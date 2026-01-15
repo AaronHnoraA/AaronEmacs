@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Ket
+# key: ket
+# --
+\ket{$1} $2

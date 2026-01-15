@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Xelatex
+# key: xelatex
+# -- Set xelatex as TeX program compiler
+# --
+%! TeX program = xelatex
+$0

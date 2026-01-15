@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Jupyter:Md
+# key: jmd
+# --
+# %% [code]
+%%markdown
+${1:md}

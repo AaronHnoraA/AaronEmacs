@@ -1,0 +1,21 @@
+# -*- mode: snippet -*-
+# name: @inproceedings
+# key: @inproceedings
+# -- An article in a conference proceedings.
+# --
+@inproceedings{${1:name},
+    author = {${2:author}},
+    title = {${3:title}},
+    booktitle = {${4:booktitle}},
+    editor = {${5:?_editor}},
+    volume = {${6:?_volume}},
+    number = {${7:?_number}},
+    series = {${8:?_series}},
+    pages = {${9:?_pages}},
+    address = {${10:?_address}},
+    organization = {${11:?_organization}},
+    publisher = {${12:?_publisher}},
+    year = {${13:year}},
+    month = {${14:?_month}},
+    note = {${15:?_note}},
+}

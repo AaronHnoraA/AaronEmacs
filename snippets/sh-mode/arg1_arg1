@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+# name: arg1
+# key: arg1
+# --
+if [ ! \$# -gt 0 ]; then
+	echo "No argument provided"
+	exit 1
+fi
+
+${1}

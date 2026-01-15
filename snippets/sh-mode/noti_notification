@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: notification
+# key: noti
+# --
+osascript -e 'display notification "${1:body}" with title "${2:title}"'

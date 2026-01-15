@@ -1,0 +1,62 @@
+############################
+# Emacs compiled files
+############################
+
+*.elc
+
+############################
+# Package management
+############################
+
+elpa/
+quelpa/
+package-quickstart.el
+.cask
+
+############################
+# Native compilation cache (Emacs 28+)
+############################
+
+eln-cache/
+
+############################
+# Runtime / cache directories
+############################
+
+var/
+etc/
+tree-sitter/
+
+############################
+# Backup & autosave files
+############################
+
+*~
+\#*\#
+.\#*
+
+############################
+# Undo-tree history
+############################
+
+*.~undo-tree
+undo-tree/
+
+############################
+# Flycheck temporary files
+############################
+
+.flycheck*
+
+############################
+# Shell init files (local only)
+############################
+
+init_bash.sh
+init_zsh.sh
+
+############################
+# OS junk
+############################
+
+.DS_Store

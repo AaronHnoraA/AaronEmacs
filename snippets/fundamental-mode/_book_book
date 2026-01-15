@@ -1,0 +1,18 @@
+# -*- mode: snippet -*-
+# name: @book
+# key: @book
+# -- A published book
+# --
+@book{${1:name},
+    author = {${2:author}},
+    title = {${3:title}},
+    publisher = {${4:publisher}},
+    volume = {${5:?_volume}},
+    number = {${6:?_number}},
+    series = {${7:?_series}},
+    address = {${8:?_address}},
+    edition = {${9:?_edition}},
+    year = {${10:year}},
+    month = {${11:?_month}},
+    note = {${12:?_note}},
+}

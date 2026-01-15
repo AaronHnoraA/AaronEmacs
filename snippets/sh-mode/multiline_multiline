@@ -1,0 +1,14 @@
+# -*- mode: snippet -*-
+# name: multiline
+# key: multiline
+# --
+configs=\$(
+	cat <<EOF
+${1:line1
+line2}
+EOF
+)
+
+while IFS= read -r line; do
+	echo "Processing: \$line"
+done <<<"\$configs"
