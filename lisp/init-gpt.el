@@ -34,6 +34,7 @@
     :custom
       (gptel-default-mode 'markdown-mode)
       (gptel-model 'gemini-3-pro-thinking)
+      (gptel-rewrite 'gemini-3-pro-thinking)
     )
 
 (provide 'init-gpt)

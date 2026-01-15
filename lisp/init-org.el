@@ -161,6 +161,7 @@
   :ensure t
   :after org
   :init
+    (setq org-roam-directory (file-truename "~/.org/roam"))
   (setq org-roam-v2-ack t)
   :custom
     (setq org-roam-directory (file-truename "~/.org/roam"))
@@ -178,7 +179,11 @@
 (use-package org-roam
    :ensure t
    :after org
+    :custom
+    (setq org-roam-directory (file-truename "~/.org/roam"))
+    (setq org-directory (file-truename "~/.org"))
    :init
+    (setq org-roam-directory (file-truename "~/.org/roam"))
    (setq org-roam-v2-ack t) ;; Acknowledge V2 upgrade
    :config
    (org-roam-setup)
@@ -236,8 +241,9 @@ it can be passed in POS."
       (pv/org-set-time-file-property "last_modified")))
    :hook
    (before-save . pv/org-set-last-modified) ; 保存文件时调用
-   :custom
-   (org-roam-directory (concat org-directory "roam/"))  ; 设置 org-roam 目录
+  :custom
+    (setq org-roam-directory (file-truename "~/.org/roam"))
+    (setq org-directory (file-truename "~/.org"))
    ;; 自定义默认模板
    (org-roam-capture-templates
     '(("d" "default" plain "%?"

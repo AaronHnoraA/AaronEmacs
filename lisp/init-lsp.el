@@ -223,13 +223,12 @@
   :hook (company-mode . company-box-mode))
 
 
-(use-package company-tabnine
-  :ensure t
-  :after company
-  :config
-  ;; TabNine 放到第一优先级
-  (add-to-list 'company-backends
-               '(company-tabnine company-capf)))
+
+                                        ;
+;If you are using the plugin with the Windsurf Self-Hosted Enterprise deployment, you'll need to set your Portal and API URLs in your vim config file so that Windsurf knows where to send completion requests. Add the following line to your ~/.emacs.d/init.el:
+;(setq-default codeium-enterprise t)
+;(setq-default codeium-portal-url "<PORTAL URL>")
+;(setq-default codeium-api-url "<PORTAL URL>/_route/api_server")
 
 
 ;; Trigger completion immediately.
@@ -237,7 +236,6 @@
 
 ;; Number the candidates (use M-1, M-2 etc to select completions).
 (setq company-show-numbers t)
-
 
 
 (use-package lsp-ivy
