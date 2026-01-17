@@ -171,10 +171,6 @@
 
 (set-fringe-mode '(0 . nil))  ; Right-only.
 
-;; 若开启, buffer 尾行之后的区域的右流苏区域会显示密集的刻度线.
-(setopt indicate-empty-lines nil)
-(setopt overflow-newline-into-fringe t)
-
 ;;; Scroll Bar:
 
 (setopt scroll-bar-mode 'right)
@@ -182,8 +178,6 @@
 ;; 滚动条落至底部 (overscrolling) 时的行为.
 (setopt scroll-bar-adjust-thumb-portion nil)
 
-(setq-default scroll-bar-width 28)
-
 ;;; Mode Line:
 
 ;; Face ‘mode-line-inactive’ for non-selected window’s mode line.
@@ -191,15 +185,6 @@
 
 (setopt mode-line-compact nil)  ; 不要设 t, 否则即使有多余的空间, 它也倾向于挤在一起.
 (setopt mode-line-right-align-edge 'window)  ; 与 window 的边缘对齐.
-
-(setopt doom-modeline-display-misc-in-all-mode-lines t  ; 没看出有什么区别, 先设 t, 继续观察...
-        doom-modeline-minor-modes nil)
-(setopt doom-modeline-bar-width 3  ; 左侧 小竖条 (装饰品) 的 宽度.
-        ;; 尽可能地窄.
-        doom-modeline-height 1
-        ;; 即使当前窗口宽度很小, 也尽量显示所有信息.
-        doom-modeline-window-width-limit nil)
-(doom-modeline-mode)
 
 
 (size-indication-mode)  ; 在 mode line 上显示 buffer 大小.
@@ -211,10 +196,6 @@
         uniquify-strip-common-suffix t)
 
 (line-number-mode -1)  ; Mode line 上不要显示行号, 因为 window 左边缘已经显示行号了.
-;; 从 1 开始计数.
-(setopt mode-line-position-column-format '("C%C")
-        doom-modeline-column-zero-based nil)
-(column-number-mode)
 
 ;;; End of Line
 (setopt eol-mnemonic-unix " LF "
@@ -245,8 +226,6 @@
 (setopt mouse-avoidance-threshold  2  ; >=2
         mouse-avoidance-nudge-var  1  ; >=1
         mouse-avoidance-nudge-dist 2)
-(mouse-avoidance-mode 'animate)
-
 ;;; Cursor:
 
 (setopt cursor-type 'box
@@ -256,14 +235,6 @@
 (setopt x-stretch-cursor t)  ; 在 TAB 字符上拉长 cursor.
 
 (blink-cursor-mode -1)
-;; 以下设置无效, 因为‘blink-cursor-mode’关掉了.
-(setopt blink-cursor-delay  0  ; Cursor 静止一段时间之后开始闪烁.
-        blink-cursor-blinks 0  ; 闪烁次数.
-        blink-cursor-interval 0.5
-        ;; 映射: ‘cursor-type’ -> 光标黯淡时的造型.
-        blink-cursor-alist '((box  . nil)
-                             (bar  . box)
-                             (hbar . bar)))
 
 ;; TUI 下, 尽可能地 使 cursor 外形或特征 更加显著.
 (setopt visible-cursor t)
@@ -288,8 +259,6 @@
 (setopt mouse-wheel-tilt-scroll t
         mouse-wheel-scroll-amount-horizontal 1)
 (mouse-wheel-mode)
-
-(pixel-scroll-precision-mode)
 
 ;; Scroll 以使 window 底端的 N 行呈现到顶端.
 (setopt next-screen-context-lines 5)
@@ -318,20 +287,9 @@
 ;;; Horizontal
 (setopt hscroll-margin 5
         hscroll-step 1)
-
-;;; Tooltip:
-(require 'tooltip)
 
-(require 'let-alist)
-(let-alist tooltip-frame-parameters
-  "让 compiler 闭嘴.")
-
-(setopt tooltip-delay       0
-        tooltip-short-delay 0
-        tooltip-hide-delay  most-positive-fixnum)
-
-(tooltip-mode)
-;;; Dialog Box:
+(tooltip-mode -1)
+;;; Dialo Box:
 
 (setopt use-dialog-box t
         use-file-dialog t)

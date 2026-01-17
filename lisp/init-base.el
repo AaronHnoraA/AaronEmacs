@@ -67,7 +67,6 @@
 ;;显示行号
 ;; 相对行号（当前行显示绝对行号，其它行显示相对行号）
 (setq display-line-numbers-type 'relative)
-
 ;; 只在编程模式开（你也可以换成 text-mode / 全局）
 (add-hook 'prog-mode-hook 'display-line-numbers-mode)
 ;; 可选：在一些模式禁用（终端、shell 等）
@@ -93,43 +92,6 @@
 
 
 (setq global-disable-point-adjustment nil)
-
-;;; Deletion:
-
-(advice-add 'backward-kill-word :before-while
-            (lambda (arg)
-              "若间断地调用该命令, 则当 前面顶多只有空白字符 或 后面顶多只有空白字符且前面有空白字符 时, 删除前方所有空白."
-              (if (and (called-interactively-p 'any)  ; 只在使用键盘, 且
-                       ;; 没有前缀参数时执行.
-                       (= 1 arg)
-                       ;; 只在第一次调用时, 考虑是否要清除空白.
-                       (not (eq real-last-command 'backward-kill-word))
-                       (or (save-match-data
-                             (looking-back (concat "^\\(" search-whitespace-regexp "\\)?\\=") nil))
-                           (and (looking-at-p (concat "\\=\\(" search-whitespace-regexp "\\)?$"))
-                                (save-match-data
-                                  (looking-back (concat search-whitespace-regexp "\\=") nil)))))
-                  (prog1 nil
-                    (c-hungry-delete))
-                t)) '((name . "edit: delete whitespaces hungrily")))
-(advice-add 'kill-word :before-while
-            (lambda (arg)
-              "若间断地调用该命令, 则当 后面顶多只有空白字符 或 前面顶多只有空白字符且后面有空白字符 时, 删除后面所有空白."
-              (if (and (called-interactively-p 'any)  ; 只在使用键盘, 且
-                       ;; 没有前缀参数时执行.
-                       (= 1 arg)
-                       ;; 只在第一次调用时, 考虑是否要清除空白.
-                       (not (eq real-last-command 'kill-word))
-                       (or (looking-at-p (concat "\\=\\(" search-whitespace-regexp "\\)?$"))
-                           (and (save-match-data
-                                  (looking-back (concat "^\\(" search-whitespace-regexp "\\)?\\=") nil))
-                                (looking-at-p (concat "\\=" search-whitespace-regexp)))))
-                  (prog1 nil
-                    (c-hungry-delete-forward))
-                t)) '((name . "edit: delete whitespaces hungrily")))
-
-
-
 
 ;; Smooth scroll & friends
 (setq scroll-step 2
@@ -200,10 +162,6 @@
 ;; Sane defaults
 (setq use-short-answers t)
 
-;; Inhibit switching out from `y-or-n-p' and `read-char-choice'
-(setq y-or-n-p-use-read-key t
-      read-char-choice-use-read-key t)
-
 ;; Enable the disabled narrow commands
 (put 'narrow-to-defun  'disabled nil)
 (put 'narrow-to-page   'disabled nil)
@@ -219,9 +177,6 @@
 ;; Quick editing in `describe-variable'
 (with-eval-after-load 'help-fns
   (put 'help-fns-edit-variable 'disabled nil))
-
-;; Use TeX as default IM
-(setq default-input-method "TeX")
 
 ;; Keep clean but enable `menu-bar' in MacOS
 (when (and (fboundp 'menu-bar-mode) (not (eq system-type 'darwin)))
@@ -476,7 +431,7 @@ Else, call `comment-or-uncomment-region' on the current line."
 
 ;; transparent remote access
 (use-package tramp
-  :ensure nil
+  :ensure t
   :defer t
   :custom
   ;; Always use file cache when using tramp
@@ -667,7 +622,12 @@ Else, call `comment-or-uncomment-region' on the current line."
 (scroll-bar-mode -1)
 
 ;; 像素级滚动（Emacs 29）
-(pixel-scroll-precision-mode 1)
+;(pixel-scroll-precision-mode 1)
+
+
+(setq scroll-conservatively most-positive-fixnum
+      fast-but-imprecise-scrolling t
+      redisplay-skip-fontification-on-input t)
 
 ;; 高质量渲染
 (setq frame-resize-pixelwise t)
@@ -697,10 +657,6 @@ Else, call `comment-or-uncomment-region' on the current line."
   ("C-a" . mwim-beginning-of-code-or-line)
   ("C-e" . mwim-end-of-code-or-line))
 
-(use-package good-scroll
-  :ensure t
-  :if window-system          ; 在图形化界面时才使用这个插件
-  :init (good-scroll-mode))
 
 (use-package hydra
   :ensure t)
@@ -854,10 +810,6 @@ Else, call `comment-or-uncomment-region' on the current line."
 ;; 获取输入之后, 恢复进入 minibuffer 之前 当前 frame 的 window-configurations.
 (setq read-minibuffer-restore-windows t)
 
-;;; Minibuffer History
-(setq history-delete-duplicates t)
-(setq history-length t)  ; 无上限.
-
 ;;; 性能相关:
 
 ;; 不清除 字体 缓存.
@@ -866,35 +818,6 @@ Else, call `comment-or-uncomment-region' on the current line."
 (global-so-long-mode)
 
 (setopt idle-update-delay 5)
-
-;;; Backup & Auto-Saving & Reverting:
-
-
-;; 此外, Emacs 在发生致命错误 (e.g., “kill %emacs”) 时会直接触发自动保存.
-(setopt auto-save-default t
-        auto-save-no-message nil)
-(setopt auto-save-interval 20  ; 键入这么多个字符之后触发自动保存.
-        ;; 经过这么多秒数的 idleness 之后触发自动保存,
-        ;; 还可能执行一次 GC (这是一条 heuristic 的建议, Emacs 可以不遵循, e.g., 当编辑大文件时).
-        auto-save-timeout (max idle-update-delay 30))
-(setopt delete-auto-save-files t  ; 保存时自动删除 auto-save-file.
-        kill-buffer-delete-auto-save-files nil)
-
-(setopt revert-without-query '("[^z-a]")  ; 调用 ‘revert-buffer’ 时无需确认.
-        revert-buffer-quick-short-answers t)
-(setq revert-buffer-with-fine-grain-max-seconds most-positive-fixnum)
-(setopt auto-revert-use-notify t
-        ;; 默认同时使用被动的 OS 级 file-notification 和主动的 poll (poll 在编辑 remote-file 时无可替代).
-        ;; 在此关闭 polling.
-        auto-revert-avoid-polling t)
-(setq-local buffer-auto-revert-by-notification t)  ; E.g., 令 Dired 使用 file-notification.
-(setopt auto-revert-remote-files t
-        global-auto-revert-non-file-buffers t
-        ;; Auto-revert 时还检查 VC 状态, 即使文件没有修改时也检查.
-        auto-revert-check-vc-info t)
-(setopt auto-revert-verbose t)
-(setopt auto-revert-interval 5)  ; Buffer-menu 只使用 poll 更新.
-(global-auto-revert-mode)
 
 
 ;;; Evaluation:
