@@ -43,6 +43,7 @@ tree-sitter/
 *.~undo-tree
 undo-tree/
 
+
 ############################
 # Flycheck temporary files
 ############################
@@ -61,3 +62,7 @@ init_zsh.sh
 ############################
 
 .DS_Store
+
+
+Org/
+

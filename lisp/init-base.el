@@ -817,7 +817,7 @@ Else, call `comment-or-uncomment-region' on the current line."
 
 (global-so-long-mode)
 
-(setopt idle-update-delay 5)
+(setopt idle-update-delay 15)
 
 
 ;;; Evaluation:

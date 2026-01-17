@@ -205,6 +205,7 @@ If popup is focused, kill it."
                       (when-let ((w (get-buffer-window (current-buffer))))
                         (ignore-errors (delete-window w))))
                     nil t))))))
+(setq vterm-shell "zsh")
 
 (provide 'init-shell)
 ;;; init-shell.el ends here

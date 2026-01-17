@@ -76,5 +76,8 @@
   :ensure t
   :hook (dired-mode . diredfl-mode))
 
+(setq insert-directory-program "gls" dired-use-ls-dired t)
+(setq dired-listing-switches "-al --group-directories-first")
+
 (provide 'init-dired)
 ;;; init-dired.el ends here

@@ -9,6 +9,8 @@
   (package-refresh-contents)
   (package-install 'exec-path-from-shell))
 
+
+
 (require 'exec-path-from-shell)
 (exec-path-from-shell-initialize)
 
@@ -107,7 +109,6 @@
 (require 'init-shell)
 (require 'init-spell)
 (require 'init-gpt)
-(require 'init-lean)
 (require 'init-search)
 (require 'init-direnv)
 (require 'init-smartparens)

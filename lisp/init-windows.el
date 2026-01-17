@@ -113,7 +113,7 @@
   :config
   ;; 1) 先给一个“基础属性集合”（绝对不会触发 dirvish-vc）
   (setq dirvish-attributes
-        '(nerd-icons file-size subtree-state collapse file-time))
+        '(all-the-icons file-size subtree-state collapse file-time))
 
   ;; 2) Peek / Side-follow：有就开（没有就跳过，不报错）
   (when (fboundp 'dirvish-peek-mode)
