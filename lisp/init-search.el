@@ -21,9 +21,22 @@
   (setq ivy-use-virtual-buffers t
         ivy-initial-inputs-alist nil
         ivy-count-format "%d/%d "
-        enable-recursive-minibuffers t
+        enable-recursive-minibuffers nil
         ivy-re-builders-alist '((t . ivy--regex-ignore-order)))
   (ivy-posframe-mode 1))
+
+
+(defun my/safe-counsel-M-x ()
+  "Call `counsel-M-x' unless minibuffer is already active."
+  (interactive)
+  (if (active-minibuffer-window)
+      (keyboard-quit)
+    (counsel-M-x)))
+
+
+
+
+(global-set-key (kbd "M-x") #'my/safe-counsel-M-x)
 
 (with-eval-after-load 'ivy
   (define-key ivy-minibuffer-map (kbd "TAB") #'ivy-alt-done)
@@ -55,6 +68,8 @@
   (setq swiper-action-recenter t
         swiper-include-line-number-in-search t))
 
+;; 强制关闭递归 minibuffer，避免 M-x 套娃
+(setq enable-recursive-minibuffers nil)
 
 (provide 'init-search)
 

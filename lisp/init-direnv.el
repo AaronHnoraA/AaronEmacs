@@ -9,7 +9,7 @@
   :ensure t
   :defer 1
   :config
-  (direnv-mode 1))
+  (direnv-mode -1))
 
 (provide 'init-direnv)
 

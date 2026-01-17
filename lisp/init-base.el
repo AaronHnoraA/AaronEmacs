@@ -87,6 +87,50 @@
 ;; No eyes distraction
 (setq blink-cursor-mode nil)
 
+
+(setopt hs-hide-comments-when-hiding-all t
+        hs-isearch-open t)
+
+
+(setq global-disable-point-adjustment nil)
+
+;;; Deletion:
+
+(advice-add 'backward-kill-word :before-while
+            (lambda (arg)
+              "若间断地调用该命令, 则当 前面顶多只有空白字符 或 后面顶多只有空白字符且前面有空白字符 时, 删除前方所有空白."
+              (if (and (called-interactively-p 'any)  ; 只在使用键盘, 且
+                       ;; 没有前缀参数时执行.
+                       (= 1 arg)
+                       ;; 只在第一次调用时, 考虑是否要清除空白.
+                       (not (eq real-last-command 'backward-kill-word))
+                       (or (save-match-data
+                             (looking-back (concat "^\\(" search-whitespace-regexp "\\)?\\=") nil))
+                           (and (looking-at-p (concat "\\=\\(" search-whitespace-regexp "\\)?$"))
+                                (save-match-data
+                                  (looking-back (concat search-whitespace-regexp "\\=") nil)))))
+                  (prog1 nil
+                    (c-hungry-delete))
+                t)) '((name . "edit: delete whitespaces hungrily")))
+(advice-add 'kill-word :before-while
+            (lambda (arg)
+              "若间断地调用该命令, 则当 后面顶多只有空白字符 或 前面顶多只有空白字符且后面有空白字符 时, 删除后面所有空白."
+              (if (and (called-interactively-p 'any)  ; 只在使用键盘, 且
+                       ;; 没有前缀参数时执行.
+                       (= 1 arg)
+                       ;; 只在第一次调用时, 考虑是否要清除空白.
+                       (not (eq real-last-command 'kill-word))
+                       (or (looking-at-p (concat "\\=\\(" search-whitespace-regexp "\\)?$"))
+                           (and (save-match-data
+                                  (looking-back (concat "^\\(" search-whitespace-regexp "\\)?\\=") nil))
+                                (looking-at-p (concat "\\=" search-whitespace-regexp)))))
+                  (prog1 nil
+                    (c-hungry-delete-forward))
+                t)) '((name . "edit: delete whitespaces hungrily")))
+
+
+
+
 ;; Smooth scroll & friends
 (setq scroll-step 2
       scroll-margin 2
@@ -680,6 +724,237 @@ Else, call `comment-or-uncomment-region' on the current line."
   ("l"   undo-tree-load-history)
   ("u"   undo-tree-visualize "visualize" :color blue)
   ("q"   nil "quit" :color blue)))
+
+(use-package outline-indent
+  :ensure t
+  :hook (prog-mode . outline-indent-minor-mode))
+
+(with-eval-after-load 'tramp
+  ;; 0 最安静，6 最啰嗦；建议 3~4
+  (setq tramp-verbose 4)
+  ;; 让 TRAMP 的消息更容易被看到
+  (setq tramp-message-show-message t))
+
+(defun pv/with-find-file-feedback (orig filename &rest args)
+  (let* ((remote (file-remote-p filename))
+         (label  (if remote "TRAMP/SSH" "Local"))
+         (t0 (float-time)))
+    (message "[%s] Opening: %s" label filename)
+    (prog1 (apply orig filename args)
+      (message "[%s] Opened in %.2fs: %s"
+               label (- (float-time) t0) filename))))
+
+(advice-add 'find-file :around #'pv/with-find-file-feedback)
+
+;;(setq debug-on-quit t)
+
+(use-package spinner
+  :ensure t)
+
+(defvar pv/spinner nil)
+
+(defun pv/spinner-start ()
+  (setq pv/spinner (spinner-start 'progress-bar-filled))
+  (force-mode-line-update t))
+
+(defun pv/spinner-stop ()
+  (when pv/spinner
+    (spinner-stop pv/spinner)
+    (setq pv/spinner nil)
+    (force-mode-line-update t)))
+
+(defun pv/with-spinner (orig &rest args)
+  (pv/spinner-start)
+  (unwind-protect
+      (apply orig args)
+    (pv/spinner-stop)))
+
+;; 只给远程文件转圈（避免本地也烦）
+(defun pv/find-file-with-spinner (orig filename &rest args)
+  (if (file-remote-p filename)
+      (pv/with-spinner (lambda () (apply orig filename args)))
+    (apply orig filename args)))
+
+(advice-add 'find-file :around #'pv/find-file-with-spinner)
+
+
+(keymap-global-unset "C-x m")
+(keymap-global-unset "C-x 4 m")
+(keymap-global-unset "C-x 5 m")
+(keymap-global-unset "C-x 5 m")
+
+
+(setq print-escape-newlines t  ; 字符串中的 换行 打印成‘\n’.  注意, 推荐用‘?\s’表示空格的字符常量.
+      ;; "打印成‘^C’而非‘\3’, 但‘\n’和‘\f’仍受‘print-escape-newlines’控制.
+      print-escape-control-characters nil
+      ctl-arrow t
+      ;; 不把 multibyte 打印成‘\xXXXX’.
+      print-escape-multibyte nil
+      ;; 若不启用‘ctl-arrow’, 则‘\x80’而非‘\200’.
+      display-raw-bytes-as-hex t)
+
+(setq print-length nil  ; 当打印的 列表 元素数 > 该值时, 超出部分用省略号表示.
+      eval-expression-print-length nil)
+
+(setq print-level nil
+      eval-expression-print-level nil)
+
+(setq print-circle t  ; 使用 “#N=(#N#)” 语法 打印 递归结构.
+      ;; 允许 (字面上) 读取循环结构.
+      read-circle t)
+
+(setq print-integers-as-characters nil  ; 打印 字符常量 的方式: “115 (#o163, ...)” instea of “?s (#o163, ...)”.
+      ;; 打印 字符常量 时 括号内: “(#o163, #x73)” instead of “(#o163, #x73, ?s)”.
+      eval-expression-print-maximum-character most-positive-fixnum)
+
+;; Debugger 以 C 风格 显示 函数调用, 而不是 Lisp 风格.
+(setopt debugger-stack-frame-as-list nil)
+
+;; 有关该值的合适范围的讨论 (无果): <https://emacs.stackexchange.com/q/76246/39388>
+(setopt max-lisp-eval-depth 800)
+
+;; GC 时在 echo area 显示信息, 但不会并入到 “*Messages*” 中.
+(setopt garbage-collection-messages t)
+
+(setq auto-mode-case-fold t)
+
+;; 如有必要, 会在 写入/重命名 文件后 执行 ‘normal-mode’ 以使用恰当的 major mode.
+(setq change-major-mode-with-file-name t)
+
+
+;;; Minibuffer:
+
+;; 默认情况下, 点击 “echo area” 会打开 “*Messages*”, 在此关闭这个功能.
+(keymap-unset minibuffer-inactive-mode-map "<mouse-1>")  ; ‘view-echo-area-messages’
+
+(add-hook 'minibuffer-mode-hook
+          (lambda ()
+            (keymap-set minibuffer-local-completion-map "SPC"
+                        #'self-insert-command)
+            (keymap-set minibuffer-local-completion-map "?"
+                        #'self-insert-command)))
+
+;;; Invoke Command
+(setq meta-prefix-char ?\e)
+
+(keymap-global-unset "C-x ESC ESC")  ; ‘repeat-complex-command’
+
+;;; Minibuffer Completion
+(setopt completion-cycle-threshold nil  ; 补全时, 按 <tab> 会轮换候选词.
+        completion-ignored-extensions '()
+        completion-styles '(basic partial-completion initials))
+(setopt completion-auto-help t  ; 按一次 <tab> 以显示 help 列表.
+        ;; 对符号进行 completion 时, 在符号所在的那一行显示符号的类型和文档首行.
+        completions-detailed t)
+
+;;; Read
+(setq read-extended-command-predicate #'command-completion-default-include-p
+      read-file-name-completion-ignore-case t
+      ;; “C-q” 后接 16 进制.
+      read-quoted-char-radix 16
+      read-buffer-completion-ignore-case t)
+
+(setq enable-recursive-minibuffers t)
+
+;; 大部分情况下, 保留从 ‘read-from-minibuffer’ 获取的文本的属性.
+(setq minibuffer-allow-text-properties t)
+(setq minibuffer-default-prompt-format #(" (default %s)"
+                                         10 12 (face (underline (:foreground "VioletRed1")))))
+(setq file-name-shadow-mode t)  ; ‘find-file’时, 若输入绝对路径, 则调暗默认值的前景.
+
+;; 获取输入之后, 恢复进入 minibuffer 之前 当前 frame 的 window-configurations.
+(setq read-minibuffer-restore-windows t)
+
+;;; Minibuffer History
+(setq history-delete-duplicates t)
+(setq history-length t)  ; 无上限.
+
+;;; 性能相关:
+
+;; 不清除 字体 缓存.
+(setq inhibit-compacting-font-caches t)
+
+(global-so-long-mode)
+
+(setopt idle-update-delay 5)
+
+
+;;; Backup & Auto-Saving & Reverting:
+
+
+;; 此外, Emacs 在发生致命错误 (e.g., “kill %emacs”) 时会直接触发自动保存.
+(setopt auto-save-default t
+        auto-save-no-message nil)
+(setopt auto-save-interval 20  ; 键入这么多个字符之后触发自动保存.
+        ;; 经过这么多秒数的 idleness 之后触发自动保存,
+        ;; 还可能执行一次 GC (这是一条 heuristic 的建议, Emacs 可以不遵循, e.g., 当编辑大文件时).
+        auto-save-timeout (max idle-update-delay 30))
+(setopt delete-auto-save-files t  ; 保存时自动删除 auto-save-file.
+        kill-buffer-delete-auto-save-files nil)
+
+(setopt revert-without-query '("[^z-a]")  ; 调用 ‘revert-buffer’ 时无需确认.
+        revert-buffer-quick-short-answers t)
+(setq revert-buffer-with-fine-grain-max-seconds most-positive-fixnum)
+(setopt auto-revert-use-notify t
+        ;; 默认同时使用被动的 OS 级 file-notification 和主动的 poll (poll 在编辑 remote-file 时无可替代).
+        ;; 在此关闭 polling.
+        auto-revert-avoid-polling t)
+(setq-local buffer-auto-revert-by-notification t)  ; E.g., 令 Dired 使用 file-notification.
+(setopt auto-revert-remote-files t
+        global-auto-revert-non-file-buffers t
+        ;; Auto-revert 时还检查 VC 状态, 即使文件没有修改时也检查.
+        auto-revert-check-vc-info t)
+(setopt auto-revert-verbose t)
+(setopt auto-revert-interval 5)  ; Buffer-menu 只使用 poll 更新.
+(global-auto-revert-mode)
+
+
+;;; Evaluation:
+
+(setopt debug-on-quit nil  ; 按下 “C-g” 时是否要进入 debugger.
+        ;; 在 ‘eval-expression’ 时暂时地将 ‘debug-on-error’ 设置为 t.
+        eval-expression-debug-on-error t)
+
+;;; 与 宿主 OS 交互
+
+;;; Process:
+
+(setq read-process-output-max (min (pcase system-type
+                                     ('gnu/linux
+                                      (string-to-number  (shell-command-to-string "cat /proc/sys/fs/pipe-max-size")))
+                                     (_
+                                      most-positive-fixnum)) (* 1024 1024))
+      process-adaptive-read-buffering "急切读取"
+
+      w32-pipe-buffer-size read-process-output-max
+      w32-pipe-read-delay 0)
+;;; File System:
+
+(setq w32-get-true-file-attributes 'local)
+
+;; 打开达到该字节数的大文件时询问相关事宜;
+;; 重点在于可以借此开启 literally 读取模式, 这会关闭一些昂贵的功能以提高访问速度.
+(setopt large-file-warning-threshold (* 1024 1024))
+
+(setopt delete-by-moving-to-trash t)
+
+
+;;; 图片:
+
+;; 居然没有 ‘image-mode-hook’, 简直逆天!  只能用下面这个作为 work-around 了.
+(add-hook 'image-mode-new-window-functions
+          (lambda (_)
+            (display-line-numbers-mode -1)))
+;;; 视频:
+
+;;; PDF:
+
+
+(setopt user-full-name    "Chang He (Aaron)"
+        user-mail-address "mail")
+
+
+
 
 
 (provide 'init-base)

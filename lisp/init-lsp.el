@@ -1,19 +1,20 @@
 ;;; init-lsp.el --- The completion engine and lsp client -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;;
+;; Refactored and merged configuration for Company, LSP, and Debugging.
 
 ;;; Code:
 
-;; The completion engine
-;;
-;; 'company-mode' has an online manual now.
-;;
+;; -------------------------
+;; 1. Company Mode (Completion)
+;; -------------------------
 ;; https://company-mode.github.io/manual/
 
 (use-package company
   :ensure t
   :hook (prog-mode . company-mode)
+  :init
+  (global-company-mode) ;; 全局启用
   :bind (:map company-mode-map
          ([remap completion-at-point] . company-complete)
          :map company-active-map
@@ -27,140 +28,62 @@
     "Try default completion styles."
     (let ((completion-styles '(basic partial-completion)))
       (apply func args)))
+  
   :custom
-  (company-idle-delay 0)
-  ;; Easy navigation to candidates with M-<n>
-  (company-show-quick-access t)
-  (company-require-match nil)
-  (company-show-numbers t) ;; 给选项编号 (按快捷键 M-1、M-2 等等来进行选择).
-  (company-minimum-prefix-length 3)
+  ;; 核心体验设置
+  (company-idle-delay 0)            ;; 立即触发补全
+  (company-minimum-prefix-length 3) ;; 至少3个字符触发
+  (company-show-numbers t)          ;; 显示编号 (M-1, M-2 选择)
+  (company-show-quick-access t)     ;; 允许 M-<n> 快速选择
+  (company-require-match nil)       ;; 不强制匹配
+  
+  ;; UI 设置
   (company-tooltip-width-grow-only t)
   (company-tooltip-align-annotations t)
-  ;; complete `abbrev' only in current buffer and make dabbrev case-sensitive
-  (company-dabbrev-other-buffers nil)
+  (company-format-margin-function nil) ;; No icons inside margin (cleaner)
+
+  ;; Dabbrev 设置 (文本补全)
   (company-dabbrev-ignore-case nil)
   (company-dabbrev-downcase nil)
-  ;; make dabbrev-code case-sensitive
   (company-dabbrev-code-ignore-case nil)
   (company-dabbrev-code-everywhere t)
-  ;; call `tempo-expand-if-complete' after completion
-  (company-tempo-expand t)
-  ;; Ignore uninteresting files. Items end with a slash are recognized as
-  ;; directories.
+  
+  ;; 文件/路径补全设置
   (company-files-exclusions '(".git/" ".DS_Store"))
-  ;; No icons
-  (company-format-margin-function nil)
-  (company-backends '((company-capf :with company-tempo company-yasnippet)
-                      company-files
-                      (company-dabbrev-code company-keywords)
-                      company-dabbrev)))
 
-;; lsp-mode
-(use-package lsp-mode
+  ;; Backends 设置
+  ;; 注意：`company-files` 在这里确保了路径补全功能。
+  ;; 当你输入 "/" 或 "./" 时，company-files 会接管。
+  (company-backends 
+        '((company-capf 
+          company-files          ; <--- 移到这里，与 LSP 平级
+          :with company-tempo 
+          company-yasnippet)
+          (company-dabbrev-code company-keywords)
+          company-dabbrev))
+  )
+
+(use-package company-box
   :ensure t
-  :hook (prog-mode . lsp-deferred)
-  :bind (:map lsp-mode-map
-         ("C-c f" . lsp-format-region)
-         ("C-c d" . lsp-describe-thing-at-point)
-         ("C-c a" . lsp-execute-code-action)
-         ("C-c r" . lsp-rename))
-  :config
-  (with-no-warnings
-    (lsp-enable-which-key-integration t))
-  :custom
-  (lsp-keymap-prefix "C-c l")
-  (lsp-enable-links nil)                    ;; no clickable links
-  (lsp-enable-folding nil)                  ;; use `hideshow' instead
-  (lsp-enable-snippet nil)                  ;; no snippets, it requires `yasnippet'
-  (lsp-enable-file-watchers nil)            ;; performance matters
-  (lsp-enable-text-document-color nil)      ;; as above
-  (lsp-enable-symbol-highlighting nil)      ;; as above
-  (lsp-enable-on-type-formatting nil)       ;; as above
-  (lsp-semantic-tokens-enable nil)          ;; optional
-  (lsp-semantic-tokens-apply-modifiers nil) ;; don't override token faces
-  (lsp-headerline-breadcrumb-enable nil)    ;; keep headline clean
-  (lsp-modeline-code-actions-enable nil)    ;; keep modeline clean
-  (lsp-modeline-diagnostics-enable nil)     ;; as above
-  (lsp-log-io nil)                          ;; debug only
-  (lsp-auto-guess-root t)                   ;; Yes, I'm using projectile
-  (lsp-completion-provider :none)           ;; don't add `company-capf' to `company-backends'
-  (lsp-keep-workspace-alive nil)            ;; auto kill lsp server
-  (lsp-eldoc-enable-hover nil)              ;; disable eldoc hover
-  (lsp-completion-enable-additional-text-edit nil))
-
-(use-package eglot
-  :disabled
-  :hook (prog-mode . eglot-ensure)
-  :bind (:map eglot-mode-map
-         ("C-c f" . eglot-format)
-         ("C-c d" . eldoc-doc-buffer)
-         ("C-c a" . eglot-code-actions)
-         ("C-c r" . eglot-rename)
-         ("C-c l" . eglot-command-map))
-  :config
-  (defvar-keymap eglot-command-map
-    :prefix 'eglot-command-map
-    ;; workspaces
-    "w q" #'eglot-shutdown
-    "w r" #'eglot-reconnect
-    "w s" #'eglot
-    "w d" #'eglot-show-workspace-configuration
-
-    ;; formatting
-    "= =" #'eglot-format-buffer
-    "= r" #'eglot-format
-
-    ;; goto
-    "g a" #'xref-find-apropos
-    "g d" #'eglot-find-declaration
-    "g g" #'xref-find-definitions
-    "g i" #'eglot-find-implementation
-    "g r" #'xref-find-references
-    "g t" #'eglot-find-typeDefinition
-
-    ;; actions
-    "a q" #'eglot-code-action-quickfix
-    "a r" #'eglot-code-action-rewrite
-    "a i" #'eglot-code-action-inline
-    "a e" #'eglot-code-action-extract
-    "a o" #'eglot-code-action-organize-imports)
-  :custom
-  (eglot-sync-connect 0)
-  (eglot-autoshutdown t)
-  (eglot-extend-to-xref t)
-  (eglot-events-buffer-config '(:size 0 :format short))
-  (eglot-ignored-server-capabilities '(:documentLinkProvider
-                                       :documentOnTypeFormattingProvider
-                                       :foldingRangeProvider
-                                       :colorProvider
-                                       :inlayHintProvider)))
+  :if window-system
+  :hook (company-mode . company-box-mode))
 
 
+;; -------------------------
+;; 2. Aggressive Indent
+;; -------------------------
 (use-package aggressive-indent
   :ensure t
   :hook (
-         (clojure-mode    . aggressive-indent-mode)
-         (python-mode    . aggressive-indent-mode)
-         (c++-mode    . aggressive-indent-mode)
-         (c-mode    . aggressive-indent-mode)
-         ;; 你也可以对其它语言开，但我建议先从括号语言开始
+         (clojure-mode . aggressive-indent-mode)
+         (python-mode  . aggressive-indent-mode)
+         (c++-mode     . aggressive-indent-mode)
+         (c-mode       . aggressive-indent-mode)
          ))
-;;
-;; lsp-mode completion 允许 snippets（函数补全可插参数模板）
-(setq lsp-completion-enable t)
-(setq lsp-enable-snippet t)
 
-(use-package lsp-mode
-  :ensure t
-  :commands lsp
-  :custom
-  (lsp-signature-auto-activate t)   ;; 自动弹出签名
-  (lsp-signature-render-documentation t)
-  (lsp-signature-doc-lines 5))
 
-(add-hook 'after-init-hook 'global-company-mode)
 ;; -------------------------
-;; LSP diagnostics inline (Flymake)
+;; 3. Flymake (Diagnostics)
 ;; -------------------------
 (use-package flymake
   :ensure nil ; Emacs built-in
@@ -170,14 +93,8 @@
          ("M-p" . flymake-goto-prev-error)
          ("C-c !" . flymake-show-buffer-diagnostics))
   :custom
-  ;; 让 Flymake 更积极一点（默认也行，但这个更“明显”）
   (flymake-no-changes-timeout 0.3)
-  ;; 只在行尾显示标记时更干净；如果你想更显眼，可以改成 'right-margin
   (flymake-indicator-type 'fringes))
-;; lsp-mode diagnostics visibility baseline
-(with-eval-after-load 'lsp-mode
-  ;; lsp-mode 默认走 flymake；这里不改 provider
-  (setq lsp-diagnostics-provider :auto))
 
 ;; 光标停在报错位置时，在 minibuffer/eldoc 显示诊断
 (use-package flymake-diagnostic-at-point
@@ -188,64 +105,130 @@
   (flymake-diagnostic-at-point-display-diagnostic-function
    #'flymake-diagnostic-at-point-display-minibuffer))
 
-(with-eval-after-load 'lsp-mode
-  (setq lsp-diagnostics-provider :flycheck))
 
+;; -------------------------
+;; 4. LSP Mode (Core)
+;; -------------------------
+(use-package lsp-mode
+  :ensure t
+  :commands (lsp lsp-deferred)
+  :hook (prog-mode . lsp-deferred)
+  :bind (:map lsp-mode-map
+         ("C-c f" . lsp-format-region)
+         ("C-c d" . lsp-describe-thing-at-point)
+         ("C-c a" . lsp-execute-code-action)
+         ("C-c r" . lsp-rename))
+  :config
+  (with-no-warnings
+    (lsp-enable-which-key-integration t))
+  
+  :custom
+  ;; 前缀键
+  (lsp-keymap-prefix "C-c l")
+  
+  ;; 性能与功能开关
+  (lsp-log-io nil)                          ;; debug only
+  (lsp-auto-guess-root t)                   ;; 使用 projectile root
+  (lsp-keep-workspace-alive nil)            ;; auto kill lsp server
+  (lsp-enable-file-watchers nil)            ;; 性能优化：禁用文件监控
+  
+  ;; UI 简化 (Clean UI)
+  (lsp-enable-links nil)                    ;; no clickable links
+  (lsp-enable-folding nil)                  ;; use hideshow' instead
+  (lsp-enable-text-document-color t)
+  (lsp-enable-symbol-highlighting t)
+  (lsp-enable-on-type-formatting nil)
+  (lsp-headerline-breadcrumb-enable t)    ;; 保持顶部干净
+  (lsp-modeline-code-actions-enable nil)    ;; 保持 modeline 干净
+  (lsp-modeline-diagnostics-enable nil)
+  
+  ;; 语义高亮
+  (lsp-semantic-tokens-enable nil)
+  (lsp-semantic-tokens-apply-modifiers nil)
+  
+  ;; 补全与 Snippets
+  (lsp-completion-provider :none)           ;; 关键：设为 none，因为我们在 company 中手动配置了 capf
+  (lsp-completion-enable t)
+  (lsp-enable-snippet t)                    ;; 开启 snippet 支持 (参数模板)
+  (lsp-completion-enable-additional-text-edit nil)
+  
+  ;; 提升 LSP / jsonrpc 吞吐
+  (read-process-output-max (* 1024 1024)) ;; 1MB
+
+  ;; 签名提示 (Signature Help)
+  (lsp-signature-auto-activate t)           ;; 自动弹出函数签名
+  (lsp-signature-render-documentation t)
+  (lsp-signature-doc-lines 5)
+  (lsp-eldoc-enable-hover nil)              ;; 禁用 eldoc hover，防止干扰 signature
+  
+  ;; 诊断 (Diagnostics)
+  ;; 设为 :auto 以使用 flymake (因为上面配置了 flymake)
+  ;; 如果要用 flycheck，需改为 :flycheck 并安装 flycheck 包
+  (lsp-diagnostics-provider :auto))
+
+(use-package lsp-ivy
+  :ensure t
+  :after lsp-mode)
+
+
+;; -------------------------
+;; 5. LSP UI (Doc, Peek, Imenu)
+;; -------------------------
 (use-package lsp-ui
   :ensure t
-  :commands (lsp-ui-imenu
-             lsp-ui-doc-show
+  :commands (lsp-ui-doc-show
              lsp-ui-doc-hide
              lsp-ui-doc-glance
              lsp-ui-peek-find-definitions
              lsp-ui-peek-find-references
              lsp-ui-peek-find-implementation)
   :bind
-  (;; ========== Hyper + l ==========
-   ("C-h m" . lsp-ui-imenu)                     ; 符号大纲
+  (
    ("C-h d" . lsp-ui-doc-glance)                ; 快速看文档
-   ("C-h D" . lsp-ui-doc-toggle)                  ; 强制显示文档
+   ("C-h D" . lsp-ui-doc-toggle)                ; 强制显示文档
    ("C-h c" . lsp-ui-doc-hide)                  ; 隐藏文档
-
-   ("C-h e" . lsp-ui-peek-find-definitions)   ; 定义
-   ("C-h r" . lsp-ui-peek-find-references)    ; 引用
+   ("C-h e" . lsp-ui-peek-find-definitions)     ; 定义
+   ("C-h r" . lsp-ui-peek-find-references)      ; 引用
    ("C-h i" . lsp-ui-peek-find-implementation)) ; 实现
   :custom
-  (lsp-ui-imenu-enable t)
+  ;; Doc
   (lsp-ui-doc-enable t)
   (lsp-ui-doc-position 'at-point)
-  (lsp-ui-doc-delay 0.3))
+  (lsp-ui-doc-show-with-cursor t)
+  (lsp-ui-doc-delay 0.3)
+  
+  ;; Peek
+  (lsp-ui-peek-enable t)
+  (lsp-ui-peek-always-show t))
 
-
-(use-package company-box
+(use-package imenu-list
   :ensure t
-  :if window-system
-  :hook (company-mode . company-box-mode))
+  :commands (imenu-list-smart-toggle)
+  :custom
+  ;; 放左边或右边都行
+  (imenu-list-position 'left)
+
+  ;; 自动根据当前 buffer 更新
+  (imenu-list-auto-update t)
+
+  ;; 高亮当前光标所在符号
+  (imenu-list-highlight-current-entry t)
+
+  ;; 不要抢焦点
+  (imenu-list-focus-after-activation nil)
+
+  ;; 窗口宽度
+  (imenu-list-size 0.25)
+)
 
 
 
-                                        ;
-;If you are using the plugin with the Windsurf Self-Hosted Enterprise deployment, you'll need to set your Portal and API URLs in your vim config file so that Windsurf knows where to send completion requests. Add the following line to your ~/.emacs.d/init.el:
-;(setq-default codeium-enterprise t)
-;(setq-default codeium-portal-url "<PORTAL URL>")
-;(setq-default codeium-api-url "<PORTAL URL>/_route/api_server")
-
-
-;; Trigger completion immediately.
-(setq company-idle-delay 0)
-
-;; Number the candidates (use M-1, M-2 etc to select completions).
-(setq company-show-numbers t)
-
-
-(use-package lsp-ivy
-  :ensure t
-  :after (lsp-mode))
-
-
+;; -------------------------
+;; 6. DAP Mode (Debugging)
+;; -------------------------
 (use-package dap-mode
   :ensure t
-  :after hydra lsp-mode
+  :after (hydra lsp-mode)
   :commands dap-debug
   :custom
   (dap-auto-configure-mode t)
@@ -298,7 +281,82 @@ _Q_: Disconnect     _sl_: List locals        _bl_: Set log message
    ("Q" dap-disconnect :color red)))
 
 
+;; -------------------------
+;; 7. Eglot (Alternative LSP, Disabled)
+;; -------------------------
+(use-package eglot
+  :disabled
+  :hook (prog-mode . eglot-ensure)
+  :bind (:map eglot-mode-map
+         ("C-c f" . eglot-format)
+         ("C-c d" . eldoc-doc-buffer)
+         ("C-c a" . eglot-code-actions)
+         ("C-c r" . eglot-rename)
+         ("C-c l" . eglot-command-map))
+  :config
+  (defvar-keymap eglot-command-map
+    :prefix 'eglot-command-map
+    "w q" #'eglot-shutdown
+    "w r" #'eglot-reconnect
+    "w s" #'eglot
+    "w d" #'eglot-show-workspace-configuration
+    "= =" #'eglot-format-buffer
+    "= r" #'eglot-format
+    "g a" #'xref-find-apropos
+    "g d" #'eglot-find-declaration
+    "g g" #'xref-find-definitions
+    "g i" #'eglot-find-implementation
+    "g r" #'xref-find-references
+    "g t" #'eglot-find-typeDefinition
+    "a q" #'eglot-code-action-quickfix
+    "a r" #'eglot-code-action-rewrite
+    "a i" #'eglot-code-action-inline
+    "a e" #'eglot-code-action-extract
+    "a o" #'eglot-code-action-organize-imports)
+  :custom
+  (eglot-sync-connect 0)
+  (eglot-autoshutdown t)
+  (eglot-extend-to-xref t)
+  (eglot-events-buffer-config '(:size 0 :format short))
+  (eglot-ignored-server-capabilities '(:documentLinkProvider
+                                       :documentOnTypeFormattingProvider
+                                       :foldingRangeProvider
+                                       :colorProvider
+                                       :inlayHintProvider)))
 
+
+;; -------------------------
+;; 8. Misc & Language Init
+;; -------------------------
+
+(setq tab-always-indent 'complete)
+
+;; Org-mode specific company setup
+(add-hook 'org-mode-hook
+          (lambda ()
+            (setq-local company-backends
+                        ;; 使用双层括号 '((...)) 代表这是一个 Group (分组)
+                        ;; 组内的 backend 会并行工作，结果合并显示
+                        '((company-files          ; [路径] 输入 / 或 ./ 或 ../ 时触发文件名补全
+                           company-yasnippet      ; [Snippet] 补全代码片段
+                           company-capf           ; [Org] 原生补全 (比如 #+TITLE, Tags, Links)
+                           company-dabbrev)))))   ; [单词] 补全当前 Buffer 里的文字
+
+;; 让 C-c ' 打开的窗口自动启动 LSP
+(add-hook 'org-src-mode-hook
+          (lambda ()
+            ;; 1. 只有特定的语言才启动 LSP (可选，根据你的需要调整)
+            ;; (when (member major-mode '(python-mode c++-mode rust-mode))
+            ;;   (lsp-deferred))
+            
+            ;; 或者 2. 只要是编程语言就尝试启动 (推荐)
+            (lsp-deferred)))
+(with-eval-after-load 'lsp-mode
+  ;; 允许 LSP 在 org-src block 中根据当前 org 文件的位置来判断 root
+  (setq lsp-auto-guess-root t))
+
+
+;; Load other language specific configurations
 (require 'init-cpp)
 (require 'init-rust)
 (require 'init-ocaml)
@@ -308,7 +366,6 @@ _Q_: Disconnect     _sl_: List locals        _bl_: Set log message
 (require 'init-elisp)
 (require 'init-vale)
 (require 'init-sh)
-
 
 (provide 'init-lsp)
 ;;; init-lsp.el ends here

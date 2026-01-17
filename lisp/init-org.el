@@ -7,100 +7,319 @@
 
 (require 'init-funcs)
 
+;;; ----------------------------------------------------------------------------
+;;; 1. Global Variables & Paths
+;;; ----------------------------------------------------------------------------
+
+;; Define the root org directory first
+(defvar my-org-root (file-truename "~/HC/Org/"))
+
+;; specific files/folders
+(defvar pv/org-refile-file (expand-file-name "refile.org" my-org-root))
+(defvar pv/org-bibtex-dir (expand-file-name "references/" my-org-root))
+(defvar pv/org-bibtex-files (list (expand-file-name "references.bib" pv/org-bibtex-dir)))
+
+;; Ensure directories exist (optional safety)
+(make-directory my-org-root t)
+(make-directory (expand-file-name "roam" my-org-root) t)
+
+;;; ----------------------------------------------------------------------------
+;;; 2. Org Core (Merged)
+;;; ----------------------------------------------------------------------------
 (use-package org
   :ensure nil
-  :hook (org-mode . visual-line-mode)
+  :hook ((org-mode . visual-line-mode)    ; Soft wrapping
+         (org-mode . org-cdlatex-mode))   ; Turn on CDLaTeX
+  :bind (("C-c a" . org-agenda)
+         ("C-c c" . org-capture)
+         :map org-mode-map
+         ("C-c C-q" . counsel-org-tag))   ; Assuming you use counsel/ivy
+  :config
+  ;; Load languages for Babel
+  (org-babel-do-load-languages
+   'org-babel-load-languages
+   '((C          . t)
+     (dot        . t)
+     (emacs-lisp . t)
+     (eshell     . t)
+     (python     . t)
+     (shell      . t)))
+
   :custom
-    (setq org-directory (file-truename "~/.org"))
+  ;; --- Directories & Files ---
+  (org-directory my-org-root)
   (org-default-notes-file (expand-file-name "notes.org" org-directory))
-  ;; prettify
+  (org-archive-location "%s_archive::datetree/")
+
+  ;; --- Appearance & formatting ---
   (org-startup-indented t)
   (org-fontify-todo-headline nil)
   (org-fontify-done-headline t)
   (org-fontify-whole-heading-line t)
   (org-fontify-quote-and-verse-blocks t)
   (org-list-demote-modify-bullet '(("+" . "-") ("1." . "a.") ("-" . "+")))
-  ;; image
-  (org-image-actual-width nil)
-  ;; more user-friendly
+  (org-use-sub-superscripts '{})        ; Require {} for sub/super script
+  (org-image-actual-width nil)          ; Allow resizing
+  (org-startup-with-inline-images t)
+  (org-display-remote-inline-images t)
   (org-imenu-depth 4)
+
+  ;; --- Navigation & Editing ---
+  (org-return-follows-link nil)         ; C-c C-o to open links, Enter for newline
   (org-clone-delete-id t)
-  (org-use-sub-superscripts '{})
   (org-yank-adjusted-subtrees t)
   (org-ctrl-k-protect-subtree 'error)
   (org-fold-catch-invisible-edits 'show-and-error)
-  ;; call C-c C-o explicitly
-  (org-return-follows-link nil)
-  ;; todo
-  (org-todo-keywords '((sequence "TODO(t)" "HOLD(h!)" "WIP(i!)" "WAIT(w!)" "|" "DONE(d!)" "CANCELLED(c@/!)")))
-  (org-todo-keyword-faces '(("TODO"       :foreground "#7c7c75" :weight bold)
-                            ("HOLD"       :foreground "#feb24c" :weight bold)
-                            ("WIP"        :foreground "#0098dd" :weight bold)
-                            ("WAIT"       :foreground "#9f7efe" :weight bold)
-                            ("DONE"       :foreground "#50a14f" :weight bold)
-                            ("CANCELLED"  :foreground "#ff6480" :weight bold)))
+  (org-id-link-to-org-use-id 'create-if-interactive-and-no-custom-id)
+  
+  ;; --- TODO & Task Management ---
+  (org-todo-keywords
+   '((sequence "TODO(t)" "HOLD(h!)" "WIP(i!)" "WAIT(w!)" "|" "DONE(d!)" "CANCELLED(c@/!)")))
+  (org-todo-keyword-faces
+   '(("TODO"      :foreground "#FF9800" :weight bold)
+     ("HOLD"      :foreground "#feb24c" :weight bold)
+     ("WIP"       :foreground "#0098dd" :weight bold)
+     ("WAIT"      :foreground "#9f7efe" :weight bold)
+     ("DONE"      :foreground "#50a14f" :weight bold)
+     ("CANCELLED" :foreground "#ff6480" :weight bold)))
   (org-use-fast-todo-selection 'expert)
   (org-enforce-todo-dependencies t)
   (org-enforce-todo-checkbox-dependencies t)
-  (org-priority-faces '((?A :foreground "red")
-                        (?B :foreground "orange")
-                        (?C :foreground "yellow")))
-  (org-global-properties '(("EFFORT_ALL" . "0:15 0:30 0:45 1:00 2:00 3:00 4:00 5:00 6:00 7:00 8:00")
-                           ("APPT_WARNTIME_ALL" . "0 5 10 15 20 25 30 45 60")
-                           ("STYLE_ALL" . "habit")))
-  (org-columns-default-format "%25ITEM %TODO %SCHEDULED %DEADLINE %3PRIORITY %TAGS %CLOCKSUM %EFFORT{:}")
-  ;; Remove CLOSED: [timestamp] after switching to non-DONE states
+  (org-priority-faces
+   '((?A :foreground "red")
+     (?B :foreground "orange")
+     (?C :foreground "yellow")))
   (org-closed-keep-when-no-todo t)
-  ;; log
   (org-log-repeat 'time)
-  ;; refile
+
+  ;; --- Properties & Columns ---
+  (org-global-properties
+   '(("EFFORT_ALL" . "0:15 0:30 0:45 1:00 2:00 3:00 4:00 5:00 6:00 7:00 8:00")
+     ("APPT_WARNTIME_ALL" . "0 5 10 15 20 25 30 45 60")
+     ("STYLE_ALL" . "habit")))
+  (org-columns-default-format "%25ITEM %TODO %SCHEDULED %DEADLINE %3PRIORITY %TAGS %CLOCKSUM %EFFORT{:}")
+
+  ;; --- Refiling ---
   (org-refile-use-cache nil)
-  (org-refile-targets '((org-agenda-files . (:maxlevel . 6))))
+  (org-refile-targets '((nil . (:maxlevel . 9))
+                        (org-agenda-files . (:maxlevel . 9))))
   (org-refile-use-outline-path 'file)
   (org-outline-path-complete-in-steps nil)
   (org-refile-allow-creating-parent-nodes 'confirm)
-  ;; goto. We use minibuffer to filter instead of isearch.
+  
+  ;; --- Tags & Search ---
   (org-goto-auto-isearch nil)
   (org-goto-interface 'outline-path-completion)
-  ;; tags, e.g. #+TAGS: keyword in your file
   (org-use-fast-tag-selection t)
   (org-fast-tag-selection-single-key t)
-  ;; archive
-  (org-archive-location "%s_archive::datetree/")
-  ;; id
-  (org-id-link-to-org-use-id 'create-if-interactive-and-no-custom-id)
-  ;; abbreviation for url
-  (org-link-abbrev-alist '(("GitHub" . "https://github.com/")
-                           ("GitLab" . "https://gitlab.com/")
-                           ("Google" . "https://google.com/search?q=")
-                           ("RFCs"   . "https://tools.ietf.org/html/")
-                           ("LWN"    . "https://lwn.net/Articles/")
-                           ("WG21"   . "https://wg21.link/"))))
 
-;; Keep track of tasks
+  ;; --- Links ---
+  (org-link-abbrev-alist
+   '(("GitHub" . "https://github.com/")
+     ("GitLab" . "https://gitlab.com/")
+     ("Google" . "https://google.com/search?q=")
+     ("RFCs"   . "https://tools.ietf.org/html/")
+     ("LWN"    . "https://lwn.net/Articles/")
+     ("WG21"   . "https://wg21.link/")))
+
+  ;; --- Citations (Built-in) ---
+  (org-cite-global-bibliography pv/org-bibtex-files)
+
+  ;; --- Capture Templates (Merged) ---
+  ;; Note: I have organized your two sets of templates into a single structure
+  (org-capture-use-agenda-date t)
+  (org-capture-templates-contexts nil)
+  )
+
+;; 1. 定义根目录和子目录结构
+(defvar my-daily-root (expand-file-name "daily/" my-org-root))
+(defvar my-daily-subdirs '("idea" "inbox" "mail" "note" "meeting" "protocol" "uni" "life"))
+
+;; 自动创建所有需要的子文件夹，防止报错
+(make-directory my-daily-root t)
+(dolist (dir my-daily-subdirs)
+  (make-directory (expand-file-name dir my-daily-root) t))
+
+;; 2. 核心辅助函数：询问文件名并生成路径
+;; 格式：~/.org/daily/文件夹/输入名-时间.org
+(defun my/get-daily-capture-path (subdir)
+  "Prompt for a filename, append date, and return full path."
+  (let* ((name (read-string "File Name (slug): ")) ;; 询问文件名
+         (slug (replace-regexp-in-string "[^a-zA-Z0-9]+" "-" (downcase name))) ;; 简单的 slug 处理
+         (date (format-time-string "%Y%m%d")) ;; 日期后缀
+         (fname (format "%s-%s.org" slug date))) ;; 拼接：名字-日期.org
+    (expand-file-name fname (expand-file-name subdir my-daily-root))))
+
+(setq org-capture-templates
+      '(
+        ;; --- 核心分类 (Core) ---
+        
+        ("i" "Idea (灵感)" plain 
+         (file (lambda () (my/get-daily-capture-path "idea")))
+         "#+title: %^{Title}\n#+date: %u\n#+filetags: :idea:\n\n* Idea:\n%?\n"
+         :unnarrowed t)
+
+        ("b" "Inbox (收集箱)" plain 
+         (file (lambda () (my/get-daily-capture-path "inbox")))
+         "#+title: %^{Title}\n#+date: %u\n#+filetags: :inbox:\n\n* Details\n%?\n"
+         :unnarrowed t)
+
+        ("m" "Mail (邮件/通信)" plain 
+         (file (lambda () (my/get-daily-capture-path "mail")))
+         "#+title: Mail: %^{Subject}\n#+date: %u\n#+filetags: :mail:\n\n* To/From: %^{Recipient}\n* Status: TODO\n\n%?\n"
+         :unnarrowed t)
+
+        ("n" "Note (随手记)" plain 
+         (file (lambda () (my/get-daily-capture-path "note")))
+         "#+title: %^{Title}\n#+date: %u\n#+filetags: :note:\n\n%?\n"
+         :unnarrowed t)
+
+        ("t" "Meeting (会议)" plain 
+         (file (lambda () (my/get-daily-capture-path "meeting")))
+         "#+title: Meeting: %^{Topic}\n#+date: %u\n#+filetags: :meeting:\n\n* Participants: %^{Who}\n* Time: %^T\n\n* Agenda\n%?\n"
+         :unnarrowed t)
+
+        ;; Protocol 通常由浏览器触发，这里保留手动触发作为备份
+        ;; 这里的逻辑稍有不同，如果通过 org-protocol 抓取，通常会有专门的设置
+        ("p" "Protocol (网页/链接)" plain 
+         (file (lambda () (my/get-daily-capture-path "protocol")))
+         "#+title: %:description\n#+source: %:link\n#+date: %u\n#+filetags: :protocol:\n\n* Summary\n%i\n%?\n"
+         :unnarrowed t)
+
+        ;; --- 学业与生活 (Life & Work) ---
+
+        ("u" "Uni/Academic (学业)" plain 
+         (file (lambda () (my/get-daily-capture-path "uni")))
+         "#+title: %^{Course/Task}\n#+date: %u\n#+filetags: :uni:\n\n* Course: %^{Course Code|COMP|MATH|PHYS|PHIL}\n* Deadline: %^t\n\n* Requirements\n%?\n"
+         :unnarrowed t)
+
+        ("l" "Life/Admin (生活事务)" plain 
+         (file (lambda () (my/get-daily-capture-path "life")))
+         "#+title: %^{Task}\n#+date: %u\n#+filetags: :life:\n\n* Category: %^{Type|Finance|Shopping|Health|Travel}\n* Action\n%?\n"
+         :unnarrowed t)
+      ))
+
+;;; ----------------------------------------------------------------------------
+;;; 3. Org Agenda
+;;; ----------------------------------------------------------------------------
 (use-package org-agenda
   :ensure nil
-  :hook (org-agenda-finalize . org-agenda-to-appt)
+  :after org
+  :bind
+  ("C-c a" . org-agenda)     ;; 打开 Agenda 主界面
+  ("C-c r" . my/reload-agenda) ;; 【新增】绑定手动刷新快捷键
+  
+  :init
+  ;; 初始设为空，或者只包含 daily 入口，保证启动秒开
+  (setq org-agenda-files nil)
+  (setq org-agenda-diary-file (expand-file-name "diary.org" my-org-root))
+
   :config
-  ;; update appt list every 5 minutes
-  (run-at-time t 300 #'org-agenda-to-appt)
-  (shut-up! #'org-agenda-to-appt)
+  (appt-activate 1)
+
+  ;; --- 【核心】手动刷新函数 ---
+  (defun my/reload-agenda ()
+    "手动扫描 root 下所有 org 文件更新 Agenda，并同步提醒。"
+    (interactive)
+    (let ((files (directory-files-recursively my-org-root "\\.org$")))
+      ;; 过滤掉 ltximg 文件夹 (LaTeX 预览缓存)，防止污染日程
+      (setq files (cl-remove-if (lambda (path) 
+                                  (string-match-p "/ltximg/" path)) 
+                                files))
+      (setq org-agenda-files files)
+      
+      ;; 顺便同步一下系统提醒 (Appt)
+      (org-agenda-to-appt)
+      (message "已刷新 Agenda：加载了 %d 个文件 (包含 Roam 和 Daily)" (length files))))
+
   :custom
-  (org-agenda-files (list (expand-file-name "tasks.org" org-directory)))
-  (org-agenda-diary-file (expand-file-name "diary.org" org-directory))
   (org-agenda-insert-diary-extract-time t)
   (org-agenda-inhibit-startup t)
   (org-agenda-time-leading-zero t)
-  (org-agenda-columns-add-appointments-to-effort-sum t)
   (org-agenda-restore-windows-after-quit t)
-  (org-agenda-window-setup 'current-window))
+  (org-agenda-window-setup 'current-window)
+  (org-agenda-span 'week)
+  (org-agenda-start-on-weekday 1))
 
-;; Write codes in org-mode
+
+;; 定义任务状态流程
+(setq org-todo-keywords
+      '((sequence "TODO(t)"       ; 待办：还没开始
+                  "NEXT(n)"       ; 下一步：现在就可以动手
+                  "WAIT(w@/!)"    ; 等待：等回复/被阻塞 (记录时间戳)
+                  "|"             ; 管道符右边是完成状态
+                  "DONE(d!)"      ; 完成 (记录时间戳)
+                  "CANCELLED(c@)"))) ; 取消 (强制写说明原因)
+
+;; 给不同状态上色，一眼识别
+(setq org-todo-keyword-faces
+      '(("TODO" . (:foreground "#ff6c6b" :weight bold))      ; 红色：待办
+        ("NEXT" . (:foreground "#98be65" :weight bold))      ; 绿色：立即执行
+        ("WAIT" . (:foreground "#ecbe7b" :weight bold))      ; 黄色：阻塞
+        ("DONE" . (:foreground "#51afef" :weight bold :strike-through t))))
+
+
+;; 优化 Agenda 显示格式
+;; %-12c: 显示分类(Category)占12格
+;; %-12t: 显示时间
+;; %s: 任务标题
+(setq org-agenda-prefix-format
+      '((agenda . " %i %-12:c%?-12t% s")
+        (todo   . " %i %-12:c %s")
+        (tags   . " %i %-12:c %s")
+        (search . " %i %-12:c %s")))
+
+;; 紧凑视图：不在 Agenda 里显示这一堆标签，因为我们已经用分类区分了
+;; 保持界面清爽，鼠标放上去还是能看到的
+(setq org-agenda-hide-tags-regexp ".")
+
+;; 在日程视图中显示任务的“面包屑导航” (Breadcrumbs)
+;; 这样你知道 "Review" 是属于 "Math/Linear Algebra" 还是 "Life/Shopping"
+(setq org-agenda-show-outline-path t)
+
+
+(setq org-agenda-custom-commands
+      '(("o" "Overview / Dashboard"
+         (
+          ;; --- 板块 1: 必须关注的危机 (Deadline & Urgent) ---
+          (agenda ""
+                  ((org-agenda-span 'day)
+                   (org-agenda-overriding-header "⚡ Today's Schedule & Deadlines")))
+
+          ;; --- 板块 2: 学业任务 (Uni) ---
+          ;; 扫描所有打着 :uni: 标签，或者是 TODO 状态的任务
+          (tags-todo "+uni/!TODO|NEXT"
+                     ((org-agenda-overriding-header "🎓 University Tasks (Assignments & Exams)")))
+
+          ;; --- 板块 3: 研究与思考 (Math/CS/QC) ---
+          ;; 这里会把你 Roam 笔记里散落的 TODO 聚合起来
+          (tags-todo "+math+cs+qc+research/!TODO|NEXT"
+                     ((org-agenda-overriding-header "🔬 Research & Knowledge Gaps")))
+
+          ;; --- 板块 4: 下一步行动 (Ready to Execute) ---
+          ;; 所有标记为 NEXT 的任务，通常是琐事
+          (todo "NEXT"
+                ((org-agenda-overriding-header "🚀 Next Actions (Ready to go)")))
+
+          ;; --- 板块 5: 阻塞中 (Waiting) ---
+          (todo "WAIT"
+                ((org-agenda-overriding-header "⏳ Waiting for others...")))
+          
+          ;; --- 板块 6: 收集箱 (Inbox) ---
+          ;; 提醒你去整理那些还没归类的东西
+          (tags "inbox"
+                ((org-agenda-overriding-header "📥 Unprocessed Inbox Items")))
+          )
+         ;; 导出设置（可选）
+         nil)))
+
+;;; ----------------------------------------------------------------------------
+;;; 4. Org Source Blocks
+;;; ----------------------------------------------------------------------------
 (use-package org-src
   :ensure nil
   :hook (org-babel-after-execute . org-redisplay-inline-images)
   :bind (:map org-src-mode-map
-         ;; consistent with separedit/magit
          ("C-c C-c" . org-edit-src-exit))
   :custom
   (org-confirm-babel-evaluate nil)
@@ -111,126 +330,73 @@
                         ("C++"    . c++)
                         ("bash"   . sh)
                         ("cpp"    . c++)
-                        ("dot"    . graphviz-dot) ;; was `fundamental-mode'
+                        ("python"    . python)
+                        ("dot"    . graphviz-dot)
                         ("elisp"  . emacs-lisp)
                         ("ocaml"  . tuareg)
-                        ("shell"  . sh)))
-  (org-babel-load-languages '((C          . t)
-                              (dot        . t)
-                              (emacs-lisp . t)
-                              (eshell     . t)
-                              (python     . t)
-                              (shell      . t))))
+                        ("shell"  . sh))))
 
-;; Create structured information quickly
-(use-package org-capture
-  :ensure nil
-  :hook (org-capture-mode . org-capture-setup)
-  :config
-  (with-no-warnings
-    (defun org-capture-setup ()
-      (setq-local org-complete-tags-always-offer-all-agenda-tags t)))
-  :custom
-  (org-capture-use-agenda-date t)
-  (org-capture-templates-contexts nil)
-  (org-capture-templates `(;; Tasks
-                           ("t" "Tasks")
-                           ("tt" "Today" entry (file+olp+datetree "tasks.org")
-                            "* %? %^{EFFORT}p"
-                            :prepend t)
-                           ("ti" "Inbox" entry (file+headline "tasks.org" "Inbox")
-                            "* %?\n%i\n")
-                           ("tm" "Mail" entry (file+headline "tasks.org" "Inbox")
-                            "* TODO %^{type|reply to|contact} %^{recipient} about %^{subject} :MAIL:\n")
-                           ;; Capture
-                           ("c" "Capture")
-                           ("cn" "Note" entry (file+headline "capture.org" "Notes")
-                            "* %? %^g\n%i\n"))))
 
-(use-package org
-  :ensure nil
-  :init
-  ;; 确保在任何引用 org-directory 之前，它一定存在
-  (defvar org-directory nil "Directory for Org files.")
-  :custom
-  (org-directory (file-truename "~/.org")))
-
-(define-prefix-command 'org-roam-map)
-(global-set-key (kbd "C-c n") 'org-roam-map)
+;;; ----------------------------------------------------------------------------
+;;; 5. Org Roam (Merged & Complete)
+;;; ----------------------------------------------------------------------------
 (use-package org-roam
   :ensure t
   :after org
   :init
-    (setq org-roam-directory (file-truename "~/.org/roam"))
+  (setq org-roam-directory (file-truename (expand-file-name "roam" org-directory)))
   (setq org-roam-v2-ack t)
-  :custom
-    (setq org-roam-directory (file-truename "~/.org/roam"))
-    (setq org-directory (file-truename "~/.org"))
+  
+  ;; Define keymap prefix
+  (define-prefix-command 'org-roam-map)
+  (global-set-key (kbd "C-c n") 'org-roam-map)
+  
   :bind (("C-c n f" . org-roam-node-find)
          ("C-c n b" . org-roam-buffer-toggle)
          ("C-c n i" . org-roam-node-insert)
          ("C-c n t" . org-roam-tag-add)
          ("C-c n a" . org-roam-alias-add)
-         ("C-c n o" . org-id-get-create))
+         ("C-c n o" . org-id-get-create)
+         ("C-c n l" . org-roam-buffer-toggle))
+  
+  :custom
+  (org-roam-directory (file-truename (expand-file-name "roam" org-directory)))
   :config
   (org-roam-setup)
-  (org-roam-db-autosync-mode 1))
+  ;; 强制走外部 sqlite3
+  ;;(org-roam-database-connector 'sqlite3)
+  (org-roam-db-autosync-mode 1)
 
-(use-package org-roam
-   :ensure t
-   :after org
-    :custom
-    (setq org-roam-directory (file-truename "~/.org/roam"))
-    (setq org-directory (file-truename "~/.org"))
-   :init
-    (setq org-roam-directory (file-truename "~/.org/roam"))
-   (setq org-roam-v2-ack t) ;; Acknowledge V2 upgrade
-   :config
-   (org-roam-setup)
-   ;;--------------------------
-   ;; Handling file properties for ‘LAST_MODIFIED’
-   ;;--------------------------
-   (defun pv/org-find-time-file-property (property &optional anywhere)
-     "Return the position of the time file PROPERTY if it exists.
+  ;; --- Last Modified Timestamp Logic ---
+  (defun pv/org-find-time-file-property (property &optional anywhere)
+    "Return the position of the time file PROPERTY if it exists."
+    (save-excursion
+      (goto-char (point-min))
+      (let ((first-heading
+             (save-excursion
+               (re-search-forward org-outline-regexp-bol nil t))))
+        (when (re-search-forward (format "^#\\+%s:" property)
+                                 (if anywhere nil first-heading)
+                                 t)
+          (point)))))
 
-When ANYWHERE is non-nil, search beyond the preamble."
-     (save-excursion
-       (goto-char (point-min))
-       (let ((first-heading
-              (save-excursion
-                (re-search-forward org-outline-regexp-bol nil t))))
-         (when (re-search-forward (format "^#\\+%s:" property)
-                                  (if anywhere nil first-heading)
-                                  t)
-           (point)))))
-
-   (defun pv/org-has-time-file-property-p (property &optional anywhere)
-     "Return the position of time file PROPERTY if it is defined.
-
-As a special case, return -1 if the time file PROPERTY exists but
-is not defined."
-     (when-let ((pos (pv/org-find-time-file-property property anywhere)))
-       (save-excursion
-         (goto-char pos)
-         (if (and (looking-at-p " ")
-                  (progn (forward-char)
-                         (org-at-timestamp-p 'lax)))
-             pos
-           -1))))
-   (defun pv/org-set-time-file-property (property &optional anywhere pos)
-    "Set the time file PROPERTY in the preamble.
-
-When ANYWHERE is non-nil, search beyond the preamble.
-
-If the position of the file PROPERTY has already been computed,
-it can be passed in POS."
-    (when-let ((pos (or pos
-                        (pv/org-find-time-file-property property))))
+  (defun pv/org-has-time-file-property-p (property &optional anywhere)
+    "Return position of property or -1 if exists but empty."
+    (when-let ((pos (pv/org-find-time-file-property property anywhere)))
       (save-excursion
         (goto-char pos)
-        (if (looking-at-p " ")
-            (forward-char)
-          (insert " "))
+        (if (and (looking-at-p " ")
+                 (progn (forward-char)
+                        (org-at-timestamp-p 'lax)))
+            pos
+          -1))))
+
+  (defun pv/org-set-time-file-property (property &optional anywhere pos)
+    "Set the time file PROPERTY in the preamble."
+    (when-let ((pos (or pos (pv/org-find-time-file-property property))))
+      (save-excursion
+        (goto-char pos)
+        (if (looking-at-p " ") (forward-char) (insert " "))
         (delete-region (point) (line-end-position))
         (let* ((now (format-time-string "[%Y-%m-%d %a %H:%M]")))
           (insert now)))))
@@ -239,82 +405,126 @@ it can be passed in POS."
     "Update the LAST_MODIFIED file property in the preamble."
     (when (derived-mode-p 'org-mode)
       (pv/org-set-time-file-property "last_modified")))
-   :hook
-   (before-save . pv/org-set-last-modified) ; 保存文件时调用
-  :custom
-    (setq org-roam-directory (file-truename "~/.org/roam"))
-    (setq org-directory (file-truename "~/.org"))
-   ;; 自定义默认模板
-   (org-roam-capture-templates
-    '(("d" "default" plain "%?"
-       :if-new
-       (file+head "${slug}-%<%Y%m%d%H%M%S>.org"
-                  "#+title: ${title}\n#+date: %u\n#+last_modified: \n\n")
-       :immediate-finish t)))
-   :bind (("C-c n f" . org-roam-node-find)
-          (:map org-mode-map
-            (("C-c n i" . org-roam-node-insert)
-            ("C-c n o" . org-id-get-create)
-            ("C-c n t" . org-roam-tag-add)
-            ("C-c n a" . org-roam-alias-add)
-            ("C-c n l" . org-roam-buffer-toggle)))))
 
+  ;; Hook the modification function to save
+  (add-hook 'before-save-hook #'pv/org-set-last-modified)
+
+  ;; --- Visuals & Preview ---
+  ;; Refresh inline images after Roam buffer render
+  (add-hook 'org-roam-buffer-postrender-functions
+            (lambda ()
+              (when (derived-mode-p 'org-mode)
+                (ignore-errors (org-display-inline-images))
+                (ignore-errors (org-latex-preview '(64)))))))
+
+;; UI Extension
 (use-package org-roam-ui
-  :ensure t ;; 自动安装
+  :ensure t
   :after org-roam
   :custom
-  (org-roam-ui-sync-theme t) ;; 同步 Emacs 主题
-  (org-roam-ui-follow t) ;; 笔记节点跟随
+  (org-roam-ui-sync-theme t)
+  (org-roam-ui-follow t)
   (org-roam-ui-update-on-save t))
 
-(setq pv/org-refile-file (concat org-directory "refile.org"))
 
-(use-package org
-  :custom
-  ;; ...
-  (org-capture-templates
-   (quote (("t" "todo" entry (file pv/org-refile-file)
-            "* TODO %?\n%U\n%a\n" :clock-in t :clock-resume t)
-           ("r" "respond" entry (file pv/org-refile-file)
-            "* NEXT Respond to %:from on %:subject\nSCHEDULED: %t\n%U\n%a\n" :clock-in t :clock-resume t :immediate-finish t)
-           ("n" "note" entry (file pv/org-refile-file)
-            "* %? :NOTE:\n%U\n%a\n" :clock-in t :clock-resume t)
-           ("w" "org-protocol" entry (file pv/org-refile-file)
-            "* TODO Review %c\n%U\n" :immediate-finish t)
-           ("m" "Meeting" entry (file pv/org-refile-file)
-            "* MEETING with %? :MEETING:\n%U" :clock-in t :clock-resume t))))
-  (org-refile-targets (quote ((nil :maxlevel . 9)
-                                 (org-agenda-files :maxlevel . 9))))
-  ;; Use full outline paths for refile targets - we file directly with IDO
-  (org-refile-use-outline-path 'file)
-    ;; Allow refile to create parent tasks with confirmation
-  (org-refile-allow-creating-parent-nodes (quote confirm))
-  (org-cite-global-bibliography pv/org-bibtex-files)
-  :bind
-  ;; ...
-  (("C-c a" . 'org-agenda)
-   ("C-c c" . 'org-capture)
-   :map org-mode-map
-   ("C-c C-q" . counsel-org-tag)))
 
-(setq pv/org-bibtex-library `(,(concat org-directory "References/")))
-(setq pv/org-bibtex-files `(,(concat org-directory "References/references.bib")))
+(setq org-roam-capture-templates
+      '(
+        ;; --- 学科基础层 (Base Concepts) ---
+        ;; 自动归类到对应文件夹，文件名直接使用概念名 (Slug)，内容留白
 
-(use-package org
-  :custom
-  ;; ...
-  (org-cite-global-bibliography pv/org-bibtex-files))
+        ("m" "Math Concept" plain
+         "%?"
+         :if-new (file+head "math/${slug}.org"
+                            "#+title: ${title}\n#+date: %u\n#+filetags: :math:\n")
+         :unnarrowed t)
 
+        ("c" "CS Concept" plain
+         "%?"
+         :if-new (file+head "CS/${slug}.org"
+                            "#+title: ${title}\n#+date: %u\n#+filetags: :cs:\n")
+         :unnarrowed t)
+
+        ("q" "Quantum Concept" plain
+         "%?"
+         :if-new (file+head "QC/${slug}.org"
+                            "#+title: ${title}\n#+date: %u\n#+filetags: :qc:\n")
+         :unnarrowed t)
+
+        ("p" "Philosophy Concept" plain
+         "%?"
+         :if-new (file+head "philosophy/${slug}.org"
+                            "#+title: ${title}\n#+date: %u\n#+filetags: :phil:\n")
+         :unnarrowed t)
+
+        ;; --- 知识融合层 (Integration) ---
+        ;; Index 是跨学科的“集散地”，用来把 math/cs/qc 里的点连成线
+
+        ("i" "Index (Integration)" plain
+         "%?"
+         :if-new (file+head "index/${slug}.org"
+                            "#+title: ${title}\n#+date: %u\n#+filetags: :index:\n")
+         :unnarrowed t)
+
+        ;; --- 外部输入层 (Source) ---
+        ;; 论文依旧单独存放，保持纯洁性
+
+        ("r" "Paper/Reference" plain
+         "%?"
+         :if-new (file+head "papers/${slug}.org"
+                            "#+title: ${title}\n#+date: %u\n#+filetags: :paper:\n")
+         :unnarrowed t)
+      ))
+
+
+
+
+;;; ----------------------------------------------------------------------------
+;;; 6. Bibliography & References
+;;; ----------------------------------------------------------------------------
 (use-package bibtex-completion
   :custom
+  (bibtex-completion-bibliography pv/org-bibtex-files)
+  (bibtex-completion-library-path (list pv/org-bibtex-dir))
   (bibtex-completion-pdf-open-function
    (lambda (fpath)
-     (call-process "open" nil 0 nil fpath))) ; 配置打开 PDF 的方式
-  (bibtex-completion-bibliography pv/org-bibtex-files)
-  (bibtex-completion-library-path pv/org-bibtex-library))
+     (call-process "open" nil 0 nil fpath))))
 
 (use-package org-ref
-  :ensure t)
+  :ensure t
+  :after org)
+
+;;; ----------------------------------------------------------------------------
+;;; 7. LaTeX & Math
+;;; ----------------------------------------------------------------------------
+(use-package cdlatex
+  :ensure t
+  ;; Hook is already handled in 'org' use-package above
+  )
+
+(use-package org-fragtog
+  :ensure t
+  :hook (org-mode . org-fragtog-mode))
+
+;; Global LaTeX Preview Settings
+(with-eval-after-load 'org
+  ;; Choose your process
+  (setq org-preview-latex-default-process 'imagemagick)
+  ;; (setq org-preview-latex-default-process 'dvipng) ;; Fallback
+
+  ;; Scale adjustments (High DPI/Retina)
+  (setq org-format-latex-options
+        (plist-put org-format-latex-options :scale 1.6)))
+
+
+
+
+(require 'org-tempo)
+(setq org-pretty-entities t)
+
+(use-package zotxt
+ :ensure t)
+
 
 (provide 'init-org)
 ;;; init-org.el ends here

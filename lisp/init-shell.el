@@ -184,5 +184,27 @@ If popup is focused, kill it."
       (my/popwin:eshell)
       (popwin:stick-popup-window))))
 
+
+(use-package vterm
+  :ensure t
+  :commands (vterm)
+  :config
+  (defun vterm-toggle ()
+    "Toggle a persistent vterm popup window."
+    (interactive)
+    (if-let* ((win (get-buffer-window "*vterm-popup*")))
+        (if (eq (selected-window) win)
+            (delete-window win)
+          (select-window win))
+      (let ((display-buffer-alist '(((category . comint)
+                                     (display-buffer-at-bottom)))))
+        (with-current-buffer (vterm "*vterm-popup*")
+          ;; 可选：退出时自动关窗口
+          (add-hook 'kill-buffer-hook
+                    (lambda ()
+                      (when-let ((w (get-buffer-window (current-buffer))))
+                        (ignore-errors (delete-window w))))
+                    nil t))))))
+
 (provide 'init-shell)
 ;;; init-shell.el ends here

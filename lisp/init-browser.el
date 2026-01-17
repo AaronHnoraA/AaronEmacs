@@ -31,8 +31,6 @@
           (kill-new (xwidget-webkit-current-url))
           (message "Copied URL."))))))
 
-(provide 'init-browser)
-
 ;;;; browse-url 智能分流：优先 EWW，遇到“复杂站点/关键词”走 xwidget
 
 (defun my/url-looks-complex-p (url)
@@ -74,7 +72,68 @@
 (global-set-key (kbd "C-c w x") #'xwidget-webkit-browse-url)
 (global-set-key (kbd "C-c w w") #'browse-url)
 
+
 (with-eval-after-load 'eww
   (setq eww-search-prefix "https://duckduckgo.com/?q=")
   (define-key eww-mode-map (kbd "R") #'eww-readable))
 ;;; init-base.el ends here
+
+;;; eww <-> xwidget-webkit 互转 (稳健版)
+
+;; ---------- 1. 获取 URL 的工具函数 ----------
+
+(defun my/eww-get-url ()
+  "获取当前 EWW buffer 的 URL，带空值检查"
+  (if (derived-mode-p 'eww-mode)
+      (plist-get eww-data :url)
+    nil))
+
+(defun my/xwidget-get-url ()
+  "获取当前 Xwidget buffer 的 URL，带空值检查"
+  (if (eq major-mode 'xwidget-webkit-mode)
+      (xwidget-webkit-uri (xwidget-webkit-current-session))
+    nil))
+
+;; ---------- 2. 核心切换逻辑 (带延迟清理) ----------
+
+(defun my/eww-to-xwidget ()
+  "从 EWW 切换到 Xwidget，成功后延迟清理旧 Buffer"
+  (interactive)
+  (let ((url (my/eww-get-url))
+        (old-buf (current-buffer)))
+    (if url
+        (progn
+          (message "正在切换至 Xwidget: %s" url)
+          ;; 启动 xwidget
+          (xwidget-webkit-browse-url url)
+          ;; 【关键修正】：不要立即杀 buffer。
+          ;; 使用 run-at-time 0 让 Emacs 先完成 buffer 切换和界面重绘，
+          ;; 待事件循环空闲时再回头杀掉旧 buffer。
+          (run-at-time "0 sec" nil 
+                       (lambda (b) 
+                         (when (buffer-live-p b)
+                           (kill-buffer b))) 
+                       old-buf))
+      (message "错误：无法获取 EWW URL"))))
+
+(defun my/xwidget-to-eww ()
+  "从 Xwidget 切换到 EWW，成功后延迟清理旧 Buffer"
+  (interactive)
+  (let ((url (my/xwidget-get-url))
+        (old-buf (current-buffer)))
+    (if url
+        (progn
+          (message "正在切换至 EWW: %s" url)
+          ;; 启动 eww (eww 通常会在当前窗口复用 buffer)
+          (eww url)
+          ;; 【关键修正】：同样延迟清理，防止 xwidget 还没隐藏就被杀掉导致闪退
+          (run-at-time "0 sec" nil 
+                       (lambda (b) 
+                         (when (buffer-live-p b)
+                           (kill-buffer b))) 
+                       old-buf))
+      (message "错误：无法获取 Xwidget URL"))))
+
+
+(provide 'init-browser)
+
