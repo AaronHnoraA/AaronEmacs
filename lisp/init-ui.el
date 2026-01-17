@@ -108,45 +108,6 @@
                                dashboard-insert-footer)))
 
 
-;; 使 frame 根据 背景色的 亮暗, 让 face 自行选择对应的方案.
-(setopt frame-background-mode nil)
-
-(setopt frame-resize-pixelwise t)
-
-;; 当最后一个 frame 关闭时, 存入它的 位置/尺寸;
-;; 当桌面上没有 frame 时, 下一个打开的 frame 将使用那个被存入的 位置/尺寸.
-;; +-----------------------------------------+
-;; |‘stored?’ => nil.  Daemon is initialized.|
-;; |‘getter’ is in ‘server-*-make-*-hook’.   |
-;; +---------------------+-------------------+
-;;                       |
-;;  No frame on desktop. | Let’s _make_ one.
-;;                       V                          Because ‘stored?’ is t, the frame to make will
-;; +------------------------------------------+     use the parameters of the last frame which is deleted
-;; |Run ‘getter’ in ‘server-*-make-*-hook’:   |<-------------------------------------------+
-;; |‘getter’ itself is removed from the hook; |     when Emacs runs ‘server-*-make-*-hook’.|
-;; |‘setter’ is in ‘delete-*-functions’.      |                                            |
-;; +------------------------------------------+                                            |
-;;  Let’s _make_ more frames.                                                              |
-;;  Either ‘getter’ or ‘setter’ won’t run.                                                 |
-;;           |                                                                             |
-;;           | Let’s _delete_ one frame.                          No frame on desktop now. | Let’s _make_ one.
-;;           V                                                                             |
-;; +-------------------------------------+                             +-------------------+-----------------+
-;; |Run ‘setter’ in ‘delete-*-functions’:| Let’s _delete_ the last one |Run ‘setter’ in ‘delete-*-functions’:|
-;; |nothing will happend because the     +---------------------------->|frame parameters will be stored;     |
-;; |frame to be deleted is not the only  |     frame on the desktop.   |now ‘stored?’ => t; ‘setter’ itself  |
-;; |one frame on the desktop.            |                             |is removed from the hook; ‘getter’ is|
-;; ++------------------------------------+                             |in ‘server-*-make-*-hook’            |
-;;  |                                   ^                              +-------------------------------------+
-;;  |Let’s _delete_ frames until there’s|
-;;  +-----------------------------------+
-;;   only one frame left on the desktop.
-
-
-(setopt window-divider-default-places      'right-only  ; 横向 divider 可以用 mode line代替.
-      window-divider-default-right-width 12)
-(window-divider-mode)
 
 ;;; Menu Bar:
 
@@ -182,14 +143,6 @@
 (keymap-global-unset "<menu-bar> <tools> <browse-web>")
 (keymap-global-unset "<menu-bar> <tools> <gnus>")
 
-;;; Imenu
-(setopt imenu-auto-rescan t
-        ;; Buffer 很大, ‘imenu’你忍一下.
-        imenu-auto-rescan-maxout most-positive-fixnum
-        ;; 超过 这几秒 就算了.
-        imenu-max-index-time (* 0.3 idle-update-delay))
-(setopt imenu-sort-function #'imenu--sort-by-name)
-;; (add-hook 'XXX-mode-hook #'imenu-add-menubar-index)
 
 (keymap-global-unset "<menu-bar> <help-menu> <about-emacs>")
 (keymap-global-unset "<menu-bar> <help-menu> <about-gnu-project>")
@@ -201,17 +154,6 @@
 (keymap-global-unset "<menu-bar> <help-menu> <getting-new-versions>")
 (keymap-global-unset "<menu-bar> <help-menu> <more-manuals> <order-emacs-manuals>")
 
-;;; Tool Bar:
-
-(setq tool-bar-style 'both)
-
-(tool-bar-mode -1)
-
-;;; Tab Bar:
-
-(with-eval-after-load 'tab-bar
-  (setq tab-prefix-map nil))
-
 ;;; Tab Line:
 
 (unless (package-installed-p 'all-the-icons)
@@ -220,35 +162,19 @@
      :url "https://github.com/domtronn/all-the-icons.el.git"
      :rev :last-release)))
 
-;;; Window:
-
-(setopt window-resize-pixelwise t)
-
-(setopt window-min-height 4
-        window-min-width  1)
 ;;; Text Area:
 
 
 ;; 渲染成对的单引号时, 尽可能使用 ‘curve’ 这种样式, 退而求此次地可以使用 `grave' 这种样式.
 (setopt text-quoting-style nil)
-
 ;;; Fringe:
 
 (set-fringe-mode '(0 . nil))  ; Right-only.
-
-;; 每 10 行就用 ‘line-number-major-tick’ 高亮一次行号.
-(setopt display-line-numbers-major-tick 10)
 
 ;; 若开启, buffer 尾行之后的区域的右流苏区域会显示密集的刻度线.
 (setopt indicate-empty-lines nil)
 (setopt overflow-newline-into-fringe t)
 
-;; 启用 word-wrap 时在换行处显示 down-arrow.
-(setopt visual-line-fringe-indicators '(nil down-arrow))
-
-;; 控制是否在 fringe 所在的区域上显示首尾指示符 (window 的四个边角区域).
-(setopt indicate-buffer-boundaries nil)
-
 ;;; Scroll Bar:
 
 (setopt scroll-bar-mode 'right)
@@ -296,8 +222,6 @@
         eol-mnemonic-dos  " CRLF "
         eol-mnemonic-undecided " ?EOL ")
 
-(setopt mode-line-process t)  ; E.g., ‘Shell :run’.
-
 ;;; Minibuffer & Echo Area:
 
 (setopt max-mini-window-height 0.3)
@@ -307,7 +231,6 @@
 
 ;; Trim 首尾的空行.
 (setopt resize-mini-frames #'fit-frame-to-buffer)
-
 ;;; Mouse:
 
 (setq mouse-fine-grained-tracking nil)

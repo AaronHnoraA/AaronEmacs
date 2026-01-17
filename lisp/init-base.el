@@ -810,9 +810,6 @@ Else, call `comment-or-uncomment-region' on the current line."
 ;; Debugger 以 C 风格 显示 函数调用, 而不是 Lisp 风格.
 (setopt debugger-stack-frame-as-list nil)
 
-;; 有关该值的合适范围的讨论 (无果): <https://emacs.stackexchange.com/q/76246/39388>
-(setopt max-lisp-eval-depth 800)
-
 ;; GC 时在 echo area 显示信息, 但不会并入到 “*Messages*” 中.
 (setopt garbage-collection-messages t)
 
@@ -838,14 +835,6 @@ Else, call `comment-or-uncomment-region' on the current line."
 (setq meta-prefix-char ?\e)
 
 (keymap-global-unset "C-x ESC ESC")  ; ‘repeat-complex-command’
-
-;;; Minibuffer Completion
-(setopt completion-cycle-threshold nil  ; 补全时, 按 <tab> 会轮换候选词.
-        completion-ignored-extensions '()
-        completion-styles '(basic partial-completion initials))
-(setopt completion-auto-help t  ; 按一次 <tab> 以显示 help 列表.
-        ;; 对符号进行 completion 时, 在符号所在的那一行显示符号的类型和文档首行.
-        completions-detailed t)
 
 ;;; Read
 (setq read-extended-command-predicate #'command-completion-default-include-p
@@ -878,7 +867,6 @@ Else, call `comment-or-uncomment-region' on the current line."
 
 (setopt idle-update-delay 5)
 
-
 ;;; Backup & Auto-Saving & Reverting:
 
 
@@ -930,11 +918,6 @@ Else, call `comment-or-uncomment-region' on the current line."
       w32-pipe-read-delay 0)
 ;;; File System:
 
-(setq w32-get-true-file-attributes 'local)
-
-;; 打开达到该字节数的大文件时询问相关事宜;
-;; 重点在于可以借此开启 literally 读取模式, 这会关闭一些昂贵的功能以提高访问速度.
-(setopt large-file-warning-threshold (* 1024 1024))
 
 (setopt delete-by-moving-to-trash t)
 
