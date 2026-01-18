@@ -1,0 +1,45 @@
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Usage: org-dvisvgm INPUT.dvi OUTPUT.svg
+in="${1:?missing input .dvi}"
+out="${2:?missing output .svg}"
+
+# Optional knobs:
+#   ORG_DVISVGM_OPTS="--bbox=min --clipjoin -n --optimize"
+#   ORG_DVISVGM_ZOOM="1.0"        (dvisvgm --zoom)
+#   ORG_DVISVGM_PAGE="1"          (dvisvgm --page)
+opts="${ORG_DVISVGM_OPTS:---bbox=min --clipjoin -n --optimize}"
+zoom="${ORG_DVISVGM_ZOOM:-2.5}"
+page="${ORG_DVISVGM_PAGE:-1}"
+
+# 1) Make sure TeX's kpathsea is correctly wired for this process.
+#    This is the key to fixing:
+#      - texmf.cnf not found
+#      - default map files not found
+#      - tex.pro / texps.pro / special.pro / color.pro not found
+#
+#    We prefer kpsewhich (from TeX Live) as the source of truth.
+if command -v kpsewhich >/dev/null 2>&1; then
+  texmfdist="$(kpsewhich -var-value=TEXMFDIST 2>/dev/null || true)"
+  if [[ -n "${texmfdist}" ]]; then
+    export TEXMFDIST="${texmfdist}"
+    # texmf.cnf typically lives here
+    if [[ -d "${texmfdist}/web2c" ]]; then
+      export TEXMFCNF="${texmfdist}/web2c"
+    fi
+  fi
+fi
+
+# Keep TeX runtime cache in a stable place (helps map/ls-R usage)
+: "${TEXMFVAR:=${HOME}/.cache/texlive/texmf-var}"
+export TEXMFVAR
+mkdir -p "${TEXMFVAR}" || true
+
+# 2) Run dvisvgm.
+#    -o expects output pattern; we force exact output file by quoting.
+#    --page / --zoom are explicit to avoid surprises.
+#
+#    Note: We do NOT use --pdf here; input is DVI, output is SVG.
+dvisvgm --page="${page}" --zoom="${zoom}" ${opts} -o "${out}" "${in}"

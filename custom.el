@@ -6,8 +6,8 @@
  ;; If there is more than one, they won't work right.
  '(package-selected-packages nil)
  '(package-vc-selected-packages
-   '((holo-layer :url "https://github.com/manateelazycat/holo-layer.git" :rev
-                 :last-release))))
+   '((svg-tag-mode :url "https://github.com/rougier/svg-tag-mode.git" :rev
+                   :last-release))))
 (custom-set-faces
  ;; custom-set-faces was added by Custom.
  ;; If you edit it by hand, you could mess it up, so be careful.

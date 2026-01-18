@@ -207,5 +207,15 @@ If popup is focused, kill it."
                     nil t))))))
 (setq vterm-shell "zsh")
 
+
+
+(defun my/vterm-named (name)
+  "Create or switch to a named vterm buffer."
+  (interactive "sVTerm name: ")
+  (let ((buf (format "*vterm:%s*" name)))
+    (if (get-buffer buf)
+        (switch-to-buffer buf)
+      (vterm buf))))
+
 (provide 'init-shell)
 ;;; init-shell.el ends here

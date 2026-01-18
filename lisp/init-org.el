@@ -476,7 +476,71 @@
          :unnarrowed t)
       ))
 
+(unless (package-installed-p 'org-modern-indent)
+  (package-vc-install
+   '(org-modern-indent
+     :url "https://github.com/jdtsmith/org-modern-indent.git"
+     :rev :last-release)))
+(use-package org-modern-indent
+  :config
+  (add-hook 'org-mode-hook #'org-modern-indent-mode 90))
 
+(defconst org-modern-indent-begin (propertize "┌"  'face 'org-modern-indent-bracket-line))
+(defconst org-modern-indent-guide (propertize "│ " 'face 'org-modern-indent-bracket-line))
+(defconst org-modern-indent-end   (propertize "└"  'face 'org-modern-indent-bracket-line))
+
+(use-package org-superstar
+  :ensure t
+  :hook (org-mode . org-superstar-mode)
+  :config
+  ;; 自定义你的标题符号
+  (setq org-superstar-headline-bullets-list '("◉" "○" "✸" "✿")))
+(unless (package-installed-p 'org-appear)
+  (package-vc-install
+   '(org-appear
+     :url "https://github.com/awth13/org-appear.git"
+     :rev :last-release)))
+(require 'org-appear)
+(add-hook 'org-mode-hook 'org-appear-mode)
+(use-package olivetti
+  :ensure t)
+(use-package mixed-pitch
+  :ensure t
+  :hook
+  ;; If you want it in all text modes:
+  (text-mode . mixed-pitch-mode))
+(use-package valign
+  :ensure t)
+(add-hook 'org-mode-hook #'valign-mode)
+(use-package scala-mode
+  :interpreter
+    ("scala" . scala-mode))
+
+(defun my/org-clean-ui ()
+  "让 Org 的元数据不那么刺眼"
+  ;; 1. 隐藏多余的强调符（/斜体/，*粗体* 两边的符号）
+  (setq org-hide-emphasis-markers t)
+  
+  ;; 2. 让 #+BEGIN_SRC 这种元数据行变小、变淡
+  (set-face-attribute 'org-meta-line nil :inherit 'shadow :height 0.8)
+  (set-face-attribute 'org-block-begin-line nil :inherit 'shadow :height 0.8 :background nil)
+  (set-face-attribute 'org-block-end-line nil :inherit 'shadow :height 0.8 :background nil)
+
+  ;; 3. 给代码块加一个淡淡的背景色（类似 Notion）
+  (set-face-attribute 'org-block nil :background (if (eq (frame-parameter nil 'background-mode) 'dark)
+                                                     "#232323" ;; 深色模式背景
+                                                   "#f5f5f5")) ;; 浅色模式背景
+                                                   
+  ;; 4. 自动折叠 Properties 抽屉，眼不见心不烦
+  (setq org-cycle-hide-drawer-startup t))
+
+(add-hook 'org-mode-hook #'my/org-clean-ui)
+
+(use-package org-fancy-priorities
+  :ensure t
+  :hook (org-mode . org-fancy-priorities-mode)
+  :config
+  (setq org-fancy-priorities-list '("⚡" "⬆" "⬇" "☕"))) ;; 用 emoji 代替 A/B/C
 
 
 ;;; ----------------------------------------------------------------------------
@@ -508,13 +572,26 @@
 
 ;; Global LaTeX Preview Settings
 (with-eval-after-load 'org
-  ;; Choose your process
-  (setq org-preview-latex-default-process 'imagemagick)
-  ;; (setq org-preview-latex-default-process 'dvipng) ;; Fallback
+  (let ((tool (expand-file-name "tools/org-dvipng-hires" user-emacs-directory)))
+    (add-to-list
+     'org-preview-latex-process-alist
+     `(dvipng-hires-script
+       :programs ("latex")
+       :description "latex -> dvi -> (dvipng+convert via script) -> png"
+       :message "Need latex, dvipng, imagemagick, and org-dvipng-hires."
+       :image-input-type "dvi"
+       :image-output-type "svg"
+       :image-size-adjust (1.0 . 1.0)
+       :latex-compiler
+       ("latex -interaction nonstopmode -halt-on-error -output-directory %o %f")
+       :image-converter
+       (,(format "%s %%f %%O" (shell-quote-argument tool))))))
 
-  ;; Scale adjustments (High DPI/Retina)
+  (setq org-preview-latex-default-process 'dvipng-hires-script)
+
+  ;; 显示层先别再缩放，避免叠加
   (setq org-format-latex-options
-        (plist-put org-format-latex-options :scale 1.6)))
+        (plist-put org-format-latex-options :scale 1.0)))
 
 
 

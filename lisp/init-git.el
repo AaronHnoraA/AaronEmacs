@@ -72,6 +72,9 @@
          ("\\.gitconfig\\'"     . conf-unix-mode)
          ("\\.gitattributes\\'" . conf-unix-mode)))
 
+(use-package magit-delta
+  :hook (magit-mode . magit-delta-mode))
+
 (provide 'init-git)
 
 ;;; init-git.el ends here

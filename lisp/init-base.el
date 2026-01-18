@@ -3,6 +3,10 @@
 ;;; Commentary:
 ;;
 
+(add-to-list 'exec-path (expand-file-name "tools" user-emacs-directory))
+(setenv "PATH"
+        (concat (expand-file-name "tools" user-emacs-directory)
+                ":" (getenv "PATH")))
 ;;; Code:
 
 ;; Suppress GUI features and more
@@ -44,9 +48,6 @@
 ;; Cutting and pasting use primary/clipboard
 (setq select-enable-primary t
       select-enable-clipboard t)
-
-;; No gc for font caches
-(setq inhibit-compacting-font-caches t)
 
 ;; Improve display
 (setq display-raw-bytes-as-hex t
@@ -123,40 +124,143 @@
 (setq-default tab-width 4)
 (setq-default c-basic-offset 4)
 
-;; Font size
-(set-face-attribute 'default nil
-                    :family "Fira Code"
-                    :height 160
-                    :weight 'semi-bold)
+;;; -*- lexical-binding: t; -*-
 
-(defvar cn-fonts-list '("黑体" "STHeiti" "微软雅黑" "文泉译微米黑")
-  "定义使用的中文字体候选列表.")
+;; ======================================================================
+;; 1. 变量定义 (用户自定义区域)
+;; ======================================================================
 
-(defvar en-fonts-list '("Cascadia Code" "Courier New" "Monaco" "Ubuntu Mono")
-  "定义使用的英文字体候选列表.")
+;; 英文正文 (Body) - Org 普通文本（variable-pitch）
+(defvar my/font-body  "Futura")
+(defvar my/h-body     200)
 
-(defvar emoji-fonts-list '("Apple Color Emoji" "Segoe UI Emoji" "Noto Color Emoji" "Symbola" "Symbol")
-  "定义使用Emoji字体候选列表.")
+;; 代码/表格 (Code) - 默认界面 + 代码环境（fixed-pitch）
+(defvar my/font-code  "Fira Code")
+(defvar my/h-code     160)
 
-;;;###autoload
-(defun tenon--font-setup ()
-  "Font setup."
+;; 标题 (Title) - Org 标题
+(defvar my/font-title "Excalifont")
+(defvar my/h-title    220)
 
+;; 中文 (Chinese)
+(defvar my/font-cn    "FZLiuGongQuanKaiShuJF")
+(defvar my/scale-cn   1.3)
+
+;; ======================================================================
+;; 2. 核心：应用字体（全局 + 中文绑定）
+;; ======================================================================
+
+(defun my/font--apply-core-faces ()
+  "设置 default/fixed/variable 三类 face。"
+  ;; 默认 = 代码字体（稳定，且界面/代码/表格都不乱）
+  (set-face-attribute 'default nil
+                      :family my/font-code
+                      :height my/h-code
+                      :weight 'semi-bold)
+
+  ;; 固定宽度 = 代码字体（确保 org-block/org-table 等继承后稳定）
+  (set-face-attribute 'fixed-pitch nil
+                      :family my/font-body
+                      :height my/h-body
+                      :weight 'regular)
+
+  ;; 变宽 = 正文字体（mixed-pitch 会让 Org 正文用它）
+  (set-face-attribute 'variable-pitch nil
+                      :family my/font-body
+                      :height my/h-body
+                      :weight 'regular))
+
+(defun my/font--bind-chinese-to-fontset ()
+  "把中文相关字符集强制绑定到 my/font-cn。"
+  (when (member my/font-cn (font-family-list))
+    ;; t 表示当前 frame 的 fontset；也会影响后续 frame 的默认 fontset 选择
+    (dolist (charset '(han cjk-misc bopomofo kana hangul))
+      ;; 'prepend：把该字体放在 fallback 优先级前面，避免被系统中文字体截胡
+      (set-fontset-font t charset (font-spec :family my/font-cn) nil 'prepend))))
+
+(defun my/font--apply-rescale ()
+  "设置中文缩放（只调大小，不负责选字体）。"
+  (setq face-font-rescale-alist
+        (assq-delete-all my/font-cn face-font-rescale-alist))
+  (add-to-list 'face-font-rescale-alist (cons my/font-cn my/scale-cn)))
+
+(defun my/apply-font-config (&optional frame)
+  "应用全部字体设置。可用于 daemon 新 frame。
+若传入 FRAME，则在该 frame 上应用。"
   (interactive)
-  (let* ((cf (tenon--available-font cn-fonts-list))
-	     (ef (tenon--available-font en-fonts-list))
-         (em (tenon--available-font emoji-fonts-list)))
-    (when ef
-      (dolist (face '(default fixed-pitch fixed-pitch-serif variable-pitch))
-	    (set-face-attribute face nil :family ef)))
-    (when em
-      (dolist (charset `(unicode unicode-bmp ,(if (> emacs-major-version 27) 'emoji 'symbol)))
-        (set-fontset-font t charset em nil 'prepend)))
-    (when cf
-      (dolist (charset '(kana han cjk-misc bopomofo))
-	    (set-fontset-font t charset cf))
-      (setq face-font-rescale-alist
-	        (mapcar (lambda (item) (cons item 1.2)) `(,cf ,em))))))
+  (when (frame-live-p frame)
+    (select-frame frame))
+
+  (my/font--apply-core-faces)
+  (my/font--bind-chinese-to-fontset)
+  (my/font--apply-rescale)
+
+  ;; 保险：让 Emacs 重新评估字体缓存（可选但很稳）
+  (when (fboundp 'font-cache-reset)
+    (font-cache-reset)))
+
+;; 启动立即生效
+(my/apply-font-config)
+
+;; Daemon / 新 frame 也生效
+(add-hook 'server-after-make-frame-hook #'my/apply-font-config)
+
+;; ======================================================================
+;; 3. Org Mode & mixed-pitch 适配
+;; ======================================================================
+
+;; 你如果用 use-package：确保 mixed-pitch 可用
+;; (use-package mixed-pitch :ensure t)
+
+(defun my/org-font-setup ()
+  "Org 模式：启用 mixed-pitch，设置标题字体，保护代码/表格等 fixed-pitch。"
+  (when (fboundp 'mixed-pitch-mode)
+    (mixed-pitch-mode 1))
+
+  ;; 标题：只改 org 的标题 faces，不要去动 default
+  (dolist (face '(org-level-1 org-level-2 org-level-3
+                  org-level-4 org-level-5 org-level-6
+                  org-level-7 org-level-8 org-document-title))
+    (set-face-attribute face nil
+                        :family my/font-title
+                        :height my/h-title
+                        :weight 'bold))
+
+  ;; 保护：这些必须固定宽度（对齐/可读性）
+  (dolist (face '(org-block
+                  org-block-begin-line
+                  org-block-end-line
+                  org-table
+                  org-formula
+                  org-code
+                  org-verbatim
+                  org-meta-line
+                  org-checkbox
+                  line-number
+                  line-number-current-line))
+    ;; 继承 fixed-pitch 即可；高度可按需统一到代码高度
+    (set-face-attribute face nil
+                        :inherit 'fixed-pitch
+                        :height my/h-code))
+
+  (my/apply-font-config)
+  ;; 确保中文绑定在 Org 里也不会被覆盖（有些主题/包会动 fontset）
+  (my/font--bind-chinese-to-fontset))
+
+(add-hook 'org-mode-hook #'my/org-font-setup)
+
+;; ======================================================================
+;; 4. 可选：一键刷新（调字体时用）
+;; ======================================================================
+
+(defun my/font-reset-all ()
+  "清 Emacs 字体缓存并重应用配置。"
+  (interactive)
+  (when (fboundp 'font-cache-reset) (font-cache-reset))
+  (my/apply-font-config)
+  (redraw-display))
+
+
 
 
 ;; Sane defaults
