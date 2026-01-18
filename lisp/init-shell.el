@@ -50,7 +50,6 @@
   (defalias 'eshell/vi 'find-file)
   (defalias 'eshell/vim 'find-file)
   (defalias 'eshell/nvim 'find-file)
-
   (defun eshell/bat (file)
     "cat FILE with syntax highlight."
     (with-temp-buffer

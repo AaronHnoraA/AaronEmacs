@@ -103,7 +103,6 @@
          ("<mouse-1>" . dirvish-subtree-toggle-or-open)
          ("<mouse-2>" . dired-mouse-find-file-other-window)
          ("<mouse-3>" . dired-mouse-find-file))
-
   :custom
   (dirvish-side-width 36)
   (dirvish-header-line-height '(26 . 36))
@@ -113,7 +112,7 @@
   :config
   ;; 1) 先给一个“基础属性集合”（绝对不会触发 dirvish-vc）
   (setq dirvish-attributes
-        '(all-the-icons file-size subtree-state collapse file-time))
+        '(nerd-icons file-size subtree-state collapse file-time))
 
   ;; 2) Peek / Side-follow：有就开（没有就跳过，不报错）
   (when (fboundp 'dirvish-side-follow-mode)
@@ -122,13 +121,17 @@
   ;; 3) VC/Git：尝试静默加载 dirvish-vc，成功才追加属性
   (when (require 'dirvish-vc nil t)
     (setq dirvish-attributes
-          '(all-the-icons vc-state git-msg file-size subtree-state collapse file-time)))
+          '(nerd-icons vc-state git-msg file-size subtree-state collapse file-time)))
 
   ;; 4) 如果你希望 P 键在没有 peek 函数时也不报错，做一个安全绑定
   (unless (fboundp 'dirvish-peek-mode)
     (define-key dirvish-mode-map (kbd "P") #'ignore)))
 
-
+;; Nerd Font 图标区（PUA）专用回退：只管图标，不污染符号/数学
+(when (member "JetBrainsMono Nerd Font" (font-family-list))
+  (set-fontset-font t '(#xe000 . #xf8ff) "JetBrainsMono Nerd Font" nil 'append)
+  ;; 有些 Nerd Fonts 还用到更高的 PUA 扩展区（可选但建议加）
+  (set-fontset-font t '(#xf0000 . #xffffd) "JetBrainsMono Nerd Font" nil 'append))
 
 ;; 搜索/过滤：配合 dirvish-fd、consult 更舒服
 (use-package vertico

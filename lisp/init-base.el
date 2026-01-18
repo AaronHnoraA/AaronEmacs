@@ -167,7 +167,8 @@
 (setq-default c-basic-offset 4)
 
 ;;; -*- lexical-binding: t; -*-
-
+(when (member "JetBrainsMono Nerd Font" (font-family-list))
+  (set-fontset-font t '(#xe000 . #xf8ff) "JetBrainsMono Nerd Font" nil 'append))
 ;; ======================================================================
 ;; 1. 变量定义 (用户自定义区域)
 ;; ======================================================================

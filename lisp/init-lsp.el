@@ -19,8 +19,7 @@
          ([remap completion-at-point] . company-complete)
          :map company-active-map
          ("C-s"     . company-filter-candidates)
-         ([tab]     . company-complete-common-or-cycle)
-         ([backtab] . company-select-previous-or-abort)
+         ([tab]     . company-complete-selection)
          )
   :after yasnippet
   :config
@@ -31,7 +30,7 @@
   
   :custom
   ;; 核心体验设置
-  (company-idle-delay 0)            ;; 立即触发补全
+  (company-idle-delay 0.05)            ;; 立即触发补全
   (company-minimum-prefix-length 1) ;; 至少3个字符触发
   (company-show-numbers t)          ;; 显示编号 (M-1, M-2 选择)
   (company-show-quick-access t)     ;; 允许 M-<n> 快速选择
@@ -209,7 +208,7 @@
   (imenu-list-position 'left)
 
   ;; 自动根据当前 buffer 更新
-  (imenu-list-auto-update t)
+  ;(imenu-list-auto-update t)
 
   ;; 高亮当前光标所在符号
   (imenu-list-highlight-current-entry t)
@@ -323,7 +322,6 @@ _Q_: Disconnect     _sl_: List locals        _bl_: Set log message
                                        :foldingRangeProvider
                                        :colorProvider
                                        :inlayHintProvider)))
-
 
 ;; -------------------------
 ;; 8. Misc & Language Init
