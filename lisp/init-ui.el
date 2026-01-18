@@ -76,38 +76,52 @@
 (use-package dashboard
   :ensure t
   :init
-  ;; Format: "(icon title help action face prefix suffix)"
-  (setq dashboard-navigator-buttons `(((,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-mark_github") "★")
-                                        "GitHub" "Browse" (lambda (&rest _) (browse-url homepage-url)))
-                                       (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-heart") "♥")
-                                        "Stars" "Show stars" (lambda (&rest _) (browse-url stars-url)))
-                                       (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-alert") "⚑")
-                                        "Issue" "Report issue" (lambda (&rest _) (browse-url issue-url)) warning)
-                                       (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-download") "♺")
-                                        "Upgrade" "Upgrade packages synchronously" (lambda (&rest _) (package-upgrade-all nil)) success))))
+  ;; 导航按钮配置 (保持不变)
+  (setq dashboard-navigator-buttons
+        `(((,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-mark_github") "★")
+            "GitHub" "Browse" (lambda (&rest _) (browse-url homepage-url)))
+           (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-heart") "♥")
+            "Stars" "Show stars" (lambda (&rest _) (browse-url stars-url)))
+           (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-alert") "⚑")
+            "Issue" "Report issue" (lambda (&rest _) (browse-url issue-url)) warning)
+           (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-download") "♺")
+            "Upgrade" "Upgrade packages synchronously" (lambda (&rest _) (package-upgrade-all nil)) success))))
+  
   (dashboard-setup-startup-hook)
+
   :config
   (defconst homepage-url "https://git.pwo101.top/")
   (defconst stars-url (concat homepage-url "/stargazers"))
   (defconst issue-url (concat homepage-url "/issues/new"))
+
   :custom
-  (dashboard-startup-banner 'logo)
+  ;; 【核心修改】
+  ;; 直接指向 emacs 根目录下的 dashboard.txt
+  ;; 如果你用 (cons "img" "txt")，GUI下会优先找图片，找不到才显示文字。
+  ;; 这里直接设为路径字符串，强制使用文本内容。
+  (dashboard-banner-logo-title "Aaron's Emacs")
+  (dashboard-startup-banner (expand-file-name "dashboard.txt" user-emacs-directory))
+
+  (dashboard-center-content t)
   (dashboard-set-heading-icons t)
   (dashboard-set-file-icons t)
-  (dashboard-items '((recents   . 10)
-                     (projects  . 7)))
-  (dashboard-startupify-list '(dashboard-insert-banner
+  (dashboard-items '((recents  . 10)
+                     (projects . 7)))
+  (dashboard-startupify-list '(
+                               dashboard-insert-newline
                                dashboard-insert-newline
                                dashboard-insert-banner-title
                                dashboard-insert-newline
+                               dashboard-insert-banner
                                dashboard-insert-navigator
                                dashboard-insert-newline
                                dashboard-insert-init-info
                                dashboard-insert-items
                                dashboard-insert-newline
                                dashboard-insert-footer)))
-
-
+(add-to-list 'dashboard-items '(agenda) t)
+(setq dashboard-week-agenda t)
+(setq dashboard-filter-agenda-entry 'dashboard-no-filter-agenda)
 
 ;;; Menu Bar:
 

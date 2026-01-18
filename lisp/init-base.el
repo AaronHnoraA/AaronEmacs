@@ -65,14 +65,55 @@
 (global-ligature-mode t)
 
 
-;;显示行号
-;; 相对行号（当前行显示绝对行号，其它行显示相对行号）
-(setq display-line-numbers-type 'relative)
+
+;; 使用绝对行号
+(setq display-line-numbers-type 'absolute)
+
+
+;; 可选：关闭次刻度（避免干扰）
+(setq display-line-numbers-minor-tick 0)
+
+;; ========= 行号显示策略 =========
+(setq display-line-numbers-minor-tick 0)
+
+(add-hook 'prog-mode-hook #'display-line-numbers-mode)
+
+;; ========= 行号字体 =========
+(set-face-attribute 'line-number nil
+                    :family "Fira Code"
+                    :height 0.85
+                    :foreground "#6b7280")
+
+(set-face-attribute 'line-number-current-line nil
+                    :family "Fira Code"
+                    :height 0.85
+                    :foreground "#ffffff")
+
+
+;; 1. 设置触发频率（例如每 5 行高亮一次）
+(setq display-line-numbers-major-tick 20)
+
+;; 2. 直接配置内置的 Face
+;; 注意：Emacs 30 已经内置了 line-number-major-tick 这个 Face
+(custom-set-faces
+ '(line-number-major-tick ((t :inherit line-number 
+                              :weight bold 
+                              :foreground "#ff9e64"))))
+
+;; 3. 启用行号（如果还没启用）
+(global-display-line-numbers-mode 1)
+
+;; 启用行号（全局或按需）
+(global-display-line-numbers-mode 1)
+
 ;; 只在编程模式开（你也可以换成 text-mode / 全局）
-(add-hook 'prog-mode-hook 'display-line-numbers-mode)
+(add-hook 'text-mode-hook 'display-line-numbers-mode)
 ;; 可选：在一些模式禁用（终端、shell 等）
 (dolist (hook '(term-mode-hook vterm-mode-hook eshell-mode-hook))
   (add-hook hook (lambda () (display-line-numbers-mode -1))))
+
+
+
 
 ;; 80 列竖线
 (setq-default fill-column 80)
