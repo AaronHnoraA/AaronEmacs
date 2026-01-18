@@ -32,7 +32,7 @@
   :custom
   ;; 核心体验设置
   (company-idle-delay 0)            ;; 立即触发补全
-  (company-minimum-prefix-length 3) ;; 至少3个字符触发
+  (company-minimum-prefix-length 1) ;; 至少3个字符触发
   (company-show-numbers t)          ;; 显示编号 (M-1, M-2 选择)
   (company-show-quick-access t)     ;; 允许 M-<n> 快速选择
   (company-require-match nil)       ;; 不强制匹配

@@ -315,6 +315,37 @@
 (setopt no-redraw-on-reenter t)
 
 
+
+;;; ============================================================
+;;; Indent Guide —— 稳定版配置（推荐）
+;;; ============================================================
+
+(use-package indent-guide
+  :ensure t
+  :hook (prog-mode . indent-guide-mode)
+  :custom
+  ;; 延迟一点点绘制，避免每个字符都重算（0.1~0.2 比较稳）
+  (indent-guide-delay 0.15)
+
+  ;; 不递归高亮 parent indent（递归会明显增加 redraw 负担）
+  (indent-guide-recursive nil)
+
+  ;; 字符宽度对齐（防止等宽/变宽字体下轻微抖动）
+  (indent-guide-char "|")
+
+  ;; 禁用在空行上画线（减少 overlay 数量）
+  (indent-guide-disable-on-empty-lines t)
+
+  ;; 不在注释/字符串里画（更干净，也更稳）
+  (indent-guide-ignore-comments t)
+  (indent-guide-ignore-strings t))
+
+(with-eval-after-load 'indent-guide
+  (custom-set-faces
+   ;; 普通缩进线：淡灰蓝，不抢正文
+   '(indent-guide-face
+     ((t (:foreground "#5E81AC"))))))
+
 (provide 'init-ui)
 
 ;;; init-ui.el ends here

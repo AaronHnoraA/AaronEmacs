@@ -102,7 +102,7 @@
 
 
 ;; standalone apps
-(require 'init-org)
+;(require 'init-org)
 (require 'init-text)
 (require 'init-mail)
 (require 'init-shell)
@@ -112,7 +112,6 @@
 (require 'init-direnv)
 (require 'init-smartparens)
 (require 'init-rainbow-delimiters)
-(require 'init-indent-guides)
 (require 'init-avy)
 (require 'init-multiple-cursors)
 (require 'init-auctex)

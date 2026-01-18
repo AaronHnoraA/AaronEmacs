@@ -75,6 +75,21 @@
    ;; 添加其他你需要映射的语言
    ))
 
+(jit-lock-mode 1)
+(font-lock-mode 1)
+
+(setq idle-update-delay 5.0)
+;; 或更保守
+(setq treesit-font-lock-level 3)     ;; 还卡就 2
+;; 关键：避免 refontify 时先把整段清空造成“白一下”
+;(setq jit-lock-antiblink t)
+;; 你可以同时保持即时刷新（不积攒）
+;(setq jit-lock-defer-time 0)
+;; 可选：关掉 stealth，减少后台偷偷重染造成的跳变
+;(setq jit-lock-stealth-time nil)
+;(setq jit-lock-chunk-size 2000)
+;(setq jit-lock-context-time 0.1)
+
 
 (provide 'init-treesit)
 

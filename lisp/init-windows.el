@@ -116,19 +116,18 @@
         '(all-the-icons file-size subtree-state collapse file-time))
 
   ;; 2) Peek / Side-follow：有就开（没有就跳过，不报错）
-  (when (fboundp 'dirvish-peek-mode)
-    (dirvish-peek-mode 1))
   (when (fboundp 'dirvish-side-follow-mode)
     (dirvish-side-follow-mode 1))
 
   ;; 3) VC/Git：尝试静默加载 dirvish-vc，成功才追加属性
   (when (require 'dirvish-vc nil t)
     (setq dirvish-attributes
-          '(nerd-icons vc-state git-msg file-size subtree-state collapse file-time)))
+          '(all-the-icons vc-state git-msg file-size subtree-state collapse file-time)))
 
   ;; 4) 如果你希望 P 键在没有 peek 函数时也不报错，做一个安全绑定
   (unless (fboundp 'dirvish-peek-mode)
     (define-key dirvish-mode-map (kbd "P") #'ignore)))
+
 
 
 ;; 搜索/过滤：配合 dirvish-fd、consult 更舒服

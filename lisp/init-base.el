@@ -107,7 +107,8 @@
 (global-display-line-numbers-mode 1)
 
 ;; 只在编程模式开（你也可以换成 text-mode / 全局）
-(add-hook 'text-mode-hook 'display-line-numbers-mode)
+(add-hook 'prog-mode-hook 'display-line-numbers-mode)
+(add-hook 'org-mode-hook 'display-line-numbers-mode)
 ;; 可选：在一些模式禁用（终端、shell 等）
 (dolist (hook '(term-mode-hook vterm-mode-hook eshell-mode-hook))
   (add-hook hook (lambda () (display-line-numbers-mode -1))))
@@ -962,7 +963,6 @@ Else, call `comment-or-uncomment-region' on the current line."
 
 (global-so-long-mode)
 
-(setopt idle-update-delay 15)
 
 
 ;;; Evaluation:
