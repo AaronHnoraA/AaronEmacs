@@ -84,6 +84,17 @@
   (add-to-list 'load-path (file-name-as-directory (expand-file-name "lang" dir))))
 (setq custom-file (locate-user-emacs-file "custom.el"))
 
+(defun my/reload-init ()
+  "Reload Emacs init file safely."
+  (interactive)
+  (let ((init-file user-init-file))
+    (when (and init-file (file-exists-p init-file))
+      (message "Reloading init file: %s" init-file)
+      (condition-case err
+          (load-file init-file)
+        (error
+         (message "Error reloading init file: %s"
+                  (error-message-string err)))))))
 
 (require 'init-base)
 (require 'init-utils)
