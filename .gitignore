@@ -27,6 +27,7 @@ eln-cache/
 var/
 etc/
 tree-sitter/
+undo-tree-history/
 
 ############################
 # Backup & autosave files

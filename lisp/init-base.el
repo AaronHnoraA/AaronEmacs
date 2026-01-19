@@ -813,9 +813,32 @@ Else, call `comment-or-uncomment-region' on the current line."
   :after hydra) 
 
 
+
+;;; ============================
+;;; undo-tree: 本地集中存放历史文件；远程(ssh/TRAMP)不落盘
+;;; ============================
 (use-package undo-tree
   :ensure t
-  :init (global-undo-tree-mode)
+  :init
+  ;; 1) 开启全局 undo-tree
+  (global-undo-tree-mode 1)
+
+  ;; 2) 本地历史文件统一放到一个目录（只在本机路径生效）
+  ;;    你可以改成你喜欢的位置：例如 ~/.emacs.d/undo-tree/
+  (defvar my/undo-tree-history-dir
+    (expand-file-name "undo-tree-history/" user-emacs-directory))
+
+  (unless (file-directory-p my/undo-tree-history-dir)
+    (make-directory my/undo-tree-history-dir t))
+
+  ;; 3) 让 undo-tree 把历史文件写入该目录（而不是到处散落）
+  ;;    undo-tree 用的是 `undo-tree-history-directory-alist`
+  (setq undo-tree-history-directory-alist
+        `(("." . ,my/undo-tree-history-dir)))
+
+  ;; 4) 让它在“本地文件”自动把历史写盘（崩溃也可恢复）
+  (setq undo-tree-auto-save-history t)
+
   :after hydra
   :bind ("C-x C-h u" . hydra-undo-tree/body)
   :hydra (hydra-undo-tree (:hint nil)
@@ -826,7 +849,9 @@ Else, call `comment-or-uncomment-region' on the current line."
   ("s"   undo-tree-save-history)
   ("l"   undo-tree-load-history)
   ("u"   undo-tree-visualize "visualize" :color blue)
-  ("q"   nil "quit" :color blue)))
+  ("q"   nil "quit" :color blue))
+  )
+
 
 (use-package outline-indent
   :ensure t

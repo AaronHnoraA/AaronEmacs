@@ -510,6 +510,19 @@
   )
 
 
+;;; init-c-indent.el --- C/C++ ts-mode indent 4 -*- lexical-binding: t; -*-
+
+(defun my/c-ts-indent-4 ()
+  "Use 4-space indentation in `c-ts-mode' and `c++-ts-mode'."
+  (setq-local c-ts-mode-indent-offset 4)
+  (setq-local tab-width 4)
+  (setq-local indent-tabs-mode nil)
+  ;; 确保回车是“换行并缩进”
+  (local-set-key (kbd "RET") #'newline-and-indent))
+
+(add-hook 'c-ts-mode-hook  #'my/c-ts-indent-4)
+(add-hook 'c++-ts-mode-hook #'my/c-ts-indent-4)
+
 
 (provide 'init-cpp)
 

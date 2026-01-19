@@ -74,9 +74,9 @@
 (use-package aggressive-indent
   :ensure t
   :hook (
-         (clojure-mode . aggressive-indent-mode)
+         (elisp-mode . aggressive-indent-mode)
          (python-mode  . aggressive-indent-mode)
-         (c++-mode     . aggressive-indent-mode)
+s        (c++-mode     . aggressive-indent-mode)
          (c-mode       . aggressive-indent-mode)
          ))
 
