@@ -366,6 +366,8 @@ _Q_: Disconnect     _sl_: List locals        _bl_: Set log message
 (require 'init-sh)
 (require 'init-lean)
 (require 'init-md)
+(require 'init-nix)
+(require 'init-sage)
 
 (provide 'init-lsp)
 ;;; init-lsp.el ends here

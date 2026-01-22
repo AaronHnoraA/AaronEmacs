@@ -129,6 +129,7 @@
 (require 'init-jupyter)
 (require 'init-browser)
 (require 'init-stock)
+(require 'init-fzfs)
 
 ;; MacOS specific
 (when (eq system-type 'darwin)

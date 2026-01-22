@@ -235,7 +235,5 @@
 
 
 
-
-
 (provide 'init-windows)
 ;;; init-base.el ends here
