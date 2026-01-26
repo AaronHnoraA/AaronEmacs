@@ -466,6 +466,12 @@
                             "#+title: ${title}\n#+date: %u\n#+filetags: :index:\n")
          :unnarrowed t)
 
+        ("I" "Idea (Fleeting notes)" plain
+         "%?"
+         :if-new (file+head "idea/${slug}.org"
+                            "#+title: ${title}\n#+date: %u\n#+filetags: :idea:\n")
+         :unnarrowed t)
+
         ;; --- 外部输入层 (Source) ---
         ;; 论文依旧单独存放，保持纯洁性
 
@@ -530,7 +536,6 @@
   (set-face-attribute 'org-block nil :background (if (eq (frame-parameter nil 'background-mode) 'dark)
                                                      "#232323" ;; 深色模式背景
                                                    "#f5f5f5")) ;; 浅色模式背景
-                                                   
   ;; 4. 自动折叠 Properties 抽屉，眼不见心不烦
   (setq org-cycle-hide-drawer-startup t))
 

@@ -16,36 +16,20 @@
                       )
 ) 
 
-(require 'flymake-vale)
 
+;; flymake-vale
 (use-package flymake-vale
-  :hook
-  (
-(text-mode markdown-mode org-mode latex-mode) . flymake-vale-load
-)
+  :ensure t
+  :after flymake
   :config
-  ;; vale 可执行文件路径（如果服务器和本地不一样）
-  (setq flymake-vale-executable "vale"))
+  (setq flymake-vale-executable "vale")
 
-;; 如果你是远程编辑（TRAMP），但 vale 只在本地
-(defun my/flymake-vale-disable-on-remote ()
-  (when (file-remote-p default-directory)
-    (flymake-mode -1)))
+  :hook
+  ((text-mode . my/flymake-vale-setup)
+   (org-mode . my/flymake-vale-setup)
+   (markdown-mode . my/flymake-vale-setup)
+   (latex-mode . my/flymake-vale-setup)))
 
-
-(add-hook 'text-mode-hook #'flymake-vale-load)
-(add-hook 'latex-mode-hook #'flymake-vale-load)
-(add-hook 'org-mode-hook #'flymake-vale-load)
-(add-hook 'markdown-mode-hook #'flymake-vale-load)
-(add-hook 'message-mode-hook #'flymake-vale-load)
-
-(add-hook 'find-file-hook 'flymake-vale-maybe-load)
-;; flymake-vale-modes defaults to: 
-;;  => (text-mode latex-mode org-mode markdown-mode message-mode)
-
-(add-to-list 'flymake-vale-modes 'adoc-mode)
-
-(add-hook 'find-file-hook #'my/flymake-vale-disable-on-remote)
 (setq flymake-fringe-indicator-position 'right-fringe)
 
 (provide 'init-vale)
