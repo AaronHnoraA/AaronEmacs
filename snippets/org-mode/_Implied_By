@@ -2,4 +2,4 @@
 # name: Implied By
 # key: =<
 # --
-\impliedby  `(when (looking-at "\n") (delete-char 1))`
+\impliedby `(when (looking-at "\n") (delete-char 1))`

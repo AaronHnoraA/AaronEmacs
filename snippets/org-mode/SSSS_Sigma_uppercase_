@@ -2,4 +2,4 @@
 # name: Sigma (uppercase)
 # key: SSSS
 # --
-\Sigma  `(when (looking-at "\n") (delete-char 1))`
+\Sigma `(when (looking-at "\n") (delete-char 1))`

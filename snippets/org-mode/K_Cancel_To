@@ -2,4 +2,4 @@
 # name: Cancel To
 # key: K
 # --
-\cancelto{ $1 }{ ${VISUAL} }  `(when (looking-at "\n") (delete-char 1))`
+\cancelto{ $1 }{ ${VISUAL} } `(when (looking-at "\n") (delete-char 1))`

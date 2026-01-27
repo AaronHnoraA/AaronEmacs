@@ -2,4 +2,4 @@
 # name: Trace
 # key: trace
 # --
-\mathrm{Tr}  `(when (looking-at "\n") (delete-char 1))`
+\mathrm{Tr} `(when (looking-at "\n") (delete-char 1))`

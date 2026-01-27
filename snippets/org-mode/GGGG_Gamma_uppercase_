@@ -2,4 +2,4 @@
 # name: Gamma (uppercase)
 # key: GGGG
 # --
-\Gamma  `(when (looking-at "\n") (delete-char 1))`
+\Gamma `(when (looking-at "\n") (delete-char 1))`

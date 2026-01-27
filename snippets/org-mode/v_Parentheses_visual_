@@ -2,4 +2,4 @@
 # name: Parentheses (visual)
 # key: v(
 # --
-(${VISUAL})  `(when (looking-at "\n") (delete-char 1))`
+(${VISUAL}) `(when (looking-at "\n") (delete-char 1))`

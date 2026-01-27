@@ -2,4 +2,4 @@
 # name: Tensor Product
 # key: ox
 # --
-\otimes  `(when (looking-at "\n") (delete-char 1))`
+\otimes `(when (looking-at "\n") (delete-char 1))`

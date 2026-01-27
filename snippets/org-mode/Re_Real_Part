@@ -2,4 +2,4 @@
 # name: Real Part
 # key: Re
 # --
-\mathrm{Re}  `(when (looking-at "\n") (delete-char 1))`
+\mathrm{Re} `(when (looking-at "\n") (delete-char 1))`

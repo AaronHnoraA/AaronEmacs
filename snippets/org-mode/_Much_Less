@@ -2,4 +2,4 @@
 # name: Much Less
 # key: <<
 # --
-\ll  `(when (looking-at "\n") (delete-char 1))`
+\ll `(when (looking-at "\n") (delete-char 1))`

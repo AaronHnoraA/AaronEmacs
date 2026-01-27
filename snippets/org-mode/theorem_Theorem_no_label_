@@ -6,4 +6,4 @@
 \begin{theorem}{$1}
 	$2
 \end{theorem}
-$0  `(when (looking-at "\n") (delete-char 1))`
+$0 `(when (looking-at "\n") (delete-char 1))`

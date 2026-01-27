@@ -2,4 +2,4 @@
 # name: Underline
 # key: und
 # --
-\underline{$1}$2  `(when (looking-at "\n") (delete-char 1))`
+\underline{$1}$2 `(when (looking-at "\n") (delete-char 1))`

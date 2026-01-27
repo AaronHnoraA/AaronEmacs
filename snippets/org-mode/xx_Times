@@ -2,4 +2,4 @@
 # name: Times
 # key: xx
 # --
-\times  `(when (looking-at "\n") (delete-char 1))`
+\times `(when (looking-at "\n") (delete-char 1))`

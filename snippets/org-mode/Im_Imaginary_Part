@@ -2,4 +2,4 @@
 # name: Imaginary Part
 # key: Im
 # --
-\mathrm{Im}  `(when (looking-at "\n") (delete-char 1))`
+\mathrm{Im} `(when (looking-at "\n") (delete-char 1))`

@@ -2,4 +2,4 @@
 # name: Varepsilon
 # key: :e
 # --
-\varepsilon  `(when (looking-at "\n") (delete-char 1))`
+\varepsilon `(when (looking-at "\n") (delete-char 1))`

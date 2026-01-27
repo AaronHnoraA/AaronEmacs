@@ -2,4 +2,4 @@
 # name: Time Derivative
 # key: ddt
 # --
-\frac{d}{dt}  `(when (looking-at "\n") (delete-char 1))`
+\frac{d}{dt} `(when (looking-at "\n") (delete-char 1))`

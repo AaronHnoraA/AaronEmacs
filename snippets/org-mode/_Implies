@@ -2,4 +2,4 @@
 # name: Implies
 # key: =>
 # --
-\implies  `(when (looking-at "\n") (delete-char 1))`
+\implies `(when (looking-at "\n") (delete-char 1))`

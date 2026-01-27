@@ -2,4 +2,4 @@
 # name: Set Minus
 # key: \\\
 # --
-\setminus  `(when (looking-at "\n") (delete-char 1))`
+\setminus `(when (looking-at "\n") (delete-char 1))`

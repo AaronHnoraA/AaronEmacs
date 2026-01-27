@@ -2,4 +2,4 @@
 # name: Maps To
 # key: !>
 # --
-\mapsto  `(when (looking-at "\n") (delete-char 1))`
+\mapsto `(when (looking-at "\n") (delete-char 1))`

@@ -2,4 +2,4 @@
 # name: Dot
 # key: **
 # --
-\cdot  `(when (looking-at "\n") (delete-char 1))`
+\cdot `(when (looking-at "\n") (delete-char 1))`

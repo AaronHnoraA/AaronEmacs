@@ -2,4 +2,4 @@
 # name: Upsilon (lowercase)
 # key: uuuu
 # --
-\upsilon  `(when (looking-at "\n") (delete-char 1))`
+\upsilon `(when (looking-at "\n") (delete-char 1))`

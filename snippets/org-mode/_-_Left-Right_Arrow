@@ -2,4 +2,4 @@
 # name: Left-Right Arrow
 # key: <->
 # --
-\leftrightarrow   `(when (looking-at "\n") (delete-char 1))`
+\leftrightarrow  `(when (looking-at "\n") (delete-char 1))`

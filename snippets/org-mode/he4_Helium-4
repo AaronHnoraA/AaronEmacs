@@ -2,4 +2,4 @@
 # name: Helium-4
 # key: he4
 # --
-{}^{4}_{2}He  `(when (looking-at "\n") (delete-char 1))`
+{}^{4}_{2}He `(when (looking-at "\n") (delete-char 1))`

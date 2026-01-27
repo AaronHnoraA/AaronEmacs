@@ -5,4 +5,4 @@
 # --
 \begin{tabular}{${1:c}}\label{tab:$2}
 $0
-\end{tabular}  `(when (looking-at "\n") (delete-char 1))`
+\end{tabular} `(when (looking-at "\n") (delete-char 1))`

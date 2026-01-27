@@ -2,4 +2,4 @@
 # name: Delta (uppercase)
 # key: DDDD
 # --
-\Delta  `(when (looking-at "\n") (delete-char 1))`
+\Delta `(when (looking-at "\n") (delete-char 1))`

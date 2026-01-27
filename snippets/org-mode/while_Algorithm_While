@@ -4,4 +4,4 @@
 # --
 \While{$1}
 	\State $0
-\EndWhile  `(when (looking-at "\n") (delete-char 1))`
+\EndWhile `(when (looking-at "\n") (delete-char 1))`

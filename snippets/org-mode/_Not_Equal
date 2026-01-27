@@ -2,4 +2,4 @@
 # name: Not Equal
 # key: !=
 # --
-\neq  `(when (looking-at "\n") (delete-char 1))`
+\neq `(when (looking-at "\n") (delete-char 1))`

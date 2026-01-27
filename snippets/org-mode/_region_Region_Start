@@ -3,4 +3,4 @@
 # key: #region
 # -- Folding Region Start
 # --
-%#Region $0  `(when (looking-at "\n") (delete-char 1))`
+%#Region $0 `(when (looking-at "\n") (delete-char 1))`

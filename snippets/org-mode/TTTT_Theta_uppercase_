@@ -2,4 +2,4 @@
 # name: Theta (uppercase)
 # key: TTTT
 # --
-\Theta  `(when (looking-at "\n") (delete-char 1))`
+\Theta `(when (looking-at "\n") (delete-char 1))`

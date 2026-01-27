@@ -2,4 +2,4 @@
 # name: Direct Sum
 # key: o+
 # --
-\oplus  `(when (looking-at "\n") (delete-char 1))`
+\oplus `(when (looking-at "\n") (delete-char 1))`

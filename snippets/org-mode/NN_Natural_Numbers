@@ -2,4 +2,4 @@
 # name: Natural Numbers
 # key: NN
 # --
-\mathbb{N}  `(when (looking-at "\n") (delete-char 1))`
+\mathbb{N} `(when (looking-at "\n") (delete-char 1))`

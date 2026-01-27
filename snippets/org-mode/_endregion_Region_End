@@ -3,4 +3,4 @@
 # key: #endregion
 # -- Folding Region End
 # --
-%#Endregion  `(when (looking-at "\n") (delete-char 1))`
+%#Endregion `(when (looking-at "\n") (delete-char 1))`

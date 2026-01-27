@@ -2,4 +2,4 @@
 # name: Real Numbers
 # key: RR
 # --
-\mathbb{R}  `(when (looking-at "\n") (delete-char 1))`
+\mathbb{R} `(when (looking-at "\n") (delete-char 1))`

@@ -2,4 +2,4 @@
 # name: Omega (uppercase)
 # key: OOOO
 # --
-\Omega  `(when (looking-at "\n") (delete-char 1))`
+\Omega `(when (looking-at "\n") (delete-char 1))`

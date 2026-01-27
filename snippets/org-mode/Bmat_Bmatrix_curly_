@@ -4,4 +4,4 @@
 # --
 \begin{Bmatrix}
 $1
-\end{Bmatrix}  `(when (looking-at "\n") (delete-char 1))`
+\end{Bmatrix} `(when (looking-at "\n") (delete-char 1))`

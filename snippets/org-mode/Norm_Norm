@@ -2,4 +2,4 @@
 # name: Norm
 # key: Norm
 # --
-\lVert $1 \rVert $2  `(when (looking-at "\n") (delete-char 1))`
+\lVert $1 \rVert $2 `(when (looking-at "\n") (delete-char 1))`

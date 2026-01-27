@@ -2,4 +2,4 @@
 # name: Less or Equal
 # key: <=
 # --
-\leq  `(when (looking-at "\n") (delete-char 1))`
+\leq `(when (looking-at "\n") (delete-char 1))`

@@ -2,4 +2,4 @@
 # name: Greater or Equal
 # key: >=
 # --
-\geq  `(when (looking-at "\n") (delete-char 1))`
+\geq `(when (looking-at "\n") (delete-char 1))`

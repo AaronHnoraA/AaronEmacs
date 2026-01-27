@@ -2,4 +2,4 @@
 # name: Much Greater
 # key: >>
 # --
-\gg  `(when (looking-at "\n") (delete-char 1))`
+\gg `(when (looking-at "\n") (delete-char 1))`

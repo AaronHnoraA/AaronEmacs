@@ -2,4 +2,4 @@
 # name: Vartheta
 # key: :t
 # --
-\vartheta  `(when (looking-at "\n") (delete-char 1))`
+\vartheta `(when (looking-at "\n") (delete-char 1))`

@@ -2,4 +2,4 @@
 # name: Zeta
 # key: zzzz
 # --
-\zeta  `(when (looking-at "\n") (delete-char 1))`
+\zeta `(when (looking-at "\n") (delete-char 1))`

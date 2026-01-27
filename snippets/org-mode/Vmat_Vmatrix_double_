@@ -4,4 +4,4 @@
 # --
 \begin{Vmatrix}
 $1
-\end{Vmatrix}  `(when (looking-at "\n") (delete-char 1))`
+\end{Vmatrix} `(when (looking-at "\n") (delete-char 1))`

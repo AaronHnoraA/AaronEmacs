@@ -2,4 +2,4 @@
 # name: Lagrangian
 # key: LL
 # --
-\mathcal{L}  `(when (looking-at "\n") (delete-char 1))`
+\mathcal{L} `(when (looking-at "\n") (delete-char 1))`

@@ -2,4 +2,4 @@
 # name: Equiv
 # key: ===
 # --
-\equiv  `(when (looking-at "\n") (delete-char 1))`
+\equiv `(when (looking-at "\n") (delete-char 1))`

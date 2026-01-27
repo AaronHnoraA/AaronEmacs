@@ -2,4 +2,4 @@
 # name: Underset
 # key: B
 # --
-\underset{ $1 }{ ${VISUAL} }  `(when (looking-at "\n") (delete-char 1))`
+\underset{ $1 }{ ${VISUAL} } `(when (looking-at "\n") (delete-char 1))`

@@ -2,4 +2,4 @@
 # name: Text Environment (short)
 # key: "
 # --
-\text{$1}$2  `(when (looking-at "\n") (delete-char 1))`
+\text{$1}$2 `(when (looking-at "\n") (delete-char 1))`
