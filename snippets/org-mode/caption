@@ -2,4 +2,4 @@
 # name: cp
 # key: cp
 # --
-#+CAPTION: caption
+#+CAPTION: caption `(when (looking-at "\n") (delete-char 1))`

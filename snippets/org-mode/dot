@@ -26,4 +26,4 @@
             {rank=same;  SlaughterServer1 , LocalDB1 }
         }
     }
-#+END_SRC
+#+END_SRC `(when (looking-at "\n") (delete-char 1))`

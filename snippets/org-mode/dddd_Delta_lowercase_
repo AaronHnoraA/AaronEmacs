@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Delta (lowercase)
+# key: dddd
+# --
+\delta `(when (looking-at "\n") (delete-char 1))`

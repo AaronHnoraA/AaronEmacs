@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Plus-Minus
+# key: +-
+# --
+\pm  `(when (looking-at "\n") (delete-char 1))`

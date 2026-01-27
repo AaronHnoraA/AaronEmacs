@@ -4,4 +4,4 @@
 # --
 #+begin_src verb -n :wrap src ob-verb-response
 
-#+end_src
+#+end_src  `(when (looking-at "\n") (delete-char 1))`

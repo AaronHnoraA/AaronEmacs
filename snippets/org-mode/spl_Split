@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Split
+# key: spl
+# -- Split
+# --
+\begin{split}
+	$0
+\end{split} `(when (looking-at "\n") (delete-char 1))`

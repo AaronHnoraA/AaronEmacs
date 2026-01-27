@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: Exercise
+# key: exercise
+# -- Add a exercise
+# --
+\begin{exercise}
+	$1
+\end{exercise}
+$0 `(when (looking-at "\n") (delete-char 1))`

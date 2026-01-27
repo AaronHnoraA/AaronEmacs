@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Text Subscript
+# key: sts
+# --
+_\text{$1}  `(when (looking-at "\n") (delete-char 1))`

@@ -5,4 +5,4 @@
 * 汇报日期： `(format-time-string "%Y-%m-%d")`
 本周工作：
 
-下周工作：
+下周工作： `(when (looking-at "\n") (delete-char 1))`

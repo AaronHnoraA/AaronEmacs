@@ -2,4 +2,4 @@
 # name: htmlbg
 # key: bg
 # --
-#+ATTR_HTML: :style background: #3498db
+#+ATTR_HTML: :style background: #3498db `(when (looking-at "\n") (delete-char 1))`

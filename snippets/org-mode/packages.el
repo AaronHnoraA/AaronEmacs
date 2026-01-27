@@ -22,4 +22,4 @@
 
 
 (provide 'packages)
-;;; packages.el ends here
+;;; packages.el ends here `(when (looking-at "\n") (delete-char 1))`

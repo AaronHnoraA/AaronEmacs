@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: Corollary (no label)
+# key: corollary
+# -- Add a corollary without label
+# --
+\begin{corollary}{$1}
+	$2
+\end{corollary}
+$0 `(when (looking-at "\n") (delete-char 1))`

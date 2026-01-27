@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Product
+# key: prod
+# --
+\prod `(when (looking-at "\n") (delete-char 1))`

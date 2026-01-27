@@ -2,4 +2,4 @@
 # name:
 # key: trigger-key
 # condition: t
-# --
+# -- `(when (looking-at "\n") (delete-char 1))`

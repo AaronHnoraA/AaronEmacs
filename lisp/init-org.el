@@ -607,6 +607,5 @@
 (use-package zotxt
  :ensure t)
 
-
 (provide 'init-org)
 ;;; init-org.el ends here

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Subscript
+# key: _
+# --
+_{$1}$2  `(when (looking-at "\n") (delete-char 1))`

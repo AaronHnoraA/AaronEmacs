@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Algorithm:State
+# key: state
+# --
+\State $1 `(when (looking-at "\n") (delete-char 1))`

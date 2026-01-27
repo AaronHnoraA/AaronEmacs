@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Array
+# key: array
+# --
+\begin{array}
+$1
+\end{array} `(when (looking-at "\n") (delete-char 1))`

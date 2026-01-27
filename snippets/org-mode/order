@@ -11,4 +11,4 @@ A -> B: reqest
 B -> B: handle
 B -> A: response
 
-#+END_SRC
+#+END_SRC `(when (looking-at "\n") (delete-char 1))`

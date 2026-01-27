@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Union
+# key: orr
+# --
+\cup `(when (looking-at "\n") (delete-char 1))`

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Lambda (uppercase)
+# key: LLLL
+# --
+\Lambda  `(when (looking-at "\n") (delete-char 1))`

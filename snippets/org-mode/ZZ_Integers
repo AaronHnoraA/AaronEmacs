@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Integers
+# key: ZZ
+# --
+\mathbb{Z}  `(when (looking-at "\n") (delete-char 1))`

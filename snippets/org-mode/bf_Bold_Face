@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Bold Face
+# key: bf
+# --
+\mathbf{$1} `(when (looking-at "\n") (delete-char 1))`

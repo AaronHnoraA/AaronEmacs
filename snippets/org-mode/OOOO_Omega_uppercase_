@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Omega (uppercase)
+# key: OOOO
+# --
+\Omega  `(when (looking-at "\n") (delete-char 1))`

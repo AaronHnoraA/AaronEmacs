@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Bmatrix (curly)
+# key: Bmat
+# --
+\begin{Bmatrix}
+$1
+\end{Bmatrix}  `(when (looking-at "\n") (delete-char 1))`

@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Enumerate
+# key: enumerate
+# -- Add a enumerate
+# --
+\\begin{enumerate}
+	\item $0
+\\end{enumerate} `(when (looking-at "\n") (delete-char 1))`

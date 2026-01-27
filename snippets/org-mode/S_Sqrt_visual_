@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Sqrt (visual)
+# key: S
+# --
+\sqrt{ ${VISUAL} }  `(when (looking-at "\n") (delete-char 1))`

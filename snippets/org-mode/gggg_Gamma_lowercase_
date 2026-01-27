@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Gamma (lowercase)
+# key: gggg
+# --
+\gamma `(when (looking-at "\n") (delete-char 1))`

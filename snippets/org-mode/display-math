@@ -1,0 +1,7 @@
+# -*- mode: snippet; require-final-newline: nil -*-
+# name: display math
+# key: ;;
+# --
+\[
+$1
+\] $0 `(when (looking-at "\n") (delete-char 1))`

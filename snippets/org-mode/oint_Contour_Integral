@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Contour Integral
+# key: oint
+# --
+\oint `(when (looking-at "\n") (delete-char 1))`

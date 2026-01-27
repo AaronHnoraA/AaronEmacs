@@ -39,4 +39,4 @@ A -> B { class : 2de }
 *.style.fill-pattern : \${style-fill-pattern}
 *.style.shadow       : \${style-shadow}
 
-#+end_src
+#+end_src `(when (looking-at "\n") (delete-char 1))`

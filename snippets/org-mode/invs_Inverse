@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Inverse
+# key: invs
+# --
+^{-1} `(when (looking-at "\n") (delete-char 1))`

@@ -4,4 +4,4 @@
 # --
 #+BEGIN_SRC sql
 select * from $0 limit 1
-#+END_SRC
+#+END_SRC `(when (looking-at "\n") (delete-char 1))`

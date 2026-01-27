@@ -7,4 +7,4 @@ ID
 --
 ,* Name
 }
-note left #5DADE2 : comment
+note left #5DADE2 : comment `(when (looking-at "\n") (delete-char 1))`

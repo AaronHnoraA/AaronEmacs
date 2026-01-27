@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: Lemma (no label)
+# key: lemma
+# -- Add a lemma without label
+# --
+\begin{lemma}{$1}
+	$2
+\end{lemma}
+$0 `(when (looking-at "\n") (delete-char 1))`

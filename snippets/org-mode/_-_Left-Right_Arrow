@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Left-Right Arrow
+# key: <->
+# --
+\leftrightarrow   `(when (looking-at "\n") (delete-char 1))`

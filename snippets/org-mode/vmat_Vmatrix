@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Vmatrix
+# key: vmat
+# --
+\begin{vmatrix}
+$1
+\end{vmatrix}  `(when (looking-at "\n") (delete-char 1))`

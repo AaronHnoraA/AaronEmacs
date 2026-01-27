@@ -21,20 +21,20 @@
           :stream t
           ;; 从 auth-source 取 Bearer token
           :key "sk-6CSNDcbV9Dm7OkMAf3TXhbZULA3riM2nO3dutj4sAXJ9Irxi"
-          :models '(gemini-3-pro-thinking)))
+          :models '(gemini-3-pro-preview)))
 
-    (setq gptel-model "gemini-3-pro-thinking")
+    (setq gptel-model "gemini-3-pro-preview")
     ;; preset：coding
       (gptel-make-preset 'gemini-coding
         :description "Coding preset"
         :backend "HiAPI"
-        :model "gemini-3-pro-thinking"
+        :model "gemini-3-pro-preview"
         :system "You are an expert coding assistant. Provide correct, minimal, and maintainable code. Explain key decisions briefly."
         :tools nil) 
     :custom
       (gptel-default-mode 'markdown-mode)
-      (gptel-model 'gemini-3-pro-thinking)
-      (gptel-rewrite 'gemini-3-pro-thinking)
+      (gptel-model 'gemini-3-pro-preview)
+      (gptel-rewrite 'gemini-3-pro-preview)
     )
 
 ;; (use-package aider

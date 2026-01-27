@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: InlineExp
+# key: inlineexp
+# -- Inline Expression
+# --
+\\($1\\)$0 `(when (looking-at "\n") (delete-char 1))`
