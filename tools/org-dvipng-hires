@@ -9,9 +9,10 @@ out="${2:?missing output .svg}"
 #   ORG_DVISVGM_OPTS="--bbox=min --clipjoin -n --optimize"
 #   ORG_DVISVGM_ZOOM="1.0"        (dvisvgm --zoom)
 #   ORG_DVISVGM_PAGE="1"          (dvisvgm --page)
-opts="${ORG_DVISVGM_OPTS:---bbox=min --clipjoin -n --optimize}"
+opts="${ORG_DVISVGM_OPTS:---bbox=min --clipjoin -n --optimize }"
 zoom="${ORG_DVISVGM_ZOOM:-2.5}"
 page="${ORG_DVISVGM_PAGE:-1}"
+nospecials="${ORG_DVISVGM_NO_SPECIALS:-bgcolor}"
 
 # 1) Make sure TeX's kpathsea is correctly wired for this process.
 #    This is the key to fixing:
@@ -41,4 +42,4 @@ mkdir -p "${TEXMFVAR}" || true
 #    --page / --zoom are explicit to avoid surprises.
 #
 #    Note: We do NOT use --pdf here; input is DVI, output is SVG.
-dvisvgm --page="${page}" --zoom="${zoom}" ${opts} -o "${out}" "${in}"
+dvisvgm --page="${page}" --zoom="${zoom}" ${opts} -o "${out}" "${in}" --no-specials="${nospecials}"

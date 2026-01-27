@@ -73,6 +73,7 @@
          ("\\.gitattributes\\'" . conf-unix-mode)))
 
 (use-package magit-delta
+  :ensure t
   :hook (magit-mode . magit-delta-mode))
 
 (provide 'init-git)

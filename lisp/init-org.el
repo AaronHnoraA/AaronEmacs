@@ -604,8 +604,135 @@
 (require 'org-tempo)
 (setq org-pretty-entities t)
 
-(use-package zotxt
- :ensure t)
+
+
+(with-eval-after-load 'org
+  (org-link-set-parameters "zotero"
+    :follow (lambda (path)
+              (let ((url (concat "zotero:" path))
+                    (command (if (eq system-type 'darwin) "open" "xdg-open")))
+                (start-process "zotero-opener" nil command url)))))
+
+
+
+;; ============================================================
+;;  Org Special Blocks 卡片化美化 (Fix: org-indent & End line)
+;; ============================================================
+
+(with-eval-after-load 'org
+  ;; 1. 定义颜色和标签映射
+  (defvar my/org-special-block-styles
+    '(;; --- 数学 (Math) ---
+      ("definition" . (:label "定义" :color "#e0af68"))
+      ("defn"       . (:label "定义" :color "#e0af68"))
+      ("theorem"    . (:label "定理" :color "#9ece6a"))
+      ("lemma"      . (:label "引理" :color "#7aa2f7"))
+      ("cor"        . (:label "推论" :color "#bb9af7"))
+      ("prop"       . (:label "命题" :color "#ff75a0"))
+      ("property"   . (:label "性质" :color "#bb9af7"))
+      ("proof"      . (:label "证明" :color "#565f89"))
+      ;; --- 杂项 (Misc) ---
+      ("example"    . (:label "例子" :color "#d08770"))
+      ("attention"  . (:label "注意" :color "#f7768e"))
+      ("note"       . (:label "注意" :color "#f7768e"))
+      ("warning"    . (:label "警告" :color "#f7768e")))
+    "Alist mapping block types to their display label and color.")
+
+  ;; 2. 标题面的基本属性
+  (defface my/org-block-title-face
+    '((t :weight bold :height 1.05 :inherit default)) 
+    "Face for the custom block title.")
+
+  ;; 3. 核心辅助函数：获取 Org Indent 的前缀并拼接边框
+  (defun my/org--make-merged-prefix (base-prefix color)
+    "获取 org-indent 的原有缩进 (base-prefix)，并在其后拼接一根 colored 竖线"
+    (let ((bar (propertize "▍ " 'face `(:foreground ,color :weight bold)))) ;; 竖条图案
+      (if base-prefix
+          ;; 如果有 org-indent 缩进，拼接在后面
+          (concat base-prefix bar)
+        ;; 如果没有缩进，直接返回竖条
+        bar)))
+
+  ;; 4. 核心渲染逻辑
+  (defun my/org--pretty-special-blocks (&rest _)
+    "Render special blocks as cards with background."
+    (when (derived-mode-p 'org-mode)
+      (save-excursion
+        (remove-overlays (point-min) (point-max) 'my/org-pretty-block t)
+        
+        (goto-char (point-min))
+        (let ((case-fold-search t))
+          (while (re-search-forward "^[ \t]*#\\+begin_\\([a-zA-Z0-9_-]+\\)\\(.*\\)$" nil t)
+            (let* ((type (downcase (match-string 1)))
+                   (rest (string-trim (match-string 2)))
+                   (config (cdr (assoc type my/org-special-block-styles))))
+              
+              (when config
+                (let* ((label (plist-get config :label))
+                       (color (plist-get config :color))
+                       ;; 统一背景色：标题和内容都使用淡化的背景
+                       (bg-color (color-darken-name color 85)) 
+                       (title-bg bg-color) ;; 【修改点】标题背景与卡片背景一致
+                       (beg-line (line-beginning-position))
+                       (beg-line-end (line-end-position))
+                       ;; 获取当前行的 org-indent 属性 (如果有)
+                       (base-indent (get-text-property beg-line 'line-prefix))
+                       end-line end-line-end content-beg content-end)
+
+                  (when (re-search-forward (format "^[ \t]*#\\+end_%s\\s-*$" (regexp-quote type)) nil t)
+                    (setq end-line (line-beginning-position))
+                    (setq end-line-end (line-end-position))
+                    (setq content-beg (save-excursion (goto-char beg-line-end) (min (point-max) (1+ (point)))))
+                    (setq content-end (max content-beg (1- end-line)))
+
+                    ;; --- A. 处理 Begin 行 (标题栏) ---
+                    (let* ((title-text (concat " " label (if (string-empty-p rest) "" (concat " : " rest))))
+                           (ov (make-overlay beg-line beg-line-end)))
+                      (overlay-put ov 'my/org-pretty-block t)
+                      (overlay-put ov 'face `(:background ,title-bg :foreground ,color :extend t))
+                      ;; 关键：保留原有的缩进，同时加上我们的标题
+                      (overlay-put ov 'display (concat 
+                                                (or base-indent "") 
+                                                (propertize " " 'display (propertize "┏ " 'face `(:foreground ,color))) ;; 左上角装饰
+                                                (propertize title-text 'face 'my/org-block-title-face)))
+                      (overlay-put ov 'evaporate t))
+
+                    ;; --- B. 处理 内容区域 (卡片主体) ---
+                    (let ((ov (make-overlay content-beg content-end)))
+                      (overlay-put ov 'my/org-pretty-block t)
+                      (overlay-put ov 'face `(:background ,bg-color :extend t))
+                      ;; 【关键修改】：获取内容第一行的缩进属性，拼接到我们的边框上
+                      (let ((content-indent (or (get-text-property content-beg 'line-prefix) base-indent)))
+                        (overlay-put ov 'line-prefix (my/org--make-merged-prefix content-indent color))
+                        (overlay-put ov 'wrap-prefix (my/org--make-merged-prefix content-indent color)))
+                      (overlay-put ov 'evaporate t))
+
+                    ;; --- C. 处理 End 行 (底部闭合线) ---
+                    (let ((ov (make-overlay end-line end-line-end)))
+                      (overlay-put ov 'my/org-pretty-block t)
+                      ;; 确保 End 行也有背景色，看起来是一体的
+                      (overlay-put ov 'face `(:background ,bg-color :foreground ,color :extend t))
+                      ;; 用一条细线或者底边框字符替换 #+end_...
+                      (overlay-put ov 'display (concat 
+                                                (or base-indent "") 
+                                                (propertize "┗━━━━━━━━━━━━━━━━━━━━━━━━━━" 'face `(:foreground ,color :height 0.7)))) 
+                      (overlay-put ov 'evaporate t)))))))))))
+
+  ;; 5. 钩子与激活
+  (defun my/org-refresh-pretty-blocks ()
+    (interactive)
+    (my/org--pretty-special-blocks))
+
+  (add-hook 'org-mode-hook #'my/org-refresh-pretty-blocks)
+  ;; 监听 org-indent 的变化，确保缩进改变时重绘
+  (add-hook 'org-indent-mode-hook #'my/org-refresh-pretty-blocks)
+  
+  (advice-add 'org-indent-refresh-maybe :after #'my/org--pretty-special-blocks)
+  (advice-add 'org-cycle :after #'my/org--pretty-special-blocks)
+  ;; 在保存后重绘，防止编辑导致错位
+  (add-hook 'before-save-hook (lambda () (remove-overlays (point-min) (point-max) 'my/org-pretty-block t)))
+  (add-hook 'after-save-hook (lambda () (when (derived-mode-p 'org-mode) (my/org-refresh-pretty-blocks)))))
+
 
 (provide 'init-org)
 ;;; init-org.el ends here
