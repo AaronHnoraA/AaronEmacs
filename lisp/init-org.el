@@ -541,6 +541,26 @@
                     (command (if (eq system-type 'darwin) "open" "xdg-open")))
                 (start-process "zotero-opener" nil command url)))))
 
+
+(with-eval-after-load 'org
+  (let ((marginnote-link-types
+         '("marginnote1app" "marginnote2app" "marginnote3app" "marginnote4app")))
+    (dolist (type marginnote-link-types)
+      (org-link-set-parameters
+       type
+       :follow
+       (lambda (path)
+         (if (eq system-type 'darwin)
+             (let ((url (concat "marginnote4app:" path)))
+               (start-process
+                "marginnote"
+                nil
+                "open"
+                url))
+           (message
+            "[org] MarginNote link only supported on macOS (got %s)"
+            system-type)))))))
+
 (require 'org-tempo) 
 
 (provide 'init-org)

@@ -67,6 +67,8 @@
   (define-key copilot-completion-map (kbd "M-}") #'copilot-accept-completion-to-char))
 
 
+(add-hook 'org-mode-hook #'copilot-mode)
+
 
 (provide 'init-gpt)
 
