@@ -2,4 +2,5 @@
 # name: Definite Integral
 # key: dint
 # --
-\int_{$1}^{$2} $3 \, d$4 $5 `(when (looking-at "\n") (delete-char 1))`
+\int_{$1}^{$2} $3 \, d$4 $5 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

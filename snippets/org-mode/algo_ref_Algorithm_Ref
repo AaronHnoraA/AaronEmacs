@@ -2,4 +2,5 @@
 # name: Algorithm:Ref
 # key: algo:ref
 # --
-${1:Algorithm}~\ref{algo:$2}$0 `(when (looking-at "\n") (delete-char 1))`
+${1:Algorithm}~\ref{algo:$2}$0 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

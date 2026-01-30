@@ -2,4 +2,5 @@
 # name: Dot Product
 # key: cdot
 # --
-\cdot `(when (looking-at "\n") (delete-char 1))`
+\cdot `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

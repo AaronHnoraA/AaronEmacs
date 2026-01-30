@@ -3,4 +3,5 @@
 # key: section:ref
 # -- Section Reference
 # --
-${1:Section}~\ref{sec:$2}$0 `(when (looking-at "\n") (delete-char 1))`
+${1:Section}~\ref{sec:$2}$0 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

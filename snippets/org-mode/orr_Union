@@ -2,4 +2,5 @@
 # name: Union
 # key: orr
 # --
-\cup `(when (looking-at "\n") (delete-char 1))`
+\cup `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

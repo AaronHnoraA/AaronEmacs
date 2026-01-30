@@ -11,4 +11,5 @@ Documentation/admin-guide/README.rst first.
 
 Please read the Documentation/process/changes.rst file, as it contains the
 requirements for building and running this program, and information about
-the problems which may result by upgrading your program. `(when (looking-at "\n") (delete-char 1))`
+the problems which may result by upgrading your program. `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

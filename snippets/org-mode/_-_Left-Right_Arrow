@@ -2,4 +2,5 @@
 # name: Left-Right Arrow
 # key: <->
 # --
-\leftrightarrow  `(when (looking-at "\n") (delete-char 1))`
+\leftrightarrow  `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

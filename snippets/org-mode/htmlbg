@@ -2,4 +2,5 @@
 # name: htmlbg
 # key: bg
 # --
-#+ATTR_HTML: :style background: #3498db `(when (looking-at "\n") (delete-char 1))`
+#+ATTR_HTML: :style background: #3498db `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

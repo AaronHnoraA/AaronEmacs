@@ -2,4 +2,5 @@
 # name: Set Minus
 # key: \\\
 # --
-\setminus `(when (looking-at "\n") (delete-char 1))`
+\setminus `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

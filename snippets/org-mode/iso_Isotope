@@ -2,4 +2,5 @@
 # name: Isotope
 # key: iso
 # --
-{}^{$1}_{$2}$3 `(when (looking-at "\n") (delete-char 1))`
+{}^{$1}_{$2}$3 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

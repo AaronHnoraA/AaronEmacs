@@ -4,4 +4,5 @@
 # --
 #+begin_quote
 注意：这是一个特殊的说明
-#+end_quote `(when (looking-at "\n") (delete-char 1))`
+#+end_quote `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

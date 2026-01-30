@@ -2,4 +2,5 @@
 # name: Not Element Of
 # key: notin
 # --
-\not\in `(when (looking-at "\n") (delete-char 1))`
+\not\in `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

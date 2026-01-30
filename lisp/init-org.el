@@ -257,17 +257,21 @@
   :config
   (setq org-fancy-priorities-list '("⚡" "⬆" "⬇" "☕")))
 
+;; ===========================================================
+;; 0. 依赖加载
+;; ===========================================================
 (require 'color)
 (require 'cl-lib)
 (require 'org-element)
 
 ;; ===========================================================
-;; 1. 样式配置
+;; 1. 样式配置 (可自定义颜色和标签)
 ;; ===========================================================
 (defvar my/org-special-block-styles
   '(("definition" . (:label "定义" :color "#e0af68"))
     ("defn"       . (:label "定义" :color "#e0af68"))
     ("theorem"    . (:label "定理" :color "#9ece6a"))
+    ("thm"        . (:label "定理" :color "#9ece6a"))
     ("lemma"      . (:label "引理" :color "#7aa2f7"))
     ("cor"        . (:label "推论" :color "#bb9af7"))
     ("prop"       . (:label "命题" :color "#ff75a0"))
@@ -275,18 +279,19 @@
     ("proof"      . (:label "证明" :color "#7aa2f7"))
     ("example"    . (:label "例子" :color "#d08770"))
     ("attention"  . (:label "注意" :color "#f7768e"))
-    ("note"       . (:label "笔记" :color "#f7768e"))
+    ("note"       . (:label "笔记" :color "#0db9d7"))
+    ("info"       . (:label "信息" :color "#0db9d7"))
     ("warning"    . (:label "警告" :color "#f7768e"))))
 
 (defface my/org-block-title-face
   '((t :weight bold :height 1.05 :inherit default))
-  "Custom block title face.")
+  "Block 标题的字体样式。")
 
 ;; ===========================================================
-;; 2. 颜色计算 (保持清爽逻辑)
+;; 2. 颜色计算辅助函数
 ;; ===========================================================
 (defun my/org-blend-colors (color1 color2 alpha)
-  "混合颜色: color1(前景) + color2(背景)"
+  "混合颜色: color1(前景) * alpha + color2(背景) * (1-alpha)。"
   (condition-case nil
       (let ((c1 (color-name-to-rgb color1))
             (c2 (color-name-to-rgb color2)))
@@ -296,132 +301,146 @@
     (error color1)))
 
 ;; ===========================================================
-;; 3. 核心渲染 (AST 版本)
+;; 3. 核心渲染逻辑：只处理单个 Element
 ;; ===========================================================
-(defun my/org--pretty-special-blocks (&rest _)
-  "使用 org-element AST 解析，支持嵌套，支持 org-indent。"
-  (when (derived-mode-p 'org-mode)
-    (let* ((inhibit-read-only t)
-           (default-bg (face-attribute 'default :background nil t))
-           ;; 兜底背景色
-           (default-bg (if (or (not default-bg) (string= default-bg "unspecified"))
-                           "#1a1b26" default-bg))
-           ;; 解析整棵树
-           (tree (org-element-parse-buffer)))
+(defun my/org-prettify-element (element)
+  "渲染单个 Org Element 节点，应用 Overlay 样式。"
+  (let* ((type (downcase (or (org-element-property :type element) "")))
+         (config (cdr (assoc type my/org-special-block-styles))))
+    
+    (when config
+      (let* ((begin-pos (org-element-property :begin element))
+             (end-pos (org-element-property :end element))
+             (contents-begin (org-element-property :contents-begin element))
+             (contents-end (org-element-property :contents-end element))
+             (post-affiliated (org-element-property :post-affiliated element))
+             
+             ;; 1. 计算深度 (用于处理嵌套 Block 的堆叠顺序)
+             (lineage (org-element-lineage element '(special-block)))
+             (depth (length lineage))
+             ;; 深度越深，priority 越高，确保内层盖在外层上
+             (priority (+ 50 (* 10 depth))) 
+             
+             ;; 2. 颜色准备
+             (base-color (plist-get config :color))
+             (label (plist-get config :label))
+             (params (org-element-property :parameters element))
+             (title-text (concat " " label (if params (concat " : " params) "")))
+             
+             (default-bg (face-attribute 'default :background nil t))
+             (default-bg (if (or (not default-bg) (string= default-bg "unspecified"))
+                             "#1a1b26" default-bg))
+             (header-bg (my/org-blend-colors base-color default-bg 0.15))
+             (body-bg (my/org-blend-colors base-color default-bg 0.05)))
+
+        ;; 3. 清理区域
+        ;; 这里的关键逻辑：渲染当前 Block 时，先清除这个区域内已有的 Overlay
+        ;; 如果这是个内层 Block，这一步会把外层 Block 在这里的背景色“挖掉”
+        ;; 从而实现完美的图层嵌套，而不是颜色混合
+        (remove-overlays begin-pos end-pos 'my/org-pretty-block t)
+
+        ;; -------------------------------------------------------
+        ;; A. Header Overlay (#+begin_xxx)
+        ;; -------------------------------------------------------
+        (let ((header-end (save-excursion 
+                            (goto-char post-affiliated) 
+                            (line-end-position))))
+          (let ((ov (make-overlay post-affiliated header-end)))
+            (overlay-put ov 'my/org-pretty-block t)
+            (overlay-put ov 'face `(:background ,header-bg :extend t))
+            (overlay-put ov 'priority priority)
+            (overlay-put ov 'display 
+                         (concat (propertize "▍" 'face `(:foreground ,base-color :weight bold))
+                                 (propertize title-text 'face `(:inherit my/org-block-title-face :foreground ,base-color))))
+            (overlay-put ov 'evaporate t)))
+
+        ;; -------------------------------------------------------
+        ;; B. Body Overlay (内容区域)
+        ;; -------------------------------------------------------
+        (when (and contents-begin contents-end (> contents-end contents-begin))
+          ;; 修正：内容末尾通常是换行符，Overlay 退一格以防覆盖 Footer
+          (let ((true-body-end (if (= (char-before contents-end) ?\n)
+                                   (1- contents-end)
+                                 contents-end)))
+            (let ((ov (make-overlay contents-begin true-body-end)))
+              (overlay-put ov 'my/org-pretty-block t)
+              (overlay-put ov 'face `(:background ,body-bg :extend t))
+              (overlay-put ov 'priority priority)
+              (overlay-put ov 'evaporate t))))
+
+        ;; -------------------------------------------------------
+        ;; C. Footer Overlay (#+end_xxx)
+        ;; -------------------------------------------------------
+        (save-excursion
+          (goto-char end-pos)
+          (skip-chars-backward " \t\n")
+          (beginning-of-line)
+          ;; 确保是对应的 end 标签
+          (when (looking-at (format "^[ \t]*#\\+end_%s" (regexp-quote type)))
+            (let ((ov (make-overlay (point) (line-end-position))))
+              (overlay-put ov 'my/org-pretty-block t)
+              (overlay-put ov 'face `(:background ,body-bg :extend t))
+              (overlay-put ov 'priority priority)
+              (overlay-put ov 'display 
+                           (propertize "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" 
+                                       'face `(:foreground ,base-color :height 0.7)))
+              (overlay-put ov 'evaporate t))))))))
+
+;; ===========================================================
+;; 4. JIT-Lock 引擎：连续扫描 (支持嵌套)
+;; ===========================================================
+(defun my/org-jit-prettify-blocks (start end)
+  "JIT-Lock 调用的函数：扫描 start 之后的块，确保完整渲染。"
+  (save-excursion
+    (save-match-data
+      ;; 1. [回溯修正]：防止 start 切在 Block 中间
+      ;; 如果 JIT 起点在 Block 内部，尝试回退到 begin 处，保证该 Block 被完整处理
+      (goto-char start)
+      (if (re-search-backward "^[ \t]*#\\+begin_" nil t)
+          (let ((el (org-element-at-point)))
+            (when (and (eq (org-element-type el) 'special-block)
+                       (> (org-element-property :end el) start))
+              (setq start (org-element-property :begin el))))
+        (goto-char start))
       
-      (save-excursion
-        ;; 清除旧 Overlay
-        (remove-overlays (point-min) (point-max) 'my/org-pretty-block t)
+      ;; 2. 循环扫描
+      (goto-char start)
+      ;; 搜索所有的 #+begin_，即使它在另一个 Block 内部
+      (while (re-search-forward "^[ \t]*#\\+begin_\\(\\w+\\)" end t)
         
-        ;; 遍历所有 special-block
-        (org-element-map tree 'special-block
-          (lambda (element)
-            (let* ((type (downcase (or (org-element-property :type element) "")))
-                   (config (cdr (assoc type my/org-special-block-styles))))
-              
-              (when config
-                (let* ((begin-pos (org-element-property :begin element))
-                       (end-pos (org-element-property :end element))
-                       (contents-begin (org-element-property :contents-begin element))
-                       (contents-end (org-element-property :contents-end element))
-                       (post-affiliated (org-element-property :post-affiliated element))
-                       
-                       ;; 计算深度 (用于嵌套叠加 Z轴)
-                       (depth (length (org-element-lineage element '(special-block))))
-                       (priority (+ 50 depth))
-                       
-                       ;; 颜色计算
-                       (base-color (plist-get config :color))
-                       (label (plist-get config :label))
-                       (params (org-element-property :parameters element))
-                       (title-text (concat " " label (if params (concat " : " params) "")))
-                       
-                       ;; 背景色逻辑：淡化处理，不混浊
-                       (header-bg (my/org-blend-colors base-color default-bg 0.15))
-                       (body-bg (my/org-blend-colors base-color default-bg 0.05)))
-                  
-                  ;; -------------------------------------------------------
-                  ;; A. Header Overlay (#+begin 行)
-                  ;; -------------------------------------------------------
-                  ;; 注意：org-indent-mode 下，视觉上的行首可能包含虚拟缩进
-                  ;; 我们使用 post-affiliated (即 #+begin 开始的位置)
-                  (let ((header-end (save-excursion 
-                                      (goto-char post-affiliated) 
-                                      (line-end-position))))
-                    (let ((ov (make-overlay post-affiliated header-end)))
-                      (overlay-put ov 'my/org-pretty-block t)
-                      (overlay-put ov 'face `(:background ,header-bg :extend t))
-                      (overlay-put ov 'priority priority)
-                      ;; 左侧高亮竖条 + 标题
-                      (overlay-put ov 'display 
-                                   (concat (propertize "▍" 'face `(:foreground ,base-color :weight bold))
-                                           (propertize title-text 'face `(:inherit my/org-block-title-face :foreground ,base-color))))
-                      (overlay-put ov 'evaporate t)))
-                  
-                  ;; -------------------------------------------------------
-                  ;; B. Body Overlay (内容区)
-                  ;; -------------------------------------------------------
-                  (when (and contents-begin contents-end (> contents-end contents-begin))
-                    ;; 修正：contents-end 通常包含最后一个换行，我们稍微回退一格以防止吞掉 Footer
-                    ;; 如果正文和 Footer 紧贴，org-element 可能会把换行算进 content
-                    (let ((true-body-end (if (= (char-before contents-end) ?\n)
-                                             (1- contents-end)
-                                           contents-end)))
-                      (let ((ov (make-overlay contents-begin true-body-end)))
-                        (overlay-put ov 'my/org-pretty-block t)
-                        (overlay-put ov 'face `(:background ,body-bg :extend t))
-                        (overlay-put ov 'priority priority)
-                        (overlay-put ov 'evaporate t))))
-                  
-                  ;; -------------------------------------------------------
-                  ;; C. Footer Overlay (#+end 行)
-                  ;; -------------------------------------------------------
-                  (save-excursion
-                    (goto-char end-pos)
-                    (skip-chars-backward " \t\n") ;; 跳过空行回到 #+end 这一行
-                    (beginning-of-line)
-                    ;; 再次确认是 #+end (防止解析位置偏差)
-                    (when (looking-at (format "^[ \t]*#\\+end_%s" (regexp-quote type)))
-                      (let ((ov (make-overlay (point) (line-end-position))))
-                        (overlay-put ov 'my/org-pretty-block t)
-                        (overlay-put ov 'face `(:background ,body-bg :extend t))
-                        (overlay-put ov 'priority priority)
-                        (overlay-put ov 'display 
-                                     (propertize "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" 
-                                                 'face `(:foreground ,base-color :height 0.7)))
-                        (overlay-put ov 'evaporate t))))
-                  )))))))))
+        (let ((el (org-element-at-point)))
+          (when (eq (org-element-type el) 'special-block)
+            ;; 渲染它
+            (my/org-prettify-element el)
+            
+            ;; ===========================================================
+            ;; [重要]：这里不再执行 (goto-char (org-element-property :end el))
+            ;; 我们让正则搜索自然向下进行。
+            ;; 这样如果 Block 内部还有嵌套的 #+begin_，下一次循环就能捉到它。
+            ;; ===========================================================
+            ))))))
 
 ;; ===========================================================
-;; 4. 自动刷新机制 (Idle Timer)
+;; 5. 激活机制
 ;; ===========================================================
-(defvar my/org-block-timer nil)
 
-(defun my/org-trigger-update ()
-  "Debounced update for special blocks."
-  (when (and (derived-mode-p 'org-mode)
-             (not (minibufferp)))
-    (when my/org-block-timer
-      (cancel-timer my/org-block-timer))
-    ;; 延迟 0.5 秒刷新，避免打字时疯狂计算卡顿
-    (setq my/org-block-timer
-          (run-with-idle-timer 0.5 nil #'my/org--pretty-special-blocks))))
+(defun my/org-enable-jit-pretty-blocks ()
+  "在当前 Buffer 启用 JIT 渲染机制。"
+  (when (derived-mode-p 'org-mode)
+    (jit-lock-register #'my/org-jit-prettify-blocks t)
+    (jit-lock-refontify)))
 
-(defun my/org-refresh-pretty-blocks () 
-  (interactive) 
-  (my/org--pretty-special-blocks))
+(defun my/org-reset-overlays ()
+  "调试用：强制清除所有 Overlay 并重绘。"
+  (interactive)
+  (remove-overlays (point-min) (point-max) 'my/org-pretty-block t)
+  (jit-lock-refontify))
 
-;; ===========================================================
-;; 5. Hooks
-;; ===========================================================
-(add-hook 'org-mode-hook #'my/org-refresh-pretty-blocks)
+;; 添加 Hook
+(add-hook 'org-mode-hook #'my/org-enable-jit-pretty-blocks)
 
-;; 自动刷新：每次按键后重置计时器，停手 0.5s 后刷新
-(add-hook 'post-command-hook #'my/org-trigger-update)
-
-;; 补充 Hooks：确保折叠、保存时也能立即刷新
-(add-hook 'org-cycle-hook #'my/org-refresh-pretty-blocks)
-(add-hook 'after-save-hook (lambda () (when (derived-mode-p 'org-mode) (my/org-refresh-pretty-blocks))))
+;; 如果你是重新加载配置，运行下面这行来立即生效当前 buffer
+;; (my/org-reset-overlays)
 
 ;;; ----------------------------------------------------------------------------
 ;;; 4. Agenda (日程管理)

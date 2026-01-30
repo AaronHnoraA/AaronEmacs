@@ -4,4 +4,5 @@
 # --
 #+begin_src verb -n :wrap src ob-verb-response
 
-#+end_src `(when (looking-at "\n") (delete-char 1))`
+#+end_src `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

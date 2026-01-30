@@ -2,4 +2,5 @@
 # name: Double Dot Accent
 # key: ddot
 # --
-\ddot{$1}$2 `(when (looking-at "\n") (delete-char 1))`
+\ddot{$1}$2 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

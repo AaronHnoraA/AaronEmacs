@@ -6,4 +6,5 @@
 \begin{cases}
 	${1:equation}, &\text{ if }${2:case}\\\\
 	$0
-\end{cases} `(when (looking-at "\n") (delete-char 1))`
+\end{cases} `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

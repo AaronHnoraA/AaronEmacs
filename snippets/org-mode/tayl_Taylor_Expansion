@@ -2,4 +2,5 @@
 # name: Taylor Expansion
 # key: tayl
 # --
-$1($2 + $3) = $1($2) + $1'($2)$3 + $1''($2) \frac{$3^{2}}{2!} + \dots$4 `(when (looking-at "\n") (delete-char 1))`
+$1($2 + $3) = $1($2) + $1'($2)$3 + $1''($2) \frac{$3^{2}}{2!} + \dots$4 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

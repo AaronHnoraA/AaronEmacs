@@ -2,4 +2,5 @@
 # name: Integers
 # key: ZZ
 # --
-\mathbb{Z} `(when (looking-at "\n") (delete-char 1))`
+\mathbb{Z} `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

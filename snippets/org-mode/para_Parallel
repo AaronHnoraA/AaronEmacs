@@ -2,4 +2,5 @@
 # name: Parallel
 # key: para
 # --
-\parallel `(when (looking-at "\n") (delete-char 1))`
+\parallel `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

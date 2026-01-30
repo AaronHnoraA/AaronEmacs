@@ -2,4 +2,5 @@
 # name: Physical Units
 # key: pu
 # --
-\pu{ $1 } `(when (looking-at "\n") (delete-char 1))`
+\pu{ $1 } `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

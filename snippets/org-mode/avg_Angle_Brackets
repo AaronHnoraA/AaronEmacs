@@ -2,4 +2,5 @@
 # name: Angle Brackets
 # key: avg
 # --
-\langle $1 \rangle $2 `(when (looking-at "\n") (delete-char 1))`
+\langle $1 \rangle $2 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

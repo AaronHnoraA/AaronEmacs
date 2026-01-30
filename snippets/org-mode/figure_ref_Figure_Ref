@@ -3,4 +3,5 @@
 # key: figure:ref
 # -- Ref for Figure
 # --
-${1:Figure}~\ref{fig:$2}$0 `(when (looking-at "\n") (delete-char 1))`
+${1:Figure}~\ref{fig:$2}$0 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

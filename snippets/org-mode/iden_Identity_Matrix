@@ -7,4 +7,5 @@
 0 & 1 & \dots & 0 \\
 \vdots & \vdots & \ddots & \vdots \\
 0 & 0 & \dots & 1
-\end{pmatrix} `(when (looking-at "\n") (delete-char 1))`
+\end{pmatrix} `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

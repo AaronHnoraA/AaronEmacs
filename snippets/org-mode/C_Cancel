@@ -2,4 +2,5 @@
 # name: Cancel
 # key: C
 # --
-\cancel{ ${VISUAL} } `(when (looking-at "\n") (delete-char 1))`
+\cancel{ ${VISUAL} } `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

@@ -2,4 +2,5 @@
 # name: Omega (uppercase)
 # key: OOOO
 # --
-\Omega `(when (looking-at "\n") (delete-char 1))`
+\Omega `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

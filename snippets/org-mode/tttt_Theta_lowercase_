@@ -2,4 +2,5 @@
 # name: Theta (lowercase)
 # key: tttt
 # --
-\theta `(when (looking-at "\n") (delete-char 1))`
+\theta `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

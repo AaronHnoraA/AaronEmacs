@@ -2,4 +2,5 @@
 # name: Integral 0 to Infinity
 # key: oinf
 # --
-\int_{0}^{\infty} $1 \, d$2 $3 `(when (looking-at "\n") (delete-char 1))`
+\int_{0}^{\infty} $1 \, d$2 $3 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

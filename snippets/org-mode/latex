@@ -5,4 +5,5 @@
 $$\begin{aligned}
 A &= B \times C \\
 Delay_{A} &= \frac{A（bit）}{B（bit/s）} \\
-\end{aligned} $$ `(when (looking-at "\n") (delete-char 1))`
+\end{aligned} $$ `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

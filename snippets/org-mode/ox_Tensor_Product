@@ -2,4 +2,5 @@
 # name: Tensor Product
 # key: ox
 # --
-\otimes `(when (looking-at "\n") (delete-char 1))`
+\otimes `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

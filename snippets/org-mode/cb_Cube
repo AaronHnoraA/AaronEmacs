@@ -2,4 +2,5 @@
 # name: Cube
 # key: cb
 # --
-^{3} `(when (looking-at "\n") (delete-char 1))`
+^{3} `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

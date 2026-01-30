@@ -26,4 +26,5 @@
             {rank=same;  SlaughterServer1 , LocalDB1 }
         }
     }
-#+END_SRC `(when (looking-at "\n") (delete-char 1))`
+#+END_SRC `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

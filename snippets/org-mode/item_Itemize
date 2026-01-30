@@ -5,4 +5,5 @@
 # --
 \\begin{itemize}
 	\item $0
-\\end{itemize} `(when (looking-at "\n") (delete-char 1))`
+\\end{itemize} `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

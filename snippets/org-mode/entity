@@ -27,4 +27,5 @@ entity t_product_info {
 note right #6495ED: 产品信息表
 
 t_credit_apply_log }o--|| t_product_info
-#+END_SRC `(when (looking-at "\n") (delete-char 1))`
+#+END_SRC `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

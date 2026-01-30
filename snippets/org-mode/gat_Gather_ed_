@@ -5,4 +5,5 @@
 # --
 \begin{gather}
 	$0
-\end{gather} `(when (looking-at "\n") (delete-char 1))`
+\end{gather} `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

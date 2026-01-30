@@ -2,4 +2,5 @@
 # name: Complex Numbers
 # key: CC
 # --
-\mathbb{C} `(when (looking-at "\n") (delete-char 1))`
+\mathbb{C} `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

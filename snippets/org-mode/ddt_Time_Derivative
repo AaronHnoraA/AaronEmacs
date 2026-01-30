@@ -2,4 +2,5 @@
 # name: Time Derivative
 # key: ddt
 # --
-\frac{d}{dt} `(when (looking-at "\n") (delete-char 1))`
+\frac{d}{dt} `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

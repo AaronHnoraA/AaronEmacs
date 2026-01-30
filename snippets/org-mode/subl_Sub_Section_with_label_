@@ -4,4 +4,5 @@
 # -- Sub Section with label
 # --
 \subsection{$1}\label{sub:$1}
-${0:$TM_SELECTED_TEXT} `(when (looking-at "\n") (delete-char 1))`
+${0:$TM_SELECTED_TEXT} `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

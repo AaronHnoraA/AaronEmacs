@@ -5,4 +5,5 @@
 # --
 \begin{part}
 	$0
-\end{part} `(when (looking-at "\n") (delete-char 1))`
+\end{part} `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

@@ -2,4 +2,5 @@
 # name: Beta
 # key: bbbb
 # --
-\beta `(when (looking-at "\n") (delete-char 1))`
+\beta `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

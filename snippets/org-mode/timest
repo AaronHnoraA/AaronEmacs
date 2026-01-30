@@ -2,4 +2,5 @@
 # name: timest
 # key: timest
 # --
-`(substring (number-to-string (* (time-to-seconds) 1000)) 0 13)` `(when (looking-at "\n") (delete-char 1))`
+`(substring (number-to-string (* (time-to-seconds) 1000)) 0 13)` `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

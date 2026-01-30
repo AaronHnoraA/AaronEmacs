@@ -5,4 +5,5 @@
 # --
 \begin{tabular}{${1:c}}\label{tab:$2}
 $0
-\end{tabular} `(when (looking-at "\n") (delete-char 1))`
+\end{tabular} `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

@@ -4,4 +4,5 @@
 # --
 \For{i=0:$1}
 	\State $0
-\EndFor `(when (looking-at "\n") (delete-char 1))`
+\EndFor `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

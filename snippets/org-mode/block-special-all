@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+# name: org special block (scripted; cached choice)
+# key: ;b
+# --
+`(let* ((blk (yas-choose-value
+              '("definition" "defn" "theorem" "lemma" "cor"
+                "prop" "property" "proof" "example"
+                "attention" "note" "warning"))))
+   (insert (concat "#+begin_" blk "\n\n#+end_" blk)))`
+

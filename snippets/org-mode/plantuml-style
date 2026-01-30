@@ -4,4 +4,5 @@
 # --
 #DARKORANGE/LIGHTORANGE/DARKBLUE/LIGHTBLUE/DARKRED/LIGHTRED/DARKGREEN/LIGHTGREEN
 !define DARKBLUE
-!includeurl ~/org/org-roam/emacs/C4-PlantUML/juststyle.puml `(when (looking-at "\n") (delete-char 1))`
+!includeurl ~/org/org-roam/emacs/C4-PlantUML/juststyle.puml `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

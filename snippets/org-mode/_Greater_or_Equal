@@ -2,4 +2,5 @@
 # name: Greater or Equal
 # key: >=
 # --
-\geq `(when (looking-at "\n") (delete-char 1))`
+\geq `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

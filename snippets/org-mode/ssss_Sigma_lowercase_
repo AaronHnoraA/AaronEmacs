@@ -2,4 +2,5 @@
 # name: Sigma (lowercase)
 # key: ssss
 # --
-\sigma `(when (looking-at "\n") (delete-char 1))`
+\sigma `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

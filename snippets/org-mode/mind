@@ -7,4 +7,5 @@
 ,* A
 ,**[#Orange] C
 ,**[#Orange] D
-#+END_SRC `(when (looking-at "\n") (delete-char 1))`
+#+END_SRC `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

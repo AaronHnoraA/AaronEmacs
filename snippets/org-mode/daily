@@ -5,4 +5,5 @@
 * 汇报日期： `(format-time-string "%Y-%m-%d")`
 本周工作：
 
-下周工作： `(when (looking-at "\n") (delete-char 1))`
+下周工作： `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

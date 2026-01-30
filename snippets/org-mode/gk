@@ -5,4 +5,5 @@
 
 * 发版
 |       时间 | 系统 | 版本 | 说明                   | 核心开发 |
-|            |      |      |                        |          | `(when (looking-at "\n") (delete-char 1))`
+|            |      |      |                        |          | `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

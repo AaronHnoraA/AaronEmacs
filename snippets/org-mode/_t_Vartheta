@@ -2,4 +2,5 @@
 # name: Vartheta
 # key: :t
 # --
-\vartheta `(when (looking-at "\n") (delete-char 1))`
+\vartheta `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

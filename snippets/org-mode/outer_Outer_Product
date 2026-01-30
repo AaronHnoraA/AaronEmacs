@@ -2,4 +2,5 @@
 # name: Outer Product
 # key: outer
 # --
-\ket{$1} \bra{$1} $2 `(when (looking-at "\n") (delete-char 1))`
+\ket{$1} \bra{$1} $2 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

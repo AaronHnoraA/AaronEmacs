@@ -2,4 +2,5 @@
 # name: Hamiltonian
 # key: HH
 # --
-\mathcal{H} `(when (looking-at "\n") (delete-char 1))`
+\mathcal{H} `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

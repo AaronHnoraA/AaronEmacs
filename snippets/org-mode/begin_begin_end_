@@ -5,4 +5,5 @@
 # --
 \\begin{${1:env}}
 $2
-\\end{${1:env}} `(when (looking-at "\n") (delete-char 1))`
+\\end{${1:env}} `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

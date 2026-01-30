@@ -3,4 +3,5 @@
 # key: openlink
 # -- Add a empty page
 # --
-http://10.31.2.53/openlink.html?link=$0 `(when (looking-at "\n") (delete-char 1))`
+http://10.31.2.53/openlink.html?link=$0 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

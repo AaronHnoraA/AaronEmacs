@@ -7,4 +7,5 @@ ID
 --
 ,* Name
 }
-note left #5DADE2 : comment `(when (looking-at "\n") (delete-char 1))`
+note left #5DADE2 : comment `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

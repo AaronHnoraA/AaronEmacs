@@ -6,4 +6,5 @@
 #+subtitle: this is subtitle
 #+author: `(getenv "USER")`
 #+date: `(format-time-string "<%Y-%m-%d %H:%M>")`
-#+SETUPFILE: ~/.doom.d/org-classic-head.setup `(when (looking-at "\n") (delete-char 1))`
+#+SETUPFILE: ~/.doom.d/org-classic-head.setup `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

@@ -5,4 +5,5 @@
 \If{$1}
 \ElsIf{$2}
 \Else
-\EndIf `(when (looking-at "\n") (delete-char 1))`
+\EndIf `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

@@ -2,4 +2,5 @@
 # name: Upsilon (lowercase)
 # key: uuuu
 # --
-\upsilon `(when (looking-at "\n") (delete-char 1))`
+\upsilon `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

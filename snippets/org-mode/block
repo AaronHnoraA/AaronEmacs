@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: org special block (definition/theorem/...)
+# key: ;bb
+# --
+#+begin_${1:block}
+$0
+#+end_${1} `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

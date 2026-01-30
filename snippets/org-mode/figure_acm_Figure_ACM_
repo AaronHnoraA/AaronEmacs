@@ -7,4 +7,5 @@
 	\includegraphics[width=0.45\textwidth]{figures/$1}
 	\caption{$2}\label{fig:$3}
 \end{figure*}
-$0 `(when (looking-at "\n") (delete-char 1))`
+$0 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

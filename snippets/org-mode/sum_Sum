@@ -2,4 +2,5 @@
 # name: Sum
 # key: sum
 # --
-\sum `(when (looking-at "\n") (delete-char 1))`
+\sum `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

@@ -2,4 +2,5 @@
 # name: Left-Right Braces
 # key: lr{
 # --
-\left\{ $1 \right\} $2 `(when (looking-at "\n") (delete-char 1))`
+\left\{ $1 \right\} $2 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

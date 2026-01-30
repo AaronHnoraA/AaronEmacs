@@ -2,4 +2,5 @@
 # name: Not Equal
 # key: !=
 # --
-\neq `(when (looking-at "\n") (delete-char 1))`
+\neq `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

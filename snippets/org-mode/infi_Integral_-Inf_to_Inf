@@ -2,4 +2,5 @@
 # name: Integral -Inf to Inf
 # key: infi
 # --
-\int_{-\infty}^{\infty} $1 \, d$2 $3 `(when (looking-at "\n") (delete-char 1))`
+\int_{-\infty}^{\infty} $1 \, d$2 $3 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
