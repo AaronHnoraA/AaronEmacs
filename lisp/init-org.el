@@ -620,6 +620,100 @@
   :ensure t
   :after org)
 
+
+;;;; 按需渲染：滚动停止后 idle 0.3s 预览可见区域（节流 + 去重）
+
+(defgroup my/org-latex-preview nil
+  "On-demand LaTeX preview helpers."
+  :group 'org)
+
+(defcustom my/org-latex-preview-idle-delay 0.3
+  "Idle delay (seconds) before previewing visible region after scrolling."
+  :type 'number
+  :group 'my/org-latex-preview)
+
+(defcustom my/org-latex-preview-min-chars 400
+  "Minimum visible region size (chars) required to trigger preview.
+Helps avoid tiny-window edge cases."
+  :type 'integer
+  :group 'my/org-latex-preview)
+
+(defvar-local my/org-latex--preview-timer nil)
+(defvar-local my/org-latex--last-preview-range nil)
+(defvar-local my/org-latex--preview-in-progress nil)
+
+(defun my/org-latex--visible-range ()
+  "Return (beg . end) for the current window's visible range."
+  (cons (window-start) (window-end nil t)))
+
+(defun my/org-latex--range-similar-p (r1 r2)
+  "Return non-nil if ranges R1 and R2 are similar enough to skip re-preview."
+  (when (and r1 r2)
+    (let ((b1 (car r1)) (e1 (cdr r1))
+          (b2 (car r2)) (e2 (cdr r2)))
+      ;; 允许小幅滚动不触发重复预览：阈值按 1/6 屏宽估算（很保守）
+      (let* ((span (max 1 (- e2 b2)))
+             (tol  (max 200 (/ span 6))))
+        (and (<= (abs (- b1 b2)) tol)
+             (<= (abs (- e1 e2)) tol))))))
+
+(defun my/org-latex-preview-visible-now ()
+  "Preview LaTeX fragments in visible area, with guardrails."
+  (interactive)
+  (when (and (derived-mode-p 'org-mode)
+             (not my/org-latex--preview-in-progress))
+    (let* ((range (my/org-latex--visible-range))
+           (beg (car range))
+           (end (cdr range)))
+      (when (and (> (- end beg) my/org-latex-preview-min-chars)
+                 (not (my/org-latex--range-similar-p my/org-latex--last-preview-range range)))
+        (setq my/org-latex--preview-in-progress t)
+        (setq my/org-latex--last-preview-range range)
+        (unwind-protect
+            (save-excursion
+              ;; 只预览可见区域：用 region 触发 org-latex-preview 的 region 行为
+              (goto-char beg)
+              (push-mark end nil t)
+              (activate-mark)
+              (condition-case _err
+                  (org-latex-preview)
+                (error nil))
+              (deactivate-mark))
+          (setq my/org-latex--preview-in-progress nil))))))
+
+(defun my/org-latex-preview-visible-debounced ()
+  "Debounced preview of visible area after scrolling stops."
+  (when (derived-mode-p 'org-mode)
+    (when (timerp my/org-latex--preview-timer)
+      (cancel-timer my/org-latex--preview-timer))
+    (setq my/org-latex--preview-timer
+          (run-with-idle-timer my/org-latex-preview-idle-delay nil
+                               #'my/org-latex-preview-visible-now))))
+
+;; 启用：对滚动、翻页等导致窗口内容变化的命令做“事后触发”
+(defun my/org-latex-enable-scroll-preview ()
+  "Enable on-demand LaTeX preview for visible area after scrolling."
+  (interactive)
+  (when (derived-mode-p 'org-mode)
+    ;; 这些 hook 在窗口滚动/重绘后跑，配合 idle timer 达到“滚动停了才渲染”
+    (add-hook 'window-scroll-functions (lambda (_win _start) (my/org-latex-preview-visible-debounced)) nil t)
+    (add-hook 'window-size-change-functions (lambda (_frame) (my/org-latex-preview-visible-debounced)) nil t)))
+
+(defun my/org-latex-disable-scroll-preview ()
+  "Disable on-demand LaTeX preview after scrolling."
+  (interactive)
+  (remove-hook 'window-scroll-functions (lambda (_win _start) (my/org-latex-preview-visible-debounced)) t)
+  (remove-hook 'window-size-change-functions (lambda (_frame) (my/org-latex-preview-visible-debounced)) t)
+  (when (timerp my/org-latex--preview-timer)
+    (cancel-timer my/org-latex--preview-timer))
+  (setq my/org-latex--preview-timer nil))
+
+(add-hook 'org-mode-hook #'my/org-latex-enable-scroll-preview)
+
+;; 备用快捷键：手动刷新当前可见区域
+(with-eval-after-load 'org
+  (define-key org-mode-map (kbd "C-c C-x v") #'my/org-latex-preview-visible-now))
+
 (with-eval-after-load 'org
   (let ((tool (expand-file-name "tools/org-dvipng-hires" user-emacs-directory)))
     (add-to-list 'org-preview-latex-process-alist
