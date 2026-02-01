@@ -5,13 +5,6 @@
 (unless package--initialized
   (package-initialize))
 
-(unless (package-installed-p 'exec-path-from-shell)
-  (package-refresh-contents)
-  (package-install 'exec-path-from-shell))
-
-
-(require 'exec-path-from-shell)
-(exec-path-from-shell-initialize)
 
 (unless (package-installed-p 'use-package)
   (package-refresh-contents)
@@ -108,7 +101,7 @@
 (require 'init-minibuffer)
 (require 'init-snippets)
 (require 'init-treesit)
-(require 'init-windows)
+;(require 'init-windows)
 (require 'init-project)
 
 
@@ -127,7 +120,7 @@
 (require 'init-avy)
 (require 'init-multiple-cursors)
 (require 'init-auctex)
-(require 'init-jupyter)
+;(require 'init-jupyter)
 (require 'init-browser)
 (require 'init-stock)
 (require 'init-fzfs)

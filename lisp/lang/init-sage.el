@@ -1,3 +1,4 @@
+;; -*- lexical-binding: t; -*-
 (unless (package-installed-p 'sage-shell)
   (package-vc-install
    '(sage-shell

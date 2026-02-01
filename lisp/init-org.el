@@ -1,10 +1,11 @@
 ;;; init-org.el --- Org mode configurations -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;; Refactored Org Configuration (Fixed Version).
-;; 1. Fixed 'void-variable title-bg' bug in special block rendering.
-;; 2. Full Org-Modern integration (Buttons, Icons, Progress bars).
-;; 3. Includes Org-Roam fixes and Olivetti auto-toggle.
+;; Refactored Org Configuration.
+;; 1. Fixed load order: org-modern loads after org.
+;; 2. Optimized directory creation and path handling.
+;; 3. Enhanced robustness of special block rendering (nested blocks support).
+;; 4. Performance tuning for on-demand LaTeX previews.
 
 ;;; Code:
 
@@ -28,10 +29,10 @@
 (defvar pv/org-bibtex-dir (expand-file-name "references/" my-org-root))
 (defvar pv/org-bibtex-files (list (expand-file-name "references.bib" pv/org-bibtex-dir)))
 
-;; Ensure core directories exist
-(make-directory my-org-root t)
-(make-directory my-org-roam-dir t)
-(make-directory my-org-daily-dir t)
+;; Ensure core directories exist (Optimized)
+(dolist (dir (list my-org-root my-org-roam-dir my-org-daily-dir pv/org-bibtex-dir))
+  (unless (file-directory-p dir)
+    (make-directory dir t)))
 
 ;;; ----------------------------------------------------------------------------
 ;;; 2. Org Core Configuration (核心设置)
@@ -69,16 +70,16 @@
 
   ;; --- Appearance Basics ---
   (org-startup-indented t)
-  (org-hide-emphasis-markers t)       
-  (org-pretty-entities t)             
-  (org-ellipsis " ▾")                 
-  (org-image-actual-width nil)        
+  (org-hide-emphasis-markers t)
+  (org-pretty-entities t)
+  (org-ellipsis " ▾")
+  (org-image-actual-width nil)
   (org-startup-with-inline-images t)
   (org-display-remote-inline-images t)
   (org-imenu-depth 4)
   
   ;; --- Navigation & Editing ---
-  (org-return-follows-link nil)       
+  (org-return-follows-link nil)
   (org-clone-delete-id t)
   (org-yank-adjusted-subtrees t)
   (org-ctrl-k-protect-subtree 'error)
@@ -135,11 +136,10 @@
      ("RFCs"   . "https://tools.ietf.org/html/")))
   
   ;; --- Citations ---
-  (org-cite-global-bibliography pv/org-bibtex-files)
-)
+  (org-cite-global-bibliography pv/org-bibtex-files))
 
 ;;; ----------------------------------------------------------------------------
-;;; 3. Modern UI & Aesthetics (UI美化 - 修复版)
+;;; 3. Modern UI & Aesthetics (UI美化)
 ;;; ----------------------------------------------------------------------------
 
 ;; 3.1 混合字体
@@ -158,7 +158,7 @@
   (defun xs-toggle-olivetti-for-org ()
     "If current buffer is org and only one visible buffer, enable olivetti mode."
     (if (and (eq (length (window-list nil nil nil)) 1)
-             (eq (buffer-local-value 'major-mode (current-buffer)) 'org-mode))
+             (derived-mode-p 'org-mode))
         (olivetti-mode 1)
       (olivetti-mode 0)))
   
@@ -173,6 +173,7 @@
 ;; 3.4 Org Modern (全面增强版)
 (use-package org-modern
   :ensure t
+  :after org  ; [IMPORTANT] 修复加载顺序，确保在 org 之后加载
   :hook ((org-mode . org-modern-mode)
          (org-agenda-finalize . org-modern-agenda-mode))
   :custom
@@ -195,24 +196,24 @@
   
   ;; 5. 关键词美化 (集成你的图标)
   (org-modern-keyword
-   '(("title"       . "➲")
-     ("subtitle"    . "⮊")
-     ("author"      . "💁")
-     ("email"       . "📧")
-     ("date"        . "📅")
-     ("language"    . "🖹")
-     ("options"     . "⛭")
-     ("startup"     . "✲")
-     ("macro"       . "Maps")
-     ("bind"        . "Key")
-     ("setupfile"   . "📝")
-     ("downloaded"  . "⇊")
-     ("attr_latex"  . "🄛")
-     ("attr_html"   . "🄗")
-     ("attr_org"    . "🄞")
-     ("name"        . "🄝")
-     ("caption"     . "🄒")
-     ("results"     . "☰")
+   '(("title"        . "➲")
+     ("subtitle"     . "⮊")
+     ("author"       . "💁")
+     ("email"        . "📧")
+     ("date"         . "📅")
+     ("language"     . "🖹")
+     ("options"      . "⛭")
+     ("startup"      . "✲")
+     ("macro"        . "Maps")
+     ("bind"         . "Key")
+     ("setupfile"    . "📝")
+     ("downloaded"   . "⇊")
+     ("attr_latex"   . "🄛")
+     ("attr_html"    . "🄗")
+     ("attr_org"     . "🄞")
+     ("name"         . "🄝")
+     ("caption"      . "🄒")
+     ("results"      . "☰")
      ("print_bibliography" . "📚")))
   
   ;; 6. 复选框美化
@@ -224,26 +225,23 @@
   ;; 7. 其他装饰
   (org-modern-horizontal-rule t)
   (org-modern-block-name nil)
-  (org-modern-todo nil)
+  (org-modern-todo nil) ; 禁用 todo 美化，以免覆盖你在 org-mode 中自定义的颜色
   (org-modern-priority t)
   
   :config
   (setq-default line-spacing 0.1))
 
 ;; 3.5 Org Modern Indent
-(unless (package-installed-p 'org-modern-indent)
-  (package-vc-install
-   '(org-modern-indent :url "https://github.com/jdtsmith/org-modern-indent.git")))
 (use-package org-modern-indent
+  :vc (:url "https://github.com/jdtsmith/org-modern-indent.git")
   :hook (org-mode . org-modern-indent-mode)
   :config
   (setq org-modern-indent-width 4))
 
 ;; 3.6 自动显示强调符
-(unless (package-installed-p 'org-appear)
-  (package-vc-install
-   '(org-appear :url "https://github.com/awth13/org-appear.git")))
 (use-package org-appear
+  :vc (:url "https://github.com/awth13/org-appear.git")
+  :after org
   :hook (org-mode . org-appear-mode)
   :custom
   (org-appear-autoemphasis t)
@@ -334,9 +332,6 @@
              (body-bg (my/org-blend-colors base-color default-bg 0.05)))
 
         ;; 3. 清理区域
-        ;; 这里的关键逻辑：渲染当前 Block 时，先清除这个区域内已有的 Overlay
-        ;; 如果这是个内层 Block，这一步会把外层 Block 在这里的背景色“挖掉”
-        ;; 从而实现完美的图层嵌套，而不是颜色混合
         (remove-overlays begin-pos end-pos 'my/org-pretty-block t)
 
         ;; -------------------------------------------------------
@@ -393,8 +388,6 @@
   "JIT-Lock 调用的函数：扫描 start 之后的块，确保完整渲染。"
   (save-excursion
     (save-match-data
-      ;; 1. [回溯修正]：防止 start 切在 Block 中间
-      ;; 如果 JIT 起点在 Block 内部，尝试回退到 begin 处，保证该 Block 被完整处理
       (goto-char start)
       (if (re-search-backward "^[ \t]*#\\+begin_" nil t)
           (let ((el (org-element-at-point)))
@@ -403,22 +396,11 @@
               (setq start (org-element-property :begin el))))
         (goto-char start))
       
-      ;; 2. 循环扫描
       (goto-char start)
-      ;; 搜索所有的 #+begin_，即使它在另一个 Block 内部
       (while (re-search-forward "^[ \t]*#\\+begin_\\(\\w+\\)" end t)
-        
         (let ((el (org-element-at-point)))
           (when (eq (org-element-type el) 'special-block)
-            ;; 渲染它
-            (my/org-prettify-element el)
-            
-            ;; ===========================================================
-            ;; [重要]：这里不再执行 (goto-char (org-element-property :end el))
-            ;; 我们让正则搜索自然向下进行。
-            ;; 这样如果 Block 内部还有嵌套的 #+begin_，下一次循环就能捉到它。
-            ;; ===========================================================
-            ))))))
+            (my/org-prettify-element el)))))))
 
 ;; ===========================================================
 ;; 5. 激活机制
@@ -436,11 +418,7 @@
   (remove-overlays (point-min) (point-max) 'my/org-pretty-block t)
   (jit-lock-refontify))
 
-;; 添加 Hook
 (add-hook 'org-mode-hook #'my/org-enable-jit-pretty-blocks)
-
-;; 如果你是重新加载配置，运行下面这行来立即生效当前 buffer
-;; (my/org-reset-overlays)
 
 ;;; ----------------------------------------------------------------------------
 ;;; 4. Agenda (日程管理)
@@ -620,21 +598,19 @@
   :ensure t
   :after org)
 
-
 ;;;; 按需渲染：滚动停止后 idle 0.3s 预览可见区域（节流 + 去重）
 
 (defgroup my/org-latex-preview nil
   "On-demand LaTeX preview helpers."
   :group 'org)
 
-(defcustom my/org-latex-preview-idle-delay 0.3
+(defcustom my/org-latex-preview-idle-delay 0.4
   "Idle delay (seconds) before previewing visible region after scrolling."
   :type 'number
   :group 'my/org-latex-preview)
 
 (defcustom my/org-latex-preview-min-chars 400
-  "Minimum visible region size (chars) required to trigger preview.
-Helps avoid tiny-window edge cases."
+  "Minimum visible region size (chars) required to trigger preview."
   :type 'integer
   :group 'my/org-latex-preview)
 
@@ -651,7 +627,6 @@ Helps avoid tiny-window edge cases."
   (when (and r1 r2)
     (let ((b1 (car r1)) (e1 (cdr r1))
           (b2 (car r2)) (e2 (cdr r2)))
-      ;; 允许小幅滚动不触发重复预览：阈值按 1/6 屏宽估算（很保守）
       (let* ((span (max 1 (- e2 b2)))
              (tol  (max 200 (/ span 6))))
         (and (<= (abs (- b1 b2)) tol)
@@ -671,7 +646,6 @@ Helps avoid tiny-window edge cases."
         (setq my/org-latex--last-preview-range range)
         (unwind-protect
             (save-excursion
-              ;; 只预览可见区域：用 region 触发 org-latex-preview 的 region 行为
               (goto-char beg)
               (push-mark end nil t)
               (activate-mark)
@@ -690,30 +664,20 @@ Helps avoid tiny-window edge cases."
           (run-with-idle-timer my/org-latex-preview-idle-delay nil
                                #'my/org-latex-preview-visible-now))))
 
-;; 启用：对滚动、翻页等导致窗口内容变化的命令做“事后触发”
 (defun my/org-latex-enable-scroll-preview ()
   "Enable on-demand LaTeX preview for visible area after scrolling."
   (interactive)
   (when (derived-mode-p 'org-mode)
-    ;; 这些 hook 在窗口滚动/重绘后跑，配合 idle timer 达到“滚动停了才渲染”
     (add-hook 'window-scroll-functions (lambda (_win _start) (my/org-latex-preview-visible-debounced)) nil t)
     (add-hook 'window-size-change-functions (lambda (_frame) (my/org-latex-preview-visible-debounced)) nil t)))
 
-(defun my/org-latex-disable-scroll-preview ()
-  "Disable on-demand LaTeX preview after scrolling."
-  (interactive)
-  (remove-hook 'window-scroll-functions (lambda (_win _start) (my/org-latex-preview-visible-debounced)) t)
-  (remove-hook 'window-size-change-functions (lambda (_frame) (my/org-latex-preview-visible-debounced)) t)
-  (when (timerp my/org-latex--preview-timer)
-    (cancel-timer my/org-latex--preview-timer))
-  (setq my/org-latex--preview-timer nil))
-
 (add-hook 'org-mode-hook #'my/org-latex-enable-scroll-preview)
 
-;; 备用快捷键：手动刷新当前可见区域
+;; 手动刷新绑定
 (with-eval-after-load 'org
   (define-key org-mode-map (kbd "C-c C-x v") #'my/org-latex-preview-visible-now))
 
+;; High Res LaTeX Preview (Dvipng)
 (with-eval-after-load 'org
   (let ((tool (expand-file-name "tools/org-dvipng-hires" user-emacs-directory)))
     (add-to-list 'org-preview-latex-process-alist
@@ -728,15 +692,14 @@ Helps avoid tiny-window edge cases."
   (setq org-preview-latex-default-process 'dvipng-hires-script)
   (setq org-format-latex-options (plist-put org-format-latex-options :scale 1.0)))
 
+;; External App Links (Zotero, MarginNote)
 (with-eval-after-load 'org
   (org-link-set-parameters "zotero"
     :follow (lambda (path)
               (let ((url (concat "zotero:" path))
                     (command (if (eq system-type 'darwin) "open" "xdg-open")))
-                (start-process "zotero-opener" nil command url)))))
+                (start-process "zotero-opener" nil command url))))
 
-
-(with-eval-after-load 'org
   (let ((marginnote-link-types
          '("marginnote1app" "marginnote2app" "marginnote3app" "marginnote4app")))
     (dolist (type marginnote-link-types)
@@ -746,14 +709,8 @@ Helps avoid tiny-window edge cases."
        (lambda (path)
          (if (eq system-type 'darwin)
              (let ((url (concat "marginnote4app:" path)))
-               (start-process
-                "marginnote"
-                nil
-                "open"
-                url))
-           (message
-            "[org] MarginNote link only supported on macOS (got %s)"
-            system-type)))))))
+               (start-process "marginnote" nil "open" url))
+           (message "[org] MarginNote link only supported on macOS (got %s)" system-type)))))))
 
 (require 'org-tempo) 
 

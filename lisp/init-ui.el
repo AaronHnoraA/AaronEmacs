@@ -12,8 +12,7 @@
   :config
   (load-theme 'kanagawa-wave t))
 
-(use-package doom-themes
-             :ensure t)
+;(use-package doom-themes)
 
 (use-package doom-modeline
   :ensure t

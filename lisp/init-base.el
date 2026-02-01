@@ -53,14 +53,14 @@
 (setq display-raw-bytes-as-hex t
       redisplay-skip-fontification-on-input t)
 
-(unless (package-installed-p 'ligature) 
-  (package-vc-install '
-                      (ligture
-                      :url "https://github.com/mickeynp/ligature.el.git" 
-                      :rev 
-                      :last-release)
-                      )
-)
+;(unless (package-installed-p 'ligature) 
+;  (package-vc-install '
+;                      (ligture
+;                      :url "https://github.com/mickeynp/ligature.el.git" 
+;                      :rev 
+;                      :last-release)
+;                      )
+;)
 
 (require 'ligature)
 

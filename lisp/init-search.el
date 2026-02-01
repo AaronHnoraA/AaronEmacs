@@ -29,8 +29,7 @@
         enable-recursive-minibuffers nil
         ivy-re-builders-alist '((t . ivy--regex-ignore-order)))
 
-  ;; 如果你用 posframe，就开；否则可以关掉
-  (ivy-posframe-mode 1))
+  )
 
 (with-eval-after-load 'ivy
   (define-key ivy-minibuffer-map (kbd "TAB") #'ivy-alt-done)
