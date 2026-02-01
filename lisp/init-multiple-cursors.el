@@ -5,6 +5,15 @@
 
 ;;; Code:
 
+(unless (package-installed-p 'multiple-cursors) 
+  (package-vc-install '
+                      (multiple-cursors
+                      :url "https://github.com/magnars/multiple-cursors.el.git" 
+                      :rev 
+                      :last-release)
+                      )
+)
+
 
 (require 'multiple-cursors)
 (global-set-key (kbd "C-S-c C-S-c") 'mc/edit-lines)
