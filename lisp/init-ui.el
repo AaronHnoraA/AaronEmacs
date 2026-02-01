@@ -6,12 +6,14 @@
 ;;; Code:
 
 ;; Use Iosvkem in terminals
-
 (mapc #'disable-theme custom-enabled-themes)
-(load-theme 'kanagawa-wave t)
+(use-package kanagawa-themes
+  :ensure t
+  :config
+  (load-theme 'kanagawa-wave t))
 
-
-(use-package doom-themes)
+(use-package doom-themes
+             :ensure t)
 
 (use-package doom-modeline
   :ensure t

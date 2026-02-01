@@ -53,6 +53,14 @@
 (setq display-raw-bytes-as-hex t
       redisplay-skip-fontification-on-input t)
 
+(unless (package-installed-p 'ligature) 
+  (package-vc-install '
+                      (ligture
+                      :url "https://github.com/mickeynp/ligature.el.git" 
+                      :rev 
+                      :last-release)
+                      )
+)
 
 (require 'ligature)
 
@@ -787,9 +795,26 @@ Else, call `comment-or-uncomment-region' on the current line."
 
 ;; 保存 minibuffer 历史
 ;; 保存最近打开的文件记录
+(unless (package-installed-p 'buttercup) 
+  (package-vc-install '
+                      (buttercup
+                      :url "https://github.com/jorgenschaefer/emacs-buttercup.git" 
+                      :rev 
+                      :last-release)
+                      )
+)
 (require 'buttercup)
 (recentf-mode 1)
 (setq recentf-max-saved-items 200) ; 设置记录的文件数量
+
+(unless (package-installed-p 'multiple-cursors) 
+  (package-vc-install '
+                      (multiple-cursors
+                      :url "https://github.com/jwiegley/emacs-async.git" 
+                      :rev 
+                      :last-release)
+                      )
+)
 
 (autoload 'dired-async-mode "dired-async.el" nil t)
 (dired-async-mode 1)
