@@ -192,7 +192,7 @@ s        (c++-mode     . aggressive-indent-mode)
   :custom
   ;; Doc
   (lsp-ui-doc-enable t)
-  (lsp-ui-doc-position 'at-point)
+  (lsp-ui-doc-position 'bottom)
   (lsp-ui-doc-show-with-cursor t)
   (lsp-ui-doc-delay 0.3)
   

@@ -201,7 +201,7 @@ If popup is focused, kill it."
           ;; 可选：退出时自动关窗口
           (add-hook 'kill-buffer-hook
                     (lambda ()
-                      (when-let ((w (get-buffer-window (current-buffer))))
+                      (when-let* ((w (get-buffer-window (current-buffer))))
                         (ignore-errors (delete-window w))))
                     nil t))))))
 (setq vterm-shell "zsh")

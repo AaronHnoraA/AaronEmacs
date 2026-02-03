@@ -11,8 +11,22 @@
   (package-install 'use-package))
 (require 'use-package)
 
+
+
+(use-package exec-path-from-shell
+  :ensure t
+  :init
+  (setq exec-path-from-shell-check-startup-files nil)
+  :config
+  (exec-path-from-shell-initialize))
+(use-package direnv
+  :ensure t
+  :after exec-path-from-shell
+  :config
+  (direnv-mode))
+
 ;; 关键：以后 use-package 默认都会自动安装缺失包
-(setq use-package-always-ensure t)
+;(setq use-package-always-ensure t)
 
 ;;; init.el --- The main entry for emacs -*- lexical-binding: t -*-
 ;;; Commentary:
@@ -101,13 +115,14 @@
 (require 'init-minibuffer)
 (require 'init-snippets)
 (require 'init-treesit)
-;(require 'init-windows)
+(require 'init-windows)
 (require 'init-project)
 
 
 ;; standalone apps
 (require 'init-org)
 (require 'init-org-zotero)
+(require 'init-eaf)
 (require 'init-text)
 (require 'init-mail)
 (require 'init-shell)
@@ -120,7 +135,7 @@
 (require 'init-avy)
 (require 'init-multiple-cursors)
 (require 'init-auctex)
-;(require 'init-jupyter)
+(require 'init-jupyter)
 (require 'init-browser)
 (require 'init-stock)
 (require 'init-fzfs)
