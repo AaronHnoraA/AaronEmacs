@@ -40,5 +40,7 @@
 (setq eaf-browser-chrome-browser-name "Brave")
 (setq eaf-browser-auto-import-chrome-cookies t)
 
+
+
 (provide 'init-eaf)
 

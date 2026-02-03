@@ -875,6 +875,11 @@ Else, call `comment-or-uncomment-region' on the current line."
   ("l"   undo-tree-load-history)
   ("u"   undo-tree-visualize "visualize" :color blue)
   ("q"   nil "quit" :color blue))
+  :config
+  (setq undo-tree-auto-save-history t)
+  
+  ;; 关键:在打开文件后立即加载历史
+  (add-hook 'find-file-hook #'undo-tree-load-history-hook)
   )
 
 

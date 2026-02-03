@@ -7,6 +7,37 @@
 ;;;
     
 
+;; 共享 Brave 的所有数据（需要关闭 Brave）
+(setq xwidget-webkit-cookie-file 
+      (expand-file-name "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"))
+(setq xwidget-webkit-cache-directory 
+      (expand-file-name "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cache/"))
+(setq xwidget-webkit-local-storage-directory 
+      (expand-file-name "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Local Storage/"))
+
+;; === 其他有用的设置 ===
+;; 启用 JavaScript
+(setq xwidget-webkit-enable-javascript t)
+
+;; 启用插件（如 Flash，虽然现在基本不用了）
+(setq xwidget-webkit-enable-plugins t)
+
+;; 启用媒体播放
+(setq xwidget-webkit-enable-media t)
+
+;; 设置用户代理（伪装成常规浏览器）
+(setq xwidget-webkit-user-agent 
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+;; 启用开发者工具
+(setq xwidget-webkit-enable-developer-extras t)
+
+
+;; 设置 xwidget-webkit 使用 Brave 浏览器的 cookie
+(setq xwidget-webkit-cookie-file 
+      (expand-file-name "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"))
+
+
 
 ;;;; xwidget-webkit 基础配置（macOS / emacs-plus with-xwidgets）
 
@@ -133,6 +164,116 @@
                            (kill-buffer b))) 
                        old-buf))
       (message "错误：无法获取 Xwidget URL"))))
+
+
+;; 1. EWW 切换到 EAF 浏览器
+(defun my/eww-to-eaf ()
+  "从 EWW 切换到 EAF 浏览器，成功后延迟清理旧 Buffer"
+  (interactive)
+  (let ((url (eww-current-url))
+        (old-buf (current-buffer)))
+    (if url
+        (progn
+          (message "正在切换至 EAF: %s" url)
+          ;; 启动 EAF 浏览器
+          (eaf-open-browser url)
+          ;; 延迟清理旧 buffer，防止显示问题
+          (run-at-time "0 sec" nil 
+                       (lambda (b) 
+                         (when (buffer-live-p b)
+                           (kill-buffer b))) 
+                       old-buf))
+      (message "错误：无法获取 EWW URL"))))
+
+;; 2. Xwidget 切换到 EAF 浏览器
+(defun my/xwidget-to-eaf ()
+  "从 Xwidget 切换到 EAF 浏览器，成功后延迟清理旧 Buffer"
+  (interactive)
+  (let ((url (xwidget-webkit-uri (xwidget-webkit-current-session)))
+        (old-buf (current-buffer)))
+    (if url
+        (progn
+          (message "正在切换至 EAF: %s" url)
+          ;; 启动 EAF 浏览器
+          (eaf-open-browser url)
+          ;; 延迟清理旧 buffer
+          (run-at-time "0 sec" nil 
+                       (lambda (b) 
+                         (when (buffer-live-p b)
+                           (kill-buffer b))) 
+                       old-buf))
+      (message "错误：无法获取 Xwidget URL"))))
+
+;; 3. EAF 浏览器切换到 EWW
+(defun my/eaf-to-eww ()
+  "从 EAF 浏览器切换到 EWW，成功后延迟清理旧 Buffer"
+  (interactive)
+  (let ((url (if (derived-mode-p 'eaf-mode)
+                 (eaf-call-sync "execute_function" eaf--buffer-id "get_url")
+               nil))
+        (old-buf (current-buffer)))
+    (if url
+        (progn
+          (message "正在切换至 EWW: %s" url)
+          ;; 启动 eww
+          (eww url)
+          ;; 延迟清理旧 buffer
+          (run-at-time "0 sec" nil 
+                       (lambda (b) 
+                         (when (buffer-live-p b)
+                           (kill-buffer b))) 
+                       old-buf))
+      (message "错误：无法获取 EAF URL"))))
+
+;; 4. EAF 浏览器切换到 Xwidget
+(defun my/eaf-to-xwidget ()
+  "从 EAF 浏览器切换到 Xwidget，成功后延迟清理旧 Buffer"
+  (interactive)
+  (let ((url (if (derived-mode-p 'eaf-mode)
+                 (eaf-call-sync "execute_function" eaf--buffer-id "get_url")
+               nil))
+        (old-buf (current-buffer)))
+    (if url
+        (progn
+          (message "正在切换至 Xwidget: %s" url)
+          ;; 启动 xwidget-webkit
+          (xwidget-webkit-browse-url url)
+          ;; 延迟清理旧 buffer
+          (run-at-time "0 sec" nil 
+                       (lambda (b) 
+                         (when (buffer-live-p b)
+                           (kill-buffer b))) 
+                       old-buf))
+      (message "错误：无法获取 EAF URL"))))
+
+
+
+
+(defun eaf-open-search (search-term &optional engine browser)
+  "Search SEARCH-TERM with selected search ENGINE and BROWSER."
+  (interactive
+   (list
+    (read-string "Search: ")
+    (intern (completing-read "Search Engine (default: bing): "
+                            '("bing" "perplexity")
+                            nil t nil nil "bing"))
+    (intern (completing-read "Browser (default: xwidget): "
+                            '("xwidget" "eaf")
+                            nil t nil nil "xwidget"))))
+  (require 'url-util)
+  (let* ((encoded-query (url-hexify-string search-term))
+         (search-url
+          (pcase engine
+            ('bing (format "https://www.bing.com/search?q=%s" encoded-query))
+            ('perplexity (format "https://www.perplexity.ai/search?q=%s" encoded-query))
+            (_ (format "https://www.bing.com/search?q=%s" encoded-query)))))
+    (pcase browser
+      ('xwidget (xwidget-webkit-browse-url search-url))
+      ('eaf (eaf-open-browser search-url))
+      (_ (xwidget-webkit-browse-url search-url)))))
+
+
+
 
 
 (provide 'init-browser)
