@@ -29,6 +29,8 @@
 (setq xwidget-webkit-user-agent 
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
+
+
 ;; 启用开发者工具
 (setq xwidget-webkit-enable-developer-extras t)
 
@@ -271,7 +273,6 @@
       ('xwidget (xwidget-webkit-browse-url search-url))
       ('eaf (eaf-open-browser search-url))
       (_ (xwidget-webkit-browse-url search-url)))))
-
 
 
 

@@ -270,5 +270,12 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
           "gv" 'find-variable
           "gl" 'find-library)))))
 
+
+
+
+
+
+
+
 (provide 'init-evil)
 ;;; init-evil.el ends here

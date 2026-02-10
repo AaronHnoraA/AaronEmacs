@@ -174,9 +174,10 @@
 (setq-default tab-width 4)
 (setq-default c-basic-offset 4)
 
-;;; -*- lexical-binding: t; -*-
 (when (member "JetBrainsMono Nerd Font" (font-family-list))
-  (set-fontset-font t '(#xe000 . #xf8ff) "JetBrainsMono Nerd Font" nil 'append))
+  ;; 只给 symbol / unicode 区域加 fallback，不动中文、英文正文字体
+  (dolist (charset '(symbol))
+    (set-fontset-font t charset "JetBrainsMono Nerd Font" nil 'append)))
 ;; ======================================================================
 ;; 1. 变量定义 (用户自定义区域)
 ;; ======================================================================
@@ -234,6 +235,10 @@
   (setq face-font-rescale-alist
         (assq-delete-all my/font-cn face-font-rescale-alist))
   (add-to-list 'face-font-rescale-alist (cons my/font-cn my/scale-cn)))
+(with-eval-after-load 'doom-modeline
+  (when (member "JetBrainsMono Nerd Font Mono" (font-family-list))
+    (set-face-attribute 'doom-modeline nil
+                        :family "JetBrainsMono Nerd Font Mono")))
 
 (defun my/apply-font-config (&optional frame)
   "应用全部字体设置。可用于 daemon 新 frame。

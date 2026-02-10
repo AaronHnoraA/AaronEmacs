@@ -677,20 +677,36 @@
 (with-eval-after-load 'org
   (define-key org-mode-map (kbd "C-c C-x v") #'my/org-latex-preview-visible-now))
 
-;; High Res LaTeX Preview (Dvipng)
 (with-eval-after-load 'org
-  (let ((tool (expand-file-name "tools/org-dvipng-hires" user-emacs-directory)))
+  (setq org-latex-default-packages-alist nil)
+  (setq org-latex-packages-alist nil)
+
+  ;; 2. 定义处理程序 (保持不变)
+  (let ((tool (expand-file-name "tools/org-xdvisvgm-hires" user-emacs-directory)))
     (add-to-list 'org-preview-latex-process-alist
-                 `(dvipng-hires-script
-                   :programs ("latex")
-                   :description "latex -> dvi -> (dvipng+convert) -> png"
-                   :image-input-type "dvi"
+                 `(xdvisvgm-hires-script
+                   :programs ("xelatex" "dvisvgm")
+                   :description "xelatex -> xdv -> (dvisvgm via script) -> svg"
+                   :image-input-type "xdv"
                    :image-output-type "svg"
                    :image-size-adjust (1.0 . 1.0)
-                   :latex-compiler ("latex -interaction nonstopmode -halt-on-error -output-directory %o %f")
+                   :latex-compiler ("xelatex -no-pdf -interaction nonstopmode -halt-on-error -output-directory %o %f")
                    :image-converter (,(format "%s %%f %%O" (shell-quote-argument tool))))))
-  (setq org-preview-latex-default-process 'dvipng-hires-script)
-  (setq org-format-latex-options (plist-put org-format-latex-options :scale 1.0)))
+
+  (setq org-preview-latex-default-process 'xdvisvgm-hires-script)
+  (setq org-format-latex-options (plist-put org-format-latex-options :scale 1.5))
+
+  ;; 3. 极简 Header (确保没有占位符)
+  (setq org-format-latex-header
+        "\\documentclass{article}
+\\usepackage[usenames]{color}
+\\usepackage{amsmath}
+\\usepackage{fontspec}        % 显式加载 fontspec
+\\usepackage{unicode-math}    % 加载 unicode-math
+\\setmathfont{GFS Neohellenic Math}
+\\pagestyle{empty}
+"))
+
 
 ;; External App Links (Zotero, MarginNote)
 (with-eval-after-load 'org

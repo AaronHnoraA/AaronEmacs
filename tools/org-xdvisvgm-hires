@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Usage: org-xdvisvgm INPUT.xdv OUTPUT.svg
+in="${1:?missing input .xdv}"
+out="${2:?missing output .svg}"
+
+# Optional knobs:
+#   ORG_DVISVGM_OPTS="--bbox=min --clipjoin -n --optimize"
+#   ORG_DVISVGM_ZOOM="1.0"        (dvisvgm --zoom)
+#   ORG_DVISVGM_PAGE="1"          (dvisvgm --page)
+opts="${ORG_DVISVGM_OPTS:---bbox=min --clipjoin -n --optimize }"
+zoom="${ORG_DVISVGM_ZOOM:-2.5}"
+page="${ORG_DVISVGM_PAGE:-1}"
+nospecials="${ORG_DVISVGM_NO_SPECIALS:-bgcolor}"
+
+# 1) kpathsea env (TeX Live) wiring — 保留你原来的逻辑
+if command -v kpsewhich >/dev/null 2>&1; then
+  texmfdist="$(kpsewhich -var-value=TEXMFDIST 2>/dev/null || true)"
+  if [[ -n "${texmfdist}" ]]; then
+    export TEXMFDIST="${texmfdist}"
+    if [[ -d "${texmfdist}/web2c" ]]; then
+      export TEXMFCNF="${texmfdist}/web2c"
+    fi
+  fi
+fi
+
+: "${TEXMFVAR:=${HOME}/.cache/texlive/texmf-var}"
+export TEXMFVAR
+mkdir -p "${TEXMFVAR}" || true
+
+# 2) dvisvgm: input is XDV, output is SVG
+dvisvgm --page="${page}" --zoom="${zoom}" ${opts} -o "${out}" "${in}" --no-specials="${nospecials}"
