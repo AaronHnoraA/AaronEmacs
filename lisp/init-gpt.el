@@ -1,79 +1,71 @@
 ;;; init-gpt.el --- GPT changes the world -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;;
+;;  Loads GPT configuration from var/mygpt.json
 
 ;;; Code:
 
+(require 'json)
 
 (use-package gptel
   :ensure t
   :hook (gptel-mode . gptel-highlight-mode)
   :bind (:map gptel-mode-map
-         ("C-c C-g" . gptel-abort))
+              ("C-c C-g" . gptel-abort))
   :config
-  ;; ---- Backend: HiAPI (OpenAI-compatible) ----
-  (setq gptel-backend
-        (gptel-make-openai "HiAPI"
-          ;; 对应你截图的 https://hiapi.online/v1
-          :host "hiapi.online"
-          :endpoint "/v1/chat/completions"
-          :stream t
-          ;; 从 auth-source 取 Bearer token
-          :key "sk-6CSNDcbV9Dm7OkMAf3TXhbZULA3riM2nO3dutj4sAXJ9Irxi"
-          :models '(gemini-3-pro-preview)))
+  ;; Define path to config file: ~/.emacs.d/var/mygpt.json
+  (let ((gpt-config-file (expand-file-name "var/mygpt.json" user-emacs-directory)))
+    
+    (if (file-exists-p gpt-config-file)
+        (let* ((json-object-type 'alist)
+               (json-array-type 'list)
+               (json-key-type 'symbol)
+               ;; Read the JSON file
+               (config-data (json-read-file gpt-config-file))
+               ;; Extract variables
+               (host (alist-get 'host config-data))
+               (endpoint (alist-get 'endpoint config-data))
+               (key (alist-get 'key config-data))
+               (model (alist-get 'model config-data))
+               (backend-name (alist-get 'backend_name config-data)))
 
-    (setq gptel-model "gemini-3-pro-preview")
-    ;; preset：coding
-      (gptel-make-preset 'gemini-coding
-        :description "Coding preset"
-        :backend "HiAPI"
-        :model "gemini-3-pro-preview"
-        :system "You are an expert coding assistant. Provide correct, minimal, and maintainable code. Explain key decisions briefly."
-        :tools nil) 
-    :custom
-      (gptel-default-mode 'markdown-mode)
-      (gptel-model 'gemini-3-pro-preview)
-      (gptel-rewrite 'gemini-3-pro-preview)
-    )
+          ;; 1. Configure Backend
+          (setq gptel-backend
+                (gptel-make-openai backend-name
+                  :host host
+                  :endpoint endpoint
+                  :stream t
+                  :key key
+                  :models (list model)))
 
-;; (use-package aider
-;;   :ensure t
-;;   :config
-;;   ;; For latest claude sonnet model
-;;   (setq aider-args '("--model" "sonnet" "--no-auto-accept-architect")) ;; add --no-auto-commits if you don't want it
-;;   (setenv "ANTHROPIC_API_KEY" anthropic-api-key)
-;;   ;; Or chatgpt model
-;;   ;; (setq aider-args '("--model" "o4-mini"))
-;;   ;; (setenv "OPENAI_API_KEY" <your-openai-api-key>)
-;;   ;; Or use your personal config file
-;;   ;; (setq aider-args `("--config" ,(expand-file-name "~/.aider.conf.yml")))
-;;   ;; ;;
-;;   ;; Optional: Set a key binding for the transient menu
-;;   (global-set-key (kbd "C-c a") 'aider-transient-menu) ;; for wider screen
-;;   ;; or use aider-transient-menu-2cols / aider-transient-menu-1col, for narrow screen
-;;   (aider-magit-setup-transients) ;; add aider magit function to magit menu
-;;   ;; auto revert buffer
-;;   (global-auto-revert-mode 1)
-;;   (auto-revert-mode 1))
+          ;; 2. Set Default Model
+          (setq gptel-model model)
+
+          ;; 3. Create Coding Preset
+          (gptel-make-preset 'gemini-coding
+            :description "Coding preset"
+            :backend backend-name
+            :model model
+            :system "You are an expert coding assistant. Provide correct, minimal, and maintainable code. Explain key decisions briefly."
+            :tools nil))
+      
+      ;; Error handling if file is missing
+      (display-warning 'init-gpt "GPT config file (var/mygpt.json) not found!" :warning)))
+
+  ;; General settings
+  (setq gptel-default-mode 'markdown-mode)
+  ;; Note: gptel-rewrite is usually set to a model name, setting it here to match your JSON
+  (setq gptel-rewrite gptel-model))
 
 
 (use-package copilot
   :ensure t
-  :hook
-  (prog-mode . copilot-mode)
+  :hook (prog-mode . copilot-mode)
   :config
   (define-key copilot-completion-map (kbd "M-]") #'copilot-accept-completion)
   (define-key copilot-completion-map (kbd "M-}") #'copilot-accept-completion-to-char))
 
-
 (add-hook 'org-mode-hook #'copilot-mode)
 
-
 (provide 'init-gpt)
-
-
-
 ;;; init-gpt.el ends here
-;;;
-

@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: proof end
+# key: pd
+# --
+■`(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

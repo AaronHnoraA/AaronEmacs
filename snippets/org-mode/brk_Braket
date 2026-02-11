@@ -1,6 +1,6 @@
 # -*- mode: snippet -*-
 # name: Braket
-# key: brk
+# key: bk
 # --
-\braket{ $1 | $2 } $3 `(when (and (not (eobp)) (looking-at "
+\langle ${1:\phi}\rvert ${2:\psi}\rangle $0 `(when (and (not (eobp)) (looking-at "
 ")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

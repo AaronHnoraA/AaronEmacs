@@ -1,3 +1,4 @@
+(setq user-full-name "aaron")
 ;; =========================
 ;; 同步 shell PATH 到 Emacs（macOS 必备）
 ;; =========================

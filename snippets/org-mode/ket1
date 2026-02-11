@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: ket1
+# key: ket1
+# --
+\lvert 1\rangle $0 `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
