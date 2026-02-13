@@ -368,6 +368,7 @@ _Q_: Disconnect     _sl_: List locals        _bl_: Set log message
 (require 'init-md)
 (require 'init-nix)
 (require 'init-sage)
+(require 'init-html)
 
 (provide 'init-lsp)
 ;;; init-lsp.el ends here

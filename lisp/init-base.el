@@ -1065,7 +1065,8 @@ Else, call `comment-or-uncomment-region' on the current line."
 (setopt user-full-name    "Chang He (Aaron)"
         user-mail-address "mail")
 
-
+;; 简单版：永远只是关掉当前 frame（如果是最后一个 frame 就会报错）
+(global-set-key (kbd "M-w") #'delete-frame)  ;; mac 上 Command-w 关闭当前 Emacs 窗口
 
 
 

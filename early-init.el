@@ -29,7 +29,7 @@
          (horizontal-scroll-bars . nil) ; 不显示水平滚动条
          (undecorated . t)           ; 无窗口边框/标题栏（支持的平台）
          (internal-border-width . 0) ; 去掉内部边框
-         (fullscreen . maximized))   ; 启动就最大化（不想最大化就删掉这一行）
+        )
        default-frame-alist))
 
 ;; 对第一个 frame 也应用同样设置（有些版本对 initial-frame-alist 特判）
