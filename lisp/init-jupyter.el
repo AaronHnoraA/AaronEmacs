@@ -37,6 +37,17 @@
 ;; ----------------------------
 (setq jupyter-repl-buffer-name-template "*jupyter-repl[%s]*")
 
+
+
+
+
+(use-package code-cells
+  :ensure t)
+
+
+
+
+
 (provide 'init-jupyter)
 
 
