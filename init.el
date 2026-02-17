@@ -20,6 +20,7 @@
   (setq exec-path-from-shell-check-startup-files nil)
   :config
   (exec-path-from-shell-initialize))
+
 (use-package direnv
   :ensure t
   :after exec-path-from-shell
@@ -204,7 +205,7 @@ With prefix arg FORCE, recompile all files; otherwise only outdated ones."
     ;; byte-recompile-directory: second arg 2 = recurse
     ;; third arg: if non-nil => compile all; if nil => only outdated.
     ;; NOTE: We intentionally DO NOT suppress warnings here.
-    (byte-recompile-directory base 2 (when force 0))
+    (byte-recompile-directory base 2 force)
     (message "Byte-recompile done: %s (force=%s)" base (and force t))))
 
 ;;;; ---------------------------------------------------------------------------
@@ -219,7 +220,7 @@ With prefix arg FORCE, recompile all files; otherwise only outdated ones."
 
 (defun my/native-compile-lisp-dir (&optional force)
   "Native-compile `my/lisp-dir` recursively (enqueue async).
-With prefix arg FORCE, still enqueues all files. (Native compilation is async.)
+With prefix arg FORCE, delete old .eln files first to force recompilation.
 
 This requires an Emacs build with native-comp support."
   (interactive "P")
@@ -227,17 +228,19 @@ This requires an Emacs build with native-comp support."
    ((not (my/native-comp-available-p))
     (message "Native compilation is not available in this Emacs build."))
    (t
-    (let* ((base (my/ensure-lisp-dir))
-           (files (directory-files-recursively base "\\.el\\'"))
-           ;; Where .eln will live (Emacs-managed cache).
-           (eln-cache (when (boundp 'native-comp-eln-load-path)
-                        (car native-comp-eln-load-path))))
-      ;; We do not suppress compile-time warnings here; native compilation has its own logs.
-      ;; FORCE is mostly semantic here (native compilation is queued); we still enqueue all.
-      (dolist (f files)
-        (native-compile-async f))
-      (message "Native compile queued: %s files from %s -> %s (force=%s)"
-               (length files) base (or eln-cache "<eln-cache>") (and force t))))))
+    (let ((base (my/ensure-lisp-dir))
+          (eln-cache (when (boundp 'native-comp-eln-load-path)
+                       (car native-comp-eln-load-path))))
+      (when force
+        ;; 删除缓存中的所有 .eln 文件以强制重新编译
+        (when (and eln-cache (file-directory-p eln-cache))
+          (dolist (eln (directory-files-recursively eln-cache "\\.eln\\'"))
+            (delete-file eln))
+          (message "Deleted old .eln files from %s" eln-cache)))
+      ;; 递归入队编译
+      (native-compile-async base 'recursively)
+      (message "Native compile queued: %s -> %s (force=%s)"
+               base (or eln-cache "<eln-cache>") (and force t))))))
 
 ;;;; ---------------------------------------------------------------------------
 ;;;; 3) OPTIONAL: runtime warning suppression (does NOT affect compile-time output)
@@ -250,7 +253,6 @@ This requires an Emacs build with native-comp support."
 (when my/suppress-runtime-warnings
   ;; Runtime only: keep errors visible, silence warnings/info.
   (setq warning-minimum-level :error))
-
 
 
 (provide 'init)
