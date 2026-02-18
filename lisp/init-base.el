@@ -183,7 +183,7 @@
 ;; ======================================================================
 
 ;; 英文正文 (Body) - Org 普通文本（variable-pitch）
-(defvar my/font-body  "Futura")
+(defvar my/font-body  "Merriweather")
 (defvar my/h-body     200)
 
 ;; 代码/表格 (Code) - 默认界面 + 代码环境（fixed-pitch）
