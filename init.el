@@ -160,6 +160,7 @@
 (require 'init-browser)
 (require 'init-stock)
 (require 'init-fzfs)
+(require 'init-joplin)
 
 ;; MacOS specific
 (when (eq system-type 'darwin)

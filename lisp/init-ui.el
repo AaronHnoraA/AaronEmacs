@@ -12,8 +12,6 @@
   :config
   (load-theme 'kanagawa-wave t))
 
-;(use-package doom-themes)
-
 (use-package doom-modeline
   :ensure t
   :hook (after-init . doom-modeline-mode)
@@ -346,6 +344,152 @@
    ;; 普通缩进线：淡灰蓝，不抢正文
    '(indent-guide-face
      ((t (:foreground "#5E81AC"))))))
+
+
+
+
+
+
+(defface chunlian-face '((t :background "red" :foreground "yellow" :weight bold :height 2.0)) "春联样式。")
+;; 新增一个专门用来填充红底的 Face
+(defface chunlian-blank-face '((t :background "red")) "春联间隙的纯红背景。")
+
+(defvar chunlian-right "霜蹄千里辞寒岁")
+(defvar chunlian-left "锦辔乘风纳清祥")
+(defvar chunlian-top "乘影追风")
+
+(defvar chunlian-top-offset 14 "向下偏移的行数。避开顶部的 Logo/Banner 空白。")
+(defvar chunlian-margin-width 6 "左右 Margin 的宽度，确保放大的字能完整显示。")
+(defvar chunlian-line-step 2 "每隔几行挂一个字。")
+
+;; 【关键新增】：填充红条用的宽度。
+;; 因为汉字放大了 2.0 倍，宽度也是原来的两倍（相当于 4 个英文字母或 2 个全角空格的宽度）。
+;; 这里默认使用 2 个全角空格。如果不齐，可以改成 4 个半角空格 "    "
+(defvar chunlian-blank-string "　　" "间隙填充字符，用纯红底色填补上下字的空隙。")
+
+(defvar-local chunlian--overlays nil)
+
+(defun chunlian--setup-overlays ()
+  "在 buffer 两侧设置静态的春联 overlays。"
+  (let ((win (selected-window)))
+    ;; 确保只有在有窗口展示当前 buffer 时才进行渲染
+    (when (window-live-p win)
+      (set-window-margins win chunlian-margin-width chunlian-margin-width)
+      (save-excursion
+        ;; 清除旧的 overlays
+        (mapc #'delete-overlay chunlian--overlays)
+        (setq chunlian--overlays nil)
+        
+        (goto-char (point-min))
+        ;; 往下空几行，跳过 Dashboard 顶部
+        (forward-line chunlian-top-offset)
+        
+        (let ((len (min (length chunlian-left) (length chunlian-right))))
+          (dotimes (i len)
+            (when (not (eobp))
+              ;; 1. 渲染带字的 Overlay
+              (let* ((start (line-beginning-position))
+                     (ov-l (make-overlay start start))
+                     (ov-r (make-overlay start start))
+                     (char-l (substring chunlian-left i (1+ i)))
+                     (char-r (substring chunlian-right i (1+ i))))
+                
+                (overlay-put ov-l 'before-string
+                             (propertize " " 'display
+                                         `((margin left-margin)
+                                           ,(propertize char-l 'face 'chunlian-face))))
+                (overlay-put ov-r 'after-string
+                             (propertize " " 'display
+                                         `((margin right-margin)
+                                           ,(propertize char-r 'face 'chunlian-face))))
+                
+                (push ov-l chunlian--overlays)
+                (push ov-r chunlian--overlays))
+              
+              ;; 2. 【关键修复】如果不是最后一个字，填充红底的间隙
+              (when (< i (1- len))
+                (dotimes (step chunlian-line-step)
+                  (when (= (forward-line 1) 0)
+                    ;; 仅在被作为“行距”跳过的行，塞入纯红空白块
+                    (when (< step (1- chunlian-line-step))
+                      (let* ((start (line-beginning-position))
+                             (ov-l (make-overlay start start))
+                             (ov-r (make-overlay start start))
+                             ;; 涂上纯红背景的空格
+                             (blank (propertize chunlian-blank-string 'face 'chunlian-blank-face)))
+                        
+                        (overlay-put ov-l 'before-string
+                                     (propertize " " 'display
+                                                 `((margin left-margin) ,blank)))
+                        (overlay-put ov-r 'after-string
+                                     (propertize " " 'display
+                                                 `((margin right-margin) ,blank)))
+                        
+                        (push ov-l chunlian--overlays)
+                        (push ov-r chunlian--overlays)))))))))))))
+
+(defun chunlian--setup-display ()
+  "初始化春联显示。"
+  (setq header-line-format
+        (list (propertize " " 'display `(space :align-to (- center ,(string-width chunlian-top))))
+              (propertize chunlian-top 'face 'chunlian-face)))
+  (chunlian--setup-overlays))
+
+(defun chunlian--clear-display ()
+  "清除春联显示。"
+  (setq header-line-format nil)
+  (let ((win (get-buffer-window (current-buffer))))
+    (when win
+      (set-window-margins win 0 0)))
+  (mapc #'delete-overlay chunlian--overlays)
+  (setq chunlian--overlays nil))
+
+;;;###autoload
+(define-minor-mode chunlian-mode
+  "一个简单的 Minor Mode，用于在 buffer 两侧固定显示春联。"
+  :lighter " 🧧"
+  (if chunlian-mode
+      (chunlian--setup-display)
+    (chunlian--clear-display)))
+
+
+;; 卸载旧的，挂载安全的 Hook
+(remove-hook 'dashboard-mode-hook #'chunlian-mode)
+(add-hook 'dashboard-after-initialize-hook (lambda ()
+                                             (chunlian-mode 1)
+                                             (run-with-timer 0.1 nil #'chunlian--setup-overlays)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 (provide 'init-ui)
 

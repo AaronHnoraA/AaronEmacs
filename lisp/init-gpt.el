@@ -67,5 +67,18 @@
 
 (add-hook 'org-mode-hook #'copilot-mode)
 
+
+
+
+
+;{
+;  "host": "hiapi.online",
+;  "endpoint": "/v1/chat/completions",
+;  "key": "sk-",
+;  "model": "....",
+;  "backend_name": "HiAPI"
+;}
+
+
 (provide 'init-gpt)
 ;;; init-gpt.el ends here
