@@ -76,7 +76,7 @@
   :hook (
          (elisp-mode . aggressive-indent-mode)
          (python-mode  . aggressive-indent-mode)
-s        (c++-mode     . aggressive-indent-mode)
+        (c++-mode     . aggressive-indent-mode)
          (c-mode       . aggressive-indent-mode)
          ))
 
@@ -353,6 +353,17 @@ _Q_: Disconnect     _sl_: List locals        _bl_: Set log message
   ;; 允许 LSP 在 org-src block 中根据当前 org 文件的位置来判断 root
   (setq lsp-auto-guess-root t))
 
+(use-package company-prescient
+  :ensure t
+  :after company
+  :config
+  (company-prescient-mode 1)
+  ;; 将你的选择历史保存在本地，重启 Emacs 依然有效
+  (prescient-persist-mode 1))
+
+
+
+
 
 ;; Load other language specific configurations
 (require 'init-cpp)
@@ -369,6 +380,7 @@ _Q_: Disconnect     _sl_: List locals        _bl_: Set log message
 (require 'init-nix)
 (require 'init-sage)
 (require 'init-html)
+(require 'init-js2)
 
 (provide 'init-lsp)
 ;;; init-lsp.el ends here
