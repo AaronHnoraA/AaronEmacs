@@ -18,33 +18,59 @@
   :init (counsel-projectile-mode))
 
 
-
 (use-package treemacs
   :ensure t
-  :defer t
-  :config
-  (treemacs-tag-follow-mode)
   :bind
-  (:map global-map
-        ("M-0"       . treemacs-select-window)
-        ("C-x t 1"   . treemacs-delete-other-windows)
-        ("C-x t t"   . treemacs)
-        ("C-x t B"   . treemacs-bookmark)
-        ;; ("C-x t C-t" . treemacs-find-file)
-        ("C-x t M-t" . treemacs-find-tag))
-  (:map treemacs-mode-map
-	("/" . treemacs-advanced-helpful-hydra)))
+  (("C-c t" . treemacs)
+   ("M-0"   . treemacs-select-window))
+  
+  :config
+  ;; ==========================================
+  ;; 1. 窗口位置：底部弹出 (占据 35% 高度)
+  ;; ==========================================
+  (setq treemacs-display-in-side-window nil)
+  (add-to-list 'display-buffer-alist
+               '("\\` \\*Treemacs-.*"
+                 (display-buffer-at-bottom)
+                 (window-height . 0.35)
+                 (window-parameters . ((no-other-window . t)))))
 
-(use-package treemacs-projectile
+  ;; ==========================================
+  ;; 2. 焦点切换自动隐藏
+  ;; ==========================================
+  (defun my-treemacs-auto-hide (&optional _)
+    (let ((tree-win (treemacs-get-local-window)))
+      (when (and tree-win
+                 (window-live-p tree-win)
+                 (not (eq (selected-window) tree-win))
+                 (not (window-minibuffer-p (selected-window))))
+        (ignore-errors (delete-window tree-win)))))
+  (add-hook 'window-selection-change-functions #'my-treemacs-auto-hide)
+
+  ;; ==========================================
+  ;; 3. 性能优化与 Imenu 基础设置
+  ;; ==========================================
+  (setq treemacs-deferred-git-apply-delay 0.5
+        treemacs-max-git-entries 3000
+        treemacs-file-event-delay 1500
+        treemacs-show-cursor t
+        treemacs-width-is-initially-locked nil
+        ;; 【关键】开启内置 Imenu 的自动刷新，防止按 TAB 展开后看到的是旧的代码结构
+        imenu-auto-rescan t) 
+
+  (treemacs-filewatch-mode t)
+  (treemacs-git-mode 'deferred))
+
+;; ==========================================
+;; 4. Magit 联动 (仅保留 Git 状态实时刷新)
+;; ==========================================
+(use-package treemacs-magit
   :ensure t
-  :after (treemacs projectile))
-
-(use-package lsp-treemacs
-  :ensure t
-  :after (treemacs lsp))
+  :after (treemacs magit))
 
 
-;;; init-perspective.el --- Workspaces (perspective.el) -*- lexical-binding: t; -*-
+
+
 
 (use-package perspective
   :ensure t

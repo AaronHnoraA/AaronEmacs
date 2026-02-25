@@ -18,6 +18,8 @@
   :bind (:map markdown-mode-map
          ("C-c C-e" . markdown-do)))
 
+(add-to-list 'auto-mode-alist '("\\.md\\'" . markdown-mode))
+
 (provide 'init-md)
 
 ;;; init-bazel.el ends here
