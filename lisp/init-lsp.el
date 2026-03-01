@@ -382,5 +382,29 @@ _Q_: Disconnect     _sl_: List locals        _bl_: Set log message
 (require 'init-html)
 (require 'init-js2)
 
+
+
+
+
+
+;; lsp-mode：服务器挂了就别自动重启（避免死循环）
+(setq lsp-restart 'interactive)       ;; 或 'interactive（每次问你）
+;; eglot：永不自动重连（需要你手动 M-x eglot 重新连）
+(setq eglot-autoreconnect nil)
+(with-eval-after-load 'tramp
+  (add-to-list 'tramp-remote-path 'tramp-own-remote-path))
+
+
+
+;; 不在输入停顿时自动检查
+(setq-default flymake-no-changes-timeout nil)  ;; [web:88][web:85]
+
+;; 保存时检查（当前 buffer）
+(add-hook 'after-save-hook
+          (lambda ()
+            (when (bound-and-true-p flymake-mode)
+              (flymake-start))))
+
+
 (provide 'init-lsp)
 ;;; init-lsp.el ends here

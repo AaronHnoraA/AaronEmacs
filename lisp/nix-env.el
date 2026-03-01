@@ -256,5 +256,12 @@
 
   (message "nix-env: applied"))
 
+
+
+
+
+
+
+
 (provide 'nix-env)
 ;;; nix-env.el ends here
