@@ -893,22 +893,79 @@ Else, call `comment-or-uncomment-region' on the current line."
   :ensure t
   :hook (prog-mode . outline-indent-minor-mode))
 
+
+;; ===============================
+;; TRAMP 基础配置
+;; ===============================
+
 (with-eval-after-load 'tramp
-  ;; 0 最安静，6 最啰嗦；建议 3~4
-  (setq tramp-verbose 4)
-  ;; 让 TRAMP 的消息更容易被看到
-  (setq tramp-message-show-message t))
+
+  ;; 日志等级
+  ;; 0 = silent
+  ;; 6 = debug
+  (setq tramp-verbose 3)
+
+  ;; 连接超时
+  (setq tramp-connection-timeout 10)
+
+  ;; session 保持时间
+  (setq tramp-session-timeout 300)
+
+  ;; 使用 ssh
+  (setq tramp-default-method "ssh")
+
+  ;; login shell
+  (setq tramp-login-shell "bash")
+  (setq tramp-login-args '(("-l")))
+
+  ;; 使用远程 PATH
+  (setq tramp-remote-path '(tramp-own-remote-path))
+
+  ;; SSH ControlMaster (极大加速)
+  (setq tramp-use-ssh-controlmaster-options t)
+
+  ;; 减少锁文件
+  (setq remote-file-name-inhibit-locks t)
+
+  ;; 禁用备份
+  (setq tramp-backup-directory-alist backup-directory-alist)
+
+)
+
+;; ===============================
+;; find-file 打开速度反馈
+;; ===============================
 
 (defun pv/with-find-file-feedback (orig filename &rest args)
-  (let* ((remote (file-remote-p filename))
-         (label  (if remote "TRAMP/SSH" "Local"))
-         (t0 (float-time)))
-    (message "[%s] Opening: %s" label filename)
-    (prog1 (apply orig filename args)
-      (message "[%s] Opened in %.2fs: %s"
-               label (- (float-time) t0) filename))))
+  (let ((t0 (float-time)))
+    (message "Opening: %s" filename)
+    (prog1
+        (apply orig filename args)
+      (let ((remote (ignore-errors (file-remote-p filename))))
+        (message "[%s] Opened in %.2fs: %s"
+                 (if remote "TRAMP" "Local")
+                 (- (float-time) t0)
+                 filename)))))
 
 (advice-add 'find-file :around #'pv/with-find-file-feedback)
+
+
+;; ===============================
+;; TRAMP 缓存优化
+;; ===============================
+
+(setq tramp-persistency-file-name
+      (expand-file-name "tramp" user-emacs-directory))
+
+(setq tramp-auto-save-directory
+      (expand-file-name "tramp-autosave" user-emacs-directory))
+
+
+
+
+
+
+
 
 ;;(setq debug-on-quit t)
 

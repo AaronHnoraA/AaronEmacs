@@ -391,8 +391,6 @@ _Q_: Disconnect     _sl_: List locals        _bl_: Set log message
 (setq lsp-restart 'interactive)       ;; 或 'interactive（每次问你）
 ;; eglot：永不自动重连（需要你手动 M-x eglot 重新连）
 (setq eglot-autoreconnect nil)
-(with-eval-after-load 'tramp
-  (add-to-list 'tramp-remote-path 'tramp-own-remote-path))
 
 
 
