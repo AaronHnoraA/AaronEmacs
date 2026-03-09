@@ -105,24 +105,6 @@
                   (error-message-string err)))))))
 
 
-(with-eval-after-load 'direnv
-  (require 'nix-env) ;; 去掉 nil t，确保找不到文件时直接报错
-  (when (fboundp 'nix-env-apply)
-
-    (defun nix-env-apply-if-local ()
-      "Apply nix-env only for local buffers (skip TRAMP)."
-      (interactive)
-      (if (file-remote-p default-directory)
-          (message "nix-env: skipped (remote directory)")
-        (nix-env-apply)
-        (message "nix-env: successfully applied for local directory")))
-
-    ;; 启动时应用
-    (nix-env-apply-if-local)
-
-    ;; direnv 更新后应用
-    (add-hook 'direnv-after-update-environment-hook #'nix-env-apply-if-local)))
-
 
 (require 'init-base)
 (require 'init-utils)
