@@ -191,6 +191,21 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
+
+(defun my-c-unified-indent-setup ()
+  (setq-local c-basic-offset 4)
+  (setq-local c-ts-mode-indent-offset 4)
+  (setq-local indent-tabs-mode nil)
+  (local-set-key (kbd "RET") #'newline-and-indent))
+
+(add-hook 'c-mode-common-hook #'my-c-unified-indent-setup)
+(add-hook 'c-ts-mode-hook #'my-c-unified-indent-setup)
+(add-hook 'c++-ts-mode-hook #'my-c-unified-indent-setup)
+
+
+
+
+
 (provide 'init-cpp)
 
 ;;; init-cpp.el ends here

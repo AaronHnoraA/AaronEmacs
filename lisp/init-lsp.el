@@ -53,18 +53,20 @@
 
   ;; Backends 设置 (Eglot 原生使用 company-capf)
   (company-backends 
-        '((company-yasnippet
+        '((
           company-capf 
           company-files          ; 路径补全
           :with company-tempo 
+          company-yasnippet
           )
           (company-dabbrev-code company-keywords)
           company-dabbrev))
   (setq-default company-backends 
-        '((company-yasnippet
+        '((
           company-capf 
           company-files          ; 路径补全
           :with company-tempo 
+          company-yasnippet
           )
           (company-dabbrev-code company-keywords)
           company-dabbrev))
@@ -97,7 +99,8 @@
   :hook ((elisp-mode . aggressive-indent-mode)
          (python-mode  . aggressive-indent-mode)
          (c++-mode     . aggressive-indent-mode)
-         (c-mode       . aggressive-indent-mode)))
+         (c-mode       . aggressive-indent-mode)
+        ))
 
 
 ;; -------------------------

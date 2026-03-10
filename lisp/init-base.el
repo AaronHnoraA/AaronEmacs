@@ -961,11 +961,6 @@ Else, call `comment-or-uncomment-region' on the current line."
       (expand-file-name "tramp-autosave" user-emacs-directory))
 
 
-(use-package tramp-rpc
-  :after tramp
-  :vc (:url "https://github.com/ArthurHeymans/emacs-tramp-rpc"
-       :rev :newest
-       :lisp-dir "lisp"))
 
 
 
@@ -1130,6 +1125,15 @@ Else, call `comment-or-uncomment-region' on the current line."
 ;; 简单版：永远只是关掉当前 frame（如果是最后一个 frame 就会报错）
 (global-set-key (kbd "M-w") #'delete-frame)  ;; mac 上 Command-w 关闭当前 Emacs 窗口
 
+
+;; 不要在任何情况下自动显示 diary
+(setq calendar-mark-diary-entries-flag nil)  ;; 你已经设了
+(setq calendar-view-diary-initially-flag nil)
+(setq calendar-mark-holidays-flag nil)
+
+;; org agenda 里也不要混入 diary
+(setq org-agenda-include-diary nil)
+(setq org-agenda-diary-file nil)
 
 
 (provide 'init-base)
