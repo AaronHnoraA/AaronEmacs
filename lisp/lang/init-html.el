@@ -7,11 +7,6 @@
 ;; npm install -g vscode-langservers-extracted
 ;; sp-install-serverREThtml-lsRET
 
-(use-package lsp-mode
-  :hook ((html-mode . lsp))
-  :commands lsp)
-
-
 (use-package vue-html-mode
  :ensure t)
 

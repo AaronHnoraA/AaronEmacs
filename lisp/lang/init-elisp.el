@@ -1,45 +1,52 @@
-;;; init-elisp.el --- elisp -*- lexical-binding: t -*-
+;;; init-elisp.el --- Emacs Lisp config -*- lexical-binding: t; -*-
+
 ;;; Commentary:
-;;
+;; Emacs Lisp uses built-in tooling instead of lsp/eglot:
+;; - eldoc
+;; - completion-at-point
+;; - flymake
 
 ;;; Code:
 
 (require 'init-funcs)
 
-;; Emacs Lisp 不使用 lsp-mode：避免弹 “no matched clients”
-(add-hook 'emacs-lisp-mode-hook
-          (lambda ()
-            (when (boundp 'lsp-mode)
-              (lsp-mode -1))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Emacs Lisp does not use eglot
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; 文档即时显示（多行）
-(setq eldoc-echo-area-use-multiline-p t)
+(defun my/elisp-mode-setup ()
+  "Setup for Emacs Lisp buffers."
+  ;; Multi-line eldoc in echo area
+  (setq-local eldoc-echo-area-use-multiline-p t)
 
-;; 原生补全体验：按 TAB/循环更顺
-(setq completion-cycle-threshold 3)
+  ;; Better native completion experience
+  (setq-local completion-cycle-threshold 3)
 
-;; Emacs Lisp buffer 里 company 只用 capf（只对当前 buffer 生效）
-(add-hook 'emacs-lisp-mode-hook
-          (lambda ()
-            (setq-local company-backends '(company-capf))))
+  ;; Built-in diagnostics
+  (flymake-mode 1))
 
-;; 使用 Flymake（Emacs 自带检查；只对 elisp buffer）
-(add-hook 'emacs-lisp-mode-hook #'flymake-mode)
+(add-hook 'emacs-lisp-mode-hook #'my/elisp-mode-setup)
+(add-hook 'lisp-interaction-mode-hook #'my/elisp-mode-setup)
 
-(with-eval-after-load 'lsp-mode
-  (defun my/lsp--skip-in-elisp (orig-fn &rest args)
-    "Do not run lsp in Emacs Lisp buffers."
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Prevent eglot from starting in Emacs Lisp buffers
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(with-eval-after-load 'eglot
+  (defun my/eglot--skip-in-elisp (orig-fn &rest args)
+    "Do not run eglot in Emacs Lisp buffers."
     (if (derived-mode-p 'emacs-lisp-mode 'lisp-interaction-mode)
         (progn
-          ;; 确保万一已经开启也立刻关掉
-          (when (bound-and-true-p lsp-mode)
-            (lsp-mode -1))
-          ;; 不再继续执行 lsp/lsp-deferred
+          ;; If eglot somehow already started, shut it down locally.
+          (when (and (fboundp 'eglot-managed-p)
+                     (eglot-managed-p))
+            (ignore-errors (eglot-shutdown (eglot-current-server))))
           nil)
       (apply orig-fn args)))
 
-  (advice-add 'lsp :around #'my/lsp--skip-in-elisp)
-  (advice-add 'lsp-deferred :around #'my/lsp--skip-in-elisp))
+  (advice-add 'eglot :around #'my/eglot--skip-in-elisp)
+  (advice-add 'eglot-ensure :around #'my/eglot--skip-in-elisp))
+
 (provide 'init-elisp)
 
 ;;; init-elisp.el ends here

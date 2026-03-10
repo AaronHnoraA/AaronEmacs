@@ -5,14 +5,17 @@
 
 ;;; Code:
 
+(use-package eglot
+  :ensure t
+  :hook
+  (python-mode . eglot-ensure))
+
 (use-package python
   :ensure nil
   :mode ("\\.py\\'" . python-mode)
   :custom
   (python-shell-dedicated 'project)
   (python-indent-guess-indent-offset-verbose nil))
-
-
 
 
 (provide 'init-python)
