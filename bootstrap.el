@@ -8,8 +8,10 @@
 
 ;; 仓库按需改
 (setq package-archives
-      '(("gnu"   . "https://elpa.gnu.org/packages/")
-        ("melpa" . "https://melpa.org/packages/")))
+      '(("melpa"  . "https://melpa.org/packages/")
+        ("gnu"    . "https://elpa.gnu.org/packages/")
+        ("nongnu" . "https://elpa.nongnu.org/nongnu/")
+        ("org"    . "https://orgmode.org/elpa/")))
 
 (setq package-enable-at-startup nil)
 (package-initialize)

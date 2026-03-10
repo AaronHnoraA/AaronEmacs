@@ -35,6 +35,7 @@
   (require 'eaf-mindmap)
   (require 'eaf-video-player)
   (require 'eaf-org-previewer)
+  (require 'eaf-git)
 
   (defalias 'browse-web #'eaf-open-browser))
 
@@ -55,5 +56,6 @@
     (when (fboundp 'eaf-kill-process)
       (eaf-kill-process))
     (message "已清理 %d 个 EAF Buffer 及后台进程！" count)))
+
 
 (provide 'init-eaf)
