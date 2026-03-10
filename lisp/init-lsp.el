@@ -1,14 +1,16 @@
 ;;; init-lsp.el --- The completion engine and lsp client -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;; Refactored and merged configuration for Company, LSP, and Debugging.
+;; Refactored configuration for Company, Eglot (LSP), and Debugging.
+;; Switched from lsp-mode to eglot to provide a more lightweight, native experience,
+;; while maintaining similar UI features (doc-box, breadcrumbs, diagnostics).
 
 ;;; Code:
 
 ;; -------------------------
 ;; 1. Company Mode (Completion)
 ;; -------------------------
-;; https://company-mode.github.io/manual/
+;; [https://company-mode.github.io/manual/](https://company-mode.github.io/manual/)
 
 (use-package company
   :ensure t
@@ -19,8 +21,7 @@
          ([remap completion-at-point] . company-complete)
          :map company-active-map
          ("C-s"     . company-filter-candidates)
-         ([tab]     . company-complete-selection)
-         )
+         ([tab]     . company-complete-selection))
   :after yasnippet
   :config
   (define-advice company-capf--candidates (:around (func &rest args))
@@ -31,10 +32,10 @@
   :custom
   ;; 核心体验设置
   (company-idle-delay 0.05)            ;; 立即触发补全
-  (company-minimum-prefix-length 1) ;; 至少3个字符触发
-  (company-show-numbers t)          ;; 显示编号 (M-1, M-2 选择)
-  (company-show-quick-access t)     ;; 允许 M-<n> 快速选择
-  (company-require-match nil)       ;; 不强制匹配
+  (company-minimum-prefix-length 1)    ;; 至少1个字符触发
+  (company-show-numbers t)             ;; 显示编号 (M-1, M-2 选择)
+  (company-show-quick-access t)        ;; 允许 M-<n> 快速选择
+  (company-require-match nil)          ;; 不强制匹配
   
   ;; UI 设置
   (company-tooltip-width-grow-only t)
@@ -50,22 +51,42 @@
   ;; 文件/路径补全设置
   (company-files-exclusions '(".git/" ".DS_Store"))
 
-  ;; Backends 设置
-  ;; 注意：`company-files` 在这里确保了路径补全功能。
-  ;; 当你输入 "/" 或 "./" 时，company-files 会接管。
+  ;; Backends 设置 (Eglot 原生使用 company-capf)
   (company-backends 
-        '((company-capf 
-          company-files          ; <--- 移到这里，与 LSP 平级
+        '((company-yasnippet
+          company-capf 
+          company-files          ; 路径补全
           :with company-tempo 
-          company-yasnippet)
+          )
+          (company-dabbrev-code company-keywords)
+          company-dabbrev))
+  (setq-default company-backends 
+        '((company-yasnippet
+          company-capf 
+          company-files          ; 路径补全
+          :with company-tempo 
+          )
           (company-dabbrev-code company-keywords)
           company-dabbrev))
   )
+ ;; 全局默认 backends
+
+
+(with-eval-after-load 'eglot
+  (add-to-list 'eglot-stay-out-of 'company-backends))
+  
 
 (use-package company-box
   :ensure t
   :if window-system
   :hook (company-mode . company-box-mode))
+
+(use-package company-prescient
+  :ensure t
+  :after company
+  :config
+  (company-prescient-mode 1)
+  (prescient-persist-mode 1))
 
 
 ;; -------------------------
@@ -73,17 +94,16 @@
 ;; -------------------------
 (use-package aggressive-indent
   :ensure t
-  :hook (
-         (elisp-mode . aggressive-indent-mode)
+  :hook ((elisp-mode . aggressive-indent-mode)
          (python-mode  . aggressive-indent-mode)
-        (c++-mode     . aggressive-indent-mode)
-         (c-mode       . aggressive-indent-mode)
-         ))
+         (c++-mode     . aggressive-indent-mode)
+         (c-mode       . aggressive-indent-mode)))
 
 
 ;; -------------------------
 ;; 3. Flymake (Diagnostics)
 ;; -------------------------
+;; Eglot 默认无缝集成 Flymake
 (use-package flymake
   :ensure nil ; Emacs built-in
   :hook (prog-mode . flymake-mode)
@@ -92,10 +112,10 @@
          ("M-p" . flymake-goto-prev-error)
          ("C-c !" . flymake-show-buffer-diagnostics))
   :custom
-  (flymake-no-changes-timeout 0.3)
+  (flymake-no-changes-timeout nil) ; 不在输入停顿时自动检查
   (flymake-indicator-type 'fringes))
 
-;; 光标停在报错位置时，在 minibuffer/eldoc 显示诊断
+;; 光标停在报错位置时，在 minibuffer 显示诊断
 (use-package flymake-diagnostic-at-point
   :ensure t
   :after flymake
@@ -106,225 +126,194 @@
 
 
 ;; -------------------------
-;; 4. LSP Mode (Core)
+;; 4. Eglot (LSP Client)
 ;; -------------------------
-(use-package lsp-mode
+(use-package eglot
+  :ensure nil ; Built-in since Emacs 29
+  :hook ((prog-mode . eglot-ensure)
+         ;; 关闭 Eglot 自带的 Inlay hints (类型推导提示)，保持 UI 干净
+         (eglot-managed-mode . (lambda ()
+                                 (when (bound-and-true-p eglot-inlay-hints-mode)
+                                   (eglot-inlay-hints-mode -1)))))
+  :bind (:map eglot-mode-map
+         ("C-c f" . eglot-format-buffer)
+         ("C-c d" . eldoc-doc-buffer)          ; 在独立 buffer 查看完整文档
+         ("C-c a" . eglot-code-actions)
+         ("C-c r" . eglot-rename)
+         
+         ;; Xref 代替 lsp-ui-peek 进行跳转
+         ("C-h e" . xref-find-definitions)     ; 定义
+         ("C-h r" . xref-find-references)      ; 引用
+         ("C-h i" . eglot-find-implementation) ; 实现
+         ("C-h t" . eglot-find-typeDefinition))
+  :custom
+  ;; 性能与功能开关 (对照 lsp-mode 优化)
+  (eglot-sync-connect 0)                   ; 异步连接
+  (eglot-autoshutdown t)                   ; auto kill server
+  (eglot-extend-to-xref t)
+  (eglot-events-buffer-size 0)             ; 等效于 lsp-log-io nil，不记录日志提升性能
+  
+  ;; 提升 jsonrpc 吞吐
+  (read-process-output-max (* 1024 1024))) ; 1MB
+
+
+;; -------------------------
+;; 5. UI Emulation (Doc Box & Breadcrumb)
+;; -------------------------
+
+;; 替代 lsp-ui-doc：提供光标处悬浮文档框
+(use-package eldoc-box
   :ensure t
-  :commands (lsp lsp-deferred)
-  :hook (prog-mode . lsp-deferred)
-  :bind (:map lsp-mode-map
-         ("C-c f" . lsp-format-region)
-         ("C-c d" . lsp-describe-thing-at-point)
-         ("C-c a" . lsp-execute-code-action)
-         ("C-c r" . lsp-rename))
+  :hook (eglot-managed-mode . eldoc-box-hover-at-point-mode)
+  :bind (:map eglot-mode-map
+         ("C-h d" . eldoc-box-help-at-point)  ; 快速看文档弹窗
+         ("C-h c" . eldoc-box-quit-frame))    ; 隐藏文档
+  :custom
+  (eldoc-box-max-pixel-width 600)
+  (eldoc-box-max-pixel-height 400)
+  (eldoc-box-clear-with-C-g t))
+
+;; 替代 lsp-headerline-breadcrumb：Eglot 作者出品的面包屑
+(use-package breadcrumb
+  :ensure t
   :config
-  (with-no-warnings
-    (lsp-enable-which-key-integration t))
-  
-  :custom
-  ;; 前缀键
-  (lsp-keymap-prefix "C-c l")
-  
-  ;; 性能与功能开关
-  (lsp-log-io nil)                          ;; debug only
-  (lsp-auto-guess-root t)                   ;; 使用 projectile root
-  (lsp-keep-workspace-alive nil)            ;; auto kill lsp server
-  (lsp-enable-file-watchers nil)            ;; 性能优化：禁用文件监控
-  
-  ;; UI 简化 (Clean UI)
-  (lsp-enable-links nil)                    ;; no clickable links
-  (lsp-enable-folding nil)                  ;; use hideshow' instead
-  (lsp-enable-text-document-color t)
-  (lsp-enable-symbol-highlighting t)
-  (lsp-enable-on-type-formatting nil)
-  (lsp-headerline-breadcrumb-enable t)    ;; 保持顶部干净
-  (lsp-modeline-code-actions-enable nil)    ;; 保持 modeline 干净
-  (lsp-modeline-diagnostics-enable nil)
-  
-  ;; 语义高亮
-  (lsp-semantic-tokens-enable nil)
-  (lsp-semantic-tokens-apply-modifiers nil)
-  
-  ;; 补全与 Snippets
-  (lsp-completion-provider :none)           ;; 关键：设为 none，因为我们在 company 中手动配置了 capf
-  (lsp-completion-enable t)
-  (lsp-enable-snippet t)                    ;; 开启 snippet 支持 (参数模板)
-  (lsp-completion-enable-additional-text-edit nil)
-  
-  ;; 提升 LSP / jsonrpc 吞吐
-  (read-process-output-max (* 1024 1024)) ;; 1MB
+  (breadcrumb-mode 1))
 
-  ;; 签名提示 (Signature Help)
-  (lsp-signature-auto-activate t)           ;; 自动弹出函数签名
-  (lsp-signature-render-documentation t)
-  (lsp-signature-doc-lines 5)
-  (lsp-eldoc-enable-hover nil)              ;; 禁用 eldoc hover，防止干扰 signature
-  
-  ;; 诊断 (Diagnostics)
-  ;; 设为 :auto 以使用 flymake (因为上面配置了 flymake)
-  ;; 如果要用 flycheck，需改为 :flycheck 并安装 flycheck 包
-  (lsp-diagnostics-provider :auto))
-
-(use-package lsp-ivy
-  :ensure t
-  :after lsp-mode)
-
-
-;; -------------------------
-;; 5. LSP UI (Doc, Peek, Imenu)
-;; -------------------------
-(use-package lsp-ui
-  :ensure t
-  :commands (lsp-ui-doc-show
-             lsp-ui-doc-hide
-             lsp-ui-doc-glance
-             lsp-ui-peek-find-definitions
-             lsp-ui-peek-find-references
-             lsp-ui-peek-find-implementation)
-  :bind
-  (
-   ("C-h d" . lsp-ui-doc-glance)                ; 快速看文档
-   ("C-h D" . lsp-ui-doc-toggle)                ; 强制显示文档
-   ("C-h c" . lsp-ui-doc-hide)                  ; 隐藏文档
-   ("C-h e" . lsp-ui-peek-find-definitions)     ; 定义
-   ("C-h r" . lsp-ui-peek-find-references)      ; 引用
-   ("C-h i" . lsp-ui-peek-find-implementation)) ; 实现
-  :custom
-  ;; Doc
-  (lsp-ui-doc-enable t)
-  (lsp-ui-doc-position 'bottom)
-  (lsp-ui-doc-show-with-cursor t)
-  (lsp-ui-doc-delay 0.3)
-  
-  ;; Peek
-  (lsp-ui-peek-enable t)
-  (lsp-ui-peek-always-show t))
-
+;; 左侧/右侧符号导航 (完全兼容 Eglot)
 (use-package imenu-list
   :ensure t
   :commands (imenu-list-smart-toggle)
   :custom
-  ;; 放左边或右边都行
   (imenu-list-position 'left)
-
-  ;; 自动根据当前 buffer 更新
-  ;(imenu-list-auto-update t)
-
-  ;; 高亮当前光标所在符号
   (imenu-list-highlight-current-entry t)
-
-  ;; 不要抢焦点
   (imenu-list-focus-after-activation nil)
-
-  ;; 窗口宽度
-  (imenu-list-size 0.25)
-)
-
+  (imenu-list-size 0.25))
 
 
 ;; -------------------------
-;; 6. DAP Mode (Debugging)
+;; 6. Dape (Debugging)
 ;; -------------------------
-(use-package dap-mode
+;;
+;; dape 是更适合 Eglot / 原生 Emacs 工作流的 DAP 客户端。
+;; 入口命令是 `M-x dape`。
+;; 推荐打开 `repeat-mode`，这样单步调试体验会更顺。
+;;
+;; 说明：
+;; - 不再使用 dap-ui-mode / dap-auto-configure-mode
+;; - 不再依赖 lsp-mode
+;; - 部分 dap-mode 命令在 dape 中没有 1:1 同名接口，
+;;   这里改成 dape 当前公开可用的命令体系
+;;
+(use-package dape
   :ensure t
-  :after (hydra lsp-mode)
-  :commands dap-debug
+  :after hydra
+  :commands (dape
+             dape-next
+             dape-step-in
+             dape-step-out
+             dape-continue
+             dape-pause
+             dape-restart
+             dape-quit
+             dape-breakpoint-toggle
+             dape-breakpoint-log
+             dape-breakpoint-expression
+             dape-breakpoint-hits
+             dape-breakpoint-remove-at-point
+             dape-evaluate-expression
+             dape-watch-dwim
+             dape-repl
+             dape-repl-threads
+             dape-repl-stack
+             dape-repl-breakpoints
+             dape-repl-scope
+             dape-repl-watch)
+  :hook
+  ;; 退出 Emacs 时保存断点；启动后加载断点
+  (kill-emacs . dape-breakpoint-save)
+  (after-init . dape-breakpoint-load)
   :custom
-  (dap-auto-configure-mode t)
+  ;; 让 dape 的侧边窗口更像 IDE
+  (dape-buffer-window-arrangement 'right)
+  ;; 如果你不想复用 gud 前缀，可设成 nil
+  ;; (dape-key-prefix nil)
   :config
-  (dap-ui-mode 1)
-  :hydra
-  (hydra-dap-mode
-   (:color pink :hint nil :foreign-keys run)
-   "
-^Stepping^          ^Switch^                 ^Breakpoints^         ^Debug^                     ^Eval
-^^^^^^^^----------------------------------------------------------------------------------------------------------------
-_n_: Next           _ss_: Session            _bb_: Toggle          _dd_: Debug                 _ee_: Eval
-_i_: Step in        _st_: Thread             _bd_: Delete          _dr_: Debug recent          _er_: Eval region
-_o_: Step out       _sf_: Stack frame        _ba_: Add             _dl_: Debug last            _es_: Eval thing at point
-_c_: Continue       _su_: Up stack frame     _bc_: Set condition   _de_: Edit debug template   _ea_: Add expression.
-_r_: Restart frame  _sd_: Down stack frame   _bh_: Set hit count   _ds_: Debug restart
-_Q_: Disconnect     _sl_: List locals        _bl_: Set log message
-                  _sb_: List breakpoints
-                  _sS_: List sessions
+  ;; 推荐：让重复命令（next/step/continue 等）更顺手
+  (repeat-mode 1)
+
+  ;; 停住时高亮当前行（可选）
+  (add-hook 'dape-display-source-hook #'pulse-momentary-highlight-one-line)
+
+  ;; 调试开始前自动保存 buffer（对解释型语言尤其有用）
+  (add-hook 'dape-start-hook
+            (lambda () (save-some-buffers t t)))
+
+  ;; 可选：编译成功后自动关掉 compile buffer
+  ;; (add-hook 'dape-compile-hook #'kill-buffer)
+
+  ;; 兼容你原来的 Hydra 风格
+  (defhydra hydra-dape-mode
+    (:color pink :hint nil :foreign-keys run)
+    "
+^Stepping^          ^Switch/View^             ^Breakpoints^         ^Debug^                     ^Eval / Watch^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_n_: Next           _ss_: Sessions(REPL)      _bb_: Toggle          _dd_: Debug (dape)          _ee_: Eval
+_i_: Step in        _st_: Threads             _bd_: Delete here     _dr_: Restart               _er_: Eval region
+_o_: Step out       _sf_: Stack               _ba_: Log message     _dq_: Quit                  _es_: Eval thing
+_c_: Continue       _sl_: Locals(scope)       _bc_: Condition       _dR_: REPL                  _ea_: Add watch
+_p_: Pause          _sb_: Breakpoints         _bh_: Hit count
 "
-   ("n" dap-next)
-   ("i" dap-step-in)
-   ("o" dap-step-out)
-   ("c" dap-continue)
-   ("r" dap-restart-frame)
-   ("ss" dap-switch-session)
-   ("st" dap-switch-thread)
-   ("sf" dap-switch-stack-frame)
-   ("su" dap-up-stack-frame)
-   ("sd" dap-down-stack-frame)
-   ("sl" dap-ui-locals)
-   ("sb" dap-ui-breakpoints)
-   ("sS" dap-ui-sessions)
-   ("bb" dap-breakpoint-toggle)
-   ("ba" dap-breakpoint-add)
-   ("bd" dap-breakpoint-delete)
-   ("bc" dap-breakpoint-condition)
-   ("bh" dap-breakpoint-hit-condition)
-   ("bl" dap-breakpoint-log-message)
-   ("dd" dap-debug)
-   ("dr" dap-debug-recent)
-   ("ds" dap-debug-restart)
-   ("dl" dap-debug-last)
-   ("de" dap-debug-edit-template)
-   ("ee" dap-eval)
-   ("ea" dap-ui-expressions-add)
-   ("er" dap-eval-region)
-   ("es" dap-eval-thing-at-point)
-   ("q" nil "quit" :color blue)
-   ("Q" dap-disconnect :color red)))
+    ;; stepping
+    ("n" dape-next)
+    ("i" dape-step-in)
+    ("o" dape-step-out)
+    ("c" dape-continue)
+    ("p" dape-pause)
+
+    ;; switch / info
+    ("ss" dape-repl)
+    ("st" dape-repl-threads)
+    ("sf" dape-repl-stack)
+    ("sl" dape-repl-scope)
+    ("sb" dape-repl-breakpoints)
+
+    ;; breakpoints
+    ("bb" dape-breakpoint-toggle)
+    ("ba" dape-breakpoint-log)
+    ("bd" dape-breakpoint-remove-at-point)
+    ("bc" dape-breakpoint-expression)
+    ("bh" dape-breakpoint-hits)
+
+    ;; debug
+    ("dd" dape)
+    ("dr" dape-restart)
+    ("dR" dape-repl)
+    ("dq" dape-quit :color blue)
+
+    ;; eval / watch
+    ("ee" dape-evaluate-expression)
+    ("ea" dape-watch-dwim)
+    ("er" (if (use-region-p)
+              (dape-evaluate-expression
+               (or (ignore-errors (dape--live-connection 'stopped t))
+                   (ignore-errors (dape--live-connection 'last)))
+               (buffer-substring-no-properties
+                (region-beginning) (region-end)))
+            (user-error "No active region")))
+    ("es" (let ((sym (thing-at-point 'symbol t)))
+            (if sym
+                (dape-evaluate-expression
+                 (or (ignore-errors (dape--live-connection 'stopped t))
+                     (ignore-errors (dape--live-connection 'last)))
+                 sym)
+              (user-error "No symbol at point"))))
+
+    ("q" nil "quit" :color blue)))
 
 
-;; -------------------------
-;; 7. Eglot (Alternative LSP, Disabled)
-;; -------------------------
-(use-package eglot
-  :disabled
-  :hook (prog-mode . eglot-ensure)
-  :bind (:map eglot-mode-map
-         ("C-c f" . eglot-format)
-         ("C-c d" . eldoc-doc-buffer)
-         ("C-c a" . eglot-code-actions)
-         ("C-c r" . eglot-rename)
-         ("C-c l" . eglot-command-map))
-  :config
-  (defvar-keymap eglot-command-map
-    :prefix 'eglot-command-map
-    "w q" #'eglot-shutdown
-    "w r" #'eglot-reconnect
-    "w s" #'eglot
-    "w d" #'eglot-show-workspace-configuration
-    "= =" #'eglot-format-buffer
-    "= r" #'eglot-format
-    "g a" #'xref-find-apropos
-    "g d" #'eglot-find-declaration
-    "g g" #'xref-find-definitions
-    "g i" #'eglot-find-implementation
-    "g r" #'xref-find-references
-    "g t" #'eglot-find-typeDefinition
-    "a q" #'eglot-code-action-quickfix
-    "a r" #'eglot-code-action-rewrite
-    "a i" #'eglot-code-action-inline
-    "a e" #'eglot-code-action-extract
-    "a o" #'eglot-code-action-organize-imports)
-  :custom
-  (eglot-sync-connect 0)
-  (eglot-autoshutdown t)
-  (eglot-extend-to-xref t)
-  (eglot-events-buffer-config '(:size 0 :format short))
-  (eglot-ignored-server-capabilities '(:documentLinkProvider
-                                       :documentOnTypeFormattingProvider
-                                       :foldingRangeProvider
-                                       :colorProvider
-                                       :inlayHintProvider)))
 
 ;; -------------------------
-;; 8. Misc & Language Init
+;; 7. Misc & Language Init
 ;; -------------------------
 
 (setq tab-always-indent 'complete)
@@ -333,36 +322,15 @@ _Q_: Disconnect     _sl_: List locals        _bl_: Set log message
 (add-hook 'org-mode-hook
           (lambda ()
             (setq-local company-backends
-                        ;; 使用双层括号 '((...)) 代表这是一个 Group (分组)
-                        ;; 组内的 backend 会并行工作，结果合并显示
                         '((company-files          ; [路径] 输入 / 或 ./ 或 ../ 时触发文件名补全
                            company-yasnippet      ; [Snippet] 补全代码片段
-                           company-capf           ; [Org] 原生补全 (比如 #+TITLE, Tags, Links)
+                           company-capf           ; [Org / Eglot] 原生补全
                            company-dabbrev)))))   ; [单词] 补全当前 Buffer 里的文字
 
-;; 让 C-c ' 打开的窗口自动启动 LSP
+;; 让 C-c ' 打开的窗口自动启动 Eglot
 (add-hook 'org-src-mode-hook
           (lambda ()
-            ;; 1. 只有特定的语言才启动 LSP (可选，根据你的需要调整)
-            ;; (when (member major-mode '(python-mode c++-mode rust-mode))
-            ;;   (lsp-deferred))
-            
-            ;; 或者 2. 只要是编程语言就尝试启动 (推荐)
-            (lsp-deferred)))
-(with-eval-after-load 'lsp-mode
-  ;; 允许 LSP 在 org-src block 中根据当前 org 文件的位置来判断 root
-  (setq lsp-auto-guess-root t))
-
-(use-package company-prescient
-  :ensure t
-  :after company
-  :config
-  (company-prescient-mode 1)
-  ;; 将你的选择历史保存在本地，重启 Emacs 依然有效
-  (prescient-persist-mode 1))
-
-
-
+            (eglot-ensure)))
 
 
 ;; Load other language specific configurations
@@ -382,20 +350,8 @@ _Q_: Disconnect     _sl_: List locals        _bl_: Set log message
 (require 'init-html)
 (require 'init-js2)
 
-
-
-
-
-
-;; lsp-mode：服务器挂了就别自动重启（避免死循环）
-(setq lsp-restart 'interactive)       ;; 或 'interactive（每次问你）
 ;; eglot：永不自动重连（需要你手动 M-x eglot 重新连）
-(setq eglot-autoreconnect nil)
-
-
-
-;; 不在输入停顿时自动检查
-(setq-default flymake-no-changes-timeout nil)  ;; [web:88][web:85]
+(setq-default eglot-autoreconnect nil)
 
 ;; 保存时检查（当前 buffer）
 (add-hook 'after-save-hook
@@ -404,5 +360,10 @@ _Q_: Disconnect     _sl_: List locals        _bl_: Set log message
               (flymake-start))))
 
 
+
+
+
+
 (provide 'init-lsp)
 ;;; init-lsp.el ends here
+

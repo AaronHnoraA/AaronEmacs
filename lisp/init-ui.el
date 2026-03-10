@@ -35,7 +35,6 @@
                    ("*quickrun*"             :select t :inhibit-window-quit t :same t)
                    (profiler-report-mode     :select t)
                    (xwidget-webkit-mode      :select t :same t)
-                   (flycheck-error-list-mode :select t :align t :size 10)
                    (comint-mode              :select t :align t :size 0.4)
                    (grep-mode                :select t :align t)
                    (rg-mode                  :select t :align t)
