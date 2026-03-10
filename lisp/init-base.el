@@ -1136,6 +1136,39 @@ Else, call `comment-or-uncomment-region' on the current line."
 (setq org-agenda-diary-file nil)
 
 
+
+(use-package popper
+  :ensure t ; or :straight t
+  :bind (("C-`"   . popper-toggle)
+         ("M-`"   . popper-cycle)
+         ("C-M-`" . popper-toggle-type))
+  :init
+  (setq popper-reference-buffers
+        '("\\*Messages\\*"
+          "Output\\*$"
+          "\\*Async Shell Command\\*"
+          help-mode
+          compilation-mode))
+  (popper-mode +1)
+  (popper-echo-mode +1))                ; For echo area hints
+
+
+
+(require 'fingertip)
+(require 'thing-edit)
+(require 'move-text)
+(require 'open-newline)
+(require 'duplicate-line)
+(require 'toggle-one-window)
+(require 'goto-line-preview)
+(require 'winpoint)
+(require 'basic-toolkit)
+(require 'symbol-overlay)
+(require 'sort-tab)
+(sort-tab-mode 1)
+
+
+
 (provide 'init-base)
 
 ;;; init-base.el ends here

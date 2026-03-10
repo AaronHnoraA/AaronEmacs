@@ -66,6 +66,8 @@
   :custom
   (tab-bar-history-buttons-show nil))
 
+
+
 (use-package nerd-icons
   :ensure t
   :when (display-graphic-p)
