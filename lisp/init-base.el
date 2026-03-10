@@ -1160,12 +1160,9 @@ Else, call `comment-or-uncomment-region' on the current line."
 (require 'open-newline)
 (require 'duplicate-line)
 (require 'toggle-one-window)
-(require 'goto-line-preview)
 (require 'winpoint)
 (require 'basic-toolkit)
 (require 'symbol-overlay)
-(require 'sort-tab)
-(sort-tab-mode 1)
 
 
 
