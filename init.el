@@ -120,6 +120,7 @@
 (require 'init-treesit)
 (require 'init-windows)
 (require 'init-project)
+(require 'init-server)
 
 
 ;; standalone apps

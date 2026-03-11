@@ -1,18 +1,33 @@
-;;; init-bazel.el --- bazel is the future -*- lexical-binding: t -*-
+;;; init-html.el --- HTML LSP configuration -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;;
+;; 前置依赖安装 (终端执行):
+;; npm install -g vscode-langservers-extracted
+;; 此包包含了 vscode-html-language-server
 
 ;;; Code:
-;; npm install -g vscode-langservers-extracted
-;; sp-install-serverREThtml-lsRET
 
+;; 1. 配置 Eglot 及 LSP Server 映射
+(use-package eglot
+  :ensure t
+  :defer t
+  :config
+  ;; Eglot 默认已支持 html-mode 和 mhtml-mode
+  ;; 此处通过 eglot-server-programs 将自定义的 vue-html-mode 绑定到 HTML LSP 服务
+  (add-to-list 'eglot-server-programs
+               '(vue-html-mode . ("vscode-html-language-server" "--stdio"))))
+
+;; 2. 配置 vue-html-mode 并设置自动启动 Eglot
 (use-package vue-html-mode
- :ensure t)
+  :ensure t
+  :hook (vue-html-mode . eglot-ensure))
 
-
-
+;; 3. (推荐) 为 Emacs 内置的 HTML 模式也自动开启 Eglot
+(use-package sgml-mode
+  :defer t
+  :hook ((html-mode . eglot-ensure)
+         (mhtml-mode . eglot-ensure)))
 
 (provide 'init-html)
 
-;;; init-bazel.el ends here
+;;; init-html.el ends here
