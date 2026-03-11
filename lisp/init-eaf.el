@@ -14,7 +14,7 @@
 (use-package eaf
   :load-path "~/.emacs.d/site-lisp/emacs-application-framework"
   ;; 核心：只有当你调用以下命令时，才会真正加载 EAF 及其 Python 进程
-  :commands (eaf-open-browser eaf-open eaf-open-pdf eaf-open-mindmap browse-web)
+  :commands (eaf-open-browser eaf-open eaf-open-pdf eaf-open-mindmap browse-web eaf-open-git)
   :custom
   ;; See https://github.com/emacs-eaf/emacs-application-framework/wiki/Customization
   (eaf-browser-continue-where-left-off t)
