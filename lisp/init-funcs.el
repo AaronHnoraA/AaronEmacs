@@ -27,11 +27,11 @@ BUFFER defaults to the current buffer."
 
 (defun my/rich-ui-buffer-p (&optional buffer threshold)
   "Return non-nil when BUFFER is suitable for expensive UI niceties.
-The buffer should be local, graphical, and smaller than THRESHOLD."
+Power-first preference: only require a graphical frame.
+BUFFER and THRESHOLD are accepted for compatibility."
+  (ignore threshold)
   (with-current-buffer (or buffer (current-buffer))
-    (and (display-graphic-p)
-         (not (my/remote-buffer-p))
-         (not (my/buffer-large-p nil threshold)))))
+    (display-graphic-p)))
 
 (defmacro set-company-backends-for! (mode &rest backends)
   "Set `company-backends' for MODE with BACKENDS."

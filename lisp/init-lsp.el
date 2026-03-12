@@ -81,7 +81,10 @@
 (use-package company-box
   :ensure t
   :if window-system
-  :hook (company-mode . company-box-mode))
+  :hook (company-mode . company-box-mode)
+  :custom
+  (company-box-doc-delay 0.2)
+  (company-box-scrollbar nil))
 
 (use-package company-prescient
   :ensure t
@@ -134,10 +137,9 @@
 (use-package eglot
   :ensure nil ; Built-in since Emacs 29
   :hook ((prog-mode . eglot-ensure)
-         ;; 关闭 Eglot 自带的 Inlay hints (类型推导提示)，保持 UI 干净
          (eglot-managed-mode . (lambda ()
-                                 (when (bound-and-true-p eglot-inlay-hints-mode)
-                                   (eglot-inlay-hints-mode -1)))))
+                                 (when (fboundp 'eglot-inlay-hints-mode)
+                                   (eglot-inlay-hints-mode 1)))))
   :bind (:map eglot-mode-map
          ("C-c f" . eglot-format-buffer)
          ("C-c d" . eldoc-doc-buffer)          ; 在独立 buffer 查看完整文档
@@ -181,17 +183,6 @@
   :ensure t
   :config
   (breadcrumb-mode 1))
-
-;; 左侧/右侧符号导航 (完全兼容 Eglot)
-(use-package imenu-list
-  :ensure t
-  :commands (imenu-list-smart-toggle)
-  :custom
-  (imenu-list-position 'left)
-  (imenu-list-highlight-current-entry t)
-  (imenu-list-focus-after-activation nil)
-  (imenu-list-size 0.25))
-
 
 ;; -------------------------
 ;; 6. Dape (Debugging)

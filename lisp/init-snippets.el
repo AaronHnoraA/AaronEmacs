@@ -3,8 +3,9 @@
 ;;; Commentary:
 ;; - 所有 prog-mode 自动启用 yas-minor-mode
 ;; - TAB 不给 yas 用（缩进 / company 用）
-;; - C-c y 显式展开 snippet
-;; - C-c s 打开 snippet 菜单
+;; - `C-c y` 是 snippet 前缀
+;; - `C-c y y` 展开 snippet
+;; - `C-c y i` 打开 snippet 菜单
 
 ;;; Code:
 
@@ -40,9 +41,13 @@
                  (locate-library "yasnippet-snippets"))))
   (yas-reload-all))
 
-;; 全局手动展开 / 插入 snippet
-(global-set-key (kbd "C-c y") #'yas-expand)
-(global-set-key (kbd "C-c s") #'yas-insert-snippet)
+;; 全局 snippet 前缀，避免覆盖 `rg' 默认的 `C-c s' 搜索入口。
+(define-prefix-command 'my/snippet-map)
+(global-set-key (kbd "C-c y") #'my/snippet-map)
+(keymap-set my/snippet-map "y" #'yas-expand)
+(keymap-set my/snippet-map "i" #'yas-insert-snippet)
+(keymap-set my/snippet-map "n" #'yas-new-snippet)
+(keymap-set my/snippet-map "v" #'yas-visit-snippet-file)
 
 (provide 'init-snippets)
 ;;; init-snippets.el ends here

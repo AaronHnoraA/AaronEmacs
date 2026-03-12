@@ -10,7 +10,8 @@
   :ensure nil
   :bind (:map dired-mode-map
          ;; consistent with ivy
-         ("C-c C-e"   . wdired-change-to-wdired-mode))
+         ("C-c C-e"   . wdired-change-to-wdired-mode)
+         ("H"         . dired-dotfiles-toggle))
   :custom
   (dired-dwim-target t)
   (dired-bind-vm nil)
@@ -34,9 +35,7 @@
           (revert-buffer)
         (dired-mark-files-regexp "^\\.")
         (dired-do-kill-lines))
-      (setq-local dired-dotfiles-show (not dired-dotfiles-show)))
-
-    (advice-add 'dired-do-print :override #'dired-dotfiles-toggle))
+      (setq-local dired-dotfiles-show (not dired-dotfiles-show))))
   :custom
   (dired-vc-rename-file t)
   (dired-do-revert-buffer t)
@@ -48,8 +47,13 @@
   :ensure t
   :hook (dired-mode . diredfl-mode))
 
-(setq insert-directory-program "gls" dired-use-ls-dired t)
-(setq dired-listing-switches "-al --group-directories-first")
+(let ((gls (executable-find "gls")))
+  (setq insert-directory-program (or gls insert-directory-program)
+        dired-use-ls-dired (and gls t)
+        dired-listing-switches
+        (if gls
+            "-alh --group-directories-first --time-style=long-iso"
+          "-alh")))
 
 
 (provide 'init-dired)

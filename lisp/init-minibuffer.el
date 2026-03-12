@@ -12,8 +12,30 @@
   :custom
   (vertico-sort-function nil))
 
+(use-package vertico-directory
+  :ensure nil
+  :after vertico
+  :bind (:map vertico-map
+         ("RET" . vertico-directory-enter)
+         ("DEL" . vertico-directory-delete-char)
+         ("M-DEL" . vertico-directory-delete-word)))
+
+(use-package orderless
+  :ensure t
+  :init
+  (setq completion-styles '(orderless basic partial-completion)
+        completion-category-defaults nil
+        completion-category-overrides
+        '((buffer (styles . (orderless flex)))
+          (file (styles . (basic partial-completion orderless)))
+          (imenu (styles . (orderless substring)))
+          (eglot-capf (styles . (orderless basic partial-completion)))
+          (kill-ring (styles . (orderless substring))))))
+
 (use-package embark
   :ensure t
+  :init
+  (setq prefix-help-command #'embark-prefix-help-command)
   :bind (:map minibuffer-local-map
          ("M-o"     . embark-act)
          ("C-c C-c" . embark-export)

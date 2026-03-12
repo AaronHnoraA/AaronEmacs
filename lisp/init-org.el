@@ -39,11 +39,13 @@
   :group 'org)
 
 (defcustom my/org-rich-ui-max-buffer-size (* 512 1024)
-  "Skip expensive Org UI niceties for buffers larger than this many bytes."
+  "Compatibility knob kept for older logic.
+Rich Org UI is no longer disabled based on buffer size."
   :type 'integer)
 
 (defcustom my/org-pretty-block-max-buffer-size (* 256 1024)
-  "Skip special block overlays for buffers larger than this many bytes."
+  "Compatibility knob kept for older logic.
+Special block overlays are no longer disabled based on buffer size."
   :type 'integer)
 
 (defcustom my/org-agenda-auto-refresh-idle-delay 4
@@ -51,31 +53,31 @@
   :type 'integer)
 
 (defun my/org-rich-ui-buffer-p ()
-  "Return non-nil when the current Org buffer can afford rich UI helpers."
+  "Return non-nil when the current Org buffer should use rich UI helpers."
   (my/rich-ui-buffer-p nil my/org-rich-ui-max-buffer-size))
 
 (defun my/org-enable-mixed-pitch-maybe ()
-  "Enable `mixed-pitch-mode' only for local graphical Org buffers."
+  "Enable `mixed-pitch-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
     (mixed-pitch-mode 1)))
 
 (defun my/org-enable-valign-maybe ()
-  "Enable `valign-mode' only where table rendering stays responsive."
+  "Enable `valign-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
     (valign-mode 1)))
 
 (defun my/org-enable-org-modern-indent-maybe ()
-  "Enable `org-modern-indent-mode' only for local graphical Org buffers."
+  "Enable `org-modern-indent-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
     (org-modern-indent-mode 1)))
 
 (defun my/org-enable-org-appear-maybe ()
-  "Enable `org-appear-mode' only for local graphical Org buffers."
+  "Enable `org-appear-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
     (org-appear-mode 1)))
 
 (defun my/org-enable-org-fragtog-maybe ()
-  "Enable `org-fragtog-mode' only for local graphical Org buffers."
+  "Enable `org-fragtog-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
     (org-fragtog-mode 1)))
 
@@ -201,9 +203,8 @@
   (setq olivetti-body-width 0.618) 
   :config
   (defun xs-toggle-olivetti-for-org ()
-    "If current buffer is org and only one visible buffer, enable olivetti mode."
-    (if (and (my/org-rich-ui-buffer-p)
-             (eq (length (window-list nil nil nil)) 1)
+    "If current buffer is Org and only one window is visible, enable olivetti."
+    (if (and (eq (length (window-list nil nil nil)) 1)
              (derived-mode-p 'org-mode))
         (olivetti-mode 1)
       (olivetti-mode 0)))
@@ -457,9 +458,7 @@
 
 (defun my/org-enable-jit-pretty-blocks ()
   "在当前 Buffer 启用 JIT 渲染机制。"
-  (when (and (derived-mode-p 'org-mode)
-             (not (my/remote-buffer-p))
-             (not (my/buffer-large-p nil my/org-pretty-block-max-buffer-size)))
+  (when (derived-mode-p 'org-mode)
     (unless (memq #'my/org-jit-prettify-blocks jit-lock-functions)
       (jit-lock-register #'my/org-jit-prettify-blocks t))
     (jit-lock-refontify)))

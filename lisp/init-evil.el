@@ -149,15 +149,44 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       "bl" 'bookmark-bmenu-list
       "bs" 'bookmark-save
 
+      ;; edit
+      "e"  '(:wk "edit")
+      "ed" 'duplicate-line-or-region-below
+      "eD" 'duplicate-line-or-region-above
+      "eo" 'open-newline-below
+      "eO" 'open-newline-above
+      "ej" 'move-text-down
+      "ek" 'move-text-up
+      "e1" 'toggle-one-window
+
+      ;; help
+      "h"  '(:wk "help")
+      "hf" 'helpful-callable
+      "hc" 'helpful-command
+      "hv" 'helpful-variable
+      "hk" 'helpful-key
+      "hw" 'my/show-warnings-buffer
+      "hF" 'describe-face
+      "hd" 'devdocs-lookup
+      "ht" 'tldr
+
       ;; code
       "c" '(:wk "code")
+      "ca" 'eglot-code-actions
       "cd" 'rmsbolt-compile
       "cc" 'compile
       "cC" 'recompile
+      "cf" 'eglot-format-buffer
+      "ci" 'show-imenu
+      "cI" 'eldoc-box-help-at-point
       "ck" 'kill-compilation
       "cl" '+switch-to-compilation
+      "cj" 'dape
+      "cr" 'eglot-rename
       "cw" 'delete-trailing-whitespace
       "cx" 'quickrun
+      "ce" 'my/byte-recompile-lisp-dir
+      "cE" 'my/native-compile-lisp-dir
 
       ;; window
       "w" 'evil-window-map
@@ -177,6 +206,10 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       "tt" 'tab-bar-switch-to-tab
       "t'" 'tab-bar-switch-to-recent-tab
       "tr" 'tab-bar-rename-tab
+      "t[" 'centaur-tabs-backward
+      "t]" 'centaur-tabs-forward
+      "t{" 'centaur-tabs-backward-group
+      "t}" 'centaur-tabs-forward-group
 
       ;; search
       "s" '(:wk "search")
@@ -188,7 +221,21 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       "ss" 'consult-line
 
       ;; project
-      "p" 'projectile-command-map
+      "p"  '(:wk "project")
+      "p." 'my/project-dispatch
+      "pp" 'my/project-switch
+      "po" 'my/project-open-workbench
+      "pf" 'my/project-find-file
+      "pr" 'my/project-recent-file
+      "pb" 'my/project-switch-buffer
+      "ps" 'my/project-ripgrep
+      "pd" 'my/project-open-root
+      "pm" 'my/project-magit-status
+      "pv" 'my/project-vterm
+      "pa" 'my/project-add-known-project
+      "pD" 'my/project-discover-projects-in-directory
+      "pk" 'my/project-kill-buffers
+      "px" 'my/project-remove-known-project
 
       ;; app
       "a" '(:wk "app")
@@ -200,10 +247,19 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       ;; open
       "o" '(:wk "open")
       "oc" 'org-capture
+      "od" 'dirvish-dwim
+      "oD" 'dirvish-fd
       "ol" 'org-store-link
-      "ot" 'ansi-term
-      "oe" 'eshell
-      "os" 'shell)
+      "ob" 'browse-url
+      "ot" 'vterm-toggle
+      "oT" 'ansi-term
+      "ov" 'vterm
+      "oV" 'my/vterm-named
+      "oS" 'my/vterm-ssh
+      "ow" 'eww-browse-url
+      "ox" 'xwidget-webkit-browse-url
+      "oe" 'eshell-toggle
+      "os" 'shell-toggle)
 
     (with-eval-after-load 'org
       (define-leader-key 'normal org-mode-map :localleader
@@ -213,6 +269,8 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
         "e" 'org-set-effort
         "f" 'org-footnote-action
         "l" 'org-lint
+        "n" 'org-roam-node-insert
+        "N" 'org-roam-node-find
         "o" 'org-toggle-ordered-property
         "p" 'org-set-property
         "q" 'org-set-tags-command
@@ -220,6 +278,8 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
         "s" 'org-schedule
         "t" 'org-todo
         "T" 'org-todo-list
+        "v" 'my/org-latex-preview-visible-now
+        "z" 'my/org-zotero-fill-metadata
 
         ;; babel
         "bp" 'org-babel-previous-src-block

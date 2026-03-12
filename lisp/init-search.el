@@ -12,17 +12,9 @@
   :ensure t
   :hook (after-init . ivy-mode)
   :config
-  ;; TRAMP
-  (setq tramp-default-method "ssh")
-  ;; 明确告诉 TRAMP 去读 ~/.ssh/config 里的 Host 别名
-  (setq tramp-use-ssh-controlmaster-options nil)
-  ;; 关键：启用 ssh-config 补全（TRAMP 会利用 ssh -G / config 解析）
-  (setq tramp-completion-use-auth-sources t)
-
   (setq ivy-use-virtual-buffers t
         ivy-initial-inputs-alist nil
         ivy-count-format "%d/%d "
-        enable-recursive-minibuffers nil
         ivy-re-builders-alist '((t . ivy--regex-ignore-order)))
 
   )
@@ -49,9 +41,6 @@
   (if (active-minibuffer-window)
       (keyboard-quit)
     (counsel-M-x)))
-
-;; 强制关闭递归 minibuffer，避免 M-x 套娃
-(setq enable-recursive-minibuffers nil)
 
 (use-package counsel
   :ensure t

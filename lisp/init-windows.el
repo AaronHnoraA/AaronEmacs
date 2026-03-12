@@ -49,26 +49,6 @@
 ;;;; Dirvish (Dired UI) - practical + pretty + icons
 ;;;; =========================
 
-;; 基础依赖
-(use-package dired
-  :ensure nil
-  :custom
-  ;; macOS 上 ls 参数可能不支持 GNU 选项；你用 coreutils 的 gls 更稳。
-  ;; 如果你没有 gls，就把下面 dired-use-ls-dired 设为 nil 并简化 listing switches。
-  (dired-listing-switches "-alh --group-directories-first --time-style=long-iso")
-  (dired-kill-when-opening-new-dired-buffer t)
-  (delete-by-moving-to-trash t)
-  :config
-  ;; 让 dired 用外部 ls（GNU ls）能力更全
-  (setq dired-use-ls-dired t))
-
-;; 目录高亮（很实用）
-(use-package diredfl
-  :ensure t
-  :hook (dired-mode . diredfl-mode)
-  :custom
-  (diredfl-global-mode t))
-
 ;; 图标依赖（必须先装）
 (use-package nerd-icons
   :ensure t)
@@ -132,24 +112,6 @@
   (set-fontset-font t '(#xe000 . #xf8ff) "JetBrainsMono Nerd Font" nil 'append)
   ;; 有些 Nerd Fonts 还用到更高的 PUA 扩展区（可选但建议加）
   (set-fontset-font t '(#xf0000 . #xffffd) "JetBrainsMono Nerd Font" nil 'append))
-
-;; 搜索/过滤：配合 dirvish-fd、consult 更舒服
-(use-package vertico
-  :ensure t
-  :init (vertico-mode 1))
-
-(use-package orderless
-  :ensure t
-  :custom
-  (completion-styles '(orderless basic))
-  (orderless-component-separator #'orderless-escapable-split-on-space)
-  (orderless-matching-styles '(orderless-initialism orderless-prefixes orderless-regexp)))
-
-(use-package consult
-  :ensure t)
-
-
-
 
 (use-package centaur-tabs
   :ensure t
@@ -218,12 +180,7 @@
   (term-mode . centaur-tabs-local-mode)
   (calendar-mode . centaur-tabs-local-mode)
   (org-agenda-mode . centaur-tabs-local-mode)
-  (helpful-mode . centaur-tabs-local-mode)
-  :bind
-  ("C-c b" . centaur-tabs-backward)
-  ("C-c n" . centaur-tabs-forward)
-  ("C-c m" . centaur-tabs-forward-group)
-  ("C-c v" . centaur-tabs-backward-group))
+  (helpful-mode . centaur-tabs-local-mode))
 
 (use-package bookmark
   :ensure nil
