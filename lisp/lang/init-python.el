@@ -7,8 +7,7 @@
 
 (use-package eglot
   :ensure t
-  :hook
-  (python-mode . eglot-ensure))
+  :hook (python-mode . eglot-ensure))
 
 (use-package python
   :ensure nil

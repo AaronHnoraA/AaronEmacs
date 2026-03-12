@@ -7,14 +7,7 @@
 ;; ---------------------------
 ;; Vale + Flymake (Spell Check)
 ;; ---------------------------
-(unless (package-installed-p 'flymake-vale) 
-  (package-vc-install '
-                      (flymake-vale
-                      :url "https://github.com/tpeacock19/flymake-vale.git" 
-                      :rev 
-                      :last-release)
-                      )
-) 
+(my/package-ensure-vc 'flymake-vale "https://github.com/tpeacock19/flymake-vale.git")
 
 
 ;; flymake-vale

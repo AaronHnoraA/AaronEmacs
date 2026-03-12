@@ -1,4 +1,4 @@
-;;; move-text.el --- Move current line or region.
+;;; move-text.el --- Move current line or region. -*- lexical-binding: t; -*-
 
 ;; Filename: move-text.el
 ;; Description: Move current line or region.

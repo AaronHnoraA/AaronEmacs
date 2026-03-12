@@ -34,6 +34,51 @@
   (unless (file-directory-p dir)
     (make-directory dir t)))
 
+(defgroup my/org-ui nil
+  "Org UI and note-taking ergonomics."
+  :group 'org)
+
+(defcustom my/org-rich-ui-max-buffer-size (* 512 1024)
+  "Skip expensive Org UI niceties for buffers larger than this many bytes."
+  :type 'integer)
+
+(defcustom my/org-pretty-block-max-buffer-size (* 256 1024)
+  "Skip special block overlays for buffers larger than this many bytes."
+  :type 'integer)
+
+(defcustom my/org-agenda-auto-refresh-idle-delay 4
+  "Seconds to wait before refreshing Org agenda files after startup."
+  :type 'integer)
+
+(defun my/org-rich-ui-buffer-p ()
+  "Return non-nil when the current Org buffer can afford rich UI helpers."
+  (my/rich-ui-buffer-p nil my/org-rich-ui-max-buffer-size))
+
+(defun my/org-enable-mixed-pitch-maybe ()
+  "Enable `mixed-pitch-mode' only for local graphical Org buffers."
+  (when (my/org-rich-ui-buffer-p)
+    (mixed-pitch-mode 1)))
+
+(defun my/org-enable-valign-maybe ()
+  "Enable `valign-mode' only where table rendering stays responsive."
+  (when (my/org-rich-ui-buffer-p)
+    (valign-mode 1)))
+
+(defun my/org-enable-org-modern-indent-maybe ()
+  "Enable `org-modern-indent-mode' only for local graphical Org buffers."
+  (when (my/org-rich-ui-buffer-p)
+    (org-modern-indent-mode 1)))
+
+(defun my/org-enable-org-appear-maybe ()
+  "Enable `org-appear-mode' only for local graphical Org buffers."
+  (when (my/org-rich-ui-buffer-p)
+    (org-appear-mode 1)))
+
+(defun my/org-enable-org-fragtog-maybe ()
+  "Enable `org-fragtog-mode' only for local graphical Org buffers."
+  (when (my/org-rich-ui-buffer-p)
+    (org-fragtog-mode 1)))
+
 ;;; ----------------------------------------------------------------------------
 ;;; 2. Org Core Configuration (核心设置)
 ;;; ----------------------------------------------------------------------------
@@ -145,7 +190,7 @@
 ;; 3.1 混合字体
 (use-package mixed-pitch
   :ensure t
-  :hook (org-mode . mixed-pitch-mode))
+  :hook (org-mode . my/org-enable-mixed-pitch-maybe))
 
 ;; 3.2 写作专注模式 (自动居中)
 (use-package olivetti
@@ -157,7 +202,8 @@
   :config
   (defun xs-toggle-olivetti-for-org ()
     "If current buffer is org and only one visible buffer, enable olivetti mode."
-    (if (and (eq (length (window-list nil nil nil)) 1)
+    (if (and (my/org-rich-ui-buffer-p)
+             (eq (length (window-list nil nil nil)) 1)
              (derived-mode-p 'org-mode))
         (olivetti-mode 1)
       (olivetti-mode 0)))
@@ -168,7 +214,7 @@
 ;; 3.3 表格对齐
 (use-package valign
   :ensure t
-  :hook (org-mode . valign-mode))
+  :hook (org-mode . my/org-enable-valign-maybe))
 
 ;; 3.4 Org Modern (全面增强版)
 (use-package org-modern
@@ -232,17 +278,20 @@
   (setq-default line-spacing 0.1))
 
 ;; 3.5 Org Modern Indent
+(my/package-ensure-vc 'org-modern-indent "https://github.com/jdtsmith/org-modern-indent.git")
+
 (use-package org-modern-indent
-  :vc (:url "https://github.com/jdtsmith/org-modern-indent.git")
-  :hook (org-mode . org-modern-indent-mode)
+  :after org-modern
+  :hook (org-mode . my/org-enable-org-modern-indent-maybe)
   :config
   (setq org-modern-indent-width 4))
 
 ;; 3.6 自动显示强调符
+(my/package-ensure-vc 'org-appear "https://github.com/awth13/org-appear.git")
+
 (use-package org-appear
-  :vc (:url "https://github.com/awth13/org-appear.git")
   :after org
-  :hook (org-mode . org-appear-mode)
+  :hook (org-mode . my/org-enable-org-appear-maybe)
   :custom
   (org-appear-autoemphasis t)
   (org-appear-autolinks t)
@@ -408,8 +457,11 @@
 
 (defun my/org-enable-jit-pretty-blocks ()
   "在当前 Buffer 启用 JIT 渲染机制。"
-  (when (derived-mode-p 'org-mode)
-    (jit-lock-register #'my/org-jit-prettify-blocks t)
+  (when (and (derived-mode-p 'org-mode)
+             (not (my/remote-buffer-p))
+             (not (my/buffer-large-p nil my/org-pretty-block-max-buffer-size)))
+    (unless (memq #'my/org-jit-prettify-blocks jit-lock-functions)
+      (jit-lock-register #'my/org-jit-prettify-blocks t))
     (jit-lock-refontify)))
 
 (defun my/org-reset-overlays ()
@@ -432,14 +484,17 @@
   (setq org-agenda-diary-file my-org-diary-file)
   :config
   (appt-activate 1)
-  (defun my/reload-agenda ()
+  (defun my/reload-agenda (&optional silent)
     "Reload all org files under root into agenda."
     (interactive)
     (let ((files (directory-files-recursively my-org-root "\\.org$")))
       (setq files (cl-remove-if (lambda (path) (string-match-p "/ltximg/" path)) files))
       (setq org-agenda-files files)
       (org-agenda-to-appt)
-      (message "Agenda refreshed: %d files loaded." (length files))))
+      (unless silent
+        (message "Agenda refreshed: %d files loaded." (length files)))))
+  (run-with-idle-timer my/org-agenda-auto-refresh-idle-delay nil
+                       #'my/reload-agenda t)
 
   :custom
   (org-agenda-span 'week)
@@ -537,7 +592,9 @@
         (when (re-search-forward "^#\\+last_modified:" nil t)
           (delete-region (point) (line-end-position))
           (insert (format " [%s]" (format-time-string "%Y-%m-%d %a %H:%M")))))))
-  (add-hook 'before-save-hook #'pv/org-set-last-modified)
+  (add-hook 'org-mode-hook
+            (lambda ()
+              (add-hook 'before-save-hook #'pv/org-set-last-modified nil t)))
 
   (setq org-roam-capture-templates
         '(("m" "Math" plain "%?" :if-new (file+head "math/${slug}.org" "#+title: ${title}\n#+date: %u\n#+filetags: :math:\n") :unnarrowed t)
@@ -585,7 +642,7 @@
 
 (use-package org-fragtog
   :ensure t
-  :hook (org-mode . org-fragtog-mode))
+  :hook (org-mode . my/org-enable-org-fragtog-maybe))
 
 (use-package bibtex-completion
   :custom

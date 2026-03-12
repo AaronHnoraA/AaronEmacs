@@ -5,11 +5,15 @@
 
 ;;; Code:
 
+(defcustom my/enable-direnv nil
+  "Whether to enable `direnv-mode' automatically."
+  :type 'boolean
+  :group 'environment)
+
 (use-package direnv
   :ensure t
-  :defer 1
-  :config
-  (direnv-mode -1))
+  :if my/enable-direnv
+  :hook (after-init . direnv-mode))
 
 (provide 'init-direnv)
 

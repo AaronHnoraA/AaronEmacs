@@ -1,17 +1,27 @@
+;;; init.el --- The main entry for emacs -*- lexical-binding: t -*-
+
 (setq user-full-name "aaron")
+(require 'package)
+
+;; 包源要在任何安装逻辑之前设置好
+(setq package-archives
+      '(("melpa"  . "https://melpa.org/packages/")
+        ("gnu"    . "https://elpa.gnu.org/packages/")
+        ("nongnu" . "https://elpa.nongnu.org/nongnu/")
+        ("org"    . "https://orgmode.org/elpa/")))
 ;; =========================
 ;; 同步 shell PATH 到 Emacs（macOS 必备）
 ;; =========================
 (defun my/package-initialize-once ()
   "Initialize package.el if needed."
-  (require 'package)
   (unless package--initialized
     (package-initialize)))
 
 (defun my/ensure-use-package-installed ()
   "Install `use-package' when missing."
   (unless (package-installed-p 'use-package)
-    (package-refresh-contents)
+    (unless package-archive-contents
+      (package-refresh-contents))
     (package-install 'use-package)))
 
 (my/package-initialize-once)
@@ -21,21 +31,18 @@
 
 
 (use-package exec-path-from-shell
+  :if (and (eq system-type 'darwin)
+           (not noninteractive)
+           (or (daemonp) (display-graphic-p)))
   :ensure t
+  :demand t
   :init
   (setq exec-path-from-shell-check-startup-files nil)
   :config
   (exec-path-from-shell-initialize))
-
-(use-package direnv
-  :ensure t
-  :after exec-path-from-shell
-  :config
-  (direnv-mode))
 ;; 关键：以后 use-package 默认都会自动安装缺失包
 ;(setq use-package-always-ensure t)
 
-;;; init.el --- The main entry for emacs -*- lexical-binding: t -*-
 ;;; Commentary:
 ;;; Code:
 
@@ -50,16 +57,6 @@
 ;;
 ;; `cat /proc/sys/fs/pipe-max-size` to check the max value.
 (setq read-process-output-max (* 4 1024 1024))
-
-(require 'package)
-(setq package-archives
-      '(("melpa"  . "https://melpa.org/packages/")
-        ("gnu"    . "https://elpa.gnu.org/packages/")
-        ("nongnu" . "https://elpa.nongnu.org/nongnu/")
-        ("org"    . "https://orgmode.org/elpa/")))
-
-(my/package-initialize-once)
-(my/ensure-use-package-installed)
 (eval-and-compile
   (setq use-package-always-ensure nil)
   (setq use-package-always-defer nil)
@@ -91,6 +88,8 @@
   (add-to-list 'load-path (file-name-as-directory dir))
   (add-to-list 'load-path (file-name-as-directory (expand-file-name "lang" dir))))
 (setq custom-file (locate-user-emacs-file "custom.el"))
+
+(require 'init-package-utils)
 
 (defun my/reload-init ()
   "Reload Emacs init file safely."

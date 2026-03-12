@@ -1,4 +1,4 @@
-;;; duplicate-line.el --- Provie duplicate line functions, extract from my basic-toolkit.el
+;;; duplicate-line.el --- Provie duplicate line functions, extract from my basic-toolkit.el -*- lexical-binding: t; -*-
 
 ;; Filename: duplicate-line.el
 ;; Description: Provie duplicate line functions, extract from my basic-toolkit.el

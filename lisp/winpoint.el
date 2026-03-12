@@ -1,4 +1,4 @@
-;;; winpoint.el --- Remember buffer positions per-window, not per buffer
+;;; winpoint.el --- Remember buffer positions per-window, not per buffer -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2006  Jorgen Schaefer
 ;; Copyright (C) 2009  Andy Stewart

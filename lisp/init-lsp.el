@@ -369,4 +369,3 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
 
 (provide 'init-lsp)
 ;;; init-lsp.el ends here
-

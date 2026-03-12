@@ -1,4 +1,4 @@
-;;; thing-edit.el --- Extension thing edit
+;;; thing-edit.el --- Extension thing edit -*- lexical-binding: t; -*-
 
 ;; Author: Andy Stewart <lazycat.manatee@gmail.com>
 ;; Maintainer: Andy Stewart <lazycat.manatee@gmail.com>

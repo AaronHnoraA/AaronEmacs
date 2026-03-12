@@ -15,7 +15,8 @@
 
 (require 'server)
 
-(unless (server-running-p)
+(unless (or noninteractive
+            (server-running-p))
   (server-start))
 
 

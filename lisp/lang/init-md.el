@@ -5,20 +5,14 @@
 
 ;;; Code:
 
-(unless (package-installed-p 'markdown-mode)
-  (package-vc-install
-   '(markdown-mode
-     :url "https://github.com/jrblevin/markdown-mode.git"
-     :rev :last-release)))
+(my/package-ensure-vc 'markdown-mode "https://github.com/jrblevin/markdown-mode.git")
 
 (use-package markdown-mode
-  :ensure t
-  :mode ("README\\.md\\'" . gfm-mode)
+  :mode (("README\\.md\\'" . gfm-mode)
+         ("\\.md\\'" . markdown-mode))
   :init (setq markdown-command "multimarkdown")
   :bind (:map markdown-mode-map
          ("C-c C-e" . markdown-do)))
-
-(add-to-list 'auto-mode-alist '("\\.md\\'" . markdown-mode))
 
 (provide 'init-md)
 

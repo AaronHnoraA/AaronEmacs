@@ -18,13 +18,10 @@
       (list (expand-file-name "tree-sitter/" user-emacs-directory)))
 
 
-(unless (package-installed-p 'treesit-fold)
-  (package-vc-install
-   '(treesit-fold
-     :url "https://github.com/emacs-tree-sitter/treesit-fold.git"
-     :rev :last-release)))
+(my/package-ensure-vc 'treesit-fold "https://github.com/emacs-tree-sitter/treesit-fold.git")
 
-(use-package treesit-fold)
+(use-package treesit-fold
+  :commands (treesit-fold-mode treesit-fold-toggle))
 
 
 
