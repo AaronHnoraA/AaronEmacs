@@ -1,4 +1,4 @@
-;;; open-newline.el --- Open newline like vi
+;;; open-newline.el --- Open newline like vi -*- lexical-binding: t; -*-
 
 ;; Filename: open-newline.el
 ;; Description: Open newline like vi

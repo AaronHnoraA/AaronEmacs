@@ -1,4 +1,4 @@
-;;; toggle-one-window.el --- Toggle between window layout and one window.
+;;; toggle-one-window.el --- Toggle between window layout and one window. -*- lexical-binding: t; -*-
 
 ;; Filename: toggle-one-window.el
 ;; Description: Toggle between window layout and one window.

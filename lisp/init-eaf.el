@@ -11,8 +11,11 @@
 ;; chmod +x ./install-eaf.py
 ;; ./install-eaf.py
 
+(defconst my/eaf-load-path
+  (expand-file-name "site-lisp/emacs-application-framework" user-emacs-directory))
+
 (use-package eaf
-  :load-path "~/.emacs.d/site-lisp/emacs-application-framework"
+  :load-path my/eaf-load-path
   ;; 核心：只有当你调用以下命令时，才会真正加载 EAF 及其 Python 进程
   :commands (eaf-open-browser eaf-open eaf-open-pdf eaf-open-mindmap browse-web eaf-open-git)
   :custom

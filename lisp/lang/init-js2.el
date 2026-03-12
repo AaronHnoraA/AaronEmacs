@@ -1,3 +1,10 @@
+;;; init-js2.el --- JavaScript mode integration -*- lexical-binding: t; -*-
+
+;;; Commentary:
+;;
+
+;;; Code:
+
 (use-package js2-mode
   :ensure t
   )

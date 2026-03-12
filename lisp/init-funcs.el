@@ -4,6 +4,35 @@
 
 ;;; Code:
 
+(defgroup my/editor-experience nil
+  "Shared helpers for editor ergonomics."
+  :group 'convenience)
+
+(defcustom my/large-buffer-size (* 1024 1024)
+  "Default threshold in bytes for treating a buffer as large."
+  :type 'integer)
+
+(defun my/buffer-large-p (&optional buffer threshold)
+  "Return non-nil if BUFFER exceeds THRESHOLD bytes.
+BUFFER defaults to the current buffer.  THRESHOLD defaults to
+`my/large-buffer-size'."
+  (with-current-buffer (or buffer (current-buffer))
+    (> (buffer-size) (or threshold my/large-buffer-size))))
+
+(defun my/remote-buffer-p (&optional buffer)
+  "Return non-nil if BUFFER is remote.
+BUFFER defaults to the current buffer."
+  (with-current-buffer (or buffer (current-buffer))
+    (file-remote-p (or buffer-file-name default-directory))))
+
+(defun my/rich-ui-buffer-p (&optional buffer threshold)
+  "Return non-nil when BUFFER is suitable for expensive UI niceties.
+The buffer should be local, graphical, and smaller than THRESHOLD."
+  (with-current-buffer (or buffer (current-buffer))
+    (and (display-graphic-p)
+         (not (my/remote-buffer-p))
+         (not (my/buffer-large-p nil threshold)))))
+
 (defmacro set-company-backends-for! (mode &rest backends)
   "Set `company-backends' for MODE with BACKENDS."
   `(add-hook (intern (format "%s-hook" ',mode))

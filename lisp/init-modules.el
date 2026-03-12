@@ -26,7 +26,6 @@
 (require 'init-org-zotero)
 (require 'init-eaf)
 (require 'init-text)
-(require 'init-mail)
 (require 'init-shell)
 (require 'init-spell)
 (require 'init-gpt)
@@ -39,9 +38,12 @@
 (require 'init-auctex)
 (require 'init-jupyter)
 (require 'init-browser)
-(require 'init-stock)
 (require 'init-fzfs)
-(require 'init-joplin)
+(my/package-register-vc 'joplin-mode
+                        '(:url "https://github.com/cinsk/joplin-mode.git"
+                          :rev :last-release))
+(with-eval-after-load 'markdown-mode
+  (require 'init-joplin))
 (require 'init-ignored)
 
 ;; MacOS specific

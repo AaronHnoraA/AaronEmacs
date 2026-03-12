@@ -1,3 +1,10 @@
+;;; init-fzfs.el --- fzf integration -*- lexical-binding: t; -*-
+
+;;; Commentary:
+;;
+
+;;; Code:
+
 (use-package fzf
   :ensure t
   :bind

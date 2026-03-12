@@ -1,4 +1,4 @@
-;;; basic-toolkit.el --- Basic edit toolkit.
+;;; basic-toolkit.el --- Basic edit toolkit. -*- lexical-binding: t; -*-
 
 ;; Filename: basic-toolkit.el
 ;; Description: Basic edit toolkit.

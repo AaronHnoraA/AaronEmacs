@@ -170,11 +170,7 @@
 
 ;;; Tab Line:
 
-(unless (package-installed-p 'all-the-icons)
-  (package-vc-install
-   '(all-the-icons
-     :url "https://github.com/domtronn/all-the-icons.el.git"
-     :rev :last-release)))
+(my/package-ensure-vc 'all-the-icons "https://github.com/domtronn/all-the-icons.el.git")
 
 ;;; Text Area:
 

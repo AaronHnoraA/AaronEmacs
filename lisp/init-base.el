@@ -53,24 +53,15 @@
 (setq display-raw-bytes-as-hex t
       redisplay-skip-fontification-on-input t)
 
-;(unless (package-installed-p 'ligature) 
-;  (package-vc-install '
-;                      (ligture
-;                      :url "https://github.com/mickeynp/ligature.el.git" 
-;                      :rev 
-;                      :last-release)
-;                      )
-;)
-
-(require 'ligature)
-
-(ligature-set-ligatures
- 't
- '("==" "===" "!=" "->" "<-" "<->"
-   "=>" "<=" ">=" "::" ":="
-   "&&" "||" ">>" "<<"))
-
-(global-ligature-mode t)
+(use-package ligature
+  :demand t
+  :config
+  (ligature-set-ligatures
+   't
+   '("==" "===" "!=" "->" "<-" "<->"
+     "=>" "<=" ">=" "::" ":="
+     "&&" "||" ">>" "<<"))
+  (global-ligature-mode t))
 
 
 
@@ -83,8 +74,6 @@
 
 ;; ========= 行号显示策略 =========
 (setq display-line-numbers-minor-tick 0)
-
-(add-hook 'prog-mode-hook #'display-line-numbers-mode)
 
 ;; ========= 行号字体 =========
 (set-face-attribute 'line-number nil
@@ -110,13 +99,6 @@
 
 ;; 3. 启用行号（如果还没启用）
 (global-display-line-numbers-mode 1)
-
-;; 启用行号（全局或按需）
-(global-display-line-numbers-mode 1)
-
-;; 只在编程模式开（你也可以换成 text-mode / 全局）
-(add-hook 'prog-mode-hook 'display-line-numbers-mode)
-(add-hook 'org-mode-hook 'display-line-numbers-mode)
 ;; 可选：在一些模式禁用（终端、shell 等）
 (dolist (hook '(term-mode-hook vterm-mode-hook eshell-mode-hook))
   (add-hook hook (lambda () (display-line-numbers-mode -1))))
@@ -160,8 +142,6 @@
 
 ;; Dont move points out of eyes
 (setq mouse-yank-at-point t)
-
-(setq-default fill-column 80)
 
 ;; Treats the `_' as a word constituent
 (add-hook 'after-change-major-mode-hook
@@ -421,12 +401,6 @@
   (repeat-exit-timeout 1)
   (repeat-exit-key (kbd "RET")))
 
-;; Server mode.
-;; Use emacsclient to connect
-(use-package server
-  :ensure nil
-  :hook (after-init . server-mode))
-
 ;; Workaround with minified source files
 (use-package so-long
   :ensure nil
@@ -591,7 +565,7 @@ Else, call `comment-or-uncomment-region' on the current line."
 
 ;; transparent remote access
 (use-package tramp
-  :ensure t
+  :ensure nil
   :defer t
   :custom
   ;; Always use file cache when using tramp
@@ -739,7 +713,7 @@ Else, call `comment-or-uncomment-region' on the current line."
   :ensure nil
   :hook (after-init . recentf-mode)
   :custom
-  (recentf-max-saved-items 300)
+  (recentf-max-saved-items 200)
   (recentf-auto-cleanup 'never)
   (recentf-exclude '(;; Folders on MacOS start
                      "^/private/tmp/"
@@ -765,17 +739,12 @@ Else, call `comment-or-uncomment-region' on the current line."
   :ensure t
   :commands try try-and-refresh)
 
-;; MacOS specific
-(use-package exec-path-from-shell
-  :ensure t
-  :when (eq system-type 'darwin)
-  :hook (after-init . exec-path-from-shell-initialize))
-
-
 (use-package vlf
-  :ensure t)
-(eval-after-load "vlf"
-  '(define-key vlf-prefix-map "\C-xv" vlf-mode-map))
+  :ensure t
+  :commands (vlf vlf-mode)
+  :init
+  (with-eval-after-load 'vlf
+    (define-key vlf-prefix-map "\C-xv" vlf-mode-map)))
 
 ;; 关闭无用 UI，打开有用能力
 (menu-bar-mode 1)
@@ -796,31 +765,6 @@ Else, call `comment-or-uncomment-region' on the current line."
 
 (setq treesit-font-lock-level 4)
 (setq compilation-scroll-output t)
-
-(save-place-mode 1)
-
-;; 保存 minibuffer 历史
-;; 保存最近打开的文件记录
-(unless (package-installed-p 'buttercup) 
-  (package-vc-install '
-                      (buttercup
-                      :url "https://github.com/jorgenschaefer/emacs-buttercup.git" 
-                      :rev 
-                      :last-release)
-                      )
-)
-(require 'buttercup)
-(recentf-mode 1)
-(setq recentf-max-saved-items 200) ; 设置记录的文件数量
-
-(unless (package-installed-p 'multiple-cursors) 
-  (package-vc-install '
-                      (multiple-cursors
-                      :url "https://github.com/jwiegley/emacs-async.git" 
-                      :rev 
-                      :last-release)
-                      )
-)
 
 (autoload 'dired-async-mode "dired-async.el" nil t)
 (dired-async-mode 1)
@@ -919,10 +863,20 @@ Else, call `comment-or-uncomment-region' on the current line."
   (setq tramp-login-args '(("-l")))
 
   ;; 使用远程 PATH
-  (setq tramp-remote-path '(tramp-own-remote-path))
+  (setq tramp-remote-path '(tramp-own-remote-path
+                            tramp-default-remote-path
+                            "/usr/local/bin"
+                            "/opt/homebrew/bin"
+                            "/opt/local/bin"
+                            "/usr/sbin"
+                            "/sbin"
+                            "~/.local/bin"
+                            "~/.cargo/bin"
+                            "/snap/bin"))
 
   ;; SSH ControlMaster (极大加速)
   (setq tramp-use-ssh-controlmaster-options t)
+  (setq tramp-use-scp-direct-remote-copying t)
 
   ;; 减少锁文件
   (setq remote-file-name-inhibit-locks t)
@@ -936,16 +890,21 @@ Else, call `comment-or-uncomment-region' on the current line."
 ;; find-file 打开速度反馈
 ;; ===============================
 
+(defcustom my/find-file-feedback-threshold 0.4
+  "Only report local file opens slower than this many seconds."
+  :type 'number)
+
 (defun pv/with-find-file-feedback (orig filename &rest args)
   (let ((t0 (float-time)))
-    (message "Opening: %s" filename)
     (prog1
         (apply orig filename args)
-      (let ((remote (ignore-errors (file-remote-p filename))))
-        (message "[%s] Opened in %.2fs: %s"
-                 (if remote "TRAMP" "Local")
-                 (- (float-time) t0)
-                 filename)))))
+      (let* ((elapsed (- (float-time) t0))
+             (remote (ignore-errors (file-remote-p filename))))
+        (when (or remote (> elapsed my/find-file-feedback-threshold))
+          (message "[%s %.2fs] %s"
+                   (if remote "TRAMP" "Local")
+                   elapsed
+                   filename))))))
 
 (advice-add 'find-file :around #'pv/with-find-file-feedback)
 
@@ -968,12 +927,10 @@ Else, call `comment-or-uncomment-region' on the current line."
 
 ;;(setq debug-on-quit t)
 
-(use-package spinner
-  :ensure t)
-
 (defvar pv/spinner nil)
 
 (defun pv/spinner-start ()
+  (require 'spinner)
   (setq pv/spinner (spinner-start 'progress-bar-filled))
   (force-mode-line-update t))
 
@@ -1078,8 +1035,6 @@ Else, call `comment-or-uncomment-region' on the current line."
 
 ;; 不清除 字体 缓存.
 (setq inhibit-compacting-font-caches t)
-
-(global-so-long-mode)
 
 
 

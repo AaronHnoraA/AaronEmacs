@@ -1,5 +1,4 @@
-
-;;; init-snippets.el --- The necessary settings -*- lexical-binding: t -*-
+;;; init-project.el --- Project navigation and integration -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;;
@@ -8,15 +7,31 @@
 
 (use-package projectile
   :ensure t
-  :bind (("C-c p" . projectile-command-map))
+  :hook (after-init . projectile-mode)
+  :bind (:map projectile-mode-map
+         ("C-c p" . projectile-command-map))
   :config
+  (dolist (dir '("bazel-bin"
+                 "bazel-out"
+                 "bazel-testlogs"))
+    (add-to-list 'projectile-globally-ignored-directories dir))
   (setq projectile-mode-line "Projectile")
-  (setq projectile-track-known-projects-automatically nil))
+  (setq projectile-track-known-projects-automatically nil)
+  :custom
+  (projectile-use-git-grep t)
+  (projectile-indexing-method 'alien)
+  (projectile-kill-buffers-filter 'kill-only-files)
+  (projectile-globally-ignored-files '("TAGS" "tags" ".DS_Store"))
+  (projectile-globally-ignored-file-suffixes '(".elc" ".pyc" ".o" ".swp" ".so" ".a"))
+  (projectile-ignored-projects `("~/"
+                                 "/tmp/"
+                                 "/private/tmp/"
+                                 ,package-user-dir)))
 
 (use-package counsel-projectile
   :ensure t
   :after (projectile)
-  :init (counsel-projectile-mode))
+  :hook (after-init . counsel-projectile-mode))
 
 
 (use-package treemacs

@@ -10,12 +10,8 @@
 ;; =========================
 (use-package ivy
   :ensure t
-  :defer 1
-  :demand
   :hook (after-init . ivy-mode)
   :config
-  (ivy-mode 1)
-
   ;; TRAMP
   (setq tramp-default-method "ssh")
   ;; 明确告诉 TRAMP 去读 ~/.ssh/config 里的 Host 别名
@@ -194,9 +190,9 @@
   (my/counsel-apply-find-file-filter)
 
   ;; 你要的快捷键：C-c .
-(with-eval-after-load 'ivy
-  (define-key ivy-minibuffer-map (kbd "C-c .")
-              #'my/counsel-toggle-find-file-filter))
+  (with-eval-after-load 'ivy
+    (define-key ivy-minibuffer-map (kbd "C-c .")
+                #'my/counsel-toggle-find-file-filter))
   ;; ------------------------------------------------------------
   ;; D) recentf 同步过滤（避免 C-x C-r 里出现垃圾）
   ;; ------------------------------------------------------------

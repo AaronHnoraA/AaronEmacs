@@ -206,7 +206,27 @@ If popup is focused, kill it."
                     nil t))))))
 (setq vterm-shell "zsh")
 
+(defvar my/ssh-host-history nil)
 
+(defun my/ssh-config-hosts ()
+  "Return concrete host entries from `~/.ssh/config'."
+  (let ((config (expand-file-name "~/.ssh/config")))
+    (when (file-readable-p config)
+      (with-temp-buffer
+        (insert-file-contents config)
+        (let (hosts)
+          (while (re-search-forward "^[[:space:]]*Host[[:space:]]+\\(.+\\)$" nil t)
+            (dolist (host (split-string (match-string 1) "[[:space:]]+" t))
+              (unless (string-match-p "[*?]" host)
+                (push host hosts))))
+          (delete-dups (nreverse hosts)))))))
+
+(defun my/read-ssh-host ()
+  "Read an SSH host, preferring entries from `~/.ssh/config'."
+  (let ((hosts (my/ssh-config-hosts)))
+    (if hosts
+        (completing-read "SSH host: " hosts nil nil nil 'my/ssh-host-history)
+      (read-string "SSH host: " nil 'my/ssh-host-history))))
 
 (defun my/vterm-named (name)
   "Create or switch to a named vterm buffer."
@@ -215,6 +235,17 @@ If popup is focused, kill it."
     (if (get-buffer buf)
         (switch-to-buffer buf)
       (vterm buf))))
+
+(defun my/vterm-ssh (host)
+  "Open a dedicated vterm buffer and start an SSH session to HOST."
+  (interactive (list (my/read-ssh-host)))
+  (let ((buffer-name (format "*vterm:ssh:%s*" host)))
+    (pop-to-buffer
+     (or (get-buffer buffer-name)
+         (with-current-buffer (vterm buffer-name)
+           (vterm-send-string (format "ssh %s" host))
+           (vterm-send-return)
+           (current-buffer))))))
 
 (provide 'init-shell)
 ;;; init-shell.el ends here

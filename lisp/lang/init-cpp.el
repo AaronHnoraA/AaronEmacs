@@ -72,7 +72,6 @@
          (c++-mode . eglot-ensure)
          (c-ts-mode . eglot-ensure)
          (c++-ts-mode . eglot-ensure))
-
   :config
   (add-to-list
    'eglot-server-programs
