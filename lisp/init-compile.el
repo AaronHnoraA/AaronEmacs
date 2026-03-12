@@ -183,7 +183,7 @@ With prefix arg FORCE, safely delete old .eln files for this dir to force recomp
 ;;;; 3) OPTIONAL: runtime warning suppression
 ;;;; ---------------------------------------------------------------------------
 
-(defcustom my/suppress-runtime-warnings t
+(defcustom my/suppress-runtime-warnings nil
   "If non-nil, suppress runtime warnings below :error."
   :type 'boolean)
 

@@ -183,29 +183,6 @@ If popup is focused, kill it."
       (my/popwin:eshell)
       (popwin:stick-popup-window))))
 
-
-(use-package vterm
-  :ensure t
-  :commands (vterm)
-  :config
-  (defun vterm-toggle ()
-    "Toggle a persistent vterm popup window."
-    (interactive)
-    (if-let* ((win (get-buffer-window "*vterm-popup*")))
-        (if (eq (selected-window) win)
-            (delete-window win)
-          (select-window win))
-      (let ((display-buffer-alist '(((category . comint)
-                                     (display-buffer-at-bottom)))))
-        (with-current-buffer (vterm "*vterm-popup*")
-          ;; 可选：退出时自动关窗口
-          (add-hook 'kill-buffer-hook
-                    (lambda ()
-                      (when-let* ((w (get-buffer-window (current-buffer))))
-                        (ignore-errors (delete-window w))))
-                    nil t))))))
-(setq vterm-shell "zsh")
-
 (defvar my/ssh-host-history nil)
 
 (defun my/ssh-config-hosts ()
@@ -246,6 +223,29 @@ If popup is focused, kill it."
            (vterm-send-string (format "ssh %s" host))
            (vterm-send-return)
            (current-buffer))))))
+
+(defun vterm-toggle ()
+  "Toggle a persistent vterm popup window."
+  (interactive)
+  (if-let* ((win (get-buffer-window "*vterm-popup*")))
+      (if (eq (selected-window) win)
+          (delete-window win)
+        (select-window win))
+    (let ((display-buffer-alist '(((category . comint)
+                                   (display-buffer-at-bottom)))))
+      (with-current-buffer (vterm "*vterm-popup*")
+        ;; 可选：退出时自动关窗口
+        (add-hook 'kill-buffer-hook
+                  (lambda ()
+                    (when-let* ((w (get-buffer-window (current-buffer))))
+                      (ignore-errors (delete-window w))))
+                  nil t)))))
+
+(use-package vterm
+  :ensure t
+  :commands (vterm vterm-toggle my/vterm-named my/vterm-ssh)
+  :custom
+  (vterm-shell "zsh"))
 
 (provide 'init-shell)
 ;;; init-shell.el ends here

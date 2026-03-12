@@ -35,12 +35,48 @@
 (setq-default bidi-paragraph-direction 'left-to-right)
 (setq bidi-inhibit-bpa t)
 
-;; No backup files
-(setq make-backup-files nil
-      auto-save-default nil)
+;; Keep recovery files out of projects while preserving crash protection.
+(defconst my/state-dir
+  (file-name-as-directory (expand-file-name "var" user-emacs-directory)))
+(defconst my/backup-dir
+  (file-name-as-directory (expand-file-name "backup" my/state-dir)))
+(defconst my/auto-save-dir
+  (file-name-as-directory (expand-file-name "auto-save" my/state-dir)))
+(defconst my/auto-save-session-dir
+  (file-name-as-directory (expand-file-name "sessions" my/auto-save-dir)))
+(defconst my/lockfile-dir
+  (file-name-as-directory (expand-file-name "lockfiles" my/state-dir)))
+(defconst my/tramp-state-dir
+  (file-name-as-directory (expand-file-name "tramp" my/state-dir)))
+(defconst my/tramp-auto-save-dir
+  (file-name-as-directory (expand-file-name "autosave" my/tramp-state-dir)))
 
-;; No lock files
-(setq create-lockfiles nil)
+(dolist (dir (list my/state-dir
+                   my/backup-dir
+                   my/auto-save-dir
+                   my/auto-save-session-dir
+                   my/lockfile-dir
+                   my/tramp-state-dir
+                   my/tramp-auto-save-dir))
+  (make-directory dir t))
+
+(setq make-backup-files t
+      backup-by-copying t
+      delete-old-versions t
+      version-control t
+      kept-new-versions 10
+      kept-old-versions 3
+      backup-directory-alist `(("." . ,my/backup-dir))
+      auto-save-default t
+      auto-save-timeout 20
+      auto-save-interval 200
+      auto-save-file-name-transforms `((".*" ,my/auto-save-dir t))
+      auto-save-list-file-prefix (expand-file-name ".saves-" my/auto-save-session-dir))
+
+(if (boundp 'lock-file-name-transforms)
+    (setq create-lockfiles t
+          lock-file-name-transforms `((".*" ,my/lockfile-dir t)))
+  (setq create-lockfiles nil))
 
 ;; Always load the newest file
 (setq load-prefer-newer t)
@@ -192,8 +228,8 @@
 
   ;; 固定宽度 = 代码字体（确保 org-block/org-table 等继承后稳定）
   (set-face-attribute 'fixed-pitch nil
-                      :family my/font-body
-                      :height my/h-body
+                      :family my/font-code
+                      :height my/h-code
                       :weight 'regular)
 
   ;; 变宽 = 正文字体（mixed-pitch 会让 Org 正文用它）
@@ -914,10 +950,10 @@ Else, call `comment-or-uncomment-region' on the current line."
 ;; ===============================
 
 (setq tramp-persistency-file-name
-      (expand-file-name "tramp" user-emacs-directory))
+      (expand-file-name "persistency.el" my/tramp-state-dir))
 
 (setq tramp-auto-save-directory
-      (expand-file-name "tramp-autosave" user-emacs-directory))
+      my/tramp-auto-save-dir)
 
 
 
@@ -1053,7 +1089,7 @@ Else, call `comment-or-uncomment-region' on the current line."
                                       (string-to-number  (shell-command-to-string "cat /proc/sys/fs/pipe-max-size")))
                                      (_
                                       most-positive-fixnum)) (* 1024 1024))
-      process-adaptive-read-buffering "急切读取"
+      process-adaptive-read-buffering t
 
       w32-pipe-buffer-size read-process-output-max
       w32-pipe-read-delay 0)
@@ -1077,8 +1113,63 @@ Else, call `comment-or-uncomment-region' on the current line."
 (setopt user-full-name    "Chang He (Aaron)"
         user-mail-address "mail")
 
-;; 简单版：永远只是关掉当前 frame（如果是最后一个 frame 就会报错）
-(global-set-key (kbd "M-w") #'delete-frame)  ;; mac 上 Command-w 关闭当前 Emacs 窗口
+(defun my/delete-frame-dwim ()
+  "Close the current frame when possible, otherwise bury the current buffer."
+  (interactive)
+  (if (> (length (frame-list)) 1)
+      (delete-frame)
+    (bury-buffer)))
+
+;; Keep `M-w' for copy; use Hyper-w as the close-frame key.
+(global-set-key (kbd "H-w") #'my/delete-frame-dwim)
+
+(defcustom my/warning-popup-minimum-level :error
+  "Minimum warning severity that may auto-display the warnings buffer.
+Warnings below this level are still logged to `*Warnings*', but they do not
+interrupt the current window layout."
+  :type '(choice (const :tag "Debug" :debug)
+                 (const :tag "Warning" :warning)
+                 (const :tag "Error" :error)
+                 (const :tag "Emergency" :emergency))
+  :group 'convenience)
+
+(defconst my/warnings-buffer-name "*Warnings*")
+
+(defun my/warning-level-rank (level)
+  "Return a comparable numeric rank for warning LEVEL."
+  (pcase level
+    (:debug 0)
+    (:warning 1)
+    (:error 2)
+    (:emergency 3)
+    (_ 1)))
+
+(defun my/warning-level-at-least-p (level threshold)
+  "Return non-nil when warning LEVEL is at least THRESHOLD."
+  (>= (my/warning-level-rank level)
+      (my/warning-level-rank threshold)))
+
+(defun my/warning-type-list (type)
+  "Normalize warning TYPE into the list form used by `warning-suppress-types'."
+  (if (consp type) type (list type)))
+
+(defun my/suppress-warning-popups-a (orig-fn type message &optional level buffer-name)
+  "Keep lower-severity warnings in the log without auto-popping a window."
+  (let ((level (or level :warning)))
+    (if (my/warning-level-at-least-p level my/warning-popup-minimum-level)
+        (funcall orig-fn type message level buffer-name)
+      (let ((warning-suppress-types
+             (cons (my/warning-type-list type) warning-suppress-types)))
+        (funcall orig-fn type message level buffer-name)))))
+
+(defun my/show-warnings-buffer ()
+  "Show the warning log buffer if it exists."
+  (interactive)
+  (if-let* ((buffer (get-buffer my/warnings-buffer-name)))
+      (pop-to-buffer buffer)
+    (user-error "No warnings buffer yet")))
+
+(advice-add 'display-warning :around #'my/suppress-warning-popups-a)
 
 
 ;; 不要在任何情况下自动显示 diary
@@ -1100,6 +1191,7 @@ Else, call `comment-or-uncomment-region' on the current line."
   :init
   (setq popper-reference-buffers
         '("\\*Messages\\*"
+          "\\*Warnings\\*"
           "Output\\*$"
           "\\*Async Shell Command\\*"
           help-mode

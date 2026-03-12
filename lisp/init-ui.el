@@ -56,6 +56,16 @@
   (help-window-keep-selected t)
   (help-enable-variable-value-editing t))
 
+(use-package helpful
+  :ensure t
+  :after help
+  :bind (([remap describe-function] . helpful-callable)
+         ([remap describe-command]  . helpful-command)
+         ([remap describe-variable] . helpful-variable)
+         ([remap describe-key]      . helpful-key))
+  :custom
+  (helpful-switch-buffer-function #'pop-to-buffer))
+
 ;; Windows layout recorder
 ;;
 ;; You can still use `winner-mode' on Emacs 26 or early. On Emacs 27, it's
