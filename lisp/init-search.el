@@ -46,7 +46,9 @@
   :ensure t
   :after ivy
   :bind (("M-x"     . my/safe-counsel-M-x)   ;; 确保最终是安全版
-         ("C-x C-f" . counsel-find-file)
+         ;; `find-file' now goes through the native file prompt, so it can
+         ;; reuse Vertico/Orderless and avoid the Ivy-specific glitches.
+         ("C-x C-f" . find-file)
          ("C-x C-r" . counsel-recentf)
          ("C-x g"   . counsel-git))
   :config

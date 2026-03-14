@@ -20,6 +20,27 @@
          ("DEL" . vertico-directory-delete-char)
          ("M-DEL" . vertico-directory-delete-word)))
 
+(defconst my/file-name-completion-ignored-extensions
+  '("~" "#" ".~undo-tree~"
+    ".swp" ".swo" ".swn" ".swx"
+    ".un~" ".bak" ".tmp" ".temp"
+    ".DS_Store" ".localized" "Icon\r"
+    ".use-package-keywords.md" ".projectile" ".dir-locals-2.el"
+    ".coverage" "coverage" ".classpath" ".project" ".envrc"
+    ".cache/" "__pycache__/" ".mypy_cache/" ".pytest_cache/" ".ruff_cache/"
+    "node_modules/" "dist/" "build/" "out/" ".parcel-cache/" ".turbo/"
+    "target/" ".gradle/" ".idea/" ".vscode/" ".settings/"
+    ".ccls-cache/" ".clangd/" ".cache-clangd/"
+    ".venv/" "venv/" ".git/" ".hg/" ".svn/"
+    ".Trash/" ".DocumentRevisions-V100/" ".TemporaryItems/"
+    ".fseventsd/" ".Spotlight-V100/")
+  "Extra suffixes hidden by native file-name completion.")
+
+(setq-default completion-ignored-extensions
+              (delete-dups
+               (append my/file-name-completion-ignored-extensions
+                       completion-ignored-extensions)))
+
 (use-package orderless
   :ensure t
   :init

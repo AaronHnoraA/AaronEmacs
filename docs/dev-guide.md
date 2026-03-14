@@ -26,7 +26,7 @@
 ### 你会实际感受到的行为
 
 - `M-x` 走 `counsel-M-x`
-- `C-x C-f` 走 `counsel-find-file`
+- `C-x C-f` 走 `find-file` + `vertico-directory`
 - `C-x b` 走 `consult-buffer`
 - `C-s` 走 `swiper`
 - `M-o` 在 minibuffer 里走 `embark-act`

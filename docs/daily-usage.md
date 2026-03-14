@@ -9,7 +9,7 @@
 - `M-x`
   `counsel-M-x`
 - `C-x C-f`
-  `counsel-find-file`
+  `find-file` + `vertico-directory`
 - `C-x b`
   `consult-buffer`
 - `C-s`

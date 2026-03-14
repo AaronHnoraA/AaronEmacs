@@ -18,8 +18,8 @@
 - 补全与搜索
   - 当前是双栈并存：
     - `vertico` + `orderless` + `consult` + `embark` + `marginalia` 负责现代 minibuffer/completion 体验。
-    - `ivy` + `counsel` + `swiper` 仍负责 `M-x`、`C-x C-f`、`C-x C-r`、`C-s` 等常用入口。
-  - `vertico-directory` 已启用，`counsel-find-file` 也带自定义垃圾文件过滤器，可在 minibuffer 中用 `C-c .` 临时开关。
+    - `ivy` + `counsel` + `swiper` 仍负责 `M-x`、`C-x C-r`、`C-s` 等常用入口。
+  - `C-x C-f` 已切回原生 `find-file`，配合 `vertico-directory` 和原生文件补全过滤，避免旧的 Ivy 文件选择问题。
 - 编程与调试
   - `company` + `company-prescient` + `company-box` 做补全，`eglot` 做 LSP，`flymake` 做诊断。
   - `eldoc-box`、`breadcrumb`、`Treemacs` 提供文档悬浮、breadcrumb 和左侧文件/符号导航。
@@ -80,7 +80,7 @@
 - `M-x`
   走 `counsel-M-x`。
 - `C-x C-f`
-  走 `counsel-find-file`。
+  走 `find-file` + `vertico-directory`。
 - `C-x b`
   走 `consult-buffer`。
 - `C-s`
