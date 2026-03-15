@@ -848,6 +848,66 @@ Else, call `comment-or-uncomment-region' on the current line."
   (setq undo-tree-history-directory-alist
         `(("." . ,my/undo-tree-history-dir)))
 
+  (defun my/undo-tree-local-history-p (&optional file)
+    "Return non-nil when FILE should persist undo-tree history locally."
+    (and file (not (file-remote-p file))))
+
+  (defun my/undo-tree-normalize-file-name (file)
+    "Return a stable local file name for FILE when saving undo history."
+    (let* ((local-file (if (file-remote-p file) (file-local-name file) file))
+           (expanded-file (expand-file-name local-file)))
+      (if (file-exists-p expanded-file)
+          (file-truename expanded-file)
+        expanded-file)))
+
+  (defun my/undo-tree-history-file-name (file &optional legacy)
+    "Return the undo-tree history path for FILE.
+When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
+    (let* ((backup-directory-alist undo-tree-history-directory-alist)
+           (target-file (if legacy
+                            file
+                          (my/undo-tree-normalize-file-name file)))
+           (name (make-backup-file-name-1 target-file))
+           (history-file
+            (concat (file-name-directory name) "."
+                    (file-name-nondirectory name)
+                    ".~undo-tree~")))
+      (when-let* ((dir (file-name-directory history-file)))
+        (unless (file-directory-p dir)
+          (make-directory dir t)))
+      history-file))
+
+  (defun my/undo-tree-make-history-save-file-name (_orig-fun file)
+    "Use a stable history filename for FILE."
+    (my/undo-tree-history-file-name file))
+
+  (defun my/undo-tree-load-history (orig-fun &optional filename noerror)
+    "Load undo history through ORIG-FUN, with path fallbacks for FILENAME."
+    (cond
+     ((and (null filename)
+           buffer-file-name
+           (not (my/undo-tree-local-history-p buffer-file-name)))
+      nil)
+     ((or filename (not buffer-file-name))
+      (funcall orig-fun filename noerror))
+     (t
+      (let* ((canonical-file (my/undo-tree-history-file-name buffer-file-name))
+             (legacy-file (my/undo-tree-history-file-name buffer-file-name 'legacy))
+             (resolved-file
+              (cond
+               ((file-exists-p canonical-file) canonical-file)
+               ((file-exists-p legacy-file) legacy-file)
+               (t canonical-file))))
+        (funcall orig-fun resolved-file noerror)))))
+
+  (defun my/undo-tree-save-history (orig-fun &optional filename overwrite)
+    "Save undo history through ORIG-FUN, skipping remote files when FILENAME is nil."
+    (if (and (null filename)
+             buffer-file-name
+             (not (my/undo-tree-local-history-p buffer-file-name)))
+        nil
+      (funcall orig-fun filename overwrite)))
+
   ;; 4) 让它在“本地文件”自动把历史写盘（崩溃也可恢复）
   (setq undo-tree-auto-save-history t)
 
@@ -864,10 +924,13 @@ Else, call `comment-or-uncomment-region' on the current line."
   ("q"   nil "quit" :color blue))
   :config
   (setq undo-tree-auto-save-history t)
+  (advice-add 'undo-tree-make-history-save-file-name
+              :around #'my/undo-tree-make-history-save-file-name)
+  (advice-add 'undo-tree-load-history :around #'my/undo-tree-load-history)
+  (advice-add 'undo-tree-save-history :around #'my/undo-tree-save-history)
   
   ;; 关键:在打开文件后立即加载历史
-  (add-hook 'find-file-hook #'undo-tree-load-history-hook)
-  )
+  (add-hook 'find-file-hook #'undo-tree-load-history-from-hook))
 
 
 (use-package outline-indent

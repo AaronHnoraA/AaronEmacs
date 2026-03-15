@@ -112,6 +112,10 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       "'" 'vertico-repeat
       ";" 'avy-resume
 
+      ;; quit
+      "q"  '(:wk "quit")
+      "qq" 'save-buffers-kill-terminal
+
       ;; file
       "f"  '(:wk "files")
       "ff" 'find-file

@@ -244,8 +244,14 @@ If popup is focused, kill it."
 (use-package vterm
   :ensure t
   :commands (vterm vterm-toggle my/vterm-named my/vterm-ssh)
+  :hook (vterm-mode . (lambda ()
+                        (when (fboundp 'evil-emacs-state)
+                          (evil-emacs-state))))
   :custom
   (vterm-shell "zsh"))
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'vterm-mode 'emacs))
 
 (provide 'init-shell)
 ;;; init-shell.el ends here

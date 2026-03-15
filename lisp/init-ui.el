@@ -137,7 +137,6 @@
 
 (keymap-global-unset "<menu-bar> <file> <close-tab>")
 (keymap-global-unset "<menu-bar> <file> <delete-this-frame>")
-(keymap-global-unset "<menu-bar> <file> <exit-emacs>")
 (keymap-global-unset "<menu-bar> <file> <kill-buffer>")
 (keymap-global-unset "<menu-bar> <file> <make-frame>")
 (keymap-global-unset "<menu-bar> <file> <make-tab>")

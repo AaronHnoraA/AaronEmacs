@@ -14,10 +14,34 @@
 (defconst my/eaf-load-path
   (expand-file-name "site-lisp/emacs-application-framework" user-emacs-directory))
 
+(defconst my/eaf-app-load-paths
+  (mapcar (lambda (dir)
+            (expand-file-name dir my/eaf-load-path))
+          '("app/browser"
+            "app/git"
+            "app/image-viewer"
+            "app/markdown-previewer"
+            "app/mind-elixir"
+            "app/mindmap"
+            "app/org-previewer"
+            "app/pdf-viewer"
+            "app/video-player")))
+
+(dolist (dir (cons my/eaf-load-path my/eaf-app-load-paths))
+  (when (file-directory-p dir)
+    (add-to-list 'load-path dir)))
+
+(autoload 'eaf-open "eaf" nil t)
+(autoload 'eaf-open-browser "eaf-browser" nil t)
+(autoload 'eaf-open-pdf "eaf-pdf-viewer" nil t)
+(autoload 'eaf-open-mindmap "eaf-mindmap" nil t)
+(autoload 'eaf-open-git "eaf-git" nil t)
+
+(defalias 'browse-web #'eaf-open-browser)
+
 (use-package eaf
-  :load-path my/eaf-load-path
-  ;; 核心：只有当你调用以下命令时，才会真正加载 EAF 及其 Python 进程
-  :commands (eaf-open-browser eaf-open eaf-open-pdf eaf-open-mindmap browse-web eaf-open-git)
+  :if (file-directory-p my/eaf-load-path)
+  :defer t
   :custom
   ;; See https://github.com/emacs-eaf/emacs-application-framework/wiki/Customization
   (eaf-browser-continue-where-left-off t)
@@ -26,21 +50,7 @@
   ;; 将你原本散落在外面的 setq 整合进 :custom，更加规范
   (eaf-jupyter-search-function nil)
   (eaf-browser-chrome-browser-name "Brave")
-  (eaf-browser-auto-import-chrome-cookies t)
-  
-  :config
-  ;; 当上面 :commands 里的任何一个命令被触发时，才会执行以下 require
-  (require 'eaf-browser)
-  (require 'eaf-image-viewer)
-  (require 'eaf-pdf-viewer)
-  (require 'eaf-mind-elixir)
-  (require 'eaf-markdown-previewer)
-  (require 'eaf-mindmap)
-  (require 'eaf-video-player)
-  (require 'eaf-org-previewer)
-  (require 'eaf-git)
-
-  (defalias 'browse-web #'eaf-open-browser))
+  (eaf-browser-auto-import-chrome-cookies t))
 
 ;; ----------------------------------------------------------------------
 ;; 一键清理 EAF 相关的 Buffer 和 Python 进程
