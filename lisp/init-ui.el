@@ -129,9 +129,6 @@
                                dashboard-insert-items
                                dashboard-insert-newline
                                dashboard-insert-footer)))
-(add-to-list 'dashboard-items '(agenda) t)
-(setq dashboard-week-agenda t)
-(setq dashboard-filter-agenda-entry 'dashboard-no-filter-agenda)
 
 ;;; Menu Bar:
 

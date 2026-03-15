@@ -39,7 +39,7 @@
   - Org UI 比较重：`mixed-pitch`、`valign`、`org-modern`、`org-modern-indent`、`org-appear`、`olivetti`、特殊 block overlay、按可见区域触发的 LaTeX 预览。
   - 这些增强默认保持开启，不再按远端或大文件场景主动降载。
 - 终端 / 远程
-  - 内置了 `shell`、`eshell`、`term`、`vterm` 的弹出式用法。
+  - 内置了 `shell`、`term`、`vterm` 的终端工作流，日常弹出终端以共享 `vterm` 为主。
   - `M-x my/vterm-ssh` 会优先读取 `~/.ssh/config` 的主机名，打开专用 vterm 并直接 SSH。
   - TRAMP 做了 PATH、ControlMaster、超时、spinner、持久化文件和 autosave 目录配置。
 - 浏览器 / 外部整合
@@ -104,7 +104,11 @@
 - `C-c o d`
   `dirvish-dwim`。
 - <code>M-`</code>
-  弹出/收起 `eshell`。
+  弹出/收起共享 `vterm`。
+- `C-c e`
+  弹出/收起临时 `vterm`，失焦自动收起。
+- `C-c E`
+  切换共享 `vterm` 的固定状态。
 - <code>C-`</code>
   `popper-toggle`。
 - `M-x my/vterm-ssh`

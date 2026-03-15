@@ -9,6 +9,8 @@
                 ":" (getenv "PATH")))
 ;;; Code:
 
+(require 'cl-lib)
+
 ;; Suppress GUI features and more
 (setq use-file-dialog nil
       use-dialog-box nil
@@ -112,29 +114,10 @@
 ;; ========= 行号显示策略 =========
 (setq display-line-numbers-minor-tick 0)
 
-;; ========= 行号字体 =========
-(set-face-attribute 'line-number nil
-                    :family "Fira Code"
-                    :height 0.85
-                    :foreground "#6b7280")
-
-(set-face-attribute 'line-number-current-line nil
-                    :family "Fira Code"
-                    :height 0.85
-                    :foreground "#ffffff")
-
-
 ;; 1. 设置触发频率（例如每 5 行高亮一次）
 (setq display-line-numbers-major-tick 20)
 
-;; 2. 直接配置内置的 Face
-;; 注意：Emacs 30 已经内置了 line-number-major-tick 这个 Face
-(custom-set-faces
- '(line-number-major-tick ((t :inherit line-number 
-                              :weight bold 
-                              :foreground "#ff9e64"))))
-
-;; 3. 启用行号（如果还没启用）
+;; 2. 启用行号（如果还没启用）
 (global-display-line-numbers-mode 1)
 ;; 可选：在一些模式禁用（终端、shell 等）
 (dolist (hook '(term-mode-hook vterm-mode-hook eshell-mode-hook))
@@ -195,49 +178,168 @@
   ;; 只给 symbol / unicode 区域加 fallback，不动中文、英文正文字体
   (dolist (charset '(symbol))
     (set-fontset-font t charset "JetBrainsMono Nerd Font" nil 'append)))
+
+(use-package mixed-pitch
+  :ensure t
+  :commands (mixed-pitch-mode)
+  :custom
+  (mixed-pitch-set-height t)
+  :config
+  ;; 只让代码和结构标记保持等宽，标题仍然交给各模式自己的 face。
+  (dolist (face '(font-latex-verbatim-face
+                  markdown-header-delimiter-face
+                  markdown-markup-face
+                  markdown-pre-face
+                  markdown-table-face))
+    (add-to-list 'mixed-pitch-fixed-pitch-faces face))
+  (setq mixed-pitch-fixed-pitch-faces
+        (delq 'font-latex-sectioning-5-face mixed-pitch-fixed-pitch-faces)))
+
 ;; ======================================================================
-;; 1. 变量定义 (用户自定义区域)
+;; 1. 字体变量 (用户自定义区域)
 ;; ======================================================================
 
-;; 英文正文 (Body) - Org 普通文本（variable-pitch）
-(defvar my/font-body  "Merriweather")
-(defvar my/h-body     200)
+(defgroup my/typography nil
+  "Typography helpers shared by UI and writing modes."
+  :group 'faces)
+
+;; 英文正文 (Body) - prose / variable-pitch
+(defcustom my/font-body "Merriweather"
+  "Serif family used for prose."
+  :type 'string
+  :group 'my/typography)
+
+(defcustom my/h-body 200
+  "Base height for prose text."
+  :type 'integer
+  :group 'my/typography)
 
 ;; 代码/表格 (Code) - 默认界面 + 代码环境（fixed-pitch）
-(defvar my/font-code  "Fira Code")
-(defvar my/h-code     160)
+(defcustom my/font-code "Fira Code"
+  "Monospace family used for UI and code."
+  :type 'string
+  :group 'my/typography)
 
-;; 标题 (Title) - Org 标题
-(defvar my/font-title "Excalifont")
-(defvar my/h-title    220)
+(defcustom my/h-code 160
+  "Base height for code and UI text."
+  :type 'integer
+  :group 'my/typography)
+
+;; 标题 (Title) - Org / Markdown / LaTeX 标题
+(defcustom my/font-title "Excalifont"
+  "Display family used for document titles and headings."
+  :type 'string
+  :group 'my/typography)
+
+(defcustom my/h-title 220
+  "Base height for first-level document headings."
+  :type 'integer
+  :group 'my/typography)
 
 ;; 中文 (Chinese)
-(defvar my/font-cn    "FZLiuGongQuanKaiShuJF")
-(defvar my/scale-cn   1.3)
+(defcustom my/font-cn "FZLiuGongQuanKaiShuJF"
+  "Primary Chinese family."
+  :type 'string
+  :group 'my/typography)
+
+(defcustom my/scale-cn 1.3
+  "Scale factor for Chinese glyphs."
+  :type 'number
+  :group 'my/typography)
+
+(defcustom my/font-code-weight 'medium
+  "Preferred weight for monospace UI and code."
+  :type 'symbol
+  :group 'my/typography)
+
+(defcustom my/font-body-weight 'regular
+  "Preferred weight for prose text."
+  :type 'symbol
+  :group 'my/typography)
+
+(defcustom my/font-title-weight 'regular
+  "Preferred weight for document headings."
+  :type 'symbol
+  :group 'my/typography)
+
+(defcustom my/prose-line-spacing 0.12
+  "Line spacing used in prose buffers."
+  :type 'number
+  :group 'my/typography)
 
 ;; ======================================================================
 ;; 2. 核心：应用字体（全局 + 中文绑定）
 ;; ======================================================================
 
+(defun my/font--set-face (face &rest attrs)
+  "Apply ATTRS to FACE when it exists."
+  (when (facep face)
+    (apply #'set-face-attribute face nil attrs)))
+
+(defun my/font--title-heights ()
+  "Return a compact heading scale derived from `my/h-title'."
+  (list (+ my/h-title 24)
+        my/h-title
+        (- my/h-title 6)
+        (- my/h-title 12)
+        (- my/h-title 18)
+        (- my/h-title 24)
+        (- my/h-title 28)
+        (- my/h-title 32)
+        (- my/h-title 36)))
+
+(defun my/font--set-prose-face (face &rest attrs)
+  "Make FACE use the prose font plus ATTRS."
+  (apply #'my/font--set-face face
+         :family my/font-body
+         :weight my/font-body-weight
+         attrs))
+
+(defun my/font--set-code-face (face &rest attrs)
+  "Make FACE use the monospace font plus ATTRS."
+  (apply #'my/font--set-face face
+         :family my/font-code
+         :weight my/font-code-weight
+         attrs))
+
+(defun my/font--set-title-face (face height &optional weight)
+  "Make FACE use the title font with HEIGHT and optional WEIGHT."
+  (my/font--set-face face
+                     :inherit 'variable-pitch
+                     :family my/font-title
+                     :height height
+                     :weight (or weight my/font-title-weight)))
+
+(defun my/font--apply-ui-faces ()
+  "Keep UI monospace consistent without using heavy bold weights."
+  (my/font--set-code-face 'line-number
+                          :height 0.85
+                          :foreground "#6b7280")
+  (my/font--set-face 'line-number-current-line
+                     :inherit 'line-number)
+  (my/font--set-face 'line-number-major-tick
+                     :inherit 'line-number
+                     :foreground "#ff9e64"))
+
 (defun my/font--apply-core-faces ()
   "设置 default/fixed/variable 三类 face。"
   ;; 默认 = 代码字体（稳定，且界面/代码/表格都不乱）
-  (set-face-attribute 'default nil
-                      :family my/font-code
-                      :height my/h-code
-                      :weight 'semi-bold)
+  (my/font--set-face 'default
+                     :family my/font-code
+                     :height my/h-code
+                     :weight my/font-code-weight)
 
   ;; 固定宽度 = 代码字体（确保 org-block/org-table 等继承后稳定）
-  (set-face-attribute 'fixed-pitch nil
-                      :family my/font-code
-                      :height my/h-code
-                      :weight 'regular)
+  (my/font--set-face 'fixed-pitch
+                     :family my/font-code
+                     :height my/h-code
+                     :weight my/font-code-weight)
 
   ;; 变宽 = 正文字体（mixed-pitch 会让 Org 正文用它）
-  (set-face-attribute 'variable-pitch nil
-                      :family my/font-body
-                      :height my/h-body
-                      :weight 'regular))
+  (my/font--set-face 'variable-pitch
+                     :family my/font-body
+                     :height my/h-body
+                     :weight my/font-body-weight))
 
 (defun my/font--bind-chinese-to-fontset ()
   "把中文相关字符集强制绑定到 my/font-cn。"
@@ -245,13 +347,126 @@
     ;; t 表示当前 frame 的 fontset；也会影响后续 frame 的默认 fontset 选择
     (dolist (charset '(han cjk-misc bopomofo kana hangul))
       ;; 'prepend：把该字体放在 fallback 优先级前面，避免被系统中文字体截胡
-      (set-fontset-font t charset (font-spec :family my/font-cn) nil 'prepend))))
+      (set-fontset-font t charset
+                        (font-spec :family my/font-cn
+                                   :weight 'regular
+                                   :slant 'normal)
+                        nil
+                        'prepend))))
 
 (defun my/font--apply-rescale ()
   "设置中文缩放（只调大小，不负责选字体）。"
   (setq face-font-rescale-alist
         (assq-delete-all my/font-cn face-font-rescale-alist))
   (add-to-list 'face-font-rescale-alist (cons my/font-cn my/scale-cn)))
+
+(defun my/font--apply-org-faces ()
+  "Apply typography for Org headings and code blocks."
+  (let ((heights (my/font--title-heights)))
+    (cl-mapc #'my/font--set-title-face
+             '(org-document-title
+               org-level-1 org-level-2 org-level-3 org-level-4
+               org-level-5 org-level-6 org-level-7 org-level-8)
+             heights))
+  (dolist (face '(org-block
+                  org-block-begin-line
+                  org-block-end-line
+                  org-table
+                  org-formula
+                  org-code
+                  org-verbatim
+                  org-meta-line
+                  org-checkbox
+                  org-document-info-keyword
+                  org-indent
+                  org-latex-and-related))
+    (my/font--set-code-face face :inherit 'fixed-pitch)))
+
+(defun my/font--apply-markdown-faces ()
+  "Apply typography for Markdown headings and code spans."
+  (let ((heights (cdr (my/font--title-heights))))
+    (cl-mapc #'my/font--set-title-face
+             '(markdown-header-face-1
+               markdown-header-face-2
+               markdown-header-face-3
+               markdown-header-face-4
+               markdown-header-face-5
+               markdown-header-face-6)
+             heights))
+  (my/font--set-title-face 'markdown-header-face (- my/h-title 12))
+  (dolist (face '(markdown-code-face
+                  markdown-comment-face
+                  markdown-header-delimiter-face
+                  markdown-inline-code-face
+                  markdown-language-info-face
+                  markdown-language-keyword-face
+                  markdown-markup-face
+                  markdown-math-face
+                  markdown-pre-face
+                  markdown-table-face))
+    (my/font--set-code-face face :inherit 'fixed-pitch)))
+
+(defun my/font--apply-latex-faces ()
+  "Apply typography for LaTeX sectioning and literal faces."
+  (let ((heights (cdr (my/font--title-heights))))
+    (cl-mapc #'my/font--set-title-face
+             '(font-latex-sectioning-0-face
+               font-latex-sectioning-1-face
+               font-latex-sectioning-2-face
+               font-latex-sectioning-3-face
+               font-latex-sectioning-4-face
+               font-latex-sectioning-5-face)
+             heights))
+  (my/font--set-title-face 'font-latex-slide-title-face (+ my/h-title 12))
+  (dolist (face '(font-latex-math-face
+                  font-latex-sedate-face
+                  font-latex-string-face
+                  font-latex-verbatim-face
+                  font-latex-warning-face))
+    (my/font--set-code-face face :inherit 'fixed-pitch)))
+
+(defun my/font--apply-dashboard-faces ()
+  "Keep dashboard readable without breaking nerd-icons glyph faces."
+  (my/font--set-title-face 'dashboard-banner-logo-title (+ my/h-title 18) 'medium)
+  ;; Heading / navigator / item lines may mix nerd-icons with text, so only
+  ;; tune size and weight here and leave font family resolution to the icon faces.
+  (my/font--set-face 'dashboard-heading
+                     :height (- my/h-title 10)
+                     :weight 'medium)
+  (my/font--set-face 'dashboard-items-face
+                     :height my/h-body
+                     :weight my/font-body-weight)
+  (my/font--set-face 'dashboard-footer-face
+                     :height (- my/h-body 10)
+                     :weight my/font-body-weight)
+  (my/font--set-face 'dashboard-navigator
+                     :height my/h-code
+                     :weight my/font-code-weight)
+  (my/font--set-face 'dashboard-text-banner
+                     :inherit 'variable-pitch
+                     :family my/font-body
+                     :height (+ my/h-body 6)
+                     :weight 'medium))
+
+(defun my/font--apply-document-faces ()
+  "Refresh mode-specific faces for already loaded writing packages."
+  (when (featurep 'org)
+    (my/font--apply-org-faces))
+  (when (featurep 'markdown-mode)
+    (my/font--apply-markdown-faces))
+  (when (featurep 'font-latex)
+    (my/font--apply-latex-faces))
+  (when (featurep 'dashboard)
+    (my/font--apply-dashboard-faces)))
+
+(defun my/typography-setup-prose-buffer ()
+  "Enable mixed-pitch and spacing for prose-oriented buffers."
+  (when (and (display-graphic-p)
+             (fboundp 'mixed-pitch-mode))
+    (mixed-pitch-mode 1)
+    (setq-local line-spacing my/prose-line-spacing))
+  (my/font--bind-chinese-to-fontset))
+
 (with-eval-after-load 'doom-modeline
   (when (member "JetBrainsMono Nerd Font Mono" (font-family-list))
     (set-face-attribute 'doom-modeline nil
@@ -265,8 +480,10 @@
     (select-frame frame))
 
   (my/font--apply-core-faces)
+  (my/font--apply-ui-faces)
   (my/font--bind-chinese-to-fontset)
   (my/font--apply-rescale)
+  (my/font--apply-document-faces)
 
   ;; 保险：让 Emacs 重新评估字体缓存（可选但很稳）
   (when (fboundp 'font-cache-reset)
@@ -278,49 +495,27 @@
 ;; Daemon / 新 frame 也生效
 (add-hook 'server-after-make-frame-hook #'my/apply-font-config)
 
+(with-eval-after-load 'org
+  (my/font--apply-org-faces))
+
+(with-eval-after-load 'markdown-mode
+  (my/font--apply-markdown-faces))
+
+(with-eval-after-load 'font-latex
+  (my/font--apply-latex-faces))
+
+(with-eval-after-load 'dashboard
+  (my/font--apply-dashboard-faces))
+
 ;; ======================================================================
-;; 3. Org Mode & mixed-pitch 适配
+;; 3. 主题切换 / 字体调试
 ;; ======================================================================
 
-;; 你如果用 use-package：确保 mixed-pitch 可用
-;; (use-package mixed-pitch :ensure t)
+(defun my/font--refresh-after-theme (&rest _)
+  "Re-apply typography after theme changes."
+  (my/apply-font-config))
 
-(defun my/org-font-setup ()
-  "Org 模式：启用 mixed-pitch，设置标题字体，保护代码/表格等 fixed-pitch。"
-  (when (fboundp 'mixed-pitch-mode)
-    (mixed-pitch-mode 1))
-
-  ;; 标题：只改 org 的标题 faces，不要去动 default
-  (dolist (face '(org-level-1 org-level-2 org-level-3
-                  org-level-4 org-level-5 org-level-6
-                  org-level-7 org-level-8 org-document-title))
-    (set-face-attribute face nil
-                        :family my/font-title
-                        :height my/h-title
-                        :weight 'bold))
-
-  ;; 保护：这些必须固定宽度（对齐/可读性）
-  (dolist (face '(org-block
-                  org-block-begin-line
-                  org-block-end-line
-                  org-table
-                  org-formula
-                  org-code
-                  org-verbatim
-                  org-meta-line
-                  org-checkbox
-                  line-number
-                  line-number-current-line))
-    ;; 继承 fixed-pitch 即可；高度可按需统一到代码高度
-    (set-face-attribute face nil
-                        :inherit 'fixed-pitch
-                        :height my/h-code))
-
-  (my/apply-font-config)
-  ;; 确保中文绑定在 Org 里也不会被覆盖（有些主题/包会动 fontset）
-  (my/font--bind-chinese-to-fontset))
-
-(add-hook 'org-mode-hook #'my/org-font-setup)
+(advice-add 'load-theme :after #'my/font--refresh-after-theme)
 
 ;; ======================================================================
 ;; 4. 可选：一键刷新（调字体时用）
@@ -526,23 +721,13 @@
   ;; year/month/day
   (calendar-date-style 'iso))
 
-;; Appointment
+;; Appointment / diary reminders are intentionally disabled.
 (use-package appt
   :ensure nil
-  :hook (after-init . appt-activate)
-  :config
-  (defun appt-display-with-notification (min-to-app new-time appt-msg)
-    (notify-send :title (format "Appointment in %s minutes" min-to-app)
-                 :body appt-msg
-                 :urgency 'critical)
-    (appt-disp-window min-to-app new-time appt-msg))
+  :defer t
   :custom
-  (appt-audible nil)
   (appt-display-diary nil)
-  (appt-display-interval 5)
-  (appt-display-mode-line t)
-  (appt-message-warning-time 15)
-  (appt-disp-window-function #'appt-display-with-notification))
+  (appt-display-mode-line nil))
 
 ;; Build regexp with visual feedback
 (use-package re-builder

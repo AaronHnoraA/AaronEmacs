@@ -6,6 +6,8 @@
 
 ;;; Code:
 
+(declare-function my/typography-setup-prose-buffer "init-base")
+
 ;; Pixel alignment for org/markdown tables
 (use-package valign
   :ensure t
@@ -15,7 +17,8 @@
 (use-package markdown-mode
   :ensure t
   :mode ("README\\(?:\\.md\\)?\\'" . gfm-mode)
-  :hook (markdown-mode . visual-line-mode)
+  :hook ((markdown-mode . visual-line-mode)
+         (markdown-mode . my/typography-setup-prose-buffer))
   :bind (:map markdown-mode-style-map
          ("r" . markdown-insert-ruby-tag))
   :config

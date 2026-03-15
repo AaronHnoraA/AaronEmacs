@@ -23,8 +23,6 @@
   `org-capture`
 - `C-c n`
   org-roam 前缀
-- `C-c r`
-  刷新 agenda 文件列表
 - `C-c C-x v`
   手动刷新当前可视区域 LaTeX 预览
 
@@ -53,17 +51,14 @@
 
 ### 基本逻辑
 
-- agenda 文件不是手写固定列表
-- 启动后会扫描整个 `my-org-root` 下的 `.org` 文件
-- `ltximg/` 会排除
-- 扫描后自动同步到 `org-agenda-files`
+- 默认不再自动扫描 `my-org-root`
+- `org-agenda-files` 初始为空
+- 如果以后要重新启用 agenda，直接手动设置 `org-agenda-files`
 
 ### 常用命令
 
 - `C-c a`
   打开 agenda
-- `C-c r`
-  重新扫描并刷新 agenda
 
 ## 5. Org Roam
 

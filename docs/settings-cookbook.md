@@ -22,6 +22,9 @@
 文件：
 
 - [lisp/init-base.el](../lisp/init-base.el)
+- [lisp/init-org.el](../lisp/init-org.el)
+- [lisp/init-text.el](../lisp/init-text.el)
+- [lisp/init-auctex.el](../lisp/init-auctex.el)
 
 重点变量：
 
@@ -33,6 +36,17 @@
 - `my/h-code`
 - `my/h-title`
 - `my/scale-cn`
+
+职责：
+
+- `lisp/init-base.el`
+  基础字体族、字号、中文 fontset 绑定、共享排版 helper。
+- `lisp/init-org.el`
+  Org 里什么时候启用 prose 排版。
+- `lisp/init-text.el`
+  Markdown 里什么时候启用 prose 排版。
+- `lisp/init-auctex.el`
+  LaTeX 里什么时候启用 prose 排版。
 
 改完后可以执行：
 

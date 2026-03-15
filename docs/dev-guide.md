@@ -167,13 +167,18 @@
 - `M-x shell-toggle`
   弹出 shell
 
-### Eshell
-
-- `M-\``
-  `eshell-toggle`
-
 ### VTerm
 
+- `M-\``
+  `vterm-toggle`
+- `C-c e`
+  弹出/收起临时 `vterm`，失焦自动收起
+- `C-c E`
+  切换共享 `vterm` 的固定状态
+- `SPC o e`
+  `vterm-toggle`
+- `SPC o E`
+  切换共享 `vterm` 的固定状态
 - `SPC o t`
   `vterm-toggle`
 - `SPC o v`

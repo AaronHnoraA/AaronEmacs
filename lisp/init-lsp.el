@@ -26,9 +26,23 @@
      company-dabbrev))
   "Company backends for prose and document buffers.")
 
+(defconst my/company-shell-backends
+  '((company-capf
+     company-files
+     :with company-dabbrev-code
+     company-dabbrev))
+  "Company backends for interactive shell buffers.")
+
 (defun my/company-setup-text-backends ()
   "Use company popup completion in document buffers instead of `*Completions*'."
   (setq-local company-backends my/company-text-backends))
+
+(defun my/company-setup-shell-backends ()
+  "Enable popup completion for Eshell with CAPF/pcomplete."
+  (company-mode 1)
+  (setq-local company-backends my/company-shell-backends)
+  (setq-local company-idle-delay 0.08)
+  (setq-local company-minimum-prefix-length 1))
 
 (use-package company
   :ensure t
@@ -65,6 +79,9 @@
   (setq-default company-backends my/company-lsp-backends)
   )
  ;; 全局默认 backends
+
+(with-eval-after-load 'esh-mode
+  (add-hook 'eshell-mode-hook #'my/company-setup-shell-backends))
 
 
 (with-eval-after-load 'eglot

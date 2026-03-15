@@ -5,6 +5,18 @@
 
 ;;; Code:
 
+(defvar projectile-known-projects)
+(defvar project--list)
+(defvar dashboard-projects-backend)
+(defvar dashboard-projects-switch-function)
+
+(declare-function project--ensure-read-project-list "project")
+(declare-function dashboard-projects-backend-load-projects "dashboard-widgets")
+(declare-function projectile-ignored-project-p "projectile")
+(declare-function projectile-known-projects "projectile")
+(declare-function projectile-merge-known-projects "projectile")
+(declare-function projectile-relevant-known-projects "projectile")
+
 (defgroup my/project nil
   "Project workflow helpers."
   :group 'convenience)
@@ -50,6 +62,14 @@ directory string or a cons cell of the form (DIRECTORY . DEPTH)."
   "Return non-nil when LEFT and RIGHT refer to the same project root."
   (equal (my/project-canonical-path left)
          (my/project-canonical-path right)))
+
+(defun my/project-hidden-root-p (project-root)
+  "Return non-nil when PROJECT-ROOT should stay out of project UIs."
+  (when project-root
+    (let ((project-root (my/project-normalize-root project-root)))
+      (or (my/project-ignored-root-p project-root)
+          (and (require 'projectile nil t)
+               (projectile-ignored-project-p project-root))))))
 
 (defun my/project-load-ignored-roots ()
   "Return project roots suppressed from the custom project workflow."
@@ -100,7 +120,7 @@ directory string or a cons cell of the form (DIRECTORY . DEPTH)."
 
 (defun my/project-project-object-ignored-p (project)
   "Return non-nil when PROJECT should be excluded from `project.el' lists."
-  (my/project-ignored-root-p (project-root project)))
+  (my/project-hidden-root-p (project-root project)))
 
 (defun my/project-path-inside-root-p (path project-root)
   "Return non-nil when PATH belongs to PROJECT-ROOT."
@@ -150,17 +170,47 @@ keep perspective names unique."
                (when-let* ((project (project-current nil default-directory))
                            (project-root (project-root project)))
                  (my/project-normalize-root project-root))))))
-    (unless (my/project-ignored-root-p root)
+    (unless (my/project-hidden-root-p root)
       root)))
+
+(defun my/project-sync-roots-from-project-el ()
+  "Sync visible `project.el' roots into Projectile known projects."
+  (when (and (require 'project nil t)
+             (require 'projectile nil t))
+    (projectile-known-projects)
+    (project--ensure-read-project-list)
+    (let ((changed nil))
+      (dolist (project-root (project-known-project-roots))
+        (let ((project-root (my/project-normalize-root project-root)))
+          (unless (or (my/project-hidden-root-p project-root)
+                      (seq-some
+                       (lambda (known-root)
+                         (my/project-root-equal-p known-root project-root))
+                       projectile-known-projects))
+            (push project-root projectile-known-projects)
+            (setq changed t))))
+      (when changed
+        (setq projectile-known-projects
+              (seq-uniq (mapcar #'my/project-normalize-root projectile-known-projects)))
+        (projectile-merge-known-projects)))
+    projectile-known-projects))
 
 (defun my/project-known-projects ()
   "Return known Projectile projects that still exist."
-  (seq-filter
-   (lambda (project-root)
-     (and (file-directory-p project-root)
-          (not (my/project-ignored-root-p project-root))))
-   (mapcar #'my/project-normalize-root
-           (projectile-relevant-known-projects))))
+  (when (require 'projectile nil t)
+    (my/project-sync-roots-from-project-el)
+    (seq-filter
+     (lambda (project-root)
+       (and (file-directory-p project-root)
+            (not (my/project-hidden-root-p project-root))))
+     (mapcar #'my/project-normalize-root
+             (projectile-relevant-known-projects)))))
+
+(defun my/dashboard-projects-load-projects (orig-fn &rest args)
+  "Use the custom Projectile project list for dashboard projects."
+  (if (eq dashboard-projects-backend 'projectile)
+      (or (my/project-known-projects) nil)
+    (apply orig-fn args)))
 
 (defun my/project-read-known-project (&optional prompt)
   "Read one known project root using PROMPT."
@@ -823,6 +873,16 @@ Returns the number of killed buffers."
 
 (with-eval-after-load 'project
   (add-to-list 'project-list-exclude #'my/project-project-object-ignored-p))
+
+(with-eval-after-load 'dashboard
+  (setq dashboard-projects-backend 'projectile
+        dashboard-projects-switch-function #'my/project-open-workbench)
+
+  (unless (advice-member-p #'my/dashboard-projects-load-projects
+                           #'dashboard-projects-backend-load-projects)
+    (advice-add 'dashboard-projects-backend-load-projects
+                :around
+                #'my/dashboard-projects-load-projects)))
 
 (provide 'init-project)
 

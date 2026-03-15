@@ -51,7 +51,8 @@
     (setq evil-collection-mode-list
           (seq-remove
            (lambda (mode)
-             (eq (if (consp mode) (car mode) mode) 'vterm))
+             (memq (if (consp mode) (car mode) mode)
+                   '(vterm eshell)))
            evil-collection-mode-list)))
   :hook (evil-mode . evil-collection-init)
   :bind (([remap evil-show-marks] . evil-collection-consult-mark)
@@ -263,6 +264,8 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       "oD" 'dirvish-fd
       "ol" 'org-store-link
       "ob" 'browse-url
+      "oe" 'vterm-toggle
+      "oE" 'my/vterm-toggle-fixed
       "ot" 'vterm-toggle
       "oT" 'ansi-term
       "ov" 'vterm
@@ -270,7 +273,6 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       "oS" 'my/vterm-ssh
       "ow" 'eww-browse-url
       "ox" 'xwidget-webkit-browse-url
-      "oe" 'eshell-toggle
       "os" 'shell-toggle)
 
     (with-eval-after-load 'org

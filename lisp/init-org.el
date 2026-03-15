@@ -9,6 +9,8 @@
 
 ;;; Code:
 
+(declare-function my/typography-setup-prose-buffer "init-base")
+
 (require 'init-funcs)
 (require 'org)
 
@@ -48,18 +50,14 @@ Rich Org UI is no longer disabled based on buffer size."
 Special block overlays are no longer disabled based on buffer size."
   :type 'integer)
 
-(defcustom my/org-agenda-auto-refresh-idle-delay 4
-  "Seconds to wait before refreshing Org agenda files after startup."
-  :type 'integer)
-
 (defun my/org-rich-ui-buffer-p ()
   "Return non-nil when the current Org buffer should use rich UI helpers."
   (my/rich-ui-buffer-p nil my/org-rich-ui-max-buffer-size))
 
-(defun my/org-enable-mixed-pitch-maybe ()
-  "Enable `mixed-pitch-mode' for Org buffers in graphical sessions."
+(defun my/org-enable-typography-maybe ()
+  "Enable shared prose typography for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
-    (mixed-pitch-mode 1)))
+    (my/typography-setup-prose-buffer)))
 
 (defun my/org-enable-valign-maybe ()
   "Enable `valign-mode' for Org buffers in graphical sessions."
@@ -88,26 +86,12 @@ Special block overlays are no longer disabled based on buffer size."
 (use-package org
   :ensure nil
   :hook ((org-mode . visual-line-mode)        ; 自动换行
-         (org-mode . org-indent-mode))        ; 缩进模式
+         (org-mode . org-indent-mode)
+         (org-mode . my/org-enable-typography-maybe)) ; 缩进模式
   :bind (("C-c a" . org-agenda)
          ("C-c c" . org-capture)
          :map org-mode-map
          ("C-c C-q" . counsel-org-tag))
-  
-  :custom-face
-  ;; --- Heading Typography (标题排版) ---
-  (org-document-title ((t (:height 4.75 :weight bold :inherit variable-pitch))))
-  (org-level-1 ((t (:height 4.40 :weight bold :inherit variable-pitch))))
-  (org-level-2 ((t (:height 4.35 :weight bold :inherit variable-pitch))))
-  (org-level-3 ((t (:height 4.30 :weight bold :inherit variable-pitch))))
-  (org-level-4 ((t (:height 4.25 :weight bold :inherit variable-pitch))))
-  (org-level-5 ((t (:height 4.20 :weight bold :inherit variable-pitch))))
-  (org-level-6 ((t (:height 4.15 :weight bold :inherit variable-pitch))))
-  (org-level-7 ((t (:height 4.10 :weight bold :inherit variable-pitch))))
-  (org-level-8 ((t (:height 4.05 :weight bold :inherit variable-pitch))))
-  (org-block ((t (:inherit fixed-pitch))))
-  (org-code ((t (:inherit (shadow fixed-pitch)))))
-  (org-verbatim ((t (:inherit (shadow fixed-pitch)))))
 
   :custom
   ;; --- Directories ---
@@ -139,20 +123,20 @@ Special block overlays are no longer disabled based on buffer size."
                "DONE(d!)" "CANCELLED(c@/!)")))
 
   (org-todo-keyword-faces
-   '(("TODO"      . (:foreground "#ff6c6b" :weight bold))
-     ("NEXT"      . (:foreground "#98be65" :weight bold))
-     ("HOLD"      . (:foreground "#feb24c" :weight bold))
-     ("WIP"       . (:foreground "#0098dd" :weight bold))
-     ("WAIT"      . (:foreground "#ecbe7b" :weight bold))
-     ("DONE"      . (:foreground "#51afef" :weight bold :strike-through t))
-     ("CANCELLED" . (:foreground "#ff6480" :weight bold :strike-through t))))
+   '(("TODO"      . (:foreground "#ff6c6b" :weight medium))
+     ("NEXT"      . (:foreground "#98be65" :weight medium))
+     ("HOLD"      . (:foreground "#feb24c" :weight medium))
+     ("WIP"       . (:foreground "#0098dd" :weight medium))
+     ("WAIT"      . (:foreground "#ecbe7b" :weight medium))
+     ("DONE"      . (:foreground "#51afef" :weight medium :strike-through t))
+     ("CANCELLED" . (:foreground "#ff6480" :weight medium :strike-through t))))
 
   (org-enforce-todo-dependencies t)
   (org-enforce-todo-checkbox-dependencies t)
   (org-closed-keep-when-no-todo t)
   (org-log-repeat 'time)
   (org-priority-faces
-   '((?A :foreground "red" :weight bold)
+   '((?A :foreground "red" :weight medium)
      (?B :foreground "orange")
      (?C :foreground "yellow")))
 
@@ -189,12 +173,7 @@ Special block overlays are no longer disabled based on buffer size."
 ;;; 3. Modern UI & Aesthetics (UI美化)
 ;;; ----------------------------------------------------------------------------
 
-;; 3.1 混合字体
-(use-package mixed-pitch
-  :ensure t
-  :hook (org-mode . my/org-enable-mixed-pitch-maybe))
-
-;; 3.2 写作专注模式 (自动居中)
+;; 3.1 写作专注模式 (自动居中)
 (use-package olivetti
   :ensure t
   :diminish
@@ -212,12 +191,12 @@ Special block overlays are no longer disabled based on buffer size."
   (add-hook 'org-mode-hook #'xs-toggle-olivetti-for-org)
   (add-hook 'window-configuration-change-hook #'xs-toggle-olivetti-for-org))
 
-;; 3.3 表格对齐
+;; 3.2 表格对齐
 (use-package valign
   :ensure t
   :hook (org-mode . my/org-enable-valign-maybe))
 
-;; 3.4 Org Modern (全面增强版)
+;; 3.3 Org Modern (全面增强版)
 (use-package org-modern
   :ensure t
   :after org  ; [IMPORTANT] 修复加载顺序，确保在 org 之后加载
@@ -278,7 +257,7 @@ Special block overlays are no longer disabled based on buffer size."
   :config
   (setq-default line-spacing 0.1))
 
-;; 3.5 Org Modern Indent
+;; 3.4 Org Modern Indent
 (my/package-ensure-vc 'org-modern-indent "https://github.com/jdtsmith/org-modern-indent.git")
 
 (use-package org-modern-indent
@@ -287,7 +266,7 @@ Special block overlays are no longer disabled based on buffer size."
   :config
   (setq org-modern-indent-width 4))
 
-;; 3.6 自动显示强调符
+;; 3.5 自动显示强调符
 (my/package-ensure-vc 'org-appear "https://github.com/awth13/org-appear.git")
 
 (use-package org-appear
@@ -298,7 +277,7 @@ Special block overlays are no longer disabled based on buffer size."
   (org-appear-autolinks t)
   (org-appear-autosubmarkers t))
 
-;; 3.7 优先级美化
+;; 3.6 优先级美化
 (use-package org-fancy-priorities
   :ensure t
   :hook (org-mode . org-fancy-priorities-mode)
@@ -332,7 +311,7 @@ Special block overlays are no longer disabled based on buffer size."
     ("warning"    . (:label "警告" :color "#f7768e"))))
 
 (defface my/org-block-title-face
-  '((t :weight bold :height 1.05 :inherit default))
+  '((t :weight regular :height 1.05 :inherit default))
   "Block 标题的字体样式。")
 
 ;; ===========================================================
@@ -477,23 +456,9 @@ Special block overlays are no longer disabled based on buffer size."
 
 (use-package org-agenda
   :ensure nil
-  :bind ("C-c r" . my/reload-agenda)
   :init
   (setq org-agenda-files nil)
-  (setq org-agenda-diary-file my-org-diary-file)
-  :config
-  (appt-activate 1)
-  (defun my/reload-agenda (&optional silent)
-    "Reload all org files under root into agenda."
-    (interactive)
-    (let ((files (directory-files-recursively my-org-root "\\.org$")))
-      (setq files (cl-remove-if (lambda (path) (string-match-p "/ltximg/" path)) files))
-      (setq org-agenda-files files)
-      (org-agenda-to-appt)
-      (unless silent
-        (message "Agenda refreshed: %d files loaded." (length files)))))
-  (run-with-idle-timer my/org-agenda-auto-refresh-idle-delay nil
-                       #'my/reload-agenda t)
+  (setq org-agenda-diary-file nil)
 
   :custom
   (org-agenda-span 'week)

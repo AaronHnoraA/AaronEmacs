@@ -21,7 +21,11 @@
 - `C-x g`
   Magit
 - `M-\``
-  `eshell-toggle`
+  `vterm-toggle`
+- `C-c e`
+  临时 `vterm`，失焦自动收起
+- `C-c E`
+  切换共享 `vterm` 的固定状态
 - `C-\``
   `popper-toggle`
 
@@ -121,6 +125,10 @@
   `dirvish-dwim`
 - `SPC o D`
   `dirvish-fd`
+- `SPC o e`
+  `vterm-toggle`
+- `SPC o E`
+  切换共享 `vterm` 的固定状态
 - `SPC o t`
   `vterm-toggle`
 - `SPC o v`
@@ -129,8 +137,6 @@
   命名 `vterm`
 - `SPC o S`
   `my/vterm-ssh`
-- `SPC o e`
-  `eshell-toggle`
 - `SPC o s`
   `shell-toggle`
 - `SPC o w`

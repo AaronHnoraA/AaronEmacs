@@ -4,6 +4,9 @@
 ;;
 
 ;;; Code:
+
+(declare-function my/typography-setup-prose-buffer "init-base")
+
 ;; =========================
 ;; AUCTeX 基础配置
 ;; =========================
@@ -12,6 +15,7 @@
   :ensure auctex
   :defer t
   :hook
+  (LaTeX-mode . my/typography-setup-prose-buffer)
   (LaTeX-mode . LaTeX-math-mode)   ;; 快速输入数学符号
   (LaTeX-mode . turn-on-reftex)    ;; 引用、label、ref
   :config
