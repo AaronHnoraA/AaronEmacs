@@ -45,7 +45,9 @@
 (menu-bar-mode -1)
 (tool-bar-mode -1)
 (scroll-bar-mode -1)
-(select-frame-set-input-focus (selected-frame))
+;; 放在 GUI 初始化之后
+(when (display-graphic-p)
+  (select-frame-set-input-focus (selected-frame)))
 
 ;; 让启动更“干净”：取消启动画面、startup message 等（可选）
 (setq inhibit-startup-screen t
