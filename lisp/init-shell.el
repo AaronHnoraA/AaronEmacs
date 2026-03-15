@@ -246,7 +246,15 @@ If popup is focused, kill it."
   :commands (vterm vterm-toggle my/vterm-named my/vterm-ssh)
   :hook (vterm-mode . (lambda ()
                         (when (fboundp 'evil-emacs-state)
-                          (evil-emacs-state))))
+                          (evil-emacs-state))
+                        (run-at-time
+                         0 nil
+                         (lambda (buffer)
+                           (when (buffer-live-p buffer)
+                             (with-current-buffer buffer
+                               (when (bound-and-true-p evil-local-mode)
+                                 (turn-off-evil-mode)))))
+                         (current-buffer))))
   :custom
   (vterm-shell "zsh"))
 

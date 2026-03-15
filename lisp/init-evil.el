@@ -22,6 +22,7 @@
          :map evil-normal-state-map
          ("s" . evil-avy-goto-char-timer))
   :config
+  (add-to-list 'evil-buffer-regexps '("^\\*vterm.*\\*$" . nil))
   ;; Silence line out of range error.
   (shut-up! #'evil-indent)
   :custom
@@ -45,6 +46,13 @@
   :hook (after-init . global-evil-surround-mode))
 (use-package evil-collection
   :ensure t
+  :init
+  (with-eval-after-load 'evil-collection
+    (setq evil-collection-mode-list
+          (seq-remove
+           (lambda (mode)
+             (eq (if (consp mode) (car mode) mode) 'vterm))
+           evil-collection-mode-list)))
   :hook (evil-mode . evil-collection-init)
   :bind (([remap evil-show-marks] . evil-collection-consult-mark)
          ([remap evil-show-jumps] . evil-collection-consult-jump-list))

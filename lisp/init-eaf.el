@@ -31,11 +31,41 @@
   (when (file-directory-p dir)
     (add-to-list 'load-path dir)))
 
-(autoload 'eaf-open "eaf" nil t)
-(autoload 'eaf-open-browser "eaf-browser" nil t)
-(autoload 'eaf-open-pdf "eaf-pdf-viewer" nil t)
-(autoload 'eaf-open-mindmap "eaf-mindmap" nil t)
-(autoload 'eaf-open-git "eaf-git" nil t)
+(defun my/eaf-require (&rest features)
+  "Load EAF core and FEATURES lazily."
+  (require 'eaf)
+  (dolist (feature features)
+    (require feature)))
+
+(defun eaf-open (url &optional app-name args always-new)
+  "Lazy wrapper for the real `eaf-open'."
+  (interactive "G[EAF] EAF Open: ")
+  (my/eaf-require)
+  (funcall (symbol-function 'eaf-open) url app-name args always-new))
+
+(defun eaf-open-browser (url &optional args)
+  "Lazy wrapper for the real `eaf-open-browser'."
+  (interactive "M[EAF/browser] URL: ")
+  (my/eaf-require 'eaf-browser)
+  (funcall (symbol-function 'eaf-open-browser) url args))
+
+(defun eaf-open-pdf (file)
+  "Open FILE with the EAF PDF viewer."
+  (interactive "f[EAF/pdf] Open PDF: ")
+  (my/eaf-require 'eaf-pdf-viewer)
+  (eaf-open file "pdf-viewer"))
+
+(defun eaf-open-mindmap (file)
+  "Lazy wrapper for the real `eaf-open-mindmap'."
+  (interactive "F[EAF/mindmap] Select Mindmap file: ")
+  (my/eaf-require 'eaf-mindmap)
+  (funcall (symbol-function 'eaf-open-mindmap) file))
+
+(defun eaf-open-git ()
+  "Lazy wrapper for the real `eaf-open-git'."
+  (interactive)
+  (my/eaf-require 'eaf-git)
+  (call-interactively (symbol-function 'eaf-open-git)))
 
 (defalias 'browse-web #'eaf-open-browser)
 
