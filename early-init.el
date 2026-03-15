@@ -31,9 +31,11 @@
 
          ;; 启动时直接进入全屏。
          ;; 如需改成“最大化但不进原生全屏”，可改为 `maximized`。
-         (fullscreen . fullboth)
+         ;(fullscreen . fullboth)
+         ;(fullscreen . maximized)
         )
        default-frame-alist))
+
 
 
 ;; 对第一个 frame 也应用同样设置（有些版本对 initial-frame-alist 特判）
