@@ -47,5 +47,21 @@ REV defaults to `:last-release'."
       (require 'package-vc)
       (package-vc-install (cons package spec)))))
 
+;; Compatibility shims for newer ELPA Magit running against Emacs 31's
+;; built-in `transient'.
+(defvar transient-prefer-reading-value nil
+  "Whether Magit should prefer reading infix values in the minibuffer.
+
+This variable was provided by older external `transient' releases and is
+still referenced by current Magit code.")
+
+(with-eval-after-load 'transient
+  ;; Emacs 31's built-in transient dropped this private helper, but the
+  ;; current ELPA Magit still calls it when formatting some branch infixes.
+  (unless (fboundp 'transient--get-format)
+    (defun transient--get-format (obj)
+      "Return OBJ's display format for Magit compatibility."
+      (slot-value obj 'format))))
+
 (provide 'init-package-utils)
 ;;; init-package-utils.el ends here
