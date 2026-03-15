@@ -1011,6 +1011,8 @@ Else, call `comment-or-uncomment-region' on the current line."
 (use-package amx
   :ensure t
   :defer 2
+  :custom
+  (amx-history-length 20)
   :config
   (amx-mode 1))
 

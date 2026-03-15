@@ -46,6 +46,7 @@
   (require 'init-joplin))
 (require 'init-ignored)
 
+
 ;; MacOS specific
 (when (eq system-type 'darwin)
   (require 'init-macos))

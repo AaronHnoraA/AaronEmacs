@@ -10,7 +10,8 @@
   :hook ((after-init . vertico-mode)
          (minibuffer-setup . vertico-repeat-save))
   :custom
-  (vertico-sort-function nil))
+  ;; 最近使用过的候选优先，M-x/Consult/普通补全都会更贴近使用历史。
+  (vertico-sort-function #'vertico-sort-history-length-alpha))
 
 (use-package vertico-directory
   :ensure nil
