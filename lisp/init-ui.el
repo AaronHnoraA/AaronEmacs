@@ -14,7 +14,9 @@
 
 (use-package doom-modeline
   :ensure t
-  :hook (after-init . doom-modeline-mode)
+  :defer 1
+  :config
+  (doom-modeline-mode 1)
   :custom
   (doom-modeline-irc nil)
   (doom-modeline-mu4e nil)
@@ -27,7 +29,9 @@
 ;; Customize popwin behavior
 (use-package shackle
   :ensure t
-  :hook (after-init . shackle-mode)
+  :defer 1
+  :config
+  (shackle-mode 1)
   :custom
   (shackle-default-size 0.5)
   (shackle-default-alignment 'below)

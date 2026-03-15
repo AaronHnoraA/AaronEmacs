@@ -11,11 +11,15 @@
 (defvar dashboard-projects-switch-function)
 
 (declare-function project--ensure-read-project-list "project")
+(declare-function project--write-project-list "project")
 (declare-function dashboard-projects-backend-load-projects "dashboard-widgets")
+(declare-function projectile-find-file-in-directory "projectile")
 (declare-function projectile-ignored-project-p "projectile")
 (declare-function projectile-known-projects "projectile")
+(declare-function projectile-load-known-projects "projectile")
 (declare-function projectile-merge-known-projects "projectile")
 (declare-function projectile-relevant-known-projects "projectile")
+(declare-function projectile-save-known-projects "projectile")
 
 (defgroup my/project nil
   "Project workflow helpers."
@@ -233,13 +237,22 @@ With a prefix argument, always prompt."
   (when (fboundp 'persp-switch)
     (persp-switch (my/project-perspective-name project-root))))
 
+(defmacro my/with-project-root-context (project-root &rest body)
+  "Evaluate BODY with PROJECT-ROOT bound as the active Projectile root."
+  (declare (indent 1) (debug t))
+  `(let* ((project-root (my/project-normalize-root ,project-root))
+          (default-directory project-root)
+          (projectile-project-root project-root))
+     ,@body))
+
 (defun my/project-switch (project-root &optional arg)
   "Switch to PROJECT-ROOT, optionally using Projectile commander with ARG."
   (interactive (list (my/project-read-known-project "Switch to project: ")
                      current-prefix-arg))
   (setq project-root (my/project-normalize-root project-root))
   (my/project-switch-perspective project-root)
-  (projectile-switch-project-by-name project-root arg))
+  (my/with-project-root-context project-root
+    (projectile-switch-project-by-name project-root arg)))
 
 (defun my/project-ensure-treemacs ()
   "Load Treemacs integrations needed for project-aware navigation."
@@ -261,19 +274,19 @@ With ARG, Projectile uses commander mode."
   "Find a file in PROJECT-ROOT.
 Without a prefix argument, default to the current project."
   (interactive (list (my/project-read-target-root "Find file in project: ")))
-  (let ((default-directory (my/project-normalize-root project-root)))
-    (projectile-find-file)))
+  (my/with-project-root-context project-root
+    (projectile-find-file-in-directory project-root)))
 
 (defun my/project-recent-file (project-root)
   "Open a recently visited file in PROJECT-ROOT."
   (interactive (list (my/project-read-target-root "Recent file in project: ")))
-  (let ((default-directory (my/project-normalize-root project-root)))
+  (my/with-project-root-context project-root
     (projectile-recentf)))
 
 (defun my/project-switch-buffer (project-root)
   "Switch to a buffer that belongs to PROJECT-ROOT."
   (interactive (list (my/project-read-target-root "Buffer in project: ")))
-  (let ((default-directory (my/project-normalize-root project-root)))
+  (my/with-project-root-context project-root
     (projectile-switch-to-buffer)))
 
 (defun my/project-ripgrep (project-root)
@@ -399,6 +412,37 @@ This matches canonically, so symlinked roots are cleaned as well."
   (when (require 'project nil t)
     (project--remember-dir project-root))
   project-root)
+
+(defun my/project--filter-visible-roots (roots)
+  "Return ROOTS without entries that should stay hidden from project UIs."
+  (seq-uniq
+   (seq-remove #'my/project-hidden-root-p
+               (mapcar #'my/project-normalize-root roots))))
+
+(defun my/project-prune-hidden-project-state ()
+  "Remove ignored roots such as `~/` from persisted project state."
+  (interactive)
+  (when (require 'projectile nil t)
+    (projectile-load-known-projects)
+    (let ((filtered (my/project--filter-visible-roots projectile-known-projects)))
+      (unless (equal filtered projectile-known-projects)
+        (setq projectile-known-projects filtered)
+        (projectile-merge-known-projects))))
+  (when (require 'project nil t)
+    (project--ensure-read-project-list)
+    (let ((filtered
+           (seq-remove
+            (lambda (entry)
+              (my/project-hidden-root-p (car-safe entry)))
+            project--list)))
+      (unless (equal filtered project--list)
+        (setq project--list filtered)
+        (project--write-project-list)))))
+
+(defun my/project--remember-dir-visible-only (orig-fn dir)
+  "Only let ORIG-FN remember DIR when it is not an ignored root."
+  (unless (my/project-hidden-root-p dir)
+    (funcall orig-fn dir)))
 
 (defun my/show-imenu-target-root ()
   "Return the directory root used by `show-imenu'."
@@ -701,6 +745,7 @@ Returns the number of killed buffers."
   (define-key projectile-command-map (kbd ".") #'my/project-dispatch)
   (setq projectile-mode-line "Projectile"
         projectile-track-known-projects-automatically nil)
+  (my/project-prune-hidden-project-state)
   :custom
   (projectile-use-git-grep t)
   (projectile-ignored-project-function #'my/project-ignored-root-p)
@@ -718,7 +763,9 @@ Returns the number of killed buffers."
 (use-package counsel-projectile
   :ensure t
   :after projectile
-  :hook (after-init . counsel-projectile-mode))
+  :defer 2
+  :config
+  (counsel-projectile-mode 1))
 
 (use-package transient
   :ensure nil
@@ -750,6 +797,8 @@ Returns the number of killed buffers."
 (use-package treemacs
   :ensure t
   :defer t
+  :hook (treemacs-mode . (lambda ()
+                           (display-line-numbers-mode -1)))
   :init
   (with-eval-after-load 'winum
     (define-key winum-keymap (kbd "M-0") #'treemacs-select-window))
@@ -860,6 +909,7 @@ Returns the number of killed buffers."
 
 (use-package perspective
   :ensure t
+  :defer 2
   :bind
   (("C-x k" . persp-kill-buffer*))
   :init
@@ -873,6 +923,10 @@ Returns the number of killed buffers."
 
 (with-eval-after-load 'project
   (add-to-list 'project-list-exclude #'my/project-project-object-ignored-p))
+
+(with-eval-after-load 'project
+  (advice-add 'project--remember-dir :around #'my/project--remember-dir-visible-only)
+  (my/project-prune-hidden-project-state))
 
 (with-eval-after-load 'dashboard
   (setq dashboard-projects-backend 'projectile

@@ -11,14 +11,17 @@
 
 (use-package yasnippet
   :ensure t
+  :defer 2
+  :commands (yas-expand yas-insert-snippet yas-new-snippet yas-visit-snippet-file)
   :init
   ;; 你自己的 snippets 目录：~/.emacs.d/snippets
   (setq yas-snippet-dirs
         (list (expand-file-name "snippets" user-emacs-directory)))
   :hook
-  (prog-mode . yas-minor-mode)
+  ((prog-mode . yas-minor-mode)
+   (text-mode . yas-minor-mode)
+   (org-mode . yas-minor-mode))
   :config
-  (yas-global-mode 1)
   (yas-reload-all)
 
   (with-eval-after-load 'yasnippet
@@ -32,6 +35,7 @@
 (use-package yasnippet-snippets
   :ensure t
   :after yasnippet
+  :defer t
   :config
   ;; 把包自带 snippets 也加入
   (add-to-list 'yas-snippet-dirs

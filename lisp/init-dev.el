@@ -53,7 +53,9 @@
 ;; Highlight TODO
 (use-package hl-todo
   :ensure t
-  :hook (after-init . global-hl-todo-mode)
+  :defer 2
+  :config
+  (global-hl-todo-mode 1)
   :bind (:map hl-todo-mode-map
          ("C-c t p" . hl-todo-previous)
          ("C-c t n" . hl-todo-next)

@@ -119,9 +119,26 @@
 
 ;; 2. 启用行号（如果还没启用）
 (global-display-line-numbers-mode 1)
-;; 可选：在一些模式禁用（终端、shell 等）
-(dolist (hook '(term-mode-hook vterm-mode-hook eshell-mode-hook))
-  (add-hook hook (lambda () (display-line-numbers-mode -1))))
+
+(defun my/disable-display-line-numbers ()
+  "Disable line numbers in buffers where they add cost but little value."
+  (display-line-numbers-mode -1))
+
+;; 可选：在一些模式禁用（终端、目录、帮助、仪表盘等）
+(dolist (hook '(term-mode-hook
+                vterm-mode-hook
+                eshell-mode-hook
+                shell-mode-hook
+                treemacs-mode-hook
+                dashboard-mode-hook
+                ibuffer-mode-hook
+                dired-mode-hook
+                helpful-mode-hook
+                help-mode-hook
+                magit-mode-hook
+                magit-status-mode-hook
+                compilation-mode-hook))
+  (add-hook hook #'my/disable-display-line-numbers))
 
 
 
@@ -993,7 +1010,9 @@ Else, call `comment-or-uncomment-region' on the current line."
 
 (use-package amx
   :ensure t
-  :init (amx-mode))
+  :defer 2
+  :config
+  (amx-mode 1))
 
 (use-package mwim
   :ensure t

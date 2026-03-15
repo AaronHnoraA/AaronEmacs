@@ -51,7 +51,9 @@
 
 ;; 图标依赖（必须先装）
 (use-package nerd-icons
-  :ensure t)
+  :ensure t
+  :if (display-graphic-p)
+  :defer 1)
 
 (use-package dirvish
   :ensure t
@@ -115,6 +117,7 @@
 
 (use-package centaur-tabs
   :ensure t
+  :defer 2
   :config
   (setq centaur-tabs-style "bar"
     centaur-tabs-height 22

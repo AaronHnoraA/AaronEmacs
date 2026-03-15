@@ -522,12 +522,46 @@ Special block overlays are no longer disabled based on buffer size."
         ("l" "Life Task" plain (file (lambda () (my/get-daily-capture-path "life")))
          "#+title: %^{Task}\n#+date: %u\n#+filetags: :life:\n\n* Type: %^{Type}\n%?\n" :unnarrowed t)))
 
+(defcustom my/org-roam-background-init-delay 2
+  "Idle delay before Org Roam starts its background services."
+  :type 'number
+  :group 'my/org-ui)
+
+(defvar my/org-roam--background-timer nil)
+(defvar my/org-roam--initialized nil)
+
+(defun pv/org-set-last-modified ()
+  "Update the `#+last_modified` field before saving an Org buffer."
+  (when (derived-mode-p 'org-mode)
+    (save-excursion
+      (goto-char (point-min))
+      (when (re-search-forward "^#\\+last_modified:" nil t)
+        (delete-region (point) (line-end-position))
+        (insert (format " [%s]" (format-time-string "%Y-%m-%d %a %H:%M")))))))
+
+(add-hook 'org-mode-hook
+          (lambda ()
+            (add-hook 'before-save-hook #'pv/org-set-last-modified nil t)))
+
+(defun my/org-roam-background-init ()
+  "Load Org Roam on idle so startup stays responsive."
+  (setq my/org-roam--background-timer nil)
+  (unless (featurep 'org-roam)
+    (require 'org-roam nil t)))
+
 ;;; ----------------------------------------------------------------------------
 ;;; 6. Org Roam (知识库)
 ;;; ----------------------------------------------------------------------------
 
 (use-package org-roam
   :ensure t
+  :defer t
+  :commands (org-roam-node-find
+             org-roam-node-insert
+             org-roam-tag-add
+             org-roam-alias-add
+             org-roam-buffer-toggle
+             org-roam-db-autosync-mode)
   :init
   (setq org-roam-directory my-org-roam-dir)
   (setq org-roam-v2-ack t)
@@ -546,20 +580,10 @@ Special block overlays are no longer disabled based on buffer size."
         ("l" . org-roam-buffer-toggle))
   
   :config
-  (org-roam-setup)
-  (org-roam-db-autosync-mode 1)
-  
-  (defun pv/org-set-last-modified ()
-    (when (derived-mode-p 'org-mode)
-      (save-excursion
-        (goto-char (point-min))
-        (when (re-search-forward "^#\\+last_modified:" nil t)
-          (delete-region (point) (line-end-position))
-          (insert (format " [%s]" (format-time-string "%Y-%m-%d %a %H:%M")))))))
-  (add-hook 'org-mode-hook
-            (lambda ()
-              (add-hook 'before-save-hook #'pv/org-set-last-modified nil t)))
-
+  (unless my/org-roam--initialized
+    (org-roam-setup)
+    (org-roam-db-autosync-mode 1)
+    (setq my/org-roam--initialized t))
   (setq org-roam-capture-templates
         '(("m" "Math" plain "%?" :if-new (file+head "math/${slug}.org" "#+title: ${title}\n#+date: %u\n#+filetags: :math:\n") :unnarrowed t)
           ("c" "CS" plain "%?" :if-new (file+head "CS/${slug}.org" "#+title: ${title}\n#+date: %u\n#+filetags: :cs:\n") :unnarrowed t)
@@ -567,6 +591,15 @@ Special block overlays are no longer disabled based on buffer size."
           ("p" "Phil" plain "%?" :if-new (file+head "philosophy/${slug}.org" "#+title: ${title}\n#+date: %u\n#+filetags: :phil:\n") :unnarrowed t)
           ("i" "Index" plain "%?" :if-new (file+head "index/${slug}.org" "#+title: ${title}\n#+date: %u\n#+filetags: :index:\n") :unnarrowed t)
           ("r" "Paper" plain "%?" :if-new (file+head "papers/${slug}.org" "#+title: ${title}\n#+date: %u\n#+filetags: :paper:\n") :unnarrowed t))))
+
+(add-hook 'emacs-startup-hook
+          (lambda ()
+            (unless (or noninteractive
+                        my/org-roam--background-timer
+                        my/org-roam--initialized)
+              (setq my/org-roam--background-timer
+                    (run-with-idle-timer my/org-roam-background-init-delay nil
+                                         #'my/org-roam-background-init)))))
 
 (use-package org-roam-ui
   :ensure t

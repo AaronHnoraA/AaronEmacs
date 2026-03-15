@@ -99,6 +99,7 @@
 (use-package company-prescient
   :ensure t
   :after company
+  :defer 2
   :config
   (company-prescient-mode 1)
   (prescient-persist-mode 1))
@@ -191,8 +192,8 @@
 ;; 替代 lsp-headerline-breadcrumb：Eglot 作者出品的面包屑
 (use-package breadcrumb
   :ensure t
-  :config
-  (breadcrumb-mode 1))
+  :hook ((prog-mode . breadcrumb-local-mode)
+         (org-src-mode . breadcrumb-local-mode)))
 
 ;; -------------------------
 ;; 6. Dape (Debugging)

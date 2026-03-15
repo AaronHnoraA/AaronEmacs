@@ -8,8 +8,9 @@
 ;; Tips for next keystroke
 (use-package which-key
   :ensure t
-  :hook (after-init . which-key-mode)
+  :defer 2
   :config
+  (which-key-mode 1)
   (which-key-add-key-based-replacements
     "C-c !" "flycheck"
     "C-c @" "hideshow"
@@ -30,7 +31,9 @@
 ;; Press C-c s to search
 (use-package rg
   :ensure t
-  :hook (after-init . rg-enable-default-bindings))
+  :defer 2
+  :config
+  (rg-enable-default-bindings))
 
 ;; Jump to arbitrary positions
 (use-package avy
