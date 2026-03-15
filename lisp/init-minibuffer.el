@@ -98,6 +98,15 @@
   (consult-async-input-throttle 0.2)
   (consult-async-input-debounce 0.1))
 
+(defun my/completion-in-region-with-minibuffer (&rest args)
+  "Use the minibuffer completion UI instead of opening `*Completions*'."
+  (apply (if (bound-and-true-p vertico-mode)
+             #'consult-completion-in-region
+           #'completion--in-region)
+         args))
+
+(setq completion-in-region-function #'my/completion-in-region-with-minibuffer)
+
 ;; Consult users will also want the embark-consult package.
 (use-package embark-consult
   :ensure t

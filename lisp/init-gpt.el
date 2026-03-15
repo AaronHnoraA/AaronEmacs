@@ -54,7 +54,42 @@
   :ensure t
   :hook ((prog-mode . copilot-mode)
          (org-mode . copilot-mode))
+  :custom
+  (copilot-install-dir (expand-file-name "var/copilot" user-emacs-directory))
+  (copilot-idle-delay 0.30)
+  (copilot-indent-offset-warning-disable t)
+  (copilot-lsp-settings '(:github (:copilot ())))
   :config
+  (defun my/copilot-check-status ()
+    "Report current `copilot.el' authentication status.
+
+Compatibility wrapper for old `lsp-copilot-check-status' workflows."
+    (interactive)
+    (let* ((response (copilot--request 'checkStatus nil))
+           (status (plist-get response :status))
+           (user (plist-get response :user)))
+      (message "%s"
+               (cond
+                ((and (stringp user) (not (string-empty-p user)))
+                 (format "Copilot is signed in as %s%s"
+                         user
+                         (if (and (stringp status) (not (string-empty-p status)))
+                             (format " [%s]" status)
+                           "")))
+                ((and (stringp status) (not (string-empty-p status)))
+                 (format "Copilot status: %s" status))
+                (t
+                 (format "Copilot status response: %S" response))))))
+  (defun my/copilot-check-quota ()
+    "Report quota or entitlement information from the Copilot server."
+    (interactive)
+    (message "Copilot quota: %S" (copilot--request 'checkQuota nil)))
+  (when (and (fboundp 'my/copilot--suppress-cancelled-errors)
+             (advice-member-p #'my/copilot--suppress-cancelled-errors 'copilot--log))
+    (advice-remove 'copilot--log #'my/copilot--suppress-cancelled-errors))
+  (defalias 'lsp-copilot-check-status #'my/copilot-check-status)
+  (defalias 'lsp-copilot-login #'copilot-login)
+  (defalias 'lsp-copilot-logout #'copilot-logout)
   (define-key copilot-completion-map (kbd "M-]") #'copilot-accept-completion)
   (define-key copilot-completion-map (kbd "M-}") #'copilot-accept-completion-to-char))
 

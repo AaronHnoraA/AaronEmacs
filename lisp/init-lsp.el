@@ -12,64 +12,57 @@
 ;; -------------------------
 ;; [https://company-mode.github.io/manual/](https://company-mode.github.io/manual/)
 
+(defconst my/company-lsp-backends
+  '((company-capf
+     company-files
+     :with company-tempo
+     company-yasnippet))
+  "LSP-first company backends for code buffers.")
+
+(defconst my/company-text-backends
+  '((company-capf
+     company-files
+     :with company-yasnippet
+     company-dabbrev))
+  "Company backends for prose and document buffers.")
+
+(defun my/company-setup-text-backends ()
+  "Use company popup completion in document buffers instead of `*Completions*'."
+  (setq-local company-backends my/company-text-backends))
+
 (use-package company
   :ensure t
-  :hook (prog-mode . company-mode)
+  :demand t
+  :hook ((eglot-managed-mode . company-mode)
+         (org-mode . company-mode)
+         (text-mode . company-mode)
+         (text-mode . my/company-setup-text-backends))
   :init
-  (global-company-mode) ;; 全局启用
   :bind (:map company-mode-map
          ([remap completion-at-point] . company-complete)
          :map company-active-map
          ("C-s"     . company-filter-candidates)
          ([tab]     . company-complete-selection))
-  :after yasnippet
   :config
   (define-advice company-capf--candidates (:around (func &rest args))
     "Try default completion styles."
     (let ((completion-styles '(basic partial-completion)))
       (apply func args)))
-  
-  :custom
-  ;; 核心体验设置
-  (company-idle-delay 0.05)            ;; 立即触发补全
-  (company-minimum-prefix-length 1)    ;; 至少1个字符触发
-  (company-show-numbers t)             ;; 显示编号 (M-1, M-2 选择)
-  (company-show-quick-access t)        ;; 允许 M-<n> 快速选择
-  (company-require-match nil)          ;; 不强制匹配
-  
-  ;; UI 设置
-  (company-tooltip-width-grow-only t)
-  (company-tooltip-align-annotations t)
-  (company-format-margin-function nil) ;; No icons inside margin (cleaner)
-
-  ;; Dabbrev 设置 (文本补全)
-  (company-dabbrev-ignore-case nil)
-  (company-dabbrev-downcase nil)
-  (company-dabbrev-code-ignore-case nil)
-  (company-dabbrev-code-everywhere t)
-  
-  ;; 文件/路径补全设置
-  (company-files-exclusions '(".git/" ".DS_Store"))
-
-  ;; Backends 设置 (Eglot 原生使用 company-capf)
-  (company-backends 
-        '((
-          company-capf 
-          company-files          ; 路径补全
-          :with company-tempo 
-          company-yasnippet
-          )
-          (company-dabbrev-code company-keywords)
-          company-dabbrev))
-  (setq-default company-backends 
-        '((
-          company-capf 
-          company-files          ; 路径补全
-          :with company-tempo 
-          company-yasnippet
-          )
-          (company-dabbrev-code company-keywords)
-          company-dabbrev))
+  (setq company-idle-delay 0.12
+        company-minimum-prefix-length 1
+        company-show-numbers t
+        company-show-quick-access t
+        company-require-match nil
+        company-tooltip-width-grow-only t
+        company-tooltip-align-annotations t
+        company-format-margin-function nil
+        company-dabbrev-ignore-case nil
+        company-dabbrev-downcase nil
+        company-dabbrev-code-ignore-case nil
+        company-dabbrev-code-everywhere t
+        company-files-exclusions '(".git/" ".DS_Store")
+        company-backends my/company-lsp-backends)
+  (setq-default company-backends my/company-lsp-backends)
   )
  ;; 全局默认 backends
 
@@ -310,7 +303,7 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
 ;; 7. Misc & Language Init
 ;; -------------------------
 
-(setq tab-always-indent 'complete)
+(setq tab-always-indent t)
 
 ;; Org-mode specific company setup
 (add-hook 'org-mode-hook

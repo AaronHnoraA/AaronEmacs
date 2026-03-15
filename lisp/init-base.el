@@ -458,7 +458,7 @@
          ([escape] . abort-recursive-edit))
   :custom
   ;; Default minibuffer is fine-tuned since Emacs 29
-  (completion-auto-help t)
+  (completion-auto-help nil)
   (completion-show-help nil)
   (completion-auto-select nil)
   (completion-cycle-threshold nil)
