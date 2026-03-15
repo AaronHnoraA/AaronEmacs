@@ -761,6 +761,16 @@ Returns the number of killed buffers."
         treemacs-file-follow-delay 0.2
         treemacs-workspace-switch-cleanup nil
         imenu-auto-rescan t)
+  ;; In practice evil's motion-state mouse bindings can shadow treemacs' own
+  ;; handlers, so wire single-click actions explicitly for both vanilla and
+  ;; evil treemacs buffers.
+  (keymap-set treemacs-mode-map "<mouse-1>" #'treemacs-single-click-expand-action)
+  (with-eval-after-load 'treemacs-evil
+    (keymap-set evil-treemacs-state-map "<down-mouse-1>" #'treemacs-leftclick-action)
+    (keymap-set evil-treemacs-state-map "<mouse-1>" #'treemacs-single-click-expand-action)
+    (keymap-set evil-treemacs-state-map "<double-mouse-1>" #'treemacs-doubleclick-action)
+    (keymap-set evil-treemacs-state-map "<drag-mouse-1>" #'treemacs-dragleftclick-action)
+    (keymap-set evil-treemacs-state-map "<mouse-3>" #'treemacs-rightclick-menu))
   (with-eval-after-load 'treemacs-tag-follow-mode
     (advice-remove 'treemacs--flatten&sort-imenu-index
                    #'my/treemacs-normalize-flat-imenu-index)

@@ -10,7 +10,7 @@
 ;; =========================
 (use-package ivy
   :ensure t
-  :hook (after-init . ivy-mode)
+  :defer t
   :config
   (setq ivy-use-virtual-buffers t
         ivy-initial-inputs-alist nil
@@ -29,24 +29,12 @@
 (use-package ivy-posframe
   :ensure t
   :after ivy
-  :config
-  (ivy-posframe-mode 1))
-
-;; =========================
-;; Counsel / M-x 防套娃
-;; =========================
-(defun my/safe-counsel-M-x ()
-  "Call `counsel-M-x' unless minibuffer is already active."
-  (interactive)
-  (if (active-minibuffer-window)
-      (keyboard-quit)
-    (counsel-M-x)))
+  :defer t)
 
 (use-package counsel
   :ensure t
   :after ivy
-  :bind (("M-x"     . my/safe-counsel-M-x)   ;; 确保最终是安全版
-         ;; `find-file' now goes through the native file prompt, so it can
+  :bind (;; `find-file' now goes through the native file prompt, so it can
          ;; reuse Vertico/Orderless and avoid the Ivy-specific glitches.
          ("C-x C-f" . find-file)
          ("C-x C-r" . counsel-recentf)

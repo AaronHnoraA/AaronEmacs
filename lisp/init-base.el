@@ -81,9 +81,10 @@
 ;; Always load the newest file
 (setq load-prefer-newer t)
 
-;; Cutting and pasting use primary/clipboard
-(setq select-enable-primary t
-      select-enable-clipboard t)
+;; Keep the system clipboard stable when selecting text with the mouse.
+(setq select-enable-primary nil
+      select-enable-clipboard t
+      select-active-regions nil)
 
 ;; Improve display
 (setq display-raw-bytes-as-hex t
@@ -383,8 +384,8 @@
   (delete-pair-blink-delay 0)
   ;; confusing if no fringes (GUI only).
   (visual-line-fringe-indicators '(nil right-curly-arrow))
-  ;; don't save current clipboard text before replacing it
-  (save-interprogram-paste-before-kill nil)
+  ;; preserve the previous clipboard entry in the kill ring before replacing it
+  (save-interprogram-paste-before-kill t)
   ;; kill last word if there is no active region. C-w behaves more like vim.
   (kill-region-dwim 'unix-word)
   ;; eliminate duplicates

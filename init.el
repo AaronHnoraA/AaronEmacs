@@ -1,6 +1,7 @@
 ;;; init.el --- The main entry for emacs -*- lexical-binding: t -*-
 
 (setq user-full-name "aaron")
+(setq load-prefer-newer t)
 (require 'package)
 
 ;; 包源要在任何安装逻辑之前设置好
