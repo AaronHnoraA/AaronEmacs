@@ -40,14 +40,14 @@
   (delete-by-moving-to-trash t)
   ;; Curse Lion and its sudden but inevitable fullscreen mode!
   ;; NOTE Meaningless to railwaycat's emacs-mac build
+  (ns-use-native-fullscreen nil)
   ;(ns-use-native-fullscreen t)
-  (ns-use-native-fullscreen t)
   ;; Visit files opened outside of Emacs in existing frame, not a new one
   (ns-pop-up-frames nil))
 
 
 ;; 窗口系统启动后，自动执行一次全屏切换（效果等同于按 F11）
-(add-hook 'window-setup-hook #'toggle-frame-fullscreen)
+;(add-hook 'window-setup-hook #'toggle-frame-fullscreen)
 
 
 (provide 'init-macos)
