@@ -33,7 +33,6 @@ tokens:
   - cautiously
   - cheerfully
   - cleverly
-  - closely
   - coaxingly
   - colorfully
   - continually
@@ -54,7 +53,6 @@ tokens:
   - doubtfully
   - dreamily
   - easily
-  - effectively
   - elegantly
   - energetically
   - enormously
@@ -76,7 +74,6 @@ tokens:
   - frenetically
   - frightfully
   - furiously
-  - generally
   - generously
   - gently
   - gladly
@@ -146,14 +143,12 @@ tokens:
   - optimistically
   - overconfidently
   - painfully
-  - partially
   - patiently
   - perfectly
   - playfully
   - politely
   - poorly
   - positively
-  - potentially
   - powerfully
   - promptly
   - properly
@@ -176,7 +171,6 @@ tokens:
   - recklessly
   - regularly
   - reluctantly
-  - repeatedly
   - reproachfully
   - restfully
   - righteously

@@ -123,8 +123,9 @@
 ### LaTeX
 
 - Org 里启用了 `cdlatex`
-- 可见区域 LaTeX 预览走自定义 `xdvisvgm` 流程
+- 可见区域 LaTeX 预览走自定义 `xelatex + dvisvgm` 异步 SVG 流程
 - AUCTeX 和 `pdf-tools` 已配置
+- AUCTeX 支持 `latexmk -pvc` 实时编译和 Sioyek 双向同步
 
 ### 引用
 
@@ -135,7 +136,7 @@
 ### PDF
 
 - `pdf-tools` 已启用
-- AUCTeX 查看器走 PDF Tools
+- AUCTeX 查看器走 Sioyek
 
 ## 9. 如果 Org 看起来不对
 

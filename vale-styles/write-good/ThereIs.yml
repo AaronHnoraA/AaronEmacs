@@ -1,6 +1,7 @@
 extends: existence
-message: "Don't start a sentence with '%s'."
+message: "Sentence-openers like '%s' can often be rewritten more directly."
 ignorecase: false
-level: error
-raw:
-  - '(?:[;-]\s)There\s(is|are)|\bThere\s(is|are)\b'
+level: suggestion
+scope: sentence
+tokens:
+  - '^There (?:is|are)\b'

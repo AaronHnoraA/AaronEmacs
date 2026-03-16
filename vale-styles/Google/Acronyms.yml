@@ -9,17 +9,30 @@ second: '(?:\b[A-Z][a-z]+ )+\(([A-Z]{3,5})\)'
 # ... with the exception of these:
 exceptions:
   - API
+  - ATT
+  - ATE
   - ASP
+  - BQP
+  - CNN
+  - CPTP
   - CLI
   - CPU
   - CSS
   - CSV
+  - DAG
   - DEBUG
+  - DFT
+  - DID
   - DOM
   - DPI
+  - FFT
   - FAQ
   - GCC
   - GDB
+  - GLM
+  - GMM
+  - GNN
+  - HMM
   - GET
   - GPU
   - GTK
@@ -31,22 +44,48 @@ exceptions:
   - JAR
   - JSON
   - JSX
+  - KKT
+  - LATE
   - LESS
   - LLDB
+  - LLM
+  - MCMC
+  - MDP
+  - MLE
+  - NLP
   - NET
+  - NISQ
   - NOTE
   - NVDA
+  - ODE
+  - OLS
   - OSS
   - PATH
+  - PCA
+  - PDE
   - PDF
   - PHP
+  - POVM
   - POST
+  - QAOA
+  - QED
+  - QFT
+  - QKD
+  - QPE
+  - QUBO
   - RAM
+  - RCT
   - REPL
   - RSA
+  - RNN
   - SCM
   - SCSS
   - SDK
+  - SEM
+  - SGD
+  - SVD
+  - SVM
+  - SDE
   - SQL
   - SSH
   - SSL
@@ -58,6 +97,8 @@ exceptions:
   - URL
   - USB
   - UTF
+  - VAR
+  - VQE
   - XML
   - XSS
   - YAML

@@ -9,6 +9,11 @@
 
 ;;; Code:
 
+(defun my/yas-setup-auctex-extra-modes ()
+  "Make AUCTeX buffers reuse `latex-mode' and `tex-mode' snippets."
+  (yas-activate-extra-mode 'latex-mode)
+  (yas-activate-extra-mode 'tex-mode))
+
 (use-package yasnippet
   :ensure t
   :defer 2
@@ -20,7 +25,9 @@
   :hook
   ((prog-mode . yas-minor-mode)
    (text-mode . yas-minor-mode)
-   (org-mode . yas-minor-mode))
+   (org-mode . yas-minor-mode)
+   (LaTeX-mode . my/yas-setup-auctex-extra-modes)
+   (plain-TeX-mode . my/yas-setup-auctex-extra-modes))
   :config
   (yas-reload-all)
 

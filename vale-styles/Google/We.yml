@@ -1,11 +1,7 @@
 extends: existence
-message: "Try to avoid using first-person plural like '%s'."
+message: "Conversational first-person plural like '%s' can sound informal in notes or academic prose."
 link: 'https://developers.google.com/style/pronouns#personal-pronouns'
-level: warning
+level: suggestion
 ignorecase: true
 tokens:
-  - we
-  - we'(?:ve|re)
-  - ours?
-  - us
   - let's

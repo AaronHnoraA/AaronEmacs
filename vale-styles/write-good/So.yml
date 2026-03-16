@@ -1,5 +1,6 @@
 extends: existence
-message: "Don't start a sentence with '%s'."
-level: error
-raw:
-  - '(?:[;-]\s)so[\s,]|\bSo[\s,]'
+message: "Sentence-openers like '%s' read conversationally; consider a more direct transition."
+level: suggestion
+scope: sentence
+tokens:
+  - '^So(?:,)?\b'

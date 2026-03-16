@@ -354,6 +354,7 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
 (require 'init-sage)
 (require 'init-html)
 (require 'init-js2)
+(require 'init-latex)
 
 ;; eglot：永不自动重连（需要你手动 M-x eglot 重新连）
 (setq-default eglot-autoreconnect nil)

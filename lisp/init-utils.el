@@ -14,6 +14,14 @@
 ;; Silence compile warnings
 (defvar url-http-end-of-headers)
 
+(defun my/executable-or-name (program)
+  "Return PROGRAM's absolute path when available, otherwise PROGRAM itself."
+  (or (executable-find program) program))
+
+(defun my/shell-command-executable (program)
+  "Return a shell-safe command string for PROGRAM."
+  (shell-quote-argument (my/executable-or-name program)))
+
 ;;;###autoload
 (defun tldr (cmd &optional op)
   "View tldr page of CMD.

@@ -29,6 +29,39 @@
 (my/ensure-use-package-installed)
 (require 'use-package)
 
+(defconst my/shell-environment-variables
+  '("PATH" "MANPATH" "INFOPATH" "TEXINPUTS" "BIBINPUTS" "BSTINPUTS")
+  "Environment variables copied from the login shell into Emacs.")
+
+(defun my/refresh-environment-from-shell ()
+  "Refresh PATH-like environment variables from the user's login shell."
+  (interactive)
+  (when (eq system-type 'darwin)
+    (cond
+     ((featurep 'exec-path-from-shell)
+      (dolist (variable my/shell-environment-variables)
+        (let ((value (ignore-errors
+                       (exec-path-from-shell-getenv variable))))
+          (when (stringp value)
+            (setenv variable value))))
+      (setq exec-path
+            (append (parse-colon-path (or (getenv "PATH") ""))
+                    (list exec-directory))))
+     (t
+      (let* ((shell (or (getenv "SHELL") shell-file-name))
+             (path
+              (when (and shell (file-executable-p shell))
+                (string-trim-right
+                 (with-temp-buffer
+                   (when (zerop
+                          (call-process shell nil t nil "-lc" "printf %s \"$PATH\""))
+                     (buffer-string)))))))
+        (when (and path (not (string-empty-p path)))
+          (setenv "PATH" path)
+          (setq exec-path
+                (append (parse-colon-path path)
+                        (list exec-directory)))))))))
+
 
 
 (use-package exec-path-from-shell
@@ -39,8 +72,11 @@
   :demand t
   :init
   (setq exec-path-from-shell-check-startup-files nil)
+  (setq exec-path-from-shell-arguments '("-l"))
   :config
-  (exec-path-from-shell-initialize))
+  (my/refresh-environment-from-shell))
+
+(add-hook 'server-after-make-frame-hook #'my/refresh-environment-from-shell)
 ;; 关键：以后 use-package 默认都会自动安装缺失包
 ;(setq use-package-always-ensure t)
 

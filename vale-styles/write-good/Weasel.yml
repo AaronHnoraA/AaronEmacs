@@ -1,10 +1,9 @@
 extends: existence
 message: "'%s' is a weasel word!"
 ignorecase: true
-level: warning
+level: suggestion
 tokens:
   - clearly
-  - completely
   - exceedingly
   - excellent
   - extremely
@@ -12,18 +11,10 @@ tokens:
   - huge
   - interestingly
   - is a number
-  - largely
-  - mostly
   - obviously
   - quite
-  - relatively
   - remarkably
-  - several
-  - significantly
-  - substantially
   - surprisingly
   - tiny
-  - usually
-  - various
   - vast
   - very

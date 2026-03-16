@@ -280,6 +280,14 @@
         mouse-wheel-scroll-amount-horizontal 1)
 (mouse-wheel-mode)
 
+;; 禁用鼠标/触控板缩放, 避免误触修改 text scale.
+(dolist (event '([pinch]
+                 [C-wheel-up]
+                 [C-wheel-down]
+                 [C-mouse-4]
+                 [C-mouse-5]))
+  (define-key global-map event nil))
+
 ;; Scroll 以使 window 底端的 N 行呈现到顶端.
 (setopt next-screen-context-lines 5)
 

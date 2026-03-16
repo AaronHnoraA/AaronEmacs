@@ -27,7 +27,12 @@
   ((text-mode . my/flymake-vale-setup)
    (org-mode . my/flymake-vale-setup)
    (markdown-mode . my/flymake-vale-setup)
-   (latex-mode . my/flymake-vale-setup)))
+   (latex-mode . my/flymake-vale-setup)
+   (LaTeX-mode . my/flymake-vale-setup)
+   (tex-mode . my/flymake-vale-setup)
+   (TeX-mode . my/flymake-vale-setup)
+   (plain-tex-mode . my/flymake-vale-setup)
+   (plain-TeX-mode . my/flymake-vale-setup)))
 
 (setq flymake-fringe-indicator-position 'right-fringe)
 
