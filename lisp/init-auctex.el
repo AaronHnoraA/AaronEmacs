@@ -87,7 +87,7 @@
     (user-error "Current buffer is not visiting a file"))
   (when (buffer-modified-p)
     (save-buffer))
-  (if-let ((process (TeX-active-process)))
+  (if-let* ((process (TeX-active-process)))
       (message "TeX process already running: %s" (process-name process))
     (let ((cmd (if (eq TeX-engine 'xetex) "XeLaTeXMk-PVC" "PdfLaTeXMk-PVC")))
       (TeX-command cmd #'TeX-master-file -1))
@@ -98,7 +98,7 @@
   "Stop the active `latexmk -pvc' process for the current TeX master."
   (interactive)
   (my/auctex-live-preview--cancel-save-timer)
-  (when-let ((process (TeX-active-process)))
+  (when-let* ((process (TeX-active-process)))
     (kill-process process)
     (message "Stopped TeX process: %s" (process-name process))))
 
@@ -109,17 +109,24 @@
              (not (TeX-active-process)))
     (my/auctex-start-live-compilation)))
 
+(defun my/auctex-live-preview--enable ()
+  "Enable buffer-local hooks and start live preview compilation."
+  (add-hook 'after-change-functions #'my/auctex-live-preview--schedule-save nil t)
+  (add-hook 'after-save-hook #'my/auctex-live-preview--after-save nil t)
+  (my/auctex-start-live-compilation))
+
+(defun my/auctex-live-preview--disable ()
+  "Disable buffer-local hooks and stop live preview compilation."
+  (remove-hook 'after-change-functions #'my/auctex-live-preview--schedule-save t)
+  (remove-hook 'after-save-hook #'my/auctex-live-preview--after-save t)
+  (my/auctex-stop-live-compilation))
+
 (define-minor-mode my/auctex-live-preview-mode
   "Continuously compile the current TeX master with `latexmk -pvc'."
   :lighter " LiveTeX"
   (if my/auctex-live-preview-mode
-      (progn
-        (add-hook 'after-change-functions #'my/auctex-live-preview--schedule-save nil t)
-        (add-hook 'after-save-hook #'my/auctex-live-preview--after-save nil t)
-        (my/auctex-start-live-compilation))
-    (remove-hook 'after-change-functions #'my/auctex-live-preview--schedule-save t)
-    (remove-hook 'after-save-hook #'my/auctex-live-preview--after-save t)
-    (my/auctex-stop-live-compilation)))
+      (my/auctex-live-preview--enable)
+    (my/auctex-live-preview--disable)))
 
 (defun my/auctex-setup-build-workflow ()
   "Prefer latexmk-based builds in LaTeX buffers."
@@ -185,10 +192,10 @@
   (delete-dups
    (delq nil
          (append
-          (when-let ((master-pdf (my/pdf-sync--master-pdf-candidate)))
+          (when-let* ((master-pdf (my/pdf-sync--master-pdf-candidate)))
             (list (file-name-directory master-pdf)))
-          (when-let ((project (and (fboundp 'project-current)
-                                   (project-current nil))))
+          (when-let* ((project (and (fboundp 'project-current)
+                                    (project-current nil))))
             (list (expand-file-name
                    (if (fboundp 'project-root)
                        (project-root project)
@@ -218,7 +225,7 @@
     (let (candidates)
       (dolist (pdf (my/pdf-sync--open-pdf-candidates))
         (push pdf candidates))
-      (when-let ((master-pdf (my/pdf-sync--master-pdf-candidate)))
+      (when-let* ((master-pdf (my/pdf-sync--master-pdf-candidate)))
         (push master-pdf candidates))
       (dolist (pdf (my/pdf-sync--project-pdf-candidates))
         (push pdf candidates))
@@ -247,12 +254,11 @@
 
 (defun my/pdf-sync-forward-correlate-advice (orig &optional line column)
   "Resolve included TeX subfiles against the matching master SyncTeX file."
-  (if (and buffer-file-name
-           (or (derived-mode-p 'TeX-mode)
-               (derived-mode-p 'latex-mode)))
-      (if-let ((pdf (my/pdf-sync-master-pdf-for-current-buffer)))
-          (my/pdf-sync-forward-correlate-with-pdf pdf line column)
-        (funcall orig line column))
+  (if-let* (((and buffer-file-name
+                  (or (derived-mode-p 'TeX-mode)
+                      (derived-mode-p 'latex-mode))))
+            (pdf (my/pdf-sync-master-pdf-for-current-buffer)))
+      (my/pdf-sync-forward-correlate-with-pdf pdf line column)
     (funcall orig line column)))
 
 (defun my/pdf-sync-forward-search-with-pdf (pdf &optional line column)
@@ -277,7 +283,7 @@
     (if (or (file-exists-p output-file)
             (not buffer-file-name))
         (apply orig args)
-      (if-let ((pdf (my/pdf-sync-master-pdf-for-current-buffer)))
+      (if-let* ((pdf (my/pdf-sync-master-pdf-for-current-buffer)))
           (if (and TeX-source-correlate-mode
                    (fboundp 'pdf-sync-forward-search))
               (my/pdf-sync-forward-search-with-pdf pdf)

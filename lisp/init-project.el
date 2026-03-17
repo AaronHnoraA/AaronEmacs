@@ -549,6 +549,48 @@ following."
        (or buffer-file-name
            (eq major-mode 'dired-mode))))
 
+(defun my/treemacs-follow-path ()
+  "Return the current buffer path Treemacs should follow."
+  (cond
+   (buffer-file-name
+    (my/project-canonical-path buffer-file-name))
+   ((derived-mode-p 'dired-mode)
+    (my/project-canonical-path default-directory))))
+
+(defun my/treemacs-safe-imenu-index ()
+  "Return the current buffer's Treemacs imenu index, or nil on failure."
+  (when buffer-file-name
+    (condition-case nil
+        (let ((inhibit-message t))
+          (pcase (treemacs--flatten&sort-imenu-index)
+            ('unsupported nil)
+            (index index)))
+      (error nil))))
+
+(defun my/treemacs-follow-source-silently (&optional prefer-tag)
+  "Follow the current source buffer in Treemacs without transient failures.
+When PREFER-TAG is non-nil, prefer following the current tag when one exists."
+  (let* ((treemacs-window (treemacs-get-local-window))
+         (path (my/treemacs-follow-path)))
+    (when (and treemacs-window path)
+      (setq-local treemacs--project-of-buffer nil)
+      (let ((project (treemacs--find-project-for-buffer path)))
+        (when project
+          (let ((inhibit-message t)
+                (treemacs-pulse-on-failure nil)
+                (index (and prefer-tag (my/treemacs-safe-imenu-index))))
+            (unless
+                (condition-case nil
+                    (and index
+                         (treemacs--do-follow-tag index treemacs-window path project)
+                         t)
+                  (error nil))
+              (condition-case nil
+                  (with-selected-window treemacs-window
+                    (treemacs-goto-file-node path project)
+                    t)
+                (error nil)))))))))
+
 (defun my/treemacs-follow-current-buffer (buffer)
   "Update Treemacs to follow BUFFER's current file and symbol."
   (setq my/treemacs-cursor-follow-timer nil)
@@ -556,12 +598,7 @@ following."
              (window-live-p (treemacs-get-local-window)))
     (with-current-buffer buffer
       (when (my/treemacs-source-buffer-p)
-        (setq-local treemacs--project-of-buffer nil)
-        (condition-case nil
-            (treemacs-find-tag)
-          (error
-           (ignore-errors
-             (treemacs-find-file))))))))
+        (my/treemacs-follow-source-silently t)))))
 
 (defun my/treemacs-schedule-follow (&rest _)
   "Schedule a Treemacs follow update for the current source buffer."
@@ -610,8 +647,7 @@ following."
         (let ((default-directory root))
           (treemacs-add-and-display-current-project-exclusively)
           (with-current-buffer source-buffer
-            (ignore-errors
-              (treemacs-find-tag))))))))
+            (my/treemacs-follow-source-silently t)))))))
 
 (defun my/project-remove-from-treemacs-workspaces (project-root)
   "Remove PROJECT-ROOT from every Treemacs workspace."

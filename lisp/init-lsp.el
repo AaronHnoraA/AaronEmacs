@@ -1,11 +1,133 @@
 ;;; init-lsp.el --- The completion engine and lsp client -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;; Refactored configuration for Company, Eglot (LSP), and Debugging.
-;; Switched from lsp-mode to eglot to provide a more lightweight, native experience,
-;; while maintaining similar UI features (doc-box, breadcrumbs, diagnostics).
+;; Restore the original Eglot + Flymake workflow, while keeping a small
+;; compatibility layer so explicitly registered modes can still opt into
+;; `lsp-mode' when needed.
 
 ;;; Code:
+
+(defvar my/lsp-mode-preferred-modes nil
+  "Major modes that should use `lsp-mode' instead of `eglot'.")
+
+(defvar my/lsp-mode-required-features nil
+  "Alist mapping major modes to extra `lsp-mode' support features.")
+
+(defvar tramp-login-shell)
+
+(defun my/language-server-prepare-remote-eglot-environment ()
+  "Prepare shell settings for remote `eglot' buffers."
+  (when (file-remote-p default-directory)
+    (let ((remote-shell (or (and (boundp 'tramp-login-shell)
+                                 tramp-login-shell)
+                            "sh")))
+      (setq-local shell-file-name remote-shell)
+      (setq-local explicit-shell-file-name remote-shell)
+      (setq-local shell-command-switch "-c"))))
+
+(defun my/register-lsp-mode-preference (mode &optional feature)
+  "Prefer `lsp-mode' over `eglot' for MODE.
+When FEATURE is non-nil, require it before starting `lsp-mode'."
+  (add-to-list 'my/lsp-mode-preferred-modes mode)
+  (when feature
+    (setf (alist-get mode my/lsp-mode-required-features nil nil #'eq)
+          feature)))
+
+(defun my/lsp-mode-preferred-p ()
+  "Return non-nil when current buffer should use `lsp-mode'."
+  (and my/lsp-mode-preferred-modes
+       (apply #'derived-mode-p my/lsp-mode-preferred-modes)))
+
+(defun my/lsp-mode-required-feature ()
+  "Return the extra `lsp-mode' feature required for the current buffer."
+  (catch 'feature
+    (dolist (entry my/lsp-mode-required-features)
+      (when (derived-mode-p (car entry))
+        (throw 'feature (cdr entry))))
+    nil))
+
+(defun my/lsp-mode-supported-p ()
+  "Return non-nil when `lsp-mode' can start for the current buffer."
+  (let ((feature (my/lsp-mode-required-feature)))
+    (if feature
+        (or (featurep feature)
+            (require feature nil t))
+      t)))
+
+(defun my/current-language-server-backend ()
+  "Return the active language server backend for the current buffer."
+  (cond
+   ((and (fboundp 'eglot-managed-p)
+         (eglot-managed-p))
+    'eglot)
+   ((bound-and-true-p lsp-managed-mode)
+    'lsp-mode)
+   (t nil)))
+
+(defun my/lsp-mode-ensure ()
+  "Start `lsp-mode' for explicitly registered major modes."
+  (interactive)
+  (when (my/lsp-mode-preferred-p)
+    (when (and (not (bound-and-true-p lsp-managed-mode))
+               (not (and (fboundp 'eglot-managed-p)
+                         (eglot-managed-p))))
+      (if (my/lsp-mode-supported-p)
+          (lsp-deferred)
+        (let ((feature (my/lsp-mode-required-feature)))
+          (message "Skip lsp-mode in %s: missing `%s'" major-mode feature))))))
+
+(defun my/eglot-ensure ()
+  "Start `eglot' in programming buffers that do not opt into `lsp-mode'."
+  (interactive)
+  (when (and (derived-mode-p 'prog-mode)
+             (not (my/lsp-mode-preferred-p)))
+    (unless (or (bound-and-true-p lsp-managed-mode)
+                (and (fboundp 'eglot-managed-p)
+                     (eglot-managed-p)))
+      (my/language-server-prepare-remote-eglot-environment)
+      (eglot-ensure))))
+
+(defun my/language-server-ensure ()
+  "Start the preferred language server backend for the current buffer."
+  (interactive)
+  (if (my/lsp-mode-preferred-p)
+      (my/lsp-mode-ensure)
+    (my/eglot-ensure)))
+
+(defun my/language-server-call (eglot-fn lsp-fn)
+  "Call EGLOT-FN or LSP-FN for the active language server backend."
+  (pcase (my/current-language-server-backend)
+    ('eglot
+     (call-interactively eglot-fn))
+    ('lsp-mode
+     (call-interactively lsp-fn))
+    (_
+     (user-error "No active language server in current buffer"))))
+
+(defun my/language-server-code-actions ()
+  "Run a code action using the active language server backend."
+  (interactive)
+  (my/language-server-call #'eglot-code-actions #'lsp-execute-code-action))
+
+(defun my/language-server-format-buffer ()
+  "Format the current buffer using the active language server backend."
+  (interactive)
+  (my/language-server-call #'eglot-format-buffer #'lsp-format-buffer))
+
+(defun my/language-server-rename ()
+  "Rename the symbol at point using the active language server backend."
+  (interactive)
+  (my/language-server-call #'eglot-rename #'lsp-rename))
+
+(defun my/language-server-find-implementation ()
+  "Find implementation using the active language server backend."
+  (interactive)
+  (my/language-server-call #'eglot-find-implementation #'lsp-find-implementation))
+
+(defun my/language-server-find-type-definition ()
+  "Find type definition using the active language server backend."
+  (interactive)
+  (my/language-server-call #'eglot-find-typeDefinition #'lsp-find-type-definition))
 
 ;; -------------------------
 ;; 1. Company Mode (Completion)
@@ -48,6 +170,7 @@
   :ensure t
   :demand t
   :hook ((eglot-managed-mode . company-mode)
+         (lsp-managed-mode . company-mode)
          (org-mode . company-mode)
          (text-mode . company-mode)
          (text-mode . my/company-setup-text-backends))
@@ -76,17 +199,13 @@
         company-dabbrev-code-everywhere t
         company-files-exclusions '(".git/" ".DS_Store")
         company-backends my/company-lsp-backends)
-  (setq-default company-backends my/company-lsp-backends)
-  )
- ;; 全局默认 backends
+  (setq-default company-backends my/company-lsp-backends))
 
 (with-eval-after-load 'esh-mode
   (add-hook 'eshell-mode-hook #'my/company-setup-shell-backends))
 
-
 (with-eval-after-load 'eglot
   (add-to-list 'eglot-stay-out-of 'company-backends))
-  
 
 (use-package company-box
   :ensure t
@@ -113,14 +232,13 @@
   :hook ((elisp-mode . aggressive-indent-mode)
          (python-mode  . aggressive-indent-mode)
          (c++-mode     . aggressive-indent-mode)
-         (c-mode       . aggressive-indent-mode)
-        ))
+         (c-mode       . aggressive-indent-mode)))
 
 
 ;; -------------------------
 ;; 3. Flymake (Diagnostics)
 ;; -------------------------
-;; Eglot 默认无缝集成 Flymake
+;; Eglot / lsp-mode 均统一走 Flymake 诊断
 (use-package flymake
   :ensure nil ; Emacs built-in
   :hook (prog-mode . flymake-mode)
@@ -143,47 +261,79 @@
 
 
 ;; -------------------------
-;; 4. Eglot (LSP Client)
+;; 4. lsp-mode (for explicit opt-in languages)
+;; -------------------------
+(use-package lsp-mode
+  :ensure t
+  :commands (lsp
+             lsp-deferred
+             lsp-execute-code-action
+             lsp-find-implementation
+             lsp-find-type-definition
+             lsp-format-buffer
+             lsp-inlay-hints-mode
+             lsp-rename)
+  :hook ((lsp-managed-mode . (lambda ()
+                               (when (fboundp 'lsp-inlay-hints-mode)
+                                 (lsp-inlay-hints-mode 1)))))
+  :bind (:map lsp-mode-map
+         ("C-c f" . lsp-format-buffer)
+         ("C-c d" . eldoc-doc-buffer)
+         ("C-c a" . lsp-execute-code-action)
+         ("C-c r" . lsp-rename)
+         ("C-h e" . xref-find-definitions)
+         ("C-h r" . xref-find-references)
+         ("C-h i" . lsp-find-implementation)
+         ("C-h t" . lsp-find-type-definition))
+  :custom
+  (lsp-completion-provider :capf)
+  (lsp-diagnostics-provider :flymake)
+  (lsp-headerline-breadcrumb-enable nil)
+  (lsp-inlay-hint-enable t)
+  (lsp-log-io nil))
+
+
+;; -------------------------
+;; 5. Eglot (LSP Client)
 ;; -------------------------
 (use-package eglot
   :ensure nil ; Built-in since Emacs 29
-  :hook ((prog-mode . eglot-ensure)
+  :hook ((prog-mode . my/eglot-ensure)
          (eglot-managed-mode . (lambda ()
                                  (when (fboundp 'eglot-inlay-hints-mode)
                                    (eglot-inlay-hints-mode 1)))))
   :bind (:map eglot-mode-map
          ("C-c f" . eglot-format-buffer)
-         ("C-c d" . eldoc-doc-buffer)          ; 在独立 buffer 查看完整文档
+         ("C-c d" . eldoc-doc-buffer)
          ("C-c a" . eglot-code-actions)
          ("C-c r" . eglot-rename)
-         
-         ;; Xref 代替 lsp-ui-peek 进行跳转
-         ("C-h e" . xref-find-definitions)     ; 定义
-         ("C-h r" . xref-find-references)      ; 引用
-         ("C-h i" . eglot-find-implementation) ; 实现
+         ("C-h e" . xref-find-definitions)
+         ("C-h r" . xref-find-references)
+         ("C-h i" . eglot-find-implementation)
          ("C-h t" . eglot-find-typeDefinition))
   :custom
-  ;; 性能与功能开关 (对照 lsp-mode 优化)
-  (eglot-sync-connect 0)                   ; 异步连接
-  (eglot-autoshutdown t)                   ; auto kill server
+  (eglot-sync-connect 0)
+  (eglot-autoshutdown t)
   (eglot-extend-to-xref t)
-  (eglot-events-buffer-size 0)             ; 等效于 lsp-log-io nil，不记录日志提升性能
-  
-  ;; 提升 jsonrpc 吞吐
-  (read-process-output-max (* 1024 1024))) ; 1MB
+  (eglot-events-buffer-size 0)
+  (read-process-output-max (* 1024 1024)))
 
 
 ;; -------------------------
-;; 5. UI Emulation (Doc Box & Breadcrumb)
+;; 6. UI Emulation (Doc Box & Breadcrumb)
 ;; -------------------------
 
 ;; 替代 lsp-ui-doc：提供光标处悬浮文档框
 (use-package eldoc-box
   :ensure t
-  :hook (eglot-managed-mode . eldoc-box-hover-at-point-mode)
+  :hook ((eglot-managed-mode . eldoc-box-hover-at-point-mode)
+         (lsp-managed-mode . eldoc-box-hover-at-point-mode))
   :bind (:map eglot-mode-map
-         ("C-h d" . eldoc-box-help-at-point)  ; 快速看文档弹窗
-         ("C-h c" . eldoc-box-quit-frame))    ; 隐藏文档
+         ("C-h d" . eldoc-box-help-at-point)
+         ("C-h c" . eldoc-box-quit-frame)
+         :map lsp-mode-map
+         ("C-h d" . eldoc-box-help-at-point)
+         ("C-h c" . eldoc-box-quit-frame))
   :custom
   (eldoc-box-max-pixel-width 600)
   (eldoc-box-max-pixel-height 400)
@@ -196,7 +346,7 @@
          (org-src-mode . breadcrumb-local-mode)))
 
 ;; -------------------------
-;; 6. Dape (Debugging)
+;; 7. Dape (Debugging)
 ;; -------------------------
 ;;
 ;; dape 是更适合 Eglot / 原生 Emacs 工作流的 DAP 客户端。
@@ -234,29 +384,18 @@
              dape-repl-scope
              dape-repl-watch)
   :hook
-  ;; 退出 Emacs 时保存断点；启动后加载断点
   (kill-emacs . dape-breakpoint-save)
   (after-init . dape-breakpoint-load)
   :custom
-  ;; 让 dape 的侧边窗口更像 IDE
   (dape-buffer-window-arrangement 'right)
-  ;; 如果你不想复用 gud 前缀，可设成 nil
-  ;; (dape-key-prefix nil)
   :config
-  ;; 推荐：让重复命令（next/step/continue 等）更顺手
   (repeat-mode 1)
 
-  ;; 停住时高亮当前行（可选）
   (add-hook 'dape-display-source-hook #'pulse-momentary-highlight-one-line)
 
-  ;; 调试开始前自动保存 buffer（对解释型语言尤其有用）
   (add-hook 'dape-start-hook
             (lambda () (save-some-buffers t t)))
 
-  ;; 可选：编译成功后自动关掉 compile buffer
-  ;; (add-hook 'dape-compile-hook #'kill-buffer)
-
-  ;; 兼容你原来的 Hydra 风格
   (defhydra hydra-dape-mode
     (:color pink :hint nil :foreign-keys run)
     "
@@ -268,34 +407,29 @@ _o_: Step out       _sf_: Stack               _ba_: Log message     _dq_: Quit  
 _c_: Continue       _sl_: Locals(scope)       _bc_: Condition       _dR_: REPL                  _ea_: Add watch
 _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
 "
-    ;; stepping
     ("n" dape-next)
     ("i" dape-step-in)
     ("o" dape-step-out)
     ("c" dape-continue)
     ("p" dape-pause)
 
-    ;; switch / info
     ("ss" dape-repl)
     ("st" dape-repl-threads)
     ("sf" dape-repl-stack)
     ("sl" dape-repl-scope)
     ("sb" dape-repl-breakpoints)
 
-    ;; breakpoints
     ("bb" dape-breakpoint-toggle)
     ("ba" dape-breakpoint-log)
     ("bd" dape-breakpoint-remove-at-point)
     ("bc" dape-breakpoint-expression)
     ("bh" dape-breakpoint-hits)
 
-    ;; debug
     ("dd" dape)
     ("dr" dape-restart)
     ("dR" dape-repl)
     ("dq" dape-quit :color blue)
 
-    ;; eval / watch
     ("ee" dape-evaluate-expression)
     ("ea" dape-watch-dwim)
     ("er" (if (use-region-p)
@@ -316,9 +450,8 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
     ("q" nil "quit" :color blue)))
 
 
-
 ;; -------------------------
-;; 7. Misc & Language Init
+;; 8. Misc & Language Init
 ;; -------------------------
 
 (setq tab-always-indent t)
@@ -327,15 +460,15 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
 (add-hook 'org-mode-hook
           (lambda ()
             (setq-local company-backends
-                        '((company-files          ; [路径] 输入 / 或 ./ 或 ../ 时触发文件名补全
-                           company-yasnippet      ; [Snippet] 补全代码片段
-                           company-capf           ; [Org / Eglot] 原生补全
-                           company-dabbrev)))))   ; [单词] 补全当前 Buffer 里的文字
+                        '((company-files
+                           company-yasnippet
+                           company-capf
+                           company-dabbrev)))))
 
-;; 让 C-c ' 打开的窗口自动启动 Eglot
+;; 让 C-c ' 打开的窗口自动启动对应 language server
 (add-hook 'org-src-mode-hook
           (lambda ()
-            (eglot-ensure)))
+            (my/language-server-ensure)))
 
 
 ;; Load other language specific configurations
@@ -348,6 +481,7 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
 (require 'init-elisp)
 (require 'init-vale)
 (require 'init-sh)
+(require 'init-java)
 (require 'init-lean)
 (require 'init-md)
 (require 'init-nix)
@@ -364,10 +498,6 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
           (lambda ()
             (when (bound-and-true-p flymake-mode)
               (flymake-start))))
-
-
-
-
 
 
 (provide 'init-lsp)

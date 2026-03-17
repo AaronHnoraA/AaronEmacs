@@ -185,17 +185,17 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
 
       ;; code
       "c" '(:wk "code")
-      "ca" 'eglot-code-actions
+      "ca" 'my/language-server-code-actions
       "cd" 'rmsbolt-compile
       "cc" 'compile
       "cC" 'recompile
-      "cf" 'eglot-format-buffer
+      "cf" 'my/language-server-format-buffer
       "ci" 'show-imenu
       "cI" 'eldoc-box-help-at-point
       "ck" 'kill-compilation
       "cl" '+switch-to-compilation
       "cj" 'dape
-      "cr" 'eglot-rename
+      "cr" 'my/language-server-rename
       "cw" 'delete-trailing-whitespace
       "cx" 'quickrun
       "ce" 'my/byte-recompile-lisp-dir
