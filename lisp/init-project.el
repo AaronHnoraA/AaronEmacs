@@ -938,6 +938,19 @@ Returns the number of killed buffers."
                 :around
                 #'my/dashboard-projects-load-projects)))
 
+
+
+
+(with-eval-after-load 'treemacs
+  (advice-add 'treemacs--follow :around
+              (lambda (fn &rest args)
+                (let ((inhibit-message t))
+                  (apply fn args)))))
+
+
+
+
+
 (provide 'init-project)
 
 ;;; init-project.el ends here

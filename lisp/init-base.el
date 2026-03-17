@@ -1482,6 +1482,8 @@ interrupt the current window layout."
 (require 'symbol-overlay)
 
 
+;; 确保所有文件路径都解析 symlink
+(setq find-file-visit-truename t)
 
 (provide 'init-base)
 
