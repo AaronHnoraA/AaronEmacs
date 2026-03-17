@@ -5,26 +5,34 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+(require 'subr-x)
+
 (declare-function my/typography-setup-prose-buffer "init-base")
 (declare-function my/refresh-environment-from-shell nil)
 (declare-function my/shell-command-executable "init-utils")
 
-(defvar my/latex-preview-math-font "GFS Neohellenic Math"
-  "Preferred math font for XeLaTeX-based preview snippets.")
-
-(defconst my/auctex-preview-xetex-no-pdf-replacement
-  '(("\\`xelatex\\(\\(?:.\\|\n\\)*\\)\\'" . ("xelatex -no-pdf\\1")))
-  "Force preview-latex to use XDV output when XeLaTeX is active.")
+;; --- XeLaTeX 与 pdflatex 的编译命令，注入 -synctex=1 ---
 
 (defconst my/auctex-xelatexmk-command
   (concat (my/shell-command-executable "latexmk")
-          " -xelatex %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t")
+          " -xelatex -synctex=1 %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t")
   "latexmk command that explicitly builds with XeLaTeX.")
 
 (defconst my/auctex-xelatexmk-pvc-command
   (concat (my/shell-command-executable "latexmk")
-          " -xelatex -pvc -view=none %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t")
+          " -xelatex -synctex=1 -pvc -view=none %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t")
   "latexmk command that explicitly watches with XeLaTeX.")
+
+(defconst my/auctex-pdflatexmk-command
+  (concat (my/shell-command-executable "latexmk")
+          " -pdf -synctex=1 %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t")
+  "latexmk command that explicitly builds with pdfLaTeX.")
+
+(defconst my/auctex-pdflatexmk-pvc-command
+  (concat (my/shell-command-executable "latexmk")
+          " -pdf -synctex=1 -pvc -view=none %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t")
+  "latexmk command that explicitly watches with pdfLaTeX.")
 
 (defun my/auctex-refresh-shell-environment (&rest _)
   "Refresh Emacs environment before starting TeX commands."
@@ -35,16 +43,6 @@
   "Register TeX command ENTRY without duplicating existing items."
   (setq TeX-command-list
         (cons entry (assoc-delete-all (car entry) TeX-command-list))))
-
-(defun my/auctex-apply-preview-defaults ()
-  "Configure preview-latex to render SVG snippets with dvisvgm."
-  (setq-default preview-image-type 'dvi*)
-  (setq-default preview-dvi*-command #'preview-dvisvgm-command)
-  (setq-default preview-dvi*-image-type 'svg)
-  (setq-default preview-scale-function #'preview-scale-from-face)
-  (setq-default preview-LaTeX-command-replacements
-                my/auctex-preview-xetex-no-pdf-replacement)
-  (setq-default preview-auto-cache-preamble t))
 
 (defcustom my/auctex-live-save-idle-delay 1.0
   "Idle seconds before saving a modified LaTeX buffer in live preview mode."
@@ -89,9 +87,10 @@
     (user-error "Current buffer is not visiting a file"))
   (when (buffer-modified-p)
     (save-buffer))
-  (if-let* ((process (TeX-active-process)))
+  (if-let ((process (TeX-active-process)))
       (message "TeX process already running: %s" (process-name process))
-    (TeX-command "XeLaTeXMk-PVC" #'TeX-master-file -1)
+    (let ((cmd (if (eq TeX-engine 'xetex) "XeLaTeXMk-PVC" "PdfLaTeXMk-PVC")))
+      (TeX-command cmd #'TeX-master-file -1))
     (when (file-exists-p (TeX-active-master (TeX-output-extension)))
       (TeX-view))))
 
@@ -99,7 +98,7 @@
   "Stop the active `latexmk -pvc' process for the current TeX master."
   (interactive)
   (my/auctex-live-preview--cancel-save-timer)
-  (when-let* ((process (TeX-active-process)))
+  (when-let ((process (TeX-active-process)))
     (kill-process process)
     (message "Stopped TeX process: %s" (process-name process))))
 
@@ -124,22 +123,9 @@
 
 (defun my/auctex-setup-build-workflow ()
   "Prefer latexmk-based builds in LaTeX buffers."
-  (unless (eq TeX-engine 'xetex)
-    (TeX-engine-set 'xetex))
-  (setq-local TeX-command-default "XeLaTeXMk")
+  (setq-local TeX-command-default
+              (if (eq TeX-engine 'xetex) "XeLaTeXMk" "PdfLaTeXMk"))
   (setq-local TeX-save-query nil))
-
-(defun my/auctex-setup-preview-latex ()
-  "Use SVG preview-latex output while keeping XeLaTeX font rendering."
-  (require 'preview)
-  (my/auctex-apply-preview-defaults)
-  (setq-local preview-image-type 'dvi*)
-  (setq-local preview-dvi*-command #'preview-dvisvgm-command)
-  (setq-local preview-dvi*-image-type 'svg)
-  (setq-local preview-scale-function #'preview-scale-from-face)
-  (setq-local preview-LaTeX-command-replacements
-              my/auctex-preview-xetex-no-pdf-replacement)
-  (setq-local preview-auto-cache-preamble t))
 
 (defun my/pdf-view-enable-auto-refresh ()
   "Auto-refresh PDF buffers when the underlying file changes."
@@ -199,10 +185,10 @@
   (delete-dups
    (delq nil
          (append
-          (when-let* ((master-pdf (my/pdf-sync--master-pdf-candidate)))
+          (when-let ((master-pdf (my/pdf-sync--master-pdf-candidate)))
             (list (file-name-directory master-pdf)))
-          (when-let* ((project (and (fboundp 'project-current)
-                                    (project-current nil))))
+          (when-let ((project (and (fboundp 'project-current)
+                                   (project-current nil))))
             (list (expand-file-name
                    (if (fboundp 'project-root)
                        (project-root project)
@@ -232,7 +218,7 @@
     (let (candidates)
       (dolist (pdf (my/pdf-sync--open-pdf-candidates))
         (push pdf candidates))
-      (when-let* ((master-pdf (my/pdf-sync--master-pdf-candidate)))
+      (when-let ((master-pdf (my/pdf-sync--master-pdf-candidate)))
         (push master-pdf candidates))
       (dolist (pdf (my/pdf-sync--project-pdf-candidates))
         (push pdf candidates))
@@ -264,7 +250,7 @@
   (if (and buffer-file-name
            (or (derived-mode-p 'TeX-mode)
                (derived-mode-p 'latex-mode)))
-      (if-let* ((pdf (my/pdf-sync-master-pdf-for-current-buffer)))
+      (if-let ((pdf (my/pdf-sync-master-pdf-for-current-buffer)))
           (my/pdf-sync-forward-correlate-with-pdf pdf line column)
         (funcall orig line column))
     (funcall orig line column)))
@@ -291,7 +277,7 @@
     (if (or (file-exists-p output-file)
             (not buffer-file-name))
         (apply orig args)
-      (if-let* ((pdf (my/pdf-sync-master-pdf-for-current-buffer)))
+      (if-let ((pdf (my/pdf-sync-master-pdf-for-current-buffer)))
           (if (and TeX-source-correlate-mode
                    (fboundp 'pdf-sync-forward-search))
               (my/pdf-sync-forward-search-with-pdf pdf)
@@ -308,55 +294,53 @@
   :defer t
   :hook
   (LaTeX-mode . my/typography-setup-prose-buffer)
-  (LaTeX-mode . LaTeX-math-mode)   ;; 快速输入数学符号
-  (LaTeX-mode . turn-on-reftex)    ;; 引用、label、ref
+  (LaTeX-mode . LaTeX-math-mode)
+  (LaTeX-mode . turn-on-reftex)
   (LaTeX-mode . TeX-source-correlate-mode)
   (LaTeX-mode . my/auctex-setup-build-workflow)
-  (LaTeX-mode . my/auctex-setup-preview-latex)
   :config
-  ;; 使用 XeLaTeX + SyncTeX
   (setq TeX-engine 'xetex)
   (setq TeX-source-correlate-method 'synctex)
   (setq TeX-source-correlate-start-server t)
-  (with-eval-after-load 'preview
-    (my/auctex-apply-preview-defaults))
 
-  ;; Sioyek 双向同步命令覆盖默认项，避免重复打开窗口。
-  (add-to-list 'TeX-view-program-list
-               '("Sioyek"
-                 ("sioyek --reuse-window %o"
-                  (mode-io-correlate
-                   " --forward-search-file \"%b\" --forward-search-line %n --inverse-search \"emacsclient --no-wait +%2 %1\""))
-                 "sioyek"))
-
-  ;; 保存后自动解析文档（非常重要）
   (setq TeX-auto-save t)
   (setq TeX-parse-self t)
+
   (unless (advice-member-p #'my/auctex-refresh-shell-environment 'TeX-command)
     (advice-add 'TeX-command :before #'my/auctex-refresh-shell-environment))
+
   (add-hook 'TeX-after-compilation-finished-functions
             #'TeX-revert-document-buffer)
 
-  ;; 在 `C-c C-c' 菜单中提供显式的 XeLaTeX + latexmk 条目。
   (my/auctex-register-command
    `("XeLaTeXMk"
      ,my/auctex-xelatexmk-command
      TeX-run-TeX nil (LaTeX-mode docTeX-mode)
      :help "Run latexmk with XeLaTeX"))
+
   (my/auctex-register-command
    `("XeLaTeXMk-PVC"
      ,my/auctex-xelatexmk-pvc-command
      TeX-run-TeX nil (LaTeX-mode docTeX-mode)
      :help "Run latexmk continuously with XeLaTeX"))
 
-  ;; 默认走 PDF Tools，AUCTeX 可以直接用它做 SyncTeX 正反向同步。
+  (my/auctex-register-command
+   `("PdfLaTeXMk"
+     ,my/auctex-pdflatexmk-command
+     TeX-run-TeX nil (LaTeX-mode docTeX-mode)
+     :help "Run latexmk with pdfLaTeX"))
+
+  (my/auctex-register-command
+   `("PdfLaTeXMk-PVC"
+     ,my/auctex-pdflatexmk-pvc-command
+     TeX-run-TeX nil (LaTeX-mode docTeX-mode)
+     :help "Run latexmk continuously with pdfLaTeX"))
+
+  ;; 默认走 PDF Tools，保留 SyncTeX 正反向同步。
   (setq TeX-view-program-selection
         '((output-pdf "PDF Tools")))
 
-  ;; 编译时不烦你
   (setq TeX-interactive-mode t)
-
-  ;; 让 \item 自动对齐
   (setq LaTeX-item-indent 0))
 
 (use-package pdf-tools
@@ -364,22 +348,25 @@
   :config
   (pdf-tools-install)
   (require 'pdf-sync)
+
   (advice-add 'pdf-sync-forward-correlate :around
               #'my/pdf-sync-forward-correlate-advice)
+
   (advice-add 'TeX-view :around #'my/TeX-view-subfile-advice)
+
   (add-hook 'pdf-view-mode-hook #'pdf-sync-minor-mode)
   (add-hook 'pdf-view-mode-hook #'my/pdf-view-enable-auto-refresh)
   (my/pdf-view-configure-open-buffers))
-
 
 (defun pdf-view-kill-rmn-ring-save ()
   "Copy the region to the `kill-ring' after remove all newline characters."
   (interactive)
   (pdf-view-assert-active-region)
-  (let* ((txt (replace-regexp-in-string "\n" " "
-        (car (pdf-view-active-region-text)))))
+  (let* ((txt (replace-regexp-in-string
+               "\n" " "
+               (car (pdf-view-active-region-text)))))
     (pdf-view-deactivate-region)
-	(kill-new txt)))
+    (kill-new txt)))
 
 (use-package pdf-view
   :after pdf-tools
@@ -388,7 +375,5 @@
         ("C-c C-w" . pdf-view-kill-rmn-ring-save)))
 
 (provide 'init-auctex)
-
-
 
 ;;; init-auctex.el ends here
