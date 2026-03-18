@@ -16,7 +16,6 @@
 (require 'ob)
 (require 'ob-core)
 (require 'init-jupyter)
-(require 'init-sage)
 (require 'ob-jupyter)
 
 (declare-function jupyter-canonicalize-language-string "jupyter-kernelspec" (language))
@@ -44,13 +43,13 @@
      :kernel-language "sage"
      :preferred-kernels ("sagemath-10.8")
      :session "sage"
-     :mode sage-shell:sage
+     :mode python
      :extension "sage")
     ("sagemath"
      :kernel-language "sage"
      :preferred-kernels ("sagemath-10.8")
      :session "sagemath"
-     :mode sage-shell:sage
+     :mode python
      :extension "sage")
     ("maple"
      :kernel-language "maple"
@@ -312,7 +311,6 @@ DEFAULT-DIR becomes the buffer-local `default-directory' before execution."
       (package-initialize)
       (require 'use-package)
       (load-file ,(expand-file-name "lisp/init-package-utils.el" my/org-babel-config-root))
-      (load-file ,(expand-file-name "lisp/lang/init-sage.el" my/org-babel-config-root))
       (load-file ,(expand-file-name "lisp/init-org-babel.el" my/org-babel-config-root))
       (my/org-babel-async-batch-run
        ,source-file

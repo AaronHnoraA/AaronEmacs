@@ -6,6 +6,7 @@
 ;;; Code:
 
 (declare-function on-screen-mode "on-screen" (&optional arg))
+(defvar kanagawa-themes-custom-colors)
 
 (defgroup my/chunlian nil
   "Decorative Chunlian UI for dashboard."
@@ -15,6 +16,10 @@
 (mapc #'disable-theme custom-enabled-themes)
 (use-package kanagawa-themes
   :ensure t
+  :init
+  ;; Emacs 31 warns on `:foreground nil'; `unspecified' preserves the
+  ;; theme's "fall back to default face color" intent without noise.
+  (setq kanagawa-themes-custom-colors '((syn-variable unspecified)))
   :config
   (load-theme 'kanagawa-wave t))
 

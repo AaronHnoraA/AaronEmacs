@@ -14,6 +14,12 @@
 ;; Emacs Lisp does not use eglot
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defun my/elisp--flymake-safe-buffer-p ()
+  "Return non-nil when byte-compile Flymake is safe for this buffer."
+  (or buffer-file-name
+      (not (fboundp 'trusted-content-p))
+      (funcall #'trusted-content-p)))
+
 (defun my/elisp-mode-setup ()
   "Setup for Emacs Lisp buffers."
   ;; Multi-line eldoc in echo area
@@ -22,8 +28,12 @@
   ;; Better native completion experience
   (setq-local completion-cycle-threshold 3)
 
-  ;; Built-in diagnostics
-  (flymake-mode 1))
+  ;; `prog-mode' enables Flymake broadly; turn it back off for untrusted
+  ;; scratch-like buffers so Emacs 31 does not emit the byte-compile warning.
+  (if (my/elisp--flymake-safe-buffer-p)
+      (flymake-mode 1)
+    (when (bound-and-true-p flymake-mode)
+      (flymake-mode -1))))
 
 (add-hook 'emacs-lisp-mode-hook #'my/elisp-mode-setup)
 (add-hook 'lisp-interaction-mode-hook #'my/elisp-mode-setup)

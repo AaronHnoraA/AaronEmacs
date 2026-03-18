@@ -18,6 +18,7 @@
 
 (declare-function eglot-current-server "eglot")
 (declare-function eglot-shutdown "eglot" (server))
+(declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
 (declare-function prescient-persist-mode "prescient" (&optional arg))
 (declare-function flymake-start "flymake" (&optional report-fn))
 (declare-function dape--live-connection "dape" (&optional kind noerror))
@@ -97,8 +98,21 @@ When FEATURE is non-nil, require it before starting `lsp-mode'."
     (unless (or (bound-and-true-p lsp-managed-mode)
                 (and (fboundp 'eglot-managed-p)
                      (eglot-managed-p)))
+      (when (fboundp 'my/direnv-update-environment-maybe)
+        (my/direnv-update-environment-maybe))
       (my/language-server-prepare-remote-eglot-environment)
       (eglot-ensure))))
+
+(defun my/eglot-ensure-deferred ()
+  "Start `eglot' after the current buffer has finished opening."
+  (let ((buffer (current-buffer)))
+    (run-at-time
+     0 nil
+     (lambda (buf)
+       (when (buffer-live-p buf)
+         (with-current-buffer buf
+           (my/eglot-ensure))))
+     buffer)))
 
 (defun my/language-server-ensure ()
   "Start the preferred language server backend for the current buffer."
@@ -313,7 +327,7 @@ When FEATURE is non-nil, require it before starting `lsp-mode'."
 ;; -------------------------
 (use-package eglot
   :ensure nil ; Built-in since Emacs 29
-  :hook ((prog-mode . my/eglot-ensure)
+  :hook ((prog-mode . my/eglot-ensure-deferred)
          (eglot-managed-mode . (lambda ()
                                  (when (fboundp 'eglot-inlay-hints-mode)
                                    (eglot-inlay-hints-mode 1)))))
@@ -501,7 +515,6 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
 (require 'init-lean)
 (require 'init-md)
 (require 'init-nix)
-(require 'init-sage)
 (require 'init-html)
 (require 'init-js2)
 (require 'init-latex)

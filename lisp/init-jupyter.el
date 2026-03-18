@@ -14,6 +14,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'eieio-core)
 (require 'subr-x)
 
 (defgroup my/jupyter nil
@@ -43,6 +44,12 @@
 (declare-function org-babel-get-src-block-info "ob-core" (&optional light))
 (declare-function org-babel-where-is-src-block-head "ob-core")
 (declare-function org-in-src-block-p "org-src" (&optional inside))
+
+(defun my/jupyter--ensure-kernel-client (object)
+  "Signal unless OBJECT is a `jupyter-kernel-client' instance."
+  (unless (and (eieio-object-p object)
+               (object-of-class-p object 'jupyter-kernel-client))
+    (signal 'wrong-type-argument (list 'jupyter-kernel-client object))))
 
 (defun my/jupyter--normalize-language (language)
   "Normalize LANGUAGE to a stable Jupyter-facing identifier."
@@ -74,7 +81,6 @@
              (car (org-babel-get-src-block-info 'light))))
           (pcase major-mode
             ((or 'python-mode 'python-ts-mode) "python")
-            ((or 'sage-mode 'sage-shell:sage-mode) "sage")
             ('maple-mode "maple")
             (_ nil)))))
     (when (my/jupyter-managed-language-p language)
@@ -259,7 +265,7 @@ without forking the dependency."
       "Return a monadic value that extracts the current client."
       (lambda (state)
         (let ((client (if (listp state) (car state) state)))
-          (cl-check-type client jupyter-kernel-client)
+          (my/jupyter--ensure-kernel-client client)
           (cons client state))))
     (defun jupyter-push (s)
       "Push S onto the monadic state stack."
@@ -273,7 +279,7 @@ without forking the dependency."
           (cons state nil))))
     (defun jupyter-set-client (client)
       "Return a monadic value that replaces the current client with CLIENT."
-      (cl-check-type client jupyter-kernel-client)
+      (my/jupyter--ensure-kernel-client client)
       (lambda (state)
         (cons nil
               (if (listp state)
