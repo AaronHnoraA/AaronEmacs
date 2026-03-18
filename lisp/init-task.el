@@ -5,7 +5,9 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'init-funcs)
+(require 'init-project-local)
 (require 'json)
 
 (declare-function my/project-current-root "init-project")
@@ -19,6 +21,9 @@
 
 (defvar my/task-last-directory nil
   "Directory where the last project task ran.")
+
+(defvar my/task-last-environment nil
+  "Environment used by the last project task.")
 
 (defun my/task-project-root ()
   "Return the best project root for task commands."
@@ -90,7 +95,9 @@
       (push (cons (format "just:%s" target) (format "just %s" target)) pairs))
     (dolist (target (my/task--make-targets root "Makefile"))
       (push (cons (format "make:%s" target) (format "make %s" target)) pairs))
-    (delete-dups (nreverse pairs))))
+    (my/project-local-merge-candidates 'task
+                                       (delete-dups (nreverse pairs))
+                                       root)))
 
 (defun my/task-run (label)
   "Run task LABEL selected from `my/task-candidates'."
@@ -102,10 +109,13 @@
      (list (completing-read "Task: " labels nil t))))
   (let* ((root (file-name-as-directory (expand-file-name (my/task-project-root))))
          (command (or (cdr (assoc label (my/task-candidates)))
-                      (user-error "Unknown task: %s" label))))
+                      (user-error "Unknown task: %s" label)))
+         (env (my/project-local-env 'task root)))
     (setq my/task-last-command command
-          my/task-last-directory root)
+          my/task-last-directory root
+          my/task-last-environment env)
     (let ((default-directory root)
+          (process-environment (my/project-local-apply-env env))
           (compilation-buffer-name-function (lambda (_) "*task*")))
       (compile command))))
 
@@ -115,6 +125,8 @@
   (unless (and my/task-last-command my/task-last-directory)
     (user-error "No previous task command"))
   (let ((default-directory my/task-last-directory)
+        (process-environment (my/project-local-apply-env
+                              my/task-last-environment))
         (compilation-buffer-name-function (lambda (_) "*task*")))
     (compile my/task-last-command)))
 

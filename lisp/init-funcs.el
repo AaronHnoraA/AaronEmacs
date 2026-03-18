@@ -127,7 +127,7 @@ confirmation."
   "Bind COMMAND to `SPC KEY' in Evil normal state.
 When REPLACEMENT is non-nil, register it with Which-Key."
   (with-eval-after-load 'evil
-    (evil-define-key* 'normal 'global (kbd (concat "SPC " key)) command))
+    (evil-define-key* 'normal 'global (kbd (concat "<leader>" key)) command))
   (when replacement
     (my/leader-key-label key replacement)))
 

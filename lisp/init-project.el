@@ -5,6 +5,14 @@
 
 ;;; Code:
 
+(require 'init-treemacs-bridge)
+
+(eval-when-compile
+  (require 'treemacs-workspaces nil t))
+
+(eval-and-compile
+  (my/treemacs-bridge-declarations))
+
 (defvar projectile-known-projects)
 (defvar project--list)
 (defvar dashboard-projects-backend)

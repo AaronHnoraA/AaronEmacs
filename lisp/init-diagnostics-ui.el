@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'init-funcs)
+(require 'seq)
 
 (declare-function flymake-diagnostic-beg "flymake" (diag))
 (declare-function flymake-diagnostic-buffer "flymake" (diag))
@@ -16,6 +17,12 @@
 
 (defvar-local my/diagnostics-buffer-scope 'buffer
   "Scope used by the current diagnostics UI buffer.")
+
+(defvar-local my/diagnostics-buffer-filter nil
+  "Optional severity filter for the current diagnostics buffer.")
+
+(defvar-local my/diagnostics-buffer-title nil
+  "Readable title for the current diagnostics buffer.")
 
 (define-derived-mode my/diagnostics-mode special-mode "Diagnostics"
   "Major mode for persistent diagnostics lists.")
@@ -51,16 +58,29 @@
         (flymake--project-diagnostics project)
       (my/diagnostics--collect-buffer))))
 
+(defun my/diagnostics--apply-filter (diags)
+  "Apply the active severity filter to DIAGS."
+  (if my/diagnostics-buffer-filter
+      (seq-filter (lambda (diag)
+                    (eq (flymake-diagnostic-type diag)
+                        my/diagnostics-buffer-filter))
+                  diags)
+    diags))
+
 (defun my/diagnostics-refresh ()
   "Refresh the diagnostics list."
   (interactive)
   (let ((inhibit-read-only t)
-        (diags (pcase my/diagnostics-buffer-scope
-                 ('project (my/diagnostics--collect-project))
-                 (_ (my/diagnostics--collect-buffer)))))
+        (diags (my/diagnostics--apply-filter
+                (pcase my/diagnostics-buffer-scope
+                  ('project (my/diagnostics--collect-project))
+                  (_ (my/diagnostics--collect-buffer))))))
     (erase-buffer)
-    (insert (format "%s diagnostics\n\n"
-                    (capitalize (symbol-name my/diagnostics-buffer-scope))))
+    (insert (format "%s\n\n"
+                    (or my/diagnostics-buffer-title
+                        (format "%s diagnostics"
+                                (capitalize
+                                 (symbol-name my/diagnostics-buffer-scope))))))
     (if diags
         (dolist (diag diags)
           (let* ((buffer (flymake-diagnostic-buffer diag))
@@ -80,13 +100,21 @@
       (insert "No diagnostics.\n"))
     (goto-char (point-min))))
 
-(defun my/diagnostics-open (scope)
-  "Open a persistent diagnostics buffer for SCOPE."
-  (let ((buffer (get-buffer-create
-                 (format "*Diagnostics: %s*" (capitalize (symbol-name scope))))))
+(defun my/diagnostics-open (scope &optional filter title)
+  "Open a persistent diagnostics buffer for SCOPE, FILTER, and TITLE."
+  (let* ((title (or title
+                    (format "%s diagnostics"
+                            (capitalize (symbol-name scope)))))
+         (buffer (get-buffer-create
+                  (format "*Diagnostics: %s*" title))))
     (with-current-buffer buffer
       (my/diagnostics-mode)
       (setq-local my/diagnostics-buffer-scope scope)
+      (setq-local my/diagnostics-buffer-filter filter)
+      (setq-local my/diagnostics-buffer-title title)
+      (setq-local default-directory
+                  (with-current-buffer (window-buffer (selected-window))
+                    default-directory))
       (use-local-map (copy-keymap special-mode-map))
       (local-set-key (kbd "g") #'my/diagnostics-refresh)
       (my/diagnostics-refresh))

@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'init-funcs)
+(require 'init-project-local)
 
 (declare-function my/project-current-root "init-project")
 
@@ -25,6 +26,9 @@ MATCHER can be a directory path or regexp matched against the project root."
 
 (defvar my/project-run-last-directory nil
   "Directory where the last run profile executed.")
+
+(defvar my/project-run-last-environment nil
+  "Environment used by the last run profile.")
 
 (defun my/project-run-root ()
   "Return the current project root."
@@ -88,7 +92,9 @@ MATCHER can be a directory path or regexp matched against the project root."
                        ("serve" . "make serve")
                        ("start" . "make start")))
         (push entry profiles)))
-    (delete-dups (nreverse profiles))))
+    (my/project-local-merge-candidates 'run
+                                       (delete-dups (nreverse profiles))
+                                       root)))
 
 (defun my/project-run (name)
   "Run project profile NAME."
@@ -99,10 +105,13 @@ MATCHER can be a directory path or regexp matched against the project root."
      (list (completing-read "Run profile: " (mapcar #'car profiles) nil t))))
   (let* ((root (file-name-as-directory (expand-file-name (my/project-run-root))))
          (command (or (cdr (assoc name (my/project-run-profiles)))
-                      (user-error "Unknown run profile: %s" name))))
+                      (user-error "Unknown run profile: %s" name)))
+         (env (my/project-local-env 'run root)))
     (setq my/project-run-last-command command
-          my/project-run-last-directory root)
+          my/project-run-last-directory root
+          my/project-run-last-environment env)
     (let ((default-directory root)
+          (process-environment (my/project-local-apply-env env))
           (compilation-buffer-name-function (lambda (_) "*run*")))
       (compile command))))
 
@@ -112,6 +121,8 @@ MATCHER can be a directory path or regexp matched against the project root."
   (unless (and my/project-run-last-command my/project-run-last-directory)
     (user-error "No previous run profile"))
   (let ((default-directory my/project-run-last-directory)
+        (process-environment (my/project-local-apply-env
+                              my/project-run-last-environment))
         (compilation-buffer-name-function (lambda (_) "*run*")))
     (compile my/project-run-last-command)))
 
