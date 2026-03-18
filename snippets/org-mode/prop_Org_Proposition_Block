@@ -1,9 +1,9 @@
 # -*- mode: snippet -*-
-# name: Org example block
-# key: example
+# name: Org proposition block
+# key: prop
 # -- Org special block
 # --
-#+begin_example
+#+begin_prop
 $0
-#+end_example `(when (and (not (eobp)) (looking-at "
+#+end_prop `(when (and (not (eobp)) (looking-at "
 ")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

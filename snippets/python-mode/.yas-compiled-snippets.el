@@ -52,17 +52,35 @@
                         "main" nil nil nil
                         "/Users/hc/.emacs.d/snippets/python-mode/main_main" nil
                         nil)
-                       ("jraw" "# %% [code]\n%%raw\n${1:raw}\n" "Jupyter:Raw"
+                       ("jtimeit" "%%timeit\n$0\n" "Jupyter cell magic: timeit"
                         nil nil nil
+                        "/Users/hc/.emacs.d/snippets/python-mode/jtimeit_Jupyter_Cell_Timeit"
+                        nil nil)
+                       ("jtime" "%%time\n$0\n" "Jupyter cell magic: time" nil
+                        nil nil
+                        "/Users/hc/.emacs.d/snippets/python-mode/jtime_Jupyter_Cell_Time"
+                        nil nil)
+                       ("jraw" "# %% [raw]\n$0\n" "Jupytext raw cell" nil nil
+                        nil
                         "/Users/hc/.emacs.d/snippets/python-mode/jraw_Jupyter_Raw"
                         nil nil)
-                       ("jmd" "# %% [code]\n%%markdown\n${1:md}\n" "Jupyter:Md"
+                       ("jmd" "# %% [markdown]\n$0\n" "Jupytext markdown cell"
                         nil nil nil
                         "/Users/hc/.emacs.d/snippets/python-mode/jmd_Jupyter_Md"
                         nil nil)
-                       ("jcode" "# %% [code]\n${1:code}\n" "Jupyter:Code" nil
-                        nil nil
+                       ("jcode" "# %%\n$0\n" "Jupytext code cell" nil nil nil
                         "/Users/hc/.emacs.d/snippets/python-mode/jcode_Jupyter_Code"
+                        nil nil)
+                       ("jcell" "# %%\n$0\n" "Jupytext cell split" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/python-mode/jcell_Jupytext_Cell"
+                        nil nil)
+                       ("jcap" "%%capture\n$0\n" "Jupyter cell magic: capture"
+                        nil nil nil
+                        "/Users/hc/.emacs.d/snippets/python-mode/jcap_Jupyter_Cell_Capture"
+                        nil nil)
+                       ("jbash" "%%bash\n$0\n" "Jupyter cell magic: bash" nil
+                        nil nil
+                        "/Users/hc/.emacs.d/snippets/python-mode/jbash_Jupyter_Cell_Bash"
                         nil nil)
                        ("histo1d"
                         "df.Histo1D((${1:binning}), \"${2:branch}\")\n"
@@ -84,4 +102,4 @@
                         nil)))
 
 
-;;; Do not edit! File generated at Wed Mar 11 14:30:22 2026
+;;; Do not edit! File generated at Thu Mar 19 01:26:50 2026

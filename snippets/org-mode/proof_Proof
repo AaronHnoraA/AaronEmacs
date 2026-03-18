@@ -1,10 +1,9 @@
 # -*- mode: snippet -*-
-# name: Proof
+# name: Org proof block
 # key: proof
-# -- Add a proof
+# -- Org special block
 # --
-\begin{proof}
-	$1
-\end{proof}
-$0 `(when (and (not (eobp)) (looking-at "
+#+begin_proof
+$0
+#+end_proof `(when (and (not (eobp)) (looking-at "
 ")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

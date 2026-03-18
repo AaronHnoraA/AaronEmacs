@@ -1,10 +1,9 @@
 # -*- mode: snippet -*-
-# name: Lemma (no label)
+# name: Org lemma block
 # key: lemma
-# -- Add a lemma without label
+# -- Org special block
 # --
-\begin{lemma}{$1}
-	$2
-\end{lemma}
-$0 `(when (and (not (eobp)) (looking-at "
+#+begin_lemma
+$0
+#+end_lemma `(when (and (not (eobp)) (looking-at "
 ")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

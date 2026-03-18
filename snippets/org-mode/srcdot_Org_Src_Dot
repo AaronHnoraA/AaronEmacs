@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Org DOT src block
+# key: srcdot
+# --
+#+begin_src dot${1:}
+$0
+#+end_src `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

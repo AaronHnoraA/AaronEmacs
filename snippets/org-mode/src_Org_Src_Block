@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Org src block
+# key: src
+# --
+#+begin_src ${1:python}${2:}
+$0
+#+end_src `(when (and (not (eobp)) (looking-at "
+")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

@@ -1,7 +1,6 @@
 # -*- mode: snippet -*-
-# name: Jupyter:Raw
+# name: Jupytext raw cell
 # key: jraw
 # --
-# %% [code]
-%%raw
-${1:raw}
+# %% [raw]
+$0

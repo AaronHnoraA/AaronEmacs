@@ -1,6 +1,6 @@
 # -*- mode: snippet -*-
-# name: Jupyter:Code
+# name: Jupytext code cell
 # key: jcode
 # --
-# %% [code]
-${1:code}
+# %%
+$0

@@ -15,6 +15,11 @@
                         "Algorithm:While" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/while_Algorithm_While"
                         nil nil)
+                       ("warning"
+                        "#+begin_warning\n$0\n#+end_warning `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org warning block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/warning_Org_Warning_Block"
+                        nil nil)
                        ("vmat"
                         "\\begin{vmatrix}\n$1\n\\end{vmatrix} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
                         "Vmatrix" nil nil nil
@@ -87,9 +92,14 @@
                         "Theorem (with label)" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/thml_Theorem_with_label_"
                         nil nil)
+                       ("thm"
+                        "#+begin_thm\n$0\n#+end_thm `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org theorem alias block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/thm_Org_Theorem_Alias"
+                        nil nil)
                        ("theorem"
-                        "\\begin{theorem}{$1}\n	$2\n\\end{theorem}\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
-                        "Theorem (no label)" nil nil nil
+                        "#+begin_theorem\n$0\n#+end_theorem `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org theorem block" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/theorem_Theorem_no_label_"
                         nil nil)
                        ("text"
@@ -196,6 +206,66 @@
                         "Sigma (lowercase)" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/ssss_Sigma_lowercase_"
                         nil nil)
+                       ("srcsh"
+                        "#+begin_src sh${1:}\n$0\n#+end_src `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org shell src block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/srcsh_Org_Src_Shell"
+                        nil nil)
+                       ("srcsage"
+                        "#+begin_src sage${1:}\n$0\n#+end_src `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org Sage src block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/srcsage_Org_Src_Sage"
+                        nil nil)
+                       ("srcrs"
+                        "#+begin_src rust${1:}\n$0\n#+end_src `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org Rust src block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/srcrs_Org_Src_Rust"
+                        nil nil)
+                       ("srcpy"
+                        "#+begin_src python${1:}\n$0\n#+end_src `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org Python src block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/srcpy_Org_Src_Python"
+                        nil nil)
+                       ("srcmmd"
+                        "#+begin_src mermaid${1:}\n$0\n#+end_src `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org Mermaid src block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/srcmmd_Org_Src_Mermaid"
+                        nil nil)
+                       ("srcmaple"
+                        "#+begin_src maple${1:}\n$0\n#+end_src `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org Maple src block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/srcmaple_Org_Src_Maple"
+                        nil nil)
+                       ("srclean"
+                        "#+begin_src lean${1:}\n$0\n#+end_src `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org Lean src block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/srclean_Org_Src_Lean"
+                        nil nil)
+                       ("srcel"
+                        "#+begin_src emacs-lisp${1:}\n$0\n#+end_src `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org Emacs Lisp src block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/srcel_Org_Src_Emacs_Lisp"
+                        nil nil)
+                       ("srcdot"
+                        "#+begin_src dot${1:}\n$0\n#+end_src `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org DOT src block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/srcdot_Org_Src_Dot"
+                        nil nil)
+                       ("srccpp"
+                        "#+begin_src C++${1:}\n$0\n#+end_src `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org C++ src block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/srccpp_Org_Src_Cpp"
+                        nil nil)
+                       ("srcc"
+                        "#+begin_src C${1:}\n$0\n#+end_src `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org C src block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/srcc_Org_Src_C"
+                        nil nil)
+                       ("src"
+                        "#+begin_src ${1:python}${2:}\n$0\n#+end_src `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org src block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/src_Org_Src_Block"
+                        nil nil)
                        ("sr"
                         "^{2} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
                         "Square" nil nil nil
@@ -294,18 +364,28 @@
                         "Proposition (with label)" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/propl_Proposition_with_label_"
                         nil nil)
+                       ("property"
+                        "#+begin_property\n$0\n#+end_property `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org property block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/property_Org_Property_Block"
+                        nil nil)
                        ("prop"
                         "\\propto `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
                         "Proportional To" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/prop_Proportional_To"
+                        nil nil)
+                       ("prop"
+                        "#+begin_prop\n$0\n#+end_prop `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org proposition block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/prop_Org_Proposition_Block"
                         nil nil)
                        ("pd"
                         "■`(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "proof end" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/proof_end" nil nil)
                        ("proof"
-                        "\\begin{proof}\n	$1\n\\end{proof}\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
-                        "Proof" nil nil nil
+                        "#+begin_proof\n$0\n#+end_proof `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org proof block" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/proof_Proof" nil
                         nil)
                        ("prod"
@@ -450,8 +530,8 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/notin_Not_Element_Of"
                         nil nil)
                        ("note"
-                        "\\begin{note}\n	$1\n\\end{note}\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
-                        "Note" nil nil nil
+                        "#+begin_note\n$0\n#+end_note `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org note block" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/note_Note" nil nil)
                        ("norm"
                         "\\lvert $1 \\rvert $2 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
@@ -541,8 +621,8 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/lemmal_Lemma_with_label_"
                         nil nil)
                        ("lemma"
-                        "\\begin{lemma}{$1}\n	$2\n\\end{lemma}\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
-                        "Lemma (no label)" nil nil nil
+                        "#+begin_lemma\n$0\n#+end_lemma `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org lemma block" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/lemma_Lemma_no_label_"
                         nil nil)
                        ("lax"
@@ -613,6 +693,11 @@
                         "\\\\($1\\\\)$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
                         "InlineExp" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/inlineexp_InlineExp"
+                        nil nil)
+                       ("info"
+                        "#+begin_info\n$0\n#+end_info `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org info block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/info_Org_Info_Block"
                         nil nil)
                        ("infi"
                         "\\int_{-\\infty}^{\\infty} $1 \\, d$2 $3 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
@@ -721,8 +806,8 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/exercise_Exercise"
                         nil nil)
                        ("example"
-                        "\\begin{example}\n	$1\n\\end{example}\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
-                        "Example" nil nil nil
+                        "#+begin_example\n$0\n#+end_example `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org example block" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/example_Example"
                         nil nil)
                        ("eset"
@@ -810,14 +895,19 @@
                         "\\nabla `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
                         "Del" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/del_Del" nil nil)
+                       ("defn"
+                        "#+begin_defn\n$0\n#+end_defn `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org definition alias block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/defn_Org_Definition_Alias"
+                        nil nil)
                        ("defl"
                         "\\begin{definition}{$1}\\label{def:$1}\n	$2\n\\end{definition}\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
                         "Definition (with label)" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/defl_Definition_with_label_"
                         nil nil)
                        ("definition"
-                        "\\begin{definition}{$1}\n	$2\n\\end{definition}\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
-                        "Definition (no label)" nil nil nil
+                        "#+begin_definition\n$0\n#+end_definition `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org definition block" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/definition_Definition_no_label_"
                         nil nil)
                        ("ddt"
@@ -866,6 +956,11 @@
                         "\\begin{corollary}{$1}\\label{cor:$1}\n	$2\n\\end{corollary}\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
                         "Corollary (with label)" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/corl_Corollary_with_label_"
+                        nil nil)
+                       ("cor"
+                        "#+begin_cor\n$0\n#+end_cor `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org corollary block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/cor_Org_Corollary_Block"
                         nil nil)
                        ("conclusion"
                         "\\begin{conclusion}\n	$1\n\\end{conclusion}\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
@@ -943,7 +1038,7 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/bmat_Bmatrix" nil
                         nil)
                        (";b"
-                        "`(let* ((blk (yas-choose-value\n              '(\"definition\" \"defn\" \"theorem\" \"lemma\" \"cor\"\n                \"prop\" \"property\" \"proof\" \"example\"\n                \"attention\" \"note\" \"warning\"))))\n   (insert (concat \"#+begin_\" blk \"\\n\\n#+end_\" blk)))`\n\n"
+                        "`(let* ((blk (yas-choose-value\n              '(\"definition\" \"defn\" \"theorem\" \"thm\" \"lemma\"\n                \"cor\" \"prop\" \"property\" \"proof\" \"example\"\n                \"attention\" \"note\" \"info\" \"warning\"))))\n   (insert (concat \"#+begin_\" blk \"\\n\\n#+end_\" blk)))`\n"
                         "org special block (scripted; cached choice)" nil nil
                         nil
                         "/Users/hc/.emacs.d/snippets/org-mode/block-special-all"
@@ -994,6 +1089,11 @@
                         "\\langle $1 \\rangle $2 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
                         "Angle Brackets" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/avg_Angle_Brackets"
+                        nil nil)
+                       ("attention"
+                        "#+begin_attention\n$0\n#+end_attention `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "Org attention block" nil nil nil
+                        "/Users/hc/.emacs.d/snippets/org-mode/attention_Org_Attention_Block"
                         nil nil)
                        ("img"
                         "[[file:/Users/van/org/org-roam/图片附件/]] `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
@@ -1262,4 +1362,4 @@
                         nil)))
 
 
-;;; Do not edit! File generated at Wed Mar 11 14:30:22 2026
+;;; Do not edit! File generated at Thu Mar 19 01:26:50 2026
