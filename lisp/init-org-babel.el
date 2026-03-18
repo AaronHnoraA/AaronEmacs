@@ -4,6 +4,8 @@
 ;; Keep local-only Org Babel languages minimal and route supported compute
 ;; languages through Jupyter.  The old native and remote execution helpers are
 ;; intentionally removed so Python and Sage depend on `ob-jupyter'.
+;;
+;; See docs/jupyter-workflow.org for the current operational model.
 
 ;;; Code:
 

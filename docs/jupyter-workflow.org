@@ -1,0 +1,374 @@
+#+title: Jupyter-Centered Org and Jupytext Workflow
+
+* Scope
+
+This document describes the current Jupyter-centered workflow in this Emacs
+config.  It covers:
+
+- Org Babel execution through =ob-jupyter=
+- Existing-kernel workflows based on =kernel-*.json= connection files
+- Remote kernels, including =remote_ikernel=-style kernelspecs
+- The script-first Jupytext workflow in =lisp/init-jupyter.el=
+- How to add or maintain languages and kernels later
+
+Relevant config entry points:
+
+- =lisp/init-jupyter.el=
+- =lisp/init-org-babel.el=
+
+* Design
+
+The current setup treats Jupyter as the unified execution backend.
+
+From the user's point of view:
+
+- Plain Org languages like =python=, =sage=, =sagemath=, and =maple= stay plain
+- REPL, Org execution, async execution, and existing-kernel attachment all use
+  the Jupyter protocol underneath
+
+In practice the stack is:
+
+- Org / source buffers
+- =ob-jupyter= and =emacs-jupyter=
+- Jupyter kernel protocol
+- A concrete kernel for the target language
+
+This means Jupyter acts as a compatibility layer for execution and session
+management.  It does *not* invent language support.  A language must have a
+working Jupyter kernel, or a running existing kernel with a readable connection
+file, to participate in this workflow.
+
+* Current Command Surface
+
+The main keybindings live in =lisp/init-jupyter.el=.
+
+- =C-c j r=: connect to the remembered existing kernel for the current language;
+  if none is remembered, prompt for a =.json= connection file
+- =C-u C-c j r=: start a new kernel through =jupyter-run-repl=
+- =C-c j c=: explicitly choose a =.json= connection file and connect a REPL
+- =C-c j k=: remember a connection file as the default existing kernel for a
+  language
+- =C-c j o=: update the current Org source block to use a chosen connection
+  file and add =:async yes=
+- =C-c j i=: inspect at point
+- =C-c j e=: evaluate line or region through the connected REPL client
+- =C-c j y=: toggle =jupytext-mode=
+- =C-c j s=: run =jupytext --sync= now
+- =C-c j p=: register the current script buffer with its paired notebook
+
+Org-specific async helpers live in =lisp/init-org-babel.el=.
+
+- =C-c C-v C-a=: async execution helper for non-Jupyter sessionless blocks
+- =C-c C-v C-k=: cancel the current async helper job
+
+Jupyter-backed Org blocks use =ob-jupyter='s own async path and should normally
+use =:async yes= directly.
+
+* Org Babel Model
+
+The config routes a small set of plain Org languages through Jupyter by default.
+
+Current Jupyter-backed plain languages:
+
+- =python=
+- =sage=
+- =sagemath=
+- =maple=
+
+This mapping is defined in =my/org-babel-jupyter-native-backends= in
+=lisp/init-org-babel.el=.
+
+Defaults for these languages are set so that:
+
+- execution goes through =ob-jupyter=
+- =:async yes= is the default
+- if a remembered existing-kernel =.json= file exists for the language, that
+  file becomes the default session
+- otherwise the fallback symbolic Jupyter session name is used
+
+** Plain block examples
+
+Once a language is configured, plain blocks stay plain:
+
+#+begin_src org
+#+begin_src python :results output
+print(2 + 3)
+#+end_src
+#+end_src
+
+If =python= already has a remembered existing kernel, the block will run there.
+Otherwise it falls back to the configured Jupyter session.
+
+Explicit existing-kernel attachment:
+
+#+begin_src org
+#+begin_src python :session /Users/hc/Library/Jupyter/runtime/kernel-xxxx.json :async yes :results value
+2 + 8
+#+end_src
+#+end_src
+
+The same idea works for remote TRAMP connection files:
+
+#+begin_src org
+#+begin_src sage :session /ssh:your-host:/home/your-user/.local/share/jupyter/runtime/kernel-xxxx.json :async yes :results output
+factorial(30)
+#+end_src
+#+end_src
+
+** Existing kernel versus new kernel
+
+These are not the same:
+
+- =:session /path/to/kernel-xxxx.json=: attach to an already running kernel
+- =:kernel some-kernelspec=: start a new kernel from that kernelspec
+
+For example, this starts a new remote kernel if the kernelspec exists:
+
+#+begin_src org
+#+begin_src sage :kernel rik_ssh_aaron_wsl2_sage :results output
+print(2 + 3)
+#+end_src
+#+end_src
+
+This does *not* attach to an already running kernel.  For an existing WSL2 Sage
+kernel, prefer a =.json= connection file instead.
+
+* Existing-Kernel Workflow
+
+The primary workflow is now "connect to an already running kernel" rather than
+"start a fresh kernel for every new session".
+
+** Remember one existing kernel per language
+
+Use:
+
+- =C-c j k=
+
+Pick:
+
+- a language such as =python= or =sage=
+- a =kernel-*.json= connection file
+
+After that, plain Org blocks for that language default to the remembered
+connection file, and =C-c j r= will connect a REPL to the remembered kernel.
+
+Language alias sharing:
+
+- =sage= and =sagemath= share the same remembered connection file
+
+** Make one current Org block explicit
+
+Use:
+
+- =C-c j o=
+
+This updates the current Org source block in place by adding:
+
+- =:session /path/to/kernel-xxxx.json=
+- =:async yes=
+
+This is the easiest way to pin a specific block to a specific existing kernel.
+
+** Local and remote connection files
+
+Local:
+
+- =/Users/hc/Library/Jupyter/runtime/kernel-xxxx.json=
+
+Remote via TRAMP:
+
+- =/ssh:host:/home/user/.local/share/jupyter/runtime/kernel-xxxx.json=
+
+When the connection file is remote, =emacs-jupyter= can tunnel the remote kernel
+ports over SSH.  This is the native remote existing-kernel path.
+
+* Remote Kernels
+
+There are three distinct remote stories worth keeping separate.
+
+** 1. Existing remote kernel via connection file
+
+This is the closest match to =nvim-ipy=-style usage.
+
+Use:
+
+- =jupyter-connect-repl=
+- =C-c j c=
+- =:session /ssh:host:/path/to/kernel-xxxx.json=
+
+This attaches to a kernel that is already running remotely.
+
+** 2. Start a new remote kernel on demand
+
+This is the "remote kernelspec" or =remote_ikernel= story.
+
+Examples:
+
+- =rik_ssh_aaron_wsl2_sage=
+
+Use this path when the remote kernelspec should *launch* a new remote kernel.
+This is appropriate when you want remote startup convenience rather than
+attachment to an existing runtime.
+
+** 3. Jupyter server based remote sessions
+
+=ob-jupyter= also has support for Jupyter server / TRAMP based sessions.  That
+is a separate path from raw connection files.  For this config, raw connection
+files are the preferred way to attach to an existing remote kernel because they
+map directly onto the current REPL and Org workflow.
+
+* Jupytext Workflow
+
+The Jupytext workflow in =lisp/init-jupyter.el= is intentionally script-first.
+
+The intended loop is:
+
+1. Keep the notebook open and runnable in JupyterLab.
+2. Save the notebook when you want outputs preserved.
+3. Edit the paired script in Emacs.
+4. Save the script and let =jupytext --sync= update the notebook.
+5. In JupyterLab, reload the notebook from disk and continue.
+
+** What the helper does
+
+=jupytext-mode= is a buffer-local minor mode for the script buffer.
+
+When enabled:
+
+- the script is paired with a notebook
+- save hooks run =jupytext --sync=
+- the Emacs script buffer is reverted when the sync rewrites the file on disk
+
+Useful commands:
+
+- =C-c j y=: toggle =jupytext-mode=
+- =C-c j p=: register the current script buffer and paired notebook
+- =C-c j s=: sync immediately
+
+The pairing logic stores:
+
+- the script path
+- the notebook path
+- the Jupytext format, for example =py:percent= or =sage:percent=
+
+** When to use Jupytext versus Org
+
+Use Jupytext when:
+
+- you want the notebook UI and outputs to remain first-class in JupyterLab
+- you want to edit the paired script in Emacs
+- you want notebook state preserved in notebook files
+
+Use Org + Jupyter when:
+
+- you want literate development inside Org
+- you want plain source blocks with Jupyter-backed execution
+- you want existing-kernel attachment and Org-native async results
+
+These workflows are complementary.  They both rely on Jupyter, but they are not
+the same editing model.
+
+* Adding a New Language
+
+Adding a new Jupyter-backed language is intentionally explicit.
+
+Typical steps:
+
+1. Ensure a working Jupyter kernelspec exists.
+2. Add the language to =my/org-babel-jupyter-native-backends= in
+   =lisp/init-org-babel.el=.
+3. Add the language name to =my/jupyter-known-languages= in
+   =lisp/init-jupyter.el=.
+4. If the language has aliases that should share one remembered connection
+   file, update:
+   - =my/jupyter--normalize-language=
+   - =my/jupyter--language-family=
+5. If the language needs better current-buffer detection, update
+   =my/jupyter-current-language=.
+
+Minimal example for a hypothetical Julia setup:
+
+#+begin_src emacs-lisp
+("julia"
+ :kernel-language "julia"
+ :preferred-kernels ("julia-1.11")
+ :session "julia"
+ :mode julia
+ :extension "jl")
+#+end_src
+
+The maintenance rule is simple:
+
+- no kernel, no integration
+
+If a language has no workable Jupyter kernel, it should not be routed through
+this stack.
+
+* Maintenance Notes
+
+** State bug in emacs-jupyter
+
+This config carries a local runtime fix for a native-compilation issue where
+some =emacs-jupyter= monad helpers can fail with:
+
+- =Symbol's value as variable is void: state=
+
+The fix is applied in =lisp/init-jupyter.el= by rebinding the affected helper
+functions after =jupyter-monads= loads.
+
+** Connection files are runtime artifacts
+
+Remembered connection files are useful, but they are tied to running kernels.
+
+If a remembered =kernel-*.json= disappears or the kernel dies:
+
+- reconnect to a new existing kernel
+- re-run =C-c j k= for the language if needed
+- or use =C-u C-c j r= to start a fresh kernel intentionally
+
+** Remote sessions need the Jupyter transport stack
+
+Remote attachment relies on Jupyter's normal transport machinery, including the
+ZMQ path used by =emacs-jupyter=.  If remote sessions fail, verify:
+
+- the remote kernel really exists
+- the connection file still exists
+- SSH / TRAMP access works
+- the kernel ports are still live
+
+** Verified behavior in this config
+
+The current setup has been verified for:
+
+- existing local kernel attachment through =kernel-*.json=
+- Org =:results output=
+- Org =:results value=
+- Org =:async yes=
+- REPL connection through remembered existing kernels
+
+* Short Recipes
+
+** Attach Org to an existing WSL2 Sage kernel
+
+#+begin_src org
+#+begin_src sage :session /ssh:your-host:/home/your-user/.local/share/jupyter/runtime/kernel-xxxx.json :async yes :results output
+factorial(20)
+#+end_src
+#+end_src
+
+** Remember an existing kernel for later plain blocks
+
+1. =C-c j k=
+2. Choose =python= or =sage=
+3. Choose the =kernel-*.json= file
+4. Run plain blocks as usual
+
+** Start a brand new remote_ikernel session
+
+#+begin_src org
+#+begin_src sage :kernel rik_ssh_aaron_wsl2_sage :results output
+print(2 + 3)
+#+end_src
+#+end_src
+
+This is for new remote startup, not existing-kernel attachment.

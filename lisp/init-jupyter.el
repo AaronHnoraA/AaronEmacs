@@ -8,6 +8,8 @@
 ;;   3. Edit the paired script in Emacs.
 ;;   4. Save the script and let `jupytext --sync` update the notebook.
 ;;   5. In JupyterLab, run "Reload from Disk" and continue executing cells.
+;;
+;; See docs/jupyter-workflow.org for the full workflow and maintenance notes.
 
 ;;; Code:
 
