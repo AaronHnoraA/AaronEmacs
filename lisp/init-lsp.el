@@ -64,13 +64,19 @@ When FEATURE is non-nil, require it before starting `lsp-mode'."
     'lsp-mode)
    (t nil)))
 
+(defun my/language-server-stop-eglot ()
+  "Shut down the current `eglot' session in this buffer, if any."
+  (when (and (fboundp 'eglot-managed-p)
+             (eglot-managed-p))
+    (ignore-errors
+      (eglot-shutdown (eglot-current-server)))))
+
 (defun my/lsp-mode-ensure ()
   "Start `lsp-mode' for explicitly registered major modes."
   (interactive)
   (when (my/lsp-mode-preferred-p)
-    (when (and (not (bound-and-true-p lsp-managed-mode))
-               (not (and (fboundp 'eglot-managed-p)
-                         (eglot-managed-p))))
+    (unless (bound-and-true-p lsp-managed-mode)
+      (my/language-server-stop-eglot)
       (if (my/lsp-mode-supported-p)
           (lsp-deferred)
         (let ((feature (my/lsp-mode-required-feature)))
@@ -265,6 +271,7 @@ When FEATURE is non-nil, require it before starting `lsp-mode'."
 ;; -------------------------
 (use-package lsp-mode
   :ensure t
+  :defer t
   :commands (lsp
              lsp-deferred
              lsp-execute-code-action
@@ -276,21 +283,21 @@ When FEATURE is non-nil, require it before starting `lsp-mode'."
   :hook ((lsp-managed-mode . (lambda ()
                                (when (fboundp 'lsp-inlay-hints-mode)
                                  (lsp-inlay-hints-mode 1)))))
-  :bind (:map lsp-mode-map
-         ("C-c f" . lsp-format-buffer)
-         ("C-c d" . eldoc-doc-buffer)
-         ("C-c a" . lsp-execute-code-action)
-         ("C-c r" . lsp-rename)
-         ("C-h e" . xref-find-definitions)
-         ("C-h r" . xref-find-references)
-         ("C-h i" . lsp-find-implementation)
-         ("C-h t" . lsp-find-type-definition))
-  :custom
-  (lsp-completion-provider :capf)
-  (lsp-diagnostics-provider :flymake)
-  (lsp-headerline-breadcrumb-enable nil)
-  (lsp-inlay-hint-enable t)
-  (lsp-log-io nil))
+  :init
+  (setq lsp-completion-provider :capf
+        lsp-diagnostics-provider :flymake
+        lsp-headerline-breadcrumb-enable nil
+        lsp-inlay-hint-enable t
+        lsp-log-io nil)
+  :config
+  (define-key lsp-mode-map (kbd "C-c f") #'lsp-format-buffer)
+  (define-key lsp-mode-map (kbd "C-c d") #'eldoc-doc-buffer)
+  (define-key lsp-mode-map (kbd "C-c a") #'lsp-execute-code-action)
+  (define-key lsp-mode-map (kbd "C-c r") #'lsp-rename)
+  (define-key lsp-mode-map (kbd "C-h e") #'xref-find-definitions)
+  (define-key lsp-mode-map (kbd "C-h r") #'xref-find-references)
+  (define-key lsp-mode-map (kbd "C-h i") #'lsp-find-implementation)
+  (define-key lsp-mode-map (kbd "C-h t") #'lsp-find-type-definition))
 
 
 ;; -------------------------
@@ -330,14 +337,15 @@ When FEATURE is non-nil, require it before starting `lsp-mode'."
          (lsp-managed-mode . eldoc-box-hover-at-point-mode))
   :bind (:map eglot-mode-map
          ("C-h d" . eldoc-box-help-at-point)
-         ("C-h c" . eldoc-box-quit-frame)
-         :map lsp-mode-map
-         ("C-h d" . eldoc-box-help-at-point)
          ("C-h c" . eldoc-box-quit-frame))
   :custom
   (eldoc-box-max-pixel-width 600)
   (eldoc-box-max-pixel-height 400)
-  (eldoc-box-clear-with-C-g t))
+  (eldoc-box-clear-with-C-g t)
+  :config
+  (with-eval-after-load 'lsp-mode
+    (define-key lsp-mode-map (kbd "C-h d") #'eldoc-box-help-at-point)
+    (define-key lsp-mode-map (kbd "C-h c") #'eldoc-box-quit-frame)))
 
 ;; 替代 lsp-headerline-breadcrumb：Eglot 作者出品的面包屑
 (use-package breadcrumb
