@@ -60,6 +60,7 @@ If one of FEATURES is already available, require MODULE immediately."
 
 ;; standalone apps
 (my/require-module-after-any-feature 'init-org 'org)
+(my/require-module-after-any-feature 'init-org-mmdc 'org)
 (my/require-module-after-any-feature 'init-org-zotero 'org)
 (require 'init-eaf)
 (require 'init-text)
