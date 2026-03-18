@@ -123,5 +123,19 @@ confirmation."
   (when-let* ((buf (get-buffer "*compilation*")))
     (pop-to-buffer buf)))
 
+(defun my/evil-global-leader-set (key command &optional replacement)
+  "Bind COMMAND to `SPC KEY' in Evil normal state.
+When REPLACEMENT is non-nil, register it with Which-Key."
+  (with-eval-after-load 'evil
+    (evil-define-key* 'normal 'global (kbd (concat "SPC " key)) command))
+  (when replacement
+    (my/leader-key-label key replacement)))
+
+(defun my/leader-key-label (key replacement)
+  "Register REPLACEMENT for `SPC KEY' in Which-Key."
+  (when replacement
+    (with-eval-after-load 'which-key
+      (which-key-add-key-based-replacements (concat "SPC " key) replacement))))
+
 (provide 'init-funcs)
 ;;; init-funcs.el ends here

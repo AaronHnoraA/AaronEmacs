@@ -1136,6 +1136,10 @@ When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
               :around #'my/undo-tree-make-history-save-file-name)
   (advice-add 'undo-tree-load-history :around #'my/undo-tree-load-history)
   (advice-add 'undo-tree-save-history :around #'my/undo-tree-save-history)
+  ;; Only persist history for on-disk file states. Saving on `kill-buffer-hook'
+  ;; can poison the history file when the buffer has unsaved edits, causing the
+  ;; next reopen to fail the hash check and drop persistent undo history.
+  (remove-hook 'kill-buffer-hook #'undo-tree-save-history-from-hook)
   
   ;; 关键:在打开文件后立即加载历史
   (add-hook 'find-file-hook #'undo-tree-load-history-from-hook))

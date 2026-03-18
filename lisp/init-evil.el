@@ -26,8 +26,8 @@
   ;; Silence line out of range error.
   (shut-up! #'evil-indent)
   :custom
-  ;; undo will never freeze my Emacs
-  (evil-undo-system 'undo-redo)
+  ;; Keep Evil on `undo-tree' so reopened files can reuse persisted undo history.
+  (evil-undo-system 'undo-tree)
   ;; Switch to the new window after splitting
   (evil-split-window-below t)
   (evil-vsplit-window-right t)
