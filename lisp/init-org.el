@@ -626,18 +626,7 @@ Special block overlays are no longer disabled based on buffer size."
 ;;; 7. Source Blocks & Babel (代码执行)
 ;;; ----------------------------------------------------------------------------
 
-(use-package org-src
-  :ensure nil
-  :hook (org-babel-after-execute . org-redisplay-inline-images)
-  :config
-  (org-babel-do-load-languages
-   'org-babel-load-languages
-   '((C . t) (dot . t) (emacs-lisp . t) (python . t) (shell . t)))
-  :custom
-  (org-confirm-babel-evaluate nil)
-  (org-src-fontify-natively t)
-  (org-src-tab-acts-natively t)
-  (org-src-window-setup 'other-window))
+(require 'init-org-babel)
 
 (use-package scala-mode
   :interpreter ("scala" . scala-mode))
