@@ -5,6 +5,12 @@
 
 ;;; Code:
 
+(declare-function on-screen-mode "on-screen" (&optional arg))
+
+(defgroup my/chunlian nil
+  "Decorative Chunlian UI for dashboard."
+  :group 'faces)
+
 ;; Use Iosvkem in terminals
 (mapc #'disable-theme custom-enabled-themes)
 (use-package kanagawa-themes
@@ -87,6 +93,21 @@
   :when (display-graphic-p)
   :demand t)
 
+(defun my/dashboard-upgrade-packages (&rest _)
+  "Upgrade installed packages from the dashboard button."
+  (interactive)
+  (cond
+   ((fboundp 'package-upgrade-all)
+    (package-upgrade-all nil))
+   ((require 'package-menu nil t)
+    (package-refresh-contents)
+    (package-list-packages t)
+    (with-current-buffer "*Packages*"
+      (package-menu-mark-upgrades)
+      (package-menu-execute t)))
+   (t
+    (user-error "Package upgrade command is unavailable in this Emacs"))))
+
 (use-package dashboard
   :ensure t
   :init
@@ -99,7 +120,7 @@
            (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-alert") "⚑")
             "Issue" "Report issue" (lambda (&rest _) (browse-url issue-url)) warning)
            (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-download") "♺")
-            "Upgrade" "Upgrade packages synchronously" (lambda (&rest _) (package-upgrade-all nil)) success))))
+            "Upgrade" "Upgrade packages synchronously" #'my/dashboard-upgrade-packages success))))
   
   (dashboard-setup-startup-hook)
 
@@ -365,9 +386,15 @@
 
 
 
-(defface chunlian-face '((t :background "red" :foreground "yellow" :weight bold :height 2.0)) "春联样式。")
+(defface chunlian-face
+  '((t :background "red" :foreground "yellow" :weight bold :height 2.0))
+  "春联样式。"
+  :group 'my/chunlian)
 ;; 新增一个专门用来填充红底的 Face
-(defface chunlian-blank-face '((t :background "red")) "春联间隙的纯红背景。")
+(defface chunlian-blank-face
+  '((t :background "red"))
+  "春联间隙的纯红背景。"
+  :group 'my/chunlian)
 
 (defvar chunlian-right "霜蹄千里辞寒岁")
 (defvar chunlian-left "锦辔乘风纳清祥")

@@ -14,6 +14,13 @@
   "Alist mapping major modes to extra `lsp-mode' support features.")
 
 (defvar tramp-login-shell)
+(defvar eglot-stay-out-of)
+
+(declare-function eglot-current-server "eglot")
+(declare-function eglot-shutdown "eglot" (server))
+(declare-function prescient-persist-mode "prescient" (&optional arg))
+(declare-function flymake-start "flymake" (&optional report-fn))
+(declare-function dape--live-connection "dape" (&optional kind noerror))
 
 (defun my/language-server-prepare-remote-eglot-environment ()
   "Prepare shell settings for remote `eglot' buffers."
@@ -193,7 +200,6 @@ When FEATURE is non-nil, require it before starting `lsp-mode'."
       (apply func args)))
   (setq company-idle-delay 0.12
         company-minimum-prefix-length 1
-        company-show-numbers t
         company-show-quick-access t
         company-require-match nil
         company-tooltip-width-grow-only t
@@ -205,6 +211,8 @@ When FEATURE is non-nil, require it before starting `lsp-mode'."
         company-dabbrev-code-everywhere t
         company-files-exclusions '(".git/" ".DS_Store")
         company-backends my/company-lsp-backends)
+  (when (boundp 'company-show-numbers)
+    (setq company-show-numbers t))
   (setq-default company-backends my/company-lsp-backends))
 
 (with-eval-after-load 'esh-mode

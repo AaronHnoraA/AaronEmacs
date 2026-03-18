@@ -61,6 +61,10 @@ Special block overlays are no longer disabled based on buffer size."
   (when (my/org-rich-ui-buffer-p)
     (my/typography-setup-prose-buffer)))
 
+(defun my/org-setup-buffer-spacing ()
+  "Use relaxed line spacing in Org buffers only."
+  (setq-local line-spacing 0.1))
+
 (defun my/org-enable-valign-maybe ()
   "Enable `valign-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
@@ -89,6 +93,7 @@ Special block overlays are no longer disabled based on buffer size."
   :ensure nil
   :hook ((org-mode . visual-line-mode)        ; 自动换行
          (org-mode . org-indent-mode)
+         (org-mode . my/org-setup-buffer-spacing)
          (org-mode . my/org-enable-typography-maybe)) ; 缩进模式
   :bind (("C-c a" . org-agenda)
          ("C-c c" . org-capture)
@@ -254,10 +259,7 @@ Special block overlays are no longer disabled based on buffer size."
   (org-modern-horizontal-rule t)
   (org-modern-block-name nil)
   (org-modern-todo nil) ; 禁用 todo 美化，以免覆盖你在 org-mode 中自定义的颜色
-  (org-modern-priority t)
-  
-  :config
-  (setq-default line-spacing 0.1))
+  (org-modern-priority t))
 
 ;; 3.4 Org Modern Indent
 (my/package-ensure-vc 'org-modern-indent "https://github.com/jdtsmith/org-modern-indent.git")
@@ -532,6 +534,18 @@ Special block overlays are no longer disabled based on buffer size."
 (defvar my/org-roam--background-timer nil)
 (defvar my/org-roam--initialized nil)
 
+(defun my/org-roam-enable ()
+  "Initialize org-roam once using the newest available entry point."
+  (unless my/org-roam--initialized
+    (cond
+     ((fboundp 'org-roam-db-autosync-enable)
+      (org-roam-db-autosync-enable))
+     (t
+      (when (fboundp 'org-roam-setup)
+        (org-roam-setup))
+      (org-roam-db-autosync-mode 1)))
+    (setq my/org-roam--initialized t)))
+
 (defun pv/org-set-last-modified ()
   "Update the `#+last_modified` field before saving an Org buffer."
   (when (derived-mode-p 'org-mode)
@@ -582,10 +596,7 @@ Special block overlays are no longer disabled based on buffer size."
         ("l" . org-roam-buffer-toggle))
   
   :config
-  (unless my/org-roam--initialized
-    (org-roam-setup)
-    (org-roam-db-autosync-mode 1)
-    (setq my/org-roam--initialized t))
+  (my/org-roam-enable)
   (setq org-roam-capture-templates
         '(("m" "Math" plain "%?" :if-new (file+head "math/${slug}.org" "#+title: ${title}\n#+date: %u\n#+filetags: :math:\n") :unnarrowed t)
           ("c" "CS" plain "%?" :if-new (file+head "CS/${slug}.org" "#+title: ${title}\n#+date: %u\n#+filetags: :cs:\n") :unnarrowed t)

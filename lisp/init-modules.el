@@ -5,6 +5,18 @@
 
 ;;; Code:
 
+(defun my/require-module-after-any-feature (module &rest features)
+  "Require MODULE after any of FEATURES loads.
+If one of FEATURES is already available, require MODULE immediately."
+  (if (catch 'loaded
+        (dolist (feature features)
+          (when (featurep feature)
+            (throw 'loaded t))))
+      (require module)
+    (dolist (feature features)
+      (with-eval-after-load feature
+        (require module)))))
+
 (require 'init-base)
 (require 'init-utils)
 (require 'init-ui)
@@ -22,8 +34,8 @@
 (require 'init-server)
 
 ;; standalone apps
-(require 'init-org)
-(require 'init-org-zotero)
+(my/require-module-after-any-feature 'init-org 'org)
+(my/require-module-after-any-feature 'init-org-zotero 'org)
 (require 'init-eaf)
 (require 'init-text)
 (require 'init-shell)
@@ -35,7 +47,7 @@
 (require 'init-rainbow-delimiters)
 (require 'init-avy)
 (require 'init-multiple-cursors)
-(require 'init-auctex)
+(my/require-module-after-any-feature 'init-auctex 'tex 'tex-site 'pdf-tools 'pdf-view)
 (require 'init-jupyter)
 (require 'init-browser)
 (require 'init-fzfs)

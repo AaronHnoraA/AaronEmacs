@@ -11,6 +11,8 @@
 
 (require 'cl-lib)
 
+(declare-function tempo-expand-if-complete "tempo")
+
 ;; Suppress GUI features and more
 (setq use-file-dialog nil
       use-dialog-box nil
@@ -1234,6 +1236,9 @@ When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
 ;;(setq debug-on-quit t)
 
 (defvar pv/spinner nil)
+
+(declare-function spinner-start "spinner" (&optional spinner-type))
+(declare-function spinner-stop "spinner" (spinner))
 
 (defun pv/spinner-start ()
   (require 'spinner)

@@ -11,6 +11,10 @@
 
 (require 'cl-lib)
 
+(defgroup my/compile nil
+  "Compilation helpers for the local Emacs config."
+  :group 'convenience)
+
 ;;;; ---------------------------------------------------------------------------
 ;;;; 0) Directory helper (no hard-coded paths)
 ;;;; ---------------------------------------------------------------------------
@@ -31,20 +35,23 @@
 
 (defcustom my/native-comp-pop-log t
   "If non-nil, display native compilation log buffer when compilation starts."
-  :type 'boolean)
+  :type 'boolean
+  :group 'my/compile)
 
 (defcustom my/native-comp-async-report-policy 'silent
-  "Value assigned to `native-comp-async-report-warnings-errors`.
-- nil    : default behavior (Emacs decides)
-- 'silent: reduce intrusive popups, keep logs in the log buffer
-- t      : be more explicit about warnings/errors"
+  "Value assigned to `native-comp-async-report-warnings-errors'.
+- nil     : default behavior (Emacs decides)
+- `silent': reduce intrusive popups, keep logs in the log buffer
+- t       : be more explicit about warnings/errors"
   :type '(choice (const :tag "Default (nil)" nil)
                  (const :tag "Silent (recommended)" silent)
-                 (const :tag "Verbose (t)" t)))
+                 (const :tag "Verbose (t)" t))
+  :group 'my/compile)
 
 (defcustom my/native-comp-verbose 1
   "Value assigned to `native-comp-verbose`."
-  :type 'integer)
+  :type 'integer
+  :group 'my/compile)
 
 (defun my/native-comp--log-buffer ()
   "Return an existing native compilation log buffer if any."
@@ -70,7 +77,9 @@ With prefix arg FORCE, recompile all files; otherwise only outdated ones."
   (interactive "P")
   (require 'bytecomp)
   (let ((base (my/ensure-lisp-dir)))
-    (byte-recompile-directory base 2 force)
+    ;; ARG=0 compiles missing .elc files without prompting, which keeps this
+    ;; command usable in batch/noninteractive runs as well.
+    (byte-recompile-directory base 0 force)
     (message "Byte-recompile done: %s (force=%s)" base (and force t))))
 
 ;;;; ---------------------------------------------------------------------------
@@ -185,7 +194,8 @@ With prefix arg FORCE, safely delete old .eln files for this dir to force recomp
 
 (defcustom my/suppress-runtime-warnings nil
   "If non-nil, suppress runtime warnings below :error."
-  :type 'boolean)
+  :type 'boolean
+  :group 'my/compile)
 
 (when my/suppress-runtime-warnings
   (setq warning-minimum-level :error))

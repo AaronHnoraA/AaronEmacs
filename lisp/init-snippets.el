@@ -9,6 +9,11 @@
 
 ;;; Code:
 
+(declare-function yas-activate-extra-mode "yasnippet" (mode))
+(declare-function yas-reload-all "yasnippet" (&optional no-jit interactive))
+(declare-function yas-next-field "yasnippet" (&optional arg))
+(declare-function yas-prev-field "yasnippet" (&optional arg))
+
 (defun my/yas-setup-auctex-extra-modes ()
   "Make AUCTeX buffers reuse `latex-mode' and `tex-mode' snippets."
   (yas-activate-extra-mode 'latex-mode)

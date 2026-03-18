@@ -7,6 +7,17 @@
 
 (require 'json)
 
+(defvar gptel-backend)
+(defvar gptel-model)
+
+(declare-function gptel-make-openai "gptel")
+(declare-function gptel-make-preset "gptel")
+(declare-function copilot--request "copilot")
+(declare-function copilot-login "copilot")
+(declare-function copilot-logout "copilot")
+(declare-function copilot-accept-completion "copilot")
+(declare-function copilot-accept-completion-to-char "copilot")
+
 (defun my/gptel-load-config ()
   "Load GPT backend settings from `var/mygpt.json'."
   (let ((gpt-config-file (expand-file-name "var/mygpt.json" user-emacs-directory)))
@@ -34,7 +45,34 @@
             :model model
             :system "You are an expert coding assistant. Provide correct, minimal, and maintainable code. Explain key decisions briefly."
             :tools nil))
-      (display-warning 'init-gpt "GPT config file (var/mygpt.json) not found!" :warning))))
+      (unless noninteractive
+        (display-warning 'init-gpt "GPT config file (var/mygpt.json) not found!" :warning)))))
+
+(defun my/copilot-check-status ()
+  "Report current `copilot.el' authentication status.
+
+Compatibility wrapper for old `lsp-copilot-check-status' workflows."
+  (interactive)
+  (let* ((response (copilot--request 'checkStatus nil))
+         (status (plist-get response :status))
+         (user (plist-get response :user)))
+    (message "%s"
+             (cond
+              ((and (stringp user) (not (string-empty-p user)))
+               (format "Copilot is signed in as %s%s"
+                       user
+                       (if (and (stringp status) (not (string-empty-p status)))
+                           (format " [%s]" status)
+                         "")))
+              ((and (stringp status) (not (string-empty-p status)))
+               (format "Copilot status: %s" status))
+              (t
+               (format "Copilot status response: %S" response))))))
+
+(defun my/copilot-check-quota ()
+  "Report quota or entitlement information from the Copilot server."
+  (interactive)
+  (message "Copilot quota: %S" (copilot--request 'checkQuota nil)))
 
 (use-package gptel
   :ensure t
@@ -60,30 +98,6 @@
   (copilot-indent-offset-warning-disable t)
   (copilot-lsp-settings '(:github (:copilot ())))
   :config
-  (defun my/copilot-check-status ()
-    "Report current `copilot.el' authentication status.
-
-Compatibility wrapper for old `lsp-copilot-check-status' workflows."
-    (interactive)
-    (let* ((response (copilot--request 'checkStatus nil))
-           (status (plist-get response :status))
-           (user (plist-get response :user)))
-      (message "%s"
-               (cond
-                ((and (stringp user) (not (string-empty-p user)))
-                 (format "Copilot is signed in as %s%s"
-                         user
-                         (if (and (stringp status) (not (string-empty-p status)))
-                             (format " [%s]" status)
-                           "")))
-                ((and (stringp status) (not (string-empty-p status)))
-                 (format "Copilot status: %s" status))
-                (t
-                 (format "Copilot status response: %S" response))))))
-  (defun my/copilot-check-quota ()
-    "Report quota or entitlement information from the Copilot server."
-    (interactive)
-    (message "Copilot quota: %S" (copilot--request 'checkQuota nil)))
   (when (and (fboundp 'my/copilot--suppress-cancelled-errors)
              (advice-member-p #'my/copilot--suppress-cancelled-errors 'copilot--log))
     (advice-remove 'copilot--log #'my/copilot--suppress-cancelled-errors))
