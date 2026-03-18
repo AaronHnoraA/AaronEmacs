@@ -59,6 +59,15 @@
      :extension "mpl"))
   "Native Org source block languages routed through Jupyter.")
 
+(defconst my/org-babel-native-src-lang-modes
+  '(("C++" . c++)
+    ("cpp" . c++)
+    ("bash" . shell)
+    ("sh" . shell)
+    ("zsh" . shell)
+    ("rust" . rust))
+  "Extra `org-src-lang-modes' mappings for native Babel languages.")
+
 (cl-defstruct (my/org-babel-async-job
                (:constructor my/org-babel-async-job-create))
   id
@@ -484,6 +493,10 @@ INFO is the result of `org-babel-get-src-block-info'."
     (when extension
       (setf (alist-get lang org-babel-tangle-lang-exts nil nil #'equal) extension))))
 
+(use-package ob-rust
+  :ensure t
+  :defer t)
+
 (defun my/org-babel-jupyter--defaults-symbol (lang)
   "Return the default-header-args symbol for Jupyter LANG."
   (intern (format "org-babel-default-header-args:jupyter-%s" lang)))
@@ -551,15 +564,22 @@ INFO is the result of `org-babel-get-src-block-info'."
   (org-src-tab-acts-natively t)
   (org-src-window-setup 'other-window)
   :config
+  (dolist (pair my/org-babel-native-src-lang-modes)
+    (setf (alist-get (car pair) org-src-lang-modes nil nil #'equal)
+          (cdr pair)))
   (setq org-babel-load-languages
         (cl-remove-duplicates
          (append
           '((dot . t)
-            (emacs-lisp . t))
+            (emacs-lisp . t)
+            (C . t)
+            (shell . t)
+            (rust . t))
           (cl-remove-if
            (lambda (pair)
              (memq (car pair)
-                   '(C bash python rust sage sagemath shell sh maple)))
+                   '(C C++ cpp shell bash sh zsh rust
+                     python sage sagemath maple)))
            org-babel-load-languages))
          :key #'car))
   (org-babel-do-load-languages
