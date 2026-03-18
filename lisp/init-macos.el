@@ -47,7 +47,7 @@
 
 
 ;; 窗口系统启动后，自动执行一次全屏切换（效果等同于按 F11）
-;(add-hook 'window-setup-hook #'toggle-frame-fullscreen)
+(add-hook 'window-setup-hook #'toggle-frame-fullscreen)
 
 
 (provide 'init-macos)
