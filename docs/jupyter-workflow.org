@@ -46,12 +46,20 @@ The main keybindings live in =lisp/init-jupyter.el=.
   if none is remembered, prompt for a =.json= connection file
 - =C-u C-c j r=: start a new kernel through =jupyter-run-repl=
 - =C-c j c=: explicitly choose a =.json= connection file and connect a REPL
+- =C-c j ?=: open the full Jupyter dispatch menu
+- =C-c j h=: open the Jupyter Hub management dashboard
+- =C-c j C=: forget the remembered connection file for a language
 - =C-c j k=: remember a connection file as the default existing kernel for a
   language
 - =C-c j o=: update the current Org source block to use a chosen connection
   file and add =:async yes=
 - =C-c j i=: inspect at point
 - =C-c j e=: evaluate line or region through the connected REPL client
+- =C-c j K=: choose the default kernelspec for a plain managed language such as
+  =python= or =sage=
+- =C-c j x=: refresh Jupyter kernelspec discovery and reconfigure Org/Jupyter
+- =C-c j P=: install the current Python environment as a user kernelspec via
+  =python -m ipykernel install --user=
 - =C-c j y=: toggle =jupytext-mode=
 - =C-c j s=: run =jupytext --sync= now
 - =C-c j p=: register the current script buffer with its paired notebook
@@ -63,6 +71,68 @@ Org-specific async helpers live in =lisp/init-org-babel.el=.
 
 Jupyter-backed Org blocks use =ob-jupyter='s own async path and should normally
 use =:async yes= directly.
+
+* Jupyter Hub
+
+The config includes a lightweight management dashboard for the whole Jupyter
+stack:
+
+- =C-c j h=
+
+This opens =*Jupyter Hub*=, which shows:
+
+- the current Org Babel language surface
+- plain Org languages routed through Jupyter
+- each language's effective default kernelspec
+- remembered existing-kernel connection files
+- all discovered kernelspecs with their language and display name
+
+The Org Babel section makes the execution surface explicit:
+
+- native loaded Babel languages such as =C=, =shell=, and =rust=
+- plain languages such as =python= or =sage= that are routed through Jupyter
+- generated =jupyter-*= aliases exposed by =ob-jupyter=
+
+Inside the dashboard:
+
+- =g=: redraw the dashboard
+- =x=: refresh kernelspec discovery and redraw
+- =K=: set the default kernelspec for the entry at point
+- =d=: clear the default kernelspec override for the language at point
+- =c=: remember a connection file for the language at point
+- =C=: forget the remembered connection file for the language at point
+- =r=: open a REPL for the language or kernelspec at point
+- =P=: install the current Python environment as a kernelspec
+- =D=: open the Jupyter doctor report
+- =S=: prune remembered connection files that no longer exist
+- =v=: open the local Jupyter runtime directory
+- =l=: show the main =emacs-jupyter= log buffer
+- =L=: show the kernelspec install log buffer
+- =t=: show the Jupytext log buffer
+- =?=: open the Jupyter dispatch menu
+- =o=: open this workflow document
+- =RET=: context action
+
+The dashboard is intentionally simple: it is a display-and-manage tool, not a
+replacement for raw =ob-jupyter= or direct connection-file workflows.
+
+* Maintenance Surface
+
+The config now includes a small maintenance layer in =lisp/init-jupyter-tools.el=
+instead of continuing to grow =lisp/init-jupyter.el=.
+
+Two entry points matter:
+
+- =C-c j ?=: transient dispatch for the whole Jupyter surface
+- =C-c j h=: persistent dashboard with inline actions
+
+The maintenance commands cover:
+
+- a =Jupyter Doctor= report for executables, runtime state, remembered
+  connections, and current buffer Jupytext state
+- pruning stale remembered connection files
+- opening the local runtime directory directly
+- jumping to the Jupyter, kernelspec-install, and Jupytext log buffers
 
 * Org Babel Model
 
@@ -84,6 +154,8 @@ Defaults for these languages are set so that:
 - =:async yes= is the default
 - if a remembered existing-kernel =.json= file exists for the language, that
   file becomes the default session
+- if a user-selected default kernelspec exists for the language, it is preferred
+  over the static built-in fallback kernelspec list
 - otherwise the fallback symbolic Jupyter session name is used
 
 ** Plain block examples
@@ -132,6 +204,61 @@ print(2 + 3)
 
 This does *not* attach to an already running kernel.  For an existing WSL2 Sage
 kernel, prefer a =.json= connection file instead.
+
+* Environment-As-Kernel Workflow
+
+This config now treats "Python environment" and "Jupyter kernelspec" as
+separate but complementary layers.
+
+- =direnv= controls which Python tooling Emacs sees in the current project
+- Jupyter kernelspecs control which kernel =ob-jupyter= or =jupyter-run-repl=
+  launches
+
+This separation is intentional.  It means you do not need =conda.el= to make
+project-local Python or notebook kernels work well in Emacs.
+
+** Register the current environment as a kernel
+
+If the current project environment already has =ipykernel= installed, use:
+
+- =C-c j P=
+
+This runs the equivalent of:
+
+#+begin_src shell
+python -m ipykernel install --user --name <kernel-name> --display-name <display-name>
+#+end_src
+
+from the current Emacs environment, which can be provided by =direnv=, =conda=,
+=venv=, or another Python selector.
+
+After that, use:
+
+- =C-c j x=
+
+to refresh kernelspec discovery inside Emacs.
+
+** Make one kernelspec the default for a plain language
+
+If you have multiple Python kernels, plain =#+begin_src python= blocks still
+need a default kernelspec choice.  Use:
+
+- =C-c j K=
+
+Pick:
+
+- a managed plain language such as =python= or =sage=
+- a kernelspec name such as =python3=, =g6k=, or =my-project=
+
+After that, plain blocks for that language prefer that kernelspec whenever they
+are not pinned to an existing kernel connection file.
+
+** What this buys you
+
+- project-local editing can still be controlled by =direnv=
+- one environment can be exposed as a reusable kernelspec
+- =jupyter-run-repl= sees the environment by kernelspec name
+- plain Org blocks can stay plain while still launching the right kernel
 
 * Existing-Kernel Workflow
 
@@ -275,6 +402,7 @@ Adding a new Jupyter-backed language is intentionally explicit.
 Typical steps:
 
 1. Ensure a working Jupyter kernelspec exists.
+   For Python environments, =C-c j P= is the fastest path.
 2. Add the language to =my/org-babel-jupyter-native-backends= in
    =lisp/init-org-babel.el=.
 3. Add the language name to =my/jupyter-known-languages= in

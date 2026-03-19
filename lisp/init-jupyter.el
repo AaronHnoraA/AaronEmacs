@@ -15,6 +15,7 @@
 
 (require 'cl-lib)
 (require 'eieio-core)
+(require 'init-funcs)
 (require 'subr-x)
 
 (defgroup my/jupyter nil
@@ -28,21 +29,66 @@
   :type '(repeat string)
   :group 'my/jupyter)
 
+(defcustom my/jupyter-language-default-kernels nil
+  "User-selected default kernelspec names for managed languages.
+
+Each entry is of the form (LANGUAGE . KERNEL), where LANGUAGE is a
+plain Org/Jupyter language such as \"python\" or \"sage\" and KERNEL is
+the preferred kernelspec name to launch for that language when no
+existing-kernel connection file is in use."
+  :type '(alist :key-type string :value-type string)
+  :group 'my/jupyter)
+
+(defcustom my/jupyter-kernelspec-log-buffer-name "*jupyter-kernelspec*"
+  "Buffer used to capture kernelspec installation output."
+  :type 'string
+  :group 'my/jupyter)
+
+(defconst my/jupyter-manager-buffer-name "*Jupyter Hub*"
+  "Buffer name used by the Jupyter management dashboard.")
+
 (defvar my/jupyter-connection-file-history nil
   "History of Jupyter kernel connection files.")
 
 (defvar my/jupyter-language-connection-files nil
   "Alist mapping language names to active Jupyter connection files.")
 
+(defvar org-babel-jupyter-language-aliases nil
+  "Current `ob-jupyter' source block aliases.")
+
+(defvar org-babel-load-languages nil
+  "Enabled Org Babel languages.")
+
+(defvar org-src-lang-modes nil
+  "Org source language to major-mode mappings.")
+
+(defvar my/jupyter-manager-setup-functions nil
+  "Functions run after the Jupyter Hub keymap is initialized.
+
+Each function is called with no arguments in the Jupyter Hub buffer.")
+
+(defvar my/jupyter-manager-extra-section-functions nil
+  "Functions used to append extra sections to the Jupyter Hub buffer.
+
+Each function is called with no arguments after the built-in header is
+inserted and should insert any desired text into the current buffer.")
+
 (declare-function jupyter-connect-repl "jupyter-repl"
                   (file &optional repl-name associate-buffer client-class display))
+(declare-function jupyter-kernelspec-name "jupyter-kernelspec" (spec))
+(declare-function jupyter-kernelspec-plist "jupyter-kernelspec" (spec))
+(declare-function jupyter-kernelspecs "jupyter-kernelspec" (&optional directory refresh))
+(declare-function jupyter-refresh-kernelspecs "jupyter-kernelspec")
 (declare-function jupyter-run-repl "jupyter-repl"
                   (kernel-name &optional repl-name associate-buffer client-class display))
 (declare-function jupyter-runtime-directory "jupyter-env")
+(declare-function my/org-babel-configure-jupyter-backends "init-org-babel")
 (declare-function my/org-babel-jupyter-set-language-session "init-org-babel"
                   (lang session &optional async))
+(declare-function my/evil-global-leader-set "init-funcs" (key def &optional label))
 (declare-function org-babel-get-src-block-info "ob-core" (&optional light))
 (declare-function org-babel-where-is-src-block-head "ob-core")
+(declare-function org-src-get-lang-mode "org-src" (lang))
 (declare-function org-in-src-block-p "org-src" (&optional inside))
 
 (defun my/jupyter--ensure-kernel-client (object)
@@ -114,6 +160,594 @@
         file
       fallback)))
 
+(defun my/jupyter--available-kernels (&optional refresh)
+  "Return an alist mapping normalized languages to available kernel names.
+
+When REFRESH is non-nil, refresh the cached kernelspec list first."
+  (require 'jupyter-kernelspec)
+  (let ((default-directory user-emacs-directory)
+        available)
+    (dolist (spec (or (with-demoted-errors "Error retrieving kernelspecs: %S"
+                        (jupyter-kernelspecs user-emacs-directory refresh))
+                      nil))
+      (let* ((kernel (jupyter-kernelspec-name spec))
+             (language (my/jupyter--normalize-language
+                        (plist-get (jupyter-kernelspec-plist spec) :language)))
+             (slot (assoc language available)))
+        (when (and (stringp kernel) (stringp language))
+          (if slot
+              (cl-pushnew kernel (cdr slot) :test #'equal)
+            (push (cons language (list kernel)) available)))))
+    (nreverse available)))
+
+(defun my/jupyter--available-kernel-names (&optional language refresh)
+  "Return available kernelspec names.
+
+When LANGUAGE is non-nil, restrict the result to kernels for that
+normalized Jupyter language.  When REFRESH is non-nil, refresh the
+kernelspec cache first."
+  (let* ((language (and language (my/jupyter--normalize-language language)))
+         (available (my/jupyter--available-kernels refresh)))
+    (if language
+        (copy-sequence (cdr (assoc language available)))
+      (sort (delete-dups (apply #'append (mapcar #'cdr available))) #'string<))))
+
+(defun my/jupyter-preferred-kernels-for-language (language fallback)
+  "Return preferred kernels for LANGUAGE, prepending user overrides to FALLBACK."
+  (let* ((language (my/jupyter--normalize-language language))
+         (override (alist-get language my/jupyter-language-default-kernels nil nil #'equal))
+         (kernels (append (and override (list override))
+                          (copy-sequence fallback))))
+    (delete-dups (delq nil kernels))))
+
+(defun my/jupyter-read-kernel (&optional prompt language include-auto)
+  "Prompt for a kernelspec name and return it.
+
+When LANGUAGE is non-nil, only offer kernels whose kernelspec language
+matches LANGUAGE.  When INCLUDE-AUTO is non-nil, include an \"<auto>\"
+choice and return nil when that entry is selected."
+  (let* ((language (and language (my/jupyter--normalize-language language)))
+         (kernels (my/jupyter--available-kernel-names language))
+         (choices (if include-auto
+                      (cons "<auto>" kernels)
+                    kernels))
+         (default (or (alist-get language my/jupyter-language-default-kernels nil nil #'equal)
+                      (when include-auto "<auto>")
+                      (car kernels))))
+    (unless choices
+      (user-error "No Jupyter kernelspecs are currently available"))
+    (let* ((input (completing-read
+                   (if default
+                       (format "%s (default %s): "
+                               (or prompt "Kernel")
+                               default)
+                     (format "%s: " (or prompt "Kernel")))
+                   choices nil t nil nil default))
+           (kernel (if (string-empty-p input) default input)))
+      (unless (or (null kernel) (string= kernel "<auto>"))
+        kernel))))
+
+(defun my/jupyter-refresh-kernelspecs-and-reconfigure (&optional quiet)
+  "Refresh kernelspecs and reconfigure Org/Jupyter glue.
+
+When QUIET is non-nil, suppress the final confirmation message."
+  (interactive)
+  (require 'jupyter-kernelspec)
+  (jupyter-refresh-kernelspecs)
+  (when (featurep 'init-org-babel)
+    (my/org-babel-configure-jupyter-backends))
+  (unless quiet
+    (message "Refreshed Jupyter kernelspecs and reconfigured Org backends")))
+
+(defun my/jupyter-set-default-kernel-for-language (language kernel)
+  "Set LANGUAGE's default kernelspec to KERNEL.
+
+When KERNEL is nil, clear the override and fall back to automatic
+kernel selection."
+  (interactive
+   (let* ((language (my/jupyter-read-language "Plain language"))
+          (kernel (my/jupyter-read-kernel
+                   (format "Default kernelspec for %s" language)
+                   language
+                   t)))
+     (list language kernel)))
+  (setq language (my/jupyter--normalize-language language))
+  (setf (alist-get language my/jupyter-language-default-kernels nil 'remove #'equal)
+        kernel)
+  (when (called-interactively-p 'interactive)
+    (customize-save-variable 'my/jupyter-language-default-kernels
+                             my/jupyter-language-default-kernels))
+  (my/jupyter-refresh-kernelspecs-and-reconfigure t)
+  (if kernel
+      (message "Jupyter %s now defaults to kernelspec %s" language kernel)
+    (message "Jupyter %s now uses automatic kernel selection" language)))
+
+(defun my/jupyter--default-python-kernel-name ()
+  "Return a default kernelspec name for the current Python environment."
+  (let ((conda (getenv "CONDA_DEFAULT_ENV"))
+        (venv (getenv "VIRTUAL_ENV")))
+    (cond
+     ((and conda (not (string-empty-p conda))) conda)
+     ((and venv (not (string-empty-p venv)))
+      (file-name-nondirectory (directory-file-name venv)))
+     ((and default-directory
+           (not (string-empty-p (directory-file-name default-directory))))
+     (file-name-nondirectory (directory-file-name default-directory)))
+     (t
+      "python3"))))
+
+(defun my/jupyter--org-backends ()
+  "Return the current plain Org languages routed through Jupyter."
+  (when (require 'init-org-babel nil t)
+    (and (boundp 'my/org-babel-jupyter-native-backends)
+         my/org-babel-jupyter-native-backends)))
+
+(defun my/jupyter--org-backend-entry (language)
+  "Return the Org/Jupyter backend entry for LANGUAGE, if any."
+  (let ((language (my/jupyter--normalize-language language)))
+    (cl-find-if (lambda (entry)
+                  (string= language (car entry)))
+                (my/jupyter--org-backends))))
+
+(defun my/jupyter--static-preferred-kernels-for-language (language)
+  "Return static preferred kernels configured for LANGUAGE."
+  (copy-sequence
+   (plist-get (cdr (my/jupyter--org-backend-entry language))
+              :preferred-kernels)))
+
+(defun my/jupyter--managed-languages ()
+  "Return all known managed languages in display order."
+  (delete-dups
+   (append
+    (mapcar #'car (my/jupyter--org-backends))
+    (mapcar #'my/jupyter--normalize-language my/jupyter-known-languages)
+    (mapcar #'car my/jupyter-language-connection-files)
+    (mapcar #'car my/jupyter-language-default-kernels))))
+
+(defun my/jupyter--loaded-org-babel-languages ()
+  "Return enabled native Org Babel languages."
+  (when (require 'init-org-babel nil t)
+    (sort
+     (mapcar (lambda (pair) (format "%s" (car pair)))
+             (cl-remove-if-not #'cdr org-babel-load-languages))
+     #'string<)))
+
+(defun my/jupyter--org-src-mode-for-language (language)
+  "Return the Org source edit mode used for LANGUAGE."
+  (when (require 'init-org-babel nil t)
+    (let ((mode (or (and (fboundp 'org-src-get-lang-mode)
+                         (org-src-get-lang-mode language))
+                    (cdr (assoc language org-src-lang-modes))
+                    (cdr (assoc (downcase language) org-src-lang-modes))
+                    (cdr (assoc (capitalize language) org-src-lang-modes)))))
+      (if mode
+          (format "%s" mode)
+        "-"))))
+
+(defun my/jupyter--org-babel-alias-entries ()
+  "Return active `jupyter-*' Org source block aliases."
+  (when (require 'init-org-babel nil t)
+    (sort
+     (cl-delete-duplicates
+      (cl-loop for pair in org-babel-jupyter-language-aliases
+               for kernel-language = (format "%s" (car pair))
+               for alias = (format "%s" (cadr pair))
+               collect `(:src-language ,(format "jupyter-%s" alias)
+                                       :alias ,alias
+                                       :kernel-language ,kernel-language))
+      :test (lambda (left right)
+              (string=
+               (plist-get left :src-language)
+               (plist-get right :src-language))))
+     (lambda (left right)
+       (string< (plist-get left :src-language)
+                (plist-get right :src-language))))))
+
+(defun my/jupyter--first-available-kernel-for-language (language)
+  "Return the best available kernelspec name for LANGUAGE."
+  (let* ((language (my/jupyter--normalize-language language))
+         (available (my/jupyter--available-kernel-names language))
+         (preferred (my/jupyter-preferred-kernels-for-language
+                     language
+                     (my/jupyter--static-preferred-kernels-for-language language))))
+    (or (cl-find-if (lambda (kernel) (member kernel available)) preferred)
+        (car available))))
+
+(defun my/jupyter-run-repl-for-language (language)
+  "Open a Jupyter REPL for LANGUAGE.
+
+If LANGUAGE has a remembered existing-kernel connection file, prefer
+connecting to that running kernel.  Otherwise launch the best matching
+kernelspec for the language."
+  (interactive (list (my/jupyter-read-language "Run REPL for language")))
+  (setq language (my/jupyter--normalize-language language))
+  (let ((connection-file (my/jupyter-language-connection-file language)))
+    (if (and (stringp connection-file) (file-exists-p connection-file))
+        (my/jupyter-connect-existing-repl connection-file nil language)
+      (let ((kernel (my/jupyter--first-available-kernel-for-language language)))
+        (unless kernel
+          (user-error "No kernelspec is available for language %s" language))
+        (jupyter-run-repl kernel nil t nil t)))))
+
+(defvar-local my/jupyter-manager-source-buffer nil
+  "Buffer from which the current Jupyter manager view was opened.")
+
+(define-derived-mode my/jupyter-manager-mode special-mode "Jupyter-Hub"
+  "Major mode for the Jupyter kernels and Org language management dashboard.")
+
+(defun my/jupyter-manager--current-entry ()
+  "Return the Jupyter manager entry at point, if any."
+  (or (get-text-property (point) 'my/jupyter-entry)
+      (get-text-property (line-beginning-position) 'my/jupyter-entry)))
+
+(defun my/jupyter-manager--entry-language (&optional entry)
+  "Return the managed language associated with ENTRY or point."
+  (let* ((entry (or entry (my/jupyter-manager--current-entry)))
+         (kind (plist-get entry :kind)))
+    (pcase kind
+      ('language (plist-get entry :language))
+      ('kernel
+       (let* ((kernel-language (plist-get entry :language))
+              (candidates
+               (cl-remove-if-not
+                (lambda (language)
+                  (string= kernel-language
+                           (or (plist-get (cdr (my/jupyter--org-backend-entry language))
+                                          :kernel-language)
+                               language)))
+                (my/jupyter--managed-languages))))
+         (cond
+          ((null candidates) nil)
+          ((= (length candidates) 1) (car candidates))
+          (t
+           (my/jupyter-read-language
+            (format "Language for kernel %s" (plist-get entry :kernel)))))))
+      (_ nil))))
+
+(defun my/jupyter-manager--entry-kernel (&optional entry)
+  "Return the kernelspec associated with ENTRY or point."
+  (let* ((entry (or entry (my/jupyter-manager--current-entry)))
+         (kind (plist-get entry :kind)))
+    (pcase kind
+      ('kernel (plist-get entry :kernel))
+      ('language (my/jupyter--first-available-kernel-for-language
+                  (plist-get entry :language)))
+      (_ nil))))
+
+(defun my/jupyter-manager--set-entry-properties (start end entry)
+  "Mark the region between START and END with manager ENTRY."
+  (add-text-properties start end
+                       `(my/jupyter-entry ,entry
+                                          mouse-face highlight
+                                          help-echo "RET: context action")))
+
+(defun my/jupyter-manager--insert-button (label action help)
+  "Insert a text button with LABEL, ACTION, and HELP."
+  (insert-text-button
+   label
+   'action action
+   'follow-link t
+   'help-echo help))
+
+(defun my/jupyter-manager--insert-language-section ()
+  "Insert the managed plain-language section."
+  (insert "Managed Plain Languages\n")
+  (insert "-----------------------\n")
+  (if-let* ((languages (my/jupyter--managed-languages)))
+      (dolist (language languages)
+        (let* ((entry (my/jupyter--org-backend-entry language))
+               (plist (cdr entry))
+               (kernel-language (or (plist-get plist :kernel-language) language))
+               (mode (plist-get plist :mode))
+               (extension (plist-get plist :extension))
+               (override (alist-get language my/jupyter-language-default-kernels nil nil #'equal))
+               (available (my/jupyter--available-kernel-names kernel-language))
+               (effective (my/jupyter--first-available-kernel-for-language language))
+               (connection (my/jupyter-language-connection-file language))
+               (fallback-session (or (plist-get plist :session) language))
+               (effective-session (my/jupyter-default-session-for-language
+                                   language
+                                   fallback-session))
+               (row `(:kind language :language ,language))
+               (start (point)))
+          (insert (format "%-12s kernel-lang=%-8s mode=%-10s ext=%s\n"
+                          language
+                          kernel-language
+                          (or mode "-")
+                          (or extension "-")))
+          (insert (format "  default kernel: %s%s\n"
+                          (or effective "-")
+                          (if override
+                              (format " (override: %s)" override)
+                            "")))
+          (insert (format "  available: %s\n"
+                          (if available
+                              (string-join available ", ")
+                            "-")))
+          (insert (format "  session: %s\n"
+                          (if (stringp effective-session)
+                              (abbreviate-file-name effective-session)
+                            effective-session)))
+          (insert (format "  connection: %s\n"
+                          (if connection
+                              (abbreviate-file-name connection)
+                            "-")))
+          (insert "  actions: ")
+          (my/jupyter-manager--insert-button
+           "[kernel]"
+           (lambda (_button)
+             (my/jupyter-set-default-kernel-for-language language
+                                                         (my/jupyter-read-kernel
+                                                          (format "Default kernelspec for %s" language)
+                                                          language
+                                                          t))
+             (my/jupyter-manager-refresh))
+           "Set or clear the default kernelspec for this language")
+          (insert " ")
+          (my/jupyter-manager--insert-button
+           "[connection]"
+           (lambda (_button)
+             (call-interactively
+              (lambda (file)
+                (interactive
+                 (list (my/jupyter-read-connection-file
+                        (format "%s connection file: " language)
+                        language)))
+                (my/jupyter-register-language-connection-file language file)))
+             (my/jupyter-manager-refresh))
+           "Remember an existing-kernel connection file for this language")
+          (when connection
+            (insert " ")
+            (my/jupyter-manager--insert-button
+             "[clear]"
+             (lambda (_button)
+               (my/jupyter-clear-language-connection-file language)
+               (my/jupyter-manager-refresh))
+             "Forget the remembered connection file for this language"))
+          (insert " ")
+          (my/jupyter-manager--insert-button
+           "[repl]"
+           (lambda (_button)
+             (my/jupyter-run-repl-for-language language))
+           "Open a REPL for this language")
+          (insert "\n\n")
+          (my/jupyter-manager--set-entry-properties start (point) row)))
+    (insert "No managed Jupyter languages are configured.\n\n")))
+
+(defun my/jupyter-manager--insert-org-babel-section ()
+  "Insert a summary of the current Org Babel language surface."
+  (insert "Org Babel Surface\n")
+  (insert "-----------------\n")
+  (let ((native-languages (my/jupyter--loaded-org-babel-languages))
+        (plain-languages (my/jupyter--managed-languages))
+        (alias-entries (my/jupyter--org-babel-alias-entries)))
+    (insert "Native loaded languages\n")
+    (if native-languages
+        (dolist (language native-languages)
+          (insert (format "  %-18s kind=native mode=%s\n"
+                          language
+                          (my/jupyter--org-src-mode-for-language language))))
+      (insert "  -\n"))
+    (insert "\n")
+    (insert "Plain Jupyter-backed languages\n")
+    (if plain-languages
+        (dolist (language plain-languages)
+          (let* ((entry (cdr (my/jupyter--org-backend-entry language)))
+                 (kernel-language (or (plist-get entry :kernel-language) language)))
+            (insert (format "  %-18s kind=plain-jupyter kernel-lang=%s mode=%s\n"
+                            language
+                            kernel-language
+                            (my/jupyter--org-src-mode-for-language language)))))
+      (insert "  -\n"))
+    (insert "\n")
+    (insert "Jupyter alias source block names\n")
+    (if alias-entries
+        (dolist (entry alias-entries)
+          (insert (format "  %-18s kind=jupyter-alias kernel-lang=%s\n"
+                          (plist-get entry :src-language)
+                          (plist-get entry :kernel-language))))
+      (insert "  -\n"))
+    (insert "\n")))
+
+(defun my/jupyter-manager--kernel-used-by (kernel language)
+  "Return plain managed languages using KERNEL for normalized LANGUAGE."
+  (cl-remove-if-not
+   (lambda (managed-language)
+     (and (string= language
+                   (or (plist-get (cdr (my/jupyter--org-backend-entry managed-language))
+                                  :kernel-language)
+                       managed-language))
+          (string= kernel
+                   (or (alist-get managed-language my/jupyter-language-default-kernels nil nil #'equal)
+                       ""))))
+   (my/jupyter--managed-languages)))
+
+(defun my/jupyter-manager--insert-kernelspec-section ()
+  "Insert the discovered kernelspec section."
+  (insert "Available Kernelspecs\n")
+  (insert "--------------------\n")
+  (require 'jupyter-kernelspec)
+  (let ((default-directory user-emacs-directory)
+        (specs (or (with-demoted-errors "Error retrieving kernelspecs: %S"
+                     (jupyter-kernelspecs user-emacs-directory))
+                   nil)))
+    (if specs
+        (dolist (spec specs)
+          (let* ((kernel (jupyter-kernelspec-name spec))
+                 (plist (jupyter-kernelspec-plist spec))
+                 (language (my/jupyter--normalize-language
+                            (plist-get plist :language)))
+                 (display-name (or (plist-get plist :display_name) kernel))
+                 (used-by (my/jupyter-manager--kernel-used-by kernel language))
+                 (row `(:kind kernel :kernel ,kernel :language ,language))
+                 (start (point)))
+            (insert (format "%-28s [%s]\n" kernel language))
+            (insert (format "  display: %s\n" display-name))
+            (insert (format "  used by override: %s\n"
+                            (if used-by
+                                (string-join used-by ", ")
+                              "-")))
+            (insert "  actions: ")
+            (my/jupyter-manager--insert-button
+             "[repl]"
+             (lambda (_button)
+               (jupyter-run-repl kernel nil t nil t))
+             "Start a REPL using this kernelspec")
+            (insert " ")
+            (my/jupyter-manager--insert-button
+             "[set default]"
+             (lambda (_button)
+               (let ((target-language
+                      (or (my/jupyter-manager--entry-language row)
+                          (my/jupyter-read-language "Plain language"))))
+                 (my/jupyter-set-default-kernel-for-language target-language kernel)
+                 (my/jupyter-manager-refresh)))
+             "Assign this kernelspec to a plain managed language")
+            (insert "\n\n")
+            (my/jupyter-manager--set-entry-properties start (point) row)))
+      (insert "No kernelspecs available.\n\n"))))
+
+(defun my/jupyter-manager-refresh ()
+  "Refresh the Jupyter manager dashboard."
+  (interactive)
+  (let ((inhibit-read-only t))
+    (erase-buffer)
+    (insert "Jupyter Hub\n")
+    (insert "===========\n\n")
+    (insert "Keys: g refresh, x refresh kernelspecs, RET context action, K set default kernel, d clear override, c set connection, C clear connection, r open REPL, P install current Python env, D doctor, S prune stale, v runtime, l jupyter log, t jupytext log, ? dispatch, o docs, q quit\n\n")
+    (run-hooks 'my/jupyter-manager-extra-section-functions)
+    (my/jupyter-manager--insert-org-babel-section)
+    (my/jupyter-manager--insert-language-section)
+    (my/jupyter-manager--insert-kernelspec-section)
+    (goto-char (point-min))))
+
+(defun my/jupyter-manager-refresh-kernels ()
+  "Refresh kernelspec discovery, then redraw the manager."
+  (interactive)
+  (my/jupyter-refresh-kernelspecs-and-reconfigure t)
+  (my/jupyter-manager-refresh)
+  (message "Jupyter Hub refreshed kernelspec discovery"))
+
+(defun my/jupyter-manager-set-default-kernel ()
+  "Set the default kernelspec using the manager entry at point."
+  (interactive)
+  (let* ((entry (my/jupyter-manager--current-entry))
+         (language (or (my/jupyter-manager--entry-language entry)
+                       (my/jupyter-read-language "Plain language")))
+         (kernel (pcase (plist-get entry :kind)
+                   ('kernel (plist-get entry :kernel))
+                   (_ (my/jupyter-read-kernel
+                       (format "Default kernelspec for %s" language)
+                       language
+                       t)))))
+    (my/jupyter-set-default-kernel-for-language language kernel)
+    (my/jupyter-manager-refresh)))
+
+(defun my/jupyter-manager-clear-default-kernel ()
+  "Clear the default kernelspec override for the entry at point."
+  (interactive)
+  (let ((language (or (my/jupyter-manager--entry-language)
+                      (my/jupyter-read-language "Plain language"))))
+    (my/jupyter-set-default-kernel-for-language language nil)
+    (my/jupyter-manager-refresh)))
+
+(defun my/jupyter-manager-register-connection ()
+  "Remember a connection file for the language at point."
+  (interactive)
+  (let* ((language (or (my/jupyter-manager--entry-language)
+                       (my/jupyter-read-language "Plain language")))
+         (file (my/jupyter-read-connection-file
+                (format "%s connection file: " language)
+                language)))
+    (my/jupyter-register-language-connection-file language file)
+    (my/jupyter-manager-refresh)))
+
+(defun my/jupyter-manager-run-repl ()
+  "Run a REPL using the manager entry at point."
+  (interactive)
+  (let ((entry (my/jupyter-manager--current-entry)))
+    (pcase (plist-get entry :kind)
+      ('kernel
+       (jupyter-run-repl (plist-get entry :kernel) nil t nil t))
+      (_
+       (my/jupyter-run-repl-for-language
+        (or (my/jupyter-manager--entry-language entry)
+            (my/jupyter-read-language "Run REPL for language")))))))
+
+(defun my/jupyter-manager-context-action ()
+  "Run the context action for the manager entry at point."
+  (interactive)
+  (pcase (plist-get (my/jupyter-manager--current-entry) :kind)
+    ('kernel (my/jupyter-manager-run-repl))
+    (_ (my/jupyter-manager-set-default-kernel))))
+
+(defun my/jupyter-manager-open-docs ()
+  "Open the Jupyter workflow documentation."
+  (interactive)
+  (find-file (expand-file-name "docs/jupyter-workflow.org" user-emacs-directory)))
+
+(defun my/jupyter-manager ()
+  "Open the Jupyter kernels and Org language management dashboard."
+  (interactive)
+  (let ((buffer (get-buffer-create my/jupyter-manager-buffer-name))
+        (source (current-buffer)))
+    (with-current-buffer buffer
+      (my/jupyter-manager-mode)
+      (setq-local my/jupyter-manager-source-buffer source)
+      (let ((map (copy-keymap special-mode-map)))
+        (use-local-map map)
+        (local-set-key (kbd "g") #'my/jupyter-manager-refresh)
+        (local-set-key (kbd "x") #'my/jupyter-manager-refresh-kernels)
+        (local-set-key (kbd "K") #'my/jupyter-manager-set-default-kernel)
+        (local-set-key (kbd "d") #'my/jupyter-manager-clear-default-kernel)
+        (local-set-key (kbd "c") #'my/jupyter-manager-register-connection)
+        (local-set-key (kbd "r") #'my/jupyter-manager-run-repl)
+        (local-set-key (kbd "P") #'my/jupyter-install-current-python-kernel)
+        (local-set-key (kbd "o") #'my/jupyter-manager-open-docs)
+        (local-set-key (kbd "RET") #'my/jupyter-manager-context-action)
+        (run-hooks 'my/jupyter-manager-setup-functions))
+      (my/jupyter-manager-refresh))
+    (pop-to-buffer buffer)))
+
+(defun my/jupyter-install-current-python-kernel (name display-name)
+  "Install the current Python environment as a user Jupyter kernelspec.
+
+This command uses the current Emacs process environment.  In practice
+that means `direnv', `conda', `venv', or other project-level Python
+selection should already be active before invoking it."
+  (interactive
+   (let* ((name (read-string "Kernel name: "
+                             (my/jupyter--default-python-kernel-name)))
+          (display-name (read-string "Display name: "
+                                     (format "Python (%s)" name))))
+     (list name display-name)))
+  (let* ((python (or (executable-find "python3")
+                     (executable-find "python")))
+         (log-buffer (get-buffer-create my/jupyter-kernelspec-log-buffer-name)))
+    (unless python
+      (user-error "Cannot find python3 or python in PATH"))
+    (with-current-buffer log-buffer
+      (erase-buffer))
+    (let ((status (process-file python nil log-buffer nil
+                                "-m" "ipykernel" "install"
+                                "--user"
+                                "--name" name
+                                "--display-name" display-name)))
+      (with-current-buffer log-buffer
+        (let ((output (string-trim (buffer-string))))
+          (if (zerop status)
+              (progn
+                (my/jupyter-refresh-kernelspecs-and-reconfigure t)
+                (message "Installed kernelspec %s via %s"
+                         name
+                         (abbreviate-file-name python)))
+            (display-buffer log-buffer)
+            (error "ipykernel install exited with status %d%s"
+                   status
+                   (if (string-empty-p output)
+                       ""
+                     (format ": %s" output)))))))))
+
 (defun my/jupyter--runtime-directory ()
   "Return the local Jupyter runtime directory."
   (require 'jupyter-env)
@@ -178,6 +812,20 @@ When QUIET is non-nil, skip the confirmation message."
     (message "Jupyter %s now uses %s"
              language
              (abbreviate-file-name file))))
+
+(defun my/jupyter-clear-language-connection-file (language &optional quiet)
+  "Forget any remembered connection file for LANGUAGE.
+
+When QUIET is non-nil, skip the confirmation message."
+  (interactive (list (my/jupyter-read-language "Clear connection for language")))
+  (setq language (my/jupyter--normalize-language language))
+  (dolist (alias (my/jupyter--language-family language))
+    (setf (alist-get alias my/jupyter-language-connection-files nil 'remove #'equal)
+          nil))
+  (my/jupyter-refresh-kernelspecs-and-reconfigure t)
+  (unless quiet
+    (message "Jupyter %s no longer uses a remembered connection file"
+             language)))
 
 (defun my/jupyter--org-header-arg-value (value)
   "Return VALUE formatted for insertion into an Org source header."
@@ -593,6 +1241,8 @@ Reload the notebook from disk in JupyterLab to keep running there."
     (remove-hook 'after-save-hook #'my/jupytext--after-save t)
     (message "Jupytext mode disabled")))
 
+(require 'init-jupyter-tools)
+
 ;; ----------------------------
 ;; 安装 emacs-jupyter
 ;; ----------------------------
@@ -603,26 +1253,43 @@ Reload the notebook from disk in JupyterLab to keep running there."
              jupyter-connect-repl
              jupyter-inspect-at-point
              jupyter-eval-line-or-region
+             my/jupyter-clear-language-connection-file
              my/jupyter-connect-repl-dwim
              my/jupyter-connect-existing-repl
+             my/jupyter-dispatch
+             my/jupyter-doctor
+             my/jupyter-install-current-python-kernel
+             my/jupyter-manager
+             my/jupyter-prune-stale-connections
              my/jupyter-register-language-connection-file
+             my/jupyter-refresh-kernelspecs-and-reconfigure
+             my/jupyter-run-repl-for-language
+             my/jupyter-set-default-kernel-for-language
              my/jupyter-use-connection-file-for-org-block)
   :bind (("C-c j r" . my/jupyter-connect-repl-dwim)
          ("C-c j R" . jupyter-run-repl)
          ("C-c j c" . my/jupyter-connect-existing-repl)
+         ("C-c j ?" . my/jupyter-dispatch)
+         ("C-c j h" . my/jupyter-manager)
+         ("C-c j C" . my/jupyter-clear-language-connection-file)
          ("C-c j k" . my/jupyter-register-language-connection-file)
+         ("C-c j K" . my/jupyter-set-default-kernel-for-language)
          ("C-c j o" . my/jupyter-use-connection-file-for-org-block)
          ("C-c j i" . jupyter-inspect-at-point)
          ("C-c j e" . jupyter-eval-line-or-region)
+         ("C-c j x" . my/jupyter-refresh-kernelspecs-and-reconfigure)
          ("C-c j y" . jupytext-mode)
          ("C-c j s" . jupytext-sync-buffer)
-         ("C-c j p" . jupytext-register-current-buffer))
+         ("C-c j p" . jupytext-register-current-buffer)
+         ("C-c j P" . my/jupyter-install-current-python-kernel))
   :init
   (setq jupyter-log-buffer-name "*jupyter-log*")
   (setq jupyter-repl-interaction-mode-enable-prompt-overlay t)
   (setq jupyter-repl-buffer-name-template "*jupyter-repl[%s]*")
   :config
   (my/jupyter-apply-emacs-jupyter-state-fixes))
+
+(my/evil-global-leader-set "o j" #'my/jupyter-manager "jupyter hub")
 
 (use-package code-cells
   :ensure t

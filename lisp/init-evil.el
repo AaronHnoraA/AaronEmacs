@@ -7,6 +7,64 @@
 
 (require 'init-funcs)
 
+(defun my/evil--first-indent-width (&rest variables)
+  "Return the first positive integer value among VARIABLES."
+  (catch 'width
+    (dolist (variable variables)
+      (when (boundp variable)
+        (let ((value (symbol-value variable)))
+          (when (and (integerp value) (> value 0))
+            (throw 'width value)))))))
+
+(defun my/evil-current-indent-width ()
+  "Return the current buffer's effective indentation width."
+  (or
+   (cond
+    ((derived-mode-p 'js-mode 'js2-mode 'js-ts-mode 'js-jsx-mode
+                     'typescript-mode 'typescript-ts-mode 'tsx-ts-mode)
+     (my/evil--first-indent-width
+      'typescript-ts-mode-indent-offset
+      'typescript-indent-level
+      'js2-basic-offset
+      'js-indent-level
+      'standard-indent
+      'tab-width))
+    ((derived-mode-p 'c-mode 'c++-mode 'java-mode 'c-ts-mode 'c++-ts-mode 'java-ts-mode)
+     (my/evil--first-indent-width
+      'c-ts-mode-indent-offset
+      'c-basic-offset
+      'standard-indent
+      'tab-width))
+    ((derived-mode-p 'python-mode 'python-ts-mode)
+     (my/evil--first-indent-width
+      'python-indent-offset
+      'standard-indent
+      'tab-width))
+    ((derived-mode-p 'rust-mode 'rust-ts-mode)
+     (my/evil--first-indent-width
+      'rust-indent-offset
+      'standard-indent
+      'tab-width))
+    ((derived-mode-p 'emacs-lisp-mode 'lisp-interaction-mode 'lisp-mode)
+     (my/evil--first-indent-width
+      'lisp-body-indent
+      'standard-indent
+      'tab-width))
+    (t
+     (my/evil--first-indent-width 'standard-indent 'tab-width)))
+   4))
+
+(defun my/evil-sync-shift-width ()
+  "Keep `evil-shift-width' aligned with the current buffer's indent width."
+  (when (boundp 'evil-shift-width)
+    (setq-local evil-shift-width (my/evil-current-indent-width))))
+
+(defun my/evil-sync-shift-width-existing-buffers ()
+  "Sync `evil-shift-width' for existing buffers."
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (my/evil-sync-shift-width))))
+
 (use-package evil
   :ensure t
   :init
@@ -25,6 +83,9 @@
   (add-to-list 'evil-buffer-regexps '("^\\*vterm.*\\*$" . nil))
   ;; Silence line out of range error.
   (shut-up! #'evil-indent)
+  (add-hook 'after-change-major-mode-hook #'my/evil-sync-shift-width)
+  (add-hook 'hack-local-variables-hook #'my/evil-sync-shift-width)
+  (my/evil-sync-shift-width-existing-buffers)
   :custom
   ;; Keep Evil on `undo-tree' so reopened files can reuse persisted undo history.
   (evil-undo-system 'undo-tree)

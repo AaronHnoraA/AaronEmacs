@@ -5,9 +5,11 @@
 
 ;;; Code:
 
+(declare-function my/eglot-ensure "init-lsp")
+
 (use-package eglot
   :ensure t
-  :hook (python-mode . eglot-ensure))
+  :hook (python-mode . my/eglot-ensure))
 
 (use-package python
   :ensure nil

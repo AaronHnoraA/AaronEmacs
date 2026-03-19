@@ -118,7 +118,9 @@ leader 入口：
 - [lisp/init-search.el](../lisp/init-search.el)
   ivy/counsel/swiper
 - [lisp/init-lsp.el](../lisp/init-lsp.el)
-  company/eglot/flymake/dape
+  company/eglot/lsp-mode/flymake/dape
+- [lisp/init-lsp-tools.el](../lisp/init-lsp-tools.el)
+  language server hub / doctor / dispatch / runtime knobs
 - [lisp/init-org.el](../lisp/init-org.el)
   Org 全家桶
 - [lisp/init-shell.el](../lisp/init-shell.el)
@@ -147,9 +149,11 @@ leader 入口：
 
 看：
 
-1. 语言服务器是否存在
-2. `M-x eglot` 是否能手动起
-3. 当前 major mode 是否真的被纳入 `eglot`
+1. `M-x my/language-server-doctor`
+2. 当前 buffer 的 route policy / active backend 对不对
+3. 语言服务器 executable 或 feature 是否存在
+4. `M-x my/language-server-manager` 里能不能直接开 log / session
+5. 当前 major mode 是否真的命中了你以为的那条路由
 
 ### Org LaTeX 预览挂了
 

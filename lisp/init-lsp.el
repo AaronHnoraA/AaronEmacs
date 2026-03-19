@@ -3,9 +3,18 @@
 ;;; Commentary:
 ;; Restore the original Eglot + Flymake workflow, while keeping a small
 ;; compatibility layer so explicitly registered modes can still opt into
-;; `lsp-mode' when needed.
+;; `lsp-mode' when needed.  The maintenance/dashboard layer lives in
+;; `init-lsp-tools.el'.
 
 ;;; Code:
+
+(require 'cl-lib)
+(require 'subr-x)
+
+(defgroup my/language-server nil
+  "Routing and observability helpers for the language server stack."
+  :group 'tools
+  :prefix "my/language-server-")
 
 (defvar my/lsp-mode-preferred-modes nil
   "Major modes that should use `lsp-mode' instead of `eglot'.")
@@ -13,8 +22,21 @@
 (defvar my/lsp-mode-required-features nil
   "Alist mapping major modes to extra `lsp-mode' support features.")
 
+(defvar my/lsp-mode-preference-metadata nil
+  "Metadata for explicit `lsp-mode' routing entries.
+
+Each entry is a plist with at least `:mode', `:feature', `:source', and
+optional `:note' keys.")
+
+(defvar my/eglot-custom-server-program-metadata nil
+  "Metadata for locally registered `eglot-server-programs' entries.
+
+Each entry is a plist with keys such as `:modes', `:program',
+`:executables', `:label', `:source', and `:note'.")
+
 (defvar tramp-login-shell)
 (defvar eglot-stay-out-of)
+(defvar eglot-server-programs)
 
 (declare-function eglot-current-server "eglot")
 (declare-function eglot-shutdown "eglot" (server))
@@ -22,6 +44,19 @@
 (declare-function prescient-persist-mode "prescient" (&optional arg))
 (declare-function flymake-start "flymake" (&optional report-fn))
 (declare-function dape--live-connection "dape" (&optional kind noerror))
+
+(defun my/language-server--resolve-source (source)
+  "Return SOURCE as an absolute file name when available."
+  (when-let* ((path (or source load-file-name buffer-file-name)))
+    (expand-file-name path)))
+
+(defun my/language-server-lsp-mode-preference-entries ()
+  "Return explicit `lsp-mode' routing entries in registration order."
+  (nreverse (copy-sequence my/lsp-mode-preference-metadata)))
+
+(defun my/language-server-eglot-program-entries ()
+  "Return locally registered Eglot server-program entries."
+  (nreverse (copy-sequence my/eglot-custom-server-program-metadata)))
 
 (defun my/language-server-prepare-remote-eglot-environment ()
   "Prepare shell settings for remote `eglot' buffers."
@@ -33,13 +68,41 @@
       (setq-local explicit-shell-file-name remote-shell)
       (setq-local shell-command-switch "-c"))))
 
-(defun my/register-lsp-mode-preference (mode &optional feature)
+(defun my/register-lsp-mode-preference (mode &optional feature source note)
   "Prefer `lsp-mode' over `eglot' for MODE.
-When FEATURE is non-nil, require it before starting `lsp-mode'."
+When FEATURE is non-nil, require it before starting `lsp-mode'.
+SOURCE and NOTE are recorded for maintenance tooling."
   (add-to-list 'my/lsp-mode-preferred-modes mode)
   (when feature
     (setf (alist-get mode my/lsp-mode-required-features nil nil #'eq)
-          feature)))
+          feature))
+  (setq my/lsp-mode-preference-metadata
+        (cons (list :mode mode
+                    :feature feature
+                    :source (my/language-server--resolve-source source)
+                    :note note)
+              (cl-remove-if
+               (lambda (entry)
+                 (eq (plist-get entry :mode) mode))
+               my/lsp-mode-preference-metadata))))
+
+(defun my/register-eglot-server-program (modes program &rest props)
+  "Register PROGRAM for MODES and record metadata for maintenance tools.
+
+PROPS accepts `:executables', `:label', `:source', and `:note'."
+  (add-to-list 'eglot-server-programs (cons modes program))
+  (setq my/eglot-custom-server-program-metadata
+        (cons (list :modes modes
+                    :program program
+                    :executables (plist-get props :executables)
+                    :label (plist-get props :label)
+                    :source (my/language-server--resolve-source
+                             (plist-get props :source))
+                    :note (plist-get props :note))
+              (cl-remove-if
+               (lambda (entry)
+                 (equal (plist-get entry :modes) modes))
+               my/eglot-custom-server-program-metadata))))
 
 (defun my/lsp-mode-preferred-p ()
   "Return non-nil when current buffer should use `lsp-mode'."
@@ -90,11 +153,10 @@ When FEATURE is non-nil, require it before starting `lsp-mode'."
         (let ((feature (my/lsp-mode-required-feature)))
           (message "Skip lsp-mode in %s: missing `%s'" major-mode feature))))))
 
-(defun my/eglot-ensure ()
-  "Start `eglot' in programming buffers that do not opt into `lsp-mode'."
+(defun my/eglot-ensure-unless-lsp-mode ()
+  "Start `eglot' in the current buffer unless `lsp-mode' is preferred."
   (interactive)
-  (when (and (derived-mode-p 'prog-mode)
-             (not (my/lsp-mode-preferred-p)))
+  (unless (my/lsp-mode-preferred-p)
     (unless (or (bound-and-true-p lsp-managed-mode)
                 (and (fboundp 'eglot-managed-p)
                      (eglot-managed-p)))
@@ -102,6 +164,12 @@ When FEATURE is non-nil, require it before starting `lsp-mode'."
         (my/direnv-update-environment-maybe))
       (my/language-server-prepare-remote-eglot-environment)
       (eglot-ensure))))
+
+(defun my/eglot-ensure ()
+  "Start `eglot' in programming buffers that do not opt into `lsp-mode'."
+  (interactive)
+  (when (derived-mode-p 'prog-mode)
+    (my/eglot-ensure-unless-lsp-mode)))
 
 (defun my/eglot-ensure-deferred ()
   "Start `eglot' after the current buffer has finished opening."

@@ -11,6 +11,9 @@
 
 (require 'init-funcs)
 
+(declare-function my/eglot-ensure "init-lsp")
+(declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Find sibling files
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -68,20 +71,22 @@
 
 (use-package eglot
   :ensure t
-  :hook ((c-mode . eglot-ensure)
-         (c++-mode . eglot-ensure)
-         (c-ts-mode . eglot-ensure)
-         (c++-ts-mode . eglot-ensure))
+  :hook ((c-mode . my/eglot-ensure)
+         (c++-mode . my/eglot-ensure)
+         (c-ts-mode . my/eglot-ensure)
+         (c++-ts-mode . my/eglot-ensure))
   :config
-  (add-to-list
-   'eglot-server-programs
-   '((c-mode c++-mode c-ts-mode c++-ts-mode)
-     . ("clangd"
-        "-j=2"
-        "--background-index"
-        "--clang-tidy"
-        "--completion-style=bundled"
-        "--header-insertion-decorators"))))
+  (my/register-eglot-server-program
+   '(c-mode c++-mode c-ts-mode c++-ts-mode)
+   '("clangd"
+     "-j=2"
+     "--background-index"
+     "--clang-tidy"
+     "--completion-style=bundled"
+     "--header-insertion-decorators")
+   :label "clangd"
+   :executables '("clangd")
+   :note "C/C++ buffers use clangd through Eglot."))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Compiler explorer

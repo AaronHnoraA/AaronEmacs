@@ -27,6 +27,7 @@
 (declare-function org-babel-jupyter-make-language-alias "ob-jupyter" (kernel lang))
 (declare-function org-babel-jupyter-override-src-block "ob-jupyter" (lang))
 (declare-function my/jupyter-default-session-for-language "init-jupyter" (language fallback))
+(declare-function my/jupyter-preferred-kernels-for-language "init-jupyter" (language fallback))
 
 (defconst my/org-babel-config-root
   (expand-file-name ".." (file-name-directory (or load-file-name buffer-file-name)))
@@ -529,10 +530,13 @@ INFO is the result of `org-babel-get-src-block-info'."
          (plist (cdr entry))
          (kernel-language (or (plist-get plist :kernel-language) lang))
          (kernels (cdr (assoc kernel-language available-kernels)))
+         (preferred-kernels (my/jupyter-preferred-kernels-for-language
+                             lang
+                             (plist-get plist :preferred-kernels)))
          (kernel (and kernels
                       (my/org-babel-jupyter--pick-kernel
                        kernels
-                       (plist-get plist :preferred-kernels))))
+                       preferred-kernels)))
          (session (my/jupyter-default-session-for-language
                    lang
                    (or (plist-get plist :session) lang))))

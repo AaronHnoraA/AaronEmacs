@@ -100,11 +100,18 @@
 ### Code `SPC c`
 
 - `SPC c a`
-  `eglot-code-actions`
+  code actions
 - `SPC c f`
-  `eglot-format-buffer`
+  format buffer
 - `SPC c r`
-  `eglot-rename`
+  rename
+- `SPC c o`
+  organize imports
+- `SPC c R`
+  restart language server
+- `SPC c L`
+  语言服务器菜单
+  可以进 Hub / Doctor / 调参 / log / session / config
 - `SPC c i`
   `show-imenu`
   左侧 smart-toggle `treemacs`，并跟随当前文件和光标所在 symbol

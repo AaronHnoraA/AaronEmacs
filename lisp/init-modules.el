@@ -29,6 +29,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-symbols)
 (require 'init-workspace-symbol)
 (require 'init-lsp-ops)
+(require 'init-lsp-tools)
 (require 'init-code-actions)
 (require 'init-git)
 (require 'init-smerge)

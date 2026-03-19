@@ -31,7 +31,9 @@
     my/debug-profile-dispatch
     my/output-dispatch
     my/diagnostics-dispatch
-    my/language-server-ops-dispatch)
+    my/language-server-dispatch
+    my/language-server-manager
+    my/language-server-doctor)
   "Interactive commands checked in `my/health-report'.")
 
 (define-derived-mode my/health-mode special-mode "Health"

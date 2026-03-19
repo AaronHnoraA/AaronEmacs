@@ -18,6 +18,10 @@
    常见“我想改点什么”操作手册，告诉你该改哪个文件。
 7. [maintenance.md](maintenance.md)
    包管理、依赖升级、Elisp 编译、状态目录、故障排查。
+8. [lsp-workflow.org](lsp-workflow.org)
+   语言服务器的 Hub / Doctor / 路由和维护模型。
+9. [jupyter-workflow.org](jupyter-workflow.org)
+   Jupyter / Org / Jupytext 的完整工作流和维护面。
 
 如果你只是想立刻上手：
 
@@ -26,4 +30,5 @@
 - 项目管理看 [project-guide.md](project-guide.md)
 - Org 看 [org-guide.md](org-guide.md)
 - 编程 / LSP / 远程看 [dev-guide.md](dev-guide.md)
+- 语言服务器深度排查看 [lsp-workflow.org](lsp-workflow.org)
 - 想改配置看 [settings-cookbook.md](settings-cookbook.md)

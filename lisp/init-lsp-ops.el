@@ -6,7 +6,6 @@
 ;;; Code:
 
 (require 'init-funcs)
-(require 'transient)
 
 (declare-function my/current-language-server-backend "init-lsp")
 (declare-function eglot-code-action-organize-imports "eglot")
@@ -82,19 +81,6 @@
     ('lsp-mode
      (call-interactively #'lsp-describe-session))))
 
-(transient-define-prefix my/language-server-ops-dispatch ()
-  "Language server operations."
-  [["Lifecycle"
-    ("r" "restart" my/language-server-restart)
-    ("q" "shutdown" my/language-server-shutdown)]
-   ["Workspace"
-    ("o" "organize imports" my/language-server-organize-imports)
-    ("s" "session" my/language-server-describe-session)
-    ("c" "config" my/language-server-show-workspace-configuration)
-    ("l" "log" my/language-server-open-log)]])
-
-(my/evil-global-leader-set "c L" #'my/language-server-ops-dispatch
-                           "language server")
 (my/evil-global-leader-set "c o" #'my/language-server-organize-imports
                            "organize imports")
 (my/evil-global-leader-set "c R" #'my/language-server-restart

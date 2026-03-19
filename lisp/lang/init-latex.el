@@ -9,6 +9,8 @@
 ;;; Code:
 
 (declare-function my/executable-or-name "init-utils")
+(declare-function my/eglot-ensure-unless-lsp-mode "init-lsp")
+(declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
 
 (defun my/latex-eglot-available-p ()
   "Return non-nil when a LaTeX language server is available."
@@ -36,7 +38,7 @@
   (when (my/latex-eglot-available-p)
     (setq-local eglot-workspace-configuration
                 (my/latex-eglot-workspace-configuration))
-    (eglot-ensure)))
+    (my/eglot-ensure-unless-lsp-mode)))
 
 (use-package eglot
   :ensure nil
@@ -50,15 +52,18 @@
          (docTeX-mode . my/latex-eglot-ensure)
          (bibtex-mode . my/latex-eglot-ensure))
   :config
-  (add-to-list 'eglot-server-programs
-               `((latex-mode LaTeX-mode
-                  tex-mode TeX-mode
-                  plain-tex-mode plain-TeX-mode
-                  docTeX-mode
-                  bibtex-mode)
-                 . ,(eglot-alternatives
-                     '(("texlab")
-                       ("digestif"))))))
+  (my/register-eglot-server-program
+   '(latex-mode LaTeX-mode
+     tex-mode TeX-mode
+     plain-tex-mode plain-TeX-mode
+     docTeX-mode
+     bibtex-mode)
+   (eglot-alternatives
+    '(("texlab")
+      ("digestif")))
+   :label "texlab/digestif"
+   :executables '("texlab" "digestif")
+   :note "LaTeX and BibTeX buffers prefer texlab, then fall back to digestif."))
 
 (provide 'init-latex)
 ;;; init-latex.el ends here

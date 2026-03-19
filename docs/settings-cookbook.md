@@ -83,6 +83,16 @@
 
 - `var/mygpt.json`
 
+现在这份 JSON 同时支持：
+
+- 旧的单后端格式
+- 新的多后端 `backends` 列表格式
+
+常用入口：
+
+- `M-x my/gptel-open-config`
+- `SPC l l` / `C-c l l`
+
 只有在你要换加载逻辑时才需要改 Elisp。
 
 ## 5. 我要增删 leader 键
@@ -162,6 +172,9 @@ emacs --debug-init -q -l ./bootstrap.el
 - [lisp/init-minibuffer.el](../lisp/init-minibuffer.el)
 - [lisp/init-search.el](../lisp/init-search.el)
 - [lisp/init-lsp.el](../lisp/init-lsp.el)
+- [lisp/init-lsp-ops.el](../lisp/init-lsp-ops.el)
+- [lisp/init-lsp-tools.el](../lisp/init-lsp-tools.el)
+- [lsp-workflow.org](lsp-workflow.org)
 
 职责划分：
 
@@ -170,7 +183,18 @@ emacs --debug-init -q -l ./bootstrap.el
 - `init-search.el`
   `ivy/counsel/swiper`
 - `init-lsp.el`
-  `company/company-box/eglot`
+  `company/company-box/eglot/lsp-mode` 核心路由
+- `init-lsp-ops.el`
+  organize imports / restart / shutdown / log / session 这类 backend-agnostic 操作
+- `init-lsp-tools.el`
+  Hub / Doctor / dispatch / runtime 调参
+
+如果你是新增某个语言服务器映射：
+
+- `lsp-mode` 例外路由，优先用 `my/register-lsp-mode-preference`
+- 自定义 Eglot server，优先用 `my/register-eglot-server-program`
+
+不要再到处散落手写 `add-to-list 'eglot-server-programs`。
 
 ## 9. 我要改远程和终端行为
 

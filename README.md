@@ -21,9 +21,10 @@
     - `ivy` + `counsel` + `swiper` 仍负责 `M-x`、`C-x C-r`、`C-s` 等常用入口。
   - `C-x C-f` 已切回原生 `find-file`，配合 `vertico-directory` 和原生文件补全过滤，避免旧的 Ivy 文件选择问题。
 - 编程与调试
-  - `company` + `company-prescient` + `company-box` 做补全，`eglot` 做 LSP，`flymake` 做诊断。
+  - `company` + `company-prescient` + `company-box` 做补全，默认走 `eglot`，少数语言显式切到 `lsp-mode`，诊断统一走 `flymake`。
   - `eldoc-box`、`breadcrumb`、`Treemacs` 提供文档悬浮、breadcrumb 和左侧文件/符号导航。
   - `eglot` 的 inlay hints 现在默认开启。
+  - 现在补了一层 `Language Server Hub` / `Doctor`，可以直接看路由、server 映射、当前 buffer 状态、日志入口和 session 级调参。
   - `dape` 负责调试，`citre` 补充 tags/xref，`devdocs`、`quickrun`、`yasnippet`、`hideshow` 都已接入。
   - tree-sitter 相关配置包含 `treesit-auto`、`treesit-fold`，并在打开文件后延迟切到 `*-ts-mode`。
 - 项目 / 文件 / 窗口
@@ -47,7 +48,7 @@
   - 还保留了 EAF 浏览器 / PDF / Git / mindmap 等入口，以及 EWW / Xwidget / EAF 互转函数。
   - `atomic-chrome`、`webjump`、`fanyi`、`rcirc`、`gnus` 都在配置里。
 - AI
-  - `gptel` 从 `var/mygpt.json` 读取后端配置。
+  - `gptel` 支持默认 ChatGPT / GitHub Copilot 后端，也支持从 `var/mygpt.json` 读取多后端配置、preset、context 和 rewrite 工作流。
   - `copilot` 在 `prog-mode` 和 `org-mode` 下自动启用。
 
 ## 仓库结构
@@ -61,7 +62,7 @@
 - [package-lock.el](package-lock.el)
   自动生成的依赖锁文件。
 - [docs/](docs/)
-  中文使用手册，覆盖安装、日常操作、项目管理、Org、LSP/远程、维护和自定义。
+  中文使用手册，覆盖安装、日常操作、项目管理、Org、LSP/远程、维护和自定义；另外补了 LSP / Jupyter 的专题 workflow 文档。
 - [lisp/](lisp/)
   主配置模块，覆盖 UI、补全、项目、Org、终端、EAF 等。
 - [lisp/lang/](lisp/lang/)
@@ -125,6 +126,10 @@
   `xwidget-webkit-browse-url`。
 - `C-c w w`
   统一的 `browse-url` 入口。
+- `SPC l l` / `C-c l l`
+  打开 LLM workflow 菜单。
+- `SPC l c` / `C-c l c`
+  打开 gptel chat。
 
 ## 环境约定与依赖
 
@@ -132,7 +137,7 @@
 
 - 路径约定
   - Org 根目录固定为 `~/HC/Org/`。
-  - GPT 配置文件固定为 `var/mygpt.json`。
+  - GPT 配置文件默认是 `var/mygpt.json`。
   - SSH 主机列表默认从 `~/.ssh/config` 读取。
   - tree-sitter 动态库目录固定为 `tree-sitter/`。
   - 备份、自动保存和 lock 文件统一写到 `var/` 下，不再污染项目目录。

@@ -117,17 +117,47 @@ emacs --debug-init -q -l ./bootstrap.el
 
 - `var/mygpt.json`
 
+现在推荐用多后端格式，旧的单后端格式也继续兼容。
+
 格式示例：
 
 ```json
 {
-  "host": "your-host",
-  "endpoint": "/v1/chat/completions",
-  "key": "sk-...",
-  "model": "your-model",
-  "backend_name": "YourBackend"
+  "default_backend": "OpenAI",
+  "default_model": "your-openai-model",
+  "backends": [
+    {
+      "name": "OpenAI",
+      "type": "openai",
+      "key": "env:OPENAI_API_KEY",
+      "model": "your-openai-model",
+      "models": ["your-openai-model"],
+      "stream": true
+    },
+    {
+      "name": "Ollama",
+      "type": "ollama",
+      "host": "localhost:11434",
+      "model": "your-local-model",
+      "stream": true
+    }
+  ]
 }
 ```
+
+常见类型：
+
+- `openai`
+- `gemini`
+- `anthropic`
+- `ollama`
+- `copilot`
+
+额外说明：
+
+- `key` 支持直接写明文，也支持 `env:ENV_NAME`
+- `key` 也支持 `file:relative/path.txt`
+- 没有 `var/mygpt.json` 时，会回退到 gptel 自带的默认 ChatGPT 后端，不再启动时报 warning
 
 ### 运行时状态目录
 
@@ -148,7 +178,8 @@ emacs --debug-init -q -l ./bootstrap.el
 3. `C-x C-f` / `C-x b` / `C-s` 是否符合预期
 4. `M-x my/vterm-ssh` 是否能读到 SSH 主机
 5. `M-x gptel` 是否能成功创建会话
-6. `C-x g` 是否能打开 Magit
+6. `SPC l l` / `C-c l l` 是否能打开 LLM 菜单
+7. `C-x g` 是否能打开 Magit
 
 ## 8. 下一步看什么
 

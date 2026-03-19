@@ -58,6 +58,13 @@
   左侧 `Treemacs` smart toggle，并跟随当前文件和光标所在 symbol
 - `SPC c I`
   文档浮窗
+- `SPC c L`
+  语言服务器菜单
+  Hub / Doctor / 调参 / log / session / config
+- `SPC c o`
+  organize imports
+- `SPC c R`
+  restart language server
 
 ### 跳转
 
@@ -78,6 +85,30 @@
   上一个诊断
 - `C-c !`
   显示当前 buffer 诊断
+
+### Hub / Doctor
+
+现在语言服务器栈补了一层可视化维护面：
+
+- `M-x my/language-server-manager`
+  打开 `*Language Server Hub*`
+- `M-x my/language-server-doctor`
+  打开 `*Language Server Doctor*`
+
+Hub 里可以直接看：
+
+- 当前 buffer 的 route policy / active backend / workspace config
+- 显式 `lsp-mode` 路由
+- 自定义 Eglot server 映射
+- 一组 session 级调参入口
+
+Doctor 更适合快速排查：
+
+- 关键 library 是否存在
+- 本地 server executable 是否存在
+- 当前 buffer 命中了哪条路由
+
+详细模型看 [lsp-workflow.org](lsp-workflow.org)。
 
 ## 3. 调试
 
@@ -243,6 +274,9 @@
 ### GPT
 
 - `M-x gptel`
+- `SPC l l` / `C-c l l`
+- `SPC l c` / `C-c l c`
+- `SPC l r` / `C-c l r`
 - 配置文件：`var/mygpt.json`
 
 ### Copilot
@@ -256,9 +290,10 @@
 
 优先检查：
 
-1. 语言服务器是否在 PATH
-2. 远端 PATH 里是否真的有这些 server
-3. `eglot` 是否已经 attach
-4. TRAMP 主机是否能正常登录
+1. 先开 `M-x my/language-server-doctor`
+2. 看当前 buffer 的 route policy / active backend / executable
+3. 远端 PATH 里是否真的有这些 server
+4. `eglot` 或 `lsp-mode` 是否已经 attach
+5. TRAMP 主机是否能正常登录
 
-更详细的维护和排查见 [maintenance.md](maintenance.md)。
+更详细的维护和排查见 [lsp-workflow.org](lsp-workflow.org) 和 [maintenance.md](maintenance.md)。
