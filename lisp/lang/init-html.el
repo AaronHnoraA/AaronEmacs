@@ -18,6 +18,12 @@
   ;; Eglot 默认已支持 html-mode 和 mhtml-mode
   ;; 此处通过 eglot-server-programs 将自定义的 vue-html-mode 绑定到 HTML LSP 服务
   (my/register-eglot-server-program
+   'html-ts-mode
+   '("vscode-html-language-server" "--stdio")
+   :label "vscode-html-language-server"
+   :executables '("vscode-html-language-server")
+   :note "html-ts-mode uses the HTML language server through Eglot.")
+  (my/register-eglot-server-program
    'vue-html-mode
    '("vscode-html-language-server" "--stdio")
    :label "vscode-html-language-server"
@@ -33,6 +39,7 @@
 (use-package sgml-mode
   :defer t
   :hook ((html-mode . my/eglot-ensure-unless-lsp-mode)
+         (html-ts-mode . my/eglot-ensure-unless-lsp-mode)
          (mhtml-mode . my/eglot-ensure-unless-lsp-mode)))
 
 (provide 'init-html)

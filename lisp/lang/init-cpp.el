@@ -22,16 +22,17 @@
   :ensure nil
   :config
   (add-to-list 'find-sibling-rules
-               `(,(rx (group (+ (not "/"))) (or ".hpp" ".cpp") eos)
-                 "\\1_test.cpp" "\\1_benchmark.cpp"))
+               `(,(rx (group (+ (not "/"))) (or ".hpp" ".cpp" ".cc") eos)
+                 "\\1_test.cpp" "\\1_test.cc"
+                 "\\1_benchmark.cpp" "\\1_benchmark.cc"))
 
   (add-to-list 'find-sibling-rules
-               `(,(rx (group (+ (not "/"))) "_test.cpp" eos)
-                 "\\1.cpp" "\\1.hpp"))
+               `(,(rx (group (+ (not "/"))) "_test" (or ".cpp" ".cc") eos)
+                 "\\1.cpp" "\\1.cc" "\\1.hpp"))
 
   (add-to-list 'find-sibling-rules
-               `(,(rx (group (+ (not "/"))) "_benchmark.cpp" eos)
-                 "\\1.cpp" "\\1.hpp")))
+               `(,(rx (group (+ (not "/"))) "_benchmark" (or ".cpp" ".cc") eos)
+                 "\\1.cpp" "\\1.cc" "\\1.hpp")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; C/C++ Mode
@@ -39,7 +40,8 @@
 
 (use-package cc-mode
   :ensure nil
-  :mode ("\\.cxx\\'" . c++-mode)
+  :mode (("\\.cxx\\'" . c++-mode)
+         ("\\.cc\\'" . c++-mode))
 
   :hook
   (c-mode . (lambda ()

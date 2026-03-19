@@ -9,10 +9,22 @@
 
 (declare-function consult-imenu "consult-imenu")
 (declare-function consult-imenu-multi "consult-imenu" (&optional query))
+(declare-function my/python-setup-imenu "init-python")
+
+(defvar imenu--index-alist)
+
+(defun my/symbols--prepare-buffer-imenu ()
+  "Refresh the current buffer's imenu data before symbol search."
+  (when (and (fboundp 'my/python-setup-imenu)
+             (derived-mode-p 'python-mode 'python-ts-mode))
+    (my/python-setup-imenu))
+  (when (boundp 'imenu--index-alist)
+    (setq imenu--index-alist nil)))
 
 (defun my/symbols-buffer ()
   "Search symbols in the current buffer."
   (interactive)
+  (my/symbols--prepare-buffer-imenu)
   (if (fboundp 'consult-imenu)
       (consult-imenu)
     (imenu nil)))
@@ -23,6 +35,8 @@
   (if (fboundp 'consult-imenu-multi)
       (consult-imenu-multi)
     (my/symbols-buffer)))
+
+(global-set-key (kbd "M-g i") #'my/symbols-buffer)
 
 (my/evil-global-leader-set "s b" #'my/symbols-buffer "buffer symbols")
 (my/evil-global-leader-set "s I" #'my/symbols-project "project symbols")

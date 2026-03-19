@@ -904,6 +904,7 @@ Else, call `comment-or-uncomment-region' on the current line."
                   (mode . message-mode)
                   (derived-mode . gnus-mode)))
       ("Conf" (or (mode . yaml-mode)
+                  (mode . yaml-ts-mode)
                   (mode . conf-mode)))
       ("Dict" (or (mode . fanyi-mode)
                   (mode . dictionary-mode)))

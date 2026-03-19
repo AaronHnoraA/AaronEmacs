@@ -14,10 +14,34 @@
 (declare-function yas-next-field "yasnippet" (&optional arg))
 (declare-function yas-prev-field "yasnippet" (&optional arg))
 
+(defconst my/yas-treesit-extra-modes
+  '((bash-ts-mode sh-mode)
+    (c-ts-mode c-mode)
+    (c++-ts-mode c++-mode)
+    (css-ts-mode css-mode)
+    (go-ts-mode go-mode)
+    (html-ts-mode html-mode)
+    (java-ts-mode java-mode)
+    (js-ts-mode js-mode js2-mode)
+    (json-ts-mode json-mode)
+    (markdown-ts-mode markdown-mode)
+    (python-ts-mode python-mode)
+    (rust-ts-mode rust-mode)
+    (toml-ts-mode conf-toml-mode)
+    (typescript-ts-mode typescript-mode)
+    (yaml-ts-mode yaml-mode))
+  "Snippet parent modes reused by tree-sitter major modes.")
+
 (defun my/yas-setup-auctex-extra-modes ()
   "Make AUCTeX buffers reuse `latex-mode' and `tex-mode' snippets."
   (yas-activate-extra-mode 'latex-mode)
   (yas-activate-extra-mode 'tex-mode))
+
+(defun my/yas-setup-treesit-extra-modes ()
+  "Make tree-sitter buffers reuse snippets from their original major modes."
+  (when-let* ((extra-modes (alist-get major-mode my/yas-treesit-extra-modes)))
+    (dolist (mode (if (listp extra-modes) extra-modes (list extra-modes)))
+      (yas-activate-extra-mode mode))))
 
 (use-package yasnippet
   :ensure t
@@ -31,6 +55,7 @@
   ((prog-mode . yas-minor-mode)
    (text-mode . yas-minor-mode)
    (org-mode . yas-minor-mode)
+   (yas-minor-mode . my/yas-setup-treesit-extra-modes)
    (LaTeX-mode . my/yas-setup-auctex-extra-modes)
    (plain-TeX-mode . my/yas-setup-auctex-extra-modes))
   :config

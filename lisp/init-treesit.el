@@ -5,13 +5,25 @@
 
 ;;; Code:
 
+(require 'seq)
+
 ;; ========== Tree-sitter grammars sources ==========
 (setq treesit-language-source-alist
-      '((c   "https://github.com/tree-sitter/tree-sitter-c")
-        (cpp "https://github.com/tree-sitter/tree-sitter-cpp")
-        (bash "https://github.com/tree-sitter/tree-sitter-bash")
-        (json "https://github.com/tree-sitter/tree-sitter-json")
-        (python "https://github.com/tree-sitter/tree-sitter-python")))
+      '((bash       "https://github.com/tree-sitter/tree-sitter-bash")
+        (c          "https://github.com/tree-sitter/tree-sitter-c")
+        (cpp        "https://github.com/tree-sitter/tree-sitter-cpp")
+        (css        "https://github.com/tree-sitter/tree-sitter-css")
+        (go         "https://github.com/tree-sitter/tree-sitter-go")
+        (html       "https://github.com/tree-sitter/tree-sitter-html")
+        (java       "https://github.com/tree-sitter/tree-sitter-java")
+        (javascript "https://github.com/tree-sitter/tree-sitter-javascript")
+        (json       "https://github.com/tree-sitter/tree-sitter-json")
+        (python     "https://github.com/tree-sitter/tree-sitter-python")
+        (rust       "https://github.com/tree-sitter/tree-sitter-rust")
+        (tsx        "https://github.com/tree-sitter/tree-sitter-typescript" "master" "tsx/src")
+        (typescript "https://github.com/tree-sitter/tree-sitter-typescript" "master" "typescript/src")
+        (toml       "https://github.com/tree-sitter/tree-sitter-toml")
+        (yaml       "https://github.com/ikatyang/tree-sitter-yaml")))
 
 ;; 建议显式指定 Emacs 放 grammar 动态库的位置（与你报错里一致）
 (setq treesit-extra-load-path
@@ -62,15 +74,45 @@
 
 (add-hook 'find-file-hook #'pv/treesit-switch-after-open)
 
-;; 也就是把 python-mode 重新映射到 python-ts-mode
+(defconst my/treesit-major-mode-remap-candidates
+  '((sh-mode . (bash-ts-mode . bash))
+    (c-mode . (c-ts-mode . c))
+    (c++-mode . (c++-ts-mode . cpp))
+    (css-mode . (css-ts-mode . css))
+    (go-mode . (go-ts-mode . go))
+    (html-mode . (html-ts-mode . html))
+    (java-mode . (java-ts-mode . java))
+    (js-mode . (js-ts-mode . javascript))
+    (js2-mode . (js-ts-mode . javascript))
+    (json-mode . (json-ts-mode . json))
+    (python-mode . (python-ts-mode . python))
+    (rust-mode . (rust-ts-mode . rust))
+    (typescript-mode . (typescript-ts-mode . typescript))
+    (conf-toml-mode . (toml-ts-mode . toml))
+    (yaml-mode . (yaml-ts-mode . yaml)))
+  "Major modes to remap to tree-sitter variants when the grammar is ready.")
+
+(defun my/treesit-ready-mode-p (ts-mode language)
+  "Return non-nil when TS-MODE and LANGUAGE are ready for use."
+  (and (fboundp ts-mode)
+       (fboundp 'treesit-ready-p)
+       (ignore-errors
+         (treesit-ready-p language))))
+
+(defun my/treesit-supported-major-mode-remaps ()
+  "Return supported entries for `major-mode-remap-alist'."
+  (let (result)
+    (dolist (entry my/treesit-major-mode-remap-candidates (nreverse result))
+      (let* ((base (car entry))
+             (spec (cdr entry))
+             (ts-mode (car spec))
+             (language (cdr spec)))
+        (when (my/treesit-ready-mode-p ts-mode language)
+          (push (cons base ts-mode) result))))))
+
+;; 优先使用已经安装 grammar 的 ts-mode，没装好就留在原 mode。
 (setq major-mode-remap-alist
- '((python-mode . python-ts-mode)
-   (js-mode . js-ts-mode)
-   (css-mode . css-ts-mode)
-   (c-mode . c-ts-mode)
-   (c++-mode . cpp-ts-mode)
-   ;; 添加其他你需要映射的语言
-   ))
+      (my/treesit-supported-major-mode-remaps))
 
 (jit-lock-mode 1)
 (font-lock-mode 1)

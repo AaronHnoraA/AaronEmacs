@@ -41,7 +41,10 @@ Each entry is a plist with keys such as `:modes', `:program',
 (declare-function eglot-current-server "eglot")
 (declare-function eglot-shutdown "eglot" (server))
 (declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
+(declare-function my/diagnostics-buffer-ui "init-diagnostics-ui")
+(declare-function my/diagnostics-project-ui "init-diagnostics-ui")
 (declare-function prescient-persist-mode "prescient" (&optional arg))
+(declare-function flymake-diagnostic-text "flymake" (diag))
 (declare-function flymake-start "flymake" (&optional report-fn))
 (declare-function dape--live-connection "dape" (&optional kind noerror))
 
@@ -341,9 +344,10 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   :bind (:map flymake-mode-map
          ("M-n" . flymake-goto-next-error)
          ("M-p" . flymake-goto-prev-error)
-         ("C-c !" . flymake-show-buffer-diagnostics))
+         ("C-c !" . my/diagnostics-buffer-ui)
+         ("C-c ?" . my/diagnostics-project-ui))
   :custom
-  (flymake-no-changes-timeout nil) ; 不在输入停顿时自动检查
+  (flymake-no-changes-timeout 0.2) ; 输入停顿 0.2s 后自动检查
   (flymake-indicator-type 'fringes))
 
 ;; 光标停在报错位置时，在 minibuffer 显示诊断
@@ -352,8 +356,14 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   :after flymake
   :hook (flymake-mode . flymake-diagnostic-at-point-mode)
   :custom
+  (flymake-diagnostic-at-point-timer-delay 0.2)
   (flymake-diagnostic-at-point-display-diagnostic-function
-   #'flymake-diagnostic-at-point-display-minibuffer))
+   #'flymake-diagnostic-at-point-display-minibuffer)
+  :config
+  ;; Emacs 31 removed the old internal `flymake--diag-text' helper that this
+  ;; package still calls.  Bridge it to the public API instead of patching ELPA.
+  (unless (fboundp 'flymake--diag-text)
+    (defalias 'flymake--diag-text #'flymake-diagnostic-text)))
 
 
 ;; -------------------------
@@ -411,6 +421,8 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   :custom
   (eglot-sync-connect 0)
   (eglot-autoshutdown t)
+  (eglot-code-action-indications nil)
+  (eglot-send-changes-idle-time 0.2)
   (eglot-extend-to-xref t)
   (eglot-events-buffer-size 0)
   (read-process-output-max (* 1024 1024)))
@@ -589,13 +601,6 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
 
 ;; eglot：永不自动重连（需要你手动 M-x eglot 重新连）
 (setq-default eglot-autoreconnect nil)
-
-;; 保存时检查（当前 buffer）
-(add-hook 'after-save-hook
-          (lambda ()
-            (when (bound-and-true-p flymake-mode)
-              (flymake-start))))
-
 
 (provide 'init-lsp)
 ;;; init-lsp.el ends here

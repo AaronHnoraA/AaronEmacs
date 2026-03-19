@@ -20,9 +20,15 @@
   :config
   (setq ibuffer-saved-filter-groups
         '(("default"
-           ("Code"  (or (mode . c-mode) (mode . c++-mode) (mode . python-mode)
-                        (mode . emacs-lisp-mode) (mode . rust-mode) (mode . go-mode)
-                        (mode . java-mode) (mode . js-mode) (mode . typescript-mode)))
+           ("Code"  (or (mode . c-mode) (mode . c-ts-mode)
+                        (mode . c++-mode) (mode . c++-ts-mode)
+                        (mode . python-mode) (mode . python-ts-mode)
+                        (mode . emacs-lisp-mode)
+                        (mode . rust-mode) (mode . rust-ts-mode)
+                        (mode . go-mode) (mode . go-ts-mode)
+                        (mode . java-mode) (mode . java-ts-mode)
+                        (mode . js-mode) (mode . js-ts-mode)
+                        (mode . typescript-mode) (mode . typescript-ts-mode)))
            ("Dired" (mode . dired-mode))
            ("Shell" (or (mode . eshell-mode) (mode . shell-mode) (mode . term-mode)))
            ("Emacs" (or (name . "^\\*scratch\\*$")
