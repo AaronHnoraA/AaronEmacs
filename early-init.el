@@ -3,6 +3,11 @@
 ;;; 提前关掉包系统自动初始化，用 use-package 等自己控制
 (setq package-enable-at-startup nil)
 
+;; Keep native compilation cache local to this config so cleanup stays simple.
+(when (fboundp 'startup-redirect-eln-cache)
+  (startup-redirect-eln-cache
+   (expand-file-name "var/eln-cache/" user-emacs-directory)))
+
 ;;; 启动性能优化：暂时放宽 GC、禁用 file-name-handler
 (defvar my/original-gc-cons-threshold gc-cons-threshold)
 (defvar my/original-gc-cons-percentage gc-cons-percentage)

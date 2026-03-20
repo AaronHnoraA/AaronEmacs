@@ -51,7 +51,18 @@
        (buffer-local-value 'my/vterm-popup-instance-p buffer)))
 
 (defun my/vterm-popup--live-buffers ()
-  "Return live popup vterm buffers, pruning dead entries."
+  "Return live popup vterm buffers, pruning dead entrbuffer: init-vterm-popup.el
+file: ~/.config/emacs/lisp/init-vterm-popup.el
+major mode: emacs-lisp-mode
+default-directory: ~/.config/emacs/lisp/
+project root: ~/.config/emacs/
+route policy: eglot (prog-mode default)
+active backend: -
+required lsp feature: - (ready)
+matching custom eglot mapping: -
+flymake/company/breadcrumb: on / off / on
+local eglot workspace config: unset
+ies."
   (setq my/vterm-popup-buffers
         (cl-remove-if-not #'my/vterm-popup--buffer-p my/vterm-popup-buffers)))
 

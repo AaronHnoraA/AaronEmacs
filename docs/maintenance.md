@@ -31,18 +31,51 @@ emacs --debug-init -q -l ./bootstrap.el
 
 - [lisp/init-compile.el](../lisp/init-compile.el)
 
-常用命令：
+常用入口：
 
-- `M-x my/byte-recompile-lisp-dir`
-- `M-x my/native-compile-lisp-dir`
+- `M-x my/compile-board`
+  统一 board。看状态、做编译、做清理、跑 smoke check。
+- `M-x my/compile-dispatch`
+  transient 菜单版入口。
+- `M-x my/byte-compile-config`
+  编译整套本地配置。
+- `M-x my/native-compile-config`
+  对整套本地配置排队 native compile。
+- `M-x my/byte-compile-current-file`
+- `M-x my/native-compile-current-file`
 - `M-x my/native-comp-open-log`
+
+命令行入口：
+
+- `make help`
+- `make compile`
+- `make compile-byte-force`
+- `make compile-native`
+- `make compile-native-force`
+- `make clean-build`
+- `make clean-eln`
+- `make health`
 
 leader 入口：
 
+- `SPC c b`
+  打开 compile board
+- `SPC c ?`
+  打开 compile dispatch
 - `SPC c e`
-  byte-compile
+  byte-compile `lisp/`
 - `SPC c E`
-  native-compile
+  native-compile `lisp/`
+
+默认策略：
+
+- package 安装时允许 native compile
+- native compile cache 统一放到 [var/eln-cache](../var/eln-cache)
+- JIT native compile 开启
+- async warning 策略走 `silent`
+- `custom.el` 不纳入统一编译目标
+- 不自动做 byte compile
+- 可选自动 native compile on save，由 board / dispatch 统一开关
 
 ## 3. 状态目录
 
@@ -52,6 +85,7 @@ leader 入口：
 - auto-save
 - lockfiles
 - tramp
+- eln-cache
 - company
 - copilot
 - projectile
@@ -67,6 +101,15 @@ leader 入口：
 - 出故障时比“散落在仓库里”更容易排查
 
 ## 4. 常见清理
+
+### 清编译产物
+
+优先直接在 `my/compile-board` 里做：
+
+- clean `.elc`
+- clean config `.eln`
+- reset eln cache
+- clean all managed artifacts
 
 ### 清 transient 历史
 
@@ -144,6 +187,7 @@ leader 入口：
 
 1. `SPC h w`
 2. 或者 `M-x my/show-warnings-buffer`
+3. native compile 相关问题先看 `M-x my/native-comp-open-log`
 
 ### LSP 挂了
 

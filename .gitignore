@@ -1,75 +1,53 @@
-############################
 # Emacs compiled files
-############################
-
 *.elc
 *.eln
 
-############################
-# Package management
-############################
+# Emacs package management
+/elpa/
+/quelpa/
+/package-quickstart.el
+/.cask
 
-elpa/
-quelpa/
-package-quickstart.el
-.cask
+# Emacs runtime state and caches
+/eln-cache/
+/var/
+/etc/
+/tree-sitter/
+/undo-tree-history/
+/auto-save-list/
+/eshell/
+/request/
+/server/
+/transient/
+/url/
+/places
+/recentf
+/savehist
+/network-security.data
+/projectile-bookmarks.eld
+/bookmarks
+/bookmarks~
+/session.*
+/semanticdb/
 
-############################
-# Native compilation cache (Emacs 28+)
-############################
+# Project-local data produced by this config
+/Org/
+/eaf/
 
-eln-cache/
+# Python caches from local helper scripts
+__pycache__/
+*.py[cod]
 
-############################
-# Runtime / cache directories
-############################
-
-var/
-etc/
-tree-sitter/
-undo-tree-history/
-
-############################
-# Backup & autosave files
-############################
-
+# Backup, autosave, lock, and transient files
 *~
 \#*\#
 .\#*
-
-############################
-# Undo-tree history
-############################
-
 *.~undo-tree
-undo-tree/
-
-
-############################
-# Flycheck temporary files
-############################
-
 .flycheck*
 
-############################
-# Shell init files (local only)
-############################
+# Shell init files kept only on the local machine
+/init_bash.sh
+/init_zsh.sh
 
-init_bash.sh
-init_zsh.sh
-
-############################
 # OS junk
-############################
-
 .DS_Store
-
-
-Org/
-
-
-
-############################
-# OS junk
-############################
-eaf/

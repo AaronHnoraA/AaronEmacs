@@ -31,7 +31,7 @@ Linux 不是不能用，但部分体验默认按 macOS 配置。
 - [package-lock.el](../package-lock.el)
   锁文件。
 - [var/](../var/)
-  运行时状态目录。备份、自动保存、transient、projectile、dirvish 等状态都集中放这里。
+  运行时状态目录。备份、自动保存、eln-cache、transient、projectile、dirvish 等状态都集中放这里。
 - [docs/](.)
   这套使用文档。
 
@@ -165,9 +165,15 @@ emacs --debug-init -q -l ./bootstrap.el
 
 - backup
 - auto-save
+- eln-cache
 - lockfiles
 - tramp
 - company / copilot / projectile / transient / dirvish / treemacs 等状态目录
+
+编译和清理现在统一走：
+
+- `M-x my/compile-board`
+- `SPC c b`
 
 ## 7. 启动后先确认什么
 

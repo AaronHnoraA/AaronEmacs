@@ -9,6 +9,10 @@
 (require 'subr-x)
 (require 'transient)
 
+(declare-function my/compile-board "init-compile" ())
+(declare-function my/byte-compile-config "init-compile" (&optional force))
+(declare-function my/native-compile-config "init-compile" (&optional force))
+
 (defgroup my/health nil
   "Health checks for the Emacs config."
   :group 'convenience)
@@ -24,7 +28,11 @@
   :group 'my/health)
 
 (defconst my/health-important-commands
-  '(show-imenu
+  '(my/compile-board
+    my/compile-dispatch
+    my/byte-compile-config
+    my/native-compile-config
+    show-imenu
     my/test-dispatch
     my/task-dispatch
     my/project-run-dispatch
@@ -86,9 +94,30 @@
                  "--batch" "-Q"
                  "-l" "./init.el"
                  "--eval" "(setq debug-on-error t)"
-                 "--eval" "(my/byte-recompile-lisp-dir)")))
+                 "--eval" "(my/byte-compile-config)")))
     (if (called-interactively-p 'interactive)
         (message "Byte-compile smoke %s"
+                 (if (plist-get result :ok) "passed" "failed"))
+      result)))
+
+(defun my/health-native-compile-check ()
+  "Run a batch native-compile smoke test."
+  (interactive)
+  (let ((result (my/health--run-batch
+                 "--batch" "-Q"
+                 "-l" "./init.el"
+                 "--eval" "(setq debug-on-error t)"
+                 "--eval"
+                 "(if (and (fboundp 'native-comp-available-p)
+                           (native-comp-available-p)
+                           (fboundp 'native-compile))
+                      (progn
+                        (native-compile
+                         (expand-file-name \"lisp/init-compile.el\" user-emacs-directory))
+                        (message \"NATIVE-OK\"))
+                    (message \"NATIVE-SKIP\"))")))
+    (if (called-interactively-p 'interactive)
+        (message "Native-compile smoke %s"
                  (if (plist-get result :ok) "passed" "failed"))
       result)))
 
@@ -121,6 +150,7 @@
   (let ((buffer (get-buffer-create "*Health*"))
         (startup (my/health-startup-check))
         (compile (my/health-byte-compile-check))
+        (native (my/health-native-compile-check))
         (executables (my/health--executable-report))
         (commands (my/health--command-report)))
     (with-current-buffer buffer
@@ -134,6 +164,8 @@
         (my/health--insert-check "Startup smoke" startup)
         (insert "\n")
         (my/health--insert-check "Byte compile" compile)
+        (insert "\n")
+        (my/health--insert-check "Native compile" native)
         (insert "\nExecutables\n")
         (insert "-----------\n")
         (dolist (entry executables)
@@ -156,7 +188,10 @@
   [["Checks"
     ("h" "full report" my/health-report)
     ("s" "startup smoke" my/health-startup-check)
-    ("c" "byte compile smoke" my/health-byte-compile-check)]])
+    ("c" "byte compile smoke" my/health-byte-compile-check)
+    ("n" "native compile smoke" my/health-native-compile-check)]
+   ["Ops"
+    ("b" "compile board" my/compile-board)]])
 
 (my/evil-global-leader-set "h H" #'my/health-dispatch "health")
 
