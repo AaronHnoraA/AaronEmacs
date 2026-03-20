@@ -23,9 +23,11 @@
 - `M-\``
   `vterm-toggle`
 - `C-c e`
-  临时 `vterm`，失焦自动收起
+  切换当前 popup `vterm`
 - `C-c E`
-  切换共享 `vterm` 的固定状态
+  切换到下一个 popup `vterm`，`C-u C-c E` 新建一个
+- `C-c M-e`
+  切换当前 popup `vterm` 的固定状态
 - `C-\``
   `popper-toggle`
 
@@ -135,11 +137,15 @@
 - `SPC o e`
   `vterm-toggle`
 - `SPC o E`
-  切换共享 `vterm` 的固定状态
+  切换到下一个 popup `vterm`
+- `SPC o F`
+  切换当前 popup `vterm` 的固定状态
 - `SPC o t`
   `vterm-toggle`
 - `SPC o v`
   直接打开新 `vterm`
+- `M-x my/project-popup-vterm-app`
+  在当前项目根目录的新 popup `vterm` 里运行 `lazygit` / `btop` / `codex`
 - `SPC o V`
   命名 `vterm`
 - `SPC o S`

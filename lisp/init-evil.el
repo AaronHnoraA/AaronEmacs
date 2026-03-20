@@ -326,7 +326,8 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       "ol" 'org-store-link
       "ob" 'browse-url
       "oe" 'vterm-toggle
-      "oE" 'my/vterm-toggle-fixed
+      "oE" 'my/vterm-popup-cycle
+      "oF" 'my/vterm-toggle-fixed
       "ot" 'vterm-toggle
       "oT" 'ansi-term
       "ov" 'vterm

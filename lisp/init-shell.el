@@ -10,6 +10,7 @@
 (declare-function ring-elements "ring")
 (declare-function eshell/cd "esh-mode")
 (declare-function eshell-grep "em-unix")
+(declare-function vterm "vterm" (&optional buffer-name))
 (declare-function vterm-send-string "vterm")
 (declare-function vterm-send-return "vterm")
 (declare-function turn-off-evil-mode "evil")
@@ -189,56 +190,7 @@ If popup is focused, kill it."
         (completing-read "SSH host: " hosts nil nil nil 'my/ssh-host-history)
       (read-string "SSH host: " nil 'my/ssh-host-history))))
 
-(global-set-key (kbd "M-`") #'vterm-toggle)
-(global-set-key (kbd "C-c e") #'vterm-toggle)
-(global-set-key (kbd "C-c E") #'my/vterm-toggle-fixed)
-
-(defcustom my/vterm-popup-window-height 0.2
-  "Height of the shared vterm popup window."
-  :type 'number
-  :group 'term)
-
-(defvar my/vterm-popup-fixed nil
-  "Whether the shared vterm popup should stay visible after focus changes.")
-
-(defun my/vterm--window ()
-  "Return the visible shared vterm window, if any."
-  (get-buffer-window "*vterm-popup*" (selected-frame)))
-
-(defun my/vterm--delete-own-window ()
-  "Delete the selected vterm popup window if it is visible."
-  (setq my/vterm-popup-fixed nil)
-  (when-let* ((win (get-buffer-window (current-buffer) (selected-frame))))
-    (ignore-errors (delete-window win))))
-
-(defun my/vterm-hide-popup ()
-  "Hide the shared vterm popup window."
-  (interactive)
-  (setq my/vterm-popup-fixed nil)
-  (when-let* ((win (my/vterm--window)))
-    (ignore-errors (delete-window win))))
-
-(defun my/vterm--ensure-buffer ()
-  "Return the shared vterm popup buffer, creating it when needed."
-  (or (get-buffer "*vterm-popup*")
-      (progn
-        (require 'vterm)
-        (with-current-buffer (save-window-excursion (vterm "*vterm-popup*"))
-          (add-hook 'kill-buffer-hook #'my/vterm--delete-own-window nil t)
-          (current-buffer)))))
-
-(defun my/vterm-show-popup ()
-  "Show the shared vterm buffer in a top popup window."
-  (let ((window (display-buffer-in-side-window
-                 (my/vterm--ensure-buffer)
-                 `((side . top)
-                   (slot . 1)
-                   (window-height . ,my/vterm-popup-window-height)))))
-    (set-window-parameter window 'my-vterm-popup t)
-    (set-window-parameter window 'my-vterm-fixed my/vterm-popup-fixed)
-    (set-window-parameter window 'no-delete-other-windows t)
-    (window-preserve-size window nil t)
-    window))
+(require 'init-vterm-popup)
 
 (defun my/vterm-named (name)
   "Create or switch to a named vterm buffer."
@@ -259,39 +211,9 @@ If popup is focused, kill it."
            (vterm-send-return)
            (current-buffer))))))
 
-(defun my/vterm-toggle-fixed ()
-  "Toggle whether the shared vterm popup stays visible when it loses focus."
-  (interactive)
-  (setq my/vterm-popup-fixed (not my/vterm-popup-fixed))
-  (let ((win (or (my/vterm--window)
-                 (my/vterm-show-popup))))
-    (set-window-parameter win 'my-vterm-fixed my/vterm-popup-fixed)
-    (select-window win))
-  (message "VTerm popup %s"
-           (if my/vterm-popup-fixed "fixed" "temporary")))
-
-(defun my/vterm--auto-hide-popup (&rest _)
-  "Hide the shared vterm popup when it loses focus in temporary mode."
-  (if-let* ((win (my/vterm--window)))
-      (unless (or my/vterm-popup-fixed
-                  (active-minibuffer-window)
-                  (eq (selected-window) win))
-        (my/vterm-hide-popup))
-    (setq my/vterm-popup-fixed nil)))
-
-(defun vterm-toggle ()
-  "Toggle the shared temporary vterm popup window."
-  (interactive)
-  (if-let* ((win (my/vterm--window)))
-      (if (eq (selected-window) win)
-          (my/vterm-hide-popup)
-        (select-window win))
-    (setq my/vterm-popup-fixed nil)
-    (select-window (my/vterm-show-popup))))
-
 (use-package vterm
   :ensure t
-  :commands (vterm vterm-toggle my/vterm-toggle-fixed my/vterm-named my/vterm-ssh)
+  :commands (vterm)
   :hook (vterm-mode . (lambda ()
                         (when (fboundp 'evil-emacs-state)
                           (evil-emacs-state))
@@ -305,8 +227,6 @@ If popup is focused, kill it."
                          (current-buffer))))
   :custom
   (vterm-shell "zsh"))
-
-(add-hook 'window-selection-change-functions #'my/vterm--auto-hide-popup)
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'eshell-mode 'emacs)

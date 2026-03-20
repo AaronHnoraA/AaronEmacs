@@ -820,8 +820,10 @@ Returns the number of killed buffers."
     "Project workbench."
     :transient-suffix 'transient--do-stay
     [["Switch"
-      ("p" "switch project" my/project-switch)
-      ("o" "open workbench" my/project-open-workbench)
+      ("p" "switch project" my/project-switch
+       :transient transient--do-exit)
+      ("o" "open workbench" my/project-open-workbench
+       :transient transient--do-exit)
       ("f" "find file" my/project-find-file)
       ("r" "recent file" my/project-recent-file)
       ("b" "switch buffer" my/project-switch-buffer)]

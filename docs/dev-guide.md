@@ -203,13 +203,17 @@ Doctor 更适合快速排查：
 - `M-\``
   `vterm-toggle`
 - `C-c e`
-  弹出/收起临时 `vterm`，失焦自动收起
+  弹出/收起当前 popup `vterm`
 - `C-c E`
-  切换共享 `vterm` 的固定状态
+  切换到下一个 popup `vterm`；`C-u C-c E` 新建一个
+- `C-c M-e`
+  切换当前 popup `vterm` 的固定状态
 - `SPC o e`
   `vterm-toggle`
 - `SPC o E`
-  切换共享 `vterm` 的固定状态
+  切换到下一个 popup `vterm`
+- `SPC o F`
+  切换当前 popup `vterm` 的固定状态
 - `SPC o t`
   `vterm-toggle`
 - `SPC o v`
@@ -218,6 +222,8 @@ Doctor 更适合快速排查：
   创建命名 `vterm`
 - `SPC o S`
   `my/vterm-ssh`
+- `M-x my/project-popup-vterm-app`
+  在当前 project 根目录的新 popup `vterm` 里运行 `lazygit` / `btop` / `codex`
 
 ## 6. 远程与 TRAMP
 
