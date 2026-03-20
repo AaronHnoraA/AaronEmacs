@@ -13,7 +13,7 @@
   (which-key-mode 1)
   (which-key-add-key-based-replacements
     "C-c !" "diagnostics"
-    "C-c ?" "project diagnostics"
+    "C-c ?" "diagnostics panel"
     "C-c @" "hideshow"
     "C-c i" "ispell"
     "C-c t" "hl-todo"
