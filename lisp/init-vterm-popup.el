@@ -28,6 +28,7 @@
 (defcustom my/project-popup-vterm-apps
   '(("lazygit" . "lazygit")
     ("btop" . "btop")
+    ("yazi" . "yazi")
     ("codex" . "codex"))
   "Preset terminal apps launched in a fresh popup vterm at project root."
   :type '(alist :key-type string :value-type string)

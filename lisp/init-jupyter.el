@@ -966,6 +966,11 @@ without forking the dependency."
   :type 'string
   :group 'my/jupytext)
 
+(defcustom my/jupytext-auto-mode-file-regexp "\\.ju\\.[^.]+\\'"
+  "File name regexp for script buffers that should auto-enable `jupytext-mode'."
+  :type 'regexp
+  :group 'my/jupytext)
+
 (defcustom my/jupytext-format-alist
   '(("py" . "py:percent")
     ("r" . "R:percent")
@@ -1023,10 +1028,15 @@ Sage-specific `PYTHONPATH`, into the external Jupytext process."
       (user-error "Enable `jupytext-mode' in the paired script buffer, not the notebook"))
     script-file))
 
+(defun my/jupytext--canonical-script-file (&optional script-file)
+  "Return SCRIPT-FILE with an optional `.ju.' infix normalized away."
+  (let ((file (expand-file-name (or script-file (my/jupytext--script-file)))))
+    (replace-regexp-in-string "\\.ju\\.\\([^.]+\\)\\'" ".\\1" file)))
+
 (defun my/jupytext--default-notebook-file (&optional script-file)
   "Infer the paired notebook path for SCRIPT-FILE or the current buffer."
   (concat (file-name-sans-extension
-           (expand-file-name (or script-file (my/jupytext--script-file))))
+           (my/jupytext--canonical-script-file script-file))
           my/jupytext-default-notebook-extension))
 
 (defun my/jupytext--default-format (&optional script-file)
@@ -1218,6 +1228,23 @@ When ANNOUNCE is non-nil, show a success message."
       (error
        (message "Jupytext sync failed: %s" (error-message-string err))))))
 
+(defun my/jupytext-auto-enable-mode ()
+  "Enable `jupytext-mode' automatically for matching paired script buffers."
+  (when (and buffer-file-name
+             (not jupytext-mode)
+             (string-match-p my/jupytext-auto-mode-file-regexp buffer-file-name))
+    (let* ((script-file (my/jupytext--script-file))
+           (pair-entry (my/jupytext--pair-entry script-file))
+           (default-notebook (my/jupytext--default-notebook-file script-file)))
+      (when (or pair-entry
+                (file-exists-p default-notebook))
+        (condition-case err
+            (jupytext-mode 1)
+          (error
+           (message "Skipping automatic jupytext-mode for %s: %s"
+                    (file-name-nondirectory script-file)
+                    (error-message-string err))))))))
+
 (define-minor-mode jupytext-mode
   "Buffer-local Jupytext workflow for paired script/notebook editing.
 
@@ -1240,6 +1267,8 @@ Reload the notebook from disk in JupyterLab to keep running there."
          (signal (car err) (cdr err))))
     (remove-hook 'after-save-hook #'my/jupytext--after-save t)
     (message "Jupytext mode disabled")))
+
+(add-hook 'find-file-hook #'my/jupytext-auto-enable-mode)
 
 (require 'init-jupyter-tools)
 
