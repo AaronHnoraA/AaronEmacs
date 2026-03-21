@@ -7,6 +7,19 @@
 
 (require 'init-funcs)
 
+(declare-function my/bookmark-delete-dwim "init-windows")
+(declare-function my/bookmark-dispatch "init-windows")
+(declare-function my/bookmark-jump-dwim "init-windows")
+(declare-function my/bookmark-jump-other-window-dwim "init-windows")
+(declare-function my/bookmark-list "init-windows")
+(declare-function my/bookmark-next-line "init-windows")
+(declare-function my/bookmark-previous-line "init-windows")
+(declare-function my/bookmark-rename-dwim "init-windows")
+(declare-function my/bookmark-set "init-windows")
+(declare-function my/bookmark-set-no-overwrite "init-windows")
+(declare-function my/bookmark-set-line "init-windows")
+(declare-function my/bookmark-toggle-line "init-windows")
+
 (defun my/evil--first-indent-width (&rest variables)
   "Return the first positive integer value among VARIABLES."
   (catch 'width
@@ -212,15 +225,19 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       "bx" 'scratch-buffer
       "bz" 'bury-buffer
       ;; --------------
-      "bm" 'bookmark-set
-      "bM" 'bookmark-set-no-overwrite
+      "b." 'my/bookmark-dispatch
+      "bm" 'my/bookmark-set
+      "bM" 'my/bookmark-set-no-overwrite
       "bi" 'bookmark-insert
-      "br" 'bookmark-rename
-      "bd" 'bookmark-delete
+      "br" 'my/bookmark-rename-dwim
       "bw" 'bookmark-write
-      "bj" 'bookmark-jump
-      "bJ" 'bookmark-jump-other-window
-      "bl" 'bookmark-bmenu-list
+      "bj" 'my/bookmark-jump-dwim
+      "bJ" 'my/bookmark-jump-other-window-dwim
+      "bl" 'my/bookmark-list
+      "bn" 'my/bookmark-next-line
+      "bp" 'my/bookmark-previous-line
+      "bt" 'my/bookmark-toggle-line
+      "bL" 'my/bookmark-set-line
       "bs" 'bookmark-save
 
       ;; edit

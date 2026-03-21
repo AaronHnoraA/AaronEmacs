@@ -9,7 +9,7 @@
 - `SPC SPC`
   `telescope` 统一搜索面板
 - `M-x`
-  `counsel-M-x`
+  原生 `M-x` + `amx` 历史排序
 - `M-x telescope`
   `telescope` 统一搜索面板
 - `C-x C-f`
@@ -17,7 +17,7 @@
 - `C-x b`
   `consult-buffer`
 - `C-s`
-  `swiper`
+  `consult-line`
 - `C-c p`
   Projectile 前缀
 - `C-c p g`
@@ -58,6 +58,16 @@
 
 - `SPC b b`
   切 buffer
+- `SPC b .`
+  打开 bookmark 管理菜单
+- `C-x r .`
+  打开 bookmark 管理菜单
+- `C-x r j`
+  跳转 bookmark（带 preview）
+- `C-x r l`
+  切换当前行书签
+- `C-x r n` / `C-x r p`
+  下一个 / 上一个行书签
 - `SPC b c`
   clone indirect buffer
 - `SPC b x`
@@ -65,9 +75,21 @@
 - `SPC b z`
   bury buffer
 - `SPC b j`
-  跳转 bookmark
+  跳转 bookmark（带 preview）
+- `SPC b J`
+  在其他窗口跳转 bookmark
 - `SPC b m`
   设置 bookmark
+- `SPC b r`
+  重命名 bookmark
+- `SPC b l`
+  打开 bookmark 列表；`RET` 跳转，`D` 删除，当前项目条目优先
+- `SPC b t`
+  切换当前行书签
+- `SPC b n` / `SPC b p`
+  下一个 / 上一个行书签
+- `SPC b L`
+  直接设置当前行书签
 
 ### 编辑 `SPC e`
 
@@ -210,11 +232,13 @@
 - `SPC SPC g`
   当前项目 ripgrep
 - `SPC SPC I`
-  当前 workspace / 项目 symbols
+  当前 workspace / 项目 symbols；优先加载 workspace 候选后在本地筛选，匹配更宽松，并带 preview
 - `SPC SPC m`
-  bookmark 入口；有书签时走 picker，没有书签时打开 bookmark 列表
+  bookmark picker；没有书签时打开 bookmark 列表
 - `C-s`
   当前 buffer 搜索
+- `C-x C-r`
+  最近文件
 - `SPC s p`
   `consult-ripgrep`
 - `SPC s s`
@@ -230,7 +254,24 @@
 - `C-'`
   `avy-goto-word-1`
 
-## 4. 折叠与结构选择
+## 4. 结构导航
+
+- `SPC n a`
+  跳到当前函数开头
+- `SPC n e`
+  跳到当前函数结尾
+- `SPC n [`
+  上一个函数
+- `SPC n ]`
+  下一个函数
+- `SPC n u`
+  跳到外层结构
+- `[f`
+  上一个函数
+- `]f`
+  下一个函数
+
+## 5. 折叠与结构选择
 
 ### 折叠
 
@@ -276,7 +317,7 @@
 - `SPC v p`
   选下一层外层结构
 
-## 5. 多光标和 snippet
+## 6. 多光标和 snippet
 
 ### 多光标
 

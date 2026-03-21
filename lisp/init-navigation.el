@@ -14,6 +14,10 @@
 (declare-function evil-jump-forward "evil-commands" (&optional count))
 (declare-function evil-set-jump "evil-jumps")
 (declare-function evil-collection-consult-jump-list "evil-collection-consult")
+(declare-function treesit-node-at "treesit" (pos &optional parser-or-lang named))
+(declare-function treesit-node-parent "treesit" (node))
+(declare-function treesit-node-start "treesit" (node))
+(declare-function treesit-node-type "treesit" (node))
 (declare-function xref-find-definitions "xref" (identifier))
 (declare-function xref-find-references "xref" (identifier))
 (declare-function xref-go-back "xref" ())
@@ -22,6 +26,25 @@
 (declare-function citre-jump-to-reference "citre")
 (declare-function citre-peek "citre" (&optional buf point reference))
 (declare-function citre-peek-reference "citre")
+
+(defconst my/navigation-structural-node-regexp
+  (rx (or "function"
+          "method"
+          "lambda"
+          "class"
+          "interface"
+          "struct"
+          "enum"
+          "trait"
+          "impl"
+          "namespace"
+          "module"
+          "block"
+          "body"
+          "suite"
+          "statement_block"
+          "statement_list"))
+  "Tree-sitter node fragments treated as structural navigation anchors.")
 
 (defun my/navigation--push-jump ()
   "Record the current position in Evil's jump list when available."
@@ -107,6 +130,61 @@
    (t
     (user-error "Jump list UI is unavailable"))))
 
+(defun my/navigation-beginning-of-defun ()
+  "Jump to the beginning of the current defun."
+  (interactive)
+  (my/navigation--push-jump)
+  (call-interactively #'beginning-of-defun))
+
+(defun my/navigation-end-of-defun ()
+  "Jump to the end of the current defun."
+  (interactive)
+  (my/navigation--push-jump)
+  (call-interactively #'end-of-defun))
+
+(defun my/navigation-previous-defun ()
+  "Jump to the previous defun."
+  (interactive)
+  (my/navigation--push-jump)
+  (condition-case nil
+      (beginning-of-defun 2)
+    (error
+     (goto-char (point-min)))))
+
+(defun my/navigation-next-defun ()
+  "Jump to the next defun."
+  (interactive)
+  (my/navigation--push-jump)
+  (condition-case nil
+      (progn
+        (end-of-defun)
+        (beginning-of-defun -1))
+    (error
+     (goto-char (point-max)))))
+
+(defun my/navigation-up-structure ()
+  "Jump to the nearest enclosing structural form."
+  (interactive)
+  (my/navigation--push-jump)
+  (cond
+   ((and (fboundp 'treesit-node-at)
+         (fboundp 'treesit-node-parent))
+    (let ((node (or (ignore-errors (treesit-node-at (point)))
+                    (and (> (point) (point-min))
+                         (ignore-errors (treesit-node-at (1- (point))))))))
+      (catch 'done
+        (while node
+          (setq node (treesit-node-parent node))
+          (when (and node
+                     (string-match-p my/navigation-structural-node-regexp
+                                     (treesit-node-type node)))
+            (goto-char (treesit-node-start node))
+            (throw 'done t)))
+        (user-error "No enclosing structural form"))))
+   ((ignore-errors (backward-up-list) t))
+   (t
+    (user-error "No enclosing structural form"))))
+
 (global-set-key (kbd "M-.") #'my/navigation-find-definition)
 (global-set-key (kbd "M-?") #'my/navigation-find-references)
 (global-set-key (kbd "M-,") #'my/navigation-back)
@@ -115,7 +193,9 @@
   (evil-define-key* 'normal 'global (kbd "gd") #'my/navigation-find-definition)
   (evil-define-key* 'normal 'global (kbd "gr") #'my/navigation-find-references)
   (evil-define-key* 'normal 'global (kbd "gi") #'my/navigation-find-implementation)
-  (evil-define-key* 'normal 'global (kbd "gy") #'my/navigation-find-type-definition))
+  (evil-define-key* 'normal 'global (kbd "gy") #'my/navigation-find-type-definition)
+  (evil-define-key* 'normal 'global (kbd "[f") #'my/navigation-previous-defun)
+  (evil-define-key* 'normal 'global (kbd "]f") #'my/navigation-next-defun))
 
 (my/leader-key-label "n" "navigate")
 (my/evil-global-leader-set "n d" #'my/navigation-find-definition "definition")
@@ -127,6 +207,11 @@
 (my/evil-global-leader-set "n j" #'my/navigation-jump-list "jump list")
 (my/evil-global-leader-set "n p" #'my/navigation-peek-definition "peek definition")
 (my/evil-global-leader-set "n P" #'my/navigation-peek-references "peek references")
+(my/evil-global-leader-set "n a" #'my/navigation-beginning-of-defun "defun start")
+(my/evil-global-leader-set "n e" #'my/navigation-end-of-defun "defun end")
+(my/evil-global-leader-set "n [" #'my/navigation-previous-defun "previous defun")
+(my/evil-global-leader-set "n ]" #'my/navigation-next-defun "next defun")
+(my/evil-global-leader-set "n u" #'my/navigation-up-structure "up structure")
 
 (provide 'init-navigation)
 ;;; init-navigation.el ends here

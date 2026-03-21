@@ -6,13 +6,33 @@
 ;;; Code:
 
 (require 'init-funcs)
+(require 'cl-lib)
+(require 'seq)
 
+(declare-function consult-xref "consult" (fetcher &optional alist))
 (declare-function treesit-fold-close "treesit-fold" ())
 (declare-function treesit-fold-close-all "treesit-fold" ())
 (declare-function treesit-fold-mode "treesit-fold" (&optional arg))
 (declare-function treesit-fold-open "treesit-fold" ())
 (declare-function treesit-fold-open-all "treesit-fold" ())
 (declare-function treesit-fold-toggle "treesit-fold" ())
+
+(defgroup my/fold nil
+  "Editor folding helpers."
+  :group 'editing)
+
+(defcustom my/fold-state-file
+  (expand-file-name "fold-state.el"
+                    (expand-file-name "var" user-emacs-directory))
+  "Path used to persist fold states."
+  :type 'file
+  :group 'my/fold)
+
+(defvar my/fold-state-table nil
+  "Alist mapping file names to persisted fold start lines.")
+
+(defvar my/fold-state-loaded nil
+  "Whether fold state has been loaded from disk.")
 
 ;; Compilation Mode
 (use-package compile
@@ -98,8 +118,9 @@
                              ((executable-find "ugrep") 'ugrep)
                              (t 'grep)))
   (xref-history-storage 'xref-window-local-history)
-  (xref-show-xrefs-function #'xref-show-definitions-completing-read)
-  (xref-show-definitions-function #'xref-show-definitions-completing-read))
+  ;; Use Consult so workspace/project symbols can preview target locations.
+  (xref-show-xrefs-function #'consult-xref)
+  (xref-show-definitions-function #'consult-xref))
 
 ;; A fancy ctags frontend
 (use-package citre
@@ -153,6 +174,97 @@
   (my/fold--ensure-backend)
   (bound-and-true-p treesit-fold-mode))
 
+(defun my/fold--state-key (&optional file)
+  "Return canonical persisted key for FILE or current buffer."
+  (when-let* ((path (or file buffer-file-name)))
+    (expand-file-name path)))
+
+(defun my/fold--load-state-table ()
+  "Load persisted fold state from disk once."
+  (unless my/fold-state-loaded
+    (setq my/fold-state-loaded t)
+    (when (file-exists-p my/fold-state-file)
+      (with-temp-buffer
+        (insert-file-contents my/fold-state-file)
+        (goto-char (point-min))
+        (setq my/fold-state-table (read (current-buffer)))))))
+
+(defun my/fold--save-state-table ()
+  "Persist fold state to disk."
+  (my/fold--load-state-table)
+  (condition-case err
+      (progn
+        (make-directory (file-name-directory my/fold-state-file) t)
+        (with-temp-file my/fold-state-file
+          (let ((print-length nil)
+                (print-level nil))
+            (prin1 my/fold-state-table (current-buffer))
+            (insert "\n"))))
+    (file-locked
+     (message "Skip saving fold state: %s" (error-message-string err)))))
+
+(defun my/fold--current-hidden-start-lines ()
+  "Return sorted start lines for currently hidden folds."
+  (save-excursion
+    (sort
+     (delete-dups
+      (mapcar
+       (lambda (ov)
+         (line-number-at-pos (overlay-start ov)))
+       (seq-filter
+        (lambda (ov)
+          (or (eq (overlay-get ov 'invisible) 'treesit-fold)
+              (eq (overlay-get ov 'hs) 'code)))
+        (overlays-in (point-min) (point-max)))))
+     #'<)))
+
+(defun my/fold--apply-close-at-line (line)
+  "Close the fold starting at LINE."
+  (save-excursion
+    (goto-char (point-min))
+    (forward-line (1- line))
+    (back-to-indentation)
+    (condition-case nil
+        (if (my/fold--use-treesit-p)
+            (treesit-fold-close)
+          (hs-hide-block))
+      (error nil))))
+
+(defun my/fold-save-buffer-state ()
+  "Persist fold state for the current buffer."
+  (when buffer-file-name
+    (my/fold--load-state-table)
+    (let ((key (my/fold--state-key))
+          (lines (my/fold--current-hidden-start-lines)))
+      (setq my/fold-state-table
+            (assoc-delete-all key my/fold-state-table))
+      (when lines
+        (push (cons key lines) my/fold-state-table))
+      (my/fold--save-state-table))))
+
+(defun my/fold-restore-buffer-state ()
+  "Restore fold state for the current buffer."
+  (when buffer-file-name
+    (my/fold--load-state-table)
+    (when-let* ((entry (assoc (my/fold--state-key) my/fold-state-table)))
+      (my/fold--ensure-backend)
+      (dolist (line (cdr entry))
+        (my/fold--apply-close-at-line line)))))
+
+(defun my/fold-restore-buffer-state-deferred ()
+  "Restore fold state after the current file finishes opening."
+  (when (and buffer-file-name
+             (derived-mode-p 'prog-mode))
+    (let ((buffer (current-buffer)))
+      (run-with-idle-timer
+       0.15 nil
+       (lambda (buf)
+         (when (buffer-live-p buf)
+           (with-current-buffer buf
+             (ignore-errors
+               (my/fold-restore-buffer-state)))))
+       buffer))))
+
 (defun my/hs-set-up-overlay (overlay)
   "Render a concise folding indicator for hidden OVERLAY."
   (when (eq 'code (overlay-get overlay 'hs))
@@ -169,35 +281,40 @@
   (interactive)
   (if (my/fold--use-treesit-p)
       (call-interactively #'treesit-fold-toggle)
-    (call-interactively #'hs-toggle-hiding)))
+    (call-interactively #'hs-toggle-hiding))
+  (my/fold-save-buffer-state))
 
 (defun my/fold-open ()
   "Open the fold at point."
   (interactive)
   (if (my/fold--use-treesit-p)
       (call-interactively #'treesit-fold-open)
-    (call-interactively #'hs-show-block)))
+    (call-interactively #'hs-show-block))
+  (my/fold-save-buffer-state))
 
 (defun my/fold-close ()
   "Close the fold at point."
   (interactive)
   (if (my/fold--use-treesit-p)
       (call-interactively #'treesit-fold-close)
-    (call-interactively #'hs-hide-block)))
+    (call-interactively #'hs-hide-block))
+  (my/fold-save-buffer-state))
 
 (defun my/fold-open-all ()
   "Open all folds in the current buffer."
   (interactive)
   (if (my/fold--use-treesit-p)
       (call-interactively #'treesit-fold-open-all)
-    (call-interactively #'hs-show-all)))
+    (call-interactively #'hs-show-all))
+  (my/fold-save-buffer-state))
 
 (defun my/fold-close-all ()
   "Close all folds in the current buffer."
   (interactive)
   (if (my/fold--use-treesit-p)
       (call-interactively #'treesit-fold-close-all)
-    (call-interactively #'hs-hide-all)))
+    (call-interactively #'hs-hide-all))
+  (my/fold-save-buffer-state))
 
 (use-package hideshow
   :ensure nil
@@ -222,6 +339,10 @@
   (evil-define-key* 'normal 'global (kbd "zc") #'my/fold-close)
   (evil-define-key* 'normal 'global (kbd "zR") #'my/fold-open-all)
   (evil-define-key* 'normal 'global (kbd "zM") #'my/fold-close-all))
+
+(add-hook 'find-file-hook #'my/fold-restore-buffer-state-deferred)
+(add-hook 'kill-buffer-hook #'my/fold-save-buffer-state)
+(add-hook 'kill-emacs-hook #'my/fold--save-state-table)
 
 ;; Antlr mode
 (use-package antlr-mode

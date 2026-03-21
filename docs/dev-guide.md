@@ -18,17 +18,18 @@
   - `consult`
   - `embark`
   - `marginalia`
-- 旧但高频仍在使用：
+- 兼容保留：
   - `ivy`
   - `counsel`
-  - `swiper`
 
 ### 你会实际感受到的行为
 
-- `M-x` 走 `counsel-M-x`
+- `M-x` 走原生 `execute-extended-command`，配 `amx` 历史排序
 - `C-x C-f` 走 `find-file` + `vertico-directory`
 - `C-x b` 走 `consult-buffer`
-- `C-s` 走 `swiper`
+- `C-s` 走 `consult-line`
+- `C-x C-r` 走 `consult-recent-file`
+- `C-x g` 打开 `magit-status`
 - `M-o` 在 minibuffer 里走 `embark-act`
 
 ## 2. LSP 与补全

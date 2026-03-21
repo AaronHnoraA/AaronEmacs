@@ -9,7 +9,6 @@
 
 (declare-function bookmark-bmenu-list "bookmark")
 (declare-function bookmark-maybe-load-default-file "bookmark")
-(declare-function consult-bookmark "consult" ())
 (declare-function consult-buffer "consult" ())
 (declare-function consult-complex-command "consult" ())
 (declare-function consult-find "consult" (&optional dir initial))
@@ -24,6 +23,7 @@
 (declare-function my/project-open-root "init-project")
 (declare-function my/project-switch "init-project")
 (declare-function my/project-vterm "init-project")
+(declare-function my/bookmark-jump-dwim "init-windows")
 (declare-function my/symbols-buffer "init-symbols")
 (declare-function my/symbols-project "init-symbols")
 
@@ -115,11 +115,7 @@
 Load bookmark data first; if no bookmark exists yet, fall back to
 the built-in bookmark list buffer."
   (interactive)
-  (require 'bookmark)
-  (bookmark-maybe-load-default-file)
-  (if bookmark-alist
-      (consult-bookmark)
-    (bookmark-bmenu-list)))
+  (my/bookmark-jump-dwim))
 
 (defun my/telescope-yank-ring ()
   "Browse the kill ring from a centralized Telescope picker."

@@ -23,179 +23,81 @@
   (define-key ivy-minibuffer-map (kbd "TAB") #'ivy-alt-done)
   (define-key ivy-minibuffer-map (kbd "<tab>") #'ivy-alt-done))
 
-;; =========================
-;; Ivy Posframe
-;; =========================
-(use-package ivy-posframe
-  :ensure t
-  :after ivy
-  :defer t)
-
 (use-package counsel
   :ensure t
-  :after ivy
-  :bind (;; `find-file' now goes through the native file prompt, so it can
-         ;; reuse Vertico/Orderless and avoid the Ivy-specific glitches.
-         ("C-x C-f" . find-file)
-         ("C-x C-r" . counsel-recentf)
-         ("C-x g"   . counsel-git))
-  :config
+  :after ivy)
 
-  ;; ============================================================
-  ;; Counsel-find-file 过滤器（默认开）
-  ;; - 精确名字黑名单（文件/目录名完全相等）
-  ;; - 模式黑名单（后缀/临时文件等：例如 *.~undo-tree~）
-  ;; 快捷键：C-c . 切换
-  ;; ============================================================
+(defconst my/search-ignore-exact-names
+  '(".DS_Store" ".localized" "Icon\r"
+    ".use-package-keywords.md" ".projectile" ".dir-locals-2.el" ".cache"
+    "__pycache__" ".mypy_cache" ".pytest_cache" ".ruff_cache"
+    ".coverage" "coverage"
+    "node_modules" "dist" "build" "out" ".parcel-cache" ".turbo"
+    "target" ".gradle" ".idea" ".vscode" ".settings" ".classpath" ".project"
+    ".ccls-cache" ".clangd" ".cache-clangd"
+    ".venv" "venv" ".envrc"
+    ".git" ".hg" ".svn")
+  "Exact file or directory names treated as junk in search-related UIs.")
 
-  (defgroup my/counsel-find-file-filter nil
-    "My counsel find-file filter."
-    :group 'ivy)
+(defconst my/search-ignore-patterns-regexp
+  (concat
+   "\\(?:"
+   ".*~\\'"
+   "\\|#.*#\\'"
+   "\\|\\.#[^/]+\\'"
+   "\\|.*\\.~undo-tree~\\'"
+   "\\|.*\\(?:\\.swp\\|\\.swo\\|\\.swn\\|\\.swx\\)\\'"
+   "\\|.*\\.un~\\'"
+   "\\|.*\\(?:\\.bak\\|\\.tmp\\|\\.temp\\)\\'"
+   "\\|\\.Trash\\'"
+   "\\|\\.DocumentRevisions-V100\\'"
+   "\\|\\.TemporaryItems\\'"
+   "\\|\\.fseventsd\\'"
+   "\\|\\.Spotlight-V100\\'"
+   "\\)")
+  "Regexp matching junk file patterns to exclude from recent-file UIs.")
 
-  (defcustom my/counsel-find-file-filter-enabled t
-    "Non-nil means enable my counsel find-file filter by default."
-    :type 'boolean
-    :group 'my/counsel-find-file-filter)
-
-  ;; ------------------------------------------------------------
-  ;; A) 精确名字黑名单：只匹配“条目名”本身
-  ;; ------------------------------------------------------------
-  (defconst my/counsel-find-file-ignore-exact-names
-    '(
-      ;; ---------- macOS ----------
-      ".DS_Store" ".localized" "Icon\r"
-
-      ;; ---------- Emacs / 编辑器常见生成物 ----------
-      ".use-package-keywords.md"
-      ".projectile"
-      ".dir-locals-2.el"
-      ".cache"
-
-      ;; ---------- Python ----------
-      "__pycache__" ".mypy_cache" ".pytest_cache" ".ruff_cache"
-      ".coverage" "coverage"
-
-      ;; ---------- Node / frontend ----------
-      "node_modules" "dist" "build" "out" ".parcel-cache" ".turbo"
-
-      ;; ---------- Rust/Java/Gradle/IDE ----------
-      "target" ".gradle" ".idea" ".vscode" ".settings" ".classpath" ".project"
-
-      ;; ---------- C/C++ / LSP cache ----------
-      ".ccls-cache" ".clangd" ".cache-clangd"
-
-      ;; ---------- Virtual env / direnv ----------
-      ".venv" "venv" ".envrc"
-
-      ;; ---------- Git / 常见 VCS ----------
-      ".git" ".hg" ".svn"
-      )
-    "Exact entry names to ignore in `counsel-find-file`.")
-
-  (defconst my/counsel-find-file-ignore-exact-names-regexp
-    (concat "\\`"
-            (regexp-opt my/counsel-find-file-ignore-exact-names 'symbols)
-            "\\'")
-    "Regexp matching exact entry names to ignore.")
-
-  ;; ------------------------------------------------------------
-  ;; B) 模式黑名单：匹配“条目名形态”，尤其是尾缀
-  ;;    关键：undo-tree 过滤的是“任何以 .~undo-tree~ 结尾”
-  ;; ------------------------------------------------------------
-  (defconst my/counsel-find-file-ignore-patterns-regexp
-    (concat
-     "\\(?:"
-     ;; ---- Emacs 备份：foo~ ----
-     ".*~\\'"
-     "\\|"
-     ;; ---- Emacs 自动保存：#foo# ----
-     "#.*#\\'"
-     "\\|"
-     ;; ---- Emacs 锁文件：.#foo ----
-     "\\.#[^/]+\\'"
-     "\\|"
-     ;; ---- Undo-tree：任何以 .~undo-tree~ 结尾（例如 a.md.~undo-tree~）----
-     ".*\\.~undo-tree~\\'"
-     "\\|"
-     ;; ---- Vim swap / undo / backup ----
-     ".*\\(?:\\.swp\\|\\.swo\\|\\.swn\\|\\.swx\\)\\'"
-     "\\|"
-     ".*\\.un~\\'"
-     "\\|"
-     ".*\\(?:\\.bak\\|\\.tmp\\|\\.temp\\)\\'"
-     "\\|"
-     ;; ---- 常见系统/工具残留（多为目录名）----
-     "\\.Trash\\'"
-     ".DS_Store"
-     "\\|"
-     "\\.DocumentRevisions-V100\\'"
-     "\\|"
-     "\\.TemporaryItems\\'"
-     "\\|"
-     "\\.fseventsd\\'"
-     "\\|"
-     "\\.Spotlight-V100\\'"
-     "\\)"
-     )
-    "Regexp matching common junk entry patterns to ignore.")
-
-  ;; ------------------------------------------------------------
-  ;; C) 最终规则：精确 OR 模式
-  ;; ------------------------------------------------------------
-  (defconst my/counsel-find-file-ignore-regexp
-    (concat "\\(?:"
-            my/counsel-find-file-ignore-exact-names-regexp
-            "\\|"
-            my/counsel-find-file-ignore-patterns-regexp
-            "\\)")
-    "Combined ignore regexp used by counsel find-file.")
-
-  (defun my/counsel-apply-find-file-filter ()
-    "Apply or clear `counsel-find-file-ignore-regexp` according to toggle."
-    (setq counsel-find-file-ignore-regexp
-          (when my/counsel-find-file-filter-enabled
-            my/counsel-find-file-ignore-regexp)))
-
-  (defun my/counsel-toggle-find-file-filter ()
-    "Toggle my counsel find-file filter (default ON)."
-    (interactive)
-    (setq my/counsel-find-file-filter-enabled
-          (not my/counsel-find-file-filter-enabled))
-    (my/counsel-apply-find-file-filter)
-    (message "Counsel file filter: %s"
-             (if my/counsel-find-file-filter-enabled "ON" "OFF")))
-
-  ;; 默认启用
-  (my/counsel-apply-find-file-filter)
-
-  ;; 你要的快捷键：C-c .
-  (with-eval-after-load 'ivy
-    (define-key ivy-minibuffer-map (kbd "C-c .")
-                #'my/counsel-toggle-find-file-filter))
-  ;; ------------------------------------------------------------
-  ;; D) recentf 同步过滤（避免 C-x C-r 里出现垃圾）
-  ;; ------------------------------------------------------------
+(defun my/search-apply-recentf-filter ()
+  "Exclude junk entries from `recentf'."
   (with-eval-after-load 'recentf
-    ;; 1) 路径段中出现精确黑名单名字就排除（目录或文件都行）
-    (dolist (name my/counsel-find-file-ignore-exact-names)
+    (dolist (name my/search-ignore-exact-names)
       (add-to-list 'recentf-exclude
                    (concat "/"
                            (regexp-quote name)
                            "\\(?:/\\|\\'\\)")))
-    ;; 2) 末尾形态命中（尤其 *.~undo-tree~、*~、#*# 等）
-    (add-to-list 'recentf-exclude my/counsel-find-file-ignore-patterns-regexp)))
+    (add-to-list 'recentf-exclude my/search-ignore-patterns-regexp)))
 
-;; =========================
-;; Swiper
-;; =========================
-(use-package swiper
-  :ensure t
-  :after ivy
-  :bind (("C-s" . swiper)
-         ("C-r" . swiper-isearch-backward))
-  :config
-  (setq swiper-action-recenter t
-        swiper-include-line-number-in-search t))
+(my/search-apply-recentf-filter)
+
+(declare-function consult-line "consult" (&optional initial start))
+(declare-function consult-line-multi "consult" (query &optional initial))
+(declare-function consult-recent-file "consult" ())
+
+(defun my/search-line-forward ()
+  "Search the current buffer with `consult-line'."
+  (interactive)
+  (call-interactively #'consult-line))
+
+(defun my/search-line-backward ()
+  "Keep classic backward incremental search on `C-r'."
+  (interactive)
+  (call-interactively #'isearch-backward))
+
+(defun my/search-open-recent-file ()
+  "Open a recent file with the Consult UI."
+  (interactive)
+  (call-interactively #'consult-recent-file))
+
+(defun my/search-project-buffers ()
+  "Search across opened project buffers."
+  (interactive)
+  (if (fboundp 'consult-line-multi)
+      (call-interactively #'consult-line-multi)
+    (call-interactively #'consult-line)))
+
+(global-set-key (kbd "C-s") #'my/search-line-forward)
+(global-set-key (kbd "C-r") #'my/search-line-backward)
+(global-set-key (kbd "C-x C-r") #'my/search-open-recent-file)
 
 (provide 'init-search)
 

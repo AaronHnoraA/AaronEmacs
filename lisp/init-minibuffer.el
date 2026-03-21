@@ -51,6 +51,7 @@
         '((buffer (styles . (orderless flex)))
           (file (styles . (basic partial-completion orderless)))
           (imenu (styles . (orderless substring)))
+          (my-workspace-symbol (styles . (orderless flex basic)))
           (eglot-capf (styles . (orderless basic partial-completion)))
           (kill-ring (styles . (orderless substring))))))
 
@@ -76,10 +77,13 @@
   :config
   (with-no-warnings
     (consult-customize consult-ripgrep consult-git-grep consult-grep
-                       consult-bookmark
                        consult-recent-file
                        consult-buffer
                        :preview-key nil)
+    (consult-customize consult-bookmark
+                       :preview-key '(:debounce 0.2 any))
+    (consult-customize consult-xref
+                       :preview-key '(:debounce 0.15 any))
     (consult-customize consult-line
                        :prompt "Search: "))
 

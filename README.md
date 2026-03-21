@@ -17,8 +17,8 @@
   - `evil` + `evil-collection` + `evil-surround` 是主工作流，`SPC` 是 leader key。
 - 补全与搜索
   - 当前是双栈并存：
-    - `vertico` + `orderless` + `consult` + `embark` + `marginalia` 负责现代 minibuffer/completion 体验。
-    - `ivy` + `counsel` + `swiper` 仍负责 `M-x`、`C-x C-r`、`C-s` 等常用入口。
+    - `vertico` + `orderless` + `consult` + `embark` + `marginalia` 负责主搜索/补全工作流，`C-s`、`C-x C-r` 等高频入口已经切到 Consult。
+    - `ivy` + `counsel` 仍保留给少数兼容入口和 Projectile/Org 的旧工作流。
   - 现在额外补了一层 `telescope` 统一入口：用 `transient` 把常用 `consult` picker、项目切换和符号搜索收在一个面板里，并单独给这套入口打开更积极的 preview。
   - `C-x C-f` 已切回原生 `find-file`，配合 `vertico-directory` 和原生文件补全过滤，避免旧的 Ivy 文件选择问题。
 - 编程与调试
@@ -80,21 +80,25 @@
 - `SPC`
   Evil leader，总入口。
 - `M-x`
-  走 `counsel-M-x`。
+  走原生 `execute-extended-command`，配 `amx` 历史排序。
 - `M-x telescope`
   打开统一的 Telescope 风格搜索面板。
 - `SPC SPC`
   打开统一的 Telescope 风格搜索面板。
 - `SPC SPC I`
-  打开当前 workspace / 项目的 symbols。
+  打开当前 workspace / 项目的 symbols；优先加载一批 workspace 候选后在本地筛选，匹配更宽松，并直接预览候选位置。
 - `SPC SPC m`
-  打开 bookmark 入口；有书签时走 picker，没有书签时打开书签列表。
+  打开 bookmark picker；当前项目书签优先，没有书签时打开列表缓冲区。
 - `C-x C-f`
   走 `find-file` + `vertico-directory`。
 - `C-x b`
   走 `consult-buffer`。
 - `C-s`
-  走 `swiper`。
+  走 `consult-line`。
+- `C-x C-r`
+  走 `consult-recent-file`。
+- `C-x g`
+  打开 `magit-status`。
 - `C-c p`
   Projectile 前缀。
 - `C-c p .`
@@ -109,6 +113,22 @@
   代码折叠：切换 / 打开 / 关闭 / 全展开 / 全折叠。
 - `SPC v v` / `SPC v f` / `SPC v s` / `SPC v b`
   结构选择：扩选、整函数、语句、代码块。
+- `SPC b .`
+  打开 bookmark 管理菜单。
+- `C-x r .`
+  打开 bookmark 管理菜单。
+- `C-x r j`
+  跳转 bookmark，带预览。
+- `C-x r l` / `C-x r n` / `C-x r p`
+  切换当前行书签 / 下一个行书签 / 上一个行书签。
+- `SPC b l` / `SPC b t` / `SPC b n` / `SPC b p` / `SPC b L`
+  书签列表 / 切换当前行书签 / 下一个行书签 / 上一个行书签 / 直接设置当前行书签。
+- `*Bookmarks*`
+  列表里 `RET` 跳转，`D` 删除；当前项目书签优先显示。
+- `SPC n a` / `SPC n e` / `SPC n u`
+  结构导航：函数开头、函数结尾、跳到外层结构。
+- `[f` / `]f`
+  上一个 / 下一个函数。
 - `C-c p g`
   `consult-ripgrep`。
 - `C-c y`
@@ -210,6 +230,6 @@ emacs --debug-init -q -l ./bootstrap.el
 
 ## 当前已知现状
 
-- 现在仍然是 `ivy/counsel/swiper` 和 `vertico/consult/embark` 双栈并存，尚未完全统一。
+- 现在仍然是 `ivy/counsel` 和 `vertico/consult/embark` 双栈并存，但高频搜索入口已经优先走 `consult`。
 - 一些路径和应用绑定是硬编码的，比如 `~/HC/Org/`、Brave 数据目录、`var/mygpt.json`。
 - 这套配置优先照顾“本地编码 + SSH/TRAMP + Org 笔记/学术写作”三类日常使用，不追求最小依赖或跨平台零定制。
