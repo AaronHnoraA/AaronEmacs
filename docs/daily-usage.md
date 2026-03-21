@@ -244,7 +244,9 @@
 - `SPC SPC g`
   当前项目 ripgrep
 - `SPC SPC I`
-  当前 workspace / 项目 symbols；输入关键词后走 `xref-find-apropos` + `consult-xref`，并带 preview
+  当前 workspace / 项目 symbols；输入时实时刷新候选并 preview
+- `SPC SPC i`
+  当前 buffer symbols；输入时实时 preview 到候选 symbol
 - `SPC SPC m`
   bookmark picker；没有书签时打开 bookmark 列表
 - `C-s`

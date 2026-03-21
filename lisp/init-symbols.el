@@ -9,8 +9,17 @@
 (require 'init-funcs)
 (require 'subr-x)
 
+(defvar consult--buffer-display)
+(defvar consult-preview-key)
+(defvar xref-file-name-display)
+(defvar xref-show-definitions-function)
+(defvar xref-show-xrefs-function)
+
 (declare-function consult--format-file-line-match "consult" (file line match))
+(declare-function consult--dynamic-collection "consult" (&rest args))
 (declare-function consult--jump-preview "consult" ())
+(declare-function consult--lookup-prop "consult" (prop candidates input narrowing))
+(declare-function consult--prefix-group "consult" (candidate transform))
 (declare-function consult--read "consult" (table &rest options))
 (declare-function consult--temporary-files "consult" ())
 (declare-function consult--marker-from-line-column "consult" (buffer line column))
@@ -18,12 +27,32 @@
 (declare-function consult-imenu "consult-imenu")
 (declare-function consult-imenu-multi "consult-imenu" (&optional query))
 (declare-function my/current-language-server-backend "init-lsp")
+(declare-function my/project-current-root "init-project")
 (declare-function my/python-setup-imenu "init-python")
 (declare-function lsp-feature? "lsp-mode" (method))
+(declare-function xref-backend-apropos "xref" (backend pattern))
+(declare-function xref-file-location-column "xref" (xref-file-location))
+(declare-function xref-find-backend "xref" ())
+(declare-function xref-item-location "xref" (xref))
+(declare-function xref-item-summary "xref" (xref))
+(declare-function xref-location-group "xref" (location))
+(declare-function xref-location-line "xref" (location))
+(declare-function xref-location-marker "xref" (location))
+(declare-function xref-pop-to-location "xref" (location &optional display-action always-show))
 (declare-function xref-find-apropos "xref" (pattern))
+
+(defgroup my/symbols nil
+  "Buffer and project symbol search."
+  :group 'convenience)
+
+(defcustom my/symbols-preview-key '(:debounce 0.15 any)
+  "Preview strategy for symbol pickers."
+  :type 'sexp
+  :group 'my/symbols)
 
 (defvar imenu--index-alist)
 (defvar my/symbols-file-line-history nil)
+(defvar my/symbols-workspace-history nil)
 (defvar my/symbols-project-fallback-alist nil)
 (defvar transient--original-buffer)
 
@@ -58,6 +87,12 @@
                (lambda (entry)
                  (eq (car entry) mode))
                my/symbols-project-fallback-alist))))
+
+(defun my/symbols--project-root ()
+  "Return the active project root, or `default-directory' as fallback."
+  (or (and (fboundp 'my/project-current-root)
+           (my/project-current-root))
+      default-directory))
 
 (defun my/symbols--project-fallback-function ()
   "Return the project-symbol fallback function for the current buffer."
@@ -129,6 +164,59 @@ Use OPENER to open the file temporarily when provided."
         (recenter)
         t))))
 
+(defun my/symbols--xref-candidate (xref root)
+  "Build a Consult candidate for XREF relative to ROOT."
+  (let* ((loc (xref-item-location xref))
+         (group (xref-location-group loc))
+         (group (if (and root (stringp group))
+                    (string-remove-prefix root group)
+                  group))
+         (cand (consult--format-file-line-match
+                (or group "")
+                (or (xref-location-line loc) 0)
+                (xref-item-summary xref))))
+    (add-text-properties
+     0 1 `(my-symbol-xref ,xref
+                          consult--prefix-group ,group)
+     cand)
+    cand))
+
+(defun my/symbols--workspace-preview-state ()
+  "Build the preview state function for workspace symbol candidates."
+  (require 'consult)
+  (let ((open (consult--temporary-files))
+        (preview (consult--jump-preview)))
+    (lambda (action cand)
+      (unless (and cand (eq action 'preview))
+        (funcall open))
+      (let ((consult--buffer-display #'switch-to-buffer))
+        (funcall preview action
+                 (when-let* ((xref (and (eq action 'preview) cand))
+                             (loc (xref-item-location xref)))
+                   (pcase (type-of loc)
+                     ((or 'xref-file-location 'xref-etags-location)
+                      (consult--marker-from-line-column
+                       (funcall open
+                                (let ((xref-file-name-display 'abs))
+                                  (xref-location-group loc)))
+                       (xref-location-line loc)
+                       (if (eq (type-of loc) 'xref-file-location)
+                           (xref-file-location-column loc)
+                         0)))
+                     (_
+                      (xref-location-marker loc)))))))))
+
+(defun my/symbols--workspace-candidates (buffer backend root input)
+  "Return workspace symbol candidates for INPUT from BACKEND in BUFFER."
+  (when (and (buffer-live-p buffer)
+             (not (string-empty-p input)))
+    (with-current-buffer buffer
+      (condition-case nil
+          (mapcar (lambda (xref)
+                    (my/symbols--xref-candidate xref root))
+                  (xref-backend-apropos backend input))
+        (error nil)))))
+
 (defun my/symbols--prepare-buffer-imenu ()
   "Refresh the current buffer's imenu data before symbol search."
   (when (and (fboundp 'my/python-setup-imenu)
@@ -140,9 +228,10 @@ Use OPENER to open the file temporarily when provided."
 (defun my/symbols--buffer ()
   "Search symbols in the current buffer."
   (my/symbols--prepare-buffer-imenu)
-  (if (fboundp 'consult-imenu)
-      (consult-imenu)
-    (imenu nil)))
+  (let ((consult-preview-key my/symbols-preview-key))
+    (if (fboundp 'consult-imenu)
+        (consult-imenu)
+      (imenu nil))))
 
 (defun my/symbols-buffer ()
   "Search symbols in the current buffer."
@@ -150,13 +239,40 @@ Use OPENER to open the file temporarily when provided."
   (my/symbols--call-in-origin-buffer #'my/symbols--buffer))
 
 (defun my/symbols-xref-apropos ()
-  "Run `xref-find-apropos' through Consult with preview enabled."
+  "Search workspace symbols with live preview while typing."
   (interactive)
   (require 'consult)
-  (let ((xref-show-xrefs-function #'consult-xref)
-        (xref-show-definitions-function #'consult-xref)
-        (consult-preview-key '(:debounce 0.15 any)))
-    (call-interactively #'xref-find-apropos)))
+  (let* ((buffer (my/symbols--origin-buffer))
+         (backend (with-current-buffer buffer
+                    (xref-find-backend)))
+         (root (with-current-buffer buffer
+                 (my/symbols--project-root)))
+         (initial (with-current-buffer buffer
+                    (thing-at-point 'symbol t))))
+    (unless backend
+      (user-error "No xref backend in current buffer"))
+    (when-let* ((xref
+                 (consult--read
+                  (consult--dynamic-collection
+                    (lambda (input)
+                      (my/symbols--workspace-candidates
+                       buffer backend root input))
+                    :min-input 1
+                    :throttle 0.15
+                    :debounce 0.1
+                    :highlight t)
+                  :prompt "Workspace symbol: "
+                  :history 'my/symbols-workspace-history
+                  :add-history initial
+                  :require-match t
+                  :sort nil
+                  :category 'my-workspace-symbol
+                  :group #'consult--prefix-group
+                  :state (my/symbols--workspace-preview-state)
+                  :preview-key my/symbols-preview-key
+                  :lookup (apply-partially #'consult--lookup-prop
+                                           'my-symbol-xref))))
+      (xref-pop-to-location (xref-item-location xref)))))
 
 (defun my/symbols--workspace-capable-p ()
   "Return non-nil when workspace-symbol search should be attempted."
@@ -184,7 +300,8 @@ back to `consult-imenu-multi', which only covers opened buffers."
     (my/symbols-xref-apropos))
    ((my/symbols--project-fallback))
    ((fboundp 'consult-imenu-multi)
-    (consult-imenu-multi))
+    (let ((consult-preview-key my/symbols-preview-key))
+      (consult-imenu-multi)))
    (t
     (my/symbols--buffer))))
 
