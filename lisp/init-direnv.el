@@ -8,6 +8,8 @@
 (declare-function direnv-update-environment "direnv" (&optional file-name force-summary))
 (declare-function direnv-update-directory-environment "direnv" (&optional directory force-summary))
 
+(defvar direnv-always-show-summary)
+
 (defcustom my/enable-direnv t
   "Whether to enable `direnv-mode' automatically."
   :type 'boolean
@@ -25,7 +27,7 @@
                      ((file-directory-p expanded)
                       (file-name-as-directory expanded))
                      (t
-                      (file-name-directory expanded)))))
+                       (file-name-directory expanded)))))
     (when (and directory
                (not (file-remote-p directory))
                (file-directory-p directory))

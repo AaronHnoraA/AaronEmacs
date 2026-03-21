@@ -7,6 +7,9 @@
 
 (defvar eshell-last-dir-ring)
 
+(declare-function my/terminal-cd-command "init-funcs" (directory))
+(declare-function my/terminal-home-directory "init-funcs" (&optional directory))
+(declare-function my/terminal-normalize-directory "init-funcs" (directory))
 (declare-function ring-elements "ring")
 (declare-function eshell/cd "esh-mode")
 (declare-function eshell-grep "em-unix")
@@ -195,34 +198,52 @@ If popup is focused, kill it."
 (defvar my/vterm-startup-cd-inhibited nil
   "When non-nil, do not inject an initial `cd' into newly created VTerm buffers.")
 
-(defun my/vterm--startup-directory ()
-  "Return the local startup directory for a fresh VTerm buffer, or nil."
-  (let ((directory (and default-directory
-                        (file-name-as-directory
-                         (expand-file-name default-directory)))))
-    (unless (or my/vterm-startup-cd-inhibited
-                (null directory)
-                (file-remote-p directory)
-                (equal directory
-                       (file-name-as-directory (expand-file-name "~"))))
-      directory)))
+(defun my/vterm--startup-directory (&optional directory)
+  "Return the same-connection home directory for DIRECTORY, or nil."
+  (unless my/vterm-startup-cd-inhibited
+    (my/terminal-home-directory (or directory default-directory))))
 
 (defun my/vterm--send-cd (buffer directory)
   "Send `cd DIRECTORY' to VTerm BUFFER."
-  (when (and directory (buffer-live-p buffer))
+  (when-let* ((buffer (and (buffer-live-p buffer) buffer))
+              (command (my/terminal-cd-command directory)))
     (with-current-buffer buffer
-      (vterm-send-string
-       (format "cd %s" (shell-quote-argument (directory-file-name directory))))
+      (vterm-send-string command)
       (vterm-send-return))))
 
 (defun my/vterm--start-in-home-and-cd (orig-fn &rest args)
-  "Create local VTerm buffers from home, then `cd' into the original directory."
-  (if-let* ((target-directory (my/vterm--startup-directory)))
-      (let ((default-directory "~/"))
-        (let ((buffer (apply orig-fn args)))
-          (my/vterm--send-cd buffer target-directory)
-          buffer))
-    (apply orig-fn args)))
+  "Create VTerm buffers from home, then `cd' into the original directory."
+  (let* ((target-directory (my/terminal-normalize-directory default-directory))
+         (startup-directory (and target-directory
+                                 (my/vterm--startup-directory target-directory))))
+    (if startup-directory
+        (let ((default-directory startup-directory))
+          (let ((buffer (apply orig-fn args)))
+            (my/vterm--send-cd buffer target-directory)
+            buffer))
+      (apply orig-fn args))))
+
+(defun my/vterm--ssh-target-directory (host)
+  "Return the preferred TRAMP directory for SSH HOST."
+  (let* ((directory (my/terminal-normalize-directory default-directory))
+         (method (and directory (file-remote-p directory 'method)))
+         (remote-host (and directory (file-remote-p directory 'host))))
+    (if (and method
+             remote-host
+             (string= host remote-host)
+             (or (string-prefix-p "ssh" method)
+                 (string= method "scp")))
+        directory
+      (format "/ssh:%s:~/" host))))
+
+(defun my/vterm--open-in-directory (buffer-name directory)
+  "Open or switch to BUFFER-NAME, creating it in DIRECTORY when needed."
+  (if-let* ((buffer (get-buffer buffer-name)))
+      (progn
+        (my/vterm--send-cd buffer directory)
+        buffer)
+    (let ((default-directory directory))
+      (vterm buffer-name))))
 
 (defun my/vterm-named (name)
   "Create or switch to a named vterm buffer."
@@ -235,14 +256,10 @@ If popup is focused, kill it."
 (defun my/vterm-ssh (host)
   "Open a dedicated vterm buffer and start an SSH session to HOST."
   (interactive (list (my/read-ssh-host)))
-  (let ((buffer-name (format "*vterm:ssh:%s*" host)))
+  (let ((buffer-name (format "*vterm:ssh:%s*" host))
+        (target-directory (my/vterm--ssh-target-directory host)))
     (pop-to-buffer
-     (or (get-buffer buffer-name)
-         (let ((my/vterm-startup-cd-inhibited t))
-           (with-current-buffer (vterm buffer-name)
-           (vterm-send-string (format "ssh %s" host))
-           (vterm-send-return)
-           (current-buffer)))))))
+     (my/vterm--open-in-directory buffer-name target-directory))))
 
 (use-package vterm
   :ensure t

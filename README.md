@@ -86,7 +86,7 @@
 - `SPC SPC`
   打开统一的 Telescope 风格搜索面板。
 - `SPC SPC I`
-  打开当前 workspace / 项目的 symbols；优先加载一批 workspace 候选后在本地筛选，匹配更宽松，并直接预览候选位置。
+  打开当前 workspace / 项目的 symbols；输入关键词后走 `xref-find-apropos` + `consult-xref`，并直接预览候选位置。
 - `SPC SPC m`
   打开 bookmark picker；当前项目书签优先，没有书签时打开列表缓冲区。
 - `C-x C-f`

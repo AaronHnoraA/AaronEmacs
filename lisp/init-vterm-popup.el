@@ -7,6 +7,7 @@
 
 (require 'cl-lib)
 
+(declare-function my/terminal-normalize-directory "init-funcs" (directory))
 (declare-function vterm "vterm" (&optional buffer-name))
 (declare-function vterm-send-string "vterm" (string))
 (declare-function vterm-send-return "vterm" ())
@@ -140,15 +141,14 @@ When BUFFER is non-nil, return the window displaying BUFFER."
 
 (defun my/vterm-popup--create-buffer (&optional directory buffer-name)
   "Create and register a new popup vterm buffer.
-Use DIRECTORY as the initial `cd' target when non-nil.
+Use DIRECTORY as the initial terminal directory when non-nil.
 Use BUFFER-NAME when non-nil."
   (require 'vterm)
-  (let* ((directory (and directory
-                         (file-name-as-directory (expand-file-name directory))))
-         (default-directory "~/")
-        (target-name (generate-new-buffer-name
-                      (or buffer-name
-                          (my/vterm-popup--next-buffer-name)))))
+  (let* ((default-directory (or (my/terminal-normalize-directory directory)
+                                default-directory))
+         (target-name (generate-new-buffer-name
+                       (or buffer-name
+                           (my/vterm-popup--next-buffer-name)))))
     (with-current-buffer (save-window-excursion
                            (vterm target-name))
       (setq-local my/vterm-popup-instance-p t)
@@ -157,14 +157,7 @@ Use BUFFER-NAME when non-nil."
       (setq my/vterm-popup-buffers
             (append (my/vterm-popup--live-buffers) (list (current-buffer))))
       (setq my/vterm-popup-current-buffer (current-buffer))
-      (when directory
-        (vterm-send-string (my/vterm-popup--cd-command directory))
-        (vterm-send-return))
       (current-buffer))))
-
-(defun my/vterm-popup--cd-command (directory)
-  "Return a shell command that changes to DIRECTORY."
-  (format "cd %s" (shell-quote-argument (directory-file-name directory))))
 
 (defun my/vterm-popup--project-root ()
   "Return the current project root.
@@ -200,10 +193,7 @@ Signal a user error when outside a project."
          (buffer (my/vterm-popup--create-buffer project-root buffer-name)))
     (with-current-buffer buffer
       (setq-local vterm-kill-buffer-on-exit t)
-      (vterm-send-string
-       (format "%s && clear; %s; exit"
-               (my/vterm-popup--cd-command project-root)
-               command))
+      (vterm-send-string (format "clear; %s; exit" command))
       (vterm-send-return))
     (select-window (my/vterm-popup--show-buffer buffer))
     buffer))
@@ -326,6 +316,7 @@ With prefix ARG, create a new popup vterm and switch to it."
 (global-set-key (kbd "C-c M-e") #'my/vterm-toggle-fixed)
 
 (add-hook 'window-selection-change-functions #'my/vterm-popup--auto-hide)
+(add-hook 'buffer-list-update-hook #'my/vterm-popup--auto-hide)
 
 (provide 'init-vterm-popup)
 ;;; init-vterm-popup.el ends here

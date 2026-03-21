@@ -12,6 +12,33 @@
   "Default threshold in bytes for treating a buffer as large."
   :type 'integer)
 
+(defun my/terminal-normalize-directory (directory)
+  "Return DIRECTORY as an absolute directory name."
+  (when directory
+    (file-name-as-directory (expand-file-name directory))))
+
+(defun my/terminal-home-directory (&optional directory)
+  "Return the home directory for DIRECTORY's local or remote context."
+  (when-let* ((directory (my/terminal-normalize-directory
+                          (or directory default-directory))))
+    (if-let* ((remote-prefix (file-remote-p directory)))
+        (concat remote-prefix "~/")
+      (file-name-as-directory (expand-file-name "~")))))
+
+(defun my/terminal-shell-directory (directory)
+  "Return DIRECTORY in the form expected by an interactive shell."
+  (when-let* ((directory (my/terminal-normalize-directory directory)))
+    (if (file-remote-p directory)
+        (file-name-as-directory (file-local-name directory))
+      directory)))
+
+(defun my/terminal-cd-command (directory)
+  "Return a shell command that changes to DIRECTORY."
+  (when-let* ((shell-directory (my/terminal-shell-directory directory)))
+    (format "cd %s"
+            (shell-quote-argument
+             (directory-file-name shell-directory)))))
+
 (defun my/buffer-large-p (&optional buffer threshold)
   "Return non-nil if BUFFER exceeds THRESHOLD bytes.
 BUFFER defaults to the current buffer.  THRESHOLD defaults to
