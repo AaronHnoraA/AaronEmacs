@@ -4,7 +4,7 @@
 # -- Cases
 # --
 \begin{cases}
-	${1:equation}, &\text{ if }${2:case}\\\\
-	$0
+${1:f(x) = x^2}, & \\text{if } ${2:x > 0} \\
+${3:0}, & \\text{otherwise}
 \end{cases} `(when (and (not (eobp)) (looking-at "
 ")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

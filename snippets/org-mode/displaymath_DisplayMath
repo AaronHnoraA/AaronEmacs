@@ -3,8 +3,8 @@
 # key: displaymath
 # -- Display Math
 # --
-\begin{displaymath}
-	$1
-\end{displaymath}
+\[
+$1
+\]
 $0 `(when (and (not (eobp)) (looking-at "
 ")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

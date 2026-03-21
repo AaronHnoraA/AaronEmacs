@@ -4,7 +4,7 @@
 # -- Add a Equation
 # --
 \begin{equation}
-	$0
-	\label{eq:$1}
+$1
+\label{eq:$2}
 \end{equation} `(when (and (not (eobp)) (looking-at "
 ")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

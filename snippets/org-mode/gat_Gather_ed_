@@ -3,7 +3,8 @@
 # key: gat
 # -- Gather(ed)
 # --
-\begin{gather}
-	$0
-\end{gather} `(when (and (not (eobp)) (looking-at "
+\begin{gather*}
+$1 \\
+$0
+\end{gather*} `(when (and (not (eobp)) (looking-at "
 ")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`

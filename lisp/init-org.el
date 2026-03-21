@@ -1150,8 +1150,10 @@ Each value may be a readable `.cls' file path or literal class source."
           (my/org-latex--place-preview
            beg end (plist-get waiter :value) file imagetype))))))
 
-(defun my/org-latex--fragment-spec (beg end value)
-  "Return render metadata for LaTeX fragment VALUE between BEG and END."
+(defun my/org-latex--fragment-spec (beg end source-value render-value)
+  "Return render metadata for a LaTeX fragment between BEG and END.
+SOURCE-VALUE is the exact buffer text covered by the preview overlay.
+RENDER-VALUE is the snippet sent to the LaTeX renderer."
   (save-excursion
     (goto-char beg)
     (let* ((processing-type org-preview-latex-default-process)
@@ -1178,7 +1180,7 @@ Each value may be a readable `.cls' file path or literal class source."
                               nil
                               nil
                               org-format-latex-options
-                              t value fg bg))))
+                              t render-value fg bg))))
            (imagetype (or (plist-get processing-info :image-output-type) "png"))
            (movefile (format "%s_%s.%s"
                              (expand-file-name prefix dir)
@@ -1190,7 +1192,8 @@ Each value may be a readable `.cls' file path or literal class source."
              `(:foreground ,fg :background ,bg))))
       (list :beg beg
             :end end
-            :value value
+            :value source-value
+            :render-value render-value
             :dir dir
             :file movefile
             :imagetype imagetype
@@ -1212,9 +1215,15 @@ Each value may be a readable `.cls' file path or literal class source."
                                (goto-char (org-element-end context))
                                (skip-chars-backward " \r\t\n")
                                (point)))
-                   (value (org-element-property :value context)))
-              (push (my/org-latex--fragment-spec frag-beg frag-end value) fragments)
-              (goto-char (max (point) frag-end))))))
+                   (source-beg frag-beg)
+                   (source-end frag-end)
+                   (source-value
+                    (buffer-substring-no-properties source-beg source-end))
+                   (render-value source-value))
+              (push (my/org-latex--fragment-spec
+                     source-beg source-end source-value render-value)
+                    fragments)
+              (goto-char (max (point) source-end))))))
       (nreverse fragments))))
 
 (defun my/org-latex--cleanup-job-files (job)
@@ -1399,7 +1408,7 @@ Each value may be a readable `.cls' file path or literal class source."
                             :imagetype (plist-get spec :imagetype)
                             :options (plist-get spec :options)
                             :processing-type (plist-get spec :processing-type)
-                            :value (plist-get spec :value)
+                            :value (plist-get spec :render-value)
                             :waiters (list (my/org-latex--make-waiter spec))))
             (puthash target job my/org-latex--pending-renders)
             (setq my/org-latex--render-queue

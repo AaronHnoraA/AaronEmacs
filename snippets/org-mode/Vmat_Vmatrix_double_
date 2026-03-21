@@ -3,6 +3,6 @@
 # key: Vmat
 # --
 \begin{Vmatrix}
-$1
+$0
 \end{Vmatrix} `(when (and (not (eobp)) (looking-at "
 ")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
