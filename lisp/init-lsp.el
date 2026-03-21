@@ -41,7 +41,9 @@ Each entry is a plist with keys such as `:modes', `:program',
 (declare-function eglot-current-server "eglot")
 (declare-function eglot-shutdown "eglot" (server))
 (declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
+(declare-function my/problems-buffer "init-problems" ())
 (declare-function my/diagnostics-buffer-ui "init-diagnostics-ui")
+(declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
 (declare-function my/diagnostics-project-ui "init-diagnostics-ui")
 (declare-function prescient-persist-mode "prescient" (&optional arg))
 (declare-function flymake-diagnostic-text "flymake" (diag))
@@ -344,8 +346,8 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   :bind (:map flymake-mode-map
          ("M-n" . flymake-goto-next-error)
          ("M-p" . flymake-goto-prev-error)
-         ("C-c !" . my/diagnostics-buffer-ui)
-         ("C-c ?" . my/diagnostics-project-ui))
+         ("C-c !" . my/problems-buffer)
+         ("C-c ?" . my/diagnostics-dispatch))
   :custom
   (flymake-no-changes-timeout 0.2) ; 输入停顿 0.2s 后自动检查
   (flymake-indicator-type 'fringes))

@@ -16,6 +16,7 @@
 (declare-function flymake-diagnostics "flymake" (&optional beg end))
 (declare-function flymake-start "flymake" ())
 (declare-function flymake--project-diagnostics "flymake" (project))
+(declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
 
 (defconst my/diagnostics-project-buffer-name "*Diagnostics: Project*"
   "Buffer name used by the toggleable project diagnostics panel.")
@@ -51,7 +52,8 @@ When `other', show only other files.")
     (define-key map (kbd "w") #'my/diagnostics-show-warnings)
     (define-key map (kbd "n") #'my/diagnostics-show-notes)
     (define-key map (kbd "x") #'my/diagnostics-rerun)
-    (define-key map (kbd "C-c ?") #'my/diagnostics-project-ui)
+    (define-key map (kbd "?") #'my/diagnostics-dispatch)
+    (define-key map (kbd "C-c ?") #'my/diagnostics-dispatch)
     map)
   "Keymap for `my/diagnostics-mode'.")
 

@@ -127,6 +127,11 @@
 
 ### Code `SPC c`
 
+- `SPC c ?`
+  diagnostics hub
+  统一入口：当前 / 项目 picker、buffer / project panel、error / warning 过滤都在这里
+- `SPC c !`
+  当前 buffer diagnostics picker
 - `SPC c a`
   code actions
 - `SPC c .`
@@ -163,6 +168,10 @@
   `compile`
 - `SPC c C`
   `recompile`
+- `SPC c D`
+  当前 buffer diagnostics panel
+- `SPC c P`
+  当前项目 diagnostics panel
 - `SPC c x`
   `quickrun`
 

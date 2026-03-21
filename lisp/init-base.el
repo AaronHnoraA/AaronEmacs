@@ -1449,7 +1449,8 @@ interrupt the current window layout."
       (pop-to-buffer buffer)
     (user-error "No warnings buffer yet")))
 
-(advice-add 'display-warning :around #'my/suppress-warning-popups-a)
+(unless (advice-member-p #'my/suppress-warning-popups-a 'display-warning)
+  (advice-add 'display-warning :around #'my/suppress-warning-popups-a))
 
 
 ;; 不要在任何情况下自动显示 diary

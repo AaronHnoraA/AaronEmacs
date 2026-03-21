@@ -95,7 +95,7 @@
   "Return non-nil when tree-sitter APIs are ready for the current buffer."
   (and (fboundp 'treesit-node-at)
        (fboundp 'treesit-ready-p)
-       (ignore-errors (treesit-ready-p))))
+       (ignore-errors (treesit-ready-p nil t))))
 
 (defun my/selection--node-at-point ()
   "Return the current tree-sitter node around point."

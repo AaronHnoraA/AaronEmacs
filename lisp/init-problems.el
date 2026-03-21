@@ -27,8 +27,7 @@
       (consult-flymake t)
     (flymake-show-buffer-diagnostics)))
 
-(my/evil-global-leader-set "c !" #'my/problems-buffer "problems")
-(my/evil-global-leader-set "c ?" #'my/problems-project "project problems")
+(my/evil-global-leader-set "c !" #'my/problems-buffer "buffer problems")
 
 (provide 'init-problems)
 ;;; init-problems.el ends here

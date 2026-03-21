@@ -17,6 +17,45 @@
       gc-cons-percentage 0.6
       file-name-handler-alist nil)
 
+;; Silence non-critical warning popups as early as possible so startup noise
+;; stays in `*Warnings*` instead of stealing focus.
+(defvar my/warning-popup-minimum-level :error
+  "Minimum warning severity that may auto-display the warnings buffer.")
+
+(defun my/warning-level-rank (level)
+  "Return a comparable numeric rank for warning LEVEL."
+  (pcase level
+    (:debug 0)
+    (:warning 1)
+    (:error 2)
+    (:emergency 3)
+    (_ 1)))
+
+(defun my/warning-level-at-least-p (level threshold)
+  "Return non-nil when warning LEVEL is at least THRESHOLD."
+  (>= (my/warning-level-rank level)
+      (my/warning-level-rank threshold)))
+
+(defun my/warning-type-list (type)
+  "Normalize warning TYPE into the list form used by `warning-suppress-types'."
+  (if (consp type) type (list type)))
+
+(defun my/suppress-warning-popups-a (orig-fn type message &optional level buffer-name)
+  "Keep lower-severity warnings in the log without auto-popping a window."
+  (let ((level (or level :warning)))
+    (if (my/warning-level-at-least-p level my/warning-popup-minimum-level)
+        (funcall orig-fn type message level buffer-name)
+      (let ((warning-suppress-types
+             (cons (my/warning-type-list type) warning-suppress-types)))
+        (funcall orig-fn type message level buffer-name)))))
+
+(unless (advice-member-p #'my/suppress-warning-popups-a 'display-warning)
+  (advice-add 'display-warning :around #'my/suppress-warning-popups-a))
+
+;; Native compilation warnings can surface before the main init loads.
+(setq native-comp-async-report-warnings-errors 'silent
+      native-comp-warning-on-missing-source nil)
+
 ;; Emacs 启动完成后恢复正常 GC 和 file-name-handler 设置
 (add-hook 'emacs-startup-hook
           (lambda ()

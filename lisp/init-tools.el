@@ -12,8 +12,8 @@
   :config
   (which-key-mode 1)
   (which-key-add-key-based-replacements
-    "C-c !" "diagnostics"
-    "C-c ?" "diagnostics panel"
+    "C-c !" "buffer diagnostics"
+    "C-c ?" "diagnostics hub"
     "C-c @" "hideshow"
     "C-c i" "ispell"
     "C-c t" "hl-todo"

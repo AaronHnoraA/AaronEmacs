@@ -158,7 +158,7 @@
   "Return non-nil when the current buffer should prefer `treesit-fold'."
   (and (fboundp 'treesit-ready-p)
        (fboundp 'treesit-fold-mode)
-       (ignore-errors (treesit-ready-p))
+       (ignore-errors (treesit-ready-p nil t))
        (string-match-p "-ts-mode\\'" (symbol-name major-mode))))
 
 (defun my/fold--ensure-backend ()
@@ -191,17 +191,18 @@
 
 (defun my/fold--save-state-table ()
   "Persist fold state to disk."
-  (my/fold--load-state-table)
-  (condition-case err
-      (progn
-        (make-directory (file-name-directory my/fold-state-file) t)
-        (with-temp-file my/fold-state-file
-          (let ((print-length nil)
-                (print-level nil))
-            (prin1 my/fold-state-table (current-buffer))
-            (insert "\n"))))
-    (file-locked
-     (message "Skip saving fold state: %s" (error-message-string err)))))
+  (unless noninteractive
+    (my/fold--load-state-table)
+    (condition-case err
+        (progn
+          (make-directory (file-name-directory my/fold-state-file) t)
+          (with-temp-file my/fold-state-file
+            (let ((print-length nil)
+                  (print-level nil))
+              (prin1 my/fold-state-table (current-buffer))
+              (insert "\n"))))
+      (file-locked
+       (message "Skip saving fold state: %s" (error-message-string err))))))
 
 (defun my/fold--current-hidden-start-lines ()
   "Return sorted start lines for currently hidden folds."

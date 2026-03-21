@@ -10,6 +10,8 @@
 
 (declare-function flymake-diagnostic-type "flymake" (diag))
 (declare-function flymake-diagnostics "flymake" (&optional beg end))
+(declare-function my/problems-buffer "init-problems" ())
+(declare-function my/problems-project "init-problems" ())
 (declare-function my/diagnostics-buffer-ui "init-diagnostics-ui")
 (declare-function my/diagnostics-mode "init-diagnostics-ui")
 (declare-function my/diagnostics-open "init-diagnostics-ui" (scope &optional filter title))
@@ -107,12 +109,15 @@
 
 (transient-define-prefix my/diagnostics-dispatch ()
   "Diagnostics workflow."
-  [["Current"
-    ("b" "buffer" my/diagnostics-buffer-ui)
+  [["Jump"
+    ("!" "buffer picker" my/problems-buffer)
+    ("?" "project picker" my/problems-project)]
+   ["Panel"
+    ("b" "buffer panel" my/diagnostics-buffer-ui)
     ("e" "buffer errors" my/diagnostics-buffer-errors)
     ("w" "buffer warnings" my/diagnostics-buffer-warnings)]
    ["Project"
-    ("p" "project" my/diagnostics-project-ui)
+    ("p" "project panel" my/diagnostics-project-ui)
     ("E" "project errors" my/diagnostics-project-errors)
     ("W" "project warnings" my/diagnostics-project-warnings)]
    ["Display"
@@ -120,6 +125,7 @@
     ("a" "toggle auto refresh" my/diagnostics-auto-refresh-mode)]])
 
 (my/evil-global-leader-set "c m" #'my/diagnostics-dispatch "diagnostics menu")
+(my/evil-global-leader-set "c ?" #'my/diagnostics-dispatch "diagnostics")
 
 (my/diagnostics-modeline-mode 1)
 (my/diagnostics-auto-refresh-mode 1)

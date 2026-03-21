@@ -97,7 +97,7 @@
   (and (fboundp ts-mode)
        (fboundp 'treesit-ready-p)
        (ignore-errors
-         (treesit-ready-p language))))
+         (treesit-ready-p language t))))
 
 (defun my/treesit-supported-major-mode-remaps ()
   "Return supported entries for `major-mode-remap-alist'."
