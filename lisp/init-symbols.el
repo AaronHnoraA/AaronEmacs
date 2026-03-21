@@ -32,6 +32,7 @@
 (declare-function lsp-feature? "lsp-mode" (method))
 (declare-function xref-backend-apropos "xref" (backend pattern))
 (declare-function xref-file-location-column "xref" (xref-file-location))
+(declare-function xref-make "xref" (summary location))
 (declare-function xref-find-backend "xref" ())
 (declare-function xref-item-location "xref" (xref))
 (declare-function xref-item-summary "xref" (xref))
@@ -55,6 +56,41 @@
 (defvar my/symbols-workspace-history nil)
 (defvar my/symbols-project-fallback-alist nil)
 (defvar transient--original-buffer)
+
+(defun my/symbols--location-summary (location)
+  "Build a readable summary line for xref LOCATION."
+  (condition-case nil
+      (let* ((marker (xref-location-marker location))
+             (buffer (marker-buffer marker)))
+        (if (not (buffer-live-p buffer))
+            ""
+          (with-current-buffer buffer
+            (save-excursion
+              (goto-char marker)
+              (let ((summary
+                     (string-trim
+                      (buffer-substring-no-properties
+                       (line-beginning-position)
+                       (line-end-position)))))
+                (if (string-empty-p summary)
+                    (or (xref-location-group location) "")
+                  summary))))))
+    (error
+     (or (ignore-errors (xref-location-group location))
+         ""))))
+
+(defun my/symbols--ensure-xref-item (object)
+  "Return OBJECT as an xref item.
+Some backends return bare xref locations for apropos results
+instead of `xref-item' values."
+  (cond
+   ((ignore-errors
+      (xref-item-location object))
+    object)
+   ((ignore-errors
+      (xref-location-group object))
+    (xref-make (my/symbols--location-summary object) object))
+   (t nil)))
 
 (defun my/symbols--origin-buffer ()
   "Return the source buffer that initiated the current symbol command."
@@ -166,15 +202,16 @@ Use OPENER to open the file temporarily when provided."
 
 (defun my/symbols--xref-candidate (xref root)
   "Build a Consult candidate for XREF relative to ROOT."
-  (let* ((loc (xref-item-location xref))
-         (group (xref-location-group loc))
-         (group (if (and root (stringp group))
-                    (string-remove-prefix root group)
-                  group))
-         (cand (consult--format-file-line-match
-                (or group "")
-                (or (xref-location-line loc) 0)
-                (xref-item-summary xref))))
+  (when-let* ((xref (my/symbols--ensure-xref-item xref))
+              (loc (xref-item-location xref))
+              (group (xref-location-group loc))
+              (group (if (and root (stringp group))
+                         (string-remove-prefix root group)
+                       group))
+              (cand (consult--format-file-line-match
+                     (or group "")
+                     (or (xref-location-line loc) 0)
+                     (or (xref-item-summary xref) ""))))
     (add-text-properties
      0 1 `(my-symbol-xref ,xref
                           consult--prefix-group ,group)
@@ -212,9 +249,10 @@ Use OPENER to open the file temporarily when provided."
              (not (string-empty-p input)))
     (with-current-buffer buffer
       (condition-case nil
-          (mapcar (lambda (xref)
-                    (my/symbols--xref-candidate xref root))
-                  (xref-backend-apropos backend input))
+          (delq nil
+                (mapcar (lambda (xref)
+                          (my/symbols--xref-candidate xref root))
+                        (xref-backend-apropos backend input)))
         (error nil)))))
 
 (defun my/symbols--prepare-buffer-imenu ()
@@ -272,7 +310,7 @@ Use OPENER to open the file temporarily when provided."
                   :preview-key my/symbols-preview-key
                   :lookup (apply-partially #'consult--lookup-prop
                                            'my-symbol-xref))))
-      (xref-pop-to-location (xref-item-location xref)))))
+      (xref-pop-to-location xref))))
 
 (defun my/symbols--workspace-capable-p ()
   "Return non-nil when workspace-symbol search should be attempted."
