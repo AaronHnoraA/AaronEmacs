@@ -129,6 +129,8 @@
 
 - `SPC c a`
   code actions
+- `SPC c .`
+  code menu；`b` build，`B` rerun build，自动识别常见的 `make` / `cmake` / `ninja`
 - `SPC c f`
   format buffer
 - `SPC c r`
@@ -147,6 +149,16 @@
   `eldoc-box-help-at-point`
 - `SPC c j`
   `dape`
+- `SPC c t`
+  测试菜单
+- `SPC c n`
+  当前附近测试
+- `SPC c N`
+  当前文件测试
+- `SPC c p`
+  当前项目测试
+- `SPC c T`
+  重跑上次测试
 - `SPC c c`
   `compile`
 - `SPC c C`

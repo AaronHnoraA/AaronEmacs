@@ -17,6 +17,8 @@
 (declare-function my/language-server-workspace-symbol "init-workspace-symbol")
 (declare-function my/symbols-buffer "init-symbols")
 (declare-function my/symbols-project "init-symbols")
+(declare-function my/task-build "init-task")
+(declare-function my/task-build-rerun "init-task")
 (declare-function lsp-organize-imports "lsp-mode")
 
 (defun my/language-server-organize-imports ()
@@ -50,7 +52,10 @@
       ("?" "project problems" my/problems-project)
       ("s" "workspace symbol" my/language-server-workspace-symbol)
       ("i" "buffer symbols" my/symbols-buffer)
-      ("I" "project symbols" my/symbols-project)]]))
+      ("I" "project symbols" my/symbols-project)]
+     ["Build"
+      ("b" "build" my/task-build)
+      ("B" "rerun build" my/task-build-rerun)]]))
 
 (my/evil-global-leader-set "c ." #'my/code-actions-dispatch "code menu")
 

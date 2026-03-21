@@ -5,8 +5,127 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+(require 'subr-x)
+
 (my/package-ensure-installed-list '(dash magit-section lsp-mode))
 (my/package-ensure-vc 'lean4-mode "https://github.com/leanprover-community/lean4-mode.git")
+
+(declare-function lean4-lake-find-dir "lean4-lake")
+(declare-function lsp-workspace-root "lsp-mode" (&optional path))
+(declare-function my/project-current-root "init-project")
+(declare-function my/symbols-make-file-line-candidate "init-symbols"
+                  (root file line match))
+(declare-function my/symbols-read-file-line-candidates "init-symbols"
+                  (candidates &optional prompt history category))
+(declare-function my/symbols-register-project-fallback "init-symbols"
+                  (mode function))
+
+(defvar my/lean-project-symbol-history nil)
+
+(defconst my/lean-project-symbol-rg-regexp
+  (concat
+   "^[[:space:]]*"
+   "(?:@[[:alnum:]_.]+[[:space:]]+)*"
+   "(?:(?:private|protected|noncomputable|unsafe|partial|scoped|local)"
+   "[[:space:]]+)*"
+   "(?:class[[:space:]]+inductive|inductive|instance|structure|class|theorem"
+   "|axiom|lemma|definition|def|constant|abbrev|opaque)\\b")
+  "Ripgrep regexp used to discover top-level Lean declarations.")
+
+(defun my/lean-root-dir-p (dir)
+  "Return non-nil when DIR looks like a Lean project root."
+  (or (file-exists-p (expand-file-name "lakefile.lean" dir))
+      (file-exists-p (expand-file-name "lakefile.toml" dir))
+      (file-exists-p (expand-file-name "lean-toolchain" dir))))
+
+(defun my/lean-project-root ()
+  "Return the current Lean project root."
+  (or (and (fboundp 'lsp-workspace-root)
+           (ignore-errors (lsp-workspace-root)))
+      (and (fboundp 'lean4-lake-find-dir)
+           (ignore-errors (lean4-lake-find-dir)))
+      (when-let* ((file (or buffer-file-name default-directory)))
+        (locate-dominating-file file #'my/lean-root-dir-p))
+      (and (fboundp 'my/project-current-root)
+           (my/project-current-root))
+      default-directory))
+
+(defun my/lean--declaration-kind-and-name (text)
+  "Extract declaration kind and name from Lean declaration TEXT."
+  (when (string-match
+         (rx string-start
+             (* (any " \t"))
+             (* (seq "@" (+ (not (any " \t\n\r"))) (+ blank)))
+             (* (seq (or "private"
+                         "protected"
+                         "noncomputable"
+                         "unsafe"
+                         "partial"
+                         "scoped"
+                         "local")
+                     (+ blank)))
+             (group (or (seq "class" (+ blank) "inductive")
+                        "inductive"
+                        "instance"
+                        "structure"
+                        "class"
+                        "theorem"
+                        "axiom"
+                        "lemma"
+                        "definition"
+                        "def"
+                        "constant"
+                        "abbrev"
+                        "opaque"))
+             (+ blank)
+             (group (+ (not (any " \t\n\r:={([,")))))
+         text)
+    (cons (match-string 1 text)
+          (match-string 2 text))))
+
+(defun my/lean--project-symbol-lines (root)
+  "Return ripgrep declaration hits under Lean project ROOT."
+  (when-let* ((rg (executable-find "rg")))
+    (let ((default-directory root))
+      (condition-case nil
+          (process-lines
+           rg
+           "--color" "never"
+           "--line-number"
+           "--no-heading"
+           "--glob" "*.lean"
+           "-e" my/lean-project-symbol-rg-regexp
+           ".")
+        (error nil)))))
+
+(defun my/lean--project-symbol-candidates ()
+  "Return file-line candidates for Lean declarations in the current project."
+  (let ((root (file-name-as-directory (expand-file-name (my/lean-project-root)))))
+    (cl-loop for hit in (my/lean--project-symbol-lines root)
+             when (string-match "\\`\\([^:]+\\):\\([0-9]+\\):\\(.*\\)\\'" hit)
+             for relative-file = (match-string 1 hit)
+             for line = (string-to-number (match-string 2 hit))
+             for text = (string-trim (match-string 3 hit))
+             for kind-and-name = (my/lean--declaration-kind-and-name text)
+             for summary = (if kind-and-name
+                               (format "%s %s"
+                                       (car kind-and-name)
+                                       (cdr kind-and-name))
+                             text)
+             collect (my/symbols-make-file-line-candidate
+                      root
+                      (expand-file-name relative-file root)
+                      line
+                      summary))))
+
+(defun my/lean-project-symbols-fallback ()
+  "Fallback project symbol search for Lean projects."
+  (my/symbols-read-file-line-candidates
+   (my/lean--project-symbol-candidates)
+   "Lean project symbol: "
+   'my/lean-project-symbol-history
+   'my-lean-project-symbol))
 
 (with-eval-after-load 'magit-mode
   ;; `magit-region-highlight-hook' may reference
@@ -32,7 +151,12 @@
 (use-package lean4-mode
   :init
   (my/register-lsp-mode-preference 'lean4-mode)
+  (add-hook 'lean4-mode-hook #'my/lsp-mode-ensure)
   :mode ("\\.lean\\'" . lean4-mode))
+
+(with-eval-after-load 'init-symbols
+  (my/symbols-register-project-fallback 'lean4-mode
+                                        #'my/lean-project-symbols-fallback))
 
 (provide 'init-lean)
 

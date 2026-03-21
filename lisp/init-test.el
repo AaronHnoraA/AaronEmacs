@@ -178,11 +178,17 @@
     "Test workflow."
     [["Run"
       ("n" "nearest" my/test-nearest)
-      ("f" "file" my/test-file)
+      ("N" "file" my/test-file)
       ("p" "project" my/test-project)
-      ("r" "rerun last" my/test-rerun)]]))
+      ("T" "rerun last" my/test-rerun)]]))
 
 (my/leader-key-label "r" "run")
+(my/evil-global-leader-set "c t" #'my/test-dispatch "tests")
+(my/evil-global-leader-set "c n" #'my/test-nearest "nearest test")
+(my/evil-global-leader-set "c N" #'my/test-file "file tests")
+(my/evil-global-leader-set "c p" #'my/test-project "project tests")
+(my/evil-global-leader-set "c T" #'my/test-rerun "rerun test")
+
 (my/evil-global-leader-set "r t" #'my/test-dispatch "tests")
 (my/evil-global-leader-set "r n" #'my/test-nearest "nearest test")
 (my/evil-global-leader-set "r f" #'my/test-file "file tests")

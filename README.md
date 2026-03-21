@@ -109,6 +109,10 @@
   项目工作台式打开当前目标项目。
 - `SPC c i`
   打开 `show-imenu` 左侧 Treemacs 导航。
+- `SPC c t` / `SPC c n` / `SPC c N` / `SPC c p` / `SPC c T`
+  测试菜单 / 当前附近测试 / 当前文件测试 / 当前项目测试 / 重跑上次测试。
+- `SPC c .`
+  打开 code menu；里面补了 `b` / `B` 做 build / rerun build，常见项目会自动识别 `make`、`cmake`、`ninja`。
 - `za` / `zo` / `zc` / `zR` / `zM`
   代码折叠：切换 / 打开 / 关闭 / 全展开 / 全折叠。
 - `SPC v v` / `SPC v f` / `SPC v s` / `SPC v b`

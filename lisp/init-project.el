@@ -21,6 +21,9 @@
 (declare-function project--ensure-read-project-list "project")
 (declare-function project--write-project-list "project")
 (declare-function dashboard-projects-backend-load-projects "dashboard-widgets")
+(declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
+(declare-function vterm-send-string "vterm" (string))
+(declare-function vterm-send-return "vterm" ())
 (declare-function projectile-find-file-in-directory "projectile")
 (declare-function projectile-ignored-project-p "projectile")
 (declare-function projectile-known-projects "projectile")
@@ -251,6 +254,8 @@ With a prefix argument, always prompt."
   `(let* ((project-root (my/project-normalize-root ,project-root))
           (default-directory project-root)
           (projectile-project-root project-root))
+     (when (fboundp 'my/direnv-update-environment-maybe)
+       (my/direnv-update-environment-maybe project-root))
      ,@body))
 
 (defun my/project-switch (project-root &optional arg)
@@ -300,17 +305,25 @@ Without a prefix argument, default to the current project."
 (defun my/project-ripgrep (project-root)
   "Run `consult-ripgrep' in PROJECT-ROOT."
   (interactive (list (my/project-read-target-root "Ripgrep in project: ")))
-  (consult-ripgrep (my/project-normalize-root project-root)))
+  (setq project-root (my/project-normalize-root project-root))
+  (when (fboundp 'my/direnv-update-environment-maybe)
+    (my/direnv-update-environment-maybe project-root))
+  (consult-ripgrep project-root))
 
 (defun my/project-open-root (project-root)
   "Open PROJECT-ROOT in Dired/Dirvish."
   (interactive (list (my/project-read-target-root "Open project root: ")))
-  (dired (my/project-normalize-root project-root)))
+  (setq project-root (my/project-normalize-root project-root))
+  (when (fboundp 'my/direnv-update-environment-maybe)
+    (my/direnv-update-environment-maybe project-root))
+  (dired project-root))
 
 (defun my/project-magit-status (project-root)
   "Open Magit status for PROJECT-ROOT."
   (interactive (list (my/project-read-target-root "Magit project: ")))
   (setq project-root (my/project-normalize-root project-root))
+  (when (fboundp 'my/direnv-update-environment-maybe)
+    (my/direnv-update-environment-maybe project-root))
   (let ((default-directory project-root))
     (magit-status-setup-buffer project-root)))
 
@@ -319,10 +332,18 @@ Without a prefix argument, default to the current project."
   (interactive (list (my/project-read-target-root "VTerm project: ")))
   (let* ((project-root (my/project-normalize-root project-root))
          (buffer-name (format "*vterm:%s*" (my/project-perspective-name project-root)))
-         (default-directory project-root))
+         (default-directory "~"))
+    (when (fboundp 'my/direnv-update-environment-maybe)
+      (my/direnv-update-environment-maybe project-root))
     (if (get-buffer buffer-name)
         (pop-to-buffer buffer-name)
-      (vterm buffer-name))))
+      (let ((buffer (vterm buffer-name)))
+        (with-current-buffer buffer
+          (vterm-send-string
+           (format "cd %s" (shell-quote-argument
+                            (directory-file-name project-root))))
+          (vterm-send-return))
+        buffer))))
 
 (defun my/project-kill-buffers (project-root)
   "Kill buffers belonging to PROJECT-ROOT."

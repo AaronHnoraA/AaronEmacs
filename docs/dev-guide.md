@@ -59,6 +59,16 @@
   左侧 `Treemacs` smart toggle，并跟随当前文件和光标所在 symbol
 - `SPC c I`
   文档浮窗
+- `SPC c t`
+  测试菜单
+- `SPC c n`
+  当前附近测试
+- `SPC c N`
+  当前文件测试
+- `SPC c p`
+  当前项目测试
+- `SPC c T`
+  重跑上次测试
 - `SPC c L`
   语言服务器菜单
   Hub / Doctor / 调参 / log / session / config
@@ -122,7 +132,30 @@ Doctor 更适合快速排查：
 
 调试期间还有 `hydra-dape-mode`。
 
-## 4. 项目导航
+## 4. 编译与测试
+
+- `SPC c .`
+  code menu；`b` 选 build，`B` 重跑上次 build。会优先识别常见项目里的 `make`、`cmake`、`ninja`
+- `SPC c c`
+  `compile`
+- `SPC c C`
+  `recompile`
+- `SPC c k`
+  停止当前编译
+- `SPC c l`
+  切到编译 / 测试输出
+- `SPC c t`
+  测试菜单
+- `SPC c n`
+  当前附近测试
+- `SPC c N`
+  当前文件测试
+- `SPC c p`
+  当前项目测试
+- `SPC c T`
+  重跑上次测试
+
+## 5. 项目导航
 
 ### 项目工作流
 
@@ -192,7 +225,7 @@ Doctor 更适合快速排查：
 - `C-c o f`
   `dirvish-fd`
 
-## 5. 终端
+## 6. 终端
 
 ### Shell
 

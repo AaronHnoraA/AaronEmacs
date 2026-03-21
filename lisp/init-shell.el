@@ -192,6 +192,38 @@ If popup is focused, kill it."
 
 (require 'init-vterm-popup)
 
+(defvar my/vterm-startup-cd-inhibited nil
+  "When non-nil, do not inject an initial `cd' into newly created VTerm buffers.")
+
+(defun my/vterm--startup-directory ()
+  "Return the local startup directory for a fresh VTerm buffer, or nil."
+  (let ((directory (and default-directory
+                        (file-name-as-directory
+                         (expand-file-name default-directory)))))
+    (unless (or my/vterm-startup-cd-inhibited
+                (null directory)
+                (file-remote-p directory)
+                (equal directory
+                       (file-name-as-directory (expand-file-name "~"))))
+      directory)))
+
+(defun my/vterm--send-cd (buffer directory)
+  "Send `cd DIRECTORY' to VTerm BUFFER."
+  (when (and directory (buffer-live-p buffer))
+    (with-current-buffer buffer
+      (vterm-send-string
+       (format "cd %s" (shell-quote-argument (directory-file-name directory))))
+      (vterm-send-return))))
+
+(defun my/vterm--start-in-home-and-cd (orig-fn &rest args)
+  "Create local VTerm buffers from home, then `cd' into the original directory."
+  (if-let* ((target-directory (my/vterm--startup-directory)))
+      (let ((default-directory "~/"))
+        (let ((buffer (apply orig-fn args)))
+          (my/vterm--send-cd buffer target-directory)
+          buffer))
+    (apply orig-fn args)))
+
 (defun my/vterm-named (name)
   "Create or switch to a named vterm buffer."
   (interactive "sVTerm name: ")
@@ -206,10 +238,11 @@ If popup is focused, kill it."
   (let ((buffer-name (format "*vterm:ssh:%s*" host)))
     (pop-to-buffer
      (or (get-buffer buffer-name)
-         (with-current-buffer (vterm buffer-name)
+         (let ((my/vterm-startup-cd-inhibited t))
+           (with-current-buffer (vterm buffer-name)
            (vterm-send-string (format "ssh %s" host))
            (vterm-send-return)
-           (current-buffer))))))
+           (current-buffer)))))))
 
 (use-package vterm
   :ensure t
@@ -226,7 +259,9 @@ If popup is focused, kill it."
                                  (turn-off-evil-mode)))))
                          (current-buffer))))
   :custom
-  (vterm-shell "zsh"))
+  (vterm-shell "zsh")
+  :config
+  (advice-add 'vterm :around #'my/vterm--start-in-home-and-cd))
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'eshell-mode 'emacs)
