@@ -6,8 +6,12 @@
 
 - `SPC`
   Evil leader，总入口。
+- `SPC SPC`
+  `telescope` 统一搜索面板
 - `M-x`
   `counsel-M-x`
+- `M-x telescope`
+  `telescope` 统一搜索面板
 - `C-x C-f`
   `find-file` + `vertico-directory`
 - `C-x b`
@@ -197,6 +201,18 @@
 
 ## 3. 搜索与跳转
 
+- `SPC SPC`
+  打开 `telescope`
+- `SPC SPC f`
+  当前项目找文件
+- `SPC SPC b`
+  统一切换 buffer
+- `SPC SPC g`
+  当前项目 ripgrep
+- `SPC SPC I`
+  当前 workspace / 项目 symbols
+- `SPC SPC m`
+  bookmark 入口；有书签时走 picker，没有书签时打开 bookmark 列表
 - `C-s`
   当前 buffer 搜索
 - `SPC s p`
@@ -214,7 +230,53 @@
 - `C-'`
   `avy-goto-word-1`
 
-## 4. 多光标和 snippet
+## 4. 折叠与结构选择
+
+### 折叠
+
+- `za`
+  切换当前折叠
+- `zo`
+  打开当前折叠
+- `zc`
+  关闭当前折叠
+- `zR`
+  展开当前 buffer 的所有折叠
+- `zM`
+  折叠当前 buffer 的所有折叠
+- `SPC z a`
+  同 `za`
+- `SPC z o`
+  同 `zo`
+- `SPC z c`
+  同 `zc`
+- `SPC z R`
+  同 `zR`
+- `SPC z M`
+  同 `zM`
+
+### 结构选择 `SPC v`
+
+- `SPC v v`
+  逐级扩选
+- `SPC v V`
+  缩回上一步
+- `SPC v f`
+  选整个函数 / method / class
+- `SPC v F`
+  选函数 / class 的 body
+- `SPC v s`
+  选当前语句
+- `SPC v e`
+  选当前表达式
+- `SPC v b`
+  选当前代码块
+- `SPC v B`
+  选当前代码块内部
+- `SPC v p`
+  选下一层外层结构
+
+## 5. 多光标和 snippet
 
 ### 多光标
 

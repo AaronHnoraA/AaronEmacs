@@ -70,6 +70,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-gpt)
 (require 'init-search)
 (require 'init-search-extra)
+(require 'init-telescope)
 (require 'init-direnv)
 (require 'init-smartparens)
 (require 'init-rainbow-delimiters)

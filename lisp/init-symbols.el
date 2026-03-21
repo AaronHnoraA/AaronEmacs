@@ -9,7 +9,9 @@
 
 (declare-function consult-imenu "consult-imenu")
 (declare-function consult-imenu-multi "consult-imenu" (&optional query))
+(declare-function my/current-language-server-backend "init-lsp")
 (declare-function my/python-setup-imenu "init-python")
+(declare-function xref-find-apropos "xref" (pattern))
 
 (defvar imenu--index-alist)
 
@@ -30,11 +32,18 @@
     (imenu nil)))
 
 (defun my/symbols-project ()
-  "Search symbols across current-project peer buffers."
+  "Search project symbols.
+Prefer workspace symbols from the active language server.  Fall
+back to `consult-imenu-multi', which only covers opened buffers."
   (interactive)
-  (if (fboundp 'consult-imenu-multi)
-      (consult-imenu-multi)
-    (my/symbols-buffer)))
+  (cond
+   ((and (fboundp 'my/current-language-server-backend)
+         (my/current-language-server-backend))
+    (call-interactively #'xref-find-apropos))
+   ((fboundp 'consult-imenu-multi)
+    (consult-imenu-multi))
+   (t
+    (my/symbols-buffer))))
 
 (global-set-key (kbd "M-g i") #'my/symbols-buffer)
 

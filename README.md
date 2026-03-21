@@ -19,6 +19,7 @@
   - 当前是双栈并存：
     - `vertico` + `orderless` + `consult` + `embark` + `marginalia` 负责现代 minibuffer/completion 体验。
     - `ivy` + `counsel` + `swiper` 仍负责 `M-x`、`C-x C-r`、`C-s` 等常用入口。
+  - 现在额外补了一层 `telescope` 统一入口：用 `transient` 把常用 `consult` picker、项目切换和符号搜索收在一个面板里，并单独给这套入口打开更积极的 preview。
   - `C-x C-f` 已切回原生 `find-file`，配合 `vertico-directory` 和原生文件补全过滤，避免旧的 Ivy 文件选择问题。
 - 编程与调试
   - `company` + `company-prescient` + `company-box` 做补全，默认走 `eglot`，少数语言显式切到 `lsp-mode`，诊断统一走 `flymake`。
@@ -80,6 +81,14 @@
   Evil leader，总入口。
 - `M-x`
   走 `counsel-M-x`。
+- `M-x telescope`
+  打开统一的 Telescope 风格搜索面板。
+- `SPC SPC`
+  打开统一的 Telescope 风格搜索面板。
+- `SPC SPC I`
+  打开当前 workspace / 项目的 symbols。
+- `SPC SPC m`
+  打开 bookmark 入口；有书签时走 picker，没有书签时打开书签列表。
 - `C-x C-f`
   走 `find-file` + `vertico-directory`。
 - `C-x b`
@@ -96,6 +105,10 @@
   项目工作台式打开当前目标项目。
 - `SPC c i`
   打开 `show-imenu` 左侧 Treemacs 导航。
+- `za` / `zo` / `zc` / `zR` / `zM`
+  代码折叠：切换 / 打开 / 关闭 / 全展开 / 全折叠。
+- `SPC v v` / `SPC v f` / `SPC v s` / `SPC v b`
+  结构选择：扩选、整函数、语句、代码块。
 - `C-c p g`
   `consult-ripgrep`。
 - `C-c y`

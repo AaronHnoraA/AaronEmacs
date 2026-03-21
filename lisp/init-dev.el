@@ -7,6 +7,13 @@
 
 (require 'init-funcs)
 
+(declare-function treesit-fold-close "treesit-fold" ())
+(declare-function treesit-fold-close-all "treesit-fold" ())
+(declare-function treesit-fold-mode "treesit-fold" (&optional arg))
+(declare-function treesit-fold-open "treesit-fold" ())
+(declare-function treesit-fold-open-all "treesit-fold" ())
+(declare-function treesit-fold-toggle "treesit-fold" ())
+
 ;; Compilation Mode
 (use-package compile
   :ensure nil
@@ -126,14 +133,95 @@
 ;; za toggle-fold
 ;; zo show-block
 ;; zc hide-block
+(defun my/fold--treesit-buffer-p ()
+  "Return non-nil when the current buffer should prefer `treesit-fold'."
+  (and (fboundp 'treesit-ready-p)
+       (fboundp 'treesit-fold-mode)
+       (ignore-errors (treesit-ready-p))
+       (string-match-p "-ts-mode\\'" (symbol-name major-mode))))
+
+(defun my/fold--ensure-backend ()
+  "Enable the best available folding backend for the current buffer."
+  (when (fboundp 'hs-minor-mode)
+    (hs-minor-mode 1))
+  (when (and (my/fold--treesit-buffer-p)
+             (not (bound-and-true-p treesit-fold-mode)))
+    (treesit-fold-mode 1)))
+
+(defun my/fold--use-treesit-p ()
+  "Return non-nil when folding should use tree-sitter."
+  (my/fold--ensure-backend)
+  (bound-and-true-p treesit-fold-mode))
+
+(defun my/hs-set-up-overlay (overlay)
+  "Render a concise folding indicator for hidden OVERLAY."
+  (when (eq 'code (overlay-get overlay 'hs))
+    (let* ((start (overlay-start overlay))
+           (end (overlay-end overlay))
+           (lines (max 1 (count-lines start end))))
+      (overlay-put overlay 'display
+                   (format " ... [%d lines] " lines))
+      (overlay-put overlay 'help-echo
+                   (format "Hidden code block: %d lines" lines)))))
+
+(defun my/fold-toggle ()
+  "Toggle the fold at point."
+  (interactive)
+  (if (my/fold--use-treesit-p)
+      (call-interactively #'treesit-fold-toggle)
+    (call-interactively #'hs-toggle-hiding)))
+
+(defun my/fold-open ()
+  "Open the fold at point."
+  (interactive)
+  (if (my/fold--use-treesit-p)
+      (call-interactively #'treesit-fold-open)
+    (call-interactively #'hs-show-block)))
+
+(defun my/fold-close ()
+  "Close the fold at point."
+  (interactive)
+  (if (my/fold--use-treesit-p)
+      (call-interactively #'treesit-fold-close)
+    (call-interactively #'hs-hide-block)))
+
+(defun my/fold-open-all ()
+  "Open all folds in the current buffer."
+  (interactive)
+  (if (my/fold--use-treesit-p)
+      (call-interactively #'treesit-fold-open-all)
+    (call-interactively #'hs-show-all)))
+
+(defun my/fold-close-all ()
+  "Close all folds in the current buffer."
+  (interactive)
+  (if (my/fold--use-treesit-p)
+      (call-interactively #'treesit-fold-close-all)
+    (call-interactively #'hs-hide-all)))
+
 (use-package hideshow
   :ensure nil
-  :hook (prog-mode . hs-minor-mode)
+  :hook (prog-mode . my/fold--ensure-backend)
   :custom
   (hs-show-indicators t)
   (hs-display-lines-hidden t)
   (hs-indicator-type (if (display-graphic-p) 'fringe 'margin))
-  (hs-hide-comments-when-hiding-all nil))
+  (hs-hide-comments-when-hiding-all nil)
+  (hs-set-up-overlay #'my/hs-set-up-overlay))
+
+(my/leader-key-label "z" "fold")
+(my/evil-global-leader-set "z a" #'my/fold-toggle "toggle fold")
+(my/evil-global-leader-set "z o" #'my/fold-open "open fold")
+(my/evil-global-leader-set "z c" #'my/fold-close "close fold")
+(my/evil-global-leader-set "z R" #'my/fold-open-all "open all folds")
+(my/evil-global-leader-set "z M" #'my/fold-close-all "close all folds")
+
+(with-eval-after-load 'evil
+  (evil-define-key* 'normal 'global (kbd "za") #'my/fold-toggle)
+  (evil-define-key* 'normal 'global (kbd "zo") #'my/fold-open)
+  (evil-define-key* 'normal 'global (kbd "zc") #'my/fold-close)
+  (evil-define-key* 'normal 'global (kbd "zR") #'my/fold-open-all)
+  (evil-define-key* 'normal 'global (kbd "zM") #'my/fold-close-all))
 
 ;; Antlr mode
 (use-package antlr-mode
