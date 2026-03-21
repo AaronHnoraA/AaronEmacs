@@ -21,7 +21,7 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/warning_Org_Warning_Block"
                         nil nil)
                        ("vmat"
-                        "\\begin{vmatrix}\n$1\n\\end{vmatrix} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{vmatrix}\n$0\n\\end{vmatrix} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Vmatrix" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/vmat_Vmatrix" nil
                         nil)
@@ -280,7 +280,7 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/sq_Square_Root"
                         nil nil)
                        ("spl"
-                        "\\begin{split}\n	$0\n\\end{split} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{equation*}\n\\begin{split}\n$1 &= $2 \\\\\n$3 &= $0\n\\end{split}\n\\end{equation*} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Split" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/spl_Split" nil nil)
                        ("solution"
@@ -414,7 +414,7 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/postl_Postulate_with_label_"
                         nil nil)
                        ("pmat"
-                        "\\begin{pmatrix}\n$1\n\\end{pmatrix} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{pmatrix}\n$0\n\\end{pmatrix} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Pmatrix" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/pmat_Pmatrix" nil
                         nil)
@@ -472,7 +472,7 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/ox_Tensor_Product"
                         nil nil)
                        ("outlineexp"
-                        "\\\\[\n	$1\n\\\\]\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\[\n$1\n\\]\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "OutlineExp" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/outlineexp_OutlineExp"
                         nil nil)
@@ -558,11 +558,11 @@
                         "mind" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/mind" nil nil)
                        ("math"
-                        "\\begin{math}\n	$1\n\\end{math}\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\($1\\)$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Math" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/math_Math" nil nil)
                        ("mat"
-                        "\\begin{${1:p/b/v/V/B/small}matrix}\n	$0\n\\end{${1:p/b/v/V/B/small}matrix} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{${1:p/b/v/V/B/small}matrix}\n$0\n\\end{${1:p/b/v/V/B/small}matrix} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Matrix" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/mat_Matrix" nil
                         nil)
@@ -626,7 +626,7 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/lemma_Lemma_no_label_"
                         nil nil)
                        ("lax"
-                        "$$\\begin{aligned}\nA &= B \\times C \\\\\nDelay_{A} &= \\frac{A（bit）}{B（bit/s）} \\\\\n\\end{aligned} $$ `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{align*}\n$1 &= $2 \\\\\n$3 &= $0\n\\end{align*} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "latex" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/latex" nil nil)
                        ("kkkk"
@@ -660,7 +660,7 @@
                         "item" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/item_item" nil nil)
                        ("item"
-                        "\\\\begin{itemize}\n	\\item $0\n\\\\end{itemize} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{itemize}\n\\item $0\n\\end{itemize} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Itemize" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/item_Itemize" nil
                         nil)
@@ -690,7 +690,7 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/inn_Element_Of"
                         nil nil)
                        ("inlineexp"
-                        "\\\\($1\\\\)$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\($1\\)$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "InlineExp" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/inlineexp_InlineExp"
                         nil nil)
@@ -761,7 +761,7 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/gggg_Gamma_lowercase_"
                         nil nil)
                        ("gat"
-                        "\\begin{gather}\n	$0\n\\end{gather} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{gather*}\n$1 \\\\\n$0\n\\end{gather*} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Gather(ed)" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/gat_Gather_ed_"
                         nil nil)
@@ -816,7 +816,7 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/eset_Empty_Set"
                         nil nil)
                        ("equation"
-                        "\\begin{equation}\n	$0\n	\\label{eq:$1}\n\\end{equation} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{equation}\n$1\n\\label{eq:$2}\n\\end{equation} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Equation" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/equation_Equation"
                         nil nil)
@@ -825,7 +825,7 @@
                         "Equ" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/equ_Equ" nil nil)
                        ("enumerate"
-                        "\\\\begin{enumerate}\n	\\item $0\n\\\\end{enumerate} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{enumerate}\n\\item $0\n\\end{enumerate} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Enumerate" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/enumerate_Enumerate"
                         nil nil)
@@ -867,17 +867,17 @@
                         "dot" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/dot" nil nil)
                        (";"
-                        "\\\\\\($1\\\\\\)$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "\\($1\\)$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "display inline math" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/disply-inline-math"
                         nil nil)
                        ("displaymath"
-                        "\\begin{displaymath}\n	$1\n\\end{displaymath}\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\[\n$1\n\\]\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "DisplayMath" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/displaymath_DisplayMath"
                         nil nil)
                        (";;"
-                        "\\[\n$1\n\\] $0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "\\[\n$1\n\\]\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "display math" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/display-math" nil
                         nil)
@@ -887,7 +887,7 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/dint_Definite_Integral"
                         nil nil)
                        ("desc"
-                        "\\\\begin{description}\n	\\item[$1] $0\n\\\\end{description} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{description}\n\\item[$1] $0\n\\end{description} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Description" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/desc_Description"
                         nil nil)
@@ -1016,7 +1016,7 @@
                         "Cube" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/cb_Cube" nil nil)
                        ("cas"
-                        "\\begin{cases}\n	${1:equation}, &\\text{ if }${2:case}\\\\\\\\\n	$0\n\\end{cases} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{cases}\n${1:f(x) = x^2}, & \\\\text{if } ${2:x > 0} \\\\\n${3:0}, & \\\\text{otherwise}\n\\end{cases} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Cases" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/cas_Cases" nil nil)
                        ("cp"
@@ -1033,7 +1033,7 @@
                         "bra" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/bra" nil nil)
                        ("bmat"
-                        "\\begin{bmatrix}\n$1\n\\end{bmatrix} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{bmatrix}\n$0\n\\end{bmatrix} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Bmatrix" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/bmat_Bmatrix" nil
                         nil)
@@ -1053,12 +1053,12 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/bf_Bold_Face" nil
                         nil)
                        ("begin"
-                        "\\\\begin{${1:env}}\n$2\n\\\\end{${1:env}} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{${1:env}}\n$2\n\\end{${1:env}} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "\\begin{}…\\end{}" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/begin_begin_end_"
                         nil nil)
                        ("beg"
-                        "\\begin{$1}\n$2\n\\end{$1} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{$1}\n$2\n\\end{$1} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Begin-End Environment" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/beg_Begin-End_Environment"
                         nil nil)
@@ -1105,7 +1105,7 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/assumption_Assumption"
                         nil nil)
                        ("array"
-                        "\\begin{array}\n$1\n\\end{array} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{array}{${1:c}}\n$0\n\\end{array} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Array" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/array_Array" nil
                         nil)
@@ -1115,7 +1115,7 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/and_Intersection"
                         nil nil)
                        ("ali"
-                        "\\begin{align*}\n$1\n\\end{align*} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "\\begin{align*}\n$1 &= $2 \\\\\n$3 &= $0\n\\end{align*} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Align" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/ali_Align" nil nil)
                        ("algo:ref"
@@ -1229,7 +1229,7 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/ZZ_Integers" nil
                         nil)
                        ("Vmat"
-                        "\\begin{Vmatrix}\n$1\n\\end{Vmatrix} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{Vmatrix}\n$0\n\\end{Vmatrix} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Vmatrix (double)" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/Vmat_Vmatrix_double_"
                         nil nil)
@@ -1337,7 +1337,7 @@
                         "/Users/hc/.emacs.d/snippets/org-mode/CC_Complex_Numbers"
                         nil nil)
                        ("Bmat"
-                        "\\begin{Bmatrix}\n$1\n\\end{Bmatrix} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`"
+                        "\\begin{Bmatrix}\n$0\n\\end{Bmatrix} `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "Bmatrix (curly)" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/Bmat_Bmatrix_curly_"
                         nil nil)
@@ -1362,4 +1362,4 @@
                         nil)))
 
 
-;;; Do not edit! File generated at Thu Mar 19 01:26:50 2026
+;;; Do not edit! File generated at Sat Mar 21 17:59:39 2026

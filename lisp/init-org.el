@@ -1068,9 +1068,20 @@ Each value may be a readable `.cls' file path or literal class source."
 (defvar-local my/org-latex--pending-renders nil)
 (defvar my/org-latex--allow-native-preview nil)
 
-(defun my/org-latex--visible-range ()
-  "Return (beg . end) for the current window's visible range."
-  (cons (window-start) (window-end nil t)))
+(defun my/org-latex--visible-range (&optional window)
+  "Return (beg . end) for WINDOW's visible range in the current buffer."
+  (when-let* ((win (cond
+                    ((and (window-live-p window)
+                          (eq (window-buffer window) (current-buffer)))
+                     window)
+                    ((eq (window-buffer (selected-window)) (current-buffer))
+                     (selected-window))
+                    (t
+                     (get-buffer-window (current-buffer) t))))
+              (beg (window-start win))
+              (end (window-end win t)))
+    (cons (max (point-min) (min beg end))
+          (min (point-max) (max beg end)))))
 
 (defun my/org-latex--range-similar-p (r1 r2)
   "Return non-nil if ranges R1 and R2 are similar enough to skip re-preview."
@@ -1204,27 +1215,28 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   "Collect LaTeX fragments between BEG and END."
   (let ((math-regexp "\\$\\|\\\\[([]\\|^[ \t]*\\\\begin{[A-Za-z0-9*]+}")
         fragments)
-    (save-excursion
-      (goto-char beg)
-      (while (re-search-forward math-regexp end t)
-        (let* ((context (org-element-context))
-               (type (org-element-type context)))
-          (when (memq type '(latex-environment latex-fragment))
-            (let* ((frag-beg (org-element-begin context))
-                   (frag-end (save-excursion
-                               (goto-char (org-element-end context))
-                               (skip-chars-backward " \r\t\n")
-                               (point)))
-                   (source-beg frag-beg)
-                   (source-end frag-end)
-                   (source-value
-                    (buffer-substring-no-properties source-beg source-end))
-                   (render-value source-value))
-              (push (my/org-latex--fragment-spec
-                     source-beg source-end source-value render-value)
-                    fragments)
-              (goto-char (max (point) source-end))))))
-      (nreverse fragments))))
+    (when (< beg end)
+      (save-excursion
+        (goto-char beg)
+        (while (re-search-forward math-regexp end t)
+          (let* ((context (org-element-context))
+                 (type (org-element-type context)))
+            (when (memq type '(latex-environment latex-fragment))
+              (let* ((frag-beg (org-element-begin context))
+                     (frag-end (save-excursion
+                                 (goto-char (org-element-end context))
+                                 (skip-chars-backward " \r\t\n")
+                                 (point)))
+                     (source-beg frag-beg)
+                     (source-end frag-end)
+                     (source-value
+                      (buffer-substring-no-properties source-beg source-end))
+                     (render-value source-value))
+                (push (my/org-latex--fragment-spec
+                       source-beg source-end source-value render-value)
+                      fragments)
+                (goto-char (max (point) source-end))))))
+        (nreverse fragments)))))
 
 (defun my/org-latex--cleanup-job-files (job)
   "Delete temporary files created for JOB."
@@ -1490,12 +1502,12 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
       (funcall orig arg)
     (my/org-latex-preview-command arg)))
 
-(defun my/org-latex-preview-visible-now ()
-  "Preview visible Org LaTeX fragments asynchronously."
+(defun my/org-latex-preview-visible-now (&optional window)
+  "Preview visible Org LaTeX fragments asynchronously in WINDOW."
   (interactive)
-  (when (derived-mode-p 'org-mode)
-    (let* ((range (my/org-latex--visible-range))
-           (beg (car range))
+  (when-let* (((derived-mode-p 'org-mode))
+              (range (my/org-latex--visible-range window)))
+    (let* ((beg (car range))
            (end (cdr range))
            (force (called-interactively-p 'interactive)))
       (when (and (or force
@@ -1507,14 +1519,15 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
         (setq my/org-latex--last-preview-range range)
         (my/org-latex--preview-range beg end)))))
 
-(defun my/org-latex-preview-visible-debounced ()
-  "Debounced preview of visible area after scrolling stops."
+(defun my/org-latex-preview-visible-debounced (&optional window)
+  "Debounced preview of WINDOW's visible area after scrolling stops."
   (when (derived-mode-p 'org-mode)
     (when (timerp my/org-latex--preview-timer)
       (cancel-timer my/org-latex--preview-timer))
     (setq my/org-latex--preview-timer
           (run-with-idle-timer my/org-latex-preview-idle-delay nil
-                               #'my/org-latex-preview-visible-now))))
+                               #'my/org-latex-preview-visible-now
+                               window))))
 
 (defun my/org-latex-cleanup-scroll-preview ()
   "Stop async scroll-preview state in the current Org buffer."
@@ -1526,8 +1539,15 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   (interactive)
   (when (derived-mode-p 'org-mode)
     (my/org-latex--ensure-state)
-    (add-hook 'window-scroll-functions (lambda (_win _start) (my/org-latex-preview-visible-debounced)) nil t)
-    (add-hook 'window-size-change-functions (lambda (_frame) (my/org-latex-preview-visible-debounced)) nil t)
+    (add-hook 'window-scroll-functions
+              (lambda (win _start)
+                (my/org-latex-preview-visible-debounced win))
+              nil t)
+    (add-hook 'window-size-change-functions
+              (lambda (_frame)
+                (my/org-latex-preview-visible-debounced
+                 (get-buffer-window (current-buffer) t)))
+              nil t)
     (add-hook 'kill-buffer-hook #'my/org-latex-cleanup-scroll-preview nil t)))
 
 (add-hook 'org-mode-hook #'my/org-latex-enable-scroll-preview)
