@@ -709,7 +709,7 @@ Each value may be a readable `.cls' file path or literal class source."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-max-concurrency 1
+(defcustom my/org-latex-preview-max-concurrency 3
   "Maximum number of concurrent LaTeX preview render jobs."
   :type 'integer
   :group 'my/org-latex-preview)
