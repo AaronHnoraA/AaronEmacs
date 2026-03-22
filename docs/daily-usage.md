@@ -34,6 +34,12 @@
   切换当前 popup `vterm` 的固定状态
 - `C-\``
   `popper-toggle`
+- `F1` / `F2` / `F3` / `F4`
+  `help-command` / `telescope` / 项目工作台 / 项目 `ripgrep`
+- `F5` / `F6` / `F7` / `F8`
+  运行 profile / 测试菜单 / 调试 profile / `olivetti-mode`
+- `F9` / `F10` / `F12`
+  `org-agenda` / popup `vterm` / `gptel chat`
 
 ## 2. Leader 键分组
 

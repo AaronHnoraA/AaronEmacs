@@ -80,6 +80,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-jupyter)
 (require 'init-browser)
 (require 'init-fzfs)
+(require 'init-function-keys)
 (my/package-register-vc 'joplin-mode
                         '(:url "https://github.com/cinsk/joplin-mode.git"
                           :rev :last-release))
