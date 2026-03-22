@@ -867,7 +867,7 @@
                         "dot" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/dot" nil nil)
                        (";"
-                        "\\($1\\)$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
+                        "\\\\($1\\\\)$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "display inline math" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/disply-inline-math"
                         nil nil)
@@ -1362,4 +1362,4 @@
                         nil)))
 
 
-;;; Do not edit! File generated at Sat Mar 21 17:59:39 2026
+;;; Do not edit! File generated at Sun Mar 22 18:37:13 2026

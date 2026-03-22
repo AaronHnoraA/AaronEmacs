@@ -12,6 +12,7 @@
 (declare-function my/typography-setup-prose-buffer "init-base")
 (declare-function my/refresh-environment-from-shell nil)
 (declare-function my/shell-command-executable "init-utils")
+(declare-function org-fragtog--disable-frag "org-fragtog" (frag &optional renew))
 
 (require 'init-funcs)
 (require 'org)
@@ -714,6 +715,11 @@ Each value may be a readable `.cls' file path or literal class source."
   :type 'integer
   :group 'my/org-latex-preview)
 
+(defcustom my/org-latex-preview-edit-idle-delay 0.2
+  "Idle delay (seconds) before pre-rendering the fragment being edited."
+  :type 'number
+  :group 'my/org-latex-preview)
+
 (defcustom my/latex-preview-math-font "GFS Neohellenic Math"
   "Fallback math font family used by XeLaTeX-based preview pipelines."
   :type 'string
@@ -1066,7 +1072,118 @@ Each value may be a readable `.cls' file path or literal class source."
 (defvar-local my/org-latex--render-running 0)
 (defvar-local my/org-latex--render-processes nil)
 (defvar-local my/org-latex--pending-renders nil)
+(defvar-local my/org-latex--edit-preview-timer nil)
+(defvar-local my/org-latex--edit-preview-marker nil)
+(defvar-local my/org-latex--post-command-point nil)
 (defvar my/org-latex--allow-native-preview nil)
+
+(defun my/org-latex--current-fragment (&optional pos)
+  "Return the LaTeX fragment at POS, or at point when POS is nil."
+  (save-excursion
+    (when pos
+      (goto-char pos))
+    (let ((datum (org-element-context)))
+      (when (org-element-type-p datum '(latex-environment latex-fragment))
+        datum))))
+
+(defun my/org-latex--fragment-range (frag)
+  "Return the trimmed source range for LaTeX fragment FRAG."
+  (when frag
+    (let ((beg (org-element-property :begin frag))
+          (end (save-excursion
+                 (goto-char (org-element-end frag))
+                 (skip-chars-backward " \r\t\n")
+                 (point))))
+      (cons beg end))))
+
+(defun my/org-latex--point-editing-fragment-p (beg end)
+  "Return non-nil when point is actively inside fragment range BEG END."
+  (and (<= beg (point))
+       (< (point) end)
+       (let ((frag (my/org-latex--current-fragment)))
+         (and frag
+              (equal (my/org-latex--fragment-range frag)
+                     (cons beg end))))))
+
+(defun my/org-latex--preview-fragment (frag)
+  "Queue or place preview for LaTeX fragment FRAG without toggle semantics."
+  (when-let* ((range (my/org-latex--fragment-range frag))
+              (beg (car range))
+              (end (cdr range))
+              ((< beg end)))
+    (my/org-latex--preview-range beg end)
+    t))
+
+(defun my/org-latex--async-preview-active-p ()
+  "Return non-nil when Org async LaTeX preview should be used here."
+  (and (derived-mode-p 'org-mode)
+       (display-graphic-p)
+       (not my/org-latex--allow-native-preview)))
+
+(defun my/org-latex--fragment-around-change (beg end)
+  "Return the LaTeX fragment touched by a change from BEG to END."
+  (or (my/org-latex--current-fragment beg)
+      (and (> end beg)
+           (my/org-latex--current-fragment (max beg (1- end))))
+      (my/org-latex--current-fragment)))
+
+(defun my/org-latex--cancel-edit-preview-timer ()
+  "Cancel the pending edit-preview timer for the current buffer."
+  (when (timerp my/org-latex--edit-preview-timer)
+    (cancel-timer my/org-latex--edit-preview-timer))
+  (setq my/org-latex--edit-preview-timer nil))
+
+(defun my/org-latex--clear-edit-preview-marker ()
+  "Release the marker used to track the fragment being edited."
+  (when (markerp my/org-latex--edit-preview-marker)
+    (set-marker my/org-latex--edit-preview-marker nil))
+  (setq my/org-latex--edit-preview-marker nil))
+
+(defun my/org-latex--run-edit-preview (buffer marker)
+  "Pre-render the edited fragment in BUFFER tracked by MARKER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (eq marker my/org-latex--edit-preview-marker)
+        (setq my/org-latex--edit-preview-timer nil)
+        (when-let* (((marker-buffer marker))
+                    (frag (my/org-latex--current-fragment
+                           (marker-position marker))))
+          (my/org-latex--preview-fragment frag))))))
+
+(defun my/org-latex--schedule-edit-preview (frag)
+  "Debounce async preview work for the fragment currently being edited."
+  (when-let* ((range (my/org-latex--fragment-range frag))
+              (beg (car range)))
+    (my/org-latex--cancel-edit-preview-timer)
+    (my/org-latex--clear-edit-preview-marker)
+    (setq my/org-latex--edit-preview-marker (copy-marker beg))
+    (setq my/org-latex--edit-preview-timer
+          (run-with-idle-timer my/org-latex-preview-edit-idle-delay nil
+                               #'my/org-latex--run-edit-preview
+                               (current-buffer)
+                               my/org-latex--edit-preview-marker))))
+
+(defun my/org-latex-after-change-function (beg end _len)
+  "Pre-render edited LaTeX fragments after changes between BEG and END."
+  (when (my/org-latex--async-preview-active-p)
+    (when-let* ((frag (my/org-latex--fragment-around-change beg end)))
+      (my/org-latex--schedule-edit-preview frag))))
+
+(defun my/org-latex-post-command-function ()
+  "Re-enable preview when point leaves a LaTeX fragment."
+  (when (my/org-latex--async-preview-active-p)
+    (let* ((prev-point my/org-latex--post-command-point)
+           (prev-frag (and prev-point
+                           (my/org-latex--current-fragment prev-point)))
+           (curr-frag (my/org-latex--current-fragment))
+           (prev-range (and prev-frag (my/org-latex--fragment-range prev-frag)))
+           (curr-range (and curr-frag (my/org-latex--fragment-range curr-frag))))
+      (unless (equal prev-range curr-range)
+        (when prev-frag
+          (my/org-latex--preview-fragment prev-frag))
+        (unless curr-frag
+          (my/org-latex--clear-edit-preview-marker))))
+    (setq my/org-latex--post-command-point (point))))
 
 (defun my/org-latex--visible-range (&optional window)
   "Return (beg . end) for WINDOW's visible range in the current buffer."
@@ -1144,9 +1261,11 @@ Each value may be a readable `.cls' file path or literal class source."
   (when (and (file-exists-p file)
              (< beg end)
              (<= end (point-max))
-             (string= (buffer-substring-no-properties beg end) value))
+             (string= (buffer-substring-no-properties beg end) value)
+             (not (my/org-latex--point-editing-fragment-p beg end)))
     (org-clear-latex-preview beg end)
-    (org--make-preview-overlay beg end file imagetype)))
+    (let ((max-image-size nil))
+      (org--make-preview-overlay beg end file imagetype))))
 
 (defun my/org-latex--place-waiter-preview (waiter file imagetype)
   "Place preview FILE for WAITER using IMAGETYPE."
@@ -1444,14 +1563,17 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   (interactive)
   (when (timerp my/org-latex--preview-timer)
     (cancel-timer my/org-latex--preview-timer))
+  (my/org-latex--cancel-edit-preview-timer)
   (dolist (process my/org-latex--render-processes)
     (when (process-live-p process)
       (delete-process process)))
   (setq my/org-latex--preview-timer nil
         my/org-latex--last-preview-range nil
+        my/org-latex--post-command-point nil
         my/org-latex--render-processes nil
         my/org-latex--render-queue nil
         my/org-latex--render-running 0)
+  (my/org-latex--clear-edit-preview-marker)
   (when (hash-table-p my/org-latex--pending-renders)
     (maphash (lambda (_key job)
                (my/org-latex--release-waiters job))
@@ -1481,13 +1603,12 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
    ((use-region-p)
     (my/org-latex--preview-range (region-beginning) (region-end))
     (message "Queueing LaTeX previews for region..."))
-   ((let ((datum (org-element-context)))
+   ((let ((datum (my/org-latex--current-fragment)))
       (and (org-element-type-p datum '(latex-environment latex-fragment))
-           (let ((beg (org-element-begin datum))
-                 (end (org-element-end datum)))
+           (pcase-let ((`(,beg . ,end) (my/org-latex--fragment-range datum)))
              (if (org-clear-latex-preview beg end)
                  (message "LaTeX preview removed")
-               (my/org-latex--preview-range beg end)
+               (my/org-latex--preview-fragment datum)
                (message "Queueing LaTeX preview..."))
              t))))
    (t
@@ -1534,11 +1655,21 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   (interactive)
   (my/org-latex-cancel-pending-renders))
 
+(defun my/org-fragtog-enable-frag-advice (orig frag)
+  "Make `org-fragtog' re-enable FRAG through async preview."
+  (if (not (my/org-latex--async-preview-active-p))
+      (funcall orig frag)
+    (save-excursion
+      (org-fragtog--disable-frag frag)
+      (my/org-latex--preview-fragment frag))))
+
 (defun my/org-latex-enable-scroll-preview ()
   "Enable on-demand LaTeX preview for visible area after scrolling."
   (interactive)
   (when (derived-mode-p 'org-mode)
     (my/org-latex--ensure-state)
+    (add-hook 'after-change-functions #'my/org-latex-after-change-function nil t)
+    (add-hook 'post-command-hook #'my/org-latex-post-command-function nil t)
     (add-hook 'window-scroll-functions
               (lambda (win _start)
                 (my/org-latex-preview-visible-debounced win))
@@ -1557,6 +1688,9 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   (advice-add 'org-latex-preview :around #'my/org-latex-preview-advice)
   (define-key org-mode-map (kbd "C-c C-x C-l") #'my/org-latex-preview-command)
   (define-key org-mode-map (kbd "C-c C-x v") #'my/org-latex-preview-visible-now))
+
+(with-eval-after-load 'org-fragtog
+  (advice-add 'org-fragtog--enable-frag :around #'my/org-fragtog-enable-frag-advice))
 
 (with-eval-after-load 'ox-latex
   (setq org-latex-compiler "xelatex")
