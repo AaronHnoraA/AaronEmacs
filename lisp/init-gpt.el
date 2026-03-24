@@ -29,6 +29,13 @@
   :type 'symbol
   :group 'my/gptel)
 
+(defcustom my/gptel-log-level 'debug
+  "Default gptel logging verbosity."
+  :type '(choice (const :tag "Off" nil)
+                 (const :tag "Info" info)
+                 (const :tag "Debug" debug))
+  :group 'my/gptel)
+
 (defconst my/gptel--config-template
   (concat
    "{\n"
@@ -50,20 +57,24 @@
 (defvar my/gptel--loaded-config-file nil
   "Absolute path of the last loaded gptel config file.")
 
-(defvar gptel-backend nil)
-(defvar gptel-api-key nil)
-(defvar gptel-default-mode nil)
-(defvar gptel-model nil)
-(defvar gptel-directives nil)
-(defvar gptel--known-backends nil)
-(defvar gptel--known-presets nil)
-(defvar gptel-expert-commands nil)
-(defvar gptel-mode-map nil)
-(defvar gptel-rewrite-default-action nil)
-(defvar gptel-prompt-prefix-alist nil)
-(defvar gptel-response-prefix-alist nil)
-(defvar gptel-use-context nil)
-(defvar copilot-completion-map nil)
+;; Forward-declare external package variables without binding them.
+;; Binding them to nil here prevents the packages from installing their own
+;; default values and keymaps during load.
+(defvar gptel-backend)
+(defvar gptel-api-key)
+(defvar gptel-default-mode)
+(defvar gptel-model)
+(defvar gptel-directives)
+(defvar gptel--known-backends)
+(defvar gptel--known-presets)
+(defvar gptel-expert-commands)
+(defvar gptel-mode-map)
+(defvar gptel-rewrite-default-action)
+(defvar gptel-prompt-prefix-alist)
+(defvar gptel-response-prefix-alist)
+(defvar gptel-use-context)
+(defvar gptel-log-level)
+(defvar copilot-completion-map)
 
 (declare-function gptel "gptel")
 (declare-function gptel-abort "gptel")
@@ -112,6 +123,14 @@
       (insert my/gptel--config-template)
       (goto-char (point-min))
       (search-forward "your-model-name" nil t))))
+
+(defun my/gptel-show-log ()
+  "Display the gptel log buffer in the configured debug window."
+  (interactive)
+  (let ((buffer (get-buffer-create "*gptel-log*")))
+    (display-buffer buffer)
+    (with-current-buffer buffer
+      (goto-char (point-max)))))
 
 (defun my/gptel--json-object-p (value)
   "Return non-nil when VALUE looks like a JSON object alist."
@@ -507,6 +526,7 @@ buffer-locally."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "l") #'my/gptel-dispatch)
     (define-key map (kbd "c") #'my/gptel-chat)
+    (define-key map (kbd "d") #'my/gptel-show-log)
     (define-key map (kbd "s") #'gptel-send)
     (define-key map (kbd "m") #'gptel-menu)
     (define-key map (kbd "p") #'gptel-system-prompt)
@@ -525,6 +545,7 @@ buffer-locally."
 (my/leader-key-label "l" "llm")
 (my/evil-global-leader-set "l l" #'my/gptel-dispatch "llm menu")
 (my/evil-global-leader-set "l c" #'my/gptel-chat "chat")
+(my/evil-global-leader-set "l d" #'my/gptel-show-log "debug log")
 (my/evil-global-leader-set "l s" #'gptel-send "send")
 (my/evil-global-leader-set "l m" #'gptel-menu "menu")
 (my/evil-global-leader-set "l p" #'gptel-system-prompt "prompt")
@@ -574,6 +595,7 @@ Compatibility wrapper for old `lsp-copilot-check-status' workflows."
   (setq gptel-default-mode 'markdown-mode)
   :config
   (setq gptel-expert-commands t
+        gptel-log-level my/gptel-log-level
         gptel-rewrite-default-action 'dispatch
         gptel-prompt-prefix-alist
         '((markdown-mode . "### User\n\n")
