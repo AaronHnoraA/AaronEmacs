@@ -1,4 +1,4 @@
-;;; init-snippets.el --- The necessary settings -*- lexical-binding: t -*-
+;;; init-windows.el --- Window and bookmark helpers -*- lexical-binding: t -*-
 
 ;;; Commentary:
 ;;
@@ -9,6 +9,11 @@
 (require 'seq)
 (require 'subr-x)
 (require 'tabulated-list)
+
+;; `evil-define-key' is a macro. Load Evil at compile time so byte-compiled
+;; config expands it correctly instead of emitting a runtime function call.
+(eval-when-compile
+  (require 'evil))
 
 (declare-function my/project-current-root "init-project")
 (declare-function bookmark-bmenu-list "bookmark")
@@ -29,7 +34,6 @@
 (declare-function consult--jump-preview "consult" ())
 (declare-function consult--lookup-prop "consult" (prop candidates input))
 (declare-function consult--read "consult" (table &rest options))
-(declare-function evil-define-key "evil" (state keymap key def &rest bindings))
 (declare-function evil-set-initial-state "evil" (mode state))
 
 (defvar my/bookmark-history nil)

@@ -15,6 +15,10 @@
 
 (require 'server)
 
+(setq server-use-tcp t
+      server-host "0.0.0.0"
+      server-port 54321)
+
 (unless (or noninteractive
             (server-running-p))
   (server-start))
