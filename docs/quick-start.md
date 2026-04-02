@@ -59,6 +59,10 @@ emacs --debug-init -q -l ./bootstrap.el
 - 机器上已有较多第三方包：导出新的 `package-lock.el`
 - 新环境：按 `package-lock.el` 恢复依赖
 
+直接启动 `init.el` 时，如果检测到本地几乎还没有第三方包，也会先按
+`package-lock.el` 补齐依赖，避免在 theme、modeline 之类的首批模块上中途失败。
+不过首装依然建议优先跑一次 `make install`。
+
 ## 4. 必装外部依赖
 
 ### 基础工具

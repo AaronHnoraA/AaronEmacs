@@ -1,6 +1,7 @@
 EMACS ?= emacs
 BATCH = $(EMACS) --batch -Q -l ./init.el
-BOOTSTRAP = $(EMACS) --debug-init -q -l ./bootstrap.el
+#BOOTSTRAP = $(EMACS) --debug-init -q -l ./bootstrap.el
+BOOTSTRAP = $(EMACS) -q -l ./bootstrap.el
 
 .PHONY: default help install \
         compile compile-byte compile-byte-force compile-native compile-native-force \

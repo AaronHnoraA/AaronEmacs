@@ -7,6 +7,8 @@
 
 (declare-function on-screen-mode "on-screen" (&optional arg))
 (defvar kanagawa-themes-custom-colors)
+(defvar unspecified 'unspecified
+  "Literal face attribute value used by some themes during runtime expansion.")
 
 (defgroup my/chunlian nil
   "Decorative Chunlian UI for dashboard."
@@ -16,10 +18,6 @@
 (mapc #'disable-theme custom-enabled-themes)
 (use-package kanagawa-themes
   :ensure t
-  :init
-  ;; Emacs 31 warns on `:foreground nil'; `unspecified' preserves the
-  ;; theme's "fall back to default face color" intent without noise.
-  (setq kanagawa-themes-custom-colors '((syn-variable unspecified)))
   :config
   (load-theme 'kanagawa-wave t))
 
@@ -101,17 +99,7 @@
 (defun my/dashboard-upgrade-packages (&rest _)
   "Upgrade installed packages from the dashboard button."
   (interactive)
-  (cond
-   ((fboundp 'package-upgrade-all)
-    (package-upgrade-all nil))
-   ((require 'package-menu nil t)
-    (package-refresh-contents)
-    (package-list-packages t)
-    (with-current-buffer "*Packages*"
-      (package-menu-mark-upgrades)
-      (package-menu-execute t)))
-   (t
-    (user-error "Package upgrade command is unavailable in this Emacs"))))
+  (my/package-upgrade-all-noninteractive))
 
 (use-package dashboard
   :ensure t
@@ -125,7 +113,8 @@
            (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-alert") "⚑")
             "Issue" "Report issue" (lambda (&rest _) (browse-url issue-url)) warning)
            (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-download") "♺")
-            "Upgrade" "Upgrade packages synchronously" #'my/dashboard-upgrade-packages success))))
+            "Upgrade" "Upgrade archive and VC packages, then refresh the lock file"
+            ,#'my/dashboard-upgrade-packages success))))
   
   (dashboard-setup-startup-hook)
 

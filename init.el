@@ -129,6 +129,7 @@
 (setq custom-file (locate-user-emacs-file "custom.el"))
 
 (require 'init-package-utils)
+(my/package-bootstrap-from-lock-if-needed)
 
 (defun my/reload-init ()
   "Reload Emacs init file safely."
