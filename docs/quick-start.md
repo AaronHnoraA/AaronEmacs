@@ -16,6 +16,11 @@
 
 Linux 不是不能用，但部分体验默认按 macOS 配置。
 
+macOS 图形界面下当前修饰键约定是：
+
+- `Command = Meta (M-)`
+- `Option = Hyper (H-)`
+
 ## 2. 核心目录
 
 - [init.el](../init.el)

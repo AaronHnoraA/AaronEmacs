@@ -77,6 +77,8 @@
 
 ## 常用入口
 
+- macOS GUI 下：
+  `Command = Meta (M-)`，`Option = Hyper (H-)`
 - `SPC`
   Evil leader，总入口。
 - `M-x`
@@ -177,6 +179,24 @@
   打开 LLM workflow 菜单。
 - `SPC l c` / `C-c l c`
   打开 gptel chat。
+- `H-f` / `H-b` / `H-r` / `H-s`
+  `find-file` / `consult-buffer` / 最近文件 / 当前 buffer 搜索。
+- `H-g` / `H-p` / `H-t` / `H-m`
+  项目 ripgrep / 项目工作台 / telescope / Magit。
+- `H-a` / `H-l` / `H-\`` / `H-w`
+  `org-agenda` / gptel chat / `popper-toggle` / 关当前 frame。
+- `H-e` / `H-d` / `H-i` / `H-u`
+  code menu / diagnostics menu / `show-imenu` / language server 菜单。
+- `H-j` / `H-n` / `H-y`
+  `dape` / 最近测试 / bookmark 跳转。
+- `H-o` / `H-O` / `H-k` / `H-K`
+  下方开新行 / 上方开新行 / 向下复制当前行或区域 / 向上复制当前行或区域。
+- `H-,` / `H-.` / `H--` / `H-=`
+  上移 / 下移当前行或区域 / 收缩选择 / 扩大选择。
+- `H-;` / `H-'` / `H-[` / `H-]` / `H-/`
+  注释切换 / 多光标按行 / 上一个相同项 / 下一个相同项 / 全选相同项。
+- `H-x` / `H-c` / `H-v`
+  剪切 / 复制 / 粘贴。
 
 ## 环境约定与依赖
 

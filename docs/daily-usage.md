@@ -4,6 +4,8 @@
 
 ## 1. 你每天最常用的入口
 
+- macOS GUI 下：
+  `Command = Meta (M-)`，`Option = Hyper (H-)`
 - `SPC`
   Evil leader，总入口。
 - `SPC SPC`
@@ -40,6 +42,27 @@
   运行 profile / 测试菜单 / 调试 profile / `olivetti-mode`
 - `F9` / `F10` / `F12`
   `org-agenda` / popup `vterm` / `gptel chat`
+
+### macOS Option `H-`
+
+- `H-f` / `H-b` / `H-r` / `H-s`
+  打开文件 / 切 buffer / 最近文件 / 当前 buffer 搜索
+- `H-g` / `H-p` / `H-t` / `H-m`
+  项目 ripgrep / 项目工作台 / `telescope` / `magit-status`
+- `H-a` / `H-l` / `H-\`` / `H-w`
+  `org-agenda` / gptel chat / `popper-toggle` / 关当前 frame
+- `H-e` / `H-d` / `H-i` / `H-u`
+  code menu / diagnostics menu / `show-imenu` / language server 菜单
+- `H-j` / `H-n` / `H-y`
+  `dape` / 最近测试 / bookmark 跳转
+- `H-o` / `H-O` / `H-k` / `H-K`
+  下方开新行 / 上方开新行 / 向下复制当前行或区域 / 向上复制当前行或区域
+- `H-,` / `H-.` / `H--` / `H-=`
+  上移 / 下移当前行或区域 / 收缩选择 / 扩大选择
+- `H-;` / `H-'` / `H-[` / `H-]` / `H-/`
+  注释切换 / 多光标按行 / 上一个相同项 / 下一个相同项 / 全选相同项
+- `H-x` / `H-c` / `H-v`
+  剪切 / 复制 / 粘贴
 
 ## 2. Leader 键分组
 
@@ -113,6 +136,21 @@
   上移当前行/区域
 - `SPC e 1`
   单窗口 / 恢复窗口布局切换
+
+macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
+
+- `H-o` / `H-O`
+  下方 / 上方开新行
+- `H-k` / `H-K`
+  向下 / 向上复制当前行或区域
+- `H-,` / `H-.`
+  上移 / 下移当前行或区域
+- `H--` / `H-=`
+  收缩 / 扩大选择
+- `H-;`
+  注释或取消注释当前行/区域
+- `H-'` / `H-[` / `H-]` / `H-/`
+  多光标按行 / 上一个相同项 / 下一个相同项 / 全选相同项
 
 ### Help `SPC h`
 
@@ -390,12 +428,12 @@
 
 - `M-o`
   `ace-window`
-- `C-\``
-  `popper-toggle`
 - `M-\``
-  `popper-cycle`
+  `vterm-toggle`
+- `H-\`` / `C-\``
+  `popper-toggle`
 - `C-M-\``
-  改变 popper 类型
+  改变 popup 类型
 
 ## 7. 有冲突时优先记住什么
 

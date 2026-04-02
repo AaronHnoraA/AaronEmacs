@@ -1400,9 +1400,6 @@ When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
       (delete-frame)
     (bury-buffer)))
 
-;; Keep `M-w' for copy; use Hyper-w as the close-frame key.
-(global-set-key (kbd "H-w") #'my/delete-frame-dwim)
-
 (defcustom my/warning-popup-minimum-level :error
   "Minimum warning severity that may auto-display the warnings buffer.
 Warnings below this level are still logged to `*Warnings*', but they do not

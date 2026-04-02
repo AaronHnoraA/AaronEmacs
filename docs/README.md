@@ -22,6 +22,8 @@
    语言服务器的 Hub / Doctor / 路由和维护模型。
 9. [jupyter-workflow.org](jupyter-workflow.org)
    Jupyter / Org / Jupytext 的完整工作流和维护面。
+10. [research-notes-workflow.md](research-notes-workflow.md)
+   科研笔记与代码实验如何在 Org 和 Jupytext / Jupyter 之间分工。
 
 如果你只是想立刻上手：
 
@@ -32,3 +34,4 @@
 - 编程 / LSP / 远程看 [dev-guide.md](dev-guide.md)
 - 语言服务器深度排查看 [lsp-workflow.org](lsp-workflow.org)
 - 想改配置看 [settings-cookbook.md](settings-cookbook.md)
+- 做科研笔记和实验分工看 [research-notes-workflow.md](research-notes-workflow.md)
