@@ -35,6 +35,50 @@
 (declare-function my/test-nearest "init-test" ())
 (declare-function show-imenu "init-project" ())
 
+(defvar my/macos-idle-gc-timer nil
+  "Timer used to run a delayed GC after the UI goes idle on macOS.")
+
+(defun my/macos-schedule-idle-gc ()
+  "Run GC shortly after focus leaves Emacs or the minibuffer closes."
+  (when (timerp my/macos-idle-gc-timer)
+    (cancel-timer my/macos-idle-gc-timer))
+  (setq my/macos-idle-gc-timer
+        (run-with-idle-timer 2 nil
+                             (lambda ()
+                               (setq my/macos-idle-gc-timer nil)
+                               (garbage-collect)))))
+
+(defun my/macos-apply-performance-tweaks ()
+  "Apply macOS tuning that approximates the best parts of `emacs-plus'."
+  ;; Keep NS process IO in larger chunks. This improves throughput for
+  ;; LSP/Lean, terminals and other chatty subprocesses on macOS.
+  (setq-default process-adaptive-read-buffering nil
+                read-process-output-max (max read-process-output-max
+                                             (* 4 1024 1024)))
+  (setq process-adaptive-read-buffering (default-value 'process-adaptive-read-buffering)
+        read-process-output-max (default-value 'read-process-output-max))
+
+  ;; These are already good defaults elsewhere in the config, but keeping the
+  ;; macOS-specific rendering knobs here makes the platform tuning explicit.
+  (setq auto-window-vscroll nil
+        ffap-machine-p-known 'reject
+        fast-but-imprecise-scrolling t
+        garbage-collection-messages nil
+        redisplay-skip-fontification-on-input t)
+  (setq use-dialog-box nil
+        use-file-dialog nil)
+
+  (when (boundp 'ns-use-proxy-icon)
+    (setq ns-use-proxy-icon nil))
+  (when (boundp 'ns-use-srgb-colorspace)
+    (setq ns-use-srgb-colorspace t))
+  (when (fboundp 'pixel-scroll-precision-mode)
+    (pixel-scroll-precision-mode 1)))
+
+(my/macos-apply-performance-tweaks)
+(add-hook 'focus-out-hook #'my/macos-schedule-idle-gc)
+(add-hook 'minibuffer-exit-hook #'my/macos-schedule-idle-gc)
+
 (use-package emacs
   :ensure nil
   :config
@@ -107,7 +151,10 @@
   ;; Curse Lion and its sudden but inevitable fullscreen mode!
   ;; NOTE Meaningless to railwaycat's emacs-mac build
   (ns-use-native-fullscreen nil)
+  (ns-use-proxy-icon nil)
   ;(ns-use-native-fullscreen t)
+  (use-dialog-box nil)
+  (use-file-dialog nil)
   ;; Visit files opened outside of Emacs in existing frame, not a new one
   (ns-pop-up-frames nil))
 

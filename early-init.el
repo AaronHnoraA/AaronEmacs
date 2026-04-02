@@ -15,6 +15,7 @@
 
 (setq gc-cons-threshold most-positive-fixnum
       gc-cons-percentage 0.6
+      frame-inhibit-implied-resize t
       file-name-handler-alist nil)
 
 ;; Silence non-critical warning popups as early as possible so startup noise
