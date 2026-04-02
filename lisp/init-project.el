@@ -481,8 +481,9 @@ This matches canonically, so symlinked roots are cleaned as well."
       (user-error "Treemacs follow mode is unavailable"))
   (when (bound-and-true-p treemacs-tag-follow-mode)
     (treemacs-tag-follow-mode -1))
+  (when (bound-and-true-p treemacs-follow-mode)
+    (treemacs-follow-mode -1))
   (my/treemacs-reset-follow-state)
-  (treemacs-follow-mode 1)
   (treemacs-project-follow-mode 1)
   (my/treemacs-cursor-follow-mode 1))
 
@@ -561,7 +562,9 @@ following."
       (when (boundp 'treemacs--imenu-cache)
         (setq-local treemacs--imenu-cache nil))
       (when (boundp 'treemacs--project-of-buffer)
-        (setq-local treemacs--project-of-buffer nil)))))
+        (setq-local treemacs--project-of-buffer nil))
+      (when (boundp 'treemacs--previously-followed-tag-position)
+        (setq-local treemacs--previously-followed-tag-position nil)))))
 
 (defun my/treemacs-source-buffer-p ()
   "Return non-nil when the current buffer should drive Treemacs following."
@@ -599,18 +602,23 @@ When PREFER-TAG is non-nil, prefer following the current tag when one exists."
         (when project
           (let ((inhibit-message t)
                 (treemacs-pulse-on-failure nil)
-                (index (and prefer-tag (my/treemacs-safe-imenu-index))))
-            (unless
-                (condition-case nil
-                    (and index
-                         (treemacs--do-follow-tag index treemacs-window path project)
-                         t)
-                  (error nil))
-              (condition-case nil
-                  (with-selected-window treemacs-window
-                    (treemacs-goto-file-node path project)
-                    t)
-                (error nil)))))))))
+                (index (and prefer-tag (my/treemacs-safe-imenu-index)))
+                (followed nil))
+            (setq followed
+                  (or (condition-case nil
+                          (and index
+                               (treemacs--do-follow-tag index treemacs-window path project)
+                               t)
+                        (error nil))
+                      (condition-case nil
+                          (with-selected-window treemacs-window
+                            (and (treemacs-goto-file-node path project) t))
+                        (error nil))))
+            (when followed
+              (with-selected-window treemacs-window
+                (hl-line-highlight)
+                (set-window-point treemacs-window (point))
+                (force-window-update treemacs-window)))))))))
 
 (defun my/treemacs-follow-current-buffer (buffer)
   "Update Treemacs to follow BUFFER's current file and symbol."
@@ -881,7 +889,7 @@ Returns the number of killed buffers."
         treemacs-eldoc-display 'simple
         treemacs-file-event-delay 2000
         treemacs-file-name-transformer #'identity
-        treemacs-follow-after-init t
+        treemacs-follow-after-init nil
         treemacs-expand-after-init t
         treemacs-find-workspace-method 'find-for-file-or-pick-first
         treemacs-goto-tag-strategy 'refetch-index
@@ -939,8 +947,9 @@ Returns the number of killed buffers."
                 #'my/treemacs-flatten-and-sort-imenu-index))
   (when (bound-and-true-p treemacs-tag-follow-mode)
     (treemacs-tag-follow-mode -1))
+  (when (bound-and-true-p treemacs-follow-mode)
+    (treemacs-follow-mode -1))
   (treemacs-fringe-indicator-mode 'always)
-  (treemacs-follow-mode t)
   (treemacs-filewatch-mode t)
   (when treemacs-python-executable
     (treemacs-git-commit-diff-mode t))
