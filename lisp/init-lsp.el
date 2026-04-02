@@ -577,12 +577,6 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
                            company-capf
                            company-dabbrev)))))
 
-;; 让 C-c ' 打开的窗口自动启动对应 language server
-(add-hook 'org-src-mode-hook
-          (lambda ()
-            (my/language-server-ensure)))
-
-
 ;; Load other language specific configurations
 (require 'init-cpp)
 (require 'init-rust)

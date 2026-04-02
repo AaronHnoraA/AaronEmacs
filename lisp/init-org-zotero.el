@@ -1,9 +1,10 @@
-;;; init-utils.el --- Utilities -*- lexical-binding: t -*-
+;;; init-org-zotero.el --- Org Zotero helpers -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;;
 
 ;;; Code:
+(require 'cl-lib)
 (require 'bibtex)
 (require 'subr-x) ; 确保加载 string-trim 等函数
 
@@ -84,4 +85,4 @@ v3 修复版：彻底解决了 stringp/nil 和 listp 报错问题。"
 
 
 (provide 'init-org-zotero)
-;;; init-utils.el ends here
+;;; init-org-zotero.el ends here
