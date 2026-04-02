@@ -13,6 +13,10 @@
 (declare-function my/refresh-environment-from-shell nil)
 (declare-function my/shell-command-executable "init-utils")
 (declare-function org-fragtog--disable-frag "org-fragtog" (frag &optional renew))
+(declare-function org-babel-get-src-block-info "ob-core" (&optional light datum))
+
+(defvar org-src-source-buffer)
+(defvar org-src--beg-marker)
 
 (require 'init-funcs)
 (require 'org)
@@ -85,6 +89,27 @@ Special block overlays are no longer disabled based on buffer size."
   "Enable `org-fragtog-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
     (org-fragtog-mode 1)))
+
+(defun my/org-src-edit-buffer-language ()
+  "Return the language of the current Org source edit buffer."
+  (when (and (bound-and-true-p org-src-mode)
+             (buffer-live-p org-src-source-buffer)
+             (markerp org-src--beg-marker))
+    (with-current-buffer org-src-source-buffer
+      (save-excursion
+        (goto-char (marker-position org-src--beg-marker))
+        (when (org-in-src-block-p t)
+          (car (org-babel-get-src-block-info 'light)))))))
+
+(defun my/org-enable-diagram-editing-maybe ()
+  "Enable drawing-friendly modes for Org diagram source buffers."
+  (let ((language (my/org-src-edit-buffer-language)))
+    (when (and language (string= (downcase language) "ditaa"))
+      (unless (derived-mode-p 'picture-mode)
+        (picture-mode))
+      (artist-mode 1)
+      (setq-local truncate-lines t)
+      (setq-local word-wrap nil))))
 
 ;;; ----------------------------------------------------------------------------
 ;;; 2. Org Core Configuration (核心设置)
@@ -1757,6 +1782,15 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
              (let ((url (concat "marginnote4app:" path)))
                (start-process "marginnote" nil "open" url))
            (message "[org] MarginNote link only supported on macOS (got %s)" system-type)))))))
+
+(with-eval-after-load 'org-src
+  (add-hook 'org-src-mode-hook #'my/org-enable-diagram-editing-maybe))
+
+(with-eval-after-load 'org-tempo
+  (dolist (template '(("dot" . "src dot :file images/graph.svg")
+                      ("ditaa" . "src ditaa :file images/diagram.png")
+                      ("pic" . "src ditaa :file images/diagram.png")))
+    (add-to-list 'org-structure-template-alist template t)))
 
 (require 'org-tempo) 
 

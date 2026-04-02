@@ -66,6 +66,8 @@
     ("bash" . shell)
     ("sh" . shell)
     ("zsh" . shell)
+    ("dot" . graphviz-dot)
+    ("ditaa" . picture)
     ("rust" . rust))
   "Extra `org-src-lang-modes' mappings for native Babel languages.")
 
@@ -87,6 +89,22 @@
   "Org Babel execution helpers."
   :group 'org)
 
+(defcustom my/org-ditaa-jar-candidates
+  '("/opt/homebrew/opt/ditaa/libexec"
+    "/usr/local/opt/ditaa/libexec"
+    "~/.local/share/ditaa"
+    "~/bin")
+  "Candidate directories used to locate the system ditaa jar for Org Babel."
+  :type '(repeat directory)
+  :group 'my/org-babel)
+
+(defcustom my/org-dot-command-candidates
+  '("/opt/homebrew/bin/dot"
+    "/usr/local/bin/dot")
+  "Candidate absolute paths used to locate the system Graphviz dot binary."
+  :type '(repeat file)
+  :group 'my/org-babel)
+
 (defcustom my/org-babel-async-emacs-program
   (expand-file-name invocation-name invocation-directory)
   "Emacs executable used to run asynchronous Org Babel jobs."
@@ -101,6 +119,58 @@
 
 (defvar my/org-babel-async-job-counter 0
   "Monotonic counter used for Org Babel async job ids.")
+
+(defun my/org-babel--find-dot-command ()
+  "Return the first usable system Graphviz dot binary, or nil."
+  (or (executable-find "dot")
+      (cl-find-if #'file-exists-p
+                  (mapcar #'expand-file-name my/org-dot-command-candidates))))
+
+(defun my/org-babel--find-ditaa-jar ()
+  "Return the first usable system ditaa jar path, or nil when none is found."
+  (or
+   (cl-find-if
+    #'identity
+    (mapcar
+     (lambda (dir)
+       (let ((path (expand-file-name dir)))
+         (when (file-directory-p path)
+           (car (sort (directory-files-recursively path "ditaa.*\\.jar\\'")
+                      #'string>)))))
+     my/org-ditaa-jar-candidates))
+   (let ((brew-cellar
+          (cl-find-if #'file-directory-p
+                      '("/opt/homebrew/Cellar/ditaa"
+                        "/usr/local/Cellar/ditaa"))))
+     (when brew-cellar
+       (car (sort (directory-files-recursively brew-cellar "ditaa.*\\.jar\\'")
+                  #'string>))))))
+
+(defun my/org-babel--ensure-output-directory (&optional info)
+  "Create the parent directory for the current block's `:file' target.
+INFO defaults to the source block at point."
+  (let* ((info (or info (org-babel-get-src-block-info)))
+         (params (nth 2 info))
+         (target (cdr (assq :file params))))
+    (when (and (stringp target)
+               (not (string-empty-p target)))
+      (let ((directory (file-name-directory
+                        (expand-file-name target default-directory))))
+        (when (and directory (not (file-directory-p directory)))
+          (make-directory directory t))))))
+
+(defun my/org-babel--prepare-src-block (info)
+  "Normalize execution parameters for source block INFO."
+  (let* ((language (car info))
+         (params (copy-tree (nth 2 info))))
+    (when (and (stringp language)
+               (string= (downcase language) "dot")
+               (not (assq :cmd params)))
+      (when-let* ((dot-command (my/org-babel--find-dot-command)))
+        (push (cons :cmd dot-command) params)))
+    (setf (nth 2 info) params)
+    (my/org-babel--ensure-output-directory info)
+    info))
 
 (defun my/org-babel--normalize-boolish (value)
   "Normalize VALUE into a lowercase string."
@@ -430,23 +500,27 @@ INFO is the result of `org-babel-get-src-block-info'."
   "Execute the current Org source block asynchronously."
   (interactive)
   (let ((info (org-babel-get-src-block-info)))
+    (my/org-babel--prepare-src-block info)
     (when (my/org-babel--jupyter-language-p (car info))
       (user-error "Jupyter blocks use `:async yes' directly"))
     (my/org-babel--start-async-job info)))
 
-(defun my/org-babel-execute-src-block-a (orig-fn &rest args)
+(defun my/org-babel-execute-src-block-a
+    (orig-fn &optional arg info params executor-type)
   "Run `org-babel-execute-src-block' asynchronously when `:async yes'."
-  (if (or my/org-babel-in-async-child
-          (not (called-interactively-p 'interactive)))
-      (apply orig-fn args)
-    (let* ((info (org-babel-get-src-block-info))
-           (params (nth 2 info))
-           (language (car info)))
+  (let* ((info (copy-tree (or info (org-babel-get-src-block-info))))
+         (_ (cl-callf org-babel-merge-params (nth 2 info) params))
+         (_ (my/org-babel--prepare-src-block info))
+         (params (nth 2 info))
+         (language (car info)))
+    (if (or my/org-babel-in-async-child
+            (not (called-interactively-p 'interactive)))
+        (funcall orig-fn arg info nil executor-type)
       (if (and (my/org-babel--yes-p (cdr (assq :async params)))
                (my/org-babel--sessionless-p params)
                (not (my/org-babel--jupyter-language-p language)))
           (my/org-babel--start-async-job info)
-        (apply orig-fn args)))))
+        (funcall orig-fn arg info nil executor-type)))))
 
 (advice-add 'org-babel-execute-src-block :around #'my/org-babel-execute-src-block-a)
 
@@ -575,6 +649,7 @@ INFO is the result of `org-babel-get-src-block-info'."
         (cl-remove-duplicates
          (append
           '((dot . t)
+            (ditaa . t)
             (emacs-lisp . t)
             (C . t)
             (shell . t)
@@ -589,6 +664,14 @@ INFO is the result of `org-babel-get-src-block-info'."
   (org-babel-do-load-languages
    'org-babel-load-languages
    org-babel-load-languages)
+  (setf (alist-get :cmdline org-babel-default-header-args:dot nil nil #'eq)
+        "-Tsvg")
+  (setf (alist-get :results org-babel-default-header-args:ditaa nil nil #'eq)
+        "file graphics replace")
+  (setf (alist-get :exports org-babel-default-header-args:ditaa nil nil #'eq)
+        "results")
+  (when-let* ((ditaa-jar (my/org-babel--find-ditaa-jar)))
+    (setq org-ditaa-jar-path ditaa-jar))
   (my/org-babel-configure-jupyter-backends)
   (unless (assoc 'async org-babel-common-header-args-w-values)
     (add-to-list 'org-babel-common-header-args-w-values '(async (yes no)))))
