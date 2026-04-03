@@ -19,6 +19,38 @@
 (declare-function turn-off-evil-mode "evil")
 (declare-function evil-set-initial-state "evil-core")
 
+(defcustom my/vterm-startup-send-delay 0.05
+  "Delay between retries when sending startup commands to a fresh VTerm."
+  :type 'number
+  :group 'term)
+
+(defcustom my/vterm-startup-send-retries 20
+  "Maximum retry count for startup commands sent to a fresh VTerm."
+  :type 'integer
+  :group 'term)
+
+(defun my/vterm-send-command (buffer command &optional retries)
+  "Send COMMAND to VTerm BUFFER once its subprocess is ready.
+Append a trailing return automatically.  RETRIES defaults to
+`my/vterm-startup-send-retries'."
+  (when (and (buffer-live-p buffer)
+             (stringp command)
+             (not (string-empty-p command)))
+    (let ((remaining (or retries my/vterm-startup-send-retries)))
+      (if-let* ((process (get-buffer-process buffer))
+                ((process-live-p process)))
+          (with-current-buffer buffer
+            (vterm-send-string command)
+            (vterm-send-return))
+        (when (> remaining 0)
+          ;; Fresh vterm shells can still be starting up here; retry so the
+          ;; command is not injected mid-startup and lose its first character.
+          (run-at-time my/vterm-startup-send-delay nil
+                       #'my/vterm-send-command
+                       buffer
+                       command
+                       (1- remaining)))))))
+
 (defun shell-mode-common-init ()
   "The common initialization procedure for term/shell."
   (setq-local scroll-margin 0)
@@ -207,9 +239,7 @@ If popup is focused, kill it."
   "Send `cd DIRECTORY' to VTerm BUFFER."
   (when-let* ((buffer (and (buffer-live-p buffer) buffer))
               (command (my/terminal-cd-command directory)))
-    (with-current-buffer buffer
-      (vterm-send-string command)
-      (vterm-send-return))))
+    (my/vterm-send-command buffer command)))
 
 (defun my/vterm--start-in-home-and-cd (orig-fn &rest args)
   "Create VTerm buffers from home, then `cd' into the original directory."

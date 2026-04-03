@@ -8,6 +8,7 @@
 (require 'cl-lib)
 
 (declare-function my/terminal-normalize-directory "init-funcs" (directory))
+(declare-function my/vterm-send-command "init-shell" (buffer command &optional retries))
 (declare-function vterm "vterm" (&optional buffer-name))
 (declare-function vterm-send-string "vterm" (string))
 (declare-function vterm-send-return "vterm" ())
@@ -41,6 +42,9 @@
 
 (defvar my/vterm-popup-current-buffer nil
   "Current popup vterm buffer.")
+
+(defvar my/vterm-popup-last-height nil
+  "Last popup vterm height ratio recorded from a visible window.")
 
 (defvar-local my/vterm-popup-fixed nil
   "Whether this popup vterm buffer should stay visible after focus changes.")
@@ -106,6 +110,24 @@ When BUFFER is non-nil, return the window displaying BUFFER."
                      (eq (window-buffer window) buffer)))
         (throw 'window window)))))
 
+(defun my/vterm-popup--effective-window-height ()
+  "Return the height to use for newly shown popup vterm windows."
+  (if (and (numberp my/vterm-popup-last-height)
+           (> my/vterm-popup-last-height 0)
+           (<= my/vterm-popup-last-height 1))
+      my/vterm-popup-last-height
+    my/vterm-popup-window-height))
+
+(defun my/vterm-popup--record-window-height (&optional window)
+  "Record WINDOW's current height for future popup vterm toggles."
+  (when-let* ((window (or window (my/vterm-popup--window)))
+              (root-window (frame-root-window (window-frame window)))
+              (root-height (window-total-height root-window))
+              ((> root-height 0)))
+    (setq my/vterm-popup-last-height
+          (/ (float (window-total-height window))
+             (float root-height)))))
+
 (defun my/vterm-popup--show-buffer (buffer)
   "Show popup vterm BUFFER in the shared side window."
   (setq my/vterm-popup-current-buffer buffer)
@@ -114,7 +136,7 @@ When BUFFER is non-nil, return the window displaying BUFFER."
                      buffer
                      `((side . top)
                        (slot . 1)
-                       (window-height . ,my/vterm-popup-window-height))))))
+                       (window-height . ,(my/vterm-popup--effective-window-height)))))))
     (set-window-buffer window buffer)
     (set-window-parameter window 'my-vterm-popup t)
     (set-window-parameter
@@ -131,6 +153,8 @@ When BUFFER is non-nil, return the window displaying BUFFER."
          (tail (member buffer buffers))
          (next (or (cadr tail) (car buffers)))
          (window (my/vterm-popup--window buffer)))
+    (when window
+      (my/vterm-popup--record-window-height window))
     (setq my/vterm-popup-buffers (delq buffer my/vterm-popup-buffers))
     (when (eq my/vterm-popup-current-buffer buffer)
       (setq my/vterm-popup-current-buffer
@@ -194,8 +218,10 @@ Signal a user error when outside a project."
          (buffer (my/vterm-popup--create-buffer project-root buffer-name)))
     (with-current-buffer buffer
       (setq-local vterm-kill-buffer-on-exit t)
-      (vterm-send-string (format "clear; %s; exit" command))
-      (vterm-send-return))
+      (if (fboundp 'my/vterm-send-command)
+          (my/vterm-send-command buffer (format "clear; %s; exit" command))
+        (vterm-send-string (format "clear; %s; exit" command))
+        (vterm-send-return)))
     (select-window (my/vterm-popup--show-buffer buffer))
     buffer))
 
@@ -228,6 +254,7 @@ Signal a user error when outside a project."
   "Hide the current popup vterm window."
   (interactive)
   (when-let* ((window (my/vterm-popup--window)))
+    (my/vterm-popup--record-window-height window)
     (ignore-errors (delete-window window))))
 
 (defun my/vterm-show-popup ()
@@ -315,6 +342,9 @@ With prefix ARG, create a new popup vterm and switch to it."
 (global-set-key (kbd "C-c e") #'vterm-toggle)
 (global-set-key (kbd "C-c E") #'my/vterm-popup-cycle)
 (global-set-key (kbd "C-c M-e") #'my/vterm-toggle-fixed)
+
+(with-eval-after-load 'savehist
+  (add-to-list 'savehist-additional-variables 'my/vterm-popup-last-height))
 
 (add-hook 'window-selection-change-functions #'my/vterm-popup--auto-hide)
 (add-hook 'buffer-list-update-hook #'my/vterm-popup--auto-hide)
