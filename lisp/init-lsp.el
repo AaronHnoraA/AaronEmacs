@@ -78,6 +78,7 @@ Each entry is a plist with keys such as `:modes', `:program',
 (defvar-local my/language-server--performance-buffer-p nil
   "Whether the current buffer is counted for LSP performance tuning.")
 
+(declare-function lsp-feature? "lsp-mode" (method))
 (declare-function eglot-current-server "eglot")
 (declare-function eglot--lookup-mode "eglot" (mode))
 (declare-function eglot--managed-buffers "eglot" (server))
@@ -108,6 +109,24 @@ Each entry is a plist with keys such as `:modes', `:program',
 (defun my/language-server-executable-available-p (program)
   "Return non-nil when PROGRAM is available locally or on the remote host."
   (and (my/language-server-executable-find program) t))
+
+(defun my/prog-flymake-setup ()
+  "Enable Flymake for programming buffers with mode-specific exceptions.
+
+Untrusted Emacs Lisp buffers manage Flymake locally so the built-in
+byte-compile backend does not emit noisy warnings on startup."
+  (unless (and (derived-mode-p 'emacs-lisp-mode 'lisp-interaction-mode)
+               (fboundp 'trusted-content-p)
+               (not (trusted-content-p)))
+    (flymake-mode 1)))
+
+(defun my/lsp-managed-mode-setup ()
+  "Apply per-buffer `lsp-mode' UI tweaks after a client attaches."
+  (when (and (bound-and-true-p lsp-inlay-hint-enable)
+             (fboundp 'lsp-feature?)
+             (fboundp 'lsp-inlay-hints-mode)
+             (ignore-errors (lsp-feature? "textDocument/inlayHint")))
+    (lsp-inlay-hints-mode 1)))
 
 (defun my/language-server--plist-like-p (value)
   "Return non-nil when VALUE looks like a plist."
@@ -575,7 +594,7 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
 ;; Eglot / lsp-mode 均统一走 Flymake 诊断
 (use-package flymake
   :ensure nil ; Emacs built-in
-  :hook (prog-mode . flymake-mode)
+  :hook (prog-mode . my/prog-flymake-setup)
   :bind (:map flymake-mode-map
          ("M-n" . flymake-goto-next-error)
          ("M-p" . flymake-goto-prev-error)
@@ -615,9 +634,7 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
              lsp-format-buffer
              lsp-inlay-hints-mode
              lsp-rename)
-  :hook ((lsp-managed-mode . (lambda ()
-                               (when (fboundp 'lsp-inlay-hints-mode)
-                                 (lsp-inlay-hints-mode 1)))))
+  :hook (lsp-managed-mode . my/lsp-managed-mode-setup)
   :init
   (setq lsp-completion-provider :capf
         lsp-diagnostics-provider :flymake
@@ -644,15 +661,6 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
          (eglot-managed-mode . (lambda ()
                                  (when (fboundp 'eglot-inlay-hints-mode)
                                    (eglot-inlay-hints-mode 1)))))
-  :bind (:map eglot-mode-map
-         ("C-c f" . eglot-format-buffer)
-         ("C-c d" . eldoc-doc-buffer)
-         ("C-c a" . eglot-code-actions)
-         ("C-c r" . eglot-rename)
-         ("C-h e" . xref-find-definitions)
-         ("C-h r" . xref-find-references)
-         ("C-h i" . eglot-find-implementation)
-         ("C-h t" . eglot-find-typeDefinition))
   :custom
   (eglot-sync-connect 0)
   (eglot-autoshutdown t)
@@ -664,6 +672,14 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   (read-process-output-max (* 1024 1024)))
 
 (with-eval-after-load 'eglot
+  (define-key eglot-mode-map (kbd "C-c f") #'eglot-format-buffer)
+  (define-key eglot-mode-map (kbd "C-c d") #'eldoc-doc-buffer)
+  (define-key eglot-mode-map (kbd "C-c a") #'eglot-code-actions)
+  (define-key eglot-mode-map (kbd "C-c r") #'eglot-rename)
+  (define-key eglot-mode-map (kbd "C-h e") #'xref-find-definitions)
+  (define-key eglot-mode-map (kbd "C-h r") #'xref-find-references)
+  (define-key eglot-mode-map (kbd "C-h i") #'eglot-find-implementation)
+  (define-key eglot-mode-map (kbd "C-h t") #'eglot-find-typeDefinition)
   (when (boundp 'eglot-events-buffer-config)
     (cl-callf plist-put eglot-events-buffer-config :size 0))
   (define-advice eglot--managed-mode (:around (fn &optional server) my/defer-eglot-shutdown)
@@ -694,15 +710,22 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
 (use-package eldoc-box
   :ensure t
   :hook ((eglot-managed-mode . eldoc-box-hover-at-point-mode)
-         (lsp-managed-mode . eldoc-box-hover-at-point-mode))
-  :bind (:map eglot-mode-map
-         ("C-h d" . eldoc-box-help-at-point)
-         ("C-h c" . eldoc-box-quit-frame))
+         (lsp-managed-mode . eldoc-box-hover-at-point-mode)
+         (emacs-lisp-mode . eldoc-box-hover-at-point-mode)
+         (lisp-interaction-mode . eldoc-box-hover-at-point-mode))
   :custom
   (eldoc-box-max-pixel-width 600)
   (eldoc-box-max-pixel-height 400)
   (eldoc-box-clear-with-C-g t)
   :config
+  (with-eval-after-load 'eglot
+    (define-key eglot-mode-map (kbd "C-h d") #'eldoc-box-help-at-point)
+    (define-key eglot-mode-map (kbd "C-h c") #'eldoc-box-quit-frame))
+  (with-eval-after-load 'elisp-mode
+    (define-key emacs-lisp-mode-map (kbd "C-h d") #'eldoc-box-help-at-point)
+    (define-key emacs-lisp-mode-map (kbd "C-h c") #'eldoc-box-quit-frame)
+    (define-key lisp-interaction-mode-map (kbd "C-h d") #'eldoc-box-help-at-point)
+    (define-key lisp-interaction-mode-map (kbd "C-h c") #'eldoc-box-quit-frame))
   (with-eval-after-load 'lsp-mode
     (define-key lsp-mode-map (kbd "C-h d") #'eldoc-box-help-at-point)
     (define-key lsp-mode-map (kbd "C-h c") #'eldoc-box-quit-frame)))

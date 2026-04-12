@@ -1,17 +1,33 @@
 ;;; init-elisp.el --- Emacs Lisp config -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; Emacs Lisp uses built-in tooling instead of lsp/eglot:
-;; - eldoc
-;; - completion-at-point
-;; - flymake
+;; Emacs Lisp keeps the built-in editing experience by default, but can opt
+;; into `lsp-mode' via Elsa in file buffers when `elsa-lsp' is installed.
 
 ;;; Code:
 
 (require 'init-funcs)
+(require 'init-package-utils)
+(require 'subr-x)
+
+(declare-function my/lsp-mode-ensure "init-lsp")
+(declare-function my/language-server-stop-eglot "init-lsp")
+(declare-function my/register-lsp-mode-preference "init-lsp" (mode &optional feature source note))
+(declare-function flymake-start "flymake" (&optional report-fn))
+(declare-function elisp-flymake-byte-compile "elisp-mode" (report-fn &rest args))
+(declare-function elisp-flymake-checkdoc "elisp-mode" (report-fn &rest args))
+(declare-function lsp-deferred "lsp-mode")
+(declare-function lsp-register-client "lsp-mode" (client))
+(declare-function lsp-stdio-connection "lsp-mode" (command &optional test-command))
+(declare-function lsp-inlay-hints-mode "lsp-mode" (&optional arg))
+(declare-function make-lsp-client "lsp-mode" (&rest args))
+
+(defvar flymake-diagnostic-functions)
+(defvar lsp-language-id-configuration)
+(defvar lsp-inlay-hint-enable)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Emacs Lisp does not use eglot
+;; Emacs Lisp editing
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun my/elisp--flymake-safe-buffer-p ()
@@ -19,6 +35,13 @@
   (or buffer-file-name
       (not (fboundp 'trusted-content-p))
       (funcall #'trusted-content-p)))
+
+(defun my/elisp-flymake-backends ()
+  "Return the Flymake backends suitable for the current Emacs Lisp buffer."
+  (delq nil
+        (list (when (my/elisp--flymake-safe-buffer-p)
+                #'elisp-flymake-byte-compile)
+              #'elisp-flymake-checkdoc)))
 
 (defun my/elisp-mode-setup ()
   "Setup for Emacs Lisp buffers."
@@ -28,34 +51,98 @@
   ;; Better native completion experience
   (setq-local completion-cycle-threshold 3)
 
-  ;; `prog-mode' enables Flymake broadly; turn it back off for untrusted
-  ;; scratch-like buffers so Emacs 31 does not emit the byte-compile warning.
-  (if (my/elisp--flymake-safe-buffer-p)
-      (flymake-mode 1)
-    (when (bound-and-true-p flymake-mode)
-      (flymake-mode -1))))
+  ;; Elsa does not implement the inlay hint request.
+  (setq-local lsp-inlay-hint-enable nil)
+  (when (and (bound-and-true-p lsp-managed-mode)
+             (fboundp 'lsp-inlay-hints-mode))
+    (ignore-errors (lsp-inlay-hints-mode -1)))
+
+  ;; Use byte-compile checks only for trusted content; keep `checkdoc`
+  ;; available everywhere so untrusted buffers still get diagnostics.
+  (setq-local flymake-diagnostic-functions (my/elisp-flymake-backends))
+  (flymake-mode 1)
+  (flymake-start))
 
 (add-hook 'emacs-lisp-mode-hook #'my/elisp-mode-setup)
 (add-hook 'lisp-interaction-mode-hook #'my/elisp-mode-setup)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Prevent eglot from starting in Emacs Lisp buffers
+;; Optional Elsa LSP support (same explicit lsp-mode route pattern as Lean)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(with-eval-after-load 'eglot
-  (defun my/eglot--skip-in-elisp (orig-fn &rest args)
-    "Do not run eglot in Emacs Lisp buffers."
-    (if (derived-mode-p 'emacs-lisp-mode 'lisp-interaction-mode)
-        (progn
-          ;; If eglot somehow already started, shut it down locally.
-          (when (and (fboundp 'eglot-managed-p)
-                     (eglot-managed-p))
-            (ignore-errors (eglot-shutdown (eglot-current-server))))
-          nil)
-      (apply orig-fn args)))
+(my/package-install-archive 'elsa)
 
-  (advice-add 'eglot :around #'my/eglot--skip-in-elisp)
-  (advice-add 'eglot-ensure :around #'my/eglot--skip-in-elisp))
+(when (fboundp 'my/register-lsp-mode-preference)
+  (my/register-lsp-mode-preference
+   'emacs-lisp-mode
+   'elsa-lsp
+   nil
+   "Emacs Lisp buffers prefer Elsa through lsp-mode when Elsa is installed."))
+
+(defun my/elisp-elsa-lsp-command ()
+  "Return a direct Elsa LSP command using the current Emacs binary.
+
+This avoids the upstream Eask/Cask wrapper requirement and starts Elsa from
+the already-installed ELPA package."
+  (let ((emacs-bin (expand-file-name invocation-name invocation-directory)))
+    (list emacs-bin
+          "--batch"
+          "-Q"
+          "--eval"
+          (mapconcat
+           #'identity
+           '("(progn"
+             "  (require 'package)"
+             "  (package-initialize)"
+             "  (require 'cl-lib)"
+             "  (let ((warning-minimum-level :emergency)"
+             "        (message-log-max nil)"
+             "        (inhibit-message t))"
+             "    (cl-letf (((symbol-function 'message) (lambda (&rest _args) nil))"
+             "              ((symbol-function 'display-warning) (lambda (&rest _args) nil)))"
+             "      (require 'elsa-lsp)))"
+             "  (elsa-lsp-stdin-loop))")
+           "\n"))))
+
+(defun my/elisp-lsp-ensure ()
+  "Start Elsa LSP for the current Emacs Lisp file buffer."
+  (when (and buffer-file-name
+             (locate-library "elsa-lsp")
+             (not (bound-and-true-p lsp-managed-mode)))
+    (setq-local lsp-inlay-hint-enable nil)
+    (when (fboundp 'my/language-server-stop-eglot)
+      (my/language-server-stop-eglot))
+    (lsp-deferred)))
+
+(defun my/elisp-lsp-ensure-deferred ()
+  "Start Elsa LSP after the current Emacs Lisp file buffer settles."
+  (when (and buffer-file-name
+             (fboundp 'my/elisp-lsp-ensure)
+             (locate-library "elsa-lsp"))
+    (let ((buffer (current-buffer)))
+      (run-at-time
+       0 nil
+       (lambda (buf)
+         (when (buffer-live-p buf)
+           (with-current-buffer buf
+             (my/elisp-lsp-ensure))))
+       buffer))))
+
+(use-package elsa-lsp
+  :ensure nil
+  :if (locate-library "elsa-lsp")
+  :after lsp-mode
+  :demand t
+  :config
+  (add-to-list 'lsp-language-id-configuration '(emacs-lisp-mode . "emacs-lisp"))
+  (lsp-register-client
+   (make-lsp-client
+    :new-connection (lsp-stdio-connection #'my/elisp-elsa-lsp-command)
+    :major-modes '(emacs-lisp-mode)
+    :priority 2
+    :server-id 'elsa-lsp))
+  (add-hook 'emacs-lisp-mode-hook #'my/elisp-lsp-ensure-deferred))
+
 
 
 (provide 'init-elisp)
