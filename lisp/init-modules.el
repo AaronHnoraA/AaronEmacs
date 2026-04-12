@@ -28,8 +28,9 @@ If one of FEATURES is already available, require MODULE immediately."
       (with-eval-after-load feature
         (my/require-module-safely module)))))
 
-(require 'init-base)
 (require 'init-utils)
+(require 'init-base)
+(require 'init-tramp)
 (require 'init-ui)
 (require 'init-display-rules)
 (require 'init-tools)

@@ -174,16 +174,24 @@
     (when-let* ((rootdir (my/lean4-remote-rootdir)))
       (setq-local lean4-rootdir rootdir))))
 
-(defun my/lean4-disable-remote-ui ()
-  "Disable Lean UI features that are unstable over TRAMP."
+(defun my/lean4-tune-remote-ui ()
+  "Tune Lean UI for TRAMP connections: disable expensive features, slow refresh."
   (when (file-remote-p default-directory)
-    (setq-local lean4-show-file-progress nil
-                lsp-semantic-tokens-enable nil)
+    ;; Fringe progress overlays have a dedicated safe wrapper; disable the
+    ;; feature itself to avoid unnecessary remote traffic.
+    (setq-local lean4-show-file-progress nil)
+    ;; Semantic tokens add round-trip overhead with little benefit remotely.
+    (setq-local lsp-semantic-tokens-enable nil)
+    ;; post-command and flycheck hooks only re-render cached goal data locally —
+    ;; they are cheap but generate timer churn; remove them.  The LSP idle hook
+    ;; (lean4-info-buffer-refresh) is kept so C-c C-i and cursor-movement goals
+    ;; still update, but we slow its cadence to avoid hammering the connection.
     (remove-hook 'post-command-hook #'lean4-info-buffer-redisplay-debounced t)
     (remove-hook 'flycheck-after-syntax-check-hook
-                 #'lean4-info-buffer-redisplay-debounced
-                 t)
-    (remove-hook 'lsp-on-idle-hook #'lean4-info-buffer-refresh t)
+                 #'lean4-info-buffer-redisplay-debounced t)
+    ;; 2 s idle before sending $/lean/plainGoal — relaxed from the 0.5 s default.
+    (setq-local lsp-idle-delay 2.0)
+    ;; Cancel any pending fringe timer left over from lean4-mode startup.
     (when (timerp lean4-fringe-delay-timer)
       (cancel-timer lean4-fringe-delay-timer)
       (setq-local lean4-fringe-delay-timer nil))))
@@ -192,7 +200,7 @@
   "Report remote Lean UI ERROR only once per buffer."
   (unless my/lean4-remote-ui-error-reported
     (setq-local my/lean4-remote-ui-error-reported t)
-    (message "Lean remote UI disabled after error: %s"
+    (message "Lean remote UI error (non-fatal): %s"
              (error-message-string error))))
 
 (use-package lean4-mode
@@ -200,7 +208,7 @@
   (setq lean4-mode-hook nil)
   (my/register-lsp-mode-preference 'lean4-mode)
   (add-hook 'lean4-mode-hook #'my/lean4-setup-remote-rootdir)
-  (add-hook 'lean4-mode-hook #'my/lean4-disable-remote-ui)
+  (add-hook 'lean4-mode-hook #'my/lean4-tune-remote-ui)
   (add-hook 'lean4-mode-hook #'my/lsp-mode-ensure)
   :mode ("\\\\.lean\\\\'" . lean4-mode))
 
@@ -221,21 +229,20 @@
         (condition-case err
             (funcall fn)
           (error
-           (my/lean4-disable-remote-ui)
+           (my/lean4-tune-remote-ui)
            (my/lean4-report-remote-ui-error err)))
       (funcall fn))))
 
 (with-eval-after-load 'lean4-info
   (define-advice lean4-info-buffer-redisplay
       (:around (fn) my/lean4-remote-safe-info)
-    "Ignore invalid remote Lean goal refreshes instead of wedging the session."
-    (if (file-remote-p default-directory)
-        (condition-case err
-            (funcall fn)
-          (error
-           (my/lean4-disable-remote-ui)
-           (my/lean4-report-remote-ui-error err)))
-      (funcall fn))))
+    "Swallow rendering errors in the Lean goal buffer.
+Unlike the fringe advice, a transient render failure should NOT permanently
+kill the info buffer, so we just log the first occurrence and continue."
+    (condition-case err
+        (funcall fn)
+      (error
+       (my/lean4-report-remote-ui-error err)))))
 
 (with-eval-after-load 'init-symbols
   (my/symbols-register-project-fallback 'lean4-mode

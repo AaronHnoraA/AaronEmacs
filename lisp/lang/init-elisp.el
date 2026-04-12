@@ -57,11 +57,17 @@
              (fboundp 'lsp-inlay-hints-mode))
     (ignore-errors (lsp-inlay-hints-mode -1)))
 
-  ;; Use byte-compile checks only for trusted content; keep `checkdoc`
-  ;; available everywhere so untrusted buffers still get diagnostics.
-  (setq-local flymake-diagnostic-functions (my/elisp-flymake-backends))
-  (flymake-mode 1)
-  (flymake-start))
+  ;; Keep startup buffers such as `*scratch*' out of Flymake when Emacs marks
+  ;; them as untrusted.  Otherwise the built-in byte-compile backend emits a
+  ;; warning before our local backend override can take effect.
+  (if (my/elisp--flymake-safe-buffer-p)
+      (progn
+        (setq-local flymake-diagnostic-functions (my/elisp-flymake-backends))
+        (flymake-mode 1)
+        (flymake-start))
+    (setq-local flymake-diagnostic-functions nil)
+    (when (bound-and-true-p flymake-mode)
+      (flymake-mode -1))))
 
 (add-hook 'emacs-lisp-mode-hook #'my/elisp-mode-setup)
 (add-hook 'lisp-interaction-mode-hook #'my/elisp-mode-setup)

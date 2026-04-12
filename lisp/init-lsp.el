@@ -78,7 +78,17 @@ Each entry is a plist with keys such as `:modes', `:program',
 (defvar-local my/language-server--performance-buffer-p nil
   "Whether the current buffer is counted for LSP performance tuning.")
 
+(defvar-local my/flymake-diagnostic-at-point-timer nil
+  "Idle timer used by `my/flymake-diagnostic-at-point-mode'.")
+
+(defcustom my/flymake-diagnostic-at-point-delay 0.2
+  "Seconds to wait before echoing the Flymake diagnostic at point."
+  :type 'number
+  :group 'my/language-server)
+
 (declare-function lsp-feature? "lsp-mode" (method))
+(declare-function lsp--update-inlay-hints "lsp-mode" ())
+(declare-function lsp--workspace-buffers "lsp-mode" (workspace))
 (declare-function eglot-current-server "eglot")
 (declare-function eglot--lookup-mode "eglot" (mode))
 (declare-function eglot--managed-buffers "eglot" (server))
@@ -93,7 +103,10 @@ Each entry is a plist with keys such as `:modes', `:program',
 (declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
 (declare-function my/diagnostics-project-ui "init-diagnostics-ui")
 (declare-function prescient-persist-mode "prescient" (&optional arg))
+(declare-function flymake-diagnostic-beg "flymake" (diag))
+(declare-function flymake-diagnostic-end "flymake" (diag))
 (declare-function flymake-diagnostic-text "flymake" (diag))
+(declare-function flymake-diagnostics "flymake" (&optional beg end))
 (declare-function flymake-start "flymake" (&optional report-fn))
 (declare-function dape--live-connection "dape" (&optional kind noerror))
 
@@ -127,6 +140,76 @@ byte-compile backend does not emit noisy warnings on startup."
              (fboundp 'lsp-inlay-hints-mode)
              (ignore-errors (lsp-feature? "textDocument/inlayHint")))
     (lsp-inlay-hints-mode 1)))
+
+(defun my/flymake-diagnostic-at-point-text ()
+  "Return the first Flymake diagnostic text covering point."
+  (when (bound-and-true-p flymake-mode)
+    (when-let* ((diag (seq-find
+                       (lambda (it)
+                         (let ((beg (flymake-diagnostic-beg it))
+                               (end (flymake-diagnostic-end it)))
+                           (<= beg (point) (max beg end))))
+                       (flymake-diagnostics))))
+      (flymake-diagnostic-text diag))))
+
+(defun my/flymake-diagnostic-at-point-cancel ()
+  "Cancel the current buffer's Flymake point-diagnostic timer."
+  (when (timerp my/flymake-diagnostic-at-point-timer)
+    (cancel-timer my/flymake-diagnostic-at-point-timer)
+    (setq my/flymake-diagnostic-at-point-timer nil)))
+
+(defun my/flymake-diagnostic-at-point-display (buffer)
+  "Echo the Flymake diagnostic for BUFFER when point stays idle."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq my/flymake-diagnostic-at-point-timer nil)
+      (when (and (bound-and-true-p my/flymake-diagnostic-at-point-mode)
+                 (bound-and-true-p flymake-mode)
+                 (frame-focus-state)
+                 (eq (current-buffer) (window-buffer (selected-window))))
+        (when-let* ((text (my/flymake-diagnostic-at-point-text)))
+          (message "➤ %s" text))))))
+
+(defun my/flymake-diagnostic-at-point-schedule (&rest _)
+  "Refresh the idle timer for `my/flymake-diagnostic-at-point-mode'."
+  (my/flymake-diagnostic-at-point-cancel)
+  (when (and (bound-and-true-p my/flymake-diagnostic-at-point-mode)
+             (not (minibufferp)))
+    (setq my/flymake-diagnostic-at-point-timer
+          (run-with-idle-timer
+           my/flymake-diagnostic-at-point-delay
+           nil
+           #'my/flymake-diagnostic-at-point-display
+           (current-buffer)))))
+
+(define-minor-mode my/flymake-diagnostic-at-point-mode
+  "Display Flymake diagnostics for point in the echo area."
+  :lighter nil
+  (if my/flymake-diagnostic-at-point-mode
+      (progn
+        (add-hook 'post-command-hook #'my/flymake-diagnostic-at-point-schedule nil t)
+        (add-hook 'pre-command-hook #'my/flymake-diagnostic-at-point-cancel nil t))
+    (remove-hook 'post-command-hook #'my/flymake-diagnostic-at-point-schedule t)
+    (remove-hook 'pre-command-hook #'my/flymake-diagnostic-at-point-cancel t)
+    (my/flymake-diagnostic-at-point-cancel)))
+
+(defun my/flymake-diagnostic-at-point-mode-sync ()
+  "Keep `my/flymake-diagnostic-at-point-mode' aligned with `flymake-mode'."
+  (my/flymake-diagnostic-at-point-mode
+   (if (bound-and-true-p flymake-mode) 1 -1)))
+
+(defun my/lsp-handle-inlay-hint-refresh (workspace)
+  "Handle an unsupported inlay-hint refresh request for WORKSPACE."
+  (dolist (buffer (ignore-errors (lsp--workspace-buffers workspace)))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when (and (bound-and-true-p lsp-managed-mode)
+                   (bound-and-true-p lsp-inlay-hints-mode)
+                   (fboundp 'lsp--update-inlay-hints)
+                   (get-buffer-window buffer t))
+          (ignore-errors
+            (lsp--update-inlay-hints))))))
+  nil)
 
 (defun my/language-server--plist-like-p (value)
   "Return non-nil when VALUE looks like a plist."
@@ -605,19 +688,7 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   (flymake-indicator-type 'fringes))
 
 ;; 光标停在报错位置时，在 minibuffer 显示诊断
-(use-package flymake-diagnostic-at-point
-  :ensure t
-  :after flymake
-  :hook (flymake-mode . flymake-diagnostic-at-point-mode)
-  :custom
-  (flymake-diagnostic-at-point-timer-delay 0.2)
-  (flymake-diagnostic-at-point-display-diagnostic-function
-   #'flymake-diagnostic-at-point-display-minibuffer)
-  :config
-  ;; Emacs 31 removed the old internal `flymake--diag-text' helper that this
-  ;; package still calls.  Bridge it to the public API instead of patching ELPA.
-  (unless (fboundp 'flymake--diag-text)
-    (defalias 'flymake--diag-text #'flymake-diagnostic-text)))
+(add-hook 'flymake-mode-hook #'my/flymake-diagnostic-at-point-mode-sync)
 
 
 ;; -------------------------
@@ -642,6 +713,12 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
         lsp-inlay-hint-enable t
         lsp-log-io nil)
   :config
+  (define-advice lsp--on-request (:around (fn workspace request) my/handle-inlay-hint-refresh)
+    "Handle standard refresh requests that this `lsp-mode' release lacks."
+    (let ((method (plist-get request :method)))
+      (if (equal method "workspace/inlayHint/refresh")
+          (my/lsp-handle-inlay-hint-refresh workspace)
+        (funcall fn workspace request))))
   (define-key lsp-mode-map (kbd "C-c f") #'lsp-format-buffer)
   (define-key lsp-mode-map (kbd "C-c d") #'eldoc-doc-buffer)
   (define-key lsp-mode-map (kbd "C-c a") #'lsp-execute-code-action)
