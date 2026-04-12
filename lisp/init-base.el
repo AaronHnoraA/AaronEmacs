@@ -1282,13 +1282,44 @@ When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
 
 (with-eval-after-load 'lsp-mode
   (define-advice lsp-stdio-connection (:filter-return (plist) my/disable-tramp-direct-async)
-    "Disable TRAMP direct async for LSP stdio transports."
+    "Manage TRAMP direct-async for LSP stdio transports.
+
+Most LSP servers work fine with TRAMP's traditional (non-direct-async) path,
+which shares an existing SSH connection.
+
+Exception: lean4-lsp MUST use a pipe-mode direct-async SSH connection.
+TRAMP's traditional path applies unix-EOL encoding (stripping \\r) to all
+outgoing data.  Lean's LSP watchdog requires \\r\\n line endings in headers
+\(`String.takeEnd 2 == \"\\r\\n\"'\) and aborts with \"Invalid header field\"
+if only \\n is received.
+
+The fix uses TRAMP's direct-async path but overrides `tramp-direct-async' to
+nil so SSH does not allocate a PTY (no -t -t).  Without a PTY the process
+gets a raw pipe channel with `:coding 'no-conversion', and \\r\\n passes
+through unchanged."
     (if-let* ((connect-fn (plist-get plist :connect)))
         (plist-put
          plist :connect
-         (lambda (&rest args)
-           (cl-letf (((symbol-function 'tramp-direct-async-process-p) #'ignore))
-             (apply connect-fn args))))
+         (lambda (filter sentinel name environment-fn workspace)
+           (if (string-match-p "lean4" name)
+               ;; lean4: direct-async WITHOUT PTY = raw binary SSH pipe.
+               ;; We must override both:
+               ;;  1. tramp-direct-async-process-p → t  (take the direct-async path)
+               ;;  2. tramp-get-method-parameter for tramp-direct-async → nil
+               ;;     so (consp nil)=nil → no -t -t flags → no PTY → no echo.
+               (let ((orig-gmp (symbol-function 'tramp-get-method-parameter)))
+                 (cl-letf (((symbol-function 'tramp-direct-async-process-p)
+                            (lambda (&rest _) t))
+                           ((symbol-function 'tramp-get-method-parameter)
+                            (lambda (vec param &optional default)
+                              (if (eq param 'tramp-direct-async)
+                                  nil
+                                (funcall orig-gmp vec param default)))))
+                   (funcall connect-fn filter sentinel name environment-fn workspace)))
+             ;; All other servers: keep direct-async disabled to avoid
+             ;; instability on the shared ControlMaster connection.
+             (cl-letf (((symbol-function 'tramp-direct-async-process-p) #'ignore))
+               (funcall connect-fn filter sentinel name environment-fn workspace)))))
       plist)))
 
 (with-eval-after-load 'eglot

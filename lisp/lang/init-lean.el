@@ -177,11 +177,6 @@
 (defun my/lean4-disable-remote-ui ()
   "Disable Lean UI features that are unstable over TRAMP."
   (when (file-remote-p default-directory)
-    ;; FIX: 阻止 TRAMP 对 LSP Payload 进行分块从而引发 Lean Watchdog JSON截断错误
-    (setq-local tramp-chunksize 4096)
-    ;; FIX: 强制使用管道(Pipes)而非伪终端(PTY)来防止回显污染 LSP 报头
-    (setq-local process-connection-type nil)
-
     (setq-local lean4-show-file-progress nil
                 lsp-semantic-tokens-enable nil)
     (remove-hook 'post-command-hook #'lean4-info-buffer-redisplay-debounced t)
@@ -245,7 +240,6 @@
 (with-eval-after-load 'init-symbols
   (my/symbols-register-project-fallback 'lean4-mode
                                         #'my/lean-project-symbols-fallback))
-
 
 
 (provide 'init-lean)

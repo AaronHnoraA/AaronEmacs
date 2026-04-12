@@ -49,8 +49,8 @@
                     comment-end "")))
 
   :custom
-  (c-basic-offset 4)
-  (tab-width 4)
+  (c-basic-offset 2)
+  (tab-width 2)
   (indent-tabs-mode nil))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -58,9 +58,9 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun my/c-ts-indent-4 ()
-  "Use 4 space indentation in c-ts-mode."
-  (setq-local c-ts-mode-indent-offset 4)
-  (setq-local tab-width 4)
+  "Use 2 space indentation in c-ts-mode."
+  (setq-local c-ts-mode-indent-offset 2)
+  (setq-local tab-width 2)
   (setq-local indent-tabs-mode nil)
   (local-set-key (kbd "RET") #'newline-and-indent))
 
@@ -199,8 +199,8 @@
 
 
 (defun my-c-unified-indent-setup ()
-  (setq-local c-basic-offset 4)
-  (setq-local c-ts-mode-indent-offset 4)
+  (setq-local c-basic-offset 2)
+  (setq-local c-ts-mode-indent-offset 2)
   (setq-local indent-tabs-mode nil)
   (local-set-key (kbd "RET") #'newline-and-indent))
 
