@@ -60,6 +60,7 @@
 (declare-function my/language-server-ensure "init-lsp")
 (declare-function my/language-server-format-buffer "init-lsp")
 (declare-function my/language-server-lsp-mode-preference-entries "init-lsp")
+(declare-function my/language-server-project-backend-override "init-lsp")
 (declare-function my/language-server-rename "init-lsp")
 (declare-function my/language-server-organize-imports "init-lsp-ops")
 (declare-function my/language-server-restart "init-lsp-ops")
@@ -176,8 +177,20 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
   "Return a short description of the expected backend policy for BUFFER."
   (with-current-buffer (or buffer (current-buffer))
     (let ((active (and (fboundp 'my/current-language-server-backend)
-                       (my/current-language-server-backend))))
+                       (my/current-language-server-backend)))
+          (override (and (fboundp 'my/language-server-project-backend-override)
+                         (my/language-server-project-backend-override))))
       (cond
+       ((eq override 'disabled)
+        "disabled (project-local override)")
+       ((eq override 'lsp-mode)
+        (if (eq active 'lsp-mode)
+            "lsp-mode (active project-local override)"
+          "lsp-mode (project-local override)"))
+       ((eq override 'eglot)
+        (if (eq active 'eglot)
+            "eglot (active project-local override)"
+          "eglot (project-local override)"))
        ((my/language-server--current-lsp-preference-entry)
         (if (eq active 'lsp-mode)
             "lsp-mode (active explicit route)"

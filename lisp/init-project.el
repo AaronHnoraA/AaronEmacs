@@ -17,11 +17,18 @@
 (defvar project--list)
 (defvar dashboard-projects-backend)
 (defvar dashboard-projects-switch-function)
+(defvar winner-mode)
+(defvar winner-currents)
+(defvar winner-pending-undo-ring)
+(defvar winner-ring-alist)
+(defvar winner-undo-frame)
 
 (declare-function project--ensure-read-project-list "project")
 (declare-function project--write-project-list "project")
 (declare-function dashboard-projects-backend-load-projects "dashboard-widgets")
 (declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
+(declare-function get-current-persp "perspective")
+(declare-function persp-parameter "perspective" (parameter &optional persp))
 (declare-function projectile-find-file-in-directory "projectile")
 (declare-function projectile-ignored-project-p "projectile")
 (declare-function projectile-known-projects "projectile")
@@ -29,6 +36,7 @@
 (declare-function projectile-merge-known-projects "projectile")
 (declare-function projectile-relevant-known-projects "projectile")
 (declare-function projectile-save-known-projects "projectile")
+(declare-function set-persp-parameter "perspective" (parameter value &optional persp))
 
 (defgroup my/project nil
   "Project workflow helpers."
@@ -245,6 +253,28 @@ With a prefix argument, always prompt."
   "Switch to the perspective associated with PROJECT-ROOT."
   (when (fboundp 'persp-switch)
     (persp-switch (my/project-perspective-name project-root))))
+
+(defun my/project-save-winner-data-h (&rest _)
+  "Persist `winner-mode' state into the active perspective."
+  (when (and (bound-and-true-p winner-mode)
+             (fboundp 'get-current-persp)
+             (get-current-persp))
+    (set-persp-parameter
+     'winner-ring
+     (list winner-currents
+           winner-ring-alist
+           winner-pending-undo-ring))))
+
+(defun my/project-load-winner-data-h (&rest _)
+  "Restore `winner-mode' state from the active perspective."
+  (when (bound-and-true-p winner-mode)
+    (pcase-let ((`(,currents ,alist ,pending)
+                 (or (persp-parameter 'winner-ring)
+                     (list nil nil nil))))
+      (setq winner-undo-frame nil
+            winner-currents currents
+            winner-ring-alist alist
+            winner-pending-undo-ring pending))))
 
 (defmacro my/with-project-root-context (project-root &rest body)
   "Evaluate BODY with PROJECT-ROOT bound as the active Projectile root."
@@ -808,6 +838,15 @@ Returns the number of killed buffers."
                  "bazel-testlogs"))
     (add-to-list 'projectile-globally-ignored-directories dir))
   (define-key projectile-command-map (kbd ".") #'my/project-dispatch)
+  (define-key projectile-command-map (kbd "p") #'my/project-switch)
+  (define-key projectile-command-map (kbd "o") #'my/project-open-workbench)
+  (define-key projectile-command-map (kbd "f") #'my/project-find-file)
+  (define-key projectile-command-map (kbd "r") #'my/project-recent-file)
+  (define-key projectile-command-map (kbd "b") #'my/project-switch-buffer)
+  (define-key projectile-command-map (kbd "g") #'my/project-ripgrep)
+  (define-key projectile-command-map (kbd "d") #'my/project-open-root)
+  (define-key projectile-command-map (kbd "m") #'my/project-magit-status)
+  (define-key projectile-command-map (kbd "v") #'my/project-vterm)
   (setq projectile-mode-line "Projectile"
         projectile-track-known-projects-automatically nil)
   (my/project-prune-hidden-project-state)
@@ -984,7 +1023,10 @@ Returns the number of killed buffers."
   (setq persp-mode-prefix-key (kbd "C-x x")
         persp-initial-frame-name "main")
   :config
+  (add-to-list 'window-persistent-parameters '(winner-ring . t))
   (persp-mode 1)
+  (add-hook 'persp-before-deactivate-functions #'my/project-save-winner-data-h)
+  (add-hook 'persp-activated-functions #'my/project-load-winner-data-h)
   (with-eval-after-load 'treemacs
     (when (assoc 'Perspectives treemacs-scope-types)
       (treemacs-set-scope-type 'Perspectives))))

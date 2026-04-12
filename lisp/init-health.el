@@ -44,6 +44,15 @@
     my/language-server-doctor)
   "Interactive commands checked in `my/health-report'.")
 
+(defvar my/health-startup-time nil
+  "Elapsed startup time in seconds for the current Emacs session.")
+
+(defvar my/health-startup-gcs nil
+  "GC count recorded for the current Emacs session startup.")
+
+(defvar my/health-startup-package-count nil
+  "Installed package count recorded after startup.")
+
 (define-derived-mode my/health-mode special-mode "Health"
   "Major mode for config health reports.")
 
@@ -74,6 +83,30 @@
         (list :ok (eq status 0)
               :status status
               :output output)))))
+
+(defun my/health--record-startup-metrics-h ()
+  "Capture startup metrics for the current Emacs session."
+  (setq my/health-startup-time
+        (float-time (time-subtract after-init-time before-init-time))
+        my/health-startup-gcs gcs-done
+        my/health-startup-package-count (length package-alist))
+  (unless noninteractive
+    (message "Emacs ready in %.2fs with %d GCs (%d packages)"
+             my/health-startup-time
+             my/health-startup-gcs
+             my/health-startup-package-count)))
+
+(add-hook 'emacs-startup-hook #'my/health--record-startup-metrics-h 90)
+
+(defun my/health-startup-summary ()
+  "Display a concise summary of current-session startup metrics."
+  (interactive)
+  (if (and my/health-startup-time my/health-startup-gcs)
+      (message "Startup: %.2fs, %d GCs, %d packages"
+               my/health-startup-time
+               my/health-startup-gcs
+               (or my/health-startup-package-count 0))
+    (message "Startup metrics are not available yet")))
 
 (defun my/health-startup-check ()
   "Run a batch startup smoke test."
@@ -159,6 +192,20 @@
         (erase-buffer)
         (insert (format "Health report for %s\n\n"
                         (abbreviate-file-name (my/health-config-root))))
+        (insert "Current session\n")
+        (insert "---------------\n")
+        (insert (format "%-20s %s\n" "Startup time"
+                        (if my/health-startup-time
+                            (format "%.2fs" my/health-startup-time)
+                          "N/A")))
+        (insert (format "%-20s %s\n" "GCs"
+                        (if my/health-startup-gcs
+                            (number-to-string my/health-startup-gcs)
+                          "N/A")))
+        (insert (format "%-20s %s\n\n" "Packages"
+                        (if my/health-startup-package-count
+                            (number-to-string my/health-startup-package-count)
+                          "N/A")))
         (insert "Batch checks\n")
         (insert "------------\n")
         (my/health--insert-check "Startup smoke" startup)
@@ -187,6 +234,7 @@
   "Health check workflow."
   [["Checks"
     ("h" "full report" my/health-report)
+    ("i" "init stats" my/health-startup-summary)
     ("s" "startup smoke" my/health-startup-check)
     ("c" "byte compile smoke" my/health-byte-compile-check)
     ("n" "native compile smoke" my/health-native-compile-check)]
@@ -194,6 +242,7 @@
     ("b" "compile board" my/compile-board)]])
 
 (my/evil-global-leader-set "h H" #'my/health-dispatch "health")
+(my/evil-global-leader-set "h i" #'my/health-startup-summary "init stats")
 
 (provide 'init-health)
 ;;; init-health.el ends here

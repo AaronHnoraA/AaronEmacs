@@ -13,7 +13,7 @@
 (declare-function my/project-current-root "init-project")
 
 (defgroup my/project-local nil
-  "Project-local overrides for test, task, run, and debug workflows."
+  "Project-local overrides for workflows and language-server behavior."
   :group 'convenience)
 
 (defcustom my/project-local-overrides nil
@@ -26,10 +26,12 @@ Supported matcher forms:
 - function: called with the normalized project root
 
 Supported plist keys:
-- `:env' / `:test-env' / `:task-env' / `:run-env' / `:debug-env'
+- `:env' / `:test-env' / `:task-env' / `:run-env' / `:debug-env' / `:lsp-env'
 - `:test' as an alist like ((nearest . \"...\") (project . \"...\"))
 - `:task', `:run', and `:debug' as alists of (LABEL . SPEC)
-- `:debug-default' as a debug SPEC or profile label."
+- `:debug-default' as a debug SPEC or profile label
+- `:language-server' as one of `eglot', `lsp-mode', or `disabled'
+- `:eglot-workspace' as extra workspace configuration merged before startup."
   :type '(repeat
           (cons :tag "Project override"
                 sexp
@@ -40,7 +42,7 @@ Supported plist keys:
   "Buffer-local project override plist, typically set via `.dir-locals.el'.")
 
 (defconst my/project-local--env-keys
-  '(:env :test-env :task-env :run-env :debug-env)
+  '(:env :test-env :task-env :run-env :debug-env :lsp-env)
   "Plist keys that contain environment variable alists.")
 
 (defconst my/project-local--candidate-keys

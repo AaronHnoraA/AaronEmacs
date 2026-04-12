@@ -536,6 +536,11 @@ If OTHER-WINDOW is non-nil, jump in another window on final selection."
   (dirvish-mode-line-format '(:left (sort symlink) :right (vc-info yank index)))
 
   :config
+  (define-key dirvish-mode-map (kbd "RET") #'dired-find-file)
+  (define-key dirvish-mode-map (kbd "<return>") #'dired-find-file)
+  (with-eval-after-load 'evil
+    (evil-define-key* 'normal dirvish-mode-map (kbd "RET") #'dired-find-file)
+    (evil-define-key* 'normal dirvish-mode-map (kbd "<return>") #'dired-find-file))
   ;; 1) 先给一个“基础属性集合”（绝对不会触发 dirvish-vc）
   (setq dirvish-attributes
         '(nerd-icons file-size subtree-state collapse file-time))

@@ -5,13 +5,26 @@
 
 ;;; Code:
 
+(declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
+
+(defun my/dired-open-dwim ()
+  "Open the Dired entry at point."
+  (interactive)
+  (call-interactively #'dired-find-file))
+
 ;; Use ( to toggle dired-hide-details-mode
 (use-package dired
   :ensure nil
   :bind (:map dired-mode-map
+         ("RET"       . my/dired-open-dwim)
+         ("<return>"  . my/dired-open-dwim)
          ;; consistent with ivy
          ("C-c C-e"   . wdired-change-to-wdired-mode)
          ("H"         . dired-dotfiles-toggle))
+  :config
+  (with-eval-after-load 'evil
+    (evil-define-key* 'normal dired-mode-map (kbd "RET") #'my/dired-open-dwim)
+    (evil-define-key* 'normal dired-mode-map (kbd "<return>") #'my/dired-open-dwim))
   :custom
   (dired-dwim-target t)
   (dired-bind-vm nil)

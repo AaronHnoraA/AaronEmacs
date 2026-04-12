@@ -4,6 +4,8 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+
 (declare-function consult-buffer "consult" ())
 (declare-function dape "dape" (config &optional skip-compile))
 (declare-function comment-or-uncomment "init-base" ())
@@ -28,6 +30,7 @@
 (declare-function org-agenda "org" (&optional arg keys restriction))
 (declare-function popper-toggle "popper" ())
 (declare-function my/project-dispatch "init-project" ())
+(declare-function my/workspace-dispatch "init-workspaces" ())
 (declare-function my/search-line-forward "init-search" ())
 (declare-function my/search-open-recent-file "init-search" ())
 (declare-function telescope "init-telescope" ())
@@ -37,6 +40,11 @@
 
 (defvar my/macos-idle-gc-timer nil
   "Timer used to run a delayed GC after the UI goes idle on macOS.")
+
+(defun my/macos-schedule-idle-gc-after-focus-change ()
+  "Queue idle GC when the selected frame loses focus."
+  (unless (frame-focus-state)
+    (my/macos-schedule-idle-gc)))
 
 (defun my/macos-schedule-idle-gc ()
   "Run GC shortly after focus leaves Emacs or the minibuffer closes."
@@ -76,7 +84,11 @@
     (pixel-scroll-precision-mode 1)))
 
 (my/macos-apply-performance-tweaks)
-(add-hook 'focus-out-hook #'my/macos-schedule-idle-gc)
+(if (boundp 'after-focus-change-function)
+    (add-function :after after-focus-change-function
+                  #'my/macos-schedule-idle-gc-after-focus-change)
+  (with-suppressed-warnings ((obsolete focus-out-hook))
+    (add-hook 'focus-out-hook #'my/macos-schedule-idle-gc)))
 (add-hook 'minibuffer-exit-hook #'my/macos-schedule-idle-gc)
 
 (use-package emacs
@@ -94,6 +106,7 @@
                      ("H-s" . my/search-line-forward)
                      ("H-g" . my/telescope-ripgrep)
                      ("H-p" . my/project-dispatch)
+                     ("H-P" . my/workspace-dispatch)
                      ("H-t" . telescope)
                      ("H-m" . magit-status)
                      ("H-a" . org-agenda)

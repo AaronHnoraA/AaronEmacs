@@ -6,13 +6,31 @@
 
 ;;; Code:
 
+(require 'init-funcs)
+
+(declare-function browse-at-remote "browse-at-remote" (&optional kill))
+(declare-function browse-at-remote-kill "browse-at-remote" ())
+(declare-function diff-hl-next-hunk "diff-hl" (&optional backward))
+(declare-function diff-hl-previous-hunk "diff-hl" ())
+(declare-function diff-hl-revert-hunk "diff-hl" ())
+(declare-function diff-hl-show-hunk "diff-hl-show-hunk" ())
+(declare-function diff-hl-stage-current-hunk "diff-hl" ())
+(declare-function git-commit-setup-flyspell "git-commit" ())
+(declare-function git-commit-turn-on-flyspell "git-commit" ())
+
+(defun my/git-commit-setup-flyspell-h ()
+  "Enable Flyspell in commit buffers across Magit versions."
+  (if (fboundp 'git-commit-setup-flyspell)
+      (git-commit-setup-flyspell)
+    (git-commit-turn-on-flyspell)))
+
 ;; The awesome git client
 ;;
 ;; Explicit binding makes it load lazily although it's the default.
 ;; See `magit-define-global-key-bindings' for more information.
 (use-package magit
   :ensure t
-  :hook (git-commit-setup . git-commit-turn-on-flyspell)
+  :hook (git-commit-setup . my/git-commit-setup-flyspell-h)
   :bind (("C-x g"   . magit-status)
          ("C-x M-g" . magit-dispatch)
          ("C-c M-g" . magit-file-dispatch))
@@ -39,6 +57,8 @@
          (magit-post-refresh . diff-hl-magit-post-refresh))
   :config
   (global-diff-hl-mode 1)
+  (when (fboundp 'diff-hl-show-hunk-mouse-mode)
+    (diff-hl-show-hunk-mouse-mode 1))
   ;; When Emacs runs in terminal, show the indicators in margin instead.
   (unless (display-graphic-p)
     (diff-hl-margin-mode))
@@ -76,6 +96,21 @@
 (use-package magit-delta
   :ensure t
   :hook (magit-mode . magit-delta-mode))
+
+(use-package browse-at-remote
+  :ensure t
+  :commands (browse-at-remote
+             browse-at-remote-kill))
+
+(my/leader-key-label "g" "git")
+(my/evil-global-leader-set "g g" #'magit-status "status")
+(my/evil-global-leader-set "g ]" #'diff-hl-next-hunk "next hunk")
+(my/evil-global-leader-set "g [" #'diff-hl-previous-hunk "previous hunk")
+(my/evil-global-leader-set "g r" #'diff-hl-revert-hunk "revert hunk")
+(my/evil-global-leader-set "g s" #'diff-hl-stage-current-hunk "stage hunk")
+(my/evil-global-leader-set "g h" #'diff-hl-show-hunk "show hunk")
+(my/evil-global-leader-set "g y" #'browse-at-remote-kill "copy remote url")
+(my/evil-global-leader-set "g Y" #'browse-at-remote "browse remote url")
 
 (provide 'init-git)
 

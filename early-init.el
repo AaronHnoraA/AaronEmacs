@@ -60,9 +60,13 @@
 ;; Emacs 启动完成后恢复正常 GC 和 file-name-handler 设置
 (add-hook 'emacs-startup-hook
           (lambda ()
-            (setq gc-cons-threshold my/original-gc-cons-threshold
-                  gc-cons-percentage my/original-gc-cons-percentage
-                  file-name-handler-alist my/original-file-name-handler-alist)))
+            (setq file-name-handler-alist my/original-file-name-handler-alist)
+            ;; Once `gcmh' starts, let it own GC policy. Otherwise, restore to
+            ;; a saner interactive threshold than Emacs' tiny default.
+            (unless (bound-and-true-p gcmh-mode)
+              (setq gc-cons-threshold (max my/original-gc-cons-threshold
+                                           (* 16 1024 1024))
+                    gc-cons-percentage my/original-gc-cons-percentage))))
 
 
 (setq default-frame-alist

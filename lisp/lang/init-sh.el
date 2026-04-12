@@ -5,6 +5,15 @@
 
 ;;; Code:
 
+(declare-function my/eglot-ensure-unless-lsp-mode "init-lsp")
+(declare-function my/language-server-executable-available-p "init-lsp" (program))
+(declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
+
+(defun my/sh-eglot-ensure ()
+  "Start Eglot for shell buffers when bash-language-server is available."
+  (when (my/language-server-executable-available-p "bash-language-server")
+    (my/eglot-ensure-unless-lsp-mode)))
+
 ;; Edit shell scripts
 ;;
 ;; sh-mode provides `sh-while-getopts' to automate getopts.
@@ -13,7 +22,9 @@
   :mode (("\\.sh\\'"     . sh-mode)
          ("/PKGBUILD\\'" . sh-mode))
   :hook ((sh-mode . sh-mode-setup)
-         (bash-ts-mode . sh-mode-setup))
+         (sh-mode . my/sh-eglot-ensure)
+         (bash-ts-mode . sh-mode-setup)
+         (bash-ts-mode . my/sh-eglot-ensure))
   :config
   (defun sh-mode-setup ()
     (add-hook 'after-save-hook #'executable-make-buffer-file-executable-if-script-p nil t)
@@ -40,6 +51,17 @@
                          "shebang"
                          "Insert shebang"
                          'sh-tempo-tags))
+
+(use-package eglot
+  :ensure nil
+  :defer t
+  :config
+  (my/register-eglot-server-program
+   '(sh-mode bash-ts-mode)
+   '("bash-language-server" "start")
+   :label "bash-language-server"
+   :executables '("bash-language-server")
+   :note "Shell buffers use bash-language-server through Eglot."))
 
 (provide 'init-sh)
 ;;; init-sh.el ends here

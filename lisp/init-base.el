@@ -12,6 +12,12 @@
 (require 'cl-lib)
 
 (declare-function tempo-expand-if-complete "tempo")
+(declare-function magit-toplevel "magit" (&optional directory))
+(declare-function project-current "project" (&optional maybe-prompt directory))
+(declare-function diff-hl-mode "diff-hl" (&optional arg))
+(declare-function vc-git-root "vc-git" (file))
+
+(defvar project-current-directory-override)
 
 ;; Suppress GUI features and more
 (setq use-file-dialog nil
@@ -126,6 +132,27 @@
   "Disable line numbers in buffers where they add cost but little value."
   (display-line-numbers-mode -1))
 
+(defvar my/line-number-style display-line-numbers-type
+  "Preferred line-number display style for `my/toggle-line-numbers'.")
+
+(defun my/toggle-line-numbers ()
+  "Cycle line numbers between absolute, relative/visual, and disabled."
+  (interactive)
+  (let* ((styles `(t ,(if visual-line-mode 'visual 'relative) nil))
+         (order (cons display-line-numbers-type
+                      (remq display-line-numbers-type styles)))
+         (queue (memq my/line-number-style order))
+         (next (if (= (length queue) 1)
+                   (car order)
+                 (cadr queue))))
+    (setq my/line-number-style next)
+    (setq display-line-numbers next)
+    (message "Line numbers: %s"
+             (pcase next
+               (`t "absolute")
+               (`nil "off")
+               (_ (symbol-name next))))))
+
 ;; 可选：在一些模式禁用（终端、目录、帮助、仪表盘等）
 (dolist (hook '(term-mode-hook
                 vterm-mode-hook
@@ -141,6 +168,12 @@
                 magit-status-mode-hook
                 compilation-mode-hook))
   (add-hook hook #'my/disable-display-line-numbers))
+
+(with-eval-after-load 'evil
+  (define-key evil-window-map (kbd "l") #'my/toggle-line-numbers))
+
+(with-eval-after-load 'which-key
+  (which-key-add-key-based-replacements "SPC w l" "line numbers"))
 
 
 
@@ -809,8 +842,9 @@ Else, call `comment-or-uncomment-region' on the current line."
   :ensure nil
   :defer t
   :custom
-  ;; Always use file cache when using tramp
-  (remote-file-name-inhibit-cache nil)
+  ;; Keep remote stat results around a bit; TRAMP round-trips are expensive.
+  (remote-file-name-inhibit-cache 60)
+  (remote-file-name-inhibit-auto-save-visited t)
   (tramp-default-method "ssh"))
 
 
@@ -1183,13 +1217,18 @@ When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
                             "/opt/local/bin"
                             "/usr/sbin"
                             "/sbin"
+                            "~/.elan/bin"
                             "~/.local/bin"
+                            "~/.pyenv/shims"
+                            "~/.asdf/shims"
                             "~/.cargo/bin"
                             "/snap/bin"))
 
   ;; SSH ControlMaster (极大加速)
   (setq tramp-use-ssh-controlmaster-options t)
   (setq tramp-use-scp-direct-remote-copying t)
+  (setq tramp-copy-size-limit (* 1024 1024))
+  (setq tramp-completion-reread-directory-timeout 60)
 
   ;; 减少锁文件
   (setq remote-file-name-inhibit-locks t)
@@ -1198,6 +1237,73 @@ When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
   (setq tramp-backup-directory-alist backup-directory-alist)
 
 )
+
+(defun my/remote-file-buffer-p ()
+  "Return non-nil when the current buffer visits a remote path."
+  (file-remote-p (or buffer-file-name default-directory)))
+
+(defun my/disable-remote-vc-h ()
+  "Disable VC integrations that are unreliable or too expensive over TRAMP."
+  (when (my/remote-file-buffer-p)
+    (setq-local vc-handled-backends nil
+                vc-mode nil)
+    (when (bound-and-true-p diff-hl-mode)
+      (diff-hl-mode -1))))
+
+(add-hook 'find-file-hook #'my/disable-remote-vc-h)
+
+(with-eval-after-load 'vc-hooks
+  (define-advice vc-refresh-state (:around (fn) my/skip-on-remote)
+    "Skip VC state refresh for remote buffers."
+    (if (my/remote-file-buffer-p)
+        (progn
+          (my/disable-remote-vc-h)
+          nil)
+      (funcall fn))))
+
+(with-eval-after-load 'vc
+  (setq-default vc-ignore-dir-regexp
+                (format "%s\\|%s"
+                        vc-ignore-dir-regexp
+                        tramp-file-name-regexp)))
+
+;; Prefer TRAMP's newer direct async path for remote scp sessions, but keep it
+;; off for LSP stdio connections, which are still more reliable on the
+;; traditional path.
+(with-eval-after-load 'files-x
+  (when (and (fboundp 'connection-local-set-profile-variables)
+             (fboundp 'connection-local-set-profiles))
+    (connection-local-set-profile-variables
+     'remote-direct-async-process
+     '((tramp-direct-async-process . t)))
+    (connection-local-set-profiles
+     '(:application tramp :protocol "scp")
+     'remote-direct-async-process)))
+
+(with-eval-after-load 'lsp-mode
+  (define-advice lsp-stdio-connection (:filter-return (plist) my/disable-tramp-direct-async)
+    "Disable TRAMP direct async for LSP stdio transports."
+    (if-let* ((connect-fn (plist-get plist :connect)))
+        (plist-put
+         plist :connect
+         (lambda (&rest args)
+           (cl-letf (((symbol-function 'tramp-direct-async-process-p) #'ignore))
+             (apply connect-fn args))))
+      plist)))
+
+(with-eval-after-load 'eglot
+  (define-advice eglot--connect (:around (fn &rest args) my/disable-tramp-direct-async)
+    "Disable TRAMP direct async while Eglot establishes stdio sessions."
+    (cl-letf (((symbol-function 'tramp-direct-async-process-p) #'ignore))
+      (apply fn args))))
+
+(with-eval-after-load 'magit
+  (setq magit-tramp-pipe-stty-settings 'pty))
+
+(with-eval-after-load 'compile
+  (with-eval-after-load 'tramp
+    (remove-hook 'compilation-mode-hook
+                 #'tramp-compile-disable-ssh-controlmaster-options)))
 
 ;; ===============================
 ;; find-file 打开速度反馈
@@ -1231,6 +1337,61 @@ When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
 
 (setq tramp-auto-save-directory
       my/tramp-auto-save-dir)
+
+(defun my/tramp-memoize (key cache fn &rest args)
+  "Memoize FN with ARGS in CACHE when KEY is a remote path."
+  (if (and key (file-remote-p key))
+      (if-let* ((cached (assoc key (symbol-value cache))))
+          (cdr cached)
+        (let ((value (apply fn args)))
+          (set cache (cons (cons key value) (symbol-value cache)))
+          value))
+    (apply fn args)))
+
+(defvar my/tramp--magit-toplevel-cache nil)
+(defvar my/tramp--project-current-cache nil)
+(defvar my/tramp--vc-git-root-cache nil)
+
+(defun my/tramp-clear-memoization-caches-h (&rest _)
+  "Clear TRAMP-specific memoization caches."
+  (setq my/tramp--magit-toplevel-cache nil
+        my/tramp--project-current-cache nil
+        my/tramp--vc-git-root-cache nil))
+
+(with-eval-after-load 'magit
+  (define-advice magit-toplevel (:around (fn &optional directory) my/tramp-memoize)
+    "Memoize remote `magit-toplevel' lookups."
+    (my/tramp-memoize (or directory default-directory)
+                      'my/tramp--magit-toplevel-cache
+                      fn directory)))
+
+(with-eval-after-load 'project
+  (define-advice project-current (:around (fn &optional maybe-prompt directory) my/tramp-memoize)
+    "Memoize remote `project-current' lookups."
+    (my/tramp-memoize (or directory
+                          project-current-directory-override
+                          default-directory)
+                      'my/tramp--project-current-cache
+                      fn maybe-prompt directory)))
+
+(with-eval-after-load 'vc-git
+  (define-advice vc-git-root (:around (fn file) my/tramp-memoize)
+    "Memoize remote `vc-git-root' lookups."
+    (let ((value (my/tramp-memoize (file-name-directory file)
+                                   'my/tramp--vc-git-root-cache
+                                   fn file)))
+      ;; Avoid retaining transient misses forever.
+      (unless (cdar my/tramp--vc-git-root-cache)
+        (setq my/tramp--vc-git-root-cache
+              (cdr my/tramp--vc-git-root-cache)))
+      value)))
+
+(with-eval-after-load 'tramp
+  (advice-add 'tramp-cleanup-all-connections
+              :after #'my/tramp-clear-memoization-caches-h)
+  (when (fboundp 'tramp-cleanup-connection)
+    (advice-add 'tramp-cleanup-connection
+                :after #'my/tramp-clear-memoization-caches-h)))
 
 
 
@@ -1476,6 +1637,19 @@ interrupt the current window layout."
           compilation-mode))
   (popper-mode +1)
   (popper-echo-mode +1))                ; For echo area hints
+
+(with-eval-after-load 'popper
+  (defun my/escape-close-popup-h ()
+    "Close the selected Popper popup when present."
+    (when (and (bound-and-true-p popper-mode)
+               (fboundp 'popper-popup-p)
+               (window-live-p (selected-window))
+               (popper-popup-p (window-buffer (selected-window))))
+      (if (fboundp 'popper-close-latest)
+          (popper-close-latest)
+        (quit-window nil (selected-window)))
+      t))
+  (add-hook 'my/escape-hook #'my/escape-close-popup-h))
 
 
 

@@ -19,6 +19,24 @@
 (declare-function my/bookmark-set-no-overwrite "init-windows")
 (declare-function my/bookmark-set-line "init-windows")
 (declare-function my/bookmark-toggle-line "init-windows")
+(declare-function evil-force-normal-state "evil")
+(declare-function evil-save-state "evil")
+
+(defun my/evil-clear-ex-highlights-h ()
+  "Clear Evil ex highlights from `my/escape'."
+  (when (and (fboundp 'evil-ex-nohighlight)
+             (fboundp 'evil-ex-hl-active-p)
+             (evil-ex-hl-active-p 'evil-ex-search))
+    (evil-ex-nohighlight)
+    t))
+
+(defun my/evil-force-normal-state-h ()
+  "Return to normal state before `my/escape' falls back to `keyboard-quit'."
+  (when (and (bound-and-true-p evil-local-mode)
+             (fboundp 'evil-force-normal-state)
+             (memq evil-state '(insert replace visual operator)))
+    (evil-force-normal-state)
+    t))
 
 (defun my/evil--first-indent-width (&rest variables)
   "Return the first positive integer value among VARIABLES."
@@ -80,22 +98,44 @@
 
 (use-package evil
   :ensure t
+  :demand t
   :init
   (setq evil-disable-insert-state-bindings t)
   (setq evil-want-Y-yank-to-eol t)
-  :hook (after-init . evil-mode)
   ;; Don't quit Emacs on `:q'.
   ;;
   ;; Rebind `f'/`s' to mimic `evil-snipe'.
   :bind (([remap evil-quit] . kill-current-buffer)
          :map evil-motion-state-map
+         ([escape] . my/escape)
          ("f" . evil-avy-goto-char-in-line)
+         :map evil-normal-state-map
+         ([escape] . my/escape)
+         :map evil-visual-state-map
+         ([escape] . my/escape)
+         :map evil-operator-state-map
+         ([escape] . my/escape)
+         :map evil-insert-state-map
+         ([escape] . my/escape)
+         :map evil-emacs-state-map
+         ([escape] . my/escape)
+         :map evil-replace-state-map
+         ([escape] . my/escape)
          :map evil-normal-state-map
          ("s" . evil-avy-goto-char-timer))
   :config
+  (unless (bound-and-true-p evil-mode)
+    (evil-mode 1))
+  (define-advice set-auto-mode (:around (fn &rest args) my/evil-preserve-state)
+    "Preserve the current Evil state while `set-auto-mode' changes major modes."
+    (if (bound-and-true-p evil-local-mode)
+        (evil-save-state (apply fn args))
+      (apply fn args)))
   (add-to-list 'evil-buffer-regexps '("^\\*vterm.*\\*$" . nil))
   ;; Silence line out of range error.
   (shut-up! #'evil-indent)
+  (add-hook 'my/escape-hook #'my/evil-force-normal-state-h)
+  (add-hook 'my/escape-hook #'my/evil-clear-ex-highlights-h)
   (add-hook 'after-change-major-mode-hook #'my/evil-sync-shift-width)
   (add-hook 'hack-local-variables-hook #'my/evil-sync-shift-width)
   (my/evil-sync-shift-width-existing-buffers)
@@ -222,7 +262,6 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       "bC" 'clone-indirect-buffer-other-window
       "by" '+copy-current-buffer-name
       "bv" 'revert-buffer-quick
-      "bx" 'scratch-buffer
       "bz" 'bury-buffer
       ;; --------------
       "b." 'my/bookmark-dispatch

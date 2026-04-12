@@ -31,7 +31,8 @@
   (doom-modeline-mu4e nil)
   (doom-modeline-gnus nil)
   (doom-modeline-github nil)
-  (doom-modeline-persp-name nil)
+  (doom-modeline-buffer-file-name-style 'truncate-except-project)
+  (doom-modeline-persp-name t)
   (doom-modeline-unicode-fallback t)
   (doom-modeline-enable-word-count nil))
 

@@ -47,6 +47,17 @@
     (my/format-on-save-mode 1))
   (message "Format-on-save %s" (if my/format-on-save-mode "enabled" "disabled")))
 
+(use-package ws-butler
+  :ensure t
+  :hook (after-init . ws-butler-global-mode)
+  :config
+  (dolist (mode '(special-mode
+                  comint-mode
+                  term-mode
+                  eshell-mode
+                  diff-mode))
+    (add-to-list 'ws-butler-global-exempt-modes mode)))
+
 (my/evil-global-leader-set "c F" #'my/format-toggle-on-save "format on save")
 
 (provide 'init-format)

@@ -9,6 +9,9 @@
 
 (declare-function my/language-server-find-implementation "init-lsp")
 (declare-function my/language-server-find-type-definition "init-lsp")
+(declare-function better-jumper-jump-backward "better-jumper" (&optional count))
+(declare-function better-jumper-jump-forward "better-jumper" (&optional count))
+(declare-function better-jumper-set-jump "better-jumper" (&optional pos))
 (declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
 (declare-function evil-jump-backward "evil-commands" (&optional count))
 (declare-function evil-jump-forward "evil-commands" (&optional count))
@@ -46,11 +49,72 @@
           "statement_list"))
   "Tree-sitter node fragments treated as structural navigation anchors.")
 
+(defconst my/navigation-pulse-excluded-modes
+  '(so-long-mode special-mode comint-mode term-mode vterm-mode)
+  "Major modes where jump pulses are suppressed.")
+
+(use-package better-jumper
+  :ensure t
+  :defer 1
+  :init
+  (global-set-key [remap evil-jump-forward] #'better-jumper-jump-forward)
+  (global-set-key [remap evil-jump-backward] #'better-jumper-jump-backward)
+  (global-set-key [remap xref-pop-marker-stack] #'better-jumper-jump-backward)
+  (global-set-key [remap xref-go-back] #'better-jumper-jump-backward)
+  (global-set-key [remap xref-go-forward] #'better-jumper-jump-forward)
+  :config
+  (better-jumper-mode 1)
+
+  (defun my/navigation-set-jump-a (fn &rest args)
+    "Record a jump before calling FN with ARGS."
+    (better-jumper-set-jump (if (markerp (car args)) (car args)))
+    (let ((evil--jumps-jumping t)
+          (better-jumper--jumping t))
+      (apply fn args)))
+
+  (defun my/navigation-set-jump-h ()
+    "Record a jump before killing a visible buffer."
+    (when (get-buffer-window)
+      (better-jumper-set-jump))
+    nil)
+
+  (add-hook 'kill-buffer-hook #'my/navigation-set-jump-h)
+  (advice-add #'imenu :around #'my/navigation-set-jump-a)
+  (advice-add #'outline-up-heading :around #'my/navigation-set-jump-a))
+
+(use-package pulse
+  :ensure nil
+  :defer 1
+  :config
+  (defun my/navigation-pulse-line-h (&rest _)
+    "Momentarily highlight the current line after a jump."
+    (when (and (display-graphic-p)
+               (not (apply #'derived-mode-p my/navigation-pulse-excluded-modes)))
+      (pulse-momentary-highlight-one-line (point))))
+
+  (defun my/navigation-pulse-line-delayed-h (&rest _)
+    "Pulse the current line after a short delay."
+    (run-at-time 0.08 nil #'my/navigation-pulse-line-h))
+
+  (dolist (hook '(imenu-after-jump-hook
+                  consult-after-jump-hook
+                  better-jumper-post-jump-hook
+                  org-follow-link-hook))
+    (add-hook hook #'my/navigation-pulse-line-h))
+
+  (with-eval-after-load 'perspective
+    (add-hook 'persp-activated-functions #'my/navigation-pulse-line-delayed-h))
+
+  (advice-add #'save-place-find-file-hook :after #'my/navigation-pulse-line-h))
+
 (defun my/navigation--push-jump ()
   "Record the current position in Evil's jump list when available."
-  (when (fboundp 'evil-set-jump)
+  (when (or (fboundp 'better-jumper-set-jump)
+            (fboundp 'evil-set-jump))
     (ignore-errors
-      (evil-set-jump))))
+      (if (fboundp 'better-jumper-set-jump)
+          (better-jumper-set-jump)
+        (evil-set-jump)))))
 
 (defun my/navigation--call-primary-or-fallback (primary &optional fallback)
   "Call PRIMARY interactively, with optional FALLBACK on lookup errors."

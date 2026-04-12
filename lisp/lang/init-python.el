@@ -5,15 +5,63 @@
 
 ;;; Code:
 
-(declare-function my/eglot-ensure "init-lsp")
+(declare-function my/eglot-ensure-unless-lsp-mode "init-lsp")
+(declare-function my/language-server-executable-find "init-lsp" (program))
+(declare-function my/eglot-set-workspace-configuration "init-lsp" (configuration))
+(declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
+(declare-function eglot-alternatives "eglot" (alternatives))
 (defvar imenu-create-index-function)
 (defvar-local my/python-imenu-backend nil
   "Original Python imenu backend for the current buffer.")
 
+(defun my/python-eglot-contact (&optional interactive project)
+  "Return the preferred Python Eglot contact for the current buffer."
+  (if (file-remote-p default-directory)
+      (list (or (ignore-errors (my/language-server-executable-find "pylsp"))
+                "pylsp"))
+    (require 'eglot)
+    (funcall
+     (eglot-alternatives
+      '(("basedpyright-langserver" "--stdio")
+        ("pyright-langserver" "--stdio")
+        ("pylsp")
+        ("jedi-language-server")))
+     interactive
+     project)))
+
+(defun my/python-eglot-workspace-configuration ()
+  "Return Python workspace configuration for the active server."
+  '(:python (:analysis (:autoSearchPaths t
+                        :useLibraryCodeForTypes t))
+    :basedpyright (:analysis (:typeCheckingMode "basic"
+                              :diagnosticMode "openFilesOnly"))
+    :pyright (:analysis (:typeCheckingMode "basic"
+                       :diagnosticMode "openFilesOnly"))
+    :pylsp (:plugins (:jedi_completion (:fuzzy t)
+                       :jedi_definition (:follow_imports t)
+                       :jedi_hover (:enabled t)
+                       :rope_autoimport (:enabled t)))))
+
+(defun my/python-eglot-ensure ()
+  "Start Eglot for Python buffers."
+  (my/eglot-set-workspace-configuration
+   (my/python-eglot-workspace-configuration))
+  (my/eglot-ensure-unless-lsp-mode))
+
 (use-package eglot
-  :ensure t
-  :hook ((python-mode . my/eglot-ensure)
-         (python-ts-mode . my/eglot-ensure)))
+  :ensure nil
+  :hook ((python-mode . my/python-eglot-ensure)
+         (python-ts-mode . my/python-eglot-ensure))
+  :config
+  (my/register-eglot-server-program
+   '(python-mode python-ts-mode)
+   #'my/python-eglot-contact
+   :label "local: basedpyright/pyright, remote: pylsp/jedi"
+   :executables '("basedpyright-langserver"
+                  "pyright-langserver"
+                  "pylsp"
+                  "jedi-language-server")
+   :note "Python buffers prefer basedpyright/pyright locally, but prefer pylsp/jedi over TRAMP."))
 
 (use-package python
   :ensure nil

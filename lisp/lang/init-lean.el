@@ -11,8 +11,11 @@
 (my/package-ensure-installed-list '(dash magit-section lsp-mode))
 (my/package-ensure-vc 'lean4-mode "https://github.com/leanprover-community/lean4-mode.git")
 
+(defvar lean4-mode-hook)
 (declare-function lean4-lake-find-dir "lean4-lake")
+(declare-function lean4-get-executable "lean4-util" (exe-name))
 (declare-function lsp-workspace-root "lsp-mode" (&optional path))
+(declare-function my/language-server-executable-find "init-lsp" (program))
 (declare-function my/project-current-root "init-project")
 (declare-function my/symbols-make-file-line-candidate "init-symbols"
                   (root file line match))
@@ -22,6 +25,23 @@
                   (mode function))
 
 (defvar my/lean-project-symbol-history nil)
+(defvar lean4-executable-name)
+(defvar lean4-show-file-progress)
+(defvar lsp-semantic-tokens-enable)
+(defvar-local lean4-fringe-delay-timer nil)
+(defvar-local lean4-rootdir nil)
+(defvar-local my/lean4-remote-ui-error-reported nil)
+
+(defun my/lean4-remote-rootdir ()
+  "Return Lean's remote executable root as a plain Unix path."
+  (when-let* ((executable (ignore-errors
+                            (my/language-server-executable-find
+                             lean4-executable-name)))
+              ((stringp executable))
+              (rootdir (file-name-directory
+                        (directory-file-name
+                         (file-name-directory executable)))))
+    (file-name-as-directory rootdir)))
 
 (defconst my/lean-project-symbol-rg-regexp
   (concat
@@ -30,7 +50,7 @@
    "(?:(?:private|protected|noncomputable|unsafe|partial|scoped|local)"
    "[[:space:]]+)*"
    "(?:class[[:space:]]+inductive|inductive|instance|structure|class|theorem"
-   "|axiom|lemma|definition|def|constant|abbrev|opaque)\\b")
+   "|axiom|lemma|definition|def|constant|abbrev|opaque)\\\\b")
   "Ripgrep regexp used to discover top-level Lean declarations.")
 
 (defun my/lean-root-dir-p (dir)
@@ -55,8 +75,8 @@
   "Extract declaration kind and name from Lean declaration TEXT."
   (when (string-match
          (rx string-start
-             (* (any " \t"))
-             (* (seq "@" (+ (not (any " \t\n\r"))) (+ blank)))
+             (* (any " \\t"))
+             (* (seq "@" (+ (not (any " \\t\\n\\r"))) (+ blank)))
              (* (seq (or "private"
                          "protected"
                          "noncomputable"
@@ -79,7 +99,7 @@
                         "abbrev"
                         "opaque"))
              (+ blank)
-             (group (+ (not (any " \t\n\r:={([,")))))
+             (group (+ (not (any " \\t\\n\\r:={([,")))))
          text)
     (cons (match-string 1 text)
           (match-string 2 text))))
@@ -103,7 +123,7 @@
   "Return file-line candidates for Lean declarations in the current project."
   (let ((root (file-name-as-directory (expand-file-name (my/lean-project-root)))))
     (cl-loop for hit in (my/lean--project-symbol-lines root)
-             when (string-match "\\`\\([^:]+\\):\\([0-9]+\\):\\(.*\\)\\'" hit)
+             when (string-match "\\\\`\\\\([^:]+\\\\):\\\\([0-9]+\\\\):\\\\(.*\\\\)\\\\'" hit)
              for relative-file = (match-string 1 hit)
              for line = (string-to-number (match-string 2 hit))
              for text = (string-trim (match-string 3 hit))
@@ -148,11 +168,79 @@
   (advice-add 'lean4-ensure-info-buffer :after #'my/lean4-info-buffer-setup)
   (advice-add 'lean4-toggle-info-buffer :after #'my/lean4-info-buffer-setup))
 
+(defun my/lean4-setup-remote-rootdir ()
+  "Make `lean4-mode' resolve Lean toolchain paths correctly over TRAMP."
+  (when (file-remote-p default-directory)
+    (when-let* ((rootdir (my/lean4-remote-rootdir)))
+      (setq-local lean4-rootdir rootdir))))
+
+(defun my/lean4-disable-remote-ui ()
+  "Disable Lean UI features that are unstable over TRAMP."
+  (when (file-remote-p default-directory)
+    ;; FIX: 阻止 TRAMP 对 LSP Payload 进行分块从而引发 Lean Watchdog JSON截断错误
+    (setq-local tramp-chunksize 4096)
+    ;; FIX: 强制使用管道(Pipes)而非伪终端(PTY)来防止回显污染 LSP 报头
+    (setq-local process-connection-type nil)
+
+    (setq-local lean4-show-file-progress nil
+                lsp-semantic-tokens-enable nil)
+    (remove-hook 'post-command-hook #'lean4-info-buffer-redisplay-debounced t)
+    (remove-hook 'flycheck-after-syntax-check-hook
+                 #'lean4-info-buffer-redisplay-debounced
+                 t)
+    (remove-hook 'lsp-on-idle-hook #'lean4-info-buffer-refresh t)
+    (when (timerp lean4-fringe-delay-timer)
+      (cancel-timer lean4-fringe-delay-timer)
+      (setq-local lean4-fringe-delay-timer nil))))
+
+(defun my/lean4-report-remote-ui-error (error)
+  "Report remote Lean UI ERROR only once per buffer."
+  (unless my/lean4-remote-ui-error-reported
+    (setq-local my/lean4-remote-ui-error-reported t)
+    (message "Lean remote UI disabled after error: %s"
+             (error-message-string error))))
+
 (use-package lean4-mode
   :init
+  (setq lean4-mode-hook nil)
   (my/register-lsp-mode-preference 'lean4-mode)
+  (add-hook 'lean4-mode-hook #'my/lean4-setup-remote-rootdir)
+  (add-hook 'lean4-mode-hook #'my/lean4-disable-remote-ui)
   (add-hook 'lean4-mode-hook #'my/lsp-mode-ensure)
-  :mode ("\\.lean\\'" . lean4-mode))
+  :mode ("\\\\.lean\\\\'" . lean4-mode))
+
+(with-eval-after-load 'lean4-mode
+  (define-advice lean4--server-cmd (:around (fn) my/lean4-remote-server-cmd)
+    "Avoid synchronous version probes when starting Lean over TRAMP."
+    (if (file-remote-p default-directory)
+        (if (locate-dominating-file default-directory #'my/lean-root-dir-p)
+            (list "lake" "serve")
+          (list lean4-executable-name "--server"))
+      (funcall fn))))
+
+(with-eval-after-load 'lean4-fringe
+  (define-advice lean4-fringe-update-progress-overlays
+      (:around (fn) my/lean4-remote-safe-progress)
+    "Ignore invalid remote progress overlays instead of wedging the session."
+    (if (file-remote-p default-directory)
+        (condition-case err
+            (funcall fn)
+          (error
+           (my/lean4-disable-remote-ui)
+           (my/lean4-report-remote-ui-error err)))
+      (funcall fn))))
+
+(with-eval-after-load 'lean4-info
+  (define-advice lean4-info-buffer-redisplay
+      (:around (fn) my/lean4-remote-safe-info)
+    "Ignore invalid remote Lean goal refreshes instead of wedging the session."
+    (if (file-remote-p default-directory)
+        (condition-case err
+            (funcall fn)
+          (error
+           (my/lean4-disable-remote-ui)
+           (my/lean4-report-remote-ui-error err)))
+      (funcall fn))))
 
 (with-eval-after-load 'init-symbols
   (my/symbols-register-project-fallback 'lean4-mode

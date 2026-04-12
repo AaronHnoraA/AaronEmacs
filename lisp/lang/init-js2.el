@@ -5,6 +5,39 @@
 
 ;;; Code:
 
+(declare-function my/eglot-ensure-unless-lsp-mode "init-lsp")
+(declare-function my/language-server-executable-available-p "init-lsp" (program))
+(declare-function my/eglot-set-workspace-configuration "init-lsp" (configuration))
+(declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
+
+(defun my/js-ts-eglot-available-p ()
+  "Return non-nil when the TypeScript language server is available."
+  (my/language-server-executable-available-p "typescript-language-server"))
+
+(defun my/js-ts-eglot-workspace-configuration ()
+  "Return shared JS/TS workspace configuration."
+  '(:typescript (:inlayHints (:includeInlayParameterNameHints "literals"
+                 :includeInlayParameterNameHintsWhenArgumentMatchesName t
+                 :includeInlayFunctionParameterTypeHints t
+                 :includeInlayVariableTypeHints nil
+                 :includeInlayPropertyDeclarationTypeHints t
+                 :includeInlayFunctionLikeReturnTypeHints t
+                 :includeInlayEnumMemberValueHints t))
+    :javascript (:inlayHints (:includeInlayParameterNameHints "literals"
+                 :includeInlayParameterNameHintsWhenArgumentMatchesName t
+                 :includeInlayFunctionParameterTypeHints t
+                 :includeInlayVariableTypeHints nil
+                 :includeInlayPropertyDeclarationTypeHints t
+                 :includeInlayFunctionLikeReturnTypeHints t
+                 :includeInlayEnumMemberValueHints t))))
+
+(defun my/js-ts-eglot-ensure ()
+  "Start Eglot for JS/TS buffers when the server is available."
+  (when (my/js-ts-eglot-available-p)
+    (my/eglot-set-workspace-configuration
+     (my/js-ts-eglot-workspace-configuration))
+    (my/eglot-ensure-unless-lsp-mode)))
+
 (use-package js2-mode
   :ensure t
   )
@@ -51,5 +84,23 @@
 (add-hook 'typescript-mode-hook #'my-js-ts-indent-setup)
 (add-hook 'typescript-ts-mode-hook #'my-js-ts-indent-setup)
 (add-hook 'tsx-ts-mode-hook #'my-js-ts-indent-setup) ; 补充处理 TSX 文件的模式
+
+(use-package eglot
+  :ensure nil
+  :hook ((js-mode . my/js-ts-eglot-ensure)
+         (js2-mode . my/js-ts-eglot-ensure)
+         (js-ts-mode . my/js-ts-eglot-ensure)
+         (js-jsx-mode . my/js-ts-eglot-ensure)
+         (typescript-mode . my/js-ts-eglot-ensure)
+         (typescript-ts-mode . my/js-ts-eglot-ensure)
+         (tsx-ts-mode . my/js-ts-eglot-ensure))
+  :config
+  (my/register-eglot-server-program
+   '(js-mode js2-mode js-ts-mode js-jsx-mode
+     typescript-mode typescript-ts-mode tsx-ts-mode)
+   '("typescript-language-server" "--stdio")
+   :label "typescript-language-server"
+   :executables '("typescript-language-server")
+   :note "JS/TS buffers share the TypeScript language server through Eglot."))
 
 (provide 'init-js2)

@@ -34,13 +34,59 @@ optional `:note' keys.")
 Each entry is a plist with keys such as `:modes', `:program',
 `:executables', `:label', `:source', and `:note'.")
 
+(defcustom my/language-server-performance-read-process-output-max (* 1024 1024)
+  "Minimum `read-process-output-max' while any language server is active."
+  :type 'integer
+  :group 'my/language-server)
+
+(defcustom my/language-server-performance-gcmh-factor 2
+  "Multiplier applied to `gcmh-high-cons-threshold' while LSP is active."
+  :type 'integer
+  :group 'my/language-server)
+
+(defcustom my/language-server-defer-shutdown 3
+  "Seconds to defer Eglot shutdown after the last managed buffer closes."
+  :type '(choice (const :tag "Disabled" nil)
+                 (integer :tag "Seconds"))
+  :group 'my/language-server)
+
+(defcustom my/language-server-disable-file-watchers-on-remote t
+  "Disable `lsp-mode' file watchers in remote buffers."
+  :type 'boolean
+  :group 'my/language-server)
+
 (defvar tramp-login-shell)
+(defvar eglot-events-buffer-config)
 (defvar eglot-stay-out-of)
 (defvar eglot-server-programs)
+(defvar eglot-workspace-configuration)
+(defvar gcmh-high-cons-threshold)
+(defvar lsp-managed-mode)
+(defvar lsp-enable-file-watchers)
+(defvar lsp-file-watch-threshold)
+(defvar read-process-output-max)
+
+(defvar my/language-server--managed-buffer-count 0
+  "Number of buffers currently counted for LSP performance tuning.")
+
+(defvar my/language-server--default-read-process-output-max nil
+  "Original `read-process-output-max' before LSP performance tuning.")
+
+(defvar my/language-server--default-gcmh-high-cons-threshold nil
+  "Original `gcmh-high-cons-threshold' before LSP performance tuning.")
+
+(defvar-local my/language-server--performance-buffer-p nil
+  "Whether the current buffer is counted for LSP performance tuning.")
 
 (declare-function eglot-current-server "eglot")
+(declare-function eglot--lookup-mode "eglot" (mode))
+(declare-function eglot--managed-buffers "eglot" (server))
 (declare-function eglot-shutdown "eglot" (server))
+(declare-function gcmh-set-high-threshold "gcmh" ())
 (declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
+(declare-function my/project-local-apply-env "init-project-local" (env &optional base))
+(declare-function my/project-local-env "init-project-local" (kind &optional root))
+(declare-function my/project-local-value "init-project-local" (key &optional root))
 (declare-function my/problems-buffer "init-problems" ())
 (declare-function my/diagnostics-buffer-ui "init-diagnostics-ui")
 (declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
@@ -54,6 +100,128 @@ Each entry is a plist with keys such as `:modes', `:program',
   "Return SOURCE as an absolute file name when available."
   (when-let* ((path (or source load-file-name buffer-file-name)))
     (expand-file-name path)))
+
+(defun my/language-server-executable-find (program)
+  "Return PROGRAM path for the current local or remote buffer."
+  (executable-find program t))
+
+(defun my/language-server-executable-available-p (program)
+  "Return non-nil when PROGRAM is available locally or on the remote host."
+  (and (my/language-server-executable-find program) t))
+
+(defun my/language-server--plist-like-p (value)
+  "Return non-nil when VALUE looks like a plist."
+  (and (listp value)
+       (or (null value)
+           (let ((rest value)
+                 (ok t))
+             (while (and rest ok)
+               (setq ok (and (keywordp (car rest))
+                             (consp (cdr rest))))
+               (setq rest (cddr rest)))
+             ok))))
+
+(defun my/language-server--alist-like-p (value)
+  "Return non-nil when VALUE looks like an alist."
+  (and (listp value)
+       (or (null value)
+           (consp (car value)))))
+
+(defun my/language-server--merge-values (base override)
+  "Deep-merge OVERRIDE into BASE for keyed plist/alist structures."
+  (cond
+   ((null override) (copy-tree base))
+   ((null base) (copy-tree override))
+   ((and (my/language-server--plist-like-p base)
+         (my/language-server--plist-like-p override))
+    (let ((result (copy-tree base))
+          (plist (copy-tree override)))
+      (while plist
+        (let* ((key (pop plist))
+               (value (pop plist))
+               (current (plist-get result key)))
+          (setq result
+                (plist-put result key
+                           (my/language-server--merge-values current value)))))
+      result))
+   ((and (my/language-server--alist-like-p base)
+         (my/language-server--alist-like-p override))
+   (let ((result (copy-tree base)))
+      (dolist (entry (copy-tree override) result)
+        (when (consp entry)
+          (let* ((key (car entry))
+                 (current (assoc key result))
+                 (value (if current
+                            (my/language-server--merge-values (cdr current) (cdr entry))
+                          (copy-tree (cdr entry)))))
+            (setq result (assq-delete-all key result))
+            (setq result (append result (list (cons key value)))))))))
+   (t (copy-tree override))))
+
+(defun my/language-server-project-backend-override ()
+  "Return the project-local backend override for the current buffer."
+  (when (fboundp 'my/project-local-value)
+    (pcase (my/project-local-value :language-server)
+      ((or 'lsp 'lsp-mode) 'lsp-mode)
+      ('eglot 'eglot)
+      ('disabled 'disabled)
+      (_ nil))))
+
+(defun my/language-server-preferred-backend ()
+  "Return the preferred backend for the current buffer."
+  (or (my/language-server-project-backend-override)
+      (if (and my/lsp-mode-preferred-modes
+               (apply #'derived-mode-p my/lsp-mode-preferred-modes))
+          'lsp-mode
+        'eglot)))
+
+(defun my/language-server-project-environment ()
+  "Return the merged project-local environment for language servers."
+  (when (fboundp 'my/project-local-env)
+    (my/project-local-env 'lsp)))
+
+(defun my/language-server-process-environment ()
+  "Return the process environment for launching language servers."
+  (let ((env (my/language-server-project-environment)))
+    (if (and env (fboundp 'my/project-local-apply-env))
+        (my/project-local-apply-env env process-environment)
+      process-environment)))
+
+(defun my/language-server-apply-process-environment ()
+  "Install the language-server process environment in the current buffer."
+  (setq-local process-environment
+              (my/language-server-process-environment)))
+
+(defun my/language-server-project-workspace-configuration ()
+  "Return project-local Eglot workspace configuration overrides."
+  (when (fboundp 'my/project-local-value)
+    (my/project-local-value :eglot-workspace)))
+
+(defun my/eglot-set-workspace-configuration (configuration)
+  "Merge CONFIGURATION into the current buffer's Eglot workspace settings."
+  (setq-local eglot-workspace-configuration
+              (my/language-server--merge-values
+               (and (boundp 'eglot-workspace-configuration)
+                    eglot-workspace-configuration)
+               configuration)))
+
+(defun my/language-server-apply-eglot-local-settings ()
+  "Apply project-local Eglot settings before startup."
+  (when-let* ((configuration (my/language-server-project-workspace-configuration)))
+    (my/eglot-set-workspace-configuration configuration)))
+
+(defun my/language-server-apply-lsp-local-settings ()
+  "Apply local `lsp-mode' settings before startup."
+  (when (and my/language-server-disable-file-watchers-on-remote
+             (file-remote-p default-directory))
+    (setq-local lsp-enable-file-watchers nil
+                lsp-file-watch-threshold 0)))
+
+(defun my/eglot-contact-available-p ()
+  "Return non-nil when Eglot has a server mapping for this buffer."
+  (and (require 'eglot nil t)
+       (fboundp 'eglot--lookup-mode)
+       (ignore-errors (eglot--lookup-mode major-mode))))
 
 (defun my/language-server-lsp-mode-preference-entries ()
   "Return explicit `lsp-mode' routing entries in registration order."
@@ -72,6 +240,65 @@ Each entry is a plist with keys such as `:modes', `:program',
       (setq-local shell-file-name remote-shell)
       (setq-local explicit-shell-file-name remote-shell)
       (setq-local shell-command-switch "-c"))))
+
+(defun my/language-server-managed-p ()
+  "Return non-nil when the current buffer is managed by Eglot or lsp-mode."
+  (or (bound-and-true-p lsp-managed-mode)
+      (bound-and-true-p eglot-managed-mode)
+      (bound-and-true-p eglot--managed-mode)))
+
+(defun my/language-server-performance--enable ()
+  "Apply Doom-style IPC and GC tuning while language servers are active."
+  (when (= my/language-server--managed-buffer-count 1)
+    (setq my/language-server--default-read-process-output-max
+          (default-value 'read-process-output-max))
+    (setq-default read-process-output-max
+                  (max (default-value 'read-process-output-max)
+                       my/language-server-performance-read-process-output-max))
+    (when (boundp 'gcmh-high-cons-threshold)
+      (setq my/language-server--default-gcmh-high-cons-threshold
+            (default-value 'gcmh-high-cons-threshold))
+      (setq-default gcmh-high-cons-threshold
+                    (* my/language-server-performance-gcmh-factor
+                       my/language-server--default-gcmh-high-cons-threshold))
+      (when (fboundp 'gcmh-set-high-threshold)
+        (gcmh-set-high-threshold)))))
+
+(defun my/language-server-performance--disable ()
+  "Restore pre-LSP IPC and GC settings when no language servers remain."
+  (when (= my/language-server--managed-buffer-count 0)
+    (when my/language-server--default-read-process-output-max
+      (setq-default read-process-output-max
+                    my/language-server--default-read-process-output-max))
+    (when (and (boundp 'gcmh-high-cons-threshold)
+               my/language-server--default-gcmh-high-cons-threshold)
+      (setq-default gcmh-high-cons-threshold
+                    my/language-server--default-gcmh-high-cons-threshold)
+      (when (fboundp 'gcmh-set-high-threshold)
+        (gcmh-set-high-threshold)))))
+
+(defun my/language-server-performance--leave-buffer ()
+  "Remove the current buffer from LSP performance accounting."
+  (when my/language-server--performance-buffer-p
+    (setq my/language-server--performance-buffer-p nil
+          my/language-server--managed-buffer-count
+          (max 0 (1- my/language-server--managed-buffer-count)))
+    (my/language-server-performance--disable)))
+
+(defun my/language-server-performance-sync-h ()
+  "Synchronize LSP performance tuning with the current buffer state."
+  (if (my/language-server-managed-p)
+      (unless my/language-server--performance-buffer-p
+        (setq my/language-server--performance-buffer-p t)
+        (setq my/language-server--managed-buffer-count
+              (1+ my/language-server--managed-buffer-count))
+        (my/language-server-performance--enable))
+    (my/language-server-performance--leave-buffer)))
+
+(add-hook 'eglot-managed-mode-hook #'my/language-server-performance-sync-h)
+(add-hook 'lsp-managed-mode-hook #'my/language-server-performance-sync-h)
+(add-hook 'kill-buffer-hook #'my/language-server-performance--leave-buffer)
+(add-hook 'change-major-mode-hook #'my/language-server-performance--leave-buffer)
 
 (defun my/register-lsp-mode-preference (mode &optional feature source note)
   "Prefer `lsp-mode' over `eglot' for MODE.
@@ -111,8 +338,7 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
 
 (defun my/lsp-mode-preferred-p ()
   "Return non-nil when current buffer should use `lsp-mode'."
-  (and my/lsp-mode-preferred-modes
-       (apply #'derived-mode-p my/lsp-mode-preferred-modes)))
+  (eq (my/language-server-preferred-backend) 'lsp-mode))
 
 (defun my/lsp-mode-required-feature ()
   "Return the extra `lsp-mode' feature required for the current buffer."
@@ -150,25 +376,31 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
 (defun my/lsp-mode-ensure ()
   "Start `lsp-mode' for explicitly registered major modes."
   (interactive)
-  (when (my/lsp-mode-preferred-p)
+  (when (eq (my/language-server-preferred-backend) 'lsp-mode)
     (unless (bound-and-true-p lsp-managed-mode)
       (my/language-server-stop-eglot)
       (if (my/lsp-mode-supported-p)
-          (lsp-deferred)
+          (progn
+            (my/language-server-apply-process-environment)
+            (my/language-server-apply-lsp-local-settings)
+            (lsp-deferred))
         (let ((feature (my/lsp-mode-required-feature)))
           (message "Skip lsp-mode in %s: missing `%s'" major-mode feature))))))
 
 (defun my/eglot-ensure-unless-lsp-mode ()
   "Start `eglot' in the current buffer unless `lsp-mode' is preferred."
   (interactive)
-  (unless (my/lsp-mode-preferred-p)
+  (when (eq (my/language-server-preferred-backend) 'eglot)
     (unless (or (bound-and-true-p lsp-managed-mode)
                 (and (fboundp 'eglot-managed-p)
                      (eglot-managed-p)))
-      (when (fboundp 'my/direnv-update-environment-maybe)
-        (my/direnv-update-environment-maybe))
-      (my/language-server-prepare-remote-eglot-environment)
-      (eglot-ensure))))
+      (when (my/eglot-contact-available-p)
+        (when (fboundp 'my/direnv-update-environment-maybe)
+          (my/direnv-update-environment-maybe))
+        (my/language-server-prepare-remote-eglot-environment)
+        (my/language-server-apply-process-environment)
+        (my/language-server-apply-eglot-local-settings)
+        (eglot-ensure)))))
 
 (defun my/eglot-ensure ()
   "Start `eglot' in programming buffers that do not opt into `lsp-mode'."
@@ -190,9 +422,10 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
 (defun my/language-server-ensure ()
   "Start the preferred language server backend for the current buffer."
   (interactive)
-  (if (my/lsp-mode-preferred-p)
-      (my/lsp-mode-ensure)
-    (my/eglot-ensure)))
+  (pcase (my/language-server-preferred-backend)
+    ('lsp-mode (my/lsp-mode-ensure))
+    ('eglot (my/eglot-ensure))
+    ('disabled (message "Language server disabled for this project"))))
 
 (defun my/language-server-call (eglot-fn lsp-fn)
   "Call EGLOT-FN or LSP-FN for the active language server backend."
@@ -423,11 +656,34 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   :custom
   (eglot-sync-connect 0)
   (eglot-autoshutdown t)
+  (eglot-auto-display-help-buffer nil)
   (eglot-code-action-indications nil)
   (eglot-send-changes-idle-time 0.2)
   (eglot-extend-to-xref t)
   (eglot-events-buffer-size 0)
   (read-process-output-max (* 1024 1024)))
+
+(with-eval-after-load 'eglot
+  (when (boundp 'eglot-events-buffer-config)
+    (cl-callf plist-put eglot-events-buffer-config :size 0))
+  (define-advice eglot--managed-mode (:around (fn &optional server) my/defer-eglot-shutdown)
+    "Defer Eglot shutdown briefly to avoid restart churn while switching files."
+    (let ((orig-shutdown (symbol-function 'eglot-shutdown)))
+      (cl-letf (((symbol-function 'eglot-shutdown)
+                 (lambda (srv)
+                   (if (or (null my/language-server-defer-shutdown)
+                           (eq my/language-server-defer-shutdown 0))
+                       (funcall orig-shutdown srv)
+                     (run-at-time
+                      (if (numberp my/language-server-defer-shutdown)
+                          my/language-server-defer-shutdown
+                        3)
+                      nil
+                      (lambda (deferred-server)
+                        (unless (eglot--managed-buffers deferred-server)
+                          (funcall orig-shutdown deferred-server)))
+                      srv)))))
+        (funcall fn server)))))
 
 
 ;; -------------------------

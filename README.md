@@ -12,7 +12,9 @@
   - [lisp/init-modules.el](lisp/init-modules.el) 按顺序加载功能模块，[lisp/lang/](lisp/lang/) 负责语言专项配置。
 - UI 与编辑体验
   - 主题是 `kanagawa-wave`，配 `doom-modeline`、`dashboard`、`shackle`、`tab-bar`、`popper`。
+  - 现在额外补了 Doom 风格的 workspace 层：`perspective` 有独立窗口历史，`SPC TAB` 是工作区总入口，modeline 直接显示当前 workspace。
   - 默认启用全局行号、fill-column 指示线、ligature、自定义字体与中文字体绑定。
+  - 新增 Doom 风格的统一 escape / popup 关闭、行号循环切换和跳转后 pulse 高亮反馈。
   - 帮助系统已经切到 `helpful`，多光标编辑使用 `multiple-cursors`。
   - `evil` + `evil-collection` + `evil-surround` 是主工作流，`SPC` 是 leader key。
 - 补全与搜索
@@ -25,12 +27,14 @@
   - `company` + `company-prescient` + `company-box` 做补全，默认走 `eglot`，少数语言显式切到 `lsp-mode`，诊断统一走 `flymake`。
   - `eldoc-box`、`breadcrumb`、`Treemacs` 提供文档悬浮、breadcrumb 和左侧文件/符号导航。
   - `eglot` 的 inlay hints 现在默认开启。
+  - 现在补了 Doom 风格的 LSP 性能策略：只要有 `eglot` / `lsp-mode` buffer 活跃，就临时放宽 `read-process-output-max` 和 `gcmh` 阈值，并延迟 Eglot 关停，减少切文件时的 server 抖动。
   - 现在补了一层 `Language Server Hub` / `Doctor`，可以直接看路由、server 映射、当前 buffer 状态、日志入口和 session 级调参。
+  - 现在补了 Doom 风格的编辑基础设施：`editorconfig`、`dtrt-indent`、按需 whitespace 检查、`ws-butler`、`better-jumper`、文件模板、sudo 打开/保存、目录跳转、更强的 `ibuffer` 视图，以及 `link-hint` / `rainbow-mode` / 远程仓库链接分享。
   - `dape` 负责调试，`citre` 补充 tags/xref，`devdocs`、`quickrun`、`yasnippet`、`hideshow` 都已接入。
   - tree-sitter 相关配置包含 `treesit-auto`、`treesit-fold`，并在打开文件后延迟切到 `*-ts-mode`。
 - 项目 / 文件 / 窗口
   - `projectile` + `counsel-projectile` 负责项目识别、文件检索、项目搜索。
-  - 现在补了一层项目工作台：`transient` + 自定义 `my/project-*` 命令，把切项目、搜项目、开项目、开 Magit、开 vterm 串成一个工作流。
+  - 现在补了一层项目工作台：`transient` + 自定义 `my/project-*` 命令，把切项目、搜项目、开项目、开 Magit、开 vterm 串成一个工作流；并且 `C-c p` 里的常用项目入口也默认走这套 workspace 化流程。
   - `show-imenu` 会 smart-toggle 左侧 `Treemacs`；有项目时用项目根，没有项目时用当前目录，并自动跟随当前文件和光标所在符号。
   - `Treemacs` 统一走左侧 side window，从树里打开文件默认落到最近访问的编辑窗口，`perspective` 负责按项目切工作区。
   - 文件浏览以 `dirvish` 接管 `dired`，配 `diredfl`、`nerd-icons`、`consult-find` / `consult-ripgrep`。
@@ -43,7 +47,7 @@
 - 终端 / 远程
   - 内置了 `shell`、`term`、`vterm` 的终端工作流，日常弹出终端以 popup `vterm` 池为主。
   - `M-x my/vterm-ssh` 会优先读取 `~/.ssh/config` 的主机名，打开专用 vterm 并直接 SSH。
-  - TRAMP 做了 PATH、ControlMaster、超时、spinner、持久化文件和 autosave 目录配置。
+  - TRAMP 做了 PATH、ControlMaster、超时、spinner、持久化文件和 autosave 目录配置；现在又补了 Doom 风格的 remote cache、direct async process、LSP 兼容回退和远程项目/VC 根缓存。
 - 浏览器 / 外部整合
   - `browse-url` 会按 URL 复杂度在 `eww` 和 `xwidget-webkit` 之间分流。
   - 还保留了 EAF 浏览器 / PDF / Git / mindmap 等入口，以及 EWW / Xwidget / EAF 互转函数。
@@ -87,12 +91,16 @@
   打开统一的 Telescope 风格搜索面板。
 - `SPC SPC`
   打开统一的 Telescope 风格搜索面板。
+- `SPC TAB`
+  工作区菜单；`SPC TAB TAB` 显示工作区，`.` 切换，`n` 新建，`d` 删除，`[` / `]` 左右切换。
 - `SPC SPC I`
   打开当前 workspace / 项目的 symbols；输入关键词后走 `xref-find-apropos` + `consult-xref`，并直接预览候选位置。
 - `SPC SPC m`
   打开 bookmark picker；当前项目书签优先，没有书签时打开列表缓冲区。
 - `C-x C-f`
   走 `find-file` + `vertico-directory`。
+- `C-x C-d`
+  `consult-dir`，快速切目录。
 - `C-x b`
   走 `consult-buffer`。
 - `C-s`
@@ -115,6 +123,18 @@
   测试菜单 / 当前附近测试 / 当前文件测试 / 当前项目测试 / 重跑上次测试。
 - `SPC c .`
   打开 code menu；里面补了 `b` / `B` 做 build / rerun build，常见项目会自动识别 `make`、`cmake`、`ninja`。
+- `SPC f u` / `SPC f U` / `SPC f S`
+  sudo 打开文件 / sudo 重开当前文件 / sudo 保存当前 buffer。
+- `SPC f t` / `SPC f T`
+  手动应用文件模板 / 查看当前命中的模板规则。
+- `SPC o o` / `SPC o O` / `M-o`
+  hint 打开链接 / 复制链接 / 快速打开当前窗口里的链接按钮。
+- `SPC p c`
+  打开当前项目的 `.editorconfig`。
+- `SPC q r`
+  重启 Emacs。
+- `SPC g g` / `SPC g [` / `SPC g ]` / `SPC g r` / `SPC g s` / `SPC g h` / `SPC g y` / `SPC g Y`
+  Git 状态 / 上下一个 hunk / 回滚 hunk / stage hunk / 查看 hunk / 复制远程仓库 URL / 浏览远程仓库 URL。
 - `za` / `zo` / `zc` / `zR` / `zM`
   代码折叠：切换 / 打开 / 关闭 / 全展开 / 全折叠。
 - `SPC v v` / `SPC v f` / `SPC v s` / `SPC v b`
@@ -183,6 +203,8 @@
   `find-file` / `consult-buffer` / 最近文件 / 当前 buffer 搜索。
 - `H-g` / `H-p` / `H-t` / `H-m`
   项目 ripgrep / 项目工作台 / telescope / Magit。
+- `H-P`
+  工作区菜单。
 - `H-a` / `H-l` / `H-\`` / `H-w`
   `org-agenda` / gptel chat / `popper-toggle` / 关当前 frame。
 - `H-e` / `H-d` / `H-i` / `H-u`

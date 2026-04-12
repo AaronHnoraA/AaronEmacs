@@ -102,8 +102,11 @@
   :ensure t
   :hook (after-init . gcmh-mode)
   :custom
-  (gcmh-idle-delay 10)
-  (gcmh-high-cons-threshold #x6400000)) ;; 100 MB
+  ;; Follow Doom's strategy: wait longer while active, then collect more
+  ;; aggressively after a real idle period.
+  (gcmh-idle-delay 'auto)
+  (gcmh-auto-idle-delay-factor 10)
+  (gcmh-high-cons-threshold (* 64 1024 1024)))
 
 ;; Write documentation comment in an easy way
 (use-package separedit

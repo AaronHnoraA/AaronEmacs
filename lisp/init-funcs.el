@@ -164,5 +164,31 @@ When REPLACEMENT is non-nil, register it with Which-Key."
     (with-eval-after-load 'which-key
       (which-key-add-key-based-replacements (concat "SPC " key) replacement))))
 
+(defvar my/escape-hook nil
+  "Hook run by `my/escape'.
+If any function returns non-nil, later hooks are skipped.")
+
+(defun my/escape (&optional interactive)
+  "Run `my/escape-hook', then fall back to `keyboard-quit'."
+  (interactive (list 'interactive))
+  (let ((inhibit-quit t))
+    (cond
+     ((minibuffer-window-active-p (minibuffer-window))
+      (when interactive
+        (setq this-command 'abort-recursive-edit))
+      (abort-recursive-edit))
+     ((run-hook-with-args-until-success 'my/escape-hook))
+     ((or defining-kbd-macro executing-kbd-macro) nil)
+     (t
+      (unwind-protect
+          (keyboard-quit)
+        (when interactive
+          (setq this-command 'keyboard-quit)))))))
+
+(global-set-key [remap keyboard-quit] #'my/escape)
+
+(with-eval-after-load 'eldoc
+  (eldoc-add-command 'my/escape))
+
 (provide 'init-funcs)
 ;;; init-funcs.el ends here
