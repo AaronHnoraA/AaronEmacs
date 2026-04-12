@@ -413,7 +413,6 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
           "i" 'info-lookup-symbol
 
           ;; eval
-          "eb" 'eval-buffer
           "ed" 'eval-defun
           "ee" 'eval-last-sexp
           "el" 'load-library

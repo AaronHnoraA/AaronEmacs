@@ -158,6 +158,8 @@
   (my/symbols-register-project-fallback 'lean4-mode
                                         #'my/lean-project-symbols-fallback))
 
+
+
 (provide 'init-lean)
 
 ;;; init-lean.el ends here
