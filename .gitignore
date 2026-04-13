@@ -7,6 +7,7 @@
 /quelpa/
 /package-quickstart.el
 /.cask
+/lisp/.elsa/
 
 # Emacs runtime state and caches
 /eln-cache/
