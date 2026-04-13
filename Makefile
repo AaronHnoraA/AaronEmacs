@@ -1,19 +1,30 @@
 EMACS ?= emacs
 BATCH = $(EMACS) --batch -Q -l ./init.el
-#BOOTSTRAP = $(EMACS) --debug-init -q -l ./bootstrap.el
-BOOTSTRAP = $(EMACS) -q -l ./bootstrap.el
+BOOTSTRAP = $(EMACS) --batch -Q -l ./bootstrap.el
+BOOTSTRAP_INSTALL = BOOTSTRAP_MODE=install $(BOOTSTRAP)
+BOOTSTRAP_EXPORT = BOOTSTRAP_MODE=export $(BOOTSTRAP)
+BOOTSTRAP_AUDIT = BOOTSTRAP_MODE=audit $(BOOTSTRAP)
 
-.PHONY: default help install build build-force \
+.PHONY: default help up setup setup-full bootstrap-health install lock audit-lock doctor build build-force \
         compile compile-byte compile-byte-force compile-native compile-native-force \
-        clean clean-build clean-elc clean-eln clean-state \
+        clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
         health health-startup health-byte health-native
 
-default: install
+default: up
 
 help:
 	@printf '%s\n' \
 	  'Targets:' \
-	  '  make install              Bootstrap packages / refresh lock workflow' \
+	  '  make up                   One-click bootstrap; optionally restore SNAPSHOT first' \
+	  '  make setup                One-shot restore + startup health check' \
+	  '  make setup-full           Restore + full health suite + doctor report' \
+	  '  make bootstrap-health     Restore + health + doctor + lock audit' \
+	  '  make install              Deterministically restore packages from package-lock.el' \
+	  '  make lock                 Export the current package set back into package-lock.el' \
+	  '  make audit-lock           Compare installed packages against package-lock.el' \
+	  '  make doctor               Open/check the config health doctor report in batch' \
+	  '  make state-backup         Snapshot migration-worthy local state into var/backup-snapshots' \
+	  '  make state-restore SNAPSHOT=/path/to/archive.tar.gz  Restore a saved state snapshot' \
 	  '  make build                Full byte + native compile for config and third-party Elisp' \
 	  '  make build-force          Same as build, but reset ELN cache first' \
 	  '  make compile              Byte-compile the local Emacs config' \
@@ -30,8 +41,36 @@ help:
 	  '  make health-byte          Run byte-compile smoke check' \
 	  '  make health-native        Run native-compile smoke check'
 
+up:
+	@if [ -n "$(SNAPSHOT)" ]; then \
+	  $(MAKE) state-restore SNAPSHOT="$(SNAPSHOT)"; \
+	fi
+	$(MAKE) bootstrap-health
+
+setup: install health-startup
+
+setup-full: install health doctor
+
+bootstrap-health: install health doctor audit-lock
+
 install:
-	$(BOOTSTRAP)
+	$(BOOTSTRAP_INSTALL)
+
+lock:
+	$(BOOTSTRAP_EXPORT)
+
+audit-lock:
+	$(BOOTSTRAP_AUDIT)
+
+doctor:
+	$(BATCH) --eval '(prin1 (my/health-critical-check))'
+
+state-backup:
+	$(BATCH) --eval '(princ (my/maintenance-state-snapshot))'
+
+state-restore:
+	@test -n "$(SNAPSHOT)" || (echo "SNAPSHOT=/path/to/archive.tar.gz is required" >&2; exit 2)
+	$(BATCH) --eval "(princ (my/maintenance-state-restore \"$(SNAPSHOT)\"))"
 
 build:
 	$(BATCH) --eval '(my/build-all)'

@@ -413,6 +413,7 @@ If popup is focused, kill it."
                          (current-buffer))))
   :custom
   (vterm-shell "zsh")
+  (vterm-always-compile-module t)
   :config
   (advice-add 'vterm :around #'my/vterm--start-in-home-and-cd))
 

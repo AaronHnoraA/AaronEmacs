@@ -17,21 +17,26 @@
 6. [settings-cookbook.md](settings-cookbook.md)
    常见“我想改点什么”操作手册，告诉你该改哪个文件。
 7. [maintenance.md](maintenance.md)
-   包管理、依赖升级、Elisp 编译、状态目录、故障排查。
-8. [lsp-workflow.org](lsp-workflow.org)
+   包管理、一键拉起、状态快照恢复、Elisp 编译、故障排查。
+8. [migration.md](migration.md)
+   新机器迁移、一键拉起入口、显式 bootstrap 模式、这次真实踩坑总结。
+9. [lsp-workflow.org](lsp-workflow.org)
    语言服务器的 Hub / Doctor / 路由和维护模型。
-9. [jupyter-workflow.org](jupyter-workflow.org)
+10. [jupyter-workflow.org](jupyter-workflow.org)
    Jupyter / Org / Jupytext 的完整工作流和维护面。
-10. [research-notes-workflow.md](research-notes-workflow.md)
+11. [research-notes-workflow.md](research-notes-workflow.md)
    科研笔记与代码实验如何在 Org 和 Jupytext / Jupyter 之间分工。
 
 如果你只是想立刻上手：
 
 - 安装看 [quick-start.md](quick-start.md)
+- 一键拉起和恢复环境看 [quick-start.md](quick-start.md)
 - 快捷键看 [daily-usage.md](daily-usage.md)
 - 项目管理看 [project-guide.md](project-guide.md)
 - Org 看 [org-guide.md](org-guide.md)
 - 编程 / LSP / 远程看 [dev-guide.md](dev-guide.md)
+- 换机 / 新 clone / 恢复环境看 [migration.md](migration.md)
+- 长期维护、锁文件审计、状态备份恢复看 [maintenance.md](maintenance.md)
 - 语言服务器深度排查看 [lsp-workflow.org](lsp-workflow.org)
 - 想改配置看 [settings-cookbook.md](settings-cookbook.md)
 - 做科研笔记和实验分工看 [research-notes-workflow.md](research-notes-workflow.md)

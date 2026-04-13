@@ -254,19 +254,90 @@ VC 包：
 更新或恢复依赖时执行：
 
 ```sh
+make up
+```
+
+如果你手上还有上一台机器导出的状态快照：
+
+```sh
+make up SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
+```
+
+`make up` 现在就是默认的一键入口：
+
+- 可选先恢复本地状态快照
+- 按锁文件恢复依赖
+- 跑 startup / byte / native health
+- 跑 critical doctor
+- 跑 lock drift audit
+
+其中：
+
+- `install`
+- `audit-lock`
+
+都只依赖 `bootstrap.el` 和 `package-lock.el`，不会先加载整套 `init.el`。
+这就是为了避免“配置自己还没满足依赖，却先要求配置正常加载”这种循环依赖。
+
+你也可以只做基础恢复：
+
+```sh
+make setup
+```
+
+或者只恢复依赖：
+
+```sh
 make install
 ```
 
-或者：
+更新锁文件时执行：
 
 ```sh
-emacs --debug-init -q -l ./bootstrap.el
+make lock
 ```
 
-`bootstrap.el` 的实际策略是：
+检查当前环境和锁文件是否漂移：
 
-- 如果当前机器已经装了足够多的第三方包，就把它当成“已有环境”，加载 [init.el](init.el) 后重写 [package-lock.el](package-lock.el)。
-- 如果当前机器几乎没有第三方包，就把它当成“新环境”，从 [package-lock.el](package-lock.el) 安装 archive 包和 VC 包。
+```sh
+make audit-lock
+```
+
+做一次更接近迁移验收的完整检查：
+
+```sh
+make bootstrap-health
+```
+
+备份本地状态并在另一台机器恢复：
+
+```sh
+make state-backup
+make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
+```
+
+也可以直接调用 bootstrap：
+
+```sh
+BOOTSTRAP_MODE=install emacs -q -l ./bootstrap.el
+BOOTSTRAP_MODE=export emacs -q -l ./bootstrap.el
+```
+
+现在 `bootstrap.el` 的策略是：
+
+- `make install` / `BOOTSTRAP_MODE=install`
+  始终按 [package-lock.el](package-lock.el) 恢复依赖，适合新机器、迁移、CI、第一次 clone。
+- `make lock` / `BOOTSTRAP_MODE=export`
+  显式导出当前环境回 [package-lock.el](package-lock.el)，适合维护者更新锁文件。
+- 不再把“目录里碰巧有几个包”当成是否导出锁文件的主要依据，避免新机器误判成“已有环境”。
+
+这次实际迁移暴露出来的关键教训是：
+
+- 包恢复必须显式、确定，不能靠“当前装了几个包”的启发式猜测。
+- VC 包启动阶段不能每次都尝试 `package-vc-install`，否则已有 checkout 会卡在交互覆盖提示。
+- 像 `pdf-tools`、`vterm` 这种带本地构建步骤的包，要优先复用现成产物，只在确实不可用时重建。
+- 运行时状态、临时文件、本地密钥必须持续收敛到 `var/`、`etc/` 和 `.gitignore`，否则迁移时会混入脏状态。
+- 除了包恢复，还要有“本地状态快照/恢复”工具，否则 project/session/history 这类迁移总会靠手工补。
 
 新增 VC 包时不要手写散落的 `package-vc-install`，请用：
 

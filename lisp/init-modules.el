@@ -69,6 +69,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-debug-profile)
 (require 'init-output)
 (require 'init-session)
+(require 'init-maintenance)
 (require 'init-diagnostics-ui)
 (require 'init-diagnostics-extra)
 (require 'init-health)

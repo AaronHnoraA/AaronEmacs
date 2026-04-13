@@ -4,18 +4,24 @@
 
 ## 1. 依赖管理
 
+先记住边界：
+
+- Emacs 包依赖已经进入锁文件、恢复和审计链路
+- 系统级依赖还在 `make` 之外，需要机器层自己满足
+- 恢复和锁文件审计不应依赖整套配置加载
+
 ### 更新锁文件
 
 执行：
 
 ```sh
-make install
+make lock
 ```
 
-或者：
+校验当前环境和锁文件是否一致：
 
 ```sh
-emacs --debug-init -q -l ./bootstrap.el
+make audit-lock
 ```
 
 ### 什么时候该更新锁文件
@@ -24,6 +30,90 @@ emacs --debug-init -q -l ./bootstrap.el
 - 你删除了 package
 - 你把 VC 包 recipe 改了
 - 你在另一台机器上完成了一次安装整理，想同步回来
+
+### 当前已经解决到什么程度
+
+就 Emacs 自身 package 依赖而言，现在已经可以：
+
+- `make install`
+  确定性恢复锁文件里的包
+- `make audit-lock`
+  检查当前环境和锁文件是否漂移
+- `make up`
+  做一键恢复 + 验收
+
+其中前两步故意只依赖：
+
+- `bootstrap.el`
+- `package-lock.el`
+
+不会先加载 `init.el`。
+
+但像这些仍然属于系统外部依赖：
+
+- `rg`
+- `git`
+- `latexmk`
+- `dvisvgm`
+- `hunspell`
+- `gls`
+- 本地编译工具链
+
+这层目前还没有做成自动安装，只能检查、记录、补装。
+
+### 新机器迁移时怎么做
+
+执行：
+
+```sh
+make up
+```
+
+如果需要把旧机器的本地状态一起带回来：
+
+```sh
+make up SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
+```
+
+这个入口的目标是：
+
+- 可选先恢复状态快照
+- 按 `package-lock.el` 恢复依赖
+- 跑完整 bootstrap health
+- 尽早暴露 `pdf-tools` / `vterm` / VC checkout / 锁文件漂移这类迁移问题
+
+更轻量的路径才是：
+
+```sh
+make setup
+```
+
+这条命令的目标是：
+
+- 按 `package-lock.el` 恢复依赖
+- 避免把“本地碰巧已有几个包”误判成已有开发环境
+- 立刻跑一次启动 smoke check，尽早暴露 `pdf-tools` / `vterm` / VC checkout 这类迁移问题
+
+如果你想把这一步提升成更接近“迁移验收”的流程，执行：
+
+```sh
+make bootstrap-health
+```
+
+它会把：
+
+- install
+- startup / byte / native health
+- critical doctor
+- lock drift audit
+
+串起来一次跑完。
+
+如果你要做真正的跨机器恢复，推荐顺序是：
+
+1. 旧机器执行 `make state-backup`
+2. 新机器 clone 后执行 `make up SNAPSHOT=/path/to/archive.tar.gz`
+3. 确认 `make audit-lock` 仍然是干净的
 
 ## 2. Elisp 编译
 
@@ -99,6 +189,28 @@ leader 入口：
 - 项目目录更干净
 - 状态问题可以定向删除
 - 出故障时比“散落在仓库里”更容易排查
+
+### 状态备份与恢复
+
+这套配置现在提供本地状态快照：
+
+```sh
+make state-backup
+make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
+```
+
+它会优先覆盖迁移价值高但不该进 git 的内容，例如：
+
+- `etc/`
+- project / projectile / transient 状态
+- session / recentf / savehist / save-place
+- org 持久化状态
+
+不会把 `eln-cache`、包目录、其他重建型缓存也打进去。
+
+快照默认写到：
+
+- [var/backup-snapshots](../var/backup-snapshots)
 
 ## 4. 常见清理
 

@@ -6,6 +6,12 @@
 2. 新机器怎么装起来。
 3. 装好后哪些目录和文件最重要。
 
+先记一个结论：
+
+- 默认一键入口是 `make up`
+- Emacs 包依赖已经纳入锁文件和恢复链路
+- 系统外部依赖仍然需要机器本身满足
+
 ## 1. 环境定位
 
 这套配置明显偏：
@@ -45,25 +51,101 @@ macOS 图形界面下当前修饰键约定是：
 在配置目录执行：
 
 ```sh
+make up
+```
+
+如果你还带着旧机器导出的状态快照：
+
+```sh
+make up SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
+```
+
+`make up` 会：
+
+- 可选先恢复本地状态
+- 按 `package-lock.el` 恢复依赖
+- 跑完整 bootstrap health 验收
+
+这里有个刻意的设计原则：
+
+- `make install`
+- `make audit-lock`
+
+都只走 `bootstrap.el` + `package-lock.el`，不要求先正常加载整套配置。
+因为恢复阶段本来就处在“配置依赖可能还没满足”的状态，这一步必须专心做下载安装和审计。
+
+这条链路已经覆盖：
+
+- ELPA / NonGNU / Org / MELPA 普通包
+- `package-vc` 管理的 VC 包
+- 首次拉起时最容易炸的主题、ligature、`tramp-rpc`、`vterm`、`pdf-tools` 这类 Emacs 内部依赖
+
+它不负责安装系统级依赖，例如 Homebrew / apt 层面的工具。
+
+如果你只想做最小拉起：
+
+```sh
+make setup
+```
+
+如果你只想恢复依赖，不跑检查：
+
+```sh
 make install
 ```
 
-或者：
+如果你是维护者，要把当前环境导回锁文件：
 
 ```sh
-emacs --debug-init -q -l ./bootstrap.el
+make lock
 ```
 
-`bootstrap.el` 会自动判断：
+如果你想检查当前环境和锁文件是否已经漂移：
 
-- 机器上已有较多第三方包：导出新的 `package-lock.el`
-- 新环境：按 `package-lock.el` 恢复依赖
+```sh
+make audit-lock
+```
+
+如果你想做一次更完整的迁移验收：
+
+```sh
+make bootstrap-health
+```
+
+直接调用 bootstrap 时，推荐显式指定模式：
+
+```sh
+BOOTSTRAP_MODE=install emacs -q -l ./bootstrap.el
+BOOTSTRAP_MODE=export emacs -q -l ./bootstrap.el
+```
+
+推荐流程：
+
+- 新机器 / 新 clone：`make up`
+- 只恢复包：`make install`
+- 新增或删除包后更新锁文件：`make lock`
+- 检查锁文件漂移：`make audit-lock`
+- 做完整拉起验收：`make bootstrap-health`
+
+如果你还想把本地 project/session/history 状态一起带走：
+
+```sh
+make state-backup
+make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
+```
 
 直接启动 `init.el` 时，如果检测到本地几乎还没有第三方包，也会先按
 `package-lock.el` 补齐依赖，避免在 theme、modeline 之类的首批模块上中途失败。
-不过首装依然建议优先跑一次 `make install`。
+不过首装依然建议优先跑一次 `make up`。
 
 ## 4. 必装外部依赖
+
+这里说的是系统级依赖，不是 Emacs 包依赖。
+
+换句话说：
+
+- Emacs 包依赖：`make up` / `make install` 负责
+- 系统外部依赖：你机器上要先有，或后续再脚本化安装
 
 ### 基础工具
 

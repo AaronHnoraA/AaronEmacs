@@ -12,6 +12,9 @@
 (declare-function my/compile-board "init-compile" ())
 (declare-function my/byte-compile-config "init-compile" (&optional force))
 (declare-function my/native-compile-config "init-compile" (&optional force))
+(declare-function gptel-get-backend "gptel-request" (name))
+(declare-function my/package-lock-audit "init-package-utils" ())
+(declare-function my/maintenance-state-report "init-maintenance" ())
 
 (defgroup my/health nil
   "Health checks for the Emacs config."
@@ -44,6 +47,16 @@
     my/language-server-doctor)
   "Interactive commands checked in `my/health-report'.")
 
+(defconst my/health-critical-libraries
+  '((ligature . "ligature")
+    (theme . "kanagawa-themes")
+    (vterm . "vterm")
+    (vterm-module . "vterm-module")
+    (pdf-tools . "pdf-tools")
+    (tramp-rpc . "tramp-rpc")
+    (gptel . "gptel"))
+  "Libraries that should be available after a healthy bootstrap.")
+
 (defvar my/health-startup-time nil
   "Elapsed startup time in seconds for the current Emacs session.")
 
@@ -52,6 +65,15 @@
 
 (defvar my/health-startup-package-count nil
   "Installed package count recorded after startup.")
+
+(defun my/health--bundled-epdfinfo ()
+  "Return the configured bundled epdfinfo path."
+  (expand-file-name "elpa/pdf-tools-20260102.1101/epdfinfo"
+                    user-emacs-directory))
+
+(defun my/health--gpt-config-file ()
+  "Return the primary GPT config path."
+  (expand-file-name "etc/mygpt.json" user-emacs-directory))
 
 (define-derived-mode my/health-mode special-mode "Health"
   "Major mode for config health reports.")
@@ -166,6 +188,60 @@
             (cons command (fboundp command)))
           my/health-important-commands))
 
+(defun my/health--library-report ()
+  "Return critical library availability as an alist."
+  (mapcar (lambda (entry)
+            (cons (car entry)
+                  (ignore-errors (locate-library (cdr entry)))))
+          my/health-critical-libraries))
+
+(defun my/health--artifact-report ()
+  "Return critical runtime artifact availability as an alist."
+  (list
+   (cons 'epdfinfo
+         (let ((path (my/health--bundled-epdfinfo)))
+           (and (file-executable-p path) path)))
+   (cons 'gpt-config
+         (let ((path (my/health--gpt-config-file)))
+           (and (file-exists-p path) path)))))
+
+(defun my/health--feature-report ()
+  "Return lightweight feature/runtime checks for critical subsystems."
+  (list
+   (cons 'rpc-method
+         (ignore-errors
+           (require 'tramp)
+           (or (assoc "rpc" tramp-methods)
+               (assoc 'rpc tramp-methods))))
+   (cons 'gpt-backend
+         (ignore-errors
+           (require 'init-gpt)
+           (require 'gptel)
+           (or (and (boundp 'gptel-backend) gptel-backend)
+               (gptel-get-backend "HiAPI Gemini"))))
+   (cons 'theme-loaded
+         (ignore-errors
+           (memq 'kanagawa-wave custom-enabled-themes)))
+   (cons 'ligature-enabled
+         (ignore-errors
+           (bound-and-true-p global-ligature-mode)))))
+
+(defun my/health-critical-check ()
+  "Return a compact batch-friendly report for critical bootstrap features."
+  (interactive)
+  (let ((report
+         (list
+          :libraries (my/health--library-report)
+          :artifacts (my/health--artifact-report)
+          :features (my/health--feature-report)
+          :lock (when (fboundp 'my/package-lock-audit)
+                  (my/package-lock-audit))
+          :state (when (fboundp 'my/maintenance-state-report)
+                   (my/maintenance-state-report)))))
+    (if (called-interactively-p 'interactive)
+        (message "%S" report)
+      report)))
+
 (defun my/health--insert-check (label result)
   "Insert LABEL and RESULT into the current health buffer."
   (insert (format "%-20s %s\n"
@@ -185,7 +261,14 @@
         (compile (my/health-byte-compile-check))
         (native (my/health-native-compile-check))
         (executables (my/health--executable-report))
-        (commands (my/health--command-report)))
+        (commands (my/health--command-report))
+        (libraries (my/health--library-report))
+        (artifacts (my/health--artifact-report))
+        (features (my/health--feature-report))
+        (lock-report (and (fboundp 'my/package-lock-audit)
+                          (my/package-lock-audit)))
+        (state-report (and (fboundp 'my/maintenance-state-report)
+                           (my/maintenance-state-report))))
     (with-current-buffer buffer
       (my/health-mode)
       (let ((inhibit-read-only t))
@@ -225,6 +308,50 @@
           (insert (format "%-28s %s\n"
                           (car entry)
                           (if (cdr entry) "OK" "MISSING"))))
+        (insert "\nLibraries\n")
+        (insert "---------\n")
+        (dolist (entry libraries)
+          (insert (format "%-28s %s\n"
+                          (car entry)
+                          (or (cdr entry) "MISSING"))))
+        (insert "\nArtifacts\n")
+        (insert "---------\n")
+        (dolist (entry artifacts)
+          (insert (format "%-28s %s\n"
+                          (car entry)
+                          (or (cdr entry) "MISSING"))))
+        (insert "\nCritical features\n")
+        (insert "-----------------\n")
+        (dolist (entry features)
+          (insert (format "%-28s %s\n"
+                          (car entry)
+                          (if (cdr entry) "OK" "MISSING"))))
+        (when lock-report
+          (insert "\nLock Audit\n")
+          (insert "----------\n")
+          (insert (format "%-28s %s\n" "lock-status"
+                          (if (plist-get lock-report :ok) "OK" "DRIFT")))
+          (insert (format "%-28s %s\n" "lock-version"
+                          (or (plist-get lock-report :lock-version) "MISSING")))
+          (insert (format "%-28s %S\n" "archive-missing"
+                          (plist-get lock-report :archive-missing-in-lock)))
+          (insert (format "%-28s %S\n" "archive-extra"
+                          (plist-get lock-report :archive-extra-in-lock)))
+          (insert (format "%-28s %S\n" "vc-missing"
+                          (plist-get lock-report :vc-missing-in-lock)))
+          (insert (format "%-28s %S\n" "vc-extra"
+                          (plist-get lock-report :vc-extra-in-lock))))
+        (when state-report
+          (insert "\nState Snapshot\n")
+          (insert "--------------\n")
+          (insert (format "%-28s %s\n" "tar"
+                          (or (plist-get state-report :tar) "MISSING")))
+          (insert (format "%-28s %s\n" "backup-dir"
+                          (or (plist-get state-report :backup-dir) "MISSING")))
+          (insert (format "%-28s %S\n" "paths"
+                          (plist-get state-report :paths)))
+          (insert (format "%-28s %S\n" "missing-paths"
+                          (plist-get state-report :missing-paths))))
         (goto-char (point-min))
         (use-local-map (copy-keymap special-mode-map))
         (local-set-key (kbd "g") #'my/health-report)))
@@ -233,7 +360,9 @@
 (transient-define-prefix my/health-dispatch ()
   "Health check workflow."
   [["Checks"
-    ("h" "full report" my/health-report)
+   ("h" "full report" my/health-report)
+    ("d" "critical doctor" my/health-critical-check)
+    ("l" "lock audit" my/package-lock-audit)
     ("i" "init stats" my/health-startup-summary)
     ("s" "startup smoke" my/health-startup-check)
     ("c" "byte compile smoke" my/health-byte-compile-check)

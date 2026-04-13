@@ -26,15 +26,15 @@
 ;;
 ;; The guards below (my/tramp-rpc-path-p) are safe regardless of whether
 ;; tramp-rpc is installed — they are pure string checks on the file path.
-;(my/package-ensure-vc 'tramp-rpc "https://github.com/ArthurHeymans/emacs-tramp-rpc")
+(my/package-ensure-vc 'tramp-rpc "https://github.com/ArthurHeymans/emacs-tramp-rpc")
 ;;;; tramp / tramp-rpc safe setup
 (let ((tramp-rpc-dir
        (or (ignore-errors
              (when-let* ((library (locate-library "tramp-rpc")))
                (file-name-directory library)))
-           (expand-file-name "emacs-tramp-rpc/lisp"
+           (expand-file-name "tramp-rpc"
                              (or (and (boundp 'package-user-dir) package-user-dir)
-                                 (expand-file-name "var/elpa" user-emacs-directory))))))
+                                 (expand-file-name "elpa" user-emacs-directory))))))
   (when (file-directory-p tramp-rpc-dir)
     (add-to-list 'load-path tramp-rpc-dir)
     (require 'tramp-rpc)))

@@ -8,6 +8,10 @@
 (require 'cl-lib)
 (require 'package)
 
+(defvar package-selected-packages)
+(defvar package-vc-selected-packages)
+(defvar my/package-lock-version)
+
 (defgroup my/package-utils nil
   "Helpers for installing and loading packages."
   :group 'convenience)
@@ -19,6 +23,9 @@ Each element is a cons cell of the form (PACKAGE . SPEC).")
 (defconst my/package-lock-file
   (expand-file-name "package-lock.el" user-emacs-directory)
   "Path to the generated package lock file.")
+
+(defconst my/package-lock-supported-version 2
+  "Expected schema version for `my/package-lock-file'.")
 
 (defconst my/package-core-packages
   '(use-package)
@@ -87,6 +94,18 @@ REV defaults to `:last-release'."
     (load-file my/package-lock-file)
     t))
 
+(defun my/package-read-lock-state ()
+  "Return package metadata recorded in `my/package-lock-file'.
+The result is a plist with `:version', `:packages', and `:vc-packages'."
+  (when (file-exists-p my/package-lock-file)
+    (let (package-selected-packages
+          package-vc-selected-packages
+          my/package-lock-version)
+      (load-file my/package-lock-file)
+      (list :version my/package-lock-version
+            :packages (copy-tree package-selected-packages)
+            :vc-packages (copy-tree package-vc-selected-packages)))))
+
 (defun my/package--package-desc (pkg)
   "Return the first package descriptor for PKG from `package-alist'."
   (cadr (assq pkg package-alist)))
@@ -130,6 +149,45 @@ REV defaults to `:last-release'."
                         (my/package--vc-package-p pkg)))
                   (my/package--installed-third-party-packages))))
 
+(defun my/package--normalize-symbol-list (items)
+  "Return ITEMS as a stable symbol list without duplicates."
+  (sort (delete-dups (copy-sequence (or items nil)))
+        (lambda (a b)
+          (string< (symbol-name a)
+                   (symbol-name b)))))
+
+(defun my/package--normalize-vc-package-list (items)
+  "Return ITEMS as a stable VC package alist without duplicate package names."
+  (let ((merged nil))
+    (dolist (entry (or items nil))
+      (pcase-let ((`(,name . ,spec) entry))
+        (setq merged (assq-delete-all name merged))
+        (push (cons name spec) merged)))
+    (sort merged
+          (lambda (a b)
+            (string< (symbol-name (car a))
+                     (symbol-name (car b)))))))
+
+(defun my/package--missing-symbols (left right)
+  "Return symbols present in LEFT but not in RIGHT."
+  (cl-set-difference (my/package--normalize-symbol-list left)
+                     (my/package--normalize-symbol-list right)
+                     :test #'eq))
+
+(defun my/package--vc-entry-equal-p (left right)
+  "Return non-nil when LEFT and RIGHT describe the same VC package entry."
+  (and (eq (car left) (car right))
+       (equal (cdr left) (cdr right))))
+
+(defun my/package--missing-vc-entries (left right)
+  "Return VC entries present in LEFT but not in RIGHT."
+  (cl-remove-if
+   (lambda (entry)
+     (seq-some (lambda (other)
+                 (my/package--vc-entry-equal-p entry other))
+               right))
+   (my/package--normalize-vc-package-list left)))
+
 (defun my/package-export-lock-file (&optional file)
   "Write installed archive and VC packages to FILE.
 FILE defaults to `my/package-lock-file'."
@@ -148,6 +206,43 @@ FILE defaults to `my/package-lock-file'."
       (insert ")\n\n")
       (insert "(provide 'package-lock)\n"))
     target))
+
+(defun my/package-lock-audit ()
+  "Compare current package state against `my/package-lock-file'.
+Return a plist suitable for batch checks."
+  (interactive)
+  (let* ((lock-state (my/package-read-lock-state))
+         (lock-version (plist-get lock-state :version))
+         (locked-packages (plist-get lock-state :packages))
+         (locked-vc-packages (plist-get lock-state :vc-packages))
+         (current-packages (my/package--current-package-list))
+         (current-vc-packages (my/package--current-vc-package-list))
+         (archive-missing-in-lock
+          (my/package--missing-symbols current-packages locked-packages))
+         (archive-extra-in-lock
+          (my/package--missing-symbols locked-packages current-packages))
+         (vc-missing-in-lock
+          (my/package--missing-vc-entries current-vc-packages locked-vc-packages))
+         (vc-extra-in-lock
+          (my/package--missing-vc-entries locked-vc-packages current-vc-packages))
+         (ok (and lock-state
+                  (eq lock-version my/package-lock-supported-version)
+                  (null archive-missing-in-lock)
+                  (null archive-extra-in-lock)
+                  (null vc-missing-in-lock)
+                  (null vc-extra-in-lock)))
+         (report
+          (list :ok ok
+                :lock-file my/package-lock-file
+                :lock-version lock-version
+                :expected-version my/package-lock-supported-version
+                :archive-missing-in-lock archive-missing-in-lock
+                :archive-extra-in-lock archive-extra-in-lock
+                :vc-missing-in-lock vc-missing-in-lock
+                :vc-extra-in-lock vc-extra-in-lock)))
+    (if (called-interactively-p 'interactive)
+        (message "%S" report)
+      report)))
 
 (defun my/package-install-from-lock ()
   "Install archive and VC packages recorded in `my/package-lock-file'."
