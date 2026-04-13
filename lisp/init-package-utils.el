@@ -73,7 +73,11 @@ Each element is a cons cell of the form (PACKAGE . SPEC).")
 REV defaults to `:last-release'."
   (let ((spec `(:url ,url :rev ,(or rev :last-release))))
     (my/package-register-vc package spec)
-    (unless (package-installed-p package)
+    (unless (or (package-installed-p package)
+                ;; VC packages may already exist as working trees under elpa/
+                ;; but still confuse package-vc into prompting for overwrite.
+                ;; If the library is already loadable, treat it as installed.
+                (locate-library (symbol-name package)))
       (require 'package-vc)
       (package-vc-install (cons package spec)))))
 

@@ -49,7 +49,9 @@
 
 ;; 2. 当 pdf-view 真正被加载时，再静默执行底层工具链的安装与核心设置
 (with-eval-after-load 'pdf-view
-  (pdf-tools-install :no-query))
+  (if (fboundp 'my/pdf-tools-activate)
+      (my/pdf-tools-activate)
+    (pdf-tools-install :no-query)))
 
 ;; ----------------------------------------------------------------------
 ;; 一键清理 EAF 相关的 Buffer 和 Python 进程

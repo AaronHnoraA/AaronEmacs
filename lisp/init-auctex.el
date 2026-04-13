@@ -39,6 +39,20 @@
   (when (fboundp 'my/refresh-environment-from-shell)
     (my/refresh-environment-from-shell)))
 
+(defun my/pdf-tools-activate ()
+  "Enable PDF Tools without forcing an unnecessary rebuild.
+
+If the bundled `epdfinfo' is already executable and healthy, reuse it.
+Only fall back to `pdf-tools-install' when the checker fails."
+  (let ((bundled-epdfinfo
+         (expand-file-name "elpa/pdf-tools-20260102.1101/epdfinfo"
+                           user-emacs-directory)))
+    (when (file-executable-p bundled-epdfinfo)
+      (setq pdf-info-epdfinfo-program bundled-epdfinfo))
+    (if (ignore-errors (pdf-info-check-epdfinfo) t)
+        (pdf-tools-install)
+      (pdf-tools-install :no-query))))
+
 (defun my/auctex-register-command (entry)
   "Register TeX command ENTRY without duplicating existing items."
   (setq TeX-command-list
@@ -352,7 +366,7 @@
 (use-package pdf-tools
   :ensure t
   :config
-  (pdf-tools-install)
+  (my/pdf-tools-activate)
   (require 'pdf-sync)
 
   (advice-add 'pdf-sync-forward-correlate :around
