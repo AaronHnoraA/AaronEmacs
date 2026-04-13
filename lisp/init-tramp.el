@@ -366,6 +366,54 @@ Caches for remote SSH paths only; passes through for local and /rpc: paths."
   (when (fboundp 'tramp-cleanup-connection)
     (advice-add 'tramp-cleanup-connection :after #'my/tramp-clear-caches-h)))
 
+(defun my/tramp-remove-named-advice (symbol advice-name)
+  "Remove advice named ADVICE-NAME from SYMBOL when present."
+  (advice-mapc
+   (lambda (advice props)
+     (when (equal (alist-get 'name props) advice-name)
+       (advice-remove symbol advice)))
+   symbol))
+
+(defun my/tramp-projectile-dispatch-handler-a (operation orig-fn &rest args)
+  "Call ORIG-FN for OPERATION, dispatching through file handlers when safe.
+Unlike the upstream tramp-rpc advice, this only treats the first arg as a path
+when it is actually a string, avoiding `stringp' errors for calls such as
+`(projectile-get-ext-command 'git)'."
+  (let* ((path-arg (car args))
+         (handler-path (cond
+                        ((and (stringp path-arg)
+                              (file-name-absolute-p path-arg))
+                         path-arg)
+                        ((stringp default-directory)
+                         default-directory)))
+         (handler (and (stringp handler-path)
+                       (find-file-name-handler handler-path operation))))
+    (if handler
+        (apply handler operation args)
+      (apply orig-fn args))))
+
+(with-eval-after-load 'projectile
+  ;; tramp-rpc currently advises these Projectile functions via a generic file
+  ;; handler wrapper that assumes the first argument is always a pathname. That
+  ;; breaks `projectile-get-ext-command', whose argument is a VCS symbol such as
+  ;; `git', and leaves project switching stuck in a scratch buffer.
+  (my/tramp-remove-named-advice
+   'projectile-get-ext-command
+   "tramp-advice-projectile-get-ext-command")
+  (my/tramp-remove-named-advice
+   'projectile-project-files
+   "tramp-advice-projectile-project-files")
+  (advice-add 'projectile-get-ext-command :around
+              (lambda (orig-fn &rest args)
+                (apply #'my/tramp-projectile-dispatch-handler-a
+                       #'projectile-get-ext-command orig-fn args))
+              '((name . "my/tramp-projectile-get-ext-command")))
+  (advice-add 'projectile-project-files :around
+              (lambda (orig-fn &rest args)
+                (apply #'my/tramp-projectile-dispatch-handler-a
+                       #'projectile-project-files orig-fn args))
+              '((name . "my/tramp-projectile-project-files"))))
+
 ;;; ── recentf: don't probe remote paths at startup ────────────────────────────
 
 (with-eval-after-load 'recentf

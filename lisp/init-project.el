@@ -72,11 +72,12 @@ directory string or a cons cell of the form (DIRECTORY . DEPTH)."
 
 (defun my/project-normalize-root (project-root)
   "Return PROJECT-ROOT as a normalized directory name."
-  (file-name-as-directory (expand-file-name project-root)))
+  (when (stringp project-root)
+    (file-name-as-directory (expand-file-name project-root))))
 
 (defun my/project-canonical-path (path)
   "Return PATH in a stable canonical form."
-  (when path
+  (when (stringp path)
     (let* ((expanded (expand-file-name path))
            (canonical (if (file-remote-p expanded)
                           expanded
@@ -91,11 +92,12 @@ directory string or a cons cell of the form (DIRECTORY . DEPTH)."
 
 (defun my/project-hidden-root-p (project-root)
   "Return non-nil when PROJECT-ROOT should stay out of project UIs."
-  (when project-root
+  (when (stringp project-root)
     (let ((project-root (my/project-normalize-root project-root)))
-      (or (my/project-ignored-root-p project-root)
-          (and (require 'projectile nil t)
-               (projectile-ignored-project-p project-root))))))
+      (and project-root
+           (or (my/project-ignored-root-p project-root)
+               (and (require 'projectile nil t)
+                    (projectile-ignored-project-p project-root)))))))
 
 (defun my/project-load-ignored-roots ()
   "Return project roots suppressed from the custom project workflow."
@@ -406,7 +408,14 @@ This matches canonically, so symlinked roots are cleaned as well."
       (setq project--list
             (seq-remove
              (lambda (entry)
-               (my/project-root-equal-p (car entry) project-root))
+               (let ((root (cond
+                            ((stringp entry) entry)
+                            ((stringp (car-safe entry)) (car-safe entry))
+                            ((and (listp entry)
+                                  (stringp (car-safe (last entry))))
+                             (car (last entry)))
+                            (t nil))))
+                 (and root (my/project-root-equal-p root project-root))))
              project--list))
       (unless (= before (length project--list))
         (project--write-project-list)
@@ -489,16 +498,29 @@ This matches canonically, so symlinked roots are cleaned as well."
     (let ((filtered
            (seq-remove
             (lambda (entry)
-              (my/project-hidden-root-p (car-safe entry)))
+              (let ((root (cond
+                           ((stringp entry) entry)
+                           ;; Historical format: ("/path/")
+                           ((stringp (car-safe entry)) (car-safe entry))
+                           ;; Be tolerant of formats like (vc Git "/path/") etc.
+                           ((and (listp entry)
+                                 (stringp (car-safe (last entry))))
+                            (car (last entry)))
+                           (t nil))))
+                (and root (my/project-hidden-root-p root))))
             project--list)))
       (unless (equal filtered project--list)
         (setq project--list filtered)
         (project--write-project-list)))))
 
-(defun my/project--remember-dir-visible-only (orig-fn dir)
-  "Only let ORIG-FN remember DIR when it is not an ignored root."
-  (unless (my/project-hidden-root-p dir)
-    (funcall orig-fn dir)))
+(defun my/project--remember-dir-visible-only (orig-fn root &rest args)
+  "Only let ORIG-FN remember ROOT when it is not an ignored root.
+
+Emacs 31 `project--remember-dir' takes optional arguments (NO-WRITE STABLE)."
+  ;; Be defensive: some callers may pass non-string roots (e.g. backend tags).
+  (if (and (stringp root) (my/project-hidden-root-p root))
+      nil
+    (apply orig-fn root args)))
 
 (defun my/show-imenu-target-root ()
   "Return the directory root used by `show-imenu'."
@@ -840,6 +862,13 @@ Returns the number of killed buffers."
 (use-package projectile
   :ensure t
   :hook (after-init . projectile-mode)
+  :init
+  ;; When reloading init after Emacs has already started, `after-init-hook` has
+  ;; run already, so we must enable Projectile immediately to keep `SPC p ...`
+  ;; bindings functional.
+  (when after-init-time
+    (when (require 'projectile nil t)
+      (projectile-mode 1)))
   :bind (:map projectile-mode-map
          ("C-c p" . projectile-command-map))
   :config
@@ -883,7 +912,6 @@ Returns the number of killed buffers."
 
 (use-package transient
   :ensure nil
-  :after projectile
   :demand t
   :config
   (transient-define-prefix my/project-dispatch ()
