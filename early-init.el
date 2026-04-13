@@ -23,6 +23,33 @@
 (defvar my/warning-popup-minimum-level :error
   "Minimum warning severity that may auto-display the warnings buffer.")
 
+(defvar my/warning-suppress-elpa-noise t
+  "Whether to suppress low-severity startup noise from third-party ELPA packages.")
+
+(defconst my/suppressed-warnings-buffer "*Suppressed Warnings*"
+  "Buffer that collects low-severity warnings redirected away from *Messages*.
+Browse with `my/show-suppressed-warnings'.")
+
+(defun my/log-to-suppressed-warnings (type message level)
+  "Append a suppressed warning to `my/suppressed-warnings-buffer'."
+  (with-current-buffer (get-buffer-create my/suppressed-warnings-buffer)
+    (let ((inhibit-read-only t))
+      (goto-char (point-max))
+      (insert (format "[%s] (%s) %s: %s\n"
+                      (format-time-string "%T")
+                      (if (consp type)
+                          (mapconcat #'symbol-name type ".")
+                        (symbol-name type))
+                      (upcase (substring (symbol-name level) 1))
+                      message)))))
+
+(defun my/show-suppressed-warnings ()
+  "Pop up the buffer of warnings that were silenced during startup."
+  (interactive)
+  (if-let* ((buf (get-buffer my/suppressed-warnings-buffer)))
+      (pop-to-buffer buf)
+    (message "No suppressed warnings recorded.")))
+
 (defun my/warning-level-rank (level)
   "Return a comparable numeric rank for warning LEVEL."
   (pcase level
@@ -41,14 +68,41 @@
   "Normalize warning TYPE into the list form used by `warning-suppress-types'."
   (if (consp type) type (list type)))
 
+(defun my/warning-should-suppress-p (type message level)
+  "Return non-nil when TYPE/MESSAGE/LEVEL should be redirected to the warning log."
+  (let ((level (or level :warning))
+        (type-list (my/warning-type-list type)))
+    (and my/warning-suppress-elpa-noise
+         (not (my/warning-level-at-least-p level :error))
+         (or
+          ;; Byte-compiler and native-compiler noise from ELPA packages.
+          (member 'bytecomp     type-list)
+          (member 'obsolete     type-list)
+          (member 'comp         type-list)
+          ;; (require 'cl) deprecation.
+          (member 'cl-functions type-list)
+          ;; Remaining message-content checks.
+          (and (stringp message)
+               (or (string-match-p "/elpa/" message)
+                   (string-match-p
+                    "setting attribute .+:foreground.+'font-lock-variable-name-face'.+nil value is invalid"
+                    message)
+                   (and (member 'package type-list)
+                        (string-match-p "deprecated" message))))))))
+
 (defun my/suppress-warning-popups-a (orig-fn type message &optional level buffer-name)
-  "Keep lower-severity warnings in the log without auto-popping a window."
+  "Redirect low-severity warnings to `my/suppressed-warnings-buffer'."
   (let ((level (or level :warning)))
-    (if (my/warning-level-at-least-p level my/warning-popup-minimum-level)
-        (funcall orig-fn type message level buffer-name)
+    (cond
+     ((my/warning-should-suppress-p type message level)
+      ;; Log to the dedicated buffer instead of discarding or showing in *Messages*.
+      (my/log-to-suppressed-warnings type message level))
+     ((my/warning-level-at-least-p level my/warning-popup-minimum-level)
+      (funcall orig-fn type message level buffer-name))
+     (t
       (let ((warning-suppress-types
              (cons (my/warning-type-list type) warning-suppress-types)))
-        (funcall orig-fn type message level buffer-name)))))
+        (funcall orig-fn type message level buffer-name))))))
 
 (unless (advice-member-p #'my/suppress-warning-popups-a 'display-warning)
   (advice-add 'display-warning :around #'my/suppress-warning-popups-a))
@@ -56,6 +110,32 @@
 ;; Native compilation warnings can surface before the main init loads.
 (setq native-comp-async-report-warnings-errors 'silent
       native-comp-warning-on-missing-source nil)
+
+;; Emacs 31 development builds can emit a lot of third-party package
+;; compatibility warnings while loading or JIT-compiling ELPA packages.
+;; Keep normal startup usable by only surfacing actual errors.
+(setq warning-minimum-level :error
+      warning-minimum-log-level :error)
+
+;; Stop the byte-compiler from generating obsolete-API warnings in the first
+;; place.  ELPA packages targeting pre-31 Emacs use when-let, if-let,
+;; defadvice, search, count, etc. that became obsolete in Emacs 28–31.
+;; '(not obsolete) means "all default warnings except the obsolete category".
+(setq byte-compile-warnings '(not obsolete))
+
+
+(defvar my/gui-undecorated nil
+  "Whether GUI frames should start without native window decorations.
+Keep this disabled by default because some Emacs/macOS builds handle
+undecorated frames poorly.")
+
+(defvar my/gui-internal-border-width 0
+  "Internal border width applied to GUI frames.")
+
+(defvar my/gui-startup-fullscreen nil
+  "Startup fullscreen state for GUI frames.
+Use nil for a normal window, `maximized' for a maximized window, or
+`fullboth' for a fullscreen window.")
 
 ;; Emacs 启动完成后恢复正常 GC 和 file-name-handler 设置
 (add-hook 'emacs-startup-hook
@@ -69,21 +149,19 @@
                     gc-cons-percentage my/original-gc-cons-percentage))))
 
 
-(setq default-frame-alist
-      (append
-       '((menu-bar-lines . 0)
+(let ((frame-params
+       `((menu-bar-lines . 0)
          (tool-bar-lines . 0)
          (vertical-scroll-bars . nil)
          (horizontal-scroll-bars . nil)
-         (undecorated . t)
-         (internal-border-width . 0)
-
-         ;; 启动时直接进入全屏。
-         ;; 如需改成“最大化但不进原生全屏”，可改为 `maximized`。
-         ;(fullscreen . fullboth)
-         ;(fullscreen . maximized)
-        )
-       default-frame-alist))
+         ,@(when my/gui-undecorated
+             '((undecorated . t)))
+         ,@(when (integerp my/gui-internal-border-width)
+             `((internal-border-width . ,my/gui-internal-border-width)))
+         ,@(when my/gui-startup-fullscreen
+             `((fullscreen . ,my/gui-startup-fullscreen))))))
+  (setq default-frame-alist
+        (append frame-params default-frame-alist)))
 
 
 

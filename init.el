@@ -1,8 +1,16 @@
 ;;; init.el --- The main entry for emacs -*- lexical-binding: t -*-
 
+(when (fboundp 'startup-redirect-eln-cache)
+  (startup-redirect-eln-cache
+   (expand-file-name "var/eln-cache/" user-emacs-directory)))
+
 (setq user-full-name "aaron")
 (setq load-prefer-newer t)
 (require 'package)
+
+(defvar exec-path-from-shell-arguments)
+(defvar exec-path-from-shell-check-startup-files)
+(declare-function exec-path-from-shell-getenv "exec-path-from-shell" (name))
 
 ;; 包源要在任何安装逻辑之前设置好
 (setq package-archives
@@ -126,7 +134,18 @@
   (add-to-list 'load-path (file-name-as-directory dir))
   (add-to-list 'load-path (file-name-as-directory org-dir))
   (add-to-list 'load-path (file-name-as-directory (expand-file-name "lang" dir))))
-(setq custom-file (locate-user-emacs-file "custom.el"))
+(setq custom-file (locate-user-emacs-file "etc/custom.el"))
+
+(when (file-exists-p custom-file)
+  (condition-case err
+      (load custom-file nil 'nomessage)
+    (error
+     (display-warning
+      'init
+      (format "Failed to load custom file %s: %s"
+              custom-file
+              (error-message-string err))
+      :error))))
 
 (require 'init-package-utils)
 (my/package-bootstrap-from-lock-if-needed)

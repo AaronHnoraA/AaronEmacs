@@ -60,6 +60,20 @@
   (file-name-as-directory (expand-file-name "tramp" my/state-dir)))
 (defconst my/tramp-auto-save-dir
   (file-name-as-directory (expand-file-name "autosave" my/tramp-state-dir)))
+(defconst my/eshell-state-dir
+  (file-name-as-directory (expand-file-name "eshell" my/state-dir)))
+(defconst my/undo-tree-history-state-dir
+  (file-name-as-directory (expand-file-name "undo-tree-history" my/state-dir)))
+(defconst my/eaf-state-dir
+  (file-name-as-directory (expand-file-name "eaf" my/state-dir)))
+(defconst my/treesit-state-dir
+  (file-name-as-directory (expand-file-name "tree-sitter" my/state-dir)))
+(defconst my/org-state-dir
+  (file-name-as-directory (expand-file-name "org" my/state-dir)))
+(defconst my/dape-state-dir
+  (file-name-as-directory (expand-file-name "dape" my/state-dir)))
+
+(defvar org-id-locations-file)
 
 (dolist (dir (list my/state-dir
                    my/backup-dir
@@ -67,8 +81,17 @@
                    my/auto-save-session-dir
                    my/lockfile-dir
                    my/tramp-state-dir
-                   my/tramp-auto-save-dir))
+                   my/tramp-auto-save-dir
+                   my/eshell-state-dir
+                   my/undo-tree-history-state-dir
+                   my/eaf-state-dir
+                   my/treesit-state-dir
+                   my/org-state-dir
+                   my/dape-state-dir))
   (make-directory dir t))
+
+(setq org-id-locations-file
+      (expand-file-name "id-locations.el" my/org-state-dir))
 
 (setq make-backup-files t
       backup-by-copying t
@@ -1073,7 +1096,9 @@ Else, call `comment-or-uncomment-region' on the current line."
   ;; 2) 本地历史文件统一放到一个目录（只在本机路径生效）
   ;;    你可以改成你喜欢的位置：例如 ~/.emacs.d/undo-tree/
   (defvar my/undo-tree-history-dir
-    (expand-file-name "undo-tree-history/" user-emacs-directory))
+    (or (and (boundp 'my/undo-tree-history-state-dir)
+             my/undo-tree-history-state-dir)
+        (expand-file-name "var/undo-tree-history/" user-emacs-directory)))
 
   (unless (file-directory-p my/undo-tree-history-dir)
     (make-directory my/undo-tree-history-dir t))
@@ -1349,6 +1374,11 @@ interrupt the current window layout."
                  (const :tag "Emergency" :emergency))
   :group 'convenience)
 
+(defcustom my/warning-suppress-elpa-noise t
+  "Whether to suppress low-severity startup noise from third-party ELPA packages."
+  :type 'boolean
+  :group 'convenience)
+
 (defconst my/warnings-buffer-name "*Warnings*")
 
 (defun my/warning-level-rank (level)
@@ -1369,14 +1399,33 @@ interrupt the current window layout."
   "Normalize warning TYPE into the list form used by `warning-suppress-types'."
   (if (consp type) type (list type)))
 
+(defun my/warning-should-suppress-p (type message level)
+  "Return non-nil when TYPE/MESSAGE/LEVEL should be suppressed entirely."
+  (let ((level (or level :warning)))
+    (and my/warning-suppress-elpa-noise
+         (not (my/warning-level-at-least-p level :error))
+         (stringp message)
+         (or (string-match-p "/elpa/" message)
+             (string-match-p "\\`Package cl is deprecated\\'" message)
+             (string-match-p
+              "setting attribute .+:foreground.+'font-lock-variable-name-face'.+nil value is invalid"
+              message)
+             (let ((type-list (my/warning-type-list type)))
+               (and (member 'package type-list)
+                    (string-match-p "deprecated" message)))))))
+
 (defun my/suppress-warning-popups-a (orig-fn type message &optional level buffer-name)
   "Keep lower-severity warnings in the log without auto-popping a window."
   (let ((level (or level :warning)))
-    (if (my/warning-level-at-least-p level my/warning-popup-minimum-level)
-        (funcall orig-fn type message level buffer-name)
+    (cond
+     ((my/warning-should-suppress-p type message level)
+      nil)
+     ((my/warning-level-at-least-p level my/warning-popup-minimum-level)
+      (funcall orig-fn type message level buffer-name))
+     (t
       (let ((warning-suppress-types
              (cons (my/warning-type-list type) warning-suppress-types)))
-        (funcall orig-fn type message level buffer-name)))))
+        (funcall orig-fn type message level buffer-name))))))
 
 (defun my/show-warnings-buffer ()
   "Show the warning log buffer if it exists."

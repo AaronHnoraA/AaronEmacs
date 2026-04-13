@@ -23,6 +23,9 @@
   (browse-url-browser-function 'eaf-open-browser)
   
   :init
+  (setq eaf-config-location
+        (or (and (boundp 'my/eaf-state-dir) my/eaf-state-dir)
+            (expand-file-name "var/eaf/" user-emacs-directory)))
   ;; 将 alias 放在 init 块中，确保在 EAF 加载前就能识别 browse-web 命令
   (defalias 'browse-web #'eaf-open-browser)
   

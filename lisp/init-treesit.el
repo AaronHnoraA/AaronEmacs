@@ -27,7 +27,8 @@
 
 ;; 建议显式指定 Emacs 放 grammar 动态库的位置（与你报错里一致）
 (setq treesit-extra-load-path
-      (list (expand-file-name "tree-sitter/" user-emacs-directory)))
+      (list (or (and (boundp 'my/treesit-state-dir) my/treesit-state-dir)
+                (expand-file-name "var/tree-sitter/" user-emacs-directory))))
 
 
 (my/package-ensure-vc 'treesit-fold "https://github.com/emacs-tree-sitter/treesit-fold.git")

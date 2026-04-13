@@ -78,11 +78,12 @@ If one of FEATURES is already available, require MODULE immediately."
 (my/require-module-after-any-feature 'init-org 'org)
 (my/require-module-after-any-feature 'init-org-mmdc 'org)
 (my/require-module-after-any-feature 'init-org-zotero 'org)
-(require 'init-eaf)
+(my/require-module-safely 'init-eaf)
 (require 'init-text)
 (require 'init-shell)
-(require 'init-spell)
-(require 'init-gpt)
+(require 'init-remote-connectboard)
+(my/require-module-safely 'init-spell)
+(my/require-module-safely 'init-gpt)
 (require 'init-search)
 (require 'init-search-extra)
 (require 'init-telescope)
@@ -93,20 +94,20 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-multiple-cursors)
 (my/require-module-after-any-feature 'init-auctex 'tex 'tex-site 'pdf-tools 'pdf-view)
 (my/require-module-safely 'init-jupyter)
-(require 'init-browser)
-(require 'init-fzfs)
+(my/require-module-safely 'init-browser)
+(my/require-module-safely 'init-fzfs)
 (require 'init-function-keys)
 (my/package-register-vc 'joplin-mode
                         '(:url "https://github.com/cinsk/joplin-mode.git"
                           :rev :last-release))
 (with-eval-after-load 'markdown-mode
-  (require 'init-joplin))
+  (my/require-module-safely 'init-joplin))
 (require 'init-ignored)
 
 
 ;; MacOS specific
 (when (eq system-type 'darwin)
-  (require 'init-macos))
+  (my/require-module-safely 'init-macos))
 
 (provide 'init-modules)
 ;;; init-modules.el ends here

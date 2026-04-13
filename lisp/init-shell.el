@@ -140,6 +140,9 @@ current directory."
     "ripgrep with eshell integration."
     (eshell-grep "rg" (append '("--no-heading") args) t))
   :custom
+  (eshell-directory-name
+   (or (and (boundp 'my/eshell-state-dir) my/eshell-state-dir)
+       (expand-file-name "var/eshell/" user-emacs-directory)))
   ;; The following cmds will run on term.
   (eshell-visual-commands '("top" "htop" "less" "more" "telnet"))
   (eshell-visual-subcommands '(("git" "help" "lg" "log" "diff" "show")))

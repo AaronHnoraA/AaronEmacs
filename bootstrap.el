@@ -1,5 +1,9 @@
 ;;; bootstrap.el --- Bootstrap packages from lock file -*- lexical-binding: t; -*-
 
+(when (fboundp 'startup-redirect-eln-cache)
+  (startup-redirect-eln-cache
+   (expand-file-name "var/eln-cache/" user-emacs-directory)))
+
 ;; 调整 GC，安装阶段更快
 (setq gc-cons-threshold most-positive-fixnum
       gc-cons-percentage 0.6)

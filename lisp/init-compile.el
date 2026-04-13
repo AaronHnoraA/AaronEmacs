@@ -10,6 +10,8 @@
 (require 'subr-x)
 (require 'transient)
 
+(defvar package-user-dir)
+
 (declare-function my/evil-global-leader-set "init-funcs" (key def desc))
 (declare-function my/show-warnings-buffer "init-utils" ())
 (declare-function my/health-startup-check "init-health" ())
@@ -45,6 +47,12 @@
 (defcustom my/compile-target-directories
   '("lisp")
   "Directories managed by the compile helpers."
+  :type '(repeat string)
+  :group 'my/compile)
+
+(defcustom my/compile-third-party-directories
+  '("site-lisp")
+  "Extra directories under the config root included by full build commands."
   :type '(repeat string)
   :group 'my/compile)
 
@@ -130,6 +138,31 @@
            (mapcar (lambda (dir)
                      (directory-files-recursively dir "\\.el\\'"))
                    (my/compile--directory-paths))))))
+
+(defun my/compile--third-party-directory-paths ()
+  "Return third-party directories included by full build commands."
+  (delete-dups
+   (append
+    (when (and (boundp 'package-user-dir)
+               package-user-dir
+               (file-directory-p package-user-dir))
+      (list (file-name-as-directory (expand-file-name package-user-dir))))
+    (seq-filter
+     #'file-directory-p
+     (mapcar (lambda (dir)
+               (file-name-as-directory
+                (expand-file-name dir my/compile-config-root)))
+             my/compile-third-party-directories)))))
+
+(defun my/compile--all-el-files ()
+  "Return managed and third-party Emacs Lisp source files."
+  (delete-dups
+   (append
+    (my/compile--target-el-files)
+    (apply #'append
+           (mapcar (lambda (dir)
+                     (directory-files-recursively dir "\\.el\\'"))
+                   (my/compile--third-party-directory-paths))))))
 
 (defun my/compile--path-in-config-p (path)
   "Return non-nil when PATH is inside the current Emacs config."
@@ -348,6 +381,17 @@ With prefix arg FORCE, recompile everything unconditionally."
              (and force t))
     (my/compile--refresh-board-if-visible)))
 
+(defun my/byte-compile-all (&optional force)
+  "Byte-compile the local config and third-party Elisp directories.
+With prefix arg FORCE, recompile everything unconditionally."
+  (interactive "P")
+  (my/byte-compile-config force)
+  (dolist (dir (my/compile--third-party-directory-paths))
+    (byte-recompile-directory dir 0 force))
+  (message "Byte-compile finished for config + third-party Elisp (force=%s)"
+           (and force t))
+  (my/compile--refresh-board-if-visible))
+
 (defun my/native-compile-current-file (&optional force)
   "Queue native compilation for the current managed Emacs Lisp file.
 With prefix arg FORCE, delete the file's current `.eln' first."
@@ -403,6 +447,30 @@ With prefix arg FORCE, delete managed `.eln' artifacts first."
   (my/native-comp--start-progress "config")
   (message "Queued native compilation for the local Emacs config")
   (my/compile--refresh-board-if-visible))
+
+(defun my/native-compile-all (&optional force)
+  "Synchronously native-compile the local config and third-party Elisp.
+With prefix arg FORCE, delete the dedicated ELN cache first."
+  (interactive "P")
+  (unless (my/native-comp-available-p)
+    (user-error "Native compilation is not available in this Emacs"))
+  (my/compile-apply-runtime-settings)
+  (when force
+    (my/native-comp-reset-cache))
+  (let ((compiled 0))
+    (dolist (file (my/compile--all-el-files))
+      (native-compile file)
+      (cl-incf compiled))
+    (message "Native-compile finished for config + third-party Elisp (files=%d, force=%s)"
+             compiled
+             (and force t)))
+  (my/compile--refresh-board-if-visible))
+
+(defun my/build-all (&optional force)
+  "Run full byte + native compilation for config and third-party Elisp."
+  (interactive "P")
+  (my/byte-compile-all force)
+  (my/native-compile-all force))
 
 (defun my/compile-clean-byte-artifacts ()
   "Delete managed byte-compiled files."

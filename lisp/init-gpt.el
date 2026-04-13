@@ -3,7 +3,7 @@
 ;;; Commentary:
 ;; Configure gptel and Copilot.
 ;;
-;; `var/mygpt.json' supports both the old single-backend format and a richer
+;; `etc/mygpt.json' supports both the old single-backend format and a richer
 ;; multi-backend format.  When the file is absent, gptel falls back to its
 ;; default ChatGPT backend instead of warning on every startup.
 
@@ -19,7 +19,7 @@
   "Local gptel helpers and workflow."
   :group 'applications)
 
-(defcustom my/gptel-config-files '("var/mygpt.json")
+(defcustom my/gptel-config-files '("etc/mygpt.json" "var/mygpt.json")
   "Relative config files tried by `my/gptel-load-config'."
   :type '(repeat string)
   :group 'my/gptel)
@@ -428,7 +428,7 @@ buffer-locally."
       (gptel-make-gh-copilot "GitHub Copilot"))))
 
 (defun my/gptel-load-config ()
-  "Load and register gptel backends from `var/mygpt.json'."
+  "Load and register gptel backends from the configured JSON files."
   (setq my/gptel--loaded-config-file nil)
   (when-let* ((config-file (my/gptel--locate-config-file)))
     (let* ((json-object-type 'alist)

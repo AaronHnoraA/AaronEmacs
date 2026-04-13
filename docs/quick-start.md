@@ -124,7 +124,7 @@ emacs --debug-init -q -l ./bootstrap.el
 
 [lisp/init-gpt.el](../lisp/init-gpt.el) 默认读取：
 
-- `var/mygpt.json`
+- `etc/mygpt.json`
 
 现在推荐用多后端格式，旧的单后端格式也继续兼容。
 
@@ -166,7 +166,7 @@ emacs --debug-init -q -l ./bootstrap.el
 
 - `key` 支持直接写明文，也支持 `env:ENV_NAME`
 - `key` 也支持 `file:relative/path.txt`
-- 没有 `var/mygpt.json` 时，会回退到 gptel 自带的默认 ChatGPT 后端，不再启动时报 warning
+- 没有 `etc/mygpt.json` 时，会回退到 gptel 自带的默认 ChatGPT 后端，不再启动时报 warning
 
 ### 运行时状态目录
 

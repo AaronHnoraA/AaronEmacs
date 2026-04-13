@@ -7,8 +7,25 @@
 
 (declare-function on-screen-mode "on-screen" (&optional arg))
 (defvar kanagawa-themes-custom-colors)
-(defvar unspecified 'unspecified
+(defvar my/theme-unspecified 'unspecified
   "Literal face attribute value used by some themes during runtime expansion.")
+
+;; Emacs 31 rejects nil as a face attribute value; themes written for earlier
+;; Emacs versions may still pass nil.  Convert nil → 'unspecified at the call
+;; site so the "nil value is invalid" warning is never emitted.
+(when (>= emacs-major-version 31)
+  (define-advice set-face-attribute (:filter-args (args) fix-nil-to-unspecified)
+    "Convert nil face attribute values to \\='unspecified (Emacs 31 compatibility)."
+    (let ((face  (nth 0 args))
+          (frame (nth 1 args))
+          (rest  (nthcdr 2 args))
+          fixed)
+      (while rest
+        (push (car rest) fixed)
+        (push (if (null (cadr rest)) 'unspecified (cadr rest)) fixed)
+        (setq rest (cddr rest)))
+      (cons face (cons frame (nreverse fixed))))))
+
 
 (defgroup my/chunlian nil
   "Decorative Chunlian UI for dashboard."
@@ -20,6 +37,14 @@
   :ensure t
   :config
   (load-theme 'kanagawa-wave t))
+
+(defun my/theme-normalize-faces ()
+  "Normalize theme face attributes that Emacs 31 rejects when set to nil."
+  (when (and (facep 'font-lock-variable-name-face)
+             (null (face-attribute 'font-lock-variable-name-face :foreground nil 'default)))
+    (set-face-attribute 'font-lock-variable-name-face nil :foreground 'unspecified)))
+
+(add-hook 'after-load-theme-hook #'my/theme-normalize-faces)
 
 (use-package doom-modeline
   :ensure t
@@ -125,12 +150,10 @@
   (defconst issue-url (concat homepage-url "/issues/new"))
 
   :custom
-  ;; 【核心修改】
-  ;; 直接指向 emacs 根目录下的 dashboard.txt
-  ;; 如果你用 (cons "img" "txt")，GUI下会优先找图片，找不到才显示文字。
-  ;; 这里直接设为路径字符串，强制使用文本内容。
+  ;; Keep the dashboard banner in `etc/` with other local UI config.
   (dashboard-banner-logo-title "Aaron's Emacs")
-  (dashboard-startup-banner (expand-file-name "dashboard.txt" user-emacs-directory))
+  (dashboard-startup-banner
+   (expand-file-name "etc/dashboard.txt" user-emacs-directory))
 
   (dashboard-center-content t)
   (dashboard-set-heading-icons t)

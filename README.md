@@ -53,7 +53,7 @@
   - 还保留了 EAF 浏览器 / PDF / Git / mindmap 等入口，以及 EWW / Xwidget / EAF 互转函数。
   - `atomic-chrome`、`webjump`、`fanyi`、`rcirc`、`gnus` 都在配置里。
 - AI
-  - `gptel` 支持默认 ChatGPT / GitHub Copilot 后端，也支持从 `var/mygpt.json` 读取多后端配置、preset、context 和 rewrite 工作流。
+  - `gptel` 支持默认 ChatGPT / GitHub Copilot 后端，也支持从 `etc/mygpt.json` 读取多后端配置、preset、context 和 rewrite 工作流。
   - `copilot` 在 `prog-mode` 和 `org-mode` 下自动启用。
 
 ## 仓库结构
@@ -226,7 +226,7 @@
 
 - 路径约定
   - Org 根目录固定为 `~/HC/Org/`。
-  - GPT 配置文件默认是 `var/mygpt.json`。
+  - GPT 配置文件默认是 `etc/mygpt.json`。
   - SSH 主机列表默认从 `~/.ssh/config` 读取。
   - tree-sitter 动态库目录固定为 `tree-sitter/`。
   - 备份、自动保存和 lock 文件统一写到 `var/` 下，不再污染项目目录。
@@ -283,5 +283,5 @@ emacs --debug-init -q -l ./bootstrap.el
 ## 当前已知现状
 
 - 现在仍然是 `ivy/counsel` 和 `vertico/consult/embark` 双栈并存，但高频搜索入口已经优先走 `consult`。
-- 一些路径和应用绑定是硬编码的，比如 `~/HC/Org/`、Brave 数据目录、`var/mygpt.json`。
+- 一些路径和应用绑定是硬编码的，比如 `~/HC/Org/`、Brave 数据目录、`etc/mygpt.json`。
 - 这套配置优先照顾“本地编码 + SSH/TRAMP + Org 笔记/学术写作”三类日常使用，不追求最小依赖或跨平台零定制。

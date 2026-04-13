@@ -3,7 +3,7 @@ BATCH = $(EMACS) --batch -Q -l ./init.el
 #BOOTSTRAP = $(EMACS) --debug-init -q -l ./bootstrap.el
 BOOTSTRAP = $(EMACS) -q -l ./bootstrap.el
 
-.PHONY: default help install \
+.PHONY: default help install build build-force \
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state \
         health health-startup health-byte health-native
@@ -14,6 +14,8 @@ help:
 	@printf '%s\n' \
 	  'Targets:' \
 	  '  make install              Bootstrap packages / refresh lock workflow' \
+	  '  make build                Full byte + native compile for config and third-party Elisp' \
+	  '  make build-force          Same as build, but reset ELN cache first' \
 	  '  make compile              Byte-compile the local Emacs config' \
 	  '  make compile-byte         Same as compile' \
 	  '  make compile-byte-force   Force byte-compilation for managed files' \
@@ -30,6 +32,12 @@ help:
 
 install:
 	$(BOOTSTRAP)
+
+build:
+	$(BATCH) --eval '(my/build-all)'
+
+build-force:
+	$(BATCH) --eval '(my/build-all t)'
 
 compile: compile-byte
 

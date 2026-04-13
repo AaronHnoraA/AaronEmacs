@@ -1,0 +1,23 @@
+{
+  "_example": {
+    "name": "gpu-rpc",
+    "host": "gpu-box",
+    "method": "rpc",
+    "path": "~/work",
+    "group": "lab",
+    "description": "fast rpc target"
+  },
+  "ssh": {
+    "enabled": true,
+    "include": [],
+    "exclude": []
+  },
+  "rpc": {
+    "enabled": true,
+    "include": [
+      "Aaron-*"
+    ],
+    "exclude": []
+  },
+  "entries": []
+}

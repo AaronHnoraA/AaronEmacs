@@ -77,11 +77,11 @@
 文件：
 
 - [lisp/init-gpt.el](../lisp/init-gpt.el)
-- `var/mygpt.json`
+- `etc/mygpt.json`
 
 通常只需要改：
 
-- `var/mygpt.json`
+- `etc/mygpt.json`
 
 现在这份 JSON 同时支持：
 

@@ -319,7 +319,7 @@ Doctor 更适合快速排查：
 - `SPC l l` / `C-c l l`
 - `SPC l c` / `C-c l c`
 - `SPC l r` / `C-c l r`
-- 配置文件：`var/mygpt.json`
+- 配置文件：`etc/mygpt.json`
 
 ### Copilot
 

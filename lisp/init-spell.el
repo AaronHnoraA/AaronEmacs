@@ -29,7 +29,8 @@
   (ispell-program-name "hunspell")
   (ispell-dictionary "en_US")
   (ispell-following-word t)
-  (ispell-personal-dictionary (locate-user-emacs-file "hunspell_dict.txt")))
+  (ispell-personal-dictionary
+   (expand-file-name "etc/hunspell_dict.txt" user-emacs-directory)))
 
 ;; Spell check on-the-fly
 (use-package flyspell

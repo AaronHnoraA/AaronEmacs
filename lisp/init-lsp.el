@@ -827,6 +827,8 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
 ;; - 部分 dap-mode 命令在 dape 中没有 1:1 同名接口，
 ;;   这里改成 dape 当前公开可用的命令体系
 ;;
+(defvar dape-default-breakpoints-file)
+
 (use-package dape
   :ensure t
   :after hydra
@@ -855,6 +857,8 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   (kill-emacs . dape-breakpoint-save)
   (after-init . dape-breakpoint-load)
   :custom
+  (dape-default-breakpoints-file
+   (expand-file-name "breakpoints.eld" my/dape-state-dir))
   (dape-buffer-window-arrangement 'right)
   :config
   (repeat-mode 1)

@@ -41,6 +41,14 @@
 (defvar my/macos-idle-gc-timer nil
   "Timer used to run a delayed GC after the UI goes idle on macOS.")
 
+(defvar my/macos-use-transparent-titlebar nil
+  "Whether macOS GUI frames should use a transparent titlebar.")
+
+(defvar my/macos-startup-window-state 'fullscreen
+  "Startup window state for macOS GUI frames.
+Use nil for a regular window, `maximized' for a maximized window, or
+`fullscreen' for a fullscreen window.")
+
 (defun my/macos-schedule-idle-gc-after-focus-change ()
   "Queue idle GC when the selected frame loses focus."
   (unless (frame-focus-state)
@@ -134,9 +142,10 @@
                      ("H-`" . popper-toggle)))
     (global-set-key (kbd (car binding)) (cdr binding)))
 
-  ;; Make titlebar dark
+  ;; Make titlebar match the dark theme, but keep transparency opt-in.
   (add-to-list 'default-frame-alist '(ns-appearance . dark))
-  (add-to-list 'default-frame-alist '(ns-transparent-titlebar . t))
+  (when my/macos-use-transparent-titlebar
+    (add-to-list 'default-frame-alist '(ns-transparent-titlebar . t)))
 
   ;; Useful when use an external keyboard
   (defun +mac-swap-option-and-command ()
@@ -172,8 +181,17 @@
   (ns-pop-up-frames nil))
 
 
-;; 窗口系统启动后，自动执行一次全屏切换（效果等同于按 F11）
-(add-hook 'window-setup-hook #'toggle-frame-fullscreen)
+(defun my/macos-apply-startup-window-state ()
+  "Apply the configured startup window state on macOS GUI builds."
+  (when (display-graphic-p)
+    (pcase my/macos-startup-window-state
+      ('maximized
+       (toggle-frame-maximized))
+      ('fullscreen
+       (toggle-frame-fullscreen))
+      (_ nil))))
+
+(add-hook 'window-setup-hook #'my/macos-apply-startup-window-state)
 
 
 (provide 'init-macos)

@@ -63,7 +63,12 @@ directory string or a cons cell of the form (DIRECTORY . DEPTH)."
 (defconst my/project-ignored-roots-file
   (expand-file-name "ignored-roots.el" my/project-state-dir))
 
+(defconst my/project-list-file
+  (expand-file-name "projects.eld" my/project-state-dir))
+
 (make-directory my/project-state-dir t)
+
+(setq project-list-file my/project-list-file)
 
 (defun my/project-normalize-root (project-root)
   "Return PROJECT-ROOT as a normalized directory name."
