@@ -154,6 +154,12 @@
                 (expand-file-name dir my/compile-config-root)))
              my/compile-third-party-directories)))))
 
+(defun my/compile--elpa-recurse-dir-p (dir)
+  "Return non-nil when DIR should be recursed into during ELPA compilation.
+Skips test suites and example directories that ship with some packages."
+  (let ((base (file-name-nondirectory (directory-file-name dir))))
+    (not (string-match-p (rx bos (or "test" "tests" "examples" "example") eos) base))))
+
 (defun my/compile--all-el-files ()
   "Return managed and third-party Emacs Lisp source files."
   (delete-dups
@@ -161,7 +167,9 @@
     (my/compile--target-el-files)
     (apply #'append
            (mapcar (lambda (dir)
-                     (directory-files-recursively dir "\\.el\\'"))
+                     (directory-files-recursively
+                      dir "\\.el\\'"
+                      nil nil #'my/compile--elpa-recurse-dir-p))
                    (my/compile--third-party-directory-paths))))))
 
 (defun my/compile--path-in-config-p (path)
@@ -457,13 +465,18 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
   (my/compile-apply-runtime-settings)
   (when force
     (my/native-comp-reset-cache))
-  (let ((compiled 0))
+  (let ((compiled 0) (skipped 0))
     (dolist (file (my/compile--all-el-files))
-      (native-compile file)
-      (cl-incf compiled))
-    (message "Native-compile finished for config + third-party Elisp (files=%d, force=%s)"
-             compiled
-             (and force t)))
+      (condition-case err
+          (progn (native-compile file)
+                 (cl-incf compiled))
+        (error
+         (cl-incf skipped)
+         (message "Native-compile skipped %s: %s"
+                  (file-relative-name file user-emacs-directory)
+                  (error-message-string err)))))
+    (message "Native-compile finished (compiled=%d, skipped=%d, force=%s)"
+             compiled skipped (and force t)))
   (my/compile--refresh-board-if-visible))
 
 (defun my/build-all (&optional force)
