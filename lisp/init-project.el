@@ -608,6 +608,11 @@ following."
        (or buffer-file-name
            (eq major-mode 'dired-mode))))
 
+(defun my/treemacs-find-current-user-project-a (orig-fn &rest args)
+  "Only let source buffers drive Treemacs project following."
+  (when (my/treemacs-source-buffer-p)
+    (apply orig-fn args)))
+
 (defun my/treemacs-follow-path ()
   "Return the current buffer path Treemacs should follow."
   (cond
@@ -1061,6 +1066,12 @@ Returns the number of killed buffers."
               (lambda (fn &rest args)
                 (let ((inhibit-message t))
                   (apply fn args)))))
+
+(with-eval-after-load 'treemacs-workspaces
+  (advice-remove 'treemacs--find-current-user-project
+                 #'my/treemacs-find-current-user-project-a)
+  (advice-add 'treemacs--find-current-user-project :around
+              #'my/treemacs-find-current-user-project-a))
 
 
 

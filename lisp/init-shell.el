@@ -6,12 +6,15 @@
 ;;; Code:
 
 (defvar eshell-last-dir-ring)
+(defvar eshell-buffer-name)
 
 (declare-function my/terminal-cd-command "init-funcs" (directory))
 (declare-function my/terminal-home-directory "init-funcs" (&optional directory))
 (declare-function my/terminal-normalize-directory "init-funcs" (directory))
+(declare-function comint-simple-send "comint" (proc string))
 (declare-function ring-elements "ring")
 (declare-function eshell/cd "esh-mode")
+(declare-function eshell-reset "esh-mode")
 (declare-function eshell-grep "em-unix")
 (declare-function vterm "vterm" (&optional buffer-name))
 (declare-function vterm-send-string "vterm")
@@ -56,6 +59,93 @@ Append a trailing return automatically.  RETRIES defaults to
   (setq-local scroll-margin 0)
   (setq-local truncate-lines t)
   (setq-local global-hl-line-mode nil))
+
+(defun my/terminal-context-key (&optional directory)
+  "Return a stable local-or-remote context key for DIRECTORY."
+  (when-let* ((directory (my/terminal-normalize-directory
+                          (or directory default-directory))))
+    (if-let* ((remote-prefix (file-remote-p directory)))
+        (replace-regexp-in-string
+         "[^[:alnum:]@._#-]+"
+         ":"
+         (replace-regexp-in-string "\\`/+\\|:+\\'" "" remote-prefix))
+      "local")))
+
+(defun my/terminal-context-buffer-name (base-name &optional directory)
+  "Return BASE-NAME specialized for DIRECTORY's local-or-remote context."
+  (let ((context-key (my/terminal-context-key directory)))
+    (if (or (null context-key)
+            (string= context-key "local"))
+        base-name
+      (format "%s:%s*"
+              (if (string-suffix-p "*" base-name)
+                  (substring base-name 0 -1)
+                base-name)
+              context-key))))
+
+(defun my/shell--sync-directory (buffer directory)
+  "Change shell BUFFER to DIRECTORY."
+  (when-let* ((buffer (and (buffer-live-p buffer) buffer))
+              (directory (my/terminal-normalize-directory directory))
+              (process (get-buffer-process buffer))
+              ((process-live-p process))
+              (command (my/terminal-cd-command directory)))
+    (with-current-buffer buffer
+      (unless (equal (my/terminal-normalize-directory default-directory)
+                     directory)
+        (setq default-directory directory)
+        (comint-simple-send process command)))))
+
+(defun my/eshell--sync-directory (buffer directory)
+  "Change Eshell BUFFER to DIRECTORY and redraw its prompt."
+  (when-let* ((buffer (and (buffer-live-p buffer) buffer))
+              (directory (my/terminal-normalize-directory directory)))
+    (with-current-buffer buffer
+      (unless (equal (my/terminal-normalize-directory default-directory)
+                     directory)
+        (eshell/cd directory)
+        (setq default-directory directory)
+        (eshell-reset)
+        (goto-char (point-max))))))
+
+(defun my/shell-context-buffer-name (&optional directory)
+  "Return the standard shell buffer name for DIRECTORY."
+  (my/terminal-context-buffer-name "*shell*" directory))
+
+(defun my/shell-popup-buffer-name (&optional directory)
+  "Return the popup shell buffer name for DIRECTORY."
+  (my/terminal-context-buffer-name "*shell-popup*" directory))
+
+(defun my/eshell-context-buffer-name (&optional directory)
+  "Return the standard Eshell buffer name for DIRECTORY."
+  (my/terminal-context-buffer-name "*eshell*" directory))
+
+(defun my/shell-reuse-by-context-a (orig-fn &optional buffer file-name)
+  "Reuse `shell' buffers per local-or-remote context."
+  (if buffer
+      (funcall orig-fn buffer file-name)
+    (let* ((directory (my/terminal-normalize-directory default-directory))
+           (buffer-name (my/shell-context-buffer-name directory))
+           (existing (get-buffer buffer-name))
+           (buffer (funcall orig-fn buffer-name file-name)))
+      (when existing
+        (my/shell--sync-directory buffer directory))
+      buffer)))
+
+(defun my/eshell-reuse-by-context-a (orig-fn &optional arg)
+  "Reuse `eshell' buffers per local-or-remote context.
+Keep the stock prefix-argument behaviour for explicitly creating or selecting
+numbered sessions."
+  (if arg
+      (funcall orig-fn arg)
+    (let* ((directory (my/terminal-normalize-directory default-directory))
+           (buffer-name (my/eshell-context-buffer-name directory))
+           (existing (get-buffer buffer-name))
+           (eshell-buffer-name buffer-name)
+           (buffer (funcall orig-fn nil)))
+      (when existing
+        (my/eshell--sync-directory buffer directory))
+      buffer)))
 
 (defun my/eshell-emacs-state-setup ()
   "Keep eshell out of Evil stateful editing."
@@ -106,6 +196,8 @@ Append a trailing return automatically.  RETRIES defaults to
          (eshell-mode . completion-preview-mode)
          (eshell-mode . my/eshell-emacs-state-setup))
   :config
+  (advice-remove 'eshell #'my/eshell-reuse-by-context-a)
+  (advice-add 'eshell :around #'my/eshell-reuse-by-context-a)
   ;; Prevent accident typing
   (defalias 'eshell/vi 'find-file)
   (defalias 'eshell/vim 'find-file)
@@ -183,20 +275,31 @@ current directory."
   :hook ((shell-mode . shell-mode-common-init)
          (shell-mode . revert-tab-width-to-default))
   :config
+  (advice-remove 'shell #'my/shell-reuse-by-context-a)
+  (advice-add 'shell :around #'my/shell-reuse-by-context-a)
   (defun shell-toggle ()
     "Toggle a persistent shell popup window.
 If popup is visible but unselected, select it.
 If popup is focused, kill it."
     (interactive)
-    (if-let* ((win (get-buffer-window "*shell-popup*")))
-        (if (eq (selected-window) win)
-            ;; If users attempt to delete the sole ordinary window, silence it.
-            (shell-delete-window)
-          (select-window win))
-      (let ((display-buffer-alist '(((category . comint)
-                                     (display-buffer-at-bottom)))))
-        (when-let* ((proc (ignore-errors (get-buffer-process (shell "*shell-popup*")))))
-          (set-process-sentinel proc #'shell-self-destroy-sentinel)))))
+    (let* ((directory (my/terminal-normalize-directory default-directory))
+           (buffer-name (my/shell-popup-buffer-name directory)))
+      (if-let* ((win (get-buffer-window buffer-name)))
+          (if (eq (selected-window) win)
+              ;; If users attempt to delete the sole ordinary window, silence it.
+              (shell-delete-window win)
+            (progn
+              (my/shell--sync-directory (window-buffer win) directory)
+              (select-window win)))
+        (let ((display-buffer-alist '(((category . comint)
+                                       (display-buffer-at-bottom))))
+              (existing (get-buffer buffer-name)))
+          (let ((default-directory directory))
+            (when-let* ((buffer (shell buffer-name)))
+              (when existing
+                (my/shell--sync-directory buffer directory))
+              (when-let* ((proc (ignore-errors (get-buffer-process buffer))))
+                (set-process-sentinel proc #'shell-self-destroy-sentinel))))))))
 
   ;; Correct indentation for `ls'
   (defun revert-tab-width-to-default ()
