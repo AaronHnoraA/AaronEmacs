@@ -3,7 +3,7 @@
 #+DATE: {{month_year}}
 #+LATEX_CLASS: assignment
 #+LATEX_COMPILER: xelatex
-#+OPTIONS: toc:t num:2
+#+OPTIONS: toc:t num:3 H:3
 
 #+LATEX_HEADER: \providecommand{\assignmentinstitution}[1]{}
 #+LATEX_HEADER: \providecommand{\assignmentcoursecode}[1]{}
