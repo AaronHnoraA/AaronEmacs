@@ -54,6 +54,11 @@ directory string or a cons cell of the form (DIRECTORY . DEPTH)."
                  (integer :tag "Depth"))))
   :group 'my/project)
 
+(defcustom my/project-import-project-el-entries nil
+  "Whether `project.el' entries may flow back into the manual project list."
+  :type 'boolean
+  :group 'my/project)
+
 (defconst my/project-state-dir
   (file-name-as-directory
    (expand-file-name "project"
@@ -203,7 +208,8 @@ keep perspective names unique."
 
 (defun my/project-sync-roots-from-project-el ()
   "Sync visible `project.el' roots into Projectile known projects."
-  (when (and (require 'project nil t)
+  (when (and my/project-import-project-el-entries
+             (require 'project nil t)
              (require 'projectile nil t))
     (projectile-known-projects)
     (project--ensure-read-project-list)
@@ -226,7 +232,6 @@ keep perspective names unique."
 (defun my/project-known-projects ()
   "Return known Projectile projects that still exist."
   (when (require 'projectile nil t)
-    (my/project-sync-roots-from-project-el)
     (seq-filter
      (lambda (project-root)
        (and (file-directory-p project-root)
@@ -527,13 +532,22 @@ This matches canonically, so symlinked roots are cleaned as well."
         (project--write-project-list)))))
 
 (defun my/project--remember-dir-visible-only (orig-fn root &rest args)
-  "Only let ORIG-FN remember ROOT when it is not an ignored root.
+  "Only let ORIG-FN remember ROOT when it is explicitly managed here.
 
 Emacs 31 `project--remember-dir' takes optional arguments (NO-WRITE STABLE)."
   ;; Be defensive: some callers may pass non-string roots (e.g. backend tags).
-  (if (and (stringp root) (my/project-hidden-root-p root))
-      nil
-    (apply orig-fn root args)))
+  (let* ((root (and (stringp root) (my/project-normalize-root root)))
+         (managed-p
+          (or (null root)
+              (my/project-hidden-root-p root)
+              (and (require 'projectile nil t)
+                   (projectile-known-projects)
+                   (seq-some
+                    (lambda (known-root)
+                      (my/project-root-equal-p known-root root))
+                    projectile-known-projects)))))
+    (when managed-p
+      (apply orig-fn root args))))
 
 (defun my/show-imenu-target-root ()
   "Return the directory root used by `show-imenu'."

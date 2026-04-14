@@ -150,6 +150,45 @@ confirmation."
   (when-let* ((buf (get-buffer "*compilation*")))
     (pop-to-buffer buf)))
 
+(defun my/delimiter--org-script-range-at-point ()
+  "Return `(OPEN . CLOSE)' for the surrounding Org `^{...}'/`_{...}' at point.
+This works even when `org-appear' hides the braces."
+  (when (derived-mode-p 'org-mode)
+    (save-excursion
+      (let ((origin (point))
+            found)
+        (while (and (not found)
+                    (search-backward "{" nil t))
+          (when (memq (char-before) '(?^ ?_))
+            (let ((open (point)))
+              (let ((close (save-excursion
+                             (goto-char (1+ open))
+                             (search-forward "}" nil t))))
+                (when (and close
+                           (<= origin close)
+                           (> origin open))
+                  (setq found (cons open close)))))))
+        found))))
+
+(defun my/forward-delimiter-dwim ()
+  "Jump forward out of Org script braces or to the next closing delimiter."
+  (interactive)
+  (if-let* ((range (my/delimiter--org-script-range-at-point))
+            (jumped (cdr range)))
+      (goto-char jumped)
+    (unless (re-search-forward "[])}]" nil t)
+      (user-error "No forward closing delimiter found"))))
+
+(defun my/backward-delimiter-dwim ()
+  "Jump backward to Org script opening brace or previous opening delimiter."
+  (interactive)
+  (if-let* ((range (my/delimiter--org-script-range-at-point))
+            (jumped (car range)))
+      (goto-char (1+ jumped))
+    (unless (re-search-backward "[][({]" nil t)
+      (user-error "No backward opening delimiter found"))
+    (forward-char 1)))
+
 (defun my/evil-global-leader-set (key command &optional replacement)
   "Bind COMMAND to `SPC KEY' in Evil normal state.
 When REPLACEMENT is non-nil, register it with Which-Key."
@@ -186,6 +225,8 @@ If any function returns non-nil, later hooks are skipped.")
           (setq this-command 'keyboard-quit)))))))
 
 (global-set-key [remap keyboard-quit] #'my/escape)
+(global-set-key (kbd "M-]") #'my/forward-delimiter-dwim)
+(global-set-key (kbd "M-[") #'my/backward-delimiter-dwim)
 
 (with-eval-after-load 'eldoc
   (eldoc-add-command 'my/escape))

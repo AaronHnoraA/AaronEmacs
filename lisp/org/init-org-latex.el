@@ -1033,6 +1033,17 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   (interactive)
   (my/org-latex-cancel-pending-renders))
 
+(defun my/org-latex-preview-visible-initial (buffer)
+  "Trigger one visible-area LaTeX preview for BUFFER once it is displayable."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when-let* (((derived-mode-p 'org-mode))
+                  (window (get-buffer-window buffer t)))
+        ;; Force one initial render path instead of waiting for the first
+        ;; scroll-driven debounce cycle.
+        (setq my/org-latex--last-preview-range nil)
+        (my/org-latex-preview-visible-now window)))))
+
 (defun my/org-fragtog-enable-frag-advice (orig frag)
   "Make `org-fragtog' re-enable FRAG through async preview."
   (if (not (my/org-latex--async-preview-active-p))
@@ -1057,7 +1068,10 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
                 (my/org-latex-preview-visible-debounced
                  (get-buffer-window (current-buffer) t)))
               nil t)
-    (add-hook 'kill-buffer-hook #'my/org-latex-cleanup-scroll-preview nil t)))
+    (add-hook 'kill-buffer-hook #'my/org-latex-cleanup-scroll-preview nil t)
+    (run-with-idle-timer 0.15 nil
+                         #'my/org-latex-preview-visible-initial
+                         (current-buffer))))
 
 (add-hook 'org-mode-hook #'my/org-latex-enable-scroll-preview)
 

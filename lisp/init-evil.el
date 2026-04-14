@@ -19,6 +19,8 @@
 (declare-function my/bookmark-set-no-overwrite "init-windows")
 (declare-function my/bookmark-set-line "init-windows")
 (declare-function my/bookmark-toggle-line "init-windows")
+(declare-function avy-goto-char-in-line "avy" (&optional arg))
+(declare-function avy-goto-char-timer "avy" (&optional arg))
 (declare-function evil-force-normal-state "evil")
 (declare-function evil-save-state "evil")
 
@@ -96,6 +98,35 @@
     (with-current-buffer buffer
       (my/evil-sync-shift-width))))
 
+(defun my/evil-avy-goto-char-in-line (&optional arg)
+  "Jump to a character on the current line using `avy'."
+  (interactive "P")
+  (unless (require 'avy nil t)
+    (user-error "Avy is unavailable"))
+  (avy-goto-char-in-line arg))
+
+(defun my/evil-avy-goto-char-timer (&optional arg)
+  "Jump using timed `avy' input."
+  (interactive "P")
+  (unless (require 'avy nil t)
+    (user-error "Avy is unavailable"))
+  (avy-goto-char-timer arg))
+
+(defun my/evil-recover ()
+  "Re-enable Evil globally and refresh local state in existing buffers."
+  (interactive)
+  (unless (featurep 'evil)
+    (require 'evil))
+  (evil-mode 1)
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (when (and (boundp 'evil-local-mode)
+                 (not (minibufferp buffer))
+                 (not evil-local-mode))
+        (evil-local-mode 1))
+      (my/evil-sync-shift-width)))
+  (message "Evil recovered"))
+
 (use-package evil
   :ensure t
   :demand t
@@ -108,7 +139,7 @@
   :bind (([remap evil-quit] . kill-current-buffer)
          :map evil-motion-state-map
          ([escape] . my/escape)
-         ("f" . evil-avy-goto-char-in-line)
+         ("f" . my/evil-avy-goto-char-in-line)
          :map evil-normal-state-map
          ([escape] . my/escape)
          :map evil-visual-state-map
@@ -122,7 +153,7 @@
          :map evil-replace-state-map
          ([escape] . my/escape)
          :map evil-normal-state-map
-         ("s" . evil-avy-goto-char-timer))
+         ("s" . my/evil-avy-goto-char-timer))
   :config
   (unless (bound-and-true-p evil-mode)
     (evil-mode 1))
@@ -238,6 +269,7 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       ;; quit
       "q"  '(:wk "quit")
       "qq" 'save-buffers-kill-terminal
+      "qE" 'my/evil-recover
 
       ;; file
       "f"  '(:wk "files")
