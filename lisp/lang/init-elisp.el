@@ -16,6 +16,7 @@
 (declare-function flymake-start "flymake" (&optional report-fn))
 (declare-function elisp-flymake-byte-compile "elisp-mode" (report-fn &rest args))
 (declare-function elisp-flymake-checkdoc "elisp-mode" (report-fn &rest args))
+(declare-function lsp-activate-on "lsp-mode" (&rest languages))
 (declare-function lsp-deferred "lsp-mode")
 (declare-function lsp-register-client "lsp-mode" (client))
 (declare-function lsp-stdio-connection "lsp-mode" (command &optional test-command))
@@ -110,6 +111,18 @@ the already-installed ELPA package."
              "  (elsa-lsp-stdin-loop))")
            "\n"))))
 
+(defun my/elisp-register-elsa-lsp-client ()
+  "Register the Elsa LSP client without loading Elsa into the main Emacs."
+  (when (locate-library "elsa-lsp")
+    (add-to-list 'lsp-language-id-configuration '(emacs-lisp-mode . "emacs-lisp"))
+    (lsp-register-client
+     (make-lsp-client
+      :new-connection (lsp-stdio-connection #'my/elisp-elsa-lsp-command)
+      :activation-fn (lsp-activate-on "emacs-lisp")
+      :major-modes '(emacs-lisp-mode)
+      :priority 2
+      :server-id 'elsa-lsp))))
+
 (defun my/elisp-lsp-ensure ()
   "Start Elsa LSP for the current Emacs Lisp file buffer."
   (when (and buffer-file-name
@@ -134,20 +147,10 @@ the already-installed ELPA package."
              (my/elisp-lsp-ensure))))
        buffer))))
 
-(use-package elsa-lsp
-  :ensure nil
-  :if (locate-library "elsa-lsp")
-  :after lsp-mode
-  :demand t
-  :config
-  (add-to-list 'lsp-language-id-configuration '(emacs-lisp-mode . "emacs-lisp"))
-  (lsp-register-client
-   (make-lsp-client
-    :new-connection (lsp-stdio-connection #'my/elisp-elsa-lsp-command)
-    :major-modes '(emacs-lisp-mode)
-    :priority 2
-    :server-id 'elsa-lsp))
-  (add-hook 'emacs-lisp-mode-hook #'my/elisp-lsp-ensure-deferred))
+(with-eval-after-load 'lsp-mode
+  (my/elisp-register-elsa-lsp-client))
+
+(add-hook 'emacs-lisp-mode-hook #'my/elisp-lsp-ensure-deferred)
 
 
 
