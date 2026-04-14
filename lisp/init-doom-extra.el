@@ -12,54 +12,12 @@
 (declare-function editorconfig-find-current-editorconfig "editorconfig")
 (declare-function link-hint-copy-link "link-hint" ())
 (declare-function link-hint-open-link "link-hint" ())
-(declare-function yas-abort-snippet "yasnippet" ())
-(declare-function yas-expand-snippet "yasnippet" (content &optional start end expand-env))
-(declare-function yas-lookup-snippet "yasnippet" (name &optional mode noerror))
-(declare-function yas-reload-all "yasnippet" (&optional no-jit interactive))
 
 (defvar vertico-map)
 
 (defgroup my/doom-extra nil
   "Doom-inspired UI and editing enhancements."
   :group 'convenience)
-
-(defcustom my/file-templates-directory
-  (expand-file-name "doomemacs/modules/editor/file-templates/templates"
-                    user-emacs-directory)
-  "Directory containing Yasnippet-based file templates."
-  :type 'directory
-  :group 'my/doom-extra)
-
-(defcustom my/file-template-enabled nil
-  "Whether to enable the legacy Yasnippet-backed file template system.
-
-This config also ships a simpler `auto-insert' based system in
-`lisp/init-auto-insert.el'.  Keep this off to avoid template double-insertion."
-  :type 'boolean
-  :group 'my/doom-extra)
-
-(defconst my/file-template-rules
-  '(("/main\\.c\\(?:c\\|pp\\)\\'" :mode c++-mode :trigger "__main.cpp")
-    ("/win32_\\.c\\(?:c\\|pp\\)\\'" :mode c++-mode :trigger "__winmain.cpp")
-    ("\\.c\\(?:c\\|pp\\)\\'" :mode c++-mode :trigger "__cpp")
-    ("\\.h\\(?:h\\|pp\\|xx\\)\\'" :mode c++-mode :trigger "__hpp")
-    ("\\.h\\'" :mode c-mode :trigger "__h")
-    (c-mode :trigger "__c")
-    ("/main\\.go\\'" :mode go-mode :trigger "__main.go")
-    (go-mode :trigger "__.go")
-    ("\\.html\\'" :mode web-mode :trigger "__.html")
-    (markdown-mode :trigger "__")
-    (nxml-mode :trigger "__")
-    (python-mode :trigger "__")
-    ("/main\\.rs\\'" :mode rust-mode :trigger "__main.rs")
-    ("/Cargo\\.toml\\'" :mode rust-mode :trigger "__Cargo.toml")
-    ("/package\\.json\\'" :mode json-mode :trigger "__package.json")
-    ("/bower\\.json\\'" :mode json-mode :trigger "__bower.json")
-    ("\\.zunit\\'" :mode sh-mode :trigger "__zunit")
-    (sh-mode :trigger "__")
-    (org-mode :trigger "__")
-    ("\\.el\\'" :mode emacs-lisp-mode :trigger "__package"))
-  "Subset of Doom file template rules adapted to this config.")
 
 (defconst my/dtrt-indent-excluded-modes
   '(pascal-mode
@@ -256,70 +214,6 @@ This config also ships a simpler `auto-insert' based system in
       (kill-buffer))
     (revert-buffer t t)
     (message "Saved %s as root" buffer-file-name)))
-
-(defun my/file-template--available-p ()
-  "Return non-nil when file templates can be expanded."
-  (and my/file-template-enabled
-       (file-directory-p my/file-templates-directory)
-       (featurep 'yasnippet)))
-
-(defun my/file-template--match-p (predicate)
-  "Return non-nil when PREDICATE matches the current buffer."
-  (cond
-   ((symbolp predicate)
-    (or (eq major-mode predicate)
-        (derived-mode-p predicate)))
-   ((and (stringp predicate) buffer-file-name)
-    (string-match-p predicate buffer-file-name))
-   (t nil)))
-
-(defun my/file-template-rule ()
-  "Return the first applicable file template rule for the current buffer."
-  (cl-find-if (lambda (rule)
-                (my/file-template--match-p (car rule)))
-              my/file-template-rules))
-
-(defun my/file-template-apply ()
-  "Expand a Yasnippet-backed file template for the current buffer."
-  (interactive)
-  (unless (my/file-template--available-p)
-    (user-error "File templates are unavailable"))
-  (when-let* ((rule (my/file-template-rule))
-              (mode (or (plist-get (cdr rule) :mode) major-mode))
-              (trigger (or (plist-get (cdr rule) :trigger) "__"))
-              (snippet (yas-lookup-snippet trigger mode 'noerror)))
-    (let ((yas-indent-line 'fixed))
-      (yas-expand-snippet snippet (point-min) (point-max))
-      t)))
-
-(defun my/file-template-check-h ()
-  "Apply a file template when opening a new, empty file."
-  (when (and (my/file-template--available-p)
-             buffer-file-name
-             (not buffer-read-only)
-             (bobp) (eobp)
-             (not (file-exists-p buffer-file-name))
-             (not (buffer-modified-p))
-             (null (buffer-base-buffer))
-             (not (bound-and-true-p org-capture-current-plist))
-             (not (member (substring (buffer-name) 0 1) '("*" " "))))
-    (my/file-template-apply)))
-
-(defun my/file-template-debug ()
-  "Report the matching template rule for the current buffer."
-  (interactive)
-  (if-let* ((rule (my/file-template-rule)))
-      (message "File template: %S" rule)
-    (message "File template: none")))
-
-(with-eval-after-load 'yasnippet
-  (when (and my/file-template-enabled
-             (file-directory-p my/file-templates-directory))
-    (add-to-list 'yas-snippet-dirs my/file-templates-directory 'append #'eq)
-    (yas-reload-all))
-  (when my/file-template-enabled
-    (add-hook 'find-file-hook #'my/file-template-check-h)
-    (add-hook 'my/escape-hook #'yas-abort-snippet)))
 
 (my/evil-global-leader-set "f d" #'consult-dir "consult dir")
 (my/evil-global-leader-set "f u" #'my/sudo-find-file "sudo find file")

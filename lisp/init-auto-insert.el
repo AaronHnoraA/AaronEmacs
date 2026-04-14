@@ -218,11 +218,23 @@ template filename under templates/KIND/."
     (erase-buffer))
   (my/auto-insert--insert-template-file (my/template--path kind template)))
 
+(defun my/template--auto-insert-allowed-p ()
+  "Return non-nil when `auto-insert-mode' should insert templates here."
+  (and buffer-file-name
+       (not buffer-read-only)
+       (bobp) (eobp)
+       (not (file-exists-p buffer-file-name))
+       (not (buffer-modified-p))
+       (null (buffer-base-buffer))
+       (not (bound-and-true-p org-capture-current-plist))
+       (not (member (substring (buffer-name) 0 1) '("*" " ")))))
+
 (defun my/template-auto-insert (kind &optional template)
   "Auto-insert template for KIND when enabled.
 
 When TEMPLATE is non-nil, insert that exact template file under templates/KIND/."
-  (when (and my/template-auto-insert-enabled
+  (when (and (my/template--auto-insert-allowed-p)
+             my/template-auto-insert-enabled
              (memq kind my/template-auto-insert-enabled-kinds))
     (my/template-apply kind nil template)))
 

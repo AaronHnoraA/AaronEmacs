@@ -319,4 +319,4 @@ emacs --debug-init -q -l ./bootstrap.el
 说明：
 
 - `my/template-current-override` 只接受“文件名”（不能带路径分隔符），指向 `templates/<kind>/` 下的模板文件
-- 这套是内置 `auto-insert`；如果你之前用过 Doom 那套 Yasnippet file-templates，本配置默认已把它关掉避免重复插入（见 [lisp/init-doom-extra.el](../lisp/init-doom-extra.el) 里的 `my/file-template-enabled`）
+- 新建文件模板只保留这一套内置 `auto-insert`（已移除 Doom 那套 Yasnippet file-templates 的遗留实现，避免重复/分叉维护）
