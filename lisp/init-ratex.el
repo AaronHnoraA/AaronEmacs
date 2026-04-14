@@ -3,23 +3,26 @@
 ;;; Commentary:
 ;;
 ;; Use ratex.el as an edit-time popup preview backend for Org math fragments.
-;; Keep the existing XeLaTeX export pipeline intact, but disable the in-buffer
-;; Org preview overlays in buffers where RaTeX takes over.
+;; Keep the existing Org/XeLaTeX preview pipeline intact and only add RaTeX's
+;; edit-time popup, so Org overlays and RaTeX can coexist.
 
 ;;; Code:
 
-(declare-function org-clear-latex-preview "org" (&optional beg end))
-(declare-function org-fragtog-mode "org-fragtog" (&optional arg))
 (declare-function ratex-mode "ratex" (&optional arg))
 
 (defvar my/org-latex--allow-native-preview)
 (defvar ratex-auto-download-backend)
 (defvar ratex-backend-root)
 (defvar ratex-edit-preview)
+(defvar ratex-debug)
+(defvar ratex-font-size)
 (defvar ratex-font-dir)
+(defvar ratex-hide-source-while-preview)
 (defvar ratex-inline-preview)
 (defvar ratex-posframe-background-color)
 (defvar ratex-posframe-border-color)
+(defvar ratex-render-cache-limit)
+(defvar ratex-render-cache-ttl)
 (defvar ratex-render-color)
 
 (defconst my/ratex-root
@@ -34,20 +37,13 @@
   "Return non-nil when the local ratex.el checkout is available."
   (file-directory-p (expand-file-name "lisp" my/ratex-root)))
 
-(defun my/org-ratex-disable-other-preview-systems ()
-  "Disable Org math preview systems that would conflict with RaTeX."
-  (setq-local my/org-latex--allow-native-preview t)
-  (when (fboundp 'org-fragtog-mode)
-    (org-fragtog-mode -1))
-  (when (fboundp 'org-clear-latex-preview)
-    (org-clear-latex-preview (point-min) (point-max))))
-
 (defun my/org-ratex-enable ()
-  "Enable popup-only RaTeX previews in the current Org buffer."
+  "Enable popup-only RaTeX previews alongside Org previews."
   (when (and (my/org-ratex-available-p)
              (display-graphic-p)
              (derived-mode-p 'org-mode))
-    (my/org-ratex-disable-other-preview-systems)
+    ;; Keep Org's async preview stack active; RaTeX only adds the edit popup.
+    (setq-local my/org-latex--allow-native-preview nil)
     (ratex-mode 1)))
 
 (use-package ratex
@@ -60,12 +56,19 @@
   :init
   (setq ratex-backend-root my/ratex-root
         ratex-font-dir my/ratex-font-dir
+        ratex-font-size 24.0
         ratex-edit-preview 'posframe
+        ratex-debug nil
+        ratex-hide-source-while-preview nil
         ratex-inline-preview nil
+        ratex-render-cache-limit 24
+        ratex-render-cache-ttl 60
         ratex-auto-download-backend t
         ratex-render-color "#d8dee9"
-        ratex-posframe-background-color "#16181d"
-        ratex-posframe-border-color "#3b4252")
+        ratex-posframe-background-color "#2b3140"
+        ratex-posframe-border-color "#5f6f8f"
+        ratex-posframe-poshandler
+        #'ratex-posframe-poshandler-point-top-left-corner-offset)
   :hook (org-mode . my/org-ratex-enable))
 
 (provide 'init-ratex)

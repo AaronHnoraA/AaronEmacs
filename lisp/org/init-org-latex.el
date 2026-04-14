@@ -718,6 +718,8 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   "Collect LaTeX fragments between BEG and END."
   (let ((math-regexp "\\$\\|\\\\[([]\\|^[ \t]*\\\\begin{[A-Za-z0-9*]+}")
         fragments)
+    (setq beg (max (point-min) (min beg end)))
+    (setq end (min (point-max) (max beg end)))
     (when (< beg end)
       (save-excursion
         (goto-char beg)
@@ -738,7 +740,9 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
                 (push (my/org-latex--fragment-spec
                        source-beg source-end source-value render-value)
                       fragments)
-                (goto-char (max (point) source-end))))))
+                ;; Keep point within the original search bound for the next
+                ;; `re-search-forward'; large fragments may extend past END.
+                (goto-char (min end (max (point) source-end)))))))
         (nreverse fragments)))))
 
 (defun my/org-latex--cleanup-job-files (job)
@@ -932,8 +936,11 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
 
 (defun my/org-latex--preview-range (beg end)
   "Queue LaTeX preview work between BEG and END."
-  (dolist (spec (my/org-latex--collect-fragments beg end))
-    (my/org-latex--enqueue-fragment spec)))
+  (setq beg (max (point-min) (min beg end)))
+  (setq end (min (point-max) (max beg end)))
+  (when (< beg end)
+    (dolist (spec (my/org-latex--collect-fragments beg end))
+      (my/org-latex--enqueue-fragment spec))))
 
 (defun my/org-latex--section-range ()
   "Return the current Org section range as (BEG . END)."
@@ -1048,7 +1055,11 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
         ;; Force one initial render path instead of waiting for the first
         ;; scroll-driven debounce cycle.
         (setq my/org-latex--last-preview-range nil)
-        (my/org-latex-preview-visible-now window)))))
+        (condition-case err
+            (my/org-latex-preview-visible-now window)
+          (error
+           (message "Org LaTeX initial preview skipped: %s"
+                    (error-message-string err))))))))
 
 (defun my/org-fragtog-enable-frag-advice (orig frag)
   "Make `org-fragtog' re-enable FRAG through async preview."

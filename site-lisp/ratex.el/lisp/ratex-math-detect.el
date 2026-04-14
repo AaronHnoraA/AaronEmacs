@@ -3,6 +3,8 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr-x)
+(require 'ratex-core)
 
 (defconst ratex--delimiter-pairs
   '(("\\[" . "\\]")
@@ -11,15 +13,19 @@
 (defconst ratex--math-environments
   '("equation" "equation*"
     "displaymath"
+    "math" "math*"
     "align" "align*"
     "alignat" "alignat*"
     "gather" "gather*"
     "multline" "multline*"
     "flalign" "flalign*"
-    "cases"
+    "eqnarray" "eqnarray*"
+    "subequations"
+    "cases" "dcases"
     "matrix" "pmatrix" "bmatrix" "Bmatrix" "vmatrix" "Vmatrix"
     "smallmatrix"
-    "split" "aligned" "alignedat" "array")
+    "split" "aligned" "alignedat" "array"
+    "dmath" "dmath*" "dseries" "dseries*" "dgroup" "dgroup*")
   "Math environments that should be previewed by RaTeX.")
 
 (defconst ratex--active-fragment-preferred-opens
@@ -28,26 +34,106 @@
 
 (defun ratex-fragments-in-buffer ()
   "Return all math fragments in the current buffer."
-  (let (all)
+  (let ((org-fragments (ratex--org-fragments-in-buffer))
+        all)
     (dolist (pair ratex--delimiter-pairs)
       (setq all (nconc all (ratex--fragments-with-delimiters (car pair) (cdr pair)))))
     (setq all (nconc all (ratex--environment-fragments-in-buffer)))
-    (ratex--select-non-overlapping-fragments all)))
+    (ratex--select-non-overlapping-fragments (nconc org-fragments all))))
 
 (defun ratex-fragment-at-point ()
   "Return the math fragment around point as a plist.
 
 The plist contains `:begin', `:end' and `:content' when a fragment is found."
-  (unless (ratex--code-context-at-p (point))
-    (let* ((candidates
-            (nconc
-             (cl-loop for (open . close) in ratex--delimiter-pairs
-                      nconc (ratex--fragments-with-delimiters-at-point open close))
-             (ratex--environment-fragments-at-point)))
-           (preferred
-            (cl-remove-if-not #'ratex--preferred-active-fragment-p candidates)))
-      (or (ratex--largest-fragment preferred)
-          (ratex--largest-fragment candidates)))))
+  (let ((fragment
+         (unless (ratex--code-context-at-p (point))
+           (let* ((candidates
+                   (append
+                    (when-let* ((org-fragment (ratex--org-fragment-at-point)))
+                      (list org-fragment))
+                    (cl-loop for (open . close) in ratex--delimiter-pairs
+                             nconc (ratex--fragments-with-delimiters-at-point open close))
+                    (ratex--environment-fragments-at-point)))
+                  (preferred
+                   (cl-remove-if-not #'ratex--preferred-active-fragment-p candidates)))
+             (or (ratex--largest-fragment preferred)
+                 (ratex--largest-fragment candidates))))))
+    (ratex-debug-log "fragment-at-point pos=%s mode=%s fragment=%S"
+                     (point) major-mode fragment)
+    fragment))
+
+(defun ratex--org-fragment-at-point ()
+  "Return Org LaTeX fragment at point as a RaTeX plist, or nil."
+  (when (derived-mode-p 'org-mode)
+    (require 'org-element)
+    (let* ((datum (org-element-context))
+           (target (or (org-element-lineage datum '(latex-fragment latex-environment) t)
+                       datum)))
+      (ratex-debug-log "org-element-context type=%S begin=%S end=%S value=%S"
+                       (org-element-type target)
+                       (ignore-errors (org-element-property :begin target))
+                       (ignore-errors (org-element-property :end target))
+                       (ignore-errors (org-element-property :value target)))
+      (when (memq (org-element-type target) '(latex-fragment latex-environment))
+        (ratex--org-element-to-fragment target)))))
+
+(defun ratex--org-fragments-in-buffer ()
+  "Return all Org LaTeX fragments in the current buffer, or nil outside Org."
+  (when (derived-mode-p 'org-mode)
+    (require 'org-element)
+    (let (fragments)
+      (org-element-map (org-element-parse-buffer) '(latex-fragment latex-environment)
+        (lambda (datum)
+          (when-let ((fragment (ratex--org-element-to-fragment datum)))
+            (push fragment fragments))))
+      (nreverse fragments))))
+
+(defun ratex--org-element-to-fragment (datum)
+  "Convert Org LaTeX DATUM to the plist shape expected by RaTeX."
+  (let* ((type (org-element-type datum))
+         (begin (org-element-property :begin datum))
+         (end (save-excursion
+                (goto-char (org-element-property :end datum))
+                (skip-chars-backward " \r\t\n")
+                (point)))
+         (value (buffer-substring-no-properties begin end)))
+    (pcase type
+      ('latex-environment
+       (let ((env (ratex--org-latex-environment-name value)))
+         (when (and env (member env ratex--math-environments))
+           (list :begin begin
+                 :end end
+                 :content value
+                 :open (format "\\begin{%s}" env)
+                 :close (format "\\end{%s}" env)
+                 :environment env))))
+      ('latex-fragment
+       (pcase-let ((`(,open ,content ,close) (ratex--split-delimited-fragment value)))
+         (list :begin begin
+               :end end
+               :content content
+               :open open
+               :close close)))
+      (_ nil))))
+
+(defun ratex--org-latex-environment-name (value)
+  "Extract environment name from Org LaTeX environment VALUE."
+  (when (string-match "\\`\\\\begin{\\([^}]+\\)}" value)
+    (match-string 1 value)))
+
+(defun ratex--split-delimited-fragment (value)
+  "Split VALUE into (OPEN CONTENT CLOSE) for common math delimiters."
+  (cond
+   ((and (string-prefix-p "\\[" value) (string-suffix-p "\\]" value))
+    (list "\\[" (string-trim (substring value 2 -2)) "\\]"))
+   ((and (string-prefix-p "\\(" value) (string-suffix-p "\\)" value))
+    (list "\\(" (string-trim (substring value 2 -2)) "\\)"))
+   ((and (string-prefix-p "$$" value) (string-suffix-p "$$" value))
+    (list "$$" (string-trim (substring value 2 -2)) "$$"))
+   ((and (string-prefix-p "$" value) (string-suffix-p "$" value))
+    (list "$" (string-trim (substring value 1 -1)) "$"))
+   (t
+    (list "" (string-trim value) ""))))
 
 (defun ratex--fragment-with-delimiters (open close)
   "Return fragment bounded by OPEN and CLOSE around point."
@@ -56,6 +142,7 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
           (open-len (length open))
           (close-len (length close))
           fragment)
+      (goto-char (min (point-max) (+ pos open-len)))
       (while (and (not fragment) (search-backward open nil t))
         (let ((begin (point)))
           (if (or (ratex--escaped-at-p begin)
@@ -72,8 +159,8 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
                     (setq found-end (point))
                     (setq content-end end-start))))
               (if (and found-end
-                       (<= content-begin pos)
-                       (<= pos content-end))
+                       (<= begin pos)
+                       (< pos found-end))
                   (setq fragment
                         (list :begin begin
                               :end found-end
@@ -121,6 +208,7 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
           (open-len (length open))
           (close-len (length close))
           fragments)
+      (goto-char (min (point-max) (+ pos open-len)))
       (while (search-backward open nil t)
         (let ((begin (point)))
           (if (or (ratex--escaped-at-p begin)
@@ -137,8 +225,8 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
                     (setq found-end (point))
                     (setq content-end end-start))))
               (when (and found-end
-                         (<= content-begin pos)
-                         (<= pos content-end))
+                         (<= begin pos)
+                         (< pos found-end))
                 (push (list :begin begin
                             :end found-end
                             :content (buffer-substring-no-properties

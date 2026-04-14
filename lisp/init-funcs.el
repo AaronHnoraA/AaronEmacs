@@ -242,7 +242,14 @@ If any function returns non-nil, later hooks are skipped.")
         (when interactive
           (setq this-command 'keyboard-quit)))))))
 
+(defun my/confirm-quit-emacs ()
+  "Quit Emacs after asking for confirmation."
+  (interactive)
+  (when (yes-or-no-p "Quit Emacs? ")
+    (save-buffers-kill-terminal)))
+
 (global-set-key [remap keyboard-quit] #'my/escape)
+(global-set-key (kbd "M-q") #'my/confirm-quit-emacs)
 (global-set-key (kbd "M-]") #'my/forward-delimiter-dwim)
 (global-set-key (kbd "M-[") #'my/backward-delimiter-dwim)
 

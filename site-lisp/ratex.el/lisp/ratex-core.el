@@ -99,6 +99,22 @@ Use nil to keep backend defaults."
   "Poshandler function used to place the RaTeX posframe preview."
   :type 'function)
 
+(defcustom ratex-hide-source-while-preview nil
+  "Whether to hide the source text while the edit preview is visible."
+  :type 'boolean)
+
+(defcustom ratex-debug nil
+  "When non-nil, append runtime diagnostics to the RaTeX debug buffer."
+  :type 'boolean)
+
+(defcustom ratex-render-cache-limit 32
+  "Maximum number of in-memory render results kept per buffer."
+  :type 'integer)
+
+(defcustom ratex-render-cache-ttl 90
+  "Seconds an unused in-memory render result may live before cleanup."
+  :type 'integer)
+
 (defvar ratex--process nil)
 (defvar ratex--process-buffer " *ratex-backend*")
 (defvar ratex--pending (make-hash-table :test #'eql))
@@ -107,6 +123,28 @@ Use nil to keep backend defaults."
 (defvar ratex--startup-warned nil)
 (defvar ratex--startup-callbacks nil)
 (defvar ratex--download-in-progress nil)
+(defconst ratex--debug-buffer-name "*RaTeX Debug*")
+
+(defun ratex-debug-log (format-string &rest args)
+  "Append a formatted debug line using FORMAT-STRING and ARGS."
+  (when ratex-debug
+    (with-current-buffer (get-buffer-create ratex--debug-buffer-name)
+      (goto-char (point-max))
+      (insert
+       (format-time-string "[%H:%M:%S.%3N] ")
+       (apply #'format format-string args)
+       "\n"))))
+
+(defun ratex-debug-open-buffer ()
+  "Open the RaTeX debug buffer."
+  (interactive)
+  (display-buffer (get-buffer-create ratex--debug-buffer-name)))
+
+(defun ratex-debug-close-buffer ()
+  "Close the RaTeX debug buffer if it exists."
+  (interactive)
+  (when-let* ((buffer (get-buffer ratex--debug-buffer-name)))
+    (kill-buffer buffer)))
 
 (defun ratex-root ()
   "Return the installed root directory of ratex.el."
@@ -125,6 +163,7 @@ Use nil to keep backend defaults."
 When CALLBACK is non-nil, invoke it with the live process once startup succeeds."
   (cond
    ((ratex-backend-live-p)
+    (ratex-debug-log "backend already live")
     (when callback
       (funcall callback ratex--process))
     ratex--process)
@@ -135,6 +174,7 @@ When CALLBACK is non-nil, invoke it with the live process once startup succeeds.
    ((ratex--backend-ready-p)
     (condition-case err
         (progn
+          (ratex-debug-log "launch backend: %s" (ratex--backend-binary-path))
           (ratex--launch-backend)
           (when callback
             (funcall callback ratex--process))
@@ -142,6 +182,8 @@ When CALLBACK is non-nil, invoke it with the live process once startup succeeds.
       (error
        (if ratex-auto-download-backend
            (progn
+             (ratex-debug-log "backend launch failed; redownload: %s"
+                              (error-message-string err))
              (ratex--delete-backend-binary)
              (when callback
                (push callback ratex--startup-callbacks))
@@ -151,6 +193,7 @@ When CALLBACK is non-nil, invoke it with the live process once startup succeeds.
                   (error-message-string err)))
          nil))))
    (ratex-auto-download-backend
+    (ratex-debug-log "backend missing; start download")
     (when callback
       (push callback ratex--startup-callbacks))
     (ratex--download-backend-async)
@@ -163,6 +206,7 @@ When CALLBACK is non-nil, invoke it with the live process once startup succeeds.
   "Stop the backend process."
   (interactive)
   (when (ratex-backend-live-p)
+    (ratex-debug-log "stop backend")
     (delete-process ratex--process))
   (setq ratex--process nil))
 
@@ -266,9 +310,13 @@ instead of downloading a pre-built binary."
         (origin-buffer (current-buffer))
         (data nil))
     (setq data (append (list (cons 'id id)) payload))
+    (ratex-debug-log "request #%s buffer=%s payload=%S"
+                     id (buffer-name origin-buffer) data)
     (puthash
      id
      (lambda (response)
+       (ratex-debug-log "callback #%s buffer-live=%s response=%S"
+                        id (buffer-live-p origin-buffer) response)
        (when (buffer-live-p origin-buffer)
          (with-current-buffer origin-buffer
            (funcall callback response))))
@@ -285,6 +333,7 @@ instead of downloading a pre-built binary."
 
 (defun ratex--process-filter (_proc chunk)
   "Process backend output CHUNK."
+  (ratex-debug-log "backend chunk=%S" chunk)
   (setq ratex--read-buffer (concat ratex--read-buffer chunk))
   (let (line)
     (while (string-match "\n" ratex--read-buffer)
@@ -295,6 +344,7 @@ instead of downloading a pre-built binary."
 
 (defun ratex--dispatch-line (line)
   "Dispatch one backend output LINE."
+  (ratex-debug-log "dispatch line=%s" line)
   (let* ((json-object-type 'alist)
          (json-key-type 'symbol)
          (json-array-type 'list)
@@ -309,6 +359,7 @@ instead of downloading a pre-built binary."
 
 (defun ratex--process-sentinel (proc event)
   "Handle backend PROC EVENT."
+  (ratex-debug-log "process sentinel live=%s event=%s" (process-live-p proc) (string-trim event))
   (unless (process-live-p proc)
     (maphash
      (lambda (_id callback)
@@ -325,6 +376,7 @@ instead of downloading a pre-built binary."
       (error "RaTeX backend binary does not exist: %s" binary))
     (ratex--validate-backend-file binary)
     (setq ratex--read-buffer "")
+    (ratex-debug-log "make-process backend binary=%s cwd=%s" binary default-directory)
     (setq ratex--process
           (make-process
            :name "ratex-backend"

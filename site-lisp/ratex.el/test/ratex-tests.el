@@ -52,6 +52,57 @@
     (let ((fragment (ratex-fragment-at-point)))
       (should (equal (plist-get fragment :content) "x+1")))))
 
+(ert-deftest ratex-detects-org-inline-fragment-via-org-element ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "a \\(x+1\\) b")
+    (goto-char 7)
+    (let ((fragment (ratex-fragment-at-point)))
+      (should fragment)
+      (should (equal (plist-get fragment :open) "\\("))
+      (should (equal (plist-get fragment :content) "x+1")))))
+
+(ert-deftest ratex-detects-org-bracket-fragment-via-org-element ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "a \\[x+1\\] b")
+    (goto-char 7)
+    (let ((fragment (ratex-fragment-at-point)))
+      (should fragment)
+      (should (equal (plist-get fragment :open) "\\["))
+      (should (equal (plist-get fragment :content) "x+1")))))
+
+(ert-deftest ratex-detects-org-multiline-bracket-fragment ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "a\n\\[\nx+1\n\\]\nb")
+    (goto-char (point-min))
+    (search-forward "x+1")
+    (let ((fragment (ratex-fragment-at-point)))
+      (should fragment)
+      (should (equal (plist-get fragment :open) "\\["))
+      (should (equal (plist-get fragment :content) "x+1")))))
+
+(ert-deftest ratex-ignores-non-math-org-latex-environment ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "\\begin{enumerate}\n  \\item Compute \\(x+1\\).\n\\end{enumerate}\n")
+    (goto-char (point-min))
+    (search-forward "x+1")
+    (let ((fragment (ratex--org-fragment-at-point)))
+      (should-not fragment))))
+
+(ert-deftest ratex-detects-math-org-latex-environment-from-inner-point ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "\\begin{align}\na &= b + c \\\\\nd &= e\n\\end{align}\n")
+    (goto-char (point-min))
+    (search-forward "b + c")
+    (let ((fragment (ratex--org-fragment-at-point)))
+      (should fragment)
+      (should (equal (plist-get fragment :environment) "align"))
+      (should (string-prefix-p "\\begin{align}" (plist-get fragment :content))))))
+
 (ert-deftest ratex-fragment-at-point-prefers-largest-bracketed-fragment ()
   (with-temp-buffer
     (insert "\\[ a + \\(b\\) \\]")
@@ -59,6 +110,19 @@
     (let ((fragment (ratex-fragment-at-point)))
       (should (equal (plist-get fragment :open) "\\["))
       (should (equal (plist-get fragment :content) " a + \\(b\\) ")))))
+
+(ert-deftest ratex-fragment-at-point-detects-bracket-on-delimiter ()
+  (with-temp-buffer
+    (insert "\\[\na+b\n\\]")
+    (goto-char (point-min))
+    (let ((fragment (ratex-fragment-at-point)))
+      (should fragment)
+      (should (equal (plist-get fragment :open) "\\[")))
+    (goto-char (point-max))
+    (backward-char 2)
+    (let ((fragment (ratex-fragment-at-point)))
+      (should fragment)
+      (should (equal (plist-get fragment :close) "\\]")))))
 
 (ert-deftest ratex-fragment-at-point-prefers-largest-environment-fragment ()
   (with-temp-buffer
@@ -165,6 +229,29 @@
       (should (equal (mapcar (lambda (f) (plist-get f :content)) fragments)
                      '("x" "y+1"))))))
 
+(ert-deftest ratex-render-cache-trims-oldest-entries ()
+  (with-temp-buffer
+    (ratex-reset-buffer-state)
+    (let ((ratex-render-cache-limit 2))
+      (ratex--cache-put 'a '((ok . t)))
+      (puthash 'a 1.0 ratex--render-cache-access)
+      (ratex--cache-put 'b '((ok . t)))
+      (puthash 'b 2.0 ratex--render-cache-access)
+      (ratex--cache-put 'c '((ok . t)))
+      (should-not (ratex--cache-get 'a))
+      (should (ratex--cache-get 'b))
+      (should (ratex--cache-get 'c)))))
+
+(ert-deftest ratex-cleanup-render-caches-removes-expired-entries ()
+  (with-temp-buffer
+    (setq-local ratex-mode t)
+    (ratex-reset-buffer-state)
+    (let ((ratex-render-cache-ttl 1))
+      (puthash 'a '((ok . t)) ratex--render-cache)
+      (puthash 'a (- (float-time) 5) ratex--render-cache-access)
+      (ratex--cleanup-render-caches)
+      (should-not (ratex--cache-get 'a)))))
+
 (ert-deftest ratex-fragments-to-render-excludes-active ()
   (with-temp-buffer
     (insert "a \\(x\\) b \\(y\\) c")
@@ -225,6 +312,23 @@
                    1)))
         (ratex--ensure-fragment-preview fragment)
         (should (equal (alist-get 'color payload) "red"))))))
+
+(ert-deftest ratex-render-latex-keeps-inline-fragment-bare ()
+  (let ((fragment '(:begin 1 :end 6 :content " x " :open "\\(" :close "\\)")))
+    (should (equal (ratex--render-latex fragment) "x"))))
+
+(ert-deftest ratex-render-latex-upgrades-bracket-fragment-to-displaystyle ()
+  (let ((fragment '(:begin 1 :end 6 :content " x+1 " :open "\\[" :close "\\]")))
+    (should (equal (ratex--render-latex fragment) "\\displaystyle x+1"))))
+
+(ert-deftest ratex-render-latex-keeps-environment-wrapper ()
+  (let ((fragment '(:begin 1 :end 30
+                    :content "\\begin{align} x &= y \\end{align}"
+                    :open "\\begin{align}"
+                    :close "\\end{align}"
+                    :environment "align")))
+    (should (equal (ratex--render-latex fragment)
+                   "\\begin{align} x &= y \\end{align}"))))
 
 (ert-deftest ratex-initialize-previews-renders-all-then-hides-active ()
   (with-temp-buffer
@@ -355,16 +459,20 @@
       (let ((overlay (ratex-overlay-for-key "1:6:x")))
         (should-not (overlayp overlay))))))
 
-(ert-deftest ratex-mask-edit-source-hides-fragment-range ()
+(ert-deftest ratex-mask-edit-source-respects-visibility-setting ()
   (with-temp-buffer
     (insert "\\[x\\]")
     (let ((fragment '(:begin 1 :end 6 :content "x" :open "\\[" :close "\\]")))
       (ratex-reset-buffer-state)
       (ratex--mask-edit-source fragment)
-      (should (overlayp ratex--edit-source-overlay))
-      (should (equal (overlay-start ratex--edit-source-overlay) 1))
-      (should (equal (overlay-end ratex--edit-source-overlay) 6))
-      (should (equal (overlay-get ratex--edit-source-overlay 'display) "")))))
+      (should-not (overlayp ratex--edit-source-overlay))
+      (let ((ratex-hide-source-while-preview t))
+        (ratex--mask-edit-source fragment)
+        (should (overlayp ratex--edit-source-overlay))
+        (should (equal (overlay-start ratex--edit-source-overlay) 1))
+        (should (equal (overlay-end ratex--edit-source-overlay) 6))
+        (should (equal (overlay-get ratex--edit-source-overlay 'display) ""))
+        (should (eq (overlay-get ratex--edit-source-overlay 'invisible) t))))))
 
 (ert-deftest ratex-inflight-shared-formula-renders-all-waiters ()
   (with-temp-buffer
