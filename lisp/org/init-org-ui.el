@@ -129,7 +129,7 @@
   :custom
   (org-appear-autoemphasis t)
   (org-appear-autolinks t)
-  (org-appear-autosubmarkers nil))
+  (org-appear-autosubmarkers t))
 
 ;; 3.6 优先级美化
 (use-package org-fancy-priorities

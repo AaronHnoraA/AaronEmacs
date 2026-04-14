@@ -63,46 +63,6 @@ Special block overlays are no longer disabled based on buffer size."
   "Use relaxed line spacing in Org buffers only."
   (setq-local line-spacing 0.1))
 
-(defun my/org--sub-sup-context-literal-p ()
-  "Return non-nil when `^' or `_' should stay literal at point."
-  (or (org-in-src-block-p t)
-      (org-at-table-p)
-      (memq (org-element-type (org-element-context))
-            '(code verbatim src-block inline-src-block
-                   example-block export-block
-                   keyword babel-call link
-                   latex-fragment latex-environment))))
-
-(defun my/org-insert-sub-sup-marker (marker)
-  "Insert Org sub/sup MARKER with editable braces when appropriate."
-  (interactive)
-  (cond
-   ((use-region-p)
-    (let ((beg (region-beginning))
-          (end (region-end)))
-      (goto-char end)
-      (insert "}")
-      (goto-char beg)
-      (insert marker "{")
-      (deactivate-mark)))
-   ((or (my/org--sub-sup-context-literal-p)
-        (bobp)
-        (member (char-before) '(?\s ?\t ?\n ?\( ?\[ ?\{)))
-    (insert marker))
-   (t
-    (insert marker "{}")
-    (backward-char 1))))
-
-(defun my/org-insert-superscript ()
-  "Insert a superscript marker without trapping point in hidden braces."
-  (interactive)
-  (my/org-insert-sub-sup-marker ?^))
-
-(defun my/org-insert-subscript ()
-  "Insert a subscript marker without trapping point in hidden braces."
-  (interactive)
-  (my/org-insert-sub-sup-marker ?_))
-
 ;;; ----------------------------------------------------------------------------
 ;;; 2. Org Core Configuration (核心设置)
 ;;; ----------------------------------------------------------------------------
@@ -195,11 +155,7 @@ Special block overlays are no longer disabled based on buffer size."
      ("RFCs"   . "https://tools.ietf.org/html/")))
   
   ;; --- Citations ---
-  (org-cite-global-bibliography pv/org-bibtex-files)
-
-  :config
-  (keymap-set org-mode-map "^" #'my/org-insert-superscript)
-  (keymap-set org-mode-map "_" #'my/org-insert-subscript))
+  (org-cite-global-bibliography pv/org-bibtex-files))
 
 (provide 'init-org-core)
 ;;; init-org-core.el ends here
