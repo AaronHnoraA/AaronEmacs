@@ -259,7 +259,7 @@ Doctor 更适合快速排查：
 - `SPC o S`
   `my/vterm-ssh`
 - `M-x my/project-popup-vterm-app`
-  在当前 project 根目录的新 popup `vterm` 里运行 `lazygit` / `btop` / `codex`
+  在当前 project 根目录的新 popup `vterm` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
 
 ## 6. 远程与 TRAMP
 
@@ -313,13 +313,17 @@ Doctor 更适合快速排查：
 
 ## 8. AI
 
-### GPT
+### Claude Code
 
-- `M-x gptel`
-- `SPC l l` / `C-c l l`
-- `SPC l c` / `C-c l c`
-- `SPC l r` / `C-c l r`
-- 配置文件：`etc/mygpt.json`
+- `C-c C-'` / `C-c a` — claude-code-ide 菜单
+- `F12` / `H-l`       — 同上
+- 配置：`lisp/init-ai-ide.el`，变量 `claude-code-ide-cli-path`
+
+### Codex CLI
+
+- `C-c c t` — 切换面板
+- `C-c c s` / `C-c c q` — 启动 / 停止
+- `C-c c p` / `C-c c r` / `C-c c f` — 发送 prompt / region / file
 
 ### Copilot
 

@@ -72,28 +72,34 @@
 - `org-roam-directory`
 - bibliography 路径
 
-## 4. 我要改 GPT 后端
+## 4. 我要改 AI 助手配置
 
 文件：
 
-- [lisp/init-gpt.el](../lisp/init-gpt.el)
-- `etc/mygpt.json`
+- [lisp/init-ai-ide.el](../lisp/init-ai-ide.el)
 
-通常只需要改：
+### Claude Code
 
-- `etc/mygpt.json`
+变量：
 
-现在这份 JSON 同时支持：
-
-- 旧的单后端格式
-- 新的多后端 `backends` 列表格式
+- `claude-code-ide-cli-path`  — Claude CLI 可执行路径（默认 `/Users/hc/.local/bin/claude`）
 
 常用入口：
 
-- `M-x my/gptel-open-config`
-- `SPC l l` / `C-c l l`
+- `C-c C-'` / `C-c a`  — 打开 claude-code-ide 菜单
+- `F12` / `H-l`        — 同上（全局快捷键 / macOS Option 快捷键）
 
-只有在你要换加载逻辑时才需要改 Elisp。
+只有在你要换 CLI 路径或调整 MCP tools 时才需要改 Elisp。
+
+### Codex CLI
+
+变量：
+
+- `codex-cli-executable`      — Codex 可执行文件名（默认 `"codex"`）
+- `codex-cli-terminal-backend` — 终端后端（默认 `vterm`）
+- `codex-cli-side` / `codex-cli-width` — 面板位置与宽度
+
+键位前缀 `C-c c`；参见文件顶部注释。
 
 ## 5. 我要增删 leader 键
 

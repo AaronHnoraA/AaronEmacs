@@ -87,7 +87,6 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-shell)
 (require 'init-remote-connectboard)
 (my/require-module-safely 'init-spell)
-(my/require-module-safely 'init-gpt)
 (require 'init-search)
 (require 'init-search-extra)
 (require 'init-telescope)

@@ -202,53 +202,20 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 - `~/HC/Org/roam/`
 - `~/HC/Org/daily/`
 
-### GPT
+### AI 助手
 
-[lisp/init-gpt.el](../lisp/init-gpt.el) 默认读取：
+[lisp/init-ai-ide.el](../lisp/init-ai-ide.el) 管理两套 AI 助手：
 
-- `etc/mygpt.json`
+**Claude Code**（主力）
 
-现在推荐用多后端格式，旧的单后端格式也继续兼容。
+- CLI 路径：`claude-code-ide-cli-path`（默认 `/Users/hc/.local/bin/claude`）
+- 入口：`C-c C-'` / `F12` / `H-l`
+- 需要先在终端 `npm install -g @anthropic-ai/claude-code` 或 brew 安装 claude CLI
 
-格式示例：
+**Codex CLI**（可选）
 
-```json
-{
-  "default_backend": "OpenAI",
-  "default_model": "your-openai-model",
-  "backends": [
-    {
-      "name": "OpenAI",
-      "type": "openai",
-      "key": "env:OPENAI_API_KEY",
-      "model": "your-openai-model",
-      "models": ["your-openai-model"],
-      "stream": true
-    },
-    {
-      "name": "Ollama",
-      "type": "ollama",
-      "host": "localhost:11434",
-      "model": "your-local-model",
-      "stream": true
-    }
-  ]
-}
-```
-
-常见类型：
-
-- `openai`
-- `gemini`
-- `anthropic`
-- `ollama`
-- `copilot`
-
-额外说明：
-
-- `key` 支持直接写明文，也支持 `env:ENV_NAME`
-- `key` 也支持 `file:relative/path.txt`
-- 没有 `etc/mygpt.json` 时，会回退到 gptel 自带的默认 ChatGPT 后端，不再启动时报 warning
+- 入口前缀：`C-c c`
+- 需要 `codex` 可执行文件在 PATH 中
 
 ### 运行时状态目录
 
@@ -274,9 +241,8 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 2. `M-x org-agenda` 是否能打开
 3. `C-x C-f` / `C-x b` / `C-s` 是否符合预期
 4. `M-x my/vterm-ssh` 是否能读到 SSH 主机
-5. `M-x gptel` 是否能成功创建会话
-6. `SPC l l` / `C-c l l` 是否能打开 LLM 菜单
-7. `C-x g` 是否能打开 Magit
+5. `C-c C-'` 是否能打开 claude-code-ide 菜单（需要 claude CLI 已安装）
+6. `C-x g` 是否能打开 Magit
 
 ## 8. 下一步看什么
 

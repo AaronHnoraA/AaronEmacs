@@ -17,7 +17,7 @@
 (declare-function my/test-dispatch "init-test" ())
 (declare-function my/debug-profile-dispatch "init-debug-profile" ())
 (declare-function vterm-toggle "init-vterm-popup" ())
-(declare-function my/gptel-chat "init-gpt" (&optional skip-preset))
+(declare-function claude-code-ide-menu "claude-code-ide" ())
 (declare-function org-agenda "org" (&optional arg keys restriction))
 (autoload 'olivetti-mode "olivetti" nil t)
 
@@ -32,7 +32,7 @@
 (global-set-key (kbd "<f9>") #'org-agenda)
 (global-set-key (kbd "<f10>") #'vterm-toggle)
 ;; F11 intentionally left alone.
-(global-set-key (kbd "<f12>") #'my/gptel-chat)
+(global-set-key (kbd "<f12>") #'claude-code-ide-menu)
 
 (provide 'init-function-keys)
 ;;; init-function-keys.el ends here

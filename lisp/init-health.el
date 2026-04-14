@@ -12,7 +12,7 @@
 (declare-function my/compile-board "init-compile" ())
 (declare-function my/byte-compile-config "init-compile" (&optional force))
 (declare-function my/native-compile-config "init-compile" (&optional force))
-(declare-function gptel-get-backend "gptel-request" (name))
+(declare-function claude-code-ide-emacs-tools-setup "claude-code-ide" ())
 (declare-function my/package-lock-audit "init-package-utils" ())
 (declare-function my/maintenance-state-report "init-maintenance" ())
 
@@ -54,7 +54,8 @@
     (vterm-module . "vterm-module")
     (pdf-tools . "pdf-tools")
     (tramp-rpc . "tramp-rpc")
-    (gptel . "gptel"))
+    (claude-code-ide . "claude-code-ide")
+    (codex-cli . "codex-cli"))
   "Libraries that should be available after a healthy bootstrap.")
 
 (defvar my/health-startup-time nil
@@ -71,9 +72,16 @@
   (expand-file-name "elpa/pdf-tools-20260102.1101/epdfinfo"
                     user-emacs-directory))
 
-(defun my/health--gpt-config-file ()
-  "Return the primary GPT config path."
-  (expand-file-name "etc/mygpt.json" user-emacs-directory))
+(defun my/health--claude-cli-path ()
+  "Return the configured Claude CLI path."
+  (if (boundp 'claude-code-ide-cli-path)
+      claude-code-ide-cli-path
+    (executable-find "claude")))
+
+(defun my/health--codex-executable ()
+  "Return the configured Codex CLI executable path."
+  (executable-find
+   (if (boundp 'codex-cli-executable) codex-cli-executable "codex")))
 
 (define-derived-mode my/health-mode special-mode "Health"
   "Major mode for config health reports.")
@@ -201,9 +209,11 @@
    (cons 'epdfinfo
          (let ((path (my/health--bundled-epdfinfo)))
            (and (file-executable-p path) path)))
-   (cons 'gpt-config
-         (let ((path (my/health--gpt-config-file)))
-           (and (file-exists-p path) path)))))
+   (cons 'claude-cli
+         (let ((path (my/health--claude-cli-path)))
+           (and path (file-executable-p path) path)))
+   (cons 'codex-cli
+         (my/health--codex-executable))))
 
 (defun my/health--feature-report ()
   "Return lightweight feature/runtime checks for critical subsystems."
@@ -213,12 +223,14 @@
            (require 'tramp)
            (or (assoc "rpc" tramp-methods)
                (assoc 'rpc tramp-methods))))
-   (cons 'gpt-backend
+   (cons 'claude-code-ide-loaded
          (ignore-errors
-           (require 'init-gpt)
-           (require 'gptel)
-           (or (and (boundp 'gptel-backend) gptel-backend)
-               (gptel-get-backend "HiAPI Gemini"))))
+           (require 'claude-code-ide)
+           (fboundp 'claude-code-ide-menu)))
+   (cons 'codex-cli-loaded
+         (ignore-errors
+           (require 'codex-cli)
+           (fboundp 'codex-cli-toggle)))
    (cons 'theme-loaded
          (ignore-errors
            (memq 'kanagawa-wave custom-enabled-themes)))

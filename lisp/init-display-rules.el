@@ -27,9 +27,8 @@
     ("\\*task\\*"                :select t :align below :size ,my/display-rules-bottom-size :regexp t)
     ("\\*run\\*"                 :select t :align below :size ,my/display-rules-bottom-size :regexp t)
     ("\\*xref\\*"                :select t :align below :size ,my/display-rules-bottom-size :regexp t)
-    ("\\*gptel-\\(log\\|diagnostic\\|query\\|tool-calls\\)\\*"
-     :select t :align below :size ,my/display-rules-bottom-size :regexp t)
-    ("\\*Diagnostics:.*\\*"      :select t :align below :size ,my/display-rules-bottom-size :regexp t))
+    ("\\*claude-code-ide\\*"        :select t :align below :size ,my/display-rules-bottom-size :regexp t)
+("\\*Diagnostics:.*\\*"      :select t :align below :size ,my/display-rules-bottom-size :regexp t))
   "Additional `shackle-rules' for development workflows.")
 
 (with-eval-after-load 'shackle

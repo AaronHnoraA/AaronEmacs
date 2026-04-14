@@ -41,7 +41,7 @@
 - `F5` / `F6` / `F7` / `F8`
   运行 profile / 测试菜单 / 调试 profile / `olivetti-mode`
 - `F9` / `F10` / `F12`
-  `org-agenda` / popup `vterm` / `gptel chat`
+  `org-agenda` / popup `vterm` / Claude Code 菜单
 
 ### macOS Option `H-`
 
@@ -50,7 +50,7 @@
 - `H-g` / `H-p` / `H-t` / `H-m`
   项目 ripgrep / 项目工作台 / `telescope` / `magit-status`
 - `H-a` / `H-l` / `H-\`` / `H-w`
-  `org-agenda` / gptel chat / `popper-toggle` / 关当前 frame
+  `org-agenda` / Claude Code 菜单 / `popper-toggle` / 关当前 frame
 - `H-e` / `H-d` / `H-i` / `H-u`
   code menu / diagnostics menu / `show-imenu` / language server 菜单
 - `H-j` / `H-n` / `H-y`
@@ -236,7 +236,7 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC o v`
   直接打开新 `vterm`
 - `M-x my/project-popup-vterm-app`
-  在当前项目根目录的新 popup `vterm` 里运行 `lazygit` / `btop` / `codex`
+  在当前项目根目录的新 popup `vterm` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
 - `SPC o V`
   命名 `vterm`
 - `SPC o S`
