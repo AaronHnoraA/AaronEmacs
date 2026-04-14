@@ -44,6 +44,7 @@
 (defconst ratex--posframe-offset-y 72)
 (defconst ratex--posframe-display-offset-y 28)
 (defconst ratex--popup-window-max-height 18)
+(defconst ratex--popup-preview-width-threshold 0.75)
 
 (defun ratex-reset-buffer-state ()
   "Reset buffer-local rendering state."
@@ -292,18 +293,40 @@ currently under point."
 RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
 those wrappers during detection. To preserve display-style rendering for
 bracketed math, re-add the semantic hint as `\\displaystyle'. Environment
-fragments are passed through intact."
+fragments are normalized for preview compatibility when needed."
   (let ((content (string-trim (plist-get fragment :content)))
         (open (plist-get fragment :open)))
     (cond
      ((plist-get fragment :environment)
-      content)
+      (ratex--render-environment-latex fragment content))
      ((equal open "\\[")
       (if (string-empty-p content)
           "\\displaystyle"
         (concat "\\displaystyle " content)))
      (t
       content))))
+
+(defun ratex--render-environment-latex (fragment content)
+  "Return preview-ready LaTeX for environment FRAGMENT with CONTENT."
+  (let* ((environment (plist-get fragment :environment))
+         (preview-environment (ratex--preview-environment-name environment)))
+    (if (equal preview-environment environment)
+        content
+      (string-replace
+       (format "\\end{%s}" environment)
+       (format "\\end{%s}" preview-environment)
+       (string-replace
+        (format "\\begin{%s}" environment)
+        (format "\\begin{%s}" preview-environment)
+        content)))))
+
+(defun ratex--preview-environment-name (environment)
+  "Return a preview-safe environment name for ENVIRONMENT."
+  (pcase environment
+    ((or "equation" "align" "alignat" "gather" "multline" "flalign"
+         "eqnarray" "dmath" "dseries" "dgroup")
+     (concat environment "*"))
+    (_ environment)))
 
 (defun ratex--normalized-render-color ()
   "Return a normalized render color string, or nil."
@@ -468,11 +491,28 @@ When `posframe' is selected, always use posframe placement."
     ('posframe
      (ratex-debug-log "display-edit-preview style=posframe fragment=%S response=%s image=%s"
                       fragment (not (null response)) (not (null image)))
-     (ratex--display-posframe fragment response image))
+     (let ((preview-image (or image (and response (ratex--image-from-response response)))))
+       (if (ratex--prefer-popup-preview-p fragment preview-image)
+           (ratex--display-popup-window fragment response preview-image)
+         (ratex--display-posframe fragment response preview-image))))
     ('minibuffer
      (ratex-debug-log "display-edit-preview style=minibuffer fragment=%S" fragment)
      (ratex--display-minibuffer fragment response image))
     (_ nil)))
+
+(defun ratex--prefer-popup-preview-p (fragment image)
+  "Return non-nil when FRAGMENT with IMAGE should use popup preview."
+  (and image
+       (or (ratex--display-fragment-p fragment)
+           (ratex--image-too-wide-for-posframe-p image))))
+
+(defun ratex--image-too-wide-for-posframe-p (image)
+  "Return non-nil when IMAGE would be awkward to show in a posframe."
+  (let* ((size (image-size image t))
+         (image-width (car size))
+         (window-width (max 1 (- (nth 2 (window-inside-pixel-edges))
+                                 (nth 0 (window-inside-pixel-edges))))))
+    (> image-width (* window-width ratex--popup-preview-width-threshold))))
 
 (defun ratex--ensure-posframe-loaded ()
   "Return non-nil when posframe is available; load it if needed."
@@ -720,8 +760,8 @@ When `posframe' is selected, always use posframe placement."
               (posframe-show
                ratex--posframe-buffer
                :position (point)
-               :poshandler (or ratex-posframe-poshandler
-                               #'ratex-posframe-poshandler-point-bottom-left-corner-offset)
+               :poshandler (ratex--posframe-poshandler-for-fragment
+                            ratex--posframe-fragment)
                :border-width 1
                :border-color ratex-posframe-border-color
                :background-color ratex-posframe-background-color)

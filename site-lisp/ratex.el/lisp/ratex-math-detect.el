@@ -125,13 +125,13 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
   "Split VALUE into (OPEN CONTENT CLOSE) for common math delimiters."
   (cond
    ((and (string-prefix-p "\\[" value) (string-suffix-p "\\]" value))
-    (list "\\[" (string-trim (substring value 2 -2)) "\\]"))
+    (list "\\[" (substring value 2 -2) "\\]"))
    ((and (string-prefix-p "\\(" value) (string-suffix-p "\\)" value))
-    (list "\\(" (string-trim (substring value 2 -2)) "\\)"))
+    (list "\\(" (substring value 2 -2) "\\)"))
    ((and (string-prefix-p "$$" value) (string-suffix-p "$$" value))
-    (list "$$" (string-trim (substring value 2 -2)) "$$"))
+    (list "$$" (substring value 2 -2) "$$"))
    ((and (string-prefix-p "$" value) (string-suffix-p "$" value))
-    (list "$" (string-trim (substring value 1 -1)) "$"))
+    (list "$" (substring value 1 -1) "$"))
    (t
     (list "" (string-trim value) ""))))
 

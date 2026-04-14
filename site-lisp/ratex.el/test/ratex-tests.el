@@ -81,7 +81,18 @@
     (let ((fragment (ratex-fragment-at-point)))
       (should fragment)
       (should (equal (plist-get fragment :open) "\\["))
-      (should (equal (plist-get fragment :content) "x+1")))))
+      (should (equal (plist-get fragment :content) "\nx+1\n")))))
+
+(ert-deftest ratex-org-multiline-bracket-fragment-remains-valid ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "a\n\\[\nx+1\n\\]\nb")
+    (goto-char (point-min))
+    (search-forward "x+1")
+    (let ((fragment (ratex-fragment-at-point)))
+      (should fragment)
+      (should (ratex--fragment-valid-p fragment))
+      (should (equal (ratex--render-latex fragment) "\\displaystyle x+1")))))
 
 (ert-deftest ratex-ignores-non-math-org-latex-environment ()
   (with-temp-buffer
@@ -321,14 +332,23 @@
   (let ((fragment '(:begin 1 :end 6 :content " x+1 " :open "\\[" :close "\\]")))
     (should (equal (ratex--render-latex fragment) "\\displaystyle x+1"))))
 
-(ert-deftest ratex-render-latex-keeps-environment-wrapper ()
+(ert-deftest ratex-render-latex-downgrades-numbered-environment-for-preview ()
   (let ((fragment '(:begin 1 :end 30
                     :content "\\begin{align} x &= y \\end{align}"
                     :open "\\begin{align}"
                     :close "\\end{align}"
                     :environment "align")))
     (should (equal (ratex--render-latex fragment)
-                   "\\begin{align} x &= y \\end{align}"))))
+                   "\\begin{align*} x &= y \\end{align*}"))))
+
+(ert-deftest ratex-render-latex-keeps-unnumbered-environment-wrapper ()
+  (let ((fragment '(:begin 1 :end 32
+                    :content "\\begin{align*} x &= y \\end{align*}"
+                    :open "\\begin{align*}"
+                    :close "\\end{align*}"
+                    :environment "align*")))
+    (should (equal (ratex--render-latex fragment)
+                   "\\begin{align*} x &= y \\end{align*}"))))
 
 (ert-deftest ratex-initialize-previews-renders-all-then-hides-active ()
   (with-temp-buffer
@@ -474,7 +494,7 @@
         (should (equal (overlay-get ratex--edit-source-overlay 'display) ""))
         (should (eq (overlay-get ratex--edit-source-overlay 'invisible) t))))))
 
-(ert-deftest ratex-display-preview-uses-posframe-for-display-fragments ()
+(ert-deftest ratex-display-preview-uses-popup-for-display-fragments ()
   (with-temp-buffer
     (setq-local ratex-edit-preview 'posframe)
     (let ((fragment '(:begin 1 :end 6 :content "x" :open "\\[" :close "\\]"))
@@ -486,7 +506,23 @@
                 ((symbol-function 'ratex--display-minibuffer)
                  (lambda (&rest _args) (push 'mini calls) nil)))
         (should-not (ratex--display-edit-preview fragment '((ok . t)) 'img))
-        (should (equal calls '(posframe)))))))
+        (should (equal calls '(popup)))))))
+
+(ert-deftest ratex-display-preview-keeps-posframe-for-narrow-inline-fragments ()
+  (with-temp-buffer
+    (setq-local ratex-edit-preview 'posframe)
+    (cl-letf (((symbol-function 'window-inside-pixel-edges)
+               (lambda (&optional _window) '(0 0 1000 800))))
+      (let ((fragment '(:begin 1 :end 6 :content "x" :open "\\(" :close "\\)"))
+            (image (create-image "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='20'></svg>"
+                                 'svg t))
+            calls)
+        (cl-letf (((symbol-function 'ratex--display-posframe)
+                   (lambda (&rest _args) (push 'posframe calls) nil))
+                  ((symbol-function 'ratex--display-popup-window)
+                   (lambda (&rest _args) (push 'popup calls) nil)))
+          (should-not (ratex--display-edit-preview fragment '((ok . t)) image))
+          (should (equal calls '(posframe))))))))
 
 (ert-deftest ratex-inflight-shared-formula-renders-all-waiters ()
   (with-temp-buffer
