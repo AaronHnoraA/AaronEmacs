@@ -32,6 +32,22 @@
   :type 'integer
   :group 'term)
 
+(defvar my/terminal-startup-cd-inhibited nil
+  "When non-nil, start terminal buffers directly in the target directory.")
+
+(defun my/terminal--startup-directory (&optional directory)
+  "Return a safe startup directory for DIRECTORY, or nil to use DIRECTORY directly."
+  (unless my/terminal-startup-cd-inhibited
+    (my/terminal-home-directory (or directory default-directory))))
+
+(defun my/terminal--resolve-launch-directories (&optional directory)
+  "Return (STARTUP-DIRECTORY . TARGET-DIRECTORY) for terminal launch."
+  (when-let* ((target-directory (my/terminal-normalize-directory
+                                 (or directory default-directory))))
+    (cons (or (my/terminal--startup-directory target-directory)
+              target-directory)
+          target-directory)))
+
 (defun my/vterm-send-command (buffer command &optional retries)
   "Send COMMAND to VTerm BUFFER once its subprocess is ready.
 Append a trailing return automatically.  RETRIES defaults to
@@ -96,6 +112,14 @@ Append a trailing return automatically.  RETRIES defaults to
         (setq default-directory directory)
         (comint-simple-send process command)))))
 
+(defun my/shell--ensure-directory (buffer directory)
+  "Ensure shell BUFFER is associated with DIRECTORY."
+  (when-let* ((buffer (and (buffer-live-p buffer) buffer))
+              (directory (my/terminal-normalize-directory directory)))
+    (with-current-buffer buffer
+      (setq default-directory directory))
+    (my/shell--sync-directory buffer directory)))
+
 (defun my/eshell--sync-directory (buffer directory)
   "Change Eshell BUFFER to DIRECTORY and redraw its prompt."
   (when-let* ((buffer (and (buffer-live-p buffer) buffer))
@@ -107,6 +131,14 @@ Append a trailing return automatically.  RETRIES defaults to
         (setq default-directory directory)
         (eshell-reset)
         (goto-char (point-max))))))
+
+(defun my/eshell--ensure-directory (buffer directory)
+  "Ensure Eshell BUFFER is associated with DIRECTORY."
+  (when-let* ((buffer (and (buffer-live-p buffer) buffer))
+              (directory (my/terminal-normalize-directory directory)))
+    (with-current-buffer buffer
+      (setq default-directory directory))
+    (my/eshell--sync-directory buffer directory)))
 
 (defun my/shell-context-buffer-name (&optional directory)
   "Return the standard shell buffer name for DIRECTORY."
@@ -124,12 +156,13 @@ Append a trailing return automatically.  RETRIES defaults to
   "Reuse `shell' buffers per local-or-remote context."
   (if buffer
       (funcall orig-fn buffer file-name)
-    (let* ((directory (my/terminal-normalize-directory default-directory))
-           (buffer-name (my/shell-context-buffer-name directory))
-           (existing (get-buffer buffer-name))
-           (buffer (funcall orig-fn buffer-name file-name)))
-      (when existing
-        (my/shell--sync-directory buffer directory))
+    (let* ((directories (my/terminal--resolve-launch-directories default-directory))
+           (startup-directory (car directories))
+           (target-directory (cdr directories))
+           (buffer-name (my/shell-context-buffer-name target-directory))
+           (buffer (let ((default-directory startup-directory))
+                     (funcall orig-fn buffer-name file-name))))
+      (my/shell--ensure-directory buffer target-directory)
       buffer)))
 
 (defun my/eshell-reuse-by-context-a (orig-fn &optional arg)
@@ -138,13 +171,14 @@ Keep the stock prefix-argument behaviour for explicitly creating or selecting
 numbered sessions."
   (if arg
       (funcall orig-fn arg)
-    (let* ((directory (my/terminal-normalize-directory default-directory))
-           (buffer-name (my/eshell-context-buffer-name directory))
-           (existing (get-buffer buffer-name))
+    (let* ((directories (my/terminal--resolve-launch-directories default-directory))
+           (startup-directory (car directories))
+           (target-directory (cdr directories))
+           (buffer-name (my/eshell-context-buffer-name target-directory))
            (eshell-buffer-name buffer-name)
-           (buffer (funcall orig-fn nil)))
-      (when existing
-        (my/eshell--sync-directory buffer directory))
+           (buffer (let ((default-directory startup-directory))
+                     (funcall orig-fn nil))))
+      (my/eshell--ensure-directory buffer target-directory)
       buffer)))
 
 (defun my/eshell-emacs-state-setup ()
@@ -333,31 +367,25 @@ If popup is focused, kill it."
 
 (require 'init-vterm-popup)
 
-(defvar my/vterm-startup-cd-inhibited nil
-  "When non-nil, do not inject an initial `cd' into newly created VTerm buffers.")
-
-(defun my/vterm--startup-directory (&optional directory)
-  "Return the same-connection home directory for DIRECTORY, or nil."
-  (unless my/vterm-startup-cd-inhibited
-    (my/terminal-home-directory (or directory default-directory))))
-
 (defun my/vterm--send-cd (buffer directory)
   "Send `cd DIRECTORY' to VTerm BUFFER."
   (when-let* ((buffer (and (buffer-live-p buffer) buffer))
+              (directory (my/terminal-normalize-directory directory))
               (command (my/terminal-cd-command directory)))
+    (with-current-buffer buffer
+      (setq default-directory directory))
     (my/vterm-send-command buffer command)))
 
 (defun my/vterm--start-in-home-and-cd (orig-fn &rest args)
   "Create VTerm buffers from home, then `cd' into the original directory."
-  (let* ((target-directory (my/terminal-normalize-directory default-directory))
-         (startup-directory (and target-directory
-                                 (my/vterm--startup-directory target-directory))))
-    (if startup-directory
-        (let ((default-directory startup-directory))
-          (let ((buffer (apply orig-fn args)))
-            (my/vterm--send-cd buffer target-directory)
-            buffer))
-      (apply orig-fn args))))
+  (if-let* ((directories (my/terminal--resolve-launch-directories default-directory))
+            (startup-directory (car directories))
+            (target-directory (cdr directories)))
+      (let ((default-directory startup-directory))
+        (let ((buffer (apply orig-fn args)))
+          (my/vterm--send-cd buffer target-directory)
+          buffer))
+    (apply orig-fn args)))
 
 (defun my/vterm--ssh-target-directory (host)
   "Return the preferred TRAMP directory for SSH HOST."
