@@ -361,11 +361,9 @@ Each value may be a readable `.cls' file path or literal class source."
 
 (defun my/org-latex--export-to-tex-with-class (class)
   "Export current Org buffer to LaTeX using CLASS."
-  (let* ((export-info (my/org-latex--export-ext-plist class))
-         (outfile (org-export-output-file-name ".tex" nil)))
-    (my/org-latex--ensure-embedded-class-registered export-info)
+  (let ((outfile (org-export-output-file-name ".tex" nil)))
     (org-export-to-file 'latex outfile nil nil nil nil
-                        export-info)))
+                        (my/org-latex--export-ext-plist class))))
 
 (defun my/org-latex--latexmk-command (texfile)
   "Return (PROJECT-ROOT . COMMAND) used to compile TEXFILE with latexmk."
@@ -1117,3 +1115,4 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
 
 (provide 'init-org-latex)
 ;;; init-org-latex.el ends here
+

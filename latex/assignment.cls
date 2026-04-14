@@ -110,10 +110,10 @@
     {\normalfont\normalsize\bfseries}
     {\thesubsection}{0.5em}{}
 \titlespacing*{\subsection}{0pt}{0.95ex plus .3ex minus .2ex}{0.25ex}
-\titleformat{\subsubsection}[runin]
-    {\normalfont\normalsize\itshape}
-    {\thesubsubsection}{0.45em}{}[.]
-\titlespacing*{\subsubsection}{0pt}{0.75ex plus .2ex minus .1ex}{0.45em}
+\titleformat{\subsubsection}
+    {\normalfont\normalsize\bfseries\itshape}
+    {\thesubsubsection}{0.5em}{}
+\titlespacing*{\subsubsection}{0pt}{0.85ex plus .25ex minus .15ex}{0.3ex}
 
 % 页眉和页脚 Header & footer
 \providecommand{\Name}{Name}% "Name" at the right of the header
