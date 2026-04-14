@@ -474,6 +474,20 @@
         (should (equal (overlay-get ratex--edit-source-overlay 'display) ""))
         (should (eq (overlay-get ratex--edit-source-overlay 'invisible) t))))))
 
+(ert-deftest ratex-display-preview-uses-posframe-for-display-fragments ()
+  (with-temp-buffer
+    (setq-local ratex-edit-preview 'posframe)
+    (let ((fragment '(:begin 1 :end 6 :content "x" :open "\\[" :close "\\]"))
+          calls)
+      (cl-letf (((symbol-function 'ratex--display-posframe)
+                 (lambda (&rest _args) (push 'posframe calls) nil))
+                ((symbol-function 'ratex--display-popup-window)
+                 (lambda (&rest _args) (push 'popup calls) nil))
+                ((symbol-function 'ratex--display-minibuffer)
+                 (lambda (&rest _args) (push 'mini calls) nil)))
+        (should-not (ratex--display-edit-preview fragment '((ok . t)) 'img))
+        (should (equal calls '(posframe)))))))
+
 (ert-deftest ratex-inflight-shared-formula-renders-all-waiters ()
   (with-temp-buffer
     (insert "\\(A\\) xx \\(A\\)")
