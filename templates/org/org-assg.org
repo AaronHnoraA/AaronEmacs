@@ -1,16 +1,23 @@
 #+TITLE: {{title}}
-#+AUTHOR: {{author}}
+#+AUTHOR: Chang He (Aaron)
 #+DATE: {{month_year}}
 #+LATEX_CLASS: assignment
 #+LATEX_COMPILER: xelatex
-#+OPTIONS: toc:nil num:t
+#+OPTIONS: toc:t num:2
 
-#+ASSIGNMENT_INSTITUTION: {{institution}}
-#+ASSIGNMENT_COURSE_CODE: {{course_code}}
-#+ASSIGNMENT_TERM: {{term}}
-#+ASSIGNMENT_STUDENT_ID: {{student_id}}
-#+ASSIGNMENT_AFFILIATION: {{affiliation}}
-#+ASSIGNMENT_AUTHOR_URL: {{author_url}}
+#+LATEX_HEADER: \providecommand{\assignmentinstitution}[1]{}
+#+LATEX_HEADER: \providecommand{\assignmentcoursecode}[1]{}
+#+LATEX_HEADER: \providecommand{\assignmentterm}[1]{}
+#+LATEX_HEADER: \providecommand{\studentid}[1]{}
+#+LATEX_HEADER: \providecommand{\assignmentaffiliation}[1]{}
+#+LATEX_HEADER: \providecommand{\authorurl}[1]{}
+
+#+LATEX_HEADER: \assignmentinstitution{CSE}
+#+LATEX_HEADER: \assignmentcoursecode{COMP3453}
+#+LATEX_HEADER: \assignmentterm{2026 T1}
+#+LATEX_HEADER: \studentid{z5586493}
+#+LATEX_HEADER: \assignmentaffiliation{UNSW}
+#+LATEX_HEADER: \authorurl{https://aaronhnoraa.github.io/}
 
 #+LATEX: \newpage
 * Question 1
