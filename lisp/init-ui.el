@@ -32,11 +32,11 @@
   :group 'faces)
 
 ;; Use Iosvkem in terminals
-(mapc #'disable-theme custom-enabled-themes)
-(use-package kanagawa-themes
-  :ensure t
+(use-package aaron-ui
+  :load-path "~/.emacs.d/site-lisp/aaron-ui"
+  :demand t
   :config
-  (load-theme 'kanagawa-wave t))
+  (aaron-ui-load-theme 'wave))
 
 (defun my/theme-normalize-faces ()
   "Normalize theme face attributes that Emacs 31 rejects when set to nil."
@@ -52,6 +52,12 @@
   :config
   (doom-modeline-mode 1)
   :custom
+  (doom-modeline-height 22)
+  (doom-modeline-bar-width 0)
+  (doom-modeline-buffer-encoding nil)
+  (doom-modeline-minor-modes nil)
+  (doom-modeline-modal nil)
+  (doom-modeline-vcs-max-length 20)
   (doom-modeline-irc nil)
   (doom-modeline-mu4e nil)
   (doom-modeline-gnus nil)
@@ -255,6 +261,154 @@
         uniquify-strip-common-suffix t)
 
 (line-number-mode -1)  ; Mode line 上不要显示行号, 因为 window 左边缘已经显示行号了.
+
+(defun my/ui-apply-polish ()
+  "Apply a restrained dark UI polish on top of the active theme."
+  (interactive)
+  (when (display-graphic-p)
+    (setq-default mode-line-format mode-line-format)
+    (setq-default tab-bar-separator "  ")
+    (setopt tab-bar-auto-width t)
+    (setopt tab-bar-close-button-show nil)
+    (setopt tab-bar-new-button-show nil)
+    (setopt tab-bar-tab-hints nil)
+    (setopt window-divider-default-right-width 10)
+    (setopt window-divider-default-bottom-width 1)
+    (window-divider-mode 1)
+    (set-face-attribute 'default nil :background "#282a36" :foreground "#e8edf5")
+    (set-face-attribute 'fringe nil :background "#282a36" :foreground "#58627a")
+    (set-face-attribute 'vertical-border nil :foreground "#2b2d3a")
+    (set-face-attribute 'window-divider nil :foreground "#33394b" :background "#282a36")
+    (set-face-attribute 'window-divider-first-pixel nil :foreground "#282a36" :background "#282a36")
+    (set-face-attribute 'window-divider-last-pixel nil :foreground "#33394b" :background "#282a36")
+    (set-face-attribute 'cursor nil :background "#9fbddd")
+    (set-face-attribute 'region nil :background "#444b60" :extend t)
+    (set-face-attribute 'highlight nil :background "#394154" :extend t)
+    (set-face-attribute 'line-number nil :foreground "#7a84a3" :background "#282a36" :weight 'regular)
+    (set-face-attribute 'line-number-current-line nil :foreground "#e3edf8" :background "#384156" :weight 'medium)
+    (set-face-attribute 'hl-line nil :background "#384156" :extend t)
+    (set-face-attribute 'mode-line nil
+                        :background "#2b2d3a"
+                        :foreground "#d8dee9"
+                        :box '(:line-width 6 :color "#2b2d3a")
+                        :overline nil
+                        :underline nil
+                        :height 0.92
+                        :weight 'regular)
+    (set-face-attribute 'mode-line-inactive nil
+                        :background "#262834"
+                        :foreground "#6b7280"
+                        :box '(:line-width 6 :color "#262834")
+                        :overline nil
+                        :underline nil
+                        :height 0.92
+                        :weight 'regular)
+    (set-face-attribute 'header-line nil
+                        :background "#282a36"
+                        :foreground "#909bb0"
+                        :box '(:line-width 6 :color "#282a36")
+                        :height 0.96)
+    (set-face-attribute 'tab-bar nil
+                        :background "#1d1e26"
+                        :foreground "#70758d"
+                        :box '(:line-width 6 :color "#1d1e26")
+                        :height 0.92)
+    (set-face-attribute 'tab-bar-tab nil
+                        :background "#2f3140"
+                        :foreground "#e5e9f0"
+                        :box '(:line-width 6 :color "#2f3140")
+                        :weight 'medium)
+    (set-face-attribute 'tab-bar-tab-inactive nil
+                        :background "#232530"
+                        :foreground "#7f849c"
+                        :box '(:line-width 6 :color "#232530")
+                        :weight 'regular)
+    (when (facep 'doom-modeline-bar)
+      (set-face-attribute 'doom-modeline-bar nil
+                          :background "#2b2d3a"
+                          :foreground "#2b2d3a"))
+    (when (facep 'doom-modeline-buffer-file)
+      (set-face-attribute 'doom-modeline-buffer-file nil :weight 'medium))
+    (when (facep 'doom-modeline-buffer-path)
+      (set-face-attribute 'doom-modeline-buffer-path nil :foreground "#7f849c" :weight 'regular))
+    (when (facep 'doom-modeline-project-dir)
+      (set-face-attribute 'doom-modeline-project-dir nil :foreground "#7f849c" :weight 'regular))
+    (when (facep 'doom-modeline-buffer-modified)
+      (set-face-attribute 'doom-modeline-buffer-modified nil :foreground "#e5c07b" :weight 'medium))
+    (when (facep 'doom-modeline-info)
+      (set-face-attribute 'doom-modeline-info nil :foreground "#98e6d4"))
+    (when (facep 'doom-modeline-warning)
+      (set-face-attribute 'doom-modeline-warning nil :foreground "#ffbe8c"))
+    (when (facep 'doom-modeline-urgent)
+      (set-face-attribute 'doom-modeline-urgent nil :foreground "#ff97a8"))
+    (when (facep 'minibuffer-prompt)
+      (set-face-attribute 'minibuffer-prompt nil :foreground "#9bc2ff" :weight 'medium))
+    (when (facep 'link)
+      (set-face-attribute 'link nil :foreground "#8fd0ff" :underline nil))
+    (when (facep 'font-lock-comment-face)
+      (set-face-attribute 'font-lock-comment-face nil :foreground "#9aa5bb" :slant 'normal))
+    (when (facep 'font-lock-doc-face)
+      (set-face-attribute 'font-lock-doc-face nil :foreground "#aab6ca" :slant 'normal))
+    (when (facep 'font-lock-keyword-face)
+      (set-face-attribute 'font-lock-keyword-face nil :foreground "#d6c186"))
+    (when (facep 'font-lock-function-name-face)
+      (set-face-attribute 'font-lock-function-name-face nil :foreground "#acd0f2"))
+    (when (facep 'font-lock-string-face)
+      (set-face-attribute 'font-lock-string-face nil :foreground "#b7d8ad"))
+    (when (facep 'helpful-heading)
+      (set-face-attribute 'helpful-heading nil
+                          :foreground "#a9bed3"
+                          :weight 'medium
+                          :height 1.02))
+    (when (facep 'help-key-binding)
+      (set-face-attribute 'help-key-binding nil
+                          :background "#31384a"
+                          :foreground "#edf2f7"
+                          :box '(:line-width 3 :color "#31384a")
+                          :weight 'medium))
+    (when (facep 'button)
+      (set-face-attribute 'button nil
+                          :foreground "#f0d58a"
+                          :underline nil))
+    (when (facep 'shadow)
+      (set-face-attribute 'shadow nil :foreground "#919aae"))
+    (when (facep 'internal-border)
+      (set-face-attribute 'internal-border nil
+                          :background "#2b2d3a"
+                          :foreground "#2b2d3a"))
+    (when (facep 'indent-guide-face)
+      (set-face-attribute 'indent-guide-face nil :foreground "#454b61"))))
+
+(add-hook 'after-init-hook #'my/ui-apply-polish)
+(add-hook 'server-after-make-frame-hook #'my/ui-apply-polish)
+(add-hook 'after-load-theme-hook #'my/ui-apply-polish)
+
+(defun my/dashboard-apply-ui ()
+  "Apply local UI styling to the dashboard."
+  (when (display-graphic-p)
+    (when (facep 'dashboard-banner-logo-title)
+      (set-face-attribute 'dashboard-banner-logo-title nil
+                          :foreground "#edf2f7"
+                          :weight 'medium))
+    (when (facep 'dashboard-heading)
+      (set-face-attribute 'dashboard-heading nil
+                          :foreground "#a9bed3"
+                          :weight 'medium))
+    (when (facep 'dashboard-items-face)
+      (set-face-attribute 'dashboard-items-face nil
+                          :foreground "#d8dee9"))
+    (when (facep 'dashboard-footer-face)
+      (set-face-attribute 'dashboard-footer-face nil
+                          :foreground "#6f748b"))
+    (when (facep 'dashboard-navigator)
+      (set-face-attribute 'dashboard-navigator nil
+                          :foreground "#8aa6c1"))
+    (when (facep 'dashboard-text-banner)
+      (set-face-attribute 'dashboard-text-banner nil
+                          :foreground "#8b90a8"))))
+
+(add-hook 'dashboard-mode-hook #'my/dashboard-apply-ui)
+(add-hook 'after-load-theme-hook #'my/dashboard-apply-ui)
 
 ;;; End of Line
 (setopt eol-mnemonic-unix " LF "

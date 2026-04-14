@@ -286,7 +286,7 @@ Doctor 更适合快速排查：
 
 - `eww`
 - `xwidget-webkit`
-- `EAF`
+- `appine`
 
 ### 常用命令
 
@@ -294,6 +294,12 @@ Doctor 更适合快速排查：
   `eww-browse-url`
 - `C-c w x`
   `xwidget-webkit-browse-url`
+- `C-c w a`
+  `my/appine-open-url`
+- `C-c w s`
+  `my/browser-switch-to`
+- `C-c w k`
+  `my/appine-kill-all`
 - `C-c w w`
   统一 `browse-url`
 
@@ -304,12 +310,19 @@ Doctor 更适合快速排查：
 - 简单页面：优先 `eww`
 - 复杂站点：优先 `xwidget-webkit`
 
-此外保留了：
+browser pipeline 额外提供：
 
 - EWW <-> Xwidget
-- EWW/Xwidget <-> EAF
+- EWW/Xwidget <-> Appine
+- 统一搜索入口：`my/browser-open-search`
+- 当前页面后端切换：`my/browser-switch-to`
+- Appine 便携动作：打开文件、打开光标下链接、前进后退、刷新、标签切换、全杀
 
-互转命令，方便按站点切换渲染器。
+因此当前建议是：
+
+- 文本/阅读优先 `eww`
+- 复杂网页优先 `xwidget-webkit`
+- 原生嵌入、临时查看文件或便携切换优先 `appine`
 
 ## 8. AI
 

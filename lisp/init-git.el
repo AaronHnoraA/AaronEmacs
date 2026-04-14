@@ -38,7 +38,8 @@
   (magit-diff-refine-hunk t)
   (magit-diff-paint-whitespace nil)
   (magit-ediff-dwim-show-on-hunks t)
-  (magit-display-buffer-function 'magit-display-buffer-same-window-except-diff-v1))
+  (magit-display-buffer-function 'magit-display-buffer-same-window-except-diff-v1)
+  (magit-section-visibility-indicator '("▸" . "▾")))
 
 ;; NOTE: `diff-hl' depends on `vc'
 (use-package vc
@@ -64,6 +65,63 @@
     (diff-hl-margin-mode))
   :custom
   (diff-hl-update-async t))
+
+(defun my/git-apply-ui ()
+  "Apply local diff indicator faces."
+  (when (display-graphic-p)
+    (when (facep 'magit-section-heading)
+      (set-face-attribute 'magit-section-heading nil
+                          :foreground "#a9bed3"
+                          :weight 'medium))
+    (when (facep 'magit-section-highlight)
+      (set-face-attribute 'magit-section-highlight nil
+                          :background "#2c3342"
+                          :extend t))
+    (when (facep 'magit-diff-context)
+      (set-face-attribute 'magit-diff-context nil
+                          :foreground "#8b90a8"
+                          :background "#24232f"))
+    (when (facep 'magit-diff-context-highlight)
+      (set-face-attribute 'magit-diff-context-highlight nil
+                          :foreground "#d8dee9"
+                          :background "#2a2f3d"))
+    (when (facep 'magit-diff-added)
+      (set-face-attribute 'magit-diff-added nil
+                          :foreground "#8fbf8f"
+                          :background "#243026"))
+    (when (facep 'magit-diff-added-highlight)
+      (set-face-attribute 'magit-diff-added-highlight nil
+                          :foreground "#a7d7a7"
+                          :background "#2a3a2e"))
+    (when (facep 'magit-diff-removed)
+      (set-face-attribute 'magit-diff-removed nil
+                          :foreground "#d79a9a"
+                          :background "#332628"))
+    (when (facep 'magit-diff-removed-highlight)
+      (set-face-attribute 'magit-diff-removed-highlight nil
+                          :foreground "#e4b3b3"
+                          :background "#3a2d30"))
+    (when (facep 'magit-branch-local)
+      (set-face-attribute 'magit-branch-local nil
+                          :foreground "#8aa6c1"
+                          :weight 'medium))
+    (when (facep 'magit-branch-remote)
+      (set-face-attribute 'magit-branch-remote nil
+                          :foreground "#8fbf8f"
+                          :weight 'medium))
+    (when (facep 'magit-hash)
+      (set-face-attribute 'magit-hash nil
+                          :foreground "#6f748b"))
+    (when (facep 'diff-hl-insert)
+      (set-face-attribute 'diff-hl-insert nil :foreground "#7fa86f" :background "#7fa86f"))
+    (when (facep 'diff-hl-change)
+      (set-face-attribute 'diff-hl-change nil :foreground "#8aa6c1" :background "#8aa6c1"))
+    (when (facep 'diff-hl-delete)
+      (set-face-attribute 'diff-hl-delete nil :foreground "#bf7f7f" :background "#bf7f7f"))))
+
+(add-hook 'after-init-hook #'my/git-apply-ui)
+(add-hook 'server-after-make-frame-hook #'my/git-apply-ui)
+(add-hook 'after-load-theme-hook #'my/git-apply-ui)
 
 ;; Visual diff interface
 (use-package ediff

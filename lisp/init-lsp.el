@@ -11,6 +11,10 @@
 (require 'cl-lib)
 (require 'subr-x)
 
+(eval-when-compile
+  (ignore-errors
+    (require 'hydra)))
+
 (defgroup my/language-server nil
   "Routing and observability helpers for the language server stack."
   :group 'tools
@@ -61,7 +65,15 @@ Each entry is a plist with keys such as `:modes', `:program',
 (defvar eglot-server-programs)
 (defvar eglot-workspace-configuration)
 (defvar gcmh-high-cons-threshold)
+(defvar my/dape-state-dir)
+(defvar company-dabbrev-ignore-case)
+(defvar company-dabbrev-downcase)
+(defvar company-dabbrev-code-ignore-case)
+(defvar company-dabbrev-code-everywhere)
+(defvar company-files-exclusions)
 (defvar lsp-managed-mode)
+(defvar lsp-completion-provider)
+(defvar lsp-diagnostics-provider)
 (defvar lsp-enable-file-watchers)
 (defvar lsp-file-watch-threshold)
 (defvar read-process-output-max)
@@ -90,10 +102,23 @@ Each entry is a plist with keys such as `:modes', `:program',
 (declare-function lsp--update-inlay-hints "lsp-mode" ())
 (declare-function lsp--workspace-buffers "lsp-mode" (workspace))
 (declare-function eglot-current-server "eglot")
+(declare-function eglot-code-actions "eglot" ())
+(declare-function eglot-find-implementation "eglot" ())
+(declare-function eglot-find-typeDefinition "eglot" ())
+(declare-function eglot-format-buffer "eglot" ())
+(declare-function eglot-rename "eglot" ())
 (declare-function eglot--lookup-mode "eglot" (mode))
 (declare-function eglot--managed-buffers "eglot" (server))
+(declare-function eglot--managed-mode@my/defer-eglot-shutdown nil (&optional server))
 (declare-function eglot-shutdown "eglot" (server))
+(declare-function eldoc-box-quit-frame "eldoc-box" ())
 (declare-function gcmh-set-high-threshold "gcmh" ())
+(declare-function hydra--call-interactively-remap-maybe "hydra" (cmd &optional keys))
+(declare-function hydra-default-pre "hydra" ())
+(declare-function hydra-keyboard-quit "hydra" ())
+(declare-function hydra-set-transient-map "hydra" (keymap &optional keep-pred on-exit message timeout))
+(declare-function hydra-show-hint "hydra" (&rest args))
+(declare-function lsp--on-request@my/handle-inlay-hint-refresh nil (workspace request))
 (declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
 (declare-function my/project-local-apply-env "init-project-local" (env &optional base))
 (declare-function my/project-local-env "init-project-local" (kind &optional root))
@@ -868,9 +893,10 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   (add-hook 'dape-start-hook
             (lambda () (save-some-buffers t t)))
 
-  (defhydra hydra-dape-mode
-    (:color pink :hint nil :foreign-keys run)
-    "
+  (with-suppressed-warnings ((docstrings) (callargs))
+    (defhydra hydra-dape-mode
+      (:color pink :hint nil :foreign-keys run)
+      "
 ^Stepping^          ^Switch/View^             ^Breakpoints^         ^Debug^                     ^Eval / Watch^
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 _n_: Next           _ss_: Sessions(REPL)      _bb_: Toggle          _dd_: Debug (dape)          _ee_: Eval
@@ -879,47 +905,47 @@ _o_: Step out       _sf_: Stack               _ba_: Log message     _dq_: Quit  
 _c_: Continue       _sl_: Locals(scope)       _bc_: Condition       _dR_: REPL                  _ea_: Add watch
 _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
 "
-    ("n" dape-next)
-    ("i" dape-step-in)
-    ("o" dape-step-out)
-    ("c" dape-continue)
-    ("p" dape-pause)
+      ("n" dape-next)
+      ("i" dape-step-in)
+      ("o" dape-step-out)
+      ("c" dape-continue)
+      ("p" dape-pause)
 
-    ("ss" dape-repl)
-    ("st" dape-repl-threads)
-    ("sf" dape-repl-stack)
-    ("sl" dape-repl-scope)
-    ("sb" dape-repl-breakpoints)
+      ("ss" dape-repl)
+      ("st" dape-repl-threads)
+      ("sf" dape-repl-stack)
+      ("sl" dape-repl-scope)
+      ("sb" dape-repl-breakpoints)
 
-    ("bb" dape-breakpoint-toggle)
-    ("ba" dape-breakpoint-log)
-    ("bd" dape-breakpoint-remove-at-point)
-    ("bc" dape-breakpoint-expression)
-    ("bh" dape-breakpoint-hits)
+      ("bb" dape-breakpoint-toggle)
+      ("ba" dape-breakpoint-log)
+      ("bd" dape-breakpoint-remove-at-point)
+      ("bc" dape-breakpoint-expression)
+      ("bh" dape-breakpoint-hits)
 
-    ("dd" dape)
-    ("dr" dape-restart)
-    ("dR" dape-repl)
-    ("dq" dape-quit :color blue)
+      ("dd" dape)
+      ("dr" dape-restart)
+      ("dR" dape-repl)
+      ("dq" dape-quit :color blue)
 
-    ("ee" dape-evaluate-expression)
-    ("ea" dape-watch-dwim)
-    ("er" (if (use-region-p)
-              (dape-evaluate-expression
-               (or (ignore-errors (dape--live-connection 'stopped t))
-                   (ignore-errors (dape--live-connection 'last)))
-               (buffer-substring-no-properties
-                (region-beginning) (region-end)))
-            (user-error "No active region")))
-    ("es" (let ((sym (thing-at-point 'symbol t)))
-            (if sym
+      ("ee" dape-evaluate-expression)
+      ("ea" dape-watch-dwim)
+      ("er" (if (use-region-p)
                 (dape-evaluate-expression
                  (or (ignore-errors (dape--live-connection 'stopped t))
                      (ignore-errors (dape--live-connection 'last)))
-                 sym)
-              (user-error "No symbol at point"))))
+                 (buffer-substring-no-properties
+                  (region-beginning) (region-end)))
+              (user-error "No active region")))
+      ("es" (let ((sym (thing-at-point 'symbol t)))
+              (if sym
+                  (dape-evaluate-expression
+                   (or (ignore-errors (dape--live-connection 'stopped t))
+                       (ignore-errors (dape--live-connection 'last)))
+                   sym)
+                (user-error "No symbol at point"))))
 
-    ("q" nil "quit" :color blue)))
+      ("q" nil "quit" :color blue))))
 
 
 ;; -------------------------

@@ -76,19 +76,21 @@
   :hook ((c-mode . my/eglot-ensure)
          (c++-mode . my/eglot-ensure)
          (c-ts-mode . my/eglot-ensure)
-         (c++-ts-mode . my/eglot-ensure))
-  :config
-  (my/register-eglot-server-program
-   '(c-mode c++-mode c-ts-mode c++-ts-mode)
-   '("clangd"
-     "-j=2"
-     "--background-index"
-     "--clang-tidy"
-     "--completion-style=bundled"
-     "--header-insertion-decorators")
-   :label "clangd"
-   :executables '("clangd")
-   :note "C/C++ buffers use clangd through Eglot."))
+         (c++-ts-mode . my/eglot-ensure)))
+
+(with-eval-after-load 'eglot
+  (when (fboundp 'my/register-eglot-server-program)
+    (my/register-eglot-server-program
+     '(c-mode c++-mode c-ts-mode c++-ts-mode)
+     '("clangd"
+       "-j=2"
+       "--background-index"
+       "--clang-tidy"
+       "--completion-style=bundled"
+       "--header-insertion-decorators")
+     :label "clangd"
+     :executables '("clangd")
+     :note "C/C++ buffers use clangd through Eglot.")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Compiler explorer
@@ -114,17 +116,19 @@
 ;; LLVM IR
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(use-package llvm-mode
-  :ensure nil
-  :mode ("\\.ll\\'" . llvm-mode))
+(when (locate-library "llvm-mode")
+  (use-package llvm-mode
+    :ensure nil
+    :mode ("\\.ll\\'" . llvm-mode)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TableGen
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(use-package tablegen-mode
-  :ensure nil
-  :mode ("\\.td\\'" . tablegen-mode))
+(when (locate-library "tablegen-mode")
+  (use-package tablegen-mode
+    :ensure nil
+    :mode ("\\.td\\'" . tablegen-mode)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Snippets (tempo)

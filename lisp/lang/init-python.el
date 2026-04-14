@@ -51,17 +51,19 @@
 (use-package eglot
   :ensure nil
   :hook ((python-mode . my/python-eglot-ensure)
-         (python-ts-mode . my/python-eglot-ensure))
-  :config
-  (my/register-eglot-server-program
-   '(python-mode python-ts-mode)
-   #'my/python-eglot-contact
-   :label "local: basedpyright/pyright, remote: pylsp/jedi"
-   :executables '("basedpyright-langserver"
-                  "pyright-langserver"
-                  "pylsp"
-                  "jedi-language-server")
-   :note "Python buffers prefer basedpyright/pyright locally, but prefer pylsp/jedi over TRAMP."))
+         (python-ts-mode . my/python-eglot-ensure)))
+
+(with-eval-after-load 'eglot
+  (when (fboundp 'my/register-eglot-server-program)
+    (my/register-eglot-server-program
+     '(python-mode python-ts-mode)
+     #'my/python-eglot-contact
+     :label "local: basedpyright/pyright, remote: pylsp/jedi"
+     :executables '("basedpyright-langserver"
+                    "pyright-langserver"
+                    "pylsp"
+                    "jedi-language-server")
+     :note "Python buffers prefer basedpyright/pyright locally, but prefer pylsp/jedi over TRAMP.")))
 
 (use-package python
   :ensure nil

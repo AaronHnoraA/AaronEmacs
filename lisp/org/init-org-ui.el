@@ -69,6 +69,7 @@
   
   ;; 2. 标签按钮化 (Tag Buttons)
   (org-modern-tag t) 
+  (org-modern-label-border 4)
   
   ;; 3. 统计与进度条美化
   (org-modern-statistics t) 
@@ -111,6 +112,115 @@
   (org-modern-todo nil) ; 禁用 todo 美化，以免覆盖你在 org-mode 中自定义的颜色
   (org-modern-priority t))
 
+(defun my/org-apply-ui ()
+  "Apply the local document UI to Org and Org Modern faces."
+  (when (display-graphic-p)
+    (when (facep 'org-document-title)
+      (set-face-attribute 'org-document-title nil
+                          :foreground "#f6f1df"
+                          :weight 'medium))
+    (when (facep 'org-level-1)
+      (set-face-attribute 'org-level-1 nil :foreground "#e7cf8b" :weight 'medium))
+    (when (facep 'org-level-2)
+      (set-face-attribute 'org-level-2 nil :foreground "#98ccf2" :weight 'medium))
+    (when (facep 'org-level-3)
+      (set-face-attribute 'org-level-3 nil :foreground "#c7b7ec" :weight 'medium))
+    (when (facep 'org-level-4)
+      (set-face-attribute 'org-level-4 nil :foreground "#96d4be" :weight 'medium))
+    (when (facep 'org-level-5)
+      (set-face-attribute 'org-level-5 nil :foreground "#d9be96"))
+    (when (facep 'org-level-6)
+      (set-face-attribute 'org-level-6 nil :foreground "#a3bdd8"))
+    (when (facep 'org-level-7)
+      (set-face-attribute 'org-level-7 nil :foreground "#c1b4d7"))
+    (when (facep 'org-level-8)
+      (set-face-attribute 'org-level-8 nil :foreground "#9dc3b6"))
+    (when (facep 'org-document-info)
+      (set-face-attribute 'org-document-info nil :foreground "#c7cfdb"))
+    (when (facep 'org-meta-line)
+      (set-face-attribute 'org-meta-line nil
+                          :background "#24362b"
+                          :foreground "#98c379"
+                          :extend t))
+    (when (facep 'org-document-info-keyword)
+      (set-face-attribute 'org-document-info-keyword nil
+                          :background "#24362b"
+                          :foreground "#8fbc72"))
+    (when (facep 'org-block)
+      (set-face-attribute 'org-block nil
+                          :background "#2d3240"
+                          :foreground "#e8edf4"
+                          :extend t))
+    (when (facep 'org-block-begin-line)
+      (set-face-attribute 'org-block-begin-line nil
+                          :background "#394150"
+                          :foreground "#c6d0dc"
+                          :extend t))
+    (when (facep 'org-block-end-line)
+      (set-face-attribute 'org-block-end-line nil
+                          :background "#394150"
+                          :foreground "#aeb8c7"
+                          :extend t))
+    (when (facep 'org-code)
+      (set-face-attribute 'org-code nil
+                          :background "#2d3140"
+                          :foreground "#f0d58a"))
+    (when (facep 'org-verbatim)
+      (set-face-attribute 'org-verbatim nil
+                          :background "#2d3140"
+                          :foreground "#95d5ff"))
+    (when (facep 'org-table)
+      (set-face-attribute 'org-table nil :foreground "#cad3e0"))
+    (when (facep 'org-formula)
+      (set-face-attribute 'org-formula nil :foreground "#d9b8ff"))
+    (when (facep 'org-special-keyword)
+      (set-face-attribute 'org-special-keyword nil
+                          :background "#24362b"
+                          :foreground "#8fbc72"))
+    (when (facep 'org-date)
+      (set-face-attribute 'org-date nil :foreground "#9fd7ff"))
+    (when (facep 'org-drawer)
+      (set-face-attribute 'org-drawer nil :foreground "#b0bbcd"))
+    (when (facep 'org-ellipsis)
+      (set-face-attribute 'org-ellipsis nil :foreground "#f0c674"))
+    (when (facep 'org-indent)
+      (set-face-attribute 'org-indent nil :foreground "#313949" :background "#282a36"))
+    (when (facep 'org-hide)
+      (set-face-attribute 'org-hide nil :foreground "#282a36" :background "#282a36"))
+    (when (facep 'org-modern-label)
+      (set-face-attribute 'org-modern-label nil
+                          :background "#445065"
+                          :foreground "#edf2f7"
+                          :box '(:line-width 4 :color "#445065")))
+    (when (facep 'org-modern-keyword)
+      (set-face-attribute 'org-modern-keyword nil
+                          :background "#24362b"
+                          :foreground "#8fbc72"
+                          :box nil))
+    (when (facep 'org-modern-tag)
+      (set-face-attribute 'org-modern-tag nil
+                          :background "#38435a"
+                          :foreground "#dce4ee"))
+    (when (facep 'org-modern-date-active)
+      (set-face-attribute 'org-modern-date-active nil
+                          :background "#3a465c"
+                          :foreground "#c0e3f8"))
+    (when (facep 'org-modern-date-inactive)
+      (set-face-attribute 'org-modern-date-inactive nil
+                          :background "#343a49"
+                          :foreground "#b1bac9"))
+    (when (facep 'org-modern-block-name)
+      (set-face-attribute 'org-modern-block-name nil
+                          :foreground "#f0d58a"
+                          :weight 'medium))
+    (when (facep 'org-modern-progress-complete)
+      (set-face-attribute 'org-modern-progress-complete nil :foreground "#9ed0a4"))
+    (when (facep 'org-modern-progress-incomplete)
+      (set-face-attribute 'org-modern-progress-incomplete nil :foreground "#66728a"))))
+
+(add-hook 'org-mode-hook #'my/org-apply-ui)
+(add-hook 'after-load-theme-hook #'my/org-apply-ui)
+
 ;; 3.4 Org Modern Indent
 (my/package-ensure-vc 'org-modern-indent "https://github.com/jdtsmith/org-modern-indent.git")
 
@@ -142,20 +252,20 @@
 ;; 1. 样式配置 (可自定义颜色和标签)
 ;; ===========================================================
 (defvar my/org-special-block-styles
-  '(("definition" . (:label "定义" :color "#e0af68"))
-    ("defn"       . (:label "定义" :color "#e0af68"))
-    ("theorem"    . (:label "定理" :color "#9ece6a"))
-    ("thm"        . (:label "定理" :color "#9ece6a"))
-    ("lemma"      . (:label "引理" :color "#7aa2f7"))
-    ("cor"        . (:label "推论" :color "#bb9af7"))
-    ("prop"       . (:label "命题" :color "#ff75a0"))
-    ("property"   . (:label "性质" :color "#bb9af7"))
-    ("proof"      . (:label "证明" :color "#7aa2f7"))
-    ("example"    . (:label "例子" :color "#d08770"))
-    ("attention"  . (:label "注意" :color "#f7768e"))
-    ("note"       . (:label "笔记" :color "#0db9d7"))
-    ("info"       . (:label "信息" :color "#0db9d7"))
-    ("warning"    . (:label "警告" :color "#f7768e"))))
+  '(("definition" . (:label "定义" :color "#e6c57d"))
+    ("defn"       . (:label "定义" :color "#e6c57d"))
+    ("theorem"    . (:label "定理" :color "#9fd694"))
+    ("thm"        . (:label "定理" :color "#9fd694"))
+    ("lemma"      . (:label "引理" :color "#8bbfe8"))
+    ("cor"        . (:label "推论" :color "#c4b1e2"))
+    ("prop"       . (:label "命题" :color "#e59bb4"))
+    ("property"   . (:label "性质" :color "#c4b1e2"))
+    ("proof"      . (:label "证明" :color "#7fb2e6"))
+    ("example"    . (:label "例子" :color "#deae8d"))
+    ("attention"  . (:label "注意" :color "#de8ea0"))
+    ("note"       . (:label "笔记" :color "#88cddd"))
+    ("info"       . (:label "信息" :color "#88cddd"))
+    ("warning"    . (:label "警告" :color "#de8ea0"))))
 
 (defface my/org-block-title-face
   '((t :weight regular :height 1.05 :inherit default))
@@ -199,13 +309,16 @@
              (base-color (plist-get config :color))
              (label (plist-get config :label))
              (params (org-element-property :parameters element))
-             (title-text (concat " " label (if params (concat " : " params) "")))
+             (title-text (concat " " label))
+             (params-text (and params (concat "  " params)))
              
              (default-bg (face-attribute 'default :background nil t))
              (default-bg (if (or (not default-bg) (string= default-bg "unspecified"))
                              "#1a1b26" default-bg))
-             (header-bg (my/org-blend-colors base-color default-bg 0.15))
-             (body-bg (my/org-blend-colors base-color default-bg 0.05)))
+             (header-bg (my/org-blend-colors base-color default-bg 0.13))
+             (body-bg (my/org-blend-colors base-color default-bg 0.045))
+             (footer-color (my/org-blend-colors base-color default-bg 0.62))
+             (params-color (my/org-blend-colors "#d8dee9" default-bg 0.68)))
 
         ;; 3. 清理区域
         (remove-overlays begin-pos end-pos 'my/org-pretty-block t)
@@ -221,8 +334,10 @@
             (overlay-put ov 'face `(:background ,header-bg :extend t))
             (overlay-put ov 'priority priority)
             (overlay-put ov 'display 
-                         (concat (propertize "▍" 'face `(:foreground ,base-color :weight bold))
-                                 (propertize title-text 'face `(:inherit my/org-block-title-face :foreground ,base-color))))
+                         (concat (propertize "▎" 'face `(:foreground ,base-color :weight bold))
+                                 (propertize title-text 'face `(:inherit my/org-block-title-face :foreground ,base-color :weight medium))
+                                 (when params-text
+                                   (propertize params-text 'face `(:inherit my/org-block-title-face :foreground ,params-color)))))
             (overlay-put ov 'evaporate t)))
 
         ;; -------------------------------------------------------
@@ -253,8 +368,8 @@
               (overlay-put ov 'face `(:background ,body-bg :extend t))
               (overlay-put ov 'priority priority)
               (overlay-put ov 'display 
-                           (propertize "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" 
-                                       'face `(:foreground ,base-color :height 0.7)))
+                           (propertize "╰────────────────────────"
+                                       'face `(:foreground ,footer-color :height 0.8)))
               (overlay-put ov 'evaporate t))))))))
 
 ;; ===========================================================

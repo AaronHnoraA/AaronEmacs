@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ratex-types",
+    "crates/ratex-font",
+    "crates/ratex-lexer",
+    "crates/ratex-parser",
+    "crates/ratex-layout",
+    "crates/ratex-ffi",
+    "crates/ratex-render",
+    "crates/ratex-svg",
+    "crates/ratex-wasm",
+]
+
+[workspace.package]
+version = "0.0.12"
+edition = "2021"
+authors = ["RaTeX Contributors"]
+license = "MIT"
+repository = "https://github.com/erweixin/RaTeX"
+homepage = "https://github.com/erweixin/RaTeX"
+documentation = "https://github.com/erweixin/RaTeX#readme"
+
+[workspace.dependencies]
+ratex-types  = { path = "crates/ratex-types", version = "0.0.12" }
+ratex-font   = { path = "crates/ratex-font", version = "0.0.12" }
+ratex-lexer  = { path = "crates/ratex-lexer", version = "0.0.12" }
+ratex-parser = { path = "crates/ratex-parser", version = "0.0.12" }
+ratex-layout = { path = "crates/ratex-layout", version = "0.0.12" }
+ratex-svg    = { path = "crates/ratex-svg", version = "0.0.12" }
+
+phf        = { version = "0.11", features = ["macros"] }
+thiserror  = "1.0"
+serde      = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+lto = true            # Full cross-crate link-time optimization, eliminates dead code
+codegen-units = 1     # Single codegen unit for maximum optimization
+panic = "abort"       # Remove unwinding machinery (gimli, addr2line, miniz_oxide, regex_lite)
+strip = "symbols"     # Strip all symbol tables from output binaries

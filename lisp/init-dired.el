@@ -60,6 +60,36 @@
   :ensure t
   :hook (dired-mode . diredfl-mode))
 
+(defun my/dired-apply-ui ()
+  "Apply local UI styling to Dired."
+  (when (display-graphic-p)
+    (when (facep 'diredfl-dir-name)
+      (set-face-attribute 'diredfl-dir-name nil
+                          :foreground "#a9bed3"
+                          :weight 'medium))
+    (when (facep 'diredfl-file-name)
+      (set-face-attribute 'diredfl-file-name nil
+                          :foreground "#d8dee9"))
+    (when (facep 'diredfl-exec-priv)
+      (set-face-attribute 'diredfl-exec-priv nil
+                          :foreground "#8fbf8f"))
+    (when (facep 'diredfl-no-priv)
+      (set-face-attribute 'diredfl-no-priv nil
+                          :foreground "#6f748b"))
+    (when (facep 'diredfl-date-time)
+      (set-face-attribute 'diredfl-date-time nil
+                          :foreground "#7f849c"))
+    (when (facep 'diredfl-number)
+      (set-face-attribute 'diredfl-number nil
+                          :foreground "#8aa6c1"))
+    (when (facep 'dired-header)
+      (set-face-attribute 'dired-header nil
+                          :foreground "#a9bed3"
+                          :weight 'medium))
+    (setq-local hl-line-face 'hl-line)))
+
+(add-hook 'dired-mode-hook #'my/dired-apply-ui)
+
 (let ((gls (executable-find "gls")))
   (setq insert-directory-program (or gls insert-directory-program)
         dired-use-ls-dired (and gls t)

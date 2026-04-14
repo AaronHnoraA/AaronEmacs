@@ -11,7 +11,7 @@
   - [init.el](init.el) 负责 `package.el`、`use-package`、macOS GUI/daemon 下的 `exec-path-from-shell`、模块装配以及本地 Elisp 编译 helper。
   - [lisp/init-modules.el](lisp/init-modules.el) 按顺序加载功能模块，[lisp/lang/](lisp/lang/) 负责语言专项配置。
 - UI 与编辑体验
-  - 主题是 `kanagawa-wave`，配 `doom-modeline`、`dashboard`、`shackle`、`tab-bar`、`popper`。
+  - 主题基底是本地 vendored 的 `aaron-ui`（`kanagawa-wave` 变体），配 `doom-modeline`、`dashboard`、`shackle`、`tab-bar`、`popper`。
   - 现在额外补了 Doom 风格的 workspace 层：`perspective` 有独立窗口历史，`SPC TAB` 是工作区总入口，modeline 直接显示当前 workspace。
   - 默认启用全局行号、fill-column 指示线、ligature、自定义字体与中文字体绑定。
   - 新增 Doom 风格的统一 escape / popup 关闭、行号循环切换和跳转后 pulse 高亮反馈。
@@ -49,8 +49,9 @@
   - `M-x my/vterm-ssh` 会优先读取 `~/.ssh/config` 的主机名，打开专用 vterm 并直接 SSH。
   - TRAMP 做了 PATH、ControlMaster、超时、spinner、持久化文件和 autosave 目录配置；现在又补了 Doom 风格的 remote cache、direct async process、LSP 兼容回退和远程项目/VC 根缓存。
 - 浏览器 / 外部整合
-  - `browse-url` 会按 URL 复杂度在 `eww` 和 `xwidget-webkit` 之间分流。
-  - 还保留了 EAF 浏览器 / PDF / Git / mindmap 等入口，以及 EWW / Xwidget / EAF 互转函数。
+  - 浏览器主线现在是 `eww`、`xwidget-webkit`、`appine` 三套后端，加上一层统一的 browser pipeline。
+  - `browse-url` 会按 URL 复杂度在 `eww` 和 `xwidget-webkit` 之间分流；`appine` 负责原生嵌入和便携切换。
+  - `eww` / `xwidget-webkit` / `appine` 之间都保留了互转函数和统一搜索入口。
   - `atomic-chrome`、`webjump`、`fanyi`、`rcirc`、`gnus` 都在配置里。
 - AI
   - `gptel` 支持默认 ChatGPT / GitHub Copilot 后端，也支持从 `etc/mygpt.json` 读取多后端配置、preset、context 和 rewrite 工作流。
@@ -69,11 +70,9 @@
 - [docs/](docs/)
   中文使用手册，覆盖安装、日常操作、项目管理、Org、LSP/远程、维护和自定义；另外补了 LSP / Jupyter 的专题 workflow 文档。
 - [lisp/](lisp/)
-  主配置模块，覆盖 UI、补全、项目、Org、终端、EAF 等。
+  主配置模块，覆盖 UI、补全、项目、Org、终端、浏览器整合等。
 - [lisp/lang/](lisp/lang/)
   语言专项配置，目前覆盖 C/C++、Rust、Python、OCaml、Haskell、Lean、Nix、Shell、JS、HTML、Markdown、Bazel、Sage、Vale、Elisp 等。
-- [site-lisp/emacs-application-framework/](site-lisp/emacs-application-framework/)
-  本地 EAF 源码。
 - [snippets/](snippets/)
   `yasnippet` 自定义 snippet。
 - [tools/](tools/)
@@ -193,6 +192,18 @@
   `eww-browse-url`。
 - `C-c w x`
   `xwidget-webkit-browse-url`。
+- `C-c w a`
+  `my/appine-open-url`。
+- `C-c w f` / `C-c w g`
+  `my/appine-open-file` / `my/appine-open-at-point`。
+- `C-c w h` / `C-c w l` / `C-c w r`
+  `appine` 后退 / 前进 / 刷新。
+- `C-c w [` / `C-c w ]` / `C-c w 0`
+  `appine` 上一标签 / 下一标签 / 关闭标签。
+- `C-c w s`
+  在 `eww` / `xwidget` / `appine` 之间切换当前页面。
+- `C-c w k`
+  `my/appine-kill-all`。
 - `C-c w w`
   统一的 `browse-url` 入口。
 - `SPC l l` / `C-c l l`
@@ -233,8 +244,8 @@
 - 外部工具 / 应用
   - `gls`：`dirvish` / `dired` 在 macOS 下按 GNU ls 的参数工作。
   - `terminal-notifier`：macOS 通知使用它。
-  - Brave：`xwidget-webkit` 和 EAF 里写死了 Brave 的 cookie/cache 路径。
-  - EAF：默认从 `site-lisp/emacs-application-framework/` 本地加载。
+  - Brave：`xwidget-webkit` 里写死了 Brave 的 cookie/cache 路径。
+  - Appine：第一次真正调用时会按它自己的流程准备动态模块。
 - 字体
   - 当前配置直接引用 `Merriweather`、`Fira Code`、`Excalifont`、`FZLiuGongQuanKaiShuJF`、`JetBrainsMono Nerd Font`。
   - 缺字体不会阻止启动，但界面效果会和当前配置作者机器明显不同。

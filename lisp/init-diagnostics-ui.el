@@ -60,6 +60,32 @@ When `other', show only other files.")
 (define-derived-mode my/diagnostics-mode special-mode "Diagnostics"
   "Major mode for persistent diagnostics lists.")
 
+(defun my/diagnostics-apply-ui ()
+  "Apply local diagnostic faces."
+  (when (display-graphic-p)
+    (when (facep 'flymake-error)
+      (set-face-attribute 'flymake-error nil
+                          :underline '(:style line :color "#bf7f7f")
+                          :foreground 'unspecified))
+    (when (facep 'flymake-warning)
+      (set-face-attribute 'flymake-warning nil
+                          :underline '(:style line :color "#d0a86e")
+                          :foreground 'unspecified))
+    (when (facep 'flymake-note)
+      (set-face-attribute 'flymake-note nil
+                          :underline '(:style line :color "#8aa6c1")
+                          :foreground 'unspecified))
+    (when (facep 'error)
+      (set-face-attribute 'error nil :foreground "#d79a9a"))
+    (when (facep 'warning)
+      (set-face-attribute 'warning nil :foreground "#d8b27f"))
+    (when (facep 'success)
+      (set-face-attribute 'success nil :foreground "#8fbf8f"))))
+
+(add-hook 'after-init-hook #'my/diagnostics-apply-ui)
+(add-hook 'server-after-make-frame-hook #'my/diagnostics-apply-ui)
+(add-hook 'after-load-theme-hook #'my/diagnostics-apply-ui)
+
 (defun my/diagnostics--severity-rank (diag)
   "Return a sort rank for DIAG severity."
   (pcase (flymake-diagnostic-type diag)

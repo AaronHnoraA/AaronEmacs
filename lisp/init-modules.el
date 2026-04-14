@@ -80,9 +80,11 @@ If one of FEATURES is already available, require MODULE immediately."
 
 ;; standalone apps
 (my/require-module-after-any-feature 'init-org 'org)
+(my/require-module-after-any-feature 'init-ratex 'org)
 (my/require-module-after-any-feature 'init-org-mmdc 'org)
 (my/require-module-after-any-feature 'init-org-zotero 'org)
-(my/require-module-safely 'init-eaf)
+(when (eq system-type 'darwin)
+  (my/require-module-safely 'init-appine))
 (require 'init-text)
 (require 'init-shell)
 (require 'init-remote-connectboard)

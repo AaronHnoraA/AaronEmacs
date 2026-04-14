@@ -247,6 +247,33 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
   `eww-browse-url`
 - `SPC o x`
   `xwidget-webkit-browse-url`
+- `SPC o a`
+  `my/appine-open-url`
+- `SPC o W`
+  统一搜索入口，可选搜索引擎和浏览后端
+- `SPC o B`
+  在 `eww` / `xwidget` / `appine` 之间切换当前页面
+
+### Appine `SPC a p`
+
+- `SPC a p a`
+  打开 URL 到 `appine`
+- `SPC a p f`
+  用 `appine` 打开文件
+- `SPC a p p`
+  用 `appine` 打开光标下 URL
+- `SPC a p h` / `SPC a p l` / `SPC a p r`
+  后退 / 前进 / 刷新
+- `SPC a p [` / `SPC a p ]` / `SPC a p c`
+  上一标签 / 下一标签 / 关闭当前标签
+- `SPC a p k`
+  `my/appine-kill-all`
+- `SPC a p R`
+  `my/appine-restart`
+- `SPC a p s`
+  切换当前页面到 `eww` / `xwidget` / `appine`
+- `SPC a p S`
+  统一搜索入口
 
 ### Tab `SPC t`
 

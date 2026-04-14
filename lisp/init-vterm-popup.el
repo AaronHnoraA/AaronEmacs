@@ -51,6 +51,20 @@
 (defvar-local my/vterm-popup-instance-p nil
   "Whether the current buffer belongs to the popup vterm pool.")
 
+(defun my/vterm-popup-apply-ui (buffer)
+  "Apply local popup terminal UI to BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq-local mode-line-format nil)
+      (setq-local header-line-format
+                  '(" "
+                    (:propertize "%b" face mode-line-buffer-id)
+                    "  "
+                    (:propertize "terminal" face shadow)))
+      (setq-local fringes-outside-margins nil)
+      (setq-local left-margin-width 0)
+      (setq-local right-margin-width 0))))
+
 (defun my/vterm-popup--buffer-p (buffer)
   "Return non-nil when BUFFER is a live popup vterm buffer."
   (and (buffer-live-p buffer)
@@ -142,6 +156,7 @@ When BUFFER is non-nil, return the window displaying BUFFER."
      window 'my-vterm-fixed
      (buffer-local-value 'my/vterm-popup-fixed buffer))
     (set-window-parameter window 'no-delete-other-windows t)
+    (set-window-parameter window 'mode-line-format 'none)
     (window-preserve-size window nil t)
     window))
 
@@ -177,6 +192,7 @@ Use BUFFER-NAME when non-nil."
                            (vterm target-name))
       (setq-local my/vterm-popup-instance-p t)
       (setq-local my/vterm-popup-fixed nil)
+      (my/vterm-popup-apply-ui (current-buffer))
       (add-hook 'kill-buffer-hook #'my/vterm-popup--on-kill nil t)
       (setq my/vterm-popup-buffers
             (append (my/vterm-popup--live-buffers) (list (current-buffer))))

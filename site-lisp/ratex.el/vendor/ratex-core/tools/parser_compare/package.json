@@ -1,0 +1,11 @@
+{
+  "name": "parser-compare",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Compare ratex-parser vs KaTeX parser output",
+  "type": "module",
+  "dependencies": {
+    "katex": "^0.16.38",
+    "tsx": "^4.21.0"
+  }
+}

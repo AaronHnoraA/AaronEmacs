@@ -5,8 +5,19 @@
 
 ;;; Code:
 ;;;
-    
 
+(declare-function appine-open-url "appine" (url))
+(declare-function my/appine-get-url "init-appine" ())
+(declare-function my/appine-kill-all "init-appine" ())
+(declare-function my/appine-back "init-appine" ())
+(declare-function my/appine-close-tab "init-appine" ())
+(declare-function my/appine-forward "init-appine" ())
+(declare-function my/appine-next-tab "init-appine" ())
+(declare-function my/appine-open-url "init-appine" (url))
+(declare-function my/appine-open-file "init-appine" (path))
+(declare-function my/appine-open-at-point "init-appine" ())
+(declare-function my/appine-prev-tab "init-appine" ())
+(declare-function my/appine-reload "init-appine" ())
 ;; 共享 Brave 的所有数据（需要关闭 Brave）
 (setq xwidget-webkit-cookie-file 
       (expand-file-name "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"))
@@ -103,12 +114,25 @@
 
 (global-set-key (kbd "C-c w e") #'eww-browse-url)
 (global-set-key (kbd "C-c w x") #'xwidget-webkit-browse-url)
+(global-set-key (kbd "C-c w a") #'my/appine-open-url)
+(global-set-key (kbd "C-c w f") #'my/appine-open-file)
+(global-set-key (kbd "C-c w g") #'my/appine-open-at-point)
+(global-set-key (kbd "C-c w h") #'my/appine-back)
+(global-set-key (kbd "C-c w l") #'my/appine-forward)
+(global-set-key (kbd "C-c w r") #'my/appine-reload)
+(global-set-key (kbd "C-c w [") #'my/appine-prev-tab)
+(global-set-key (kbd "C-c w ]") #'my/appine-next-tab)
+(global-set-key (kbd "C-c w 0") #'my/appine-close-tab)
 (global-set-key (kbd "C-c w w") #'browse-url)
+(global-set-key (kbd "C-c w s") #'my/browser-switch-to)
+(global-set-key (kbd "C-c w k") #'my/appine-kill-all)
 
 
 (with-eval-after-load 'eww
   (setq eww-search-prefix "https://duckduckgo.com/?q=")
-  (define-key eww-mode-map (kbd "R") #'eww-readable))
+  (define-key eww-mode-map (kbd "R") #'eww-readable)
+  (define-key eww-mode-map (kbd "X") #'my/eww-to-xwidget)
+  (define-key eww-mode-map (kbd "A") #'my/eww-to-appine))
 ;;; init-base.el ends here
 
 ;;; eww <-> xwidget-webkit 互转 (稳健版)
@@ -126,6 +150,96 @@
   (if (eq major-mode 'xwidget-webkit-mode)
       (xwidget-webkit-uri (xwidget-webkit-current-session))
     nil))
+
+(defun my/browser-build-search-url (search-term engine)
+  "Return a search URL for SEARCH-TERM on ENGINE."
+  (require 'url-util)
+  (let ((encoded-query (url-hexify-string search-term)))
+    (pcase engine
+      ('bing (format "https://www.bing.com/search?q=%s" encoded-query))
+      ('perplexity (format "https://www.perplexity.ai/search?q=%s" encoded-query))
+      ('duckduckgo (format "https://duckduckgo.com/?q=%s" encoded-query))
+      (_ (format "https://www.bing.com/search?q=%s" encoded-query)))))
+
+(defun my/browser-current-backend ()
+  "Return the current browser backend symbol, or nil."
+  (cond
+   ((derived-mode-p 'eww-mode) 'eww)
+   ((eq major-mode 'xwidget-webkit-mode) 'xwidget)
+   ((and (fboundp 'my/appine-get-url)
+         (ignore-errors (my/appine-get-url)))
+    'appine)
+   (t nil)))
+
+(defun my/browser-current-url ()
+  "Return the current page URL for the active browser backend."
+  (pcase (my/browser-current-backend)
+    ('eww (my/eww-get-url))
+    ('xwidget (my/xwidget-get-url))
+    ('appine (and (fboundp 'my/appine-get-url)
+                  (my/appine-get-url)))
+    (_ nil)))
+
+(defun my/browser-open-url-with-backend (backend url)
+  "Open URL with browser BACKEND."
+  (pcase backend
+    ('eww (eww url))
+    ('xwidget (xwidget-webkit-browse-url url))
+    ('appine (if (fboundp 'my/appine-open-url)
+                 (my/appine-open-url url)
+               (appine-open-url url)))
+    (_ (user-error "Unsupported browser backend: %s" backend))))
+
+(defun my/browser-cleanup-backend (backend buffer)
+  "Clean up BACKEND using BUFFER after a successful switch."
+  (pcase backend
+    ('appine
+     (when (fboundp 'my/appine-kill-all)
+       (my/appine-kill-all)))
+    (_
+     (when (buffer-live-p buffer)
+       (kill-buffer buffer)))))
+
+(defun my/browser-switch-to (backend)
+  "Switch the current browser page to BACKEND."
+  (interactive
+   (list
+   (intern
+     (completing-read "Switch browser to: "
+                      '("eww" "xwidget" "appine")
+                      nil t nil nil "xwidget"))))
+  (let ((source-backend (my/browser-current-backend))
+        (url (my/browser-current-url))
+        (old-buf (current-buffer)))
+    (unless source-backend
+      (user-error "当前 buffer 不是受支持的浏览后端"))
+    (unless url
+      (user-error "无法获取当前页面 URL"))
+    (when (eq source-backend backend)
+      (user-error "当前已经是 %s" backend))
+    (message "正在切换至 %s: %s" backend url)
+    (my/browser-open-url-with-backend backend url)
+    (run-at-time "0 sec" nil #'my/browser-cleanup-backend source-backend old-buf)))
+
+(defun my/eww-to-appine ()
+  "Switch the current EWW page to Appine."
+  (interactive)
+  (my/browser-switch-to 'appine))
+
+(defun my/xwidget-to-appine ()
+  "Switch the current xwidget page to Appine."
+  (interactive)
+  (my/browser-switch-to 'appine))
+
+(defun my/appine-to-eww ()
+  "Switch the current Appine page to EWW."
+  (interactive)
+  (my/browser-switch-to 'eww))
+
+(defun my/appine-to-xwidget ()
+  "Switch the current Appine page to xwidget-webkit."
+  (interactive)
+  (my/browser-switch-to 'xwidget))
 
 ;; ---------- 2. 核心切换逻辑 (带延迟清理) ----------
 
@@ -168,114 +282,26 @@
       (message "错误：无法获取 Xwidget URL"))))
 
 
-;; 1. EWW 切换到 EAF 浏览器
-(defun my/eww-to-eaf ()
-  "从 EWW 切换到 EAF 浏览器，成功后延迟清理旧 Buffer"
-  (interactive)
-  (let ((url (eww-current-url))
-        (old-buf (current-buffer)))
-    (if url
-        (progn
-          (message "正在切换至 EAF: %s" url)
-          ;; 启动 EAF 浏览器
-          (eaf-open-browser url)
-          ;; 延迟清理旧 buffer，防止显示问题
-          (run-at-time "0 sec" nil 
-                       (lambda (b) 
-                         (when (buffer-live-p b)
-                           (kill-buffer b))) 
-                       old-buf))
-      (message "错误：无法获取 EWW URL"))))
-
-;; 2. Xwidget 切换到 EAF 浏览器
-(defun my/xwidget-to-eaf ()
-  "从 Xwidget 切换到 EAF 浏览器，成功后延迟清理旧 Buffer"
-  (interactive)
-  (let ((url (xwidget-webkit-uri (xwidget-webkit-current-session)))
-        (old-buf (current-buffer)))
-    (if url
-        (progn
-          (message "正在切换至 EAF: %s" url)
-          ;; 启动 EAF 浏览器
-          (eaf-open-browser url)
-          ;; 延迟清理旧 buffer
-          (run-at-time "0 sec" nil 
-                       (lambda (b) 
-                         (when (buffer-live-p b)
-                           (kill-buffer b))) 
-                       old-buf))
-      (message "错误：无法获取 Xwidget URL"))))
-
-;; 3. EAF 浏览器切换到 EWW
-(defun my/eaf-to-eww ()
-  "从 EAF 浏览器切换到 EWW，成功后延迟清理旧 Buffer"
-  (interactive)
-  (let ((url (if (derived-mode-p 'eaf-mode)
-                 (eaf-call-sync "execute_function" eaf--buffer-id "get_url")
-               nil))
-        (old-buf (current-buffer)))
-    (if url
-        (progn
-          (message "正在切换至 EWW: %s" url)
-          ;; 启动 eww
-          (eww url)
-          ;; 延迟清理旧 buffer
-          (run-at-time "0 sec" nil 
-                       (lambda (b) 
-                         (when (buffer-live-p b)
-                           (kill-buffer b))) 
-                       old-buf))
-      (message "错误：无法获取 EAF URL"))))
-
-;; 4. EAF 浏览器切换到 Xwidget
-(defun my/eaf-to-xwidget ()
-  "从 EAF 浏览器切换到 Xwidget，成功后延迟清理旧 Buffer"
-  (interactive)
-  (let ((url (if (derived-mode-p 'eaf-mode)
-                 (eaf-call-sync "execute_function" eaf--buffer-id "get_url")
-               nil))
-        (old-buf (current-buffer)))
-    (if url
-        (progn
-          (message "正在切换至 Xwidget: %s" url)
-          ;; 启动 xwidget-webkit
-          (xwidget-webkit-browse-url url)
-          ;; 延迟清理旧 buffer
-          (run-at-time "0 sec" nil 
-                       (lambda (b) 
-                         (when (buffer-live-p b)
-                           (kill-buffer b))) 
-                       old-buf))
-      (message "错误：无法获取 EAF URL"))))
-
-
-
-
-(defun eaf-open-search (search-term &optional engine browser)
+(defun my/browser-open-search (search-term &optional engine browser)
   "Search SEARCH-TERM with selected search ENGINE and BROWSER."
   (interactive
    (list
     (read-string "Search: ")
-    (intern (completing-read "Search Engine (default: bing): "
-                            '("bing" "perplexity")
+     (intern (completing-read "Search Engine (default: bing): "
+                            '("bing" "perplexity" "duckduckgo")
                             nil t nil nil "bing"))
-    (intern (completing-read "Browser (default: xwidget): "
-                            '("xwidget" "eaf")
+     (intern (completing-read "Browser (default: xwidget): "
+                            '("eww" "xwidget" "appine")
                             nil t nil nil "xwidget"))))
-  (require 'url-util)
-  (let* ((encoded-query (url-hexify-string search-term))
-         (search-url
-          (pcase engine
-            ('bing (format "https://www.bing.com/search?q=%s" encoded-query))
-            ('perplexity (format "https://www.perplexity.ai/search?q=%s" encoded-query))
-            (_ (format "https://www.bing.com/search?q=%s" encoded-query)))))
-    (pcase browser
-      ('xwidget (xwidget-webkit-browse-url search-url))
-      ('eaf (eaf-open-browser search-url))
-      (_ (xwidget-webkit-browse-url search-url)))))
+  (my/browser-open-url-with-backend
+   browser
+   (my/browser-build-search-url search-term engine)))
+
+(with-eval-after-load 'xwidget
+  (define-key xwidget-webkit-mode-map (kbd "W") #'my/xwidget-to-eww)
+  (define-key xwidget-webkit-mode-map (kbd "A") #'my/xwidget-to-appine))
 
 
 
 
 (provide 'init-browser)
-

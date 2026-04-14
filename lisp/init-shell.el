@@ -76,6 +76,33 @@ Append a trailing return automatically.  RETRIES defaults to
   (setq-local truncate-lines t)
   (setq-local global-hl-line-mode nil))
 
+(defun my/terminal-apply-ui ()
+  "Apply a restrained terminal UI in shell-like buffers."
+  (when (display-graphic-p)
+    (setq-local line-spacing 0)
+    (when (derived-mode-p 'eshell-mode)
+      (setq-local mode-line-format nil)
+      (setq-local header-line-format
+                  '(" "
+                    (:propertize "%b" face mode-line-buffer-id)
+                    "  "
+                    (:propertize "eshell" face shadow))))
+    (when (facep 'eshell-prompt)
+      (set-face-attribute 'eshell-prompt nil
+                          :foreground "#8aa6c1"
+                          :weight 'medium))
+    (when (facep 'eshell-ls-directory)
+      (set-face-attribute 'eshell-ls-directory nil
+                          :foreground "#a9bed3"
+                          :weight 'medium))
+    (when (facep 'eshell-ls-executable)
+      (set-face-attribute 'eshell-ls-executable nil
+                          :foreground "#8fbf8f"))
+    (when (facep 'vterm-color-default)
+      (set-face-attribute 'vterm-color-default nil
+                          :background "#24232f"
+                          :foreground "#d8dee9"))))
+
 (defun my/terminal-context-key (&optional directory)
   "Return a stable local-or-remote context key for DIRECTORY."
   (when-let* ((directory (my/terminal-normalize-directory
@@ -228,7 +255,8 @@ numbered sessions."
   :ensure nil
   :hook ((eshell-mode . shell-mode-common-init)
          (eshell-mode . completion-preview-mode)
-         (eshell-mode . my/eshell-emacs-state-setup))
+         (eshell-mode . my/eshell-emacs-state-setup)
+         (eshell-mode . my/terminal-apply-ui))
   :config
   (advice-remove 'eshell #'my/eshell-reuse-by-context-a)
   (advice-add 'eshell :around #'my/eshell-reuse-by-context-a)
@@ -429,6 +457,8 @@ If popup is focused, kill it."
   :ensure t
   :commands (vterm)
   :hook (vterm-mode . (lambda ()
+                        (shell-mode-common-init)
+                        (my/terminal-apply-ui)
                         (when (fboundp 'evil-emacs-state)
                           (evil-emacs-state))
                         (run-at-time

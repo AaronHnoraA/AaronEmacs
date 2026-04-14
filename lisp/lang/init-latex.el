@@ -50,20 +50,22 @@
          (plain-tex-mode . my/latex-eglot-ensure)
          (plain-TeX-mode . my/latex-eglot-ensure)
          (docTeX-mode . my/latex-eglot-ensure)
-         (bibtex-mode . my/latex-eglot-ensure))
-  :config
-  (my/register-eglot-server-program
-   '(latex-mode LaTeX-mode
-     tex-mode TeX-mode
-     plain-tex-mode plain-TeX-mode
-     docTeX-mode
-     bibtex-mode)
-   (eglot-alternatives
-    '(("texlab")
-      ("digestif")))
-   :label "texlab/digestif"
-   :executables '("texlab" "digestif")
-   :note "LaTeX and BibTeX buffers prefer texlab, then fall back to digestif."))
+         (bibtex-mode . my/latex-eglot-ensure)))
+
+(with-eval-after-load 'eglot
+  (when (fboundp 'my/register-eglot-server-program)
+    (my/register-eglot-server-program
+     '(latex-mode LaTeX-mode
+       tex-mode TeX-mode
+       plain-tex-mode plain-TeX-mode
+       docTeX-mode
+       bibtex-mode)
+     (eglot-alternatives
+      '(("texlab")
+        ("digestif")))
+     :label "texlab/digestif"
+     :executables '("texlab" "digestif")
+     :note "LaTeX and BibTeX buffers prefer texlab, then fall back to digestif.")))
 
 (provide 'init-latex)
 ;;; init-latex.el ends here

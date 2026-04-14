@@ -54,14 +54,16 @@
 
 (use-package eglot
   :ensure nil
-  :defer t
-  :config
-  (my/register-eglot-server-program
-   '(sh-mode bash-ts-mode)
-   '("bash-language-server" "start")
-   :label "bash-language-server"
-   :executables '("bash-language-server")
-   :note "Shell buffers use bash-language-server through Eglot."))
+  :defer t)
+
+(with-eval-after-load 'eglot
+  (when (fboundp 'my/register-eglot-server-program)
+    (my/register-eglot-server-program
+     '(sh-mode bash-ts-mode)
+     '("bash-language-server" "start")
+     :label "bash-language-server"
+     :executables '("bash-language-server")
+     :note "Shell buffers use bash-language-server through Eglot.")))
 
 (provide 'init-sh)
 ;;; init-sh.el ends here

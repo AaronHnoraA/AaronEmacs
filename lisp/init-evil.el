@@ -402,6 +402,20 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       ;; app
       "a" '(:wk "app")
       "aa" 'org-agenda
+      "ap" '(:wk "appine")
+      "apa" 'my/appine-open-url
+      "apf" 'my/appine-open-file
+      "app" 'my/appine-open-at-point
+      "apr" 'my/appine-reload
+      "aph" 'my/appine-back
+      "apl" 'my/appine-forward
+      "ap[" 'my/appine-prev-tab
+      "ap]" 'my/appine-next-tab
+      "apc" 'my/appine-close-tab
+      "apk" 'my/appine-kill-all
+      "apR" 'my/appine-restart
+      "aps" 'my/browser-switch-to
+      "apS" 'my/browser-open-search
       "ac" 'calendar
       "ag" 'gnus
       "ai" 'rcirc
@@ -413,6 +427,7 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       "oD" 'dirvish-fd
       "ol" 'org-store-link
       "ob" 'browse-url
+      "oa" 'my/appine-open-url
       "oe" 'vterm-toggle
       "oE" 'my/vterm-popup-cycle
       "oF" 'my/vterm-toggle-fixed
@@ -422,7 +437,9 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       "oV" 'my/vterm-named
       "oS" 'my/vterm-ssh
       "ow" 'eww-browse-url
+      "oW" 'my/browser-open-search
       "ox" 'xwidget-webkit-browse-url
+      "oB" 'my/browser-switch-to
       "os" 'shell-toggle)
 
     (with-eval-after-load 'org

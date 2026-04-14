@@ -93,14 +93,16 @@
          (js-jsx-mode . my/js-ts-eglot-ensure)
          (typescript-mode . my/js-ts-eglot-ensure)
          (typescript-ts-mode . my/js-ts-eglot-ensure)
-         (tsx-ts-mode . my/js-ts-eglot-ensure))
-  :config
-  (my/register-eglot-server-program
-   '(js-mode js2-mode js-ts-mode js-jsx-mode
-     typescript-mode typescript-ts-mode tsx-ts-mode)
-   '("typescript-language-server" "--stdio")
-   :label "typescript-language-server"
-   :executables '("typescript-language-server")
-   :note "JS/TS buffers share the TypeScript language server through Eglot."))
+         (tsx-ts-mode . my/js-ts-eglot-ensure)))
+
+(with-eval-after-load 'eglot
+  (when (fboundp 'my/register-eglot-server-program)
+    (my/register-eglot-server-program
+     '(js-mode js2-mode js-ts-mode js-jsx-mode
+       typescript-mode typescript-ts-mode tsx-ts-mode)
+     '("typescript-language-server" "--stdio")
+     :label "typescript-language-server"
+     :executables '("typescript-language-server")
+     :note "JS/TS buffers share the TypeScript language server through Eglot.")))
 
 (provide 'init-js2)

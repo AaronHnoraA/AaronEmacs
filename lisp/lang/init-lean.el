@@ -206,7 +206,8 @@
 (use-package lean4-mode
   :init
   (setq lean4-mode-hook nil)
-  (my/register-lsp-mode-preference 'lean4-mode)
+  (when (fboundp 'my/register-lsp-mode-preference)
+    (my/register-lsp-mode-preference 'lean4-mode))
   (add-hook 'lean4-mode-hook #'my/lean4-setup-remote-rootdir)
   (add-hook 'lean4-mode-hook #'my/lean4-tune-remote-ui)
   (add-hook 'lean4-mode-hook #'my/lsp-mode-ensure)

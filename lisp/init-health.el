@@ -49,7 +49,7 @@
 
 (defconst my/health-critical-libraries
   '((ligature . "ligature")
-    (theme . "kanagawa-themes")
+    (theme . "aaron-ui")
     (vterm . "vterm")
     (vterm-module . "vterm-module")
     (pdf-tools . "pdf-tools")

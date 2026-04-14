@@ -64,8 +64,6 @@
   (file-name-as-directory (expand-file-name "eshell" my/state-dir)))
 (defconst my/undo-tree-history-state-dir
   (file-name-as-directory (expand-file-name "undo-tree-history" my/state-dir)))
-(defconst my/eaf-state-dir
-  (file-name-as-directory (expand-file-name "eaf" my/state-dir)))
 (defconst my/treesit-state-dir
   (file-name-as-directory (expand-file-name "tree-sitter" my/state-dir)))
 (defconst my/org-state-dir
@@ -84,7 +82,6 @@
                    my/tramp-auto-save-dir
                    my/eshell-state-dir
                    my/undo-tree-history-state-dir
-                   my/eaf-state-dir
                    my/treesit-state-dir
                    my/org-state-dir
                    my/dape-state-dir))
@@ -322,7 +319,7 @@
   :type 'number
   :group 'my/typography)
 
-(defcustom my/font-code-weight 'medium
+(defcustom my/font-code-weight 'regular
   "Preferred weight for monospace UI and code."
   :type 'symbol
   :group 'my/typography)
@@ -332,7 +329,7 @@
   :type 'symbol
   :group 'my/typography)
 
-(defcustom my/font-title-weight 'regular
+(defcustom my/font-title-weight 'medium
   "Preferred weight for document headings."
   :type 'symbol
   :group 'my/typography)
@@ -823,7 +820,7 @@
   :ensure nil
   :hook (after-init . tab-bar-mode)
   :custom
-  (tab-bar-show 1)
+  (tab-bar-show 0)
   (tab-bar-tab-hints t)
   (tab-bar-auto-width nil)
   (tab-bar-close-button-show nil)
@@ -971,6 +968,33 @@ Else, call `comment-or-uncomment-region' on the current line."
       ("Dired" (mode . dired-mode))
       ("IRC" (or (mode . rcirc-mode)
                  (mode . erc-mode)))))))
+
+(defun my/ibuffer-apply-ui ()
+  "Apply local UI styling to Ibuffer."
+  (when (display-graphic-p)
+    (when (facep 'ibuffer-title-face)
+      (set-face-attribute 'ibuffer-title-face nil
+                          :foreground "#edf2f7"
+                          :weight 'medium))
+    (when (facep 'ibuffer-filter-group-name-face)
+      (set-face-attribute 'ibuffer-filter-group-name-face nil
+                          :foreground "#a9bed3"
+                          :weight 'medium))
+    (when (facep 'ibuffer-marked-face)
+      (set-face-attribute 'ibuffer-marked-face nil
+                          :foreground "#d8b27f"
+                          :weight 'medium))
+    (when (facep 'ibuffer-modified-buffer)
+      (set-face-attribute 'ibuffer-modified-buffer nil
+                          :foreground "#8aa6c1"))
+    (when (facep 'ibuffer-read-only-buffer)
+      (set-face-attribute 'ibuffer-read-only-buffer nil
+                          :foreground "#7f849c"))
+    (when (facep 'ibuffer-locked-buffer)
+      (set-face-attribute 'ibuffer-locked-buffer nil
+                          :foreground "#bf7f7f"))))
+
+(add-hook 'ibuffer-mode-hook #'my/ibuffer-apply-ui)
 
 ;; Notifications
 ;;

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Pre-commit hook: run cargo clippy before allowing commit.
+# Install: git config core.hooksPath .githooks  (from repo root)
+# Or: cp .githooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+set -e
+echo "Running cargo clippy..."
+cargo clippy --workspace -- -D warnings
+echo "Clippy passed."

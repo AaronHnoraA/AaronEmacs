@@ -566,23 +566,22 @@ If OTHER-WINDOW is non-nil, jump in another window on final selection."
 
 (use-package centaur-tabs
   :ensure t
-  :defer 2
+  :defer 1
   :config
   (setq centaur-tabs-style "bar"
-    centaur-tabs-height 22
-    centaur-tabs-set-icons t
-    centaur-tabs-plain-icons t
-    centaur-tabs-gray-out-icons t
-    centaur-tabs-set-close-button t
-    centaur-tabs-set-modified-marker t
-    centaur-tabs-show-navigation-buttons t
-    centaur-tabs-set-bar 'left
-    centaur-tabs-cycle-scope 'tabs
-    x-underline-at-descent-line nil)
+        centaur-tabs-height 24
+        centaur-tabs-set-icons t
+        centaur-tabs-plain-icons t
+        centaur-tabs-gray-out-icons t
+        centaur-tabs-set-close-button t
+        centaur-tabs-set-modified-marker t
+        centaur-tabs-modified-marker " •"
+        centaur-tabs-show-navigation-buttons nil
+        centaur-tabs-label-fixed-length 16
+        centaur-tabs-set-bar 'left
+        centaur-tabs-cycle-scope 'tabs
+        x-underline-at-descent-line nil)
   (centaur-tabs-headline-match)
-  ;; (setq centaur-tabs-gray-out-icons 'buffer)
-  ;; (centaur-tabs-enable-buffer-reordering)
-  ;; (setq centaur-tabs-adjust-buffer-order t)
   (centaur-tabs-mode t)
   (setq uniquify-separator "/")
   (setq uniquify-buffer-name-style 'forward)
@@ -627,6 +626,66 @@ If OTHER-WINDOW is non-nil, jump in another window on final selection."
        "OrgMode")
       (t
        (centaur-tabs-get-group-name (current-buffer))))))
+  (defun my/centaur-tabs-apply-ui ()
+    "Style `centaur-tabs' to match the local dark UI."
+    (when (display-graphic-p)
+      (set-face-attribute 'centaur-tabs-default nil
+                          :background "#1d1e26"
+                          :foreground "#70758d"
+                          :height 0.90)
+      (set-face-attribute 'centaur-tabs-unselected nil
+                          :background "#262938"
+                          :foreground "#8b90a8"
+                          :box '(:line-width 4 :color "#262938")
+                          :weight 'regular)
+      (set-face-attribute 'centaur-tabs-selected nil
+                          :background "#34384b"
+                          :foreground "#e5e9f0"
+                          :box '(:line-width 4 :color "#34384b")
+                          :weight 'medium)
+      (set-face-attribute 'centaur-tabs-unselected-modified nil
+                          :inherit 'centaur-tabs-unselected
+                          :foreground "#f5a97f")
+      (set-face-attribute 'centaur-tabs-selected-modified nil
+                          :inherit 'centaur-tabs-selected
+                          :foreground "#e5c07b")
+      (set-face-attribute 'centaur-tabs-active-bar-face nil
+                          :background "#8aa6c1"
+                          :foreground "#8aa6c1")
+      (when (facep 'centaur-tabs-dim-buffer-face)
+        (set-face-attribute 'centaur-tabs-dim-buffer-face nil
+                            :foreground "#6f748b"
+                            :weight 'regular))
+      (when (facep 'centaur-tabs-close-unselected)
+        (set-face-attribute 'centaur-tabs-close-unselected nil
+                            :background "#262938"
+                            :foreground "#6f748b"
+                            :height 0.9))
+      (when (facep 'centaur-tabs-close-selected)
+        (set-face-attribute 'centaur-tabs-close-selected nil
+                            :background "#34384b"
+                            :foreground "#a9bed3"
+                            :height 0.9))
+      (when (facep 'centaur-tabs-name-mouse-face)
+        (set-face-attribute 'centaur-tabs-name-mouse-face nil
+                            :background "#3a3f55"
+                            :foreground "#f5f5f5"))
+      (when (facep 'centaur-tabs-close-mouse-face)
+        (set-face-attribute 'centaur-tabs-close-mouse-face nil
+                            :background "#3a3f55"
+                            :foreground "#f5f5f5"))
+      (when (facep 'centaur-tabs-modified-marker-selected)
+        (set-face-attribute 'centaur-tabs-modified-marker-selected nil
+                            :inherit 'centaur-tabs-selected
+                            :foreground "#8aa6c1"
+                            :weight 'regular))
+      (when (facep 'centaur-tabs-modified-marker-unselected)
+        (set-face-attribute 'centaur-tabs-modified-marker-unselected nil
+                            :inherit 'centaur-tabs-unselected
+                            :foreground "#6f748b"
+                            :weight 'regular))))
+  (my/centaur-tabs-apply-ui)
+  (add-hook 'after-load-theme-hook #'my/centaur-tabs-apply-ui)
   :hook
   (dashboard-mode . centaur-tabs-local-mode)
   (term-mode . centaur-tabs-local-mode)

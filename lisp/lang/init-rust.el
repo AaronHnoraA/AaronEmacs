@@ -30,14 +30,16 @@
 
 (use-package eglot
   :ensure nil
-  :defer t
-  :config
-  (my/register-eglot-server-program
-   '(rust-mode rust-ts-mode)
-   '("rust-analyzer")
-   :label "rust-analyzer"
-   :executables '("rust-analyzer")
-   :note "Rust buffers use rust-analyzer through Eglot."))
+  :defer t)
+
+(with-eval-after-load 'eglot
+  (when (fboundp 'my/register-eglot-server-program)
+    (my/register-eglot-server-program
+     '(rust-mode rust-ts-mode)
+     '("rust-analyzer")
+     :label "rust-analyzer"
+     :executables '("rust-analyzer")
+     :note "Rust buffers use rust-analyzer through Eglot.")))
 
 (provide 'init-rust)
 ;;; init-rust.el ends here
