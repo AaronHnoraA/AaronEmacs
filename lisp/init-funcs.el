@@ -150,11 +150,34 @@ confirmation."
   (when-let* ((buf (get-buffer "*compilation*")))
     (pop-to-buffer buf)))
 
+(defun my/delimiter--org-script-range-at-point ()
+  "Return (OPEN . CLOSE) for the ^{...} or _{...} surrounding point, or nil.
+OPEN is the buffer position of `{'; CLOSE is the position just past `}'.
+Works even when org-appear hides the braces, because overlays do not
+alter buffer positions."
+  (when (derived-mode-p 'org-mode)
+    (save-excursion
+      (let ((origin (point))
+            found)
+        (while (and (not found)
+                    (search-backward "{" nil t))
+          (when (memq (char-before) '(?^ ?_))
+            (let* ((open (point))
+                   (close (save-excursion
+                            (goto-char (1+ open))
+                            (search-forward "}" nil t))))
+              (when (and close (> origin open) (<= origin close))
+                (setq found (cons open close))))))
+        found))))
+
 (defun my/forward-delimiter-dwim ()
-  "Jump to the next closing delimiter."
+  "Jump past the closing `}' of an Org ^{}/_{} at point, or to the next `]'/`)'/`}'."
   (interactive)
-  (unless (re-search-forward "[])}]" nil t)
-    (user-error "No forward closing delimiter found")))
+  (if-let* ((range (my/delimiter--org-script-range-at-point)))
+      ;; cdr is already one past `}' (search-forward return value)
+      (goto-char (cdr range))
+    (unless (re-search-forward "[])}]" nil t)
+      (user-error "No forward closing delimiter found"))))
 
 (defun my/delimiter--backward-open-target ()
   "Return the point just after the previous opening delimiter."
@@ -169,11 +192,20 @@ confirmation."
         (1+ (point))))))
 
 (defun my/backward-delimiter-dwim ()
-  "Jump to the previous opening delimiter."
+  "Jump to the start of Org ^{}/_{} content at point, or to the previous `['/`('/`{'.
+If already at the inner start of ^{}/_{}, jump backward past the `^'/`_' marker."
   (interactive)
-  (if-let* ((target (my/delimiter--backward-open-target)))
-      (goto-char target)
-    (user-error "No backward opening delimiter found")))
+  (if-let* ((range (my/delimiter--org-script-range-at-point))
+            (inner-start (1+ (car range))))
+      (if (= (point) inner-start)
+          ;; Already at the content start — escape outward past ^ or _
+          (if-let* ((outer (my/delimiter--backward-open-target)))
+              (goto-char outer)
+            (user-error "No backward opening delimiter found"))
+        (goto-char inner-start))
+    (if-let* ((target (my/delimiter--backward-open-target)))
+        (goto-char target)
+      (user-error "No backward opening delimiter found"))))
 
 (defun my/evil-global-leader-set (key command &optional replacement)
   "Bind COMMAND to `SPC KEY' in Evil normal state.
