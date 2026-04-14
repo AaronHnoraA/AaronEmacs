@@ -52,6 +52,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-minibuffer)
 (require 'init-consult-project)
 (require 'init-snippets)
+(require 'init-auto-insert)
 (require 'init-doom-extra)
 (require 'init-treesit)
 (require 'init-windows)

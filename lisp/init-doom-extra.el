@@ -30,6 +30,14 @@
   :type 'directory
   :group 'my/doom-extra)
 
+(defcustom my/file-template-enabled nil
+  "Whether to enable the legacy Yasnippet-backed file template system.
+
+This config also ships a simpler `auto-insert' based system in
+`lisp/init-auto-insert.el'.  Keep this off to avoid template double-insertion."
+  :type 'boolean
+  :group 'my/doom-extra)
+
 (defconst my/file-template-rules
   '(("/main\\.c\\(?:c\\|pp\\)\\'" :mode c++-mode :trigger "__main.cpp")
     ("/win32_\\.c\\(?:c\\|pp\\)\\'" :mode c++-mode :trigger "__winmain.cpp")
@@ -251,7 +259,8 @@
 
 (defun my/file-template--available-p ()
   "Return non-nil when file templates can be expanded."
-  (and (file-directory-p my/file-templates-directory)
+  (and my/file-template-enabled
+       (file-directory-p my/file-templates-directory)
        (featurep 'yasnippet)))
 
 (defun my/file-template--match-p (predicate)
@@ -304,18 +313,20 @@
     (message "File template: none")))
 
 (with-eval-after-load 'yasnippet
-  (when (file-directory-p my/file-templates-directory)
+  (when (and my/file-template-enabled
+             (file-directory-p my/file-templates-directory))
     (add-to-list 'yas-snippet-dirs my/file-templates-directory 'append #'eq)
     (yas-reload-all))
-  (add-hook 'find-file-hook #'my/file-template-check-h)
-  (add-hook 'my/escape-hook #'yas-abort-snippet))
+  (when my/file-template-enabled
+    (add-hook 'find-file-hook #'my/file-template-check-h)
+    (add-hook 'my/escape-hook #'yas-abort-snippet)))
 
 (my/evil-global-leader-set "f d" #'consult-dir "consult dir")
 (my/evil-global-leader-set "f u" #'my/sudo-find-file "sudo find file")
 (my/evil-global-leader-set "f U" #'my/sudo-this-file "sudo this file")
 (my/evil-global-leader-set "f S" #'my/sudo-save-buffer "sudo save")
-(my/evil-global-leader-set "f t" #'my/file-template-apply "apply template")
-(my/evil-global-leader-set "f T" #'my/file-template-debug "debug template")
+(my/evil-global-leader-set "f t" #'my/template-switch "switch template")
+(my/evil-global-leader-set "f T" #'my/template-debug "debug template")
 (my/evil-global-leader-set "o o" #'link-hint-open-link "open link")
 (my/evil-global-leader-set "o O" #'link-hint-copy-link "copy link")
 (my/evil-global-leader-set "p c" #'editorconfig-find-current-editorconfig "editorconfig")

@@ -1,0 +1,90 @@
+#+TITLE: {{title}}
+#+AUTHOR: {{author}}
+#+DATE: {{month_year}}
+#+LATEX_CLASS: assignment
+#+LATEX_COMPILER: xelatex
+#+OPTIONS: toc:nil num:t
+
+#+ASSIGNMENT_INSTITUTION: {{institution}}
+#+ASSIGNMENT_COURSE_CODE: {{course_code}}
+#+ASSIGNMENT_TERM: {{term}}
+#+ASSIGNMENT_STUDENT_ID: {{student_id}}
+#+ASSIGNMENT_AFFILIATION: {{affiliation}}
+#+ASSIGNMENT_AUTHOR_URL: {{author_url}}
+
+#+LATEX: \newpage
+* Question 1
+
+Problem.
+
+-----
+
+** Part (a)
+
+#+begin_proof
+{{cursor}}
+#+end_proof
+
+** Part (b)
+
+#+begin_proof
+
+#+end_proof
+
+#+LATEX: \newpage
+* Question 2
+
+Problem.
+
+-----
+
+** Part (a)
+
+#+begin_proof
+
+#+end_proof
+
+** Part (b)
+
+#+begin_proof
+
+#+end_proof
+
+#+LATEX: \newpage
+* Question 3
+
+Problem.
+
+-----
+
+** Part (a)
+
+#+begin_proof
+
+#+end_proof
+
+** Part (b)
+
+#+begin_proof
+
+#+end_proof
+
+#+LATEX: \newpage
+* Question 4
+
+Problem.
+
+-----
+
+** Part (a)
+
+#+begin_proof
+
+#+end_proof
+
+** Part (b)
+
+#+begin_proof
+
+#+end_proof
+

@@ -470,8 +470,21 @@ This matches canonically, so symlinked roots are cleaned as well."
 (defun my/project-register-root (project-root)
   "Register PROJECT-ROOT across project backends."
   (setq project-root (my/project-normalize-root project-root))
-  (unless (projectile-project-p project-root)
-    (user-error "%s is not recognized as a project root" project-root))
+  (unless (require 'projectile nil t)
+    (user-error "Projectile is unavailable"))
+  (unless (file-directory-p project-root)
+    (user-error "%s is not a directory" (abbreviate-file-name project-root)))
+  (let ((default-directory project-root))
+    (unless (projectile-project-p project-root)
+      ;; Projectile caches "rootless" directories. If a directory becomes a
+      ;; project (e.g. `git init` / `git clone`) while Emacs is running, that
+      ;; cached miss will make subsequent checks incorrectly return nil until the
+      ;; cache is cleared.
+      (when (fboundp 'projectile-invalidate-cache)
+        (projectile-invalidate-cache nil))
+      (unless (projectile-project-p project-root)
+        (user-error "%s is not recognized as a project root (try `M-x projectile-invalidate-cache` or restart Emacs)"
+                    (abbreviate-file-name project-root)))))
   (my/project-unignore-root project-root)
   (projectile-add-known-project project-root)
   (when (require 'project nil t)

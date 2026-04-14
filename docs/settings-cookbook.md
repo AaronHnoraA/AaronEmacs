@@ -286,3 +286,37 @@ emacs --debug-init -q -l ./bootstrap.el
 - `my/lockfile-dir`
 
 现在所有这些都写到 [var/](../var/)。
+
+## 14. 我要改新建文件模板（auto-insert）
+
+文件：
+
+- [lisp/init-auto-insert.el](../lisp/init-auto-insert.el)
+- [templates/](../templates/)
+
+入口：
+
+- `SPC f t`
+  选择并切换当前 buffer 对应 kind 的模板（会用新模板替换当前 buffer 内容）
+- `SPC f T`
+  查看当前 buffer 命中的 kind、当前选择的模板、以及是否会自动插入
+
+默认策略：
+
+- `auto-insert-mode` 全局开，但只对 `my/template-auto-insert-enabled-kinds` 里的 kind 生效
+- `org` 默认不在 allowlist 里（避免干扰 `org-capture`/`org-roam` 的 capture 模板）
+- 模板存放在 `templates/<kind>/`；模板里的占位符支持 `{{date}}` / `{{title}}` / `{{file}}` / `{{author}}` / `{{cursor}}` 等
+
+项目内按目录开关（`.dir-locals.el`）：
+
+```elisp
+((nil . ((my/template-auto-insert-enabled . t)
+         (my/template-auto-insert-enabled-kinds . (c cc sh python js ts tex))
+         (my/template-current-override . ((python . "module.py")
+                                          (tex . "ctex-article.tex"))))))
+```
+
+说明：
+
+- `my/template-current-override` 只接受“文件名”（不能带路径分隔符），指向 `templates/<kind>/` 下的模板文件
+- 这套是内置 `auto-insert`；如果你之前用过 Doom 那套 Yasnippet file-templates，本配置默认已把它关掉避免重复插入（见 [lisp/init-doom-extra.el](../lisp/init-doom-extra.el) 里的 `my/file-template-enabled`）

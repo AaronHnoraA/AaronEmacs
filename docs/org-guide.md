@@ -77,6 +77,11 @@
 - `C-c n l`
   切换 roam buffer
 
+说明：
+
+- `org-roam` 的“模板”来自 `org-roam-capture-templates`（见 [lisp/org/init-org-roam.el](../lisp/org/init-org-roam.el)），不走新建文件 `auto-insert` 模板系统。
+- 另外这套配置里 `org` 的 `auto-insert` 默认是关闭的（不在 allowlist），避免新建 roam/capture 文件时发生模板叠加。
+
 ## 6. Org UI 增强
 
 默认启用的增强包括：

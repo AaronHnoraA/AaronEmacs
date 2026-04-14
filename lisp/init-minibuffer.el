@@ -9,6 +9,11 @@
   :ensure t
   :hook ((after-init . vertico-mode)
          (minibuffer-setup . vertico-repeat-save))
+  :bind (:map vertico-map
+         ;; 在 `C-x C-f` 这类文件补全场景，M-RET 直接使用你当前输入的文本，
+         ;; 不选中/不补全候选（用于创建与已有文件“相似名字”的新文件）。
+         ("M-RET" . vertico-exit-input)
+         ("<M-return>" . vertico-exit-input))
   :custom
   ;; 最近使用过的候选优先，M-x/Consult/普通补全都会更贴近使用历史。
   (vertico-sort-function #'vertico-sort-history-length-alpha))

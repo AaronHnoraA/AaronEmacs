@@ -126,7 +126,7 @@
 - `SPC f u` / `SPC f U` / `SPC f S`
   sudo 打开文件 / sudo 重开当前文件 / sudo 保存当前 buffer。
 - `SPC f t` / `SPC f T`
-  手动应用文件模板 / 查看当前命中的模板规则。
+  切换/应用文件模板 / 查看当前命中的模板规则。
 - `SPC o o` / `SPC o O` / `M-o`
   hint 打开链接 / 复制链接 / 快速打开当前窗口里的链接按钮。
 - `SPC p c`
