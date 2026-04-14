@@ -466,6 +466,46 @@
         (ratex-handle-post-command)
         (should (equal ensured '("x")))))))
 
+(ert-deftest ratex-active-fragment-fallback-respects-code-context ()
+  (with-temp-buffer
+    (insert "\\(x\\)")
+    (setq-local ratex--active-fragment
+                '(:begin 1 :end 6 :content "x" :open "\\(" :close "\\)"))
+    (goto-char 3)
+    (cl-letf (((symbol-function 'ratex--code-context-at-p)
+               (lambda (_pos) t)))
+      (should-not (ratex--active-fragment-at-point)))))
+
+(ert-deftest ratex-hide-posframe-clears-shared-owner ()
+  (let ((owner (generate-new-buffer " *ratex-owner*"))
+        hidden)
+    (unwind-protect
+        (progn
+          (setq ratex--posframe-owner-buffer owner)
+          (with-current-buffer owner
+            (setq-local ratex--posframe-visible t)
+            (setq-local ratex--posframe-fragment '(:begin 1 :end 6 :content "x"))
+            (setq-local ratex--posframe-last-override-params '((width . 10))))
+          (cl-letf (((symbol-function 'posframe-hide)
+                     (lambda (buffer)
+                       (setq hidden buffer)))
+                    ((symbol-function 'featurep)
+                     (lambda (feature)
+                       (eq feature 'posframe)))
+                    ((symbol-function 'get-buffer)
+                     (lambda (name)
+                       (and (equal name ratex--posframe-buffer)
+                            owner))))
+            (with-temp-buffer
+              (ratex--hide-posframe))
+            (should (equal hidden ratex--posframe-buffer))
+            (should-not ratex--posframe-owner-buffer)
+            (with-current-buffer owner
+              (should-not ratex--posframe-visible)
+              (should-not ratex--posframe-fragment)
+              (should-not ratex--posframe-last-override-params))))
+      (kill-buffer owner))))
+
 (ert-deftest ratex-edit-preview-posframe-keeps-overlay ()
   (with-temp-buffer
     (insert "\\(x\\)")

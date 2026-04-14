@@ -15,6 +15,7 @@
 (declare-function ratex-handle-buffer-switch "ratex-render")
 (declare-function ratex-handle-post-command "ratex-render")
 (declare-function ratex--hide-edit-preview "ratex-render")
+(declare-function ratex-reset-buffer-state "ratex-render")
 (declare-function evil-insert-state-p "evil")
 
 (defvar my/org-latex--allow-native-preview)
@@ -61,6 +62,17 @@
   "Return non-nil when the local ratex.el checkout is available."
   (file-directory-p (expand-file-name "lisp" my/ratex-root)))
 
+(defun my/ratex-supported-buffer-p ()
+  "Return non-nil when the current buffer should enable RaTeX previews."
+  (derived-mode-p 'org-mode
+                  'latex-mode
+                  'LaTeX-mode
+                  'tex-mode
+                  'TeX-mode
+                  'plain-tex-mode
+                  'plain-TeX-mode
+                  'docTeX-mode))
+
 (defun my/org-ratex-preview-active-p ()
   "Return non-nil when RaTeX edit preview should be active now."
   (or (not my/ratex-evil-insert-only)
@@ -70,7 +82,7 @@
 (defun my/ratex--debounced-post-command (orig-fn &rest args)
   "Run `ratex-handle-post-command' through a short idle debounce."
   (my/ratex-cancel-pending-preview)
-  (if (or (not (derived-mode-p 'org-mode))
+  (if (or (not (my/ratex-supported-buffer-p))
           (not (bound-and-true-p ratex-mode))
           (not (my/org-ratex-preview-active-p))
           (null (ignore-errors (ratex--active-fragment-at-point))))
@@ -83,7 +95,7 @@
         (when (buffer-live-p buffer)
           (with-current-buffer buffer
             (setq my/ratex-preview-timer nil)
-            (when (and (derived-mode-p 'org-mode)
+            (when (and (my/ratex-supported-buffer-p)
                        (bound-and-true-p ratex-mode)
                        (my/org-ratex-preview-active-p))
               (condition-case nil
@@ -116,7 +128,7 @@
 
 (defun my/org-ratex-sync-evil-state ()
   "Enable RaTeX edit preview only when the current Evil state should show it."
-  (when (and (derived-mode-p 'org-mode)
+  (when (and (my/ratex-supported-buffer-p)
              (bound-and-true-p ratex-mode))
     (if (my/org-ratex-preview-active-p)
         (progn
@@ -130,10 +142,13 @@
   "Enable popup-only RaTeX previews alongside Org previews."
   (when (and (my/org-ratex-available-p)
              (display-graphic-p)
-             (derived-mode-p 'org-mode))
+             (my/ratex-supported-buffer-p))
     ;; Keep Org's async preview stack active; RaTeX only adds the edit popup.
-    (setq-local my/org-latex--allow-native-preview nil)
+    (when (derived-mode-p 'org-mode)
+      (setq-local my/org-latex--allow-native-preview nil))
     (ratex-mode 1)
+    (add-hook 'change-major-mode-hook #'my/ratex-hide-preview-now nil t)
+    (add-hook 'kill-buffer-hook #'my/ratex-hide-preview-now nil t)
     (my/org-ratex-sync-evil-state)))
 
 (use-package ratex
@@ -146,7 +161,7 @@
   :init
   (setq ratex-backend-root my/ratex-root
         ratex-font-dir my/ratex-font-dir
-        ratex-font-size 24.0
+        ratex-font-size 30.0
         ratex-edit-preview my/ratex-preview-style
         ratex-debug nil
         ratex-hide-source-while-preview nil
@@ -159,7 +174,14 @@
         ratex-posframe-border-color "#5f6f8f"
         ratex-posframe-poshandler
         #'ratex-posframe-poshandler-point-top-left-corner-offset)
-  :hook (org-mode . my/org-ratex-enable))
+  :hook ((org-mode . my/org-ratex-enable)
+         (latex-mode . my/org-ratex-enable)
+         (LaTeX-mode . my/org-ratex-enable)
+         (tex-mode . my/org-ratex-enable)
+         (TeX-mode . my/org-ratex-enable)
+         (plain-tex-mode . my/org-ratex-enable)
+         (plain-TeX-mode . my/org-ratex-enable)
+         (docTeX-mode . my/org-ratex-enable)))
 
 (with-eval-after-load 'ratex-render
   (advice-add 'ratex-handle-buffer-switch :around #'my/ratex-handle-buffer-switch)
@@ -167,7 +189,11 @@
 
 (with-eval-after-load 'evil
   (add-hook 'evil-insert-state-entry-hook #'my/org-ratex-sync-evil-state)
-  (add-hook 'evil-insert-state-exit-hook #'my/org-ratex-sync-evil-state))
+  (add-hook 'evil-insert-state-exit-hook #'my/org-ratex-sync-evil-state)
+  (add-hook 'evil-normal-state-entry-hook #'my/org-ratex-sync-evil-state)
+  (add-hook 'evil-visual-state-entry-hook #'my/org-ratex-sync-evil-state)
+  (add-hook 'evil-motion-state-entry-hook #'my/org-ratex-sync-evil-state)
+  (add-hook 'evil-replace-state-entry-hook #'my/org-ratex-sync-evil-state))
 
 (provide 'init-ratex)
 ;;; init-ratex.el ends here

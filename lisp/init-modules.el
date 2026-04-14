@@ -80,7 +80,7 @@ If one of FEATURES is already available, require MODULE immediately."
 
 ;; standalone apps
 (my/require-module-after-any-feature 'init-org 'org)
-(my/require-module-after-any-feature 'init-ratex 'org)
+(my/require-module-after-any-feature 'init-ratex 'org 'tex 'tex-site)
 (my/require-module-after-any-feature 'init-org-mmdc 'org)
 (my/require-module-after-any-feature 'init-org-zotero 'org)
 (when (eq system-type 'darwin)

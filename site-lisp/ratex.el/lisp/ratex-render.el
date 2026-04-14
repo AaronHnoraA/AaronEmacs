@@ -20,6 +20,8 @@
 (defvar ratex-posframe-background-color)
 (defvar ratex-posframe-border-color)
 (defvar ratex-posframe-poshandler)
+(defvar ratex--posframe-owner-buffer nil
+  "Buffer that currently owns the shared RaTeX posframe.")
 (defvar-local ratex--render-cache nil)
 (defvar-local ratex--render-cache-access nil)
 (defvar-local ratex--inflight-requests nil)
@@ -37,8 +39,28 @@
 (defconst ratex--posframe-offset-y 72)
 (defconst ratex--posframe-display-offset-y 28)
 
+(defun ratex--clear-posframe-state (&optional buffer)
+  "Clear posframe bookkeeping in BUFFER or the current buffer."
+  (with-current-buffer (or buffer (current-buffer))
+    (setq-local ratex--posframe-visible nil)
+    (setq-local ratex--posframe-fragment nil)
+    (setq-local ratex--posframe-last-override-params nil)))
+
+(defun ratex--set-posframe-owner (buffer fragment override-params)
+  "Record BUFFER as the owner of the shared posframe for FRAGMENT."
+  (when (and (buffer-live-p ratex--posframe-owner-buffer)
+             (not (eq ratex--posframe-owner-buffer buffer)))
+    (ratex--clear-posframe-state ratex--posframe-owner-buffer))
+  (setq ratex--posframe-owner-buffer buffer)
+  (with-current-buffer buffer
+    (setq-local ratex--posframe-visible t)
+    (setq-local ratex--posframe-fragment fragment)
+    (setq-local ratex--posframe-last-override-params override-params)))
+
 (defun ratex-reset-buffer-state ()
   "Reset buffer-local rendering state."
+  (when (eq ratex--posframe-owner-buffer (current-buffer))
+    (ratex--hide-posframe))
   (setq-local ratex--render-cache (make-hash-table :test #'equal))
   (setq-local ratex--render-cache-access (make-hash-table :test #'equal))
   (setq-local ratex--inflight-requests (make-hash-table :test #'equal))
@@ -216,10 +238,11 @@ currently under point."
 
 (defun ratex--active-fragment-at-point ()
   "Return editable fragment at point, including rendered overlay fallback."
-  (or (ratex-fragment-at-point)
-      (ratex-overlay-fragment-at-point)
-      (when (ratex--point-in-fragment-p ratex--active-fragment)
-        ratex--active-fragment)))
+  (unless (ratex--code-context-at-p (point))
+    (or (ratex-fragment-at-point)
+        (ratex-overlay-fragment-at-point)
+        (when (ratex--point-in-fragment-p ratex--active-fragment)
+          ratex--active-fragment))))
 
 (defun ratex--point-in-fragment-p (fragment)
   "Return non-nil if point is within FRAGMENT."
@@ -500,7 +523,9 @@ When `posframe' is selected, always use posframe placement."
                 (setq-local word-wrap nil)
                 (erase-buffer)
                 (insert (propertize " " 'display image)))
-              (setq ratex--posframe-last-override-params override-params)
+              (when (and (buffer-live-p ratex--posframe-owner-buffer)
+                         (not (eq ratex--posframe-owner-buffer (current-buffer))))
+                (ratex--hide-posframe))
               (posframe-show
                ratex--posframe-buffer
                :position (point)
@@ -511,8 +536,7 @@ When `posframe' is selected, always use posframe placement."
                :background-color ratex-posframe-background-color
                :override-parameters override-params)
               (ratex--mask-edit-source fragment)
-              (setq ratex--posframe-visible t)
-              (setq ratex--posframe-fragment fragment)
+              (ratex--set-posframe-owner (current-buffer) fragment override-params)
               (ratex-debug-log "posframe success")
               t)
           (error
@@ -563,11 +587,15 @@ When `posframe' is selected, always use posframe placement."
 
 (defun ratex--hide-posframe ()
   "Hide the posframe preview."
+  (when (buffer-live-p ratex--posframe-owner-buffer)
+    (with-current-buffer ratex--posframe-owner-buffer
+      (ratex--unmask-edit-source)
+      (ratex--clear-posframe-state)))
+  (setq ratex--posframe-owner-buffer nil)
   (when (featurep 'posframe)
-    (when ratex--posframe-visible
+    (when (get-buffer ratex--posframe-buffer)
       (posframe-hide ratex--posframe-buffer))
-    (setq ratex--posframe-visible nil)
-    (setq ratex--posframe-fragment nil))
+    (ratex--clear-posframe-state))
   (ratex--unmask-edit-source))
 
 (defun ratex--hide-edit-preview ()
