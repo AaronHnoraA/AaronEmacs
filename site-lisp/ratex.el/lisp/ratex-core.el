@@ -120,6 +120,8 @@ Use nil to keep backend defaults."
 (defvar ratex--pending (make-hash-table :test #'eql))
 (defvar ratex--next-id 0)
 (defvar ratex--read-buffer "")
+(defvar ratex--read-chunks nil
+  "Pending output chunks accumulated since the last newline, in reverse order.")
 (defvar ratex--startup-warned nil)
 (defvar ratex--startup-callbacks nil)
 (defvar ratex--download-in-progress nil)
@@ -191,6 +193,7 @@ When CALLBACK is non-nil, invoke it with the live process once startup succeeds.
          (ratex--warn
           (format "RaTeX backend launch failed: %s"
                   (error-message-string err)))
+         (when callback (funcall callback nil))
          nil))))
    (ratex-auto-download-backend
     (ratex-debug-log "backend missing; start download")
@@ -200,6 +203,7 @@ When CALLBACK is non-nil, invoke it with the live process once startup succeeds.
     nil)
    (t
     (ratex--warn "RaTeX backend binary is missing. Run `M-x ratex-download-backend`.")
+    (when callback (funcall callback nil))
     nil)))
 
 (defun ratex-stop-backend ()
@@ -323,8 +327,14 @@ instead of downloading a pre-built binary."
      ratex--pending)
     (ratex-start-backend
      (lambda (proc)
-       (when (process-live-p proc)
-         (process-send-string proc (concat (json-encode data) "\n")))))
+       (if (and proc (process-live-p proc))
+           (process-send-string proc (concat (json-encode data) "\n"))
+         ;; Backend unavailable — resolve pending entry immediately so it
+         ;; does not accumulate forever in ratex--pending.
+         (let ((cb (gethash id ratex--pending)))
+           (when cb
+             (remhash id ratex--pending)
+             (funcall cb '((ok . :false) (error . "backend unavailable"))))))))
     id))
 
 (defun ratex-ping (callback)
@@ -332,15 +342,28 @@ instead of downloading a pre-built binary."
   (ratex-request '((type . "ping")) callback))
 
 (defun ratex--process-filter (_proc chunk)
-  "Process backend output CHUNK."
+  "Process backend output CHUNK.
+
+Chunks are accumulated in a list and joined only when a newline
+is seen, avoiding the O(n²) cost of repeated string concatenation
+for large SVG payloads."
   (ratex-debug-log "backend chunk=%S" chunk)
-  (setq ratex--read-buffer (concat ratex--read-buffer chunk))
-  (let (line)
-    (while (string-match "\n" ratex--read-buffer)
-      (setq line (substring ratex--read-buffer 0 (match-beginning 0)))
-      (setq ratex--read-buffer (substring ratex--read-buffer (match-end 0)))
-      (unless (string-empty-p line)
-        (ratex--dispatch-line line)))))
+  (push chunk ratex--read-chunks)
+  (when (string-search "\n" chunk)
+    (let* ((data (apply #'concat (nreverse ratex--read-chunks)))
+           (text (if (string-empty-p ratex--read-buffer)
+                     data
+                   (concat ratex--read-buffer data))))
+      (setq ratex--read-chunks nil
+            ratex--read-buffer "")
+      (let ((start 0))
+        (while-let ((pos (string-search "\n" text start)))
+          (let ((line (substring text start pos)))
+            (unless (string-empty-p line)
+              (ratex--dispatch-line line)))
+          (setq start (1+ pos)))
+        (unless (= start (length text))
+          (setq ratex--read-buffer (substring text start)))))))
 
 (defun ratex--dispatch-line (line)
   "Dispatch one backend output LINE."
@@ -366,7 +389,9 @@ instead of downloading a pre-built binary."
        (funcall callback `((ok . :false) (error . ,(string-trim event)))))
      ratex--pending)
     (clrhash ratex--pending)
-    (setq ratex--process nil)))
+    (setq ratex--read-chunks nil
+          ratex--read-buffer ""
+          ratex--process nil)))
 
 (defun ratex--launch-backend ()
   "Launch the backend binary."

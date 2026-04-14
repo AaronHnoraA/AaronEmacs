@@ -84,7 +84,7 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
     (let (fragments)
       (org-element-map (org-element-parse-buffer) '(latex-fragment latex-environment)
         (lambda (datum)
-          (when-let ((fragment (ratex--org-element-to-fragment datum)))
+          (when-let* ((fragment (ratex--org-element-to-fragment datum)))
             (push fragment fragments))))
       (nreverse fragments))))
 
@@ -134,43 +134,6 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
     (list "$" (substring value 1 -1) "$"))
    (t
     (list "" (string-trim value) ""))))
-
-(defun ratex--fragment-with-delimiters (open close)
-  "Return fragment bounded by OPEN and CLOSE around point."
-  (save-excursion
-    (let ((pos (point))
-          (open-len (length open))
-          (close-len (length close))
-          fragment)
-      (goto-char (min (point-max) (+ pos open-len)))
-      (while (and (not fragment) (search-backward open nil t))
-        (let ((begin (point)))
-          (if (or (ratex--escaped-at-p begin)
-                  (ratex--code-context-at-p begin))
-              (goto-char (max (point-min) (1- begin)))
-            (let ((content-begin (+ begin open-len))
-                  found-end
-                  content-end)
-              (goto-char content-begin)
-              (while (and (not found-end) (search-forward close nil t))
-                (let ((end-start (- (point) close-len)))
-                  (unless (or (ratex--escaped-at-p end-start)
-                              (ratex--code-context-at-p end-start))
-                    (setq found-end (point))
-                    (setq content-end end-start))))
-              (if (and found-end
-                       (<= begin pos)
-                       (< pos found-end))
-                  (setq fragment
-                        (list :begin begin
-                              :end found-end
-                              :content (buffer-substring-no-properties
-                                        content-begin
-                                        content-end)
-                              :open open
-                              :close close))
-                (goto-char (max (point-min) (1- begin))))))))
-      fragment)))
 
 (defun ratex--fragments-with-delimiters (open close)
   "Return all OPEN..CLOSE fragments in the current buffer."

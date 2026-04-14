@@ -28,23 +28,14 @@
 (defvar-local ratex--active-fragment nil)
 (defvar-local ratex--posframe-visible nil)
 (defvar-local ratex--posframe-fragment nil)
-(defvar-local ratex--child-frame nil)
-(defvar-local ratex--child-frame-visible nil)
-(defvar-local ratex--child-frame-fragment nil)
-(defvar-local ratex--popup-window nil)
-(defvar-local ratex--popup-fragment nil)
-(defvar-local ratex--minibuffer-visible nil)
-(defvar-local ratex--minibuffer-fragment nil)
 (defvar-local ratex--preview-enabled nil)
 (defvar-local ratex--edit-source-overlay nil)
+(defvar-local ratex--posframe-last-override-params nil
+  "Last override-parameters used for the posframe, cached for position updates.")
 (defvar ratex--cache-gc-timer nil)
 (defconst ratex--posframe-buffer " *ratex-preview*")
-(defconst ratex--child-frame-buffer " *ratex-child-preview*")
-(defconst ratex--popup-buffer " *ratex-popup-preview*")
 (defconst ratex--posframe-offset-y 72)
 (defconst ratex--posframe-display-offset-y 28)
-(defconst ratex--popup-window-max-height 18)
-(defconst ratex--popup-preview-width-threshold 0.75)
 
 (defun ratex-reset-buffer-state ()
   "Reset buffer-local rendering state."
@@ -56,17 +47,7 @@
   (setq-local ratex--active-fragment nil)
   (setq-local ratex--posframe-visible nil)
   (setq-local ratex--posframe-fragment nil)
-  (when (frame-live-p ratex--child-frame)
-    (delete-frame ratex--child-frame))
-  (setq-local ratex--child-frame nil)
-  (setq-local ratex--child-frame-visible nil)
-  (setq-local ratex--child-frame-fragment nil)
-  (when (window-live-p ratex--popup-window)
-    (quit-window nil ratex--popup-window))
-  (setq-local ratex--popup-window nil)
-  (setq-local ratex--popup-fragment nil)
-  (setq-local ratex--minibuffer-visible nil)
-  (setq-local ratex--minibuffer-fragment nil)
+  (setq-local ratex--posframe-last-override-params nil)
   (when (overlayp ratex--edit-source-overlay)
     (delete-overlay ratex--edit-source-overlay))
   (setq-local ratex--edit-source-overlay nil)
@@ -109,8 +90,7 @@ currently under point."
   "Update previews only when point enters/leaves math fragments."
   (when ratex-mode
     (when (ratex--preview-enabled-p)
-      (ratex--update-posframe-position)
-      (ratex--update-minibuffer-preview))
+      (ratex--update-posframe-position))
     (let ((current (ratex--active-fragment-at-point))
           (previous ratex--active-fragment))
       (ratex-debug-log "post-command point=%s previous=%S current=%S"
@@ -137,9 +117,6 @@ currently under point."
            (unless (ratex--display-edit-preview fragment cached image)
              (ratex--ensure-fragment-preview fragment))
            (ratex--update-posframe-position))
-          ('minibuffer
-           (unless (ratex--display-minibuffer fragment cached image)
-             (ratex--ensure-fragment-preview fragment)))
           (_
            (ratex--ensure-fragment-preview fragment))))
     (ratex--hide-edit-preview)))
@@ -390,8 +367,9 @@ fragments are normalized for preview compatibility when needed."
             (latex . ,(ratex--render-latex fragment))
             (font_size . ,ratex-font-size)
             (padding . ,ratex-svg-padding)
-            (color . ,(ratex--normalized-render-color))
             (embed_glyphs . t))
+          (when-let* ((color (ratex--normalized-render-color)))
+            `((color . ,color)))
           (when ratex-font-dir
             `((font_dir . ,(expand-file-name ratex-font-dir)))))))
     (ratex-debug-log "render-payload fragment=%S payload=%S" fragment payload)
@@ -492,27 +470,8 @@ When `posframe' is selected, always use posframe placement."
      (ratex-debug-log "display-edit-preview style=posframe fragment=%S response=%s image=%s"
                       fragment (not (null response)) (not (null image)))
      (let ((preview-image (or image (and response (ratex--image-from-response response)))))
-       (if (ratex--prefer-popup-preview-p fragment preview-image)
-           (ratex--display-popup-window fragment response preview-image)
-         (ratex--display-posframe fragment response preview-image))))
-    ('minibuffer
-     (ratex-debug-log "display-edit-preview style=minibuffer fragment=%S" fragment)
-     (ratex--display-minibuffer fragment response image))
+       (ratex--display-posframe fragment response preview-image)))
     (_ nil)))
-
-(defun ratex--prefer-popup-preview-p (fragment image)
-  "Return non-nil when FRAGMENT with IMAGE should use popup preview."
-  (and image
-       (or (ratex--display-fragment-p fragment)
-           (ratex--image-too-wide-for-posframe-p image))))
-
-(defun ratex--image-too-wide-for-posframe-p (image)
-  "Return non-nil when IMAGE would be awkward to show in a posframe."
-  (let* ((size (image-size image t))
-         (image-width (car size))
-         (window-width (max 1 (- (nth 2 (window-inside-pixel-edges))
-                                 (nth 0 (window-inside-pixel-edges))))))
-    (> image-width (* window-width ratex--popup-preview-width-threshold))))
 
 (defun ratex--ensure-posframe-loaded ()
   "Return non-nil when posframe is available; load it if needed."
@@ -528,19 +487,29 @@ When `posframe' is selected, always use posframe placement."
     (let ((image (or image (and response (ratex--image-from-response response)))))
       (when image
         (condition-case nil
-            (progn
-              (ratex-debug-log "try posframe fragment=%S" fragment)
+            (let* ((size (image-size image t))
+                   (ibw 8)
+                   (px-w (+ (ceiling (car size)) (* 2 ibw) 2))
+                   (px-h (+ (ceiling (cdr size)) (* 2 ibw) 2))
+                   (override-params
+                    `((width . (text-pixels . ,px-w))
+                      (height . (text-pixels . ,px-h)))))
+              (ratex-debug-log "try posframe fragment=%S size=%S" fragment size)
               (with-current-buffer (get-buffer-create ratex--posframe-buffer)
+                (setq-local truncate-lines nil)
+                (setq-local word-wrap nil)
                 (erase-buffer)
                 (insert (propertize " " 'display image)))
+              (setq ratex--posframe-last-override-params override-params)
               (posframe-show
                ratex--posframe-buffer
                :position (point)
                :poshandler (ratex--posframe-poshandler-for-fragment fragment)
-               :internal-border-width 8
+               :internal-border-width ibw
                :border-width 1
                :border-color ratex-posframe-border-color
-               :background-color ratex-posframe-background-color)
+               :background-color ratex-posframe-background-color
+               :override-parameters override-params)
               (ratex--mask-edit-source fragment)
               (setq ratex--posframe-visible t)
               (setq ratex--posframe-fragment fragment)
@@ -548,85 +517,6 @@ When `posframe' is selected, always use posframe placement."
               t)
           (error
            (ratex-debug-log "posframe failed")
-           nil))))))
-
-(defun ratex--point-absolute-pixel-position ()
-  "Return absolute pixel position for point as (X . Y), or nil."
-  (when-let* ((posn (posn-at-point))
-              (xy (posn-x-y posn))
-              (window (posn-window posn))
-              ((window-live-p window)))
-    (let* ((edges (window-inside-pixel-edges window))
-           (x (+ (car edges) (car xy)))
-           (y (+ (cadr edges) (cdr xy)))
-           (frame-pos (frame-position)))
-      (cons (+ (car frame-pos) x)
-            (+ (cdr frame-pos) y)))))
-
-(defun ratex--child-frame-parameters (width height left top)
-  "Return child-frame parameters for preview of WIDTH HEIGHT at LEFT TOP."
-  `((parent-frame . ,(window-frame))
-    (minibuffer . nil)
-    (left . ,left)
-    (top . ,top)
-    (width . ,width)
-    (height . ,height)
-    (border-width . 1)
-    (internal-border-width . 10)
-    (undecorated . t)
-    (skip-taskbar . t)
-    (no-accept-focus . t)
-    (no-focus-on-map . t)
-    (visibility . nil)
-    (vertical-scroll-bars . nil)
-    (horizontal-scroll-bars . nil)
-    (menu-bar-lines . 0)
-    (tool-bar-lines . 0)
-    (line-spacing . 0)
-    (left-fringe . 0)
-    (right-fringe . 0)
-    (child-frame-border-width . 1)
-    (background-color . ,ratex-posframe-background-color)
-    (border-color . ,ratex-posframe-border-color)))
-
-(defun ratex--display-child-frame (fragment &optional response image)
-  "Display IMAGE (or RESPONSE) in an internal child frame for FRAGMENT."
-  (when (and (display-graphic-p)
-             (ratex--point-in-fragment-p fragment))
-    (let* ((image (or image (and response (ratex--image-from-response response))))
-           (xy (ratex--point-absolute-pixel-position)))
-      (when (and image xy)
-        (condition-case nil
-            (let* ((size (image-size image t))
-                   (width (max 64 (+ 20 (ceiling (car size)))))
-                   (height (max 48 (+ 20 (ceiling (cdr size)))))
-                   (left (max 0 (- (car xy) 12)))
-                   (top (max 0 (- (cdr xy) height 132)))
-                   (buffer (get-buffer-create ratex--child-frame-buffer)))
-              (ratex-debug-log "try child-frame fragment=%S xy=%S size=%S" fragment xy size)
-              (with-current-buffer buffer
-                (setq-local mode-line-format nil)
-                (setq-local header-line-format nil)
-                (setq-local cursor-type nil)
-                (setq-local display-line-numbers nil)
-                (setq-local truncate-lines t)
-                (erase-buffer)
-                (insert (propertize " " 'display image)))
-              (unless (frame-live-p ratex--child-frame)
-                (setq ratex--child-frame
-                      (make-frame (ratex--child-frame-parameters width height left top))))
-              (modify-frame-parameters
-               ratex--child-frame
-               (ratex--child-frame-parameters width height left top))
-              (set-window-buffer (frame-root-window ratex--child-frame) buffer)
-              (make-frame-visible ratex--child-frame)
-              (ratex--mask-edit-source fragment)
-              (setq ratex--child-frame-visible t)
-              (setq ratex--child-frame-fragment fragment)
-              (ratex-debug-log "child-frame success")
-              t)
-          (error
-           (ratex-debug-log "child-frame failed")
            nil))))))
 
 (defun ratex-posframe-poshandler-point-bottom-left-corner-offset (info)
@@ -637,11 +527,16 @@ When `posframe' is selected, always use posframe placement."
     (cons x (+ y ratex--posframe-offset-y))))
 
 (defun ratex-posframe-poshandler-point-top-left-corner-offset (info)
-  "Position posframe above point using `posframe-poshandler-point-top-left-corner'."
-  (let* ((base (posframe-poshandler-point-top-left-corner info))
-         (x (car base))
-         (y (cdr base)))
-    (cons x (- y ratex--posframe-offset-y))))
+  "Position posframe above point, falling back to below when near screen top."
+  (let* ((above-base (posframe-poshandler-point-top-left-corner info))
+         (above-y (- (cdr above-base) ratex--posframe-offset-y))
+         (posframe-h (or (plist-get info :posframe-height) 0)))
+    (if (>= (- above-y posframe-h) 0)
+        (cons (car above-base) above-y)
+      ;; Not enough room above — place below the cursor instead.
+      (let* ((below-base (posframe-poshandler-point-bottom-left-corner info))
+             (below-y (+ (cdr below-base) ratex--posframe-display-offset-y)))
+        (cons (car below-base) below-y)))))
 
 (defun ratex--display-fragment-p (fragment)
   "Return non-nil when FRAGMENT should use display-style popup placement."
@@ -649,11 +544,15 @@ When `posframe' is selected, always use posframe placement."
       (equal (plist-get fragment :open) "\\[")))
 
 (defun ratex-posframe-poshandler-point-bottom-left-corner-upward-offset (info)
-  "Position posframe above point using upward bottom-left alignment."
-  (let* ((base (posframe-poshandler-point-bottom-left-corner-upward info))
-         (x (car base))
-         (y (cdr base)))
-    (cons x (max 0 (- y ratex--posframe-display-offset-y)))))
+  "Position posframe above point, falling back to below when near screen top."
+  (let* ((above-base (posframe-poshandler-point-bottom-left-corner-upward info))
+         (above-y (- (cdr above-base) ratex--posframe-display-offset-y))
+         (posframe-h (or (plist-get info :posframe-height) 0)))
+    (if (>= (- above-y posframe-h) 0)
+        (cons (car above-base) above-y)
+      (let* ((below-base (posframe-poshandler-point-bottom-left-corner info))
+             (below-y (+ (cdr below-base) ratex--posframe-display-offset-y)))
+        (cons (car below-base) below-y)))))
 
 (defun ratex--posframe-poshandler-for-fragment (fragment)
   "Return the best posframe poshandler for FRAGMENT."
@@ -671,81 +570,9 @@ When `posframe' is selected, always use posframe placement."
     (setq ratex--posframe-fragment nil))
   (ratex--unmask-edit-source))
 
-(defun ratex--hide-child-frame ()
-  "Hide the internal child-frame preview."
-  (when (frame-live-p ratex--child-frame)
-    (make-frame-invisible ratex--child-frame t))
-  (setq ratex--child-frame-visible nil)
-  (setq ratex--child-frame-fragment nil)
-  (ratex--unmask-edit-source))
-
-(defun ratex--display-popup-window (fragment &optional response image)
-  "Display IMAGE (or RESPONSE) in a temporary popup window for FRAGMENT."
-  (when (ratex--point-in-fragment-p fragment)
-    (let ((image (or image (and response (ratex--image-from-response response)))))
-      (when image
-        (ratex-debug-log "try popup-window fragment=%S" fragment)
-        (let* ((buffer (get-buffer-create ratex--popup-buffer))
-               (window
-                (display-buffer-in-side-window
-                 buffer
-                 '((side . bottom)
-                   (slot . -1)
-                   (window-height . fit-window-to-buffer)
-                   (preserve-size . (t . t))
-                   (dedicated . t))))))
-          (with-current-buffer buffer
-            (setq-local mode-line-format nil)
-            (setq-local header-line-format nil)
-            (setq-local cursor-type nil)
-            (setq-local truncate-lines t)
-            (setq-local display-line-numbers nil)
-            (let ((inhibit-read-only t))
-              (erase-buffer)
-              (insert (propertize " " 'display image))
-              (special-mode)))
-          (when (window-live-p window)
-            (set-window-dedicated-p window t)
-            (fit-window-to-buffer window ratex--popup-window-max-height 6)
-            (ratex--mask-edit-source fragment)
-            (setq ratex--popup-window window)
-            (setq ratex--popup-fragment fragment)
-            (ratex-debug-log "popup-window success window=%S" window)
-            t)))))
-
-(defun ratex--hide-popup-window ()
-  "Hide the popup preview window."
-  (when (window-live-p ratex--popup-window)
-    (quit-window nil ratex--popup-window))
-  (setq ratex--popup-window nil)
-  (setq ratex--popup-fragment nil)
-  (ratex--unmask-edit-source))
-
-(defun ratex--display-minibuffer (fragment &optional response image)
-  "Display IMAGE (or RESPONSE) in the minibuffer for FRAGMENT."
-  (when (ratex--point-in-fragment-p fragment)
-    (let ((image (or image (and response (ratex--image-from-response response)))))
-      (when image
-        (ratex-debug-log "try minibuffer fragment=%S" fragment)
-        (message "%s" (propertize " " 'display image))
-        (setq ratex--minibuffer-visible t)
-        (setq ratex--minibuffer-fragment fragment)
-        (ratex-debug-log "minibuffer success")
-        t))))
-
-(defun ratex--hide-minibuffer ()
-  "Hide minibuffer preview if visible."
-  (when ratex--minibuffer-visible
-    (message nil)
-    (setq ratex--minibuffer-visible nil)
-    (setq ratex--minibuffer-fragment nil)))
-
 (defun ratex--hide-edit-preview ()
-  "Hide whichever edit preview is active."
+  "Hide the posframe edit preview."
   (ratex--hide-posframe)
-  (ratex--hide-child-frame)
-  (ratex--hide-popup-window)
-  (ratex--hide-minibuffer)
   (ratex--unmask-edit-source))
 
 (defun ratex--update-posframe-position ()
@@ -764,18 +591,11 @@ When `posframe' is selected, always use posframe placement."
                             ratex--posframe-fragment)
                :border-width 1
                :border-color ratex-posframe-border-color
-               :background-color ratex-posframe-background-color)
+               :background-color ratex-posframe-background-color
+               :override-parameters ratex--posframe-last-override-params)
               (ratex--mask-edit-source ratex--posframe-fragment))
           (error (ratex--hide-posframe)))
-      (ratex--hide-posframe)))
-  (when (and ratex--child-frame-visible
-             (eq (ratex--preview-style) 'posframe))
-    (if (ratex--point-in-fragment-p ratex--child-frame-fragment)
-        (ratex--display-child-frame ratex--child-frame-fragment)
-      (ratex--hide-child-frame)))
-  (when (window-live-p ratex--popup-window)
-    (unless (ratex--point-in-fragment-p ratex--popup-fragment)
-      (ratex--hide-popup-window))))
+      (ratex--hide-posframe))))
 
 (defun ratex--mask-edit-source (fragment)
   "Hide the source text of FRAGMENT while edit preview is visible."
@@ -795,12 +615,6 @@ When `posframe' is selected, always use posframe placement."
     (overlay-put ratex--edit-source-overlay 'invisible nil)
     (delete-overlay ratex--edit-source-overlay))
   (setq ratex--edit-source-overlay nil))
-
-(defun ratex--update-minibuffer-preview ()
-  "Keep minibuffer preview visible while point stays inside fragment."
-  (when ratex--minibuffer-visible
-    (unless (ratex--point-in-fragment-p ratex--minibuffer-fragment)
-      (ratex--hide-minibuffer))))
 
 (defun ratex-toggle-preview-at-point ()
   "Toggle the RaTeX posframe preview for the formula at point."
