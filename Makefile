@@ -1,6 +1,8 @@
 EMACS ?= emacs
-BATCH = $(EMACS) --batch -Q -l ./init.el
-BOOTSTRAP = $(EMACS) --batch -Q -l ./bootstrap.el
+EMACS_BATCH_BASE = $(EMACS) --batch --no-site-file --no-site-lisp --no-splash --init-directory=$(CURDIR) -q
+# Load early-init first so native-comp never writes into top-level eln-cache.
+BATCH = $(EMACS_BATCH_BASE) -l ./early-init.el -l ./init.el
+BOOTSTRAP = $(EMACS_BATCH_BASE) -l ./early-init.el -l ./bootstrap.el
 BOOTSTRAP_INSTALL = BOOTSTRAP_MODE=install $(BOOTSTRAP)
 BOOTSTRAP_EXPORT = BOOTSTRAP_MODE=export $(BOOTSTRAP)
 BOOTSTRAP_AUDIT = BOOTSTRAP_MODE=audit $(BOOTSTRAP)

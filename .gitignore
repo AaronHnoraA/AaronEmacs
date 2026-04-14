@@ -10,6 +10,7 @@
 /lisp/.elsa/
 
 # Emacs runtime state and caches
+/eln-cache
 /eln-cache/
 /var/
 /tree-sitter/
