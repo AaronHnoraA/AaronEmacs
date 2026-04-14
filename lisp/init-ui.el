@@ -429,64 +429,85 @@
 
 (defvar-local chunlian--overlays nil)
 
+(defun chunlian--apply-window-margins (win)
+  "Apply Chunlian margins to WIN while preserving previous margins."
+  (when (window-live-p win)
+    (unless (window-parameter win 'chunlian--saved-margins)
+      (set-window-parameter win 'chunlian--saved-margins (window-margins win)))
+    (set-window-parameter win 'chunlian--active t)
+    (set-window-margins win chunlian-margin-width chunlian-margin-width)))
+
+(defun chunlian--restore-window-margins (&optional win)
+  "Restore margins previously changed by Chunlian.
+When WIN is nil, restore every tracked window."
+  (dolist (target (if win (list win) (window-list nil 'no-minibuffer t)))
+    (when (and (window-live-p target)
+               (window-parameter target 'chunlian--active))
+      (let* ((saved (window-parameter target 'chunlian--saved-margins))
+             (left (car-safe saved))
+             (right (cdr-safe saved)))
+        (set-window-margins target left right)
+        (set-window-parameter target 'chunlian--active nil)
+        (set-window-parameter target 'chunlian--saved-margins nil)))))
+
 (defun chunlian--setup-overlays ()
   "在 buffer 两侧设置静态的春联 overlays。"
-  (let ((win (selected-window)))
-    ;; 确保只有在有窗口展示当前 buffer 时才进行渲染
-    (when (window-live-p win)
-      (set-window-margins win chunlian-margin-width chunlian-margin-width)
-      (save-excursion
-        ;; 清除旧的 overlays
-        (mapc #'delete-overlay chunlian--overlays)
-        (setq chunlian--overlays nil)
-        
-        (goto-char (point-min))
-        ;; 往下空几行，跳过 Dashboard 顶部
-        (forward-line chunlian-top-offset)
-        
-        (let ((len (min (length chunlian-left) (length chunlian-right))))
-          (dotimes (i len)
-            (when (not (eobp))
-              ;; 1. 渲染带字的 Overlay
-              (let* ((start (line-beginning-position))
-                     (ov-l (make-overlay start start))
-                     (ov-r (make-overlay start start))
-                     (char-l (substring chunlian-left i (1+ i)))
-                     (char-r (substring chunlian-right i (1+ i))))
-                
-                (overlay-put ov-l 'before-string
-                             (propertize " " 'display
-                                         `((margin left-margin)
-                                           ,(propertize char-l 'face 'chunlian-face))))
-                (overlay-put ov-r 'after-string
-                             (propertize " " 'display
-                                         `((margin right-margin)
-                                           ,(propertize char-r 'face 'chunlian-face))))
-                
-                (push ov-l chunlian--overlays)
-                (push ov-r chunlian--overlays))
-              
-              ;; 2. 【关键修复】如果不是最后一个字，填充红底的间隙
-              (when (< i (1- len))
-                (dotimes (step chunlian-line-step)
-                  (when (= (forward-line 1) 0)
-                    ;; 仅在被作为“行距”跳过的行，塞入纯红空白块
-                    (when (< step (1- chunlian-line-step))
-                      (let* ((start (line-beginning-position))
-                             (ov-l (make-overlay start start))
-                             (ov-r (make-overlay start start))
-                             ;; 涂上纯红背景的空格
-                             (blank (propertize chunlian-blank-string 'face 'chunlian-blank-face)))
-                        
-                        (overlay-put ov-l 'before-string
-                                     (propertize " " 'display
-                                                 `((margin left-margin) ,blank)))
-                        (overlay-put ov-r 'after-string
-                                     (propertize " " 'display
-                                                 `((margin right-margin) ,blank)))
-                        
-                        (push ov-l chunlian--overlays)
-                        (push ov-r chunlian--overlays)))))))))))))
+  ;; 确保只有在有窗口展示当前 buffer 时才进行渲染
+  (when-let* ((wins (get-buffer-window-list (current-buffer) nil t)))
+    (dolist (win wins)
+      (chunlian--apply-window-margins win))
+    (save-excursion
+      ;; 清除旧的 overlays
+      (mapc #'delete-overlay chunlian--overlays)
+      (setq chunlian--overlays nil)
+
+      (goto-char (point-min))
+      ;; 往下空几行，跳过 Dashboard 顶部
+      (forward-line chunlian-top-offset)
+
+      (let ((len (min (length chunlian-left) (length chunlian-right))))
+        (dotimes (i len)
+          (when (not (eobp))
+            ;; 1. 渲染带字的 Overlay
+            (let* ((start (line-beginning-position))
+                   (ov-l (make-overlay start start))
+                   (ov-r (make-overlay start start))
+                   (char-l (substring chunlian-left i (1+ i)))
+                   (char-r (substring chunlian-right i (1+ i))))
+
+              (overlay-put ov-l 'before-string
+                           (propertize " " 'display
+                                       `((margin left-margin)
+                                         ,(propertize char-l 'face 'chunlian-face))))
+              (overlay-put ov-r 'after-string
+                           (propertize " " 'display
+                                       `((margin right-margin)
+                                         ,(propertize char-r 'face 'chunlian-face))))
+
+              (push ov-l chunlian--overlays)
+              (push ov-r chunlian--overlays))
+
+            ;; 2. 【关键修复】如果不是最后一个字，填充红底的间隙
+            (when (< i (1- len))
+              (dotimes (step chunlian-line-step)
+                (when (= (forward-line 1) 0)
+                  ;; 仅在被作为“行距”跳过的行，塞入纯红空白块
+                  (when (< step (1- chunlian-line-step))
+                    (let* ((start (line-beginning-position))
+                           (ov-l (make-overlay start start))
+                           (ov-r (make-overlay start start))
+                           ;; 涂上纯红背景的空格
+                           (blank (propertize chunlian-blank-string 'face 'chunlian-blank-face)))
+
+                      (overlay-put ov-l 'before-string
+                                   (propertize " " 'display
+                                               `((margin left-margin) ,blank)))
+                      (overlay-put ov-r 'after-string
+                                   (propertize " " 'display
+                                               `((margin right-margin) ,blank)))
+
+                      (push ov-l chunlian--overlays)
+                      (push ov-r chunlian--overlays))))))))))))
 
 (defun chunlian--setup-display ()
   "初始化春联显示。"
@@ -498,11 +519,16 @@
 (defun chunlian--clear-display ()
   "清除春联显示。"
   (setq header-line-format nil)
-  (let ((win (get-buffer-window (current-buffer))))
-    (when win
-      (set-window-margins win 0 0)))
+  (chunlian--restore-window-margins)
   (mapc #'delete-overlay chunlian--overlays)
   (setq chunlian--overlays nil))
+
+(defun chunlian--maybe-disable ()
+  "Disable `chunlian-mode' when the dashboard buffer is no longer visible."
+  (when (and chunlian-mode
+             (derived-mode-p 'dashboard-mode)
+             (null (get-buffer-window (current-buffer) t)))
+    (chunlian-mode -1)))
 
 ;;;###autoload
 (define-minor-mode chunlian-mode
@@ -515,9 +541,19 @@
 
 ;; 卸载旧的，挂载安全的 Hook
 (remove-hook 'dashboard-mode-hook #'chunlian-mode)
-(add-hook 'dashboard-after-initialize-hook (lambda ()
-                                             (chunlian-mode 1)
-                                             (run-with-timer 0.1 nil #'chunlian--setup-overlays)))
+(add-hook 'buffer-list-update-hook #'chunlian--maybe-disable)
+(add-hook 'dashboard-after-initialize-hook
+          (lambda ()
+            (chunlian-mode 1)
+            (let ((dashboard-buffer (current-buffer)))
+              (run-with-timer
+               0.1 nil
+               (lambda (buffer)
+                 (when (buffer-live-p buffer)
+                   (with-current-buffer buffer
+                     (when chunlian-mode
+                       (chunlian--setup-overlays)))))
+               dashboard-buffer))))
 
 
 
