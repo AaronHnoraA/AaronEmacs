@@ -150,50 +150,11 @@ confirmation."
   (when-let* ((buf (get-buffer "*compilation*")))
     (pop-to-buffer buf)))
 
-(defun my/delimiter--org-script-range-at-point ()
-  "Return `(OPEN . CLOSE)' for the surrounding Org `^{...}'/`_{...}' at point.
-This works even when `org-appear' hides the braces."
-  (when (derived-mode-p 'org-mode)
-    (save-excursion
-      (let ((origin (point))
-            found)
-        (while (and (not found)
-                    (search-backward "{" nil t))
-          (when (memq (char-before) '(?^ ?_))
-            (let ((open (point)))
-              (let ((close (save-excursion
-                             (goto-char (1+ open))
-                             (search-forward "}" nil t))))
-                (when (and close
-                           (<= origin close)
-                           (> origin open))
-                  (setq found (cons open close)))))))
-        found))))
-
-(defun my/delimiter--org-reveal-script-at-point ()
-  "Temporarily reveal the current Org sub/superscript for visible jumps."
-  (when (and (derived-mode-p 'org-mode)
-             (bound-and-true-p org-appear-mode)
-             (boundp 'org-appear-autosubmarkers)
-             org-appear-autosubmarkers
-             (fboundp 'org-appear--show-invisible))
-    (require 'org-element)
-    (when-let* ((element (org-element-context))
-                (type (org-element-type element))
-                ((memq type '(subscript superscript)))
-                ((org-element-property :use-brackets-p element)))
-      (org-appear--show-invisible element))))
-
 (defun my/forward-delimiter-dwim ()
-  "Jump forward out of Org script braces or to the next closing delimiter."
+  "Jump to the next closing delimiter."
   (interactive)
-  (if-let* ((range (my/delimiter--org-script-range-at-point))
-            (jumped (cdr range)))
-      (progn
-        (my/delimiter--org-reveal-script-at-point)
-        (goto-char jumped))
-    (unless (re-search-forward "[])}]" nil t)
-      (user-error "No forward closing delimiter found"))))
+  (unless (re-search-forward "[])}]" nil t)
+    (user-error "No forward closing delimiter found")))
 
 (defun my/delimiter--backward-open-target ()
   "Return the point just after the previous opening delimiter."
@@ -208,24 +169,11 @@ This works even when `org-appear' hides the braces."
         (1+ (point))))))
 
 (defun my/backward-delimiter-dwim ()
-  "Jump backward to Org script opening brace or previous opening delimiter."
+  "Jump to the previous opening delimiter."
   (interactive)
-  (if-let* ((range (my/delimiter--org-script-range-at-point))
-            (target (1+ (car range))))
-      (progn
-        (my/delimiter--org-reveal-script-at-point)
-        (if (= (point) target)
-            (let ((outer-target
-                   (save-excursion
-                     (goto-char (car range))
-                     (my/delimiter--backward-open-target))))
-              (if outer-target
-                  (goto-char outer-target)
-                (goto-char target)))
-          (goto-char target)))
-    (if-let ((target (my/delimiter--backward-open-target)))
-        (goto-char target)
-      (user-error "No backward opening delimiter found"))))
+  (if-let* ((target (my/delimiter--backward-open-target)))
+      (goto-char target)
+    (user-error "No backward opening delimiter found")))
 
 (defun my/evil-global-leader-set (key command &optional replacement)
   "Bind COMMAND to `SPC KEY' in Evil normal state.

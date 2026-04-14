@@ -14,7 +14,13 @@
 
 (use-package cdlatex
   :ensure t
-  :hook (org-mode . org-cdlatex-mode))
+  :hook (org-mode . org-cdlatex-mode)
+  :config
+  ;; org-appear 隐藏括号后 ^{} / _{} 内外无法区分。
+  ;; 改为只插入开括号 ^{ / _{，不自动补全 }，由用户手动收尾。
+  (with-eval-after-load 'org
+    (keymap-set org-cdlatex-mode-map "^" (lambda () (interactive) (insert "^{")))
+    (keymap-set org-cdlatex-mode-map "_" (lambda () (interactive) (insert "_{")))))
 
 (use-package org-fragtog
   :ensure t
