@@ -34,7 +34,6 @@
 (declare-function appine--update-active-keymap "appine")
 (declare-function appine-focus "appine")
 (declare-function appine-open-file-by-file-chooser "appine")
-(declare-function appine-refresh "appine")
 (declare-function appine-native-action "appine" (name))
 
 (defun my/appine-current-file ()
@@ -203,24 +202,6 @@
      ((string-prefix-p "/" u)       'file)
      ((string-match-p "\\`https?://" u) 'web)
      (t                              'web))))   ; treat any other scheme as web
-
-(defun my/appine-reload ()
-  "Reload the current Appine web tab."
-  (interactive)
-  (appine-web-reload))
-
-(defun my/appine-reload-file ()
-  "Reload the current Appine file tab by closing and reopening it.
-Use this for PDF/Quick Look tabs that need a disk refresh."
-  (interactive)
-  (if-let* ((file (my/appine-current-file))
-            (path (expand-file-name file)))
-      (progn
-        (message "Appine 重新打开文件: %s" path)
-        (appine-focus)
-        (appine-close-tab)
-        (run-at-time 0.1 nil #'appine-open-file path))
-    (user-error "当前 tab 不是文件")))
 
 (defun my/appine-next-tab ()
   "Switch to the next Appine tab (registry updated via advice)."
@@ -407,9 +388,7 @@ into the appine native plugins directory so it survives git pull."
     (with-temp-file index-file
       (insert (format "// Appine plugin: %s\nexport default {\n  name: '%s',\n  setup(api) {\n    api.onLoad(() => {\n      %s\n    });\n  }\n};\n"
                       name name js-code)))
-    (message "Plugin '%s' → %s (reload to activate)" name user-dir)
-    (when (yes-or-no-p "Reload Appine to activate plugin? ")
-      (my/appine-reload))))
+    (message "Plugin '%s' → %s" name user-dir)))
 
 (defun my/appine-run-js-once (js-code)
   "Inject JS-CODE as a one-shot plugin (stored as _oneshot), then reload."
@@ -640,10 +619,9 @@ export default {
                    host n total
                    (mapconcat (lambda (line) (concat "      " line))
                               (split-string js "\n") "\n"))))
-        (message "Wrote %d/%d cookies for %s → %s (reload to activate)"
+        (message "Wrote %d/%d cookies for %s → %s"
                  n total host index-file)
-        (when (yes-or-no-p (format "Reload Appine to activate %d cookies? " n))
-          (my/appine-reload))))))
+        (message "Brave cookies plugin written. Reopen the target page if you need it to take effect.")))))
 
 ;;; ── Board ───────────────────────────────────────────────────────────────
 
@@ -707,9 +685,7 @@ export default {
     (my/appine-board--section "Navigation")
     (my/appine-board--insert-action-line
      '(("[H] back"       my/appine-back        "Go back")
-       ("[L] forward"    my/appine-forward     "Go forward")
-       ("[r] reload"     my/appine-reload      "Web reload")
-       ("[F] reload-file" my/appine-reload-file "Close & reopen file tab")))
+       ("[L] forward"    my/appine-forward     "Go forward")))
     (my/appine-board--insert-action-line
      '(("[n] new tab"    my/appine-new-tab     "Open a new tab")
        ("[[]] prev/next" my/appine-prev-tab    "Prev tab (] for next)")
@@ -752,7 +728,7 @@ export default {
     (my/appine-board--insert-action-line
      '(("[pc] create plugin" my/appine-create-plugin  "Create a new JS plugin")
        ("[pj] run JS once"   my/appine-run-js-once    "Inject one-shot JS (reloads page)")))
-    (insert "(Plugins are injected at page load; use [r] reload after changes.)\n")
+    (insert "(Plugins are injected at page load.)\n")
 
     ;; ── Browser Storage ─────────────────────────────────────────────────
     (my/appine-board--section "Browser Storage")
@@ -797,8 +773,8 @@ export default {
     (my/appine-board--section "Keys")
     (my/appine-board--hint-row '("g"  "refresh board") '("a"  "focus/open")
                                '("u"  "open URL")      '("f"  "open file"))
-    (my/appine-board--hint-row '("r"  "reload tab")    '("n"  "new tab")
-                               '("d"  "close tab")     '("k"  "kill all"))
+    (my/appine-board--hint-row '("n"  "new tab")       '("d"  "close tab")
+                               '("k"  "kill all"))
     (my/appine-board--hint-row '("H/L" "back/fwd")     '("[/]" "prev/next tab")
                                '("o"  "edit src")      '("/"  "find"))
     (my/appine-board--hint-row '("^"  "scroll top")    '("v"  "scroll btm")
@@ -824,8 +800,6 @@ export default {
         (define-key map (kbd "a")   #'my/appine-focus-or-open)
         (define-key map (kbd "u")   #'my/appine-open-url)
         (define-key map (kbd "f")   #'my/appine-open-file)
-        (define-key map (kbd "r")   #'my/appine-reload)
-        (define-key map (kbd "F")   #'my/appine-reload-file)
         (define-key map (kbd "n")   #'my/appine-new-tab)
         (define-key map (kbd "d")   #'my/appine-close-tab)
         (define-key map (kbd "k")   #'my/appine-kill-all)
@@ -940,10 +914,8 @@ export default {
              appine-next-tab
              appine-prev-tab
              appine-focus
-             appine-refresh
              appine-web-go-back
-             appine-web-go-forward
-             appine-web-reload))
+             appine-web-go-forward))
 
 
 (with-eval-after-load 'appine
@@ -959,10 +931,6 @@ export default {
   (when (boundp 'appine-active-map)
     (define-key appine-active-map (kbd "H")   #'my/appine-back)
     (define-key appine-active-map (kbd "L")   #'my/appine-forward)
-    (define-key appine-active-map (kbd "g")   #'my/appine-reload)
-    (define-key appine-active-map (kbd "R")   #'my/appine-reload)
-    (define-key appine-active-map [?\s-r]     #'my/appine-reload)
-    (define-key appine-active-map (kbd "F")   #'my/appine-reload-file)
     (define-key appine-active-map (kbd "M-w") #'my/appine-close-tab)
     (define-key appine-active-map (kbd "[")   #'my/appine-prev-tab)
     (define-key appine-active-map (kbd "]")   #'my/appine-next-tab)

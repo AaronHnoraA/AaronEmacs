@@ -11,6 +11,7 @@
 (declare-function my/typography-setup-prose-buffer "init-base")
 (declare-function my/refresh-environment-from-shell nil)
 (declare-function my/shell-command-executable "init-utils")
+(declare-function evil-local-set-key "evil-core" (state key def))
 
 ;; --- XeLaTeX 与 pdflatex 的编译命令，注入 -synctex=1 ---
 
@@ -153,13 +154,81 @@ Only fall back to `pdf-tools-install' when the checker fails."
   (setq-local auto-revert-interval 0.5)
   (auto-revert-mode 1))
 
+(defconst my/pdf-tools-enabled-modes
+  '(pdf-history-minor-mode
+    pdf-isearch-minor-mode
+    pdf-links-minor-mode
+    pdf-misc-minor-mode
+    pdf-outline-minor-mode
+    pdf-misc-size-indication-minor-mode
+    pdf-misc-menu-bar-minor-mode
+    pdf-annot-minor-mode
+    pdf-sync-minor-mode
+    pdf-misc-context-menu-minor-mode
+    pdf-cache-prefetch-minor-mode
+    pdf-occur-global-minor-mode)
+  "PDF Tools minor modes that should be active by default.")
+
+(defun my/pdf-view-enable-capabilities ()
+  "Enable the full PDF Tools interaction stack in the current PDF buffer."
+  (dolist (mode my/pdf-tools-enabled-modes)
+    (when (fboundp mode)
+      (funcall mode 1))))
+
+(defun my/pdf-view-mouse-follow-link (event)
+  "Follow the PDF link at mouse EVENT, if one exists."
+  (interactive "e")
+  (let* ((pos (event-start event))
+         (window (posn-window pos))
+         (image-pos (posn-object-x-y pos)))
+    (unless (and (windowp window) image-pos)
+      (user-error "Mouse is not over a PDF page"))
+    (with-selected-window window
+      (let* ((page (if pdf-view-roll-minor-mode
+                       (/ (+ 3 (posn-point pos)) 4)
+                     (pdf-view-current-page window)))
+             (relative-pos (pdf-util-scale-pixel-to-relative
+                            image-pos nil t window))
+             (link (cl-find-if
+                    (lambda (candidate)
+                      (pdf-util-edges-inside-p
+                       (alist-get 'edges candidate)
+                       relative-pos
+                       0.01))
+                    (pdf-cache-pagelinks page))))
+        (if link
+            (pdf-links-action-perform link)
+          (message "No PDF link at click position"))))))
+
+(defun my/pdf-view-setup-interaction ()
+  "Configure local interaction keys for PDF buffers."
+  (local-set-key (kbd "<down>") #'pdf-view-next-page-command)
+  (local-set-key (kbd "<up>") #'pdf-view-previous-page-command)
+  (local-set-key (kbd "M-r") #'revert-buffer)
+  (local-set-key [mouse-2] #'my/pdf-view-mouse-follow-link)
+  (local-set-key [double-mouse-1] #'my/pdf-view-mouse-follow-link)
+  (local-set-key (kbd "TAB") #'pdf-outline)
+  (local-set-key (kbd "C-c C-o") #'pdf-outline)
+  (local-set-key (kbd "C-c C-s") #'pdf-occur)
+  (when (featurep 'evil)
+    (dolist (state '(normal motion))
+      (evil-local-set-key state (kbd "j") #'pdf-view-next-page-command)
+      (evil-local-set-key state (kbd "k") #'pdf-view-previous-page-command)
+      (evil-local-set-key state (kbd "<down>") #'pdf-view-next-page-command)
+      (evil-local-set-key state (kbd "<up>") #'pdf-view-previous-page-command)
+      (evil-local-set-key state (kbd "M-r") #'revert-buffer)
+      (evil-local-set-key state (kbd "TAB") #'pdf-outline)
+      (evil-local-set-key state (kbd "go") #'pdf-outline)
+      (evil-local-set-key state (kbd "gs") #'pdf-occur))))
+
 (defun my/pdf-view-configure-open-buffers ()
-  "Enable PDF sync and auto-refresh in already-open PDF buffers."
+  "Enable PDF Tools capabilities in already-open PDF buffers."
   (dolist (buffer (buffer-list))
     (with-current-buffer buffer
       (when (derived-mode-p 'pdf-view-mode)
-        (pdf-sync-minor-mode 1)
-        (my/pdf-view-enable-auto-refresh)))))
+        (my/pdf-view-enable-capabilities)
+        (my/pdf-view-enable-auto-refresh)
+        (my/pdf-view-setup-interaction)))))
 
 (defun my/pdf-sync--open-pdf-candidates ()
   "Return currently opened PDF buffer files."
@@ -366,16 +435,26 @@ Only fall back to `pdf-tools-install' when the checker fails."
 (use-package pdf-tools
   :ensure t
   :config
+  (setq pdf-tools-enabled-modes my/pdf-tools-enabled-modes)
+  (setq pdf-outline-enable-imenu t)
   (my/pdf-tools-activate)
   (require 'pdf-sync)
+  (require 'pdf-links)
+  (require 'pdf-history)
+  (require 'pdf-outline)
+  (require 'pdf-annot)
+  (require 'pdf-occur)
+  (require 'pdf-misc)
+  (require 'pdf-cache)
 
   (advice-add 'pdf-sync-forward-correlate :around
               #'my/pdf-sync-forward-correlate-advice)
 
   (advice-add 'TeX-view :around #'my/TeX-view-subfile-advice)
 
-  (add-hook 'pdf-view-mode-hook #'pdf-sync-minor-mode)
+  (add-hook 'pdf-view-mode-hook #'my/pdf-view-enable-capabilities)
   (add-hook 'pdf-view-mode-hook #'my/pdf-view-enable-auto-refresh)
+  (add-hook 'pdf-view-mode-hook #'my/pdf-view-setup-interaction)
   (my/pdf-view-configure-open-buffers))
 
 (defun pdf-view-kill-rmn-ring-save ()
