@@ -695,6 +695,27 @@
               (should-not ratex--posframe-last-override-params))))
       (kill-buffer owner))))
 
+(ert-deftest ratex-call-isolated-from-scroll-restores-window-state ()
+  (with-temp-buffer
+    (dotimes (i 40)
+      (insert (format "line-%02d\n" i)))
+    (let ((window (display-buffer (current-buffer) '(display-buffer-same-window))))
+      (unwind-protect
+          (progn
+            (set-window-start window (point-min))
+            (set-window-point window (point-min))
+            (let ((before-start (window-start window))
+                  (before-point (window-point window)))
+              (ratex--call-isolated-from-scroll
+               (lambda ()
+                 (let ((window-scroll-functions '(ignore)))
+                   (set-window-start window (point-max) t)
+                   (set-window-point window (point-max))))
+               window)
+              (should (= (window-start window) before-start))
+              (should (= (window-point window) before-point))))
+        (delete-other-windows)))))
+
 (ert-deftest ratex-edit-preview-posframe-keeps-overlay ()
   (with-temp-buffer
     (insert "\\(x\\)")

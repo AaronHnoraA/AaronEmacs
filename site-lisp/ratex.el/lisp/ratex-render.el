@@ -32,6 +32,8 @@
 (defvar evil-local-mode)
 (defvar ratex--posframe-owner-buffer nil
   "Buffer that currently owns the shared RaTeX posframe.")
+(defvar ratex--posframe-owner-window nil
+  "Window that owns the shared RaTeX posframe.")
 (defvar-local ratex--render-cache nil)
 (defvar-local ratex--render-cache-access nil)
 (defvar-local ratex--inflight-requests nil)
@@ -50,6 +52,8 @@
 (defvar-local ratex--edit-source-overlay nil)
 (defvar-local ratex--posframe-last-override-params nil
   "Last override-parameters used for the posframe, cached for position updates.")
+(defvar-local ratex--posframe-showing-p nil)
+(defvar ratex--suppress-scroll-side-effects nil)
 (defvar ratex--cache-gc-timer nil)
 (defconst ratex--posframe-buffer " *ratex-preview*")
 (defconst ratex--posframe-display-offset-y 28)
@@ -65,7 +69,56 @@
     (setq-local ratex--posframe-visible nil)
     (setq-local ratex--posframe-fragment nil)
     (setq-local ratex--posframe-last-anchor nil)
-    (setq-local ratex--posframe-last-override-params nil)))
+    (setq-local ratex--posframe-last-override-params nil)
+    (setq-local ratex--posframe-showing-p nil)))
+
+(defun ratex--source-window (&optional buffer)
+  "Return a live source window displaying BUFFER or the current buffer."
+  (let ((buffer (or buffer (current-buffer))))
+    (cond
+     ((and (window-live-p ratex--posframe-owner-window)
+           (eq (window-buffer ratex--posframe-owner-window) buffer))
+      ratex--posframe-owner-window)
+     ((eq (window-buffer (selected-window)) buffer)
+      (selected-window))
+     (t
+      (get-buffer-window buffer t)))))
+
+(defun ratex--capture-window-state (&optional window)
+  "Capture scrolling state for WINDOW."
+  (when-let* ((window (and (window-live-p window) window)))
+    (list :window window
+          :buffer (window-buffer window)
+          :start (window-start window)
+          :point (window-point window)
+          :hscroll (window-hscroll window))))
+
+(defun ratex--restore-window-state (state)
+  "Restore WINDOW scrolling STATE captured by `ratex--capture-window-state'."
+  (when-let* ((window (plist-get state :window))
+              ((window-live-p window))
+              (buffer (plist-get state :buffer))
+              ((eq (window-buffer window) buffer)))
+    (let ((start (plist-get state :start))
+          (point (plist-get state :point))
+          (hscroll (plist-get state :hscroll)))
+      (when (number-or-marker-p start)
+        (set-window-start window start t))
+      (when (number-or-marker-p point)
+        (set-window-point window point))
+      (when (integerp hscroll)
+        (set-window-hscroll window hscroll)))))
+
+(defun ratex--call-isolated-from-scroll (fn &optional window)
+  "Call FN while isolating source WINDOW from scroll side effects."
+  (let ((state (ratex--capture-window-state
+                (or window (ratex--source-window)))))
+    (let ((window-scroll-functions nil)
+          (window-size-change-functions nil)
+          (ratex--suppress-scroll-side-effects t))
+      (prog1 (funcall fn)
+        (when state
+          (ratex--restore-window-state state))))))
 
 (defun ratex--set-posframe-owner (buffer fragment override-params)
   "Record BUFFER as the owner of the shared posframe for FRAGMENT."
@@ -73,6 +126,7 @@
              (not (eq ratex--posframe-owner-buffer buffer)))
     (ratex--clear-posframe-state ratex--posframe-owner-buffer))
   (setq ratex--posframe-owner-buffer buffer)
+  (setq ratex--posframe-owner-window (ratex--source-window buffer))
   (with-current-buffer buffer
     (setq-local ratex--posframe-visible t)
     (setq-local ratex--posframe-fragment fragment)
@@ -94,6 +148,7 @@
   (setq-local ratex--posframe-fragment nil)
   (setq-local ratex--posframe-last-anchor nil)
   (setq-local ratex--posframe-last-override-params nil)
+  (setq-local ratex--posframe-showing-p nil)
   (setq-local ratex--preview-fragment nil)
   (setq-local ratex--preview-key nil)
   (when (overlayp ratex--edit-source-overlay)
@@ -733,17 +788,20 @@ When `posframe' is selected, use a child frame."
               (when (and (buffer-live-p ratex--posframe-owner-buffer)
                          (not (eq ratex--posframe-owner-buffer (current-buffer))))
                 (ratex--hide-posframe))
-              (posframe-show
-               ratex--posframe-buffer
-               :position anchor
-               :poshandler (ratex--posframe-poshandler-for-fragment fragment)
-               :internal-border-width ibw
-               :border-width 1
-               :border-color ratex-posframe-border-color
-               :background-color ratex-posframe-background-color
-               :override-parameters override-params)
+              (ratex--call-isolated-from-scroll
+               (lambda ()
+                 (posframe-show
+                  ratex--posframe-buffer
+                  :position anchor
+                  :poshandler (ratex--posframe-poshandler-for-fragment fragment)
+                  :internal-border-width ibw
+                  :border-width 1
+                  :border-color ratex-posframe-border-color
+                  :background-color ratex-posframe-background-color
+                  :override-parameters override-params)))
               (ratex--mask-edit-source fragment)
               (ratex--set-posframe-owner (current-buffer) fragment override-params)
+              (setq-local ratex--posframe-showing-p t)
               (ratex-debug-log "posframe success")
               t)
           (error
@@ -825,16 +883,21 @@ the cursor."
 
 (defun ratex--hide-posframe ()
   "Hide the posframe preview."
-  (when (buffer-live-p ratex--posframe-owner-buffer)
-    (with-current-buffer ratex--posframe-owner-buffer
-      (ratex--unmask-edit-source)
-      (ratex--clear-posframe-state)))
-  (setq ratex--posframe-owner-buffer nil)
-  (when (featurep 'posframe)
-    (when (get-buffer ratex--posframe-buffer)
-      (posframe-hide ratex--posframe-buffer))
-    (ratex--clear-posframe-state))
-  (ratex--unmask-edit-source))
+  (when (or ratex--posframe-showing-p
+            (buffer-live-p ratex--posframe-owner-buffer))
+    (when (buffer-live-p ratex--posframe-owner-buffer)
+      (with-current-buffer ratex--posframe-owner-buffer
+        (ratex--unmask-edit-source)
+        (ratex--clear-posframe-state)))
+    (setq ratex--posframe-owner-buffer nil)
+    (setq ratex--posframe-owner-window nil)
+    (when (featurep 'posframe)
+      (when (get-buffer ratex--posframe-buffer)
+        (ratex--call-isolated-from-scroll
+         (lambda ()
+           (posframe-hide ratex--posframe-buffer))))
+      (ratex--clear-posframe-state))
+    (ratex--unmask-edit-source)))
 
 (defun ratex--hide-edit-preview ()
   "Hide the active edit preview."
@@ -859,15 +922,17 @@ the cursor."
           (condition-case nil
               (progn
                 (unless (equal anchor ratex--posframe-last-anchor)
-                  (posframe-show
-                   ratex--posframe-buffer
-                   :position anchor
-                   :poshandler (ratex--posframe-poshandler-for-fragment
-                                ratex--posframe-fragment)
-                   :border-width 1
-                   :border-color ratex-posframe-border-color
-                   :background-color ratex-posframe-background-color
-                   :override-parameters ratex--posframe-last-override-params)
+                  (ratex--call-isolated-from-scroll
+                   (lambda ()
+                     (posframe-show
+                      ratex--posframe-buffer
+                      :position anchor
+                      :poshandler (ratex--posframe-poshandler-for-fragment
+                                   ratex--posframe-fragment)
+                      :border-width 1
+                      :border-color ratex-posframe-border-color
+                      :background-color ratex-posframe-background-color
+                      :override-parameters ratex--posframe-last-override-params)))
                   (setq-local ratex--posframe-last-anchor anchor))
                 (ratex--mask-edit-source ratex--posframe-fragment))
             (error (ratex--hide-posframe))))
