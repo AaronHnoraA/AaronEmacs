@@ -16,6 +16,12 @@
 (defvar my/appine-last-url nil
   "Most recent URL opened through the local Appine wrapper.")
 
+(defun my/appine-current-file ()
+  "Return the current Appine local file path, or nil for non-file tabs."
+  (when (and (stringp my/appine-last-url)
+             (string-prefix-p "file://" my/appine-last-url))
+    (substring my/appine-last-url (length "file://"))))
+
 (defun my/appine-buffer-p (&optional buffer)
   "Return non-nil when BUFFER is the Appine host buffer."
   (eq (get-buffer (or buffer (current-buffer)))
@@ -85,9 +91,17 @@
   (call-interactively #'appine-web-go-forward))
 
 (defun my/appine-reload ()
-  "Reload the current Appine page."
+  "Reload the current Appine tab.
+
+When the active tab is a local file opened via `my/appine-open-file',
+reopen that file so PDF/Quick Look content is refreshed from disk."
   (interactive)
-  (call-interactively #'appine-web-reload))
+  (if-let* ((file (my/appine-current-file)))
+      (progn
+        (setq my/appine-last-url (concat "file://" (expand-file-name file)))
+        (appine-open-file file)
+        (message "Appine 已刷新文件: %s" file))
+    (call-interactively #'appine-web-reload)))
 
 (defun my/appine-next-tab ()
   "Switch to the next Appine tab."
@@ -124,6 +138,7 @@
     (define-key appine-active-map (kbd "H") #'my/appine-back)
     (define-key appine-active-map (kbd "L") #'my/appine-forward)
     (define-key appine-active-map (kbd "g") #'my/appine-reload)
+    (define-key appine-active-map (kbd "M-r") #'my/appine-reload)
     (define-key appine-active-map (kbd "[") #'my/appine-prev-tab)
     (define-key appine-active-map (kbd "]") #'my/appine-next-tab)
     (define-key appine-active-map (kbd "d") #'my/appine-close-tab)
