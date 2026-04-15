@@ -283,6 +283,38 @@ Return a plist suitable for batch checks."
                 :error)))))))
     t))
 
+(defun my/package--upgrade-archive-packages (query)
+  "Upgrade archive packages.
+When QUERY is non-nil, allow the underlying package upgrader to prompt."
+  (my/package-refresh-archives-once)
+  (cond
+   ((fboundp 'package-upgrade-all)
+    (package-upgrade-all query)
+    t)
+   ((and (fboundp 'package-list-packages)
+         (fboundp 'package-menu-mark-upgrades)
+         (fboundp 'package-menu-execute))
+    (package-list-packages t)
+    (with-current-buffer "*Packages*"
+      (package-menu-mark-upgrades)
+      (package-menu-execute t))
+    t)
+   (t nil)))
+
+(defun my/package--upgrade-vc-packages ()
+  "Upgrade installed VC packages."
+  (require 'package-vc)
+  (cond
+   ((fboundp 'package-vc-upgrade-all)
+    (package-vc-upgrade-all)
+    t)
+   ((and (fboundp 'package-vc-upgrade)
+         (boundp 'package-vc-selected-packages))
+    (dolist (entry package-vc-selected-packages)
+      (package-vc-upgrade (car entry)))
+    t)
+   (t nil)))
+
 (defun my/package-bootstrap-from-lock-if-needed ()
   "Install packages from `my/package-lock-file' on first startup.
 This makes a freshly cloned config survivable even when the user launches
@@ -300,24 +332,20 @@ If QUERY is non-nil, archive package upgrades may prompt for confirmation."
   (interactive (list t))
   (unless (booleanp query)
     (setq query nil))
-  (let ((upgraded-any nil))
-    (cond
-     ((fboundp 'package-upgrade-all)
-      (package-upgrade-all query)
-      (setq upgraded-any t))
-     ((and (fboundp 'package-refresh-contents)
-           (fboundp 'package-list-packages)
-           (fboundp 'package-menu-mark-upgrades)
-           (fboundp 'package-menu-execute))
-      (package-refresh-contents)
-      (package-list-packages t)
-      (with-current-buffer "*Packages*"
-        (package-menu-mark-upgrades)
-        (package-menu-execute t))
-      (setq upgraded-any t)))
-    (when (fboundp 'package-vc-upgrade-all)
-      (package-vc-upgrade-all)
-      (setq upgraded-any t))
+  (let ((archive-upgrade-available nil)
+        (vc-upgrade-available nil)
+        (upgraded-any nil))
+    (condition-case err
+        (progn
+          (setq archive-upgrade-available
+                (my/package--upgrade-archive-packages query))
+          (setq vc-upgrade-available
+                (my/package--upgrade-vc-packages))
+          (setq upgraded-any
+                (or archive-upgrade-available
+                    vc-upgrade-available)))
+      (error
+       (user-error "Package upgrade failed: %s" (error-message-string err))))
     (unless upgraded-any
       (user-error "Package upgrade command is unavailable in this Emacs"))
     (let ((lock-file (my/package-export-lock-file)))

@@ -22,6 +22,7 @@
 (declare-function avy-goto-char-in-line "avy" (&optional arg))
 (declare-function avy-goto-char-timer "avy" (&optional arg))
 (declare-function evil-force-normal-state "evil")
+(declare-function evil-local-mode "evil")
 (declare-function evil-save-state "evil")
 
 (defun my/evil-clear-ex-highlights-h ()
@@ -127,6 +128,11 @@
       (my/evil-sync-shift-width)))
   (message "Evil recovered"))
 
+(defun my/evil-disable-local-mode-h ()
+  "Disable Evil in the current buffer."
+  (when (bound-and-true-p evil-local-mode)
+    (evil-local-mode -1)))
+
 (use-package evil
   :ensure t
   :demand t
@@ -163,6 +169,7 @@
         (evil-save-state (apply fn args))
       (apply fn args)))
   (dolist (mode '(ibuffer-mode
+                  debugger-mode
                   my/diagnostics-mode
                   my/language-server-manager-mode
                   my/language-server-doctor-mode
@@ -174,6 +181,8 @@
     (evil-set-initial-state mode 'normal))
   (add-to-list 'evil-buffer-regexps '("^\\*Appine Window\\*$" . nil))
   (add-to-list 'evil-buffer-regexps '("^\\*vterm.*\\*$" . nil))
+  (add-hook 'eww-mode-hook #'my/evil-disable-local-mode-h)
+  (add-hook 'xwidget-webkit-mode-hook #'my/evil-disable-local-mode-h)
   ;; Silence line out of range error.
   (shut-up! #'evil-indent)
   (add-hook 'my/escape-hook #'my/evil-force-normal-state-h)

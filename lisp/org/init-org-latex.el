@@ -87,6 +87,16 @@ Each value may be a readable `.cls' file path or literal class source."
   :type 'number
   :group 'my/org-latex-preview)
 
+(defcustom my/org-latex-preview-scroll-idle-delay 0.18
+  "Idle delay (seconds) before previewing visible region after scrolling."
+  :type 'number
+  :group 'my/org-latex-preview)
+
+(defcustom my/org-latex-preview-scroll-tolerance 160
+  "Maximum point delta treated as the same visible region while scrolling."
+  :type 'integer
+  :group 'my/org-latex-preview)
+
 (defcustom my/org-latex-preview-min-chars 400
   "Minimum visible region size (chars) required to trigger preview."
   :type 'integer
@@ -516,6 +526,12 @@ Each value may be a readable `.cls' file path or literal class source."
            (my/org-latex--current-fragment (max beg (1- end))))
       (my/org-latex--current-fragment)))
 
+(defun my/org-latex--normalize-window (window)
+  "Return WINDOW when it is a live window, otherwise nil."
+  (and (windowp window)
+       (window-live-p window)
+       window))
+
 (defun my/org-latex--cancel-edit-preview-timer ()
   "Cancel the pending edit-preview timer for the current buffer."
   (when (timerp my/org-latex--edit-preview-timer)
@@ -576,11 +592,13 @@ Each value may be a readable `.cls' file path or literal class source."
 
 (defun my/org-latex--visible-range (&optional window)
   "Return (beg . end) for WINDOW's visible range in the current buffer."
+  (setq window (my/org-latex--normalize-window window))
   (when-let* ((win (cond
-                    ((and (window-live-p window)
+                    ((and window
                           (eq (window-buffer window) (current-buffer)))
                      window)
-                    ((eq (window-buffer (selected-window)) (current-buffer))
+                    ((and (window-live-p (selected-window))
+                          (eq (window-buffer (selected-window)) (current-buffer)))
                      (selected-window))
                     (t
                      (get-buffer-window (current-buffer) t))))
@@ -595,7 +613,8 @@ Each value may be a readable `.cls' file path or literal class source."
     (let ((b1 (car r1)) (e1 (cdr r1))
           (b2 (car r2)) (e2 (cdr r2)))
       (let* ((span (max 1 (- e2 b2)))
-             (tol  (max 200 (/ span 6))))
+             (tol  (max my/org-latex-preview-scroll-tolerance
+                        (/ span 10))))
         (and (<= (abs (- b1 b2)) tol)
              (<= (abs (- e1 e2)) tol))))))
 
@@ -1025,6 +1044,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
 (defun my/org-latex-preview-visible-now (&optional window)
   "Preview visible Org LaTeX fragments asynchronously in WINDOW."
   (interactive)
+  (setq window (my/org-latex--normalize-window window))
   (when-let* (((derived-mode-p 'org-mode))
               ((my/org-latex--async-preview-active-p))
               (range (my/org-latex--visible-range window)))
@@ -1042,25 +1062,29 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
 
 (defun my/org-latex-preview-visible-debounced (&optional window)
   "Debounced preview of WINDOW's visible area after scrolling stops."
+  (setq window (my/org-latex--normalize-window window))
   (when (and (derived-mode-p 'org-mode)
              (my/org-latex--async-preview-active-p)
-             (my/org-latex--buffer-visible-p))
+             (my/org-latex--buffer-visible-p)
+             (or (null window) window))
     (when (timerp my/org-latex--preview-timer)
       (cancel-timer my/org-latex--preview-timer))
     (setq my/org-latex--preview-timer
-          (run-with-idle-timer my/org-latex-preview-idle-delay nil
+          (run-with-idle-timer my/org-latex-preview-scroll-idle-delay nil
                                #'my/org-latex-preview-visible-now
                                window))))
 
 (defun my/org-latex--window-scroll-preview-hook (win _start)
   "Schedule preview refresh after WIN scrolls."
-  (when (eq (window-buffer win) (current-buffer))
+  (when (and (windowp win)
+             (window-live-p win)
+             (eq (window-buffer win) (current-buffer)))
     (my/org-latex-preview-visible-debounced win)))
 
 (defun my/org-latex--window-size-preview-hook (_frame)
   "Schedule preview refresh after a window-size change."
-  (my/org-latex-preview-visible-debounced
-   (get-buffer-window (current-buffer) t)))
+  (when-let* ((window (get-buffer-window (current-buffer) t)))
+    (my/org-latex-preview-visible-debounced window)))
 
 (defun my/org-latex-cleanup-scroll-preview ()
   "Stop async scroll-preview state in the current Org buffer."

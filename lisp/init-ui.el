@@ -13,6 +13,8 @@
   "Last theme signature applied by `my/ui-apply-polish'.")
 (defvar my/dashboard-ui--theme-signature nil
   "Last theme signature applied by `my/dashboard-apply-ui'.")
+(defvar my/chunlian--visibility-timer nil
+  "Idle timer used to coalesce dashboard visibility checks.")
 
 ;; Emacs 31 rejects nil as a face attribute value; themes written for earlier
 ;; Emacs versions may still pass nil.  Convert nil → 'unspecified at the call
@@ -608,7 +610,9 @@
 (defun chunlian--restore-window-margins (&optional win)
   "Restore margins previously changed by Chunlian.
 When WIN is nil, restore every tracked window."
-  (dolist (target (if win (list win) (window-list nil 'no-minibuffer t)))
+  (dolist (target (if (window-live-p win)
+                      (list win)
+                    (window-list nil 'no-minibuffer)))
     (when (and (window-live-p target)
                (window-parameter target 'chunlian--active))
       (let* ((saved (window-parameter target 'chunlian--saved-margins))
@@ -698,6 +702,20 @@ When WIN is nil, restore every tracked window."
              (null (get-buffer-window (current-buffer) t)))
     (chunlian-mode -1)))
 
+(defun my/chunlian-schedule-visibility-check (&rest _)
+  "Coalesce repeated buffer-list changes before checking dashboard visibility."
+  (when (timerp my/chunlian--visibility-timer)
+    (cancel-timer my/chunlian--visibility-timer))
+  (setq my/chunlian--visibility-timer
+        (run-with-idle-timer
+         0.1 nil
+         (lambda ()
+           (setq my/chunlian--visibility-timer nil)
+           (when-let* ((buffer (get-buffer "*dashboard*")))
+             (with-current-buffer buffer
+               (when chunlian-mode
+                 (chunlian--maybe-disable))))))))
+
 ;;;###autoload
 (define-minor-mode chunlian-mode
   "一个简单的 Minor Mode，用于在 buffer 两侧固定显示春联。"
@@ -709,7 +727,7 @@ When WIN is nil, restore every tracked window."
 
 ;; 卸载旧的，挂载安全的 Hook
 (remove-hook 'dashboard-mode-hook #'chunlian-mode)
-(add-hook 'buffer-list-update-hook #'chunlian--maybe-disable)
+(add-hook 'buffer-list-update-hook #'my/chunlian-schedule-visibility-check)
 (add-hook 'dashboard-after-initialize-hook
           (lambda ()
             (chunlian-mode 1)

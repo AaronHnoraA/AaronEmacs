@@ -969,32 +969,41 @@ Else, call `comment-or-uncomment-region' on the current line."
       ("IRC" (or (mode . rcirc-mode)
                  (mode . erc-mode)))))))
 
+(defvar my/ibuffer-ui--theme-signature nil
+  "Last theme signature applied by `my/ibuffer-apply-ui'.")
+
 (defun my/ibuffer-apply-ui ()
   "Apply local UI styling to Ibuffer."
   (when (display-graphic-p)
-    (when (facep 'ibuffer-title-face)
-      (set-face-attribute 'ibuffer-title-face nil
-                          :foreground "#edf2f7"
-                          :weight 'medium))
-    (when (facep 'ibuffer-filter-group-name-face)
-      (set-face-attribute 'ibuffer-filter-group-name-face nil
-                          :foreground "#a9bed3"
-                          :weight 'medium))
-    (when (facep 'ibuffer-marked-face)
-      (set-face-attribute 'ibuffer-marked-face nil
-                          :foreground "#d8b27f"
-                          :weight 'medium))
-    (when (facep 'ibuffer-modified-buffer)
-      (set-face-attribute 'ibuffer-modified-buffer nil
-                          :foreground "#8aa6c1"))
-    (when (facep 'ibuffer-read-only-buffer)
-      (set-face-attribute 'ibuffer-read-only-buffer nil
-                          :foreground "#7f849c"))
-    (when (facep 'ibuffer-locked-buffer)
-      (set-face-attribute 'ibuffer-locked-buffer nil
-                          :foreground "#bf7f7f"))))
+    (let ((signature (list custom-enabled-themes
+                           (face-attribute 'default :background nil t)
+                           (face-attribute 'default :foreground nil t))))
+      (unless (equal signature my/ibuffer-ui--theme-signature)
+        (setq my/ibuffer-ui--theme-signature signature)
+        (when (facep 'ibuffer-title-face)
+          (set-face-attribute 'ibuffer-title-face nil
+                              :foreground "#edf2f7"
+                              :weight 'medium))
+        (when (facep 'ibuffer-filter-group-name-face)
+          (set-face-attribute 'ibuffer-filter-group-name-face nil
+                              :foreground "#a9bed3"
+                              :weight 'medium))
+        (when (facep 'ibuffer-marked-face)
+          (set-face-attribute 'ibuffer-marked-face nil
+                              :foreground "#d8b27f"
+                              :weight 'medium))
+        (when (facep 'ibuffer-modified-buffer)
+          (set-face-attribute 'ibuffer-modified-buffer nil
+                              :foreground "#8aa6c1"))
+        (when (facep 'ibuffer-read-only-buffer)
+          (set-face-attribute 'ibuffer-read-only-buffer nil
+                              :foreground "#7f849c"))
+        (when (facep 'ibuffer-locked-buffer)
+          (set-face-attribute 'ibuffer-locked-buffer nil
+                              :foreground "#bf7f7f"))))))
 
 (add-hook 'ibuffer-mode-hook #'my/ibuffer-apply-ui)
+(add-hook 'after-load-theme-hook #'my/ibuffer-apply-ui)
 
 ;; Notifications
 ;;
@@ -1178,11 +1187,25 @@ When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
       (let* ((canonical-file (my/undo-tree-history-file-name buffer-file-name))
              (legacy-file (my/undo-tree-history-file-name buffer-file-name 'legacy))
              (resolved-file
-              (cond
+             (cond
                ((file-exists-p canonical-file) canonical-file)
                ((file-exists-p legacy-file) legacy-file)
                (t canonical-file))))
-        (funcall orig-fun resolved-file noerror)))))
+        (condition-case err
+            (funcall orig-fun resolved-file noerror)
+          (error
+           ;; Broken history files should not keep polluting every reopen.
+           (when (and resolved-file
+                      (file-exists-p resolved-file))
+             (ignore-errors
+               (delete-file resolved-file)))
+           (display-warning
+            'undo-tree
+            (format "Discarded unreadable undo-tree history %s: %s"
+                    resolved-file
+                    (error-message-string err))
+            :warning)
+           nil))))))
 
   (defun my/undo-tree-save-history (orig-fun &optional filename overwrite)
     "Save undo history through ORIG-FUN, skipping remote files when FILENAME is nil."

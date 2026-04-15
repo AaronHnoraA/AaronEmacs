@@ -25,6 +25,9 @@
 (defvar my/diagnostics--modeline-cookie '(:eval (my/diagnostics-modeline-string))
   "Mode line cookie used by `my/diagnostics-modeline-mode'.")
 
+(defvar my/diagnostics--refresh-timer nil
+  "Idle timer used to coalesce diagnostics UI refreshes.")
+
 (defun my/diagnostics--counts (&optional diags)
   "Return diagnostic counts for DIAGS or the current buffer."
   (let ((errors 0)
@@ -78,14 +81,28 @@
           (my/diagnostics-refresh)))))
   (force-mode-line-update t))
 
+(defun my/diagnostics--schedule-refresh-open-buffers (&rest _)
+  "Coalesce diagnostics buffer refreshes after Flymake saves."
+  (when (timerp my/diagnostics--refresh-timer)
+    (cancel-timer my/diagnostics--refresh-timer))
+  (setq my/diagnostics--refresh-timer
+        (run-with-idle-timer
+         0.12 nil
+         (lambda ()
+           (setq my/diagnostics--refresh-timer nil)
+           (my/diagnostics--refresh-open-buffers)))))
+
 (define-minor-mode my/diagnostics-auto-refresh-mode
   "Auto-refresh diagnostics buffers after Flymake saves."
   :init-value t
   :global t
   :lighter nil
   (if my/diagnostics-auto-refresh-mode
-      (add-hook 'flymake-after-save-hook #'my/diagnostics--refresh-open-buffers)
-    (remove-hook 'flymake-after-save-hook #'my/diagnostics--refresh-open-buffers)))
+      (add-hook 'flymake-after-save-hook #'my/diagnostics--schedule-refresh-open-buffers)
+    (remove-hook 'flymake-after-save-hook #'my/diagnostics--schedule-refresh-open-buffers)
+    (when (timerp my/diagnostics--refresh-timer)
+      (cancel-timer my/diagnostics--refresh-timer)
+      (setq my/diagnostics--refresh-timer nil))))
 
 (defun my/diagnostics-buffer-errors ()
   "Open a diagnostics buffer filtered to current-buffer errors."
