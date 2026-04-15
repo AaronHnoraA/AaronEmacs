@@ -43,6 +43,26 @@
     (dolist (mode (if (listp extra-modes) extra-modes (list extra-modes)))
       (yas-activate-extra-mode mode))))
 
+(defun my/yas-org-cleanup-trailing-newline ()
+  "Silently delete a trailing newline left by a snippet at point.
+Replicates the per-snippet `inhibit-modification-hooks' cleanup that was
+previously inlined in every org-mode snippet file."
+  (save-excursion
+    (when (and (not (eobp))
+               (eq (char-after) ?\n))
+      (let ((inhibit-modification-hooks t))
+        (ignore-errors (delete-char 1))))))
+
+(defun my/yas-setup-org-behavior ()
+  "Keep Org snippet expansion conservative around indentation and newlines."
+  (setq-local yas-indent-line 'fixed)
+  (setq-local yas-also-indent-empty-lines nil)
+  ;; After each snippet exits, clean up any trailing newline it may have left.
+  ;; This replicates the per-snippet inline lisp that was removed from snippet
+  ;; files, while keeping the inhibit-modification-hooks suppression centralized.
+  (add-hook 'yas-after-exit-snippet-hook
+            #'my/yas-org-cleanup-trailing-newline nil t))
+
 (use-package yasnippet
   :ensure t
   :defer 2
@@ -55,6 +75,7 @@
   ((prog-mode . yas-minor-mode)
    (text-mode . yas-minor-mode)
    (org-mode . yas-minor-mode)
+   (org-mode . my/yas-setup-org-behavior)
    (yas-minor-mode . my/yas-setup-treesit-extra-modes)
    (LaTeX-mode . my/yas-setup-auctex-extra-modes)
    (plain-TeX-mode . my/yas-setup-auctex-extra-modes))
@@ -63,7 +84,6 @@
 
   (with-eval-after-load 'yasnippet
     ;; snippet 会话中的 field 跳转
-    (define-key yas-keymap (kbd "M-]") #'yas-next-field)
     (define-key yas-keymap (kbd "M-[") #'yas-prev-field)
     ;; 不让 yas 抢 TAB
     (define-key yas-keymap (kbd "TAB") nil)

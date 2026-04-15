@@ -876,7 +876,7 @@
                         "DisplayMath" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/displaymath_DisplayMath"
                         nil nil)
-                       (";;"
+                       (":"
                         "\\[\n$1\n\\]\n$0 `(when (and (not (eobp)) (looking-at \"\n\")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`\n"
                         "display math" nil nil nil
                         "/Users/hc/.emacs.d/snippets/org-mode/display-math" nil
@@ -1362,4 +1362,4 @@
                         nil)))
 
 
-;;; Do not edit! File generated at Sun Mar 22 18:37:13 2026
+;;; Do not edit! File generated at Wed Apr 15 14:16:19 2026

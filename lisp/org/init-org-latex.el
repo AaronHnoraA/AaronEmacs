@@ -571,17 +571,18 @@ Each value may be a readable `.cls' file path or literal class source."
 (defun my/org-latex-post-command-function ()
   "Re-enable preview when point leaves a LaTeX fragment."
   (when (my/org-latex--async-preview-active-p)
-    (let* ((prev-point my/org-latex--post-command-point)
-           (prev-frag (and prev-point
-                           (my/org-latex--current-fragment prev-point)))
-           (curr-frag (my/org-latex--current-fragment))
-           (prev-range (and prev-frag (my/org-latex--fragment-range prev-frag)))
-           (curr-range (and curr-frag (my/org-latex--fragment-range curr-frag))))
-      (unless (equal prev-range curr-range)
-        (when prev-frag
-          (my/org-latex--preview-fragment prev-frag))
-        (unless curr-frag
-          (my/org-latex--clear-edit-preview-marker))))
+    (unless (memq this-command '(self-insert-command org-self-insert-command))
+      (let* ((prev-point my/org-latex--post-command-point)
+             (prev-frag (and prev-point
+                             (my/org-latex--current-fragment prev-point)))
+             (curr-frag (my/org-latex--current-fragment))
+             (prev-range (and prev-frag (my/org-latex--fragment-range prev-frag)))
+             (curr-range (and curr-frag (my/org-latex--fragment-range curr-frag))))
+        (unless (equal prev-range curr-range)
+          (when prev-frag
+            (my/org-latex--preview-fragment prev-frag))
+          (unless curr-frag
+            (my/org-latex--clear-edit-preview-marker)))))
     (setq my/org-latex--post-command-point (point))))
 
 (defun my/org-latex--visible-range (&optional window)

@@ -2,5 +2,4 @@
 # name: Text Environment (short)
 # key: "
 # --
-\text{$1}$2 `(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+\text{$1}$2

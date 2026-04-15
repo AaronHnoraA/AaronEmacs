@@ -4,5 +4,4 @@
 # --
 \While{$1}
 	\State $0
-\EndWhile `(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+\EndWhile

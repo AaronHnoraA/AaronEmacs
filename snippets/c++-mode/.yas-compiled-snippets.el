@@ -10,8 +10,7 @@
                         (progn
                           (progn
                             (when
-                                (looking-back "[ 	]+"
-                                              (line-beginning-position))
+                                (looking-back "[ 	]+" (line-beginning-position))
                               (delete-region (match-beginning 0) (match-end 0)))
                             (insert "->")))
                         ".. => -> (eat spaces, no newline)"
@@ -22,4 +21,4 @@
                         nil)))
 
 
-;;; Do not edit! File generated at Sun Mar 22 18:37:13 2026
+;;; Do not edit! File generated at Wed Apr 15 14:16:18 2026

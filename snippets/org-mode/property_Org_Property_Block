@@ -5,5 +5,4 @@
 # --
 #+begin_property
 $0
-#+end_property `(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+#+end_property

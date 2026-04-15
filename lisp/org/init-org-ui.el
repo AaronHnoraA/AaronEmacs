@@ -14,6 +14,10 @@
 (defvar-local my/org-pretty-block-cache nil)
 (defvar my/org-ui--face-theme-signature nil)
 (defvar my/org--olivetti-sync-timer nil)
+(defvar-local my/org--suspended-in-insert nil)
+(defvar-local my/org--insert-suspended-modes nil)
+
+(declare-function evil-insert-state-p "evil")
 
 (defun my/org-enable-valign-maybe ()
   "Enable `valign-mode' for Org buffers in graphical sessions."
@@ -34,6 +38,50 @@
   "Enable `org-fragtog-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
     (org-fragtog-mode 1)))
+
+(defun my/org--suspend-mode-for-insert (mode)
+  "Disable MODE temporarily in the current Org buffer during Evil insert state."
+  (when (and (fboundp mode)
+             (boundp mode)
+             (symbol-value mode))
+    (push mode my/org--insert-suspended-modes)
+    (funcall mode -1)))
+
+(defun my/org-suspend-expensive-modes-in-insert ()
+  "Temporarily suspend expensive dynamic Org UI helpers during Evil insert state."
+  (when (and (derived-mode-p 'org-mode)
+             (not my/org--suspended-in-insert)
+             (fboundp 'evil-insert-state-p)
+             (evil-insert-state-p))
+    (setq-local my/org--suspended-in-insert t)
+    (setq-local my/org--insert-suspended-modes nil)
+    (my/org--suspend-mode-for-insert 'org-appear-mode)
+    ;; org-fragtog manages formula overlay visibility and is specifically
+    ;; designed for insert-time editing; toggling it causes overlay height
+    ;; changes that appear as vertical scrolling when entering/leaving formulas.
+    (my/org--suspend-mode-for-insert 'valign-mode)))
+
+(defun my/org-resume-expensive-modes-after-insert ()
+  "Re-enable Org UI helpers suspended by `my/org-suspend-expensive-modes-in-insert'."
+  (when (and (derived-mode-p 'org-mode)
+             my/org--suspended-in-insert)
+    (setq-local my/org--suspended-in-insert nil)
+    (prog1 nil
+      (dolist (mode (nreverse my/org--insert-suspended-modes))
+        (when (fboundp mode)
+          (funcall mode 1)))
+      (setq-local my/org--insert-suspended-modes nil))))
+
+(defun my/org-setup-evil-insert-performance ()
+  "Install buffer-local Evil hooks that keep Org insert mode responsive."
+  (when (featurep 'evil)
+    (add-hook 'evil-insert-state-entry-hook
+              #'my/org-suspend-expensive-modes-in-insert nil t)
+    (add-hook 'evil-insert-state-exit-hook
+              #'my/org-resume-expensive-modes-after-insert nil t)
+    (when (and (fboundp 'evil-insert-state-p)
+               (evil-insert-state-p))
+      (my/org-suspend-expensive-modes-in-insert))))
 
 ;; 3.1 写作专注模式 (自动居中)
 (use-package olivetti
@@ -249,6 +297,7 @@
 
 (add-hook 'org-mode-hook #'my/org-apply-ui)
 (add-hook 'after-load-theme-hook #'my/org-apply-ui)
+(add-hook 'org-mode-hook #'my/org-setup-evil-insert-performance)
 
 ;; 3.4 Org Modern Indent
 (my/package-ensure-vc 'org-modern-indent "https://github.com/jdtsmith/org-modern-indent.git")
@@ -444,7 +493,9 @@
 
 (defun my/org-enable-jit-pretty-blocks ()
   "在当前 Buffer 启用 JIT 渲染机制。"
-  (when (derived-mode-p 'org-mode)
+  (when (and (derived-mode-p 'org-mode)
+             (my/org-rich-ui-buffer-p)
+             (<= (buffer-size) my/org-pretty-block-max-buffer-size))
     (unless (hash-table-p my/org-pretty-block-cache)
       (setq-local my/org-pretty-block-cache (make-hash-table :test #'equal)))
     (unless (memq #'my/org-jit-prettify-blocks jit-lock-functions)

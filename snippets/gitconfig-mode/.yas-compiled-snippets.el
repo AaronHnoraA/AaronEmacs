@@ -2,11 +2,10 @@
 ;;; Snippet definitions:
 ;;;
 (yas-define-snippets 'gitconfig-mode
-                     '(("gitc"
-                        "[user]\n	name = user\n	email = user@qq.com\n"
+                     '(("gitc" "[user]\n	name = user\n	email = user@qq.com\n"
                         "gitc" nil nil nil
                         "/Users/hc/.emacs.d/snippets/gitconfig-mode/gitc" nil
                         nil)))
 
 
-;;; Do not edit! File generated at Sun Mar 22 18:37:13 2026
+;;; Do not edit! File generated at Wed Apr 15 14:16:18 2026

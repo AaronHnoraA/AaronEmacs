@@ -6,5 +6,4 @@
 \begin{definition}{$1}\label{def:$1}
 	$2
 \end{definition}
-$0 `(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+$0

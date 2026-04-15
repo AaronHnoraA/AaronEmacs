@@ -2,5 +2,4 @@
 # name: Underset
 # key: B
 # --
-\underset{ $1 }{ ${VISUAL} } `(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+\underset{ $1 }{ ${VISUAL} }

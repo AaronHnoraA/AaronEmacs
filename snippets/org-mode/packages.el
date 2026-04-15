@@ -22,5 +22,4 @@
 
 
 (provide 'packages)
-;;; packages.el ends here `(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+;;; packages.el ends here

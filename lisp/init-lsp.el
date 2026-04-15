@@ -647,7 +647,7 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   :demand t
   :hook ((eglot-managed-mode . company-mode)
          (lsp-managed-mode . company-mode)
-         (org-mode . company-mode)
+         ;; org-mode derives from text-mode, so text-mode-hook already covers it.
          (text-mode . company-mode)
          (text-mode . my/company-setup-text-backends))
   :init
@@ -690,7 +690,16 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   :hook (company-mode . company-box-mode)
   :custom
   (company-box-doc-delay 0.2)
-  (company-box-scrollbar nil))
+  (company-box-scrollbar nil)
+  :config
+  (define-advice company-box--handle-scroll-parent
+      (:around (fn win new-start) my/company-box-guard-scroll-parent)
+    "Ignore transient scroll events after the popup/window state is stale.
+Guards both the nil new-start case and a potentially-throwing company-box--get-frame."
+    (when (and (window-live-p win)
+               (number-or-marker-p new-start)
+               (ignore-errors (frame-live-p (company-box--get-frame))))
+      (funcall fn win new-start))))
 
 (use-package company-prescient
   :ensure t

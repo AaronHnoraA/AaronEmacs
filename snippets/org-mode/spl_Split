@@ -8,5 +8,4 @@
 $1 &= $2 \\
 $3 &= $0
 \end{split}
-\end{equation*} `(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+\end{equation*}

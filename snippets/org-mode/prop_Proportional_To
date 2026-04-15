@@ -2,5 +2,4 @@
 # name: Proportional To
 # key: prop
 # --
-\propto `(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+\propto

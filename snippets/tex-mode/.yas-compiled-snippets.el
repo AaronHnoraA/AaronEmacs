@@ -217,9 +217,8 @@
                         "Problemset" nil nil nil
                         "/Users/hc/.emacs.d/snippets/tex-mode/problemset_Problemset"
                         nil nil)
-                       ("problem"
-                        "\\begin{problem}\n	$1\n\\end{problem}\n$0\n" "Problem"
-                        nil nil nil
+                       ("problem" "\\begin{problem}\n	$1\n\\end{problem}\n$0\n"
+                        "Problem" nil nil nil
                         "/Users/hc/.emacs.d/snippets/tex-mode/problem_Problem"
                         nil nil)
                        ("postulate"
@@ -269,8 +268,8 @@
                        ("ox" "\\otimes \n" "Tensor Product" nil nil nil
                         "/Users/hc/.emacs.d/snippets/tex-mode/ox_Tensor_Product"
                         nil nil)
-                       ("outlineexp" "\\\\[\n	$1\n\\\\]\n$0\n" "OutlineExp"
-                        nil nil nil
+                       ("outlineexp" "\\\\[\n	$1\n\\\\]\n$0\n" "OutlineExp" nil
+                        nil nil
                         "/Users/hc/.emacs.d/snippets/tex-mode/outlineexp_OutlineExp"
                         nil nil)
                        ("outer" "\\ket{$1} \\bra{$1} $2\n" "Outer Product" nil
@@ -480,9 +479,8 @@
                         "Exercise" nil nil nil
                         "/Users/hc/.emacs.d/snippets/tex-mode/exercise_Exercise"
                         nil nil)
-                       ("example"
-                        "\\begin{example}\n	$1\n\\end{example}\n$0\n" "Example"
-                        nil nil nil
+                       ("example" "\\begin{example}\n	$1\n\\end{example}\n$0\n"
+                        "Example" nil nil nil
                         "/Users/hc/.emacs.d/snippets/tex-mode/example_Example"
                         nil nil)
                        ("eset" "\\emptyset\n" "Empty Set" nil nil nil
@@ -639,8 +637,7 @@
                         "Axiom (with label)" nil nil nil
                         "/Users/hc/.emacs.d/snippets/tex-mode/axioml_Axiom_with_label_"
                         nil nil)
-                       ("axiom"
-                        "\\begin{axiom}{$1}\n		$2\n\\end{axiom}\n$0\n"
+                       ("axiom" "\\begin{axiom}{$1}\n		$2\n\\end{axiom}\n$0\n"
                         "Axiom (no label)" nil nil nil
                         "/Users/hc/.emacs.d/snippets/tex-mode/axiom_Axiom_no_label_"
                         nil nil)
@@ -815,4 +812,4 @@
                         nil)))
 
 
-;;; Do not edit! File generated at Sun Mar 22 18:37:13 2026
+;;; Do not edit! File generated at Wed Apr 15 14:16:19 2026

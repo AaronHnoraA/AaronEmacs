@@ -2,5 +2,4 @@
 # name: Cancel To
 # key: K
 # --
-\cancelto{ $1 }{ ${VISUAL} } `(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+\cancelto{ $1 }{ ${VISUAL} }

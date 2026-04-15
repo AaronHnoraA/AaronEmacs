@@ -2,5 +2,4 @@
 # name: Less or Equal
 # key: <=
 # --
-\leq `(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+\leq

@@ -2,5 +2,4 @@
 # name: ket
 # key: ket
 # --
-\lvert ${1:\psi}\rangle $0`(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+\lvert ${1:\psi}\rangle $0

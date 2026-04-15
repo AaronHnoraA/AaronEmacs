@@ -5,5 +5,4 @@
 # --
 \begin{description}
 \item[$1] $0
-\end{description} `(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+\end{description}

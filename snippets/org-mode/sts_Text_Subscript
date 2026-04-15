@@ -2,5 +2,4 @@
 # name: Text Subscript
 # key: sts
 # --
-_\text{$1} `(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+_\text{$1}

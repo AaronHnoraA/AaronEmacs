@@ -171,22 +171,38 @@ alter buffer positions."
         found))))
 
 (defun my/forward-delimiter-dwim ()
-  "Jump past the closing `}' of an Org ^{}/_{} at point, or to the next `]'/`)'/`}'."
+  "Jump past the closing `}' of an Org ^{}/_{} at point, or the nearest closer.
+Prefer structural navigation when point is inside a balanced expression.
+Fall back to a same-line closer search instead of scanning arbitrarily far."
   (interactive)
   (if-let* ((range (my/delimiter--org-script-range-at-point)))
       ;; cdr is already one past `}' (search-forward return value)
       (goto-char (cdr range))
-    (unless (re-search-forward "[])}]" nil t)
-      (user-error "No forward closing delimiter found"))))
+    (or
+     (ignore-errors
+       (up-list 1)
+       t)
+     (save-excursion
+       (let ((line-end (line-end-position)))
+         (when (re-search-forward "[])}]" line-end t)
+           (goto-char (match-end 0))
+           t)))
+     (user-error "No forward closing delimiter found"))))
 
 (defun my/forward-delimiter-or-copilot-dwim ()
-  "Accept Copilot completion when visible, otherwise jump forward by delimiter."
+  "Prefer active snippet/Copilot actions, then jump forward by delimiter."
   (interactive)
-  (if (and (fboundp 'copilot-accept-completion)
-           (fboundp 'copilot--overlay-visible)
-           (copilot--overlay-visible))
-      (copilot-accept-completion)
-    (my/forward-delimiter-dwim)))
+  (cond
+   ((and (bound-and-true-p yas-minor-mode)
+         (bound-and-true-p yas--active-field-overlay)
+         (fboundp 'yas-next-field))
+    (yas-next-field))
+   ((and (fboundp 'copilot-accept-completion)
+         (fboundp 'copilot--overlay-visible)
+         (copilot--overlay-visible))
+    (copilot-accept-completion))
+   (t
+    (my/forward-delimiter-dwim))))
 
 (defun my/delimiter--backward-open-target ()
   "Return the point just after the previous opening delimiter."

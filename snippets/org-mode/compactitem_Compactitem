@@ -6,5 +6,4 @@
 \begin{compactitem}
 	\item $1
 \end{compactitem}
-$0 `(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+$0

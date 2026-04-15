@@ -1181,6 +1181,13 @@ When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
            buffer-file-name
            (not (my/undo-tree-local-history-p buffer-file-name)))
       nil)
+     ((and (null filename)
+           buffer-file-name
+           (buffer-modified-p))
+      ;; Some modes touch the buffer during file-open hooks. Loading persisted
+      ;; history after that triggers undo-tree's hash mismatch warning and the
+      ;; history cannot be attached safely anyway.
+      nil)
      ((or filename (not buffer-file-name))
       (funcall orig-fun filename noerror))
      (t
@@ -1192,7 +1199,9 @@ When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
                ((file-exists-p legacy-file) legacy-file)
                (t canonical-file))))
         (condition-case err
-            (funcall orig-fun resolved-file noerror)
+            (let ((inhibit-message t)
+                  (message-log-max nil))
+              (funcall orig-fun resolved-file noerror))
           (error
            ;; Broken history files should not keep polluting every reopen.
            (when (and resolved-file

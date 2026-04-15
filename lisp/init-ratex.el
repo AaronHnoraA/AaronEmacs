@@ -10,13 +10,11 @@
 
 (require 'cl-lib)
 
-(declare-function ratex-mode "ratex" (&optional arg))
-(declare-function ratex--active-fragment-at-point "ratex-render")
+(declare-function ratex-mode                 "ratex"        (&optional arg))
 (declare-function ratex-handle-buffer-switch "ratex-render")
-(declare-function ratex-handle-post-command "ratex-render")
-(declare-function ratex--hide-edit-preview "ratex-render")
-(declare-function ratex-reset-buffer-state "ratex-render")
-(declare-function evil-insert-state-p "evil")
+(declare-function ratex-handle-post-command  "ratex-render")
+(declare-function ratex--hide-edit-preview   "ratex-render")
+(declare-function evil-insert-state-p        "evil")
 
 (defvar my/org-latex--allow-native-preview)
 (defvar ratex-auto-download-backend)
@@ -29,13 +27,19 @@
 (defvar ratex-inline-preview)
 (defvar ratex-posframe-background-color)
 (defvar ratex-posframe-border-color)
+(defvar ratex-posframe-poshandler)           ; not forward-declared by ratex-render
 (defvar ratex-render-cache-limit)
 (defvar ratex-render-cache-ttl)
 (defvar ratex-render-color)
 (defvar-local ratex-mode)
 (defvar-local ratex--active-fragment)
-(defvar-local my/ratex-preview-timer nil)
-(defvar-local my/ratex--initialized nil)
+(defvar-local my/ratex-preview-timer     nil)
+(defvar-local my/ratex--initialized     nil)
+(defvar-local my/ratex--tracking-enabled nil)
+(defvar-local my/ratex--last-point      nil
+  "Point position recorded when the last preview timer was scheduled.")
+(defvar-local my/ratex--last-tick       nil
+  "Buffer modification tick recorded when the last preview timer was scheduled.")
 
 (defcustom my/ratex-evil-insert-only t
   "When non-nil, only show RaTeX edit previews in Evil insert state."
@@ -48,8 +52,18 @@
                  (const :tag "Posframe" posframe)))
 
 (defcustom my/ratex-preview-idle-delay 0.15
-  "Idle delay before running RaTeX preview updates."
+  "Seconds of idle time before running RaTeX preview updates."
   :type 'number)
+
+(defcustom my/ratex-math-scan-lines 4
+  "Lines above/below point to scan for math delimiters before scheduling preview.
+A value of 4 catches most display-math blocks while keeping the scan O(8 lines)
+rather than O(full org-element parse)."
+  :type 'natnum)
+
+(defconst my/ratex--math-delimiter-re
+  "\\$\\|\\\\(\\|\\\\\\[\\|\\\\begin{"
+  "Regexp matching LaTeX math delimiters ($, \\(, \\[, \\begin{).")
 
 (defconst my/ratex-root
   (expand-file-name "site-lisp/ratex.el" user-emacs-directory)
@@ -84,32 +98,98 @@
   "Return non-nil when BUFFER is currently shown in a live window."
   (get-buffer-window (or buffer (current-buffer)) t))
 
+(defun my/ratex-near-math-p ()
+  "Return non-nil if point is plausibly near a LaTeX math fragment.
+Scans `my/ratex-math-scan-lines' lines above and below point for any of
+`my/ratex--math-delimiter-re'.  This O(N-lines) check prevents the idle timer
+— and therefore ratex's org-element-context call — from being scheduled when
+the cursor is clearly outside any math environment."
+  (let ((lo (save-excursion
+              (forward-line (- my/ratex-math-scan-lines))
+              (line-beginning-position)))
+        (hi (save-excursion
+              (forward-line my/ratex-math-scan-lines)
+              (line-end-position))))
+    (save-excursion
+      (goto-char lo)
+      (re-search-forward my/ratex--math-delimiter-re hi t))))
+
 (defun my/ratex--debounced-post-command (orig-fn &rest args)
-  "Run `ratex-handle-post-command' through a short idle debounce."
-  (my/ratex-cancel-pending-preview)
-  (if (or (not (my/ratex-supported-buffer-p))
-          (not (bound-and-true-p ratex-mode))
-          (not (my/ratex-buffer-visible-p))
-          (not (my/org-ratex-preview-active-p))
-          (null (ignore-errors (ratex--active-fragment-at-point))))
-      (my/ratex-hide-preview-now)
-    (setq-local
-     my/ratex-preview-timer
-     (run-with-idle-timer
-      my/ratex-preview-idle-delay nil
-      (lambda (buffer)
-        (when (buffer-live-p buffer)
-          (with-current-buffer buffer
-            (setq my/ratex-preview-timer nil)
-            (when (and (my/ratex-supported-buffer-p)
-                       (bound-and-true-p ratex-mode)
-                       (my/ratex-buffer-visible-p)
-                       (my/org-ratex-preview-active-p))
-              (condition-case nil
-                  (apply orig-fn args)
-                (error
-                 (my/ratex-hide-preview-now)))))))
-      (current-buffer)))))
+  "Run `ratex-handle-post-command' through a short idle debounce.
+
+Guards evaluated cheapest-first:
+  1. Mode / buffer / visibility / Evil-state sanity.
+  2. `my/ratex-near-math-p' regexp scan — skip when no math delimiter is
+     nearby, avoiding a ratex org-element-context call entirely.
+  3. Point + buffer-tick dedup — if neither cursor position nor buffer
+     content changed since the last schedule, keep any pending timer alive
+     instead of canceling + rescheduling it.
+
+When all guards pass and state has changed: cancel old timer, reschedule."
+  (if (not (and (my/ratex-supported-buffer-p)
+                (bound-and-true-p ratex-mode)
+                (my/ratex-buffer-visible-p)
+                (my/org-ratex-preview-active-p)
+                (my/ratex-near-math-p)))
+      ;; Any guard failed → cancel and hide immediately.
+      (progn
+        (my/ratex-cancel-pending-preview)
+        (my/ratex-hide-preview-now))
+    ;; All guards pass.  Only reschedule when something actually changed.
+    (let ((pt   (point))
+          (tick (buffer-chars-modified-tick)))
+      (if (and (eql pt   my/ratex--last-point)
+               (eql tick my/ratex--last-tick))
+          ;; Nothing changed — preserve any in-flight timer; don't thrash.
+          nil
+        (my/ratex-cancel-pending-preview)
+        (setq-local my/ratex--last-point pt
+                    my/ratex--last-tick  tick)
+        (setq-local
+         my/ratex-preview-timer
+         (run-with-idle-timer
+          my/ratex-preview-idle-delay nil
+          (lambda (buf)
+            (when (buffer-live-p buf)
+              (with-current-buffer buf
+                (setq my/ratex-preview-timer nil)
+                (when (and (my/ratex-supported-buffer-p)
+                           (bound-and-true-p ratex-mode)
+                           (my/ratex-buffer-visible-p)
+                           (my/org-ratex-preview-active-p))
+                  (condition-case err
+                      (apply orig-fn args)
+                    (error
+                     (message "[ratex] preview error: %S" err)
+                     (my/ratex-hide-preview-now)))))))
+          (current-buffer)))))))
+
+(defun my/ratex-enable-post-command-tracking ()
+  "Enable RaTeX post-command tracking in the current buffer."
+  (when (and (bound-and-true-p ratex-mode)
+             (not my/ratex--tracking-enabled))
+    (setq-local my/ratex--tracking-enabled t)
+    (add-hook 'post-command-hook #'ratex-handle-post-command nil t)))
+
+(defun my/ratex-disable-post-command-tracking ()
+  "Disable RaTeX post-command tracking in the current buffer."
+  (when my/ratex--tracking-enabled
+    (setq-local my/ratex--tracking-enabled nil)
+    (remove-hook 'post-command-hook #'ratex-handle-post-command t)))
+
+(defun my/ratex-refresh-post-command-soon ()
+  "Queue one near-immediate RaTeX post-command refresh for the current buffer."
+  (let ((buffer (current-buffer)))
+    (run-with-idle-timer
+     0 nil
+     (lambda ()
+       (when (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (when (and (bound-and-true-p ratex-mode)
+                      my/ratex--tracking-enabled
+                      (my/org-ratex-preview-active-p)
+                      (fboundp 'ratex-handle-post-command))
+             (ratex-handle-post-command))))))))
 
 (defun my/ratex-cancel-pending-preview ()
   "Cancel any queued RaTeX preview timer in the current buffer."
@@ -120,7 +200,10 @@
 (defun my/ratex-hide-preview-now ()
   "Cancel pending preview work and hide any visible RaTeX preview."
   (my/ratex-cancel-pending-preview)
-  (setq-local ratex--active-fragment nil)
+  ;; Reset dedup state so the next cursor arrival always reschedules.
+  (setq-local ratex--active-fragment nil
+              my/ratex--last-point   nil
+              my/ratex--last-tick    nil)
   (when (fboundp 'ratex--hide-edit-preview)
     (ratex--hide-edit-preview)))
 
@@ -137,9 +220,10 @@
     (if (my/org-ratex-preview-active-p)
         (progn
           (setq-local ratex-edit-preview my/ratex-preview-style)
-          (when (fboundp 'ratex-handle-post-command)
-            (ratex-handle-post-command)))
+          (my/ratex-enable-post-command-tracking)
+          (my/ratex-refresh-post-command-soon))
       (setq-local ratex-edit-preview nil)
+      (my/ratex-disable-post-command-tracking)
       (my/ratex-hide-preview-now))))
 
 (defun my/org-ratex-enable ()
@@ -156,6 +240,9 @@
       (setq-local my/ratex--initialized t)
       (add-hook 'change-major-mode-hook #'my/ratex-hide-preview-now nil t)
       (add-hook 'kill-buffer-hook #'my/ratex-hide-preview-now nil t))
+    ;; `ratex-mode' enables tracking eagerly. We only want it while previews
+    ;; should actually be active, otherwise Org insert latency suffers.
+    (my/ratex-disable-post-command-tracking)
     (my/org-ratex-sync-evil-state)))
 
 (use-package ratex
@@ -173,8 +260,8 @@
         ratex-debug nil
         ratex-hide-source-while-preview nil
         ratex-inline-preview nil
-        ratex-render-cache-limit 12
-        ratex-render-cache-ttl 30
+        ratex-render-cache-limit 24   ; up from 12 — more unique formulas cached
+        ratex-render-cache-ttl   60   ; up from 30 — survives longer editing sessions
         ratex-auto-download-backend t
         ratex-render-color "#d8dee9"
         ratex-posframe-background-color "#2b3140"
@@ -194,13 +281,12 @@
   (advice-add 'ratex-handle-buffer-switch :around #'my/ratex-handle-buffer-switch)
   (advice-add 'ratex-handle-post-command :around #'my/ratex--debounced-post-command))
 
+;; Only hook insert-state entry/exit.  Normal → visual → motion → replace
+;; transitions do not change tracking eligibility (all are non-insert), so
+;; they need no hooks — saving 4 extra dispatch calls on every state switch.
 (with-eval-after-load 'evil
   (add-hook 'evil-insert-state-entry-hook #'my/org-ratex-sync-evil-state)
-  (add-hook 'evil-insert-state-exit-hook #'my/org-ratex-sync-evil-state)
-  (add-hook 'evil-normal-state-entry-hook #'my/org-ratex-sync-evil-state)
-  (add-hook 'evil-visual-state-entry-hook #'my/org-ratex-sync-evil-state)
-  (add-hook 'evil-motion-state-entry-hook #'my/org-ratex-sync-evil-state)
-  (add-hook 'evil-replace-state-entry-hook #'my/org-ratex-sync-evil-state))
+  (add-hook 'evil-insert-state-exit-hook  #'my/org-ratex-sync-evil-state))
 
 (provide 'init-ratex)
 ;;; init-ratex.el ends here

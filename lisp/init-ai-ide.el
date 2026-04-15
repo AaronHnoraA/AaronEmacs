@@ -59,8 +59,7 @@
 
 (use-package copilot
   :ensure t
-  :hook ((prog-mode . copilot-mode)
-         (org-mode . copilot-mode))
+  :hook (prog-mode . copilot-mode)
   :bind (:map copilot-mode-map
               ("M-]" . my/forward-delimiter-or-copilot-dwim))
   :config

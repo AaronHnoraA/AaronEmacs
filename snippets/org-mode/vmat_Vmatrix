@@ -4,5 +4,4 @@
 # --
 \begin{vmatrix}
 $0
-\end{vmatrix} `(when (and (not (eobp)) (looking-at "
-")) (let ((inhibit-modification-hooks t)) (ignore-errors (delete-char 1))))`
+\end{vmatrix}
