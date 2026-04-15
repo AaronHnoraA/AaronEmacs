@@ -268,8 +268,8 @@
   :custom
   (org-appear-autoemphasis t)
   (org-appear-autolinks t)
-  ;; `^{}' / `_{}' 自动显隐会影响输入与定位，单独禁用。
-  (org-appear-autosubmarkers nil))
+  ;; 光标进入 `^{}' / `_{}' 时显示标记，避免编辑时只看到渲染结果。
+  (org-appear-autosubmarkers t))
 
 ;; 3.6 优先级美化
 (use-package org-fancy-priorities

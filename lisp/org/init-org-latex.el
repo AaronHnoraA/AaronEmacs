@@ -14,13 +14,7 @@
 
 (use-package cdlatex
   :ensure t
-  :hook (org-mode . org-cdlatex-mode)
-  :config
-  ;; org-appear 隐藏括号后 ^{} / _{} 内外无法区分。
-  ;; 改为只插入开括号 ^{ / _{，不自动补全 }，由用户手动收尾。
-  (with-eval-after-load 'org
-    (keymap-set org-cdlatex-mode-map "^" (lambda () (interactive) (insert "^{")))
-    (keymap-set org-cdlatex-mode-map "_" (lambda () (interactive) (insert "_{")))))
+  :hook (org-mode . org-cdlatex-mode))
 
 (use-package org-fragtog
   :ensure t
@@ -82,12 +76,12 @@ Each value may be a readable `.cls' file path or literal class source."
     ("\\subparagraph{%s}" . "\\subparagraph*{%s}"))
   "Fallback sectioning used for embedded Org LaTeX classes.")
 
-(defcustom my/org-latex-preview-idle-delay 0.4
+(defcustom my/org-latex-preview-idle-delay 0.9
   "Idle delay (seconds) before previewing visible region after scrolling."
   :type 'number
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-scroll-idle-delay 0.18
+(defcustom my/org-latex-preview-scroll-idle-delay 0.8
   "Idle delay (seconds) before previewing visible region after scrolling."
   :type 'number
   :group 'my/org-latex-preview)
@@ -107,7 +101,7 @@ Each value may be a readable `.cls' file path or literal class source."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-edit-idle-delay 0.2
+(defcustom my/org-latex-preview-edit-idle-delay 0.55
   "Idle delay (seconds) before pre-rendering the fragment being edited."
   :type 'number
   :group 'my/org-latex-preview)
@@ -1128,7 +1122,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
     (add-hook 'window-size-change-functions #'my/org-latex--window-size-preview-hook nil t)
     (add-hook 'change-major-mode-hook #'my/org-latex-cleanup-scroll-preview nil t)
     (add-hook 'kill-buffer-hook #'my/org-latex-cleanup-scroll-preview nil t)
-    (run-with-idle-timer 0.15 nil
+    (run-with-idle-timer my/org-latex-preview-idle-delay nil
                          #'my/org-latex-preview-visible-initial
                          (current-buffer))))
 

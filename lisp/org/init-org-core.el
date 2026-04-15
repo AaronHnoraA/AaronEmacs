@@ -72,9 +72,7 @@ Special block overlays are no longer disabled based on buffer size."
   :hook ((org-mode . visual-line-mode)        ; 自动换行
          (org-mode . org-indent-mode)
          (org-mode . my/org-setup-buffer-spacing)
-         (org-mode . my/org-enable-typography-maybe) ; 缩进模式
-         ;; org-appear 隐藏括号后括号内外无法区分，禁用自动括号补全
-         (org-mode . (lambda () (electric-pair-local-mode -1))))
+         (org-mode . my/org-enable-typography-maybe)) ; 缩进模式
   :bind (("C-c a" . org-agenda)
          ("C-c c" . org-capture)
          :map org-mode-map
@@ -92,6 +90,7 @@ Special block overlays are no longer disabled based on buffer size."
   (org-startup-indented t)
   (org-hide-emphasis-markers t)
   (org-pretty-entities t)
+  (org-pretty-entities-include-sub-superscripts nil)
   (org-use-sub-superscripts '{})
   (org-ellipsis " ▾")
   (org-image-actual-width nil)
