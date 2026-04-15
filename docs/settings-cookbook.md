@@ -97,9 +97,27 @@
 
 - `codex-cli-executable`      — Codex 可执行文件名（默认 `"codex"`）
 - `codex-cli-terminal-backend` — 终端后端（默认 `vterm`）
-- `codex-cli-side` / `codex-cli-width` — 面板位置与宽度
+- 本地 override：Codex buffer 用底部普通窗口打开，高度约 18 行，可继续分屏
 
 键位前缀 `C-c c`；参见文件顶部注释。
+
+### 窗口切换 / 交换
+
+文件：
+
+- [lisp/init-windows.el](../lisp/init-windows.el)
+
+现有快捷键：
+
+- `M-o` — `ace-window`，快速选择目标窗口
+- `M-S-o` — 交换当前窗口和另一个窗口
+- `C-c w s` — 同上，作为更稳妥的备用键位
+- `M-<left/right/up/down>` — `windmove`，按方向切换窗口
+
+交换窗口的策略：
+
+- 只有两个窗口时，直接和另一个窗口交换
+- 多于两个窗口时，用 `ace-window` 选目标窗口再交换
 
 ## 5. 我要增删 leader 键
 

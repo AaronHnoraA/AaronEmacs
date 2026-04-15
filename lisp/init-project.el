@@ -1027,7 +1027,7 @@ Returns the number of killed buffers."
         treemacs-tag-follow-cleanup t
         treemacs-tag-follow-delay 1.5
         treemacs-width 35
-        treemacs-width-is-initially-locked t
+        treemacs-width-is-initially-locked nil
         treemacs-file-follow-delay 0.2
         treemacs-workspace-switch-cleanup nil
         imenu-auto-rescan t)

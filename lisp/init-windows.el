@@ -478,8 +478,30 @@ If OTHER-WINDOW is non-nil, jump in another window on final selection."
               (ibuffer-switch-to-saved-filter-groups "default")
               (ibuffer-do-sort-by-recency))))
 
+(defun my/swap-window-dwim ()
+  "Swap the current window with another window.
+When only two windows are visible, swap with the other one directly.
+Otherwise, use `ace-window' to choose the target window."
+  (interactive)
+  (unless (> (count-windows) 1)
+    (user-error "Need at least two windows to swap"))
+  (let ((source (selected-window))
+        (target nil))
+    (setq target
+          (if (= (count-windows) 2)
+              (next-window source nil t)
+            (progn
+              (require 'ace-window)
+              (aw-select "Swap with window"))))
+    (unless (and (window-live-p target)
+                 (not (eq source target)))
+      (user-error "No target window selected"))
+    (window-swap-states source target)))
+
 (use-package ace-window
-  :bind (("M-o" . ace-window)))
+  :bind (("M-o" . ace-window)
+         ("M-O" . my/swap-window-dwim)
+         ("C-c w s" . my/swap-window-dwim)))
 
 (use-package winner
   :ensure nil
