@@ -15,6 +15,10 @@
 (require 'ratex-render)
 
 (declare-function evil-insert-state-p "evil")
+(declare-function my/org-latex-cleanup-scroll-preview "init-org-latex")
+(declare-function my/org-latex-enable-scroll-preview "init-org-latex")
+
+(defvar org-fragtog-mode)
 
 (defvar my/org-latex--allow-native-preview)
 (defvar my/org-latex--external-preview-active)
