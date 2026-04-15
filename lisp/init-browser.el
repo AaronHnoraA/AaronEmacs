@@ -62,6 +62,7 @@
   (with-eval-after-load 'xwidget
     (define-key xwidget-webkit-mode-map (kbd "q") #'quit-window)
     (define-key xwidget-webkit-mode-map (kbd "g") #'xwidget-webkit-reload)
+    (define-key xwidget-webkit-mode-map (kbd "M-r") #'my/refresh-current-content)
     (define-key xwidget-webkit-mode-map (kbd "l") #'xwidget-webkit-browse-url)
     (define-key xwidget-webkit-mode-map (kbd "b") #'xwidget-webkit-back)
     (define-key xwidget-webkit-mode-map (kbd "f") #'xwidget-webkit-forward)
@@ -119,10 +120,10 @@
 (global-set-key (kbd "C-c w g") #'my/appine-open-at-point)
 (global-set-key (kbd "C-c w h") #'my/appine-back)
 (global-set-key (kbd "C-c w l") #'my/appine-forward)
-(global-set-key (kbd "C-c w r") #'my/appine-reload)
 (global-set-key (kbd "C-c w [") #'my/appine-prev-tab)
 (global-set-key (kbd "C-c w ]") #'my/appine-next-tab)
 (global-set-key (kbd "C-c w 0") #'my/appine-close-tab)
+(global-set-key (kbd "C-c w ?") #'my/appine-board)
 (global-set-key (kbd "C-c w w") #'browse-url)
 (global-set-key (kbd "C-c w s") #'my/browser-switch-to)
 (global-set-key (kbd "C-c w k") #'my/appine-kill-all)
@@ -130,6 +131,8 @@
 
 (with-eval-after-load 'eww
   (setq eww-search-prefix "https://duckduckgo.com/?q=")
+  (define-key eww-mode-map (kbd "g") #'my/refresh-current-content)
+  (define-key eww-mode-map (kbd "M-r") #'my/refresh-current-content)
   (define-key eww-mode-map (kbd "R") #'eww-readable)
   (define-key eww-mode-map (kbd "X") #'my/eww-to-xwidget)
   (define-key eww-mode-map (kbd "A") #'my/eww-to-appine))
@@ -199,6 +202,26 @@
     (_
      (when (buffer-live-p buffer)
        (kill-buffer buffer)))))
+
+(defun my/refresh-current-content ()
+  "Refresh the current web view or file buffer."
+  (interactive)
+  (cond
+   ((eq (my/browser-current-backend) 'appine)
+    (call-interactively #'my/appine-reload))
+   ((derived-mode-p 'eww-mode)
+    (call-interactively #'eww-reload))
+   ((eq major-mode 'xwidget-webkit-mode)
+    (call-interactively #'xwidget-webkit-reload))
+   ((or (buffer-file-name) (derived-mode-p 'dired-mode))
+    (if (buffer-modified-p)
+        (user-error "当前 buffer 有未保存修改，先保存再刷新")
+      (revert-buffer :ignore-auto :noconfirm :preserve-modes)
+      (message "已刷新: %s" (buffer-name))))
+   (t
+    (user-error "当前 buffer 不支持刷新"))))
+
+(global-set-key (kbd "C-c w r") #'my/refresh-current-content)
 
 (defun my/browser-switch-to (backend)
   "Switch the current browser page to BACKEND."
