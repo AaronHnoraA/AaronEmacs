@@ -55,5 +55,18 @@
         codex-cli-side 'right
         codex-cli-width 90))
 
+;;; ── GitHub Copilot ────────────────────────────────────────────────────────
+
+(use-package copilot
+  :ensure t
+  :hook ((prog-mode . copilot-mode)
+         (org-mode . copilot-mode))
+  :bind (:map copilot-mode-map
+              ("M-]" . my/forward-delimiter-or-copilot-dwim))
+  :config
+  ;; When a completion overlay is visible, `M-]' should accept it before any
+  ;; global fallback navigation runs.
+  (define-key copilot-completion-map (kbd "M-]") #'copilot-accept-completion))
+
 (provide 'init-ai-ide)
 ;;; init-ai-ide.el ends here

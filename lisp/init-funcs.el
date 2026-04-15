@@ -179,6 +179,15 @@ alter buffer positions."
     (unless (re-search-forward "[])}]" nil t)
       (user-error "No forward closing delimiter found"))))
 
+(defun my/forward-delimiter-or-copilot-dwim ()
+  "Accept Copilot completion when visible, otherwise jump forward by delimiter."
+  (interactive)
+  (if (and (fboundp 'copilot-accept-completion)
+           (fboundp 'copilot--overlay-visible)
+           (copilot--overlay-visible))
+      (copilot-accept-completion)
+    (my/forward-delimiter-dwim)))
+
 (defun my/delimiter--backward-open-target ()
   "Return the point just after the previous opening delimiter."
   (save-excursion
@@ -262,7 +271,7 @@ If any function returns non-nil, later hooks are skipped.")
   :keymap my/global-quit-key-mode-map)
 
 (global-set-key [remap keyboard-quit] #'my/escape)
-(global-set-key (kbd "M-]") #'my/forward-delimiter-dwim)
+(global-set-key (kbd "M-]") #'my/forward-delimiter-or-copilot-dwim)
 (global-set-key (kbd "M-[") #'my/backward-delimiter-dwim)
 
 (my/global-quit-key-mode 1)
