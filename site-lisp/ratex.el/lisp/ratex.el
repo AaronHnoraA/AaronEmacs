@@ -15,6 +15,7 @@
 (require 'ratex-render)
 
 (declare-function evil-insert-state-p "evil")
+(declare-function ratex--call-isolated-from-scroll "ratex-render" (fn &optional buffer))
 
 (defun ratex--supported-buffer-p ()
   "Return non-nil when the current buffer should enable RaTeX."
@@ -52,13 +53,15 @@
   :lighter " RaTeX"
   (if ratex-mode
       (condition-case err
-          (progn
-            (ratex-reset-buffer-state)
-            (add-hook 'post-command-hook #'ratex-post-command nil t)
-            (add-hook 'buffer-list-update-hook #'ratex-handle-buffer-switch)
-            (ratex-start-backend)
-            (ratex-initialize-previews)
-            (ratex-sync-evil-state))
+          (ratex--call-isolated-from-scroll
+           (lambda ()
+             (ratex-reset-buffer-state)
+             (add-hook 'post-command-hook #'ratex-post-command nil t)
+             (add-hook 'buffer-list-update-hook #'ratex-handle-buffer-switch)
+             (ratex-start-backend)
+             (ratex-initialize-previews)
+             (ratex-sync-evil-state))
+           (current-buffer))
         (error
          (ratex--disable-current-buffer)
          (setq ratex-mode nil)
@@ -68,7 +71,10 @@
                   (buffer-name)
                   (error-message-string err))
           :warning)))
-    (ratex--disable-current-buffer)))
+    (ratex--call-isolated-from-scroll
+     (lambda ()
+       (ratex--disable-current-buffer))
+     (current-buffer))))
 
 
 ;;;###autoload

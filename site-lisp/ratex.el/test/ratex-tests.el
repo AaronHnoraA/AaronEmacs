@@ -444,14 +444,6 @@
         (ratex-initialize-previews)
         (should (equal rendered '("x")))))))
 
-(ert-deftest ratex-fragment-renderable-p-rejects-oversized-fragments ()
-  (let ((ratex-max-fragment-length 3))
-    (with-temp-buffer
-      (insert "\\(abcd\\)")
-      (goto-char 4)
-      (let ((fragment (ratex-fragment-at-point)))
-        (should-not (ratex--fragment-renderable-p fragment))))))
-
 (ert-deftest ratex-image-from-response-rejects-oversized-svg ()
   (let ((ratex-max-svg-chars 8))
     (should-not
@@ -715,6 +707,14 @@
               (should (= (window-start window) before-start))
               (should (= (window-point window) before-point))))
         (delete-other-windows)))))
+
+(ert-deftest ratex-valid-fragment-remains-renderable-regardless-of-length ()
+  (with-temp-buffer
+    (insert "\\(" (make-string 5000 ?x) "\\)")
+    (goto-char 10)
+    (let ((fragment (ratex-fragment-at-point)))
+      (should fragment)
+      (should (ratex--fragment-valid-p fragment)))))
 
 (ert-deftest ratex-edit-preview-posframe-keeps-overlay ()
   (with-temp-buffer

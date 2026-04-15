@@ -108,13 +108,6 @@ region plus a small margin. `all' renders every detected fragment."
   "Extra lines above and below the visible window to include in initial scans."
   :type 'natnum)
 
-(defcustom ratex-max-fragment-length 1200
-  "Maximum source length of a single fragment RaTeX will send to the backend.
-
-Longer fragments are skipped to protect interactive editing responsiveness."
-  :type '(choice (const :tag "No limit" nil)
-                 natnum))
-
 (defcustom ratex-max-svg-chars 400000
   "Maximum SVG payload size accepted from the backend for one preview."
   :type '(choice (const :tag "No limit" nil)

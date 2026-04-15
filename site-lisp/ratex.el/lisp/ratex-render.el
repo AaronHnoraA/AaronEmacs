@@ -20,7 +20,6 @@
 (defvar ratex-hide-source-while-preview)
 (defvar ratex-initial-render-scope)
 (defvar ratex-visible-region-margin)
-(defvar ratex-max-fragment-length)
 (defvar ratex-max-svg-chars)
 (defvar ratex-render-cache-limit)
 (defvar ratex-render-cache-ttl)
@@ -82,7 +81,26 @@
      ((eq (window-buffer (selected-window)) buffer)
       (selected-window))
      (t
-      (get-buffer-window buffer t)))))
+     (get-buffer-window buffer t)))))
+
+(defun ratex--normalize-buffer (buffer-or-window)
+  "Return a buffer for BUFFER-OR-WINDOW, or the current buffer."
+  (cond
+   ((windowp buffer-or-window)
+    (window-buffer buffer-or-window))
+   ((bufferp buffer-or-window)
+    buffer-or-window)
+   (t
+    (current-buffer))))
+
+(defun ratex--buffer-windows (&optional buffer-or-window)
+  "Return all live windows currently showing BUFFER-OR-WINDOW."
+  (let ((buffer (ratex--normalize-buffer buffer-or-window)))
+    (seq-filter
+     (lambda (window)
+       (and (window-live-p window)
+            (eq (window-buffer window) buffer)))
+     (get-buffer-window-list buffer nil t))))
 
 (defun ratex--capture-window-state (&optional window)
   "Capture scrolling state for WINDOW."
@@ -92,6 +110,11 @@
           :start (window-start window)
           :point (window-point window)
           :hscroll (window-hscroll window))))
+
+(defun ratex--capture-buffer-window-states (&optional buffer-or-window)
+  "Capture scrolling state for every live window showing BUFFER-OR-WINDOW."
+  (mapcar #'ratex--capture-window-state
+          (ratex--buffer-windows buffer-or-window)))
 
 (defun ratex--restore-window-state (state)
   "Restore WINDOW scrolling STATE captured by `ratex--capture-window-state'."
@@ -109,16 +132,26 @@
       (when (integerp hscroll)
         (set-window-hscroll window hscroll)))))
 
-(defun ratex--call-isolated-from-scroll (fn &optional window)
-  "Call FN while isolating source WINDOW from scroll side effects."
-  (let ((state (ratex--capture-window-state
-                (or window (ratex--source-window)))))
+(defun ratex--restore-buffer-window-states (states)
+  "Restore a list of captured window STATES."
+  (dolist (state states)
+    (when state
+      (ratex--restore-window-state state))))
+
+(defun ratex--call-isolated-from-scroll (fn &optional buffer-or-window)
+  "Call FN while isolating BUFFER-OR-WINDOW from scroll side effects."
+  (let ((states (ratex--capture-buffer-window-states
+                 buffer-or-window))
+        (selected (selected-window)))
     (let ((window-scroll-functions nil)
           (window-size-change-functions nil)
           (ratex--suppress-scroll-side-effects t))
-      (prog1 (funcall fn)
-        (when state
-          (ratex--restore-window-state state))))))
+      (prog1
+          (save-selected-window
+            (funcall fn))
+        (ratex--restore-buffer-window-states states)
+        (when (window-live-p selected)
+          (select-window selected))))))
 
 (defun ratex--set-posframe-owner (buffer fragment override-params)
   "Record BUFFER as the owner of the shared posframe for FRAGMENT."
@@ -519,14 +552,6 @@ fragments are normalized for preview compatibility when needed."
       (unless (gethash key keep)
         (ratex-remove-overlay key)))))
 
-(defun ratex--fragment-renderable-p (fragment)
-  "Return non-nil when FRAGMENT is safe to send to the backend."
-  (let ((content (plist-get fragment :content)))
-    (and (ratex--fragment-valid-p fragment)
-         (or (null ratex-max-fragment-length)
-             (not (stringp content))
-             (<= (length content) ratex-max-fragment-length)))))
-
 (defun ratex--render-payload (fragment)
   "Build the render request payload for FRAGMENT."
   (let ((payload
@@ -552,7 +577,7 @@ fragments are normalized for preview compatibility when needed."
          (cached (ratex--cache-get cache-key))
          (inflight (gethash cache-key (ratex--inflight-table))))
     (cond
-     ((not (ratex--fragment-renderable-p fragment))
+     ((not (ratex--fragment-valid-p fragment))
       (ratex-remove-overlay fragment-key))
      (cached
       (ratex--display-response fragment-key fragment cached))
