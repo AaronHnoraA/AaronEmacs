@@ -67,10 +67,14 @@ Set this explicitly if the backend cannot locate fonts automatically."
   "Preview style used while editing formulas.
 
 Set to nil to disable edit previews, `posframe' to show a floating preview,
-or `minibuffer' to show the preview in the minibuffer."
+`overlay' to show the preview above the formula in the current buffer, or
+`minibuffer' to show the preview in the minibuffer, or `window' to show
+the preview in a dedicated popup window."
   :type '(choice (const :tag "Disable" nil)
                  (const :tag "Posframe" posframe)
-                 (const :tag "Minibuffer" minibuffer)))
+                 (const :tag "Overlay above formula" overlay)
+                 (const :tag "Minibuffer" minibuffer)
+                 (const :tag "Popup window" window)))
 
 (defcustom ratex-inline-preview t
   "Whether RaTeX should keep rendered inline overlays in the buffer.
@@ -95,13 +99,30 @@ Use nil to keep backend defaults."
   :type 'string)
 
 (defcustom ratex-posframe-poshandler
-  'ratex-posframe-poshandler-point-bottom-left-corner-offset
-  "Poshandler function used to place the RaTeX posframe preview."
+  'ratex-posframe-poshandler-point-top-left-corner-offset
+  "Poshandler function used to place the RaTeX posframe preview.
+
+The default prefers showing the preview above point and falls back below
+when there isn't enough space, similar to eldoc-box's at-point behavior."
   :type 'function)
 
 (defcustom ratex-hide-source-while-preview nil
   "Whether to hide the source text while the edit preview is visible."
   :type 'boolean)
+
+(defcustom ratex-window-side 'right
+  "Side used for the RaTeX popup preview window."
+  :type '(choice (const :tag "Bottom" bottom)
+                 (const :tag "Right" right)
+                 (const :tag "Top" top)
+                 (const :tag "Left" left)))
+
+(defcustom ratex-window-size 0.22
+  "Size of the RaTeX popup preview window.
+
+For top/bottom windows, this is the window height ratio.  For left/right
+windows, it is the window width ratio."
+  :type 'number)
 
 (defcustom ratex-debug nil
   "When non-nil, append runtime diagnostics to the RaTeX debug buffer."

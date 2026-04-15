@@ -571,6 +571,11 @@ Each value may be a readable `.cls' file path or literal class source."
 (defun my/org-latex-post-command-function ()
   "Re-enable preview when point leaves a LaTeX fragment."
   (when (my/org-latex--async-preview-active-p)
+    ;; Safety net: if an image overlay still covers point, fragtog failed to
+    ;; clear it.  Remove it now so the cursor is never trapped inside a preview.
+    (when-let* ((ov (my/org-latex--image-overlay-at-point)))
+      (org-clear-latex-preview (overlay-start ov) (overlay-end ov))
+      (my/org-latex--cancel-edit-preview-timer))
     (unless (memq this-command '(self-insert-command org-self-insert-command))
       (let* ((prev-point my/org-latex--post-command-point)
              (prev-frag (and prev-point
@@ -659,6 +664,26 @@ Each value may be a readable `.cls' file path or literal class source."
           (cons (my/org-latex--make-waiter spec)
                 (plist-get job :waiters)))))
 
+(defun my/org-latex--image-overlay-at-point ()
+  "Return an image display overlay that directly covers point, or nil."
+  (catch 'found
+    (dolist (ov (overlays-at (point)))
+      (let ((disp (overlay-get ov 'display)))
+        (when (and (listp disp) (eq (car disp) 'image))
+          (throw 'found ov))))
+    nil))
+
+(defun my/org-latex--overlay-shows-file-p (beg end file)
+  "Return non-nil when an existing preview overlay at BEG..END already shows FILE."
+  (catch 'found
+    (dolist (ov (overlays-in beg end))
+      (when-let* ((disp (overlay-get ov 'display))
+                  ((listp disp))
+                  ((eq (car disp) 'image))
+                  (shown-file (plist-get (cdr disp) :file)))
+        (when (string= (file-truename shown-file) (file-truename file))
+          (throw 'found t))))))
+
 (defun my/org-latex--place-preview (beg end value file imagetype)
   "Overlay FILE as preview between BEG and END when VALUE is unchanged."
   (when (and (file-exists-p file)
@@ -666,9 +691,10 @@ Each value may be a readable `.cls' file path or literal class source."
              (<= end (point-max))
              (string= (buffer-substring-no-properties beg end) value)
              (not (my/org-latex--point-editing-fragment-p beg end)))
-    (org-clear-latex-preview beg end)
-    (let ((max-image-size nil))
-      (org--make-preview-overlay beg end file imagetype))))
+    (unless (my/org-latex--overlay-shows-file-p beg end file)
+      (org-clear-latex-preview beg end)
+      (let ((max-image-size nil))
+        (org--make-preview-overlay beg end file imagetype)))))
 
 (defun my/org-latex--place-waiter-preview (waiter file imagetype)
   "Place preview FILE for WAITER using IMAGETYPE."
@@ -1061,6 +1087,11 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   (when (and (derived-mode-p 'org-mode)
              (my/org-latex--async-preview-active-p)
              (my/org-latex--buffer-visible-p)
+             ;; Don't race against the edit-preview timer: if the user is
+             ;; actively editing a fragment (LSP/Copilot overlays can fire
+             ;; window-scroll-functions while typing), let the edit-preview
+             ;; timer render first, then scroll-preview can follow.
+             (not my/org-latex--edit-preview-timer)
              (or (null window) window))
     (when (timerp my/org-latex--preview-timer)
       (cancel-timer my/org-latex--preview-timer))
@@ -1129,11 +1160,24 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
 
 (add-hook 'org-mode-hook #'my/org-latex-enable-scroll-preview)
 
+(defun my/org-latex-open-preview-at-point (&optional arg)
+  "On a LaTeX preview overlay: clear it and move point inside the fragment.
+Anywhere else: run `org-return' as usual."
+  (interactive "P")
+  (if-let* ((ov (my/org-latex--image-overlay-at-point)))
+      (let ((beg (overlay-start ov))
+            (end (overlay-end ov)))
+        (my/org-latex--cancel-edit-preview-timer)
+        (org-clear-latex-preview beg end)
+        (goto-char beg))
+    (org-return arg)))
+
 ;; 手动刷新绑定
 (with-eval-after-load 'org
   (advice-add 'org-latex-preview :around #'my/org-latex-preview-advice)
   (define-key org-mode-map (kbd "C-c C-x C-l") #'my/org-latex-preview-command)
-  (define-key org-mode-map (kbd "C-c C-x v") #'my/org-latex-preview-visible-now))
+  (define-key org-mode-map (kbd "C-c C-x v") #'my/org-latex-preview-visible-now)
+  (define-key org-mode-map (kbd "RET") #'my/org-latex-open-preview-at-point))
 
 (with-eval-after-load 'org-fragtog
   (advice-add 'org-fragtog--enable-frag :around #'my/org-fragtog-enable-frag-advice))

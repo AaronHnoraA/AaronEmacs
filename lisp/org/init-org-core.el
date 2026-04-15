@@ -158,5 +158,19 @@ Special block overlays are no longer disabled based on buffer size."
   ;; --- Citations ---
   (org-cite-global-bibliography pv/org-bibtex-files))
 
+;;; ----------------------------------------------------------------------------
+;;; Misc fixes
+;;; ----------------------------------------------------------------------------
+
+;; pcomplete/org-mode/drawer calls (substring context 1 nil) without checking
+;; whether context is empty, producing args-out-of-range when company triggers
+;; completion inside a LaTeX fragment.  Guard against it here.
+(with-eval-after-load 'org-pcomplete
+  (define-advice pcomplete/org-mode/drawer
+      (:around (orig) guard-empty-context)
+    (condition-case nil
+        (funcall orig)
+      (args-out-of-range nil))))
+
 (provide 'init-org-core)
 ;;; init-org-core.el ends here

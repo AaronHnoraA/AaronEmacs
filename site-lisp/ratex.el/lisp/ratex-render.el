@@ -17,11 +17,17 @@
 (defvar ratex-hide-source-while-preview)
 (defvar ratex-render-cache-limit)
 (defvar ratex-render-cache-ttl)
+(defvar ratex-window-side)
+(defvar ratex-window-size)
 (defvar ratex-posframe-background-color)
 (defvar ratex-posframe-border-color)
 (defvar ratex-posframe-poshandler)
 (defvar ratex--posframe-owner-buffer nil
   "Buffer that currently owns the shared RaTeX posframe.")
+(defvar ratex--minibuffer-owner-buffer nil
+  "Buffer that currently owns the shared RaTeX minibuffer preview.")
+(defvar ratex--window-owner-buffer nil
+  "Buffer that currently owns the shared RaTeX window preview.")
 (defvar-local ratex--render-cache nil)
 (defvar-local ratex--render-cache-access nil)
 (defvar-local ratex--inflight-requests nil)
@@ -30,14 +36,28 @@
 (defvar-local ratex--active-fragment nil)
 (defvar-local ratex--posframe-visible nil)
 (defvar-local ratex--posframe-fragment nil)
+(defvar-local ratex--minibuffer-visible nil)
+(defvar-local ratex--window-visible nil)
 (defvar-local ratex--preview-enabled nil)
 (defvar-local ratex--edit-source-overlay nil)
+(defvar-local ratex--edit-preview-overlay nil)
 (defvar-local ratex--posframe-last-override-params nil
   "Last override-parameters used for the posframe, cached for position updates.")
 (defvar ratex--cache-gc-timer nil)
 (defconst ratex--posframe-buffer " *ratex-preview*")
+(defconst ratex--window-buffer " *ratex-window-preview*")
 (defconst ratex--posframe-offset-y 72)
 (defconst ratex--posframe-display-offset-y 28)
+(defconst ratex--posframe-gap-x 10)
+(defconst ratex--posframe-gap-y 8)
+
+(define-derived-mode ratex-preview-window-mode special-mode "RaTeX-Preview"
+  "Major mode for the RaTeX popup preview window."
+  (setq-local cursor-type nil)
+  (setq-local mode-line-format nil)
+  (setq-local header-line-format " RaTeX Preview ")
+  (setq-local truncate-lines t)
+  (setq-local window-size-fixed nil))
 
 (defun ratex--clear-posframe-state (&optional buffer)
   "Clear posframe bookkeeping in BUFFER or the current buffer."
@@ -45,6 +65,34 @@
     (setq-local ratex--posframe-visible nil)
     (setq-local ratex--posframe-fragment nil)
     (setq-local ratex--posframe-last-override-params nil)))
+
+(defun ratex--clear-minibuffer-state (&optional buffer)
+  "Clear minibuffer-preview bookkeeping in BUFFER or the current buffer."
+  (with-current-buffer (or buffer (current-buffer))
+    (setq-local ratex--minibuffer-visible nil)))
+
+(defun ratex--clear-window-state (&optional buffer)
+  "Clear popup-window bookkeeping in BUFFER or the current buffer."
+  (with-current-buffer (or buffer (current-buffer))
+    (setq-local ratex--window-visible nil)))
+
+(defun ratex--set-minibuffer-owner (buffer)
+  "Record BUFFER as the owner of the shared RaTeX minibuffer preview."
+  (when (and (buffer-live-p ratex--minibuffer-owner-buffer)
+             (not (eq ratex--minibuffer-owner-buffer buffer)))
+    (ratex--clear-minibuffer-state ratex--minibuffer-owner-buffer))
+  (setq ratex--minibuffer-owner-buffer buffer)
+  (with-current-buffer buffer
+    (setq-local ratex--minibuffer-visible t)))
+
+(defun ratex--set-window-owner (buffer)
+  "Record BUFFER as the owner of the shared RaTeX window preview."
+  (when (and (buffer-live-p ratex--window-owner-buffer)
+             (not (eq ratex--window-owner-buffer buffer)))
+    (ratex--clear-window-state ratex--window-owner-buffer))
+  (setq ratex--window-owner-buffer buffer)
+  (with-current-buffer buffer
+    (setq-local ratex--window-visible t)))
 
 (defun ratex--set-posframe-owner (buffer fragment override-params)
   "Record BUFFER as the owner of the shared posframe for FRAGMENT."
@@ -61,6 +109,10 @@
   "Reset buffer-local rendering state."
   (when (eq ratex--posframe-owner-buffer (current-buffer))
     (ratex--hide-posframe))
+  (when (eq ratex--minibuffer-owner-buffer (current-buffer))
+    (ratex--hide-minibuffer-preview))
+  (when (eq ratex--window-owner-buffer (current-buffer))
+    (ratex--hide-window-preview))
   (setq-local ratex--render-cache (make-hash-table :test #'equal))
   (setq-local ratex--render-cache-access (make-hash-table :test #'equal))
   (setq-local ratex--inflight-requests (make-hash-table :test #'equal))
@@ -69,10 +121,15 @@
   (setq-local ratex--active-fragment nil)
   (setq-local ratex--posframe-visible nil)
   (setq-local ratex--posframe-fragment nil)
+  (setq-local ratex--minibuffer-visible nil)
+  (setq-local ratex--window-visible nil)
   (setq-local ratex--posframe-last-override-params nil)
   (when (overlayp ratex--edit-source-overlay)
     (delete-overlay ratex--edit-source-overlay))
+  (when (overlayp ratex--edit-preview-overlay)
+    (delete-overlay ratex--edit-preview-overlay))
   (setq-local ratex--edit-source-overlay nil)
+  (setq-local ratex--edit-preview-overlay nil)
   (setq-local ratex--preview-enabled nil)
   (ratex--ensure-cache-gc-timer))
 
@@ -484,16 +541,46 @@ fragments are normalized for preview compatibility when needed."
   "Return active edit preview style or nil."
   ratex-edit-preview)
 
+(defun ratex--yasnippet-active-p ()
+  "Return non-nil when a yasnippet field is currently active."
+  (and (bound-and-true-p yas-minor-mode)
+       (bound-and-true-p yas--active-field-overlay)
+       (overlay-buffer yas--active-field-overlay)))
+
+(defun ratex--ensure-overlay-preview-overlay (fragment)
+  "Return the overlay used for overlay edit previews for FRAGMENT."
+  (let ((pos (save-excursion
+               (goto-char (plist-get fragment :begin))
+               (line-beginning-position))))
+    (unless (overlayp ratex--edit-preview-overlay)
+      (setq-local ratex--edit-preview-overlay (make-overlay pos pos nil t nil))
+      (overlay-put ratex--edit-preview-overlay 'priority 200)
+      (overlay-put ratex--edit-preview-overlay 'ratex-edit-preview t))
+    (move-overlay ratex--edit-preview-overlay pos pos)
+    ratex--edit-preview-overlay))
+
 (defun ratex--display-edit-preview (fragment &optional response image)
   "Display edit preview for FRAGMENT using the configured style.
 
-When `posframe' is selected, always use posframe placement."
+  When `posframe' is selected, use a child frame.
+When `minibuffer' is selected, show the preview in the echo area.
+When `window' is selected, show the preview in a popup window.
+When `overlay' is selected, show the image above the formula in-buffer."
   (pcase (ratex--preview-style)
     ('posframe
      (ratex-debug-log "display-edit-preview style=posframe fragment=%S response=%s image=%s"
                       fragment (not (null response)) (not (null image)))
      (let ((preview-image (or image (and response (ratex--image-from-response response)))))
        (ratex--display-posframe fragment response preview-image)))
+    ('minibuffer
+     (let ((preview-image (or image (and response (ratex--image-from-response response)))))
+       (ratex--display-minibuffer-preview fragment preview-image)))
+    ('window
+     (let ((preview-image (or image (and response (ratex--image-from-response response)))))
+       (ratex--display-window-preview fragment preview-image)))
+    ('overlay
+     (let ((preview-image (or image (and response (ratex--image-from-response response)))))
+       (ratex--display-overlay-preview fragment preview-image)))
     (_ nil)))
 
 (defun ratex--ensure-posframe-loaded ()
@@ -507,6 +594,7 @@ When `posframe' is selected, always use posframe placement."
              (ratex--ensure-posframe-loaded)
              (featurep 'posframe)
              (ratex--point-in-fragment-p fragment))
+    (ratex--hide-window-preview)
     (let ((image (or image (and response (ratex--image-from-response response)))))
       (when image
         (condition-case nil
@@ -543,24 +631,126 @@ When `posframe' is selected, always use posframe placement."
            (ratex-debug-log "posframe failed")
            nil))))))
 
+(defun ratex--display-overlay-preview (fragment image)
+  "Display IMAGE above FRAGMENT using a buffer overlay."
+  (when (and (eq (ratex--preview-style) 'overlay)
+             image
+             (ratex--point-in-fragment-p fragment)
+             (not (ratex--yasnippet-active-p)))
+    (ratex--hide-window-preview)
+    (ratex--hide-minibuffer-preview)
+    (ratex--hide-posframe)
+    (ratex--unmask-edit-source)
+    (let ((ov (ratex--ensure-overlay-preview-overlay fragment)))
+      (overlay-put ov 'before-string
+                   (concat (propertize " " 'display image) "\n"))
+      t)))
+
+(defun ratex--display-minibuffer-preview (fragment image)
+  "Display IMAGE for FRAGMENT in the minibuffer/echo area."
+  (when (and (eq (ratex--preview-style) 'minibuffer)
+             image
+             (ratex--point-in-fragment-p fragment))
+    (ratex--hide-window-preview)
+    (ratex--hide-overlay-preview)
+    (ratex--hide-posframe)
+    (ratex--unmask-edit-source)
+    (let ((msg (propertize " " 'display image)))
+      (setq ratex--minibuffer-owner-buffer (current-buffer))
+      (ratex--set-minibuffer-owner (current-buffer))
+      (message "%s" msg)
+      t)))
+
+(defun ratex--window-display-action ()
+  "Return the `display-buffer' action for RaTeX preview windows."
+  (let ((side ratex-window-side)
+        (size ratex-window-size))
+    (list #'display-buffer-in-side-window
+          (append `((side . ,side)
+                    (slot . -1))
+                  (if (memq side '(left right))
+                      `((window-width . ,size))
+                    `((window-height . ,size)))))))
+
+(defun ratex--window-buffer ()
+  "Return the shared RaTeX popup preview buffer."
+  (get-buffer-create ratex--window-buffer))
+
+(defun ratex--render-window-buffer (image)
+  "Render IMAGE into the shared RaTeX popup preview buffer."
+  (with-current-buffer (ratex--window-buffer)
+    (let ((inhibit-read-only t))
+      (unless (derived-mode-p 'ratex-preview-window-mode)
+        (ratex-preview-window-mode))
+      (erase-buffer)
+      (insert "\n")
+      (insert (propertize " " 'display image))
+      (goto-char (point-min)))
+    (current-buffer)))
+
+(defun ratex--display-window-preview (fragment image)
+  "Display IMAGE for FRAGMENT in a popup side window."
+  (when (and (eq (ratex--preview-style) 'window)
+             image
+             (ratex--point-in-fragment-p fragment))
+    (ratex--hide-minibuffer-preview)
+    (ratex--hide-overlay-preview)
+    (ratex--hide-posframe)
+    (ratex--unmask-edit-source)
+    (let* ((buffer (ratex--render-window-buffer image))
+           (action (ratex--window-display-action))
+           (window (display-buffer buffer action)))
+      (setq ratex--window-owner-buffer (current-buffer))
+      (ratex--set-window-owner (current-buffer))
+      (set-window-dedicated-p window t)
+      (set-window-parameter window 'no-delete-other-windows t)
+      (set-window-parameter window 'mode-line-format 'none)
+      (set-window-parameter window 'window-size-fixed nil)
+      (window-preserve-size window nil (memq ratex-window-side '(top bottom)))
+      t)))
+
+(defun ratex--point-position-relative-to-native-frame (&optional point window)
+  "Return the pixel position of POINT in WINDOW relative to the native frame."
+  (unless point
+    (setq point (window-point window)))
+  (let* ((window (or window (selected-window)))
+         (pos (pos-visible-in-window-p point window t))
+         (x (car pos))
+         (y (cadr pos))
+         (edges (window-edges window nil nil t)))
+    (cons (+ x (car edges) (frame-char-width))
+          (+ y (cadr edges)))))
+
 (defun ratex-posframe-poshandler-point-bottom-left-corner-offset (info)
-  "Position posframe 5px below `posframe-poshandler-point-bottom-left-corner`."
-  (let* ((base (posframe-poshandler-point-bottom-left-corner info))
-         (x (car base))
-         (y (cdr base)))
-    (cons x (+ y ratex--posframe-offset-y))))
+  "Position posframe below point with a small gap from the cursor."
+  (let* ((point-pos (ratex--point-position-relative-to-native-frame))
+         (x (+ (car point-pos) ratex--posframe-gap-x))
+         (y (+ (cdr point-pos) (frame-char-height) ratex--posframe-gap-y))
+         (width (or (plist-get info :posframe-width) 0))
+         (max-x (max 0 (- (frame-inner-width) width ratex--posframe-gap-x))))
+    (cons (min x max-x) y)))
 
 (defun ratex-posframe-poshandler-point-top-left-corner-offset (info)
-  "Position posframe above point, falling back to below when near screen top."
-  (let* ((above-base (posframe-poshandler-point-top-left-corner info))
-         (above-y (- (cdr above-base) ratex--posframe-offset-y))
-         (posframe-h (or (plist-get info :posframe-height) 0)))
-    (if (>= (- above-y posframe-h) 0)
-        (cons (car above-base) above-y)
-      ;; Not enough room above — place below the cursor instead.
-      (let* ((below-base (posframe-poshandler-point-bottom-left-corner info))
-             (below-y (+ (cdr below-base) ratex--posframe-display-offset-y)))
-        (cons (car below-base) below-y)))))
+  "Position posframe above point, falling back below when needed.
+
+This follows eldoc-box's at-point strategy more closely than the stock
+posframe handlers: compute point's pixel position in the native frame, keep
+the preview inside frame bounds, and leave a small gap so it doesn't cover
+the cursor."
+  (let* ((point-pos (ratex--point-position-relative-to-native-frame))
+         (raw-x (+ (car point-pos) ratex--posframe-gap-x))
+         (raw-y (cdr point-pos))
+         (em (frame-char-height))
+         (width (or (plist-get info :posframe-width) 0))
+         (height (or (plist-get info :posframe-height) 0))
+         (x (if (< (- (frame-inner-width) width) raw-x)
+                (max 0 (- (frame-inner-width) width ratex--posframe-gap-x))
+              raw-x))
+         (y (if (< (- raw-y ratex--posframe-gap-y) height)
+                (min (max 0 (- (frame-inner-height) height))
+                     (+ raw-y em ratex--posframe-gap-y))
+              (max 0 (- raw-y height ratex--posframe-gap-y)))))
+    (cons x y)))
 
 (defun ratex--display-fragment-p (fragment)
   "Return non-nil when FRAGMENT should use display-style popup placement."
@@ -580,10 +770,8 @@ When `posframe' is selected, always use posframe placement."
 
 (defun ratex--posframe-poshandler-for-fragment (fragment)
   "Return the best posframe poshandler for FRAGMENT."
-  (if (ratex--display-fragment-p fragment)
-      #'ratex-posframe-poshandler-point-bottom-left-corner-upward-offset
-    (or ratex-posframe-poshandler
-        #'ratex-posframe-poshandler-point-bottom-left-corner-offset)))
+  (or ratex-posframe-poshandler
+      #'ratex-posframe-poshandler-point-top-left-corner-offset))
 
 (defun ratex--hide-posframe ()
   "Hide the posframe preview."
@@ -598,8 +786,35 @@ When `posframe' is selected, always use posframe placement."
     (ratex--clear-posframe-state))
   (ratex--unmask-edit-source))
 
+(defun ratex--hide-minibuffer-preview ()
+  "Hide the minibuffer/echo-area preview."
+  (when (buffer-live-p ratex--minibuffer-owner-buffer)
+    (with-current-buffer ratex--minibuffer-owner-buffer
+      (ratex--clear-minibuffer-state)))
+  (setq ratex--minibuffer-owner-buffer nil)
+  (message nil))
+
+(defun ratex--hide-window-preview ()
+  "Hide the popup window preview."
+  (when (buffer-live-p ratex--window-owner-buffer)
+    (with-current-buffer ratex--window-owner-buffer
+      (ratex--clear-window-state)))
+  (setq ratex--window-owner-buffer nil)
+  (when-let* ((buffer (get-buffer ratex--window-buffer))
+              (window (get-buffer-window buffer t)))
+    (ignore-errors (delete-window window))))
+
+(defun ratex--hide-overlay-preview ()
+  "Hide the in-buffer overlay preview."
+  (when (overlayp ratex--edit-preview-overlay)
+    (delete-overlay ratex--edit-preview-overlay))
+  (setq-local ratex--edit-preview-overlay nil))
+
 (defun ratex--hide-edit-preview ()
-  "Hide the posframe edit preview."
+  "Hide the active edit preview."
+  (ratex--hide-overlay-preview)
+  (ratex--hide-window-preview)
+  (ratex--hide-minibuffer-preview)
   (ratex--hide-posframe)
   (ratex--unmask-edit-source))
 

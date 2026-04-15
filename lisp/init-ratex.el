@@ -33,12 +33,12 @@
 (defvar ratex-render-color)
 (defvar-local ratex-mode)
 (defvar-local ratex--active-fragment)
-(defvar-local my/ratex-preview-timer     nil)
-(defvar-local my/ratex--initialized     nil)
+(defvar-local my/ratex-preview-timer      nil)
+(defvar-local my/ratex--initialized      nil)
 (defvar-local my/ratex--tracking-enabled nil)
-(defvar-local my/ratex--last-point      nil
+(defvar-local my/ratex--last-point       nil
   "Point position recorded when the last preview timer was scheduled.")
-(defvar-local my/ratex--last-tick       nil
+(defvar-local my/ratex--last-tick        nil
   "Buffer modification tick recorded when the last preview timer was scheduled.")
 
 (defcustom my/ratex-evil-insert-only t
@@ -46,10 +46,17 @@
   :type 'boolean)
 
 (defcustom my/ratex-preview-style 'posframe
-  "Preview UI used for RaTeX edit previews in conservative mode."
-  :type '(choice (const :tag "Disable" nil)
-                 (const :tag "Minibuffer" minibuffer)
-                 (const :tag "Posframe" posframe)))
+  "Preview UI used for RaTeX edit previews in conservative mode.
+\\='minibuffer shows the rendered image in the echo area without moving buffer text.
+\\='window shows the rendered image in a popup side window.
+\\='overlay shows the rendered image above the formula using a buffer overlay.
+\\='posframe uses a floating child frame.
+nil disables the edit-time popup."
+  :type '(choice (const :tag "Posframe"               posframe)
+                 (const :tag "Minibuffer / echo area"   minibuffer)
+                 (const :tag "Popup side window"        window)
+                 (const :tag "Overlay above formula"    overlay)
+                 (const :tag "Disable"                nil)))
 
 (defcustom my/ratex-preview-idle-delay 0.15
   "Seconds of idle time before running RaTeX preview updates."
@@ -238,8 +245,11 @@ When all guards pass and state has changed: cancel old timer, reschedule."
       (ratex-mode 1))
     (unless my/ratex--initialized
       (setq-local my/ratex--initialized t)
-      (add-hook 'change-major-mode-hook #'my/ratex-hide-preview-now nil t)
-      (add-hook 'kill-buffer-hook #'my/ratex-hide-preview-now nil t))
+      (add-hook 'change-major-mode-hook   #'my/ratex-hide-preview-now    nil t)
+      (add-hook 'kill-buffer-hook         #'my/ratex-hide-preview-now    nil t)
+      ;; Clear the overlay the moment a yasnippet expansion starts so the
+      ;; image never pushes snippet fields off-screen.
+      (add-hook 'yas-before-expand-snippet-hook #'my/ratex-hide-preview-now nil t))
     ;; `ratex-mode' enables tracking eagerly. We only want it while previews
     ;; should actually be active, otherwise Org insert latency suffers.
     (my/ratex-disable-post-command-tracking)
@@ -278,8 +288,8 @@ When all guards pass and state has changed: cancel old timer, reschedule."
          (docTeX-mode . my/org-ratex-enable)))
 
 (with-eval-after-load 'ratex-render
-  (advice-add 'ratex-handle-buffer-switch :around #'my/ratex-handle-buffer-switch)
-  (advice-add 'ratex-handle-post-command :around #'my/ratex--debounced-post-command))
+  (advice-add 'ratex-handle-buffer-switch   :around #'my/ratex-handle-buffer-switch)
+  (advice-add 'ratex-handle-post-command    :around #'my/ratex--debounced-post-command))
 
 ;; Only hook insert-state entry/exit.  Normal → visual → motion → replace
 ;; transitions do not change tracking eligibility (all are non-insert), so
