@@ -18,6 +18,10 @@
 (defvar ratex-inline-preview)
 (defvar ratex-font-dir)
 (defvar ratex-hide-source-while-preview)
+(defvar ratex-initial-render-scope)
+(defvar ratex-visible-region-margin)
+(defvar ratex-max-fragment-length)
+(defvar ratex-max-svg-chars)
 (defvar ratex-render-cache-limit)
 (defvar ratex-render-cache-ttl)
 (defvar ratex-posframe-background-color)
@@ -119,13 +123,42 @@ currently under point."
       (dolist (fragment targets)
         (ratex--ensure-fragment-preview fragment)))))
 
+(defun ratex--window-visible-range (&optional window)
+  "Return `(BEG . END)' for the visible portion of WINDOW in the current buffer."
+  (when-let* ((window (or window (get-buffer-window (current-buffer) t))))
+    (let ((beg (window-start window))
+          (end (window-end window t)))
+      (when (and beg end)
+        (save-excursion
+          (goto-char beg)
+          (forward-line (- ratex-visible-region-margin))
+          (setq beg (line-beginning-position))
+          (goto-char end)
+          (forward-line ratex-visible-region-margin)
+          (setq end (line-end-position))
+          (cons beg end))))))
+
+(defun ratex--initial-fragments ()
+  "Return fragments to render for initial inline preview."
+  (pcase ratex-initial-render-scope
+    ('all
+     (ratex-fragments-in-buffer))
+    (_
+     (if-let* ((range (ratex--window-visible-range)))
+         (ratex-fragments-in-region (car range) (cdr range))
+       (ratex-fragments-in-buffer)))))
+
 (defun ratex-initialize-previews ()
   "Render all formulas once and initialize point tracking."
   (setq ratex--preview-enabled (and (ratex--preview-style) t))
   (setq ratex--active-fragment (ratex-fragment-at-point))
   (if ratex-inline-preview
       (progn
-        (ratex-refresh-previews t)
+        (let* ((fragments (ratex--initial-fragments))
+               (target-keys (mapcar #'ratex--fragment-key fragments)))
+          (ratex--drop-stale-overlays target-keys)
+          (dolist (fragment fragments)
+            (ratex--ensure-fragment-preview fragment)))
         (when ratex--active-fragment
           (ratex-remove-overlay (ratex--fragment-key ratex--active-fragment))))
     (ratex-clear-overlays)
@@ -264,7 +297,9 @@ currently under point."
   (let* ((svg (alist-get 'svg response))
          (baseline (or (alist-get 'baseline response) 0.0))
          (height (max 0.001 (or (alist-get 'height response) 0.0))))
-    (when svg
+    (when (and (stringp svg)
+               (or (null ratex-max-svg-chars)
+                   (<= (length svg) ratex-max-svg-chars)))
       (create-image
        svg
        'svg t
@@ -429,6 +464,14 @@ fragments are normalized for preview compatibility when needed."
       (unless (gethash key keep)
         (ratex-remove-overlay key)))))
 
+(defun ratex--fragment-renderable-p (fragment)
+  "Return non-nil when FRAGMENT is safe to send to the backend."
+  (let ((content (plist-get fragment :content)))
+    (and (ratex--fragment-valid-p fragment)
+         (or (null ratex-max-fragment-length)
+             (not (stringp content))
+             (<= (length content) ratex-max-fragment-length)))))
+
 (defun ratex--render-payload (fragment)
   "Build the render request payload for FRAGMENT."
   (let ((payload
@@ -454,7 +497,7 @@ fragments are normalized for preview compatibility when needed."
          (cached (ratex--cache-get cache-key))
          (inflight (gethash cache-key (ratex--inflight-table))))
     (cond
-     ((not (ratex--fragment-valid-p fragment))
+     ((not (ratex--fragment-renderable-p fragment))
       (ratex-remove-overlay fragment-key))
      (cached
       (ratex--display-response fragment-key fragment cached))
@@ -469,8 +512,8 @@ fragments are normalized for preview compatibility when needed."
          (remhash cache-key (ratex--inflight-table))
          (let ((waiters (gethash cache-key (ratex--inflight-waiters-table))))
            (remhash cache-key (ratex--inflight-waiters-table))
-      (when (alist-get 'ok response)
-        (ratex--cache-put cache-key response))
+           (when (alist-get 'ok response)
+             (ratex--cache-put cache-key response))
            (when ratex-mode
              (dolist (entry waiters)
                (ratex--display-if-visible
@@ -507,22 +550,25 @@ fragments are normalized for preview compatibility when needed."
           (message "RaTeX render failed: %s" ratex--last-error)))
     (let ((image (ratex--image-from-response response)))
       (setq ratex--last-error nil)
-      (if (and (ratex--preview-enabled-p)
+      (if (not image)
+          (ratex-remove-overlay fragment-key)
+        (cond
+         ((and (ratex--preview-enabled-p)
                (ratex--point-in-fragment-p fragment))
-          (progn
-            (ratex-remove-overlay fragment-key)
-            (unless (ratex--preview-current-fragment-p fragment)
-              (ratex--display-edit-preview fragment response image)))
-        (if ratex-inline-preview
-            (ratex-show-overlay
-             fragment-key
-             (plist-get fragment :begin)
-             (plist-get fragment :end)
-             image
-             (format "RaTeX %s" (if (alist-get 'cached response) "cached" "rendered"))
-             fragment
-             (or style 'inline))
-          (ratex-remove-overlay fragment-key)))))) 
+          (ratex-remove-overlay fragment-key)
+          (unless (ratex--preview-current-fragment-p fragment)
+            (ratex--display-edit-preview fragment response image)))
+         (ratex-inline-preview
+          (ratex-show-overlay
+           fragment-key
+           (plist-get fragment :begin)
+           (plist-get fragment :end)
+           image
+           (format "RaTeX %s" (if (alist-get 'cached response) "cached" "rendered"))
+           fragment
+           (or style 'inline)))
+         (t
+          (ratex-remove-overlay fragment-key)))))))
 
 
 

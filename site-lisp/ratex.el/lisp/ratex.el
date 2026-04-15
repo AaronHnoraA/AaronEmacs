@@ -15,17 +15,6 @@
 (require 'ratex-render)
 
 (declare-function evil-insert-state-p "evil")
-(declare-function my/org-latex-cleanup-scroll-preview "init-org-latex")
-(declare-function my/org-latex-enable-scroll-preview "init-org-latex")
-
-(defvar org-fragtog-mode)
-
-(defvar my/org-latex--allow-native-preview)
-(defvar my/org-latex--external-preview-active)
-(defvar-local ratex--saved-org-native-preview nil)
-(defvar-local ratex--saved-org-external-preview nil)
-(defvar-local ratex--saved-org-scroll-preview nil)
-(defvar-local ratex--saved-org-fragtog-mode nil)
 
 (defun ratex--supported-buffer-p ()
   "Return non-nil when the current buffer should enable RaTeX."
@@ -39,42 +28,13 @@
                   'docTeX-mode
                   'markdown-mode))
 
-(defun ratex--prepare-org-preview-integration ()
-  "Adjust Org preview integration for the current buffer."
-  (when (derived-mode-p 'org-mode)
-    (when (and ratex-org-disable-native-preview
-               (boundp 'my/org-latex--allow-native-preview))
-      (setq-local ratex--saved-org-native-preview my/org-latex--allow-native-preview)
-      (setq-local my/org-latex--allow-native-preview nil))
-    (when (boundp 'my/org-latex--external-preview-active)
-      (setq-local ratex--saved-org-external-preview my/org-latex--external-preview-active)
-      (setq-local my/org-latex--external-preview-active t))
-    (when (boundp 'my/org-latex--scroll-preview-enabled)
-      (setq-local ratex--saved-org-scroll-preview my/org-latex--scroll-preview-enabled))
-    (when (fboundp 'my/org-latex-cleanup-scroll-preview)
-      (my/org-latex-cleanup-scroll-preview))
-    (when (bound-and-true-p org-fragtog-mode)
-      (setq-local ratex--saved-org-fragtog-mode t)
-      (org-fragtog-mode -1))))
-
-(defun ratex--restore-org-preview-integration ()
-  "Restore Org preview integration state for the current buffer."
-  (when (derived-mode-p 'org-mode)
-    (when (boundp 'my/org-latex--allow-native-preview)
-      (setq-local my/org-latex--allow-native-preview ratex--saved-org-native-preview))
-    (when (boundp 'my/org-latex--external-preview-active)
-      (setq-local my/org-latex--external-preview-active
-                  ratex--saved-org-external-preview))
-    (when (and ratex--saved-org-scroll-preview
-               (fboundp 'my/org-latex-enable-scroll-preview))
-      (my/org-latex-enable-scroll-preview))
-    (when (and ratex--saved-org-fragtog-mode
-               (fboundp 'org-fragtog-mode))
-      (org-fragtog-mode 1))
-    (kill-local-variable 'ratex--saved-org-native-preview)
-    (kill-local-variable 'ratex--saved-org-external-preview)
-    (kill-local-variable 'ratex--saved-org-scroll-preview)
-    (kill-local-variable 'ratex--saved-org-fragtog-mode)))
+(defun ratex--disable-current-buffer ()
+  "Tear down RaTeX state in the current buffer without changing `ratex-mode'."
+  (remove-hook 'post-command-hook #'ratex-post-command t)
+  (remove-hook 'buffer-list-update-hook #'ratex-handle-buffer-switch)
+  (ratex-handle-buffer-switch)
+  (ratex-clear-overlays)
+  (ratex-reset-buffer-state))
 
 (defun ratex-sync-evil-state ()
   "Refresh edit preview visibility after an Evil state transition."
@@ -91,20 +51,24 @@
   "Minor mode for inline math previews powered by RaTeX."
   :lighter " RaTeX"
   (if ratex-mode
-      (progn
-        (ratex--prepare-org-preview-integration)
-        (ratex-reset-buffer-state)
-        (add-hook 'post-command-hook #'ratex-post-command nil t)
-        (add-hook 'buffer-list-update-hook #'ratex-handle-buffer-switch)
-        (ratex-start-backend)
-        (ratex-initialize-previews)
-        (ratex-sync-evil-state))
-    (remove-hook 'post-command-hook #'ratex-post-command t)
-    (remove-hook 'buffer-list-update-hook #'ratex-handle-buffer-switch)
-    (ratex-handle-buffer-switch)
-    (ratex-clear-overlays)
-    (ratex-reset-buffer-state)
-    (ratex--restore-org-preview-integration)))
+      (condition-case err
+          (progn
+            (ratex-reset-buffer-state)
+            (add-hook 'post-command-hook #'ratex-post-command nil t)
+            (add-hook 'buffer-list-update-hook #'ratex-handle-buffer-switch)
+            (ratex-start-backend)
+            (ratex-initialize-previews)
+            (ratex-sync-evil-state))
+        (error
+         (ratex--disable-current-buffer)
+         (setq ratex-mode nil)
+         (display-warning
+          'ratex
+          (format "RaTeX failed to enable in %s: %s"
+                  (buffer-name)
+                  (error-message-string err))
+          :warning)))
+    (ratex--disable-current-buffer)))
 
 
 ;;;###autoload
@@ -133,7 +97,8 @@
 (defun ratex-turn-on ()
   "Enable `ratex-mode' in buffers that RaTeX supports."
   (when (and (display-graphic-p)
-             (ratex--supported-buffer-p))
+             (ratex--supported-buffer-p)
+             (not (file-remote-p default-directory)))
     (ratex-mode 1)))
 
 (with-eval-after-load 'evil

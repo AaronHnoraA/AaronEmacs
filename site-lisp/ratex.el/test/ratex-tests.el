@@ -288,6 +288,13 @@
       (should (equal (mapcar (lambda (f) (plist-get f :content)) fragments)
                      '("x" "y+1"))))))
 
+(ert-deftest ratex-fragments-in-region-stays-local ()
+  (with-temp-buffer
+    (insert "a \\(x\\)\n\nb \\[y+1\\] c")
+    (let ((fragments (ratex-fragments-in-region 1 8)))
+      (should (= (length fragments) 1))
+      (should (equal (plist-get (car fragments) :content) "x")))))
+
 (ert-deftest ratex-render-cache-trims-oldest-entries ()
   (with-temp-buffer
     (ratex-reset-buffer-state)
@@ -398,21 +405,60 @@
     (should (equal (ratex--render-latex fragment)
                    "\\begin{align*} x &= y \\end{align*}"))))
 
-(ert-deftest ratex-initialize-previews-renders-all-then-hides-active ()
+(ert-deftest ratex-initialize-previews-renders-initial-fragments-then-hides-active ()
   (with-temp-buffer
     (insert "a \\(x\\) b")
     (goto-char 5)
-    (let (include-active removed-key)
-      (cl-letf (((symbol-function 'ratex-refresh-previews)
-                 (lambda (&optional include)
-                   (setq include-active include)))
+    (let (rendered removed-key)
+      (cl-letf (((symbol-function 'ratex--initial-fragments)
+                 (lambda ()
+                   (list (list :begin 3 :end 8 :content "x" :open "\\(" :close "\\)"))))
+                ((symbol-function 'ratex--drop-stale-overlays)
+                 (lambda (_keys) nil))
+                ((symbol-function 'ratex--ensure-fragment-preview)
+                 (lambda (fragment)
+                   (push (plist-get fragment :content) rendered)))
                 ((symbol-function 'ratex-remove-overlay)
                  (lambda (key)
                    (setq removed-key key))))
+        (setq-local ratex-inline-preview t)
         (ratex-initialize-previews)
-        (should include-active)
+        (should (equal rendered '("x")))
         (should (equal removed-key "3:8:x"))
         (should (equal (plist-get ratex--active-fragment :content) "x"))))))
+
+(ert-deftest ratex-initialize-previews-prefers-visible-scope ()
+  (with-temp-buffer
+    (insert "a \\(x\\) b")
+    (let (rendered)
+      (cl-letf (((symbol-function 'ratex--window-visible-range)
+                 (lambda (&optional _window)
+                   '(1 . 8)))
+                ((symbol-function 'ratex--drop-stale-overlays)
+                 (lambda (_keys) nil))
+                ((symbol-function 'ratex--ensure-fragment-preview)
+                 (lambda (fragment)
+                   (push (plist-get fragment :content) rendered))))
+        (setq-local ratex-inline-preview t)
+        (setq-local ratex-initial-render-scope 'visible)
+        (ratex-initialize-previews)
+        (should (equal rendered '("x")))))))
+
+(ert-deftest ratex-fragment-renderable-p-rejects-oversized-fragments ()
+  (let ((ratex-max-fragment-length 3))
+    (with-temp-buffer
+      (insert "\\(abcd\\)")
+      (goto-char 4)
+      (let ((fragment (ratex-fragment-at-point)))
+        (should-not (ratex--fragment-renderable-p fragment))))))
+
+(ert-deftest ratex-image-from-response-rejects-oversized-svg ()
+  (let ((ratex-max-svg-chars 8))
+    (should-not
+     (ratex--image-from-response
+      '((svg . "<svg>0123456789</svg>")
+        (baseline . 1.0)
+        (height . 1.0))))))
 
 (ert-deftest ratex-post-command-hides-on-enter-and-renders-on-leave ()
   (with-temp-buffer

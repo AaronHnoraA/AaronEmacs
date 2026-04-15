@@ -464,7 +464,6 @@ Each value may be a readable `.cls' file path or literal class source."
 (defvar-local my/org-latex--edit-preview-marker nil)
 (defvar-local my/org-latex--post-command-point nil)
 (defvar-local my/org-latex--scroll-preview-enabled nil)
-(defvar-local my/org-latex--external-preview-active nil)
 (defvar my/org-latex--allow-native-preview nil)
 
 (defun my/org-latex--current-fragment (&optional pos)
@@ -508,8 +507,7 @@ Each value may be a readable `.cls' file path or literal class source."
   "Return non-nil when Org async LaTeX preview should be used here."
   (and (derived-mode-p 'org-mode)
        (display-graphic-p)
-       (not my/org-latex--allow-native-preview)
-       (not my/org-latex--external-preview-active)))
+       (not my/org-latex--allow-native-preview)))
 
 (defun my/org-latex--buffer-visible-p (&optional buffer)
   "Return non-nil when BUFFER is displayed in a live window."
@@ -1062,11 +1060,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   (if (or my/org-latex--allow-native-preview
           (not (derived-mode-p 'org-mode)))
       (funcall orig arg)
-    (if my/org-latex--external-preview-active
-        (progn
-          (my/org-latex-cancel-pending-renders)
-          nil)
-      (my/org-latex-preview-command arg))))
+    (my/org-latex-preview-command arg)))
 
 (defun my/org-latex-preview-visible-now (&optional window)
   "Preview visible Org LaTeX fragments asynchronously in WINDOW."

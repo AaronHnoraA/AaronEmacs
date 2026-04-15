@@ -41,6 +41,19 @@
     (setq all (nconc all (ratex--environment-fragments-in-buffer)))
     (ratex--select-non-overlapping-fragments (nconc org-fragments all))))
 
+(defun ratex-fragments-in-region (beg end)
+  "Return math fragments intersecting BEG..END in the current buffer.
+
+This regional scan intentionally avoids Org's full-buffer parser so repeated
+startup and refresh work stays local to what is on screen."
+  (save-restriction
+    (narrow-to-region beg end)
+    (let (all)
+      (dolist (pair ratex--delimiter-pairs)
+        (setq all (nconc all (ratex--fragments-with-delimiters (car pair) (cdr pair)))))
+      (setq all (nconc all (ratex--environment-fragments-in-buffer)))
+      (ratex--select-non-overlapping-fragments all))))
+
 (defun ratex-fragment-at-point ()
   "Return the math fragment around point as a plist.
 

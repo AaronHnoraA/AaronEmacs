@@ -96,6 +96,30 @@ When nil, RaTeX only shows the edit preview UI selected by
 `ratex-edit-preview' and does not place persistent inline overlays."
   :type 'boolean)
 
+(defcustom ratex-initial-render-scope 'visible
+  "Initial inline preview scope when `ratex-mode' starts.
+
+`visible' limits the initial render pass to the selected window's visible
+region plus a small margin. `all' renders every detected fragment."
+  :type '(choice (const :tag "Visible region" visible)
+                 (const :tag "Whole buffer" all)))
+
+(defcustom ratex-visible-region-margin 2
+  "Extra lines above and below the visible window to include in initial scans."
+  :type 'natnum)
+
+(defcustom ratex-max-fragment-length 1200
+  "Maximum source length of a single fragment RaTeX will send to the backend.
+
+Longer fragments are skipped to protect interactive editing responsiveness."
+  :type '(choice (const :tag "No limit" nil)
+                 natnum))
+
+(defcustom ratex-max-svg-chars 400000
+  "Maximum SVG payload size accepted from the backend for one preview."
+  :type '(choice (const :tag "No limit" nil)
+                 natnum))
+
 (defcustom ratex-render-color nil
   "Default formula color sent to backend rendering.
 
