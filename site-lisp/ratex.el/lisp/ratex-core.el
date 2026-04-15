@@ -55,6 +55,25 @@ Set this explicitly if the backend cannot locate fonts automatically."
   :type '(choice (const :tag "Auto detect" nil)
                  directory))
 
+(defcustom ratex-edit-preview-idle-delay 0.18
+  "Seconds of idle time before updating the active edit preview."
+  :type 'number)
+
+(defcustom ratex-edit-preview-scan-lines 4
+  "Lines above and below point to scan for math delimiters before previewing.
+
+This cheap regexp scan avoids running full fragment detection when point is
+clearly far away from any math block."
+  :type 'natnum)
+
+(defcustom ratex-edit-preview-evil-insert-only t
+  "When non-nil, only show floating edit previews in Evil insert state."
+  :type 'boolean)
+
+(defcustom ratex-org-disable-native-preview t
+  "When non-nil, disable the local Org native preview pipeline while `ratex-mode' is active."
+  :type 'boolean)
+
 (defcustom ratex-font-size 16.0
   "Default backend SVG font size."
   :type 'number)
@@ -66,15 +85,9 @@ Set this explicitly if the backend cannot locate fonts automatically."
 (defcustom ratex-edit-preview nil
   "Preview style used while editing formulas.
 
-Set to nil to disable edit previews, `posframe' to show a floating preview,
-`overlay' to show the preview above the formula in the current buffer, or
-`minibuffer' to show the preview in the minibuffer, or `window' to show
-the preview in a dedicated popup window."
+Set to nil to disable edit previews, or `posframe' to show a floating preview."
   :type '(choice (const :tag "Disable" nil)
-                 (const :tag "Posframe" posframe)
-                 (const :tag "Overlay above formula" overlay)
-                 (const :tag "Minibuffer" minibuffer)
-                 (const :tag "Popup window" window)))
+                 (const :tag "Posframe" posframe)))
 
 (defcustom ratex-inline-preview t
   "Whether RaTeX should keep rendered inline overlays in the buffer.
@@ -106,23 +119,17 @@ The default prefers showing the preview above point and falls back below
 when there isn't enough space, similar to eldoc-box's at-point behavior."
   :type 'function)
 
+(defcustom ratex-posframe-max-pixel-width 720
+  "Maximum width of the RaTeX posframe in pixels."
+  :type 'integer)
+
+(defcustom ratex-posframe-max-pixel-height 420
+  "Maximum height of the RaTeX posframe in pixels."
+  :type 'integer)
+
 (defcustom ratex-hide-source-while-preview nil
   "Whether to hide the source text while the edit preview is visible."
   :type 'boolean)
-
-(defcustom ratex-window-side 'right
-  "Side used for the RaTeX popup preview window."
-  :type '(choice (const :tag "Bottom" bottom)
-                 (const :tag "Right" right)
-                 (const :tag "Top" top)
-                 (const :tag "Left" left)))
-
-(defcustom ratex-window-size 0.22
-  "Size of the RaTeX popup preview window.
-
-For top/bottom windows, this is the window height ratio.  For left/right
-windows, it is the window width ratio."
-  :type 'number)
 
 (defcustom ratex-debug nil
   "When non-nil, append runtime diagnostics to the RaTeX debug buffer."
@@ -190,6 +197,12 @@ windows, it is the window width ratio."
            (file-name-as-directory (expand-file-name ratex-backend-root)))
       (ratex--discover-root)
       (error "Could not determine ratex.el root; set `ratex-backend-root'")))
+
+(defun ratex-default-font-dir ()
+  "Return the bundled KaTeX font directory when it exists, else nil."
+  (let ((dir (expand-file-name "vendor/ratex-core/fonts" (ratex-root))))
+    (when (file-directory-p dir)
+      dir)))
 
 (defun ratex-backend-live-p ()
   "Return non-nil when the backend process is alive."
