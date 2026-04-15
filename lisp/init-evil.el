@@ -162,6 +162,17 @@
     (if (bound-and-true-p evil-local-mode)
         (evil-save-state (apply fn args))
       (apply fn args)))
+  (dolist (mode '(ibuffer-mode
+                  my/diagnostics-mode
+                  my/language-server-manager-mode
+                  my/language-server-doctor-mode
+                  my/jupyter-manager-mode
+                  my/jupyter-doctor-mode
+                  my/compile-board-mode
+                  my/health-mode
+                  my/bookmark-list-mode))
+    (evil-set-initial-state mode 'normal))
+  (add-to-list 'evil-buffer-regexps '("^\\*Appine Window\\*$" . nil))
   (add-to-list 'evil-buffer-regexps '("^\\*vterm.*\\*$" . nil))
   ;; Silence line out of range error.
   (shut-up! #'evil-indent)

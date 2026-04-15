@@ -66,9 +66,17 @@
   :custom
   (diff-hl-update-async t))
 
+(defvar my/git-ui--face-theme-signature nil
+  "Last theme signature applied by `my/git-apply-ui'.")
+
 (defun my/git-apply-ui ()
   "Apply local diff indicator faces."
   (when (display-graphic-p)
+    (let ((signature (list custom-enabled-themes
+                           (face-attribute 'default :background nil t)
+                           (face-attribute 'default :foreground nil t))))
+      (unless (equal signature my/git-ui--face-theme-signature)
+        (setq my/git-ui--face-theme-signature signature)
     (when (facep 'magit-section-heading)
       (set-face-attribute 'magit-section-heading nil
                           :foreground "#a9bed3"
@@ -117,7 +125,7 @@
     (when (facep 'diff-hl-change)
       (set-face-attribute 'diff-hl-change nil :foreground "#8aa6c1" :background "#8aa6c1"))
     (when (facep 'diff-hl-delete)
-      (set-face-attribute 'diff-hl-delete nil :foreground "#bf7f7f" :background "#bf7f7f"))))
+      (set-face-attribute 'diff-hl-delete nil :foreground "#bf7f7f" :background "#bf7f7f"))))))
 
 (add-hook 'after-init-hook #'my/git-apply-ui)
 (add-hook 'server-after-make-frame-hook #'my/git-apply-ui)

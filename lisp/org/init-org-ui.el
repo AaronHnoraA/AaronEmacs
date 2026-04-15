@@ -10,6 +10,11 @@
 (require 'init-org-core)
 (require 'org-element)
 
+(defvar-local my/org--olivetti-auto-state nil)
+(defvar-local my/org-pretty-block-cache nil)
+(defvar my/org-ui--face-theme-signature nil)
+(defvar my/org--olivetti-sync-timer nil)
+
 (defun my/org-enable-valign-maybe ()
   "Enable `valign-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
@@ -40,13 +45,32 @@
   :config
   (defun xs-toggle-olivetti-for-org ()
     "If current buffer is Org and only one window is visible, enable olivetti."
-    (if (and (eq (length (window-list nil nil nil)) 1)
-             (derived-mode-p 'org-mode))
-        (olivetti-mode 1)
-      (olivetti-mode 0)))
+    (let ((desired (and (derived-mode-p 'org-mode)
+                        (eq (length (window-list nil nil nil)) 1))))
+      (unless (eq desired my/org--olivetti-auto-state)
+        (setq-local my/org--olivetti-auto-state desired)
+        (if desired
+            (olivetti-mode 1)
+          (when (bound-and-true-p olivetti-mode)
+            (olivetti-mode 0))))))
+
+  (defun my/org-sync-visible-olivetti-buffers ()
+    "Synchronize Olivetti state for visible Org buffers."
+    (setq my/org--olivetti-sync-timer nil)
+    (dolist (window (window-list nil 'no-minibuf))
+      (when-let* ((buffer (window-buffer window)))
+        (with-current-buffer buffer
+          (when (derived-mode-p 'org-mode)
+            (xs-toggle-olivetti-for-org))))))
+
+  (defun my/org-schedule-olivetti-sync (&rest _)
+    "Coalesce repeated window changes before syncing Org Olivetti state."
+    (unless (timerp my/org--olivetti-sync-timer)
+      (setq my/org--olivetti-sync-timer
+            (run-with-idle-timer 0.05 nil #'my/org-sync-visible-olivetti-buffers))))
   
   (add-hook 'org-mode-hook #'xs-toggle-olivetti-for-org)
-  (add-hook 'window-configuration-change-hook #'xs-toggle-olivetti-for-org))
+  (add-hook 'window-configuration-change-hook #'my/org-schedule-olivetti-sync))
 
 ;; 3.2 表格对齐
 (use-package valign
@@ -115,6 +139,11 @@
 (defun my/org-apply-ui ()
   "Apply the local document UI to Org and Org Modern faces."
   (when (display-graphic-p)
+    (let ((signature (list custom-enabled-themes
+                           (face-attribute 'default :background nil t)
+                           (face-attribute 'default :foreground nil t))))
+      (unless (equal signature my/org-ui--face-theme-signature)
+        (setq my/org-ui--face-theme-signature signature)
     (when (facep 'org-document-title)
       (set-face-attribute 'org-document-title nil
                           :foreground "#f6f1df"
@@ -216,7 +245,7 @@
     (when (facep 'org-modern-progress-complete)
       (set-face-attribute 'org-modern-progress-complete nil :foreground "#9ed0a4"))
     (when (facep 'org-modern-progress-incomplete)
-      (set-face-attribute 'org-modern-progress-incomplete nil :foreground "#66728a"))))
+      (set-face-attribute 'org-modern-progress-incomplete nil :foreground "#66728a"))))))
 
 (add-hook 'org-mode-hook #'my/org-apply-ui)
 (add-hook 'after-load-theme-hook #'my/org-apply-ui)
@@ -318,7 +347,22 @@
              (header-bg (my/org-blend-colors base-color default-bg 0.13))
              (body-bg (my/org-blend-colors base-color default-bg 0.045))
              (footer-color (my/org-blend-colors base-color default-bg 0.62))
-             (params-color (my/org-blend-colors "#d8dee9" default-bg 0.68)))
+             (params-color (my/org-blend-colors "#d8dee9" default-bg 0.68))
+             (signature (list type begin-pos end-pos contents-begin contents-end
+                              post-affiliated params default-bg))
+             (cached-signature (and (hash-table-p my/org-pretty-block-cache)
+                                    (gethash begin-pos my/org-pretty-block-cache)))
+             (already-rendered
+              (cl-some
+               (lambda (ov)
+                 (overlay-get ov 'my/org-pretty-block))
+               (overlays-in begin-pos (min end-pos (1+ begin-pos))))))
+
+        (unless (and already-rendered
+                     (equal signature cached-signature))
+          (unless (hash-table-p my/org-pretty-block-cache)
+            (setq my/org-pretty-block-cache (make-hash-table :test #'equal)))
+          (puthash begin-pos signature my/org-pretty-block-cache)
 
         ;; 3. 清理区域
         (remove-overlays begin-pos end-pos 'my/org-pretty-block t)
@@ -370,7 +414,7 @@
               (overlay-put ov 'display 
                            (propertize "╰────────────────────────"
                                        'face `(:foreground ,footer-color :height 0.8)))
-              (overlay-put ov 'evaporate t))))))))
+              (overlay-put ov 'evaporate t)))))))))
 
 ;; ===========================================================
 ;; 4. JIT-Lock 引擎：连续扫描 (支持嵌套)
@@ -400,6 +444,8 @@
 (defun my/org-enable-jit-pretty-blocks ()
   "在当前 Buffer 启用 JIT 渲染机制。"
   (when (derived-mode-p 'org-mode)
+    (unless (hash-table-p my/org-pretty-block-cache)
+      (setq-local my/org-pretty-block-cache (make-hash-table :test #'equal)))
     (unless (memq #'my/org-jit-prettify-blocks jit-lock-functions)
       (jit-lock-register #'my/org-jit-prettify-blocks t))
     (jit-lock-refontify)))
@@ -408,6 +454,8 @@
   "调试用：强制清除所有 Overlay 并重绘。"
   (interactive)
   (remove-overlays (point-min) (point-max) 'my/org-pretty-block t)
+  (when (hash-table-p my/org-pretty-block-cache)
+    (clrhash my/org-pretty-block-cache))
   (jit-lock-refontify))
 
 (add-hook 'org-mode-hook #'my/org-enable-jit-pretty-blocks)

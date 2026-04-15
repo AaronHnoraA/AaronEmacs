@@ -459,6 +459,7 @@ Each value may be a readable `.cls' file path or literal class source."
 (defvar-local my/org-latex--edit-preview-timer nil)
 (defvar-local my/org-latex--edit-preview-marker nil)
 (defvar-local my/org-latex--post-command-point nil)
+(defvar-local my/org-latex--scroll-preview-enabled nil)
 (defvar my/org-latex--allow-native-preview nil)
 
 (defun my/org-latex--current-fragment (&optional pos)
@@ -503,6 +504,10 @@ Each value may be a readable `.cls' file path or literal class source."
   (and (derived-mode-p 'org-mode)
        (display-graphic-p)
        (not my/org-latex--allow-native-preview)))
+
+(defun my/org-latex--buffer-visible-p (&optional buffer)
+  "Return non-nil when BUFFER is displayed in a live window."
+  (get-buffer-window (or buffer (current-buffer)) t))
 
 (defun my/org-latex--fragment-around-change (beg end)
   "Return the LaTeX fragment touched by a change from BEG to END."
@@ -938,7 +943,10 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   "Queue LaTeX preview work between BEG and END."
   (setq beg (max (point-min) (min beg end)))
   (setq end (min (point-max) (max beg end)))
-  (when (< beg end)
+  (when (and (my/org-latex--async-preview-active-p)
+             (or (called-interactively-p 'interactive)
+                 (my/org-latex--buffer-visible-p))
+             (< beg end))
     (dolist (spec (my/org-latex--collect-fragments beg end))
       (my/org-latex--enqueue-fragment spec))))
 
@@ -1018,6 +1026,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   "Preview visible Org LaTeX fragments asynchronously in WINDOW."
   (interactive)
   (when-let* (((derived-mode-p 'org-mode))
+              ((my/org-latex--async-preview-active-p))
               (range (my/org-latex--visible-range window)))
     (let* ((beg (car range))
            (end (cdr range))
@@ -1033,7 +1042,9 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
 
 (defun my/org-latex-preview-visible-debounced (&optional window)
   "Debounced preview of WINDOW's visible area after scrolling stops."
-  (when (derived-mode-p 'org-mode)
+  (when (and (derived-mode-p 'org-mode)
+             (my/org-latex--async-preview-active-p)
+             (my/org-latex--buffer-visible-p))
     (when (timerp my/org-latex--preview-timer)
       (cancel-timer my/org-latex--preview-timer))
     (setq my/org-latex--preview-timer
@@ -1041,9 +1052,20 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
                                #'my/org-latex-preview-visible-now
                                window))))
 
+(defun my/org-latex--window-scroll-preview-hook (win _start)
+  "Schedule preview refresh after WIN scrolls."
+  (when (eq (window-buffer win) (current-buffer))
+    (my/org-latex-preview-visible-debounced win)))
+
+(defun my/org-latex--window-size-preview-hook (_frame)
+  "Schedule preview refresh after a window-size change."
+  (my/org-latex-preview-visible-debounced
+   (get-buffer-window (current-buffer) t)))
+
 (defun my/org-latex-cleanup-scroll-preview ()
   "Stop async scroll-preview state in the current Org buffer."
   (interactive)
+  (setq-local my/org-latex--scroll-preview-enabled nil)
   (my/org-latex-cancel-pending-renders))
 
 (defun my/org-latex-preview-visible-initial (buffer)
@@ -1072,19 +1094,15 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
 (defun my/org-latex-enable-scroll-preview ()
   "Enable on-demand LaTeX preview for visible area after scrolling."
   (interactive)
-  (when (derived-mode-p 'org-mode)
+  (when (and (derived-mode-p 'org-mode)
+             (not my/org-latex--scroll-preview-enabled))
+    (setq-local my/org-latex--scroll-preview-enabled t)
     (my/org-latex--ensure-state)
     (add-hook 'after-change-functions #'my/org-latex-after-change-function nil t)
     (add-hook 'post-command-hook #'my/org-latex-post-command-function nil t)
-    (add-hook 'window-scroll-functions
-              (lambda (win _start)
-                (my/org-latex-preview-visible-debounced win))
-              nil t)
-    (add-hook 'window-size-change-functions
-              (lambda (_frame)
-                (my/org-latex-preview-visible-debounced
-                 (get-buffer-window (current-buffer) t)))
-              nil t)
+    (add-hook 'window-scroll-functions #'my/org-latex--window-scroll-preview-hook nil t)
+    (add-hook 'window-size-change-functions #'my/org-latex--window-size-preview-hook nil t)
+    (add-hook 'change-major-mode-hook #'my/org-latex-cleanup-scroll-preview nil t)
     (add-hook 'kill-buffer-hook #'my/org-latex-cleanup-scroll-preview nil t)
     (run-with-idle-timer 0.15 nil
                          #'my/org-latex-preview-visible-initial

@@ -35,6 +35,7 @@
 (defvar-local ratex-mode)
 (defvar-local ratex--active-fragment)
 (defvar-local my/ratex-preview-timer nil)
+(defvar-local my/ratex--initialized nil)
 
 (defcustom my/ratex-evil-insert-only t
   "When non-nil, only show RaTeX edit previews in Evil insert state."
@@ -79,11 +80,16 @@
       (not (bound-and-true-p evil-local-mode))
       (evil-insert-state-p)))
 
+(defun my/ratex-buffer-visible-p (&optional buffer)
+  "Return non-nil when BUFFER is currently shown in a live window."
+  (get-buffer-window (or buffer (current-buffer)) t))
+
 (defun my/ratex--debounced-post-command (orig-fn &rest args)
   "Run `ratex-handle-post-command' through a short idle debounce."
   (my/ratex-cancel-pending-preview)
   (if (or (not (my/ratex-supported-buffer-p))
           (not (bound-and-true-p ratex-mode))
+          (not (my/ratex-buffer-visible-p))
           (not (my/org-ratex-preview-active-p))
           (null (ignore-errors (ratex--active-fragment-at-point))))
       (my/ratex-hide-preview-now)
@@ -97,6 +103,7 @@
             (setq my/ratex-preview-timer nil)
             (when (and (my/ratex-supported-buffer-p)
                        (bound-and-true-p ratex-mode)
+                       (my/ratex-buffer-visible-p)
                        (my/org-ratex-preview-active-p))
               (condition-case nil
                   (apply orig-fn args)
@@ -119,11 +126,8 @@
 
 (defun my/ratex-handle-buffer-switch (orig-fn &rest args)
   "Clear pending/visible RaTeX previews before delegating to ORIG-FN."
-  (dolist (buffer (buffer-list))
-    (when (buffer-live-p buffer)
-      (with-current-buffer buffer
-        (when (bound-and-true-p ratex-mode)
-          (my/ratex-hide-preview-now)))))
+  (when (bound-and-true-p ratex-mode)
+    (my/ratex-hide-preview-now))
   (apply orig-fn args))
 
 (defun my/org-ratex-sync-evil-state ()
@@ -146,9 +150,12 @@
     ;; Keep Org's async preview stack active; RaTeX only adds the edit popup.
     (when (derived-mode-p 'org-mode)
       (setq-local my/org-latex--allow-native-preview nil))
-    (ratex-mode 1)
-    (add-hook 'change-major-mode-hook #'my/ratex-hide-preview-now nil t)
-    (add-hook 'kill-buffer-hook #'my/ratex-hide-preview-now nil t)
+    (unless (bound-and-true-p ratex-mode)
+      (ratex-mode 1))
+    (unless my/ratex--initialized
+      (setq-local my/ratex--initialized t)
+      (add-hook 'change-major-mode-hook #'my/ratex-hide-preview-now nil t)
+      (add-hook 'kill-buffer-hook #'my/ratex-hide-preview-now nil t))
     (my/org-ratex-sync-evil-state)))
 
 (use-package ratex

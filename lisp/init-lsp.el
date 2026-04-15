@@ -93,6 +93,12 @@ Each entry is a plist with keys such as `:modes', `:program',
 (defvar-local my/flymake-diagnostic-at-point-timer nil
   "Idle timer used by `my/flymake-diagnostic-at-point-mode'.")
 
+(defvar-local my/flymake-diagnostic-at-point-last-point nil
+  "Last point position shown by `my/flymake-diagnostic-at-point-mode'.")
+
+(defvar-local my/flymake-diagnostic-at-point-last-text nil
+  "Last diagnostic text shown by `my/flymake-diagnostic-at-point-mode'.")
+
 (defcustom my/flymake-diagnostic-at-point-delay 0.2
   "Seconds to wait before echoing the Flymake diagnostic at point."
   :type 'number
@@ -192,14 +198,21 @@ byte-compile backend does not emit noisy warnings on startup."
                  (bound-and-true-p flymake-mode)
                  (frame-focus-state)
                  (eq (current-buffer) (window-buffer (selected-window))))
-        (when-let* ((text (my/flymake-diagnostic-at-point-text)))
-          (message "➤ %s" text))))))
+        (let ((point-now (point))
+              (text (my/flymake-diagnostic-at-point-text)))
+          (unless (and (equal point-now my/flymake-diagnostic-at-point-last-point)
+                       (equal text my/flymake-diagnostic-at-point-last-text))
+            (setq my/flymake-diagnostic-at-point-last-point point-now
+                  my/flymake-diagnostic-at-point-last-text text)
+            (when text
+              (message "➤ %s" text))))))))
 
 (defun my/flymake-diagnostic-at-point-schedule (&rest _)
   "Refresh the idle timer for `my/flymake-diagnostic-at-point-mode'."
   (my/flymake-diagnostic-at-point-cancel)
   (when (and (bound-and-true-p my/flymake-diagnostic-at-point-mode)
-             (not (minibufferp)))
+             (not (minibufferp))
+             (get-buffer-window (current-buffer) t))
     (setq my/flymake-diagnostic-at-point-timer
           (run-with-idle-timer
            my/flymake-diagnostic-at-point-delay
@@ -220,6 +233,9 @@ byte-compile backend does not emit noisy warnings on startup."
 
 (defun my/flymake-diagnostic-at-point-mode-sync ()
   "Keep `my/flymake-diagnostic-at-point-mode' aligned with `flymake-mode'."
+  (unless (bound-and-true-p flymake-mode)
+    (setq my/flymake-diagnostic-at-point-last-point nil
+          my/flymake-diagnostic-at-point-last-text nil))
   (my/flymake-diagnostic-at-point-mode
    (if (bound-and-true-p flymake-mode) 1 -1)))
 

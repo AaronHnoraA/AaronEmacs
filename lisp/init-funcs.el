@@ -225,6 +225,12 @@ When REPLACEMENT is non-nil, register it with Which-Key."
   "Hook run by `my/escape'.
 If any function returns non-nil, later hooks are skipped.")
 
+(defvar my/global-quit-key-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "M-q") #'my/confirm-quit-emacs)
+    map)
+  "High-priority keymap for global quit bindings.")
+
 (defun my/escape (&optional interactive)
   "Run `my/escape-hook', then fall back to `keyboard-quit'."
   (interactive (list 'interactive))
@@ -248,10 +254,18 @@ If any function returns non-nil, later hooks are skipped.")
   (when (yes-or-no-p "Quit Emacs? ")
     (save-buffers-kill-terminal)))
 
+(define-minor-mode my/global-quit-key-mode
+  "Keep global quit bindings available above local keymaps."
+  :init-value t
+  :global t
+  :lighter nil
+  :keymap my/global-quit-key-mode-map)
+
 (global-set-key [remap keyboard-quit] #'my/escape)
-(global-set-key (kbd "M-q") #'my/confirm-quit-emacs)
 (global-set-key (kbd "M-]") #'my/forward-delimiter-dwim)
 (global-set-key (kbd "M-[") #'my/backward-delimiter-dwim)
+
+(my/global-quit-key-mode 1)
 
 (with-eval-after-load 'eldoc
   (eldoc-add-command 'my/escape))

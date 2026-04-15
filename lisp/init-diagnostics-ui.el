@@ -21,6 +21,9 @@
 (defconst my/diagnostics-project-buffer-name "*Diagnostics: Project*"
   "Buffer name used by the toggleable project diagnostics panel.")
 
+(defvar my/diagnostics-ui--theme-signature nil
+  "Last theme signature applied by `my/diagnostics-apply-ui'.")
+
 (defvar-local my/diagnostics-buffer-scope 'buffer
   "Scope used by the current diagnostics UI buffer.")
 
@@ -63,24 +66,29 @@ When `other', show only other files.")
 (defun my/diagnostics-apply-ui ()
   "Apply local diagnostic faces."
   (when (display-graphic-p)
-    (when (facep 'flymake-error)
-      (set-face-attribute 'flymake-error nil
-                          :underline '(:style line :color "#bf7f7f")
-                          :foreground 'unspecified))
-    (when (facep 'flymake-warning)
-      (set-face-attribute 'flymake-warning nil
-                          :underline '(:style line :color "#d0a86e")
-                          :foreground 'unspecified))
-    (when (facep 'flymake-note)
-      (set-face-attribute 'flymake-note nil
-                          :underline '(:style line :color "#8aa6c1")
-                          :foreground 'unspecified))
-    (when (facep 'error)
-      (set-face-attribute 'error nil :foreground "#d79a9a"))
-    (when (facep 'warning)
-      (set-face-attribute 'warning nil :foreground "#d8b27f"))
-    (when (facep 'success)
-      (set-face-attribute 'success nil :foreground "#8fbf8f"))))
+    (let ((signature (list custom-enabled-themes
+                           (face-attribute 'default :background nil t)
+                           (face-attribute 'default :foreground nil t))))
+      (unless (equal signature my/diagnostics-ui--theme-signature)
+        (setq my/diagnostics-ui--theme-signature signature)
+        (when (facep 'flymake-error)
+          (set-face-attribute 'flymake-error nil
+                              :underline '(:style line :color "#bf7f7f")
+                              :foreground 'unspecified))
+        (when (facep 'flymake-warning)
+          (set-face-attribute 'flymake-warning nil
+                              :underline '(:style line :color "#d0a86e")
+                              :foreground 'unspecified))
+        (when (facep 'flymake-note)
+          (set-face-attribute 'flymake-note nil
+                              :underline '(:style line :color "#8aa6c1")
+                              :foreground 'unspecified))
+        (when (facep 'error)
+          (set-face-attribute 'error nil :foreground "#d79a9a"))
+        (when (facep 'warning)
+          (set-face-attribute 'warning nil :foreground "#d8b27f"))
+        (when (facep 'success)
+          (set-face-attribute 'success nil :foreground "#8fbf8f"))))))
 
 (add-hook 'after-init-hook #'my/diagnostics-apply-ui)
 (add-hook 'server-after-make-frame-hook #'my/diagnostics-apply-ui)

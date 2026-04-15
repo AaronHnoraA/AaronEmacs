@@ -115,6 +115,18 @@ Use nil to keep backend defaults."
   "Seconds an unused in-memory render result may live before cleanup."
   :type 'integer)
 
+(defcustom ratex-request-timeout 8.0
+  "Seconds to wait before treating a backend request as timed out."
+  :type 'number)
+
+(defcustom ratex-backend-restart-cooldown 5.0
+  "Cooldown in seconds after repeated backend startup failures."
+  :type 'number)
+
+(defcustom ratex-backend-max-start-failures 3
+  "Suspend backend startup temporarily after this many consecutive failures."
+  :type 'integer)
+
 (defvar ratex--process nil)
 (defvar ratex--process-buffer " *ratex-backend*")
 (defvar ratex--pending (make-hash-table :test #'eql))
@@ -125,6 +137,9 @@ Use nil to keep backend defaults."
 (defvar ratex--startup-warned nil)
 (defvar ratex--startup-callbacks nil)
 (defvar ratex--download-in-progress nil)
+(defvar ratex--pending-timers (make-hash-table :test #'eql))
+(defvar ratex--backend-start-failures 0)
+(defvar ratex--backend-suspended-until nil)
 (defconst ratex--debug-buffer-name "*RaTeX Debug*")
 
 (defun ratex-debug-log (format-string &rest args)
@@ -159,6 +174,43 @@ Use nil to keep backend defaults."
   "Return non-nil when the backend process is alive."
   (and ratex--process (process-live-p ratex--process)))
 
+(defun ratex--backend-suspended-p ()
+  "Return non-nil when backend startup is in cooldown."
+  (and ratex--backend-suspended-until
+       (> ratex--backend-suspended-until (float-time))))
+
+(defun ratex--record-backend-start-success ()
+  "Reset backend startup failure state after a successful launch."
+  (setq ratex--backend-start-failures 0
+        ratex--backend-suspended-until nil
+        ratex--startup-warned nil))
+
+(defun ratex--record-backend-start-failure (reason)
+  "Track a backend startup failure for REASON."
+  (setq ratex--backend-start-failures (1+ ratex--backend-start-failures))
+  (ratex-debug-log "backend start failure #%s: %s"
+                   ratex--backend-start-failures reason)
+  (when (>= ratex--backend-start-failures ratex-backend-max-start-failures)
+    (setq ratex--backend-suspended-until
+          (+ (float-time) ratex-backend-restart-cooldown))
+    (ratex--warn
+     (format "RaTeX backend suspended for %.1fs after repeated launch failures."
+             ratex-backend-restart-cooldown))))
+
+(defun ratex--cancel-pending-timeout (id)
+  "Cancel and forget the timeout timer associated with request ID."
+  (when-let* ((timer (gethash id ratex--pending-timers)))
+    (cancel-timer timer)
+    (remhash id ratex--pending-timers)))
+
+(defun ratex--resolve-pending-request (id response)
+  "Resolve pending request ID with RESPONSE."
+  (let ((callback (gethash id ratex--pending)))
+    (when callback
+      (ratex--cancel-pending-timeout id)
+      (remhash id ratex--pending)
+      (funcall callback response))))
+
 (defun ratex-start-backend (&optional callback)
   "Start the backend process if needed.
 
@@ -173,15 +225,22 @@ When CALLBACK is non-nil, invoke it with the live process once startup succeeds.
     (when callback
       (push callback ratex--startup-callbacks))
     nil)
+   ((ratex--backend-suspended-p)
+    (ratex-debug-log "backend startup skipped during cooldown")
+    (when callback
+      (funcall callback nil))
+    nil)
    ((ratex--backend-ready-p)
     (condition-case err
         (progn
           (ratex-debug-log "launch backend: %s" (ratex--backend-binary-path))
           (ratex--launch-backend)
+          (ratex--record-backend-start-success)
           (when callback
             (funcall callback ratex--process))
           ratex--process)
       (error
+       (ratex--record-backend-start-failure (error-message-string err))
        (if ratex-auto-download-backend
            (progn
              (ratex-debug-log "backend launch failed; redownload: %s"
@@ -325,16 +384,28 @@ instead of downloading a pre-built binary."
          (with-current-buffer origin-buffer
            (funcall callback response))))
      ratex--pending)
+    (when (and (numberp ratex-request-timeout)
+               (> ratex-request-timeout 0))
+      (puthash
+       id
+       (run-with-timer
+        ratex-request-timeout nil
+        (lambda (request-id)
+          (ratex-debug-log "request timeout #%s" request-id)
+          (ratex--resolve-pending-request
+           request-id
+           '((ok . :false) (error . "backend request timed out"))))
+        id)
+       ratex--pending-timers))
     (ratex-start-backend
      (lambda (proc)
        (if (and proc (process-live-p proc))
            (process-send-string proc (concat (json-encode data) "\n"))
          ;; Backend unavailable — resolve pending entry immediately so it
          ;; does not accumulate forever in ratex--pending.
-         (let ((cb (gethash id ratex--pending)))
-           (when cb
-             (remhash id ratex--pending)
-             (funcall cb '((ok . :false) (error . "backend unavailable"))))))))
+         (ratex--resolve-pending-request
+          id
+          '((ok . :false) (error . "backend unavailable"))))))
     id))
 
 (defun ratex-ping (callback)
@@ -372,23 +443,25 @@ for large SVG payloads."
          (json-key-type 'symbol)
          (json-array-type 'list)
          (json-false :false)
-         (data (ignore-errors (json-read-from-string line))))
+        (data (ignore-errors (json-read-from-string line))))
     (when data
       (let* ((id (alist-get 'id data))
-             (callback (gethash id ratex--pending)))
-        (when callback
-          (remhash id ratex--pending)
-          (funcall callback data))))))
+             (_callback (gethash id ratex--pending)))
+        (when _callback
+          (ratex--resolve-pending-request id data))))))
 
 (defun ratex--process-sentinel (proc event)
   "Handle backend PROC EVENT."
   (ratex-debug-log "process sentinel live=%s event=%s" (process-live-p proc) (string-trim event))
   (unless (process-live-p proc)
     (maphash
-     (lambda (_id callback)
-       (funcall callback `((ok . :false) (error . ,(string-trim event)))))
+     (lambda (id _callback)
+       (ratex--resolve-pending-request
+        id
+        `((ok . :false) (error . ,(string-trim event)))))
      ratex--pending)
     (clrhash ratex--pending)
+    (clrhash ratex--pending-timers)
     (setq ratex--read-chunks nil
           ratex--read-buffer ""
           ratex--process nil)))
