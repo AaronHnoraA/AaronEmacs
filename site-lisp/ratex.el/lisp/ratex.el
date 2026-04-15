@@ -17,7 +17,11 @@
 (declare-function evil-insert-state-p "evil")
 
 (defvar my/org-latex--allow-native-preview)
+(defvar my/org-latex--external-preview-active)
 (defvar-local ratex--saved-org-native-preview nil)
+(defvar-local ratex--saved-org-external-preview nil)
+(defvar-local ratex--saved-org-scroll-preview nil)
+(defvar-local ratex--saved-org-fragtog-mode nil)
 
 (defun ratex--supported-buffer-p ()
   "Return non-nil when the current buffer should enable RaTeX."
@@ -33,18 +37,40 @@
 
 (defun ratex--prepare-org-preview-integration ()
   "Adjust Org preview integration for the current buffer."
-  (when (and ratex-org-disable-native-preview
-             (derived-mode-p 'org-mode)
-             (boundp 'my/org-latex--allow-native-preview))
-    (setq-local ratex--saved-org-native-preview my/org-latex--allow-native-preview)
-    (setq-local my/org-latex--allow-native-preview nil)))
+  (when (derived-mode-p 'org-mode)
+    (when (and ratex-org-disable-native-preview
+               (boundp 'my/org-latex--allow-native-preview))
+      (setq-local ratex--saved-org-native-preview my/org-latex--allow-native-preview)
+      (setq-local my/org-latex--allow-native-preview nil))
+    (when (boundp 'my/org-latex--external-preview-active)
+      (setq-local ratex--saved-org-external-preview my/org-latex--external-preview-active)
+      (setq-local my/org-latex--external-preview-active t))
+    (when (boundp 'my/org-latex--scroll-preview-enabled)
+      (setq-local ratex--saved-org-scroll-preview my/org-latex--scroll-preview-enabled))
+    (when (fboundp 'my/org-latex-cleanup-scroll-preview)
+      (my/org-latex-cleanup-scroll-preview))
+    (when (bound-and-true-p org-fragtog-mode)
+      (setq-local ratex--saved-org-fragtog-mode t)
+      (org-fragtog-mode -1))))
 
 (defun ratex--restore-org-preview-integration ()
   "Restore Org preview integration state for the current buffer."
-  (when (and (derived-mode-p 'org-mode)
-             (boundp 'my/org-latex--allow-native-preview))
-    (setq-local my/org-latex--allow-native-preview ratex--saved-org-native-preview)
-    (kill-local-variable 'ratex--saved-org-native-preview)))
+  (when (derived-mode-p 'org-mode)
+    (when (boundp 'my/org-latex--allow-native-preview)
+      (setq-local my/org-latex--allow-native-preview ratex--saved-org-native-preview))
+    (when (boundp 'my/org-latex--external-preview-active)
+      (setq-local my/org-latex--external-preview-active
+                  ratex--saved-org-external-preview))
+    (when (and ratex--saved-org-scroll-preview
+               (fboundp 'my/org-latex-enable-scroll-preview))
+      (my/org-latex-enable-scroll-preview))
+    (when (and ratex--saved-org-fragtog-mode
+               (fboundp 'org-fragtog-mode))
+      (org-fragtog-mode 1))
+    (kill-local-variable 'ratex--saved-org-native-preview)
+    (kill-local-variable 'ratex--saved-org-external-preview)
+    (kill-local-variable 'ratex--saved-org-scroll-preview)
+    (kill-local-variable 'ratex--saved-org-fragtog-mode)))
 
 (defun ratex-sync-evil-state ()
   "Refresh edit preview visibility after an Evil state transition."

@@ -859,12 +859,12 @@ the cursor."
           (ratex--ensure-fragment-preview fragment))))))
 
 (defun ratex-handle-buffer-switch ()
-  "Clear previews for all ratex buffers when switching buffers."
-  (when (ratex--preview-style)
-    (dolist (buffer (buffer-list))
-      (with-current-buffer buffer
-        (when ratex-mode
-          (ratex--hide-edit-preview))))))
+  "Hide the shared edit preview when its owner buffer is no longer selected."
+  (when (and (ratex--preview-style)
+             (buffer-live-p ratex--posframe-owner-buffer)
+             (not (eq (window-buffer (selected-window))
+                      ratex--posframe-owner-buffer)))
+    (ratex--hide-posframe)))
 
 (provide 'ratex-render)
 
