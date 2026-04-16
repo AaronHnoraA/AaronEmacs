@@ -51,6 +51,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-dired)
 (my/require-module-safely 'init-zoxide)
 (my/require-module-safely 'init-ai-ide)
+(require 'init-copilot)
 (require 'init-minibuffer)
 (require 'init-consult-project)
 (require 'init-snippets)
