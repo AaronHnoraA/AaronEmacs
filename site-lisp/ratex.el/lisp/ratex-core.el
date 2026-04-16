@@ -56,8 +56,19 @@ Set this explicitly if the backend cannot locate fonts automatically."
                  directory))
 
 (defcustom ratex-edit-preview-idle-delay 0.18
-  "Seconds of idle time before updating the active edit preview."
+  "Seconds of idle time before updating the active edit preview.
+
+This is the primary debounce: resets on every keystroke, so the preview
+fires quickly once the user pauses, without rendering on every single key."
   :type 'number)
+
+(defcustom ratex-edit-preview-max-staleness 2.5
+  "Maximum seconds between preview renders during continuous editing.
+
+When the user types without pausing long enough for the idle timer to fire,
+a real-time fallback timer forces a render after this many seconds.  Set to
+nil to disable forced updates and rely solely on the idle debounce."
+  :type '(choice (const :tag "Disabled" nil) number))
 
 (defcustom ratex-edit-preview-scan-lines 4
   "Lines above and below point to scan for math delimiters before previewing.

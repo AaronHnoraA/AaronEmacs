@@ -44,6 +44,12 @@
 (defvar-local ratex--posframe-last-anchor nil)
 (defvar-local ratex--preview-enabled nil)
 (defvar-local ratex--preview-timer nil)
+(defvar-local ratex--force-preview-timer nil
+  "Real-time fallback timer to refresh the preview during continuous editing.
+Unlike `ratex--preview-timer' (idle-based), this fires unconditionally after
+`ratex-edit-preview-max-staleness' seconds so the preview never goes fully
+stale during rapid input.  Not reset by keystrokes; cancelled when the user
+leaves the formula or the idle timer renders first.")
 (defvar-local ratex--last-point nil)
 (defvar-local ratex--last-tick nil)
 (defvar-local ratex--preview-fragment nil)
@@ -215,6 +221,9 @@ propagates outward."
   (setq-local ratex--edit-source-overlay nil)
   (setq-local ratex--preview-enabled nil)
   (setq-local ratex--preview-timer nil)
+  (when (timerp ratex--force-preview-timer)
+    (cancel-timer ratex--force-preview-timer))
+  (setq-local ratex--force-preview-timer nil)
   (setq-local ratex--last-point nil)
   (setq-local ratex--last-tick nil)
   (ratex--ensure-cache-gc-timer))
@@ -731,6 +740,34 @@ fragments are normalized for preview compatibility when needed."
     (cancel-timer ratex--preview-timer)
     (setq-local ratex--preview-timer nil)))
 
+(defun ratex--cancel-force-preview ()
+  "Cancel any running real-time force-preview timer."
+  (when (timerp ratex--force-preview-timer)
+    (cancel-timer ratex--force-preview-timer)
+    (setq-local ratex--force-preview-timer nil)))
+
+(defun ratex--force-refresh-preview (buffer)
+  "Force-refresh the preview in BUFFER and reschedule the force timer.
+Called unconditionally by `ratex--force-preview-timer' so the preview
+never goes fully stale during rapid continuous input."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq-local ratex--force-preview-timer nil)
+      (when (and ratex-mode
+                 (ratex--buffer-visible-p)
+                 ratex--active-fragment
+                 ratex-edit-preview-max-staleness)
+        (ratex--cancel-pending-preview)
+        (ratex--refresh-preview-now)
+        ;; Reschedule as long as we are still editing a formula.
+        (when (and ratex--active-fragment
+                   ratex-edit-preview-max-staleness)
+          (setq-local ratex--force-preview-timer
+                      (run-with-timer
+                       ratex-edit-preview-max-staleness nil
+                       #'ratex--force-refresh-preview
+                       buffer)))))))
+
 (defun ratex--refresh-preview-now ()
   "Refresh the active preview immediately in the current buffer."
   (condition-case err
@@ -762,8 +799,22 @@ fragments are normalized for preview compatibility when needed."
                            (setq ratex--preview-timer nil)
                            (when (and ratex-mode
                                       (ratex--buffer-visible-p))
+                             ;; Idle timer fired first — cancel the real-time
+                             ;; fallback so they don't double-render.
+                             (ratex--cancel-force-preview)
                              (ratex--refresh-preview-now)))))
-                     (current-buffer)))))))
+                     (current-buffer)))
+        ;; Schedule the real-time fallback timer only on the *first* keystroke
+        ;; in a formula session (not on every keystroke), so it fires once after
+        ;; ratex-edit-preview-max-staleness seconds regardless of typing speed.
+        (when (and ratex-edit-preview-max-staleness
+                   ratex--active-fragment
+                   (not (timerp ratex--force-preview-timer)))
+          (setq-local ratex--force-preview-timer
+                      (run-with-timer
+                       ratex-edit-preview-max-staleness nil
+                       #'ratex--force-refresh-preview
+                       (current-buffer))))))))
 
 (defun ratex-refresh-post-command-soon ()
   "Queue one near-immediate post-command refresh for the current buffer."
@@ -998,6 +1049,7 @@ Strategy mirrors company-box's frame-position logic:
 (defun ratex--hide-edit-preview ()
   "Hide the active edit preview."
   (ratex--cancel-pending-preview)
+  (ratex--cancel-force-preview)
   (setq-local ratex--active-fragment nil
               ratex--last-point nil
               ratex--last-tick nil

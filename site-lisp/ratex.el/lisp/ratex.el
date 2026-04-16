@@ -14,6 +14,7 @@
 (require 'ratex-overlays)
 (require 'ratex-render)
 
+(defvar ratex-mode)
 (declare-function evil-insert-state-p "evil")
 
 (defun ratex--supported-buffer-p ()
