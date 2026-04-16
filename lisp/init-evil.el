@@ -193,8 +193,7 @@
       (apply fn args)))
   (dolist (mode '(my/bookmark-list-mode))
     (evil-set-initial-state mode 'normal))
-  (dolist (mode '(dashboard-mode
-                  ibuffer-mode
+  (dolist (mode '(ibuffer-mode
                   debugger-mode
                   my/diagnostics-mode
                   my/language-server-manager-mode
@@ -206,8 +205,7 @@
     (evil-set-initial-state mode 'emacs))
   (add-to-list 'evil-buffer-regexps '("^\\*Appine Window\\*$" . nil))
   (add-to-list 'evil-buffer-regexps '("^\\*vterm.*\\*$" . nil))
-  (dolist (hook '(dashboard-mode-hook
-                  ibuffer-mode-hook
+  (dolist (hook '(ibuffer-mode-hook
                   debugger-mode-hook
                   my/diagnostics-mode-hook
                   my/language-server-manager-mode-hook
