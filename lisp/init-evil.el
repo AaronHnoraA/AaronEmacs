@@ -21,6 +21,7 @@
 (declare-function my/bookmark-toggle-line "init-windows")
 (declare-function avy-goto-char-in-line "avy" (&optional arg))
 (declare-function avy-goto-char-timer "avy" (&optional arg))
+(declare-function evil-emacs-state "evil")
 (declare-function evil-force-normal-state "evil")
 (declare-function evil-local-mode "evil")
 (declare-function evil-save-state "evil")
@@ -133,6 +134,28 @@
   (when (bound-and-true-p evil-local-mode)
     (evil-local-mode -1)))
 
+(defvar my/evil-special-buffer-navigation-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "j") #'next-line)
+    (define-key map (kbd "k") #'previous-line)
+    (define-key map (kbd "<down>") #'next-line)
+    (define-key map (kbd "<up>") #'previous-line)
+    map)
+  "Lightweight navigation keymap for special buffers kept in Emacs state.")
+
+(define-minor-mode my/evil-special-buffer-navigation-mode
+  "Restore light Vim-style movement in special buffers using Emacs state."
+  :init-value nil
+  :lighter nil
+  :keymap my/evil-special-buffer-navigation-map)
+
+(defun my/evil-special-buffer-setup-h ()
+  "Use Emacs state plus local `j/k' navigation in interactive special buffers."
+  (when (bound-and-true-p evil-local-mode)
+    (my/evil-special-buffer-navigation-mode 1)
+    (when (fboundp 'evil-emacs-state)
+      (evil-emacs-state))))
+
 (use-package evil
   :ensure t
   :demand t
@@ -168,7 +191,10 @@
     (if (bound-and-true-p evil-local-mode)
         (evil-save-state (apply fn args))
       (apply fn args)))
-  (dolist (mode '(ibuffer-mode
+  (dolist (mode '(my/bookmark-list-mode))
+    (evil-set-initial-state mode 'normal))
+  (dolist (mode '(dashboard-mode
+                  ibuffer-mode
                   debugger-mode
                   my/diagnostics-mode
                   my/language-server-manager-mode
@@ -176,11 +202,21 @@
                   my/jupyter-manager-mode
                   my/jupyter-doctor-mode
                   my/compile-board-mode
-                  my/health-mode
-                  my/bookmark-list-mode))
-    (evil-set-initial-state mode 'normal))
+                  my/health-mode))
+    (evil-set-initial-state mode 'emacs))
   (add-to-list 'evil-buffer-regexps '("^\\*Appine Window\\*$" . nil))
   (add-to-list 'evil-buffer-regexps '("^\\*vterm.*\\*$" . nil))
+  (dolist (hook '(dashboard-mode-hook
+                  ibuffer-mode-hook
+                  debugger-mode-hook
+                  my/diagnostics-mode-hook
+                  my/language-server-manager-mode-hook
+                  my/language-server-doctor-mode-hook
+                  my/jupyter-manager-mode-hook
+                  my/jupyter-doctor-mode-hook
+                  my/compile-board-mode-hook
+                  my/health-mode-hook))
+    (add-hook hook #'my/evil-special-buffer-setup-h))
   (add-hook 'eww-mode-hook #'my/evil-disable-local-mode-h)
   (add-hook 'xwidget-webkit-mode-hook #'my/evil-disable-local-mode-h)
   ;; Silence line out of range error.

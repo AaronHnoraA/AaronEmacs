@@ -13,6 +13,10 @@
 (declare-function yas-reload-all "yasnippet" (&optional no-jit interactive))
 (declare-function yas-next-field "yasnippet" (&optional arg))
 (declare-function yas-prev-field "yasnippet" (&optional arg))
+(declare-function my/backward-delimiter-or-snippet-dwim "init-funcs" ())
+(declare-function my/forward-delimiter-or-copilot-dwim "init-ai-ide" ())
+(declare-function my/forward-delimiter-or-copilot-by-word-dwim "init-ai-ide" ())
+(declare-function my/forward-delimiter-or-copilot-to-char-dwim "init-ai-ide" ())
 
 (defconst my/yas-treesit-extra-modes
   '((bash-ts-mode sh-mode)
@@ -86,9 +90,10 @@ previously inlined in every org-mode snippet file."
     ;; snippet 会话中的跳转仍统一走全局 DWIM 调度，避免直接触碰脆弱内部状态。
     (define-key yas-keymap (kbd "M-[") #'my/backward-delimiter-or-snippet-dwim)
     (define-key yas-keymap (kbd "M-]") #'my/forward-delimiter-or-copilot-dwim)
-    (define-key yas-keymap (kbd "M-(") #'my/forward-delimiter-or-copilot-by-word-dwim)
-    (define-key yas-keymap (kbd "M-)") #'my/forward-delimiter-or-copilot-to-char-dwim)
-    (define-key yas-keymap (kbd "M-}") #'my/forward-delimiter-or-copilot-by-line-dwim)
+    (define-key yas-keymap (kbd "M-\\") #'my/forward-delimiter-or-copilot-by-word-dwim)
+    (define-key yas-keymap (kbd "M-}") #'my/forward-delimiter-or-copilot-to-char-dwim)
+    (define-key yas-keymap (kbd "M-(") nil)
+    (define-key yas-keymap (kbd "M-)") nil)
     ;; 不让 yas 抢 TAB
     (define-key yas-keymap (kbd "TAB") nil)
     (define-key yas-keymap (kbd "<tab>") nil)))

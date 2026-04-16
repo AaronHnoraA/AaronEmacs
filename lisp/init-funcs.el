@@ -8,11 +8,6 @@
 (declare-function yas-current-field "yasnippet" ())
 (declare-function yas-next-field "yasnippet" (&optional arg))
 (declare-function yas-prev-field "yasnippet" (&optional arg))
-(declare-function copilot--overlay-visible "copilot" ())
-(declare-function copilot-accept-completion "copilot" (&optional transform-fn))
-(declare-function copilot-accept-completion-by-word "copilot" (&optional n))
-(declare-function copilot-accept-completion-to-char "copilot" (char &optional count))
-(declare-function copilot-accept-completion-by-line "copilot" (&optional n))
 
 (defgroup my/editor-experience nil
   "Shared helpers for editor ergonomics."
@@ -228,12 +223,6 @@ alter buffer positions."
        (yas-active-snippets)
        (yas-current-field)))
 
-(defun my/copilot-completion-visible-p ()
-  "Return non-nil when Copilot currently shows a completion overlay."
-  (and (bound-and-true-p copilot-mode)
-       (fboundp 'copilot--overlay-visible)
-       (copilot--overlay-visible)))
-
 (defun my/snippet-next-field-dwim ()
   "Advance the active snippet field when possible."
   (interactive)
@@ -259,63 +248,6 @@ fall back to a same-line closer search."
     (if-let* ((target (my/delimiter--forward-target)))
         (goto-char target)
       (user-error "No forward closing delimiter found"))))
-
-(defun my/forward-delimiter-or-copilot-dwim ()
-  "Prefer active snippet/Copilot actions, then jump forward by delimiter."
-  (interactive)
-  (cond
-   ((my/snippet-active-p)
-    (my/snippet-next-field-dwim))
-   ((and (fboundp 'copilot-accept-completion)
-         (my/copilot-completion-visible-p))
-    (copilot-accept-completion))
-   (t
-    (my/forward-delimiter-dwim))))
-
-(defun my/forward-delimiter-or-copilot-by-word-dwim ()
-  "Prefer snippet field advance, then Copilot accept-by-word, then jump."
-  (interactive)
-  (cond
-   ((my/snippet-active-p)
-    (my/snippet-next-field-dwim))
-   ((and (fboundp 'copilot-accept-completion-by-word)
-         (my/copilot-completion-visible-p))
-    (copilot-accept-completion-by-word))
-   ((and (fboundp 'copilot-accept-completion)
-         (my/copilot-completion-visible-p))
-    (copilot-accept-completion))
-   (t
-    (my/forward-delimiter-dwim))))
-
-(defun my/forward-delimiter-or-copilot-to-char-dwim ()
-  "Prefer snippet field advance, then Copilot accept-to-char, then jump."
-  (interactive)
-  (cond
-   ((my/snippet-active-p)
-    (my/snippet-next-field-dwim))
-   ((and (fboundp 'copilot-accept-completion-to-char)
-         (my/copilot-completion-visible-p))
-    (call-interactively #'copilot-accept-completion-to-char))
-   ((and (fboundp 'copilot-accept-completion)
-         (my/copilot-completion-visible-p))
-    (copilot-accept-completion))
-   (t
-    (my/forward-delimiter-dwim))))
-
-(defun my/forward-delimiter-or-copilot-by-line-dwim ()
-  "Prefer snippet field advance, then Copilot line accept, then delimiter jump."
-  (interactive)
-  (cond
-   ((my/snippet-active-p)
-    (my/snippet-next-field-dwim))
-   ((and (fboundp 'copilot-accept-completion-by-line)
-         (my/copilot-completion-visible-p))
-    (copilot-accept-completion-by-line))
-   ((and (fboundp 'copilot-accept-completion)
-         (my/copilot-completion-visible-p))
-    (copilot-accept-completion))
-   (t
-    (my/forward-delimiter-dwim))))
 
 (defun my/delimiter--backward-open-target ()
   "Return backward jump target for delimiter DWIM commands."
@@ -419,11 +351,6 @@ If any function returns non-nil, later hooks are skipped.")
   :keymap my/global-quit-key-mode-map)
 
 (global-set-key [remap keyboard-quit] #'my/escape)
-(global-set-key (kbd "M-]") #'my/forward-delimiter-or-copilot-dwim)
-(global-set-key (kbd "M-[") #'my/backward-delimiter-or-snippet-dwim)
-(global-set-key (kbd "M-(") #'my/forward-delimiter-or-copilot-by-word-dwim)
-(global-set-key (kbd "M-)") #'my/forward-delimiter-or-copilot-to-char-dwim)
-(global-set-key (kbd "M-}") #'my/forward-delimiter-or-copilot-by-line-dwim)
 
 (my/global-quit-key-mode 1)
 
