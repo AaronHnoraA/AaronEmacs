@@ -18,6 +18,10 @@
   "Return non-nil when Copilot can start in the current environment."
   (and (not buffer-read-only)
        (not (minibufferp))
+       ;; `use-package' only installs the hooks here; the library itself may
+       ;; still be unloaded when the first editable buffer opens.
+       (or (featurep 'copilot)
+           (require 'copilot nil t))
        (ignore-errors
          (when-let* ((server (copilot-server-executable)))
            (file-exists-p server)))))
@@ -92,7 +96,8 @@
 (use-package copilot
   :ensure t
   :hook ((prog-mode . my/copilot-auto-enable-h)
-         (org-mode . my/copilot-auto-enable-h))
+         (org-mode . my/copilot-auto-enable-h)
+         (org-src-mode . my/copilot-auto-enable-h))
   :custom
   (copilot-install-dir (expand-file-name "var/copilot" user-emacs-directory))
   (copilot-idle-delay 0.30)
