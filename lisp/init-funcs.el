@@ -4,6 +4,16 @@
 
 ;;; Code:
 
+(declare-function yas-active-snippets "yasnippet" (&optional beg end))
+(declare-function yas-current-field "yasnippet" ())
+(declare-function yas-next-field "yasnippet" (&optional arg))
+(declare-function yas-prev-field "yasnippet" (&optional arg))
+(declare-function copilot--overlay-visible "copilot" ())
+(declare-function copilot-accept-completion "copilot" (&optional transform-fn))
+(declare-function copilot-accept-completion-by-word "copilot" (&optional n))
+(declare-function copilot-accept-completion-to-char "copilot" (char &optional count))
+(declare-function copilot-accept-completion-by-line "copilot" (&optional n))
+
 (defgroup my/editor-experience nil
   "Shared helpers for editor ergonomics."
   :group 'convenience)
@@ -170,55 +180,170 @@ alter buffer positions."
                 (setq found (cons open close))))))
         found))))
 
+(defun my/delimiter--char-syntax-at (pos)
+  "Return syntax class for the character at POS, or nil."
+  (when-let* ((char (char-after pos)))
+    (char-syntax char)))
+
+(defun my/delimiter--opening-pos-at (pos)
+  "Return POS when it is on an opening delimiter, otherwise nil."
+  (when (eq (my/delimiter--char-syntax-at pos) ?\()
+    pos))
+
+(defun my/delimiter--closing-pos-at (pos)
+  "Return POS when it is on a closing delimiter, otherwise nil."
+  (when (eq (my/delimiter--char-syntax-at pos) ?\))
+    pos))
+
+(defun my/delimiter--containing-open-pos (&optional pos)
+  "Return opening delimiter position surrounding POS or point."
+  (let* ((pos (or pos (point)))
+         (state (syntax-ppss pos)))
+    (or (nth 1 state)
+        (when (nth 3 state)
+          (nth 8 state)))))
+
+(defun my/delimiter--forward-target ()
+  "Return forward jump target for delimiter DWIM commands."
+  (or
+   (when-let* ((open (my/delimiter--opening-pos-at (point))))
+     (ignore-errors (scan-sexps open 1)))
+   (when-let* ((close (my/delimiter--closing-pos-at (point))))
+     (1+ close))
+   (when-let* ((open-before (and (> (point) (point-min))
+                                 (my/delimiter--opening-pos-at (1- (point))))))
+     (ignore-errors (scan-sexps open-before 1)))
+   (when-let* ((container (my/delimiter--containing-open-pos)))
+     (ignore-errors (scan-sexps container 1)))
+   (save-excursion
+     (let ((line-end (line-end-position)))
+       (when (re-search-forward "[])}]" line-end t)
+         (match-end 0))))))
+
+(defun my/snippet-active-p ()
+  "Return non-nil when a live yasnippet field is active at point."
+  (and (bound-and-true-p yas-minor-mode)
+       (fboundp 'yas-active-snippets)
+       (fboundp 'yas-current-field)
+       (yas-active-snippets)
+       (yas-current-field)))
+
+(defun my/copilot-completion-visible-p ()
+  "Return non-nil when Copilot currently shows a completion overlay."
+  (and (bound-and-true-p copilot-mode)
+       (fboundp 'copilot--overlay-visible)
+       (copilot--overlay-visible)))
+
+(defun my/snippet-next-field-dwim ()
+  "Advance the active snippet field when possible."
+  (interactive)
+  (unless (my/snippet-active-p)
+    (user-error "No active snippet field"))
+  (yas-next-field))
+
+(defun my/snippet-previous-field-dwim ()
+  "Move to the previous active snippet field when possible."
+  (interactive)
+  (unless (my/snippet-active-p)
+    (user-error "No active snippet field"))
+  (yas-prev-field))
+
 (defun my/forward-delimiter-dwim ()
-  "Jump past the closing `}' of an Org ^{}/_{} at point, or the nearest closer.
-Prefer structural navigation when point is inside a balanced expression.
-Fall back to a same-line closer search instead of scanning arbitrarily far."
+  "Jump forward across the current delimiter context.
+Prefer structural navigation for Org scripts, lists and strings, then
+fall back to a same-line closer search."
   (interactive)
   (if-let* ((range (my/delimiter--org-script-range-at-point)))
       ;; cdr is already one past `}' (search-forward return value)
       (goto-char (cdr range))
-    (or
-     (ignore-errors
-       (up-list 1)
-       t)
-     (save-excursion
-       (let ((line-end (line-end-position)))
-         (when (re-search-forward "[])}]" line-end t)
-           (goto-char (match-end 0))
-           t)))
-     (user-error "No forward closing delimiter found"))))
+    (if-let* ((target (my/delimiter--forward-target)))
+        (goto-char target)
+      (user-error "No forward closing delimiter found"))))
 
 (defun my/forward-delimiter-or-copilot-dwim ()
   "Prefer active snippet/Copilot actions, then jump forward by delimiter."
   (interactive)
   (cond
-   ((and (bound-and-true-p yas-minor-mode)
-         (bound-and-true-p yas--active-field-overlay)
-         (fboundp 'yas-next-field))
-    (yas-next-field))
+   ((my/snippet-active-p)
+    (my/snippet-next-field-dwim))
    ((and (fboundp 'copilot-accept-completion)
-         (fboundp 'copilot--overlay-visible)
-         (copilot--overlay-visible))
+         (my/copilot-completion-visible-p))
+    (copilot-accept-completion))
+   (t
+    (my/forward-delimiter-dwim))))
+
+(defun my/forward-delimiter-or-copilot-by-word-dwim ()
+  "Prefer snippet field advance, then Copilot accept-by-word, then jump."
+  (interactive)
+  (cond
+   ((my/snippet-active-p)
+    (my/snippet-next-field-dwim))
+   ((and (fboundp 'copilot-accept-completion-by-word)
+         (my/copilot-completion-visible-p))
+    (copilot-accept-completion-by-word))
+   ((and (fboundp 'copilot-accept-completion)
+         (my/copilot-completion-visible-p))
+    (copilot-accept-completion))
+   (t
+    (my/forward-delimiter-dwim))))
+
+(defun my/forward-delimiter-or-copilot-to-char-dwim ()
+  "Prefer snippet field advance, then Copilot accept-to-char, then jump."
+  (interactive)
+  (cond
+   ((my/snippet-active-p)
+    (my/snippet-next-field-dwim))
+   ((and (fboundp 'copilot-accept-completion-to-char)
+         (my/copilot-completion-visible-p))
+    (call-interactively #'copilot-accept-completion-to-char))
+   ((and (fboundp 'copilot-accept-completion)
+         (my/copilot-completion-visible-p))
+    (copilot-accept-completion))
+   (t
+    (my/forward-delimiter-dwim))))
+
+(defun my/forward-delimiter-or-copilot-by-line-dwim ()
+  "Prefer snippet field advance, then Copilot line accept, then delimiter jump."
+  (interactive)
+  (cond
+   ((my/snippet-active-p)
+    (my/snippet-next-field-dwim))
+   ((and (fboundp 'copilot-accept-completion-by-line)
+         (my/copilot-completion-visible-p))
+    (copilot-accept-completion-by-line))
+   ((and (fboundp 'copilot-accept-completion)
+         (my/copilot-completion-visible-p))
     (copilot-accept-completion))
    (t
     (my/forward-delimiter-dwim))))
 
 (defun my/delimiter--backward-open-target ()
-  "Return the point just after the previous opening delimiter."
-  (save-excursion
-    (let ((start (point)))
-      (when (and (> start (point-min))
-                 (memq (char-before) '(?\( ?\[ ?\{))
-                 (> (1- start) (point-min)))
-        (setq start (1- start)))
-      (goto-char start)
-      (when (re-search-backward "[][({]" nil t)
-        (1+ (point))))))
+  "Return backward jump target for delimiter DWIM commands."
+  (let* ((point (point))
+         (open-before (and (> point (point-min))
+                           (my/delimiter--opening-pos-at (1- point))))
+         (close-before (and (> point (point-min))
+                            (my/delimiter--closing-pos-at (1- point)))))
+    (or
+     (when open-before
+       (when-let* ((outer (my/delimiter--containing-open-pos open-before)))
+         (unless (= outer open-before)
+           (1+ outer))))
+     (when-let* ((close (my/delimiter--closing-pos-at point)))
+       (when-let* ((open (ignore-errors (scan-sexps (1+ close) -1))))
+         (1+ open)))
+     (when close-before
+       (when-let* ((open (ignore-errors (scan-sexps point -1))))
+         (1+ open)))
+     (when-let* ((container (my/delimiter--containing-open-pos)))
+       (1+ container))
+     (save-excursion
+       (when (re-search-backward "[][({]" nil t)
+         (1+ (point)))))))
 
 (defun my/backward-delimiter-dwim ()
-  "Jump to the start of Org ^{}/_{} content at point, or to the previous `['/`('/`{'.
-If already at the inner start of ^{}/_{}, jump backward past the `^'/`_' marker."
+  "Jump backward to the current delimiter's inner start.
+When already at an inner start, try to escape to the parent delimiter."
   (interactive)
   (if-let* ((range (my/delimiter--org-script-range-at-point))
             (inner-start (1+ (car range))))
@@ -226,11 +351,18 @@ If already at the inner start of ^{}/_{}, jump backward past the `^'/`_' marker.
           ;; Already at the content start — escape outward past ^ or _
           (if-let* ((outer (my/delimiter--backward-open-target)))
               (goto-char outer)
-            (user-error "No backward opening delimiter found"))
+            (goto-char (max (point-min) (1- (car range)))))
         (goto-char inner-start))
     (if-let* ((target (my/delimiter--backward-open-target)))
         (goto-char target)
       (user-error "No backward opening delimiter found"))))
+
+(defun my/backward-delimiter-or-snippet-dwim ()
+  "Prefer snippet field retreat, then delimiter backward jump."
+  (interactive)
+  (if (my/snippet-active-p)
+      (my/snippet-previous-field-dwim)
+    (my/backward-delimiter-dwim)))
 
 (defun my/evil-global-leader-set (key command &optional replacement)
   "Bind COMMAND to `SPC KEY' in Evil normal state.
@@ -288,7 +420,10 @@ If any function returns non-nil, later hooks are skipped.")
 
 (global-set-key [remap keyboard-quit] #'my/escape)
 (global-set-key (kbd "M-]") #'my/forward-delimiter-or-copilot-dwim)
-(global-set-key (kbd "M-[") #'my/backward-delimiter-dwim)
+(global-set-key (kbd "M-[") #'my/backward-delimiter-or-snippet-dwim)
+(global-set-key (kbd "M-(") #'my/forward-delimiter-or-copilot-by-word-dwim)
+(global-set-key (kbd "M-)") #'my/forward-delimiter-or-copilot-to-char-dwim)
+(global-set-key (kbd "M-}") #'my/forward-delimiter-or-copilot-by-line-dwim)
 
 (my/global-quit-key-mode 1)
 

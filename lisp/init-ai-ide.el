@@ -68,15 +68,39 @@
 
 ;;; ── GitHub Copilot ────────────────────────────────────────────────────────
 
+(declare-function copilot-server-executable "copilot" ())
+
+(defun my/copilot-available-p ()
+  "Return non-nil when Copilot can start in the current environment."
+  (and (not buffer-read-only)
+       (not (minibufferp))
+       (ignore-errors
+         (when-let* ((server (copilot-server-executable)))
+           (file-exists-p server)))))
+
+(defun my/copilot-mode-maybe-enable ()
+  "Enable `copilot-mode' only when its server is available."
+  (when (my/copilot-available-p)
+    (copilot-mode 1)))
+
 (use-package copilot
   :ensure t
-  :hook (prog-mode . copilot-mode)
+  :hook ((prog-mode . my/copilot-mode-maybe-enable)
+         (org-mode . my/copilot-mode-maybe-enable))
   :bind (:map copilot-mode-map
-              ("M-]" . my/forward-delimiter-or-copilot-dwim))
+              ("M-]" . my/forward-delimiter-or-copilot-dwim)
+              ("M-[" . my/backward-delimiter-or-snippet-dwim)
+              ("M-(" . my/forward-delimiter-or-copilot-by-word-dwim)
+              ("M-)" . my/forward-delimiter-or-copilot-to-char-dwim)
+              ("M-}" . my/forward-delimiter-or-copilot-by-line-dwim))
   :config
-  ;; When a completion overlay is visible, `M-]' should accept it before any
-  ;; global fallback navigation runs.
-  (define-key copilot-completion-map (kbd "M-]") #'copilot-accept-completion))
+  ;; Keep local Copilot keymaps aligned with the global DWIM policy:
+  ;; snippet > Copilot > delimiter jump.
+  (define-key copilot-completion-map (kbd "M-]") #'my/forward-delimiter-or-copilot-dwim)
+  (define-key copilot-completion-map (kbd "M-[") #'my/backward-delimiter-or-snippet-dwim)
+  (define-key copilot-completion-map (kbd "M-(") #'my/forward-delimiter-or-copilot-by-word-dwim)
+  (define-key copilot-completion-map (kbd "M-)") #'my/forward-delimiter-or-copilot-to-char-dwim)
+  (define-key copilot-completion-map (kbd "M-}") #'my/forward-delimiter-or-copilot-by-line-dwim))
 
 (provide 'init-ai-ide)
 ;;; init-ai-ide.el ends here

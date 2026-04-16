@@ -83,8 +83,12 @@ previously inlined in every org-mode snippet file."
   (yas-reload-all)
 
   (with-eval-after-load 'yasnippet
-    ;; snippet 会话中的 field 跳转
-    (define-key yas-keymap (kbd "M-[") #'yas-prev-field)
+    ;; snippet 会话中的跳转仍统一走全局 DWIM 调度，避免直接触碰脆弱内部状态。
+    (define-key yas-keymap (kbd "M-[") #'my/backward-delimiter-or-snippet-dwim)
+    (define-key yas-keymap (kbd "M-]") #'my/forward-delimiter-or-copilot-dwim)
+    (define-key yas-keymap (kbd "M-(") #'my/forward-delimiter-or-copilot-by-word-dwim)
+    (define-key yas-keymap (kbd "M-)") #'my/forward-delimiter-or-copilot-to-char-dwim)
+    (define-key yas-keymap (kbd "M-}") #'my/forward-delimiter-or-copilot-by-line-dwim)
     ;; 不让 yas 抢 TAB
     (define-key yas-keymap (kbd "TAB") nil)
     (define-key yas-keymap (kbd "<tab>") nil)))
