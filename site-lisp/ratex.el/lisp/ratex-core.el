@@ -77,10 +77,6 @@ This cheap regexp scan avoids running full fragment detection when point is
 clearly far away from any math block."
   :type 'natnum)
 
-(defcustom ratex-edit-preview-evil-insert-only t
-  "When non-nil, only show floating edit previews in Evil insert state."
-  :type 'boolean)
-
 (defcustom ratex-org-disable-native-preview t
   "When non-nil, disable the local Org native preview pipeline while `ratex-mode' is active."
   :type 'boolean)

@@ -537,22 +537,28 @@
         (ratex-handle-post-command)
         (should (equal handled '("xy")))))))
 
-(ert-deftest ratex-preview-active-p-respects-evil-insert-only ()
+(ert-deftest ratex-preview-active-p-is-unconditional ()
   (with-temp-buffer
-    (setq-local ratex-edit-preview-evil-insert-only t)
-    (cl-letf (((symbol-function 'evil-insert-state-p)
-               (lambda () nil)))
-      (setq-local evil-local-mode t)
-      (should-not (ratex--preview-active-p))
-      (cl-letf (((symbol-function 'evil-insert-state-p)
-                 (lambda () t)))
-        (should (ratex--preview-active-p))))))
-
-(ert-deftest ratex-preview-active-p-allows-non-evil-buffers ()
-  (with-temp-buffer
-    (setq-local ratex-edit-preview-evil-insert-only t)
-    (setq-local evil-local-mode nil)
     (should (ratex--preview-active-p))))
+
+(ert-deftest ratex-post-command-searches-near-math-unconditionally ()
+  (with-temp-buffer
+    (insert "a \\(xy\\) b")
+    (goto-char 5)
+    (setq-local ratex-mode t)
+    (setq-local ratex-edit-preview 'posframe)
+    (setq-local ratex--preview-enabled t)
+    (let (scheduled)
+      (cl-letf (((symbol-function 'ratex--buffer-visible-p)
+                 (lambda (&optional _buffer) t))
+                ((symbol-function 'ratex--near-math-p)
+                 (lambda () t))
+                ((symbol-function 'run-with-idle-timer)
+                 (lambda (&rest _args)
+                   (setq scheduled t)
+                   'fake-timer)))
+        (ratex-post-command)
+        (should scheduled)))))
 
 (ert-deftest ratex-post-command-debounces-live-edit-commands ()
   (with-temp-buffer

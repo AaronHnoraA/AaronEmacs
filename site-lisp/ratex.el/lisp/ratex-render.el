@@ -10,12 +10,10 @@
 ;; posframe is optional; load it dynamically when enabled.
 
 (defvar ratex-mode)
-(declare-function evil-insert-state-p "evil")
 (defvar ratex-render-color)
 (defvar ratex-edit-preview)
 (defvar ratex-edit-preview-idle-delay)
 (defvar ratex-edit-preview-scan-lines)
-(defvar ratex-edit-preview-evil-insert-only)
 (defvar ratex-inline-preview)
 (defvar ratex-font-dir)
 (defvar ratex-hide-source-while-preview)
@@ -29,7 +27,6 @@
 (defvar ratex-posframe-max-pixel-width)
 (defvar ratex-posframe-max-pixel-height)
 (defvar ratex-posframe-poshandler)
-(defvar evil-local-mode)
 (defvar ratex--posframe-owner-buffer nil
   "Buffer that currently owns the shared RaTeX posframe.")
 (defvar ratex--posframe-owner-window nil
@@ -55,7 +52,6 @@ leaves the formula or the idle timer renders first.")
 (defvar-local ratex--last-tick nil)
 (defvar-local ratex--preview-fragment nil)
 (defvar-local ratex--preview-key nil)
-(defvar-local ratex--preview-image nil)
 (defvar-local ratex--edit-source-overlay nil)
 (defvar-local ratex--posframe-last-override-params nil
   "Last override-parameters used for the posframe, cached for position updates.")
@@ -218,7 +214,6 @@ propagates outward."
   (setq-local ratex--posframe-showing-p nil)
   (setq-local ratex--preview-fragment nil)
   (setq-local ratex--preview-key nil)
-  (setq-local ratex--preview-image nil)
   (when (overlayp ratex--edit-source-overlay)
     (delete-overlay ratex--edit-source-overlay))
   (setq-local ratex--edit-source-overlay nil)
@@ -716,10 +711,7 @@ fragments are normalized for preview compatibility when needed."
 
 (defun ratex--preview-active-p ()
   "Return non-nil when edit preview should be visible in the current state."
-  (or (not ratex-edit-preview-evil-insert-only)
-      (not (bound-and-true-p evil-local-mode))
-      (and (fboundp 'evil-insert-state-p)
-           (evil-insert-state-p))))
+  t)
 
 (defun ratex--buffer-visible-p (&optional buffer)
   "Return non-nil when BUFFER is currently visible in a live window."
@@ -808,17 +800,6 @@ never goes fully stale during rapid continuous input."
                              (ratex--refresh-preview-now)))))
                      (current-buffer)))))))
 
-(defun ratex-refresh-post-command-soon ()
-  "Queue one near-immediate post-command refresh for the current buffer."
-  (let ((buffer (current-buffer)))
-    (run-with-idle-timer
-     0 nil
-     (lambda ()
-       (when (buffer-live-p buffer)
-         (with-current-buffer buffer
-           (when ratex-mode
-             (ratex-post-command))))))))
-
 (defun ratex--display-edit-preview (fragment &optional response image)
   "Display edit preview for FRAGMENT using the configured style.
 
@@ -834,11 +815,9 @@ When `posframe' is selected, use a child frame."
     (if shown
         (progn
           (setq-local ratex--preview-fragment fragment)
-          (setq-local ratex--preview-key (ratex--fragment-key fragment))
-          (setq-local ratex--preview-image preview-image))
+          (setq-local ratex--preview-key (ratex--fragment-key fragment)))
       (setq-local ratex--preview-fragment nil)
-      (setq-local ratex--preview-key nil)
-      (setq-local ratex--preview-image nil))
+      (setq-local ratex--preview-key nil))
     shown))
 
 (defun ratex--ensure-posframe-loaded ()
@@ -1054,8 +1033,7 @@ Strategy mirrors company-box's frame-position logic:
               ratex--last-point nil
               ratex--last-tick nil
               ratex--preview-fragment nil
-              ratex--preview-key nil
-              ratex--preview-image nil))
+              ratex--preview-key nil))
 
 (defun ratex--update-posframe-position ()
   "Keep floating preview aligned with the active fragment anchor."

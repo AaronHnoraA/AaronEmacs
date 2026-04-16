@@ -15,7 +15,6 @@
 (require 'ratex-render)
 
 (defvar ratex-mode)
-(declare-function evil-insert-state-p "evil")
 
 (defun ratex--supported-buffer-p ()
   "Return non-nil when the current buffer should enable RaTeX."
@@ -37,13 +36,6 @@
   (ratex--preserving-window-start #'ratex-clear-overlays)
   (ratex-reset-buffer-state))
 
-(defun ratex-sync-evil-state ()
-  "Refresh edit preview visibility after an Evil state transition."
-  (when ratex-mode
-    (if ratex--active-fragment
-        (ratex--refresh-preview-now)
-      (ratex-refresh-post-command-soon))))
-
 ;;;###autoload
 (define-minor-mode ratex-mode
   "Minor mode for inline math previews powered by RaTeX."
@@ -56,7 +48,8 @@
             (add-hook 'buffer-list-update-hook #'ratex-handle-buffer-switch)
             (ratex-start-backend)
             (ratex-initialize-previews)
-            (ratex-sync-evil-state))
+            (when (ratex--preview-style)
+              (ratex--refresh-preview-now)))
         (error
          (ratex--disable-current-buffer)
          (setq ratex-mode nil)
@@ -98,10 +91,6 @@
              (ratex--supported-buffer-p)
              (not (file-remote-p default-directory)))
     (ratex-mode 1)))
-
-(with-eval-after-load 'evil
-  (add-hook 'evil-insert-state-entry-hook #'ratex-sync-evil-state)
-  (add-hook 'evil-insert-state-exit-hook #'ratex-sync-evil-state))
 
 (provide 'ratex)
 
