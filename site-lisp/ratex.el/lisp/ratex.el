@@ -15,7 +15,6 @@
 (require 'ratex-render)
 
 (declare-function evil-insert-state-p "evil")
-(declare-function ratex--call-isolated-from-scroll "ratex-render" (fn &optional buffer))
 
 (defun ratex--supported-buffer-p ()
   "Return non-nil when the current buffer should enable RaTeX."
@@ -34,7 +33,7 @@
   (remove-hook 'post-command-hook #'ratex-post-command t)
   (remove-hook 'buffer-list-update-hook #'ratex-handle-buffer-switch)
   (ratex-handle-buffer-switch)
-  (ratex-clear-overlays)
+  (ratex--preserving-window-start #'ratex-clear-overlays)
   (ratex-reset-buffer-state))
 
 (defun ratex-sync-evil-state ()
@@ -53,15 +52,13 @@
   :lighter " RaTeX"
   (if ratex-mode
       (condition-case err
-          (ratex--call-isolated-from-scroll
-           (lambda ()
-             (ratex-reset-buffer-state)
-             (add-hook 'post-command-hook #'ratex-post-command nil t)
-             (add-hook 'buffer-list-update-hook #'ratex-handle-buffer-switch)
-             (ratex-start-backend)
-             (ratex-initialize-previews)
-             (ratex-sync-evil-state))
-           (current-buffer))
+          (progn
+            (ratex-reset-buffer-state)
+            (add-hook 'post-command-hook #'ratex-post-command nil t)
+            (add-hook 'buffer-list-update-hook #'ratex-handle-buffer-switch)
+            (ratex-start-backend)
+            (ratex-initialize-previews)
+            (ratex-sync-evil-state))
         (error
          (ratex--disable-current-buffer)
          (setq ratex-mode nil)
@@ -71,10 +68,7 @@
                   (buffer-name)
                   (error-message-string err))
           :warning)))
-    (ratex--call-isolated-from-scroll
-     (lambda ()
-       (ratex--disable-current-buffer))
-     (current-buffer))))
+    (ratex--disable-current-buffer)))
 
 
 ;;;###autoload

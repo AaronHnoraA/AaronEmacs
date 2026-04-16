@@ -141,17 +141,43 @@
 (defun ratex--call-isolated-from-scroll (fn &optional buffer-or-window)
   "Call FN while isolating BUFFER-OR-WINDOW from scroll side effects."
   (let ((states (ratex--capture-buffer-window-states
-                 buffer-or-window))
-        (selected (selected-window)))
+                 buffer-or-window)))
     (let ((window-scroll-functions nil)
           (window-size-change-functions nil)
           (ratex--suppress-scroll-side-effects t))
       (prog1
           (save-selected-window
             (funcall fn))
-        (ratex--restore-buffer-window-states states)
-        (when (window-live-p selected)
-          (select-window selected))))))
+        (ratex--restore-buffer-window-states states)))))
+
+(defun ratex--preserving-window-start (fn &optional buffer)
+  "Call FN and restore window starts for BUFFER to prevent display scroll jumps.
+
+Unlike `ratex--call-isolated-from-scroll', this does not suppress hooks or
+alter the selected window, making it safe to call from async contexts.
+
+Restoration is guaranteed even if FN signals an error (via `unwind-protect').
+Each saved start is validated against current buffer bounds before restoring,
+and `set-window-start' errors are silently swallowed so a stale position never
+propagates outward."
+  (let* ((buf (or buffer (current-buffer)))
+         (wins (seq-filter #'window-live-p
+                           (get-buffer-window-list buf nil t)))
+         (saved (mapcar (lambda (w) (cons w (window-start w))) wins)))
+    (unwind-protect
+        (funcall fn)
+      (with-current-buffer buf
+        (dolist (entry saved)
+          (let ((win (car entry))
+                (pos (cdr entry)))
+            (when (and (window-live-p win)
+                       (eq (window-buffer win) buf)
+                       (number-or-marker-p pos)
+                       (<= (point-min) pos (point-max))
+                       (/= (window-start win) pos))
+              (condition-case nil
+                  (set-window-start win pos t)
+                (error nil)))))))))
 
 (defun ratex--set-posframe-owner (buffer fragment override-params)
   "Record BUFFER as the owner of the shared posframe for FRAGMENT."
@@ -580,7 +606,9 @@ fragments are normalized for preview compatibility when needed."
      ((not (ratex--fragment-valid-p fragment))
       (ratex-remove-overlay fragment-key))
      (cached
-      (ratex--display-response fragment-key fragment cached))
+      (ratex--preserving-window-start
+       (lambda ()
+         (ratex--display-response fragment-key fragment cached))))
      (inflight
       (ratex--enqueue-waiter cache-key fragment-key fragment))
      (t
@@ -595,11 +623,13 @@ fragments are normalized for preview compatibility when needed."
            (when (alist-get 'ok response)
              (ratex--cache-put cache-key response))
            (when ratex-mode
-             (dolist (entry waiters)
-               (ratex--display-if-visible
-                (car entry)
-                (cdr entry)
-                response))))))))))
+             (ratex--preserving-window-start
+              (lambda ()
+                (dolist (entry waiters)
+                  (ratex--display-if-visible
+                   (car entry)
+                   (cdr entry)
+                   response))))))))))))
 
 (defun ratex--display-if-visible (fragment-key fragment response)
   "Display RESPONSE for FRAGMENT-KEY if FRAGMENT should still be visible."
