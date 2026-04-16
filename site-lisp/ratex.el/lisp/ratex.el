@@ -42,10 +42,11 @@
   (when ratex-mode
     (if (ratex--preview-active-p)
         (ratex-refresh-post-command-soon)
-      (ratex--hide-edit-preview)
-      (let ((fragment (ratex--active-fragment-at-point)))
+      (let ((fragment (or ratex--active-fragment
+                          (ratex--active-fragment-at-point))))
+        (ratex--hide-edit-preview)
         (when fragment
-          (ratex--ensure-fragment-preview fragment))))))
+          (ratex--refresh-inline-fragment-now fragment))))))
 
 ;;;###autoload
 (define-minor-mode ratex-mode

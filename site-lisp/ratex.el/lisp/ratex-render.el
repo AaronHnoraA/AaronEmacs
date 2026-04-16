@@ -659,6 +659,33 @@ fragments are normalized for preview compatibility when needed."
           (ratex--display-response fragment-key fragment response 'inline)
         (ratex-remove-overlay fragment-key))))))
 
+(defun ratex--refresh-inline-fragment-now (fragment)
+  "Render FRAGMENT directly to an inline overlay for immediate non-edit display."
+  (when (and ratex-inline-preview
+             (ratex--fragment-valid-p fragment))
+    (let* ((buffer (current-buffer))
+           (fragment-key (ratex--fragment-key fragment))
+           (cache-key (ratex--cache-key fragment))
+           (cached (ratex--cache-get cache-key)))
+      (if cached
+          (ratex--preserving-window-start
+           (lambda ()
+             (ratex--display-response fragment-key fragment cached 'inline)))
+        (ratex-request
+         (ratex--render-payload fragment)
+         (lambda (response)
+           (when (buffer-live-p buffer)
+             (with-current-buffer buffer
+               (when (and ratex-mode
+                          ratex-inline-preview
+                          (ratex--fragment-valid-p fragment))
+                 (when (alist-get 'ok response)
+                   (ratex--cache-put cache-key response))
+                 (ratex--preserving-window-start
+                  (lambda ()
+                    (ratex--display-response
+                     fragment-key fragment response 'inline))))))))))))
+
 (defun ratex--display-response (fragment-key fragment response &optional style)
   "Display backend RESPONSE for FRAGMENT identified by FRAGMENT-KEY."
   (if (not (alist-get 'ok response))
@@ -803,18 +830,7 @@ never goes fully stale during rapid continuous input."
                              ;; fallback so they don't double-render.
                              (ratex--cancel-force-preview)
                              (ratex--refresh-preview-now)))))
-                     (current-buffer)))
-        ;; Schedule the real-time fallback timer only on the *first* keystroke
-        ;; in a formula session (not on every keystroke), so it fires once after
-        ;; ratex-edit-preview-max-staleness seconds regardless of typing speed.
-        (when (and ratex-edit-preview-max-staleness
-                   ratex--active-fragment
-                   (not (timerp ratex--force-preview-timer)))
-          (setq-local ratex--force-preview-timer
-                      (run-with-timer
-                       ratex-edit-preview-max-staleness nil
-                       #'ratex--force-refresh-preview
-                       (current-buffer))))))))
+                     (current-buffer)))))))
 
 (defun ratex-refresh-post-command-soon ()
   "Queue one near-immediate post-command refresh for the current buffer."
