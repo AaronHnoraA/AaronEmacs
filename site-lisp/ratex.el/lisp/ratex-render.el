@@ -853,8 +853,8 @@ When `posframe' is selected, use a child frame."
                   :border-width 1
                   :border-color ratex-posframe-border-color
                   :background-color ratex-posframe-background-color
-                  :override-parameters override-params)))
-              (ratex--mask-edit-source fragment)
+                  :override-parameters override-params)
+                 (ratex--mask-edit-source fragment)))
               (ratex--set-posframe-owner (current-buffer) fragment override-params)
               (setq-local ratex--posframe-showing-p t)
               (ratex-debug-log "posframe success")
@@ -864,16 +864,16 @@ When `posframe' is selected, use a child frame."
            nil))))))
 
 (defun ratex--point-position-relative-to-native-frame (&optional point window)
-  "Return the pixel position of POINT in WINDOW relative to the native frame."
-  (unless point
-    (setq point (window-point window)))
+  "Return pixel position of POINT in WINDOW relative to the native frame.
+Returns nil when POINT is not currently visible in WINDOW, so callers must
+guard against nil rather than computing coordinates from garbage data."
   (let* ((window (or window (selected-window)))
-         (pos (pos-visible-in-window-p point window t))
-         (x (car pos))
-         (y (cadr pos))
-         (edges (window-edges window nil nil t)))
-    (cons (+ x (car edges) (frame-char-width))
-          (+ y (cadr edges)))))
+         (point  (or point (window-point window)))
+         (pos    (pos-visible-in-window-p point window t)))
+    (when pos
+      (let ((edges (window-edges window nil nil t)))
+        (cons (+ (car pos)  (car  edges) (frame-char-width))
+              (+ (cadr pos) (cadr edges)))))))
 
 (defun ratex--preview-anchor-position (fragment)
   "Return the buffer position used to anchor FRAGMENT edit previews.
@@ -887,38 +887,79 @@ follow point while editing."
   (or (plist-get info :position)
       (point)))
 
+(defun ratex--posframe-window-bottom (&optional window)
+  "Return the usable bottom pixel y of WINDOW in native-frame coordinates.
+
+Mirrors company-box's `company-box--point-bottom': walks down to the
+bottommost sibling window and uses its mode-line edge as the true floor,
+so the posframe never overlaps the mode-line or mini-buffer."
+  (let* ((win (or window (selected-window)))
+         (bottom-win (let ((tmp win))
+                       (while (window-in-direction 'below tmp t)
+                         (setq tmp (window-in-direction 'below tmp t)))
+                       tmp))
+         (edges (window-edges bottom-win t nil t)))
+    ;; cadr = top-pixel of window; add pixel-height to get bottom
+    (+ (cadr edges) (window-pixel-height bottom-win))))
+
+(defun ratex--posframe-clamp-x (x width)
+  "Clamp posframe X so a box of WIDTH stays within the frame."
+  (max ratex--posframe-gap-x
+       (min x (- (frame-inner-width) width ratex--posframe-gap-x))))
+
 (defun ratex-posframe-poshandler-point-bottom-left-corner-offset (info)
   "Position posframe below point with a small gap from the cursor."
   (let* ((point-pos (ratex--point-position-relative-to-native-frame
                      (ratex--posframe-info-position info)))
-         (x (+ (car point-pos) ratex--posframe-gap-x))
-         (y (+ (cdr point-pos) (frame-char-height) ratex--posframe-gap-y))
-         (width (or (plist-get info :posframe-width) 0))
-         (max-x (max 0 (- (frame-inner-width) width ratex--posframe-gap-x))))
-    (cons (min x max-x) y)))
+         (width (or (plist-get info :posframe-width) 0)))
+    (if (not point-pos)
+        (cons ratex--posframe-gap-x ratex--posframe-gap-y)
+      (cons (ratex--posframe-clamp-x (+ (car point-pos) ratex--posframe-gap-x) width)
+            (+ (cdr point-pos) (frame-char-height) ratex--posframe-gap-y)))))
 
 (defun ratex-posframe-poshandler-point-top-left-corner-offset (info)
-  "Position posframe above point, falling back below when needed.
+  "Position posframe preferring above point, with full four-edge boundary clamping.
 
-This follows eldoc-box's at-point strategy more closely than the stock
-posframe handlers: compute point's pixel position in the native frame, keep
-the preview inside frame bounds, and leave a small gap so it doesn't cover
-the cursor."
-  (let* ((point-pos (ratex--point-position-relative-to-native-frame
-                     (ratex--posframe-info-position info)))
-         (raw-x (+ (car point-pos) ratex--posframe-gap-x))
-         (raw-y (cdr point-pos))
-         (em (frame-char-height))
-         (width (or (plist-get info :posframe-width) 0))
-         (height (or (plist-get info :posframe-height) 0))
-         (x (if (< (- (frame-inner-width) width) raw-x)
-                (max 0 (- (frame-inner-width) width ratex--posframe-gap-x))
-              raw-x))
-         (y (if (< (- raw-y ratex--posframe-gap-y) height)
-                (min (max 0 (- (frame-inner-height) height))
-                     (+ raw-y em ratex--posframe-gap-y))
-              (max 0 (- raw-y height ratex--posframe-gap-y)))))
-    (cons x y)))
+Strategy mirrors company-box's frame-position logic:
+  1. Measure real usable space above and below using the source window's
+     true bottom (mode-line edge), not the raw frame height.
+  2. Prefer above when space fits; fall back to below.
+  3. When neither side fits fully, choose the roomier side and clamp to
+     the nearest frame edge so the posframe is never partially off-screen.
+  4. Clamp x so the box stays within [gap, frame-right - width - gap].
+  5. Return a safe fallback when the anchor is not visible in the window."
+  (let* ((anchor    (ratex--posframe-info-position info))
+         (win       (or (plist-get info :parent-window) (selected-window)))
+         (point-pos (or (ratex--point-position-relative-to-native-frame anchor win)
+                        ;; Anchor scrolled out of view: try current point.
+                        (ratex--point-position-relative-to-native-frame nil win))))
+    (if (not point-pos)
+        ;; Complete fallback: nothing visible — park at top-left.
+        (cons ratex--posframe-gap-x ratex--posframe-gap-y)
+      (let* ((raw-x  (+ (car point-pos) ratex--posframe-gap-x))
+             (raw-y  (cdr point-pos))
+             (em     (frame-char-height))
+             (width  (or (plist-get info :posframe-width)  0))
+             (height (or (plist-get info :posframe-height) 0))
+             ;; Use the real window bottom (mode-line), not frame-inner-height.
+             (win-bottom    (ratex--posframe-window-bottom win))
+             ;; Available pixels above / below the cursor line.
+             (space-above   (- raw-y ratex--posframe-gap-y))
+             (space-below   (- win-bottom (+ raw-y em ratex--posframe-gap-y)))
+             (y (cond
+                  ;; Preferred: enough room above.
+                  ((>= space-above height)
+                   (- raw-y height ratex--posframe-gap-y))
+                  ;; Fall back: enough room below.
+                  ((>= space-below height)
+                   (+ raw-y em ratex--posframe-gap-y))
+                  ;; Neither fits fully — pick the roomier side and clamp.
+                  ((>= space-above space-below)
+                   (max 0 (- raw-y height ratex--posframe-gap-y)))
+                  (t
+                   (min (max 0 (- (frame-inner-height) height))
+                        (+ raw-y em ratex--posframe-gap-y))))))
+        (cons (ratex--posframe-clamp-x raw-x width) y)))))
 
 (defun ratex-posframe-poshandler-point-bottom-left-corner-upward-offset (info)
   "Position posframe above point, falling back to below when near screen top."
@@ -987,9 +1028,9 @@ the cursor."
                       :border-width 1
                       :border-color ratex-posframe-border-color
                       :background-color ratex-posframe-background-color
-                      :override-parameters ratex--posframe-last-override-params)))
-                  (setq-local ratex--posframe-last-anchor anchor))
-                (ratex--mask-edit-source ratex--posframe-fragment))
+                      :override-parameters ratex--posframe-last-override-params)
+                     (ratex--mask-edit-source ratex--posframe-fragment)))
+                  (setq-local ratex--posframe-last-anchor anchor)))
             (error (ratex--hide-posframe))))
       (ratex--hide-posframe))))
 
