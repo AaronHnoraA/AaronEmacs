@@ -40,13 +40,9 @@
 (defun ratex-sync-evil-state ()
   "Refresh edit preview visibility after an Evil state transition."
   (when ratex-mode
-    (if (ratex--preview-active-p)
-        (ratex-refresh-post-command-soon)
-      (let ((fragment (or ratex--active-fragment
-                          (ratex--active-fragment-at-point))))
-        (ratex--hide-edit-preview)
-        (when fragment
-          (ratex--refresh-inline-fragment-now fragment))))))
+    (if ratex--active-fragment
+        (ratex--refresh-preview-now)
+      (ratex-refresh-post-command-soon))))
 
 ;;;###autoload
 (define-minor-mode ratex-mode

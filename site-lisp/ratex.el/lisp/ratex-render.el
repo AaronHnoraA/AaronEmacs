@@ -10,6 +10,7 @@
 ;; posframe is optional; load it dynamically when enabled.
 
 (defvar ratex-mode)
+(declare-function evil-insert-state-p "evil")
 (defvar ratex-render-color)
 (defvar ratex-edit-preview)
 (defvar ratex-edit-preview-idle-delay)
@@ -54,6 +55,7 @@ leaves the formula or the idle timer renders first.")
 (defvar-local ratex--last-tick nil)
 (defvar-local ratex--preview-fragment nil)
 (defvar-local ratex--preview-key nil)
+(defvar-local ratex--preview-image nil)
 (defvar-local ratex--edit-source-overlay nil)
 (defvar-local ratex--posframe-last-override-params nil
   "Last override-parameters used for the posframe, cached for position updates.")
@@ -216,6 +218,7 @@ propagates outward."
   (setq-local ratex--posframe-showing-p nil)
   (setq-local ratex--preview-fragment nil)
   (setq-local ratex--preview-key nil)
+  (setq-local ratex--preview-image nil)
   (when (overlayp ratex--edit-source-overlay)
     (delete-overlay ratex--edit-source-overlay))
   (setq-local ratex--edit-source-overlay nil)
@@ -308,7 +311,7 @@ currently under point."
           (ratex--ensure-fragment-preview previous)))
       (cond
        ((not active)
-       (ratex--hide-edit-preview))
+        (ratex--hide-edit-preview))
        ((ratex--preview-current-fragment-p active)
         nil)
        (t
@@ -659,33 +662,6 @@ fragments are normalized for preview compatibility when needed."
           (ratex--display-response fragment-key fragment response 'inline)
         (ratex-remove-overlay fragment-key))))))
 
-(defun ratex--refresh-inline-fragment-now (fragment)
-  "Render FRAGMENT directly to an inline overlay for immediate non-edit display."
-  (when (and ratex-inline-preview
-             (ratex--fragment-valid-p fragment))
-    (let* ((buffer (current-buffer))
-           (fragment-key (ratex--fragment-key fragment))
-           (cache-key (ratex--cache-key fragment))
-           (cached (ratex--cache-get cache-key)))
-      (if cached
-          (ratex--preserving-window-start
-           (lambda ()
-             (ratex--display-response fragment-key fragment cached 'inline)))
-        (ratex-request
-         (ratex--render-payload fragment)
-         (lambda (response)
-           (when (buffer-live-p buffer)
-             (with-current-buffer buffer
-               (when (and ratex-mode
-                          ratex-inline-preview
-                          (ratex--fragment-valid-p fragment))
-                 (when (alist-get 'ok response)
-                   (ratex--cache-put cache-key response))
-                 (ratex--preserving-window-start
-                  (lambda ()
-                    (ratex--display-response
-                     fragment-key fragment response 'inline))))))))))))
-
 (defun ratex--display-response (fragment-key fragment response &optional style)
   "Display backend RESPONSE for FRAGMENT identified by FRAGMENT-KEY."
   (if (not (alist-get 'ok response))
@@ -858,9 +834,11 @@ When `posframe' is selected, use a child frame."
     (if shown
         (progn
           (setq-local ratex--preview-fragment fragment)
-          (setq-local ratex--preview-key (ratex--fragment-key fragment)))
+          (setq-local ratex--preview-key (ratex--fragment-key fragment))
+          (setq-local ratex--preview-image preview-image))
       (setq-local ratex--preview-fragment nil)
-      (setq-local ratex--preview-key nil))
+      (setq-local ratex--preview-key nil)
+      (setq-local ratex--preview-image nil))
     shown))
 
 (defun ratex--ensure-posframe-loaded ()
@@ -1062,17 +1040,22 @@ Strategy mirrors company-box's frame-position logic:
       (ratex--clear-posframe-state))
     (ratex--unmask-edit-source)))
 
-(defun ratex--hide-edit-preview ()
-  "Hide the active edit preview."
+(defun ratex--dismiss-edit-preview ()
+  "Hide the edit preview UI without ending the current formula session."
   (ratex--cancel-pending-preview)
   (ratex--cancel-force-preview)
+  (ratex--hide-posframe)
+  (ratex--unmask-edit-source))
+
+(defun ratex--hide-edit-preview ()
+  "Hide the active edit preview."
+  (ratex--dismiss-edit-preview)
   (setq-local ratex--active-fragment nil
               ratex--last-point nil
               ratex--last-tick nil
               ratex--preview-fragment nil
-              ratex--preview-key nil)
-  (ratex--hide-posframe)
-  (ratex--unmask-edit-source))
+              ratex--preview-key nil
+              ratex--preview-image nil))
 
 (defun ratex--update-posframe-position ()
   "Keep floating preview aligned with the active fragment anchor."

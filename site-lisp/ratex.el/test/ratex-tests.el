@@ -537,6 +537,23 @@
         (ratex-handle-post-command)
         (should (equal handled '("xy")))))))
 
+(ert-deftest ratex-preview-active-p-respects-evil-insert-only ()
+  (with-temp-buffer
+    (setq-local ratex-edit-preview-evil-insert-only t)
+    (cl-letf (((symbol-function 'evil-insert-state-p)
+               (lambda () nil)))
+      (setq-local evil-local-mode t)
+      (should-not (ratex--preview-active-p))
+      (cl-letf (((symbol-function 'evil-insert-state-p)
+                 (lambda () t)))
+        (should (ratex--preview-active-p))))))
+
+(ert-deftest ratex-preview-active-p-allows-non-evil-buffers ()
+  (with-temp-buffer
+    (setq-local ratex-edit-preview-evil-insert-only t)
+    (setq-local evil-local-mode nil)
+    (should (ratex--preview-active-p))))
+
 (ert-deftest ratex-post-command-debounces-live-edit-commands ()
   (with-temp-buffer
     (insert "a \\(xy\\) b")
