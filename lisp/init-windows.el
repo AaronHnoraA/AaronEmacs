@@ -535,6 +535,8 @@ Otherwise, use `ace-window' to choose the target window."
          ("C-c o f" . dirvish-fd)
          :map dirvish-mode-map
          ("q" . dirvish-quit)
+         ("h" . dirvish-subtree-remove)
+         ("l" . dirvish-subtree-toggle)
          ("a" . dirvish-quick-access)
          ("f" . dirvish-file-info-menu)
          ("y" . dirvish-yank-menu)

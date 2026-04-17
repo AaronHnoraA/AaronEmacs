@@ -1036,7 +1036,7 @@ Sage-specific `PYTHONPATH`, into the external Jupytext process."
 (defun my/jupytext--default-notebook-file (&optional script-file)
   "Infer the paired notebook path for SCRIPT-FILE or the current buffer."
   (concat (file-name-sans-extension
-           (my/jupytext--canonical-script-file script-file))
+           (expand-file-name (or script-file (my/jupytext--script-file))))
           my/jupytext-default-notebook-extension))
 
 (defun my/jupytext--default-format (&optional script-file)
@@ -1178,7 +1178,12 @@ current file extension, for example `py:percent' or `sage:percent'."
                                (my/jupytext--default-format script-file)
                                t))
      (t
-      (call-interactively #'jupytext-register-current-buffer)))))
+      ;; Default to a same-basename notebook so brand new `.ju.*' files can
+      ;; create their paired `.ipynb' on first save without prompting.
+      (my/jupytext--store-pair script-file
+                               default-notebook
+                               (my/jupytext--default-format script-file)
+                               t)))))
 
 (defun my/jupytext--sync (&optional announce)
   "Sync the current buffer with its notebook via Jupytext.
@@ -1190,12 +1195,13 @@ When ANNOUNCE is non-nil, show a success message."
          (notebook-file (expand-file-name my/jupytext-notebook-file))
          (format my/jupytext-script-format)
          (pairing-p my/jupytext--set-formats-pending)
-         (args (if pairing-p
-                   (list "--set-formats"
-                         (format "ipynb,%s" format)
-                         "--sync"
-                         script-file)
-                 (list "--sync" script-file))))
+         (creating-p (or pairing-p
+                         (not (file-exists-p notebook-file))))
+         (args (append (unless creating-p
+                         (list "--update"))
+                       (list "--to" "ipynb"
+                             "--output" notebook-file
+                             script-file))))
     (my/jupytext--store-pair script-file notebook-file format pairing-p)
     (apply #'my/jupytext--run args)
     (setq-local my/jupytext--set-formats-pending nil)
@@ -1203,7 +1209,7 @@ When ANNOUNCE is non-nil, show a success message."
       (message "Jupytext synced %s <-> %s%s"
                (abbreviate-file-name script-file)
                (abbreviate-file-name notebook-file)
-               (if pairing-p " [set-formats]" "")))))
+               (if creating-p " [create]" "")))))
 
 (defun my/jupytext--revert-buffer-if-needed ()
   "Revert the current buffer if Jupytext rewrote it on disk."
@@ -1233,17 +1239,13 @@ When ANNOUNCE is non-nil, show a success message."
   (when (and buffer-file-name
              (not jupytext-mode)
              (string-match-p my/jupytext-auto-mode-file-regexp buffer-file-name))
-    (let* ((script-file (my/jupytext--script-file))
-           (pair-entry (my/jupytext--pair-entry script-file))
-           (default-notebook (my/jupytext--default-notebook-file script-file)))
-      (when (or pair-entry
-                (file-exists-p default-notebook))
-        (condition-case err
-            (jupytext-mode 1)
-          (error
-           (message "Skipping automatic jupytext-mode for %s: %s"
-                    (file-name-nondirectory script-file)
-                    (error-message-string err))))))))
+    (let ((script-file (my/jupytext--script-file)))
+      (condition-case err
+          (jupytext-mode 1)
+        (error
+         (message "Skipping automatic jupytext-mode for %s: %s"
+                  (file-name-nondirectory script-file)
+                  (error-message-string err)))))))
 
 (define-minor-mode jupytext-mode
   "Buffer-local Jupytext workflow for paired script/notebook editing.

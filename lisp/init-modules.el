@@ -78,6 +78,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-diagnostics-extra)
 (require 'init-health)
 (require 'init-server)
+(require 'init-md)
 
 ;; standalone apps
 (my/require-module-after-any-feature 'init-org 'org)

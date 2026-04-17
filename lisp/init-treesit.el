@@ -47,33 +47,14 @@
   (treesit-auto-install 'prompt)          ;; 关键：不要在打开文件时提示/安装
   :config
   (treesit-auto-add-to-auto-mode-alist 'all)
+  ;; Keep Markdown on classic `markdown-mode`; its UI/customizations are better
+  ;; aligned with this config than `markdown-ts-mode`.
+  (setq auto-mode-alist
+        (cl-remove-if
+         (lambda (entry)
+           (equal entry '("\\.md\\'" . markdown-ts-mode)))
+         auto-mode-alist))
   (global-treesit-auto-mode -1))      ;; 打开时不接管
-
-(defcustom pv/treesit-idle-delay 0.8
-  "Seconds to wait (idle) before switching to *-ts-mode."
-  :type 'number)
-
-(defun pv/treesit--switch-current-buffer ()
-  "Switch current buffer to its *-ts-mode if treesit-auto can apply."
-  (when (and buffer-file-name
-             (not (minibufferp))
-             ;; 避免对特别小/特殊 buffer 折腾，你也可按需加条件
-             (fboundp 'treesit-auto--maybe-apply))
-    ;; treesit-auto 的核心切换逻辑：能切就切，不能切就不动
-    (treesit-auto--maybe-apply)))
-
-(defun pv/treesit-switch-after-open ()
-  "Schedule treesit switch after opening a file."
-  (let ((buf (current-buffer)))
-    (run-with-idle-timer
-     pv/treesit-idle-delay nil
-     (lambda (b)
-       (when (buffer-live-p b)
-         (with-current-buffer b
-           (pv/treesit--switch-current-buffer))))
-     buf)))
-
-(add-hook 'find-file-hook #'pv/treesit-switch-after-open)
 
 (defconst my/treesit-major-mode-remap-candidates
   '((sh-mode . (bash-ts-mode . bash))

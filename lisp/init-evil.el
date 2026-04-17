@@ -195,6 +195,7 @@
     (evil-set-initial-state mode 'normal))
   (dolist (mode '(ibuffer-mode
                   debugger-mode
+                  dired-mode
                   my/diagnostics-mode
                   my/language-server-manager-mode
                   my/language-server-doctor-mode
@@ -215,6 +216,11 @@
                   my/compile-board-mode-hook
                   my/health-mode-hook))
     (add-hook hook #'my/evil-special-buffer-setup-h))
+  ;; Keep file managers and buffer menus fully in Emacs state instead of
+  ;; letting Evil / evil-collection take them over.
+  (add-hook 'ibuffer-mode-hook #'my/evil-disable-local-mode-h)
+  (add-hook 'dired-mode-hook #'my/evil-disable-local-mode-h)
+  (add-hook 'dirvish-mode-hook #'my/evil-disable-local-mode-h)
   (add-hook 'eww-mode-hook #'my/evil-disable-local-mode-h)
   (add-hook 'xwidget-webkit-mode-hook #'my/evil-disable-local-mode-h)
   ;; Silence line out of range error.
@@ -251,7 +257,7 @@
           (seq-remove
            (lambda (mode)
              (memq (if (consp mode) (car mode) mode)
-                   '(vterm eshell)))
+                   '(vterm eshell ibuffer dired)))
            evil-collection-mode-list)))
   :hook (evil-mode . evil-collection-init)
   :bind (([remap evil-show-marks] . evil-collection-consult-mark)
