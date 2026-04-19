@@ -44,7 +44,7 @@
 (defvar my/macos-use-transparent-titlebar nil
   "Whether macOS GUI frames should use a transparent titlebar.")
 
-(defvar my/macos-startup-window-state 'fullscreen
+(defvar my/macos-startup-window-state nil
   "Startup window state for macOS GUI frames.
 Use nil for a regular window, `maximized' for a maximized window, or
 `fullscreen' for a fullscreen window.")

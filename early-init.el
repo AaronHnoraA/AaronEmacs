@@ -124,7 +124,7 @@ Browse with `my/show-suppressed-warnings'.")
 (setq byte-compile-warnings '(not obsolete))
 
 
-(defvar my/gui-undecorated nil
+(defvar my/gui-undecorated t
   "Whether GUI frames should start without native window decorations.
 Keep this disabled by default because some Emacs/macOS builds handle
 undecorated frames poorly.")

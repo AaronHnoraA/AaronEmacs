@@ -35,6 +35,10 @@
 (declare-function consult--lookup-prop "consult" (prop candidates input))
 (declare-function consult--read "consult" (table &rest options))
 (declare-function evil-set-initial-state "evil" (mode state))
+(declare-function persp-current-buffers "perspective" ())
+(declare-function persp-current-name "perspective" ())
+(declare-function project-current "project" (&optional maybe-prompt dir))
+(declare-function project-root "project" (project))
 
 (defvar my/bookmark-history nil)
 (defvar my/bookmark-list-buffer-name "*Bookmarks*")
@@ -511,15 +515,72 @@ Otherwise, use `ace-window' to choose the target window."
   :ensure nil
   :config (windmove-default-keybindings 'meta))
 
+;;; Buffer management helpers
+
+(defun my/kill-buffer-dwim ()
+  "Kill the current buffer, or if it's a special/read-only buffer, bury it."
+  (interactive)
+  (if (or buffer-read-only
+          (and (string-prefix-p "*" (buffer-name))
+               (not (buffer-file-name))))
+      (bury-buffer)
+    (kill-current-buffer)))
+
+(defun my/kill-other-buffers ()
+  "Kill all buffers except the current one and important special buffers."
+  (interactive)
+  (let ((current (current-buffer))
+        (killed 0))
+    (dolist (buf (buffer-list))
+      (unless (or (eq buf current)
+                  (string-prefix-p " " (buffer-name buf))
+                  (get-buffer-process buf))
+        (kill-buffer buf)
+        (cl-incf killed)))
+    (message "Killed %d buffer(s)" killed)))
+
+(defun my/kill-workspace-other-buffers ()
+  "Kill all buffers in the current workspace except the current buffer."
+  (interactive)
+  (if (and (bound-and-true-p persp-mode) (fboundp 'persp-current-buffers))
+      (let ((current (current-buffer))
+            (bufs (persp-current-buffers))
+            (killed 0))
+        (dolist (buf bufs)
+          (unless (or (eq buf current)
+                      (get-buffer-process buf))
+            (kill-buffer buf)
+            (cl-incf killed)))
+        (message "Killed %d buffer(s) in workspace" killed))
+    (my/kill-other-buffers)))
+
+;;; Frame management helpers
+
+(defun my/frame-new ()
+  "Create a new Emacs frame."
+  (interactive)
+  (select-frame (make-frame)))
+
+(defun my/frame-kill ()
+  "Delete the current frame, or quit Emacs if it's the last one."
+  (interactive)
+  (if (> (length (frame-list)) 1)
+      (delete-frame)
+    (save-buffers-kill-terminal)))
+
+(defun my/frame-other ()
+  "Switch to the next Emacs frame."
+  (interactive)
+  (other-frame 1))
+
+(defun my/frame-previous ()
+  "Switch to the previous Emacs frame."
+  (interactive)
+  (other-frame -1))
+
 ;;;; =========================
 ;;;; Dirvish (Dired UI) - practical + pretty + icons
 ;;;; =========================
-
-;; 图标依赖（必须先装）
-(use-package nerd-icons
-  :ensure t
-  :if (display-graphic-p)
-  :defer 1)
 
 (use-package dirvish
   :ensure t
@@ -582,140 +643,10 @@ Otherwise, use `ace-window' to choose the target window."
   (unless (fboundp 'dirvish-peek-mode)
     (define-key dirvish-mode-map (kbd "P") #'ignore)))
 
-;; Nerd Font 图标区（PUA）专用回退：只管图标，不污染符号/数学
+; Nerd Font 图标区（PUA）专用回退：只管图标，不污染符号/数学
 (when (member "JetBrainsMono Nerd Font" (font-family-list))
   (set-fontset-font t '(#xe000 . #xf8ff) "JetBrainsMono Nerd Font" nil 'append)
-  ;; 有些 Nerd Fonts 还用到更高的 PUA 扩展区（可选但建议加）
   (set-fontset-font t '(#xf0000 . #xffffd) "JetBrainsMono Nerd Font" nil 'append))
-
-(use-package centaur-tabs
-  :ensure t
-  :defer 1
-  :config
-  (setq centaur-tabs-style "bar"
-        centaur-tabs-height 24
-        centaur-tabs-set-icons t
-        centaur-tabs-plain-icons t
-        centaur-tabs-gray-out-icons t
-        centaur-tabs-set-close-button t
-        centaur-tabs-set-modified-marker t
-        centaur-tabs-modified-marker " •"
-        centaur-tabs-show-navigation-buttons nil
-        centaur-tabs-label-fixed-length 16
-        centaur-tabs-set-bar 'left
-        centaur-tabs-cycle-scope 'tabs
-        x-underline-at-descent-line nil)
-  (centaur-tabs-headline-match)
-  (centaur-tabs-mode t)
-  (setq uniquify-separator "/")
-  (setq uniquify-buffer-name-style 'forward)
-  (defun centaur-tabs-buffer-groups ()
-    "`centaur-tabs-buffer-groups' control buffers' group rules.
- Group centaur-tabs with mode if buffer is derived from `eshell-mode' `emacs-lisp-mode' `dired-mode' `org-mode' `magit-mode'.
- All buffer name start with * will group to \"Emacs\".
- Other buffer group by `centaur-tabs-get-group-name' with project name."
-    (list
-     (cond
-      ((ignore-errors
-     (and (string= "*xwidget" (substring (buffer-name) 0 8))
-          (not (string= "*xwidget-log*" (buffer-name)))))
-       "Xwidget")
-      ((or (string-equal "*" (substring (buffer-name) 0 1))
-       (memq major-mode '(magit-process-mode
-                  magit-status-mode
-                  magit-diff-mode
-                  magit-log-mode
-                  magit-file-mode
-                  magit-blob-mode
-                  magit-blame-mode
-                  )))
-       "Emacs")
-      ((derived-mode-p 'prog-mode)
-       "Editing")
-      ((derived-mode-p 'dired-mode)
-       "Dired")
-      ((memq major-mode '(helpful-mode
-              help-mode))
-       "Help")
-      ((memq major-mode '(org-mode
-              org-agenda-clockreport-mode
-              org-src-mode
-              org-agenda-mode
-              org-beamer-mode
-              org-indent-mode
-              org-bullets-mode
-              org-cdlatex-mode
-              org-agenda-log-mode
-              diary-mode))
-       "OrgMode")
-      (t
-       (centaur-tabs-get-group-name (current-buffer))))))
-  (defun my/centaur-tabs-apply-ui ()
-    "Style `centaur-tabs' to match the local dark UI."
-    (when (display-graphic-p)
-      (set-face-attribute 'centaur-tabs-default nil
-                          :background "#1d1e26"
-                          :foreground "#70758d"
-                          :height 0.90)
-      (set-face-attribute 'centaur-tabs-unselected nil
-                          :background "#262938"
-                          :foreground "#8b90a8"
-                          :box '(:line-width 4 :color "#262938")
-                          :weight 'regular)
-      (set-face-attribute 'centaur-tabs-selected nil
-                          :background "#34384b"
-                          :foreground "#e5e9f0"
-                          :box '(:line-width 4 :color "#34384b")
-                          :weight 'medium)
-      (set-face-attribute 'centaur-tabs-unselected-modified nil
-                          :inherit 'centaur-tabs-unselected
-                          :foreground "#f5a97f")
-      (set-face-attribute 'centaur-tabs-selected-modified nil
-                          :inherit 'centaur-tabs-selected
-                          :foreground "#e5c07b")
-      (set-face-attribute 'centaur-tabs-active-bar-face nil
-                          :background "#8aa6c1"
-                          :foreground "#8aa6c1")
-      (when (facep 'centaur-tabs-dim-buffer-face)
-        (set-face-attribute 'centaur-tabs-dim-buffer-face nil
-                            :foreground "#6f748b"
-                            :weight 'regular))
-      (when (facep 'centaur-tabs-close-unselected)
-        (set-face-attribute 'centaur-tabs-close-unselected nil
-                            :background "#262938"
-                            :foreground "#6f748b"
-                            :height 0.9))
-      (when (facep 'centaur-tabs-close-selected)
-        (set-face-attribute 'centaur-tabs-close-selected nil
-                            :background "#34384b"
-                            :foreground "#a9bed3"
-                            :height 0.9))
-      (when (facep 'centaur-tabs-name-mouse-face)
-        (set-face-attribute 'centaur-tabs-name-mouse-face nil
-                            :background "#3a3f55"
-                            :foreground "#f5f5f5"))
-      (when (facep 'centaur-tabs-close-mouse-face)
-        (set-face-attribute 'centaur-tabs-close-mouse-face nil
-                            :background "#3a3f55"
-                            :foreground "#f5f5f5"))
-      (when (facep 'centaur-tabs-modified-marker-selected)
-        (set-face-attribute 'centaur-tabs-modified-marker-selected nil
-                            :inherit 'centaur-tabs-selected
-                            :foreground "#8aa6c1"
-                            :weight 'regular))
-      (when (facep 'centaur-tabs-modified-marker-unselected)
-        (set-face-attribute 'centaur-tabs-modified-marker-unselected nil
-                            :inherit 'centaur-tabs-unselected
-                            :foreground "#6f748b"
-                            :weight 'regular))))
-  (my/centaur-tabs-apply-ui)
-  (add-hook 'after-load-theme-hook #'my/centaur-tabs-apply-ui)
-  :hook
-  (dashboard-mode . centaur-tabs-local-mode)
-  (term-mode . centaur-tabs-local-mode)
-  (calendar-mode . centaur-tabs-local-mode)
-  (org-agenda-mode . centaur-tabs-local-mode)
-  (helpful-mode . centaur-tabs-local-mode))
 
 (use-package bookmark
   :ensure nil

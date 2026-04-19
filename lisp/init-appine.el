@@ -875,13 +875,13 @@ export default {
       (find-file (expand-file-name "README.zh-CN.md" appine-root-dir))
     (user-error "Appine root dir is not available")))
 
-(defun my/appine--ensure-window-below-a (orig-fn &rest args)
-  "Prefer splitting below for Appine windows before calling ORIG-FN with ARGS."
+(defun my/appine--ensure-window-right-a (orig-fn &rest args)
+  "Prefer splitting right for Appine windows before calling ORIG-FN with ARGS."
   (if-let* ((existing (and (fboundp 'appine--get-active-window-for-buffer)
                            (appine--get-active-window-for-buffer my/appine-buffer-name))))
       existing
     (let* ((base (selected-window))
-           (new (split-window base nil 'below)))
+           (new (split-window base nil 'right)))
       (set-window-buffer new (appine--buffer))
       (set-window-dedicated-p new nil)
       (with-current-buffer (appine--buffer)
@@ -895,10 +895,10 @@ export default {
           (insert "\nIf you can see this message, Emacs is currently displaying at least two *Appine Window* buffers.\n")
           (insert "\nThe embedded macOS view of Appine can only be attached to the active *Appine Window* buffer.\n")
           (insert "\nYou can press `C-x 1` to close this buffer.\n")))
-      (let* ((total (window-total-height base))
+      (let* ((total (window-total-width base))
              (target (max 8 (floor (* total my/appine-default-window-size)))))
         (ignore-errors
-          (window-resize new (- target (window-total-height new)) nil)))
+          (window-resize new (- target (window-total-width new)) t)))
       new)))
 
 (use-package appine
@@ -921,7 +921,7 @@ export default {
 (with-eval-after-load 'appine
   ;; Migrate any existing user plugins to etc/appine/plugins/ on first load.
   (my/appine--ensure-user-plugins-dir)
-  (advice-add 'appine--ensure-window :around #'my/appine--ensure-window-below-a)
+  (advice-add 'appine--ensure-window :around #'my/appine--ensure-window-right-a)
   ;; Tab registry: all opens go through appine-open-url (appine-open-file
   ;; calls appine-open-url internally), so one advisor covers both.
   (advice-add 'appine-open-url  :around #'my/appine--track-open-url-a)

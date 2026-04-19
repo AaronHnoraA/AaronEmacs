@@ -29,8 +29,8 @@
   :init
   ;; Point to the Claude CLI binary (installed via npm / brew / manual).
   (setq claude-code-ide-cli-path "/Users/hc/.local/bin/claude"
-        claude-code-ide-window-side 'bottom
-        claude-code-ide-window-height 18)
+        claude-code-ide-window-side 'right
+        claude-code-ide-window-width 90)
   :config
   ;; Expose Emacs MCP tools so Claude can read/edit buffers, eval Elisp, etc.
   (claude-code-ide-emacs-tools-setup))
@@ -56,15 +56,7 @@
         codex-cli-terminal-backend 'vterm
         codex-cli-side 'right
         codex-cli-width 90)
-  :config
-  (defun my/codex-cli-setup-bottom-window (buffer)
-    "Display BUFFER in a splittable bottom window."
-    (display-buffer-at-bottom
-     buffer
-     '((window-height . 18)
-       (dedicated . nil))))
-  (advice-add 'codex-cli--setup-side-window :override
-              #'my/codex-cli-setup-bottom-window))
+  :config)
 
 
 (provide 'init-ai-ide)

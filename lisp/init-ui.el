@@ -125,7 +125,8 @@
   :ensure nil
   :hook (after-init . tab-bar-history-mode)
   :custom
-  (tab-bar-history-buttons-show nil))
+  (tab-bar-history-buttons-show nil)
+  (tab-bar-show t))
 
 
 
@@ -321,18 +322,18 @@
                             :height 0.96)
         (set-face-attribute 'tab-bar nil
                             :background "#1d1e26"
-                            :foreground "#70758d"
+                            :foreground "#8e95ad"
                             :box '(:line-width 6 :color "#1d1e26")
-                            :height 0.92)
+                            :height 0.98)
         (set-face-attribute 'tab-bar-tab nil
-                            :background "#2f3140"
-                            :foreground "#e5e9f0"
-                            :box '(:line-width 6 :color "#2f3140")
+                            :background "#384056"
+                            :foreground "#f2f5fb"
+                            :box '(:line-width 6 :color "#384056")
                             :weight 'medium)
         (set-face-attribute 'tab-bar-tab-inactive nil
-                            :background "#232530"
-                            :foreground "#7f849c"
-                            :box '(:line-width 6 :color "#232530")
+                            :background "#232733"
+                            :foreground "#9197ad"
+                            :box '(:line-width 6 :color "#232733")
                             :weight 'regular)
         (when (facep 'doom-modeline-bar)
           (set-face-attribute 'doom-modeline-bar nil

@@ -19,6 +19,23 @@
 (declare-function my/bookmark-set-no-overwrite "init-windows")
 (declare-function my/bookmark-set-line "init-windows")
 (declare-function my/bookmark-toggle-line "init-windows")
+(declare-function my/kill-buffer-dwim "init-windows")
+(declare-function my/kill-workspace-other-buffers "init-windows")
+(declare-function my/frame-new "init-windows")
+(declare-function my/frame-kill "init-windows")
+(declare-function my/frame-other "init-windows")
+(declare-function my/frame-previous "init-windows")
+(declare-function my/tab-close "init-workspaces")
+(declare-function my/tab-close-other-tabs "init-workspaces")
+(declare-function my/tab-new "init-workspaces")
+(declare-function my/tab-new-named "init-workspaces")
+(declare-function my/tab-rename "init-workspaces")
+(declare-function my/tab-switch "init-workspaces")
+(declare-function my/workspace-dispatch "init-workspaces")
+(declare-function my/workspace-other "init-workspaces")
+(declare-function my/workspace-switch-buffer "init-workspaces")
+(declare-function my/workspace-switch-left "init-workspaces")
+(declare-function my/workspace-switch-right "init-workspaces")
 (declare-function avy-goto-char-in-line "avy" (&optional arg))
 (declare-function avy-goto-char-timer "avy" (&optional arg))
 (declare-function evil-emacs-state "evil")
@@ -346,22 +363,26 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       "fj" 'dired-jump
       "fJ" 'dired-jump-other-window
 
-      ;; buffer & bookmark
-      "b" '(:wk "bufmark")
+      ;; buffer
+      "b" '(:wk "buffer")
       "bb" 'switch-to-buffer
       "bB" 'switch-to-buffer-other-window
+      "bo" 'previous-buffer
+      "bO" 'next-buffer
       "bc" 'clone-indirect-buffer
       "bC" 'clone-indirect-buffer-other-window
       "by" '+copy-current-buffer-name
       "bv" 'revert-buffer-quick
       "bz" 'bury-buffer
-      ;; --------------
+      "bk" 'my/kill-buffer-dwim
+      "bK" 'my/kill-workspace-other-buffers
+      "bx" 'kill-buffer-and-window
+      "bi" 'ibuffer
+      ;; bookmarks
       "b." 'my/bookmark-dispatch
       "bm" 'my/bookmark-set
       "bM" 'my/bookmark-set-no-overwrite
-      "bi" 'bookmark-insert
       "br" 'my/bookmark-rename-dwim
-      "bw" 'bookmark-write
       "bj" 'my/bookmark-jump-dwim
       "bJ" 'my/bookmark-jump-other-window-dwim
       "bl" 'my/bookmark-list
@@ -413,25 +434,33 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
       ;; window
       "w" 'evil-window-map
       "wx" 'kill-buffer-and-window
-      "wu" '+transient-tab-bar-history
+      "wu" 'winner-undo
+      "wU" 'winner-redo
       "w-" 'split-window-vertically
       "w/" 'split-window-horizontally
 
-      ;; tab
-      "t" '(:wk "tab")
-      "tc" 'tab-bar-close-tab
-      "tC" 'tab-bar-close-group-tabs
-      "tg" 'tab-bar-change-tab-group
-      "ti" 'tab-switcher
-      "tn" 'tab-bar-new-tab
-      "to" 'tab-bar-close-other-tabs
-      "tt" 'tab-bar-switch-to-tab
+      ;; frame
+      "F" '(:wk "frame")
+      "Fn" 'my/frame-new
+      "Fd" 'my/frame-kill
+      "Fo" 'my/frame-other
+      "FO" 'my/frame-previous
+      "Fr" 'set-frame-name
+
+      ;; workspace / tab-bar
+      "t" '(:wk "workspace")
+      "td" 'my/tab-close
+      "tD" 'my/tab-close-other-tabs
+      "tg" 'my/workspace-dispatch
+      "ti" 'my/workspace-switch-buffer
+      "tn" 'my/tab-new
+      "tN" 'my/tab-new-named
+      "to" 'my/workspace-other
+      "tt" 'my/tab-switch
       "t'" 'tab-bar-switch-to-recent-tab
-      "tr" 'tab-bar-rename-tab
-      "t[" 'centaur-tabs-backward
-      "t]" 'centaur-tabs-forward
-      "t{" 'centaur-tabs-backward-group
-      "t}" 'centaur-tabs-forward-group
+      "tr" 'my/tab-rename
+      "t[" 'my/workspace-switch-left
+      "t]" 'my/workspace-switch-right
 
       ;; search
       "s" '(:wk "search")

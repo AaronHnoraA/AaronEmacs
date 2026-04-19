@@ -91,7 +91,13 @@
 - `SPC SPC`
   打开统一的 Telescope 风格搜索面板。
 - `SPC TAB`
-  工作区菜单；`SPC TAB TAB` 显示工作区，`.` 切换，`n` 新建，`d` 删除，`[` / `]` 左右切换。
+  工作区菜单；`SPC TAB TAB` 显示工作区，`.` 切换 workspace，`b` 切当前 workspace 的 buffer，`n` 新建，`d` 删除，`[` / `]` 左右切换。
+- 标签/工作区心智模型
+  `frame = 一个 Emacs GUI 窗口`，`tab = workspace 的可视化壳`，`workspace = perspective`，`window = frame 里的分栏`，`buffer = 文件或临时内容`。现在约定是“顶层 `tab-bar` 代表 workspace，`centaur-tabs` 只代表当前 workspace 里的 buffer”；优先用 `SPC t` 管顶层 tab，用 `SPC TAB` 管 workspace 细节。
+- `SPC t`
+  顶层 tab 工作流；`tn` 新建 tab+workspace，`tN` 新建命名 tab+workspace，`tt` 切 tab，`tr` 同时重命名当前 tab 和 workspace，`tc` 同时关闭当前 tab 和 workspace，`t[` / `t]` 切当前 workspace 的 buffer tab，`t{` / `t}` 左右切 workspace。
+- 顶部 tab 栏
+  现在会始终显示，即使只有一个 tab 也不会消失；配置会对每个 GUI frame 显式强制打开这条栏，标签格式改成更明确的“编号 + workspace 名”。
 - `SPC SPC I`
   打开当前 workspace / 项目的 symbols；输入关键词后走 `xref-find-apropos` + `consult-xref`，并直接预览候选位置。
 - `SPC SPC m`

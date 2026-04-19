@@ -374,6 +374,15 @@ Only fall back to `pdf-tools-install' when the checker fails."
                                (find-file-noselect pdf))))
         (apply orig args)))))
 
+(defun my/pdf-view-display-in-right-window (buffer &optional _alist)
+  "Display PDF BUFFER in a reusable right-side window."
+  (let ((window (or (get-buffer-window buffer)
+                    (split-window (selected-window) nil 'right))))
+    (set-window-buffer window buffer)
+    (set-window-dedicated-p window nil)
+    (window-preserve-size window t nil)
+    window))
+
 ;; =========================
 ;; AUCTeX 基础配置
 ;; =========================
@@ -428,6 +437,7 @@ Only fall back to `pdf-tools-install' when the checker fails."
   ;; 默认走 PDF Tools，保留 SyncTeX 正反向同步。
   (setq TeX-view-program-selection
         '((output-pdf "PDF Tools")))
+  (setq pdf-sync-forward-display-action '(my/pdf-view-display-in-right-window))
 
   (setq TeX-interactive-mode t)
   (setq LaTeX-item-indent 0))
