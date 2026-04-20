@@ -1143,7 +1143,7 @@ Else, call `comment-or-uncomment-region' on the current line."
 
 
 ;;; ============================
-;;; undo-tree: 本地集中存放历史文件；远程(ssh/TRAMP)不落盘
+;;; undo-tree: 历史文件统一集中存放到本地 var（含 TRAMP）
 ;;; ============================
 (use-package undo-tree
   :ensure t
@@ -1166,45 +1166,116 @@ Else, call `comment-or-uncomment-region' on the current line."
   (setq undo-tree-history-directory-alist
         `(("." . ,my/undo-tree-history-dir)))
 
-  (defun my/undo-tree-local-history-p (&optional file)
+  (defun my/undo-tree-history-enabled-p (&optional file)
     "Return non-nil when FILE should persist undo-tree history locally."
-    (and file (not (file-remote-p file))))
+    (and (stringp file)
+         (not (string-empty-p file))))
+
+  (defun my/undo-tree-sanitize-history-label (label)
+    "Return LABEL sanitized for use in a local undo history filename."
+    (let ((sanitized (replace-regexp-in-string "[^[:alnum:]._-]+" "_" label)))
+      (if (string-empty-p sanitized) "buffer" sanitized)))
 
   (defun my/undo-tree-normalize-file-name (file)
-    "Return a stable local file name for FILE when saving undo history."
-    (let* ((local-file (if (file-remote-p file) (file-local-name file) file))
-           (expanded-file (expand-file-name local-file)))
+    "Return a stable canonical file name for FILE when saving undo history."
+    (let ((expanded-file (expand-file-name file)))
       (if (file-exists-p expanded-file)
           (file-truename expanded-file)
         expanded-file)))
 
+  (defun my/undo-tree-history-key (file)
+    "Return a stable key for FILE used to derive local history filenames."
+    (if-let* ((remote (file-remote-p file 'method)))
+        (progn
+          (require 'tramp)
+          (let* ((vec (tramp-dissect-file-name file))
+                 (method (or (tramp-file-name-method vec) "remote"))
+                 (user (or (tramp-file-name-user vec) "nouser"))
+                 (host (or (tramp-file-name-host vec) "nohost"))
+                 (local (file-local-name file)))
+            (format "remote:%s:%s@%s:%s"
+                    method user host
+                    (my/undo-tree-normalize-file-name local))))
+      (format "local:%s" (my/undo-tree-normalize-file-name file))))
+
+  (defun my/undo-tree-history-file-name-v2 (file)
+    "Return the v2 local undo-tree history path for FILE."
+    (let* ((key (my/undo-tree-history-key file))
+           (remote-p (file-remote-p file))
+           (category (if remote-p "remote" "local"))
+           (leaf (or (file-name-nondirectory
+                      (directory-file-name (if remote-p
+                                               (file-local-name file)
+                                             file)))
+                     "buffer"))
+           (label (my/undo-tree-sanitize-history-label leaf))
+           (hash (secure-hash 'sha1 key))
+           (dir (expand-file-name category my/undo-tree-history-dir))
+           (history-file (expand-file-name
+                          (format "%s-%s.~undo-tree~" label hash)
+                          dir)))
+      (unless (file-directory-p dir)
+        (make-directory dir t))
+      history-file))
+
   (defun my/undo-tree-history-file-name (file &optional legacy)
     "Return the undo-tree history path for FILE.
 When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
-    (let* ((backup-directory-alist undo-tree-history-directory-alist)
-           (target-file (if legacy
-                            file
-                          (my/undo-tree-normalize-file-name file)))
-           (name (make-backup-file-name-1 target-file))
-           (history-file
-            (concat (file-name-directory name) "."
-                    (file-name-nondirectory name)
-                    ".~undo-tree~")))
-      (when-let* ((dir (file-name-directory history-file)))
-        (unless (file-directory-p dir)
-          (make-directory dir t)))
-      history-file))
+    (if legacy
+        (let* ((backup-directory-alist undo-tree-history-directory-alist)
+               (target-file (my/undo-tree-normalize-file-name file))
+               (name (make-backup-file-name-1 target-file))
+               (history-file
+                (concat (file-name-directory name) "."
+                        (file-name-nondirectory name)
+                        ".~undo-tree~")))
+          (when-let* ((dir (file-name-directory history-file)))
+            (unless (file-directory-p dir)
+              (make-directory dir t)))
+          history-file)
+      (my/undo-tree-history-file-name-v2 file)))
 
   (defun my/undo-tree-make-history-save-file-name (_orig-fun file)
     "Use a stable history filename for FILE."
     (my/undo-tree-history-file-name file))
+
+  (defun my/undo-tree-load-history-core (&optional filename noerror)
+    "Load undo-tree history for the current buffer from FILENAME.
+When FILENAME is nil, resolve the canonical local history path."
+    (let* ((canonical-file (and buffer-file-name
+                                (my/undo-tree-history-file-name buffer-file-name)))
+           (legacy-file (and buffer-file-name
+                             (my/undo-tree-history-file-name buffer-file-name 'legacy)))
+           (resolved-file
+            (cond
+             (filename filename)
+             ((and canonical-file (file-exists-p canonical-file)) canonical-file)
+             ((and legacy-file (file-exists-p legacy-file)) legacy-file)
+             (t canonical-file))))
+      (condition-case err
+          (let ((inhibit-message t)
+                (message-log-max nil))
+            (undo-tree-load-history resolved-file noerror))
+        (error
+         ;; Broken history files should not keep polluting every reopen.
+         (when (and resolved-file
+                    (file-exists-p resolved-file))
+           (ignore-errors
+             (delete-file resolved-file)))
+         (display-warning
+          'undo-tree
+          (format "Discarded unreadable undo-tree history %s: %s"
+                  resolved-file
+                  (error-message-string err))
+          :warning)
+         nil))))
 
   (defun my/undo-tree-load-history (orig-fun &optional filename noerror)
     "Load undo history through ORIG-FUN, with path fallbacks for FILENAME."
     (cond
      ((and (null filename)
            buffer-file-name
-           (not (my/undo-tree-local-history-p buffer-file-name)))
+           (not (my/undo-tree-history-enabled-p buffer-file-name)))
       nil)
      ((and (null filename)
            buffer-file-name
@@ -1216,38 +1287,29 @@ When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
      ((or filename (not buffer-file-name))
       (funcall orig-fun filename noerror))
      (t
-      (let* ((canonical-file (my/undo-tree-history-file-name buffer-file-name))
-             (legacy-file (my/undo-tree-history-file-name buffer-file-name 'legacy))
-             (resolved-file
-             (cond
-               ((file-exists-p canonical-file) canonical-file)
-               ((file-exists-p legacy-file) legacy-file)
-               (t canonical-file))))
-        (condition-case err
-            (let ((inhibit-message t)
-                  (message-log-max nil))
-              (funcall orig-fun resolved-file noerror))
-          (error
-           ;; Broken history files should not keep polluting every reopen.
-           (when (and resolved-file
-                      (file-exists-p resolved-file))
-             (ignore-errors
-               (delete-file resolved-file)))
-           (display-warning
-            'undo-tree
-            (format "Discarded unreadable undo-tree history %s: %s"
-                    resolved-file
-                    (error-message-string err))
-            :warning)
-           nil))))))
+      (my/undo-tree-load-history-core nil noerror))))
 
   (defun my/undo-tree-save-history (orig-fun &optional filename overwrite)
-    "Save undo history through ORIG-FUN, skipping remote files when FILENAME is nil."
+    "Save undo history through ORIG-FUN into the local var history dir."
     (if (and (null filename)
              buffer-file-name
-             (not (my/undo-tree-local-history-p buffer-file-name)))
+             (not (my/undo-tree-history-enabled-p buffer-file-name)))
         nil
       (funcall orig-fun filename overwrite)))
+
+  (defun my/undo-tree-load-history-early-a (orig-fun &rest args)
+    "Restore persistent undo history before `after-find-file' runs hooks.
+This avoids hash mismatches when file-open hooks mutate the buffer."
+    (when (and buffer-file-name
+               undo-tree-auto-save-history
+               (not revert-buffer-in-progress-p)
+               (not (eq buffer-undo-list t))
+               (my/undo-tree-history-enabled-p buffer-file-name)
+               (not (buffer-modified-p)))
+      (unless undo-tree-mode
+        (undo-tree-mode 1))
+      (my/undo-tree-load-history-core nil 'noerror))
+    (apply orig-fun args))
 
   ;; 4) 让它在“本地文件”自动把历史写盘（崩溃也可恢复）
   (setq undo-tree-auto-save-history t)
@@ -1269,13 +1331,12 @@ When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
               :around #'my/undo-tree-make-history-save-file-name)
   (advice-add 'undo-tree-load-history :around #'my/undo-tree-load-history)
   (advice-add 'undo-tree-save-history :around #'my/undo-tree-save-history)
+  (advice-add 'after-find-file :around #'my/undo-tree-load-history-early-a)
   ;; Only persist history for on-disk file states. Saving on `kill-buffer-hook'
   ;; can poison the history file when the buffer has unsaved edits, causing the
   ;; next reopen to fail the hash check and drop persistent undo history.
   (remove-hook 'kill-buffer-hook #'undo-tree-save-history-from-hook)
-  
-  ;; 关键:在打开文件后立即加载历史
-  (add-hook 'find-file-hook #'undo-tree-load-history-from-hook))
+  (remove-hook 'find-file-hook #'undo-tree-load-history-from-hook))
 
 
 (use-package outline-indent

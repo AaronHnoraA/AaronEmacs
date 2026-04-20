@@ -657,6 +657,18 @@ following."
        (or buffer-file-name
            (eq major-mode 'dired-mode))))
 
+(defun my/treemacs-follow-context-active-p (&optional buffer)
+  "Return non-nil when BUFFER is still the active source for Treemacs follow.
+When BUFFER is nil, use the current buffer in the selected window."
+  (let ((window (selected-window))
+        (target (or buffer (current-buffer))))
+    (and (window-live-p window)
+         (not (eq window (treemacs-get-local-window)))
+         (eq (window-buffer window) target)
+         (buffer-live-p target)
+         (with-current-buffer target
+           (my/treemacs-source-buffer-p)))))
+
 (defun my/treemacs-find-current-user-project-a (orig-fn &rest args)
   "Only let source buffers drive Treemacs project following."
   (when (my/treemacs-source-buffer-p)
@@ -713,18 +725,19 @@ When PREFER-TAG is non-nil, prefer following the current tag when one exists."
   "Update Treemacs to follow BUFFER's current file and symbol."
   (setq my/treemacs-cursor-follow-timer nil)
   (when (and (buffer-live-p buffer)
-             (window-live-p (treemacs-get-local-window)))
+             (window-live-p (treemacs-get-local-window))
+             (my/treemacs-follow-context-active-p buffer))
     (with-current-buffer buffer
-      (when (my/treemacs-source-buffer-p)
-        (my/treemacs-follow-source-silently t)))))
+      (my/treemacs-follow-source-silently t))))
 
 (defun my/treemacs-schedule-follow (&rest _)
   "Schedule a Treemacs follow update for the current source buffer."
+  (when (timerp my/treemacs-cursor-follow-timer)
+    (cancel-timer my/treemacs-cursor-follow-timer)
+    (setq my/treemacs-cursor-follow-timer nil))
   (when (and my/treemacs-cursor-follow-mode
-             (my/treemacs-source-buffer-p)
-             (window-live-p (treemacs-get-local-window)))
-    (when (timerp my/treemacs-cursor-follow-timer)
-      (cancel-timer my/treemacs-cursor-follow-timer))
+             (window-live-p (treemacs-get-local-window))
+             (my/treemacs-follow-context-active-p))
     (let ((buffer (current-buffer)))
       (setq my/treemacs-cursor-follow-timer
             (run-with-idle-timer my/treemacs-cursor-follow-delay nil
