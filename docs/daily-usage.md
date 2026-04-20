@@ -137,6 +137,41 @@
 - `SPC e 1`
   单窗口 / 恢复窗口布局切换
 
+### Git `SPC g`
+
+- `SPC g .`
+  Git Hub；把状态、当前文件 diff / log / blame / stage、merge conflict 收到一个 transient 菜单里
+- `SPC g g`
+  `magit-status`
+- `SPC g w`
+  打开 Git 工作台，列表看当前仓库文件状态；`RET` 打开文件，`d` diff，`l` log，`B` blame，`s` / `u` stage / unstage
+- `SPC g t`
+  打开 `gittree` 可视化；当前窗口显示带颜色的 `git log --graph --decorate --oneline --all`
+- `SPC g d`
+  当前文件直接对比任意 Git revision 和现在的 buffer，当前窗口打开 unified diff
+- `SPC g =`
+  当前文件直接对比 `HEAD` 和现在的 buffer
+- `SPC g b`
+  当前文件对比当前 branch 基线；优先取 upstream merge-base，没有 upstream 时退回仓库 root commit
+- `SPC g l`
+  当前文件历史
+- `SPC g B`
+  blame 切换
+- `SPC g S` / `SPC g U`
+  stage / unstage 当前文件
+- `SPC g [` / `SPC g ]`
+  上一个 / 下一个 hunk
+- `SPC g r`
+  回滚当前 hunk
+- `SPC g s`
+  stage 当前 hunk
+- `SPC g h`
+  查看当前 hunk
+- merge conflict 文件内
+  `o` ours，`t` theirs，`b` both，`B` base，`n` / `p` 或 `[c` / `]c` 跳冲突，`e` 进 `ediff`，`q` 打开冲突菜单
+- `gittree` buffer 内
+  `RET` / `o` 或鼠标点 commit 查看当前 commit，`n` / `p` 上下跳 commit，`y` 复制 hash，`g` 刷新，`q` 退出回原 buffer
+
 macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 
 - `H-o` / `H-O`

@@ -138,8 +138,8 @@
   打开当前项目的 `.editorconfig`。
 - `SPC q r`
   重启 Emacs。
-- `SPC g g` / `SPC g [` / `SPC g ]` / `SPC g r` / `SPC g s` / `SPC g h` / `SPC g y` / `SPC g Y`
-  Git 状态 / 上下一个 hunk / 回滚 hunk / stage hunk / 查看 hunk / 复制远程仓库 URL / 浏览远程仓库 URL。
+- `SPC g .` / `SPC g g` / `SPC g w` / `SPC g t` / `SPC g d` / `SPC g =` / `SPC g b` / `SPC g l` / `SPC g B` / `SPC g S` / `SPC g U` / `SPC g [` / `SPC g ]` / `SPC g r` / `SPC g s` / `SPC g h` / `SPC g y` / `SPC g Y`
+  Git Hub / Git 状态 / Git 工作台（状态列表）/ commit tree 可视化 / 当前文件对比任意 revision（当前窗口 unified diff）/ 当前文件对比 `HEAD` / 当前文件对比当前 branch 基线 / 当前文件历史 / blame 切换 / stage 当前文件 / unstage 当前文件 / 上下一个 hunk / 回滚 hunk / stage hunk / 查看 hunk / 复制远程仓库 URL / 浏览远程仓库 URL。
 - `za` / `zo` / `zc` / `zR` / `zM`
   代码折叠：切换 / 打开 / 关闭 / 全展开 / 全折叠。
 - `SPC v v` / `SPC v f` / `SPC v s` / `SPC v b`
