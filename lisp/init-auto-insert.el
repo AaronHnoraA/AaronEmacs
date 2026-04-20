@@ -58,6 +58,9 @@ still be inserted manually via `my/template-switch'."
 Value is an alist like `((python . \"module.py\"))'.  When non-nil, this takes
 precedence over `my/template-current' when choosing the template file.")
 
+(defvar-local my/template--remote-placeholder-created nil
+  "Whether this buffer bootstrapped a missing remote file for auto-insert.")
+
 (defun my/template--safe-kinds-p (value)
   (and (listp value)
        (seq-every-p (lambda (x) (and (symbolp x) (memq x my/template-kinds))) value)))
@@ -76,6 +79,18 @@ precedence over `my/template-current' when choosing the template file.")
 (put 'my/template-auto-insert-enabled 'safe-local-variable #'booleanp)
 (put 'my/template-auto-insert-enabled-kinds 'safe-local-variable #'my/template--safe-kinds-p)
 (put 'my/template-current-override 'safe-local-variable #'my/template--safe-current-override-p)
+
+(defun my/template--bootstrap-remote-file-maybe ()
+  "Create a missing remote file before auto-insert when possible.
+
+This mirrors the successful manual workaround of creating the remote file
+first and then opening it."
+  (when (and buffer-file-name
+             (file-remote-p buffer-file-name)
+             (not (file-exists-p buffer-file-name)))
+    (let ((coding-system-for-write 'no-conversion))
+      (write-region "" nil buffer-file-name nil 'silent))
+    (setq-local my/template--remote-placeholder-created t)))
 
 (defun my/template--kind-for-extension (file)
   (when-let* ((ext (file-name-extension (or file ""))))
@@ -223,7 +238,8 @@ template filename under templates/KIND/."
   (and buffer-file-name
        (not buffer-read-only)
        (bobp) (eobp)
-       (not (file-exists-p buffer-file-name))
+       (or my/template--remote-placeholder-created
+           (not (file-exists-p buffer-file-name)))
        (not (buffer-modified-p))
        (null (buffer-base-buffer))
        (not (bound-and-true-p org-capture-current-plist))
@@ -233,6 +249,7 @@ template filename under templates/KIND/."
   "Auto-insert template for KIND when enabled.
 
 When TEMPLATE is non-nil, insert that exact template file under templates/KIND/."
+  (my/template--bootstrap-remote-file-maybe)
   (when (and (my/template--auto-insert-allowed-p)
              my/template-auto-insert-enabled
              (memq kind my/template-auto-insert-enabled-kinds))

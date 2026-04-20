@@ -35,6 +35,9 @@
 (defvar my/terminal-startup-cd-inhibited nil
   "When non-nil, start terminal buffers directly in the target directory.")
 
+(defvar-local my/vterm-target-directory nil
+  "Target directory a VTerm buffer should represent after startup sync.")
+
 (defun my/terminal--startup-directory (&optional directory)
   "Return a safe startup directory for DIRECTORY, or nil to use DIRECTORY directly."
   (unless my/terminal-startup-cd-inhibited
@@ -395,13 +398,26 @@ If popup is focused, kill it."
 
 (require 'init-vterm-popup)
 
+(defun my/vterm--set-target-directory (buffer directory)
+  "Record DIRECTORY as BUFFER's target working directory."
+  (when-let* ((buffer (and (buffer-live-p buffer) buffer))
+              (directory (my/terminal-normalize-directory directory)))
+    (with-current-buffer buffer
+      (setq-local my/vterm-target-directory directory
+                  default-directory directory))
+    directory))
+
+(defun my/vterm--sync-target-directory-h ()
+  "Re-apply the recorded target directory for the current VTerm buffer."
+  (when-let* ((directory (my/terminal-normalize-directory my/vterm-target-directory)))
+    (setq-local default-directory directory)))
+
 (defun my/vterm--send-cd (buffer directory)
   "Send `cd DIRECTORY' to VTerm BUFFER."
   (when-let* ((buffer (and (buffer-live-p buffer) buffer))
               (directory (my/terminal-normalize-directory directory))
               (command (my/terminal-cd-command directory)))
-    (with-current-buffer buffer
-      (setq default-directory directory))
+    (my/vterm--set-target-directory buffer directory)
     (my/vterm-send-command buffer command)))
 
 (defun my/vterm--start-in-home-and-cd (orig-fn &rest args)
@@ -459,6 +475,14 @@ If popup is focused, kill it."
   :hook (vterm-mode . (lambda ()
                         (shell-mode-common-init)
                         (my/terminal-apply-ui)
+                        (my/vterm--sync-target-directory-h)
+                        (run-at-time
+                         0 nil
+                         (lambda (buffer)
+                           (when (buffer-live-p buffer)
+                             (with-current-buffer buffer
+                               (my/vterm--sync-target-directory-h))))
+                         (current-buffer))
                         (when (fboundp 'evil-emacs-state)
                           (evil-emacs-state))
                         (run-at-time
