@@ -631,16 +631,33 @@ following."
 (defvar my/treemacs-cursor-follow-timer nil
   "Idle timer used by `my/treemacs-cursor-follow-mode'.")
 
+(defvar my/treemacs-last-follow-state nil
+  "Last source context synchronized to Treemacs.")
+
 (defcustom my/treemacs-cursor-follow-delay 0.12
   "Idle delay before Treemacs follows the current file and symbol."
   :type 'number
   :group 'my/project)
 
+(defun my/treemacs-current-follow-state (&optional buffer window)
+  "Return the follow state for BUFFER in WINDOW.
+The state is used to avoid re-following when the source context did not
+actually change."
+  (let ((buffer (or buffer (current-buffer)))
+        (window (or window (selected-window))))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (list :buffer buffer
+              :window window
+              :point (point)
+              :tick (buffer-chars-modified-tick))))))
+
 (defun my/treemacs-reset-follow-state ()
   "Clear Treemacs caches used by file and tag following."
   (when (timerp my/treemacs-cursor-follow-timer)
     (cancel-timer my/treemacs-cursor-follow-timer))
-  (setq my/treemacs-cursor-follow-timer nil)
+  (setq my/treemacs-cursor-follow-timer nil
+        my/treemacs-last-follow-state nil)
   (dolist (buffer (buffer-list))
     (with-current-buffer buffer
       (when (boundp 'treemacs--imenu-cache)
@@ -719,7 +736,8 @@ When PREFER-TAG is non-nil, prefer following the current tag when one exists."
               (with-selected-window treemacs-window
                 (hl-line-highlight)
                 (set-window-point treemacs-window (point))
-                (force-window-update treemacs-window)))))))))
+                (force-window-update treemacs-window)))
+            followed))))))
 
 (defun my/treemacs-follow-current-buffer (buffer)
   "Update Treemacs to follow BUFFER's current file and symbol."
@@ -728,7 +746,9 @@ When PREFER-TAG is non-nil, prefer following the current tag when one exists."
              (window-live-p (treemacs-get-local-window))
              (my/treemacs-follow-context-active-p buffer))
     (with-current-buffer buffer
-      (my/treemacs-follow-source-silently t))))
+      (when (my/treemacs-follow-source-silently t)
+        (setq my/treemacs-last-follow-state
+              (my/treemacs-current-follow-state buffer (selected-window)))))))
 
 (defun my/treemacs-schedule-follow (&rest _)
   "Schedule a Treemacs follow update for the current source buffer."
@@ -738,11 +758,13 @@ When PREFER-TAG is non-nil, prefer following the current tag when one exists."
   (when (and my/treemacs-cursor-follow-mode
              (window-live-p (treemacs-get-local-window))
              (my/treemacs-follow-context-active-p))
-    (let ((buffer (current-buffer)))
-      (setq my/treemacs-cursor-follow-timer
-            (run-with-idle-timer my/treemacs-cursor-follow-delay nil
-                                 #'my/treemacs-follow-current-buffer
-                                 buffer)))))
+    (let* ((buffer (current-buffer))
+           (state (my/treemacs-current-follow-state buffer (selected-window))))
+      (unless (equal state my/treemacs-last-follow-state)
+        (setq my/treemacs-cursor-follow-timer
+              (run-with-idle-timer my/treemacs-cursor-follow-delay nil
+                                   #'my/treemacs-follow-current-buffer
+                                   buffer))))))
 
 (define-minor-mode my/treemacs-cursor-follow-mode
   "Follow the current file and symbol in Treemacs."
@@ -763,7 +785,8 @@ When PREFER-TAG is non-nil, prefer following the current tag when one exists."
     (remove-hook 'first-change-hook #'my/treemacs-reset-follow-state)
     (when (timerp my/treemacs-cursor-follow-timer)
       (cancel-timer my/treemacs-cursor-follow-timer))
-    (setq my/treemacs-cursor-follow-timer nil)))
+    (setq my/treemacs-cursor-follow-timer nil
+          my/treemacs-last-follow-state nil)))
 
 (defun show-imenu ()
   "Toggle a left Treemacs view that follows the current file and tag."
