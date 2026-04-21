@@ -5,6 +5,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'init-funcs)
 
 (declare-function my/bookmark-delete-dwim "init-windows")

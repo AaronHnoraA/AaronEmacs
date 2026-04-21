@@ -6,7 +6,9 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'json)
 (require 'init-funcs)
+(require 'init-remote-connectboard nil t)
 (require 'subr-x)
 (require 'transient)
 
@@ -24,6 +26,11 @@
 
 (defvar my/jupytext-command "jupytext"
   "Command used to run Jupytext.")
+
+(defcustom my/jupyter-remote-ikernel-command "/opt/homebrew/anaconda3/bin/remote_ikernel"
+  "Absolute path to the `remote_ikernel' management command."
+  :type 'string
+  :group 'my/jupyter)
 
 (defvar-local my/jupytext-notebook-file nil
   "Notebook file paired with the current script buffer.")
@@ -45,6 +52,9 @@
 
 (defvar my/jupyter-manager-setup-functions nil
   "Hook used to extend the Jupyter Hub keymap.")
+
+(defvar my/jupyter-lab-command)
+(defvar my/jupyter-remote-ikernel-command)
 
 (declare-function dired "dired" (dirname &optional switches))
 (declare-function my/evil-global-leader-set "init-funcs" (key def &optional label))
@@ -75,6 +85,311 @@
 (declare-function my/jupyter-use-connection-file-for-org-block "init-jupyter"
                   (file &optional language))
 (declare-function my/jupyter-run-repl-for-language "init-jupyter" (language))
+(declare-function my/jupyter-lab--command "init-jupyter-lab")
+(declare-function my/jupyter-lab--default-directory "init-jupyter-lab")
+(declare-function my/jupyter-lab-open-log "init-jupyter-lab")
+(declare-function my/jupyter-lab-url "init-jupyter-lab")
+(declare-function my/jupyter-manager--entry-kernel "init-jupyter")
+
+(defun my/jupyter-manager--entry-resource-dir (&optional entry)
+  "Return the kernelspec resource directory associated with ENTRY or point."
+  (let* ((entry (or entry (my/jupyter-manager--current-entry)))
+         (kind (plist-get entry :kind)))
+    (pcase kind
+      ('kernel
+       (or (plist-get entry :resource-dir)
+           (let ((kernel (plist-get entry :kernel)))
+             (and kernel (my/jupyter--kernelspec-resource-dir kernel)))))
+      (_ nil))))
+
+(defcustom my/jupyter-config-file-candidates
+  '("jupyter_server_config.py"
+    "jupyter_lab_config.py"
+    "jupyter_notebook_config.py"
+    "jupyter_server_config.json"
+    "jupyter_lab_config.json")
+  "Likely Jupyter config files to edit from the board."
+  :type '(repeat string)
+  :group 'my/jupyter)
+
+(defun my/jupyter--jupyter-command ()
+  "Return the Jupyter executable used for local config discovery."
+  (cond
+   ((and (boundp 'my/jupyter-lab-command)
+         (stringp my/jupyter-lab-command)
+         (file-executable-p my/jupyter-lab-command))
+    my/jupyter-lab-command)
+   ((and (fboundp 'my/jupyter-lab--command)
+         (ignore-errors (my/jupyter-lab--command))))
+   ((executable-find "jupyter"))
+   (t (user-error "Cannot find a usable Jupyter executable"))))
+
+(defun my/jupyter--command-json (program &rest args)
+  "Run PROGRAM with ARGS and parse JSON output."
+  (with-temp-buffer
+    (let ((status (apply #'process-file program nil (current-buffer) nil args)))
+      (unless (zerop status)
+        (user-error "%s %s exited with status %d"
+                    program (string-join args " ") status))
+      (goto-char (point-min))
+      (let ((json-object-type 'alist)
+            (json-array-type 'list)
+            (json-key-type 'symbol)
+            (json-false nil))
+        (json-read)))))
+
+(defun my/jupyter--paths ()
+  "Return the parsed result of `jupyter --paths --json'."
+  (my/jupyter--command-json (my/jupyter--jupyter-command) "--paths" "--json"))
+
+(defun my/jupyter--config-directories ()
+  "Return configured Jupyter config directories."
+  (alist-get 'config (my/jupyter--paths)))
+
+(defun my/jupyter--data-directories ()
+  "Return configured Jupyter data directories."
+  (alist-get 'data (my/jupyter--paths)))
+
+(defun my/jupyter--config-directory ()
+  "Return the primary local Jupyter config directory."
+  (or (car (my/jupyter--config-directories))
+      (expand-file-name "~/.jupyter/")))
+
+(defun my/jupyter--kernelspec-root-directory ()
+  "Return the primary local kernelspec root directory."
+  (let ((data (car (my/jupyter--data-directories))))
+    (when data
+      (expand-file-name "kernels" data))))
+
+(defun my/jupyter--kernelspec-list-json ()
+  "Return parsed output from `jupyter kernelspec list --json'."
+  (my/jupyter--command-json (my/jupyter--jupyter-command)
+                            "kernelspec" "list" "--json"))
+
+(defun my/jupyter--kernelspec-entry-by-name (kernel)
+  "Return the kernelspec JSON entry for KERNEL."
+  (let* ((json (my/jupyter--kernelspec-list-json))
+         (specs (alist-get 'kernelspecs json nil nil #'equal)))
+    (alist-get kernel specs nil nil #'equal)))
+
+(defun my/jupyter--kernelspec-resource-dir (kernel)
+  "Return the resource directory for KERNEL."
+  (alist-get 'resource_dir (my/jupyter--kernelspec-entry-by-name kernel)))
+
+(defun my/jupyter--ensure-file-directory (file)
+  "Ensure the directory for FILE exists."
+  (make-directory (file-name-directory file) t))
+
+(defun my/jupyter-open-jupyter-config-directory ()
+  "Open the primary local Jupyter config directory."
+  (interactive)
+  (dired (my/jupyter--config-directory)))
+
+(defun my/jupyter-open-jupyter-data-directory ()
+  "Open the primary local Jupyter data directory."
+  (interactive)
+  (if-let* ((dir (car (my/jupyter--data-directories))))
+      (dired dir)
+    (user-error "Cannot determine the Jupyter data directory")))
+
+(defun my/jupyter-open-kernelspec-root-directory ()
+  "Open the local kernelspec root directory."
+  (interactive)
+  (let ((dir (my/jupyter--kernelspec-root-directory)))
+    (unless dir
+      (user-error "Cannot determine the kernelspec root directory"))
+    (dired dir)))
+
+(defun my/jupyter-edit-jupyter-config-file (&optional file)
+  "Open a local Jupyter config FILE.
+
+When FILE is nil, prompt for one of the standard config filenames."
+  (interactive)
+  (let* ((dir (my/jupyter--config-directory))
+         (file (or file
+                   (expand-file-name
+                    (completing-read "Jupyter config file: "
+                                     my/jupyter-config-file-candidates
+                                     nil
+                                     t
+                                     nil
+                                     nil
+                                     (car my/jupyter-config-file-candidates))
+                    dir))))
+    (my/jupyter--ensure-file-directory file)
+    (find-file file)))
+
+(defun my/jupyter-edit-current-jupyter-config-file ()
+  "Open the most common Jupyter server config file."
+  (interactive)
+  (my/jupyter-edit-jupyter-config-file
+   (expand-file-name (car my/jupyter-config-file-candidates)
+                     (my/jupyter--config-directory))))
+
+(defun my/jupyter-edit-kernelspec-json (kernel)
+  "Open KERNEL's `kernel.json' file."
+  (interactive (list (my/jupyter-read-kernel "Edit kernelspec")))
+  (let ((resource-dir (my/jupyter--kernelspec-resource-dir kernel)))
+    (unless resource-dir
+      (user-error "No kernelspec resource directory found for %s" kernel))
+    (find-file (expand-file-name "kernel.json" resource-dir))))
+
+(defun my/jupyter-edit-current-kernelspec-json ()
+  "Open the kernelspec JSON for the entry at point."
+  (interactive)
+  (let* ((entry (my/jupyter-manager--current-entry))
+         (kernel (my/jupyter-manager--entry-kernel entry))
+         (resource-dir (my/jupyter-manager--entry-resource-dir entry)))
+    (unless kernel
+      (user-error "No kernelspec at point"))
+    (unless resource-dir
+      (user-error "Current line is not a concrete kernelspec entry"))
+    (find-file (expand-file-name "kernel.json" resource-dir))))
+
+(defun my/jupyter-open-current-kernelspec-directory ()
+  "Open the kernelspec directory for the entry at point."
+  (interactive)
+  (let* ((entry (my/jupyter-manager--current-entry))
+         (resource-dir (my/jupyter-manager--entry-resource-dir entry)))
+    (unless resource-dir
+      (user-error "No kernelspec directory at point"))
+    (dired resource-dir)))
+
+(defun my/jupyter-open-remote-connectboard ()
+  "Open the remote connectboard, when available."
+  (interactive)
+  (unless (fboundp 'my/remote-connectboard)
+    (user-error "Remote connectboard is not available"))
+  (my/remote-connectboard))
+
+(defun my/jupyter-edit-remote-connectboard-config ()
+  "Open the remote connectboard configuration file."
+  (interactive)
+  (unless (fboundp 'my/remote-connectboard-edit-config)
+    (user-error "Remote connectboard config editor is not available"))
+  (my/remote-connectboard-edit-config))
+
+(defun my/jupyter--remote-ikernel-command ()
+  "Return the `remote_ikernel' management executable."
+  (cond
+   ((and (boundp 'my/jupyter-remote-ikernel-command)
+         (stringp my/jupyter-remote-ikernel-command)
+         (file-executable-p my/jupyter-remote-ikernel-command))
+    my/jupyter-remote-ikernel-command)
+   ((executable-find "remote_ikernel"))
+   (t (user-error "Cannot find a usable remote_ikernel executable"))))
+
+(defvar my/jupyter-remote-ikernel-buffer-name "*Remote IKernel*"
+  "Buffer used for `remote_ikernel manage' output.")
+
+(define-derived-mode my/jupyter-remote-ikernel-mode special-mode "Remote-IKernel"
+  "Major mode for `remote_ikernel manage' output.")
+
+(defun my/jupyter--remote-ikernel-run (args &optional buffer)
+  "Run `remote_ikernel manage' with ARGS and capture output in BUFFER."
+  (let ((buffer (or buffer (get-buffer-create my/jupyter-remote-ikernel-buffer-name))))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer))
+      (my/jupyter-remote-ikernel-mode))
+    (let ((status
+           (with-current-buffer buffer
+             (let ((inhibit-read-only t))
+               (apply #'process-file
+                      (my/jupyter--remote-ikernel-command)
+                      nil
+                      buffer
+                      nil
+                      (append (list "manage") args))))))
+      (if (zerop status)
+          buffer
+        (user-error "remote_ikernel manage failed with status %d" status)))))
+
+(defun my/jupyter-remote-ikernel-installed-names ()
+  "Return installed `remote_ikernel' kernelspec names."
+  (when-let* ((buffer (ignore-errors
+                        (my/jupyter--remote-ikernel-run '("--show")))))
+    (with-current-buffer buffer
+      (goto-char (point-min))
+      (let (names)
+        (while (re-search-forward
+                "^\\(?:\\['\\([^']+\\)'\\]\\|[[:space:]]*[-*]?[[:space:]]*\\([^ :\n]+\\):?\\)$"
+                nil t)
+          (push (or (match-string 1)
+                    (match-string 2))
+                names))
+        (nreverse names)))))
+
+(defun my/jupyter-remote-ikernel-read-kernel (prompt)
+  "Read one installed remote kernel using PROMPT."
+  (let ((kernels (or (my/jupyter-remote-ikernel-installed-names) '())))
+    (unless kernels
+      (user-error "No installed remote kernels"))
+    (completing-read prompt kernels nil t)))
+
+(defun my/jupyter-remote-ikernel-show (&optional kernel)
+  "Show `remote_ikernel manage' output, optionally for KERNEL."
+  (interactive
+   (list (when current-prefix-arg
+           (my/jupyter-remote-ikernel-read-kernel "Remote kernel: "))))
+  (let ((buffer (my/jupyter--remote-ikernel-run
+                 (append (and kernel (list "--show" kernel))
+                         (unless kernel (list "--show"))))))
+    (pop-to-buffer buffer)))
+
+(defun my/jupyter-remote-ikernel-add ()
+  "Add a new remote kernel with a guided prompt."
+  (interactive)
+  (let* ((name (read-string "Kernel name: "))
+         (interface (completing-read
+                     "Interface: "
+                     '("ssh" "local" "pbs" "sge" "sge_qrsh" "slurm" "lsf")
+                     nil
+                     t
+                     nil
+                     nil
+                     "ssh"))
+         (host (read-string "Host: "))
+         (kernel-cmd (read-string "Kernel command: "))
+         (language (read-string "Language: "))
+         (cpus (read-string "CPUs (optional): "))
+         (workdir (read-string "Workdir (optional): "))
+         (launch-cmd (read-string "Launch command (optional): "))
+         (remote-launch-args (read-string "Remote launch args (optional): "))
+         (remote-precmd (read-string "Remote precmd (optional): "))
+         (tunnel-hosts (read-string "Tunnel hosts (optional, space-separated): "))
+         (system (y-or-n-p "Install system-wide? "))
+         (args (append
+                (delq nil
+                      (list "--add"
+                            (and system "--system")
+                            (unless (string-empty-p name) (format "--name=%s" name))
+                            (unless (string-empty-p interface) (format "--interface=%s" interface))
+                            (unless (string-empty-p host) (format "--host=%s" host))
+                            (unless (string-empty-p kernel-cmd) (format "--kernel_cmd=%s" kernel-cmd))
+                            (unless (string-empty-p language) (format "--language=%s" language))
+                            (unless (string-empty-p cpus) (format "--cpus=%s" cpus))
+                            (unless (string-empty-p workdir) (format "--workdir=%s" workdir))
+                            (unless (string-empty-p launch-cmd) (format "--launch-cmd=%s" launch-cmd))
+                            (unless (string-empty-p remote-launch-args)
+                              (format "--remote-launch-args=%s" remote-launch-args))
+                            (unless (string-empty-p remote-precmd)
+                              (format "--remote-precmd=%s" remote-precmd))))
+                (when (not (string-empty-p tunnel-hosts))
+                  (cons "--tunnel-hosts" (split-string tunnel-hosts "[[:space:]]+" t)))))
+         (buffer (my/jupyter--remote-ikernel-run args)))
+    (display-buffer buffer)
+    (when (fboundp 'my/jupyter-manager-refresh)
+      (my/jupyter-manager-refresh))))
+
+(defun my/jupyter-remote-ikernel-delete (kernel)
+  "Delete an installed remote kernel KERNEL."
+  (interactive
+   (list (my/jupyter-remote-ikernel-read-kernel "Delete remote kernel: ")))
+  (let ((buffer (my/jupyter--remote-ikernel-run (list "--delete" kernel))))
+    (display-buffer buffer)
+    (when (fboundp 'my/jupyter-manager-refresh)
+      (my/jupyter-manager-refresh))))
 
 (define-derived-mode my/jupyter-doctor-mode special-mode "Jupyter-Doctor"
   "Major mode for the Jupyter doctor report.")
@@ -380,11 +695,91 @@
      "Show the Jupytext log buffer")
     (insert "\n\n")))
 
+(defun my/jupyter-manager-insert-configuration-section ()
+  "Insert configuration-editing shortcuts into the Jupyter Hub."
+  (let* ((config-dir (my/jupyter--config-directory))
+         (data-dir (car (my/jupyter--data-directories)))
+         (kernelspec-root (my/jupyter--kernelspec-root-directory)))
+    (insert "Configuration\n")
+    (insert "-------------\n")
+    (insert (format "config dir: %s\n" (abbreviate-file-name config-dir)))
+    (insert (format "data dir:   %s\n" (abbreviate-file-name (or data-dir "-"))))
+    (insert (format "kernelspec: %s\n"
+                    (abbreviate-file-name (or kernelspec-root "-"))))
+    (insert "actions: ")
+    (my/jupyter-manager--insert-button
+     "[config]"
+     (lambda (_button) (my/jupyter-open-jupyter-config-directory))
+     "Open the local Jupyter config directory")
+    (insert " ")
+    (my/jupyter-manager--insert-button
+     "[edit config]"
+     (lambda (_button) (my/jupyter-edit-current-jupyter-config-file))
+     "Edit the main Jupyter server config file")
+    (insert " ")
+    (my/jupyter-manager--insert-button
+     "[kernelspec root]"
+     (lambda (_button) (my/jupyter-open-kernelspec-root-directory))
+     "Open the local kernelspec root directory")
+    (insert " ")
+    (my/jupyter-manager--insert-button
+     "[remote board]"
+     (lambda (_button) (my/jupyter-open-remote-connectboard))
+     "Open the curated remote connectboard")
+    (insert " ")
+    (my/jupyter-manager--insert-button
+     "[remote config]"
+     (lambda (_button) (my/jupyter-edit-remote-connectboard-config))
+     "Edit the remote connectboard config")
+    (insert "\n\n")))
+
+(defun my/jupyter-manager-insert-remote-kernel-section ()
+  "Insert remote_ikernel management shortcuts into the Jupyter Hub."
+  (let ((remote-kernels (ignore-errors (my/jupyter-remote-ikernel-installed-names))))
+    (insert "Remote Kernels\n")
+    (insert "--------------\n")
+    (insert (format "remote_ikernel: %s\n"
+                    (abbreviate-file-name (my/jupyter--remote-ikernel-command))))
+    (insert (format "installed: %d\n" (length remote-kernels)))
+    (insert "actions: ")
+    (my/jupyter-manager--insert-button
+     "[show]"
+     (lambda (_button) (my/jupyter-remote-ikernel-show))
+     "Show the remote_ikernel manage output")
+    (insert " ")
+    (my/jupyter-manager--insert-button
+     "[add]"
+     (lambda (_button) (my/jupyter-remote-ikernel-add))
+     "Add a remote kernel")
+    (insert " ")
+    (my/jupyter-manager--insert-button
+     "[delete]"
+     (lambda (_button)
+       (my/jupyter-remote-ikernel-delete
+        (my/jupyter-remote-ikernel-read-kernel "Delete remote kernel: ")))
+     "Delete an installed remote kernel")
+    (insert " ")
+    (my/jupyter-manager--insert-button
+     "[refresh]"
+     (lambda (_button) (my/jupyter-manager-refresh))
+     "Refresh the Jupyter Hub")
+    (insert "\n\n")))
+
 (defun my/jupyter-manager-setup-maintenance-keys ()
   "Install maintenance keybindings in the Jupyter Hub."
   (local-set-key (kbd "C") #'my/jupyter-manager-clear-connection)
   (local-set-key (kbd "D") #'my/jupyter-doctor)
   (local-set-key (kbd "S") #'my/jupyter-manager-prune-stale-connections)
+  (local-set-key (kbd "O") #'my/jupyter-lab-open-log)
+  (local-set-key (kbd "e") #'my/jupyter-edit-current-jupyter-config-file)
+  (local-set-key (kbd "E") #'my/jupyter-open-jupyter-config-directory)
+  (local-set-key (kbd "j") #'my/jupyter-edit-current-kernelspec-json)
+  (local-set-key (kbd "J") #'my/jupyter-open-current-kernelspec-directory)
+  (local-set-key (kbd "u") #'my/jupyter-remote-ikernel-add)
+  (local-set-key (kbd "U") #'my/jupyter-remote-ikernel-delete)
+  (local-set-key (kbd "m") #'my/jupyter-open-remote-connectboard)
+  (local-set-key (kbd "M") #'my/jupyter-edit-remote-connectboard-config)
+  (local-set-key (kbd "w") #'my/jupyter-remote-ikernel-show)
   (local-set-key (kbd "v") #'my/jupyter-open-runtime-directory)
   (local-set-key (kbd "l") #'my/jupyter-show-log-buffer)
   (local-set-key (kbd "L") #'my/jupyter-show-kernelspec-log-buffer)
@@ -396,7 +791,21 @@
   [["Views"
     ("h" "hub" my/jupyter-manager)
     ("D" "doctor" my/jupyter-doctor)
-    ("o" "docs" my/jupyter-manager-open-docs)]
+    ("o" "docs" my/jupyter-manager-open-docs)
+    ("O" "lab log" my/jupyter-lab-open-log)]
+   ["Config"
+    ("e" "edit jupyter config" my/jupyter-edit-current-jupyter-config-file)
+    ("E" "open jupyter config dir" my/jupyter-open-jupyter-config-directory)
+    ("j" "edit current kernelspec" my/jupyter-edit-current-kernelspec-json)
+    ("J" "open current kernelspec dir" my/jupyter-open-current-kernelspec-directory)
+    ("m" "remote board" my/jupyter-open-remote-connectboard)
+    ("M" "remote config" my/jupyter-edit-remote-connectboard-config)]
+   ["Remote"
+    ("u" "add remote kernel" my/jupyter-remote-ikernel-add)
+    ("U" "delete remote kernel" my/jupyter-remote-ikernel-delete)
+    ("w" "show remote_ikernel" my/jupyter-remote-ikernel-show)
+    ("b" "remote board" my/jupyter-open-remote-connectboard)
+    ("B" "remote config" my/jupyter-edit-remote-connectboard-config)]
    ["Kernel"
     ("r" "repl" my/jupyter-run-repl-for-language)
     ("k" "remember connection" my/jupyter-register-language-connection-file)
@@ -412,11 +821,15 @@
     ("t" "show jupytext log" my/jupytext-show-log-buffer)]])
 
 (add-hook 'my/jupyter-manager-extra-section-functions
+          #'my/jupyter-manager-insert-configuration-section)
+(add-hook 'my/jupyter-manager-extra-section-functions
+          #'my/jupyter-manager-insert-remote-kernel-section)
+(add-hook 'my/jupyter-manager-extra-section-functions
           #'my/jupyter-manager-insert-maintenance-section)
 (add-hook 'my/jupyter-manager-setup-functions
           #'my/jupyter-manager-setup-maintenance-keys)
 
-(my/evil-global-leader-set "o J" #'my/jupyter-dispatch "jupyter dispatch")
+(my/evil-global-leader-set "o j ?" #'my/jupyter-dispatch "jupyter dispatch")
 
 (provide 'init-jupyter-tools)
 ;;; init-jupyter-tools.el ends here

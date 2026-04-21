@@ -388,7 +388,7 @@ SEEN tracks visited files for recursive Include handling."
   (let* ((default (symbol-name my/remote-connectboard-default-action))
          (choice (completing-read
                   (format "Action (default %s): " default)
-                  '("open" "vterm" "copy")
+                  '("open" "vterm" "copy" "config" "refresh")
                   nil
                   t
                   nil
@@ -405,12 +405,14 @@ SEEN tracks visited files for recursive Include handling."
   "Open one curated remote target.
 With prefix argument CHOOSE-ACTION, prompt for the action first."
   (interactive "P")
-  (let ((entry (my/remote-connectboard--read-entry)))
-    (if choose-action
+  (if choose-action
+      (let ((action (my/remote-connectboard--read-action)))
         (my/remote-connectboard-dispatch
-         entry
-         (my/remote-connectboard--read-action))
-      (my/remote-connectboard-open entry))))
+         (unless (memq action '(config refresh))
+           (my/remote-connectboard--read-entry))
+         action))
+    (my/remote-connectboard-open
+     (my/remote-connectboard--read-entry))))
 
 (defun my/remote-connectboard-vterm (entry)
   "Open a dedicated VTerm for remote ENTRY."
@@ -436,12 +438,16 @@ With prefix argument CHOOSE-ACTION, prompt for the action first."
 (defun my/remote-connectboard-dispatch (entry action)
   "Run ACTION for remote ENTRY."
   (interactive
-   (let ((entry (my/remote-connectboard--read-entry)))
-     (list entry (my/remote-connectboard--read-action))))
+   (let ((action (my/remote-connectboard--read-action)))
+     (list (unless (memq action '(config refresh))
+             (my/remote-connectboard--read-entry))
+           action)))
   (pcase action
     ('open (my/remote-connectboard-open entry))
     ('vterm (my/remote-connectboard-vterm entry))
     ('copy (my/remote-connectboard-copy entry))
+    ('config (my/remote-connectboard-edit-config))
+    ('refresh (my/remote-connectboard-refresh))
     (_ (user-error "Unknown connectboard action: %s" action))))
 
 (defun my/remote-connectboard-edit-config ()

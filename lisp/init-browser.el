@@ -76,38 +76,20 @@
           (kill-new (xwidget-webkit-current-url))
           (message "Copied URL."))))))
 
-;;;; browse-url 智能分流：优先 EWW，遇到“复杂站点/关键词”走 xwidget
-
-(defun my/url-looks-complex-p (url)
-  "Heuristic: 判断 URL 是否可能需要 JS/复杂渲染。"
-  (let ((u (downcase url)))
-    (or (string-match-p
-         (regexp-opt
-          '("youtube.com" "bilibili.com" "github.com" "gitlab.com"
-            "notion.so" "figma.com" "docs.google.com" "drive.google.com"
-            "openai.com" "chatgpt.com" "accounts.google.com"
-            "cloudflare" "login" "signin" "oauth" "sso"
-            "stripe.com" "paypal.com")
-          t)
-         u)
-        ;; URL 里带很多 query 参数也往往更复杂
-        (> (length (or (url-filename (url-generic-parse-url u)) "")) 80))))
+;;;; browse-url 统一入口：默认走 Appine，其他后端保留手动切换
 
 (defun my/browse-url (url &optional _new-window)
-  "统一入口：简单页用 EWW，复杂页用 xwidget-webkit。"
+  "Open URL with Appine by default."
   (interactive (browse-url-interactive-arg "URL: "))
   (unless (string-match-p "\\`https?://" url)
     (setq url (concat "https://" url)))
   (cond
-   ;; 如果没有 xwidgets，就回落到系统浏览器
-   ((not (featurep 'xwidget-internal))
-    (browse-url-default-browser url))
-   ;; 复杂站点：xwidget
-   ((my/url-looks-complex-p url)
-    (xwidget-webkit-browse-url url))
-   ;; 其余：EWW
+   ((fboundp 'my/appine-open-url)
+    (my/appine-open-url url))
+   ((fboundp 'appine-open-url)
+    (appine-open-url url))
    (t
-    (eww-browse-url url))))
+    (browse-url-default-browser url))))
 
 ;; 让所有点链接都走这个
 (setq browse-url-browser-function #'my/browse-url)
@@ -230,7 +212,7 @@
    (intern
      (completing-read "Switch browser to: "
                       '("eww" "xwidget" "appine")
-                      nil t nil nil "xwidget"))))
+                      nil t nil nil "appine"))))
   (let ((source-backend (my/browser-current-backend))
         (url (my/browser-current-url))
         (old-buf (current-buffer)))
@@ -313,11 +295,11 @@
      (intern (completing-read "Search Engine (default: bing): "
                             '("bing" "perplexity" "duckduckgo")
                             nil t nil nil "bing"))
-     (intern (completing-read "Browser (default: xwidget): "
+     (intern (completing-read "Browser (default: appine): "
                             '("eww" "xwidget" "appine")
-                            nil t nil nil "xwidget"))))
+                            nil t nil nil "appine"))))
   (my/browser-open-url-with-backend
-   browser
+   (or browser 'appine)
    (my/browser-build-search-url search-term engine)))
 
 (with-eval-after-load 'xwidget

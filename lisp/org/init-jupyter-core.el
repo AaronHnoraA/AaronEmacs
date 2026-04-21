@@ -16,6 +16,7 @@
 (require 'cl-lib)
 (require 'eieio-core)
 (require 'init-funcs)
+(require 'init-jupyter-lab)
 (require 'subr-x)
 
 (defgroup my/jupyter nil
@@ -578,11 +579,20 @@ kernelspec for the language."
                  (language (my/jupyter--normalize-language
                             (plist-get plist :language)))
                  (display-name (or (plist-get plist :display_name) kernel))
+                 (resource-dir (or (plist-get plist :resource_dir)
+                                   (plist-get plist :resource-dir)))
                  (used-by (my/jupyter-manager--kernel-used-by kernel language))
-                 (row `(:kind kernel :kernel ,kernel :language ,language))
+                 (row `(:kind kernel
+                              :kernel ,kernel
+                              :language ,language
+                              :resource-dir ,resource-dir))
                  (start (point)))
             (insert (format "%-28s [%s]\n" kernel language))
             (insert (format "  display: %s\n" display-name))
+            (insert (format "  resource: %s\n"
+                            (if resource-dir
+                                (abbreviate-file-name resource-dir)
+                              "-")))
             (insert (format "  used by override: %s\n"
                             (if used-by
                                 (string-join used-by ", ")
@@ -593,6 +603,21 @@ kernelspec for the language."
              (lambda (_button)
                (jupyter-run-repl kernel nil t nil t))
              "Start a REPL using this kernelspec")
+            (insert " ")
+            (my/jupyter-manager--insert-button
+             "[json]"
+             (lambda (_button)
+               (my/jupyter-edit-kernelspec-json kernel))
+             "Edit this kernelspec's kernel.json")
+            (insert " ")
+            (my/jupyter-manager--insert-button
+             "[dir]"
+             (lambda (_button)
+               (let ((dir (my/jupyter--kernelspec-resource-dir kernel)))
+                 (unless dir
+                   (user-error "No kernelspec directory found for %s" kernel))
+                 (dired dir)))
+             "Open this kernelspec's resource directory")
             (insert " ")
             (my/jupyter-manager--insert-button
              "[set default]"
@@ -614,8 +639,9 @@ kernelspec for the language."
     (erase-buffer)
     (insert "Jupyter Hub\n")
     (insert "===========\n\n")
-    (insert "Keys: g refresh, x refresh kernelspecs, RET context action, K set default kernel, d clear override, c set connection, C clear connection, r open REPL, P install current Python env, D doctor, S prune stale, v runtime, l jupyter log, t jupytext log, ? dispatch, o docs, q quit\n\n")
+    (insert "Keys: g refresh, x refresh kernelspecs, a start lab, A start+open lab, b open lab, B restart lab, z stop lab, O lab log, RET context action, K set default kernel, d clear override, c set connection, C clear connection, r open REPL, e edit config, j edit kernelspec, m remote board, u add remote kernel, U delete remote kernel, w show remote_ikernel, P install current Python env, D doctor, S prune stale, v runtime, l jupyter log, L kernelspec log, t jupytext log, ? dispatch, o docs, q quit\n\n")
     (run-hooks 'my/jupyter-manager-extra-section-functions)
+    (my/jupyter-manager--insert-lab-section)
     (my/jupyter-manager--insert-org-babel-section)
     (my/jupyter-manager--insert-language-section)
     (my/jupyter-manager--insert-kernelspec-section)
@@ -698,6 +724,12 @@ kernelspec for the language."
         (use-local-map map)
         (local-set-key (kbd "g") #'my/jupyter-manager-refresh)
         (local-set-key (kbd "x") #'my/jupyter-manager-refresh-kernels)
+        (local-set-key (kbd "a") #'my/jupyter-lab-start)
+        (local-set-key (kbd "A") #'my/jupyter-lab-start-and-open)
+        (local-set-key (kbd "b") #'my/jupyter-lab-open)
+        (local-set-key (kbd "B") #'my/jupyter-lab-restart)
+        (local-set-key (kbd "z") #'my/jupyter-lab-stop)
+        (local-set-key (kbd "O") #'my/jupyter-lab-open-log)
         (local-set-key (kbd "K") #'my/jupyter-manager-set-default-kernel)
         (local-set-key (kbd "d") #'my/jupyter-manager-clear-default-kernel)
         (local-set-key (kbd "c") #'my/jupyter-manager-register-connection)
@@ -1285,32 +1317,64 @@ Reload the notebook from disk in JupyterLab to keep running there."
              jupyter-inspect-at-point
              jupyter-eval-line-or-region
              my/jupyter-clear-language-connection-file
+             my/jupyter-lab-open
+             my/jupyter-lab-open-log
+             my/jupyter-lab-restart
+             my/jupyter-lab-start
+             my/jupyter-lab-start-and-open
+             my/jupyter-lab-stop
              my/jupyter-connect-repl-dwim
              my/jupyter-connect-existing-repl
              my/jupyter-dispatch
              my/jupyter-doctor
+             my/jupyter-edit-current-jupyter-config-file
+             my/jupyter-edit-current-kernelspec-json
+             my/jupyter-edit-jupyter-config-file
+             my/jupyter-edit-kernelspec-json
              my/jupyter-install-current-python-kernel
              my/jupyter-manager
+             my/jupyter-open-current-kernelspec-directory
+             my/jupyter-open-jupyter-config-directory
+             my/jupyter-open-kernelspec-root-directory
+             my/jupyter-open-remote-connectboard
+             my/jupyter-remote-ikernel-add
+             my/jupyter-remote-ikernel-delete
+             my/jupyter-remote-ikernel-show
              my/jupyter-prune-stale-connections
              my/jupyter-register-language-connection-file
              my/jupyter-refresh-kernelspecs-and-reconfigure
              my/jupyter-run-repl-for-language
+             my/jupyter-edit-remote-connectboard-config
              my/jupyter-set-default-kernel-for-language
              my/jupyter-use-connection-file-for-org-block)
   :bind (("C-c j r" . my/jupyter-connect-repl-dwim)
          ("C-c j R" . jupyter-run-repl)
+         ("C-c j a" . my/jupyter-lab-start)
+         ("C-c j A" . my/jupyter-lab-start-and-open)
+         ("C-c j b" . my/jupyter-lab-open)
+         ("C-c j B" . my/jupyter-lab-restart)
          ("C-c j c" . my/jupyter-connect-existing-repl)
          ("C-c j ?" . my/jupyter-dispatch)
          ("C-c j h" . my/jupyter-manager)
          ("C-c j C" . my/jupyter-clear-language-connection-file)
          ("C-c j k" . my/jupyter-register-language-connection-file)
          ("C-c j K" . my/jupyter-set-default-kernel-for-language)
+         ("C-c j l" . my/jupyter-lab-open-log)
          ("C-c j o" . my/jupyter-use-connection-file-for-org-block)
          ("C-c j i" . jupyter-inspect-at-point)
          ("C-c j e" . jupyter-eval-line-or-region)
+         ("C-c j E" . my/jupyter-open-jupyter-config-directory)
+         ("C-c j j" . my/jupyter-edit-current-kernelspec-json)
+         ("C-c j J" . my/jupyter-open-current-kernelspec-directory)
+         ("C-c j m" . my/jupyter-open-remote-connectboard)
+         ("C-c j M" . my/jupyter-edit-remote-connectboard-config)
+         ("C-c j u" . my/jupyter-remote-ikernel-add)
+         ("C-c j U" . my/jupyter-remote-ikernel-delete)
+         ("C-c j w" . my/jupyter-remote-ikernel-show)
          ("C-c j x" . my/jupyter-refresh-kernelspecs-and-reconfigure)
          ("C-c j y" . jupytext-mode)
          ("C-c j s" . jupytext-sync-buffer)
+         ("C-c j z" . my/jupyter-lab-stop)
          ("C-c j p" . jupytext-register-current-buffer)
          ("C-c j P" . my/jupyter-install-current-python-kernel))
   :init
@@ -1321,6 +1385,7 @@ Reload the notebook from disk in JupyterLab to keep running there."
   (my/jupyter-apply-emacs-jupyter-state-fixes))
 
 (my/evil-global-leader-set "o j" #'my/jupyter-manager "jupyter hub")
+(my/evil-global-leader-set "o J" #'my/jupyter-lab-start-and-open "jupyter lab")
 
 (use-package code-cells
   :ensure t

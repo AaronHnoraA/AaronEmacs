@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(declare-function my/browse-url "init-browser" (url &optional new-window))
+
 ;; Tips for next keystroke
 (use-package which-key
   :ensure t
@@ -198,7 +200,7 @@
     (let ((city (completing-read "City: " webjump-weather-default-cities)))
       (format webjump-weather-url-template city)))
 
-  (add-to-list 'browse-url-handlers '("weathernew.pae.baidu.com" . xwidget-webkit-browse-url))
+  (add-to-list 'browse-url-handlers '("weathernew.pae.baidu.com" . my/browse-url))
   :custom
   (webjump-sites '(;; Internet search engines.
                    ("Google" .

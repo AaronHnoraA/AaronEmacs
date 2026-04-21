@@ -417,14 +417,18 @@ Otherwise return nil."
     (goto-char (cadar point-stack))
     (setq point-stack (cdr point-stack))))
 
-(defun count-words ()
-  "Count the number of word in buffer, include Chinese."
-  (interactive)
-  (let ((begin (point-min))
-        (end (point-max)))
-    (if mark-active
-        (setq begin (region-beginning)
-              end (region-end)))
+(defun count-words (&optional begin end)
+  "Count words between BEGIN and END, including Chinese.
+
+When called interactively, prefer the active region and otherwise use the
+whole buffer.  This keeps compatibility with the built-in `count-words'
+signature, which many packages call with explicit region arguments."
+  (interactive
+   (if (use-region-p)
+       (list (region-beginning) (region-end))
+     (list (point-min) (point-max))))
+  (let ((begin (or begin (point-min)))
+        (end (or end (point-max))))
     (count-ce-words begin end)))
 
 (defun count-ce-words (beg end)

@@ -19,8 +19,13 @@
 (declare-function vterm "vterm" (&optional buffer-name))
 (declare-function vterm-send-string "vterm")
 (declare-function vterm-send-return "vterm")
+(declare-function vterm-yank "vterm")
 (declare-function turn-off-evil-mode "evil")
 (declare-function evil-set-initial-state "evil-core")
+(declare-function vterm-copy-mode "vterm" (&optional arg))
+(declare-function vterm-copy-mode-done "vterm" (&optional arg))
+(defvar vterm-mode-map)
+(defvar vterm-copy-mode-map)
 
 (defcustom my/vterm-startup-send-delay 0.05
   "Delay between retries when sending startup commands to a fresh VTerm."
@@ -37,6 +42,9 @@
 
 (defvar-local my/vterm-target-directory nil
   "Target directory a VTerm buffer should represent after startup sync.")
+
+(defvar-local my/vterm-copy-mode-visual-line-anchor nil
+  "Marker for the line where VTerm visual-line selection started.")
 
 (defun my/terminal--startup-directory (&optional directory)
   "Return a safe startup directory for DIRECTORY, or nil to use DIRECTORY directly."
@@ -469,12 +477,100 @@ If popup is focused, kill it."
     (pop-to-buffer
      (my/vterm--open-in-directory buffer-name target-directory))))
 
+(defun my/vterm-copy-mode-enter ()
+  "Enter `vterm-copy-mode' without enabling region selection."
+  (interactive)
+  (setq-local my/vterm-copy-mode-visual-line-anchor nil)
+  (vterm-copy-mode 1))
+
+(defun my/vterm-copy-mode--anchor-position ()
+  "Return the current visual-line anchor position, if any."
+  (when (markerp my/vterm-copy-mode-visual-line-anchor)
+    (marker-position my/vterm-copy-mode-visual-line-anchor)))
+
+(defun my/vterm-copy-mode--set-visual-line-region ()
+  "Update the region to whole lines between anchor and point."
+  (when-let* ((anchor (my/vterm-copy-mode--anchor-position)))
+    (let* ((anchor-beg anchor)
+           (anchor-end (save-excursion
+                         (goto-char anchor)
+                         (line-end-position)))
+           (current-beg (line-beginning-position))
+           (current-end (line-end-position)))
+      (if (<= anchor current-beg)
+          (progn
+            (goto-char anchor-beg)
+            (push-mark (point) t t)
+            (goto-char current-end))
+        (goto-char anchor-end)
+        (push-mark (point) t t)
+        (goto-char current-beg))
+      (setq deactivate-mark nil))))
+
+(defun my/vterm-copy-mode-visual-line ()
+  "Enter `vterm-copy-mode' and select the current line."
+  (interactive)
+  (let ((anchor (line-beginning-position)))
+    (setq-local my/vterm-copy-mode-visual-line-anchor
+                (copy-marker anchor)))
+  (vterm-copy-mode 1)
+  (goto-char (marker-position my/vterm-copy-mode-visual-line-anchor))
+  (my/vterm-copy-mode--set-visual-line-region))
+
+(defun my/vterm-copy-mode-next-line ()
+  "Move down in VTerm copy mode, preserving visual-line selection."
+  (interactive)
+  (forward-line 1)
+  (if (my/vterm-copy-mode--anchor-position)
+      (my/vterm-copy-mode--set-visual-line-region)
+    (setq goal-column nil)))
+
+(defun my/vterm-copy-mode-previous-line ()
+  "Move up in VTerm copy mode, preserving visual-line selection."
+  (interactive)
+  (forward-line -1)
+  (if (my/vterm-copy-mode--anchor-position)
+      (my/vterm-copy-mode--set-visual-line-region)
+    (setq goal-column nil)))
+
+(defun my/vterm-copy-mode-quit ()
+  "Leave `vterm-copy-mode' without copying."
+  (interactive)
+  (when (markerp my/vterm-copy-mode-visual-line-anchor)
+    (set-marker my/vterm-copy-mode-visual-line-anchor nil))
+  (setq-local my/vterm-copy-mode-visual-line-anchor nil)
+  (vterm-copy-mode -1))
+
+(defun my/vterm-disable-evil-h ()
+  "Keep `vterm' fully detached from `evil'."
+  (when (bound-and-true-p evil-local-mode)
+    (turn-off-evil-mode)))
+
+(defun my/vterm-disable-word-count-h ()
+  "Disable mode-line size and region word counting in `vterm'."
+  (setq-local size-indication-mode nil))
+
+(defun my/vterm-copy-mode-setup-keys ()
+  "Install Vim-like copy-mode keys scoped to VTerm."
+  (keymap-set vterm-mode-map "M-v" #'my/vterm-copy-mode-enter)
+  (keymap-set vterm-mode-map "M-c" #'my/vterm-copy-mode-visual-line)
+  (keymap-set vterm-mode-map "M-V" #'vterm-yank)
+  (keymap-set vterm-copy-mode-map "h" #'backward-char)
+  (keymap-set vterm-copy-mode-map "j" #'my/vterm-copy-mode-next-line)
+  (keymap-set vterm-copy-mode-map "k" #'my/vterm-copy-mode-previous-line)
+  (keymap-set vterm-copy-mode-map "l" #'forward-char)
+  (keymap-set vterm-copy-mode-map "y" #'vterm-copy-mode-done)
+  (keymap-set vterm-copy-mode-map "q" #'my/vterm-copy-mode-quit)
+  (keymap-set vterm-copy-mode-map "<escape>" #'my/vterm-copy-mode-quit))
+
 (use-package vterm
   :ensure t
   :commands (vterm)
   :hook (vterm-mode . (lambda ()
                         (shell-mode-common-init)
                         (my/terminal-apply-ui)
+                        (my/vterm-disable-evil-h)
+                        (my/vterm-disable-word-count-h)
                         (my/vterm--sync-target-directory-h)
                         (run-at-time
                          0 nil
@@ -482,26 +578,16 @@ If popup is focused, kill it."
                            (when (buffer-live-p buffer)
                              (with-current-buffer buffer
                                (my/vterm--sync-target-directory-h))))
-                         (current-buffer))
-                        (when (fboundp 'evil-emacs-state)
-                          (evil-emacs-state))
-                        (run-at-time
-                         0 nil
-                         (lambda (buffer)
-                           (when (buffer-live-p buffer)
-                             (with-current-buffer buffer
-                               (when (bound-and-true-p evil-local-mode)
-                                 (turn-off-evil-mode)))))
                          (current-buffer))))
   :custom
   (vterm-shell "zsh")
   (vterm-always-compile-module t)
   :config
+  (my/vterm-copy-mode-setup-keys)
   (advice-add 'vterm :around #'my/vterm--start-in-home-and-cd))
 
 (with-eval-after-load 'evil
-  (evil-set-initial-state 'eshell-mode 'emacs)
-  (evil-set-initial-state 'vterm-mode 'emacs))
+  (evil-set-initial-state 'eshell-mode 'emacs))
 
 (provide 'init-shell)
 ;;; init-shell.el ends here

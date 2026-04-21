@@ -45,24 +45,43 @@
 
 ### macOS Option `H-`
 
-- `H-f` / `H-b` / `H-r` / `H-s`
-  打开文件 / 切 buffer / 最近文件 / 当前 buffer 搜索
-- `H-g` / `H-p` / `H-t` / `H-m`
-  项目 ripgrep / 项目工作台 / `telescope` / `magit-status`
-- `H-a` / `H-l` / `H-\`` / `H-w`
-  `org-agenda` / Claude Code 菜单 / `popper-toggle` / 关当前 frame
-- `H-e` / `H-d` / `H-i` / `H-u`
-  code menu / diagnostics menu / `show-imenu` / language server 菜单
-- `H-j` / `H-n` / `H-y`
-  `dape` / 最近测试 / bookmark 跳转
+- `H-,` / `H-x`
+  Hyper 管理菜单 / 只显示 `my/` 交互命令的独立 M-x
+- `H-f` / `H-F` / `H-b` / `H-B`
+  打开文件 / 其他窗口打开文件 / 切 buffer / 其他窗口切 buffer
+- `H-r` / `H-s` / `H-g` / `H-t`
+  最近文件 / 当前 buffer 搜索 / 项目 ripgrep / `telescope`
+- `H-p` / `H-P` / `H-R` / `H-T`
+  项目工作台 / workspace 菜单 / run profile 菜单 / test 菜单
+- `H-m` / `H-a` / `H-l` / `H-y`
+  `magit-status` / `org-agenda` / Claude Code 菜单 / bookmark 跳转
+- `H-h` / `H-H` / `H-z` / `H-Z`
+  help / health 菜单 / zoxide 跳目录 / 当前文件目录
+- `H-e` / `H-E` / `H-d` / `H-D`
+  code menu / compile menu / diagnostics menu / debug profile 菜单
+- `H-i` / `H-u` / `H-j` / `H-n` / `H-N`
+  `show-imenu` / language server 菜单 / `dape` / 最近测试 / output 菜单
+- `H-\`` / `H-q` / `H-Q` / `H-w`
+  `popper-toggle` / 关闭当前 buffer / 退出 Emacs / 关当前 frame
+- `H-0` / `H-1` / `H-2` / `H-3`
+  关当前窗口 / 单窗口切换 / 上下分屏 / 左右分屏
 - `H-o` / `H-O` / `H-k` / `H-K`
   下方开新行 / 上方开新行 / 向下复制当前行或区域 / 向上复制当前行或区域
-- `H-,` / `H-.` / `H--` / `H-=`
+- `H-<up>` / `H-<down>` / `H--` / `H-=`
   上移 / 下移当前行或区域 / 收缩选择 / 扩大选择
 - `H-;` / `H-'` / `H-[` / `H-]` / `H-/`
   注释切换 / 多光标按行 / 上一个相同项 / 下一个相同项 / 全选相同项
-- `H-x` / `H-c` / `H-v`
+- `H-X` / `H-c` / `H-v`
   剪切 / 复制 / 粘贴
+
+`H-x` 使用独立的 `my/hyper-command-history`，不会混进普通 `M-x`
+的 `extended-command-history`；普通 `M-x` 也不会因为 `H-x` 的使用而改变排序。
+`H-x` 会隐藏 mode、refresh、quit、board 行动作、manager 内部按钮命令、
+setup/ensure 和低层维护命令。普通 `M-x` 仍走默认 `amx` 行为。
+
+`H-,` 内部按键按用途分组：board 入口用 `c/g/L/j/a/h`，菜单入口用
+`p/w/r/k/t/o`，代码和运维入口用 `./e/d/D/u/x`，其他工具用
+`m/s/n/J/R/P`。
 
 ## 2. Leader 键分组
 
@@ -178,7 +197,7 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
   下方 / 上方开新行
 - `H-k` / `H-K`
   向下 / 向上复制当前行或区域
-- `H-,` / `H-.`
+- `H-<up>` / `H-<down>`
   上移 / 下移当前行或区域
 - `H--` / `H-=`
   收缩 / 扩大选择
