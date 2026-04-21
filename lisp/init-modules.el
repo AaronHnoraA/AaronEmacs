@@ -105,6 +105,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (my/require-module-safely 'init-fzfs)
 (require 'init-function-keys)
 (require 'init-hyper)
+(require 'init-mouse)
 (my/package-register-vc 'joplin-mode
                         '(:url "https://github.com/cinsk/joplin-mode.git"
                           :rev :last-release))
