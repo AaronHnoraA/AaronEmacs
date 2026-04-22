@@ -281,7 +281,7 @@
   :type 'string
   :group 'my/typography)
 
-(defcustom my/h-body 200
+(defcustom my/h-body 212
   "Base height for prose text."
   :type 'integer
   :group 'my/typography)
@@ -292,7 +292,7 @@
   :type 'string
   :group 'my/typography)
 
-(defcustom my/h-code 160
+(defcustom my/h-code 172
   "Base height for code and UI text."
   :type 'integer
   :group 'my/typography)
@@ -303,7 +303,7 @@
   :type 'string
   :group 'my/typography)
 
-(defcustom my/h-title 220
+(defcustom my/h-title 236
   "Base height for first-level document headings."
   :type 'integer
   :group 'my/typography)

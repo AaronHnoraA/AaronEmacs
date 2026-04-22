@@ -484,8 +484,8 @@ names to which it refers are bound."
 ;;;;;; Built-in packages
 
 ;;;;;;; Basic coloring
-      (button (:underline t))
-      (link :foreground ,bright-blue :underline t :weight bold)
+      (button (:foreground ,bright-yellow :underline nil :weight bold))
+      (link :foreground ,bright-blue :underline nil :weight bold)
       (link-visited :foreground ,blue :underline t :weight normal)
       (default (:foreground ,fg :background ,bg))
       (cursor (:foreground ,bg :background ,fg))
@@ -505,28 +505,28 @@ names to which it refers are bound."
       (window-divider (:foreground ,bg-m1))
       (vertical-border (:foreground ,bg-m1))
 ;;;;;;; font lock
-      (font-lock-builtin-face (:foreground ,fg))
+      (font-lock-builtin-face (:foreground ,bright-blue :weight bold))
       (font-lock-comment-face (:foreground ,syn-comment
                                            :slant ,(if kanagawa-themes-comment-italic 'italic 'normal)))
       (font-lock-comment-delimiter-face (:foreground ,syn-comment))
       (font-lock-bracket-face (:foreground ,syn-punct))
       (font-lock-delimiter-face (:foreground ,syn-punct))
       (font-lock-constant-face (:foreground ,syn-constant))
-      (font-lock-doc-face (:foreground ,syn-string))
-      (font-lock-function-name-face (:foreground ,syn-fun))
+      (font-lock-doc-face (:foreground ,fg-dim))
+      (font-lock-function-name-face (:foreground ,syn-fun :weight bold))
       (font-lock-keyword-face (:foreground ,syn-keyword :weight bold
                                            :slant ,(if kanagawa-themes-keyword-italic 'italic 'normal)))
-      (font-lock-operator-face (:foreground ,syn-operator))
+      (font-lock-operator-face (:foreground ,syn-operator :weight bold))
       (font-lock-negation-char-face (:inherit font-lock-keyword-face))
-      (font-lock-preprocessor-face (:foreground ,syn-preproc))
+      (font-lock-preprocessor-face (:foreground ,syn-preproc :weight bold))
       (font-lock-regexp-grouping-construct (:foreground ,syn-regex :weight bold))
       (font-lock-regexp-grouping-backslash (:foreground ,syn-regex :weight bold))
       (font-lock-string-face (:foreground ,syn-string))
-      (font-lock-number-face (:foreground ,syn-number))
-      (font-lock-type-face (:foreground ,syn-type))
-      (font-lock-variable-name-face (:foreground ,syn-variable))
+      (font-lock-number-face (:foreground ,syn-number :weight bold))
+      (font-lock-type-face (:foreground ,syn-type :weight bold))
+      (font-lock-variable-name-face (:foreground ,syn-variable :weight medium))
       (font-lock-property-use-face (:foreground ,syn-identifier))
-      (font-lock-warning-face (:foreground ,diag-warning))
+      (font-lock-warning-face (:foreground ,diag-error :weight bold))
       (c-annotation-face (:inherit font-lock-constant-face))
 ;;;;;;; line numbers
       (line-number (:foreground ,nontext :background ,bg-gutter))
@@ -552,7 +552,7 @@ names to which it refers are bound."
       (isearch (:foreground ,fg-reverse :background ,diag-warning))
       (isearch-fail (:foreground ,fg :background ,diag-error))
       (lazy-highlight (:foreground ,fg :background ,bg-search))
-      (minibuffer-prompt (:foreground ,fg :weight bold))
+      (minibuffer-prompt (:foreground ,bright-blue :weight bold))
 ;;;;;;; mode-line
       (mode-line (:foreground ,fg-dim :background ,bg-m3))
       (mode-line-inactive (:foreground ,nontext :background ,bg-m3))
@@ -592,8 +592,13 @@ names to which it refers are bound."
       (term-color-white (:foreground ,white :background ,white))
 ;;;;;;; org-mode
       (org-done (:foreground ,diag-info))
-      (org-code (:background ,bg-m3))
+      (org-document-title (:foreground ,bright-white :weight bold))
+      (org-document-info (:foreground ,fg-dim))
+      (org-document-info-keyword (:foreground ,diag-ok))
+      (org-code (:foreground ,bright-yellow :background ,bg-m3 :weight medium))
+      (org-verbatim (:foreground ,bright-blue :background ,bg-m3 :weight medium))
       (org-meta-line (:foreground ,diag-ok :background ,diff-add))
+      (org-special-keyword (:foreground ,diag-ok))
       (org-block (:foreground ,fg :background ,bg))
       (org-block-begin-line (:foreground ,bright-blue :background ,diff-change))
       (org-block-end-line (:foreground ,extend-color-2 :background ,diff-delete))
@@ -602,22 +607,27 @@ names to which it refers are bound."
       (org-headline-todo (:foreground ,bg-m1))
       (org-upcoming-deadline (:foreground ,extend-color-1))
       (org-footnote (:foreground ,bright-cyan))
+      (org-table (:foreground ,bright-white))
+      (org-formula (:foreground ,bright-magenta :weight medium))
+      (org-drawer (:foreground ,fg-dim))
       (org-indent (:foreground ,bg :background ,bg))
       (org-hide (:inherit org-indent))
-      (org-date (:foreground ,bg-search))
-      (org-ellipsis (:foreground ,bg-search :weight bold))
-      (org-level-1 (:foreground ,magenta
+      (org-date (:foreground ,bright-blue :weight medium))
+      (org-ellipsis (:foreground ,bright-yellow :weight bold))
+      (org-level-1 (:foreground ,bright-yellow
                                 :height ,(if kanagawa-themes-org-height 1.3 1.0)
                                 :weight ,(if kanagawa-themes-org-bold 'bold 'normal)))
-      (org-level-2 (:foreground ,blue
+      (org-level-2 (:foreground ,bright-blue
                                 :height ,(if kanagawa-themes-org-height 1.2 1.0)
                                 :weight ,(if kanagawa-themes-org-bold 'bold 'normal)))
-      (org-level-3 (:foreground ,bright-cyan :height ,(if kanagawa-themes-org-height 1.1 1.0)))
-      (org-level-4 (:foreground ,bright-green))
-      (org-level-5 (:foreground ,bright-yellow))
-      (org-level-6 (:foreground ,extend-color-1))  ; orange
-      (org-level-7 (:foreground ,red))
-      (org-level-8 (:foreground ,bright-magenta))
+      (org-level-3 (:foreground ,bright-magenta
+                                :height ,(if kanagawa-themes-org-height 1.1 1.0)
+                                :weight ,(if kanagawa-themes-org-bold 'bold 'normal)))
+      (org-level-4 (:foreground ,bright-cyan :weight ,(if kanagawa-themes-org-bold 'bold 'medium)))
+      (org-level-5 (:foreground ,extend-color-1 :weight medium))
+      (org-level-6 (:foreground ,bright-blue :weight medium))
+      (org-level-7 (:foreground ,bright-magenta :weight medium))
+      (org-level-8 (:foreground ,bright-cyan :weight medium))
       (org-priority (:foreground ,extend-color-2
                                  :weight ,(if kanagawa-themes-org-priority-bold 'bold 'normal)))
 ;;;;;; show-paren

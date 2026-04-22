@@ -15,7 +15,6 @@
   "Last theme signature applied by `my/dashboard-apply-ui'.")
 (defvar my/chunlian--visibility-timer nil
   "Idle timer used to coalesce dashboard visibility checks.")
-
 ;; Emacs 31 rejects nil as a face attribute value; themes written for earlier
 ;; Emacs versions may still pass nil.  Convert nil → 'unspecified at the call
 ;; site so the "nil value is invalid" warning is never emitted.
@@ -287,7 +286,7 @@
                            (face-attribute 'default :foreground nil t))))
       (unless (equal signature my/ui--polish-theme-signature)
         (setq my/ui--polish-theme-signature signature)
-        (set-face-attribute 'default nil :background "#282a36" :foreground "#e8edf5")
+        (set-face-attribute 'default nil :background "#282a36")
         (set-face-attribute 'fringe nil :background "#282a36" :foreground "#58627a")
         (set-face-attribute 'vertical-border nil :foreground "#2b2d3a")
         (set-face-attribute 'window-divider nil :foreground "#33394b" :background "#282a36")
@@ -297,11 +296,10 @@
         (set-face-attribute 'region nil :background "#444b60" :extend t)
         (set-face-attribute 'highlight nil :background "#394154" :extend t)
         (set-face-attribute 'line-number nil :foreground "#7a84a3" :background "#282a36" :weight 'regular)
-        (set-face-attribute 'line-number-current-line nil :foreground "#e3edf8" :background "#384156" :weight 'medium)
+        (set-face-attribute 'line-number-current-line nil :background "#384156")
         (set-face-attribute 'hl-line nil :background "#384156" :extend t)
         (set-face-attribute 'mode-line nil
                             :background "#2b2d3a"
-                            :foreground "#d8dee9"
                             :box '(:line-width 6 :color "#2b2d3a")
                             :overline nil
                             :underline nil
@@ -309,7 +307,6 @@
                             :weight 'regular)
         (set-face-attribute 'mode-line-inactive nil
                             :background "#262834"
-                            :foreground "#6b7280"
                             :box '(:line-width 6 :color "#262834")
                             :overline nil
                             :underline nil
@@ -317,73 +314,29 @@
                             :weight 'regular)
         (set-face-attribute 'header-line nil
                             :background "#282a36"
-                            :foreground "#909bb0"
                             :box '(:line-width 6 :color "#282a36")
                             :height 0.96)
         (set-face-attribute 'tab-bar nil
                             :background "#1d1e26"
-                            :foreground "#8e95ad"
                             :box '(:line-width 6 :color "#1d1e26")
                             :height 0.98)
         (set-face-attribute 'tab-bar-tab nil
                             :background "#384056"
-                            :foreground "#f2f5fb"
                             :box '(:line-width 6 :color "#384056")
                             :weight 'medium)
         (set-face-attribute 'tab-bar-tab-inactive nil
                             :background "#232733"
-                            :foreground "#9197ad"
                             :box '(:line-width 6 :color "#232733")
                             :weight 'regular)
         (when (facep 'doom-modeline-bar)
           (set-face-attribute 'doom-modeline-bar nil
                               :background "#2b2d3a"
                               :foreground "#2b2d3a"))
-        (when (facep 'doom-modeline-buffer-file)
-          (set-face-attribute 'doom-modeline-buffer-file nil :weight 'medium))
-        (when (facep 'doom-modeline-buffer-path)
-          (set-face-attribute 'doom-modeline-buffer-path nil :foreground "#7f849c" :weight 'regular))
-        (when (facep 'doom-modeline-project-dir)
-          (set-face-attribute 'doom-modeline-project-dir nil :foreground "#7f849c" :weight 'regular))
-        (when (facep 'doom-modeline-buffer-modified)
-          (set-face-attribute 'doom-modeline-buffer-modified nil :foreground "#e5c07b" :weight 'medium))
-        (when (facep 'doom-modeline-info)
-          (set-face-attribute 'doom-modeline-info nil :foreground "#98e6d4"))
-        (when (facep 'doom-modeline-warning)
-          (set-face-attribute 'doom-modeline-warning nil :foreground "#ffbe8c"))
-        (when (facep 'doom-modeline-urgent)
-          (set-face-attribute 'doom-modeline-urgent nil :foreground "#ff97a8"))
-        (when (facep 'minibuffer-prompt)
-          (set-face-attribute 'minibuffer-prompt nil :foreground "#9bc2ff" :weight 'medium))
-        (when (facep 'link)
-          (set-face-attribute 'link nil :foreground "#8fd0ff" :underline nil))
-        (when (facep 'font-lock-comment-face)
-          (set-face-attribute 'font-lock-comment-face nil :foreground "#9aa5bb" :slant 'normal))
-        (when (facep 'font-lock-doc-face)
-          (set-face-attribute 'font-lock-doc-face nil :foreground "#aab6ca" :slant 'normal))
-        (when (facep 'font-lock-keyword-face)
-          (set-face-attribute 'font-lock-keyword-face nil :foreground "#d6c186"))
-        (when (facep 'font-lock-function-name-face)
-          (set-face-attribute 'font-lock-function-name-face nil :foreground "#acd0f2"))
-        (when (facep 'font-lock-string-face)
-          (set-face-attribute 'font-lock-string-face nil :foreground "#b7d8ad"))
-        (when (facep 'helpful-heading)
-          (set-face-attribute 'helpful-heading nil
-                              :foreground "#a9bed3"
-                              :weight 'medium
-                              :height 1.02))
         (when (facep 'help-key-binding)
           (set-face-attribute 'help-key-binding nil
                               :background "#31384a"
-                              :foreground "#edf2f7"
                               :box '(:line-width 3 :color "#31384a")
                               :weight 'medium))
-        (when (facep 'button)
-          (set-face-attribute 'button nil
-                              :foreground "#f0d58a"
-                              :underline nil))
-        (when (facep 'shadow)
-          (set-face-attribute 'shadow nil :foreground "#919aae"))
         (when (facep 'internal-border)
           (set-face-attribute 'internal-border nil
                               :background "#2b2d3a"
