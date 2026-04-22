@@ -197,3 +197,6 @@ emacs --batch -Q -L lisp -L site-lisp/general.el --eval '...'
 For behavior wrappers, add a focused batch smoke test when practical. For
 package/bootstrap/state work, use the `make` targets documented in
 `docs/maintenance.md` and `docs/migration.md`.
+
+
+如果开发中有对项目整体性有影响的设计,需要会过来维护这个文档,使得项目可以被长期,统一,持续的维护.
