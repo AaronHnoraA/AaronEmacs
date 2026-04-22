@@ -96,6 +96,9 @@
 (use-package copilot
   :ensure t
   :hook ((prog-mode . my/copilot-auto-enable-h)
+         (markdown-mode . my/copilot-auto-enable-h)
+         (gfm-mode . my/copilot-auto-enable-h)
+         (markdown-ts-mode . my/copilot-auto-enable-h)
          (org-mode . my/copilot-auto-enable-h)
          (org-src-mode . my/copilot-auto-enable-h))
   :custom
