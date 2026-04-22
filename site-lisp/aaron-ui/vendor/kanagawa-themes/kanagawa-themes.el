@@ -488,11 +488,14 @@ names to which it refers are bound."
       (link :foreground ,bright-blue :underline nil :weight bold)
       (link-visited :foreground ,blue :underline t :weight normal)
       (default (:foreground ,fg :background ,bg))
-      (cursor (:foreground ,bg :background ,fg))
+      (cursor (:foreground ,bg :background "#9FBDDD"))
       (widget-field (:foreground ,fg :background ,bg-p1))
       (escape-glyph (:foreground ,special :weight bold))
-      (fringe (:foreground ,fg :background ,bg))
-      (header-line (:foreground ,fg :background ,bg-p1 :extend t))
+      (fringe (:foreground "#58627A" :background ,bg))
+      (header-line (:foreground ,fg :background ,bg-p1
+                                :box (:line-width 6 :color ,bg-p1)
+                                :height 0.96
+                                :extend t))
       (highlight (:foreground ,fg :background ,bg-dim :weight bold))
       (success (:foreground ,diag-ok :weight bold))
       (warning (:foreground ,diag-warning :weight bold))
@@ -502,8 +505,10 @@ names to which it refers are bound."
       (separator-line (:background ,bg-m3))
       (shadow (:inherit separator-line))
       (window-border (:background ,bg))
-      (window-divider (:foreground ,bg-m1))
-      (vertical-border (:foreground ,bg-m1))
+      (window-divider (:foreground ,bg-m1 :background ,bg))
+      (window-divider-first-pixel (:foreground ,bg :background ,bg))
+      (window-divider-last-pixel (:foreground ,bg-m1 :background ,bg))
+      (vertical-border (:foreground ,bg-m3))
 ;;;;;;; font lock
       (font-lock-builtin-face (:foreground ,bright-blue :weight bold))
       (font-lock-comment-face (:foreground ,syn-comment
@@ -514,7 +519,7 @@ names to which it refers are bound."
       (font-lock-constant-face (:foreground ,syn-constant))
       (font-lock-doc-face (:foreground ,fg-dim))
       (font-lock-function-name-face (:foreground ,syn-fun :weight bold))
-      (font-lock-keyword-face (:foreground ,syn-keyword :weight bold
+      (font-lock-keyword-face (:foreground ,syn-keyword :weight semibold
                                            :slant ,(if kanagawa-themes-keyword-italic 'italic 'normal)))
       (font-lock-operator-face (:foreground ,syn-operator :weight bold))
       (font-lock-negation-char-face (:inherit font-lock-keyword-face))
@@ -530,7 +535,7 @@ names to which it refers are bound."
       (c-annotation-face (:inherit font-lock-constant-face))
 ;;;;;;; line numbers
       (line-number (:foreground ,nontext :background ,bg-gutter))
-      (line-number-current-line (:inherit line-number))
+      (line-number-current-line (:inherit line-number :background ,bg-p2))
 ;;;;;;; ansi-colors
       (ansi-color-black (:foreground ,black))
       (ansi-color-red (:foreground ,red))
@@ -554,8 +559,14 @@ names to which it refers are bound."
       (lazy-highlight (:foreground ,fg :background ,bg-search))
       (minibuffer-prompt (:foreground ,bright-blue :weight bold))
 ;;;;;;; mode-line
-      (mode-line (:foreground ,fg-dim :background ,bg-m3))
-      (mode-line-inactive (:foreground ,nontext :background ,bg-m3))
+      (mode-line (:foreground ,fg-dim :background ,bg-m3
+                              :box (:line-width 6 :color ,bg-m3)
+                              :overline nil :underline nil
+                              :height 0.92 :weight regular))
+      (mode-line-inactive (:foreground ,nontext :background ,bg-m2
+                                       :box (:line-width 6 :color ,bg-m2)
+                                       :overline nil :underline nil
+                                       :height 0.92 :weight regular))
 ;;;;;;; hl-line-mode
       (hl-line (:background ,bg-p2))
 ;;;;;;; message
@@ -594,14 +605,14 @@ names to which it refers are bound."
       (org-done (:foreground ,diag-info))
       (org-document-title (:foreground "#F5E0DC" :weight semibold))
       (org-document-info (:foreground ,fg-dim))
-      (org-document-info-keyword (:foreground "#A6E3A1" :background "#181825"))
-      (org-code (:foreground "#F9E2AF" :background "#181825" :weight medium))
-      (org-verbatim (:foreground "#89B4FA" :background "#181825" :weight medium))
-      (org-meta-line (:foreground "#A6E3A1" :background "#181825"))
-      (org-special-keyword (:foreground ,diag-ok))
-      (org-block (:foreground "#CDD6F4" :background "#11111B"))
-      (org-block-begin-line (:foreground "#BAC2DE" :background "#313244"))
-      (org-block-end-line (:foreground "#A6ADC8" :background "#313244"))
+      (org-document-info-keyword (:foreground ,diag-ok :background ,diff-add))
+      (org-code (:foreground ,yellow :background ,bg-m2 :weight medium))
+      (org-verbatim (:foreground ,blue :background ,bg-m2 :weight medium))
+      (org-meta-line (:foreground ,diag-ok :background ,diff-add))
+      (org-special-keyword (:foreground ,diag-ok :background ,diff-add))
+      (org-block (:foreground ,fg :background ,bg-m3))
+      (org-block-begin-line (:foreground ,fg-dim :background ,bg-p1))
+      (org-block-end-line (:foreground ,nontext :background ,bg-p1))
       (org-headline-done (:foreground ,diag-info :strike-through t))
       (org-todo (:foreground ,extend-color-1 :weight bold))
       (org-headline-todo (:foreground ,bg-m1))
@@ -636,6 +647,15 @@ names to which it refers are bound."
       (show-paren-mismatch (:foreground ,bright-black :weight bold))
 ;;;;;; tab-line
       (tab-line (:background ,bg-m3))
+      (tab-bar (:background "#1F2434"
+                            :box (:line-width 6 :color "#1F2434")
+                            :height 0.98))
+      (tab-bar-tab (:background "#3E4A6B"
+                                :box (:line-width 6 :color "#3E4A6B")
+                                :weight medium))
+      (tab-bar-tab-inactive (:background "#272C3D"
+                                         :box (:line-width 6 :color "#272C3D")
+                                         :weight regular))
 ;;;;;; comint
       (comint-highlight-prompt (:background ,syn-punct :foreground ,bg-dim))
 ;;;;;; completions
@@ -659,7 +679,7 @@ names to which it refers are bound."
       (highlight-indent-guides-stack-odd-face (:foreground ,bg))
       (highlight-indent-guides-stack-even-face (:foreground ,nontext))
       (highlight-indent-guides-stack-character-face (:foreground ,bg))
-      (highlight-indent-guides-even-face (:foreground ,bg-m3))
+      (highlight-indent-guides-even-face (:foreground "#454B61"))
       (highlight-indent-guides-odd-face (:foreground ,nontext))
 ;;;;;; ivy
       (ivy-current-match (:foreground ,bg-m3 :background ,blue :weight bold))
@@ -822,7 +842,11 @@ names to which it refers are bound."
       (doom-modeline-error (:background ,extend-color-2))
       (doom-modeline-buffer-major-mode (:inherit doom-modeline-buffer-path))
       (doom-modeline-info (:foreground ,blue))
-      (doom-modeline-bar (:background ,bright-magenta :weight bold))
+      (doom-modeline-bar (:background ,bg-m3 :foreground ,bg-m3 :weight bold))
+      (help-key-binding (:background "#36405B"
+                                     :box (:line-width 3 :color "#36405B")
+                                     :weight medium))
+      (internal-border (:background ,bg-m3 :foreground ,bg-m3))
       (doom-modeline-panel (:foreground ,bg-m1 :background ,syn-operator))
       (doom-themes-visual-bell (:background ,vcs-removed))
 ;;;;;;; anzu

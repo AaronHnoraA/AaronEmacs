@@ -19,6 +19,36 @@
 
 (declare-function evil-insert-state-p "evil")
 
+(defun my/org--unspecified-color-p (value)
+  "Return non-nil when VALUE is an unspecified face color."
+  (or (null value)
+      (eq value 'unspecified)
+      (and (stringp value)
+           (string-prefix-p "unspecified" value))))
+
+(defun my/org--hex-to-rgb (color)
+  "Return COLOR as an RGB float list when it is a hex string, else nil."
+  (when (and (stringp color)
+             (string-prefix-p "#" color))
+    (pcase (length color)
+      (4
+       (mapcar (lambda (component)
+                 (/ (string-to-number (make-string 2 component) 16) 255.0))
+               (cdr (string-to-list color))))
+      (7
+       (list (/ (string-to-number (substring color 1 3) 16) 255.0)
+             (/ (string-to-number (substring color 3 5) 16) 255.0)
+             (/ (string-to-number (substring color 5 7) 16) 255.0)))
+      (13
+       (list (/ (string-to-number (substring color 1 5) 16) 65535.0)
+             (/ (string-to-number (substring color 5 9) 16) 65535.0)
+             (/ (string-to-number (substring color 9 13) 16) 65535.0))))))
+
+(defun my/org--color-to-rgb (color)
+  "Return COLOR as an RGB float list."
+  (or (my/org--hex-to-rgb color)
+      (color-name-to-rgb color)))
+
 (defun my/org-enable-valign-maybe ()
   "Enable `valign-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
@@ -193,28 +223,31 @@
       (unless (equal signature my/org-ui--face-theme-signature)
         (setq my/org-ui--face-theme-signature signature)
         (let* ((base-bg (face-attribute 'default :background nil t))
-               (base-bg (if (or (not base-bg) (eq base-bg 'unspecified) (string= base-bg "unspecified"))
-                            "#1e1e2e"
+               (base-bg (if (my/org--unspecified-color-p base-bg)
+                            "#292D40"
                           base-bg))
                (title-weight (if (boundp 'my/font-title-weight) my/font-title-weight 'medium))
                (strong-weight (if (boundp 'my/font-strong-weight) my/font-strong-weight 'medium))
                (popout-weight (if (boundp 'my/font-popout-weight) my/font-popout-weight 'semibold))
-               (crust "#11111b")
-               (mantle "#181825")
-               (surface0 "#313244")
-               (surface1 "#45475a")
-               (surface2 "#585b70")
-               (overlay1 "#7f849c")
-               (subtext0 "#a6adc8")
-               (subtext1 "#bac2de")
-               (text "#cdd6f4")
+               (crust "#171c28")
+               (mantle "#1b2231")
+               (surface0 "#273144")
+               (surface1 "#344057")
+               (surface2 "#46516a")
+               (overlay1 "#90a0c0")
+               (subtext0 "#9ba8c7")
+               (subtext1 "#bfcae2")
+               (text "#e4ecff")
                (rosewater "#f5e0dc")
                (yellow "#f9e2af")
-               (blue "#89b4fa")
+               (blue "#a9cbff")
                (lavender "#b4befe")
                (mauve "#cba6f7")
-               (teal "#94e2d5")
-               (green "#a6e3a1"))
+               (teal "#a8f0e3")
+               (green "#bbf7b8")
+               (meta-bg "#244438")
+               (meta-bg-strong "#2c5041")
+               (meta-fg "#e1f6dd"))
           (when (facep 'org-document-title)
             (set-face-attribute 'org-document-title nil
                                 :foreground rosewater
@@ -239,27 +272,17 @@
             (set-face-attribute 'org-document-info nil :foreground subtext1))
           (when (facep 'org-meta-line)
             (set-face-attribute 'org-meta-line nil
-                                :background mantle
-                                :foreground green
+                                :background meta-bg
+                                :foreground meta-fg
                                 :extend t))
           (when (facep 'org-document-info-keyword)
             (set-face-attribute 'org-document-info-keyword nil
-                                :background mantle
-                                :foreground green))
+                                :background meta-bg
+                                :foreground meta-fg))
           (when (facep 'org-block)
             (set-face-attribute 'org-block nil
                                 :background crust
                                 :foreground text
-                                :extend t))
-          (when (facep 'org-block-begin-line)
-            (set-face-attribute 'org-block-begin-line nil
-                                :background surface0
-                                :foreground subtext1
-                                :extend t))
-          (when (facep 'org-block-end-line)
-            (set-face-attribute 'org-block-end-line nil
-                                :background surface0
-                                :foreground subtext0
                                 :extend t))
           (when (facep 'org-code)
             (set-face-attribute 'org-code nil
@@ -279,8 +302,8 @@
             (set-face-attribute 'org-formula nil :foreground mauve))
           (when (facep 'org-special-keyword)
             (set-face-attribute 'org-special-keyword nil
-                                :background mantle
-                                :foreground green))
+                                :background meta-bg
+                                :foreground meta-fg))
           (when (facep 'org-date)
             (set-face-attribute 'org-date nil :foreground blue :weight title-weight))
           (when (facep 'org-drawer)
@@ -298,8 +321,8 @@
                                 :box `(:line-width 4 :color ,surface1)))
           (when (facep 'org-modern-keyword)
             (set-face-attribute 'org-modern-keyword nil
-                                :background mantle
-                                :foreground green
+                                :background meta-bg
+                                :foreground meta-fg
                                 :box nil))
           (when (facep 'org-modern-tag)
             (set-face-attribute 'org-modern-tag nil
@@ -383,11 +406,13 @@
 (defun my/org-blend-colors (color1 color2 alpha)
   "混合颜色: color1(前景) * alpha + color2(背景) * (1-alpha)。"
   (condition-case nil
-      (let ((c1 (color-name-to-rgb color1))
-            (c2 (color-name-to-rgb color2)))
-        (apply 'color-rgb-to-hex
-               (cl-mapcar (lambda (x y) (+ (* x alpha) (* y (- 1.0 alpha))))
-                          c1 c2)))
+      (let ((c1 (my/org--color-to-rgb color1))
+            (c2 (my/org--color-to-rgb color2)))
+        (apply #'color-rgb-to-hex
+               (append
+                (cl-mapcar (lambda (x y) (+ (* x alpha) (* y (- 1.0 alpha))))
+                           c1 c2)
+                '(2))))
     (error color1)))
 
 ;; ===========================================================
@@ -419,12 +444,12 @@
              (params-text (and params (concat "  " params)))
              
              (default-bg (face-attribute 'default :background nil t))
-             (default-bg (if (or (not default-bg) (string= default-bg "unspecified"))
-                             "#1a1b26" default-bg))
-             (header-bg (my/org-blend-colors base-color default-bg 0.13))
-             (body-bg (my/org-blend-colors base-color default-bg 0.045))
-             (footer-color (my/org-blend-colors base-color default-bg 0.62))
-             (params-color (my/org-blend-colors "#d8dee9" default-bg 0.68))
+             (default-bg (if (my/org--unspecified-color-p default-bg)
+                             "#292D40" default-bg))
+             (header-bg (my/org-blend-colors base-color default-bg 0.18))
+             (body-bg (my/org-blend-colors base-color default-bg 0.075))
+             (footer-color (my/org-blend-colors base-color default-bg 0.72))
+             (params-color (my/org-blend-colors "#d8dee9" default-bg 0.78))
              (signature (list type begin-pos end-pos contents-begin contents-end
                               post-affiliated params default-bg))
              (cached-signature (and (hash-table-p my/org-pretty-block-cache)

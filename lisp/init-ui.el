@@ -9,8 +9,6 @@
 (defvar kanagawa-themes-custom-colors)
 (defvar my/theme-unspecified 'unspecified
   "Literal face attribute value used by some themes during runtime expansion.")
-(defvar my/ui--polish-theme-signature nil
-  "Last theme signature applied by `my/ui-apply-polish'.")
 (defvar my/dashboard-ui--theme-signature nil
   "Last theme signature applied by `my/dashboard-apply-ui'.")
 (defvar my/chunlian--visibility-timer nil
@@ -269,7 +267,7 @@
 (line-number-mode -1)  ; Mode line 上不要显示行号, 因为 window 左边缘已经显示行号了.
 
 (defun my/ui-apply-polish ()
-  "Apply a restrained dark UI polish on top of the active theme."
+  "Apply non-color UI polish on top of the active theme."
   (interactive)
   (when (display-graphic-p)
     (setq-default mode-line-format mode-line-format)
@@ -280,69 +278,7 @@
     (setopt tab-bar-tab-hints nil)
     (setopt window-divider-default-right-width 10)
     (setopt window-divider-default-bottom-width 1)
-    (window-divider-mode 1)
-    (let ((signature (list custom-enabled-themes
-                           (face-attribute 'default :background nil t)
-                           (face-attribute 'default :foreground nil t))))
-      (unless (equal signature my/ui--polish-theme-signature)
-        (setq my/ui--polish-theme-signature signature)
-        (set-face-attribute 'default nil :background "#282a36")
-        (set-face-attribute 'fringe nil :background "#282a36" :foreground "#58627a")
-        (set-face-attribute 'vertical-border nil :foreground "#2b2d3a")
-        (set-face-attribute 'window-divider nil :foreground "#33394b" :background "#282a36")
-        (set-face-attribute 'window-divider-first-pixel nil :foreground "#282a36" :background "#282a36")
-        (set-face-attribute 'window-divider-last-pixel nil :foreground "#33394b" :background "#282a36")
-        (set-face-attribute 'cursor nil :background "#9fbddd")
-        (set-face-attribute 'region nil :background "#444b60" :extend t)
-        (set-face-attribute 'highlight nil :background "#394154" :extend t)
-        (set-face-attribute 'line-number nil :foreground "#7a84a3" :background "#282a36" :weight 'regular)
-        (set-face-attribute 'line-number-current-line nil :background "#384156")
-        (set-face-attribute 'hl-line nil :background "#384156" :extend t)
-        (set-face-attribute 'mode-line nil
-                            :background "#2b2d3a"
-                            :box '(:line-width 6 :color "#2b2d3a")
-                            :overline nil
-                            :underline nil
-                            :height 0.92
-                            :weight 'regular)
-        (set-face-attribute 'mode-line-inactive nil
-                            :background "#262834"
-                            :box '(:line-width 6 :color "#262834")
-                            :overline nil
-                            :underline nil
-                            :height 0.92
-                            :weight 'regular)
-        (set-face-attribute 'header-line nil
-                            :background "#282a36"
-                            :box '(:line-width 6 :color "#282a36")
-                            :height 0.96)
-        (set-face-attribute 'tab-bar nil
-                            :background "#1d1e26"
-                            :box '(:line-width 6 :color "#1d1e26")
-                            :height 0.98)
-        (set-face-attribute 'tab-bar-tab nil
-                            :background "#384056"
-                            :box '(:line-width 6 :color "#384056")
-                            :weight 'medium)
-        (set-face-attribute 'tab-bar-tab-inactive nil
-                            :background "#232733"
-                            :box '(:line-width 6 :color "#232733")
-                            :weight 'regular)
-        (when (facep 'doom-modeline-bar)
-          (set-face-attribute 'doom-modeline-bar nil
-                              :background "#2b2d3a"
-                              :foreground "#2b2d3a"))
-        (when (facep 'help-key-binding)
-          (set-face-attribute 'help-key-binding nil
-                              :background "#31384a"
-                              :box '(:line-width 3 :color "#31384a")
-                              :weight 'medium))
-        (when (facep 'internal-border)
-          (set-face-attribute 'internal-border nil
-                              :background "#2b2d3a"
-                              :foreground "#2b2d3a"))
-        (when (facep 'indent-guide-face)
-          (set-face-attribute 'indent-guide-face nil :foreground "#454b61"))))))
+    (window-divider-mode 1)))
 
 (add-hook 'after-init-hook #'my/ui-apply-polish)
 (add-hook 'server-after-make-frame-hook #'my/ui-apply-polish)
