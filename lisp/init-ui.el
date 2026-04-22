@@ -156,8 +156,8 @@
 
   :config
   (defconst homepage-url "https://git.pwo101.top/")
-  (defconst stars-url (concat homepage-url "/stargazers"))
-  (defconst issue-url (concat homepage-url "/issues/new"))
+  (defconst stars-url (concat "https://github.com/AaronHnoraA/AaronEmacs" "/stargazers"))
+  (defconst issue-url (concat "https://github.com/AaronHnoraA/AaronEmacs" "/issues/new"))
 
   :custom
   ;; Keep the dashboard banner in `etc/` with other local UI config.
