@@ -4,6 +4,8 @@
 
 ;;; Code:
 
+(declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
+(declare-function general-define-key "general" (&rest maps))
 (declare-function yas-active-snippets "yasnippet" (&optional beg end))
 (declare-function yas-current-field "yasnippet" ())
 (declare-function yas-next-field "yasnippet" (&optional arg))
@@ -296,11 +298,24 @@ When already at an inner start, try to escape to the parent delimiter."
       (my/snippet-previous-field-dwim)
     (my/backward-delimiter-dwim)))
 
+(defun my/evil-define-key (state keymap key command)
+  "Bind KEY to COMMAND for Evil STATE in KEYMAP.
+Use vendored `general.el' for symbolic keymaps and Evil's native
+binding helper for live keymap objects."
+  (with-eval-after-load 'evil
+    (if (symbolp keymap)
+        (progn
+          (require 'general)
+          (general-define-key
+           :states state
+           :keymaps keymap
+           key command))
+      (evil-define-key* state keymap (kbd key) command))))
+
 (defun my/evil-global-leader-set (key command &optional replacement)
   "Bind COMMAND to `SPC KEY' in Evil normal state.
 When REPLACEMENT is non-nil, register it with Which-Key."
-  (with-eval-after-load 'evil
-    (evil-define-key* 'normal 'global (kbd (concat "<leader>" key)) command))
+  (my/evil-define-key 'normal 'global (concat "<leader>" key) command)
   (when replacement
     (my/leader-key-label key replacement)))
 

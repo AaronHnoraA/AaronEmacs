@@ -61,6 +61,24 @@ make audit-lock
 
 这层目前还没有做成自动安装，只能检查、记录、补装。
 
+### 本地 vendored Elisp
+
+`site-lisp/` 里放的是不走 package-lock 的本地 Elisp。
+
+当前启动链里有一个重要项：
+
+- [site-lisp/general.el/general.el](../site-lisp/general.el/general.el)
+
+`general.el` 是按键绑定 DSL，主要服务 `lisp/init-funcs.el` 里的 `my/evil-define-key`。它让 leader 绑定可以统一处理 Evil state、符号 keymap、真实 keymap object 和批量绑定。
+
+维护边界：
+
+- 它现在是启动依赖，不是可随手删除的实验目录
+- `init.el` 会把 `site-lisp/general.el/` 加入 `load-path`
+- 如果换机器、新 clone 或清理 `site-lisp/` 时漏掉它，`require 'general` 会导致启动链失败
+- 如果继续 vendored 管理，需要把整个 `site-lisp/general.el/` 保留在仓库或迁移快照中
+- 如果改成 package / VC 包管理，需要同步更新 `init.el` 的 load-path 和 package 恢复流程
+
 ### 新机器迁移时怎么做
 
 执行：
@@ -166,6 +184,14 @@ leader 入口：
 - `custom.el` 不纳入统一编译目标
 - 不自动做 byte compile
 - 可选自动 native compile on save，由 board / dispatch 统一开关
+
+编译策略：
+
+- 日常入口用 `make compile`、`make compile-byte`、`M-x my/byte-compile-config` 或 compile board 的 `[byte config]`
+- 这些入口是增量编译，只会处理缺失或源码比 `.elc` 更新的文件
+- 如果所有 `.elc` 都是新的，结果应类似 `0 files compiled, 128 skipped`
+- 只有明确需要重建字节码时才用 `make compile-byte-force`、compile board 的 `[force byte]` 或 dispatch 里的 `force byte config`
+- 修启动链、清理过旧字节码、怀疑 `.elc` 内容坏了时，才算需要 force
 
 ## 3. 状态目录
 

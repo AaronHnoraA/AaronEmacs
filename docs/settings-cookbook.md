@@ -124,12 +124,33 @@
 文件：
 
 - [lisp/init-evil.el](../lisp/init-evil.el)
+- [lisp/init-funcs.el](../lisp/init-funcs.el)
+- [site-lisp/general.el/general.el](../site-lisp/general.el/general.el)
 
 你会看到：
 
 - 全局 leader
 - Org localleader
 - Elisp localleader
+
+当前按键绑定链路：
+
+- `define-leader-key` 是配置里的 leader 入口，定义在 `lisp/init-evil.el`
+- `my/evil-define-key` 是底层封装，定义在 `lisp/init-funcs.el`
+- `general.el` 是 vendored 的按键绑定 DSL，放在 `site-lisp/general.el/`
+
+`general.el` 的职责很窄：声明式定义快捷键。它不是 UI、补全、LSP 或包管理框架。这里引入它，主要是为了统一处理 Evil state、keymap、leader key 和批量绑定，尤其是符号 keymap，例如 `'global`。
+
+这类绑定会走 `general-define-key`：
+
+```elisp
+(general-define-key
+ :states 'normal
+ :keymaps 'global
+ "<leader>ff" #'find-file)
+```
+
+真实 keymap object 仍然优先用 Evil 自己的 `evil-define-key*`。所以日常加 leader 键时，不需要直接改 `general.el`，只需要改 `define-leader-key` 的绑定列表。
 
 改法：
 

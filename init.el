@@ -131,11 +131,14 @@
 
 (let* ((dir (locate-user-emacs-file "lisp"))
        (org-dir (expand-file-name "org" dir))
-       (git-dir (expand-file-name "git" dir)))
+       (git-dir (expand-file-name "git" dir))
+       (general-dir (locate-user-emacs-file "site-lisp/general.el")))
   (add-to-list 'load-path (file-name-as-directory dir))
   (add-to-list 'load-path (file-name-as-directory org-dir))
   (add-to-list 'load-path (file-name-as-directory git-dir))
-  (add-to-list 'load-path (file-name-as-directory (expand-file-name "lang" dir))))
+  (add-to-list 'load-path (file-name-as-directory (expand-file-name "lang" dir)))
+  (add-to-list 'load-path (file-name-as-directory general-dir)))
+
 (setq custom-file (locate-user-emacs-file "etc/custom.el"))
 
 (when (file-exists-p custom-file)

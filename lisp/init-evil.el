@@ -313,7 +313,7 @@
 
     (defun define-leader-key (state map localleader &rest bindings)
       "Define leader key in MAP when STATE, a wrapper for
-`evil-define-key*'. All BINDINGS are prefixed with \"<leader>\"
+`general-define-key'. All BINDINGS are prefixed with \"<leader>\"
 if LOCALLEADER is nil, otherwise \"<localleader>\"."
       (cl-assert (cl-evenp (length bindings)))
       (let ((prefix (if localleader "<localleader>" "<leader>"))
@@ -322,7 +322,7 @@ if LOCALLEADER is nil, otherwise \"<localleader>\"."
           (let ((key (pop bindings))
                 (def (pop bindings)))
             (when (symbolp def)
-              (evil-define-key* state map (kbd (concat prefix key)) def))
+              (my/evil-define-key state map (concat prefix key) def))
             ;; Save which-key (key . replacement).
             (pcase def
               (`(:wk ,replacement)

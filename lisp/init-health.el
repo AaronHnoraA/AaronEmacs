@@ -67,6 +67,10 @@
 (defvar my/health-startup-package-count nil
   "Installed package count recorded after startup.")
 
+(defconst my/health-startup-bytecode-files
+  '("early-init.el" "init.el" "bootstrap.el")
+  "Top-level startup files whose stale bytecode should fail health checks.")
+
 (defun my/health--bundled-epdfinfo ()
   "Return the configured bundled epdfinfo path."
   (expand-file-name "elpa/pdf-tools-20260102.1101/epdfinfo"
@@ -91,6 +95,29 @@
   (expand-file-name
    ".."
    (file-name-directory my/health--module-file)))
+
+(defun my/health--stale-startup-bytecode-files ()
+  "Return stale top-level startup `.elc' files as absolute paths."
+  (let (stale)
+    (dolist (file my/health-startup-bytecode-files (nreverse stale))
+      (let* ((source (expand-file-name file (my/health-config-root)))
+             (bytecode (concat source "c")))
+        (when (and (file-exists-p source)
+                   (file-exists-p bytecode)
+                   (file-newer-than-file-p source bytecode))
+          (push bytecode stale))))))
+
+(defun my/health--startup-bytecode-freshness-result (stale-files)
+  "Return a failed health result for STALE-FILES."
+  (list :ok nil
+        :status 'stale-bytecode
+        :output
+        (format "Stale startup bytecode: %s"
+                (string-join
+                 (mapcar (lambda (file)
+                           (file-relative-name file (my/health-config-root)))
+                         stale-files)
+                 ", "))))
 
 (defun my/health--emacs-program ()
   "Return the Emacs executable used for batch health checks."
@@ -141,10 +168,26 @@
 (defun my/health-startup-check ()
   "Run a batch startup smoke test."
   (interactive)
-  (let ((result (my/health--run-batch
-                 "--batch" "-Q"
-                 "-l" "./init.el"
-                 "--eval" "(message \"INIT-OK\")")))
+  (let* ((stale-files (my/health--stale-startup-bytecode-files))
+         (result
+          (if stale-files
+              (my/health--startup-bytecode-freshness-result stale-files)
+            (my/health--run-batch
+             "--batch" "--no-site-file" "--no-site-lisp" "--no-splash"
+             (format "--init-directory=%s"
+                     (directory-file-name (my/health-config-root)))
+             "-q"
+             "-L" "."
+             "-l" "early-init"
+             "-l" "init"
+             "--eval"
+             "(progn
+                (unless (featurep 'init-modules)
+                  (error \"init-modules did not load\"))
+                (when (eq system-type 'darwin)
+                  (unless (featurep 'init-macos)
+                    (error \"init-macos did not load\")))
+                (message \"INIT-OK\"))"))))
     (if (called-interactively-p 'interactive)
         (message "Startup smoke %s"
                  (if (plist-get result :ok) "passed" "failed"))

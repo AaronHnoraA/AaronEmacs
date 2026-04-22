@@ -7,7 +7,7 @@
 
 (require 'tabulated-list)
 
-(declare-function evil-define-key "evil" (state keymap key def &rest bindings))
+(declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
 (declare-function magit-stage-files "magit-apply" (files &optional force))
 (declare-function magit-toplevel "magit-git" (&optional directory))
 (declare-function magit-unstage-files "magit-apply" (files))
@@ -190,7 +190,7 @@
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'my/git-board-mode 'normal)
-  (evil-define-key 'normal my/git-board-mode-map
+  (evil-define-key* 'normal my/git-board-mode-map
     (kbd "RET") #'my/git-board-visit
     (kbd "<return>") #'my/git-board-visit
     (kbd "d") #'my/git-board-diff

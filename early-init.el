@@ -3,6 +3,33 @@
 ;;; 提前关掉包系统自动初始化，用 use-package 等自己控制
 (setq package-enable-at-startup nil)
 
+;; Prefer fresh source over stale bytecode throughout the startup chain.
+(setq load-prefer-newer t)
+
+(defconst my/startup-byte-compiled-files
+  '("early-init.el" "init.el" "bootstrap.el")
+  "Top-level startup files whose stale bytecode can break bootstrap.")
+
+(defun my/delete-stale-startup-bytecode ()
+  "Delete stale top-level `.elc' files before normal init loading continues."
+  (dolist (file my/startup-byte-compiled-files)
+    (let* ((source (expand-file-name file user-emacs-directory))
+           (bytecode (concat source "c")))
+      (when (and (file-exists-p source)
+                 (file-exists-p bytecode)
+                 (file-newer-than-file-p source bytecode))
+        (condition-case err
+            (delete-file bytecode)
+          (error
+           (display-warning
+            'early-init
+            (format "Failed to delete stale startup bytecode %s: %s"
+                    bytecode
+                    (error-message-string err))
+            :error)))))))
+
+(my/delete-stale-startup-bytecode)
+
 ;; Keep native compilation cache local to this config so cleanup stays simple.
 (when (fboundp 'startup-redirect-eln-cache)
   (startup-redirect-eln-cache
