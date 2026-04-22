@@ -324,6 +324,11 @@
   :type 'symbol
   :group 'my/typography)
 
+(defcustom my/font-ui-weight 'regular
+  "Preferred weight for general UI text."
+  :type 'symbol
+  :group 'my/typography)
+
 (defcustom my/font-body-weight 'regular
   "Preferred weight for prose text."
   :type 'symbol
@@ -331,6 +336,16 @@
 
 (defcustom my/font-title-weight 'medium
   "Preferred weight for document headings."
+  :type 'symbol
+  :group 'my/typography)
+
+(defcustom my/font-strong-weight 'medium
+  "Preferred weight for emphasis that should remain readable on transparent backgrounds."
+  :type 'symbol
+  :group 'my/typography)
+
+(defcustom my/font-popout-weight 'semibold
+  "Preferred weight for the strongest visible accents such as top headings."
   :type 'symbol
   :group 'my/typography)
 
@@ -386,12 +401,14 @@
   "Keep UI monospace consistent without using heavy bold weights."
   (my/font--set-code-face 'line-number
                           :height 0.85
-                          :foreground "#6b7280")
+                          :weight my/font-ui-weight
+                          :foreground "#7f849c")
   (my/font--set-face 'line-number-current-line
-                     :inherit 'line-number)
+                     :inherit 'line-number
+                     :foreground "#bac2de")
   (my/font--set-face 'line-number-major-tick
                      :inherit 'line-number
-                     :foreground "#ff9e64"))
+                     :foreground "#f9e2af"))
 
 (defun my/font--apply-core-faces ()
   "设置 default/fixed/variable 三类 face。"
@@ -440,6 +457,14 @@
                org-level-1 org-level-2 org-level-3 org-level-4
                org-level-5 org-level-6 org-level-7 org-level-8)
              heights))
+  (my/font--set-face 'org-document-title
+                     :weight my/font-popout-weight)
+  (dolist (face '(org-level-1 org-level-2))
+    (my/font--set-face face :weight my/font-popout-weight))
+  (dolist (face '(org-level-3 org-level-4))
+    (my/font--set-face face :weight my/font-strong-weight))
+  (dolist (face '(org-level-5 org-level-6 org-level-7 org-level-8))
+    (my/font--set-face face :weight my/font-title-weight))
   (dolist (face '(org-block
                   org-block-begin-line
                   org-block-end-line
@@ -499,12 +524,12 @@
 
 (defun my/font--apply-dashboard-faces ()
   "Keep dashboard readable without breaking nerd-icons glyph faces."
-  (my/font--set-title-face 'dashboard-banner-logo-title (+ my/h-title 18) 'medium)
+  (my/font--set-title-face 'dashboard-banner-logo-title (+ my/h-title 18) my/font-strong-weight)
   ;; Heading / navigator / item lines may mix nerd-icons with text, so only
   ;; tune size and weight here and leave font family resolution to the icon faces.
   (my/font--set-face 'dashboard-heading
                      :height (- my/h-title 10)
-                     :weight 'medium)
+                     :weight my/font-strong-weight)
   (my/font--set-face 'dashboard-items-face
                      :height my/h-body
                      :weight my/font-body-weight)
@@ -513,12 +538,12 @@
                      :weight my/font-body-weight)
   (my/font--set-face 'dashboard-navigator
                      :height my/h-code
-                     :weight my/font-code-weight)
+                     :weight my/font-ui-weight)
   (my/font--set-face 'dashboard-text-banner
                      :inherit 'variable-pitch
                      :family my/font-body
                      :height (+ my/h-body 6)
-                     :weight 'medium))
+                     :weight my/font-strong-weight))
 
 (defun my/font--apply-document-faces ()
   "Refresh mode-specific faces for already loaded writing packages."

@@ -192,108 +192,135 @@
                            (face-attribute 'default :foreground nil t))))
       (unless (equal signature my/org-ui--face-theme-signature)
         (setq my/org-ui--face-theme-signature signature)
-    (when (facep 'org-document-title)
-      (set-face-attribute 'org-document-title nil
-                          :foreground "#f6f1df"
-                          :weight 'medium))
-    (when (facep 'org-level-1)
-      (set-face-attribute 'org-level-1 nil :foreground "#e7cf8b" :weight 'medium))
-    (when (facep 'org-level-2)
-      (set-face-attribute 'org-level-2 nil :foreground "#98ccf2" :weight 'medium))
-    (when (facep 'org-level-3)
-      (set-face-attribute 'org-level-3 nil :foreground "#c7b7ec" :weight 'medium))
-    (when (facep 'org-level-4)
-      (set-face-attribute 'org-level-4 nil :foreground "#96d4be" :weight 'medium))
-    (when (facep 'org-level-5)
-      (set-face-attribute 'org-level-5 nil :foreground "#d9be96"))
-    (when (facep 'org-level-6)
-      (set-face-attribute 'org-level-6 nil :foreground "#a3bdd8"))
-    (when (facep 'org-level-7)
-      (set-face-attribute 'org-level-7 nil :foreground "#c1b4d7"))
-    (when (facep 'org-level-8)
-      (set-face-attribute 'org-level-8 nil :foreground "#9dc3b6"))
-    (when (facep 'org-document-info)
-      (set-face-attribute 'org-document-info nil :foreground "#c7cfdb"))
-    (when (facep 'org-meta-line)
-      (set-face-attribute 'org-meta-line nil
-                          :background "#24362b"
-                          :foreground "#98c379"
-                          :extend t))
-    (when (facep 'org-document-info-keyword)
-      (set-face-attribute 'org-document-info-keyword nil
-                          :background "#24362b"
-                          :foreground "#8fbc72"))
-    (when (facep 'org-block)
-      (set-face-attribute 'org-block nil
-                          :background "#2d3240"
-                          :foreground "#e8edf4"
-                          :extend t))
-    (when (facep 'org-block-begin-line)
-      (set-face-attribute 'org-block-begin-line nil
-                          :background "#394150"
-                          :foreground "#c6d0dc"
-                          :extend t))
-    (when (facep 'org-block-end-line)
-      (set-face-attribute 'org-block-end-line nil
-                          :background "#394150"
-                          :foreground "#aeb8c7"
-                          :extend t))
-    (when (facep 'org-code)
-      (set-face-attribute 'org-code nil
-                          :background "#2d3140"
-                          :foreground "#f0d58a"))
-    (when (facep 'org-verbatim)
-      (set-face-attribute 'org-verbatim nil
-                          :background "#2d3140"
-                          :foreground "#95d5ff"))
-    (when (facep 'org-table)
-      (set-face-attribute 'org-table nil :foreground "#cad3e0"))
-    (when (facep 'org-formula)
-      (set-face-attribute 'org-formula nil :foreground "#d9b8ff"))
-    (when (facep 'org-special-keyword)
-      (set-face-attribute 'org-special-keyword nil
-                          :background "#24362b"
-                          :foreground "#8fbc72"))
-    (when (facep 'org-date)
-      (set-face-attribute 'org-date nil :foreground "#9fd7ff"))
-    (when (facep 'org-drawer)
-      (set-face-attribute 'org-drawer nil :foreground "#b0bbcd"))
-    (when (facep 'org-ellipsis)
-      (set-face-attribute 'org-ellipsis nil :foreground "#f0c674"))
-    (when (facep 'org-indent)
-      (set-face-attribute 'org-indent nil :foreground "#313949" :background "#282a36"))
-    (when (facep 'org-hide)
-      (set-face-attribute 'org-hide nil :foreground "#282a36" :background "#282a36"))
-    (when (facep 'org-modern-label)
-      (set-face-attribute 'org-modern-label nil
-                          :background "#445065"
-                          :foreground "#edf2f7"
-                          :box '(:line-width 4 :color "#445065")))
-    (when (facep 'org-modern-keyword)
-      (set-face-attribute 'org-modern-keyword nil
-                          :background "#24362b"
-                          :foreground "#8fbc72"
-                          :box nil))
-    (when (facep 'org-modern-tag)
-      (set-face-attribute 'org-modern-tag nil
-                          :background "#38435a"
-                          :foreground "#dce4ee"))
-    (when (facep 'org-modern-date-active)
-      (set-face-attribute 'org-modern-date-active nil
-                          :background "#3a465c"
-                          :foreground "#c0e3f8"))
-    (when (facep 'org-modern-date-inactive)
-      (set-face-attribute 'org-modern-date-inactive nil
-                          :background "#343a49"
-                          :foreground "#b1bac9"))
-    (when (facep 'org-modern-block-name)
-      (set-face-attribute 'org-modern-block-name nil
-                          :foreground "#f0d58a"
-                          :weight 'medium))
-    (when (facep 'org-modern-progress-complete)
-      (set-face-attribute 'org-modern-progress-complete nil :foreground "#9ed0a4"))
-    (when (facep 'org-modern-progress-incomplete)
-      (set-face-attribute 'org-modern-progress-incomplete nil :foreground "#66728a"))))))
+        (let* ((base-bg (face-attribute 'default :background nil t))
+               (base-bg (if (or (not base-bg) (eq base-bg 'unspecified) (string= base-bg "unspecified"))
+                            "#1e1e2e"
+                          base-bg))
+               (title-weight (if (boundp 'my/font-title-weight) my/font-title-weight 'medium))
+               (strong-weight (if (boundp 'my/font-strong-weight) my/font-strong-weight 'medium))
+               (popout-weight (if (boundp 'my/font-popout-weight) my/font-popout-weight 'semibold))
+               (crust "#11111b")
+               (mantle "#181825")
+               (surface0 "#313244")
+               (surface1 "#45475a")
+               (surface2 "#585b70")
+               (overlay1 "#7f849c")
+               (subtext0 "#a6adc8")
+               (subtext1 "#bac2de")
+               (text "#cdd6f4")
+               (rosewater "#f5e0dc")
+               (yellow "#f9e2af")
+               (blue "#89b4fa")
+               (lavender "#b4befe")
+               (mauve "#cba6f7")
+               (teal "#94e2d5")
+               (green "#a6e3a1"))
+          (when (facep 'org-document-title)
+            (set-face-attribute 'org-document-title nil
+                                :foreground rosewater
+                                :weight popout-weight))
+          (when (facep 'org-level-1)
+            (set-face-attribute 'org-level-1 nil :foreground yellow :weight popout-weight))
+          (when (facep 'org-level-2)
+            (set-face-attribute 'org-level-2 nil :foreground blue :weight popout-weight))
+          (when (facep 'org-level-3)
+            (set-face-attribute 'org-level-3 nil :foreground mauve :weight strong-weight))
+          (when (facep 'org-level-4)
+            (set-face-attribute 'org-level-4 nil :foreground teal :weight strong-weight))
+          (when (facep 'org-level-5)
+            (set-face-attribute 'org-level-5 nil :foreground rosewater :weight title-weight))
+          (when (facep 'org-level-6)
+            (set-face-attribute 'org-level-6 nil :foreground lavender :weight title-weight))
+          (when (facep 'org-level-7)
+            (set-face-attribute 'org-level-7 nil :foreground mauve :weight title-weight))
+          (when (facep 'org-level-8)
+            (set-face-attribute 'org-level-8 nil :foreground teal :weight title-weight))
+          (when (facep 'org-document-info)
+            (set-face-attribute 'org-document-info nil :foreground subtext1))
+          (when (facep 'org-meta-line)
+            (set-face-attribute 'org-meta-line nil
+                                :background mantle
+                                :foreground green
+                                :extend t))
+          (when (facep 'org-document-info-keyword)
+            (set-face-attribute 'org-document-info-keyword nil
+                                :background mantle
+                                :foreground green))
+          (when (facep 'org-block)
+            (set-face-attribute 'org-block nil
+                                :background crust
+                                :foreground text
+                                :extend t))
+          (when (facep 'org-block-begin-line)
+            (set-face-attribute 'org-block-begin-line nil
+                                :background surface0
+                                :foreground subtext1
+                                :extend t))
+          (when (facep 'org-block-end-line)
+            (set-face-attribute 'org-block-end-line nil
+                                :background surface0
+                                :foreground subtext0
+                                :extend t))
+          (when (facep 'org-code)
+            (set-face-attribute 'org-code nil
+                                :background mantle
+                                :foreground yellow
+                                :weight strong-weight))
+          (when (facep 'org-verbatim)
+            (set-face-attribute 'org-verbatim nil
+                                :background mantle
+                                :foreground blue
+                                :weight title-weight))
+          (when (facep 'org-table)
+            (set-face-attribute 'org-table nil
+                                :foreground subtext1
+                                :background base-bg))
+          (when (facep 'org-formula)
+            (set-face-attribute 'org-formula nil :foreground mauve))
+          (when (facep 'org-special-keyword)
+            (set-face-attribute 'org-special-keyword nil
+                                :background mantle
+                                :foreground green))
+          (when (facep 'org-date)
+            (set-face-attribute 'org-date nil :foreground blue :weight title-weight))
+          (when (facep 'org-drawer)
+            (set-face-attribute 'org-drawer nil :foreground overlay1))
+          (when (facep 'org-ellipsis)
+            (set-face-attribute 'org-ellipsis nil :foreground yellow :weight strong-weight))
+          (when (facep 'org-indent)
+            (set-face-attribute 'org-indent nil :foreground base-bg :background base-bg))
+          (when (facep 'org-hide)
+            (set-face-attribute 'org-hide nil :foreground base-bg :background base-bg))
+          (when (facep 'org-modern-label)
+            (set-face-attribute 'org-modern-label nil
+                                :background surface1
+                                :foreground text
+                                :box `(:line-width 4 :color ,surface1)))
+          (when (facep 'org-modern-keyword)
+            (set-face-attribute 'org-modern-keyword nil
+                                :background mantle
+                                :foreground green
+                                :box nil))
+          (when (facep 'org-modern-tag)
+            (set-face-attribute 'org-modern-tag nil
+                                :background surface0
+                                :foreground text))
+          (when (facep 'org-modern-date-active)
+            (set-face-attribute 'org-modern-date-active nil
+                                :background surface0
+                                :foreground blue))
+          (when (facep 'org-modern-date-inactive)
+            (set-face-attribute 'org-modern-date-inactive nil
+                                :background mantle
+                                :foreground subtext0))
+          (when (facep 'org-modern-block-name)
+            (set-face-attribute 'org-modern-block-name nil
+                                :foreground yellow
+                                :weight strong-weight))
+          (when (facep 'org-modern-progress-complete)
+            (set-face-attribute 'org-modern-progress-complete nil :foreground green))
+          (when (facep 'org-modern-progress-incomplete)
+            (set-face-attribute 'org-modern-progress-incomplete nil :foreground surface2)))))))
 
 (add-hook 'org-mode-hook #'my/org-apply-ui)
 (add-hook 'after-load-theme-hook #'my/org-apply-ui)
