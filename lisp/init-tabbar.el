@@ -12,11 +12,12 @@
 (defvar persp-mode)
 (defvar tab-line-exclude-modes)
 (defvar tab-line-tab-map)
+(defvar my/vterm-popup-instance-p)
 
 (declare-function centaur-tabs-mode "centaur-tabs" (&optional arg))
 (declare-function global-tab-line-mode "tab-line" (&optional arg))
 (declare-function persp-current-buffers* "perspective" (&optional include-global))
-(declare-function persp-current-name "perspective" ())
+(declare-function tab-line--get-tab-property "tab-line" (prop string))
 (declare-function tab-line-force-update "tab-line" (all))
 (declare-function tab-bar-tabs "tab-bar" ())
 
@@ -48,6 +49,17 @@
   '((t (:foreground "#5f6578")))
   "Face used for separators in the centered tab line."
   :group 'tab-line)
+
+(defconst my/tab-line-separator-string "|"
+  "Separator used between centered buffer tabs.")
+
+(defvar my/tab-line-click-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [tab-line down-mouse-1] #'ignore)
+    (define-key map [tab-line mouse-1] #'my/tab-line-select-buffer)
+    (define-key map (kbd "RET") #'my/tab-line-select-current)
+    map)
+  "Keymap for clickable centered buffer tabs.")
 
 (defun my/tab-bar--current-buffer ()
   "Return the buffer shown in the selected window."
@@ -104,47 +116,77 @@ When FRAME is nil, use the selected frame."
   (let* ((buffers (if (and (bound-and-true-p persp-mode)
                            (fboundp 'persp-current-buffers*))
                       (persp-current-buffers* t)
-                    (buffer-list)))
-         (current (current-buffer))
-         (filtered
-          (seq-filter
-           (lambda (buffer)
-             (and (buffer-live-p buffer)
-                  (or (eq buffer current)
-                      (with-current-buffer buffer
-                        (and (not (derived-mode-p 'dashboard-mode))
-                             (or buffer-file-name
-                                 (derived-mode-p 'dired-mode
-                                                 'eshell-mode
-                                                 'shell-mode
-                                                 'term-mode
-                                                 'vterm-mode)
-                                 (let ((name (buffer-name buffer)))
-                                   (and (stringp name)
-                                        (not (string-prefix-p " " name))
-                                        (not (string-prefix-p "*" name))))))))))
-           buffers)))
+                    (buffer-list))))
     (delete-dups
-     (if (memq current filtered)
-         (copy-sequence filtered)
-       (cons current filtered)))))
+     (seq-filter #'my/tab-line-visible-buffer-p buffers))))
+
+(defun my/tab-line-starred-buffer-p (buffer)
+  "Return non-nil when BUFFER uses the conventional `*name*' wrapper."
+  (let ((name (buffer-name buffer)))
+    (and (stringp name)
+         (string-prefix-p "*" name)
+         (string-suffix-p "*" name))))
+
+(defun my/tab-line-visible-buffer-p (buffer)
+  "Return non-nil when BUFFER should appear in the centered tab line."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (let ((name (buffer-name buffer)))
+           (and (not (derived-mode-p 'dashboard-mode))
+                (not (bound-and-true-p my/vterm-popup-instance-p))
+                (not (and (stringp name)
+                          (string-match-p "vterm-pop" name)))
+                (not (my/tab-line-starred-buffer-p buffer))
+                (or buffer-file-name
+                    (derived-mode-p 'dired-mode
+                                    'eshell-mode
+                                    'shell-mode
+                                    'term-mode
+                                    'vterm-mode)
+                    (and (stringp name)
+                         (not (string-prefix-p " " name)))))))))
 
 (defun my/tab-line-hidden-p ()
   "Return non-nil when the centered buffer tab line should stay hidden."
   (or (derived-mode-p 'dashboard-mode)
-      (minibufferp)))
+      (minibufferp)
+      (not (my/tab-line-visible-buffer-p (current-buffer)))))
+
+(defun my/tab-line-current-buffer ()
+  "Return the currently selected visible buffer for the centered tab line."
+  (or (current-buffer)
+      (car (my/tab-line-buffer-list))))
+
+(defun my/tab-line-select-current ()
+  "No-op keyboard entrypoint for the current centered tab item."
+  (interactive))
+
+(defun my/tab-line-select-buffer (event)
+  "Select the clicked buffer tab from EVENT."
+  (interactive "e")
+  (let* ((posnp (event-start event))
+         (string (car-safe (posn-string posnp)))
+         (buffer (and string
+                      (tab-line--get-tab-property 'tab string))))
+    (when (buffer-live-p buffer)
+      (with-selected-window (posn-window posnp)
+        (let ((switch-to-buffer-obey-display-actions nil))
+          (switch-to-buffer buffer))
+        (my/tab-line-refresh)))))
 
 (defun my/tab-line-tab-string (buffer)
   "Return the clickable tab label for BUFFER."
-  (let ((current (eq buffer (current-buffer)))
+  (let ((current (eq buffer (my/tab-line-current-buffer)))
         (name (buffer-name buffer)))
     (propertize
-     name
+     (format " %s " name)
      'face (if current
                'my/tab-line-current-face
              'my/tab-line-inactive-face)
      'tab buffer
-     'keymap tab-line-tab-map
+     'local-map my/tab-line-click-map
+     'keymap my/tab-line-click-map
+     'pointer 'hand
      'mouse-face 'tab-line-highlight
      'follow-link 'ignore
      'help-echo (or (buffer-file-name buffer)
@@ -152,33 +194,41 @@ When FRAME is nil, use the selected frame."
 
 (defun my/tab-line-separator ()
   "Return the muted separator used between buffer tabs."
-  (propertize " | " 'face 'my/tab-line-separator-face))
+  (propertize my/tab-line-separator-string
+              'face 'my/tab-line-separator-face))
 
 (defun my/tab-line-content ()
-  "Return the centered buffer tabs content string."
+  "Return the centered buffer tabs content segments."
   (let ((buffers (my/tab-line-buffer-list)))
     (when buffers
-      (let ((parts (list (my/tab-line-separator))))
+      (let ((segments (list (propertize "(" 'face 'my/tab-line-separator-face))))
         (dolist (buffer buffers)
-          (push (my/tab-line-tab-string buffer) parts)
-          (push (my/tab-line-separator) parts))
-        (apply #'concat (nreverse parts))))))
+          (when (> (length segments) 1)
+            (setq segments
+                  (append segments
+                          (list (my/tab-line-separator)))))
+          (setq segments
+                (append segments
+                        (list (my/tab-line-tab-string buffer)))))
+        (append segments
+                (list (propertize ")" 'face 'my/tab-line-separator-face)))))))
 
 (defun my/tab-line-format ()
   "Render a centered, minimal buffer tab line."
   (unless (my/tab-line-hidden-p)
     (when-let* ((content (my/tab-line-content)))
-      (let* ((content-width (string-width content))
+      (let* ((content-width (string-width (format-mode-line content)))
              (window-width (window-body-width))
              (offset (if (< content-width (max 1 (- window-width 4)))
                          (/ content-width 2)
                        0)))
-        (list
-         (if (> offset 0)
-             (propertize " "
-                         'face 'tab-line
-                         'display `(space :align-to (- center ,offset)))
-           (propertize " " 'face 'tab-line))
+        (append
+         (list
+          (if (> offset 0)
+              (propertize " "
+                          'face 'tab-line
+                          'display `(space :align-to (- center ,offset)))
+            (propertize " " 'face 'tab-line)))
          content)))))
 
 (defun my/tab-line-refresh (&rest _)
@@ -188,51 +238,50 @@ When FRAME is nil, use the selected frame."
 
 (defun my/tab-line-apply-ui ()
   "Apply the local visual treatment for the centered buffer tab line."
-  (let ((bg (face-background 'default nil t)))
-    (set-face-attribute 'tab-line nil
-                        :background bg
-                        :foreground "#8f96ad"
-                        :box nil
-                        :overline nil
-                        :underline nil
-                        :height 0.95)
-    (set-face-attribute 'tab-line-active nil
-                        :background bg
-                        :foreground "#8f96ad"
-                        :box nil
-                        :overline nil
-                        :underline nil)
-    (set-face-attribute 'tab-line-inactive nil
-                        :background bg
-                        :foreground "#8f96ad"
-                        :box nil
-                        :overline nil
-                        :underline nil)
-    (set-face-attribute 'tab-line-tab nil
-                        :background bg
-                        :foreground "#8f96ad"
-                        :box nil
-                        :overline nil
-                        :underline nil)
-    (set-face-attribute 'tab-line-tab-current nil
-                        :background bg
-                        :foreground "#e7d6a5"
-                        :box nil
-                        :overline nil
-                        :underline nil
-                        :weight 'semibold)
-    (set-face-attribute 'tab-line-tab-inactive nil
-                        :background bg
-                        :foreground "#8f96ad"
-                        :box nil
-                        :overline nil
-                        :underline nil)
-    (set-face-attribute 'tab-line-highlight nil
-                        :background bg
-                        :foreground "#e7d6a5"
-                        :box nil
-                        :overline nil
-                        :underline nil)))
+  (set-face-attribute 'tab-line nil
+                      :background 'unspecified
+                      :foreground "#8f96ad"
+                      :box nil
+                      :overline nil
+                      :underline nil
+                      :height 0.95)
+  (set-face-attribute 'tab-line-active nil
+                      :background 'unspecified
+                      :foreground "#8f96ad"
+                      :box nil
+                      :overline nil
+                      :underline nil)
+  (set-face-attribute 'tab-line-inactive nil
+                      :background 'unspecified
+                      :foreground "#8f96ad"
+                      :box nil
+                      :overline nil
+                      :underline nil)
+  (set-face-attribute 'tab-line-tab nil
+                      :background 'unspecified
+                      :foreground "#8f96ad"
+                      :box nil
+                      :overline nil
+                      :underline nil)
+  (set-face-attribute 'tab-line-tab-current nil
+                      :background 'unspecified
+                      :foreground "#e7d6a5"
+                      :box nil
+                      :overline nil
+                      :underline nil
+                      :weight 'semibold)
+  (set-face-attribute 'tab-line-tab-inactive nil
+                      :background 'unspecified
+                      :foreground "#8f96ad"
+                      :box nil
+                      :overline nil
+                      :underline nil)
+  (set-face-attribute 'tab-line-highlight nil
+                      :background 'unspecified
+                      :foreground "#e7d6a5"
+                      :box nil
+                      :overline nil
+                      :underline nil))
 
 (use-package tab-bar
   :ensure nil
@@ -256,9 +305,7 @@ When FRAME is nil, use the selected frame."
 (use-package tab-line
   :ensure nil
   :demand t
-  :hook ((after-init . global-tab-line-mode)
-         (after-init . my/tab-line-apply-ui)
-         (server-after-make-frame . my/tab-line-apply-ui)
+  :hook ((server-after-make-frame . my/tab-line-apply-ui)
          (after-load-theme . my/tab-line-apply-ui))
   :custom
   (tab-line-close-button-show nil)
