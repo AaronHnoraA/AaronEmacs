@@ -125,7 +125,7 @@
   :hook (after-init . tab-bar-history-mode)
   :custom
   (tab-bar-history-buttons-show nil)
-  (tab-bar-show t))
+  (tab-bar-show 0))
 
 
 

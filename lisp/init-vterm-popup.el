@@ -51,11 +51,29 @@
 (defvar-local my/vterm-popup-instance-p nil
   "Whether the current buffer belongs to the popup vterm pool.")
 
+(defface my/vterm-popup-separator
+  '((t (:inherit mode-line
+        :foreground "#3d465c"
+        :background "#3d465c"
+        :box nil
+        :overline "#58627a"
+        :underline nil
+        :height 0.24)))
+  "Face used for the popup vterm separator bar."
+  :group 'my/vterm-popup)
+
+(defun my/vterm-popup--separator-line ()
+  "Return a full-width separator line for popup vterm windows."
+  (propertize
+   " "
+   'face 'my/vterm-popup-separator
+   'display '(space :align-to right)))
+
 (defun my/vterm-popup-apply-ui (buffer)
   "Apply local popup terminal UI to BUFFER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
-      (setq-local mode-line-format nil)
+      (setq-local mode-line-format '((:eval (my/vterm-popup--separator-line))))
       (setq-local header-line-format
                   '(" "
                     (:propertize "%b" face mode-line-buffer-id)
@@ -156,7 +174,6 @@ When BUFFER is non-nil, return the window displaying BUFFER."
      window 'my-vterm-fixed
      (buffer-local-value 'my/vterm-popup-fixed buffer))
     (set-window-parameter window 'no-delete-other-windows t)
-    (set-window-parameter window 'mode-line-format 'none)
     (window-preserve-size window nil t)
     window))
 

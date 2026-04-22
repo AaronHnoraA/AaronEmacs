@@ -32,6 +32,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-base)
 (require 'init-tramp)
 (require 'init-ui)
+(require 'init-tabbar)
 (require 'init-display-rules)
 (require 'init-tools)
 (require 'init-evil)

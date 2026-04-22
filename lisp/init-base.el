@@ -14,8 +14,10 @@
 (declare-function tempo-expand-if-complete "tempo")
 (declare-function magit-toplevel "magit" (&optional directory))
 (declare-function project-current "project" (&optional maybe-prompt directory))
+(declare-function project-root "project" (project))
 (declare-function diff-hl-mode "diff-hl" (&optional arg))
 (declare-function vc-git-root "vc-git" (file))
+(declare-function my/project-current-root "init-project")
 
 (defvar project-current-directory-override)
 
@@ -836,49 +838,6 @@
          ("C-c C-n" . reb-next-match))
   :custom
   (reb-re-syntax 'string))
-
-;; window layout manager
-;;
-;; gt next-tab
-;; gT prev-tab
-(defun my/tab-bar-tab-name-format (tab index)
-  "Format TAB at INDEX as a clear workspace-style label."
-  (let* ((name (alist-get 'name tab))
-         (current (eq (car tab) 'current-tab))
-         (prefix (if current "[" " "))
-         (suffix (if current "]" " ")))
-    (format " %s%d %s%s " prefix index name suffix)))
-
-(defun my/tab-bar-ensure-visible (&optional frame)
-  "Force the top-level tab bar to be visible on FRAME.
-When FRAME is nil, use the selected frame."
-  (let ((frame (or frame (selected-frame))))
-    (when (display-graphic-p frame)
-      (with-selected-frame frame
-        (setq tab-bar-show 0)
-        (tab-bar-mode 1)
-        (set-frame-parameter frame 'tab-bar-lines 1)
-        (force-mode-line-update t)))))
-
-(use-package tab-bar
-  :ensure nil
-  :hook ((after-init . my/tab-bar-ensure-visible)
-         (server-after-make-frame . my/tab-bar-ensure-visible))
-  :custom
-  (tab-bar-show 0)
-  (tab-bar-tab-hints nil)
-  (tab-bar-auto-width t)
-  (tab-bar-close-button-show nil)
-  (tab-bar-new-button-show nil)
-  (tab-bar-format '(tab-bar-format-tabs
-                    tab-bar-separator
-                    tab-bar-format-align-right
-                    tab-bar-format-global))
-  (tab-bar-tab-name-format-function #'my/tab-bar-tab-name-format)
-  (tab-bar-tab-name-function 'tab-bar-tab-name-truncated)
-  :config
-  (when (display-graphic-p)
-    (my/tab-bar-ensure-visible)))
 
 (use-package newcomment
   :ensure nil
