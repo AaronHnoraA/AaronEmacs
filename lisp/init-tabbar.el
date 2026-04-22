@@ -1,4 +1,4 @@
-;;; init-tabbar.el --- Top tab bar UI -*- lexical-binding: t; -*-
+;;; init-tabbar.el --- Top tab and buffer bars -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;;
@@ -6,19 +6,18 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'seq)
 (require 'subr-x)
 
 (defvar persp-mode)
+(defvar tab-line-exclude-modes)
+(defvar tab-line-tab-map)
 
-(declare-function centaur-tabs-buffer-update-groups "centaur-tabs" ())
-(declare-function centaur-tabs-current-tabset "centaur-tabs" (&optional update))
-(declare-function centaur-tabs-display-update "centaur-tabs" ())
 (declare-function centaur-tabs-mode "centaur-tabs" (&optional arg))
-(declare-function centaur-tabs-selected-p "centaur-tabs" (tab tabset))
+(declare-function global-tab-line-mode "tab-line" (&optional arg))
 (declare-function persp-current-buffers* "perspective" (&optional include-global))
 (declare-function persp-current-name "perspective" ())
-(declare-function project-current "project" (&optional maybe-prompt dir))
-(declare-function project-root "project" (project))
+(declare-function tab-line-force-update "tab-line" (all))
 (declare-function tab-bar-tabs "tab-bar" ())
 
 (defface my/tab-bar-buffer-face
@@ -34,21 +33,21 @@
   "Face used for secondary path text in the top tab bar."
   :group 'tab-bar)
 
-(defface my/centaur-tabs-active-buffer-face
+(defface my/tab-line-current-face
   '((t (:foreground "#e7d6a5"
         :weight semibold)))
-  "Face used for the primary selected buffer label."
-  :group 'centaur-tabs)
+  "Face used for the selected buffer in the centered tab line."
+  :group 'tab-line)
 
-(defface my/centaur-tabs-meta-face
+(defface my/tab-line-inactive-face
   '((t (:foreground "#8f96ad")))
-  "Face used for secondary metadata in buffer tabs."
-  :group 'centaur-tabs)
+  "Face used for inactive buffers in the centered tab line."
+  :group 'tab-line)
 
-(defface my/centaur-tabs-divider-face
+(defface my/tab-line-separator-face
   '((t (:foreground "#5f6578")))
-  "Face used for separators inside buffer tabs."
-  :group 'centaur-tabs)
+  "Face used for separators in the centered tab line."
+  :group 'tab-line)
 
 (defun my/tab-bar--current-buffer ()
   "Return the buffer shown in the selected window."
@@ -100,118 +99,140 @@ When FRAME is nil, use the selected frame."
         (force-mode-line-update t)
         (redraw-frame frame)))))
 
-(defun my/tab-bar-disable-tab-line ()
-  "Disable stale `tab-line-mode' buffers left by earlier experiments."
-  (dolist (buffer (buffer-list))
-    (with-current-buffer buffer
-      (when (bound-and-true-p tab-line-mode)
-        (tab-line-mode -1)))))
-
-(defun my/centaur-tabs-buffer-list ()
+(defun my/tab-line-buffer-list ()
   "Return buffers that belong to the current workspace."
   (let* ((buffers (if (and (bound-and-true-p persp-mode)
                            (fboundp 'persp-current-buffers*))
                       (persp-current-buffers* t)
                     (buffer-list)))
-         (live-buffers (cl-remove-if-not #'buffer-live-p buffers))
-         (current (current-buffer)))
+         (current (current-buffer))
+         (filtered
+          (seq-filter
+           (lambda (buffer)
+             (and (buffer-live-p buffer)
+                  (or (eq buffer current)
+                      (with-current-buffer buffer
+                        (and (not (derived-mode-p 'dashboard-mode))
+                             (or buffer-file-name
+                                 (derived-mode-p 'dired-mode
+                                                 'eshell-mode
+                                                 'shell-mode
+                                                 'term-mode
+                                                 'vterm-mode)
+                                 (let ((name (buffer-name buffer)))
+                                   (and (stringp name)
+                                        (not (string-prefix-p " " name))
+                                        (not (string-prefix-p "*" name))))))))))
+           buffers)))
     (delete-dups
-     (if (memq current live-buffers)
-         (copy-sequence live-buffers)
-       (cons current live-buffers)))))
+     (if (memq current filtered)
+         (copy-sequence filtered)
+       (cons current filtered)))))
 
-(defun my/centaur-tabs-buffer-groups ()
-  "Keep the visible buffer tabs aligned with the current workspace."
-  (list
-   (or (and (bound-and-true-p persp-mode)
-            (fboundp 'persp-current-name)
-            (persp-current-name))
-       "Buffers")))
+(defun my/tab-line-hidden-p ()
+  "Return non-nil when the centered buffer tab line should stay hidden."
+  (or (derived-mode-p 'dashboard-mode)
+      (minibufferp)))
 
-(defun my/centaur-tabs--project-name (buffer)
-  "Return a short project or directory name for BUFFER."
-  (with-current-buffer buffer
-    (when-let* ((root (or (when (fboundp 'project-current)
-                            (when-let* ((project (ignore-errors
-                                                   (project-current nil default-directory))))
-                              (project-root project)))
-                          default-directory)))
-      (file-name-nondirectory
-       (directory-file-name (expand-file-name root))))))
+(defun my/tab-line-tab-string (buffer)
+  "Return the clickable tab label for BUFFER."
+  (let ((current (eq buffer (current-buffer)))
+        (name (buffer-name buffer)))
+    (propertize
+     name
+     'face (if current
+               'my/tab-line-current-face
+             'my/tab-line-inactive-face)
+     'tab buffer
+     'keymap tab-line-tab-map
+     'mouse-face 'tab-line-highlight
+     'follow-link 'ignore
+     'help-echo (or (buffer-file-name buffer)
+                    name))))
 
-(defun my/centaur-tabs-tab-label (tab)
-  "Render TAB with a restrained file-plus-project label."
-  (let* ((buffer (car tab))
-         (selected (centaur-tabs-selected-p tab (centaur-tabs-current-tabset)))
-         (name (buffer-name buffer)))
-    (if (not selected)
-        (format " %s" name)
-      (let ((project (my/centaur-tabs--project-name buffer)))
-        (concat
-         " "
-         (propertize name 'face 'my/centaur-tabs-active-buffer-face)
-         (if (and (stringp project)
-                  (not (string-empty-p project))
-                  (not (equal project name)))
-             (concat
-              (propertize "  |  " 'face 'my/centaur-tabs-divider-face)
-              (propertize project 'face 'my/centaur-tabs-meta-face))
-           ""))))))
+(defun my/tab-line-separator ()
+  "Return the muted separator used between buffer tabs."
+  (propertize " | " 'face 'my/tab-line-separator-face))
 
-(defun my/centaur-tabs-hide-p ()
-  "Return non-nil when the buffer tab bar should stay hidden."
-  (derived-mode-p 'dashboard-mode))
+(defun my/tab-line-content ()
+  "Return the centered buffer tabs content string."
+  (let ((buffers (my/tab-line-buffer-list)))
+    (when buffers
+      (let ((parts (list (my/tab-line-separator))))
+        (dolist (buffer buffers)
+          (push (my/tab-line-tab-string buffer) parts)
+          (push (my/tab-line-separator) parts))
+        (apply #'concat (nreverse parts))))))
 
-(defun my/centaur-tabs-refresh (&rest _)
-  "Refresh the buffer tab bar after workspace changes."
-  (when (bound-and-true-p centaur-tabs-mode)
-    (centaur-tabs-buffer-update-groups)
-    (centaur-tabs-display-update)))
+(defun my/tab-line-format ()
+  "Render a centered, minimal buffer tab line."
+  (unless (my/tab-line-hidden-p)
+    (when-let* ((content (my/tab-line-content)))
+      (let* ((content-width (string-width content))
+             (window-width (window-body-width))
+             (offset (if (< content-width (max 1 (- window-width 4)))
+                         (/ content-width 2)
+                       0)))
+        (list
+         (if (> offset 0)
+             (propertize " "
+                         'face 'tab-line
+                         'display `(space :align-to (- center ,offset)))
+           (propertize " " 'face 'tab-line))
+         content)))))
 
-(defun my/centaur-tabs-apply-ui ()
-  "Apply the local visual treatment for buffer tabs."
-  (when (display-graphic-p)
-    (set-face-attribute 'centaur-tabs-default nil
-                        :background "#1d212b"
-                        :foreground "#1d212b")
-    (set-face-attribute 'centaur-tabs-unselected nil
-                        :background "#202533"
-                        :foreground "#7d8598"
-                        :box '(:line-width 5 :color "#202533")
+(defun my/tab-line-refresh (&rest _)
+  "Refresh the centered buffer tab line."
+  (when (fboundp 'tab-line-force-update)
+    (tab-line-force-update t)))
+
+(defun my/tab-line-apply-ui ()
+  "Apply the local visual treatment for the centered buffer tab line."
+  (let ((bg (face-background 'default nil t)))
+    (set-face-attribute 'tab-line nil
+                        :background bg
+                        :foreground "#8f96ad"
+                        :box nil
+                        :overline nil
+                        :underline nil
                         :height 0.95)
-    (set-face-attribute 'centaur-tabs-unselected-modified nil
-                        :background "#202533"
-                        :foreground "#95a0b8"
-                        :box '(:line-width 5 :color "#202533")
-                        :height 0.95)
-    (set-face-attribute 'centaur-tabs-selected nil
-                        :background "#2a3140"
+    (set-face-attribute 'tab-line-active nil
+                        :background bg
+                        :foreground "#8f96ad"
+                        :box nil
+                        :overline nil
+                        :underline nil)
+    (set-face-attribute 'tab-line-inactive nil
+                        :background bg
+                        :foreground "#8f96ad"
+                        :box nil
+                        :overline nil
+                        :underline nil)
+    (set-face-attribute 'tab-line-tab nil
+                        :background bg
+                        :foreground "#8f96ad"
+                        :box nil
+                        :overline nil
+                        :underline nil)
+    (set-face-attribute 'tab-line-tab-current nil
+                        :background bg
                         :foreground "#e7d6a5"
-                        :box '(:line-width 5 :color "#2a3140")
-                        :height 0.98
-                        :weight 'medium)
-    (set-face-attribute 'centaur-tabs-selected-modified nil
-                        :background "#2a3140"
+                        :box nil
+                        :overline nil
+                        :underline nil
+                        :weight 'semibold)
+    (set-face-attribute 'tab-line-tab-inactive nil
+                        :background bg
+                        :foreground "#8f96ad"
+                        :box nil
+                        :overline nil
+                        :underline nil)
+    (set-face-attribute 'tab-line-highlight nil
+                        :background bg
                         :foreground "#e7d6a5"
-                        :box '(:line-width 5 :color "#2a3140")
-                        :height 0.98
-                        :weight 'medium)
-    (set-face-attribute 'centaur-tabs-modified-marker-selected nil
-                        :foreground "#d7b76f"
-                        :background "#2a3140")
-    (set-face-attribute 'centaur-tabs-modified-marker-unselected nil
-                        :foreground "#7d8598"
-                        :background "#202533")
-    (set-face-attribute 'centaur-tabs-active-bar-face nil
-                        :background "#d7b76f")))
-
-(defun my/centaur-tabs-ensure-visible (&optional frame)
-  "Ensure the buffer tab bar is enabled on FRAME."
-  (let ((frame (or frame (selected-frame))))
-    (with-selected-frame frame
-      (unless (bound-and-true-p centaur-tabs-mode)
-        (centaur-tabs-mode 1))
-      (my/centaur-tabs-refresh))))
+                        :box nil
+                        :overline nil
+                        :underline nil)))
 
 (use-package tab-bar
   :ensure nil
@@ -229,38 +250,29 @@ When FRAME is nil, use the selected frame."
   (tab-bar-tab-name-format-function #'my/tab-bar-tab-name-format)
   (tab-bar-tab-name-function 'tab-bar-tab-name-truncated)
   :config
-  (my/tab-bar-disable-tab-line)
   (when (display-graphic-p)
     (my/tab-bar-ensure-visible)))
 
-(use-package centaur-tabs
-  :ensure t
+(use-package tab-line
+  :ensure nil
   :demand t
-  :hook ((after-init . my/centaur-tabs-ensure-visible)
-         (server-after-make-frame . my/centaur-tabs-ensure-visible)
-         (after-load-theme . my/centaur-tabs-apply-ui))
+  :hook ((after-init . global-tab-line-mode)
+         (after-init . my/tab-line-apply-ui)
+         (server-after-make-frame . my/tab-line-apply-ui)
+         (after-load-theme . my/tab-line-apply-ui))
   :custom
-  (centaur-tabs-style "bar")
-  (centaur-tabs-height 30)
-  (centaur-tabs-set-bar nil)
-  (centaur-tabs-set-close-button nil)
-  (centaur-tabs-set-icons nil)
-  (centaur-tabs-set-modified-marker t)
-  (centaur-tabs-modified-marker "•")
-  (centaur-tabs-show-navigation-buttons nil)
-  (centaur-tabs-cycle-scope 'tabs)
-  (centaur-tabs-left-edge-margin " ")
-  (centaur-tabs-right-edge-margin " ")
-  (centaur-tabs-buffer-list-function #'my/centaur-tabs-buffer-list)
-  (centaur-tabs-buffer-groups-function #'my/centaur-tabs-buffer-groups)
+  (tab-line-close-button-show nil)
+  (tab-line-new-button-show nil)
   :config
-  (centaur-tabs-mode 1)
-  (setq centaur-tabs-tab-label-function #'my/centaur-tabs-tab-label
-        centaur-tabs-hide-predicate #'my/centaur-tabs-hide-p)
+  (when (fboundp 'centaur-tabs-mode)
+    (ignore-errors (centaur-tabs-mode -1)))
+  (advice-add 'tab-line-format :override #'my/tab-line-format)
+  (add-to-list 'tab-line-exclude-modes 'dashboard-mode)
+  (global-tab-line-mode 1)
   (with-eval-after-load 'perspective
-    (add-hook 'persp-activated-functions #'my/centaur-tabs-refresh))
-  (my/centaur-tabs-apply-ui)
-  (my/centaur-tabs-refresh))
+    (add-hook 'persp-activated-functions #'my/tab-line-refresh))
+  (my/tab-line-apply-ui)
+  (my/tab-line-refresh))
 
 (provide 'init-tabbar)
 ;;; init-tabbar.el ends here
