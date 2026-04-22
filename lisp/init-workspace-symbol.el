@@ -18,8 +18,8 @@
     (user-error "No active language server in the current buffer"))
   (call-interactively #'my/symbols-xref-apropos))
 
-(my/evil-global-leader-set "c s" #'my/language-server-workspace-symbol
-                           "workspace symbol")
+(my/leader!
+  "c s" '(:def my/language-server-workspace-symbol :which-key "workspace symbol"))
 
 (provide 'init-workspace-symbol)
 ;;; init-workspace-symbol.el ends here

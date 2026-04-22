@@ -12,7 +12,6 @@
 
 (defvar package-user-dir)
 
-(declare-function my/evil-global-leader-set "init-funcs" (key def desc))
 (declare-function my/show-warnings-buffer "init-utils" ())
 (declare-function my/health-startup-check "init-health" ())
 (declare-function my/health-byte-compile-check "init-health" ())
@@ -778,9 +777,9 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
     ("l" "native log" my/native-comp-open-log)
     ("t" "toggle auto native on save" my/compile-toggle-auto-native-on-save)]])
 
-(when (fboundp 'my/evil-global-leader-set)
-  (my/evil-global-leader-set "cb" #'my/compile-board "compile board")
-  (my/evil-global-leader-set "c?" #'my/compile-dispatch "compile menu"))
+(my/leader!
+  "cb" '(:def my/compile-board :which-key "compile board")
+  "c?" '(:def my/compile-dispatch :which-key "compile menu"))
 
 (provide 'init-compile)
 ;;; init-compile.el ends here

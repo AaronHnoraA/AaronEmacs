@@ -209,8 +209,9 @@
 
 (add-hook 'prog-mode-hook #'my/debug-profile-apply-default)
 
-(my/evil-global-leader-set "r d" #'my/debug-profile-dispatch "debug profile")
-(my/evil-global-leader-set "r D" #'my/debug-profile-rerun "rerun debug profile")
+(my/leader!
+  "r d" '(:def my/debug-profile-dispatch :which-key "debug profile")
+  "r D" '(:def my/debug-profile-rerun :which-key "rerun debug profile"))
 
 (provide 'init-debug-profile)
 ;;; init-debug-profile.el ends here

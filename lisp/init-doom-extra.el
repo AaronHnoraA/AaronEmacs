@@ -215,16 +215,17 @@
     (revert-buffer t t)
     (message "Saved %s as root" buffer-file-name)))
 
-(my/evil-global-leader-set "f d" #'consult-dir "consult dir")
-(my/evil-global-leader-set "f u" #'my/sudo-find-file "sudo find file")
-(my/evil-global-leader-set "f U" #'my/sudo-this-file "sudo this file")
-(my/evil-global-leader-set "f S" #'my/sudo-save-buffer "sudo save")
-(my/evil-global-leader-set "f t" #'my/template-switch "switch template")
-(my/evil-global-leader-set "f T" #'my/template-debug "debug template")
-(my/evil-global-leader-set "o o" #'link-hint-open-link "open link")
-(my/evil-global-leader-set "o O" #'link-hint-copy-link "copy link")
-(my/evil-global-leader-set "p c" #'editorconfig-find-current-editorconfig "editorconfig")
-(my/evil-global-leader-set "q r" #'restart-emacs "restart emacs")
+(my/leader!
+  "f d" '(:def consult-dir :which-key "consult dir")
+  "f u" '(:def my/sudo-find-file :which-key "sudo find file")
+  "f U" '(:def my/sudo-this-file :which-key "sudo this file")
+  "f S" '(:def my/sudo-save-buffer :which-key "sudo save")
+  "f t" '(:def my/template-switch :which-key "switch template")
+  "f T" '(:def my/template-debug :which-key "debug template")
+  "o o" '(:def link-hint-open-link :which-key "open link")
+  "o O" '(:def link-hint-copy-link :which-key "copy link")
+  "p c" '(:def editorconfig-find-current-editorconfig :which-key "editorconfig")
+  "q r" '(:def restart-emacs :which-key "restart emacs"))
 
 (provide 'init-doom-extra)
 ;;; init-doom-extra.el ends here

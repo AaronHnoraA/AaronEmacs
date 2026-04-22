@@ -235,11 +235,10 @@ When VALUE is a function, call it with ROOT when possible."
   (interactive)
   (find-file (expand-file-name ".dir-locals.el" (my/project-local-root))))
 
-(my/leader-key-label "p" "project")
-(my/evil-global-leader-set "p l" #'my/project-local-describe
-                           "project local overrides")
-(my/evil-global-leader-set "p L" #'my/project-local-open-dir-locals
-                           "project dir-locals")
+(my/leader!
+  "p"   '(:ignore t :which-key "project")
+  "p l" '(:def my/project-local-describe :which-key "project local overrides")
+  "p L" '(:def my/project-local-open-dir-locals :which-key "project dir-locals"))
 
 (provide 'init-project-local)
 ;;; init-project-local.el ends here

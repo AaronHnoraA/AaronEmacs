@@ -465,8 +465,9 @@ Return non-nil when BUFFER was visible."
                            nil
                            my/diagnostics-project-buffer-name))))
 
-(my/evil-global-leader-set "c D" #'my/diagnostics-buffer-ui "diagnostics ui")
-(my/evil-global-leader-set "c P" #'my/diagnostics-project-ui "project diagnostics ui")
+(my/leader!
+  "c D" '(:def my/diagnostics-buffer-ui :which-key "diagnostics ui")
+  "c P" '(:def my/diagnostics-project-ui :which-key "project diagnostics ui"))
 
 (provide 'init-diagnostics-ui)
 ;;; init-diagnostics-ui.el ends here

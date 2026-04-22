@@ -136,8 +136,9 @@ MATCHER can be a directory path or regexp matched against the project root."
       ("r" "choose profile" my/project-run)
       ("R" "rerun last" my/project-run-rerun)]]))
 
-(my/evil-global-leader-set "r r" #'my/project-run-dispatch "run profile")
-(my/evil-global-leader-set "r R" #'my/project-run-rerun "rerun profile")
+(my/leader!
+  "r r" '(:def my/project-run-dispatch :which-key "run profile")
+  "r R" '(:def my/project-run-rerun :which-key "rerun profile"))
 
 (provide 'init-project-run)
 ;;; init-project-run.el ends here

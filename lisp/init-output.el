@@ -144,8 +144,9 @@
 
 (add-hook 'compilation-mode-hook #'my/output--setup-buffer)
 
-(my/evil-global-leader-set "r o" #'my/output-dispatch "output")
-(my/evil-global-leader-set "r O" #'my/output-switch "latest output")
+(my/leader!
+  "r o" '(:def my/output-dispatch :which-key "output")
+  "r O" '(:def my/output-switch :which-key "latest output"))
 
 (provide 'init-output)
 ;;; init-output.el ends here

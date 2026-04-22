@@ -57,7 +57,6 @@
 (defvar my/jupyter-remote-ikernel-command)
 
 (declare-function dired "dired" (dirname &optional switches))
-(declare-function my/evil-global-leader-set "init-funcs" (key def &optional label))
 (declare-function my/jupyter--available-kernel-names "init-jupyter" (&optional language refresh))
 (declare-function my/jupyter--connection-files "init-jupyter")
 (declare-function my/jupyter--first-available-kernel-for-language "init-jupyter" (language))
@@ -829,7 +828,8 @@ When FILE is nil, prompt for one of the standard config filenames."
 (add-hook 'my/jupyter-manager-setup-functions
           #'my/jupyter-manager-setup-maintenance-keys)
 
-(my/evil-global-leader-set "o j ?" #'my/jupyter-dispatch "jupyter dispatch")
+(my/leader!
+  "o j ?" '(:def my/jupyter-dispatch :which-key "jupyter dispatch"))
 
 (provide 'init-jupyter-tools)
 ;;; init-jupyter-tools.el ends here

@@ -311,8 +311,9 @@ The list includes directories that already look configured for CMake or Ninja."
       ("b" "choose build" my/task-build)
       ("B" "rerun build" my/task-build-rerun)]]))
 
-(my/evil-global-leader-set "r k" #'my/task-dispatch "tasks")
-(my/evil-global-leader-set "r K" #'my/task-rerun "rerun task")
+(my/leader!
+  "r k" '(:def my/task-dispatch :which-key "tasks")
+  "r K" '(:def my/task-rerun :which-key "rerun task"))
 
 (provide 'init-task)
 ;;; init-task.el ends here

@@ -19,7 +19,6 @@
 (require 'subr-x)
 (require 'tramp)
 
-(declare-function my/evil-global-leader-set "init-funcs" (key command &optional replacement))
 (declare-function my/vterm--open-in-directory "init-shell" (buffer-name directory))
 
 (defgroup my/remote-connectboard nil
@@ -459,9 +458,10 @@ With prefix argument CHOOSE-ACTION, prompt for the action first."
       (insert my/remote-connectboard--template)))
   (find-file my/remote-connectboard-config-file))
 
-(my/evil-global-leader-set "o r" #'my/remote-connectboard "remote open")
-(my/evil-global-leader-set "o R" #'my/remote-connectboard-dispatch "remote board")
-(my/evil-global-leader-set "o C" #'my/remote-connectboard-edit-config "remote config")
+(my/leader!
+  "o r" '(:def my/remote-connectboard :which-key "remote open")
+  "o R" '(:def my/remote-connectboard-dispatch :which-key "remote board")
+  "o C" '(:def my/remote-connectboard-edit-config :which-key "remote config"))
 
 (provide 'init-remote-connectboard)
 ;;; init-remote-connectboard.el ends here

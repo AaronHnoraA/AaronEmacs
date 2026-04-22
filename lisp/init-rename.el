@@ -20,7 +20,8 @@
       (vc-rename-file buffer-file-name newname)
     (+rename-current-file newname)))
 
-(my/evil-global-leader-set "f m" #'my/rename-current-file-dwim "rename file dwim")
+(my/leader!
+  "f m" '(:def my/rename-current-file-dwim :which-key "rename file dwim"))
 
 (provide 'init-rename)
 ;;; init-rename.el ends here

@@ -121,9 +121,10 @@ LABEL is displayed in the diff header for the historical side."
   (let ((revision (my/git-diff--branch-base-revision)))
     (my/git-diff--show-file-against-revision revision "branch-base")))
 
-(my/evil-global-leader-set "g d" #'my/git-diff-file-with-revision "diff file vs revision")
-(my/evil-global-leader-set "g =" #'my/git-diff-file-with-head "diff file vs HEAD")
-(my/evil-global-leader-set "g b" #'my/git-diff-file-with-branch-base "diff file vs branch base")
+(my/leader!
+  "g d" '(:def my/git-diff-file-with-revision :which-key "diff file vs revision")
+  "g =" '(:def my/git-diff-file-with-head :which-key "diff file vs HEAD")
+  "g b" '(:def my/git-diff-file-with-branch-base :which-key "diff file vs branch base"))
 
 (provide 'init-git-diff)
 ;;; init-git-diff.el ends here

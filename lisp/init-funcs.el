@@ -5,7 +5,17 @@
 ;;; Code:
 
 (declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
-(declare-function general-define-key "general" (&rest maps))
+(require 'general)
+
+(general-create-definer my/leader!
+  :states 'normal
+  :keymaps 'global
+  :prefix "<leader>")
+
+(general-create-definer my/local-leader!
+  :states 'normal
+  :prefix "<localleader>")
+
 (declare-function yas-active-snippets "yasnippet" (&optional beg end))
 (declare-function yas-current-field "yasnippet" ())
 (declare-function yas-next-field "yasnippet" (&optional arg))
@@ -304,12 +314,10 @@ Use vendored `general.el' for symbolic keymaps and Evil's native
 binding helper for live keymap objects."
   (with-eval-after-load 'evil
     (if (symbolp keymap)
-        (progn
-          (require 'general)
-          (general-define-key
-           :states state
-           :keymaps keymap
-           key command))
+        (general-define-key
+         :states state
+         :keymaps keymap
+         key command)
       (evil-define-key* state keymap (kbd key) command))))
 
 (defun my/evil-global-leader-set (key command &optional replacement)

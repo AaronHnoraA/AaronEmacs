@@ -81,10 +81,9 @@
     ('lsp-mode
      (call-interactively #'lsp-describe-session))))
 
-(my/evil-global-leader-set "c o" #'my/language-server-organize-imports
-                           "organize imports")
-(my/evil-global-leader-set "c R" #'my/language-server-restart
-                           "restart language server")
+(my/leader!
+  "c o" '(:def my/language-server-organize-imports :which-key "organize imports")
+  "c R" '(:def my/language-server-restart :which-key "restart language server"))
 
 (provide 'init-lsp-ops)
 ;;; init-lsp-ops.el ends here

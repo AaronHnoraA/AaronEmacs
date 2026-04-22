@@ -141,8 +141,9 @@
     ("m" "toggle modeline" my/diagnostics-modeline-mode)
     ("a" "toggle auto refresh" my/diagnostics-auto-refresh-mode)]])
 
-(my/evil-global-leader-set "c m" #'my/diagnostics-dispatch "diagnostics menu")
-(my/evil-global-leader-set "c ?" #'my/diagnostics-dispatch "diagnostics")
+(my/leader!
+  "c m" '(:def my/diagnostics-dispatch :which-key "diagnostics menu")
+  "c ?" '(:def my/diagnostics-dispatch :which-key "diagnostics"))
 
 (my/diagnostics-modeline-mode 1)
 (my/diagnostics-auto-refresh-mode 1)

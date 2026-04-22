@@ -425,8 +425,9 @@
    ["Ops"
     ("b" "compile board" my/compile-board)]])
 
-(my/evil-global-leader-set "h H" #'my/health-dispatch "health")
-(my/evil-global-leader-set "h i" #'my/health-startup-summary "init stats")
+(my/leader!
+  "h H" '(:def my/health-dispatch :which-key "health")
+  "h i" '(:def my/health-startup-summary :which-key "init stats"))
 
 (provide 'init-health)
 ;;; init-health.el ends here

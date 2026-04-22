@@ -58,7 +58,8 @@
                   diff-mode))
     (add-to-list 'ws-butler-global-exempt-modes mode)))
 
-(my/evil-global-leader-set "c F" #'my/format-toggle-on-save "format on save")
+(my/leader!
+  "c F" '(:def my/format-toggle-on-save :which-key "format on save"))
 
 (provide 'init-format)
 ;;; init-format.el ends here

@@ -327,12 +327,13 @@
   (hs-hide-comments-when-hiding-all nil)
   (hs-set-up-overlay #'my/hs-set-up-overlay))
 
-(my/leader-key-label "z" "fold")
-(my/evil-global-leader-set "z a" #'my/fold-toggle "toggle fold")
-(my/evil-global-leader-set "z o" #'my/fold-open "open fold")
-(my/evil-global-leader-set "z c" #'my/fold-close "close fold")
-(my/evil-global-leader-set "z R" #'my/fold-open-all "open all folds")
-(my/evil-global-leader-set "z M" #'my/fold-close-all "close all folds")
+(my/leader!
+  "z"   '(:ignore t :which-key "fold")
+  "z a" '(:def my/fold-toggle :which-key "toggle fold")
+  "z o" '(:def my/fold-open :which-key "open fold")
+  "z c" '(:def my/fold-close :which-key "close fold")
+  "z R" '(:def my/fold-open-all :which-key "open all folds")
+  "z M" '(:def my/fold-close-all :which-key "close all folds"))
 
 (with-eval-after-load 'evil
   (evil-define-key* 'normal 'global (kbd "za") #'my/fold-toggle)

@@ -57,7 +57,8 @@
       ("b" "build" my/task-build)
       ("B" "rerun build" my/task-build-rerun)]]))
 
-(my/evil-global-leader-set "c ." #'my/code-actions-dispatch "code menu")
+(my/leader!
+  "c ." '(:def my/code-actions-dispatch :which-key "code menu"))
 
 (provide 'init-code-actions)
 ;;; init-code-actions.el ends here

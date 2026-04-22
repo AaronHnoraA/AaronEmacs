@@ -59,9 +59,10 @@
 (with-eval-after-load 'evil
   (evil-define-key* 'normal 'global (kbd "gD") #'my/navigation-find-declaration))
 
-(my/evil-global-leader-set "n D" #'my/navigation-find-declaration "declaration")
-(my/evil-global-leader-set "n R" #'my/navigation-peek-restore "restore peek")
-(my/evil-global-leader-set "n h" #'my/navigation-call-hierarchy "call hierarchy")
+(my/leader!
+  "n D" '(:def my/navigation-find-declaration :which-key "declaration")
+  "n R" '(:def my/navigation-peek-restore :which-key "restore peek")
+  "n h" '(:def my/navigation-call-hierarchy :which-key "call hierarchy"))
 
 (provide 'init-navigation-extra)
 ;;; init-navigation-extra.el ends here

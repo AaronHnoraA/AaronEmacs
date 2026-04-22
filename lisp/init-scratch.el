@@ -223,10 +223,11 @@ With RESET-P, start from a fresh scratch."
 
 (add-hook 'kill-emacs-hook #'my/scratch-save-all-buffers-h)
 
-(my/evil-global-leader-set "b x" #'my/scratch-toggle "scratch buffer")
-(my/evil-global-leader-set "b X" #'my/scratch-switch "scratch here")
-(my/evil-global-leader-set "p x" #'my/scratch-project-toggle "project scratch")
-(my/evil-global-leader-set "p X" #'my/scratch-project-switch "project scratch here")
+(my/leader!
+  "b x" '(:def my/scratch-toggle :which-key "scratch buffer")
+  "b X" '(:def my/scratch-switch :which-key "scratch here")
+  "p x" '(:def my/scratch-project-toggle :which-key "project scratch")
+  "p X" '(:def my/scratch-project-switch :which-key "project scratch here"))
 
 (provide 'init-scratch)
 ;;; init-scratch.el ends here

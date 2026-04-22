@@ -92,8 +92,9 @@
     ("e" "ediff" smerge-ediff)
     ("q" "quit mode" smerge-mode)]])
 
-(my/leader-key-label "g" "git/merge")
-(my/evil-global-leader-set "g m" #'my/smerge-dispatch "merge conflict")
+(my/leader!
+  "g"   '(:ignore t :which-key "git/merge")
+  "g m" '(:def my/smerge-dispatch :which-key "merge conflict"))
 
 (provide 'init-smerge)
 ;;; init-smerge.el ends here

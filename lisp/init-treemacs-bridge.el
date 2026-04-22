@@ -93,8 +93,8 @@
       (my/treemacs-cursor-follow-mode 1))
     (message "Treemacs workspace refreshed")))
 
-(my/evil-global-leader-set "p T" #'my/treemacs-repair-workspace
-                           "repair treemacs")
+(my/leader!
+  "p T" '(:def my/treemacs-repair-workspace :which-key "repair treemacs"))
 
 (provide 'init-treemacs-bridge)
 ;;; init-treemacs-bridge.el ends here

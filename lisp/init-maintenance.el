@@ -127,8 +127,9 @@ When ARCHIVE is nil, store it under `my/maintenance-state-backup-dir'."
       (message "State snapshot restored from %s" archive))
     archive))
 
-(my/evil-global-leader-set "r B" #'my/maintenance-state-snapshot "backup state")
-(my/evil-global-leader-set "r R" #'my/maintenance-state-restore "restore state")
+(my/leader!
+  "r B" '(:def my/maintenance-state-snapshot :which-key "backup state")
+  "r R" '(:def my/maintenance-state-restore :which-key "restore state"))
 
 (provide 'init-maintenance)
 ;;; init-maintenance.el ends here

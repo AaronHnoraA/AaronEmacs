@@ -41,9 +41,10 @@
       (consult-line-multi nil)
     (user-error "consult-line-multi is unavailable")))
 
-(my/evil-global-leader-set "s t" #'my/search-todos "todos")
-(my/evil-global-leader-set "s P" #'my/search-symbol-at-point "grep symbol")
-(my/evil-global-leader-set "s L" #'my/search-project-lines "project lines")
+(my/leader!
+  "s t" '(:def my/search-todos :which-key "todos")
+  "s P" '(:def my/search-symbol-at-point :which-key "grep symbol")
+  "s L" '(:def my/search-project-lines :which-key "project lines"))
 
 (provide 'init-search-extra)
 ;;; init-search-extra.el ends here

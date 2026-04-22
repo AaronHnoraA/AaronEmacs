@@ -182,18 +182,20 @@
       ("p" "project" my/test-project)
       ("T" "rerun last" my/test-rerun)]]))
 
-(my/leader-key-label "r" "run")
-(my/evil-global-leader-set "c t" #'my/test-dispatch "tests")
-(my/evil-global-leader-set "c n" #'my/test-nearest "nearest test")
-(my/evil-global-leader-set "c N" #'my/test-file "file tests")
-(my/evil-global-leader-set "c p" #'my/test-project "project tests")
-(my/evil-global-leader-set "c T" #'my/test-rerun "rerun test")
+(my/leader!
+  "r"   '(:ignore t :which-key "run")
+  "c t" '(:def my/test-dispatch :which-key "tests")
+  "c n" '(:def my/test-nearest :which-key "nearest test")
+  "c N" '(:def my/test-file :which-key "file tests")
+  "c p" '(:def my/test-project :which-key "project tests")
+  "c T" '(:def my/test-rerun :which-key "rerun test"))
 
-(my/evil-global-leader-set "r t" #'my/test-dispatch "tests")
-(my/evil-global-leader-set "r n" #'my/test-nearest "nearest test")
-(my/evil-global-leader-set "r f" #'my/test-file "file tests")
-(my/evil-global-leader-set "r p" #'my/test-project "project tests")
-(my/evil-global-leader-set "r T" #'my/test-rerun "rerun test")
+(my/leader!
+  "r t" '(:def my/test-dispatch :which-key "tests")
+  "r n" '(:def my/test-nearest :which-key "nearest test")
+  "r f" '(:def my/test-file :which-key "file tests")
+  "r p" '(:def my/test-project :which-key "project tests")
+  "r T" '(:def my/test-rerun :which-key "rerun test"))
 
 (provide 'init-test)
 ;;; init-test.el ends here

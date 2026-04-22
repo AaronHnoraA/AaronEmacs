@@ -986,8 +986,8 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 
 (defalias 'my/language-server-ops-dispatch #'my/language-server-dispatch)
 
-(my/evil-global-leader-set "c L" #'my/language-server-dispatch
-                           "language server")
+(my/leader!
+  "c L" '(:def my/language-server-dispatch :which-key "language server"))
 
 (provide 'init-lsp-tools)
 ;;; init-lsp-tools.el ends here

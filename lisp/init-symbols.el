@@ -350,8 +350,9 @@ back to `consult-imenu-multi', which only covers opened buffers."
 
 (global-set-key (kbd "M-g i") #'my/symbols-buffer)
 
-(my/evil-global-leader-set "s b" #'my/symbols-buffer "buffer symbols")
-(my/evil-global-leader-set "s I" #'my/symbols-project "project symbols")
+(my/leader!
+  "s b" '(:def my/symbols-buffer :which-key "buffer symbols")
+  "s I" '(:def my/symbols-project :which-key "project symbols"))
 
 (provide 'init-symbols)
 ;;; init-symbols.el ends here

@@ -107,14 +107,15 @@
 
 (my/harpoon-load-state)
 
-(my/leader-key-label "j" "jump")
-(my/evil-global-leader-set "j m" #'my/harpoon-mark-current-file "mark file")
-(my/evil-global-leader-set "j d" #'my/harpoon-unmark-current-file "unmark file")
-(my/evil-global-leader-set "j j" #'my/harpoon-quick-menu "harpoon menu")
-(my/evil-global-leader-set "j 1" (lambda () (interactive) (my/harpoon-jump 1)) "slot 1")
-(my/evil-global-leader-set "j 2" (lambda () (interactive) (my/harpoon-jump 2)) "slot 2")
-(my/evil-global-leader-set "j 3" (lambda () (interactive) (my/harpoon-jump 3)) "slot 3")
-(my/evil-global-leader-set "j 4" (lambda () (interactive) (my/harpoon-jump 4)) "slot 4")
+(my/leader!
+  "j"   '(:ignore t :which-key "jump")
+  "j m" '(:def my/harpoon-mark-current-file :which-key "mark file")
+  "j d" '(:def my/harpoon-unmark-current-file :which-key "unmark file")
+  "j j" '(:def my/harpoon-quick-menu :which-key "harpoon menu")
+  "j 1" '(:def (lambda () (interactive) (my/harpoon-jump 1)) :which-key "slot 1")
+  "j 2" '(:def (lambda () (interactive) (my/harpoon-jump 2)) :which-key "slot 2")
+  "j 3" '(:def (lambda () (interactive) (my/harpoon-jump 3)) :which-key "slot 3")
+  "j 4" '(:def (lambda () (interactive) (my/harpoon-jump 4)) :which-key "slot 4"))
 
 (provide 'init-harpoon)
 ;;; init-harpoon.el ends here

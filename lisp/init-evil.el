@@ -309,296 +309,275 @@
     ;;
     ;; If you know how to fix that, let me know. Thanks.
     (evil-set-leader 'normal (kbd "SPC"))
-    (evil-set-leader 'normal (kbd "<leader>m") :localleader)
+    (evil-set-leader 'normal (kbd "<leader>m") :localleader))
 
-    (defun define-leader-key (state map localleader &rest bindings)
-      "Define leader key in MAP when STATE, a wrapper for
-`general-define-key'. All BINDINGS are prefixed with \"<leader>\"
-if LOCALLEADER is nil, otherwise \"<localleader>\"."
-      (cl-assert (cl-evenp (length bindings)))
-      (let ((prefix (if localleader "<localleader>" "<leader>"))
-            wk-replacements)
-        (while bindings
-          (let ((key (pop bindings))
-                (def (pop bindings)))
-            (when (symbolp def)
-              (my/evil-define-key state map (concat prefix key) def))
-            ;; Save which-key (key . replacement).
-            (pcase def
-              (`(:wk ,replacement)
-               (push (cons (concat "SPC " key) replacement) wk-replacements)))))
-        ;; which-key integration.
-        ;; XXX: replacement for localleader NOT supported.
-        (cl-loop for (key . replacement) in wk-replacements
-                 unless localleader
-                 do (which-key-add-key-based-replacements key replacement))))
+  (my/leader!
+    ;; SPC, quit minibuffer.
+    "SPC" 'keyboard-escape-quit
 
-    (define-leader-key 'normal 'global nil
-      ;; SPC, quit minibuffer.
-      "SPC" 'keyboard-escape-quit
+    ;; Clear highlights
+    "S-SPC" 'lazy-highlight-cleanup
 
-      ;; Clear highlights
-      "S-SPC" 'lazy-highlight-cleanup
+    ;; Resume
+    "'" 'vertico-repeat
+    ";" 'avy-resume
 
-      ;; Resume
-      "'" 'vertico-repeat
-      ";" 'avy-resume
+    ;; quit
+    "q"  '(:ignore t :which-key "quit")
+    "qq" 'save-buffers-kill-terminal
+    "qE" 'my/evil-recover
 
-      ;; quit
-      "q"  '(:wk "quit")
-      "qq" 'save-buffers-kill-terminal
-      "qE" 'my/evil-recover
+    ;; file
+    "f"  '(:ignore t :which-key "files")
+    "ff" 'find-file
+    "fF" 'find-file-other-window
+    "f/" 'find-file-other-window
+    "fC" '+copy-current-file
+    "fD" '+delete-current-file
+    "fy" '+copy-current-filename
+    "fR" '+rename-current-file
+    "fr" 'recentf-open-files
+    "fl" 'find-file-literally
+    "fo" 'find-sibling-file
+    "fj" 'dired-jump
+    "fJ" 'dired-jump-other-window
 
-      ;; file
-      "f"  '(:wk "files")
-      "ff" 'find-file
-      "fF" 'find-file-other-window
-      "f/" 'find-file-other-window
-      "fC" '+copy-current-file
-      "fD" '+delete-current-file
-      "fy" '+copy-current-filename
-      "fR" '+rename-current-file
-      "fr" 'recentf-open-files
-      "fl" 'find-file-literally
-      "fo" 'find-sibling-file
-      "fj" 'dired-jump
-      "fJ" 'dired-jump-other-window
+    ;; buffer
+    "b"  '(:ignore t :which-key "buffer")
+    "bb" 'switch-to-buffer
+    "bB" 'switch-to-buffer-other-window
+    "bo" 'previous-buffer
+    "bO" 'next-buffer
+    "bc" 'clone-indirect-buffer
+    "bC" 'clone-indirect-buffer-other-window
+    "by" '+copy-current-buffer-name
+    "bv" 'revert-buffer-quick
+    "bz" 'bury-buffer
+    "bk" 'my/kill-buffer-dwim
+    "bK" 'my/kill-workspace-other-buffers
+    "bx" 'kill-buffer-and-window
+    "bi" 'ibuffer
+    ;; bookmarks
+    "b." 'my/bookmark-dispatch
+    "bm" 'my/bookmark-set
+    "bM" 'my/bookmark-set-no-overwrite
+    "br" 'my/bookmark-rename-dwim
+    "bj" 'my/bookmark-jump-dwim
+    "bJ" 'my/bookmark-jump-other-window-dwim
+    "bl" 'my/bookmark-list
+    "bn" 'my/bookmark-next-line
+    "bp" 'my/bookmark-previous-line
+    "bt" 'my/bookmark-toggle-line
+    "bL" 'my/bookmark-set-line
+    "bs" 'bookmark-save
 
-      ;; buffer
-      "b" '(:wk "buffer")
-      "bb" 'switch-to-buffer
-      "bB" 'switch-to-buffer-other-window
-      "bo" 'previous-buffer
-      "bO" 'next-buffer
-      "bc" 'clone-indirect-buffer
-      "bC" 'clone-indirect-buffer-other-window
-      "by" '+copy-current-buffer-name
-      "bv" 'revert-buffer-quick
-      "bz" 'bury-buffer
-      "bk" 'my/kill-buffer-dwim
-      "bK" 'my/kill-workspace-other-buffers
-      "bx" 'kill-buffer-and-window
-      "bi" 'ibuffer
-      ;; bookmarks
-      "b." 'my/bookmark-dispatch
-      "bm" 'my/bookmark-set
-      "bM" 'my/bookmark-set-no-overwrite
-      "br" 'my/bookmark-rename-dwim
-      "bj" 'my/bookmark-jump-dwim
-      "bJ" 'my/bookmark-jump-other-window-dwim
-      "bl" 'my/bookmark-list
-      "bn" 'my/bookmark-next-line
-      "bp" 'my/bookmark-previous-line
-      "bt" 'my/bookmark-toggle-line
-      "bL" 'my/bookmark-set-line
-      "bs" 'bookmark-save
+    ;; edit
+    "e"  '(:ignore t :which-key "edit")
+    "ed" 'duplicate-line-or-region-below
+    "eD" 'duplicate-line-or-region-above
+    "eo" 'open-newline-below
+    "eO" 'open-newline-above
+    "ej" 'move-text-down
+    "ek" 'move-text-up
+    "e1" 'toggle-one-window
 
-      ;; edit
-      "e"  '(:wk "edit")
-      "ed" 'duplicate-line-or-region-below
-      "eD" 'duplicate-line-or-region-above
-      "eo" 'open-newline-below
-      "eO" 'open-newline-above
-      "ej" 'move-text-down
-      "ek" 'move-text-up
-      "e1" 'toggle-one-window
+    ;; help
+    "h"  '(:ignore t :which-key "help")
+    "hf" 'helpful-callable
+    "hc" 'helpful-command
+    "hv" 'helpful-variable
+    "hk" 'helpful-key
+    "hw" 'my/show-warnings-buffer
+    "hF" 'describe-face
+    "hd" 'devdocs-lookup
+    "ht" 'tldr
 
-      ;; help
-      "h"  '(:wk "help")
-      "hf" 'helpful-callable
-      "hc" 'helpful-command
-      "hv" 'helpful-variable
-      "hk" 'helpful-key
-      "hw" 'my/show-warnings-buffer
-      "hF" 'describe-face
-      "hd" 'devdocs-lookup
-      "ht" 'tldr
+    ;; code
+    "c"  '(:ignore t :which-key "code")
+    "ca" 'my/language-server-code-actions
+    "cd" 'rmsbolt-compile
+    "cc" 'compile
+    "cC" 'recompile
+    "cf" 'my/language-server-format-buffer
+    "ci" 'show-imenu
+    "cI" 'eldoc-box-help-at-point
+    "ck" 'kill-compilation
+    "cl" '+switch-to-compilation
+    "cj" 'dape
+    "cr" 'my/language-server-rename
+    "cw" 'delete-trailing-whitespace
+    "cx" 'quickrun
+    "ce" 'my/byte-recompile-lisp-dir
+    "cE" 'my/native-compile-lisp-dir
 
-      ;; code
-      "c" '(:wk "code")
-      "ca" 'my/language-server-code-actions
-      "cd" 'rmsbolt-compile
-      "cc" 'compile
-      "cC" 'recompile
-      "cf" 'my/language-server-format-buffer
-      "ci" 'show-imenu
-      "cI" 'eldoc-box-help-at-point
-      "ck" 'kill-compilation
-      "cl" '+switch-to-compilation
-      "cj" 'dape
-      "cr" 'my/language-server-rename
-      "cw" 'delete-trailing-whitespace
-      "cx" 'quickrun
-      "ce" 'my/byte-recompile-lisp-dir
-      "cE" 'my/native-compile-lisp-dir
+    ;; window
+    "w"  'evil-window-map
+    "wx" 'kill-buffer-and-window
+    "wu" 'winner-undo
+    "wU" 'winner-redo
+    "w-" 'split-window-vertically
+    "w/" 'split-window-horizontally
 
-      ;; window
-      "w" 'evil-window-map
-      "wx" 'kill-buffer-and-window
-      "wu" 'winner-undo
-      "wU" 'winner-redo
-      "w-" 'split-window-vertically
-      "w/" 'split-window-horizontally
+    ;; frame
+    "F"  '(:ignore t :which-key "frame")
+    "Fn" 'my/frame-new
+    "Fd" 'my/frame-kill
+    "Fo" 'my/frame-other
+    "FO" 'my/frame-previous
+    "Fr" 'set-frame-name
 
-      ;; frame
-      "F" '(:wk "frame")
-      "Fn" 'my/frame-new
-      "Fd" 'my/frame-kill
-      "Fo" 'my/frame-other
-      "FO" 'my/frame-previous
-      "Fr" 'set-frame-name
+    ;; workspace / tab-bar
+    "t"  '(:ignore t :which-key "workspace")
+    "td" 'my/tab-close
+    "tD" 'my/tab-close-other-tabs
+    "tg" 'my/workspace-dispatch
+    "ti" 'my/workspace-switch-buffer
+    "tn" 'my/tab-new
+    "tN" 'my/tab-new-named
+    "to" 'my/workspace-other
+    "tt" 'my/tab-switch
+    "t'" 'tab-bar-switch-to-recent-tab
+    "tr" 'my/tab-rename
+    "t[" 'my/workspace-switch-left
+    "t]" 'my/workspace-switch-right
 
-      ;; workspace / tab-bar
-      "t" '(:wk "workspace")
-      "td" 'my/tab-close
-      "tD" 'my/tab-close-other-tabs
-      "tg" 'my/workspace-dispatch
-      "ti" 'my/workspace-switch-buffer
-      "tn" 'my/tab-new
-      "tN" 'my/tab-new-named
-      "to" 'my/workspace-other
-      "tt" 'my/tab-switch
-      "t'" 'tab-bar-switch-to-recent-tab
-      "tr" 'my/tab-rename
-      "t[" 'my/workspace-switch-left
-      "t]" 'my/workspace-switch-right
+    ;; search
+    "s"  '(:ignore t :which-key "search")
+    "sj" 'evil-show-jumps
+    "sm" 'evil-show-marks
+    "sr" 'evil-show-registers
+    "si" 'imenu
+    "sp" 'consult-ripgrep
+    "ss" 'consult-line
 
-      ;; search
-      "s" '(:wk "search")
-      "sj" 'evil-show-jumps
-      "sm" 'evil-show-marks
-      "sr" 'evil-show-registers
-      "si" 'imenu
-      "sp" 'consult-ripgrep
-      "ss" 'consult-line
+    ;; project
+    "p"  '(:ignore t :which-key "project")
+    "p." 'my/project-dispatch
+    "pp" 'my/project-switch
+    "po" 'my/project-open-workbench
+    "pf" 'my/project-find-file
+    "pr" 'my/project-recent-file
+    "pb" 'my/project-switch-buffer
+    "ps" 'my/project-ripgrep
+    "pd" 'my/project-open-root
+    "pm" 'my/project-magit-status
+    "pv" 'my/project-vterm
+    "pa" 'my/project-add-known-project
+    "pD" 'my/project-discover-projects-in-directory
+    "pk" 'my/project-kill-buffers
+    "px" 'my/project-remove-known-project
 
-      ;; project
-      "p"  '(:wk "project")
-      "p." 'my/project-dispatch
-      "pp" 'my/project-switch
-      "po" 'my/project-open-workbench
-      "pf" 'my/project-find-file
-      "pr" 'my/project-recent-file
-      "pb" 'my/project-switch-buffer
-      "ps" 'my/project-ripgrep
-      "pd" 'my/project-open-root
-      "pm" 'my/project-magit-status
-      "pv" 'my/project-vterm
-      "pa" 'my/project-add-known-project
-      "pD" 'my/project-discover-projects-in-directory
-      "pk" 'my/project-kill-buffers
-      "px" 'my/project-remove-known-project
+    ;; app
+    "a"  '(:ignore t :which-key "app")
+    "aa" 'org-agenda
+    "ap" '(:ignore t :which-key "appine")
+    "apa" 'my/appine-open-url
+    "apf" 'my/appine-open-file
+    "app" 'my/appine-open-at-point
+    "apr" 'my/appine-reload
+    "aph" 'my/appine-back
+    "apl" 'my/appine-forward
+    "ap[" 'my/appine-prev-tab
+    "ap]" 'my/appine-next-tab
+    "apc" 'my/appine-close-tab
+    "apk" 'my/appine-kill-all
+    "apR" 'my/appine-restart
+    "aps" 'my/browser-switch-to
+    "apS" 'my/browser-open-search
+    "ac" 'calendar
+    "ag" 'gnus
+    "ai" 'rcirc
 
-      ;; app
-      "a" '(:wk "app")
-      "aa" 'org-agenda
-      "ap" '(:wk "appine")
-      "apa" 'my/appine-open-url
-      "apf" 'my/appine-open-file
-      "app" 'my/appine-open-at-point
-      "apr" 'my/appine-reload
-      "aph" 'my/appine-back
-      "apl" 'my/appine-forward
-      "ap[" 'my/appine-prev-tab
-      "ap]" 'my/appine-next-tab
-      "apc" 'my/appine-close-tab
-      "apk" 'my/appine-kill-all
-      "apR" 'my/appine-restart
-      "aps" 'my/browser-switch-to
-      "apS" 'my/browser-open-search
-      "ac" 'calendar
-      "ag" 'gnus
-      "ai" 'rcirc
+    ;; open
+    "o"  '(:ignore t :which-key "open")
+    "oc" 'org-capture
+    "od" 'dirvish-dwim
+    "oD" 'dirvish-fd
+    "ol" 'org-store-link
+    "ob" 'browse-url
+    "oa" 'my/appine-open-url
+    "oe" 'vterm-toggle
+    "oE" 'my/vterm-popup-cycle
+    "oF" 'my/vterm-toggle-fixed
+    "ot" 'vterm-toggle
+    "oT" 'ansi-term
+    "ov" 'vterm
+    "oV" 'my/vterm-named
+    "oS" 'my/vterm-ssh
+    "ow" 'eww-browse-url
+    "oW" 'my/browser-open-search
+    "ox" 'xwidget-webkit-browse-url
+    "oB" 'my/browser-switch-to
+    "os" 'shell-toggle)
 
-      ;; open
-      "o" '(:wk "open")
-      "oc" 'org-capture
-      "od" 'dirvish-dwim
-      "oD" 'dirvish-fd
-      "ol" 'org-store-link
-      "ob" 'browse-url
-      "oa" 'my/appine-open-url
-      "oe" 'vterm-toggle
-      "oE" 'my/vterm-popup-cycle
-      "oF" 'my/vterm-toggle-fixed
-      "ot" 'vterm-toggle
-      "oT" 'ansi-term
-      "ov" 'vterm
-      "oV" 'my/vterm-named
-      "oS" 'my/vterm-ssh
-      "ow" 'eww-browse-url
-      "oW" 'my/browser-open-search
-      "ox" 'xwidget-webkit-browse-url
-      "oB" 'my/browser-switch-to
-      "os" 'shell-toggle)
+  (with-eval-after-load 'org
+    (my/local-leader!
+      :keymaps 'org-mode-map
+      "." 'org-goto
+      "a" 'org-archive-subtree
+      "d" 'org-deadline
+      "e" 'org-set-effort
+      "f" 'org-footnote-action
+      "l" 'org-lint
+      "n" 'org-roam-node-insert
+      "N" 'org-roam-node-find
+      "o" 'org-toggle-ordered-property
+      "p" 'org-set-property
+      "q" 'org-set-tags-command
+      "r" 'org-refile
+      "s" 'org-schedule
+      "t" 'org-todo
+      "T" 'org-todo-list
+      "v" 'my/org-latex-preview-visible-now
+      "z" 'my/org-zotero-fill-metadata
 
-    (with-eval-after-load 'org
-      (define-leader-key 'normal org-mode-map :localleader
-        "." 'org-goto
-        "a" 'org-archive-subtree
-        "d" 'org-deadline
-        "e" 'org-set-effort
-        "f" 'org-footnote-action
-        "l" 'org-lint
-        "n" 'org-roam-node-insert
-        "N" 'org-roam-node-find
-        "o" 'org-toggle-ordered-property
-        "p" 'org-set-property
-        "q" 'org-set-tags-command
-        "r" 'org-refile
-        "s" 'org-schedule
-        "t" 'org-todo
-        "T" 'org-todo-list
-        "v" 'my/org-latex-preview-visible-now
-        "z" 'my/org-zotero-fill-metadata
+      ;; babel
+      "bp" 'org-babel-previous-src-block
+      "bn" 'org-babel-next-src-block
+      "be" 'org-babel-expand-src-block
+      "bg" 'org-babel-goto-named-src-block
+      "bs" 'org-babel-execute-subtree
+      "bb" 'org-babel-execute-buffer
+      "bt" 'org-babel-tangle
+      "bf" 'org-babel-tangle-file
+      "bc" 'org-babel-check-src-block
+      "bi" 'org-babel-insert-header-arg
+      "bI" 'org-babel-view-src-block-info
+      "bk" 'org-babel-remove-result-one-or-many
 
-        ;; babel
-        "bp" 'org-babel-previous-src-block
-        "bn" 'org-babel-next-src-block
-        "be" 'org-babel-expand-src-block
-        "bg" 'org-babel-goto-named-src-block
-        "bs" 'org-babel-execute-subtree
-        "bb" 'org-babel-execute-buffer
-        "bt" 'org-babel-tangle
-        "bf" 'org-babel-tangle-file
-        "bc" 'org-babel-check-src-block
-        "bi" 'org-babel-insert-header-arg
-        "bI" 'org-babel-view-src-block-info
-        "bk" 'org-babel-remove-result-one-or-many
+      ;; clock
+      "cc" 'org-clock-in
+      "cC" 'org-clock-out
+      "cd" 'org-clock-mark-default-task
+      "ce" 'org-clock-modify-effort-estimate
+      "cg" 'org-clock-goto
+      "cl" 'org-clock-in-last
+      "cr" 'org-clock-report
+      "cs" 'org-clock-display
+      "cx" 'org-clock-cancel
+      "c=" 'org-clock-timestamps-up
+      "c-" 'org-clock-timestamps-down
 
-        ;; clock
-        "cc" 'org-clock-in
-        "cC" 'org-clock-out
-        "cd" 'org-clock-mark-default-task
-        "ce" 'org-clock-modify-effort-estimate
-        "cg" 'org-clock-goto
-        "cl" 'org-clock-in-last
-        "cr" 'org-clock-report
-        "cs" 'org-clock-display
-        "cx" 'org-clock-cancel
-        "c=" 'org-clock-timestamps-up
-        "c-" 'org-clock-timestamps-down
+      ;; insert
+      "id" 'org-insert-drawer
+      "in" 'org-add-note
+      "it" 'org-time-stamp-inactive
+      "iT" 'org-time-stamp))
 
-        ;; insert
-        "id" 'org-insert-drawer
-        "in" 'org-add-note
-        "it" 'org-time-stamp-inactive
-        "iT" 'org-time-stamp))
+  (with-eval-after-load 'elisp-mode
+    (my/local-leader!
+      :keymaps '(emacs-lisp-mode-map lisp-interaction-mode-map)
+      "i" 'info-lookup-symbol
 
-    (with-eval-after-load 'elisp-mode
-      (dolist (keymap (list emacs-lisp-mode-map lisp-interaction-mode-map))
-        (define-leader-key 'normal keymap :localleader
-          "i" 'info-lookup-symbol
+      ;; eval
+      "ed" 'eval-defun
+      "ee" 'eval-last-sexp
+      "el" 'load-library
 
-          ;; eval
-          "ed" 'eval-defun
-          "ee" 'eval-last-sexp
-          "el" 'load-library
-
-          ;; goto
-          "gf" 'find-function
-          "gv" 'find-variable
-          "gl" 'find-library)))))
+      ;; goto
+      "gf" 'find-function
+      "gv" 'find-variable
+      "gl" 'find-library)))
 
 
 

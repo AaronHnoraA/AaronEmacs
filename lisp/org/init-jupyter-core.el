@@ -86,7 +86,6 @@ inserted and should insert any desired text into the current buffer.")
 (declare-function my/org-babel-configure-jupyter-backends "init-org-babel")
 (declare-function my/org-babel-jupyter-set-language-session "init-org-babel"
                   (lang session &optional async))
-(declare-function my/evil-global-leader-set "init-funcs" (key def &optional label))
 (declare-function org-babel-get-src-block-info "ob-core" (&optional light))
 (declare-function org-babel-where-is-src-block-head "ob-core")
 (declare-function org-src-get-lang-mode "org-src" (lang))
@@ -1384,8 +1383,9 @@ Reload the notebook from disk in JupyterLab to keep running there."
   :config
   (my/jupyter-apply-emacs-jupyter-state-fixes))
 
-(my/evil-global-leader-set "o j" #'my/jupyter-manager "jupyter hub")
-(my/evil-global-leader-set "o J" #'my/jupyter-lab-start-and-open "jupyter lab")
+(my/leader!
+  "o j" '(:def my/jupyter-manager :which-key "jupyter hub")
+  "o J" '(:def my/jupyter-lab-start-and-open :which-key "jupyter lab"))
 
 (use-package code-cells
   :ensure t

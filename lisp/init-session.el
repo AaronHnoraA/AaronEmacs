@@ -50,8 +50,9 @@
 
 (add-hook 'kill-emacs-hook #'my/session-save-maybe)
 
-(my/evil-global-leader-set "r s" #'my/session-save "save session")
-(my/evil-global-leader-set "r l" #'my/session-load "load session")
+(my/leader!
+  "r s" '(:def my/session-save :which-key "save session")
+  "r l" '(:def my/session-load :which-key "load session"))
 
 (provide 'init-session)
 ;;; init-session.el ends here
