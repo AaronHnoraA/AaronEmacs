@@ -306,7 +306,29 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC o W`
   统一搜索入口，可选搜索引擎和浏览后端
 - `SPC o B`
-  在 `eww` / `xwidget` / `appine` 之间切换当前页面
+  在 `eww` / `xwidget` / `appine` / macOS `open` 之间切换当前页面
+
+### Browser `C-c w`
+
+- `C-c w w`
+  统一 `browse-url` 入口，默认走 `appine`
+- `C-c w e` / `C-c w x` / `C-c w a`
+  直接用 `eww` / `xwidget-webkit` / `appine` 打开 URL
+- `C-c w E` / `C-c w X` / `C-c w A` / `C-c w O`
+  把当前页面快速切到 `eww` / `xwidget-webkit` / `appine` / macOS `open`
+- `C-c w s`
+  交互选择目标后端；可选 `eww` / `xwidget` / `appine` / `open`
+- `C-c w f` / `C-c w g`
+  用 `appine` 打开文件 / 打开光标下 URL
+- `C-c w h` / `C-c w l` / `C-c w r`
+  `appine` 后退 / 前进 / 刷新
+- `C-c w [` / `C-c w ]` / `C-c w 0`
+  `appine` 上一标签 / 下一标签 / 关闭当前标签
+- `C-c w ?` / `C-c w k`
+  打开 Appine board / 清理全部 Appine view
+
+当前策略是手动分流：`appine` 做默认真实网页和原生嵌入，`eww` 适合阅读，
+`xwidget-webkit` 作为备用真实网页后端，macOS `open` 用系统应用处理文件或链接。
 
 ### Appine `SPC a p`
 
@@ -325,9 +347,13 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC a p R`
   `my/appine-restart`
 - `SPC a p s`
-  切换当前页面到 `eww` / `xwidget` / `appine`
+  切换当前页面到 `eww` / `xwidget` / `appine` / macOS `open`
 - `SPC a p S`
   统一搜索入口
+
+关闭 Appine 的最后一个标签时会自动清掉 `*Appine Window*` host buffer。
+Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac open`
+入口，用 macOS `open` 交给系统应用处理。
 
 ### Tab `SPC t`
 

@@ -297,7 +297,9 @@ Doctor 更适合快速排查：
 - `C-c w a`
   `my/appine-open-url`
 - `C-c w s`
-  `my/browser-switch-to`
+  交互选择当前页面的目标后端
+- `C-c w E` / `C-c w X` / `C-c w A` / `C-c w O`
+  当前页面直达 `eww` / `xwidget-webkit` / `appine` / macOS `open`
 - `C-c w k`
   `my/appine-kill-all`
 - `C-c w w`
@@ -305,24 +307,25 @@ Doctor 更适合快速排查：
 
 ### 当前逻辑
 
-`browse-url` 会自动判断：
-
-- 简单页面：优先 `eww`
-- 复杂站点：优先 `xwidget-webkit`
+`browse-url` 默认走 `appine`，不做 URL 复杂度自动分流。分流保持手动：
 
 browser pipeline 额外提供：
 
 - EWW <-> Xwidget
 - EWW/Xwidget <-> Appine
+- 当前页面 -> macOS `open`
 - 统一搜索入口：`my/browser-open-search`
 - 当前页面后端切换：`my/browser-switch-to`
 - Appine 便携动作：打开文件、打开光标下链接、前进后退、刷新、标签切换、全杀
+- Appine board 的文件、目录、URL、tab registry 上都有 macOS `open` 入口
 
 因此当前建议是：
 
 - 文本/阅读优先 `eww`
-- 复杂网页优先 `xwidget-webkit`
-- 原生嵌入、临时查看文件或便携切换优先 `appine`
+- 真实网页和原生嵌入默认优先 `appine`
+- `xwidget-webkit` 作为备用真实网页后端
+- 文件、URL 需要系统应用接管时走 macOS `open`
+- 关闭 Appine 的最后一个标签会自动清掉 host buffer
 
 ## 8. AI
 

@@ -6,6 +6,8 @@
 ;;; Code:
 ;;;
 
+(require 'general)
+
 (declare-function appine-open-url "appine" (url))
 (declare-function my/appine-get-url "init-appine" ())
 (declare-function my/appine-kill-all "init-appine" ())
@@ -18,6 +20,7 @@
 (declare-function my/appine-open-at-point "init-appine" ())
 (declare-function my/appine-prev-tab "init-appine" ())
 (declare-function my/appine-reload "init-appine" ())
+(declare-function my/macos-open-url "init-macos" (url))
 ;; 共享 Brave 的所有数据（需要关闭 Brave）
 (setq xwidget-webkit-cookie-file 
       (expand-file-name "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"))
@@ -95,20 +98,26 @@
 (setq browse-url-browser-function #'my/browse-url)
 
 
-(global-set-key (kbd "C-c w e") #'eww-browse-url)
-(global-set-key (kbd "C-c w x") #'xwidget-webkit-browse-url)
-(global-set-key (kbd "C-c w a") #'my/appine-open-url)
-(global-set-key (kbd "C-c w f") #'my/appine-open-file)
-(global-set-key (kbd "C-c w g") #'my/appine-open-at-point)
-(global-set-key (kbd "C-c w h") #'my/appine-back)
-(global-set-key (kbd "C-c w l") #'my/appine-forward)
-(global-set-key (kbd "C-c w [") #'my/appine-prev-tab)
-(global-set-key (kbd "C-c w ]") #'my/appine-next-tab)
-(global-set-key (kbd "C-c w 0") #'my/appine-close-tab)
-(global-set-key (kbd "C-c w ?") #'my/appine-board)
-(global-set-key (kbd "C-c w w") #'browse-url)
-(global-set-key (kbd "C-c w s") #'my/browser-switch-to)
-(global-set-key (kbd "C-c w k") #'my/appine-kill-all)
+(general-define-key
+ :keymaps 'global
+ "C-c w e" #'eww-browse-url
+ "C-c w x" #'xwidget-webkit-browse-url
+ "C-c w a" #'my/appine-open-url
+ "C-c w f" #'my/appine-open-file
+ "C-c w g" #'my/appine-open-at-point
+ "C-c w h" #'my/appine-back
+ "C-c w l" #'my/appine-forward
+ "C-c w [" #'my/appine-prev-tab
+ "C-c w ]" #'my/appine-next-tab
+ "C-c w 0" #'my/appine-close-tab
+ "C-c w ?" #'my/appine-board
+ "C-c w w" #'browse-url
+ "C-c w s" #'my/browser-switch-to
+ "C-c w E" #'my/browser-switch-to-eww
+ "C-c w X" #'my/browser-switch-to-xwidget
+ "C-c w A" #'my/browser-switch-to-appine
+ "C-c w O" #'my/browser-switch-to-open
+ "C-c w k" #'my/appine-kill-all)
 
 
 (with-eval-after-load 'eww
@@ -173,6 +182,9 @@
     ('appine (if (fboundp 'my/appine-open-url)
                  (my/appine-open-url url)
                (appine-open-url url)))
+    ('open (if (fboundp 'my/macos-open-url)
+               (my/macos-open-url url)
+             (browse-url-default-browser url)))
     (_ (user-error "Unsupported browser backend: %s" backend))))
 
 (defun my/browser-cleanup-backend (backend buffer)
@@ -203,16 +215,18 @@
    (t
     (user-error "当前 buffer 不支持刷新"))))
 
-(global-set-key (kbd "C-c w r") #'my/refresh-current-content)
+(general-define-key
+ :keymaps 'global
+ "C-c w r" #'my/refresh-current-content)
 
 (defun my/browser-switch-to (backend)
   "Switch the current browser page to BACKEND."
   (interactive
    (list
-   (intern
-     (completing-read "Switch browser to: "
-                      '("eww" "xwidget" "appine")
-                      nil t nil nil "appine"))))
+     (intern
+       (completing-read "Switch browser to: "
+                        '("eww" "xwidget" "appine" "open")
+                        nil t nil nil "appine"))))
   (let ((source-backend (my/browser-current-backend))
         (url (my/browser-current-url))
         (old-buf (current-buffer)))
@@ -225,6 +239,26 @@
     (message "正在切换至 %s: %s" backend url)
     (my/browser-open-url-with-backend backend url)
     (run-at-time "0 sec" nil #'my/browser-cleanup-backend source-backend old-buf)))
+
+(defun my/browser-switch-to-eww ()
+  "Switch the current browser page to EWW."
+  (interactive)
+  (my/browser-switch-to 'eww))
+
+(defun my/browser-switch-to-xwidget ()
+  "Switch the current browser page to xwidget-webkit."
+  (interactive)
+  (my/browser-switch-to 'xwidget))
+
+(defun my/browser-switch-to-appine ()
+  "Switch the current browser page to Appine."
+  (interactive)
+  (my/browser-switch-to 'appine))
+
+(defun my/browser-switch-to-open ()
+  "Open the current browser page with macOS open."
+  (interactive)
+  (my/browser-switch-to 'open))
 
 (defun my/eww-to-appine ()
   "Switch the current EWW page to Appine."
@@ -296,8 +330,8 @@
                             '("bing" "perplexity" "duckduckgo")
                             nil t nil nil "bing"))
      (intern (completing-read "Browser (default: appine): "
-                            '("eww" "xwidget" "appine")
-                            nil t nil nil "appine"))))
+                              '("eww" "xwidget" "appine" "open")
+                              nil t nil nil "appine"))))
   (my/browser-open-url-with-backend
    (or browser 'appine)
    (my/browser-build-search-url search-term engine)))

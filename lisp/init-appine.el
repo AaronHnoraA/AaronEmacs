@@ -35,6 +35,7 @@
 (declare-function appine-focus "appine")
 (declare-function appine-open-file-by-file-chooser "appine")
 (declare-function appine-native-action "appine" (name))
+(declare-function my/macos-open-target "init-macos" (target))
 
 (defun my/appine-current-file ()
   "Return the current Appine local file path, or nil for non-file tabs."
@@ -90,9 +91,11 @@
     (setq my/appine-tab-list
           (append (seq-take my/appine-tab-list my/appine-tab-index)
                   (seq-drop my/appine-tab-list (1+ my/appine-tab-index))))
-    (setq my/appine-tab-index
-          (max 0 (min my/appine-tab-index (1- (length my/appine-tab-list)))))
-    (setq my/appine-last-url (my/appine--tab-current-url))))
+    (if my/appine-tab-list
+        (setq my/appine-tab-index
+              (max 0 (min my/appine-tab-index (1- (length my/appine-tab-list))))
+              my/appine-last-url (my/appine--tab-current-url))
+      (my/appine--tab-reset))))
 
 (defun my/appine--tab-next ()
   "Update registry after switching to the next tab."
@@ -117,11 +120,11 @@
 ;;; ── Advisors ─────────────────────────────────────────────────────────────
 
 (defun my/appine--track-open-url-a (orig-fn url &rest args)
-  "Push URL into the tab registry then call ORIG-FN."
+  "Call ORIG-FN then push URL into the tab registry."
   ;; appine-open-file calls appine-open-url internally, so all opens
   ;; (both file:// and http/https) converge here exactly once.
-  (my/appine--tab-push (my/appine--normalize-url url))
-  (apply orig-fn url args))
+  (prog1 (apply orig-fn url args)
+    (my/appine--tab-push (my/appine--normalize-url url))))
 
 (defun my/appine--track-next-tab-a (orig-fn &rest args)
   "Call ORIG-FN then advance the tab-registry index."
@@ -132,9 +135,37 @@
   (prog1 (apply orig-fn args) (my/appine--tab-prev)))
 
 (defun my/appine--track-close-tab-a (orig-fn &rest args)
-  "Remove the active tab from the registry then call ORIG-FN."
-  (my/appine--tab-remove-current)
-  (apply orig-fn args))
+  "Call ORIG-FN, update the registry, and kill Appine after the last tab."
+  (let ((last-tab-p (and my/appine-tab-list
+                         (= (length my/appine-tab-list) 1))))
+    (prog1 (apply orig-fn args)
+      (when my/appine-tab-list
+        (my/appine--tab-remove-current))
+      (when last-tab-p
+        (my/appine--kill-host-after-last-tab)))))
+
+(defun my/appine--url-open-target (url)
+  "Return URL as a target suitable for macOS open."
+  (when (stringp url)
+    (if (string-prefix-p "file://" url)
+        (substring url (length "file://"))
+      url)))
+
+(defun my/appine--macos-open (target)
+  "Open TARGET using macOS open."
+  (if (fboundp 'my/macos-open-target)
+      (my/macos-open-target target)
+    (unless (executable-find "open")
+      (user-error "Cannot find macOS open command"))
+    (start-process "macos-open" nil "open" target)
+    (message "open: %s" target)))
+
+(defun my/appine--kill-host-after-last-tab ()
+  "Kill the Appine host buffer after its final tracked tab closes."
+  (my/appine--tab-reset)
+  (when (fboundp 'appine-kill)
+    (appine-kill))
+  (message "Appine: closed last tab and killed host buffer."))
 
 (defun my/appine-open-url (url)
   "Open URL in Appine (tab registry is updated via advice on `appine-open-url')."
@@ -161,6 +192,14 @@
   (if-let* ((file (my/appine-current-file)))
       (find-file file)
     (user-error "当前 Appine tab 不是文件")))
+
+(defun my/appine-open-current-with-macos ()
+  "Open the current Appine file or URL with macOS open."
+  (interactive)
+  (if-let* ((target (or (my/appine-current-file)
+                        (my/appine--url-open-target my/appine-last-url))))
+      (my/appine--macos-open target)
+    (user-error "当前 Appine tab 没有可 open 的文件或链接")))
 
 (defun my/appine-get-url ()
   "Return the remembered Appine URL when the Appine view is active or visible."
@@ -193,6 +232,11 @@
   (interactive)
   (call-interactively #'appine-web-go-forward))
 
+(defun my/appine-reload ()
+  "Reload the current Appine web view."
+  (interactive)
+  (call-interactively #'appine-web-reload))
+
 (defun my/appine-url-type (&optional url)
   "Return the type of URL as a symbol: `file', `web', or `unknown'."
   (let ((u (or url my/appine-last-url)))
@@ -221,7 +265,7 @@
 (defun my/appine-toggle-org-links ()
   "Toggle Appine integration for Org links, then refresh the board."
   (interactive)
-  (call-interactively #'appine-toggle-open-in-org-mode)
+  (call-interactively #'appine-toggle-use-for-org-links)
   (when (get-buffer my/appine-board-buffer-name)
     (with-current-buffer my/appine-board-buffer-name
       (my/appine-board-refresh))))
@@ -242,15 +286,37 @@ then calls the function interactively (prompting for any arguments)."
     (insert-text-button label 'action wrapped 'follow-link t 'help-echo help)))
 
 (defun my/appine-board--insert-openable-path (path &optional dired-p)
-  "Insert PATH as a clickable button.  With DIRED-P, open via `dired'."
+  "Insert PATH as clickable Emacs and macOS-open buttons.
+With DIRED-P, the main path button opens via `dired'."
   (if (and path (stringp path))
-      (my/appine-board--insert-button
-       (abbreviate-file-name (expand-file-name path))
-       (if dired-p
-           (lambda (_b) (dired path))
-         (lambda (_b) (find-file path)))
-       (if dired-p "Open directory" "Open this file"))
+      (let ((expanded (expand-file-name path)))
+        (my/appine-board--insert-button
+         (abbreviate-file-name expanded)
+         (if dired-p
+             (lambda (_b) (dired path))
+           (lambda (_b) (find-file path)))
+         (if dired-p "Open directory in Emacs" "Open this file in Emacs"))
+        (insert " ")
+        (my/appine-board--insert-button
+         "[open]"
+         (lambda (_b) (my/appine--macos-open expanded))
+         "Open with macOS open"))
     (insert "<unset>")))
+
+(defun my/appine-board--insert-openable-url (url)
+  "Insert URL as clickable Appine and macOS-open buttons."
+  (if (and url (stringp url))
+      (progn
+        (my/appine-board--insert-button
+         url
+         (lambda (_b) (my/appine-open-url url))
+         "Open URL in Appine")
+        (insert " ")
+        (my/appine-board--insert-button
+         "[open]"
+         (lambda (_b) (my/appine--macos-open (my/appine--url-open-target url)))
+         "Open with macOS open"))
+    (insert "<none>")))
 
 (defun my/appine-board--insert-value-line (label value)
   "Insert LABEL and VALUE as a formatted line."
@@ -260,6 +326,36 @@ then calls the function interactively (prompting for any arguments)."
   "Insert LABEL and PATH as a button line."
   (insert (format "%-24s " label))
   (my/appine-board--insert-openable-path path dired-p)
+  (insert "\n"))
+
+(defun my/appine-board--insert-url-line (label url)
+  "Insert LABEL and URL as a button line."
+  (insert (format "%-24s " label))
+  (my/appine-board--insert-openable-url url)
+  (insert "\n"))
+
+(defun my/appine-board--insert-tabs-line ()
+  "Insert the Appine tab registry with macOS-open buttons."
+  (insert (format "%-24s " "Tab registry"))
+  (insert (format "%d/%d  "
+                  (1+ my/appine-tab-index)
+                  (length my/appine-tab-list)))
+  (let ((i 0))
+    (dolist (url my/appine-tab-list)
+      (when (> i 0)
+        (insert " | "))
+      (let ((label (if (eq (my/appine-url-type url) 'file)
+                       (file-name-nondirectory
+                        (my/appine--url-open-target url))
+                     (replace-regexp-in-string "\\`https?://" "" url)))
+            (target (my/appine--url-open-target url)))
+        (my/appine-board--insert-button
+         (if (= i my/appine-tab-index)
+             (format "[%s]" label)
+           label)
+         (lambda (_b) (my/appine--macos-open target))
+         "Open with macOS open"))
+      (setq i (1+ i))))
   (insert "\n"))
 
 (defun my/appine-board--insert-action-line (pairs)
@@ -665,21 +761,11 @@ export default {
                   ('file "File  (PDF / Quick Look)")
                   ('web  "Web   (http/https)")
                   (_     "Unknown")))
-    (my/appine-board--insert-value-line "URL" (or url "<none>"))
+    (my/appine-board--insert-url-line "URL" url)
     (when (eq url-type 'file)
       (my/appine-board--insert-path-line "File path" file))
     (when my/appine-tab-list
-      (my/appine-board--insert-value-line
-       "Tab registry"
-       (format "%d/%d  [%s]"
-               (1+ my/appine-tab-index)
-               (length my/appine-tab-list)
-               (mapconcat
-                (lambda (u)
-                  (if (eq (my/appine-url-type u) 'file)
-                      (file-name-nondirectory (string-remove-prefix "file://" u))
-                    (replace-regexp-in-string "\\`https?://" "" u)))
-                my/appine-tab-list " | "))))
+      (my/appine-board--insert-tabs-line))
 
     ;; ── Navigation ──────────────────────────────────────────────────────
     (my/appine-board--section "Navigation")
@@ -697,7 +783,8 @@ export default {
      '(("[a] focus/open"  my/appine-focus-or-open      "Focus or create Appine")
        ("[u] open URL"    my/appine-open-url            "Open URL in new tab")
        ("[f] open file"   my/appine-open-file           "Open local file in new tab")
-       ("[o] edit source" my/appine--open-current-file  "Open current file in Emacs")))
+       ("[o] edit source" my/appine--open-current-file  "Open current file in Emacs")
+       ("mac open"        my/appine-open-current-with-macos "Open current file/URL with macOS open")))
 
     ;; ── Scroll / Find ───────────────────────────────────────────────────
     (my/appine-board--section "Scroll / Find")
@@ -909,13 +996,14 @@ export default {
              appine-open-file-by-file-chooser
              appine-close
              appine-kill
-             appine-toggle-open-in-org-mode
+             appine-toggle-use-for-org-links
              appine-close-tab
              appine-next-tab
              appine-prev-tab
              appine-focus
              appine-web-go-back
-             appine-web-go-forward))
+             appine-web-go-forward
+             appine-web-reload))
 
 
 (with-eval-after-load 'appine

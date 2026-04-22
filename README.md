@@ -50,8 +50,9 @@
   - TRAMP 做了 PATH、ControlMaster、超时、spinner、持久化文件和 autosave 目录配置；现在又补了 Doom 风格的 remote cache、direct async process、LSP 兼容回退和远程项目/VC 根缓存。
 - 浏览器 / 外部整合
   - 浏览器主线现在是 `eww`、`xwidget-webkit`、`appine` 三套后端，加上一层统一的 browser pipeline。
-  - `browse-url` 会按 URL 复杂度在 `eww` 和 `xwidget-webkit` 之间分流；`appine` 负责原生嵌入和便携切换。
-  - `eww` / `xwidget-webkit` / `appine` 之间都保留了互转函数和统一搜索入口。
+  - `browse-url` 默认走 `appine`；`eww`、`xwidget-webkit`、`appine`、macOS `open` 之间保留手动分流和直达切换。
+  - Appine 负责原生嵌入和文件/链接查看；关闭最后一个 Appine tab 会自动清掉 host buffer。
+  - Appine board 里的文件、目录、URL 和 tab registry 都有 macOS `open` 入口。
   - `atomic-chrome`、`webjump`、`fanyi`、`rcirc`、`gnus` 都在配置里。
 - AI
   - `gptel` 支持默认 ChatGPT / GitHub Copilot 后端，也支持从 `etc/mygpt.json` 读取多后端配置、preset、context 和 rewrite 工作流。
@@ -207,7 +208,9 @@
 - `C-c w [` / `C-c w ]` / `C-c w 0`
   `appine` 上一标签 / 下一标签 / 关闭标签。
 - `C-c w s`
-  在 `eww` / `xwidget` / `appine` 之间切换当前页面。
+  交互选择当前页面的目标后端：`eww` / `xwidget` / `appine` / `open`。
+- `C-c w E` / `C-c w X` / `C-c w A` / `C-c w O`
+  当前页面直达 `eww` / `xwidget-webkit` / `appine` / macOS `open`。
 - `C-c w k`
   `my/appine-kill-all`。
 - `C-c w w`
