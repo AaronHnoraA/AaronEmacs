@@ -644,7 +644,8 @@ Set to nil to keep the full log."
   "Build a waiter from fragment SPEC."
   (list :beg (copy-marker (plist-get spec :beg))
         :end (copy-marker (plist-get spec :end) t)
-        :value (plist-get spec :value)))
+        :value (plist-get spec :value)
+        :background (plist-get spec :background)))
 
 (defun my/org-latex--release-waiters (job)
   "Release marker resources tracked by JOB."
@@ -682,6 +683,27 @@ Set to nil to keep the full log."
           (throw 'found ov))))
     nil))
 
+(defun my/org-latex--image-spec-put (display property value)
+  "Return DISPLAY image spec with PROPERTY set to VALUE."
+  (if (and (listp display) (eq (car display) 'image))
+      (let ((plist (copy-sequence (cdr display))))
+        (setq plist (plist-put plist property value))
+        (cons 'image plist))
+    display))
+
+(defun my/org-latex--apply-preview-background (beg end background)
+  "Make LaTeX preview overlays between BEG and END use BACKGROUND."
+  (when (and (stringp background)
+             (not (my/org--unspecified-color-p background)))
+    (dolist (ov (overlays-in beg end))
+      (when (eq (overlay-get ov 'org-overlay-type) 'org-latex-overlay)
+        (overlay-put ov 'face `(:background ,background))
+        (overlay-put ov 'display
+                     (my/org-latex--image-spec-put
+                      (overlay-get ov 'display)
+                      :background
+                      background))))))
+
 (defun my/org-latex--overlay-shows-file-p (beg end file)
   "Return non-nil when an existing preview overlay at BEG..END already shows FILE."
   (catch 'found
@@ -693,7 +715,7 @@ Set to nil to keep the full log."
         (when (string= (file-truename shown-file) (file-truename file))
           (throw 'found t))))))
 
-(defun my/org-latex--place-preview (beg end value file imagetype)
+(defun my/org-latex--place-preview (beg end value file imagetype &optional background)
   "Overlay FILE as preview between BEG and END when VALUE is unchanged."
   (when (and (file-exists-p file)
              (< beg end)
@@ -703,7 +725,8 @@ Set to nil to keep the full log."
     (unless (my/org-latex--overlay-shows-file-p beg end file)
       (org-clear-latex-preview beg end)
       (let ((max-image-size nil))
-        (org--make-preview-overlay beg end file imagetype)))))
+        (org--make-preview-overlay beg end file imagetype))
+      (my/org-latex--apply-preview-background beg end background))))
 
 (defun my/org-latex--place-waiter-preview (waiter file imagetype)
   "Place preview FILE for WAITER using IMAGETYPE."
@@ -716,7 +739,8 @@ Set to nil to keep the full log."
             (end (marker-position end-marker)))
         (when (and beg end)
           (my/org-latex--place-preview
-           beg end (plist-get waiter :value) file imagetype))))))
+           beg end (plist-get waiter :value) file imagetype
+           (plist-get waiter :background)))))))
 
 (defun my/org-latex--fragment-spec (beg end source-value render-value)
   "Return render metadata for a LaTeX fragment between BEG and END.
@@ -737,9 +761,11 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
                ((eq color 'auto) (face-attribute face :foreground nil 'default))
                ((eq color 'default) (face-attribute 'default :foreground nil))
                (t color))))
+           (block-bg (my/org-special-block-background-at-point beg))
            (bg
             (let ((color (plist-get org-format-latex-options :background)))
               (cond
+               ((and block-bg (memq color '(auto default))) block-bg)
                ((eq color 'auto) (face-attribute face :background nil 'default))
                ((eq color 'default) (face-attribute 'default :background nil))
                (t color))))
@@ -766,6 +792,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
             :file movefile
             :imagetype imagetype
             :options options
+            :background bg
             :processing-type processing-type))))
 
 (defun my/org-latex--collect-fragments (beg end)
@@ -987,7 +1014,8 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
          (plist-get spec :end)
          (plist-get spec :value)
          target
-         (plist-get spec :imagetype))
+         (plist-get spec :imagetype)
+         (plist-get spec :background))
       (progn
         (make-directory (file-name-directory target) t)
         (my/org-latex--ensure-state)

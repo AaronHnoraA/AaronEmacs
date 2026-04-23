@@ -415,6 +415,49 @@
                 '(2))))
     (error color1)))
 
+(defun my/org-default-background ()
+  "Return the resolved default background color used by Org block UI."
+  (let ((background (face-attribute 'default :background nil t)))
+    (if (my/org--unspecified-color-p background)
+        "#292D40"
+      background)))
+
+(defun my/org-special-block-palette (type &optional default-bg)
+  "Return the UI palette for special block TYPE.
+DEFAULT-BG defaults to `my/org-default-background'."
+  (when-let* ((config (cdr (assoc (downcase (or type ""))
+                                  my/org-special-block-styles)))
+              (base-color (plist-get config :color))
+              (background (or default-bg (my/org-default-background))))
+    (list :label (plist-get config :label)
+          :base-color base-color
+          :header-bg (my/org-blend-colors base-color background 0.18)
+          :body-bg (my/org-blend-colors base-color background 0.075)
+          :footer-color (my/org-blend-colors base-color background 0.72)
+          :params-color (my/org-blend-colors "#d8dee9" background 0.78))))
+
+(defun my/org-special-block-at-point (&optional pos)
+  "Return the styled Org special block containing POS, or nil."
+  (save-excursion
+    (when pos
+      (goto-char pos))
+    (let ((element (org-element-context))
+          found)
+      (while (and element (not found))
+        (when (and (eq (org-element-type element) 'special-block)
+                   (my/org-special-block-palette
+                    (org-element-property :type element)))
+          (setq found element))
+        (setq element (org-element-property :parent element)))
+      found)))
+
+(defun my/org-special-block-background-at-point (&optional pos)
+  "Return the body background color for the styled special block at POS."
+  (when-let* ((block (my/org-special-block-at-point pos))
+              (type (org-element-property :type block))
+              (palette (my/org-special-block-palette type)))
+    (plist-get palette :body-bg)))
+
 ;; ===========================================================
 ;; 3. 核心渲染逻辑：只处理单个 Element
 ;; ===========================================================
@@ -437,19 +480,17 @@
              (priority (+ 50 (* 10 depth))) 
              
              ;; 2. 颜色准备
-             (base-color (plist-get config :color))
-             (label (plist-get config :label))
+             (default-bg (my/org-default-background))
+             (palette (my/org-special-block-palette type default-bg))
+             (base-color (plist-get palette :base-color))
+             (label (plist-get palette :label))
              (params (org-element-property :parameters element))
              (title-text (concat " " label))
              (params-text (and params (concat "  " params)))
-             
-             (default-bg (face-attribute 'default :background nil t))
-             (default-bg (if (my/org--unspecified-color-p default-bg)
-                             "#292D40" default-bg))
-             (header-bg (my/org-blend-colors base-color default-bg 0.18))
-             (body-bg (my/org-blend-colors base-color default-bg 0.075))
-             (footer-color (my/org-blend-colors base-color default-bg 0.72))
-             (params-color (my/org-blend-colors "#d8dee9" default-bg 0.78))
+             (header-bg (plist-get palette :header-bg))
+             (body-bg (plist-get palette :body-bg))
+             (footer-color (plist-get palette :footer-color))
+             (params-color (plist-get palette :params-color))
              (signature (list type begin-pos end-pos contents-begin contents-end
                               post-affiliated params default-bg))
              (cached-signature (and (hash-table-p my/org-pretty-block-cache)
@@ -472,18 +513,32 @@
         ;; -------------------------------------------------------
         ;; A. Header Overlay (#+begin_xxx)
         ;; -------------------------------------------------------
-        (let ((header-end (save-excursion 
-                            (goto-char post-affiliated) 
-                            (line-end-position))))
-          (let ((ov (make-overlay post-affiliated header-end)))
+        (let* ((header-bol (save-excursion
+                             (goto-char post-affiliated)
+                             (line-beginning-position)))
+               (header-text-beg (save-excursion
+                                  (goto-char post-affiliated)
+                                  (back-to-indentation)
+                                  (point)))
+               (header-end (save-excursion
+                             (goto-char post-affiliated)
+                             (line-end-position))))
+          (let ((ov (make-overlay header-bol header-end)))
             (overlay-put ov 'my/org-pretty-block t)
             (overlay-put ov 'face `(:background ,header-bg :extend t))
             (overlay-put ov 'priority priority)
-            (overlay-put ov 'display 
-                         (concat (propertize "▎" 'face `(:foreground ,base-color :weight bold))
-                                 (propertize title-text 'face `(:inherit my/org-block-title-face :foreground ,base-color :weight medium))
+            (overlay-put ov 'evaporate t))
+          ;; Do not replace leading indentation characters: org-modern-indent
+          ;; uses display properties there for its left bracket/guide.
+          (let ((ov (make-overlay header-text-beg header-end)))
+            (overlay-put ov 'my/org-pretty-block t)
+            (overlay-put ov 'face `(:background ,header-bg :extend t))
+            (overlay-put ov 'priority (1+ priority))
+            (overlay-put ov 'display
+                         (concat (propertize "▎" 'face `(:background ,header-bg :foreground ,base-color :weight bold))
+                                 (propertize title-text 'face `(:inherit my/org-block-title-face :background ,header-bg :foreground ,base-color :weight medium))
                                  (when params-text
-                                   (propertize params-text 'face `(:inherit my/org-block-title-face :foreground ,params-color)))))
+                                   (propertize params-text 'face `(:inherit my/org-block-title-face :background ,header-bg :foreground ,params-color)))))
             (overlay-put ov 'evaporate t)))
 
         ;; -------------------------------------------------------
@@ -509,14 +564,24 @@
           (beginning-of-line)
           ;; 确保是对应的 end 标签
           (when (looking-at (format "^[ \t]*#\\+end_%s" (regexp-quote type)))
-            (let ((ov (make-overlay (point) (line-end-position))))
-              (overlay-put ov 'my/org-pretty-block t)
-              (overlay-put ov 'face `(:background ,body-bg :extend t))
-              (overlay-put ov 'priority priority)
-              (overlay-put ov 'display 
-                           (propertize "╰────────────────────────"
-                                       'face `(:foreground ,footer-color :height 0.8)))
-              (overlay-put ov 'evaporate t)))))))))
+            (let* ((footer-bol (line-beginning-position))
+                   (footer-text-beg (save-excursion
+                                      (back-to-indentation)
+                                      (point)))
+                   (footer-end (line-end-position)))
+              (let ((ov (make-overlay footer-bol footer-end)))
+                (overlay-put ov 'my/org-pretty-block t)
+                (overlay-put ov 'face `(:background ,header-bg :extend t))
+                (overlay-put ov 'priority priority)
+                (overlay-put ov 'evaporate t))
+              (let ((ov (make-overlay footer-text-beg footer-end)))
+                (overlay-put ov 'my/org-pretty-block t)
+                (overlay-put ov 'face `(:background ,header-bg :extend t))
+                (overlay-put ov 'priority (1+ priority))
+                (overlay-put ov 'display
+                             (propertize "╰────────────────────────"
+                                         'face `(:background ,header-bg :foreground ,footer-color :height 0.8)))
+                (overlay-put ov 'evaporate t))))))))))
 
 ;; ===========================================================
 ;; 4. JIT-Lock 引擎：连续扫描 (支持嵌套)
