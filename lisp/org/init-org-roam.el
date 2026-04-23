@@ -15,8 +15,15 @@
 (defvar my/org-roam--background-timer nil)
 (defvar my/org-roam--initialized nil)
 
+(defun my/org-roam--cancel-background-timer ()
+  "Cancel the deferred Org Roam background initialization timer."
+  (when (timerp my/org-roam--background-timer)
+    (cancel-timer my/org-roam--background-timer))
+  (setq my/org-roam--background-timer nil))
+
 (defun my/org-roam-enable ()
   "Initialize org-roam once using the newest available entry point."
+  (my/org-roam--cancel-background-timer)
   (unless my/org-roam--initialized
     (cond
      ((fboundp 'org-roam-db-autosync-enable)
@@ -29,7 +36,7 @@
 
 (defun my/org-roam-background-init ()
   "Load Org Roam on idle so startup stays responsive."
-  (setq my/org-roam--background-timer nil)
+  (my/org-roam--cancel-background-timer)
   (unless (featurep 'org-roam)
     (require 'org-roam nil t)))
 

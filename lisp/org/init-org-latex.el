@@ -103,6 +103,13 @@ Each value may be a readable `.cls' file path or literal class source."
   :type 'integer
   :group 'my/org-latex-preview)
 
+(defcustom my/org-latex-preview-log-max-size 200000
+  "Maximum characters kept in the shared async LaTeX preview log buffer.
+Set to nil to keep the full log."
+  :type '(choice (const :tag "Unlimited" nil)
+                 integer)
+  :group 'my/org-latex-preview)
+
 (defcustom my/org-latex-preview-edit-idle-delay 0.55
   "Idle delay (seconds) before pre-rendering the fragment being edited."
   :type 'number
@@ -914,8 +921,25 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
             (message "[org-latex] Preview failed for %s"
                      (file-name-nondirectory target)))
           (my/org-latex--pump-render-queue)))
+      (my/org-latex--trim-log-buffer (process-buffer process))
       (my/org-latex--release-waiters job)
       (my/org-latex--cleanup-job-files job))))
+
+(defun my/org-latex--trim-log-buffer (&optional buffer)
+  "Trim async LaTeX preview log BUFFER to `my/org-latex-preview-log-max-size'."
+  (when-let* (((integerp my/org-latex-preview-log-max-size))
+              ((> my/org-latex-preview-log-max-size 0))
+              (buffer (or buffer (get-buffer "*Org Async LaTeX Preview*")))
+              ((buffer-live-p buffer)))
+    (with-current-buffer buffer
+      (when (> (buffer-size) my/org-latex-preview-log-max-size)
+        (let ((inhibit-read-only t)
+              (keep-from (max (point-min)
+                              (- (point-max)
+                                 my/org-latex-preview-log-max-size))))
+          (goto-char keep-from)
+          (forward-line 0)
+          (delete-region (point-min) (point)))))))
 
 (defun my/org-latex--start-render (job)
   "Start an async render JOB for the current buffer."
@@ -934,6 +958,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
            :sentinel #'my/org-latex--render-sentinel)))
     (process-put process 'my/org-latex-buffer buffer)
     (process-put process 'my/org-latex-job job)
+    (my/org-latex--trim-log-buffer log-buffer)
     (push process my/org-latex--render-processes)))
 
 (defun my/org-latex--pump-render-queue ()
@@ -1118,6 +1143,12 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   "Stop async scroll-preview state in the current Org buffer."
   (interactive)
   (setq-local my/org-latex--scroll-preview-enabled nil)
+  (remove-hook 'after-change-functions #'my/org-latex-after-change-function t)
+  (remove-hook 'post-command-hook #'my/org-latex-post-command-function t)
+  (remove-hook 'window-scroll-functions #'my/org-latex--window-scroll-preview-hook t)
+  (remove-hook 'window-size-change-functions #'my/org-latex--window-size-preview-hook t)
+  (remove-hook 'change-major-mode-hook #'my/org-latex-cleanup-scroll-preview t)
+  (remove-hook 'kill-buffer-hook #'my/org-latex-cleanup-scroll-preview t)
   (my/org-latex-cancel-pending-renders))
 
 (defun my/org-latex-preview-visible-initial (buffer)

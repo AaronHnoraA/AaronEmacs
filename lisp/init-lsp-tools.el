@@ -96,6 +96,24 @@
       (user-error "No live source buffer is associated with this view"))
     buffer))
 
+(defun my/language-server--clear-source-buffer-references-h ()
+  "Clear manager views that point at the buffer being killed."
+  (let ((source (current-buffer)))
+    (dolist (buffer (buffer-list))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (when (and (or (derived-mode-p 'my/language-server-manager-mode)
+                         (derived-mode-p 'my/language-server-doctor-mode))
+                     (eq my/language-server-manager-source-buffer source))
+            (setq-local my/language-server-manager-source-buffer nil)))))))
+
+(defun my/language-server--watch-source-buffer (source)
+  "Install source cleanup for language-server manager views."
+  (when (buffer-live-p source)
+    (with-current-buffer source
+      (add-hook 'kill-buffer-hook
+                #'my/language-server--clear-source-buffer-references-h nil t))))
+
 (defun my/language-server--view-refresh (buffer)
   "Refresh language-server BUFFER when it is a managed view."
   (when (buffer-live-p buffer)
@@ -886,6 +904,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
     (with-current-buffer buffer
       (my/language-server-doctor-mode)
       (setq-local my/language-server-manager-source-buffer source)
+      (my/language-server--watch-source-buffer source)
       (let ((inhibit-read-only t))
         (use-local-map (copy-keymap special-mode-map))
         (local-set-key (kbd "g") #'my/language-server-doctor-refresh)
@@ -945,6 +964,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
     (with-current-buffer buffer
       (my/language-server-manager-mode)
       (setq-local my/language-server-manager-source-buffer source)
+      (my/language-server--watch-source-buffer source)
       (let ((inhibit-read-only t))
         (use-local-map (copy-keymap special-mode-map))
         (my/language-server-manager-setup-keys)

@@ -215,6 +215,7 @@
   "Kill the Appine view and clear all tab state."
   (interactive)
   (let ((count (if (get-buffer my/appine-buffer-name) 1 0)))
+    (my/appine--cancel-refresh-timer)
     (my/appine--tab-reset)
     (when (fboundp 'appine-kill)
       (appine-kill))
@@ -1000,12 +1001,17 @@ export default {
     (ignore-errors (appine-refresh))
     (ignore-errors (appine--sync-active-state))))
 
+(defun my/appine--cancel-refresh-timer ()
+  "Cancel the delayed Appine refresh timer."
+  (when (timerp my/appine--refresh-timer)
+    (cancel-timer my/appine--refresh-timer))
+  (setq my/appine--refresh-timer nil))
+
 (defun my/appine--schedule-refresh-visible (&rest _args)
   "Schedule a delayed Appine refresh.
 This keeps the native view attached to its host window after Emacs finishes
 buffer/window selection changes."
-  (when (timerp my/appine--refresh-timer)
-    (cancel-timer my/appine--refresh-timer))
+  (my/appine--cancel-refresh-timer)
   (setq my/appine--refresh-timer
         (run-at-time
          0.05 nil

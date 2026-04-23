@@ -53,6 +53,15 @@ When nil, prefer the current project root, then `default-directory'."
 (defvar my/jupyter-lab--restart-open nil
   "Non-nil means the next restart should open JupyterLab in the browser.")
 
+(defvar my/jupyter-lab--shutdown-response-timer nil
+  "Timer used to answer JupyterLab's shutdown prompt.")
+
+(defvar my/jupyter-lab--force-kill-timer nil
+  "Timer used to force-kill a JupyterLab process that ignores shutdown.")
+
+(defvar my/jupyter-lab--open-timer nil
+  "Timer used to open JupyterLab after startup.")
+
 (declare-function my/jupyter-manager-refresh "init-jupyter-core")
 (declare-function my/jupyter-manager--insert-button "init-jupyter-core"
                   (label action help))
@@ -106,10 +115,27 @@ When nil, prefer the current project root, then `default-directory'."
         (when (derived-mode-p 'my/jupyter-manager-mode)
           (my/jupyter-manager-refresh))))))
 
+(defun my/jupyter-lab--cancel-timer (symbol)
+  "Cancel the timer stored in SYMBOL and set SYMBOL to nil."
+  (when (timerp (symbol-value symbol))
+    (cancel-timer (symbol-value symbol)))
+  (set symbol nil))
+
+(defun my/jupyter-lab--cancel-stop-timers ()
+  "Cancel delayed shutdown timers for managed JupyterLab."
+  (my/jupyter-lab--cancel-timer 'my/jupyter-lab--shutdown-response-timer)
+  (my/jupyter-lab--cancel-timer 'my/jupyter-lab--force-kill-timer))
+
+(defun my/jupyter-lab--cancel-open-timer ()
+  "Cancel the delayed browser-open timer for managed JupyterLab."
+  (my/jupyter-lab--cancel-timer 'my/jupyter-lab--open-timer))
+
 (defun my/jupyter-lab--cleanup (&optional keep-log-buffer)
   "Clear managed JupyterLab state.
 
 When KEEP-LOG-BUFFER is non-nil, do not kill the log buffer."
+  (my/jupyter-lab--cancel-stop-timers)
+  (my/jupyter-lab--cancel-open-timer)
   (setq my/jupyter-lab-process nil
         my/jupyter-lab--restart-open nil)
   (unless keep-log-buffer
@@ -127,18 +153,29 @@ When KEEP-LOG-BUFFER is non-nil, do not kill the log buffer."
        (message "JupyterLab interrupt failed: %s" (error-message-string err))
        (ignore-errors (signal-process process 2))))
     ;; Jupyter's shutdown prompt expects an explicit yes/no answer.
-    (run-at-time
-     0.3 nil
-     (lambda (proc)
-       (when (process-live-p proc)
-         (ignore-errors (process-send-string proc "y\n"))))
-     process)
-    (run-at-time
-     30 nil
-     (lambda (proc)
-       (when (process-live-p proc)
-         (ignore-errors (delete-process proc))))
-     process)))
+    (my/jupyter-lab--cancel-stop-timers)
+    (let (timer)
+      (setq timer
+            (run-at-time
+             0.3 nil
+             (lambda (proc)
+               (when (eq my/jupyter-lab--shutdown-response-timer timer)
+                 (setq my/jupyter-lab--shutdown-response-timer nil))
+               (when (process-live-p proc)
+                 (ignore-errors (process-send-string proc "y\n"))))
+             process))
+      (setq my/jupyter-lab--shutdown-response-timer timer))
+    (let (timer)
+      (setq timer
+            (run-at-time
+             30 nil
+             (lambda (proc)
+               (when (eq my/jupyter-lab--force-kill-timer timer)
+                 (setq my/jupyter-lab--force-kill-timer nil))
+               (when (process-live-p proc)
+                 (ignore-errors (delete-process proc))))
+             process))
+      (setq my/jupyter-lab--force-kill-timer timer))))
 
 (defun my/jupyter-lab--sentinel (process event)
   "Track local JupyterLab PROCESS state changes described by EVENT."
@@ -191,7 +228,17 @@ When OPEN is non-nil, open the JupyterLab page in the browser after launch."
       (message "Starting JupyterLab at %s" (my/jupyter-lab-url))
       (my/jupyter-lab--refresh-manager-maybe)
       (when open
-        (run-at-time "1 sec" nil #'my/jupyter-lab-open)))))
+        (my/jupyter-lab--cancel-open-timer)
+        (let (timer)
+          (setq timer
+                (run-at-time
+                 "1 sec" nil
+                 (lambda ()
+                   (when (eq my/jupyter-lab--open-timer timer)
+                     (setq my/jupyter-lab--open-timer nil))
+                   (when (my/jupyter-lab-running-p)
+                     (my/jupyter-lab-open)))))
+          (setq my/jupyter-lab--open-timer timer))))))
 
 (defun my/jupyter-lab-start-and-open ()
   "Start managed local JupyterLab and open it in the browser."

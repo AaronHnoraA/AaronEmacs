@@ -550,16 +550,32 @@
              (<= (buffer-size) my/org-pretty-block-max-buffer-size))
     (unless (hash-table-p my/org-pretty-block-cache)
       (setq-local my/org-pretty-block-cache (make-hash-table :test #'equal)))
+    (add-hook 'change-major-mode-hook #'my/org-disable-jit-pretty-blocks nil t)
+    (add-hook 'kill-buffer-hook #'my/org-disable-jit-pretty-blocks nil t)
     (unless (memq #'my/org-jit-prettify-blocks jit-lock-functions)
       (jit-lock-register #'my/org-jit-prettify-blocks t))
     (jit-lock-refontify)))
 
+(defun my/org-clear-pretty-block-state ()
+  "Clear Org pretty-block overlays and cache in the current buffer."
+  (remove-overlays (point-min) (point-max) 'my/org-pretty-block t)
+  (when (hash-table-p my/org-pretty-block-cache)
+    (clrhash my/org-pretty-block-cache)))
+
+(defun my/org-disable-jit-pretty-blocks ()
+  "Disable Org pretty-block JIT state in the current buffer."
+  (when (and (boundp 'jit-lock-functions)
+             (memq #'my/org-jit-prettify-blocks jit-lock-functions))
+    (jit-lock-unregister #'my/org-jit-prettify-blocks))
+  (remove-hook 'change-major-mode-hook #'my/org-disable-jit-pretty-blocks t)
+  (remove-hook 'kill-buffer-hook #'my/org-disable-jit-pretty-blocks t)
+  (my/org-clear-pretty-block-state)
+  (setq-local my/org-pretty-block-cache nil))
+
 (defun my/org-reset-overlays ()
   "调试用：强制清除所有 Overlay 并重绘。"
   (interactive)
-  (remove-overlays (point-min) (point-max) 'my/org-pretty-block t)
-  (when (hash-table-p my/org-pretty-block-cache)
-    (clrhash my/org-pretty-block-cache))
+  (my/org-clear-pretty-block-state)
   (jit-lock-refontify))
 
 (add-hook 'org-mode-hook #'my/org-enable-jit-pretty-blocks)

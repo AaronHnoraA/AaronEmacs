@@ -31,6 +31,8 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-utils)
 (require 'init-base)
 (require 'init-open)
+(when (eq system-type 'darwin)
+  (my/require-module-safely 'init-macos))
 (require 'init-tramp)
 (require 'init-ui)
 (require 'init-tabbar)
@@ -114,11 +116,6 @@ If one of FEATURES is already available, require MODULE immediately."
 (with-eval-after-load 'markdown-mode
   (my/require-module-safely 'init-joplin))
 (require 'init-ignored)
-
-
-;; MacOS specific
-(when (eq system-type 'darwin)
-  (my/require-module-safely 'init-macos))
 
 (provide 'init-modules)
 ;;; init-modules.el ends here

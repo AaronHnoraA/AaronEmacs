@@ -350,36 +350,48 @@ When CALLBACK is non-nil, invoke it with the live process once startup succeeds.
     (url-retrieve
      url
      (lambda (status)
-       (let ((callbacks (nreverse ratex--startup-callbacks))
-             (temp-file (make-temp-file
-                         "ratex-backend-"
-                         nil
-                         (if (eq system-type 'windows-nt) ".exe" ""))))
+       (let ((response-buffer (current-buffer))
+             (callbacks (nreverse ratex--startup-callbacks))
+             (temp-file nil))
          (setq ratex--startup-callbacks nil)
          (setq ratex--download-in-progress nil)
          (unwind-protect
-             (if (or (not status)
-                     (plist-get status :error))
-                 (let ((err (plist-get status :error)))
-                   (ratex--warn
-                    (format "RaTeX backend download failed: %s"
-                            (if err (error-message-string err) "unknown error")))
-                   (dolist (cb callbacks)
-                     (funcall cb nil)))
-               (goto-char (point-min))
-               (re-search-forward "\r?\n\r?\n" nil t)
-               (let ((body-start (point)))
-                 (write-region body-start (point-max) temp-file nil 'silent))
-               (ratex--validate-backend-file temp-file url)
-               (rename-file temp-file binary t)
-               (unless (eq system-type 'windows-nt)
-                 (set-file-modes binary #o755))
-               (message "RaTeX backend downloaded to %s" binary)
-               (ratex--launch-backend)
-               (dolist (cb callbacks)
-                 (funcall cb ratex--process)))
-           (when (file-exists-p temp-file)
-             (delete-file temp-file)))))
+             (progn
+               (setq temp-file
+                     (make-temp-file
+                      "ratex-backend-"
+                      nil
+                      (if (eq system-type 'windows-nt) ".exe" "")))
+               (condition-case err
+                   (if (or (not status)
+                           (plist-get status :error))
+                       (let ((url-err (plist-get status :error)))
+                         (error "download failed: %s"
+                                (if url-err
+                                    (error-message-string url-err)
+                                  "unknown error")))
+                     (goto-char (point-min))
+                     (re-search-forward "\r?\n\r?\n" nil t)
+                     (let ((body-start (point)))
+                       (write-region body-start (point-max) temp-file nil 'silent))
+                     (ratex--validate-backend-file temp-file url)
+                     (rename-file temp-file binary t)
+                     (unless (eq system-type 'windows-nt)
+                       (set-file-modes binary #o755))
+                     (message "RaTeX backend downloaded to %s" binary)
+                     (ratex--launch-backend)
+                     (dolist (cb callbacks)
+                       (funcall cb ratex--process)))
+                 (error
+                  (ratex--warn
+                   (format "RaTeX backend download failed: %s"
+                           (error-message-string err)))
+                  (dolist (cb callbacks)
+                    (funcall cb nil)))))
+           (when (and temp-file (file-exists-p temp-file))
+             (delete-file temp-file))
+           (when (buffer-live-p response-buffer)
+             (kill-buffer response-buffer)))))
      nil t)))
 
 (defcustom ratex-backend-build-command
@@ -512,14 +524,24 @@ for large SVG payloads."
   "Handle backend PROC EVENT."
   (ratex-debug-log "process sentinel live=%s event=%s" (process-live-p proc) (string-trim event))
   (unless (process-live-p proc)
-    (maphash
-     (lambda (id _callback)
-       (ratex--resolve-pending-request
-        id
-        `((ok . :false) (error . ,(string-trim event)))))
-     ratex--pending)
-    (clrhash ratex--pending)
-    (clrhash ratex--pending-timers)
+    (let ((error-response `((ok . :false) (error . ,(string-trim event))))
+          pending-ids
+          timer-ids)
+      (maphash
+       (lambda (id _callback)
+         (push id pending-ids))
+       ratex--pending)
+      (maphash
+       (lambda (id _timer)
+         (push id timer-ids))
+       ratex--pending-timers)
+      (dolist (id pending-ids)
+        (ratex--resolve-pending-request id error-response))
+      (dolist (id timer-ids)
+        (when-let* ((timer (gethash id ratex--pending-timers)))
+          (when (timerp timer)
+            (cancel-timer timer))
+          (remhash id ratex--pending-timers))))
     (setq ratex--read-chunks nil
           ratex--read-buffer ""
           ratex--process nil)))

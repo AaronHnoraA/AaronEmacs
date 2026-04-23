@@ -10,7 +10,7 @@
 (declare-function evil-local-set-key "evil-core" (state key def))
 (declare-function magit-show-commit "magit-diff" (rev &optional args files module))
 (declare-function magit-toplevel "magit-git" (&optional directory))
-(declare-function my/git-tool-prepare-buffer "init-git-core" ())
+(declare-function my/git-tool-prepare-buffer "init-git-core" (&optional origin-buffer))
 (declare-function my/git-tool-quit-buffer "init-git-core" (origin-buffer))
 
 (defvar my/git-tree-buffer-name "*Git Tree*"
@@ -154,7 +154,7 @@
       (my/git-tree-mode)
       (setq-local default-directory repo-root)
       (setq-local my/git-tree-origin-buffer origin-buffer)
-      (my/git-tool-prepare-buffer)
+      (my/git-tool-prepare-buffer origin-buffer)
       (let ((map (copy-keymap special-mode-map)))
         (use-local-map map)
         (local-set-key (kbd "g") #'my/git-tree-refresh)

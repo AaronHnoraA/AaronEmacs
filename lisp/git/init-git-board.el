@@ -11,7 +11,7 @@
 (declare-function magit-stage-files "magit-apply" (files &optional force))
 (declare-function magit-toplevel "magit-git" (&optional directory))
 (declare-function magit-unstage-files "magit-apply" (files))
-(declare-function my/git-tool-prepare-buffer "init-git-core" ())
+(declare-function my/git-tool-prepare-buffer "init-git-core" (&optional origin-buffer))
 (declare-function my/git-tool-quit-buffer "init-git-core" (origin-buffer))
 (declare-function my/git-diff-file-with-head "init-git-diff" ())
 (declare-function my/git-file-blame-toggle "init-git-core" ())
@@ -184,7 +184,7 @@
       (setq-local default-directory repo-root)
       (setq-local my/git-board-repo-root repo-root)
       (setq-local my/git-board-origin-buffer origin-buffer)
-      (my/git-tool-prepare-buffer)
+      (my/git-tool-prepare-buffer origin-buffer)
       (my/git-board-refresh))
     (switch-to-buffer buffer)))
 

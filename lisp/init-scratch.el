@@ -115,6 +115,10 @@ When set to t, inherit the current buffer's major mode when practical."
              :directory default-directory)
        (current-buffer)))))
 
+(defun my/scratch-unregister-buffer-h ()
+  "Forget the current scratch buffer from the live scratch registry."
+  (setq my/scratch-buffers (delq (current-buffer) my/scratch-buffers)))
+
 (defun my/scratch-save-all-buffers-h ()
   "Persist every live scratch buffer."
   (setq my/scratch-buffers
@@ -157,6 +161,8 @@ When PROJECT-ROOT is non-nil, return the scratch buffer associated with it."
         (setq my/scratch-initialized t))
       (unless (memq #'my/scratch-save-buffer-h kill-buffer-hook)
         (add-hook 'kill-buffer-hook #'my/scratch-save-buffer-h nil t))
+      (unless (memq #'my/scratch-unregister-buffer-h kill-buffer-hook)
+        (add-hook 'kill-buffer-hook #'my/scratch-unregister-buffer-h t t))
       (cl-pushnew buffer my/scratch-buffers)
       buffer)))
 

@@ -238,6 +238,24 @@ When `other', show only other files.")
    'action (lambda (_button)
              (call-interactively command))))
 
+(defun my/diagnostics--goto-location (file buffer-name position)
+  "Visit FILE or BUFFER-NAME and move to POSITION."
+  (let ((buffer (and buffer-name (get-buffer buffer-name))))
+    (cond
+     ((and buffer
+           (buffer-live-p buffer)
+           (or (null file)
+               (with-current-buffer buffer
+                 (and buffer-file-name
+                      (equal (expand-file-name buffer-file-name) file)))))
+      (pop-to-buffer buffer))
+     (file
+      (find-file file))
+     (t
+      (user-error "Diagnostic source buffer is no longer available"))))
+  (goto-char position)
+  (recenter))
+
 (defun my/diagnostics--insert-toolbar ()
   "Insert the diagnostics toolbar."
   (insert (propertize (format "%s\n" my/diagnostics-buffer-title)
@@ -290,6 +308,10 @@ When `other', show only other files.")
 (defun my/diagnostics--insert-diag-button (diag)
   "Insert a button for DIAG."
   (let* ((buffer (flymake-diagnostic-buffer diag))
+         (file (with-current-buffer buffer
+                 (and buffer-file-name
+                      (expand-file-name buffer-file-name))))
+         (buffer-name (buffer-name buffer))
          (beg (flymake-diagnostic-beg diag))
          (severity (my/diagnostics--severity-name diag))
          (source (abbreviate-file-name (my/diagnostics--source-label diag)))
@@ -300,9 +322,7 @@ When `other', show only other files.")
      label
      'follow-link t
      'action (lambda (_button)
-               (pop-to-buffer buffer)
-               (goto-char beg)
-               (recenter)))))
+               (my/diagnostics--goto-location file buffer-name beg)))))
 
 (defun my/diagnostics--insert-section (title diags empty-message)
   "Insert TITLE for DIAGS or EMPTY-MESSAGE when DIAGS is empty."
@@ -349,6 +369,16 @@ When `other', show only other files.")
                                        "No diagnostics.")))
     (goto-char (point-min))))
 
+(defun my/diagnostics--clear-origin-buffer-references ()
+  "Clear diagnostics panels that point at the current buffer."
+  (let ((origin (current-buffer)))
+    (dolist (buffer (buffer-list))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (when (and (derived-mode-p 'my/diagnostics-mode)
+                     (eq my/diagnostics-origin-buffer origin))
+            (setq-local my/diagnostics-origin-buffer nil)))))))
+
 (defun my/diagnostics-open (scope &optional filter title origin-buffer file-scope buffer-name)
   "Open a persistent diagnostics buffer for SCOPE, FILTER, and TITLE.
 
@@ -363,6 +393,10 @@ BUFFER-NAME overrides the generated buffer name."
          (buffer (get-buffer-create
                   (or buffer-name
                       (format "*Diagnostics: %s*" title)))))
+    (when (buffer-live-p origin)
+      (with-current-buffer origin
+        (add-hook 'kill-buffer-hook
+                  #'my/diagnostics--clear-origin-buffer-references nil t)))
     (with-current-buffer buffer
       (my/diagnostics-mode)
       (setq-local my/diagnostics-buffer-scope scope)

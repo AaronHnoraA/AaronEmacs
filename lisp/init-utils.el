@@ -7,6 +7,7 @@
 
 (require 'url)
 (require 'json)
+(require 'cl-lib)
 
 (defconst tldr-buffer-name "*tldr*")
 (defconst tldr-url-template "https://api.github.com/repos/tldr-pages/tldr/contents/pages/%s/%s.md")
@@ -37,24 +38,29 @@ name and search again. Typically OP is nil or \"common\"."
          (url (format tldr-url-template platform cmd)))
     (url-retrieve url
                   (lambda (status)
-                    (if (or (not status) (plist-member status :error))
-                        (if (not op)
-                            (tldr cmd "common")
-                          (user-error "Something went wrong.\n\n%s" (pp-to-string (plist-get status :error))))
-                      (goto-char url-http-end-of-headers)
-                      (let* ((req (json-read))
-                             (encoding (alist-get 'encoding req))
-                             (content (alist-get 'content req)))
-                        (cl-assert (string= encoding "base64"))
-                        (let ((buf (get-buffer-create tldr-buffer-name))
-                              (inhibit-read-only t))
-                          (with-current-buffer buf
-                            (erase-buffer)
-                            (insert (base64-decode-string content))
-                            (when (functionp 'markdown-mode)
-                              (markdown-mode))
-                            (view-mode +1)
-                            (pop-to-buffer buf)))))))))
+                    (let ((response-buffer (current-buffer)))
+                      (unwind-protect
+                          (if (or (not status) (plist-member status :error))
+                              (if (not op)
+                                  (tldr cmd "common")
+                                (user-error "Something went wrong.\n\n%s"
+                                            (pp-to-string (plist-get status :error))))
+                            (goto-char url-http-end-of-headers)
+                            (let* ((req (json-read))
+                                   (encoding (alist-get 'encoding req))
+                                   (content (alist-get 'content req)))
+                              (cl-assert (string= encoding "base64"))
+                              (let ((buf (get-buffer-create tldr-buffer-name))
+                                    (inhibit-read-only t))
+                                (with-current-buffer buf
+                                  (erase-buffer)
+                                  (insert (base64-decode-string content))
+                                  (when (functionp 'markdown-mode)
+                                    (markdown-mode))
+                                  (view-mode +1)
+                                  (pop-to-buffer buf)))))
+                        (when (buffer-live-p response-buffer)
+                          (kill-buffer response-buffer))))))))
 
 (provide 'init-utils)
 ;;; init-utils.el ends here

@@ -46,8 +46,28 @@
   (add-hook 'kill-buffer-hook fn nil t)
   (push fn my/git-tool-cleanup-functions))
 
-(defun my/git-tool-prepare-buffer ()
-  "Capture the current window configuration for a Git tool buffer."
+(defun my/git-tool-clear-origin-references-h ()
+  "Clear Git tool references to the buffer being killed."
+  (let ((origin (current-buffer)))
+    (dolist (buffer (buffer-list))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (dolist (var '(my/git-board-origin-buffer
+                         my/git-diff-origin-buffer
+                         my/git-tree-origin-buffer))
+            (when (and (boundp var)
+                       (eq (symbol-value var) origin))
+              (set var nil))))))))
+
+(defun my/git-tool-watch-origin-buffer (origin-buffer)
+  "Install origin-buffer cleanup for Git tool buffers."
+  (when (buffer-live-p origin-buffer)
+    (with-current-buffer origin-buffer
+      (add-hook 'kill-buffer-hook #'my/git-tool-clear-origin-references-h nil t))))
+
+(defun my/git-tool-prepare-buffer (&optional origin-buffer)
+  "Capture window configuration and watch ORIGIN-BUFFER for Git tool cleanup."
+  (my/git-tool-watch-origin-buffer origin-buffer)
   (setq-local my/git-tool-origin-window-configuration
               (current-window-configuration)))
 

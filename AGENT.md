@@ -120,6 +120,29 @@ Do not reintroduce top-level runtime files such as:
 
 Existing state backup/restore flows are documented in `docs/maintenance.md`.
 
+## Resource Lifecycle Rules
+
+Prefer bounded, explicit lifetimes for features that allocate Emacs resources:
+
+- Store timer objects returned by `run-at-time`, `run-with-timer`, or
+  `run-with-idle-timer`, and cancel them when the owning buffer, mode, process,
+  or UI surface is torn down.
+- Async process sentinels should resolve outstanding callbacks, cancel request
+  timers, clear chunk/read buffers, and avoid mutating a hash table while
+  iterating over it.
+- Async process startup should clean any temp files, markers, and log buffers if
+  `make-process` or the surrounding setup fails.
+- `url-retrieve` callbacks should kill their response buffer with
+  `unwind-protect` after parsing or handing off the result.
+- Global hooks installed for buffer-local features need reference-style cleanup:
+  keep them while any buffer still uses the feature, and remove them when the
+  last owner goes away.
+- Caches keyed by buffers, windows, markers, or other live objects should either
+  be bounded/cleared on teardown or use weak hash-table keys where appropriate.
+- Markers and overlays created for async work should be released or deleted on
+  success, failure, cancellation, and buffer teardown.
+- Long-lived shared log buffers should be bounded or explicitly user-managed.
+
 ## Domain Policies
 
 LSP:

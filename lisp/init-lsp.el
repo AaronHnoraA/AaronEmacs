@@ -226,10 +226,20 @@ byte-compile backend does not emit noisy warnings on startup."
   (if my/flymake-diagnostic-at-point-mode
       (progn
         (add-hook 'post-command-hook #'my/flymake-diagnostic-at-point-schedule nil t)
-        (add-hook 'pre-command-hook #'my/flymake-diagnostic-at-point-cancel nil t))
-    (remove-hook 'post-command-hook #'my/flymake-diagnostic-at-point-schedule t)
-    (remove-hook 'pre-command-hook #'my/flymake-diagnostic-at-point-cancel t)
-    (my/flymake-diagnostic-at-point-cancel)))
+        (add-hook 'pre-command-hook #'my/flymake-diagnostic-at-point-cancel nil t)
+        (add-hook 'change-major-mode-hook #'my/flymake-diagnostic-at-point-cleanup nil t)
+        (add-hook 'kill-buffer-hook #'my/flymake-diagnostic-at-point-cleanup nil t))
+    (my/flymake-diagnostic-at-point-cleanup)))
+
+(defun my/flymake-diagnostic-at-point-cleanup ()
+  "Release buffer-local point-diagnostic hooks and timer."
+  (remove-hook 'post-command-hook #'my/flymake-diagnostic-at-point-schedule t)
+  (remove-hook 'pre-command-hook #'my/flymake-diagnostic-at-point-cancel t)
+  (remove-hook 'change-major-mode-hook #'my/flymake-diagnostic-at-point-cleanup t)
+  (remove-hook 'kill-buffer-hook #'my/flymake-diagnostic-at-point-cleanup t)
+  (my/flymake-diagnostic-at-point-cancel)
+  (setq my/flymake-diagnostic-at-point-last-point nil
+        my/flymake-diagnostic-at-point-last-text nil))
 
 (defun my/flymake-diagnostic-at-point-mode-sync ()
   "Keep `my/flymake-diagnostic-at-point-mode' aligned with `flymake-mode'."

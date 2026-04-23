@@ -606,13 +606,22 @@ When WIN is nil, restore every tracked window."
                (when chunlian-mode
                  (chunlian--maybe-disable))))))))
 
+(defun chunlian--cleanup-current-buffer ()
+  "Release Chunlian overlays, margins, and buffer-local hooks."
+  (remove-hook 'change-major-mode-hook #'chunlian--cleanup-current-buffer t)
+  (remove-hook 'kill-buffer-hook #'chunlian--cleanup-current-buffer t)
+  (chunlian--clear-display))
+
 ;;;###autoload
 (define-minor-mode chunlian-mode
   "一个简单的 Minor Mode，用于在 buffer 两侧固定显示春联。"
   :lighter " 🧧"
   (if chunlian-mode
-      (chunlian--setup-display)
-    (chunlian--clear-display)))
+      (progn
+        (add-hook 'change-major-mode-hook #'chunlian--cleanup-current-buffer nil t)
+        (add-hook 'kill-buffer-hook #'chunlian--cleanup-current-buffer nil t)
+        (chunlian--setup-display))
+    (chunlian--cleanup-current-buffer)))
 
 
 ;; 卸载旧的，挂载安全的 Hook

@@ -320,6 +320,20 @@ DEFAULT-DIR becomes the buffer-local `default-directory' before execution."
   (when (markerp (my/org-babel-async-job-marker job))
     (set-marker (my/org-babel-async-job-marker job) nil)))
 
+(defun my/org-babel--cleanup-startup-resources (process log-buffer marker files)
+  "Clean resources allocated while starting an async Babel job."
+  (when (processp process)
+    (ignore-errors (set-process-sentinel process #'ignore))
+    (when (process-live-p process)
+      (ignore-errors (delete-process process))))
+  (when (buffer-live-p log-buffer)
+    (kill-buffer log-buffer))
+  (when (markerp marker)
+    (set-marker marker nil))
+  (dolist (file files)
+    (when (and file (file-exists-p file))
+      (ignore-errors (delete-file file)))))
+
 (defun my/org-babel--job-update-buffer (job raw-text)
   "Replace JOB result in its source buffer with RAW-TEXT."
   (when (my/org-babel--job-buffer-live-p job)
@@ -433,46 +447,56 @@ INFO is the result of `org-babel-get-src-block-info'."
          (source-text (save-restriction
                         (widen)
                         (buffer-substring-no-properties (point-min) (point-max))))
-         process job)
-    (unless (my/org-babel--sessionless-p params)
-      (user-error "Async Org Babel currently supports only :session none"))
-    (when existing
-      (my/org-babel-cancel-async-job existing))
-    (with-temp-file source-file
-      (insert source-text))
-    (my/org-babel--write-runner-file runner-file source-file begin default-dir output-file)
-    (let ((default-directory default-dir))
-      (setq process
-            (make-process
-             :name (format "org-babel-async-%s" job-id)
-             :buffer log-buffer
-             :noquery t
-             :sentinel #'my/org-babel--async-sentinel
-             :command (list my/org-babel-async-emacs-program
-                            "--batch" "-Q"
-                            "-L" (expand-file-name "lisp" my/org-babel-config-root)
-                            "-L" (expand-file-name "lisp/lang" my/org-babel-config-root)
-                            "-l" runner-file))))
-    (setq job (my/org-babel-async-job-create
-               :id job-id
-               :buffer buffer
-               :marker marker
-               :hash hash
-               :language language
-               :started-at (current-time)
-               :process process
-               :source-file source-file
-               :runner-file runner-file
-               :output-file output-file
-               :log-buffer log-buffer))
-    (process-put process 'my/org-babel-job job)
-    (push job my/org-babel-async-jobs)
-    (my/org-babel--replace-result-block
-     (my/org-babel--format-status-result
-      (format "RUNNING job %s (%s)\nUse C-c C-v C-k to cancel"
-              job-id language)))
-    (message "Started Org Babel async job %s for %s" job-id language)
-    job))
+         process job started)
+    (condition-case err
+        (progn
+          (unless (my/org-babel--sessionless-p params)
+            (user-error "Async Org Babel currently supports only :session none"))
+          (when existing
+            (my/org-babel-cancel-async-job existing))
+          (with-temp-file source-file
+            (insert source-text))
+          (my/org-babel--write-runner-file runner-file source-file begin default-dir output-file)
+          (let ((default-directory default-dir))
+            (setq process
+                  (make-process
+                   :name (format "org-babel-async-%s" job-id)
+                   :buffer log-buffer
+                   :noquery t
+                   :sentinel #'my/org-babel--async-sentinel
+                   :command (list my/org-babel-async-emacs-program
+                                  "--batch" "-Q"
+                                  "-L" (expand-file-name "lisp" my/org-babel-config-root)
+                                  "-L" (expand-file-name "lisp/lang" my/org-babel-config-root)
+                                  "-l" runner-file))))
+          (setq job (my/org-babel-async-job-create
+                     :id job-id
+                     :buffer buffer
+                     :marker marker
+                     :hash hash
+                     :language language
+                     :started-at (current-time)
+                     :process process
+                     :source-file source-file
+                     :runner-file runner-file
+                     :output-file output-file
+                     :log-buffer log-buffer))
+          (process-put process 'my/org-babel-job job)
+          (push job my/org-babel-async-jobs)
+          (my/org-babel--replace-result-block
+           (my/org-babel--format-status-result
+            (format "RUNNING job %s (%s)\nUse C-c C-v C-k to cancel"
+                    job-id language)))
+          (setq started t)
+          (message "Started Org Babel async job %s for %s" job-id language)
+          job)
+      (error
+       (unless started
+         (setq my/org-babel-async-jobs (delq job my/org-babel-async-jobs))
+         (my/org-babel--cleanup-startup-resources
+          process log-buffer marker
+          (list source-file runner-file output-file)))
+       (signal (car err) (cdr err))))))
 
 (defun my/org-babel-cancel-async-job (job)
   "Cancel Org Babel async JOB."

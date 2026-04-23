@@ -215,16 +215,27 @@ If any window isn't shown anymore, forget about it."
                   winpoint-frame-positions)))))
 
 (defun winpoint-clean ()
-  "Remove unknown windows."
+  "Remove unknown windows and dead-buffer markers."
   (let ((windows (window-list)))
     (setq winpoint-frame-positions
           (filter-map! (lambda (entry)
-                         (let ((bufs (filter! (lambda (buf+pos)
-                                                (buffer-live-p (car buf+pos)))
-                                              (cdr entry))))
-                           (when (not (null bufs))
-                             (cons (car entry)
-                                   bufs))))
+                         (if (not (memq (car entry) windows))
+                             (progn
+                               (dolist (buf+pos (cdr entry))
+                                 (when (markerp (cdr buf+pos))
+                                   (set-marker (cdr buf+pos) nil)))
+                               nil)
+                           (let ((bufs (filter-map!
+                                        (lambda (buf+pos)
+                                          (if (buffer-live-p (car buf+pos))
+                                              buf+pos
+                                            (when (markerp (cdr buf+pos))
+                                              (set-marker (cdr buf+pos) nil))
+                                            nil))
+                                        (cdr entry))))
+                             (when bufs
+                               (cons (car entry)
+                                     bufs)))))
                        winpoint-frame-positions))))
 
 (defun filter-map! (fun list)

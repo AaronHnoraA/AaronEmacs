@@ -11,7 +11,7 @@
 (declare-function magit-git-string "magit-git" (&rest args))
 (declare-function magit-read-branch-or-commit "magit-git" (prompt &optional secondary-default exclude))
 (declare-function magit-toplevel "magit-git" (&optional directory))
-(declare-function my/git-tool-prepare-buffer "init-git-core" ())
+(declare-function my/git-tool-prepare-buffer "init-git-core" (&optional origin-buffer))
 (declare-function my/git-tool-quit-buffer "init-git-core" (origin-buffer))
 (declare-function my/git-tool-register-cleanup "init-git-core" (fn))
 
@@ -43,7 +43,7 @@ killed."
   (setq-local default-directory repo-root)
   (setq-local revert-buffer-function nil)
   (setq-local my/git-diff-origin-buffer origin-buffer)
-  (my/git-tool-prepare-buffer)
+  (my/git-tool-prepare-buffer origin-buffer)
   (my/git-diff--cleanup-temp-files-on-kill (list revision-file))
   (local-set-key (kbd "q") #'my/git-diff-quit)
   (when (featurep 'evil)

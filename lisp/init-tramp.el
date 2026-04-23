@@ -313,6 +313,23 @@ servers use the shared ControlMaster path."
 ;; cache with filesystem-watch invalidation.  Wrapping that in our own alist
 ;; would only serve stale results after tramp-rpc has invalidated its cache.
 
+(defcustom my/tramp-memoize-cache-limit 128
+  "Maximum entries retained in each remote lookup memoization cache.
+Set to nil to keep caches unbounded."
+  :type '(choice (const :tag "Unbounded" nil)
+                 (integer :tag "Entries"))
+  :group 'tramp)
+
+(defun my/tramp--trim-memoize-cache (cache)
+  "Trim symbol CACHE to `my/tramp-memoize-cache-limit' entries."
+  (when (integerp my/tramp-memoize-cache-limit)
+    (if (<= my/tramp-memoize-cache-limit 0)
+        (set cache nil)
+      (let* ((entries (symbol-value cache))
+             (tail (nthcdr (1- my/tramp-memoize-cache-limit) entries)))
+        (when tail
+          (setcdr tail nil))))))
+
 (defun my/tramp-memoize (key cache fn &rest args)
   "Return cached result for KEY from symbol CACHE, or call FN with ARGS.
 Caches for remote SSH paths only; passes through for local and /rpc: paths."
@@ -321,6 +338,7 @@ Caches for remote SSH paths only; passes through for local and /rpc: paths."
           (cdr cached)
         (let ((value (apply fn args)))
           (set cache (cons (cons key value) (symbol-value cache)))
+          (my/tramp--trim-memoize-cache cache)
           value))
     (apply fn args)))
 

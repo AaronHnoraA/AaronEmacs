@@ -51,6 +51,11 @@ existing-kernel connection file is in use."
 (defvar my/jupyter-connection-file-history nil
   "History of Jupyter kernel connection files.")
 
+(defcustom my/jupyter-connection-file-history-limit 40
+  "Maximum remembered Jupyter kernel connection files."
+  :type 'integer
+  :group 'my/jupyter)
+
 (defvar my/jupyter-language-connection-files nil
   "Alist mapping language names to active Jupyter connection files.")
 
@@ -374,6 +379,23 @@ kernelspec for the language."
 
 (define-derived-mode my/jupyter-manager-mode special-mode "Jupyter-Hub"
   "Major mode for the Jupyter kernels and Org language management dashboard.")
+
+(defun my/jupyter-manager--clear-source-buffer-references-h ()
+  "Clear Jupyter manager views that point at the buffer being killed."
+  (let ((source (current-buffer)))
+    (dolist (buffer (buffer-list))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (when (and (derived-mode-p 'my/jupyter-manager-mode)
+                     (eq my/jupyter-manager-source-buffer source))
+            (setq-local my/jupyter-manager-source-buffer nil)))))))
+
+(defun my/jupyter-manager--watch-source-buffer (source)
+  "Install source cleanup for Jupyter manager views."
+  (when (buffer-live-p source)
+    (with-current-buffer source
+      (add-hook 'kill-buffer-hook
+                #'my/jupyter-manager--clear-source-buffer-references-h nil t))))
 
 (defun my/jupyter-manager--current-entry ()
   "Return the Jupyter manager entry at point, if any."
@@ -719,6 +741,7 @@ kernelspec for the language."
     (with-current-buffer buffer
       (my/jupyter-manager-mode)
       (setq-local my/jupyter-manager-source-buffer source)
+      (my/jupyter-manager--watch-source-buffer source)
       (let ((map (copy-keymap special-mode-map)))
         (use-local-map map)
         (local-set-key (kbd "g") #'my/jupyter-manager-refresh)
@@ -819,6 +842,11 @@ to seed the default with the language's currently registered file."
   (setq file (expand-file-name file))
   (setq my/jupyter-connection-file-history
         (cons file (delete file my/jupyter-connection-file-history)))
+  (when (and (integerp my/jupyter-connection-file-history-limit)
+             (> my/jupyter-connection-file-history-limit 0))
+    (when-let* ((tail (nthcdr (1- my/jupyter-connection-file-history-limit)
+                              my/jupyter-connection-file-history)))
+      (setcdr tail nil)))
   (dolist (alias (my/jupyter--language-family language))
     (setf (alist-get alias my/jupyter-language-connection-files nil 'remove #'equal)
           file)

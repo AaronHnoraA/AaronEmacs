@@ -155,10 +155,15 @@ buffer file."
   (unless (frame-focus-state)
     (my/macos-schedule-idle-gc)))
 
+(defun my/macos-cancel-idle-gc-timer ()
+  "Cancel the pending macOS idle GC timer."
+  (when (timerp my/macos-idle-gc-timer)
+    (cancel-timer my/macos-idle-gc-timer)
+    (setq my/macos-idle-gc-timer nil)))
+
 (defun my/macos-schedule-idle-gc ()
   "Run GC shortly after focus leaves Emacs or the minibuffer closes."
-  (when (timerp my/macos-idle-gc-timer)
-    (cancel-timer my/macos-idle-gc-timer))
+  (my/macos-cancel-idle-gc-timer)
   (setq my/macos-idle-gc-timer
         (run-with-idle-timer 2 nil
                              (lambda ()
@@ -194,11 +199,17 @@ buffer file."
 
 (my/macos-apply-performance-tweaks)
 (if (boundp 'after-focus-change-function)
-    (add-function :after after-focus-change-function
-                  #'my/macos-schedule-idle-gc-after-focus-change)
+    (progn
+      (remove-function after-focus-change-function
+                       #'my/macos-schedule-idle-gc-after-focus-change)
+      (add-function :after after-focus-change-function
+                    #'my/macos-schedule-idle-gc-after-focus-change))
   (with-suppressed-warnings ((obsolete focus-out-hook))
+    (remove-hook 'focus-out-hook #'my/macos-schedule-idle-gc)
     (add-hook 'focus-out-hook #'my/macos-schedule-idle-gc)))
+(remove-hook 'minibuffer-exit-hook #'my/macos-schedule-idle-gc)
 (add-hook 'minibuffer-exit-hook #'my/macos-schedule-idle-gc)
+(add-hook 'kill-emacs-hook #'my/macos-cancel-idle-gc-timer)
 
 (use-package emacs
   :ensure nil

@@ -84,7 +84,7 @@ Scrolling in the opposite direction is allowed immediately."
 (defvar my/tab-line-global-order nil
   "Fallback buffer order for the centered tab line outside perspective mode.")
 
-(defvar my/tab-line-wheel-state (make-hash-table :test #'eq)
+(defvar my/tab-line-wheel-state (make-hash-table :test #'eq :weakness 'key)
   "Accepted wheel timestamps keyed by window for centered tab switching.")
 
 (defvar my/tab-line-click-map

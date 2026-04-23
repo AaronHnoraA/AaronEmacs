@@ -128,13 +128,21 @@ Only fall back to `pdf-tools-install' when the checker fails."
   "Enable buffer-local hooks and start live preview compilation."
   (add-hook 'after-change-functions #'my/auctex-live-preview--schedule-save nil t)
   (add-hook 'after-save-hook #'my/auctex-live-preview--after-save nil t)
+  (add-hook 'change-major-mode-hook #'my/auctex-live-preview--cleanup-current-buffer nil t)
+  (add-hook 'kill-buffer-hook #'my/auctex-live-preview--cleanup-current-buffer nil t)
   (my/auctex-start-live-compilation))
+
+(defun my/auctex-live-preview--cleanup-current-buffer ()
+  "Release live-preview hooks, timers, and TeX process in the current buffer."
+  (remove-hook 'after-change-functions #'my/auctex-live-preview--schedule-save t)
+  (remove-hook 'after-save-hook #'my/auctex-live-preview--after-save t)
+  (remove-hook 'change-major-mode-hook #'my/auctex-live-preview--cleanup-current-buffer t)
+  (remove-hook 'kill-buffer-hook #'my/auctex-live-preview--cleanup-current-buffer t)
+  (my/auctex-stop-live-compilation))
 
 (defun my/auctex-live-preview--disable ()
   "Disable buffer-local hooks and stop live preview compilation."
-  (remove-hook 'after-change-functions #'my/auctex-live-preview--schedule-save t)
-  (remove-hook 'after-save-hook #'my/auctex-live-preview--after-save t)
-  (my/auctex-stop-live-compilation))
+  (my/auctex-live-preview--cleanup-current-buffer))
 
 (define-minor-mode my/auctex-live-preview-mode
   "Continuously compile the current TeX master with `latexmk -pvc'."

@@ -235,7 +235,9 @@ numbered sessions."
 (defun shell-self-destroy-sentinel (proc _exit-msg)
   "Make PROC self destroyable."
   (when (memq (process-status proc) '(exit signal stop))
-    (kill-buffer (process-buffer proc))
+    (when-let* ((buffer (process-buffer proc))
+                ((buffer-live-p buffer)))
+      (kill-buffer buffer))
     (ignore-errors (delete-window))))
 
 (defun shell-delete-window (&optional win)
@@ -480,8 +482,14 @@ If popup is focused, kill it."
 (defun my/vterm-copy-mode-enter ()
   "Enter `vterm-copy-mode' without enabling region selection."
   (interactive)
-  (setq-local my/vterm-copy-mode-visual-line-anchor nil)
+  (my/vterm-copy-mode-clear-visual-line-anchor)
   (vterm-copy-mode 1))
+
+(defun my/vterm-copy-mode-clear-visual-line-anchor ()
+  "Release the VTerm visual-line copy marker in the current buffer."
+  (when (markerp my/vterm-copy-mode-visual-line-anchor)
+    (set-marker my/vterm-copy-mode-visual-line-anchor nil))
+  (setq-local my/vterm-copy-mode-visual-line-anchor nil))
 
 (defun my/vterm-copy-mode--anchor-position ()
   "Return the current visual-line anchor position, if any."
@@ -510,6 +518,7 @@ If popup is focused, kill it."
 (defun my/vterm-copy-mode-visual-line ()
   "Enter `vterm-copy-mode' and select the current line."
   (interactive)
+  (my/vterm-copy-mode-clear-visual-line-anchor)
   (let ((anchor (line-beginning-position)))
     (setq-local my/vterm-copy-mode-visual-line-anchor
                 (copy-marker anchor)))
@@ -536,10 +545,15 @@ If popup is focused, kill it."
 (defun my/vterm-copy-mode-quit ()
   "Leave `vterm-copy-mode' without copying."
   (interactive)
-  (when (markerp my/vterm-copy-mode-visual-line-anchor)
-    (set-marker my/vterm-copy-mode-visual-line-anchor nil))
-  (setq-local my/vterm-copy-mode-visual-line-anchor nil)
+  (my/vterm-copy-mode-clear-visual-line-anchor)
   (vterm-copy-mode -1))
+
+(defun my/vterm-copy-mode-done ()
+  "Copy VTerm selection and release visual-line copy state."
+  (interactive)
+  (unwind-protect
+      (vterm-copy-mode-done)
+    (my/vterm-copy-mode-clear-visual-line-anchor)))
 
 (defun my/vterm-disable-evil-h ()
   "Keep `vterm' fully detached from `evil'."
@@ -559,7 +573,7 @@ If popup is focused, kill it."
   (keymap-set vterm-copy-mode-map "j" #'my/vterm-copy-mode-next-line)
   (keymap-set vterm-copy-mode-map "k" #'my/vterm-copy-mode-previous-line)
   (keymap-set vterm-copy-mode-map "l" #'forward-char)
-  (keymap-set vterm-copy-mode-map "y" #'vterm-copy-mode-done)
+  (keymap-set vterm-copy-mode-map "y" #'my/vterm-copy-mode-done)
   (keymap-set vterm-copy-mode-map "q" #'my/vterm-copy-mode-quit)
   (keymap-set vterm-copy-mode-map "<escape>" #'my/vterm-copy-mode-quit))
 

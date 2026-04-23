@@ -8,16 +8,19 @@
 
 (defconst my/startup-byte-compiled-files
   '("early-init.el" "init.el" "bootstrap.el")
-  "Top-level startup files whose stale bytecode can break bootstrap.")
+  "Top-level startup files whose bytecode can break bootstrap.")
 
 (defun my/delete-stale-startup-bytecode ()
-  "Delete stale top-level `.elc' files before normal init loading continues."
+  "Delete top-level startup `.elc' files before normal init loading continues.
+
+The startup entry points are small and order-sensitive.  Loading an older or
+badly compiled `init.elc' can bypass source fixes before `load-prefer-newer' has
+a chance to affect the rest of the module graph."
   (dolist (file my/startup-byte-compiled-files)
     (let* ((source (expand-file-name file user-emacs-directory))
            (bytecode (concat source "c")))
       (when (and (file-exists-p source)
-                 (file-exists-p bytecode)
-                 (file-newer-than-file-p source bytecode))
+                 (file-exists-p bytecode))
         (condition-case err
             (delete-file bytecode)
           (error

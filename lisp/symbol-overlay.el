@@ -245,9 +245,11 @@ You can re-bind the commands to any keys you prefer.")
   (if symbol-overlay-mode
       (progn
         (add-hook 'post-command-hook #'symbol-overlay-post-command nil t)
+        (add-hook 'change-major-mode-hook #'symbol-overlay-cleanup-current-buffer nil t)
+        (add-hook 'kill-buffer-hook #'symbol-overlay-cleanup-current-buffer nil t)
         (symbol-overlay-update-timer symbol-overlay-idle-time))
     (remove-hook 'post-command-hook #'symbol-overlay-post-command t)
-    (symbol-overlay-remove-temp)))
+    (symbol-overlay-cleanup-current-buffer)))
 
 (defun symbol-overlay-get-list (dir &optional symbol exclude)
   "Get all highlighted overlays in the buffer.
@@ -362,7 +364,32 @@ This only affects symbols in the current displayed window if
 (defun symbol-overlay-cancel-timer ()
   "Cancel `symbol-overlay-timer' if it is running."
   (when symbol-overlay-timer
-    (cancel-timer symbol-overlay-timer)))
+    (cancel-timer symbol-overlay-timer)
+    (setq symbol-overlay-timer nil)))
+
+(defun symbol-overlay--active-buffer-p (&optional ignored-buffer)
+  "Return non-nil when a live buffer besides IGNORED-BUFFER uses the mode."
+  (catch 'active
+    (dolist (buffer (buffer-list))
+      (unless (eq buffer ignored-buffer)
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (when (bound-and-true-p symbol-overlay-mode)
+              (throw 'active t))))))
+    nil))
+
+(defun symbol-overlay-maybe-cancel-timer (&optional ignored-buffer)
+  "Cancel the shared idle timer when no live buffers still need it."
+  (unless (symbol-overlay--active-buffer-p ignored-buffer)
+    (symbol-overlay-cancel-timer)))
+
+(defun symbol-overlay-cleanup-current-buffer ()
+  "Release buffer-local temporary highlight state for `symbol-overlay-mode'."
+  (remove-hook 'post-command-hook #'symbol-overlay-post-command t)
+  (remove-hook 'change-major-mode-hook #'symbol-overlay-cleanup-current-buffer t)
+  (remove-hook 'kill-buffer-hook #'symbol-overlay-cleanup-current-buffer t)
+  (symbol-overlay-remove-temp)
+  (symbol-overlay-maybe-cancel-timer (current-buffer)))
 
 (defun symbol-overlay-idle-timer ()
   "Idle timer callback.

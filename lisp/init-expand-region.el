@@ -12,6 +12,11 @@
 (defvar-local my/expand-region-history nil
   "Previous region states for `my/expand-region'.")
 
+(defcustom my/expand-region-history-limit 64
+  "Maximum previous region states kept per buffer."
+  :type 'integer
+  :group 'editing)
+
 (defconst my/selection-definition-node-regexp
   (rx (or "function"
           "method"
@@ -80,7 +85,12 @@
 (defun my/selection--push-history ()
   "Remember the current region state."
   (when (use-region-p)
-    (push (cons (region-beginning) (region-end)) my/expand-region-history)))
+    (push (cons (region-beginning) (region-end)) my/expand-region-history)
+    (when (and (integerp my/expand-region-history-limit)
+               (> my/expand-region-history-limit 0))
+      (when-let* ((tail (nthcdr (1- my/expand-region-history-limit)
+                                my/expand-region-history)))
+        (setcdr tail nil)))))
 
 (defun my/selection--activate-bounds (bounds)
   "Activate region for BOUNDS."

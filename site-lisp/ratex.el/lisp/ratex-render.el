@@ -218,13 +218,14 @@ propagates outward."
     (delete-overlay ratex--edit-source-overlay))
   (setq-local ratex--edit-source-overlay nil)
   (setq-local ratex--preview-enabled nil)
+  (when (timerp ratex--preview-timer)
+    (cancel-timer ratex--preview-timer))
   (setq-local ratex--preview-timer nil)
   (when (timerp ratex--force-preview-timer)
     (cancel-timer ratex--force-preview-timer))
   (setq-local ratex--force-preview-timer nil)
   (setq-local ratex--last-point nil)
-  (setq-local ratex--last-tick nil)
-  (ratex--ensure-cache-gc-timer))
+  (setq-local ratex--last-tick nil))
 
 (defun ratex-refresh-previews (&optional include-active)
   "Refresh math previews in current buffer.
@@ -356,6 +357,8 @@ currently under point."
 (defun ratex--cache-put (cache-key response)
   "Store RESPONSE for CACHE-KEY and trim stale cache entries."
   (when (hash-table-p ratex--render-cache)
+    (when (bound-and-true-p ratex-mode)
+      (ratex--ensure-cache-gc-timer))
     (puthash cache-key response ratex--render-cache)
     (puthash cache-key (ratex--cache-now) ratex--render-cache-access)
     (ratex--trim-render-cache)))
@@ -372,6 +375,12 @@ currently under point."
   (unless (timerp ratex--cache-gc-timer)
     (setq ratex--cache-gc-timer
           (run-with-idle-timer 30 t #'ratex--cleanup-render-caches))))
+
+(defun ratex--cancel-cache-gc-timer ()
+  "Cancel the global render-cache cleanup timer."
+  (when (timerp ratex--cache-gc-timer)
+    (cancel-timer ratex--cache-gc-timer))
+  (setq ratex--cache-gc-timer nil))
 
 (defun ratex--trim-render-cache ()
   "Trim the current buffer render cache."
@@ -396,13 +405,14 @@ currently under point."
   (let ((now (ratex--cache-now))
         (ttl (and (integerp ratex-render-cache-ttl)
                   (> ratex-render-cache-ttl 0)
-                  ratex-render-cache-ttl)))
-    (when ttl
-      (dolist (buffer (buffer-list))
-        (when (buffer-live-p buffer)
-          (with-current-buffer buffer
-            (when (and (boundp 'ratex-mode)
-                       ratex-mode
+                  ratex-render-cache-ttl))
+        (live-ratex-buffer nil))
+    (dolist (buffer (buffer-list))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (when (bound-and-true-p ratex-mode)
+            (setq live-ratex-buffer t)
+            (when (and ttl
                        (hash-table-p ratex--render-cache-access))
               (let (expired)
                 (maphash
@@ -411,7 +421,9 @@ currently under point."
                      (push key expired)))
                  ratex--render-cache-access)
                 (dolist (key expired)
-                  (ratex--cache-delete key))))))))))
+                  (ratex--cache-delete key))))))))
+    (unless live-ratex-buffer
+      (ratex--cancel-cache-gc-timer))))
 
 (defun ratex--image-from-response (response)
   "Build an image object from backend RESPONSE."
