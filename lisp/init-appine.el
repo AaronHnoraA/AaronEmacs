@@ -28,11 +28,16 @@
 (defvar my/appine-default-window-size 0.38
   "Default height ratio for the Appine window when splitting below.")
 
+(defvar my/appine--refresh-timer nil
+  "Timer used to refresh Appine after Emacs window changes settle.")
+
 (declare-function appine--buffer "appine")
 (declare-function appine--get-active-window-for-buffer "appine" (buffer-name))
+(declare-function appine--sync-active-state "appine" (&rest args))
 (declare-function appine--window-pixel-rect "appine" (win))
 (declare-function appine--update-active-keymap "appine")
 (declare-function appine-focus "appine")
+(declare-function appine-refresh "appine")
 (declare-function appine-open-file-by-file-chooser "appine")
 (declare-function appine-native-action "appine" (name))
 (declare-function my/macos-open-target "init-macos" (target))
@@ -988,6 +993,26 @@ export default {
           (window-resize new (- target (window-total-width new)) t)))
       new)))
 
+(defun my/appine--refresh-visible ()
+  "Refresh visible Appine native view after window state changes."
+  (when (and (featurep 'appine-module)
+             (my/appine-visible-p))
+    (ignore-errors (appine-refresh))
+    (ignore-errors (appine--sync-active-state))))
+
+(defun my/appine--schedule-refresh-visible (&rest _args)
+  "Schedule a delayed Appine refresh.
+This keeps the native view attached to its host window after Emacs finishes
+buffer/window selection changes."
+  (when (timerp my/appine--refresh-timer)
+    (cancel-timer my/appine--refresh-timer))
+  (setq my/appine--refresh-timer
+        (run-at-time
+         0.05 nil
+         (lambda ()
+           (setq my/appine--refresh-timer nil)
+           (my/appine--refresh-visible)))))
+
 (use-package appine
   :ensure nil
   :commands (appine
@@ -1016,6 +1041,9 @@ export default {
   (advice-add 'appine-next-tab  :around #'my/appine--track-next-tab-a)
   (advice-add 'appine-prev-tab  :around #'my/appine--track-prev-tab-a)
   (advice-add 'appine-close-tab :around #'my/appine--track-close-tab-a)
+  (add-hook 'window-configuration-change-hook #'my/appine--schedule-refresh-visible)
+  (add-hook 'window-buffer-change-functions #'my/appine--schedule-refresh-visible)
+  (add-hook 'window-selection-change-functions #'my/appine--schedule-refresh-visible)
   (when (boundp 'appine-active-map)
     (define-key appine-active-map (kbd "H")   #'my/appine-back)
     (define-key appine-active-map (kbd "L")   #'my/appine-forward)

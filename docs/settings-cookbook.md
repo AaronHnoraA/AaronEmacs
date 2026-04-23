@@ -118,7 +118,28 @@
 - 只有两个窗口时，直接和另一个窗口交换
 - 多于两个窗口时，用 `ace-window` 选目标窗口再交换
 
-## 5. 我要增删 leader 键
+## 5. 我要改默认打开方式
+
+文件：
+
+- [lisp/init-open.el](../lisp/init-open.el)
+- [site-lisp/general.el/general.el](../site-lisp/general.el/general.el)
+
+改默认 URL / 搜索 / 文件 / PDF 打开方式时，优先改 `lisp/init-open.el`
+里的 `my/open-routes`。
+
+`my/open-routes` 使用 `general.el` 提供的 `general-route-*` DSL helpers：
+具体策略留在 `init-open.el`，通用的 route 读取、别名归一和菜单选择逻辑在
+`site-lisp/general.el/general.el`。
+
+常用值：
+
+- `url` 的 `:default menu` 表示 `browse-url` 每次弹菜单
+- `url` 的 `:menu-default xwidget` 表示菜单默认项是 `xwidget`
+- `system` 表示 macOS `open` / Linux `xdg-open` / Windows shell open
+- `pdf` 默认走 `system`，普通 `find-file` 打开 PDF 仍由 `pdf-tools` 处理
+
+## 6. 我要增删 leader 键
 
 文件：
 
@@ -157,7 +178,7 @@
 2. 在对应分组加命令
 3. 如果是 mode 专属功能，优先放 localleader
 
-## 6. 我要加一个新包
+## 7. 我要加一个新包
 
 ### 普通包
 
@@ -195,7 +216,7 @@ emacs --debug-init -q -l ./bootstrap.el
 
 把锁文件更新掉。
 
-## 7. 我要改 snippet
+## 8. 我要改 snippet
 
 文件：
 
@@ -209,7 +230,7 @@ emacs --debug-init -q -l ./bootstrap.el
 - `C-c y v`
   找 snippet 文件
 
-## 8. 我要改补全行为
+## 9. 我要改补全行为
 
 看这些文件：
 
@@ -240,7 +261,7 @@ emacs --debug-init -q -l ./bootstrap.el
 
 不要再到处散落手写 `add-to-list 'eglot-server-programs`。
 
-## 9. 我要改远程和终端行为
+## 10. 我要改远程和终端行为
 
 文件：
 
@@ -253,7 +274,7 @@ emacs --debug-init -q -l ./bootstrap.el
 - `my/ssh-config-hosts`
 - TRAMP 相关 `setq`
 
-## 10. 我要改项目管理行为
+## 11. 我要改项目管理行为
 
 文件：
 
@@ -284,7 +305,7 @@ emacs --debug-init -q -l ./bootstrap.el
 
 - `my/project-search-paths`
 
-## 11. 我要调整 Dired / Dirvish
+## 12. 我要调整 Dired / Dirvish
 
 文件：
 
@@ -298,7 +319,7 @@ emacs --debug-init -q -l ./bootstrap.el
 - `init-windows.el`
   `dirvish` 的 UI 和键位
 
-## 12. 我要改 Org 重 UI
+## 13. 我要改 Org 重 UI
 
 文件：
 
@@ -316,7 +337,7 @@ emacs --debug-init -q -l ./bootstrap.el
 - `my/org-enable-*`
 - `my/org-enable-jit-pretty-blocks`
 
-## 13. 我要改运行时状态目录
+## 14. 我要改运行时状态目录
 
 文件：
 
@@ -331,7 +352,7 @@ emacs --debug-init -q -l ./bootstrap.el
 
 现在所有这些都写到 [var/](../var/)。
 
-## 14. 我要改新建文件模板（auto-insert）
+## 15. 我要改新建文件模板（auto-insert）
 
 文件：
 

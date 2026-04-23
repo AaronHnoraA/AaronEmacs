@@ -162,6 +162,76 @@ This is an alist of a state to keybindings.")
   :type '(alist :key-type (or symbol (repeat symbol))
                 :value-type symbol))
 
+(defun general-route-get (routes kind property &optional fallback)
+  "Return PROPERTY from KIND in ROUTES, or FALLBACK.
+ROUTES is an alist whose entries look like:
+
+  (KIND :default BACKEND :menu-default BACKEND :backends (BACKEND...))
+
+This helper intentionally stays domain-neutral; callers own the route names,
+properties, and concrete actions."
+  (let ((route (cdr (assq kind routes))))
+    (if (and route (plist-member route property))
+        (plist-get route property)
+      fallback)))
+
+(defun general-route-normalize-choice (choice &optional aliases)
+  "Normalize CHOICE with ALIASES.
+CHOICE may be a string or symbol.  ALIASES is an alist mapping accepted names
+to canonical symbols."
+  (let ((choice (if (stringp choice) (intern choice) choice)))
+    (or (cdr (assq choice aliases))
+        choice)))
+
+(defun general-route-labels (routes kind &optional fallback)
+  "Return completion labels for KIND in ROUTES."
+  (mapcar #'symbol-name
+          (or (general-route-get routes kind :backends)
+              fallback)))
+
+(defun general-route-read-choice (routes kind &optional prompt default aliases)
+  "Read a backend choice for KIND from ROUTES.
+PROMPT overrides the prompt.  DEFAULT overrides the route's `:menu-default'.
+ALIASES maps accepted names to canonical symbols."
+  (let* ((backends (general-route-get routes kind :backends))
+         (default (general-route-normalize-choice
+                   (or default
+                       (general-route-get routes kind :menu-default)
+                       (car backends))
+                   aliases))
+         (choice (completing-read
+                  (or prompt (format "Route %s to: " kind))
+                  (general-route-labels routes kind (and default (list default)))
+                  nil t nil nil (and default (symbol-name default)))))
+    (general-route-normalize-choice choice aliases)))
+
+(defun general-route-resolve-choice (routes kind &optional choice aliases)
+  "Return the concrete route choice for KIND in ROUTES.
+If CHOICE or the route's `:default' is `menu', prompt with
+`general-route-read-choice'."
+  (let ((choice (general-route-normalize-choice
+                 (or choice (general-route-get routes kind :default))
+                 aliases)))
+    (if (eq choice 'menu)
+        (general-route-read-choice routes kind nil nil aliases)
+      choice)))
+
+(defun general-route-match-kind (routes target &optional fallback match-property)
+  "Return the first route kind whose match property matches TARGET.
+MATCH-PROPERTY defaults to `:match'.  The property value should be a list of
+regular expressions.  Return FALLBACK when nothing matches."
+  (let ((match-property (or match-property :match))
+        (target (or target "")))
+    (catch 'kind
+      (dolist (route routes)
+        (let ((patterns (plist-get (cdr route) match-property)))
+          (when (and patterns
+                     (cl-some (lambda (regexp)
+                                (string-match-p regexp target))
+                              patterns))
+            (throw 'kind (car route)))))
+      fallback)))
+
 (defcustom general-keymap-aliases
   '((override . general-override-mode-map)
     ((i insert) . evil-insert-state-map)

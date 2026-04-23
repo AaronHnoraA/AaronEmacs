@@ -83,6 +83,9 @@ dependency, not an optional experiment.
 - For global non-leader bindings, use `general-define-key`.
 - For concrete mode keymap objects that only exist after a package loads, bind
   inside `with-eval-after-load`; `evil-define-key*` is acceptable there.
+- Domain-neutral route-table helpers live in vendored `general.el` as
+  `general-route-*`; concrete policy still belongs in the owning init module
+  such as `lisp/init-open.el`.
 
 When changing user-facing shortcuts, update the relevant docs, usually
 `docs/daily-usage.md`, `README.md`, and sometimes `docs/dev-guide.md` or
@@ -146,9 +149,14 @@ Org/Jupyter/research:
 
 Browser/Appine:
 
-- `browse-url` defaults to Appine.
+- `browse-url` defaults to a backend menu whose default choice is xwidget.
 - EWW is for text/reading.
-- `xwidget-webkit` is the backup real-webpage backend.
+- EWW and `xwidget-webkit` route opens should create/show separate browser
+  buffers, not replace the current editing buffer or an already visible browser
+  buffer.
+- `xwidget-webkit` is the default real-webpage backend.
+- Appine is available for native embedding, but should not be the default route
+  while its native overlay is unstable outside the host buffer.
 - macOS `open` is the system handoff for files and URLs.
 - Keep browser routing manual; do not add "smart" URL auto-routing unless
   explicitly requested and documented.

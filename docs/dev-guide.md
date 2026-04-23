@@ -291,15 +291,17 @@ Doctor 更适合快速排查：
 ### 常用命令
 
 - `C-c w e`
-  `eww-browse-url`
+  `my/open-eww-url`
 - `C-c w x`
-  `xwidget-webkit-browse-url`
+  `my/open-xwidget-url`
 - `C-c w a`
   `my/appine-open-url`
 - `C-c w s`
   交互选择当前页面的目标后端
 - `C-c w E` / `C-c w X` / `C-c w A` / `C-c w O`
   当前页面直达 `eww` / `xwidget-webkit` / `appine` / macOS `open`
+- `C-c w d` / browser buffer `M-w`
+  kill 当前 `eww` / `xwidget-webkit` buffer 并删除对应窗口，或关闭当前 Appine tab
 - `C-c w k`
   `my/appine-kill-all`
 - `C-c w w`
@@ -307,12 +309,15 @@ Doctor 更适合快速排查：
 
 ### 当前逻辑
 
-`browse-url` 默认走 `appine`，不做 URL 复杂度自动分流。分流保持手动：
+默认打开方式集中在 `lisp/init-open.el` 的 `my/open-routes`，通用 DSL helper
+在 vendored `site-lisp/general.el/general.el` 的 `general-route-*`。`browse-url`
+默认走 `menu`，菜单默认项是 `xwidget`，不做 URL 复杂度自动分流。分流保持手动：
 
 browser pipeline 额外提供：
 
 - EWW <-> Xwidget
 - EWW/Xwidget <-> Appine
+- EWW/Xwidget 默认打开到独立浏览 buffer，连续多开不覆盖已显示的浏览 buffer
 - 当前页面 -> macOS `open`
 - 统一搜索入口：`my/browser-open-search`
 - 当前页面后端切换：`my/browser-switch-to`
@@ -322,9 +327,9 @@ browser pipeline 额外提供：
 因此当前建议是：
 
 - 文本/阅读优先 `eww`
-- 真实网页和原生嵌入默认优先 `appine`
-- `xwidget-webkit` 作为备用真实网页后端
-- 文件、URL 需要系统应用接管时走 macOS `open`
+- 默认真实网页优先 `xwidget-webkit`
+- 原生嵌入或 AppKit 文件查看需要时手动走 `appine`
+- 文件、URL 需要系统应用接管时走 `system` / macOS `open`
 - 关闭 Appine 的最后一个标签会自动清掉 host buffer
 
 ## 8. AI

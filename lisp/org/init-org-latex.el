@@ -6,9 +6,11 @@
 ;;; Code:
 
 (declare-function my/refresh-environment-from-shell nil)
+(declare-function my/open-file "init-open" (file &optional kind backend))
 (declare-function my/shell-command-executable "init-utils")
 (declare-function org-fragtog--disable-frag "org-fragtog" (frag &optional renew))
 
+(require 'init-open)
 (require 'init-org-core)
 (require 'init-org-ui)
 
@@ -27,7 +29,7 @@
   (bibtex-completion-bibliography pv/org-bibtex-files)
   (bibtex-completion-library-path (list pv/org-bibtex-dir))
   (bibtex-completion-pdf-open-function
-   (lambda (fpath) (call-process "open" nil 0 nil fpath))))
+   (lambda (fpath) (my/open-file fpath 'pdf))))
 
 (use-package org-ref
   :ensure t

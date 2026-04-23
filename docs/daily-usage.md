@@ -298,9 +298,9 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC o s`
   `shell-toggle`
 - `SPC o w`
-  `eww-browse-url`
+  `my/open-eww-url`
 - `SPC o x`
-  `xwidget-webkit-browse-url`
+  `my/open-xwidget-url`
 - `SPC o a`
   `my/appine-open-url`
 - `SPC o W`
@@ -311,24 +311,31 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 ### Browser `C-c w`
 
 - `C-c w w`
-  统一 `browse-url` 入口，默认走 `appine`
+  统一 `browse-url` 入口，默认弹选择菜单，默认项是 `xwidget`
 - `C-c w e` / `C-c w x` / `C-c w a`
-  直接用 `eww` / `xwidget-webkit` / `appine` 打开 URL
+  直接用 `eww` / `xwidget-webkit` / `appine` 打开 URL；`eww` 和 `xwidget-webkit`
+  会在独立浏览 buffer 里打开，连续多开也不会顶掉已显示的浏览 buffer
 - `C-c w E` / `C-c w X` / `C-c w A` / `C-c w O`
   把当前页面快速切到 `eww` / `xwidget-webkit` / `appine` / macOS `open`
 - `C-c w s`
-  交互选择目标后端；可选 `eww` / `xwidget` / `appine` / `open`
+  交互选择目标后端；可选 `xwidget` / `appine` / `eww` / `system`
 - `C-c w f` / `C-c w g`
   用 `appine` 打开文件 / 打开光标下 URL
 - `C-c w h` / `C-c w l` / `C-c w r`
   `appine` 后退 / 前进 / 刷新
 - `C-c w [` / `C-c w ]` / `C-c w 0`
   `appine` 上一标签 / 下一标签 / 关闭当前标签
+- `C-c w d`
+  关闭当前浏览后端；在 `eww` / `xwidget-webkit` buffer 中也可以按 `M-w`，
+  会同时 kill browser buffer 并删除对应窗口
 - `C-c w ?` / `C-c w k`
   打开 Appine board / 清理全部 Appine view
 
-当前策略是手动分流：`appine` 做默认真实网页和原生嵌入，`eww` 适合阅读，
-`xwidget-webkit` 作为备用真实网页后端，macOS `open` 用系统应用处理文件或链接。
+当前策略是手动分流：默认打开方式统一在 `lisp/init-open.el` 的
+`my/open-routes` 里维护，route DSL helper 来自 vendored `general.el` 的
+`general-route-*`。`browse-url` 会先让你选后端，默认项是 `xwidget`；
+`appine` 保留为原生嵌入/文件查看入口，`eww` 适合阅读，`system` 用系统
+应用处理文件或链接。
 
 ### Appine `SPC a p`
 

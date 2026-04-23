@@ -1,4 +1,4 @@
-;;; init-snippets.el --- The necessary settings -*- lexical-binding: t -*-
+;;; init-browser.el --- Browser integration -*- lexical-binding: t -*-
 
 ;;; Commentary:
 ;;
@@ -7,6 +7,7 @@
 ;;;
 
 (require 'general)
+(require 'init-open)
 
 (declare-function appine-open-url "appine" (url))
 (declare-function my/appine-get-url "init-appine" ())
@@ -21,6 +22,13 @@
 (declare-function my/appine-prev-tab "init-appine" ())
 (declare-function my/appine-reload "init-appine" ())
 (declare-function my/macos-open-url "init-macos" (url))
+(declare-function my/open-normalize-backend "init-open" (backend))
+(declare-function my/open-eww-url "init-open" (url &optional reuse-selected))
+(declare-function my/open-read-backend "init-open" (kind &optional prompt default))
+(declare-function my/open-resolve-backend "init-open" (kind &optional backend))
+(declare-function my/open-url "init-open" (url &optional backend))
+(declare-function my/open-url-with-backend "init-open" (url backend &optional reuse-selected))
+(declare-function my/open-xwidget-url "init-open" (url &optional reuse-selected))
 ;; 共享 Brave 的所有数据（需要关闭 Brave）
 (setq xwidget-webkit-cookie-file 
       (expand-file-name "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"))
@@ -66,7 +74,7 @@
     (define-key xwidget-webkit-mode-map (kbd "q") #'quit-window)
     (define-key xwidget-webkit-mode-map (kbd "g") #'xwidget-webkit-reload)
     (define-key xwidget-webkit-mode-map (kbd "M-r") #'my/refresh-current-content)
-    (define-key xwidget-webkit-mode-map (kbd "l") #'xwidget-webkit-browse-url)
+    (define-key xwidget-webkit-mode-map (kbd "l") #'my/open-xwidget-url)
     (define-key xwidget-webkit-mode-map (kbd "b") #'xwidget-webkit-back)
     (define-key xwidget-webkit-mode-map (kbd "f") #'xwidget-webkit-forward)
     (define-key xwidget-webkit-mode-map (kbd "y") #'xwidget-webkit-copy-selection-as-kill)
@@ -79,20 +87,12 @@
           (kill-new (xwidget-webkit-current-url))
           (message "Copied URL."))))))
 
-;;;; browse-url 统一入口：默认走 Appine，其他后端保留手动切换
+;;;; browse-url 统一入口：默认策略由 init-open.el 维护
 
 (defun my/browse-url (url &optional _new-window)
-  "Open URL with Appine by default."
+  "Open URL with the central URL route."
   (interactive (browse-url-interactive-arg "URL: "))
-  (unless (string-match-p "\\`https?://" url)
-    (setq url (concat "https://" url)))
-  (cond
-   ((fboundp 'my/appine-open-url)
-    (my/appine-open-url url))
-   ((fboundp 'appine-open-url)
-    (appine-open-url url))
-   (t
-    (browse-url-default-browser url))))
+  (my/open-url url))
 
 ;; 让所有点链接都走这个
 (setq browse-url-browser-function #'my/browse-url)
@@ -100,8 +100,8 @@
 
 (general-define-key
  :keymaps 'global
- "C-c w e" #'eww-browse-url
- "C-c w x" #'xwidget-webkit-browse-url
+ "C-c w e" #'my/open-eww-url
+ "C-c w x" #'my/open-xwidget-url
  "C-c w a" #'my/appine-open-url
  "C-c w f" #'my/appine-open-file
  "C-c w g" #'my/appine-open-at-point
@@ -110,6 +110,7 @@
  "C-c w [" #'my/appine-prev-tab
  "C-c w ]" #'my/appine-next-tab
  "C-c w 0" #'my/appine-close-tab
+ "C-c w d" #'my/browser-close-current
  "C-c w ?" #'my/appine-board
  "C-c w w" #'browse-url
  "C-c w s" #'my/browser-switch-to
@@ -124,6 +125,7 @@
   (setq eww-search-prefix "https://duckduckgo.com/?q=")
   (define-key eww-mode-map (kbd "g") #'my/refresh-current-content)
   (define-key eww-mode-map (kbd "M-r") #'my/refresh-current-content)
+  (define-key eww-mode-map (kbd "M-w") #'my/browser-close-current)
   (define-key eww-mode-map (kbd "R") #'eww-readable)
   (define-key eww-mode-map (kbd "X") #'my/eww-to-xwidget)
   (define-key eww-mode-map (kbd "A") #'my/eww-to-appine))
@@ -174,18 +176,37 @@
                   (my/appine-get-url)))
     (_ nil)))
 
-(defun my/browser-open-url-with-backend (backend url)
+(defun my/browser--kill-buffer-and-window ()
+  "Kill the current browser buffer and delete its window when possible."
+  (let ((buffer (current-buffer))
+        (window (selected-window)))
+    (let ((kill-buffer-query-functions nil))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))
+    (when (and (window-live-p window)
+               (> (length (window-list nil 'no-minibuf)) 1))
+      (delete-window window))))
+
+(defun my/browser-close-current ()
+  "Close the current browser view or tab.
+For EWW and xwidget-webkit, this kills the browser buffer and deletes its
+window, avoiding orphan browser buffers/windows."
+  (interactive)
+  (pcase (my/browser-current-backend)
+    ('appine
+     (if (fboundp 'my/appine-close-tab)
+         (my/appine-close-tab)
+       (user-error "Appine close command is not available")))
+    ('eww
+     (my/browser--kill-buffer-and-window))
+    ('xwidget
+     (my/browser--kill-buffer-and-window))
+    (_
+     (user-error "当前 buffer 不是受支持的浏览后端"))))
+
+(defun my/browser-open-url-with-backend (backend url &optional reuse-selected)
   "Open URL with browser BACKEND."
-  (pcase backend
-    ('eww (eww url))
-    ('xwidget (xwidget-webkit-browse-url url))
-    ('appine (if (fboundp 'my/appine-open-url)
-                 (my/appine-open-url url)
-               (appine-open-url url)))
-    ('open (if (fboundp 'my/macos-open-url)
-               (my/macos-open-url url)
-             (browse-url-default-browser url)))
-    (_ (user-error "Unsupported browser backend: %s" backend))))
+  (my/open-url-with-backend url backend reuse-selected))
 
 (defun my/browser-cleanup-backend (backend buffer)
   "Clean up BACKEND using BUFFER after a successful switch."
@@ -222,12 +243,9 @@
 (defun my/browser-switch-to (backend)
   "Switch the current browser page to BACKEND."
   (interactive
-   (list
-     (intern
-       (completing-read "Switch browser to: "
-                        '("eww" "xwidget" "appine" "open")
-                        nil t nil nil "appine"))))
-  (let ((source-backend (my/browser-current-backend))
+   (list (my/open-read-backend 'url "Switch browser to: ")))
+  (let ((backend (my/open-normalize-backend backend))
+        (source-backend (my/browser-current-backend))
         (url (my/browser-current-url))
         (old-buf (current-buffer)))
     (unless source-backend
@@ -237,7 +255,7 @@
     (when (eq source-backend backend)
       (user-error "当前已经是 %s" backend))
     (message "正在切换至 %s: %s" backend url)
-    (my/browser-open-url-with-backend backend url)
+    (my/browser-open-url-with-backend backend url t)
     (run-at-time "0 sec" nil #'my/browser-cleanup-backend source-backend old-buf)))
 
 (defun my/browser-switch-to-eww ()
@@ -258,7 +276,7 @@
 (defun my/browser-switch-to-open ()
   "Open the current browser page with macOS open."
   (interactive)
-  (my/browser-switch-to 'open))
+  (my/browser-switch-to 'system))
 
 (defun my/eww-to-appine ()
   "Switch the current EWW page to Appine."
@@ -291,7 +309,7 @@
         (progn
           (message "正在切换至 Xwidget: %s" url)
           ;; 启动 xwidget
-          (xwidget-webkit-browse-url url)
+          (my/open-xwidget-url url t)
           ;; 【关键修正】：不要立即杀 buffer。
           ;; 使用 run-at-time 0 让 Emacs 先完成 buffer 切换和界面重绘，
           ;; 待事件循环空闲时再回头杀掉旧 buffer。
@@ -310,8 +328,8 @@
     (if url
         (progn
           (message "正在切换至 EWW: %s" url)
-          ;; 启动 eww (eww 通常会在当前窗口复用 buffer)
-          (eww url)
+          ;; 启动 eww
+          (my/open-eww-url url t)
           ;; 【关键修正】：同样延迟清理，防止 xwidget 还没隐藏就被杀掉导致闪退
           (run-at-time "0 sec" nil 
                        (lambda (b) 
@@ -329,14 +347,13 @@
      (intern (completing-read "Search Engine (default: bing): "
                             '("bing" "perplexity" "duckduckgo")
                             nil t nil nil "bing"))
-     (intern (completing-read "Browser (default: appine): "
-                              '("eww" "xwidget" "appine" "open")
-                              nil t nil nil "appine"))))
+     (my/open-read-backend 'search "Browser: ")))
   (my/browser-open-url-with-backend
-   (or browser 'appine)
+   (or browser (my/open-resolve-backend 'search))
    (my/browser-build-search-url search-term engine)))
 
 (with-eval-after-load 'xwidget
+  (define-key xwidget-webkit-mode-map (kbd "M-w") #'my/browser-close-current)
   (define-key xwidget-webkit-mode-map (kbd "W") #'my/xwidget-to-eww)
   (define-key xwidget-webkit-mode-map (kbd "A") #'my/xwidget-to-appine))
 

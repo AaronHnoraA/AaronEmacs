@@ -30,6 +30,7 @@ If one of FEATURES is already available, require MODULE immediately."
 
 (require 'init-utils)
 (require 'init-base)
+(require 'init-open)
 (require 'init-tramp)
 (require 'init-ui)
 (require 'init-tabbar)

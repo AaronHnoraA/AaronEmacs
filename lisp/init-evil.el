@@ -504,9 +504,9 @@
     "ov" 'vterm
     "oV" 'my/vterm-named
     "oS" 'my/vterm-ssh
-    "ow" 'eww-browse-url
+    "ow" 'my/open-eww-url
     "oW" 'my/browser-open-search
-    "ox" 'xwidget-webkit-browse-url
+    "ox" 'my/open-xwidget-url
     "oB" 'my/browser-switch-to
     "os" 'shell-toggle)
 
