@@ -63,6 +63,17 @@ Special block overlays are no longer disabled based on buffer size."
   "Use relaxed line spacing in Org buffers only."
   (setq-local line-spacing 0.1))
 
+(defun my/org-force-indent-mode ()
+  "Enable `org-indent-mode' in every Org buffer."
+  (when (derived-mode-p 'org-mode)
+    (org-indent-mode 1)))
+
+(defun my/org-force-indent-mode-in-existing-buffers ()
+  "Enable `org-indent-mode' for Org buffers that already exist."
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (my/org-force-indent-mode))))
+
 ;;; ----------------------------------------------------------------------------
 ;;; 2. Org Core Configuration (核心设置)
 ;;; ----------------------------------------------------------------------------
@@ -70,7 +81,7 @@ Special block overlays are no longer disabled based on buffer size."
 (use-package org
   :ensure nil
   :hook ((org-mode . visual-line-mode)        ; 自动换行
-         (org-mode . org-indent-mode)
+         (org-mode . my/org-force-indent-mode)
          (org-mode . my/org-setup-buffer-spacing)
          (org-mode . my/org-enable-typography-maybe)) ; 缩进模式
   :bind (("C-c a" . org-agenda)
@@ -157,6 +168,9 @@ Special block overlays are no longer disabled based on buffer size."
   
   ;; --- Citations ---
   (org-cite-global-bibliography pv/org-bibtex-files))
+
+(add-hook 'hack-local-variables-hook #'my/org-force-indent-mode)
+(my/org-force-indent-mode-in-existing-buffers)
 
 ;;; ----------------------------------------------------------------------------
 ;;; Misc fixes

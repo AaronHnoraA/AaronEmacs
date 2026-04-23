@@ -54,10 +54,17 @@
   (when (my/org-rich-ui-buffer-p)
     (valign-mode 1)))
 
-(defun my/org-enable-org-modern-indent-maybe ()
-  "Enable `org-modern-indent-mode' for Org buffers in graphical sessions."
-  (when (my/org-rich-ui-buffer-p)
+(defun my/org-enable-org-modern-indent ()
+  "Enable `org-modern-indent-mode' for every Org buffer."
+  (when (derived-mode-p 'org-mode)
+    (org-indent-mode 1)
     (org-modern-indent-mode 1)))
+
+(defun my/org-enable-org-modern-indent-in-existing-buffers ()
+  "Enable `org-modern-indent-mode' for Org buffers that already exist."
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (my/org-enable-org-modern-indent))))
 
 (defun my/org-enable-org-appear-maybe ()
   "Enable `org-appear-mode' for Org buffers in graphical sessions."
@@ -353,10 +360,11 @@
 (my/package-ensure-vc 'org-modern-indent "https://github.com/jdtsmith/org-modern-indent.git")
 
 (use-package org-modern-indent
-  :after org-modern
-  :hook (org-mode . my/org-enable-org-modern-indent-maybe)
+  :after org
+  :hook (org-mode . my/org-enable-org-modern-indent)
   :config
-  (setq org-modern-indent-width 4))
+  (setq org-modern-indent-width 4)
+  (my/org-enable-org-modern-indent-in-existing-buffers))
 
 ;; 3.5 自动显示强调符
 (my/package-ensure-vc 'org-appear "https://github.com/awth13/org-appear.git")
@@ -458,6 +466,13 @@ DEFAULT-BG defaults to `my/org-default-background'."
               (palette (my/org-special-block-palette type)))
     (plist-get palette :body-bg)))
 
+(defun my/org-line-background-end (&optional pos)
+  "Return the position that lets a face extend through POS's full line."
+  (save-excursion
+    (when pos
+      (goto-char pos))
+    (min (point-max) (line-beginning-position 2))))
+
 ;; ===========================================================
 ;; 3. 核心渲染逻辑：只处理单个 Element
 ;; ===========================================================
@@ -522,8 +537,9 @@ DEFAULT-BG defaults to `my/org-default-background'."
                                   (point)))
                (header-end (save-excursion
                              (goto-char post-affiliated)
-                             (line-end-position))))
-          (let ((ov (make-overlay header-bol header-end)))
+                             (line-end-position)))
+               (header-bg-end (my/org-line-background-end post-affiliated)))
+          (let ((ov (make-overlay header-bol header-bg-end)))
             (overlay-put ov 'my/org-pretty-block t)
             (overlay-put ov 'face `(:background ,header-bg :extend t))
             (overlay-put ov 'priority priority)
@@ -545,10 +561,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
         ;; B. Body Overlay (内容区域)
         ;; -------------------------------------------------------
         (when (and contents-begin contents-end (> contents-end contents-begin))
-          ;; 修正：内容末尾通常是换行符，Overlay 退一格以防覆盖 Footer
-          (let ((true-body-end (if (= (char-before contents-end) ?\n)
-                                   (1- contents-end)
-                                 contents-end)))
+          (let ((true-body-end contents-end))
             (let ((ov (make-overlay contents-begin true-body-end)))
               (overlay-put ov 'my/org-pretty-block t)
               (overlay-put ov 'face `(:background ,body-bg :extend t))
@@ -568,8 +581,9 @@ DEFAULT-BG defaults to `my/org-default-background'."
                    (footer-text-beg (save-excursion
                                       (back-to-indentation)
                                       (point)))
-                   (footer-end (line-end-position)))
-              (let ((ov (make-overlay footer-bol footer-end)))
+                   (footer-end (line-end-position))
+                   (footer-bg-end (my/org-line-background-end)))
+              (let ((ov (make-overlay footer-bol footer-bg-end)))
                 (overlay-put ov 'my/org-pretty-block t)
                 (overlay-put ov 'face `(:background ,header-bg :extend t))
                 (overlay-put ov 'priority priority)

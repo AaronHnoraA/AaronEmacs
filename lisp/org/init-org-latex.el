@@ -704,6 +704,34 @@ Set to nil to keep the full log."
                       :background
                       background))))))
 
+(defun my/org-latex--display-math-source-p (value)
+  "Return non-nil when VALUE is a display-math fragment."
+  (let ((trimmed (string-trim-left value)))
+    (or (string-prefix-p "\\[" trimmed)
+        (string-prefix-p "$$" trimmed)
+        (string-prefix-p "\\begin{" trimmed))))
+
+(defun my/org-latex--center-preview-overlays (beg end value background)
+  "Center display-math preview overlays between BEG and END for VALUE."
+  (when (my/org-latex--display-math-source-p value)
+    (let* ((window (or (get-buffer-window (current-buffer) t)
+                       (selected-window)))
+           (body-width (max 1 (window-body-width window))))
+      (dolist (ov (overlays-in beg end))
+        (when-let* (((eq (overlay-get ov 'org-overlay-type) 'org-latex-overlay))
+                    (image (overlay-get ov 'display))
+                    ((listp image))
+                    ((eq (car image) 'image))
+                    (image-width (ceiling (car (image-size image)))))
+          (let ((left (max 0 (/ (- body-width image-width) 2))))
+            (overlay-put
+             ov 'before-string
+             (propertize
+              " "
+              'display `(space :align-to ,left)
+              'face (and (stringp background)
+                         `(:background ,background))))))))))
+
 (defun my/org-latex--overlay-shows-file-p (beg end file)
   "Return non-nil when an existing preview overlay at BEG..END already shows FILE."
   (catch 'found
@@ -725,8 +753,9 @@ Set to nil to keep the full log."
     (unless (my/org-latex--overlay-shows-file-p beg end file)
       (org-clear-latex-preview beg end)
       (let ((max-image-size nil))
-        (org--make-preview-overlay beg end file imagetype))
-      (my/org-latex--apply-preview-background beg end background))))
+        (org--make-preview-overlay beg end file imagetype)))
+    (my/org-latex--apply-preview-background beg end background)
+    (my/org-latex--center-preview-overlays beg end value background)))
 
 (defun my/org-latex--place-waiter-preview (waiter file imagetype)
   "Place preview FILE for WAITER using IMAGETYPE."
