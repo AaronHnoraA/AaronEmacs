@@ -8,6 +8,7 @@
 /package-quickstart.el
 /.cask
 /lisp/.elsa/
+.elsa/
 
 # Emacs runtime state and caches
 /eln-cache
@@ -33,8 +34,10 @@
 /semanticdb/
 
 # Project-local data produced by this config
-/Org/
+/Org
 /eaf/
+/tramp-rpc/
+/site-lisp/ratex.el/backend/target/
 
 # Local config and app state kept under etc/
 /etc/eshell/
@@ -63,6 +66,8 @@ __pycache__/
 .\#*
 *.~undo-tree
 .flycheck*
+*.bak-*
+.yas-compiled-snippets.el
 
 # Shell init files kept only on the local machine
 /init_bash.sh

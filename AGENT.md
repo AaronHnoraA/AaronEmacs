@@ -231,3 +231,5 @@ package/bootstrap/state work, use the `make` targets documented in
 
 
 如果开发中有对项目整体性有影响的设计,需要会过来维护这个文档,使得项目可以被长期,统一,持续的维护.
+
+保证每次修改git都是赶紧的,你实现完成后询问用户时候提交,通过则自动add + commit

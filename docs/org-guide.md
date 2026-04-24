@@ -2,6 +2,8 @@
 
 这套配置的 Org 是重功能路线，不主动对远程和大文件降载。
 
+如果你要看的不是 Emacs 里的按键和模块，而是 `~/HC/Org/` 这个个人知识库 / 站点源目录怎么组织、`daily/` 和 `roam/` 怎么分工、tag 怎么约定，另见 [org-kb-guide.md](org-kb-guide.md)。
+
 ## 1. 目录结构
 
 在 [lisp/init-org.el](../lisp/init-org.el) 里默认是：
