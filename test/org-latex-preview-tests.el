@@ -87,6 +87,83 @@
       (should (eq (gethash target my/org-latex--pending-renders) :new-job))
       (kill-buffer log-buffer))))
 
+(ert-deftest my/org-latex-preview-scroll-hook-ignores-ratex-suppression ()
+  (my/org-latex-test-with-org-buffer "\\(x\\)"
+    (let ((window (display-buffer (current-buffer) '(display-buffer-same-window)))
+          scheduled)
+      (unwind-protect
+          (let ((ratex--suppress-scroll-side-effects t))
+            (cl-letf (((symbol-function 'my/org-latex-preview-visible-debounced)
+                       (lambda (&optional _window)
+                         (setq scheduled t))))
+              (my/org-latex--window-scroll-preview-hook window (window-start window))
+              (should-not scheduled)))
+        (delete-other-windows)))))
+
+(ert-deftest my/org-latex-preview-visible-debounced-skips-active-ratex-edit-session ()
+  (my/org-latex-test-with-org-buffer "\\(x\\)"
+    (let ((window (display-buffer (current-buffer) '(display-buffer-same-window)))
+          scheduled)
+      (unwind-protect
+          (progn
+            (setq-local ratex-mode t)
+            (setq-local ratex--active-fragment '(:begin 1 :end 6 :content "x"))
+            (cl-letf (((symbol-function 'my/org-latex--buffer-visible-p)
+                       (lambda (&optional _buffer) t))
+                      ((symbol-function 'run-with-idle-timer)
+                       (lambda (&rest _args)
+                         (setq scheduled t)
+                         'fake-timer)))
+              (my/org-latex-preview-visible-debounced window)
+              (should-not scheduled)))
+        (delete-other-windows)))))
+
+(ert-deftest my/org-latex-preview-place-preview-preserves-window-state ()
+  (my/org-latex-test-with-org-buffer "\\(x\\)\n\n\nline-4\nline-5\nline-6\nline-7\nline-8\nline-9\nline-10\n"
+    (let ((file (expand-file-name "stable.svg" default-directory))
+          (window (display-buffer (current-buffer) '(display-buffer-same-window))))
+      (unwind-protect
+          (progn
+            (my/org-latex-test--write-file file "<svg xmlns='http://www.w3.org/2000/svg'/>")
+            (goto-char (point-max))
+            (set-window-start window (point-min))
+            (set-window-point window (point-min))
+            (let ((before-start (window-start window))
+                  (before-point (window-point window))
+                  (orig (symbol-function 'my/org-latex--make-preview-overlay)))
+              (cl-letf (((symbol-function 'my/org-latex--make-preview-overlay)
+                         (lambda (beg end overlay-file imagetype)
+                           (set-window-start window (point-max) t)
+                           (set-window-point window (point-max))
+                           (funcall orig beg end overlay-file imagetype))))
+                (my/org-latex--place-preview 1 6 "\\(x\\)" file "svg")
+                (should (= (window-start window) before-start))
+                (should (= (window-point window) before-point)))))
+        (delete-other-windows)))))
+
+(ert-deftest my/org-latex-preview-clear-range-preserves-window-state ()
+  (my/org-latex-test-with-org-buffer "\\(x\\)\n\n\nline-4\nline-5\nline-6\nline-7\nline-8\nline-9\nline-10\n"
+    (let ((file (expand-file-name "stable-clear.svg" default-directory))
+          (window (display-buffer (current-buffer) '(display-buffer-same-window))))
+      (unwind-protect
+          (progn
+            (my/org-latex-test--write-file file "<svg xmlns='http://www.w3.org/2000/svg'/>")
+            (my/org-latex--make-preview-overlay 1 6 file "svg")
+            (set-window-start window (point-min))
+            (set-window-point window (point-min))
+            (let ((before-start (window-start window))
+                  (before-point (window-point window))
+                  (orig (symbol-function 'my/org-latex--delete-overlay)))
+              (cl-letf (((symbol-function 'my/org-latex--delete-overlay)
+                         (lambda (overlay)
+                           (set-window-start window (point-max) t)
+                           (set-window-point window (point-max))
+                           (funcall orig overlay))))
+                (my/org-latex--clear-preview-range 1 6)
+                (should (= (window-start window) before-start))
+                (should (= (window-point window) before-point)))))
+        (delete-other-windows)))))
+
 (provide 'org-latex-preview-tests)
 
 ;;; org-latex-preview-tests.el ends here

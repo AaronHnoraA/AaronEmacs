@@ -131,6 +131,7 @@
 
 - Org 里启用了 `cdlatex`
 - 可见区域 LaTeX 预览走自定义 `xelatex + dvisvgm` 异步 SVG 流程
+- 与 `RaTeX` 共存时，公式编辑期间会忽略预览 UI 引发的合成滚动事件，避免可视区域预览被误触发
 - AUCTeX 和 `pdf-tools` 已配置
 - AUCTeX 支持 `latexmk -pvc` 实时编译和 Sioyek 双向同步
 

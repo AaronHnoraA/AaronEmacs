@@ -731,6 +731,68 @@
               (should (= (window-point window) before-point))))
         (delete-other-windows)))))
 
+(ert-deftest ratex-call-isolated-from-scroll-restores-window-state-on-error ()
+  (with-temp-buffer
+    (dotimes (i 40)
+      (insert (format "line-%02d\n" i)))
+    (let ((window (display-buffer (current-buffer) '(display-buffer-same-window))))
+      (unwind-protect
+          (progn
+            (set-window-start window (point-min))
+            (set-window-point window (point-min))
+            (let ((before-start (window-start window))
+                  (before-point (window-point window)))
+              (should-error
+               (ratex--call-isolated-from-scroll
+                (lambda ()
+                  (set-window-start window (point-max) t)
+                  (set-window-point window (point-max))
+                  (error "boom"))
+                window))
+              (should (= (window-start window) before-start))
+              (should (= (window-point window) before-point))))
+        (delete-other-windows)))))
+
+(ert-deftest ratex-call-isolated-from-scroll-sets-suppression-flag ()
+  (let (seen)
+    (ratex--call-isolated-from-scroll
+     (lambda ()
+       (setq seen ratex--suppress-scroll-side-effects)))
+    (should seen)))
+
+(ert-deftest ratex-hide-posframe-restores-owner-window-state-from-other-buffer ()
+  (let ((owner (generate-new-buffer " *ratex-owner-window*"))
+        (other (generate-new-buffer " *ratex-other-window*")))
+    (unwind-protect
+        (with-current-buffer owner
+          (dotimes (i 40)
+            (insert (format "line-%02d\n" i)))
+          (let ((window (display-buffer owner '(display-buffer-same-window))))
+            (set-window-start window (point-min))
+            (set-window-point window (point-min))
+            (setq ratex--posframe-owner-buffer owner)
+            (setq ratex--posframe-owner-window window)
+            (setq-local ratex--posframe-visible t)
+            (setq-local ratex--posframe-fragment '(:begin 1 :end 6 :content "x"))
+            (cl-letf (((symbol-function 'posframe-hide)
+                       (lambda (_buffer)
+                         (set-window-start window (point-max) t)
+                         (set-window-point window (point-max))))
+                      ((symbol-function 'featurep)
+                       (lambda (feature)
+                         (eq feature 'posframe)))
+                      ((symbol-function 'get-buffer)
+                       (lambda (name)
+                         (and (equal name ratex--posframe-buffer)
+                              owner))))
+              (with-current-buffer other
+                (ratex--hide-posframe))
+              (should (= (window-start window) (point-min)))
+              (should (= (window-point window) (point-min))))))
+      (kill-buffer owner)
+      (kill-buffer other)
+      (delete-other-windows))))
+
 (ert-deftest ratex-valid-fragment-remains-renderable-regardless-of-length ()
   (with-temp-buffer
     (insert "\\(" (make-string 5000 ?x) "\\)")

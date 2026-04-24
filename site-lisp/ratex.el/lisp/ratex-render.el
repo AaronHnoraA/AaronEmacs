@@ -149,7 +149,7 @@ leaves the formula or the idle timer renders first.")
     (let ((window-scroll-functions nil)
           (window-size-change-functions nil)
           (ratex--suppress-scroll-side-effects t))
-      (prog1
+      (unwind-protect
           (save-selected-window
             (funcall fn))
         (ratex--restore-buffer-window-states states)))))
@@ -1017,19 +1017,27 @@ Strategy mirrors company-box's frame-position logic:
   "Hide the posframe preview."
   (when (or ratex--posframe-showing-p
             (buffer-live-p ratex--posframe-owner-buffer))
-    (when (buffer-live-p ratex--posframe-owner-buffer)
-      (with-current-buffer ratex--posframe-owner-buffer
-        (ratex--unmask-edit-source)
-        (ratex--clear-posframe-state)))
-    (setq ratex--posframe-owner-buffer nil)
-    (setq ratex--posframe-owner-window nil)
-    (when (featurep 'posframe)
-      (when (get-buffer ratex--posframe-buffer)
-        (ratex--call-isolated-from-scroll
-         (lambda ()
-           (posframe-hide ratex--posframe-buffer))))
-      (ratex--clear-posframe-state))
-    (ratex--unmask-edit-source)))
+    (let ((owner-buffer (and (buffer-live-p ratex--posframe-owner-buffer)
+                             ratex--posframe-owner-buffer))
+          (owner-window (and (window-live-p ratex--posframe-owner-window)
+                             ratex--posframe-owner-window)))
+      (when owner-buffer
+        (with-current-buffer owner-buffer
+          (ratex--unmask-edit-source)
+          (ratex--clear-posframe-state)))
+      (setq ratex--posframe-owner-buffer nil)
+      (setq ratex--posframe-owner-window nil)
+      (when (featurep 'posframe)
+        (when (get-buffer ratex--posframe-buffer)
+          (ratex--call-isolated-from-scroll
+           (lambda ()
+             (posframe-hide ratex--posframe-buffer))
+           (or owner-window owner-buffer (current-buffer))))
+        (ratex--clear-posframe-state))
+      (when owner-buffer
+        (with-current-buffer owner-buffer
+          (ratex--unmask-edit-source)))
+      (ratex--unmask-edit-source))))
 
 (defun ratex--dismiss-edit-preview ()
   "Hide the edit preview UI without ending the current formula session."

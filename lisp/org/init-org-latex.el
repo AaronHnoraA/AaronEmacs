@@ -10,6 +10,11 @@
 (declare-function my/shell-command-executable "init-utils")
 (declare-function org-fragtog--disable-frag "org-fragtog" (frag &optional renew))
 
+(defvar ratex-mode)
+(defvar ratex--active-fragment)
+(defvar ratex--posframe-visible)
+(defvar ratex--suppress-scroll-side-effects nil)
+
 (require 'init-open)
 (require 'init-org-core)
 (require 'init-org-ui)
@@ -589,6 +594,56 @@ render is usually ready before point leaves it."
        (window-live-p window)
        window))
 
+(defun my/org-latex--capture-window-state (&optional window)
+  "Capture scrolling state for WINDOW."
+  (when-let* ((window (my/org-latex--normalize-window window)))
+    (list :window window
+          :buffer (window-buffer window)
+          :start (window-start window)
+          :point (window-point window)
+          :hscroll (window-hscroll window))))
+
+(defun my/org-latex--capture-buffer-window-states (&optional buffer)
+  "Capture scrolling state for windows showing BUFFER or the current buffer."
+  (let ((buffer (or buffer (current-buffer))))
+    (mapcar #'my/org-latex--capture-window-state
+            (seq-filter
+             (lambda (window)
+               (eq (window-buffer window) buffer))
+             (get-buffer-window-list buffer nil t)))))
+
+(defun my/org-latex--restore-window-state (state)
+  "Restore WINDOW scrolling STATE captured by `my/org-latex--capture-window-state'."
+  (when-let* ((window (plist-get state :window))
+              ((window-live-p window))
+              (buffer (plist-get state :buffer))
+              ((eq (window-buffer window) buffer)))
+    (let ((start (plist-get state :start))
+          (point (plist-get state :point))
+          (hscroll (plist-get state :hscroll)))
+      (when (number-or-marker-p start)
+        (set-window-start window start t))
+      (when (number-or-marker-p point)
+        (set-window-point window point))
+      (when (integerp hscroll)
+        (set-window-hscroll window hscroll)))))
+
+(defun my/org-latex--preserving-window-state (fn &optional buffer)
+  "Call FN and restore window state for BUFFER or the current buffer."
+  (let ((states (my/org-latex--capture-buffer-window-states buffer)))
+    (unwind-protect
+        (funcall fn)
+      (dolist (state states)
+        (when state
+          (my/org-latex--restore-window-state state))))))
+
+(defun my/org-latex--ratex-edit-session-active-p ()
+  "Return non-nil when RaTeX is actively editing a formula in this Org buffer."
+  (and (bound-and-true-p ratex-mode)
+       (derived-mode-p 'org-mode)
+       (or ratex--posframe-visible
+           ratex--active-fragment)))
+
 (defun my/org-latex--cancel-edit-preview-timer ()
   "Cancel the pending edit-preview timer for the current buffer."
   (when (timerp my/org-latex--edit-preview-timer)
@@ -778,16 +833,18 @@ render is usually ready before point leaves it."
 (defun my/org-latex--clear-preview-range (beg end)
   "Delete Org LaTeX preview overlays between BEG and END.
 Keep the preview overlay table synchronized even when duplicate overlays exist."
-  (let (removed)
-    (when-let* ((overlay (my/org-latex--lookup-overlay beg end)))
-      (push overlay removed)
-      (my/org-latex--delete-overlay overlay))
-    (dolist (overlay (overlays-in beg end))
-      (when (and (eq (overlay-get overlay 'org-overlay-type) 'org-latex-overlay)
-                 (not (memq overlay removed)))
-        (push overlay removed)
-        (my/org-latex--delete-overlay overlay)))
-    removed))
+  (my/org-latex--preserving-window-state
+   (lambda ()
+     (let (removed)
+       (when-let* ((overlay (my/org-latex--lookup-overlay beg end)))
+         (push overlay removed)
+         (my/org-latex--delete-overlay overlay))
+       (dolist (overlay (overlays-in beg end))
+         (when (and (eq (overlay-get overlay 'org-overlay-type) 'org-latex-overlay)
+                    (not (memq overlay removed)))
+           (push overlay removed)
+           (my/org-latex--delete-overlay overlay)))
+       removed))))
 
 (defun my/org-latex--waiter-key (beg end value)
   "Return the deduplication key for a waiter covering BEG to END with VALUE."
@@ -990,14 +1047,16 @@ Keep the preview overlay table synchronized even when duplicate overlays exist."
              (<= end (point-max))
              (string= (buffer-substring-no-properties beg end) value)
              (not (my/org-latex--point-editing-fragment-p beg end)))
-    (my/org-latex--ensure-state)
-    (let ((overlay (my/org-latex--lookup-overlay beg end)))
-      (unless (my/org-latex--overlay-shows-file-p overlay file)
-        (my/org-latex--clear-preview-range beg end)
-        (let ((max-image-size nil))
-          (setq overlay (my/org-latex--make-preview-overlay beg end file imagetype))))
-      (overlay-put overlay 'my/org-latex-file file)
-      (my/org-latex--configure-preview-overlay overlay value background))))
+    (my/org-latex--preserving-window-state
+     (lambda ()
+       (my/org-latex--ensure-state)
+       (let ((overlay (my/org-latex--lookup-overlay beg end)))
+         (unless (my/org-latex--overlay-shows-file-p overlay file)
+           (my/org-latex--clear-preview-range beg end)
+           (let ((max-image-size nil))
+             (setq overlay (my/org-latex--make-preview-overlay beg end file imagetype))))
+         (overlay-put overlay 'my/org-latex-file file)
+         (my/org-latex--configure-preview-overlay overlay value background))))))
 
 (defun my/org-latex--place-waiter-preview (waiter file imagetype)
   "Place preview FILE for WAITER using IMAGETYPE."
@@ -1434,6 +1493,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   (when (and (derived-mode-p 'org-mode)
              (my/org-latex--async-preview-active-p)
              (my/org-latex--buffer-visible-p)
+             (not (my/org-latex--ratex-edit-session-active-p))
              ;; Don't race against the edit-preview timer: if the user is
              ;; actively editing a fragment (LSP/Copilot overlays can fire
              ;; window-scroll-functions while typing), let the edit-preview
@@ -1451,6 +1511,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   "Schedule preview refresh after WIN scrolls."
   (when (and (windowp win)
              (window-live-p win)
+             (not ratex--suppress-scroll-side-effects)
              (eq (window-buffer win) (current-buffer)))
     (my/org-latex-preview-visible-debounced win)))
 
