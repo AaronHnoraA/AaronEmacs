@@ -55,18 +55,6 @@
   (when (my/org-rich-ui-buffer-p)
     (valign-mode 1)))
 
-(defun my/org-enable-org-modern-indent ()
-  "Enable `org-modern-indent-mode' for every Org buffer."
-  (when (derived-mode-p 'org-mode)
-    (org-indent-mode 1)
-    (org-modern-indent-mode 1)))
-
-(defun my/org-enable-org-modern-indent-in-existing-buffers ()
-  "Enable `org-modern-indent-mode' for Org buffers that already exist."
-  (dolist (buffer (buffer-list))
-    (with-current-buffer buffer
-      (my/org-enable-org-modern-indent))))
-
 (defun my/org-enable-org-appear-maybe ()
   "Enable `org-appear-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
@@ -175,7 +163,7 @@
   (org-modern-star '("◉" "○" "✸" "✿" "◈" "◇" "❀" "✜"))
   (org-modern-table-vertical 1)
   (org-modern-table-horizontal 0.2)
-  (org-modern-list '((45 . "∙") (43 . "∙") (42 . "∙"))) 
+  (org-modern-list '((45 . "•") (43 . "◦") (42 . "✦"))) 
   
   ;; 2. 标签按钮化 (Tag Buttons)
   (org-modern-tag t) 
@@ -195,11 +183,13 @@
      ("author"       . "💁")
      ("email"        . "📧")
      ("date"         . "📅")
+     ("filetags"     . "🏷")
      ("language"     . "🖹")
      ("options"      . "⛭")
      ("startup"      . "✲")
-     ("macro"        . "Maps")
-     ("bind"         . "Key")
+     ("property"     . "☷")
+     ("macro"        . "𝓜")
+     ("bind"         . "⌘")
      ("setupfile"    . "📝")
      ("downloaded"   . "⇊")
      ("attr_latex"   . "🄛")
@@ -255,19 +245,41 @@
                (green (aaron-ui-color 'accent-green))
                (meta-bg (aaron-ui-color 'bg-meta))
                (meta-bg-strong (aaron-ui-color 'bg-meta-strong))
-               (meta-fg (aaron-ui-color 'accent-green)))
+               (meta-fg (aaron-ui-color 'accent-green))
+               (quote-bg (my/org-blend-colors blue base-bg 0.05))
+               (verse-bg (my/org-blend-colors mauve base-bg 0.05))
+               (table-bg (my/org-blend-colors blue base-bg 0.025))
+               (tag-bg (my/org-blend-colors teal base-bg 0.12))
+               (priority-bg (my/org-blend-colors rosewater base-bg 0.12))
+               (stats-done-bg (my/org-blend-colors green base-bg 0.15))
+               (stats-todo-bg (my/org-blend-colors yellow base-bg 0.14))
+               (agenda-structure-bg (my/org-blend-colors mauve base-bg 0.12))
+               (agenda-today-bg (my/org-blend-colors blue base-bg 0.12)))
           (when (facep 'org-document-title)
             (set-face-attribute 'org-document-title nil
                                 :foreground rosewater
-                                :weight popout-weight))
+                                :weight popout-weight
+                                :height 1.22))
           (when (facep 'org-level-1)
-            (set-face-attribute 'org-level-1 nil :foreground yellow :weight popout-weight))
+            (set-face-attribute 'org-level-1 nil
+                                :foreground yellow
+                                :weight popout-weight
+                                :height 1.14))
           (when (facep 'org-level-2)
-            (set-face-attribute 'org-level-2 nil :foreground blue :weight popout-weight))
+            (set-face-attribute 'org-level-2 nil
+                                :foreground blue
+                                :weight popout-weight
+                                :height 1.09))
           (when (facep 'org-level-3)
-            (set-face-attribute 'org-level-3 nil :foreground mauve :weight strong-weight))
+            (set-face-attribute 'org-level-3 nil
+                                :foreground mauve
+                                :weight strong-weight
+                                :height 1.05))
           (when (facep 'org-level-4)
-            (set-face-attribute 'org-level-4 nil :foreground teal :weight strong-weight))
+            (set-face-attribute 'org-level-4 nil
+                                :foreground teal
+                                :weight strong-weight
+                                :height 1.03))
           (when (facep 'org-level-5)
             (set-face-attribute 'org-level-5 nil :foreground rosewater :weight title-weight))
           (when (facep 'org-level-6)
@@ -297,31 +309,96 @@
                                 :background mantle
                                 :foreground yellow
                                 :weight strong-weight))
+          (when (facep 'org-block-begin-line)
+            (set-face-attribute 'org-block-begin-line nil
+                                :background meta-bg
+                                :foreground subtext0
+                                :extend t))
+          (when (facep 'org-block-end-line)
+            (set-face-attribute 'org-block-end-line nil
+                                :background meta-bg
+                                :foreground subtext0
+                                :extend t))
           (when (facep 'org-verbatim)
             (set-face-attribute 'org-verbatim nil
                                 :background mantle
                                 :foreground blue
                                 :weight title-weight))
+          (when (facep 'org-quote)
+            (set-face-attribute 'org-quote nil
+                                :background quote-bg
+                                :foreground text
+                                :slant 'italic
+                                :extend t))
+          (when (facep 'org-verse)
+            (set-face-attribute 'org-verse nil
+                                :background verse-bg
+                                :foreground text
+                                :slant 'italic
+                                :extend t))
           (when (facep 'org-table)
             (set-face-attribute 'org-table nil
                                 :foreground subtext1
-                                :background base-bg))
+                                :background table-bg))
           (when (facep 'org-formula)
-            (set-face-attribute 'org-formula nil :foreground mauve))
+            (set-face-attribute 'org-formula nil
+                                :foreground mauve
+                                :weight title-weight))
           (when (facep 'org-special-keyword)
             (set-face-attribute 'org-special-keyword nil
                                 :background meta-bg
                                 :foreground meta-fg))
           (when (facep 'org-date)
             (set-face-attribute 'org-date nil :foreground blue :weight title-weight))
+          (when (facep 'org-link)
+            (set-face-attribute 'org-link nil
+                                :foreground blue
+                                :underline t))
+          (when (facep 'org-footnote)
+            (set-face-attribute 'org-footnote nil
+                                :foreground lavender
+                                :weight title-weight))
           (when (facep 'org-drawer)
-            (set-face-attribute 'org-drawer nil :foreground overlay1))
+            (set-face-attribute 'org-drawer nil
+                                :foreground overlay1
+                                :weight title-weight))
           (when (facep 'org-ellipsis)
-            (set-face-attribute 'org-ellipsis nil :foreground yellow :weight strong-weight))
+            (set-face-attribute 'org-ellipsis nil
+                                :foreground yellow
+                                :weight strong-weight
+                                :background base-bg))
           (when (facep 'org-indent)
             (set-face-attribute 'org-indent nil :foreground base-bg :background base-bg))
           (when (facep 'org-hide)
             (set-face-attribute 'org-hide nil :foreground base-bg :background base-bg))
+          (when (facep 'org-tag)
+            (set-face-attribute 'org-tag nil
+                                :background tag-bg
+                                :foreground teal
+                                :weight title-weight))
+          (when (facep 'org-priority)
+            (set-face-attribute 'org-priority nil
+                                :background priority-bg
+                                :foreground rosewater
+                                :weight strong-weight))
+          (when (facep 'org-checkbox-statistics-done)
+            (set-face-attribute 'org-checkbox-statistics-done nil
+                                :background stats-done-bg
+                                :foreground green
+                                :weight strong-weight))
+          (when (facep 'org-checkbox-statistics-todo)
+            (set-face-attribute 'org-checkbox-statistics-todo nil
+                                :background stats-todo-bg
+                                :foreground yellow
+                                :weight strong-weight))
+          (when (facep 'org-headline-done)
+            (set-face-attribute 'org-headline-done nil
+                                :foreground subtext1
+                                :strike-through t))
+          (when (facep 'org-warning)
+            (set-face-attribute 'org-warning nil
+                                :foreground rosewater
+                                :weight strong-weight))
           (when (facep 'org-modern-label)
             (set-face-attribute 'org-modern-label nil
                                 :background surface1
@@ -334,40 +411,77 @@
                                 :box nil))
           (when (facep 'org-modern-tag)
             (set-face-attribute 'org-modern-tag nil
-                                :background surface0
-                                :foreground text))
+                                :background surface1
+                                :foreground text
+                                :box `(:line-width 3 :color ,surface1)))
           (when (facep 'org-modern-date-active)
             (set-face-attribute 'org-modern-date-active nil
                                 :background surface0
-                                :foreground blue))
+                                :foreground blue
+                                :box `(:line-width 3 :color ,surface0)))
           (when (facep 'org-modern-date-inactive)
             (set-face-attribute 'org-modern-date-inactive nil
                                 :background mantle
-                                :foreground subtext0))
+                                :foreground subtext0
+                                :box `(:line-width 3 :color ,mantle)))
           (when (facep 'org-modern-block-name)
             (set-face-attribute 'org-modern-block-name nil
                                 :foreground yellow
                                 :weight strong-weight))
+          (when (facep 'org-modern-horizontal-rule)
+            (set-face-attribute 'org-modern-horizontal-rule nil
+                                :foreground surface2))
+          (when (facep 'org-modern-priority)
+            (set-face-attribute 'org-modern-priority nil
+                                :background priority-bg
+                                :foreground rosewater
+                                :weight strong-weight))
           (when (facep 'org-modern-progress-complete)
-            (set-face-attribute 'org-modern-progress-complete nil :foreground green))
+            (set-face-attribute 'org-modern-progress-complete nil
+                                :foreground green
+                                :background stats-done-bg))
           (when (facep 'org-modern-progress-incomplete)
-            (set-face-attribute 'org-modern-progress-incomplete nil :foreground surface2)))))))
+            (set-face-attribute 'org-modern-progress-incomplete nil
+                                :foreground surface2
+                                :background surface0))
+          (when (facep 'org-agenda-structure)
+            (set-face-attribute 'org-agenda-structure nil
+                                :background agenda-structure-bg
+                                :foreground mauve
+                                :weight popout-weight))
+          (when (facep 'org-agenda-date)
+            (set-face-attribute 'org-agenda-date nil
+                                :foreground blue
+                                :weight title-weight))
+          (when (facep 'org-agenda-date-today)
+            (set-face-attribute 'org-agenda-date-today nil
+                                :background agenda-today-bg
+                                :foreground blue
+                                :weight popout-weight))
+          (when (facep 'org-agenda-date-weekend)
+            (set-face-attribute 'org-agenda-date-weekend nil
+                                :foreground lavender))
+          (when (facep 'org-agenda-done)
+            (set-face-attribute 'org-agenda-done nil
+                                :foreground subtext1
+                                :strike-through t))
+          (when (facep 'org-scheduled)
+            (set-face-attribute 'org-scheduled nil
+                                :foreground teal))
+          (when (facep 'org-scheduled-today)
+            (set-face-attribute 'org-scheduled-today nil
+                                :foreground green
+                                :weight strong-weight))
+          (when (facep 'org-upcoming-deadline)
+            (set-face-attribute 'org-upcoming-deadline nil
+                                :foreground yellow
+                                :weight title-weight)))))))
 
 (add-hook 'org-mode-hook #'my/org-apply-ui)
 (add-hook 'after-load-theme-hook #'my/org-apply-ui)
 (add-hook 'org-mode-hook #'my/org-setup-evil-insert-performance)
 
-;; 3.4 Org Modern Indent
-(my/package-ensure-vc 'org-modern-indent "https://github.com/jdtsmith/org-modern-indent.git")
-
-(use-package org-modern-indent
-  :after org
-  :hook (org-mode . my/org-enable-org-modern-indent)
-  :config
-  (setq org-modern-indent-width 4)
-  (my/org-enable-org-modern-indent-in-existing-buffers))
-
-;; 3.5 自动显示强调符
+;; 3.4 自动显示强调符
 (my/package-ensure-vc 'org-appear "https://github.com/awth13/org-appear.git")
 
 (use-package org-appear
@@ -379,7 +493,7 @@
   ;; 光标进入 `^{}' / `_{}' 时显示标记，避免编辑时只看到渲染结果。
   (org-appear-autosubmarkers t))
 
-;; 3.6 优先级美化
+;; 3.5 优先级美化
 (use-package org-fancy-priorities
   :ensure t
   :hook (org-mode . org-fancy-priorities-mode)
@@ -390,20 +504,24 @@
 ;; 1. 样式配置 (可自定义颜色和标签)
 ;; ===========================================================
 (defvar my/org-special-block-styles
-  `(("definition" . (:label "定义" :color ,(aaron-ui-color 'accent-yellow)))
-    ("defn"       . (:label "定义" :color ,(aaron-ui-color 'accent-yellow)))
-    ("theorem"    . (:label "定理" :color ,(aaron-ui-color 'accent-green)))
-    ("thm"        . (:label "定理" :color ,(aaron-ui-color 'accent-green)))
-    ("lemma"      . (:label "引理" :color ,(aaron-ui-color 'accent-blue)))
-    ("cor"        . (:label "推论" :color ,(aaron-ui-color 'accent-lavender)))
-    ("prop"       . (:label "命题" :color ,(aaron-ui-color 'accent-rose)))
-    ("property"   . (:label "性质" :color ,(aaron-ui-color 'accent-lavender)))
-    ("proof"      . (:label "证明" :color ,(aaron-ui-color 'accent-cyan)))
-    ("example"    . (:label "例子" :color ,(aaron-ui-color 'accent-yellow-soft)))
-    ("attention"  . (:label "注意" :color ,(aaron-ui-color 'accent-red)))
-    ("note"       . (:label "笔记" :color ,(aaron-ui-color 'accent-teal)))
-    ("info"       . (:label "信息" :color ,(aaron-ui-color 'accent-teal)))
-    ("warning"    . (:label "警告" :color ,(aaron-ui-color 'accent-red)))))
+  `(("definition" . (:label "定义" :emoji "💡" :footer "◇" :color ,(aaron-ui-color 'accent-yellow)))
+    ("defn"       . (:label "定义" :emoji "💡" :footer "◇" :color ,(aaron-ui-color 'accent-yellow)))
+    ("theorem"    . (:label "定理" :emoji "📐" :footer "◈" :color ,(aaron-ui-color 'accent-green)))
+    ("thm"        . (:label "定理" :emoji "📐" :footer "◈" :color ,(aaron-ui-color 'accent-green)))
+    ("lemma"      . (:label "引理" :emoji "🔹" :footer "◌" :color ,(aaron-ui-color 'accent-blue)))
+    ("cor"        . (:label "推论" :emoji "✨" :footer "✦" :color ,(aaron-ui-color 'accent-lavender)))
+    ("prop"       . (:label "命题" :emoji "📌" :footer "◆" :color ,(aaron-ui-color 'accent-rose)))
+    ("property"   . (:label "性质" :emoji "🧩" :footer "◍" :color ,(aaron-ui-color 'accent-lavender)))
+    ("proof"      . (:label "证明" :emoji "🔍" :footer "■" :footer-style square :color ,(aaron-ui-color 'accent-cyan)))
+    ("example"    . (:label "例子" :emoji "🧪" :footer "◦" :color ,(aaron-ui-color 'accent-yellow-soft)))
+    ("attention"  . (:label "注意" :emoji "❗" :footer "❢" :color ,(aaron-ui-color 'accent-red)))
+    ("note"       . (:label "笔记" :emoji "📝" :footer "✎" :color ,(aaron-ui-color 'accent-teal)))
+    ("info"       . (:label "信息" :emoji "ℹ" :footer "⊙" :color ,(aaron-ui-color 'accent-teal)))
+    ("warning"    . (:label "警告" :emoji "⚠" :footer "▲" :color ,(aaron-ui-color 'accent-red)))))
+
+(defun my/org-special-block-config (type)
+  "Return the configured style plist for special block TYPE."
+  (cdr (assoc (downcase (or type "")) my/org-special-block-styles)))
 
 (defface my/org-block-title-face
   '((t :weight regular :height 1.05 :inherit default))
@@ -434,14 +552,23 @@
 (defun my/org-special-block-palette (type &optional default-bg)
   "Return the UI palette for special block TYPE.
 DEFAULT-BG defaults to `my/org-default-background'."
-  (when-let* ((config (cdr (assoc (downcase (or type ""))
-                                  my/org-special-block-styles)))
+  (when-let* ((config (my/org-special-block-config type))
               (base-color (plist-get config :color))
-              (background (or default-bg (my/org-default-background))))
-    (list :label (plist-get config :label)
+              (background (or default-bg (my/org-default-background)))
+              (label (plist-get config :label))
+              (emoji (plist-get config :emoji))
+              (footer (or (plist-get config :footer) emoji)))
+    (list :label label
+          :emoji emoji
+          :title (concat label (when emoji (concat " " emoji)))
+          :footer footer
+          :footer-style (plist-get config :footer-style)
           :base-color base-color
           :header-bg (my/org-blend-colors base-color background 0.18)
           :body-bg (my/org-blend-colors base-color background 0.075)
+          :badge-bg (my/org-blend-colors base-color background 0.24)
+          :divider-color (my/org-blend-colors base-color background 0.54)
+          :gutter-color (my/org-blend-colors base-color background 0.46)
           :footer-color (my/org-blend-colors base-color background 0.72)
           :params-color (my/org-blend-colors (aaron-ui-color 'fg-soft) background 0.78))))
 
@@ -474,13 +601,108 @@ DEFAULT-BG defaults to `my/org-default-background'."
       (goto-char pos))
     (min (point-max) (line-beginning-position 2))))
 
+(defun my/org-delete-pretty-block-overlays (begin end block-id)
+  "Delete pretty-block overlays between BEGIN and END matching BLOCK-ID."
+  (dolist (ov (overlays-in begin end))
+    (when (and (overlay-get ov 'my/org-pretty-block)
+               (equal (overlay-get ov 'my/org-pretty-block-id) block-id))
+      (delete-overlay ov))))
+
+(defun my/org-special-block-footer-marker-display (palette header-bg)
+  "Return the styled footer marker string for a styled special block PALETTE."
+  (when-let* ((footer-marker (plist-get palette :footer))
+              (footer-color (plist-get palette :footer-color)))
+    (pcase (plist-get palette :footer-style)
+      ('square
+       (propertize footer-marker
+                   'face `(:background ,header-bg
+                           :foreground ,footer-color
+                           :height 0.92
+                           :weight semibold)
+                   'display '(raise -0.05)))
+      (_
+       (propertize footer-marker
+                   'face `(:background ,header-bg
+                           :foreground ,footer-color
+                           :weight medium))))))
+
+(defun my/org-special-block-params-display (params palette header-bg)
+  "Return a polished parameter badge string for special block PARAMS."
+  (when (and (stringp params)
+             (string-match-p "\\S-" params))
+    (let ((badge-bg (plist-get palette :badge-bg))
+          (divider-color (plist-get palette :divider-color))
+          (params-color (plist-get palette :params-color)))
+      (concat
+       (propertize "  ·  "
+                   'face `(:background ,header-bg
+                           :foreground ,divider-color))
+       (propertize (format " %s " params)
+                   'face `(:inherit my/org-block-title-face
+                           :background ,badge-bg
+                           :foreground ,params-color
+                           :height 0.94))))))
+
+(defun my/org-special-block-guide-display (bar-color background
+                                                     &optional bar-width gap-width)
+  "Return a slim guide strip using BAR-COLOR on BACKGROUND."
+  (concat
+   (propertize " "
+               'display `(space :width ,(or bar-width 0.22))
+               'face `(:background ,bar-color))
+   (propertize " "
+               'display `(space :width ,(or gap-width 0.72))
+               'face `(:background ,background))))
+
+(defun my/org-special-block-header-display (palette header-bg)
+  "Return the rendered header string for a styled special block PALETTE."
+  (let* ((base-color (plist-get palette :base-color))
+         (title (plist-get palette :title))
+         (params (plist-get palette :params))
+         (params-display (my/org-special-block-params-display params palette header-bg)))
+    (concat
+     (my/org-special-block-guide-display base-color header-bg 0.22 0.64)
+     (propertize title
+                 'face `(:inherit my/org-block-title-face
+                         :background ,header-bg
+                         :foreground ,base-color
+                         :weight medium))
+     params-display)))
+
+(defun my/org-special-block-body-prefix (palette body-bg)
+  "Return the subtle left gutter used inside a styled special block body."
+  (let ((gutter-color (plist-get palette :gutter-color)))
+    ;; Use a colored display-space instead of a glyph so the guide stays
+    ;; visually continuous even when Org buffers use relaxed line spacing.
+    (my/org-special-block-guide-display gutter-color body-bg 0.22 0.72)))
+
+(defun my/org-special-block-footer-display (palette header-bg)
+  "Return the rendered footer string for a styled special block PALETTE."
+  (let* ((footer-color (plist-get palette :footer-color))
+         (footer-marker (plist-get palette :footer))
+         (footer-marker-display
+          (my/org-special-block-footer-marker-display palette header-bg))
+         (rule (propertize "────────────────────────"
+                           'face `(:background ,header-bg
+                                   :foreground ,footer-color
+                                   :height 0.8))))
+    (if (and (stringp footer-marker)
+             (> (length footer-marker) 0))
+        (concat
+         rule
+         (propertize " "
+                     'face `(:background ,header-bg)
+                     'display `(space :align-to (- right ,(+ 1 (string-width footer-marker)))))
+         footer-marker-display)
+      rule)))
+
 ;; ===========================================================
 ;; 3. 核心渲染逻辑：只处理单个 Element
 ;; ===========================================================
 (defun my/org-prettify-element (element)
   "渲染单个 Org Element 节点，应用 Overlay 样式。"
   (let* ((type (downcase (or (org-element-property :type element) "")))
-         (config (cdr (assoc type my/org-special-block-styles))))
+         (config (my/org-special-block-config type)))
     
     (when config
       (let* ((begin-pos (org-element-property :begin element))
@@ -499,16 +721,29 @@ DEFAULT-BG defaults to `my/org-default-background'."
              (default-bg (my/org-default-background))
              (palette (my/org-special-block-palette type default-bg))
              (base-color (plist-get palette :base-color))
-             (label (plist-get palette :label))
+             (title (plist-get palette :title))
+             (footer-marker (plist-get palette :footer))
+             (footer-style (plist-get palette :footer-style))
              (params (org-element-property :parameters element))
-             (title-text (concat " " label))
-             (params-text (and params (concat "  " params)))
+             (badge-bg (plist-get palette :badge-bg))
+             (divider-color (plist-get palette :divider-color))
+             (gutter-color (plist-get palette :gutter-color))
+             (body-prefix (my/org-special-block-body-prefix palette
+                                                            (plist-get palette :body-bg)))
              (header-bg (plist-get palette :header-bg))
              (body-bg (plist-get palette :body-bg))
              (footer-color (plist-get palette :footer-color))
              (params-color (plist-get palette :params-color))
+             (header-display (my/org-special-block-header-display
+                              (plist-put (copy-sequence palette) :params params)
+                              header-bg))
+             (footer-display (my/org-special-block-footer-display palette header-bg))
              (signature (list type begin-pos end-pos contents-begin contents-end
-                              post-affiliated params default-bg))
+                              post-affiliated params default-bg title
+                              footer-marker footer-style base-color header-bg body-bg
+                              footer-color params-color badge-bg
+                              divider-color gutter-color body-prefix
+                              header-display footer-display))
              (cached-signature (and (hash-table-p my/org-pretty-block-cache)
                                     (gethash begin-pos my/org-pretty-block-cache)))
              (already-rendered
@@ -524,7 +759,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
           (puthash begin-pos signature my/org-pretty-block-cache)
 
         ;; 3. 清理区域
-        (remove-overlays begin-pos end-pos 'my/org-pretty-block t)
+        (my/org-delete-pretty-block-overlays begin-pos end-pos begin-pos)
 
         ;; -------------------------------------------------------
         ;; A. Header Overlay (#+begin_xxx)
@@ -542,20 +777,18 @@ DEFAULT-BG defaults to `my/org-default-background'."
                (header-bg-end (my/org-line-background-end post-affiliated)))
           (let ((ov (make-overlay header-bol header-bg-end)))
             (overlay-put ov 'my/org-pretty-block t)
+            (overlay-put ov 'my/org-pretty-block-id begin-pos)
             (overlay-put ov 'face `(:background ,header-bg :extend t))
             (overlay-put ov 'priority priority)
             (overlay-put ov 'evaporate t))
-          ;; Do not replace leading indentation characters: org-modern-indent
-          ;; uses display properties there for its left bracket/guide.
+          ;; Do not replace leading indentation characters: Org indentation
+          ;; helpers use display properties there for visual indentation.
           (let ((ov (make-overlay header-text-beg header-end)))
             (overlay-put ov 'my/org-pretty-block t)
+            (overlay-put ov 'my/org-pretty-block-id begin-pos)
             (overlay-put ov 'face `(:background ,header-bg :extend t))
             (overlay-put ov 'priority (1+ priority))
-            (overlay-put ov 'display
-                         (concat (propertize "▎" 'face `(:background ,header-bg :foreground ,base-color :weight bold))
-                                 (propertize title-text 'face `(:inherit my/org-block-title-face :background ,header-bg :foreground ,base-color :weight medium))
-                                 (when params-text
-                                   (propertize params-text 'face `(:inherit my/org-block-title-face :background ,header-bg :foreground ,params-color)))))
+            (overlay-put ov 'display header-display)
             (overlay-put ov 'evaporate t)))
 
         ;; -------------------------------------------------------
@@ -565,7 +798,10 @@ DEFAULT-BG defaults to `my/org-default-background'."
           (let ((true-body-end contents-end))
             (let ((ov (make-overlay contents-begin true-body-end)))
               (overlay-put ov 'my/org-pretty-block t)
+              (overlay-put ov 'my/org-pretty-block-id begin-pos)
               (overlay-put ov 'face `(:background ,body-bg :extend t))
+              (overlay-put ov 'line-prefix body-prefix)
+              (overlay-put ov 'wrap-prefix body-prefix)
               (overlay-put ov 'priority priority)
               (overlay-put ov 'evaporate t))))
 
@@ -586,16 +822,16 @@ DEFAULT-BG defaults to `my/org-default-background'."
                    (footer-bg-end (my/org-line-background-end)))
               (let ((ov (make-overlay footer-bol footer-bg-end)))
                 (overlay-put ov 'my/org-pretty-block t)
+                (overlay-put ov 'my/org-pretty-block-id begin-pos)
                 (overlay-put ov 'face `(:background ,header-bg :extend t))
                 (overlay-put ov 'priority priority)
                 (overlay-put ov 'evaporate t))
               (let ((ov (make-overlay footer-text-beg footer-end)))
                 (overlay-put ov 'my/org-pretty-block t)
+                (overlay-put ov 'my/org-pretty-block-id begin-pos)
                 (overlay-put ov 'face `(:background ,header-bg :extend t))
                 (overlay-put ov 'priority (1+ priority))
-                (overlay-put ov 'display
-                             (propertize "╰────────────────────────"
-                                         'face `(:background ,header-bg :foreground ,footer-color :height 0.8)))
+                (overlay-put ov 'display footer-display)
                 (overlay-put ov 'evaporate t))))))))))
 
 ;; ===========================================================
@@ -605,19 +841,14 @@ DEFAULT-BG defaults to `my/org-default-background'."
   "JIT-Lock 调用的函数：扫描 start 之后的块，确保完整渲染。"
   (save-excursion
     (save-match-data
-      (goto-char start)
-      (if (re-search-backward "^[ \t]*#\\+begin_" nil t)
-          (let ((el (org-element-at-point)))
-            (when (and (eq (org-element-type el) 'special-block)
-                       (> (org-element-property :end el) start))
-              (setq start (org-element-property :begin el))))
-        (goto-char start))
-      
-      (goto-char start)
-      (while (re-search-forward "^[ \t]*#\\+begin_\\(\\w+\\)" end t)
-        (let ((el (org-element-at-point)))
-          (when (eq (org-element-type el) 'special-block)
-            (my/org-prettify-element el)))))))
+      (dolist (el (org-element-map (org-element-parse-buffer) 'special-block
+                    (lambda (el)
+                      (when (and (my/org-special-block-palette
+                                  (org-element-property :type el))
+                                 (< (org-element-property :begin el) end)
+                                 (> (org-element-property :end el) start))
+                        el))))
+        (my/org-prettify-element el)))))
 
 ;; ===========================================================
 ;; 5. 激活机制
