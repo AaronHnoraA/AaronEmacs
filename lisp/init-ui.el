@@ -488,6 +488,7 @@
 (defvar chunlian-blank-string "　　" "间隙填充字符，用纯红底色填补上下字的空隙。")
 
 (defvar-local chunlian--overlays nil)
+(defvar-local chunlian--header-line-remap nil)
 
 (defun chunlian--apply-window-margins (win)
   "Apply Chunlian margins to WIN while preserving previous margins."
@@ -573,14 +574,27 @@ When WIN is nil, restore every tracked window."
 
 (defun chunlian--setup-display ()
   "初始化春联显示。"
-  (setq header-line-format
+  (unless chunlian--header-line-remap
+    (setq chunlian--header-line-remap
+          (face-remap-add-relative
+           'header-line
+           :inherit 'default
+           :background (face-background 'default nil t)
+           :foreground (face-foreground 'default nil t)
+           :box nil
+           :overline nil
+           :underline nil)))
+  (setq-local header-line-format
         (list (propertize " " 'display `(space :align-to (- center ,(string-width chunlian-top))))
               (propertize chunlian-top 'face 'chunlian-face)))
   (chunlian--setup-overlays))
 
 (defun chunlian--clear-display ()
   "清除春联显示。"
-  (setq header-line-format nil)
+  (setq-local header-line-format nil)
+  (when chunlian--header-line-remap
+    (face-remap-remove-relative chunlian--header-line-remap)
+    (setq chunlian--header-line-remap nil))
   (chunlian--restore-window-margins)
   (mapc #'delete-overlay chunlian--overlays)
   (setq chunlian--overlays nil))
