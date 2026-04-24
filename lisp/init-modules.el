@@ -50,6 +50,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-git)
 (require 'init-smerge)
 (require 'init-dev)
+(require 'init-clutch)
 (require 'init-navigation)
 (require 'init-navigation-extra)
 (require 'init-dired)

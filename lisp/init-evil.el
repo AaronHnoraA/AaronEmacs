@@ -499,6 +499,7 @@
     "oe" 'vterm-toggle
     "oE" 'my/vterm-popup-cycle
     "oF" 'my/vterm-toggle-fixed
+    "oq" 'clutch-query-console
     "ot" 'vterm-toggle
     "oT" 'ansi-term
     "ov" 'vterm

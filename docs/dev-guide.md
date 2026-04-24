@@ -261,6 +261,25 @@ Doctor 更适合快速排查：
 - `M-x my/project-popup-vterm-app`
   在当前 project 根目录的新 popup `vterm` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
 
+## 6.1 数据库 / SQL
+
+- `M-x clutch-query-console`
+  打开 `clutch` 的连接选择器和查询控制台
+- `SPC o q`
+  同上
+
+这套配置把数据库客户端接到了 `clutch`，但保持懒加载：
+
+- 包声明在 [lisp/init-clutch.el](../lisp/init-clutch.el)
+- 第一次打开控制台时，才会安装/加载 `clutch`
+- 连接配置单独放在本地 `etc/clutch-config.el`
+
+连接建议：
+
+- `clutch-connection-alist` 放在 `etc/clutch-config.el`
+- 密码优先走 `auth-source` / `pass`
+- 不默认接管 `.sql` 文件，避免打断现有 SQL 编辑流；需要时手动 `M-x clutch-mode`
+
 ## 6. 远程与 TRAMP
 
 ### 设计目标

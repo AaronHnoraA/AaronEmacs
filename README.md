@@ -18,7 +18,7 @@ This configuration is designed to solve a concrete set of problems:
 - Project-first workflow
   `projectile`, `perspective`, `transient`, Treemacs, `show-imenu`, and popup `vterm` are composed into a workspace-oriented project surface.
 - Programming and debugging
-  The default route is `eglot`, with `lsp-mode` used selectively where needed. Completion, diagnostics, build/test, debugging, tree-sitter, snippets, and code navigation are already wired together.
+  The default route is `eglot`, with `lsp-mode` used selectively where needed. Completion, diagnostics, build/test, debugging, tree-sitter, snippets, code navigation, and an on-demand SQL/database client are already wired together.
 - Org and research writing
   Agenda, capture, org-roam, LaTeX preview, AUCTeX, Jupyter, citations, and PDF workflows are treated as long-term maintained parts of the system.
 - Remote work and terminals

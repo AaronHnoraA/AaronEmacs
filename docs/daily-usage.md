@@ -279,6 +279,8 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
   `dirvish-dwim`
 - `SPC o D`
   `dirvish-fd`
+- `SPC o q`
+  `clutch-query-console`
 - `SPC o e`
   `vterm-toggle`
 - `SPC o E`

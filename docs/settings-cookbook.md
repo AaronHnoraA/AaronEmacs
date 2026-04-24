@@ -216,6 +216,33 @@ emacs --debug-init -q -l ./bootstrap.el
 
 把锁文件更新掉。
 
+## 7.1 我要改数据库客户端配置
+
+文件：
+
+- [lisp/init-clutch.el](../lisp/init-clutch.el)
+- `etc/clutch-config.el`（本地私有配置，默认不进 Git）
+- [etc/clutch-config.el.example](../etc/clutch-config.el.example)
+
+职责：
+
+- `lisp/init-clutch.el`
+  负责 `clutch` 的 VC 包声明、懒安装、懒加载和入口命令。
+- `etc/clutch-config.el`
+  放你自己的 `clutch-connection-alist`、超时设置和连接别名。
+- `etc/clutch-config.el.example`
+  只是示例结构，方便对照。
+
+入口：
+
+- `M-x clutch-query-console`
+- `SPC o q`
+
+建议：
+
+- 密码优先放 `auth-source` / `pass`，不要把 `:password` 直接写进主配置。
+- 如果你只是改连接列表，通常只需要动 `etc/clutch-config.el`。
+
 ## 8. 我要改 snippet
 
 文件：

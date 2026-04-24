@@ -1,0 +1,29 @@
+;;; clutch-config.el.example --- Sample clutch config -*- lexical-binding: t; -*-
+
+;;; Commentary:
+;;
+;; Mirror this structure in `etc/clutch-config.el` and keep secrets in
+;; auth-source or pass when possible.
+
+;;; Code:
+
+(setq clutch-connect-timeout-seconds 10
+      clutch-read-idle-timeout-seconds 30
+      clutch-query-timeout-seconds 20
+      clutch-jdbc-rpc-timeout-seconds 15
+      clutch-connection-alist
+      '(("dev-mysql" . (:backend mysql
+                        :host "127.0.0.1"
+                        :port 3306
+                        :user "root"
+                        :database "mydb"))
+        ("dev-pg" . (:backend pg
+                     :host "127.0.0.1"
+                     :port 5432
+                     :user "postgres"
+                     :database "mydb"))
+        ("dev-sqlite" . (:backend sqlite
+                         :database "/path/to/my.db"))))
+
+(provide 'clutch-config-example)
+;;; clutch-config.el.example ends here

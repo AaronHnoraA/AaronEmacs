@@ -43,6 +43,7 @@
 /etc/eshell/
 /etc/gnus/
 /etc/yasnippet/
+/etc/clutch-config.el
 /etc/custom.el
 /etc/mygpt.json
 /etc/hiapi-online.key
