@@ -645,6 +645,14 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   "Use company popup completion in document buffers instead of `*Completions*'."
   (setq-local company-backends my/company-text-backends))
 
+(defun my/company-setup-org-backends ()
+  "Use Org-specific company backends while keeping CAPF/LSP completions."
+  (setq-local company-backends
+              '((company-capf
+                 company-files
+                 company-yasnippet)
+                company-dabbrev)))
+
 (defun my/company-setup-shell-backends ()
   "Enable popup completion for Eshell with CAPF/pcomplete."
   (company-mode 1)
@@ -693,6 +701,16 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
 
 (with-eval-after-load 'eglot
   (add-to-list 'eglot-stay-out-of 'company-backends))
+
+(with-eval-after-load 'company-yasnippet
+  (define-advice company-yasnippet (:around (fn command &optional arg &rest args)
+                                            my/guard-doc-buffer)
+    "Ignore snippet preview errors from asynchronous company doc timers."
+    (if (eq command 'doc-buffer)
+        (condition-case-unless-debug nil
+            (apply fn command arg args)
+          (error nil))
+      (apply fn command arg args))))
 
 (use-package company-box
   :ensure t
@@ -992,13 +1010,7 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
 (setq tab-always-indent t)
 
 ;; Org-mode specific company setup
-(add-hook 'org-mode-hook
-          (lambda ()
-            (setq-local company-backends
-                        '((company-files
-                           company-yasnippet
-                           company-capf
-                           company-dabbrev)))))
+(add-hook 'org-mode-hook #'my/company-setup-org-backends)
 
 ;; Load other language specific configurations
 (require 'init-cpp)
