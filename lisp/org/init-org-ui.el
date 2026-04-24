@@ -688,7 +688,9 @@ made the buffer lose its rendered appearance in insert state."
   (org-appear-autolinks t)
   (org-appear-autoentities t)
   (org-appear-autokeywords t)
-  (org-appear-inside-latex t)
+  ;; Keep Org's pretty entities/compositions stable while editing formulas.
+  ;; Let the LaTeX preview pipeline handle formula rendering instead.
+  (org-appear-inside-latex nil)
   ;; 光标进入 `^{}' / `_{}' 时显示标记，避免编辑时只看到渲染结果。
   (org-appear-autosubmarkers t)
   (org-appear-delay 0.08))

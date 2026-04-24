@@ -115,6 +115,13 @@ Set to nil to keep the full log."
   :type 'number
   :group 'my/org-latex-preview)
 
+(defcustom my/org-latex-preview-while-editing t
+  "Whether to pre-render LaTeX fragments while point is still editing them.
+When non-nil, edits debounce a preview refresh for the current fragment so the
+render is usually ready before point leaves it."
+  :type 'boolean
+  :group 'my/org-latex-preview)
+
 (defcustom my/latex-preview-math-font "GFS Neohellenic Math"
   "Fallback math font family used by XeLaTeX-based preview pipelines."
   :type 'string
@@ -516,6 +523,12 @@ Set to nil to keep the full log."
       (goto-char scan-beg)
       (re-search-forward my/org-latex--fragment-syntax-regexp scan-end t))))
 
+(defun my/org-latex--change-in-tracked-range-p (beg end)
+  "Return non-nil when a change from BEG to END touches the tracked fragment."
+  (and my/org-latex--post-command-range
+       (< beg (cdr my/org-latex--post-command-range))
+       (> end (car my/org-latex--post-command-range))))
+
 (defun my/org-latex--current-fragment (&optional pos)
   "Return the LaTeX fragment at POS, or at point when POS is nil."
   (save-excursion
@@ -613,11 +626,21 @@ Set to nil to keep the full log."
                                my/org-latex--edit-preview-marker))))
 
 (defun my/org-latex-after-change-function (beg end _len)
-  "Pre-render edited LaTeX fragments after changes between BEG and END."
+  "Track edited LaTeX fragments after changes between BEG and END."
   (when (and (my/org-latex--async-preview-active-p)
-             (my/org-latex--change-near-fragment-syntax-p beg end))
-    (when-let* ((frag (my/org-latex--fragment-around-change beg end)))
-      (my/org-latex--schedule-edit-preview frag))))
+             (or (my/org-latex--change-near-fragment-syntax-p beg end)
+                 (my/org-latex--change-in-tracked-range-p beg end)))
+    (if-let* ((frag (my/org-latex--fragment-around-change beg end)))
+        (progn
+          (setq my/org-latex--post-command-range
+                (my/org-latex--fragment-range frag))
+          (if my/org-latex-preview-while-editing
+              (my/org-latex--schedule-edit-preview frag)
+            (my/org-latex--cancel-edit-preview-timer)
+            (my/org-latex--clear-edit-preview-marker)))
+      (setq my/org-latex--post-command-range nil)
+      (my/org-latex--cancel-edit-preview-timer)
+      (my/org-latex--clear-edit-preview-marker))))
 
 (defun my/org-latex-post-command-function ()
   "Re-enable preview when point leaves a LaTeX fragment."
