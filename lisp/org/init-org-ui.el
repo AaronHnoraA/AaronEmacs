@@ -183,7 +183,8 @@
      ("author"       . "💁")
      ("email"        . "📧")
      ("date"         . "📅")
-     ("filetags"     . "🏷")
+     ;; Use the emoji variation sequence to force colorful tag rendering.
+     ("filetags"     . "🏷️")
      ("language"     . "🖹")
      ("options"      . "⛭")
      ("startup"      . "✲")

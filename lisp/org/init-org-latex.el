@@ -466,9 +466,12 @@ Set to nil to keep the full log."
 (defvar-local my/org-latex--preview-timer nil)
 (defvar-local my/org-latex--last-preview-range nil)
 (defvar-local my/org-latex--render-queue nil)
+(defvar-local my/org-latex--render-queue-tail nil)
 (defvar-local my/org-latex--render-running 0)
 (defvar-local my/org-latex--render-processes nil)
 (defvar-local my/org-latex--pending-renders nil)
+(defvar-local my/org-latex--overlay-table nil)
+(defvar-local my/org-latex--render-generation 0)
 (defvar-local my/org-latex--edit-preview-timer nil)
 (defvar-local my/org-latex--edit-preview-marker nil)
 (defvar-local my/org-latex--post-command-point nil)
@@ -583,7 +586,7 @@ Set to nil to keep the full log."
     ;; Safety net: if an image overlay still covers point, fragtog failed to
     ;; clear it.  Remove it now so the cursor is never trapped inside a preview.
     (when-let* ((ov (my/org-latex--image-overlay-at-point)))
-      (org-clear-latex-preview (overlay-start ov) (overlay-end ov))
+      (my/org-latex--clear-preview-range (overlay-start ov) (overlay-end ov))
       (my/org-latex--cancel-edit-preview-timer))
     (unless (memq this-command '(self-insert-command org-self-insert-command))
       (let* ((prev-point my/org-latex--post-command-point)
@@ -630,7 +633,106 @@ Set to nil to keep the full log."
 (defun my/org-latex--ensure-state ()
   "Initialize async preview state for the current Org buffer."
   (unless (hash-table-p my/org-latex--pending-renders)
-    (setq my/org-latex--pending-renders (make-hash-table :test 'equal))))
+    (setq my/org-latex--pending-renders (make-hash-table :test 'equal)))
+  (unless (hash-table-p my/org-latex--overlay-table)
+    (setq my/org-latex--overlay-table (make-hash-table :test 'equal))))
+
+(defun my/org-latex--overlay-key (beg end)
+  "Return the hash-table key for a preview overlay at BEG and END."
+  (cons beg end))
+
+(defun my/org-latex--overlay-live-p (overlay)
+  "Return non-nil when OVERLAY still belongs to the current buffer."
+  (and (overlayp overlay)
+       (eq (overlay-buffer overlay) (current-buffer))))
+
+(defun my/org-latex--register-overlay (overlay)
+  "Track OVERLAY in the buffer-local preview overlay table."
+  (when (my/org-latex--overlay-live-p overlay)
+    (my/org-latex--ensure-state)
+    (let ((key (my/org-latex--overlay-key (overlay-start overlay)
+                                          (overlay-end overlay))))
+      (overlay-put overlay 'my/org-latex-key key)
+      (puthash key overlay my/org-latex--overlay-table)
+      overlay)))
+
+(defun my/org-latex--forget-overlay (overlay)
+  "Remove OVERLAY from the buffer-local preview overlay table."
+  (when (overlayp overlay)
+    (when-let* ((key (overlay-get overlay 'my/org-latex-key))
+                ((hash-table-p my/org-latex--overlay-table))
+                (tracked (gethash key my/org-latex--overlay-table)))
+      (when (eq tracked overlay)
+        (remhash key my/org-latex--overlay-table)))
+    (overlay-put overlay 'my/org-latex-key nil))
+  overlay)
+
+(defun my/org-latex--delete-overlay (overlay)
+  "Delete OVERLAY while keeping the preview overlay table consistent."
+  (when (overlayp overlay)
+    (my/org-latex--forget-overlay overlay)
+    (delete-overlay overlay)))
+
+(defun my/org-latex--find-existing-overlay (beg end)
+  "Return an existing Org LaTeX preview overlay spanning BEG to END."
+  (catch 'found
+    (dolist (ov (overlays-in beg end))
+      (when (and (eq (overlay-get ov 'org-overlay-type) 'org-latex-overlay)
+                 (= (overlay-start ov) beg)
+                 (= (overlay-end ov) end))
+        (throw 'found ov)))))
+
+(defun my/org-latex--lookup-overlay (beg end)
+  "Return the tracked preview overlay spanning BEG to END, if any."
+  (my/org-latex--ensure-state)
+  (let* ((key (my/org-latex--overlay-key beg end))
+         (overlay (gethash key my/org-latex--overlay-table)))
+    (cond
+     ((and (my/org-latex--overlay-live-p overlay)
+           (= (overlay-start overlay) beg)
+           (= (overlay-end overlay) end))
+      overlay)
+     (t
+      (when overlay
+        (remhash key my/org-latex--overlay-table))
+      (when-let* ((found (my/org-latex--find-existing-overlay beg end)))
+        (my/org-latex--register-overlay found))))))
+
+(defun my/org-latex--clear-preview-range (beg end)
+  "Delete Org LaTeX preview overlays between BEG and END.
+Keep the preview overlay table synchronized even when duplicate overlays exist."
+  (let (removed)
+    (when-let* ((overlay (my/org-latex--lookup-overlay beg end)))
+      (push overlay removed)
+      (my/org-latex--delete-overlay overlay))
+    (dolist (overlay (overlays-in beg end))
+      (when (and (eq (overlay-get overlay 'org-overlay-type) 'org-latex-overlay)
+                 (not (memq overlay removed)))
+        (push overlay removed)
+        (my/org-latex--delete-overlay overlay)))
+    removed))
+
+(defun my/org-latex--waiter-key (beg end value)
+  "Return the deduplication key for a waiter covering BEG to END with VALUE."
+  (list beg end value))
+
+(defun my/org-latex--enqueue-job (job)
+  "Append JOB to the render queue in O(1) time."
+  (let ((cell (list job)))
+    (if my/org-latex--render-queue-tail
+        (setcdr my/org-latex--render-queue-tail cell)
+      (setq my/org-latex--render-queue cell))
+    (setq my/org-latex--render-queue-tail cell)
+    job))
+
+(defun my/org-latex--dequeue-job ()
+  "Pop the next render job from the queue."
+  (when my/org-latex--render-queue
+    (let ((cell my/org-latex--render-queue))
+      (setq my/org-latex--render-queue (cdr cell))
+      (when (null my/org-latex--render-queue)
+        (setq my/org-latex--render-queue-tail nil))
+      (car cell))))
 
 (defun my/org-latex--preview-base-directory ()
   "Return the directory used to store Org preview images."
@@ -642,7 +744,11 @@ Set to nil to keep the full log."
 
 (defun my/org-latex--make-waiter (spec)
   "Build a waiter from fragment SPEC."
-  (list :beg (copy-marker (plist-get spec :beg))
+  (list :key (my/org-latex--waiter-key
+              (plist-get spec :beg)
+              (plist-get spec :end)
+              (plist-get spec :value))
+        :beg (copy-marker (plist-get spec :beg))
         :end (copy-marker (plist-get spec :end) t)
         :value (plist-get spec :value)
         :background (plist-get spec :background)))
@@ -651,28 +757,31 @@ Set to nil to keep the full log."
   "Release marker resources tracked by JOB."
   (dolist (waiter (plist-get job :waiters))
     (set-marker (plist-get waiter :beg) nil)
-    (set-marker (plist-get waiter :end) nil)))
+    (set-marker (plist-get waiter :end) nil))
+  (when-let* ((index (plist-get job :waiter-index)))
+    (clrhash index))
+  (setf (plist-get job :waiters) nil))
 
 (defun my/org-latex--waiter-present-p (job spec)
   "Return non-nil when JOB already tracks SPEC."
-  (catch 'found
-    (dolist (waiter (plist-get job :waiters))
-      (let ((beg (plist-get waiter :beg))
-            (end (plist-get waiter :end)))
-        (when (and (marker-buffer beg)
-                   (marker-buffer end)
-                   (= (marker-position beg) (plist-get spec :beg))
-                   (= (marker-position end) (plist-get spec :end))
-                   (equal (plist-get waiter :value) (plist-get spec :value)))
-          (throw 'found t))))
-    nil))
+  (when-let* ((index (plist-get job :waiter-index)))
+    (gethash (my/org-latex--waiter-key
+              (plist-get spec :beg)
+              (plist-get spec :end)
+              (plist-get spec :value))
+             index)))
 
 (defun my/org-latex--add-waiter (job spec)
   "Attach SPEC to JOB unless it is already tracked."
   (unless (my/org-latex--waiter-present-p job spec)
-    (setf (plist-get job :waiters)
-          (cons (my/org-latex--make-waiter spec)
-                (plist-get job :waiters)))))
+    (let* ((waiter (my/org-latex--make-waiter spec))
+           (index (or (plist-get job :waiter-index)
+                      (let ((table (make-hash-table :test 'equal)))
+                        (setf (plist-get job :waiter-index) table)
+                        table))))
+      (puthash (plist-get waiter :key) t index)
+      (setf (plist-get job :waiters)
+            (cons waiter (plist-get job :waiters))))))
 
 (defun my/org-latex--image-overlay-at-point ()
   "Return an image display overlay that directly covers point, or nil."
@@ -691,18 +800,24 @@ Set to nil to keep the full log."
         (cons 'image plist))
     display))
 
-(defun my/org-latex--apply-preview-background (beg end background)
-  "Make LaTeX preview overlays between BEG and END use BACKGROUND."
-  (when (and (stringp background)
-             (not (my/org--unspecified-color-p background)))
-    (dolist (ov (overlays-in beg end))
-      (when (eq (overlay-get ov 'org-overlay-type) 'org-latex-overlay)
-        (overlay-put ov 'face `(:background ,background))
-        (overlay-put ov 'display
-                     (my/org-latex--image-spec-put
-                      (overlay-get ov 'display)
-                      :background
-                      background))))))
+(defun my/org-latex--image-spec-delete (display property)
+  "Return DISPLAY image spec with PROPERTY removed."
+  (if (and (listp display) (eq (car display) 'image))
+      (let ((plist nil)
+            (source (cdr display)))
+        (while source
+          (let ((key (pop source))
+                (value (pop source)))
+            (unless (eq key property)
+              (setq plist (plist-put plist key value)))))
+        (cons 'image plist))
+    display))
+
+(defun my/org-latex--normalize-preview-color (value fallback)
+  "Return VALUE unless it is unspecified, in which case use FALLBACK."
+  (if (my/org--unspecified-color-p value)
+      fallback
+    value))
 
 (defun my/org-latex--display-math-source-p (value)
   "Return non-nil when VALUE is a display-math fragment."
@@ -711,37 +826,83 @@ Set to nil to keep the full log."
         (string-prefix-p "$$" trimmed)
         (string-prefix-p "\\begin{" trimmed))))
 
-(defun my/org-latex--center-preview-overlays (beg end value background)
-  "Center display-math preview overlays between BEG and END for VALUE."
-  (when (my/org-latex--display-math-source-p value)
-    (let* ((window (or (get-buffer-window (current-buffer) t)
-                       (selected-window)))
-           (body-width (max 1 (window-body-width window))))
-      (dolist (ov (overlays-in beg end))
-        (when-let* (((eq (overlay-get ov 'org-overlay-type) 'org-latex-overlay))
-                    (image (overlay-get ov 'display))
+(defun my/org-latex--make-preview-overlay (beg end file imagetype)
+  "Create and register a LaTeX preview overlay from BEG to END using FILE."
+  (let ((overlay (make-overlay beg end))
+        (image-type (or (intern imagetype) 'png)))
+    (overlay-put overlay 'org-overlay-type 'org-latex-overlay)
+    (overlay-put overlay 'evaporate t)
+    (overlay-put overlay
+                 'modification-hooks
+                 (list
+                  (lambda (ov _flag _beg _end &optional _len)
+                    (my/org-latex--forget-overlay ov)
+                    (delete-overlay ov))))
+    (overlay-put overlay 'display
+                 (list 'image :type image-type :file file :ascent 'center))
+    (overlay-put overlay 'my/org-latex-file file)
+    (my/org-latex--register-overlay overlay)))
+
+(defun my/org-latex--overlay-shows-file-p (overlay file)
+  "Return non-nil when OVERLAY already displays FILE."
+  (when (my/org-latex--overlay-live-p overlay)
+    (let* ((display (overlay-get overlay 'display))
+           (shown-file (or (overlay-get overlay 'my/org-latex-file)
+                           (when (and (listp display) (eq (car display) 'image))
+                             (plist-get (cdr display) :file)))))
+      (and (stringp shown-file)
+           (string= shown-file file)))))
+
+(defun my/org-latex--configure-preview-overlay (overlay value background)
+  "Apply BACKGROUND and display-math alignment settings to OVERLAY."
+  (when (my/org-latex--overlay-live-p overlay)
+    (let* ((valid-background (and (stringp background)
+                                  (not (my/org--unspecified-color-p background))
+                                  background))
+           (previous-background (overlay-get overlay 'my/org-latex-background))
+           (display (overlay-get overlay 'display)))
+      (unless (equal previous-background valid-background)
+        (overlay-put overlay 'my/org-latex-background valid-background)
+        (overlay-put overlay 'face
+                     (and valid-background `(:background ,valid-background)))
+        (overlay-put overlay 'display
+                     (if valid-background
+                         (my/org-latex--image-spec-put display :background
+                                                       valid-background)
+                       (my/org-latex--image-spec-delete display :background)))))
+    (if (my/org-latex--display-math-source-p value)
+        (when-let* ((window (or (get-buffer-window (current-buffer) t)
+                                (selected-window)))
+                    (image (overlay-get overlay 'display))
                     ((listp image))
                     ((eq (car image) 'image))
+                    (body-width (max 1 (window-body-width window)))
                     (image-width (ceiling (car (image-size image)))))
-          (let ((left (max 0 (/ (- body-width image-width) 2))))
-            (overlay-put
-             ov 'before-string
-             (propertize
-              " "
-              'display `(space :align-to ,left)
-              'face (and (stringp background)
-                         `(:background ,background))))))))))
-
-(defun my/org-latex--overlay-shows-file-p (beg end file)
-  "Return non-nil when an existing preview overlay at BEG..END already shows FILE."
-  (catch 'found
-    (dolist (ov (overlays-in beg end))
-      (when-let* ((disp (overlay-get ov 'display))
-                  ((listp disp))
-                  ((eq (car disp) 'image))
-                  (shown-file (plist-get (cdr disp) :file)))
-        (when (string= (file-truename shown-file) (file-truename file))
-          (throw 'found t))))))
+          (let* ((valid-background (and (stringp background)
+                                        (not (my/org--unspecified-color-p background))
+                                        background))
+                 (left (max 0 (/ (- body-width image-width) 2)))
+                 (previous-left (overlay-get overlay 'my/org-latex-align-left))
+                 (previous-width (overlay-get overlay 'my/org-latex-align-width))
+                 (previous-background (overlay-get overlay 'my/org-latex-align-background)))
+            (unless (and (equal previous-left left)
+                         (equal previous-width body-width)
+                         (equal previous-background valid-background))
+              (overlay-put overlay 'my/org-latex-align-left left)
+              (overlay-put overlay 'my/org-latex-align-width body-width)
+              (overlay-put overlay 'my/org-latex-align-background valid-background)
+              (overlay-put
+               overlay 'before-string
+               (propertize
+                " "
+                'display `(space :align-to ,left)
+                'face (and valid-background
+                           `(:background ,valid-background)))))))
+      (when (overlay-get overlay 'before-string)
+        (overlay-put overlay 'before-string nil)
+        (overlay-put overlay 'my/org-latex-align-left nil)
+        (overlay-put overlay 'my/org-latex-align-width nil)
+        (overlay-put overlay 'my/org-latex-align-background nil)))))
 
 (defun my/org-latex--place-preview (beg end value file imagetype &optional background)
   "Overlay FILE as preview between BEG and END when VALUE is unchanged."
@@ -750,12 +911,14 @@ Set to nil to keep the full log."
              (<= end (point-max))
              (string= (buffer-substring-no-properties beg end) value)
              (not (my/org-latex--point-editing-fragment-p beg end)))
-    (unless (my/org-latex--overlay-shows-file-p beg end file)
-      (org-clear-latex-preview beg end)
-      (let ((max-image-size nil))
-        (org--make-preview-overlay beg end file imagetype)))
-    (my/org-latex--apply-preview-background beg end background)
-    (my/org-latex--center-preview-overlays beg end value background)))
+    (my/org-latex--ensure-state)
+    (let ((overlay (my/org-latex--lookup-overlay beg end)))
+      (unless (my/org-latex--overlay-shows-file-p overlay file)
+        (my/org-latex--clear-preview-range beg end)
+        (let ((max-image-size nil))
+          (setq overlay (my/org-latex--make-preview-overlay beg end file imagetype))))
+      (overlay-put overlay 'my/org-latex-file file)
+      (my/org-latex--configure-preview-overlay overlay value background))))
 
 (defun my/org-latex--place-waiter-preview (waiter file imagetype)
   "Place preview FILE for WAITER using IMAGETYPE."
@@ -784,20 +947,32 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
            (dir (my/org-latex--preview-base-directory))
            (prefix (concat org-preview-latex-image-directory "org-ltximg"))
            (face (or (face-at-point nil t) 'default))
+           (default-fg
+            (my/org-latex--normalize-preview-color
+             (face-attribute 'default :foreground nil)
+             "Black"))
+           (default-bg
+            (my/org-latex--normalize-preview-color
+             (face-attribute 'default :background nil)
+             "Transparent"))
            (fg
             (let ((color (plist-get org-format-latex-options :foreground)))
-              (cond
-               ((eq color 'auto) (face-attribute face :foreground nil 'default))
-               ((eq color 'default) (face-attribute 'default :foreground nil))
-               (t color))))
+              (my/org-latex--normalize-preview-color
+               (cond
+                ((eq color 'auto) (face-attribute face :foreground nil 'default))
+                ((eq color 'default) (face-attribute 'default :foreground nil))
+                (t color))
+               default-fg)))
            (block-bg (my/org-special-block-background-at-point beg))
            (bg
             (let ((color (plist-get org-format-latex-options :background)))
-              (cond
-               ((and block-bg (memq color '(auto default))) block-bg)
-               ((eq color 'auto) (face-attribute face :background nil 'default))
-               ((eq color 'default) (face-attribute 'default :background nil))
-               (t color))))
+              (my/org-latex--normalize-preview-color
+               (cond
+                ((and block-bg (memq color '(auto default))) block-bg)
+                ((eq color 'auto) (face-attribute face :background nil 'default))
+                ((eq color 'default) (face-attribute 'default :background nil))
+                (t color))
+               default-bg)))
            (hash (sha1 (prin1-to-string
                         (list org-format-latex-header
                               nil
@@ -955,28 +1130,30 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   (when (memq (process-status process) '(exit signal))
     (let* ((buffer (process-get process 'my/org-latex-buffer))
            (job (process-get process 'my/org-latex-job))
+           (generation (plist-get job :generation))
            (target (plist-get job :file))
            (success (and (eq (process-status process) 'exit)
                          (= (process-exit-status process) 0)
                          (file-exists-p (plist-get job :image-output-file)))))
       (when (buffer-live-p buffer)
         (with-current-buffer buffer
-          (setq my/org-latex--render-processes
-                (delq process my/org-latex--render-processes))
-          (setq my/org-latex--render-running
-                (max 0 (1- my/org-latex--render-running)))
-          (when (hash-table-p my/org-latex--pending-renders)
-            (remhash target my/org-latex--pending-renders))
-          (when success
-            (make-directory (file-name-directory target) t)
-            (copy-file (plist-get job :image-output-file) target t)
-            (dolist (waiter (plist-get job :waiters))
-              (my/org-latex--place-waiter-preview waiter target
-                                                  (plist-get job :imagetype))))
-          (unless success
-            (message "[org-latex] Preview failed for %s"
-                     (file-name-nondirectory target)))
-          (my/org-latex--pump-render-queue)))
+          (when (= generation my/org-latex--render-generation)
+            (setq my/org-latex--render-processes
+                  (delq process my/org-latex--render-processes))
+            (setq my/org-latex--render-running
+                  (max 0 (1- my/org-latex--render-running)))
+            (when (hash-table-p my/org-latex--pending-renders)
+              (remhash target my/org-latex--pending-renders))
+            (when success
+              (make-directory (file-name-directory target) t)
+              (copy-file (plist-get job :image-output-file) target t)
+              (dolist (waiter (plist-get job :waiters))
+                (my/org-latex--place-waiter-preview waiter target
+                                                    (plist-get job :imagetype))))
+            (unless success
+              (message "[org-latex] Preview failed for %s"
+                       (file-name-nondirectory target)))
+            (my/org-latex--pump-render-queue))))
       (my/org-latex--trim-log-buffer (process-buffer process))
       (my/org-latex--release-waiters job)
       (my/org-latex--cleanup-job-files job))))
@@ -1021,7 +1198,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   "Start queued Org LaTeX renders up to the concurrency limit."
   (while (and my/org-latex--render-queue
               (< my/org-latex--render-running my/org-latex-preview-max-concurrency))
-    (let ((job (pop my/org-latex--render-queue)))
+    (let ((job (my/org-latex--dequeue-job)))
       (setq my/org-latex--render-running (1+ my/org-latex--render-running))
       (condition-case err
           (my/org-latex--start-render job)
@@ -1051,16 +1228,20 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
         (let ((job (gethash target my/org-latex--pending-renders)))
           (if job
               (my/org-latex--add-waiter job spec)
-            (setq job (list :dir (plist-get spec :dir)
-                            :file target
-                            :imagetype (plist-get spec :imagetype)
-                            :options (plist-get spec :options)
-                            :processing-type (plist-get spec :processing-type)
-                            :value (plist-get spec :render-value)
-                            :waiters (list (my/org-latex--make-waiter spec))))
+            (let* ((waiter (my/org-latex--make-waiter spec))
+                   (waiter-index (make-hash-table :test 'equal)))
+              (puthash (plist-get waiter :key) t waiter-index)
+              (setq job (list :dir (plist-get spec :dir)
+                              :file target
+                              :imagetype (plist-get spec :imagetype)
+                              :options (plist-get spec :options)
+                              :processing-type (plist-get spec :processing-type)
+                              :value (plist-get spec :render-value)
+                              :generation my/org-latex--render-generation
+                              :waiters (list waiter)
+                              :waiter-index waiter-index)))
             (puthash target job my/org-latex--pending-renders)
-            (setq my/org-latex--render-queue
-                  (nconc my/org-latex--render-queue (list job)))
+            (my/org-latex--enqueue-job job)
             (my/org-latex--pump-render-queue)))))))
 
 (defun my/org-latex--preview-range (beg end)
@@ -1084,6 +1265,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
 (defun my/org-latex-cancel-pending-renders ()
   "Cancel all queued and running async LaTeX preview renders."
   (interactive)
+  (setq my/org-latex--render-generation (1+ my/org-latex--render-generation))
   (when (timerp my/org-latex--preview-timer)
     (cancel-timer my/org-latex--preview-timer))
   (my/org-latex--cancel-edit-preview-timer)
@@ -1095,6 +1277,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
         my/org-latex--post-command-point nil
         my/org-latex--render-processes nil
         my/org-latex--render-queue nil
+        my/org-latex--render-queue-tail nil
         my/org-latex--render-running 0)
   (my/org-latex--clear-edit-preview-marker)
   (when (hash-table-p my/org-latex--pending-renders)
@@ -1111,17 +1294,17 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
    ((and untrusted-content (not org--latex-preview-when-risky)) nil)
    ((equal arg '(64))
     (my/org-latex-cancel-pending-renders)
-    (org-clear-latex-preview (point-min) (point-max))
+    (my/org-latex--clear-preview-range (point-min) (point-max))
     (message "LaTeX previews removed from buffer"))
    ((equal arg '(16))
     (my/org-latex--preview-range (point-min) (point-max))
     (message "Queueing LaTeX previews for buffer..."))
    ((equal arg '(4))
-    (pcase-let ((`(,beg . ,end) (if (use-region-p)
+     (pcase-let ((`(,beg . ,end) (if (use-region-p)
                                     (cons (region-beginning) (region-end))
                                   (my/org-latex--section-range))))
       (my/org-latex-cancel-pending-renders)
-      (org-clear-latex-preview beg end)
+      (my/org-latex--clear-preview-range beg end)
       (message "LaTeX previews removed")))
    ((use-region-p)
     (my/org-latex--preview-range (region-beginning) (region-end))
@@ -1129,7 +1312,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
    ((let ((datum (my/org-latex--current-fragment)))
       (and (org-element-type-p datum '(latex-environment latex-fragment))
            (pcase-let ((`(,beg . ,end) (my/org-latex--fragment-range datum)))
-             (if (org-clear-latex-preview beg end)
+             (if (my/org-latex--clear-preview-range beg end)
                  (message "LaTeX preview removed")
                (my/org-latex--preview-fragment datum)
                (message "Queueing LaTeX preview..."))
@@ -1258,7 +1441,7 @@ Anywhere else: run `org-return' as usual."
       (let ((beg (overlay-start ov))
             (end (overlay-end ov)))
         (my/org-latex--cancel-edit-preview-timer)
-        (org-clear-latex-preview beg end)
+        (my/org-latex--clear-preview-range beg end)
         (goto-char beg))
     (org-return arg)))
 
