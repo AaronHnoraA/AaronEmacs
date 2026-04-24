@@ -3,10 +3,17 @@
 ;;; Commentary:
 ;;
 ;; Keep the Kanagawa base theme in-repo so bootstrapping a fresh Emacs does not
-;; need to fetch it from ELPA.  This file is the single local entrypoint for
-;; loading the vendored theme files under `site-lisp/aaron-ui/vendor/`.
+;; need to fetch it from ELPA.  This file also exposes a small semantic palette
+;; API so local UI modules can consume named colors instead of scattering raw
+;; hex values everywhere.
 
 ;;; Code:
+
+(require 'cl-lib)
+
+(defgroup aaron-ui nil
+  "Local theme helpers and semantic palette."
+  :group 'faces)
 
 (defconst aaron-ui--root
   (file-name-directory (or load-file-name buffer-file-name))
@@ -78,12 +85,74 @@
     (extend-color-2 "#FFD2F2"))
   "Aaron's high-contrast Wave palette, tuned to match Kitty transparency.")
 
+(defconst aaron-ui-wave-semantic-colors
+  '((fg-strong . fg)
+    (fg-main . "#E4ECFF")
+    (fg-soft . "#D8DEE9")
+    (fg-dim . "#A9BED3")
+    (fg-overlay . "#90A0C0")
+    (fg-muted . "#8B90A8")
+    (fg-subtle . "#9BA8C7")
+    (fg-faint . "#6F748B")
+    (fg-tab . "#8F96AD")
+    (fg-tab-separator . "#5F6578")
+    (fg-tab-overflow . "#6D7488")
+    (accent-blue . "#A9CBFF")
+    (accent-cyan . "#8AA6C1")
+    (accent-sand . "#E7D6A5")
+    (accent-yellow . "#F9E2AF")
+    (accent-yellow-soft . "#D8B27F")
+    (accent-orange . "#D0A86E")
+    (accent-green . "#BBF7B8")
+    (accent-green-soft . "#8FBF8F")
+    (accent-green-strong . "#A7D7A7")
+    (accent-red . "#D79A9A")
+    (accent-red-soft . "#BF7F7F")
+    (accent-red-strong . "#E4B3B3")
+    (accent-lavender . "#B4BEFE")
+    (accent-mauve . "#CBA6F7")
+    (accent-teal . "#A8F0E3")
+    (accent-rose . "#F5E0DC")
+    (bg-base . bg)
+    (bg-gutter . bg-gutter)
+    (bg-code . "#1B2231")
+    (bg-elevated . "#24232F")
+    (bg-elevated-strong . "#2A2F3D")
+    (bg-panel . "#31384A")
+    (bg-panel-strong . "#384154")
+    (bg-overlay . "#2C3342")
+    (bg-preview . "#293241")
+    (bg-popup-separator . "#3D465C")
+    (bg-ratex . "#2B3140")
+    (bg-success . "#243026")
+    (bg-success-strong . "#2A3A2E")
+    (bg-danger . "#332628")
+    (bg-danger-strong . "#3A2D30")
+    (bg-meta . "#244438")
+    (bg-meta-strong . "#2C5041")
+    (bg-surface . "#273144")
+    (bg-surface-strong . "#344057")
+    (bg-surface-stronger . "#46516A")
+    (border-subtle . "#3A4154")
+    (border-muted . "#4B556B")
+    (border-popup-separator . "#58627A")
+    (border-ratex . "#5F6F8F")
+    (guide-line . "#5E81AC")
+    (line-number . "#7F849C")
+    (line-number-current . fg-strong)
+    (line-number-current-bg . bg-p2)
+    (line-number-major . accent-yellow-soft))
+  "Semantic UI color tokens for the Wave variant.")
+
 (defcustom aaron-ui-default-variant 'wave
   "Default Kanagawa variant loaded by `aaron-ui-load-theme'."
   :type '(choice (const :tag "Wave" wave)
                  (const :tag "Dragon" dragon)
                  (const :tag "Lotus" lotus))
-  :group 'faces)
+  :group 'aaron-ui)
+
+(defvar aaron-ui-current-variant aaron-ui-default-variant
+  "Variant currently loaded by `aaron-ui-load-theme'.")
 
 (defun aaron-ui--custom-colors-for-variant (variant)
   "Return custom color overrides for VARIANT."
@@ -91,11 +160,97 @@
     ('wave aaron-ui-wave-custom-colors)
     (_ nil)))
 
+(defun aaron-ui--semantic-colors-for-variant (variant)
+  "Return semantic UI colors for VARIANT."
+  (pcase variant
+    ('wave aaron-ui-wave-semantic-colors)
+    (_ aaron-ui-wave-semantic-colors)))
+
+(defun aaron-ui--palette-for-variant (&optional variant)
+  "Return the merged palette for VARIANT."
+  (let ((variant (or variant aaron-ui-current-variant aaron-ui-default-variant)))
+    (append (aaron-ui--semantic-colors-for-variant variant)
+            (aaron-ui--custom-colors-for-variant variant))))
+
+(defun aaron-ui-has-color-p (token &optional variant)
+  "Return non-nil when TOKEN is a known palette color for VARIANT."
+  (and (symbolp token)
+       (assq token (aaron-ui--palette-for-variant variant))))
+
+(defun aaron-ui--resolve-color (token palette seen)
+  "Resolve TOKEN against PALETTE, tracking SEEN aliases."
+  (cond
+   ((stringp token) token)
+   ((not (symbolp token)) nil)
+   ((memq token seen)
+    (error "Circular aaron-ui color alias: %S" (reverse (cons token seen))))
+   (t
+    (let ((value (alist-get token palette nil nil #'eq)))
+      (cond
+       ((null value) nil)
+       ((stringp value) value)
+       ((and (consp value)
+             (null (cdr value))
+             (stringp (car value)))
+        (car value))
+       ((symbolp value) (aaron-ui--resolve-color value palette (cons token seen)))
+       ((and (consp value)
+             (null (cdr value))
+             (symbolp (car value)))
+        (aaron-ui--resolve-color (car value) palette (cons token seen)))
+       (t value))))))
+
+(defun aaron-ui-color (token &optional fallback variant)
+  "Return resolved color string for TOKEN in VARIANT.
+Return FALLBACK when TOKEN is unknown.  String TOKEN values are returned as-is."
+  (or (aaron-ui--resolve-color token (aaron-ui--palette-for-variant variant) nil)
+      fallback
+      (and (stringp token) token)
+      (error "Unknown aaron-ui color token: %S" token)))
+
+(defun aaron-ui--resolve-colorish (value)
+  "Resolve VALUE if it looks like an `aaron-ui' color token."
+  (cond
+   ((and (symbolp value) (aaron-ui-has-color-p value))
+    (aaron-ui-color value))
+   ((plistp value)
+    (let ((copy (copy-tree value)))
+      (dolist (key '(:color :foreground :background))
+        (when (plist-member copy key)
+          (setq copy
+                (plist-put copy key
+                           (aaron-ui--resolve-colorish (plist-get copy key))))))
+      copy))
+   (t value)))
+
+(defun aaron-ui--resolve-face-attrs (attrs)
+  "Resolve palette-backed colors in face attribute list ATTRS."
+  (let (resolved)
+    (while attrs
+      (let ((key (pop attrs))
+            (value (pop attrs)))
+        (push key resolved)
+        (push
+         (pcase key
+           ((or :foreground :background :distant-foreground)
+            (aaron-ui--resolve-colorish value))
+           ((or :underline :overline :box)
+            (aaron-ui--resolve-colorish value))
+           (_ value))
+         resolved)))
+    (nreverse resolved)))
+
+(defun aaron-ui-set-face (face &rest attrs)
+  "Apply ATTRS to FACE, resolving known `aaron-ui' color tokens automatically."
+  (when (facep face)
+    (apply #'set-face-attribute face nil (aaron-ui--resolve-face-attrs attrs))))
+
 (defun aaron-ui-load-theme (&optional variant)
   "Load local Kanagawa VARIANT from `site-lisp/aaron-ui'."
   (interactive)
   (let* ((variant (or variant aaron-ui-default-variant))
          (theme (intern (format "kanagawa-%s" variant))))
+    (setq aaron-ui-current-variant variant)
     (setq kanagawa-themes-comment-italic nil)
     (setq kanagawa-themes-keyword-italic nil)
     (setq kanagawa-themes-custom-colors

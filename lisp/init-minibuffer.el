@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'aaron-ui)
+
 (use-package vertico
   :ensure t
   :hook ((after-init . vertico-mode)
@@ -138,72 +140,72 @@
       (unless (equal signature my/minibuffer-ui--theme-signature)
         (setq my/minibuffer-ui--theme-signature signature)
         (when (facep 'vertico-current)
-          (set-face-attribute 'vertico-current nil
-                              :background "#31384a"
-                              :foreground "#edf2f7"
-                              :extend t
-                              :weight 'medium))
+          (aaron-ui-set-face 'vertico-current
+                             :background 'bg-panel
+                             :foreground 'fg-strong
+                             :extend t
+                             :weight 'medium))
         (when (facep 'vertico-group-title)
-          (set-face-attribute 'vertico-group-title nil
-                              :foreground "#8aa6c1"
-                              :weight 'medium
-                              :height 0.92))
+          (aaron-ui-set-face 'vertico-group-title
+                             :foreground 'accent-cyan
+                             :weight 'medium
+                             :height 0.92))
         (when (facep 'vertico-group-separator)
-          (set-face-attribute 'vertico-group-separator nil
-                              :foreground "#4b556b"))
+          (aaron-ui-set-face 'vertico-group-separator
+                             :foreground 'border-muted))
         (when (facep 'vertico-multiline)
-          (set-face-attribute 'vertico-multiline nil
-                              :foreground "#7f849c"))
+          (aaron-ui-set-face 'vertico-multiline
+                             :foreground 'line-number))
         (when (facep 'completions-first-difference)
-          (set-face-attribute 'completions-first-difference nil
-                              :foreground "#a9bed3"
-                              :weight 'medium))
+          (aaron-ui-set-face 'completions-first-difference
+                             :foreground 'fg-dim
+                             :weight 'medium))
         (when (facep 'completions-annotations)
-          (set-face-attribute 'completions-annotations nil
-                              :foreground "#6f748b"
-                              :slant 'normal))
+          (aaron-ui-set-face 'completions-annotations
+                             :foreground 'fg-faint
+                             :slant 'normal))
         (when (facep 'completions-common-part)
-          (set-face-attribute 'completions-common-part nil
-                              :foreground "#d8dee9"
-                              :weight 'regular))
+          (aaron-ui-set-face 'completions-common-part
+                             :foreground 'fg-soft
+                             :weight 'regular))
         (when (facep 'completions-highlight)
-          (set-face-attribute 'completions-highlight nil
-                              :background "#31384a"
-                              :foreground "#edf2f7"
-                              :extend t))
+          (aaron-ui-set-face 'completions-highlight
+                             :background 'bg-panel
+                             :foreground 'fg-strong
+                             :extend t))
         (when (facep 'marginalia-documentation)
-          (set-face-attribute 'marginalia-documentation nil
-                              :foreground "#6f748b"))
+          (aaron-ui-set-face 'marginalia-documentation
+                             :foreground 'fg-faint))
         (when (facep 'marginalia-key)
-          (set-face-attribute 'marginalia-key nil
-                              :foreground "#8aa6c1"
-                              :weight 'medium))
+          (aaron-ui-set-face 'marginalia-key
+                             :foreground 'accent-cyan
+                             :weight 'medium))
         (when (facep 'marginalia-type)
-          (set-face-attribute 'marginalia-type nil
-                              :foreground "#7f849c"))
+          (aaron-ui-set-face 'marginalia-type
+                             :foreground 'line-number))
         (when (facep 'marginalia-file-name)
-          (set-face-attribute 'marginalia-file-name nil
-                              :foreground "#7f849c"))
+          (aaron-ui-set-face 'marginalia-file-name
+                             :foreground 'line-number))
         (when (facep 'marginalia-size)
-          (set-face-attribute 'marginalia-size nil
-                              :foreground "#6f748b"))
+          (aaron-ui-set-face 'marginalia-size
+                             :foreground 'fg-faint))
         (when (facep 'consult-preview-line)
-          (set-face-attribute 'consult-preview-line nil
-                              :background "#293241"
-                              :extend t))
+          (aaron-ui-set-face 'consult-preview-line
+                             :background 'bg-preview
+                             :extend t))
         (when (facep 'consult-preview-match)
-          (set-face-attribute 'consult-preview-match nil
-                              :background "#384154"
-                              :foreground "#edf2f7"
-                              :weight 'medium))
+          (aaron-ui-set-face 'consult-preview-match
+                             :background 'bg-panel-strong
+                             :foreground 'fg-strong
+                             :weight 'medium))
         (when (facep 'consult-highlight-match)
-          (set-face-attribute 'consult-highlight-match nil
-                              :foreground "#a9bed3"
-                              :weight 'medium))
+          (aaron-ui-set-face 'consult-highlight-match
+                             :foreground 'fg-dim
+                             :weight 'medium))
         (when (facep 'child-frame-border)
-          (set-face-attribute 'child-frame-border nil
-                              :background "#3a4154"
-                              :foreground "#3a4154"))))))
+          (aaron-ui-set-face 'child-frame-border
+                             :background 'border-subtle
+                             :foreground 'border-subtle))))))
 
 (add-hook 'after-init-hook #'my/minibuffer-apply-ui)
 (add-hook 'server-after-make-frame-hook #'my/minibuffer-apply-ui)

@@ -9,7 +9,9 @@
 
 ;;; Code:
 
+(require 'aaron-ui)
 (declare-function my/typography-setup-prose-buffer "init-base")
+(defvar my/prose-line-spacing)
 (require 'init-funcs)
 (require 'org)
 (require 'org-element)
@@ -61,7 +63,9 @@ Special block overlays are no longer disabled based on buffer size."
 
 (defun my/org-setup-buffer-spacing ()
   "Use relaxed line spacing in Org buffers only."
-  (setq-local line-spacing 0.1))
+  (setq-local line-spacing (or (and (boundp 'my/prose-line-spacing)
+                                    my/prose-line-spacing)
+                               0.16)))
 
 (defun my/org-force-indent-mode ()
   "Enable `org-indent-mode' in every Org buffer."
@@ -123,22 +127,22 @@ Special block overlays are no longer disabled based on buffer size."
                "DONE(d!)" "CANCELLED(c@/!)")))
 
   (org-todo-keyword-faces
-   '(("TODO"      . (:foreground "#ff6c6b" :weight medium))
-     ("NEXT"      . (:foreground "#98be65" :weight medium))
-     ("HOLD"      . (:foreground "#feb24c" :weight medium))
-     ("WIP"       . (:foreground "#0098dd" :weight medium))
-     ("WAIT"      . (:foreground "#ecbe7b" :weight medium))
-     ("DONE"      . (:foreground "#51afef" :weight medium :strike-through t))
-     ("CANCELLED" . (:foreground "#ff6480" :weight medium :strike-through t))))
+   `(("TODO"      . (:foreground ,(aaron-ui-color 'accent-red) :weight medium))
+     ("NEXT"      . (:foreground ,(aaron-ui-color 'accent-green-soft) :weight medium))
+     ("HOLD"      . (:foreground ,(aaron-ui-color 'accent-orange) :weight medium))
+     ("WIP"       . (:foreground ,(aaron-ui-color 'accent-cyan) :weight medium))
+     ("WAIT"      . (:foreground ,(aaron-ui-color 'accent-yellow) :weight medium))
+     ("DONE"      . (:foreground ,(aaron-ui-color 'accent-blue) :weight medium :strike-through t))
+     ("CANCELLED" . (:foreground ,(aaron-ui-color 'accent-red-soft) :weight medium :strike-through t))))
 
   (org-enforce-todo-dependencies t)
   (org-enforce-todo-checkbox-dependencies t)
   (org-closed-keep-when-no-todo t)
   (org-log-repeat 'time)
   (org-priority-faces
-   '((?A :foreground "red" :weight medium)
-     (?B :foreground "orange")
-     (?C :foreground "yellow")))
+   `((?A :foreground ,(aaron-ui-color 'accent-red) :weight medium)
+     (?B :foreground ,(aaron-ui-color 'accent-orange))
+     (?C :foreground ,(aaron-ui-color 'accent-yellow))))
 
   ;; --- Properties ---
   (org-global-properties

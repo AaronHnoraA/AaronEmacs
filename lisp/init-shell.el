@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'aaron-ui)
+
 (defvar eshell-last-dir-ring)
 (defvar eshell-buffer-name)
 
@@ -99,20 +101,20 @@ Append a trailing return automatically.  RETRIES defaults to
                     "  "
                     (:propertize "eshell" face shadow))))
     (when (facep 'eshell-prompt)
-      (set-face-attribute 'eshell-prompt nil
-                          :foreground "#8aa6c1"
-                          :weight 'medium))
+      (aaron-ui-set-face 'eshell-prompt
+                         :foreground 'accent-cyan
+                         :weight 'medium))
     (when (facep 'eshell-ls-directory)
-      (set-face-attribute 'eshell-ls-directory nil
-                          :foreground "#a9bed3"
-                          :weight 'medium))
+      (aaron-ui-set-face 'eshell-ls-directory
+                         :foreground 'fg-dim
+                         :weight 'medium))
     (when (facep 'eshell-ls-executable)
-      (set-face-attribute 'eshell-ls-executable nil
-                          :foreground "#8fbf8f"))
+      (aaron-ui-set-face 'eshell-ls-executable
+                         :foreground 'accent-green-soft))
     (when (facep 'vterm-color-default)
-      (set-face-attribute 'vterm-color-default nil
-                          :background "#24232f"
-                          :foreground "#d8dee9"))))
+      (aaron-ui-set-face 'vterm-color-default
+                         :background 'bg-elevated
+                         :foreground 'fg-soft))))
 
 (defun my/terminal-context-key (&optional directory)
   "Return a stable local-or-remote context key for DIRECTORY."

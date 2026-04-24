@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'aaron-ui)
+
 (declare-function on-screen-mode "on-screen" (&optional arg))
 (defvar kanagawa-themes-custom-colors)
 (defvar my/theme-unspecified 'unspecified
@@ -293,25 +295,25 @@
       (unless (equal signature my/dashboard-ui--theme-signature)
         (setq my/dashboard-ui--theme-signature signature)
         (when (facep 'dashboard-banner-logo-title)
-          (set-face-attribute 'dashboard-banner-logo-title nil
-                              :foreground "#edf2f7"
-                              :weight 'medium))
+          (aaron-ui-set-face 'dashboard-banner-logo-title
+                             :foreground 'fg-strong
+                             :weight 'medium))
         (when (facep 'dashboard-heading)
-          (set-face-attribute 'dashboard-heading nil
-                              :foreground "#a9bed3"
-                              :weight 'medium))
+          (aaron-ui-set-face 'dashboard-heading
+                             :foreground 'fg-dim
+                             :weight 'medium))
         (when (facep 'dashboard-items-face)
-          (set-face-attribute 'dashboard-items-face nil
-                              :foreground "#d8dee9"))
+          (aaron-ui-set-face 'dashboard-items-face
+                             :foreground 'fg-soft))
         (when (facep 'dashboard-footer-face)
-          (set-face-attribute 'dashboard-footer-face nil
-                              :foreground "#6f748b"))
+          (aaron-ui-set-face 'dashboard-footer-face
+                             :foreground 'fg-faint))
         (when (facep 'dashboard-navigator)
-          (set-face-attribute 'dashboard-navigator nil
-                              :foreground "#8aa6c1"))
+          (aaron-ui-set-face 'dashboard-navigator
+                             :foreground 'accent-cyan))
         (when (facep 'dashboard-text-banner)
-          (set-face-attribute 'dashboard-text-banner nil
-                              :foreground "#8b90a8"))))))
+          (aaron-ui-set-face 'dashboard-text-banner
+                             :foreground 'fg-muted))))))
 
 (add-hook 'dashboard-mode-hook #'my/dashboard-apply-ui)
 (add-hook 'after-load-theme-hook #'my/dashboard-apply-ui)
@@ -454,10 +456,8 @@
   (indent-guide-ignore-strings t))
 
 (with-eval-after-load 'indent-guide
-  (custom-set-faces
-   ;; 普通缩进线：淡灰蓝，不抢正文
-   '(indent-guide-face
-     ((t (:foreground "#5E81AC"))))))
+  ;; 普通缩进线：淡灰蓝，不抢正文
+  (aaron-ui-set-face 'indent-guide-face :foreground 'guide-line))
 
 
 

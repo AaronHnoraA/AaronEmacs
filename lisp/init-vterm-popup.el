@@ -5,6 +5,7 @@
 
 ;;; Code:
 
+(require 'aaron-ui)
 (require 'cl-lib)
 
 (declare-function my/terminal-normalize-directory "init-funcs" (directory))
@@ -52,11 +53,11 @@
   "Whether the current buffer belongs to the popup vterm pool.")
 
 (defface my/vterm-popup-separator
-  '((t (:inherit mode-line
-        :foreground "#3d465c"
-        :background "#3d465c"
+  `((t (:inherit mode-line
+        :foreground ,(aaron-ui-color 'bg-popup-separator)
+        :background ,(aaron-ui-color 'bg-popup-separator)
         :box nil
-        :overline "#58627a"
+        :overline ,(aaron-ui-color 'border-popup-separator)
         :underline nil
         :height 0.24)))
   "Face used for the popup vterm separator bar."

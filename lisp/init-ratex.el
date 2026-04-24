@@ -2,6 +2,8 @@
 
 ;;; Code:
 
+(require 'aaron-ui)
+
 (use-package ratex
   :load-path "~/.emacs.d/site-lisp/ratex.el/lisp"
   :commands (ratex-mode
@@ -18,9 +20,9 @@
         ratex-debug nil
         ratex-render-cache-limit 24
         ratex-render-cache-ttl 60
-        ratex-render-color "#d8dee9"
-        ratex-posframe-background-color "#2b3140"
-        ratex-posframe-border-color "#5f6f8f")
+        ratex-render-color (aaron-ui-color 'fg-soft)
+        ratex-posframe-background-color (aaron-ui-color 'bg-ratex)
+        ratex-posframe-border-color (aaron-ui-color 'border-ratex))
   :hook ((org-mode . ratex-turn-on)
          (latex-mode . ratex-turn-on)
          (LaTeX-mode . ratex-turn-on)

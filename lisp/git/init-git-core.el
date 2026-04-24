@@ -5,6 +5,7 @@
 
 ;;; Code:
 
+(require 'aaron-ui)
 (require 'init-funcs)
 (require 'transient)
 
@@ -222,60 +223,60 @@ a Git repository."
       (unless (equal signature my/git-ui--face-theme-signature)
         (setq my/git-ui--face-theme-signature signature)
         (when (facep 'magit-section-heading)
-          (set-face-attribute 'magit-section-heading nil
-                              :foreground "#a9bed3"
-                              :weight 'medium))
+          (aaron-ui-set-face 'magit-section-heading
+                             :foreground 'fg-dim
+                             :weight 'medium))
         (when (facep 'magit-section-highlight)
-          (set-face-attribute 'magit-section-highlight nil
-                              :background "#2c3342"
-                              :extend t))
+          (aaron-ui-set-face 'magit-section-highlight
+                             :background 'bg-overlay
+                             :extend t))
         (when (facep 'magit-diff-context)
-          (set-face-attribute 'magit-diff-context nil
-                              :foreground "#8b90a8"
-                              :background "#24232f"))
+          (aaron-ui-set-face 'magit-diff-context
+                             :foreground 'fg-muted
+                             :background 'bg-elevated))
         (when (facep 'magit-diff-context-highlight)
-          (set-face-attribute 'magit-diff-context-highlight nil
-                              :foreground "#d8dee9"
-                              :background "#2a2f3d"))
+          (aaron-ui-set-face 'magit-diff-context-highlight
+                             :foreground 'fg-soft
+                             :background 'bg-elevated-strong))
         (when (facep 'magit-diff-added)
-          (set-face-attribute 'magit-diff-added nil
-                              :foreground "#8fbf8f"
-                              :background "#243026"))
+          (aaron-ui-set-face 'magit-diff-added
+                             :foreground 'accent-green-soft
+                             :background 'bg-success))
         (when (facep 'magit-diff-added-highlight)
-          (set-face-attribute 'magit-diff-added-highlight nil
-                              :foreground "#a7d7a7"
-                              :background "#2a3a2e"))
+          (aaron-ui-set-face 'magit-diff-added-highlight
+                             :foreground 'accent-green-strong
+                             :background 'bg-success-strong))
         (when (facep 'magit-diff-removed)
-          (set-face-attribute 'magit-diff-removed nil
-                              :foreground "#d79a9a"
-                              :background "#332628"))
+          (aaron-ui-set-face 'magit-diff-removed
+                             :foreground 'accent-red
+                             :background 'bg-danger))
         (when (facep 'magit-diff-removed-highlight)
-          (set-face-attribute 'magit-diff-removed-highlight nil
-                              :foreground "#e4b3b3"
-                              :background "#3a2d30"))
+          (aaron-ui-set-face 'magit-diff-removed-highlight
+                             :foreground 'accent-red-strong
+                             :background 'bg-danger-strong))
         (when (facep 'magit-branch-local)
-          (set-face-attribute 'magit-branch-local nil
-                              :foreground "#8aa6c1"
-                              :weight 'medium))
+          (aaron-ui-set-face 'magit-branch-local
+                             :foreground 'accent-cyan
+                             :weight 'medium))
         (when (facep 'magit-branch-remote)
-          (set-face-attribute 'magit-branch-remote nil
-                              :foreground "#8fbf8f"
-                              :weight 'medium))
+          (aaron-ui-set-face 'magit-branch-remote
+                             :foreground 'accent-green-soft
+                             :weight 'medium))
         (when (facep 'magit-hash)
-          (set-face-attribute 'magit-hash nil
-                              :foreground "#6f748b"))
+          (aaron-ui-set-face 'magit-hash
+                             :foreground 'fg-faint))
         (when (facep 'diff-hl-insert)
-          (set-face-attribute 'diff-hl-insert nil
-                              :foreground "#7fa86f"
-                              :background "#7fa86f"))
+          (aaron-ui-set-face 'diff-hl-insert
+                             :foreground 'accent-green-soft
+                             :background 'accent-green-soft))
         (when (facep 'diff-hl-change)
-          (set-face-attribute 'diff-hl-change nil
-                              :foreground "#8aa6c1"
-                              :background "#8aa6c1"))
+          (aaron-ui-set-face 'diff-hl-change
+                             :foreground 'accent-cyan
+                             :background 'accent-cyan))
         (when (facep 'diff-hl-delete)
-          (set-face-attribute 'diff-hl-delete nil
-                              :foreground "#bf7f7f"
-                              :background "#bf7f7f"))))))
+          (aaron-ui-set-face 'diff-hl-delete
+                             :foreground 'accent-red-soft
+                             :background 'accent-red-soft))))))
 
 (add-hook 'after-init-hook #'my/git-apply-ui)
 (add-hook 'server-after-make-frame-hook #'my/git-apply-ui)

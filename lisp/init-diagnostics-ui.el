@@ -5,6 +5,7 @@
 
 ;;; Code:
 
+(require 'aaron-ui)
 (require 'init-funcs)
 (require 'project)
 (require 'seq)
@@ -72,23 +73,23 @@ When `other', show only other files.")
       (unless (equal signature my/diagnostics-ui--theme-signature)
         (setq my/diagnostics-ui--theme-signature signature)
         (when (facep 'flymake-error)
-          (set-face-attribute 'flymake-error nil
-                              :underline '(:style line :color "#bf7f7f")
-                              :foreground 'unspecified))
+          (aaron-ui-set-face 'flymake-error
+                             :underline '(:style line :color accent-red-soft)
+                             :foreground 'unspecified))
         (when (facep 'flymake-warning)
-          (set-face-attribute 'flymake-warning nil
-                              :underline '(:style line :color "#d0a86e")
-                              :foreground 'unspecified))
+          (aaron-ui-set-face 'flymake-warning
+                             :underline '(:style line :color accent-orange)
+                             :foreground 'unspecified))
         (when (facep 'flymake-note)
-          (set-face-attribute 'flymake-note nil
-                              :underline '(:style line :color "#8aa6c1")
-                              :foreground 'unspecified))
+          (aaron-ui-set-face 'flymake-note
+                             :underline '(:style line :color accent-cyan)
+                             :foreground 'unspecified))
         (when (facep 'error)
-          (set-face-attribute 'error nil :foreground "#d79a9a"))
+          (aaron-ui-set-face 'error :foreground 'accent-red))
         (when (facep 'warning)
-          (set-face-attribute 'warning nil :foreground "#d8b27f"))
+          (aaron-ui-set-face 'warning :foreground 'accent-yellow-soft))
         (when (facep 'success)
-          (set-face-attribute 'success nil :foreground "#8fbf8f"))))))
+          (aaron-ui-set-face 'success :foreground 'accent-green-soft))))))
 
 (add-hook 'after-init-hook #'my/diagnostics-apply-ui)
 (add-hook 'server-after-make-frame-hook #'my/diagnostics-apply-ui)

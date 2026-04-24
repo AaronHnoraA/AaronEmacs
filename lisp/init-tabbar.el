@@ -5,6 +5,7 @@
 
 ;;; Code:
 
+(require 'aaron-ui)
 (require 'cl-lib)
 (require 'easymenu)
 (require 'seq)
@@ -26,36 +27,36 @@
 (declare-function tab-bar-tabs "tab-bar" ())
 
 (defface my/tab-bar-buffer-face
-  '((t (:inherit tab-bar-tab
-        :foreground "#d8dee9"
+  `((t (:inherit tab-bar-tab
+        :foreground ,(aaron-ui-color 'fg-soft)
         :weight semibold)))
   "Face used for the current buffer label in the top tab bar."
   :group 'tab-bar)
 
 (defface my/tab-bar-buffer-path-face
-  '((t (:inherit tab-bar
-        :foreground "#8f96ad")))
+  `((t (:inherit tab-bar
+        :foreground ,(aaron-ui-color 'fg-tab))))
   "Face used for secondary path text in the top tab bar."
   :group 'tab-bar)
 
 (defface my/tab-line-current-face
-  '((t (:foreground "#e7d6a5"
+  `((t (:foreground ,(aaron-ui-color 'accent-sand)
         :weight semibold)))
   "Face used for the selected buffer in the centered tab line."
   :group 'tab-line)
 
 (defface my/tab-line-inactive-face
-  '((t (:foreground "#8f96ad")))
+  `((t (:foreground ,(aaron-ui-color 'fg-tab))))
   "Face used for inactive buffers in the centered tab line."
   :group 'tab-line)
 
 (defface my/tab-line-separator-face
-  '((t (:foreground "#5f6578")))
+  `((t (:foreground ,(aaron-ui-color 'fg-tab-separator))))
   "Face used for separators in the centered tab line."
   :group 'tab-line)
 
 (defface my/tab-line-overflow-face
-  '((t (:foreground "#6d7488")))
+  `((t (:foreground ,(aaron-ui-color 'fg-tab-overflow))))
   "Face used for overflow markers in the centered tab line."
   :group 'tab-line)
 
@@ -609,50 +610,64 @@ Keep the current buffer visible and expand around it while space allows."
 
 (defun my/tab-line-apply-ui ()
   "Apply the local visual treatment for the centered buffer tab line."
-  (set-face-attribute 'tab-line nil
-                      :background 'unspecified
-                      :foreground "#8f96ad"
-                      :box nil
-                      :overline nil
-                      :underline nil
-                      :height 0.95)
-  (set-face-attribute 'tab-line-active nil
-                      :background 'unspecified
-                      :foreground "#8f96ad"
-                      :box nil
-                      :overline nil
-                      :underline nil)
-  (set-face-attribute 'tab-line-inactive nil
-                      :background 'unspecified
-                      :foreground "#8f96ad"
-                      :box nil
-                      :overline nil
-                      :underline nil)
-  (set-face-attribute 'tab-line-tab nil
-                      :background 'unspecified
-                      :foreground "#8f96ad"
-                      :box nil
-                      :overline nil
-                      :underline nil)
-  (set-face-attribute 'tab-line-tab-current nil
-                      :background 'unspecified
-                      :foreground "#e7d6a5"
-                      :box nil
-                      :overline nil
-                      :underline nil
-                      :weight 'semibold)
-  (set-face-attribute 'tab-line-tab-inactive nil
-                      :background 'unspecified
-                      :foreground "#8f96ad"
-                      :box nil
-                      :overline nil
-                      :underline nil)
-  (set-face-attribute 'tab-line-highlight nil
-                      :background 'unspecified
-                      :foreground "#e7d6a5"
-                      :box nil
-                      :overline nil
-                      :underline nil))
+  (aaron-ui-set-face 'my/tab-bar-buffer-face
+                     :foreground 'fg-soft
+                     :weight 'semibold)
+  (aaron-ui-set-face 'my/tab-bar-buffer-path-face
+                     :foreground 'fg-tab)
+  (aaron-ui-set-face 'my/tab-line-current-face
+                     :foreground 'accent-sand
+                     :weight 'semibold)
+  (aaron-ui-set-face 'my/tab-line-inactive-face
+                     :foreground 'fg-tab)
+  (aaron-ui-set-face 'my/tab-line-separator-face
+                     :foreground 'fg-tab-separator)
+  (aaron-ui-set-face 'my/tab-line-overflow-face
+                     :foreground 'fg-tab-overflow)
+  (aaron-ui-set-face 'tab-line
+                     :background 'unspecified
+                     :foreground 'fg-tab
+                     :box nil
+                     :overline nil
+                     :underline nil
+                     :height 0.95)
+  (aaron-ui-set-face 'tab-line-active
+                     :background 'unspecified
+                     :foreground 'fg-tab
+                     :box nil
+                     :overline nil
+                     :underline nil)
+  (aaron-ui-set-face 'tab-line-inactive
+                     :background 'unspecified
+                     :foreground 'fg-tab
+                     :box nil
+                     :overline nil
+                     :underline nil)
+  (aaron-ui-set-face 'tab-line-tab
+                     :background 'unspecified
+                     :foreground 'fg-tab
+                     :box nil
+                     :overline nil
+                     :underline nil)
+  (aaron-ui-set-face 'tab-line-tab-current
+                     :background 'unspecified
+                     :foreground 'accent-sand
+                     :box nil
+                     :overline nil
+                     :underline nil
+                     :weight 'semibold)
+  (aaron-ui-set-face 'tab-line-tab-inactive
+                     :background 'unspecified
+                     :foreground 'fg-tab
+                     :box nil
+                     :overline nil
+                     :underline nil)
+  (aaron-ui-set-face 'tab-line-highlight
+                     :background 'unspecified
+                     :foreground 'accent-sand
+                     :box nil
+                     :overline nil
+                     :underline nil))
 
 (use-package tab-bar
   :ensure nil

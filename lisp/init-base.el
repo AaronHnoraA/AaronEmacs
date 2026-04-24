@@ -10,6 +10,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'aaron-ui)
 
 (declare-function tempo-expand-if-complete "tempo")
 (declare-function magit-toplevel "magit" (&optional directory))
@@ -288,6 +289,12 @@
   :type 'integer
   :group 'my/typography)
 
+(defcustom my/font-body-width 'semi-expanded
+  "Preferred width for prose Latin text.
+Use a slightly expanded width so English sits closer to enlarged CJK glyphs."
+  :type 'symbol
+  :group 'my/typography)
+
 ;; 代码/表格 (Code) - 默认界面 + 代码环境（fixed-pitch）
 (defcustom my/font-code "Fira Code"
   "Monospace family used for UI and code."
@@ -351,7 +358,7 @@
   :type 'symbol
   :group 'my/typography)
 
-(defcustom my/prose-line-spacing 0.12
+(defcustom my/prose-line-spacing 0.16
   "Line spacing used in prose buffers."
   :type 'number
   :group 'my/typography)
@@ -381,6 +388,7 @@
   "Make FACE use the prose font plus ATTRS."
   (apply #'my/font--set-face face
          :family my/font-body
+         :width my/font-body-width
          :weight my/font-body-weight
          attrs))
 
@@ -404,13 +412,15 @@
   (my/font--set-code-face 'line-number
                           :height 0.85
                           :weight my/font-ui-weight
-                          :foreground "#7f849c")
+                          :foreground (aaron-ui-color 'line-number))
   (my/font--set-face 'line-number-current-line
                      :inherit 'line-number
-                     :foreground "#bac2de")
+                     :foreground (aaron-ui-color 'line-number-current)
+                     :background (aaron-ui-color 'line-number-current-bg)
+                     :weight my/font-strong-weight)
   (my/font--set-face 'line-number-major-tick
                      :inherit 'line-number
-                     :foreground "#f9e2af"))
+                     :foreground (aaron-ui-color 'line-number-major)))
 
 (defun my/font--apply-core-faces ()
   "设置 default/fixed/variable 三类 face。"
@@ -429,7 +439,8 @@
   ;; 变宽 = 正文字体（mixed-pitch 会让 Org 正文用它）
   (my/font--set-face 'variable-pitch
                      :family my/font-body
-                     :height my/h-body
+                     :height (+ my/h-body 8)
+                     :width my/font-body-width
                      :weight my/font-body-weight))
 
 (defun my/font--bind-chinese-to-fontset ()
@@ -990,26 +1001,26 @@ Else, call `comment-or-uncomment-region' on the current line."
       (unless (equal signature my/ibuffer-ui--theme-signature)
         (setq my/ibuffer-ui--theme-signature signature)
         (when (facep 'ibuffer-title-face)
-          (set-face-attribute 'ibuffer-title-face nil
-                              :foreground "#edf2f7"
-                              :weight 'medium))
+          (aaron-ui-set-face 'ibuffer-title-face
+                             :foreground 'fg-strong
+                             :weight 'medium))
         (when (facep 'ibuffer-filter-group-name-face)
-          (set-face-attribute 'ibuffer-filter-group-name-face nil
-                              :foreground "#a9bed3"
-                              :weight 'medium))
+          (aaron-ui-set-face 'ibuffer-filter-group-name-face
+                             :foreground 'fg-dim
+                             :weight 'medium))
         (when (facep 'ibuffer-marked-face)
-          (set-face-attribute 'ibuffer-marked-face nil
-                              :foreground "#d8b27f"
-                              :weight 'medium))
+          (aaron-ui-set-face 'ibuffer-marked-face
+                             :foreground 'accent-yellow-soft
+                             :weight 'medium))
         (when (facep 'ibuffer-modified-buffer)
-          (set-face-attribute 'ibuffer-modified-buffer nil
-                              :foreground "#8aa6c1"))
+          (aaron-ui-set-face 'ibuffer-modified-buffer
+                             :foreground 'accent-cyan))
         (when (facep 'ibuffer-read-only-buffer)
-          (set-face-attribute 'ibuffer-read-only-buffer nil
-                              :foreground "#7f849c"))
+          (aaron-ui-set-face 'ibuffer-read-only-buffer
+                             :foreground 'line-number))
         (when (facep 'ibuffer-locked-buffer)
-          (set-face-attribute 'ibuffer-locked-buffer nil
-                              :foreground "#bf7f7f"))))))
+          (aaron-ui-set-face 'ibuffer-locked-buffer
+                             :foreground 'accent-red-soft))))))
 
 (add-hook 'ibuffer-mode-hook #'my/ibuffer-apply-ui)
 (add-hook 'after-load-theme-hook #'my/ibuffer-apply-ui)

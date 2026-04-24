@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'aaron-ui)
+
 (declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
 
 (defun my/dired-open-dwim ()
@@ -64,28 +66,28 @@
   "Apply local UI styling to Dired."
   (when (display-graphic-p)
     (when (facep 'diredfl-dir-name)
-      (set-face-attribute 'diredfl-dir-name nil
-                          :foreground "#a9bed3"
-                          :weight 'medium))
+      (aaron-ui-set-face 'diredfl-dir-name
+                         :foreground 'fg-dim
+                         :weight 'medium))
     (when (facep 'diredfl-file-name)
-      (set-face-attribute 'diredfl-file-name nil
-                          :foreground "#d8dee9"))
+      (aaron-ui-set-face 'diredfl-file-name
+                         :foreground 'fg-soft))
     (when (facep 'diredfl-exec-priv)
-      (set-face-attribute 'diredfl-exec-priv nil
-                          :foreground "#8fbf8f"))
+      (aaron-ui-set-face 'diredfl-exec-priv
+                         :foreground 'accent-green-soft))
     (when (facep 'diredfl-no-priv)
-      (set-face-attribute 'diredfl-no-priv nil
-                          :foreground "#6f748b"))
+      (aaron-ui-set-face 'diredfl-no-priv
+                         :foreground 'fg-faint))
     (when (facep 'diredfl-date-time)
-      (set-face-attribute 'diredfl-date-time nil
-                          :foreground "#7f849c"))
+      (aaron-ui-set-face 'diredfl-date-time
+                         :foreground 'line-number))
     (when (facep 'diredfl-number)
-      (set-face-attribute 'diredfl-number nil
-                          :foreground "#8aa6c1"))
+      (aaron-ui-set-face 'diredfl-number
+                         :foreground 'accent-cyan))
     (when (facep 'dired-header)
-      (set-face-attribute 'dired-header nil
-                          :foreground "#a9bed3"
-                          :weight 'medium))
+      (aaron-ui-set-face 'dired-header
+                         :foreground 'fg-dim
+                         :weight 'medium))
     (setq-local hl-line-face 'hl-line)))
 
 (add-hook 'dired-mode-hook #'my/dired-apply-ui)
