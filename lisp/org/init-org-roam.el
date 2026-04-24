@@ -15,6 +15,18 @@
 (defvar my/org-roam--background-timer nil)
 (defvar my/org-roam--initialized nil)
 
+(defun my/org-roam-capture-head (tag)
+  "Return the default Org Roam capture head with filetag TAG."
+  (format "#+title: ${title}
+#+date: %%u
+#+filetags: :%s:
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+"
+          tag))
+
 (defun my/org-roam--cancel-background-timer ()
   "Cancel the deferred Org Roam background initialization timer."
   (when (timerp my/org-roam--background-timer)
@@ -69,12 +81,12 @@
   :config
   (my/org-roam-enable)
   (setq org-roam-capture-templates
-        '(("m" "Math" plain "%?" :if-new (file+head "math/${slug}.org" "#+title: ${title}\n#+date: %u\n#+filetags: :math:\n") :unnarrowed t)
-          ("c" "CS" plain "%?" :if-new (file+head "CS/${slug}.org" "#+title: ${title}\n#+date: %u\n#+filetags: :cs:\n") :unnarrowed t)
-          ("q" "Quantum" plain "%?" :if-new (file+head "QC/${slug}.org" "#+title: ${title}\n#+date: %u\n#+filetags: :qc:\n") :unnarrowed t)
-          ("p" "Phil" plain "%?" :if-new (file+head "philosophy/${slug}.org" "#+title: ${title}\n#+date: %u\n#+filetags: :phil:\n") :unnarrowed t)
-          ("i" "Index" plain "%?" :if-new (file+head "index/${slug}.org" "#+title: ${title}\n#+date: %u\n#+filetags: :index:\n") :unnarrowed t)
-          ("r" "Paper" plain "%?" :if-new (file+head "papers/${slug}.org" "#+title: ${title}\n#+date: %u\n#+filetags: :paper:\n") :unnarrowed t))))
+        `(("m" "Math" plain "%?" :if-new (file+head "math/${slug}.org" ,(my/org-roam-capture-head "math")) :unnarrowed t)
+          ("c" "CS" plain "%?" :if-new (file+head "CS/${slug}.org" ,(my/org-roam-capture-head "cs")) :unnarrowed t)
+          ("q" "Quantum" plain "%?" :if-new (file+head "QC/${slug}.org" ,(my/org-roam-capture-head "qc")) :unnarrowed t)
+          ("p" "Phil" plain "%?" :if-new (file+head "philosophy/${slug}.org" ,(my/org-roam-capture-head "phil")) :unnarrowed t)
+          ("i" "Index" plain "%?" :if-new (file+head "index/${slug}.org" ,(my/org-roam-capture-head "index")) :unnarrowed t)
+          ("r" "Paper" plain "%?" :if-new (file+head "papers/${slug}.org" ,(my/org-roam-capture-head "paper")) :unnarrowed t))))
 
 (add-hook 'emacs-startup-hook
           (lambda ()

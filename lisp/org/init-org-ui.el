@@ -20,6 +20,11 @@
 
 (declare-function evil-insert-state-p "evil")
 
+(defface my/org-hl-line
+  '((t :inherit hl-line))
+  "Current line face used in Org buffers."
+  :group 'my/org-ui)
+
 (defun my/org--unspecified-color-p (value)
   "Return non-nil when VALUE is an unspecified face color."
   (or (null value)
@@ -88,7 +93,7 @@
     (my/org--suspend-mode-for-insert 'valign-mode)))
 
 (defun my/org-resume-expensive-modes-after-insert ()
-  "Re-enable Org UI helpers suspended by `my/org-suspend-expensive-modes-in-insert'."
+  "Re-enable Org UI helpers suspended during Evil insert state."
   (when (and (derived-mode-p 'org-mode)
              my/org--suspended-in-insert)
     (setq-local my/org--suspended-in-insert nil)
@@ -108,6 +113,16 @@
     (when (and (fboundp 'evil-insert-state-p)
                (evil-insert-state-p))
       (my/org-suspend-expensive-modes-in-insert))))
+
+(defun my/org-setup-polished-document-frame ()
+  "Apply small buffer-local polish for reading and note-taking."
+  (when (display-graphic-p)
+    (setq-local line-spacing (max (or line-spacing 0) 0.18))
+    (setq-local cursor-type 'bar)
+    (setq-local left-margin-width 1)
+    (setq-local right-margin-width 1)
+    (setq-local hl-line-face 'my/org-hl-line)
+    (set-window-buffer (selected-window) (current-buffer))))
 
 ;; 3.1 写作专注模式 (自动居中)
 (use-package olivetti
@@ -160,10 +175,12 @@
   :custom
   ;; 1. 基础美化
   (org-modern-hide-stars 'leading)
-  (org-modern-star '("◉" "○" "✸" "✿" "◈" "◇" "❀" "✜"))
+  (org-modern-star 'replace)
+  (org-modern-cycle-stars t)
+  (org-modern-replace-stars '("◉" "◎" "○" "◌" "◆" "◇" "✦" "·"))
   (org-modern-table-vertical 1)
   (org-modern-table-horizontal 0.2)
-  (org-modern-list '((45 . "•") (43 . "◦") (42 . "✦"))) 
+  (org-modern-list '((45 . "•") (43 . "◦") (42 . "∙")))
   
   ;; 2. 标签按钮化 (Tag Buttons)
   (org-modern-tag t) 
@@ -171,21 +188,23 @@
   
   ;; 3. 统计与进度条美化
   (org-modern-statistics t) 
-  (org-modern-progress t)   
+  (org-modern-progress 14)
   
   ;; 4. 时间戳美化
   (org-modern-timestamp t)
+  (org-modern-internal-target '(" ⟦" t "⟧ "))
+  (org-modern-radio-target '(" ⟪" t "⟫ "))
   
   ;; 5. 关键词美化 (集成你的图标)
   (org-modern-keyword
-   '(("title"        . "➲")
-     ("subtitle"     . "⮊")
-     ("author"       . "💁")
-     ("email"        . "📧")
-     ("date"         . "📅")
+   '(("title"        . "◇")
+     ("subtitle"     . "◆")
+     ("author"       . "✎")
+     ("email"        . "@")
+     ("date"         . "◷")
      ;; Use the emoji variation sequence to force colorful tag rendering.
-     ("filetags"     . "🏷️")
-     ("language"     . "🖹")
+     ("filetags"     . "⌗")
+     ("language"     . "文")
      ("options"      . "⛭")
      ("startup"      . "✲")
      ("property"     . "☷")
@@ -199,19 +218,66 @@
      ("name"         . "🄝")
      ("caption"      . "🄒")
      ("results"      . "☰")
-     ("print_bibliography" . "📚")))
+     ("print_bibliography" . "§")))
   
   ;; 6. 复选框美化
   (org-modern-checkbox
-   '((?X . "🗹")
-     (?- . "⊟")
-     (?\s . "□")))
+   '((?X . "☑")
+     (?- . "◩")
+     (?\s . "☐")))
 
   ;; 7. 其他装饰
   (org-modern-horizontal-rule t)
-  (org-modern-block-name nil)
-  (org-modern-todo nil) ; 禁用 todo 美化，以免覆盖你在 org-mode 中自定义的颜色
-  (org-modern-priority t))
+  (org-modern-block-name
+   '(("src" . ("λ" "□"))
+     ("example" . ("EX" "□"))
+     ("quote" . ("❝" "❞"))
+     ("verse" . ("❦" "❦"))
+     (t . ("╭" "╰"))))
+  (org-modern-todo t)
+  (org-modern-priority '((?A . "A")
+                         (?B . "B")
+                         (?C . "C")
+                         (?D . "D")))
+  :config
+  (setq org-modern-todo-faces
+        `(("TODO" :background ,(aaron-ui-color 'accent-red-soft)
+           :foreground ,(aaron-ui-color 'bg-base)
+           :weight medium)
+          ("NEXT" :background ,(aaron-ui-color 'accent-green)
+           :foreground ,(aaron-ui-color 'bg-base)
+           :weight semibold)
+          ("WIP" :background ,(aaron-ui-color 'accent-cyan)
+           :foreground ,(aaron-ui-color 'bg-base)
+           :weight semibold)
+          ("HOLD" :background ,(aaron-ui-color 'accent-orange)
+           :foreground ,(aaron-ui-color 'bg-base)
+           :weight medium)
+          ("WAIT" :background ,(aaron-ui-color 'accent-yellow)
+           :foreground ,(aaron-ui-color 'bg-base)
+           :weight medium)
+          ("DONE" :background ,(aaron-ui-color 'accent-blue)
+           :foreground ,(aaron-ui-color 'bg-base)
+           :weight medium)
+          ("CANCELLED" :background ,(aaron-ui-color 'fg-faint)
+           :foreground ,(aaron-ui-color 'bg-base)
+           :weight medium)))
+  (setq org-modern-tag-faces
+        `((t :background ,(aaron-ui-color 'bg-surface-strong)
+             :foreground ,(aaron-ui-color 'accent-teal)
+             :weight medium)))
+  (setq org-modern-priority-faces
+        `((?A :background ,(aaron-ui-color 'accent-red)
+              :foreground ,(aaron-ui-color 'bg-base)
+              :weight semibold)
+          (?B :background ,(aaron-ui-color 'accent-orange)
+              :foreground ,(aaron-ui-color 'bg-base)
+              :weight semibold)
+          (?C :background ,(aaron-ui-color 'accent-yellow-soft)
+              :foreground ,(aaron-ui-color 'bg-base)
+              :weight medium)
+          (t :background ,(aaron-ui-color 'bg-surface-strong)
+             :foreground ,(aaron-ui-color 'fg-main)))))
 
 (defun my/org-apply-ui ()
   "Apply the local document UI to Org and Org Modern faces."
@@ -228,25 +294,42 @@
                (title-weight (if (boundp 'my/font-title-weight) my/font-title-weight 'medium))
                (strong-weight (if (boundp 'my/font-strong-weight) my/font-strong-weight 'medium))
                (popout-weight (if (boundp 'my/font-popout-weight) my/font-popout-weight 'semibold))
-               (crust (aaron-ui-color 'bg-base))
                (mantle (aaron-ui-color 'bg-code))
                (surface0 (aaron-ui-color 'bg-surface))
                (surface1 (aaron-ui-color 'bg-surface-strong))
                (surface2 (aaron-ui-color 'bg-surface-stronger))
+               (border-subtle (aaron-ui-color 'border-subtle))
+               (fg-strong (aaron-ui-color 'fg-strong))
+               (fg-faint (aaron-ui-color 'fg-faint))
                (overlay1 (aaron-ui-color 'fg-overlay))
                (subtext0 (aaron-ui-color 'fg-subtle))
                (subtext1 (aaron-ui-color 'fg-soft))
                (text (aaron-ui-color 'fg-main))
                (rosewater (aaron-ui-color 'accent-rose))
+               (red (aaron-ui-color 'accent-red))
+               (orange (aaron-ui-color 'accent-orange))
                (yellow (aaron-ui-color 'accent-yellow))
                (blue (aaron-ui-color 'accent-blue))
                (lavender (aaron-ui-color 'accent-lavender))
                (mauve (aaron-ui-color 'accent-mauve))
+               (cyan (aaron-ui-color 'accent-cyan))
                (teal (aaron-ui-color 'accent-teal))
                (green (aaron-ui-color 'accent-green))
                (meta-bg (aaron-ui-color 'bg-meta))
-               (meta-bg-strong (aaron-ui-color 'bg-meta-strong))
                (meta-fg (aaron-ui-color 'accent-green))
+               (headline-1-bg (my/org-blend-colors yellow base-bg 0.085))
+               (headline-2-bg (my/org-blend-colors blue base-bg 0.075))
+               (headline-3-bg (my/org-blend-colors mauve base-bg 0.06))
+               (headline-4-bg (my/org-blend-colors teal base-bg 0.05))
+               (inline-code-bg (my/org-blend-colors yellow base-bg 0.11))
+               (verbatim-bg (my/org-blend-colors blue base-bg 0.1))
+               (latex-bg (my/org-blend-colors mauve base-bg 0.075))
+               (checkbox-bg (my/org-blend-colors green base-bg 0.12))
+               (hl-line-bg (my/org-blend-colors blue base-bg 0.055))
+               (block-name-bg (my/org-blend-colors yellow base-bg 0.1))
+               (target-bg (my/org-blend-colors lavender base-bg 0.12))
+               (done-bg (my/org-blend-colors green base-bg 0.1))
+               (property-bg (my/org-blend-colors teal base-bg 0.055))
                (quote-bg (my/org-blend-colors blue base-bg 0.05))
                (verse-bg (my/org-blend-colors mauve base-bg 0.05))
                (table-bg (my/org-blend-colors blue base-bg 0.025))
@@ -256,33 +339,47 @@
                (stats-todo-bg (my/org-blend-colors yellow base-bg 0.14))
                (agenda-structure-bg (my/org-blend-colors mauve base-bg 0.12))
                (agenda-today-bg (my/org-blend-colors blue base-bg 0.12)))
+          (when (facep 'my/org-hl-line)
+            (set-face-attribute 'my/org-hl-line nil
+                                :background hl-line-bg
+                                :extend t))
           (when (facep 'org-document-title)
             (set-face-attribute 'org-document-title nil
-                                :foreground rosewater
+                                :foreground fg-strong
                                 :weight popout-weight
-                                :height 1.22))
+                                :height 1.34))
           (when (facep 'org-level-1)
             (set-face-attribute 'org-level-1 nil
                                 :foreground yellow
+                                :background headline-1-bg
                                 :weight popout-weight
-                                :height 1.14))
+                                :height 1.18
+                                :extend t
+                                :overline `(:color ,(my/org-blend-colors yellow base-bg 0.34)
+                                            :style line)))
           (when (facep 'org-level-2)
             (set-face-attribute 'org-level-2 nil
                                 :foreground blue
+                                :background headline-2-bg
                                 :weight popout-weight
-                                :height 1.09))
+                                :height 1.12
+                                :extend t))
           (when (facep 'org-level-3)
             (set-face-attribute 'org-level-3 nil
                                 :foreground mauve
+                                :background headline-3-bg
                                 :weight strong-weight
-                                :height 1.05))
+                                :height 1.07
+                                :extend t))
           (when (facep 'org-level-4)
             (set-face-attribute 'org-level-4 nil
                                 :foreground teal
+                                :background headline-4-bg
                                 :weight strong-weight
-                                :height 1.03))
+                                :height 1.04
+                                :extend t))
           (when (facep 'org-level-5)
-            (set-face-attribute 'org-level-5 nil :foreground rosewater :weight title-weight))
+            (set-face-attribute 'org-level-5 nil :foreground rosewater :weight title-weight :height 1.01))
           (when (facep 'org-level-6)
             (set-face-attribute 'org-level-6 nil :foreground lavender :weight title-weight))
           (when (facep 'org-level-7)
@@ -300,31 +397,46 @@
             (set-face-attribute 'org-document-info-keyword nil
                                 :background meta-bg
                                 :foreground meta-fg))
+          (when (facep 'org-property-value)
+            (set-face-attribute 'org-property-value nil
+                                :background property-bg
+                                :foreground subtext1
+                                :weight title-weight))
+          (when (facep 'org-archived)
+            (set-face-attribute 'org-archived nil
+                                :foreground fg-faint
+                                :slant 'italic))
           (when (facep 'org-block)
             (set-face-attribute 'org-block nil
-                                :background crust
+                                :background mantle
                                 :foreground text
-                                :extend t))
+                                :extend t
+                                :box `(:line-width -1 :color ,border-subtle)))
           (when (facep 'org-code)
             (set-face-attribute 'org-code nil
-                                :background mantle
+                                :background inline-code-bg
                                 :foreground yellow
-                                :weight strong-weight))
+                                :weight strong-weight
+                                :box `(:line-width 2 :color ,inline-code-bg)))
           (when (facep 'org-block-begin-line)
             (set-face-attribute 'org-block-begin-line nil
                                 :background meta-bg
-                                :foreground subtext0
+                                :foreground meta-fg
+                                :height 0.88
+                                :weight title-weight
                                 :extend t))
           (when (facep 'org-block-end-line)
             (set-face-attribute 'org-block-end-line nil
                                 :background meta-bg
                                 :foreground subtext0
+                                :height 0.82
                                 :extend t))
           (when (facep 'org-verbatim)
             (set-face-attribute 'org-verbatim nil
-                                :background mantle
+                                :background verbatim-bg
                                 :foreground blue
-                                :weight title-weight))
+                                :weight title-weight
+                                :box `(:line-width 2 :color ,verbatim-bg)))
           (when (facep 'org-quote)
             (set-face-attribute 'org-quote nil
                                 :background quote-bg
@@ -345,16 +457,28 @@
             (set-face-attribute 'org-formula nil
                                 :foreground mauve
                                 :weight title-weight))
+          (when (facep 'org-latex-and-related)
+            (set-face-attribute 'org-latex-and-related nil
+                                :background latex-bg
+                                :foreground lavender
+                                :weight title-weight
+                                :box `(:line-width 2 :color ,latex-bg)))
           (when (facep 'org-special-keyword)
             (set-face-attribute 'org-special-keyword nil
                                 :background meta-bg
-                                :foreground meta-fg))
+                                :foreground meta-fg
+                                :weight title-weight))
           (when (facep 'org-date)
-            (set-face-attribute 'org-date nil :foreground blue :weight title-weight))
+            (set-face-attribute 'org-date nil
+                                :background (my/org-blend-colors blue base-bg 0.105)
+                                :foreground blue
+                                :weight title-weight
+                                :box `(:line-width 2 :color ,(my/org-blend-colors blue base-bg 0.105))))
           (when (facep 'org-link)
             (set-face-attribute 'org-link nil
                                 :foreground blue
-                                :underline t))
+                                :underline `(:color ,(my/org-blend-colors blue base-bg 0.56)
+                                             :style line)))
           (when (facep 'org-footnote)
             (set-face-attribute 'org-footnote nil
                                 :foreground lavender
@@ -368,6 +492,18 @@
                                 :foreground yellow
                                 :weight strong-weight
                                 :background base-bg))
+          (when (facep 'org-list-dt)
+            (set-face-attribute 'org-list-dt nil
+                                :foreground orange
+                                :background (my/org-blend-colors orange base-bg 0.08)
+                                :weight strong-weight
+                                :box `(:line-width 2 :color ,(my/org-blend-colors orange base-bg 0.08))))
+          (when (facep 'org-checkbox)
+            (set-face-attribute 'org-checkbox nil
+                                :background checkbox-bg
+                                :foreground green
+                                :weight strong-weight
+                                :box `(:line-width 2 :color ,checkbox-bg)))
           (when (facep 'org-indent)
             (set-face-attribute 'org-indent nil :foreground base-bg :background base-bg))
           (when (facep 'org-hide)
@@ -377,6 +513,16 @@
                                 :background tag-bg
                                 :foreground teal
                                 :weight title-weight))
+          (when (facep 'org-todo)
+            (set-face-attribute 'org-todo nil
+                                :foreground red
+                                :weight strong-weight))
+          (when (facep 'org-done)
+            (set-face-attribute 'org-done nil
+                                :background done-bg
+                                :foreground green
+                                :weight title-weight
+                                :box `(:line-width 2 :color ,done-bg)))
           (when (facep 'org-priority)
             (set-face-attribute 'org-priority nil
                                 :background priority-bg
@@ -398,8 +544,12 @@
                                 :strike-through t))
           (when (facep 'org-warning)
             (set-face-attribute 'org-warning nil
-                                :foreground rosewater
+                                :foreground red
                                 :weight strong-weight))
+          (when (facep 'org-modern-symbol)
+            (set-face-attribute 'org-modern-symbol nil
+                                :foreground fg-faint
+                                :weight title-weight))
           (when (facep 'org-modern-label)
             (set-face-attribute 'org-modern-label nil
                                 :background surface1
@@ -427,11 +577,48 @@
                                 :box `(:line-width 3 :color ,mantle)))
           (when (facep 'org-modern-block-name)
             (set-face-attribute 'org-modern-block-name nil
+                                :background block-name-bg
                                 :foreground yellow
-                                :weight strong-weight))
+                                :height 0.9
+                                :weight strong-weight
+                                :box `(:line-width 2 :color ,block-name-bg)))
+          (when (facep 'org-modern-todo)
+            (set-face-attribute 'org-modern-todo nil
+                                :inherit 'org-modern-label
+                                :weight strong-weight
+                                :inverse-video nil))
+          (when (facep 'org-modern-done)
+            (set-face-attribute 'org-modern-done nil
+                                :background done-bg
+                                :foreground green
+                                :weight title-weight
+                                :box `(:line-width 3 :color ,done-bg)))
+          (when (facep 'org-modern-time-active)
+            (set-face-attribute 'org-modern-time-active nil
+                                :background (my/org-blend-colors blue base-bg 0.18)
+                                :foreground fg-strong
+                                :weight strong-weight
+                                :box `(:line-width 3 :color ,(my/org-blend-colors blue base-bg 0.18))))
+          (when (facep 'org-modern-time-inactive)
+            (set-face-attribute 'org-modern-time-inactive nil
+                                :background (my/org-blend-colors overlay1 base-bg 0.11)
+                                :foreground subtext0
+                                :box `(:line-width 3 :color ,(my/org-blend-colors overlay1 base-bg 0.11))))
+          (when (facep 'org-modern-internal-target)
+            (set-face-attribute 'org-modern-internal-target nil
+                                :background target-bg
+                                :foreground lavender
+                                :weight title-weight
+                                :box `(:line-width 3 :color ,target-bg)))
+          (when (facep 'org-modern-radio-target)
+            (set-face-attribute 'org-modern-radio-target nil
+                                :background target-bg
+                                :foreground mauve
+                                :weight title-weight
+                                :box `(:line-width 3 :color ,target-bg)))
           (when (facep 'org-modern-horizontal-rule)
             (set-face-attribute 'org-modern-horizontal-rule nil
-                                :foreground surface2))
+                                :foreground (my/org-blend-colors cyan base-bg 0.42)))
           (when (facep 'org-modern-priority)
             (set-face-attribute 'org-modern-priority nil
                                 :background priority-bg
@@ -480,6 +667,7 @@
 
 (add-hook 'org-mode-hook #'my/org-apply-ui)
 (add-hook 'after-load-theme-hook #'my/org-apply-ui)
+(add-hook 'org-mode-hook #'my/org-setup-polished-document-frame)
 (add-hook 'org-mode-hook #'my/org-setup-evil-insert-performance)
 
 ;; 3.4 自动显示强调符
@@ -491,8 +679,12 @@
   :custom
   (org-appear-autoemphasis t)
   (org-appear-autolinks t)
+  (org-appear-autoentities t)
+  (org-appear-autokeywords t)
+  (org-appear-inside-latex t)
   ;; 光标进入 `^{}' / `_{}' 时显示标记，避免编辑时只看到渲染结果。
-  (org-appear-autosubmarkers t))
+  (org-appear-autosubmarkers t)
+  (org-appear-delay 0.08))
 
 ;; 3.5 优先级美化
 (use-package org-fancy-priorities
@@ -505,20 +697,32 @@
 ;; 1. 样式配置 (可自定义颜色和标签)
 ;; ===========================================================
 (defvar my/org-special-block-styles
-  `(("definition" . (:label "定义" :emoji "💡" :footer "◇" :color ,(aaron-ui-color 'accent-yellow)))
-    ("defn"       . (:label "定义" :emoji "💡" :footer "◇" :color ,(aaron-ui-color 'accent-yellow)))
-    ("theorem"    . (:label "定理" :emoji "📐" :footer "◈" :color ,(aaron-ui-color 'accent-green)))
-    ("thm"        . (:label "定理" :emoji "📐" :footer "◈" :color ,(aaron-ui-color 'accent-green)))
-    ("lemma"      . (:label "引理" :emoji "🔹" :footer "◌" :color ,(aaron-ui-color 'accent-blue)))
-    ("cor"        . (:label "推论" :emoji "✨" :footer "✦" :color ,(aaron-ui-color 'accent-lavender)))
-    ("prop"       . (:label "命题" :emoji "📌" :footer "◆" :color ,(aaron-ui-color 'accent-rose)))
-    ("property"   . (:label "性质" :emoji "🧩" :footer "◍" :color ,(aaron-ui-color 'accent-lavender)))
-    ("proof"      . (:label "证明" :emoji "🔍" :footer "■" :footer-style square :color ,(aaron-ui-color 'accent-cyan)))
-    ("example"    . (:label "例子" :emoji "🧪" :footer "◦" :color ,(aaron-ui-color 'accent-yellow-soft)))
-    ("attention"  . (:label "注意" :emoji "❗" :footer "❢" :color ,(aaron-ui-color 'accent-red)))
-    ("note"       . (:label "笔记" :emoji "📝" :footer "✎" :color ,(aaron-ui-color 'accent-teal)))
-    ("info"       . (:label "信息" :emoji "ℹ" :footer "⊙" :color ,(aaron-ui-color 'accent-teal)))
-    ("warning"    . (:label "警告" :emoji "⚠" :footer "▲" :color ,(aaron-ui-color 'accent-red)))))
+  `(("overview"   . (:label "概览" :emoji "☷" :footer "☷" :color ,(aaron-ui-color 'accent-blue)))
+    ("toc"        . (:label "目录" :emoji "☷" :footer "☷" :color ,(aaron-ui-color 'accent-blue)))
+    ("definition" . (:label "定义" :emoji "◆" :footer "◇" :color ,(aaron-ui-color 'accent-yellow)))
+    ("defn"       . (:label "定义" :emoji "◆" :footer "◇" :color ,(aaron-ui-color 'accent-yellow)))
+    ("theorem"    . (:label "定理" :emoji "∎" :footer "◈" :color ,(aaron-ui-color 'accent-green)))
+    ("thm"        . (:label "定理" :emoji "∎" :footer "◈" :color ,(aaron-ui-color 'accent-green)))
+    ("lemma"      . (:label "引理" :emoji "◇" :footer "◌" :color ,(aaron-ui-color 'accent-blue)))
+    ("corollary"  . (:label "推论" :emoji "⇒" :footer "✦" :color ,(aaron-ui-color 'accent-lavender)))
+    ("cor"        . (:label "推论" :emoji "⇒" :footer "✦" :color ,(aaron-ui-color 'accent-lavender)))
+    ("proposition" . (:label "命题" :emoji "◉" :footer "◆" :color ,(aaron-ui-color 'accent-rose)))
+    ("prop"       . (:label "命题" :emoji "◉" :footer "◆" :color ,(aaron-ui-color 'accent-rose)))
+    ("property"   . (:label "性质" :emoji "◍" :footer "◍" :color ,(aaron-ui-color 'accent-lavender)))
+    ("proof"      . (:label "证明" :emoji "∵" :footer "■" :footer-style square :color ,(aaron-ui-color 'accent-cyan)))
+    ("solution"   . (:label "解答" :emoji "∴" :footer "□" :footer-style square :color ,(aaron-ui-color 'accent-cyan)))
+    ("answer"     . (:label "答案" :emoji "✓" :footer "✓" :color ,(aaron-ui-color 'accent-green)))
+    ("exercise"   . (:label "练习" :emoji "✦" :footer "✦" :color ,(aaron-ui-color 'accent-orange)))
+    ("problem"    . (:label "题目" :emoji "?" :footer "?" :color ,(aaron-ui-color 'accent-orange)))
+    ("question"   . (:label "问题" :emoji "?" :footer "?" :color ,(aaron-ui-color 'accent-yellow-soft)))
+    ("example"    . (:label "例子" :emoji "◎" :footer "◦" :color ,(aaron-ui-color 'accent-yellow-soft)))
+    ("attention"  . (:label "注意" :emoji "!" :footer "!" :color ,(aaron-ui-color 'accent-red)))
+    ("important"  . (:label "重点" :emoji "!" :footer "!" :color ,(aaron-ui-color 'accent-red-strong)))
+    ("tip"        . (:label "提示" :emoji "✧" :footer "✧" :color ,(aaron-ui-color 'accent-teal)))
+    ("summary"    . (:label "小结" :emoji "☰" :footer "☰" :color ,(aaron-ui-color 'accent-blue)))
+    ("note"       . (:label "笔记" :emoji "✎" :footer "✎" :color ,(aaron-ui-color 'accent-teal)))
+    ("info"       . (:label "信息" :emoji "i" :footer "⊙" :color ,(aaron-ui-color 'accent-teal)))
+    ("warning"    . (:label "警告" :emoji "△" :footer "▲" :color ,(aaron-ui-color 'accent-red)))))
 
 (defun my/org-special-block-config (type)
   "Return the configured style plist for special block TYPE."
@@ -526,7 +730,8 @@
 
 (defface my/org-block-title-face
   '((t :weight regular :height 1.05 :inherit default))
-  "Block 标题的字体样式。")
+  "Block 标题的字体样式。"
+  :group 'my/org-ui)
 
 ;; ===========================================================
 ;; 2. 颜色计算辅助函数

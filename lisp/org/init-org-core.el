@@ -15,6 +15,7 @@
 (require 'init-funcs)
 (require 'org)
 (require 'org-element)
+(require 'subr-x)
 
 ;;; ----------------------------------------------------------------------------
 ;;; 1. Global Variables & Paths (全局路径配置)
@@ -52,6 +53,25 @@ Rich Org UI is no longer disabled based on buffer size."
 Special block overlays are no longer disabled based on buffer size."
   :type 'integer)
 
+(defcustom my/org-toc-depth 3
+  "Default headline depth used by `my/org-toc-insert-or-update'."
+  :type 'integer)
+
+(defcustom my/org-toc-auto-update-max-buffer-size (* 1024 1024)
+  "Maximum Org buffer size eligible for automatic TOC refresh."
+  :type 'integer)
+
+(defcustom my/org-toc-open-idle-delay 0.45
+  "Idle delay before refreshing an existing managed TOC after opening Org."
+  :type 'number)
+
+(defcustom my/org-toc-auto-update-enabled t
+  "Whether Org buffers with an overview TOC refresh automatically."
+  :type 'boolean)
+
+(defvar-local my/org-toc--open-refresh-timer nil
+  "Idle timer used to refresh a managed TOC after opening an Org buffer.")
+
 (defun my/org-rich-ui-buffer-p ()
   "Return non-nil when the current Org buffer should use rich UI helpers."
   (my/rich-ui-buffer-p nil my/org-rich-ui-max-buffer-size))
@@ -78,6 +98,160 @@ Special block overlays are no longer disabled based on buffer size."
     (with-current-buffer buffer
       (my/org-force-indent-mode))))
 
+(defun my/org-toc--block-regexp ()
+  "Return regexp matching the managed overview TOC block."
+  "^[ \t]*#\\+begin_overview\\_>.*:toc\\_>")
+
+(defun my/org-toc--find-block ()
+  "Return (BEGIN . END) for the managed overview TOC block, or nil."
+  (save-excursion
+    (goto-char (point-min))
+    (when (re-search-forward (my/org-toc--block-regexp) nil t)
+      (let ((begin (line-beginning-position)))
+        (when (re-search-forward "^[ \t]*#\\+end_overview\\_>" nil t)
+          (cons begin (min (point-max) (1+ (line-end-position)))))))))
+
+(defun my/org-toc--block-depth (block)
+  "Return the DEPTH declared by managed TOC BLOCK, or nil."
+  (save-excursion
+    (goto-char (car block))
+    (when (looking-at ".*:depth[ \t]+\\([0-9]+\\)")
+      (string-to-number (match-string 1)))))
+
+(defun my/org-toc--insert-position ()
+  "Return the position after leading Org file metadata."
+  (save-excursion
+    (goto-char (point-min))
+    (let ((continue t))
+      (while (and continue (not (eobp)))
+        (cond
+         ((looking-at-p "[ \t]*$")
+          (forward-line 1))
+         ((looking-at (my/org-toc--block-regexp))
+          (if (re-search-forward "^[ \t]*#\\+end_overview\\_>" nil t)
+              (forward-line 1)
+            (setq continue nil)))
+         ((looking-at-p "^[ \t]*:PROPERTIES:[ \t]*$")
+          (if (re-search-forward "^[ \t]*:END:[ \t]*$" nil t)
+              (forward-line 1)
+            (setq continue nil)))
+         ((looking-at-p "[ \t]*#\\+")
+          (forward-line 1))
+         (t
+          (setq continue nil)))))
+    (point)))
+
+(defun my/org-toc--headline-link (title)
+  "Return an Org fuzzy link to headline TITLE."
+  (org-link-make-string (concat "*" title) (my/org-toc--display-title title)))
+
+(defun my/org-toc--display-title (title)
+  "Return TITLE suitable as readable TOC link text."
+  (let ((text (copy-sequence title)))
+    (while (string-match "\\[\\[[^]\n]+\\]\\[\\([^]\n]+\\)\\]\\]" text)
+      (setq text (replace-match "\\1" t nil text)))
+    (while (string-match "\\[\\[\\([^]\n]+\\)\\]\\]" text)
+      (setq text (replace-match "\\1" t nil text)))
+    text))
+
+(defun my/org-toc--headline-lines (&optional depth)
+  "Return formatted TOC lines up to headline DEPTH.
+This intentionally uses a cheap headline scan instead of a full
+`org-element' parse."
+  (let ((max-depth (or depth my/org-toc-depth))
+        lines)
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (point-min))
+        (while (re-search-forward org-heading-regexp nil t)
+          (let* ((components (org-heading-components))
+                 (level (nth 0 components))
+                 (title (string-trim (org-no-properties (or (nth 4 components) ""))))
+                 (tags (nth 5 components)))
+            (when (and level
+                       (<= level max-depth)
+                       (not (and tags (string-match-p ":no_toc:" tags)))
+                       (not (string-empty-p title)))
+              (push (format "%s- %s"
+                            (make-string (* 2 (1- level)) ?\s)
+                            (my/org-toc--headline-link title))
+                    lines))))))
+    (nreverse lines)))
+
+(defun my/org-toc--contents (&optional depth)
+  "Return the managed overview TOC block text for DEPTH."
+  (let ((lines (my/org-toc--headline-lines depth)))
+    (concat "#+begin_overview :toc t :depth " (number-to-string (or depth my/org-toc-depth)) "\n"
+            (if lines
+                (mapconcat #'identity lines "\n")
+              "- 还没有标题。")
+            "\n#+end_overview\n")))
+
+(defun my/org-toc-insert-or-update (&optional depth)
+  "Insert or update the managed TOC at the top of the current Org buffer.
+The TOC is stored as a styled `overview' special block and follows `*'
+headline levels."
+  (interactive "P")
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Not in an Org buffer"))
+  (let* ((block (my/org-toc--find-block))
+         (depth (cond
+                 ((numberp depth) depth)
+                 ((consp depth) (prefix-numeric-value depth))
+                 (block (or (my/org-toc--block-depth block) my/org-toc-depth))
+                 (t my/org-toc-depth)))
+         (contents (my/org-toc--contents depth))
+         (block (or block (my/org-toc--find-block)))
+         (target (my/org-toc--insert-position)))
+    (save-excursion
+      (if block
+          (unless (and (= (car block) target)
+                       (string= (buffer-substring-no-properties (car block) (cdr block))
+                                contents))
+            (delete-region (car block) (cdr block))
+            (goto-char (my/org-toc--insert-position))
+            (insert contents)
+            (unless (looking-at-p "[ \t]*$")
+              (insert "\n")))
+        (goto-char (my/org-toc--insert-position))
+        (unless (bolp)
+          (insert "\n"))
+        (insert contents "\n")))))
+
+(defun my/org-toc-update-if-present ()
+  "Refresh the managed overview TOC when the current Org buffer has one."
+  (when (and my/org-toc-auto-update-enabled
+             (derived-mode-p 'org-mode)
+             (<= (buffer-size) my/org-toc-auto-update-max-buffer-size)
+             (my/org-toc--find-block))
+    (my/org-toc-insert-or-update)))
+
+(defun my/org-toc-refresh-open-buffer (buffer)
+  "Refresh managed TOC in BUFFER after it has been opened."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq-local my/org-toc--open-refresh-timer nil)
+      (when (and my/org-toc-auto-update-enabled
+                 (derived-mode-p 'org-mode)
+                 (not (buffer-modified-p))
+                 (<= (buffer-size) my/org-toc-auto-update-max-buffer-size))
+        (let ((inhibit-message t))
+          (my/org-toc-update-if-present))))))
+
+(defun my/org-setup-toc-auto-update ()
+  "Auto-refresh the managed overview TOC with low overhead."
+  (add-hook 'before-save-hook #'my/org-toc-update-if-present nil t)
+  (when (and my/org-toc-auto-update-enabled
+             (not my/org-toc--open-refresh-timer)
+             (<= (buffer-size) my/org-toc-auto-update-max-buffer-size)
+             (my/org-toc--find-block))
+    (setq-local my/org-toc--open-refresh-timer
+                (run-with-idle-timer my/org-toc-open-idle-delay
+                                     nil
+                                     #'my/org-toc-refresh-open-buffer
+                                     (current-buffer)))))
+
 ;;; ----------------------------------------------------------------------------
 ;;; 2. Org Core Configuration (核心设置)
 ;;; ----------------------------------------------------------------------------
@@ -87,12 +261,14 @@ Special block overlays are no longer disabled based on buffer size."
   :hook ((org-mode . visual-line-mode)        ; 自动换行
          (org-mode . my/org-force-indent-mode)
          (org-mode . my/org-setup-buffer-spacing)
+         (org-mode . my/org-setup-toc-auto-update)
          (org-mode . my/org-enable-typography-maybe)) ; 缩进模式
   :bind (("C-c a" . org-agenda)
          ("C-c c" . org-capture)
          :map org-mode-map
          ("C-c '" . nil)
          ("C-c C-'" . nil)
+         ("C-c C-x T" . my/org-toc-insert-or-update)
          ("C-c C-q" . counsel-org-tag))
 
   :custom
