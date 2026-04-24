@@ -18,6 +18,13 @@
 (defvar-local my/org--suspended-in-insert nil)
 (defvar-local my/org--insert-suspended-modes nil)
 
+(defcustom my/org-pretty-block-cache-max-entries 256
+  "Maximum cached pretty-block signatures per Org buffer.
+The cache is only an optimization; clearing it is safe and prevents stale
+integer position keys from accumulating during long editing sessions."
+  :type 'integer
+  :group 'my/org-ui)
+
 (declare-function evil-insert-state-p "evil")
 (declare-function my/org-toc-insert-or-update "init-org-core")
 
@@ -1156,6 +1163,11 @@ DEFAULT-BG defaults to `my/org-default-background'."
                      (equal signature cached-signature))
           (unless (hash-table-p my/org-pretty-block-cache)
             (setq my/org-pretty-block-cache (make-hash-table :test #'equal)))
+          (when (and (integerp my/org-pretty-block-cache-max-entries)
+                     (> my/org-pretty-block-cache-max-entries 0)
+                     (> (hash-table-count my/org-pretty-block-cache)
+                        my/org-pretty-block-cache-max-entries))
+            (clrhash my/org-pretty-block-cache))
           (puthash begin-pos signature my/org-pretty-block-cache)
 
         ;; 3. 清理区域

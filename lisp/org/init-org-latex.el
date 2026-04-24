@@ -479,6 +479,10 @@ Set to nil to keep the full log."
 (defvar-local my/org-latex--scroll-preview-enabled nil)
 (defvar my/org-latex--allow-native-preview nil)
 
+(defcustom my/org-latex-overlay-table-max-entries 768
+  "Maximum tracked LaTeX preview overlays per Org buffer before pruning."
+  :type 'integer)
+
 (defcustom my/org-latex-fragment-context-lookaround 140
   "Characters checked around point/change before parsing for LaTeX fragments."
   :type 'integer)
@@ -692,6 +696,14 @@ Set to nil to keep the full log."
   "Track OVERLAY in the buffer-local preview overlay table."
   (when (my/org-latex--overlay-live-p overlay)
     (my/org-latex--ensure-state)
+    (when (and (integerp my/org-latex-overlay-table-max-entries)
+               (> my/org-latex-overlay-table-max-entries 0)
+               (> (hash-table-count my/org-latex--overlay-table)
+                  my/org-latex-overlay-table-max-entries))
+      (maphash (lambda (key tracked-overlay)
+                 (unless (my/org-latex--overlay-live-p tracked-overlay)
+                   (remhash key my/org-latex--overlay-table)))
+               my/org-latex--overlay-table))
     (let ((key (my/org-latex--overlay-key (overlay-start overlay)
                                           (overlay-end overlay))))
       (overlay-put overlay 'my/org-latex-key key)
@@ -798,8 +810,10 @@ Keep the preview overlay table synchronized even when duplicate overlays exist."
 (defun my/org-latex--release-waiters (job)
   "Release marker resources tracked by JOB."
   (dolist (waiter (plist-get job :waiters))
-    (set-marker (plist-get waiter :beg) nil)
-    (set-marker (plist-get waiter :end) nil))
+    (when (markerp (plist-get waiter :beg))
+      (set-marker (plist-get waiter :beg) nil))
+    (when (markerp (plist-get waiter :end))
+      (set-marker (plist-get waiter :end) nil)))
   (when-let* ((index (plist-get job :waiter-index)))
     (clrhash index))
   (setf (plist-get job :waiters) nil))
@@ -1317,6 +1331,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
   (setq my/org-latex--preview-timer nil
         my/org-latex--last-preview-range nil
         my/org-latex--post-command-point nil
+        my/org-latex--post-command-range nil
         my/org-latex--render-processes nil
         my/org-latex--render-queue nil
         my/org-latex--render-queue-tail nil
