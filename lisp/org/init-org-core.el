@@ -61,16 +61,18 @@ Special block overlays are no longer disabled based on buffer size."
   "Maximum Org buffer size eligible for automatic TOC refresh."
   :type 'integer)
 
-(defcustom my/org-toc-open-idle-delay 0.45
-  "Idle delay before refreshing an existing managed TOC after opening Org."
-  :type 'number)
-
 (defcustom my/org-toc-auto-update-enabled t
   "Whether Org buffers with an overview TOC refresh automatically."
   :type 'boolean)
 
-(defvar-local my/org-toc--open-refresh-timer nil
-  "Idle timer used to refresh a managed TOC after opening an Org buffer.")
+(defvar-local my/org-toc--block-begin-marker nil
+  "Marker for the beginning of the managed overview TOC block.")
+
+(defvar-local my/org-toc--block-end-marker nil
+  "Marker for the end of the managed overview TOC block.")
+
+(defvar-local my/org-toc--initial-refresh-done nil
+  "Whether this buffer already ran its one-time TOC refresh after opening.")
 
 (defun my/org-rich-ui-buffer-p ()
   "Return non-nil when the current Org buffer should use rich UI helpers."
@@ -111,6 +113,34 @@ Special block overlays are no longer disabled based on buffer size."
         (when (re-search-forward "^[ \t]*#\\+end_overview\\_>" nil t)
           (cons begin (min (point-max) (1+ (line-end-position)))))))))
 
+(defun my/org-toc--set-cached-block (block)
+  "Cache managed TOC BLOCK bounds using markers."
+  (if block
+      (progn
+        (setq-local my/org-toc--block-begin-marker (copy-marker (car block)))
+        (setq-local my/org-toc--block-end-marker (copy-marker (cdr block) t)))
+    (when (markerp my/org-toc--block-begin-marker)
+      (set-marker my/org-toc--block-begin-marker nil))
+    (when (markerp my/org-toc--block-end-marker)
+      (set-marker my/org-toc--block-end-marker nil))
+    (setq-local my/org-toc--block-begin-marker nil)
+    (setq-local my/org-toc--block-end-marker nil)))
+
+(defun my/org-toc--refresh-cached-block ()
+  "Refresh cached managed TOC bounds and return them."
+  (let ((block (my/org-toc--find-block)))
+    (my/org-toc--set-cached-block block)
+    block))
+
+(defun my/org-toc--cached-block ()
+  "Return cached managed TOC block bounds, or nil."
+  (when (and (markerp my/org-toc--block-begin-marker)
+             (markerp my/org-toc--block-end-marker)
+             (marker-buffer my/org-toc--block-begin-marker)
+             (marker-buffer my/org-toc--block-end-marker))
+    (cons (marker-position my/org-toc--block-begin-marker)
+          (marker-position my/org-toc--block-end-marker))))
+
 (defun my/org-toc--block-depth (block)
   "Return the DEPTH declared by managed TOC BLOCK, or nil."
   (save-excursion
@@ -118,25 +148,41 @@ Special block overlays are no longer disabled based on buffer size."
     (when (looking-at ".*:depth[ \t]+\\([0-9]+\\)")
       (string-to-number (match-string 1)))))
 
+(defun my/org-toc--skip-blank-lines ()
+  "Move point over blank lines."
+  (while (and (not (eobp)) (looking-at-p "[ \t]*$"))
+    (forward-line 1)))
+
+(defun my/org-toc--metadata-at-point-p ()
+  "Return non-nil when point is on leading Org file metadata."
+  (or (looking-at-p "^[ \t]*:PROPERTIES:[ \t]*$")
+      (looking-at-p "[ \t]*#\\+")))
+
+(defun my/org-toc--forward-metadata ()
+  "Move point over the metadata form at point."
+  (cond
+   ((looking-at-p "^[ \t]*:PROPERTIES:[ \t]*$")
+    (if (re-search-forward "^[ \t]*:END:[ \t]*$" nil t)
+        (forward-line 1)
+      (goto-char (point-max))))
+   ((looking-at-p "[ \t]*#\\+")
+    (forward-line 1))))
+
 (defun my/org-toc--insert-position ()
-  "Return the position after leading Org file metadata."
+  "Return the tight position after leading Org file metadata."
   (save-excursion
     (goto-char (point-min))
+    (my/org-toc--skip-blank-lines)
     (let ((continue t))
       (while (and continue (not (eobp)))
         (cond
-         ((looking-at-p "[ \t]*$")
-          (forward-line 1))
-         ((looking-at (my/org-toc--block-regexp))
-          (if (re-search-forward "^[ \t]*#\\+end_overview\\_>" nil t)
-              (forward-line 1)
-            (setq continue nil)))
-         ((looking-at-p "^[ \t]*:PROPERTIES:[ \t]*$")
-          (if (re-search-forward "^[ \t]*:END:[ \t]*$" nil t)
-              (forward-line 1)
-            (setq continue nil)))
-         ((looking-at-p "[ \t]*#\\+")
-          (forward-line 1))
+         ((my/org-toc--metadata-at-point-p)
+          (my/org-toc--forward-metadata)
+          (let ((blank-start (point)))
+            (my/org-toc--skip-blank-lines)
+            (unless (my/org-toc--metadata-at-point-p)
+              (goto-char blank-start)
+              (setq continue nil))))
          (t
           (setq continue nil)))))
     (point)))
@@ -209,7 +255,13 @@ headline levels."
           (unless (and (= (car block) target)
                        (string= (buffer-substring-no-properties (car block) (cdr block))
                                 contents))
-            (delete-region (car block) (cdr block))
+            (let ((delete-start (if (and (< target (car block))
+                                         (string-blank-p
+                                          (buffer-substring-no-properties
+                                           target (car block))))
+                                    target
+                                  (car block))))
+              (delete-region delete-start (cdr block)))
             (goto-char (my/org-toc--insert-position))
             (insert contents)
             (unless (looking-at-p "[ \t]*$")
@@ -217,40 +269,32 @@ headline levels."
         (goto-char (my/org-toc--insert-position))
         (unless (bolp)
           (insert "\n"))
-        (insert contents "\n")))))
+        (insert contents "\n")))
+    (my/org-toc--refresh-cached-block)))
 
 (defun my/org-toc-update-if-present ()
   "Refresh the managed overview TOC when the current Org buffer has one."
   (when (and my/org-toc-auto-update-enabled
              (derived-mode-p 'org-mode)
              (<= (buffer-size) my/org-toc-auto-update-max-buffer-size)
-             (my/org-toc--find-block))
+             (or (my/org-toc--cached-block)
+                 (my/org-toc--refresh-cached-block)))
     (my/org-toc-insert-or-update)))
 
-(defun my/org-toc-refresh-open-buffer (buffer)
-  "Refresh managed TOC in BUFFER after it has been opened."
-  (when (buffer-live-p buffer)
-    (with-current-buffer buffer
-      (setq-local my/org-toc--open-refresh-timer nil)
-      (when (and my/org-toc-auto-update-enabled
-                 (derived-mode-p 'org-mode)
-                 (not (buffer-modified-p))
-                 (<= (buffer-size) my/org-toc-auto-update-max-buffer-size))
-        (let ((inhibit-message t))
-          (my/org-toc-update-if-present))))))
+(defun my/org-toc-initial-refresh-if-present ()
+  "Run one active managed TOC refresh when an Org buffer is first set up."
+  (when (and my/org-toc-auto-update-enabled
+             (not my/org-toc--initial-refresh-done)
+             (derived-mode-p 'org-mode)
+             (<= (buffer-size) my/org-toc-auto-update-max-buffer-size)
+             (my/org-toc--refresh-cached-block))
+    (setq-local my/org-toc--initial-refresh-done t)
+    (let ((inhibit-message t))
+      (my/org-toc-update-if-present))))
 
 (defun my/org-setup-toc-auto-update ()
-  "Auto-refresh the managed overview TOC with low overhead."
-  (add-hook 'before-save-hook #'my/org-toc-update-if-present nil t)
-  (when (and my/org-toc-auto-update-enabled
-             (not my/org-toc--open-refresh-timer)
-             (<= (buffer-size) my/org-toc-auto-update-max-buffer-size)
-             (my/org-toc--find-block))
-    (setq-local my/org-toc--open-refresh-timer
-                (run-with-idle-timer my/org-toc-open-idle-delay
-                                     nil
-                                     #'my/org-toc-refresh-open-buffer
-                                     (current-buffer)))))
+  "Set up one-time managed overview TOC refresh."
+  (my/org-toc-initial-refresh-if-present))
 
 ;;; ----------------------------------------------------------------------------
 ;;; 2. Org Core Configuration (核心设置)

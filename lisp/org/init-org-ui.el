@@ -19,6 +19,7 @@
 (defvar-local my/org--insert-suspended-modes nil)
 
 (declare-function evil-insert-state-p "evil")
+(declare-function my/org-toc-insert-or-update "init-org-core")
 
 (defface my/org-hl-line
   '((t :inherit hl-line))
@@ -79,18 +80,17 @@
     (funcall mode -1)))
 
 (defun my/org-suspend-expensive-modes-in-insert ()
-  "Temporarily suspend expensive dynamic Org UI helpers during Evil insert state."
+  "Keep Org editing responsive without tearing down visual rendering.
+
+This intentionally no longer disables `org-modern-mode', `org-indent-mode',
+`valign-mode', `org-fragtog-mode' or pretty-block overlays: turning those off
+made the buffer lose its rendered appearance in insert state."
   (when (and (derived-mode-p 'org-mode)
              (not my/org--suspended-in-insert)
              (fboundp 'evil-insert-state-p)
              (evil-insert-state-p))
     (setq-local my/org--suspended-in-insert t)
-    (setq-local my/org--insert-suspended-modes nil)
-    (my/org--suspend-mode-for-insert 'org-appear-mode)
-    ;; org-fragtog manages formula overlay visibility and is specifically
-    ;; designed for insert-time editing; toggling it causes overlay height
-    ;; changes that appear as vertical scrolling when entering/leaving formulas.
-    (my/org--suspend-mode-for-insert 'valign-mode)))
+    (setq-local my/org--insert-suspended-modes nil)))
 
 (defun my/org-resume-expensive-modes-after-insert ()
   "Re-enable Org UI helpers suspended during Evil insert state."
@@ -770,6 +770,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
           :footer footer
           :footer-style (plist-get config :footer-style)
           :base-color base-color
+          :type (downcase (or type ""))
           :header-bg (my/org-blend-colors base-color background 0.18)
           :body-bg (my/org-blend-colors base-color background 0.075)
           :badge-bg (my/org-blend-colors base-color background 0.24)
@@ -928,12 +929,56 @@ DEFAULT-BG defaults to `my/org-default-background'."
                        :foreground ,(plist-get palette :footer-color)
                        :weight medium))))
 
+(defun my/org-special-block-refresh-toc-button (header-bg base-color)
+  "Return a clickable refresh button for managed TOC blocks."
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mouse-1] #'my/org-special-block-refresh-toc-at-point)
+    (define-key map (kbd "RET") #'my/org-special-block-refresh-toc-at-point)
+    (propertize "  🍵"
+                'face `(:background ,header-bg
+                        :foreground ,base-color
+                        :weight medium)
+                'mouse-face `(:background ,header-bg
+                              :foreground ,base-color
+                              :weight bold)
+                'help-echo "刷新当前 Org TOC"
+                'keymap map)))
+
+(defun my/org-special-block-refresh-toc-at-point (&optional event)
+  "Refresh the managed TOC in the Org buffer clicked by EVENT."
+  (interactive "e")
+  (let ((buffer (cond
+                 ((and event (eventp event))
+                  (window-buffer (posn-window (event-start event))))
+                 (t
+                  (current-buffer)))))
+    (with-current-buffer buffer
+      (when (derived-mode-p 'org-mode)
+        (save-excursion
+          (my/org-toc-insert-or-update))
+        (when (bound-and-true-p my/org-pretty-block-cache)
+          (clrhash my/org-pretty-block-cache))
+        (jit-lock-refontify)
+        (message "TOC refreshed")))))
+
+(defun my/org-special-block-toc-p (palette)
+  "Return non-nil when PALETTE describes a managed TOC block."
+  (let ((type (plist-get palette :type))
+        (params (or (plist-get palette :params) "")))
+    (or (string= type "toc")
+        (and (string= type "overview")
+             (string-match-p "\\(?:^\\|[[:space:]]\\):toc\\(?:[[:space:]]\\|$\\)"
+                             params)))))
+
 (defun my/org-special-block-header-display (palette header-bg)
   "Return the rendered header string for a styled special block PALETTE."
   (let* ((base-color (plist-get palette :base-color))
          (title (plist-get palette :title))
          (params (plist-get palette :params))
-         (params-display (my/org-special-block-params-display params palette header-bg)))
+         (params-display (my/org-special-block-params-display params palette header-bg))
+         (refresh-button (when (my/org-special-block-toc-p palette)
+                           (my/org-special-block-refresh-toc-button
+                            header-bg base-color))))
     (concat
      (propertize "╭"
                  'face `(:background ,header-bg
@@ -945,7 +990,8 @@ DEFAULT-BG defaults to `my/org-default-background'."
                          :background ,header-bg
                          :foreground ,base-color
                          :weight medium))
-     params-display)))
+     params-display
+     refresh-button)))
 
 (defun my/org-special-block-line-range (element)
   "Return ELEMENT's full visible line range as (BEGIN . END)."
@@ -1197,17 +1243,35 @@ DEFAULT-BG defaults to `my/org-default-background'."
 ;; 4. JIT-Lock 引擎：连续扫描 (支持嵌套)
 ;; ===========================================================
 (defun my/org-jit-prettify-blocks (start end)
-  "JIT-Lock 调用的函数：扫描 start 之后的块，确保完整渲染。"
-  (save-excursion
-    (save-match-data
-      (dolist (el (org-element-map (org-element-parse-buffer) 'special-block
-                    (lambda (el)
-                      (when (and (my/org-special-block-palette
-                                  (org-element-property :type el))
-                                 (< (org-element-property :begin el) end)
-                                 (> (org-element-property :end el) start))
-                        el))))
-        (my/org-prettify-element el)))))
+  "JIT-Lock callback: render styled special blocks around START and END."
+  (unless (and (fboundp 'evil-insert-state-p)
+               (evil-insert-state-p))
+    (save-excursion
+      (save-match-data
+        (let (scan-start scan-end)
+          (goto-char start)
+          (setq scan-start
+                (if (re-search-backward "^[ \t]*#\\+begin_" nil t)
+                    (line-beginning-position)
+                  start))
+          (goto-char end)
+          (setq scan-end
+                (if (re-search-forward "^[ \t]*#\\+end_" nil t)
+                    (min (point-max) (line-beginning-position 2))
+                  end))
+          (when (save-excursion
+                  (goto-char scan-start)
+                  (re-search-forward "^[ \t]*#\\+begin_" scan-end t))
+            (save-restriction
+              (narrow-to-region scan-start scan-end)
+              (dolist (el (org-element-map (org-element-parse-buffer) 'special-block
+                            (lambda (el)
+                              (when (and (my/org-special-block-palette
+                                          (org-element-property :type el))
+                                         (< (org-element-property :begin el) end)
+                                         (> (org-element-property :end el) start))
+                                el))))
+                (my/org-prettify-element el)))))))))
 
 ;; ===========================================================
 ;; 5. 激活机制

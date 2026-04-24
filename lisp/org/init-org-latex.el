@@ -475,8 +475,42 @@ Set to nil to keep the full log."
 (defvar-local my/org-latex--edit-preview-timer nil)
 (defvar-local my/org-latex--edit-preview-marker nil)
 (defvar-local my/org-latex--post-command-point nil)
+(defvar-local my/org-latex--post-command-range nil)
 (defvar-local my/org-latex--scroll-preview-enabled nil)
 (defvar my/org-latex--allow-native-preview nil)
+
+(defcustom my/org-latex-fragment-context-lookaround 140
+  "Characters checked around point/change before parsing for LaTeX fragments."
+  :type 'integer)
+
+(defconst my/org-latex--fragment-syntax-regexp
+  (regexp-opt '("\\(" "\\[" "\\]" "\\begin" "\\end" "$"))
+  "Cheap regexp for text that may be near an Org LaTeX fragment.")
+
+(defun my/org-latex--near-fragment-syntax-p (&optional pos)
+  "Return non-nil when POS is near likely LaTeX fragment syntax."
+  (save-excursion
+    (when pos
+      (goto-char pos))
+    (let ((beg (max (point-min)
+                    (- (point) my/org-latex-fragment-context-lookaround)))
+          (end (min (point-max)
+                    (+ (point) my/org-latex-fragment-context-lookaround))))
+      (save-restriction
+        (widen)
+        (save-excursion
+          (goto-char beg)
+          (re-search-forward my/org-latex--fragment-syntax-regexp end t))))))
+
+(defun my/org-latex--change-near-fragment-syntax-p (beg end)
+  "Return non-nil when a change from BEG to END may touch LaTeX."
+  (let ((scan-beg (max (point-min)
+                       (- beg my/org-latex-fragment-context-lookaround)))
+        (scan-end (min (point-max)
+                       (+ end my/org-latex-fragment-context-lookaround))))
+    (save-excursion
+      (goto-char scan-beg)
+      (re-search-forward my/org-latex--fragment-syntax-regexp scan-end t))))
 
 (defun my/org-latex--current-fragment (&optional pos)
   "Return the LaTeX fragment at POS, or at point when POS is nil."
@@ -576,7 +610,8 @@ Set to nil to keep the full log."
 
 (defun my/org-latex-after-change-function (beg end _len)
   "Pre-render edited LaTeX fragments after changes between BEG and END."
-  (when (my/org-latex--async-preview-active-p)
+  (when (and (my/org-latex--async-preview-active-p)
+             (my/org-latex--change-near-fragment-syntax-p beg end))
     (when-let* ((frag (my/org-latex--fragment-around-change beg end)))
       (my/org-latex--schedule-edit-preview frag))))
 
@@ -589,17 +624,24 @@ Set to nil to keep the full log."
       (my/org-latex--clear-preview-range (overlay-start ov) (overlay-end ov))
       (my/org-latex--cancel-edit-preview-timer))
     (unless (memq this-command '(self-insert-command org-self-insert-command))
-      (let* ((prev-point my/org-latex--post-command-point)
-             (prev-frag (and prev-point
-                             (my/org-latex--current-fragment prev-point)))
-             (curr-frag (my/org-latex--current-fragment))
-             (prev-range (and prev-frag (my/org-latex--fragment-range prev-frag)))
-             (curr-range (and curr-frag (my/org-latex--fragment-range curr-frag))))
+      (let* ((prev-range my/org-latex--post-command-range)
+             (inside-prev-range
+              (and prev-range
+                   (<= (car prev-range) (point))
+                   (< (point) (cdr prev-range))))
+             (curr-frag (unless inside-prev-range
+                          (and (my/org-latex--near-fragment-syntax-p)
+                               (my/org-latex--current-fragment))))
+             (curr-range (if inside-prev-range
+                             prev-range
+                           (and curr-frag
+                                (my/org-latex--fragment-range curr-frag)))))
         (unless (equal prev-range curr-range)
-          (when prev-frag
-            (my/org-latex--preview-fragment prev-frag))
-          (unless curr-frag
-            (my/org-latex--clear-edit-preview-marker)))))
+          (when prev-range
+            (my/org-latex--preview-range (car prev-range) (cdr prev-range)))
+          (unless curr-range
+            (my/org-latex--clear-edit-preview-marker)))
+        (setq my/org-latex--post-command-range curr-range)))
     (setq my/org-latex--post-command-point (point))))
 
 (defun my/org-latex--visible-range (&optional window)
