@@ -654,6 +654,74 @@ DEFAULT-BG defaults to `my/org-default-background'."
                'display `(space :width ,(or gap-width 0.72))
                'face `(:background ,background))))
 
+(defun my/org-special-block-inner-padding (background &optional width)
+  "Return horizontal inner padding on BACKGROUND."
+  (propertize " "
+              'display `(space :width ,(or width 1.05))
+              'face `(:background ,background)))
+
+(defun my/org-special-block-prefix-width (&optional pos)
+  "Return the existing visual indent width at POS."
+  ;; Read text properties only so overlay redraws do not feed back into the
+  ;; next width computation and cause visible jitter.
+  (let ((prefix (or (get-text-property (or pos (point)) 'line-prefix)
+                    (get-text-property (or pos (point)) 'wrap-prefix))))
+    (if (stringp prefix)
+        (string-width prefix)
+      0)))
+
+(defun my/org-special-block-fixed-prefix (prefix-width background tail)
+  "Return a prefix of PREFIX-WIDTH on BACKGROUND ending with TAIL."
+  (when (> prefix-width 0)
+    (let* ((tail-width (if (stringp tail) (string-width tail) 0))
+           (padding-width (max 0 (- prefix-width tail-width))))
+      (concat
+       (when (> padding-width 0)
+         (propertize " "
+                     'display `(space :width ,padding-width)
+                     'face `(:background ,background)))
+       tail))))
+
+(defun my/org-special-block-header-prefix (palette header-bg prefix-width)
+  "Return the header prefix string for a styled special block."
+  (my/org-special-block-fixed-prefix
+   prefix-width header-bg
+   (propertize "╭"
+               'face `(:background ,header-bg
+                       :foreground ,(plist-get palette :base-color)
+                       :weight medium))))
+
+(defun my/org-special-block-body-line-prefix (palette body-bg prefix-width)
+  "Return the body guide prefix string for a styled special block."
+  (let* ((bar (propertize " "
+                          'display '(space :width 0.2)
+                          'face `(:background ,(plist-get palette :gutter-color))))
+         (gap (propertize " "
+                          'display '(space :width 0.55)
+                          'face `(:background ,body-bg)))
+         (inner (my/org-special-block-inner-padding body-bg 1.0))
+         (tail-width (+ (string-width bar)
+                        (string-width gap)
+                        (string-width inner)))
+         (padding-width (max 0 (- prefix-width tail-width))))
+    (concat
+     bar
+     (when (> padding-width 0)
+       (propertize " "
+                   'display `(space :width ,padding-width)
+                   'face `(:background ,body-bg)))
+     gap
+     inner)))
+
+(defun my/org-special-block-footer-prefix (palette header-bg prefix-width)
+  "Return the footer prefix string for a styled special block."
+  (my/org-special-block-fixed-prefix
+   prefix-width header-bg
+   (propertize "╰"
+               'face `(:background ,header-bg
+                       :foreground ,(plist-get palette :footer-color)
+                       :weight medium))))
+
 (defun my/org-special-block-header-display (palette header-bg)
   "Return the rendered header string for a styled special block PALETTE."
   (let* ((base-color (plist-get palette :base-color))
@@ -661,7 +729,11 @@ DEFAULT-BG defaults to `my/org-default-background'."
          (params (plist-get palette :params))
          (params-display (my/org-special-block-params-display params palette header-bg)))
     (concat
-     (my/org-special-block-guide-display base-color header-bg 0.22 0.64)
+     (propertize "╭"
+                 'face `(:background ,header-bg
+                         :foreground ,base-color
+                         :weight medium))
+     (my/org-special-block-inner-padding header-bg 0.92)
      (propertize title
                  'face `(:inherit my/org-block-title-face
                          :background ,header-bg
@@ -669,12 +741,63 @@ DEFAULT-BG defaults to `my/org-default-background'."
                          :weight medium))
      params-display)))
 
-(defun my/org-special-block-body-prefix (palette body-bg)
-  "Return the subtle left gutter used inside a styled special block body."
-  (let ((gutter-color (plist-get palette :gutter-color)))
-    ;; Use a colored display-space instead of a glyph so the guide stays
-    ;; visually continuous even when Org buffers use relaxed line spacing.
-    (my/org-special-block-guide-display gutter-color body-bg 0.22 0.72)))
+(defun my/org-special-block-line-range (element)
+  "Return ELEMENT's full visible line range as (BEGIN . END)."
+  (let ((begin (save-excursion
+                 (goto-char (org-element-property :post-affiliated element))
+                 (line-beginning-position)))
+        (end (save-excursion
+               (goto-char (org-element-property :end element))
+               (skip-chars-backward " \t\n")
+               (my/org-line-background-end))))
+    (cons begin end)))
+
+(defun my/org-special-block-body-line-range (contents-begin contents-end)
+  "Return the visible body line range from CONTENTS-BEGIN to CONTENTS-END."
+  (when (and contents-begin contents-end (> contents-end contents-begin))
+    (cons (save-excursion
+            (goto-char contents-begin)
+            (line-beginning-position))
+          (save-excursion
+            (goto-char contents-end)
+            (skip-chars-backward " \t\n")
+            (my/org-line-background-end)))))
+
+(defun my/org-special-block-body-segments (element contents-begin contents-end)
+  "Return body segments for ELEMENT excluding nested styled special blocks."
+  (when-let* ((body-range (my/org-special-block-body-line-range
+                           contents-begin contents-end))
+              (body-begin (car body-range))
+              (body-end (cdr body-range)))
+    (let (ranges segments
+                (cursor body-begin))
+      (dolist (child (org-element-map element 'special-block #'identity))
+        (when (and (not (eq child element))
+                   (my/org-special-block-palette
+                    (org-element-property :type child)))
+          (pcase-let ((`(,child-begin . ,child-end)
+                       (my/org-special-block-line-range child)))
+            (push (cons (max body-begin child-begin)
+                        (min body-end child-end))
+                  ranges))))
+      (setq ranges
+            (sort ranges (lambda (left right) (< (car left) (car right)))))
+      (let (merged)
+        (dolist (range ranges)
+          (pcase-let ((`(,range-begin . ,range-end) range))
+            (when (< range-begin range-end)
+              (if (and merged (<= range-begin (cdar merged)))
+                  (setcdr (car merged) (max range-end (cdar merged)))
+                (push (cons range-begin range-end) merged)))))
+        (setq ranges (nreverse merged)))
+      (dolist (range ranges)
+        (pcase-let ((`(,range-begin . ,range-end) range))
+          (when (< cursor range-begin)
+            (push (cons cursor range-begin) segments))
+          (setq cursor (max cursor range-end))))
+      (when (< cursor body-end)
+        (push (cons cursor body-end) segments))
+      (nreverse segments))))
 
 (defun my/org-special-block-footer-display (palette header-bg)
   "Return the rendered footer string for a styled special block PALETTE."
@@ -682,6 +805,8 @@ DEFAULT-BG defaults to `my/org-default-background'."
          (footer-marker (plist-get palette :footer))
          (footer-marker-display
           (my/org-special-block-footer-marker-display palette header-bg))
+         ;; Start the footer rule directly after the corner so the bottom
+         ;; border lines up with the frame without shifting the body guide.
          (rule (propertize "────────────────────────"
                            'face `(:background ,header-bg
                                    :foreground ,footer-color
@@ -689,12 +814,21 @@ DEFAULT-BG defaults to `my/org-default-background'."
     (if (and (stringp footer-marker)
              (> (length footer-marker) 0))
         (concat
+         (propertize "╰"
+                     'face `(:background ,header-bg
+                             :foreground ,footer-color
+                             :weight medium))
          rule
          (propertize " "
                      'face `(:background ,header-bg)
                      'display `(space :align-to (- right ,(+ 1 (string-width footer-marker)))))
          footer-marker-display)
-      rule)))
+      (concat
+       (propertize "╰"
+                   'face `(:background ,header-bg
+                           :foreground ,footer-color
+                           :weight medium))
+       rule))))
 
 ;; ===========================================================
 ;; 3. 核心渲染逻辑：只处理单个 Element
@@ -728,22 +862,36 @@ DEFAULT-BG defaults to `my/org-default-background'."
              (badge-bg (plist-get palette :badge-bg))
              (divider-color (plist-get palette :divider-color))
              (gutter-color (plist-get palette :gutter-color))
-             (body-prefix (my/org-special-block-body-prefix palette
-                                                            (plist-get palette :body-bg)))
+             (header-text-beg (save-excursion
+                                (goto-char post-affiliated)
+                                (back-to-indentation)
+                                (point)))
              (header-bg (plist-get palette :header-bg))
              (body-bg (plist-get palette :body-bg))
              (footer-color (plist-get palette :footer-color))
              (params-color (plist-get palette :params-color))
+             (body-prefix-width
+              (max (save-excursion
+                     (goto-char (or contents-begin post-affiliated))
+                     (my/org-special-block-prefix-width))
+                   (save-excursion
+                     (goto-char (or header-text-beg post-affiliated))
+                     (my/org-special-block-prefix-width))))
+             (body-prefix (my/org-special-block-body-line-prefix
+                           palette body-bg body-prefix-width))
              (header-display (my/org-special-block-header-display
                               (plist-put (copy-sequence palette) :params params)
                               header-bg))
+             (body-segments (my/org-special-block-body-segments
+                             element contents-begin contents-end))
              (footer-display (my/org-special-block-footer-display palette header-bg))
              (signature (list type begin-pos end-pos contents-begin contents-end
                               post-affiliated params default-bg title
                               footer-marker footer-style base-color header-bg body-bg
                               footer-color params-color badge-bg
-                              divider-color gutter-color body-prefix
-                              header-display footer-display))
+                              divider-color gutter-color body-prefix-width
+                              body-prefix
+                              body-segments header-display footer-display))
              (cached-signature (and (hash-table-p my/org-pretty-block-cache)
                                     (gethash begin-pos my/org-pretty-block-cache)))
              (already-rendered
@@ -767,10 +915,6 @@ DEFAULT-BG defaults to `my/org-default-background'."
         (let* ((header-bol (save-excursion
                              (goto-char post-affiliated)
                              (line-beginning-position)))
-               (header-text-beg (save-excursion
-                                  (goto-char post-affiliated)
-                                  (back-to-indentation)
-                                  (point)))
                (header-end (save-excursion
                              (goto-char post-affiliated)
                              (line-end-position)))
@@ -779,6 +923,8 @@ DEFAULT-BG defaults to `my/org-default-background'."
             (overlay-put ov 'my/org-pretty-block t)
             (overlay-put ov 'my/org-pretty-block-id begin-pos)
             (overlay-put ov 'face `(:background ,header-bg :extend t))
+            (overlay-put ov 'line-prefix "")
+            (overlay-put ov 'wrap-prefix "")
             (overlay-put ov 'priority priority)
             (overlay-put ov 'evaporate t))
           ;; Do not replace leading indentation characters: Org indentation
@@ -789,21 +935,24 @@ DEFAULT-BG defaults to `my/org-default-background'."
             (overlay-put ov 'face `(:background ,header-bg :extend t))
             (overlay-put ov 'priority (1+ priority))
             (overlay-put ov 'display header-display)
+            (overlay-put ov 'line-prefix "")
+            (overlay-put ov 'wrap-prefix "")
             (overlay-put ov 'evaporate t)))
 
         ;; -------------------------------------------------------
         ;; B. Body Overlay (内容区域)
         ;; -------------------------------------------------------
-        (when (and contents-begin contents-end (> contents-end contents-begin))
-          (let ((true-body-end contents-end))
-            (let ((ov (make-overlay contents-begin true-body-end)))
+        (dolist (segment body-segments)
+          (pcase-let ((`(,segment-begin . ,segment-end) segment))
+            (when (< segment-begin segment-end)
+              (let ((ov (make-overlay segment-begin segment-end)))
               (overlay-put ov 'my/org-pretty-block t)
               (overlay-put ov 'my/org-pretty-block-id begin-pos)
               (overlay-put ov 'face `(:background ,body-bg :extend t))
               (overlay-put ov 'line-prefix body-prefix)
               (overlay-put ov 'wrap-prefix body-prefix)
               (overlay-put ov 'priority priority)
-              (overlay-put ov 'evaporate t))))
+              (overlay-put ov 'evaporate t)))))
 
         ;; -------------------------------------------------------
         ;; C. Footer Overlay (#+end_xxx)
@@ -824,6 +973,8 @@ DEFAULT-BG defaults to `my/org-default-background'."
                 (overlay-put ov 'my/org-pretty-block t)
                 (overlay-put ov 'my/org-pretty-block-id begin-pos)
                 (overlay-put ov 'face `(:background ,header-bg :extend t))
+                (overlay-put ov 'line-prefix "")
+                (overlay-put ov 'wrap-prefix "")
                 (overlay-put ov 'priority priority)
                 (overlay-put ov 'evaporate t))
               (let ((ov (make-overlay footer-text-beg footer-end)))
@@ -832,6 +983,8 @@ DEFAULT-BG defaults to `my/org-default-background'."
                 (overlay-put ov 'face `(:background ,header-bg :extend t))
                 (overlay-put ov 'priority (1+ priority))
                 (overlay-put ov 'display footer-display)
+                (overlay-put ov 'line-prefix "")
+                (overlay-put ov 'wrap-prefix "")
                 (overlay-put ov 'evaporate t))))))))))
 
 ;; ===========================================================
