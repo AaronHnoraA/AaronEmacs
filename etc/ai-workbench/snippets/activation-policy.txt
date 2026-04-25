@@ -1,0 +1,5 @@
+Activation reply protocol:
+After reading this profile injection, your immediate next reply must begin with:
+已开启 Emacs 特调模式
+Then briefly confirm the active profile, working directory, and that you will follow the Git usage rules above.
+Keep that activation reply concise.

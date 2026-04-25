@@ -26,7 +26,7 @@
 (declare-function turn-off-evil-mode "evil" ())
 (declare-function evil-emacs-state "evil" ())
 (declare-function vterm "vterm" (&optional arg))
-(declare-function vterm-send-string "vterm" (string))
+(declare-function vterm-send-string "vterm" (string &optional paste-p))
 (declare-function vterm-send-return "vterm" ())
 (declare-function eat-mode "eat" ())
 (declare-function eat-exec "eat" (buffer name command startfile &rest switches))
@@ -170,6 +170,22 @@
      (error "Unsupported Codex terminal backend: %s"
             ai-workbench-codex-terminal-backend))))
 
+(defun ai-workbench-codex--terminal-paste-string (string)
+  "Send STRING to the current Codex terminal buffer using bracketed paste mode.
+Bracketed paste prevents Codex from interpreting embedded newlines as
+Enter and submitting partial input."
+  (pcase ai-workbench-codex-terminal-backend
+    ('vterm
+     (vterm-send-string string t))
+    ('eat
+     (when eat-terminal
+       (eat-term-send-string eat-terminal "\e[200~")
+       (eat-term-send-string eat-terminal string)
+       (eat-term-send-string eat-terminal "\e[201~")))
+    (_
+     (error "Unsupported Codex terminal backend: %s"
+            ai-workbench-codex-terminal-backend))))
+
 (defun ai-workbench-codex--terminal-send-return ()
   "Send return to the current Codex terminal buffer."
   (pcase ai-workbench-codex-terminal-backend
@@ -291,13 +307,26 @@
   "Return the Codex profile prompt for PROJECT-ROOT."
   (ai-workbench-profile-build-prompt project-root))
 
+(defun ai-workbench-codex--cd-prompt (project-root)
+  "Return the cd line sent to Codex before the profile for PROJECT-ROOT."
+  (format "cd %s"
+          (shell-quote-argument
+           (directory-file-name (expand-file-name project-root)))))
+
 (defun ai-workbench-codex-prime-session (&optional project-root)
-  "Inject workdir/profile context into Codex once for PROJECT-ROOT."
+  "Inject the working directory and profile into Codex for PROJECT-ROOT.
+The cd line and profile are sent as two separate auto-submitted
+messages.  Profile body uses bracketed paste so embedded newlines are
+preserved."
   (let ((root (or project-root default-directory)))
     (unless (ai-workbench-session-profile-injected-p 'codex root)
       (ai-workbench-codex-send-prompt
+       (ai-workbench-codex--cd-prompt root)
+       root)
+      (ai-workbench-codex-send-prompt
        (ai-workbench-codex--profile-prompt root)
        root)
+      (ai-workbench-session-mark-profile-bootstrap-sent 'codex root)
       (ai-workbench-session-mark-profile-injected 'codex root)
       (ai-workbench-session-set-last-status "Codex profile injected" root))))
 
@@ -307,7 +336,7 @@
             (process (get-buffer-process buffer))
             ((process-live-p process)))
       (with-current-buffer buffer
-        (ai-workbench-codex--terminal-send-string prompt)
+        (ai-workbench-codex--terminal-paste-string prompt)
         (sit-for 0.1)
         (ai-workbench-codex--terminal-send-return))
     (if (> attempts 0)
@@ -330,7 +359,7 @@
             (process (get-buffer-process buffer))
             ((process-live-p process)))
       (with-current-buffer buffer
-        (ai-workbench-codex--terminal-send-string prompt))
+        (ai-workbench-codex--terminal-paste-string prompt))
     (if (> attempts 0)
         (run-with-timer 0.3 nil
                         #'ai-workbench-codex--draft-prompt-retry

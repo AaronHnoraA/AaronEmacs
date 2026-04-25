@@ -833,7 +833,7 @@ have completed before cleanup.  Waits up to 5 seconds."
                                  (funcall claude-code-ide-buffer-name-function dir))
                                (list dir1 dir2))))
           (dolist (buffer-name buffers)
-            (when-let ((buffer (get-buffer buffer-name)))
+            (when-let* ((buffer (get-buffer buffer-name)))
               (claude-code-ide-tests--wait-for-process buffer)
               (kill-buffer buffer))))
         (delete-directory dir1 t)

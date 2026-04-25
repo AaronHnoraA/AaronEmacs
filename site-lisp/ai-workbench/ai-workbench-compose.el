@@ -10,6 +10,7 @@
 (require 'ai-workbench-session)
 
 (declare-function ai-workbench-open "ai-workbench" ())
+(declare-function ai-workbench-switch-profile "ai-workbench" (&optional profile))
 (declare-function ai-workbench-open-backend-buffer "ai-workbench" ())
 (declare-function ai-workbench-output-append "ai-workbench-output" (kind text &optional project-root))
 (declare-function ai-workbench-send-string "ai-workbench" (backend prompt &optional project-root))
@@ -26,6 +27,7 @@
     (define-key map (kbd "C-c C-c") #'ai-workbench-compose-send)
     (define-key map (kbd "C-c C-k") #'ai-workbench-compose-clear)
     (define-key map (kbd "C-c C-b") #'ai-workbench-compose-cycle-backend)
+    (define-key map (kbd "C-c C-p") #'ai-workbench-compose-switch-profile)
     (define-key map (kbd "C-c C-r") #'ai-workbench-compose-insert-region)
     (define-key map (kbd "C-c C-f") #'ai-workbench-compose-insert-file)
     (define-key map (kbd "C-c C-e") #'ai-workbench-compose-insert-current-buffer)
@@ -43,8 +45,9 @@
   "Major mode for ai-workbench compose buffers."
   (setq-local header-line-format
               '(:eval
-                (format "AI Compose  backend:%s  project:%s  C-c C-c send  C-c C-b switch  C-c C-r/C-f/C-e inject"
+                (format "AI Compose  backend:%s  profile:%s  project:%s  C-c C-c send  C-c C-b backend  C-c C-p profile  C-c C-r/C-f/C-e inject"
                         ai-workbench-compose-backend
+                        (ai-workbench-session-profile ai-workbench-compose-project-root)
                         (abbreviate-file-name ai-workbench-compose-project-root)))))
 
 (defun ai-workbench-compose--relative-path (file project-root)
@@ -119,6 +122,13 @@ When NO-DISPLAY is non-nil, return the buffer without popping it."
                                     ai-workbench-compose-project-root)
   (force-mode-line-update)
   (message "ai-workbench backend: %s" ai-workbench-compose-backend))
+
+(defun ai-workbench-compose-switch-profile ()
+  "Switch the project profile from the compose buffer."
+  (interactive)
+  (let ((default-directory ai-workbench-compose-project-root))
+    (call-interactively #'ai-workbench-switch-profile)
+    (force-mode-line-update)))
 
 (defun ai-workbench-compose-send ()
   "Send the current compose buffer text to the selected backend."

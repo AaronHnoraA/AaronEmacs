@@ -12,6 +12,9 @@
 (require 'ai-workbench-vendor)
 
 (defvar my/terminal-startup-cd-inhibited)
+(defvar claude-code-ide-use-ide-diff)
+(defvar claude-code-ide-terminal-backend)
+(defvar eat-terminal)
 
 (declare-function my/vterm-popup-display-buffer "init-vterm-popup" (buffer))
 (declare-function claude-code-ide "claude-code-ide" ())
@@ -21,6 +24,9 @@
 (declare-function claude-code-ide--get-buffer-name "claude-code-ide" (&optional directory))
 (declare-function turn-off-evil-mode "evil" ())
 (declare-function evil-emacs-state "evil" ())
+(declare-function vterm-send-string "vterm" (string &optional paste-p))
+(declare-function vterm-send-return "vterm" ())
+(declare-function eat-term-send-string "eat" (terminal string))
 
 (defun ai-workbench-claude-available-p ()
   "Return non-nil when the vendored Claude package directory is present."
@@ -33,6 +39,7 @@
   (ai-workbench-add-vendor-to-load-path 'claude-code-ide)
   (require 'claude-code-ide)
   (require 'claude-code-ide-emacs-tools)
+  (setq claude-code-ide-use-ide-diff nil)
   (claude-code-ide-emacs-tools-setup))
 
 (defun ai-workbench-claude-buffer (&optional project-root)
@@ -93,27 +100,81 @@
   "Return the Claude profile prompt for PROJECT-ROOT."
   (ai-workbench-profile-build-prompt project-root))
 
+(defun ai-workbench-claude--cd-prompt (project-root)
+  "Return the cd line sent to Claude before the profile for PROJECT-ROOT."
+  (format "cd %s"
+          (shell-quote-argument
+           (directory-file-name (expand-file-name project-root)))))
+
+(defun ai-workbench-claude--paste-string (string)
+  "Send STRING to the current Claude buffer using bracketed paste mode.
+Bracketed paste prevents Claude from interpreting embedded newlines as
+Enter and submitting partial input."
+  (pcase claude-code-ide-terminal-backend
+    ('vterm
+     (vterm-send-string string t))
+    ('eat
+     (when eat-terminal
+       (eat-term-send-string eat-terminal "\e[200~")
+       (eat-term-send-string eat-terminal string)
+       (eat-term-send-string eat-terminal "\e[201~")))
+    (_
+     (claude-code-ide--terminal-send-string string))))
+
+(defun ai-workbench-claude--submit-return ()
+  "Press return in the current Claude buffer."
+  (pcase claude-code-ide-terminal-backend
+    ('vterm
+     (vterm-send-return))
+    ('eat
+     (when eat-terminal
+       (eat-term-send-string eat-terminal "\r")))
+    (_
+     (claude-code-ide--terminal-send-string "\r"))))
+
+(defun ai-workbench-claude--paste-and-submit (prompt)
+  "Send PROMPT to the current Claude buffer with bracketed paste then submit."
+  (ai-workbench-claude--paste-string prompt)
+  (sit-for 0.1)
+  (ai-workbench-claude--submit-return))
+
 (defun ai-workbench-claude-prime-session (&optional project-root)
-  "Inject workdir/profile context into Claude once for PROJECT-ROOT."
+  "Inject the working directory and profile into Claude for PROJECT-ROOT.
+The cd line and profile are sent as two separate auto-submitted
+messages.  Profile body uses bracketed paste so embedded newlines are
+preserved."
   (let ((root (or project-root default-directory)))
     (unless (ai-workbench-session-profile-injected-p 'claude root)
       (ai-workbench-claude-send-prompt
+       (ai-workbench-claude--cd-prompt root)
+       root)
+      (ai-workbench-claude-send-prompt
        (ai-workbench-claude--profile-prompt root)
        root)
+      (ai-workbench-session-mark-profile-bootstrap-sent 'claude root)
       (ai-workbench-session-mark-profile-injected 'claude root)
       (ai-workbench-session-set-last-status "Claude profile injected" root))))
 
 (defun ai-workbench-claude--send-prompt-retry (prompt project-root attempts)
   "Send PROMPT for PROJECT-ROOT, retrying up to ATTEMPTS times."
   (let ((default-directory (or project-root default-directory)))
-    (condition-case err
-        (claude-code-ide-send-prompt prompt)
-      (error
-       (if (> attempts 0)
-           (run-with-timer 0.3 nil
-                           #'ai-workbench-claude--send-prompt-retry
-                           prompt project-root (1- attempts))
-         (signal (car err) (cdr err)))))))
+    (if-let* ((buffer (ai-workbench-claude-buffer project-root))
+              (process (get-buffer-process buffer))
+              ((process-live-p process)))
+        (condition-case err
+            (with-current-buffer buffer
+              (ai-workbench-claude--paste-and-submit prompt))
+          (error
+           (if (> attempts 0)
+               (run-with-timer 0.3 nil
+                               #'ai-workbench-claude--send-prompt-retry
+                               prompt project-root (1- attempts))
+             (signal (car err) (cdr err)))))
+      (if (> attempts 0)
+          (run-with-timer 0.3 nil
+                          #'ai-workbench-claude--send-prompt-retry
+                          prompt project-root (1- attempts))
+        (error "Claude session did not become ready")))))
 
 (defun ai-workbench-claude-send-prompt (prompt &optional project-root)
   "Send PROMPT to Claude, starting a session for PROJECT-ROOT when needed."
@@ -131,7 +192,7 @@
               (process (get-buffer-process buffer))
               ((process-live-p process)))
         (with-current-buffer buffer
-          (claude-code-ide--terminal-send-string prompt))
+          (ai-workbench-claude--paste-string prompt))
       (if (> attempts 0)
           (run-with-timer 0.3 nil
                           #'ai-workbench-claude--draft-prompt-retry

@@ -1,0 +1,5 @@
+Write approval rules:
+- In Emacs special-tuned mode, do not write code immediately.
+- Before each modification block, first state the target files or ranges and the exact planned change.
+- Wait for explicit user approval before writing each modification block.
+- If approval is not given, stop at the plan and do not modify files.

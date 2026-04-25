@@ -34,6 +34,7 @@
                              :backend ai-workbench-default-backend
                              :profile "default"
                              :initialized nil
+                             :profile-bootstrap-sent-backends nil
                              :profile-injected-backends nil
                              :compose-buffer nil
                              :last-prompt nil
@@ -84,6 +85,36 @@
   "Return the backends with injected profile state for PROJECT-ROOT."
   (plist-get (ai-workbench-session-get project-root) :profile-injected-backends))
 
+(defun ai-workbench-session-profile-bootstrap-sent-backends (&optional project-root)
+  "Return the backends with bootstrap prompt already sent for PROJECT-ROOT."
+  (plist-get (ai-workbench-session-get project-root) :profile-bootstrap-sent-backends))
+
+(defun ai-workbench-session-profile-bootstrap-sent-p (backend &optional project-root)
+  "Return non-nil when BACKEND already got bootstrap prompt for PROJECT-ROOT."
+  (memq backend (ai-workbench-session-profile-bootstrap-sent-backends project-root)))
+
+(defun ai-workbench-session-mark-profile-bootstrap-sent (backend &optional project-root)
+  "Record BACKEND as having received bootstrap prompt for PROJECT-ROOT."
+  (let* ((root (or project-root (ai-workbench-project-root)))
+         (session (copy-sequence (ai-workbench-session-get root)))
+         (backends (plist-get session :profile-bootstrap-sent-backends)))
+    (unless (memq backend backends)
+      (setq backends (cons backend backends)))
+    (setq session (plist-put session :profile-bootstrap-sent-backends backends))
+    (puthash root session ai-workbench--session-table)
+    backends))
+
+(defun ai-workbench-session-clear-profile-bootstrap-sent (backend &optional project-root)
+  "Clear bootstrap-sent marker for BACKEND in PROJECT-ROOT."
+  (let* ((root (or project-root (ai-workbench-project-root)))
+         (session (copy-sequence (ai-workbench-session-get root)))
+         (backends (delq backend
+                         (copy-sequence
+                          (plist-get session :profile-bootstrap-sent-backends)))))
+    (setq session (plist-put session :profile-bootstrap-sent-backends backends))
+    (puthash root session ai-workbench--session-table)
+    backends))
+
 (defun ai-workbench-session-profile-injected-p (backend &optional project-root)
   "Return non-nil when BACKEND already got profile injection for PROJECT-ROOT."
   (memq backend (ai-workbench-session-profile-injected-backends project-root)))
@@ -108,6 +139,15 @@
     (setq session (plist-put session :profile-injected-backends backends))
     (puthash root session ai-workbench--session-table)
     backends))
+
+(defun ai-workbench-session-reset-profile-injected (&optional project-root)
+  "Clear all profile bootstrap and injected markers for PROJECT-ROOT."
+  (let* ((root (or project-root (ai-workbench-project-root)))
+         (session (copy-sequence (ai-workbench-session-get root))))
+    (setq session (plist-put session :profile-bootstrap-sent-backends nil))
+    (setq session (plist-put session :profile-injected-backends nil))
+    (puthash root session ai-workbench--session-table)
+    nil))
 
 (defun ai-workbench-session-compose-buffer (&optional project-root)
   "Return the compose buffer stored for PROJECT-ROOT."

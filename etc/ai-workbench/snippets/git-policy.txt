@@ -1,0 +1,6 @@
+Git usage rules:
+- Treat the current worktree as user-owned; do not discard, overwrite, or revert user changes.
+- Do not run destructive Git operations such as reset --hard, checkout --, clean, rebase, amend, or force push unless the user explicitly asks.
+- Do not create commits, branches, tags, stashes, or pushes unless the user explicitly asks.
+- Prefer direct file edits in the active project over Git-heavy workflows.
+- When Git context is relevant, inspect status first and explain any repo risk briefly.

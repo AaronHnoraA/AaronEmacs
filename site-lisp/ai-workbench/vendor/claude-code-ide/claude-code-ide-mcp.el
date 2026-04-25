@@ -130,7 +130,7 @@ Uses buffer-local cache to avoid repeated project lookups."
       ;; Cache is valid, return cached value (even if nil)
       claude-code-ide-mcp--buffer-project-cache
     ;; Cache is invalid or doesn't exist, recalculate
-    (let ((project-dir (when-let ((project (project-current)))
+    (let ((project-dir (when-let* ((project (project-current)))
                          (expand-file-name (project-root project)))))
       ;; Update cache
       (setq claude-code-ide-mcp--buffer-project-cache project-dir
@@ -148,7 +148,7 @@ Returns the session structure if found, nil otherwise."
 This is a convenience function that combines
 `claude-code-ide-mcp--get-buffer-project' and
 `claude-code-ide-mcp--get-session-for-project'."
-  (when-let ((project-dir (claude-code-ide-mcp--get-buffer-project)))
+  (when-let* ((project-dir (claude-code-ide-mcp--get-buffer-project)))
     (claude-code-ide-mcp--get-session-for-project project-dir)))
 
 (defun claude-code-ide-mcp--find-session-by-websocket (ws)
@@ -421,7 +421,7 @@ Optional SESSION contains the MCP session context."
                id -32601 (format "Method not found: %s" method)))
              ;; Notifications (no id)
              ((string= method "ide_connected")
-              (when-let ((pid (alist-get 'pid params)))
+              (when-let* ((pid (alist-get 'pid params)))
                 (claude-code-ide-debug "CLI connected with PID: %s" pid)
                 (when session
                   (setf (claude-code-ide-mcp-session-cli-pid session) pid)))
@@ -436,7 +436,7 @@ Optional SESSION contains the MCP session context."
         (let ((client (if session
                           (claude-code-ide-mcp-session-client session)
                         ;; Fallback: try to find session from current buffer using cache
-                        (when-let ((s (or (when (and claude-code-ide-mcp--buffer-cache-valid
+                        (when-let* ((s (or (when (and claude-code-ide-mcp--buffer-cache-valid
                                                      claude-code-ide-mcp--buffer-session-cache)
                                             claude-code-ide-mcp--buffer-session-cache)
                                           (when-let* ((project-dir (claude-code-ide-mcp--get-buffer-project))
@@ -566,7 +566,7 @@ Optional SESSION contains the MCP session context."
                                         (expand-file-name file-path)))
               (setf (claude-code-ide-mcp-session-last-buffer session) (current-buffer))
               ;; Update MCP tools server's last active buffer
-              (when-let ((session-id (gethash project-dir claude-code-ide--session-ids)))
+              (when-let* ((session-id (gethash project-dir claude-code-ide--session-ids)))
                 (claude-code-ide-mcp-server-update-last-active-buffer session-id (current-buffer)))))
           (claude-code-ide-debug "Warning: Could not find session for WebSocket connection")))))
 
@@ -650,13 +650,13 @@ Optional SESSION contains the MCP session context."
 
 (defun claude-code-ide-mcp--stop-ping-timer (session)
   "Stop the ping timer for SESSION."
-  (when-let ((timer (claude-code-ide-mcp-session-ping-timer session)))
+  (when-let* ((timer (claude-code-ide-mcp-session-ping-timer session)))
     (cancel-timer timer)
     (setf (claude-code-ide-mcp-session-ping-timer session) nil)))
 
 (defun claude-code-ide-mcp--send-ping (session)
   "Send a ping frame to keep connection alive for SESSION."
-  (when-let ((client (claude-code-ide-mcp-session-client session)))
+  (when-let* ((client (claude-code-ide-mcp-session-client session)))
     (condition-case err
         (websocket-send client
                         (make-websocket-frame :opcode 'ping
@@ -701,7 +701,7 @@ This should be called when the buffer's context might have changed."
       ;; Only proceed if we have a session
       (when session
         ;; Cancel any existing timer for this session
-        (when-let ((timer (claude-code-ide-mcp-session-selection-timer session)))
+        (when-let* ((timer (claude-code-ide-mcp-session-selection-timer session)))
           (cancel-timer timer))
         ;; Set new timer for this session
         (let ((project-dir (claude-code-ide-mcp-session-project-dir session))
@@ -749,7 +749,7 @@ the CLI's SelectionChangedSchema."
 
 (defun claude-code-ide-mcp--send-selection-for-project (project-dir)
   "Send current selection to Claude for PROJECT-DIR."
-  (when-let ((session (claude-code-ide-mcp--get-session-for-project project-dir)))
+  (when-let* ((session (claude-code-ide-mcp--get-session-for-project project-dir)))
     ;; Clear the timer in the session
     (setf (claude-code-ide-mcp-session-selection-timer session) nil)
 
@@ -825,7 +825,7 @@ the CLI's SelectionChangedSchema."
                                         (expand-file-name file-path)))
               (setf (claude-code-ide-mcp-session-last-buffer session) current-buffer)
               ;; Update MCP tools server's last active buffer
-              (when-let ((session-id (gethash project-dir claude-code-ide--session-ids)))
+              (when-let* ((session-id (gethash project-dir claude-code-ide--session-ids)))
                 (claude-code-ide-mcp-server-update-last-active-buffer session-id current-buffer)))))))))
 
 ;;; Public API
@@ -876,21 +876,21 @@ the CLI's SelectionChangedSchema."
 
 (defun claude-code-ide-mcp-stop-session (project-dir)
   "Stop the MCP session for PROJECT-DIR."
-  (when-let ((session (gethash project-dir claude-code-ide-mcp--sessions)))
+  (when-let* ((session (gethash project-dir claude-code-ide-mcp--sessions)))
     (claude-code-ide-debug "Stopping MCP session for %s" project-dir)
 
     ;; Close server and client
-    (when-let ((server (claude-code-ide-mcp-session-server session)))
+    (when-let* ((server (claude-code-ide-mcp-session-server session)))
       (websocket-server-close server))
 
     ;; Stop timers
-    (when-let ((ping-timer (claude-code-ide-mcp-session-ping-timer session)))
+    (when-let* ((ping-timer (claude-code-ide-mcp-session-ping-timer session)))
       (cancel-timer ping-timer))
-    (when-let ((sel-timer (claude-code-ide-mcp-session-selection-timer session)))
+    (when-let* ((sel-timer (claude-code-ide-mcp-session-selection-timer session)))
       (cancel-timer sel-timer))
 
     ;; Remove lockfile
-    (when-let ((port (claude-code-ide-mcp-session-port session)))
+    (when-let* ((port (claude-code-ide-mcp-session-port session)))
       (claude-code-ide-debug "Removing lockfile for port %d" port)
       (claude-code-ide-mcp--remove-lockfile port))
 

@@ -13,6 +13,7 @@
 (require 'ai-workbench-output)
 (require 'ai-workbench-result)
 (require 'ai-workbench-profile)
+(require 'ai-workbench-status)
 (require 'ai-workbench-adapter-claude)
 (require 'ai-workbench-adapter-codex)
 (require 'ai-workbench-tools)
@@ -22,6 +23,7 @@
 (declare-function ai-workbench-claude-stop "ai-workbench-adapter-claude" (&optional project-root))
 (declare-function ai-workbench-claude-draft-prompt "ai-workbench-adapter-claude" (prompt &optional project-root))
 (declare-function ai-workbench-codex-draft-prompt "ai-workbench-adapter-codex" (prompt &optional project-root))
+(declare-function ai-workbench-status-open "ai-workbench-status" ())
 
 (defgroup ai-workbench nil
   "Unified AI workbench."
@@ -78,8 +80,7 @@
 (defun ai-workbench--reset-selection (project-root)
   "Reset backend selection state for PROJECT-ROOT."
   (ai-workbench-session-set-initialized nil project-root)
-  (ai-workbench-session-clear-profile-injected 'claude project-root)
-  (ai-workbench-session-clear-profile-injected 'codex project-root)
+  (ai-workbench-session-reset-profile-injected project-root)
   (ai-workbench-session-set-last-status "Backend selection reset" project-root))
 
 (defun ai-workbench--prepare-backend (project-root)
@@ -115,10 +116,69 @@
          (current (ai-workbench-session-backend project-root))
          (next (if (eq current 'claude) 'codex 'claude)))
     (ai-workbench-session-set-backend next project-root)
-    (ai-workbench-session-clear-profile-injected 'claude project-root)
-    (ai-workbench-session-clear-profile-injected 'codex project-root)
+    (ai-workbench-session-reset-profile-injected project-root)
     (message "ai-workbench backend: %s" next)
     (ai-workbench-open)))
+
+(defun ai-workbench-switch-profile (&optional profile)
+  "Switch the active project profile to PROFILE."
+  (interactive)
+  (let* ((project-root (ai-workbench-project-root))
+         (current (ai-workbench-session-profile project-root))
+         (selected (or profile
+                       (ai-workbench-profile-read-name-with-summary
+                        "AI profile: "
+                        current))))
+    (ai-workbench-session-set-profile selected project-root)
+    (ai-workbench-session-reset-profile-injected project-root)
+    (ai-workbench-session-set-last-status
+     (format "Profile switched to %s" selected)
+     project-root)
+    (ai-workbench-output-append
+     'status
+     (format "Profile switched to %s" selected)
+     project-root)
+    (message "ai-workbench profile: %s" selected)))
+
+(defun ai-workbench-edit-profile (&optional profile)
+  "Open PROFILE for editing."
+  (interactive)
+  (let* ((project-root (ai-workbench-project-root))
+         (selected (or profile
+                       (ai-workbench-session-profile project-root)
+                       ai-workbench-profile-default-name)))
+    (ai-workbench-profile-open selected)))
+
+(defun ai-workbench-preview-profile (&optional profile)
+  "Preview PROFILE in a read-only buffer."
+  (interactive)
+  (ai-workbench-profile-preview
+   (or profile
+       (ai-workbench-session-profile (ai-workbench-project-root))
+       ai-workbench-profile-default-name)))
+
+(defun ai-workbench-create-profile (name &optional base-profile)
+  "Create NAME using BASE-PROFILE as a starting point."
+  (interactive
+   (list (read-string "New profile name: ")
+         (ai-workbench-profile-read-name-with-summary
+          "Base profile: "
+          (ai-workbench-session-profile (ai-workbench-project-root)))))
+  (ai-workbench-profile-create name base-profile))
+
+(defun ai-workbench-edit-shared-snippet (&optional name)
+  "Edit shared snippet NAME used by all profiles."
+  (interactive)
+  (ai-workbench-profile-edit-snippet
+   (or name
+       (completing-read "Shared snippet: "
+                        (ai-workbench-profile-snippet-names)
+                        nil t nil nil "git-policy"))))
+
+(defun ai-workbench-status ()
+  "Open the current project's ai-workbench status buffer."
+  (interactive)
+  (ai-workbench-status-open))
 
 (defun ai-workbench-open-backend-buffer ()
   "Open the current backend's session buffer."
@@ -132,7 +192,7 @@
   "Toggle the interactive Codex execution mode."
   (interactive)
   (ai-workbench-codex-toggle-execution-mode)
-  (ai-workbench-session-clear-profile-injected 'codex (ai-workbench-project-root))
+  (ai-workbench-session-reset-profile-injected (ai-workbench-project-root))
   (message "ai-workbench Codex mode: %s" (ai-workbench-codex-execution-mode)))
 
 (defun ai-workbench-stop ()
@@ -156,27 +216,34 @@
 
 (defun ai-workbench-send-string (backend prompt &optional project-root)
   "Send PROMPT for PROJECT-ROOT through BACKEND."
-  (ai-workbench-session-set-last-prompt prompt project-root)
-  (ai-workbench-session-set-last-error nil project-root)
-  (ai-workbench-session-set-last-status (format "Sending prompt to %s" backend) project-root)
+  (let* ((root (or project-root (ai-workbench-project-root)))
+         (effective-prompt
+          (if (ai-workbench-session-profile-injected-p backend root)
+              prompt
+            (ai-workbench-profile-wrap-user-prompt prompt root))))
+    (ai-workbench-session-set-last-prompt prompt root)
+    (ai-workbench-session-set-last-error nil root)
+    (ai-workbench-session-set-last-status (format "Sending prompt to %s" backend) root)
   (ai-workbench-output-append
    'prompt
    (format "backend: %s\nproject: %s\n\n%s"
            backend
-           (abbreviate-file-name (or project-root default-directory))
-           prompt)
-   project-root)
-  (let ((default-directory (or project-root default-directory)))
-    (pcase backend
-      ('claude (ai-workbench-claude-send-prompt prompt project-root))
-      ('codex (ai-workbench-codex-send-prompt prompt project-root))
-      (_ (user-error "Unsupported backend: %s" backend))))
-  (ai-workbench-output-append
-   'status
-   (format "Sent prompt to %s" backend)
-   project-root)
-  (ai-workbench-session-set-last-status (format "Sent prompt to %s" backend) project-root)
-  (message "ai-workbench sent prompt to %s" backend))
+           (abbreviate-file-name root)
+           effective-prompt)
+   root)
+    (let ((default-directory root))
+      (pcase backend
+        ('claude (ai-workbench-claude-send-prompt effective-prompt root))
+        ('codex (ai-workbench-codex-send-prompt effective-prompt root))
+        (_ (user-error "Unsupported backend: %s" backend))))
+    (ai-workbench-session-mark-profile-bootstrap-sent backend root)
+    (ai-workbench-session-mark-profile-injected backend root)
+    (ai-workbench-output-append
+     'status
+     (format "Sent prompt to %s" backend)
+     root)
+    (ai-workbench-session-set-last-status (format "Sent prompt to %s" backend) root)
+    (message "ai-workbench sent prompt to %s" backend)))
 
 (defun ai-workbench--draft-string-now (backend prompt project-root)
   "Insert PROMPT into BACKEND for PROJECT-ROOT without submitting it."
@@ -185,8 +252,17 @@
     ('codex (ai-workbench-codex-draft-prompt prompt project-root))
     (_ (user-error "Unsupported backend: %s" backend))))
 
+(defun ai-workbench--effective-prompt (backend prompt project-root)
+  "Return PROMPT or a profile-wrapped version for BACKEND and PROJECT-ROOT."
+  (if (ai-workbench-session-profile-injected-p backend project-root)
+      prompt
+    (ai-workbench-profile-wrap-user-prompt prompt project-root)))
+
 (defun ai-workbench-draft-string (backend prompt &optional project-root)
-  "Insert PROMPT into BACKEND for PROJECT-ROOT without submitting it."
+  "Insert PROMPT into BACKEND for PROJECT-ROOT without submitting it.
+The profile is injected eagerly by `ai-workbench--prepare-backend';
+when that injection just ran the draft is delayed so it does not
+collide with the in-flight bootstrap messages."
   (let* ((root (or project-root (ai-workbench-project-root)))
          (profile-already-injected
           (ai-workbench-session-profile-injected-p backend root)))
@@ -203,7 +279,7 @@
     (ai-workbench-open-backend-buffer)
     (if profile-already-injected
         (ai-workbench--draft-string-now backend prompt root)
-      (run-with-timer 0.8 nil
+      (run-with-timer 1.5 nil
                       #'ai-workbench--draft-string-now
                       backend prompt root))
     (ai-workbench-session-set-last-status (format "Drafted prompt to %s" backend) root)
