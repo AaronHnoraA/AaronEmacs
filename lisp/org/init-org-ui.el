@@ -17,6 +17,8 @@
 (defvar my/org--olivetti-sync-timer nil)
 (defvar-local my/org--suspended-in-insert nil)
 (defvar-local my/org--insert-suspended-modes nil)
+(defvar-local my/org--valign-table-watch-installed nil)
+(defvar-local my/org-appear--last-post-command-key nil)
 (defvar my/org-special-block--palette-cache (make-hash-table :test #'equal))
 
 (defcustom my/org-pretty-block-cache-max-entries 256
@@ -30,6 +32,17 @@ integer position keys from accumulating during long editing sessions."
   "Preferred `olivetti-mode' body width for Org prose buffers."
   :type 'integer
   :group 'my/org-ui)
+
+(defcustom my/org-valign-on-demand t
+  "When non-nil, enable `valign-mode' only after an Org table is present.
+Buffers without tables keep a cheap local edit watcher instead of a JIT
+alignment function.  This keeps ordinary prose, notes and formula buffers
+lighter without changing table behavior once a table exists."
+  :type 'boolean
+  :group 'my/org-ui)
+
+(defconst my/org--table-line-regexp "^[ \t]*[|│┃]"
+  "Regexp matching Org or box-table lines that need `valign-mode'.")
 
 (declare-function evil-insert-state-p "evil")
 (declare-function my/org-toc-insert-or-update "init-org-core")
@@ -72,11 +85,69 @@ integer position keys from accumulating during long editing sessions."
 (defun my/org-enable-valign-maybe ()
   "Enable `valign-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
+    (if (or (not my/org-valign-on-demand)
+            (my/org-buffer-has-table-p))
+        (my/org-enable-valign-now)
+      (my/org-install-valign-table-watch))))
+
+(defun my/org-buffer-has-table-p ()
+  "Return non-nil if the current Org buffer already contains a table line."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (goto-char (point-min))
+      (re-search-forward my/org--table-line-regexp nil t))))
+
+(defun my/org-change-has-table-line-p (beg end)
+  "Return non-nil if the changed region BEG END now touches a table line."
+  (save-excursion
+    (let ((scan-beg (progn
+                      (goto-char beg)
+                      (line-beginning-position)))
+          (scan-end (progn
+                      (goto-char end)
+                      (line-end-position))))
+      (goto-char scan-beg)
+      (re-search-forward my/org--table-line-regexp scan-end t))))
+
+(defun my/org-enable-valign-now ()
+  "Enable `valign-mode' and remove the on-demand table watcher."
+  (my/org-cleanup-valign-table-watch)
+  (when (fboundp 'valign-mode)
     (valign-mode 1)))
+
+(defun my/org-enable-valign-on-table-insert (beg end _len)
+  "Enable `valign-mode' when an edit creates a table between BEG and END."
+  (when (and (derived-mode-p 'org-mode)
+             (my/org-rich-ui-buffer-p)
+             (my/org-change-has-table-line-p beg end))
+    (my/org-enable-valign-now)))
+
+(defun my/org-install-valign-table-watch ()
+  "Install the cheap on-demand table watcher for `valign-mode'."
+  (unless my/org--valign-table-watch-installed
+    (setq-local my/org--valign-table-watch-installed t)
+    (add-hook 'after-change-functions
+              #'my/org-enable-valign-on-table-insert nil t)
+    (add-hook 'change-major-mode-hook
+              #'my/org-cleanup-valign-table-watch nil t)
+    (add-hook 'kill-buffer-hook
+              #'my/org-cleanup-valign-table-watch nil t)))
+
+(defun my/org-cleanup-valign-table-watch ()
+  "Remove the on-demand `valign-mode' table watcher."
+  (remove-hook 'after-change-functions
+               #'my/org-enable-valign-on-table-insert t)
+  (remove-hook 'change-major-mode-hook
+               #'my/org-cleanup-valign-table-watch t)
+  (remove-hook 'kill-buffer-hook
+               #'my/org-cleanup-valign-table-watch t)
+  (setq-local my/org--valign-table-watch-installed nil))
 
 (defun my/org-enable-org-appear-maybe ()
   "Enable `org-appear-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
+    (setq-local my/org-appear--last-post-command-key nil)
     (org-appear-mode 1)))
 
 (defun my/org-enable-org-fragtog-maybe ()
@@ -715,7 +786,20 @@ its rendered appearance in insert state."
   (org-appear-inside-latex nil)
   ;; 光标进入 `^{}' / `_{}' 时显示标记，避免编辑时只看到渲染结果。
   (org-appear-autosubmarkers t)
-  (org-appear-delay 0.08))
+  (org-appear-delay 0.08)
+  :config
+  (defun my/org-appear-post-command-guard (orig)
+    "Skip `org-appear--post-cmd' when point and edit state did not change."
+    (let ((key (list (point)
+                     (buffer-chars-modified-tick)
+                     org-appear--do-buffer
+                     org-appear--elem-toggled)))
+      (unless (equal key my/org-appear--last-post-command-key)
+        (setq-local my/org-appear--last-post-command-key key)
+        (funcall orig))))
+
+  (advice-add 'org-appear--post-cmd
+              :around #'my/org-appear-post-command-guard))
 
 ;; 3.5 优先级美化
 (use-package org-fancy-priorities

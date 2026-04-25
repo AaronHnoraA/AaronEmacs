@@ -97,7 +97,7 @@
 - 自定义 special block overlay
 - LaTeX 可见区域按需预览
 
-现在这些增强默认不再因为远端或大文件自动关闭。
+现在这些增强默认不再因为远端或大文件整体关闭；其中高频成本比较明确的部分会按需启用或跳过无效刷新：`valign` 只在 buffer 已有表格或新插入表格时打开，`org-appear` 在 point/编辑状态未变化时不重复解析，`org-roam` 侧边 buffer 跟随刷新会短延迟合并，避免每个命令都重算。
 
 ## 7. Org Localleader
 
@@ -134,6 +134,7 @@
 - LaTeX 预览的滚动触发有短 debounce，长滚动中会低频补偿刷新；当前可视区域有未缓存公式时，会让旧的自动预取渲染先让出并发槽
 - 与 `RaTeX` 共存时，公式编辑期间会忽略预览 UI 引发的合成滚动事件，避免可视区域预览被误触发
 - `org-fragtog` 已不再默认常驻；公式进出编辑状态由自定义异步预览管线处理
+- 这些 Org 性能优化不会降频 LaTeX overlay 的挂载路径；视觉装饰层和 roam 侧边栏可以合并刷新，公式预览 overlay 仍按可视区域优先尽快挂上
 - AUCTeX 和 `pdf-tools` 已配置
 - AUCTeX 支持 `latexmk -pvc` 实时编译和 Sioyek 双向同步
 

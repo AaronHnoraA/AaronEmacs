@@ -216,6 +216,17 @@ leader 入口：
 - Org buffer 列表、是否可见、局部 hook 数量、LaTeX 预览队列/overlay/pending 数。
 - 最大 buffer 列表和 timer/idle timer 分组。
 
+给 agent 或批处理用的只读 API：
+
+- `(my/performance-report-string &optional inspected-buffer)`
+  返回完整纯文本报告，不打开 board，也不启动刷新 timer。
+- `(my/performance-snapshot &optional inspected-buffer)`
+  返回结构化 plist，包含当前采样、hook、Org buffer、最大 buffer、timer 和 idle timer 摘要。
+- `(my/performance-hook-snapshot &optional buffer hooks)`
+  返回指定 buffer 的 hook 计数和本地条目。
+- `(my/performance-org-buffer-snapshot)`
+  返回 Org buffer 的可见性、局部 hook 数量、LaTeX queue/overlay/pending 等状态。
+
 记录保存在 [var/performance/](../var/performance/)：
 
 - `s` 会把当前采样追加到当天的 `performance-YYYYMMDD.tsv`。
@@ -225,6 +236,7 @@ leader 入口：
 按键：
 
 - `g` 立即刷新。
+- `y` 复制当前完整页面，方便粘给 agent 或 issue。
 - `a` 切换自动刷新。
 - `s` 保存当前采样。
 - `R` 切换录制模式。

@@ -361,8 +361,12 @@ emacs --debug-init -q -l ./bootstrap.el
 
 现在策略是：
 
-- 默认不主动降载
-- 图形界面下尽量全开
+- 默认不做破坏体验的整体降载
+- 图形界面下保留完整 UI，但让高频成本明确的功能按需或合并刷新
+- `valign` 只在 Org buffer 已有表格或新插入表格时启用
+- `org-appear` 在 point 和编辑状态未变化时跳过重复解析
+- `org-roam` 侧边 buffer 跟随刷新走短 idle 合并，避免每个命令都重算
+- LaTeX preview overlay 挂载、公式编辑预编译和可视区域抢占路径不作为降频对象
 
 如果你以后想重新做降载，优先改：
 

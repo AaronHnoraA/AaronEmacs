@@ -12,8 +12,18 @@
   :type 'number
   :group 'my/org-ui)
 
+(defcustom my/org-roam-buffer-redisplay-idle-delay 0.08
+  "Idle delay used to coalesce Org Roam side-buffer follow refreshes.
+The upstream hook runs from `post-command-hook'; this delay keeps the side
+buffer following point while avoiding repeated node lookups during continuous
+motion or typing."
+  :type 'number
+  :group 'my/org-ui)
+
 (defvar my/org-roam--background-timer nil)
 (defvar my/org-roam--initialized nil)
+(defvar-local my/org-roam--redisplay-timer nil)
+(defvar-local my/org-roam--redisplay-key nil)
 
 (defun my/org-roam-capture-head (tag)
   "Return the default Org Roam capture head with filetag TAG."
@@ -80,6 +90,64 @@
   
   :config
   (my/org-roam-enable)
+  (defun my/org-roam-buffer--cancel-redisplay-timer ()
+    "Cancel the pending Org Roam side-buffer redisplay timer."
+    (when (timerp my/org-roam--redisplay-timer)
+      (cancel-timer my/org-roam--redisplay-timer))
+    (setq-local my/org-roam--redisplay-timer nil))
+
+  (defun my/org-roam-buffer--cleanup-redisplay ()
+    "Remove local debounced Org Roam side-buffer redisplay state."
+    (my/org-roam-buffer--cancel-redisplay-timer)
+    (remove-hook 'post-command-hook
+                 #'my/org-roam-buffer--redisplay-debounced-h t)
+    (remove-hook 'kill-buffer-hook
+                 #'my/org-roam-buffer--cleanup-redisplay t)
+    (remove-hook 'change-major-mode-hook
+                 #'my/org-roam-buffer--cleanup-redisplay t)
+    (setq-local my/org-roam--redisplay-key nil))
+
+  (defun my/org-roam-buffer--redisplay-now (buffer)
+    "Redisplay Org Roam side BUFFER after debounced point motion."
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (setq-local my/org-roam--redisplay-timer nil)
+        (when (and (boundp 'org-roam-buffer)
+                   (get-buffer-window org-roam-buffer 'visible))
+          (org-roam-buffer-persistent-redisplay)))))
+
+  (defun my/org-roam-buffer--redisplay-debounced-h ()
+    "Debounced replacement for `org-roam-buffer--redisplay-h'."
+    (when (and (boundp 'org-roam-buffer)
+               (get-buffer-window org-roam-buffer 'visible))
+      (let ((key (list (point)
+                       (buffer-chars-modified-tick)
+                       (window-start))))
+        (unless (equal key my/org-roam--redisplay-key)
+          (setq-local my/org-roam--redisplay-key key)
+          (my/org-roam-buffer--cancel-redisplay-timer)
+          (setq-local my/org-roam--redisplay-timer
+                      (run-with-idle-timer
+                       my/org-roam-buffer-redisplay-idle-delay nil
+                       #'my/org-roam-buffer--redisplay-now
+                       (current-buffer)))))))
+
+  (define-advice org-roam-buffer--setup-redisplay-h
+      (:override () debounce-redisplay)
+    "Install a debounced side-buffer follow hook."
+    (add-hook 'post-command-hook
+              #'my/org-roam-buffer--redisplay-debounced-h nil t)
+    (add-hook 'kill-buffer-hook
+              #'my/org-roam-buffer--cleanup-redisplay nil t)
+    (add-hook 'change-major-mode-hook
+              #'my/org-roam-buffer--cleanup-redisplay nil t))
+
+  (define-advice org-roam-buffer-toggle (:after (&rest _) cleanup-hidden-follow)
+    "Drop local follow timers when the Org Roam side buffer is hidden."
+    (unless (and (boundp 'org-roam-buffer)
+                 (get-buffer-window org-roam-buffer 'visible))
+      (my/org-roam-buffer--cleanup-redisplay)))
+
   (setq org-roam-capture-templates
         `(("m" "Math" plain "%?" :if-new (file+head "math/${slug}.org" ,(my/org-roam-capture-head "math")) :unnarrowed t)
           ("c" "CS" plain "%?" :if-new (file+head "CS/${slug}.org" ,(my/org-roam-capture-head "cs")) :unnarrowed t)

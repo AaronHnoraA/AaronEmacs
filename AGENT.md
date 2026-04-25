@@ -62,6 +62,11 @@ This config already has maintenance and workflow entry points. Reuse them:
   Perspective, Transient, and `show-imenu`.
 - Compile/maintenance: `my/compile-board`, `my/compile-dispatch`, `make`
   targets documented in `docs/maintenance.md`.
+- Performance diagnostics: `my/performance-watch`,
+  `my/performance-report-string`, `my/performance-snapshot`,
+  `my/performance-hook-snapshot`, and `my/performance-org-buffer-snapshot`.
+  Prefer these APIs over asking for screenshots when investigating runtime or
+  Org performance.  In the watch buffer, `y` copies the full current report.
 - Templates: the built-in `auto-insert` template layer in
   `lisp/init-auto-insert.el`; do not revive the old Doom/Yasnippet file-template
   path.
@@ -70,6 +75,23 @@ Do not add a repo-wide "unified tool" just to make unrelated domains look
 consistent. Prefer the existing pattern: keep core behavior in the owning
 module, put operational UI in a small `*-tools.el` module when needed, and
 document the workflow in `docs/`.
+
+## Performance Diagnostics
+
+For runtime or Org performance work, start from the existing performance
+surface:
+
+- Interactive: `M-x my/performance-watch` or `SPC h p`.
+- Agent/batch: evaluate `(my/performance-report-string)` for a full text page,
+  or `(my/performance-snapshot)` for structured data.
+- Keep auto refresh off unless a time series is needed; each refresh samples
+  `ps` and can perturb the measurement.
+- For Org issues, check LaTeX running/queued/pending, local
+  `post-command-hook`, `after-change-functions`, `jit-lock-functions`, timers,
+  and visible Org buffers before removing hooks.
+- Do not slow the LaTeX preview overlay placement path to save unrelated Org UI
+  cost.  Prefer optimizing visual decoration, table alignment, diagnostics, or
+  side-buffer refresh paths first.
 
 ## Keybinding Rules
 

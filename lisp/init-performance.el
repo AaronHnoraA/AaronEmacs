@@ -636,8 +636,7 @@ This samples once and does not mutate or display the performance board."
   (insert (propertize "Usage" 'face 'my/performance-section-face) "\n")
   (insert "  g  refresh now        y  copy full page          a  toggle auto refresh\n")
   (insert "  s  save one record    R  toggle recording        o  open record directory\n")
-  (insert "  R  toggle recording   o  open record directory   p  start CPU profiler\n")
-  (insert "  P  profiler report    q  close performance frame\n\n")
+  (insert "  p  start CPU profiler P  profiler report         q  close performance frame\n\n")
   (insert (format "Updated: %s    Inspecting: %s\n"
                   (plist-get sample :timestamp)
                   (if (buffer-live-p inspected-buffer)
