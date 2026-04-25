@@ -25,6 +25,11 @@ integer position keys from accumulating during long editing sessions."
   :type 'integer
   :group 'my/org-ui)
 
+(defcustom my/org-prose-body-width 96
+  "Preferred `olivetti-mode' body width for Org prose buffers."
+  :type 'integer
+  :group 'my/org-ui)
+
 (declare-function evil-insert-state-p "evil")
 (declare-function my/org-toc-insert-or-update "init-org-core")
 
@@ -124,7 +129,11 @@ made the buffer lose its rendered appearance in insert state."
 (defun my/org-setup-polished-document-frame ()
   "Apply small buffer-local polish for reading and note-taking."
   (when (display-graphic-p)
-    (setq-local line-spacing (max (or line-spacing 0) 0.18))
+    (setq-local line-spacing
+                (max (or line-spacing 0)
+                     (or (and (boundp 'my/prose-line-spacing)
+                              my/prose-line-spacing)
+                         0.19)))
     (setq-local cursor-type 'bar)
     (setq-local left-margin-width 1)
     (setq-local right-margin-width 1)
@@ -136,8 +145,8 @@ made the buffer lose its rendered appearance in insert state."
   :ensure t
   :diminish
   :bind ("<f8>" . olivetti-mode)
-  :init 
-  (setq olivetti-body-width 0.618) 
+  :init
+  (setq olivetti-body-width my/org-prose-body-width)
   :config
   (defun xs-toggle-olivetti-for-org ()
     "If current buffer is Org and only one window is visible, enable olivetti."

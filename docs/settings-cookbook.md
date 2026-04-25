@@ -23,6 +23,7 @@
 
 - [lisp/init-base.el](../lisp/init-base.el)
 - [lisp/init-org.el](../lisp/init-org.el)
+- [lisp/org/init-org-ui.el](../lisp/org/init-org-ui.el)
 - [lisp/init-text.el](../lisp/init-text.el)
 - [lisp/init-auctex.el](../lisp/init-auctex.el)
 
@@ -32,10 +33,13 @@
 - `my/font-code`
 - `my/font-title`
 - `my/font-cn`
+- `my/font-body-width`
 - `my/h-body`
 - `my/h-code`
 - `my/h-title`
 - `my/scale-cn`
+- `my/prose-line-spacing`
+- `my/org-prose-body-width`
 
 职责：
 
@@ -43,6 +47,8 @@
   基础字体族、字号、中文 fontset 绑定、共享排版 helper。
 - `lisp/init-org.el`
   Org 里什么时候启用 prose 排版。
+- `lisp/org/init-org-ui.el`
+  Org prose 行距、单窗口阅读宽度、标题和 special block 视觉层。
 - `lisp/init-text.el`
   Markdown 里什么时候启用 prose 排版。
 - `lisp/init-auctex.el`

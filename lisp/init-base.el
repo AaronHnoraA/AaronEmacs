@@ -289,9 +289,9 @@
   :type 'integer
   :group 'my/typography)
 
-(defcustom my/font-body-width 'semi-expanded
+(defcustom my/font-body-width 'normal
   "Preferred width for prose Latin text.
-Use a slightly expanded width so English sits closer to enlarged CJK glyphs."
+Keep the prose font at its native width so long English lines stay tight."
   :type 'symbol
   :group 'my/typography)
 
@@ -358,7 +358,7 @@ Use a slightly expanded width so English sits closer to enlarged CJK glyphs."
   :type 'symbol
   :group 'my/typography)
 
-(defcustom my/prose-line-spacing 0.16
+(defcustom my/prose-line-spacing 0.19
   "Line spacing used in prose buffers."
   :type 'number
   :group 'my/typography)
