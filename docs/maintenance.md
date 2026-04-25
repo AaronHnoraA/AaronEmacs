@@ -183,17 +183,56 @@ leader 入口：
 - async warning 策略走 `silent`
 - `custom.el` 不纳入统一编译目标
 - 不自动做 byte compile
+- 启动时会删除本配置自有的 `lisp/` 和 `site-lisp/` 下 `.elc`，避免坏字节码或较新的错误 `.elc` 压过源码；`elpa/` 包字节码不受影响
 - 可选自动 native compile on save，由 board / dispatch 统一开关
 
 编译策略：
 
 - 日常入口用 `make compile`、`make compile-byte`、`M-x my/byte-compile-config` 或 compile board 的 `[byte config]`
-- 这些入口是增量编译，只会处理缺失或源码比 `.elc` 更新的文件
-- 如果所有 `.elc` 都是新的，结果应类似 `0 files compiled, 128 skipped`
+- 这些入口主要用于诊断 byte-compile warning/error；生成的本地 `.elc` 是可丢弃产物，下一次正常启动会自动删除
+- 在同一个 Emacs 会话内重复运行时，这些入口仍是增量编译，只会处理缺失或源码比 `.elc` 更新的文件
 - 只有明确需要重建字节码时才用 `make compile-byte-force`、compile board 的 `[force byte]` 或 dispatch 里的 `force byte config`
 - 修启动链、清理过旧字节码、怀疑 `.elc` 内容坏了时，才算需要 force
 
-## 3. 状态目录
+## 3. 性能 / 功耗观察
+
+文件：
+
+- [lisp/init-performance.el](../lisp/init-performance.el)
+
+常用入口：
+
+- `M-x my/performance-watch`
+  打开运行时观察 board。
+- `SPC h p`
+  同上。
+
+这个 buffer 默认打开到独立 frame，避免和 dashboard/Org 分屏共绘。默认只在打开和按 `g` 时采样；如果按 `a` 临时开启自动刷新，`q` 退出时会停止刷新 timer 并关闭监管 frame。顶部有用法区和概览条形图。里面可以看：
+
+- `ps` 里的 Emacs CPU、内存、RSS、子进程。
+- Emacs runtime：buffer/process/timer/GC/read-process-output-max。
+- Emacs process 列表。
+- hook 表的全局和当前 buffer-local 激活数量。
+- Org buffer 列表、是否可见、局部 hook 数量、LaTeX 预览队列/overlay/pending 数。
+- 最大 buffer 列表和 timer/idle timer 分组。
+
+记录保存在 [var/performance/](../var/performance/)：
+
+- `s` 会把当前采样追加到当天的 `performance-YYYYMMDD.tsv`。
+- `R` 会切换录制模式，录制开启后每次刷新都会追加一条。
+- `o` 打开记录目录。
+
+按键：
+
+- `g` 立即刷新。
+- `a` 切换自动刷新。
+- `s` 保存当前采样。
+- `R` 切换录制模式。
+- `o` 打开记录目录。
+- `p` 启动 CPU profiler。
+- `P` 打开 profiler report。
+
+## 4. 状态目录
 
 集中在 [var/](../var/)：
 

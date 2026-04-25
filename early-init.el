@@ -10,6 +10,18 @@
   '("early-init.el" "init.el" "bootstrap.el")
   "Top-level startup files whose bytecode can break bootstrap.")
 
+(defvar my/delete-local-bytecode-on-startup t
+  "Whether startup deletes config-owned `.elc' files before loading modules.
+
+Byte compilation remains useful as a health check, but this personal config
+changes frequently enough that stale or badly compiled local bytecode is more
+expensive than the small startup win it provides.  This only touches files under
+the config's own Elisp trees, not installed packages under `elpa/'.")
+
+(defconst my/local-bytecode-directories
+  '("lisp" "site-lisp")
+  "Config-owned directories whose `.elc' files are disposable.")
+
 (defun my/delete-stale-startup-bytecode ()
   "Delete top-level startup `.elc' files before normal init loading continues.
 
@@ -31,7 +43,25 @@ a chance to affect the rest of the module graph."
                     (error-message-string err))
             :error)))))))
 
+(defun my/delete-local-bytecode-files ()
+  "Delete config-owned `.elc' files before loading local modules."
+  (when my/delete-local-bytecode-on-startup
+    (dolist (directory my/local-bytecode-directories)
+      (let ((root (expand-file-name directory user-emacs-directory)))
+        (when (file-directory-p root)
+          (dolist (file (directory-files-recursively root "\\.elc\\'"))
+            (condition-case err
+                (delete-file file)
+              (error
+               (display-warning
+                'early-init
+                (format "Failed to delete local bytecode %s: %s"
+                        file
+                        (error-message-string err))
+                :error)))))))))
+
 (my/delete-stale-startup-bytecode)
+(my/delete-local-bytecode-files)
 
 ;; Keep native compilation cache local to this config so cleanup stays simple.
 (when (fboundp 'startup-redirect-eln-cache)

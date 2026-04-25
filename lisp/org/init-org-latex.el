@@ -105,6 +105,14 @@ Each value may be a readable `.cls' file path or literal class source."
   :type 'integer
   :group 'my/org-latex-preview)
 
+(defcustom my/org-latex-preview-lookahead-lines 36
+  "Number of lines below the visible window to pre-render opportunistically.
+This intentionally defaults higher than `my/org-latex-preview-overscan-lines'
+because scrolling through notes usually moves forward, and cached previews
+should be ready before their source enters the window."
+  :type 'integer
+  :group 'my/org-latex-preview)
+
 (defcustom my/org-latex-preview-max-concurrency 3
   "Maximum number of concurrent LaTeX preview render jobs."
   :type 'integer
@@ -920,6 +928,21 @@ fallback edit render."
         (cons (max (point-min) scan-beg)
               (min (point-max) scan-end))))))
 
+(defun my/org-latex--range-with-line-margins (beg end before-lines after-lines)
+  "Return BEG END expanded by BEFORE-LINES and AFTER-LINES."
+  (let ((before-lines (max 0 (or before-lines 0)))
+        (after-lines (max 0 (or after-lines 0))))
+    (save-excursion
+      (let (scan-beg scan-end)
+        (goto-char beg)
+        (forward-line (- before-lines))
+        (setq scan-beg (line-beginning-position))
+        (goto-char end)
+        (forward-line after-lines)
+        (setq scan-end (line-end-position))
+        (cons (max (point-min) scan-beg)
+              (min (point-max) scan-end))))))
+
 (defun my/org-latex--range-include-boundary-fragments (range)
   "Expand RANGE to include fragments that overlap its boundaries."
   (let ((beg (car range))
@@ -935,8 +958,11 @@ fallback edit render."
 (defun my/org-latex--visible-scan-range (beg end)
   "Return the scan range used to find previews overlapping visible BEG END."
   (my/org-latex--range-include-boundary-fragments
-   (my/org-latex--range-with-line-margin
-    beg end my/org-latex-preview-overscan-lines)))
+   (my/org-latex--range-with-line-margins
+    beg end
+    my/org-latex-preview-overscan-lines
+    (max my/org-latex-preview-overscan-lines
+         my/org-latex-preview-lookahead-lines))))
 
 (defun my/org-latex--spec-overlaps-range-p (spec beg end)
   "Return non-nil when preview SPEC overlaps BEG END."
@@ -1277,12 +1303,14 @@ old scroll-triggered jobs."
 
 (defun my/org-latex--image-overlay-at-point ()
   "Return an image display overlay that directly covers point, or nil."
-  (catch 'found
-    (dolist (ov (overlays-at (point)))
-      (let ((disp (overlay-get ov 'display)))
-        (when (and (listp disp) (eq (car disp) 'image))
-          (throw 'found ov))))
-    nil))
+  (when (eq (get-char-property (point) 'org-overlay-type) 'org-latex-overlay)
+    (catch 'found
+      (dolist (ov (overlays-at (point)))
+        (when (eq (overlay-get ov 'org-overlay-type) 'org-latex-overlay)
+          (let ((disp (overlay-get ov 'display)))
+            (when (and (listp disp) (eq (car disp) 'image))
+              (throw 'found ov)))))
+      nil)))
 
 (defun my/org-latex--image-spec-put (display property value)
   "Return DISPLAY image spec with PROPERTY set to VALUE."

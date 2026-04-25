@@ -17,6 +17,7 @@
 (defvar my/org--olivetti-sync-timer nil)
 (defvar-local my/org--suspended-in-insert nil)
 (defvar-local my/org--insert-suspended-modes nil)
+(defvar my/org-special-block--palette-cache (make-hash-table :test #'equal))
 
 (defcustom my/org-pretty-block-cache-max-entries 256
   "Maximum cached pretty-block signatures per Org buffer.
@@ -140,6 +141,16 @@ made the buffer lose its rendered appearance in insert state."
     (setq-local hl-line-face 'my/org-hl-line)
     (set-window-buffer (selected-window) (current-buffer))))
 
+(defun my/org-visible-buffer-p ()
+  "Return non-nil when an Org buffer is visible in a live window."
+  (catch 'visible
+    (dolist (window (window-list nil 'no-minibuf))
+      (when-let* ((buffer (window-buffer window)))
+        (with-current-buffer buffer
+          (when (derived-mode-p 'org-mode)
+            (throw 'visible t)))))
+    nil))
+
 ;; 3.1 写作专注模式 (自动居中)
 (use-package olivetti
   :ensure t
@@ -170,7 +181,8 @@ made the buffer lose its rendered appearance in insert state."
 
   (defun my/org-schedule-olivetti-sync (&rest _)
     "Coalesce repeated window changes before syncing Org Olivetti state."
-    (unless (timerp my/org--olivetti-sync-timer)
+    (when (and (not (timerp my/org--olivetti-sync-timer))
+               (my/org-visible-buffer-p))
       (setq my/org--olivetti-sync-timer
             (run-with-idle-timer 0.05 nil #'my/org-sync-visible-olivetti-buffers))))
   
@@ -303,6 +315,7 @@ made the buffer lose its rendered appearance in insert state."
                            (face-attribute 'default :foreground nil t))))
       (unless (equal signature my/org-ui--face-theme-signature)
         (setq my/org-ui--face-theme-signature signature)
+        (clrhash my/org-special-block--palette-cache)
         (let* ((base-bg (face-attribute 'default :background nil t))
                (base-bg (if (my/org--unspecified-color-p base-bg)
                             (aaron-ui-color 'bg-base)
@@ -778,24 +791,32 @@ made the buffer lose its rendered appearance in insert state."
 DEFAULT-BG defaults to `my/org-default-background'."
   (when-let* ((config (my/org-special-block-config type))
               (base-color (plist-get config :color))
-              (background (or default-bg (my/org-default-background)))
-              (label (plist-get config :label))
-              (emoji (plist-get config :emoji))
-              (footer (or (plist-get config :footer) emoji)))
-    (list :label label
-          :emoji emoji
-          :title (concat label (when emoji (concat " " emoji)))
-          :footer footer
-          :footer-style (plist-get config :footer-style)
-          :base-color base-color
-          :type (downcase (or type ""))
-          :header-bg (my/org-blend-colors base-color background 0.18)
-          :body-bg (my/org-blend-colors base-color background 0.075)
-          :badge-bg (my/org-blend-colors base-color background 0.24)
-          :divider-color (my/org-blend-colors base-color background 0.54)
-          :gutter-color (my/org-blend-colors base-color background 0.46)
-          :footer-color (my/org-blend-colors base-color background 0.72)
-          :params-color (my/org-blend-colors (aaron-ui-color 'fg-soft) background 0.78))))
+              (background (or default-bg (my/org-default-background))))
+    (let* ((type (downcase (or type "")))
+           (key (list type background config)))
+      (or (gethash key my/org-special-block--palette-cache)
+          (let* ((label (plist-get config :label))
+                 (emoji (plist-get config :emoji))
+                 (footer (or (plist-get config :footer) emoji))
+                 (palette
+                  (list :label label
+                        :emoji emoji
+                        :title (concat label (when emoji (concat " " emoji)))
+                        :footer footer
+                        :footer-style (plist-get config :footer-style)
+                        :base-color base-color
+                        :type type
+                        :header-bg (my/org-blend-colors base-color background 0.18)
+                        :body-bg (my/org-blend-colors base-color background 0.075)
+                        :badge-bg (my/org-blend-colors base-color background 0.24)
+                        :divider-color (my/org-blend-colors base-color background 0.54)
+                        :gutter-color (my/org-blend-colors base-color background 0.46)
+                        :footer-color (my/org-blend-colors base-color background 0.72)
+                        :params-color (my/org-blend-colors
+                                       (aaron-ui-color 'fg-soft)
+                                       background 0.78))))
+            (puthash key palette my/org-special-block--palette-cache)
+            palette)))))
 
 (defun my/org-special-block-at-point (&optional pos)
   "Return the styled Org special block containing POS, or nil."
@@ -806,7 +827,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
           found)
       (while (and element (not found))
         (when (and (eq (org-element-type element) 'special-block)
-                   (my/org-special-block-palette
+                   (my/org-special-block-config
                     (org-element-property :type element)))
           (setq found element))
         (setq element (org-element-property :parent element)))
@@ -1043,7 +1064,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
                 (cursor body-begin))
       (dolist (child (org-element-map element 'special-block #'identity))
         (when (and (not (eq child element))
-                   (my/org-special-block-palette
+                   (my/org-special-block-config
                     (org-element-property :type child)))
           (pcase-let ((`(,child-begin . ,child-end)
                        (my/org-special-block-line-range child)))
@@ -1289,7 +1310,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
               (narrow-to-region scan-start scan-end)
               (dolist (el (org-element-map (org-element-parse-buffer) 'special-block
                             (lambda (el)
-                              (when (and (my/org-special-block-palette
+                              (when (and (my/org-special-block-config
                                           (org-element-property :type el))
                                          (< (org-element-property :begin el) end)
                                          (> (org-element-property :end el) start))

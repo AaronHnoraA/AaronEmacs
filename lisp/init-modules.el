@@ -79,6 +79,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-output)
 (require 'init-session)
 (require 'init-maintenance)
+(require 'init-performance)
 (require 'init-diagnostics-ui)
 (require 'init-diagnostics-extra)
 (require 'init-health)

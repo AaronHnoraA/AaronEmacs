@@ -100,6 +100,10 @@ Special block overlays are no longer disabled based on buffer size."
     (with-current-buffer buffer
       (my/org-force-indent-mode))))
 
+(defun my/org-setup-indent-after-local-variables ()
+  "Keep `org-indent-mode' enabled after file-local variables are applied."
+  (add-hook 'hack-local-variables-hook #'my/org-force-indent-mode nil t))
+
 (defun my/org-toc--block-regexp ()
   "Return regexp matching the managed overview TOC block."
   "^[ \t]*#\\+begin_overview\\_>.*:toc\\_>")
@@ -304,6 +308,7 @@ headline levels."
   :ensure nil
   :hook ((org-mode . visual-line-mode)        ; 自动换行
          (org-mode . my/org-force-indent-mode)
+         (org-mode . my/org-setup-indent-after-local-variables)
          (org-mode . my/org-setup-buffer-spacing)
          (org-mode . my/org-setup-toc-auto-update)
          (org-mode . my/org-enable-typography-maybe)) ; 缩进模式
@@ -392,8 +397,6 @@ headline levels."
   
   ;; --- Citations ---
   (org-cite-global-bibliography pv/org-bibtex-files))
-
-(add-hook 'hack-local-variables-hook #'my/org-force-indent-mode)
 (my/org-force-indent-mode-in-existing-buffers)
 
 ;;; ----------------------------------------------------------------------------
