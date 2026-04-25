@@ -353,17 +353,34 @@ browser pipeline 额外提供：
 
 ## 8. AI
 
+### AI Workbench
+
+- `M-x ai-workbench` — 直接打开当前项目的交互 backend session
+- `M-x ai-workbench-compose-buffer` — 打开统一 compose buffer
+- `C-c M-a` — 在当前文件里打开引用式 AI 工具入口
+- `C-c A w` / `C-c A m` — workbench / compose 快捷入口
+- `C-c A i r` / `C-c A i b` / `C-c A i f` — 直接发送 region / buffer / file
+- 第一次打开会选择 backend，session 默认 profile 先记为 `default`，profile 文本从 `etc/ai-workbench/profiles/default.txt` 读取
+- 统一入口不再停在中转 frontend，而是直接弹出 Claude/Codex 交互 buffer
+- Codex 默认走交互 terminal session，不默认走 `exec --json`
+- session 创建时会自动在项目目录启动，并自动注入一次 workdir/profile 提示
+- 如果输出中包含 patch，会额外进入 diff buffer，走 `a`/`x` accept/reject
+- 引用式入口会写 `var/ai-workbench/` manifest，profile 启动期要求 AI 把所有修改文件写入清单，diff review 会读取它
+- 这层当前是主推荐入口，底层仍复用 Claude Code / Codex CLI
+
 ### Claude Code
 
 - `C-c C-'` / `C-c a` — claude-code-ide 菜单
 - `F12` / `H-l`       — 同上
 - 配置：`lisp/init-ai-ide.el`，变量 `claude-code-ide-cli-path`
+- 本地源码由 `site-lisp/ai-workbench/vendor/claude-code-ide/` 提供
 
 ### Codex CLI
 
 - `C-c c t` — 切换面板
 - `C-c c s` / `C-c c q` — 启动 / 停止
 - `C-c c p` / `C-c c r` / `C-c c f` — 发送 prompt / region / file
+- 本地源码由 `site-lisp/ai-workbench/vendor/codex-cli/` 提供
 
 ### Copilot
 

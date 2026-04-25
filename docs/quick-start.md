@@ -206,6 +206,27 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 [lisp/init-ai-ide.el](../lisp/init-ai-ide.el) 管理两套 AI 助手：
 
+当前本地源码来源已经切到 `site-lisp/ai-workbench/vendor/` 下的 vendored 包，
+不再依赖这里现场拉取 VC 包。
+
+**AI Workbench**（统一入口，实验中）
+
+- `M-x ai-workbench` — 直接弹出当前后端的交互 buffer
+- `M-x ai-workbench-compose-buffer` — 打开 compose buffer
+- `C-c M-a` — 在当前文件里打开引用式 AI 工具入口
+- `C-c A w` — 打开 workbench
+- `C-c A m` — 打开 compose buffer
+- `C-c A i r` / `C-c A i b` / `C-c A i f` — 直接把 region / 当前 buffer / 文件发给当前 backend
+- 第一次打开会先选择 backend；profile 现在先固定为 `default`，文本在 `etc/ai-workbench/profiles/default.txt`
+- workbench 不再停在中转页面，统一入口会直接把 Claude/Codex 的交互 session 弹出来
+- 引用式工具入口生成的 prompt 会进入 popup compose buffer，并清掉上一次残留内容
+- 后端 session 创建时会自动在项目目录启动，并自动注入一次 workdir/profile 提示
+- compose buffer:
+  `C-c C-c` 发送，`C-c C-b` 切后端，`C-c C-r` 注入 region，
+  `C-c C-e` 注入当前 buffer，`C-c C-f` 注入文件
+- diff 候选仍然先进入 Emacs diff buffer，再由用户决定是否 apply；引用式入口会在 `var/ai-workbench/` 放修改清单 manifest，profile 启动期会说明维护规则
+- 当前先复用 Claude/Codex 的现有会话能力，同时保留旧快捷键
+
 **Claude Code**（主力）
 
 - CLI 路径：`claude-code-ide-cli-path`（默认 `/Users/hc/.local/bin/claude`）

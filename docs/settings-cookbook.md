@@ -84,6 +84,8 @@
 
 - [lisp/init-ai-ide.el](../lisp/init-ai-ide.el)
 
+当前 AI 相关源码由 `site-lisp/ai-workbench/vendor/` 提供。
+
 ### Claude Code
 
 变量：

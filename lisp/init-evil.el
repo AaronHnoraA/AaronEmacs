@@ -220,10 +220,23 @@
                   my/jupyter-manager-mode
                   my/jupyter-doctor-mode
                   my/compile-board-mode
-                  my/health-mode))
+                  my/health-mode
+                  ai-workbench-mode
+                  ai-workbench-codex-mode
+                  ai-workbench-compose-mode
+                  ai-workbench-output-mode
+                  ai-workbench-result-mode
+                  ai-workbench-diff-mode))
     (evil-set-initial-state mode 'emacs))
   (add-to-list 'evil-buffer-regexps '("^\\*Appine Window\\*$" . nil))
   (add-to-list 'evil-buffer-regexps '("^\\*vterm.*\\*$" . nil))
+  (add-to-list 'evil-buffer-regexps '("^\\*AI Workbench:.*\\*$" . nil))
+  (add-to-list 'evil-buffer-regexps '("^\\*AI Compose:.*\\*$" . nil))
+  (add-to-list 'evil-buffer-regexps '("^\\*AI Output:.*\\*$" . nil))
+  (add-to-list 'evil-buffer-regexps '("^\\*AI Result:.*\\*$" . nil))
+  (add-to-list 'evil-buffer-regexps '("^\\*AI Diff:.*\\*$" . nil))
+  (add-to-list 'evil-buffer-regexps '("^\\*claude-code\\[.*\\]\\*$" . nil))
+  (add-to-list 'evil-buffer-regexps '("^\\*codex\\[.*\\]\\*$" . nil))
   (dolist (hook '(ibuffer-mode-hook
                   debugger-mode-hook
                   my/diagnostics-mode-hook
@@ -232,7 +245,13 @@
                   my/jupyter-manager-mode-hook
                   my/jupyter-doctor-mode-hook
                   my/compile-board-mode-hook
-                  my/health-mode-hook))
+                  my/health-mode-hook
+                  ai-workbench-mode-hook
+                  ai-workbench-codex-mode-hook
+                  ai-workbench-compose-mode-hook
+                  ai-workbench-output-mode-hook
+                  ai-workbench-result-mode-hook
+                  ai-workbench-diff-mode-hook))
     (add-hook hook #'my/evil-special-buffer-setup-h))
   ;; Keep file managers and buffer menus fully in Emacs state instead of
   ;; letting Evil / evil-collection take them over.
@@ -241,6 +260,13 @@
   (add-hook 'dirvish-mode-hook #'my/evil-disable-local-mode-h)
   (add-hook 'eww-mode-hook #'my/evil-disable-local-mode-h)
   (add-hook 'xwidget-webkit-mode-hook #'my/evil-disable-local-mode-h)
+  (dolist (hook '(ai-workbench-mode-hook
+                  ai-workbench-codex-mode-hook
+                  ai-workbench-compose-mode-hook
+                  ai-workbench-output-mode-hook
+                  ai-workbench-result-mode-hook
+                  ai-workbench-diff-mode-hook))
+    (add-hook hook #'my/evil-disable-local-mode-h))
   ;; Silence line out of range error.
   (shut-up! #'evil-indent)
   (add-hook 'my/escape-hook #'my/evil-force-normal-state-h)

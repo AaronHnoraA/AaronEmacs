@@ -52,6 +52,28 @@
 (defvar-local my/vterm-popup-instance-p nil
   "Whether the current buffer belongs to the popup vterm pool.")
 
+(defvar-local my/vterm-popup-kind 'terminal
+  "Semantic kind for the current popup buffer.")
+
+(defvar-local my/vterm-popup-title nil
+  "Optional title shown in the popup header for the current buffer.")
+
+(defface my/vterm-popup-tab-current
+  `((t (:inherit mode-line-buffer-id
+        :foreground ,(aaron-ui-color 'fg-strong)
+        :background ,(aaron-ui-color 'bg-elevated)
+        :box (:line-width (1 . -1)
+              :color ,(aaron-ui-color 'border-popup-separator)))))
+  "Face used for the active popup vterm tab."
+  :group 'my/vterm-popup)
+
+(defface my/vterm-popup-tab
+  `((t (:inherit mode-line
+        :foreground ,(aaron-ui-color 'fg-muted)
+        :background ,(aaron-ui-color 'bg-base))))
+  "Face used for inactive popup vterm tabs."
+  :group 'my/vterm-popup)
+
 (defface my/vterm-popup-separator
   `((t (:inherit mode-line
         :foreground ,(aaron-ui-color 'bg-popup-separator)
@@ -70,16 +92,98 @@
    'face 'my/vterm-popup-separator
    'display '(space :align-to right)))
 
+(defun my/vterm-popup--kind-label (&optional buffer)
+  "Return a short semantic label for popup BUFFER."
+  (let ((kind (if buffer
+                  (buffer-local-value 'my/vterm-popup-kind buffer)
+                my/vterm-popup-kind)))
+    (pcase kind
+      ('ai-claude "cc")
+      ('ai-codex "codex")
+      ('ai-compose "prompt")
+      (_ "term"))))
+
+(defun my/vterm-popup--tab-title (buffer)
+  "Return the display title for popup BUFFER."
+  (or (buffer-local-value 'my/vterm-popup-title buffer)
+      (buffer-name buffer)))
+
+(defun my/vterm-popup-select-buffer (buffer)
+  "Select popup BUFFER in the shared popup window."
+  (interactive
+   (list (my/vterm-popup--read-buffer "Popup tab: ")))
+  (unless (my/vterm-popup--buffer-p buffer)
+    (user-error "Not a popup vterm buffer: %s" buffer))
+  (select-window (my/vterm-popup--show-buffer buffer))
+  buffer)
+
+(defun my/vterm-popup--tab-segment (buffer index current)
+  "Return a clickable tab segment for BUFFER at INDEX.
+CURRENT is the currently displayed popup buffer."
+  (let* ((selected (eq buffer current))
+         (face (if selected 'my/vterm-popup-tab-current 'my/vterm-popup-tab))
+         (title (my/vterm-popup--tab-title buffer))
+         (label (format " %d:%s %s "
+                        index
+                        (my/vterm-popup--kind-label buffer)
+                        (file-name-nondirectory
+                         (directory-file-name title)))))
+    (propertize
+     label
+     'face face
+     'mouse-face 'mode-line-highlight
+     'help-echo (format "Switch to %s" (buffer-name buffer))
+     'local-map (let ((map (make-sparse-keymap)))
+                  (define-key map [header-line mouse-1]
+                              (lambda ()
+                                (interactive)
+                                (my/vterm-popup-select-buffer buffer)))
+                  map))))
+
+(defun my/vterm-popup-new ()
+  "Create a fresh popup vterm in `default-directory' and switch to it."
+  (interactive)
+  (select-window
+   (my/vterm-popup--show-buffer
+    (my/vterm-popup--create-buffer default-directory))))
+
+(defun my/vterm-popup--new-tab-segment ()
+  "Return a clickable segment that creates a new popup vterm."
+  (propertize
+   " +term "
+   'face 'my/vterm-popup-tab
+   'mouse-face 'mode-line-highlight
+   'help-echo "Create a new popup vterm"
+   'local-map (let ((map (make-sparse-keymap)))
+                (define-key map [header-line mouse-1]
+                            (lambda ()
+                              (interactive)
+                              (my/vterm-popup-new)))
+                map)))
+
+(defun my/vterm-popup--tab-line ()
+  "Return the popup vterm tab strip for the header line."
+  (let* ((buffers (my/vterm-popup--live-buffers))
+         (current (current-buffer))
+         (tabs (cl-loop for buffer in buffers
+                        for index from 1
+                        collect (my/vterm-popup--tab-segment
+                                 buffer index current))))
+    (append
+     (list " ")
+     tabs
+     (list " "
+           (my/vterm-popup--new-tab-segment)
+           " "
+           (propertize "C-c E next  C-c M-e pin"
+                       'face 'shadow)))))
+
 (defun my/vterm-popup-apply-ui (buffer)
   "Apply local popup terminal UI to BUFFER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (setq-local mode-line-format '((:eval (my/vterm-popup--separator-line))))
-      (setq-local header-line-format
-                  '(" "
-                    (:propertize "%b" face mode-line-buffer-id)
-                    "  "
-                    (:propertize "terminal" face shadow)))
+      (setq-local header-line-format '(:eval (my/vterm-popup--tab-line)))
       (setq-local fringes-outside-margins nil)
       (setq-local left-margin-width 0)
       (setq-local right-margin-width 0))))
@@ -166,6 +270,22 @@ When BUFFER is non-nil, return the window displaying BUFFER."
     (set-window-parameter window 'no-delete-other-windows t)
     (window-preserve-size window nil t)
     window))
+
+(defun my/vterm-popup-display-buffer (buffer)
+  "Display BUFFER using the shared popup vterm window logic."
+  (unless (buffer-live-p buffer)
+    (user-error "Dead buffer: %s" buffer))
+  (with-current-buffer buffer
+    (setq-local my/vterm-popup-instance-p t)
+    (unless (boundp 'my/vterm-popup-fixed)
+      (setq-local my/vterm-popup-fixed nil))
+    (my/vterm-popup-apply-ui buffer)
+    (add-hook 'kill-buffer-hook #'my/vterm-popup--on-kill nil t))
+  (unless (memq buffer (my/vterm-popup--live-buffers))
+    (setq my/vterm-popup-buffers
+          (append (my/vterm-popup--live-buffers) (list buffer))))
+  (select-window (my/vterm-popup--show-buffer buffer))
+  buffer)
 
 (defun my/vterm-popup--on-kill ()
   "Clean up popup vterm state when the current buffer is killed."
@@ -363,6 +483,7 @@ With prefix ARG, create a new popup vterm and switch to it."
 (global-set-key (kbd "M-`") #'vterm-toggle)
 (global-set-key (kbd "C-c e") #'vterm-toggle)
 (global-set-key (kbd "C-c E") #'my/vterm-popup-cycle)
+(global-set-key (kbd "C-c M-E") #'my/vterm-popup-new)
 (global-set-key (kbd "C-c M-e") #'my/vterm-toggle-fixed)
 
 (with-eval-after-load 'savehist

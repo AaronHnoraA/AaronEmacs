@@ -15,12 +15,41 @@
 ;;     C-c c s/q start / stop
 ;;     C-c c p/r/f  send prompt / region / file
 ;;     C-c c a/n/b  show-all / next page / prev page
+;;
+;;   AI Workbench (ai-workbench) — unified Emacs-native entry layer
+;;     M-x ai-workbench               open backend interactive buffer
+;;     M-x ai-workbench-compose-buffer open compose buffer
+;;     C-c M-a     ai-workbench-context-prompt
+;;     C-c A w     ai-workbench
+;;     C-c A .     ai-workbench-context-prompt
+;;     C-c A k     ai-workbench-kill
+;;     C-c A m     ai-workbench-compose-buffer
+;;     C-c A i r/b/f send region / buffer / file via current backend
 
 ;;; Code:
 
-;;; ── Claude Code ────────────────────────────────────────────────────────────
+(add-to-list 'load-path
+             (file-name-as-directory
+              (locate-user-emacs-file "site-lisp/ai-workbench")))
 
-(my/package-ensure-vc 'claude-code-ide "https://github.com/manzaltu/claude-code-ide.el")
+(require 'ai-workbench)
+(require 'ai-workbench-vendor)
+(ai-workbench-setup-vendor-load-paths)
+
+(defvar-keymap my/ai-workbench-prefix-map
+  :doc "Prefix map for ai-workbench commands."
+  "w" #'ai-workbench
+  "." #'ai-workbench-context-prompt
+  "k" #'ai-workbench-kill
+  "m" #'ai-workbench-compose-buffer
+  "i r" #'ai-workbench-send-region
+  "i b" #'ai-workbench-send-current-buffer
+  "i f" #'ai-workbench-send-file)
+
+(global-set-key (kbd "C-c M-a") #'ai-workbench-context-prompt)
+(global-set-key (kbd "C-c A") my/ai-workbench-prefix-map)
+
+;;; ── Claude Code ────────────────────────────────────────────────────────────
 
 (use-package claude-code-ide
   :ensure nil
@@ -36,8 +65,6 @@
   (claude-code-ide-emacs-tools-setup))
 
 ;;; ── Codex CLI ──────────────────────────────────────────────────────────────
-
-(my/package-ensure-vc 'codex-cli "https://github.com/bennfocus/codex-cli.el")
 
 (use-package codex-cli
   :ensure nil
