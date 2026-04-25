@@ -28,8 +28,7 @@
 (use-package org-fragtog
   :ensure t
   :custom
-  (org-fragtog-preview-delay 0.15)
-  :hook (org-mode . my/org-enable-org-fragtog-maybe))
+  (org-fragtog-preview-delay 0.15))
 
 (use-package bibtex-completion
   :custom
@@ -90,8 +89,15 @@ Each value may be a readable `.cls' file path or literal class source."
   :type 'number
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-scroll-idle-delay 0.2
-  "Idle delay (seconds) before previewing visible region after scrolling."
+(defcustom my/org-latex-preview-scroll-idle-delay 0.08
+  "Debounce delay (seconds) before previewing visible region after scrolling."
+  :type 'number
+  :group 'my/org-latex-preview)
+
+(defcustom my/org-latex-preview-scroll-follow-interval 0.35
+  "Minimum seconds between forced visible previews during continuous scrolling.
+This is a low-frequency safety net for long scrolls; the normal trailing
+debounce still handles the final viewport after scrolling settles."
   :type 'number
   :group 'my/org-latex-preview)
 
@@ -510,6 +516,7 @@ render is usually ready before point leaves it."
     (format "\\setmathfont{%s}" my/latex-preview-math-font)))
 
 (defvar-local my/org-latex--preview-timer nil)
+(defvar-local my/org-latex--preview-follow-timer nil)
 (defvar-local my/org-latex--render-queue nil)
 (defvar-local my/org-latex--render-queue-tail nil)
 (defvar-local my/org-latex--render-running 0)
@@ -524,6 +531,8 @@ render is usually ready before point leaves it."
 (defvar-local my/org-latex--leave-preview-end-marker nil)
 (defvar-local my/org-latex--post-command-point nil)
 (defvar-local my/org-latex--post-command-range nil)
+(defvar-local my/org-latex--last-visible-range nil)
+(defvar-local my/org-latex--last-visible-preview-time 0.0)
 (defvar-local my/org-latex--scroll-preview-enabled nil)
 (defvar-local my/org-latex--suppress-scroll-preview nil)
 (defvar my/org-latex--allow-native-preview nil)
@@ -684,12 +693,21 @@ render is usually ready before point leaves it."
         (when state
           (my/org-latex--restore-window-state state))))))
 
+(defun my/org-latex--cancel-visible-preview-timers ()
+  "Cancel pending visible-area preview timers for the current buffer."
+  (when (timerp my/org-latex--preview-timer)
+    (cancel-timer my/org-latex--preview-timer))
+  (when (timerp my/org-latex--preview-follow-timer)
+    (cancel-timer my/org-latex--preview-follow-timer))
+  (setq my/org-latex--preview-timer nil
+        my/org-latex--preview-follow-timer nil))
+
 (defun my/org-latex--ratex-edit-session-active-p ()
   "Return non-nil when RaTeX is actively editing a formula in this Org buffer."
   (and (bound-and-true-p ratex-mode)
        (derived-mode-p 'org-mode)
-       (or ratex--posframe-visible
-           ratex--active-fragment)))
+       (or (bound-and-true-p ratex--posframe-visible)
+           (bound-and-true-p ratex--active-fragment))))
 
 (defun my/org-latex--cancel-edit-preview-timer ()
   "Cancel the pending edit-preview timer for the current buffer."
@@ -852,6 +870,18 @@ fallback edit render."
       (my/org-latex--cancel-leave-preview)
       (my/org-latex--clear-edit-preview-marker))))
 
+(defun my/org-latex--maybe-refresh-selected-viewport ()
+  "Schedule a visible preview if the selected window moved to a new viewport."
+  (when-let* (((not my/org-latex--suppress-scroll-preview))
+              ((bound-and-true-p my/org-latex--scroll-preview-enabled))
+              (window (selected-window))
+              ((window-live-p window))
+              ((eq (window-buffer window) (current-buffer)))
+              (start (window-start window))
+              ((or (null my/org-latex--last-visible-range)
+                   (/= start (car my/org-latex--last-visible-range)))))
+    (my/org-latex-preview-visible-debounced window)))
+
 (defun my/org-latex-post-command-function ()
   "Re-enable preview when point leaves a LaTeX fragment."
   (when (my/org-latex--async-preview-active-p)
@@ -890,7 +920,8 @@ fallback edit render."
             (unless curr-range
               (my/org-latex--clear-edit-preview-marker)))
           (setq my/org-latex--post-command-range curr-range)))))
-    (setq my/org-latex--post-command-point (point))))
+    (setq my/org-latex--post-command-point (point))
+    (my/org-latex--maybe-refresh-selected-viewport)))
 
 (defun my/org-latex--visible-range (&optional window)
   "Return (beg . end) for WINDOW's visible range in the current buffer."
@@ -1138,6 +1169,10 @@ old scroll-triggered jobs."
           (throw 'overlaps t))))
     nil))
 
+(defun my/org-latex--auto-preview-origin-p (origin)
+  "Return non-nil when ORIGIN is automatic visible-area preview work."
+  (memq origin '(visible prefetch)))
+
 (defun my/org-latex--edit-job-p (job)
   "Return non-nil when JOB renders the fragment being edited."
   (memq (plist-get job :origin) '(edit preedit)))
@@ -1203,6 +1238,26 @@ old scroll-triggered jobs."
           (throw 'cancelled t))))
     nil))
 
+(defun my/org-latex--cancel-prunable-renders-outside-range
+    (beg end &optional max-count)
+  "Cancel automatic renders that do not overlap BEG END.
+When MAX-COUNT is non-nil, cancel at most that many processes."
+  (let ((cancelled 0))
+    (dolist (process (copy-sequence my/org-latex--render-processes))
+      (when (or (null max-count)
+                (< cancelled max-count))
+        (let ((job (process-get process 'my/org-latex-job)))
+          (when (and job
+                     (plist-get job :prunable)
+                     (process-live-p process)
+                     (not (my/org-latex--job-waiter-overlaps-range-p
+                           job beg end)))
+            (process-put process 'my/org-latex-cancelled t)
+            (my/org-latex--finalize-render-state process job)
+            (my/org-latex--terminate-render-process process)
+            (setq cancelled (1+ cancelled))))))
+    cancelled))
+
 (defun my/org-latex--ensure-edit-render-slot (job)
   "Make room for edit JOB without interrupting manual render work."
   (when (and (my/org-latex--edit-job-p job)
@@ -1233,19 +1288,31 @@ old scroll-triggered jobs."
 
 (defun my/org-latex--cancel-stale-visible-renders (beg end)
   "Cancel running visible-preview jobs that no longer overlap BEG END."
-  (let ((cancelled 0))
-    (dolist (process (copy-sequence my/org-latex--render-processes))
-      (let ((job (process-get process 'my/org-latex-job)))
-        (when (and job
-                   (plist-get job :prunable)
-                   (process-live-p process)
-                   (not (my/org-latex--job-waiter-overlaps-range-p
-                         job beg end)))
-          (process-put process 'my/org-latex-cancelled t)
-          (my/org-latex--finalize-render-state process job)
-          (my/org-latex--terminate-render-process process)
-          (setq cancelled (1+ cancelled)))))
-    cancelled))
+  (my/org-latex--cancel-prunable-renders-outside-range beg end))
+
+(defun my/org-latex--visible-uncached-render-count (specs)
+  "Return the number of distinct SPECS that still need a render slot."
+  (let ((seen (make-hash-table :test 'equal))
+        (count 0))
+    (dolist (spec specs count)
+      (let* ((target (plist-get spec :file))
+             (job (and (hash-table-p my/org-latex--pending-renders)
+                       (gethash target my/org-latex--pending-renders))))
+        (when (and (stringp target)
+                   (not (gethash target seen))
+                   (not (file-exists-p target))
+                   (not (and job (my/org-latex--job-running-p job))))
+          (puthash target t seen)
+          (setq count (1+ count)))))))
+
+(defun my/org-latex--ensure-visible-render-slots (visible-specs beg end)
+  "Make current visible SPECS able to start before off-screen prefetch work."
+  (let* ((needed (my/org-latex--visible-uncached-render-count visible-specs))
+         (free (max 0 (- my/org-latex-preview-max-concurrency
+                         my/org-latex--render-running)))
+         (shortage (- needed free)))
+    (when (> shortage 0)
+      (my/org-latex--cancel-prunable-renders-outside-range beg end shortage))))
 
 (defun my/org-latex--preview-base-directory ()
   "Return the directory used to store Org preview images."
@@ -1289,7 +1356,7 @@ old scroll-triggered jobs."
 
 (defun my/org-latex--add-waiter (job spec)
   "Attach SPEC to JOB unless it is already tracked."
-  (unless (eq (plist-get spec :origin) 'visible)
+  (unless (my/org-latex--auto-preview-origin-p (plist-get spec :origin))
     (setf (plist-get job :prunable) nil))
   (unless (my/org-latex--waiter-present-p job spec)
     (let* ((waiter (my/org-latex--make-waiter spec))
@@ -1397,7 +1464,9 @@ old scroll-triggered jobs."
                     ((listp image))
                     ((eq (car image) 'image))
                     (body-width (max 1 (window-body-width window)))
-                    (image-width (ceiling (car (image-size image)))))
+                    (image-size (ignore-errors (image-size image)))
+                    (image-width (and image-size
+                                      (ceiling (car image-size)))))
           (let* ((valid-background (and (stringp background)
                                         (not (my/org--unspecified-color-p background))
                                         background))
@@ -1666,8 +1735,13 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
               (make-directory (file-name-directory target) t)
               (copy-file (plist-get job :image-output-file) target t)
               (dolist (waiter (plist-get job :waiters))
-                (my/org-latex--place-waiter-preview waiter target
-                                                    (plist-get job :imagetype))))
+                (condition-case err
+                    (my/org-latex--place-waiter-preview
+                     waiter target (plist-get job :imagetype))
+                  (error
+                   (message "[org-latex] Preview overlay skipped for %s: %s"
+                            (file-name-nondirectory target)
+                            (error-message-string err))))))
             (unless (or success cancelled)
               (message "[org-latex] Preview failed for %s"
                        (file-name-nondirectory target)))
@@ -1707,6 +1781,8 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
                           (plist-get job :command))
            :noquery t
            :sentinel #'my/org-latex--render-sentinel)))
+    (when (hash-table-p my/org-latex--pending-renders)
+      (puthash (plist-get job :file) job my/org-latex--pending-renders))
     (process-put process 'my/org-latex-buffer buffer)
     (process-put process 'my/org-latex-job job)
     (my/org-latex--trim-log-buffer log-buffer)
@@ -1774,7 +1850,9 @@ When NO-PUMP is non-nil, leave queue pumping to the caller."
                               :value (plist-get spec :render-value)
                               :generation my/org-latex--render-generation
                               :origin (plist-get spec :origin)
-                              :prunable (eq (plist-get spec :origin) 'visible)
+                              :prunable
+                              (my/org-latex--auto-preview-origin-p
+                               (plist-get spec :origin))
                               :waiters (list waiter)
                               :waiter-index waiter-index)))
             (puthash target job my/org-latex--pending-renders)
@@ -1823,10 +1901,11 @@ queued work."
       (if (my/org-latex--spec-overlaps-range-p spec beg end)
           (push spec visible-specs)
         (push spec prefetch-specs)))
+    (my/org-latex--ensure-visible-render-slots visible-specs beg end)
     (+ (my/org-latex--enqueue-fragments
         (nreverse visible-specs) 'visible 'front)
        (my/org-latex--enqueue-fragments
-        (nreverse prefetch-specs) 'visible))))
+        (nreverse prefetch-specs) 'prefetch))))
 
 (defun my/org-latex--prune-offscreen-overlays (beg end)
   "Prune tracked preview overlays far away from visible BEG END."
@@ -1864,16 +1943,16 @@ queued work."
   "Cancel all queued and running async LaTeX preview renders."
   (interactive)
   (setq my/org-latex--render-generation (1+ my/org-latex--render-generation))
-  (when (timerp my/org-latex--preview-timer)
-    (cancel-timer my/org-latex--preview-timer))
+  (my/org-latex--cancel-visible-preview-timers)
   (my/org-latex--cancel-edit-preview-timer)
   (my/org-latex--cancel-leave-preview)
   (dolist (process my/org-latex--render-processes)
     (when (process-live-p process)
       (my/org-latex--terminate-render-process process)))
-  (setq my/org-latex--preview-timer nil
-        my/org-latex--post-command-point nil
+  (setq my/org-latex--post-command-point nil
         my/org-latex--post-command-range nil
+        my/org-latex--last-visible-range nil
+        my/org-latex--last-visible-preview-time 0.0
         my/org-latex--render-processes nil
         my/org-latex--render-queue nil
         my/org-latex--render-queue-tail nil
@@ -1939,9 +2018,7 @@ queued work."
                      (current-buffer))))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
-        (when (timerp my/org-latex--preview-timer)
-          (cancel-timer my/org-latex--preview-timer))
-        (setq my/org-latex--preview-timer nil)
+        (my/org-latex--cancel-visible-preview-timers)
         (when (and window
                    (not (eq (window-buffer window) buffer)))
           (setq window nil))
@@ -1951,10 +2028,16 @@ queued work."
           (let* ((beg (car range))
                  (end (cdr range))
                  (force (called-interactively-p 'interactive)))
+            (setq my/org-latex--last-visible-range (cons beg end))
             (when (and (or force
                            (> (- end beg) my/org-latex-preview-min-chars)))
               (my/org-latex--preview-visible-range beg end)
+              (setq my/org-latex--last-visible-preview-time (float-time))
               (my/org-latex--prune-offscreen-overlays beg end))))))))
+
+(defun my/org-latex--visible-refresh-stale-p (range)
+  "Return non-nil when RANGE has not been refreshed yet."
+  (not (equal range my/org-latex--last-visible-range)))
 
 (defun my/org-latex-preview-visible-debounced (&optional window)
   "Debounced preview of WINDOW's visible area after scrolling stops."
@@ -1969,22 +2052,35 @@ queued work."
              ;; timer render first, then scroll-preview can follow.
              (not my/org-latex--edit-preview-timer)
              (or (null window) window))
-    (when (timerp my/org-latex--preview-timer)
-      (cancel-timer my/org-latex--preview-timer))
-    (setq my/org-latex--preview-timer
-          (run-with-idle-timer my/org-latex-preview-scroll-idle-delay nil
-                               #'my/org-latex-preview-visible-now
-                               window
-                               (current-buffer)))))
+    (when-let* ((range (my/org-latex--visible-range window))
+                ((my/org-latex--visible-refresh-stale-p range)))
+      (when (timerp my/org-latex--preview-timer)
+        (cancel-timer my/org-latex--preview-timer))
+      (setq my/org-latex--preview-timer
+            (run-at-time my/org-latex-preview-scroll-idle-delay nil
+                         #'my/org-latex-preview-visible-now
+                         window
+                         (current-buffer)))
+      (when (and (numberp my/org-latex-preview-scroll-follow-interval)
+                 (> my/org-latex-preview-scroll-follow-interval 0)
+                 (not (timerp my/org-latex--preview-follow-timer))
+                 (>= (- (float-time) my/org-latex--last-visible-preview-time)
+                     my/org-latex-preview-scroll-follow-interval))
+        (setq my/org-latex--preview-follow-timer
+              (run-at-time 0 nil
+                           #'my/org-latex-preview-visible-now
+                           window
+                           (current-buffer)))))))
 
 (defun my/org-latex--window-scroll-preview-hook (win _start)
   "Schedule preview refresh after WIN scrolls."
   (when (and (windowp win)
              (window-live-p win)
-             (not ratex--suppress-scroll-side-effects)
-             (not my/org-latex--suppress-scroll-preview)
-             (eq (window-buffer win) (current-buffer)))
-    (my/org-latex-preview-visible-debounced win)))
+             (buffer-live-p (window-buffer win)))
+    (with-current-buffer (window-buffer win)
+      (when (and (not ratex--suppress-scroll-side-effects)
+                 (not my/org-latex--suppress-scroll-preview))
+        (my/org-latex-preview-visible-debounced win)))))
 
 (defun my/org-latex--window-size-preview-hook (_frame)
   "Schedule preview refresh after a window-size change."

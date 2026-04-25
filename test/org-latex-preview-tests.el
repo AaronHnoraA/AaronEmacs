@@ -87,6 +87,32 @@
       (should (eq (gethash target my/org-latex--pending-renders) :new-job))
       (kill-buffer log-buffer))))
 
+(ert-deftest my/org-latex-preview-start-render-refreshes-pending-prepared-job ()
+  (my/org-latex-test-with-org-buffer ""
+    (let* ((target (expand-file-name "ltximg/prepared.svg" default-directory))
+           (job (list :dir default-directory
+                      :file target
+                      :generation my/org-latex--render-generation
+                      :waiters nil
+                      :post-clean nil)))
+      (puthash target job my/org-latex--pending-renders)
+      (cl-letf (((symbol-function 'my/org-latex--prepare-render)
+                 (lambda (queued-job)
+                   (append (list :command "sleep 30") queued-job))))
+        (unwind-protect
+            (progn
+              (my/org-latex--start-render job)
+              (let* ((process (car my/org-latex--render-processes))
+                     (prepared-job (process-get process 'my/org-latex-job)))
+                (should (process-live-p process))
+                (should (eq (gethash target my/org-latex--pending-renders)
+                            prepared-job))
+                (should-not (eq prepared-job job))))
+          (dolist (process my/org-latex--render-processes)
+            (when (process-live-p process)
+              (process-put process 'my/org-latex-cancelled t)
+              (delete-process process))))))))
+
 (ert-deftest my/org-latex-preview-scroll-hook-ignores-ratex-suppression ()
   (my/org-latex-test-with-org-buffer "\\(x\\)"
     (let ((window (display-buffer (current-buffer) '(display-buffer-same-window)))
@@ -100,6 +126,23 @@
               (should-not scheduled)))
         (delete-other-windows)))))
 
+(ert-deftest my/org-latex-preview-scroll-hook-uses-window-buffer ()
+  (my/org-latex-test-with-org-buffer "\\(x\\)"
+    (let ((org-buffer (current-buffer))
+          (window (display-buffer (current-buffer) '(display-buffer-same-window)))
+          scheduled)
+      (unwind-protect
+          (with-temp-buffer
+            (cl-letf (((symbol-function 'my/org-latex-preview-visible-debounced)
+                       (lambda (&optional target-window)
+                         (setq scheduled
+                               (and (eq target-window window)
+                                    (eq (current-buffer) org-buffer))))))
+              (my/org-latex--window-scroll-preview-hook window
+                                                        (window-start window))
+              (should scheduled)))
+        (delete-other-windows)))))
+
 (ert-deftest my/org-latex-preview-visible-debounced-skips-active-ratex-edit-session ()
   (my/org-latex-test-with-org-buffer "\\(x\\)"
     (let ((window (display-buffer (current-buffer) '(display-buffer-same-window)))
@@ -108,15 +151,101 @@
           (progn
             (setq-local ratex-mode t)
             (setq-local ratex--active-fragment '(:begin 1 :end 6 :content "x"))
-            (cl-letf (((symbol-function 'my/org-latex--buffer-visible-p)
+            (cl-letf (((symbol-function 'my/org-latex--async-preview-active-p)
+                       (lambda () t))
+                      ((symbol-function 'my/org-latex--buffer-visible-p)
                        (lambda (&optional _buffer) t))
-                      ((symbol-function 'run-with-idle-timer)
+                      ((symbol-function 'my/org-latex--visible-range)
+                       (lambda (&optional _window) (cons 1 6)))
+                      ((symbol-function 'run-at-time)
                        (lambda (&rest _args)
                          (setq scheduled t)
                          'fake-timer)))
               (my/org-latex-preview-visible-debounced window)
               (should-not scheduled)))
         (delete-other-windows)))))
+
+(ert-deftest my/org-latex-preview-visible-debounced-skips-edit-preview-timer ()
+  (my/org-latex-test-with-org-buffer "\\(x\\)"
+    (let ((window (display-buffer (current-buffer) '(display-buffer-same-window)))
+          (edit-timer (run-at-time 60 nil #'ignore))
+          scheduled)
+      (unwind-protect
+          (progn
+            (setq-local my/org-latex--edit-preview-timer edit-timer)
+            (cl-letf (((symbol-function 'my/org-latex--async-preview-active-p)
+                       (lambda () t))
+                      ((symbol-function 'my/org-latex--buffer-visible-p)
+                       (lambda (&optional _buffer) t))
+                      ((symbol-function 'my/org-latex--visible-range)
+                       (lambda (&optional _window) (cons 1 6)))
+                      ((symbol-function 'run-at-time)
+                       (lambda (&rest _args)
+                         (setq scheduled t)
+                         'fake-timer)))
+              (my/org-latex-preview-visible-debounced window)
+              (should-not scheduled)))
+        (when (timerp edit-timer)
+          (cancel-timer edit-timer))
+        (delete-other-windows)))))
+
+(ert-deftest my/org-latex-preview-visible-slots-cancel-offscreen-prefetch ()
+  (my/org-latex-test-with-org-buffer "\\(old\\)\n\n\\(new\\)"
+    (let* ((old-waiter (list :beg (copy-marker 1)
+                             :end (copy-marker 8 t)
+                             :value "\\(old\\)"
+                             :origin 'prefetch))
+           (old-job (list :file (expand-file-name "ltximg/old.svg"
+                                                  default-directory)
+                          :origin 'prefetch
+                          :prunable t
+                          :waiters (list old-waiter)))
+           (new-spec (list :file (expand-file-name "ltximg/new.svg"
+                                                   default-directory)))
+           (process (make-process :name "org-latex-prefetch-test"
+                                  :command (list shell-file-name
+                                                 shell-command-switch
+                                                 "sleep 30")
+                                  :noquery t)))
+      (unwind-protect
+          (progn
+            (process-put process 'my/org-latex-job old-job)
+            (setq-local my/org-latex--render-processes (list process))
+            (setq-local my/org-latex--render-running 1)
+            (let ((my/org-latex-preview-max-concurrency 1))
+              (my/org-latex--ensure-visible-render-slots
+               (list new-spec) 10 17))
+            (should (= my/org-latex--render-running 0))
+            (should-not (process-live-p process)))
+        (when (process-live-p process)
+          (delete-process process))))))
+
+(ert-deftest my/org-latex-preview-visible-slots-preserve-edit-precompile ()
+  (my/org-latex-test-with-org-buffer "\\(old\\)\n\n\\(new\\)"
+    (let* ((edit-job (list :file (expand-file-name "ltximg/edit.svg"
+                                                   default-directory)
+                           :origin 'preedit
+                           :prunable nil
+                           :waiters nil))
+           (new-spec (list :file (expand-file-name "ltximg/new.svg"
+                                                   default-directory)))
+           (process (make-process :name "org-latex-preedit-test"
+                                  :command (list shell-file-name
+                                                 shell-command-switch
+                                                 "sleep 30")
+                                  :noquery t)))
+      (unwind-protect
+          (progn
+            (process-put process 'my/org-latex-job edit-job)
+            (setq-local my/org-latex--render-processes (list process))
+            (setq-local my/org-latex--render-running 1)
+            (let ((my/org-latex-preview-max-concurrency 1))
+              (my/org-latex--ensure-visible-render-slots
+               (list new-spec) 10 17))
+            (should (= my/org-latex--render-running 1))
+            (should (process-live-p process)))
+        (when (process-live-p process)
+          (delete-process process))))))
 
 (ert-deftest my/org-latex-preview-place-preview-preserves-window-state ()
   (my/org-latex-test-with-org-buffer "\\(x\\)\n\n\nline-4\nline-5\nline-6\nline-7\nline-8\nline-9\nline-10\n"

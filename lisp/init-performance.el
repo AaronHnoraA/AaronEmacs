@@ -7,6 +7,7 @@
 
 (require 'cl-lib)
 (require 'init-funcs)
+(require 'seq)
 (require 'subr-x)
 
 (declare-function evil-local-mode "evil-core" (&optional arg))
@@ -415,23 +416,12 @@
     (insert (format "Selected buffer: %s\n\n" (buffer-name buffer)))
     (insert (format "%-34s %-8s %-8s %s\n"
                     "Hook" "Global" "Local" "Local entries"))
-    (dolist (hook my/performance-watch-hooks)
-      (let ((global (and (boundp hook) (default-value hook)))
-            local local-entries)
-        (with-current-buffer buffer
-          (when (local-variable-p hook)
-            (setq local (symbol-value hook)
-                  local-entries
-                  (mapconcat #'my/performance--function-name
-                             (if (and (listp local) (not (functionp local)))
-                                 local
-                               (list local))
-                             ", "))))
-        (insert (format "%-34s %-8d %-8d %s\n"
-                        hook
-                        (my/performance--hook-count global)
-                        (my/performance--hook-count local)
-                        (or local-entries "")))))
+    (dolist (row (my/performance-hook-snapshot buffer))
+      (insert (format "%-34s %-8d %-8d %s\n"
+                      (plist-get row :hook)
+                      (plist-get row :global-count)
+                      (plist-get row :local-count)
+                      (string-join (plist-get row :local-entries) ", "))))
     (insert "\n")))
 
 (defun my/performance--buffer-visible-p (buffer)
@@ -446,6 +436,35 @@
   "Return hash table count for VALUE, or 0."
   (if (hash-table-p value) (hash-table-count value) 0))
 
+(defun my/performance--hook-function-list (value)
+  "Return VALUE normalized to a list of hook functions."
+  (cond
+   ((null value) nil)
+   ((and (listp value) (not (functionp value))) value)
+   (t (list value))))
+
+(defun my/performance-hook-snapshot (&optional buffer hooks)
+  "Return structured hook counts for BUFFER and HOOKS.
+The return value is a list of plists with `:hook', `:global-count',
+`:local-count' and `:local-entries'."
+  (let ((buffer (or buffer (current-buffer)))
+        (hooks (or hooks my/performance-watch-hooks)))
+    (mapcar
+     (lambda (hook)
+       (let ((global (and (boundp hook) (default-value hook)))
+             local local-entries)
+         (with-current-buffer buffer
+           (when (local-variable-p hook)
+             (setq local (symbol-value hook)
+                   local-entries
+                   (mapcar #'my/performance--function-name
+                           (my/performance--hook-function-list local)))))
+         (list :hook hook
+               :global-count (my/performance--hook-count global)
+               :local-count (my/performance--hook-count local)
+               :local-entries local-entries)))
+     hooks)))
+
 (defun my/performance--org-buffers ()
   "Return live Org buffers."
   (cl-remove-if-not
@@ -454,64 +473,144 @@
        (derived-mode-p 'org-mode)))
    (buffer-list)))
 
+(defun my/performance-org-buffer-snapshot ()
+  "Return structured Org buffer runtime state."
+  (mapcar
+   (lambda (buffer)
+     (with-current-buffer buffer
+       (let ((running (if (boundp 'my/org-latex--render-running)
+                          my/org-latex--render-running
+                        0))
+             (queued (if (boundp 'my/org-latex--render-queue)
+                         (my/performance--list-length
+                          my/org-latex--render-queue)
+                       0))
+             (overlays (if (boundp 'my/org-latex--overlay-table)
+                           (my/performance--hash-count my/org-latex--overlay-table)
+                         0))
+             (pending (if (boundp 'my/org-latex--pending-renders)
+                          (my/performance--hash-count my/org-latex--pending-renders)
+                        0)))
+         (list :buffer (buffer-name buffer)
+               :size (buffer-size)
+               :visible (and (my/performance--buffer-visible-p buffer) t)
+               :modified (buffer-modified-p)
+               :major-mode major-mode
+               :post-command-count
+               (my/performance--hook-count post-command-hook)
+               :after-change-count
+               (my/performance--hook-count after-change-functions)
+               :jit-lock-count
+               (my/performance--hook-count
+                (and (boundp 'jit-lock-functions) jit-lock-functions))
+               :latex-enabled
+               (bound-and-true-p my/org-latex--scroll-preview-enabled)
+               :latex-running running
+               :latex-queued queued
+               :latex-overlays overlays
+               :latex-pending pending))))
+   (my/performance--org-buffers)))
+
 (defun my/performance--insert-org-buffers ()
   "Insert Org-specific runtime state."
   (my/performance--section "Org Buffers")
   (insert (format "%-28s %8s %-7s %-6s %-5s %-5s %-5s %-5s %-7s %-7s %-8s\n"
                   "Buffer" "Size" "Visible" "Mod" "Post" "AChg" "JIT"
                   "Latex" "Run/Q" "Overlay" "Pending"))
-  (dolist (buffer (my/performance--org-buffers))
+  (dolist (row (my/performance-org-buffer-snapshot))
     (insert
-     (with-current-buffer buffer
-       (format "%-28s %8d %-7s %-6s %-5d %-5d %-5d %-5s %-7s %-7d %-8d\n"
-               (truncate-string-to-width (buffer-name buffer) 28 nil nil t)
-               (buffer-size)
-               (if (my/performance--buffer-visible-p buffer) "yes" "no")
-               (if (buffer-modified-p) "yes" "no")
-               (my/performance--hook-count post-command-hook)
-               (my/performance--hook-count after-change-functions)
-               (my/performance--hook-count
-                (and (boundp 'jit-lock-functions) jit-lock-functions))
-               (if (bound-and-true-p my/org-latex--scroll-preview-enabled)
-                   "on"
-                 "off")
-               (format "%s/%s"
-                       (if (boundp 'my/org-latex--render-running)
-                           my/org-latex--render-running
-                         0)
-                       (if (boundp 'my/org-latex--render-queue)
-                           (my/performance--list-length
-                            my/org-latex--render-queue)
-                         0))
-               (if (boundp 'my/org-latex--overlay-table)
-                   (my/performance--hash-count my/org-latex--overlay-table)
-                 0)
-               (if (boundp 'my/org-latex--pending-renders)
-                   (my/performance--hash-count my/org-latex--pending-renders)
-                 0)))))
+     (format "%-28s %8d %-7s %-6s %-5d %-5d %-5d %-5s %-7s %-7d %-8d\n"
+             (truncate-string-to-width (plist-get row :buffer) 28 nil nil t)
+             (plist-get row :size)
+             (if (plist-get row :visible) "yes" "no")
+             (if (plist-get row :modified) "yes" "no")
+             (plist-get row :post-command-count)
+             (plist-get row :after-change-count)
+             (plist-get row :jit-lock-count)
+             (if (plist-get row :latex-enabled) "on" "off")
+             (format "%s/%s"
+                     (plist-get row :latex-running)
+                     (plist-get row :latex-queued))
+             (plist-get row :latex-overlays)
+             (plist-get row :latex-pending))))
   (insert "\n"))
+
+(defun my/performance-buffer-hotspot-snapshot (&optional limit)
+  "Return largest buffers with hook counts, capped at LIMIT entries."
+  (mapcar
+   (lambda (buffer)
+     (with-current-buffer buffer
+       (list :buffer (buffer-name buffer)
+             :size (buffer-size)
+             :major-mode major-mode
+             :post-command-count
+             (my/performance--hook-count post-command-hook)
+             :after-change-count
+             (my/performance--hook-count after-change-functions)
+             :jit-lock-count
+             (my/performance--hook-count
+              (and (boundp 'jit-lock-functions) jit-lock-functions)))))
+   (seq-take
+    (sort (copy-sequence (buffer-list))
+          (lambda (left right)
+            (> (buffer-size left) (buffer-size right))))
+    (or limit 20))))
 
 (defun my/performance--insert-buffer-hotspots ()
   "Insert largest buffers and local hook counts."
   (my/performance--section "Largest Buffers")
   (insert (format "%-32s %10s %-22s %-5s %-5s %-5s\n"
                   "Buffer" "Size" "Mode" "Post" "AChg" "JIT"))
-  (dolist (buffer (seq-take
-                   (sort (copy-sequence (buffer-list))
-                         (lambda (left right)
-                           (> (buffer-size left) (buffer-size right))))
-                   20))
+  (dolist (row (my/performance-buffer-hotspot-snapshot 20))
     (insert
-     (with-current-buffer buffer
-       (format "%-32s %10d %-22s %-5d %-5d %-5d\n"
-               (truncate-string-to-width (buffer-name buffer) 32 nil nil t)
-               (buffer-size)
-               major-mode
-               (my/performance--hook-count post-command-hook)
-               (my/performance--hook-count after-change-functions)
-               (my/performance--hook-count
-                (and (boundp 'jit-lock-functions) jit-lock-functions))))))
+     (format "%-32s %10d %-22s %-5d %-5d %-5d\n"
+             (truncate-string-to-width (plist-get row :buffer) 32 nil nil t)
+             (plist-get row :size)
+             (plist-get row :major-mode)
+             (plist-get row :post-command-count)
+             (plist-get row :after-change-count)
+             (plist-get row :jit-lock-count))))
   (insert "\n"))
+
+(defun my/performance-snapshot (&optional inspected-buffer)
+  "Return a structured performance snapshot for INSPECTED-BUFFER.
+This API is intended for quick debugging from `emacsclient --eval' or batch
+tools; it samples once and does not start any refresh timers."
+  (let ((buffer (or inspected-buffer
+                    (and (derived-mode-p 'my/performance-watch-mode)
+                         (buffer-live-p my/performance--inspected-buffer)
+                         my/performance--inspected-buffer)
+                    (current-buffer))))
+    (list :sample (my/performance--sample)
+          :inspected-buffer (and (buffer-live-p buffer) (buffer-name buffer))
+          :hooks (and (buffer-live-p buffer)
+                      (my/performance-hook-snapshot buffer))
+          :org-buffers (my/performance-org-buffer-snapshot)
+          :largest-buffers (my/performance-buffer-hotspot-snapshot 20)
+          :timers (my/performance--timer-summary timer-list)
+          :idle-timers (my/performance--timer-summary timer-idle-list))))
+
+(defun my/performance--insert-report (sample inspected-buffer)
+  "Insert a complete performance report for SAMPLE and INSPECTED-BUFFER."
+  (my/performance--insert-header sample inspected-buffer)
+  (my/performance--insert-overview sample)
+  (my/performance--insert-os-processes)
+  (my/performance--insert-emacs-summary)
+  (my/performance--insert-org-buffers)
+  (my/performance--insert-emacs-processes)
+  (my/performance--insert-hook-table inspected-buffer)
+  (my/performance--insert-buffer-hotspots)
+  (my/performance--insert-timer-summary "Timers" timer-list)
+  (my/performance--insert-timer-summary "Idle Timers" timer-idle-list))
+
+(defun my/performance-report-string (&optional inspected-buffer)
+  "Return a complete plain-text performance report for INSPECTED-BUFFER.
+This samples once and does not mutate or display the performance board."
+  (let* ((buffer (or inspected-buffer (current-buffer)))
+         (sample (my/performance--sample)))
+    (with-temp-buffer
+      (my/performance--insert-report sample buffer)
+      (buffer-substring-no-properties (point-min) (point-max)))))
 
 (defun my/performance-watch-refresh ()
   "Refresh the performance watch board."
@@ -527,16 +626,7 @@
     (when my/performance--recording
       (my/performance-save-record sample))
     (erase-buffer)
-    (my/performance--insert-header sample selected-buffer)
-    (my/performance--insert-overview sample)
-    (my/performance--insert-os-processes)
-    (my/performance--insert-emacs-summary)
-    (my/performance--insert-org-buffers)
-    (my/performance--insert-emacs-processes)
-    (my/performance--insert-hook-table selected-buffer)
-    (my/performance--insert-buffer-hotspots)
-    (my/performance--insert-timer-summary "Timers" timer-list)
-    (my/performance--insert-timer-summary "Idle Timers" timer-idle-list)
+    (my/performance--insert-report sample selected-buffer)
     (goto-char (point-min))))
 
 (defun my/performance--insert-header (sample inspected-buffer)
@@ -544,7 +634,8 @@
   (insert (propertize "Performance Watch" 'face 'my/performance-title-face) "\n")
   (insert (propertize "=================" 'face 'my/performance-dim-face) "\n\n")
   (insert (propertize "Usage" 'face 'my/performance-section-face) "\n")
-  (insert "  g  refresh now        a  toggle auto refresh     s  save one record\n")
+  (insert "  g  refresh now        y  copy full page          a  toggle auto refresh\n")
+  (insert "  s  save one record    R  toggle recording        o  open record directory\n")
   (insert "  R  toggle recording   o  open record directory   p  start CPU profiler\n")
   (insert "  P  profiler report    q  close performance frame\n\n")
   (insert (format "Updated: %s    Inspecting: %s\n"
@@ -645,6 +736,15 @@
   (profiler-start 'cpu)
   (message "CPU profiler started; run `profiler-report' after reproducing load"))
 
+(defun my/performance-copy-page ()
+  "Copy the full current performance page to the kill ring."
+  (interactive)
+  (let ((text (if (derived-mode-p 'my/performance-watch-mode)
+                  (buffer-substring-no-properties (point-min) (point-max))
+                (my/performance-report-string (current-buffer)))))
+    (kill-new text)
+    (message "Copied performance report (%d chars)" (length text))))
+
 (defun my/performance-watch-quit ()
   "Quit the performance watch frame and stop its automatic refresh."
   (interactive)
@@ -686,6 +786,7 @@
       (let ((map (copy-keymap special-mode-map)))
         (use-local-map map)
         (local-set-key (kbd "g") #'my/performance-watch-refresh)
+        (local-set-key (kbd "y") #'my/performance-copy-page)
         (local-set-key (kbd "a") #'my/performance-watch-toggle-auto-refresh)
         (local-set-key (kbd "s") #'my/performance-save-record)
         (local-set-key (kbd "R") #'my/performance-toggle-recording)

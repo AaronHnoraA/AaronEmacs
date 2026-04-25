@@ -96,8 +96,8 @@ integer position keys from accumulating during long editing sessions."
   "Keep Org editing responsive without tearing down visual rendering.
 
 This intentionally no longer disables `org-modern-mode', `org-indent-mode',
-`valign-mode', `org-fragtog-mode' or pretty-block overlays: turning those off
-made the buffer lose its rendered appearance in insert state."
+`valign-mode' or pretty-block overlays: turning those off made the buffer lose
+its rendered appearance in insert state."
   (when (and (derived-mode-p 'org-mode)
              (not my/org--suspended-in-insert)
              (fboundp 'evil-insert-state-p)

@@ -93,7 +93,6 @@
 - `org-modern`
 - `org-modern-indent`
 - `org-appear`
-- `org-fragtog`
 - `olivetti`
 - 自定义 special block overlay
 - LaTeX 可见区域按需预览
@@ -132,8 +131,9 @@
 - Org 里启用了 `cdlatex`
 - 可见区域 LaTeX 预览走自定义 `xelatex + dvisvgm` 异步 SVG 流程：当前窗口优先入队，窗口下方会比上方预取更多行，滚动产生的旧可视区域队列和旧自动渲染进程会自动回收
 - 正在编辑的公式预渲染走独立 cache-only 管线：它不会被可视区域回收取消，必要时会让自动可视渲染让出并发槽；离开公式后只挂缓存或等待同一个预渲染结果，短延迟复查并补挂 overlay
-- LaTeX 预览的滚动触发有短 debounce，并且只在 idle 后扫描可视区域，避免滚动手感被同步渲染拖慢
+- LaTeX 预览的滚动触发有短 debounce，长滚动中会低频补偿刷新；当前可视区域有未缓存公式时，会让旧的自动预取渲染先让出并发槽
 - 与 `RaTeX` 共存时，公式编辑期间会忽略预览 UI 引发的合成滚动事件，避免可视区域预览被误触发
+- `org-fragtog` 已不再默认常驻；公式进出编辑状态由自定义异步预览管线处理
 - AUCTeX 和 `pdf-tools` 已配置
 - AUCTeX 支持 `latexmk -pvc` 实时编译和 Sioyek 双向同步
 
