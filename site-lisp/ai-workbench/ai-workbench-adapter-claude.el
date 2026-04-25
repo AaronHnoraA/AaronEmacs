@@ -106,20 +106,16 @@
           (shell-quote-argument
            (directory-file-name (expand-file-name project-root)))))
 
-(defun ai-workbench-claude--paste-string (string)
-  "Send STRING to the current Claude buffer using bracketed paste mode.
-Bracketed paste prevents Claude from interpreting embedded newlines as
-Enter and submitting partial input."
+(defun ai-workbench-claude--send-line-text (line)
+  "Send LINE (no embedded newlines) to the current Claude buffer."
   (pcase claude-code-ide-terminal-backend
     ('vterm
-     (vterm-send-string string t))
+     (vterm-send-string line))
     ('eat
      (when eat-terminal
-       (eat-term-send-string eat-terminal "\e[200~")
-       (eat-term-send-string eat-terminal string)
-       (eat-term-send-string eat-terminal "\e[201~")))
+       (eat-term-send-string eat-terminal line)))
     (_
-     (claude-code-ide--terminal-send-string string))))
+     (claude-code-ide--terminal-send-string line))))
 
 (defun ai-workbench-claude--submit-return ()
   "Press return in the current Claude buffer."
@@ -132,24 +128,46 @@ Enter and submitting partial input."
     (_
      (claude-code-ide--terminal-send-string "\r"))))
 
+(defun ai-workbench-claude--paste-string (string)
+  "Insert multi-line STRING into the current Claude buffer without submitting.
+Uses Claude's `\\' + Enter convention for in-input newlines so embedded
+newlines stay inside one user message instead of submitting partial
+input."
+  (let ((lines (split-string string "\n")))
+    (while lines
+      (let ((line (pop lines)))
+        (unless (string-empty-p line)
+          (ai-workbench-claude--send-line-text line))
+        (when lines
+          (sit-for 0.03)
+          (ai-workbench-claude--send-line-text "\\")
+          (sit-for 0.03)
+          (ai-workbench-claude--submit-return))))))
+
 (defun ai-workbench-claude--paste-and-submit (prompt)
-  "Send PROMPT to the current Claude buffer with bracketed paste then submit."
+  "Insert PROMPT then press return in the current Claude buffer."
   (ai-workbench-claude--paste-string prompt)
   (sit-for 0.1)
   (ai-workbench-claude--submit-return))
 
+(defun ai-workbench-claude--bootstrap-prompt (project-root)
+  "Return the combined cd+profile bootstrap prompt for PROJECT-ROOT.
+Sent as a single message so Claude does not need to finish processing
+the cd line before the profile body arrives."
+  (concat (ai-workbench-claude--cd-prompt project-root)
+          "\n\n"
+          (ai-workbench-claude--profile-prompt project-root)))
+
 (defun ai-workbench-claude-prime-session (&optional project-root)
   "Inject the working directory and profile into Claude for PROJECT-ROOT.
-The cd line and profile are sent as two separate auto-submitted
-messages.  Profile body uses bracketed paste so embedded newlines are
-preserved."
+The cd line and profile body are sent as a single auto-submitted
+message via bracketed paste so embedded newlines are preserved and
+Claude does not need to round-trip the cd line before the profile
+arrives."
   (let ((root (or project-root default-directory)))
     (unless (ai-workbench-session-profile-injected-p 'claude root)
       (ai-workbench-claude-send-prompt
-       (ai-workbench-claude--cd-prompt root)
-       root)
-      (ai-workbench-claude-send-prompt
-       (ai-workbench-claude--profile-prompt root)
+       (ai-workbench-claude--bootstrap-prompt root)
        root)
       (ai-workbench-session-mark-profile-bootstrap-sent 'claude root)
       (ai-workbench-session-mark-profile-injected 'claude root)

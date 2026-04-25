@@ -313,18 +313,24 @@ Enter and submitting partial input."
           (shell-quote-argument
            (directory-file-name (expand-file-name project-root)))))
 
+(defun ai-workbench-codex--bootstrap-prompt (project-root)
+  "Return the combined cd+profile bootstrap prompt for PROJECT-ROOT.
+Sent as a single message so Codex does not need to finish processing
+the cd line before the profile body arrives."
+  (concat (ai-workbench-codex--cd-prompt project-root)
+          "\n\n"
+          (ai-workbench-codex--profile-prompt project-root)))
+
 (defun ai-workbench-codex-prime-session (&optional project-root)
   "Inject the working directory and profile into Codex for PROJECT-ROOT.
-The cd line and profile are sent as two separate auto-submitted
-messages.  Profile body uses bracketed paste so embedded newlines are
-preserved."
+The cd line and profile body are sent as a single auto-submitted
+message via bracketed paste so embedded newlines are preserved and
+Codex does not need to round-trip the cd line before the profile
+arrives."
   (let ((root (or project-root default-directory)))
     (unless (ai-workbench-session-profile-injected-p 'codex root)
       (ai-workbench-codex-send-prompt
-       (ai-workbench-codex--cd-prompt root)
-       root)
-      (ai-workbench-codex-send-prompt
-       (ai-workbench-codex--profile-prompt root)
+       (ai-workbench-codex--bootstrap-prompt root)
        root)
       (ai-workbench-session-mark-profile-bootstrap-sent 'codex root)
       (ai-workbench-session-mark-profile-injected 'codex root)
