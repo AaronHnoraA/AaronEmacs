@@ -62,7 +62,7 @@
 (defvar my/macos-use-transparent-titlebar nil
   "Whether macOS GUI frames should use a transparent titlebar.")
 
-(defvar my/macos-startup-window-state 'fullscreen
+(defvar my/macos-startup-window-state nil
   "Startup window state for macOS GUI frames.
 Use nil for a regular window, `maximized' for a maximized window, or
 `fullscreen' for a fullscreen window.")
@@ -303,7 +303,7 @@ buffer file."
   (delete-by-moving-to-trash t)
   ;; Curse Lion and its sudden but inevitable fullscreen mode!
   ;; NOTE Meaningless to railwaycat's emacs-mac build
-  (ns-use-native-fullscreen t)
+  (ns-use-native-fullscreen nil)
   (ns-use-proxy-icon nil)
   ;(ns-use-native-fullscreen t)
   (use-dialog-box nil)
