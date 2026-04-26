@@ -40,7 +40,7 @@ integer position keys from accumulating during long editing sessions."
   :type 'integer
   :group 'my/org-ui)
 
-(defcustom my/org-pretty-block-visible-margin-lines 40
+(defcustom my/org-pretty-block-visible-margin-lines 24
   "Extra lines around visible Org windows that stay eligible for prettification."
   :type 'integer
   :group 'my/org-ui)
@@ -403,17 +403,34 @@ so the pre-redisplay fast path stays allocation-light, and skips
         ;; still invalidates the cached signature.
         (and face-remapping-alist t)))
 
+(defun my/org-modern--window-signature (window)
+  "Return WINDOW state that matters for Org Modern pre-redisplay."
+  (when (window-live-p window)
+    (list (window-start window)
+          (window-end window t)
+          (window-hscroll window)
+          (window-width window)
+          (window-body-width window t))))
+
 (defun my/org-modern-pre-redisplay-cached-a (orig window)
   "Skip repeated Org Modern pre-redisplay work while display inputs match.
 The signature is computed once per call: when the cache hits we return
 without calling ORIG, and when it misses we reuse the same signature value
 for the cache update so we never compute it twice in one redisplay."
   (if (and (derived-mode-p 'org-mode)
-           (bound-and-true-p org-modern-mode))
-      (let ((signature (my/org-modern--pre-redisplay-signature)))
-        (unless (equal signature my/org-modern--pre-redisplay-signature)
+           (bound-and-true-p org-modern-mode)
+           (window-live-p window)
+           (eq (window-buffer window) (current-buffer)))
+      (let* ((display-signature (my/org-modern--pre-redisplay-signature))
+             (window-signature (my/org-modern--window-signature window))
+             (signature (list display-signature window-signature)))
+        (unless (equal signature
+                       (window-parameter window 'my/org-modern-pre-redisplay-signature))
           (funcall orig window)
-          (setq-local my/org-modern--pre-redisplay-signature signature)))
+          (setq-local my/org-modern--pre-redisplay-signature display-signature)
+          (set-window-parameter window
+                                'my/org-modern-pre-redisplay-signature
+                                signature)))
     (funcall orig window)))
 
 (unless (advice-member-p #'my/org-modern-pre-redisplay-cached-a

@@ -144,7 +144,7 @@ preview commands may still recreate previews from the cached image files."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-retain-lines 220
+(defcustom my/org-latex-preview-retain-lines 120
   "Number of lines around the visible window whose preview overlays are kept."
   :type 'integer
   :group 'my/org-latex-preview)

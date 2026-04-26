@@ -1453,6 +1453,10 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
 ;; 不清除 字体 缓存.
 (setq inhibit-compacting-font-caches t)
 
+;; 大内存机器优先减少前台 GC 频率, 让大块编辑/渲染工作更少被打断.
+(setq gc-cons-threshold (* 32 1024 1024)
+      gc-cons-percentage 0.2)
+
 
 
 ;;; Evaluation:
@@ -1469,7 +1473,8 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
                                      ('gnu/linux
                                       (string-to-number  (shell-command-to-string "cat /proc/sys/fs/pipe-max-size")))
                                      (_
-                                      most-positive-fixnum)) (* 1024 1024))
+                                      most-positive-fixnum))
+                                   (* 4 1024 1024))
       process-adaptive-read-buffering t
 
       w32-pipe-buffer-size read-process-output-max
