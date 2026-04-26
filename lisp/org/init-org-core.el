@@ -65,6 +65,12 @@ Special block overlays are no longer disabled based on buffer size."
   "Whether Org buffers with an overview TOC refresh automatically."
   :type 'boolean)
 
+(defcustom my/org-toc-auto-search-limit (* 64 1024)
+  "Maximum characters searched for a managed TOC during automatic setup.
+Managed overview TOCs are expected near the top of the file; limiting this
+scan avoids walking large ordinary Org buffers that do not use the feature."
+  :type 'integer)
+
 (defvar-local my/org-toc--block-begin-marker nil
   "Marker for the beginning of the managed overview TOC block.")
 
@@ -73,6 +79,44 @@ Special block overlays are no longer disabled based on buffer size."
 
 (defvar-local my/org-toc--initial-refresh-done nil
   "Whether this buffer already ran its one-time TOC refresh after opening.")
+
+(defconst my/org-buffer-feature--scan-regexp
+  "\\(^[ \t]*[|│┃]\\)\\|\\(^[ \t]*#\\+begin_\\)\\|\\(\\\\[([]\\|^[ \t]*\\\\begin{[A-Za-z0-9*]+}\\|\\$\\)"
+  "Regexp used for one-pass detection of Org features used by UI helpers.")
+
+(defvar-local my/org-buffer-feature--cache nil
+  "Cached Org feature presence for the current `buffer-chars-modified-tick'.")
+
+(defun my/org-buffer-feature--scan ()
+  "Return cached feature presence for the current Org buffer."
+  (let ((tick (buffer-chars-modified-tick)))
+    (unless (and (consp my/org-buffer-feature--cache)
+                 (eql (plist-get my/org-buffer-feature--cache :tick) tick))
+      (let (table special-block latex-candidate)
+        (save-excursion
+          (save-restriction
+            (widen)
+            (goto-char (point-min))
+            (while (and (not (and table special-block latex-candidate))
+                        (re-search-forward
+                         my/org-buffer-feature--scan-regexp nil t))
+              (cond
+               ((match-beginning 1)
+                (setq table t))
+               ((match-beginning 2)
+                (setq special-block t))
+               ((match-beginning 3)
+                (setq latex-candidate t))))))
+        (setq-local my/org-buffer-feature--cache
+                    (list :tick tick
+                          :table table
+                          :special-block special-block
+                          :latex-candidate latex-candidate))))
+    my/org-buffer-feature--cache))
+
+(defun my/org-buffer-feature-present-p (feature)
+  "Return non-nil when cached Org FEATURE is present in the buffer."
+  (plist-get (my/org-buffer-feature--scan) feature))
 
 (defun my/org-rich-ui-buffer-p ()
   "Return non-nil when the current Org buffer should use rich UI helpers."
@@ -108,14 +152,20 @@ Special block overlays are no longer disabled based on buffer size."
   "Return regexp matching the managed overview TOC block."
   "^[ \t]*#\\+begin_overview\\_>.*:toc\\_>")
 
-(defun my/org-toc--find-block ()
+(defun my/org-toc--find-block (&optional full-scan)
   "Return (BEGIN . END) for the managed overview TOC block, or nil."
   (save-excursion
     (goto-char (point-min))
-    (when (re-search-forward (my/org-toc--block-regexp) nil t)
-      (let ((begin (line-beginning-position)))
-        (when (re-search-forward "^[ \t]*#\\+end_overview\\_>" nil t)
-          (cons begin (min (point-max) (1+ (line-end-position)))))))))
+    (let ((limit (unless full-scan
+                   (and (integerp my/org-toc-auto-search-limit)
+                        (> my/org-toc-auto-search-limit 0)
+                        (min (point-max)
+                             (+ (point-min)
+                                my/org-toc-auto-search-limit))))))
+      (when (re-search-forward (my/org-toc--block-regexp) limit t)
+        (let ((begin (line-beginning-position)))
+          (when (re-search-forward "^[ \t]*#\\+end_overview\\_>" nil t)
+            (cons begin (min (point-max) (1+ (line-end-position))))))))))
 
 (defun my/org-toc--set-cached-block (block)
   "Cache managed TOC BLOCK bounds using markers."
@@ -130,9 +180,9 @@ Special block overlays are no longer disabled based on buffer size."
     (setq-local my/org-toc--block-begin-marker nil)
     (setq-local my/org-toc--block-end-marker nil)))
 
-(defun my/org-toc--refresh-cached-block ()
+(defun my/org-toc--refresh-cached-block (&optional full-scan)
   "Refresh cached managed TOC bounds and return them."
-  (let ((block (my/org-toc--find-block)))
+  (let ((block (my/org-toc--find-block full-scan)))
     (my/org-toc--set-cached-block block)
     block))
 
@@ -245,14 +295,15 @@ headline levels."
   (interactive "P")
   (unless (derived-mode-p 'org-mode)
     (user-error "Not in an Org buffer"))
-  (let* ((block (my/org-toc--find-block))
+  (let* ((full-scan (called-interactively-p 'interactive))
+         (block (my/org-toc--find-block full-scan))
          (depth (cond
                  ((numberp depth) depth)
                  ((consp depth) (prefix-numeric-value depth))
                  (block (or (my/org-toc--block-depth block) my/org-toc-depth))
                  (t my/org-toc-depth)))
          (contents (my/org-toc--contents depth))
-         (block (or block (my/org-toc--find-block)))
+         (block (or block (my/org-toc--find-block full-scan)))
          (target (my/org-toc--insert-position)))
     (save-excursion
       (if block
@@ -274,7 +325,7 @@ headline levels."
         (unless (bolp)
           (insert "\n"))
         (insert contents "\n")))
-    (my/org-toc--refresh-cached-block)))
+    (my/org-toc--refresh-cached-block full-scan)))
 
 (defun my/org-toc-update-if-present ()
   "Refresh the managed overview TOC when the current Org buffer has one."

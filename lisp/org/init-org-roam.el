@@ -107,19 +107,24 @@ motion or typing."
                  #'my/org-roam-buffer--cleanup-redisplay t)
     (setq-local my/org-roam--redisplay-key nil))
 
+  (defun my/org-roam-buffer--follow-context-p ()
+    "Return non-nil when the Org Roam side buffer should follow this buffer."
+    (and (derived-mode-p 'org-mode)
+         (not (minibufferp))
+         (boundp 'org-roam-buffer)
+         (get-buffer-window org-roam-buffer 'visible)))
+
   (defun my/org-roam-buffer--redisplay-now (buffer)
     "Redisplay Org Roam side BUFFER after debounced point motion."
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
         (setq-local my/org-roam--redisplay-timer nil)
-        (when (and (boundp 'org-roam-buffer)
-                   (get-buffer-window org-roam-buffer 'visible))
+        (when (my/org-roam-buffer--follow-context-p)
           (org-roam-buffer-persistent-redisplay)))))
 
   (defun my/org-roam-buffer--redisplay-debounced-h ()
     "Debounced replacement for `org-roam-buffer--redisplay-h'."
-    (when (and (boundp 'org-roam-buffer)
-               (get-buffer-window org-roam-buffer 'visible))
+    (when (my/org-roam-buffer--follow-context-p)
       (let ((key (list (point)
                        (buffer-chars-modified-tick)
                        (window-start))))

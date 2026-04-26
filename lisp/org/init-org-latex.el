@@ -16,6 +16,7 @@
 (defvar ratex--suppress-scroll-side-effects nil)
 (defvar org--latex-preview-when-risky)
 (defvar untrusted-content)
+(defvar my/latex-preview--math-font-line-cache nil)
 
 (require 'init-open)
 (require 'init-org-core)
@@ -509,11 +510,13 @@ render is usually ready before point leaves it."
 
 (defun my/latex-preview-math-font-line ()
   "Return the `\\setmathfont' line used in preview snippet headers."
-  (if-let* ((font-file (my/latex-preview--preferred-math-font-file)))
-      (format "\\setmathfont[Path=%s]{%s}"
-              (file-name-as-directory (file-name-directory font-file))
-              (file-name-nondirectory font-file))
-    (format "\\setmathfont{%s}" my/latex-preview-math-font)))
+  (or my/latex-preview--math-font-line-cache
+      (setq my/latex-preview--math-font-line-cache
+            (if-let* ((font-file (my/latex-preview--preferred-math-font-file)))
+                (format "\\setmathfont[Path=%s]{%s}"
+                        (file-name-as-directory (file-name-directory font-file))
+                        (file-name-nondirectory font-file))
+              (format "\\setmathfont{%s}" my/latex-preview-math-font)))))
 
 (defvar-local my/org-latex--preview-timer nil)
 (defvar-local my/org-latex--preview-follow-timer nil)
@@ -523,6 +526,7 @@ render is usually ready before point leaves it."
 (defvar-local my/org-latex--render-processes nil)
 (defvar-local my/org-latex--pending-renders nil)
 (defvar-local my/org-latex--overlay-table nil)
+(defvar-local my/org-latex--preview-base-directory-cache nil)
 (defvar-local my/org-latex--render-generation 0)
 (defvar-local my/org-latex--edit-preview-timer nil)
 (defvar-local my/org-latex--edit-preview-marker nil)
@@ -531,9 +535,12 @@ render is usually ready before point leaves it."
 (defvar-local my/org-latex--leave-preview-end-marker nil)
 (defvar-local my/org-latex--post-command-point nil)
 (defvar-local my/org-latex--post-command-range nil)
+(defvar-local my/org-latex--last-post-command-key nil)
 (defvar-local my/org-latex--last-visible-range nil)
 (defvar-local my/org-latex--last-visible-preview-time 0.0)
 (defvar-local my/org-latex--scroll-preview-enabled nil)
+(defvar-local my/org-latex--fragment-syntax-cache nil)
+(defvar-local my/org-latex--syntax-watch-installed nil)
 (defvar-local my/org-latex--suppress-scroll-preview nil)
 (defvar my/org-latex--allow-native-preview nil)
 
@@ -549,30 +556,131 @@ render is usually ready before point leaves it."
   (regexp-opt '("\\(" "\\[" "\\]" "\\begin" "\\end" "$"))
   "Cheap regexp for text that may be near an Org LaTeX fragment.")
 
+(defconst my/org-latex--fragment-start-regexp
+  "\\\\[([]\\|^[ \t]*\\\\begin{[A-Za-z0-9*]+}"
+  "Cheap regexp for non-dollar syntax that can start an Org LaTeX fragment.")
+
+(defun my/org-latex--escaped-char-p (pos)
+  "Return non-nil when the character at POS is escaped by backslashes."
+  (let ((count 0)
+        (cursor (1- pos)))
+    (while (and (>= cursor (point-min))
+                (= (char-after cursor) ?\\))
+      (setq count (1+ count))
+      (setq cursor (1- cursor)))
+    (= (% count 2) 1)))
+
+(defun my/org-latex--dollar-fragment-start-p (pos limit)
+  "Return non-nil when POS starts plausible dollar math before LIMIT."
+  (and (< pos limit)
+       (= (char-after pos) ?$)
+       (not (my/org-latex--escaped-char-p pos))
+       (or (and (< (1+ pos) limit)
+                (= (char-after (1+ pos)) ?$))
+           (let ((line-end (min limit (save-excursion
+                                        (goto-char pos)
+                                        (line-end-position))))
+                 (body-beg (1+ pos))
+                 found)
+             (save-excursion
+               (goto-char body-beg)
+               (while (and (not found)
+                           (re-search-forward "\\$" line-end t))
+                 (let ((second (match-beginning 0)))
+                   (when (and (not (my/org-latex--escaped-char-p second))
+                              (save-excursion
+                                (goto-char body-beg)
+                                (re-search-forward "\\S-" second t)))
+                     (setq found t)))))
+             found))))
+
+(defun my/org-latex--dollar-fragment-syntax-in-range-p (beg end)
+  "Return non-nil when BEG END contains plausible dollar math syntax."
+  (catch 'found
+    (save-excursion
+      (goto-char beg)
+      (while (re-search-forward "\\$" end t)
+        (let ((first (match-beginning 0)))
+          (when (my/org-latex--dollar-fragment-start-p first end)
+            (throw 'found t)))))
+    nil))
+
 (defun my/org-latex--near-fragment-syntax-p (&optional pos)
   "Return non-nil when POS is near likely LaTeX fragment syntax."
   (save-excursion
     (when pos
       (goto-char pos))
-    (let ((beg (max (point-min)
-                    (- (point) my/org-latex-fragment-context-lookaround)))
-          (end (min (point-max)
-                    (+ (point) my/org-latex-fragment-context-lookaround))))
-      (save-restriction
-        (widen)
-        (save-excursion
-          (goto-char beg)
-          (re-search-forward my/org-latex--fragment-syntax-regexp end t))))))
+    (save-restriction
+      (widen)
+      (let ((beg (max (point-min)
+                      (- (point) my/org-latex-fragment-context-lookaround)))
+            (end (min (point-max)
+                      (+ (point) my/org-latex-fragment-context-lookaround))))
+        (my/org-latex--range-may-have-fragment-syntax-p beg end)))))
 
 (defun my/org-latex--change-near-fragment-syntax-p (beg end)
   "Return non-nil when a change from BEG to END may touch LaTeX."
-  (let ((scan-beg (max (point-min)
-                       (- beg my/org-latex-fragment-context-lookaround)))
-        (scan-end (min (point-max)
-                       (+ end my/org-latex-fragment-context-lookaround))))
-    (save-excursion
-      (goto-char scan-beg)
-      (re-search-forward my/org-latex--fragment-syntax-regexp scan-end t))))
+  (save-restriction
+    (widen)
+    (let ((scan-beg (max (point-min)
+                         (- beg my/org-latex-fragment-context-lookaround)))
+          (scan-end (min (point-max)
+                         (+ end my/org-latex-fragment-context-lookaround))))
+      (my/org-latex--range-may-have-fragment-syntax-p scan-beg scan-end))))
+
+(defun my/org-latex--range-may-have-fragment-syntax-p (beg end)
+  "Return non-nil when BEG END contains likely LaTeX fragment syntax."
+  (let ((beg (max (point-min) (min beg end)))
+        (end (min (point-max) (max beg end))))
+    (or (save-excursion
+          (goto-char beg)
+          (re-search-forward my/org-latex--fragment-start-regexp end t))
+        (my/org-latex--dollar-fragment-syntax-in-range-p beg end))))
+
+(defun my/org-latex-buffer-has-fragment-syntax-p ()
+  "Return non-nil when the current buffer may contain Org LaTeX previews."
+  (let ((tick (buffer-chars-modified-tick)))
+    (if (and (consp my/org-latex--fragment-syntax-cache)
+             (eql (car my/org-latex--fragment-syntax-cache) tick))
+        (cdr my/org-latex--fragment-syntax-cache)
+      (let ((present
+             (and (my/org-buffer-feature-present-p :latex-candidate)
+                  (save-excursion
+                    (save-restriction
+                      (widen)
+                      (my/org-latex--range-may-have-fragment-syntax-p
+                       (point-min) (point-max)))))))
+        (setq-local my/org-latex--fragment-syntax-cache
+                    (cons tick present))
+        present))))
+
+(defun my/org-latex-enable-scroll-preview-on-syntax-insert (beg end _len)
+  "Enable full LaTeX preview hooks after inserting likely fragment syntax."
+  (when (and (derived-mode-p 'org-mode)
+             (my/org-latex--async-preview-active-p)
+             (my/org-latex--change-near-fragment-syntax-p beg end))
+    (my/org-latex-enable-scroll-preview)))
+
+(defun my/org-latex-install-syntax-watch ()
+  "Install the cheap watcher that enables LaTeX preview hooks on demand."
+  (unless my/org-latex--syntax-watch-installed
+    (setq-local my/org-latex--syntax-watch-installed t)
+    (add-hook 'after-change-functions
+              #'my/org-latex-enable-scroll-preview-on-syntax-insert nil t)
+    (add-hook 'change-major-mode-hook
+              #'my/org-latex-cleanup-syntax-watch nil t)
+    (add-hook 'kill-buffer-hook
+              #'my/org-latex-cleanup-syntax-watch nil t)))
+
+(defun my/org-latex-cleanup-syntax-watch ()
+  "Remove the on-demand LaTeX syntax watcher."
+  (remove-hook 'after-change-functions
+               #'my/org-latex-enable-scroll-preview-on-syntax-insert t)
+  (remove-hook 'change-major-mode-hook
+               #'my/org-latex-cleanup-syntax-watch t)
+  (remove-hook 'kill-buffer-hook
+               #'my/org-latex-cleanup-syntax-watch t)
+  (setq-local my/org-latex--syntax-watch-installed nil))
 
 (defun my/org-latex--change-in-tracked-range-p (beg end)
   "Return non-nil when a change from BEG to END touches the tracked fragment."
@@ -885,43 +993,51 @@ fallback edit render."
 (defun my/org-latex-post-command-function ()
   "Re-enable preview when point leaves a LaTeX fragment."
   (when (my/org-latex--async-preview-active-p)
-    ;; Safety net: if an image overlay still covers point, fragtog failed to
-    ;; clear it.  Remove it now so the cursor is never trapped inside a preview.
-    (when-let* ((ov (my/org-latex--image-overlay-at-point)))
-      (my/org-latex--clear-preview-range (overlay-start ov) (overlay-end ov))
-      (my/org-latex--cancel-leave-preview)
-      (my/org-latex--cancel-edit-preview-timer))
-    (let* ((self-insert (memq this-command
-                              '(self-insert-command org-self-insert-command)))
-           (prev-range my/org-latex--post-command-range)
-           (inside-prev-range
-            (and prev-range
-                 (<= (car prev-range) (point))
-                 (< (point) (cdr prev-range)))))
-      (cond
-       ((and self-insert inside-prev-range)
-        nil)
-       ((and self-insert prev-range)
-        (my/org-latex--finalize-left-fragment
-         (car prev-range) (cdr prev-range))
-        (setq my/org-latex--post-command-range nil))
-       (t
-        (let* ((curr-frag (unless inside-prev-range
-                            (and (my/org-latex--near-fragment-syntax-p)
-                                 (my/org-latex--current-fragment))))
-               (curr-range (if inside-prev-range
-                               prev-range
-                             (and curr-frag
-                                  (my/org-latex--fragment-range curr-frag)))))
-          (unless (equal prev-range curr-range)
-            (when prev-range
-              (my/org-latex--finalize-left-fragment
-               (car prev-range) (cdr prev-range)))
-            (unless curr-range
-              (my/org-latex--clear-edit-preview-marker)))
-          (setq my/org-latex--post-command-range curr-range)))))
-    (setq my/org-latex--post-command-point (point))
-    (my/org-latex--maybe-refresh-selected-viewport)))
+    (let* ((window (get-buffer-window (current-buffer) t))
+           (key (list (point)
+                      (buffer-chars-modified-tick)
+                      my/org-latex--post-command-range
+                      this-command
+                      (and window (window-start window)))))
+      (unless (equal key my/org-latex--last-post-command-key)
+        (setq my/org-latex--last-post-command-key key)
+        ;; Safety net: if an image overlay still covers point, fragtog failed
+        ;; to clear it.  Remove it now so point is never trapped in a preview.
+        (when-let* ((ov (my/org-latex--image-overlay-at-point)))
+          (my/org-latex--clear-preview-range (overlay-start ov) (overlay-end ov))
+          (my/org-latex--cancel-leave-preview)
+          (my/org-latex--cancel-edit-preview-timer))
+        (let* ((self-insert (memq this-command
+                                  '(self-insert-command org-self-insert-command)))
+               (prev-range my/org-latex--post-command-range)
+               (inside-prev-range
+                (and prev-range
+                     (<= (car prev-range) (point))
+                     (< (point) (cdr prev-range)))))
+          (cond
+           ((and self-insert inside-prev-range)
+            nil)
+           ((and self-insert prev-range)
+            (my/org-latex--finalize-left-fragment
+             (car prev-range) (cdr prev-range))
+            (setq my/org-latex--post-command-range nil))
+           (t
+            (let* ((curr-frag (unless inside-prev-range
+                                (and (my/org-latex--near-fragment-syntax-p)
+                                     (my/org-latex--current-fragment))))
+                   (curr-range (if inside-prev-range
+                                   prev-range
+                                 (and curr-frag
+                                      (my/org-latex--fragment-range curr-frag)))))
+              (unless (equal prev-range curr-range)
+                (when prev-range
+                  (my/org-latex--finalize-left-fragment
+                   (car prev-range) (cdr prev-range)))
+                (unless curr-range
+                  (my/org-latex--clear-edit-preview-marker)))
+              (setq my/org-latex--post-command-range curr-range)))))
+        (setq my/org-latex--post-command-point (point))
+        (my/org-latex--maybe-refresh-selected-viewport)))))
 
 (defun my/org-latex--visible-range (&optional window)
   "Return (beg . end) for WINDOW's visible range in the current buffer."
@@ -1316,11 +1432,18 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
 
 (defun my/org-latex--preview-base-directory ()
   "Return the directory used to store Org preview images."
-  (let* ((file (buffer-file-name (buffer-base-buffer)))
-         (base (if (or (not file) (file-remote-p file))
-                   temporary-file-directory
-                 default-directory)))
-    (file-name-as-directory (file-truename base))))
+  (let* ((base-buffer (buffer-base-buffer))
+         (file (buffer-file-name base-buffer))
+         (key (list file default-directory)))
+    (if (equal (car-safe my/org-latex--preview-base-directory-cache) key)
+        (cdr my/org-latex--preview-base-directory-cache)
+      (let* ((base (if (or (not file) (file-remote-p file))
+                       temporary-file-directory
+                     default-directory))
+             (directory (file-name-as-directory (file-truename base))))
+        (setq-local my/org-latex--preview-base-directory-cache
+                    (cons key directory))
+        directory))))
 
 (defun my/org-latex--make-waiter (spec)
   "Build a waiter from fragment SPEC."
@@ -1600,25 +1723,29 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
       (save-excursion
         (goto-char beg)
         (while (re-search-forward math-regexp end t)
-          (let* ((context (org-element-context))
-                 (type (org-element-type context)))
-            (when (memq type '(latex-environment latex-fragment))
-              (let* ((frag-beg (org-element-begin context))
-                     (frag-end (save-excursion
-                                 (goto-char (org-element-end context))
-                                 (skip-chars-backward " \r\t\n")
-                                 (point)))
-                     (source-beg frag-beg)
-                     (source-end frag-end)
-                     (source-value
-                      (buffer-substring-no-properties source-beg source-end))
-                     (render-value source-value))
-                (push (my/org-latex--fragment-spec
-                       source-beg source-end source-value render-value)
-                      fragments)
-                ;; Keep point within the original search bound for the next
-                ;; `re-search-forward'; large fragments may extend past END.
-                (goto-char (min end (max (point) source-end)))))))
+          (let ((syntax-beg (match-beginning 0)))
+            (when (or (/= (char-after syntax-beg) ?$)
+                      (my/org-latex--dollar-fragment-start-p syntax-beg end))
+              (let* ((context (org-element-context))
+                     (type (org-element-type context)))
+                (when (memq type '(latex-environment latex-fragment))
+                  (let* ((frag-beg (org-element-begin context))
+                         (frag-end (save-excursion
+                                     (goto-char (org-element-end context))
+                                     (skip-chars-backward " \r\t\n")
+                                     (point)))
+                         (source-beg frag-beg)
+                         (source-end frag-end)
+                         (source-value
+                          (buffer-substring-no-properties
+                           source-beg source-end))
+                         (render-value source-value))
+                    (push (my/org-latex--fragment-spec
+                           source-beg source-end source-value render-value)
+                          fragments)
+                    ;; Keep point within the original search bound for the next
+                    ;; `re-search-forward'; large fragments may extend past END.
+                    (goto-char (min end (max (point) source-end)))))))))
         (nreverse fragments)))))
 
 (defun my/org-latex--cleanup-job-files (job)
@@ -1892,20 +2019,22 @@ queued work."
   (let* ((scan-range (my/org-latex--visible-scan-range beg end))
          (scan-beg (car scan-range))
          (scan-end (cdr scan-range))
-         (specs (my/org-latex--collect-fragments scan-beg scan-end))
          visible-specs
          prefetch-specs)
     (my/org-latex--cancel-stale-visible-renders scan-beg scan-end)
     (my/org-latex--drop-stale-visible-queue scan-beg scan-end)
-    (dolist (spec specs)
-      (if (my/org-latex--spec-overlaps-range-p spec beg end)
-          (push spec visible-specs)
-        (push spec prefetch-specs)))
-    (my/org-latex--ensure-visible-render-slots visible-specs beg end)
-    (+ (my/org-latex--enqueue-fragments
-        (nreverse visible-specs) 'visible 'front)
-       (my/org-latex--enqueue-fragments
-        (nreverse prefetch-specs) 'prefetch))))
+    (if (not (my/org-latex--range-may-have-fragment-syntax-p
+              scan-beg scan-end))
+        0
+      (dolist (spec (my/org-latex--collect-fragments scan-beg scan-end))
+        (if (my/org-latex--spec-overlaps-range-p spec beg end)
+            (push spec visible-specs)
+          (push spec prefetch-specs)))
+      (my/org-latex--ensure-visible-render-slots visible-specs beg end)
+      (+ (my/org-latex--enqueue-fragments
+          (nreverse visible-specs) 'visible 'front)
+         (my/org-latex--enqueue-fragments
+          (nreverse prefetch-specs) 'prefetch)))))
 
 (defun my/org-latex--prune-offscreen-overlays (beg end)
   "Prune tracked preview overlays far away from visible BEG END."
@@ -1951,6 +2080,7 @@ queued work."
       (my/org-latex--terminate-render-process process)))
   (setq my/org-latex--post-command-point nil
         my/org-latex--post-command-range nil
+        my/org-latex--last-post-command-key nil
         my/org-latex--last-visible-range nil
         my/org-latex--last-visible-preview-time 0.0
         my/org-latex--render-processes nil
@@ -2092,6 +2222,7 @@ queued work."
   "Stop async scroll-preview state in the current Org buffer."
   (interactive)
   (setq-local my/org-latex--scroll-preview-enabled nil)
+  (my/org-latex-cleanup-syntax-watch)
   (remove-hook 'after-change-functions #'my/org-latex-after-change-function t)
   (remove-hook 'post-command-hook #'my/org-latex-post-command-function t)
   (remove-hook 'window-scroll-functions #'my/org-latex--window-scroll-preview-hook t)
@@ -2126,18 +2257,29 @@ queued work."
   "Enable on-demand LaTeX preview for visible area after scrolling."
   (interactive)
   (when (and (derived-mode-p 'org-mode)
+             (my/org-latex--async-preview-active-p)
              (not my/org-latex--scroll-preview-enabled))
-    (setq-local my/org-latex--scroll-preview-enabled t)
-    (my/org-latex--ensure-state)
-    (add-hook 'after-change-functions #'my/org-latex-after-change-function nil t)
-    (add-hook 'post-command-hook #'my/org-latex-post-command-function nil t)
-    (add-hook 'window-scroll-functions #'my/org-latex--window-scroll-preview-hook nil t)
-    (add-hook 'window-size-change-functions #'my/org-latex--window-size-preview-hook nil t)
-    (add-hook 'change-major-mode-hook #'my/org-latex-cleanup-scroll-preview nil t)
-    (add-hook 'kill-buffer-hook #'my/org-latex-cleanup-scroll-preview nil t)
-    (run-with-idle-timer my/org-latex-preview-idle-delay nil
-                         #'my/org-latex-preview-visible-initial
-                         (current-buffer))))
+    (if (my/org-latex-buffer-has-fragment-syntax-p)
+        (progn
+          (my/org-latex-cleanup-syntax-watch)
+          (setq-local my/org-latex--scroll-preview-enabled t)
+          (my/org-latex--ensure-state)
+          (add-hook 'after-change-functions
+                    #'my/org-latex-after-change-function nil t)
+          (add-hook 'post-command-hook
+                    #'my/org-latex-post-command-function nil t)
+          (add-hook 'window-scroll-functions
+                    #'my/org-latex--window-scroll-preview-hook nil t)
+          (add-hook 'window-size-change-functions
+                    #'my/org-latex--window-size-preview-hook nil t)
+          (add-hook 'change-major-mode-hook
+                    #'my/org-latex-cleanup-scroll-preview nil t)
+          (add-hook 'kill-buffer-hook
+                    #'my/org-latex-cleanup-scroll-preview nil t)
+          (run-with-idle-timer my/org-latex-preview-idle-delay nil
+                               #'my/org-latex-preview-visible-initial
+                               (current-buffer)))
+      (my/org-latex-install-syntax-watch))))
 
 (add-hook 'org-mode-hook #'my/org-latex-enable-scroll-preview)
 

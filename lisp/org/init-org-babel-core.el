@@ -115,6 +115,11 @@
   :type 'file
   :group 'my/org-babel)
 
+(defcustom my/org-babel-inline-image-refresh-delay 0.05
+  "Idle delay before refreshing inline images after image-producing Babel jobs."
+  :type 'number
+  :group 'my/org-babel)
+
 (defvar my/org-babel-in-async-child nil
   "Non-nil when this Emacs process is executing an async Babel child job.")
 
@@ -123,6 +128,9 @@
 
 (defvar my/org-babel-async-job-counter 0
   "Monotonic counter used for Org Babel async job ids.")
+
+(defvar-local my/org-babel--inline-image-refresh-timer nil
+  "Pending inline image refresh timer for the current Org buffer.")
 
 (defun my/org-babel--find-dot-command ()
   "Return the first usable system Graphviz dot binary, or nil."
@@ -228,6 +236,45 @@ INFO defaults to the source block at point."
           (buffer-substring-no-properties result-beg (org-babel-result-end)))
       "")))
 
+(defconst my/org-babel--inline-image-link-regexp
+  "\\[\\[file:[^]\n]+\\.\\(?:png\\|jpe?g\\|gif\\|svg\\|webp\\|avif\\|bmp\\)\\(?:\\][^]\n]*\\)?\\]\\]"
+  "Regexp matching Org file links that can become inline images.")
+
+(defun my/org-babel--file-output-p (&optional info)
+  "Return non-nil when INFO/current source block writes to a file."
+  (let* ((info (or info (ignore-errors
+                          (org-babel-get-src-block-info 'light))))
+         (params (nth 2 info))
+         (file (cdr (assq :file params))))
+    (and (stringp file)
+         (not (string-empty-p file)))))
+
+(defun my/org-babel--result-image-link-p (text)
+  "Return non-nil when TEXT contains an inline-image file link."
+  (and (stringp text)
+       (string-match-p my/org-babel--inline-image-link-regexp text)))
+
+(defun my/org-babel--redisplay-inline-images-now (buffer)
+  "Refresh inline images in BUFFER if it is still live."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq-local my/org-babel--inline-image-refresh-timer nil)
+      (when (derived-mode-p 'org-mode)
+        (org-redisplay-inline-images)))))
+
+(defun my/org-babel--schedule-inline-image-redisplay (&optional raw-text)
+  "Coalesce inline image refresh after image-producing Babel output RAW-TEXT."
+  (when (and (derived-mode-p 'org-mode)
+             (or (my/org-babel--file-output-p)
+                 (my/org-babel--result-image-link-p raw-text)))
+    (when (timerp my/org-babel--inline-image-refresh-timer)
+      (cancel-timer my/org-babel--inline-image-refresh-timer))
+    (setq-local my/org-babel--inline-image-refresh-timer
+                (run-with-idle-timer
+                 my/org-babel-inline-image-refresh-delay nil
+                 #'my/org-babel--redisplay-inline-images-now
+                 (current-buffer)))))
+
 (defun my/org-babel--format-status-result (text)
   "Return TEXT as a simple `#+RESULTS:' block."
   (concat "#+RESULTS:\n"
@@ -248,7 +295,7 @@ INFO defaults to the source block at point."
         (insert raw-text)
         (unless (string-suffix-p "\n" raw-text)
           (insert "\n"))))
-    (org-redisplay-inline-images)))
+    (my/org-babel--schedule-inline-image-redisplay raw-text)))
 
 (defun my/org-babel--write-sexp-file (file data)
   "Write DATA into FILE as a printed Lisp expression."
@@ -660,7 +707,8 @@ INFO is the result of `org-babel-get-src-block-info'."
 
 (setq org-confirm-babel-evaluate nil)
 
-(add-hook 'org-babel-after-execute-hook #'org-redisplay-inline-images)
+(add-hook 'org-babel-after-execute-hook
+          #'my/org-babel--schedule-inline-image-redisplay)
 
 (dolist (pair my/org-babel-native-src-lang-modes)
   (setf (alist-get (car pair) org-src-lang-modes nil nil #'equal)

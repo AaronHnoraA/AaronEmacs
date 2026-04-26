@@ -13,11 +13,13 @@
 
 (defvar-local my/org--olivetti-auto-state nil)
 (defvar-local my/org-pretty-block-cache nil)
+(defvar-local my/org-pretty-block-jit-cache nil)
 (defvar my/org-ui--face-theme-signature nil)
 (defvar my/org--olivetti-sync-timer nil)
 (defvar-local my/org--suspended-in-insert nil)
 (defvar-local my/org--insert-suspended-modes nil)
 (defvar-local my/org--valign-table-watch-installed nil)
+(defvar-local my/org--pretty-block-watch-installed nil)
 (defvar-local my/org-appear--last-post-command-key nil)
 (defvar my/org-special-block--palette-cache (make-hash-table :test #'equal))
 
@@ -25,6 +27,11 @@
   "Maximum cached pretty-block signatures per Org buffer.
 The cache is only an optimization; clearing it is safe and prevents stale
 integer position keys from accumulating during long editing sessions."
+  :type 'integer
+  :group 'my/org-ui)
+
+(defcustom my/org-pretty-block-jit-cache-max-entries 128
+  "Maximum cached unchanged JIT scan ranges per Org buffer."
   :type 'integer
   :group 'my/org-ui)
 
@@ -43,6 +50,9 @@ lighter without changing table behavior once a table exists."
 
 (defconst my/org--table-line-regexp "^[ \t]*[|│┃]"
   "Regexp matching Org or box-table lines that need `valign-mode'.")
+
+(defconst my/org--special-block-line-regexp "^[ \t]*#\\+begin_"
+  "Regexp matching Org special-block opening lines.")
 
 (declare-function evil-insert-state-p "evil")
 (declare-function my/org-toc-insert-or-update "init-org-core")
@@ -92,11 +102,7 @@ lighter without changing table behavior once a table exists."
 
 (defun my/org-buffer-has-table-p ()
   "Return non-nil if the current Org buffer already contains a table line."
-  (save-excursion
-    (save-restriction
-      (widen)
-      (goto-char (point-min))
-      (re-search-forward my/org--table-line-regexp nil t))))
+  (my/org-buffer-feature-present-p :table))
 
 (defun my/org-change-has-table-line-p (beg end)
   "Return non-nil if the changed region BEG END now touches a table line."
@@ -210,7 +216,10 @@ its rendered appearance in insert state."
     (setq-local left-margin-width 1)
     (setq-local right-margin-width 1)
     (setq-local hl-line-face 'my/org-hl-line)
-    (set-window-buffer (selected-window) (current-buffer))))
+    (let ((window (selected-window)))
+      (when (and (window-live-p window)
+                 (not (eq (window-buffer window) (current-buffer))))
+        (set-window-buffer window (current-buffer))))))
 
 (defun my/org-visible-buffer-p ()
   "Return non-nil when an Org buffer is visible in a live window."
@@ -230,10 +239,12 @@ its rendered appearance in insert state."
   :init
   (setq olivetti-body-width my/org-prose-body-width)
   :config
-  (defun xs-toggle-olivetti-for-org ()
+  (defun xs-toggle-olivetti-for-org (&optional window-count)
     "If current buffer is Org and only one window is visible, enable olivetti."
     (let ((desired (and (derived-mode-p 'org-mode)
-                        (eq (length (window-list nil nil nil)) 1))))
+                        (= (or window-count
+                               (length (window-list nil nil nil)))
+                           1))))
       (unless (eq desired my/org--olivetti-auto-state)
         (setq-local my/org--olivetti-auto-state desired)
         (if desired
@@ -244,11 +255,12 @@ its rendered appearance in insert state."
   (defun my/org-sync-visible-olivetti-buffers ()
     "Synchronize Olivetti state for visible Org buffers."
     (setq my/org--olivetti-sync-timer nil)
-    (dolist (window (window-list nil 'no-minibuf))
-      (when-let* ((buffer (window-buffer window)))
-        (with-current-buffer buffer
-          (when (derived-mode-p 'org-mode)
-            (xs-toggle-olivetti-for-org))))))
+    (let ((window-count (length (window-list nil nil nil))))
+      (dolist (window (window-list nil 'no-minibuf))
+        (when-let* ((buffer (window-buffer window)))
+          (with-current-buffer buffer
+            (when (derived-mode-p 'org-mode)
+              (xs-toggle-olivetti-for-org window-count)))))))
 
   (defun my/org-schedule-olivetti-sync (&rest _)
     "Coalesce repeated window changes before syncing Org Olivetti state."
@@ -938,6 +950,70 @@ DEFAULT-BG defaults to `my/org-default-background'."
                (equal (overlay-get ov 'my/org-pretty-block-id) block-id))
       (delete-overlay ov))))
 
+(defun my/org-buffer-has-special-block-p ()
+  "Return non-nil when the current Org buffer contains a special block."
+  (my/org-buffer-feature-present-p :special-block))
+
+(defun my/org-change-has-special-block-line-p (beg end)
+  "Return non-nil when the changed region BEG END now touches a special block."
+  (save-excursion
+    (let ((scan-beg (progn
+                      (goto-char beg)
+                      (line-beginning-position)))
+          (scan-end (progn
+                      (goto-char end)
+                      (line-end-position))))
+      (goto-char scan-beg)
+      (re-search-forward my/org--special-block-line-regexp scan-end t))))
+
+(defun my/org-enable-jit-pretty-blocks-on-insert (beg end _len)
+  "Enable pretty-block JIT when an edit creates a block between BEG and END."
+  (when (and (derived-mode-p 'org-mode)
+             (my/org-rich-ui-buffer-p)
+             (my/org-change-has-special-block-line-p beg end))
+    (my/org-enable-jit-pretty-blocks)))
+
+(defun my/org-install-pretty-block-watch ()
+  "Install a cheap watcher that enables block prettification on demand."
+  (unless my/org--pretty-block-watch-installed
+    (setq-local my/org--pretty-block-watch-installed t)
+    (add-hook 'after-change-functions
+              #'my/org-enable-jit-pretty-blocks-on-insert nil t)
+    (add-hook 'change-major-mode-hook
+              #'my/org-cleanup-pretty-block-watch nil t)
+    (add-hook 'kill-buffer-hook
+              #'my/org-cleanup-pretty-block-watch nil t)))
+
+(defun my/org-cleanup-pretty-block-watch ()
+  "Remove the on-demand watcher for pretty special blocks."
+  (remove-hook 'after-change-functions
+               #'my/org-enable-jit-pretty-blocks-on-insert t)
+  (remove-hook 'change-major-mode-hook
+               #'my/org-cleanup-pretty-block-watch t)
+  (remove-hook 'kill-buffer-hook
+               #'my/org-cleanup-pretty-block-watch t)
+  (setq-local my/org--pretty-block-watch-installed nil))
+
+(defun my/org-pretty-block--jit-cache-hit-p (scan-start scan-end)
+  "Return non-nil when SCAN-START SCAN-END was already handled unchanged."
+  (when (hash-table-p my/org-pretty-block-jit-cache)
+    (gethash (list scan-start scan-end (buffer-chars-modified-tick))
+             my/org-pretty-block-jit-cache)))
+
+(defun my/org-pretty-block--remember-jit-range (scan-start scan-end)
+  "Remember that SCAN-START SCAN-END has been handled for this buffer tick."
+  (unless (hash-table-p my/org-pretty-block-jit-cache)
+    (setq-local my/org-pretty-block-jit-cache
+                (make-hash-table :test #'equal)))
+  (when (and (integerp my/org-pretty-block-jit-cache-max-entries)
+             (> my/org-pretty-block-jit-cache-max-entries 0)
+             (> (hash-table-count my/org-pretty-block-jit-cache)
+                my/org-pretty-block-jit-cache-max-entries))
+    (clrhash my/org-pretty-block-jit-cache))
+  (puthash (list scan-start scan-end (buffer-chars-modified-tick))
+           t
+           my/org-pretty-block-jit-cache))
+
 (defun my/org-special-block-footer-marker-display (palette header-bg)
   "Return the styled footer marker string for a styled special block PALETTE."
   (when-let* ((footer-marker (plist-get palette :footer))
@@ -1379,7 +1455,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
         (let (scan-start scan-end)
           (goto-char start)
           (setq scan-start
-                (if (re-search-backward "^[ \t]*#\\+begin_" nil t)
+                (if (re-search-backward my/org--special-block-line-regexp nil t)
                     (line-beginning-position)
                   start))
           (goto-char end)
@@ -1387,19 +1463,33 @@ DEFAULT-BG defaults to `my/org-default-background'."
                 (if (re-search-forward "^[ \t]*#\\+end_" nil t)
                     (min (point-max) (line-beginning-position 2))
                   end))
-          (when (save-excursion
-                  (goto-char scan-start)
-                  (re-search-forward "^[ \t]*#\\+begin_" scan-end t))
-            (save-restriction
-              (narrow-to-region scan-start scan-end)
-              (dolist (el (org-element-map (org-element-parse-buffer) 'special-block
-                            (lambda (el)
-                              (when (and (my/org-special-block-config
-                                          (org-element-property :type el))
-                                         (< (org-element-property :begin el) end)
-                                         (> (org-element-property :end el) start))
-                                el))))
-                (my/org-prettify-element el)))))))))
+          (unless (my/org-pretty-block--jit-cache-hit-p scan-start scan-end)
+            (let ((seen (make-hash-table :test #'eql)))
+              (goto-char scan-start)
+              (while (re-search-forward my/org--special-block-line-regexp
+                                        scan-end t)
+                (let ((line-begin (match-beginning 0)))
+                  (goto-char line-begin)
+                  (let* ((element (org-element-at-point))
+                         (type (and (eq (org-element-type element)
+                                        'special-block)
+                                    (org-element-property :type element)))
+                         (begin (and type
+                                     (org-element-property :begin element)))
+                         (end-pos (and type
+                                       (org-element-property :end element))))
+                    (when (and begin
+                               end-pos
+                               (not (gethash begin seen))
+                               (my/org-special-block-config type)
+                               (< begin end)
+                               (> end-pos start))
+                      (puthash begin t seen)
+                      (my/org-prettify-element element)))
+                  (goto-char line-begin)
+                  (forward-line 1))))
+            (my/org-pretty-block--remember-jit-range
+             scan-start scan-end)))))))
 
 ;; ===========================================================
 ;; 5. 激活机制
@@ -1409,7 +1499,8 @@ DEFAULT-BG defaults to `my/org-default-background'."
   "在当前 Buffer 启用 JIT 渲染机制。"
   (when (and (derived-mode-p 'org-mode)
              (my/org-rich-ui-buffer-p)
-             (<= (buffer-size) my/org-pretty-block-max-buffer-size))
+             (my/org-buffer-has-special-block-p))
+    (my/org-cleanup-pretty-block-watch)
     (unless (hash-table-p my/org-pretty-block-cache)
       (setq-local my/org-pretty-block-cache (make-hash-table :test #'equal)))
     (add-hook 'change-major-mode-hook #'my/org-disable-jit-pretty-blocks nil t)
@@ -1422,7 +1513,9 @@ DEFAULT-BG defaults to `my/org-default-background'."
   "Clear Org pretty-block overlays and cache in the current buffer."
   (remove-overlays (point-min) (point-max) 'my/org-pretty-block t)
   (when (hash-table-p my/org-pretty-block-cache)
-    (clrhash my/org-pretty-block-cache)))
+    (clrhash my/org-pretty-block-cache))
+  (when (hash-table-p my/org-pretty-block-jit-cache)
+    (clrhash my/org-pretty-block-jit-cache)))
 
 (defun my/org-disable-jit-pretty-blocks ()
   "Disable Org pretty-block JIT state in the current buffer."
@@ -1431,8 +1524,10 @@ DEFAULT-BG defaults to `my/org-default-background'."
     (jit-lock-unregister #'my/org-jit-prettify-blocks))
   (remove-hook 'change-major-mode-hook #'my/org-disable-jit-pretty-blocks t)
   (remove-hook 'kill-buffer-hook #'my/org-disable-jit-pretty-blocks t)
+  (my/org-cleanup-pretty-block-watch)
   (my/org-clear-pretty-block-state)
-  (setq-local my/org-pretty-block-cache nil))
+  (setq-local my/org-pretty-block-cache nil)
+  (setq-local my/org-pretty-block-jit-cache nil))
 
 (defun my/org-reset-overlays ()
   "调试用：强制清除所有 Overlay 并重绘。"
@@ -1440,7 +1535,15 @@ DEFAULT-BG defaults to `my/org-default-background'."
   (my/org-clear-pretty-block-state)
   (jit-lock-refontify))
 
-(add-hook 'org-mode-hook #'my/org-enable-jit-pretty-blocks)
+(defun my/org-enable-jit-pretty-blocks-maybe ()
+  "Enable pretty-block rendering immediately or arm its on-demand watcher."
+  (when (and (derived-mode-p 'org-mode)
+             (my/org-rich-ui-buffer-p))
+    (if (my/org-buffer-has-special-block-p)
+        (my/org-enable-jit-pretty-blocks)
+      (my/org-install-pretty-block-watch))))
+
+(add-hook 'org-mode-hook #'my/org-enable-jit-pretty-blocks-maybe)
 
 (provide 'init-org-ui)
 ;;; init-org-ui.el ends here

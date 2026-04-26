@@ -7,6 +7,11 @@
 
 (require 'init-org-core)
 
+(defcustom my/org-last-modified-search-limit (* 16 1024)
+  "Maximum characters searched for `#+last_modified` before saving."
+  :type 'integer
+  :group 'org)
+
 (defvar my-daily-subdirs '("idea" "inbox" "mail" "note" "meeting" "protocol" "uni" "life"))
 (dolist (dir my-daily-subdirs)
   (make-directory (expand-file-name dir my-org-daily-dir) t))
@@ -41,7 +46,13 @@
   (when (derived-mode-p 'org-mode)
     (save-excursion
       (goto-char (point-min))
-      (when (re-search-forward "^#\\+last_modified:" nil t)
+      (when (re-search-forward
+             "^#\\+last_modified:"
+             (and (integerp my/org-last-modified-search-limit)
+                  (> my/org-last-modified-search-limit 0)
+                  (min (point-max)
+                       (+ (point-min) my/org-last-modified-search-limit)))
+             t)
         (delete-region (point) (line-end-position))
         (insert (format " [%s]" (format-time-string "%Y-%m-%d %a %H:%M")))))))
 
