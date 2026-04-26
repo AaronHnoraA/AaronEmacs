@@ -1,0 +1,13 @@
+AI Workbench global profile
+
+Working directory: {{working-directory}}
+
+Profile: {{profile}}
+
+{{git-policy}}
+
+{{write-policy}}
+
+{{activation-policy}}
+
+{{profile-text}}

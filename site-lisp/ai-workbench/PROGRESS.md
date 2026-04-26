@@ -10,8 +10,10 @@
   - `M-x ai-workbench`
   - `M-x ai-workbench-compose-buffer`
   - `C-c M-a`
+  - `C-c A W`
   - `C-c A w`
   - `C-c A .`
+  - `C-c A /`
   - `C-c A k`
   - `C-c A m`
   - `C-c A i r` / `C-c A i b` / `C-c A i f`
@@ -35,6 +37,12 @@
   - `@Git状态`
   - `@诊断`
 - last prompt / last status / last error / run state 记录
+- 写作 prompt 预览入口：
+  - `C-c A w` 从当前选区或 buffer 生成写作 prompt
+  - 支持润色 / 改写 / 总结 / 翻译 / 提纲 / 续写 / 评论
+  - 先进入可编辑预览 buffer，再 `C-c C-d` draft 或 `C-c C-c` send
+- 引用式 prompt 预览入口：
+  - `C-c A /` 先预览引用式 prompt，再决定 draft/send
 
 ### Backend
 
@@ -50,6 +58,7 @@
 - 自动注入一次 workdir/profile 提示
 - profile 只描述项目工作目录和引用式 prompt 语义，不再注入 manifest 审计协议
 - profile 文本已移到 `etc/ai-workbench/profiles/default.txt`
+- profile / snippet / prompt template 文本已统一放到 `etc/ai-workbench/`
 - Codex 默认不再走 `exec --json`
 
 ### UI / 窗口
@@ -72,10 +81,10 @@
 
 ## 正在推进
 
-- Codex 交互细节继续向 Claude 当前体验靠拢
-- profile 从固定 `default` 变成真正可选
+- 写作体验继续围绕 Org/Markdown 场景优化
+- profile 作为写作 persona 继续增强
 
 ## 已知问题
 
-- profile 默认仍是 `default`，但文本已经可在 `etc/ai-workbench/profiles/default.txt` 里改；selector 还没做。
+- status buffer 只做工作台概览；写作 prompt 应从 Org/Markdown/text buffer 调用。
 - Claude / Codex 的交互 UI 还可以继续压一轮细节。

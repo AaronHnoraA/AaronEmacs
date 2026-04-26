@@ -116,6 +116,69 @@
       (delete-directory profile-dir t)
       (delete-directory snippet-dir t))))
 
+(ert-deftest ai-workbench-profile-uses-editable-template-files ()
+  "Profile wrappers should be controlled by editable template files."
+  (let* ((profile-dir (make-temp-file "aiw-profile-dir" t))
+         (snippet-dir (make-temp-file "aiw-snippet-dir" t))
+         (template-dir (make-temp-file "aiw-template-dir" t))
+         (project-root "/tmp/ai-workbench-tests/")
+         (ai-workbench-profile-search-path (list profile-dir))
+         (ai-workbench-profile-snippet-search-path (list snippet-dir))
+         (ai-workbench-profile-template-search-path (list template-dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name "default.txt" profile-dir)
+            (insert "Profile body."))
+          (with-temp-file (expand-file-name "git-policy.txt" snippet-dir)
+            (insert "Git body."))
+          (with-temp-file (expand-file-name "write-policy.txt" snippet-dir)
+            (insert "Write body."))
+          (with-temp-file (expand-file-name "activation-policy.txt" snippet-dir)
+            (insert "Activation body."))
+          (with-temp-file (expand-file-name "profile-prompt.txt" template-dir)
+            (insert "TPL {{profile}} {{working-directory}} {{git-policy}} {{write-policy}} {{activation-policy}} {{profile-text}}"))
+          (with-temp-file (expand-file-name "user-prompt-wrapper.txt" template-dir)
+            (insert "WRAP\n{{profile-prompt}}\nTASK\n{{user-prompt}}"))
+          (ai-workbench-session-set-profile "default" project-root)
+          (let ((prompt (ai-workbench-profile-wrap-user-prompt "Fix bug" project-root)))
+            (should (string-match-p "\\`WRAP" prompt))
+            (should (string-match-p "TPL default" prompt))
+            (should (string-match-p "Git body" prompt))
+            (should (string-match-p "TASK\nFix bug" prompt))))
+      (delete-directory profile-dir t)
+      (delete-directory snippet-dir t)
+      (delete-directory template-dir t))))
+
+(ert-deftest ai-workbench-profile-rejects-unsafe-etc-names ()
+  "Profile and snippet names should not escape their etc directories."
+  (should-error (ai-workbench-profile-file "../escape") :type 'user-error)
+  (should-error (ai-workbench-profile-snippet-file "bad/name") :type 'user-error)
+  (should-error (ai-workbench-profile-template-file "..") :type 'user-error))
+
+(ert-deftest ai-workbench-tools-relative-path-does-not-match-siblings ()
+  "Relative path helpers should not treat sibling prefixes as project files."
+  (should-not
+   (string= "ile/a.el"
+            (ai-workbench-tools--relative-path
+             "/tmp/projectile/a.el"
+             "/tmp/project/"))))
+
+(ert-deftest ai-workbench-tools-writing-prompt-uses-editable-template ()
+  "Writing prompts should be rendered from editable template files."
+  (let* ((template-dir (make-temp-file "aiw-writing-template-dir" t))
+         (ai-workbench-profile-template-search-path (list template-dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name "writing-prompt.txt" template-dir)
+            (insert "WRITE {{mode}}\n{{task}}\n{{context}}\n{{text}}"))
+          (let ((prompt (ai-workbench-tools--writing-prompt
+                         "润色" "make it concise" "hello" "source: note.org")))
+            (should (string-match-p "\\`WRITE 润色" prompt))
+            (should (string-match-p "make it concise" prompt))
+            (should (string-match-p "source: note\\.org" prompt))
+            (should (string-match-p "hello" prompt))))
+      (delete-directory template-dir t))))
+
 (ert-deftest ai-workbench-session-reset-profile-injected-clears-all-backends ()
   "Resetting injected profile state should clear every backend marker."
   (let ((project-root "/tmp/ai-workbench-tests/"))

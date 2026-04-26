@@ -11,11 +11,16 @@
 (require 'seq)
 (require 'subr-x)
 (require 'ai-workbench-session)
+(require 'ai-workbench-profile)
 
 (declare-function which-function "which-func" ())
+(declare-function flymake-diagnostic-text "flymake" (diag))
+(declare-function flycheck-error-level "flycheck" (err))
 (declare-function ai-workbench-draft-string "ai-workbench" (backend prompt &optional project-root))
 (declare-function ai-workbench-send-string "ai-workbench" (backend prompt &optional project-root))
 (declare-function ai-workbench-open "ai-workbench" ())
+
+(defvar flycheck-current-errors)
 
 (defcustom ai-workbench-tools-project-files-limit 40
   "Maximum number of project files included in project file references."
@@ -26,6 +31,24 @@
   "Maximum number of lines included in test failure references."
   :type 'integer
   :group 'ai-workbench)
+
+(defconst ai-workbench-tools--context-template-fallback
+  "{{task-section}}\n\n{{references}}"
+  "Minimal fallback used only when editable context template is unavailable.")
+
+(defconst ai-workbench-tools--writing-template-fallback
+  "{{mode}}\n\n{{task}}\n\n{{context}}\n\n{{text}}"
+  "Minimal fallback used only when editable writing template is unavailable.")
+
+(defconst ai-workbench-writing-modes
+  '(("润色" . polish)
+    ("改写" . rewrite)
+    ("总结" . summarize)
+    ("翻译" . translate)
+    ("提纲" . outline)
+    ("续写" . continue)
+    ("评论" . critique))
+  "Writing modes exposed by `ai-workbench-writing-prompt'.")
 
 (defconst ai-workbench-tool-choices
   '(("@本文件" . current-file)
@@ -42,11 +65,33 @@
     ("@测试失败" . test-failures))
   "Choices exposed by `ai-workbench-context-prompt'.")
 
+(defvar ai-workbench-prompt-preview-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map text-mode-map)
+    (define-key map (kbd "C-c C-c") #'ai-workbench-prompt-preview-send)
+    (define-key map (kbd "C-c C-d") #'ai-workbench-prompt-preview-draft)
+    (define-key map (kbd "C-c C-o") #'ai-workbench-open)
+    map)
+  "Keymap for ai-workbench prompt preview buffers.")
+
+(defvar-local ai-workbench-prompt-preview-project-root nil
+  "Project root associated with the current prompt preview.")
+
+(defvar-local ai-workbench-prompt-preview-backend nil
+  "Backend associated with the current prompt preview.")
+
+(define-derived-mode ai-workbench-prompt-preview-mode text-mode "AI-Prompt"
+  "Major mode for editable ai-workbench prompt previews."
+  (setq-local header-line-format
+              '(:eval
+                (format "AI Prompt  backend:%s  project:%s  C-c C-c send  C-c C-d draft"
+                        ai-workbench-prompt-preview-backend
+                        (abbreviate-file-name
+                         ai-workbench-prompt-preview-project-root)))))
+
 (defun ai-workbench-tools--relative-path (file project-root)
   "Return FILE relative to PROJECT-ROOT when possible."
-  (if (and file project-root
-           (string-prefix-p (expand-file-name project-root)
-                            (expand-file-name file)))
+  (if (and file project-root (file-in-directory-p file project-root))
       (file-relative-name file project-root)
     (abbreviate-file-name file)))
 
@@ -224,7 +269,7 @@
                   (line-beginning-position)
                   (line-end-position)))
                 lines)))
-      (nreverse (delete-dups (delq "" lines))))))
+      (nreverse (delete-dups (seq-remove #'string-empty-p lines))))))
 
 (defun ai-workbench-tools--test-failure-summary ()
   "Return a summary of test failures from active buffers."
@@ -329,18 +374,104 @@
 
 (defun ai-workbench-tools--prompt-template (task references)
   "Return a prompt template using TASK and REFERENCES."
-  (string-join
-   (delq nil
-         (list "请直接基于下面这些 Emacs 引用上下文工作，不要要求我重复粘贴源码。"
-               "把这些引用当作权威上下文；需要修改时直接执行，并简要说明会动哪些文件或范围。"
-               (and (not (string-empty-p task))
-                    (format "\n任务:\n%s" task))
-               "\n引用:"
-               (string-join references "\n")
-               "\n输出要求:"
-               "- 先直接完成任务，不要停在 diff 审阅流程"
-               "- 简要说明你修改了哪些文件、做了什么、还有什么风险"))
-   "\n"))
+  (ai-workbench-profile-render-template
+   (ai-workbench-profile-read-template
+    "context-prompt"
+    ai-workbench-tools--context-template-fallback)
+   `(("task-section" . ,(if (string-empty-p task)
+                            ""
+                          (format "任务:\n\n%s" task)))
+     ("references" . ,(string-join references "\n")))))
+
+(defun ai-workbench-tools--writing-text ()
+  "Return the text to use for a writing task."
+  (cond
+   ((use-region-p)
+    (buffer-substring-no-properties (region-beginning) (region-end)))
+   ((let ((text (string-trim
+                 (buffer-substring-no-properties (point-min) (point-max)))))
+      (not (string-empty-p text)))
+    (buffer-substring-no-properties (point-min) (point-max)))
+   (t
+    (user-error "No writing text available"))))
+
+(defun ai-workbench-tools--writing-context (project-root)
+  "Return lightweight writing context for PROJECT-ROOT."
+  (let ((source (if-let* ((file (buffer-file-name)))
+                    (format "source: %s"
+                            (ai-workbench-tools--relative-path file project-root))
+                  (format "buffer: %s" (buffer-name)))))
+    (string-join
+     (delq nil
+           (list source
+                 (when (use-region-p)
+                   (format "range: %d-%d"
+                           (line-number-at-pos (region-beginning))
+                           (line-number-at-pos (region-end))))))
+     "\n")))
+
+(defun ai-workbench-tools--writing-prompt (mode task text context)
+  "Return a writing prompt for MODE, TASK, TEXT, and CONTEXT."
+  (ai-workbench-profile-render-template
+   (ai-workbench-profile-read-template
+    "writing-prompt"
+    ai-workbench-tools--writing-template-fallback)
+   `(("mode" . ,mode)
+     ("task" . ,task)
+     ("context" . ,context)
+     ("text" . ,text))))
+
+(defun ai-workbench-tools--preview-buffer (name prompt project-root backend)
+  "Open NAME with editable PROMPT for PROJECT-ROOT and BACKEND."
+  (let ((buffer (get-buffer-create name)))
+    (with-current-buffer buffer
+      (unless (derived-mode-p 'ai-workbench-prompt-preview-mode)
+        (ai-workbench-prompt-preview-mode))
+      (setq buffer-read-only nil)
+      (erase-buffer)
+      (insert prompt)
+      (setq default-directory project-root)
+      (setq-local ai-workbench-prompt-preview-project-root project-root)
+      (setq-local ai-workbench-prompt-preview-backend backend)
+      (goto-char (point-min)))
+    (pop-to-buffer buffer)))
+
+(defun ai-workbench-prompt-preview--prompt ()
+  "Return the current editable prompt preview text."
+  (string-trim
+   (buffer-substring-no-properties (point-min) (point-max))))
+
+(defun ai-workbench-prompt-preview--ensure-session ()
+  "Ensure the preview buffer has enough session state."
+  (unless ai-workbench-prompt-preview-project-root
+    (setq-local ai-workbench-prompt-preview-project-root
+                (ai-workbench-project-root)))
+  (unless ai-workbench-prompt-preview-backend
+    (setq-local ai-workbench-prompt-preview-backend
+                (ai-workbench-session-backend
+                 ai-workbench-prompt-preview-project-root))))
+
+(defun ai-workbench-prompt-preview-send ()
+  "Send the current prompt preview to the configured backend."
+  (interactive)
+  (ai-workbench-prompt-preview--ensure-session)
+  (let ((prompt (ai-workbench-prompt-preview--prompt)))
+    (when (string-empty-p prompt)
+      (user-error "Prompt preview is empty"))
+    (ai-workbench-send-string ai-workbench-prompt-preview-backend
+                              prompt
+                              ai-workbench-prompt-preview-project-root)))
+
+(defun ai-workbench-prompt-preview-draft ()
+  "Draft the current prompt preview into the configured backend."
+  (interactive)
+  (ai-workbench-prompt-preview--ensure-session)
+  (let ((prompt (ai-workbench-prompt-preview--prompt)))
+    (when (string-empty-p prompt)
+      (user-error "Prompt preview is empty"))
+    (ai-workbench-draft-string ai-workbench-prompt-preview-backend
+                               prompt
+                               ai-workbench-prompt-preview-project-root)))
 
 (defun ai-workbench-tools--context-dispatch (send-immediately)
   "Build context references, then draft or send based on SEND-IMMEDIATELY."
@@ -364,6 +495,39 @@
       (ai-workbench-draft-string backend prompt project-root)
       (message "ai-workbench drafted prompt with %d reference(s); press RET to submit"
                (length references)))))
+
+(defun ai-workbench-context-preview ()
+  "Preview a reference-style prompt before sending or drafting it."
+  (interactive)
+  (let* ((project-root (ai-workbench-project-root))
+         (choices (ai-workbench-tools--selected-symbols))
+         (task (read-string "AI task: "))
+         (context (ai-workbench-tools--build-references choices project-root))
+         (references (plist-get context :references))
+         (backend (ai-workbench-session-backend project-root))
+         (prompt (ai-workbench-tools--prompt-template task references)))
+    (unless references
+      (user-error "No references selected"))
+    (ai-workbench-tools--preview-buffer
+     (format "*AI Context Prompt: %s*" (ai-workbench-project-name project-root))
+     prompt project-root backend)))
+
+(defun ai-workbench-writing-prompt ()
+  "Create an editable AI writing prompt from region or current buffer."
+  (interactive)
+  (let* ((project-root (ai-workbench-project-root))
+         (mode-label (completing-read "Writing mode: "
+                                      (mapcar #'car ai-workbench-writing-modes)
+                                      nil t nil nil "润色"))
+         (task (read-string "Writing task: "))
+         (text (ai-workbench-tools--writing-text))
+         (context (ai-workbench-tools--writing-context project-root))
+         (backend (ai-workbench-session-backend project-root))
+         (prompt (ai-workbench-tools--writing-prompt
+                  mode-label task text context)))
+    (ai-workbench-tools--preview-buffer
+     (format "*AI Writing Prompt: %s*" (ai-workbench-project-name project-root))
+     prompt project-root backend)))
 
 (defun ai-workbench-context-prompt ()
   "Draft a reference-style prompt into the current AI backend."

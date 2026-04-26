@@ -201,7 +201,7 @@ Enter and submitting partial input."
 (defun ai-workbench-codex--build-command ()
   "Return the Codex command string."
   (string-join
-   (cons ai-workbench-codex-executable
+   (cons (shell-quote-argument ai-workbench-codex-executable)
          (mapcar #'shell-quote-argument ai-workbench-codex-extra-args))
    " "))
 
@@ -268,8 +268,21 @@ Enter and submitting partial input."
 
 (defun ai-workbench-codex-session-live-p (&optional project-root)
   "Return non-nil when the Codex session for PROJECT-ROOT is live."
-  (when-let* ((process (ai-workbench-codex--get-process project-root)))
-    (process-live-p process)))
+  (let* ((root (ai-workbench-codex--working-directory project-root))
+         (tracked-process (ai-workbench-codex--get-process root))
+         (buffer-process (when-let* ((buffer (ai-workbench-codex-buffer root)))
+                           (get-buffer-process buffer)))
+         (live-process (cond
+                        ((and tracked-process
+                              (process-live-p tracked-process))
+                         tracked-process)
+                        ((and buffer-process
+                              (process-live-p buffer-process))
+                         buffer-process))))
+    (when live-process
+      (unless (eq live-process tracked-process)
+        (ai-workbench-codex--set-process live-process root))
+      t)))
 
 (defun ai-workbench-codex-open-active-buffer ()
   "Open the active Codex buffer."

@@ -1,0 +1,9 @@
+Before handling the user task below, read and apply this AI Workbench profile immediately.
+
+Your reply must start with the required activation acknowledgement, then continue with the approved scope only.
+
+{{profile-prompt}}
+
+User task:
+
+{{user-prompt}}

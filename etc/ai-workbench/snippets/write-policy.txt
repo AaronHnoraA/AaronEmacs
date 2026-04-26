@@ -1,5 +1,7 @@
 Write approval rules:
-- In Emacs special-tuned mode, do not write code immediately.
-- Before each modification block, first state the target files or ranges and the exact planned change.
+- In Emacs special-tuned mode, do not write code or prompt text immediately.
+- Keep a project-level view of dependencies and consequences, but avoid broad project-level operations unless the user explicitly asks.
+- Prefer small modification blocks: one file, one prompt, or one coherent range at a time.
+- Before each modification block, first state the target file/prompt/range and the exact planned change.
 - Wait for explicit user approval before writing each modification block.
 - If approval is not given, stop at the plan and do not modify files.

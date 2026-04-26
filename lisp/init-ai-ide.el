@@ -20,8 +20,10 @@
 ;;     M-x ai-workbench               open backend interactive buffer
 ;;     M-x ai-workbench-compose-buffer open compose buffer
 ;;     C-c M-a     ai-workbench-context-prompt
-;;     C-c A w     ai-workbench
+;;     C-c A W     ai-workbench
 ;;     C-c A .     ai-workbench-context-prompt
+;;     C-c A /     ai-workbench-context-preview
+;;     C-c A w     ai-workbench-writing-prompt
 ;;     C-c A k     ai-workbench-kill
 ;;     C-c A m     ai-workbench-compose-buffer
 ;;     C-c A i r/b/f send region / buffer / file via current backend
@@ -38,8 +40,10 @@
 
 (defvar-keymap my/ai-workbench-prefix-map
   :doc "Prefix map for ai-workbench commands."
-  "w" #'ai-workbench
+  "w" #'ai-workbench-writing-prompt
+  "W" #'ai-workbench
   "." #'ai-workbench-context-prompt
+  "/" #'ai-workbench-context-preview
   "k" #'ai-workbench-kill
   "m" #'ai-workbench-compose-buffer
   "i r" #'ai-workbench-send-region

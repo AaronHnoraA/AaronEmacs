@@ -32,9 +32,7 @@
 
 (defun ai-workbench--context-relative-path (file project-root)
   "Return FILE relative to PROJECT-ROOT when possible."
-  (if (and file project-root
-           (string-prefix-p (expand-file-name project-root)
-                            (expand-file-name file)))
+  (if (and file project-root (file-in-directory-p file project-root))
       (file-relative-name file project-root)
     (abbreviate-file-name file)))
 
@@ -174,6 +172,15 @@
        (completing-read "Shared snippet: "
                         (ai-workbench-profile-snippet-names)
                         nil t nil nil "git-policy"))))
+
+(defun ai-workbench-edit-template (&optional name)
+  "Edit prompt template NAME."
+  (interactive)
+  (ai-workbench-profile-edit-template
+   (or name
+       (completing-read "Prompt template: "
+                        (ai-workbench-profile-template-names)
+                        nil t nil nil "context-prompt"))))
 
 (defun ai-workbench-status ()
   "Open the current project's ai-workbench status buffer."

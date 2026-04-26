@@ -52,9 +52,7 @@
 
 (defun ai-workbench-compose--relative-path (file project-root)
   "Return FILE relative to PROJECT-ROOT when possible."
-  (if (and file project-root
-           (string-prefix-p (expand-file-name project-root)
-                            (expand-file-name file)))
+  (if (and file project-root (file-in-directory-p file project-root))
       (file-relative-name file project-root)
     (abbreviate-file-name file)))
 

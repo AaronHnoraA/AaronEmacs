@@ -17,6 +17,7 @@
 (declare-function ai-workbench-preview-profile "ai-workbench" (&optional profile))
 (declare-function ai-workbench-create-profile "ai-workbench" (name &optional base-profile))
 (declare-function ai-workbench-edit-shared-snippet "ai-workbench" (&optional name))
+(declare-function ai-workbench-edit-template "ai-workbench" (&optional name))
 (declare-function ai-workbench-cycle-backend "ai-workbench" ())
 (declare-function ai-workbench-compose-buffer "ai-workbench-compose" (&optional no-display))
 (declare-function ai-workbench-output-open "ai-workbench-output" ())
@@ -35,6 +36,7 @@
     (define-key map (kbd "+") #'ai-workbench-status-create-profile)
     (define-key map (kbd "e") #'ai-workbench-status-edit-profile)
     (define-key map (kbd "s") #'ai-workbench-status-edit-shared-snippet)
+    (define-key map (kbd "t") #'ai-workbench-status-edit-template)
     (define-key map (kbd "c") #'ai-workbench-status-open-compose)
     (define-key map (kbd "o") #'ai-workbench-status-open-output)
     (define-key map (kbd "r") #'ai-workbench-status-open-result)
@@ -65,6 +67,29 @@
 (defun ai-workbench-status--format-value (label value)
   "Return a human-readable status line from LABEL and VALUE."
   (format "%-18s %s\n" label (or value "-")))
+
+(defun ai-workbench-status--profile-catalog (active-profile)
+  "Return a compact profile catalog with ACTIVE-PROFILE marked."
+  (string-join
+   (mapcar
+    (lambda (profile)
+      (format "%s %-18s %s"
+              (if (string= profile active-profile) "*" " ")
+              profile
+              (ai-workbench-profile-summary profile)))
+    (ai-workbench-profile-names))
+   "\n"))
+
+(defun ai-workbench-status--template-catalog ()
+  "Return a compact template catalog."
+  (string-join
+   (mapcar
+    (lambda (name)
+      (let ((file (or (ai-workbench-profile-locate-template-file name)
+                      (ai-workbench-profile-template-file name))))
+        (format "  %-22s %s" name (abbreviate-file-name file))))
+    (ai-workbench-profile-template-names))
+   "\n"))
 
 (defun ai-workbench-status--render (project-root)
   "Render the status view for PROJECT-ROOT."
@@ -97,12 +122,22 @@
      (if (string-empty-p (or last-prompt ""))
          "(empty)\n"
        (format "%s\n" (truncate-string-to-width last-prompt 200 nil nil t)))
+     "\nWriting profiles\n"
+     (make-string 72 ?-)
+     "\n"
+     (ai-workbench-status--profile-catalog profile)
+     "\n\nPrompt templates\n"
+     (make-string 72 ?-)
+     "\n"
+     (ai-workbench-status--template-catalog)
      "\nKeys\n"
      (make-string 72 ?-)
      "\n"
      "RET open backend  b switch backend  p switch profile  v preview profile\n"
-     "+ create profile  e edit profile  s edit shared snippet\n"
-     "c compose  o output log  r result  k kill session  g refresh\n")))
+     "+ create profile  e edit profile  s edit snippet  t edit template\n"
+     "c compose  o output log  r result  k kill session  g refresh\n"
+     "Writing: use C-c A w from an Org/Markdown/text buffer\n"
+     "Context preview: use C-c A / from a source buffer\n")))
 
 (defun ai-workbench-status-buffer (&optional project-root)
   "Return the status buffer for PROJECT-ROOT."
@@ -183,6 +218,12 @@
   "Edit a shared snippet from the current status buffer."
   (interactive)
   (call-interactively #'ai-workbench-edit-shared-snippet)
+  (ai-workbench-status-refresh))
+
+(defun ai-workbench-status-edit-template ()
+  "Edit a prompt template from the current status buffer."
+  (interactive)
+  (call-interactively #'ai-workbench-edit-template)
   (ai-workbench-status-refresh))
 
 (defun ai-workbench-status-open-compose ()

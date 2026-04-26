@@ -1,0 +1,7 @@
+Read and remember the following AI Workbench profile now.
+
+Do not execute any task yet.
+
+Reply only with the required activation acknowledgement, then stop.
+
+{{profile-prompt}}
