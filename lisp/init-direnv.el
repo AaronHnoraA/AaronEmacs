@@ -58,8 +58,6 @@
   (direnv-always-show-summary nil)
   :config
   (advice-add 'compile :around #'my/direnv--sync-before-subprocess)
-  (with-eval-after-load 'vterm
-    (advice-add 'vterm :around #'my/direnv--sync-before-subprocess))
   (direnv-mode 1))
 
 (provide 'init-direnv)

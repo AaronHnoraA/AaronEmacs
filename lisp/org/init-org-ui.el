@@ -438,6 +438,19 @@ for the cache update so we never compute it twice in one redisplay."
   (advice-add 'org-modern--pre-redisplay
               :around #'my/org-modern-pre-redisplay-cached-a))
 
+(defun my/org-modern-cycle-visible-a (orig state)
+  "Keep Org Modern cycle refresh scoped to the visible ranges."
+  (if (and (derived-mode-p 'org-mode)
+           (bound-and-true-p org-modern-mode)
+           (memq state '(overview contents all)))
+      (my/org-flush-visible-ranges (current-buffer))
+    (funcall orig state)))
+
+(unless (advice-member-p #'my/org-modern-cycle-visible-a
+                         'org-modern--cycle)
+  (advice-add 'org-modern--cycle
+              :around #'my/org-modern-cycle-visible-a))
+
 (defun my/org-apply-ui ()
   "Apply the local document UI to Org and Org Modern faces."
   (when (display-graphic-p)
@@ -1113,6 +1126,17 @@ DEFAULT-BG defaults to `my/org-default-background'."
                  (> end (car range)))
         (throw 'overlap t)))
     nil))
+
+(defun my/org-flush-visible-ranges (&optional buffer)
+  "Run `font-lock-flush' for BUFFER's visible ranges plus margins."
+  (let ((buffer (or buffer (current-buffer))))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (let ((ranges (my/org-visible-ranges buffer)))
+          (if ranges
+              (dolist (range ranges)
+                (font-lock-flush (car range) (cdr range)))
+            (font-lock-flush)))))))
 
 (defun my/org-cancel-pretty-block-refontify ()
   "Cancel the pending pretty-block refontify timer in the current buffer."

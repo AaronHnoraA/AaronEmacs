@@ -566,6 +566,10 @@ If popup is focused, kill it."
   "Disable mode-line size and region word counting in `vterm'."
   (setq-local size-indication-mode nil))
 
+(defun my/vterm-low-latency-h ()
+  "Prefer lower latency over output coalescing in the current VTerm buffer."
+  (setq-local process-adaptive-read-buffering nil))
+
 (defun my/vterm-copy-mode-setup-keys ()
   "Install Vim-like copy-mode keys scoped to VTerm."
   (keymap-set vterm-mode-map "M-v" #'my/vterm-copy-mode-enter)
@@ -587,17 +591,11 @@ If popup is focused, kill it."
                         (my/terminal-apply-ui)
                         (my/vterm-disable-evil-h)
                         (my/vterm-disable-word-count-h)
-                        (my/vterm--sync-target-directory-h)
-                        (run-at-time
-                         0 nil
-                         (lambda (buffer)
-                           (when (buffer-live-p buffer)
-                             (with-current-buffer buffer
-                               (my/vterm--sync-target-directory-h))))
-                         (current-buffer))))
+                        (my/vterm-low-latency-h)
+                        (my/vterm--sync-target-directory-h)))
   :custom
   (vterm-shell "zsh")
-  (vterm-always-compile-module t)
+  (vterm-always-compile-module nil)
   :config
   (my/vterm-copy-mode-setup-keys)
   (advice-add 'vterm :around #'my/vterm--start-in-home-and-cd))
