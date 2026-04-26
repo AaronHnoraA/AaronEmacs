@@ -10,6 +10,8 @@
 (declare-function my/shell-command-executable "init-utils")
 (declare-function my/org-enable-org-appear-for-latex-edit "init-org-ui")
 (declare-function my/org-disable-org-appear-for-latex-edit "init-org-ui")
+(declare-function my/org-enable-org-fragtog-for-latex-edit "init-org-ui")
+(declare-function my/org-disable-org-fragtog-for-latex-edit "init-org-ui")
 (declare-function org-fragtog--disable-frag "org-fragtog" (frag &optional renew))
 
 (defvar ratex-mode)
@@ -819,6 +821,7 @@ render is usually ready before point leaves it."
   (unless my/org-latex--edit-post-command-enabled
     (setq-local my/org-latex--edit-post-command-enabled t)
     (my/org-enable-org-appear-for-latex-edit)
+    (my/org-enable-org-fragtog-for-latex-edit)
     (add-hook 'post-command-hook #'my/org-latex-post-command-function nil t)))
 
 (defun my/org-latex--disable-edit-post-command ()
@@ -826,6 +829,7 @@ render is usually ready before point leaves it."
   (when my/org-latex--edit-post-command-enabled
     (setq-local my/org-latex--edit-post-command-enabled nil)
     (my/org-disable-org-appear-for-latex-edit)
+    (my/org-disable-org-fragtog-for-latex-edit)
     (remove-hook 'post-command-hook #'my/org-latex-post-command-function t)))
 
 (defun my/org-latex--ratex-edit-session-active-p ()

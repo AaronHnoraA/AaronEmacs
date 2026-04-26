@@ -16,15 +16,15 @@
 (defvar-local my/org-pretty-block-jit-cache nil)
 (defvar my/org-ui--face-theme-signature nil)
 (defvar my/org--olivetti-sync-timer nil)
-(defvar-local my/org--suspended-in-insert nil)
-(defvar-local my/org--insert-suspended-modes nil)
 (defvar-local my/org--valign-table-watch-installed nil)
 (defvar-local my/org--pretty-block-watch-installed nil)
+(defvar-local my/org--pretty-block-refontify-timer nil)
 (defvar-local my/org-appear--last-point nil)
 (defvar-local my/org-appear--last-tick nil)
 (defvar-local my/org-appear--last-do-buffer nil)
 (defvar-local my/org-appear--last-elem-toggled nil)
 (defvar-local my/org--latex-edit-appear-enabled nil)
+(defvar-local my/org--latex-edit-fragtog-enabled nil)
 (defvar-local my/org-modern--pre-redisplay-signature nil)
 (defvar my/org-special-block--palette-cache (make-hash-table :test #'equal))
 
@@ -178,53 +178,21 @@ lighter without changing table behavior once a table exists."
     (when (bound-and-true-p org-appear-mode)
       (org-appear-mode -1))))
 
-(defun my/org-enable-org-fragtog-maybe ()
-  "Enable `org-fragtog-mode' for Org buffers in graphical sessions."
-  (when (my/org-rich-ui-buffer-p)
+(defun my/org-enable-org-fragtog-for-latex-edit ()
+  "Enable `org-fragtog-mode' only for the current LaTeX edit session."
+  (when (and (derived-mode-p 'org-mode)
+             (my/org-rich-ui-buffer-p)
+             (fboundp 'org-fragtog-mode)
+             (not my/org--latex-edit-fragtog-enabled))
+    (setq-local my/org--latex-edit-fragtog-enabled t)
     (org-fragtog-mode 1)))
 
-(defun my/org--suspend-mode-for-insert (mode)
-  "Disable MODE temporarily in the current Org buffer during Evil insert state."
-  (when (and (fboundp mode)
-             (boundp mode)
-             (symbol-value mode))
-    (push mode my/org--insert-suspended-modes)
-    (funcall mode -1)))
-
-(defun my/org-suspend-expensive-modes-in-insert ()
-  "Keep Org editing responsive without tearing down visual rendering.
-
-This intentionally no longer disables `org-modern-mode', `org-indent-mode',
-`valign-mode' or pretty-block overlays: turning those off made the buffer lose
-its rendered appearance in insert state."
-  (when (and (derived-mode-p 'org-mode)
-             (not my/org--suspended-in-insert)
-             (fboundp 'evil-insert-state-p)
-             (evil-insert-state-p))
-    (setq-local my/org--suspended-in-insert t)
-    (setq-local my/org--insert-suspended-modes nil)))
-
-(defun my/org-resume-expensive-modes-after-insert ()
-  "Re-enable Org UI helpers suspended during Evil insert state."
-  (when (and (derived-mode-p 'org-mode)
-             my/org--suspended-in-insert)
-    (setq-local my/org--suspended-in-insert nil)
-    (prog1 nil
-      (dolist (mode (nreverse my/org--insert-suspended-modes))
-        (when (fboundp mode)
-          (funcall mode 1)))
-      (setq-local my/org--insert-suspended-modes nil))))
-
-(defun my/org-setup-evil-insert-performance ()
-  "Install buffer-local Evil hooks that keep Org insert mode responsive."
-  (when (featurep 'evil)
-    (add-hook 'evil-insert-state-entry-hook
-              #'my/org-suspend-expensive-modes-in-insert nil t)
-    (add-hook 'evil-insert-state-exit-hook
-              #'my/org-resume-expensive-modes-after-insert nil t)
-    (when (and (fboundp 'evil-insert-state-p)
-               (evil-insert-state-p))
-      (my/org-suspend-expensive-modes-in-insert))))
+(defun my/org-disable-org-fragtog-for-latex-edit ()
+  "Disable `org-fragtog-mode' after the current LaTeX edit session ends."
+  (when my/org--latex-edit-fragtog-enabled
+    (setq-local my/org--latex-edit-fragtog-enabled nil)
+    (when (bound-and-true-p org-fragtog-mode)
+      (org-fragtog-mode -1))))
 
 (defun my/org-setup-polished-document-frame ()
   "Apply small buffer-local polish for reading and note-taking."
@@ -838,7 +806,6 @@ for the cache update so we never compute it twice in one redisplay."
 (add-hook 'org-mode-hook #'my/org-apply-ui)
 (add-hook 'after-load-theme-hook #'my/org-apply-ui)
 (add-hook 'org-mode-hook #'my/org-setup-polished-document-frame)
-(add-hook 'org-mode-hook #'my/org-setup-evil-insert-performance)
 
 ;; 3.4 自动显示强调符
 (my/package-ensure-vc 'org-appear "https://github.com/awth13/org-appear.git")
@@ -1081,6 +1048,28 @@ DEFAULT-BG defaults to `my/org-default-background'."
            t
            my/org-pretty-block-jit-cache))
 
+(defun my/org-cancel-pretty-block-refontify ()
+  "Cancel the pending pretty-block refontify timer in the current buffer."
+  (when (timerp my/org--pretty-block-refontify-timer)
+    (cancel-timer my/org--pretty-block-refontify-timer))
+  (setq-local my/org--pretty-block-refontify-timer nil))
+
+(defun my/org--pretty-block-refontify-now (buffer)
+  "Run `jit-lock-refontify' for BUFFER once the UI is idle."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq-local my/org--pretty-block-refontify-timer nil)
+      (when (derived-mode-p 'org-mode)
+        (jit-lock-refontify)))))
+
+(defun my/org-schedule-pretty-block-refontify ()
+  "Schedule a coalesced pretty-block refontify for the current buffer."
+  (my/org-cancel-pretty-block-refontify)
+  (setq-local my/org--pretty-block-refontify-timer
+              (run-with-idle-timer 0.12 nil
+                                   #'my/org--pretty-block-refontify-now
+                                   (current-buffer))))
+
 (defun my/org-special-block-footer-marker-display (palette header-bg)
   "Return the styled footer marker string for a styled special block PALETTE."
   (when-let* ((footer-marker (plist-get palette :footer))
@@ -1224,7 +1213,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
           (my/org-toc-insert-or-update))
         (when (bound-and-true-p my/org-pretty-block-cache)
           (clrhash my/org-pretty-block-cache))
-        (jit-lock-refontify)
+        (my/org-schedule-pretty-block-refontify)
         (message "TOC refreshed")))))
 
 (defun my/org-special-block-toc-p (palette)
@@ -1587,7 +1576,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
     (add-hook 'kill-buffer-hook #'my/org-disable-jit-pretty-blocks nil t)
     (unless (memq #'my/org-jit-prettify-blocks jit-lock-functions)
       (jit-lock-register #'my/org-jit-prettify-blocks t))
-    (jit-lock-refontify)))
+    (my/org-schedule-pretty-block-refontify)))
 
 (defun my/org-clear-pretty-block-state ()
   "Clear Org pretty-block overlays and cache in the current buffer."
@@ -1602,6 +1591,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
   (when (and (boundp 'jit-lock-functions)
              (memq #'my/org-jit-prettify-blocks jit-lock-functions))
     (jit-lock-unregister #'my/org-jit-prettify-blocks))
+  (my/org-cancel-pretty-block-refontify)
   (remove-hook 'change-major-mode-hook #'my/org-disable-jit-pretty-blocks t)
   (remove-hook 'kill-buffer-hook #'my/org-disable-jit-pretty-blocks t)
   (my/org-cleanup-pretty-block-watch)
@@ -1613,7 +1603,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
   "调试用：强制清除所有 Overlay 并重绘。"
   (interactive)
   (my/org-clear-pretty-block-state)
-  (jit-lock-refontify))
+  (my/org-schedule-pretty-block-refontify))
 
 (defun my/org-enable-jit-pretty-blocks-maybe ()
   "Enable pretty-block rendering immediately or arm its on-demand watcher."
