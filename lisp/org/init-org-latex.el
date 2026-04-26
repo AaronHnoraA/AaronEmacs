@@ -85,21 +85,22 @@ Each value may be a readable `.cls' file path or literal class source."
     ("\\subparagraph{%s}" . "\\subparagraph*{%s}"))
   "Fallback sectioning used for embedded Org LaTeX classes.")
 
-(defcustom my/org-latex-preview-idle-delay 0.2
+(defcustom my/org-latex-preview-idle-delay 0.28
   "Idle delay (seconds) before the first visible-region preview."
   :type 'number
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-scroll-idle-delay 0.08
+(defcustom my/org-latex-preview-scroll-idle-delay 0.16
   "Debounce delay (seconds) before previewing visible region after scrolling."
   :type 'number
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-scroll-follow-interval 0.35
+(defcustom my/org-latex-preview-scroll-follow-interval nil
   "Minimum seconds between forced visible previews during continuous scrolling.
-This is a low-frequency safety net for long scrolls; the normal trailing
-debounce still handles the final viewport after scrolling settles."
-  :type 'number
+Nil disables the forced follow-up pass and keeps preview work on the trailing
+debounce after scrolling settles."
+  :type '(choice (const :tag "Trailing debounce only" nil)
+                 number)
   :group 'my/org-latex-preview)
 
 (defcustom my/org-latex-preview-min-chars 80
@@ -107,12 +108,12 @@ debounce still handles the final viewport after scrolling settles."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-overscan-lines 8
+(defcustom my/org-latex-preview-overscan-lines 6
   "Number of lines around the visible window to pre-render opportunistically."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-lookahead-lines 36
+(defcustom my/org-latex-preview-lookahead-lines 18
   "Number of lines below the visible window to pre-render opportunistically.
 This intentionally defaults higher than `my/org-latex-preview-overscan-lines'
 because scrolling through notes usually moves forward, and cached previews
@@ -120,7 +121,7 @@ should be ready before their source enters the window."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-max-concurrency 3
+(defcustom my/org-latex-preview-max-concurrency 2
   "Maximum number of concurrent LaTeX preview render jobs."
   :type 'integer
   :group 'my/org-latex-preview)
@@ -151,12 +152,12 @@ Set to nil to keep the full log."
                  integer)
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-edit-idle-delay 0.18
+(defcustom my/org-latex-preview-edit-idle-delay 0.24
   "Idle delay (seconds) before pre-rendering the fragment being edited."
   :type 'number
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-leave-confirm-delay 0.08
+(defcustom my/org-latex-preview-leave-confirm-delay 0.12
   "Idle delay before confirming preview placement after leaving a fragment."
   :type 'number
   :group 'my/org-latex-preview)

@@ -17,6 +17,13 @@
 (require 'org-element)
 (require 'subr-x)
 
+(defvar company-idle-delay)
+(defvar copilot-idle-delay)
+(defvar flymake-no-changes-timeout)
+(defvar my/flymake-diagnostic-at-point-delay)
+(defvar my/flymake-diagnostic-at-point-mode)
+(declare-function my/flymake-diagnostic-at-point-mode "init-lsp" (&optional arg))
+
 ;;; ----------------------------------------------------------------------------
 ;;; 1. Global Variables & Paths (全局路径配置)
 ;;; ----------------------------------------------------------------------------
@@ -70,6 +77,54 @@ Special block overlays are no longer disabled based on buffer size."
 Managed overview TOCs are expected near the top of the file; limiting this
 scan avoids walking large ordinary Org buffers that do not use the feature."
   :type 'integer)
+
+(defcustom my/org-low-power-profile t
+  "Apply conservative power-oriented local defaults in Org buffers.
+The profile keeps the visual writing setup intact, but slows background
+assistants that otherwise wake up aggressively while typing or navigating."
+  :type 'boolean
+  :group 'my/org-ui)
+
+(defcustom my/org-display-line-numbers nil
+  "Buffer-local line-number style for Org buffers.
+Nil disables line numbers in Org buffers, which is cheaper with
+`visual-line-mode', variable pitch text and `org-indent-mode'.  Set this to t,
+`relative' or `visual' to keep line numbers."
+  :type '(choice (const :tag "Disabled" nil)
+                 (const :tag "Absolute" t)
+                 (const :tag "Relative" relative)
+                 (const :tag "Visual" visual))
+  :group 'my/org-ui)
+
+(defcustom my/org-company-idle-delay 0.30
+  "Org-local `company-idle-delay'.
+This is intentionally slower than programming buffers; Org completion remains
+automatic, but stops racing normal prose typing."
+  :type 'number
+  :group 'my/org-ui)
+
+(defcustom my/org-copilot-idle-delay 0.60
+  "Org-local `copilot-idle-delay'."
+  :type '(choice (number :tag "Seconds of delay")
+                 (const :tag "Idle completion disabled" nil))
+  :group 'my/org-ui)
+
+(defcustom my/org-flymake-no-changes-timeout 1.0
+  "Org-local `flymake-no-changes-timeout' for Vale/Flymake checks."
+  :type 'number
+  :group 'my/org-ui)
+
+(defcustom my/org-flymake-diagnostic-at-point nil
+  "When non-nil, echo Flymake diagnostics at point in Org buffers.
+Diagnostics remain available through Flymake fringe indicators and diagnostics
+buffers even when this echo helper is disabled."
+  :type 'boolean
+  :group 'my/org-ui)
+
+(defcustom my/org-flymake-diagnostic-at-point-delay 0.80
+  "Org-local delay before echoing a Flymake diagnostic at point."
+  :type 'number
+  :group 'my/org-ui)
 
 (defvar-local my/org-toc--block-begin-marker nil
   "Marker for the beginning of the managed overview TOC block.")
@@ -132,6 +187,47 @@ scan avoids walking large ordinary Org buffers that do not use the feature."
   (setq-local line-spacing (or (and (boundp 'my/prose-line-spacing)
                                     my/prose-line-spacing)
                                0.16)))
+
+(defun my/org-setup-low-power-profile ()
+  "Apply Org-local defaults that lower idle, typing and navigation wakeups."
+  (when my/org-low-power-profile
+    (if my/org-display-line-numbers
+        (setq-local display-line-numbers my/org-display-line-numbers)
+      (display-line-numbers-mode -1))
+    (setq-local company-idle-delay my/org-company-idle-delay)
+    (setq-local copilot-idle-delay my/org-copilot-idle-delay)
+    (setq-local flymake-no-changes-timeout my/org-flymake-no-changes-timeout)
+    (setq-local my/flymake-diagnostic-at-point-delay
+                my/org-flymake-diagnostic-at-point-delay)
+    (unless my/org-flymake-diagnostic-at-point
+      (when (and (boundp 'my/flymake-diagnostic-at-point-mode)
+                 (bound-and-true-p my/flymake-diagnostic-at-point-mode)
+                 (fboundp 'my/flymake-diagnostic-at-point-mode))
+        (my/flymake-diagnostic-at-point-mode -1)))))
+
+(defun my/org-flymake-diagnostic-at-point-mode-sync-a (orig &rest args)
+  "Keep the Flymake echo helper out of Org low-power buffers."
+  (if (and my/org-low-power-profile
+           (derived-mode-p 'org-mode)
+           (not my/org-flymake-diagnostic-at-point))
+      (when (and (boundp 'my/flymake-diagnostic-at-point-mode)
+                 (bound-and-true-p my/flymake-diagnostic-at-point-mode)
+                 (fboundp 'my/flymake-diagnostic-at-point-mode))
+        (my/flymake-diagnostic-at-point-mode -1))
+    (apply orig args)))
+
+(defun my/org-setup-flymake-diagnostic-advice ()
+  "Install Org-specific low-power advice for Flymake point diagnostics."
+  (when (and (fboundp 'my/flymake-diagnostic-at-point-mode-sync)
+             (not (advice-member-p
+                   #'my/org-flymake-diagnostic-at-point-mode-sync-a
+                   'my/flymake-diagnostic-at-point-mode-sync)))
+    (advice-add 'my/flymake-diagnostic-at-point-mode-sync
+                :around #'my/org-flymake-diagnostic-at-point-mode-sync-a)))
+
+(my/org-setup-flymake-diagnostic-advice)
+(with-eval-after-load 'init-lsp
+  (my/org-setup-flymake-diagnostic-advice))
 
 (defun my/org-force-indent-mode ()
   "Enable `org-indent-mode' in every Org buffer."
@@ -358,6 +454,7 @@ headline levels."
 (use-package org
   :ensure nil
   :hook ((org-mode . visual-line-mode)        ; 自动换行
+         (org-mode . my/org-setup-low-power-profile)
          (org-mode . my/org-force-indent-mode)
          (org-mode . my/org-setup-indent-after-local-variables)
          (org-mode . my/org-setup-buffer-spacing)
