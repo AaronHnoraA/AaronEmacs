@@ -545,6 +545,7 @@ render is usually ready before point leaves it."
 (defvar-local my/org-latex--last-visible-preview-time 0.0)
 (defvar-local my/org-latex--scroll-preview-enabled nil)
 (defvar-local my/org-latex--edit-post-command-enabled nil)
+(defvar-local my/org-latex--after-save-preview-timer nil)
 (defvar-local my/org-latex--fragment-syntax-cache nil)
 (defvar-local my/org-latex--syntax-watch-installed nil)
 (defvar-local my/org-latex--suppress-scroll-preview nil)
@@ -815,6 +816,36 @@ render is usually ready before point leaves it."
     (cancel-timer my/org-latex--preview-follow-timer))
   (setq my/org-latex--preview-timer nil
         my/org-latex--preview-follow-timer nil))
+
+(defun my/org-latex--cancel-after-save-preview-timer ()
+  "Cancel the pending after-save visible-preview timer."
+  (when (timerp my/org-latex--after-save-preview-timer)
+    (cancel-timer my/org-latex--after-save-preview-timer))
+  (setq my/org-latex--after-save-preview-timer nil))
+
+(defun my/org-latex--refresh-visible-previews-after-save (buffer)
+  "Restore visible LaTeX previews in BUFFER after a save-related redraw."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq my/org-latex--after-save-preview-timer nil)
+      (when (and (derived-mode-p 'org-mode)
+                 my/org-latex--scroll-preview-enabled
+                 (my/org-latex--async-preview-active-p)
+                 (my/org-latex-buffer-has-fragment-syntax-p))
+        (when-let* ((window (get-buffer-window buffer t)))
+          (setq my/org-latex--last-visible-range nil)
+          (my/org-latex-preview-visible-now window buffer))))))
+
+(defun my/org-latex-after-save-function ()
+  "Re-queue visible LaTeX previews after saving the current Org buffer."
+  (when (and (derived-mode-p 'org-mode)
+             my/org-latex--scroll-preview-enabled
+             (my/org-latex--async-preview-active-p))
+    (my/org-latex--cancel-after-save-preview-timer)
+    (setq my/org-latex--after-save-preview-timer
+          (run-with-idle-timer 0.05 nil
+                               #'my/org-latex--refresh-visible-previews-after-save
+                               (current-buffer)))))
 
 (defun my/org-latex--enable-edit-post-command ()
   "Install the fragment-edit tracking post-command hook for this buffer."
@@ -2259,11 +2290,13 @@ queued work."
   (setq-local my/org-latex--scroll-preview-enabled nil)
   (my/org-latex-cleanup-syntax-watch)
   (remove-hook 'after-change-functions #'my/org-latex-after-change-function t)
+  (remove-hook 'after-save-hook #'my/org-latex-after-save-function t)
   (my/org-latex--disable-edit-post-command)
   (remove-hook 'window-scroll-functions #'my/org-latex--window-scroll-preview-hook t)
   (remove-hook 'window-size-change-functions #'my/org-latex--window-size-preview-hook t)
   (remove-hook 'change-major-mode-hook #'my/org-latex-cleanup-scroll-preview t)
   (remove-hook 'kill-buffer-hook #'my/org-latex-cleanup-scroll-preview t)
+  (my/org-latex--cancel-after-save-preview-timer)
   (my/org-latex-cancel-pending-renders))
 
 (defun my/org-latex-preview-visible-initial (buffer)
@@ -2301,6 +2334,8 @@ queued work."
           (my/org-latex--ensure-state)
           (add-hook 'after-change-functions
                     #'my/org-latex-after-change-function nil t)
+          (add-hook 'after-save-hook
+                    #'my/org-latex-after-save-function nil t)
           (add-hook 'window-scroll-functions
                     #'my/org-latex--window-scroll-preview-hook nil t)
           (add-hook 'window-size-change-functions
