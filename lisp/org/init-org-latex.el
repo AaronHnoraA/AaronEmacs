@@ -8,6 +8,8 @@
 (declare-function my/refresh-environment-from-shell nil)
 (declare-function my/open-file "init-open" (file &optional kind backend))
 (declare-function my/shell-command-executable "init-utils")
+(declare-function my/org-enable-org-appear-for-latex-edit "init-org-ui")
+(declare-function my/org-disable-org-appear-for-latex-edit "init-org-ui")
 (declare-function org-fragtog--disable-frag "org-fragtog" (frag &optional renew))
 
 (defvar ratex-mode)
@@ -816,12 +818,14 @@ render is usually ready before point leaves it."
   "Install the fragment-edit tracking post-command hook for this buffer."
   (unless my/org-latex--edit-post-command-enabled
     (setq-local my/org-latex--edit-post-command-enabled t)
+    (my/org-enable-org-appear-for-latex-edit)
     (add-hook 'post-command-hook #'my/org-latex-post-command-function nil t)))
 
 (defun my/org-latex--disable-edit-post-command ()
   "Remove the fragment-edit tracking post-command hook for this buffer."
   (when my/org-latex--edit-post-command-enabled
     (setq-local my/org-latex--edit-post-command-enabled nil)
+    (my/org-disable-org-appear-for-latex-edit)
     (remove-hook 'post-command-hook #'my/org-latex-post-command-function t)))
 
 (defun my/org-latex--ratex-edit-session-active-p ()

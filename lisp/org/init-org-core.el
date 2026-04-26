@@ -96,20 +96,20 @@ Nil disables line numbers in Org buffers, which is cheaper with
                  (const :tag "Visual" visual))
   :group 'my/org-ui)
 
-(defcustom my/org-company-idle-delay 0.30
+(defcustom my/org-company-idle-delay 0.45
   "Org-local `company-idle-delay'.
 This is intentionally slower than programming buffers; Org completion remains
 automatic, but stops racing normal prose typing."
   :type 'number
   :group 'my/org-ui)
 
-(defcustom my/org-copilot-idle-delay 0.60
+(defcustom my/org-copilot-idle-delay 0.90
   "Org-local `copilot-idle-delay'."
   :type '(choice (number :tag "Seconds of delay")
                  (const :tag "Idle completion disabled" nil))
   :group 'my/org-ui)
 
-(defcustom my/org-flymake-no-changes-timeout 1.0
+(defcustom my/org-flymake-no-changes-timeout 1.50
   "Org-local `flymake-no-changes-timeout' for Vale/Flymake checks."
   :type 'number
   :group 'my/org-ui)
