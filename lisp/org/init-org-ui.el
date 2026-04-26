@@ -20,7 +20,10 @@
 (defvar-local my/org--insert-suspended-modes nil)
 (defvar-local my/org--valign-table-watch-installed nil)
 (defvar-local my/org--pretty-block-watch-installed nil)
-(defvar-local my/org-appear--last-post-command-key nil)
+(defvar-local my/org-appear--last-point nil)
+(defvar-local my/org-appear--last-tick nil)
+(defvar-local my/org-appear--last-do-buffer nil)
+(defvar-local my/org-appear--last-elem-toggled nil)
 (defvar-local my/org-modern--pre-redisplay-signature nil)
 (defvar my/org-special-block--palette-cache (make-hash-table :test #'equal))
 
@@ -154,7 +157,10 @@ lighter without changing table behavior once a table exists."
 (defun my/org-enable-org-appear-maybe ()
   "Enable `org-appear-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
-    (setq-local my/org-appear--last-post-command-key nil)
+    (setq-local my/org-appear--last-point nil
+                my/org-appear--last-tick nil
+                my/org-appear--last-do-buffer nil
+                my/org-appear--last-elem-toggled nil)
     (org-appear-mode 1)))
 
 (defun my/org-enable-org-fragtog-maybe ()
@@ -392,7 +398,10 @@ its rendered appearance in insert state."
              :foreground ,(aaron-ui-color 'fg-main)))))
 
 (defun my/org-modern--pre-redisplay-signature ()
-  "Return the Org Modern display parameters that can affect redisplay."
+  "Return the Org Modern display parameters that can affect redisplay.
+Uses `frame-char-width' (cached on the frame) instead of `default-font-width'
+so the pre-redisplay fast path stays allocation-light, and skips
+`face-remapping-alist' when nil so the common case avoids list traversal."
   (list (face-attribute 'org-modern-label :box nil t)
         (face-attribute 'default :background nil t)
         (face-attribute 'org-table :foreground nil t)
@@ -400,18 +409,23 @@ its rendered appearance in insert state."
              (cadr org-modern--table-overline))
         (and (boundp 'org-modern--table-sp-width)
              org-modern--table-sp-width)
-        (default-font-width)
-        face-remapping-alist))
+        (frame-char-width)
+        ;; Most Org buffers have no remappings; skip the list to avoid an
+        ;; equal-walk on every redisplay. Track its identity so a remap change
+        ;; still invalidates the cached signature.
+        (and face-remapping-alist t)))
 
 (defun my/org-modern-pre-redisplay-cached-a (orig window)
-  "Skip repeated Org Modern pre-redisplay work while display inputs match."
+  "Skip repeated Org Modern pre-redisplay work while display inputs match.
+The signature is computed once per call: when the cache hits we return
+without calling ORIG, and when it misses we reuse the same signature value
+for the cache update so we never compute it twice in one redisplay."
   (if (and (derived-mode-p 'org-mode)
            (bound-and-true-p org-modern-mode))
       (let ((signature (my/org-modern--pre-redisplay-signature)))
         (unless (equal signature my/org-modern--pre-redisplay-signature)
           (funcall orig window)
-          (setq-local my/org-modern--pre-redisplay-signature
-                      (my/org-modern--pre-redisplay-signature))))
+          (setq-local my/org-modern--pre-redisplay-signature signature)))
     (funcall orig window)))
 
 (unless (advice-member-p #'my/org-modern-pre-redisplay-cached-a
@@ -830,13 +844,23 @@ its rendered appearance in insert state."
   (org-appear-delay 0.08)
   :config
   (defun my/org-appear-post-command-guard (orig)
-    "Skip `org-appear--post-cmd' when point and edit state did not change."
-    (let ((key (list (point)
-                     (buffer-chars-modified-tick)
-                     org-appear--do-buffer
-                     org-appear--elem-toggled)))
-      (unless (equal key my/org-appear--last-post-command-key)
-        (setq-local my/org-appear--last-post-command-key key)
+    "Skip `org-appear--post-cmd' when point and edit state did not change.
+Compares each input as a scalar so the post-command fast path does not
+allocate a fresh list on every key tick — this hook fires after every
+command so allocation churn shows up in profiles even when the work itself
+is already cached."
+    (let ((point (point))
+          (tick (buffer-chars-modified-tick))
+          (do-buffer org-appear--do-buffer)
+          (elem-toggled org-appear--elem-toggled))
+      (unless (and (eql point my/org-appear--last-point)
+                   (eql tick my/org-appear--last-tick)
+                   (eq do-buffer my/org-appear--last-do-buffer)
+                   (eq elem-toggled my/org-appear--last-elem-toggled))
+        (setq-local my/org-appear--last-point point
+                    my/org-appear--last-tick tick
+                    my/org-appear--last-do-buffer do-buffer
+                    my/org-appear--last-elem-toggled elem-toggled)
         (funcall orig))))
 
   (advice-add 'org-appear--post-cmd

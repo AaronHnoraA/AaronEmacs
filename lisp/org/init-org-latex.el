@@ -1000,42 +1000,52 @@ fallback edit render."
                      this-command)))
       (unless (equal key my/org-latex--last-post-command-key)
         (setq my/org-latex--last-post-command-key key)
-        ;; Safety net: if an image overlay still covers point, fragtog failed
-        ;; to clear it.  Remove it now so point is never trapped in a preview.
-        (when-let* ((ov (my/org-latex--image-overlay-at-point)))
-          (my/org-latex--clear-preview-range (overlay-start ov) (overlay-end ov))
-          (my/org-latex--cancel-leave-preview)
-          (my/org-latex--cancel-edit-preview-timer))
-        (let* ((self-insert (memq this-command
-                                  '(self-insert-command org-self-insert-command)))
-               (prev-range my/org-latex--post-command-range)
-               (inside-prev-range
-                (and prev-range
-                     (<= (car prev-range) (point))
-                     (< (point) (cdr prev-range)))))
-          (cond
-           ((and self-insert inside-prev-range)
-            nil)
-           ((and self-insert prev-range)
-            (my/org-latex--finalize-left-fragment
-             (car prev-range) (cdr prev-range))
-            (setq my/org-latex--post-command-range nil))
-           (t
-            (let* ((curr-frag (unless inside-prev-range
-                                (and (my/org-latex--near-fragment-syntax-p)
-                                     (my/org-latex--current-fragment))))
-                   (curr-range (if inside-prev-range
-                                   prev-range
-                                 (and curr-frag
-                                      (my/org-latex--fragment-range curr-frag)))))
-              (unless (equal prev-range curr-range)
-                (when prev-range
-                  (my/org-latex--finalize-left-fragment
-                   (car prev-range) (cdr prev-range)))
-                (unless curr-range
-                  (my/org-latex--clear-edit-preview-marker)))
-              (setq my/org-latex--post-command-range curr-range)))))
-        (setq my/org-latex--post-command-point (point)))
+        ;; Fast bail: when the buffer holds no LaTeX syntax at all (cached) and
+        ;; we are not tracking a fragment, point movement / typing has nothing
+        ;; to do here. This is the dominant case in prose-only Org notes that
+        ;; happen to share the LaTeX hooks because they were enabled once.
+        (when (or my/org-latex--post-command-range
+                  (my/org-latex-buffer-has-fragment-syntax-p))
+          ;; Safety net: if an image overlay still covers point, fragtog
+          ;; failed to clear it.  Remove it now so point is never trapped in
+          ;; a preview.
+          (when-let* ((ov (my/org-latex--image-overlay-at-point)))
+            (my/org-latex--clear-preview-range
+             (overlay-start ov) (overlay-end ov))
+            (my/org-latex--cancel-leave-preview)
+            (my/org-latex--cancel-edit-preview-timer))
+          (let* ((self-insert (memq this-command
+                                    '(self-insert-command
+                                      org-self-insert-command)))
+                 (prev-range my/org-latex--post-command-range)
+                 (inside-prev-range
+                  (and prev-range
+                       (<= (car prev-range) (point))
+                       (< (point) (cdr prev-range)))))
+            (cond
+             ((and self-insert inside-prev-range)
+              nil)
+             ((and self-insert prev-range)
+              (my/org-latex--finalize-left-fragment
+               (car prev-range) (cdr prev-range))
+              (setq my/org-latex--post-command-range nil))
+             (t
+              (let* ((curr-frag (unless inside-prev-range
+                                  (and (my/org-latex--near-fragment-syntax-p)
+                                       (my/org-latex--current-fragment))))
+                     (curr-range (if inside-prev-range
+                                     prev-range
+                                   (and curr-frag
+                                        (my/org-latex--fragment-range
+                                         curr-frag)))))
+                (unless (equal prev-range curr-range)
+                  (when prev-range
+                    (my/org-latex--finalize-left-fragment
+                     (car prev-range) (cdr prev-range)))
+                  (unless curr-range
+                    (my/org-latex--clear-edit-preview-marker)))
+                (setq my/org-latex--post-command-range curr-range)))))
+          (setq my/org-latex--post-command-point (point))))
       (my/org-latex--maybe-refresh-selected-viewport))))
 
 (defun my/org-latex--visible-range (&optional window)

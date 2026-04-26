@@ -142,26 +142,43 @@ buffers even when this echo helper is disabled."
 (defvar-local my/org-buffer-feature--cache nil
   "Cached Org feature presence for the current `buffer-chars-modified-tick'.")
 
+(defvar-local my/org-buffer-feature--latched nil
+  "Sticky plist of feature flags ever observed in this buffer.
+Once a feature is detected we stop scanning for it on later modification
+ticks: existing on-demand UI helpers (valign, pretty blocks, LaTeX preview)
+only enable themselves when a feature appears; they do not tear themselves
+down when the last instance is removed, so a sticky flag is consistent with
+their actual behavior and cuts per-keystroke scan work to zero once a buffer
+has all three features in scope.")
+
 (defun my/org-buffer-feature--scan ()
   "Return cached feature presence for the current Org buffer."
   (let ((tick (buffer-chars-modified-tick)))
     (unless (and (consp my/org-buffer-feature--cache)
                  (eql (plist-get my/org-buffer-feature--cache :tick) tick))
-      (let (table special-block latex-candidate)
-        (save-excursion
-          (save-restriction
-            (widen)
-            (goto-char (point-min))
-            (while (and (not (and table special-block latex-candidate))
-                        (re-search-forward
-                         my/org-buffer-feature--scan-regexp nil t))
-              (cond
-               ((match-beginning 1)
-                (setq table t))
-               ((match-beginning 2)
-                (setq special-block t))
-               ((match-beginning 3)
-                (setq latex-candidate t))))))
+      (let ((table (plist-get my/org-buffer-feature--latched :table))
+            (special-block (plist-get my/org-buffer-feature--latched :special-block))
+            (latex-candidate (plist-get my/org-buffer-feature--latched
+                                        :latex-candidate)))
+        (unless (and table special-block latex-candidate)
+          (save-excursion
+            (save-restriction
+              (widen)
+              (goto-char (point-min))
+              (while (and (not (and table special-block latex-candidate))
+                          (re-search-forward
+                           my/org-buffer-feature--scan-regexp nil t))
+                (cond
+                 ((match-beginning 1)
+                  (setq table t))
+                 ((match-beginning 2)
+                  (setq special-block t))
+                 ((match-beginning 3)
+                  (setq latex-candidate t))))))
+          (setq-local my/org-buffer-feature--latched
+                      (list :table table
+                            :special-block special-block
+                            :latex-candidate latex-candidate)))
         (setq-local my/org-buffer-feature--cache
                     (list :tick tick
                           :table table
