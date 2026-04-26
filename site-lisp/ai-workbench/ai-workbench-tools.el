@@ -20,6 +20,10 @@
 (declare-function ai-workbench-send-string "ai-workbench" (backend prompt &optional project-root))
 (declare-function ai-workbench-open "ai-workbench" ())
 
+(autoload 'ai-workbench-draft-string "ai-workbench")
+(autoload 'ai-workbench-send-string "ai-workbench")
+(autoload 'ai-workbench-open "ai-workbench" nil t)
+
 (defvar flycheck-current-errors)
 
 (defcustom ai-workbench-tools-project-files-limit 40

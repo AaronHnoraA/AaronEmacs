@@ -34,9 +34,25 @@
              (file-name-as-directory
               (locate-user-emacs-file "site-lisp/ai-workbench")))
 
-(require 'ai-workbench)
-(require 'ai-workbench-vendor)
-(ai-workbench-setup-vendor-load-paths)
+(add-to-list 'load-path
+             (file-name-as-directory
+              (locate-user-emacs-file
+               "site-lisp/ai-workbench/vendor/claude-code-ide")))
+(add-to-list 'load-path
+             (file-name-as-directory
+              (locate-user-emacs-file
+               "site-lisp/ai-workbench/vendor/codex-cli")))
+
+(autoload 'ai-workbench "ai-workbench" nil t)
+(autoload 'ai-workbench-open "ai-workbench" nil t)
+(autoload 'ai-workbench-kill "ai-workbench" nil t)
+(autoload 'ai-workbench-send-region "ai-workbench" nil t)
+(autoload 'ai-workbench-send-current-buffer "ai-workbench" nil t)
+(autoload 'ai-workbench-send-file "ai-workbench" nil t)
+(autoload 'ai-workbench-compose-buffer "ai-workbench-compose" nil t)
+(autoload 'ai-workbench-context-prompt "ai-workbench-tools" nil t)
+(autoload 'ai-workbench-context-preview "ai-workbench-tools" nil t)
+(autoload 'ai-workbench-writing-prompt "ai-workbench-tools" nil t)
 
 (defvar-keymap my/ai-workbench-prefix-map
   :doc "Prefix map for ai-workbench commands."
@@ -55,39 +71,62 @@
 
 ;;; ── Claude Code ────────────────────────────────────────────────────────────
 
-(use-package claude-code-ide
-  :ensure nil
-  :bind (("C-c C-'" . claude-code-ide-menu)
-         ("C-c a"   . claude-code-ide-menu))
-  :init
-  ;; Point to the Claude CLI binary (installed via npm / brew / manual).
-  (setq claude-code-ide-cli-path "/Users/hc/.local/bin/claude"
-        claude-code-ide-window-side 'right
-        claude-code-ide-window-width 90)
-  :config
+(defvar claude-code-ide-cli-path)
+(defvar claude-code-ide-window-side)
+(defvar claude-code-ide-window-width)
+
+(declare-function claude-code-ide-emacs-tools-setup
+                  "claude-code-ide-emacs-tools" ())
+
+(autoload 'claude-code-ide-menu "claude-code-ide-transient" nil t)
+(autoload 'claude-code-ide "claude-code-ide" nil t)
+
+;; Point to the Claude CLI binary (installed via npm / brew / manual).
+(setq claude-code-ide-cli-path "/Users/hc/.local/bin/claude"
+      claude-code-ide-window-side 'right
+      claude-code-ide-window-width 90)
+
+(global-set-key (kbd "C-c C-'") #'claude-code-ide-menu)
+(global-set-key (kbd "C-c a") #'claude-code-ide-menu)
+
+(with-eval-after-load 'claude-code-ide
   ;; Expose Emacs MCP tools so Claude can read/edit buffers, eval Elisp, etc.
+  (require 'claude-code-ide-emacs-tools)
   (claude-code-ide-emacs-tools-setup))
 
 ;;; ── Codex CLI ──────────────────────────────────────────────────────────────
 
-(use-package codex-cli
-  :ensure nil
-  :bind (("C-c c t" . codex-cli-toggle)
-         ("C-c c s" . codex-cli-start)
-         ("C-c c q" . codex-cli-stop)
-         ("C-c c Q" . codex-cli-stop-all)
-         ("C-c c p" . codex-cli-send-prompt)
-         ("C-c c r" . codex-cli-send-region)
-         ("C-c c f" . codex-cli-send-file)
-         ("C-c c a" . codex-cli-toggle-all)
-         ("C-c c n" . codex-cli-toggle-all-next-page)
-         ("C-c c b" . codex-cli-toggle-all-prev-page))
-  :init
-  (setq codex-cli-executable "codex"
-        codex-cli-terminal-backend 'vterm
-        codex-cli-side 'right
-        codex-cli-width 90)
-  :config)
+(defvar codex-cli-executable)
+(defvar codex-cli-terminal-backend)
+(defvar codex-cli-side)
+(defvar codex-cli-width)
+
+(autoload 'codex-cli-toggle "codex-cli" nil t)
+(autoload 'codex-cli-start "codex-cli" nil t)
+(autoload 'codex-cli-stop "codex-cli" nil t)
+(autoload 'codex-cli-stop-all "codex-cli" nil t)
+(autoload 'codex-cli-send-prompt "codex-cli" nil t)
+(autoload 'codex-cli-send-region "codex-cli" nil t)
+(autoload 'codex-cli-send-file "codex-cli" nil t)
+(autoload 'codex-cli-toggle-all "codex-cli" nil t)
+(autoload 'codex-cli-toggle-all-next-page "codex-cli" nil t)
+(autoload 'codex-cli-toggle-all-prev-page "codex-cli" nil t)
+
+(setq codex-cli-executable "codex"
+      codex-cli-terminal-backend 'vterm
+      codex-cli-side 'right
+      codex-cli-width 90)
+
+(global-set-key (kbd "C-c c t") #'codex-cli-toggle)
+(global-set-key (kbd "C-c c s") #'codex-cli-start)
+(global-set-key (kbd "C-c c q") #'codex-cli-stop)
+(global-set-key (kbd "C-c c Q") #'codex-cli-stop-all)
+(global-set-key (kbd "C-c c p") #'codex-cli-send-prompt)
+(global-set-key (kbd "C-c c r") #'codex-cli-send-region)
+(global-set-key (kbd "C-c c f") #'codex-cli-send-file)
+(global-set-key (kbd "C-c c a") #'codex-cli-toggle-all)
+(global-set-key (kbd "C-c c n") #'codex-cli-toggle-all-next-page)
+(global-set-key (kbd "C-c c b") #'codex-cli-toggle-all-prev-page)
 
 
 (provide 'init-ai-ide)
