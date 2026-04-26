@@ -107,8 +107,8 @@
   ;; Follow Doom's strategy: wait longer while active, then collect more
   ;; aggressively after a real idle period.
   (gcmh-idle-delay 'auto)
-  (gcmh-auto-idle-delay-factor 15)
-  (gcmh-high-cons-threshold (* 256 1024 1024)))
+  (gcmh-auto-idle-delay-factor 20)
+  (gcmh-high-cons-threshold (* 512 1024 1024)))
 
 ;; Write documentation comment in an easy way
 (use-package separedit

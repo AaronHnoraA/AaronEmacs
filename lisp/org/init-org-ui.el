@@ -40,7 +40,7 @@ integer position keys from accumulating during long editing sessions."
   :type 'integer
   :group 'my/org-ui)
 
-(defcustom my/org-pretty-block-visible-margin-lines 24
+(defcustom my/org-pretty-block-visible-margin-lines 16
   "Extra lines around visible Org windows that stay eligible for prettification."
   :type 'integer
   :group 'my/org-ui)

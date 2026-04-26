@@ -107,17 +107,17 @@ debounce after scrolling settles."
                  number)
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-min-chars 160
+(defcustom my/org-latex-preview-min-chars 220
   "Minimum visible region size (chars) required to trigger preview."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-overscan-lines 2
+(defcustom my/org-latex-preview-overscan-lines 1
   "Number of lines around the visible window to pre-render opportunistically."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-lookahead-lines 6
+(defcustom my/org-latex-preview-lookahead-lines 4
   "Number of lines below the visible window to pre-render opportunistically.
 This intentionally defaults higher than `my/org-latex-preview-overscan-lines'
 because scrolling through notes usually moves forward, and cached previews
@@ -144,7 +144,7 @@ preview commands may still recreate previews from the cached image files."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-retain-lines 120
+(defcustom my/org-latex-preview-retain-lines 80
   "Number of lines around the visible window whose preview overlays are kept."
   :type 'integer
   :group 'my/org-latex-preview)
