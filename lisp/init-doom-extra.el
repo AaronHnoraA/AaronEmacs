@@ -12,6 +12,7 @@
 (declare-function editorconfig-find-current-editorconfig "editorconfig")
 (declare-function link-hint-copy-link "link-hint" ())
 (declare-function link-hint-open-link "link-hint" ())
+(declare-function undo-tree-save-history "undo-tree" (&optional filename overwrite))
 
 (defvar vertico-map)
 
@@ -32,11 +33,90 @@
   :custom
   (auto-revert-avoid-polling t)
   (auto-revert-check-vc-info t)
-  (auto-revert-interval 2)
+  (auto-revert-interval 1)
   (auto-revert-remote-files nil)
+  (auto-revert-stop-on-user-input nil)
   (auto-revert-use-notify t)
   (global-auto-revert-non-file-buffers t)
-  (auto-revert-verbose nil))
+  (auto-revert-verbose nil)
+  :config
+  (defvar my/auto-revert--warned-modified-files (make-hash-table :test 'equal)
+    "Files already reported as changed on disk while modified in Emacs.")
+
+  (defvar my/auto-revert--focus-check-timer nil
+    "Idle timer used to debounce stale buffer checks after focus changes.")
+
+  (defun my/auto-revert--refresh-review-state (buffer)
+    "Refresh VC and diff indicators for BUFFER after external changes."
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when buffer-file-name
+          (when (fboundp 'vc-refresh-state)
+            (ignore-errors (vc-refresh-state)))
+          (when (bound-and-true-p diff-hl-mode)
+            (ignore-errors (diff-hl-update)))))))
+
+  (defun my/auto-revert--modified-stale-file-buffer-p (&optional buffer)
+    "Return non-nil when BUFFER has local edits and its file changed on disk."
+    (when (buffer-live-p (or buffer (current-buffer)))
+      (with-current-buffer (or buffer (current-buffer))
+        (and buffer-file-name
+             (buffer-modified-p)
+             (not buffer-read-only)
+             (not (file-remote-p buffer-file-name))
+             (file-exists-p buffer-file-name)
+             (not (verify-visited-file-modtime (current-buffer)))))))
+
+  (defun my/auto-revert--preserve-undo-state (&optional buffer)
+    "Record BUFFER's local edits before an intentional revert."
+    (when (my/auto-revert--modified-stale-file-buffer-p buffer)
+      (with-current-buffer (or buffer (current-buffer))
+        (undo-boundary)
+        (when (and (bound-and-true-p undo-tree-mode)
+                   (fboundp 'undo-tree-save-history))
+          (ignore-errors (undo-tree-save-history nil t)))
+        (undo-boundary))))
+
+  (defun my/auto-revert-after-revert-h ()
+    "Refresh audit UI after `auto-revert-mode' reloads a file."
+    (when buffer-file-name
+      (remhash (expand-file-name buffer-file-name)
+               my/auto-revert--warned-modified-files)
+      (run-with-idle-timer
+       0.05 nil #'my/auto-revert--refresh-review-state (current-buffer))))
+
+  (defun my/auto-revert-warn-modified-stale-buffers-h ()
+    "Warn when a modified buffer's file also changed on disk."
+    (dolist (buffer (buffer-list))
+      (with-current-buffer buffer
+        (when (my/auto-revert--modified-stale-file-buffer-p buffer)
+          (let ((file (expand-file-name buffer-file-name)))
+            (my/auto-revert--preserve-undo-state buffer)
+            (unless (gethash file my/auto-revert--warned-modified-files)
+              (puthash file t my/auto-revert--warned-modified-files)
+              (message
+               "File changed on disk while buffer has unsaved edits: %s; undo history preserved, use diff/revert deliberately"
+               (abbreviate-file-name file))))))))
+
+  (defun my/auto-revert-schedule-stale-check-h ()
+    "Schedule a debounced stale buffer check after focus changes."
+    (when (timerp my/auto-revert--focus-check-timer)
+      (cancel-timer my/auto-revert--focus-check-timer))
+    (setq my/auto-revert--focus-check-timer
+          (run-with-idle-timer
+           0.2 nil #'my/auto-revert-warn-modified-stale-buffers-h)))
+
+  (add-hook 'before-revert-hook #'my/auto-revert--preserve-undo-state)
+  (add-hook 'after-revert-hook #'my/auto-revert-after-revert-h)
+  (remove-function after-focus-change-function
+                   #'my/auto-revert-schedule-stale-check-h)
+  (add-function :after after-focus-change-function
+                #'my/auto-revert-schedule-stale-check-h)
+  (add-hook 'after-save-hook
+            (lambda ()
+              (when buffer-file-name
+                (remhash (expand-file-name buffer-file-name)
+                         my/auto-revert--warned-modified-files)))))
 
 (with-eval-after-load 'saveplace
   (define-advice save-place-find-file-hook (:after (&rest _) my/recenter-after-save-place)

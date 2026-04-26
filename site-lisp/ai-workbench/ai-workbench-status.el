@@ -19,7 +19,6 @@
 (declare-function ai-workbench-edit-shared-snippet "ai-workbench" (&optional name))
 (declare-function ai-workbench-edit-template "ai-workbench" (&optional name))
 (declare-function ai-workbench-cycle-backend "ai-workbench" ())
-(declare-function ai-workbench-compose-buffer "ai-workbench-compose" (&optional no-display))
 (declare-function ai-workbench-output-open "ai-workbench-output" ())
 (declare-function ai-workbench-result-open "ai-workbench-result" ())
 (declare-function ai-workbench-claude-session-live-p "ai-workbench-adapter-claude" (&optional project-root))
@@ -37,7 +36,6 @@
     (define-key map (kbd "e") #'ai-workbench-status-edit-profile)
     (define-key map (kbd "s") #'ai-workbench-status-edit-shared-snippet)
     (define-key map (kbd "t") #'ai-workbench-status-edit-template)
-    (define-key map (kbd "c") #'ai-workbench-status-open-compose)
     (define-key map (kbd "o") #'ai-workbench-status-open-output)
     (define-key map (kbd "r") #'ai-workbench-status-open-result)
     (define-key map (kbd "k") #'ai-workbench-status-kill-session)
@@ -135,9 +133,8 @@
      "\n"
      "RET open backend  b switch backend  p switch profile  v preview profile\n"
      "+ create profile  e edit profile  s edit snippet  t edit template\n"
-     "c compose  o output log  r result  k kill session  g refresh\n"
-     "Writing: use C-c A w from an Org/Markdown/text buffer\n"
-     "Context preview: use C-c A / from a source buffer\n")))
+     "o output log  r result  k kill session  g refresh\n"
+     "Writing: use C-c A w from an Org/Markdown/text buffer\n")))
 
 (defun ai-workbench-status-buffer (&optional project-root)
   "Return the status buffer for PROJECT-ROOT."
@@ -225,12 +222,6 @@
   (interactive)
   (call-interactively #'ai-workbench-edit-template)
   (ai-workbench-status-refresh))
-
-(defun ai-workbench-status-open-compose ()
-  "Open compose buffer from the current status buffer."
-  (interactive)
-  (let ((default-directory (or ai-workbench-status-project-root default-directory)))
-    (ai-workbench-compose-buffer)))
 
 (defun ai-workbench-status-open-output ()
   "Open output buffer from the current status buffer."

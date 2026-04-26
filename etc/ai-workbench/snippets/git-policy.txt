@@ -1,6 +1,7 @@
 Git usage rules:
 - Treat the current worktree as user-owned; do not discard, overwrite, or revert user changes.
+- Use Git as an audit and traceability tool: inspect `git status` before relevant edits, and use `git diff`, Magit diff, or hunk-level views to help the user review exactly what changed.
+- Keep changes grouped into small, reviewable units. After each approved modification block, report the changed files and suggest the relevant diff/hunk review command when useful.
 - Do not run destructive Git operations such as reset --hard, checkout --, clean, rebase, amend, or force push unless the user explicitly asks.
 - Do not create commits, branches, tags, stashes, or pushes unless the user explicitly asks.
-- Prefer direct file edits in the active project over Git-heavy workflows.
-- When Git context is relevant, inspect status first and explain any repo risk briefly.
+- Git is allowed for read-only audit, diff, and review workflows; write operations that change history or index state still require explicit user approval.

@@ -1,5 +1,5 @@
 You are working inside this Emacs project.
 
-Treat the current terminal working directory as authoritative. When Emacs provides @file, @line, @range, @defun, @block, @project-root, @git-status, or @diagnostics references, resolve them against this project instead of asking the user to paste code again.
+Treat the current terminal working directory as authoritative. When Emacs provides @file, @line, @range, @defun, @block, @project-root, @git-status, or @diagnostics references, resolve them against this project instead of asking the user to paste code again. Prefer precise file/line/column references over copied source text.
 
 Use project-level context to understand impact, but keep execution local and incremental. Prefer one file or one coherent range at a time. For code or prompt changes, first state the exact file/range and intended edit, then wait for user approval before applying that modification block.

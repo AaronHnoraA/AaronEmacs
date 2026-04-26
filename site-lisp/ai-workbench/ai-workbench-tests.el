@@ -163,6 +163,19 @@
              "/tmp/projectile/a.el"
              "/tmp/project/"))))
 
+(ert-deftest ai-workbench-tools-range-reference-uses-line-columns ()
+  "Range references should point to file, line, and column locations."
+  (with-temp-buffer
+    (insert "alpha\nbeta\n")
+    (let ((start (point-min))
+          end)
+      (goto-char (point-min))
+      (search-forward "be")
+      (setq end (point))
+      (should (string= "@range note.el:1:0-2:2 selection"
+                       (ai-workbench-tools--format-range
+                        "note.el" start end "selection"))))))
+
 (ert-deftest ai-workbench-tools-writing-prompt-uses-editable-template ()
   "Writing prompts should be rendered from editable template files."
   (let* ((template-dir (make-temp-file "aiw-writing-template-dir" t))
@@ -178,6 +191,13 @@
             (should (string-match-p "source: note\\.org" prompt))
             (should (string-match-p "hello" prompt))))
       (delete-directory template-dir t))))
+
+(ert-deftest ai-workbench-tools-writing-text-refuses-code-buffers ()
+  "Writing prompts should not copy source code from programming buffers."
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (insert "(message \"hi\")")
+    (should-error (ai-workbench-tools--writing-text) :type 'user-error)))
 
 (ert-deftest ai-workbench-session-reset-profile-injected-clears-all-backends ()
   "Resetting injected profile state should clear every backend marker."

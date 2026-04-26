@@ -9,7 +9,6 @@
 (require 'subr-x)
 (require 'ai-workbench-vendor)
 (require 'ai-workbench-session)
-(require 'ai-workbench-compose)
 (require 'ai-workbench-output)
 (require 'ai-workbench-result)
 (require 'ai-workbench-profile)
@@ -45,11 +44,29 @@
           body
           "\n"))
 
-(defun ai-workbench--fenced-block (content &optional info-string)
-  "Return CONTENT wrapped in a fenced block with INFO-STRING."
-  (format "```%s\n%s\n```"
-          (or info-string "")
-          (string-trim-right content)))
+(defun ai-workbench--position-line-column (position)
+  "Return POSITION as a cons cell of line and column."
+  (save-excursion
+    (goto-char position)
+    (cons (line-number-at-pos) (current-column))))
+
+(defun ai-workbench--range-reference (file start end project-root &optional label)
+  "Return a reference to FILE from START to END under PROJECT-ROOT.
+Append LABEL when non-nil."
+  (let ((relative-file (ai-workbench--context-relative-path file project-root))
+        (start-lc (ai-workbench--position-line-column start))
+        (end-lc (ai-workbench--position-line-column end)))
+    (string-join
+     (delq nil
+           (list
+            (format "@range %s:%d:%d-%d:%d"
+                    relative-file
+                    (car start-lc)
+                    (cdr start-lc)
+                    (car end-lc)
+                    (cdr end-lc))
+            label))
+     " ")))
 
 (defun ai-workbench--select-backend (project-root)
   "Prompt for the backend used by PROJECT-ROOT."
@@ -311,64 +328,46 @@ collide with the in-flight bootstrap messages."
     (message "ai-workbench cleared runtime state")))
 
 (defun ai-workbench-send-region (start end)
-  "Send the active region to the current backend."
+  "Send a reference to the active region to the current backend."
   (interactive "r")
   (unless (use-region-p)
     (user-error "No active region"))
   (let* ((project-root (ai-workbench-project-root))
          (backend (ai-workbench-session-backend project-root))
-         (source-file (buffer-file-name))
-         (language (or (and source-file (file-name-extension source-file))
-                       (symbol-name major-mode)))
-         (metadata (if source-file
-                       (format "source: %s"
-                               (ai-workbench--context-relative-path source-file project-root))
-                     (format "buffer: %s" (buffer-name))))
+         (source-file (or (buffer-file-name)
+                          (user-error "Current buffer is not visiting a file")))
          (prompt (ai-workbench--context-block
-                  "Context: region"
-                  (ai-workbench--fenced-block
-                   (buffer-substring-no-properties start end)
-                   language)
-                  metadata)))
+                  "Reference: region"
+                  (ai-workbench--range-reference
+                   source-file start end project-root "selection"))))
     (ai-workbench-send-string backend prompt project-root)))
 
 (defun ai-workbench-send-current-buffer ()
-  "Send the current buffer to the current backend."
+  "Send a reference to the current buffer to the current backend."
   (interactive)
   (let* ((project-root (ai-workbench-project-root))
          (backend (ai-workbench-session-backend project-root))
-         (source-file (buffer-file-name))
-         (language (or (and source-file (file-name-extension source-file))
-                       (symbol-name major-mode)))
-         (metadata (if source-file
-                       (format "source: %s"
-                               (ai-workbench--context-relative-path source-file project-root))
-                     (format "buffer: %s" (buffer-name))))
+         (source-file (or (buffer-file-name)
+                          (user-error "Current buffer is not visiting a file")))
          (prompt (ai-workbench--context-block
-                  "Context: current buffer"
-                  (ai-workbench--fenced-block
-                   (buffer-substring-no-properties (point-min) (point-max))
-                   language)
-                  metadata)))
+                  "Reference: current buffer"
+                  (format "@file %s"
+                          (ai-workbench--context-relative-path
+                           source-file project-root)))))
     (ai-workbench-send-string backend prompt project-root)))
 
 (defun ai-workbench-send-file (file)
-  "Send FILE contents to the current backend."
+  "Send a reference to FILE to the current backend."
   (interactive
    (list (read-file-name "Send file: " (ai-workbench-project-root) nil t)))
   (let* ((project-root (ai-workbench-project-root))
          (backend (ai-workbench-session-backend project-root))
          (expanded (expand-file-name file))
-         (language (or (file-name-extension expanded) "text"))
          (prompt (ai-workbench--context-block
-                  "Context: file"
-                  (ai-workbench--fenced-block
-                   (with-temp-buffer
-                     (insert-file-contents expanded)
-                     (buffer-string))
-                   language)
-                  (format "source: %s"
-                          (ai-workbench--context-relative-path expanded project-root)))))
+                  "Reference: file"
+                  (format "@file %s"
+                          (ai-workbench--context-relative-path
+                           expanded project-root)))))
     (ai-workbench-send-string backend prompt project-root)))
 
 (provide 'ai-workbench)

@@ -100,7 +100,6 @@
     (pcase kind
       ('ai-claude "cc")
       ('ai-codex "codex")
-      ('ai-compose "prompt")
       (_ "term"))))
 
 (defun my/vterm-popup--tab-title (buffer)

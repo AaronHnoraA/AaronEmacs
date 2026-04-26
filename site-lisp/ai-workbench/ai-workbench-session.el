@@ -36,7 +36,6 @@
                              :initialized nil
                              :profile-bootstrap-sent-backends nil
                              :profile-injected-backends nil
-                             :compose-buffer nil
                              :last-prompt nil
                              :last-status nil
                              :last-error nil
@@ -149,18 +148,6 @@
     (puthash root session ai-workbench--session-table)
     nil))
 
-(defun ai-workbench-session-compose-buffer (&optional project-root)
-  "Return the compose buffer stored for PROJECT-ROOT."
-  (plist-get (ai-workbench-session-get project-root) :compose-buffer))
-
-(defun ai-workbench-session-set-compose-buffer (buffer &optional project-root)
-  "Store BUFFER as the compose buffer for PROJECT-ROOT and return BUFFER."
-  (let* ((root (or project-root (ai-workbench-project-root)))
-         (session (copy-sequence (ai-workbench-session-get root))))
-    (setq session (plist-put session :compose-buffer buffer))
-    (puthash root session ai-workbench--session-table)
-    buffer))
-
 (defun ai-workbench-project-name (&optional project-root)
   "Return a short display name for PROJECT-ROOT."
   (file-name-nondirectory
@@ -223,10 +210,6 @@
     (setq session (plist-put session :run-state 'idle))
     (puthash root session ai-workbench--session-table)
     session))
-
-(defun ai-workbench-compose-buffer-name (&optional project-root)
-  "Return the compose buffer name for PROJECT-ROOT."
-  (format "*AI Compose: %s*" (ai-workbench-project-name project-root)))
 
 (defun ai-workbench-panel-buffer-name (&optional project-root)
   "Return the control panel buffer name for PROJECT-ROOT."

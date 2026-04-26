@@ -8,14 +8,11 @@
 - `lisp/init-ai-ide.el` 已从 `site-lisp/ai-workbench/vendor/` 加载 Claude/Codex
 - 已有统一入口：
   - `M-x ai-workbench`
-  - `M-x ai-workbench-compose-buffer`
   - `C-c M-a`
   - `C-c A W`
   - `C-c A w`
   - `C-c A .`
-  - `C-c A /`
   - `C-c A k`
-  - `C-c A m`
   - `C-c A i r` / `C-c A i b` / `C-c A i f`
 
 ## 已完成
@@ -23,10 +20,10 @@
 ### Session 与上下文
 
 - project-scoped session 状态表
-- compose buffer
 - region / buffer / file 注入
 - 文件内引用式工具入口
   - 直接把引用式 prompt 写入当前 Claude/Codex 交互 buffer
+  - 代码上下文使用 `@file` / `@line file:line:column` / `@range file:start-line:start-column-end-line:end-column`，不复制源码正文
   - 写入后不自动回车，用户可以继续编辑或手动提交
   - `@本文件`
   - `@本行`
@@ -37,12 +34,10 @@
   - `@Git状态`
   - `@诊断`
 - last prompt / last status / last error / run state 记录
-- 写作 prompt 预览入口：
+- 写作 prompt 入口：
   - `C-c A w` 从当前选区或 buffer 生成写作 prompt
   - 支持润色 / 改写 / 总结 / 翻译 / 提纲 / 续写 / 评论
-  - 先进入可编辑预览 buffer，再 `C-c C-d` draft 或 `C-c C-c` send
-- 引用式 prompt 预览入口：
-  - `C-c A /` 先预览引用式 prompt，再决定 draft/send
+  - 直接 draft 到当前 Claude/Codex TUI，由用户在后端 buffer 里继续编辑或回车提交
 
 ### Backend
 
@@ -59,6 +54,7 @@
 - profile 只描述项目工作目录和引用式 prompt 语义，不再注入 manifest 审计协议
 - profile 文本已移到 `etc/ai-workbench/profiles/default.txt`
 - profile / snippet / prompt template 文本已统一放到 `etc/ai-workbench/`
+- Git 规则已调整为审计辅助：允许用 `git status` / `git diff` / Magit diff 做可回溯 review，但禁止未授权的破坏性或写历史操作
 - Codex 默认不再走 `exec --json`
 
 ### UI / 窗口
@@ -68,7 +64,6 @@
 - popup 显示逻辑改为复用 `init-vterm-popup.el`
 - popup header 已加入轻量 tab strip，用于切换当前 popup 池里的 terminal / Claude / Codex buffer
 - popup header 已加入 `+term` 按钮，可直接新建 popup vterm
-- compose buffer 保留为备用手写 prompt 工具；主路径不再依赖 compose buffer
 
 ### Diff
 

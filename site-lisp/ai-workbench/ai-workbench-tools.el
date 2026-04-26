@@ -69,30 +69,6 @@
     ("@测试失败" . test-failures))
   "Choices exposed by `ai-workbench-context-prompt'.")
 
-(defvar ai-workbench-prompt-preview-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map text-mode-map)
-    (define-key map (kbd "C-c C-c") #'ai-workbench-prompt-preview-send)
-    (define-key map (kbd "C-c C-d") #'ai-workbench-prompt-preview-draft)
-    (define-key map (kbd "C-c C-o") #'ai-workbench-open)
-    map)
-  "Keymap for ai-workbench prompt preview buffers.")
-
-(defvar-local ai-workbench-prompt-preview-project-root nil
-  "Project root associated with the current prompt preview.")
-
-(defvar-local ai-workbench-prompt-preview-backend nil
-  "Backend associated with the current prompt preview.")
-
-(define-derived-mode ai-workbench-prompt-preview-mode text-mode "AI-Prompt"
-  "Major mode for editable ai-workbench prompt previews."
-  (setq-local header-line-format
-              '(:eval
-                (format "AI Prompt  backend:%s  project:%s  C-c C-c send  C-c C-d draft"
-                        ai-workbench-prompt-preview-backend
-                        (abbreviate-file-name
-                         ai-workbench-prompt-preview-project-root)))))
-
 (defun ai-workbench-tools--relative-path (file project-root)
   "Return FILE relative to PROJECT-ROOT when possible."
   (if (and file project-root (file-in-directory-p file project-root))
@@ -106,26 +82,49 @@
 
 (defun ai-workbench-tools--line-reference (file)
   "Return a reference string for FILE at point."
-  (format "@line %s:%d"
+  (format "@line %s:%d:%d"
           file
-          (line-number-at-pos)))
+          (line-number-at-pos)
+          (current-column)))
+
+(defun ai-workbench-tools--position-line-column (position)
+  "Return POSITION as a cons cell of line and column."
+  (save-excursion
+    (goto-char position)
+    (cons (line-number-at-pos) (current-column))))
+
+(defun ai-workbench-tools--format-range (file start end &optional label)
+  "Return a FILE reference from START to END with optional LABEL."
+  (let ((start-lc (ai-workbench-tools--position-line-column start))
+        (end-lc (ai-workbench-tools--position-line-column end)))
+    (string-join
+     (delq nil
+           (list
+            (format "@range %s:%d:%d-%d:%d"
+                    file
+                    (car start-lc)
+                    (cdr start-lc)
+                    (car end-lc)
+                    (cdr end-lc))
+            label))
+     " ")))
 
 (defun ai-workbench-tools--symbol-reference (file)
   "Return a reference string for the symbol at point in FILE."
   (let ((symbol (thing-at-point 'symbol t)))
     (unless symbol
       (user-error "No symbol at point"))
-    (format "@symbol %s:%d name=%s"
+    (format "@symbol %s:%d:%d name=%s"
             file
             (line-number-at-pos)
+            (current-column)
             symbol)))
 
 (defun ai-workbench-tools--region-range ()
   "Return the current region range as a cons cell."
   (unless (use-region-p)
     (user-error "No active region"))
-  (cons (line-number-at-pos (region-beginning))
-        (line-number-at-pos (region-end))))
+  (cons (region-beginning) (region-end)))
 
 (defun ai-workbench-tools--defun-range ()
   "Return the current defun range as a plist."
@@ -138,6 +137,8 @@
          (deactivate-mark)
          (list :start-line (line-number-at-pos start)
                :end-line (line-number-at-pos end)
+               :start start
+               :end end
                :name (or (and (fboundp 'which-function) (which-function))
                          (thing-at-point 'symbol t)
                          "anonymous")))))
@@ -160,7 +161,9 @@
                       (forward-paragraph)
                       (point)))))
       (list :start-line (line-number-at-pos start)
-            :end-line (line-number-at-pos end)))))
+            :end-line (line-number-at-pos end)
+            :start start
+            :end end))))
 
 (defun ai-workbench-tools--git-status-summary (project-root)
   "Return a concise Git status summary for PROJECT-ROOT."
@@ -325,8 +328,8 @@
          (let* ((path (ai-workbench-tools--relative-path
                        (ai-workbench-tools--current-file) project-root))
                 (range (ai-workbench-tools--region-range)))
-           (push (format "@range %s:%d-%d selection"
-                         path (car range) (cdr range))
+           (push (ai-workbench-tools--format-range
+                  path (car range) (cdr range) "selection")
                  references)))
         ('current-symbol
          (let ((path (ai-workbench-tools--relative-path
@@ -336,20 +339,23 @@
          (let* ((path (ai-workbench-tools--relative-path
                        (ai-workbench-tools--current-file) project-root))
                 (range (ai-workbench-tools--defun-range)))
-           (push (format "@defun %s:%d-%d name=%s"
-                         path
-                         (plist-get range :start-line)
-                         (plist-get range :end-line)
+           (push (format "%s name=%s"
+                         (ai-workbench-tools--format-range
+                          path
+                          (plist-get range :start)
+                          (plist-get range :end)
+                          "defun")
                          (plist-get range :name))
                  references)))
         ('block
          (let* ((path (ai-workbench-tools--relative-path
                        (ai-workbench-tools--current-file) project-root))
                 (range (ai-workbench-tools--block-range)))
-           (push (format "@block %s:%d-%d"
-                         path
-                         (plist-get range :start-line)
-                         (plist-get range :end-line))
+           (push (ai-workbench-tools--format-range
+                  path
+                  (plist-get range :start)
+                  (plist-get range :end)
+                  "block")
                  references)))
         ('project-root
          (push (format "@project-root %s"
@@ -389,6 +395,8 @@
 
 (defun ai-workbench-tools--writing-text ()
   "Return the text to use for a writing task."
+  (when (derived-mode-p 'prog-mode)
+    (user-error "Writing prompt does not copy source code; use context references instead"))
   (cond
    ((use-region-p)
     (buffer-substring-no-properties (region-beginning) (region-end)))
@@ -425,58 +433,6 @@
      ("context" . ,context)
      ("text" . ,text))))
 
-(defun ai-workbench-tools--preview-buffer (name prompt project-root backend)
-  "Open NAME with editable PROMPT for PROJECT-ROOT and BACKEND."
-  (let ((buffer (get-buffer-create name)))
-    (with-current-buffer buffer
-      (unless (derived-mode-p 'ai-workbench-prompt-preview-mode)
-        (ai-workbench-prompt-preview-mode))
-      (setq buffer-read-only nil)
-      (erase-buffer)
-      (insert prompt)
-      (setq default-directory project-root)
-      (setq-local ai-workbench-prompt-preview-project-root project-root)
-      (setq-local ai-workbench-prompt-preview-backend backend)
-      (goto-char (point-min)))
-    (pop-to-buffer buffer)))
-
-(defun ai-workbench-prompt-preview--prompt ()
-  "Return the current editable prompt preview text."
-  (string-trim
-   (buffer-substring-no-properties (point-min) (point-max))))
-
-(defun ai-workbench-prompt-preview--ensure-session ()
-  "Ensure the preview buffer has enough session state."
-  (unless ai-workbench-prompt-preview-project-root
-    (setq-local ai-workbench-prompt-preview-project-root
-                (ai-workbench-project-root)))
-  (unless ai-workbench-prompt-preview-backend
-    (setq-local ai-workbench-prompt-preview-backend
-                (ai-workbench-session-backend
-                 ai-workbench-prompt-preview-project-root))))
-
-(defun ai-workbench-prompt-preview-send ()
-  "Send the current prompt preview to the configured backend."
-  (interactive)
-  (ai-workbench-prompt-preview--ensure-session)
-  (let ((prompt (ai-workbench-prompt-preview--prompt)))
-    (when (string-empty-p prompt)
-      (user-error "Prompt preview is empty"))
-    (ai-workbench-send-string ai-workbench-prompt-preview-backend
-                              prompt
-                              ai-workbench-prompt-preview-project-root)))
-
-(defun ai-workbench-prompt-preview-draft ()
-  "Draft the current prompt preview into the configured backend."
-  (interactive)
-  (ai-workbench-prompt-preview--ensure-session)
-  (let ((prompt (ai-workbench-prompt-preview--prompt)))
-    (when (string-empty-p prompt)
-      (user-error "Prompt preview is empty"))
-    (ai-workbench-draft-string ai-workbench-prompt-preview-backend
-                               prompt
-                               ai-workbench-prompt-preview-project-root)))
-
 (defun ai-workbench-tools--context-dispatch (send-immediately)
   "Build context references, then draft or send based on SEND-IMMEDIATELY."
   (let* ((project-root (ai-workbench-project-root))
@@ -500,24 +456,8 @@
       (message "ai-workbench drafted prompt with %d reference(s); press RET to submit"
                (length references)))))
 
-(defun ai-workbench-context-preview ()
-  "Preview a reference-style prompt before sending or drafting it."
-  (interactive)
-  (let* ((project-root (ai-workbench-project-root))
-         (choices (ai-workbench-tools--selected-symbols))
-         (task (read-string "AI task: "))
-         (context (ai-workbench-tools--build-references choices project-root))
-         (references (plist-get context :references))
-         (backend (ai-workbench-session-backend project-root))
-         (prompt (ai-workbench-tools--prompt-template task references)))
-    (unless references
-      (user-error "No references selected"))
-    (ai-workbench-tools--preview-buffer
-     (format "*AI Context Prompt: %s*" (ai-workbench-project-name project-root))
-     prompt project-root backend)))
-
 (defun ai-workbench-writing-prompt ()
-  "Create an editable AI writing prompt from region or current buffer."
+  "Draft an AI writing prompt from region or current buffer."
   (interactive)
   (let* ((project-root (ai-workbench-project-root))
          (mode-label (completing-read "Writing mode: "
@@ -529,9 +469,12 @@
          (backend (ai-workbench-session-backend project-root))
          (prompt (ai-workbench-tools--writing-prompt
                   mode-label task text context)))
-    (ai-workbench-tools--preview-buffer
-     (format "*AI Writing Prompt: %s*" (ai-workbench-project-name project-root))
-     prompt project-root backend)))
+    (unless (ai-workbench-session-initialized-p project-root)
+      (ai-workbench-open)
+      (setq backend (ai-workbench-session-backend project-root)))
+    (ai-workbench-draft-string backend prompt project-root)
+    (message "ai-workbench drafted writing prompt to %s; press RET to submit"
+             backend)))
 
 (defun ai-workbench-context-prompt ()
   "Draft a reference-style prompt into the current AI backend."
