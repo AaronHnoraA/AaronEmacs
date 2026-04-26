@@ -29,6 +29,11 @@
   :group 'tools
   :prefix "ai-workbench-")
 
+(defcustom ai-workbench-save-before-dispatch t
+  "When non-nil, save relevant file buffers before dispatching AI prompts."
+  :type 'boolean
+  :group 'ai-workbench)
+
 (defun ai-workbench--context-relative-path (file project-root)
   "Return FILE relative to PROJECT-ROOT when possible."
   (if (and file project-root (file-in-directory-p file project-root))
@@ -110,6 +115,26 @@ Append LABEL when non-nil."
      (ai-workbench-codex-prime-session project-root)
      (ai-workbench-session-set-last-status "Codex session ready" project-root))
     (_ (user-error "Unsupported backend"))))
+
+(defun ai-workbench--save-buffer-if-needed (buffer)
+  "Save BUFFER when it is a modified local file-visiting buffer."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (and ai-workbench-save-before-dispatch
+                 buffer-file-name
+                 (buffer-modified-p)
+                 (not buffer-read-only)
+                 (not (file-remote-p buffer-file-name)))
+        (save-buffer)))))
+
+(defun ai-workbench--save-current-file-buffer ()
+  "Save the current buffer before switching to an AI backend."
+  (ai-workbench--save-buffer-if-needed (current-buffer)))
+
+(defun ai-workbench--save-file-buffer-if-open (file)
+  "Save FILE's live buffer when it has unsaved edits."
+  (when-let* ((buffer (find-buffer-visiting file)))
+    (ai-workbench--save-buffer-if-needed buffer)))
 
 (defun ai-workbench-open ()
   "Select a backend if needed, prepare it, then pop the interactive buffer."
@@ -240,6 +265,7 @@ Append LABEL when non-nil."
 
 (defun ai-workbench-send-string (backend prompt &optional project-root)
   "Send PROMPT for PROJECT-ROOT through BACKEND."
+  (ai-workbench--save-current-file-buffer)
   (let* ((root (or project-root (ai-workbench-project-root)))
          (effective-prompt
           (if (ai-workbench-session-profile-injected-p backend root)
@@ -287,6 +313,7 @@ Append LABEL when non-nil."
 The profile is injected eagerly by `ai-workbench--prepare-backend';
 when that injection just ran the draft is delayed so it does not
 collide with the in-flight bootstrap messages."
+  (ai-workbench--save-current-file-buffer)
   (let* ((root (or project-root (ai-workbench-project-root)))
          (profile-already-injected
           (ai-workbench-session-profile-injected-p backend root)))
@@ -368,6 +395,7 @@ collide with the in-flight bootstrap messages."
                   (format "@file %s"
                           (ai-workbench--context-relative-path
                            expanded project-root)))))
+    (ai-workbench--save-file-buffer-if-open expanded)
     (ai-workbench-send-string backend prompt project-root)))
 
 (provide 'ai-workbench)

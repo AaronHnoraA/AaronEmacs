@@ -10,6 +10,7 @@
 (require 'init-funcs)
 
 (declare-function editorconfig-find-current-editorconfig "editorconfig")
+(declare-function ediff-current-file "ediff" ())
 (declare-function link-hint-copy-link "link-hint" ())
 (declare-function link-hint-open-link "link-hint" ())
 (declare-function undo-tree-save-history "undo-tree" (&optional filename overwrite))
@@ -29,22 +30,47 @@
 
 (use-package autorevert
   :ensure nil
-  :hook (after-init . global-auto-revert-mode)
   :custom
-  (auto-revert-avoid-polling t)
-  (auto-revert-check-vc-info t)
-  (auto-revert-interval 1)
+  (auto-revert-avoid-polling nil)
+  (auto-revert-check-vc-info nil)
+  (auto-revert-interval 2)
   (auto-revert-remote-files nil)
   (auto-revert-stop-on-user-input nil)
   (auto-revert-use-notify t)
   (global-auto-revert-non-file-buffers t)
   (auto-revert-verbose nil)
   :config
+  (global-auto-revert-mode 1)
+
   (defvar my/auto-revert--warned-modified-files (make-hash-table :test 'equal)
     "Files already reported as changed on disk while modified in Emacs.")
 
   (defvar my/auto-revert--focus-check-timer nil
     "Idle timer used to debounce stale buffer checks after focus changes.")
+
+  (defvar my/auto-revert--scan-timer nil
+    "Timer used to detect modified buffers whose files changed on disk.")
+
+  (defvar my/auto-revert-recent-buffer-limit 12
+    "Maximum recent file buffers checked after focus changes.")
+
+  (defun my/auto-revert--candidate-buffers ()
+    "Return visible and recent file buffers worth checking."
+    (let ((seen nil)
+          (recent-count 0))
+      (dolist (window (window-list nil 'no-minibuf))
+        (let ((buffer (window-buffer window)))
+          (when (and (buffer-live-p buffer)
+                     (not (memq buffer seen)))
+            (push buffer seen))))
+      (dolist (buffer (buffer-list))
+        (when (and (< recent-count my/auto-revert-recent-buffer-limit)
+                   (not (memq buffer seen)))
+          (with-current-buffer buffer
+            (when buffer-file-name
+              (setq recent-count (1+ recent-count))
+              (push buffer seen)))))
+      (nreverse seen)))
 
   (defun my/auto-revert--refresh-review-state (buffer)
     "Refresh VC and diff indicators for BUFFER after external changes."
@@ -63,6 +89,16 @@
         (and buffer-file-name
              (buffer-modified-p)
              (not buffer-read-only)
+             (not (file-remote-p buffer-file-name))
+             (file-exists-p buffer-file-name)
+             (not (verify-visited-file-modtime (current-buffer)))))))
+
+  (defun my/auto-revert--unmodified-stale-file-buffer-p (&optional buffer)
+    "Return non-nil when BUFFER can be safely refreshed from disk."
+    (when (buffer-live-p (or buffer (current-buffer)))
+      (with-current-buffer (or buffer (current-buffer))
+        (and buffer-file-name
+             (not (buffer-modified-p))
              (not (file-remote-p buffer-file-name))
              (file-exists-p buffer-file-name)
              (not (verify-visited-file-modtime (current-buffer)))))))
@@ -87,16 +123,31 @@
 
   (defun my/auto-revert-warn-modified-stale-buffers-h ()
     "Warn when a modified buffer's file also changed on disk."
-    (dolist (buffer (buffer-list))
+    (dolist (buffer (my/auto-revert--candidate-buffers))
       (with-current-buffer buffer
         (when (my/auto-revert--modified-stale-file-buffer-p buffer)
           (let ((file (expand-file-name buffer-file-name)))
-            (my/auto-revert--preserve-undo-state buffer)
             (unless (gethash file my/auto-revert--warned-modified-files)
               (puthash file t my/auto-revert--warned-modified-files)
               (message
-               "File changed on disk while buffer has unsaved edits: %s; undo history preserved, use diff/revert deliberately"
+               "File changed on disk while buffer has unsaved edits: %s; M-x my/auto-revert-resolve-current-buffer"
                (abbreviate-file-name file))))))))
+
+  (defun my/auto-revert--refresh-buffer-if-safe (buffer)
+    "Refresh BUFFER when it is an unmodified stale local file buffer."
+    (when (my/auto-revert--unmodified-stale-file-buffer-p buffer)
+      (with-current-buffer buffer
+        (revert-buffer :ignore-auto :noconfirm :preserve-modes))))
+
+  (defun my/auto-revert-refresh-visible-stale-buffers-h ()
+    "Refresh visible and recent unmodified file buffers changed on disk."
+    (dolist (buffer (my/auto-revert--candidate-buffers))
+      (my/auto-revert--refresh-buffer-if-safe buffer)))
+
+  (defun my/auto-revert-check-stale-buffers-h ()
+    "Refresh safe buffers and warn about modified stale buffers."
+    (my/auto-revert-refresh-visible-stale-buffers-h)
+    (my/auto-revert-warn-modified-stale-buffers-h))
 
   (defun my/auto-revert-schedule-stale-check-h ()
     "Schedule a debounced stale buffer check after focus changes."
@@ -104,19 +155,83 @@
       (cancel-timer my/auto-revert--focus-check-timer))
     (setq my/auto-revert--focus-check-timer
           (run-with-idle-timer
-           0.2 nil #'my/auto-revert-warn-modified-stale-buffers-h)))
+           0.2 nil
+           (lambda ()
+             (ignore-errors
+               (my/auto-revert-check-stale-buffers-h))))))
+
+  (defun my/auto-revert-resolve-current-buffer ()
+    "Resolve a modified buffer whose file changed on disk."
+    (interactive)
+    (unless (my/auto-revert--modified-stale-file-buffer-p (current-buffer))
+      (user-error "Current buffer does not have unsaved edits against a changed file"))
+    (pcase (completing-read
+            "Resolve changed file: "
+            '("merge with ediff" "accept disk version" "keep local and overwrite disk")
+            nil t)
+      ("merge with ediff"
+       (my/auto-revert--preserve-undo-state (current-buffer))
+       (require 'ediff)
+       (ediff-current-file))
+      ("accept disk version"
+       (when (yes-or-no-p "Discard local edits and reload disk version? ")
+         (my/auto-revert--preserve-undo-state (current-buffer))
+         (revert-buffer :ignore-auto :noconfirm :preserve-modes)))
+      ("keep local and overwrite disk"
+       (when (yes-or-no-p "Overwrite disk with current buffer contents? ")
+         (set-visited-file-modtime)
+         (save-buffer)
+         (when buffer-file-name
+           (remhash (expand-file-name buffer-file-name)
+                    my/auto-revert--warned-modified-files))))))
+
+  (defun my/auto-revert-ask-user-about-supersession-threat-a (orig-fun filename)
+    "Use the local stale-buffer resolver instead of Emacs' raw save prompt."
+    (if (or noninteractive
+            (not (my/auto-revert--modified-stale-file-buffer-p (current-buffer))))
+        (funcall orig-fun filename)
+      (pcase (completing-read
+              (format "File changed on disk: %s "
+                      (abbreviate-file-name filename))
+              '("merge with ediff" "accept disk version" "keep local and overwrite disk")
+              nil t)
+        ("merge with ediff"
+         (my/auto-revert--preserve-undo-state (current-buffer))
+         (require 'ediff)
+         (ediff-current-file)
+         (signal 'file-supersession (list filename)))
+        ("accept disk version"
+         (when (yes-or-no-p "Discard local edits and reload disk version? ")
+           (my/auto-revert--preserve-undo-state (current-buffer))
+           (revert-buffer :ignore-auto :noconfirm :preserve-modes))
+         (signal 'file-supersession (list filename)))
+        ("keep local and overwrite disk"
+         (when (yes-or-no-p "Overwrite disk with current buffer contents? ")
+           (set-visited-file-modtime)
+           (when buffer-file-name
+             (remhash (expand-file-name buffer-file-name)
+                      my/auto-revert--warned-modified-files)))))))
 
   (add-hook 'before-revert-hook #'my/auto-revert--preserve-undo-state)
   (add-hook 'after-revert-hook #'my/auto-revert-after-revert-h)
+  (advice-remove 'ask-user-about-supersession-threat
+                 #'my/auto-revert-ask-user-about-supersession-threat-a)
+  (advice-add 'ask-user-about-supersession-threat
+              :around #'my/auto-revert-ask-user-about-supersession-threat-a)
+  (when (timerp my/auto-revert--scan-timer)
+    (cancel-timer my/auto-revert--scan-timer)
+    (setq my/auto-revert--scan-timer nil))
   (remove-function after-focus-change-function
                    #'my/auto-revert-schedule-stale-check-h)
   (add-function :after after-focus-change-function
                 #'my/auto-revert-schedule-stale-check-h)
   (add-hook 'after-save-hook
             (lambda ()
-              (when buffer-file-name
+              (when (and buffer-file-name
+                         (not (file-remote-p buffer-file-name)))
                 (remhash (expand-file-name buffer-file-name)
-                         my/auto-revert--warned-modified-files)))))
+                         my/auto-revert--warned-modified-files)
+                (my/auto-revert-schedule-stale-check-h)))))
 
 (with-eval-after-load 'saveplace
   (define-advice save-place-find-file-hook (:after (&rest _) my/recenter-after-save-place)
