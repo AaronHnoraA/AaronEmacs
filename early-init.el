@@ -241,8 +241,6 @@ Use nil for a normal window, `maximized' for a maximized window, or
       inhibit-startup-message t
       inhibit-startup-echo-area-message user-login-name)
 
-(add-to-list 'default-frame-alist '(alpha-background . 97))
-(set-frame-parameter nil 'alpha-background 97)
-(add-to-list 'default-frame-alist '(alpha . 97))
+
 
 ;;; early-init.el ends here
