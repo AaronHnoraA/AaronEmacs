@@ -40,6 +40,11 @@ integer position keys from accumulating during long editing sessions."
   :type 'integer
   :group 'my/org-ui)
 
+(defcustom my/org-pretty-block-visible-margin-lines 40
+  "Extra lines around visible Org windows that stay eligible for prettification."
+  :type 'integer
+  :group 'my/org-ui)
+
 (defcustom my/org-prose-body-width 96
   "Preferred `olivetti-mode' body width for Org prose buffers."
   :type 'integer
@@ -1048,6 +1053,50 @@ DEFAULT-BG defaults to `my/org-default-background'."
            t
            my/org-pretty-block-jit-cache))
 
+(defun my/org-visible-range-with-margin (&optional window)
+  "Return WINDOW's visible range expanded by nearby context lines."
+  (when (window-live-p window)
+    (with-current-buffer (window-buffer window)
+      (when (eq (current-buffer) (window-buffer window))
+        (let* ((margin (max 0 my/org-pretty-block-visible-margin-lines))
+               (beg (window-start window))
+               (end (window-end window t)))
+          (save-excursion
+            (goto-char beg)
+            (forward-line (- margin))
+            (setq beg (line-beginning-position))
+            (goto-char end)
+            (forward-line margin)
+            (setq end (line-end-position))
+            (cons (max (point-min) beg)
+                  (min (point-max) end))))))))
+
+(defun my/org-visible-ranges (&optional buffer)
+  "Return merged visible ranges with margins for BUFFER."
+  (let* ((buffer (or buffer (current-buffer)))
+         (ranges
+          (delq nil
+                (mapcar #'my/org-visible-range-with-margin
+                        (get-buffer-window-list buffer nil t)))))
+    (setq ranges (sort ranges (lambda (left right) (< (car left) (car right)))))
+    (let (merged)
+      (dolist (range ranges)
+        (pcase-let ((`(,beg . ,end) range))
+          (when (< beg end)
+            (if (and merged (<= beg (cdar merged)))
+                (setcdr (car merged) (max end (cdar merged)))
+              (push (cons beg end) merged)))))
+      (nreverse merged))))
+
+(defun my/org-range-overlaps-visible-ranges-p (beg end &optional buffer)
+  "Return non-nil when BEG END overlaps BUFFER's visible ranges."
+  (catch 'overlap
+    (dolist (range (my/org-visible-ranges buffer))
+      (when (and (< beg (cdr range))
+                 (> end (car range)))
+        (throw 'overlap t)))
+    nil))
+
 (defun my/org-cancel-pretty-block-refontify ()
   "Cancel the pending pretty-block refontify timer in the current buffer."
   (when (timerp my/org--pretty-block-refontify-timer)
@@ -1060,7 +1109,11 @@ DEFAULT-BG defaults to `my/org-default-background'."
     (with-current-buffer buffer
       (setq-local my/org--pretty-block-refontify-timer nil)
       (when (derived-mode-p 'org-mode)
-        (jit-lock-refontify)))))
+        (let ((ranges (my/org-visible-ranges buffer)))
+          (if ranges
+              (dolist (range ranges)
+                (jit-lock-refontify (car range) (cdr range)))
+            (jit-lock-refontify)))))))
 
 (defun my/org-schedule-pretty-block-refontify ()
   "Schedule a coalesced pretty-block refontify for the current buffer."
@@ -1504,8 +1557,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
 ;; ===========================================================
 (defun my/org-jit-prettify-blocks (start end)
   "JIT-Lock callback: render styled special blocks around START and END."
-  (unless (and (fboundp 'evil-insert-state-p)
-               (evil-insert-state-p))
+  (when (my/org-range-overlaps-visible-ranges-p start end (current-buffer))
     (save-excursion
       (save-match-data
         (let (scan-start scan-end)
@@ -1519,46 +1571,50 @@ DEFAULT-BG defaults to `my/org-default-background'."
                 (if (re-search-forward "^[ \t]*#\\+end_" nil t)
                     (min (point-max) (line-beginning-position 2))
                   end))
-          (unless (my/org-pretty-block--jit-cache-hit-p scan-start scan-end)
-            (let ((seen (make-hash-table :test #'eql)))
-              (goto-char scan-start)
-              (while (re-search-forward my/org--special-block-line-regexp
-                                        scan-end t)
-                (let ((line-begin (match-beginning 0)))
-                  (goto-char line-begin)
-                  ;; Cheap pre-filter: read the block type from the begin
-                  ;; line and check our config before paying for the full
-                  ;; org-element parse. Most #+begin_ lines in a typical
-                  ;; buffer are src/example/quote/verse, none of which
-                  ;; appear in `my/org-special-block-styles', so this lets
-                  ;; us skip `org-element-at-point' for the common case.
-                  (let* ((line-type
-                          (and (looking-at
-                                "[ \t]*#\\+begin_\\([A-Za-z][A-Za-z0-9_-]*\\)")
-                               (match-string-no-properties 1)))
-                         (configured (and line-type
-                                          (my/org-special-block-config
-                                           line-type)))
-                         (element (and configured (org-element-at-point)))
-                         (type (and element
-                                    (eq (org-element-type element)
-                                        'special-block)
-                                    (org-element-property :type element)))
-                         (begin (and type
-                                     (org-element-property :begin element)))
-                         (end-pos (and type
-                                       (org-element-property :end element))))
-                    (when (and begin
-                               end-pos
-                               (not (gethash begin seen))
-                               (< begin end)
-                               (> end-pos start))
-                      (puthash begin t seen)
-                      (my/org-prettify-element element)))
-                  (goto-char line-begin)
-                  (forward-line 1))))
-            (my/org-pretty-block--remember-jit-range
-             scan-start scan-end)))))))
+          (when (my/org-range-overlaps-visible-ranges-p
+                 scan-start scan-end (current-buffer))
+            (unless (my/org-pretty-block--jit-cache-hit-p scan-start scan-end)
+              (let ((seen (make-hash-table :test #'eql)))
+                (goto-char scan-start)
+                (while (re-search-forward my/org--special-block-line-regexp
+                                          scan-end t)
+                  (let ((line-begin (match-beginning 0)))
+                    (goto-char line-begin)
+                    ;; Cheap pre-filter: read the block type from the begin
+                    ;; line and check our config before paying for the full
+                    ;; org-element parse. Most #+begin_ lines in a typical
+                    ;; buffer are src/example/quote/verse, none of which
+                    ;; appear in `my/org-special-block-styles', so this lets
+                    ;; us skip `org-element-at-point' for the common case.
+                    (let* ((line-type
+                            (and (looking-at
+                                  "[ \t]*#\\+begin_\\([A-Za-z][A-Za-z0-9_-]*\\)")
+                                 (match-string-no-properties 1)))
+                           (configured (and line-type
+                                            (my/org-special-block-config
+                                             line-type)))
+                           (element (and configured (org-element-at-point)))
+                           (type (and element
+                                      (eq (org-element-type element)
+                                          'special-block)
+                                      (org-element-property :type element)))
+                           (begin (and type
+                                       (org-element-property :begin element)))
+                           (end-pos (and type
+                                         (org-element-property :end element))))
+                      (when (and begin
+                                 end-pos
+                                 (not (gethash begin seen))
+                                 (< begin end)
+                                 (> end-pos start)
+                                 (my/org-range-overlaps-visible-ranges-p
+                                  begin end-pos (current-buffer)))
+                        (puthash begin t seen)
+                        (my/org-prettify-element element)))
+                    (goto-char line-begin)
+                    (forward-line 1))))
+              (my/org-pretty-block--remember-jit-range
+               scan-start scan-end))))))))
 
 ;; ===========================================================
 ;; 5. 激活机制
