@@ -20,6 +20,7 @@
 (defvar-local my/org--insert-suspended-modes nil)
 (defvar-local my/org--valign-table-watch-installed nil)
 (defvar-local my/org--pretty-block-watch-installed nil)
+(defvar-local my/org--appear-watch-installed nil)
 (defvar-local my/org-appear--last-point nil)
 (defvar-local my/org-appear--last-tick nil)
 (defvar-local my/org-appear--last-do-buffer nil)
@@ -57,6 +58,10 @@ lighter without changing table behavior once a table exists."
 
 (defconst my/org--special-block-line-regexp "^[ \t]*#\\+begin_"
   "Regexp matching Org special-block opening lines.")
+
+(defconst my/org--appear-syntax-regexp
+  "\\[\\[\\|\\\\[A-Za-z]\\|[*_/+=~]\\|^[ \t]*#\\+"
+  "Regexp matching Org syntax that benefits from `org-appear-mode'.")
 
 (declare-function evil-insert-state-p "evil")
 (declare-function my/org-toc-insert-or-update "init-org-core")
@@ -157,11 +162,56 @@ lighter without changing table behavior once a table exists."
 (defun my/org-enable-org-appear-maybe ()
   "Enable `org-appear-mode' for Org buffers in graphical sessions."
   (when (my/org-rich-ui-buffer-p)
-    (setq-local my/org-appear--last-point nil
-                my/org-appear--last-tick nil
-                my/org-appear--last-do-buffer nil
-                my/org-appear--last-elem-toggled nil)
-    (org-appear-mode 1)))
+    (if (my/org-buffer-has-appear-syntax-p)
+        (my/org-enable-org-appear-now)
+      (my/org-install-org-appear-watch))))
+
+(defun my/org-buffer-has-appear-syntax-p ()
+  "Return non-nil when the current Org buffer uses syntax handled by `org-appear'."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (goto-char (point-min))
+      (re-search-forward my/org--appear-syntax-regexp nil t))))
+
+(defun my/org-enable-org-appear-now ()
+  "Enable `org-appear-mode' and remove its on-demand watcher."
+  (my/org-cleanup-org-appear-watch)
+  (setq-local my/org-appear--last-point nil
+              my/org-appear--last-tick nil
+              my/org-appear--last-do-buffer nil
+              my/org-appear--last-elem-toggled nil)
+  (org-appear-mode 1))
+
+(defun my/org-enable-org-appear-on-insert (beg end _len)
+  "Enable `org-appear-mode' when an edit creates matching syntax."
+  (when (and (derived-mode-p 'org-mode)
+             (my/org-rich-ui-buffer-p)
+             (save-excursion
+               (goto-char beg)
+               (re-search-forward my/org--appear-syntax-regexp end t)))
+    (my/org-enable-org-appear-now)))
+
+(defun my/org-install-org-appear-watch ()
+  "Install the cheap on-demand watcher for `org-appear-mode'."
+  (unless my/org--appear-watch-installed
+    (setq-local my/org--appear-watch-installed t)
+    (add-hook 'after-change-functions
+              #'my/org-enable-org-appear-on-insert nil t)
+    (add-hook 'change-major-mode-hook
+              #'my/org-cleanup-org-appear-watch nil t)
+    (add-hook 'kill-buffer-hook
+              #'my/org-cleanup-org-appear-watch nil t)))
+
+(defun my/org-cleanup-org-appear-watch ()
+  "Remove the on-demand watcher for `org-appear-mode'."
+  (remove-hook 'after-change-functions
+               #'my/org-enable-org-appear-on-insert t)
+  (remove-hook 'change-major-mode-hook
+               #'my/org-cleanup-org-appear-watch t)
+  (remove-hook 'kill-buffer-hook
+               #'my/org-cleanup-org-appear-watch t)
+  (setq-local my/org--appear-watch-installed nil))
 
 (defun my/org-enable-org-fragtog-maybe ()
   "Enable `org-fragtog-mode' for Org buffers in graphical sessions."
