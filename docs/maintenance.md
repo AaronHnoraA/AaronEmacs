@@ -227,6 +227,12 @@ leader 入口：
 - `(my/performance-org-buffer-snapshot)`
   返回 Org buffer 的可见性、局部 hook 数量、LaTeX queue/overlay/pending 等状态。
 
+默认低功耗取向：
+
+- auto-revert 优先使用文件通知，普通 buffer 不做高频轮询；PDF buffer 单独保留较快刷新。
+- LSP/Flymake/Copilot/company/Treemacs/Org Roam 的自动后台工作都做了短延迟合并，避免每次按键后立刻唤醒一串任务。
+- diagnostics mode line 使用缓存，只在 buffer 变化或 Flymake 发布新诊断后重新统计。
+
 记录保存在 [var/performance/](../var/performance/)：
 
 - `s` 会把当前采样追加到当天的 `performance-YYYYMMDD.tsv`。

@@ -634,7 +634,7 @@ following."
 (defvar my/treemacs-last-follow-state nil
   "Last source context synchronized to Treemacs.")
 
-(defcustom my/treemacs-cursor-follow-delay 0.12
+(defcustom my/treemacs-cursor-follow-delay 0.35
   "Idle delay before Treemacs follows the current file and symbol."
   :type 'number
   :group 'my/project)
@@ -1022,12 +1022,12 @@ Returns the number of killed buffers."
   (setq treemacs-buffer-name-function #'treemacs-default-buffer-name
         treemacs-buffer-name-prefix " *Treemacs-Buffer-"
         treemacs-collapse-dirs (if treemacs-python-executable 3 0)
-        treemacs-deferred-git-apply-delay 0.5
+        treemacs-deferred-git-apply-delay 1.0
         treemacs-default-visit-action 'treemacs-visit-node-in-most-recently-used-window
         treemacs-directory-name-transformer #'identity
         treemacs-display-in-side-window t
         treemacs-eldoc-display 'simple
-        treemacs-file-event-delay 2000
+        treemacs-file-event-delay 3000
         treemacs-file-name-transformer #'identity
         treemacs-follow-after-init nil
         treemacs-expand-after-init t
@@ -1064,7 +1064,7 @@ Returns the number of killed buffers."
         treemacs-tag-follow-delay 1.5
         treemacs-width 35
         treemacs-width-is-initially-locked nil
-        treemacs-file-follow-delay 0.2
+        treemacs-file-follow-delay 0.4
         treemacs-workspace-switch-cleanup nil
         imenu-auto-rescan t)
   ;; In practice evil's motion-state mouse bindings can shadow treemacs' own

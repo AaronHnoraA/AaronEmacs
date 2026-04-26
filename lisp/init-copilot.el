@@ -14,10 +14,39 @@
 (declare-function my/forward-delimiter-dwim "init-funcs" ())
 (declare-function my/backward-delimiter-or-snippet-dwim "init-funcs" ())
 
-(defun my/copilot-available-p ()
-  "Return non-nil when Copilot can start in the current environment."
+(defgroup my/copilot nil
+  "Copilot integration defaults."
+  :group 'tools)
+
+(defcustom my/copilot-idle-delay 0.55
+  "Idle seconds before Copilot asks for inline completions."
+  :type '(choice (number :tag "Seconds of delay")
+                 (const :tag "Inline completion disabled" nil))
+  :group 'my/copilot)
+
+(defcustom my/copilot-large-buffer-threshold (* 1024 1024)
+  "Maximum buffer size where Copilot is auto-enabled.
+Large generated files can make inline completion unnecessarily expensive."
+  :type 'integer
+  :group 'my/copilot)
+
+(defcustom my/copilot-disable-on-remote t
+  "Whether to skip automatic Copilot startup in remote buffers."
+  :type 'boolean
+  :group 'my/copilot)
+
+(defun my/copilot-buffer-eligible-p ()
+  "Return non-nil when the current buffer is cheap enough for Copilot."
   (and (not buffer-read-only)
        (not (minibufferp))
+       (or (not my/copilot-disable-on-remote)
+           (not (file-remote-p default-directory)))
+       (or (null my/copilot-large-buffer-threshold)
+           (<= (buffer-size) my/copilot-large-buffer-threshold))))
+
+(defun my/copilot-available-p ()
+  "Return non-nil when Copilot can start in the current environment."
+  (and (my/copilot-buffer-eligible-p)
        ;; `use-package' only installs the hooks here; the library itself may
        ;; still be unloaded when the first editable buffer opens.
        (or (featurep 'copilot)
@@ -103,7 +132,7 @@
          (org-src-mode . my/copilot-auto-enable-h))
   :custom
   (copilot-install-dir (expand-file-name "var/copilot" user-emacs-directory))
-  (copilot-idle-delay 0.30)
+  (copilot-idle-delay my/copilot-idle-delay)
   (copilot-indent-offset-warning-disable t)
   (copilot-lsp-settings '(:github (:copilot ())))
   :config

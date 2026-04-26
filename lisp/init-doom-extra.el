@@ -31,11 +31,11 @@
 (use-package autorevert
   :ensure nil
   :custom
-  (auto-revert-avoid-polling nil)
+  (auto-revert-avoid-polling t)
   (auto-revert-check-vc-info nil)
-  (auto-revert-interval 2)
+  (auto-revert-interval 5)
   (auto-revert-remote-files nil)
-  (auto-revert-stop-on-user-input nil)
+  (auto-revert-stop-on-user-input t)
   (auto-revert-use-notify t)
   (global-auto-revert-non-file-buffers t)
   (auto-revert-verbose nil)
@@ -155,7 +155,7 @@
       (cancel-timer my/auto-revert--focus-check-timer))
     (setq my/auto-revert--focus-check-timer
           (run-with-idle-timer
-           0.2 nil
+           0.5 nil
            (lambda ()
              (ignore-errors
                (my/auto-revert-check-stale-buffers-h))))))

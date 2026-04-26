@@ -99,7 +99,7 @@ Each entry is a plist with keys such as `:modes', `:program',
 (defvar-local my/flymake-diagnostic-at-point-last-text nil
   "Last diagnostic text shown by `my/flymake-diagnostic-at-point-mode'.")
 
-(defcustom my/flymake-diagnostic-at-point-delay 0.2
+(defcustom my/flymake-diagnostic-at-point-delay 0.45
   "Seconds to wait before echoing the Flymake diagnostic at point."
   :type 'number
   :group 'my/language-server)
@@ -657,7 +657,7 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   "Enable popup completion for Eshell with CAPF/pcomplete."
   (company-mode 1)
   (setq-local company-backends my/company-shell-backends)
-  (setq-local company-idle-delay 0.08)
+  (setq-local company-idle-delay 0.15)
   (setq-local company-minimum-prefix-length 1))
 
 (use-package company
@@ -679,7 +679,7 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
     "Try default completion styles."
     (let ((completion-styles '(basic partial-completion)))
       (apply func args)))
-  (setq company-idle-delay 0.12
+  (setq company-idle-delay 0.18
         company-minimum-prefix-length 1
         company-show-quick-access t
         company-require-match nil
@@ -717,7 +717,7 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   :if window-system
   :hook (company-mode . company-box-mode)
   :custom
-  (company-box-doc-delay 0.2)
+  (company-box-doc-delay 0.45)
   (company-box-scrollbar nil)
   :config
   (define-advice company-box--handle-scroll-parent
@@ -764,7 +764,7 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
          ("C-c !" . my/problems-buffer)
          ("C-c ?" . my/diagnostics-dispatch))
   :custom
-  (flymake-no-changes-timeout 0.2) ; 输入停顿 0.2s 后自动检查
+  (flymake-no-changes-timeout 0.6) ; 输入停顿后再自动检查，减少每次按键后的后台唤醒。
   (flymake-indicator-type 'fringes))
 
 ;; 光标停在报错位置时，在 minibuffer 显示诊断
@@ -823,7 +823,7 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
   (eglot-autoshutdown t)
   (eglot-auto-display-help-buffer nil)
   (eglot-code-action-indications nil)
-  (eglot-send-changes-idle-time 0.2)
+  (eglot-send-changes-idle-time 0.5)
   (eglot-extend-to-xref t)
   (eglot-events-buffer-size 0)
   (read-process-output-max (* 1024 1024)))

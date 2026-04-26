@@ -64,6 +64,11 @@ Only fall back to `pdf-tools-install' when the checker fails."
   :type 'number
   :group 'TeX-command)
 
+(defcustom my/pdf-view-auto-refresh-interval 1.2
+  "Polling fallback interval for PDF buffers when file notifications are absent."
+  :type 'number
+  :group 'TeX-command)
+
 (defvar-local my/auctex-live-preview--save-timer nil)
 
 (defun my/auctex-live-preview--cancel-save-timer ()
@@ -159,7 +164,9 @@ Only fall back to `pdf-tools-install' when the checker fails."
 
 (defun my/pdf-view-enable-auto-refresh ()
   "Auto-refresh PDF buffers when the underlying file changes."
-  (setq-local auto-revert-interval 0.5)
+  (setq-local auto-revert-use-notify t
+              auto-revert-avoid-polling nil
+              auto-revert-interval my/pdf-view-auto-refresh-interval)
   (auto-revert-mode 1))
 
 (defconst my/pdf-tools-enabled-modes

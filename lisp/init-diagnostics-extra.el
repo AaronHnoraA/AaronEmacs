@@ -28,6 +28,12 @@
 (defvar my/diagnostics--refresh-timer nil
   "Idle timer used to coalesce diagnostics UI refreshes.")
 
+(defvar-local my/diagnostics--modeline-cache nil
+  "Cached diagnostics mode line string for the current buffer.")
+
+(defvar-local my/diagnostics--modeline-cache-key nil
+  "Buffer state key used by `my/diagnostics--modeline-cache'.")
+
 (defun my/diagnostics--counts (&optional diags)
   "Return diagnostic counts for DIAGS or the current buffer."
   (let ((errors 0)
@@ -40,23 +46,42 @@
         (_ (setq notes (1+ notes)))))
     (list :error errors :warning warnings :note notes)))
 
+(defun my/diagnostics--format-modeline-counts (counts)
+  "Return a compact mode line string for diagnostic COUNTS."
+  (pcase-let* ((errors (plist-get counts :error))
+               (warnings (plist-get counts :warning))
+               (notes (plist-get counts :note)))
+    (when (> (+ errors warnings notes) 0)
+      (concat
+       " Fly:"
+       (when (> errors 0)
+         (propertize (format " E%s" errors) 'face 'error))
+       (when (> warnings 0)
+         (propertize (format " W%s" warnings) 'face 'warning))
+       (when (> notes 0)
+         (propertize (format " N%s" notes) 'face 'success))))))
+
+(defun my/diagnostics--clear-modeline-cache (&rest _)
+  "Clear cached diagnostics modeline state in the current buffer."
+  (setq-local my/diagnostics--modeline-cache nil
+              my/diagnostics--modeline-cache-key nil))
+
+(defun my/diagnostics--clear-modeline-cache-a (&rest _)
+  "Clear diagnostics modeline cache after Flymake publishes diagnostics."
+  (my/diagnostics--clear-modeline-cache)
+  (force-mode-line-update t))
+
 (defun my/diagnostics-modeline-string ()
   "Return a compact Flymake status string for the mode line."
   (when (and my/diagnostics-modeline-mode
              (bound-and-true-p flymake-mode))
-    (pcase-let* ((counts (my/diagnostics--counts))
-                 (errors (plist-get counts :error))
-                 (warnings (plist-get counts :warning))
-                 (notes (plist-get counts :note)))
-      (when (> (+ errors warnings notes) 0)
-        (concat
-         " Fly:"
-         (when (> errors 0)
-           (propertize (format " E%s" errors) 'face 'error))
-         (when (> warnings 0)
-           (propertize (format " W%s" warnings) 'face 'warning))
-         (when (> notes 0)
-           (propertize (format " N%s" notes) 'face 'success)))))))
+    (let ((key (list (buffer-chars-modified-tick) (buffer-size))))
+      (unless (equal key my/diagnostics--modeline-cache-key)
+        (setq-local my/diagnostics--modeline-cache-key key)
+        (setq-local my/diagnostics--modeline-cache
+                    (my/diagnostics--format-modeline-counts
+                     (my/diagnostics--counts))))
+      my/diagnostics--modeline-cache)))
 
 (define-minor-mode my/diagnostics-modeline-mode
   "Show current Flymake counts in the mode line."
@@ -71,6 +96,13 @@
     (setq mode-line-misc-info
           (delete my/diagnostics--modeline-cookie mode-line-misc-info)))
   (force-mode-line-update t))
+
+(with-eval-after-load 'flymake
+  (when (fboundp 'flymake--publish-diagnostics)
+    (advice-remove 'flymake--publish-diagnostics
+                   #'my/diagnostics--clear-modeline-cache-a)
+    (advice-add 'flymake--publish-diagnostics
+                :after #'my/diagnostics--clear-modeline-cache-a)))
 
 (defun my/diagnostics--refresh-open-buffers (&rest _)
   "Refresh open diagnostics buffers and mode lines."

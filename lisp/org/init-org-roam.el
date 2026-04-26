@@ -12,7 +12,7 @@
   :type 'number
   :group 'my/org-ui)
 
-(defcustom my/org-roam-buffer-redisplay-idle-delay 0.08
+(defcustom my/org-roam-buffer-redisplay-idle-delay 0.20
   "Idle delay used to coalesce Org Roam side-buffer follow refreshes.
 The upstream hook runs from `post-command-hook'; this delay keeps the side
 buffer following point while avoiding repeated node lookups during continuous
