@@ -1523,8 +1523,22 @@ DEFAULT-BG defaults to `my/org-default-background'."
                                         scan-end t)
                 (let ((line-begin (match-beginning 0)))
                   (goto-char line-begin)
-                  (let* ((element (org-element-at-point))
-                         (type (and (eq (org-element-type element)
+                  ;; Cheap pre-filter: read the block type from the begin
+                  ;; line and check our config before paying for the full
+                  ;; org-element parse. Most #+begin_ lines in a typical
+                  ;; buffer are src/example/quote/verse, none of which
+                  ;; appear in `my/org-special-block-styles', so this lets
+                  ;; us skip `org-element-at-point' for the common case.
+                  (let* ((line-type
+                          (and (looking-at
+                                "[ \t]*#\\+begin_\\([A-Za-z][A-Za-z0-9_-]*\\)")
+                               (match-string-no-properties 1)))
+                         (configured (and line-type
+                                          (my/org-special-block-config
+                                           line-type)))
+                         (element (and configured (org-element-at-point)))
+                         (type (and element
+                                    (eq (org-element-type element)
                                         'special-block)
                                     (org-element-property :type element)))
                          (begin (and type
@@ -1534,7 +1548,6 @@ DEFAULT-BG defaults to `my/org-default-background'."
                     (when (and begin
                                end-pos
                                (not (gethash begin seen))
-                               (my/org-special-block-config type)
                                (< begin end)
                                (> end-pos start))
                       (puthash begin t seen)

@@ -1045,8 +1045,13 @@ fallback edit render."
                   (unless curr-range
                     (my/org-latex--clear-edit-preview-marker)))
                 (setq my/org-latex--post-command-range curr-range)))))
-          (setq my/org-latex--post-command-point (point))))
-      (my/org-latex--maybe-refresh-selected-viewport))))
+          (setq my/org-latex--post-command-point (point)))
+        ;; Viewport refresh only needs to run when this post-command tick
+        ;; differs from the cached one. `window-scroll-functions' covers the
+        ;; case where the user mouse-scrolls without changing point or tick,
+        ;; so leaving this inside the cache miss avoids redundant per-cmd
+        ;; work when point and buffer are unchanged.
+        (my/org-latex--maybe-refresh-selected-viewport)))))
 
 (defun my/org-latex--visible-range (&optional window)
   "Return (beg . end) for WINDOW's visible range in the current buffer."
