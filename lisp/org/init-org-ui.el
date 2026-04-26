@@ -21,6 +21,7 @@
 (defvar-local my/org--valign-table-watch-installed nil)
 (defvar-local my/org--pretty-block-watch-installed nil)
 (defvar-local my/org-appear--last-post-command-key nil)
+(defvar-local my/org-modern--pre-redisplay-signature nil)
 (defvar my/org-special-block--palette-cache (make-hash-table :test #'equal))
 
 (defcustom my/org-pretty-block-cache-max-entries 256
@@ -389,6 +390,34 @@ its rendered appearance in insert state."
               :weight medium)
           (t :background ,(aaron-ui-color 'bg-surface-strong)
              :foreground ,(aaron-ui-color 'fg-main)))))
+
+(defun my/org-modern--pre-redisplay-signature ()
+  "Return the Org Modern display parameters that can affect redisplay."
+  (list (face-attribute 'org-modern-label :box nil t)
+        (face-attribute 'default :background nil t)
+        (face-attribute 'org-table :foreground nil t)
+        (and (boundp 'org-modern--table-overline)
+             (cadr org-modern--table-overline))
+        (and (boundp 'org-modern--table-sp-width)
+             org-modern--table-sp-width)
+        (default-font-width)
+        face-remapping-alist))
+
+(defun my/org-modern-pre-redisplay-cached-a (orig window)
+  "Skip repeated Org Modern pre-redisplay work while display inputs match."
+  (if (and (derived-mode-p 'org-mode)
+           (bound-and-true-p org-modern-mode))
+      (let ((signature (my/org-modern--pre-redisplay-signature)))
+        (unless (equal signature my/org-modern--pre-redisplay-signature)
+          (funcall orig window)
+          (setq-local my/org-modern--pre-redisplay-signature
+                      (my/org-modern--pre-redisplay-signature))))
+    (funcall orig window)))
+
+(unless (advice-member-p #'my/org-modern-pre-redisplay-cached-a
+                         'org-modern--pre-redisplay)
+  (advice-add 'org-modern--pre-redisplay
+              :around #'my/org-modern-pre-redisplay-cached-a))
 
 (defun my/org-apply-ui ()
   "Apply the local document UI to Org and Org Modern faces."

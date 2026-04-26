@@ -994,12 +994,10 @@ fallback edit render."
 (defun my/org-latex-post-command-function ()
   "Re-enable preview when point leaves a LaTeX fragment."
   (when (my/org-latex--async-preview-active-p)
-    (let* ((window (get-buffer-window (current-buffer) t))
-           (key (list (point)
-                      (buffer-chars-modified-tick)
-                      my/org-latex--post-command-range
-                      this-command
-                      (and window (window-start window)))))
+    (let ((key (list (point)
+                     (buffer-chars-modified-tick)
+                     my/org-latex--post-command-range
+                     this-command)))
       (unless (equal key my/org-latex--last-post-command-key)
         (setq my/org-latex--last-post-command-key key)
         ;; Safety net: if an image overlay still covers point, fragtog failed
@@ -1037,8 +1035,8 @@ fallback edit render."
                 (unless curr-range
                   (my/org-latex--clear-edit-preview-marker)))
               (setq my/org-latex--post-command-range curr-range)))))
-        (setq my/org-latex--post-command-point (point))
-        (my/org-latex--maybe-refresh-selected-viewport)))))
+        (setq my/org-latex--post-command-point (point)))
+      (my/org-latex--maybe-refresh-selected-viewport))))
 
 (defun my/org-latex--visible-range (&optional window)
   "Return (beg . end) for WINDOW's visible range in the current buffer."
