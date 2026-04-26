@@ -841,7 +841,7 @@ for the cache update so we never compute it twice in one redisplay."
   (org-appear-inside-latex nil)
   ;; 光标进入 `^{}' / `_{}' 时显示标记，避免编辑时只看到渲染结果。
   (org-appear-autosubmarkers t)
-  (org-appear-delay 0.08)
+  (org-appear-delay 0.16)
   :config
   (defun my/org-appear-post-command-guard (orig)
     "Skip `org-appear--post-cmd' when point and edit state did not change.

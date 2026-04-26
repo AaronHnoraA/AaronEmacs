@@ -85,12 +85,12 @@ Each value may be a readable `.cls' file path or literal class source."
     ("\\subparagraph{%s}" . "\\subparagraph*{%s}"))
   "Fallback sectioning used for embedded Org LaTeX classes.")
 
-(defcustom my/org-latex-preview-idle-delay 0.28
+(defcustom my/org-latex-preview-idle-delay 0.45
   "Idle delay (seconds) before the first visible-region preview."
   :type 'number
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-scroll-idle-delay 0.16
+(defcustom my/org-latex-preview-scroll-idle-delay 0.30
   "Debounce delay (seconds) before previewing visible region after scrolling."
   :type 'number
   :group 'my/org-latex-preview)
@@ -103,17 +103,17 @@ debounce after scrolling settles."
                  number)
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-min-chars 80
+(defcustom my/org-latex-preview-min-chars 160
   "Minimum visible region size (chars) required to trigger preview."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-overscan-lines 6
+(defcustom my/org-latex-preview-overscan-lines 2
   "Number of lines around the visible window to pre-render opportunistically."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-lookahead-lines 18
+(defcustom my/org-latex-preview-lookahead-lines 6
   "Number of lines below the visible window to pre-render opportunistically.
 This intentionally defaults higher than `my/org-latex-preview-overscan-lines'
 because scrolling through notes usually moves forward, and cached previews
@@ -121,12 +121,12 @@ should be ready before their source enters the window."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-max-concurrency 2
+(defcustom my/org-latex-preview-max-concurrency 1
   "Maximum number of concurrent LaTeX preview render jobs."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-edit-extra-concurrency 1
+(defcustom my/org-latex-preview-edit-extra-concurrency 0
   "Extra render slots reserved for the fragment currently being edited.
 This keeps edit pre-rendering responsive even when automatic visible-area
 renders already occupy the normal concurrency budget."
@@ -152,17 +152,17 @@ Set to nil to keep the full log."
                  integer)
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-edit-idle-delay 0.24
+(defcustom my/org-latex-preview-edit-idle-delay 0.45
   "Idle delay (seconds) before pre-rendering the fragment being edited."
   :type 'number
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-leave-confirm-delay 0.12
+(defcustom my/org-latex-preview-leave-confirm-delay 0.20
   "Idle delay before confirming preview placement after leaving a fragment."
   :type 'number
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-while-editing t
+(defcustom my/org-latex-preview-while-editing nil
   "Whether to pre-render LaTeX fragments while point is still editing them.
 When non-nil, edits debounce a preview refresh for the current fragment so the
 render is usually ready before point leaves it."
@@ -540,6 +540,7 @@ render is usually ready before point leaves it."
 (defvar-local my/org-latex--last-visible-range nil)
 (defvar-local my/org-latex--last-visible-preview-time 0.0)
 (defvar-local my/org-latex--scroll-preview-enabled nil)
+(defvar-local my/org-latex--edit-post-command-enabled nil)
 (defvar-local my/org-latex--fragment-syntax-cache nil)
 (defvar-local my/org-latex--syntax-watch-installed nil)
 (defvar-local my/org-latex--suppress-scroll-preview nil)
@@ -811,6 +812,18 @@ render is usually ready before point leaves it."
   (setq my/org-latex--preview-timer nil
         my/org-latex--preview-follow-timer nil))
 
+(defun my/org-latex--enable-edit-post-command ()
+  "Install the fragment-edit tracking post-command hook for this buffer."
+  (unless my/org-latex--edit-post-command-enabled
+    (setq-local my/org-latex--edit-post-command-enabled t)
+    (add-hook 'post-command-hook #'my/org-latex-post-command-function nil t)))
+
+(defun my/org-latex--disable-edit-post-command ()
+  "Remove the fragment-edit tracking post-command hook for this buffer."
+  (when my/org-latex--edit-post-command-enabled
+    (setq-local my/org-latex--edit-post-command-enabled nil)
+    (remove-hook 'post-command-hook #'my/org-latex-post-command-function t)))
+
 (defun my/org-latex--ratex-edit-session-active-p ()
   "Return non-nil when RaTeX is actively editing a formula in this Org buffer."
   (and (bound-and-true-p ratex-mode)
@@ -967,6 +980,7 @@ fallback edit render."
                  (my/org-latex--change-in-tracked-range-p beg end)))
     (if-let* ((frag (my/org-latex--fragment-around-change beg end)))
         (progn
+          (my/org-latex--enable-edit-post-command)
           (my/org-latex--cancel-leave-preview)
           (setq my/org-latex--post-command-range
                 (my/org-latex--fragment-range frag))
@@ -977,7 +991,8 @@ fallback edit render."
       (setq my/org-latex--post-command-range nil)
       (my/org-latex--cancel-edit-preview-timer)
       (my/org-latex--cancel-leave-preview)
-      (my/org-latex--clear-edit-preview-marker))))
+      (my/org-latex--clear-edit-preview-marker)
+      (my/org-latex--disable-edit-post-command))))
 
 (defun my/org-latex--maybe-refresh-selected-viewport ()
   "Schedule a visible preview if the selected window moved to a new viewport."
@@ -1046,12 +1061,10 @@ fallback edit render."
                     (my/org-latex--clear-edit-preview-marker)))
                 (setq my/org-latex--post-command-range curr-range)))))
           (setq my/org-latex--post-command-point (point)))
-        ;; Viewport refresh only needs to run when this post-command tick
-        ;; differs from the cached one. `window-scroll-functions' covers the
-        ;; case where the user mouse-scrolls without changing point or tick,
-        ;; so leaving this inside the cache miss avoids redundant per-cmd
-        ;; work when point and buffer are unchanged.
-        (my/org-latex--maybe-refresh-selected-viewport)))))
+        (when (and (null my/org-latex--post-command-range)
+                   (not (timerp my/org-latex--leave-preview-timer))
+                   (not (timerp my/org-latex--edit-preview-timer)))
+          (my/org-latex--disable-edit-post-command))))))
 
 (defun my/org-latex--visible-range (&optional window)
   "Return (beg . end) for WINDOW's visible range in the current buffer."
@@ -2238,7 +2251,7 @@ queued work."
   (setq-local my/org-latex--scroll-preview-enabled nil)
   (my/org-latex-cleanup-syntax-watch)
   (remove-hook 'after-change-functions #'my/org-latex-after-change-function t)
-  (remove-hook 'post-command-hook #'my/org-latex-post-command-function t)
+  (my/org-latex--disable-edit-post-command)
   (remove-hook 'window-scroll-functions #'my/org-latex--window-scroll-preview-hook t)
   (remove-hook 'window-size-change-functions #'my/org-latex--window-size-preview-hook t)
   (remove-hook 'change-major-mode-hook #'my/org-latex-cleanup-scroll-preview t)
@@ -2280,8 +2293,6 @@ queued work."
           (my/org-latex--ensure-state)
           (add-hook 'after-change-functions
                     #'my/org-latex-after-change-function nil t)
-          (add-hook 'post-command-hook
-                    #'my/org-latex-post-command-function nil t)
           (add-hook 'window-scroll-functions
                     #'my/org-latex--window-scroll-preview-hook nil t)
           (add-hook 'window-size-change-functions

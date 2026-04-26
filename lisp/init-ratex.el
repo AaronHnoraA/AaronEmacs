@@ -13,8 +13,8 @@
              ratex-diagnose-backend)
   :init
   (setq ratex-edit-preview 'posframe
-        ratex-edit-preview-idle-delay 0.18
-        ratex-edit-preview-scan-lines 2
+        ratex-edit-preview-idle-delay 0.30
+        ratex-edit-preview-scan-lines 1
         ratex-font-size 32.0
         ratex-inline-preview nil
         ratex-debug nil
