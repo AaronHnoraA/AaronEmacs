@@ -420,6 +420,14 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 2. Host 行是不是通配符
 3. 是否真的写成了独立 Host 条目
 
+### `vterm` 升级后显示不刷新
+
+Emacs 31 snapshot 升级后，如果 `vterm` 输出停在旧画面或刷新明显滞后：
+
+1. 先重编 `vterm-module`：`M-x vterm-module-compile`
+2. 重启 Emacs，让新 `.so` 被重新加载
+3. 本配置默认把 `vterm-timer-delay` 设为 `nil`，优先保证终端不假死
+
 ### Dired 排版奇怪
 
 看：

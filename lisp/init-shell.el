@@ -586,6 +586,11 @@ If popup is focused, kill it."
 (use-package vterm
   :ensure t
   :commands (vterm)
+  :init
+  ;; Emacs 31 snapshots have shown stale/delayed VTerm redraws on this setup.
+  ;; Prefer immediate terminal redraws over timer coalescing; large command
+  ;; bursts may cost a little more CPU, but the terminal should not appear stuck.
+  (setq vterm-timer-delay nil)
   :hook (vterm-mode . (lambda ()
                         (shell-mode-common-init)
                         (my/terminal-apply-ui)
