@@ -1018,8 +1018,10 @@ fallback edit render."
 (defun my/org-latex-after-change-function (beg end _len)
   "Track edited LaTeX fragments after changes between BEG and END."
   (when (and (my/org-latex--async-preview-active-p)
-             (or (my/org-latex--change-near-fragment-syntax-p beg end)
-                 (my/org-latex--change-in-tracked-range-p beg end)))
+             ;; Check the cheap O(1) range test first; fall back to the regex
+             ;; scan only when we are not already tracking a fragment range.
+             (or (my/org-latex--change-in-tracked-range-p beg end)
+                 (my/org-latex--change-near-fragment-syntax-p beg end)))
     (if-let* ((frag (my/org-latex--fragment-around-change beg end)))
         (progn
           (my/org-latex--enable-edit-post-command)

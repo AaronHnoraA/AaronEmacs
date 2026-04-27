@@ -785,32 +785,37 @@ never goes fully stale during rapid continuous input."
 
 (defun ratex-post-command ()
   "Debounce active-fragment updates after post-command."
-  (if (not (and ratex-mode
-                (ratex--buffer-visible-p)
-                (or ratex--active-fragment
-                    (ratex--near-math-p))))
+  ;; Check mode/visibility unconditionally so we always hide when the buffer
+  ;; becomes invisible, regardless of point-cache state.
+  (if (not (and ratex-mode (ratex--buffer-visible-p)))
       (ratex--hide-edit-preview)
+    ;; Dedup by point+tick BEFORE calling ratex--near-math-p (regex scan).
+    ;; Also update last-point/tick unconditionally so that when the cursor is
+    ;; away from math the regex is not re-run on every command at the same pos.
     (let ((pt (point))
           (tick (buffer-chars-modified-tick)))
       (unless (and (eql pt ratex--last-point)
                    (eql tick ratex--last-tick))
-        (ratex--cancel-pending-preview)
         (setq-local ratex--last-point pt
-                    ratex--last-tick tick
-                    ratex--preview-timer
-                    (run-with-idle-timer
-                     ratex-edit-preview-idle-delay nil
-                     (lambda (buffer)
-                       (when (buffer-live-p buffer)
-                         (with-current-buffer buffer
-                           (setq ratex--preview-timer nil)
-                           (when (and ratex-mode
-                                      (ratex--buffer-visible-p))
-                             ;; Idle timer fired first — cancel the real-time
-                             ;; fallback so they don't double-render.
-                             (ratex--cancel-force-preview)
-                             (ratex--refresh-preview-now)))))
-                     (current-buffer)))))))
+                    ratex--last-tick tick)
+        (if (or ratex--active-fragment (ratex--near-math-p))
+            (progn
+              (ratex--cancel-pending-preview)
+              (setq-local ratex--preview-timer
+                          (run-with-idle-timer
+                           ratex-edit-preview-idle-delay nil
+                           (lambda (buffer)
+                             (when (buffer-live-p buffer)
+                               (with-current-buffer buffer
+                                 (setq ratex--preview-timer nil)
+                                 (when (and ratex-mode
+                                            (ratex--buffer-visible-p))
+                                   ;; Idle timer fired first — cancel the real-time
+                                   ;; fallback so they don't double-render.
+                                   (ratex--cancel-force-preview)
+                                   (ratex--refresh-preview-now)))))
+                           (current-buffer))))
+          (ratex--hide-edit-preview))))))
 
 (defun ratex--display-edit-preview (fragment &optional response image)
   "Display edit preview for FRAGMENT using the configured style.

@@ -946,6 +946,7 @@ Returns the number of killed buffers."
   (define-key projectile-command-map (kbd "m") #'my/project-magit-status)
   (define-key projectile-command-map (kbd "v") #'my/project-vterm)
   (setq projectile-mode-line "Projectile"
+        projectile-dynamic-mode-line nil
         projectile-track-known-projects-automatically nil)
   (my/project-prune-hidden-project-state)
   :custom
