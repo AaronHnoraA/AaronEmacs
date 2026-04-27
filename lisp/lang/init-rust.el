@@ -26,7 +26,11 @@
      '((:rust-analyzer
         :diagnostics (:disabled ["unresolved-extern-crate"])
         :cargo (:allFeatures t)
-        :checkOnSave (:command "clippy"))))))
+        :checkOnSave (:command "clippy")
+        :lens (:references (:adt (:enable t)
+                            :enumVariant (:enable t)
+                            :method (:enable t)
+                            :trait (:enable t))))))))
 
 (use-package eglot
   :ensure nil
