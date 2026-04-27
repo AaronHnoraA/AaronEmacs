@@ -49,6 +49,15 @@
     (my/direnv-update-environment-maybe default-directory))
   (apply orig-fn args))
 
+(defun my/direnv--sync-after-compile (buffer _status)
+  "Refresh direnv using BUFFER's working directory after compilation finishes.
+
+Runs after every compile/task/test so environment changes made by the task
+(e.g. nix build, nix develop, conda env create) are immediately visible."
+  (unless my/direnv-subprocess-sync-inhibited
+    (with-current-buffer buffer
+      (my/direnv-update-environment-maybe default-directory))))
+
 (use-package direnv
   :ensure t
   :if my/enable-direnv
@@ -58,6 +67,7 @@
   (direnv-always-show-summary nil)
   :config
   (advice-add 'compile :around #'my/direnv--sync-before-subprocess)
+  (add-hook 'compilation-finish-functions #'my/direnv--sync-after-compile)
   (direnv-mode 1))
 
 (provide 'init-direnv)
