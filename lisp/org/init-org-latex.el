@@ -2387,6 +2387,8 @@ Anywhere else: run `org-return' as usual."
 
 (with-eval-after-load 'ox-latex
   (setq org-latex-compiler "xelatex")
+  (setq org-latex-pdf-process
+        '("latexmk -xelatex -interaction=nonstopmode -synctex=1 -output-directory=%o %f"))
   (setq org-latex-default-class my/org-latex-default-class-name)
   (unless (assoc my/org-latex-default-class-name org-latex-classes)
     (add-to-list 'org-latex-classes
@@ -2401,6 +2403,8 @@ Anywhere else: run `org-return' as usual."
 (with-eval-after-load 'org
   (setq org-latex-default-packages-alist
         (copy-tree my/org-latex-export-default-packages-alist))
+  (setq org-latex-pdf-process
+        '("latexmk -xelatex -interaction=nonstopmode -synctex=1 -output-directory=%o %f"))
   (setq org-latex-packages-alist nil)
 
   ;; 2. 定义处理程序 (保持不变)
