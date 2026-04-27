@@ -1046,24 +1046,27 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
   (dape-toolbar-mode 1))
 
 ;;; ── CodeLens ──────────────────────────────────────────────────────────────
-;; Performance notes:
-;;   • eglot-codelens-mode is buffer-local and guards all hooks behind the
-;;     mode variable, so teardown is clean when the mode is disabled.
-;;   • Three debounced timers per managed buffer:
-;;       update  (document changes) – kept at 0.5 s to match eglot-send-changes-idle-time
-;;       refresh (scroll/window)    – raised to 0.5 s (default 0.25 s was too chatty
-;;                                    on fast scrolling; reduces overlay churn)
-;;       resolve (LSP resolve queue) – kept at 0.25 s (post-fetch, bounded by queue size)
-;;   • window-scroll-functions and window-configuration-change-hook are both
-;;     buffer-local, so they don't fire in non-codelens buffers.
+;; Off by default. Toggle with SPC c L.
+;; When enabled, automatically re-initialises after eglot reconnects.
 (use-package eglot-codelens
   :load-path "~/.emacs.d/site-lisp/codelens"
   :after eglot
   :commands eglot-codelens-mode
-  :hook (eglot-managed-mode . eglot-codelens-mode)
   :custom
   (eglot-codelens-update-delay 0.5)
-  (eglot-codelens-visible-refresh-delay 0.5))
+  (eglot-codelens-visible-refresh-delay 0.5)
+  :config
+  (defun my/eglot-codelens-managed-mode-h ()
+    "Sync CodeLens with eglot lifecycle — re-fetch on connect, clean up on disconnect."
+    (when eglot-codelens-mode
+      (if (and (eglot-managed-p)
+               (eglot-current-server)
+               (eglot-server-capable :codeLensProvider))
+          (progn
+            (eglot-codelens--setup-buffer)
+            (eglot-codelens--fetch-codelens))
+        (eglot-codelens--cleanup-buffer))))
+  (add-hook 'eglot-managed-mode-hook #'my/eglot-codelens-managed-mode-h))
 
 (provide 'init-lsp)
 ;;; init-lsp.el ends here

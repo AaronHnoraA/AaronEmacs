@@ -429,6 +429,7 @@
     "cI" 'eldoc-box-help-at-point
     "ck" 'kill-compilation
     "cl" '+switch-to-compilation
+    "cL" 'eglot-codelens-mode
     "cj" 'dape
     "cr" 'my/language-server-rename
     "cw" 'delete-trailing-whitespace
