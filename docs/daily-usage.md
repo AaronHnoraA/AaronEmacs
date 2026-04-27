@@ -401,6 +401,27 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
   批量扫描目录下的项目
 - `SPC p x`
   彻底移除一个项目及其相关状态（包含 Projectile、`project.el`、Treemacs、perspective、项目 buffer/vterm）
+- `SPC p l`
+  查看当前项目 project-local overrides（来自 `my/project-local-overrides` 全局配置）
+- `SPC p L`
+  快捷打开 `.dir-locals.el`（同 `SPC p e e`）
+
+### Dir-locals / 项目环境 `SPC p e`
+
+- `SPC p e e`
+  编辑当前项目 `.dir-locals.el`
+- `SPC p e c`
+  从模板创建 `.dir-locals.el`
+- `SPC p e m`
+  将模板合并进现有 `.dir-locals.el`
+- `SPC p e r`
+  重载 dir-locals 并刷新 direnv 环境（PATH 等）
+- `SPC p e s`
+  将所有非 `eval` 变量静默（加入 `safe-local-variable-values`）
+- `SPC p e d`
+  查看哪些 dir-locals 条目对当前 buffer 生效
+
+可用模板：`python-venv`、`python-uv`、`python-conda`、`cc-cmake`、`cc-meson`、`nix-flake`、`nix-gcc`、`nix-clang`、`nix-shell`、`sagemath`、`node`、`lsp-workspace`、`emacs-lisp`、`indent-2`、`indent-4`、`direnv`。详见 [settings-cookbook.md § 16](settings-cookbook.md)。
 
 ## 3. 搜索与跳转
 

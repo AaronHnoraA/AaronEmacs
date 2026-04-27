@@ -1,0 +1,10 @@
+;; C/C++ project using Meson (build dir: ./builddir/)
+((nil . ((my/project-local-settings
+          . (:task (("setup"  . "meson setup builddir")
+                   ("build"  . "meson compile -C builddir")
+                   ("test"   . "meson test -C builddir"))
+             :run  (("run" . "./builddir/main"))))))
+ (c-ts-mode   . ((compile-command . "meson compile -C builddir") (c-basic-offset . 4)))
+ (c++-ts-mode . ((compile-command . "meson compile -C builddir") (c-basic-offset . 4)))
+ (c-mode      . ((compile-command . "meson compile -C builddir") (c-basic-offset . 4)))
+ (c++-mode    . ((compile-command . "meson compile -C builddir") (c-basic-offset . 4))))

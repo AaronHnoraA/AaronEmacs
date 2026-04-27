@@ -27,7 +27,8 @@
     (ts . "default.ts")
     (sh . "default.sh")
     (tex . "article.tex")
-    (python . "default.py"))
+    (python . "default.py")
+    (nix . "default.nix"))
   "Current template filename per template kind.
 
 Each entry is (KIND . FILENAME), where KIND maps to templates/KIND/FILENAME."
@@ -35,11 +36,11 @@ Each entry is (KIND . FILENAME), where KIND maps to templates/KIND/FILENAME."
   :group 'my/template)
 
 (defconst my/template-kinds
-  '(org c cc js ts sh tex python)
+  '(org c cc js ts sh tex python nix)
   "Template kinds supported by this configuration.")
 
 (defcustom my/template-auto-insert-enabled-kinds
-  '(c cc sh python)
+  '(c cc sh python nix)
   "Template kinds enabled for `auto-insert-mode'.
 
 Only kinds in this list will be auto-inserted for new files.  Other kinds can
@@ -103,6 +104,7 @@ first and then opening it."
       ("c" 'c)
       ((or "sh" "bash" "zsh") 'sh)
       ("tex" 'tex)
+      ("nix" 'nix)
       (_ nil))))
 
 (defun my/template--kind (&optional file)
@@ -115,6 +117,7 @@ first and then opening it."
        ((or (derived-mode-p 'c-mode) (eq major-mode 'c-ts-mode)) 'c)
        ((or (derived-mode-p 'sh-mode) (eq major-mode 'bash-ts-mode)) 'sh)
        ((or (derived-mode-p 'tex-mode) (derived-mode-p 'latex-mode) (derived-mode-p 'LaTeX-mode) (eq major-mode 'latex-ts-mode)) 'tex)
+       ((or (derived-mode-p 'nix-mode) (eq major-mode 'nix-ts-mode)) 'nix)
        (t nil))
       (my/template--kind-for-extension (or file buffer-file-name))))
 
@@ -313,7 +316,11 @@ name, falling back to a prompt."
   (define-auto-insert (rx ".zsh" string-end)
     (lambda () (my/template-auto-insert 'sh "default.zsh")))
   (define-auto-insert (rx ".tex" string-end)
-    (lambda () (my/template-auto-insert 'tex))))
+    (lambda () (my/template-auto-insert 'tex)))
+  (define-auto-insert (rx "/flake.nix" string-end)
+    (lambda () (my/template-auto-insert 'nix)))
+  (define-auto-insert (rx ".nix" string-end)
+    (lambda () (my/template-auto-insert 'nix))))
 
 (provide 'init-auto-insert)
 ;;; init-auto-insert.el ends here

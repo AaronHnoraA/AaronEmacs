@@ -1,0 +1,11 @@
+;; Project-wide 2-space indentation
+((nil . ((indent-tabs-mode . nil)
+         (tab-width . 2)
+         (fill-column . 100)))
+ (python-ts-mode     . ((python-indent-offset . 2)))
+ (python-mode        . ((python-indent-offset . 2)))
+ (js-ts-mode         . ((js-indent-level . 2)))
+ (typescript-ts-mode . ((typescript-indent-level . 2)))
+ (tsx-ts-mode        . ((typescript-indent-level . 2)))
+ (css-ts-mode        . ((css-indent-offset . 2)))
+ (json-ts-mode       . ((js-indent-level . 2))))

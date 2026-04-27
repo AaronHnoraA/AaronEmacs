@@ -70,6 +70,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-workspaces)
 (require 'init-scratch)
 (require 'init-project-local)
+(require 'init-dir-locals)
 (require 'init-rename)
 (require 'init-harpoon)
 (require 'init-test)

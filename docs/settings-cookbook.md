@@ -422,5 +422,48 @@ emacs --debug-init -q -l ./bootstrap.el
 
 说明：
 
-- `my/template-current-override` 只接受“文件名”（不能带路径分隔符），指向 `templates/<kind>/` 下的模板文件
+- `my/template-current-override` 只接受”文件名”（不能带路径分隔符），指向 `templates/<kind>/` 下的模板文件
 - 新建文件模板只保留这一套内置 `auto-insert`（已移除 Doom 那套 Yasnippet file-templates 的遗留实现，避免重复/分叉维护）
+
+## 16. 我要配置项目本地 `.dir-locals.el`
+
+文件：
+
+- [lisp/init-dir-locals.el](../lisp/init-dir-locals.el)
+- [templates/emacs/](../templates/emacs/)
+
+入口（`SPC p e`）：
+
+- `SPC p e e`  编辑当前项目的 `.dir-locals.el`
+- `SPC p e c`  从模板创建 `.dir-locals.el`（如已有则确认替换）
+- `SPC p e m`  将某个模板合并进现有 `.dir-locals.el`（按 mode key 合并，模板优先）
+- `SPC p e r`  重新加载当前 buffer 的 dir-locals，并刷新 direnv 环境（PATH 等）
+- `SPC p e s`  将文件里的非 `eval` 变量全部加入 `safe-local-variable-values` 并保存
+- `SPC p e d`  查看哪些 dir-locals 条目对当前 buffer 的 major-mode 生效
+
+可用模板（`templates/emacs/`）：
+
+| 模板名 | 用途 |
+|---|---|
+| `python-venv` | Python `.venv` 虚拟环境 |
+| `python-uv` | Python uv 项目 |
+| `python-conda` | Python conda 环境（替换 `myenv`）|
+| `cc-cmake` | C/C++ CMake 外构建 |
+| `cc-meson` | C/C++ Meson 构建 |
+| `nix-flake` | 本地 nix flake（`nix develop`）|
+| `nix-gcc` | GCC 工具链，通过 nix-shell |
+| `nix-clang` | Clang 工具链，通过 nix-shell |
+| `nix-shell` | 通用 nix-shell 任务包装 |
+| `sagemath` | SageMath 脚本 / Jupyter 内核 |
+| `node` | Node.js / npm / TypeScript |
+| `lsp-workspace` | 自定义 Eglot workspace 配置 |
+| `emacs-lisp` | Emacs Lisp 包项目 |
+| `indent-2` | 项目全局 2 空格缩进 |
+| `indent-4` | 项目全局 4 空格缩进 |
+| `direnv` | direnv 任务占位 |
+
+**合并策略**：按 mode key（`nil` / `python-ts-mode` 等）合并，每个 mode 内按变量名合并，模板值覆盖旧值，新 mode 追加到末尾。
+
+**env 刷新**：`SPC p e r` 在 dir-locals 重载后会调用 `my/direnv-update-environment-maybe`，使 PATH、编译器路径等 shell 层变量在 Emacs 里同步更新，不需要重启。
+
+**`eval` 说明**：`silence` 命令跳过 `eval` 条目（涉及安全确认）。如需 silence `eval` 形式，手动将其加入 `safe-local-eval-forms`。
