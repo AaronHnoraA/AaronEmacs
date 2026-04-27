@@ -1033,5 +1033,37 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
 ;; eglot：永不自动重连（需要你手动 M-x eglot 重新连）
 (setq-default eglot-autoreconnect nil)
 
+;;; ── Dape Toolbar ──────────────────────────────────────────────────────────
+;; Performance notes:
+;;   • Static button bar rendered once per debug session start; no timers or
+;;     background hooks beyond dape's own session lifecycle.
+;;   • cursor-sensor-mode is buffer-local to the toolbar buffer.
+;;   • run-at-time 0 fires once to fit-window-to-buffer after render.
+(use-package dape-toolbar
+  :load-path "~/.emacs.d/site-lisp/dape-toolbar"
+  :after dape
+  :config
+  (dape-toolbar-mode 1))
+
+;;; ── CodeLens ──────────────────────────────────────────────────────────────
+;; Performance notes:
+;;   • eglot-codelens-mode is buffer-local and guards all hooks behind the
+;;     mode variable, so teardown is clean when the mode is disabled.
+;;   • Three debounced timers per managed buffer:
+;;       update  (document changes) – kept at 0.5 s to match eglot-send-changes-idle-time
+;;       refresh (scroll/window)    – raised to 0.5 s (default 0.25 s was too chatty
+;;                                    on fast scrolling; reduces overlay churn)
+;;       resolve (LSP resolve queue) – kept at 0.25 s (post-fetch, bounded by queue size)
+;;   • window-scroll-functions and window-configuration-change-hook are both
+;;     buffer-local, so they don't fire in non-codelens buffers.
+(use-package eglot-codelens
+  :load-path "~/.emacs.d/site-lisp/codelens"
+  :after eglot
+  :commands eglot-codelens-mode
+  :hook (eglot-managed-mode . eglot-codelens-mode)
+  :custom
+  (eglot-codelens-update-delay 0.5)
+  (eglot-codelens-visible-refresh-delay 0.5))
+
 (provide 'init-lsp)
 ;;; init-lsp.el ends here
