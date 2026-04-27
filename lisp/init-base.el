@@ -125,18 +125,37 @@
 
 (use-package ligature
   :demand t
+  :hook ((prog-mode
+          text-mode
+          conf-mode
+          org-mode
+          markdown-mode) . ligature-mode)
   :config
   (ligature-set-ligatures
    't
    '("==" "===" "!=" "->" "<-" "<->"
      "=>" "<=" ">=" "::" ":="
      "&&" "||" ">>" "<<"))
-  (global-ligature-mode t))
+  (global-ligature-mode -1))
 
 
 
 ;; 使用绝对行号
 (setq display-line-numbers-type 'absolute)
+
+(defcustom my/display-line-numbers-auto-modes
+  '(prog-mode conf-mode)
+  "Major mode families where line numbers are enabled automatically.
+Line numbers stay available through `my/toggle-line-numbers', but prose,
+Org, help, terminals and side buffers avoid the redisplay cost by default."
+  :type '(repeat symbol)
+  :group 'convenience)
+
+(defcustom my/display-line-numbers-large-buffer-threshold (* 512 1024)
+  "Maximum buffer size where line numbers are enabled automatically."
+  :type '(choice (const :tag "No size limit" nil)
+                 integer)
+  :group 'convenience)
 
 
 ;; 可选：关闭次刻度（避免干扰）
@@ -147,9 +166,6 @@
 
 ;; 1. 设置触发频率（例如每 5 行高亮一次）
 (setq display-line-numbers-major-tick 20)
-
-;; 2. 启用行号（如果还没启用）
-(global-display-line-numbers-mode 1)
 
 (defun my/disable-display-line-numbers ()
   "Disable line numbers in buffers where they add cost but little value."
@@ -175,6 +191,22 @@
                (`t "absolute")
                (`nil "off")
                (_ (symbol-name next))))))
+
+(defun my/display-line-numbers-auto-enable ()
+  "Enable line numbers in buffers where they are useful by default."
+  (when (and (not (minibufferp))
+             (not (file-remote-p default-directory))
+             (or (null my/display-line-numbers-large-buffer-threshold)
+                 (<= (buffer-size)
+                     my/display-line-numbers-large-buffer-threshold))
+             (apply #'derived-mode-p my/display-line-numbers-auto-modes))
+    (setq-local display-line-numbers my/line-number-style)
+    (display-line-numbers-mode 1)))
+
+;; Line numbers are expensive during redisplay, so keep them opt-in by mode
+;; family instead of enabling them globally for every buffer.
+(global-display-line-numbers-mode -1)
+(add-hook 'after-change-major-mode-hook #'my/display-line-numbers-auto-enable)
 
 ;; 可选：在一些模式禁用（终端、目录、帮助、仪表盘等）
 (dolist (hook '(term-mode-hook

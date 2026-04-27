@@ -18,13 +18,13 @@
   "Copilot integration defaults."
   :group 'tools)
 
-(defcustom my/copilot-idle-delay 0.55
+(defcustom my/copilot-idle-delay 0.85
   "Idle seconds before Copilot asks for inline completions."
   :type '(choice (number :tag "Seconds of delay")
                  (const :tag "Inline completion disabled" nil))
   :group 'my/copilot)
 
-(defcustom my/copilot-large-buffer-threshold (* 1024 1024)
+(defcustom my/copilot-large-buffer-threshold (* 512 1024)
   "Maximum buffer size where Copilot is auto-enabled.
 Large generated files can make inline completion unnecessarily expensive."
   :type 'integer

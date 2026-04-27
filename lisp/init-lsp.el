@@ -657,7 +657,7 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   "Enable popup completion for Eshell with CAPF/pcomplete."
   (company-mode 1)
   (setq-local company-backends my/company-shell-backends)
-  (setq-local company-idle-delay 0.15)
+  (setq-local company-idle-delay 0.25)
   (setq-local company-minimum-prefix-length 1))
 
 (use-package company
@@ -679,7 +679,7 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
     "Try default completion styles."
     (let ((completion-styles '(basic partial-completion)))
       (apply func args)))
-  (setq company-idle-delay 0.18
+  (setq company-idle-delay 0.28
         company-minimum-prefix-length 1
         company-show-quick-access t
         company-require-match nil
@@ -764,7 +764,7 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
          ("C-c !" . my/problems-buffer)
          ("C-c ?" . my/diagnostics-dispatch))
   :custom
-  (flymake-no-changes-timeout 0.6) ; 输入停顿后再自动检查，减少每次按键后的后台唤醒。
+  (flymake-no-changes-timeout 1.0) ; 输入停顿后再自动检查，减少每次按键后的后台唤醒。
   (flymake-indicator-type 'fringes))
 
 ;; 光标停在报错位置时，在 minibuffer 显示诊断

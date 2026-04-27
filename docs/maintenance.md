@@ -233,8 +233,14 @@ leader 入口：
   需要更顺滑手感时可以运行 `M-x my/macos-toggle-pixel-scroll-precision` 临时打开。
 - macOS 的显式 idle GC 只在焦点离开后作为补充清理，默认不再每次退出 minibuffer 后排一个 GC；
   普通活跃/空闲 GC 交给 `gcmh`。
+- 行号不再全局绘制，只在代码/配置类 buffer 自动打开；普通文本、帮助、终端、侧边栏可手动用
+  `SPC w l` / `M-x my/toggle-line-numbers` 打开。
+- ligature 不再全局启用，只在代码/文本/配置/Org/Markdown 等编辑 buffer 本地启用。
+- TODO 高亮不再全局启用，只在编辑 buffer 本地启用。
+- `whitespace-mode` 默认只检查本地的代码/配置文件，跳过文本、大文件、远程文件和 `so-long` buffer。
 - auto-revert 优先使用文件通知，普通 buffer 不做高频轮询；PDF buffer 单独保留较快刷新。
 - LSP/Flymake/Copilot/company/Treemacs/Org Roam 的自动后台工作都做了短延迟合并，避免每次按键后立刻唤醒一串任务。
+  Copilot、Company、Flymake 默认等待更明确的输入停顿后再启动。
 - diagnostics mode line 使用缓存，只在 buffer 变化或 Flymake 发布新诊断后重新统计。
 
 记录保存在 [var/performance/](../var/performance/)：

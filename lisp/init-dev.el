@@ -81,8 +81,11 @@
 (use-package hl-todo
   :ensure t
   :defer 2
-  :config
-  (global-hl-todo-mode 1)
+  :hook ((prog-mode
+          text-mode
+          conf-mode
+          org-mode
+          markdown-mode) . hl-todo-mode)
   :bind (:map hl-todo-mode-map
          ("C-c t p" . hl-todo-previous)
          ("C-c t n" . hl-todo-next)
@@ -93,7 +96,6 @@
 ;; Show trailing whitespaces
 (use-package whitespace
   :ensure nil
-  :hook ((prog-mode markdown-mode conf-mode) . whitespace-mode)
   :custom
   (whitespace-style '(face trailing)))
 

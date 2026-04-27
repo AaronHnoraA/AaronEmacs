@@ -297,9 +297,13 @@
   (defun my/whitespace-highlight-incorrect-indentation-h ()
     "Highlight indentation inconsistent with the current tab policy."
     (unless (or (eq major-mode 'fundamental-mode)
+                (not (derived-mode-p 'prog-mode 'conf-mode))
                 (bound-and-true-p global-whitespace-mode)
                 (null buffer-file-name)
-                buffer-read-only)
+                buffer-read-only
+                (my/remote-buffer-p)
+                (my/buffer-large-p nil (* 512 1024))
+                (bound-and-true-p so-long-minor-mode))
       (setq-local whitespace-style
                   (cl-union (if indent-tabs-mode
                                 '(face indentation)

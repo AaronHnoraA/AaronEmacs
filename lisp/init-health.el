@@ -279,7 +279,9 @@
            (memq 'kanagawa-wave custom-enabled-themes)))
    (cons 'ligature-enabled
          (ignore-errors
-           (bound-and-true-p global-ligature-mode)))))
+           (or (bound-and-true-p global-ligature-mode)
+               (and (featurep 'ligature)
+                    (fboundp 'ligature-mode)))))))
 
 (defun my/health-critical-check ()
   "Return a compact batch-friendly report for critical bootstrap features."
