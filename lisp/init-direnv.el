@@ -49,55 +49,23 @@
     (my/direnv-update-environment-maybe default-directory))
   (apply orig-fn args))
 
-(defvar my/direnv--env-settle-roots nil
-  "Project roots where post-compile exec-path settling is active.
-A root is added once when Emacs loads a .dir-locals.el for a buffer in that
-project.  Compilation-finish checks are pure string ops against this list —
-no I/O on every compile.")
+(defun my/direnv--settle-env-after-dir-locals ()
+  "Sync `exec-path' from `process-environment' after dir-locals finish loading.
 
-(defun my/direnv--maybe-register-settle-root ()
-  "Register current buffer's project root for post-compile env settling.
-
-Driven by `hack-local-variables-hook': only fires when Emacs actually loads
-dir-locals.  `dir-local-variables-alist' being non-nil is the confirmation
-that a .dir-locals.el was found and processed — no extra file probing needed.
-One `locate-dominating-file' call per buffer-open for qualifying projects;
-zero I/O for everything else."
+Runs from `hack-local-variables-hook'.  `dir-local-variables-alist' being
+non-nil is Emacs's own confirmation that a .dir-locals.el was found and its
+variables applied — including any `eval' forms that may have modified
+`process-environment' (e.g. direnv, nix-shell, conda activate).
+Zero cost for buffers with no dir-locals: the alist check short-circuits
+before any I/O."
   (when (and my/enable-direnv
              buffer-file-name
              (not (file-remote-p default-directory))
              (bound-and-true-p dir-local-variables-alist))
-    (when-let* ((root (locate-dominating-file default-directory ".dir-locals.el")))
-      (cl-pushnew (expand-file-name root)
-                  my/direnv--env-settle-roots
-                  :test #'equal))))
-
-(defun my/direnv--apply-path-to-exec-path ()
-  "Sync `exec-path' from the current process-environment PATH.
-
-Direnv already updated process-environment before the task ran.  This call
-settles exec-path so Emacs's command lookup matches the environment that was
-actually active during the task — without shelling out to direnv again."
-  (when-let* ((path (getenv "PATH")))
-    (setq exec-path
-          (append (split-string path path-separator t)
-                  (list exec-directory)))))
-
-(defun my/direnv--settle-env-after-compile (buffer _status)
-  "Settle exec-path after compilation if BUFFER is under a registered root.
-
-Guard is a pure string check against `my/direnv--env-settle-roots' — no I/O.
-Roots are registered lazily by `my/direnv--maybe-register-settle-root' only
-when dir-locals are actually loaded for a qualifying project."
-  (when (and my/enable-direnv
-             (not my/direnv-subprocess-sync-inhibited)
-             my/direnv--env-settle-roots)
-    (with-current-buffer buffer
-      (when (and (not (file-remote-p default-directory))
-                 (seq-some (lambda (root)
-                             (file-in-directory-p default-directory root))
-                           my/direnv--env-settle-roots))
-        (my/direnv--apply-path-to-exec-path)))))
+    (when-let* ((path (getenv "PATH")))
+      (setq exec-path
+            (append (split-string path path-separator t)
+                    (list exec-directory))))))
 
 (use-package direnv
   :ensure t
@@ -108,8 +76,7 @@ when dir-locals are actually loaded for a qualifying project."
   (direnv-always-show-summary nil)
   :config
   (advice-add 'compile :around #'my/direnv--sync-before-subprocess)
-  (add-hook 'hack-local-variables-hook #'my/direnv--maybe-register-settle-root)
-  (add-hook 'compilation-finish-functions #'my/direnv--settle-env-after-compile)
+  (add-hook 'hack-local-variables-hook #'my/direnv--settle-env-after-dir-locals)
   (direnv-mode 1))
 
 (provide 'init-direnv)
