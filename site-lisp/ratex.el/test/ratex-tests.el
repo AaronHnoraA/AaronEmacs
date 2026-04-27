@@ -492,6 +492,32 @@
         (should (equal removed '("3:9:yx")))
         (should-not ensured)))))
 
+(ert-deftest ratex-post-command-refreshes-active-fragment-without-parser ()
+  (with-temp-buffer
+    (insert "a \\(x\\) b")
+    (goto-char 5)
+    (setq-local ratex-mode t)
+    (setq-local ratex--active-fragment (ratex-fragment-at-point))
+    (insert "y")
+    (cl-letf (((symbol-function 'ratex-fragment-at-point)
+               (lambda ()
+                 (error "full parser should not run"))))
+      (ratex-handle-post-command)
+      (should (equal (plist-get ratex--active-fragment :content) "yx"))
+      (should (= (plist-get ratex--active-fragment :end) 9)))))
+
+(ert-deftest ratex-active-fragment-at-point-reuses-active-without-parser ()
+  (with-temp-buffer
+    (insert "a \\(xy\\) b")
+    (goto-char 5)
+    (setq-local ratex--active-fragment (ratex-fragment-at-point))
+    (goto-char 6)
+    (cl-letf (((symbol-function 'ratex-fragment-at-point)
+               (lambda ()
+                 (error "full parser should not run"))))
+      (let ((fragment (ratex--active-fragment-at-point)))
+        (should (equal (plist-get fragment :content) "xy"))))))
+
 (ert-deftest ratex-post-command-keeps-preview-while-staying-in-same-fragment ()
   (with-temp-buffer
     (insert "a \\(xy\\) b")

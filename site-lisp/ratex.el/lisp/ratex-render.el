@@ -438,11 +438,95 @@ currently under point."
        'svg t
        :ascent (floor (* 100.0 (/ baseline height)))))))
 
+(defun ratex--string-at-p (pos string)
+  "Return non-nil when STRING is present at buffer position POS."
+  (let ((len (and (stringp string) (length string))))
+    (and len
+         (<= (point-min) pos)
+         (<= (+ pos len) (point-max))
+         (string= string
+                  (buffer-substring-no-properties pos (+ pos len))))))
+
+(defun ratex--find-fragment-close (close start)
+  "Return the end position of CLOSE found after START, ignoring escapes."
+  (let ((close-len (length close))
+        found)
+    (save-excursion
+      (goto-char start)
+      (while (and (not found)
+                  (search-forward close nil t))
+        (let ((close-begin (- (point) close-len)))
+          (unless (ratex--escaped-at-p close-begin)
+            (setq found (point))))))
+    found))
+
+(defun ratex--refresh-active-delimited-fragment (fragment)
+  "Refresh active delimited FRAGMENT using local delimiter search."
+  (let* ((begin (plist-get fragment :begin))
+         (open (plist-get fragment :open))
+         (close (plist-get fragment :close))
+         (open-len (and (stringp open) (length open)))
+         (close-len (and (stringp close) (length close))))
+    (when (and (integer-or-marker-p begin)
+               open-len
+               close-len
+               (> open-len 0)
+               (> close-len 0)
+               (<= (point-min) begin)
+               (<= begin (point))
+               (ratex--string-at-p begin open))
+      (let* ((content-begin (+ begin open-len))
+             (end (ratex--find-fragment-close close content-begin))
+             (content-end (and end (- end close-len))))
+        (when (and end
+                   content-end
+                   (<= content-begin content-end)
+                   (< (point) end))
+          (list :begin begin
+                :end end
+                :content (buffer-substring-no-properties content-begin content-end)
+                :open open
+                :close close))))))
+
+(defun ratex--refresh-active-environment-fragment (fragment)
+  "Refresh active environment FRAGMENT using local environment delimiters."
+  (let* ((begin (plist-get fragment :begin))
+         (env (plist-get fragment :environment)))
+    (when (and (integer-or-marker-p begin)
+               (stringp env)
+               (<= (point-min) begin)
+               (<= begin (point))
+               (ratex--string-at-p begin (format "\\begin{%s}" env)))
+      (save-excursion
+        (goto-char begin)
+        (when (re-search-forward
+               (format "\\\\end{%s}" (regexp-quote env)) nil t)
+          (let ((end (match-end 0)))
+            (when (< (point) end)
+              (list :begin begin
+                    :end end
+                    :content (buffer-substring-no-properties begin end)
+                    :open (format "\\begin{%s}" env)
+                    :close (format "\\end{%s}" env)
+                    :environment env))))))))
+
+(defun ratex--refresh-active-fragment-fast (fragment)
+  "Refresh active FRAGMENT without invoking the full point parser.
+This handles the dominant post-command case: point is still inside the same
+formula, so local delimiter search is enough to update bounds and content after
+ordinary edits."
+  (when (ratex--point-in-fragment-p fragment)
+    (or (and (plist-get fragment :environment)
+             (ratex--refresh-active-environment-fragment fragment))
+        (ratex--refresh-active-delimited-fragment fragment)
+        fragment)))
+
 (defun ratex--active-fragment-at-point ()
   "Return editable fragment at point, including rendered overlay fallback."
   (unless (ratex--code-context-at-p (point))
-    (or (ratex-fragment-at-point)
+    (or (ratex--refresh-active-fragment-fast ratex--active-fragment)
         (ratex-overlay-fragment-at-point)
+        (ratex-fragment-at-point)
         (when (ratex--point-in-fragment-p ratex--active-fragment)
           ratex--active-fragment))))
 
