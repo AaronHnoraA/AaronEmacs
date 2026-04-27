@@ -1,9 +1,10 @@
 # -*- mode: snippet -*-
+# type: command
 # name: OutlineExp
 # key: outlineexp
 # -- Outline Expression
 # --
-\[
-$1
-\]
-$0
+(let ((text (or yas-selected-text ""))
+      (beg (point)))
+  (insert "\\[\n" text "\n\\]")
+  (goto-char (+ beg 3 (length text))))
