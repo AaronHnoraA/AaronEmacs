@@ -51,23 +51,23 @@
 
 (defvar my/direnv--env-settle-roots nil
   "Project roots where post-compile exec-path settling is active.
-A root is added once, when Emacs loads dir-locals for a buffer whose project
-also has an .envrc.  Compilation-finish checks are pure string ops against
-this list — no I/O on every compile.")
+A root is added once when Emacs loads a .dir-locals.el for a buffer in that
+project.  Compilation-finish checks are pure string ops against this list —
+no I/O on every compile.")
 
 (defun my/direnv--maybe-register-settle-root ()
-  "Register current buffer's .envrc root for post-compile env settling.
+  "Register current buffer's project root for post-compile env settling.
 
-Runs from `hack-local-variables-hook', so it only fires when Emacs actually
-processes dir-locals for a buffer.  Short-circuits immediately via the
-`dir-local-variables-alist' check when no dir-locals were loaded — zero I/O
-for files in ordinary projects.  One `locate-dominating-file' call happens
-at most once per buffer-open for qualified projects."
+Driven by `hack-local-variables-hook': only fires when Emacs actually loads
+dir-locals.  `dir-local-variables-alist' being non-nil is the confirmation
+that a .dir-locals.el was found and processed — no extra file probing needed.
+One `locate-dominating-file' call per buffer-open for qualifying projects;
+zero I/O for everything else."
   (when (and my/enable-direnv
              buffer-file-name
              (not (file-remote-p default-directory))
              (bound-and-true-p dir-local-variables-alist))
-    (when-let* ((root (locate-dominating-file default-directory ".envrc")))
+    (when-let* ((root (locate-dominating-file default-directory ".dir-locals.el")))
       (cl-pushnew (expand-file-name root)
                   my/direnv--env-settle-roots
                   :test #'equal))))
