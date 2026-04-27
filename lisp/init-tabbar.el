@@ -85,6 +85,12 @@ Scrolling in the opposite direction is allowed immediately."
 (defvar my/tab-line-global-order nil
   "Fallback buffer order for the centered tab line outside perspective mode.")
 
+(defvar my/tab-line-cache-generation 0
+  "Revision counter used to invalidate cached centered tab-line strings.")
+
+(defvar-local my/tab-line--format-cache nil
+  "Cached centered tab-line value for the current buffer.")
+
 (defvar my/tab-line-wheel-state (make-hash-table :test #'eq :weakness 'key)
   "Accepted wheel timestamps keyed by window for centered tab switching.")
 
@@ -134,6 +140,10 @@ Scrolling in the opposite direction is allowed immediately."
 (defun my/tab-line-set-buffer-order (buffers)
   "Persist BUFFERS as the current centered tab order."
   (my/tab-line-set-order (mapcar #'buffer-name buffers)))
+
+(defun my/tab-line-invalidate-cache (&rest _)
+  "Invalidate cached centered tab-line strings."
+  (setq my/tab-line-cache-generation (1+ my/tab-line-cache-generation)))
 
 (defun my/tab-line-sort-buffers (buffers)
   "Return BUFFERS reordered by the persisted centered tab order."
@@ -521,34 +531,30 @@ When MAX-WIDTH is non-nil, use it to shrink labels in narrow windows."
   "Return rendered segments for BUFFERS between LEFT and RIGHT.
 LEFT and RIGHT are inclusive indexes.  MAX-WIDTH is the available
 window width used to keep labels compact."
-  (let ((segments (list (my/tab-line-passive-string
-                         "("
-                         'my/tab-line-separator-face)))
+  (let ((segments nil)
         (last-index (1- (length buffers))))
+    (push (my/tab-line-passive-string
+           "("
+           'my/tab-line-separator-face)
+          segments)
     (when (> left 0)
-      (setq segments
-            (append segments
-                    (list (my/tab-line-overflow-marker)
-                          (my/tab-line-separator)))))
+      (push (my/tab-line-overflow-marker) segments)
+      (push (my/tab-line-separator) segments))
     (dotimes (offset (1+ (- right left)))
       (when (> offset 0)
-        (setq segments
-              (append segments
-                      (list (my/tab-line-separator)))))
-      (setq segments
-            (append segments
-                    (list (my/tab-line-tab-string
-                           (nth (+ left offset) buffers)
-                           max-width)))))
+        (push (my/tab-line-separator) segments))
+      (push (my/tab-line-tab-string
+             (nth (+ left offset) buffers)
+             max-width)
+            segments))
     (when (< right last-index)
-      (setq segments
-            (append segments
-                    (list (my/tab-line-separator)
-                          (my/tab-line-overflow-marker)))))
-    (append segments
-            (list (my/tab-line-passive-string
-                   ")"
-                   'my/tab-line-separator-face)))))
+      (push (my/tab-line-separator) segments)
+      (push (my/tab-line-overflow-marker) segments))
+    (push (my/tab-line-passive-string
+           ")"
+           'my/tab-line-separator-face)
+          segments)
+    (nreverse segments)))
 
 (defun my/tab-line-fit-buffers (buffers max-width)
   "Return the visible slice of BUFFERS that fits MAX-WIDTH.
@@ -585,8 +591,17 @@ Keep the current buffer visible and expand around it while space allows."
       (my/tab-line-fit-buffers buffers
                                (max 12 (- (window-body-width) 2))))))
 
-(defun my/tab-line-format ()
-  "Render a centered, minimal buffer tab line."
+(defun my/tab-line-format-cache-key ()
+  "Return a cache key for the centered tab line in the current buffer."
+  (list my/tab-line-cache-generation
+        (window-body-width)
+        (buffer-name)
+        buffer-file-name
+        major-mode
+        (bound-and-true-p my/vterm-popup-instance-p)))
+
+(defun my/tab-line-format-uncached ()
+  "Render a centered, minimal buffer tab line without consulting the cache."
   (unless (my/tab-line-hidden-p)
     (when-let* ((content (my/tab-line-content)))
       (let* ((content-width (my/tab-line-segments-width content))
@@ -603,8 +618,19 @@ Keep the current buffer visible and expand around it while space allows."
             (my/tab-line-passive-string " " 'tab-line)))
          content)))))
 
+(defun my/tab-line-format ()
+  "Render a centered, minimal buffer tab line."
+  (let ((key (my/tab-line-format-cache-key)))
+    (if (and (consp my/tab-line--format-cache)
+             (equal key (car my/tab-line--format-cache)))
+        (cdr my/tab-line--format-cache)
+      (let ((value (my/tab-line-format-uncached)))
+        (setq-local my/tab-line--format-cache (cons key value))
+        value))))
+
 (defun my/tab-line-refresh (&rest _)
   "Refresh the centered buffer tab line."
+  (my/tab-line-invalidate-cache)
   (when (fboundp 'tab-line-force-update)
     (tab-line-force-update t)))
 
@@ -701,6 +727,9 @@ Keep the current buffer visible and expand around it while space allows."
     (ignore-errors (centaur-tabs-mode -1)))
   (advice-add 'tab-line-format :override #'my/tab-line-format)
   (add-to-list 'tab-line-exclude-modes 'dashboard-mode)
+  (add-hook 'buffer-list-update-hook #'my/tab-line-invalidate-cache)
+  (add-hook 'kill-buffer-hook #'my/tab-line-invalidate-cache)
+  (add-hook 'after-change-major-mode-hook #'my/tab-line-invalidate-cache)
   (global-tab-line-mode 1)
   (with-eval-after-load 'perspective
     (add-hook 'persp-activated-functions #'my/tab-line-refresh))

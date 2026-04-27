@@ -249,11 +249,6 @@
 (setq-default tab-width 4)
 (setq-default c-basic-offset 4)
 
-(when (member "JetBrainsMono Nerd Font" (font-family-list))
-  ;; 只给 symbol / unicode 区域加 fallback，不动中文、英文正文字体
-  (dolist (charset '(symbol))
-    (set-fontset-font t charset "JetBrainsMono Nerd Font" nil 'append)))
-
 (use-package mixed-pitch
   :ensure t
   :commands (mixed-pitch-mode)
@@ -321,6 +316,14 @@ Keep the prose font at its native width so long English lines stay tight."
 (defcustom my/font-cn "FZLiuGongQuanKaiShuJF"
   "Primary Chinese family."
   :type 'string
+  :group 'my/typography)
+
+(defcustom my/font-math-symbols
+  '("Libertinus Math" "Garamond-Math" "STIXGeneral" "DejaVu Sans")
+  "Preferred fonts for Unicode math symbols shown inline in text buffers.
+These fonts are used for prettified Org entities such as \\in => ∈ so the
+glyph keeps its shape while point moves through composed text."
+  :type '(repeat string)
   :group 'my/typography)
 
 (defcustom my/scale-cn 1.3
@@ -451,6 +454,17 @@ Keep the prose font at its native width so long English lines stay tight."
       ;; 'prepend：把该字体放在 fallback 优先级前面，避免被系统中文字体截胡
       (set-fontset-font t charset
                         (font-spec :family my/font-cn
+                                   :weight 'regular
+                                   :slant 'normal)
+                        nil
+                        'prepend))))
+
+(defun my/font--bind-math-symbols-to-fontset ()
+  "Prefer math-oriented fonts for Unicode symbol glyphs."
+  (dolist (family my/font-math-symbols)
+    (when (member family (font-family-list))
+      (set-fontset-font t 'symbol
+                        (font-spec :family family
                                    :weight 'regular
                                    :slant 'normal)
                         nil
@@ -592,6 +606,7 @@ Keep the prose font at its native width so long English lines stay tight."
   (my/font--apply-core-faces)
   (my/font--apply-ui-faces)
   (my/font--bind-chinese-to-fontset)
+  (my/font--bind-math-symbols-to-fontset)
   (my/font--apply-rescale)
   (my/font--apply-document-faces)
 
