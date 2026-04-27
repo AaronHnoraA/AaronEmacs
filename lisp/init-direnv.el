@@ -54,6 +54,11 @@
   (when directory
     (locate-dominating-file directory ".envrc")))
 
+(defun my/direnv--dir-locals-root (directory)
+  "Return the directory containing the nearest .dir-locals.el above DIRECTORY, or nil."
+  (when directory
+    (locate-dominating-file directory ".dir-locals.el")))
+
 (defun my/direnv--apply-path-to-exec-path ()
   "Sync `exec-path' from the current process-environment PATH.
 
@@ -71,13 +76,15 @@ actually active during the task — without shelling out to direnv again."
 Only fires when all of:
 - `my/enable-direnv' is non-nil
 - `my/direnv-subprocess-sync-inhibited' is nil
-- an .envrc exists at or above BUFFER's working directory
-- the working directory is not a remote path"
+- the working directory is not a remote path
+- a .envrc exists at or above BUFFER's working directory
+- a .dir-locals.el exists at or above BUFFER's working directory"
   (when (and my/enable-direnv
              (not my/direnv-subprocess-sync-inhibited))
     (with-current-buffer buffer
       (when (and (not (file-remote-p default-directory))
-                 (my/direnv--envrc-root default-directory))
+                 (my/direnv--envrc-root default-directory)
+                 (my/direnv--dir-locals-root default-directory))
         (my/direnv--apply-path-to-exec-path)))))
 
 (use-package direnv
