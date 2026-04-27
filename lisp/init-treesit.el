@@ -100,16 +100,14 @@
 (font-lock-mode 1)
 
 (setq idle-update-delay 5.0)
-;; 或更保守
-(setq treesit-font-lock-level 3)     ;; 还卡就 2
-;; 关键：避免 refontify 时先把整段清空造成“白一下”
-;(setq jit-lock-antiblink t)
-;; 你可以同时保持即时刷新（不积攒）
-;(setq jit-lock-defer-time 0)
-;; 可选：关掉 stealth，减少后台偷偷重染造成的跳变
-;(setq jit-lock-stealth-time nil)
-;(setq jit-lock-chunk-size 2000)
-;(setq jit-lock-context-time 0.1)
+(setq treesit-font-lock-level 3)
+;; Disable background stealth fontification — only fontify visible text on
+;; demand.  Profiler showed jit-lock-deferred-fontify at 8% of timer cost;
+;; stealth was the main contributor running on idle even without scrolling.
+(setq jit-lock-stealth-time nil)
+;; Larger chunks mean fewer timer firings per scroll burst.
+(setq jit-lock-chunk-size 4096)
+(setq jit-lock-context-time 0.2)
 
 
 (provide 'init-treesit)

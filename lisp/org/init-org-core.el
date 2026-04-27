@@ -561,7 +561,13 @@ headline levels."
      ("RFCs"   . "https://tools.ietf.org/html/")))
   
   ;; --- Citations ---
-  (org-cite-global-bibliography pv/org-bibtex-files))
+  (org-cite-global-bibliography pv/org-bibtex-files)
+
+  ;; --- Performance ---
+  ;; Default 0.5 s fires too aggressively during continuous editing.  1.5 s
+  ;; batches more changes per sync pass without noticeable latency on navigation.
+  (org-element-cache-sync-idle-time 1.5)
+  (org-element-cache-sync-duration 0.1))
 (my/org-force-indent-mode-in-existing-buffers)
 
 ;;; ----------------------------------------------------------------------------

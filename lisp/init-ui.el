@@ -70,7 +70,13 @@
   (doom-modeline-buffer-file-name-style 'truncate-except-project)
   (doom-modeline-persp-name t)
   (doom-modeline-unicode-fallback t)
-  (doom-modeline-enable-word-count nil))
+  (doom-modeline-enable-word-count nil)
+  ;; misc-info (time, battery, …) is expensive; render only in the active
+  ;; window instead of every visible mode line.
+  (doom-modeline-display-misc-in-all-mode-lines nil)
+  ;; Disable the clock segment — it re-evaluates display-time-string on every
+  ;; redisplay tick.
+  (doom-modeline-time nil))
 
 ;; Customize popwin behavior
 (use-package shackle

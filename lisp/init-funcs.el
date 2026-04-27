@@ -375,6 +375,8 @@ If any function returns non-nil, later hooks are skipped.")
 
 (global-set-key [remap keyboard-quit] #'my/escape)
 
+(general-define-key "M-s M-s" #'save-buffer)
+
 (my/global-quit-key-mode 1)
 
 (with-eval-after-load 'eldoc

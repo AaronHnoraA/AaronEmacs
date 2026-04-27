@@ -745,7 +745,11 @@ glyph keeps its shape while point moves through composed text."
 (use-package hl-line
   :ensure nil
   :when (display-graphic-p)
-  :hook (after-init . global-hl-line-mode))
+  :hook (after-init . global-hl-line-mode)
+  :custom
+  ;; Only highlight the selected window; avoids re-painting every visible
+  ;; window's current line on each command.
+  (global-hl-line-sticky-flag nil))
 
 ;; Enable `repeat-mode' to reduce key sequence length
 ;;
@@ -761,7 +765,14 @@ glyph keeps its shape while point moves through composed text."
 ;; Workaround with minified source files
 (use-package so-long
   :ensure nil
-  :hook (after-init . global-so-long-mode))
+  :hook (after-init . global-so-long-mode)
+  :custom
+  ;; Default 250 triggers on many normal source files and adds advice
+  ;; overhead on every set-auto-mode call.  10000 catches only true
+  ;; minified/generated files.
+  (so-long-threshold 10000)
+  ;; Use the lighter minor-mode action instead of replacing the major mode.
+  (so-long-action 'so-long-minor-mode))
 
 ;; Completion engine
 (use-package minibuffer
@@ -1134,7 +1145,15 @@ Else, call `comment-or-uncomment-region' on the current line."
   :custom
   (amx-history-length 20)
   :config
-  (amx-mode 1))
+  (amx-mode 1)
+  ;; amx installs a 1-second idle timer (amx-short-idle-update-timer) to
+  ;; continuously re-check the command list.  That showed up at 2% in the
+  ;; profiler.  Replace it with a 30-second repeat so updates still happen
+  ;; but don't poll every waking idle second.
+  (when (timerp amx-short-idle-update-timer)
+    (cancel-timer amx-short-idle-update-timer))
+  (setq amx-short-idle-update-timer
+        (run-with-idle-timer 30 t #'amx-idle-update)))
 
 (use-package mwim
   :ensure t
@@ -1346,7 +1365,11 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
   ;; can poison the history file when the buffer has unsaved edits, causing the
   ;; next reopen to fail the hash check and drop persistent undo history.
   (remove-hook 'kill-buffer-hook #'undo-tree-save-history-from-hook)
-  (remove-hook 'find-file-hook #'undo-tree-load-history-from-hook))
+  (remove-hook 'find-file-hook #'undo-tree-load-history-from-hook)
+  ;; undo-tree registers undo-tree-update-menu-bar on menu-bar-update-hook,
+  ;; which fires on every pre-redisplay.  Remove it since the menu bar is not
+  ;; the primary undo UI here.
+  (remove-hook 'menu-bar-update-hook #'undo-tree-update-menu-bar))
 
 
 (use-package outline-indent
