@@ -49,14 +49,36 @@
     (my/direnv-update-environment-maybe default-directory))
   (apply orig-fn args))
 
-(defun my/direnv--sync-after-compile (buffer _status)
-  "Refresh direnv using BUFFER's working directory after compilation finishes.
+(defun my/direnv--envrc-root (directory)
+  "Return the directory containing the nearest .envrc above DIRECTORY, or nil."
+  (when directory
+    (locate-dominating-file directory ".envrc")))
 
-Runs after every compile/task/test so environment changes made by the task
-(e.g. nix build, nix develop, conda env create) are immediately visible."
-  (unless my/direnv-subprocess-sync-inhibited
+(defun my/direnv--apply-path-to-exec-path ()
+  "Sync `exec-path' from the current process-environment PATH.
+
+Direnv already updated process-environment before the task ran.  This call
+settles exec-path so Emacs's command lookup matches the environment that was
+actually active during the task — without shelling out to direnv again."
+  (when-let* ((path (getenv "PATH")))
+    (setq exec-path
+          (append (split-string path path-separator t)
+                  (list exec-directory)))))
+
+(defun my/direnv--settle-env-after-compile (buffer _status)
+  "After compilation in BUFFER, settle exec-path from process-environment.
+
+Only fires when all of:
+- `my/enable-direnv' is non-nil
+- `my/direnv-subprocess-sync-inhibited' is nil
+- an .envrc exists at or above BUFFER's working directory
+- the working directory is not a remote path"
+  (when (and my/enable-direnv
+             (not my/direnv-subprocess-sync-inhibited))
     (with-current-buffer buffer
-      (my/direnv-update-environment-maybe default-directory))))
+      (when (and (not (file-remote-p default-directory))
+                 (my/direnv--envrc-root default-directory))
+        (my/direnv--apply-path-to-exec-path)))))
 
 (use-package direnv
   :ensure t
@@ -67,7 +89,7 @@ Runs after every compile/task/test so environment changes made by the task
   (direnv-always-show-summary nil)
   :config
   (advice-add 'compile :around #'my/direnv--sync-before-subprocess)
-  (add-hook 'compilation-finish-functions #'my/direnv--sync-after-compile)
+  (add-hook 'compilation-finish-functions #'my/direnv--settle-env-after-compile)
   (direnv-mode 1))
 
 (provide 'init-direnv)
