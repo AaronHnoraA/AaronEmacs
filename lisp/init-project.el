@@ -775,13 +775,9 @@ When PREFER-TAG is non-nil, prefer following the current tag when one exists."
       (progn
         (my/treemacs-reset-follow-state)
         (add-hook 'post-command-hook #'my/treemacs-schedule-follow)
-        (add-hook 'window-buffer-change-functions #'my/treemacs-schedule-follow)
-        (add-hook 'window-selection-change-functions #'my/treemacs-schedule-follow)
         (add-hook 'first-change-hook #'my/treemacs-reset-follow-state)
         (my/treemacs-schedule-follow))
     (remove-hook 'post-command-hook #'my/treemacs-schedule-follow)
-    (remove-hook 'window-buffer-change-functions #'my/treemacs-schedule-follow)
-    (remove-hook 'window-selection-change-functions #'my/treemacs-schedule-follow)
     (remove-hook 'first-change-hook #'my/treemacs-reset-follow-state)
     (when (timerp my/treemacs-cursor-follow-timer)
       (cancel-timer my/treemacs-cursor-follow-timer))

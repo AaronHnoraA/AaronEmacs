@@ -540,7 +540,10 @@ render is usually ready before point leaves it."
 (defvar-local my/org-latex--leave-preview-end-marker nil)
 (defvar-local my/org-latex--post-command-point nil)
 (defvar-local my/org-latex--post-command-range nil)
-(defvar-local my/org-latex--last-post-command-key nil)
+(defvar-local my/org-latex--last-pc-point nil)
+(defvar-local my/org-latex--last-pc-tick nil)
+(defvar-local my/org-latex--last-pc-cmd nil)
+(defvar-local my/org-latex--last-pc-range nil)
 (defvar-local my/org-latex--last-visible-range nil)
 (defvar-local my/org-latex--last-visible-preview-time 0.0)
 (defvar-local my/org-latex--scroll-preview-enabled nil)
@@ -843,7 +846,7 @@ render is usually ready before point leaves it."
              (my/org-latex--async-preview-active-p))
     (my/org-latex--cancel-after-save-preview-timer)
     (setq my/org-latex--after-save-preview-timer
-          (run-with-idle-timer 0.05 nil
+          (run-with-idle-timer 0.15 nil
                                #'my/org-latex--refresh-visible-previews-after-save
                                (current-buffer)))))
 
@@ -1048,12 +1051,16 @@ fallback edit render."
 (defun my/org-latex-post-command-function ()
   "Re-enable preview when point leaves a LaTeX fragment."
   (when (my/org-latex--async-preview-active-p)
-    (let ((key (list (point)
-                     (buffer-chars-modified-tick)
-                     my/org-latex--post-command-range
-                     this-command)))
-      (unless (equal key my/org-latex--last-post-command-key)
-        (setq my/org-latex--last-post-command-key key)
+    (let ((pt (point))
+          (tick (buffer-chars-modified-tick)))
+      (unless (and (eql pt my/org-latex--last-pc-point)
+                   (eql tick my/org-latex--last-pc-tick)
+                   (eq this-command my/org-latex--last-pc-cmd)
+                   (equal my/org-latex--post-command-range my/org-latex--last-pc-range))
+        (setq my/org-latex--last-pc-point pt
+              my/org-latex--last-pc-tick tick
+              my/org-latex--last-pc-cmd this-command
+              my/org-latex--last-pc-range my/org-latex--post-command-range)
         ;; Fast bail: when the buffer holds no LaTeX syntax at all (cached) and
         ;; we are not tracking a fragment, point movement / typing has nothing
         ;; to do here. This is the dominant case in prose-only Org notes that
@@ -2146,7 +2153,10 @@ queued work."
       (my/org-latex--terminate-render-process process)))
   (setq my/org-latex--post-command-point nil
         my/org-latex--post-command-range nil
-        my/org-latex--last-post-command-key nil
+        my/org-latex--last-pc-point nil
+        my/org-latex--last-pc-tick nil
+        my/org-latex--last-pc-cmd nil
+        my/org-latex--last-pc-range nil
         my/org-latex--last-visible-range nil
         my/org-latex--last-visible-preview-time 0.0
         my/org-latex--render-processes nil

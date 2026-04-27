@@ -262,7 +262,7 @@ lighter without changing table behavior once a table exists."
     (when (and (not (timerp my/org--olivetti-sync-timer))
                (my/org-visible-buffer-p))
       (setq my/org--olivetti-sync-timer
-            (run-with-idle-timer 0.05 nil #'my/org-sync-visible-olivetti-buffers))))
+            (run-with-idle-timer 0.15 nil #'my/org-sync-visible-olivetti-buffers))))
   
   (add-hook 'org-mode-hook #'xs-toggle-olivetti-for-org)
   (add-hook 'window-configuration-change-hook #'my/org-schedule-olivetti-sync))
@@ -1160,7 +1160,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
   "Schedule a coalesced pretty-block refontify for the current buffer."
   (my/org-cancel-pretty-block-refontify)
   (setq-local my/org--pretty-block-refontify-timer
-              (run-with-idle-timer 0.12 nil
+              (run-with-idle-timer 0.20 nil
                                    #'my/org--pretty-block-refontify-now
                                    (current-buffer))))
 
