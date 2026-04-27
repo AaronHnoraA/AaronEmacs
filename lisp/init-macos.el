@@ -59,6 +59,35 @@
 (defvar my/macos-idle-gc-timer nil
   "Timer used to run a delayed GC after the UI goes idle on macOS.")
 
+(defgroup my/macos nil
+  "macOS-specific local integration."
+  :group 'environment)
+
+(defcustom my/macos-scroll-profile 'line
+  "Default macOS scrolling profile.
+`line' keeps `pixel-scroll-precision-mode' off and lets regular wheel
+scrolling handle trackpad input, which costs much less during long Org
+reading sessions.  `pixel' restores precision pixel scrolling for users who
+prefer the smoother feel over lower power draw."
+  :type '(choice (const :tag "Lower-power line scrolling" line)
+                 (const :tag "Precision pixel scrolling" pixel))
+  :group 'my/macos)
+
+(defcustom my/macos-idle-gc-delay 8.0
+  "Seconds to wait before the explicit macOS idle GC runs.
+`gcmh' already manages ordinary idle GC.  This macOS hook is only a fallback
+for focus-loss cleanup, so a longer delay avoids waking Emacs immediately
+after short minibuffer or window-management commands."
+  :type 'number
+  :group 'my/macos)
+
+(defcustom my/macos-gc-after-minibuffer nil
+  "Whether exiting the minibuffer should schedule an explicit macOS idle GC.
+This is disabled by default because `gcmh' already handles normal idle GC and
+minibuffer exits are common during command-heavy work."
+  :type 'boolean
+  :group 'my/macos)
+
 (defvar my/macos-use-transparent-titlebar nil
   "Whether macOS GUI frames should use a transparent titlebar.")
 
@@ -66,6 +95,8 @@
   "Startup window state for macOS GUI frames.
 Use nil for a regular window, `maximized' for a maximized window, or
 `fullscreen' for a fullscreen window.")
+
+(defvar pixel-scroll-precision-mode)
 
 (defun my/macos-open--normalize-target (target)
   "Return TARGET in a form suitable for the macOS open command."
@@ -165,10 +196,37 @@ buffer file."
   "Run GC shortly after focus leaves Emacs or the minibuffer closes."
   (my/macos-cancel-idle-gc-timer)
   (setq my/macos-idle-gc-timer
-        (run-with-idle-timer 2 nil
+        (run-with-idle-timer my/macos-idle-gc-delay nil
                              (lambda ()
                                (setq my/macos-idle-gc-timer nil)
                                (garbage-collect)))))
+
+(defun my/macos-apply-scroll-profile (&optional profile)
+  "Apply macOS scroll PROFILE.
+When PROFILE is nil, use `my/macos-scroll-profile'."
+  (let ((profile (or profile my/macos-scroll-profile)))
+    (setq fast-but-imprecise-scrolling t
+          redisplay-skip-fontification-on-input t)
+    (when (boundp 'pixel-scroll-precision-interpolate-page)
+      (setq pixel-scroll-precision-interpolate-page nil))
+    (when (boundp 'pixel-scroll-precision-use-momentum)
+      (setq pixel-scroll-precision-use-momentum nil))
+    (when (fboundp 'pixel-scroll-precision-mode)
+      (pixel-scroll-precision-mode
+       (if (eq profile 'pixel) 1 -1)))))
+
+(defun my/macos-toggle-pixel-scroll-precision (&optional arg)
+  "Toggle macOS precision pixel scrolling.
+With positive ARG, enable it.  With zero or negative ARG, disable it."
+  (interactive "P")
+  (setq my/macos-scroll-profile
+        (if (if arg
+                (> (prefix-numeric-value arg) 0)
+              (not (bound-and-true-p pixel-scroll-precision-mode)))
+            'pixel
+          'line))
+  (my/macos-apply-scroll-profile my/macos-scroll-profile)
+  (message "macOS scroll profile: %s" my/macos-scroll-profile))
 
 (defun my/macos-apply-performance-tweaks ()
   "Apply macOS tuning that approximates the best parts of `emacs-plus'."
@@ -194,8 +252,7 @@ buffer file."
     (setq ns-use-proxy-icon nil))
   (when (boundp 'ns-use-srgb-colorspace)
     (setq ns-use-srgb-colorspace t))
-  (when (fboundp 'pixel-scroll-precision-mode)
-    (pixel-scroll-precision-mode 1)))
+  (my/macos-apply-scroll-profile))
 
 (my/macos-apply-performance-tweaks)
 (if (boundp 'after-focus-change-function)
@@ -208,7 +265,8 @@ buffer file."
     (remove-hook 'focus-out-hook #'my/macos-schedule-idle-gc)
     (add-hook 'focus-out-hook #'my/macos-schedule-idle-gc)))
 (remove-hook 'minibuffer-exit-hook #'my/macos-schedule-idle-gc)
-(add-hook 'minibuffer-exit-hook #'my/macos-schedule-idle-gc)
+(when my/macos-gc-after-minibuffer
+  (add-hook 'minibuffer-exit-hook #'my/macos-schedule-idle-gc))
 (add-hook 'kill-emacs-hook #'my/macos-cancel-idle-gc-timer)
 
 (use-package emacs

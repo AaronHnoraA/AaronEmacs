@@ -229,6 +229,10 @@ leader 入口：
 
 默认低功耗取向：
 
+- macOS 默认使用普通滚轮/触控板滚动，不常驻 `pixel-scroll-precision-mode`；
+  需要更顺滑手感时可以运行 `M-x my/macos-toggle-pixel-scroll-precision` 临时打开。
+- macOS 的显式 idle GC 只在焦点离开后作为补充清理，默认不再每次退出 minibuffer 后排一个 GC；
+  普通活跃/空闲 GC 交给 `gcmh`。
 - auto-revert 优先使用文件通知，普通 buffer 不做高频轮询；PDF buffer 单独保留较快刷新。
 - LSP/Flymake/Copilot/company/Treemacs/Org Roam 的自动后台工作都做了短延迟合并，避免每次按键后立刻唤醒一串任务。
 - diagnostics mode line 使用缓存，只在 buffer 变化或 Flymake 发布新诊断后重新统计。

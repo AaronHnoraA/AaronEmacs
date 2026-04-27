@@ -91,6 +91,24 @@ Scrolling in the opposite direction is allowed immediately."
 (defvar-local my/tab-line--format-cache nil
   "Cached centered tab-line value for the current buffer.")
 
+(defvar-local my/tab-line--format-cache-generation nil
+  "Cache generation used for `my/tab-line--format-cache'.")
+
+(defvar-local my/tab-line--format-cache-window-width nil
+  "Window body width used for `my/tab-line--format-cache'.")
+
+(defvar-local my/tab-line--format-cache-buffer-name nil
+  "Buffer name used for `my/tab-line--format-cache'.")
+
+(defvar-local my/tab-line--format-cache-file-name nil
+  "File name used for `my/tab-line--format-cache'.")
+
+(defvar-local my/tab-line--format-cache-major-mode nil
+  "Major mode used for `my/tab-line--format-cache'.")
+
+(defvar-local my/tab-line--format-cache-vterm-popup nil
+  "Vterm popup state used for `my/tab-line--format-cache'.")
+
 (defvar my/tab-line-wheel-state (make-hash-table :test #'eq :weakness 'key)
   "Accepted wheel timestamps keyed by window for centered tab switching.")
 
@@ -257,8 +275,7 @@ When FRAME is nil, use the selected frame."
 
 (defun my/tab-line-current-buffer ()
   "Return the currently selected visible buffer for the centered tab line."
-  (or (current-buffer)
-      (car (my/tab-line-buffer-list))))
+  (current-buffer))
 
 (defun my/tab-line-select-current ()
   "No-op keyboard entrypoint for the current centered tab item."
@@ -591,14 +608,29 @@ Keep the current buffer visible and expand around it while space allows."
       (my/tab-line-fit-buffers buffers
                                (max 12 (- (window-body-width) 2))))))
 
-(defun my/tab-line-format-cache-key ()
-  "Return a cache key for the centered tab line in the current buffer."
-  (list my/tab-line-cache-generation
-        (window-body-width)
-        (buffer-name)
-        buffer-file-name
-        major-mode
-        (bound-and-true-p my/vterm-popup-instance-p)))
+(defun my/tab-line-format-cache-valid-p (window-width buffer-name)
+  "Return non-nil when the centered tab-line cache is valid.
+WINDOW-WIDTH and BUFFER-NAME are passed in by the caller so the fast path does
+not allocate a fresh compound key during every redisplay."
+  (and (eql my/tab-line--format-cache-generation my/tab-line-cache-generation)
+       (eql my/tab-line--format-cache-window-width window-width)
+       (equal my/tab-line--format-cache-buffer-name buffer-name)
+       (equal my/tab-line--format-cache-file-name buffer-file-name)
+       (eq my/tab-line--format-cache-major-mode major-mode)
+       (eq my/tab-line--format-cache-vterm-popup
+           (and (bound-and-true-p my/vterm-popup-instance-p) t))))
+
+(defun my/tab-line-store-format-cache (window-width buffer-name value)
+  "Cache centered tab-line VALUE for WINDOW-WIDTH and BUFFER-NAME."
+  (setq-local my/tab-line--format-cache value
+              my/tab-line--format-cache-generation my/tab-line-cache-generation
+              my/tab-line--format-cache-window-width window-width
+              my/tab-line--format-cache-buffer-name buffer-name
+              my/tab-line--format-cache-file-name buffer-file-name
+              my/tab-line--format-cache-major-mode major-mode
+              my/tab-line--format-cache-vterm-popup
+              (and (bound-and-true-p my/vterm-popup-instance-p) t))
+  value)
 
 (defun my/tab-line-format-uncached ()
   "Render a centered, minimal buffer tab line without consulting the cache."
@@ -620,13 +652,12 @@ Keep the current buffer visible and expand around it while space allows."
 
 (defun my/tab-line-format ()
   "Render a centered, minimal buffer tab line."
-  (let ((key (my/tab-line-format-cache-key)))
-    (if (and (consp my/tab-line--format-cache)
-             (equal key (car my/tab-line--format-cache)))
-        (cdr my/tab-line--format-cache)
-      (let ((value (my/tab-line-format-uncached)))
-        (setq-local my/tab-line--format-cache (cons key value))
-        value))))
+  (let ((window-width (window-body-width))
+        (buffer-name (buffer-name)))
+    (if (my/tab-line-format-cache-valid-p window-width buffer-name)
+        my/tab-line--format-cache
+      (my/tab-line-store-format-cache
+       window-width buffer-name (my/tab-line-format-uncached)))))
 
 (defun my/tab-line-refresh (&rest _)
   "Refresh the centered buffer tab line."
