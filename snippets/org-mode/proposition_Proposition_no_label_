@@ -1,9 +1,8 @@
 # -*- mode: snippet -*-
-# name: Proposition (no label)
+# name: Org proposition full block
 # key: proposition
-# -- Add a proposition without label
+# -- Org special block
 # --
-\begin{proposition}{$1}
-		$2
-\end{proposition}
+#+begin_proposition
 $0
+#+end_proposition

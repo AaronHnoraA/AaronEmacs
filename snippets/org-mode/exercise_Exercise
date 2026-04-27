@@ -1,9 +1,8 @@
 # -*- mode: snippet -*-
-# name: Exercise
+# name: Org exercise block
 # key: exercise
-# -- Add a exercise
+# -- Org special block
 # --
-\begin{exercise}
-	$1
-\end{exercise}
+#+begin_exercise
 $0
+#+end_exercise

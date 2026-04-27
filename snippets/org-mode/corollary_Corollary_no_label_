@@ -1,9 +1,8 @@
 # -*- mode: snippet -*-
-# name: Corollary (no label)
+# name: Org corollary full block
 # key: corollary
-# -- Add a corollary without label
+# -- Org special block
 # --
-\begin{corollary}{$1}
-	$2
-\end{corollary}
+#+begin_corollary
 $0
+#+end_corollary

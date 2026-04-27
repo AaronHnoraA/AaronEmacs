@@ -1,9 +1,8 @@
 # -*- mode: snippet -*-
-# name: Problem
+# name: Org problem block
 # key: problem
-# -- Add a exercise
+# -- Org special block
 # --
-\begin{problem}
-	$1
-\end{problem}
+#+begin_problem
 $0
+#+end_problem

@@ -34,6 +34,19 @@
         (should (= (length (my/org-latex-test--preview-overlays 1 6)) 1))
         (should (equal (overlay-get first 'my/org-latex-file) file))))))
 
+(ert-deftest my/org-fragtog-disable-frag-preserves-point ()
+  (my/org-latex-test-with-org-buffer "\\[\nas\n\\]"
+    (goto-char 5)
+    (let ((origin (point))
+          called)
+      (my/org-fragtog-disable-frag-preserve-point-a
+       (lambda (_frag _renew)
+         (setq called t)
+         (goto-char (point-max)))
+       nil nil)
+      (should called)
+      (should (= (point) origin)))))
+
 (ert-deftest my/org-latex-preview-enqueue-fragment-deduplicates-waiters ()
   (my/org-latex-test-with-org-buffer "\\(x\\)"
     (let* ((target (expand-file-name "ltximg/shared.svg" default-directory))

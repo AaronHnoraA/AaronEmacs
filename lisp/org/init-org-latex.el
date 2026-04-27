@@ -2333,6 +2333,20 @@ queued work."
       (org-fragtog--disable-frag frag)
       (my/org-latex--preview-fragment frag))))
 
+(defun my/org-fragtog-disable-frag-preserve-point-a (orig frag &optional renew)
+  "Run ORIG without letting `org-fragtog' relocate point.
+`org-fragtog--disable-frag' moves point when it thinks the cursor entered a
+preview from the right.  With the delayed edit timer this can fire while
+typing into a freshly expanded display-math snippet and jump point to `\\]'."
+  (if (not (derived-mode-p 'org-mode))
+      (funcall orig frag renew)
+    (let ((point-marker (copy-marker (point) t)))
+      (unwind-protect
+          (funcall orig frag renew)
+        (when (marker-buffer point-marker)
+          (goto-char point-marker))
+        (set-marker point-marker nil)))))
+
 (defun my/org-latex-enable-scroll-preview ()
   "Enable on-demand LaTeX preview for visible area after scrolling."
   (interactive)
@@ -2383,7 +2397,14 @@ Anywhere else: run `org-return' as usual."
   (define-key org-mode-map (kbd "RET") #'my/org-latex-open-preview-at-point))
 
 (with-eval-after-load 'org-fragtog
-  (advice-add 'org-fragtog--enable-frag :around #'my/org-fragtog-enable-frag-advice))
+  (unless (advice-member-p #'my/org-fragtog-enable-frag-advice
+                           'org-fragtog--enable-frag)
+    (advice-add 'org-fragtog--enable-frag
+                :around #'my/org-fragtog-enable-frag-advice))
+  (unless (advice-member-p #'my/org-fragtog-disable-frag-preserve-point-a
+                           'org-fragtog--disable-frag)
+    (advice-add 'org-fragtog--disable-frag
+                :around #'my/org-fragtog-disable-frag-preserve-point-a)))
 
 (with-eval-after-load 'ox-latex
   (setq org-latex-compiler "xelatex")

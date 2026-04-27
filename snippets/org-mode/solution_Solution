@@ -1,9 +1,8 @@
 # -*- mode: snippet -*-
-# name: Solution
+# name: Org solution block
 # key: solution
-# -- Add a remark
+# -- Org special block
 # --
-\begin{solution}
-	$1
-\end{solution}
+#+begin_solution
 $0
+#+end_solution

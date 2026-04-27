@@ -3,7 +3,9 @@
 # key: ;b
 # --
 `(let* ((blk (yas-choose-value
-              '("definition" "defn" "theorem" "thm" "lemma"
-                "cor" "prop" "property" "proof" "example"
-                "attention" "note" "info" "warning"))))
+              '("overview" "toc" "definition" "defn" "theorem" "thm"
+                "lemma" "corollary" "cor" "proposition" "prop"
+                "property" "proof" "solution" "answer" "exercise"
+                "problem" "question" "example" "attention" "important"
+                "tip" "summary" "note" "info" "warning"))))
    (insert (concat "#+begin_" blk "\n\n#+end_" blk)))`
