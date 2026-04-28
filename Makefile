@@ -29,8 +29,9 @@ help:
 	  '  make state-restore SNAPSHOT=/path/to/archive.tar.gz  Restore a saved state snapshot' \
 	  '  make build                Full byte + native compile for config and third-party Elisp' \
 	  '  make build-force          Same as build, but reset ELN cache first' \
-	  '  make compile              Byte-compile the local Emacs config' \
-	  '  make compile-byte         Same as compile' \
+	  '  make compile              btye and native compile'\
+	  '  make compile-force        Force btye and native compile'\
+	  '  make compile-byte         SByte-compile the local Emacs config' \
 	  '  make compile-byte-force   Force byte-compilation for managed files' \
 	  '  make compile-native       Queue native compilation for the local config' \
 	  '  make compile-native-force Force native compilation after cleaning managed .eln' \
@@ -80,7 +81,9 @@ build:
 build-force:
 	$(BATCH) --eval '(my/build-all t)'
 
-compile: compile-byte
+compile: compile-byte  compare-native
+
+compile-force: compile-byte-force  compare-native-force
 
 compile-byte:
 	$(BATCH) --eval '(my/byte-compile-config)'
