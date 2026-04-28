@@ -13,6 +13,7 @@
 (require 'init-org-code)
 (require 'init-org-latex)
 (require 'init-org-integrations)
+(require 'init-org-utility)
 
 (provide 'init-org)
 ;;; init-org.el ends here
