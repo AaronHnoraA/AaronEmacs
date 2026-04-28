@@ -614,17 +614,27 @@ When WIN is nil, restore every tracked window."
 
 (defun my/chunlian-schedule-visibility-check (&rest _)
   "Coalesce repeated buffer-list changes before checking dashboard visibility."
-  (when (timerp my/chunlian--visibility-timer)
-    (cancel-timer my/chunlian--visibility-timer))
-  (setq my/chunlian--visibility-timer
-        (run-with-idle-timer
-         0.1 nil
-         (lambda ()
-           (setq my/chunlian--visibility-timer nil)
-           (when-let* ((buffer (get-buffer "*dashboard*")))
-             (with-current-buffer buffer
-               (when chunlian-mode
-                 (chunlian--maybe-disable))))))))
+  (if-let* ((buffer (get-buffer "*dashboard*")))
+      (with-current-buffer buffer
+        (if chunlian-mode
+            (progn
+              (when (timerp my/chunlian--visibility-timer)
+                (cancel-timer my/chunlian--visibility-timer))
+              (setq my/chunlian--visibility-timer
+                    (run-with-idle-timer
+                     0.1 nil
+                     (lambda ()
+                       (setq my/chunlian--visibility-timer nil)
+                       (when (buffer-live-p buffer)
+                         (with-current-buffer buffer
+                           (when chunlian-mode
+                             (chunlian--maybe-disable))))))))
+          (when (timerp my/chunlian--visibility-timer)
+            (cancel-timer my/chunlian--visibility-timer))
+          (setq my/chunlian--visibility-timer nil)))
+    (when (timerp my/chunlian--visibility-timer)
+      (cancel-timer my/chunlian--visibility-timer))
+    (setq my/chunlian--visibility-timer nil)))
 
 (defun chunlian--cleanup-current-buffer ()
   "Release Chunlian overlays, margins, and buffer-local hooks."

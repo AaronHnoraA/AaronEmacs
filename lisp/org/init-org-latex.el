@@ -841,14 +841,18 @@ render is usually ready before point leaves it."
 
 (defun my/org-latex-after-save-function ()
   "Re-queue visible LaTeX previews after saving the current Org buffer."
-  (when (and (derived-mode-p 'org-mode)
-             my/org-latex--scroll-preview-enabled
-             (my/org-latex--async-preview-active-p))
-    (my/org-latex--cancel-after-save-preview-timer)
-    (setq my/org-latex--after-save-preview-timer
-          (run-with-idle-timer 0.15 nil
-                               #'my/org-latex--refresh-visible-previews-after-save
-                               (current-buffer)))))
+  (if (and (derived-mode-p 'org-mode)
+           my/org-latex--scroll-preview-enabled
+           (my/org-latex--async-preview-active-p)
+           (my/org-latex--buffer-visible-p))
+      (progn
+        (my/org-latex--cancel-after-save-preview-timer)
+        (setq my/org-latex--after-save-preview-timer
+              (run-with-idle-timer
+               0.15 nil
+               #'my/org-latex--refresh-visible-previews-after-save
+               (current-buffer))))
+    (my/org-latex--cancel-after-save-preview-timer)))
 
 (defun my/org-latex--enable-edit-post-command ()
   "Install the fragment-edit tracking post-command hook for this buffer."
@@ -2250,35 +2254,37 @@ queued work."
 (defun my/org-latex-preview-visible-debounced (&optional window)
   "Debounced preview of WINDOW's visible area after scrolling stops."
   (setq window (my/org-latex--normalize-window window))
-  (when (and (derived-mode-p 'org-mode)
-             (my/org-latex--async-preview-active-p)
-             (my/org-latex--buffer-visible-p)
-             (not (my/org-latex--ratex-edit-session-active-p))
-             ;; Don't race against the edit-preview timer: if the user is
-             ;; actively editing a fragment (LSP/Copilot overlays can fire
-             ;; window-scroll-functions while typing), let the edit-preview
-             ;; timer render first, then scroll-preview can follow.
-             (not my/org-latex--edit-preview-timer)
-             (or (null window) window))
-    (when-let* ((range (my/org-latex--visible-range window))
-                ((my/org-latex--visible-refresh-stale-p range)))
-      (when (timerp my/org-latex--preview-timer)
-        (cancel-timer my/org-latex--preview-timer))
-      (setq my/org-latex--preview-timer
-            (run-at-time my/org-latex-preview-scroll-idle-delay nil
-                         #'my/org-latex-preview-visible-now
-                         window
-                         (current-buffer)))
-      (when (and (numberp my/org-latex-preview-scroll-follow-interval)
-                 (> my/org-latex-preview-scroll-follow-interval 0)
-                 (not (timerp my/org-latex--preview-follow-timer))
-                 (>= (- (float-time) my/org-latex--last-visible-preview-time)
-                     my/org-latex-preview-scroll-follow-interval))
-        (setq my/org-latex--preview-follow-timer
-              (run-at-time 0 nil
+  (if (and (derived-mode-p 'org-mode)
+           (my/org-latex--async-preview-active-p)
+           (my/org-latex--buffer-visible-p)
+           (not (my/org-latex--ratex-edit-session-active-p))
+           ;; Don't race against the edit-preview timer: if the user is
+           ;; actively editing a fragment (LSP/Copilot overlays can fire
+           ;; window-scroll-functions while typing), let the edit-preview
+           ;; timer render first, then scroll-preview can follow.
+           (not my/org-latex--edit-preview-timer)
+           (or (null window) window))
+      (when-let* ((range (my/org-latex--visible-range window))
+                  ((my/org-latex--visible-refresh-stale-p range)))
+        (when (timerp my/org-latex--preview-timer)
+          (cancel-timer my/org-latex--preview-timer))
+        (setq my/org-latex--preview-timer
+              (run-at-time my/org-latex-preview-scroll-idle-delay nil
                            #'my/org-latex-preview-visible-now
                            window
-                           (current-buffer)))))))
+                           (current-buffer)))
+        (when (and (numberp my/org-latex-preview-scroll-follow-interval)
+                   (> my/org-latex-preview-scroll-follow-interval 0)
+                   (not (timerp my/org-latex--preview-follow-timer))
+                   (>= (- (float-time) my/org-latex--last-visible-preview-time)
+                       my/org-latex-preview-scroll-follow-interval))
+          (setq my/org-latex--preview-follow-timer
+                (run-at-time 0 nil
+                             #'my/org-latex-preview-visible-now
+                             window
+                             (current-buffer)))))
+    (unless (my/org-latex--buffer-visible-p)
+      (my/org-latex--cancel-visible-preview-timers))))
 
 (defun my/org-latex--window-scroll-preview-hook (win _start)
   "Schedule preview refresh after WIN scrolls."

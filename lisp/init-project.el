@@ -634,6 +634,9 @@ following."
 (defvar my/treemacs-last-follow-state nil
   "Last source context synchronized to Treemacs.")
 
+(defvar my/treemacs-cursor-follow--hooks-active nil
+  "Whether Treemacs cursor-follow high-frequency hooks are installed.")
+
 (defcustom my/treemacs-cursor-follow-delay 0.35
   "Idle delay before Treemacs follows the current file and symbol."
   :type 'number
@@ -666,6 +669,19 @@ actually change."
         (setq-local treemacs--project-of-buffer nil))
       (when (boundp 'treemacs--previously-followed-tag-position)
         (setq-local treemacs--previously-followed-tag-position nil)))))
+
+(defun my/treemacs-reset-current-buffer-follow-state ()
+  "Clear Treemacs follow cache for the current buffer only."
+  (when (timerp my/treemacs-cursor-follow-timer)
+    (cancel-timer my/treemacs-cursor-follow-timer))
+  (setq my/treemacs-cursor-follow-timer nil
+        my/treemacs-last-follow-state nil)
+  (when (boundp 'treemacs--imenu-cache)
+    (setq-local treemacs--imenu-cache nil))
+  (when (boundp 'treemacs--project-of-buffer)
+    (setq-local treemacs--project-of-buffer nil))
+  (when (boundp 'treemacs--previously-followed-tag-position)
+    (setq-local treemacs--previously-followed-tag-position nil)))
 
 (defun my/treemacs-source-buffer-p ()
   "Return non-nil when the current buffer should drive Treemacs following."
@@ -766,6 +782,37 @@ When PREFER-TAG is non-nil, prefer following the current tag when one exists."
                                    #'my/treemacs-follow-current-buffer
                                    buffer))))))
 
+(defun my/treemacs-cursor-follow-window-visible-p ()
+  "Return non-nil when a Treemacs window is available for following."
+  (and (fboundp 'treemacs-get-local-window)
+       (window-live-p (treemacs-get-local-window))))
+
+(defun my/treemacs-cursor-follow-enable-hooks ()
+  "Install high-frequency hooks used while Treemacs is visible."
+  (unless my/treemacs-cursor-follow--hooks-active
+    (setq my/treemacs-cursor-follow--hooks-active t)
+    (add-hook 'post-command-hook #'my/treemacs-schedule-follow)
+    (add-hook 'first-change-hook #'my/treemacs-reset-current-buffer-follow-state)))
+
+(defun my/treemacs-cursor-follow-disable-hooks ()
+  "Remove high-frequency hooks used by Treemacs cursor following."
+  (when my/treemacs-cursor-follow--hooks-active
+    (setq my/treemacs-cursor-follow--hooks-active nil)
+    (remove-hook 'post-command-hook #'my/treemacs-schedule-follow)
+    (remove-hook 'first-change-hook #'my/treemacs-reset-current-buffer-follow-state))
+  (when (timerp my/treemacs-cursor-follow-timer)
+    (cancel-timer my/treemacs-cursor-follow-timer))
+  (setq my/treemacs-cursor-follow-timer nil))
+
+(defun my/treemacs-cursor-follow-sync-hooks (&rest _)
+  "Keep Treemacs follow hooks installed only while Treemacs is visible."
+  (if (and my/treemacs-cursor-follow-mode
+           (my/treemacs-cursor-follow-window-visible-p))
+      (progn
+        (my/treemacs-cursor-follow-enable-hooks)
+        (my/treemacs-schedule-follow))
+    (my/treemacs-cursor-follow-disable-hooks)))
+
 (define-minor-mode my/treemacs-cursor-follow-mode
   "Follow the current file and symbol in Treemacs."
   :init-value nil
@@ -774,13 +821,12 @@ When PREFER-TAG is non-nil, prefer following the current tag when one exists."
   (if my/treemacs-cursor-follow-mode
       (progn
         (my/treemacs-reset-follow-state)
-        (add-hook 'post-command-hook #'my/treemacs-schedule-follow)
-        (add-hook 'first-change-hook #'my/treemacs-reset-follow-state)
-        (my/treemacs-schedule-follow))
-    (remove-hook 'post-command-hook #'my/treemacs-schedule-follow)
-    (remove-hook 'first-change-hook #'my/treemacs-reset-follow-state)
-    (when (timerp my/treemacs-cursor-follow-timer)
-      (cancel-timer my/treemacs-cursor-follow-timer))
+        (add-hook 'window-configuration-change-hook
+                  #'my/treemacs-cursor-follow-sync-hooks)
+        (my/treemacs-cursor-follow-sync-hooks))
+    (remove-hook 'window-configuration-change-hook
+                 #'my/treemacs-cursor-follow-sync-hooks)
+    (my/treemacs-cursor-follow-disable-hooks)
     (setq my/treemacs-cursor-follow-timer nil
           my/treemacs-last-follow-state nil)))
 

@@ -1178,14 +1178,11 @@ Else, call `comment-or-uncomment-region' on the current line."
   (amx-history-length 20)
   :config
   (amx-mode 1)
-  ;; amx installs a 1-second idle timer (amx-short-idle-update-timer) to
-  ;; continuously re-check the command list.  That showed up at 2% in the
-  ;; profiler.  Replace it with a 30-second repeat so updates still happen
-  ;; but don't poll every waking idle second.
+  ;; amx installs a 1-second repeating idle timer to re-check commands.
+  ;; Let interactive `M-x' update on demand instead of waking Emacs forever.
   (when (timerp amx-short-idle-update-timer)
     (cancel-timer amx-short-idle-update-timer))
-  (setq amx-short-idle-update-timer
-        (run-with-idle-timer 30 t #'amx-idle-update)))
+  (setq amx-short-idle-update-timer nil))
 
 (use-package mwim
   :ensure t

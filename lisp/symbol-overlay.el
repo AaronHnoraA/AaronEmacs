@@ -244,12 +244,13 @@ You can re-bind the commands to any keys you prefer.")
   :keymap symbol-overlay-mode-map
   (if symbol-overlay-mode
       (progn
+        (symbol-overlay--enable-buffer-hooks)
         (add-hook 'post-command-hook #'symbol-overlay-post-command nil t)
-        (add-hook 'change-major-mode-hook #'symbol-overlay-cleanup-current-buffer nil t)
-        (add-hook 'kill-buffer-hook #'symbol-overlay-cleanup-current-buffer nil t)
         (symbol-overlay-update-timer symbol-overlay-idle-time))
     (remove-hook 'post-command-hook #'symbol-overlay-post-command t)
-    (symbol-overlay-cleanup-current-buffer)))
+    (symbol-overlay-remove-temp)
+    (symbol-overlay-maybe-cancel-timer (current-buffer))
+    (symbol-overlay--disable-buffer-hooks-maybe)))
 
 (defun symbol-overlay-get-list (dir &optional symbol exclude)
   "Get all highlighted overlays in the buffer.
@@ -292,13 +293,44 @@ If NOERROR is non-nil, just return nil when no symbol is found."
     (mapc 'delete-overlay (symbol-overlay-get-list 0 (car keyword)))
     (setq symbol-overlay-keywords-alist
           (delq keyword symbol-overlay-keywords-alist))
-    (cddr keyword)))
+    (prog1 (cddr keyword)
+      (symbol-overlay--disable-buffer-hooks-maybe))))
 
 (defvar-local symbol-overlay-temp-symbol nil
   "Symbol for temporary highlighting.")
 
 (defvar-local symbol-overlay-scope nil
   "If non-nil, force to narrow to scope before temporary highlighting.")
+
+(defvar-local symbol-overlay--buffer-hooks-active nil
+  "Whether symbol-overlay buffer-local maintenance hooks are installed.")
+
+(defun symbol-overlay--buffer-hooks-needed-p ()
+  "Return non-nil when the current buffer still needs maintenance hooks."
+  (or symbol-overlay-mode
+      symbol-overlay-keywords-alist
+      symbol-overlay-temp-symbol))
+
+(defun symbol-overlay--enable-buffer-hooks ()
+  "Install buffer-local hooks only while symbol-overlay state exists."
+  (unless symbol-overlay--buffer-hooks-active
+    (setq symbol-overlay--buffer-hooks-active t)
+    (add-hook 'after-change-functions #'symbol-overlay-refresh nil t)
+    (add-hook 'before-revert-hook #'symbol-overlay-remove-all nil t)
+    (add-hook 'after-revert-hook #'symbol-overlay-after-revert nil t)
+    (add-hook 'change-major-mode-hook #'symbol-overlay-cleanup-current-buffer nil t)
+    (add-hook 'kill-buffer-hook #'symbol-overlay-cleanup-current-buffer nil t)))
+
+(defun symbol-overlay--disable-buffer-hooks-maybe ()
+  "Remove buffer-local hooks when no symbol-overlay state remains."
+  (unless (symbol-overlay--buffer-hooks-needed-p)
+    (when symbol-overlay--buffer-hooks-active
+      (setq symbol-overlay--buffer-hooks-active nil)
+      (remove-hook 'after-change-functions #'symbol-overlay-refresh t)
+      (remove-hook 'before-revert-hook #'symbol-overlay-remove-all t)
+      (remove-hook 'after-revert-hook #'symbol-overlay-after-revert t)
+      (remove-hook 'change-major-mode-hook #'symbol-overlay-cleanup-current-buffer t)
+      (remove-hook 'kill-buffer-hook #'symbol-overlay-cleanup-current-buffer t))))
 
 (defun symbol-overlay-narrow (scope &optional window)
   "Narrow to a specific region.
@@ -386,10 +418,14 @@ This only affects symbols in the current displayed window if
 (defun symbol-overlay-cleanup-current-buffer ()
   "Release buffer-local temporary highlight state for `symbol-overlay-mode'."
   (remove-hook 'post-command-hook #'symbol-overlay-post-command t)
-  (remove-hook 'change-major-mode-hook #'symbol-overlay-cleanup-current-buffer t)
-  (remove-hook 'kill-buffer-hook #'symbol-overlay-cleanup-current-buffer t)
   (symbol-overlay-remove-temp)
-  (symbol-overlay-maybe-cancel-timer (current-buffer)))
+  (symbol-overlay-maybe-cancel-timer (current-buffer))
+  (setq symbol-overlay--buffer-hooks-active nil)
+  (remove-hook 'after-change-functions #'symbol-overlay-refresh t)
+  (remove-hook 'before-revert-hook #'symbol-overlay-remove-all t)
+  (remove-hook 'after-revert-hook #'symbol-overlay-after-revert t)
+  (remove-hook 'change-major-mode-hook #'symbol-overlay-cleanup-current-buffer t)
+  (remove-hook 'kill-buffer-hook #'symbol-overlay-cleanup-current-buffer t))
 
 (defun symbol-overlay-idle-timer ()
   "Idle timer callback.
@@ -451,6 +487,7 @@ If KEYWORD is non-nil, remove it then use its color on new overlays."
             (symbol-overlay-put-one symbol face)))))
     (setq keyword `(,symbol ,scope . ,face))
     (push keyword symbol-overlay-keywords-alist)
+    (symbol-overlay--enable-buffer-hooks)
     keyword))
 
 (defun symbol-overlay-maybe-count (keyword &optional show-color)
@@ -505,15 +542,11 @@ BEG, END and LEN are the beginning, end and length of changed text."
                       (symbol-overlay-put-one symbol (cddr keyword)))))
                 symbol-overlay-keywords-alist))))))
 
-(add-hook 'after-change-functions #'symbol-overlay-refresh)
-
 (defun symbol-overlay-after-revert ()
   "Restore overlays after the buffer was reverted."
   (save-restriction
     (widen)
     (symbol-overlay-refresh (point-min) (point-max) nil)))
-
-(add-hook 'after-revert-hook #'symbol-overlay-after-revert)
 
 ;;; Language-Specific Ignore
 
@@ -629,9 +662,8 @@ When called interactively, then also reset
   (unless (minibufferp)
     (mapc 'delete-overlay (symbol-overlay-get-list 0))
     (when (called-interactively-p 'any)
-      (setq symbol-overlay-keywords-alist nil))))
-
-(add-hook 'before-revert-hook #'symbol-overlay-remove-all)
+      (setq symbol-overlay-keywords-alist nil)
+      (symbol-overlay--disable-buffer-hooks-maybe))))
 
 ;;;###autoload
 (defun symbol-overlay-save-symbol ()

@@ -88,6 +88,9 @@ Scrolling in the opposite direction is allowed immediately."
 (defvar my/tab-line-cache-generation 0
   "Revision counter used to invalidate cached centered tab-line strings.")
 
+(defvar my/tab-line-cache-invalidation-timer nil
+  "Timer used to coalesce centered tab-line cache invalidations.")
+
 (defvar-local my/tab-line--format-cache nil
   "Cached centered tab-line value for the current buffer.")
 
@@ -161,7 +164,20 @@ Scrolling in the opposite direction is allowed immediately."
 
 (defun my/tab-line-invalidate-cache (&rest _)
   "Invalidate cached centered tab-line strings."
+  (when (timerp my/tab-line-cache-invalidation-timer)
+    (cancel-timer my/tab-line-cache-invalidation-timer))
+  (setq my/tab-line-cache-invalidation-timer nil)
   (setq my/tab-line-cache-generation (1+ my/tab-line-cache-generation)))
+
+(defun my/tab-line-schedule-invalidate-cache (&rest _)
+  "Coalesce frequent buffer-list changes before invalidating tab-line caches."
+  (unless (timerp my/tab-line-cache-invalidation-timer)
+    (setq my/tab-line-cache-invalidation-timer
+          (run-with-idle-timer
+           0.05 nil
+           (lambda ()
+             (setq my/tab-line-cache-invalidation-timer nil)
+             (my/tab-line-invalidate-cache))))))
 
 (defun my/tab-line-sort-buffers (buffers)
   "Return BUFFERS reordered by the persisted centered tab order."
@@ -758,7 +774,7 @@ not allocate a fresh compound key during every redisplay."
     (ignore-errors (centaur-tabs-mode -1)))
   (advice-add 'tab-line-format :override #'my/tab-line-format)
   (add-to-list 'tab-line-exclude-modes 'dashboard-mode)
-  (add-hook 'buffer-list-update-hook #'my/tab-line-invalidate-cache)
+  (add-hook 'buffer-list-update-hook #'my/tab-line-schedule-invalidate-cache)
   (add-hook 'kill-buffer-hook #'my/tab-line-invalidate-cache)
   (add-hook 'after-change-major-mode-hook #'my/tab-line-invalidate-cache)
   (global-tab-line-mode 1)

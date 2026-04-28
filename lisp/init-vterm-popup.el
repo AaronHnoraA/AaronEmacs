@@ -456,7 +456,9 @@ With prefix ARG, create a new popup vterm and switch to it."
 
 (defun my/vterm-popup--auto-hide (&rest _)
   "Hide the popup vterm window when a temporary instance loses focus."
-  (when-let* ((window (my/vterm-popup--window)))
+  (when-let* (((or my/vterm-popup-current-buffer
+                   my/vterm-popup-buffers))
+              (window (my/vterm-popup--window)))
     (let ((buffer (window-buffer window)))
       (unless (or (active-minibuffer-window)
                   (eq (selected-window) window)

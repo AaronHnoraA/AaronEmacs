@@ -1011,13 +1011,17 @@ export default {
   "Schedule a delayed Appine refresh.
 This keeps the native view attached to its host window after Emacs finishes
 buffer/window selection changes."
-  (my/appine--cancel-refresh-timer)
-  (setq my/appine--refresh-timer
-        (run-at-time
-         0.05 nil
-         (lambda ()
-           (setq my/appine--refresh-timer nil)
-           (my/appine--refresh-visible)))))
+  (if (and (featurep 'appine-module)
+           (my/appine-visible-p))
+      (progn
+        (my/appine--cancel-refresh-timer)
+        (setq my/appine--refresh-timer
+              (run-at-time
+               0.05 nil
+               (lambda ()
+                 (setq my/appine--refresh-timer nil)
+                 (my/appine--refresh-visible)))))
+    (my/appine--cancel-refresh-timer)))
 
 (use-package appine
   :ensure nil

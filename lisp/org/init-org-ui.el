@@ -216,15 +216,17 @@ lighter without changing table behavior once a table exists."
                  (not (eq (window-buffer window) (current-buffer))))
         (set-window-buffer window (current-buffer))))))
 
-(defun my/org-visible-buffer-p ()
-  "Return non-nil when an Org buffer is visible in a live window."
-  (catch 'visible
-    (dolist (window (window-list nil 'no-minibuf))
-      (when-let* ((buffer (window-buffer window)))
-        (with-current-buffer buffer
-          (when (derived-mode-p 'org-mode)
-            (throw 'visible t)))))
-    nil))
+(defun my/org-visible-buffer-p (&optional buffer)
+  "Return non-nil when BUFFER is visible, or when any Org buffer is visible."
+  (if buffer
+      (get-buffer-window buffer t)
+    (catch 'visible
+      (dolist (window (window-list nil 'no-minibuf))
+        (when-let* ((window-buffer (window-buffer window)))
+          (with-current-buffer window-buffer
+            (when (derived-mode-p 'org-mode)
+              (throw 'visible t)))))
+      nil)))
 
 ;; 3.1 写作专注模式 (自动居中)
 (use-package olivetti
@@ -1149,20 +1151,20 @@ DEFAULT-BG defaults to `my/org-default-background'."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (setq-local my/org--pretty-block-refontify-timer nil)
-      (when (derived-mode-p 'org-mode)
+      (when (and (derived-mode-p 'org-mode)
+                 (my/org-visible-buffer-p buffer))
         (let ((ranges (my/org-visible-ranges buffer)))
-          (if ranges
-              (dolist (range ranges)
-                (jit-lock-refontify (car range) (cdr range)))
-            (jit-lock-refontify)))))))
+          (dolist (range ranges)
+            (jit-lock-refontify (car range) (cdr range))))))))
 
 (defun my/org-schedule-pretty-block-refontify ()
   "Schedule a coalesced pretty-block refontify for the current buffer."
   (my/org-cancel-pretty-block-refontify)
-  (setq-local my/org--pretty-block-refontify-timer
-              (run-with-idle-timer 0.20 nil
-                                   #'my/org--pretty-block-refontify-now
-                                   (current-buffer))))
+  (when (my/org-visible-buffer-p (current-buffer))
+    (setq-local my/org--pretty-block-refontify-timer
+                (run-with-idle-timer 0.20 nil
+                                     #'my/org--pretty-block-refontify-now
+                                     (current-buffer)))))
 
 (defun my/org-special-block-footer-marker-display (palette header-bg)
   "Return the styled footer marker string for a styled special block PALETTE."

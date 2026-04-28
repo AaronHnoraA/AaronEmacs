@@ -239,6 +239,15 @@ leader 入口：
 - TODO 高亮不再全局启用，只在编辑 buffer 本地启用。
 - `whitespace-mode` 默认只检查本地的代码/配置文件，跳过文本、大文件、远程文件和 `so-long` buffer。
 - auto-revert 优先使用文件通知，普通 buffer 不做高频轮询；PDF buffer 单独保留较快刷新。
+- `amx` 不保留重复 idle 更新 timer；命令索引在交互入口按需刷新。
+- `direnv` 不挂 `post-command-hook`；只在打开文件、切换 buffer/window、启动编译前，并且目录树里有
+  `.envrc` 时同步环境。
+- tab line 的 buffer-list 高频缓存失效走短 idle 合并。
+- Treemacs 文件/符号跟随只在 Treemacs 窗口可见时安装按键级 hook；隐藏后自动卸载并取消等待中的
+  idle timer。
+- symbol-overlay 的编辑刷新 hook 只在当前 buffer 开启模式或存在高亮时安装，不再全局空跑。
+- Org 的 rich UI 保留完整能力，但 pretty block/LaTeX 这类重渲染只面向当前可见窗口；buffer 隐藏时取消
+  等待中的可视区 timer，不做退回全 buffer 的后台刷新。
 - LSP/Flymake/Copilot/company/Treemacs/Org Roam 的自动后台工作都做了短延迟合并，避免每次按键后立刻唤醒一串任务。
   Copilot、Company、Flymake 默认等待更明确的输入停顿后再启动。
 - diagnostics mode line 使用缓存，只在 buffer 变化或 Flymake 发布新诊断后重新统计。

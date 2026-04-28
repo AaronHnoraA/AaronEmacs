@@ -7,8 +7,10 @@
 
 (declare-function direnv-update-environment "direnv" (&optional file-name force-summary))
 (declare-function direnv-update-directory-environment "direnv" (&optional directory force-summary))
+(declare-function direnv--maybe-update-environment "direnv" ())
 
 (defvar direnv-always-show-summary)
+(defvar direnv--hooks)
 
 (defcustom my/enable-direnv t
   "Whether to enable `direnv-mode' automatically."
@@ -17,6 +19,9 @@
 
 (defvar my/direnv-subprocess-sync-inhibited nil
   "When non-nil, skip automatic direnv sync advice for subprocess commands.")
+
+(defvar my/direnv--selection-sync-timer nil
+  "Idle timer used to coalesce direnv sync after buffer/window changes.")
 
 (defun my/direnv--resolve-directory (&optional path)
   "Return the local directory that should be used for direnv refresh."
@@ -33,15 +38,46 @@
                (file-directory-p directory))
       directory)))
 
+(defun my/direnv--envrc-directory-p (directory)
+  "Return non-nil when DIRECTORY is controlled by a `.envrc'."
+  (and directory
+       (locate-dominating-file directory ".envrc")))
+
 (defun my/direnv-update-environment-maybe (&optional path)
   "Refresh the buffer environment from direnv for PATH or the current buffer."
-  (when (and my/enable-direnv
-             (or (fboundp 'direnv-update-environment)
-                 (require 'direnv nil t)))
-    (when-let* ((directory (my/direnv--resolve-directory path)))
+  (when-let* ((directory (my/direnv--resolve-directory path)))
+    (when (and my/enable-direnv
+               (my/direnv--envrc-directory-p directory)
+               (or (fboundp 'direnv-update-directory-environment)
+                   (require 'direnv nil t)))
       (let ((direnv-always-show-summary nil))
         (ignore-errors
           (direnv-update-directory-environment directory nil))))))
+
+(defun my/direnv--sync-selected-buffer ()
+  "Refresh direnv for the selected window's buffer after UI selection settles."
+  (setq my/direnv--selection-sync-timer nil)
+  (when-let* ((window (selected-window))
+              ((window-live-p window))
+              (buffer (window-buffer window))
+              ((buffer-live-p buffer)))
+    (with-current-buffer buffer
+      (my/direnv-update-environment-maybe default-directory))))
+
+(defun my/direnv-schedule-selected-buffer-sync (&rest _)
+  "Coalesce direnv refresh after buffer or window selection changes."
+  (when (and my/enable-direnv
+             (not (timerp my/direnv--selection-sync-timer)))
+    (setq my/direnv--selection-sync-timer
+          (run-with-idle-timer
+           0.1 nil #'my/direnv--sync-selected-buffer))))
+
+(defun my/direnv--maybe-update-environment-a (orig-fn &rest args)
+  "Skip package-level direnv checks in directories without `.envrc'."
+  (when (and my/enable-direnv
+             (my/direnv--envrc-directory-p
+              (my/direnv--resolve-directory default-directory)))
+    (apply orig-fn args)))
 
 (defun my/direnv--sync-before-subprocess (orig-fn &rest args)
   "Refresh direnv for `default-directory' before calling ORIG-FN with ARGS."
@@ -72,10 +108,19 @@ before any I/O."
   :if my/enable-direnv
   :demand t
   :hook (find-file . my/direnv-update-environment-maybe)
+  :init
+  ;; The package default includes `post-command-hook'.  Buffer/window changes
+  ;; are enough for this config and avoid checking direnv after every command.
+  (setq direnv--hooks '(before-hack-local-variables-hook))
   :custom
   (direnv-always-show-summary nil)
   :config
+  (advice-add 'direnv--maybe-update-environment
+              :around #'my/direnv--maybe-update-environment-a)
   (advice-add 'compile :around #'my/direnv--sync-before-subprocess)
+  (add-hook 'buffer-list-update-hook #'my/direnv-schedule-selected-buffer-sync)
+  (add-hook 'window-selection-change-functions
+            #'my/direnv-schedule-selected-buffer-sync)
   (add-hook 'hack-local-variables-hook #'my/direnv--settle-env-after-dir-locals)
   (direnv-mode 1))
 

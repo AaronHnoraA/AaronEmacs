@@ -31,8 +31,11 @@
 (defvar-local my/diagnostics--modeline-cache nil
   "Cached diagnostics mode line string for the current buffer.")
 
-(defvar-local my/diagnostics--modeline-cache-key nil
-  "Buffer state key used by `my/diagnostics--modeline-cache'.")
+(defvar-local my/diagnostics--modeline-cache-tick nil
+  "Buffer modification tick used by `my/diagnostics--modeline-cache'.")
+
+(defvar-local my/diagnostics--modeline-cache-size nil
+  "Buffer size used by `my/diagnostics--modeline-cache'.")
 
 (defun my/diagnostics--counts (&optional diags)
   "Return diagnostic counts for DIAGS or the current buffer."
@@ -64,20 +67,24 @@
 (defun my/diagnostics--clear-modeline-cache (&rest _)
   "Clear cached diagnostics modeline state in the current buffer."
   (setq-local my/diagnostics--modeline-cache nil
-              my/diagnostics--modeline-cache-key nil))
+              my/diagnostics--modeline-cache-tick nil
+              my/diagnostics--modeline-cache-size nil))
 
 (defun my/diagnostics--clear-modeline-cache-a (&rest _)
   "Clear diagnostics modeline cache after Flymake publishes diagnostics."
   (my/diagnostics--clear-modeline-cache)
-  (force-mode-line-update t))
+  (force-mode-line-update))
 
 (defun my/diagnostics-modeline-string ()
   "Return a compact Flymake status string for the mode line."
   (when (and my/diagnostics-modeline-mode
              (bound-and-true-p flymake-mode))
-    (let ((key (list (buffer-chars-modified-tick) (buffer-size))))
-      (unless (equal key my/diagnostics--modeline-cache-key)
-        (setq-local my/diagnostics--modeline-cache-key key)
+    (let ((tick (buffer-chars-modified-tick))
+          (size (buffer-size)))
+      (unless (and (eql tick my/diagnostics--modeline-cache-tick)
+                   (eql size my/diagnostics--modeline-cache-size))
+        (setq-local my/diagnostics--modeline-cache-tick tick
+                    my/diagnostics--modeline-cache-size size)
         (setq-local my/diagnostics--modeline-cache
                     (my/diagnostics--format-modeline-counts
                      (my/diagnostics--counts))))
@@ -113,16 +120,26 @@
           (my/diagnostics-refresh)))))
   (force-mode-line-update t))
 
+(defun my/diagnostics--open-buffer-p ()
+  "Return non-nil when a diagnostics UI buffer is open."
+  (catch 'open
+    (dolist (buffer (buffer-list))
+      (with-current-buffer buffer
+        (when (derived-mode-p 'my/diagnostics-mode)
+          (throw 'open t))))
+    nil))
+
 (defun my/diagnostics--schedule-refresh-open-buffers (&rest _)
   "Coalesce diagnostics buffer refreshes after Flymake saves."
-  (when (timerp my/diagnostics--refresh-timer)
-    (cancel-timer my/diagnostics--refresh-timer))
-  (setq my/diagnostics--refresh-timer
-        (run-with-idle-timer
-         0.12 nil
-         (lambda ()
-           (setq my/diagnostics--refresh-timer nil)
-           (my/diagnostics--refresh-open-buffers)))))
+  (when (my/diagnostics--open-buffer-p)
+    (when (timerp my/diagnostics--refresh-timer)
+      (cancel-timer my/diagnostics--refresh-timer))
+    (setq my/diagnostics--refresh-timer
+          (run-with-idle-timer
+           0.12 nil
+           (lambda ()
+             (setq my/diagnostics--refresh-timer nil)
+             (my/diagnostics--refresh-open-buffers))))))
 
 (define-minor-mode my/diagnostics-auto-refresh-mode
   "Auto-refresh diagnostics buffers after Flymake saves."
