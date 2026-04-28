@@ -39,6 +39,26 @@
     (add-to-list 'load-path tramp-rpc-dir)
     (require 'tramp-rpc)))
 
+(defcustom my/tramp-use-login-shell nil
+  "Whether TRAMP should force a login shell on the remote side.
+
+Leave this disabled unless a specific remote needs login-shell semantics.
+Many hosts print extra startup output from shell init files, which breaks
+TRAMP's prompt parsing even though plain interactive `ssh' still appears to
+work in a terminal."
+  :type 'boolean
+  :group 'my)
+
+(defcustom my/tramp-use-ssh-controlmaster
+  nil
+  "Whether TRAMP should add its own SSH ControlMaster options.
+
+Leave this disabled unless you have verified that multiplexed SSH sessions are
+stable for your hosts.  It changes TRAMP's transport shape relative to plain
+terminal `ssh', which makes remote failures harder to reason about."
+  :type 'boolean
+  :group 'my)
+
 (defun my/tramp-rpc-path-p (&optional path)
   "Return non-nil if PATH (or current buffer path) uses Tramp method \"rpc\"."
   (when (featurep 'tramp)
@@ -84,9 +104,13 @@
   ;; SSH as the default transport.
   (setq tramp-default-method "ssh")
 
-  ;; Use bash for the remote login shell so TRAMP's prompt detection works.
-  (setq tramp-login-shell "bash")
-  (setq tramp-login-args '(("-l")))
+  ;; Forcing `bash -l' makes TRAMP sensitive to shell startup chatter.
+  ;; Keep upstream defaults unless explicitly requested.
+  (if my/tramp-use-login-shell
+      (setq tramp-login-shell "/bin/bash"
+            tramp-login-args '(("-l")))
+    (setq tramp-login-shell nil
+          tramp-login-args nil))
 
   ;; Connection and session timeouts.
   (setq tramp-connection-timeout 10
@@ -110,7 +134,7 @@
 
   ;; SSH ControlMaster: multiplex all sessions over one TCP connection.
   ;; This is the single biggest speedup for remote file access.
-  (setq tramp-use-ssh-controlmaster-options t)
+  (setq tramp-use-ssh-controlmaster-options my/tramp-use-ssh-controlmaster)
 
   ;; SCP direct remote copying: avoid local staging for large transfers.
   (setq tramp-use-scp-direct-remote-copying t)

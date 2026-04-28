@@ -18,6 +18,7 @@
         ("gnu"    . "https://elpa.gnu.org/packages/")
         ("nongnu" . "https://elpa.nongnu.org/nongnu/")
         ("org"    . "https://orgmode.org/elpa/")))
+
 ;; =========================
 ;; 同步 shell PATH 到 Emacs（macOS 必备）
 ;; =========================
@@ -38,7 +39,9 @@
 (require 'use-package)
 
 (defconst my/shell-environment-variables
-  '("PATH" "MANPATH" "INFOPATH" "TEXINPUTS" "BIBINPUTS" "BSTINPUTS")
+  '("PATH" "MANPATH" "INFOPATH"
+    "SSH_AUTH_SOCK" "SSH_AGENT_PID"
+    "TEXINPUTS" "BIBINPUTS" "BSTINPUTS")
   "Environment variables copied from the login shell into Emacs.")
 
 (defun my/refresh-environment-from-shell ()

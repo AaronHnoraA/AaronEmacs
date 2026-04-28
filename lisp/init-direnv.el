@@ -29,10 +29,11 @@
          (expanded (and target (expand-file-name target)))
          (directory (cond
                      ((null expanded) nil)
+                     ((file-remote-p expanded) nil)
                      ((file-directory-p expanded)
                       (file-name-as-directory expanded))
                      (t
-                       (file-name-directory expanded)))))
+                      (file-name-directory expanded)))))
     (when (and directory
                (not (file-remote-p directory))
                (file-directory-p directory))
