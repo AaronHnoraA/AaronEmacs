@@ -1,6 +1,9 @@
 ;; C/C++ project using GCC via nix-shell
 ;; shell.nix should expose gcc/g++ in its buildInputs.
-((nil . ((my/project-local-settings
+((nil . ((indent-tabs-mode . nil)
+         (tab-width . 4)
+         (fill-column . 100)
+         (my/project-local-settings
           . (:env  (("CC"  . "gcc")
                    ("CXX" . "g++"))
              :task (("build"     . "nix-shell --run 'make CC=gcc'")

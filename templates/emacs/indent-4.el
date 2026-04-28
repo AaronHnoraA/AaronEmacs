@@ -7,4 +7,6 @@
  (c-ts-mode      . ((c-basic-offset . 4)))
  (c++-ts-mode    . ((c-basic-offset . 4)))
  (c-mode         . ((c-basic-offset . 4)))
- (c++-mode       . ((c-basic-offset . 4))))
+ (c++-mode       . ((c-basic-offset . 4)))
+ (rust-mode      . ((rust-indent-offset . 4)))
+ (rust-ts-mode   . ((rust-ts-indent-offset . 4))))

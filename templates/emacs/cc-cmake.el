@@ -1,5 +1,9 @@
 ;; C/C++ project using CMake (out-of-tree build in ./build/)
-((nil . ((my/project-local-settings
+((nil . ((indent-tabs-mode . nil)
+         (tab-width . 4)
+         (fill-column . 100)
+         (compile-command . "cmake --build build")
+         (my/project-local-settings
           . (:task (("configure" . "cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Debug")
                    ("build"     . "cmake --build build")
                    ("clean"     . "cmake --build build --target clean"))

@@ -1082,7 +1082,7 @@ Returns the number of killed buffers."
         treemacs-indentation-string " "
         treemacs-is-never-other-window nil
         treemacs-max-git-entries 5000
-        treemacs-missing-project-action 'ask
+        treemacs-missing-project-action 'keep
         treemacs-move-files-by-mouse-dragging t
         treemacs-move-forward-on-expand nil
         treemacs-no-delete-other-windows t

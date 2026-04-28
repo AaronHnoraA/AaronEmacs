@@ -114,6 +114,30 @@
 ;; Always load the newest file
 (setq load-prefer-newer t)
 
+;; Do not block visiting files on local variable confirmations.  Trusted files
+;; may use all file/dir-local variables, while untrusted content only gets safe
+;; values and never runs eval forms.
+(setq enable-local-variables t
+      enable-local-eval 'maybe)
+
+(defun my/trusted-content-p ()
+  "Return non-nil when the current buffer should get full local variables."
+  (or (not (fboundp 'trusted-content-p))
+      (trusted-content-p)))
+
+(defun my/hack-local-variables-trust-policy-a (orig-fn &rest args)
+  "Apply local variable policy based on `trusted-content-p'."
+  (let* ((trusted (my/trusted-content-p))
+         (enable-local-variables
+          (and enable-local-variables
+               (if trusted :all :safe)))
+         (enable-local-eval
+          (and enable-local-eval trusted)))
+    (apply orig-fn args)))
+
+(advice-add 'hack-local-variables :around
+            #'my/hack-local-variables-trust-policy-a)
+
 ;; Keep the system clipboard stable when selecting text with the mouse.
 (setq select-enable-primary nil
       select-enable-clipboard t

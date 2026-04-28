@@ -508,6 +508,9 @@ for the cache update so we never compute it twice in one redisplay."
                (quote-bg (my/org-blend-colors blue base-bg 0.05))
                (verse-bg (my/org-blend-colors mauve base-bg 0.05))
                (table-bg (my/org-blend-colors blue base-bg 0.025))
+               (plain-block-bg (my/org-blend-colors mantle base-bg 0.72))
+               (plain-block-meta-bg plain-block-bg)
+               (plain-block-meta-fg (my/org-blend-colors overlay1 base-bg 0.38))
                (tag-bg (my/org-blend-colors teal base-bg 0.12))
                (priority-bg (my/org-blend-colors rosewater base-bg 0.12))
                (stats-done-bg (my/org-blend-colors green base-bg 0.15))
@@ -583,10 +586,10 @@ for the cache update so we never compute it twice in one redisplay."
                                 :slant 'italic))
           (when (facep 'org-block)
             (set-face-attribute 'org-block nil
-                                :background mantle
+                                :background plain-block-bg
                                 :foreground text
                                 :extend t
-                                :box `(:line-width -1 :color ,border-subtle)))
+                                :box nil))
           (when (facep 'org-code)
             (set-face-attribute 'org-code nil
                                 :background inline-code-bg
@@ -595,17 +598,21 @@ for the cache update so we never compute it twice in one redisplay."
                                 :box `(:line-width 2 :color ,inline-code-bg)))
           (when (facep 'org-block-begin-line)
             (set-face-attribute 'org-block-begin-line nil
-                                :background meta-bg
-                                :foreground meta-fg
+                                :background plain-block-meta-bg
+                                :foreground plain-block-meta-fg
                                 :height 0.88
-                                :weight title-weight
-                                :extend t))
+                                :weight 'normal
+                                :extend t
+                                :overline nil
+                                :box nil))
           (when (facep 'org-block-end-line)
             (set-face-attribute 'org-block-end-line nil
-                                :background meta-bg
-                                :foreground subtext0
+                                :background plain-block-meta-bg
+                                :foreground (my/org-blend-colors overlay1 base-bg 0.28)
                                 :height 0.82
-                                :extend t))
+                                :extend t
+                                :underline nil
+                                :box nil))
           (when (facep 'org-verbatim)
             (set-face-attribute 'org-verbatim nil
                                 :background verbatim-bg
@@ -752,11 +759,11 @@ for the cache update so we never compute it twice in one redisplay."
                                 :box `(:line-width 3 :color ,mantle)))
           (when (facep 'org-modern-block-name)
             (set-face-attribute 'org-modern-block-name nil
-                                :background block-name-bg
-                                :foreground yellow
+                                :background plain-block-meta-bg
+                                :foreground plain-block-meta-fg
                                 :height 0.9
-                                :weight strong-weight
-                                :box `(:line-width 2 :color ,block-name-bg)))
+                                :weight 'normal
+                                :box nil))
           (when (facep 'org-modern-todo)
             (set-face-attribute 'org-modern-todo nil
                                 :inherit 'org-modern-label

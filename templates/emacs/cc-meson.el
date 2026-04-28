@@ -1,5 +1,9 @@
 ;; C/C++ project using Meson (build dir: ./builddir/)
-((nil . ((my/project-local-settings
+((nil . ((indent-tabs-mode . nil)
+         (tab-width . 4)
+         (fill-column . 100)
+         (compile-command . "meson compile -C builddir")
+         (my/project-local-settings
           . (:task (("setup"  . "meson setup builddir")
                    ("build"  . "meson compile -C builddir")
                    ("test"   . "meson test -C builddir"))

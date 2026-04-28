@@ -1,6 +1,9 @@
 ;; C/C++ project using Clang via nix-shell
 ;; shell.nix should expose clang/clang++ (llvmPackages.clang) in buildInputs.
-((nil . ((my/project-local-settings
+((nil . ((indent-tabs-mode . nil)
+         (tab-width . 4)
+         (fill-column . 100)
+         (my/project-local-settings
           . (:env  (("CC"  . "clang")
                    ("CXX" . "clang++"))
              :task (("build"     . "nix-shell --run 'make CC=clang CXX=clang++'")

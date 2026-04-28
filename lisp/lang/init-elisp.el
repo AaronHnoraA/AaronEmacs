@@ -26,6 +26,8 @@
 (defvar flymake-diagnostic-functions)
 (defvar lsp-language-id-configuration)
 (defvar lsp-inlay-hint-enable)
+(defvar lsp-auto-guess-root)
+(defvar lsp-guess-root-without-session)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Emacs Lisp editing
@@ -126,9 +128,16 @@ the already-installed ELPA package."
 (defun my/elisp-lsp-ensure ()
   "Start Elsa LSP for the current Emacs Lisp file buffer."
   (when (and buffer-file-name
+             (not (file-remote-p buffer-file-name))
+             (not (member (file-name-nondirectory buffer-file-name)
+                          '(".dir-locals.el" ".dir-locals-2.el")))
+             (or (not (fboundp 'trusted-content-p))
+                 (funcall #'trusted-content-p))
              (locate-library "elsa-lsp")
              (not (bound-and-true-p lsp-managed-mode)))
     (setq-local lsp-inlay-hint-enable nil)
+    (setq-local lsp-auto-guess-root t)
+    (setq-local lsp-guess-root-without-session t)
     (when (fboundp 'my/language-server-stop-eglot)
       (my/language-server-stop-eglot))
     (lsp-deferred)))
