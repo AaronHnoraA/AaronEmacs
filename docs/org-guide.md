@@ -75,9 +75,34 @@
 - `C-c n a`
   添加 alias
 - `C-c n o`
-  创建 `org-id`
+  创建或复用当前位置引用目标，并复制 Org link：标题复制 `[[id:...]]`，`\\[...\\]` 公式里必要时在 `\\]` 后插入 `<<eq-...>>`，`#+begin` 块里必要时在 `#+end_xxx` 后插入 `<<xxx-...>>`
+- `C-c n I`
+  手动插入 `id:` 链接
+- `C-c n T`
+  手动插入 dedicated target 链接
 - `C-c n l`
   切换 roam buffer
+
+macOS GUI 下，`Option` 映射到 `Hyper`，Org 常用入口也放到了 `H-o` 前缀：
+
+- `H-o a` / `H-o c`
+  `org-agenda` / `org-capture`
+- `H-o f` / `H-o i` / `H-o l`
+  roam find / roam insert / roam buffer
+- `H-o o`
+  创建或复用当前位置引用目标，并复制 Org link
+- `H-o I` / `H-o L`
+  插入 `id:` link / target link
+- `H-o T` / `H-o v`
+  刷新 overview TOC / 预览当前可视区域 LaTeX
+- `H-o t` / `H-o s` / `H-o d` / `H-o r`
+  todo / schedule / deadline / refile
+- `H-o q` / `H-o p` / `H-o e` / `H-o A`
+  tags / property / effort / archive
+- `H-o z`
+  从 BibTeX block 填充 Zotero 模板字段
+
+剪贴板图片粘贴到 Org 的入口是 `H-y`。
 
 说明：
 
@@ -124,7 +149,206 @@
 - `SPC m z`
   从 BibTeX block 填充 Zotero 模板字段
 
-## 8. 学术写作
+## 8. Org 跳转引用
+
+这里讲的是 Org buffer 里的点击跳转，不是 LaTeX/PDF 导出时的 `\label` / `\ref` / `\eqref`。
+
+### 基本原则
+
+Org 里的 TOC 不是独立引用对象。TOC 只是标题链接列表；要引用某一级 TOC，实际应该引用那一级标题。
+
+公式也一样。Org 里要能点击跳转，应该给公式附近放 Org 自己认识的 target，或者把重要公式放进带 `ID` 的 heading 下面。LaTeX 的 `\label{}` 主要服务导出，不是 Org 的链接跳转机制。
+
+### 同文件标题
+
+临时引用可以直接用标题链接：
+
+```org
+[[*章节标题]]
+[[*章节标题][显示文字]]
+```
+
+这类链接依赖标题文字。标题改名后，链接可能失效。
+
+更稳的是给标题加 `CUSTOM_ID`：
+
+```org
+* 章节标题
+:PROPERTIES:
+:CUSTOM_ID: sec-intro
+:END:
+```
+
+然后引用：
+
+```org
+[[#sec-intro]]
+[[#sec-intro][章节标题]]
+```
+
+### 跨文件标题
+
+按标题跳转：
+
+```org
+[[file:math/algebra.org::*群的定义]]
+```
+
+按 `CUSTOM_ID` 跳转：
+
+```org
+[[file:math/algebra.org::#group-definition][群的定义]]
+```
+
+长期知识库里，更推荐给重要标题创建 `ID`：
+
+```org
+* 群的定义
+:PROPERTIES:
+:ID: 20260428T120000-group-definition
+:END:
+```
+
+然后任何文件都可以引用：
+
+```org
+[[id:20260428T120000-group-definition][群的定义]]
+```
+
+这对 org-roam 最友好。文件移动、标题改名时，`id:` 链接比 `file:*标题` 更稳定，也更容易出现在 backlinks 里。
+
+这套配置里 `C-c n o` / `H-o o` 会创建或复用当前位置引用目标，并复制 Org link。用在标题上时，它适合给当前标题补一个稳定 `ID` 引用点。
+
+同一个按键在 `\\[...\\]` display math 里会改为给公式创建 Org target：
+
+```org
+\[
+E = mc^2
+\] <<eq-20260428T122000>>
+```
+
+target 会插到 `\\]` 后面，最后复制链接到 kill ring。
+
+同一个命令也支持 `#+begin_...` / `#+end_...` 块。point 在 block 内时，会在结束行后插入 dedicated target：
+
+```org
+#+begin_src emacs-lisp
+(message "hello")
+#+end_src
+<<src-20260428T122000>>
+```
+
+然后复制：
+
+```org
+[[src-20260428T122000]]
+```
+
+### TOC 各级别
+
+这套配置的自动 overview TOC 由 [lisp/org/init-org-core.el](../lisp/org/init-org-core.el) 生成，TOC 项目前默认是指向标题的 fuzzy link：
+
+```org
+[[*一级标题][一级标题]]
+[[*二级标题][二级标题]]
+```
+
+所以“引用 TOC 的二级/三级条目”本质上就是引用对应 heading：
+
+```org
+[[*二级标题][二级标题]]
+[[id:20260428T121000-some-section][二级标题]]
+```
+
+临时目录跳转用标题链接即可。需要长期稳定、跨文件、被 roam 追踪时，给那个 heading 加 `ID`，然后用 `id:` 链接。
+
+如果某个标题不想进入自动 TOC，可以给它加 `:no_toc:` tag。
+
+### 同文件公式
+
+公式本身不是 Org heading。要在 Org 里点击跳转，给公式附近放一个 dedicated target：
+
+```org
+<<eq-einstein>>
+\begin{equation}
+E = mc^2
+\end{equation}
+```
+
+同文件引用：
+
+```org
+见 [[eq-einstein][质能方程]]
+```
+
+这种方式适合轻量公式、临时公式和同文件跳转。
+
+### 跨文件公式
+
+跨文件引用 dedicated target：
+
+```org
+[[file:physics.org::eq-einstein][质能方程]]
+```
+
+也可以写得更明确：
+
+```org
+[[file:physics.org::<<eq-einstein>>][质能方程]]
+```
+
+对长期笔记，更推荐把重要公式包在一个 heading 下面，并给 heading 创建 `ID`：
+
+```org
+* 质能方程
+:PROPERTIES:
+:ID: 20260428T122000-einstein-equation
+:END:
+
+\begin{equation}
+E = mc^2
+\end{equation}
+```
+
+然后跨文件引用：
+
+```org
+[[id:20260428T122000-einstein-equation][质能方程]]
+```
+
+这个模型比较适合 org-roam：公式对应的是“一个可引用的知识节点”，而不是只在 LaTeX 导出阶段存在的编号。
+
+### 选择规则
+
+- 临时同文件标题跳转：`[[*标题]]`
+- 稳定同文件标题跳转：`[[#custom-id]]`
+- 稳定跨文件标题跳转：`[[id:...]]`
+- 临时公式跳转：`<<eq-name>>` + `[[eq-name]]`
+- 跨文件公式跳转：`[[file:xxx.org::eq-name]]`
+- 长期重要公式：放进带 `ID` 的 heading，用 `[[id:...]]`
+
+### Snippets
+
+`org-mode` 里新增了几个手写引用用的 snippets：
+
+- `orgid`
+  插入 `:PROPERTIES:` / `:ID:` drawer
+- `otarget`
+  插入 `<<target>>`
+- `eqtarget`
+  插入带 target 的 `\\[...\\]` 公式块
+- `blocktarget`
+  插入带 target 的 `#+begin_...` block
+- `idlink`
+  插入 `[[id:...]]`
+- `tlink`
+  插入 `[[target]]`
+- `ftlink`
+  插入 `[[file:xxx.org::target]]`
+- `hlink`
+  插入 `[[*标题]]`
+
+## 9. 学术写作
 
 ### LaTeX
 
@@ -149,7 +373,7 @@
 - `pdf-tools` 已启用
 - AUCTeX 查看器走 Sioyek
 
-## 9. 如果 Org 看起来不对
+## 10. 如果 Org 看起来不对
 
 优先检查：
 
@@ -158,7 +382,7 @@
 3. `xelatex` / `dvisvgm` 是否可用
 4. [tools/org-xdvisvgm-hires](../tools/org-xdvisvgm-hires) 是否有执行权限
 
-## 10. 想改 Org 的入口
+## 11. 想改 Org 的入口
 
 看 [settings-cookbook.md](settings-cookbook.md)：
 

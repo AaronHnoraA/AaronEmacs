@@ -25,6 +25,10 @@ motion or typing."
 (defvar-local my/org-roam--redisplay-timer nil)
 (defvar-local my/org-roam--redisplay-key nil)
 
+(declare-function my/org-reference-create-target-dwim "init-org-utility" ())
+(declare-function my/org-insert-id-link "init-org-utility" ())
+(declare-function my/org-insert-target-link "init-org-utility" ())
+
 (defun my/org-roam-capture-head (tag)
   "Return the default Org Roam capture head with filetag TAG."
   (format "#+title: ${title}
@@ -85,7 +89,9 @@ motion or typing."
         ("i" . org-roam-node-insert)
         ("t" . org-roam-tag-add)
         ("a" . org-roam-alias-add)
-        ("o" . org-id-get-create)
+        ("o" . my/org-reference-create-target-dwim)
+        ("I" . my/org-insert-id-link)
+        ("T" . my/org-insert-target-link)
         ("l" . org-roam-buffer-toggle))
   
   :config

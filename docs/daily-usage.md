@@ -54,7 +54,7 @@
 - `H-p` / `H-P` / `H-R` / `H-T`
   项目工作台 / workspace 菜单 / run profile 菜单 / test 菜单
 - `H-m` / `H-a` / `H-l` / `H-y`
-  `magit-status` / `org-agenda` / Claude Code 菜单 / bookmark 跳转
+  `magit-status` / `org-agenda` / Claude Code 菜单 / 粘贴剪贴板图片到 Org
 - `H-h` / `H-H` / `H-z` / `H-Z`
   help / health 菜单 / zoxide 跳目录 / 当前文件目录
 - `H-e` / `H-E` / `H-d` / `H-D`
@@ -66,7 +66,7 @@
 - `H-0` / `H-1` / `H-2` / `H-3`
   关当前窗口 / 单窗口切换 / 上下分屏 / 左右分屏
 - `H-o` / `H-O` / `H-k` / `H-K`
-  下方开新行 / 上方开新行 / 向下复制当前行或区域 / 向上复制当前行或区域
+  Org 快捷前缀 / 上方开新行 / 向下复制当前行或区域 / 向上复制当前行或区域
 - `H-<up>` / `H-<down>` / `H--` / `H-=`
   上移 / 下移当前行或区域 / 收缩选择 / 扩大选择
 - `H-;` / `H-'` / `H-[` / `H-]` / `H-/`
@@ -193,8 +193,8 @@ setup/ensure 和低层维护命令。普通 `M-x` 仍走默认 `amx` 行为。
 
 macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 
-- `H-o` / `H-O`
-  下方 / 上方开新行
+- `H-O`
+  上方开新行
 - `H-k` / `H-K`
   向下 / 向上复制当前行或区域
 - `H-<up>` / `H-<down>`
