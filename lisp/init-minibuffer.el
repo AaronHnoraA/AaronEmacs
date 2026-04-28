@@ -23,6 +23,7 @@
 (use-package vertico-directory
   :ensure nil
   :after vertico
+  :hook (rfn-eshadow-update-overlay . vertico-directory-tidy)
   :bind (:map vertico-map
          ("RET" . vertico-directory-enter)
          ("DEL" . vertico-directory-delete-char)

@@ -48,16 +48,10 @@ motion or typing."
   (setq my/org-roam--background-timer nil))
 
 (defun my/org-roam-enable ()
-  "Initialize org-roam once using the newest available entry point."
+  "Initialize org-roam once."
   (my/org-roam--cancel-background-timer)
   (unless my/org-roam--initialized
-    (cond
-     ((fboundp 'org-roam-db-autosync-enable)
-      (org-roam-db-autosync-enable))
-     (t
-      (when (fboundp 'org-roam-setup)
-        (org-roam-setup))
-      (org-roam-db-autosync-mode 1)))
+    (org-roam-db-autosync-mode 1)
     (setq my/org-roam--initialized t)))
 
 (defun my/org-roam-background-init ()
