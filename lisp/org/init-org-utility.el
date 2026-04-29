@@ -27,7 +27,23 @@
   :type 'integer
   :group 'my/org-utility)
 
+(defface my/org-reference-scope-candidate
+  '((t :inherit font-lock-keyword-face :weight semibold))
+  "Face for reference candidates that can be drilled into."
+  :group 'my/org-utility)
+
+(defface my/org-reference-target-candidate
+  '((t :inherit font-lock-variable-name-face))
+  "Face for reference candidates that can be selected immediately."
+  :group 'my/org-utility)
+
+(defface my/org-reference-file-candidate
+  '((t :inherit font-lock-string-face :weight semibold))
+  "Face for file-level reference candidates."
+  :group 'my/org-utility)
+
 (defvar org-download-image-dir)
+(defvar org-download-screenshot-method)
 (defvar org-download-timestamp)
 (defvar org-roam-directory)
 (defvar my/org-reference--cache (make-hash-table :test 'equal)
@@ -95,11 +111,14 @@ Targets are stored after the formula closing delimiter."
                (<= origin end))
       (list :begin begin :end end :type type))))
 
-(defun my/org-reference--target-before-block (pos)
-  "Return dedicated target on the line immediately before block starting at POS, or nil."
+(defun my/org-reference--target-before-block (block-begin)
+  "Return dedicated target immediately before BLOCK-BEGIN, or nil."
   (save-excursion
-    (goto-char pos)
+    (goto-char block-begin)
     (forward-line -1)
+    (while (and (not (bobp))
+                (looking-at-p "[ \t]*$"))
+      (forward-line -1))
     (when (looking-at "[ \t]*<<\\([^>\n]+\\)>>[ \t]*$")
       (match-string-no-properties 1))))
 
@@ -455,17 +474,6 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
     (beginning-of-line)
     (looking-at-p "[ \t]*%")))
 
-(defun my/org-reference--target-before-block (block-begin)
-  "Return dedicated target immediately before BLOCK-BEGIN, or nil."
-  (save-excursion
-    (goto-char block-begin)
-    (forward-line -1)
-    (while (and (not (bobp))
-                (looking-at-p "[ \t]*$"))
-      (forward-line -1))
-    (when (looking-at "[ \t]*<<\\([^>\n]+\\)>>[ \t]*$")
-      (match-string-no-properties 1))))
-
 (defun my/org-reference--target-before-block-p (pos)
   "Return non-nil when dedicated target at POS labels the following block."
   (save-excursion
@@ -643,37 +651,30 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
          (<= pos end))))
 
 (defun my/org-reference--filter-scope-children (candidates scope)
-  "Return immediate useful children of SCOPE from CANDIDATES."
+  "Return useful candidates under SCOPE from CANDIDATES."
   (let* ((scope-kind (plist-get scope :kind))
          (scope-level (plist-get scope :level))
          (scope-begin (plist-get scope :begin))
          (children (seq-filter
-	                    (lambda (candidate)
-	                      (and (not (eq candidate scope))
-	                           (not (= (or (plist-get candidate :pos) -1)
-	                                   (or scope-begin -2)))
-                           (my/org-reference--candidate-in-scope-p candidate scope)))
+                    (lambda (candidate)
+                      (and (not (eq candidate scope))
+                           (let ((pos (plist-get candidate :pos))
+                                 (kind (plist-get candidate :kind)))
+                             (if (= (or pos -1) (or scope-begin -2))
+                                 (memq kind '(id custom-id))
+                               (my/org-reference--candidate-in-scope-p
+                                candidate scope)))))
                     candidates)))
-    (setq children
-          (if (eq scope-kind 'scope-heading)
-              (seq-filter
-               (lambda (candidate)
-                 (let ((kind (plist-get candidate :kind)))
-                   (not (and (eq kind 'scope-heading)
-                             (<= (or (plist-get candidate :level) most-positive-fixnum)
-                                 (or scope-level 0))))))
-               children)
-            children))
-    (seq-filter
-     (lambda (candidate)
-       (not
-        (seq-some
-         (lambda (child-scope)
-           (and (not (eq candidate child-scope))
-                (my/org-reference--scope-candidate-p child-scope)
-                (my/org-reference--candidate-in-scope-p candidate child-scope)))
-         children)))
-     children)))
+    (if (eq scope-kind 'scope-heading)
+        (seq-filter
+         (lambda (candidate)
+           (let ((kind (plist-get candidate :kind)))
+             (not (and (eq kind 'scope-heading)
+                       (<= (or (plist-get candidate :level)
+                               most-positive-fixnum)
+                           (or scope-level 0))))))
+         children)
+      children)))
 
 (defun my/org-reference--scope-candidate-p (target)
   "Return non-nil when TARGET can be drilled into."
@@ -719,6 +720,13 @@ confuse path splitting; '/' is replaced with U+2044 FRACTION SLASH."
     (_
      (my/org-reference--path-safe
       (or (plist-get c :target) (plist-get c :label) "")))))
+
+(defun my/org-reference--candidate-face (candidate)
+  "Return the completion face for reference CANDIDATE."
+  (pcase (plist-get candidate :kind)
+    ('file 'my/org-reference-file-candidate)
+    ((or 'scope-heading 'scope-block) 'my/org-reference-scope-candidate)
+    (_ 'my/org-reference-target-candidate)))
 
 (defun my/org-reference--path-candidates-at (all scope-parts &optional universe)
   "Return candidates at the level reached by SCOPE-PARTS from ALL.
@@ -783,15 +791,16 @@ that is what candidate-name emits for scope entries."
      (t
       (message "No target selected")))))
 
-(defun my/org-reference--target-read-keymap ()
+(defun my/org-reference--target-read-keymap (&optional parent)
   "Return minibuffer keymap for reference target selection."
   (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map (or parent minibuffer-local-completion-map))
     (define-key map (kbd "RET") #'my/org-reference--confirm-minibuffer-target)
     (define-key map (kbd "<return>") #'my/org-reference--confirm-minibuffer-target)
     (define-key map (kbd "C-m") #'my/org-reference--confirm-minibuffer-target)
-    (define-key map (kbd "TAB") #'my/org-reference--drill-minibuffer-target)
-    (define-key map (kbd "<tab>") #'my/org-reference--drill-minibuffer-target)
-    (define-key map (kbd "C-i") #'my/org-reference--drill-minibuffer-target)
+    (define-key map (kbd "M-RET") #'my/org-reference--drill-minibuffer-target)
+    (define-key map (kbd "M-<return>") #'my/org-reference--drill-minibuffer-target)
+    (define-key map (kbd "C-c C-o") #'my/org-reference--drill-minibuffer-target)
     map))
 
 (defun my/org-reference--lookup-selection (selected candidates lookup)
@@ -824,7 +833,7 @@ selection instead of asking for an exact match."
   "Return (table-fn . lookup-hash) for hierarchical path-style completion.
 
 Scope candidates (headings, blocks) appear with a trailing '/' and act as
-directories.  Press TAB on a scope to navigate into it; press RET to select
+directories.  Press M-RET on a scope to navigate into it; press RET to select
 the current candidate.
 
 The table emits an annotation-function that shows formula LaTeX content,
@@ -843,7 +852,6 @@ reliable lookup regardless of how the UI handles text properties."
               (let* ((context (plist-get target :context))
                      (preview (plist-get target :preview))
                      (label   (plist-get target :label))
-                     (id      (plist-get target :target))
                      (text
                       (pcase kind
                         ('file nil)
@@ -903,6 +911,7 @@ reliable lookup regardless of how the UI handles text properties."
                              (puthash segment c lookup)
                              (puthash full c lookup)
                              (propertize segment
+                                         'face (my/org-reference--candidate-face c)
                                          'my/org-reference-target c
                                          'my/org-reference-full full)))
                          level)))
@@ -1007,7 +1016,7 @@ LOOKUP maps plain completion strings to target plists."
   "Read a reference target from FILE using hierarchical path-style completion.
 
 The prompt shows the current path, e.g. \"Target: heading/subheading/\".
-Navigate into the selected scope with TAB.  RET confirms the selected
+Navigate into the selected scope with M-RET.  RET confirms the selected
 candidate, including headings and blocks."
   (let* ((all  (my/org-reference--file-targets-cached file))
          (pair (my/org-reference--make-path-table all))
@@ -1038,11 +1047,17 @@ candidate, including headings and blocks."
                                   :lookup      (lambda (selected candidates &rest _)
                                                  (my/org-reference--lookup-selection
                                                   selected candidates lookup))))
-                               (let ((choice (completing-read "Target: " table nil nil prefix)))
-                                 (my/org-reference--lookup-selection
-                                  choice
-                                  (all-completions choice table)
-                                  lookup)))))
+                              (let* ((parent minibuffer-local-completion-map)
+                                     (minibuffer-local-completion-map
+                                      (my/org-reference--target-read-keymap
+                                       parent))
+                                     (choice
+                                      (completing-read
+                                       "Target: " table nil nil prefix)))
+                                (my/org-reference--lookup-selection
+                                 choice
+                                 (all-completions choice table)
+                                 lookup)))))
                         selected))))
                  (drilled (and (consp raw) (eq (car raw) 'drill)))
                  (target (or (and drilled (cdr raw))

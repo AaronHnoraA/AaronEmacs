@@ -10,6 +10,7 @@
 (require 'aaron-ui)
 (require 'init-org-core)
 (require 'org-element)
+(require 'subr-x)
 
 (defvar-local my/org--olivetti-auto-state nil)
 (defvar-local my/org-pretty-block-cache nil)
@@ -64,6 +65,39 @@ lighter without changing table behavior once a table exists."
 (defconst my/org--special-block-line-regexp "^[ \t]*#\\+begin_"
   "Regexp matching Org special-block opening lines.")
 
+(defconst my/org-reference-formula-target-regexp
+  "\\(<<\\)\\(eq-[^<>\n\r\t ]+\\)\\(>>\\)"
+  "Regexp matching generated formula reference targets.")
+
+(defconst my/org-reference-block-target-regexp
+  "^[ \t]*\\(<<\\)\\([^<>\n\r\t ][^<>\n\r]*?\\)\\(>>\\)[ \t]*$"
+  "Regexp matching target-only lines that may label Org blocks.")
+
+(defconst my/org-property-drawer-begin-regexp
+  "^[ \t]*:PROPERTIES:[ \t]*$"
+  "Regexp matching the start of an Org property drawer.")
+
+(defcustom my/org-property-drawer-label-search-lines 8
+  "Maximum number of lines searched for a reference property drawer label."
+  :type 'integer
+  :group 'my/org-ui)
+
+(defconst my/org-reference-formula-label-prefix
+  #(" ∑ " 0 3 (face my/org-reference-formula-label))
+  "Display prefix for generated formula reference labels.")
+
+(defconst my/org-reference-formula-label-suffix
+  #(" " 0 1 (face my/org-reference-formula-label))
+  "Display suffix for generated formula reference labels.")
+
+(defconst my/org-reference-block-label-prefix
+  #(" ▣ " 0 3 (face my/org-reference-block-label))
+  "Display prefix for generated block reference labels.")
+
+(defconst my/org-reference-block-label-suffix
+  #(" " 0 1 (face my/org-reference-block-label))
+  "Display suffix for generated block reference labels.")
+
 (declare-function evil-insert-state-p "evil")
 (declare-function my/org-toc-insert-or-update "init-org-core")
 
@@ -71,6 +105,111 @@ lighter without changing table behavior once a table exists."
   '((t :inherit hl-line))
   "Current line face used in Org buffers."
   :group 'my/org-ui)
+
+(defface my/org-reference-formula-label
+  '((t :inherit org-modern-label))
+  "Face used for generated formula reference labels."
+  :group 'my/org-ui)
+
+(defface my/org-reference-block-label
+  '((t :inherit org-modern-label))
+  "Face used for generated block reference labels."
+  :group 'my/org-ui)
+
+(defface my/org-property-drawer-pill
+  '((t :inherit org-modern-label))
+  "Face used for collapsed reference property drawers."
+  :group 'my/org-ui)
+
+(defun my/org-property-drawer-display ()
+  "Return the compact display string for the current property drawer match."
+  (let ((kind (if (string= (match-string-no-properties 3) "CUSTOM_ID")
+                  "cid"
+                "id"))
+        (value (string-trim (match-string-no-properties 4))))
+    (propertize (format " %s  %s " kind value)
+                'face 'my/org-property-drawer-pill)))
+
+(defun my/org-property-drawer-label-matcher (limit)
+  "Search to LIMIT for a short property drawer containing ID or CUSTOM_ID."
+  (catch 'found
+    (while (re-search-forward my/org-property-drawer-begin-regexp limit t)
+      (let* ((block-beg (match-beginning 0))
+             (label-beg block-beg)
+             (label-end (min (1+ block-beg) (match-end 0)))
+             (scan-limit (save-excursion
+                           (forward-line my/org-property-drawer-label-search-lines)
+                           (point)))
+             key-beg key-end value-beg value-end block-end)
+        (save-excursion
+          (forward-line 1)
+          (while (and (not block-end)
+                      (< (point) scan-limit)
+                      (not (eobp)))
+            (cond
+             ((looking-at "^[ \t]*:\\(ID\\|CUSTOM_ID\\):[ \t]+\\(.+?\\)[ \t]*$")
+              (setq key-beg (match-beginning 1)
+                    key-end (match-end 1)
+                    value-beg (match-beginning 2)
+                    value-end (match-end 2)))
+             ((looking-at "^[ \t]*:END:[ \t]*$")
+              (setq block-end (min (point-max)
+                                   (line-beginning-position 2)))))
+            (forward-line 1)))
+        (when (and block-end key-beg key-end value-beg value-end)
+          (set-match-data
+           (list block-beg block-end
+                 label-beg label-end
+                 label-end block-end
+                 key-beg key-end
+                 value-beg value-end))
+          (throw 'found t))))
+    nil))
+
+(defun my/org-reference-block-target-label-p ()
+  "Return non-nil when the current target match labels a following block."
+  (let ((target (match-string-no-properties 2)))
+    (and (not (string-prefix-p "eq-" target))
+         (save-excursion
+           (goto-char (match-end 0))
+           (skip-chars-forward " \t")
+           (when (eolp)
+             (forward-line 1)
+             (while (and (not (eobp))
+                         (looking-at-p "[ \t]*$"))
+               (forward-line 1))
+             (looking-at-p "[ \t]*#\\+begin_[[:alnum:]_-]+\\b"))))))
+
+(defun my/org-reference-block-target-matcher (limit)
+  "Search to LIMIT for a dedicated target that labels a following Org block."
+  (catch 'found
+    (while (re-search-forward my/org-reference-block-target-regexp limit t)
+      (when (my/org-reference-block-target-label-p)
+        (throw 'found t)))
+    nil))
+
+(defun my/org-reference-formula-label-setup ()
+  "Prettify generated reference targets with narrow font-lock rules.
+This deliberately uses no overlays, timers, or command hooks; font-lock only
+touches generated formula targets and dedicated targets immediately before
+Org blocks."
+  (setq-local font-lock-extra-managed-props
+              (cl-union '(display invisible) font-lock-extra-managed-props))
+  (add-to-invisibility-spec 'my/org-property-drawer)
+  (font-lock-add-keywords
+   nil
+   `((,my/org-reference-formula-target-regexp
+      (0 'my/org-reference-formula-label t)
+      (1 '(face nil display ,my/org-reference-formula-label-prefix) t)
+      (3 '(face nil display ,my/org-reference-formula-label-suffix) t))
+     (my/org-reference-block-target-matcher
+      (0 'my/org-reference-block-label t)
+      (1 '(face nil display ,my/org-reference-block-label-prefix) t)
+      (3 '(face nil display ,my/org-reference-block-label-suffix) t))
+     (my/org-property-drawer-label-matcher
+      (1 (list 'face nil 'display (my/org-property-drawer-display)) t)
+      (2 '(face nil invisible my/org-property-drawer) t)))
+   'append))
 
 (defun my/org--unspecified-color-p (value)
   "Return non-nil when VALUE is an unspecified face color."
@@ -469,7 +608,6 @@ for the cache update so we never compute it twice in one redisplay."
                (surface0 (aaron-ui-color 'bg-surface))
                (surface1 (aaron-ui-color 'bg-surface-strong))
                (surface2 (aaron-ui-color 'bg-surface-stronger))
-               (border-subtle (aaron-ui-color 'border-subtle))
                (fg-strong (aaron-ui-color 'fg-strong))
                (fg-faint (aaron-ui-color 'fg-faint))
                (overlay1 (aaron-ui-color 'fg-overlay))
@@ -497,9 +635,10 @@ for the cache update so we never compute it twice in one redisplay."
                (latex-bg (my/org-blend-colors mauve base-bg 0.075))
                (checkbox-bg (my/org-blend-colors green base-bg 0.12))
                (hl-line-bg (my/org-blend-colors blue base-bg 0.055))
-               (block-name-bg (my/org-blend-colors yellow base-bg 0.1))
                (done-bg (my/org-blend-colors green base-bg 0.1))
                (property-bg (my/org-blend-colors teal base-bg 0.055))
+               (property-drawer-bg (my/org-blend-colors green base-bg 0.15))
+               (property-drawer-border (my/org-blend-colors green base-bg 0.25))
                (quote-bg (my/org-blend-colors blue base-bg 0.05))
                (verse-bg (my/org-blend-colors mauve base-bg 0.05))
                (table-bg (my/org-blend-colors blue base-bg 0.025))
@@ -507,6 +646,14 @@ for the cache update so we never compute it twice in one redisplay."
                (plain-block-meta-bg plain-block-bg)
                (plain-block-meta-fg (my/org-blend-colors overlay1 base-bg 0.38))
                (tag-bg (my/org-blend-colors teal base-bg 0.12))
+               (formula-label-bg (my/org-blend-colors lavender base-bg 0.14))
+               (formula-label-border (my/org-blend-colors lavender base-bg 0.22))
+               (block-label-bg (my/org-blend-colors cyan base-bg 0.14))
+               (block-label-border (my/org-blend-colors cyan base-bg 0.22))
+               (scope-candidate-bg (my/org-blend-colors yellow base-bg 0.16))
+               (scope-candidate-border (my/org-blend-colors yellow base-bg 0.24))
+               (file-candidate-bg (my/org-blend-colors green base-bg 0.13))
+               (file-candidate-border (my/org-blend-colors green base-bg 0.22))
                (priority-bg (my/org-blend-colors rosewater base-bg 0.12))
                (stats-done-bg (my/org-blend-colors green base-bg 0.15))
                (stats-todo-bg (my/org-blend-colors yellow base-bg 0.14))
@@ -575,6 +722,15 @@ for the cache update so we never compute it twice in one redisplay."
                                 :background property-bg
                                 :foreground subtext1
                                 :weight title-weight))
+          (when (facep 'my/org-property-drawer-pill)
+            (set-face-attribute 'my/org-property-drawer-pill nil
+                                :inherit 'org-modern-label
+                                :background property-drawer-bg
+                                :foreground green
+                                :height 0.78
+                                :weight popout-weight
+                                :box `(:line-width 3
+                                       :color ,property-drawer-border)))
           (when (facep 'org-archived)
             (set-face-attribute 'org-archived nil
                                 :foreground fg-faint
@@ -742,6 +898,44 @@ for the cache update so we never compute it twice in one redisplay."
                                 :background surface1
                                 :foreground text
                                 :box `(:line-width 3 :color ,surface1)))
+          (when (facep 'my/org-reference-formula-label)
+            (set-face-attribute 'my/org-reference-formula-label nil
+                                :inherit 'org-modern-label
+                                :background formula-label-bg
+                                :foreground lavender
+                                :height 0.78
+                                :weight title-weight
+                                :box `(:line-width 3
+                                       :color ,formula-label-border)))
+          (when (facep 'my/org-reference-block-label)
+            (set-face-attribute 'my/org-reference-block-label nil
+                                :inherit 'org-modern-label
+                                :background block-label-bg
+                                :foreground cyan
+                                :height 0.78
+                                :weight title-weight
+                                :box `(:line-width 3
+                                       :color ,block-label-border)))
+          (when (facep 'my/org-reference-scope-candidate)
+            (set-face-attribute 'my/org-reference-scope-candidate nil
+                                :background scope-candidate-bg
+                                :foreground yellow
+                                :weight popout-weight
+                                :box `(:line-width 2
+                                       :color ,scope-candidate-border)))
+          (when (facep 'my/org-reference-target-candidate)
+            (set-face-attribute 'my/org-reference-target-candidate nil
+                                :background 'unspecified
+                                :foreground blue
+                                :weight title-weight
+                                :box nil))
+          (when (facep 'my/org-reference-file-candidate)
+            (set-face-attribute 'my/org-reference-file-candidate nil
+                                :background file-candidate-bg
+                                :foreground green
+                                :weight popout-weight
+                                :box `(:line-width 2
+                                       :color ,file-candidate-border)))
           (when (facep 'org-modern-date-active)
             (set-face-attribute 'org-modern-date-active nil
                                 :background surface0
@@ -847,8 +1041,13 @@ for the cache update so we never compute it twice in one redisplay."
                                 :weight title-weight)))))))
 
 (add-hook 'org-mode-hook #'my/org-apply-ui)
+(add-hook 'org-mode-hook #'my/org-reference-formula-label-setup t)
 (add-hook 'after-load-theme-hook #'my/org-apply-ui)
 (add-hook 'org-mode-hook #'my/org-setup-polished-document-frame)
+
+(with-eval-after-load 'init-org-utility
+  (setq my/org-ui--face-theme-signature nil)
+  (my/org-apply-ui))
 
 ;; 3.4 自动显示强调符
 (my/package-ensure-vc 'org-appear "https://github.com/awth13/org-appear.git")
