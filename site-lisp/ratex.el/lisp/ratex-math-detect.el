@@ -8,7 +8,9 @@
 
 (defconst ratex--delimiter-pairs
   '(("\\[" . "\\]")
-    ("\\(" . "\\)")))
+    ("\\(" . "\\)")
+    ("$$" . "$$")
+    ("$" . "$")))
 
 (defconst ratex--math-environments
   '("equation" "equation*"

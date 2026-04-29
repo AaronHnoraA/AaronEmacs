@@ -13,6 +13,7 @@
 (declare-function my/org-enable-org-fragtog-for-latex-edit "init-org-ui")
 (declare-function my/org-disable-org-fragtog-for-latex-edit "init-org-ui")
 (declare-function org-fragtog--disable-frag "org-fragtog" (frag &optional renew))
+(declare-function ratex-fragments-in-region "ratex-math-detect" (beg end))
 
 (defvar ratex-mode)
 (defvar ratex--active-fragment)
@@ -25,6 +26,7 @@
 (require 'init-open)
 (require 'init-org-core)
 (require 'init-org-ui)
+(require 'ratex-math-detect)
 
 (use-package cdlatex
   :ensure t
@@ -1792,39 +1794,48 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
             :background bg
             :processing-type processing-type))))
 
+(defun my/org-latex--fragment-spec-from-source-range (range)
+  "Return a render spec for source RANGE."
+  (let* ((source-beg (car range))
+         (source-end (cdr range))
+         (source-value
+          (buffer-substring-no-properties source-beg source-end)))
+    (my/org-latex--fragment-spec source-beg source-end source-value source-value)))
+
+(defun my/org-latex--range-covered-p (range ranges)
+  "Return non-nil when RANGE overlaps any range in RANGES."
+  (catch 'covered
+    (dolist (candidate ranges)
+      (when (my/org-latex--range-overlap-p
+             (car range) (cdr range) (car candidate) (cdr candidate))
+        (throw 'covered t)))
+    nil))
+
+(defun my/org-latex--ratex-fragment-ranges (beg end)
+  "Return RaTeX-detected math fragment ranges between BEG and END."
+  (let (ranges)
+    (dolist (fragment (ratex-fragments-in-region beg end))
+      (let ((fragment-beg (plist-get fragment :begin))
+            (fragment-end (plist-get fragment :end)))
+        (when (and (integer-or-marker-p fragment-beg)
+                   (integer-or-marker-p fragment-end)
+                   (< fragment-beg fragment-end))
+          (push (cons fragment-beg fragment-end) ranges))))
+    (nreverse ranges)))
+
 (defun my/org-latex--collect-fragments (beg end)
   "Collect LaTeX fragments between BEG and END."
-  (let ((math-regexp "\\$\\|\\\\[([]\\|^[ \t]*\\\\begin{[A-Za-z0-9*]+}")
-        fragments)
+  (let (fragments
+        seen-ranges)
     (setq beg (max (point-min) (min beg end)))
     (setq end (min (point-max) (max beg end)))
     (when (< beg end)
       (save-excursion
-        (goto-char beg)
-        (while (re-search-forward math-regexp end t)
-          (let ((syntax-beg (match-beginning 0)))
-            (when (or (/= (char-after syntax-beg) ?$)
-                      (my/org-latex--dollar-fragment-start-p syntax-beg end))
-              (let* ((context (org-element-context))
-                     (type (org-element-type context)))
-                (when (memq type '(latex-environment latex-fragment))
-                  (let* ((frag-beg (org-element-begin context))
-                         (frag-end (save-excursion
-                                     (goto-char (org-element-end context))
-                                     (skip-chars-backward " \r\t\n")
-                                     (point)))
-                         (source-beg frag-beg)
-                         (source-end frag-end)
-                         (source-value
-                          (buffer-substring-no-properties
-                           source-beg source-end))
-                         (render-value source-value))
-                    (push (my/org-latex--fragment-spec
-                           source-beg source-end source-value render-value)
-                          fragments)
-                    ;; Keep point within the original search bound for the next
-                    ;; `re-search-forward'; large fragments may extend past END.
-                    (goto-char (min end (max (point) source-end)))))))))
+        (dolist (range (my/org-latex--ratex-fragment-ranges beg end))
+          (unless (my/org-latex--range-covered-p range seen-ranges)
+            (push range seen-ranges)
+            (push (my/org-latex--fragment-spec-from-source-range range)
+                  fragments)))
         (nreverse fragments)))))
 
 (defun my/org-latex--cleanup-job-files (job)

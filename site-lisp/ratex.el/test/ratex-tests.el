@@ -18,26 +18,46 @@
       (ratex-download-backend)
       (should called))))
 
-(ert-deftest ratex-detects-dollar-math ()
+(ert-deftest ratex-detects-paren-math ()
   (with-temp-buffer
     (insert "hello \\(x^2\\) world")
     (goto-char 11)
     (let ((fragment (ratex-fragment-at-point)))
       (should (equal (plist-get fragment :content) "x^2")))))
 
-(ert-deftest ratex-does-not-detect-double-dollar-math ()
+(ert-deftest ratex-detects-double-dollar-math ()
   (with-temp-buffer
     (insert "hello $$x^2$$ world")
     (goto-char 11)
-    (should-not (ratex-fragment-at-point))
-    (should-not (ratex-fragments-in-buffer))))
+    (let ((fragment (ratex-fragment-at-point)))
+      (should fragment)
+      (should (equal (plist-get fragment :open) "$$"))
+      (should (equal (plist-get fragment :content) "x^2")))
+    (should (= (length (ratex-fragments-in-buffer)) 1))))
 
-(ert-deftest ratex-does-not-detect-single-dollar-math ()
+(ert-deftest ratex-detects-single-dollar-math ()
   (with-temp-buffer
     (insert "hello $x^2$ world")
     (goto-char 10)
-    (should-not (ratex-fragment-at-point))
-    (should-not (ratex-fragments-in-buffer))))
+    (let ((fragment (ratex-fragment-at-point)))
+      (should fragment)
+      (should (equal (plist-get fragment :open) "$"))
+      (should (equal (plist-get fragment :content) "x^2")))
+    (should (= (length (ratex-fragments-in-buffer)) 1))))
+
+(ert-deftest ratex-detects-org-bracket-fragment-with-leading-escaped-hash ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "\\[\n\\#C(R_1,R_2)=\n\\begin{cases}\ns, & R_1\\cong R_2,\\\\[4pt]\n2s, & R_1\\not\\cong R_2.\n\\end{cases}\n\\]\n")
+    (goto-char (point-min))
+    (search-forward "\\begin{cases}")
+    (let ((fragment (ratex-fragment-at-point)))
+      (should fragment)
+      (should (equal (plist-get fragment :open) "\\["))
+      (should (string-match-p "\\\\#C(R_1,R_2)="
+                              (plist-get fragment :content)))
+      (should (string-match-p "\\\\begin{cases}"
+                              (plist-get fragment :content))))))
 
 (ert-deftest ratex-does-not-detect-after-closing-delimiter ()
   (with-temp-buffer

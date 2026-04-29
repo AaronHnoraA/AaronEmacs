@@ -47,6 +47,16 @@
       (should called)
       (should (= (point) origin)))))
 
+(ert-deftest my/org-latex-preview-collect-uses-ratex-bracket-ranges ()
+  (my/org-latex-test-with-org-buffer "\\[\n\\#C(R_1,R_2)=\n\\begin{cases}\ns, & R_1\\cong R_2,\\\\[4pt]\n2s, & R_1\\not\\cong R_2.\n\\end{cases}\n\\]\n"
+    (let ((specs (my/org-latex--collect-fragments (point-min) (point-max))))
+      (should (= (length specs) 1))
+      (let ((value (plist-get (car specs) :value)))
+        (should (string-prefix-p "\\[" value))
+        (should (string-suffix-p "\\]" value))
+        (should (string-match-p "\\\\#C(R_1,R_2)=" value))
+        (should (string-match-p "\\\\begin{cases}" value))))))
+
 (ert-deftest my/org-latex-preview-enqueue-fragment-deduplicates-waiters ()
   (my/org-latex-test-with-org-buffer "\\(x\\)"
     (let* ((target (expand-file-name "ltximg/shared.svg" default-directory))
