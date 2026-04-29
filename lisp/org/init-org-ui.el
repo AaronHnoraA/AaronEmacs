@@ -122,79 +122,14 @@ lighter without changing table behavior once a table exists."
   "Face used for collapsed reference property drawers."
   :group 'my/org-ui)
 
-(defvar my/org-reference-copy-id-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [mouse-1] #'my/org-reference-copy-id-at-event)
-    (define-key map (kbd "RET") #'my/org-reference-copy-id-at-point)
-    map)
-  "Keymap used by clickable Org reference ID labels.")
-
-(defun my/org-reference--copyable-id-at (pos)
-  "Return the copyable Org reference ID at POS or next to POS."
-  (when (integerp pos)
-    (or (get-text-property pos 'my/org-reference-id)
-        (and (> pos (point-min))
-             (get-text-property (1- pos) 'my/org-reference-id))
-        (and (< pos (point-max))
-             (get-text-property (1+ pos) 'my/org-reference-id)))))
-
-(defun my/org-reference-copy-id-at-point (&optional pos)
-  "Copy the Org reference ID stored at POS or point."
-  (interactive)
-  (let ((id (my/org-reference--copyable-id-at (or pos (point)))))
-    (unless (stringp id)
-      (user-error "No Org reference ID here"))
-    (kill-new id)
-    (message "Copied Org ID: %s" id)))
-
-(defun my/org-reference-copy-id-at-event (event)
-  "Copy the Org reference ID clicked by mouse EVENT."
-  (interactive "e")
-  (let* ((start (event-start event))
-         (window (posn-window start))
-         (pos (posn-point start)))
-    (unless (and (windowp window) (integerp pos))
-      (user-error "No Org reference ID here"))
-    (select-window window)
-    (with-current-buffer (window-buffer window)
-      (my/org-reference-copy-id-at-point pos))))
-
-(defun my/org-reference-copy-id-properties (id)
-  "Return text properties that make an Org reference label for ID clickable."
-  (list 'mouse-face 'highlight
-        'help-echo (format "mouse-1: 复制 ID %s" id)
-        'keymap my/org-reference-copy-id-map
-        'follow-link t
-        'my/org-reference-id id))
-
-(defun my/org-reference-label-properties (face id &rest properties)
-  "Return clickable label text PROPERTIES with FACE and copyable ID."
-  (append (list 'face face)
-          properties
-          (my/org-reference-copy-id-properties id)))
-
-(defun my/org-reference-copy-id-display (display id)
-  "Return DISPLAY with clickable copy-ID properties for ID."
-  (let ((display (copy-sequence display)))
-    (add-text-properties
-     0 (length display)
-     (my/org-reference-copy-id-properties id)
-     display)
-    display))
-
 (defun my/org-property-drawer-display ()
   "Return the compact display string for the current property drawer match."
-  (let* ((kind (if (string= (match-string-no-properties 3) "CUSTOM_ID")
-                   "cid"
-                 "id"))
-         (value (string-trim (match-string-no-properties 4))))
+  (let ((kind (if (string= (match-string-no-properties 3) "CUSTOM_ID")
+                  "cid"
+                "id"))
+        (value (string-trim (match-string-no-properties 4))))
     (propertize (format " %s  %s " kind value)
-                'face 'my/org-property-drawer-pill
-                'mouse-face 'highlight
-                'help-echo (format "mouse-1: 复制 ID %s" value)
-                'keymap my/org-reference-copy-id-map
-                'follow-link t
-                'my/org-reference-id value)))
+                'face 'my/org-property-drawer-pill)))
 
 (defun my/org-property-drawer-label-matcher (limit)
   "Search to LIMIT for a short property drawer containing ID or CUSTOM_ID."
@@ -260,56 +195,20 @@ This deliberately uses no overlays, timers, or command hooks; font-lock only
 touches generated formula targets and dedicated targets immediately before
 Org blocks."
   (setq-local font-lock-extra-managed-props
-              (cl-union '(display invisible mouse-face help-echo keymap
-                                   follow-link my/org-reference-id)
-                        font-lock-extra-managed-props))
+              (cl-union '(display invisible) font-lock-extra-managed-props))
   (add-to-invisibility-spec 'my/org-property-drawer)
   (font-lock-add-keywords
    nil
    `((,my/org-reference-formula-target-regexp
-      (0 (my/org-reference-label-properties
-          'my/org-reference-formula-label
-          (match-string-no-properties 2))
-         t)
-      (1 (my/org-reference-label-properties
-          nil
-          (match-string-no-properties 2)
-          'display (my/org-reference-copy-id-display
-                    my/org-reference-formula-label-prefix
-                    (match-string-no-properties 2)))
-         t)
-      (3 (my/org-reference-label-properties
-          nil
-          (match-string-no-properties 2)
-          'display (my/org-reference-copy-id-display
-                    my/org-reference-formula-label-suffix
-                    (match-string-no-properties 2)))
-         t))
+      (0 'my/org-reference-formula-label t)
+      (1 '(face nil display ,my/org-reference-formula-label-prefix) t)
+      (3 '(face nil display ,my/org-reference-formula-label-suffix) t))
      (my/org-reference-block-target-matcher
-      (0 (my/org-reference-label-properties
-          'my/org-reference-block-label
-          (match-string-no-properties 2))
-         t)
-      (1 (my/org-reference-label-properties
-          nil
-          (match-string-no-properties 2)
-          'display (my/org-reference-copy-id-display
-                    my/org-reference-block-label-prefix
-                    (match-string-no-properties 2)))
-         t)
-      (3 (my/org-reference-label-properties
-          nil
-          (match-string-no-properties 2)
-          'display (my/org-reference-copy-id-display
-                    my/org-reference-block-label-suffix
-                    (match-string-no-properties 2)))
-         t))
+      (0 'my/org-reference-block-label t)
+      (1 '(face nil display ,my/org-reference-block-label-prefix) t)
+      (3 '(face nil display ,my/org-reference-block-label-suffix) t))
      (my/org-property-drawer-label-matcher
-      (1 (my/org-reference-label-properties
-          nil
-          (match-string-no-properties 4)
-          'display (my/org-property-drawer-display))
-         t)
+      (1 (list 'face nil 'display (my/org-property-drawer-display)) t)
       (2 '(face nil invisible my/org-property-drawer) t)))
    'append))
 
