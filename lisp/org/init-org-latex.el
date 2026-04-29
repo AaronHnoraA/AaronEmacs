@@ -565,12 +565,12 @@ render is usually ready before point leaves it."
   :type 'integer)
 
 (defconst my/org-latex--fragment-syntax-regexp
-  (regexp-opt '("\\(" "\\[" "\\]" "\\begin" "\\end" "$"))
+  (regexp-opt '("\\(" "\\[" "\\]" "#+begin_display_latex"))
   "Cheap regexp for text that may be near an Org LaTeX fragment.")
 
 (defconst my/org-latex--fragment-start-regexp
-  "\\\\[([]\\|^[ \t]*\\\\begin{[A-Za-z0-9*]+}"
-  "Cheap regexp for non-dollar syntax that can start an Org LaTeX fragment.")
+  "\\\\[([]\\|^[ \t]*#\\+begin_display_latex\\b"
+  "Cheap regexp for syntax that can start a managed Org LaTeX fragment.")
 
 (defun my/org-latex--escaped-char-p (pos)
   "Return non-nil when the character at POS is escaped by backslashes."
@@ -581,41 +581,6 @@ render is usually ready before point leaves it."
       (setq count (1+ count))
       (setq cursor (1- cursor)))
     (= (% count 2) 1)))
-
-(defun my/org-latex--dollar-fragment-start-p (pos limit)
-  "Return non-nil when POS starts plausible dollar math before LIMIT."
-  (and (< pos limit)
-       (= (char-after pos) ?$)
-       (not (my/org-latex--escaped-char-p pos))
-       (or (and (< (1+ pos) limit)
-                (= (char-after (1+ pos)) ?$))
-           (let ((line-end (min limit (save-excursion
-                                        (goto-char pos)
-                                        (line-end-position))))
-                 (body-beg (1+ pos))
-                 found)
-             (save-excursion
-               (goto-char body-beg)
-               (while (and (not found)
-                           (re-search-forward "\\$" line-end t))
-                 (let ((second (match-beginning 0)))
-                   (when (and (not (my/org-latex--escaped-char-p second))
-                              (save-excursion
-                                (goto-char body-beg)
-                                (re-search-forward "\\S-" second t)))
-                     (setq found t)))))
-             found))))
-
-(defun my/org-latex--dollar-fragment-syntax-in-range-p (beg end)
-  "Return non-nil when BEG END contains plausible dollar math syntax."
-  (catch 'found
-    (save-excursion
-      (goto-char beg)
-      (while (re-search-forward "\\$" end t)
-        (let ((first (match-beginning 0)))
-          (when (my/org-latex--dollar-fragment-start-p first end)
-            (throw 'found t)))))
-    nil))
 
 (defun my/org-latex--near-fragment-syntax-p (&optional pos)
   "Return non-nil when POS is near likely LaTeX fragment syntax."
@@ -646,8 +611,7 @@ render is usually ready before point leaves it."
         (end (min (point-max) (max beg end))))
     (or (save-excursion
           (goto-char beg)
-          (re-search-forward my/org-latex--fragment-start-regexp end t))
-        (my/org-latex--dollar-fragment-syntax-in-range-p beg end))))
+          (re-search-forward my/org-latex--fragment-start-regexp end t)))))
 
 (defun my/org-latex-buffer-has-fragment-syntax-p ()
   "Return non-nil when the current buffer may contain Org LaTeX previews."
@@ -706,7 +670,11 @@ render is usually ready before point leaves it."
     (when pos
       (goto-char pos))
     (let ((datum (org-element-context)))
-      (when (org-element-type-p datum '(latex-environment latex-fragment))
+      (when (and (eq (org-element-type datum) 'latex-fragment)
+                 (let ((value (org-element-property :value datum)))
+                   (and (stringp value)
+                        (or (string-prefix-p "\\(" value)
+                            (string-prefix-p "\\[" value)))))
         datum))))
 
 (defun my/org-latex--fragment-range (frag)
@@ -1614,7 +1582,7 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
   "Return non-nil when VALUE is a display-math fragment."
   (let ((trimmed (string-trim-left value)))
     (or (string-prefix-p "\\[" trimmed)
-        (string-prefix-p "$$" trimmed)
+        (string-prefix-p "#+begin_display_latex" trimmed)
         (string-prefix-p "\\begin{" trimmed))))
 
 (defun my/org-latex--make-preview-overlay (beg end file imagetype)
@@ -1802,6 +1770,18 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
           (buffer-substring-no-properties source-beg source-end)))
     (my/org-latex--fragment-spec source-beg source-end source-value source-value)))
 
+(defun my/org-latex--fragment-spec-from-ratex-fragment (fragment)
+  "Return a render spec for a RaTeX-detected FRAGMENT.
+Display LaTeX Org blocks cover the whole block in the buffer, but only the
+block body should be sent to the LaTeX renderer."
+  (let* ((source-beg (plist-get fragment :begin))
+         (source-end (plist-get fragment :end))
+         (source-value (buffer-substring-no-properties source-beg source-end))
+         (render-value (if (plist-get fragment :block)
+                           (plist-get fragment :content)
+                         source-value)))
+    (my/org-latex--fragment-spec source-beg source-end source-value render-value)))
+
 (defun my/org-latex--range-covered-p (range ranges)
   "Return non-nil when RANGE overlaps any range in RANGES."
   (catch 'covered
@@ -1811,17 +1791,17 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
         (throw 'covered t)))
     nil))
 
-(defun my/org-latex--ratex-fragment-ranges (beg end)
-  "Return RaTeX-detected math fragment ranges between BEG and END."
-  (let (ranges)
+(defun my/org-latex--ratex-fragments (beg end)
+  "Return RaTeX-detected math fragments between BEG and END."
+  (let (fragments)
     (dolist (fragment (ratex-fragments-in-region beg end))
       (let ((fragment-beg (plist-get fragment :begin))
             (fragment-end (plist-get fragment :end)))
         (when (and (integer-or-marker-p fragment-beg)
                    (integer-or-marker-p fragment-end)
                    (< fragment-beg fragment-end))
-          (push (cons fragment-beg fragment-end) ranges))))
-    (nreverse ranges)))
+          (push fragment fragments))))
+    (nreverse fragments)))
 
 (defun my/org-latex--collect-fragments (beg end)
   "Collect LaTeX fragments between BEG and END."
@@ -1831,12 +1811,14 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
     (setq end (min (point-max) (max beg end)))
     (when (< beg end)
       (save-excursion
-        (dolist (range (my/org-latex--ratex-fragment-ranges beg end))
-          (unless (my/org-latex--range-covered-p range seen-ranges)
-            (push range seen-ranges)
-            (push (my/org-latex--fragment-spec-from-source-range range)
-                  fragments)))
-        (nreverse fragments)))))
+        (dolist (fragment (my/org-latex--ratex-fragments beg end))
+          (let ((range (cons (plist-get fragment :begin)
+                             (plist-get fragment :end))))
+            (unless (my/org-latex--range-covered-p range seen-ranges)
+              (push range seen-ranges)
+              (push (my/org-latex--fragment-spec-from-ratex-fragment fragment)
+                    fragments)))))
+        (nreverse fragments))))
 
 (defun my/org-latex--cleanup-job-files (job)
   "Delete temporary files created for JOB."
@@ -2213,7 +2195,7 @@ queued work."
     (my/org-latex--preview-range (region-beginning) (region-end))
     (message "Queueing LaTeX previews for region..."))
    ((let ((datum (my/org-latex--current-fragment)))
-      (and (org-element-type-p datum '(latex-environment latex-fragment))
+      (and (eq (org-element-type datum) 'latex-fragment)
            (pcase-let ((`(,beg . ,end) (my/org-latex--fragment-range datum)))
              (if (my/org-latex--clear-preview-range beg end)
                  (message "LaTeX preview removed")

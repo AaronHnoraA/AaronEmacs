@@ -136,7 +136,7 @@ buffers even when this echo helper is disabled."
   "Whether this buffer already ran its one-time TOC refresh after opening.")
 
 (defconst my/org-buffer-feature--scan-regexp
-  "\\(^[ \t]*[|│┃]\\)\\|\\(^[ \t]*#\\+begin_\\)\\|\\(\\\\[([]\\|^[ \t]*\\\\begin{[A-Za-z0-9*]+}\\|\\$\\)"
+  "\\(^[ \t]*[|│┃]\\)\\|\\(^[ \t]*#\\+begin_\\)\\|\\(\\\\[([]\\|^[ \t]*#\\+begin_display_latex\\b\\)"
   "Regexp used for one-pass detection of Org features used by UI helpers.")
 
 (defvar-local my/org-buffer-feature--cache nil

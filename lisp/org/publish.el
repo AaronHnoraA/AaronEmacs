@@ -2,6 +2,7 @@
 
 (require 'json)
 (require 'ox-html)
+(require 'ox-latex)
 (require 'ox-publish)
 (require 'org)
 (require 'org-element)
@@ -50,6 +51,25 @@
         (when (my/site-managed-special-block-p block)
           (org-element-extract-element block)))))
   tree)
+
+(defun my/site-display-latex-special-block-p (block)
+  "Return non-nil when BLOCK is a display_latex wrapper."
+  (string= (downcase (or (org-element-property :type block) ""))
+           "display_latex"))
+
+(defun my/site-html-special-block-a (orig special-block contents info)
+  "Export display_latex SPECIAL-BLOCK as CONTENTS, otherwise call ORIG.
+The block is an editing and preview marker only; publishing should let the
+inner LaTeX fragments export exactly as if the wrapper did not exist."
+  (if (my/site-display-latex-special-block-p special-block)
+      (or contents "")
+    (funcall orig special-block contents info)))
+
+(defun my/site-latex-special-block-a (orig special-block contents info)
+  "Export display_latex SPECIAL-BLOCK as CONTENTS, otherwise call ORIG."
+  (if (my/site-display-latex-special-block-p special-block)
+      (or contents "")
+    (funcall orig special-block contents info)))
 
 (defun my/site-id-property-paragraph-p (paragraph)
   "Return non-nil when PARAGRAPH is a leaked file-level ID drawer line."
@@ -371,6 +391,8 @@ normally, so removing that paragraph only hides local Org metadata."
              #'my/site-apply-source-title)
 
 (advice-add 'org-html-link :around #'my/site-html-link-a)
+(advice-add 'org-html-special-block :around #'my/site-html-special-block-a)
+(advice-add 'org-latex-special-block :around #'my/site-latex-special-block-a)
 
 (defun my/site-html-head (plist filename pub-dir)
   "Publish FILENAME to PUB-DIR with assets referenced relative to the output path."

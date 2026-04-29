@@ -25,25 +25,10 @@
     (let ((fragment (ratex-fragment-at-point)))
       (should (equal (plist-get fragment :content) "x^2")))))
 
-(ert-deftest ratex-detects-double-dollar-math ()
+(ert-deftest ratex-ignores-dollar-math ()
   (with-temp-buffer
-    (insert "hello $$x^2$$ world")
-    (goto-char 11)
-    (let ((fragment (ratex-fragment-at-point)))
-      (should fragment)
-      (should (equal (plist-get fragment :open) "$$"))
-      (should (equal (plist-get fragment :content) "x^2")))
-    (should (= (length (ratex-fragments-in-buffer)) 1))))
-
-(ert-deftest ratex-detects-single-dollar-math ()
-  (with-temp-buffer
-    (insert "hello $x^2$ world")
-    (goto-char 10)
-    (let ((fragment (ratex-fragment-at-point)))
-      (should fragment)
-      (should (equal (plist-get fragment :open) "$"))
-      (should (equal (plist-get fragment :content) "x^2")))
-    (should (= (length (ratex-fragments-in-buffer)) 1))))
+    (insert "hello $$x^2$$ world and $y$")
+    (should-not (ratex-fragments-in-buffer))))
 
 (ert-deftest ratex-detects-org-bracket-fragment-with-leading-escaped-hash ()
   (with-temp-buffer
@@ -123,16 +108,39 @@
     (let ((fragment (ratex--org-fragment-at-point)))
       (should-not fragment))))
 
-(ert-deftest ratex-detects-math-org-latex-environment-from-inner-point ()
+(ert-deftest ratex-detects-org-display-latex-block ()
   (with-temp-buffer
     (org-mode)
-    (insert "\\begin{align}\na &= b + c \\\\\nd &= e\n\\end{align}\n")
+    (insert "#+begin_display_latex\n\\begin{center}\n\\begin{tabular}{lcc}\nVerification time & \\(O(1)\\) & \\(O(\\log N)\\)\\\\\n\\end{tabular}\n\\end{center}\n#+end_display_latex\n")
     (goto-char (point-min))
-    (search-forward "b + c")
-    (let ((fragment (ratex--org-fragment-at-point)))
+    (search-forward "tabular")
+    (let ((fragment (ratex-fragment-at-point)))
       (should fragment)
-      (should (equal (plist-get fragment :environment) "align"))
-      (should (string-prefix-p "\\begin{align}" (plist-get fragment :content))))))
+      (should (equal (plist-get fragment :open) "#+begin_display_latex"))
+      (should (eq (plist-get fragment :block) 'latex))
+      (should (string-match-p "\\\\begin{tabular}" (plist-get fragment :content))))))
+
+(ert-deftest ratex-region-detects-org-display-latex-block-from-inner-slice ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_display_latex\n\\begin{itemize}\n\\item \\(x+1\\)\n\\end{itemize}\n#+end_display_latex\n")
+    (goto-char (point-min))
+    (search-forward "itemize")
+    (let ((fragments (ratex-fragments-in-region (point) (1+ (point)))))
+      (should (= (length fragments) 1))
+      (should (equal (plist-get (car fragments) :open) "#+begin_display_latex")))))
+
+(ert-deftest ratex-org-display-latex-block-remains-valid ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_display_latex\n\\begin{itemize}\n\\item \\(x+1\\)\n\\end{itemize}\n#+end_display_latex")
+    (goto-char (point-min))
+    (search-forward "itemize")
+    (let ((fragment (ratex-fragment-at-point)))
+      (should fragment)
+      (should (ratex--fragment-valid-p fragment))
+      (should (string-match-p "\\\\begin{itemize}"
+                              (ratex--render-latex fragment))))))
 
 (ert-deftest ratex-fragment-at-point-prefers-largest-bracketed-fragment ()
   (with-temp-buffer
@@ -154,14 +162,6 @@
     (let ((fragment (ratex-fragment-at-point)))
       (should fragment)
       (should (equal (plist-get fragment :close) "\\]")))))
-
-(ert-deftest ratex-fragment-at-point-prefers-largest-environment-fragment ()
-  (with-temp-buffer
-    (insert "\\begin{align} a &= \\(b\\) \\\\ c &= d \\end{align}")
-    (goto-char 23)
-    (let ((fragment (ratex-fragment-at-point)))
-      (should (equal (plist-get fragment :environment) "align"))
-      (should (string-prefix-p "\\begin{align}" (plist-get fragment :content))))))
 
 (ert-deftest ratex-ignores-escaped-delimiters ()
   (with-temp-buffer
@@ -406,24 +406,6 @@
 (ert-deftest ratex-render-latex-upgrades-bracket-fragment-to-displaystyle ()
   (let ((fragment '(:begin 1 :end 6 :content " x+1 " :open "\\[" :close "\\]")))
     (should (equal (ratex--render-latex fragment) "\\displaystyle x+1"))))
-
-(ert-deftest ratex-render-latex-downgrades-numbered-environment-for-preview ()
-  (let ((fragment '(:begin 1 :end 30
-                    :content "\\begin{align} x &= y \\end{align}"
-                    :open "\\begin{align}"
-                    :close "\\end{align}"
-                    :environment "align")))
-    (should (equal (ratex--render-latex fragment)
-                   "\\begin{align*} x &= y \\end{align*}"))))
-
-(ert-deftest ratex-render-latex-keeps-unnumbered-environment-wrapper ()
-  (let ((fragment '(:begin 1 :end 32
-                    :content "\\begin{align*} x &= y \\end{align*}"
-                    :open "\\begin{align*}"
-                    :close "\\end{align*}"
-                    :environment "align*")))
-    (should (equal (ratex--render-latex fragment)
-                   "\\begin{align*} x &= y \\end{align*}"))))
 
 (ert-deftest ratex-initialize-previews-renders-initial-fragments-then-hides-active ()
   (with-temp-buffer

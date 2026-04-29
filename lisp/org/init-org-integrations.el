@@ -9,6 +9,8 @@
 (require 'init-org-code)
 (require 'init-org-core)
 (require 'ox)
+(require 'ox-html)
+(require 'ox-latex)
 (require 'org-element)
 
 (defcustom my/org-html-roam-assets-directory "assets"
@@ -35,6 +37,25 @@
       (when (my/org-export--managed-special-block-p block)
         (org-element-extract-element block))))
   tree)
+
+(defun my/org-export-display-latex-special-block-p (block)
+  "Return non-nil when BLOCK is a display_latex wrapper."
+  (string= (downcase (or (org-element-property :type block) ""))
+           "display_latex"))
+
+(defun my/org-export-html-special-block-a (orig special-block contents info)
+  "Export display_latex SPECIAL-BLOCK as CONTENTS, otherwise call ORIG.
+The block is only an editing and preview marker; exported HTML should let the
+inner LaTeX fragments render as if the wrapper did not exist."
+  (if (my/org-export-display-latex-special-block-p special-block)
+      (or contents "")
+    (funcall orig special-block contents info)))
+
+(defun my/org-export-latex-special-block-a (orig special-block contents info)
+  "Export display_latex SPECIAL-BLOCK as CONTENTS, otherwise call ORIG."
+  (if (my/org-export-display-latex-special-block-p special-block)
+      (or contents "")
+    (funcall orig special-block contents info)))
 
 (defun my/org-html-roam--image-file-p (file)
   "Return non-nil when FILE has an image extension."
@@ -133,6 +154,11 @@ Return a relative path from the exported HTML file to the copied asset."
 (dolist (filter '(my/org-export-remove-managed-blocks
                   my/org-html-roam-copy-image-links))
   (add-to-list 'org-export-filter-parse-tree-functions filter))
+
+(advice-add 'org-html-special-block :around
+            #'my/org-export-html-special-block-a)
+(advice-add 'org-latex-special-block :around
+            #'my/org-export-latex-special-block-a)
 
 ;; External App Links (Zotero, MarginNote)
 (with-eval-after-load 'org

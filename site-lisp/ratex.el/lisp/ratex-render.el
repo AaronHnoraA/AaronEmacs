@@ -488,37 +488,13 @@ currently under point."
                 :open open
                 :close close))))))
 
-(defun ratex--refresh-active-environment-fragment (fragment)
-  "Refresh active environment FRAGMENT using local environment delimiters."
-  (let* ((begin (plist-get fragment :begin))
-         (env (plist-get fragment :environment)))
-    (when (and (integer-or-marker-p begin)
-               (stringp env)
-               (<= (point-min) begin)
-               (<= begin (point))
-               (ratex--string-at-p begin (format "\\begin{%s}" env)))
-      (save-excursion
-        (goto-char begin)
-        (when (re-search-forward
-               (format "\\\\end{%s}" (regexp-quote env)) nil t)
-          (let ((end (match-end 0)))
-            (when (< (point) end)
-              (list :begin begin
-                    :end end
-                    :content (buffer-substring-no-properties begin end)
-                    :open (format "\\begin{%s}" env)
-                    :close (format "\\end{%s}" env)
-                    :environment env))))))))
-
 (defun ratex--refresh-active-fragment-fast (fragment)
   "Refresh active FRAGMENT without invoking the full point parser.
 This handles the dominant post-command case: point is still inside the same
 formula, so local delimiter search is enough to update bounds and content after
 ordinary edits."
   (when (ratex--point-in-fragment-p fragment)
-    (or (and (plist-get fragment :environment)
-             (ratex--refresh-active-environment-fragment fragment))
-        (ratex--refresh-active-delimited-fragment fragment)
+    (or (ratex--refresh-active-delimited-fragment fragment)
         fragment)))
 
 (defun ratex--active-fragment-at-point ()
@@ -590,42 +566,17 @@ ordinary edits."
   "Return backend-ready LaTeX for FRAGMENT.
 
 RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
-those wrappers during detection. To preserve display-style rendering for
-bracketed math, re-add the semantic hint as `\\displaystyle'. Environment
-fragments are normalized for preview compatibility when needed."
+ those wrappers during detection. To preserve display-style rendering for
+ bracketed math, re-add the semantic hint as `\\displaystyle'."
   (let ((content (string-trim (plist-get fragment :content)))
         (open (plist-get fragment :open)))
     (cond
-     ((plist-get fragment :environment)
-      (ratex--render-environment-latex fragment content))
      ((equal open "\\[")
       (if (string-empty-p content)
           "\\displaystyle"
         (concat "\\displaystyle " content)))
      (t
       content))))
-
-(defun ratex--render-environment-latex (fragment content)
-  "Return preview-ready LaTeX for environment FRAGMENT with CONTENT."
-  (let* ((environment (plist-get fragment :environment))
-         (preview-environment (ratex--preview-environment-name environment)))
-    (if (equal preview-environment environment)
-        content
-      (string-replace
-       (format "\\end{%s}" environment)
-       (format "\\end{%s}" preview-environment)
-       (string-replace
-        (format "\\begin{%s}" environment)
-        (format "\\begin{%s}" preview-environment)
-        content)))))
-
-(defun ratex--preview-environment-name (environment)
-  "Return a preview-safe environment name for ENVIRONMENT."
-  (pcase environment
-    ((or "equation" "align" "alignat" "gather" "multline" "flalign"
-         "eqnarray" "dmath" "dseries" "dgroup")
-     (concat environment "*"))
-    (_ environment)))
 
 (defun ratex--normalized-render-color ()
   "Return a normalized render color string, or nil."
@@ -668,8 +619,8 @@ fragments are normalized for preview compatibility when needed."
          (<= (point-min) begin end (point-max))
          (string=
           (buffer-substring-no-properties begin end)
-          (if (plist-get fragment :environment)
-              content
+          (if (plist-get fragment :block)
+              (concat open "\n" content close)
             (concat open content close))))))
 
 (defun ratex--drop-stale-overlays (target-keys)
