@@ -163,10 +163,10 @@ dedicated target after the block."
   (cond
    ((org-before-first-heading-p)
     (cond
-     ((my/org-reference--block-bounds)
-      (my/org-reference-create-block-target))
      ((my/org-reference--display-math-bounds)
       (my/org-reference-create-formula-target))
+     ((my/org-reference--block-bounds)
+      (my/org-reference-create-block-target))
      (t
       (user-error "Move point to a headline, a \\[...\\] formula, or a #+begin block"))))
    ((org-at-heading-p)
@@ -174,10 +174,10 @@ dedicated target after the block."
       (kill-new id)
       (message "Org heading ID: %s" id)
       id))
-   ((my/org-reference--block-bounds)
-    (my/org-reference-create-block-target))
    ((my/org-reference--display-math-bounds)
     (my/org-reference-create-formula-target))
+   ((my/org-reference--block-bounds)
+    (my/org-reference-create-block-target))
    (t
     (org-back-to-heading t)
     (let ((id (org-id-get-create)))
@@ -212,10 +212,10 @@ a \\[...\\] formula."
   (unless (derived-mode-p 'org-mode)
     (user-error "Not in an Org buffer"))
   (cond
-   ((my/org-reference--block-bounds)
-    (my/org-reference--block-link))
    ((my/org-reference--display-math-bounds)
     (my/org-reference--formula-link))
+   ((my/org-reference--block-bounds)
+    (my/org-reference--block-link))
    ((org-before-first-heading-p)
     (user-error "Move point to a headline, a \\[...\\] formula, or a #+begin block"))
    (t
@@ -309,13 +309,14 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
           (unless (or (string-empty-p line)
                       (string-match-p "\\`[ \t]*\\*+" line)
                       (string-match-p "\\`[ \t]*#\\+" line)
+                      (string-match-p "\\`[ \t]*<<[^>\n]+>>[ \t]*\\'" line)
                       (string-match-p "\\`[ \t]*:[[:upper:]_]+:" line))
             (push line lines)))
         (forward-line 1))
       (when lines
         (my/org-reference--compact-text
          (mapconcat #'identity (nreverse lines) " · ")
-         80)))))
+         120)))))
 
 (defun my/org-reference--context-start-pos (start limit)
   "Return first useful raw text position between START and LIMIT."
@@ -330,6 +331,7 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
           (unless (or (string-empty-p line)
                       (string-match-p "\\`[ \t]*\\*+" line)
                       (string-match-p "\\`[ \t]*#\\+" line)
+                      (string-match-p "\\`[ \t]*<<[^>\n]+>>[ \t]*\\'" line)
                       (string-match-p "\\`[ \t]*:[[:upper:]_]+:" line))
             (throw 'pos (line-beginning-position))))
         (forward-line 1))
@@ -375,11 +377,13 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
   (save-excursion
     (goto-char pos)
     (when (search-backward "\\]" nil t)
-      (let ((end (point)))
+      (let ((end (save-excursion
+                   (search-forward "\\]" nil t)
+                   (point))))
         (when (search-backward "\\[" nil t)
           (my/org-reference--compact-text
            (buffer-substring-no-properties (point) end)
-           140))))))
+           180))))))
 
 (defun my/org-reference--formula-target-p (target preview)
   "Return non-nil when TARGET/PREVIEW looks like a formula target."
@@ -428,7 +432,7 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
                                     (forward-line 1)
                                     (point)))
                    (ctx (my/org-reference--extract-context-lines
-                         content-start (min (+ content-start 600) block-end) 3)))
+                         content-start (min (+ content-start 1200) block-end) 5)))
               (push (list :kind 'scope-block
                           :target nil
                           :label label
@@ -469,7 +473,7 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
                (let* ((cb (org-element-property :contents-begin headline))
                       (ctx (when (and cb (< cb end))
                              (my/org-reference--extract-context-lines
-                              cb (min (+ cb 600) end) 3))))
+                              cb (min (+ cb 1200) end) 5))))
                  (push (list :kind 'scope-heading
                              :target raw-title
                              :label raw-title
@@ -770,26 +774,26 @@ reliable lookup regardless of how the UI handles text properties."
                          (or (and context (concat "  " context))
                              (and label
                                   (concat "  "
-                                          (my/org-reference--compact-text label 60)))))
+                                          (my/org-reference--compact-text label 90)))))
                         ;; IDs / custom-IDs: show the heading label.
                         ('id
                          (and label
                               (concat "  "
-                                      (my/org-reference--compact-text label 60))))
+                                      (my/org-reference--compact-text label 90))))
                         ('custom-id
                          (and label
                               (concat "  "
-                                      (my/org-reference--compact-text label 60))))
+                                      (my/org-reference--compact-text label 90))))
                         ;; Formulas: candidate name is the target ID; annotation shows LaTeX.
                         ('formula
                          (and preview
                               (concat "  "
-                                      (my/org-reference--compact-text preview 72))))
+                                      (my/org-reference--compact-text preview 110))))
                         ;; Bare targets: show the nearby context preview.
                         (_
                          (and preview
                               (concat "  "
-                                      (my/org-reference--compact-text preview 72)))))))
+                                      (my/org-reference--compact-text preview 110)))))))
                 (when text
                   (propertize text 'face 'completions-annotations)))))))
     (cons
@@ -868,25 +872,58 @@ LOOKUP maps plain completion strings to target plists."
   (if (not (fboundp 'consult--jump-preview))
       (lambda (&rest _))
     (require 'consult)
-    (let ((preview (consult--jump-preview)))
+    (let ((preview (consult--jump-preview))
+          origin-window
+          origin-buffer
+          origin-point)
       (lambda (action cand)
-        (when cand
-          (let* ((plain (substring-no-properties cand))
-                 (full (get-text-property 0 'my/org-reference-full cand))
-                 (target (or (get-text-property 0 'my/org-reference-target cand)
-                             (and full (gethash full lookup))
-                             (gethash plain lookup)))
-                 (pos    (and target (plist-get target :pos))))
-            (when (and pos (> pos 0))
-              (condition-case nil
-                  (let* ((buf  (find-file-noselect file))
-                         (ppos (my/org-reference--preview-pos target buf)))
-                    (funcall preview action
-                             (and (eq action 'preview)
-                                  (let ((m (make-marker)))
-                                    (set-marker m ppos buf)
-                                    m))))
-                (error nil)))))))))
+        (pcase action
+          ('setup
+           (setq origin-window (selected-window)
+                 origin-buffer (current-buffer)
+                 origin-point (point-marker))
+           (funcall preview action nil))
+          ('preview
+           (condition-case nil
+               (if (not cand)
+                   (progn
+                     (funcall preview 'preview nil)
+                     (when (and (window-live-p origin-window)
+                                (buffer-live-p origin-buffer))
+                       (set-window-buffer origin-window origin-buffer)
+                       (when (marker-buffer origin-point)
+                         (set-window-point origin-window origin-point))))
+                 (let* ((plain (substring-no-properties cand))
+                        (full (get-text-property 0 'my/org-reference-full cand))
+                        (target (or (get-text-property 0
+                                                       'my/org-reference-target
+                                                       cand)
+                                    (and full (gethash full lookup))
+                                    (gethash plain lookup)))
+                        (pos (and target (plist-get target :pos))))
+                   (when (and pos (> pos 0))
+                     (let* ((buf  (find-file-noselect file))
+                            (ppos (my/org-reference--preview-pos target buf))
+                            (m (make-marker)))
+                       (set-marker m ppos buf)
+                       (funcall preview 'preview m)
+                       (when (eq (current-buffer) buf)
+                         (recenter 3))))))
+             (error nil)))
+          ((or 'exit 'return)
+           (condition-case nil
+               (progn
+                 (funcall preview 'preview nil)
+                 (when (and (window-live-p origin-window)
+                            (buffer-live-p origin-buffer))
+                   (set-window-buffer origin-window origin-buffer)
+                   (when (marker-buffer origin-point)
+                     (set-window-point origin-window origin-point)))
+                 (when (eq action 'return)
+                   (set-marker origin-point nil)))
+             (error nil)))
+          (_
+           (funcall preview action nil)))))))
 
 (defun my/org-reference--read-target (file)
   "Read a reference target from FILE using hierarchical path-style completion.
