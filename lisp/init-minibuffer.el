@@ -7,11 +7,39 @@
 
 (require 'aaron-ui)
 
+(defun my/minibuffer-file-completion-p ()
+  "Return non-nil when the active minibuffer is completing file names."
+  (and (minibufferp)
+       (or (bound-and-true-p minibuffer-completing-file-name)
+           (eq (completion-metadata-get
+                (completion-metadata (minibuffer-contents)
+                                     minibuffer-completion-table
+                                     minibuffer-completion-predicate)
+                'category)
+               'file)
+           (eq minibuffer-completion-table #'read-file-name-internal))))
+
+(defun my/vertico-tab-dwim ()
+  "Insert the selected completion candidate, with a native fallback."
+  (interactive)
+  (cond
+   ((and (fboundp 'vertico-insert)
+         (bound-and-true-p vertico--input))
+    (vertico-insert))
+   ((and (my/minibuffer-file-completion-p)
+         (fboundp 'completion--selected-candidate)
+         (completion--selected-candidate))
+    (minibuffer-choose-completion t t))
+   (t
+    (minibuffer-complete))))
+
 (use-package vertico
   :ensure t
   :hook ((after-init . vertico-mode)
          (minibuffer-setup . vertico-repeat-save))
   :bind (:map vertico-map
+         ("TAB" . my/vertico-tab-dwim)
+         ("<tab>" . my/vertico-tab-dwim)
          ;; 在 `C-x C-f` 这类文件补全场景，M-RET 直接使用你当前输入的文本，
          ;; 不选中/不补全候选（用于创建与已有文件“相似名字”的新文件）。
          ("M-RET" . vertico-exit-input)

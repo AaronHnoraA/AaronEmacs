@@ -21,6 +21,8 @@
 (defvar-local my/org--pretty-block-watch-installed nil)
 (defvar-local my/org--pretty-block-refontify-timer nil)
 (defvar-local my/org--pretty-block-needs-visible-refontify nil)
+(defvar-local my/org--pretty-block-visible-refontify-signature nil)
+(defvar-local my/org--pretty-block-scheduled-refontify-signature nil)
 (defvar-local my/org-appear--last-point nil)
 (defvar-local my/org-appear--last-tick nil)
 (defvar-local my/org-appear--last-do-buffer nil)
@@ -1271,12 +1273,6 @@ DEFAULT-BG defaults to `my/org-default-background'."
                #'my/org-cleanup-pretty-block-watch t)
   (setq-local my/org--pretty-block-watch-installed nil))
 
-(defun my/org-pretty-block--overlay-at-p (pos)
-  "Return non-nil when POS still has a pretty-block overlay."
-  (cl-some (lambda (ov)
-             (overlay-get ov 'my/org-pretty-block))
-           (overlays-in pos (min (point-max) (1+ pos)))))
-
 (defun my/org-pretty-block--role-at-p (pos block-id role)
   "Return non-nil when POS has BLOCK-ID's pretty-block overlay ROLE."
   (cl-some (lambda (ov)
@@ -1305,8 +1301,8 @@ DEFAULT-BG defaults to `my/org-default-background'."
 (defun my/org-pretty-block--render-record-live-p (record)
   "Return non-nil when cached pretty-block render RECORD is still complete."
   (if (integerp record)
-      ;; Backward-compatible fallback for records made before role metadata.
-      (my/org-pretty-block--overlay-at-p record)
+      ;; Old cache entries lack role metadata, so force one rebuild.
+      nil
     (my/org-pretty-block--rendered-p
      (plist-get record :id)
      (plist-get record :header)
@@ -1402,28 +1398,51 @@ partial render does not stay broken until the next edit."
   "Cancel the pending pretty-block refontify timer in the current buffer."
   (when (timerp my/org--pretty-block-refontify-timer)
     (cancel-timer my/org--pretty-block-refontify-timer))
-  (setq-local my/org--pretty-block-refontify-timer nil))
+  (setq-local my/org--pretty-block-refontify-timer nil)
+  (setq-local my/org--pretty-block-scheduled-refontify-signature nil))
+
+(defun my/org-pretty-block-refontify-signature (&optional buffer)
+  "Return visible pretty-block refontify inputs for BUFFER."
+  (let ((buffer (or buffer (current-buffer))))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (let ((ranges (my/org-visible-ranges buffer)))
+          (when ranges
+            (list (buffer-chars-modified-tick) ranges)))))))
 
 (defun my/org--pretty-block-refontify-now (buffer)
-  "Run `jit-lock-refontify' for BUFFER once the UI is idle."
+  "Refresh BUFFER's visible pretty-block overlays once the UI is idle."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
-      (setq-local my/org--pretty-block-refontify-timer nil)
-      (when (and (derived-mode-p 'org-mode)
-                 (my/org-visible-buffer-p buffer))
-        (setq-local my/org--pretty-block-needs-visible-refontify nil)
-        (let ((ranges (my/org-visible-ranges buffer)))
-          (dolist (range ranges)
-            (jit-lock-refontify (car range) (cdr range))))))))
+      (let ((signature my/org--pretty-block-scheduled-refontify-signature))
+        (setq-local my/org--pretty-block-refontify-timer nil)
+        (setq-local my/org--pretty-block-scheduled-refontify-signature nil)
+        (when (and (derived-mode-p 'org-mode)
+                   (my/org-visible-buffer-p buffer))
+          (setq-local my/org--pretty-block-needs-visible-refontify nil)
+          (let ((ranges (my/org-visible-ranges buffer)))
+            (dolist (range ranges)
+              (my/org-jit-prettify-blocks (car range) (cdr range)))
+            (setq-local my/org--pretty-block-visible-refontify-signature
+                        (or signature
+                            (my/org-pretty-block-refontify-signature buffer)))))))))
 
-(defun my/org-schedule-pretty-block-refontify ()
+(defun my/org-schedule-pretty-block-refontify (&optional force)
   "Schedule a coalesced pretty-block refontify for the current buffer."
-  (my/org-cancel-pretty-block-refontify)
   (if (my/org-visible-buffer-p (current-buffer))
-      (setq-local my/org--pretty-block-refontify-timer
-                  (run-with-idle-timer 0.20 nil
-                                       #'my/org--pretty-block-refontify-now
-                                       (current-buffer)))
+      (let ((signature (my/org-pretty-block-refontify-signature)))
+        (when (and signature
+                   (or force
+                       (not (or (equal signature
+                                       my/org--pretty-block-visible-refontify-signature)
+                                (equal signature
+                                       my/org--pretty-block-scheduled-refontify-signature)))))
+          (my/org-cancel-pretty-block-refontify)
+          (setq-local my/org--pretty-block-scheduled-refontify-signature signature)
+          (setq-local my/org--pretty-block-refontify-timer
+                      (run-with-idle-timer 0.20 nil
+                                           #'my/org--pretty-block-refontify-now
+                                           (current-buffer)))))
     (setq-local my/org--pretty-block-needs-visible-refontify t)))
 
 (defun my/org-schedule-deferred-pretty-block-refontify (&rest _)
@@ -1437,6 +1456,24 @@ partial render does not stay broken until the next edit."
                    (memq #'my/org-jit-prettify-blocks jit-lock-functions)
                    (not (timerp my/org--pretty-block-refontify-timer)))
           (my/org-schedule-pretty-block-refontify))))))
+
+(defun my/org-pretty-block-window-scroll-hook (window _start)
+  "Schedule visible pretty-block refontify after WINDOW scrolls."
+  (when (and (window-live-p window)
+             (buffer-live-p (window-buffer window)))
+    (with-current-buffer (window-buffer window)
+      (when (and (derived-mode-p 'org-mode)
+                 (boundp 'jit-lock-functions)
+                 (memq #'my/org-jit-prettify-blocks jit-lock-functions))
+        (my/org-schedule-pretty-block-refontify)))))
+
+(defun my/org-pretty-block-window-size-hook (_frame)
+  "Schedule visible pretty-block refontify after an Org window changes size."
+  (when (and (derived-mode-p 'org-mode)
+             (get-buffer-window (current-buffer) t)
+             (boundp 'jit-lock-functions)
+             (memq #'my/org-jit-prettify-blocks jit-lock-functions))
+    (my/org-schedule-pretty-block-refontify)))
 
 (defun my/org-special-block-footer-marker-display (palette header-bg)
   "Return the styled footer marker string for a styled special block PALETTE."
@@ -1963,6 +2000,10 @@ partial render does not stay broken until the next edit."
       (setq-local my/org-pretty-block-cache (make-hash-table :test #'equal)))
     (add-hook 'change-major-mode-hook #'my/org-disable-jit-pretty-blocks nil t)
     (add-hook 'kill-buffer-hook #'my/org-disable-jit-pretty-blocks nil t)
+    (add-hook 'window-scroll-functions
+              #'my/org-pretty-block-window-scroll-hook nil t)
+    (add-hook 'window-size-change-functions
+              #'my/org-pretty-block-window-size-hook nil t)
     (unless (memq #'my/org-jit-prettify-blocks jit-lock-functions)
       (jit-lock-register #'my/org-jit-prettify-blocks t))
     (my/org-schedule-pretty-block-refontify)))
@@ -1973,7 +2014,10 @@ partial render does not stay broken until the next edit."
   (when (hash-table-p my/org-pretty-block-cache)
     (clrhash my/org-pretty-block-cache))
   (when (hash-table-p my/org-pretty-block-jit-cache)
-    (clrhash my/org-pretty-block-jit-cache)))
+    (clrhash my/org-pretty-block-jit-cache))
+  (setq-local my/org--pretty-block-visible-refontify-signature nil)
+  (setq-local my/org--pretty-block-scheduled-refontify-signature nil)
+  (setq-local my/org--pretty-block-needs-visible-refontify nil))
 
 (defun my/org-disable-jit-pretty-blocks ()
   "Disable Org pretty-block JIT state in the current buffer."
@@ -1983,6 +2027,10 @@ partial render does not stay broken until the next edit."
   (my/org-cancel-pretty-block-refontify)
   (remove-hook 'change-major-mode-hook #'my/org-disable-jit-pretty-blocks t)
   (remove-hook 'kill-buffer-hook #'my/org-disable-jit-pretty-blocks t)
+  (remove-hook 'window-scroll-functions
+               #'my/org-pretty-block-window-scroll-hook t)
+  (remove-hook 'window-size-change-functions
+               #'my/org-pretty-block-window-size-hook t)
   (my/org-cleanup-pretty-block-watch)
   (my/org-clear-pretty-block-state)
   (setq-local my/org-pretty-block-cache nil)
@@ -1992,7 +2040,7 @@ partial render does not stay broken until the next edit."
   "调试用：强制清除所有 Overlay 并重绘。"
   (interactive)
   (my/org-clear-pretty-block-state)
-  (my/org-schedule-pretty-block-refontify))
+  (my/org-schedule-pretty-block-refontify t))
 
 (defun my/org-enable-jit-pretty-blocks-maybe ()
   "Enable pretty-block rendering immediately or arm its on-demand watcher."

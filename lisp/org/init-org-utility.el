@@ -791,17 +791,40 @@ that is what candidate-name emits for scope entries."
      (t
       (message "No target selected")))))
 
-(defun my/org-reference--target-read-keymap (&optional parent)
-  "Return minibuffer keymap for reference target selection."
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map (or parent minibuffer-local-completion-map))
-    (define-key map (kbd "RET") #'my/org-reference--confirm-minibuffer-target)
-    (define-key map (kbd "<return>") #'my/org-reference--confirm-minibuffer-target)
-    (define-key map (kbd "C-m") #'my/org-reference--confirm-minibuffer-target)
-    (define-key map (kbd "M-RET") #'my/org-reference--drill-minibuffer-target)
-    (define-key map (kbd "M-<return>") #'my/org-reference--drill-minibuffer-target)
-    (define-key map (kbd "C-c C-o") #'my/org-reference--drill-minibuffer-target)
-    map))
+(defvar my/org-reference--target-read-map nil
+  "Extra minibuffer bindings used only while reading Org reference targets.")
+
+(setq my/org-reference--target-read-map
+      (let ((map (make-sparse-keymap)))
+        (define-key map (kbd "RET") #'my/org-reference--confirm-minibuffer-target)
+        (define-key map (kbd "<return>") #'my/org-reference--confirm-minibuffer-target)
+        (define-key map (kbd "C-m") #'my/org-reference--confirm-minibuffer-target)
+        (define-key map (kbd "TAB") #'my/org-reference--drill-minibuffer-target)
+        (define-key map (kbd "<tab>") #'my/org-reference--drill-minibuffer-target)
+        (define-key map (kbd "C-i") #'my/org-reference--drill-minibuffer-target)
+        (define-key map (kbd "M-RET") #'my/org-reference--drill-minibuffer-target)
+        (define-key map (kbd "M-<return>") #'my/org-reference--drill-minibuffer-target)
+        (define-key map (kbd "C-c C-o") #'my/org-reference--drill-minibuffer-target)
+        map))
+
+(defun my/org-reference--install-target-read-map ()
+  "Install Org reference target keys in the current minibuffer only."
+  (let ((base (current-local-map)))
+    (use-local-map
+     (if base
+         (make-composed-keymap my/org-reference--target-read-map base)
+       my/org-reference--target-read-map))))
+
+(defun my/org-reference--with-target-read-map (fn)
+  "Call FN with Org target keys scoped to the minibuffer it opens."
+  (minibuffer-with-setup-hook #'my/org-reference--install-target-read-map
+    (funcall fn)))
+
+(defun my/org-reference--completing-read-with-target-map (&rest args)
+  "Call `completing-read' with Org target keys scoped to its minibuffer."
+  (my/org-reference--with-target-read-map
+   (lambda ()
+     (apply #'completing-read args))))
 
 (defun my/org-reference--lookup-selection (selected candidates lookup)
   "Return target plist for SELECTED using CANDIDATES and LOOKUP.
@@ -833,8 +856,8 @@ selection instead of asking for an exact match."
   "Return (table-fn . lookup-hash) for hierarchical path-style completion.
 
 Scope candidates (headings, blocks) appear with a trailing '/' and act as
-directories.  Press M-RET on a scope to navigate into it; press RET to select
-the current candidate.
+directories.  Press TAB or M-RET on a scope to navigate into it; press RET to
+select the current candidate.
 
 The table emits an annotation-function that shows formula LaTeX content,
 heading/block content, or nearby raw text alongside each candidate.
@@ -1016,8 +1039,8 @@ LOOKUP maps plain completion strings to target plists."
   "Read a reference target from FILE using hierarchical path-style completion.
 
 The prompt shows the current path, e.g. \"Target: heading/subheading/\".
-Navigate into the selected scope with M-RET.  RET confirms the selected
-candidate, including headings and blocks."
+Navigate into the selected scope with TAB or M-RET.  RET confirms the
+selected candidate, including headings and blocks."
   (let* ((all  (my/org-reference--file-targets-cached file))
          (pair (my/org-reference--make-path-table all))
          (table  (car pair))
@@ -1037,27 +1060,23 @@ candidate, including headings and blocks."
                                    (require 'consult)
                                    (consult--read
                                     table
-                                  :prompt      "Target: "
-                                  :initial     prefix
-                                  :require-match nil
-                                  :state       (my/org-reference--target-preview-state
-                                                file lookup)
-                                  :preview-key '(:debounce 0.15 any)
-                                  :keymap      (my/org-reference--target-read-keymap)
-                                  :lookup      (lambda (selected candidates &rest _)
-                                                 (my/org-reference--lookup-selection
-                                                  selected candidates lookup))))
-                              (let* ((parent minibuffer-local-completion-map)
-                                     (minibuffer-local-completion-map
-                                      (my/org-reference--target-read-keymap
-                                       parent))
-                                     (choice
-                                      (completing-read
+                                    :prompt      "Target: "
+                                    :initial     prefix
+                                    :require-match nil
+                                    :state       (my/org-reference--target-preview-state
+                                                  file lookup)
+                                    :preview-key '(:debounce 0.15 any)
+                                    :keymap      my/org-reference--target-read-map
+                                    :lookup      (lambda (selected candidates &rest _)
+                                                   (my/org-reference--lookup-selection
+                                                    selected candidates lookup))))
+                               (let ((choice
+                                      (my/org-reference--completing-read-with-target-map
                                        "Target: " table nil nil prefix)))
-                                (my/org-reference--lookup-selection
-                                 choice
-                                 (all-completions choice table)
-                                 lookup)))))
+                                 (my/org-reference--lookup-selection
+                                  choice
+                                  (all-completions choice table)
+                                  lookup)))))
                         selected))))
                  (drilled (and (consp raw) (eq (car raw) 'drill)))
                  (target (or (and drilled (cdr raw))
