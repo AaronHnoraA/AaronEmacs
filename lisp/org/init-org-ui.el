@@ -210,11 +210,7 @@ lighter without changing table behavior once a table exists."
     (setq-local cursor-type 'bar)
     (setq-local left-margin-width 1)
     (setq-local right-margin-width 1)
-    (setq-local hl-line-face 'my/org-hl-line)
-    (let ((window (selected-window)))
-      (when (and (window-live-p window)
-                 (not (eq (window-buffer window) (current-buffer))))
-        (set-window-buffer window (current-buffer))))))
+    (setq-local hl-line-face 'my/org-hl-line)))
 
 (defun my/org-visible-buffer-p (&optional buffer)
   "Return non-nil when BUFFER is visible, or when any Org buffer is visible."
@@ -502,7 +498,6 @@ for the cache update so we never compute it twice in one redisplay."
                (checkbox-bg (my/org-blend-colors green base-bg 0.12))
                (hl-line-bg (my/org-blend-colors blue base-bg 0.055))
                (block-name-bg (my/org-blend-colors yellow base-bg 0.1))
-               (target-bg (my/org-blend-colors lavender base-bg 0.12))
                (done-bg (my/org-blend-colors green base-bg 0.1))
                (property-bg (my/org-blend-colors teal base-bg 0.055))
                (quote-bg (my/org-blend-colors blue base-bg 0.05))
@@ -788,16 +783,16 @@ for the cache update so we never compute it twice in one redisplay."
                                 :box `(:line-width 3 :color ,(my/org-blend-colors overlay1 base-bg 0.11))))
           (when (facep 'org-modern-internal-target)
             (set-face-attribute 'org-modern-internal-target nil
-                                :background target-bg
+                                :background 'unspecified
                                 :foreground lavender
-                                :weight title-weight
-                                :box `(:line-width 3 :color ,target-bg)))
+                                :weight strong-weight
+                                :box nil))
           (when (facep 'org-modern-radio-target)
             (set-face-attribute 'org-modern-radio-target nil
-                                :background target-bg
+                                :background 'unspecified
                                 :foreground mauve
-                                :weight title-weight
-                                :box `(:line-width 3 :color ,target-bg)))
+                                :weight strong-weight
+                                :box nil))
           (when (facep 'org-modern-horizontal-rule)
             (set-face-attribute 'org-modern-horizontal-rule nil
                                 :foreground (my/org-blend-colors cyan base-bg 0.42)))

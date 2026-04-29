@@ -423,7 +423,8 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
       (while (re-search-forward "^[ \t]*#\\+begin_\\([[:alnum:]_-]+\\)\\b.*$" nil t)
         (let* ((type (downcase (match-string-no-properties 1)))
                (begin (line-beginning-position))
-               (label (format "%s block" type)))
+               (block-target (my/org-reference--target-before-block begin))
+               (label (or block-target (format "%s block" type))))
           (when (re-search-forward
                  (format "^[ \t]*#\\+end_%s\\b" (regexp-quote type)) nil t)
             (let* ((block-end (line-end-position))
@@ -434,7 +435,7 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
                    (ctx (my/org-reference--extract-context-lines
                          content-start (min (+ content-start 1200) block-end) 5)))
               (push (list :kind 'scope-block
-                          :target nil
+                          :target block-target
                           :label label
                           :line (line-number-at-pos begin)
                           :pos begin
@@ -454,11 +455,55 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
     (beginning-of-line)
     (looking-at-p "[ \t]*%")))
 
+(defun my/org-reference--target-before-block (block-begin)
+  "Return dedicated target immediately before BLOCK-BEGIN, or nil."
+  (save-excursion
+    (goto-char block-begin)
+    (forward-line -1)
+    (while (and (not (bobp))
+                (looking-at-p "[ \t]*$"))
+      (forward-line -1))
+    (when (looking-at "[ \t]*<<\\([^>\n]+\\)>>[ \t]*$")
+      (match-string-no-properties 1))))
+
+(defun my/org-reference--target-before-block-p (pos)
+  "Return non-nil when dedicated target at POS labels the following block."
+  (save-excursion
+    (goto-char pos)
+    (forward-line 1)
+    (while (and (not (eobp))
+                (looking-at-p "[ \t]*$"))
+      (forward-line 1))
+    (looking-at-p "[ \t]*#\\+begin_[[:alnum:]_-]+\\b")))
+
+(defun my/org-reference--modified-file-buffer (file)
+  "Return the modified live buffer visiting FILE, or nil."
+  (let ((expanded (expand-file-name file)))
+    (seq-find
+     (lambda (buffer)
+       (with-current-buffer buffer
+         (and buffer-file-name
+              (buffer-modified-p buffer)
+              (or (equal (expand-file-name buffer-file-name) expanded)
+                  (ignore-errors
+                    (file-equal-p buffer-file-name expanded))))))
+     (buffer-list))))
+
+(defun my/org-reference--insert-source-contents (file)
+  "Insert FILE contents, preferring unsaved live buffer contents."
+  (if-let* ((buffer (my/org-reference--modified-file-buffer file)))
+      (let ((text (with-current-buffer buffer
+                    (save-restriction
+                      (widen)
+                      (buffer-substring-no-properties (point-min) (point-max))))))
+        (insert text))
+    (insert-file-contents file)))
+
 (defun my/org-reference--scan-org-targets (file)
   "Return reference target candidates from Org FILE."
   (let (candidates)
     (with-temp-buffer
-      (insert-file-contents file)
+      (my/org-reference--insert-source-contents file)
       (org-mode)
       (org-with-wide-buffer
        (let ((tree (org-element-parse-buffer)))
@@ -507,7 +552,8 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
            (lambda (target)
              (let ((value (org-element-property :value target))
                    (begin (org-element-property :begin target)))
-               (unless (my/org-reference--latex-comment-line-p begin)
+               (unless (or (my/org-reference--latex-comment-line-p begin)
+                           (my/org-reference--target-before-block-p begin))
                  (let* ((preview (or (my/org-reference--target-formula-preview begin)
                                      (my/org-reference--nearby-preview begin)))
                         (formula-p (my/org-reference--formula-target-p value preview))
@@ -532,7 +578,7 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
   (let ((ext (downcase (or (file-name-extension file) "")))
         candidates)
     (with-temp-buffer
-      (insert-file-contents file)
+      (my/org-reference--insert-source-contents file)
       (goto-char (point-min))
       (while (not (eobp))
         (let* ((line (line-number-at-pos))
@@ -572,18 +618,20 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
 
 (defun my/org-reference--file-targets-cached (file)
   "Return target plists for FILE, re-scanning only when the mtime changes."
-  (let* ((mtime (float-time
-                 (file-attribute-modification-time (file-attributes file))))
-         (key (cons file mtime))
-         (hit (gethash key my/org-reference--cache)))
-    (or hit
-        (let ((targets (my/org-reference--file-targets file)))
-          (maphash (lambda (k _)
-                     (when (and (consp k) (equal (car k) file))
-                       (remhash k my/org-reference--cache)))
-                   my/org-reference--cache)
-          (puthash key targets my/org-reference--cache)
-          targets))))
+  (if (my/org-reference--modified-file-buffer file)
+      (my/org-reference--file-targets file)
+    (let* ((mtime (float-time
+                   (file-attribute-modification-time (file-attributes file))))
+           (key (cons file mtime))
+           (hit (gethash key my/org-reference--cache)))
+      (or hit
+          (let ((targets (my/org-reference--file-targets file)))
+            (maphash (lambda (k _)
+                       (when (and (consp k) (equal (car k) file))
+                         (remhash k my/org-reference--cache)))
+                     my/org-reference--cache)
+            (puthash key targets my/org-reference--cache)
+            targets)))))
 
 (defun my/org-reference--candidate-in-scope-p (candidate scope)
   "Return non-nil when CANDIDATE is inside SCOPE."
@@ -600,21 +648,32 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
          (scope-level (plist-get scope :level))
          (scope-begin (plist-get scope :begin))
          (children (seq-filter
-                    (lambda (candidate)
-                      (and (not (eq candidate scope))
-                           (not (= (or (plist-get candidate :pos) -1)
-                                   (or scope-begin -2)))
+	                    (lambda (candidate)
+	                      (and (not (eq candidate scope))
+	                           (not (= (or (plist-get candidate :pos) -1)
+	                                   (or scope-begin -2)))
                            (my/org-reference--candidate-in-scope-p candidate scope)))
                     candidates)))
-    (if (eq scope-kind 'scope-heading)
-        (seq-filter
-         (lambda (candidate)
-           (let ((kind (plist-get candidate :kind)))
-             (not (and (eq kind 'scope-heading)
-                       (<= (or (plist-get candidate :level) most-positive-fixnum)
-                           (or scope-level 0))))))
-         children)
-      children)))
+    (setq children
+          (if (eq scope-kind 'scope-heading)
+              (seq-filter
+               (lambda (candidate)
+                 (let ((kind (plist-get candidate :kind)))
+                   (not (and (eq kind 'scope-heading)
+                             (<= (or (plist-get candidate :level) most-positive-fixnum)
+                                 (or scope-level 0))))))
+               children)
+            children))
+    (seq-filter
+     (lambda (candidate)
+       (not
+        (seq-some
+         (lambda (child-scope)
+           (and (not (eq candidate child-scope))
+                (my/org-reference--scope-candidate-p child-scope)
+                (my/org-reference--candidate-in-scope-p candidate child-scope)))
+         children)))
+     children)))
 
 (defun my/org-reference--scope-candidate-p (target)
   "Return non-nil when TARGET can be drilled into."
@@ -622,18 +681,35 @@ Lines that look like headings, property drawers, or #+keywords are skipped."
 
 ;; ── path-style hierarchical navigation ──────────────────────────────────────
 
+(defun my/org-reference--scope-segment-name (c)
+  "Return the path segment for scope candidate C, without trailing slash."
+  (pcase (plist-get c :kind)
+    ('scope-heading
+     (my/org-reference--path-safe (plist-get c :label)))
+    ('scope-block
+     (let ((label (my/org-reference--path-safe
+                   (or (plist-get c :target)
+                       (plist-get c :label))))
+           (line (plist-get c :line)))
+       (if (and line (not (plist-get c :target)))
+           (format "%s:%s" label line)
+         label)))
+    (_
+     (my/org-reference--path-safe
+      (or (plist-get c :target) (plist-get c :label) "")))))
+
 (defun my/org-reference--candidate-name (c)
   "Return the path-segment name for candidate C.
-Scope candidates get a trailing '/' like directories.
-All names are sanitized so literal '/' in headings or previews does not
+  Scope candidates get a trailing '/' like directories.
+  All names are sanitized so literal '/' in headings or previews does not
 confuse path splitting; '/' is replaced with U+2044 FRACTION SLASH."
   (pcase (plist-get c :kind)
-    ('file
-     (or (plist-get c :label) ""))
-    ('scope-heading
-     (concat (my/org-reference--path-safe (plist-get c :label)) "/"))
-    ('scope-block
-     (concat (my/org-reference--path-safe (plist-get c :label)) "/"))
+	    ('file
+	     (or (plist-get c :label) ""))
+	    ('scope-heading
+	     (concat (my/org-reference--scope-segment-name c) "/"))
+	    ('scope-block
+	     (concat (my/org-reference--scope-segment-name c) "/"))
     ('id
      (concat "id:" (my/org-reference--path-safe (or (plist-get c :target) ""))))
     ('custom-id
@@ -644,24 +720,26 @@ confuse path splitting; '/' is replaced with U+2044 FRACTION SLASH."
      (my/org-reference--path-safe
       (or (plist-get c :target) (plist-get c :label) "")))))
 
-(defun my/org-reference--path-candidates-at (all scope-parts)
+(defun my/org-reference--path-candidates-at (all scope-parts &optional universe)
   "Return candidates at the level reached by SCOPE-PARTS from ALL.
 Returns nil when no matching scope is found.
 Matching uses the path-safe label (with '/' replaced by U+2044) since
 that is what candidate-name emits for scope entries."
-  (if (null scope-parts)
-      all
-    (let* ((head (car scope-parts))
-           (scope (seq-find
-                   (lambda (c)
-                     (and (my/org-reference--scope-candidate-p c)
-                          (string= (my/org-reference--path-safe (plist-get c :label))
-                                   head)))
-                   all)))
-      (when scope
-        (my/org-reference--path-candidates-at
-         (my/org-reference--filter-scope-children all scope)
-         (cdr scope-parts))))))
+  (let ((universe (or universe all)))
+    (if (null scope-parts)
+        all
+      (let* ((head (car scope-parts))
+             (scope (seq-find
+                     (lambda (c)
+                       (and (my/org-reference--scope-candidate-p c)
+                            (string= (my/org-reference--scope-segment-name c)
+                                     head)))
+                     all)))
+        (when scope
+          (my/org-reference--path-candidates-at
+           (my/org-reference--filter-scope-children universe scope)
+           (cdr scope-parts)
+           universe))))))
 
 (defun my/org-reference--minibuffer-candidate ()
   "Return the currently selected minibuffer candidate string."
@@ -987,6 +1065,7 @@ candidate, including headings and blocks."
     ('file nil)
     ('id (concat "*" (plist-get target :label)))
     ('scope-heading (concat "*" (plist-get target :target)))
+    ('scope-block (plist-get target :target))
     ('heading (concat "*" (plist-get target :target)))
     ('custom-id (concat "#" (plist-get target :target)))
     ('formula (plist-get target :target))
