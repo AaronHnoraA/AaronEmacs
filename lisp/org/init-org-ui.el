@@ -20,6 +20,7 @@
 (defvar-local my/org--valign-table-watch-installed nil)
 (defvar-local my/org--pretty-block-watch-installed nil)
 (defvar-local my/org--pretty-block-refontify-timer nil)
+(defvar-local my/org--pretty-block-needs-visible-refontify nil)
 (defvar-local my/org-appear--last-point nil)
 (defvar-local my/org-appear--last-tick nil)
 (defvar-local my/org-appear--last-do-buffer nil)
@@ -121,14 +122,79 @@ lighter without changing table behavior once a table exists."
   "Face used for collapsed reference property drawers."
   :group 'my/org-ui)
 
+(defvar my/org-reference-copy-id-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mouse-1] #'my/org-reference-copy-id-at-event)
+    (define-key map (kbd "RET") #'my/org-reference-copy-id-at-point)
+    map)
+  "Keymap used by clickable Org reference ID labels.")
+
+(defun my/org-reference--copyable-id-at (pos)
+  "Return the copyable Org reference ID at POS or next to POS."
+  (when (integerp pos)
+    (or (get-text-property pos 'my/org-reference-id)
+        (and (> pos (point-min))
+             (get-text-property (1- pos) 'my/org-reference-id))
+        (and (< pos (point-max))
+             (get-text-property (1+ pos) 'my/org-reference-id)))))
+
+(defun my/org-reference-copy-id-at-point (&optional pos)
+  "Copy the Org reference ID stored at POS or point."
+  (interactive)
+  (let ((id (my/org-reference--copyable-id-at (or pos (point)))))
+    (unless (stringp id)
+      (user-error "No Org reference ID here"))
+    (kill-new id)
+    (message "Copied Org ID: %s" id)))
+
+(defun my/org-reference-copy-id-at-event (event)
+  "Copy the Org reference ID clicked by mouse EVENT."
+  (interactive "e")
+  (let* ((start (event-start event))
+         (window (posn-window start))
+         (pos (posn-point start)))
+    (unless (and (windowp window) (integerp pos))
+      (user-error "No Org reference ID here"))
+    (select-window window)
+    (with-current-buffer (window-buffer window)
+      (my/org-reference-copy-id-at-point pos))))
+
+(defun my/org-reference-copy-id-properties (id)
+  "Return text properties that make an Org reference label for ID clickable."
+  (list 'mouse-face 'highlight
+        'help-echo (format "mouse-1: 复制 ID %s" id)
+        'keymap my/org-reference-copy-id-map
+        'follow-link t
+        'my/org-reference-id id))
+
+(defun my/org-reference-label-properties (face id &rest properties)
+  "Return clickable label text PROPERTIES with FACE and copyable ID."
+  (append (list 'face face)
+          properties
+          (my/org-reference-copy-id-properties id)))
+
+(defun my/org-reference-copy-id-display (display id)
+  "Return DISPLAY with clickable copy-ID properties for ID."
+  (let ((display (copy-sequence display)))
+    (add-text-properties
+     0 (length display)
+     (my/org-reference-copy-id-properties id)
+     display)
+    display))
+
 (defun my/org-property-drawer-display ()
   "Return the compact display string for the current property drawer match."
-  (let ((kind (if (string= (match-string-no-properties 3) "CUSTOM_ID")
-                  "cid"
-                "id"))
-        (value (string-trim (match-string-no-properties 4))))
+  (let* ((kind (if (string= (match-string-no-properties 3) "CUSTOM_ID")
+                   "cid"
+                 "id"))
+         (value (string-trim (match-string-no-properties 4))))
     (propertize (format " %s  %s " kind value)
-                'face 'my/org-property-drawer-pill)))
+                'face 'my/org-property-drawer-pill
+                'mouse-face 'highlight
+                'help-echo (format "mouse-1: 复制 ID %s" value)
+                'keymap my/org-reference-copy-id-map
+                'follow-link t
+                'my/org-reference-id value)))
 
 (defun my/org-property-drawer-label-matcher (limit)
   "Search to LIMIT for a short property drawer containing ID or CUSTOM_ID."
@@ -194,20 +260,56 @@ This deliberately uses no overlays, timers, or command hooks; font-lock only
 touches generated formula targets and dedicated targets immediately before
 Org blocks."
   (setq-local font-lock-extra-managed-props
-              (cl-union '(display invisible) font-lock-extra-managed-props))
+              (cl-union '(display invisible mouse-face help-echo keymap
+                                   follow-link my/org-reference-id)
+                        font-lock-extra-managed-props))
   (add-to-invisibility-spec 'my/org-property-drawer)
   (font-lock-add-keywords
    nil
    `((,my/org-reference-formula-target-regexp
-      (0 'my/org-reference-formula-label t)
-      (1 '(face nil display ,my/org-reference-formula-label-prefix) t)
-      (3 '(face nil display ,my/org-reference-formula-label-suffix) t))
+      (0 (my/org-reference-label-properties
+          'my/org-reference-formula-label
+          (match-string-no-properties 2))
+         t)
+      (1 (my/org-reference-label-properties
+          nil
+          (match-string-no-properties 2)
+          'display (my/org-reference-copy-id-display
+                    my/org-reference-formula-label-prefix
+                    (match-string-no-properties 2)))
+         t)
+      (3 (my/org-reference-label-properties
+          nil
+          (match-string-no-properties 2)
+          'display (my/org-reference-copy-id-display
+                    my/org-reference-formula-label-suffix
+                    (match-string-no-properties 2)))
+         t))
      (my/org-reference-block-target-matcher
-      (0 'my/org-reference-block-label t)
-      (1 '(face nil display ,my/org-reference-block-label-prefix) t)
-      (3 '(face nil display ,my/org-reference-block-label-suffix) t))
+      (0 (my/org-reference-label-properties
+          'my/org-reference-block-label
+          (match-string-no-properties 2))
+         t)
+      (1 (my/org-reference-label-properties
+          nil
+          (match-string-no-properties 2)
+          'display (my/org-reference-copy-id-display
+                    my/org-reference-block-label-prefix
+                    (match-string-no-properties 2)))
+         t)
+      (3 (my/org-reference-label-properties
+          nil
+          (match-string-no-properties 2)
+          'display (my/org-reference-copy-id-display
+                    my/org-reference-block-label-suffix
+                    (match-string-no-properties 2)))
+         t))
      (my/org-property-drawer-label-matcher
-      (1 (list 'face nil 'display (my/org-property-drawer-display)) t)
+      (1 (my/org-reference-label-properties
+          nil
+          (match-string-no-properties 4)
+          'display (my/org-property-drawer-display))
+         t)
       (2 '(face nil invisible my/org-property-drawer) t)))
    'append))
 
@@ -1270,14 +1372,66 @@ DEFAULT-BG defaults to `my/org-default-background'."
                #'my/org-cleanup-pretty-block-watch t)
   (setq-local my/org--pretty-block-watch-installed nil))
 
-(defun my/org-pretty-block--jit-cache-hit-p (scan-start scan-end)
-  "Return non-nil when SCAN-START SCAN-END was already handled unchanged."
-  (when (hash-table-p my/org-pretty-block-jit-cache)
-    (gethash (list scan-start scan-end (buffer-chars-modified-tick))
-             my/org-pretty-block-jit-cache)))
+(defun my/org-pretty-block--overlay-at-p (pos)
+  "Return non-nil when POS still has a pretty-block overlay."
+  (cl-some (lambda (ov)
+             (overlay-get ov 'my/org-pretty-block))
+           (overlays-in pos (min (point-max) (1+ pos)))))
 
-(defun my/org-pretty-block--remember-jit-range (scan-start scan-end)
-  "Remember that SCAN-START SCAN-END has been handled for this buffer tick."
+(defun my/org-pretty-block--role-at-p (pos block-id role)
+  "Return non-nil when POS has BLOCK-ID's pretty-block overlay ROLE."
+  (cl-some (lambda (ov)
+             (and (overlay-get ov 'my/org-pretty-block)
+                  (equal (overlay-get ov 'my/org-pretty-block-id) block-id)
+                  (eq (overlay-get ov 'my/org-pretty-block-role) role)))
+           (overlays-in pos (min (point-max) (1+ pos)))))
+
+(defun my/org-pretty-block--rendered-p
+    (block-id header-text-beg footer-text-beg body-segments)
+  "Return non-nil when BLOCK-ID's required pretty-block overlays are live."
+  (and (my/org-pretty-block--role-at-p
+        header-text-beg block-id 'header-bg)
+       (my/org-pretty-block--role-at-p
+        header-text-beg block-id 'header-display)
+       (or (null footer-text-beg)
+           (and (my/org-pretty-block--role-at-p
+                 footer-text-beg block-id 'footer-bg)
+                (my/org-pretty-block--role-at-p
+                 footer-text-beg block-id 'footer-display)))
+       (cl-every
+        (lambda (segment)
+          (my/org-pretty-block--role-at-p (car segment) block-id 'body))
+        body-segments)))
+
+(defun my/org-pretty-block--render-record-live-p (record)
+  "Return non-nil when cached pretty-block render RECORD is still complete."
+  (if (integerp record)
+      ;; Backward-compatible fallback for records made before role metadata.
+      (my/org-pretty-block--overlay-at-p record)
+    (my/org-pretty-block--rendered-p
+     (plist-get record :id)
+     (plist-get record :header)
+     (plist-get record :footer)
+     (plist-get record :body-segments))))
+
+(defun my/org-pretty-block--jit-cache-hit-p (scan-start scan-end)
+  "Return non-nil when SCAN-START SCAN-END was already handled unchanged.
+
+The cached value records styled blocks seen in the range.  A range only hits
+while every recorded block still has the required pretty-block overlays, so a
+partial render does not stay broken until the next edit."
+  (when (hash-table-p my/org-pretty-block-jit-cache)
+    (let ((records
+           (gethash (list scan-start scan-end (buffer-chars-modified-tick))
+                    my/org-pretty-block-jit-cache
+                    :missing)))
+      (cond
+       ((eq records :missing) nil)
+       ((eq records :none) t)
+       (t (cl-every #'my/org-pretty-block--render-record-live-p records))))))
+
+(defun my/org-pretty-block--remember-jit-range (scan-start scan-end records)
+  "Remember that SCAN-START SCAN-END handled RECORDS for this buffer tick."
   (unless (hash-table-p my/org-pretty-block-jit-cache)
     (setq-local my/org-pretty-block-jit-cache
                 (make-hash-table :test #'equal)))
@@ -1287,7 +1441,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
                 my/org-pretty-block-jit-cache-max-entries))
     (clrhash my/org-pretty-block-jit-cache))
   (puthash (list scan-start scan-end (buffer-chars-modified-tick))
-           t
+           (or records :none)
            my/org-pretty-block-jit-cache))
 
 (defun my/org-visible-range-with-margin (&optional window)
@@ -1358,6 +1512,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
       (setq-local my/org--pretty-block-refontify-timer nil)
       (when (and (derived-mode-p 'org-mode)
                  (my/org-visible-buffer-p buffer))
+        (setq-local my/org--pretty-block-needs-visible-refontify nil)
         (let ((ranges (my/org-visible-ranges buffer)))
           (dolist (range ranges)
             (jit-lock-refontify (car range) (cdr range))))))))
@@ -1365,11 +1520,24 @@ DEFAULT-BG defaults to `my/org-default-background'."
 (defun my/org-schedule-pretty-block-refontify ()
   "Schedule a coalesced pretty-block refontify for the current buffer."
   (my/org-cancel-pretty-block-refontify)
-  (when (my/org-visible-buffer-p (current-buffer))
-    (setq-local my/org--pretty-block-refontify-timer
-                (run-with-idle-timer 0.20 nil
-                                     #'my/org--pretty-block-refontify-now
-                                     (current-buffer)))))
+  (if (my/org-visible-buffer-p (current-buffer))
+      (setq-local my/org--pretty-block-refontify-timer
+                  (run-with-idle-timer 0.20 nil
+                                       #'my/org--pretty-block-refontify-now
+                                       (current-buffer)))
+    (setq-local my/org--pretty-block-needs-visible-refontify t)))
+
+(defun my/org-schedule-deferred-pretty-block-refontify (&rest _)
+  "Schedule pretty-block refontify for Org buffers that just became visible."
+  (dolist (window (window-list nil 'no-minibuf))
+    (when-let* ((buffer (window-buffer window)))
+      (with-current-buffer buffer
+        (when (and my/org--pretty-block-needs-visible-refontify
+                   (derived-mode-p 'org-mode)
+                   (boundp 'jit-lock-functions)
+                   (memq #'my/org-jit-prettify-blocks jit-lock-functions)
+                   (not (timerp my/org--pretty-block-refontify-timer)))
+          (my/org-schedule-pretty-block-refontify))))))
 
 (defun my/org-special-block-footer-marker-display (palette header-bg)
   "Return the styled footer marker string for a styled special block PALETTE."
@@ -1638,6 +1806,20 @@ DEFAULT-BG defaults to `my/org-default-background'."
                            :weight medium))
        rule))))
 
+(defun my/org-special-block-footer-line (end-pos type)
+  "Return footer line positions for block TYPE ending at END-POS."
+  (save-excursion
+    (goto-char end-pos)
+    (skip-chars-backward " \t\n")
+    (beginning-of-line)
+    (when (looking-at (format "^[ \t]*#\\+end_%s" (regexp-quote type)))
+      (list (line-beginning-position)
+            (save-excursion
+              (back-to-indentation)
+              (point))
+            (line-end-position)
+            (my/org-line-background-end)))))
+
 ;; ===========================================================
 ;; 3. 核心渲染逻辑：只处理单个 Element
 ;; ===========================================================
@@ -1693,20 +1875,25 @@ DEFAULT-BG defaults to `my/org-default-background'."
              (body-segments (my/org-special-block-body-segments
                              element contents-begin contents-end))
              (footer-display (my/org-special-block-footer-display palette header-bg))
+             (footer-line (my/org-special-block-footer-line end-pos type))
+             (footer-text-beg (cadr footer-line))
+             (render-record (list :id begin-pos
+                                  :header header-text-beg
+                                  :footer footer-text-beg
+                                  :body-segments body-segments))
              (signature (list type begin-pos end-pos contents-begin contents-end
                               post-affiliated params default-bg title
                               footer-marker footer-style base-color header-bg body-bg
                               footer-color params-color badge-bg
                               divider-color gutter-color body-prefix-width
                               body-prefix
-                              body-segments header-display footer-display))
+                              body-segments header-display footer-display
+                              footer-line))
              (cached-signature (and (hash-table-p my/org-pretty-block-cache)
                                     (gethash begin-pos my/org-pretty-block-cache)))
              (already-rendered
-              (cl-some
-               (lambda (ov)
-                 (overlay-get ov 'my/org-pretty-block))
-               (overlays-in begin-pos (min end-pos (1+ begin-pos))))))
+              (my/org-pretty-block--rendered-p
+               begin-pos header-text-beg footer-text-beg body-segments)))
 
         (unless (and already-rendered
                      (equal signature cached-signature))
@@ -1735,6 +1922,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
           (let ((ov (make-overlay header-bol header-bg-end)))
             (overlay-put ov 'my/org-pretty-block t)
             (overlay-put ov 'my/org-pretty-block-id begin-pos)
+            (overlay-put ov 'my/org-pretty-block-role 'header-bg)
             (overlay-put ov 'face `(:background ,header-bg :extend t))
             (overlay-put ov 'line-prefix "")
             (overlay-put ov 'wrap-prefix "")
@@ -1745,6 +1933,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
           (let ((ov (make-overlay header-text-beg header-end)))
             (overlay-put ov 'my/org-pretty-block t)
             (overlay-put ov 'my/org-pretty-block-id begin-pos)
+            (overlay-put ov 'my/org-pretty-block-role 'header-display)
             (overlay-put ov 'face `(:background ,header-bg :extend t))
             (overlay-put ov 'priority (1+ priority))
             (overlay-put ov 'display header-display)
@@ -1761,6 +1950,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
               (let ((ov (make-overlay segment-begin segment-end)))
               (overlay-put ov 'my/org-pretty-block t)
               (overlay-put ov 'my/org-pretty-block-id begin-pos)
+              (overlay-put ov 'my/org-pretty-block-role 'body)
               (overlay-put ov 'face `(:background ,body-bg :extend t))
               (overlay-put ov 'line-prefix body-prefix)
               (overlay-put ov 'wrap-prefix body-prefix)
@@ -1770,35 +1960,29 @@ DEFAULT-BG defaults to `my/org-default-background'."
         ;; -------------------------------------------------------
         ;; C. Footer Overlay (#+end_xxx)
         ;; -------------------------------------------------------
-        (save-excursion
-          (goto-char end-pos)
-          (skip-chars-backward " \t\n")
-          (beginning-of-line)
-          ;; 确保是对应的 end 标签
-          (when (looking-at (format "^[ \t]*#\\+end_%s" (regexp-quote type)))
-            (let* ((footer-bol (line-beginning-position))
-                   (footer-text-beg (save-excursion
-                                      (back-to-indentation)
-                                      (point)))
-                   (footer-end (line-end-position))
-                   (footer-bg-end (my/org-line-background-end)))
-              (let ((ov (make-overlay footer-bol footer-bg-end)))
-                (overlay-put ov 'my/org-pretty-block t)
-                (overlay-put ov 'my/org-pretty-block-id begin-pos)
-                (overlay-put ov 'face `(:background ,header-bg :extend t))
-                (overlay-put ov 'line-prefix "")
-                (overlay-put ov 'wrap-prefix "")
-                (overlay-put ov 'priority priority)
-                (overlay-put ov 'evaporate t))
-              (let ((ov (make-overlay footer-text-beg footer-end)))
-                (overlay-put ov 'my/org-pretty-block t)
-                (overlay-put ov 'my/org-pretty-block-id begin-pos)
-                (overlay-put ov 'face `(:background ,header-bg :extend t))
-                (overlay-put ov 'priority (1+ priority))
-                (overlay-put ov 'display footer-display)
-                (overlay-put ov 'line-prefix "")
-                (overlay-put ov 'wrap-prefix "")
-                (overlay-put ov 'evaporate t))))))))))
+        (when footer-line
+          (pcase-let ((`(,footer-bol ,footer-text-beg ,footer-end ,footer-bg-end)
+                       footer-line))
+            (let ((ov (make-overlay footer-bol footer-bg-end)))
+              (overlay-put ov 'my/org-pretty-block t)
+              (overlay-put ov 'my/org-pretty-block-id begin-pos)
+              (overlay-put ov 'my/org-pretty-block-role 'footer-bg)
+              (overlay-put ov 'face `(:background ,header-bg :extend t))
+              (overlay-put ov 'line-prefix "")
+              (overlay-put ov 'wrap-prefix "")
+              (overlay-put ov 'priority priority)
+              (overlay-put ov 'evaporate t))
+            (let ((ov (make-overlay footer-text-beg footer-end)))
+              (overlay-put ov 'my/org-pretty-block t)
+              (overlay-put ov 'my/org-pretty-block-id begin-pos)
+              (overlay-put ov 'my/org-pretty-block-role 'footer-display)
+              (overlay-put ov 'face `(:background ,header-bg :extend t))
+              (overlay-put ov 'priority (1+ priority))
+              (overlay-put ov 'display footer-display)
+              (overlay-put ov 'line-prefix "")
+              (overlay-put ov 'wrap-prefix "")
+              (overlay-put ov 'evaporate t)))))
+        render-record))))
 
 ;; ===========================================================
 ;; 4. JIT-Lock 引擎：连续扫描 (支持嵌套)
@@ -1822,7 +2006,8 @@ DEFAULT-BG defaults to `my/org-default-background'."
           (when (my/org-range-overlaps-visible-ranges-p
                  scan-start scan-end (current-buffer))
             (unless (my/org-pretty-block--jit-cache-hit-p scan-start scan-end)
-              (let ((seen (make-hash-table :test #'eql)))
+              (let ((seen (make-hash-table :test #'eql))
+                    render-records)
                 (goto-char scan-start)
                 (while (re-search-forward my/org--special-block-line-regexp
                                           scan-end t)
@@ -1858,11 +2043,12 @@ DEFAULT-BG defaults to `my/org-default-background'."
                                  (my/org-range-overlaps-visible-ranges-p
                                   begin end-pos (current-buffer)))
                         (puthash begin t seen)
-                        (my/org-prettify-element element)))
+                        (when-let* ((record (my/org-prettify-element element)))
+                          (push record render-records))))
                     (goto-char line-begin)
-                    (forward-line 1))))
-              (my/org-pretty-block--remember-jit-range
-               scan-start scan-end))))))))
+                    (forward-line 1)))
+                (my/org-pretty-block--remember-jit-range
+                 scan-start scan-end render-records)))))))))
 
 ;; ===========================================================
 ;; 5. 激活机制
@@ -1918,6 +2104,11 @@ DEFAULT-BG defaults to `my/org-default-background'."
       (my/org-install-pretty-block-watch))))
 
 (add-hook 'org-mode-hook #'my/org-enable-jit-pretty-blocks-maybe)
+(add-hook 'window-configuration-change-hook
+          #'my/org-schedule-deferred-pretty-block-refontify)
+(when (boundp 'window-buffer-change-functions)
+  (add-hook 'window-buffer-change-functions
+            #'my/org-schedule-deferred-pretty-block-refontify))
 
 (provide 'init-org-ui)
 ;;; init-org-ui.el ends here
