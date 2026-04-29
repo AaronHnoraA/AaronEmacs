@@ -25,6 +25,13 @@ motion or typing."
 (defvar-local my/org-roam--redisplay-timer nil)
 (defvar-local my/org-roam--redisplay-key nil)
 
+(defvar my/org-roam-db-file
+  (expand-file-name "org-roam.db"
+                    (if (boundp 'my/org-state-dir)
+                        my/org-state-dir
+                      (expand-file-name "var/org/" user-emacs-directory)))
+  "Canonical Org Roam database file for this Emacs configuration.")
+
 (declare-function my/org-reference-create-target-dwim "init-org-utility" ())
 (declare-function my/org-insert-id-link "init-org-utility" ())
 (declare-function my/org-insert-target-link "init-org-utility" ())
@@ -71,6 +78,7 @@ motion or typing."
              org-roam-db-autosync-mode)
   :init
   (setq org-roam-directory my-org-roam-dir)
+  (setq org-roam-db-location my/org-roam-db-file)
   (setq org-roam-v2-ack t)
   
   ;; 定义前缀命令
@@ -89,6 +97,68 @@ motion or typing."
         ("l" . org-roam-buffer-toggle))
   
   :config
+  (defun my/org-roam-db--first-content-position ()
+    "Return the first non-blank buffer position for Org Roam file nodes."
+    (save-excursion
+      (goto-char (point-min))
+      (skip-chars-forward " \t\n\r")
+      (point)))
+
+  (defun org-roam-db-insert-file-node ()
+    "Insert the file-level node into the Org-roam cache.
+This local override matches upstream Org Roam, but tolerates blank lines before
+the file-level property drawer.  Otherwise notes whose first byte is a newline
+are added to the files table but never become nodes."
+    (org-with-point-at (my/org-roam-db--first-content-position)
+      (when (and (= (org-outline-level) 0)
+                 (org-roam-db-node-p))
+        (when-let* ((id (org-id-get)))
+          (let* ((file (buffer-file-name (buffer-base-buffer)))
+                 (title (org-roam-db--file-title))
+                 (pos (point))
+                 (todo nil)
+                 (priority nil)
+                 (scheduled nil)
+                 (deadline nil)
+                 (level 0)
+                 (tags org-file-tags)
+                 (properties (org-entry-properties))
+                 (olp nil))
+            (org-roam-db-query!
+             (lambda (err)
+               (lwarn 'org-roam :warning "%s for %s (%s) in %s"
+                      (error-message-string err)
+                      title id file))
+             [:insert :into nodes
+              :values $v1]
+             (vector id file level pos todo priority
+                     scheduled deadline title properties olp))
+            (when tags
+              (org-roam-db-query
+               [:insert :into tags
+                :values $v1]
+               (mapcar (lambda (tag)
+                         (vector id (substring-no-properties tag)))
+                       tags)))
+            (org-roam-db-insert-aliases)
+            (org-roam-db-insert-refs))))))
+
+  (defun org-roam-id-at-point ()
+    "Return the nearest Org Roam node ID at point.
+This local override matches upstream Org Roam, but treats leading blank lines as
+part of the file-level node so links in those files keep their source ID."
+    (org-with-wide-buffer
+     (org-back-to-heading-or-point-min t)
+     (when (bobp)
+       (goto-char (my/org-roam-db--first-content-position)))
+     (while (and (not (org-roam-db-node-p))
+                 (not (bobp)))
+       (org-roam-up-heading-or-point-min)
+       (when (bobp)
+         (goto-char (my/org-roam-db--first-content-position))))
+     (when (org-roam-db-node-p)
+       (org-id-get))))
+
   (my/org-roam-enable)
   (defun my/org-roam-buffer--cancel-redisplay-timer ()
     "Cancel the pending Org Roam side-buffer redisplay timer."
@@ -176,7 +246,65 @@ motion or typing."
   :custom
   (org-roam-ui-sync-theme t)
   (org-roam-ui-follow t)
-  (org-roam-ui-update-on-save t))
+  (org-roam-ui-update-on-save t)
+  (org-roam-ui-open-on-start nil)
+  :config
+  (defun my/org-roam-ui--json-object-end (string)
+    "Return the end position of the first JSON object in STRING."
+    (let ((i 0)
+          (depth 0)
+          (in-string nil)
+          (escaped nil)
+          start end)
+      (while (and (< i (length string)) (not start))
+        (when (eq (aref string i) ?{)
+          (setq start i))
+        (setq i (1+ i)))
+      (when start
+        (setq i start)
+        (while (and (< i (length string)) (not end))
+          (let ((char (aref string i)))
+            (cond
+             (escaped
+              (setq escaped nil))
+             ((and in-string (eq char ?\\))
+              (setq escaped t))
+             ((eq char ?\")
+              (setq in-string (not in-string)))
+             ((not in-string)
+              (cond
+               ((eq char ?{)
+                (setq depth (1+ depth)))
+               ((eq char ?})
+                (setq depth (1- depth))
+                (when (= depth 0)
+                  (setq end (1+ i))))))))
+          (setq i (1+ i))))
+      end))
+
+  (defun my/org-roam-ui--parse-message (text)
+    "Parse a websocket JSON message from TEXT, ignoring trailing junk."
+    (condition-case nil
+        (json-parse-string text :object-type 'alist)
+      (json-parse-error
+       (when-let* ((end (my/org-roam-ui--json-object-end text)))
+         (json-parse-string (substring text 0 end) :object-type 'alist)))))
+
+  (defun org-roam-ui--ws-on-message (_ws frame)
+    "Handle websocket FRAME from org-roam-ui without failing on trailing bytes."
+    (let* ((text (websocket-frame-text frame))
+           (msg (my/org-roam-ui--parse-message text))
+           (command (alist-get 'command msg))
+           (data (alist-get 'data msg)))
+      (cond ((string= command "open")
+             (org-roam-ui--on-msg-open-node data))
+            ((string= command "delete")
+             (org-roam-ui--on-msg-delete-node data))
+            ((string= command "create")
+             (org-roam-ui--on-msg-create-node data))
+            (t
+             (message "Ignored malformed org-roam-ui websocket message: %S"
+                      text))))))
 
 (provide 'init-org-roam)
 ;;; init-org-roam.el ends here
