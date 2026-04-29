@@ -1,7 +1,9 @@
 # -*- mode: snippet -*-
-# name: qu
+# type: command
+# name: quote block
 # key: qu
 # --
-#+begin_quote
-注意：这是一个特殊的说明
-#+end_quote
+(let ((text (or yas-selected-text ""))
+      (beg (point)))
+  (insert "#+begin_quote\n" text "\n#+end_quote")
+  (goto-char (+ beg 14 (length text))))
