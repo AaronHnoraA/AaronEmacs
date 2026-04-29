@@ -10,6 +10,7 @@
 (require 'cl-lib)
 (require 'org-id)
 (require 'org-element)
+(require 'seq)
 (require 'subr-x)
 
 (defgroup my/org-utility nil
@@ -29,11 +30,14 @@
 (defvar org-download-image-dir)
 (defvar org-download-timestamp)
 (defvar org-roam-directory)
-(defvar my/org-reference--minibuffer-candidates nil)
+(defvar my/org-reference--cache (make-hash-table :test 'equal)
+  "Target cache: (file . mtime-float) → candidate plist list.")
+
+(defvar my/org-reference--minibuffer-lookup nil
+  "Lookup table used while reading Org reference targets.")
 
 (declare-function consult--jump-preview "consult" ())
 (declare-function consult--read "consult" (table &rest options))
-(declare-function consult--lookup-prop "consult" (prop candidates input))
 (declare-function org-download-clipboard "org-download")
 (declare-function org-download--dir "org-download")
 (declare-function org-download-screenshot "org-download")
@@ -287,6 +291,50 @@ the user to fill in."
         (truncate-string-to-width single-line width nil nil "...")
       single-line)))
 
+(defun my/org-reference--path-safe (s)
+  "Replace '/' in S with U+2044 FRACTION SLASH so it is safe in path candidates."
+  (string-replace "/" "⁄" (or s "")))
+
+(defun my/org-reference--extract-context-lines (start limit n)
+  "Return up to N non-empty, non-structural lines between START and LIMIT.
+Lines that look like headings, property drawers, or #+keywords are skipped."
+  (save-excursion
+    (goto-char start)
+    (let (lines)
+      (while (and (< (point) limit) (not (eobp)) (< (length lines) n))
+        (let ((line (string-trim
+                     (buffer-substring-no-properties
+                      (line-beginning-position)
+                      (min (line-end-position) limit)))))
+          (unless (or (string-empty-p line)
+                      (string-match-p "\\`[ \t]*\\*+" line)
+                      (string-match-p "\\`[ \t]*#\\+" line)
+                      (string-match-p "\\`[ \t]*:[[:upper:]_]+:" line))
+            (push line lines)))
+        (forward-line 1))
+      (when lines
+        (my/org-reference--compact-text
+         (mapconcat #'identity (nreverse lines) " · ")
+         80)))))
+
+(defun my/org-reference--context-start-pos (start limit)
+  "Return first useful raw text position between START and LIMIT."
+  (save-excursion
+    (goto-char start)
+    (catch 'pos
+      (while (and (< (point) limit) (not (eobp)))
+        (let ((line (string-trim
+                     (buffer-substring-no-properties
+                      (line-beginning-position)
+                      (min (line-end-position) limit)))))
+          (unless (or (string-empty-p line)
+                      (string-match-p "\\`[ \t]*\\*+" line)
+                      (string-match-p "\\`[ \t]*#\\+" line)
+                      (string-match-p "\\`[ \t]*:[[:upper:]_]+:" line))
+            (throw 'pos (line-beginning-position))))
+        (forward-line 1))
+      start)))
+
 (defun my/org-reference--nearby-preview (pos)
   "Return a compact context preview near POS in the current buffer."
   (save-excursion
@@ -374,17 +422,25 @@ the user to fill in."
                (label (format "%s block" type)))
           (when (re-search-forward
                  (format "^[ \t]*#\\+end_%s\\b" (regexp-quote type)) nil t)
-            (push (list :kind 'scope-block
-                        :target nil
-                        :label label
-                        :line (line-number-at-pos begin)
-                        :pos begin
-                        :begin begin
-                        :end (line-end-position)
-                        :block type
-                        :preview (my/org-reference--compact-text
-                                  (format "#+begin_%s" type)))
-                  scopes)))))
+            (let* ((block-end (line-end-position))
+                   (content-start (save-excursion
+                                    (goto-char begin)
+                                    (forward-line 1)
+                                    (point)))
+                   (ctx (my/org-reference--extract-context-lines
+                         content-start (min (+ content-start 600) block-end) 3)))
+              (push (list :kind 'scope-block
+                          :target nil
+                          :label label
+                          :line (line-number-at-pos begin)
+                          :pos begin
+                          :begin begin
+                          :end block-end
+                          :block type
+                          :context ctx
+                          :preview (my/org-reference--compact-text
+                                    (format "#+begin_%s" type)))
+                    scopes))))))
     (nreverse scopes)))
 
 (defun my/org-reference--latex-comment-line-p (pos)
@@ -410,18 +466,23 @@ the user to fill in."
                     (id (org-element-property :ID headline))
                     (custom-id (org-element-property :CUSTOM_ID headline))
                     (level (org-element-property :level headline)))
-               (push (list :kind 'scope-heading
-                           :target raw-title
-                           :label raw-title
-                           :line (line-number-at-pos begin)
-                           :pos begin
-                           :begin begin
-                           :end end
-                           :level level
-                           :preview (format "%s %s"
-                                            (make-string (max 0 (1- level)) ?*)
-                                            raw-title))
-                     candidates)
+               (let* ((cb (org-element-property :contents-begin headline))
+                      (ctx (when (and cb (< cb end))
+                             (my/org-reference--extract-context-lines
+                              cb (min (+ cb 600) end) 3))))
+                 (push (list :kind 'scope-heading
+                             :target raw-title
+                             :label raw-title
+                             :line (line-number-at-pos begin)
+                             :pos begin
+                             :begin begin
+                             :end end
+                             :level level
+                             :context ctx
+                             :preview (format "%s %s"
+                                              (make-string (max 0 (1- level)) ?*)
+                                              raw-title))
+                       candidates))
                (when id
                  (push (list :kind 'id
                              :target id
@@ -505,6 +566,21 @@ the user to fill in."
                 :preview (format "File: %s" (file-name-nondirectory file)))
           targets)))
 
+(defun my/org-reference--file-targets-cached (file)
+  "Return target plists for FILE, re-scanning only when the mtime changes."
+  (let* ((mtime (float-time
+                 (file-attribute-modification-time (file-attributes file))))
+         (key (cons file mtime))
+         (hit (gethash key my/org-reference--cache)))
+    (or hit
+        (let ((targets (my/org-reference--file-targets file)))
+          (maphash (lambda (k _)
+                     (when (and (consp k) (equal (car k) file))
+                       (remhash k my/org-reference--cache)))
+                   my/org-reference--cache)
+          (puthash key targets my/org-reference--cache)
+          targets))))
+
 (defun my/org-reference--candidate-in-scope-p (candidate scope)
   "Return non-nil when CANDIDATE is inside SCOPE."
   (let ((pos (plist-get candidate :pos))
@@ -540,155 +616,327 @@ the user to fill in."
   "Return non-nil when TARGET can be drilled into."
   (memq (plist-get target :kind) '(scope-heading scope-block)))
 
-(defun my/org-reference--target-candidates (file &optional targets)
-  "Return propertized completion candidates for reference targets in FILE.
-When TARGETS is non-nil, use that candidate plist list instead of scanning FILE."
-  (mapcar
-   (lambda (target)
-     (propertize
-      (let ((kind (plist-get target :kind)))
-        (cond
-         ((eq kind 'formula)
-            (format "%-9s %5s  %-28s  %-12s  %-64s  %s"
-                    kind
-                    (plist-get target :line)
-                    (my/org-reference--compact-text
-                     (or (plist-get target :scope) "")
-                     28)
-                    (my/org-reference--compact-text
-                     (or (plist-get target :block) "")
-                     12)
-                    (my/org-reference--compact-text
-                     (or (plist-get target :preview) "")
-                     64)
-                    (or (plist-get target :target) "")))
-         ((memq kind '(scope-heading scope-block))
-          (format "%-9s %5s  %-40s  %s"
-                  (if (eq kind 'scope-heading) 'heading 'block)
-                  (plist-get target :line)
-                  (my/org-reference--compact-text
-                   (or (plist-get target :label) "")
-                   40)
-                  "TAB to enter"))
-         (t
-          (format "%-9s %5s  %-40s  %s"
-                  kind
-                  (plist-get target :line)
-                  (my/org-reference--compact-text
-                   (or (plist-get target :label) "")
-                   40)
-                  (my/org-reference--compact-text
-                   (or (plist-get target :preview) "")
-                   90)))))
-      'my/org-reference-target target))
-   (or targets (my/org-reference--file-targets file))))
+;; ── path-style hierarchical navigation ──────────────────────────────────────
 
-(defun my/org-reference--target-preview-state (file)
-  "Return Consult preview state for candidates in FILE."
+(defun my/org-reference--candidate-name (c)
+  "Return the path-segment name for candidate C.
+Scope candidates get a trailing '/' like directories.
+All names are sanitized so literal '/' in headings or previews does not
+confuse path splitting; '/' is replaced with U+2044 FRACTION SLASH."
+  (pcase (plist-get c :kind)
+    ('file
+     (or (plist-get c :label) ""))
+    ('scope-heading
+     (concat (my/org-reference--path-safe (plist-get c :label)) "/"))
+    ('scope-block
+     (concat (my/org-reference--path-safe (plist-get c :label)) "/"))
+    ('id
+     (concat "id:" (my/org-reference--path-safe (or (plist-get c :target) ""))))
+    ('custom-id
+     (concat "#" (my/org-reference--path-safe (or (plist-get c :target) ""))))
+    ('formula
+     (my/org-reference--path-safe (or (plist-get c :target) "")))
+    (_
+     (my/org-reference--path-safe
+      (or (plist-get c :target) (plist-get c :label) "")))))
+
+(defun my/org-reference--path-candidates-at (all scope-parts)
+  "Return candidates at the level reached by SCOPE-PARTS from ALL.
+Returns nil when no matching scope is found.
+Matching uses the path-safe label (with '/' replaced by U+2044) since
+that is what candidate-name emits for scope entries."
+  (if (null scope-parts)
+      all
+    (let* ((head (car scope-parts))
+           (scope (seq-find
+                   (lambda (c)
+                     (and (my/org-reference--scope-candidate-p c)
+                          (string= (my/org-reference--path-safe (plist-get c :label))
+                                   head)))
+                   all)))
+      (when scope
+        (my/org-reference--path-candidates-at
+         (my/org-reference--filter-scope-children all scope)
+         (cdr scope-parts))))))
+
+(defun my/org-reference--minibuffer-candidate ()
+  "Return the currently selected minibuffer candidate string."
+  (cond
+   ((and (fboundp 'vertico--candidate)
+         (vertico--candidate))
+    (vertico--candidate))
+   (t
+    (minibuffer-contents))))
+
+(defun my/org-reference--minibuffer-target ()
+  "Return the target plist for the current minibuffer selection."
+  (let* ((candidate (my/org-reference--minibuffer-candidate))
+         (plain (and candidate (substring-no-properties candidate)))
+         (full (and candidate
+                    (get-text-property 0 'my/org-reference-full candidate))))
+    (or (and candidate
+             (get-text-property 0 'my/org-reference-target candidate))
+        (and full my/org-reference--minibuffer-lookup
+             (gethash full my/org-reference--minibuffer-lookup))
+        (and plain my/org-reference--minibuffer-lookup
+             (gethash plain my/org-reference--minibuffer-lookup)))))
+
+(defun my/org-reference--confirm-minibuffer-target ()
+  "Confirm the currently selected reference target."
+  (interactive)
+  (let ((target (my/org-reference--minibuffer-target)))
+    (if target
+        (throw 'my/org-reference-select target)
+      (user-error "No target selected"))))
+
+(defun my/org-reference--drill-minibuffer-target ()
+  "Enter the currently selected scope target."
+  (interactive)
+  (let ((target (my/org-reference--minibuffer-target)))
+    (cond
+     ((my/org-reference--scope-candidate-p target)
+      (throw 'my/org-reference-drill (cons 'drill target)))
+     (target
+      (message "This candidate is not a scope"))
+     (t
+      (message "No target selected")))))
+
+(defun my/org-reference--target-read-keymap ()
+  "Return minibuffer keymap for reference target selection."
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'my/org-reference--confirm-minibuffer-target)
+    (define-key map (kbd "<return>") #'my/org-reference--confirm-minibuffer-target)
+    (define-key map (kbd "C-m") #'my/org-reference--confirm-minibuffer-target)
+    (define-key map (kbd "TAB") #'my/org-reference--drill-minibuffer-target)
+    (define-key map (kbd "<tab>") #'my/org-reference--drill-minibuffer-target)
+    (define-key map (kbd "C-i") #'my/org-reference--drill-minibuffer-target)
+    map))
+
+(defun my/org-reference--lookup-selection (selected candidates lookup)
+  "Return target plist for SELECTED using CANDIDATES and LOOKUP.
+When SELECTED is only partial minibuffer input, fall back to the first
+currently available candidate.  This makes RET confirm the visible
+selection instead of asking for an exact match."
+  (let* ((plain (and selected (substring-no-properties selected)))
+         (full (and selected
+                    (get-text-property 0 'my/org-reference-full selected)))
+         (candidate (or (and selected
+                             (get-text-property 0
+                                                'my/org-reference-target
+                                                selected))
+                        (and full (gethash full lookup))
+                        (and plain (gethash plain lookup)))))
+    (or candidate
+        (seq-some
+         (lambda (cand)
+           (let ((plain-cand (substring-no-properties cand))
+                 (full-cand (get-text-property 0
+                                               'my/org-reference-full
+                                               cand)))
+             (or (get-text-property 0 'my/org-reference-target cand)
+                 (and full-cand (gethash full-cand lookup))
+                 (gethash plain-cand lookup))))
+         candidates))))
+
+(defun my/org-reference--make-path-table (all-candidates)
+  "Return (table-fn . lookup-hash) for hierarchical path-style completion.
+
+Scope candidates (headings, blocks) appear with a trailing '/' and act as
+directories.  Press TAB on a scope to navigate into it; press RET to select
+the current candidate.
+
+The table emits an annotation-function that shows formula LaTeX content,
+heading/block content, or nearby raw text alongside each candidate.
+The hash table maps plain completion strings → candidate plists for
+reliable lookup regardless of how the UI handles text properties."
+  (let* ((lookup (make-hash-table :test 'equal))
+         (annotate
+          (lambda (cand)
+            (when-let* ((plain (substring-no-properties cand))
+                        (full (get-text-property 0 'my/org-reference-full cand))
+                        (target (or (get-text-property 0 'my/org-reference-target cand)
+                                    (and full (gethash full lookup))
+                                    (gethash plain lookup)))
+                        (kind   (plist-get target :kind)))
+              (let* ((context (plist-get target :context))
+                     (preview (plist-get target :preview))
+                     (label   (plist-get target :label))
+                     (id      (plist-get target :target))
+                     (text
+                      (pcase kind
+                        ('file nil)
+                        ;; Scopes: show content lines below the heading/block.
+                        ((or 'scope-heading 'scope-block)
+                         (or (and context (concat "  " context))
+                             (and label
+                                  (concat "  "
+                                          (my/org-reference--compact-text label 60)))))
+                        ;; IDs / custom-IDs: show the heading label.
+                        ('id
+                         (and label
+                              (concat "  "
+                                      (my/org-reference--compact-text label 60))))
+                        ('custom-id
+                         (and label
+                              (concat "  "
+                                      (my/org-reference--compact-text label 60))))
+                        ;; Formulas: candidate name is the target ID; annotation shows LaTeX.
+                        ('formula
+                         (and preview
+                              (concat "  "
+                                      (my/org-reference--compact-text preview 72))))
+                        ;; Bare targets: show the nearby context preview.
+                        (_
+                         (and preview
+                              (concat "  "
+                                      (my/org-reference--compact-text preview 72)))))))
+                (when text
+                  (propertize text 'face 'completions-annotations)))))))
+    (cons
+     (lambda (string pred action)
+       (cond
+        ((eq action 'metadata)
+         `(metadata (category . my-org-target) (annotation-function . ,annotate)))
+        ;; Tell vertico/icomplete which portion of the string is the
+        ;; current segment so it only displays that part.
+        ((eq (car-safe action) 'boundaries)
+         (let* ((slash (string-match-p "/[^/]*\\'" string))
+                (left  (if slash (1+ slash) 0))
+                (right (length (cdr action))))
+           `(boundaries ,left . ,right)))
+        (t
+         (let* ((slash  (string-match-p "/[^/]*\\'" string))
+                (prefix (if slash (substring string 0 (1+ slash)) ""))
+                (current (if slash (substring string (1+ slash)) string))
+                (parts  (and (not (string-empty-p prefix))
+                             (split-string (string-remove-suffix "/" prefix)
+                                           "/" t)))
+                (level  (or (my/org-reference--path-candidates-at
+                             all-candidates parts)
+                            '()))
+                (completions
+                 (mapcar (lambda (c)
+                           (let* ((segment (my/org-reference--candidate-name c))
+                                  (full (concat prefix segment)))
+                             (puthash segment c lookup)
+                             (puthash full c lookup)
+                             (propertize segment
+                                         'my/org-reference-target c
+                                         'my/org-reference-full full)))
+                         level)))
+           (complete-with-action action completions current pred)))))
+     lookup)))
+
+(defun my/org-reference--preview-pos (target buf)
+  "Return the best buffer position to preview TARGET in BUF.
+For formula targets, seeks back to the opening \\[ delimiter.
+For bare targets and blocks, skips back past blank/target-only lines."
+  (let ((pos  (plist-get target :pos))
+        (kind (plist-get target :kind)))
+    (with-current-buffer buf
+      (save-excursion
+        (pcase kind
+          ('formula
+           (goto-char pos)
+           (if (search-backward "\\[" nil t)
+               (line-beginning-position)
+             pos))
+          ('scope-heading
+           (let ((begin (or (plist-get target :begin) pos))
+                 (end (or (plist-get target :end) (point-max))))
+             (goto-char begin)
+             (forward-line 1)
+             (my/org-reference--context-start-pos (point) end)))
+          ('scope-block
+           (let ((begin (or (plist-get target :begin) pos))
+                 (end (or (plist-get target :end) (point-max))))
+             (goto-char begin)
+             (forward-line 1)
+             (my/org-reference--context-start-pos (point) end)))
+          ('target
+           (goto-char pos)
+           (forward-line -1)
+           (while (and (not (bobp))
+                       (looking-at-p "[ \t]*\\(?:<<[^>\n]+>>[ \t]*\\)?$"))
+             (forward-line -1))
+           (line-beginning-position))
+          (_ pos))))))
+
+(defun my/org-reference--target-preview-state (file lookup)
+  "Return a Consult preview state that jumps to the best target position in FILE.
+LOOKUP maps plain completion strings to target plists."
   (if (not (fboundp 'consult--jump-preview))
       (lambda (&rest _))
     (require 'consult)
     (let ((preview (consult--jump-preview)))
       (lambda (action cand)
-        (let* ((target (and cand (get-text-property 0 'my/org-reference-target cand)))
-               (pos (plist-get target :pos)))
-          (when (and target pos)
-            (funcall preview action
-                     (and (eq action 'preview)
-                          (let ((marker (make-marker)))
-                            (set-marker marker pos (find-file-noselect file))
-                            marker)))))))))
-
-(defun my/org-reference--minibuffer-selected-target ()
-  "Return the current target plist selected in the minibuffer."
-  (let* ((selected (cond
-                    ((fboundp 'vertico--candidate)
-                     (vertico--candidate))
-                    (t
-                     (minibuffer-contents))))
-         (target (and selected
-                      (get-text-property 0 'my/org-reference-target selected))))
-    (or target
-        (and selected
-             (get-text-property
-              0 'my/org-reference-target
-              (seq-find (lambda (candidate)
-                          (string= (substring-no-properties candidate)
-                                   (substring-no-properties selected)))
-                        my/org-reference--minibuffer-candidates))))))
-
-(defun my/org-reference--drill-minibuffer ()
-  "Enter the selected heading/block scope from the reference minibuffer."
-  (interactive)
-  (let ((target (my/org-reference--minibuffer-selected-target)))
-    (cond
-     ((my/org-reference--scope-candidate-p target)
-      (throw 'my/org-reference-drill target))
-     (target
-      (message "This candidate is a target; press RET to insert it"))
-     (t
-      (message "No target selected")))))
-
-(defun my/org-reference--target-read-keymap ()
-  "Return keymap used by the target browser."
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "TAB") #'my/org-reference--drill-minibuffer)
-    (define-key map (kbd "<tab>") #'my/org-reference--drill-minibuffer)
-    map))
-
-(defun my/org-reference--read-target-from-candidates (file candidates prompt)
-  "Read one target from CANDIDATES in FILE using PROMPT."
-  (let ((formatted (my/org-reference--target-candidates file candidates)))
-    (unless formatted
-      (user-error "No reference targets found in this scope"))
-    (let ((my/org-reference--minibuffer-candidates formatted))
-      (if (fboundp 'consult--read)
-          (progn
-            (require 'consult)
-            (consult--read formatted
-                           :prompt prompt
-                           :require-match t
-                           :state (my/org-reference--target-preview-state file)
-                           :preview-key '(:debounce 0.15 any)
-                           :keymap (my/org-reference--target-read-keymap)
-                           :lookup (apply-partially
-                                    #'consult--lookup-prop
-                                    'my/org-reference-target)))
-        (let ((choice (completing-read prompt formatted nil t)))
-          (or (get-text-property 0 'my/org-reference-target choice)
-              (user-error "No target selected")))))))
+        (when cand
+          (let* ((plain (substring-no-properties cand))
+                 (full (get-text-property 0 'my/org-reference-full cand))
+                 (target (or (get-text-property 0 'my/org-reference-target cand)
+                             (and full (gethash full lookup))
+                             (gethash plain lookup)))
+                 (pos    (and target (plist-get target :pos))))
+            (when (and pos (> pos 0))
+              (condition-case nil
+                  (let* ((buf  (find-file-noselect file))
+                         (ppos (my/org-reference--preview-pos target buf)))
+                    (funcall preview action
+                             (and (eq action 'preview)
+                                  (let ((m (make-marker)))
+                                    (set-marker m ppos buf)
+                                    m))))
+                (error nil)))))))))
 
 (defun my/org-reference--read-target (file)
-  "Read one reference target from FILE."
-  (let* ((all-candidates (my/org-reference--file-targets file))
-         (current all-candidates)
-         (scope-labels nil))
-    (unless all-candidates
+  "Read a reference target from FILE using hierarchical path-style completion.
+
+The prompt shows the current path, e.g. \"Target: heading/subheading/\".
+Navigate into the selected scope with TAB.  RET confirms the selected
+candidate, including headings and blocks."
+  (let* ((all  (my/org-reference--file-targets-cached file))
+         (pair (my/org-reference--make-path-table all))
+         (table  (car pair))
+         (lookup (cdr pair)))
+    (unless all
       (user-error "No reference targets found in %s" file))
     (catch 'done
-      (while t
-        (let* ((prompt (if scope-labels
-                           (format "Target [%s]: "
-                                   (mapconcat #'identity
-                                              (reverse scope-labels)
-                                              " / "))
-                         "Target: "))
-               (choice
-                (catch 'my/org-reference-drill
-                  (my/org-reference--read-target-from-candidates
-                   file current prompt))))
-          (if (my/org-reference--scope-candidate-p choice)
-              (let ((children (my/org-reference--filter-scope-children
-                               all-candidates choice)))
-                (unless children
-                  (user-error "No targets under %s"
-                              (plist-get choice :label)))
-                (setq current children
-                      scope-labels (cons (plist-get choice :label)
-                                         scope-labels)))
-            (throw 'done
-                   (or (and (listp choice) choice)
-                       (user-error "No target selected")))))))))
+      (let ((prefix ""))
+        (while t
+          (let* ((my/org-reference--minibuffer-lookup lookup)
+                 (raw
+                  (catch 'my/org-reference-select
+                    (catch 'my/org-reference-drill
+                      (let ((selected
+                             (if (fboundp 'consult--read)
+                                 (progn
+                                   (require 'consult)
+                                   (consult--read
+                                    table
+                                  :prompt      "Target: "
+                                  :initial     prefix
+                                  :require-match nil
+                                  :state       (my/org-reference--target-preview-state
+                                                file lookup)
+                                  :preview-key '(:debounce 0.15 any)
+                                  :keymap      (my/org-reference--target-read-keymap)
+                                  :lookup      (lambda (selected candidates &rest _)
+                                                 (my/org-reference--lookup-selection
+                                                  selected candidates lookup))))
+                               (let ((choice (completing-read "Target: " table nil nil prefix)))
+                                 (my/org-reference--lookup-selection
+                                  choice
+                                  (all-completions choice table)
+                                  lookup)))))
+                        selected))))
+                 (drilled (and (consp raw) (eq (car raw) 'drill)))
+                 (target (or (and drilled (cdr raw))
+                             (and (listp raw) (plist-get raw :kind) raw)
+                             (user-error "No target selected"))))
+            (if (and drilled (my/org-reference--scope-candidate-p target))
+                (setq prefix (concat prefix
+                                     (my/org-reference--candidate-name target)))
+              (throw 'done target))))))))
 
 (defun my/org-reference--relative-file (file)
   "Return FILE path relative to the current buffer when possible."
