@@ -296,8 +296,8 @@ lighter without changing table behavior once a table exists."
   
   ;; 4. 时间戳美化
   (org-modern-timestamp t)
-  (org-modern-internal-target '(" ⟦" t "⟧ "))
-  (org-modern-radio-target '(" ⟪" t "⟫ "))
+  (org-modern-internal-target '(" #" t ""))
+  (org-modern-radio-target '(" @" t ""))
   
   ;; 5. 关键词美化 (集成你的图标)
   (org-modern-keyword
@@ -783,15 +783,19 @@ for the cache update so we never compute it twice in one redisplay."
                                 :box `(:line-width 3 :color ,(my/org-blend-colors overlay1 base-bg 0.11))))
           (when (facep 'org-modern-internal-target)
             (set-face-attribute 'org-modern-internal-target nil
+                                :inherit nil
                                 :background 'unspecified
-                                :foreground lavender
-                                :weight strong-weight
+                                :foreground overlay1
+                                :height 0.82
+                                :weight 'normal
                                 :box nil))
           (when (facep 'org-modern-radio-target)
             (set-face-attribute 'org-modern-radio-target nil
+                                :inherit nil
                                 :background 'unspecified
-                                :foreground mauve
-                                :weight strong-weight
+                                :foreground overlay1
+                                :height 0.82
+                                :weight 'normal
                                 :box nil))
           (when (facep 'org-modern-horizontal-rule)
             (set-face-attribute 'org-modern-horizontal-rule nil
