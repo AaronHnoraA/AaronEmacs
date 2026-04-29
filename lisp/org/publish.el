@@ -87,8 +87,10 @@ normally, so removing that paragraph only hides local Org metadata."
 
 (defun my/site-org-source-file-p (file)
   "Return non-nil when FILE is an Org source file."
-  (member (downcase (or (file-name-extension file) ""))
-          my/site-org-file-extensions))
+  (let ((name (downcase (or (file-name-nondirectory file) ""))))
+    (seq-some (lambda (extension)
+                (string-suffix-p (concat "." extension) name))
+              my/site-org-file-extensions)))
 
 (defun my/site-normalize-id (id)
   "Return canonical lookup form for Org ID string ID."
@@ -151,6 +153,28 @@ normally, so removing that paragraph only hides local Org metadata."
               (push id ids))))))
     (delete-dups (nreverse ids))))
 
+(defun my/site-file-keyword (file keyword)
+  "Return FILE keyword value for KEYWORD, or nil."
+  (when (and file (file-regular-p file))
+    (with-temp-buffer
+      (insert-file-contents file nil 0 4096)
+      (let ((case-fold-search t))
+        (goto-char (point-min))
+        (when (re-search-forward
+               (format "^[ \t]*#\\+%s:[ \t]*\\(.+\\)$"
+                       (regexp-quote keyword))
+               nil t)
+          (string-trim (match-string 1)))))))
+
+(defun my/site-clean-date-keyword (date)
+  "Return a compact readable date string from Org DATE keyword."
+  (let ((text (string-trim (or date ""))))
+    (cond
+     ((string-match "\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\)" text)
+      (match-string 1 text))
+     ((string-empty-p text) "Undated")
+     (t text))))
+
 (defun my/site-export-source-file (info)
   "Return the source Org file from export INFO."
   (or (plist-get info :input-file)
@@ -174,21 +198,25 @@ normally, so removing that paragraph only hides local Org metadata."
         (or (my/site-export-source-file info)
             (expand-file-name "publish.org" default-directory)))))))
 
-(defun my/site-roam-asset-relative-path (source-file image-file)
-  "Return a stable copied asset path for IMAGE-FILE linked from SOURCE-FILE."
+(defun my/site-asset-relative-path (source-file asset-file info)
+  "Return a stable copied asset path for ASSET-FILE linked from SOURCE-FILE."
   (let* ((source-dir (and source-file (file-name-directory source-file)))
-         (local-rel (and source-dir (file-relative-name image-file source-dir))))
+         (root (file-truename
+                (or my/site-publish-root
+                    (plist-get info :base-directory)
+                    (file-name-directory load-file-name))))
+         (local-rel (and source-dir (file-relative-name asset-file source-dir))))
     (if (and local-rel
              (not (string-prefix-p "../" local-rel))
              (not (string= local-rel "..")))
         local-rel
-      (file-relative-name image-file (file-truename my/site-roam-directory)))))
+      (file-relative-name asset-file root))))
 
-(defun my/site-copy-roam-asset (asset-file info)
-  "Copy org-roam ASSET-FILE for HTML export described by INFO."
+(defun my/site-copy-local-asset (asset-file info)
+  "Copy local ASSET-FILE for HTML export described by INFO."
   (let* ((source-file (my/site-export-source-file info))
          (output-dir (my/site-export-output-directory info))
-         (asset-rel (my/site-roam-asset-relative-path source-file asset-file))
+         (asset-rel (my/site-asset-relative-path source-file asset-file info))
          (target-file (expand-file-name
                        asset-rel
                        (expand-file-name my/site-roam-html-asset-directory
@@ -205,24 +233,25 @@ normally, so removing that paragraph only hides local Org metadata."
       (copy-file asset-file target-file t t))
     (file-relative-name target-file output-dir)))
 
-(defun my/site-copy-roam-file-links (tree backend info)
-  "Copy org-roam local file links and rewrite them for HTML export TREE."
-  (when (and (org-export-derived-backend-p backend 'html)
-             (my/site-file-in-directory-p
-              (my/site-export-source-file info)
-              my/site-roam-directory))
+(defun my/site-copy-local-file-links (tree backend info)
+  "Copy local file links and rewrite them for HTML export TREE."
+  (when (org-export-derived-backend-p backend 'html)
     (org-element-map tree 'link
       (lambda (link)
         (when (string= (org-element-property :type link) "file")
           (let* ((path (org-element-property :path link))
-                 (asset-file (and path (my/site-resolve-file-link path info))))
+                 (asset-file (and path (my/site-resolve-file-link path info)))
+                 (root (file-truename
+                        (or my/site-publish-root
+                            (plist-get info :base-directory)
+                            (file-name-directory load-file-name)))))
             (when (and asset-file
                        (file-regular-p asset-file)
                        (not (my/site-org-source-file-p asset-file))
-                       (my/site-file-in-directory-p asset-file my/site-roam-directory))
+                       (my/site-file-in-directory-p asset-file root))
               (org-element-put-property
                link :path
-               (my/site-copy-roam-asset asset-file info))))))))
+               (my/site-copy-local-asset asset-file info))))))))
   tree)
 
 (defun my/site-html-link-a (orig link desc info)
@@ -271,13 +300,75 @@ normally, so removing that paragraph only hides local Org metadata."
          (concat "\\1\n" anchors)
          output t)))))
 
+(defun my/site-html-attribute-escape (value)
+  "Escape VALUE for use in an HTML attribute."
+  (replace-regexp-in-string
+   "\"" "&quot;"
+   (replace-regexp-in-string
+    "<" "&lt;"
+    (replace-regexp-in-string
+     ">" "&gt;"
+     (replace-regexp-in-string "&" "&amp;" (or value "") t t)
+     t t)
+    t t)
+   t t))
+
+(defun my/site-note-body-attributes (info)
+  "Return final note page body attributes for export INFO."
+  (let* ((source-file (my/site-export-source-file info))
+         (title (or (my/site-file-keyword source-file "title")
+                    (and source-file (file-name-base source-file))
+                    "Working Note"))
+         (date (my/site-clean-date-keyword
+                (my/site-file-keyword source-file "date")))
+         (root (file-truename
+                (or my/site-publish-root
+                    (plist-get info :base-directory)
+                    (file-name-directory load-file-name))))
+         (rel (and source-file (file-relative-name source-file root)))
+         (group (if (and rel (string-prefix-p "roam/" rel))
+                    (or (cadr (split-string rel "/" t)) "Note")
+                  "Note")))
+    (format "class=\"note-page\" data-note-title=\"%s\" data-note-group=\"%s\" data-note-date=\"%s\""
+            (my/site-html-attribute-escape (string-trim title))
+            (my/site-html-attribute-escape group)
+            (my/site-html-attribute-escape (string-trim date)))))
+
+(defun my/site-apply-note-body-attributes (output backend info)
+  "Make note CSS apply before JavaScript enhancement runs."
+  (if (not (org-export-derived-backend-p backend 'html))
+      output
+    (replace-regexp-in-string
+     "<body[^>]*>"
+     (concat "<body " (my/site-note-body-attributes info) ">")
+     output t t)))
+
+(defun my/site-apply-source-title (output backend info)
+  "Keep the visible H1 tied to the current source file title."
+  (if (not (org-export-derived-backend-p backend 'html))
+      output
+    (let* ((source-file (my/site-export-source-file info))
+           (title (or (my/site-file-keyword source-file "title")
+                      (and source-file (file-name-base source-file)))))
+      (if (not title)
+          output
+        (replace-regexp-in-string
+         "<h1 class=\"title\">.*?</h1>"
+         (format "<h1 class=\"title\">%s</h1>"
+                 (org-html-encode-plain-text title))
+         output t t)))))
+
 (dolist (filter '(my/site-remove-leaked-id-paragraphs
                   my/site-remove-managed-blocks
-                  my/site-copy-roam-file-links))
+                  my/site-copy-local-file-links))
   (add-to-list 'org-export-filter-parse-tree-functions filter))
 
 (add-to-list 'org-export-filter-final-output-functions
              #'my/site-add-hidden-id-anchors)
+(add-to-list 'org-export-filter-final-output-functions
+             #'my/site-apply-note-body-attributes)
+(add-to-list 'org-export-filter-final-output-functions
+             #'my/site-apply-source-title)
 
 (advice-add 'org-html-link :around #'my/site-html-link-a)
 
@@ -313,8 +404,6 @@ normally, so removing that paragraph only hides local Org metadata."
        (setq export-plist (plist-put export-plist :html-html5-fancy t))
        (setq export-plist (plist-put export-plist :html-head-include-default-style nil))
        (setq export-plist (plist-put export-plist :html-postamble nil))
-       (setq export-plist (plist-put export-plist :html-body-attributes
-                                     "class=\"note-page\""))
        (setq export-plist (plist-put export-plist :with-author nil))
        (setq export-plist (plist-put export-plist :with-creator nil))
        (setq export-plist (plist-put export-plist :with-date nil))

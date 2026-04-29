@@ -7,7 +7,9 @@
 ;;; Code:
 
 (require 'init-org-core)
+(require 'cl-lib)
 (require 'org-id)
+(require 'org-element)
 (require 'subr-x)
 
 (defgroup my/org-utility nil
@@ -26,10 +28,18 @@
 
 (defvar org-download-image-dir)
 (defvar org-download-timestamp)
+(defvar org-roam-directory)
 
+(declare-function consult--jump-preview "consult" ())
+(declare-function consult--read "consult" (table &rest options))
+(declare-function consult--lookup-prop "consult" (prop candidates input))
 (declare-function org-download-clipboard "org-download")
 (declare-function org-download--dir "org-download")
 (declare-function org-download-screenshot "org-download")
+(declare-function org-roam-node-file "org-roam-node" (node))
+(declare-function org-roam-node-id "org-roam-node" (node))
+(declare-function org-roam-node-read "org-roam-node" (&optional initial-input filter-fn sort-fn require-match prompt))
+(declare-function org-roam-node-title "org-roam-node" (node))
 
 (defun my/org-reference--display-math-bounds ()
   "Return bounds of the surrounding Org \\[...\\] formula, or nil."
@@ -231,6 +241,292 @@ the user to fill in."
       (user-error "Target is empty"))
     (insert (format "[[%s]]" target))))
 
+(defun my/org-reference--read-source ()
+  "Read a source file or Org Roam node for reference insertion."
+  (let* ((choice (completing-read "Reference from: "
+                                  '("Org Roam node" "File path")
+                                  nil t))
+         (roam-p (string= choice "Org Roam node")))
+    (if roam-p
+        (progn
+          (require 'org-roam)
+          (let ((node (org-roam-node-read nil nil nil t "Roam node: ")))
+            (list :kind 'roam
+                  :file (org-roam-node-file node)
+                  :id (org-roam-node-id node)
+                  :title (org-roam-node-title node))))
+      (let ((file (read-file-name "Reference file: "
+                                  default-directory
+                                  nil t)))
+        (list :kind 'file
+              :file (expand-file-name file)
+              :title (file-name-base file))))))
+
+(defun my/org-reference--candidate-line ()
+  "Return a compact preview line at point."
+  (string-trim
+   (buffer-substring-no-properties
+    (line-beginning-position)
+    (line-end-position))))
+
+(defun my/org-reference--compact-text (text &optional width)
+  "Return TEXT as one compact preview line, truncated to WIDTH."
+  (let* ((single-line (replace-regexp-in-string
+                       "[ \t\n\r]+" " "
+                       (string-trim (or text ""))))
+         (width (or width 96)))
+    (if (> (string-width single-line) width)
+        (truncate-string-to-width single-line width nil nil "...")
+      single-line)))
+
+(defun my/org-reference--nearby-preview (pos)
+  "Return a compact context preview near POS in the current buffer."
+  (save-excursion
+    (goto-char pos)
+    (let ((line (my/org-reference--candidate-line)))
+      (cond
+       ((string-match-p "\\\\][ \t]*<<[^>\n]+>>[ \t]*\\'" line)
+        (let ((end (line-beginning-position))
+              begin)
+          (when (search-backward "\\[" nil t)
+            (setq begin (point)))
+          (my/org-reference--compact-text
+           (if begin
+               (buffer-substring-no-properties begin end)
+             line))))
+       ((not (string-match-p "\\`[ \t]*<<[^>\n]+>>[ \t]*\\'" line))
+        (my/org-reference--compact-text line))
+       (t
+        (let ((end (line-beginning-position))
+              begin)
+          (forward-line -1)
+          (while (and (not (bobp))
+                      (not (looking-at-p "[ \t]*\\(?:\\*+\\|#\\+begin_\\|#\\+end_\\)"))
+                      (not (and begin (looking-at-p "[ \t]*$"))))
+            (unless (looking-at-p "[ \t]*$")
+              (setq begin (line-beginning-position)))
+            (forward-line -1))
+          (when (and (not begin)
+                     (not (looking-at-p "[ \t]*$")))
+            (setq begin (line-beginning-position)))
+          (my/org-reference--compact-text
+           (if begin
+               (buffer-substring-no-properties begin end)
+             line))))))))
+
+(defun my/org-reference--latex-comment-line-p (pos)
+  "Return non-nil when POS is on a LaTeX comment-style line."
+  (save-excursion
+    (goto-char pos)
+    (beginning-of-line)
+    (looking-at-p "[ \t]*%")))
+
+(defun my/org-reference--scan-org-targets (file)
+  "Return reference target candidates from Org FILE."
+  (let (candidates)
+    (with-temp-buffer
+      (insert-file-contents file)
+      (org-mode)
+      (org-with-wide-buffer
+       (let ((tree (org-element-parse-buffer)))
+         (org-element-map tree 'headline
+           (lambda (headline)
+             (let* ((begin (org-element-property :begin headline))
+                    (raw-title (org-element-property :raw-value headline))
+                    (id (org-element-property :ID headline))
+                    (custom-id (org-element-property :CUSTOM_ID headline))
+                    (level (org-element-property :level headline)))
+               (push (list :kind 'heading
+                           :target raw-title
+                           :label raw-title
+                           :line (line-number-at-pos begin)
+                           :pos begin
+                           :preview (format "%s %s"
+                                            (make-string (max 0 (1- level)) ?*)
+                                            raw-title))
+                     candidates)
+               (when id
+                 (push (list :kind 'id
+                             :target id
+                             :label raw-title
+                             :line (line-number-at-pos begin)
+                             :pos begin
+                             :preview (format "ID %s  %s" id raw-title))
+                       candidates))
+               (when custom-id
+                 (push (list :kind 'custom-id
+                             :target custom-id
+                             :label raw-title
+                             :line (line-number-at-pos begin)
+                             :pos begin
+                             :preview (format "CUSTOM_ID %s  %s" custom-id raw-title))
+                       candidates)))))
+         (org-element-map tree 'target
+           (lambda (target)
+             (let ((value (org-element-property :value target))
+                   (begin (org-element-property :begin target)))
+               (unless (my/org-reference--latex-comment-line-p begin)
+                 (push (list :kind 'target
+                             :target value
+                             :label value
+                             :line (line-number-at-pos begin)
+                             :pos begin
+                             :preview (my/org-reference--nearby-preview begin))
+                       candidates))))))))
+    (nreverse candidates)))
+
+(defun my/org-reference--scan-text-targets (file)
+  "Return lightweight reference candidates from non-Org FILE."
+  (let ((ext (downcase (or (file-name-extension file) "")))
+        candidates)
+    (with-temp-buffer
+      (insert-file-contents file)
+      (goto-char (point-min))
+      (while (not (eobp))
+        (let* ((line (line-number-at-pos))
+               (pos (point))
+               (text (my/org-reference--candidate-line)))
+          (when (cond
+                 ((member ext '("md" "markdown"))
+                  (string-match-p "\\`#{1,6}[ \t]+\\S-" text))
+                 ((member ext '("el" "py" "js" "ts" "tsx" "jsx" "rs" "go" "java" "c" "cpp" "h" "hpp" "sh" "zsh" "nix"))
+                  (string-match-p
+                   "\\`[ \t]*\\(?:\\(?:def\\|class\\|function\\|const\\|let\\|var\\|fn\\|struct\\|enum\\|interface\\|type\\|;;;\\|;;\\|//\\|#\\)[ \t]+\\S-\\)"
+                   text))
+                 (t nil))
+            (push (list :kind 'line
+                        :target line
+                        :label text
+                        :line line
+                        :pos pos
+                        :preview text)
+                  candidates)))
+        (forward-line 1)))
+    (nreverse candidates)))
+
+(defun my/org-reference--file-targets (file)
+  "Return reference candidates for FILE, including a file-level candidate."
+  (let* ((org-p (string= (downcase (or (file-name-extension file) "")) "org"))
+         (targets (if org-p
+                      (my/org-reference--scan-org-targets file)
+                    (my/org-reference--scan-text-targets file))))
+    (cons (list :kind 'file
+                :target nil
+                :label (file-name-base file)
+                :line 1
+                :pos 1
+                :preview (format "File: %s" (file-name-nondirectory file)))
+          targets)))
+
+(defun my/org-reference--target-candidates (file)
+  "Return propertized completion candidates for reference targets in FILE."
+  (mapcar
+   (lambda (target)
+     (propertize
+      (format "%-9s %5s  %-40s  %s"
+              (plist-get target :kind)
+              (plist-get target :line)
+              (my/org-reference--compact-text
+               (or (plist-get target :label) "")
+               40)
+              (my/org-reference--compact-text
+               (or (plist-get target :preview) "")
+               90))
+      'my/org-reference-target target))
+   (my/org-reference--file-targets file)))
+
+(defun my/org-reference--target-preview-state (file)
+  "Return Consult preview state for candidates in FILE."
+  (if (not (fboundp 'consult--jump-preview))
+      (lambda (&rest _))
+    (require 'consult)
+    (let ((preview (consult--jump-preview)))
+      (lambda (action cand)
+        (let* ((target (and cand (get-text-property 0 'my/org-reference-target cand)))
+               (pos (plist-get target :pos)))
+          (when (and target pos)
+            (funcall preview action
+                     (and (eq action 'preview)
+                          (let ((marker (make-marker)))
+                            (set-marker marker pos (find-file-noselect file))
+                            marker)))))))))
+
+(defun my/org-reference--read-target (file)
+  "Read one reference target from FILE."
+  (let ((candidates (my/org-reference--target-candidates file)))
+    (unless candidates
+      (user-error "No reference targets found in %s" file))
+    (let ((choice
+           (if (fboundp 'consult--read)
+               (progn
+                 (require 'consult)
+                 (consult--read candidates
+                                :prompt "Target: "
+                                :require-match t
+                                :state (my/org-reference--target-preview-state file)
+                                :preview-key '(:debounce 0.15 any)
+                                :lookup (apply-partially
+                                         #'consult--lookup-prop
+                                         'my/org-reference-target)))
+             (completing-read "Target: " candidates nil t))))
+      (or (and (listp choice) choice)
+          (get-text-property 0 'my/org-reference-target choice)
+          (user-error "No target selected")))))
+
+(defun my/org-reference--relative-file (file)
+  "Return FILE path relative to the current buffer when possible."
+  (let ((base (or (and buffer-file-name (file-name-directory buffer-file-name))
+                  default-directory)))
+    (file-relative-name file base)))
+
+(defun my/org-reference--target-search (target)
+  "Return Org file search suffix for TARGET plist."
+  (pcase (plist-get target :kind)
+    ('file nil)
+    ('id (concat "*" (plist-get target :label)))
+    ('heading (concat "*" (plist-get target :target)))
+    ('custom-id (concat "#" (plist-get target :target)))
+    ('target (plist-get target :target))
+    ('line (number-to-string (plist-get target :line)))
+    (_ nil)))
+
+(defun my/org-reference--build-link (source target description)
+  "Build an Org link for SOURCE plist, TARGET plist and DESCRIPTION."
+  (let* ((roam-p (eq (plist-get source :kind) 'roam))
+         (desc (string-trim (or description "")))
+         (desc (unless (string-empty-p desc) desc))
+         (search (my/org-reference--target-search target))
+         (raw
+          (if (and roam-p (memq (plist-get target :kind) '(file id)))
+              (format "id:%s"
+                      (if (eq (plist-get target :kind) 'id)
+                          (plist-get target :target)
+                        (plist-get source :id)))
+            (concat "file:" (my/org-reference--relative-file (plist-get source :file))
+                    (when search
+                      (concat "::" search))))))
+    (if desc
+        (org-link-make-string raw desc)
+      (org-link-make-string raw))))
+
+(defun my/org-reference-insert-link ()
+  "Interactively insert a robust Org reference link.
+Choose an Org Roam node or ordinary file, pick a file/ID/target/heading with
+preview, then enter the visible link text."
+  (interactive)
+  (let* ((source (my/org-reference--read-source))
+         (file (plist-get source :file))
+         (target (my/org-reference--read-target file))
+         (default-description (or (plist-get target :label)
+                                  (plist-get source :title)
+                                  (file-name-base file)))
+         (description (read-string
+                       (format "Description (default %s): " default-description)
+                       nil nil default-description))
+         (link (my/org-reference--build-link source target description)))
+    (insert link)
+    (message "Inserted Org reference: %s" link)))
+
 (defun my/org-download--buffer-basename ()
   "Return a stable basename for the current Org buffer."
   (file-name-base
@@ -281,7 +577,8 @@ the user to fill in."
   :bind (:map org-mode-map
               ("C-c i d" . org-download-delete)
               ("C-c n I" . my/org-insert-id-link)
-              ("C-c n T" . my/org-insert-target-link)))
+              ("C-c n T" . my/org-insert-target-link)
+              ("C-c n p" . my/org-reference-insert-link)))
 
 (provide 'init-org-utility)
 ;;; init-org-utility.el ends here
