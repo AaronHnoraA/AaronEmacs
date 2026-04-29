@@ -1,0 +1,81 @@
+#+title: ${title}
+#+author: ${author}
+#+date: ${year}
+#+filetags: :paper:zotero:
+#+startup: overview
+#+options: toc:nil
+
+:PROPERTIES:
+:ZOTERO_KEY: ${citekey}
+:END:
+
+#+begin_attention
+ Zotero 链接： 
+#+end_attention
+* Reference
+#+begin_src bibtex
+
+#+end_src
+
+* One-sentence summary
+> 用一句**自己的话**说清楚：这篇文献解决了什么问题。
+
+* Problem & Motivation
+- 研究的问题是什么？
+- 为什么以前的方法不够？
+- 作者认为“核心困难”在哪里？
+
+* Main Results
+- 定理 / 命题 / 结论：
+  1. …
+  2. …
+- 每个结果在**直觉上**是什么意思？
+
+* Key Ideas / Techniques
+- 核心思想（不是公式）
+- 用到的关键工具（如：Hilbert space、POVM、spectral theorem）
+
+* Structure of the Paper
+1. Introduction
+2. Preliminaries
+3. Main theorem
+4. Proof sketch
+5. Applications
+
+（这一节帮你**快速回忆整篇文章结构**）
+
+* Detailed Notes
+** Section 2: Definitions
+- 定义 2.1：……
+- 我的理解：……
+
+** Section 3: Main Theorem
+- 定理陈述：
+- 证明思路：
+- 哪一步最关键？
+
+* Connections
+- 与 [[id:XXXX][相关概念]] 的关系
+- 和哪篇文章形成对比？
+- 是否可以推广？
+
+* Questions / Doubts
+- 我没完全看懂的地方：
+  - …
+- 这里是否有更简单的解释？
+
+* My Commentary
+（这是最重要的一节）
+- 我是否认同作者的建模？
+- 如果我来写，会怎么组织？
+- 有没有“其实可以换个角度”的地方？
+
+* Quotations (optional)
+#+begin_quote
+原文中值得反复读的一句话。
+#+end_quote
+
+* TODO / Follow-up
+- [ ] 查阅引用的文献 X
+- [ ] 把这个结论写进主笔记
+- [ ] 和 XXX 定理做对比
