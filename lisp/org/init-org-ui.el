@@ -1215,6 +1215,26 @@ DEFAULT-BG defaults to `my/org-default-background'."
               (palette (my/org-special-block-palette type)))
     (plist-get palette :body-bg)))
 
+(defun my/org-pretty-block--render-element-if-visible
+    (element seen start end)
+  "Render styled special-block ELEMENT when it overlaps visible START END.
+SEEN tracks block begin positions already handled in the current JIT pass."
+  (let* ((type (and element
+                    (eq (org-element-type element) 'special-block)
+                    (org-element-property :type element)))
+         (begin (and type (org-element-property :begin element)))
+         (end-pos (and type (org-element-property :end element))))
+    (when (and begin
+               end-pos
+               (my/org-special-block-config type)
+               (not (gethash begin seen))
+               (< begin end)
+               (> end-pos start)
+               (my/org-range-overlaps-visible-ranges-p
+                begin end-pos (current-buffer)))
+      (puthash begin t seen)
+      (my/org-prettify-element element))))
+
 (defun my/org-line-background-end (&optional pos)
   "Return the position that lets a face extend through POS's full line."
   (save-excursion
@@ -1944,6 +1964,19 @@ partial render does not stay broken until the next edit."
             (unless (my/org-pretty-block--jit-cache-hit-p scan-start scan-end)
               (let ((seen (make-hash-table :test #'eql))
                     render-records)
+                ;; If the visible range starts in the middle of a long styled
+                ;; block, its #+begin line may be outside the nearby scan.
+                ;; Probe only the visible range edges, then render the whole
+                ;; containing block when one is found.
+                (dolist (pos (delete-dups
+                              (list (max (point-min) (min (point-max) start))
+                                    (max (point-min)
+                                         (min (point-max) (1- end))))))
+                  (when-let* ((element (my/org-special-block-at-point pos))
+                              (record
+                               (my/org-pretty-block--render-element-if-visible
+                                element seen start end)))
+                    (push record render-records)))
                 (goto-char scan-start)
                 (while (re-search-forward my/org--special-block-line-regexp
                                           scan-end t)
@@ -1963,24 +1996,11 @@ partial render does not stay broken until the next edit."
                                             (my/org-special-block-config
                                              line-type)))
                            (element (and configured (org-element-at-point)))
-                           (type (and element
-                                      (eq (org-element-type element)
-                                          'special-block)
-                                      (org-element-property :type element)))
-                           (begin (and type
-                                       (org-element-property :begin element)))
-                           (end-pos (and type
-                                         (org-element-property :end element))))
-                      (when (and begin
-                                 end-pos
-                                 (not (gethash begin seen))
-                                 (< begin end)
-                                 (> end-pos start)
-                                 (my/org-range-overlaps-visible-ranges-p
-                                  begin end-pos (current-buffer)))
-                        (puthash begin t seen)
-                        (when-let* ((record (my/org-prettify-element element)))
-                          (push record render-records))))
+                           (record
+                            (my/org-pretty-block--render-element-if-visible
+                             element seen start end)))
+                      (when record
+                        (push record render-records)))
                     (goto-char line-begin)
                     (forward-line 1)))
                 (my/org-pretty-block--remember-jit-range
