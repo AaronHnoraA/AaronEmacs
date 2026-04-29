@@ -47,16 +47,6 @@
                (<= origin end))
       (cons begin end))))
 
-(defun my/org-reference--target-before-formula (pos)
-  "Return dedicated target immediately before formula at POS, or nil."
-  (save-excursion
-    (goto-char pos)
-    (beginning-of-line)
-    (skip-chars-backward "\n\t ")
-    (beginning-of-line)
-    (when (looking-at "[ \t]*<<\\([^>\n]+\\)>>[ \t]*$")
-      (match-string-no-properties 1))))
-
 (defun my/org-reference--target-after-formula (pos)
   "Return dedicated target immediately after formula ending at POS, or nil."
   (save-excursion
@@ -67,10 +57,8 @@
 
 (defun my/org-reference--formula-target-at (bounds)
   "Return dedicated target around formula BOUNDS, or nil.
-Targets after the closing delimiter are preferred, but older targets above the
-formula are still recognized."
-  (or (my/org-reference--target-after-formula (cdr bounds))
-      (my/org-reference--target-before-formula (car bounds))))
+Targets are stored after the formula closing delimiter."
+  (my/org-reference--target-after-formula (cdr bounds)))
 
 (defun my/org-reference--block-bounds ()
   "Return bounds and type of the surrounding Org #+begin block, or nil."
@@ -139,13 +127,12 @@ formula are still recognized."
     (user-error "Not in an Org buffer"))
   (let* ((bounds (or (my/org-reference--display-math-bounds)
                      (user-error "Point is not inside a \\[...\\] formula")))
-         (end (cdr bounds))
          (target (or (my/org-reference--formula-target-at bounds)
                      (my/org-reference--unique-target "eq"))))
     (unless (my/org-reference--formula-target-at bounds)
       (save-excursion
-        (goto-char end)
-        (insert " <<" target ">>")))
+        (goto-char (cdr bounds))
+        (insert "     <<" target ">>")))
     (kill-new target)
     (message "Org formula target: %s" target)
     target))

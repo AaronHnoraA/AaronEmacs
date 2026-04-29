@@ -46,6 +46,7 @@
 (declare-function my/org-insert-target-link "init-org-utility" ())
 (declare-function my/org-latex-preview-visible-now "init-org-latex" ())
 (declare-function my/org-reference-create-target-dwim "init-org-utility" ())
+(declare-function my/org-reference-ensure-target-at-point "init-org-utility" ())
 (declare-function my/org-toc-insert-or-update "init-org-core" (&optional depth))
 (declare-function my/org-zotero-fill-metadata "init-org-zotero" ())
 (declare-function popper-toggle "popper" ())
@@ -68,6 +69,7 @@
 (autoload 'my/org-insert-target-link "init-org-utility" nil t)
 (autoload 'my/org-latex-preview-visible-now "init-org-latex" nil t)
 (autoload 'my/org-reference-create-target-dwim "init-org-utility" nil t)
+(autoload 'my/org-reference-ensure-target-at-point "init-org-utility" nil t)
 (autoload 'my/org-toc-insert-or-update "init-org-core" nil t)
 (autoload 'my/org-zotero-fill-metadata "init-org-zotero" nil t)
 
@@ -352,6 +354,7 @@ With positive ARG, enable it.  With zero or negative ARG, disable it."
                      ("i" . org-roam-node-insert)
                      ("l" . org-roam-buffer-toggle)
                      ("o" . my/org-reference-create-target-dwim)
+                     ("H-o" . my/org-reference-ensure-target-at-point)
                      ("I" . my/org-insert-id-link)
                      ("L" . my/org-insert-target-link)
                      ("T" . my/org-toc-insert-or-update)
