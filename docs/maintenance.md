@@ -378,7 +378,7 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
   company/eglot/lsp-mode/flymake/dape
 - [lisp/init-lsp-tools.el](../lisp/init-lsp-tools.el)
   language server hub / doctor / dispatch / runtime knobs
-- [lisp/init-org.el](../lisp/init-org.el)
+- [lisp/org/init-org.el](../lisp/org/init-org.el)
   Org 全家桶
 - [lisp/init-shell.el](../lisp/init-shell.el)
   shell/eshell/vterm/ssh

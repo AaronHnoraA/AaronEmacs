@@ -6,7 +6,7 @@
 
 ## 1. 目录结构
 
-在 [lisp/init-org.el](../lisp/init-org.el) 里默认是：
+在 [lisp/org/init-org.el](../lisp/org/init-org.el) 里默认是：
 
 - `~/HC/Org/`
   主目录
@@ -30,7 +30,7 @@
 
 ## 3. Capture 模板
 
-当前默认模板在 [lisp/init-org.el](../lisp/init-org.el) 里，包括：
+当前默认模板在 [lisp/org/init-org.el](../lisp/org/init-org.el) 里，包括：
 
 - `i`
   Idea

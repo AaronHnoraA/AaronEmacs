@@ -456,7 +456,7 @@ DEFAULT-DIR becomes the buffer-local `default-directory' before execution."
       (package-initialize)
       (require 'use-package)
       (load-file ,(expand-file-name "lisp/init-package-utils.el" my/org-babel-config-root))
-      (load-file ,(expand-file-name "lisp/init-org-babel.el" my/org-babel-config-root))
+      (load-file ,(expand-file-name "lisp/org/init-org-babel.el" my/org-babel-config-root))
       (my/org-babel-async-batch-run
        ,source-file
        ,point

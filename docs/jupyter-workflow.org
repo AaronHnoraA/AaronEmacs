@@ -14,7 +14,7 @@ config.  It covers:
 Relevant config entry points:
 
 - =lisp/init-jupyter.el=
-- =lisp/init-org-babel.el=
+- =lisp/org/init-org-babel.el=
 
 * Design
 
@@ -64,7 +64,7 @@ The main keybindings live in =lisp/init-jupyter.el=.
 - =C-c j s=: run =jupytext --sync= now
 - =C-c j p=: register the current script buffer with its paired notebook
 
-Org-specific async helpers live in =lisp/init-org-babel.el=.
+Org-specific async helpers live in =lisp/org/init-org-babel.el=.
 
 - =C-c C-v C-a=: async execution helper for non-Jupyter sessionless blocks
 - =C-c C-v C-k=: cancel the current async helper job
@@ -146,7 +146,7 @@ Current Jupyter-backed plain languages:
 - =maple=
 
 This mapping is defined in =my/org-babel-jupyter-native-backends= in
-=lisp/init-org-babel.el=.
+=lisp/org/init-org-babel.el=.
 
 Defaults for these languages are set so that:
 
@@ -404,7 +404,7 @@ Typical steps:
 1. Ensure a working Jupyter kernelspec exists.
    For Python environments, =C-c j P= is the fastest path.
 2. Add the language to =my/org-babel-jupyter-native-backends= in
-   =lisp/init-org-babel.el=.
+   =lisp/org/init-org-babel.el=.
 3. Add the language name to =my/jupyter-known-languages= in
    =lisp/init-jupyter.el=.
 4. If the language has aliases that should share one remembered connection

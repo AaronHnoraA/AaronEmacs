@@ -35,15 +35,15 @@ v3 修复版：彻底解决了 stringp/nil 和 listp 报错问题。"
         (bibtex-mode)
         (insert bib-content)
         (goto-char (point-min))
-        
+
         ;; 跳过空行，找到条目
         (bibtex-skip-to-valid-entry)
-        
+
         ;; 获取 Citekey
-        (setq key (bibtex-key-in-head)) 
+        (setq key (bibtex-key-in-head))
         ;; 获取所有字段的原始 alist，例如 (("title" . "{Book Name}") ...)
         (setq entries (bibtex-parse-entry))
-        
+
         ;; --- 内部辅助函数：清洗 BibTeX 值 ---
         (cl-flet ((get-clean-field (field-name)
                     (let* ((entry (assoc field-name entries))
@@ -59,7 +59,7 @@ v3 修复版：彻底解决了 stringp/nil 和 listp 报错问题。"
                               (setq val (substring val 1 -1)))
                             val)
                         nil)))) ;; 字段不存在返回 nil
-          
+
           ;; 提取并清洗字段
           (setq title (get-clean-field "title"))
           (setq author (get-clean-field "author"))
@@ -73,13 +73,13 @@ v3 修复版：彻底解决了 stringp/nil 和 listp 报错问题。"
                   (while (search-forward tag nil t)
                     ;; 如果 value 是 nil，用空字符串 "" 替换，防止报错
                     (replace-match (or value "") t t))))
-        
+
         (replace-tag "${title}" title)
         (replace-tag "${author}" author)
         (replace-tag "${year}" year)
         (replace-tag "${citekey}" key)
         (replace-tag "${doi}" doi)
-        
+
         (message "元数据填充完成：Title: %s" (or title "未找到标题"))))))
 
 

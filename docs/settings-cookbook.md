@@ -22,7 +22,7 @@
 文件：
 
 - [lisp/init-base.el](../lisp/init-base.el)
-- [lisp/init-org.el](../lisp/init-org.el)
+- [lisp/org/init-org.el](../lisp/org/init-org.el)
 - [lisp/org/init-org-ui.el](../lisp/org/init-org-ui.el)
 - [lisp/init-text.el](../lisp/init-text.el)
 - [lisp/init-auctex.el](../lisp/init-auctex.el)
@@ -45,7 +45,7 @@
 
 - `lisp/init-base.el`
   基础字体族、字号、中文 fontset 绑定、共享排版 helper。
-- `lisp/init-org.el`
+- `lisp/org/init-org.el`
   Org 里什么时候启用 prose 排版。
 - `lisp/org/init-org-ui.el`
   Org prose 行距、单窗口阅读宽度、标题和 special block 视觉层。
@@ -62,7 +62,7 @@
 
 文件：
 
-- [lisp/init-org.el](../lisp/init-org.el)
+- [lisp/org/init-org.el](../lisp/org/init-org.el)
 
 重点变量：
 
@@ -358,7 +358,7 @@ emacs --debug-init -q -l ./bootstrap.el
 
 文件：
 
-- [lisp/init-org.el](../lisp/init-org.el)
+- [lisp/org/init-org.el](../lisp/org/init-org.el)
 - [lisp/init-funcs.el](../lisp/init-funcs.el)
 
 现在策略是：

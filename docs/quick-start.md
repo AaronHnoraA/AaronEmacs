@@ -196,7 +196,7 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 ### Org
 
-[lisp/init-org.el](../lisp/init-org.el) 里默认写死：
+[lisp/org/init-org.el](../lisp/org/init-org.el) 里默认写死：
 
 - `~/HC/Org/`
 - `~/HC/Org/roam/`
