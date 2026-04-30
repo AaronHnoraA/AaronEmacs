@@ -58,8 +58,28 @@
   "% !TEX program = xelatex\n"
   "Magic comment prepended to Org-exported LaTeX files.")
 
-(defconst my/org-latex-export-cjk-preamble
-  "\\usepackage{amsmath}\n\\usepackage{amssymb}\n\\usepackage{amsthm}\n\\usepackage{xeCJK}\n\\setCJKmainfont{Songti SC}\n\\setCJKsansfont{Hiragino Sans GB}\n"
+(defconst my/org-latex-common-paper-preamble-lines
+  '("\\usepackage{mathtools}"
+    "\\usepackage{amssymb}"
+    "\\usepackage{amsthm}"
+    "\\usepackage{fontspec}"
+    "\\usepackage{unicode-math}"
+    :math-font
+    "\\usepackage{mathrsfs}"
+    "\\usepackage{stmaryrd}"
+    "\\usepackage{dsfont}"
+    "\\usepackage{braket}"
+    "\\usepackage{cancel}"
+    "\\usepackage{extarrows}"
+    "\\usepackage[version=4]{mhchem}"
+    "\\usepackage{physics}"
+    "\\usepackage{siunitx}")
+  "Shared LaTeX setup for Org export and fragment preview.")
+
+(defconst my/org-latex-export-cjk-preamble-lines
+  '("\\usepackage{xeCJK}"
+    "\\setCJKmainfont{Songti SC}"
+    "\\setCJKsansfont{Hiragino Sans GB}")
   "Chinese package and font setup injected into Org-exported LaTeX preambles.")
 
 (defconst my/org-latex-export-default-packages-alist
@@ -314,6 +334,42 @@ render is usually ready before point leaves it."
             (throw 'found t)))
         nil)))
 
+(defun my/org-latex--preamble-line-package (line)
+  "Return the first package loaded by LaTeX preamble LINE."
+  (when (and (stringp line)
+             (string-match "\\\\usepackage\\(?:\\[[^]]*\\]\\)?{\\([^},]+\\)" line))
+    (match-string 1 line)))
+
+(defun my/org-latex-common-paper-preamble-lines ()
+  "Return shared paper-oriented LaTeX preamble lines."
+  (mapcar
+   (lambda (line)
+     (if (eq line :math-font)
+         (my/latex-preview-math-font-line)
+       line))
+   my/org-latex-common-paper-preamble-lines))
+
+(defun my/org-latex--preamble-line-present-p (latex line)
+  "Return non-nil when LATEX already contains the effect of LINE."
+  (cond
+   ((string-match-p "\\\\setmathfont\\b" line)
+    (string-match-p "\\\\setmathfont\\b" latex))
+   ((my/org-latex--preamble-line-package line)
+    (my/org-latex--latex-package-present-p
+     latex
+     (my/org-latex--preamble-line-package line)))
+   (t
+    (string-match-p (regexp-quote line) latex))))
+
+(defun my/org-latex--missing-preamble-lines (latex lines)
+  "Return preamble LINES whose effect is not already present in LATEX."
+  (delq nil
+        (mapcar
+         (lambda (line)
+           (unless (my/org-latex--preamble-line-present-p latex line)
+             line))
+         lines)))
+
 (defun my/org-latex--keyword-value (keyword)
   "Return the first Org keyword value for KEYWORD in the current buffer."
   (when-let* ((entry (assoc keyword (org-collect-keywords (list keyword))))
@@ -363,20 +419,14 @@ render is usually ready before point leaves it."
     (goto-char (point-min))
     (unless (looking-at-p (regexp-quote my/org-latex-export-magic-comment))
       (insert my/org-latex-export-magic-comment))
-    (let (lines)
-      (unless (my/org-latex--latex-package-present-p (buffer-string) "amsmath")
-        (setq lines (append lines '("\\usepackage{amsmath}"))))
-      (unless (my/org-latex--latex-package-present-p (buffer-string) "amssymb")
-        (setq lines (append lines '("\\usepackage{amssymb}"))))
-      (unless (my/org-latex--latex-package-present-p (buffer-string) "amsthm")
-        (setq lines (append lines '("\\usepackage{amsthm}"))))
+    (let ((lines (my/org-latex--missing-preamble-lines
+                  (buffer-string)
+                  (my/org-latex-common-paper-preamble-lines))))
       (unless (my/org-latex--latex-cjk-present-p (buffer-string))
         (setq lines
               (append
                lines
-               '("\\usepackage{xeCJK}"
-                 "\\setCJKmainfont{Songti SC}"
-                 "\\setCJKsansfont{Hiragino Sans GB}"))))
+               my/org-latex-export-cjk-preamble-lines)))
       (when lines
         (goto-char (point-min))
         (when (re-search-forward "^\\\\documentclass.*$" nil t)
@@ -2444,15 +2494,15 @@ Anywhere else: run `org-return' as usual."
 
   ;; 3. 极简 Header (确保没有占位符)
   (setq org-format-latex-header
-        (format "\\documentclass{article}
+        (concat "\\documentclass{article}
 \\usepackage[usenames]{color}
-\\usepackage{amsmath}
-\\usepackage{fontspec}
-\\usepackage{unicode-math}
-%s
-\\pagestyle{empty}
 "
-                (my/latex-preview-math-font-line))))
+                (mapconcat #'identity
+                           (my/org-latex-common-paper-preamble-lines)
+                           "\n")
+                "
+\\pagestyle{empty}
+")))
 
 (provide 'init-org-latex)
 ;;; init-org-latex.el ends here
