@@ -18,12 +18,29 @@
 (declare-function consult-recent-file "consult" ())
 (declare-function consult-ripgrep "consult" (&optional dir initial))
 (declare-function consult-yank-pop "consult" ())
+(declare-function my/diagnostics-buffer-errors "init-diagnostics-extra" ())
+(declare-function my/diagnostics-buffer-notes "init-diagnostics-extra" ())
+(declare-function my/diagnostics-buffer-ui "init-diagnostics-ui" ())
+(declare-function my/diagnostics-buffer-warnings "init-diagnostics-extra" ())
+(declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
+(declare-function my/diagnostics-project-errors "init-diagnostics-extra" ())
+(declare-function my/diagnostics-project-notes "init-diagnostics-extra" ())
+(declare-function my/diagnostics-project-ui "init-diagnostics-ui" ())
+(declare-function my/diagnostics-project-warnings "init-diagnostics-extra" ())
 (declare-function my/project-current-root "init-project")
 (declare-function my/project-dispatch "init-project")
 (declare-function my/project-open-root "init-project")
 (declare-function my/project-switch "init-project")
 (declare-function my/project-vterm "init-project")
 (declare-function my/bookmark-jump-dwim "init-windows")
+(declare-function my/problems-buffer "init-problems" ())
+(declare-function my/problems-buffer-errors "init-problems" ())
+(declare-function my/problems-buffer-notes "init-problems" ())
+(declare-function my/problems-buffer-warnings "init-problems" ())
+(declare-function my/problems-project "init-problems" ())
+(declare-function my/problems-project-errors "init-problems" ())
+(declare-function my/problems-project-notes "init-problems" ())
+(declare-function my/problems-project-warnings "init-problems" ())
 (declare-function my/symbols-buffer "init-symbols")
 (declare-function my/symbols-project "init-symbols")
 
@@ -194,7 +211,32 @@ the built-in bookmark list buffer."
        :transient transient--do-exit)
       ("v" "project vterm" my/project-vterm
        :transient transient--do-exit)
-      ("w" "project workbench" my/project-dispatch
+      ("P" "project workbench" my/project-dispatch
+       :transient transient--do-exit)]
+     ["Diagnostics"
+      ("!" "buffer picker" my/problems-buffer
+       :transient transient--do-exit)
+      ("?" "project picker" my/problems-project
+       :transient transient--do-exit)
+      ("d" "diagnostics hub" my/diagnostics-dispatch
+       :transient transient--do-exit)
+      ("D" "project board" my/diagnostics-project-ui
+       :transient transient--do-exit)]
+     ["Buffer Diags"
+      ("e" "errors" my/problems-buffer-errors
+       :transient transient--do-exit)
+      ("w" "warnings" my/problems-buffer-warnings
+       :transient transient--do-exit)
+      ("n" "notes" my/problems-buffer-notes
+       :transient transient--do-exit)
+      ("B" "board" my/diagnostics-buffer-ui
+       :transient transient--do-exit)]
+     ["Project Diags"
+      ("E" "errors" my/problems-project-errors
+       :transient transient--do-exit)
+      ("W" "warnings" my/problems-project-warnings
+       :transient transient--do-exit)
+      ("N" "notes" my/problems-project-notes
        :transient transient--do-exit)]
      ["Other"
       ("c" "command history" my/telescope-command-history

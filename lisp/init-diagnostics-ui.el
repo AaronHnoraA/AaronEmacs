@@ -16,6 +16,7 @@
 (declare-function flymake-diagnostic-type "flymake" (diag))
 (declare-function flymake-diagnostics "flymake" (&optional beg end))
 (declare-function flymake-start "flymake" ())
+(declare-function flymake--lookup-type-property "flymake" (type property &optional default))
 (declare-function flymake--project-diagnostics "flymake" (project))
 (declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
 
@@ -95,22 +96,30 @@ When `other', show only other files.")
 (add-hook 'server-after-make-frame-hook #'my/diagnostics-apply-ui)
 (add-hook 'after-load-theme-hook #'my/diagnostics-apply-ui)
 
+(defun my/diagnostics--severity-category (diag)
+  "Return DIAG severity as `error', `warning', or `note'."
+  (pcase (flymake--lookup-type-property
+          (flymake-diagnostic-type diag)
+          'flymake-category)
+    ('flymake-error 'error)
+    ('flymake-warning 'warning)
+    (_ 'note)))
+
 (defun my/diagnostics--severity-rank (diag)
   "Return a sort rank for DIAG severity."
-  (pcase (flymake-diagnostic-type diag)
-    (:error 0)
-    (:warning 1)
-    (:note 2)
+  (pcase (my/diagnostics--severity-category diag)
+    ('error 0)
+    ('warning 1)
+    ('note 2)
     (_ 3)))
 
 (defun my/diagnostics--severity-name (diag)
   "Return a display name for DIAG severity."
-  (let ((type (flymake-diagnostic-type diag)))
-    (cond
-     ((eq type :error) "Error")
-     ((eq type :warning) "Warning")
-     ((eq type :note) "Note")
-     (t (format "%s" type)))))
+  (pcase (my/diagnostics--severity-category diag)
+    ('error "Error")
+    ('warning "Warning")
+    ('note "Note")
+    (_ (format "%s" (flymake-diagnostic-type diag)))))
 
 (defun my/diagnostics--line-number (diag)
   "Return the source line for DIAG."
@@ -155,16 +164,27 @@ When `other', show only other files.")
                 (my/diagnostics--buffer-id
                  (flymake-diagnostic-buffer diag))))))
 
+(defun my/diagnostics--with-origin-buffer (fn)
+  "Call FN in `my/diagnostics-origin-buffer'."
+  (unless (buffer-live-p my/diagnostics-origin-buffer)
+    (user-error "The source buffer for this diagnostics panel is no longer available"))
+  (with-current-buffer my/diagnostics-origin-buffer
+    (funcall fn)))
+
 (defun my/diagnostics--collect-buffer ()
-  "Collect diagnostics for the current buffer."
-  (flymake-diagnostics))
+  "Collect diagnostics for the origin buffer."
+  (my/diagnostics--with-origin-buffer
+   (lambda ()
+     (flymake-diagnostics))))
 
 (defun my/diagnostics--collect-project ()
-  "Collect diagnostics for the current project."
-  (when-let* ((project (project-current nil default-directory)))
-    (if (fboundp 'flymake--project-diagnostics)
-        (flymake--project-diagnostics project)
-      (my/diagnostics--collect-buffer))))
+  "Collect diagnostics for the origin buffer's project."
+  (my/diagnostics--with-origin-buffer
+   (lambda ()
+     (when-let* ((project (project-current nil default-directory)))
+       (if (fboundp 'flymake--project-diagnostics)
+           (flymake--project-diagnostics project)
+         (flymake-diagnostics))))))
 
 (defun my/diagnostics--apply-file-scope (diags)
   "Apply the active file scope to DIAGS."
@@ -178,8 +198,12 @@ When `other', show only other files.")
   (let ((scoped (my/diagnostics--apply-file-scope diags)))
     (if my/diagnostics-buffer-filter
         (seq-filter (lambda (diag)
-                      (eq (flymake-diagnostic-type diag)
-                          my/diagnostics-buffer-filter))
+                      (eq (my/diagnostics--severity-category diag)
+                          (pcase my/diagnostics-buffer-filter
+                            (:error 'error)
+                            (:warning 'warning)
+                            (:note 'note)
+                            (_ my/diagnostics-buffer-filter))))
                     scoped)
       scoped)))
 
@@ -208,9 +232,9 @@ When `other', show only other files.")
         (warnings 0)
         (notes 0))
     (dolist (diag diags)
-      (pcase (flymake-diagnostic-type diag)
-        (:error (setq errors (1+ errors)))
-        (:warning (setq warnings (1+ warnings)))
+      (pcase (my/diagnostics--severity-category diag)
+        ('error (setq errors (1+ errors)))
+        ('warning (setq warnings (1+ warnings)))
         (_ (setq notes (1+ notes)))))
     (format "E%d W%d N%d"
             errors warnings notes)))

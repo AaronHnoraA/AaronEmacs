@@ -32,7 +32,6 @@
 (declare-function claude-code-ide-menu "claude-code-ide" ())
 (declare-function my/health-dispatch "init-health" ())
 (declare-function my/hyper-dispatch "init-hyper" ())
-(declare-function my/hyper-execute-command "init-hyper" ())
 (declare-function my/browser-current-url "init-browser" ())
 (declare-function my/kill-buffer-dwim "init-windows" ())
 (declare-function my/language-server-dispatch "init-lsp-tools" ())
@@ -295,7 +294,7 @@ With positive ARG, enable it.  With zero or negative ARG, disable it."
   ;; and use the remaining Option keys for high-frequency global entry points.
   (define-prefix-command 'my/org-hyper-map)
   (dolist (binding '(("H-," . my/hyper-dispatch)
-                     ("H-x" . my/hyper-execute-command)
+                     ("H-x" . telescope)
                      ("H-X" . clipboard-kill-region)
                      ("H-c" . clipboard-kill-ring-save)
                      ("H-v" . clipboard-yank)

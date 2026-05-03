@@ -49,7 +49,7 @@
 ### 常用命令
 
 - macOS GUI 下也可以直接用一层 `Option(H-)` 降深度：
-  `H-e` code menu，`H-d` diagnostics menu，`H-i` `show-imenu`，`H-u` language server 菜单，`H-j` `dape`，`H-n` 最近测试
+  `H-e` code menu，`H-d` diagnostics menu，`H-x` / `H-t` `telescope`，`H-i` `show-imenu`，`H-u` language server 菜单，`H-j` `dape`，`H-n` 最近测试
 - `SPC c a`
   code action
 - `SPC c f`

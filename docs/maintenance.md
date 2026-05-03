@@ -374,6 +374,8 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
   vertico/orderless/consult/embark
 - [lisp/init-search.el](../lisp/init-search.el)
   ivy/counsel/swiper
+- [lisp/telescope/](../lisp/telescope/)
+  `telescope` 统一入口，以及 diagnostics picker 这类 Telescope 风格的选择器
 - [lisp/init-lsp.el](../lisp/init-lsp.el)
   company/eglot/lsp-mode/flymake/dape
 - [lisp/init-lsp-tools.el](../lisp/init-lsp-tools.el)

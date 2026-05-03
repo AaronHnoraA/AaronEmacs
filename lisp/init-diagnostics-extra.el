@@ -163,6 +163,11 @@
   (interactive)
   (my/diagnostics-open 'buffer :warning "Buffer Warnings"))
 
+(defun my/diagnostics-buffer-notes ()
+  "Open a diagnostics buffer filtered to current-buffer notes."
+  (interactive)
+  (my/diagnostics-open 'buffer :note "Buffer Notes"))
+
 (defun my/diagnostics-project-errors ()
   "Open a diagnostics buffer filtered to project errors."
   (interactive)
@@ -173,6 +178,11 @@
   (interactive)
   (my/diagnostics-open 'project :warning "Project Warnings"))
 
+(defun my/diagnostics-project-notes ()
+  "Open a diagnostics buffer filtered to project notes."
+  (interactive)
+  (my/diagnostics-open 'project :note "Project Notes"))
+
 (transient-define-prefix my/diagnostics-dispatch ()
   "Diagnostics workflow."
   [["Jump"
@@ -181,11 +191,13 @@
    ["Panel"
     ("b" "buffer panel" my/diagnostics-buffer-ui)
     ("e" "buffer errors" my/diagnostics-buffer-errors)
-    ("w" "buffer warnings" my/diagnostics-buffer-warnings)]
+    ("w" "buffer warnings" my/diagnostics-buffer-warnings)
+    ("n" "buffer notes" my/diagnostics-buffer-notes)]
    ["Project"
     ("p" "project panel" my/diagnostics-project-ui)
     ("E" "project errors" my/diagnostics-project-errors)
-    ("W" "project warnings" my/diagnostics-project-warnings)]
+    ("W" "project warnings" my/diagnostics-project-warnings)
+    ("N" "project notes" my/diagnostics-project-notes)]
    ["Display"
     ("m" "toggle modeline" my/diagnostics-modeline-mode)
     ("a" "toggle auto refresh" my/diagnostics-auto-refresh-mode)]])

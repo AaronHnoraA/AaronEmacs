@@ -46,7 +46,7 @@
 ### macOS Option `H-`
 
 - `H-,` / `H-x`
-  Hyper 管理菜单 / 只显示 `my/` 交互命令的独立 M-x
+  Hyper 管理菜单 / `telescope`
 - `H-f` / `H-F` / `H-b` / `H-B`
   打开文件 / 其他窗口打开文件 / 切 buffer / 其他窗口切 buffer
 - `H-r` / `H-s` / `H-g` / `H-t`
@@ -74,13 +74,12 @@
 - `H-X` / `H-c` / `H-v`
   剪切 / 复制 / 粘贴
 
-`H-x` 使用独立的 `my/hyper-command-history`，不会混进普通 `M-x`
-的 `extended-command-history`；普通 `M-x` 也不会因为 `H-x` 的使用而改变排序。
-`H-x` 会隐藏 mode、refresh、quit、board 行动作、manager 内部按钮命令、
-setup/ensure 和低层维护命令。普通 `M-x` 仍走默认 `amx` 行为。
+`H-x` 现在直接打开 `telescope`，和 `SPC SPC` / `H-t` / `F2` 是同一个入口。
+普通 `M-x` 仍走默认 `amx` 行为。
 
 `H-,` 内部按键按用途分组：board 入口用 `c/g/L/j/a/h`，菜单入口用
-`p/w/r/k/t/o`，代码和运维入口用 `./e/d/D/u/x`，其他工具用
+`p/w/r/k/t/o`，代码和运维入口用 `./e/d/D/u/x`，其中 `x` 打开
+`telescope`；其他工具用
 `m/s/n/J/R/P`。
 
 ## 2. Leader 键分组
@@ -138,6 +137,11 @@ setup/ensure 和低层维护命令。普通 `M-x` 仍走默认 `amx` 行为。
   下一个 / 上一个行书签
 - `SPC b L`
   直接设置当前行书签
+
+`SPC b j` / `C-x r j` 和 `SPC SPC m` 使用同一个 bookmark picker：
+候选里会显示 bookmark 名称、类型、项目、文件、行号和当前行摘要；当前项目的
+bookmark 排在前面。上下移动候选时会预览目标位置，确认后跳转。没有 bookmark
+时会打开 bookmark 列表，方便直接管理。
 
 ### 编辑 `SPC e`
 
@@ -227,7 +231,7 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 
 - `SPC c ?`
   diagnostics hub
-  统一入口：当前 / 项目 picker、buffer / project panel、error / warning 过滤都在这里
+  统一入口：当前 / 项目 picker、buffer / project panel、error / warning / note 过滤都在这里
 - `SPC c !`
   当前 buffer diagnostics picker
 - `SPC c a`
@@ -427,6 +431,8 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 
 - `SPC SPC`
   打开 `telescope`
+- `H-x` / `H-t` / `F2`
+  同样打开 `telescope`
 - `SPC SPC f`
   当前项目找文件
 - `SPC SPC b`
@@ -438,7 +444,17 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 - `SPC SPC i`
   当前 buffer symbols；输入时实时 preview 到候选 symbol
 - `SPC SPC m`
-  bookmark picker；没有书签时打开 bookmark 列表
+  bookmark picker；当前项目条目优先，移动候选时预览目标位置，没有书签时打开 bookmark 列表
+- `SPC SPC !` / `SPC SPC ?`
+  当前 buffer / 当前项目 diagnostics picker
+- `SPC SPC B` / `SPC SPC D`
+  当前 buffer / 当前项目 diagnostics board，适合长期打开查看和过滤
+- `SPC SPC e` / `SPC SPC w` / `SPC SPC n`
+  当前 buffer errors / warnings / notes picker，移动候选时预览，确认后跳转
+- `SPC SPC E` / `SPC SPC W` / `SPC SPC N`
+  当前项目 errors / warnings / notes picker，移动候选时预览，确认后跳转
+- `SPC SPC d`
+  diagnostics hub
 - `C-s`
   当前 buffer 搜索
 - `C-x C-r`
