@@ -59,7 +59,6 @@ Each entry is a plist with keys such as `:modes', `:program',
   :type 'boolean
   :group 'my/language-server)
 
-(defvar tramp-login-shell)
 (defvar eglot-events-buffer-config)
 (defvar eglot-stay-out-of)
 (defvar eglot-server-programs)
@@ -387,9 +386,7 @@ byte-compile backend does not emit noisy warnings on startup."
 (defun my/language-server-prepare-remote-eglot-environment ()
   "Prepare shell settings for remote `eglot' buffers."
   (when (file-remote-p default-directory)
-    (let ((remote-shell (or (and (boundp 'tramp-login-shell)
-                                 tramp-login-shell)
-                            "sh")))
+    (let ((remote-shell "sh"))
       (setq-local shell-file-name remote-shell)
       (setq-local explicit-shell-file-name remote-shell)
       (setq-local shell-command-switch "-c"))))

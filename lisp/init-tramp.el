@@ -49,6 +49,11 @@ work in a terminal."
   :type 'boolean
   :group 'my)
 
+(defcustom my/tramp-shell-methods '("ssh" "scp" "sshx")
+  "TRAMP methods whose remote shell startup policy is managed here."
+  :type '(repeat string)
+  :group 'my)
+
 (defcustom my/tramp-use-ssh-controlmaster
   nil
   "Whether TRAMP should add its own SSH ControlMaster options.
@@ -69,6 +74,15 @@ terminal `ssh', which makes remote failures harder to reason about."
                         (tramp-dissect-file-name path nil)))))
       (and vec
            (string= (tramp-file-name-method vec) "rpc")))))
+
+(defun my/tramp-set-method-parameter (method parameter value)
+  "Set METHOD's TRAMP PARAMETER to VALUE in `tramp-methods'.
+When VALUE is nil, remove PARAMETER so TRAMP falls back to a quiet
+non-login shell startup."
+  (when-let* ((entry (assoc method tramp-methods)))
+    (setcdr entry (assq-delete-all parameter (cdr entry)))
+    (when value
+      (setcdr entry (cons (list parameter value) (cdr entry))))))
 
 ;;; ── Pre-load settings ───────────────────────────────────────────────────────
 ;; These must be set before TRAMP is first loaded.
@@ -104,13 +118,20 @@ terminal `ssh', which makes remote failures harder to reason about."
   ;; SSH as the default transport.
   (setq tramp-default-method "ssh")
 
-  ;; Forcing `bash -l' makes TRAMP sensitive to shell startup chatter.
-  ;; Keep upstream defaults unless explicitly requested.
-  (if my/tramp-use-login-shell
-      (setq tramp-login-shell "/bin/bash"
-            tramp-login-args '(("-l")))
-    (setq tramp-login-shell nil
-          tramp-login-args nil))
+  ;; Forcing a login shell makes TRAMP sensitive to startup chatter from
+  ;; .profile/.bashrc/.zshrc.  Some teaching/login clusters print banners or
+  ;; run module setup from those files, which can leave TRAMP stuck in the
+  ;; "Setup connection" phase.  Apply this to `tramp-methods', where current
+  ;; TRAMP versions actually store the shell policy.
+  (dolist (method my/tramp-shell-methods)
+    (when (assoc method tramp-methods)
+      (my/tramp-set-method-parameter method 'tramp-remote-shell
+                                     (if my/tramp-use-login-shell
+                                         "/bin/bash"
+                                       "/bin/sh"))
+      (my/tramp-set-method-parameter method 'tramp-remote-shell-login
+                                     (and my/tramp-use-login-shell '("-l")))
+      (my/tramp-set-method-parameter method 'tramp-remote-shell-args '("-c"))))
 
   ;; Connection and session timeouts.
   (setq tramp-connection-timeout 10
@@ -148,6 +169,10 @@ terminal `ssh', which makes remote failures harder to reason about."
 
   ;; Don't write a history file to the remote home directory.
   (setq tramp-histfile-override "/dev/null")
+
+  ;; Keep remote shell startup non-interactive and quiet where possible.
+  (dolist (env '("BASH_ENV=''" "ENV=''" "HISTFILE=/dev/null" "PROMPT_COMMAND="))
+    (add-to-list 'tramp-remote-process-environment env))
 
   ;; Allow unsafe temporary files (needed on systems with nosuid /tmp,
   ;; e.g. some NixOS configurations).
