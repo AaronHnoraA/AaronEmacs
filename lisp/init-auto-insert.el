@@ -28,7 +28,9 @@
     (sh . "default.sh")
     (tex . "article.tex")
     (python . "default.py")
-    (nix . "default.nix"))
+    (nix . "default.nix")
+    (makefile . "default.mk")
+    (cmake . "default.cmake"))
   "Current template filename per template kind.
 
 Each entry is (KIND . FILENAME), where KIND maps to templates/KIND/FILENAME."
@@ -36,7 +38,7 @@ Each entry is (KIND . FILENAME), where KIND maps to templates/KIND/FILENAME."
   :group 'my/template)
 
 (defconst my/template-kinds
-  '(org c cc js ts sh tex python nix)
+  '(org c cc js ts sh tex python nix makefile cmake)
   "Template kinds supported by this configuration.")
 
 (defcustom my/template-auto-insert-enabled-kinds
@@ -105,6 +107,8 @@ first and then opening it."
       ((or "sh" "bash" "zsh") 'sh)
       ("tex" 'tex)
       ("nix" 'nix)
+      ("mk" 'makefile)
+      ("cmake" 'cmake)
       (_ nil))))
 
 (defun my/template--kind (&optional file)
@@ -118,8 +122,14 @@ first and then opening it."
        ((or (derived-mode-p 'sh-mode) (eq major-mode 'bash-ts-mode)) 'sh)
        ((or (derived-mode-p 'tex-mode) (derived-mode-p 'latex-mode) (derived-mode-p 'LaTeX-mode) (eq major-mode 'latex-ts-mode)) 'tex)
        ((or (derived-mode-p 'nix-mode) (eq major-mode 'nix-ts-mode)) 'nix)
+       ((derived-mode-p 'makefile-mode) 'makefile)
+       ((derived-mode-p 'cmake-mode) 'cmake)
        (t nil))
-      (my/template--kind-for-extension (or file buffer-file-name))))
+      (let ((name (file-name-nondirectory (or file buffer-file-name ""))))
+        (cond
+         ((member name '("Makefile" "makefile" "GNUmakefile")) 'makefile)
+         ((string= name "CMakeLists.txt") 'cmake)
+         (t (my/template--kind-for-extension (or file buffer-file-name)))))))
 
 (defun my/template--kind-dir (kind)
   (expand-file-name (symbol-name kind) my/template-root))
