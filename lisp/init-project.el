@@ -642,6 +642,12 @@ following."
   :type 'number
   :group 'my/project)
 
+(defcustom my/treemacs-tag-follow-excluded-modes
+  '(makefile-mode makefile-gmake-mode makefile-bsdmake-mode makefile-automake-mode)
+  "Major modes where custom Treemacs cursor follow should not enter tag nodes."
+  :type '(repeat symbol)
+  :group 'my/project)
+
 (defun my/treemacs-current-follow-state (&optional buffer window)
   "Return the follow state for BUFFER in WINDOW.
 The state is used to avoid re-following when the source context did not
@@ -717,7 +723,8 @@ When BUFFER is nil, use the current buffer in the selected window."
 
 (defun my/treemacs-safe-imenu-index ()
   "Return the current buffer's Treemacs imenu index, or nil on failure."
-  (when buffer-file-name
+  (when (and buffer-file-name
+             (not (memq major-mode my/treemacs-tag-follow-excluded-modes)))
     (condition-case nil
         (let ((inhibit-message t))
           (pcase (treemacs--flatten&sort-imenu-index)

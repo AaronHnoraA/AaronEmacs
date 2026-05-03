@@ -462,6 +462,21 @@
   (indent-guide-ignore-strings t))
 
 (with-eval-after-load 'indent-guide
+  (defun my/indent-guide-window-scroll-safe-a (fn &rest args)
+    "Ignore transient scroll-boundary errors from `indent-guide'."
+    (condition-case err
+        (apply fn args)
+      (args-out-of-range
+       (unless (and (consp err)
+                    (eq (car err) 'args-out-of-range))
+         (signal (car err) (cdr err))))
+      (error
+       (unless (string-match-p "\\`Args out of range"
+                               (error-message-string err))
+         (signal (car err) (cdr err))))))
+
+  (advice-add 'indent-guide--window-scroll-hook
+              :around #'my/indent-guide-window-scroll-safe-a)
   ;; 普通缩进线：淡灰蓝，不抢正文
   (aaron-ui-set-face 'indent-guide-face :foreground 'guide-line))
 

@@ -523,8 +523,9 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
   "Shut down the current `eglot' session in this buffer, if any."
   (when (and (fboundp 'eglot-managed-p)
              (eglot-managed-p))
-    (ignore-errors
-      (eglot-shutdown (eglot-current-server)))))
+    (when-let* ((server (eglot-current-server)))
+      (ignore-errors
+        (eglot-shutdown server)))))
 
 (defun my/lsp-mode-ensure ()
   "Start `lsp-mode' for explicitly registered major modes."
@@ -853,7 +854,8 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
                         3)
                       nil
                       (lambda (deferred-server)
-                        (unless (eglot--managed-buffers deferred-server)
+                        (unless (or (null deferred-server)
+                                    (eglot--managed-buffers deferred-server))
                           (funcall orig-shutdown deferred-server)))
                       srv)))))
         (funcall fn server)))))
