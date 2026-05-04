@@ -201,9 +201,7 @@ has all three features in scope.")
 
 (defun my/org-setup-buffer-spacing ()
   "Use relaxed line spacing in Org buffers only."
-  (setq-local line-spacing (or (and (boundp 'my/prose-line-spacing)
-                                    my/prose-line-spacing)
-                               0.16)))
+  (setq-local line-spacing my/prose-line-spacing))
 
 (defun my/org-setup-low-power-profile ()
   "Apply Org-local defaults that lower idle, typing and navigation wakeups."

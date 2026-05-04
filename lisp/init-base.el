@@ -335,7 +335,7 @@ Org, help, terminals and side buffers avoid the redisplay cost by default."
   :type 'string
   :group 'my/typography)
 
-(defcustom my/h-body 212
+(defcustom my/h-body 228
   "Base height for prose text."
   :type 'integer
   :group 'my/typography)
@@ -417,7 +417,7 @@ glyph keeps its shape while point moves through composed text."
   :type 'symbol
   :group 'my/typography)
 
-(defcustom my/prose-line-spacing 0.19
+(defcustom my/prose-line-spacing 0.24
   "Line spacing used in prose buffers."
   :type 'number
   :group 'my/typography)
@@ -498,7 +498,7 @@ glyph keeps its shape while point moves through composed text."
   ;; 变宽 = 正文字体（mixed-pitch 会让 Org 正文用它）
   (my/font--set-face 'variable-pitch
                      :family my/font-body
-                     :height (+ my/h-body 8)
+                     :height my/h-body
                      :width my/font-body-width
                      :weight my/font-body-weight))
 

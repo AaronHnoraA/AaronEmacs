@@ -344,11 +344,6 @@ Org blocks."
 (defun my/org-setup-polished-document-frame ()
   "Apply small buffer-local polish for reading and note-taking."
   (when (display-graphic-p)
-    (setq-local line-spacing
-                (max (or line-spacing 0)
-                     (or (and (boundp 'my/prose-line-spacing)
-                              my/prose-line-spacing)
-                         0.19)))
     (setq-local cursor-type 'bar)
     (setq-local left-margin-width 1)
     (setq-local right-margin-width 1)
