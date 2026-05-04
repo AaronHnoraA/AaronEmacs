@@ -37,6 +37,14 @@
 (defvar-local my/diagnostics--modeline-cache-size nil
   "Buffer size used by `my/diagnostics--modeline-cache'.")
 
+(defvar my/diagnostics-modeline-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mode-line mouse-1] #'my/diagnostics-buffer-ui)
+    (define-key map [mode-line C-mouse-1] #'my/diagnostics-project-ui)
+    (define-key map [mode-line mouse-3] #'my/diagnostics-dispatch)
+    map)
+  "Mouse keymap used by the diagnostics mode-line segment.")
+
 (defun my/diagnostics--counts (&optional diags)
   "Return diagnostic counts for DIAGS or the current buffer."
   (let ((errors 0)
@@ -55,14 +63,19 @@
                (warnings (plist-get counts :warning))
                (notes (plist-get counts :note)))
     (when (> (+ errors warnings notes) 0)
-      (concat
-       " Fly:"
-       (when (> errors 0)
-         (propertize (format " E%s" errors) 'face 'error))
-       (when (> warnings 0)
-         (propertize (format " W%s" warnings) 'face 'warning))
-       (when (> notes 0)
-         (propertize (format " N%s" notes) 'face 'success))))))
+      (propertize
+       (concat
+        " Fly:"
+        (when (> errors 0)
+          (propertize (format " E%s" errors) 'face 'error))
+        (when (> warnings 0)
+          (propertize (format " W%s" warnings) 'face 'warning))
+        (when (> notes 0)
+          (propertize (format " N%s" notes) 'face 'success)))
+       'mouse-face 'mode-line-highlight
+       'local-map my/diagnostics-modeline-map
+       'keymap my/diagnostics-modeline-map
+       'help-echo "Diagnostics\nmouse-1: buffer diagnostics\nC-mouse-1: project diagnostics\nmouse-3: diagnostics menu"))))
 
 (defun my/diagnostics--clear-modeline-cache (&rest _)
   "Clear cached diagnostics modeline state in the current buffer."

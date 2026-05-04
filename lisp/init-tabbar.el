@@ -119,6 +119,8 @@ Scrolling in the opposite direction is allowed immediately."
   (let ((map (make-sparse-keymap)))
     (define-key map [tab-line down-mouse-1] #'ignore)
     (define-key map [tab-line mouse-1] #'my/tab-line-select-buffer)
+    (define-key map [tab-line down-mouse-2] #'ignore)
+    (define-key map [tab-line mouse-2] #'my/tab-line-close-buffer)
     (define-key map [tab-line down-mouse-3] #'ignore)
     (define-key map [tab-line mouse-3] #'my/tab-line-popup-menu)
     (define-key map [tab-line wheel-up] #'my/tab-line-wheel-up)
@@ -483,6 +485,13 @@ NOW is a float timestamp in seconds and defaults to the current time."
                 (my/tab-line-menu-items buffer window))))
     (popup-menu menu event)))
 
+(defun my/tab-line-close-buffer (event)
+  "Close the clicked centered tab from mouse EVENT."
+  (interactive "e")
+  (my/tab-line-kill-buffer
+   (my/tab-line-event-buffer event)
+   (my/tab-line-event-window event)))
+
 (defun my/tab-line-select-buffer (event)
   "Select the clicked buffer tab from EVENT."
   (interactive "e")
@@ -526,8 +535,9 @@ When MAX-WIDTH is non-nil, use it to shrink labels in narrow windows."
      'pointer 'hand
      'mouse-face 'tab-line-highlight
      'follow-link 'ignore
-     'help-echo (or (buffer-file-name buffer)
-                    name))))
+     'help-echo (format "%s\nmouse-1: switch\nmouse-2: close\nmouse-3: menu"
+                        (or (buffer-file-name buffer)
+                            name)))))
 
 (defun my/tab-line-passive-string (text face)
   "Return TEXT with FACE and centered tab line mouse bindings."

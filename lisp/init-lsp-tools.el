@@ -9,6 +9,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'easymenu)
 (require 'init-funcs)
 (require 'pp)
 (require 'subr-x)
@@ -38,6 +39,9 @@
 
 (defvar-local my/language-server-manager-source-buffer nil
   "Source buffer used by the current language-server view.")
+
+(defvar my/language-server-manager-entry-mouse-map nil
+  "Mouse keymap installed on row entries in language-server views.")
 
 (defvar company-mode)
 (defvar breadcrumb-local-mode)
@@ -81,6 +85,16 @@
 
 (define-derived-mode my/language-server-doctor-mode special-mode "Lang-Server-Doctor"
   "Major mode for the language-server doctor report.")
+
+(defun my/language-server-manager--assert-view-buffer ()
+  "Signal unless the current buffer is the language-server Hub."
+  (unless (derived-mode-p 'my/language-server-manager-mode)
+    (user-error "Refusing to render Language Server Hub into %s" (buffer-name))))
+
+(defun my/language-server-doctor--assert-view-buffer ()
+  "Signal unless the current buffer is the language-server Doctor."
+  (unless (derived-mode-p 'my/language-server-doctor-mode)
+    (user-error "Refusing to render Language Server Doctor into %s" (buffer-name))))
 
 (defun my/language-server--source-buffer ()
   "Return the source buffer associated with the current view."
@@ -221,6 +235,45 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
        ((derived-mode-p 'prog-mode) "eglot (prog-mode default)")
        (t "manual / unknown")))))
 
+(defun my/language-server--source-status (&optional source)
+  "Collect display status for SOURCE without inserting into that buffer."
+  (let ((source (or source (my/language-server--source-buffer))))
+    (when (buffer-live-p source)
+      (with-current-buffer source
+        (let* ((lsp-entry (my/language-server--current-lsp-preference-entry source))
+               (eglot-entry (my/language-server--current-eglot-entry source))
+               (feature (and lsp-entry (plist-get lsp-entry :feature)))
+               (active (and (fboundp 'my/current-language-server-backend)
+                            (my/current-language-server-backend)))
+               (project-root (my/language-server--project-root source))
+               (workspace-set (local-variable-p 'eglot-workspace-configuration source))
+               (workspace (and workspace-set eglot-workspace-configuration)))
+          (list :buffer (buffer-name source)
+                :file (or (and buffer-file-name
+                               (abbreviate-file-name buffer-file-name))
+                          "-")
+                :major-mode major-mode
+                :default-directory (abbreviate-file-name default-directory)
+                :project-root (if project-root
+                                  (abbreviate-file-name project-root)
+                                "-")
+                :policy (my/language-server--current-policy source)
+                :active-backend (or active "-")
+                :required-feature (or feature "-")
+                :feature-status (my/language-server--feature-status feature)
+                :eglot-match (if eglot-entry
+                                  (or (plist-get eglot-entry :label)
+                                      (my/language-server--format-mode-list
+                                       (plist-get eglot-entry :modes)))
+                                "-")
+                :flymake (if (bound-and-true-p flymake-mode) "on" "off")
+                :company (if (bound-and-true-p company-mode) "on" "off")
+                :breadcrumb (if (bound-and-true-p breadcrumb-local-mode) "on" "off")
+                :workspace-set workspace-set
+                :workspace (and workspace
+                                (string-trim-right
+                                 (pp-to-string workspace)))))))))
+
 (defun my/language-server--openable-path (path)
   "Return PATH abbreviated for display."
   (abbreviate-file-name (expand-file-name path)))
@@ -255,8 +308,10 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
   "Mark the region between START and END with manager ENTRY."
   (add-text-properties start end
                        `(my/language-server-entry ,entry
+                                                  local-map ,my/language-server-manager-entry-mouse-map
+                                                  keymap ,my/language-server-manager-entry-mouse-map
                                                   mouse-face highlight
-                                                  help-echo "RET: context action")))
+                                                  help-echo "RET/mouse-1: context action, mouse-3: menu")))
 
 (defun my/language-server-manager-open-source ()
   "Open the source file referenced by the entry at point."
@@ -274,6 +329,146 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
             (source (my/language-server--entry-source entry)))
       (find-file source)
     (my/language-server-manager-ensure)))
+
+(defun my/language-server-manager--mouse-set-point (event)
+  "Move point to the language-server view row clicked by EVENT."
+  (let* ((posn (and event (event-start event)))
+         (window (and posn (posn-window posn)))
+         (point (and posn (posn-point posn))))
+    (when (window-live-p window)
+      (select-window window))
+    (when (integer-or-marker-p point)
+      (goto-char point))))
+
+(defun my/language-server-manager-entry-mouse-action (event)
+  "Run the default row action for the language-server entry under EVENT."
+  (interactive "e")
+  (my/language-server-manager--mouse-set-point event)
+  (my/language-server-manager-context-action))
+
+(defun my/language-server-manager--menu-item (label command &optional enabled)
+  "Return a popup menu item for LABEL and COMMAND."
+  (vector label command (and (fboundp command) enabled)))
+
+(defun my/language-server-manager--entry-menu-items (entry)
+  "Return right-click menu items for language-server ENTRY."
+  (let ((source (and entry (my/language-server--entry-source entry))))
+    (list
+     (my/language-server-manager--menu-item
+      "Context action" 'my/language-server-manager-context-action t)
+     (my/language-server-manager--menu-item
+      "Open entry source" 'my/language-server-manager-open-source source)
+     (list
+      "Current Buffer"
+      (my/language-server-manager--menu-item
+       "Ensure / connect" 'my/language-server-manager-ensure t)
+      (my/language-server-manager--menu-item
+       "Restart" 'my/language-server-manager-restart t)
+      (my/language-server-manager--menu-item
+       "Shutdown" 'my/language-server-manager-shutdown t)
+      (my/language-server-manager--menu-item
+       "Open log" 'my/language-server-manager-open-log t)
+      (my/language-server-manager--menu-item
+       "Describe session" 'my/language-server-manager-describe-session t)
+      (my/language-server-manager--menu-item
+       "Workspace config" 'my/language-server-manager-show-workspace-configuration t))
+     (list
+      "Edits / Diagnostics"
+      (my/language-server-manager--menu-item
+       "Code actions" 'my/language-server-manager-code-actions t)
+      (my/language-server-manager--menu-item
+       "Organize imports" 'my/language-server-manager-organize-imports t)
+      (my/language-server-manager--menu-item
+       "Format buffer" 'my/language-server-manager-format-buffer t)
+      (my/language-server-manager--menu-item
+       "Rename symbol" 'my/language-server-manager-rename t)
+      (my/language-server-manager--menu-item
+       "Buffer problems" 'my/language-server-manager-problems-buffer t)
+      (my/language-server-manager--menu-item
+       "Project problems" 'my/language-server-manager-problems-project t))
+     (list
+      "Views"
+      (my/language-server-manager--menu-item
+       "Refresh" 'my/language-server-manager-refresh t)
+      (my/language-server-manager--menu-item
+       "Hub" 'my/language-server-manager t)
+      (my/language-server-manager--menu-item
+       "Doctor" 'my/language-server-doctor t)
+      (my/language-server-manager--menu-item
+       "Dispatch" 'my/language-server-dispatch t)
+      (my/language-server-manager--menu-item
+       "Docs" 'my/language-server-manager-open-docs t)))))
+
+(defun my/language-server-manager--view-menu-items ()
+  "Return right-click menu items for language-server Hub/Doctor views."
+  (let ((refresh-command
+         (if (derived-mode-p 'my/language-server-doctor-mode)
+             'my/language-server-doctor-refresh
+           'my/language-server-manager-refresh)))
+    (list
+     (list
+      "Views"
+      (my/language-server-manager--menu-item
+       "Refresh" refresh-command t)
+      (my/language-server-manager--menu-item
+       "Hub" 'my/language-server-manager t)
+      (my/language-server-manager--menu-item
+       "Doctor" 'my/language-server-doctor t)
+      (my/language-server-manager--menu-item
+       "Dispatch" 'my/language-server-dispatch t)
+      (my/language-server-manager--menu-item
+       "Docs" 'my/language-server-manager-open-docs t))
+     (list
+      "Lifecycle"
+      (my/language-server-manager--menu-item
+       "Ensure / connect" 'my/language-server-manager-ensure t)
+      (my/language-server-manager--menu-item
+       "Restart" 'my/language-server-manager-restart t)
+      (my/language-server-manager--menu-item
+       "Shutdown" 'my/language-server-manager-shutdown t)
+      (my/language-server-manager--menu-item
+       "Open log" 'my/language-server-manager-open-log t)
+      (my/language-server-manager--menu-item
+       "Describe session" 'my/language-server-manager-describe-session t))
+     (list
+      "Edits"
+      (my/language-server-manager--menu-item
+       "Code actions" 'my/language-server-manager-code-actions t)
+      (my/language-server-manager--menu-item
+       "Organize imports" 'my/language-server-manager-organize-imports t)
+      (my/language-server-manager--menu-item
+       "Format buffer" 'my/language-server-manager-format-buffer t)
+      (my/language-server-manager--menu-item
+       "Rename symbol" 'my/language-server-manager-rename t))
+     (list
+      "Diagnostics"
+      (my/language-server-manager--menu-item
+       "Buffer problems" 'my/language-server-manager-problems-buffer t)
+      (my/language-server-manager--menu-item
+       "Project problems" 'my/language-server-manager-problems-project t)
+      (my/language-server-manager--menu-item
+       "Buffer diagnostics UI" 'my/language-server-manager-diagnostics-buffer-ui t)
+      (my/language-server-manager--menu-item
+       "Project diagnostics UI" 'my/language-server-manager-diagnostics-project-ui t)
+      (my/language-server-manager--menu-item
+       "Diagnostics menu" 'my/language-server-manager-diagnostics-menu t)))))
+
+(defun my/language-server-manager-popup-menu (event)
+  "Show a right-click menu for language-server Hub/Doctor EVENT."
+  (interactive "e")
+  (my/language-server-manager--mouse-set-point event)
+  (let* ((entry (my/language-server-manager--current-entry))
+         (title (if entry "Language Server Entry" "Language Server"))
+         (items (if entry
+                    (my/language-server-manager--entry-menu-items entry)
+                  (my/language-server-manager--view-menu-items))))
+    (popup-menu (easy-menu-create-menu title items) event)))
+
+(setq my/language-server-manager-entry-mouse-map
+      (let ((map (make-sparse-keymap)))
+        (define-key map [mouse-1] #'my/language-server-manager-entry-mouse-action)
+        (define-key map [mouse-3] #'my/language-server-manager-popup-menu)
+        map))
 
 (defun my/language-server-manager-open-docs ()
   "Open the dedicated language-server workflow document."
@@ -300,21 +495,49 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
        ", ")
     "-"))
 
+(defun my/language-server--value-or-unset (symbol)
+  "Return SYMBOL's value, or the string \"unset\" when it is unbound."
+  (if (boundp symbol)
+      (symbol-value symbol)
+    "unset"))
+
+(defun my/language-server--enabled-value (symbol)
+  "Return non-nil when SYMBOL is bound and its value is non-nil."
+  (and (boundp symbol)
+       (symbol-value symbol)))
+
+(defun my/language-server--toggle-default (symbol)
+  "Toggle SYMBOL's default value and return the new value."
+  (let ((value (not (my/language-server--enabled-value symbol))))
+    (set-default symbol value)
+    value))
+
+(defun my/language-server--read-number-choice (name symbol choices fallback)
+  "Read a numeric value for SYMBOL named NAME from CHOICES."
+  (let* ((current (my/language-server--value-or-unset symbol))
+         (default (if (numberp current)
+                      (format "%s" current)
+                    fallback)))
+    (string-to-number
+     (completing-read
+      (format "%s (current %s): " name current)
+      choices nil t nil nil default))))
+
 (defun my/language-server--runtime-knob-entries ()
   "Return important runtime knob/value pairs."
-  `(("read-process-output-max" . ,(and (boundp 'read-process-output-max)
-                                       read-process-output-max))
-    ("eglot-autoshutdown" . ,(and (boundp 'eglot-autoshutdown)
-                                  eglot-autoshutdown))
-    ("eglot-autoreconnect" . ,(and (boundp 'eglot-autoreconnect)
-                                   eglot-autoreconnect))
-    ("eglot-events-buffer-size" . ,(and (boundp 'eglot-events-buffer-size)
-                                        eglot-events-buffer-size))
-    ("lsp-log-io" . ,(and (boundp 'lsp-log-io) lsp-log-io))
-    ("lsp-inlay-hint-enable" . ,(and (boundp 'lsp-inlay-hint-enable)
-                                     lsp-inlay-hint-enable))
-    ("flymake-no-changes-timeout" . ,(and (boundp 'flymake-no-changes-timeout)
-                                          flymake-no-changes-timeout))))
+  `(("read-process-output-max" . ,(my/language-server--value-or-unset
+                                   'read-process-output-max))
+    ("eglot-autoshutdown" . ,(my/language-server--value-or-unset
+                              'eglot-autoshutdown))
+    ("eglot-autoreconnect" . ,(my/language-server--value-or-unset
+                               'eglot-autoreconnect))
+    ("eglot-events-buffer-size" . ,(my/language-server--value-or-unset
+                                    'eglot-events-buffer-size))
+    ("lsp-log-io" . ,(my/language-server--value-or-unset 'lsp-log-io))
+    ("lsp-inlay-hint-enable" . ,(my/language-server--value-or-unset
+                                 'lsp-inlay-hint-enable))
+    ("flymake-no-changes-timeout" . ,(my/language-server--value-or-unset
+                                      'flymake-no-changes-timeout))))
 
 (defun my/language-server--maybe-refresh-current-view ()
   "Refresh the current view when it is a hub or doctor buffer."
@@ -333,36 +556,42 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
                     (my/current-language-server-backend))
           ('eglot
            (when (fboundp 'eglot-inlay-hints-mode)
-             (eglot-inlay-hints-mode (if lsp-inlay-hint-enable 1 -1))))
+             (eglot-inlay-hints-mode
+              (if (my/language-server--enabled-value 'lsp-inlay-hint-enable)
+                  1
+                -1))))
           ('lsp-mode
            (when (fboundp 'lsp-inlay-hints-mode)
-             (lsp-inlay-hints-mode (if lsp-inlay-hint-enable 1 -1)))))))))
+             (lsp-inlay-hints-mode
+              (if (my/language-server--enabled-value 'lsp-inlay-hint-enable)
+                  1
+                -1)))))))))
 
 (defun my/language-server-toggle-eglot-autoreconnect ()
   "Toggle `eglot-autoreconnect' for the current Emacs session."
   (interactive)
-  (setq-default eglot-autoreconnect (not eglot-autoreconnect))
-  (message "eglot-autoreconnect: %s" eglot-autoreconnect)
+  (message "eglot-autoreconnect: %s"
+           (my/language-server--toggle-default 'eglot-autoreconnect))
   (my/language-server--maybe-refresh-current-view))
 
 (defun my/language-server-toggle-eglot-autoshutdown ()
   "Toggle `eglot-autoshutdown' for the current Emacs session."
   (interactive)
-  (setq-default eglot-autoshutdown (not eglot-autoshutdown))
-  (message "eglot-autoshutdown: %s" eglot-autoshutdown)
+  (message "eglot-autoshutdown: %s"
+           (my/language-server--toggle-default 'eglot-autoshutdown))
   (my/language-server--maybe-refresh-current-view))
 
 (defun my/language-server-toggle-lsp-log-io ()
   "Toggle `lsp-log-io' for the current Emacs session."
   (interactive)
-  (setq-default lsp-log-io (not lsp-log-io))
-  (message "lsp-log-io: %s" lsp-log-io)
+  (message "lsp-log-io: %s"
+           (my/language-server--toggle-default 'lsp-log-io))
   (my/language-server--maybe-refresh-current-view))
 
 (defun my/language-server-toggle-inlay-hints ()
   "Toggle `lsp-inlay-hint-enable' and sync the source buffer."
   (interactive)
-  (setq-default lsp-inlay-hint-enable (not lsp-inlay-hint-enable))
+  (my/language-server--toggle-default 'lsp-inlay-hint-enable)
   (my/language-server--sync-source-buffer-inlay-hints)
   (message "lsp-inlay-hint-enable: %s" lsp-inlay-hint-enable)
   (my/language-server--maybe-refresh-current-view))
@@ -371,12 +600,11 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
   "Set `read-process-output-max' to VALUE for the current session."
   (interactive
    (list
-    (string-to-number
-     (completing-read
-      (format "read-process-output-max (current %s): " read-process-output-max)
-      '("65536" "262144" "524288" "1048576" "2097152")
-      nil t nil nil
-      (format "%s" read-process-output-max)))))
+    (my/language-server--read-number-choice
+     "read-process-output-max"
+     'read-process-output-max
+     '("65536" "262144" "524288" "1048576" "2097152")
+     "1048576")))
   (setq-default read-process-output-max value)
   (message "read-process-output-max: %s" read-process-output-max)
   (my/language-server--maybe-refresh-current-view))
@@ -385,12 +613,11 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
   "Set `eglot-events-buffer-size' to VALUE for the current session."
   (interactive
    (list
-    (string-to-number
-     (completing-read
-      (format "eglot-events-buffer-size (current %s): " eglot-events-buffer-size)
-      '("0" "20000" "100000" "200000" "1000000")
-      nil t nil nil
-      (format "%s" eglot-events-buffer-size)))))
+    (my/language-server--read-number-choice
+     "eglot-events-buffer-size"
+     'eglot-events-buffer-size
+     '("0" "20000" "100000" "200000" "1000000")
+     "200000")))
   (setq-default eglot-events-buffer-size value)
   (message "eglot-events-buffer-size: %s" eglot-events-buffer-size)
   (my/language-server--maybe-refresh-current-view))
@@ -473,6 +700,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 
 (defun my/language-server-manager-insert-maintenance-section ()
   "Insert the top-level maintenance section."
+  (my/language-server-manager--assert-view-buffer)
   (insert "Maintenance\n")
   (insert "-----------\n")
   (insert (format "explicit lsp-mode routes: %d\n"
@@ -503,15 +731,22 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 
 (defun my/language-server-manager--insert-settings-section ()
   "Insert quick runtime settings for the language-server stack."
+  (my/language-server-manager--assert-view-buffer)
   (insert "Quick Settings\n")
   (insert "--------------\n")
   (insert "These toggles only affect the current Emacs session.  If one of them proves useful, move it back into the corresponding init file.\n")
-  (insert (format "eglot-autoreconnect: %s\n" eglot-autoreconnect))
-  (insert (format "eglot-autoshutdown: %s\n" eglot-autoshutdown))
-  (insert (format "lsp-log-io: %s\n" lsp-log-io))
-  (insert (format "lsp-inlay-hint-enable: %s\n" lsp-inlay-hint-enable))
-  (insert (format "read-process-output-max: %s\n" read-process-output-max))
-  (insert (format "eglot-events-buffer-size: %s\n" eglot-events-buffer-size))
+  (insert (format "eglot-autoreconnect: %s\n"
+                  (my/language-server--value-or-unset 'eglot-autoreconnect)))
+  (insert (format "eglot-autoshutdown: %s\n"
+                  (my/language-server--value-or-unset 'eglot-autoshutdown)))
+  (insert (format "lsp-log-io: %s\n"
+                  (my/language-server--value-or-unset 'lsp-log-io)))
+  (insert (format "lsp-inlay-hint-enable: %s\n"
+                  (my/language-server--value-or-unset 'lsp-inlay-hint-enable)))
+  (insert (format "read-process-output-max: %s\n"
+                  (my/language-server--value-or-unset 'read-process-output-max)))
+  (insert (format "eglot-events-buffer-size: %s\n"
+                  (my/language-server--value-or-unset 'eglot-events-buffer-size)))
   (insert "actions: ")
   (my/language-server--insert-button
    "[toggle autoreconnect]"
@@ -546,102 +781,86 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 
 (defun my/language-server-manager--insert-current-buffer-section ()
   "Insert the current-buffer status section."
+  (my/language-server-manager--assert-view-buffer)
   (insert "Current Buffer\n")
   (insert "--------------\n")
-  (let ((source (my/language-server--source-buffer)))
-    (if (buffer-live-p source)
-        (with-current-buffer source
-          (let* ((lsp-entry (my/language-server--current-lsp-preference-entry source))
-                 (eglot-entry (my/language-server--current-eglot-entry source))
-                 (feature (and lsp-entry (plist-get lsp-entry :feature)))
-                 (active (and (fboundp 'my/current-language-server-backend)
-                              (my/current-language-server-backend)))
-                 (project-root (my/language-server--project-root source))
-                 (workspace-set (local-variable-p 'eglot-workspace-configuration source))
-                 (workspace (and workspace-set eglot-workspace-configuration)))
-            (insert (format "buffer: %s\n" (buffer-name source)))
-            (insert (format "file: %s\n"
-                            (or (and buffer-file-name
-                                     (abbreviate-file-name buffer-file-name))
-                                "-")))
-            (insert (format "major mode: %s\n" major-mode))
-            (insert (format "default-directory: %s\n"
-                            (abbreviate-file-name default-directory)))
-            (insert (format "project root: %s\n"
-                            (if project-root
-                                (abbreviate-file-name project-root)
-                              "-")))
-            (insert (format "route policy: %s\n"
-                            (my/language-server--current-policy source)))
-            (insert (format "active backend: %s\n" (or active "-")))
-            (insert (format "required lsp feature: %s (%s)\n"
-                            (or feature "-")
-                            (my/language-server--feature-status feature)))
-            (insert (format "matching custom eglot mapping: %s\n"
-                            (if eglot-entry
-                                (or (plist-get eglot-entry :label)
-                                    (my/language-server--format-mode-list
-                                     (plist-get eglot-entry :modes)))
-                              "-")))
-            (insert (format "flymake/company/breadcrumb: %s / %s / %s\n"
-                            (if (bound-and-true-p flymake-mode) "on" "off")
-                            (if (bound-and-true-p company-mode) "on" "off")
-                            (if (bound-and-true-p breadcrumb-local-mode) "on" "off")))
-            (insert (format "local eglot workspace config: %s\n"
-                            (if workspace-set "set" "unset")))
-            (when workspace
-              (insert (format "  %s\n"
-                              (string-trim-right (pp-to-string workspace)))))
-            (insert "actions: ")
-            (my/language-server--insert-button
-             "[ensure]"
-             (lambda (_button) (my/language-server-manager-ensure))
-             "Ensure the preferred backend for the source buffer")
-            (insert " ")
-            (my/language-server--insert-button
-             "[restart]"
-             (lambda (_button) (my/language-server-manager-restart))
-             "Restart the active language server")
-            (insert " ")
-            (my/language-server--insert-button
-             "[shutdown]"
-             (lambda (_button) (my/language-server-manager-shutdown))
-             "Shutdown the active language server")
-            (insert " ")
-            (my/language-server--insert-button
-             "[log]"
-             (lambda (_button) (my/language-server-manager-open-log))
-             "Open the active backend log")
-            (insert " ")
-            (my/language-server--insert-button
-             "[session]"
-             (lambda (_button) (my/language-server-manager-describe-session))
-             "Describe the current language-server session")
-            (insert " ")
-            (my/language-server--insert-button
-             "[config]"
-             (lambda (_button) (my/language-server-manager-show-workspace-configuration))
-             "Show backend workspace configuration")
-            (insert " ")
-            (my/language-server--insert-button
-             "[actions]"
-             (lambda (_button) (my/language-server-manager-code-actions))
-             "Run code actions")
-            (insert " ")
-            (my/language-server--insert-button
-             "[format]"
-             (lambda (_button) (my/language-server-manager-format-buffer))
-             "Format the current buffer")
-            (insert " ")
-            (my/language-server--insert-button
-             "[rename]"
-             (lambda (_button) (my/language-server-manager-rename))
-             "Rename the symbol at point")
-            (insert "\n\n")))
-      (insert "No source buffer.\n\n"))))
+  (if-let* ((status (my/language-server--source-status)))
+      (progn
+        (insert (format "buffer: %s\n" (plist-get status :buffer)))
+        (insert (format "file: %s\n" (plist-get status :file)))
+        (insert (format "major mode: %s\n" (plist-get status :major-mode)))
+        (insert (format "default-directory: %s\n"
+                        (plist-get status :default-directory)))
+        (insert (format "project root: %s\n" (plist-get status :project-root)))
+        (insert (format "route policy: %s\n" (plist-get status :policy)))
+        (insert (format "active backend: %s\n"
+                        (plist-get status :active-backend)))
+        (insert (format "required lsp feature: %s (%s)\n"
+                        (plist-get status :required-feature)
+                        (plist-get status :feature-status)))
+        (insert (format "matching custom eglot mapping: %s\n"
+                        (plist-get status :eglot-match)))
+        (insert (format "flymake/company/breadcrumb: %s / %s / %s\n"
+                        (plist-get status :flymake)
+                        (plist-get status :company)
+                        (plist-get status :breadcrumb)))
+        (insert (format "local eglot workspace config: %s\n"
+                        (if (plist-get status :workspace-set)
+                            "set"
+                          "unset")))
+        (when-let* ((workspace (plist-get status :workspace)))
+          (insert (format "  %s\n" workspace)))
+        (insert "actions: ")
+        (my/language-server--insert-button
+         "[ensure]"
+         (lambda (_button) (my/language-server-manager-ensure))
+         "Ensure the preferred backend for the source buffer")
+        (insert " ")
+        (my/language-server--insert-button
+         "[restart]"
+         (lambda (_button) (my/language-server-manager-restart))
+         "Restart the active language server")
+        (insert " ")
+        (my/language-server--insert-button
+         "[shutdown]"
+         (lambda (_button) (my/language-server-manager-shutdown))
+         "Shutdown the active language server")
+        (insert " ")
+        (my/language-server--insert-button
+         "[log]"
+         (lambda (_button) (my/language-server-manager-open-log))
+         "Open the active backend log")
+        (insert " ")
+        (my/language-server--insert-button
+         "[session]"
+         (lambda (_button) (my/language-server-manager-describe-session))
+         "Describe the current language-server session")
+        (insert " ")
+        (my/language-server--insert-button
+         "[config]"
+         (lambda (_button) (my/language-server-manager-show-workspace-configuration))
+         "Show backend workspace configuration")
+        (insert " ")
+        (my/language-server--insert-button
+         "[actions]"
+         (lambda (_button) (my/language-server-manager-code-actions))
+         "Run code actions")
+        (insert " ")
+        (my/language-server--insert-button
+         "[format]"
+         (lambda (_button) (my/language-server-manager-format-buffer))
+         "Format the current buffer")
+        (insert " ")
+        (my/language-server--insert-button
+         "[rename]"
+         (lambda (_button) (my/language-server-manager-rename))
+         "Rename the symbol at point")
+        (insert "\n\n"))
+    (insert "No source buffer.\n\n")))
 
 (defun my/language-server-manager--insert-routing-section ()
   "Insert explicit `lsp-mode' routing overrides."
+  (my/language-server-manager--assert-view-buffer)
   (insert "Explicit lsp-mode Routes\n")
   (insert "------------------------\n")
   (insert "Default behavior: `prog-mode' buffers prefer Eglot unless a mode is explicitly routed to `lsp-mode`.\n\n")
@@ -685,6 +904,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 
 (defun my/language-server-manager--insert-eglot-section ()
   "Insert locally registered Eglot server mappings."
+  (my/language-server-manager--assert-view-buffer)
   (insert "Custom Eglot Server Mappings\n")
   (insert "----------------------------\n")
   (insert "Built-in Eglot mappings still apply.  This section only lists local additions/overrides registered through `my/register-eglot-server-program`.\n\n")
@@ -731,6 +951,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 
 (defun my/language-server-manager--insert-runtime-knobs ()
   "Insert the runtime knobs section."
+  (my/language-server-manager--assert-view-buffer)
   (insert "Runtime Knobs\n")
   (insert "-------------\n")
   (dolist (entry (my/language-server--runtime-knob-entries))
@@ -742,6 +963,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 (defun my/language-server-manager-refresh ()
   "Refresh the language-server dashboard."
   (interactive)
+  (my/language-server-manager--assert-view-buffer)
   (let ((inhibit-read-only t))
     (erase-buffer)
     (insert "Language Server Hub\n")
@@ -758,6 +980,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 
 (defun my/language-server--doctor-insert-libraries ()
   "Insert the library availability section."
+  (my/language-server-doctor--assert-view-buffer)
   (insert "Libraries\n")
   (insert "---------\n")
   (dolist (library '("eglot"
@@ -779,6 +1002,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 
 (defun my/language-server--doctor-insert-executables ()
   "Insert the executable availability section."
+  (my/language-server-doctor--assert-view-buffer)
   (insert "Executables\n")
   (insert "-----------\n")
   (let ((names (delete-dups
@@ -801,57 +1025,42 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 
 (defun my/language-server--doctor-insert-current-buffer (source)
   "Insert a current-buffer report for SOURCE."
+  (my/language-server-doctor--assert-view-buffer)
   (insert "Current Buffer\n")
   (insert "--------------\n")
-  (if (buffer-live-p source)
-      (with-current-buffer source
-        (let* ((lsp-entry (my/language-server--current-lsp-preference-entry source))
-               (eglot-entry (my/language-server--current-eglot-entry source))
-               (feature (and lsp-entry (plist-get lsp-entry :feature)))
-               (project-root (my/language-server--project-root source)))
-          (insert (format "buffer: %s\n" (buffer-name source)))
-          (insert (format "file: %s\n"
-                          (or (and buffer-file-name
-                                   (abbreviate-file-name buffer-file-name))
-                              "-")))
-          (insert (format "major mode: %s\n" major-mode))
-          (insert (format "default-directory: %s\n"
-                          (abbreviate-file-name default-directory)))
-          (insert (format "project root: %s\n"
-                          (if project-root
-                              (abbreviate-file-name project-root)
-                            "-")))
-          (insert (format "route policy: %s\n"
-                          (my/language-server--current-policy source)))
-          (insert (format "active backend: %s\n"
-                          (or (and (fboundp 'my/current-language-server-backend)
-                                   (my/current-language-server-backend))
-                              "-")))
-          (insert (format "required lsp feature: %s (%s)\n"
-                          (or feature "-")
-                          (my/language-server--feature-status feature)))
-          (insert (format "matching custom eglot mapping: %s\n"
-                          (if eglot-entry
-                              (or (plist-get eglot-entry :label)
-                                  (my/language-server--format-mode-list
-                                   (plist-get eglot-entry :modes)))
-                            "-")))
-          (insert (format "flymake/company/breadcrumb: %s / %s / %s\n"
-                          (if (bound-and-true-p flymake-mode) "on" "off")
-                          (if (bound-and-true-p company-mode) "on" "off")
-                          (if (bound-and-true-p breadcrumb-local-mode) "on" "off")))
-          (insert (format "local eglot workspace config: %s\n"
-                          (if (local-variable-p 'eglot-workspace-configuration source)
-                              "set"
-                            "unset")))
-          (when (local-variable-p 'eglot-workspace-configuration source)
-            (insert (string-trim-right (pp-to-string eglot-workspace-configuration)))
-            (insert "\n"))))
+  (if-let* ((status (my/language-server--source-status source)))
+      (progn
+        (insert (format "buffer: %s\n" (plist-get status :buffer)))
+        (insert (format "file: %s\n" (plist-get status :file)))
+        (insert (format "major mode: %s\n" (plist-get status :major-mode)))
+        (insert (format "default-directory: %s\n"
+                        (plist-get status :default-directory)))
+        (insert (format "project root: %s\n" (plist-get status :project-root)))
+        (insert (format "route policy: %s\n" (plist-get status :policy)))
+        (insert (format "active backend: %s\n"
+                        (plist-get status :active-backend)))
+        (insert (format "required lsp feature: %s (%s)\n"
+                        (plist-get status :required-feature)
+                        (plist-get status :feature-status)))
+        (insert (format "matching custom eglot mapping: %s\n"
+                        (plist-get status :eglot-match)))
+        (insert (format "flymake/company/breadcrumb: %s / %s / %s\n"
+                        (plist-get status :flymake)
+                        (plist-get status :company)
+                        (plist-get status :breadcrumb)))
+        (insert (format "local eglot workspace config: %s\n"
+                        (if (plist-get status :workspace-set)
+                            "set"
+                          "unset")))
+        (when-let* ((workspace (plist-get status :workspace)))
+          (insert workspace)
+          (insert "\n")))
     (insert "No source buffer.\n"))
   (insert "\n"))
 
 (defun my/language-server--doctor-insert-routing ()
   "Insert routing and mapping summaries."
+  (my/language-server-doctor--assert-view-buffer)
   (insert "Routing Summary\n")
   (insert "---------------\n")
   (insert (format "explicit lsp-mode routes: %d\n"
@@ -873,6 +1082,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 
 (defun my/language-server--doctor-insert-runtime-knobs ()
   "Insert runtime knob values."
+  (my/language-server-doctor--assert-view-buffer)
   (insert "Runtime Knobs\n")
   (insert "-------------\n")
   (dolist (entry (my/language-server--runtime-knob-entries))
@@ -884,6 +1094,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 (defun my/language-server-doctor-refresh ()
   "Refresh the current language-server doctor buffer."
   (interactive)
+  (my/language-server-doctor--assert-view-buffer)
   (let ((source (my/language-server--source-buffer))
         (inhibit-read-only t))
     (erase-buffer)
@@ -924,6 +1135,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
         (local-set-key (kbd "E") #'my/language-server-set-eglot-events-buffer-size)
         (local-set-key (kbd "O") #'my/language-server-manager-open-docs)
         (local-set-key (kbd "?") #'my/language-server-dispatch)
+        (local-set-key [mouse-3] #'my/language-server-manager-popup-menu)
         (my/language-server-doctor-refresh)))
     (pop-to-buffer buffer)))
 
@@ -954,7 +1166,8 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
   (local-set-key (kbd "E") #'my/language-server-set-eglot-events-buffer-size)
   (local-set-key (kbd "O") #'my/language-server-manager-open-docs)
   (local-set-key (kbd "?") #'my/language-server-dispatch)
-  (local-set-key (kbd "RET") #'my/language-server-manager-context-action))
+  (local-set-key (kbd "RET") #'my/language-server-manager-context-action)
+  (local-set-key [mouse-3] #'my/language-server-manager-popup-menu))
 
 (defun my/language-server-manager ()
   "Open the language-server dashboard."
