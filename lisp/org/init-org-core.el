@@ -64,6 +64,13 @@ Special block overlays are no longer disabled based on buffer size."
   "Default headline depth used by `my/org-toc-insert-or-update'."
   :type 'integer)
 
+(defcustom my/org-feature-detect-margin-lines 160
+  "Lines around visible Org windows searched for optional UI features.
+Feature discovery for long Org buffers is intentionally anchored to what is
+visible, plus nearby context, instead of scanning the whole buffer on open."
+  :type 'integer
+  :group 'my/org-ui)
+
 (defcustom my/org-toc-auto-update-max-buffer-size (* 1024 1024)
   "Maximum Org buffer size eligible for automatic TOC refresh."
   :type 'integer)
@@ -94,6 +101,23 @@ Nil disables line numbers in Org buffers, which is cheaper with
                  (const :tag "Absolute" t)
                  (const :tag "Relative" relative)
                  (const :tag "Visual" visual))
+  :group 'my/org-ui)
+
+(defcustom my/org-inline-image-on-demand t
+  "Display Org inline images for visible ranges on demand.
+This keeps image display available while avoiding startup-wide image scans in
+very large prose buffers."
+  :type 'boolean
+  :group 'my/org-ui)
+
+(defcustom my/org-inline-image-visible-margin-lines 48
+  "Extra lines around visible Org windows considered for inline images."
+  :type 'integer
+  :group 'my/org-ui)
+
+(defcustom my/org-inline-image-idle-delay 0.20
+  "Idle delay before refreshing visible Org inline images."
+  :type 'number
   :group 'my/org-ui)
 
 (defcustom my/org-company-idle-delay 0.45
@@ -151,11 +175,78 @@ down when the last instance is removed, so a sticky flag is consistent with
 their actual behavior and cuts per-keystroke scan work to zero once a buffer
 has all three features in scope.")
 
+(defvar-local my/org-inline-image--refresh-timer nil
+  "Pending visible inline image refresh timer for the current Org buffer.")
+
+(defvar-local my/org-inline-image--last-signature nil
+  "Last visible inline image refresh signature in the current Org buffer.")
+
+(defvar-local my/org-inline-image--enabled nil
+  "Non-nil when visible inline image refresh hooks are installed.")
+
+(defun my/org--range-with-line-margin (beg end margin-lines)
+  "Return BEG END expanded by MARGIN-LINES lines in the current buffer."
+  (let* ((margin (max 0 (or margin-lines 0)))
+         (range-beg (max (point-min) (min beg end)))
+         (range-end (min (point-max) (max beg end)))
+         expanded-beg expanded-end)
+    (save-excursion
+      (goto-char range-beg)
+      (forward-line (- margin))
+      (setq expanded-beg (line-beginning-position))
+      (goto-char range-end)
+      (forward-line margin)
+      (setq expanded-end (line-end-position)))
+    (cons (max (point-min) expanded-beg)
+          (min (point-max) expanded-end))))
+
+(defun my/org--merge-ranges (ranges)
+  "Return sorted merged RANGES."
+  (let ((ranges (sort (delq nil ranges)
+                      (lambda (left right) (< (car left) (car right)))))
+        merged)
+    (dolist (range ranges)
+      (pcase-let ((`(,beg . ,end) range))
+        (when (< beg end)
+          (if (and merged (<= beg (cdar merged)))
+              (setcdr (car merged) (max end (cdar merged)))
+            (push (cons beg end) merged)))))
+    (nreverse merged)))
+
+(defun my/org-buffer-visible-ranges (&optional buffer margin-lines fallback-to-point)
+  "Return visible ranges for BUFFER expanded by MARGIN-LINES.
+When FALLBACK-TO-POINT is non-nil and BUFFER is not visible, return a bounded
+range around point instead of falling back to the whole buffer."
+  (let ((buffer (or buffer (current-buffer))))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (let (ranges)
+          (dolist (window (get-buffer-window-list buffer nil t))
+            (when (window-live-p window)
+              (let ((beg (window-start window))
+                    (end (or (window-end window t) (point-max))))
+                (push (my/org--range-with-line-margin
+                       beg end margin-lines)
+                      ranges))))
+          (unless (or ranges (not fallback-to-point))
+            (push (my/org--range-with-line-margin
+                   (point) (point) margin-lines)
+                  ranges))
+          (my/org--merge-ranges ranges))))))
+
+(defun my/org-buffer-feature--visible-signature ()
+  "Return the current visible feature detection signature."
+  (my/org-buffer-visible-ranges
+   (current-buffer) my/org-feature-detect-margin-lines t))
+
 (defun my/org-buffer-feature--scan ()
-  "Return cached feature presence for the current Org buffer."
-  (let ((tick (buffer-chars-modified-tick)))
+  "Return cached visible feature presence for the current Org buffer."
+  (let ((tick (buffer-chars-modified-tick))
+        (ranges (my/org-buffer-feature--visible-signature)))
     (unless (and (consp my/org-buffer-feature--cache)
-                 (eql (plist-get my/org-buffer-feature--cache :tick) tick))
+                 (eql (plist-get my/org-buffer-feature--cache :tick) tick)
+                 (equal (plist-get my/org-buffer-feature--cache :ranges)
+                        ranges))
       (let ((table (plist-get my/org-buffer-feature--latched :table))
             (special-block (plist-get my/org-buffer-feature--latched :special-block))
             (latex-candidate (plist-get my/org-buffer-feature--latched
@@ -164,23 +255,25 @@ has all three features in scope.")
           (save-excursion
             (save-restriction
               (widen)
-              (goto-char (point-min))
-              (while (and (not (and table special-block latex-candidate))
-                          (re-search-forward
-                           my/org-buffer-feature--scan-regexp nil t))
-                (cond
-                 ((match-beginning 1)
-                  (setq table t))
-                 ((match-beginning 2)
-                  (setq special-block t))
-                 ((match-beginning 3)
-                  (setq latex-candidate t))))))
+              (dolist (range ranges)
+                (goto-char (car range))
+                (while (and (not (and table special-block latex-candidate))
+                            (re-search-forward
+                             my/org-buffer-feature--scan-regexp (cdr range) t))
+                  (cond
+                   ((match-beginning 1)
+                    (setq table t))
+                   ((match-beginning 2)
+                    (setq special-block t))
+                   ((match-beginning 3)
+                    (setq latex-candidate t)))))))
           (setq-local my/org-buffer-feature--latched
                       (list :table table
                             :special-block special-block
                             :latex-candidate latex-candidate)))
         (setq-local my/org-buffer-feature--cache
                     (list :tick tick
+                          :ranges ranges
                           :table table
                           :special-block special-block
                           :latex-candidate latex-candidate))))
@@ -202,6 +295,116 @@ has all three features in scope.")
 (defun my/org-setup-buffer-spacing ()
   "Use relaxed line spacing in Org buffers only."
   (setq-local line-spacing my/prose-line-spacing))
+
+(defun my/org-inline-image--signature (&optional buffer)
+  "Return visible inline image refresh inputs for BUFFER."
+  (let ((buffer (or buffer (current-buffer))))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when (derived-mode-p 'org-mode)
+          (let ((ranges (my/org-buffer-visible-ranges
+                         buffer my/org-inline-image-visible-margin-lines t)))
+            (when ranges
+              (list (buffer-chars-modified-tick) ranges))))))))
+
+(defun my/org-display-inline-images-visible-now (&optional buffer refresh)
+  "Display inline images in BUFFER's visible Org ranges.
+When REFRESH is non-nil, existing inline image overlays in those ranges are
+refreshed."
+  (interactive)
+  (let ((buffer (or buffer (current-buffer))))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (setq-local my/org-inline-image--refresh-timer nil)
+        (when (derived-mode-p 'org-mode)
+          (let ((ranges (my/org-buffer-visible-ranges
+                         buffer my/org-inline-image-visible-margin-lines t)))
+            (dolist (range ranges)
+              (if (fboundp 'org-link-preview-region)
+                  (org-link-preview-region nil refresh
+                                           (car range) (cdr range))
+                (with-suppressed-warnings ((obsolete org-display-inline-images))
+                  (org-display-inline-images nil refresh
+                                             (car range) (cdr range)))))
+            (setq-local my/org-inline-image--last-signature
+                        (and ranges
+                             (list (buffer-chars-modified-tick) ranges)))))))))
+
+(defun my/org-cancel-visible-inline-image-refresh ()
+  "Cancel the pending visible inline image refresh timer."
+  (when (timerp my/org-inline-image--refresh-timer)
+    (cancel-timer my/org-inline-image--refresh-timer))
+  (setq-local my/org-inline-image--refresh-timer nil))
+
+(defun my/org-schedule-visible-inline-image-refresh (&optional force refresh)
+  "Schedule a coalesced visible inline image refresh for the current buffer."
+  (when (and my/org-inline-image-on-demand
+             (derived-mode-p 'org-mode))
+    (let ((signature (my/org-inline-image--signature)))
+      (when (and signature
+                 (or force
+                     (not (equal signature
+                                 my/org-inline-image--last-signature))))
+        (my/org-cancel-visible-inline-image-refresh)
+        (setq-local my/org-inline-image--refresh-timer
+                    (run-with-idle-timer
+                     my/org-inline-image-idle-delay nil
+                     #'my/org-display-inline-images-visible-now
+                     (current-buffer) refresh))))))
+
+(defun my/org-inline-image-window-scroll-h (window _start)
+  "Schedule visible inline image refresh after WINDOW scrolls."
+  (when (and my/org-inline-image-on-demand
+             (window-live-p window)
+             (buffer-live-p (window-buffer window)))
+    (with-current-buffer (window-buffer window)
+      (when my/org-inline-image--enabled
+        (my/org-schedule-visible-inline-image-refresh)))))
+
+(defun my/org-inline-image-window-size-h (_frame)
+  "Schedule visible inline image refresh after a window size change."
+  (when my/org-inline-image--enabled
+    (my/org-schedule-visible-inline-image-refresh)))
+
+(defun my/org-cleanup-visible-inline-images ()
+  "Remove visible inline image refresh hooks from the current Org buffer."
+  (my/org-cancel-visible-inline-image-refresh)
+  (remove-hook 'window-scroll-functions
+               #'my/org-inline-image-window-scroll-h t)
+  (remove-hook 'window-size-change-functions
+               #'my/org-inline-image-window-size-h t)
+  (remove-hook 'change-major-mode-hook
+               #'my/org-cleanup-visible-inline-images t)
+  (remove-hook 'kill-buffer-hook
+               #'my/org-cleanup-visible-inline-images t)
+  (setq-local my/org-inline-image--enabled nil)
+  (setq-local my/org-inline-image--last-signature nil))
+
+(defun my/org-setup-visible-inline-images ()
+  "Enable visible-range inline image refresh in Org buffers."
+  (when (and my/org-inline-image-on-demand
+             (derived-mode-p 'org-mode)
+             (not my/org-inline-image--enabled))
+    (setq-local my/org-inline-image--enabled t)
+    (add-hook 'window-scroll-functions
+              #'my/org-inline-image-window-scroll-h nil t)
+    (add-hook 'window-size-change-functions
+              #'my/org-inline-image-window-size-h nil t)
+    (add-hook 'change-major-mode-hook
+              #'my/org-cleanup-visible-inline-images nil t)
+    (add-hook 'kill-buffer-hook
+              #'my/org-cleanup-visible-inline-images nil t)
+    (my/org-schedule-visible-inline-image-refresh t nil)))
+
+(defun my/org-schedule-visible-inline-images-for-windows (&rest _)
+  "Schedule inline image refresh for visible Org windows."
+  (when my/org-inline-image-on-demand
+    (dolist (window (window-list nil 'no-minibuf))
+      (when-let* ((buffer (window-buffer window)))
+        (with-current-buffer buffer
+          (when (and my/org-inline-image--enabled
+                     (derived-mode-p 'org-mode))
+            (my/org-schedule-visible-inline-image-refresh)))))))
 
 (defun my/org-setup-low-power-profile ()
   "Apply Org-local defaults that lower idle, typing and navigation wakeups."
@@ -470,6 +673,7 @@ headline levels."
   :ensure nil
   :hook ((org-mode . visual-line-mode)        ; 自动换行
          (org-mode . my/org-setup-low-power-profile)
+         (org-mode . my/org-setup-visible-inline-images)
          (org-mode . my/org-force-indent-mode)
          (org-mode . my/org-setup-indent-after-local-variables)
          (org-mode . my/org-setup-buffer-spacing)
@@ -496,7 +700,7 @@ headline levels."
   (org-use-sub-superscripts '{})
   (org-ellipsis " ▾")
   (org-image-actual-width nil)
-  (org-startup-with-inline-images t)
+  (org-startup-with-inline-images nil)
   (org-display-remote-inline-images t)
   (org-imenu-depth 4)
   
@@ -527,6 +731,12 @@ headline levels."
   (org-element-cache-sync-idle-time 1.5)
   (org-element-cache-sync-duration 0.1))
 (my/org-force-indent-mode-in-existing-buffers)
+
+(add-hook 'window-configuration-change-hook
+          #'my/org-schedule-visible-inline-images-for-windows)
+(when (boundp 'window-buffer-change-functions)
+  (add-hook 'window-buffer-change-functions
+            #'my/org-schedule-visible-inline-images-for-windows))
 
 ;;; ----------------------------------------------------------------------------
 ;;; Misc fixes

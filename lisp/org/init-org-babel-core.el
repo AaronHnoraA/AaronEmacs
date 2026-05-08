@@ -28,6 +28,8 @@
 (declare-function org-babel-jupyter-override-src-block "ob-jupyter" (lang))
 (declare-function my/jupyter-default-session-for-language "init-jupyter" (language fallback))
 (declare-function my/jupyter-preferred-kernels-for-language "init-jupyter" (language fallback))
+(declare-function my/org-display-inline-images-visible-now
+                  "init-org-core" (&optional buffer refresh))
 
 (defconst my/org-babel-config-root
   (file-name-as-directory
@@ -260,7 +262,12 @@ INFO defaults to the source block at point."
     (with-current-buffer buffer
       (setq-local my/org-babel--inline-image-refresh-timer nil)
       (when (derived-mode-p 'org-mode)
-        (org-redisplay-inline-images)))))
+        (if (fboundp 'my/org-display-inline-images-visible-now)
+            (my/org-display-inline-images-visible-now buffer t)
+          (if (fboundp 'org-link-preview-refresh)
+              (org-link-preview-refresh)
+            (with-suppressed-warnings ((obsolete org-redisplay-inline-images))
+              (org-redisplay-inline-images))))))))
 
 (defun my/org-babel--schedule-inline-image-redisplay (&optional raw-text)
   "Coalesce inline image refresh after image-producing Babel output RAW-TEXT."

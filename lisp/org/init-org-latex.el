@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+
 (declare-function my/refresh-environment-from-shell nil)
 (declare-function my/open-file "init-open" (file &optional kind backend))
 (declare-function my/shell-command-executable "init-utils")
@@ -664,20 +666,25 @@ render is usually ready before point leaves it."
           (re-search-forward my/org-latex--fragment-start-regexp end t)))))
 
 (defun my/org-latex-buffer-has-fragment-syntax-p ()
-  "Return non-nil when the current buffer may contain Org LaTeX previews."
-  (let ((tick (buffer-chars-modified-tick)))
+  "Return non-nil when visible Org ranges may contain LaTeX previews."
+  (let* ((ranges (my/org-buffer-visible-ranges
+                  (current-buffer)
+                  (+ my/org-latex-preview-overscan-lines
+                     my/org-latex-preview-lookahead-lines)
+                  t))
+         (signature (list (buffer-chars-modified-tick) ranges)))
     (if (and (consp my/org-latex--fragment-syntax-cache)
-             (eql (car my/org-latex--fragment-syntax-cache) tick))
+             (equal (car my/org-latex--fragment-syntax-cache) signature))
         (cdr my/org-latex--fragment-syntax-cache)
       (let ((present
              (and (my/org-buffer-feature-present-p :latex-candidate)
-                  (save-excursion
-                    (save-restriction
-                      (widen)
-                      (my/org-latex--range-may-have-fragment-syntax-p
-                       (point-min) (point-max)))))))
+                  (cl-some
+                   (lambda (range)
+                     (my/org-latex--range-may-have-fragment-syntax-p
+                      (car range) (cdr range)))
+                   ranges))))
         (setq-local my/org-latex--fragment-syntax-cache
-                    (cons tick present))
+                    (cons signature present))
         present))))
 
 (defun my/org-latex-enable-scroll-preview-on-syntax-insert (beg end _len)
@@ -687,12 +694,35 @@ render is usually ready before point leaves it."
              (my/org-latex--change-near-fragment-syntax-p beg end))
     (my/org-latex-enable-scroll-preview)))
 
+(defun my/org-latex-enable-scroll-preview-on-visible-syntax (window _start)
+  "Enable LaTeX preview hooks when WINDOW scrolls onto fragment syntax."
+  (when (and (window-live-p window)
+             (buffer-live-p (window-buffer window)))
+    (with-current-buffer (window-buffer window)
+      (when (and my/org-latex--syntax-watch-installed
+                 (derived-mode-p 'org-mode)
+                 (my/org-latex--async-preview-active-p)
+                 (my/org-latex-buffer-has-fragment-syntax-p))
+        (my/org-latex-enable-scroll-preview)))))
+
+(defun my/org-latex-enable-scroll-preview-on-window-size (_frame)
+  "Re-check visible LaTeX syntax discovery after a window size change."
+  (when (and my/org-latex--syntax-watch-installed
+             (derived-mode-p 'org-mode)
+             (my/org-latex--async-preview-active-p)
+             (my/org-latex-buffer-has-fragment-syntax-p))
+    (my/org-latex-enable-scroll-preview)))
+
 (defun my/org-latex-install-syntax-watch ()
-  "Install the cheap watcher that enables LaTeX preview hooks on demand."
+  "Install cheap watchers that enable LaTeX preview hooks on demand."
   (unless my/org-latex--syntax-watch-installed
     (setq-local my/org-latex--syntax-watch-installed t)
     (add-hook 'after-change-functions
               #'my/org-latex-enable-scroll-preview-on-syntax-insert nil t)
+    (add-hook 'window-scroll-functions
+              #'my/org-latex-enable-scroll-preview-on-visible-syntax nil t)
+    (add-hook 'window-size-change-functions
+              #'my/org-latex-enable-scroll-preview-on-window-size nil t)
     (add-hook 'change-major-mode-hook
               #'my/org-latex-cleanup-syntax-watch nil t)
     (add-hook 'kill-buffer-hook
@@ -702,6 +732,10 @@ render is usually ready before point leaves it."
   "Remove the on-demand LaTeX syntax watcher."
   (remove-hook 'after-change-functions
                #'my/org-latex-enable-scroll-preview-on-syntax-insert t)
+  (remove-hook 'window-scroll-functions
+               #'my/org-latex-enable-scroll-preview-on-visible-syntax t)
+  (remove-hook 'window-size-change-functions
+               #'my/org-latex-enable-scroll-preview-on-window-size t)
   (remove-hook 'change-major-mode-hook
                #'my/org-latex-cleanup-syntax-watch t)
   (remove-hook 'kill-buffer-hook

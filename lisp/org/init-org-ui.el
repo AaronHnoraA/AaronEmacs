@@ -281,12 +281,35 @@ Org blocks."
              (my/org-change-has-table-line-p beg end))
     (my/org-enable-valign-now)))
 
+(defun my/org-enable-valign-for-visible-table-maybe ()
+  "Enable `valign-mode' when a table enters the visible Org range."
+  (when (and (derived-mode-p 'org-mode)
+             (my/org-rich-ui-buffer-p)
+             my/org--valign-table-watch-installed
+             (my/org-buffer-has-table-p))
+    (my/org-enable-valign-now)))
+
+(defun my/org-enable-valign-on-visible-table (window _start)
+  "Enable `valign-mode' when WINDOW scrolls onto a table."
+  (when (and (window-live-p window)
+             (buffer-live-p (window-buffer window)))
+    (with-current-buffer (window-buffer window)
+      (my/org-enable-valign-for-visible-table-maybe))))
+
+(defun my/org-enable-valign-on-window-size (_frame)
+  "Re-check visible table discovery after a window size change."
+  (my/org-enable-valign-for-visible-table-maybe))
+
 (defun my/org-install-valign-table-watch ()
-  "Install the cheap on-demand table watcher for `valign-mode'."
+  "Install cheap on-demand table watchers for `valign-mode'."
   (unless my/org--valign-table-watch-installed
     (setq-local my/org--valign-table-watch-installed t)
     (add-hook 'after-change-functions
               #'my/org-enable-valign-on-table-insert nil t)
+    (add-hook 'window-scroll-functions
+              #'my/org-enable-valign-on-visible-table nil t)
+    (add-hook 'window-size-change-functions
+              #'my/org-enable-valign-on-window-size nil t)
     (add-hook 'change-major-mode-hook
               #'my/org-cleanup-valign-table-watch nil t)
     (add-hook 'kill-buffer-hook
@@ -296,6 +319,10 @@ Org blocks."
   "Remove the on-demand `valign-mode' table watcher."
   (remove-hook 'after-change-functions
                #'my/org-enable-valign-on-table-insert t)
+  (remove-hook 'window-scroll-functions
+               #'my/org-enable-valign-on-visible-table t)
+  (remove-hook 'window-size-change-functions
+               #'my/org-enable-valign-on-window-size t)
   (remove-hook 'change-major-mode-hook
                #'my/org-cleanup-valign-table-watch t)
   (remove-hook 'kill-buffer-hook
@@ -1317,12 +1344,35 @@ SEEN tracks block begin positions already handled in the current JIT pass."
              (my/org-change-has-special-block-line-p beg end))
     (my/org-enable-jit-pretty-blocks)))
 
+(defun my/org-enable-jit-pretty-blocks-on-visible-block (window _start)
+  "Enable pretty-block JIT when WINDOW scrolls onto a styled block."
+  (when (and (window-live-p window)
+             (buffer-live-p (window-buffer window)))
+    (with-current-buffer (window-buffer window)
+      (when (and my/org--pretty-block-watch-installed
+                 (derived-mode-p 'org-mode)
+                 (my/org-rich-ui-buffer-p)
+                 (my/org-buffer-has-special-block-p))
+        (my/org-enable-jit-pretty-blocks)))))
+
+(defun my/org-enable-jit-pretty-blocks-on-window-size (_frame)
+  "Re-check visible styled block discovery after a window size change."
+  (when (and my/org--pretty-block-watch-installed
+             (derived-mode-p 'org-mode)
+             (my/org-rich-ui-buffer-p)
+             (my/org-buffer-has-special-block-p))
+    (my/org-enable-jit-pretty-blocks)))
+
 (defun my/org-install-pretty-block-watch ()
-  "Install a cheap watcher that enables block prettification on demand."
+  "Install cheap watchers that enable block prettification on demand."
   (unless my/org--pretty-block-watch-installed
     (setq-local my/org--pretty-block-watch-installed t)
     (add-hook 'after-change-functions
               #'my/org-enable-jit-pretty-blocks-on-insert nil t)
+    (add-hook 'window-scroll-functions
+              #'my/org-enable-jit-pretty-blocks-on-visible-block nil t)
+    (add-hook 'window-size-change-functions
+              #'my/org-enable-jit-pretty-blocks-on-window-size nil t)
     (add-hook 'change-major-mode-hook
               #'my/org-cleanup-pretty-block-watch nil t)
     (add-hook 'kill-buffer-hook
@@ -1332,6 +1382,10 @@ SEEN tracks block begin positions already handled in the current JIT pass."
   "Remove the on-demand watcher for pretty special blocks."
   (remove-hook 'after-change-functions
                #'my/org-enable-jit-pretty-blocks-on-insert t)
+  (remove-hook 'window-scroll-functions
+               #'my/org-enable-jit-pretty-blocks-on-visible-block t)
+  (remove-hook 'window-size-change-functions
+               #'my/org-enable-jit-pretty-blocks-on-window-size t)
   (remove-hook 'change-major-mode-hook
                #'my/org-cleanup-pretty-block-watch t)
   (remove-hook 'kill-buffer-hook
