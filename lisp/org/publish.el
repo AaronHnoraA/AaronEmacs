@@ -476,6 +476,16 @@ target, but their Org content is not exported."
     (format "<script defer src=\"%s/js/note-page.js?v=%s\"></script>" prefix my/site-asset-version))
    "\n"))
 
+(defun my/site-hidden-html-head-snippet (prefix)
+  "Return the minimal HTML head snippet for hidden note placeholders."
+  (mapconcat
+   #'identity
+   (list
+    "<meta name=\"color-scheme\" content=\"light\" />"
+    (format "<link rel=\"stylesheet\" href=\"%s/css/retro.css?v=%s\" />" prefix my/site-asset-version)
+    "<link rel=\"shortcut icon\" href=\"https://raw.githubusercontent.com/AaronHnoraA/AaronHnoraA.github.io/refs/heads/master/css/cv.svg\" type=\"image/x-icon\">")
+   "\n"))
+
 (defun my/site-hidden-id-anchors-for-file (file)
   "Return hidden HTML anchors for every Org ID in FILE."
   (mapconcat
@@ -492,7 +502,7 @@ target, but their Org content is not exported."
          (prefix (plist-get context :prefix))
          (site-root (plist-get context :site-root))
          (current-link (plist-get context :current-link))
-         (head-snippet (my/site-html-head-snippet prefix site-root current-link))
+         (head-snippet (my/site-hidden-html-head-snippet prefix))
          (publish-root (expand-file-name (plist-get plist :publishing-directory)))
          (out-file (expand-file-name current-link publish-root))
          (raw-title (or (my/site-file-keyword filename "title")
@@ -511,22 +521,23 @@ target, but their Org content is not exported."
       (insert head-snippet "\n")
       (insert "</head>\n")
       (insert
-       (format "<body class=\"note-page note-page-hidden\" data-note-title=\"%s\" data-note-group=\"%s\" data-note-date=\"%s\">\n"
+       (format "<body class=\"hidden-note-page\" data-note-title=\"%s\" data-note-group=\"%s\" data-note-date=\"%s\">\n"
                (my/site-html-attribute-escape title)
                (my/site-html-attribute-escape group)
                (my/site-html-attribute-escape date)))
-      (insert "<div id=\"content\" class=\"content hidden-note-content\">\n")
+      (insert "<main id=\"content\" class=\"content hidden-note-content\">\n")
       (unless (string-empty-p anchors)
         (insert anchors "\n"))
-      (insert "<h1 class=\"title\">Access Restricted</h1>\n")
+      (insert "<p class=\"hidden-note-eyebrow\">Access Restricted</p>\n")
+      (insert "<h1 class=\"hidden-note-title\">This note is sealed.</h1>\n")
       (insert "<section class=\"hidden-note-card\" role=\"note\">\n")
       (insert "<p class=\"hidden-note-kicker\">Restricted folio</p>\n")
-      (insert "<p class=\"hidden-note-message\">This note is sealed.</p>\n")
+      (insert "<p class=\"hidden-note-message\">Original content is not published.</p>\n")
       (insert "<p class=\"hidden-note-copy\">The page remains here so public links and graph references do not break, but the original Org content is not published.</p>\n")
       (insert
        (format "<a class=\"hidden-note-link\" href=\"%s\">Back to public notes</a>\n"
                (org-html-encode-plain-text return-link)))
-      (insert "</section>\n</div>\n</body>\n</html>\n"))
+      (insert "</section>\n</main>\n</body>\n</html>\n"))
     out-file))
 
 (defun my/site-html-head (plist filename pub-dir)
@@ -588,6 +599,13 @@ target, but their Org content is not exported."
                 (unless (string-empty-p clean) clean)))
             tags)))
     #'string<)))
+
+(defun my/site-public-tags (tags)
+  "Return normalized TAGS without publication-control tags."
+  (seq-remove
+   (lambda (tag)
+     (member tag my/site-hidden-filetags))
+   (append (my/site-normalize-tags tags) nil)))
 
 (defun my/site-group-key (rel-path)
   "Return the logical group key for REL-PATH."
@@ -714,6 +732,7 @@ target, but their Org content is not exported."
     ("groupKey" . ,(plist-get note :group-key))
     ("groupLabel" . ,(plist-get note :group-label))
     ("section" . ,(plist-get note :section))
+    ("hidden" . ,(if (plist-get note :hidden) t :json-false))
     ("tags" . ,(vconcat (plist-get note :tags)))
     ("refs" . ,(vconcat (plist-get note :refs)))
     ("backlinks" . ,(vconcat (plist-get note :backlinks)))))
@@ -734,10 +753,8 @@ target, but their Org content is not exported."
                      (not (string-match-p "\\`\\(?:public/\\|js/\\|css/\\|ltximg/\\|CV/.+\\.org\\'\\)" rel))))
                  (directory-files-recursively base-dir "\\.org\\'")))
          (notes-by-key (make-hash-table :test 'equal))
-         (hidden-notes-by-key (make-hash-table :test 'equal))
          (id-to-key (make-hash-table :test 'equal))
          (backlinks (make-hash-table :test 'equal))
-         (referenced-hidden-keys '())
          (note-order '()))
     (unless project-entry
       (error "Missing org-publish project: %s" project-name))
@@ -750,41 +767,32 @@ target, but their Org content is not exported."
           (let* ((buffer-data (my/site-extract-buffer-data file))
                  (hidden (my/site-hidden-source-file-p file base-dir))
                  (id (plist-get buffer-data :id))
-                 (group-key (if hidden "Hidden" (my/site-group-key rel-path)))
+                 (group-key (my/site-group-key rel-path))
                  (key (or id
                           (concat "path:" (file-name-sans-extension rel-path)))))
-            (unless (and hidden (not id))
-              (let ((note (list
-                           :key key
-                           :id id
-                           :title (if hidden
-                                      "Hidden Note"
-                                    (or (org-publish-find-title file project-entry)
-                                        (file-name-base file)))
-                           :link (concat (file-name-sans-extension rel-path) ".html")
-                           :date (if hidden
-                                     ""
-                                   (format-time-string "%Y-%m-%d" (org-publish-find-date file project-entry)))
-                           :summary (if hidden
-                                        "This note is hidden on the public site."
-                                      (plist-get buffer-data :summary))
-                           :group-key group-key
-                           :group-label (if hidden "Hidden" (my/site-group-label group-key))
-                           :section (if hidden "Hidden" (my/site-section-name group-key))
-                           :tags (if hidden
-                                     '("hidden")
-                                   (append (my/site-normalize-tags
-                                            (org-publish-find-property file :filetags project-entry))
-                                           nil))
-                           :refs '()
-                           :raw-refs (if hidden nil (plist-get buffer-data :outgoing))
-                           :backlinks '())))
-                (if hidden
-                    (puthash key note hidden-notes-by-key)
-                  (puthash key note notes-by-key)
-                  (push key note-order))
-                (when id
-                  (puthash id key id-to-key))))))))
+            (let ((note (list
+                         :key key
+                         :id id
+                         :title (or (org-publish-find-title file project-entry)
+                                    (file-name-base file))
+                         :link (concat (file-name-sans-extension rel-path) ".html")
+                         :date (format-time-string "%Y-%m-%d" (org-publish-find-date file project-entry))
+                         :summary (if hidden
+                                      "This note is sealed. Original Org content is not published."
+                                    (plist-get buffer-data :summary))
+                         :group-key group-key
+                         :group-label (my/site-group-label group-key)
+                         :section (my/site-section-name group-key)
+                         :hidden hidden
+                         :tags (my/site-public-tags
+                                (org-publish-find-property file :filetags project-entry))
+                         :refs '()
+                         :raw-refs (plist-get buffer-data :outgoing)
+                         :backlinks '())))
+              (puthash key note notes-by-key)
+              (push key note-order)
+              (when id
+                (puthash id key id-to-key)))))))
 
     (dolist (key note-order)
       (let* ((note (gethash key notes-by-key))
@@ -793,16 +801,9 @@ target, but their Org content is not exported."
           (let ((target-key (gethash target-id id-to-key)))
             (when (and target-key (not (string= target-key key)))
               (push target-key resolved-refs)
-              (when (gethash target-key hidden-notes-by-key)
-                (push target-key referenced-hidden-keys))
               (puthash target-key (cons key (gethash target-key backlinks)) backlinks))))
         (setq resolved-refs (sort (delete-dups resolved-refs) #'string<))
         (puthash key (plist-put note :refs resolved-refs) notes-by-key)))
-
-    (dolist (key (delete-dups referenced-hidden-keys))
-      (when-let* ((note (gethash key hidden-notes-by-key)))
-        (puthash key note notes-by-key)
-        (push key note-order)))
 
     (dolist (key note-order)
       (let* ((note (gethash key notes-by-key))
