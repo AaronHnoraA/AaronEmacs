@@ -325,6 +325,42 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 - reset eln cache
 - clean all managed artifacts
 
+### 清 Org 图片、附件和 LaTeX preview cache
+
+入口：
+
+- `M-x my/org-maintenance-board`
+- macOS GUI 下 `H-o b`
+
+这个 board 只在打开或手动刷新时扫描。扫描范围和 agenda 一致：
+
+- 在 `~/HC/Org/` 里打开时扫整个 Org 库
+- 在其他项目里打开时扫当前项目
+- 没有项目时扫当前目录
+
+媒体清理规则：
+
+- clean media：删除未引用图片和未引用附件
+- clean images：删除未引用图片；图片只用同目录/子目录里的 Org 链接判断引用，不做全库交叉引用
+- clean attachments：删除 `attachments/`、`attach/`、`files/` 下未引用附件；附件会看整个当前项目/scope 的 Org 链接
+- prune latex：每个 `ltximg/` 目录只保留最新
+  `my/org-maintenance-latex-cache-max-files-per-dir` 个 preview cache 文件
+- clear latex：删除当前 scope 下所有 `ltximg/` preview cache 文件
+- empty dirs：删除清理后留下的空 `img/`、`images/`、attachment、`ltximg/` 目录
+- clean all：清未引用媒体、按阈值裁剪 LaTeX cache，再删空目录
+
+防护规则：
+
+- `public/`、`publish/`、`dist/`、`build/`、`css/`、`js/`、`CV/` 不参与媒体清理
+- `ltximg/` 和 `org-latex-preview-cache/` 不参与图片/附件清理，只走 LaTeX cache 工具
+- 文件名带 `keep-` 前缀或 `-keep` 后缀时豁免清理
+- `H-o k` 可以把当前 Org `file:` 链接指向的实际文件重命名为豁免名称，并同步更新链接
+- `H-o m` 可以重命名当前 Org `file:` 链接指向的实际文件，并同步更新链接
+- `H-o O` 用系统 `open` 打开光标处的 Org link、图片链接或文件名
+
+board 会缓存同一 scope 的扫描结果；只要 Org、媒体和 cache 文件签名没变化，后续按钮
+动作会复用解析结果，避免重复 parse 所有 Org 链接。
+
 ### 清 transient 历史
 
 删：

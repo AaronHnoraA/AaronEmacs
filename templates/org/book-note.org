@@ -1,0 +1,46 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :book:reading:summary:draft:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Bibliography
+- Author:
+- Year:
+- Publisher:
+- Link / file:
+
+* Why This Book
+- 我为什么读它：
+- 期待解决的问题：
+
+* One-Sentence Summary
+{{cursor}}
+
+* Chapter Map
+| Chapter | Point | Keep? |
+|---------+-------+-------|
+|         |       |       |
+
+* Key Ideas
+- 
+
+* Useful Quotes
+#+begin_quote
+
+#+end_quote
+
+* My Notes
+** Chapter 1
+
+** Chapter 2
+
+* Follow-up
+- [ ] 写一条 atomic note
+- [ ] 加到相关 index
+- [ ] 找书中引用的材料

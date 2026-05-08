@@ -1,0 +1,43 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :paper:summary:research:draft:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* TL;DR
+{{cursor}}
+
+* Metadata
+- Authors:
+- Year:
+- Venue:
+- Link:
+- BibTeX key:
+
+* The Paper In 5 Bullets
+1. 
+2. 
+3. 
+4. 
+5. 
+
+* Main Result
+- Formal statement:
+- Plain meaning:
+- Why it matters:
+
+* Key Technique
+- 
+
+* Limitations
+- 
+
+* Reusable Notes
+- [ ] Convert definitions to concept notes
+- [ ] Convert theorem to math note
+- [ ] Link to literature map

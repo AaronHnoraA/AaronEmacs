@@ -1,0 +1,34 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :note:atomic:draft:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Claim
+用一句话写清楚这条笔记的核心断言。
+
+{{cursor}}
+
+* Context
+- 这条笔记从哪里来：
+- 为什么现在值得记：
+
+* Explanation
+- 定义 / 背景：
+- 直觉解释：
+- 例子：
+
+* Links
+- 上游：
+- 下游：
+- 对立观点：
+
+* Status
+- [ ] 拆成更小的 atomic note
+- [ ] 补链接
+- [ ] 整理到 index

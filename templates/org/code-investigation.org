@@ -1,0 +1,42 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :code:investigation:engineering:draft:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Question
+{{cursor}}
+
+* Entry Points
+- Repo:
+- Files:
+- Commands:
+
+* Map
+| Component | Responsibility | Notes |
+|-----------+----------------+-------|
+|           |                |       |
+
+* Findings
+** Fact 1
+- Evidence:
+- File / symbol:
+
+** Fact 2
+- Evidence:
+- File / symbol:
+
+* Decision
+- Change:
+- Risk:
+- Test:
+
+* Scratch
+#+begin_src sh
+
+#+end_src

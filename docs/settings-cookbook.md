@@ -78,7 +78,28 @@
 - `org-roam-directory`
 - bibliography 路径
 
-## 4. 我要改 AI 助手配置
+## 4. 我要改 Org agenda / TODO 工作流
+
+文件：
+
+- [lisp/org/init-org-agenda.el](../lisp/org/init-org-agenda.el)
+
+这里集中维护：
+
+- `TODO` / `NEXT` / `WIP` / `WAIT` / `HOLD` / `REVIEW` / `DONE` / `CANCELLED` / `DROPPED`
+- agenda dashboard 和 `org-agenda-custom-commands`
+- 打开 agenda / tags view / refile 时的 scoped `.org` 文件扫描规则
+- priority、effort、todo dependency、repeat log
+- refile 目标和 archive 位置
+- tag 快选行为
+- `H-o w` 打开的 task/status transient
+
+Org 核心文件 [lisp/org/init-org-core.el](../lisp/org/init-org-core.el) 只保留目录、
+显示、导航、链接和性能相关默认值；不要把任务状态再塞回 core。
+
+状态语义和 tag taxonomy 单独写在 [org-task-workflow.md](org-task-workflow.md)。
+
+## 5. 我要改 AI 助手配置
 
 文件：
 
@@ -126,7 +147,7 @@
 - 只有两个窗口时，直接和另一个窗口交换
 - 多于两个窗口时，用 `ace-window` 选目标窗口再交换
 
-## 5. 我要改默认打开方式
+## 6. 我要改默认打开方式
 
 文件：
 
@@ -147,7 +168,7 @@
 - `system` 表示 macOS `open` / Linux `xdg-open` / Windows shell open
 - `pdf` 默认走 `system`，普通 `find-file` 打开 PDF 仍由 `pdf-tools` 处理
 
-## 6. 我要增删 leader 键
+## 7. 我要增删 leader 键
 
 文件：
 
@@ -186,7 +207,7 @@
 2. 在对应分组加命令
 3. 如果是 mode 专属功能，优先放 localleader
 
-## 7. 我要加一个新包
+## 8. 我要加一个新包
 
 ### 普通包
 
@@ -224,7 +245,7 @@ emacs --debug-init -q -l ./bootstrap.el
 
 把锁文件更新掉。
 
-## 7.1 我要改数据库客户端配置
+## 8.1 我要改数据库客户端配置
 
 文件：
 
@@ -251,7 +272,7 @@ emacs --debug-init -q -l ./bootstrap.el
 - 密码优先放 `auth-source` / `pass`，不要把 `:password` 直接写进主配置。
 - 如果你只是改连接列表，通常只需要动 `etc/clutch-config.el`。
 
-## 8. 我要改 snippet
+## 9. 我要改 snippet
 
 文件：
 
@@ -265,7 +286,7 @@ emacs --debug-init -q -l ./bootstrap.el
 - `C-c y v`
   找 snippet 文件
 
-## 9. 我要改补全行为
+## 10. 我要改补全行为
 
 看这些文件：
 
@@ -296,7 +317,7 @@ emacs --debug-init -q -l ./bootstrap.el
 
 不要再到处散落手写 `add-to-list 'eglot-server-programs`。
 
-## 10. 我要改远程和终端行为
+## 11. 我要改远程和终端行为
 
 文件：
 
@@ -309,7 +330,7 @@ emacs --debug-init -q -l ./bootstrap.el
 - `my/ssh-config-hosts`
 - TRAMP 相关 `setq`
 
-## 11. 我要改项目管理行为
+## 12. 我要改项目管理行为
 
 文件：
 
@@ -340,7 +361,7 @@ emacs --debug-init -q -l ./bootstrap.el
 
 - `my/project-search-paths`
 
-## 12. 我要调整 Dired / Dirvish
+## 13. 我要调整 Dired / Dirvish
 
 文件：
 
@@ -354,7 +375,7 @@ emacs --debug-init -q -l ./bootstrap.el
 - `init-windows.el`
   `dirvish` 的 UI 和键位
 
-## 13. 我要改 Org 重 UI
+## 14. 我要改 Org 重 UI
 
 文件：
 
@@ -376,7 +397,7 @@ emacs --debug-init -q -l ./bootstrap.el
 - `my/org-enable-*`
 - `my/org-enable-jit-pretty-blocks`
 
-## 14. 我要改运行时状态目录
+## 15. 我要改运行时状态目录
 
 文件：
 
@@ -391,7 +412,7 @@ emacs --debug-init -q -l ./bootstrap.el
 
 现在所有这些都写到 [var/](../var/)。
 
-## 15. 我要改新建文件模板（auto-insert）
+## 16. 我要改新建文件模板（auto-insert）
 
 文件：
 
@@ -411,6 +432,16 @@ emacs --debug-init -q -l ./bootstrap.el
 - `org` 默认不在 allowlist 里（避免干扰 `org-capture`/`org-roam` 的 capture 模板）
 - 模板存放在 `templates/<kind>/`；模板里的占位符支持 `{{date}}` / `{{title}}` / `{{file}}` / `{{author}}` / `{{cursor}}` 等
 
+Org 模板集中在 [templates/org/](../templates/org/)。除了默认
+`default.org`、`org-assg.org` 和 `zotero-note.org`，还维护了一组按场景拆分的
+笔记模板，例如 atomic note、summary、文献、reading、research question、
+experiment log、dataset、course lecture、math、quantum、project、decision
+record、debug、writing draft、talk outline、daily/weekly review、index map 和
+prompt playground。TCS / 数学论文写作还单独有 theorem、proof sketch、proof
+attempt、lemma bank、definition bank、reduction、lower bound、construction、
+counterexample、algorithm analysis、notation glossary、technical overview、
+related work matrix 和 reviewer response 这类模板。
+
 项目内按目录开关（`.dir-locals.el`）：
 
 ```elisp
@@ -425,7 +456,7 @@ emacs --debug-init -q -l ./bootstrap.el
 - `my/template-current-override` 只接受”文件名”（不能带路径分隔符），指向 `templates/<kind>/` 下的模板文件
 - 新建文件模板只保留这一套内置 `auto-insert`（已移除 Doom 那套 Yasnippet file-templates 的遗留实现，避免重复/分叉维护）
 
-## 16. 我要配置项目本地 `.dir-locals.el`
+## 17. 我要配置项目本地 `.dir-locals.el`
 
 文件：
 

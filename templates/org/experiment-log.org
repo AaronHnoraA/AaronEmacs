@@ -1,0 +1,41 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :experiment:research:log:draft:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Question
+{{cursor}}
+
+* Hypothesis
+- I expect:
+- Because:
+
+* Setup
+- Code / notebook:
+- Data:
+- Parameters:
+- Environment:
+
+* Run Log
+| Time | Change | Result |
+|------+--------+--------|
+|      |        |        |
+
+* Results
+- Main observation:
+- Unexpected behavior:
+- Figure / table:
+
+* Interpretation
+- Supports:
+- Weakens:
+- Alternative explanations:
+
+* Next
+- [ ] 

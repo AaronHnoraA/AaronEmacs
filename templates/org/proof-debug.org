@@ -1,0 +1,45 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :math:tcs:proof:debug:draft:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Suspect Statement
+{{cursor}}
+
+* Where It Is Used
+- Paper / note:
+- Section:
+- Downstream result:
+
+* Failure Point
+- Line:
+- Missing condition:
+- Invalid inference:
+
+* Minimal Test Case
+- Choose smallest parameters:
+- Try degenerate object:
+- Try random object:
+
+* Diagnosis
+| Issue | Evidence | Fix |
+|-------+----------+-----|
+|       |          |     |
+
+* Repair
+** Option A: Add assumption
+
+** Option B: Weaken conclusion
+
+** Option C: Replace lemma
+
+* Final Patch
+#+begin_proof
+
+#+end_proof

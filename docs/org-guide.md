@@ -4,6 +4,9 @@
 
 如果你要看的不是 Emacs 里的按键和模块，而是 `~/HC/Org/` 这个个人知识库 / 站点源目录怎么组织、`daily/` 和 `roam/` 怎么分工、tag 怎么约定，另见 [org-kb-guide.md](org-kb-guide.md)。
 
+如果你要看 agenda、TODO 状态、任务 tags 和 `H-o w` 状态工具，另见
+[org-task-workflow.md](org-task-workflow.md)。
+
 ## 1. 目录结构
 
 在 [lisp/org/init-org.el](../lisp/org/init-org.el) 里默认是：
@@ -30,7 +33,7 @@
 
 ## 3. Capture 模板
 
-当前默认模板在 [lisp/org/init-org.el](../lisp/org/init-org.el) 里，包括：
+当前默认模板在 [lisp/org/init-org-capture.el](../lisp/org/init-org-capture.el) 里，包括：
 
 - `i`
   Idea
@@ -49,20 +52,63 @@
 
 这些模板会落到 `daily/` 下不同子目录。
 
-## 4. Agenda
+## 4. 新建文件模板
+
+文件模板放在 [templates/org/](../templates/org/)，通过 `SPC f t`
+或 `M-x my/template-switch` 手动选择并套到当前 Org buffer。`org` 默认不在
+auto-insert allowlist 里，所以这些模板不会干扰 `org-capture` / `org-roam`
+的新建流程。
+
+占位符沿用统一模板系统：
+
+- `{{title}}`
+  套模板时提示输入标题
+- `{{date}}` / `{{year}}` / `{{month_year}}`
+  当前日期
+- `{{author}}` / `{{user}}` / `{{file}}`
+  当前用户和文件信息
+- `{{cursor}}`
+  套完模板后光标落点
+
+当前 Org 文件模板覆盖这些场景：
+
+- 基础笔记：`default.org`、`atomic-note.org`、`concept-note.org`、`summary-note.org`、`misc-note.org`
+- 阅读和文献：`reading-summary.org`、`book-note.org`、`literature-note.org`、`paper-summary.org`、`zotero-note.org`
+- 研究和学习：`research-question.org`、`experiment-log.org`、`dataset-note.org`、`course-lecture.org`、`problem-solving.org`、`flashcard-seed.org`
+- 学科专题：`math-note.org`、`quantum-note.org`、`philosophy-note.org`
+- TCS / 数学论文写作：`paper-outline-tcs.org`、`technical-overview.org`、`theorem-note.org`、`definition-bank.org`、`lemma-bank.org`、`proof-sketch.org`、`proof-attempt.org`、`proof-debug.org`、`reduction-note.org`、`lower-bound-proof.org`、`construction-note.org`、`counterexample-note.org`、`algorithm-analysis.org`、`notation-glossary.org`、`related-work-matrix.org`、`reviewer-response.org`
+- 项目和工程：`project-plan.org`、`decision-record.org`、`code-investigation.org`、`bug-debug.org`
+- 写作和输出：`writing-draft.org`、`talk-outline.org`
+- 复盘和索引：`daily-review.org`、`weekly-review.org`、`index-map.org`
+- 实验性工作流：`idea-lab.org`、`prompt-playground.org`
+
+## 5. Agenda
+
+Agenda、TODO 状态、DONE/CANCELLED 完成态、refile、archive、priority、effort
+和 tags 快选现在集中在 [lisp/org/init-org-agenda.el](../lisp/org/init-org-agenda.el)。
+具体状态语义和 tag taxonomy 见 [org-task-workflow.md](org-task-workflow.md)。
 
 ### 基本逻辑
 
-- 默认不再自动扫描 `my-org-root`
-- `org-agenda-files` 初始为空
-- 如果以后要重新启用 agenda，直接手动设置 `org-agenda-files`
+- 默认不后台扫描 `my-org-root`
+- 打开 agenda / tags view / refile 时才临时扫描
+- 在 `~/HC/Org/` 下打开时扫整个 Org 库；在其他项目里扫当前项目；没有项目时扫当前目录
+- TODO 流程是 `TODO -> NEXT/WIP/WAIT/HOLD/REVIEW -> DONE/CANCELLED/DROPPED`
+- refile 目标默认是当前文件和 `org-agenda-files`
+- archive 默认归到同文件的 `_archive` datetree
 
 ### 常用命令
 
 - `C-c a`
   打开 agenda
+- `org-agenda` 里 `o`
+  打开 Overview / Dashboard 自定义视图
+- `H-o t` / `H-o s` / `H-o d` / `H-o r`
+  todo / schedule / deadline / refile
+- `H-o w`
+  打开任务状态和标记工具面板
 
-## 5. Org Roam
+## 6. Org Roam
 
 当前前缀是 `C-c n`：
 
@@ -87,6 +133,10 @@ macOS GUI 下，`Option` 映射到 `Hyper`，Org 常用入口也放到了 `H-o` 
 
 - `H-o a` / `H-o c`
   `org-agenda` / `org-capture`
+- `H-o b`
+  打开 Org maintenance board
+- `H-o m` / `H-o k` / `H-o O`
+  重命名当前 `file:` 链接文件 / 给当前链接文件加清理豁免名 / 用系统 open 打开光标处链接或文件
 - `H-o f` / `H-o i` / `H-o l`
   roam find / roam insert / roam buffer
 - `H-o o`
@@ -97,6 +147,8 @@ macOS GUI 下，`Option` 映射到 `Hyper`，Org 常用入口也放到了 `H-o` 
   插入 `id:` link / target link
 - `H-o T` / `H-o v`
   刷新 overview TOC / 预览当前可视区域 LaTeX
+- `H-o w`
+  打开 agenda / TODO / tag 状态工具
 - `H-o t` / `H-o s` / `H-o d` / `H-o r`
   todo / schedule / deadline / refile
 - `H-o q` / `H-o p` / `H-o e` / `H-o A`
@@ -106,12 +158,27 @@ macOS GUI 下，`Option` 映射到 `Hyper`，Org 常用入口也放到了 `H-o` 
 
 剪贴板图片粘贴到 Org 的入口是 `H-y`。
 
+Org 库清理入口是 `H-o b` / `M-x my/org-maintenance-board`。这个 board 会扫描
+当前 scope：在 `~/HC/Org/` 里扫整个 Org 库，在其他项目里扫当前项目，没有项目时扫
+当前目录。
+
+- 找出未引用图片；图片只看同目录/子目录里的 Org `file:` 链接，不做全库交叉引用
+- 找出 `attachments/`、`attach/`、`files/` 下未引用附件；附件按当前项目/scope 全量引用判断
+- 找出损坏的本地媒体链接
+- 统计并清理 `ltximg/` 里的 Org LaTeX preview cache
+- 删除清理后留下的空 `img/`、`images/`、附件、`ltximg/` 目录
+- 跳过 `public/`、`publish/`、`dist/`、`build/`、`css/`、`js/`、`CV/` 和 LaTeX preview cache 目录
+- 文件名带 `keep-` 前缀或 `-keep` 后缀时豁免清理；`H-o k` 可以给当前链接文件加豁免名
+
+同一 scope 的 Org link 解析结果会按文件签名缓存，所以 board 里连续执行清理动作不会
+反复 parse 全部 Org 文件。
+
 说明：
 
 - `org-roam` 的“模板”来自 `org-roam-capture-templates`（见 [lisp/org/init-org-roam.el](../lisp/org/init-org-roam.el)），不走新建文件 `auto-insert` 模板系统。
 - 另外这套配置里 `org` 的 `auto-insert` 默认是关闭的（不在 allowlist），避免新建 roam/capture 文件时发生模板叠加。
 
-## 6. Org UI 增强
+## 7. Org UI 增强
 
 默认启用的增强包括：
 
@@ -126,7 +193,7 @@ macOS GUI 下，`Option` 映射到 `Hyper`，Org 常用入口也放到了 `H-o` 
 
 现在这些增强默认不再因为远端或大文件整体关闭；其中高频成本比较明确的部分会按需启用或跳过无效刷新：`valign` 只在 buffer 已有表格或新插入表格时打开，`org-appear` 在 point/编辑状态未变化时不重复解析，`org-roam` 侧边 buffer 跟随刷新会短延迟合并，避免每个命令都重算。
 
-## 7. Org Localleader
+## 8. Org Localleader
 
 在 Org buffer 里用 `SPC m`：
 
@@ -151,7 +218,7 @@ macOS GUI 下，`Option` 映射到 `Hyper`，Org 常用入口也放到了 `H-o` 
 - `SPC m z`
   从 BibTeX block 填充 Zotero 模板字段
 
-## 8. Org 跳转引用
+## 9. Org 跳转引用
 
 这里讲的是 Org buffer 里的点击跳转，不是 LaTeX/PDF 导出时的 `\label` / `\ref` / `\eqref`。
 
@@ -345,7 +412,7 @@ E = mc^2
 - `hlink`
   插入 `[[*标题]]`
 
-## 9. 学术写作
+## 10. 学术写作
 
 ### LaTeX
 
@@ -370,7 +437,7 @@ E = mc^2
 - `pdf-tools` 已启用
 - AUCTeX 查看器走 Sioyek
 
-## 10. 如果 Org 看起来不对
+## 11. 如果 Org 看起来不对
 
 优先检查：
 
@@ -379,12 +446,12 @@ E = mc^2
 3. `xelatex` / `dvisvgm` 是否可用
 4. [tools/org-xdvisvgm-hires](../tools/org-xdvisvgm-hires) 是否有执行权限
 
-## 11. 想改 Org 的入口
+## 12. 想改 Org 的入口
 
 看 [settings-cookbook.md](settings-cookbook.md)：
 
 - 改 Org 根目录
 - 改 capture 模板
-- 改 agenda 策略
+- 改 agenda / TODO / refile 策略
 - 改 org-roam 模板
 - 改 heavy UI

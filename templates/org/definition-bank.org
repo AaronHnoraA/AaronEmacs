@@ -1,0 +1,41 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :math:tcs:definition:bank:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Conventions
+- Universe:
+- Parameters:
+- Asymptotics:
+- Probability:
+
+* Definitions
+** Definition 1
+#+begin_definition
+{{cursor}}
+#+end_definition
+
+- Intuition:
+- Equivalent forms:
+- Examples:
+- Non-examples:
+
+** Definition 2
+#+begin_definition
+
+#+end_definition
+
+* Notation
+| Symbol | Meaning | Scope |
+|--------+---------+-------|
+|        |         |       |
+
+* Dependencies
+- Needs:
+- Used by:

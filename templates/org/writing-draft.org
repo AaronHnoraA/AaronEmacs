@@ -1,0 +1,38 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :writing:draft:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Brief
+- Audience:
+- Promise:
+- Length:
+- Deadline:
+
+* Thesis
+{{cursor}}
+
+* Outline
+1. 
+2. 
+3. 
+
+* Draft
+
+* Evidence
+- 
+
+* Cut List
+- 
+
+* Revision Passes
+- [ ] Structure
+- [ ] Examples
+- [ ] Clarity
+- [ ] Links / citations

@@ -1,0 +1,49 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :literature:paper:research:draft:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Reference
+- Authors:
+- Year:
+- Venue:
+- DOI / URL:
+- Local file:
+
+* One-Sentence Claim
+{{cursor}}
+
+* Problem
+- What problem does it solve:
+- Why previous work is not enough:
+
+* Contribution
+1. 
+2. 
+3. 
+
+* Method
+- Model:
+- Assumptions:
+- Key technique:
+
+* Evidence
+- Theorems:
+- Experiments:
+- Limitations:
+
+* My Commentary
+- What I believe:
+- What I doubt:
+- Where it connects:
+
+* Follow-up
+- [ ] Extract concepts
+- [ ] Compare with related paper
+- [ ] Add citation to BibTeX

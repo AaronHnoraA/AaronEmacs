@@ -19,6 +19,8 @@ This directory contains the operational docs for the Emacs configuration. The do
   Org inside Emacs: agenda, capture, org-roam, LaTeX preview, and writing-related features.
 - [org-kb-guide.md](org-kb-guide.md)
   How `~/HC/Org/` is organized as a personal knowledge base and website, including `daily/`, `roam/`, `attachments/`, and tag conventions.
+- [org-task-workflow.md](org-task-workflow.md)
+  Org agenda, TODO states, task workflow tags, and the `H-o w` status tools.
 - [dev-guide.md](dev-guide.md)
   Programming, completion, LSP, debugging, terminals, remote work, browser integration, and AI.
 - [research-notes-workflow.md](research-notes-workflow.md)
@@ -43,5 +45,6 @@ This directory contains the operational docs for the Emacs configuration. The do
 - Want the project workflow: [project-guide.md](project-guide.md)
 - Want Org inside Emacs: [org-guide.md](org-guide.md)
 - Want the Org knowledge-base / site model: [org-kb-guide.md](org-kb-guide.md)
+- Want Org TODO / agenda workflow: [org-task-workflow.md](org-task-workflow.md)
 - Want programming / LSP / remote details: [dev-guide.md](dev-guide.md)
 - Want maintenance and lock/state guidance: [maintenance.md](maintenance.md)

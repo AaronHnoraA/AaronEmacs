@@ -1,0 +1,44 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :debug:bug:engineering:draft:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Symptom
+{{cursor}}
+
+* Environment
+- Project:
+- Branch / commit:
+- OS / runtime:
+- Input / data:
+
+* Reproduction
+1. 
+2. 
+3. 
+
+* Observations
+- Logs:
+- Error:
+- What changed recently:
+
+* Hypotheses
+| Hypothesis | Evidence | Test | Result |
+|------------+----------+------+--------|
+|            |          |      |        |
+
+* Fix
+- Root cause:
+- Patch:
+- Regression test:
+
+* Postmortem
+- Why it escaped:
+- What would catch it earlier:
+- Cleanup tasks:

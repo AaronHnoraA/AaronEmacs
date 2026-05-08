@@ -1,0 +1,34 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :reading:summary:draft:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Source
+- Title:
+- Author:
+- Link:
+- Read on: {{date}}
+
+* Summary
+{{cursor}}
+
+* What I Want To Remember
+- 
+
+* Terms
+| Term | Meaning |
+|------+---------|
+|      |         |
+
+* Questions
+- 
+
+* Actions
+- [ ] Promote one idea into an atomic note
+- [ ] Add source to references if useful

@@ -1,0 +1,39 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :math:tcs:notation:glossary:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Global Conventions
+- Logs:
+- Asymptotics:
+- Probability:
+- Linear algebra:
+- Complexity classes:
+
+* Symbols
+| Symbol | Meaning | First used | Notes |
+|--------+---------+------------+-------|
+|        |         |            |       |
+
+* Parameters
+| Parameter | Range | Meaning | Fixed / variable |
+|-----------+-------+---------+------------------|
+|           |       |         |                  |
+
+* Acronyms
+| Acronym | Expansion | Notes |
+|---------+-----------+-------|
+|         |           |       |
+
+* TODO Normalize
+- [ ] Replace overloaded symbols
+- [ ] Check theorem statements
+- [ ] Check figure labels
+
+{{cursor}}

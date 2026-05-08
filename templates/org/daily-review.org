@@ -1,0 +1,35 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :daily:review:life:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Today
+- Date: {{date}}
+- Focus:
+
+* Done
+- 
+
+* Learned
+- 
+
+* Friction
+- What felt slow:
+- What repeatedly distracted me:
+
+* Notes To Promote
+- [ ] Move useful items into roam
+- [ ] Link to existing notes
+
+* Tomorrow
+- Top 1:
+- Top 2:
+- Top 3:
+
+{{cursor}}

@@ -1,0 +1,32 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :summary:note:draft:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Short Summary
+{{cursor}}
+
+* Longer Summary
+- 
+
+* Key Points
+1. 
+2. 
+3. 
+
+* What Changed My Mind
+- 
+
+* What I Still Do Not Know
+- 
+
+* Links
+- Source:
+- Related notes:
+- Next summary:

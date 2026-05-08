@@ -1,0 +1,34 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :decision:project:record:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Status
+- Proposed / Accepted / Rejected / Superseded:
+- Date: {{date}}
+
+* Context
+{{cursor}}
+
+* Decision
+- We will:
+- We will not:
+
+* Options Considered
+| Option | Pros | Cons | Decision |
+|--------+------+------+----------|
+|        |      |      |          |
+
+* Consequences
+- Positive:
+- Negative:
+- Follow-up:
+
+* Review Trigger
+- Revisit when:

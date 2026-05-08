@@ -1,0 +1,37 @@
+#+title: {{title}}
+#+date: {{date}}
+#+last_modified: {{date}}
+#+filetags: :index:map:stable:
+#+startup: overview
+#+options: toc:nil
+
+#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+
+* Scope
+- This index covers:
+- This index does not cover:
+
+* Start Here
+- 
+
+* Core Notes
+| Note | Role | Status |
+|------+------+--------|
+|      |      |        |
+
+* Open Questions
+- [ ] 
+
+* Reading Path
+1. 
+2. 
+3. 
+
+* Maintenance
+- [ ] Merge duplicate notes
+- [ ] Promote stable daily notes
+- [ ] Add missing backlinks
+
+{{cursor}}

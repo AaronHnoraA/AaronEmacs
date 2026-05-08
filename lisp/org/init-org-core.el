@@ -487,7 +487,6 @@ headline levels."
   ;; --- Directories ---
   (org-directory my-org-root)
   (org-default-notes-file my-org-notes-file)
-  (org-archive-location "%s_archive::datetree/")
 
   ;; --- Appearance Basics ---
   (org-startup-indented t)
@@ -509,48 +508,9 @@ headline levels."
   (org-fold-catch-invisible-edits 'show-and-error)
   (org-id-link-to-org-use-id 'create-if-interactive-and-no-custom-id)
 
-  ;; --- Todo Keywords & Faces ---
-  (org-todo-keywords
-   '((sequence "TODO(t)" "NEXT(n)" "HOLD(h!)" "WIP(i!)" "WAIT(w@/!)" "|" 
-               "DONE(d!)" "CANCELLED(c@/!)")))
-
-  (org-todo-keyword-faces
-   `(("TODO"      . (:foreground ,(aaron-ui-color 'accent-red) :weight medium))
-     ("NEXT"      . (:foreground ,(aaron-ui-color 'accent-green-soft) :weight medium))
-     ("HOLD"      . (:foreground ,(aaron-ui-color 'accent-orange) :weight medium))
-     ("WIP"       . (:foreground ,(aaron-ui-color 'accent-cyan) :weight medium))
-     ("WAIT"      . (:foreground ,(aaron-ui-color 'accent-yellow) :weight medium))
-     ("DONE"      . (:foreground ,(aaron-ui-color 'accent-blue) :weight medium :strike-through t))
-     ("CANCELLED" . (:foreground ,(aaron-ui-color 'accent-red-soft) :weight medium :strike-through t))))
-
-  (org-enforce-todo-dependencies t)
-  (org-enforce-todo-checkbox-dependencies t)
-  (org-closed-keep-when-no-todo t)
-  (org-log-repeat 'time)
-  (org-priority-faces
-   `((?A :foreground ,(aaron-ui-color 'accent-red) :weight medium)
-     (?B :foreground ,(aaron-ui-color 'accent-orange))
-     (?C :foreground ,(aaron-ui-color 'accent-yellow))))
-
-  ;; --- Properties ---
-  (org-global-properties
-   '(("EFFORT_ALL" . "0:15 0:30 0:45 1:00 2:00 3:00 4:00 5:00 6:00 7:00 8:00")
-     ("STYLE_ALL" . "habit")))
-  (org-cycle-hide-drawer-startup t) 
-
-  ;; --- Refiling ---
-  (org-refile-use-cache nil)
-  (org-refile-targets '((nil . (:maxlevel . 9))
-                        (org-agenda-files . (:maxlevel . 9))))
-  (org-refile-use-outline-path 'file)
-  (org-outline-path-complete-in-steps nil)
-  (org-refile-allow-creating-parent-nodes 'confirm)
-  
-  ;; --- Tags & Search ---
+  ;; --- Search ---
   (org-goto-auto-isearch nil)
   (org-goto-interface 'outline-path-completion)
-  (org-use-fast-tag-selection t)
-  (org-fast-tag-selection-single-key t)
 
   ;; --- Links ---
   (org-link-abbrev-alist
