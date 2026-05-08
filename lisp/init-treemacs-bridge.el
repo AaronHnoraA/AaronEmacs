@@ -54,6 +54,7 @@
        (declare-function treemacs--flatten-imenu-index "treemacs-tags" (index))
        (declare-function treemacs--flatten-org-mode-imenu-index "treemacs-tags" (index))
        (declare-function treemacs--get-imenu-index "treemacs-tags" (filename))
+       (declare-function treemacs--extract-position "treemacs-tags" (item file))
        (declare-function treemacs--invalidate-buffer-project-cache "treemacs-project-follow-mode")
        (declare-function treemacs--persist "treemacs-persistence")
        (declare-function treemacs--rerender-after-workspace-change "treemacs-rendering")

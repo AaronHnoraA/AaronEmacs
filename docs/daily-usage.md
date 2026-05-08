@@ -85,6 +85,8 @@
 Org 前缀里 `H-o b` 打开 `my/org-maintenance-board`，用来清未引用图片、附件和
 过多的 `ltximg/` LaTeX preview cache。`H-o m` 重命名当前 `file:` 链接文件，
 `H-o k` 给当前链接文件加 `keep-` 清理豁免前缀，`H-o O` 用系统 open 打开光标处链接或文件。
+`H-o n` 会把当前已经位于 org-roam 目录的 Org 文件补齐文件级 roam 头，并注册进
+org-roam 数据库。
 `H-o w` 打开 `my/org-task-dispatch`，把 TODO 状态、`confusion` / `shush`
 这类标记、schedule/deadline、timestamp/calendar/clock、refile/archive 和常用
 agenda view 收在一起；其中 `H-o w x` 是按 TODO keywords 分组的 status table。

@@ -144,6 +144,8 @@ macOS GUI 下，`Option` 映射到 `Hyper`，Org 常用入口也放到了 `H-o` 
   重命名当前 `file:` 链接文件 / 给当前链接文件加清理豁免名 / 用系统 open 打开光标处链接或文件
 - `H-o f` / `H-o i` / `H-o l`
   roam find / roam insert / roam buffer
+- `H-o n`
+  把当前 roam 目录里的 Org 文件补齐文件级 roam 头，并注册进 org-roam DB
 - `H-o o`
   创建或复用当前位置引用目标，并复制 Org link
 - `H-o H-o`

@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'init-org-core)
+(require 'org-id)
 
 (defcustom my/org-roam-background-init-delay 2
   "Idle delay before Org Roam starts its background services."
@@ -32,9 +33,29 @@ motion or typing."
                       (expand-file-name "var/org/" user-emacs-directory)))
   "Canonical Org Roam database file for this Emacs configuration.")
 
+(defconst my/org-roam-default-overview-head
+  "#+begin_overview :toc t :depth 3
+- 还没有标题。
+#+end_overview
+"
+  "Default overview block used by Org Roam capture heads.")
+
+(defconst my/org-roam-directory-filetag-alist
+  '(("CS" . "cs")
+    ("QC" . "qc")
+    ("index" . "index")
+    ("math" . "math")
+    ("papers" . "paper")
+    ("philosophy" . "phil"))
+  "Default filetag inferred from the first path component under roam.")
+
 (declare-function my/org-reference-create-target-dwim "init-org-utility" ())
 (declare-function my/org-insert-id-link "init-org-utility" ())
 (declare-function my/org-insert-target-link "init-org-utility" ())
+(declare-function org-roam-db-clear-file "org-roam-db" (&optional file))
+(declare-function org-roam-db-query "org-roam-db" (sql &rest args))
+(declare-function org-roam-db-update-file "org-roam-db" (&optional file-path deprecated))
+(declare-function org-roam-list-files "org-roam" ())
 
 (defun my/org-roam-capture-head (tag)
   "Return the default Org Roam capture head with filetag TAG."
@@ -42,11 +63,256 @@ motion or typing."
 #+date: %%u
 #+filetags: :%s:
 
-#+begin_overview :toc t :depth 3
-- 还没有标题。
-#+end_overview
-"
-          tag))
+%s"
+          tag
+          my/org-roam-default-overview-head))
+
+(defun my/org-roam-db--first-content-position ()
+  "Return the first non-blank buffer position for Org Roam file nodes."
+  (save-excursion
+    (goto-char (point-min))
+    (skip-chars-forward " \t\n\r")
+    (point)))
+
+(defun my/org-roam--file-head-position ()
+  "Return the line-beginning position of the first non-blank file content."
+  (save-excursion
+    (goto-char (my/org-roam-db--first-content-position))
+    (line-beginning-position)))
+
+(defun my/org-roam--file-property-drawer-bounds ()
+  "Return bounds of the file-level property drawer, or nil."
+  (save-excursion
+    (goto-char (my/org-roam--file-head-position))
+    (when (looking-at-p "[ \t]*:PROPERTIES:[ \t]*$")
+      (let ((begin (line-beginning-position)))
+        (unless (re-search-forward "^[ \t]*:END:[ \t]*$" nil t)
+          (user-error "Malformed file-level property drawer"))
+        (cons begin (line-end-position))))))
+
+(defun my/org-roam--file-property (property)
+  "Return file-level PROPERTY value, or nil."
+  (when-let* ((bounds (my/org-roam--file-property-drawer-bounds)))
+    (save-excursion
+      (goto-char (car bounds))
+      (when (re-search-forward
+             (format "^[ \t]*:%s:[ \t]*\\(.+\\)$" (regexp-quote property))
+             (cdr bounds)
+             t)
+        (string-trim (match-string-no-properties 1))))))
+
+(defun my/org-roam--property-drawer-end-position ()
+  "Return the insertion point just after the file-level property drawer."
+  (if-let* ((bounds (my/org-roam--file-property-drawer-bounds)))
+      (save-excursion
+        (goto-char (cdr bounds))
+        (forward-line 1)
+        (point))
+    (my/org-roam--file-head-position)))
+
+(defun my/org-roam--ensure-file-id (file)
+  "Ensure current Org buffer has a file-level ID for FILE.
+Return (ID . CHANGED)."
+  (if-let* ((id (my/org-roam--file-property "ID")))
+      (cons id nil)
+    (let ((id (org-id-new)))
+      (if-let* ((bounds (my/org-roam--file-property-drawer-bounds)))
+          (save-excursion
+            (goto-char (car bounds))
+            (if (re-search-forward "^[ \t]*:ID:[ \t]*.*$" (cdr bounds) t)
+                (replace-match (concat ":ID:       " id) t t)
+              (goto-char (my/org-roam--file-head-position))
+              (forward-line 1)
+              (insert ":ID:       " id "\n")))
+        (save-excursion
+          (goto-char (my/org-roam--file-head-position))
+          (insert ":PROPERTIES:\n:ID:       " id "\n:END:\n")))
+      (org-id-add-location id file)
+      (cons id t))))
+
+(defun my/org-roam--ensure-leading-blank-line ()
+  "Ensure Org Roam heads start after a leading blank line.
+Return non-nil when the buffer changed."
+  (save-excursion
+    (goto-char (point-min))
+    (unless (looking-at-p "[ \t]*\n")
+      (insert "\n")
+      t)))
+
+(defun my/org-roam--keyword-present-p (keyword)
+  "Return non-nil if current Org buffer has #+KEYWORD."
+  (save-excursion
+    (goto-char (point-min))
+    (let ((case-fold-search t))
+      (re-search-forward
+       (format "^[ \t]*#\\+%s:" (regexp-quote keyword))
+       nil
+       t))))
+
+(defun my/org-roam--keyword-after-position (keyword)
+  "Return the position after the first #+KEYWORD line, or nil."
+  (save-excursion
+    (goto-char (point-min))
+    (let ((case-fold-search t))
+      (when (re-search-forward
+             (format "^[ \t]*#\\+%s:.*$" (regexp-quote keyword))
+             nil
+             t)
+        (forward-line 1)
+        (point)))))
+
+(defun my/org-roam--title-from-file (file)
+  "Derive a readable Org Roam title from FILE."
+  (let* ((base (file-name-base file))
+         (spaced (replace-regexp-in-string "[-_]+" " " base)))
+    (string-join
+     (mapcar (lambda (word)
+               (if (string= word (upcase word))
+                   word
+                 (capitalize word)))
+             (split-string spaced " +" t))
+     " ")))
+
+(defun my/org-roam--sanitize-filetag (tag)
+  "Return TAG in a conservative Org filetag form."
+  (let ((tag (downcase (or tag ""))))
+    (replace-regexp-in-string
+     "_+" "_"
+     (replace-regexp-in-string "[^[:alnum:]_@#%]+" "_" tag))))
+
+(defun my/org-roam--filetag-from-file (file)
+  "Infer the default Org Roam filetag for FILE."
+  (let* ((relative (file-relative-name
+                    (file-truename file)
+                    (file-name-as-directory (file-truename org-roam-directory))))
+         (directory (file-name-directory relative))
+         (component (and directory
+                         (car (split-string (directory-file-name directory)
+                                            "/" t))))
+         (tag (or (cdr (assoc component my/org-roam-directory-filetag-alist))
+                  component
+                  "note")))
+    (my/org-roam--sanitize-filetag tag)))
+
+(defun my/org-roam--insert-head-keyword (keyword value position)
+  "Insert #+KEYWORD with VALUE at POSITION."
+  (save-excursion
+    (goto-char position)
+    (insert "#+" keyword ": " value "\n")))
+
+(defun my/org-roam--head-keyword-end-position ()
+  "Return the insertion point after the known Org Roam file head keywords."
+  (or (my/org-roam--keyword-after-position "filetags")
+      (my/org-roam--keyword-after-position "date")
+      (my/org-roam--keyword-after-position "title")
+      (my/org-roam--property-drawer-end-position)))
+
+(defun my/org-roam--overview-present-p ()
+  "Return non-nil when the buffer already has an overview block."
+  (save-excursion
+    (goto-char (point-min))
+    (let ((case-fold-search t))
+      (re-search-forward "^[ \t]*#\\+begin_overview\\b" nil t))))
+
+(defun my/org-roam--ensure-file-head (file)
+  "Ensure current Org buffer has the standard file-level Org Roam head for FILE.
+Return a plist with :id and :changed."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (let* ((leading-changed (my/org-roam--ensure-leading-blank-line))
+             (id-result (my/org-roam--ensure-file-id file))
+             (id (car id-result))
+             (changed (or leading-changed (cdr id-result))))
+        (unless (my/org-roam--keyword-present-p "title")
+          (my/org-roam--insert-head-keyword
+           "title"
+           (my/org-roam--title-from-file file)
+           (my/org-roam--property-drawer-end-position))
+          (setq changed t))
+        (unless (my/org-roam--keyword-present-p "date")
+          (my/org-roam--insert-head-keyword
+           "date"
+           (format-time-string "[%Y-%m-%d %a]")
+           (or (my/org-roam--keyword-after-position "title")
+               (my/org-roam--property-drawer-end-position)))
+          (setq changed t))
+        (unless (my/org-roam--keyword-present-p "filetags")
+          (my/org-roam--insert-head-keyword
+           "filetags"
+           (format ":%s:" (my/org-roam--filetag-from-file file))
+           (or (my/org-roam--keyword-after-position "date")
+               (my/org-roam--keyword-after-position "title")
+               (my/org-roam--property-drawer-end-position)))
+          (setq changed t))
+        (unless (my/org-roam--overview-present-p)
+          (save-excursion
+            (goto-char (my/org-roam--head-keyword-end-position))
+            (insert "\n" my/org-roam-default-overview-head))
+          (setq changed t))
+        (list :id id :changed changed)))))
+
+(defun my/org-roam--current-org-file ()
+  "Return the truename of the current Org buffer file."
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Not in an Org buffer"))
+  (let ((file (buffer-file-name (buffer-base-buffer))))
+    (unless file
+      (user-error "Current Org buffer is not visiting a file"))
+    (file-truename file)))
+
+(defun my/org-roam--file-in-roam-directory-p (file)
+  "Return non-nil if FILE is under `org-roam-directory'."
+  (and (boundp 'org-roam-directory)
+       (stringp org-roam-directory)
+       (file-in-directory-p file (file-name-as-directory
+                                  (file-truename org-roam-directory)))))
+
+(defun my/org-roam--listed-file-p (file)
+  "Return non-nil if FILE is included by `org-roam-list-files'."
+  (catch 'found
+    (dolist (candidate (org-roam-list-files))
+      (when (file-equal-p file candidate)
+        (throw 'found t)))))
+
+(defun my/org-roam--file-node-registered-p (file id)
+  "Return non-nil if FILE has file-level node ID in Org Roam DB."
+  (org-roam-db-query
+   [:select id :from nodes
+    :where (and (= file $s1) (= id $s2))]
+   file
+   id))
+
+(defun my/org-roam-register-current-file ()
+  "Register the current Org file as a file-level Org Roam node.
+The file must already live under `org-roam-directory' and be included by
+`org-roam-list-files'.  This command ensures the standard roam head
+(`ID', title, date, filetags and overview), saves the file, and updates the
+Org Roam database for that file."
+  (interactive)
+  (let ((file (my/org-roam--current-org-file)))
+    (require 'org-roam)
+    (my/org-roam-enable)
+    (unless (my/org-roam--file-in-roam-directory-p file)
+      (user-error "Current file is outside org-roam-directory: %s" file))
+    (let* ((head (my/org-roam--ensure-file-head file))
+           (id (plist-get head :id))
+           (changed (plist-get head :changed)))
+      (when (or changed (buffer-modified-p))
+        (save-buffer))
+      (unless (my/org-roam--listed-file-p file)
+        (user-error "Current file is not included by org-roam-list-files: %s" file))
+      (let ((registered-before (my/org-roam--file-node-registered-p file id)))
+        (unless registered-before
+          (org-roam-db-clear-file file))
+        (org-roam-db-update-file file)
+        (unless (my/org-roam--file-node-registered-p file id)
+          (user-error "Failed to register Org Roam node %s for %s" id file))
+        (org-id-add-location id file)
+        (message "Org Roam file node %s: %s"
+                 (if registered-before "updated" "registered")
+                 id)
+        id))))
 
 (defun my/org-roam--cancel-background-timer ()
   "Cancel the deferred Org Roam background initialization timer."
@@ -97,13 +363,6 @@ motion or typing."
         ("l" . org-roam-buffer-toggle))
   
   :config
-  (defun my/org-roam-db--first-content-position ()
-    "Return the first non-blank buffer position for Org Roam file nodes."
-    (save-excursion
-      (goto-char (point-min))
-      (skip-chars-forward " \t\n\r")
-      (point)))
-
   (defun org-roam-db-insert-file-node ()
     "Insert the file-level node into the Org-roam cache.
 This local override matches upstream Org Roam, but tolerates blank lines before

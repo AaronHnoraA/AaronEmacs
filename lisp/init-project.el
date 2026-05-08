@@ -26,6 +26,7 @@
 (declare-function project--ensure-read-project-list "project")
 (declare-function project--write-project-list "project")
 (declare-function dashboard-projects-backend-load-projects "dashboard-widgets")
+(declare-function imenu--subalist-p "imenu" (item))
 (declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
 (declare-function get-current-persp "perspective")
 (declare-function persp-parameter "perspective" (parameter &optional persp))
@@ -593,6 +594,89 @@ Emacs 31 `project--remember-dir' takes optional arguments (NO-WRITE STABLE)."
          (cons leaf (cdr tag-path))))
      flat-index)))
 
+(defun my/treemacs-org-imenu-entry-label (entry)
+  "Return ENTRY's label without text properties."
+  (when (consp entry)
+    (substring-no-properties (format "%s" (car entry)))))
+
+(defun my/treemacs-org-imenu-entry-p (entry)
+  "Return non-nil when ENTRY looks like an Org imenu entry."
+  (and (consp entry)
+       (stringp (car entry))
+       (get-text-property 0 'org-imenu-marker (car entry))))
+
+(defun my/treemacs-org-imenu-index-p (index)
+  "Return non-nil when INDEX contains Org imenu entries."
+  (and (listp index)
+       (seq-some
+        (lambda (entry)
+          (or (my/treemacs-org-imenu-entry-p entry)
+              (and (imenu--subalist-p entry)
+                   (my/treemacs-org-imenu-index-p (cdr entry)))))
+        index)))
+
+(defun my/treemacs-org-imenu-duplicate-leaf-p (node leaf)
+  "Return non-nil when LEAF duplicates Org parent NODE."
+  (and (imenu--subalist-p node)
+       (my/treemacs-org-imenu-entry-p leaf)
+       (not (imenu--subalist-p leaf))
+       (string= (my/treemacs-org-imenu-entry-label node)
+                (my/treemacs-org-imenu-entry-label leaf))))
+
+(defun my/treemacs-prune-org-imenu-index (index)
+  "Remove duplicate parent leaves from an Org imenu INDEX.
+`org-imenu-get-tree' emits a parent headline twice when it has children: once
+as a subalist and once as a leaf.  Treemacs renders both, which makes Org files
+with generated overviews noisy and can leave stale duplicate tag paths."
+  (let (result)
+    (while index
+      (let* ((entry (car index))
+             (next (cadr index))
+             (entry (if (imenu--subalist-p entry)
+                        (cons (car entry)
+                              (my/treemacs-prune-org-imenu-index (cdr entry)))
+                      entry)))
+        (push entry result)
+        (setq index
+              (if (my/treemacs-org-imenu-duplicate-leaf-p entry next)
+                  (cddr index)
+                (cdr index)))))
+    (nreverse result)))
+
+(defun my/treemacs-get-imenu-index-a (orig-fn file)
+  "Post-process Treemacs imenu index from ORIG-FN for FILE."
+  (let ((index (funcall orig-fn file)))
+    (if (my/treemacs-org-imenu-index-p index)
+        (my/treemacs-prune-org-imenu-index index)
+      index)))
+
+(defun my/treemacs-extract-position (item file)
+  "Return buffer and position for Treemacs imenu ITEM in FILE.
+This is a defensive variant of `treemacs--extract-position'.  Org imenu leaves
+are dotted cons cells like (TITLE . MARKER), so PDF-specific proper-list checks
+must not call `cadr' before the Org case has been handled."
+  (cond
+   ((markerp item)
+    (cons (marker-buffer item) (marker-position item)))
+   ((overlayp item)
+    (cons (overlay-buffer item) (overlay-start item)))
+   ((integerp item)
+    (cons nil item))
+   ((and (consp item)
+         (stringp (car item))
+         (get-text-property 0 'org-imenu-marker (car item)))
+    (let ((org-marker (get-text-property 0 'org-imenu-marker (car item))))
+      (cons (marker-buffer org-marker) (marker-position org-marker))))
+   ((and (consp item)
+         (markerp (cdr item)))
+    (cons (marker-buffer (cdr item)) (marker-position (cdr item))))
+   ((and (consp item)
+         (consp (cdr item))
+         (eq 'pdf-outline-imenu-activate-link (cadr item)))
+    (with-no-warnings
+      (cons (find-buffer-visiting file)
+            (lambda () (apply #'pdf-outline-imenu-activate-link item)))))))
+
 (defun my/treemacs-flatten-and-sort-imenu-index ()
   "Flatten the current buffer's imenu index and sort it for Treemacs.
 This mirrors Treemacs' implementation, but also normalizes integer positions to
@@ -1135,6 +1219,17 @@ Returns the number of killed buffers."
     (advice-add 'treemacs--flatten&sort-imenu-index
                 :override
                 #'my/treemacs-flatten-and-sort-imenu-index))
+  (with-eval-after-load 'treemacs-tags
+    (advice-remove 'treemacs--get-imenu-index
+                   #'my/treemacs-get-imenu-index-a)
+    (advice-add 'treemacs--get-imenu-index
+                :around
+                #'my/treemacs-get-imenu-index-a)
+    (advice-remove 'treemacs--extract-position
+                   #'my/treemacs-extract-position)
+    (advice-add 'treemacs--extract-position
+                :override
+                #'my/treemacs-extract-position))
   (when (bound-and-true-p treemacs-tag-follow-mode)
     (treemacs-tag-follow-mode -1))
   (when (bound-and-true-p treemacs-follow-mode)
