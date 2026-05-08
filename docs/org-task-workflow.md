@@ -22,7 +22,10 @@
 - `C-c a`
   打开 `org-agenda`。
 - `org-agenda` 里按 `o`
-  打开 Overview / Dashboard。
+  打开 Overview / Dashboard：upcoming 日程、deadline 和主要状态分组。
+- `H-o w x` / `org-agenda` 里按 `S`
+  打开 TODO status table，按 `TODO`、`NEXT`、`WIP`、`REVIEW`、`WAIT`、
+  `HOLD`、`DONE`、`CANCELLED`、`DROPPED` 分组查看。
 
 配置文件是 [lisp/org/init-org-agenda.el](../lisp/org/init-org-agenda.el)。
 
@@ -42,6 +45,10 @@ transient 面板本身也不会扫描文件。只有真正打开 agenda、tags v
 
 扫描会跳过常见重目录：`.git`、`.cache`、`.direnv`、`.venv`、`node_modules`、
 `public`、`ltximg`。
+
+Agenda 生成时如果临时打开了被扫描的 Org 文件，这些 buffer 会挂到当前 agenda
+buffer 上。你原来已经打开的 buffer 不会被动；临时打开且未修改的 source buffer
+会在退出 agenda 时自动关闭，避免关 Emacs 时一批扫描文件逐个询问。
 
 ## TODO 状态
 
@@ -81,8 +88,8 @@ TODO -> NEXT -> WIP -> REVIEW -> DONE
 - Markers
   一键 toggle 常用标记：`confusion`、`shush`、`blocked`、`followup`、`review`。
 - Views
-  打开 overview agenda，以及 `confusion`、`shush`、`blocked`、`followup`、
-  `review` 的 tags view。
+  打开 overview agenda、status table，以及 `confusion`、`shush`、`blocked`、
+  `followup`、`review` 的 tags view。
 
 这些工具里，TODO 状态、tags、schedule、deadline、priority、property、refile、
 archive 和 clock 都是 Org heading 级别的元数据，所以会作用在当前标题上。这是

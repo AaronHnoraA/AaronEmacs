@@ -113,6 +113,9 @@
 (defvar my/org-agenda--last-scope nil
   "Most recent scoped agenda root and file count.")
 
+(defvar-local my/org-agenda--temporary-source-buffers nil
+  "Org source buffers opened only to build the current agenda buffer.")
+
 (defun my/org-agenda--default-directory ()
   "Return a safe local directory for scoped Org agenda scans."
   (file-name-as-directory
@@ -175,11 +178,63 @@ idle timers."
     (setq my/org-agenda--last-scope (list :root root :count (length files)))
     files))
 
+(defun my/org-agenda--visible-buffers ()
+  "Return buffers visible in live windows."
+  (delq nil (mapcar #'window-buffer (window-list nil 'no-minibuf))))
+
+(defun my/org-agenda--temporary-source-buffers (before files)
+  "Return source buffers opened after BEFORE for agenda FILES."
+  (let ((visible (my/org-agenda--visible-buffers))
+        (file-table (make-hash-table :test #'equal))
+        buffers)
+    (dolist (file files)
+      (puthash (file-truename file) t file-table))
+    (dolist (buffer (buffer-list))
+      (when-let* ((file (buffer-file-name buffer)))
+        (when (and (not (memq buffer before))
+                   (not (memq buffer visible))
+                   (gethash (file-truename file) file-table))
+          (push buffer buffers))))
+    buffers))
+
+(defun my/org-agenda--cleanup-temporary-source-buffers ()
+  "Kill temporary Org source buffers owned by the current agenda buffer."
+  (let ((visible (my/org-agenda--visible-buffers)))
+    (dolist (buffer my/org-agenda--temporary-source-buffers)
+      (when (and (buffer-live-p buffer)
+                 (not (buffer-modified-p buffer))
+                 (not (memq buffer visible)))
+        (kill-buffer buffer))))
+  (setq my/org-agenda--temporary-source-buffers nil))
+
+(defun my/org-agenda--remember-temporary-source-buffers (before files)
+  "Attach temporary source buffers opened after BEFORE to the agenda buffer."
+  (let ((buffers (my/org-agenda--temporary-source-buffers before files)))
+    (cond
+     ((and buffers (derived-mode-p 'org-agenda-mode))
+      (setq-local my/org-agenda--temporary-source-buffers
+                  (delete-dups
+                   (append my/org-agenda--temporary-source-buffers buffers)))
+      (add-hook 'kill-buffer-hook
+                #'my/org-agenda--cleanup-temporary-source-buffers nil t))
+     (buffers
+      (let ((my/org-agenda--temporary-source-buffers buffers))
+        (my/org-agenda--cleanup-temporary-source-buffers))))))
+
+(defun my/org-agenda--quit-around (orig-fn &rest args)
+  "Clean temporary source buffers before running ORIG-FN with ARGS."
+  (when (derived-mode-p 'org-agenda-mode)
+    (my/org-agenda--cleanup-temporary-source-buffers))
+  (apply orig-fn args))
+
 (defmacro my/org-agenda-with-scoped-files (&rest body)
   "Run BODY with `org-agenda-files' bound to the current scoped scan."
   (declare (indent 0) (debug t))
-  `(let ((org-agenda-files (my/org-agenda-scoped-files)))
-     ,@body))
+  `(let* ((org-agenda-files (my/org-agenda-scoped-files))
+          (before (buffer-list)))
+     (prog1 (progn ,@body)
+       (my/org-agenda--remember-temporary-source-buffers
+        before org-agenda-files))))
 
 (defun my/org-agenda (&optional arg keys restriction)
   "Open `org-agenda' with files scoped to Org root, project or current dir.
@@ -239,6 +294,11 @@ The scan happens only when this command is invoked."
   "Open the personal Org agenda overview."
   (interactive)
   (my/org-agenda nil "o"))
+
+(defun my/org-task-status-table ()
+  "Open the personal Org TODO status table."
+  (interactive)
+  (my/org-agenda nil "S"))
 
 (defun my/org-task-tags-view (match)
   "Open an Org tags view for MATCH."
@@ -389,12 +449,14 @@ The scan happens only when this command is invoked."
   (org-agenda-custom-commands
    '(("o" "Overview / Dashboard"
       ((agenda ""
-               ((org-agenda-span 'day)
-                (org-agenda-overriding-header "⚡ Today's Schedule & Deadlines")))
-       (tags-todo "+uni/!TODO|NEXT"
+               ((org-agenda-span 'week)
+                (org-agenda-overriding-header "⚡ Upcoming Schedule & Deadlines")))
+       (tags-todo "+uni"
                   ((org-agenda-overriding-header "🎓 University Tasks")))
-       (tags-todo "+math+cs+qc+research/!TODO|NEXT"
+       (tags-todo "+math+cs+qc+research"
                   ((org-agenda-overriding-header "🔬 Research & Gaps")))
+       (todo "TODO"
+             ((org-agenda-overriding-header "📌 Open TODO")))
        (todo "NEXT"
              ((org-agenda-overriding-header "🚀 Next Actions")))
        (todo "WIP"
@@ -403,6 +465,8 @@ The scan happens only when this command is invoked."
              ((org-agenda-overriding-header "🔎 Review")))
        (todo "WAIT"
              ((org-agenda-overriding-header "⏳ Waiting")))
+       (todo "HOLD"
+             ((org-agenda-overriding-header "⏸ On Hold")))
        (tags-todo "blocked"
                   ((org-agenda-overriding-header "⛔ Blocked")))
        (tags "confusion"
@@ -410,7 +474,30 @@ The scan happens only when this command is invoked."
        (tags "shush"
              ((org-agenda-overriding-header "💡 Remember This")))
        (tags "inbox"
-             ((org-agenda-overriding-header "📥 Unprocessed Inbox"))))))))
+             ((org-agenda-overriding-header "📥 Unprocessed Inbox")))))
+     ("S" "Status Table"
+      ((todo "TODO"
+             ((org-agenda-overriding-header "📌 TODO")))
+       (todo "NEXT"
+             ((org-agenda-overriding-header "🚀 NEXT")))
+       (todo "WIP"
+             ((org-agenda-overriding-header "🔧 WIP")))
+       (todo "REVIEW"
+             ((org-agenda-overriding-header "🔎 REVIEW")))
+       (todo "WAIT"
+             ((org-agenda-overriding-header "⏳ WAIT")))
+       (todo "HOLD"
+             ((org-agenda-overriding-header "⏸ HOLD")))
+       (todo "DONE"
+             ((org-agenda-overriding-header "✓ DONE")))
+       (todo "CANCELLED"
+             ((org-agenda-overriding-header "× CANCELLED")))
+       (todo "DROPPED"
+             ((org-agenda-overriding-header "↓ DROPPED")))))))
+
+  :config
+  (unless (advice-member-p #'my/org-agenda--quit-around 'org-agenda-quit)
+    (advice-add 'org-agenda-quit :around #'my/org-agenda--quit-around)))
 
 ;;; ----------------------------------------------------------------------------
 ;;; Interactive task/status surface
@@ -451,6 +538,7 @@ The scan happens only when this command is invoked."
     ("q" "all tags" org-set-tags-command)]
    ["Views"
     ("o" "overview" my/org-task-agenda-overview)
+    ("x" "status table" my/org-task-status-table)
     ("a" "agenda" my/org-agenda)
     ("C" "confusion" my/org-task-show-confusion)
     ("S" "shush" my/org-task-show-shush)

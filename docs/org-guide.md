@@ -103,6 +103,8 @@ Agenda、TODO 状态、DONE/CANCELLED 完成态、refile、archive、priority、
   打开 agenda
 - `org-agenda` 里 `o`
   打开 Overview / Dashboard 自定义视图
+- `H-o w x` / `org-agenda` 里 `S`
+  打开 TODO status table，按所有 TODO keywords 分组查看
 - `H-o t` / `H-o s` / `H-o d` / `H-o r`
   todo / schedule / deadline / refile
 - `H-o w`
