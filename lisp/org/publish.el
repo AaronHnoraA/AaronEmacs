@@ -120,12 +120,87 @@ normally, so removing that paragraph only hides local Org metadata."
   "Return canonical lookup form for Org ID string ID."
   (upcase (string-trim (or id ""))))
 
+(defconst my/site-scan-excluded-directory-names
+  '("public" "ltximg" "js" "css" "CV" ".git" ".cache" ".direnv" ".venv"
+    "node_modules")
+  "Directory names skipped by shell-backed publish scans.")
+
+(defun my/site--scan-globs ()
+  "Return ripgrep glob arguments for publish scans."
+  (append
+   '("--glob" "*.org")
+   (mapcan (lambda (name)
+             (list "--glob" (format "!**/%s/**" name)))
+           my/site-scan-excluded-directory-names)))
+
+(defun my/site--process-lines (program args &optional ok-statuses)
+  "Run PROGRAM with ARGS and return stdout lines."
+  (with-temp-buffer
+    (let ((status (apply #'call-process program nil t nil args)))
+      (unless (memq status (or ok-statuses '(0)))
+        (error "%s failed with status %s: %s"
+               program status (string-trim (buffer-string))))
+      (split-string (buffer-string) "\n" t))))
+
+(defun my/site-org-files (root)
+  "Return publishable Org source files below ROOT using shell tools when possible."
+  (let ((files nil))
+    (setq files
+          (condition-case nil
+              (cond
+               ((executable-find "rg")
+                (let ((default-directory root))
+                  (mapcar (lambda (file)
+                            (file-truename (expand-file-name file root)))
+                          (my/site--process-lines
+                           "rg"
+                           (append '("--files" "--hidden")
+                                   (my/site--scan-globs)
+                                   '("."))
+                           '(0 1)))))
+               ((executable-find "fd")
+                (let ((default-directory root))
+                  (mapcar (lambda (file)
+                            (file-truename (expand-file-name file root)))
+                          (my/site--process-lines
+                           "fd"
+                           (append '("--hidden" "--type" "f" "--extension" "org")
+                                   (mapcan (lambda (name)
+                                             (list "--exclude" name))
+                                           my/site-scan-excluded-directory-names)
+                                   '("."))
+                           '(0))))))
+            (error nil)))
+    (sort
+     (delete-dups
+      (or files
+          (seq-filter
+           (lambda (file)
+             (let ((rel (file-relative-name file root)))
+               (not (string-match-p
+                     "\\`\\(?:public/\\|js/\\|css/\\|ltximg/\\|CV/.+\\.org\\'\\)"
+                     rel))))
+           (directory-files-recursively root "\\.org\\'"))))
+     #'string<)))
+
 (defun my/site-collect-id-links (root)
   "Return a hash table of Org IDs found below ROOT."
   (let ((table (make-hash-table :test 'equal)))
-    (dolist (file (directory-files-recursively root "\\.org\\'"))
-      (unless (string-match-p "\\`\\(?:public/\\|ltximg/\\|CV/.+\\.org\\'\\)"
-                              (file-relative-name file root))
+    (if (executable-find "rg")
+        (let ((default-directory root))
+          (dolist (line (my/site--process-lines
+                         "rg"
+                         (append '("--no-heading" "--line-number" "--color" "never"
+                                   "--hidden")
+                                 (my/site--scan-globs)
+                                 '("--" "^[ \t]*:ID:[ \t]*" "."))
+                         '(0 1)))
+            (when (string-match "\\`\\([^:\n]+\\):[0-9]+:[ \t]*:ID:[ \t]*\\(.+\\)\\'" line)
+              (let ((id (my/site-normalize-id (match-string 2 line)))
+                    (file (file-truename (expand-file-name (match-string 1 line) root))))
+                (unless (string-empty-p id)
+                  (puthash id file table))))))
+      (dolist (file (my/site-org-files root))
         (with-temp-buffer
           (insert-file-contents file)
           (goto-char (point-min))
@@ -747,11 +822,7 @@ target, but their Org content is not exported."
          (js-dir (expand-file-name "js" pub-dir))
          (template-file (expand-file-name "homepage.html" base-dir))
          (notes-template-file (expand-file-name "notes.html" base-dir))
-         (files (seq-filter
-                 (lambda (file)
-                   (let ((rel (file-relative-name file base-dir)))
-                     (not (string-match-p "\\`\\(?:public/\\|js/\\|css/\\|ltximg/\\|CV/.+\\.org\\'\\)" rel))))
-                 (directory-files-recursively base-dir "\\.org\\'")))
+         (files (my/site-org-files base-dir))
          (notes-by-key (make-hash-table :test 'equal))
          (id-to-key (make-hash-table :test 'equal))
          (backlinks (make-hash-table :test 'equal))

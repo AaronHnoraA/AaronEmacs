@@ -140,25 +140,37 @@
       (cl-find-if #'file-exists-p
                   (mapcar #'expand-file-name my/org-dot-command-candidates))))
 
+(defun my/org-babel--find-ditaa-jar-in-dir (dir)
+  "Return the newest ditaa jar below DIR, or nil."
+  (let ((path (expand-file-name dir)))
+    (when (file-directory-p path)
+      (car
+       (sort
+        (or
+         (when (executable-find "fd")
+           (let ((default-directory path))
+             (condition-case nil
+                 (mapcar (lambda (file)
+                           (expand-file-name file path))
+                         (process-lines "fd" "--hidden" "--type" "f"
+                                        "ditaa.*\\.jar$" "."))
+               (error nil))))
+         (directory-files-recursively path "ditaa.*\\.jar\\'"))
+        #'string>)))))
+
 (defun my/org-babel--find-ditaa-jar ()
   "Return the first usable system ditaa jar path, or nil when none is found."
   (or
    (cl-find-if
     #'identity
-    (mapcar
-     (lambda (dir)
-       (let ((path (expand-file-name dir)))
-         (when (file-directory-p path)
-           (car (sort (directory-files-recursively path "ditaa.*\\.jar\\'")
-                      #'string>)))))
-     my/org-ditaa-jar-candidates))
+    (mapcar #'my/org-babel--find-ditaa-jar-in-dir
+            my/org-ditaa-jar-candidates))
    (let ((brew-cellar
           (cl-find-if #'file-directory-p
                       '("/opt/homebrew/Cellar/ditaa"
                         "/usr/local/Cellar/ditaa"))))
      (when brew-cellar
-       (car (sort (directory-files-recursively brew-cellar "ditaa.*\\.jar\\'")
-                  #'string>))))))
+       (my/org-babel--find-ditaa-jar-in-dir brew-cellar)))))
 
 (defun my/org-babel--ensure-output-directory (&optional info)
   "Create the parent directory for the current block's `:file' target.

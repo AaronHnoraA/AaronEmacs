@@ -177,6 +177,56 @@ not skipped, but published output and ordinary ignored directories still are."
         (seq-some #'my/org-maintenance--latex-cache-name-p
                   (my/org-maintenance--path-segments path root)))))
 
+(defun my/org-maintenance--external-globs (&optional include-latex-cache)
+  "Return ripgrep glob arguments for maintenance scans."
+  (mapcan
+   (lambda (name)
+     (unless (and include-latex-cache
+                  (my/org-maintenance--latex-cache-name-p name))
+       (list "--glob" (format "!**/%s/**" name))))
+   my/org-maintenance-excluded-directory-names))
+
+(defun my/org-maintenance--process-lines (program args &optional ok-statuses)
+  "Run PROGRAM with ARGS and return stdout lines."
+  (with-temp-buffer
+    (let ((status (apply #'call-process program nil t nil args)))
+      (unless (memq status (or ok-statuses '(0)))
+        (error "%s failed with status %s: %s"
+               program status (string-trim (buffer-string))))
+      (split-string (buffer-string) "\n" t))))
+
+(defun my/org-maintenance--external-files (root &optional globs include-latex-cache)
+  "Return regular files below ROOT using rg or fd.
+GLOBS are ripgrep-style glob filters."
+  (condition-case nil
+      (cond
+       ((executable-find "rg")
+        (let* ((default-directory root)
+               (args (append '("--files" "--hidden")
+                             (my/org-maintenance--external-globs include-latex-cache)
+                             globs
+                             '("."))))
+          (mapcar (lambda (file)
+                    (file-truename (expand-file-name file root)))
+                  (my/org-maintenance--process-lines "rg" args '(0 1)))))
+       ((executable-find "fd")
+        (let* ((default-directory root)
+               (args (append '("--hidden" "--type" "f")
+                             (mapcan (lambda (name)
+                                       (unless (and include-latex-cache
+                                                    (my/org-maintenance--latex-cache-name-p name))
+                                         (list "--exclude" name)))
+                                     my/org-maintenance-excluded-directory-names)
+                             '("."))))
+          (seq-filter
+           (lambda (file)
+             (not (my/org-maintenance--excluded-path-p
+                   file root include-latex-cache)))
+           (mapcar (lambda (file)
+                     (file-truename (expand-file-name file root)))
+                   (my/org-maintenance--process-lines "fd" args '(0)))))))
+    (error nil)))
+
 (defun my/org-maintenance--files-recursive (dir predicate &optional include-latex-cache)
   "Return regular files below DIR for which PREDICATE returns non-nil."
   (let (files)
@@ -198,20 +248,45 @@ not skipped, but published output and ordinary ignored directories still are."
 
 (defun my/org-maintenance--directories-named (root names &optional include-latex-cache)
   "Return non-symlink directories below ROOT whose basename is in NAMES."
-  (let (dirs)
-    (when (file-directory-p root)
-      (dolist (entry (directory-files root t directory-files-no-dot-files-regexp))
-        (when (and (file-directory-p entry)
-                   (not (file-symlink-p entry))
-                   (not (my/org-maintenance--excluded-dir-p entry include-latex-cache)))
-          (let ((base (file-name-nondirectory (directory-file-name entry))))
-            (when (member base names)
-              (push (file-name-as-directory (file-truename entry)) dirs))
-            (setq dirs
-                  (nconc (my/org-maintenance--directories-named
-                          entry names include-latex-cache)
-                         dirs))))))
-    dirs))
+  (let ((external
+         (condition-case nil
+             (when (executable-find "fd")
+               (let ((default-directory root)
+                     (args (append '("--hidden" "--type" "d")
+                                   (mapcan (lambda (name)
+                                             (unless (and include-latex-cache
+                                                          (my/org-maintenance--latex-cache-name-p name))
+                                               (list "--exclude" name)))
+                                           my/org-maintenance-excluded-directory-names)
+                                   '("."))))
+                 (seq-filter
+                  (lambda (dir)
+                    (and (member (file-name-nondirectory
+                                  (directory-file-name dir))
+                                 names)
+                         (not (my/org-maintenance--excluded-path-p
+                               dir root include-latex-cache))))
+                  (mapcar (lambda (dir)
+                            (file-name-as-directory
+                             (file-truename (expand-file-name dir root))))
+                          (my/org-maintenance--process-lines "fd" args '(0))))))
+           (error nil))))
+    (or external
+        (let (dirs)
+          (when (file-directory-p root)
+            (dolist (entry (directory-files root t directory-files-no-dot-files-regexp))
+              (when (and (file-directory-p entry)
+                         (not (file-symlink-p entry))
+                         (not (my/org-maintenance--excluded-dir-p
+                               entry include-latex-cache)))
+                (let ((base (file-name-nondirectory (directory-file-name entry))))
+                  (when (member base names)
+                    (push (file-name-as-directory (file-truename entry)) dirs))
+                  (setq dirs
+                        (nconc (my/org-maintenance--directories-named
+                                entry names include-latex-cache)
+                               dirs))))))
+          dirs))))
 
 (defun my/org-maintenance--directory-empty-p (dir)
   "Return non-nil when DIR has no entries except . and ..."
@@ -250,23 +325,30 @@ reference analysis."
   "Return Org files under ROOT."
   (sort
    (delete-dups
-    (my/org-maintenance--files-recursive
-     root
-     (lambda (file)
-       (and (not (my/org-maintenance--excluded-path-p file root))
-            (string-match-p "\\.org\\'" file)))))
+    (or (my/org-maintenance--external-files root '("--glob" "*.org"))
+        (my/org-maintenance--files-recursive
+         root
+         (lambda (file)
+           (and (not (my/org-maintenance--excluded-path-p file root))
+                (string-match-p "\\.org\\'" file))))))
    #'string<))
 
 (defun my/org-maintenance--media-files (root)
   "Return cleanable media and attachment candidates under ROOT."
   (sort
    (delete-dups
-    (my/org-maintenance--files-recursive
-     root
-     (lambda (file)
-       (and (not (my/org-maintenance--excluded-path-p file root))
-            (not (my/org-maintenance--latex-cache-path-p file root))
-            (my/org-maintenance--media-kind file root)))))
+    (or (seq-filter
+         (lambda (file)
+           (and (not (my/org-maintenance--excluded-path-p file root))
+                (not (my/org-maintenance--latex-cache-path-p file root))
+                (my/org-maintenance--media-kind file root)))
+         (my/org-maintenance--external-files root))
+        (my/org-maintenance--files-recursive
+         root
+         (lambda (file)
+           (and (not (my/org-maintenance--excluded-path-p file root))
+                (not (my/org-maintenance--latex-cache-path-p file root))
+                (my/org-maintenance--media-kind file root))))))
    #'string<))
 
 (defun my/org-maintenance--split-file-link-path (path)
@@ -297,6 +379,67 @@ reference analysis."
     ('attachment t)
     ('image (file-in-directory-p (expand-file-name target)
                                  (file-name-directory source-file)))))
+
+(defun my/org-maintenance--rg-file-link-lines (root)
+  "Return ripgrep lines containing Org file links below ROOT."
+  (when (executable-find "rg")
+    (let ((default-directory root)
+          (args (append '("--no-heading" "--line-number" "--color" "never"
+                         "--hidden")
+                        (my/org-maintenance--external-globs)
+                        '("--glob" "*.org" "--" "file:" "."))))
+      (my/org-maintenance--process-lines "rg" args '(0 1)))))
+
+(defun my/org-maintenance--parse-rg-line (root line)
+  "Parse a ripgrep LINE into (:file FILE :line LINE :text TEXT)."
+  (when (string-match "\\`\\([^:\n]+\\):\\([0-9]+\\):\\(.*\\)\\'" line)
+    (list :file (file-truename (expand-file-name (match-string 1 line) root))
+          :line (string-to-number (match-string 2 line))
+          :text (match-string 3 line))))
+
+(defun my/org-maintenance--file-link-paths-in-text (text)
+  "Return possible Org file link paths found in TEXT."
+  (let (paths start)
+    (setq start 0)
+    (while (string-match "\\[\\[file:\\([^]\n]+\\)\\]" text start)
+      (push (match-string 1 text) paths)
+      (setq start (match-end 0)))
+    (setq start 0)
+    (while (string-match "\\(?:^\\|[[:space:]([{:]\\)file:\\([^][ \t\n)>,}]+\\)" text start)
+      (push (match-string 1 text) paths)
+      (setq start (match-end 0)))
+    (delete-dups (nreverse paths))))
+
+(defun my/org-maintenance--record-file-link-reference
+    (source-file path root referenced broken)
+  "Record one Org file link PATH from SOURCE-FILE."
+  (let* ((target (my/org-maintenance--resolve-file-link source-file path))
+         (kind (and target (my/org-maintenance--media-kind target root))))
+    (when (and target
+               kind
+               (my/org-maintenance--inside-dir-p target root)
+               (not (my/org-maintenance--excluded-path-p target root))
+               (not (my/org-maintenance--latex-cache-path-p target root)))
+      (if (file-regular-p target)
+          (when (my/org-maintenance--mark-reference-p kind source-file target)
+            (puthash (file-truename target) t referenced))
+        (push (list :source source-file
+                    :target target
+                    :kind kind)
+              broken))))
+  broken)
+
+(defun my/org-maintenance--scan-org-links-rg (root referenced broken)
+  "Scan Org file links below ROOT using ripgrep."
+  (dolist (line (my/org-maintenance--rg-file-link-lines root))
+    (when-let* ((entry (my/org-maintenance--parse-rg-line root line))
+                (source-file (plist-get entry :file))
+                (text (plist-get entry :text)))
+      (dolist (path (my/org-maintenance--file-link-paths-in-text text))
+        (setq broken
+              (my/org-maintenance--record-file-link-reference
+               source-file path root referenced broken)))))
+  broken)
 
 (defun my/org-maintenance--scan-org-links (source-file root referenced broken)
   "Scan SOURCE-FILE into REFERENCED hash table and BROKEN list.
@@ -332,16 +475,26 @@ Attachment links count from any Org file in the current maintenance scope."
   "Return a plist with media references scanned from ORG-FILES under ROOT."
   (let ((referenced (make-hash-table :test 'equal))
         broken)
-    (dolist (file org-files)
-      (setq broken
-            (condition-case err
-                (my/org-maintenance--scan-org-links file root referenced broken)
-              (error
-               (push (list :source file
-                           :target nil
-                           :kind nil
-                           :error (error-message-string err))
-                     broken)))))
+    (if (executable-find "rg")
+        (setq broken
+              (condition-case err
+                  (my/org-maintenance--scan-org-links-rg root referenced broken)
+                (error
+                 (push (list :source root
+                             :target nil
+                             :kind nil
+                             :error (error-message-string err))
+                       broken))))
+      (dolist (file org-files)
+        (setq broken
+              (condition-case err
+                  (my/org-maintenance--scan-org-links file root referenced broken)
+                (error
+                 (push (list :source file
+                             :target nil
+                             :kind nil
+                             :error (error-message-string err))
+                       broken))))))
     (list :referenced referenced
           :broken (nreverse broken))))
 
@@ -363,7 +516,8 @@ Attachment links count from any Org file in the current maintenance scope."
     (dolist (dir dirs)
       (setq files
             (nconc
-             (my/org-maintenance--files-recursive dir (lambda (_file) t) t)
+             (or (my/org-maintenance--external-files dir nil t)
+                 (my/org-maintenance--files-recursive dir (lambda (_file) t) t))
              files)))
     (sort (delete-dups files) #'string<)))
 
@@ -376,8 +530,9 @@ Attachment links count from any Org file in the current maintenance scope."
   (let ((keep (max 0 my/org-maintenance-latex-cache-max-files-per-dir))
         prunable)
     (dolist (dir dirs)
-      (let* ((files (sort (my/org-maintenance--files-recursive
-                           dir (lambda (_file) t) t)
+      (let* ((files (sort (or (my/org-maintenance--external-files dir nil t)
+                              (my/org-maintenance--files-recursive
+                               dir (lambda (_file) t) t))
                           (lambda (a b)
                             (> (my/org-maintenance--mtime-float a)
                                (my/org-maintenance--mtime-float b)))))

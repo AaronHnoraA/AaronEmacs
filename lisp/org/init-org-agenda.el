@@ -10,7 +10,9 @@
 (require 'org)
 (require 'org-clock)
 (require 'project nil t)
+(require 'seq)
 (require 'transient)
+(require 'subr-x)
 
 (defcustom my/org-task-tag-alist
   '(("inbox" . ?i)
@@ -113,8 +115,22 @@
 (defvar my/org-agenda--last-scope nil
   "Most recent scoped agenda root and file count.")
 
+(defconst my/org-task--todo-keywords
+  '("TODO" "NEXT" "WIP" "WAIT" "HOLD" "REVIEW" "DONE" "CANCELLED" "DROPPED")
+  "TODO keywords used by the fast shell-backed task views.")
+
+(defconst my/org-task--active-todo-keywords
+  '("TODO" "NEXT" "WIP" "WAIT" "HOLD" "REVIEW")
+  "Non-terminal TODO keywords used by the fast shell-backed overview.")
+
+(defconst my/org-task-fast-view-buffer-name "*Org Fast Overview*"
+  "Buffer name for shell-backed Org task views.")
+
 (defvar-local my/org-agenda--temporary-source-buffers nil
   "Org source buffers opened only to build the current agenda buffer.")
+
+(defvar-local my/org-task-fast-view--entries nil
+  "Vector of entries displayed in the current fast Org task view.")
 
 (defvar-local my/org-agenda--temporary-source-buffer nil
   "Non-nil when this Org buffer was opened only as an agenda source.")
@@ -160,6 +176,49 @@ current project.  If there is no project, scan the current directory."
   (member (file-name-nondirectory (directory-file-name dir))
           my/org-agenda-scope-excluded-directory-names))
 
+(defun my/org-agenda--external-globs ()
+  "Return rg/fd glob arguments for scoped Org scans."
+  (append
+   '("--glob" "*.org")
+   (mapcan (lambda (name)
+             (list "--glob" (format "!**/%s/**" name)))
+           my/org-agenda-scope-excluded-directory-names)))
+
+(defun my/org-agenda--process-lines (program args &optional ok-statuses)
+  "Run PROGRAM with ARGS and return stdout lines.
+OK-STATUSES defaults to allowing only exit status 0."
+  (with-temp-buffer
+    (let ((status (apply #'call-process program nil t nil args)))
+      (unless (memq status (or ok-statuses '(0)))
+        (error "%s failed with status %s: %s"
+               program status (string-trim (buffer-string))))
+      (split-string (buffer-string) "\n" t))))
+
+(defun my/org-agenda--external-org-files-rg (dir)
+  "Return Org files below DIR using ripgrep."
+  (when (executable-find "rg")
+    (let ((default-directory dir)
+          (args (append '("--files" "--hidden")
+                        (my/org-agenda--external-globs)
+                        '("."))))
+      (mapcar (lambda (file)
+                (file-truename (expand-file-name file dir)))
+              (my/org-agenda--process-lines "rg" args '(0 1))))))
+
+(defun my/org-agenda--external-org-files-fd (dir)
+  "Return Org files below DIR using fd."
+  (when (executable-find "fd")
+    (let ((args (append '("--hidden" "--type" "f"
+                         "--extension" "org")
+                       (mapcan (lambda (name)
+                                 (list "--exclude" name))
+                               my/org-agenda-scope-excluded-directory-names)
+                       '("."))))
+      (mapcar (lambda (file)
+                (file-truename (expand-file-name file dir)))
+              (let ((default-directory dir))
+                (my/org-agenda--process-lines "fd" args '(0)))))))
+
 (defun my/org-agenda--org-files-recursive (dir)
   "Return Org files below DIR, pruning ignored directories."
   (let (files)
@@ -177,15 +236,228 @@ current project.  If there is no project, scan the current directory."
           (push (file-truename entry) files)))))
     files))
 
+(defun my/org-agenda--org-files-external (dir)
+  "Return Org files below DIR using external tools when available."
+  (condition-case nil
+      (or (my/org-agenda--external-org-files-rg dir)
+          (my/org-agenda--external-org-files-fd dir))
+    (error nil)))
+
 (defun my/org-agenda-scoped-files ()
   "Scan and return Org files for the current agenda scope.
 This is intentionally called only by agenda/tag entry points, not by hooks or
 idle timers."
   (let* ((root (my/org-agenda-scope-root))
-         (files (sort (delete-dups (my/org-agenda--org-files-recursive root))
+         (files (sort (delete-dups
+                       (or (my/org-agenda--org-files-external root)
+                           (my/org-agenda--org-files-recursive root)))
                       #'string<)))
     (setq my/org-agenda--last-scope (list :root root :count (length files)))
     files))
+
+(defun my/org-task-fast-view--rg-lines (root pattern)
+  "Return ripgrep matches for PATTERN below ROOT without visiting files."
+  (unless (executable-find "rg")
+    (user-error "rg is required for fast Org task views"))
+  (let ((default-directory root)
+        (args (append '("--no-heading" "--line-number" "--color" "never"
+                       "--hidden")
+                      (my/org-agenda--external-globs)
+                      (list "--" pattern "."))))
+    (my/org-agenda--process-lines "rg" args '(0 1))))
+
+(defun my/org-task-fast-view--parse-rg-line (root line)
+  "Parse one ripgrep LINE relative to ROOT."
+  (when (string-match "\\`\\([^:\n]+\\):\\([0-9]+\\):\\(.*\\)\\'" line)
+    (list :file (file-truename (expand-file-name (match-string 1 line) root))
+          :line (string-to-number (match-string 2 line))
+          :text (string-trim (match-string 3 line)))))
+
+(defun my/org-task-fast-view--parse-heading (entry)
+  "Return ENTRY augmented with Org heading metadata."
+  (let ((text (plist-get entry :text)))
+    (when (string-match
+           (concat "\\`\\(\\*+\\)[ \t]+"
+                   "\\(?:" (regexp-opt my/org-task--todo-keywords t) "[ \t]+\\)?"
+                   "\\(.*?\\)"
+                   "\\(?:[ \t]+\\(:[[:alnum:]_@#%:]+:\\)\\)?[ \t]*\\'")
+           text)
+      (let ((todo (match-string 2 text))
+            (title (string-trim (match-string 3 text)))
+            (tags (match-string 4 text)))
+        (append (list :level (length (match-string 1 text))
+                      :todo todo
+                      :title title
+                      :tags (and tags (split-string (string-trim tags ":") ":" t)))
+                entry)))))
+
+(defun my/org-task-fast-view--heading-entries (root)
+  "Return Org heading entries below ROOT using rg."
+  (delq nil
+        (mapcar (lambda (line)
+                  (when-let* ((entry (my/org-task-fast-view--parse-rg-line root line)))
+                    (my/org-task-fast-view--parse-heading entry)))
+                (my/org-task-fast-view--rg-lines root "^\\*+ "))))
+
+(defun my/org-task-fast-view--timestamp-entries (root)
+  "Return dated schedule/deadline entries below ROOT using rg."
+  (delq nil
+        (mapcar (lambda (line)
+                  (when-let* ((entry (my/org-task-fast-view--parse-rg-line root line))
+                              (text (plist-get entry :text)))
+                    (when (string-match
+                           "\\(DEADLINE:\\|SCHEDULED:\\|<[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}[^>\n]*>\\)"
+                           text)
+                      (append (list :title text) entry))))
+                (my/org-task-fast-view--rg-lines
+                 root "\\(DEADLINE:\\|SCHEDULED:\\|<[0-9]{4}-[0-9]{2}-[0-9]{2}\\)"))))
+
+(defun my/org-task-fast-view--entry-file-label (root entry)
+  "Return a compact file label for ENTRY relative to ROOT."
+  (file-relative-name (plist-get entry :file) root))
+
+(defun my/org-task-fast-view-open-at-point ()
+  "Open the Org file entry at point."
+  (interactive)
+  (let ((index (get-text-property (point) 'my/org-task-entry-index)))
+    (unless index
+      (user-error "No Org task entry at point"))
+    (let* ((entry (aref my/org-task-fast-view--entries index))
+           (file (plist-get entry :file))
+           (line (plist-get entry :line)))
+      (find-file file)
+      (goto-char (point-min))
+      (forward-line (1- line)))))
+
+(define-derived-mode my/org-task-fast-view-mode special-mode "Org Fast View"
+  "Major mode for shell-backed Org task views."
+  (setq-local truncate-lines t)
+  (define-key my/org-task-fast-view-mode-map (kbd "RET")
+              #'my/org-task-fast-view-open-at-point)
+  (define-key my/org-task-fast-view-mode-map (kbd "o")
+              #'my/org-task-fast-view-open-at-point))
+
+(defun my/org-task-fast-view--insert-section (root title entries &optional limit)
+  "Insert TITLE and ENTRIES into the current fast task view buffer."
+  (insert (propertize title 'face 'org-agenda-structure) "\n")
+  (if entries
+      (let ((count 0))
+        (dolist (entry entries)
+          (when (or (null limit) (< count limit))
+            (let* ((index (length my/org-task-fast-view--entries))
+                   (todo (plist-get entry :todo))
+                   (tags (plist-get entry :tags))
+                   (label (my/org-task-fast-view--entry-file-label root entry))
+                   (line (plist-get entry :line))
+                   (title-text (or (plist-get entry :title)
+                                   (plist-get entry :text))))
+              (setq my/org-task-fast-view--entries
+                    (vconcat my/org-task-fast-view--entries (vector entry)))
+              (insert-text-button
+               (format "  %-8s %-42s %s:%d%s\n"
+                       (or todo "")
+                       title-text
+                       label
+                       line
+                       (if tags
+                           (concat "  :" (string-join tags ":") ":")
+                         ""))
+               'follow-link t
+               'my/org-task-entry-index index
+               'action (lambda (button)
+                         (goto-char (button-start button))
+                         (my/org-task-fast-view-open-at-point))))
+            (setq count (1+ count)))))
+    (insert "  No matches\n"))
+  (insert "\n"))
+
+(defun my/org-task-fast-view--render (title sections)
+  "Render shell-backed Org task SECTIONS with TITLE."
+  (let* ((root (my/org-agenda-scope-root))
+         (buffer (get-buffer-create my/org-task-fast-view-buffer-name)))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (my/org-task-fast-view-mode)
+        (setq-local my/org-task-fast-view--entries [])
+        (setq my/org-agenda--last-scope nil)
+        (insert (propertize title 'face '(:height 1.25 :weight bold)) "\n")
+        (insert (format "Root: %s\nBackend: rg\n\n" root))
+        (dolist (section sections)
+          (my/org-task-fast-view--insert-section
+           root (plist-get section :title) (plist-get section :entries)
+           (plist-get section :limit)))))
+    (pop-to-buffer buffer)))
+
+(defun my/org-task-fast-overview ()
+  "Open a shell-backed Org overview without visiting source files."
+  (interactive)
+  (let* ((root (my/org-agenda-scope-root))
+         (headings (my/org-task-fast-view--heading-entries root))
+         (active (seq-filter (lambda (entry)
+                               (member (plist-get entry :todo)
+                                       my/org-task--active-todo-keywords))
+                             headings))
+         (timestamps (my/org-task-fast-view--timestamp-entries root)))
+    (my/org-task-fast-view--render
+     "Org Fast Overview"
+     (list
+      (list :title "Upcoming Schedule & Deadlines" :entries timestamps :limit 80)
+      (list :title "Open TODO" :entries (seq-filter (lambda (entry)
+                                                       (string= (plist-get entry :todo) "TODO"))
+                                                     active))
+      (list :title "Next Actions" :entries (seq-filter (lambda (entry)
+                                                         (string= (plist-get entry :todo) "NEXT"))
+                                                       active))
+      (list :title "In Progress" :entries (seq-filter (lambda (entry)
+                                                        (string= (plist-get entry :todo) "WIP"))
+                                                      active))
+      (list :title "Review" :entries (seq-filter (lambda (entry)
+                                                   (string= (plist-get entry :todo) "REVIEW"))
+                                                 active))
+      (list :title "Waiting / Hold" :entries (seq-filter (lambda (entry)
+                                                           (member (plist-get entry :todo)
+                                                                   '("WAIT" "HOLD")))
+                                                         active))
+      (list :title "Blocked" :entries (seq-filter (lambda (entry)
+                                                    (member "blocked" (plist-get entry :tags)))
+                                                  active))
+      (list :title "Confusion / Unclear" :entries (seq-filter (lambda (entry)
+                                                                (member "confusion" (plist-get entry :tags)))
+                                                              headings))
+      (list :title "Remember This" :entries (seq-filter (lambda (entry)
+                                                          (member "shush" (plist-get entry :tags)))
+                                                        headings))
+      (list :title "Unprocessed Inbox" :entries (seq-filter (lambda (entry)
+                                                              (member "inbox" (plist-get entry :tags)))
+                                                            headings))))))
+
+(defun my/org-task-fast-status-table ()
+  "Open a shell-backed Org TODO status table without visiting source files."
+  (interactive)
+  (let* ((root (my/org-agenda-scope-root))
+         (headings (my/org-task-fast-view--heading-entries root)))
+    (my/org-task-fast-view--render
+     "Org Fast Status Table"
+     (mapcar (lambda (todo)
+               (list :title todo
+                     :entries (seq-filter (lambda (entry)
+                                            (string= (plist-get entry :todo) todo))
+                                          headings)))
+             my/org-task--todo-keywords))))
+
+(defun my/org-task-fast-tags-view (tag)
+  "Open a shell-backed Org tag view for TAG without visiting source files."
+  (interactive
+   (list (completing-read "Tag: " (mapcar #'car my/org-task-tag-alist) nil t)))
+  (let* ((root (my/org-agenda-scope-root))
+         (headings (my/org-task-fast-view--heading-entries root)))
+    (my/org-task-fast-view--render
+     (format "Org Fast Tag: %s" tag)
+     (list (list :title tag
+                 :entries (seq-filter (lambda (entry)
+                                        (member tag (plist-get entry :tags)))
+                                      headings))))))
 
 (defun my/org-agenda--visible-buffers ()
   "Return buffers visible in live windows."
@@ -328,25 +600,25 @@ The scan happens only when this command is invoked."
 (defun my/org-task-toggle-review-tag () (interactive) (my/org-task-toggle-tag "review"))
 
 (defun my/org-task-agenda-overview ()
-  "Open the personal Org agenda overview."
+  "Open the personal Org agenda overview using the fast shell backend."
   (interactive)
-  (my/org-agenda nil "o"))
+  (my/org-task-fast-overview))
 
 (defun my/org-task-status-table ()
-  "Open the personal Org TODO status table."
+  "Open the personal Org TODO status table using the fast shell backend."
   (interactive)
-  (my/org-agenda nil "S"))
+  (my/org-task-fast-status-table))
 
 (defun my/org-task-tags-view (match)
   "Open an Org tags view for MATCH."
   (my/org-agenda-with-scoped-files
     (org-tags-view nil match)))
 
-(defun my/org-task-show-confusion () (interactive) (my/org-task-tags-view "confusion"))
-(defun my/org-task-show-shush () (interactive) (my/org-task-tags-view "shush"))
-(defun my/org-task-show-blocked () (interactive) (my/org-task-tags-view "blocked"))
-(defun my/org-task-show-followup () (interactive) (my/org-task-tags-view "followup"))
-(defun my/org-task-show-review () (interactive) (my/org-task-tags-view "review"))
+(defun my/org-task-show-confusion () (interactive) (my/org-task-fast-tags-view "confusion"))
+(defun my/org-task-show-shush () (interactive) (my/org-task-fast-tags-view "shush"))
+(defun my/org-task-show-blocked () (interactive) (my/org-task-fast-tags-view "blocked"))
+(defun my/org-task-show-followup () (interactive) (my/org-task-fast-tags-view "followup"))
+(defun my/org-task-show-review () (interactive) (my/org-task-fast-tags-view "review"))
 
 (defun my/org-task-open-docs ()
   "Open the Org task workflow documentation."
