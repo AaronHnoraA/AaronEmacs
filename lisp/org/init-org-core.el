@@ -32,7 +32,7 @@
   "Root directory for all Org files.")
 
 (defvar my-org-roam-dir (expand-file-name "roam/" my-org-root))
-(defvar my-org-daily-dir (expand-file-name "daily/" my-org-root))
+(defvar my-org-daily-dir (expand-file-name "daily/" my-org-roam-dir))
 (defvar my-org-notes-file (expand-file-name "notes.org" my-org-root))
 (defvar my-org-diary-file (expand-file-name "diary.org" my-org-root))
 

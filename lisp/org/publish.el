@@ -18,6 +18,10 @@
   '("png" "jpg" "jpeg" "gif" "svg" "webp" "avif"))
 (defconst my/site-org-file-extensions '("org" "org.gpg")
   "File extensions that should be published as HTML instead of assets.")
+(defconst my/site-public-roam-sections '("math" "qc")
+  "Top-level Org Roam directories whose note bodies may be public.")
+(defconst my/site-hidden-filetags '("private")
+  "Filetags that force an Org file to publish as a hidden placeholder.")
 (defconst my/site-timestamp-directory
   (expand-file-name ".cache/org-timestamps/" (file-name-directory load-file-name)))
 (defconst my/site-org-id-locations-file
@@ -159,19 +163,22 @@ normally, so removing that paragraph only hides local Org metadata."
         ""
       (file-relative-name html-file output-dir))))
 
-(defun my/site-current-file-ids (info)
-  "Return normalized Org IDs from the current export source file."
-  (let ((source-file (my/site-export-source-file info))
-        ids)
-    (when (and source-file (file-regular-p source-file))
+(defun my/site-file-ids (file)
+  "Return normalized Org IDs from FILE."
+  (let (ids)
+    (when (and file (file-regular-p file))
       (with-temp-buffer
-        (insert-file-contents source-file)
+        (insert-file-contents file)
         (goto-char (point-min))
         (while (re-search-forward "^[ \t]*:ID:[ \t]*\\(.+\\)$" nil t)
           (let ((id (my/site-normalize-id (match-string 1))))
             (unless (string-empty-p id)
               (push id ids))))))
     (delete-dups (nreverse ids))))
+
+(defun my/site-current-file-ids (info)
+  "Return normalized Org IDs from the current export source file."
+  (my/site-file-ids (my/site-export-source-file info)))
 
 (defun my/site-file-keyword (file keyword)
   "Return FILE keyword value for KEYWORD, or nil."
@@ -185,6 +192,48 @@ normally, so removing that paragraph only hides local Org metadata."
                        (regexp-quote keyword))
                nil t)
           (string-trim (match-string 1)))))))
+
+(defun my/site-file-filetags (file)
+  "Return normalized FILETAGS declared by FILE."
+  (let (tags)
+    (when (and file (file-regular-p file))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (let ((case-fold-search t))
+          (goto-char (point-min))
+          (while (re-search-forward "^[ \t]*#\\+filetags:[ \t]*\\(.+\\)$" nil t)
+            (dolist (tag (split-string (match-string 1) ":" t "[ \t\n\r]+"))
+              (let ((clean (downcase (string-trim tag))))
+                (unless (string-empty-p clean)
+                  (push clean tags))))))))
+    (delete-dups (nreverse tags))))
+
+(defun my/site-hidden-filetag-p (file)
+  "Return non-nil when FILE declares a hidden filetag."
+  (seq-some (lambda (tag)
+              (member tag (my/site-file-filetags file)))
+            my/site-hidden-filetags))
+
+(defun my/site-hidden-source-file-p (file &optional root)
+  "Return non-nil when FILE should publish as a hidden placeholder.
+Hidden files still get an HTML page so existing links and graph edges have a
+target, but their Org content is not exported."
+  (when (and file (file-regular-p file))
+    (let* ((root (file-truename
+                  (or root
+                      my/site-publish-root
+                      (file-name-directory load-file-name))))
+           (rel (replace-regexp-in-string
+                 "\\\\" "/"
+                 (file-relative-name (file-truename file) root)))
+           (parts (split-string rel "/" t))
+           (roam-section (and (string= (car parts) "roam")
+                              (downcase (or (cadr parts) "")))))
+      (or (my/site-hidden-filetag-p file)
+          (string= rel "diary.org")
+          (string-prefix-p "daily/" rel)
+          (and roam-section
+               (not (member roam-section my/site-public-roam-sections)))))))
 
 (defun my/site-clean-date-keyword (date)
   "Return a compact readable date string from Org DATE keyword."
@@ -394,8 +443,8 @@ normally, so removing that paragraph only hides local Org metadata."
 (advice-add 'org-html-special-block :around #'my/site-html-special-block-a)
 (advice-add 'org-latex-special-block :around #'my/site-latex-special-block-a)
 
-(defun my/site-html-head (plist filename pub-dir)
-  "Publish FILENAME to PUB-DIR with assets referenced relative to the output path."
+(defun my/site-html-path-context (plist filename)
+  "Return HTML path context for publishing FILENAME with PLIST."
   (let* ((root (expand-file-name (plist-get plist :base-directory)))
          (rel-path (file-relative-name filename root))
          (rel-dir (file-name-directory rel-path))
@@ -404,34 +453,105 @@ normally, so removing that paragraph only hides local Org metadata."
                      (mapconcat (lambda (_) "..") (number-sequence 1 depth) "/")
                    "."))
          (site-root (if (string= prefix ".") "./" (concat prefix "/")))
-         (current-link (concat (file-name-sans-extension rel-path) ".html"))
-         (head-snippet
-          (mapconcat
-           #'identity
-           (list
-           "<meta name=\"color-scheme\" content=\"light\" />"
-            (format "<link rel=\"stylesheet\" href=\"%s/css/retro.css?v=%s\" />" prefix my/site-asset-version)
-            "<link rel=\"shortcut icon\" href=\"https://raw.githubusercontent.com/AaronHnoraA/AaronHnoraA.github.io/refs/heads/master/css/cv.svg\" type=\"image/x-icon\">"
-            "<script src=\"https://d3js.org/d3.v7.min.js\"></script>"
-            (format "<script>window.SITE_ROOT_PATH=%S;window.CURRENT_NOTE_LINK=%S;</script>" site-root current-link)
-            (format "<script defer src=\"%s/js/data.js?v=%s\"></script>" prefix my/site-asset-version)
-            (format "<script defer src=\"%s/js/knowledge.js?v=%s\"></script>" prefix my/site-asset-version)
-            (format "<script defer src=\"%s/js/graph.js?v=%s\"></script>" prefix my/site-asset-version)
-            (format "<script defer src=\"%s/js/note-page.js?v=%s\"></script>" prefix my/site-asset-version))
-           "\n")))
-    (org-html-publish-to-html
-     (let ((export-plist (copy-sequence plist)))
-       (setq export-plist (plist-put export-plist :html-head head-snippet))
-       (setq export-plist (plist-put export-plist :html-doctype "html5"))
-       (setq export-plist (plist-put export-plist :html-html5-fancy t))
-       (setq export-plist (plist-put export-plist :html-head-include-default-style nil))
-       (setq export-plist (plist-put export-plist :html-postamble nil))
-       (setq export-plist (plist-put export-plist :with-author nil))
-       (setq export-plist (plist-put export-plist :with-creator nil))
-       (setq export-plist (plist-put export-plist :with-date nil))
-       (setq export-plist (plist-put export-plist :section-numbers nil))
-       export-plist)
-     filename pub-dir)))
+         (current-link (concat (file-name-sans-extension rel-path) ".html")))
+    (list :root root
+          :rel-path rel-path
+          :prefix prefix
+          :site-root site-root
+          :current-link current-link)))
+
+(defun my/site-html-head-snippet (prefix site-root current-link)
+  "Return the shared note-page HTML head snippet."
+  (mapconcat
+   #'identity
+   (list
+    "<meta name=\"color-scheme\" content=\"light\" />"
+    (format "<link rel=\"stylesheet\" href=\"%s/css/retro.css?v=%s\" />" prefix my/site-asset-version)
+    "<link rel=\"shortcut icon\" href=\"https://raw.githubusercontent.com/AaronHnoraA/AaronHnoraA.github.io/refs/heads/master/css/cv.svg\" type=\"image/x-icon\">"
+    "<script src=\"https://d3js.org/d3.v7.min.js\"></script>"
+    (format "<script>window.SITE_ROOT_PATH=%S;window.CURRENT_NOTE_LINK=%S;</script>" site-root current-link)
+    (format "<script defer src=\"%s/js/data.js?v=%s\"></script>" prefix my/site-asset-version)
+    (format "<script defer src=\"%s/js/knowledge.js?v=%s\"></script>" prefix my/site-asset-version)
+    (format "<script defer src=\"%s/js/graph.js?v=%s\"></script>" prefix my/site-asset-version)
+    (format "<script defer src=\"%s/js/note-page.js?v=%s\"></script>" prefix my/site-asset-version))
+   "\n"))
+
+(defun my/site-hidden-id-anchors-for-file (file)
+  "Return hidden HTML anchors for every Org ID in FILE."
+  (mapconcat
+   (lambda (id)
+     (format "<a id=\"ID-%s\" class=\"org-id-anchor\" aria-hidden=\"true\"></a>"
+             (org-html-encode-plain-text id)))
+   (my/site-file-ids file)
+   "\n"))
+
+(defun my/site-publish-hidden-html (plist filename _pub-dir)
+  "Publish FILENAME as a hidden placeholder page."
+  (let* ((context (my/site-html-path-context plist filename))
+         (rel-path (plist-get context :rel-path))
+         (prefix (plist-get context :prefix))
+         (site-root (plist-get context :site-root))
+         (current-link (plist-get context :current-link))
+         (head-snippet (my/site-html-head-snippet prefix site-root current-link))
+         (publish-root (expand-file-name (plist-get plist :publishing-directory)))
+         (out-file (expand-file-name current-link publish-root))
+         (raw-title (or (my/site-file-keyword filename "title")
+                        (file-name-base filename)))
+         (title (string-trim raw-title))
+         (date (my/site-clean-date-keyword (my/site-file-keyword filename "date")))
+         (group (my/site-group-label (my/site-group-key rel-path)))
+         (anchors (my/site-hidden-id-anchors-for-file filename))
+         (return-link (concat site-root "notes.html")))
+    (make-directory (file-name-directory out-file) t)
+    (with-temp-file out-file
+      (insert "<!doctype html>\n<html lang=\"en\">\n<head>\n")
+      (insert "<meta charset=\"utf-8\" />\n")
+      (insert "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n")
+      (insert "<title>Access Restricted</title>\n")
+      (insert head-snippet "\n")
+      (insert "</head>\n")
+      (insert
+       (format "<body class=\"note-page note-page-hidden\" data-note-title=\"%s\" data-note-group=\"%s\" data-note-date=\"%s\">\n"
+               (my/site-html-attribute-escape title)
+               (my/site-html-attribute-escape group)
+               (my/site-html-attribute-escape date)))
+      (insert "<div id=\"content\" class=\"content hidden-note-content\">\n")
+      (unless (string-empty-p anchors)
+        (insert anchors "\n"))
+      (insert "<h1 class=\"title\">Access Restricted</h1>\n")
+      (insert "<section class=\"hidden-note-card\" role=\"note\">\n")
+      (insert "<p class=\"hidden-note-kicker\">Restricted folio</p>\n")
+      (insert "<p class=\"hidden-note-message\">This note is sealed.</p>\n")
+      (insert "<p class=\"hidden-note-copy\">The page remains here so public links and graph references do not break, but the original Org content is not published.</p>\n")
+      (insert
+       (format "<a class=\"hidden-note-link\" href=\"%s\">Back to public notes</a>\n"
+               (org-html-encode-plain-text return-link)))
+      (insert "</section>\n</div>\n</body>\n</html>\n"))
+    out-file))
+
+(defun my/site-html-head (plist filename pub-dir)
+  "Publish FILENAME to PUB-DIR with assets referenced relative to the output path."
+  (if (my/site-hidden-source-file-p filename (expand-file-name (plist-get plist :base-directory)))
+      (my/site-publish-hidden-html plist filename pub-dir)
+    (let* ((context (my/site-html-path-context plist filename))
+           (head-snippet
+            (my/site-html-head-snippet
+             (plist-get context :prefix)
+             (plist-get context :site-root)
+             (plist-get context :current-link))))
+      (org-html-publish-to-html
+       (let ((export-plist (copy-sequence plist)))
+         (setq export-plist (plist-put export-plist :html-head head-snippet))
+         (setq export-plist (plist-put export-plist :html-doctype "html5"))
+         (setq export-plist (plist-put export-plist :html-html5-fancy t))
+         (setq export-plist (plist-put export-plist :html-head-include-default-style nil))
+         (setq export-plist (plist-put export-plist :html-postamble nil))
+         (setq export-plist (plist-put export-plist :with-author nil))
+         (setq export-plist (plist-put export-plist :with-creator nil))
+         (setq export-plist (plist-put export-plist :with-date nil))
+         (setq export-plist (plist-put export-plist :section-numbers nil))
+         export-plist)
+       filename pub-dir))))
 
 (defun my/site-clean-text (text)
   "Strip lightweight Org markup from TEXT for summaries."
@@ -614,8 +734,10 @@ normally, so removing that paragraph only hides local Org metadata."
                      (not (string-match-p "\\`\\(?:public/\\|js/\\|css/\\|ltximg/\\|CV/.+\\.org\\'\\)" rel))))
                  (directory-files-recursively base-dir "\\.org\\'")))
          (notes-by-key (make-hash-table :test 'equal))
+         (hidden-notes-by-key (make-hash-table :test 'equal))
          (id-to-key (make-hash-table :test 'equal))
          (backlinks (make-hash-table :test 'equal))
+         (referenced-hidden-keys '())
          (note-order '()))
     (unless project-entry
       (error "Missing org-publish project: %s" project-name))
@@ -626,30 +748,43 @@ normally, so removing that paragraph only hides local Org metadata."
         (unless (or (string-match-p "\\`\\." filename)
                     (string= filename "sitemap-log.org"))
           (let* ((buffer-data (my/site-extract-buffer-data file))
-                 (group-key (my/site-group-key rel-path))
-                 (key (or (plist-get buffer-data :id)
-                          (concat "path:" (file-name-sans-extension rel-path))))
-                 (note (list
-                        :key key
-                        :id (plist-get buffer-data :id)
-                        :title (or (org-publish-find-title file project-entry)
-                                   (file-name-base file))
-                        :link (concat (file-name-sans-extension rel-path) ".html")
-                        :date (format-time-string "%Y-%m-%d" (org-publish-find-date file project-entry))
-                        :summary (plist-get buffer-data :summary)
-                        :group-key group-key
-                        :group-label (my/site-group-label group-key)
-                        :section (my/site-section-name group-key)
-                        :tags (append (my/site-normalize-tags
-                                       (org-publish-find-property file :filetags project-entry))
-                                      nil)
-                        :refs '()
-                        :raw-refs (plist-get buffer-data :outgoing)
-                        :backlinks '())))
-            (puthash key note notes-by-key)
-            (push key note-order)
-            (when (plist-get buffer-data :id)
-              (puthash (plist-get buffer-data :id) key id-to-key))))))
+                 (hidden (my/site-hidden-source-file-p file base-dir))
+                 (id (plist-get buffer-data :id))
+                 (group-key (if hidden "Hidden" (my/site-group-key rel-path)))
+                 (key (or id
+                          (concat "path:" (file-name-sans-extension rel-path)))))
+            (unless (and hidden (not id))
+              (let ((note (list
+                           :key key
+                           :id id
+                           :title (if hidden
+                                      "Hidden Note"
+                                    (or (org-publish-find-title file project-entry)
+                                        (file-name-base file)))
+                           :link (concat (file-name-sans-extension rel-path) ".html")
+                           :date (if hidden
+                                     ""
+                                   (format-time-string "%Y-%m-%d" (org-publish-find-date file project-entry)))
+                           :summary (if hidden
+                                        "This note is hidden on the public site."
+                                      (plist-get buffer-data :summary))
+                           :group-key group-key
+                           :group-label (if hidden "Hidden" (my/site-group-label group-key))
+                           :section (if hidden "Hidden" (my/site-section-name group-key))
+                           :tags (if hidden
+                                     '("hidden")
+                                   (append (my/site-normalize-tags
+                                            (org-publish-find-property file :filetags project-entry))
+                                           nil))
+                           :refs '()
+                           :raw-refs (if hidden nil (plist-get buffer-data :outgoing))
+                           :backlinks '())))
+                (if hidden
+                    (puthash key note hidden-notes-by-key)
+                  (puthash key note notes-by-key)
+                  (push key note-order))
+                (when id
+                  (puthash id key id-to-key))))))))
 
     (dolist (key note-order)
       (let* ((note (gethash key notes-by-key))
@@ -658,9 +793,16 @@ normally, so removing that paragraph only hides local Org metadata."
           (let ((target-key (gethash target-id id-to-key)))
             (when (and target-key (not (string= target-key key)))
               (push target-key resolved-refs)
+              (when (gethash target-key hidden-notes-by-key)
+                (push target-key referenced-hidden-keys))
               (puthash target-key (cons key (gethash target-key backlinks)) backlinks))))
         (setq resolved-refs (sort (delete-dups resolved-refs) #'string<))
         (puthash key (plist-put note :refs resolved-refs) notes-by-key)))
+
+    (dolist (key (delete-dups referenced-hidden-keys))
+      (when-let* ((note (gethash key hidden-notes-by-key)))
+        (puthash key note notes-by-key)
+        (push key note-order)))
 
     (dolist (key note-order)
       (let* ((note (gethash key notes-by-key))
@@ -726,7 +868,7 @@ normally, so removing that paragraph only hides local Org metadata."
          :base-extension "css\\|js\\|png\\|jpg\\|jpeg\\|gif\\|svg\\|webp\\|avif\\|pdf"
          :publishing-directory "~/HC/Org/public/"
          :recursive t
-         :exclude "public/\\|ltximg/\\|CV/jpg/"
+         :exclude "public/\\|ltximg/\\|CV/jpg/\\|daily/\\|roam/"
          :publishing-function org-publish-attachment)
         ("site"
          :components ("site-org" "site-static"))))

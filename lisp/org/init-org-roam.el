@@ -25,6 +25,7 @@ motion or typing."
 (defvar my/org-roam--initialized nil)
 (defvar-local my/org-roam--redisplay-timer nil)
 (defvar-local my/org-roam--redisplay-key nil)
+(defvar org-id-locations)
 
 (defvar my/org-roam-db-file
   (expand-file-name "org-roam.db"
@@ -52,6 +53,7 @@ motion or typing."
 (declare-function my/org-reference-create-target-dwim "init-org-utility" ())
 (declare-function my/org-insert-id-link "init-org-utility" ())
 (declare-function my/org-insert-target-link "init-org-utility" ())
+(declare-function org-id-locations-save "org-id" ())
 (declare-function org-roam-db-clear-file "org-roam-db" (&optional file))
 (declare-function org-roam-db-query "org-roam-db" (sql &rest args))
 (declare-function org-roam-db-update-file "org-roam-db" (&optional file-path deprecated))
@@ -100,6 +102,51 @@ motion or typing."
              (cdr bounds)
              t)
         (string-trim (match-string-no-properties 1))))))
+
+(defun my/org-roam--file-property-line-bounds (property)
+  "Return line bounds for file-level PROPERTY, or nil."
+  (when-let* ((bounds (my/org-roam--file-property-drawer-bounds)))
+    (save-excursion
+      (goto-char (car bounds))
+      (when (re-search-forward
+             (format "^[ \t]*:%s:[ \t]*.*$" (regexp-quote property))
+             (cdr bounds)
+             t)
+        (cons (line-beginning-position)
+              (save-excursion
+                (forward-line 1)
+                (point)))))))
+
+(defun my/org-roam--file-property-drawer-empty-p ()
+  "Return non-nil when the file-level property drawer has no properties."
+  (when-let* ((bounds (my/org-roam--file-property-drawer-bounds)))
+    (let ((end-line (save-excursion
+                      (goto-char (cdr bounds))
+                      (line-beginning-position))))
+      (save-excursion
+        (goto-char (car bounds))
+        (forward-line 1)
+        (catch 'nonempty
+          (while (< (point) end-line)
+            (unless (looking-at-p "[ \t]*$")
+              (throw 'nonempty nil))
+            (forward-line 1))
+          t)))))
+
+(defun my/org-roam--delete-file-property (property)
+  "Delete file-level PROPERTY from the current Org buffer.
+Return non-nil when the buffer changed."
+  (when-let* ((line-bounds (my/org-roam--file-property-line-bounds property)))
+    (delete-region (car line-bounds) (cdr line-bounds))
+    (when (my/org-roam--file-property-drawer-empty-p)
+      (when-let* ((drawer-bounds (my/org-roam--file-property-drawer-bounds)))
+        (delete-region
+         (car drawer-bounds)
+         (save-excursion
+           (goto-char (cdr drawer-bounds))
+           (forward-line 1)
+           (point)))))
+    t))
 
 (defun my/org-roam--property-drawer-end-position ()
   "Return the insertion point just after the file-level property drawer."
@@ -283,6 +330,15 @@ Return a plist with :id and :changed."
    file
    id))
 
+(defun my/org-roam--remove-id-location (id)
+  "Remove ID from `org-id-locations' when it is cached."
+  (when (and id
+             (boundp 'org-id-locations)
+             (hash-table-p org-id-locations))
+    (remhash id org-id-locations)
+    (when (fboundp 'org-id-locations-save)
+      (org-id-locations-save))))
+
 (defun my/org-roam-register-current-file ()
   "Register the current Org file as a file-level Org Roam node.
 The file must already live under `org-roam-directory' and be included by
@@ -313,6 +369,28 @@ Org Roam database for that file."
                  (if registered-before "updated" "registered")
                  id)
         id))))
+
+(defun my/org-roam-unregister-current-file ()
+  "Remove the current file-level Org Roam ID and sync the Org Roam DB.
+The Org file stays under `org-roam-directory', but without the file-level ID it
+does not become a file node when `org-roam-db-sync' runs."
+  (interactive)
+  (let ((file (my/org-roam--current-org-file)))
+    (require 'org-roam)
+    (my/org-roam-enable)
+    (unless (my/org-roam--file-in-roam-directory-p file)
+      (user-error "Current file is outside org-roam-directory: %s" file))
+    (let ((id (my/org-roam--file-property "ID")))
+      (unless id
+        (user-error "Current file has no file-level Org Roam ID"))
+      (unless (my/org-roam--delete-file-property "ID")
+        (user-error "Failed to delete file-level Org Roam ID"))
+      (save-buffer)
+      (org-roam-db-clear-file file)
+      (org-roam-db-update-file file)
+      (my/org-roam--remove-id-location id)
+      (message "Org Roam file node unregistered: %s" id)
+      id)))
 
 (defun my/org-roam--cancel-background-timer ()
   "Cancel the deferred Org Roam background initialization timer."
