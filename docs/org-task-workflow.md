@@ -47,8 +47,9 @@ transient 面板本身也不会扫描文件。只有真正打开 agenda、tags v
 `public`、`ltximg`。
 
 Agenda 生成时如果临时打开了被扫描的 Org 文件，这些 buffer 会挂到当前 agenda
-buffer 上。你原来已经打开的 buffer 不会被动；临时打开且未修改的 source buffer
-会在退出 agenda 时自动关闭，避免关 Emacs 时一批扫描文件逐个询问。
+buffer 上。你原来已经打开的 buffer 不会被动；只为扫描打开的 source buffer 会在
+退出 agenda 时自动关闭，即使 Org/UI hook 把它们标成 modified，也不会在关 Emacs
+时逐个询问。只有你从 agenda 跳进去并实际编辑过的 buffer 会恢复成普通保存逻辑。
 
 ## TODO 状态
 

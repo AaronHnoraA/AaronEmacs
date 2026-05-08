@@ -116,6 +116,15 @@
 (defvar-local my/org-agenda--temporary-source-buffers nil
   "Org source buffers opened only to build the current agenda buffer.")
 
+(defvar-local my/org-agenda--temporary-source-buffer nil
+  "Non-nil when this Org buffer was opened only as an agenda source.")
+
+(defvar-local my/org-agenda--temporary-source-buffer-tick nil
+  "Modification tick recorded after agenda generation for a temporary source.")
+
+(defvar-local my/org-agenda--temporary-source-user-edited nil
+  "Non-nil when a temporary agenda source buffer was edited after scanning.")
+
 (defun my/org-agenda--default-directory ()
   "Return a safe local directory for scoped Org agenda scans."
   (file-name-as-directory
@@ -202,14 +211,42 @@ idle timers."
   (let ((visible (my/org-agenda--visible-buffers)))
     (dolist (buffer my/org-agenda--temporary-source-buffers)
       (when (and (buffer-live-p buffer)
-                 (not (buffer-modified-p buffer))
                  (not (memq buffer visible)))
-        (kill-buffer buffer))))
+        (with-current-buffer buffer
+          (if my/org-agenda--temporary-source-user-edited
+              (setq-local buffer-offer-save t)
+            (setq-local buffer-offer-save nil)
+            (set-buffer-modified-p nil)
+            (kill-buffer buffer))))))
   (setq my/org-agenda--temporary-source-buffers nil))
+
+(defun my/org-agenda--temporary-source-after-change (&rest _)
+  "Mark a temporary agenda source buffer as user-edited."
+  (when (and my/org-agenda--temporary-source-buffer
+             my/org-agenda--temporary-source-buffer-tick
+             (/= (buffer-chars-modified-tick)
+                 my/org-agenda--temporary-source-buffer-tick))
+    (setq-local my/org-agenda--temporary-source-user-edited t)
+    (setq-local buffer-offer-save t)
+    (remove-hook 'after-change-functions
+                 #'my/org-agenda--temporary-source-after-change t)))
+
+(defun my/org-agenda--mark-temporary-source-buffer (buffer)
+  "Mark BUFFER as owned by the current agenda buffer."
+  (with-current-buffer buffer
+    (setq-local my/org-agenda--temporary-source-buffer t)
+    (setq-local my/org-agenda--temporary-source-user-edited nil)
+    (setq-local my/org-agenda--temporary-source-buffer-tick
+                (buffer-chars-modified-tick))
+    (setq-local buffer-offer-save nil)
+    (add-hook 'after-change-functions
+              #'my/org-agenda--temporary-source-after-change nil t)))
 
 (defun my/org-agenda--remember-temporary-source-buffers (before files)
   "Attach temporary source buffers opened after BEFORE to the agenda buffer."
   (let ((buffers (my/org-agenda--temporary-source-buffers before files)))
+    (dolist (buffer buffers)
+      (my/org-agenda--mark-temporary-source-buffer buffer))
     (cond
      ((and buffers (derived-mode-p 'org-agenda-mode))
       (setq-local my/org-agenda--temporary-source-buffers
