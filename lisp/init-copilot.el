@@ -108,19 +108,55 @@ Large generated files can make inline completion unnecessarily expensive."
    (t
     (my/forward-delimiter-dwim))))
 
+(defconst my/copilot-forward-delimiter-keys '("M-]" "M-】" "M-］" "M-」" "M-〕")
+  "Keys that accept Copilot or move forward by delimiter.
+The Chinese punctuation variants keep the binding usable when a Chinese input
+method maps the bracket key to full-width punctuation.")
+
+(defconst my/copilot-backward-delimiter-keys '("M-[" "M-【" "M-［" "M-「" "M-〔")
+  "Keys that move backward by delimiter or snippet field.")
+
+(defconst my/copilot-by-word-keys '("M-\\" "M-、" "M-＼")
+  "Keys that accept Copilot by word or move forward by delimiter.")
+
+(defconst my/copilot-to-char-keys
+  '("M-}" "M-｝" "M-〗" "M-』")
+  "Keys that accept Copilot to a character or move forward by delimiter.")
+
+(defun my/copilot-define-keys (keymap keys command)
+  "Bind each key in KEYS to COMMAND in KEYMAP."
+  (dolist (key keys)
+    (define-key keymap (kbd key) command)))
+
 (defun my/copilot-setup-dwim-keys (keymap)
   "Install shared DWIM navigation/accept keys into KEYMAP."
-  (define-key keymap (kbd "M-]") #'my/forward-delimiter-or-copilot-dwim)
-  (define-key keymap (kbd "M-[") #'my/backward-delimiter-or-snippet-dwim)
-  (define-key keymap (kbd "M-\\") #'my/forward-delimiter-or-copilot-by-word-dwim)
-  (define-key keymap (kbd "M-}") #'my/forward-delimiter-or-copilot-to-char-dwim)
+  (my/copilot-define-keys keymap
+                          my/copilot-forward-delimiter-keys
+                          #'my/forward-delimiter-or-copilot-dwim)
+  (my/copilot-define-keys keymap
+                          my/copilot-backward-delimiter-keys
+                          #'my/backward-delimiter-or-snippet-dwim)
+  (my/copilot-define-keys keymap
+                          my/copilot-by-word-keys
+                          #'my/forward-delimiter-or-copilot-by-word-dwim)
+  (my/copilot-define-keys keymap
+                          my/copilot-to-char-keys
+                          #'my/forward-delimiter-or-copilot-to-char-dwim)
   (define-key keymap (kbd "M-(") nil)
   (define-key keymap (kbd "M-)") nil))
 
-(global-set-key (kbd "M-]") #'my/forward-delimiter-or-copilot-dwim)
-(global-set-key (kbd "M-[") #'my/backward-delimiter-or-snippet-dwim)
-(global-set-key (kbd "M-\\") #'my/forward-delimiter-or-copilot-by-word-dwim)
-(global-set-key (kbd "M-}") #'my/forward-delimiter-or-copilot-to-char-dwim)
+(my/copilot-define-keys global-map
+                        my/copilot-forward-delimiter-keys
+                        #'my/forward-delimiter-or-copilot-dwim)
+(my/copilot-define-keys global-map
+                        my/copilot-backward-delimiter-keys
+                        #'my/backward-delimiter-or-snippet-dwim)
+(my/copilot-define-keys global-map
+                        my/copilot-by-word-keys
+                        #'my/forward-delimiter-or-copilot-by-word-dwim)
+(my/copilot-define-keys global-map
+                        my/copilot-to-char-keys
+                        #'my/forward-delimiter-or-copilot-to-char-dwim)
 
 (use-package copilot
   :ensure t
