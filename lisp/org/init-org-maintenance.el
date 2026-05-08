@@ -57,14 +57,9 @@ excluded from media cleanup."
   :type '(repeat string)
   :group 'my/org-maintenance)
 
-(defcustom my/org-maintenance-protected-file-prefixes '("keep-")
-  "Filename prefixes that exempt media and attachments from cleanup."
-  :type '(repeat string)
-  :group 'my/org-maintenance)
-
-(defcustom my/org-maintenance-protected-file-suffixes '("-keep")
-  "Filename suffixes, before the extension, that exempt files from cleanup."
-  :type '(repeat string)
+(defcustom my/org-maintenance-protected-file-prefix "keep-"
+  "Filename prefix that exempts media and attachments from cleanup."
+  :type 'string
   :group 'my/org-maintenance)
 
 (defcustom my/org-maintenance-latex-cache-directory-name "ltximg"
@@ -245,19 +240,11 @@ reference analysis."
    ((my/org-maintenance--image-file-p file) 'image)))
 
 (defun my/org-maintenance--protected-file-p (file)
-  "Return non-nil when FILE is exempt from cleanup by prefix or suffix."
-  (let* ((base (file-name-nondirectory file))
-         (ext (file-name-extension base))
-         (stem (if ext (file-name-sans-extension base) base)))
-    (or (seq-some (lambda (prefix)
-                    (and (not (string-empty-p prefix))
-                         (string-prefix-p prefix base)))
-                  my/org-maintenance-protected-file-prefixes)
-        (seq-some (lambda (suffix)
-                    (and (not (string-empty-p suffix))
-                         (or (string-suffix-p suffix stem)
-                             (string-suffix-p suffix base))))
-                  my/org-maintenance-protected-file-suffixes))))
+  "Return non-nil when FILE is exempt from cleanup by prefix."
+  (let ((prefix my/org-maintenance-protected-file-prefix)
+        (base (file-name-nondirectory file)))
+    (and (not (string-empty-p prefix))
+         (string-prefix-p prefix base))))
 
 (defun my/org-maintenance--org-files (root)
   "Return Org files under ROOT."
@@ -413,8 +400,7 @@ Attachment links count from any Org file in the current maintenance scope."
         :image-extensions my/org-maintenance-image-extensions
         :attachment-dirs my/org-maintenance-attachment-directory-names
         :excluded-dirs my/org-maintenance-excluded-directory-names
-        :protected-prefixes my/org-maintenance-protected-file-prefixes
-        :protected-suffixes my/org-maintenance-protected-file-suffixes
+        :protected-prefix my/org-maintenance-protected-file-prefix
         :latex-keep my/org-maintenance-latex-cache-max-files-per-dir
         :org-files (my/org-maintenance--file-signature org-files)
         :media-files (my/org-maintenance--file-signature media-files)
@@ -817,40 +803,22 @@ When FORCE is non-nil, return t without prompting."
   (my/org-maintenance--rename-current-link-file-to-name
    (string-trim new-name)))
 
-(defun my/org-maintenance--protect-file-name (file mode affix)
-  "Return protected filename for FILE by applying MODE with AFFIX."
-  (let* ((base (file-name-nondirectory file))
-         (ext (file-name-extension base))
-         (stem (if ext (file-name-sans-extension base) base)))
-    (pcase mode
-      ('prefix
-       (if (string-prefix-p affix base)
-           base
-         (concat affix base)))
-      ('suffix
-       (if (string-suffix-p affix stem)
-           base
-         (concat stem affix (and ext (concat "." ext)))))
-      (_ base))))
+(defun my/org-maintenance--protect-file-name (file)
+  "Return protected filename for FILE by adding the configured prefix."
+  (let ((base (file-name-nondirectory file))
+        (prefix my/org-maintenance-protected-file-prefix))
+    (when (string-empty-p prefix)
+      (user-error "Org maintenance protected prefix is empty"))
+    (if (string-prefix-p prefix base)
+        base
+      (concat prefix base))))
 
-(defun my/org-maintenance-protect-link-file (mode affix)
-  "Rename current Org file link target with a cleanup-exempt MODE and AFFIX."
-  (interactive
-   (let* ((mode-name (completing-read "Protect by: " '("prefix" "suffix")
-                                      nil t nil nil "prefix"))
-          (mode (intern mode-name))
-          (candidates (if (eq mode 'suffix)
-                          my/org-maintenance-protected-file-suffixes
-                        my/org-maintenance-protected-file-prefixes))
-          (default-affix (or (car candidates)
-                             (if (eq mode 'suffix) "-keep" "keep-")))
-          (affix (completing-read
-                  (if (eq mode 'suffix) "Suffix: " "Prefix: ")
-                  candidates nil nil nil nil default-affix)))
-     (list mode affix)))
+(defun my/org-maintenance-protect-link-file ()
+  "Rename current Org file link target with the cleanup-exempt prefix."
+  (interactive)
   (let* ((info (my/org-maintenance--current-file-link-info))
          (target (plist-get info :target))
-         (new-name (my/org-maintenance--protect-file-name target mode affix)))
+         (new-name (my/org-maintenance--protect-file-name target)))
     (if (string= new-name (file-name-nondirectory target))
         (message "Linked file already has cleanup exemption")
       (my/org-maintenance--rename-current-link-file-to-name new-name))))
@@ -1044,9 +1012,7 @@ With FORCE, ignore the scan cache."
      (string-join my/org-maintenance-attachment-directory-names ", "))
     (my/org-maintenance-board--insert-value-line
      "Exempt names"
-     (format "prefix %s / suffix %s"
-             (string-join my/org-maintenance-protected-file-prefixes ", ")
-             (string-join my/org-maintenance-protected-file-suffixes ", ")))
+     (format "prefix %s" my/org-maintenance-protected-file-prefix))
     (my/org-maintenance-board--insert-value-line
      "Media candidates"
      (format "%d (%s)"

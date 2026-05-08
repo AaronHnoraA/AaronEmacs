@@ -47,7 +47,7 @@
 (declare-function my/org-latex-preview-visible-now "init-org-latex" ())
 (declare-function my/org-maintenance-board "init-org-maintenance" ())
 (declare-function my/org-maintenance-open-link-system "init-org-maintenance" ())
-(declare-function my/org-maintenance-protect-link-file "init-org-maintenance" (mode affix))
+(declare-function my/org-maintenance-protect-link-file "init-org-maintenance" ())
 (declare-function my/org-maintenance-rename-link-file "init-org-maintenance" (new-name))
 (declare-function my/org-task-dispatch "init-org-agenda" ())
 (declare-function my/org-reference-create-target-dwim "init-org-utility" ())

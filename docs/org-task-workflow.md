@@ -84,6 +84,11 @@ TODO -> NEXT -> WIP -> REVIEW -> DONE
   打开 overview agenda，以及 `confusion`、`shush`、`blocked`、`followup`、
   `review` 的 tags view。
 
+这些工具里，TODO 状态、tags、schedule、deadline、priority、property、refile、
+archive 和 clock 都是 Org heading 级别的元数据，所以会作用在当前标题上。这是
+Org 的原生模型，不是额外扫描或后台逻辑。`T` / `U` 是例外：它们只在当前位置插入
+active / inactive timestamp。
+
 ## Tags
 
 Tags 使用英文，目标是让标题可以横向筛选。建议每条笔记控制在 3 到 5 个 tags。

@@ -353,8 +353,8 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 - `public/`、`publish/`、`dist/`、`build/`、`css/`、`js/`、`CV/` 不参与媒体清理
 - `ltximg/` 和 `org-latex-preview-cache/` 不参与图片/附件清理，只走 LaTeX cache 工具
-- 文件名带 `keep-` 前缀或 `-keep` 后缀时豁免清理
-- `H-o k` 可以把当前 Org `file:` 链接指向的实际文件重命名为豁免名称，并同步更新链接
+- 文件名带 `keep-` 前缀时豁免清理
+- `H-o k` 可以把当前 Org `file:` 链接指向的实际文件加上 `keep-` 前缀，并同步更新链接
 - `H-o m` 可以重命名当前 Org `file:` 链接指向的实际文件，并同步更新链接
 - `H-o O` 用系统 `open` 打开光标处的 Org link、图片链接或文件名
 

@@ -59,6 +59,51 @@
   :type '(repeat (cons string (choice character (const nil))))
   :group 'org)
 
+(defconst my/org-task-tag-face-alist
+  `(("confusion" . (:foreground ,(aaron-ui-color 'accent-yellow)
+                    :weight semibold :slant italic))
+    ("shush" . (:foreground ,(aaron-ui-color 'accent-green)
+                :weight semibold))
+    ("blocked" . (:foreground ,(aaron-ui-color 'accent-red-strong)
+                  :weight semibold))
+    ("followup" . (:foreground ,(aaron-ui-color 'accent-orange)
+                   :weight semibold))
+    ("review" . (:foreground ,(aaron-ui-color 'accent-mauve)
+                 :weight semibold))
+    ("working" . (:foreground ,(aaron-ui-color 'accent-cyan)
+                  :weight semibold))
+    ("stable" . (:foreground ,(aaron-ui-color 'accent-green-soft)
+                 :weight semibold))
+    ("draft" . (:foreground ,(aaron-ui-color 'fg-dim)))
+    ("inbox" . (:foreground ,(aaron-ui-color 'accent-blue)
+                :weight semibold))
+    ("idea" . (:foreground ,(aaron-ui-color 'accent-yellow-soft)
+               :weight semibold))
+    ("question" . (:foreground ,(aaron-ui-color 'accent-orange)
+                   :weight semibold))
+    ("concept" . (:foreground ,(aaron-ui-color 'accent-teal)))
+    ("method" . (:foreground ,(aaron-ui-color 'accent-cyan)))
+    ("definition" . (:foreground ,(aaron-ui-color 'accent-blue)))
+    ("theorem" . (:foreground ,(aaron-ui-color 'accent-mauve)
+                  :weight semibold))
+    ("proof" . (:foreground ,(aaron-ui-color 'accent-cyan)
+                :weight semibold))
+    ("example" . (:foreground ,(aaron-ui-color 'accent-green-soft)))
+    ("counterexample" . (:foreground ,(aaron-ui-color 'accent-red-soft)
+                         :weight semibold))
+    ("summary" . (:foreground ,(aaron-ui-color 'accent-sand)))
+    ("paper" . (:foreground ,(aaron-ui-color 'accent-lavender)))
+    ("research" . (:foreground ,(aaron-ui-color 'accent-mauve)))
+    ("learning" . (:foreground ,(aaron-ui-color 'accent-blue)))
+    ("work" . (:foreground ,(aaron-ui-color 'accent-orange)))
+    ("dev" . (:foreground ,(aaron-ui-color 'accent-cyan)))
+    ("math" . (:foreground ,(aaron-ui-color 'accent-teal)))
+    ("tcs" . (:foreground ,(aaron-ui-color 'accent-mauve)
+              :weight semibold))
+    ("cs" . (:foreground ,(aaron-ui-color 'accent-blue)))
+    ("qc" . (:foreground ,(aaron-ui-color 'accent-cyan))))
+  "Static Org tag faces for task, study and research tags.")
+
 (defcustom my/org-agenda-scope-excluded-directory-names
   '(".git" ".cache" ".direnv" ".venv" "node_modules" "public" "ltximg")
   "Directory names skipped by scoped Org agenda scans."
@@ -249,15 +294,44 @@ The scan happens only when this command is invoked."
                "DONE(d!)" "CANCELLED(c@/!)" "DROPPED(k@/!)")))
 
   (org-todo-keyword-faces
-   `(("TODO"      . (:foreground ,(aaron-ui-color 'accent-red) :weight medium))
-     ("NEXT"      . (:foreground ,(aaron-ui-color 'accent-green-soft) :weight medium))
-     ("HOLD"      . (:foreground ,(aaron-ui-color 'accent-orange) :weight medium))
-     ("WIP"       . (:foreground ,(aaron-ui-color 'accent-cyan) :weight medium))
-     ("WAIT"      . (:foreground ,(aaron-ui-color 'accent-yellow) :weight medium))
-     ("REVIEW"    . (:foreground ,(aaron-ui-color 'accent-mauve) :weight medium))
-     ("DONE"      . (:foreground ,(aaron-ui-color 'accent-blue) :weight medium :strike-through t))
-     ("CANCELLED" . (:foreground ,(aaron-ui-color 'accent-red-soft) :weight medium :strike-through t))
-     ("DROPPED"   . (:foreground ,(aaron-ui-color 'fg-faint) :weight medium :strike-through t))))
+   `(("TODO" . (:foreground ,(aaron-ui-color 'accent-red-strong)
+               :background ,(aaron-ui-color 'bg-danger)
+               :weight semibold
+               :box (:line-width -1 :color ,(aaron-ui-color 'bg-danger-strong))))
+     ("NEXT" . (:foreground ,(aaron-ui-color 'accent-green)
+               :background ,(aaron-ui-color 'bg-success)
+               :weight semibold
+               :box (:line-width -1 :color ,(aaron-ui-color 'bg-success-strong))))
+     ("WIP" . (:foreground ,(aaron-ui-color 'accent-cyan)
+              :background ,(aaron-ui-color 'bg-meta)
+              :weight semibold
+              :box (:line-width -1 :color ,(aaron-ui-color 'bg-meta-strong))))
+     ("WAIT" . (:foreground ,(aaron-ui-color 'accent-yellow)
+               :background ,(aaron-ui-color 'bg-surface)
+               :weight medium
+               :box (:line-width -1 :color ,(aaron-ui-color 'bg-surface-strong))))
+     ("HOLD" . (:foreground ,(aaron-ui-color 'accent-orange)
+               :background ,(aaron-ui-color 'bg-surface)
+               :weight medium
+               :box (:line-width -1 :color ,(aaron-ui-color 'bg-surface-strong))))
+     ("REVIEW" . (:foreground ,(aaron-ui-color 'accent-mauve)
+                 :background ,(aaron-ui-color 'bg-overlay)
+                 :weight semibold
+                 :box (:line-width -1 :color ,(aaron-ui-color 'border-subtle))))
+     ("DONE" . (:foreground ,(aaron-ui-color 'accent-green-soft)
+               :background ,(aaron-ui-color 'bg-success)
+               :weight medium
+               :box (:line-width -1 :color ,(aaron-ui-color 'bg-success-strong))))
+     ("CANCELLED" . (:foreground ,(aaron-ui-color 'fg-faint)
+                    :background ,(aaron-ui-color 'bg-surface)
+                    :weight medium
+                    :strike-through t
+                    :box (:line-width -1 :color ,(aaron-ui-color 'border-subtle))))
+     ("DROPPED" . (:foreground ,(aaron-ui-color 'fg-faint)
+                  :background ,(aaron-ui-color 'bg-surface)
+                  :weight medium
+                  :strike-through t
+                  :box (:line-width -1 :color ,(aaron-ui-color 'border-subtle))))))
 
   (org-enforce-todo-dependencies t)
   (org-enforce-todo-checkbox-dependencies t)
@@ -285,6 +359,7 @@ The scan happens only when this command is invoked."
 
   ;; --- Tags ---
   (org-tag-alist my/org-task-tag-alist)
+  (org-tag-faces my/org-task-tag-face-alist)
   (org-use-fast-tag-selection t)
   (org-fast-tag-selection-single-key t))
 
