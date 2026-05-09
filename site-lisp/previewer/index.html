@@ -2,113 +2,339 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>Text Preview</title>
+    <title>Org Preview</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     {{ css }}
     <style>
-     .markdown-body {
-         box-sizing: border-box;
-         min-width: 200px;
-         max-width: 980px;
-         margin: 0 auto;
-         padding: 20px;
-     }
+      html, body {
+        min-height: 100%;
+        margin: 0;
+      }
 
-     @media (max-width: 767px) {
-         .markdown-body {
-             padding: 15px;
-         }
-     }
+      body {
+        background: #f7f5f0;
+      }
 
-     pre code.hljs {
-         padding: 0;
-     }
+      .preview-shell {
+        box-sizing: border-box;
+        min-height: 100vh;
+        padding: 24px 28px 48px;
+      }
+
+      pre code.hljs {
+        padding: 0;
+      }
     </style>
   </head>
   <body>
-    <div class="container">
-      <div id="preview" class="markdown-body">Text Preview</div>
-    </div>
+    <main class="preview-shell">
+      <article id="preview" class="markdown-body previewer-org-page">Text Preview</article>
+    </main>
   </body>
   {{ js }}
   <script type="text/javascript">
-   $(function() {
-       var extension = {
-           mermaid: typeof extension !== "undefined" ? extension.mermaid: false
-       }
+    (function () {
+      var preview = document.getElementById("preview");
+      var sourceAnchors = [];
+      var syncScrollFromBrowser = true;
+      var websocket = null;
+      var activeSourcePos = 0;
+      var suppressScrollEvent = false;
+      var scrollTimer = 0;
 
-       const highlight = markedHighlight.markedHighlight({
-           async: false,
-           langPrefix: "hljs language-",
-           highlight(code, lang, info) {
-               if ((lang || "").match(/^mermaid/)) {
-                   return code;
-               }
-               return hljs.highlightAuto(code).value;
-           }
-       });
-       const renderer = highlight.renderer;
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
 
-       highlight.renderer = {
-           code(code, lang, escaped) {
-               if ((lang || "").match(/^mermaid/)) {
-                   extension.mermaid = true;
-                   return '<div class="mermaid">' + code + '</div>';
-               }
-               return renderer.code(code, lang, escaped);
-           }
-       };
+      function send(message) {
+        if (websocket && websocket.readyState === WebSocket.OPEN) {
+          websocket.send(JSON.stringify(message));
+        }
+      }
 
-       marked.use(highlight);
+      function mathJaxTypeset() {
+        if (window.MathJax && typeof window.MathJax.typesetPromise === "function") {
+          window.MathJax.typesetPromise([preview]).catch(function (error) {
+            console.log(error);
+          });
+        }
+      }
 
-       var ws = new WebSocket('ws://{{ websocket }}');
-       ws.onopen = function () {
-           ws.send("I'm connected");
-       };
-       ws.onclose = function (event) {
-           window.open('', '_self', '');
-           window.close();
-       };
-       ws.onmessage = function (event) {
-           if (event.data.endsWith("<!-- iframe -->")) {
-               var iframe = document.createElement("iframe");
-               iframe.style.width = "100%";
-               iframe.style.height = "100%";
-               iframe.style.position = "absolute";
-               iframe.style.border = "none";
-               $("#preview").html(iframe)
+      function renderMathTextNode(node) {
+        var text = node.nodeValue;
+        if (!text || !/(\\\(|\\\[|\$\$)/.test(text)) {
+          return;
+        }
 
-               var frameDoc = iframe.document;
-               if(iframe.contentWindow) {
-                   frameDoc = iframe.contentWindow.document; // IE
-               }
-               frameDoc.open();
-               frameDoc.writeln(event.data);
-               frameDoc.close();
+        var pattern = /(\\\[((?:.|\n)*?)\\\]|\\\(((?:.|\n)*?)\\\)|\$\$((?:.|\n)*?)\$\$)/g;
+        var fragment = document.createDocumentFragment();
+        var last = 0;
+        var match;
 
-               var iframeContent = $("iframe").contents();
-               var position = iframeContent.find("#position-percentage").html();
-               if (position) {
-                   iframeContent.scrollTop(scroll = iframeContent.height() * (position / 100));
-                   /* iframe.contentWindow.scrollTo({top:iframeContent.height() * (position / 100), behavior: 'smooth'}); */
-                   /* iframe.animate({ scrollTop: iframeContent.height() * (position / 100)}, 300); */
-               }
-               $("body").css("margin","0")
-               $("body").css("padding","0")
-           } else {
-               $("#preview").html(marked.parse(event.data))
-               if (extension.mermaid) {
-                   mermaid.init();
-               }
-               var position = $("#position-percentage").html();
-               if (position) {
-                   $("html, body").animate({ scrollTop: $(document).height() * (position / 100)}, 300);
-               }
-           }
-       };
-       ws.onerror = function (event) {
-           console.log(event);
-       };
-   });
+        while ((match = pattern.exec(text)) !== null) {
+          if (match.index > last) {
+            fragment.appendChild(document.createTextNode(text.slice(last, match.index)));
+          }
+
+          var display = Boolean(match[2] || match[4]);
+          var tex = match[2] || match[3] || match[4] || "";
+          var span = document.createElement(display ? "div" : "span");
+          span.className = display ? "preview-math preview-math-display" : "preview-math preview-math-inline";
+          span.dataset.tex = tex;
+
+          if (window.katex && typeof window.katex.render === "function") {
+            try {
+              window.katex.render(tex, span, {
+                displayMode: display,
+                throwOnError: true,
+                strict: "ignore",
+                trust: true
+              });
+            } catch (error) {
+              span.classList.add("preview-math-fallback");
+              span.textContent = display ? "\\[" + tex + "\\]" : "\\(" + tex + "\\)";
+            }
+          } else {
+            span.classList.add("preview-math-fallback");
+            span.textContent = display ? "\\[" + tex + "\\]" : "\\(" + tex + "\\)";
+          }
+
+          fragment.appendChild(span);
+          last = pattern.lastIndex;
+        }
+
+        if (last < text.length) {
+          fragment.appendChild(document.createTextNode(text.slice(last)));
+        }
+
+        node.parentNode.replaceChild(fragment, node);
+      }
+
+      function renderMath(root) {
+        var walker = document.createTreeWalker(
+          root,
+          NodeFilter.SHOW_TEXT,
+          {
+            acceptNode: function (node) {
+              var parent = node.parentElement;
+              if (!parent || /^(SCRIPT|STYLE|TEXTAREA|CODE|PRE)$/i.test(parent.tagName)) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          }
+        );
+        var nodes = [];
+        while (walker.nextNode()) {
+          nodes.push(walker.currentNode);
+        }
+        nodes.forEach(renderMathTextNode);
+        mathJaxTypeset();
+      }
+
+      function initCodeAndDiagrams() {
+        if (window.hljs) {
+          preview.querySelectorAll("pre code").forEach(function (node) {
+            window.hljs.highlightElement(node);
+          });
+        }
+        if (window.mermaid) {
+          try {
+            window.mermaid.init(undefined, preview.querySelectorAll(".mermaid"));
+          } catch (error) {
+            console.log(error);
+          }
+        }
+      }
+
+      function normalizeText(value) {
+        return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+      }
+
+      function sourceCandidateSelector(kind) {
+        if (kind === "heading") {
+          return "h1,h2,h3,h4,h5,h6";
+        }
+        if (kind === "block") {
+          return ".definition,.defn,.theorem,.thm,.lemma,.cor,.prop,.property,.proof,.example,.attention,.note,.info,.warning,blockquote,pre";
+        }
+        return "p,li,dd,dt,blockquote,pre";
+      }
+
+      function attachSourceAnchors(anchors) {
+        var used = new Set();
+
+        anchors.forEach(function (anchor) {
+          var candidates = Array.prototype.slice.call(preview.querySelectorAll(sourceCandidateSelector(anchor.kind)));
+          var wanted = normalizeText(anchor.text);
+          var target = null;
+
+          if (wanted) {
+            target = candidates.find(function (node) {
+              if (used.has(node)) return false;
+              var text = normalizeText(node.textContent);
+              return text && (text.indexOf(wanted) >= 0 || wanted.indexOf(text.slice(0, 48)) >= 0);
+            });
+          }
+
+          if (!target) {
+            target = candidates.find(function (node) {
+              return !used.has(node);
+            });
+          }
+
+          if (target) {
+            used.add(target);
+            target.dataset.sourcePos = String(anchor.pos);
+            target.dataset.sourceLine = String(anchor.line);
+            target.dataset.sourcePercent = String(anchor.percent);
+            target.classList.add("preview-source-anchor");
+          }
+        });
+      }
+
+      function renderContent(payload) {
+        sourceAnchors = Array.isArray(payload.anchors) ? payload.anchors : [];
+        syncScrollFromBrowser = payload.syncScrollFromBrowser !== false;
+        activeSourcePos = Number(payload.point || 0);
+
+        if (payload.format === "org-html") {
+          preview.classList.add("previewer-org-page");
+          preview.innerHTML = payload.html || "";
+        } else if (payload.format === "html") {
+          preview.classList.remove("previewer-org-page");
+          preview.innerHTML = payload.html || "";
+        } else if (window.marked) {
+          preview.classList.remove("previewer-org-page");
+          preview.innerHTML = window.marked.parse(payload.html || "");
+        } else {
+          preview.innerHTML = "<pre>" + escapeHtml(payload.html || "") + "</pre>";
+        }
+
+        attachSourceAnchors(sourceAnchors);
+        renderMath(preview);
+        initCodeAndDiagrams();
+        scrollToSource(payload.point, payload.percent);
+      }
+
+      function nearestAnchorForPos(pos) {
+        var anchors = Array.prototype.slice.call(preview.querySelectorAll("[data-source-pos]"));
+        if (anchors.length === 0 || !pos) {
+          return null;
+        }
+        var best = anchors[0];
+        var bestDistance = Infinity;
+        anchors.forEach(function (node) {
+          var distance = Math.abs(Number(node.dataset.sourcePos || 0) - pos);
+          if (distance < bestDistance) {
+            best = node;
+            bestDistance = distance;
+          }
+        });
+        return best;
+      }
+
+      function scrollToSource(pos, percent) {
+        var target = nearestAnchorForPos(Number(pos || 0));
+        suppressScrollEvent = true;
+        if (target) {
+          target.scrollIntoView({ block: "center", behavior: "smooth" });
+        } else if (percent !== false && percent !== undefined) {
+          var top = Math.max(0, document.documentElement.scrollHeight * (Number(percent) / 100) - window.innerHeight / 2);
+          window.scrollTo({ top: top, behavior: "smooth" });
+        }
+        window.setTimeout(function () {
+          suppressScrollEvent = false;
+        }, 350);
+      }
+
+      function handleSync(payload) {
+        activeSourcePos = Number(payload.point || 0);
+        scrollToSource(payload.point, payload.percent);
+      }
+
+      function handleLegacyText(text) {
+        if (text.endsWith("<!-- iframe -->")) {
+          preview.innerHTML = text.replace("<!-- iframe -->", "");
+        } else if (window.marked) {
+          preview.innerHTML = window.marked.parse(text);
+        } else {
+          preview.innerHTML = "<pre>" + escapeHtml(text) + "</pre>";
+        }
+        renderMath(preview);
+        initCodeAndDiagrams();
+      }
+
+      function visibleSourceAnchor() {
+        var nodes = Array.prototype.slice.call(preview.querySelectorAll("[data-source-pos]"));
+        var best = null;
+        nodes.forEach(function (node) {
+          var rect = node.getBoundingClientRect();
+          if (rect.top <= 120) {
+            best = node;
+          } else if (!best && rect.top < window.innerHeight) {
+            best = node;
+          }
+        });
+        return best;
+      }
+
+      window.addEventListener("scroll", function () {
+        if (!syncScrollFromBrowser || suppressScrollEvent) {
+          return;
+        }
+        window.clearTimeout(scrollTimer);
+        scrollTimer = window.setTimeout(function () {
+          var anchor = visibleSourceAnchor();
+          if (!anchor) return;
+          var pos = Number(anchor.dataset.sourcePos || 0);
+          if (pos && Math.abs(pos - activeSourcePos) > 8) {
+            activeSourcePos = pos;
+            send({ type: "goto", pos: pos, passive: true });
+          }
+        }, 180);
+      });
+
+      preview.addEventListener("click", function (event) {
+        var anchor = event.target.closest("[data-source-pos]");
+        if (anchor && (event.metaKey || event.altKey)) {
+          event.preventDefault();
+          send({ type: "goto", pos: Number(anchor.dataset.sourcePos || 0) });
+        }
+      });
+
+      websocket = new WebSocket("ws://{{ websocket }}");
+      websocket.onopen = function () {
+        websocket.send(JSON.stringify({ type: "ready" }));
+      };
+      websocket.onclose = function () {
+        document.body.classList.add("preview-disconnected");
+      };
+      websocket.onmessage = function (event) {
+        var text = event.data || "";
+        if (text.charAt(0) === "{") {
+          try {
+            var payload = JSON.parse(text);
+            if (payload.type === "content") {
+              renderContent(payload);
+            } else if (payload.type === "sync") {
+              handleSync(payload);
+            }
+            return;
+          } catch (error) {
+            console.log(error);
+          }
+        }
+        handleLegacyText(text);
+      };
+      websocket.onerror = function (event) {
+        console.log(event);
+      };
+    })();
   </script>
 </html>

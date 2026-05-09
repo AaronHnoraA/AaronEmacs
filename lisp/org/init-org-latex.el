@@ -2509,7 +2509,8 @@ queued work."
   (remove-hook 'change-major-mode-hook #'my/org-latex-cleanup-scroll-preview t)
   (remove-hook 'kill-buffer-hook #'my/org-latex-cleanup-scroll-preview t)
   (my/org-latex--cancel-after-save-preview-timer)
-  (my/org-latex-cancel-pending-renders))
+  (my/org-latex-cancel-pending-renders)
+  (my/org-latex--clear-preview-range (point-min) (point-max)))
 
 (defun my/org-latex-preview-visible-initial (buffer)
   "Trigger one visible-area LaTeX preview for BUFFER once it is displayable."
@@ -2575,7 +2576,13 @@ typing into a freshly expanded display-math snippet and jump point to `\\]'."
                                (current-buffer)))
       (my/org-latex-install-syntax-watch))))
 
-(add-hook 'org-mode-hook #'my/org-latex-enable-scroll-preview)
+(defun my/org-latex-enable-scroll-preview-maybe ()
+  "Enable automatic Org LaTeX overlay previews when configured."
+  (when (and (boundp 'my/org-auto-latex-overlay-preview)
+             my/org-auto-latex-overlay-preview)
+    (my/org-latex-enable-scroll-preview)))
+
+(add-hook 'org-mode-hook #'my/org-latex-enable-scroll-preview-maybe)
 
 (defun my/org-latex-open-preview-at-point (&optional arg)
   "On a LaTeX preview overlay: clear it and move point inside the fragment.

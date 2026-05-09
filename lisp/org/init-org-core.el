@@ -122,6 +122,21 @@ assistants that otherwise wake up aggressively while typing or navigating."
   :type 'boolean
   :group 'my/org-ui)
 
+(defcustom my/org-lightweight-ui-profile t
+  "Prefer a lightweight Org editing surface and put rich rendering in Previewer.
+When non-nil, Org keeps lightweight readability aids such as `org-modern',
+`org-appear' and RaTeX edit previews, but avoids scroll-driven rich overlays
+whose main job is presentation rather than editing."
+  :type 'boolean
+  :group 'my/org-ui)
+
+(defcustom my/org-auto-latex-overlay-preview nil
+  "When non-nil, automatically render visible Org LaTeX overlays while scrolling.
+The low-power default is nil because `previewer-org-workbench' renders formulas
+in HTML/CSS/JS and RaTeX covers the formula currently being edited."
+  :type 'boolean
+  :group 'my/org-ui)
+
 (defcustom my/org-display-line-numbers nil
   "Buffer-local line-number style for Org buffers.
 Nil disables line numbers in Org buffers, which is cheaper with
@@ -952,12 +967,16 @@ headline levels."
   :ensure nil
   :hook ((org-mode . visual-line-mode)        ; 自动换行
          (org-mode . my/org-setup-low-power-profile)
-         (org-mode . my/org-setup-visible-inline-images)
-         (org-mode . my/org-force-indent-mode)
-         (org-mode . my/org-setup-indent-after-local-variables)
-         (org-mode . my/org-setup-buffer-spacing)
-         (org-mode . my/org-setup-toc-auto-update)
-         (org-mode . my/org-enable-typography-maybe)) ; 缩进模式
+         ;; Plain editor profile: preview media in Previewer, not in Org source.
+         ;; (org-mode . my/org-setup-visible-inline-images)
+         ;; Plain editor profile: rich indentation/spacing/typography belongs
+         ;; in Previewer, not in the source buffer.
+         ;; (org-mode . my/org-force-indent-mode)
+         ;; (org-mode . my/org-setup-indent-after-local-variables)
+         ;; (org-mode . my/org-setup-buffer-spacing)
+         ;; (org-mode . my/org-setup-toc-auto-update)
+         ;; (org-mode . my/org-enable-typography-maybe)
+         )
   :bind (("C-c a" . org-agenda)
          ("C-c c" . org-capture)
          :map org-mode-map
@@ -1017,13 +1036,16 @@ headline levels."
   ;; Default `t' realigns tags on every cursor-move onto a heading line.
   ;; Disable so tags only realign on save / explicit `org-align-tags'.
   (org-auto-align-tags nil))
-(my/org-force-indent-mode-in-existing-buffers)
+;; Plain editor profile: do not force org-indent in existing Org buffers.
+;; (my/org-force-indent-mode-in-existing-buffers)
 
-(add-hook 'window-configuration-change-hook
-          #'my/org-schedule-visible-inline-images-for-windows)
-(when (boundp 'window-buffer-change-functions)
-  (add-hook 'window-buffer-change-functions
-            #'my/org-schedule-visible-inline-images-for-windows))
+;; Plain editor profile: inline images are rendered in Previewer, not refreshed
+;; by Org window hooks.
+;; (add-hook 'window-configuration-change-hook
+;;           #'my/org-schedule-visible-inline-images-for-windows)
+;; (when (boundp 'window-buffer-change-functions)
+;;   (add-hook 'window-buffer-change-functions
+;;             #'my/org-schedule-visible-inline-images-for-windows))
 
 ;;; ----------------------------------------------------------------------------
 ;;; Misc fixes

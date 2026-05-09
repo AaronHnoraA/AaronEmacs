@@ -1,0 +1,243 @@
+/* Low-power Org preview theme.  Keep this close to the published note style
+   without importing the heavier homepage and graph layers. */
+:root {
+  --preview-font-body: "Merriweather", "FZLiuGongQuanKaiShuJF", "Songti SC", "Iowan Old Style", serif;
+  --preview-font-title: "Excalifont", "Merriweather", "FZLiuGongQuanKaiShuJF", "Songti SC", serif;
+  --preview-font-ui: "Merriweather", "FZLiuGongQuanKaiShuJF", "Avenir Next", "Helvetica Neue", sans-serif;
+  --preview-font-code: "Fira Code", "JetBrainsMono Nerd Font Mono", "JetBrains Mono", "SFMono-Regular", monospace;
+  --preview-paper: #f7f5f0;
+  --preview-panel: #fbfaf7;
+  --preview-text: #1f1d1a;
+  --preview-muted: rgba(31, 29, 26, 0.64);
+  --preview-border: rgba(31, 29, 26, 0.12);
+  --preview-blue: #5f77ab;
+  --preview-def: #f9e2af;
+  --preview-thm: #bbf7b8;
+  --preview-lemma: #a9cbff;
+  --preview-cor: #b4befe;
+  --preview-prop: #f5e0dc;
+  --preview-proof: #9de7ff;
+  --preview-example: #d8b27f;
+  --preview-alert: #d79a9a;
+  --preview-note: #a8f0e3;
+}
+
+body {
+  color: var(--preview-text);
+  font-family: var(--preview-font-body);
+  line-height: 1.72;
+}
+
+.previewer-org-page {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 20px 24px 40px;
+  border: 0;
+  color: var(--preview-text);
+  background: var(--preview-panel);
+  font-family: var(--preview-font-body);
+  line-height: 1.72;
+}
+
+.markdown-body.previewer-org-page {
+  color: var(--preview-text);
+  background-color: var(--preview-panel);
+  font-family: var(--preview-font-body);
+}
+
+.previewer-org-page .title,
+.previewer-org-page h1 {
+  margin: 0 0 1.2rem;
+  font-family: var(--preview-font-title);
+  font-size: 2rem;
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+.previewer-org-page h2,
+.previewer-org-page h3,
+.previewer-org-page h4,
+.previewer-org-page h5,
+.previewer-org-page h6 {
+  margin-top: 2.1rem;
+  margin-bottom: 0.8rem;
+  font-family: var(--preview-font-title);
+  line-height: 1.22;
+}
+
+.previewer-org-page h2 {
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--preview-border);
+  font-size: 1.55rem;
+}
+
+.previewer-org-page h3 {
+  font-size: 1.22rem;
+}
+
+.previewer-org-page p,
+.previewer-org-page li,
+.previewer-org-page dd {
+  font-size: 1.03rem;
+}
+
+.previewer-org-page a {
+  color: var(--preview-text);
+  font-weight: 650;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+
+.previewer-org-page a:hover {
+  border-bottom-color: currentColor;
+}
+
+.previewer-org-page code,
+.previewer-org-page pre {
+  font-family: var(--preview-font-code);
+}
+
+.previewer-org-page code {
+  padding: 0.12rem 0.36rem;
+  border-radius: 7px;
+  background: rgba(95, 119, 171, 0.1);
+  color: #39557d;
+}
+
+.previewer-org-page pre {
+  overflow-x: auto;
+  margin: 1.35rem 0;
+  padding: 1rem 1.1rem;
+  border: 1px solid rgba(31, 42, 45, 0.1);
+  border-radius: 10px;
+  background: #f4f6f7;
+  color: #233036;
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.previewer-org-page table {
+  width: 100%;
+  margin: 1.5rem 0;
+  border-collapse: collapse;
+  border: 1px solid rgba(31, 42, 45, 0.1);
+}
+
+.previewer-org-page th,
+.previewer-org-page td {
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(31, 42, 45, 0.1);
+  text-align: left;
+}
+
+.previewer-org-page th {
+  background: rgba(95, 119, 171, 0.09);
+  font-family: var(--preview-font-ui);
+}
+
+.previewer-org-page blockquote {
+  margin: 1.45rem 0;
+  padding: 0.95rem 1.15rem;
+  border-left: 4px solid rgba(95, 119, 171, 0.45);
+  background: rgba(95, 119, 171, 0.06);
+  color: #3c4a4d;
+}
+
+.definition, .defn { --preview-block: var(--preview-def); --preview-label: "定义"; }
+.theorem, .thm { --preview-block: var(--preview-thm); --preview-label: "定理"; }
+.lemma { --preview-block: var(--preview-lemma); --preview-label: "引理"; }
+.cor { --preview-block: var(--preview-cor); --preview-label: "推论"; }
+.prop, .property { --preview-block: var(--preview-prop); --preview-label: "性质"; }
+.proof { --preview-block: var(--preview-proof); --preview-label: "证明"; }
+.example { --preview-block: var(--preview-example); --preview-label: "例子"; }
+.attention, .warning { --preview-block: var(--preview-alert); --preview-label: "注意"; }
+.note, .info { --preview-block: var(--preview-note); --preview-label: "笔记"; }
+
+.definition, .defn, .theorem, .thm, .lemma, .cor,
+.prop, .property, .proof, .example, .attention,
+.note, .info, .warning {
+  margin: 1.2rem 0;
+  overflow: hidden;
+  border: 1px solid var(--preview-border);
+  border-left: 4px solid var(--preview-block);
+  background: #fff;
+}
+
+.definition::before, .defn::before, .theorem::before, .thm::before,
+.lemma::before, .cor::before, .prop::before, .property::before,
+.proof::before, .example::before, .attention::before, .note::before,
+.info::before, .warning::before {
+  content: var(--preview-label);
+  display: block;
+  padding: 0.42rem 0.85rem;
+  border-bottom: 1px solid var(--preview-border);
+  background: #f7f6f2;
+  font-family: var(--preview-font-ui);
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.definition > *, .defn > *, .theorem > *, .thm > *, .lemma > *,
+.cor > *, .prop > *, .property > *, .proof > *, .example > *,
+.attention > *, .note > *, .info > *, .warning > * {
+  margin: 0;
+  padding-inline: 0.9rem;
+}
+
+.definition > :first-child, .defn > :first-child, .theorem > :first-child,
+.thm > :first-child, .lemma > :first-child, .cor > :first-child,
+.prop > :first-child, .property > :first-child, .proof > :first-child,
+.example > :first-child, .attention > :first-child, .note > :first-child,
+.info > :first-child, .warning > :first-child {
+  padding-top: 0.75rem;
+}
+
+.definition > :last-child, .defn > :last-child, .theorem > :last-child,
+.thm > :last-child, .lemma > :last-child, .cor > :last-child,
+.prop > :last-child, .property > :last-child, .proof > :last-child,
+.example > :last-child, .attention > :last-child, .note > :last-child,
+.info > :last-child, .warning > :last-child {
+  padding-bottom: 0.75rem;
+}
+
+.preview-math-display {
+  overflow-x: auto;
+  margin: 1rem 0;
+  text-align: center;
+}
+
+.preview-math-fallback {
+  color: #7a2e2e;
+}
+
+.preview-source-anchor {
+  scroll-margin-top: 72px;
+}
+
+.preview-source-anchor:hover {
+  outline: 1px dashed rgba(95, 119, 171, 0.28);
+  outline-offset: 4px;
+}
+
+.preview-disconnected #preview::before {
+  content: "Preview disconnected";
+  display: block;
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgba(122, 46, 46, 0.22);
+  background: rgba(122, 46, 46, 0.06);
+  color: #7a2e2e;
+  font-family: var(--preview-font-ui);
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .preview-shell {
+    padding: 0;
+  }
+
+  .previewer-org-page {
+    padding: 18px 14px 32px;
+    border: 0;
+  }
+}
