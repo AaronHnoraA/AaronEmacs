@@ -56,8 +56,8 @@
   :type 'integer
   :group 'previewer)
 
-(defcustom previewer-delay 0.1
-  "Delay time when auto update preview."
+(defcustom previewer-delay 0.8
+  "Idle delay before re-rendering preview content after edits."
   :type 'float
   :group 'previewer)
 
@@ -111,6 +111,16 @@ preview, while preview-to-source navigation is reserved for modified clicks."
 (defcustom previewer-org-source-map t
   "When non-nil, send source anchors for Org preview synchronization."
   :type 'boolean
+  :group 'previewer)
+
+(defcustom previewer-org-incremental-render t
+  "When non-nil, update Org previews by replacing the edited heading chunk."
+  :type 'boolean
+  :group 'previewer)
+
+(defcustom previewer-org-incremental-heading-level 2
+  "Maximum Org heading level used as a live-preview incremental chunk boundary."
+  :type 'integer
   :group 'previewer)
 
 (defcustom previewer-vendor-auto-update t
@@ -200,6 +210,7 @@ It's useful to remove all dirty hacking with `previewer-auto-hook'."
 (defvar previewer-websocket nil)
 (defvar previewer-sending nil)
 (defvar previewer-sync-sending nil)
+(defvar previewer--content-timer nil)
 (defvar previewer-source-buffer nil)
 (defvar previewer--last-sync-key nil)
 (defvar previewer--xwidget-buffer nil)
@@ -212,6 +223,13 @@ It's useful to remove all dirty hacking with `previewer-auto-hook'."
   (expand-file-name "static/vendor/katex" previewer-home-path))
 (defvar previewer-mathjax-vendor-path
   (expand-file-name "static/vendor/mathjax" previewer-home-path))
+(defvar-local previewer--patch-timer nil)
+(defvar-local previewer--changed-beg nil)
+(defvar-local previewer--changed-end nil)
+(defvar-local previewer--org-full-rendered nil)
+(defvar previewer-org--export-source-buffer nil)
+(defvar previewer-org--export-source-offset 0)
+(defvar previewer-org--source-advice-installed nil)
 
 (defun previewer-mime-type(path)
   "Guess mime type from PATH."
@@ -303,6 +321,16 @@ It's useful to remove all dirty hacking with `previewer-auto-hook'."
            (total (previewer--buffer-line-count)))
       (max 0 (min 100 (round (* 100.0 (/ (float line) total))))))))
 
+(defun previewer--point-window-ratio ()
+  "Return point's approximate vertical ratio in its visible source window."
+  (if-let* ((window (get-buffer-window (current-buffer) t)))
+      (let* ((start-line (previewer--line-at-pos (window-start window)))
+             (end-line (previewer--line-at-pos (window-end window t)))
+             (point-line (previewer--line-at-pos (point)))
+             (span (max 1 (- end-line start-line))))
+        (max 0.08 (min 0.92 (/ (float (- point-line start-line)) span))))
+    0.45))
+
 (defun previewer--source-line-text ()
   "Return the current source line text."
   (string-trim
@@ -322,58 +350,216 @@ It's useful to remove all dirty hacking with `previewer-auto-hook'."
   "Return display text for source-map LINE."
   (let ((text (string-trim line)))
     (setq text (replace-regexp-in-string "\\`[ \t]*\\*+\\s-+" "" text))
+    (setq text (replace-regexp-in-string "\\`[ \t]*[-+*]\\s-+\\(?:\\[[ X-]\\]\\s-+\\)?\\|\\`[ \t]*[0-9]+[.)]\\s-+" "" text))
     (setq text (replace-regexp-in-string "\\`[ \t]*#\\+begin_" "" text))
     (truncate-string-to-width text 120 nil nil t)))
 
-(defun previewer-org-source-anchors ()
-  "Return a vector of Org source anchors for browser synchronization."
+(defun previewer-org-source-anchors (&optional beg end)
+  "Return a vector of Org source anchors for browser synchronization.
+When BEG and END are non-nil, only scan that source range."
   (let ((anchors nil)
         (total (previewer--buffer-line-count))
-        (count 0))
+        (count 0)
+        inside-block
+        inside-math)
     (save-excursion
       (save-restriction
         (widen)
-        (goto-char (point-min))
-        (while (and (not (eobp)) (< count 2500))
+        (goto-char (or beg (point-min)))
+        (while (and (not (eobp))
+                    (< (point) (or end (point-max)))
+                    (< count 1200))
           (let* ((pos (point))
                  (line-no (previewer--line-at-pos pos))
                  (line (buffer-substring-no-properties
                         (line-beginning-position)
                         (line-end-position)))
-                 (trimmed (string-trim line)))
-            (when (and (not (string-empty-p trimmed))
-                       (not (string-prefix-p "#+PROPERTY:" (upcase trimmed)))
-                       (not (string-prefix-p ":PROPERTIES:" (upcase trimmed)))
-                       (or (string-match-p "\\`[ \t]*\\*+\\s-+" line)
-                           (string-match-p "\\`[ \t]*#\\+begin_" line)
-                           (string-match-p "\\\\\\[\\|\\\\(\\|\\$\\$\\|\\`[ \t]*\\\\begin{" line)
-                           (and (> (length trimmed) 8)
-                                (not (string-prefix-p "#+" trimmed))
-                                (not (string-prefix-p ":" trimmed)))))
+                 (trimmed (string-trim line))
+                 (lower (downcase trimmed))
+                 (block-begin (string-match-p "\\`#\\+begin_" lower))
+                 (math-begin (string-match-p "\\`\\(?:\\\\\\[\\|\\$\\$\\|\\\\begin{\\)" trimmed))
+                 (math-end (string-match-p "\\(?:\\\\\\]\\|\\$\\$\\|\\\\end{\\)" trimmed)))
+            (cond
+             ((and inside-block (string-match-p "\\`#\\+end_" lower))
+              (setq inside-block nil))
+             ((and inside-math math-end)
+              (setq inside-math nil))
+             (inside-block nil)
+             (inside-math nil)
+             ((and (not (string-empty-p trimmed))
+                   (not (and (string-prefix-p "#+" trimmed)
+                             (not block-begin)))
+                   (not (string-prefix-p ":" trimmed))
+                   (not (string-prefix-p ":END:" (upcase trimmed))))
               (push `((pos . ,pos)
                       (line . ,line-no)
                       (percent . ,(round (* 100.0 (/ (float line-no) total))))
                       (kind . ,(previewer--anchor-kind-for-line line))
                       (text . ,(previewer--clean-anchor-text line)))
                     anchors)
-              (setq count (1+ count))))
+              (setq count (1+ count))
+              (when block-begin
+                (setq inside-block t))
+              (when (and math-begin (not math-end))
+                (setq inside-math t)))))
           (forward-line 1))))
     (vconcat (nreverse anchors))))
 
-(defun previewer-org-html-content ()
-  "Return Org HTML for the live preview pane."
+(defun previewer-org--source-attrs-for-element (element)
+  "Return source-map HTML attributes for Org ELEMENT."
+  (when-let* ((source-buffer previewer-org--export-source-buffer)
+              ((buffer-live-p source-buffer))
+              (local-beg (org-element-property :begin element)))
+    (let ((pos (max 1 (+ previewer-org--export-source-offset local-beg -1))))
+      (with-current-buffer source-buffer
+        (save-restriction
+          (widen)
+          (let* ((clamped (max (point-min) (min pos (point-max))))
+                 (line (previewer--line-at-pos clamped))
+                 (total (previewer--buffer-line-count))
+                 (percent (round (* 100.0 (/ (float line) total)))))
+            (format " data-source-pos=\"%d\" data-source-line=\"%d\" data-source-percent=\"%d\""
+                    clamped line percent)))))))
+
+(defun previewer-org--add-source-attrs-to-html (html element)
+  "Add source-map attributes for ELEMENT to the first HTML tag in HTML."
+  (if-let* (((stringp html))
+            (attrs (previewer-org--source-attrs-for-element element))
+            ((string-match "\\`[[:space:]\n]*<[[:alnum:]:-]+" html)))
+      (concat (substring html 0 (match-end 0))
+              attrs
+              (substring html (match-end 0)))
+    html))
+
+(defun previewer-org--html-source-anchor-a (orig element &rest args)
+  "Advice ORIG to annotate exported HTML for ELEMENT with source position."
+  (previewer-org--add-source-attrs-to-html
+   (apply orig element args)
+   element))
+
+(defun previewer-org--ensure-source-advice ()
+  "Install lightweight source-map advice for Org HTML exporters."
+  (unless previewer-org--source-advice-installed
+    (dolist (fn '(org-html-headline
+                  org-html-paragraph
+                  org-html-item
+                  org-html-special-block
+                  org-html-src-block
+                  org-html-example-block
+                  org-html-quote-block
+                  org-html-verse-block
+                  org-html-latex-environment
+                  org-html-latex-fragment
+                  org-html-table
+                  org-html-table-row))
+      (when (fboundp fn)
+        (advice-add fn :around #'previewer-org--html-source-anchor-a)))
+    (setq previewer-org--source-advice-installed t)))
+
+(defun previewer-org--strip-toc (html)
+  "Remove any Org-generated table of contents from HTML."
+  (let ((case-fold-search t))
+    (while (string-match
+            "<div id=\"table-of-contents\"\\(?:.\\|\n\\)*?</div>[ \t\n]*</div>[ \t\n]*"
+            html)
+      (setq html (replace-match "" t t html)))
+    html))
+
+(defun previewer-org-export-region-as-html (beg end)
+  "Return Org HTML exported from BEG to END."
   (unless (featurep 'ox-html) (require 'ox-html))
-  (let ((org-html-postamble nil)
-        (org-html-head-include-default-style nil)
-        (org-html-head-include-scripts nil)
-        (org-html-htmlize-output-type 'css)
-        (org-export-with-broken-links t)
-        (org-export-use-babel nil))
-    (org-export-as 'html nil nil t
-                   '(:with-author nil
-                     :with-creator nil
-                     :with-date nil
-                     :section-numbers nil))))
+  (let* ((source-buffer (current-buffer))
+         (source-point (point-marker))
+         (source-window (get-buffer-window source-buffer t))
+         (source-window-start (and source-window (window-start source-window)))
+         (source-default-directory default-directory)
+         (source-file-name buffer-file-name)
+         (text (buffer-substring-no-properties beg end)))
+    (unwind-protect
+        (previewer-org--strip-toc
+         (with-temp-buffer
+           (let ((default-directory source-default-directory)
+                 (buffer-file-name source-file-name)
+                 (previewer-org--export-source-buffer source-buffer)
+                 (previewer-org--export-source-offset (1- beg)))
+             (insert text)
+             (delay-mode-hooks (org-mode))
+             (previewer-org--ensure-source-advice)
+             (let ((org-html-postamble nil)
+                   (org-html-head-include-default-style nil)
+                   (org-html-head-include-scripts nil)
+                   (org-html-htmlize-output-type 'css)
+                   (org-export-with-broken-links t)
+                   (org-export-with-toc nil)
+                   (org-export-use-babel nil))
+               (org-export-as 'html nil nil t
+                              '(:with-author nil
+                                :with-creator nil
+                                :with-date nil
+                                :with-toc nil
+                                :section-numbers nil))))))
+      (when (buffer-live-p source-buffer)
+        (with-current-buffer source-buffer
+          (goto-char (marker-position source-point))
+          (when (window-live-p source-window)
+            (set-window-start source-window source-window-start t)
+            (set-window-point source-window (point)))))
+      (set-marker source-point nil))))
+
+(defun previewer-org-chunk-id (beg)
+  "Return stable-enough preview chunk id for source position BEG."
+  (if (= beg (point-min))
+      "chunk-start"
+    (format "chunk-%d" beg)))
+
+(defun previewer-org-chunk-starts ()
+  "Return sorted source positions that start incremental Org chunks."
+  (let ((starts (list (point-min)))
+        (max-level (max 1 previewer-org-incremental-heading-level)))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (point-min))
+        (while (re-search-forward "^\\*+\\s-+" nil t)
+          (let ((level (- (match-end 0) (match-beginning 0) 1)))
+            (when (<= level max-level)
+              (push (line-beginning-position) starts))))))
+    (sort (delete-dups starts) #'<)))
+
+(defun previewer-org-chunks ()
+  "Return Org preview chunks as a list of (ID BEG END HTML)."
+  (let* ((starts (previewer-org-chunk-starts))
+         (chunks nil))
+    (while starts
+      (let* ((beg (pop starts))
+             (end (or (car starts) (point-max)))
+             (html (previewer-org-export-region-as-html beg end)))
+        (push (list (previewer-org-chunk-id beg) beg end html) chunks)))
+    (nreverse chunks)))
+
+(defun previewer-org-html-content ()
+  "Return chunked Org HTML for the live preview pane."
+  (if (not previewer-org-incremental-render)
+      (previewer-org-export-region-as-html (point-min) (point-max))
+    (mapconcat
+     (lambda (chunk)
+       (pcase-let ((`(,id ,beg ,_end ,html) chunk))
+         (format "<section data-preview-chunk=\"%s\" data-source-pos=\"%d\">%s</section>"
+                 id beg html)))
+     (previewer-org-chunks)
+     "\n")))
+
+(defun previewer-org-chunk-range-at (&optional pos)
+  "Return (ID BEG END) for the incremental Org chunk at POS."
+  (let* ((position (or pos (point)))
+         (starts (previewer-org-chunk-starts))
+         (beg (car starts))
+         end)
+    (while (and (cdr starts) (<= (cadr starts) position))
+      (setq starts (cdr starts)
+            beg (car starts)))
+    (setq end (or (cadr starts) (point-max)))
+    (list (previewer-org-chunk-id beg) beg end)))
 
 (defun previewer--mode-name ()
   "Return current major mode as a string."
@@ -387,7 +573,8 @@ It's useful to remove all dirty hacking with `previewer-auto-hook'."
                          (cdr (assoc t previewer-render-alist))))
          (html (if org-p
                    (previewer-org-html-content)
-                 (funcall content-fn))))
+                 (funcall content-fn)))
+         (content-hash (secure-hash 'sha1 html)))
     (json-encode
      `((type . "content")
        (mode . ,(previewer--mode-name))
@@ -395,14 +582,39 @@ It's useful to remove all dirty hacking with `previewer-auto-hook'."
                         (html-p "html")
                         (t "markdown")))
        (sourceFile . ,(or (buffer-file-name) ""))
+       (contentHash . ,content-hash)
        (point . ,(point))
        (line . ,(previewer--line-at-pos (point)))
        (lineText . ,(previewer--source-line-text))
        (percent . ,(previewer--position-percent-number))
+       (viewportRatio . ,(previewer--point-window-ratio))
        (syncScrollFromBrowser . ,(if previewer-sync-scroll-from-browser t :json-false))
        (html . ,html)
        (anchors . ,(if (and org-p previewer-org-source-map)
                        (previewer-org-source-anchors)
+                     []))))))
+
+(defun previewer-org-patch-content ()
+  "Return a structured preview payload for the current Org chunk."
+  (pcase-let* ((`(,id ,beg ,end) (previewer-org-chunk-range-at previewer--changed-beg))
+               (html (previewer-org-export-region-as-html beg end)))
+    (json-encode
+     `((type . "patch")
+       (mode . ,(previewer--mode-name))
+       (format . "org-html")
+       (sourceFile . ,(or (buffer-file-name) ""))
+       (chunkId . ,id)
+       (chunkBeg . ,beg)
+       (chunkEnd . ,end)
+       (contentHash . ,(secure-hash 'sha1 html))
+       (point . ,(point))
+       (line . ,(previewer--line-at-pos (point)))
+       (lineText . ,(previewer--source-line-text))
+       (percent . ,(previewer--position-percent-number))
+       (viewportRatio . ,(previewer--point-window-ratio))
+       (html . ,html)
+       (anchors . ,(if previewer-org-source-map
+                       (previewer-org-source-anchors beg end)
                      []))))))
 
 (defun previewer-sync-content ()
@@ -412,7 +624,8 @@ It's useful to remove all dirty hacking with `previewer-auto-hook'."
      (point . ,(point))
      (line . ,(previewer--line-at-pos (point)))
      (lineText . ,(previewer--source-line-text))
-     (percent . ,(previewer--position-percent-number)))))
+     (percent . ,(previewer--position-percent-number))
+     (viewportRatio . ,(previewer--point-window-ratio)))))
 
 (defun previewer--send-string (text &optional ws)
   "Send TEXT to WS or the active preview websocket."
@@ -420,22 +633,97 @@ It's useful to remove all dirty hacking with `previewer-auto-hook'."
               ((process-live-p process)))
     (process-send-string process (previewer-websocket-text text))))
 
-(defun previewer-send-content()
-  "Send content to server with delay time."
-  (setq previewer-source-buffer (current-buffer))
-  (if (> previewer-delay 0)
-      (unless previewer-sending
-        (setq previewer-sending t)
-        (run-with-idle-timer
-         previewer-delay nil
-         (lambda()
-           (previewer-send-to-server)
-           (setq previewer-sending nil))))
-    (previewer-send-to-server)))
+(defun previewer--org-structural-change-p (beg end)
+  "Return non-nil when an Org change between BEG and END affects chunk structure."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (let ((scan-beg (progn (goto-char beg) (line-beginning-position)))
+            (scan-end (progn (goto-char (min (point-max) (max beg end)))
+                             (line-end-position))))
+        (goto-char scan-beg)
+        (re-search-forward "^\\(?:\\*+\\s-+\\|#\\+\\)" scan-end t)))))
 
-(defun previewer-after-change (&rest _)
-  "Schedule a full preview refresh after source edits."
-  (previewer-send-content))
+(defun previewer--cancel-content-timer ()
+  "Cancel the pending full-content preview render."
+  (when (timerp previewer--content-timer)
+    (cancel-timer previewer--content-timer))
+  (setq previewer--content-timer nil
+        previewer-sending nil))
+
+(defun previewer--cancel-patch-timer ()
+  "Cancel the pending incremental preview patch."
+  (when (timerp previewer--patch-timer)
+    (cancel-timer previewer--patch-timer))
+  (setq previewer--patch-timer nil))
+
+(defun previewer-send-content (&optional immediate)
+  "Send full preview content.
+When IMMEDIATE is non-nil, render now.  Otherwise wait for true editor idle and
+reschedule on every edit."
+  (setq previewer-source-buffer (current-buffer))
+  (previewer--cancel-content-timer)
+  (previewer--cancel-patch-timer)
+  (if (or immediate (<= previewer-delay 0))
+      (previewer-send-to-server)
+    (setq previewer-sending t
+          previewer--content-timer
+          (run-with-idle-timer
+           previewer-delay nil
+           (lambda (buffer)
+             (setq previewer--content-timer nil
+                   previewer-sending nil)
+             (when (buffer-live-p buffer)
+               (with-current-buffer buffer
+                 (previewer-send-to-server))))
+           (current-buffer)))))
+
+(defun previewer-send-patch (&optional immediate)
+  "Send an incremental Org preview patch.
+When IMMEDIATE is non-nil, send now."
+  (if (or (not (derived-mode-p 'org-mode))
+          (not previewer-org-incremental-render)
+          (not previewer--org-full-rendered)
+          (not previewer-websocket)
+          (null previewer--changed-beg))
+      (previewer-send-content immediate)
+    (previewer--cancel-patch-timer)
+    (if immediate
+        (progn
+          (previewer--send-string (previewer-org-patch-content))
+          (setq previewer--changed-beg nil
+                previewer--changed-end nil))
+      (setq previewer--patch-timer
+            (run-with-idle-timer
+             previewer-delay nil
+             (lambda (buffer)
+               (when (buffer-live-p buffer)
+                 (with-current-buffer buffer
+                   (setq previewer--patch-timer nil)
+                   (previewer--send-string (previewer-org-patch-content))
+                   (setq previewer--changed-beg nil
+                         previewer--changed-end nil)))))
+             (current-buffer)))))
+
+(defun previewer-after-change (beg end _len)
+  "Schedule preview refresh after a source edit from BEG to END."
+  (setq previewer-source-buffer (current-buffer))
+  (if (and (derived-mode-p 'org-mode)
+           previewer-org-incremental-render
+           previewer--org-full-rendered
+           (not (previewer--org-structural-change-p beg end)))
+      (progn
+        (setq previewer--changed-beg
+              (if previewer--changed-beg (min previewer--changed-beg beg) beg)
+              previewer--changed-end
+              (if previewer--changed-end (max previewer--changed-end end) end))
+        (previewer-send-patch))
+    (setq previewer--org-full-rendered nil)
+    (previewer-send-content)))
+
+(defun previewer-send-content-now ()
+  "Send full preview content immediately."
+  (previewer-send-content t))
 
 (defun previewer-send-sync ()
   "Send a lightweight point sync message to the preview."
@@ -463,9 +751,13 @@ It's useful to remove all dirty hacking with `previewer-auto-hook'."
   "Remove Previewer buffer-local hooks from the current buffer."
   (remove-hook 'after-change-functions #'previewer-after-change t)
   (remove-hook 'post-command-hook #'previewer-send-sync t)
-  (remove-hook 'after-save-hook #'previewer-send-content t)
+  (remove-hook 'after-save-hook #'previewer-send-content-now t)
   (remove-hook 'kill-buffer-hook #'previewer--cleanup-buffer-hooks t)
-  (setq previewer--buffer-hooks-installed nil))
+  (previewer--cancel-patch-timer)
+  (setq previewer--buffer-hooks-installed nil
+        previewer--changed-beg nil
+        previewer--changed-end nil
+        previewer--org-full-rendered nil))
 
 (defun previewer--install-buffer-hooks ()
   "Install Previewer buffer-local hooks for the current source buffer."
@@ -474,7 +766,7 @@ It's useful to remove all dirty hacking with `previewer-auto-hook'."
       (add-hook 'after-change-functions #'previewer-after-change nil t)
       (add-hook 'post-command-hook #'previewer-send-sync nil t)
       (run-hooks 'previewer-auto-hook))
-    (add-hook 'after-save-hook #'previewer-send-content nil t)
+    (add-hook 'after-save-hook #'previewer-send-content-now nil t)
     (add-hook 'kill-buffer-hook #'previewer--cleanup-buffer-hooks nil t)
     (setq previewer--buffer-hooks-installed t)))
 
@@ -496,8 +788,9 @@ focus from the preview pane."
         (goto-char (max (point-min) (min pos (point-max))))
         (recenter)))))
 
-(defun previewer-handle-client-message (string)
-  "Handle websocket message STRING from the preview page."
+(defun previewer-handle-client-message (string &optional _ws)
+  "Handle websocket message STRING from the preview page.
+Return `ready' when the browser is asking for initial content."
   (when (and (stringp string)
              (string-prefix-p "{" string))
     (condition-case nil
@@ -506,16 +799,16 @@ focus from the preview pane."
                (message (json-read-from-string string))
                (type (alist-get 'type message nil nil #'equal)))
           (pcase type
+            ("ready" 'ready)
             ("goto"
              (previewer-goto-source (alist-get 'pos message)
-                                    (alist-get 'passive message)))
+                                    (alist-get 'passive message))
+             'handled)
             (_ nil)))
       (error nil))))
 
-(defun previewer-send-to-server (&optional ws string)
-  "Send preview content to WS clients, or handle incoming client STRING."
-  (when string
-    (previewer-handle-client-message string))
+(defun previewer--send-current-content (&optional ws)
+  "Send the current source buffer's full preview content to WS."
   (let ((buffer (or (and (buffer-live-p previewer-source-buffer)
                          previewer-source-buffer)
                     (current-buffer))))
@@ -524,7 +817,18 @@ focus from the preview pane."
         (when (and (bound-and-true-p previewer-mode)
                    (member major-mode previewer-render-modes))
           (setq previewer-source-buffer (current-buffer))
+          (when (derived-mode-p 'org-mode)
+            (setq previewer--org-full-rendered t
+                  previewer--changed-beg nil
+                  previewer--changed-end nil))
           (previewer--send-string (previewer-json-content) ws))))))
+
+(defun previewer-send-to-server (&optional ws string)
+  "Send preview content to WS clients, or handle incoming client STRING."
+  (if string
+      (when (eq (previewer-handle-client-message string ws) 'ready)
+        (previewer--send-current-content ws))
+    (previewer--send-current-content ws)))
 
 (defun previewer-websocket-text(text)
   "Decode websocket TEXT,`ws-web-socket-frame` utf-8 is unsupported."
@@ -714,13 +1018,14 @@ When FORCE is nil, only refresh stale or missing assets."
   (previewer-maybe-update-vendor-assets)
   (when previewer-auto-browser (previewer-open-browser))
   (previewer--install-buffer-hooks)
-  (previewer-send-content))
+  (previewer-send-content t))
 
 (defun previewer-finalize ()
   "Preview close."
   (setq previewer-sending nil
         previewer-sync-sending nil
         previewer--last-sync-key nil)
+  (previewer--cancel-content-timer)
   (when previewer-server
     (ws-stop previewer-server)
     (setq previewer-server nil))
@@ -761,7 +1066,7 @@ When FORCE is nil, only refresh stale or missing assets."
     (previewer--install-buffer-hooks)
     (unless (previewer--xwidget-preview-buffer-live-p)
       (previewer-open-browser))
-    (previewer-send-content)))
+    (previewer-send-content t)))
 
 ;;;###autoload
 (defun previewer-org-workbench ()

@@ -18,7 +18,7 @@
       .preview-shell {
         box-sizing: border-box;
         min-height: 100vh;
-        padding: 24px 28px 48px;
+        padding: 24px 28px 55vh;
       }
 
       pre code.hljs {
@@ -39,6 +39,7 @@
       var syncScrollFromBrowser = true;
       var websocket = null;
       var activeSourcePos = 0;
+      var lastContentHash = "";
       var suppressScrollEvent = false;
       var scrollTimer = 0;
 
@@ -57,9 +58,9 @@
         }
       }
 
-      function mathJaxTypeset() {
+      function mathJaxTypeset(root) {
         if (window.MathJax && typeof window.MathJax.typesetPromise === "function") {
-          window.MathJax.typesetPromise([preview]).catch(function (error) {
+          window.MathJax.typesetPromise([root || preview]).catch(function (error) {
             console.log(error);
           });
         }
@@ -134,18 +135,19 @@
           nodes.push(walker.currentNode);
         }
         nodes.forEach(renderMathTextNode);
-        mathJaxTypeset();
+        mathJaxTypeset(root);
       }
 
-      function initCodeAndDiagrams() {
+      function initCodeAndDiagrams(root) {
+        root = root || preview;
         if (window.hljs) {
-          preview.querySelectorAll("pre code").forEach(function (node) {
+          root.querySelectorAll("pre code").forEach(function (node) {
             window.hljs.highlightElement(node);
           });
         }
         if (window.mermaid) {
           try {
-            window.mermaid.init(undefined, preview.querySelectorAll(".mermaid"));
+            window.mermaid.init(undefined, root.querySelectorAll(".mermaid"));
           } catch (error) {
             console.log(error);
           }
@@ -163,14 +165,73 @@
         if (kind === "block") {
           return ".definition,.defn,.theorem,.thm,.lemma,.cor,.prop,.property,.proof,.example,.attention,.note,.info,.warning,blockquote,pre";
         }
-        return "p,li,dd,dt,blockquote,pre";
+        return "p,li,dd,dt,blockquote,pre,td,th,tr";
       }
 
-      function attachSourceAnchors(anchors) {
+      function mergeSourceAnchors(patchAnchors, chunkBeg, chunkEnd) {
+        patchAnchors = Array.isArray(patchAnchors) ? patchAnchors : [];
+        var beg = Number(chunkBeg || 0);
+        var end = Number(chunkEnd || 0);
+        if (!beg || !end) {
+          return patchAnchors;
+        }
+        return sourceAnchors
+          .filter(function (anchor) {
+            var pos = Number(anchor.pos || 0);
+            return pos < beg || pos >= end;
+          })
+          .concat(patchAnchors)
+          .sort(function (a, b) {
+            return Number(a.pos || 0) - Number(b.pos || 0);
+          });
+      }
+
+      function removeGeneratedToc(root) {
+        (root || preview).querySelectorAll("#table-of-contents,.table-of-contents").forEach(function (node) {
+          node.remove();
+        });
+      }
+
+      function removeEmptyListArtifacts(root) {
+        root = root || preview;
+        root.querySelectorAll("li").forEach(function (node) {
+          if (!node.textContent.trim() && !node.querySelector("img,svg,math,mjx-container,pre,code,table")) {
+            node.remove();
+          }
+        });
+        var changed = true;
+        while (changed) {
+          changed = false;
+          root.querySelectorAll("ul,ol").forEach(function (node) {
+            if (!node.querySelector("li") && !node.textContent.trim()) {
+              node.remove();
+              changed = true;
+            }
+          });
+        }
+      }
+
+      function attachSourceAnchors(anchors, root) {
+        root = root || preview;
+        if (root.querySelector("[data-source-pos]")) {
+          return;
+        }
         var used = new Set();
+        var candidateCache = {};
+        root.querySelectorAll("[data-source-pos]").forEach(function (node) {
+          delete node.dataset.sourcePos;
+          delete node.dataset.sourceLine;
+          delete node.dataset.sourcePercent;
+          node.classList.remove("preview-source-anchor");
+        });
 
         anchors.forEach(function (anchor) {
-          var candidates = Array.prototype.slice.call(preview.querySelectorAll(sourceCandidateSelector(anchor.kind)));
+          var selector = sourceCandidateSelector(anchor.kind);
+          var candidates = candidateCache[selector];
+          if (!candidates) {
+            candidates = Array.prototype.slice.call(root.querySelectorAll(selector));
+            candidateCache[selector] = candidates;
+          }
           var wanted = normalizeText(anchor.text);
           var target = null;
 
@@ -203,6 +264,11 @@
         syncScrollFromBrowser = payload.syncScrollFromBrowser !== false;
         activeSourcePos = Number(payload.point || 0);
 
+        if (payload.contentHash && payload.contentHash === lastContentHash) {
+          return;
+        }
+        lastContentHash = payload.contentHash || "";
+
         if (payload.format === "org-html") {
           preview.classList.add("previewer-org-page");
           preview.innerHTML = payload.html || "";
@@ -216,21 +282,59 @@
           preview.innerHTML = "<pre>" + escapeHtml(payload.html || "") + "</pre>";
         }
 
+        removeGeneratedToc(preview);
+        removeEmptyListArtifacts(preview);
         attachSourceAnchors(sourceAnchors);
         renderMath(preview);
         initCodeAndDiagrams();
-        scrollToSource(payload.point, payload.percent);
       }
 
-      function nearestAnchorForPos(pos) {
+      function findChunk(chunkId) {
+        var chunks = Array.prototype.slice.call(preview.querySelectorAll("[data-preview-chunk]"));
+        return chunks.find(function (node) {
+          return node.dataset.previewChunk === chunkId;
+        });
+      }
+
+      function renderPatch(payload) {
+        var patchAnchors = Array.isArray(payload.anchors) ? payload.anchors : [];
+        sourceAnchors = mergeSourceAnchors(patchAnchors, payload.chunkBeg, payload.chunkEnd);
+        activeSourcePos = Number(payload.point || 0);
+
+        var chunk = findChunk(payload.chunkId);
+        if (!chunk) {
+          chunk = document.createElement("section");
+          chunk.dataset.previewChunk = payload.chunkId;
+          chunk.dataset.sourcePos = String(payload.chunkBeg || payload.point || 0);
+          preview.appendChild(chunk);
+        }
+
+        if (payload.contentHash && chunk.dataset.contentHash === payload.contentHash) {
+          return;
+        }
+
+        chunk.dataset.contentHash = payload.contentHash || "";
+        chunk.innerHTML = payload.html || "";
+        removeGeneratedToc(chunk);
+        removeEmptyListArtifacts(chunk);
+        attachSourceAnchors(patchAnchors, chunk);
+        renderMath(chunk);
+        initCodeAndDiagrams(chunk);
+      }
+
+      function nearestAnchorForPos(pos, line) {
         var anchors = Array.prototype.slice.call(preview.querySelectorAll("[data-source-pos]"));
         if (anchors.length === 0 || !pos) {
           return null;
         }
         var best = anchors[0];
         var bestDistance = Infinity;
+        var sourceLine = Number(line || 0);
         anchors.forEach(function (node) {
-          var distance = Math.abs(Number(node.dataset.sourcePos || 0) - pos);
+          var anchorLine = Number(node.dataset.sourceLine || 0);
+          var lineDistance = sourceLine && anchorLine ? Math.abs(anchorLine - sourceLine) : 0;
+          var posDistance = Math.abs(Number(node.dataset.sourcePos || 0) - pos);
+          var distance = lineDistance * 1000000 + posDistance;
           if (distance < bestDistance) {
             best = node;
             bestDistance = distance;
@@ -239,14 +343,31 @@
         return best;
       }
 
-      function scrollToSource(pos, percent) {
-        var target = nearestAnchorForPos(Number(pos || 0));
-        suppressScrollEvent = true;
+      function targetInViewport(target) {
+        if (!target) return false;
+        var rect = target.getBoundingClientRect();
+        return rect.top >= 0 && rect.top <= window.innerHeight;
+      }
+
+      function scrollToSource(pos, percent, viewportRatio, line) {
+        var target = nearestAnchorForPos(Number(pos || 0), line);
+        var ratio = Number(viewportRatio);
+        if (!Number.isFinite(ratio)) ratio = 0.45;
+        ratio = Math.max(0.08, Math.min(0.92, ratio));
         if (target) {
-          target.scrollIntoView({ block: "center", behavior: "smooth" });
+          if (targetInViewport(target)) {
+            return;
+          }
+          suppressScrollEvent = true;
+          var rect = target.getBoundingClientRect();
+          var top = window.scrollY + rect.top - window.innerHeight * ratio;
+          window.scrollTo({ top: Math.max(0, top), behavior: "auto" });
         } else if (percent !== false && percent !== undefined) {
-          var top = Math.max(0, document.documentElement.scrollHeight * (Number(percent) / 100) - window.innerHeight / 2);
-          window.scrollTo({ top: top, behavior: "smooth" });
+          suppressScrollEvent = true;
+          var fallbackTop = Math.max(0, document.documentElement.scrollHeight * (Number(percent) / 100) - window.innerHeight * ratio);
+          window.scrollTo({ top: fallbackTop, behavior: "auto" });
+        } else {
+          return;
         }
         window.setTimeout(function () {
           suppressScrollEvent = false;
@@ -255,7 +376,7 @@
 
       function handleSync(payload) {
         activeSourcePos = Number(payload.point || 0);
-        scrollToSource(payload.point, payload.percent);
+        scrollToSource(payload.point, payload.percent, payload.viewportRatio, payload.line);
       }
 
       function handleLegacyText(text) {
@@ -322,6 +443,8 @@
             var payload = JSON.parse(text);
             if (payload.type === "content") {
               renderContent(payload);
+            } else if (payload.type === "patch") {
+              renderPatch(payload);
             } else if (payload.type === "sync") {
               handleSync(payload);
             }

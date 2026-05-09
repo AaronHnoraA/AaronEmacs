@@ -210,11 +210,13 @@ body {
   color: #7a2e2e;
 }
 
-.preview-source-anchor {
+.preview-source-anchor,
+[data-source-pos] {
   scroll-margin-top: 72px;
 }
 
-.preview-source-anchor:hover {
+.preview-source-anchor:hover,
+[data-source-pos]:hover {
   outline: 1px dashed rgba(95, 119, 171, 0.28);
   outline-offset: 4px;
 }

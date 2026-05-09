@@ -66,8 +66,9 @@
 ;;;; xwidget-webkit 基础配置（macOS / emacs-plus with-xwidgets）
 
 (when (featurep 'xwidget-internal)
-  ;; xwidget buffer 名字更清晰
-  (setq xwidget-webkit-buffer-name-format "*xwidget: %t*")
+  ;; Keep this free of %-escapes: supported xwidget format keys vary across
+  ;; Emacs builds, and unsupported keys raise `format-spec' errors.
+  (setq xwidget-webkit-buffer-name-format "*xwidget*")
 
   ;; 进入 xwidget buffer 时给常用键（不会污染全局）
   (with-eval-after-load 'xwidget

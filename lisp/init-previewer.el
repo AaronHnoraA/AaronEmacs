@@ -57,6 +57,7 @@
   (previewer-browser-backend 'xwidget)
   (previewer-window-side 'auto)
   (previewer-window-size 0.42)
+  (previewer-delay 0.8)
   (previewer-sync-scroll-from-browser nil)
   (previewer-render-modes
    '(org-mode markdown-mode markdown-ts-mode html-mode html-ts-mode mhtml-mode web-mode vue-html-mode))

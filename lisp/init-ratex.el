@@ -71,7 +71,8 @@
         ratex-render-color (aaron-ui-color 'fg-soft)
         ratex-posframe-background-color (aaron-ui-color 'bg-ratex)
         ratex-posframe-border-color (aaron-ui-color 'border-ratex))
-  :hook ((org-mode . my/org-ratex-turn-on-maybe)
+  :hook (;; Plain Org source profile: formulas render in Previewer; RaTeX stays manual.
+         ;; (org-mode . my/org-ratex-turn-on-maybe)
          (latex-mode . ratex-turn-on)
          (LaTeX-mode . ratex-turn-on)
          (tex-mode . ratex-turn-on)

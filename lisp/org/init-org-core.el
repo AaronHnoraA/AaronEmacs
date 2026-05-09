@@ -124,9 +124,8 @@ assistants that otherwise wake up aggressively while typing or navigating."
 
 (defcustom my/org-lightweight-ui-profile t
   "Prefer a lightweight Org editing surface and put rich rendering in Previewer.
-When non-nil, Org keeps lightweight readability aids such as `org-modern',
-`org-appear' and RaTeX edit previews, but avoids scroll-driven rich overlays
-whose main job is presentation rather than editing."
+When non-nil, Org stays close to stock font-lock and avoids presentation
+helpers whose main job is rendering rather than editing."
   :type 'boolean
   :group 'my/org-ui)
 
@@ -717,6 +716,11 @@ refreshed."
                  (fboundp 'my/flymake-diagnostic-at-point-mode))
         (my/flymake-diagnostic-at-point-mode -1)))))
 
+(defun my/org-plain-source-setup ()
+  "Set up Org as a plain source buffer with minimal local UI."
+  (visual-line-mode 1)
+  (my/org-setup-low-power-profile))
+
 (defun my/org-flymake-diagnostic-at-point-mode-sync-a (orig &rest args)
   "Keep the Flymake echo helper out of Org low-power buffers."
   (if (and my/org-low-power-profile
@@ -965,8 +969,7 @@ headline levels."
 
 (use-package org
   :ensure nil
-  :hook ((org-mode . visual-line-mode)        ; 自动换行
-         (org-mode . my/org-setup-low-power-profile)
+  :hook ((org-mode . my/org-plain-source-setup)
          ;; Plain editor profile: preview media in Previewer, not in Org source.
          ;; (org-mode . my/org-setup-visible-inline-images)
          ;; Plain editor profile: rich indentation/spacing/typography belongs
