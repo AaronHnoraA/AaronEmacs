@@ -6,6 +6,10 @@
 
 - macOS GUI 下：
   `Command = Meta (M-)`，`Option = Hyper (H-)`
+- `M-c` / `M-v`
+  系统剪贴板复制 / 粘贴
+- `H-?`
+  用一次性 Codex 问本地 `docs/` 里的这套 Emacs 配置怎么用；结果直接显示在 echo area / `*Messages*`
 - `SPC`
   Evil leader，总入口。
 - `SPC SPC`
@@ -73,6 +77,8 @@
   注释切换 / 多光标按行 / 上一个相同项 / 下一个相同项 / 全选相同项
 - `H-X` / `H-c` / `H-v`
   剪切 / 复制 / 粘贴
+- `H-<tab>`
+  切换当前折叠（Org 标题、tree-sitter 折叠、hideshow 折叠统一走这个入口）
 
 `H-x` 现在直接打开 `telescope`，和 `SPC SPC` / `H-t` / `F2` 是同一个入口。
 普通 `M-x` 仍走默认 `amx` 行为。
@@ -516,6 +522,8 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
   展开当前 buffer 的所有折叠
 - `zM`
   折叠当前 buffer 的所有折叠
+- `H-<tab>`
+  同 `za`；在 Org 标题上也走这套统一折叠入口
 - `SPC z a`
   同 `za`
 - `SPC z o`
@@ -526,6 +534,12 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
   同 `zR`
 - `SPC z M`
   同 `zM`
+
+后端规则：
+
+- `org-mode`：标题折叠走 Org 自己的 subtree folding
+- `*-ts-mode`：优先走 `treesit-fold`
+- 其他 `prog-mode`：走 `hideshow`
 
 ### 结构选择 `SPC v`
 

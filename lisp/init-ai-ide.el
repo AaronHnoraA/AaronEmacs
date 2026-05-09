@@ -48,12 +48,14 @@
 (autoload 'ai-workbench-send-file "ai-workbench" nil t)
 (autoload 'ai-workbench-context-prompt "ai-workbench-tools" nil t)
 (autoload 'ai-workbench-writing-prompt "ai-workbench-tools" nil t)
+(autoload 'ai-workbench-docs-ask "ai-workbench-docs" nil t)
 
 (defvar-keymap my/ai-workbench-prefix-map
   :doc "Prefix map for ai-workbench commands."
   "w" #'ai-workbench-writing-prompt
   "W" #'ai-workbench
   "." #'ai-workbench-context-prompt
+  "?" #'ai-workbench-docs-ask
   "k" #'ai-workbench-kill
   "i r" #'ai-workbench-send-region
   "i b" #'ai-workbench-send-current-buffer

@@ -28,6 +28,7 @@
 (declare-function my/contract-region "init-expand-region" ())
 (declare-function my/debug-profile-dispatch "init-debug-profile" ())
 (declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
+(declare-function ai-workbench-docs-ask "ai-workbench-docs" (&optional question))
 (declare-function my/expand-region "init-expand-region" ())
 (declare-function claude-code-ide-menu "claude-code-ide" ())
 (declare-function my/health-dispatch "init-health" ())
@@ -316,8 +317,11 @@ With positive ARG, enable it.  With zero or negative ARG, disable it."
   :config
   ;; `Option' is mapped to Hyper on macOS. Keep the common clipboard actions
   ;; and use the remaining Option keys for high-frequency global entry points.
+  ;; `Command' remains Meta, so bind `M-c' / `M-v' to clipboard copy/paste.
   (define-prefix-command 'my/org-hyper-map)
   (dolist (binding '(("H-," . my/hyper-dispatch)
+                     ("M-c" . clipboard-kill-ring-save)
+                     ("M-v" . clipboard-yank)
                      ("H-x" . telescope)
                      ("H-X" . clipboard-kill-region)
                      ("H-c" . clipboard-kill-ring-save)
@@ -340,6 +344,7 @@ With positive ARG, enable it.  With zero or negative ARG, disable it."
                      ("H-m" . magit-status)
                      ("H-a" . org-agenda)
                      ("H-l" . claude-code-ide-menu)
+                     ("H-?" . ai-workbench-docs-ask)
                      ("H-h" . help-command)
                      ("H-H" . my/health-dispatch)
                      ("H-e" . my/code-actions-dispatch)

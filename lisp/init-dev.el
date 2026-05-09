@@ -10,6 +10,13 @@
 (require 'seq)
 
 (declare-function consult-xref "consult" (fetcher &optional alist))
+(declare-function org-at-heading-p "org" ())
+(declare-function org-back-to-heading "org" (&optional invisible-ok))
+(declare-function org-fold-folded-p "org-fold" (&optional pos))
+(declare-function org-fold-hide-subtree "org-fold" ())
+(declare-function org-fold-show-all "org-fold" (&optional state))
+(declare-function org-fold-show-subtree "org-fold" ())
+(declare-function org-overview "org" (&optional arg))
 (declare-function treesit-fold-close "treesit-fold" ())
 (declare-function treesit-fold-close-all "treesit-fold" ())
 (declare-function treesit-fold-mode "treesit-fold" (&optional arg))
@@ -156,6 +163,10 @@
 ;; za toggle-fold
 ;; zo show-block
 ;; zc hide-block
+(defun my/fold--org-buffer-p ()
+  "Return non-nil when the current buffer should use Org folding."
+  (derived-mode-p 'org-mode))
+
 (defun my/fold--treesit-buffer-p ()
   "Return non-nil when the current buffer should prefer `treesit-fold'."
   (and (fboundp 'treesit-ready-p)
@@ -163,18 +174,66 @@
        (ignore-errors (treesit-ready-p nil t))
        (string-match-p "-ts-mode\\'" (symbol-name major-mode))))
 
+(defun my/fold--backend ()
+  "Return the preferred fold backend for the current buffer."
+  (cond
+   ((my/fold--org-buffer-p) 'org)
+   ((my/fold--treesit-buffer-p) 'treesit)
+   ((derived-mode-p 'prog-mode) 'hs)
+   (t nil)))
+
 (defun my/fold--ensure-backend ()
   "Enable the best available folding backend for the current buffer."
-  (when (fboundp 'hs-minor-mode)
-    (hs-minor-mode 1))
-  (when (and (my/fold--treesit-buffer-p)
-             (not (bound-and-true-p treesit-fold-mode)))
-    (treesit-fold-mode 1)))
+  (pcase (my/fold--backend)
+    ('treesit
+     (when (fboundp 'hs-minor-mode)
+       (hs-minor-mode 1))
+     (when (not (bound-and-true-p treesit-fold-mode))
+       (treesit-fold-mode 1)))
+    ('hs
+     (when (fboundp 'hs-minor-mode)
+       (hs-minor-mode 1)))))
 
 (defun my/fold--use-treesit-p ()
   "Return non-nil when folding should use tree-sitter."
   (my/fold--ensure-backend)
   (bound-and-true-p treesit-fold-mode))
+
+(defun my/fold--org-back-to-heading ()
+  "Move point to the current Org heading or raise a user-facing error."
+  (unless (my/fold--org-buffer-p)
+    (user-error "Not in an Org buffer"))
+  (unless (or (org-at-heading-p)
+              (ignore-errors
+                (org-back-to-heading t)
+                t))
+    (user-error "Point is not inside an Org heading")))
+
+(defun my/fold--org-folded-p ()
+  "Return non-nil when the current Org heading is folded."
+  (save-excursion
+    (end-of-line)
+    (org-fold-folded-p)))
+
+(defun my/fold--org-toggle ()
+  "Toggle the current Org heading subtree."
+  (save-excursion
+    (my/fold--org-back-to-heading)
+    (if (my/fold--org-folded-p)
+        (org-fold-show-subtree)
+      (org-fold-hide-subtree))))
+
+(defun my/fold--org-open ()
+  "Open the current Org heading subtree."
+  (save-excursion
+    (my/fold--org-back-to-heading)
+    (org-fold-show-subtree)))
+
+(defun my/fold--org-close ()
+  "Close the current Org heading subtree."
+  (save-excursion
+    (my/fold--org-back-to-heading)
+    (org-fold-hide-subtree)))
 
 (defun my/fold--state-key (&optional file)
   "Return canonical persisted key for FILE or current buffer."
@@ -282,42 +341,77 @@
 (defun my/fold-toggle ()
   "Toggle the fold at point."
   (interactive)
-  (if (my/fold--use-treesit-p)
-      (call-interactively #'treesit-fold-toggle)
-    (call-interactively #'hs-toggle-hiding))
-  (my/fold-save-buffer-state))
+  (pcase (my/fold--backend)
+    ('org
+     (my/fold--org-toggle))
+    ('treesit
+     (call-interactively #'treesit-fold-toggle)
+     (my/fold-save-buffer-state))
+    ('hs
+     (call-interactively #'hs-toggle-hiding)
+     (my/fold-save-buffer-state))
+    (_
+     (user-error "No fold backend for %s" major-mode))))
 
 (defun my/fold-open ()
   "Open the fold at point."
   (interactive)
-  (if (my/fold--use-treesit-p)
-      (call-interactively #'treesit-fold-open)
-    (call-interactively #'hs-show-block))
-  (my/fold-save-buffer-state))
+  (pcase (my/fold--backend)
+    ('org
+     (my/fold--org-open))
+    ('treesit
+     (call-interactively #'treesit-fold-open)
+     (my/fold-save-buffer-state))
+    ('hs
+     (call-interactively #'hs-show-block)
+     (my/fold-save-buffer-state))
+    (_
+     (user-error "No fold backend for %s" major-mode))))
 
 (defun my/fold-close ()
   "Close the fold at point."
   (interactive)
-  (if (my/fold--use-treesit-p)
-      (call-interactively #'treesit-fold-close)
-    (call-interactively #'hs-hide-block))
-  (my/fold-save-buffer-state))
+  (pcase (my/fold--backend)
+    ('org
+     (my/fold--org-close))
+    ('treesit
+     (call-interactively #'treesit-fold-close)
+     (my/fold-save-buffer-state))
+    ('hs
+     (call-interactively #'hs-hide-block)
+     (my/fold-save-buffer-state))
+    (_
+     (user-error "No fold backend for %s" major-mode))))
 
 (defun my/fold-open-all ()
   "Open all folds in the current buffer."
   (interactive)
-  (if (my/fold--use-treesit-p)
-      (call-interactively #'treesit-fold-open-all)
-    (call-interactively #'hs-show-all))
-  (my/fold-save-buffer-state))
+  (pcase (my/fold--backend)
+    ('org
+     (org-fold-show-all))
+    ('treesit
+     (call-interactively #'treesit-fold-open-all)
+     (my/fold-save-buffer-state))
+    ('hs
+     (call-interactively #'hs-show-all)
+     (my/fold-save-buffer-state))
+    (_
+     (user-error "No fold backend for %s" major-mode))))
 
 (defun my/fold-close-all ()
   "Close all folds in the current buffer."
   (interactive)
-  (if (my/fold--use-treesit-p)
-      (call-interactively #'treesit-fold-close-all)
-    (call-interactively #'hs-hide-all))
-  (my/fold-save-buffer-state))
+  (pcase (my/fold--backend)
+    ('org
+     (org-overview))
+    ('treesit
+     (call-interactively #'treesit-fold-close-all)
+     (my/fold-save-buffer-state))
+    ('hs
+     (call-interactively #'hs-hide-all)
+     (my/fold-save-buffer-state))
+    (_
+     (user-error "No fold backend for %s" major-mode))))
 
 (use-package hideshow
   :ensure nil
@@ -343,6 +437,9 @@
   (evil-define-key* 'normal 'global (kbd "zc") #'my/fold-close)
   (evil-define-key* 'normal 'global (kbd "zR") #'my/fold-open-all)
   (evil-define-key* 'normal 'global (kbd "zM") #'my/fold-close-all))
+
+(dolist (key '("H-<tab>" "H-TAB"))
+  (keymap-global-set key #'my/fold-toggle))
 
 (add-hook 'find-file-hook #'my/fold-restore-buffer-state-deferred)
 (add-hook 'kill-buffer-hook #'my/fold-save-buffer-state)

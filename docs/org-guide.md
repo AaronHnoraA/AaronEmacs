@@ -136,6 +136,10 @@ Agenda、TODO 状态、DONE/CANCELLED 完成态、refile、archive、priority、
 
 macOS GUI 下，`Option` 映射到 `Hyper`，Org 常用入口也放到了 `H-o` 前缀：
 
+- `H-<tab>`
+  切换当前标题折叠；它和 `za` / `SPC z a` 走同一套统一折叠入口，只是 Org buffer
+  里会分发到 Org 自己的 subtree folding
+
 - `H-o a` / `H-o c`
   `org-agenda` / `org-capture`
 - `H-o b`
