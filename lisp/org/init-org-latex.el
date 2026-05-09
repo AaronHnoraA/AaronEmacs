@@ -114,12 +114,12 @@ Each value may be a readable `.cls' file path or literal class source."
     ("\\subparagraph{%s}" . "\\subparagraph*{%s}"))
   "Fallback sectioning used for embedded Org LaTeX classes.")
 
-(defcustom my/org-latex-preview-idle-delay 0.45
+(defcustom my/org-latex-preview-idle-delay 0.70
   "Idle delay (seconds) before the first visible-region preview."
   :type 'number
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-scroll-idle-delay 0.30
+(defcustom my/org-latex-preview-scroll-idle-delay 0.75
   "Debounce delay (seconds) before previewing visible region after scrolling."
   :type 'number
   :group 'my/org-latex-preview)
@@ -181,12 +181,12 @@ Set to nil to keep the full log."
                  integer)
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-edit-idle-delay 0.45
+(defcustom my/org-latex-preview-edit-idle-delay 0.65
   "Idle delay (seconds) before pre-rendering the fragment being edited."
   :type 'number
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-leave-confirm-delay 0.20
+(defcustom my/org-latex-preview-leave-confirm-delay 0.35
   "Idle delay before confirming preview placement after leaving a fragment."
   :type 'number
   :group 'my/org-latex-preview)
@@ -643,6 +643,7 @@ render is usually ready before point leaves it."
 (defvar-local my/org-latex--after-save-preview-timer nil)
 (defvar-local my/org-latex--fragment-syntax-cache nil)
 (defvar-local my/org-latex--syntax-watch-installed nil)
+(defvar-local my/org-latex--syntax-detect-timer nil)
 (defvar-local my/org-latex--suppress-scroll-preview nil)
 (defvar my/org-latex--allow-native-preview nil)
 
@@ -732,6 +733,32 @@ render is usually ready before point leaves it."
              (my/org-latex--change-near-fragment-syntax-p beg end))
     (my/org-latex-enable-scroll-preview)))
 
+(defun my/org-latex--cancel-syntax-detect-timer ()
+  "Cancel the pending visible LaTeX syntax detection timer."
+  (when (timerp my/org-latex--syntax-detect-timer)
+    (cancel-timer my/org-latex--syntax-detect-timer))
+  (setq-local my/org-latex--syntax-detect-timer nil))
+
+(defun my/org-latex-enable-scroll-preview-deferred (buffer)
+  "Run deferred visible LaTeX syntax detection for BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq-local my/org-latex--syntax-detect-timer nil)
+      (when (and my/org-latex--syntax-watch-installed
+                 (derived-mode-p 'org-mode)
+                 (my/org-latex--async-preview-active-p)
+                 (my/org-latex-buffer-has-fragment-syntax-p))
+        (my/org-latex-enable-scroll-preview)))))
+
+(defun my/org-latex-schedule-visible-syntax-check ()
+  "Schedule visible LaTeX syntax discovery after scrolling becomes idle."
+  (unless (timerp my/org-latex--syntax-detect-timer)
+    (setq-local my/org-latex--syntax-detect-timer
+                (run-with-idle-timer
+                 my/org-feature-detect-idle-delay nil
+                 #'my/org-latex-enable-scroll-preview-deferred
+                 (current-buffer)))))
+
 (defun my/org-latex-enable-scroll-preview-on-visible-syntax (window _start)
   "Enable LaTeX preview hooks when WINDOW scrolls onto fragment syntax."
   (when (and (window-live-p window)
@@ -739,17 +766,15 @@ render is usually ready before point leaves it."
     (with-current-buffer (window-buffer window)
       (when (and my/org-latex--syntax-watch-installed
                  (derived-mode-p 'org-mode)
-                 (my/org-latex--async-preview-active-p)
-                 (my/org-latex-buffer-has-fragment-syntax-p))
-        (my/org-latex-enable-scroll-preview)))))
+                 (my/org-latex--async-preview-active-p))
+        (my/org-latex-schedule-visible-syntax-check)))))
 
 (defun my/org-latex-enable-scroll-preview-on-window-size (_frame)
   "Re-check visible LaTeX syntax discovery after a window size change."
   (when (and my/org-latex--syntax-watch-installed
              (derived-mode-p 'org-mode)
-             (my/org-latex--async-preview-active-p)
-             (my/org-latex-buffer-has-fragment-syntax-p))
-    (my/org-latex-enable-scroll-preview)))
+             (my/org-latex--async-preview-active-p))
+    (my/org-latex-schedule-visible-syntax-check)))
 
 (defun my/org-latex-install-syntax-watch ()
   "Install cheap watchers that enable LaTeX preview hooks on demand."
@@ -768,6 +793,7 @@ render is usually ready before point leaves it."
 
 (defun my/org-latex-cleanup-syntax-watch ()
   "Remove the on-demand LaTeX syntax watcher."
+  (my/org-latex--cancel-syntax-detect-timer)
   (remove-hook 'after-change-functions
                #'my/org-latex-enable-scroll-preview-on-syntax-insert t)
   (remove-hook 'window-scroll-functions
@@ -2430,10 +2456,6 @@ queued work."
               (setq my/org-latex--last-visible-preview-time (float-time))
               (my/org-latex--prune-offscreen-overlays beg end))))))))
 
-(defun my/org-latex--visible-refresh-stale-p (range)
-  "Return non-nil when RANGE has not been refreshed yet."
-  (not (equal range my/org-latex--last-visible-range)))
-
 (defun my/org-latex-preview-visible-debounced (&optional window)
   "Debounced preview of WINDOW's visible area after scrolling stops."
   (setq window (my/org-latex--normalize-window window))
@@ -2447,25 +2469,14 @@ queued work."
            ;; timer render first, then scroll-preview can follow.
            (not my/org-latex--edit-preview-timer)
            (or (null window) window))
-      (when-let* ((range (my/org-latex--visible-range window))
-                  ((my/org-latex--visible-refresh-stale-p range)))
-        (when (timerp my/org-latex--preview-timer)
-          (cancel-timer my/org-latex--preview-timer))
+      (unless (timerp my/org-latex--preview-timer)
+        ;; The timer computes the current visible range when it fires.  Keeping
+        ;; one pending timer avoids a visible-range walk on every scroll event.
         (setq my/org-latex--preview-timer
               (run-at-time my/org-latex-preview-scroll-idle-delay nil
                            #'my/org-latex-preview-visible-now
                            window
-                           (current-buffer)))
-        (when (and (numberp my/org-latex-preview-scroll-follow-interval)
-                   (> my/org-latex-preview-scroll-follow-interval 0)
-                   (not (timerp my/org-latex--preview-follow-timer))
-                   (>= (- (float-time) my/org-latex--last-visible-preview-time)
-                       my/org-latex-preview-scroll-follow-interval))
-          (setq my/org-latex--preview-follow-timer
-                (run-at-time 0 nil
-                             #'my/org-latex-preview-visible-now
-                             window
-                             (current-buffer)))))
+                           (current-buffer))))
     (unless (my/org-latex--buffer-visible-p)
       (my/org-latex--cancel-visible-preview-timers))))
 

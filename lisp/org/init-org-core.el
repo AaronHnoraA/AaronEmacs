@@ -94,6 +94,13 @@ into a region that contains them."
   :type 'integer
   :group 'my/org-ui)
 
+(defcustom my/org-feature-detect-idle-delay 0.60
+  "Idle delay before scroll-triggered optional Org UI feature discovery.
+This keeps table alignment, pretty blocks and LaTeX previews available while
+avoiding visible-range scans on every scroll event."
+  :type 'number
+  :group 'my/org-ui)
+
 (defcustom my/org-toc-auto-update-max-buffer-size (* 1024 1024)
   "Maximum Org buffer size eligible for automatic TOC refresh."
   :type 'integer)
@@ -138,7 +145,7 @@ very large prose buffers."
   :type 'integer
   :group 'my/org-ui)
 
-(defcustom my/org-inline-image-idle-delay 0.20
+(defcustom my/org-inline-image-idle-delay 0.50
   "Idle delay before refreshing visible Org inline images."
   :type 'number
   :group 'my/org-ui)
@@ -607,20 +614,22 @@ refreshed."
   "Schedule a coalesced visible inline image refresh for the current buffer."
   (when (and my/org-inline-image-on-demand
              (derived-mode-p 'org-mode))
-    (let ((signature (my/org-inline-image--signature)))
-      (if (not signature)
-          (progn
+    (unless (and (not force)
+                 (timerp my/org-inline-image--refresh-timer))
+      (let ((signature (my/org-inline-image--signature)))
+        (if (not signature)
+            (progn
+              (my/org-cancel-visible-inline-image-refresh)
+              (setq-local my/org-inline-image--last-signature nil))
+          (when (or force
+                    (not (equal signature
+                                my/org-inline-image--last-signature)))
             (my/org-cancel-visible-inline-image-refresh)
-            (setq-local my/org-inline-image--last-signature nil))
-        (when (or force
-                  (not (equal signature
-                              my/org-inline-image--last-signature)))
-          (my/org-cancel-visible-inline-image-refresh)
-          (setq-local my/org-inline-image--refresh-timer
-                      (run-with-idle-timer
-                       my/org-inline-image-idle-delay nil
-                       #'my/org-display-inline-images-visible-now
-                       (current-buffer) refresh)))))))
+            (setq-local my/org-inline-image--refresh-timer
+                        (run-with-idle-timer
+                         my/org-inline-image-idle-delay nil
+                         #'my/org-display-inline-images-visible-now
+                         (current-buffer) refresh))))))))
 
 (defun my/org-inline-image-window-scroll-h (window _start)
   "Schedule visible inline image refresh after WINDOW scrolls."

@@ -18,8 +18,10 @@
 (defvar my/org-ui--face-theme-signature nil)
 (defvar my/org--olivetti-sync-timer nil)
 (defvar-local my/org--valign-table-watch-installed nil)
+(defvar-local my/org--valign-detect-timer nil)
 (defvar-local my/org--pretty-block-watch-installed nil)
 (defvar-local my/org--pretty-block-refontify-timer nil)
+(defvar-local my/org--pretty-block-detect-timer nil)
 (defvar-local my/org--pretty-block-needs-visible-refontify nil)
 (defvar-local my/org--pretty-block-visible-refontify-signature nil)
 (defvar-local my/org--pretty-block-scheduled-refontify-signature nil)
@@ -29,7 +31,6 @@
 (defvar-local my/org-appear--last-elem-toggled nil)
 (defvar-local my/org--latex-edit-appear-enabled nil)
 (defvar-local my/org--latex-edit-fragtog-enabled nil)
-(defvar-local my/org-modern--pre-redisplay-signature nil)
 (defvar my/org-special-block--palette-cache (make-hash-table :test #'equal))
 
 (defcustom my/org-pretty-block-cache-max-entries 256
@@ -47,6 +48,19 @@ integer position keys from accumulating during long editing sessions."
 (defcustom my/org-pretty-block-visible-margin-lines 16
   "Extra lines around visible Org windows that stay eligible for prettification."
   :type 'integer
+  :group 'my/org-ui)
+
+(defcustom my/org-modern-pre-redisplay-min-interval 0.50
+  "Minimum seconds between scroll-driven Org Modern redisplay refreshes.
+Buffer edits, fold changes and window-width changes still refresh immediately.
+Raising this reduces redisplay CPU while allowing Org Modern decorations to lag
+briefly during fast scrolling."
+  :type 'number
+  :group 'my/org-ui)
+
+(defcustom my/org-pretty-block-refontify-idle-delay 0.35
+  "Idle delay before refreshing visible pretty-block overlays."
+  :type 'number
   :group 'my/org-ui)
 
 (defcustom my/org-prose-body-width 96
@@ -289,16 +303,41 @@ Org blocks."
              (my/org-buffer-has-table-p))
     (my/org-enable-valign-now)))
 
+(defun my/org-cancel-valign-detect-timer ()
+  "Cancel the pending visible-table detection timer."
+  (when (timerp my/org--valign-detect-timer)
+    (cancel-timer my/org--valign-detect-timer))
+  (setq-local my/org--valign-detect-timer nil))
+
+(defun my/org-enable-valign-for-visible-table-deferred (buffer)
+  "Run deferred visible-table detection for BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq-local my/org--valign-detect-timer nil)
+      (my/org-enable-valign-for-visible-table-maybe))))
+
+(defun my/org-schedule-valign-visible-table-check ()
+  "Schedule visible table discovery after scrolling becomes idle."
+  (unless (timerp my/org--valign-detect-timer)
+    (setq-local my/org--valign-detect-timer
+                (run-with-idle-timer
+                 my/org-feature-detect-idle-delay nil
+                 #'my/org-enable-valign-for-visible-table-deferred
+                 (current-buffer)))))
+
 (defun my/org-enable-valign-on-visible-table (window _start)
   "Enable `valign-mode' when WINDOW scrolls onto a table."
   (when (and (window-live-p window)
              (buffer-live-p (window-buffer window)))
     (with-current-buffer (window-buffer window)
-      (my/org-enable-valign-for-visible-table-maybe))))
+      (when (and (derived-mode-p 'org-mode)
+                 my/org--valign-table-watch-installed)
+        (my/org-schedule-valign-visible-table-check)))))
 
 (defun my/org-enable-valign-on-window-size (_frame)
   "Re-check visible table discovery after a window size change."
-  (my/org-enable-valign-for-visible-table-maybe))
+  (when my/org--valign-table-watch-installed
+    (my/org-schedule-valign-visible-table-check)))
 
 (defun my/org-install-valign-table-watch ()
   "Install cheap on-demand table watchers for `valign-mode'."
@@ -317,6 +356,7 @@ Org blocks."
 
 (defun my/org-cleanup-valign-table-watch ()
   "Remove the on-demand `valign-mode' table watcher."
+  (my/org-cancel-valign-detect-timer)
   (remove-hook 'after-change-functions
                #'my/org-enable-valign-on-table-insert t)
   (remove-hook 'window-scroll-functions
@@ -597,52 +637,51 @@ Org blocks."
           (t :background ,(aaron-ui-color 'bg-surface-strong)
              :foreground ,(aaron-ui-color 'fg-main)))))
 
-(defun my/org-modern--pre-redisplay-signature ()
-  "Return the Org Modern display parameters that can affect redisplay.
-Uses `frame-char-width' (cached on the frame) instead of `default-font-width'
-so the pre-redisplay fast path stays allocation-light, and skips
-`face-remapping-alist' when nil so the common case avoids list traversal."
-  (list (face-attribute 'org-modern-label :box nil t)
-        (face-attribute 'default :background nil t)
-        (face-attribute 'org-table :foreground nil t)
-        (and (boundp 'org-modern--table-overline)
-             (cadr org-modern--table-overline))
-        (and (boundp 'org-modern--table-sp-width)
-             org-modern--table-sp-width)
-        (frame-char-width)
-        ;; Most Org buffers have no remappings; skip the list to avoid an
-        ;; equal-walk on every redisplay. Track its identity so a remap change
-        ;; still invalidates the cached signature.
-        (and face-remapping-alist t)))
-
-(defun my/org-modern--window-signature (window)
-  "Return WINDOW state that matters for Org Modern pre-redisplay."
-  (when (window-live-p window)
-    (list (window-start window)
-          (window-end window t)
-          (window-hscroll window)
-          (window-width window)
-          (window-body-width window t))))
+(defun my/org-modern--pre-redisplay-fold-generation ()
+  "Return the current Org fold generation for cheap redisplay invalidation."
+  (if (boundp 'my/org--fold-generation)
+      my/org--fold-generation
+    0))
 
 (defun my/org-modern-pre-redisplay-cached-a (orig window)
-  "Skip repeated Org Modern pre-redisplay work while display inputs match.
-The signature is computed once per call: when the cache hits we return
-without calling ORIG, and when it misses we reuse the same signature value
-for the cache update so we never compute it twice in one redisplay."
+  "Throttle Org Modern pre-redisplay in Org buffers.
+This deliberately avoids face lookups and `window-end' in the redisplay hot
+path.  Edits, fold changes and width changes refresh immediately; pure scroll
+refreshes are rate-limited by `my/org-modern-pre-redisplay-min-interval'."
   (if (and (derived-mode-p 'org-mode)
            (bound-and-true-p org-modern-mode)
            (window-live-p window)
            (eq (window-buffer window) (current-buffer)))
-      (let* ((display-signature (my/org-modern--pre-redisplay-signature))
-             (window-signature (my/org-modern--window-signature window))
-             (signature (list display-signature window-signature)))
-        (unless (equal signature
-                       (window-parameter window 'my/org-modern-pre-redisplay-signature))
+      (let* ((now (float-time))
+             (interval (max 0 (or my/org-modern-pre-redisplay-min-interval
+                                   0.12)))
+             (tick (buffer-chars-modified-tick))
+             (fold-gen (my/org-modern--pre-redisplay-fold-generation))
+             (width (window-width window))
+             (hscroll (window-hscroll window))
+             (last-time (or (window-parameter
+                             window 'my/org-modern-pre-redisplay-time)
+                            0.0)))
+        (when (or (/= tick (or (window-parameter
+                                window 'my/org-modern-pre-redisplay-tick)
+                               -1))
+                  (/= fold-gen (or (window-parameter
+                                    window 'my/org-modern-pre-redisplay-fold)
+                                   -1))
+                  (/= width (or (window-parameter
+                                 window 'my/org-modern-pre-redisplay-width)
+                                -1))
+                  (/= hscroll (or (window-parameter
+                                   window 'my/org-modern-pre-redisplay-hscroll)
+                                  -1))
+                  (>= (- now last-time) interval))
           (funcall orig window)
-          (setq-local my/org-modern--pre-redisplay-signature display-signature)
+          (set-window-parameter window 'my/org-modern-pre-redisplay-time now)
+          (set-window-parameter window 'my/org-modern-pre-redisplay-tick tick)
+          (set-window-parameter window 'my/org-modern-pre-redisplay-fold fold-gen)
+          (set-window-parameter window 'my/org-modern-pre-redisplay-width width)
           (set-window-parameter window
-                                'my/org-modern-pre-redisplay-signature
-                                signature)))
+                                'my/org-modern-pre-redisplay-hscroll hscroll)))
     (funcall orig window)))
 
 (unless (advice-member-p #'my/org-modern-pre-redisplay-cached-a
@@ -1483,24 +1522,46 @@ SEEN tracks block begin positions already handled in the current JIT pass."
              (my/org-change-has-special-block-line-p beg end))
     (my/org-enable-jit-pretty-blocks)))
 
-(defun my/org-enable-jit-pretty-blocks-on-visible-block (window _start)
-  "Enable pretty-block JIT when WINDOW scrolls onto a styled block."
-  (when (and (window-live-p window)
-             (buffer-live-p (window-buffer window)))
-    (with-current-buffer (window-buffer window)
+(defun my/org-cancel-pretty-block-detect-timer ()
+  "Cancel the pending visible special-block detection timer."
+  (when (timerp my/org--pretty-block-detect-timer)
+    (cancel-timer my/org--pretty-block-detect-timer))
+  (setq-local my/org--pretty-block-detect-timer nil))
+
+(defun my/org-enable-jit-pretty-blocks-deferred (buffer)
+  "Run deferred visible special-block detection for BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq-local my/org--pretty-block-detect-timer nil)
       (when (and my/org--pretty-block-watch-installed
                  (derived-mode-p 'org-mode)
                  (my/org-rich-ui-buffer-p)
                  (my/org-buffer-has-special-block-p))
         (my/org-enable-jit-pretty-blocks)))))
 
+(defun my/org-schedule-pretty-block-visible-check ()
+  "Schedule visible special-block discovery after scrolling becomes idle."
+  (unless (timerp my/org--pretty-block-detect-timer)
+    (setq-local my/org--pretty-block-detect-timer
+                (run-with-idle-timer
+                 my/org-feature-detect-idle-delay nil
+                 #'my/org-enable-jit-pretty-blocks-deferred
+                 (current-buffer)))))
+
+(defun my/org-enable-jit-pretty-blocks-on-visible-block (window _start)
+  "Enable pretty-block JIT when WINDOW scrolls onto a styled block."
+  (when (and (window-live-p window)
+             (buffer-live-p (window-buffer window)))
+    (with-current-buffer (window-buffer window)
+      (when (and my/org--pretty-block-watch-installed
+                 (derived-mode-p 'org-mode))
+        (my/org-schedule-pretty-block-visible-check)))))
+
 (defun my/org-enable-jit-pretty-blocks-on-window-size (_frame)
   "Re-check visible styled block discovery after a window size change."
   (when (and my/org--pretty-block-watch-installed
-             (derived-mode-p 'org-mode)
-             (my/org-rich-ui-buffer-p)
-             (my/org-buffer-has-special-block-p))
-    (my/org-enable-jit-pretty-blocks)))
+             (derived-mode-p 'org-mode))
+    (my/org-schedule-pretty-block-visible-check)))
 
 (defun my/org-install-pretty-block-watch ()
   "Install cheap watchers that enable block prettification on demand."
@@ -1519,6 +1580,7 @@ SEEN tracks block begin positions already handled in the current JIT pass."
 
 (defun my/org-cleanup-pretty-block-watch ()
   "Remove the on-demand watcher for pretty special blocks."
+  (my/org-cancel-pretty-block-detect-timer)
   (remove-hook 'after-change-functions
                #'my/org-enable-jit-pretty-blocks-on-insert t)
   (remove-hook 'window-scroll-functions
@@ -1696,19 +1758,24 @@ content gets rendered with the same latency as an unfolded buffer."
 (defun my/org-schedule-pretty-block-refontify (&optional force)
   "Schedule a coalesced pretty-block refontify for the current buffer."
   (if (my/org-visible-buffer-p (current-buffer))
-      (let ((signature (my/org-pretty-block-refontify-signature)))
-        (when (and signature
-                   (or force
-                       (not (or (equal signature
-                                       my/org--pretty-block-visible-refontify-signature)
-                                (equal signature
-                                       my/org--pretty-block-scheduled-refontify-signature)))))
-          (my/org-cancel-pretty-block-refontify)
-          (setq-local my/org--pretty-block-scheduled-refontify-signature signature)
-          (setq-local my/org--pretty-block-refontify-timer
-                      (run-with-idle-timer 0.20 nil
-                                           #'my/org--pretty-block-refontify-now
-                                           (current-buffer)))))
+      (if (and (not force)
+               (timerp my/org--pretty-block-refontify-timer))
+          ;; The timer reads the current visible ranges when it fires.  Avoid
+          ;; rebuilding the range signature for every scroll redisplay.
+          (setq-local my/org--pretty-block-scheduled-refontify-signature nil)
+        (let ((signature (my/org-pretty-block-refontify-signature)))
+          (when (and signature
+                     (or force
+                         (not (or (equal signature
+                                         my/org--pretty-block-visible-refontify-signature)
+                                  (equal signature
+                                         my/org--pretty-block-scheduled-refontify-signature)))))
+            (my/org-cancel-pretty-block-refontify)
+            (setq-local my/org--pretty-block-scheduled-refontify-signature signature)
+            (setq-local my/org--pretty-block-refontify-timer
+                        (run-with-idle-timer my/org-pretty-block-refontify-idle-delay nil
+                                             #'my/org--pretty-block-refontify-now
+                                             (current-buffer))))))
     (setq-local my/org--pretty-block-needs-visible-refontify t)))
 
 (defun my/org-schedule-deferred-pretty-block-refontify (&rest _)
