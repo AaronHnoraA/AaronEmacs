@@ -590,7 +590,15 @@
       "id" 'org-insert-drawer
       "in" 'org-add-note
       "it" 'org-time-stamp-inactive
-      "iT" 'org-time-stamp))
+      "iT" 'org-time-stamp
+
+      ;; math graphics
+      "mg" 'my/org-geogebra-tikz-clean-dwim
+      "mf" 'my/org-tikz-toggle-raw-fold-at-point
+      "mF" 'my/org-tikz-fold-generated-raw-blocks
+      "mp" 'my/org-tikz-preview-display-latex-block
+      "mt" 'my/org-tikz-insert-tikzpicture
+      "md" 'my/org-tikz-insert-tikzcd))
 
   (with-eval-after-load 'elisp-mode
     (my/local-leader!

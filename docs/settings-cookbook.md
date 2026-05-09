@@ -397,6 +397,24 @@ emacs --debug-init -q -l ./bootstrap.el
 - `my/org-enable-*`
 - `my/org-enable-jit-pretty-blocks`
 
+## 14.1 我要改 Org 数学图形 / TikZ 工具
+
+文件：
+
+- [lisp/org/init-org-tikz.el](../lisp/org/init-org-tikz.el)
+- [lisp/org/init-org-latex.el](../lisp/org/init-org-latex.el)
+- [snippets/org-mode/](../snippets/org-mode/)
+
+职责：
+
+- `init-org-tikz.el`
+  GeoGebra TikZ 清理、命令生成的 raw block 折叠 overlay、`tikzpicture` / `tikzcd`
+  插入和当前 `display_latex` 块预览入口。
+- `init-org-latex.el`
+  公式和数学图形的异步预览；TikZ/tikz-cd/pgfplots/quantikz 的包只在当前预览片段需要时注入。
+- `snippets/org-mode/`
+  轻量数学图形输入片段，例如 `tikzpic`、`tikzcd`、`tikznode`、`tikzdraw`、`tikzpath`、`ggbraw`。
+
 ## 15. 我要改运行时状态目录
 
 文件：

@@ -202,6 +202,22 @@ render is usually ready before point leaves it."
   :type 'string
   :group 'my/org-latex-preview)
 
+(defcustom my/org-latex-preview-tikz-preamble-lines
+  '("\\usepackage{tikz}"
+    "\\usetikzlibrary{arrows.meta,calc,cd,decorations.pathmorphing,positioning}"
+    "\\usepackage{tikz-cd}"
+    "\\usepackage{pgfplots}"
+    "\\pgfplotsset{compat=1.18}")
+  "Extra preview preamble lines used only for TikZ-like fragments."
+  :type '(repeat string)
+  :group 'my/org-latex-preview)
+
+(defcustom my/org-latex-preview-quantikz-preamble-lines
+  '("\\usepackage{quantikz}")
+  "Extra preview preamble lines used only for Quantikz fragments."
+  :type '(repeat string)
+  :group 'my/org-latex-preview)
+
 (defun my/org-latex--source-directory (&optional info)
   "Return the source directory for Org export INFO."
   (let ((input-file (plist-get info :input-file)))
@@ -576,6 +592,27 @@ render is usually ready before point leaves it."
                         (file-name-as-directory (file-name-directory font-file))
                         (file-name-nondirectory font-file))
               (format "\\setmathfont{%s}" my/latex-preview-math-font)))))
+
+(defun my/org-latex--preview-extra-preamble-lines (snippet)
+  "Return preview preamble lines needed by SNIPPET."
+  (let (lines)
+    (when (string-match-p
+           "\\\\begin{\\(?:tikzpicture\\|tikzcd\\|axis\\)}\\|\\\\usetikzlibrary\\|\\\\pgfplotsset"
+           snippet)
+      (setq lines (append lines (copy-sequence my/org-latex-preview-tikz-preamble-lines))))
+    (when (string-match-p "\\\\begin{quantikz}" snippet)
+      (setq lines (append lines (copy-sequence my/org-latex-preview-quantikz-preamble-lines))))
+    (delete-dups lines)))
+
+(defun my/org-latex--preview-header-for-snippet (snippet)
+  "Return effective preview header for SNIPPET."
+  (let ((extra (my/org-latex--preview-extra-preamble-lines snippet)))
+    (if extra
+        (concat org-format-latex-header
+                "\n"
+                (mapconcat #'identity extra "\n")
+                "\n")
+      org-format-latex-header)))
 
 (defvar-local my/org-latex--preview-timer nil)
 (defvar-local my/org-latex--preview-follow-timer nil)
@@ -1820,8 +1857,9 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
                 ((eq color 'default) (face-attribute 'default :background nil))
                 (t color))
                default-bg)))
+           (latex-header (my/org-latex--preview-header-for-snippet render-value))
            (hash (sha1 (prin1-to-string
-                        (list org-format-latex-header
+                        (list latex-header
                               nil
                               nil
                               org-format-latex-options
@@ -1844,6 +1882,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
             :imagetype imagetype
             :options options
             :background bg
+            :latex-header latex-header
             :processing-type processing-type))))
 
 (defun my/org-latex--fragment-spec-from-source-range (range)
@@ -1925,7 +1964,8 @@ block body should be sent to the LaTeX renderer."
                          '(".dvi" ".xdv" ".pdf" ".tex" ".aux" ".log"
                            ".svg" ".png" ".jpg" ".jpeg" ".out")))
          (latex-header
-          (or (plist-get processing-info :latex-header)
+          (or (plist-get job :latex-header)
+              (plist-get processing-info :latex-header)
               (let ((org-latex-default-packages-alist nil)
                     (org-latex-packages-alist nil))
                 (org-latex-make-preamble
@@ -2130,6 +2170,7 @@ When NO-PUMP is non-nil, leave queue pumping to the caller."
                               :imagetype (plist-get spec :imagetype)
                               :options (plist-get spec :options)
                               :processing-type (plist-get spec :processing-type)
+                              :latex-header (plist-get spec :latex-header)
                               :value (plist-get spec :render-value)
                               :generation my/org-latex--render-generation
                               :origin (plist-get spec :origin)

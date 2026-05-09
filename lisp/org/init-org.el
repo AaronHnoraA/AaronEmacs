@@ -12,6 +12,7 @@
 (require 'init-org-roam)
 (require 'init-org-code)
 (require 'init-org-latex)
+(require 'init-org-tikz)
 (require 'init-org-integrations)
 (require 'init-org-utility)
 (require 'init-org-maintenance)
