@@ -34,7 +34,9 @@
 (my/package-ensure-vc 'treesit-fold "https://github.com/emacs-tree-sitter/treesit-fold.git")
 
 (use-package treesit-fold
-  :commands (treesit-fold-mode treesit-fold-toggle))
+  :commands (treesit-fold-mode
+             treesit-fold-toggle
+             treesit-fold-indicators-mode))
 
 
 

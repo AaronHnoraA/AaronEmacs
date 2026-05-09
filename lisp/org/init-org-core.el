@@ -184,6 +184,13 @@ has all three features in scope.")
 (defvar-local my/org-inline-image--enabled nil
   "Non-nil when visible inline image refresh hooks are installed.")
 
+(defconst my/org-inline-image--extension-regexp
+  (let ((regexp (image-file-name-regexp)))
+    (if (string-suffix-p "\\'" regexp)
+        (substring regexp 0 -2)
+      regexp))
+  "Regexp matching image file extensions inside Org link text.")
+
 (defun my/org--range-with-line-margin (beg end margin-lines)
   "Return BEG END expanded by MARGIN-LINES lines in the current buffer."
   (let* ((margin (max 0 (or margin-lines 0)))
@@ -200,9 +207,24 @@ has all three features in scope.")
     (cons (max (point-min) expanded-beg)
           (min (point-max) expanded-end))))
 
+(defun my/org--normalize-range (range)
+  "Return RANGE clamped to the current buffer, or nil when empty."
+  (when (consp range)
+    (let* ((beg (if (markerp (car range))
+                    (marker-position (car range))
+                  (car range)))
+           (end (if (markerp (cdr range))
+                    (marker-position (cdr range))
+                  (cdr range))))
+      (when (and (integerp beg) (integerp end))
+        (let ((beg (min (point-max) (max (point-min) beg)))
+              (end (min (point-max) (max (point-min) end))))
+          (when (< beg end)
+            (cons beg end)))))))
+
 (defun my/org--merge-ranges (ranges)
   "Return sorted merged RANGES."
-  (let ((ranges (sort (delq nil ranges)
+  (let ((ranges (sort (delq nil (mapcar #'my/org--normalize-range ranges))
                       (lambda (left right) (< (car left) (car right)))))
         merged)
     (dolist (range ranges)
@@ -213,10 +235,42 @@ has all three features in scope.")
             (push (cons beg end) merged)))))
     (nreverse merged)))
 
+(defun my/org--visible-subranges-in (beg end)
+  "Return visible subranges between BEG and END.
+
+This walks only `invisible' property changes instead of asking Org to enumerate
+all folded regions.  In a folded buffer, a display window may span a very large
+buffer interval, so this keeps render scheduling proportional to visible
+segments rather than folded content size."
+  (let ((pos (max (point-min) (min beg end)))
+        (end (min (point-max) (max beg end)))
+        ranges)
+    (while (< pos end)
+      (let ((next (or (next-single-char-property-change
+                       pos 'invisible nil end)
+                      end)))
+        (when (not (invisible-p pos))
+          (push (cons pos next) ranges))
+        (setq pos (if (> next pos) next (1+ pos)))))
+    (nreverse ranges)))
+
+(defun my/org--remove-invisible-ranges (ranges)
+  "Return RANGES with currently invisible Org text removed."
+  (if (not (derived-mode-p 'org-mode))
+      ranges
+    (my/org--merge-ranges
+     (apply #'append
+            (mapcar (lambda (range)
+                      (my/org--visible-subranges-in (car range) (cdr range)))
+                    ranges)))))
+
 (defun my/org-buffer-visible-ranges (&optional buffer margin-lines fallback-to-point)
   "Return visible ranges for BUFFER expanded by MARGIN-LINES.
 When FALLBACK-TO-POINT is non-nil and BUFFER is not visible, return a bounded
-range around point instead of falling back to the whole buffer."
+range around point instead of falling back to the whole buffer.
+
+Invisible Org text is removed from the returned ranges so visual renderers can
+avoid work for folded or otherwise hidden content."
   (let ((buffer (or buffer (current-buffer))))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
@@ -232,7 +286,28 @@ range around point instead of falling back to the whole buffer."
             (push (my/org--range-with-line-margin
                    (point) (point) margin-lines)
                   ranges))
-          (my/org--merge-ranges ranges))))))
+          (my/org--remove-invisible-ranges
+           (my/org--merge-ranges ranges)))))))
+
+(defun my/org-render-range-visible-p
+    (beg end &optional buffer margin-lines fallback-to-point)
+  "Return non-nil when BEG END overlaps render-visible text in BUFFER.
+
+The render-visible ranges are window-visible ranges plus MARGIN-LINES, with
+currently invisible Org text removed."
+  (my/org-range-overlaps-ranges-p
+   beg end
+   (my/org-buffer-visible-ranges
+    buffer margin-lines fallback-to-point)))
+
+(defun my/org-range-overlaps-ranges-p (beg end ranges)
+  "Return non-nil when BEG END overlaps any range in RANGES."
+  (catch 'visible
+    (dolist (range ranges)
+      (when (and (< beg (cdr range))
+                 (> end (car range)))
+        (throw 'visible t)))
+    nil))
 
 (defun my/org-buffer-feature--visible-signature ()
   "Return the current visible feature detection signature."
@@ -302,10 +377,45 @@ range around point instead of falling back to the whole buffer."
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
         (when (derived-mode-p 'org-mode)
-          (let ((ranges (my/org-buffer-visible-ranges
-                         buffer my/org-inline-image-visible-margin-lines t)))
-            (when ranges
-              (list (buffer-chars-modified-tick) ranges))))))))
+          (when-let* ((ranges
+                       (my/org-inline-image--candidate-ranges
+                        (my/org-buffer-visible-ranges
+                         buffer my/org-inline-image-visible-margin-lines t))))
+            (list (buffer-chars-modified-tick) ranges)))))))
+
+(defun my/org-inline-image--candidate-ranges (ranges)
+  "Return line ranges in RANGES that likely contain inline image links."
+  (let (candidates)
+    (save-excursion
+      (dolist (range (my/org--merge-ranges ranges))
+        (pcase-let ((`(,beg . ,end) range))
+          (goto-char beg)
+          (while (re-search-forward my/org-inline-image--extension-regexp
+                                    end t)
+            (push (my/org--range-with-line-margin
+                   (match-beginning 0) (match-end 0) 0)
+                  candidates)))))
+    (my/org--merge-ranges candidates)))
+
+(defun my/org-inline-image--display-range (range refresh)
+  "Display inline image previews inside RANGE."
+  (when-let* ((range (my/org--normalize-range range)))
+    (pcase-let* ((`(,beg . ,end) range)
+                 (`(,beg . ,end)
+                  (my/org--range-with-line-margin beg end 0)))
+      (condition-case err
+          (save-excursion
+            (save-restriction
+              (narrow-to-region beg end)
+              (goto-char (point-min))
+              (if (fboundp 'org-link-preview-region)
+                  (org-link-preview-region nil refresh (point-min) (point-max))
+                (with-suppressed-warnings ((obsolete org-display-inline-images))
+                  (org-display-inline-images nil refresh
+                                             (point-min) (point-max))))))
+        (error
+         (message "Org inline image refresh skipped %S: %s"
+                  range (error-message-string err)))))))
 
 (defun my/org-display-inline-images-visible-now (&optional buffer refresh)
   "Display inline images in BUFFER's visible Org ranges.
@@ -317,15 +427,12 @@ refreshed."
       (with-current-buffer buffer
         (setq-local my/org-inline-image--refresh-timer nil)
         (when (derived-mode-p 'org-mode)
-          (let ((ranges (my/org-buffer-visible-ranges
-                         buffer my/org-inline-image-visible-margin-lines t)))
+          (let ((ranges
+                 (my/org-inline-image--candidate-ranges
+                  (my/org-buffer-visible-ranges
+                   buffer my/org-inline-image-visible-margin-lines t))))
             (dolist (range ranges)
-              (if (fboundp 'org-link-preview-region)
-                  (org-link-preview-region nil refresh
-                                           (car range) (cdr range))
-                (with-suppressed-warnings ((obsolete org-display-inline-images))
-                  (org-display-inline-images nil refresh
-                                             (car range) (cdr range)))))
+              (my/org-inline-image--display-range range refresh))
             (setq-local my/org-inline-image--last-signature
                         (and ranges
                              (list (buffer-chars-modified-tick) ranges)))))))))
@@ -341,16 +448,19 @@ refreshed."
   (when (and my/org-inline-image-on-demand
              (derived-mode-p 'org-mode))
     (let ((signature (my/org-inline-image--signature)))
-      (when (and signature
-                 (or force
-                     (not (equal signature
-                                 my/org-inline-image--last-signature))))
-        (my/org-cancel-visible-inline-image-refresh)
-        (setq-local my/org-inline-image--refresh-timer
-                    (run-with-idle-timer
-                     my/org-inline-image-idle-delay nil
-                     #'my/org-display-inline-images-visible-now
-                     (current-buffer) refresh))))))
+      (if (not signature)
+          (progn
+            (my/org-cancel-visible-inline-image-refresh)
+            (setq-local my/org-inline-image--last-signature nil))
+        (when (or force
+                  (not (equal signature
+                              my/org-inline-image--last-signature)))
+          (my/org-cancel-visible-inline-image-refresh)
+          (setq-local my/org-inline-image--refresh-timer
+                      (run-with-idle-timer
+                       my/org-inline-image-idle-delay nil
+                       #'my/org-display-inline-images-visible-now
+                       (current-buffer) refresh)))))))
 
 (defun my/org-inline-image-window-scroll-h (window _start)
   "Schedule visible inline image refresh after WINDOW scrolls."
@@ -694,6 +804,7 @@ headline levels."
 
   ;; --- Appearance Basics ---
   (org-startup-indented t)
+  (org-startup-folded 'overview)
   (org-hide-emphasis-markers t)
   (org-pretty-entities t)
   (org-pretty-entities-include-sub-superscripts nil)

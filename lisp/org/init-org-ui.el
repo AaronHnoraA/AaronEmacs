@@ -1288,7 +1288,7 @@ DEFAULT-BG defaults to `my/org-default-background'."
     (plist-get palette :body-bg)))
 
 (defun my/org-pretty-block--render-element-if-visible
-    (element seen start end)
+    (element seen start end &optional visible-ranges)
   "Render styled special-block ELEMENT when it overlaps visible START END.
 SEEN tracks block begin positions already handled in the current JIT pass."
   (let* ((type (and element
@@ -1302,8 +1302,10 @@ SEEN tracks block begin positions already handled in the current JIT pass."
                (not (gethash begin seen))
                (< begin end)
                (> end-pos start)
-               (my/org-range-overlaps-visible-ranges-p
-                begin end-pos (current-buffer)))
+               (my/org-range-overlaps-ranges-p
+                begin end-pos
+                (or visible-ranges
+                    (my/org-visible-ranges (current-buffer)))))
       (puthash begin t seen)
       (my/org-prettify-element element))))
 
@@ -1477,30 +1479,17 @@ partial render does not stay broken until the next edit."
                   (min (point-max) end))))))))
 
 (defun my/org-visible-ranges (&optional buffer)
-  "Return merged visible ranges with margins for BUFFER."
-  (let* ((buffer (or buffer (current-buffer)))
-         (ranges
-          (delq nil
-                (mapcar #'my/org-visible-range-with-margin
-                        (get-buffer-window-list buffer nil t)))))
-    (setq ranges (sort ranges (lambda (left right) (< (car left) (car right)))))
-    (let (merged)
-      (dolist (range ranges)
-        (pcase-let ((`(,beg . ,end) range))
-          (when (< beg end)
-            (if (and merged (<= beg (cdar merged)))
-                (setcdr (car merged) (max end (cdar merged)))
-              (push (cons beg end) merged)))))
-      (nreverse merged))))
+  "Return render-visible ranges with margins for BUFFER."
+  (my/org-buffer-visible-ranges
+   (or buffer (current-buffer))
+   my/org-pretty-block-visible-margin-lines
+   t))
 
 (defun my/org-range-overlaps-visible-ranges-p (beg end &optional buffer)
   "Return non-nil when BEG END overlaps BUFFER's visible ranges."
-  (catch 'overlap
-    (dolist (range (my/org-visible-ranges buffer))
-      (when (and (< beg (cdr range))
-                 (> end (car range)))
-        (throw 'overlap t)))
-    nil))
+  (my/org-range-overlaps-ranges-p
+   beg end
+   (my/org-visible-ranges (or buffer (current-buffer)))))
 
 (defun my/org-flush-visible-ranges (&optional buffer)
   "Run `font-lock-flush' for BUFFER's visible ranges plus margins."
@@ -1539,12 +1528,16 @@ partial render does not stay broken until the next edit."
         (when (and (derived-mode-p 'org-mode)
                    (my/org-visible-buffer-p buffer))
           (setq-local my/org--pretty-block-needs-visible-refontify nil)
-          (let ((ranges (my/org-visible-ranges buffer)))
+          (let* ((tick (buffer-chars-modified-tick))
+                 (ranges
+                  (if (and (consp signature)
+                           (eql (car signature) tick))
+                      (cadr signature)
+                    (my/org-visible-ranges buffer))))
             (dolist (range ranges)
-              (my/org-jit-prettify-blocks (car range) (cdr range)))
+              (my/org-jit-prettify-blocks (car range) (cdr range) ranges))
             (setq-local my/org--pretty-block-visible-refontify-signature
-                        (or signature
-                            (my/org-pretty-block-refontify-signature buffer)))))))))
+                        (list tick ranges))))))))
 
 (defun my/org-schedule-pretty-block-refontify (&optional force)
   "Schedule a coalesced pretty-block refontify for the current buffer."
@@ -2042,68 +2035,72 @@ partial render does not stay broken until the next edit."
 ;; ===========================================================
 ;; 4. JIT-Lock 引擎：连续扫描 (支持嵌套)
 ;; ===========================================================
-(defun my/org-jit-prettify-blocks (start end)
+(defun my/org-jit-prettify-blocks (start end &optional visible-ranges)
   "JIT-Lock callback: render styled special blocks around START and END."
-  (when (my/org-range-overlaps-visible-ranges-p start end (current-buffer))
-    (save-excursion
-      (save-match-data
-        (let (scan-start scan-end)
-          (goto-char start)
-          (setq scan-start
-                (if (re-search-backward my/org--special-block-line-regexp nil t)
-                    (line-beginning-position)
-                  start))
-          (goto-char end)
-          (setq scan-end
-                (if (re-search-forward "^[ \t]*#\\+end_" nil t)
-                    (min (point-max) (line-beginning-position 2))
-                  end))
-          (when (my/org-range-overlaps-visible-ranges-p
-                 scan-start scan-end (current-buffer))
-            (unless (my/org-pretty-block--jit-cache-hit-p scan-start scan-end)
-              (let ((seen (make-hash-table :test #'eql))
-                    render-records)
-                ;; If the visible range starts in the middle of a long styled
-                ;; block, its #+begin line may be outside the nearby scan.
-                ;; Probe only the visible range edges, then render the whole
-                ;; containing block when one is found.
-                (dolist (pos (delete-dups
-                              (list (max (point-min) (min (point-max) start))
-                                    (max (point-min)
-                                         (min (point-max) (1- end))))))
-                  (when-let* ((element (my/org-special-block-at-point pos))
-                              (record
-                               (my/org-pretty-block--render-element-if-visible
-                                element seen start end)))
-                    (push record render-records)))
-                (goto-char scan-start)
-                (while (re-search-forward my/org--special-block-line-regexp
-                                          scan-end t)
-                  (let ((line-begin (match-beginning 0)))
-                    (goto-char line-begin)
-                    ;; Cheap pre-filter: read the block type from the begin
-                    ;; line and check our config before paying for the full
-                    ;; org-element parse. Most #+begin_ lines in a typical
-                    ;; buffer are src/example/quote/verse, none of which
-                    ;; appear in `my/org-special-block-styles', so this lets
-                    ;; us skip `org-element-at-point' for the common case.
-                    (let* ((line-type
-                            (and (looking-at
-                                  "[ \t]*#\\+begin_\\([A-Za-z][A-Za-z0-9_-]*\\)")
-                                 (match-string-no-properties 1)))
-                           (configured (and line-type
-                                            (my/org-special-block-config
-                                             line-type)))
-                           (element (and configured (org-element-at-point)))
-                           (record
-                            (my/org-pretty-block--render-element-if-visible
-                             element seen start end)))
-                      (when record
-                        (push record render-records)))
-                    (goto-char line-begin)
-                    (forward-line 1)))
-                (my/org-pretty-block--remember-jit-range
-                 scan-start scan-end render-records)))))))))
+  (let ((visible-ranges (or visible-ranges
+                            (my/org-visible-ranges (current-buffer)))))
+    (when (my/org-range-overlaps-ranges-p start end visible-ranges)
+      (save-excursion
+        (save-match-data
+          (let (scan-start scan-end)
+            (goto-char start)
+            (setq scan-start
+                  (if (re-search-backward my/org--special-block-line-regexp
+                                          nil t)
+                      (line-beginning-position)
+                    start))
+            (goto-char end)
+            (setq scan-end
+                  (if (re-search-forward "^[ \t]*#\\+end_" nil t)
+                      (min (point-max) (line-beginning-position 2))
+                    end))
+            (when (my/org-range-overlaps-ranges-p scan-start scan-end
+                                                  visible-ranges)
+              (unless (my/org-pretty-block--jit-cache-hit-p scan-start scan-end)
+                (let ((seen (make-hash-table :test #'eql))
+                      render-records)
+                  ;; If the visible range starts in the middle of a long styled
+                  ;; block, its #+begin line may be outside the nearby scan.
+                  ;; Probe only the visible range edges, then render the whole
+                  ;; containing block when one is found.
+                  (dolist (pos (delete-dups
+                                (list (max (point-min)
+                                           (min (point-max) start))
+                                      (max (point-min)
+                                           (min (point-max) (1- end))))))
+                    (when-let* ((element (my/org-special-block-at-point pos))
+                                (record
+                                 (my/org-pretty-block--render-element-if-visible
+                                  element seen start end visible-ranges)))
+                      (push record render-records)))
+                  (goto-char scan-start)
+                  (while (re-search-forward my/org--special-block-line-regexp
+                                            scan-end t)
+                    (let ((line-begin (match-beginning 0)))
+                      (goto-char line-begin)
+                      ;; Cheap pre-filter: read the block type from the begin
+                      ;; line and check our config before paying for the full
+                      ;; org-element parse. Most #+begin_ lines in a typical
+                      ;; buffer are src/example/quote/verse, none of which
+                      ;; appear in `my/org-special-block-styles', so this lets
+                      ;; us skip `org-element-at-point' for the common case.
+                      (let* ((line-type
+                              (and (looking-at
+                                    "[ \t]*#\\+begin_\\([A-Za-z][A-Za-z0-9_-]*\\)")
+                                   (match-string-no-properties 1)))
+                             (configured (and line-type
+                                              (my/org-special-block-config
+                                               line-type)))
+                             (element (and configured (org-element-at-point)))
+                             (record
+                              (my/org-pretty-block--render-element-if-visible
+                               element seen start end visible-ranges)))
+                        (when record
+                          (push record render-records)))
+                      (goto-char line-begin)
+                      (forward-line 1)))
+                  (my/org-pretty-block--remember-jit-range
+                   scan-start scan-end render-records))))))))))
 
 ;; ===========================================================
 ;; 5. 激活机制

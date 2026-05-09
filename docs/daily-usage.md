@@ -515,7 +515,9 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 - `za`
   切换当前折叠
 - `zo`
-  打开当前折叠
+  打开当前折叠的一层；内部已有折叠继续保持折叠
+- `zO`
+  递归展开当前 zone / subtree
 - `zc`
   关闭当前折叠
 - `zR`
@@ -524,10 +526,14 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
   折叠当前 buffer 的所有折叠
 - `H-<tab>`
   同 `za`；在 Org 标题上也走这套统一折叠入口
+- `H-S-<tab>` / `H-<backtab>`
+  同 `zO`，递归展开当前 zone / subtree
 - `SPC z a`
   同 `za`
 - `SPC z o`
   同 `zo`
+- `SPC z O`
+  同 `zO`
 - `SPC z c`
   同 `zc`
 - `SPC z R`
@@ -538,8 +544,18 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 后端规则：
 
 - `org-mode`：标题折叠走 Org 自己的 subtree folding
-- `*-ts-mode`：优先走 `treesit-fold`
-- 其他 `prog-mode`：走 `hideshow`
+- `*-ts-mode`：优先走 `treesit-fold`，并启用可点击 fringe indicator
+- 其他 `prog-mode`：走 `hideshow`，折叠 indicator 和折叠占位文本可用鼠标点击
+
+打开文件时：
+
+- Org 默认按 `overview` 进入折叠；文件自己的 `#+startup:` 设置仍可覆盖
+- 代码 buffer 若没有保存过手动折叠状态，会在打开时直接折叠全部代码块
+- 自动默认折叠不会写入 `var/fold-state.el`；只有通过 `za` / `zo` / `zc` /
+  `zM` 或 `SPC z ...` 改过的代码折叠状态才持久化；`zR` 展开全部会清掉当前
+  buffer 的保存折叠状态，下次重新回到默认压缩视图
+- Org 的 inline image、LaTeX preview 和 special-block 卡片刷新只看可见且未折叠
+  的区域；展开 subtree 后会重新调度可见区渲染
 
 ### 结构选择 `SPC v`
 

@@ -14,15 +14,34 @@
 (declare-function org-back-to-heading "org" (&optional invisible-ok))
 (declare-function org-fold-folded-p "org-fold" (&optional pos))
 (declare-function org-fold-hide-subtree "org-fold" ())
+(declare-function org-fold-show-children "org-fold" (&optional level))
 (declare-function org-fold-show-all "org-fold" (&optional state))
+(declare-function org-fold-show-entry "org-fold" (&optional hide-drawers))
 (declare-function org-fold-show-subtree "org-fold" ())
+(declare-function my/org-flush-visible-ranges "init-org-ui" (&optional buffer))
+(declare-function my/org-latex-preview-visible-debounced "init-org-latex" (&optional window))
+(declare-function my/org-schedule-pretty-block-refontify "init-org-ui" (&optional force))
+(declare-function my/org-schedule-visible-inline-image-refresh "init-org-core" (&optional force refresh))
 (declare-function org-overview "org" (&optional arg))
+(declare-function hs-block-positions "hideshow" (&optional adjust-beg adjust-end))
+(declare-function hs-discard-overlays "hideshow" (beg end))
+(declare-function hs-get-near-block "hideshow" (&optional include-comment))
+(declare-function hs-indicator-mouse-toggle-hiding "hideshow" (event))
+(declare-function hs-overlay-at "hideshow" (position))
+(declare-function hs-toggle-hiding "hideshow" (&optional e))
+(declare-function treesit-fold-indicators-mode "treesit-fold-indicators" (&optional arg))
 (declare-function treesit-fold-close "treesit-fold" ())
 (declare-function treesit-fold-close-all "treesit-fold" ())
+(declare-function treesit-fold-open-recursively "treesit-fold" ())
 (declare-function treesit-fold-mode "treesit-fold" (&optional arg))
 (declare-function treesit-fold-open "treesit-fold" ())
 (declare-function treesit-fold-open-all "treesit-fold" ())
 (declare-function treesit-fold-toggle "treesit-fold" ())
+
+(defvar hs-allow-nesting)
+(defvar hs-hide-comments-when-hiding-all)
+(defvar hs-indicators-map)
+(defvar hs-minor-mode-map)
 
 (defgroup my/fold nil
   "Editor folding helpers."
@@ -35,11 +54,24 @@
   :type 'file
   :group 'my/fold)
 
+(defcustom my/fold-prog-startup 'fold-all
+  "Default fold action for code buffers without a persisted fold state.
+
+When set to `fold-all', newly opened code buffers enter a compact outline by
+default.  This startup fold is intentionally not persisted; explicit fold
+commands still save their state."
+  :type '(choice (const :tag "Fold all blocks" fold-all)
+                 (const :tag "Leave buffer open" nil))
+  :group 'my/fold)
+
 (defvar my/fold-state-table nil
   "Alist mapping file names to persisted fold start lines.")
 
 (defvar my/fold-state-loaded nil
   "Whether fold state has been loaded from disk.")
+
+(defvar-local my/fold--buffer-state-dirty nil
+  "Non-nil when this buffer's fold state was changed through `my/fold'.")
 
 ;; Compilation Mode
 (use-package compile
@@ -189,7 +221,9 @@
      (when (fboundp 'hs-minor-mode)
        (hs-minor-mode 1))
      (when (not (bound-and-true-p treesit-fold-mode))
-       (treesit-fold-mode 1)))
+       (treesit-fold-mode 1))
+     (when (fboundp 'treesit-fold-indicators-mode)
+       (treesit-fold-indicators-mode 1)))
     ('hs
      (when (fboundp 'hs-minor-mode)
        (hs-minor-mode 1)))))
@@ -215,25 +249,51 @@
     (end-of-line)
     (org-fold-folded-p)))
 
+(defun my/fold--refresh-visible-org-rendering (&rest _)
+  "Refresh visible Org rendering that intentionally ignores folded text."
+  (when (my/fold--org-buffer-p)
+    (when (boundp 'my/org-latex--last-visible-range)
+      (setq my/org-latex--last-visible-range nil))
+    (when (fboundp 'my/org-flush-visible-ranges)
+      (my/org-flush-visible-ranges (current-buffer)))
+    (when (fboundp 'my/org-schedule-visible-inline-image-refresh)
+      (my/org-schedule-visible-inline-image-refresh t t))
+    (when (fboundp 'my/org-schedule-pretty-block-refontify)
+      (my/org-schedule-pretty-block-refontify t))
+    (when (fboundp 'my/org-latex-preview-visible-debounced)
+      (my/org-latex-preview-visible-debounced
+       (and (window-live-p (selected-window))
+            (selected-window))))))
+
 (defun my/fold--org-toggle ()
   "Toggle the current Org heading subtree."
   (save-excursion
     (my/fold--org-back-to-heading)
     (if (my/fold--org-folded-p)
-        (org-fold-show-subtree)
-      (org-fold-hide-subtree))))
+        (my/fold--org-open)
+      (my/fold--org-close))))
 
 (defun my/fold--org-open ()
-  "Open the current Org heading subtree."
+  "Open the current Org heading one level."
   (save-excursion
     (my/fold--org-back-to-heading)
-    (org-fold-show-subtree)))
+    (org-fold-show-entry)
+    (org-fold-show-children))
+  (my/fold--refresh-visible-org-rendering))
 
 (defun my/fold--org-close ()
   "Close the current Org heading subtree."
   (save-excursion
     (my/fold--org-back-to-heading)
-    (org-fold-hide-subtree)))
+    (org-fold-hide-subtree))
+  (my/fold--refresh-visible-org-rendering))
+
+(defun my/fold--org-open-zone ()
+  "Open the current Org heading subtree recursively."
+  (save-excursion
+    (my/fold--org-back-to-heading)
+    (org-fold-show-subtree))
+  (my/fold--refresh-visible-org-rendering))
 
 (defun my/fold--state-key (&optional file)
   "Return canonical persisted key for FILE or current buffer."
@@ -249,6 +309,11 @@
         (insert-file-contents my/fold-state-file)
         (goto-char (point-min))
         (setq my/fold-state-table (read (current-buffer)))))))
+
+(defun my/fold--state-entry ()
+  "Return persisted fold state entry for the current buffer, if any."
+  (when-let* ((key (my/fold--state-key)))
+    (assoc key my/fold-state-table)))
 
 (defun my/fold--save-state-table ()
   "Persist fold state to disk."
@@ -292,51 +357,114 @@
           (hs-hide-block))
       (error nil))))
 
+(defun my/fold--hs-zone-range ()
+  "Return the hideshow fold zone around point."
+  (save-excursion
+    (if-let* ((overlay (hs-overlay-at (line-end-position))))
+        (cons (overlay-start overlay) (overlay-end overlay))
+      (when (ignore-errors
+              (hs-get-near-block hs-hide-comments-when-hiding-all))
+        (when-let* ((block (or (ignore-errors
+                                  (hs-block-positions :adjust-beg :adjust-end))
+                                (ignore-errors (hs-block-positions)))))
+          (pcase-let ((`(,beg ,end) block))
+            (when (and beg end (< beg end))
+              (cons beg end))))))))
+
+(defun my/fold--hs-open-zone ()
+  "Open all hideshow folds in the current fold zone."
+  (if-let* ((range (my/fold--hs-zone-range)))
+      (let (hs-allow-nesting)
+        (hs-discard-overlays (car range) (cdr range)))
+    (call-interactively #'hs-show-block)))
+
 (defun my/fold-save-buffer-state ()
   "Persist fold state for the current buffer."
   (when buffer-file-name
     (my/fold--load-state-table)
-    (let ((key (my/fold--state-key))
-          (lines (my/fold--current-hidden-start-lines)))
-      (setq my/fold-state-table
-            (assoc-delete-all key my/fold-state-table))
-      (when lines
-        (push (cons key lines) my/fold-state-table))
-      (my/fold--save-state-table))))
+    (let ((entry (my/fold--state-entry)))
+      (when (or my/fold--buffer-state-dirty entry)
+        (let ((key (my/fold--state-key))
+              (lines (my/fold--current-hidden-start-lines)))
+          (setq my/fold-state-table
+                (assoc-delete-all key my/fold-state-table))
+          (when lines
+            (push (cons key lines) my/fold-state-table))
+          (my/fold--save-state-table))))))
+
+(defun my/fold--mark-buffer-state-dirty-and-save ()
+  "Mark the current buffer's fold state as user-managed and persist it."
+  (setq my/fold--buffer-state-dirty t)
+  (my/fold-save-buffer-state))
+
+(defun my/fold--apply-default-prog-startup ()
+  "Apply the default startup fold policy for code buffers."
+  (when (and (eq my/fold-prog-startup 'fold-all)
+             (derived-mode-p 'prog-mode))
+    (my/fold--ensure-backend)
+    (pcase (my/fold--backend)
+      ('treesit
+       (when (bound-and-true-p treesit-fold-mode)
+         (ignore-errors (treesit-fold-close-all))))
+      ('hs
+       (ignore-errors (hs-hide-all))))))
 
 (defun my/fold-restore-buffer-state ()
   "Restore fold state for the current buffer."
   (when buffer-file-name
     (my/fold--load-state-table)
-    (when-let* ((entry (assoc (my/fold--state-key) my/fold-state-table)))
-      (my/fold--ensure-backend)
-      (dolist (line (cdr entry))
-        (my/fold--apply-close-at-line line)))))
+    (if-let* ((entry (my/fold--state-entry)))
+        (progn
+          (my/fold--ensure-backend)
+          (dolist (line (cdr entry))
+            (my/fold--apply-close-at-line line)))
+      (my/fold--apply-default-prog-startup))))
 
-(defun my/fold-restore-buffer-state-deferred ()
-  "Restore fold state after the current file finishes opening."
+(defun my/fold-restore-existing-buffer-states ()
+  "Apply startup fold restoration for all live file buffers after startup.
+
+This covers buffers opened before `find-file-hook' started restoring folds."
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (when (and buffer-file-name
+                 (derived-mode-p 'prog-mode))
+        (ignore-errors
+          (my/fold-restore-buffer-state))))))
+
+(defun my/fold-restore-buffer-state-on-open ()
+  "Restore fold state as soon as the current file finishes opening."
   (when (and buffer-file-name
              (derived-mode-p 'prog-mode))
-    (let ((buffer (current-buffer)))
-      (run-with-idle-timer
-       0.15 nil
-       (lambda (buf)
-         (when (buffer-live-p buf)
-           (with-current-buffer buf
-             (ignore-errors
-               (my/fold-restore-buffer-state)))))
-       buffer))))
+    (ignore-errors
+      (my/fold-restore-buffer-state))))
 
 (defun my/hs-set-up-overlay (overlay)
   "Render a concise folding indicator for hidden OVERLAY."
   (when (eq 'code (overlay-get overlay 'hs))
     (let* ((start (overlay-start overlay))
            (end (overlay-end overlay))
-           (lines (max 1 (count-lines start end))))
+           (lines (max 1 (count-lines start end)))
+           (map (let ((map (make-sparse-keymap)))
+                  (define-key map [mouse-1] #'my/fold-hs-mouse-toggle)
+                  map)))
       (overlay-put overlay 'display
-                   (format " ... [%d lines] " lines))
+                   (propertize
+                    (format " ... [%d lines] " lines)
+                    'mouse-face 'highlight
+                    'keymap map))
       (overlay-put overlay 'help-echo
-                   (format "Hidden code block: %d lines" lines)))))
+                   (format "Hidden code block: %d lines; mouse-1 toggles"
+                           lines)))))
+
+(defun my/fold-hs-mouse-toggle (event)
+  "Toggle a hideshow fold from mouse EVENT and persist the new state."
+  (interactive "e")
+  (let ((area (and (mouse-event-p event)
+                   (posn-area (event-start event)))))
+    (if (memq area '(left-fringe left-margin right-fringe right-margin))
+        (hs-indicator-mouse-toggle-hiding event)
+      (hs-toggle-hiding event)))
+  (my/fold--mark-buffer-state-dirty-and-save))
 
 (defun my/fold-toggle ()
   "Toggle the fold at point."
@@ -346,10 +474,10 @@
      (my/fold--org-toggle))
     ('treesit
      (call-interactively #'treesit-fold-toggle)
-     (my/fold-save-buffer-state))
+     (my/fold--mark-buffer-state-dirty-and-save))
     ('hs
      (call-interactively #'hs-toggle-hiding)
-     (my/fold-save-buffer-state))
+     (my/fold--mark-buffer-state-dirty-and-save))
     (_
      (user-error "No fold backend for %s" major-mode))))
 
@@ -361,10 +489,10 @@
      (my/fold--org-open))
     ('treesit
      (call-interactively #'treesit-fold-open)
-     (my/fold-save-buffer-state))
+     (my/fold--mark-buffer-state-dirty-and-save))
     ('hs
      (call-interactively #'hs-show-block)
-     (my/fold-save-buffer-state))
+     (my/fold--mark-buffer-state-dirty-and-save))
     (_
      (user-error "No fold backend for %s" major-mode))))
 
@@ -376,10 +504,10 @@
      (my/fold--org-close))
     ('treesit
      (call-interactively #'treesit-fold-close)
-     (my/fold-save-buffer-state))
+     (my/fold--mark-buffer-state-dirty-and-save))
     ('hs
      (call-interactively #'hs-hide-block)
-     (my/fold-save-buffer-state))
+     (my/fold--mark-buffer-state-dirty-and-save))
     (_
      (user-error "No fold backend for %s" major-mode))))
 
@@ -388,13 +516,29 @@
   (interactive)
   (pcase (my/fold--backend)
     ('org
-     (org-fold-show-all))
+     (org-fold-show-all)
+     (my/fold--refresh-visible-org-rendering))
     ('treesit
      (call-interactively #'treesit-fold-open-all)
-     (my/fold-save-buffer-state))
+     (my/fold--mark-buffer-state-dirty-and-save))
     ('hs
      (call-interactively #'hs-show-all)
-     (my/fold-save-buffer-state))
+     (my/fold--mark-buffer-state-dirty-and-save))
+    (_
+     (user-error "No fold backend for %s" major-mode))))
+
+(defun my/fold-open-zone ()
+  "Open all folds inside the current fold zone."
+  (interactive)
+  (pcase (my/fold--backend)
+    ('org
+     (my/fold--org-open-zone))
+    ('treesit
+     (call-interactively #'treesit-fold-open-recursively)
+     (my/fold--mark-buffer-state-dirty-and-save))
+    ('hs
+     (my/fold--hs-open-zone)
+     (my/fold--mark-buffer-state-dirty-and-save))
     (_
      (user-error "No fold backend for %s" major-mode))))
 
@@ -403,13 +547,14 @@
   (interactive)
   (pcase (my/fold--backend)
     ('org
-     (org-overview))
+     (org-overview)
+     (my/fold--refresh-visible-org-rendering))
     ('treesit
      (call-interactively #'treesit-fold-close-all)
-     (my/fold-save-buffer-state))
+     (my/fold--mark-buffer-state-dirty-and-save))
     ('hs
      (call-interactively #'hs-hide-all)
-     (my/fold-save-buffer-state))
+     (my/fold--mark-buffer-state-dirty-and-save))
     (_
      (user-error "No fold backend for %s" major-mode))))
 
@@ -417,16 +562,41 @@
   :ensure nil
   :hook (prog-mode . my/fold--ensure-backend)
   :custom
+  (hs-allow-nesting t)
   (hs-show-indicators t)
   (hs-display-lines-hidden t)
   (hs-indicator-type (if (display-graphic-p) 'fringe 'margin))
   (hs-hide-comments-when-hiding-all nil)
   (hs-set-up-overlay #'my/hs-set-up-overlay))
 
+(with-eval-after-load 'hideshow
+  (keymap-set hs-indicators-map "<mouse-1>" #'my/fold-hs-mouse-toggle)
+  (keymap-set hs-indicators-map "<left-margin> <mouse-1>"
+              #'my/fold-hs-mouse-toggle)
+  (keymap-set hs-minor-mode-map "<left-fringe> <mouse-1>"
+              #'my/fold-hs-mouse-toggle))
+
+(with-eval-after-load 'treesit-fold
+  (defun my/fold--treesit-command-save-a (&rest _)
+    "Persist tree-sitter fold state after direct mouse/backend commands."
+    (when (and buffer-file-name
+               (derived-mode-p 'prog-mode)
+               (bound-and-true-p treesit-fold-mode))
+      (my/fold--mark-buffer-state-dirty-and-save)))
+
+  (dolist (command '(treesit-fold-open
+                     treesit-fold-close
+                     treesit-fold-toggle))
+    (advice-add command :after #'my/fold--treesit-command-save-a)))
+
+(with-eval-after-load 'org
+  (add-hook 'org-cycle-hook #'my/fold--refresh-visible-org-rendering))
+
 (my/leader!
   "z"   '(:ignore t :which-key "fold")
   "z a" '(:def my/fold-toggle :which-key "toggle fold")
   "z o" '(:def my/fold-open :which-key "open fold")
+  "z O" '(:def my/fold-open-zone :which-key "open fold zone")
   "z c" '(:def my/fold-close :which-key "close fold")
   "z R" '(:def my/fold-open-all :which-key "open all folds")
   "z M" '(:def my/fold-close-all :which-key "close all folds"))
@@ -434,14 +604,20 @@
 (with-eval-after-load 'evil
   (evil-define-key* 'normal 'global (kbd "za") #'my/fold-toggle)
   (evil-define-key* 'normal 'global (kbd "zo") #'my/fold-open)
+  (evil-define-key* 'normal 'global (kbd "zO") #'my/fold-open-zone)
   (evil-define-key* 'normal 'global (kbd "zc") #'my/fold-close)
   (evil-define-key* 'normal 'global (kbd "zR") #'my/fold-open-all)
   (evil-define-key* 'normal 'global (kbd "zM") #'my/fold-close-all))
 
-(dolist (key '("H-<tab>" "H-TAB"))
-  (keymap-global-set key #'my/fold-toggle))
+(general-define-key
+ "H-<tab>" #'my/fold-toggle
+ "H-TAB" #'my/fold-toggle
+ "H-S-<tab>" #'my/fold-open-zone
+ "H-<backtab>" #'my/fold-open-zone
+ "H-S-TAB" #'my/fold-open-zone)
 
-(add-hook 'find-file-hook #'my/fold-restore-buffer-state-deferred)
+(add-hook 'find-file-hook #'my/fold-restore-buffer-state-on-open)
+(add-hook 'emacs-startup-hook #'my/fold-restore-existing-buffer-states)
 (add-hook 'kill-buffer-hook #'my/fold-save-buffer-state)
 (add-hook 'kill-emacs-hook #'my/fold--save-state-table)
 

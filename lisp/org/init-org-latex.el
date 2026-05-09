@@ -2216,17 +2216,36 @@ queued work."
   (let* ((scan-range (my/org-latex--visible-scan-range beg end))
          (scan-beg (car scan-range))
          (scan-end (cdr scan-range))
+         (render-ranges
+          (delq
+           nil
+           (mapcar
+            (lambda (range)
+              (let ((range-beg (max scan-beg (car range)))
+                    (range-end (min scan-end (cdr range))))
+                (when (< range-beg range-end)
+                  (cons range-beg range-end))))
+            (my/org-buffer-visible-ranges
+             (current-buffer)
+             (max my/org-latex-preview-overscan-lines
+                  my/org-latex-preview-lookahead-lines)
+             nil))))
          visible-specs
          prefetch-specs)
     (my/org-latex--cancel-stale-visible-renders scan-beg scan-end)
     (my/org-latex--drop-stale-visible-queue scan-beg scan-end)
-    (if (not (my/org-latex--range-may-have-fragment-syntax-p
-              scan-beg scan-end))
+    (if (not (cl-some
+              (lambda (range)
+                (my/org-latex--range-may-have-fragment-syntax-p
+                 (car range) (cdr range)))
+              render-ranges))
         0
-      (dolist (spec (my/org-latex--collect-fragments scan-beg scan-end))
-        (if (my/org-latex--spec-overlaps-range-p spec beg end)
-            (push spec visible-specs)
-          (push spec prefetch-specs)))
+      (dolist (range render-ranges)
+        (dolist (spec (my/org-latex--collect-fragments
+                       (car range) (cdr range)))
+          (if (my/org-latex--spec-overlaps-range-p spec beg end)
+              (push spec visible-specs)
+            (push spec prefetch-specs))))
       (my/org-latex--ensure-visible-render-slots visible-specs beg end)
       (+ (my/org-latex--enqueue-fragments
           (nreverse visible-specs) 'visible 'front)
