@@ -332,27 +332,44 @@ heading, or before the subtree end when there is no child."
   (when-let* ((range (my/fold--org-direct-body-range)))
     (my/fold--range-nonblank-visible-p (car range) (cdr range))))
 
+(defun my/fold--org-subtree-content-range ()
+  "Return the content range after the current Org heading line, or nil."
+  (save-excursion
+    (my/fold--org-back-to-heading)
+    (let ((content-beg (save-excursion
+                         (forward-line 1)
+                         (point)))
+          (subtree-end (save-excursion
+                         (org-end-of-subtree t t))))
+      (when (< content-beg subtree-end)
+        (cons content-beg subtree-end)))))
+
+(defun my/fold--org-subtree-content-visible-p ()
+  "Return non-nil when any content in the current Org subtree is visible."
+  (when-let* ((range (my/fold--org-subtree-content-range)))
+    (my/fold--range-nonblank-visible-p (car range) (cdr range))))
+
 (defun my/fold--org-show-direct-body ()
   "Explicitly show the current Org heading's direct body."
   (when-let* ((range (my/fold--org-direct-body-range)))
     (org-fold-region (car range) (cdr range) nil)))
 
 (defun my/fold--org-subtree-collapsed-p ()
-  "Return non-nil when the current Org heading's direct body is hidden.
-Visible child headings do not count as open here.  In Org's contents/overview
-states, child headings may be visible while the useful body is still folded."
+  "Return non-nil when the current Org heading subtree is fully collapsed."
   (save-excursion
     (my/fold--org-back-to-heading)
-    (if-let* ((range (my/fold--org-direct-body-range)))
-        (not (my/fold--range-nonblank-visible-p (car range) (cdr range)))
-      (let ((content-beg (save-excursion
-                           (forward-line 1)
-                           (point)))
-            (subtree-end (save-excursion
-                           (org-end-of-subtree t t))))
-        (and (< content-beg subtree-end)
-             (not (my/fold--range-nonblank-visible-p
-                   content-beg subtree-end)))))))
+    (cond
+     ((my/fold--org-direct-body-visible-p)
+      nil)
+     ;; `org-modern' can hide Org keyword text such as #+subtitle: in the
+     ;; direct body.  If child headings are still visible, H-TAB should close
+     ;; the subtree instead of treating it as already collapsed.
+     ((my/fold--org-subtree-content-visible-p)
+      nil)
+     ((my/fold--org-subtree-content-range)
+      t)
+     (t
+      nil))))
 
 (defun my/fold--org-heading-body-visible-p ()
   "Return non-nil when the current Org heading has visible body text."
