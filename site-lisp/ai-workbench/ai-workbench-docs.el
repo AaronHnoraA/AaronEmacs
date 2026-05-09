@@ -195,8 +195,7 @@
           (if (and (eq (process-status process) 'exit)
                    (zerop (process-exit-status process)))
               (let ((answer (ai-workbench-docs--read-answer process)))
-                (ai-workbench-docs--show (format "%s\n\n[q to close]" answer))
-                (message "%s" answer))
+                (ai-workbench-docs--show (format "%s\n\n[q to close]" answer)))
             (let ((details (string-trim
                             (if (buffer-live-p log-buffer)
                                 (with-current-buffer log-buffer
@@ -209,8 +208,7 @@
                                (string-trim event)
                                (replace-regexp-in-string "[\n\r\t ]+" " "
                                                          details)))))
-                (ai-workbench-docs--show (format "%s\n\n[q to close]" summary))
-                (message "%s" summary))))
+                (ai-workbench-docs--show (format "%s\n\n[q to close]" summary)))))
         (ai-workbench-docs--cleanup-artifacts process)
         (ai-workbench-docs--cleanup-process)))))
 
