@@ -9,7 +9,7 @@
   (when (file-directory-p previewer-dir)
     (add-to-list 'load-path previewer-dir)))
 
-(defcustom my/previewer-auto-open t
+(defcustom my/previewer-auto-open nil
   "Automatically open the Previewer workbench for supported buffers."
   :type 'boolean
   :group 'previewer)
@@ -58,6 +58,10 @@
   (previewer-window-side 'auto)
   (previewer-window-size 0.42)
   (previewer-delay 0.8)
+  (previewer-sync-delay 0.18)
+  (previewer-math-engine 'katex)
+  (previewer-mathjax-lazy-fallback t)
+  (previewer-vendor-auto-update nil)
   (previewer-sync-scroll-from-browser nil)
   (previewer-render-modes
    '(org-mode markdown-mode markdown-ts-mode html-mode html-ts-mode mhtml-mode web-mode vue-html-mode))

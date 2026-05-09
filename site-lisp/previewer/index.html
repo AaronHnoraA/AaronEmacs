@@ -42,6 +42,8 @@
       var lastContentHash = "";
       var suppressScrollEvent = false;
       var scrollTimer = 0;
+      var config = window.PreviewerConfig || {};
+      var mathJaxLoading = null;
 
       function escapeHtml(value) {
         return String(value)
@@ -66,6 +68,31 @@
         }
       }
 
+      function ensureMathJax(callback) {
+        if (window.MathJax && typeof window.MathJax.typesetPromise === "function") {
+          callback();
+          return;
+        }
+        if (mathJaxLoading) {
+          mathJaxLoading.then(callback).catch(function (error) { console.log(error); });
+          return;
+        }
+        mathJaxLoading = new Promise(function (resolve, reject) {
+          var script = document.createElement("script");
+          script.src = config.mathJaxPath || "/preview/static/vendor/mathjax/tex-mml-chtml.js";
+          script.async = true;
+          script.onload = resolve;
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+        mathJaxLoading.then(callback).catch(function (error) { console.log(error); });
+      }
+
+      function fallbackMath(span, tex, display) {
+        span.classList.add("preview-math-fallback");
+        span.textContent = display ? "\\[" + tex + "\\]" : "\\(" + tex + "\\)";
+      }
+
       function renderMathTextNode(node) {
         var text = node.nodeValue;
         if (!text || !/(\\\(|\\\[|\$\$)/.test(text)) {
@@ -88,7 +115,9 @@
           span.className = display ? "preview-math preview-math-display" : "preview-math preview-math-inline";
           span.dataset.tex = tex;
 
-          if (window.katex && typeof window.katex.render === "function") {
+          if (config.mathEngine === "mathjax") {
+            span.textContent = display ? "\\[" + tex + "\\]" : "\\(" + tex + "\\)";
+          } else if (window.katex && typeof window.katex.render === "function") {
             try {
               window.katex.render(tex, span, {
                 displayMode: display,
@@ -97,12 +126,13 @@
                 trust: true
               });
             } catch (error) {
-              span.classList.add("preview-math-fallback");
-              span.textContent = display ? "\\[" + tex + "\\]" : "\\(" + tex + "\\)";
+              fallbackMath(span, tex, display);
+              if (config.mathJaxLazyFallback !== false) {
+                span.dataset.mathjaxPending = "true";
+              }
             }
           } else {
-            span.classList.add("preview-math-fallback");
-            span.textContent = display ? "\\[" + tex + "\\]" : "\\(" + tex + "\\)";
+            fallbackMath(span, tex, display);
           }
 
           fragment.appendChild(span);
@@ -117,6 +147,10 @@
       }
 
       function renderMath(root) {
+        root = root || preview;
+        if (config.mathEngine === "none" || !/(\\\(|\\\[|\$\$)/.test(root.textContent || "")) {
+          return;
+        }
         var walker = document.createTreeWalker(
           root,
           NodeFilter.SHOW_TEXT,
@@ -135,7 +169,16 @@
           nodes.push(walker.currentNode);
         }
         nodes.forEach(renderMathTextNode);
-        mathJaxTypeset(root);
+        if (config.mathEngine === "mathjax") {
+          mathJaxTypeset(root);
+        } else if (config.mathJaxLazyFallback !== false && root.querySelector("[data-mathjax-pending]")) {
+          ensureMathJax(function () {
+            mathJaxTypeset(root);
+            root.querySelectorAll("[data-mathjax-pending]").forEach(function (node) {
+              delete node.dataset.mathjaxPending;
+            });
+          });
+        }
       }
 
       function initCodeAndDiagrams(root) {

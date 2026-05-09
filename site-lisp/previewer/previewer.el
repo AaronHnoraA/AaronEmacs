@@ -118,12 +118,31 @@ preview, while preview-to-source navigation is reserved for modified clicks."
   :type 'boolean
   :group 'previewer)
 
-(defcustom previewer-org-incremental-heading-level 2
+(defcustom previewer-org-incremental-heading-level 1
   "Maximum Org heading level used as a live-preview incremental chunk boundary."
   :type 'integer
   :group 'previewer)
 
-(defcustom previewer-vendor-auto-update t
+(defcustom previewer-sync-delay 0.18
+  "Idle delay before sending lightweight point synchronization messages."
+  :type 'number
+  :group 'previewer)
+
+(defcustom previewer-math-engine 'katex
+  "Math renderer used in the preview page.
+`katex' is the low-power default.  `mathjax' is more complete but heavier and
+is best kept for documents that need TeX features KaTeX cannot render."
+  :type '(choice (const :tag "KaTeX" katex)
+                 (const :tag "MathJax" mathjax)
+                 (const :tag "None" none))
+  :group 'previewer)
+
+(defcustom previewer-mathjax-lazy-fallback t
+  "When non-nil, lazily load MathJax only after KaTeX cannot render a formula."
+  :type 'boolean
+  :group 'previewer)
+
+(defcustom previewer-vendor-auto-update nil
   "When non-nil, refresh bundled preview assets when they are stale."
   :type 'boolean
   :group 'previewer)
@@ -152,19 +171,7 @@ preview, while preview-to-source navigation is reserved for modified clicks."
     "/preview/static/js/marked.min.js"
     "/preview/static/js/marked-highlight.min.js"
     "/preview/static/js/highlight.min.js"
-    "/preview/static/js/mermaid.min.js"
-    "/preview/static/vendor/katex/katex.min.js"
-    "<script>
-window.MathJax = {
-  tex: {
-    inlineMath: [['\\\\(', '\\\\)']],
-    displayMath: [['\\\\[', '\\\\]'], ['$$', '$$']],
-    processEscapes: true
-  },
-  options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
-};
-</script>"
-    "/preview/static/vendor/mathjax/tex-mml-chtml.js")
+    "/preview/static/js/mermaid.min.js")
   "Custom preview js script."
   :type 'list
   :group 'previewer)
@@ -261,18 +268,46 @@ It's useful to remove all dirty hacking with `previewer-auto-hook'."
    (lambda (x)
      (if (string-match-p "^[\n\t ]*<script" x) x
        (format "<script src=\"%s\"></script>" x)))
-   previewer-scripts "\n"))
+   (append (list (previewer-math-config-template))
+           previewer-scripts
+           (pcase previewer-math-engine
+             ('katex '("/preview/static/vendor/katex/katex.min.js"))
+             ('mathjax '("/preview/static/vendor/mathjax/tex-mml-chtml.js"))
+             (_ nil)))
+   "\n"))
+
+(defun previewer-math-config-template ()
+  "Return inline JavaScript configuration for preview math rendering."
+  (format
+   "<script>
+window.PreviewerConfig = {
+  mathEngine: %S,
+  mathJaxLazyFallback: %s,
+  mathJaxPath: '/preview/static/vendor/mathjax/tex-mml-chtml.js'
+};
+window.MathJax = {
+  tex: {
+    inlineMath: [['\\\\\\\\(', '\\\\\\\\)']],
+    displayMath: [['\\\\\\\\[', '\\\\\\\\]'], ['$$', '$$']],
+    processEscapes: true
+  },
+  options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] },
+  startup: { typeset: false }
+};
+</script>"
+   (symbol-name previewer-math-engine)
+   (if previewer-mathjax-lazy-fallback "true" "false")))
 
 (defun previewer-template ()
   "Template."
   (with-temp-buffer
     (insert-file-contents previewer-index-file)
     (when (search-forward "{{ css }}" nil t)
-      (replace-match (previewer-css-template) t))
+      (replace-match (previewer-css-template) t t))
     (when (search-forward "{{ js }}" nil t)
-      (replace-match (previewer-js-template) t))
+      (replace-match (previewer-js-template) t t))
     (when (search-forward "{{ websocket }}" nil t)
-      (replace-match (previewer-listen) t))
+      (replace-match (previewer-listen) t t))
     (buffer-string)))
 
 (defun previewer-html-content ()
@@ -740,7 +775,7 @@ When IMMEDIATE is non-nil, send now."
         (unless previewer-sync-sending
           (setq previewer-sync-sending t)
           (run-with-idle-timer
-           0.08 nil
+           previewer-sync-delay nil
            (lambda ()
              (when (buffer-live-p previewer-source-buffer)
                (with-current-buffer previewer-source-buffer
