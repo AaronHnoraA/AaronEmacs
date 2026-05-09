@@ -15,6 +15,7 @@
 (require 'init-funcs)
 (require 'org)
 (require 'org-element)
+(require 'org-fold)
 (require 'subr-x)
 
 (defvar company-idle-delay)
@@ -64,10 +65,32 @@ Special block overlays are no longer disabled based on buffer size."
   "Default headline depth used by `my/org-toc-insert-or-update'."
   :type 'integer)
 
-(defcustom my/org-feature-detect-margin-lines 160
+(defcustom my/org-visible-ranges-max-subranges 16
+  "Maximum subranges returned by `my/org-buffer-visible-ranges'.
+When fold/invisibility produces more disjoint subranges than this, the
+smallest-gap pairs are merged across hidden text so downstream loops have
+bounded cost.  The merged result is a strict superset of the visible
+content (no visible text is dropped); only invisible text gets included
+in the returned ranges."
+  :type 'integer
+  :group 'my/org-ui)
+
+(defcustom my/org-visible-ranges-merge-gap 600
+  "Maximum hidden-text gap merged between adjacent visible subranges.
+Adjacent ranges separated by fewer than this many characters of invisible
+content are unconditionally fused before the count cap is applied.
+Acts as a coarse first pass for cheap coalescing; the count cap then
+handles pathological folding."
+  :type 'integer
+  :group 'my/org-ui)
+
+(defcustom my/org-feature-detect-margin-lines 32
   "Lines around visible Org windows searched for optional UI features.
 Feature discovery for long Org buffers is intentionally anchored to what is
-visible, plus nearby context, instead of scanning the whole buffer on open."
+visible, plus nearby context, instead of scanning the whole buffer on open.
+Detection is sticky-latched: once a feature is seen we never re-scan for it,
+so a small margin is enough — features still activate when the user scrolls
+into a region that contains them."
   :type 'integer
   :group 'my/org-ui)
 
@@ -175,6 +198,25 @@ down when the last instance is removed, so a sticky flag is consistent with
 their actual behavior and cuts per-keystroke scan work to zero once a buffer
 has all three features in scope.")
 
+(defvar-local my/org--fold-generation 0
+  "Counter incremented on each Org fold state change in this buffer.
+Used as part of the visible-ranges cache key so that fold/unfold without
+character edits still invalidates the cached range list.")
+
+(defun my/org--increment-fold-generation (&rest _)
+  "Increment `my/org--fold-generation' for the current buffer."
+  (when (derived-mode-p 'org-mode)
+    (cl-incf my/org--fold-generation)))
+
+(add-hook 'org-cycle-hook #'my/org--increment-fold-generation)
+
+(defvar-local my/org--buffer-visible-ranges-cache nil
+  "Per-(margin, fallback) cache of `my/org-buffer-visible-ranges' results.
+An alist of ((MARGIN-LINES . FALLBACK-TO-POINT) . PAYLOAD) where PAYLOAD is
+a list (TICK FOLD-GEN WINS-KEY . RANGES).  Shared across all callers so
+that one redisplay/JIT pass pays the invisible-walk cost at most once per
+distinct margin.")
+
 (defvar-local my/org-inline-image--refresh-timer nil
   "Pending visible inline image refresh timer for the current Org buffer.")
 
@@ -235,6 +277,39 @@ has all three features in scope.")
             (push (cons beg end) merged)))))
     (nreverse merged)))
 
+(defun my/org--coalesce-close-ranges (ranges)
+  "Coalesce close RANGES so downstream loops have bounded count.
+First pass fuses any two adjacent ranges separated by less than
+`my/org-visible-ranges-merge-gap' chars of invisible text.  Second pass
+hard-caps the result at `my/org-visible-ranges-max-subranges' by
+repeatedly merging the smallest remaining gap.  Modifies cons cells of a
+fresh list — the input is not mutated."
+  (let ((gap-limit (max 0 (or my/org-visible-ranges-merge-gap 600)))
+        (max-count (max 1 (or my/org-visible-ranges-max-subranges 16)))
+        merged)
+    (dolist (range ranges)
+      (let ((beg (car range))
+            (end (cdr range)))
+        (if (and merged (< (- beg (cdar merged)) gap-limit))
+            (when (> end (cdar merged))
+              (setcdr (car merged) end))
+          (push (cons beg end) merged))))
+    (setq merged (nreverse merged))
+    (while (> (length merged) max-count)
+      (let ((min-gap most-positive-fixnum)
+            (best nil)
+            (cells merged))
+        (while (cdr cells)
+          (let ((gap (- (caadr cells) (cdar cells))))
+            (when (< gap min-gap)
+              (setq min-gap gap best cells)))
+          (setq cells (cdr cells)))
+        (if (not best)
+            (setq merged (cl-subseq merged 0 max-count))
+          (setcdr (car best) (cdadr best))
+          (setcdr best (cddr best)))))
+    merged))
+
 (defun my/org--visible-subranges-in (beg end)
   "Return visible subranges between BEG and END.
 
@@ -254,15 +329,40 @@ segments rather than folded content size."
         (setq pos (if (> next pos) next (1+ pos)))))
     (nreverse ranges)))
 
+(defun my/org--invisibility-active-p ()
+  "Return non-nil when invisibility is potentially active in this buffer.
+A fast probe of `buffer-invisibility-spec'.  When the spec excludes all
+fold-related symbols, no `invisible' text-property value would currently
+hide text, so the invisible-walk in `my/org--remove-invisible-ranges' can
+be skipped wholesale."
+  (let ((spec buffer-invisibility-spec))
+    (cond
+     ((eq spec t) t)
+     ((null spec) nil)
+     ((listp spec)
+      (cl-some (lambda (entry)
+                 (let ((sym (if (consp entry) (car entry) entry)))
+                   (and (symbolp sym)
+                        sym
+                        (let ((name (symbol-name sym)))
+                          (or (eq sym 'outline)
+                              (string-prefix-p "org-fold" name)
+                              (string-prefix-p "org-hide" name)
+                              (string-prefix-p "org-link" name))))))
+               spec)))))
+
 (defun my/org--remove-invisible-ranges (ranges)
   "Return RANGES with currently invisible Org text removed."
-  (if (not (derived-mode-p 'org-mode))
-      ranges
+  (cond
+   ((not (derived-mode-p 'org-mode)) ranges)
+   ((not (my/org--invisibility-active-p))
+    (my/org--merge-ranges ranges))
+   (t
     (my/org--merge-ranges
      (apply #'append
             (mapcar (lambda (range)
                       (my/org--visible-subranges-in (car range) (cdr range)))
-                    ranges)))))
+                    ranges))))))
 
 (defun my/org-buffer-visible-ranges (&optional buffer margin-lines fallback-to-point)
   "Return visible ranges for BUFFER expanded by MARGIN-LINES.
@@ -270,24 +370,58 @@ When FALLBACK-TO-POINT is non-nil and BUFFER is not visible, return a bounded
 range around point instead of falling back to the whole buffer.
 
 Invisible Org text is removed from the returned ranges so visual renderers can
-avoid work for folded or otherwise hidden content."
+avoid work for folded or otherwise hidden content.
+
+Results are cached per (MARGIN-LINES . FALLBACK-TO-POINT) keyed by buffer
+modification tick, fold generation, and window-start/window-end positions, so
+multiple callers within a single redisplay pay at most one invisible walk per
+distinct margin."
   (let ((buffer (or buffer (current-buffer))))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
-        (let (ranges)
-          (dolist (window (get-buffer-window-list buffer nil t))
-            (when (window-live-p window)
-              (let ((beg (window-start window))
-                    (end (or (window-end window t) (point-max))))
-                (push (my/org--range-with-line-margin
-                       beg end margin-lines)
-                      ranges))))
-          (unless (or ranges (not fallback-to-point))
-            (push (my/org--range-with-line-margin
-                   (point) (point) margin-lines)
-                  ranges))
-          (my/org--remove-invisible-ranges
-           (my/org--merge-ranges ranges)))))))
+        (let* ((tick (buffer-chars-modified-tick))
+               (fold-gen (if (boundp 'my/org--fold-generation)
+                             my/org--fold-generation 0))
+               (windows (get-buffer-window-list buffer nil t))
+               (wins-key
+                (mapcar (lambda (w)
+                          (when (window-live-p w)
+                            (cons (window-start w) (window-end w))))
+                        windows))
+               (key (cons margin-lines fallback-to-point))
+               (entry (cdr (assoc key my/org--buffer-visible-ranges-cache))))
+          (pcase entry
+            (`(,(pred (eql tick)) ,(pred (eql fold-gen)) ,(pred (equal wins-key)) . ,cached)
+             cached)
+            (_
+             (let (ranges)
+               (dolist (window windows)
+                 (when (window-live-p window)
+                   (let ((beg (window-start window))
+                         (end (or (window-end window) (point-max))))
+                     (push (my/org--range-with-line-margin
+                            beg end margin-lines)
+                           ranges))))
+               (unless (or ranges (not fallback-to-point))
+                 (push (my/org--range-with-line-margin
+                        (point) (point) margin-lines)
+                       ranges))
+               (let* ((merged (my/org--merge-ranges ranges))
+                      (visible (my/org--remove-invisible-ranges merged))
+                      (result (my/org--coalesce-close-ranges visible))
+                      (payload (cons tick (cons fold-gen (cons wins-key result)))))
+                 (setq-local my/org--buffer-visible-ranges-cache
+                             (cons (cons key payload)
+                                   (assoc-delete-all
+                                    key my/org--buffer-visible-ranges-cache)))
+                 result)))))))))
+
+(defun my/org-clear-visible-ranges-cache (&optional buffer)
+  "Clear cached Org visible ranges for BUFFER."
+  (let ((buffer (or buffer (current-buffer))))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (setq-local my/org--buffer-visible-ranges-cache nil)))))
 
 (defun my/org-render-range-visible-p
     (beg end &optional buffer margin-lines fallback-to-point)

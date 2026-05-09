@@ -650,13 +650,48 @@ for the cache update so we never compute it twice in one redisplay."
   (advice-add 'org-modern--pre-redisplay
               :around #'my/org-modern-pre-redisplay-cached-a))
 
+(defcustom my/org-modern-skip-cycle-redraw nil
+  "When non-nil, skip `org-modern--cycle' for heading-local TAB states.
+Replaces the per-subtree org-modern redraw with a visible-range font-lock
+flush — much faster TAB on large subtrees, at the cost of org-modern
+stars/tags possibly looking briefly stale until the next JIT pass refills
+them via font-lock keywords.  Global cycle states
+\(overview/contents/all) always use the visible-range flush regardless of
+this setting."
+  :type 'boolean
+  :group 'my/org-ui)
+
+(defun my/org--pretty-block-jit-active-p ()
+  "Return non-nil when pretty-block JIT is registered in the current buffer."
+  (and (boundp 'jit-lock-functions)
+       (memq #'my/org-jit-prettify-blocks jit-lock-functions)))
+
 (defun my/org-modern-cycle-visible-a (orig state)
-  "Keep Org Modern cycle refresh scoped to the visible ranges."
-  (if (and (derived-mode-p 'org-mode)
-           (bound-and-true-p org-modern-mode)
-           (memq state '(overview contents all)))
-      (my/org-flush-visible-ranges (current-buffer))
-    (funcall orig state)))
+  "Keep Org Modern cycle refresh scoped to the visible ranges.
+For global cycle states (overview/contents/all), replace the full-buffer
+update with a visible-range flush.  For heading-local states
+(folded/children/subtree), behavior depends on
+`my/org-modern-skip-cycle-redraw': when nil, call ORIG normally and then
+schedule a pretty-block refontify; when non-nil, skip ORIG entirely and
+flush visible ranges so font-lock rebuilds org-modern overlays via its
+keywords."
+  (cond
+   ((not (and (derived-mode-p 'org-mode)
+              (bound-and-true-p org-modern-mode)))
+    (funcall orig state))
+   ((memq state '(overview contents all))
+    (my/org-flush-visible-ranges (current-buffer)))
+   ((and my/org-modern-skip-cycle-redraw
+         (memq state '(folded children subtree)))
+    (my/org-flush-visible-ranges (current-buffer))
+    (when (my/org--pretty-block-jit-active-p)
+      (my/org-schedule-pretty-block-refontify t)))
+   (t
+    (prog1 (funcall orig state)
+      (when (memq state '(folded children subtree))
+        (my/org-clear-visible-ranges-cache (current-buffer))
+        (when (my/org--pretty-block-jit-active-p)
+          (my/org-schedule-pretty-block-refontify t)))))))
 
 (unless (advice-member-p #'my/org-modern-cycle-visible-a
                          'org-modern--cycle)
@@ -1479,7 +1514,10 @@ partial render does not stay broken until the next edit."
                   (min (point-max) end))))))))
 
 (defun my/org-visible-ranges (&optional buffer)
-  "Return render-visible ranges with margins for BUFFER."
+  "Return render-visible ranges with margins for BUFFER.
+Thin wrapper over `my/org-buffer-visible-ranges' using the pretty-block
+margin.  The underlying buffer-level cache deduplicates work across
+callers in a single redisplay."
   (my/org-buffer-visible-ranges
    (or buffer (current-buffer))
    my/org-pretty-block-visible-margin-lines
@@ -1496,11 +1534,24 @@ partial render does not stay broken until the next edit."
   (let ((buffer (or buffer (current-buffer))))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
+        (my/org-clear-visible-ranges-cache buffer)
         (let ((ranges (my/org-visible-ranges buffer)))
           (if ranges
               (dolist (range ranges)
                 (font-lock-flush (car range) (cdr range)))
             (font-lock-flush)))))))
+
+(defun my/org-pretty-block-cycle-hook (&rest _)
+  "Invalidate visible-range cache and schedule pretty-block refontify on fold.
+Added to `org-cycle-hook' so that TAB on a heading triggers re-render of
+newly-visible content, matching the latency of an unfolded buffer."
+  (when (and (derived-mode-p 'org-mode)
+             (boundp 'jit-lock-functions)
+             (memq #'my/org-jit-prettify-blocks jit-lock-functions))
+    (my/org-clear-visible-ranges-cache (current-buffer))
+    (my/org-schedule-pretty-block-refontify t)))
+
+(add-hook 'org-cycle-hook #'my/org-pretty-block-cycle-hook)
 
 (defun my/org-cancel-pretty-block-refontify ()
   "Cancel the pending pretty-block refontify timer in the current buffer."
@@ -2043,17 +2094,26 @@ partial render does not stay broken until the next edit."
       (save-excursion
         (save-match-data
           (let (scan-start scan-end)
-            (goto-char start)
-            (setq scan-start
-                  (if (re-search-backward my/org--special-block-line-regexp
-                                          nil t)
-                      (line-beginning-position)
-                    start))
-            (goto-char end)
-            (setq scan-end
-                  (if (re-search-forward "^[ \t]*#\\+end_" nil t)
-                      (min (point-max) (line-beginning-position 2))
-                    end))
+            ;; Bound searches to visible ranges so we don't traverse large
+            ;; folded sections. Blocks that contain the JIT range edges are
+            ;; caught by the my/org-special-block-at-point probes below.
+            (let ((search-floor (if visible-ranges
+                                    (caar visible-ranges)
+                                  (point-min)))
+                  (search-ceiling (if visible-ranges
+                                      (cdar (last visible-ranges))
+                                    (point-max))))
+              (goto-char start)
+              (setq scan-start
+                    (if (re-search-backward my/org--special-block-line-regexp
+                                            search-floor t)
+                        (line-beginning-position)
+                      (max start search-floor)))
+              (goto-char end)
+              (setq scan-end
+                    (if (re-search-forward "^[ \t]*#\\+end_" search-ceiling t)
+                        (min search-ceiling (line-beginning-position 2))
+                      end)))
             (when (my/org-range-overlaps-ranges-p scan-start scan-end
                                                   visible-ranges)
               (unless (my/org-pretty-block--jit-cache-hit-p scan-start scan-end)
@@ -2074,8 +2134,9 @@ partial render does not stay broken until the next edit."
                                   element seen start end visible-ranges)))
                       (push record render-records)))
                   (goto-char scan-start)
-                  (while (re-search-forward my/org--special-block-line-regexp
-                                            scan-end t)
+                  (while (and (< (point) scan-end)
+                              (re-search-forward
+                               my/org--special-block-line-regexp scan-end t))
                     (let ((line-begin (match-beginning 0)))
                       (goto-char line-begin)
                       ;; Cheap pre-filter: read the block type from the begin
@@ -2131,6 +2192,7 @@ partial render does not stay broken until the next edit."
     (clrhash my/org-pretty-block-cache))
   (when (hash-table-p my/org-pretty-block-jit-cache)
     (clrhash my/org-pretty-block-jit-cache))
+  (my/org-clear-visible-ranges-cache (current-buffer))
   (setq-local my/org--pretty-block-visible-refontify-signature nil)
   (setq-local my/org--pretty-block-scheduled-refontify-signature nil)
   (setq-local my/org--pretty-block-needs-visible-refontify nil))

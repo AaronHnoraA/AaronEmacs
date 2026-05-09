@@ -550,12 +550,20 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 打开文件时：
 
 - Org 默认按 `overview` 进入折叠；文件自己的 `#+startup:` 设置仍可覆盖
+- Org 标题在半展开状态时，`za` / `H-<tab>` 会收起整个 subtree；只有完全收起时
+  才打开一层
+- 在 `#+title:` 或第一个 heading 前按 `za` / `H-<tab>` 时，会切换整个 Org
+  buffer 的 compact / open 状态
 - 代码 buffer 若没有保存过手动折叠状态，会在打开时直接折叠全部代码块
 - 自动默认折叠不会写入 `var/fold-state.el`；只有通过 `za` / `zo` / `zc` /
   `zM` 或 `SPC z ...` 改过的代码折叠状态才持久化；`zR` 展开全部会清掉当前
   buffer 的保存折叠状态，下次重新回到默认压缩视图
 - Org 的 inline image、LaTeX preview 和 special-block 卡片刷新只看可见且未折叠
-  的区域；展开 subtree 后会重新调度可见区渲染
+  的区域；展开 subtree 后会用 idle timer 合并调度可见区渲染，折叠动作本身不
+  同步扫描整块可视区
+- `treesit-fold` 和 `hideshow` 代码块折叠后，隐藏内容里的 Flymake / LSP 诊断会
+  压缩到可见折叠行显示为 `E` / `W` / `N` 计数，鼠标悬停可看前几条具体消息。
+  Org 不做这层诊断汇总，避免折叠大纲时额外扫描标题和正文。
 
 ### 结构选择 `SPC v`
 
