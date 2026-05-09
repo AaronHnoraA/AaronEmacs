@@ -76,14 +76,6 @@ lighter without changing table behavior once a table exists."
   :type 'boolean
   :group 'my/org-ui)
 
-(defcustom my/org-enable-jit-pretty-blocks nil
-  "When non-nil, render custom special-block overlays inside Org buffers.
-The default is nil in the Previewer workflow: Org remains readable through
-`org-modern' and ordinary font-lock, while rich card rendering moves to the
-HTML preview pane."
-  :type 'boolean
-  :group 'my/org-ui)
-
 (defconst my/org--table-line-regexp "^[ \t]*[|│┃]"
   "Regexp matching Org or box-table lines that need `valign-mode'.")
 
@@ -268,9 +260,7 @@ Org blocks."
 
 (defun my/org-enable-valign-maybe ()
   "Enable `valign-mode' for Org buffers in graphical sessions."
-  (when (and (my/org-rich-ui-buffer-p)
-             (not (and (boundp 'my/org-lightweight-ui-profile)
-                       my/org-lightweight-ui-profile)))
+  (when (my/org-rich-ui-buffer-p)
     (if (or (not my/org-valign-on-demand)
             (my/org-buffer-has-table-p))
         (my/org-enable-valign-now)
@@ -355,12 +345,10 @@ Org blocks."
     (setq-local my/org--valign-table-watch-installed t)
     (add-hook 'after-change-functions
               #'my/org-enable-valign-on-table-insert nil t)
-    (unless (and (boundp 'my/org-lightweight-ui-profile)
-                 my/org-lightweight-ui-profile)
-      (add-hook 'window-scroll-functions
-                #'my/org-enable-valign-on-visible-table nil t)
-      (add-hook 'window-size-change-functions
-                #'my/org-enable-valign-on-window-size nil t))
+    (add-hook 'window-scroll-functions
+              #'my/org-enable-valign-on-visible-table nil t)
+    (add-hook 'window-size-change-functions
+              #'my/org-enable-valign-on-window-size nil t)
     (add-hook 'change-major-mode-hook
               #'my/org-cleanup-valign-table-watch nil t)
     (add-hook 'kill-buffer-hook
@@ -383,12 +371,11 @@ Org blocks."
 
 (defun my/org-enable-org-appear-now ()
   "Enable `org-appear-mode' in the current Org buffer."
-  (when (fboundp 'org-appear-mode)
-    (setq-local my/org-appear--last-point nil
-                my/org-appear--last-tick nil
-                my/org-appear--last-do-buffer nil
-                my/org-appear--last-elem-toggled nil)
-    (org-appear-mode 1)))
+  (setq-local my/org-appear--last-point nil
+              my/org-appear--last-tick nil
+              my/org-appear--last-do-buffer nil
+              my/org-appear--last-elem-toggled nil)
+  (org-appear-mode 1))
 
 (defun my/org-enable-org-appear-for-latex-edit ()
   "Enable `org-appear-mode' only for the current LaTeX edit session."
@@ -452,8 +439,6 @@ Org blocks."
   (defun xs-toggle-olivetti-for-org (&optional window-count)
     "If current buffer is Org and only one window is visible, enable olivetti."
     (let ((desired (and (derived-mode-p 'org-mode)
-                        (not (and (boundp 'my/org-lightweight-ui-profile)
-                                  my/org-lightweight-ui-profile))
                         (= (or window-count
                                (length (window-list nil nil nil)))
                            1))))
@@ -477,29 +462,24 @@ Org blocks."
   (defun my/org-schedule-olivetti-sync (&rest _)
     "Coalesce repeated window changes before syncing Org Olivetti state."
     (when (and (not (timerp my/org--olivetti-sync-timer))
-               (not (and (boundp 'my/org-lightweight-ui-profile)
-                         my/org-lightweight-ui-profile))
                (my/org-visible-buffer-p))
       (setq my/org--olivetti-sync-timer
             (run-with-idle-timer 0.15 nil #'my/org-sync-visible-olivetti-buffers))))
   
-  ;; Plain editor profile: no automatic source-buffer centering.
-  ;; (add-hook 'org-mode-hook #'xs-toggle-olivetti-for-org)
+  (add-hook 'org-mode-hook #'xs-toggle-olivetti-for-org)
   (add-hook 'window-configuration-change-hook #'my/org-schedule-olivetti-sync))
 
 ;; 3.2 表格对齐
 (use-package valign
   :ensure t
-  ;; Plain editor profile: table alignment is presentation work for Previewer.
-  ;; :hook (org-mode . my/org-enable-valign-maybe)
-  )
+  :hook (org-mode . my/org-enable-valign-maybe))
 
 ;; 3.3 Org Modern (全面增强版)
 (use-package org-modern
   :ensure t
   :after org  ; [IMPORTANT] 修复加载顺序，确保在 org 之后加载
-  ;; Plain editor profile: do not decorate Org source buffers by default.
-  :hook ((org-agenda-finalize . org-modern-agenda))
+  :hook ((org-mode . org-modern-mode)
+         (org-agenda-finalize . org-modern-agenda))
   :custom
   ;; 1. 基础美化
   (org-modern-hide-stars 'leading)
@@ -1209,27 +1189,59 @@ keywords."
                                 :foreground yellow
                                 :weight title-weight)))))))
 
-;; Plain editor profile: keep Org source buffers close to stock font-lock.
-;; (add-hook 'org-mode-hook #'my/org-apply-ui)
-;; (add-hook 'org-mode-hook #'my/org-reference-formula-label-setup t)
-;; (add-hook 'after-load-theme-hook #'my/org-apply-ui)
-;; (add-hook 'org-mode-hook #'my/org-setup-polished-document-frame)
+(add-hook 'org-mode-hook #'my/org-apply-ui)
+(add-hook 'org-mode-hook #'my/org-reference-formula-label-setup t)
+(add-hook 'after-load-theme-hook #'my/org-apply-ui)
+(add-hook 'org-mode-hook #'my/org-setup-polished-document-frame)
 
 (with-eval-after-load 'init-org-utility
-  ;; Plain editor profile: do not repaint Org source faces after utility load.
-  ;; (setq my/org-ui--face-theme-signature nil)
-  ;; (my/org-apply-ui)
-  )
+  (setq my/org-ui--face-theme-signature nil)
+  (my/org-apply-ui))
 
 ;; 3.4 自动显示强调符
-;; Plain editor profile: org-appear is not loaded for Org source buffers.
-;; (my/package-ensure-vc 'org-appear "https://github.com/awth13/org-appear.git")
+(my/package-ensure-vc 'org-appear "https://github.com/awth13/org-appear.git")
+
+(use-package org-appear
+  :after org
+  :custom
+  (org-appear-autoemphasis t)
+  (org-appear-autolinks t)
+  (org-appear-autoentities t)
+  (org-appear-autokeywords t)
+  ;; Keep Org's pretty entities/compositions stable while editing formulas.
+  ;; Let the LaTeX preview pipeline handle formula rendering instead.
+  (org-appear-inside-latex nil)
+  ;; 光标进入 `^{}' / `_{}' 时显示标记，避免编辑时只看到渲染结果。
+  (org-appear-autosubmarkers t)
+  (org-appear-delay 0.60)
+  :config
+  (defun my/org-appear-post-command-guard (orig)
+    "Skip `org-appear--post-cmd' when point and edit state did not change.
+Compares each input as a scalar so the post-command fast path does not
+allocate a fresh list on every key tick — this hook fires after every
+command so allocation churn shows up in profiles even when the work itself
+is already cached."
+    (let ((point (point))
+          (tick (buffer-chars-modified-tick))
+          (do-buffer org-appear--do-buffer)
+          (elem-toggled org-appear--elem-toggled))
+      (unless (and (eql point my/org-appear--last-point)
+                   (eql tick my/org-appear--last-tick)
+                   (eq do-buffer my/org-appear--last-do-buffer)
+                   (eq elem-toggled my/org-appear--last-elem-toggled))
+        (setq-local my/org-appear--last-point point
+                    my/org-appear--last-tick tick
+                    my/org-appear--last-do-buffer do-buffer
+                    my/org-appear--last-elem-toggled elem-toggled)
+        (funcall orig))))
+
+  (advice-add 'org-appear--post-cmd
+              :around #'my/org-appear-post-command-guard))
 
 ;; 3.5 优先级美化
 (use-package org-fancy-priorities
   :ensure t
-  ;; Plain editor profile: no priority glyph replacement in source buffers.
-  ;; :hook (org-mode . org-fancy-priorities-mode)
+  :hook (org-mode . org-fancy-priorities-mode)
   :config
   (setq org-fancy-priorities-list '("⚡" "⬆" "⬇" "☕")))
 
@@ -2399,35 +2411,6 @@ content gets rendered with the same latency as an unfolded buffer."
   (setq-local my/org-pretty-block-cache nil)
   (setq-local my/org-pretty-block-jit-cache nil))
 
-(defun my/org-apply-lightweight-ui-profile ()
-  "Remove presentation-heavy Org UI state from the current buffer."
-  (when (and (derived-mode-p 'org-mode)
-             (boundp 'my/org-lightweight-ui-profile)
-             my/org-lightweight-ui-profile)
-    (my/org-cleanup-valign-table-watch)
-    (when (bound-and-true-p valign-mode)
-      (valign-mode -1))
-    (when (bound-and-true-p org-modern-mode)
-      (org-modern-mode -1))
-    (when (bound-and-true-p org-fancy-priorities-mode)
-      (org-fancy-priorities-mode -1))
-    (when (bound-and-true-p org-appear-mode)
-      (org-appear-mode -1))
-    (when (bound-and-true-p olivetti-mode)
-      (olivetti-mode -1))
-    (when (bound-and-true-p org-indent-mode)
-      (org-indent-mode -1))
-    (when (bound-and-true-p mixed-pitch-mode)
-      (mixed-pitch-mode -1))
-    (when (bound-and-true-p visual-fill-column-mode)
-      (visual-fill-column-mode -1))
-    (my/org-disable-jit-pretty-blocks)
-    (when (fboundp 'my/org-latex-cleanup-scroll-preview)
-      (my/org-latex-cleanup-scroll-preview))
-    (when (fboundp 'org-clear-latex-preview)
-      (ignore-errors
-        (org-clear-latex-preview (point-min) (point-max))))))
-
 (defun my/org-reset-overlays ()
   "调试用：强制清除所有 Overlay 并重绘。"
   (interactive)
@@ -2437,24 +2420,17 @@ content gets rendered with the same latency as an unfolded buffer."
 (defun my/org-enable-jit-pretty-blocks-maybe ()
   "Enable pretty-block rendering immediately or arm its on-demand watcher."
   (when (and (derived-mode-p 'org-mode)
-             my/org-enable-jit-pretty-blocks
-             (not (and (boundp 'my/org-lightweight-ui-profile)
-                       my/org-lightweight-ui-profile))
              (my/org-rich-ui-buffer-p))
     (if (my/org-buffer-has-special-block-p)
         (my/org-enable-jit-pretty-blocks)
       (my/org-install-pretty-block-watch))))
 
-;; Plain editor profile: no special-block overlays in source buffers.
-;; (add-hook 'org-mode-hook #'my/org-enable-jit-pretty-blocks-maybe)
-(add-hook 'org-mode-hook #'my/org-apply-lightweight-ui-profile 100)
-(when my/org-enable-jit-pretty-blocks
-  (add-hook 'window-configuration-change-hook
-            #'my/org-schedule-deferred-pretty-block-refontify))
+(add-hook 'org-mode-hook #'my/org-enable-jit-pretty-blocks-maybe)
+(add-hook 'window-configuration-change-hook
+          #'my/org-schedule-deferred-pretty-block-refontify)
 (when (boundp 'window-buffer-change-functions)
-  (when my/org-enable-jit-pretty-blocks
-    (add-hook 'window-buffer-change-functions
-              #'my/org-schedule-deferred-pretty-block-refontify)))
+  (add-hook 'window-buffer-change-functions
+            #'my/org-schedule-deferred-pretty-block-refontify))
 
 (provide 'init-org-ui)
 ;;; init-org-ui.el ends here
