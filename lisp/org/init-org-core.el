@@ -201,14 +201,9 @@ has all three features in scope.")
 (defvar-local my/org--fold-generation 0
   "Counter incremented on each Org fold state change in this buffer.
 Used as part of the visible-ranges cache key so that fold/unfold without
-character edits still invalidates the cached range list.")
+character edits still invalidates the cached range list.
 
-(defun my/org--increment-fold-generation (&rest _)
-  "Increment `my/org--fold-generation' for the current buffer."
-  (when (derived-mode-p 'org-mode)
-    (cl-incf my/org--fold-generation)))
-
-(add-hook 'org-cycle-hook #'my/org--increment-fold-generation)
+Bumped by the combined cycle hook installed in `init-org-ui.el'.")
 
 (defvar-local my/org--buffer-visible-ranges-cache nil
   "Per-(margin, fallback) cache of `my/org-buffer-visible-ranges' results.
@@ -329,27 +324,41 @@ segments rather than folded content size."
         (setq pos (if (> next pos) next (1+ pos)))))
     (nreverse ranges)))
 
+(defvar-local my/org--invisibility-active-cache nil
+  "Cached result for `my/org--invisibility-active-p'.
+Format: (FOLD-GEN SPEC . VALUE).  Invalidates when fold generation
+advances or when `buffer-invisibility-spec' is replaced (eq comparison).")
+
 (defun my/org--invisibility-active-p ()
   "Return non-nil when invisibility is potentially active in this buffer.
 A fast probe of `buffer-invisibility-spec'.  When the spec excludes all
 fold-related symbols, no `invisible' text-property value would currently
 hide text, so the invisible-walk in `my/org--remove-invisible-ranges' can
-be skipped wholesale."
-  (let ((spec buffer-invisibility-spec))
-    (cond
-     ((eq spec t) t)
-     ((null spec) nil)
-     ((listp spec)
-      (cl-some (lambda (entry)
-                 (let ((sym (if (consp entry) (car entry) entry)))
-                   (and (symbolp sym)
-                        sym
-                        (let ((name (symbol-name sym)))
-                          (or (eq sym 'outline)
-                              (string-prefix-p "org-fold" name)
-                              (string-prefix-p "org-hide" name)
-                              (string-prefix-p "org-link" name))))))
-               spec)))))
+be skipped wholesale.  Result is cached per fold generation so repeated
+probes within one redisplay collapse to a single comparison."
+  (let ((spec buffer-invisibility-spec)
+        (fold-gen (or my/org--fold-generation 0)))
+    (pcase my/org--invisibility-active-cache
+      (`(,(pred (eql fold-gen)) ,(pred (eq spec)) . ,value) value)
+      (_
+       (let ((value
+              (cond
+               ((eq spec t) t)
+               ((null spec) nil)
+               ((listp spec)
+                (cl-some (lambda (entry)
+                           (let ((sym (if (consp entry) (car entry) entry)))
+                             (and (symbolp sym)
+                                  sym
+                                  (let ((name (symbol-name sym)))
+                                    (or (eq sym 'outline)
+                                        (string-prefix-p "org-fold" name)
+                                        (string-prefix-p "org-hide" name)
+                                        (string-prefix-p "org-link" name))))))
+                         spec)))))
+         (setq-local my/org--invisibility-active-cache
+                     (cons fold-gen (cons spec value)))
+         value)))))
 
 (defun my/org--remove-invisible-ranges (ranges)
   "Return RANGES with currently invisible Org text removed."
@@ -974,7 +983,11 @@ headline levels."
   ;; Default 0.5 s fires too aggressively during continuous editing.  1.5 s
   ;; batches more changes per sync pass without noticeable latency on navigation.
   (org-element-cache-sync-idle-time 1.5)
-  (org-element-cache-sync-duration 0.1))
+  (org-element-cache-sync-duration 0.1)
+  ;; Persist parsed org-element across sessions.  Cold-open of large files
+  ;; reads cache from disk instead of re-parsing.  Storage path is
+  ;; `org-persist-directory' (no-littering reroutes this under var/).
+  (org-element-cache-persistent t))
 (my/org-force-indent-mode-in-existing-buffers)
 
 (add-hook 'window-configuration-change-hook

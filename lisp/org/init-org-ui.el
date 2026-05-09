@@ -1541,17 +1541,18 @@ callers in a single redisplay."
                 (font-lock-flush (car range) (cdr range)))
             (font-lock-flush)))))))
 
-(defun my/org-pretty-block-cycle-hook (&rest _)
-  "Invalidate visible-range cache and schedule pretty-block refontify on fold.
-Added to `org-cycle-hook' so that TAB on a heading triggers re-render of
-newly-visible content, matching the latency of an unfolded buffer."
-  (when (and (derived-mode-p 'org-mode)
-             (boundp 'jit-lock-functions)
-             (memq #'my/org-jit-prettify-blocks jit-lock-functions))
-    (my/org-clear-visible-ranges-cache (current-buffer))
-    (my/org-schedule-pretty-block-refontify t)))
+(defun my/org-cycle-hook-handler (&rest _)
+  "Combined `org-cycle-hook' handler.
+Bumps `my/org--fold-generation' so visible-range caches invalidate, and
+when pretty-block JIT is active, schedules a refontify so newly-visible
+content gets rendered with the same latency as an unfolded buffer."
+  (when (derived-mode-p 'org-mode)
+    (cl-incf my/org--fold-generation)
+    (when (my/org--pretty-block-jit-active-p)
+      (my/org-clear-visible-ranges-cache (current-buffer))
+      (my/org-schedule-pretty-block-refontify t))))
 
-(add-hook 'org-cycle-hook #'my/org-pretty-block-cycle-hook)
+(add-hook 'org-cycle-hook #'my/org-cycle-hook-handler)
 
 (defun my/org-cancel-pretty-block-refontify ()
   "Cancel the pending pretty-block refontify timer in the current buffer."
