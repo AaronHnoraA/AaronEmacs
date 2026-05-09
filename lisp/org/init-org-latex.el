@@ -14,6 +14,7 @@
 (declare-function my/org-disable-org-appear-for-latex-edit "init-org-ui")
 (declare-function my/org-enable-org-fragtog-for-latex-edit "init-org-ui")
 (declare-function my/org-disable-org-fragtog-for-latex-edit "init-org-ui")
+(declare-function my/org-example-block-background "init-org-ui")
 (declare-function org-fragtog--disable-frag "org-fragtog" (frag &optional renew))
 (declare-function ratex-fragments-in-region "ratex-math-detect" (beg end))
 
@@ -1706,6 +1707,46 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
         (string-prefix-p "#+begin_display_latex" trimmed)
         (string-prefix-p "\\begin{" trimmed))))
 
+(defun my/org-latex--face-background (face)
+  "Return FACE's concrete background color, or nil."
+  (when (facep face)
+    (let ((background (face-attribute face :background nil t)))
+      (unless (my/org--unspecified-color-p background)
+        background))))
+
+(defun my/org-latex--standard-block-background-at-point (&optional pos)
+  "Return a standard Org block body background at POS, or nil."
+  (save-excursion
+    (when pos
+      (goto-char pos))
+    (let* ((datum (org-element-context))
+           (block (or (and (memq (org-element-type datum)
+                                  '(center-block comment-block example-block
+                                    export-block quote-block verse-block))
+                           datum)
+                      (org-element-lineage
+                       datum
+                       '(center-block comment-block example-block export-block
+                         quote-block verse-block)
+                       t)))
+           (type (and block (org-element-type block))))
+      (pcase type
+        ('example-block
+         (or (and (fboundp 'my/org-example-block-background)
+                  (my/org-example-block-background))
+             (my/org-latex--face-background 'org-block)))
+        ('quote-block (my/org-latex--face-background 'org-quote))
+        ('verse-block (my/org-latex--face-background 'org-verse))
+        ((or 'center-block 'comment-block 'export-block)
+         (my/org-latex--face-background 'org-block))
+        (_ nil)))))
+
+(defun my/org-latex--block-background-at-point (&optional pos)
+  "Return the Org block body background at POS, or nil."
+  (or (and (fboundp 'my/org-special-block-background-at-point)
+           (my/org-special-block-background-at-point pos))
+      (my/org-latex--standard-block-background-at-point pos)))
+
 (defun my/org-latex--make-preview-overlay (beg end file imagetype)
   "Create and register a LaTeX preview overlay from BEG to END using FILE."
   (let ((overlay (make-overlay beg end))
@@ -1847,12 +1888,17 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
                 ((eq color 'default) (face-attribute 'default :foreground nil))
                 (t color))
                default-fg)))
-           (block-bg (my/org-special-block-background-at-point beg))
+           (block-bg (my/org-latex--block-background-at-point beg))
            (bg
             (let ((color (plist-get org-format-latex-options :background)))
               (my/org-latex--normalize-preview-color
                (cond
-                ((and block-bg (memq color '(auto default))) block-bg)
+                ((and block-bg
+                      (or (memq color '(auto default))
+                          (null color)
+                          (and (stringp color)
+                               (string= color "Transparent"))))
+                 block-bg)
                 ((eq color 'auto) (face-attribute face :background nil 'default))
                 ((eq color 'default) (face-attribute 'default :background nil))
                 (t color))

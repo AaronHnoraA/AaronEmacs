@@ -1322,6 +1322,108 @@ DEFAULT-BG defaults to `my/org-default-background'."
               (palette (my/org-special-block-palette type)))
     (plist-get palette :body-bg)))
 
+(defun my/org-example-block-palette (&optional background)
+  "Return the palette used for ordinary Org example blocks."
+  (let* ((background (or background (my/org-default-background)))
+         (base-color "#A8754B"))
+    (list :header-bg (my/org-blend-colors base-color background 0.28)
+          :body-bg (my/org-blend-colors base-color background 0.16))))
+
+(defun my/org-example-block-background ()
+  "Return the body background color for ordinary Org example blocks."
+  (plist-get (my/org-example-block-palette) :body-bg))
+
+(defun my/org-example-block-at-point (&optional pos)
+  "Return the Org example block containing POS, or nil."
+  (save-excursion
+    (when pos
+      (goto-char pos))
+    (let ((element (org-element-context)))
+      (or (and (eq (org-element-type element) 'example-block)
+               element)
+          (org-element-lineage element '(example-block) t)))))
+
+(defun my/org-prettify-example-block (element)
+  "Render ordinary Org example block ELEMENT with a brown background."
+  (when (eq (org-element-type element) 'example-block)
+    (let* ((begin-pos (org-element-property :begin element))
+           (end-pos (org-element-property :end element))
+           (palette (my/org-example-block-palette))
+           (header-bg (plist-get palette :header-bg))
+           (body-bg (plist-get palette :body-bg))
+           (header-bol begin-pos)
+           (header-bg-end (my/org-line-background-end begin-pos))
+           (body-begin (save-excursion
+                         (goto-char begin-pos)
+                         (line-beginning-position 2)))
+           (footer-bol (save-excursion
+                         (goto-char end-pos)
+                         (skip-chars-backward " \t\n")
+                         (line-beginning-position)))
+           (footer-bg-end (my/org-line-background-end footer-bol))
+           (body-segments (and (< body-begin footer-bol)
+                               (list (cons body-begin footer-bol))))
+           (signature (list 'example begin-pos end-pos header-bg body-bg
+                            body-begin footer-bol footer-bg-end))
+           (cached-signature (and (hash-table-p my/org-pretty-block-cache)
+                                  (gethash begin-pos my/org-pretty-block-cache)))
+           (already-rendered
+            (my/org-pretty-block--rendered-p
+             begin-pos begin-pos footer-bol body-segments)))
+      (unless (and already-rendered
+                   (equal signature cached-signature))
+        (unless (hash-table-p my/org-pretty-block-cache)
+          (setq my/org-pretty-block-cache (make-hash-table :test #'equal)))
+        (puthash begin-pos signature my/org-pretty-block-cache)
+        (my/org-delete-pretty-block-overlays begin-pos end-pos begin-pos)
+        (let ((ov (make-overlay header-bol header-bg-end)))
+          (overlay-put ov 'my/org-pretty-block t)
+          (overlay-put ov 'my/org-pretty-block-id begin-pos)
+          (overlay-put ov 'my/org-pretty-block-role 'header-bg)
+          (overlay-put ov 'face `(:background ,header-bg :extend t))
+          (overlay-put ov 'priority 45)
+          (overlay-put ov 'evaporate t))
+        (let ((ov (make-overlay begin-pos
+                                (save-excursion
+                                  (goto-char begin-pos)
+                                  (line-end-position)))))
+          (overlay-put ov 'my/org-pretty-block t)
+          (overlay-put ov 'my/org-pretty-block-id begin-pos)
+          (overlay-put ov 'my/org-pretty-block-role 'header-display)
+          (overlay-put ov 'face `(:background ,header-bg :extend t))
+          (overlay-put ov 'priority 46)
+          (overlay-put ov 'evaporate t))
+        (dolist (segment body-segments)
+          (pcase-let ((`(,segment-begin . ,segment-end) segment))
+            (let ((ov (make-overlay segment-begin segment-end)))
+              (overlay-put ov 'my/org-pretty-block t)
+              (overlay-put ov 'my/org-pretty-block-id begin-pos)
+              (overlay-put ov 'my/org-pretty-block-role 'body)
+              (overlay-put ov 'face `(:background ,body-bg :extend t))
+              (overlay-put ov 'priority 45)
+              (overlay-put ov 'evaporate t))))
+        (let ((ov (make-overlay footer-bol footer-bg-end)))
+          (overlay-put ov 'my/org-pretty-block t)
+          (overlay-put ov 'my/org-pretty-block-id begin-pos)
+          (overlay-put ov 'my/org-pretty-block-role 'footer-bg)
+          (overlay-put ov 'face `(:background ,header-bg :extend t))
+          (overlay-put ov 'priority 45)
+          (overlay-put ov 'evaporate t))
+        (let ((ov (make-overlay footer-bol
+                                (save-excursion
+                                  (goto-char footer-bol)
+                                  (line-end-position)))))
+          (overlay-put ov 'my/org-pretty-block t)
+          (overlay-put ov 'my/org-pretty-block-id begin-pos)
+          (overlay-put ov 'my/org-pretty-block-role 'footer-display)
+          (overlay-put ov 'face `(:background ,header-bg :extend t))
+          (overlay-put ov 'priority 46)
+          (overlay-put ov 'evaporate t)))
+      (list :id begin-pos
+            :header begin-pos
+            :footer footer-bol
+            :body-segments body-segments))))
+
 (defun my/org-pretty-block--render-element-if-visible
     (element seen start end &optional visible-ranges)
   "Render styled special-block ELEMENT when it overlaps visible START END.
@@ -2138,11 +2240,19 @@ content gets rendered with the same latency as an unfolded buffer."
                                            (min (point-max) start))
                                       (max (point-min)
                                            (min (point-max) (1- end))))))
-                    (when-let* ((element (my/org-special-block-at-point pos))
-                                (record
-                                 (my/org-pretty-block--render-element-if-visible
-                                  element seen start end visible-ranges)))
-                      (push record render-records)))
+                    (when-let* ((element (or (my/org-special-block-at-point pos)
+                                             (my/org-example-block-at-point pos))))
+                      (if (eq (org-element-type element) 'example-block)
+                          (let ((begin (org-element-property :begin element)))
+                            (when (and begin (not (gethash begin seen)))
+                              (puthash begin t seen)
+                              (when-let* ((record
+                                           (my/org-prettify-example-block element)))
+                                (push record render-records))))
+                        (when-let* ((record
+                                     (my/org-pretty-block--render-element-if-visible
+                                      element seen start end visible-ranges)))
+                          (push record render-records)))))
                   (goto-char scan-start)
                   (while (and (< (point) scan-end)
                               (re-search-forward
@@ -2162,10 +2272,20 @@ content gets rendered with the same latency as an unfolded buffer."
                              (configured (and line-type
                                               (my/org-special-block-config
                                                line-type)))
+                             (example (and (string= line-type "example")
+                                           (org-element-at-point)))
                              (element (and configured (org-element-at-point)))
                              (record
-                              (my/org-pretty-block--render-element-if-visible
-                               element seen start end visible-ranges)))
+                              (cond
+                               ((and example
+                                     (eq (org-element-type example)
+                                         'example-block)
+                                     (not (gethash line-begin seen)))
+                                (puthash line-begin t seen)
+                                (my/org-prettify-example-block example))
+                               (t
+                                (my/org-pretty-block--render-element-if-visible
+                                 element seen start end visible-ranges)))))
                         (when record
                           (push record render-records)))
                       (goto-char line-begin)

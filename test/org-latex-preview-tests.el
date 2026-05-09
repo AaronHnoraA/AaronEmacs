@@ -57,6 +57,45 @@
         (should (string-match-p "\\\\#C(R_1,R_2)=" value))
         (should (string-match-p "\\\\begin{cases}" value))))))
 
+(ert-deftest my/org-latex-preview-collects-fragments-in-example-blocks ()
+  (my/org-latex-test-with-org-buffer "#+begin_example\n\\[\nH(m)=H(m'),\n\\]\n#+end_example\n"
+    (let ((specs (my/org-latex--collect-fragments (point-min) (point-max))))
+      (should (= (length specs) 1))
+      (let ((value (plist-get (car specs) :value)))
+        (should (string-prefix-p "\\[" value))
+        (should (string-suffix-p "\\]" value))
+        (should (string-match-p "H(m)=H(m')" value))))))
+
+(ert-deftest my/org-latex-preview-collects-fragments-in-prose-blocks ()
+  (dolist (type '("quote" "verse" "center"))
+    (my/org-latex-test-with-org-buffer (format "#+begin_%s\n\\[x\\]\n#+end_%s\n"
+                                               type type)
+      (should (= (length (my/org-latex--collect-fragments
+                          (point-min) (point-max)))
+                 1)))))
+
+(ert-deftest my/org-latex-preview-still-skips-code-like-blocks ()
+  (dolist (type '("src emacs-lisp" "verbatim"))
+    (let* ((end-type (car (split-string type)))
+           (content (format "#+begin_%s\n\\[x\\]\n#+end_%s\n"
+                            type end-type)))
+      (my/org-latex-test-with-org-buffer content
+        (should-not (my/org-latex--collect-fragments
+                     (point-min) (point-max)))))))
+
+(ert-deftest my/org-latex-preview-uses-example-block-background ()
+  (my/org-latex-test-with-org-buffer "#+begin_example\n\\[x\\]\n#+end_example\n"
+    (let ((org-format-latex-options
+           (plist-put (copy-sequence org-format-latex-options)
+                      :background "Transparent")))
+      (cl-letf (((symbol-function 'my/org-example-block-background)
+                 (lambda () "#403020")))
+        (let ((specs (my/org-latex--collect-fragments
+                      (point-min) (point-max))))
+          (should (= (length specs) 1))
+          (should (equal (plist-get (car specs) :background)
+                         "#403020")))))))
+
 (ert-deftest my/org-latex-preview-enqueue-fragment-deduplicates-waiters ()
   (my/org-latex-test-with-org-buffer "\\(x\\)"
     (let* ((target (expand-file-name "ltximg/shared.svg" default-directory))

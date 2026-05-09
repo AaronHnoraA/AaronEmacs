@@ -307,7 +307,7 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
     (or (and (fboundp 'org-in-src-block-p)
              (org-in-src-block-p t))
         (and (fboundp 'org-in-block-p)
-             (org-in-block-p '("example" "src" "verbatim")))))
+             (org-in-block-p '("src" "verbatim")))))
    ((derived-mode-p 'markdown-mode 'gfm-mode)
     (and (fboundp 'markdown-code-block-at-point-p)
          (markdown-code-block-at-point-p)))
