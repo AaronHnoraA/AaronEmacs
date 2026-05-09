@@ -65,7 +65,7 @@ Special block overlays are no longer disabled based on buffer size."
   "Default headline depth used by `my/org-toc-insert-or-update'."
   :type 'integer)
 
-(defcustom my/org-visible-ranges-max-subranges 16
+(defcustom my/org-visible-ranges-max-subranges 8
   "Maximum subranges returned by `my/org-buffer-visible-ranges'.
 When fold/invisibility produces more disjoint subranges than this, the
 smallest-gap pairs are merged across hidden text so downstream loops have
@@ -75,7 +75,7 @@ in the returned ranges."
   :type 'integer
   :group 'my/org-ui)
 
-(defcustom my/org-visible-ranges-merge-gap 600
+(defcustom my/org-visible-ranges-merge-gap 1200
   "Maximum hidden-text gap merged between adjacent visible subranges.
 Adjacent ranges separated by fewer than this many characters of invisible
 content are unconditionally fused before the count cap is applied.
@@ -84,7 +84,7 @@ handles pathological folding."
   :type 'integer
   :group 'my/org-ui)
 
-(defcustom my/org-feature-detect-margin-lines 32
+(defcustom my/org-feature-detect-margin-lines 8
   "Lines around visible Org windows searched for optional UI features.
 Feature discovery for long Org buffers is intentionally anchored to what is
 visible, plus nearby context, instead of scanning the whole buffer on open.
@@ -94,7 +94,7 @@ into a region that contains them."
   :type 'integer
   :group 'my/org-ui)
 
-(defcustom my/org-feature-detect-idle-delay 0.60
+(defcustom my/org-feature-detect-idle-delay 1.20
   "Idle delay before scroll-triggered optional Org UI feature discovery.
 This keeps table alignment, pretty blocks and LaTeX previews available while
 avoiding visible-range scans on every scroll event."
@@ -140,24 +140,24 @@ very large prose buffers."
   :type 'boolean
   :group 'my/org-ui)
 
-(defcustom my/org-inline-image-visible-margin-lines 48
+(defcustom my/org-inline-image-visible-margin-lines 12
   "Extra lines around visible Org windows considered for inline images."
   :type 'integer
   :group 'my/org-ui)
 
-(defcustom my/org-inline-image-idle-delay 0.50
+(defcustom my/org-inline-image-idle-delay 1.20
   "Idle delay before refreshing visible Org inline images."
   :type 'number
   :group 'my/org-ui)
 
-(defcustom my/org-company-idle-delay 0.45
+(defcustom my/org-company-idle-delay 0.90
   "Org-local `company-idle-delay'.
 This is intentionally slower than programming buffers; Org completion remains
 automatic, but stops racing normal prose typing."
   :type 'number
   :group 'my/org-ui)
 
-(defcustom my/org-copilot-idle-delay 0.90
+(defcustom my/org-copilot-idle-delay 1.80
   "Org-local `copilot-idle-delay'."
   :type '(choice (number :tag "Seconds of delay")
                  (const :tag "Idle completion disabled" nil))
@@ -175,7 +175,7 @@ buffers even when this echo helper is disabled."
   :type 'boolean
   :group 'my/org-ui)
 
-(defcustom my/org-flymake-diagnostic-at-point-delay 0.80
+(defcustom my/org-flymake-diagnostic-at-point-delay 1.50
   "Org-local delay before echoing a Flymake diagnostic at point."
   :type 'number
   :group 'my/org-ui)

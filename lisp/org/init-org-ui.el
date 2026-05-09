@@ -45,12 +45,12 @@ integer position keys from accumulating during long editing sessions."
   :type 'integer
   :group 'my/org-ui)
 
-(defcustom my/org-pretty-block-visible-margin-lines 16
+(defcustom my/org-pretty-block-visible-margin-lines 6
   "Extra lines around visible Org windows that stay eligible for prettification."
   :type 'integer
   :group 'my/org-ui)
 
-(defcustom my/org-modern-pre-redisplay-min-interval 0.50
+(defcustom my/org-modern-pre-redisplay-min-interval 1.00
   "Minimum seconds between scroll-driven Org Modern redisplay refreshes.
 Buffer edits, fold changes and window-width changes still refresh immediately.
 Raising this reduces redisplay CPU while allowing Org Modern decorations to lag
@@ -58,7 +58,7 @@ briefly during fast scrolling."
   :type 'number
   :group 'my/org-ui)
 
-(defcustom my/org-pretty-block-refontify-idle-delay 0.35
+(defcustom my/org-pretty-block-refontify-idle-delay 0.90
   "Idle delay before refreshing visible pretty-block overlays."
   :type 'number
   :group 'my/org-ui)
@@ -1213,7 +1213,7 @@ keywords."
   (org-appear-inside-latex nil)
   ;; 光标进入 `^{}' / `_{}' 时显示标记，避免编辑时只看到渲染结果。
   (org-appear-autosubmarkers t)
-  (org-appear-delay 0.16)
+  (org-appear-delay 0.60)
   :config
   (defun my/org-appear-post-command-guard (orig)
     "Skip `org-appear--post-cmd' when point and edit state did not change.

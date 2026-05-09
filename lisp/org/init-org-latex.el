@@ -114,12 +114,12 @@ Each value may be a readable `.cls' file path or literal class source."
     ("\\subparagraph{%s}" . "\\subparagraph*{%s}"))
   "Fallback sectioning used for embedded Org LaTeX classes.")
 
-(defcustom my/org-latex-preview-idle-delay 0.70
+(defcustom my/org-latex-preview-idle-delay 1.20
   "Idle delay (seconds) before the first visible-region preview."
   :type 'number
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-scroll-idle-delay 0.75
+(defcustom my/org-latex-preview-scroll-idle-delay 1.50
   "Debounce delay (seconds) before previewing visible region after scrolling."
   :type 'number
   :group 'my/org-latex-preview)
@@ -132,17 +132,17 @@ debounce after scrolling settles."
                  number)
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-min-chars 220
+(defcustom my/org-latex-preview-min-chars 500
   "Minimum visible region size (chars) required to trigger preview."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-overscan-lines 1
+(defcustom my/org-latex-preview-overscan-lines 0
   "Number of lines around the visible window to pre-render opportunistically."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-lookahead-lines 4
+(defcustom my/org-latex-preview-lookahead-lines 1
   "Number of lines below the visible window to pre-render opportunistically.
 This intentionally defaults higher than `my/org-latex-preview-overscan-lines'
 because scrolling through notes usually moves forward, and cached previews
@@ -162,14 +162,14 @@ renders already occupy the normal concurrency budget."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-prune-overlay-threshold 512
+(defcustom my/org-latex-preview-prune-overlay-threshold 256
   "Tracked overlay count above which old off-screen previews are pruned.
 Only scroll-triggered maintenance uses this threshold; manual full-buffer
 preview commands may still recreate previews from the cached image files."
   :type 'integer
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-retain-lines 80
+(defcustom my/org-latex-preview-retain-lines 32
   "Number of lines around the visible window whose preview overlays are kept."
   :type 'integer
   :group 'my/org-latex-preview)
@@ -181,12 +181,12 @@ Set to nil to keep the full log."
                  integer)
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-edit-idle-delay 0.65
+(defcustom my/org-latex-preview-edit-idle-delay 1.00
   "Idle delay (seconds) before pre-rendering the fragment being edited."
   :type 'number
   :group 'my/org-latex-preview)
 
-(defcustom my/org-latex-preview-leave-confirm-delay 0.35
+(defcustom my/org-latex-preview-leave-confirm-delay 0.60
   "Idle delay before confirming preview placement after leaving a fragment."
   :type 'number
   :group 'my/org-latex-preview)
@@ -967,7 +967,7 @@ render is usually ready before point leaves it."
         (my/org-latex--cancel-after-save-preview-timer)
         (setq my/org-latex--after-save-preview-timer
               (run-with-idle-timer
-               0.15 nil
+               1.00 nil
                #'my/org-latex--refresh-visible-previews-after-save
                (current-buffer))))
     (my/org-latex--cancel-after-save-preview-timer)))
