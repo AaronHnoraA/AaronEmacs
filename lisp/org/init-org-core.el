@@ -221,6 +221,11 @@ distinct margin.")
 (defvar-local my/org-inline-image--enabled nil
   "Non-nil when visible inline image refresh hooks are installed.")
 
+(defvar-local my/org-inline-image--candidate-cache nil
+  "Cached candidate ranges for `my/org-inline-image--candidate-ranges'.
+Format: (TICK FOLD-GEN INPUT . CANDIDATES) where INPUT is the input
+ranges list — `equal'-compared against future calls.")
+
 (defconst my/org-inline-image--extension-regexp
   (let ((regexp (image-file-name-regexp)))
     (if (string-suffix-p "\\'" regexp)
@@ -527,18 +532,30 @@ currently invisible Org text removed."
             (list (buffer-chars-modified-tick) ranges)))))))
 
 (defun my/org-inline-image--candidate-ranges (ranges)
-  "Return line ranges in RANGES that likely contain inline image links."
-  (let (candidates)
-    (save-excursion
-      (dolist (range (my/org--merge-ranges ranges))
-        (pcase-let ((`(,beg . ,end) range))
-          (goto-char beg)
-          (while (re-search-forward my/org-inline-image--extension-regexp
-                                    end t)
-            (push (my/org--range-with-line-margin
-                   (match-beginning 0) (match-end 0) 0)
-                  candidates)))))
-    (my/org--merge-ranges candidates)))
+  "Return line ranges in RANGES that likely contain inline image links.
+Result is cached per (tick, fold-gen, input ranges) so repeated
+visible-image refresh passes within a single redisplay or scroll burst
+pay no regex cost."
+  (let* ((tick (buffer-chars-modified-tick))
+         (fold-gen (or my/org--fold-generation 0)))
+    (pcase my/org-inline-image--candidate-cache
+      (`(,(pred (eql tick)) ,(pred (eql fold-gen)) ,(pred (equal ranges)) . ,cached)
+       cached)
+      (_
+       (let (candidates)
+         (save-excursion
+           (dolist (range (my/org--merge-ranges ranges))
+             (pcase-let ((`(,beg . ,end) range))
+               (goto-char beg)
+               (while (re-search-forward my/org-inline-image--extension-regexp
+                                         end t)
+                 (push (my/org--range-with-line-margin
+                        (match-beginning 0) (match-end 0) 0)
+                       candidates)))))
+         (let ((result (my/org--merge-ranges candidates)))
+           (setq-local my/org-inline-image--candidate-cache
+                       (cons tick (cons fold-gen (cons ranges result))))
+           result))))))
 
 (defun my/org-inline-image--display-range (range refresh)
   "Display inline image previews inside RANGE."
@@ -987,7 +1004,10 @@ headline levels."
   ;; Persist parsed org-element across sessions.  Cold-open of large files
   ;; reads cache from disk instead of re-parsing.  Storage path is
   ;; `org-persist-directory' (no-littering reroutes this under var/).
-  (org-element-cache-persistent t))
+  (org-element-cache-persistent t)
+  ;; Default `t' realigns tags on every cursor-move onto a heading line.
+  ;; Disable so tags only realign on save / explicit `org-align-tags'.
+  (org-auto-align-tags nil))
 (my/org-force-indent-mode-in-existing-buffers)
 
 (add-hook 'window-configuration-change-hook

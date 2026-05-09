@@ -2095,15 +2095,24 @@ content gets rendered with the same latency as an unfolded buffer."
       (save-excursion
         (save-match-data
           (let (scan-start scan-end)
-            ;; Bound searches to visible ranges so we don't traverse large
-            ;; folded sections. Blocks that contain the JIT range edges are
-            ;; caught by the my/org-special-block-at-point probes below.
-            (let ((search-floor (if visible-ranges
-                                    (caar visible-ranges)
-                                  (point-min)))
-                  (search-ceiling (if visible-ranges
-                                      (cdar (last visible-ranges))
-                                    (point-max))))
+            ;; Bound searches to the visible subrange that contains the JIT
+            ;; region, so we don't walk across folded gaps between subranges.
+            ;; Blocks whose #+begin_ lies before the visible subrange are
+            ;; still caught by the my/org-special-block-at-point probes below.
+            (let* ((containing
+                    (and visible-ranges
+                         (cl-find-if (lambda (r)
+                                       (and (< (car r) end)
+                                            (> (cdr r) start)))
+                                     visible-ranges)))
+                   (search-floor
+                    (cond (containing (car containing))
+                          (visible-ranges (caar visible-ranges))
+                          (t (point-min))))
+                   (search-ceiling
+                    (cond (containing (cdr containing))
+                          (visible-ranges (cdar (last visible-ranges)))
+                          (t (point-max)))))
               (goto-char start)
               (setq scan-start
                     (if (re-search-backward my/org--special-block-line-regexp
