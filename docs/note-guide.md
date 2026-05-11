@@ -36,6 +36,7 @@
   date: "2026-05-11",
   tags: ("math", "draft"),
   aliases: (),
+  private: false,
 )) <note>
 ```
 
@@ -87,11 +88,20 @@ make publish
 - `roam/**/*.typ` 是唯一 note 源文件。
 - `bin/publish-site` 读取 `#metadata((kind: "note", ...)) <note>` 和 `#note("id")[Title]`。
 - 每篇公开 note 编译成同路径 `public/roam/**/*.pdf`。
+- private note 编译成同路径 sealed PDF，占位页来自 `~/HC/Org/_typst/private.typ`。
 - `public/js/data.js` 只保存 archive / graph 需要的标题、标签、摘要、引用和 PDF 链接。
 - PDF 内的 `#note("id")[Title]` 会在发布临时源里改写为可点击的 web/PDF 链接；默认用 `/roam/...pdf`，需要绝对域名时设置 `PUBLISH_BASE_URL`。
 - 不再生成每篇 note 的 HTML wrapper；浏览器自己的 PDF viewer 负责阅读界面。
 
 因此，`note.css` / `publish.css` 只影响网站壳、archive 和 graph，不影响 PDF 里的 note 视觉。公开 PDF 缺的页面、标题、目录、卡片、页眉页脚等效果，应该补到 `~/HC/Org/_typst/publish.typ`，不要补一个发布专用 CSS，也不要把日常 `/_typst/note.typ` 改成只适合发布。
+
+private 配置跟随 Typst metadata。任一条件命中时，发布脚本不会分发正文、摘要、tags 或 outgoing refs，只会分发 sealed PDF：
+
+- `private: true`
+- `hidden: true`
+- `publish: false`
+- `visibility: "private"` / `"hidden"` / `"sealed"`
+- tags 里有 `"private"`、`"hidden"`、`"sealed"`、`"no-export"`、`"noexport"`
 
 发布是增量的。依赖快照写在 `public/.deps/`；只有 note 本身、图片、wrapper、`_typst/publish.typ` 等输入变了，才会重新编译对应 PDF。另有忽略提交的 `public/.publish-state.json` 记录上次成功发布的 git `HEAD`；当相关发布输入干净且 `HEAD` 没变时，`make publish` 会整轮快速跳过。`make force` 会绕过这些缓存。
 
