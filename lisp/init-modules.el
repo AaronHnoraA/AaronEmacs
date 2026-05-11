@@ -89,11 +89,11 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-md)
 (require 'init-ratex)
 (my/require-module-safely 'init-note)
+(my/require-module-safely 'init-note-tools)
 
 ;; standalone apps
 (my/require-module-after-any-feature 'init-org 'org)
 (my/require-module-after-any-feature 'init-org-mmdc 'org)
-(my/require-module-after-any-feature 'init-org-zotero 'org)
 (when (eq system-type 'darwin)
   (my/require-module-safely 'init-appine))
 (require 'init-text)

@@ -1,27 +1,30 @@
 # Typst Note Guide
 
-这套 note 系统是 Typst-first 的知识库试验层，不复用 `org-roam` 数据库，也不做 Org
-自动转换。
+这套 note 系统现在以 Typst 为中心。旧的 Org 文档、导出类和 `H-o` Org 入口不再作为主线维护；笔记、assignment 和项目外写作都走 `.typ`。
 
-## 1. 定位
+## 1. 模块边界
 
-- `.typ` 是新的长期笔记格式。
-- `org` 继续保留 agenda、capture、Babel/Jupyter、旧站点发布等职责。
-- Typst note 只负责节点、标签、跨笔记链接、反链和增量索引。
+- [lisp/note/init-note.el](../lisp/note/init-note.el)
+  负责 note 根目录、索引、跳转、反链、Tinymist 预览同步，以及写入 note helper。
+- [lisp/note/init-note-tools.el](../lisp/note/init-note-tools.el)
+  放从 Org 迁过来的工具入口：Zotero metadata 填充、剪贴板图片粘贴。
+- [lisp/note/typst/note.typ](../lisp/note/typst/note.typ)
+  note 内部共享 Typst 样式和 helper。
+- [notes/](../notes/)
+  项目外写作样式，当前包含 `assignment.typ`、`rho.typ`、`aleph-notas.typ`。
+- [templates/typst/](../templates/typst/)
+  Emacs 插入模板，当前主用 `assignment.typ`。
 
-## 2. 文件和模块
+默认 note 根目录仍指向 `~/HC/Org/`，默认新建目录仍是 `~/HC/Org/roam/`。这是现有文件布局兼容，不代表继续用 Org 格式。
 
-- 配置模块：`lisp/note/init-note.el`
-- 模板目录：`templates/typst/`
-- 索引数据库：`var/note/note.db`
-- 默认扫描根：`~/HC/Org/`
-- 默认新建目录：`~/HC/Org/roam/`
+## 2. Note 文件
 
-## 3. Typst note 格式
-
-每个 note 文件顶部使用 Typst 原生 metadata：
+每个 note 顶部用 Typst metadata：
 
 ```typst
+#import "/_typst/note.typ": *
+#show: note-entry
+
 #metadata((
   kind: "note",
   id: "20260511T120000-example",
@@ -32,120 +35,124 @@
 )) <note>
 ```
 
-跨笔记链接使用：
+跨 note 链接：
 
 ```typst
 #note("20260511T120000-example")[Example]
 ```
 
-`M-x my/note-db-sync` 会重建 note 索引，并更新 `my/note-root/_typst/note.typ`
-里的共享 helper。渲染时 `#note(...)` 是带颜色和下划线的普通文本，不生成 Typst
-`link(...)`，避免 Tinymist preview 把跨 note 跳转解释成浏览器内 URL。
-从 preview 点击回源码时，如果落点在 `#note(...)` 源码区域，Emacs 再打开对应 note。
+`M-x my/note-db-sync` 会重建 `var/note/note.db`，并在 note 根目录写入：
 
-note helper 使用 root-relative import：
+- `_typst/note.typ`
+  从 [lisp/note/typst/note.typ](../lisp/note/typst/note.typ) 复制出来的 helper。
+- `_typst/notes/<id>.typ`
+  每个 note 的小 wrapper，用于跨文件 import/include。
 
-```typst
-#import "/_typst/note.typ": *
-#show: note-entry
-```
+note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note-transclude`、`note-import-path`，以及 `definition`、`theorem`、`proof`、`example`、`remark`、`summary`、`question`、`important`、`warning`、`tip`、`info` 等卡片块。
 
-这里的 `/` 是 Typst project root，不是系统根目录。preview/compile 时会把
-`my/note-root` 作为 Tinymist/Typst root，因此 note 文件可以放在任意子目录，
-不需要写脆弱的 `../_typst/note.typ`。
+## 3. 多文件组合
 
-`note-entry` 会注入暖灰页面背景和文档顶部目录，并从 Emacs 配置里的 `my/font-body`、
-`my/font-cn`、`my/font-code`、`my/font-title` 和
-`my/typst-preview-math-font` 生成 Typst 正文、中文、代码、标题和数学字体设置。
-`note-theme` 只负责基础样式，供 include 时复用，避免子文件重复生成目录。
-helper 也提供 `definition`、`theorem`、`proof`、`question`、`summary`、
-`important`、`warning`、`tip`、`info` 等轻量卡片块，风格对齐 Org special block
-和 Previewer 的 Org CSS。
-预览/编译时会在文档顶部插入 `outline(title: [目录], depth: 2)`，方便 Tinymist
-preview 里快速导航。
-
-文内章节、定理和公式引用继续用 Typst 自己的 `<label>` / `@label`。
-
-## 4. 多文件组合
-
-`M-x my/note-db-sync` 会把 roam id 写进 `_typst/note.typ` 的路径表。可用 helper：
+用 wrapper import 另一个 note 暴露的内容：
 
 ```typst
 #let linked = note-import-path("note-linked")
 #import linked: cross-file-sum-equation
+```
 
+整篇 include：
+
+```typst
 #note-include("note-linked")
 ```
 
-`note-import-path(id)` 返回 root-relative Typst 路径，适合配合 `#import` 引入某个
-note 暴露出来的 `#let` 内容。`note-include(id)` / `note-transclude(id)` 会整篇包含
-对应 note，并在 include 期间标记子文件为非入口文档，所以子文件自己的入口目录不会重复
-出现在当前 PDF。整篇 include 仍会带入目标文件的 heading / metadata，适合草稿组合；
-可复用公式、定义等更推荐在目标 note 中写 `#let name = [...]`，再用
-`#import note-import-path("id"): name`。
+`note-include` / `note-transclude` 会把被包含文件标成非入口文档，避免子文件自己的目录重复出现在当前 PDF。公式、定理、章节引用仍然使用 Typst 原生 `<label>` / `@label`。
 
-## 5. 命令
+## 4. Assignment 模板
 
-在 Typst buffer 里：
+项目外写 assignment 时用 Typst 模板，不再走 LaTeX export：
+
+1. 打开目标 `.typ` 文件。
+2. 执行 `M-x my/template-switch`，kind 选 `typst`，template 选 `assignment.typ`。
+3. 模板插入时会在当前项目根目录创建 `_typst/*.typ` 软链：
+   - `_typst/assignment.typ` -> `~/.config/emacs/notes/assignment.typ`
+   - `_typst/rho.typ` -> `~/.config/emacs/notes/rho.typ`
+   - `_typst/aleph-notas.typ` -> `~/.config/emacs/notes/aleph-notas.typ`
+   - `_typst/note.typ` -> `~/.config/emacs/lisp/note/typst/note.typ`
+
+插入后的文件只需要写：
+
+```typst
+#import "/_typst/assignment.typ": *
+#show: body => assignment-theme(
+  title: "Assignment",
+  author: "hc",
+  date: "2026-05-11",
+  body,
+)
+```
+
+这样模板在任何项目里都能用 root-relative import，样式文件仍集中维护在 Emacs 配置仓库。手动编译时，如果 Typst 没有自动识别 project root，可以显式指定：
+
+```sh
+typst compile --root <project-root> main.typ main.pdf
+```
+
+`notes/assignment.typ` 对应旧 `latex/assignment.cls` 的常用能力：页眉页脚、目录、problem/solution、代码块、数学 operator 和页面引用。`notes/rho.typ`、`notes/aleph-notas.typ` 是从旧 cls 迁过来的项目外写作样式。
+
+## 5. 快捷键
+
+Typst buffer 里：
 
 - `C-c C-p`
-  用 macOS 系统浏览器打开 Tinymist 官方 preview；同一文件会复用现有进程保留增量更新，切到另一个 Typst buffer 后再次执行会杀掉旧 preview 并预览当前文件。preview 已经打开时，切换到另一个 Typst buffer 会自动跟随。
+  打开 Tinymist preview。
 - `C-c C-j`
-  把 preview 滚动到当前源码位置。
+  preview 同步到当前源码位置。
 - `C-c n n`
   新建 Typst note。
 - `C-c n f`
   查找 note。
 - `C-c n i`
-  插入 `#note("id")[title]` 链接。
+  插入 `#note("id")[title]`。
 - `C-c n l`
   查看当前 note 的反链。
 - `C-c n s`
   重建 note 索引。
+- `C-c n y`
+  粘贴剪贴板图片，保存到当前文件旁的 `img/<file>/`，插入 `#image(...)`。
+- `C-c n z`
+  用 Zotero/BibTeX 内容填充模板里的 `${title}`、`${author}`、`${year}`、`${citekey}`、`${doi}`。
 
-## 6. Snippet（yasnippet）
+macOS GUI 下，`H-o` 已经转成 note 前缀：
 
-Typst buffer 使用 `snippets/typst-ts-mode/` 下的 yasnippet。`typst-mode/` 是同
-目录的软链，所以 `typst-mode` / `typst-ts-mode` / `my/typst-mode` 都能用同一
-份模板。
+- `H-o n` 新建 note
+- `H-o f` 查找 note
+- `H-o i` 插入 note link
+- `H-o l` 反链
+- `H-o s` 重建索引
+- `H-o o` 打开 preview 并同步
+- `H-o RET` 打开光标处 note
+- `H-o y` 粘贴图片
+- `H-o z` Zotero metadata 填充
 
-这套 snippet 是把 `org-mode/` 与 `tex-mode/` 里的 LaTeX 写作快捷键整体翻译成
-Typst 等价语法，触发关键词与 org 保持一致，便于直接迁移肌肉记忆：
+全局 `H-y` 也指向 Typst note 图片粘贴。
 
-- 数学符号 / 希腊字母：`aaaa` → `alpha`，`RR` → `RR`，`frac` →
-  `frac(_, _)`，`sum` / `prod` / `int` / `lim` 等。
-- 加重 / 装饰：`bar` `hat` `tilde` `dot` `ddot` `vec` 分别对应 `overline()`、
-  `hat()`、`tilde()`、`dot()`、`dot.double()`、`arrow()`。
-- 矩阵：`mat` `pmat` `bmat` `Bmat` `vmat` `Vmat` 通过 `mat(delim: ...)` 生成；
-  `cas` 生成 `cases(...)`；`iden` 生成单位阵。
-- 分节：`sec` / `sub` / `subs` / `par` / `subp` 直接展开成 `=` ~ `=====`；
-  `*l` 变体附带 `<sec:slug>` 等 label。
-- 引用：`ref` / `cite` / `figure:ref` / `section:ref` / `table:ref` /
-  `algo:ref` / `listing:ref` 都展开为 Typst `@label` 形式。
-- 图表：`figure` / `figure:acm` / `table` / `table:acm` 用 `#figure(...)` +
-  `image()` / `table()` 包装，并自带 `<fig:_>` / `<tab:_>` label。
-- 块（theorem / lemma / proof / definition / remark / note / tip / info /
-  warning / important / question / solution / example / problem / ...）展开为
-  `#theorem[...]` 等函数调用风格，假设用户在 setup 里有 `#let theorem = ...`
-  之类的辅助函数；如果还没定义，把它们当作普通占位 placeholder 替换即可。
-- note 卡片块已有短触发：`def`、`thm`、`lem`、`cor`、`prop`、`proof`、
-  `que`、`summ`、`imp`、`warn`、`tip`、`info`、`rem`、`ex`、`sol`、`ncard`；
-  `nlink` 展开为跨 note 引用 `#note("id")[title]`。
-- 量子（`ket` / `bra` / `bk` / `me` / `dyad` / `outer` / `expval` / `comm` /
-  `anticomm` / `bell` / `proj` / `qft` / `sch` / ...）用便携的
-  `lr(|psi angle.r)` 形式书写，不依赖 `physica` 包。
-- 密码学 / 复杂性（`adv` `game` `negl` `PRF` `PRG` `Enc` `Dec` `Sign`
-  `Vrfy` `MAC` `KDF` `INDCPA` `EUFCMA` `BPP` `BQP` `bigO` `bigOmega`
-  `bigTheta` `tildeO` ...）展开为对应 Typst 数学表达式。
+## 6. Snippet
 
-完整列表见 `snippets/typst-ts-mode/`；触发器与 `snippets/org-mode/` /
-`snippets/tex-mode/` 同名，只有 body 改成 Typst 写法。如果关键词在原 org / tex
-集合里就有冲突（如 `par` 既是 paragraph 又是 partial derivative），这里也保留
-双份，让 yasnippet 走选单。
+Typst snippets 在 [snippets/typst-ts-mode/](../snippets/typst-ts-mode/)。`typst-mode/` 是同目录软链，所以 `typst-mode`、`typst-ts-mode`、`my/typst-mode` 共用同一套模板。
 
-## 7. 明确不做
+这套 snippet 保留了原来 Org/TeX 写作的触发词，但 body 已经改成 Typst：
 
-- 不转换 Org 文件。
-- 不实现 Babel 等价代码执行。
-- 不替换 org-roam / org-agenda / org-publish。
-- 不直接写 org-roam SQLite 数据库。
+- 数学符号 / 希腊字母：`aaaa`、`RR`、`frac`、`sum`、`prod`、`int`、`lim`。
+- 装饰：`bar`、`hat`、`tilde`、`dot`、`ddot`、`vec`。
+- 矩阵：`mat`、`pmat`、`bmat`、`cases`。
+- 分节和引用：`sec`、`sub`、`ref`、`cite`、`figure:ref`、`table:ref`。
+- 块：`def`、`thm`、`lem`、`proof`、`que`、`summ`、`imp`、`warn`、`tip`、`info`、`rem`、`ex`、`sol`。
+- note link：`nlink` 展开成 `#note("id")[title]`。
+
+## 7. 不再维护
+
+- 不再维护 Org 文档主线。
+- 不再维护旧 LaTeX `latex/*.cls` 导出类。
+- 不再把 `H-o` 当作 Org 前缀。
+- 不做 Org 到 Typst 的自动转换。
+- 不实现 Org Babel 的 Typst 等价层。

@@ -58,7 +58,7 @@
 - `H-p` / `H-P` / `H-R` / `H-T`
   项目工作台 / workspace 菜单 / run profile 菜单 / test 菜单
 - `H-m` / `H-a` / `H-l` / `H-y`
-  `magit-status` / `org-agenda` / Claude Code 菜单 / 粘贴剪贴板图片到 Org
+  `magit-status` / `org-agenda` / Claude Code 菜单 / 粘贴剪贴板图片到 Typst note
 - `H-h` / `H-H` / `H-z` / `H-Z`
   help / health 菜单 / zoxide 跳目录 / 当前文件目录
 - `H-e` / `H-E` / `H-d` / `H-D`
@@ -70,7 +70,7 @@
 - `H-0` / `H-1` / `H-2` / `H-3`
   关当前窗口 / 单窗口切换 / 上下分屏 / 左右分屏
 - `H-o` / `H-O` / `H-k` / `H-K`
-  Org 快捷前缀 / 上方开新行 / 向下复制当前行或区域 / 向上复制当前行或区域
+  Note 快捷前缀 / 上方开新行 / 向下复制当前行或区域 / 向上复制当前行或区域
 - `H-<up>` / `H-<down>` / `H--` / `H-=`
   上移 / 下移当前行或区域 / 收缩选择 / 扩大选择
 - `H-;` / `H-'` / `H-[` / `H-]` / `H-/`
@@ -88,19 +88,13 @@
 `telescope`；其他工具用
 `m/s/n/J/R/P`。
 
-Org 前缀里 `H-o b` 打开 `my/org-maintenance-board`，用来清未引用图片、附件和
-过多的 `ltximg/` LaTeX preview cache。`H-o m` 重命名当前 `file:` 链接文件，
-`H-o k` 给当前链接文件加 `keep-` 清理豁免前缀，`H-o O` 用系统 open 打开光标处链接或文件。
-`H-o n` 会把当前已经位于 org-roam 目录的 Org 文件补齐文件级 roam 头，并注册进
-org-roam 数据库。
-`H-o g` 清理 GeoGebra 导出的 TikZ 并生成折叠 raw block + `display_latex` 预览块；
-`H-o G` 展开/折叠这个 raw block，`H-o V` 预览当前 `display_latex` 块。
-`H-o w` 打开 `my/org-task-dispatch`，把 TODO 状态、`confusion` / `shush`
-这类标记、schedule/deadline、timestamp/calendar/clock、refile/archive 和常用
-agenda view 收在一起；其中 `H-o w x` 是按 TODO keywords 分组的 status table。
+Note 前缀 `H-o` 现在挂 Typst note：`n` 新建 note，`f` 查找 note，`i` 插入
+`#note("id")[title]` 链接，`l` 查看反链，`s` 重建索引，`o` 打开 preview 并同步，
+`RET` 打开光标处 note，`y` 粘贴剪贴板图片，`z` 填充 Zotero/BibTeX metadata。
 
 Typst note buffer 里 `C-c n` 是本地 note 前缀：`f` 查找 note，`i` 插入
-`#note("id")[title]` 链接，`l` 查看反链，`s` 重建索引，`n` 新建 note。
+`#note("id")[title]` 链接，`l` 查看反链，`s` 重建索引，`n` 新建 note，`y` 粘贴图片，
+`z` 填充 Zotero/BibTeX metadata。
 `C-c C-p` 会用 macOS 系统浏览器打开 Tinymist preview；同一文件复用现有进程保留
 增量更新，切到另一个 Typst buffer 后会切换 preview。
 
@@ -648,4 +642,4 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 - 关 frame 用 `H-w`
 - 普通 warning 现在只写入 `*Warnings*`，不再自动弹窗抢操作；需要时用 `SPC h w`
 - `C-c y` 现在是 snippet 前缀，不再直接展开
-- `C-c n` 是 org-roam 前缀，不再给 centaur-tabs
+- `C-c n` 是 Typst note 前缀，不再给 centaur-tabs

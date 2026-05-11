@@ -16,12 +16,6 @@
 (declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
 (declare-function my/navigation-find-definition "init-navigation" ())
 (declare-function my/typst-preview-send-position "init-typst" ())
-(defvar my/font-body)
-(defvar my/font-cn)
-(defvar my/font-code)
-(defvar my/font-title)
-(defvar my/font-math-symbols)
-(defvar my/typst-preview-math-font)
 
 (defgroup my/note nil
   "Typst-backed note-taking helpers."
@@ -55,40 +49,20 @@
   :type 'file
   :group 'my/note)
 
+(defcustom my/note-style-directory
+  (locate-user-emacs-file "lisp/note/typst")
+  "Directory containing internal Typst note helper modules."
+  :type 'directory
+  :group 'my/note)
+
 (defcustom my/note-excluded-directories
-  '("public" "var" ".git" ".direnv" ".venv" "node_modules")
+  '("_typst" "public" "var" ".git" ".direnv" ".venv" "node_modules")
   "Directory names ignored while scanning Typst notes."
   :type '(repeat string)
   :group 'my/note)
 
 (defconst my/note-metadata-label "note"
   "Typst label used for file-level note metadata.")
-
-(defcustom my/note-preview-page-fill "e7e5df"
-  "Warm page background color used by Typst note preview."
-  :type 'string
-  :group 'my/note)
-
-(defcustom my/note-preview-text-fill "29251f"
-  "Text color used by Typst note preview."
-  :type 'string
-  :group 'my/note)
-
-(defcustom my/note-preview-link-fill "1d4ed8"
-  "Color used for rendered Typst note references."
-  :type 'string
-  :group 'my/note)
-
-(defcustom my/note-preview-latin-font "New Computer Modern"
-  "Latin serif font used by Typst note preview.
-Keep this at Typst's default-like family so English prose stays neutral."
-  :type 'string
-  :group 'my/note)
-
-(defcustom my/note-preview-toc t
-  "When non-nil, inject a small outline at the top of Typst note previews."
-  :type 'boolean
-  :group 'my/note)
 
 (defconst my/note-helper-import-source
   "#import \"/_typst/note.typ\": *\n#show: note-entry\n"
@@ -293,29 +267,6 @@ FILE is the file path associated with the buffer."
   (seq-remove #'my/note--excluded-path-p
               (directory-files-recursively my/note-root "\\.typ\\'")))
 
-(defun my/note--font-family (symbol fallback)
-  "Return SYMBOL's string value, or FALLBACK."
-  (if (and (boundp symbol)
-           (stringp (symbol-value symbol))
-           (not (string-empty-p (symbol-value symbol))))
-      (symbol-value symbol)
-    fallback))
-
-(defun my/note--math-font-family ()
-  "Return the Typst math font family configured for notes."
-  (let ((font (my/note--font-family
-               'my/typst-preview-math-font
-               "GFS Neohellenic Math")))
-    (list font)))
-
-(defun my/note--typst-string-array (values)
-  "Return VALUES formatted as a Typst string tuple."
-  (format "(%s)"
-          (mapconcat (lambda (value)
-                       (format "%S" value))
-                     values
-                     ", ")))
-
 (defun my/note--root-relative-typst-path (file)
   "Return Typst root-relative path for FILE."
   (concat "/"
@@ -323,170 +274,73 @@ FILE is the file path associated with the buffer."
            (file-truename file)
            (file-name-as-directory (file-truename my/note-root)))))
 
+(defconst my/note--wrapper-directory "_typst/notes"
+  "Directory below `my/note-root' containing generated note id wrappers.")
+
+(defun my/note--safe-wrapper-id-p (id)
+  "Return non-nil when ID can safely be used as a wrapper file name."
+  (and (stringp id)
+       (string-match-p "\\`[[:alnum:]_.-]+\\'" id)))
+
+(defun my/note--wrapper-file (id)
+  "Return generated wrapper file path for note ID."
+  (unless (my/note--safe-wrapper-id-p id)
+    (user-error "Note id is not safe as a Typst wrapper path: %s" id))
+  (expand-file-name
+   (concat id ".typ")
+   (expand-file-name my/note--wrapper-directory
+                     (file-name-as-directory my/note-root))))
+
+(defun my/note--wrapper-source (note)
+  "Return Typst wrapper source for NOTE."
+  (let ((target (my/note--root-relative-typst-path
+                 (plist-get note :file))))
+    (format "#import %S: *\n#include %S\n" target target)))
+
+(defun my/note-write-wrapper-files (notes)
+  "Write per-note Typst id wrapper files for NOTES."
+  (let ((dir (expand-file-name my/note--wrapper-directory
+                               (file-name-as-directory my/note-root))))
+    (when (file-directory-p dir)
+      (delete-directory dir t))
+    (make-directory dir t)
+    (dolist (note notes)
+      (with-temp-file (my/note--wrapper-file (plist-get note :id))
+        (insert (my/note--wrapper-source note))))))
+
 (defun my/note--path-registry-source (notes)
-  "Return Typst source mapping note ids in NOTES to paths."
-  (let ((sorted-notes
-         (sort (copy-sequence notes)
-               (lambda (a b)
-                 (string< (or (plist-get a :id) "")
-                          (or (plist-get b :id) ""))))))
-    (concat
-   "#let note-paths = (\n"
-   (mapconcat
-    (lambda (note)
-      (format "  %S: %S,"
-              (plist-get note :id)
-              (my/note--root-relative-typst-path
-               (plist-get note :file))))
-    sorted-notes
-    "\n")
-   "\n)\n\n"
+  "Return Typst source resolving note ids through generated wrappers.
+NOTES is accepted for compatibility with callers that pass the indexed set."
+  (ignore notes)
+  (concat
    "#let note-include-active = state(\"my-note-include-active\", false)\n"
-   "#let note-path(id) = if id in note-paths { note-paths.at(id) } else { panic(\"Unknown note id: \" + id) }\n"
+   "#let note-path(id) = \"/_typst/notes/\" + id + \".typ\"\n"
    "#let note-import-path(id) = note-path(id)\n"
    "#let note-include(id) = {\n"
    "  note-include-active.update(true)\n"
    "  include(note-path(id))\n"
    "  note-include-active.update(false)\n"
    "}\n"
-   "#let note-transclude(id) = note-include(id)\n\n")))
+   "#let note-transclude(id) = note-include(id)\n\n"))
+
+(defun my/note--style-file (&optional name)
+  "Return the Typst note style file named NAME."
+  (expand-file-name (or name "note.typ")
+                    (file-name-as-directory my/note-style-directory)))
+
+(defun my/note--style-source (&optional name)
+  "Return Typst note style source named NAME."
+  (let ((file (my/note--style-file name)))
+    (unless (file-readable-p file)
+      (user-error "Missing Typst note style file: %s" file))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (buffer-string))))
 
 (defun my/note--helper-source-for-notes (notes)
   "Return Typst helper source for note references."
-  (let ((body-font my/note-preview-latin-font)
-        (cn-font (my/note--font-family 'my/font-cn "FZLiuGongQuanKaiShuJF"))
-        (code-font (my/note--font-family 'my/font-code "Fira Code"))
-        (title-font my/note-preview-latin-font)
-        (math-font (my/note--typst-string-array
-                    (my/note--math-font-family))))
-    (format
-     "%s
-#let note-theme(body) = {
-  set page(
-    fill: rgb(%S),
-    margin: (x: 6.5em, y: 5.5em),
-  )
-  set text(
-    font: (%S, %S, \"Libertinus Serif\", \"New Computer Modern\"),
-    size: 12pt,
-    fill: rgb(%S),
-    lang: \"en\",
-  )
-  set par(leading: 0.72em, justify: true)
-  set table(
-    stroke: 0.65pt + rgb(\"d7ccb8\"),
-    inset: (x: 0.62em, y: 0.48em),
-  )
-  show heading: set text(font: (%S, %S, %S), weight: \"bold\")
-  show heading.where(level: 1): it => block[
-    #set text(fill: rgb(\"5c5244\"), size: 1.22em, weight: \"bold\")
-    #it
-    #v(0.22em)
-    #line(length: 100%%, stroke: 0.9pt + rgb(\"d8cfbf\"))
-  ]
-  show heading.where(level: 2): it => block[
-    #set text(fill: rgb(\"6a5f4f\"), weight: \"semibold\")
-    #it
-  ]
-  show raw: set text(font: %S, size: 0.92em)
-  show math.equation: set text(font: %s)
-  show table.cell: set text(size: 0.95em)
-  body
-}
-
-#let note-entry(body) = {
-  show: note-theme
-  context {
-    if not note-include-active.get() {
-      %s
-    }
-  }
-  body
-}
-
-#let note-card(title, accent, tint, marker, body) = {
-  block(
-    width: 100%%,
-    fill: rgb(\"f4f3ef\"),
-    stroke: 0.7pt + rgb(\"d0cdc4\"),
-    radius: 7pt,
-    inset: 0pt,
-    breakable: true,
-  )[
-    #block(
-      width: 100%%,
-      fill: rgb(tint),
-      inset: (x: 0.78em, y: 0.42em),
-    )[
-      #text(
-        fill: rgb(accent),
-        weight: \"bold\",
-        size: 0.92em,
-      )[#title]
-    ]
-    #block(
-      width: 100%%,
-      inset: (x: 0.92em, y: 0.76em),
-    )[
-      #{
-        show math.equation: set text(font: %s)
-        body
-      }
-      #v(0.42em)
-      #align(right)[
-        #text(
-          fill: rgb(accent),
-          size: 0.78em,
-        )[#marker]
-      ]
-    ]
-  ]
-}
-
-#let definition(body) = note-card(\"📘 定义\", \"8a6418\", \"f8ecd0\", \"◇\", body)
-#let theorem(body) = note-card(\"📐 定理\", \"2f6f42\", \"e5f3df\", \"♥\", body)
-#let lemma(body) = note-card(\"🪜 引理\", \"335f91\", \"e4edf8\", \"⋄\", body)
-#let corollary(body) = note-card(\"🔎 推论\", \"5a4f91\", \"ece8f8\", \"⇒\", body)
-#let cor(body) = corollary(body)
-#let proposition(body) = note-card(\"📌 命题\", \"7a4b2d\", \"f3e6dc\", \"♠\", body)
-#let prop(body) = proposition(body)
-#let property(body) = proposition(body)
-#let proof(body) = note-card(\"✍️ 证明\", \"267386\", \"e1f2f4\", \"∎\", body)
-#let example(body) = note-card(\"🧪 例子\", \"80623a\", \"f1e5d4\", \"◦\", body)
-#let remark(body) = note-card(\"💬 备注\", \"5f6c7b\", \"e9ece8\", \"✦\", body)
-#let summary(body) = note-card(\"🧾 摘要\", \"476f78\", \"e3f1ee\", \"☰\", body)
-#let question(body) = note-card(\"❓ 问题\", \"8a6418\", \"f8ecd0\", \"?\", body)
-#let problem(body) = question(body)
-#let solution(body) = note-card(\"✅ 解法\", \"2f6f42\", \"e5f3df\", \"✓\", body)
-#let important(body) = note-card(\"⚡ 重点\", \"9b3b37\", \"f4dfdc\", \"!\", body)
-#let warning(body) = note-card(\"⚠️ 警告\", \"9b3b37\", \"f4dfdc\", \"▲\", body)
-#let tip(body) = note-card(\"💡 提示\", \"26735f\", \"e1f1ea\", \"✧\", body)
-#let info(body) = note-card(\"ℹ️ 信息\", \"335f91\", \"e4edf8\", \"i\", body)
-
-#let note(..args) = {
-  let pos = args.pos()
-  if pos.len() == 2 {
-    text(fill: rgb(%S), underline(pos.at(1)))
-  } else if pos.len() == 1 {
-    note-card(\"📝 笔记\", \"26735f\", \"e1f1ea\", \"✎\", pos.at(0))
-  }
-}
-"
-     (my/note--path-registry-source notes)
-     my/note-preview-page-fill
-     body-font
-     cn-font
-     my/note-preview-text-fill
-     title-font
-     cn-font
-     body-font
-     code-font
-     math-font
-     (if my/note-preview-toc
-         "outline(title: [目录], depth: 2)"
-       "")
-     math-font
-     my/note-preview-link-fill)))
+  (ignore notes)
+  (my/note--style-source "note.typ"))
 
 (defun my/note-write-helper-file (notes)
   "Write the shared Typst note helper for NOTES."
@@ -517,6 +371,7 @@ FILE is the file path associated with the buffer."
                       (push note notes)
                       (setq count (1+ count))))
                   (sqlite-commit db)
+                  (my/note-write-wrapper-files notes)
                   (my/note-write-helper-file notes)
                   (message "Note index synced: %d Typst notes" count)
                   count))

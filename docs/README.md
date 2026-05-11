@@ -15,22 +15,14 @@ This directory contains the operational docs for the Emacs configuration. The do
 
 - [project-guide.md](project-guide.md)
   Project switching, project workbench flow, and how Treemacs / Perspective fit together.
-- [org-guide.md](org-guide.md)
-  Org inside Emacs: agenda, capture, org-roam, LaTeX preview, and writing-related features.
-- [org-kb-guide.md](org-kb-guide.md)
-  How `~/HC/Org/` is organized as a personal knowledge base and website, including `daily/`, `roam/`, `attachments/`, and tag conventions.
 - [note-guide.md](note-guide.md)
-  Typst-first note indexing, links, backlinks, and the boundary with Org.
-- [org-task-workflow.md](org-task-workflow.md)
-  Org agenda, TODO states, task workflow tags, and the `H-o w` status tools.
+  Typst-first notes, note tools, assignment templates, project-local Typst styles, links, and backlinks.
 - [dev-guide.md](dev-guide.md)
   Programming, completion, LSP, debugging, terminals, remote work, browser integration, and AI.
 - [research-notes-workflow.md](research-notes-workflow.md)
-  Division of labor between Org notes, Jupytext notebooks, Jupyter, and reusable source code.
+  Division of labor between notes, Jupytext notebooks, Jupyter, and reusable source code.
 - [lsp-workflow.org](lsp-workflow.org)
   Language-server routing, Hub/Doctor tooling, and the maintenance model.
-- [jupyter-workflow.org](jupyter-workflow.org)
-  End-to-end Org / Jupyter / Jupytext workflow.
 
 ## Maintenance
 
@@ -45,8 +37,6 @@ This directory contains the operational docs for the Emacs configuration. The do
 - Want keybindings: [daily-usage.md](daily-usage.md)
 - Want to change behavior: [settings-cookbook.md](settings-cookbook.md)
 - Want the project workflow: [project-guide.md](project-guide.md)
-- Want Org inside Emacs: [org-guide.md](org-guide.md)
-- Want the Org knowledge-base / site model: [org-kb-guide.md](org-kb-guide.md)
-- Want Org TODO / agenda workflow: [org-task-workflow.md](org-task-workflow.md)
+- Want Typst notes and writing templates: [note-guide.md](note-guide.md)
 - Want programming / LSP / remote details: [dev-guide.md](dev-guide.md)
 - Want maintenance and lock/state guidance: [maintenance.md](maintenance.md)

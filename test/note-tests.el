@@ -1,7 +1,9 @@
 ;;; note-tests.el --- Tests for Typst note helpers -*- lexical-binding: t -*-
 
 (require 'ert)
+(require 'init-auto-insert)
 (require 'init-note)
+(require 'init-note-tools)
 
 (ert-deftest my/note-parses-metadata-and-links ()
   (with-temp-buffer
@@ -43,7 +45,11 @@
           (should (equal (my/note--rows
                           "select source_id from links where target_id = ?"
                           ["b"])
-                         '(("a")))))
+                         '(("a"))))
+          (should (file-exists-p
+                   (expand-file-name "_typst/notes/a.typ" root)))
+          (should (file-exists-p
+                   (expand-file-name "_typst/notes/b.typ" root))))
       (ignore-errors (delete-directory root t))
       (ignore-errors (delete-directory db-dir t)))))
 
@@ -64,7 +70,27 @@
     (should (string-match-p "#let definition" source))
     (should (string-match-p "underline(pos\\.at(1))" source))
     (should-not (string-match-p "link(" source))
-    (should (string-match-p "/roam/a.typ" source))))
+    (should (string-match-p "/_typst/notes/\" \\+ id \\+ \"\\.typ" source))
+    (should-not (string-match-p "/roam/a.typ" source))))
+
+(ert-deftest my/note-writes-id-wrapper-files ()
+  (let* ((root (make-temp-file "note-root-" t))
+         (my/note-root root))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name "roam" root))
+          (let ((target (expand-file-name "roam/a.typ" root)))
+            (with-temp-file target
+              (insert "#let exported = 1\nBody\n"))
+            (my/note-write-wrapper-files
+             (list (list :id "a" :file target)))
+            (should (equal
+                     (with-temp-buffer
+                       (insert-file-contents
+                        (expand-file-name "_typst/notes/a.typ" root))
+                       (buffer-string))
+                     "#import \"/roam/a.typ\": *\n#include \"/roam/a.typ\"\n"))))
+      (ignore-errors (delete-directory root t)))))
 
 (ert-deftest my/note-detects-link-id-at-point ()
   (with-temp-buffer
@@ -87,6 +113,41 @@
 (ert-deftest my/note-escapes-inserted-link-content ()
   (should (equal (my/note--typst-content-escape "A [B] \\ C")
                  "A \\[B\\] \\\\ C")))
+
+(ert-deftest my/note-zotero-fills-placeholders-from-bibtex ()
+  (with-temp-buffer
+    (insert "Title: ${title}\n"
+            "Author: ${author}\n"
+            "Year: ${year}\n"
+            "Key: ${citekey}\n"
+            "DOI: ${doi}\n\n"
+            "@article{sample2026,\n"
+            "  title = {Sample Paper},\n"
+            "  author = {Ada Lovelace},\n"
+            "  year = {2026},\n"
+            "  doi = {10.0000/example}\n"
+            "}\n")
+    (my/note-zotero-fill-metadata)
+    (should (string-match-p "Title: Sample Paper" (buffer-string)))
+    (should (string-match-p "Author: Ada Lovelace" (buffer-string)))
+    (should (string-match-p "Year: 2026" (buffer-string)))
+    (should (string-match-p "Key: sample2026" (buffer-string)))
+    (should (string-match-p "DOI: 10.0000/example" (buffer-string)))))
+
+(ert-deftest my/template-typst-assignment-links-project-styles ()
+  (let ((root (make-temp-file "typst-assignment-" t))
+        (user-emacs-directory (file-name-as-directory
+                               (expand-file-name user-emacs-directory))))
+    (unwind-protect
+        (let ((file (expand-file-name "assg.typ" root)))
+          (with-current-buffer (find-file-noselect file)
+            (unwind-protect
+                (let ((default-directory root))
+                  (my/template--ensure-typst-style-links "assignment.typ")
+                  (should (file-symlink-p (expand-file-name "_typst/assignment.typ" root)))
+                  (should (file-symlink-p (expand-file-name "_typst/note.typ" root))))
+              (kill-buffer (current-buffer)))))
+      (ignore-errors (delete-directory root t)))))
 
 (provide 'note-tests)
 ;;; note-tests.el ends here

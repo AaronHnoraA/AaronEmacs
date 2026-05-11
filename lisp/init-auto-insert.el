@@ -8,6 +8,7 @@
 
 (require 'subr-x)
 (require 'seq)
+(require 'project)
 
 (defgroup my/template nil
   "File templates for new files."
@@ -64,6 +65,13 @@ precedence over `my/template-current' when choosing the template file.")
 
 (defvar-local my/template--remote-placeholder-created nil
   "Whether this buffer bootstrapped a missing remote file for auto-insert.")
+
+(defconst my/template-typst-style-links
+  '(("assignment.typ" . "notes/assignment.typ")
+    ("rho.typ" . "notes/rho.typ")
+    ("aleph-notas.typ" . "notes/aleph-notas.typ")
+    ("note.typ" . "lisp/note/typst/note.typ"))
+  "Typst style symlinks created below a project's `_typst' directory.")
 
 (defun my/template--safe-kinds-p (value)
   (and (listp value)
@@ -158,6 +166,47 @@ first and then opening it."
 (defun my/template--path (kind &optional template)
   (expand-file-name (or template (my/template--current kind))
                     (my/template--kind-dir kind)))
+
+(defun my/template--project-root ()
+  "Return the current project root or the current file directory."
+  (file-name-as-directory
+   (expand-file-name
+    (or (when-let* ((project (condition-case nil
+                                 (project-current nil)
+                               (file-error nil))))
+          (project-root project))
+        (and buffer-file-name (file-name-directory buffer-file-name))
+        default-directory))))
+
+(defun my/template--ensure-symlink (target link)
+  "Ensure LINK points to TARGET."
+  (let ((target (file-truename target)))
+    (cond
+     ((file-symlink-p link)
+      (unless (file-equal-p (file-truename link) target)
+        (delete-file link)
+        (make-symbolic-link target link)))
+     ((file-exists-p link)
+      nil)
+     (t
+      (make-symbolic-link target link)))))
+
+(defun my/template--typst-style-source (relative)
+  "Return config-local Typst style source RELATIVE path."
+  (expand-file-name relative user-emacs-directory))
+
+(defun my/template--ensure-typst-style-links (template)
+  "Create project-local Typst style links for TEMPLATE."
+  (when (and (member template '("assignment.typ"))
+             buffer-file-name
+             (not (file-remote-p buffer-file-name)))
+    (let* ((root (my/template--project-root))
+           (dir (expand-file-name "_typst" root)))
+      (make-directory dir t)
+      (dolist (link my/template-typst-style-links)
+        (my/template--ensure-symlink
+         (my/template--typst-style-source (cdr link))
+         (expand-file-name (car link) dir))))))
 
 (defun my/template--available-kinds ()
   (seq-filter (lambda (kind)
@@ -259,7 +308,11 @@ template filename under templates/KIND/."
   (when replace
     (my/template--confirm-replace-buffer)
     (erase-buffer))
-  (my/auto-insert--insert-template-file (my/template--path kind template)))
+  (let* ((kind (or kind (my/template--kind) (my/template--read-kind)))
+         (template (or template (my/template--current kind))))
+    (when (eq kind 'typst)
+      (my/template--ensure-typst-style-links template))
+    (my/auto-insert--insert-template-file (my/template--path kind template))))
 
 (defun my/template--auto-insert-allowed-p ()
   "Return non-nil when `auto-insert-mode' should insert templates here."

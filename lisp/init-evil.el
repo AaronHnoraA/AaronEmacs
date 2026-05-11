@@ -558,7 +558,6 @@
       "T" 'org-todo-list
       "P" 'my/previewer-org-workbench
       "v" 'my/org-latex-preview-visible-now
-      "z" 'my/org-zotero-fill-metadata
 
       ;; babel
       "bp" 'org-babel-previous-src-block

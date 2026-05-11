@@ -18,7 +18,7 @@
 
 - macOS 图形界面 Emacs
 - 重 UI、重功能、重集成
-- 本地编码 + SSH/TRAMP + Org 笔记/学术写作
+- 本地编码 + SSH/TRAMP + Typst note / 学术写作
 
 Linux 不是不能用，但部分体验默认按 macOS 配置。
 
@@ -171,11 +171,12 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 - `vscode-html-language-server`
   用于 HTML / Vue HTML
 
-### Org / 学术写作
+### Typst / 学术写作
 
-- `xelatex`
-- `dvisvgm`
-- [tools/org-xdvisvgm-hires](../tools/org-xdvisvgm-hires) 依赖链能正常执行
+- `typst`
+- `tinymist`
+- `pngpaste`
+  用于把 macOS 剪贴板图片粘到 Typst note
 
 ### 终端 / 远程
 
@@ -198,13 +199,16 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 ## 6. 路径约定
 
-### Org
+### Notes
 
-[lisp/org/init-org.el](../lisp/org/init-org.el) 里默认写死：
+[lisp/note/init-note.el](../lisp/note/init-note.el) 里默认写死：
 
 - `~/HC/Org/`
 - `~/HC/Org/roam/`
-- `~/HC/Org/daily/`
+
+Typst note 共享样式在 [lisp/note/typst/note.typ](../lisp/note/typst/note.typ)。
+项目外写 assignment 时，用 `templates/typst/assignment.typ` 插入模板；插入时会在项目根目录创建
+`_typst/*.typ` 软链，指向这里维护的样式文件。
 
 ### AI 助手
 
@@ -263,7 +267,7 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 建议启动 Emacs 后依次确认：
 
 1. 主题和字体是否正常
-2. `M-x org-agenda` 是否能打开
+2. `M-x my/note-db-sync` 是否能重建 Typst note 索引
 3. `C-x C-f` / `C-x b` / `C-s` 是否符合预期
 4. `M-x my/vterm-ssh` 是否能读到 SSH 主机
 5. `C-c C-'` 是否能打开 claude-code-ide 菜单（需要 claude CLI 已安装）
@@ -272,6 +276,6 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 ## 8. 下一步看什么
 
 - 日常使用：看 [daily-usage.md](daily-usage.md)
-- Org：看 [org-guide.md](org-guide.md)
+- Notes / Typst 写作：看 [note-guide.md](note-guide.md)
 - 编程 / 远程：看 [dev-guide.md](dev-guide.md)
 - 想自己改：看 [settings-cookbook.md](settings-cookbook.md)
