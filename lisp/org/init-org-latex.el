@@ -20,6 +20,7 @@
 (declare-function org-fragtog--disable-frag "org-fragtog" (frag &optional renew))
 (declare-function ratex-fragments-in-region "ratex-math-detect" (beg end))
 (declare-function ratex-fragment-at-point "ratex-math-detect" ())
+(declare-function ratex--split-delimited-fragment "ratex-math-detect" (value))
 
 (defvar ratex-mode)
 (defvar ratex--active-fragment)
@@ -122,8 +123,18 @@ Each value may be a readable `.cls' file path or literal class source."
   :type 'number
   :group 'my/org-latex-preview)
 
+(defcustom my/org-typst-preview-idle-delay 0.12
+  "Idle delay before the first visible-region Typst preview."
+  :type 'number
+  :group 'my/org-latex-preview)
+
 (defcustom my/org-latex-preview-scroll-idle-delay 1.50
   "Debounce delay (seconds) before previewing visible region after scrolling."
+  :type 'number
+  :group 'my/org-latex-preview)
+
+(defcustom my/org-typst-preview-scroll-idle-delay 0.12
+  "Debounce delay before previewing visible Typst math after scrolling."
   :type 'number
   :group 'my/org-latex-preview)
 
@@ -137,6 +148,11 @@ debounce after scrolling settles."
 
 (defcustom my/org-latex-preview-min-chars 500
   "Minimum visible region size (chars) required to trigger preview."
+  :type 'integer
+  :group 'my/org-latex-preview)
+
+(defcustom my/org-typst-preview-min-chars 0
+  "Minimum visible region size required to trigger Typst preview."
   :type 'integer
   :group 'my/org-latex-preview)
 
@@ -158,10 +174,20 @@ should be ready before their source enters the window."
   :type 'integer
   :group 'my/org-latex-preview)
 
+(defcustom my/org-typst-preview-max-concurrency 4
+  "Maximum number of concurrent Typst preview render jobs."
+  :type 'integer
+  :group 'my/org-latex-preview)
+
 (defcustom my/org-latex-preview-edit-extra-concurrency 0
   "Extra render slots reserved for the fragment currently being edited.
 This keeps edit pre-rendering responsive even when automatic visible-area
 renders already occupy the normal concurrency budget."
+  :type 'integer
+  :group 'my/org-latex-preview)
+
+(defcustom my/org-typst-preview-edit-extra-concurrency 1
+  "Extra Typst render slots reserved for the fragment currently being edited."
   :type 'integer
   :group 'my/org-latex-preview)
 
@@ -189,8 +215,18 @@ Set to nil to keep the full log."
   :type 'number
   :group 'my/org-latex-preview)
 
+(defcustom my/org-typst-preview-edit-idle-delay 0.20
+  "Idle delay before pre-rendering the Typst fragment being edited."
+  :type 'number
+  :group 'my/org-latex-preview)
+
 (defcustom my/org-latex-preview-leave-confirm-delay 0.60
   "Idle delay before confirming preview placement after leaving a fragment."
+  :type 'number
+  :group 'my/org-latex-preview)
+
+(defcustom my/org-typst-preview-leave-confirm-delay 0.05
+  "Idle delay before confirming Typst preview placement after leaving a fragment."
   :type 'number
   :group 'my/org-latex-preview)
 
@@ -201,10 +237,15 @@ render is usually ready before point leaves it."
   :type 'boolean
   :group 'my/org-latex-preview)
 
+(defcustom my/org-typst-preview-while-editing t
+  "Whether to pre-render Typst fragments while point is still editing them."
+  :type 'boolean
+  :group 'my/org-latex-preview)
+
 (defcustom my/org-math-preview-backend 'typst
   "Renderer used by the Org math overlay pipeline.
-The `typst' backend renders `$$...$$' fragments with Typst.  The `latex'
-backend keeps the previous XeLaTeX/dvisvgm renderer for `\\(...\\)',
+The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
+`latex' backend keeps the previous XeLaTeX/dvisvgm renderer for `\\(...\\)',
 `\\[...\\]' and `display_latex' fragments."
   :type '(choice (const :tag "Typst" typst)
                  (const :tag "LaTeX" latex))
@@ -634,7 +675,9 @@ backend keeps the previous XeLaTeX/dvisvgm renderer for `\\(...\\)',
 (defvar-local my/org-latex--render-running 0)
 (defvar-local my/org-latex--render-processes nil)
 (defvar-local my/org-latex--pending-renders nil)
+(defvar-local my/org-latex--failed-renders nil)
 (defvar-local my/org-latex--overlay-table nil)
+(defvar-local my/org-latex--image-width-cache nil)
 (defvar-local my/org-latex--preview-base-directory-cache nil)
 (defvar-local my/org-latex--render-generation 0)
 (defvar-local my/org-latex--edit-preview-timer nil)
@@ -668,7 +711,7 @@ backend keeps the previous XeLaTeX/dvisvgm renderer for `\\(...\\)',
   :type 'integer)
 
 (defconst my/org-latex--fragment-syntax-regexp
-  (regexp-opt '("$$" "\\(" "\\[" "\\]" "#+begin_display_latex"))
+  "\\$"
   "Cheap regexp for text that may be near an Org math fragment.")
 
 (defconst my/org-latex--latex-fragment-start-regexp
@@ -676,7 +719,7 @@ backend keeps the previous XeLaTeX/dvisvgm renderer for `\\(...\\)',
   "Cheap regexp for syntax that can start a managed Org LaTeX fragment.")
 
 (defconst my/org-latex--typst-fragment-start-regexp
-  "\\$\\$"
+  "\\$"
   "Cheap regexp for syntax that can start a managed Org Typst fragment.")
 
 (defun my/org-latex--fragment-start-regexp ()
@@ -838,7 +881,7 @@ backend keeps the previous XeLaTeX/dvisvgm renderer for `\\(...\\)',
   "Return non-nil when FRAGMENT belongs to the active preview backend."
   (let ((open (plist-get fragment :open)))
     (pcase my/org-math-preview-backend
-      ('typst (string= open "$$"))
+      ('typst (string= open "$"))
       (_ (or (member open '("\\(" "\\[" "#+begin_display_latex"))
              (eq (plist-get fragment :block) 'latex))))))
 
@@ -881,7 +924,14 @@ backend keeps the previous XeLaTeX/dvisvgm renderer for `\\(...\\)',
   (when (and (< beg end)
              (<= end (point-max)))
     (let ((value (buffer-substring-no-properties beg end)))
-      (my/org-latex--fragment-spec beg end value value))))
+      (or (save-excursion
+            (goto-char beg)
+            (when-let* ((fragment (my/org-latex--current-fragment))
+                        ((= (plist-get fragment :begin) beg))
+                        ((= (plist-get fragment :end) end)))
+              (my/org-latex--fragment-spec-from-ratex-fragment fragment)))
+          (my/org-latex--fragment-spec
+           beg end value (my/org-latex--render-value-from-source value))))))
 
 (defun my/org-latex--async-preview-active-p ()
   "Return non-nil when Org async LaTeX preview should be used here."
@@ -990,7 +1040,7 @@ backend keeps the previous XeLaTeX/dvisvgm renderer for `\\(...\\)',
         (my/org-latex--cancel-after-save-preview-timer)
         (setq my/org-latex--after-save-preview-timer
               (run-with-idle-timer
-               1.00 nil
+               (my/org-latex--backend-delay 'save) nil
                #'my/org-latex--refresh-visible-previews-after-save
                (current-buffer))))
     (my/org-latex--cancel-after-save-preview-timer)))
@@ -1053,7 +1103,8 @@ backend keeps the previous XeLaTeX/dvisvgm renderer for `\\(...\\)',
 (defun my/org-latex--cache-preedit-spec (spec)
   "Queue SPEC on the cache-only edit pre-render pipeline."
   (let ((target (plist-get spec :file)))
-    (unless (file-exists-p target)
+    (unless (or (file-exists-p target)
+                (my/org-latex--failed-render-p target))
       (make-directory (file-name-directory target) t)
       (my/org-latex--ensure-state)
       (let ((job (gethash target my/org-latex--pending-renders)))
@@ -1113,7 +1164,7 @@ fallback edit render."
     (my/org-latex--clear-edit-preview-marker)
     (setq my/org-latex--edit-preview-marker (copy-marker beg))
     (setq my/org-latex--edit-preview-timer
-          (run-with-idle-timer my/org-latex-preview-edit-idle-delay nil
+          (run-with-idle-timer (my/org-latex--backend-delay 'edit) nil
                                #'my/org-latex--run-edit-preview
                                (current-buffer)
                                my/org-latex--edit-preview-marker))))
@@ -1157,7 +1208,7 @@ fallback edit render."
         (setq my/org-latex--leave-preview-end-marker (copy-marker end t))
         (setq my/org-latex--leave-preview-timer
               (run-with-idle-timer
-               my/org-latex-preview-leave-confirm-delay nil
+               (my/org-latex--backend-delay 'leave) nil
                #'my/org-latex--confirm-leave-preview
                (current-buffer)
                my/org-latex--leave-preview-beg-marker
@@ -1177,7 +1228,7 @@ fallback edit render."
           (my/org-latex--cancel-leave-preview)
           (setq my/org-latex--post-command-range
                 (my/org-latex--fragment-range frag))
-          (if my/org-latex-preview-while-editing
+          (if (my/org-latex--preview-while-editing-p)
               (my/org-latex--schedule-edit-preview frag)
             (my/org-latex--cancel-edit-preview-timer)
             (my/org-latex--clear-edit-preview-marker)))
@@ -1346,8 +1397,27 @@ fallback edit render."
   "Initialize async preview state for the current Org buffer."
   (unless (hash-table-p my/org-latex--pending-renders)
     (setq my/org-latex--pending-renders (make-hash-table :test 'equal)))
+  (unless (hash-table-p my/org-latex--failed-renders)
+    (setq my/org-latex--failed-renders (make-hash-table :test 'equal)))
   (unless (hash-table-p my/org-latex--overlay-table)
-    (setq my/org-latex--overlay-table (make-hash-table :test 'equal))))
+    (setq my/org-latex--overlay-table (make-hash-table :test 'equal)))
+  (unless (hash-table-p my/org-latex--image-width-cache)
+    (setq my/org-latex--image-width-cache (make-hash-table :test 'equal))))
+
+(defun my/org-latex--failed-render-p (target)
+  "Return non-nil when TARGET is known to fail for the current buffer."
+  (and (hash-table-p my/org-latex--failed-renders)
+       (gethash target my/org-latex--failed-renders)))
+
+(defun my/org-latex--mark-render-failed (target)
+  "Remember that TARGET failed to render for this buffer generation."
+  (my/org-latex--ensure-state)
+  (puthash target my/org-latex--render-generation my/org-latex--failed-renders))
+
+(defun my/org-latex--forget-render-failure (target)
+  "Forget any cached render failure for TARGET."
+  (when (hash-table-p my/org-latex--failed-renders)
+    (remhash target my/org-latex--failed-renders)))
 
 (defun my/org-latex--overlay-key (beg end)
   "Return the hash-table key for a preview overlay at BEG and END."
@@ -1426,6 +1496,17 @@ fallback edit render."
         (remhash key my/org-latex--overlay-table))
       (when-let* ((found (my/org-latex--find-existing-overlay beg end)))
         (my/org-latex--register-overlay found))))))
+
+(defun my/org-latex--overlay-current-p (beg end value)
+  "Return non-nil when the preview overlay for BEG END already shows VALUE."
+  (when-let* ((overlay (my/org-latex--lookup-overlay beg end))
+              ((equal (overlay-get overlay 'my/org-latex-value) value)))
+    (let ((align-width (overlay-get overlay 'my/org-latex-align-width)))
+      (or (null align-width)
+          (let ((window (or (get-buffer-window (current-buffer) t)
+                            (selected-window))))
+            (and (window-live-p window)
+                 (= align-width (max 1 (window-body-width window)))))))))
 
 (defun my/org-latex--clear-preview-range (beg end)
   "Delete Org LaTeX preview overlays between BEG and END.
@@ -1600,11 +1681,12 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
 
 (defun my/org-latex--ensure-edit-render-slot (job)
   "Make room for edit JOB without interrupting manual render work."
-  (when (and (my/org-latex--edit-job-p job)
-             (not (my/org-latex--job-running-p job))
-             (>= my/org-latex--render-running
-                 my/org-latex-preview-max-concurrency))
-    (my/org-latex--cancel-one-prunable-render job)))
+  (let* ((backend (plist-get job :backend))
+         (max-concurrency (my/org-latex--backend-max-concurrency backend)))
+    (when (and (my/org-latex--edit-job-p job)
+               (not (my/org-latex--job-running-p job))
+               (>= my/org-latex--render-running max-concurrency))
+      (my/org-latex--cancel-one-prunable-render job))))
 
 (defun my/org-latex--drop-stale-visible-queue (beg end)
   "Drop prunable queued visible-preview jobs outside BEG END."
@@ -1641,14 +1723,69 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
         (when (and (stringp target)
                    (not (gethash target seen))
                    (not (file-exists-p target))
+                   (not (my/org-latex--failed-render-p target))
                    (not (and job (my/org-latex--job-running-p job))))
           (puthash target t seen)
           (setq count (1+ count)))))))
 
+(defun my/org-latex--backend-max-concurrency (&optional backend)
+  "Return the render concurrency budget for BACKEND."
+  (let ((limit (if (eq (or backend my/org-math-preview-backend) 'typst)
+                   my/org-typst-preview-max-concurrency
+                 my/org-latex-preview-max-concurrency)))
+    (if (and (integerp limit) (> limit 0))
+        limit
+      1)))
+
+(defun my/org-latex--backend-edit-extra-concurrency (&optional backend)
+  "Return the extra edit render budget for BACKEND."
+  (let ((limit (if (eq (or backend my/org-math-preview-backend) 'typst)
+                   my/org-typst-preview-edit-extra-concurrency
+                 my/org-latex-preview-edit-extra-concurrency)))
+    (if (and (integerp limit) (> limit 0))
+        limit
+      0)))
+
+(defun my/org-latex--backend-delay (kind &optional backend)
+  "Return the preview delay for KIND and BACKEND."
+  (let ((typst (eq (or backend my/org-math-preview-backend) 'typst)))
+    (pcase kind
+      ('initial (if typst
+                    my/org-typst-preview-idle-delay
+                  my/org-latex-preview-idle-delay))
+      ('scroll (if typst
+                   my/org-typst-preview-scroll-idle-delay
+                 my/org-latex-preview-scroll-idle-delay))
+      ('edit (if typst
+                 my/org-typst-preview-edit-idle-delay
+               my/org-latex-preview-edit-idle-delay))
+      ('leave (if typst
+                  my/org-typst-preview-leave-confirm-delay
+                my/org-latex-preview-leave-confirm-delay))
+      ('save (if typst
+                 my/org-typst-preview-scroll-idle-delay
+               1.00))
+      (_ 0))))
+
+(defun my/org-latex--preview-min-chars (&optional backend)
+  "Return the visible region size threshold for BACKEND."
+  (let ((limit (if (eq (or backend my/org-math-preview-backend) 'typst)
+                   my/org-typst-preview-min-chars
+                 my/org-latex-preview-min-chars)))
+    (if (and (integerp limit) (>= limit 0))
+        limit
+      0)))
+
+(defun my/org-latex--preview-while-editing-p (&optional backend)
+  "Return non-nil when previews should be pre-rendered while editing."
+  (if (eq (or backend my/org-math-preview-backend) 'typst)
+      my/org-typst-preview-while-editing
+    my/org-latex-preview-while-editing))
+
 (defun my/org-latex--ensure-visible-render-slots (visible-specs beg end)
   "Make current visible SPECS able to start before off-screen prefetch work."
   (let* ((needed (my/org-latex--visible-uncached-render-count visible-specs))
-         (free (max 0 (- my/org-latex-preview-max-concurrency
+         (free (max 0 (- (my/org-latex--backend-max-concurrency)
                          my/org-latex--render-running)))
          (shortage (- needed free)))
     (when (> shortage 0)
@@ -1756,10 +1893,21 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
 (defun my/org-latex--display-math-source-p (value)
   "Return non-nil when VALUE is a display-math fragment."
   (let ((trimmed (string-trim-left value)))
-    (or (string-prefix-p "\\[" trimmed)
-        (string-prefix-p "$$" trimmed)
+    (or (my/org-latex--typst-display-math-source-p trimmed)
+        (string-prefix-p "\\[" trimmed)
         (string-prefix-p "#+begin_display_latex" trimmed)
         (string-prefix-p "\\begin{" trimmed))))
+
+(defun my/org-latex--typst-display-math-source-p (value)
+  "Return non-nil when VALUE is a Typst display math fragment.
+Only the character immediately after the opening single dollar is inspected:
+`$x$' remains inline, while `$ x$' and `$\\nx$' are display math.  `$$' is not
+part of the Typst preview contract."
+  (and (stringp value)
+       (> (length value) 1)
+       (eq (aref value 0) ?$)
+       (not (eq (aref value 1) ?$))
+       (not (null (memq (aref value 1) '(?\s ?\t ?\n ?\r))))))
 
 (defun my/org-latex--face-background (face)
   "Return FACE's concrete background color, or nil."
@@ -1818,6 +1966,42 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
     (overlay-put overlay 'my/org-latex-file file)
     (my/org-latex--register-overlay overlay)))
 
+(defun my/org-latex--svg-width-columns (file)
+  "Return SVG FILE width in frame columns, or nil.
+This avoids `image-size' for Typst SVG previews; `image-size' may synchronously
+load and parse the image while overlays are being attached."
+  (when (and (stringp file)
+             (string-match-p "\\.svg\\'" file)
+             (file-readable-p file))
+    (my/org-latex--ensure-state)
+    (or (gethash file my/org-latex--image-width-cache)
+        (let (columns)
+          (with-temp-buffer
+            (insert-file-contents file nil 0 512)
+            (goto-char (point-min))
+            (when (re-search-forward
+                   "width=\"\\([0-9.]+\\)\\([a-zA-Z]*\\)\"" nil t)
+              (let* ((raw (string-to-number (match-string 1)))
+                     (unit (match-string 2))
+                     (pixels
+                      (cond
+                       ((string= unit "pt") (* raw (/ 96.0 72.0)))
+                       ((or (string= unit "px") (string-empty-p unit)) raw)
+                       (t nil)))
+                     (char-width (max 1 (frame-char-width))))
+                (setq columns
+                      (and pixels
+                           (ceiling (/ pixels char-width)))))))
+          (when columns
+            (puthash file columns my/org-latex--image-width-cache))
+          columns))))
+
+(defun my/org-latex--image-width-columns (image file)
+  "Return IMAGE width in frame columns, preferring cheap SVG metadata from FILE."
+  (or (my/org-latex--svg-width-columns file)
+      (when-let* ((image-size (ignore-errors (image-size image))))
+        (ceiling (car image-size)))))
+
 (defun my/org-latex--overlay-shows-file-p (overlay file)
   "Return non-nil when OVERLAY already displays FILE."
   (when (my/org-latex--overlay-live-p overlay)
@@ -1852,9 +2036,9 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
                     ((listp image))
                     ((eq (car image) 'image))
                     (body-width (max 1 (window-body-width window)))
-                    (image-size (ignore-errors (image-size image)))
-                    (image-width (and image-size
-                                      (ceiling (car image-size)))))
+                    (file (or (overlay-get overlay 'my/org-latex-file)
+                              (plist-get (cdr image) :file)))
+                    (image-width (my/org-latex--image-width-columns image file)))
           (let* ((valid-background (and (stringp background)
                                         (not (my/org--unspecified-color-p background))
                                         background))
@@ -1897,6 +2081,7 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
            (let ((max-image-size nil))
              (setq overlay (my/org-latex--make-preview-overlay beg end file imagetype))))
          (overlay-put overlay 'my/org-latex-file file)
+         (overlay-put overlay 'my/org-latex-value value)
          (my/org-latex--configure-preview-overlay overlay value background))))))
 
 (defun my/org-latex--place-waiter-preview (waiter file imagetype)
@@ -1915,12 +2100,12 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
 
 (defun my/org-latex--typst-fragment-p (fragment)
   "Return non-nil when FRAGMENT uses Typst math delimiters."
-  (string= (plist-get fragment :open) "$$"))
+  (string= (plist-get fragment :open) "$"))
 
 (defun my/org-latex--fragment-display-p (fragment source-value)
   "Return non-nil when FRAGMENT or SOURCE-VALUE should be display aligned."
   (or (plist-get fragment :block)
-      (member (plist-get fragment :open) '("$$" "\\["))
+      (member (plist-get fragment :open) '("\\["))
       (my/org-latex--display-math-source-p source-value)))
 
 (defun my/org-latex--backend-for-fragment (&optional fragment)
@@ -1936,6 +2121,20 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
     (if (plist-get fragment :block)
         (plist-get fragment :content)
       source-value)))
+
+(defun my/org-latex--render-value-from-source (source-value)
+  "Return renderer input extracted from exact SOURCE-VALUE.
+This is the fallback path used when a known source range is re-rendered after
+editing.  For Typst, strip the single `$' delimiters here as well so the
+renderer never receives nested `$...$' math."
+  (if (eq my/org-math-preview-backend 'typst)
+      (pcase-let ((`(,open ,content ,_close)
+                   (ratex--split-delimited-fragment
+                    (string-trim source-value))))
+        (if (string= open "$")
+            content
+          source-value))
+    source-value))
 
 (defun my/org-latex--typst-color (value fallback)
   "Return VALUE as a Typst rgb string, or FALLBACK when it cannot be parsed."
@@ -1999,7 +2198,7 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
      "#show math.equation: set text(top-edge: \"bounds\", bottom-edge: \"bounds\")\n\n"
      (if display
          (format "#align(center)[$\n%s\n$]\n" body)
-       (format "$ %s $\n" body)))))
+       (format "$%s$\n" body)))))
 
 (defun my/org-latex--fragment-spec (beg end source-value render-value &optional fragment)
   "Return render metadata for a LaTeX fragment between BEG and END.
@@ -2048,8 +2247,10 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
                 (t color))
                default-bg)))
            (latex-header (my/org-latex--preview-header-for-snippet render-value))
+           (display-math (my/org-latex--fragment-display-p fragment source-value))
            (hash (sha1 (prin1-to-string
                         (list backend
+                              display-math
                               latex-header
                               nil
                               nil
@@ -2077,13 +2278,13 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
             :background bg
             :latex-header latex-header
             :backend backend
-            :display-math (my/org-latex--fragment-display-p fragment source-value)
+            :display-math display-math
             :typst-source
             (when (eq backend 'typst)
               (my/org-latex--typst-source
                render-value
                (my/org-latex--typst-color fg "#000000")
-               (my/org-latex--fragment-display-p fragment source-value)))
+               display-math))
             :typst-font-path (my/org-latex--typst-font-path)
             :processing-type processing-type))))
 
@@ -2099,7 +2300,9 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
                       ((= (plist-get fragment :begin) source-beg))
                       ((= (plist-get fragment :end) source-end)))
             (my/org-latex--fragment-spec-from-ratex-fragment fragment)))
-        (my/org-latex--fragment-spec source-beg source-end source-value source-value))))
+        (my/org-latex--fragment-spec
+         source-beg source-end source-value
+         (my/org-latex--render-value-from-source source-value)))))
 
 (defun my/org-latex--fragment-spec-from-ratex-fragment (fragment)
   "Return a render spec for a RaTeX-detected FRAGMENT.
@@ -2144,12 +2347,17 @@ block body should be sent to the LaTeX renderer."
     (when (< beg end)
       (save-excursion
         (dolist (fragment (my/org-latex--ratex-fragments beg end))
-          (let ((range (cons (plist-get fragment :begin)
-                             (plist-get fragment :end))))
+          (let* ((frag-beg (plist-get fragment :begin))
+                 (frag-end (plist-get fragment :end))
+                 (range (cons frag-beg frag-end))
+                 (source-value (buffer-substring-no-properties
+                                frag-beg frag-end)))
             (unless (my/org-latex--range-covered-p range seen-ranges)
               (push range seen-ranges)
-              (push (my/org-latex--fragment-spec-from-ratex-fragment fragment)
-                    fragments)))))
+              (unless (my/org-latex--overlay-current-p
+                       frag-beg frag-end source-value)
+                (push (my/org-latex--fragment-spec-from-ratex-fragment fragment)
+                      fragments))))))
         (nreverse fragments))))
 
 (defun my/org-latex--cleanup-job-files (job)
@@ -2270,8 +2478,9 @@ block body should be sent to the LaTeX renderer."
                    (plist-get job :value)
                    (my/org-latex--typst-color
                     (plist-get (plist-get job :options) :foreground)
-                    "#000000")
+                   "#000000")
                    (plist-get job :display-math)))))
+    (setf (plist-get job :command-list) command-parts)
     (setf (plist-get job :command)
           (mapconcat #'shell-quote-argument command-parts " "))
     (setf (plist-get job :texfilebase) typfilebase)
@@ -2301,6 +2510,7 @@ block body should be sent to the LaTeX renderer."
           (when (= generation my/org-latex--render-generation)
             (my/org-latex--finalize-render-state process job)
             (when success
+              (my/org-latex--forget-render-failure target)
               (make-directory (file-name-directory target) t)
               (copy-file (plist-get job :image-output-file) target t)
               (dolist (waiter (plist-get job :waiters))
@@ -2312,6 +2522,7 @@ block body should be sent to the LaTeX renderer."
                             (file-name-nondirectory target)
                             (error-message-string err))))))
             (unless (or success cancelled)
+              (my/org-latex--mark-render-failed target)
               (message "[org-latex] Preview failed for %s"
                        (file-name-nondirectory target)))
             (my/org-latex--pump-render-queue))))
@@ -2346,8 +2557,9 @@ block body should be sent to the LaTeX renderer."
            :name (format "org-latex-preview-%s"
                          (substring (sha1 (plist-get job :file)) 0 8))
            :buffer log-buffer
-           :command (list shell-file-name shell-command-switch
-                          (plist-get job :command))
+           :command (or (plist-get job :command-list)
+                        (list shell-file-name shell-command-switch
+                              (plist-get job :command)))
            :noquery t
            :sentinel #'my/org-latex--render-sentinel)))
     (when (hash-table-p my/org-latex--pending-renders)
@@ -2359,31 +2571,46 @@ block body should be sent to the LaTeX renderer."
 
 (defun my/org-latex--can-start-render-job-p (job)
   "Return non-nil when JOB can start within the render budget."
-  (or (< my/org-latex--render-running my/org-latex-preview-max-concurrency)
-      (and (my/org-latex--edit-job-p job)
-           (integerp my/org-latex-preview-edit-extra-concurrency)
-           (> my/org-latex-preview-edit-extra-concurrency 0)
-           (< (my/org-latex--running-edit-renders)
-              my/org-latex-preview-edit-extra-concurrency))))
+  (let* ((backend (plist-get job :backend))
+         (max-concurrency (my/org-latex--backend-max-concurrency backend))
+         (extra-edit-concurrency
+          (my/org-latex--backend-edit-extra-concurrency backend)))
+    (or (< my/org-latex--render-running max-concurrency)
+        (and (my/org-latex--edit-job-p job)
+             (> extra-edit-concurrency 0)
+             (< (my/org-latex--running-edit-renders)
+                extra-edit-concurrency)))))
+
+(defun my/org-latex--job-failed-p (job)
+  "Return non-nil when JOB's target is already known to fail."
+  (my/org-latex--failed-render-p (plist-get job :file)))
 
 (defun my/org-latex--pump-render-queue ()
   "Start queued Org LaTeX renders up to the concurrency limit."
   (let ((continue t))
     (while (and continue my/org-latex--render-queue)
       (let ((job (car my/org-latex--render-queue)))
-        (if (not (my/org-latex--can-start-render-job-p job))
+        (if (my/org-latex--job-failed-p job)
+            (progn
+              (setq job (my/org-latex--dequeue-job))
+              (my/org-latex--remove-pending-job job)
+              (my/org-latex--release-waiters job)
+              (my/org-latex--cleanup-job-files job))
+          (if (not (my/org-latex--can-start-render-job-p job))
             (setq continue nil)
-          (setq job (my/org-latex--dequeue-job))
-          (setq my/org-latex--render-running (1+ my/org-latex--render-running))
-          (condition-case err
-              (my/org-latex--start-render job)
-            (error
-             (setq my/org-latex--render-running
-                   (max 0 (1- my/org-latex--render-running)))
-             (my/org-latex--remove-pending-job job)
-             (my/org-latex--release-waiters job)
-             (my/org-latex--cleanup-job-files job)
-             (message "[org-latex] %s" (error-message-string err)))))))))
+            (setq job (my/org-latex--dequeue-job))
+            (setq my/org-latex--render-running (1+ my/org-latex--render-running))
+            (condition-case err
+                (my/org-latex--start-render job)
+              (error
+               (setq my/org-latex--render-running
+                     (max 0 (1- my/org-latex--render-running)))
+               (my/org-latex--remove-pending-job job)
+               (when-let* ((target (plist-get job :file)))
+                 (my/org-latex--mark-render-failed target))
+               (my/org-latex--release-waiters job)
+               (my/org-latex--cleanup-job-files job)
+               (message "[org-latex] %s" (error-message-string err))))))))))
 
 (defun my/org-latex--enqueue-fragment (spec &optional priority no-pump)
   "Place or queue preview work described by SPEC.
@@ -2399,7 +2626,7 @@ When NO-PUMP is non-nil, leave queue pumping to the caller."
          target
          (plist-get spec :imagetype)
          (plist-get spec :background))
-      (progn
+      (unless (my/org-latex--failed-render-p target)
         (make-directory (file-name-directory target) t)
         (my/org-latex--ensure-state)
         (let ((job (gethash target my/org-latex--pending-renders)))
@@ -2561,7 +2788,9 @@ queued work."
     (maphash (lambda (_key job)
                (my/org-latex--release-waiters job))
              my/org-latex--pending-renders)
-    (clrhash my/org-latex--pending-renders)))
+    (clrhash my/org-latex--pending-renders))
+  (when (hash-table-p my/org-latex--failed-renders)
+    (clrhash my/org-latex--failed-renders)))
 
 (defun my/org-latex-preview-command (&optional arg)
   "Asynchronously preview Org LaTeX fragments like `org-latex-preview'."
@@ -2629,7 +2858,8 @@ queued work."
                  (force (called-interactively-p 'interactive)))
             (setq my/org-latex--last-visible-range (cons beg end))
             (when (and (or force
-                           (> (- end beg) my/org-latex-preview-min-chars)))
+                           (> (- end beg)
+                              (my/org-latex--preview-min-chars))))
               (my/org-latex--preview-visible-range beg end)
               (setq my/org-latex--last-visible-preview-time (float-time))
               (my/org-latex--prune-offscreen-overlays beg end))))))))
@@ -2651,7 +2881,7 @@ queued work."
         ;; The timer computes the current visible range when it fires.  Keeping
         ;; one pending timer avoids a visible-range walk on every scroll event.
         (setq my/org-latex--preview-timer
-              (run-at-time my/org-latex-preview-scroll-idle-delay nil
+              (run-at-time (my/org-latex--backend-delay 'scroll) nil
                            #'my/org-latex-preview-visible-now
                            window
                            (current-buffer))))
@@ -2748,7 +2978,7 @@ typing into a freshly expanded display-math snippet and jump point to `\\]'."
                     #'my/org-latex-cleanup-scroll-preview nil t)
           (add-hook 'kill-buffer-hook
                     #'my/org-latex-cleanup-scroll-preview nil t)
-          (run-with-idle-timer my/org-latex-preview-idle-delay nil
+          (run-with-idle-timer (my/org-latex--backend-delay 'initial) nil
                                #'my/org-latex-preview-visible-initial
                                (current-buffer)))
       (my/org-latex-install-syntax-watch))))

@@ -15,6 +15,7 @@
 (require 'ratex-render)
 
 (defvar ratex-mode)
+(defvar ratex-render-backend)
 
 (defun ratex--any-active-buffer-p (&optional ignored-buffer)
   "Return non-nil when any live buffer except IGNORED-BUFFER has `ratex-mode'."
@@ -78,7 +79,8 @@ cleanup from `kill-buffer-hook' or `change-major-mode-hook'."
             (add-hook 'kill-buffer-hook #'ratex--cleanup-current-buffer-h nil t)
             (add-hook 'change-major-mode-hook #'ratex--cleanup-current-buffer-h nil t)
             (ratex--ensure-global-hooks)
-            (ratex-start-backend)
+            (unless (eq ratex-render-backend 'typst)
+              (ratex-start-backend))
             (ratex-initialize-previews)
             (when (ratex--preview-style)
               (ratex--refresh-preview-now)))

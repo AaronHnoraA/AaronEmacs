@@ -9,14 +9,14 @@
 (defvar my/latex-preview-math-font)
 
 (defconst my/org-ratex--fragment-start-regexp
-  "\\$\\$\\|\\\\(\\|\\\\\\[\\|^[ \t]*\\\\begin{[A-Za-z0-9*]+}"
-  "Regexp matching likely LaTeX fragment starters in Org buffers.")
+  "\\$"
+  "Regexp matching likely Typst math starters in Org buffers.")
 
 (defvar-local my/org-ratex--syntax-watch-installed nil
   "Whether this Org buffer is waiting to enable `ratex-mode' on demand.")
 
 (defun my/org-ratex-buffer-has-fragment-syntax-p ()
-  "Return non-nil when the current Org buffer likely contains LaTeX fragments."
+  "Return non-nil when the current Org buffer likely contains Typst math."
   (save-excursion
     (save-restriction
       (widen)
@@ -31,7 +31,7 @@
   (setq-local my/org-ratex--syntax-watch-installed nil))
 
 (defun my/org-ratex-enable-on-syntax-insert (beg end _len)
-  "Enable `ratex-mode' when an edit between BEG and END inserts LaTeX syntax."
+  "Enable `ratex-mode' when an edit between BEG and END inserts Typst math."
   (when (and (derived-mode-p 'org-mode)
              (not (bound-and-true-p ratex-mode))
              (save-excursion

@@ -95,6 +95,23 @@
     (when (overlayp overlay)
       (ratex--overlay-apply-style overlay style))))
 
+(defun ratex--centered-image-string (overlay image)
+  "Return IMAGE display text centered for OVERLAY's window when possible."
+  (let* ((buffer (overlay-buffer overlay))
+         (window (or (and buffer (get-buffer-window buffer t))
+                     (selected-window)))
+         (body-width (and (window-live-p window)
+                          (max 1 (window-body-width window))))
+         (image-size (and body-width (ignore-errors (image-size image))))
+         (image-width (and image-size (ceiling (car image-size))))
+         (left (and body-width image-width
+                    (max 0 (/ (- body-width image-width) 2))))
+         (image-text (propertize " " 'display image)))
+    (if left
+        (concat (propertize " " 'display `(space :align-to ,left))
+                image-text)
+      image-text)))
+
 (defun ratex--overlay-apply-style (overlay style)
   "Apply STYLE to OVERLAY using its stored image."
   (let ((image (overlay-get overlay 'ratex-image)))
@@ -102,7 +119,9 @@
      ((eq style 'below)
       (overlay-put overlay 'display nil)
       (overlay-put overlay 'after-string
-                   (concat "\n" (propertize " " 'display image) "\n")))
+                   (concat "\n"
+                           (ratex--centered-image-string overlay image)
+                           "\n")))
      (t
       (overlay-put overlay 'after-string nil)
       (overlay-put overlay 'display image))))

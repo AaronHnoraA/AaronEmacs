@@ -7,13 +7,11 @@
 (require 'ratex-core)
 
 (defconst ratex--delimiter-pairs
-  '(("$$" . "$$")
-    ("\\[" . "\\]")
-    ("\\(" . "\\)"))
-  "Lightweight Org math delimiters supported by RaTeX.")
+  '(("$" . "$"))
+  "Typst math delimiters supported by RaTeX.")
 
 (defconst ratex--active-fragment-preferred-opens
-  '("$$" "\\[" "\\(")
+  '("$")
   "Delimiters preferred for active edit previews.")
 
 (defcustom ratex-region-scan-context-chars 600
@@ -31,7 +29,6 @@ the full delimiter pair without falling back to a full-buffer parse."
         all)
     (dolist (pair ratex--delimiter-pairs)
       (setq all (nconc all (ratex--fragments-with-delimiters (car pair) (cdr pair)))))
-    (setq all (nconc all (ratex--org-display-latex-blocks-in-buffer)))
     (ratex--select-non-overlapping-fragments (nconc org-fragments all))))
 
 (defun ratex-fragments-in-region (beg end)
@@ -50,7 +47,6 @@ startup and refresh work stays local to what is on screen."
       (let (all)
         (dolist (pair ratex--delimiter-pairs)
           (setq all (nconc all (ratex--fragments-with-delimiters (car pair) (cdr pair)))))
-        (setq all (nconc all (ratex--org-display-latex-blocks-in-buffer)))
         (cl-remove-if-not
          (lambda (fragment)
            (ratex--fragment-intersects-region-p fragment region-beg region-end))
@@ -67,8 +63,7 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
                     (when-let* ((org-fragment (ratex--org-fragment-at-point)))
                       (list org-fragment))
                     (cl-loop for (open . close) in ratex--delimiter-pairs
-                             nconc (ratex--fragments-with-delimiters-at-point open close))
-                    (ratex--org-display-latex-blocks-at-point)))
+                             nconc (ratex--fragments-with-delimiters-at-point open close))))
                   (preferred
                    (cl-remove-if-not #'ratex--preferred-active-fragment-p candidates)))
              (or (ratex--largest-fragment preferred)
@@ -115,7 +110,7 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
     (pcase type
       ('latex-fragment
        (pcase-let ((`(,open ,content ,close) (ratex--split-delimited-fragment value)))
-         (when (member open '("$$" "\\[" "\\("))
+         (when (equal open "$")
            (list :begin begin
                  :end end
                  :content content
@@ -126,12 +121,11 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
 (defun ratex--split-delimited-fragment (value)
   "Split VALUE into (OPEN CONTENT CLOSE) for common math delimiters."
   (cond
-   ((and (string-prefix-p "\\[" value) (string-suffix-p "\\]" value))
-    (list "\\[" (substring value 2 -2) "\\]"))
-   ((and (string-prefix-p "\\(" value) (string-suffix-p "\\)" value))
-    (list "\\(" (substring value 2 -2) "\\)"))
-   ((and (string-prefix-p "$$" value) (string-suffix-p "$$" value))
-    (list "$$" (substring value 2 -2) "$$"))
+   ((and (string-prefix-p "$" value)
+         (string-suffix-p "$" value)
+         (not (string-prefix-p "$$" value))
+         (not (string-suffix-p "$$" value)))
+    (list "$" (substring value 1 -1) "$"))
    (t
     (list "" (string-trim value) ""))))
 
@@ -145,14 +139,17 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
       (while (search-forward open nil t)
         (let ((begin (- (point) open-len)))
           (unless (or (ratex--escaped-at-p begin)
-                      (ratex--code-context-at-p begin))
+                      (ratex--code-context-at-p begin)
+                      (not (ratex--delimiter-open-valid-p begin open)))
             (let ((content-begin (point))
                   found-end
                   content-end)
               (while (and (not found-end) (search-forward close nil t))
                 (let ((end-start (- (point) close-len)))
                   (unless (or (ratex--escaped-at-p end-start)
-                              (ratex--code-context-at-p end-start))
+                              (ratex--code-context-at-p end-start)
+                              (not (ratex--delimited-fragment-valid-p
+                                    begin content-begin end-start (point) open close)))
                     (setq found-end (point))
                     (setq content-end end-start))))
               (when (and found-end (<= content-begin content-end))
@@ -175,7 +172,8 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
       (while (search-backward open nil t)
         (let ((begin (point)))
           (if (or (ratex--escaped-at-p begin)
-                  (ratex--code-context-at-p begin))
+                  (ratex--code-context-at-p begin)
+                  (not (ratex--delimiter-open-valid-p begin open)))
               (goto-char (max (point-min) (1- begin)))
             (let ((content-begin (+ begin open-len))
                   found-end
@@ -184,7 +182,9 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
               (while (and (not found-end) (search-forward close nil t))
                 (let ((end-start (- (point) close-len)))
                   (unless (or (ratex--escaped-at-p end-start)
-                              (ratex--code-context-at-p end-start))
+                              (ratex--code-context-at-p end-start)
+                              (not (ratex--delimited-fragment-valid-p
+                                    begin content-begin end-start (point) open close)))
                     (setq found-end (point))
                     (setq content-end end-start))))
               (when (and found-end
@@ -200,6 +200,52 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
                       fragments))
               (goto-char (max (point-min) (1- begin)))))))
       fragments)))
+
+(defun ratex--delimiter-open-valid-p (begin open)
+  "Return non-nil when OPEN may start a math fragment at BEGIN."
+  (or (not (equal open "$"))
+      (and (not (ratex--char-at-p (1- begin) ?$))
+           (not (ratex--char-at-p (1+ begin) ?$))
+           (or (= begin (point-min))
+               (not (memq (char-syntax (char-before begin)) '(?w ?_)))))))
+
+(defun ratex--delimited-fragment-valid-p (begin content-begin content-end end open close)
+  "Return non-nil when an OPEN..CLOSE candidate is a real math fragment."
+  (let ((content (buffer-substring-no-properties content-begin content-end)))
+    (cond
+     ((equal open "$")
+      (and (equal close "$")
+           (ratex--single-dollar-boundary-p begin end)
+           (not (string-empty-p (string-trim content)))
+           (not (string-match-p "\n[ \t]*\n" content))
+           (not (string-match-p "\n[ \t]*\\(?:\\*+\\s-\\|#\\+\\)" content))
+           (ratex--typst-math-content-p content)))
+     (t t))))
+
+(defun ratex--typst-math-content-p (content)
+  "Return non-nil when CONTENT looks like math, not prose or currency."
+  (let ((trimmed (string-trim content)))
+    (and (not (string-match-p "\\`[[:digit:]][[:digit:]., \t]*\\'" trimmed))
+         (or (string-match-p "[\\\\_^=<>+*/|-]" trimmed)
+             (string-match-p "\\`[A-Za-z_][A-Za-z0-9_.'() \t]*\\'" trimmed)
+             (string-match-p "\\`[A-Za-z_][A-Za-z0-9_.'() \t\n]*\\'" trimmed)))))
+
+(defun ratex--single-dollar-boundary-p (begin end)
+  "Return non-nil when BEGIN..END is bounded by single dollar signs."
+  (and (not (ratex--char-at-p (1- begin) ?$))
+       (not (ratex--char-at-p (1+ begin) ?$))
+       (not (ratex--char-at-p (- end 2) ?$))
+       (not (ratex--char-at-p end ?$))
+       (or (= begin (point-min))
+           (not (memq (char-syntax (char-before begin)) '(?w ?_))))
+       (or (= end (point-max))
+           (not (memq (char-syntax (char-after end)) '(?w ?_))))))
+
+(defun ratex--char-at-p (pos char)
+  "Return non-nil when POS contains CHAR."
+  (and (<= (point-min) pos)
+       (< pos (point-max))
+       (eq (char-after pos) char)))
 
 (defun ratex--org-display-latex-blocks-in-buffer ()
   "Return all Org #+begin_display_latex blocks in the current buffer."

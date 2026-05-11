@@ -67,7 +67,7 @@ leaves the formula or the idle timer renders first.")
 (defconst ratex--posframe-gap-x 10)
 (defconst ratex--posframe-gap-y 8)
 (defconst ratex--math-delimiter-re
-  "\\$\\$\\|\\\\(\\|\\\\\\[\\|\\\\begin{"
+  "\\$"
   "Regexp matching likely math delimiters near point.")
 
 (defun ratex--clear-posframe-state (&optional buffer)
@@ -561,8 +561,26 @@ ordinary edits."
 
 (defun ratex--fragment-typst-p (fragment)
   "Return non-nil when FRAGMENT should be rendered by Typst."
-  (and (eq ratex-render-backend 'typst)
-       (equal (plist-get fragment :open) "$$")))
+  (and fragment
+       (eq ratex-render-backend 'typst)))
+
+(defun ratex--typst-display-fragment-p (fragment)
+  "Return non-nil when FRAGMENT uses Typst display math spacing.
+Only the first character of the fragment content is inspected.  `$x$' remains
+inline, while `$ x$' and `$\\nx$' render as display math.  `$$' is intentionally
+not supported by the detector."
+  (let ((content (plist-get fragment :content)))
+    (and (ratex--fragment-typst-p fragment)
+         (stringp content)
+         (> (length content) 0)
+         (not (null (memq (aref content 0) '(?\s ?\t ?\n ?\r)))))))
+
+(defun ratex--overlay-style-for-fragment (fragment)
+  "Return the overlay placement style for FRAGMENT."
+  (if (or (ratex--typst-display-fragment-p fragment)
+          (equal (plist-get fragment :open) "\\["))
+      'below
+    'inline))
 
 (defun ratex--fragment-backend (fragment)
   "Return the render backend for FRAGMENT."
@@ -578,7 +596,8 @@ ordinary edits."
         ratex-svg-padding
         (ratex--normalized-render-color)
         ratex-typst-font
-        ratex-typst-font-dir))
+        ratex-typst-font-dir
+        (ratex--typst-display-fragment-p fragment)))
 
 (defun ratex--render-latex (fragment)
   "Return backend-ready LaTeX for FRAGMENT.
@@ -630,7 +649,9 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
              ratex-font-size)
      (or font-line "")
      "#show math.equation: set text(top-edge: \"bounds\", bottom-edge: \"bounds\")\n\n"
-     (format "$\n%s\n$\n" (ratex--render-typst fragment)))))
+     (if (ratex--typst-display-fragment-p fragment)
+         (format "$\n%s\n$\n" (ratex--render-typst fragment))
+       (format "$%s$\n" (ratex--render-typst fragment))))))
 
 (defun ratex--typst-command ()
   "Return an executable Typst command path, including login-shell lookup."
@@ -700,6 +721,24 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
     (dolist (key (ratex-overlay-keys))
       (unless (gethash key keep)
         (ratex-remove-overlay key)))))
+
+(defun ratex--handle-render-response (origin-buffer cache-key response)
+  "Handle render RESPONSE for CACHE-KEY in ORIGIN-BUFFER."
+  (when (buffer-live-p origin-buffer)
+    (with-current-buffer origin-buffer
+      (remhash cache-key (ratex--inflight-table))
+      (let ((waiters (gethash cache-key (ratex--inflight-waiters-table))))
+        (remhash cache-key (ratex--inflight-waiters-table))
+        (when (alist-get 'ok response)
+          (ratex--cache-put cache-key response))
+        (when ratex-mode
+          (ratex--preserving-window-start
+           (lambda ()
+             (dolist (entry waiters)
+               (ratex--display-if-visible
+                (car entry)
+                (cdr entry)
+                response)))))))))
 
 (defun ratex--render-payload (fragment)
   "Build the render request payload for FRAGMENT."
@@ -782,21 +821,11 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
      (t
       (ratex--enqueue-waiter cache-key fragment-key fragment)
       (puthash cache-key t (ratex--inflight-table))
-      (let ((callback
-             (lambda (response)
-               (remhash cache-key (ratex--inflight-table))
-               (let ((waiters (gethash cache-key (ratex--inflight-waiters-table))))
-                 (remhash cache-key (ratex--inflight-waiters-table))
-                 (when (alist-get 'ok response)
-                   (ratex--cache-put cache-key response))
-                 (when ratex-mode
-                   (ratex--preserving-window-start
-                    (lambda ()
-                      (dolist (entry waiters)
-                        (ratex--display-if-visible
-                         (car entry)
-                         (cdr entry)
-                         response)))))))))
+      (let* ((origin-buffer (current-buffer))
+             (callback
+              (lambda (response)
+                (ratex--handle-render-response
+                 origin-buffer cache-key response))))
         (if (ratex--fragment-typst-p fragment)
             (ratex--typst-request fragment callback)
           (ratex-request (ratex--render-payload fragment) callback)))))))
@@ -807,6 +836,8 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
     (cond
      ((not (ratex--fragment-valid-p fragment))
       (ratex-remove-overlay fragment-key))
+     ((not (alist-get 'ok response))
+      (ratex--display-response fragment-key fragment response))
      ((and active (ratex--same-active-context-p fragment active))
       (if (ratex--preview-enabled-p)
           (progn
@@ -817,7 +848,7 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
         (ratex-remove-overlay fragment-key)))
      (t
       (if ratex-inline-preview
-          (ratex--display-response fragment-key fragment response 'inline)
+          (ratex--display-response fragment-key fragment response)
         (ratex-remove-overlay fragment-key))))))
 
 (defun ratex--display-response (fragment-key fragment response &optional style)
@@ -846,7 +877,7 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
            image
            (format "RaTeX %s" (if (alist-get 'cached response) "cached" "rendered"))
            fragment
-           (or style 'inline)))
+           (or style (ratex--overlay-style-for-fragment fragment))))
          (t
           (ratex-remove-overlay fragment-key)))))))
 
@@ -1164,7 +1195,7 @@ Strategy mirrors company-box's frame-position logic:
              (below-y (+ (cdr below-base) ratex--posframe-display-offset-y)))
         (cons (car below-base) below-y)))))
 
-(defun ratex--posframe-poshandler-for-fragment (fragment)
+(defun ratex--posframe-poshandler-for-fragment (_fragment)
   "Return the best posframe poshandler for FRAGMENT."
   (or ratex-posframe-poshandler
       #'ratex-posframe-poshandler-point-top-left-corner-offset))
