@@ -156,6 +156,12 @@ Use port 0 to let Tinymist choose a free port."
   :type 'boolean
   :group 'my/typst)
 
+(defcustom my/typst-preview-flash-source-cursor t
+  "When non-nil, briefly pulse the line after a preview→source jump.
+Provides a visual cue so the new cursor position is easy to spot."
+  :type 'boolean
+  :group 'my/typst)
+
 (defcustom my/typst-preview-pop-log-on-error nil
   "When non-nil, display the Tinymist preview log after preview errors."
   :type 'boolean
@@ -455,6 +461,19 @@ Use port 0 to let Tinymist choose a free port."
       (when my/typst-preview-center-source
         (recenter-top-bottom)))))
 
+(declare-function pulse-momentary-highlight-one-line "pulse" (&optional point face))
+
+(defun my/typst-preview--flash-source-cursor (&optional buffer)
+  "Pulse the line at point in BUFFER to mark a preview→source jump."
+  (when my/typst-preview-flash-source-cursor
+    (let ((target (or buffer (window-buffer (selected-window)))))
+      (when (buffer-live-p target)
+        (with-current-buffer target
+          (require 'pulse)
+          (let ((pulse-delay 0.04)
+                (pulse-iterations 8))
+            (pulse-momentary-highlight-one-line (point) 'next-error)))))))
+
 (defun my/typst-preview--handle-control-message (source-buffer _socket frame)
   "Handle a Tinymist control-plane websocket FRAME for SOURCE-BUFFER."
   (condition-case err
@@ -466,7 +485,8 @@ Use port 0 to let Tinymist choose a free port."
                  (position (gethash "start" message)))
              (unless (and (fboundp 'my/note-open-link-at-file-position)
                           (my/note-open-link-at-file-position file position))
-               (my/typst-preview--goto-file-position file position))))
+               (my/typst-preview--goto-file-position file position))
+             (my/typst-preview--flash-source-cursor)))
           ("syncEditorChanges"
            (when (buffer-live-p source-buffer)
              (my/typst-preview-sync-memory source-buffer)))
