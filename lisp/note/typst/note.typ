@@ -143,3 +143,27 @@
     note-card("📝 笔记", "26735f", "e1f1ea", "✎", pos.at(0))
   }
 }
+
+// --- Status chips (inline, e.g. `- #todo[Write proof of Lemma 3]`).
+// Scanned by `my/note-agenda` on the Emacs side; keep the call form
+// `#<state>[body]` so the regex stays stable.
+#let task-tag(name, accent, tint) = box(
+  fill: rgb(tint),
+  stroke: 0.6pt + rgb(accent),
+  inset: (x: 0.5em, y: 0.06em),
+  outset: (y: 0.18em),
+  radius: 999pt,
+  baseline: 0.05em,
+)[#text(
+    fill: rgb(accent),
+    weight: "bold",
+    size: 0.72em,
+    tracking: 0.06em,
+  )[#upper(name)]]
+
+#let task-muted = rgb("8a8077")
+#let todo(body) = [#task-tag("todo", "9b3b37", "f4dfdc") #body]
+#let doing(body) = [#task-tag("doing", "9b6017", "fbe9c8") #body]
+#let waiting(body) = [#task-tag("waiting", "5f6c7b", "eceae4") #body]
+#let done(body) = [#task-tag("done", "2f6f42", "e5f3df") #text(fill: task-muted)[#strike[#body]]]
+#let cancelled(body) = [#task-tag("cancelled", "8a8077", "ece8e0") #text(fill: task-muted)[#strike[#body]]]

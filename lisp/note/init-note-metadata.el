@@ -80,6 +80,24 @@
       (user-error "Value is empty"))
     value))
 
+(defun my/note--known-tags ()
+  "Return distinct tag strings recorded in the note index."
+  (mapcar #'car
+          (my/note--rows
+           "select distinct tag from tags where tag <> '' order by tag")))
+
+(defun my/note--read-tag (prompt)
+  "Read a tag using PROMPT with completion over existing tags."
+  (let* ((known (my/note--known-tags))
+         (current (and (derived-mode-p 'typst-ts-mode 'typst-mode 'my/typst-mode)
+                       (my/note--metadata-list-values "tags")))
+         (candidates (seq-uniq (append current known) #'string=))
+         (value (string-trim
+                 (completing-read prompt candidates nil nil))))
+    (when (string-empty-p value)
+      (user-error "Value is empty"))
+    value))
+
 (defun my/note--after-metadata-edit (message value)
   "Save current note, sync the index, and report MESSAGE with VALUE."
   (save-buffer)
@@ -89,7 +107,7 @@
 ;;;###autoload
 (defun my/note-tag-add (tag)
   "Add TAG to the current Typst note metadata."
-  (interactive (list (my/note--read-metadata-value "Tag: ")))
+  (interactive (list (my/note--read-tag "Tag: ")))
   (unless (derived-mode-p 'typst-ts-mode 'typst-mode 'my/typst-mode)
     (user-error "Not in a Typst note buffer"))
   (my/note--set-metadata-list

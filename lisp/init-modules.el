@@ -90,6 +90,9 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-ratex)
 (my/require-module-safely 'init-note)
 (my/require-module-safely 'init-note-metadata)
+(my/require-module-safely 'init-note-capture)
+(my/require-module-safely 'init-note-reference)
+(my/require-module-safely 'init-note-agenda)
 (my/require-module-safely 'init-note-graph)
 (my/require-module-safely 'init-note-tools)
 
