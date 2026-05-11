@@ -1,6 +1,6 @@
 # -*- mode: snippet; require-final-newline: nil -*-
 # type: command
-# name: inline math
+# name: outline math
 # key: '
 # --
 (let ((text (or yas-selected-text ""))
