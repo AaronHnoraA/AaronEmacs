@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Note important card
+# key: imp
+# --
+#important[
+  $0
+]

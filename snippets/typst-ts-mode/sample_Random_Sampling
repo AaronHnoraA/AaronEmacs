@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Random sampling
+# key: sample
+# --
+${1:x} arrow.l.long.bar^upright("R") ${2:S} $0

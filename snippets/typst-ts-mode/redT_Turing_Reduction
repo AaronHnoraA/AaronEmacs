@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Turing reduction
+# key: redT
+# --
+${1:A} <=_T^p ${2:B} $0

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Polylogarithmic
+# key: polylog
+# --
+"polylog" lr((${1:n})) $0

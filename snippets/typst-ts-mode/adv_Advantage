@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Advantage
+# key: adv
+# --
+"Adv"^(${1:ind-cpa})_(${2:Pi}, cal(${3:A})) lr((${4:lambda})) $0

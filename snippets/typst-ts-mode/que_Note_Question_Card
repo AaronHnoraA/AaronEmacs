@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Note question card
+# key: que
+# --
+#question[
+  $0
+]

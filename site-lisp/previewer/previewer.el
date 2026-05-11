@@ -1174,17 +1174,19 @@ When FORCE is nil, only refresh stale or missing assets."
     (user-error "Previewer does not handle %s" major-mode))
   (let ((previewer-browser-backend 'xwidget))
     (setq previewer-source-buffer (current-buffer))
-    (unless previewer-mode
-      (previewer-mode 1))
-    (if-let* ((url (previewer--external-url)))
-        (progn
-          (previewer--start-external)
-          (previewer-open-external-browser-maybe-delayed url))
-      (previewer-maybe-update-vendor-assets)
-      (previewer--install-buffer-hooks)
-      (unless (previewer--xwidget-preview-buffer-live-p)
-        (previewer-open-browser))
-      (previewer-send-content t))))
+    (let ((already-enabled previewer-mode))
+      (unless previewer-mode
+        (previewer-mode 1))
+      (if-let* ((url (previewer--external-url)))
+          (unless (and (not already-enabled)
+                       previewer-auto-browser)
+            (previewer--start-external)
+            (previewer-open-external-browser-maybe-delayed url))
+        (previewer-maybe-update-vendor-assets)
+        (previewer--install-buffer-hooks)
+        (unless (previewer--xwidget-preview-buffer-live-p)
+          (previewer-open-browser))
+        (previewer-send-content t)))))
 
 ;;;###autoload
 (defun previewer-org-workbench ()

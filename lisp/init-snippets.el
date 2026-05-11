@@ -38,6 +38,12 @@
   (yas-activate-extra-mode 'latex-mode)
   (yas-activate-extra-mode 'tex-mode))
 
+(defun my/yas-setup-typst-extra-modes ()
+  "Make all Typst buffers share the same snippet set."
+  (yas-activate-extra-mode 'typst-ts-mode)
+  (yas-activate-extra-mode 'typst-mode)
+  (yas-activate-extra-mode 'my/typst-mode))
+
 (defun my/yas-setup-treesit-extra-modes ()
   "Make tree-sitter buffers reuse snippets from their original major modes."
   (when-let* ((extra-modes (alist-get major-mode my/yas-treesit-extra-modes)))
@@ -77,6 +83,12 @@ previously inlined in every org-mode snippet file."
    (text-mode . yas-minor-mode)
    (org-mode . yas-minor-mode)
    (org-mode . my/yas-setup-org-behavior)
+   (typst-ts-mode . yas-minor-mode)
+   (typst-mode . yas-minor-mode)
+   (my/typst-mode . yas-minor-mode)
+   (typst-ts-mode . my/yas-setup-typst-extra-modes)
+   (typst-mode . my/yas-setup-typst-extra-modes)
+   (my/typst-mode . my/yas-setup-typst-extra-modes)
    (yas-minor-mode . my/yas-setup-treesit-extra-modes)
    (LaTeX-mode . my/yas-setup-auctex-extra-modes)
    (plain-TeX-mode . my/yas-setup-auctex-extra-modes))

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Partial trace
+# key: ptr
+# --
+"Tr"_(${1:B}) lr((rho_(${2:AB}))) $0

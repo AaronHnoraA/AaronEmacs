@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Note warning card
+# key: warn
+# --
+#warning[
+  $0
+]

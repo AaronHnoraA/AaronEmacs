@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Outer Product
+# key: outer
+# --
+lr(|${1:psi} angle.r) lr(angle.l ${1:psi}|) $2

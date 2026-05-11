@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Table ref
+# key: table:ref
+# --
+@tab:$1$0

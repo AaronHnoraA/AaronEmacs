@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Note link
+# key: nlink
+# --
+#note("${1:id}")[${2:title}]$0

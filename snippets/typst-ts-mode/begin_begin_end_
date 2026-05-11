@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: begin/end (display math)
+# key: begin
+# --
+$ $1 $

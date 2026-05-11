@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Class NEXP
+# key: NEXP
+# --
+sans("NEXP")$0

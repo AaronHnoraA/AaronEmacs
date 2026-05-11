@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Polynomial
+# key: poly
+# --
+"poly" lr((${1:n})) $0

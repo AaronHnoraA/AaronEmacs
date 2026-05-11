@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Soft O
+# key: tildeO
+# --
+tilde(O) lr((${1:f(n)})) $0

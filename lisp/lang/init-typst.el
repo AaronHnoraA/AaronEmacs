@@ -26,6 +26,7 @@
 (declare-function websocket-close "websocket" (websocket))
 (declare-function websocket-send-text "websocket" (websocket text))
 (declare-function websocket-frame-text "websocket" (frame))
+(declare-function my/note-open-link-at-file-position "init-note" (file position))
 (autoload 'previewer-workbench "previewer" nil t)
 (defvar company-backends)
 (defvar company-idle-delay)
@@ -44,6 +45,8 @@
   "File currently served by `my/typst-preview--process'.")
 (defvar-local my/typst-preview--process-args nil
   "Arguments currently used by `my/typst-preview--process'.")
+(defvar-local my/typst-preview--process-root nil
+  "Project root currently used by `my/typst-preview--process'.")
 (defvar-local my/typst-preview--control-host nil
   "Control-plane host reported by the current Tinymist preview process.")
 (defvar-local my/typst-preview--socket nil
@@ -158,6 +161,22 @@ Use port 0 to let Tinymist choose a free port."
   :type 'boolean
   :group 'my/typst)
 
+(defcustom my/typst-preview-follow-current-buffer t
+  "When non-nil, an active Typst preview follows the selected Typst buffer."
+  :type 'boolean
+  :group 'my/typst)
+
+(defcustom my/typst-preview-follow-delay 0.25
+  "Idle seconds before an active Typst preview follows buffer switches."
+  :type 'number
+  :group 'my/typst)
+
+(defvar my/typst-preview--owner-buffer nil
+  "Buffer that currently owns the single Tinymist preview server.")
+
+(defvar my/typst-preview--follow-timer nil
+  "Idle timer used to debounce Typst preview buffer following.")
+
 (defvar my/typst-mode-syntax-table
   (let ((table (make-syntax-table)))
     (modify-syntax-entry ?/ ". 124b" table)
@@ -237,16 +256,39 @@ Use port 0 to let Tinymist choose a free port."
               (list "--font-path"
                     (mapconcat #'identity font-paths path-separator))))))
 
-(defun my/typst-preview-args ()
-  "Return Tinymist CLI preview launch arguments."
+(defun my/typst-preview--root-candidate (file marker)
+  "Return the directory containing MARKER above FILE, or nil."
+  (when-let* ((directory (locate-dominating-file file marker)))
+    (file-truename directory)))
+
+(defun my/typst-preview-root (&optional file)
+  "Return the project root Tinymist should use for FILE."
+  (let* ((file (file-truename (or file buffer-file-name default-directory)))
+         (note-root (when (and (boundp 'my/note-root)
+                               (stringp my/note-root))
+                      (file-truename
+                       (file-name-as-directory
+                        (expand-file-name my/note-root))))))
+    (file-name-as-directory
+     (or (and note-root
+              (file-in-directory-p file note-root)
+              note-root)
+         (my/typst-preview--root-candidate file "typst.toml")
+         (my/typst-preview--root-candidate file ".git")
+         (file-name-directory file)))))
+
+(defun my/typst-preview-args (root)
+  "Return Tinymist CLI preview launch arguments for ROOT."
   (append
-	   (list "preview"
-	         "--no-open"
-	         "--data-plane-host"
-	         my/typst-preview-host
-	         "--control-plane-host"
-	         my/typst-preview-control-host
-	         (format "--invert-colors=%s" my/typst-preview-invert-colors))
+   (list "preview"
+         "--no-open"
+         "--data-plane-host"
+         my/typst-preview-host
+         "--control-plane-host"
+         my/typst-preview-control-host
+         "--root"
+         root
+         (format "--invert-colors=%s" my/typst-preview-invert-colors))
    (when my/typst-preview-partial-rendering
      (list "--partial-rendering=true"))
    (when-let* ((font-paths (seq-filter #'file-directory-p
@@ -255,7 +297,7 @@ Use port 0 to let Tinymist choose a free port."
            (mapconcat #'identity font-paths path-separator)))))
 
 (defun my/typst-preview-url ()
-  "Return the xwidget URL for Tinymist's official web preview."
+  "Return the URL for Tinymist's official web preview."
   (format "http://%s" my/typst-preview-host))
 
 (defun my/typst-previewer-setup ()
@@ -327,7 +369,37 @@ Use port 0 to let Tinymist choose a free port."
   (and (process-live-p my/typst-preview--process)
        buffer-file-name
        (equal my/typst-preview--process-file
-              (file-truename buffer-file-name))))
+              (file-truename buffer-file-name))
+       (equal my/typst-preview--process-root
+              (my/typst-preview-root buffer-file-name))))
+
+(defun my/typst-preview--global-active-p ()
+  "Return non-nil when the global Tinymist preview owner is still active."
+  (and (buffer-live-p my/typst-preview--owner-buffer)
+       (with-current-buffer my/typst-preview--owner-buffer
+         (process-live-p my/typst-preview--process))))
+
+(defun my/typst-preview--control-buffer ()
+  "Return the buffer whose Tinymist control socket should receive commands."
+  (cond
+   ((and (my/typst-preview--active-p)
+         my/typst-preview--socket)
+    (current-buffer))
+   ((and buffer-file-name
+         (buffer-live-p my/typst-preview--owner-buffer))
+    (let ((file-root (my/typst-preview-root buffer-file-name)))
+      (with-current-buffer my/typst-preview--owner-buffer
+        (and (process-live-p my/typst-preview--process)
+             my/typst-preview--socket
+             (equal my/typst-preview--process-root file-root)
+             (current-buffer)))))))
+
+(defun my/typst-preview-stop-active (&optional except-buffer)
+  "Stop the current global Tinymist preview unless owned by EXCEPT-BUFFER."
+  (when (and (buffer-live-p my/typst-preview--owner-buffer)
+             (not (eq my/typst-preview--owner-buffer except-buffer)))
+    (with-current-buffer my/typst-preview--owner-buffer
+      (my/typst-stop-preview))))
 
 (defun my/typst-preview--buffer-string ()
   "Return the current buffer contents without narrowing."
@@ -390,9 +462,11 @@ Use port 0 to let Tinymist choose a free port."
              (event (gethash "event" message)))
         (pcase event
           ("editorScrollTo"
-           (my/typst-preview--goto-file-position
-            (gethash "filepath" message)
-            (gethash "start" message)))
+           (let ((file (gethash "filepath" message))
+                 (position (gethash "start" message)))
+             (unless (and (fboundp 'my/note-open-link-at-file-position)
+                          (my/note-open-link-at-file-position file position))
+               (my/typst-preview--goto-file-position file position))))
           ("syncEditorChanges"
            (when (buffer-live-p source-buffer)
              (my/typst-preview-sync-memory source-buffer)))
@@ -441,16 +515,22 @@ Use port 0 to let Tinymist choose a free port."
 (defun my/typst-preview-send-position ()
   "Ask Tinymist's preview pane to scroll to point in the current Typst buffer."
   (interactive)
-  (unless (and (my/typst-preview--active-p)
-               my/typst-preview--socket)
+  (unless buffer-file-name
+    (user-error "Save this Typst buffer before syncing preview"))
+  (unless (my/typst-preview--control-buffer)
     (user-error "Tinymist preview is not connected"))
-  (websocket-send-text
-   my/typst-preview--socket
-   (json-encode
-    `(("event" . "panelScrollTo")
-      ("filepath" . ,(file-truename buffer-file-name))
-      ("line" . ,(1- (line-number-at-pos)))
-      ("character" . ,(max 1 (current-column)))))))
+  (let ((file (file-truename buffer-file-name))
+        (line (1- (line-number-at-pos)))
+        (character (current-column))
+        (control-buffer (my/typst-preview--control-buffer)))
+    (with-current-buffer control-buffer
+      (websocket-send-text
+       my/typst-preview--socket
+       (json-encode
+        `(("event" . "panelScrollTo")
+          ("filepath" . ,file)
+          ("line" . ,line)
+          ("character" . ,character)))))))
 
 (defun my/typst-preview-log-buffer ()
   "Return the Tinymist preview log buffer for the current Typst buffer."
@@ -479,8 +559,11 @@ Use port 0 to let Tinymist choose a free port."
   (setq my/typst-preview--process nil
         my/typst-preview--process-file nil
         my/typst-preview--process-args nil
+        my/typst-preview--process-root nil
         my/typst-preview--control-host nil
-        my/typst-preview--socket nil))
+        my/typst-preview--socket nil)
+  (when (eq my/typst-preview--owner-buffer (current-buffer))
+    (setq my/typst-preview--owner-buffer nil)))
 
 (defun my/typst-preview-cleanup ()
   "Clean Typst preview resources owned by the current buffer."
@@ -491,8 +574,9 @@ Use port 0 to let Tinymist choose a free port."
   (add-hook 'after-change-functions #'my/typst-preview-after-change nil t)
   (add-hook 'kill-buffer-hook #'my/typst-preview-cleanup nil t))
 
-(defun my/typst-start-default-preview ()
-  "Start Tinymist's official preview server for the current buffer."
+(defun my/typst-start-default-preview (&optional force)
+  "Start Tinymist's official preview server for the current buffer.
+When FORCE is non-nil, restart even if the current buffer already owns it."
   (unless (my/typst-tinymist-command)
     (user-error "Cannot find tinymist"))
   (unless buffer-file-name
@@ -502,60 +586,72 @@ Use port 0 to let Tinymist choose a free port."
   (my/typst-eglot-setup)
   (let ((file (file-truename buffer-file-name)))
     (let* ((command (my/typst-tinymist-command))
-           (args (append (my/typst-preview-args) (list file))))
-      (unless (and (process-live-p my/typst-preview--process)
+           (root (my/typst-preview-root file))
+           (args (append (my/typst-preview-args root) (list file))))
+      (my/typst-preview-stop-active (current-buffer))
+      (unless (and (not force)
+                   (process-live-p my/typst-preview--process)
                    (equal my/typst-preview--process-file file)
-                   (equal my/typst-preview--process-args args))
+                   (equal my/typst-preview--process-args args)
+                   (equal my/typst-preview--process-root root))
         (my/typst-stop-preview)
         (let* ((command command)
-             (args args)
-             (source-buffer (current-buffer))
-             (log-buffer (my/typst-preview-log-buffer)))
-        (with-current-buffer log-buffer
-          (erase-buffer)
-          (insert (format "$ %s %s\n\n"
-                          command
-                          (mapconcat #'shell-quote-argument args " "))))
-        (let ((error-shown nil))
-          (setq my/typst-preview--process
-                (make-process
-                 :name "tinymist-preview"
-                 :buffer log-buffer
-                 :command (cons command args)
-                 :noquery t
-                 :connection-type 'pipe
-                 :filter
-                 (lambda (process output)
-                   (when-let* ((buffer (process-buffer process))
-                               ((buffer-live-p buffer)))
-	                     (with-current-buffer buffer
-	                       (goto-char (point-max))
-	                       (insert output)
-		               (my/typst-preview--maybe-connect-control
-		                source-buffer (buffer-string)))
-	                     (when (and (not error-shown)
-                                (string-match-p
-                                 "\\(?:compilation failed\\|^error:\\)"
-                                 output))
-                       (setq error-shown t)
-                       (message "Tinymist preview has errors; see %s"
-                                (buffer-name buffer))
-                       (when my/typst-preview-pop-log-on-error
-                         (display-buffer buffer)))))
-                 :sentinel
-                 (lambda (process event)
-                   (unless (process-live-p process)
-                     (when (buffer-live-p source-buffer)
-                       (with-current-buffer source-buffer
-                         (when (eq process my/typst-preview--process)
-                           (setq my/typst-preview--process nil
-                                 my/typst-preview--process-file nil
-                                 my/typst-preview--control-host nil))))
-                     (message "Tinymist preview %s; see %s"
-                              (string-trim event)
-                             (buffer-name (process-buffer process))))))))
-        (setq my/typst-preview--process-file file
-              my/typst-preview--process-args args))))))
+               (args args)
+               (source-buffer (current-buffer))
+               (log-buffer (my/typst-preview-log-buffer)))
+          (with-current-buffer log-buffer
+            (erase-buffer)
+            (insert (format "cwd: %s\n$ %s %s\n\n"
+                            root
+                            command
+                            (mapconcat #'shell-quote-argument args " "))))
+          (let ((error-shown nil)
+                (default-directory root))
+            (setq my/typst-preview--process
+                  (make-process
+                   :name "tinymist-preview"
+                   :buffer log-buffer
+                   :command (cons command args)
+                   :noquery t
+                   :connection-type 'pipe
+                   :filter
+                   (lambda (process output)
+                     (when-let* ((buffer (process-buffer process))
+                                 ((buffer-live-p buffer)))
+                       (with-current-buffer buffer
+                         (goto-char (point-max))
+                         (insert output)
+                         (my/typst-preview--maybe-connect-control
+                          source-buffer (buffer-string)))
+                       (when (and (not error-shown)
+                                  (string-match-p
+                                   "\\(?:compilation failed\\|^error:\\)"
+                                   output))
+                         (setq error-shown t)
+                         (message "Tinymist preview has errors; see %s"
+                                  (buffer-name buffer))
+                         (when my/typst-preview-pop-log-on-error
+                           (display-buffer buffer)))))
+                   :sentinel
+                   (lambda (process event)
+                     (unless (process-live-p process)
+                       (when (buffer-live-p source-buffer)
+                         (with-current-buffer source-buffer
+                           (when (eq process my/typst-preview--process)
+                             (setq my/typst-preview--process nil
+                                   my/typst-preview--process-file nil
+                                   my/typst-preview--process-root nil
+                                   my/typst-preview--control-host nil)
+                             (when (eq my/typst-preview--owner-buffer
+                                       source-buffer)
+                               (setq my/typst-preview--owner-buffer nil)))))
+                       (message "Tinymist preview %s; see %s"
+                                (string-trim event)
+                                (buffer-name (process-buffer process))))))))
+          (setq my/typst-preview--process-file file
+                my/typst-preview--process-args args
+                my/typst-preview--process-root root
+                my/typst-preview--owner-buffer source-buffer))))))
 
 (defun my/typst-preview ()
   "Start Tinymist's official preview and open it with the system browser."
@@ -563,6 +659,46 @@ Use port 0 to let Tinymist choose a free port."
   (my/typst-previewer-setup)
   (previewer-workbench)
   (message "Started Tinymist official previewer"))
+
+(defun my/typst-preview--buffer-p (buffer)
+  "Return non-nil when BUFFER is a Typst file buffer."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (and buffer-file-name
+              (derived-mode-p 'typst-ts-mode 'typst-mode 'my/typst-mode)))))
+
+(defun my/typst-preview-follow-buffer (buffer)
+  "Switch the active Tinymist preview to BUFFER."
+  (when (and my/typst-preview-follow-current-buffer
+             (my/typst-preview--global-active-p)
+             (my/typst-preview--buffer-p buffer)
+             (not (eq buffer my/typst-preview--owner-buffer)))
+    (with-current-buffer buffer
+      (my/typst-previewer-setup)
+      (condition-case err
+          (progn
+            (my/typst-start-default-preview t)
+            (message "Tinymist preview follows %s"
+                     (file-name-nondirectory buffer-file-name)))
+        (error
+         (message "Tinymist preview follow failed: %s"
+                  (error-message-string err)))))))
+
+(defun my/typst-preview-follow-selected-window ()
+  "Follow the selected Typst buffer when a Tinymist preview is already active."
+  (when (timerp my/typst-preview--follow-timer)
+    (cancel-timer my/typst-preview--follow-timer))
+  (when (and my/typst-preview-follow-current-buffer
+             (my/typst-preview--global-active-p)
+             (not (minibufferp)))
+    (let ((buffer (window-buffer (selected-window))))
+      (when (and (my/typst-preview--buffer-p buffer)
+                 (not (eq buffer my/typst-preview--owner-buffer)))
+        (setq my/typst-preview--follow-timer
+              (run-with-idle-timer
+               my/typst-preview-follow-delay nil
+               #'my/typst-preview-follow-buffer
+               buffer))))))
 
 (defun my/typst-ts-pretty-setup ()
   "Keep Typst buffers on `typst-ts-mode' native math script rendering."
@@ -591,9 +727,12 @@ Use port 0 to let Tinymist choose a free port."
   (add-hook hook #'my/typst-preview-buffer-setup)
   (add-hook hook #'flymake-mode))
 
+(add-hook 'buffer-list-update-hook #'my/typst-preview-follow-selected-window)
+
 (with-eval-after-load 'typst-mode
   (when (boundp 'typst-mode-map)
-    (define-key typst-mode-map (kbd "C-c C-p") #'my/typst-preview)))
+    (define-key typst-mode-map (kbd "C-c C-p") #'my/typst-preview)
+    (define-key typst-mode-map (kbd "C-c C-j") #'my/typst-preview-send-position)))
 
 (define-key my/typst-mode-map (kbd "C-c C-p") #'my/typst-preview)
 (define-key my/typst-mode-map (kbd "C-c C-j") #'my/typst-preview-send-position)

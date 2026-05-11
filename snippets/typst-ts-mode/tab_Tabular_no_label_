@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Tabular (no label)
+# key: tab
+# --
+#table(
+  columns: ${1:2},
+  $0
+)

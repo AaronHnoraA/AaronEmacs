@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Key derivation function
+# key: KDF
+# --
+"KDF" lr((${1:K}, ${2:info})) $0

@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Definition (with label)
+# key: defl
+# --
+#definition(name: [$1])[
+  $2
+] <def:$1>
+$0

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Class QMA
+# key: QMA
+# --
+sans("QMA")$0

@@ -99,6 +99,11 @@ org-roam 数据库。
 这类标记、schedule/deadline、timestamp/calendar/clock、refile/archive 和常用
 agenda view 收在一起；其中 `H-o w x` 是按 TODO keywords 分组的 status table。
 
+Typst note buffer 里 `C-c n` 是本地 note 前缀：`f` 查找 note，`i` 插入
+`#note("id")[title]` 链接，`l` 查看反链，`s` 重建索引，`n` 新建 note。
+`C-c C-p` 会用 macOS 系统浏览器打开 Tinymist preview；同一文件复用现有进程保留
+增量更新，切到另一个 Typst buffer 后会切换 preview。
+
 ## 2. Leader 键分组
 
 ### 文件 `SPC f`

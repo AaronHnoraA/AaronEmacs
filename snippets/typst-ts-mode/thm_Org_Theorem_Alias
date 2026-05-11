@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Theorem alias
+# key: thm
+# --
+#theorem[
+  $0
+]

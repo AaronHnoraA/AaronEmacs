@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Text Subscript
+# key: sts
+# --
+_"$1"

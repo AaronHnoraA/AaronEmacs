@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Underset
+# key: B
+# --
+attach(${2:`yas-selected-text`}, b: $1)

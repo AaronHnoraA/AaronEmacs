@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Note card
+# key: ncard
+# --
+#note[
+  $0
+]

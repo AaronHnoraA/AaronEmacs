@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Overbrace
+# key: O
+# --
+overbrace(${2:`yas-selected-text`}, $1)

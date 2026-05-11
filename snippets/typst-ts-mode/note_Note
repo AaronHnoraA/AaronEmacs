@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Note
+# key: note
+# --
+#note[
+  $0
+]

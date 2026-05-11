@@ -1,0 +1,14 @@
+# -*- mode: snippet -*-
+# name: Table
+# key: table
+# --
+#figure(
+  table(
+    columns: 2,
+    [*$3*], [*$4*],
+    [a], [b],
+    [c], [d],
+  ),
+  caption: [$1],
+) <tab:$2>
+$0

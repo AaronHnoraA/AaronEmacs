@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: IND-CCA
+# key: INDCCA
+# --
+sans("IND-CCA")$0

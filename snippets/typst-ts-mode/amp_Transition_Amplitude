@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Transition amplitude
+# key: amp
+# --
+lr(angle.l ${1:phi}| ${2:A} |${3:psi} angle.r) $0

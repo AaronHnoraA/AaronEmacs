@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Note proposition card
+# key: proposition
+# --
+#proposition[
+  $0
+]

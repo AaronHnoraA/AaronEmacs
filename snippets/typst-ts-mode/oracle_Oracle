@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Oracle
+# key: oracle
+# --
+cal(${1:O}) lr((${2:x})) $0

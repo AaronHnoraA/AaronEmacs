@@ -33,7 +33,6 @@
 (require 'init-org-core)
 (require 'init-org-ui)
 (require 'init-typst nil t)
-(require 'ratex-math-detect)
 
 (use-package bibtex-completion
   :custom
@@ -963,12 +962,20 @@ loaded yet."
 
 (defun my/org-latex--current-fragment (&optional pos)
   "Return the managed math fragment at POS, or at point when POS is nil."
-  (save-excursion
-    (when pos
-      (goto-char pos))
-    (when-let* ((fragment (ratex-fragment-at-point))
-                ((my/org-latex--fragment-supported-p fragment)))
-      fragment)))
+  (let ((pos (or pos (point))))
+    (save-excursion
+      (goto-char pos)
+      (or (when (fboundp 'ratex-fragment-at-point)
+            (when-let* ((fragment (ratex-fragment-at-point))
+                        ((my/org-latex--fragment-supported-p fragment)))
+              fragment))
+          (seq-find
+           (lambda (fragment)
+             (and (<= (plist-get fragment :begin) pos)
+                  (< pos (plist-get fragment :end))))
+           (my/org-latex--fallback-fragments
+            (max (point-min) (- pos 2000))
+            (min (point-max) (+ pos 2000))))))))
 
 (defun my/org-latex--fragment-range (frag)
   "Return the trimmed source range for math fragment FRAG."
@@ -2217,12 +2224,16 @@ This is the fallback path used when a known source range is re-rendered after
 editing.  For Typst, strip the single `$' delimiters here as well so the
 renderer never receives nested `$...$' math."
   (if (eq my/org-math-preview-backend 'typst)
-      (pcase-let ((`(,open ,content ,_close)
-                   (ratex--split-delimited-fragment
-                    (string-trim source-value))))
-	    (if (string= open "$")
-	        content
-	      source-value))
+      (let ((trimmed (string-trim source-value)))
+        (if (fboundp 'ratex--split-delimited-fragment)
+            (pcase-let ((`(,open ,content ,_close)
+                         (ratex--split-delimited-fragment trimmed)))
+              (if (string= open "$")
+                  content
+                source-value))
+          (if (string-match-p "\\`\\$[^$].*[^$]\\$\\'" trimmed)
+              (substring trimmed 1 -1)
+            source-value)))
 	    source-value))
 
 (defun my/org-typst-prettify--face-contains-p (face target)
@@ -2594,18 +2605,74 @@ block body should be sent to the LaTeX renderer."
         (throw 'covered t)))
     nil))
 
+(defun my/org-latex--fallback-fragments (beg end)
+  "Return simple math fragments between BEG and END without loading RaTeX."
+  (let (fragments)
+    (save-excursion
+      (goto-char beg)
+      (while (re-search-forward
+              "\\\\\\(?:[(]\\|[[]\\)\\|\\$\\|^[ \t]*#\\+begin_display_latex\\b.*$"
+              end t)
+        (let ((start (match-beginning 0))
+              (open (match-string 0)))
+          (cond
+           ((string= open "\\(")
+            (when (search-forward "\\)" end t)
+              (push (list :begin start
+                          :end (point)
+                          :open "\\("
+                          :close "\\)"
+                          :content (buffer-substring-no-properties
+                                    (+ start 2) (- (point) 2)))
+                    fragments)))
+           ((string= open "\\[")
+            (when (search-forward "\\]" end t)
+              (push (list :begin start
+                          :end (point)
+                          :open "\\["
+                          :close "\\]"
+                          :content (buffer-substring-no-properties
+                                    (+ start 2) (- (point) 2)))
+                    fragments)))
+           ((string= open "$")
+            (let ((content-beg (point)))
+              (when (and (not (eq (char-before start) ?\\))
+                         (search-forward "$" (line-end-position) t))
+                (push (list :begin start
+                            :end (point)
+                            :open "$"
+                            :close "$"
+                            :content (buffer-substring-no-properties
+                                      content-beg (1- (point))))
+                      fragments))))
+           ((string-match-p "#\\+begin_display_latex" open)
+            (let ((content-beg (line-beginning-position 2)))
+              (when (re-search-forward "^[ \t]*#\\+end_display_latex\\b.*$"
+                                       end t)
+                (push (list :begin start
+                            :end (point)
+                            :open "#+begin_display_latex"
+                            :close "#+end_display_latex"
+                            :block 'latex
+                            :content (buffer-substring-no-properties
+                                      content-beg (match-beginning 0)))
+                      fragments))))))))
+    (seq-filter #'my/org-latex--fragment-supported-p (nreverse fragments))))
+
 (defun my/org-latex--ratex-fragments (beg end)
   "Return RaTeX-detected math fragments between BEG and END."
-  (let (fragments)
-    (dolist (fragment (ratex-fragments-in-region beg end))
-      (let ((fragment-beg (plist-get fragment :begin))
-            (fragment-end (plist-get fragment :end)))
-        (when (and (integer-or-marker-p fragment-beg)
-                   (integer-or-marker-p fragment-end)
-                   (< fragment-beg fragment-end)
-                   (my/org-latex--fragment-supported-p fragment))
-          (push fragment fragments))))
-    (nreverse fragments)))
+  (if (not (fboundp 'ratex-fragments-in-region))
+      (my/org-latex--fallback-fragments beg end)
+    (let (fragments)
+      (dolist (fragment (ratex-fragments-in-region beg end))
+        (let ((fragment-beg (plist-get fragment :begin))
+              (fragment-end (plist-get fragment :end)))
+          (when (and (integer-or-marker-p fragment-beg)
+                     (integer-or-marker-p fragment-end)
+                     (< fragment-beg fragment-end)
+                     (my/org-latex--fragment-supported-p fragment))
+            (push fragment fragments))))
+      (nreverse fragments))))
 
 (defun my/org-latex--collect-fragments (beg end)
   "Collect LaTeX fragments between BEG and END."

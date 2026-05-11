@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: MAC
+# key: MAC
+# --
+${1:t} <- "MAC"_(${2:k}) lr((${3:m})) $0

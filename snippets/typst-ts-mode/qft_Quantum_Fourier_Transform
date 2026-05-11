@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Quantum Fourier transform
+# key: qft
+# --
+"QFT"_(${1:n}) lr(|${2:x} angle.r) = 1/sqrt(${3:2^n}) sum_(${4:y}=0)^(${3:2^n}-1) e^(2 pi i ${2:x} ${4:y} \/ ${3:2^n}) lr(|${4:y} angle.r) $0

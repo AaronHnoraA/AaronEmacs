@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Note lemma card
+# key: lem
+# --
+#lemma[
+  $0
+]

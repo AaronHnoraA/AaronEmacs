@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: NP-complete
+# key: npcomplete
+# --
+sans("NP")"-complete"$0

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Ceiling
+# key: ceil
+# --
+ceil($1) $2

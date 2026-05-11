@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Negligible
+# key: negl
+# --
+"negl" lr((${1:lambda})) $0

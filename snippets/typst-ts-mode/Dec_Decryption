@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Decryption
+# key: Dec
+# --
+${1:m} := "Dec"_(${2:sk}) lr((${3:c})) $0

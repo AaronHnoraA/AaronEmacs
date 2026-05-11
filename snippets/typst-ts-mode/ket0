@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: ket0
+# key: ket0
+# --
+lr(|0 angle.r) $0

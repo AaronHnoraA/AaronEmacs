@@ -21,6 +21,7 @@
 
 (defcustom my/template-current
   '((org . "default.org")
+    (typst . "default.typ")
     (c . "default.c")
     (cc . "default.cc")
     (js . "default.js")
@@ -38,7 +39,7 @@ Each entry is (KIND . FILENAME), where KIND maps to templates/KIND/FILENAME."
   :group 'my/template)
 
 (defconst my/template-kinds
-  '(org c cc js ts sh tex python nix makefile cmake)
+  '(org typst c cc js ts sh tex python nix makefile cmake)
   "Template kinds supported by this configuration.")
 
 (defcustom my/template-auto-insert-enabled-kinds
@@ -99,6 +100,7 @@ first and then opening it."
   (when-let* ((ext (file-name-extension (or file ""))))
     (pcase (downcase ext)
       ("org" 'org)
+      ("typ" 'typst)
       ("py" 'python)
       ((or "js" "jsx" "mjs" "cjs") 'js)
       ((or "ts" "tsx") 'ts)
@@ -114,6 +116,10 @@ first and then opening it."
 (defun my/template--kind (&optional file)
   (or (cond
        ((derived-mode-p 'org-mode) 'org)
+       ((or (derived-mode-p 'typst-ts-mode)
+            (derived-mode-p 'typst-mode)
+            (derived-mode-p 'my/typst-mode))
+        'typst)
        ((or (derived-mode-p 'python-mode) (eq major-mode 'python-ts-mode)) 'python)
        ((or (derived-mode-p 'js-mode) (eq major-mode 'js-ts-mode)) 'js)
        ((or (derived-mode-p 'typescript-mode) (eq major-mode 'typescript-ts-mode) (eq major-mode 'tsx-ts-mode)) 'ts)
@@ -203,6 +209,13 @@ first and then opening it."
         (replace-match "" t t)
         (point)))))
 
+(defun my/auto-insert--slug (value)
+  "Return a conservative filename/id slug for VALUE."
+  (let ((slug (downcase (string-trim (or value "")))))
+    (setq slug (replace-regexp-in-string "[^[:alnum:]]+" "-" slug))
+    (setq slug (replace-regexp-in-string "-+" "-" slug))
+    (or (string-trim slug "-+" "-+") "untitled")))
+
 (defun my/auto-insert--insert-template-file (file)
   (unless (file-readable-p file)
     (user-error "Template not readable: %s" file))
@@ -215,11 +228,13 @@ first and then opening it."
       (my/auto-insert--replace-in-region
        (delq nil
              (list (cons "{{date}}" (format-time-string "%Y-%m-%d"))
+                   (cons "{{timestamp}}" (format-time-string "%Y%m%dT%H%M%S"))
                    (cons "{{month_year}}" (format-time-string "%B %Y"))
                    (cons "{{year}}" (format-time-string "%Y"))
                    (cons "{{author}}" user-full-name)
                    (cons "{{user}}" (or (getenv "USER") user-login-name))
                    (cons "{{file}}" (or buffer-file-name ""))
+                   (and title (cons "{{slug_title}}" (my/auto-insert--slug title)))
                    (and title (cons "{{title}}" title))))
        start end)
       (setq cursor-pos (my/auto-insert--cursor-pos start (point-max)))
@@ -309,6 +324,7 @@ name, falling back to a prompt."
   (auto-insert-query nil)
   :config
   (define-auto-insert (rx ".org" string-end) (lambda () (my/template-auto-insert 'org)))
+  (define-auto-insert (rx ".typ" string-end) (lambda () (my/template-auto-insert 'typst)))
   (define-auto-insert (rx ".py" string-end) (lambda () (my/template-auto-insert 'python)))
   (define-auto-insert (rx ".js" string-end) (lambda () (my/template-auto-insert 'js)))
   (define-auto-insert (rx ".cjs" string-end) (lambda () (my/template-auto-insert 'js "default.cjs")))

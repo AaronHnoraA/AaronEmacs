@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Trace operator
+# key: Tr
+# --
+"Tr" lr((${1:A})) $0

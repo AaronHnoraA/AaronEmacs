@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Postulate (with label)
+# key: postl
+# --
+#postulate(name: [$1])[
+  $2
+] <pos:$1>
+$0

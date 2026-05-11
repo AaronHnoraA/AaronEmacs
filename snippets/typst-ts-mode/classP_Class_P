@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Class P
+# key: classP
+# --
+sans("P")$0

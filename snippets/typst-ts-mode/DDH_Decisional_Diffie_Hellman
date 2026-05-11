@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: DDH
+# key: DDH
+# --
+(g^(${1:a}), g^(${2:b}), g^(${1:a} ${2:b})) approx_c (g^(${1:a}), g^(${2:b}), g^(${3:c})) $0

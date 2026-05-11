@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Dyad
+# key: dyad
+# --
+lr(|${1:phi} angle.r) lr(angle.l ${2:psi}|) $0

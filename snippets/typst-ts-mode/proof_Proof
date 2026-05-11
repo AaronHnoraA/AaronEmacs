@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Proof
+# key: proof
+# --
+#proof[
+  $0
+]

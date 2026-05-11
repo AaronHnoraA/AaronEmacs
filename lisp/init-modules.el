@@ -87,10 +87,10 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-server)
 (require 'init-previewer)
 (require 'init-md)
+(my/require-module-safely 'init-note)
 
 ;; standalone apps
 (my/require-module-after-any-feature 'init-org 'org)
-(my/require-module-after-any-feature 'init-ratex 'org 'tex 'tex-site)
 (my/require-module-after-any-feature 'init-org-mmdc 'org)
 (my/require-module-after-any-feature 'init-org-zotero 'org)
 (when (eq system-type 'darwin)

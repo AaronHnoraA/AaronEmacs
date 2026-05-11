@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Begin-End Environment
+# key: beg
+# --
+#${1:env}[
+  $2
+]

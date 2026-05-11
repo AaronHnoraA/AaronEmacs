@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: PRG
+# key: PRG
+# --
+${1:G} lr((${2:s})) $0

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Braket
+# key: bk
+# --
+lr(angle.l ${1:phi}|${2:psi} angle.r) $0

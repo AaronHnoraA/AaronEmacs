@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Schrödinger equation
+# key: sch
+# --
+i hbar diff / (diff t) lr(|psi(t) angle.r) = H lr(|psi(t) angle.r) $0

@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Bmatrix (curly)
+# key: Bmat
+# --
+mat(delim: "{",
+  $0
+)

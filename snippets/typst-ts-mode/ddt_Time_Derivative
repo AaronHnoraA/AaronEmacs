@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Time Derivative
+# key: ddt
+# --
+dif / (dif t)

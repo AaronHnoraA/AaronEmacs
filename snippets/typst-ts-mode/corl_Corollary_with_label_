@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Corollary (with label)
+# key: corl
+# --
+#corollary(name: [$1])[
+  $2
+] <cor:$1>
+$0

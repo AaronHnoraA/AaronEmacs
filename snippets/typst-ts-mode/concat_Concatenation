@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Concatenation
+# key: concat
+# --
+parallel$0

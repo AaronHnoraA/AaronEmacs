@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Big O
+# key: bigO
+# --
+O lr((${1:f(n)})) $0

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Class PSPACE
+# key: PSPACE
+# --
+sans("PSPACE")$0

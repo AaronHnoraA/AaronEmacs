@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Expectation value
+# key: expval
+# --
+lr(angle.l ${1:psi}| ${2:A} |${1:psi} angle.r) $0

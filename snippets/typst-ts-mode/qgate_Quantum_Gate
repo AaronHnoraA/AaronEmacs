@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Quantum gate
+# key: qgate
+# --
+"${1:U}"$0

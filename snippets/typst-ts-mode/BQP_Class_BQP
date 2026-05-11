@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Class BQP
+# key: BQP
+# --
+sans("BQP")$0

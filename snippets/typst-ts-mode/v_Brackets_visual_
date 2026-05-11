@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Brackets (visual)
+# key: v[
+# --
+[${1:`yas-selected-text`}]

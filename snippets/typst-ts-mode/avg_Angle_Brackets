@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Angle Brackets
+# key: avg
+# --
+lr(angle.l $1 angle.r) $2

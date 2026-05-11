@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Hadamard on state
+# key: had
+# --
+H lr(|${1:psi} angle.r) $0

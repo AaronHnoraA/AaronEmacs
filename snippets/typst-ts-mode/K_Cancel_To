@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Cancel To
+# key: K
+# --
+cancel(${2:`yas-selected-text`}, $1)

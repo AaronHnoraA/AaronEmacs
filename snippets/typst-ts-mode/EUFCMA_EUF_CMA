@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: EUF-CMA
+# key: EUFCMA
+# --
+sans("EUF-CMA")$0

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Encryption
+# key: Enc
+# --
+${1:c} <- "Enc"_(${2:pk}) lr((${3:m}; ${4:r})) $0

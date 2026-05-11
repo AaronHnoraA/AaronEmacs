@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Paragraph (with label)
+# key: parl
+# --
+==== $1 <par:$1>
+${0}

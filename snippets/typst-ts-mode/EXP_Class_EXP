@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Class EXP
+# key: EXP
+# --
+sans("EXP")$0

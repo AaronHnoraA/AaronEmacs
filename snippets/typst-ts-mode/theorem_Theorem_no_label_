@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Theorem (no label)
+# key: theorem
+# --
+#theorem[
+  $0
+]

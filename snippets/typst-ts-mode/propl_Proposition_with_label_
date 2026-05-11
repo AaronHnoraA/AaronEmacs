@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Proposition (with label)
+# key: propl
+# --
+#proposition(name: [$1])[
+  $2
+] <pro:$1>
+$0
