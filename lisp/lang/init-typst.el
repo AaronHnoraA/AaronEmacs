@@ -532,6 +532,17 @@ Provides a visual cue so the new cursor position is easy to spot."
      source-buffer
      (string-trim (match-string 1 output)))))
 
+(defun my/typst-preview--point-position ()
+  "Return (LINE . CHARACTER) for point in Tinymist's 0-based, codepoint form.
+`current-column' returns a visual column (tabs expand, CJK doubles), but the
+preview expects a codepoint offset from beginning-of-line — the same model the
+inverse path uses via `forward-char'.  Widen so narrowed buffers still report
+absolute positions."
+  (save-restriction
+    (widen)
+    (cons (1- (line-number-at-pos (point) t))
+          (- (point) (line-beginning-position)))))
+
 (defun my/typst-preview-send-position ()
   "Ask Tinymist's preview pane to scroll to point in the current Typst buffer."
   (interactive)
@@ -539,18 +550,27 @@ Provides a visual cue so the new cursor position is easy to spot."
     (user-error "Save this Typst buffer before syncing preview"))
   (unless (my/typst-preview--control-buffer)
     (user-error "Tinymist preview is not connected"))
-  (let ((file (file-truename buffer-file-name))
-        (line (1- (line-number-at-pos)))
-        (character (current-column))
-        (control-buffer (my/typst-preview--control-buffer)))
+  ;; Flush any pending unsaved edits to Tinymist before asking it to map
+  ;; (line, character) onto a rendered span; otherwise a sync fired right
+  ;; after typing can land on a stale position because the server's mental
+  ;; model still trails the buffer by `my/typst-preview-sync-delay'.
+  (my/typst-preview--cancel-sync-timer)
+  (my/typst-preview-sync-memory (current-buffer))
+  (pcase-let* ((file (file-truename buffer-file-name))
+               (`(,line . ,character) (my/typst-preview--point-position))
+               (control-buffer (my/typst-preview--control-buffer)))
     (with-current-buffer control-buffer
-      (websocket-send-text
-       my/typst-preview--socket
-       (json-encode
-        `(("event" . "panelScrollTo")
-          ("filepath" . ,file)
-          ("line" . ,line)
-          ("character" . ,character)))))))
+      (condition-case err
+          (websocket-send-text
+           my/typst-preview--socket
+           (json-encode
+            `(("event" . "panelScrollTo")
+              ("filepath" . ,file)
+              ("line" . ,line)
+              ("character" . ,character))))
+        (error
+         (message "Tinymist preview position sync failed: %s"
+                  (error-message-string err)))))))
 
 (defun my/typst-preview-log-buffer ()
   "Return the Tinymist preview log buffer for the current Typst buffer."
