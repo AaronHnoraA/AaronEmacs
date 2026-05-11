@@ -7,12 +7,13 @@
 (require 'ratex-core)
 
 (defconst ratex--delimiter-pairs
-  '(("\\[" . "\\]")
+  '(("$$" . "$$")
+    ("\\[" . "\\]")
     ("\\(" . "\\)"))
   "Lightweight Org math delimiters supported by RaTeX.")
 
 (defconst ratex--active-fragment-preferred-opens
-  '("\\[" "\\(")
+  '("$$" "\\[" "\\(")
   "Delimiters preferred for active edit previews.")
 
 (defcustom ratex-region-scan-context-chars 600
@@ -114,7 +115,7 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
     (pcase type
       ('latex-fragment
        (pcase-let ((`(,open ,content ,close) (ratex--split-delimited-fragment value)))
-         (when (member open '("\\[" "\\("))
+         (when (member open '("$$" "\\[" "\\("))
            (list :begin begin
                  :end end
                  :content content
@@ -129,6 +130,8 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
     (list "\\[" (substring value 2 -2) "\\]"))
    ((and (string-prefix-p "\\(" value) (string-suffix-p "\\)" value))
     (list "\\(" (substring value 2 -2) "\\)"))
+   ((and (string-prefix-p "$$" value) (string-suffix-p "$$" value))
+    (list "$$" (substring value 2 -2) "$$"))
    (t
     (list "" (string-trim value) ""))))
 

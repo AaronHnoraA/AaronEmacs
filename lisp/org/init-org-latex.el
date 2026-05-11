@@ -6,6 +6,8 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'color)
+(require 'seq)
 
 (declare-function my/refresh-environment-from-shell nil)
 (declare-function my/open-file "init-open" (file &optional kind backend))
@@ -17,6 +19,7 @@
 (declare-function my/org-example-block-background "init-org-ui")
 (declare-function org-fragtog--disable-frag "org-fragtog" (frag &optional renew))
 (declare-function ratex-fragments-in-region "ratex-math-detect" (beg end))
+(declare-function ratex-fragment-at-point "ratex-math-detect" ())
 
 (defvar ratex-mode)
 (defvar ratex--active-fragment)
@@ -198,8 +201,17 @@ render is usually ready before point leaves it."
   :type 'boolean
   :group 'my/org-latex-preview)
 
+(defcustom my/org-math-preview-backend 'typst
+  "Renderer used by the Org math overlay pipeline.
+The `typst' backend renders `$$...$$' fragments with Typst.  The `latex'
+backend keeps the previous XeLaTeX/dvisvgm renderer for `\\(...\\)',
+`\\[...\\]' and `display_latex' fragments."
+  :type '(choice (const :tag "Typst" typst)
+                 (const :tag "LaTeX" latex))
+  :group 'my/org-latex-preview)
+
 (defcustom my/latex-preview-math-font "GFS Neohellenic Math"
-  "Fallback math font family used by XeLaTeX-based preview pipelines."
+  "Fallback math font family used by the math preview pipelines."
   :type 'string
   :group 'my/org-latex-preview)
 
@@ -656,12 +668,22 @@ render is usually ready before point leaves it."
   :type 'integer)
 
 (defconst my/org-latex--fragment-syntax-regexp
-  (regexp-opt '("\\(" "\\[" "\\]" "#+begin_display_latex"))
-  "Cheap regexp for text that may be near an Org LaTeX fragment.")
+  (regexp-opt '("$$" "\\(" "\\[" "\\]" "#+begin_display_latex"))
+  "Cheap regexp for text that may be near an Org math fragment.")
 
-(defconst my/org-latex--fragment-start-regexp
+(defconst my/org-latex--latex-fragment-start-regexp
   "\\\\[([]\\|^[ \t]*#\\+begin_display_latex\\b"
   "Cheap regexp for syntax that can start a managed Org LaTeX fragment.")
+
+(defconst my/org-latex--typst-fragment-start-regexp
+  "\\$\\$"
+  "Cheap regexp for syntax that can start a managed Org Typst fragment.")
+
+(defun my/org-latex--fragment-start-regexp ()
+  "Return the cheap fragment-start regexp for the active preview backend."
+  (if (eq my/org-math-preview-backend 'typst)
+      my/org-latex--typst-fragment-start-regexp
+    my/org-latex--latex-fragment-start-regexp))
 
 (defun my/org-latex--escaped-char-p (pos)
   "Return non-nil when the character at POS is escaped by backslashes."
@@ -702,7 +724,7 @@ render is usually ready before point leaves it."
         (end (min (point-max) (max beg end))))
     (or (save-excursion
           (goto-char beg)
-          (re-search-forward my/org-latex--fragment-start-regexp end t)))))
+          (re-search-forward (my/org-latex--fragment-start-regexp) end t)))))
 
 (defun my/org-latex-buffer-has-fragment-syntax-p ()
   "Return non-nil when visible Org ranges may contain LaTeX previews."
@@ -812,27 +834,28 @@ render is usually ready before point leaves it."
        (< beg (cdr my/org-latex--post-command-range))
        (> end (car my/org-latex--post-command-range))))
 
+(defun my/org-latex--fragment-supported-p (fragment)
+  "Return non-nil when FRAGMENT belongs to the active preview backend."
+  (let ((open (plist-get fragment :open)))
+    (pcase my/org-math-preview-backend
+      ('typst (string= open "$$"))
+      (_ (or (member open '("\\(" "\\[" "#+begin_display_latex"))
+             (eq (plist-get fragment :block) 'latex))))))
+
 (defun my/org-latex--current-fragment (&optional pos)
-  "Return the LaTeX fragment at POS, or at point when POS is nil."
+  "Return the managed math fragment at POS, or at point when POS is nil."
   (save-excursion
     (when pos
       (goto-char pos))
-    (let ((datum (org-element-context)))
-      (when (and (eq (org-element-type datum) 'latex-fragment)
-                 (let ((value (org-element-property :value datum)))
-                   (and (stringp value)
-                        (or (string-prefix-p "\\(" value)
-                            (string-prefix-p "\\[" value)))))
-        datum))))
+    (when-let* ((fragment (ratex-fragment-at-point))
+                ((my/org-latex--fragment-supported-p fragment)))
+      fragment)))
 
 (defun my/org-latex--fragment-range (frag)
-  "Return the trimmed source range for LaTeX fragment FRAG."
+  "Return the trimmed source range for math fragment FRAG."
   (when frag
-    (let ((beg (org-element-property :begin frag))
-          (end (save-excursion
-                 (goto-char (org-element-end frag))
-                 (skip-chars-backward " \r\t\n")
-                 (point))))
+    (let ((beg (plist-get frag :begin))
+          (end (plist-get frag :end)))
       (cons beg end))))
 
 (defun my/org-latex--point-editing-fragment-p (beg end)
@@ -1039,8 +1062,12 @@ render is usually ready before point leaves it."
             (setq job (list :dir (plist-get spec :dir)
                             :file target
                             :imagetype (plist-get spec :imagetype)
+                            :backend (plist-get spec :backend)
                             :options (plist-get spec :options)
                             :processing-type (plist-get spec :processing-type)
+                            :typst-source (plist-get spec :typst-source)
+                            :typst-font-path (plist-get spec :typst-font-path)
+                            :display-math (plist-get spec :display-math)
                             :value (plist-get spec :render-value)
                             :generation my/org-latex--render-generation
                             :origin 'preedit
@@ -1730,6 +1757,7 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
   "Return non-nil when VALUE is a display-math fragment."
   (let ((trimmed (string-trim-left value)))
     (or (string-prefix-p "\\[" trimmed)
+        (string-prefix-p "$$" trimmed)
         (string-prefix-p "#+begin_display_latex" trimmed)
         (string-prefix-p "\\begin{" trimmed))))
 
@@ -1885,18 +1913,108 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
            beg end (plist-get waiter :value) file imagetype
            (plist-get waiter :background)))))))
 
-(defun my/org-latex--fragment-spec (beg end source-value render-value)
+(defun my/org-latex--typst-fragment-p (fragment)
+  "Return non-nil when FRAGMENT uses Typst math delimiters."
+  (string= (plist-get fragment :open) "$$"))
+
+(defun my/org-latex--fragment-display-p (fragment source-value)
+  "Return non-nil when FRAGMENT or SOURCE-VALUE should be display aligned."
+  (or (plist-get fragment :block)
+      (member (plist-get fragment :open) '("$$" "\\["))
+      (my/org-latex--display-math-source-p source-value)))
+
+(defun my/org-latex--backend-for-fragment (&optional fragment)
+  "Return the renderer backend for FRAGMENT."
+  (if (and fragment (my/org-latex--typst-fragment-p fragment))
+      'typst
+    my/org-math-preview-backend))
+
+(defun my/org-latex--render-value-for-fragment (fragment source-value)
+  "Return the snippet sent to the active renderer for FRAGMENT."
+  (if (eq (my/org-latex--backend-for-fragment fragment) 'typst)
+      (string-trim (or (plist-get fragment :content) source-value))
+    (if (plist-get fragment :block)
+        (plist-get fragment :content)
+      source-value)))
+
+(defun my/org-latex--typst-color (value fallback)
+  "Return VALUE as a Typst rgb string, or FALLBACK when it cannot be parsed."
+  (let* ((color (my/org-latex--normalize-preview-color value fallback))
+         (rgb (and (stringp color)
+                   (ignore-errors (color-name-to-rgb color)))))
+    (format "rgb(\"%s\")"
+            (if rgb
+                (apply #'color-rgb-to-hex (append rgb '(2)))
+              fallback))))
+
+(defun my/org-latex--typst-font-family ()
+  "Return the font family used for Typst math previews."
+  my/latex-preview-math-font)
+
+(defun my/org-latex--typst-font-path ()
+  "Return an extra Typst font search path for the preferred math font."
+  (when-let* ((font-file (my/latex-preview--preferred-math-font-file)))
+    (file-name-directory font-file)))
+
+(defun my/org-latex--typst-command ()
+  "Return an executable Typst command path, including login-shell lookup."
+  (or (executable-find "typst")
+      (seq-find #'file-executable-p
+                (list "/opt/homebrew/bin/typst"
+                      "/usr/local/bin/typst"
+                      (expand-file-name "~/.nix-profile/bin/typst")
+                      (format "/etc/profiles/per-user/%s/bin/typst"
+                              (user-login-name))
+                      "/run/current-system/sw/bin/typst"))
+      (let* ((shell (or (getenv "SHELL") shell-file-name))
+             (path
+              (when (and shell (file-executable-p shell))
+                (string-trim
+                 (with-temp-buffer
+                   (when (zerop
+                          (call-process shell nil t nil "-lc"
+                                        "command -v typst 2>/dev/null"))
+                     (buffer-string)))))))
+        (and (stringp path)
+             (not (string-empty-p path))
+             path))))
+
+(defun my/org-latex--typst-text-size ()
+  "Return the current default face height as a Typst point size."
+  (let ((height (face-attribute 'default :height nil 'default)))
+    (if (integerp height)
+        (/ height 10.0)
+      14.0)))
+
+(defun my/org-latex--typst-source (snippet foreground display)
+  "Return a standalone Typst document for math SNIPPET."
+  (let ((font (my/org-latex--typst-font-family))
+        (size (my/org-latex--typst-text-size))
+        (body (string-trim snippet)))
+    (concat
+     "#set page(fill: none, width: auto, height: auto, margin: (x: 0pt, y: 0pt))\n"
+     (format "#set text(fill: %s, font: %S, size: %.1fpt)\n"
+             foreground font size)
+     (format "#show math.equation: set text(font: %S)\n" font)
+     "#show math.equation: set text(top-edge: \"bounds\", bottom-edge: \"bounds\")\n\n"
+     (if display
+         (format "#align(center)[$\n%s\n$]\n" body)
+       (format "$ %s $\n" body)))))
+
+(defun my/org-latex--fragment-spec (beg end source-value render-value &optional fragment)
   "Return render metadata for a LaTeX fragment between BEG and END.
 SOURCE-VALUE is the exact buffer text covered by the preview overlay.
 RENDER-VALUE is the snippet sent to the LaTeX renderer."
   (save-excursion
     (goto-char beg)
-    (let* ((processing-type org-preview-latex-default-process)
+    (let* ((backend (my/org-latex--backend-for-fragment fragment))
+           (processing-type org-preview-latex-default-process)
            (processing-info
             (or (cdr (assq processing-type org-preview-latex-process-alist))
                 (user-error "Unknown Org LaTeX preview process: %s" processing-type)))
            (dir (my/org-latex--preview-base-directory))
-           (prefix (concat org-preview-latex-image-directory "org-ltximg"))
+           (prefix (concat org-preview-latex-image-directory
+                           (if (eq backend 'typst) "org-typstimg" "org-ltximg")))
            (face (or (face-at-point nil t) 'default))
            (default-fg
             (my/org-latex--normalize-preview-color
@@ -1931,12 +2049,15 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
                default-bg)))
            (latex-header (my/org-latex--preview-header-for-snippet render-value))
            (hash (sha1 (prin1-to-string
-                        (list latex-header
+                        (list backend
+                              latex-header
                               nil
                               nil
                               org-format-latex-options
                               t render-value fg bg))))
-           (imagetype (or (plist-get processing-info :image-output-type) "png"))
+           (imagetype (if (eq backend 'typst)
+                          "svg"
+                        (or (plist-get processing-info :image-output-type) "png")))
            (movefile (format "%s_%s.%s"
                              (expand-file-name prefix dir)
                              hash
@@ -1955,6 +2076,15 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
             :options options
             :background bg
             :latex-header latex-header
+            :backend backend
+            :display-math (my/org-latex--fragment-display-p fragment source-value)
+            :typst-source
+            (when (eq backend 'typst)
+              (my/org-latex--typst-source
+               render-value
+               (my/org-latex--typst-color fg "#000000")
+               (my/org-latex--fragment-display-p fragment source-value)))
+            :typst-font-path (my/org-latex--typst-font-path)
             :processing-type processing-type))))
 
 (defun my/org-latex--fragment-spec-from-source-range (range)
@@ -1963,7 +2093,13 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
          (source-end (cdr range))
          (source-value
           (buffer-substring-no-properties source-beg source-end)))
-    (my/org-latex--fragment-spec source-beg source-end source-value source-value)))
+    (or (save-excursion
+          (goto-char source-beg)
+          (when-let* ((fragment (my/org-latex--current-fragment))
+                      ((= (plist-get fragment :begin) source-beg))
+                      ((= (plist-get fragment :end) source-end)))
+            (my/org-latex--fragment-spec-from-ratex-fragment fragment)))
+        (my/org-latex--fragment-spec source-beg source-end source-value source-value))))
 
 (defun my/org-latex--fragment-spec-from-ratex-fragment (fragment)
   "Return a render spec for a RaTeX-detected FRAGMENT.
@@ -1972,10 +2108,10 @@ block body should be sent to the LaTeX renderer."
   (let* ((source-beg (plist-get fragment :begin))
          (source-end (plist-get fragment :end))
          (source-value (buffer-substring-no-properties source-beg source-end))
-         (render-value (if (plist-get fragment :block)
-                           (plist-get fragment :content)
-                         source-value)))
-    (my/org-latex--fragment-spec source-beg source-end source-value render-value)))
+         (render-value
+          (my/org-latex--render-value-for-fragment fragment source-value)))
+    (my/org-latex--fragment-spec
+     source-beg source-end source-value render-value fragment)))
 
 (defun my/org-latex--range-covered-p (range ranges)
   "Return non-nil when RANGE overlaps any range in RANGES."
@@ -1994,7 +2130,8 @@ block body should be sent to the LaTeX renderer."
             (fragment-end (plist-get fragment :end)))
         (when (and (integer-or-marker-p fragment-beg)
                    (integer-or-marker-p fragment-end)
-                   (< fragment-beg fragment-end))
+                   (< fragment-beg fragment-end)
+                   (my/org-latex--fragment-supported-p fragment))
           (push fragment fragments))))
     (nreverse fragments)))
 
@@ -2024,8 +2161,8 @@ block body should be sent to the LaTeX renderer."
           (when (file-exists-p target)
             (delete-file target)))))))
 
-(defun my/org-latex--prepare-render (job)
-  "Materialize the external render command for JOB."
+(defun my/org-latex--prepare-latex-render (job)
+  "Materialize the external LaTeX render command for JOB."
   (let* ((processing-type (plist-get job :processing-type))
          (processing-info (cdr (assq processing-type org-preview-latex-process-alist)))
          (programs (plist-get processing-info :programs))
@@ -2110,6 +2247,43 @@ block body should be sent to the LaTeX renderer."
       (setf (plist-get job :image-output-file) (concat texfilebase "." image-output-type))
       (setf (plist-get job :post-clean) post-clean)
       job)))
+
+(defun my/org-latex--prepare-typst-render (job)
+  "Materialize the external Typst render command for JOB."
+  (let* ((typst (or (my/org-latex--typst-command)
+                    (user-error "Install Typst to use Org Typst previews")))
+         (tmpdir (file-name-as-directory (file-truename temporary-file-directory)))
+         (typfilebase (make-temp-name (expand-file-name "orgtypst" tmpdir)))
+         (typfile (concat typfilebase ".typ"))
+         (image-output-file (concat typfilebase ".svg"))
+         (font-path (plist-get job :typst-font-path))
+         (command-parts
+          (append
+           (list typst "compile" "-f" "svg")
+           (when (and (stringp font-path)
+                      (file-directory-p font-path))
+             (list "--font-path" font-path))
+           (list typfile image-output-file))))
+    (with-temp-file typfile
+      (insert (or (plist-get job :typst-source)
+                  (my/org-latex--typst-source
+                   (plist-get job :value)
+                   (my/org-latex--typst-color
+                    (plist-get (plist-get job :options) :foreground)
+                    "#000000")
+                   (plist-get job :display-math)))))
+    (setf (plist-get job :command)
+          (mapconcat #'shell-quote-argument command-parts " "))
+    (setf (plist-get job :texfilebase) typfilebase)
+    (setf (plist-get job :image-output-file) image-output-file)
+    (setf (plist-get job :post-clean) '(".typ" ".svg"))
+    job))
+
+(defun my/org-latex--prepare-render (job)
+  "Materialize the external render command for JOB."
+  (if (eq (plist-get job :backend) 'typst)
+      (my/org-latex--prepare-typst-render job)
+    (my/org-latex--prepare-latex-render job)))
 
 (defun my/org-latex--render-sentinel (process _event)
   "Finalize PROCESS for an async Org LaTeX preview render."
@@ -2240,9 +2414,13 @@ When NO-PUMP is non-nil, leave queue pumping to the caller."
               (setq job (list :dir (plist-get spec :dir)
                               :file target
                               :imagetype (plist-get spec :imagetype)
+                              :backend (plist-get spec :backend)
                               :options (plist-get spec :options)
                               :processing-type (plist-get spec :processing-type)
                               :latex-header (plist-get spec :latex-header)
+                              :typst-source (plist-get spec :typst-source)
+                              :typst-font-path (plist-get spec :typst-font-path)
+                              :display-math (plist-get spec :display-math)
                               :value (plist-get spec :render-value)
                               :generation my/org-latex--render-generation
                               :origin (plist-get spec :origin)
@@ -2410,13 +2588,13 @@ queued work."
    ((use-region-p)
     (my/org-latex--preview-range (region-beginning) (region-end))
     (message "Queueing LaTeX previews for region..."))
-   ((let ((datum (my/org-latex--current-fragment)))
-      (and (eq (org-element-type datum) 'latex-fragment)
-           (pcase-let ((`(,beg . ,end) (my/org-latex--fragment-range datum)))
+   ((let ((fragment (my/org-latex--current-fragment)))
+      (and fragment
+           (pcase-let ((`(,beg . ,end) (my/org-latex--fragment-range fragment)))
              (if (my/org-latex--clear-preview-range beg end)
-                 (message "LaTeX preview removed")
-               (my/org-latex--preview-fragment datum)
-               (message "Queueing LaTeX preview..."))
+                 (message "Math preview removed")
+               (my/org-latex--preview-fragment fragment)
+               (message "Queueing math preview..."))
              t))))
    (t
     (pcase-let ((`(,beg . ,end) (my/org-latex--section-range)))

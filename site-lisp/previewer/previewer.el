@@ -40,6 +40,9 @@
 (declare-function org-element-at-point 'org-element)
 (declare-function org-element-property 'org-element)
 (declare-function xwidget-webkit-browse-url "xwidget" (url &optional new-session))
+(declare-function xwidget-webkit-current-session "xwidget" ())
+(declare-function xwidget-webkit-goto-uri "xwidget" (xwidget uri))
+(declare-function xwidget-buffer "xwidget" (xwidget))
 
 (defgroup previewer nil
   "Org mode, Markdown or HTML realtime Preview."
@@ -237,6 +240,20 @@ It's useful to remove all dirty hacking with `previewer-auto-hook'."
 (defvar previewer-org--export-source-buffer nil)
 (defvar previewer-org--export-source-offset 0)
 (defvar previewer-org--source-advice-installed nil)
+(defvar-local previewer-external-url-function nil
+  "Buffer-local function returning an external URL for Previewer to show.
+When this is non-nil, Previewer uses its xwidget workbench for that URL instead
+of serving its own HTML content.")
+(defvar-local previewer-external-start-function nil
+  "Buffer-local function called before opening an external preview URL.")
+(defvar-local previewer-external-browser-backend nil
+  "Buffer-local browser backend override for external preview URLs.")
+(defvar-local previewer-external-open-delay 0
+  "Seconds to wait before opening an external preview URL.")
+(defvar-local previewer-external-window-side nil
+  "Buffer-local side preference for external preview xwidget windows.")
+(defvar previewer--external-active nil
+  "Non-nil when Previewer is showing an externally managed preview URL.")
 
 (defun previewer-mime-type(path)
   "Guess mime type from PATH."
@@ -989,9 +1006,22 @@ When FORCE is nil, only refresh stale or missing assets."
   "Return the preview URL."
   (format "http://%s/preview" (previewer-listen)))
 
+(defun previewer--external-url ()
+  "Return the current buffer's external preview URL, or nil."
+  (when (functionp previewer-external-url-function)
+    (funcall previewer-external-url-function)))
+
+(defun previewer--start-external ()
+  "Start the current buffer's externally managed preview, if configured."
+  (when (functionp previewer-external-start-function)
+    (funcall previewer-external-start-function)))
+
 (defun previewer--split-side-for-window (window)
   "Return the concrete preview split side for WINDOW."
-  (let ((side (or previewer-window-side 'auto)))
+  (let ((side (or (and (previewer--external-url)
+                       previewer-external-window-side)
+                  previewer-window-side
+                  'auto)))
     (if (not (eq side 'auto))
         side
       (let ((width (float (max 1 (window-total-width window))))
@@ -1004,6 +1034,13 @@ When FORCE is nil, only refresh stale or missing assets."
   "Return non-nil when the Previewer xwidget buffer is still live."
   (and (buffer-live-p previewer--xwidget-buffer)
        (get-buffer-window previewer--xwidget-buffer t)))
+
+(defun previewer--xwidget-session-in-window (window)
+  "Return the xwidget webkit session displayed in WINDOW, or nil."
+  (when (window-live-p window)
+    (with-current-buffer (window-buffer window)
+      (when (fboundp 'xwidget-webkit-current-session)
+        (xwidget-webkit-current-session)))))
 
 (defun previewer--open-xwidget (url)
   "Open URL in an Emacs xwidget preview window."
@@ -1035,25 +1072,66 @@ When FORCE is nil, only refresh stale or missing assets."
                             (- target (window-total-height preview-window))
                             nil))))))
     (select-window preview-window)
-    (xwidget-webkit-browse-url url t)
-    (setq previewer--xwidget-buffer (window-buffer preview-window))
+    (if-let* ((session (previewer--xwidget-session-in-window preview-window)))
+        (progn
+          (xwidget-webkit-goto-uri session url)
+          (setq previewer--xwidget-buffer (xwidget-buffer session)))
+      (xwidget-webkit-browse-url url t)
+      (setq previewer--xwidget-buffer (window-buffer preview-window)))
     (when (window-live-p source-window)
       (select-window source-window))))
+
+(defun previewer--open-system-url (url)
+  "Open URL with the operating system default handler."
+  (if (and (eq system-type 'darwin)
+           (executable-find "open"))
+      (start-process "previewer-open-url" nil "open" url)
+    (browse-url-default-browser url)))
 
 (defun previewer-open-browser ()
   "Open browser."
   (let ((url (previewer--preview-url)))
     (pcase previewer-browser-backend
       ('xwidget (previewer--open-xwidget url))
-      (_ (browse-url url)))))
+      (_ (previewer--open-system-url url)))))
+
+(defun previewer-open-external-browser (url)
+  "Open external preview URL in the configured Previewer browser."
+  (pcase (or previewer-external-browser-backend previewer-browser-backend)
+    ('xwidget (previewer--open-xwidget url))
+    (_ (previewer--open-system-url url))))
+
+(defun previewer-open-external-browser-maybe-delayed (url)
+  "Open external preview URL, respecting `previewer-external-open-delay'."
+  (if (and (numberp previewer-external-open-delay)
+           (> previewer-external-open-delay 0))
+      (let ((buffer (current-buffer)))
+        (run-at-time
+         previewer-external-open-delay nil
+         (lambda (buf delayed-url)
+           (when (buffer-live-p buf)
+             (with-current-buffer buf
+               (previewer-open-external-browser delayed-url))))
+         buffer
+         url))
+    (previewer-open-external-browser url)))
 
 (defun previewer-init ()
   "Preview init."
-  (previewer-init-server)
-  (previewer-maybe-update-vendor-assets)
-  (when previewer-auto-browser (previewer-open-browser))
-  (previewer--install-buffer-hooks)
-  (previewer-send-content t))
+  (if-let* ((url (previewer--external-url)))
+      (progn
+        (setq previewer--external-active t)
+        (previewer--start-external)
+        (when previewer-auto-browser
+          (previewer-open-external-browser-maybe-delayed url))
+        (add-hook 'kill-buffer-hook #'previewer--cleanup-buffer-hooks nil t)
+        (setq previewer--buffer-hooks-installed t))
+    (setq previewer--external-active nil)
+    (previewer-init-server)
+    (previewer-maybe-update-vendor-assets)
+    (when previewer-auto-browser (previewer-open-browser))
+    (previewer--install-buffer-hooks)
+    (previewer-send-content t)))
 
 (defun previewer-finalize ()
   "Preview close."
@@ -1091,17 +1169,22 @@ When FORCE is nil, only refresh stale or missing assets."
 (defun previewer-workbench ()
   "Open the current buffer with an Emacs-local Previewer workbench."
   (interactive)
-  (unless (member major-mode previewer-render-modes)
+  (unless (or (member major-mode previewer-render-modes)
+              (previewer--external-url))
     (user-error "Previewer does not handle %s" major-mode))
   (let ((previewer-browser-backend 'xwidget))
     (setq previewer-source-buffer (current-buffer))
     (unless previewer-mode
       (previewer-mode 1))
-    (previewer-maybe-update-vendor-assets)
-    (previewer--install-buffer-hooks)
-    (unless (previewer--xwidget-preview-buffer-live-p)
-      (previewer-open-browser))
-    (previewer-send-content t)))
+    (if-let* ((url (previewer--external-url)))
+        (progn
+          (previewer--start-external)
+          (previewer-open-external-browser-maybe-delayed url))
+      (previewer-maybe-update-vendor-assets)
+      (previewer--install-buffer-hooks)
+      (unless (previewer--xwidget-preview-buffer-live-p)
+        (previewer-open-browser))
+      (previewer-send-content t))))
 
 ;;;###autoload
 (defun previewer-org-workbench ()

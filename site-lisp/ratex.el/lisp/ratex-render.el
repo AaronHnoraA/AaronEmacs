@@ -3,6 +3,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'seq)
 (require 'subr-x)
 (require 'ratex-core)
 (require 'ratex-math-detect)
@@ -11,6 +12,9 @@
 
 (defvar ratex-mode)
 (defvar ratex-render-color)
+(defvar ratex-render-backend)
+(defvar ratex-typst-font)
+(defvar ratex-typst-font-dir)
 (defvar ratex-edit-preview)
 (defvar ratex-edit-preview-idle-delay)
 (defvar ratex-edit-preview-scan-lines)
@@ -63,8 +67,8 @@ leaves the formula or the idle timer renders first.")
 (defconst ratex--posframe-gap-x 10)
 (defconst ratex--posframe-gap-y 8)
 (defconst ratex--math-delimiter-re
-  "\\$\\|\\\\(\\|\\\\\\[\\|\\\\begin{"
-  "Regexp matching likely LaTeX math delimiters near point.")
+  "\\$\\$\\|\\\\(\\|\\\\\\[\\|\\\\begin{"
+  "Regexp matching likely math delimiters near point.")
 
 (defun ratex--clear-posframe-state (&optional buffer)
   "Clear posframe bookkeeping in BUFFER or the current buffer."
@@ -555,12 +559,26 @@ ordinary edits."
           (plist-get fragment :end)
           (plist-get fragment :content)))
 
+(defun ratex--fragment-typst-p (fragment)
+  "Return non-nil when FRAGMENT should be rendered by Typst."
+  (and (eq ratex-render-backend 'typst)
+       (equal (plist-get fragment :open) "$$")))
+
+(defun ratex--fragment-backend (fragment)
+  "Return the render backend for FRAGMENT."
+  (if (ratex--fragment-typst-p fragment) 'typst 'latex))
+
 (defun ratex--cache-key (fragment)
   "Return render cache key for FRAGMENT."
-  (list (ratex--render-latex fragment)
+  (list (ratex--fragment-backend fragment)
+        (if (ratex--fragment-typst-p fragment)
+            (ratex--render-typst fragment)
+          (ratex--render-latex fragment))
         ratex-font-size
         ratex-svg-padding
-        (ratex--normalized-render-color)))
+        (ratex--normalized-render-color)
+        ratex-typst-font
+        ratex-typst-font-dir))
 
 (defun ratex--render-latex (fragment)
   "Return backend-ready LaTeX for FRAGMENT.
@@ -578,6 +596,10 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
      (t
       content))))
 
+(defun ratex--render-typst (fragment)
+  "Return backend-ready Typst math for FRAGMENT."
+  (string-trim (plist-get fragment :content)))
+
 (defun ratex--normalized-render-color ()
   "Return a normalized render color string, or nil."
   (let ((value ratex-render-color))
@@ -585,6 +607,53 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
       (let ((trimmed (string-trim value)))
         (unless (string-empty-p trimmed)
           trimmed)))))
+
+(defun ratex--typst-color ()
+  "Return Typst color expression for the configured preview color."
+  (let ((color (ratex--normalized-render-color)))
+    (if (and (stringp color)
+             (not (string-empty-p color)))
+        (format "rgb(%S)" color)
+      "rgb(\"#000000\")")))
+
+(defun ratex--typst-source (fragment)
+  "Return a standalone Typst document for FRAGMENT."
+  (let ((font-line
+         (when (and (stringp ratex-typst-font)
+                    (not (string-empty-p ratex-typst-font)))
+           (format "#set text(font: %S)\n#show math.equation: set text(font: %S)\n"
+                   ratex-typst-font ratex-typst-font))))
+    (concat
+     "#set page(fill: none, width: auto, height: auto, margin: (x: 0pt, y: 0pt))\n"
+     (format "#set text(fill: %s, size: %.1fpt)\n"
+             (ratex--typst-color)
+             ratex-font-size)
+     (or font-line "")
+     "#show math.equation: set text(top-edge: \"bounds\", bottom-edge: \"bounds\")\n\n"
+     (format "$\n%s\n$\n" (ratex--render-typst fragment)))))
+
+(defun ratex--typst-command ()
+  "Return an executable Typst command path, including login-shell lookup."
+  (or (executable-find "typst")
+      (seq-find #'file-executable-p
+                (list "/opt/homebrew/bin/typst"
+                      "/usr/local/bin/typst"
+                      (expand-file-name "~/.nix-profile/bin/typst")
+                      (format "/etc/profiles/per-user/%s/bin/typst"
+                              (user-login-name))
+                      "/run/current-system/sw/bin/typst"))
+      (let* ((shell (or (getenv "SHELL") shell-file-name))
+             (path
+              (when (and shell (file-executable-p shell))
+                (string-trim
+                 (with-temp-buffer
+                   (when (zerop
+                          (call-process shell nil t nil "-lc"
+                                        "command -v typst 2>/dev/null"))
+                     (buffer-string)))))))
+        (and (stringp path)
+             (not (string-empty-p path))
+             path))))
 
 (defun ratex--inflight-table ()
   "Return request-tracking table for current buffer."
@@ -650,6 +719,51 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
     (ratex-debug-log "render-payload fragment=%S payload=%S" fragment payload)
     payload))
 
+(defun ratex--typst-request (fragment callback)
+  "Render FRAGMENT with Typst and call CALLBACK with a RaTeX-style response."
+  (if-let* ((typst (ratex--typst-command)))
+      (let* ((dir (make-temp-file "ratex-typst-" t))
+             (typfile (expand-file-name "main.typ" dir))
+             (svgfile (expand-file-name "main.svg" dir))
+             (log-buffer (get-buffer-create " *ratex-typst*"))
+             (args
+              (append
+               (list "compile" "-f" "svg")
+               (when (and (stringp ratex-typst-font-dir)
+                          (file-directory-p ratex-typst-font-dir))
+                 (list "--font-path" ratex-typst-font-dir))
+               (list typfile svgfile))))
+        (with-temp-file typfile
+          (insert (ratex--typst-source fragment)))
+        (let ((process
+               (make-process
+                :name "ratex-typst"
+                :buffer log-buffer
+                :command (cons typst args)
+                :noquery t
+                :sentinel
+                (lambda (process _event)
+                  (when (memq (process-status process) '(exit signal))
+                    (unwind-protect
+                        (if (and (eq (process-status process) 'exit)
+                                 (= (process-exit-status process) 0)
+                                 (file-readable-p svgfile))
+                            (with-temp-buffer
+                              (insert-file-contents svgfile)
+                              (funcall callback
+                                       `((ok . t)
+                                         (svg . ,(buffer-string)))))
+                          (funcall callback
+                                   `((ok)
+                                     (error . ,(format "typst exited with %s"
+                                                       (process-exit-status process))))))
+                      (ignore-errors
+                        (delete-directory dir t))))))))
+          process))
+    (progn
+      (funcall callback '((ok) (error . "typst executable not found")))
+      nil)))
+
 (defun ratex--ensure-fragment-preview (fragment)
   "Ensure FRAGMENT preview is displayed or requested."
   (let* ((fragment-key (ratex--fragment-key fragment))
@@ -668,22 +782,24 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
      (t
       (ratex--enqueue-waiter cache-key fragment-key fragment)
       (puthash cache-key t (ratex--inflight-table))
-      (ratex-request
-       (ratex--render-payload fragment)
-       (lambda (response)
-         (remhash cache-key (ratex--inflight-table))
-         (let ((waiters (gethash cache-key (ratex--inflight-waiters-table))))
-           (remhash cache-key (ratex--inflight-waiters-table))
-           (when (alist-get 'ok response)
-             (ratex--cache-put cache-key response))
-           (when ratex-mode
-             (ratex--preserving-window-start
-              (lambda ()
-                (dolist (entry waiters)
-                  (ratex--display-if-visible
-                   (car entry)
-                   (cdr entry)
-                   response))))))))))))
+      (let ((callback
+             (lambda (response)
+               (remhash cache-key (ratex--inflight-table))
+               (let ((waiters (gethash cache-key (ratex--inflight-waiters-table))))
+                 (remhash cache-key (ratex--inflight-waiters-table))
+                 (when (alist-get 'ok response)
+                   (ratex--cache-put cache-key response))
+                 (when ratex-mode
+                   (ratex--preserving-window-start
+                    (lambda ()
+                      (dolist (entry waiters)
+                        (ratex--display-if-visible
+                         (car entry)
+                         (cdr entry)
+                         response)))))))))
+        (if (ratex--fragment-typst-p fragment)
+            (ratex--typst-request fragment callback)
+          (ratex-request (ratex--render-payload fragment) callback)))))))
 
 (defun ratex--display-if-visible (fragment-key fragment response)
   "Display RESPONSE for FRAGMENT-KEY if FRAGMENT should still be visible."

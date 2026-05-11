@@ -1025,6 +1025,7 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
 (require 'init-lean)
 (require 'init-md)
 (require 'init-nix)
+(require 'init-typst)
 (require 'init-html)
 (require 'init-js2)
 (require 'init-latex)

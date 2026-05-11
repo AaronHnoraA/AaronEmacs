@@ -25,10 +25,13 @@
     (let ((fragment (ratex-fragment-at-point)))
       (should (equal (plist-get fragment :content) "x^2")))))
 
-(ert-deftest ratex-ignores-dollar-math ()
+(ert-deftest ratex-detects-double-dollar-math ()
   (with-temp-buffer
     (insert "hello $$x^2$$ world and $y$")
-    (should-not (ratex-fragments-in-buffer))))
+    (let ((fragments (ratex-fragments-in-buffer)))
+      (should (= (length fragments) 1))
+      (should (equal (plist-get (car fragments) :open) "$$"))
+      (should (equal (plist-get (car fragments) :content) "x^2")))))
 
 (ert-deftest ratex-detects-org-bracket-fragment-with-leading-escaped-hash ()
   (with-temp-buffer

@@ -4,8 +4,12 @@
 
 (require 'aaron-ui)
 
+(declare-function my/latex-preview--preferred-math-font-file "init-org-latex" ())
+
+(defvar my/latex-preview-math-font)
+
 (defconst my/org-ratex--fragment-start-regexp
-  "\\\\(\\|\\\\\\[\\|^[ \t]*\\\\begin{[A-Za-z0-9*]+}\\|\\$"
+  "\\$\\$\\|\\\\(\\|\\\\\\[\\|^[ \t]*\\\\begin{[A-Za-z0-9*]+}"
   "Regexp matching likely LaTeX fragment starters in Org buffers.")
 
 (defvar-local my/org-ratex--syntax-watch-installed nil
@@ -60,7 +64,13 @@
              ratex-download-backend
              ratex-diagnose-backend)
   :init
-  (setq ratex-edit-preview 'posframe
+  (setq ratex-render-backend 'typst
+        ratex-typst-font (and (boundp 'my/latex-preview-math-font)
+                              my/latex-preview-math-font)
+        ratex-typst-font-dir (when (fboundp 'my/latex-preview--preferred-math-font-file)
+                               (when-let* ((font-file (my/latex-preview--preferred-math-font-file)))
+                                 (file-name-directory font-file)))
+        ratex-edit-preview 'posframe
         ratex-edit-preview-idle-delay 0.30
         ratex-edit-preview-scan-lines 1
         ratex-font-size 32.0

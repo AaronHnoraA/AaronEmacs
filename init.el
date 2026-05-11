@@ -6,6 +6,7 @@
 
 (setq user-full-name "aaron")
 (setq load-prefer-newer t)
+(require 'compile)
 (require 'package)
 
 (defvar exec-path-from-shell-arguments)
