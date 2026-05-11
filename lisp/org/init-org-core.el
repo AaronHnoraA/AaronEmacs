@@ -32,8 +32,8 @@
 (defvar my-org-root (file-truename "~/HC/Org/")
   "Root directory for all Org files.")
 
-(defvar my-org-roam-dir (expand-file-name "roam/" my-org-root))
-(defvar my-org-daily-dir (expand-file-name "daily/" my-org-roam-dir))
+(defvar my-org-note-dir (expand-file-name "roam/" my-org-root))
+(defvar my-org-daily-dir (expand-file-name "daily/" my-org-note-dir))
 (defvar my-org-notes-file (expand-file-name "notes.org" my-org-root))
 (defvar my-org-diary-file (expand-file-name "diary.org" my-org-root))
 
@@ -43,7 +43,7 @@
 (defvar pv/org-bibtex-files (list (expand-file-name "references.bib" pv/org-bibtex-dir)))
 
 ;; Ensure core directories exist (Optimized)
-(dolist (dir (list my-org-root my-org-roam-dir my-org-daily-dir pv/org-bibtex-dir))
+(dolist (dir (list my-org-root my-org-note-dir my-org-daily-dir pv/org-bibtex-dir))
   (unless (file-directory-p dir)
     (make-directory dir t)))
 

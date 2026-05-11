@@ -9,7 +9,6 @@
 (require 'init-org-ui)
 (require 'init-org-agenda)
 (require 'init-org-capture)
-(require 'init-org-roam)
 (require 'init-org-code)
 (require 'init-org-latex)
 (require 'init-org-tikz)

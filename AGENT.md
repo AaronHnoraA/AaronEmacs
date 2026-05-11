@@ -184,7 +184,7 @@ Org/Jupyter/research:
 - Org is intentionally feature-rich; do not add remote/large-buffer downgrades
   unless explicitly requested.
 - Org roots default to `~/HC/Org/`; changing them requires checking capture,
-  org-roam, and bibliography paths.
+  Typst notes, and bibliography paths.
 - Org auto-insert is intentionally disabled by default to avoid capture/roam
   template collisions.
 - Only route a language through Jupyter when it has a working Jupyter kernel or

@@ -426,7 +426,7 @@ emacs --debug-init -q -l ./bootstrap.el
 默认策略：
 
 - `auto-insert-mode` 全局开，但只对 `my/template-auto-insert-enabled-kinds` 里的 kind 生效
-- `org` 默认不在 allowlist 里（避免干扰 `org-capture`/`org-roam` 的 capture 模板）
+- `org` 默认不在 allowlist 里（避免干扰 `org-capture` 和 note 模板）
 - 模板存放在 `templates/<kind>/`；模板里的占位符支持 `{{date}}` / `{{title}}` / `{{file}}` / `{{author}}` / `{{cursor}}` 等
 
 Typst 模板集中在 [templates/typst/](../templates/typst/)。当前 assignment 模板会

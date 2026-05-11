@@ -32,7 +32,7 @@
   "Current org-publish source root.")
 
 (defun my/site-export-roam-source-p (info)
-  "Return non-nil when export INFO belongs to an org-roam source file."
+  "Return non-nil when export INFO belongs to a note source file."
   (my/site-file-in-directory-p (my/site-export-source-file info)
                                my/site-roam-directory))
 

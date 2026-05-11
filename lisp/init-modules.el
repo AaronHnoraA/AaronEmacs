@@ -89,6 +89,8 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-md)
 (require 'init-ratex)
 (my/require-module-safely 'init-note)
+(my/require-module-safely 'init-note-metadata)
+(my/require-module-safely 'init-note-graph)
 (my/require-module-safely 'init-note-tools)
 
 ;; standalone apps

@@ -13,14 +13,14 @@
 (require 'ox-latex)
 (require 'org-element)
 
-(defcustom my/org-html-roam-assets-directory "assets"
-  "Directory beside exported HTML files for copied org-roam image assets."
+(defcustom my/org-html-note-assets-directory "assets"
+  "Directory beside exported HTML files for copied note image assets."
   :type 'string
   :group 'org)
 
-(defconst my/org-html-roam-image-extensions
+(defconst my/org-html-note-image-extensions
   '("png" "jpg" "jpeg" "gif" "svg" "webp" "avif")
-  "Image extensions copied for org-roam HTML export.")
+  "Image extensions copied for note HTML export.")
 
 (defun my/org-export--managed-special-block-p (block)
   "Return non-nil when BLOCK is generated for local display, not export."
@@ -57,17 +57,17 @@ inner LaTeX fragments render as if the wrapper did not exist."
       (or contents "")
     (funcall orig special-block contents info)))
 
-(defun my/org-html-roam--image-file-p (file)
+(defun my/org-html-note--image-file-p (file)
   "Return non-nil when FILE has an image extension."
   (member (downcase (or (file-name-extension file) ""))
-          my/org-html-roam-image-extensions))
+          my/org-html-note-image-extensions))
 
-(defun my/org-html-roam--source-file (info)
+(defun my/org-html-note--source-file (info)
   "Return source Org file from export INFO."
   (or (plist-get info :input-file)
       (buffer-file-name (buffer-base-buffer))))
 
-(defun my/org-html-roam--output-directory (info)
+(defun my/org-html-note--output-directory (info)
   "Return the directory that should contain assets for export INFO."
   (let ((output-file (or (plist-get info :output-file)
                          (ignore-errors
@@ -76,18 +76,18 @@ inner LaTeX fragments render as if the wrapper did not exist."
      (expand-file-name
       (or output-file
           (concat (file-name-sans-extension
-                   (or (my/org-html-roam--source-file info)
+                   (or (my/org-html-note--source-file info)
                        (expand-file-name "org-export.html" default-directory)))
                   ".html"))))))
 
-(defun my/org-html-roam--file-in-directory-p (file directory)
+(defun my/org-html-note--file-in-directory-p (file directory)
   "Return non-nil when FILE is inside DIRECTORY."
   (and file directory
        (file-exists-p file)
        (file-directory-p directory)
        (file-in-directory-p (file-truename file) (file-truename directory))))
 
-(defun my/org-html-roam--resolve-file-link (path info)
+(defun my/org-html-note--resolve-file-link (path info)
   "Resolve local file link PATH against the source file in export INFO."
   (let ((expanded (substitute-in-file-name path)))
     (if (file-name-absolute-p expanded)
@@ -95,10 +95,10 @@ inner LaTeX fragments render as if the wrapper did not exist."
       (expand-file-name
        expanded
        (file-name-directory
-        (or (my/org-html-roam--source-file info)
+        (or (my/org-html-note--source-file info)
             (expand-file-name "org-export.org" default-directory)))))))
 
-(defun my/org-html-roam--asset-relative-path (source-file image-file)
+(defun my/org-html-note--asset-relative-path (source-file image-file)
   "Return a stable asset subpath for IMAGE-FILE linked from SOURCE-FILE."
   (let* ((source-dir (and source-file (file-name-directory source-file)))
          (local-rel (and source-dir (file-relative-name image-file source-dir))))
@@ -106,17 +106,17 @@ inner LaTeX fragments render as if the wrapper did not exist."
              (not (string-prefix-p "../" local-rel))
              (not (string= local-rel "..")))
         local-rel
-      (file-relative-name image-file (file-truename my-org-roam-dir)))))
+      (file-relative-name image-file (file-truename my-org-note-dir)))))
 
-(defun my/org-html-roam--copy-image-asset (image-file info)
-  "Copy org-roam IMAGE-FILE for HTML export described by INFO.
+(defun my/org-html-note--copy-image-asset (image-file info)
+  "Copy note IMAGE-FILE for HTML export described by INFO.
 Return a relative path from the exported HTML file to the copied asset."
-  (let* ((source-file (my/org-html-roam--source-file info))
-         (output-dir (my/org-html-roam--output-directory info))
-         (asset-rel (my/org-html-roam--asset-relative-path source-file image-file))
+  (let* ((source-file (my/org-html-note--source-file info))
+         (output-dir (my/org-html-note--output-directory info))
+         (asset-rel (my/org-html-note--asset-relative-path source-file image-file))
          (target-file (expand-file-name
                        asset-rel
-                       (expand-file-name my/org-html-roam-assets-directory
+                       (expand-file-name my/org-html-note-assets-directory
                                          output-dir))))
     (make-directory (file-name-directory target-file) t)
     (unless (and (file-exists-p target-file)
@@ -130,29 +130,29 @@ Return a relative path from the exported HTML file to the copied asset."
       (copy-file image-file target-file t t))
     (file-relative-name target-file output-dir)))
 
-(defun my/org-html-roam-copy-image-links (tree backend info)
-  "Copy org-roam local images and rewrite links in HTML export TREE."
+(defun my/org-html-note-copy-image-links (tree backend info)
+  "Copy note-local images and rewrite links in HTML export TREE."
   (when (and (org-export-derived-backend-p backend 'html)
-             (my/org-html-roam--file-in-directory-p
-              (my/org-html-roam--source-file info)
-              my-org-roam-dir))
+             (my/org-html-note--file-in-directory-p
+              (my/org-html-note--source-file info)
+              my-org-note-dir))
     (org-element-map tree 'link
       (lambda (link)
         (when (string= (org-element-property :type link) "file")
           (let* ((path (org-element-property :path link))
                  (image-file (and path
-                                  (my/org-html-roam--resolve-file-link path info))))
+                                  (my/org-html-note--resolve-file-link path info))))
             (when (and image-file
                        (file-regular-p image-file)
-                       (my/org-html-roam--image-file-p image-file)
-                       (my/org-html-roam--file-in-directory-p image-file my-org-roam-dir))
+                       (my/org-html-note--image-file-p image-file)
+                       (my/org-html-note--file-in-directory-p image-file my-org-note-dir))
               (org-element-put-property
                link :path
-               (my/org-html-roam--copy-image-asset image-file info))))))))
+               (my/org-html-note--copy-image-asset image-file info))))))))
   tree)
 
 (dolist (filter '(my/org-export-remove-managed-blocks
-                  my/org-html-roam-copy-image-links))
+                  my/org-html-note-copy-image-links))
   (add-to-list 'org-export-filter-parse-tree-functions filter))
 
 (advice-add 'org-html-special-block :around

@@ -15,6 +15,9 @@
 
 (declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
 (declare-function my/navigation-find-definition "init-navigation" ())
+(declare-function my/note-alias-add "init-note-metadata" (alias))
+(declare-function my/note-graph "init-note-graph" ())
+(declare-function my/note-tag-add "init-note-metadata" (tag))
 (declare-function my/typst-preview-send-position "init-typst" ())
 
 (defgroup my/note nil
@@ -48,6 +51,8 @@
   "SQLite database used by the Typst note index."
   :type 'file
   :group 'my/note)
+
+(defvar my/note-command-map)
 
 (defcustom my/note-style-directory
   (locate-user-emacs-file "lisp/note/typst")
@@ -448,6 +453,10 @@ NOTES is accepted for compatibility with callers that pass the indexed set."
          (choice (completing-read (or prompt "Note: ") candidates nil t)))
     (cdr (assoc choice candidates))))
 
+(defun my/note-read-node (&optional prompt)
+  "Read an indexed note node with PROMPT."
+  (my/note--read-node prompt))
+
 (defun my/note--node-by-id (id)
   "Return the indexed note node for ID, or nil."
   (when (and (stringp id)
@@ -624,6 +633,10 @@ Return non-nil when a note link was opened."
           (vector (file-truename buffer-file-name)))))
       (user-error "Current buffer is not an indexed Typst note")))
 
+(defun my/note-current-node ()
+  "Return the current Typst note node plist."
+  (my/note--node-by-id (my/note-current-node-id)))
+
 ;;;###autoload
 (defun my/note-backlinks ()
   "Show backlinks for the current Typst note."
@@ -699,7 +712,7 @@ Return non-nil when a note link was opened."
     (unless (file-exists-p file)
       (make-directory (file-name-directory file) t)
       (with-temp-file file
-        (insert my/note-helper-source)))
+        (insert (my/note--style-source "note.typ"))))
     file))
 
 ;;;###autoload
@@ -728,12 +741,29 @@ Return non-nil when a note link was opened."
 
 (defun my/note--setup-keys (map)
   "Bind Typst note keys in MAP."
+  (define-key map (kbd "C-c n a") #'my/note-alias-add)
   (define-key map (kbd "C-c n f") #'my/note-node-find)
+  (define-key map (kbd "C-c n g") #'my/note-graph)
   (define-key map (kbd "C-c n i") #'my/note-node-insert)
   (define-key map (kbd "C-c n l") #'my/note-backlinks)
   (define-key map (kbd "C-c n s") #'my/note-db-sync)
   (define-key map (kbd "C-c n n") #'my/note-new)
+  (define-key map (kbd "C-c n t") #'my/note-tag-add)
   (define-key map (kbd "C-c n RET") #'my/note-open-at-point))
+
+(define-prefix-command 'my/note-command-map)
+(global-set-key (kbd "C-c n") 'my/note-command-map)
+(dolist (binding '(("a" . my/note-alias-add)
+                   ("f" . my/note-node-find)
+                   ("g" . my/note-graph)
+                   ("i" . my/note-node-insert)
+                   ("l" . my/note-backlinks)
+                   ("n" . my/note-new)
+                   ("o" . my/note-open-or-preview-sync)
+                   ("RET" . my/note-open-at-point)
+                   ("s" . my/note-db-sync)
+                   ("t" . my/note-tag-add)))
+  (define-key my/note-command-map (kbd (car binding)) (cdr binding)))
 
 (defun my/note--setup-evil-keys (map)
   "Bind Evil normal-state Typst note keys in MAP."

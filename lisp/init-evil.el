@@ -547,8 +547,6 @@
       "e" 'org-set-effort
       "f" 'org-footnote-action
       "l" 'org-lint
-      "n" 'org-roam-node-insert
-      "N" 'org-roam-node-find
       "o" 'org-toggle-ordered-property
       "p" 'org-set-property
       "q" 'org-set-tags-command

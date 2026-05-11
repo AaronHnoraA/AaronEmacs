@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 ;;
-;; Small Org helpers that do not belong to agenda, capture, roam, or export.
+;; Small Org helpers that do not belong to agenda, capture, note, or export.
 
 ;;; Code:
 
@@ -45,7 +45,6 @@
 (defvar org-download-image-dir)
 (defvar org-download-screenshot-method)
 (defvar org-download-timestamp)
-(defvar org-roam-directory)
 (defvar my/org-reference--cache (make-hash-table :test 'equal)
   "Target cache: (file . mtime-float) → candidate plist list.")
 
@@ -57,10 +56,7 @@
 (declare-function org-download-clipboard "org-download")
 (declare-function org-download--dir "org-download")
 (declare-function org-download-screenshot "org-download")
-(declare-function org-roam-node-file "org-roam-node" (node))
-(declare-function org-roam-node-id "org-roam-node" (node))
-(declare-function org-roam-node-read "org-roam-node" (&optional initial-input filter-fn sort-fn require-match prompt))
-(declare-function org-roam-node-title "org-roam-node" (node))
+(declare-function my/note-read-node "init-note" (&optional prompt))
 (declare-function vertico--candidate "vertico" (&optional highlight))
 
 (defun my/org-reference--display-math-bounds ()
@@ -267,19 +263,19 @@ the user to fill in."
     (insert (format "[[%s]]" target))))
 
 (defun my/org-reference--read-source ()
-  "Read a source file or Org Roam node for reference insertion."
+  "Read a source file or note node for reference insertion."
   (let* ((choice (completing-read "Reference from: "
-                                  '("Org Roam node" "File path")
+                                  '("Note node" "File path")
                                   nil t))
-         (roam-p (string= choice "Org Roam node")))
-    (if roam-p
+         (note-p (string= choice "Note node")))
+    (if note-p
         (progn
-          (require 'org-roam)
-          (let ((node (org-roam-node-read nil nil nil t "Roam node: ")))
-            (list :kind 'roam
-                  :file (org-roam-node-file node)
-                  :id (org-roam-node-id node)
-                  :title (org-roam-node-title node))))
+          (require 'init-note)
+          (let ((node (my/note-read-node "Note node: ")))
+            (list :kind 'note
+                  :file (plist-get node :file)
+                  :id (plist-get node :id)
+                  :title (plist-get node :title))))
       (let* ((current-file (buffer-file-name (buffer-base-buffer)))
              (file (read-file-name "Reference file: "
                                    (or (and current-file
@@ -1117,16 +1113,14 @@ selected candidate, including headings and blocks."
 
 (defun my/org-reference--build-link (source target description)
   "Build an Org link for SOURCE plist, TARGET plist and DESCRIPTION."
-  (let* ((roam-p (eq (plist-get source :kind) 'roam))
+  (let* ((note-p (eq (plist-get source :kind) 'note))
          (desc (string-trim (or description "")))
          (desc (unless (string-empty-p desc) desc))
          (search (my/org-reference--target-search target))
          (raw
-          (if (and roam-p (memq (plist-get target :kind) '(file id)))
+          (if (and note-p (eq (plist-get target :kind) 'id))
               (format "id:%s"
-                      (if (eq (plist-get target :kind) 'id)
-                          (plist-get target :target)
-                        (plist-get source :id)))
+                      (plist-get target :target))
             (if (and search
                      (my/org-reference--same-file-p (plist-get source :file)))
                 (or search "")

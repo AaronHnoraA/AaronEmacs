@@ -20,7 +20,7 @@ This configuration is designed to solve a concrete set of problems:
 - Programming and debugging
   The default route is `eglot`, with `lsp-mode` used selectively where needed. Completion, diagnostics, build/test, debugging, tree-sitter, snippets, code navigation, and an on-demand SQL/database client are already wired together.
 - Org and research writing
-  Agenda, capture, org-roam, LaTeX preview, AUCTeX, Jupyter, citations, and PDF workflows are treated as long-term maintained parts of the system.
+  Agenda, capture, Typst notes, LaTeX preview, AUCTeX, Jupyter, citations, and PDF workflows are treated as long-term maintained parts of the system.
 - Remote work and terminals
   TRAMP and `my/vterm-ssh` are first-class. The goal is not merely to “support remote files”, but to make remote work part of the default workflow.
 - Browser and system integration
