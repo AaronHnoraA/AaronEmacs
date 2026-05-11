@@ -1,4 +1,4 @@
-;;; init-org-latex.el --- Org LaTeX export and preview helpers -*- lexical-binding: t; -*-
+;;; init-org-latex.el --- Org LaTeX export and Typst math preview helpers -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;;
@@ -14,10 +14,9 @@
 (declare-function my/shell-command-executable "init-utils")
 (declare-function my/org-enable-org-appear-for-latex-edit "init-org-ui")
 (declare-function my/org-disable-org-appear-for-latex-edit "init-org-ui")
-(declare-function my/org-enable-org-fragtog-for-latex-edit "init-org-ui")
-(declare-function my/org-disable-org-fragtog-for-latex-edit "init-org-ui")
 (declare-function my/org-example-block-background "init-org-ui")
-(declare-function org-fragtog--disable-frag "org-fragtog" (frag &optional renew))
+(declare-function my/org-typst-preview--preferred-math-font-file "init-typst" ())
+(declare-function my/org-typst-preview-math-font-line "init-typst" ())
 (declare-function ratex-fragments-in-region "ratex-math-detect" (beg end))
 (declare-function ratex-fragment-at-point "ratex-math-detect" ())
 (declare-function ratex--split-delimited-fragment "ratex-math-detect" (value))
@@ -26,23 +25,15 @@
 (defvar ratex--active-fragment)
 (defvar ratex--posframe-visible)
 (defvar ratex--suppress-scroll-side-effects nil)
-(defvar org--latex-preview-when-risky)
 (defvar untrusted-content)
-(defvar my/latex-preview--math-font-line-cache nil)
+(defvar typst-ts-symbol-alist)
+(defvar my/org-typst-preview-math-font)
 
 (require 'init-open)
 (require 'init-org-core)
 (require 'init-org-ui)
+(require 'init-typst nil t)
 (require 'ratex-math-detect)
-
-(use-package cdlatex
-  :ensure t
-  :hook (org-mode . org-cdlatex-mode))
-
-(use-package org-fragtog
-  :ensure t
-  :custom
-  (org-fragtog-preview-delay 0.15))
 
 (use-package bibtex-completion
   :custom
@@ -251,9 +242,124 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
                  (const :tag "LaTeX" latex))
   :group 'my/org-latex-preview)
 
-(defcustom my/latex-preview-math-font "GFS Neohellenic Math"
-  "Fallback math font family used by the math preview pipelines."
-  :type 'string
+(defcustom my/org-math-preview-when-risky nil
+  "Whether to render math previews in Org buffers marked as untrusted."
+  :type 'boolean
+  :group 'my/org-latex-preview)
+
+(defcustom my/org-typst-preview-image-directory "org-typst-preview-cache/"
+  "Directory, relative to the Org buffer, used for Typst preview images."
+  :type 'directory
+  :group 'my/org-latex-preview)
+
+(defcustom my/org-typst-prettify-symbols-alist
+  '(("in.not" . ?∉)
+    ("in.rev" . ?∋)
+    ("in" . ?∈)
+    ("alpha" . ?α)
+    ("beta" . ?β)
+    ("gamma" . ?γ)
+    ("delta" . ?δ)
+    ("epsilon" . ?ε)
+    ("epsilon.alt" . ?ϵ)
+    ("zeta" . ?ζ)
+    ("eta" . ?η)
+    ("theta" . ?θ)
+    ("theta.alt" . ?ϑ)
+    ("iota" . ?ι)
+    ("kappa" . ?κ)
+    ("lambda" . ?λ)
+    ("mu" . ?μ)
+    ("nu" . ?ν)
+    ("xi" . ?ξ)
+    ("omicron" . ?ο)
+    ("pi" . ?π)
+    ("pi.alt" . ?ϖ)
+    ("rho" . ?ρ)
+    ("rho.alt" . ?ϱ)
+    ("sigma" . ?σ)
+    ("sigma.alt" . ?ς)
+    ("tau" . ?τ)
+    ("upsilon" . ?υ)
+    ("phi" . ?φ)
+    ("phi.alt" . ?ϕ)
+    ("chi" . ?χ)
+    ("psi" . ?ψ)
+    ("omega" . ?ω)
+    ("Alpha" . ?Α)
+    ("Beta" . ?Β)
+    ("Gamma" . ?Γ)
+    ("Delta" . ?Δ)
+    ("Epsilon" . ?Ε)
+    ("Zeta" . ?Ζ)
+    ("Eta" . ?Η)
+    ("Theta" . ?Θ)
+    ("Iota" . ?Ι)
+    ("Kappa" . ?Κ)
+    ("Lambda" . ?Λ)
+    ("Mu" . ?Μ)
+    ("Nu" . ?Ν)
+    ("Xi" . ?Ξ)
+    ("Omicron" . ?Ο)
+    ("Pi" . ?Π)
+    ("Rho" . ?Ρ)
+    ("Sigma" . ?Σ)
+    ("Tau" . ?Τ)
+    ("Upsilon" . ?Υ)
+    ("Phi" . ?Φ)
+    ("Chi" . ?Χ)
+    ("Psi" . ?Ψ)
+    ("Omega" . ?Ω)
+    ("forall" . ?∀)
+    ("exists.not" . ?∄)
+    ("exists" . ?∃)
+    ("emptyset" . ?∅)
+    ("nothing" . ?∅)
+    ("infinity" . ?∞)
+    ("oo" . ?∞)
+    ("sum" . ?∑)
+    ("product" . ?∏)
+    ("integral" . ?∫)
+    ("gradient" . ?∇)
+    ("partial" . ?∂)
+    ("diff" . ?∂)
+    ("sqrt" . ?√)
+    ("and" . ?∧)
+    ("or" . ?∨)
+    ("not" . ?¬)
+    ("times" . ?×)
+    ("plus.minus" . ?±)
+    ("minus.plus" . ?∓)
+    ("eq.not" . ?≠)
+    ("lt.eq" . ?≤)
+    ("gt.eq" . ?≥)
+    ("approx" . ?≈)
+    ("equiv" . ?≡)
+    ("subset.eq" . ?⊆)
+    ("subset" . ?⊂)
+    ("supset.eq" . ?⊇)
+    ("supset" . ?⊃)
+    ("union" . ?∪)
+    ("sect" . ?∩)
+    ("arrow.r.double.long" . ?⟹)
+    ("arrow.l.r.double.long" . ?⟺)
+    ("arrow.r.long" . ?⟶)
+    ("arrow.l.r.long" . ?⟷)
+    ("arrow.r.double" . ?⇒)
+    ("arrow.l.r.double" . ?⇔)
+    ("arrow.r" . ?→)
+    ("arrow.l" . ?←)
+    ("arrow.l.r" . ?↔))
+  "Extra Typst symbol names prettified inside Org single-dollar math fragments.
+The full `typst-ts-symbol-alist' is used when available; this list fills gaps
+such as Typst function names and gives a fallback when the package has not
+loaded yet."
+  :type '(alist :key-type string :value-type character)
+  :group 'my/org-latex-preview)
+
+(defcustom my/org-typst-prettify-scripts t
+  "Whether to raise/lower Typst `^' and `_' script atoms in Org math."
+  :type 'boolean
   :group 'my/org-latex-preview)
 
 (defcustom my/org-latex-preview-tikz-preamble-lines
@@ -417,7 +523,7 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
   (mapcar
    (lambda (line)
      (if (eq line :math-font)
-         (my/latex-preview-math-font-line)
+         (my/org-typst-preview-math-font-line)
        line))
    my/org-latex-common-paper-preamble-lines))
 
@@ -618,35 +724,6 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
   (interactive (list (my/org-latex--read-class)))
   (my/org-latex-export-to-pdf class))
 
-(defun my/latex-preview--preferred-math-font-file ()
-  "Return the first preferred math-font file available on this machine."
-  (let ((candidates
-         (list (expand-file-name "~/Library/Fonts/GFSNeohellenicMath.otf")
-               (expand-file-name "~/Library/Fonts/STIXTwoMath-Regular.ttf")
-               (expand-file-name "~/Library/Fonts/LibertinusMath-Regular.otf")
-               "/System/Library/Fonts/Supplemental/STIXTwoMath.otf")))
-    (or
-     (catch 'font
-       (dolist (candidate candidates)
-         (when (file-exists-p candidate)
-           (throw 'font candidate))))
-     (when (executable-find "kpsewhich")
-       (let ((lm-math
-              (string-trim
-               (shell-command-to-string "kpsewhich latinmodern-math.otf 2>/dev/null"))))
-         (unless (string-empty-p lm-math)
-           lm-math))))))
-
-(defun my/latex-preview-math-font-line ()
-  "Return the `\\setmathfont' line used in preview snippet headers."
-  (or my/latex-preview--math-font-line-cache
-      (setq my/latex-preview--math-font-line-cache
-            (if-let* ((font-file (my/latex-preview--preferred-math-font-file)))
-                (format "\\setmathfont[Path=%s]{%s}"
-                        (file-name-as-directory (file-name-directory font-file))
-                        (file-name-nondirectory font-file))
-              (format "\\setmathfont{%s}" my/latex-preview-math-font)))))
-
 (defun my/org-latex--preview-extra-preamble-lines (snippet)
   "Return preview preamble lines needed by SNIPPET."
   (let (lines)
@@ -700,7 +777,6 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
 (defvar-local my/org-latex--syntax-watch-installed nil)
 (defvar-local my/org-latex--syntax-detect-timer nil)
 (defvar-local my/org-latex--suppress-scroll-preview nil)
-(defvar my/org-latex--allow-native-preview nil)
 
 (defcustom my/org-latex-overlay-table-max-entries 768
   "Maximum tracked LaTeX preview overlays per Org buffer before pruning."
@@ -752,7 +828,7 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
         (my/org-latex--range-may-have-fragment-syntax-p beg end)))))
 
 (defun my/org-latex--change-near-fragment-syntax-p (beg end)
-  "Return non-nil when a change from BEG to END may touch LaTeX."
+  "Return non-nil when a change from BEG to END may touch math syntax."
   (save-restriction
     (widen)
     (let ((scan-beg (max (point-min)
@@ -762,7 +838,7 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
       (my/org-latex--range-may-have-fragment-syntax-p scan-beg scan-end))))
 
 (defun my/org-latex--range-may-have-fragment-syntax-p (beg end)
-  "Return non-nil when BEG END contains likely LaTeX fragment syntax."
+  "Return non-nil when BEG END contains likely math fragment syntax."
   (let ((beg (max (point-min) (min beg end)))
         (end (min (point-max) (max beg end))))
     (or (save-excursion
@@ -770,7 +846,7 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
           (re-search-forward (my/org-latex--fragment-start-regexp) end t)))))
 
 (defun my/org-latex-buffer-has-fragment-syntax-p ()
-  "Return non-nil when visible Org ranges may contain LaTeX previews."
+  "Return non-nil when visible Org ranges may contain math previews."
   (let* ((ranges (my/org-buffer-visible-ranges
                   (current-buffer)
                   (+ my/org-latex-preview-overscan-lines
@@ -781,7 +857,7 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
              (equal (car my/org-latex--fragment-syntax-cache) signature))
         (cdr my/org-latex--fragment-syntax-cache)
       (let ((present
-             (and (my/org-buffer-feature-present-p :latex-candidate)
+             (and (my/org-buffer-feature-present-p :math-candidate)
                   (cl-some
                    (lambda (range)
                      (my/org-latex--range-may-have-fragment-syntax-p
@@ -792,20 +868,20 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
         present))))
 
 (defun my/org-latex-enable-scroll-preview-on-syntax-insert (beg end _len)
-  "Enable full LaTeX preview hooks after inserting likely fragment syntax."
+  "Enable full math preview hooks after inserting likely fragment syntax."
   (when (and (derived-mode-p 'org-mode)
              (my/org-latex--async-preview-active-p)
              (my/org-latex--change-near-fragment-syntax-p beg end))
     (my/org-latex-enable-scroll-preview)))
 
 (defun my/org-latex--cancel-syntax-detect-timer ()
-  "Cancel the pending visible LaTeX syntax detection timer."
+  "Cancel the pending visible math syntax detection timer."
   (when (timerp my/org-latex--syntax-detect-timer)
     (cancel-timer my/org-latex--syntax-detect-timer))
   (setq-local my/org-latex--syntax-detect-timer nil))
 
 (defun my/org-latex-enable-scroll-preview-deferred (buffer)
-  "Run deferred visible LaTeX syntax detection for BUFFER."
+  "Run deferred visible math syntax detection for BUFFER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (setq-local my/org-latex--syntax-detect-timer nil)
@@ -816,7 +892,7 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
         (my/org-latex-enable-scroll-preview)))))
 
 (defun my/org-latex-schedule-visible-syntax-check ()
-  "Schedule visible LaTeX syntax discovery after scrolling becomes idle."
+  "Schedule visible math syntax discovery after scrolling becomes idle."
   (unless (timerp my/org-latex--syntax-detect-timer)
     (setq-local my/org-latex--syntax-detect-timer
                 (run-with-idle-timer
@@ -825,7 +901,7 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
                  (current-buffer)))))
 
 (defun my/org-latex-enable-scroll-preview-on-visible-syntax (window _start)
-  "Enable LaTeX preview hooks when WINDOW scrolls onto fragment syntax."
+  "Enable math preview hooks when WINDOW scrolls onto fragment syntax."
   (when (and (window-live-p window)
              (buffer-live-p (window-buffer window)))
     (with-current-buffer (window-buffer window)
@@ -835,14 +911,14 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
         (my/org-latex-schedule-visible-syntax-check)))))
 
 (defun my/org-latex-enable-scroll-preview-on-window-size (_frame)
-  "Re-check visible LaTeX syntax discovery after a window size change."
+  "Re-check visible math syntax discovery after a window size change."
   (when (and my/org-latex--syntax-watch-installed
              (derived-mode-p 'org-mode)
              (my/org-latex--async-preview-active-p))
     (my/org-latex-schedule-visible-syntax-check)))
 
 (defun my/org-latex-install-syntax-watch ()
-  "Install cheap watchers that enable LaTeX preview hooks on demand."
+  "Install cheap watchers that enable math preview hooks on demand."
   (unless my/org-latex--syntax-watch-installed
     (setq-local my/org-latex--syntax-watch-installed t)
     (add-hook 'after-change-functions
@@ -857,7 +933,7 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
               #'my/org-latex-cleanup-syntax-watch nil t)))
 
 (defun my/org-latex-cleanup-syntax-watch ()
-  "Remove the on-demand LaTeX syntax watcher."
+  "Remove the on-demand math syntax watcher."
   (my/org-latex--cancel-syntax-detect-timer)
   (remove-hook 'after-change-functions
                #'my/org-latex-enable-scroll-preview-on-syntax-insert t)
@@ -934,12 +1010,11 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
            beg end value (my/org-latex--render-value-from-source value))))))
 
 (defun my/org-latex--async-preview-active-p ()
-  "Return non-nil when Org async LaTeX preview should be used here."
+  "Return non-nil when Org async math preview should be used here."
   (and (derived-mode-p 'org-mode)
        (display-graphic-p)
        (or (not (bound-and-true-p untrusted-content))
-           (bound-and-true-p org--latex-preview-when-risky))
-       (not my/org-latex--allow-native-preview)))
+           my/org-math-preview-when-risky)))
 
 (defun my/org-latex--buffer-visible-p (&optional buffer)
   "Return non-nil when BUFFER is displayed in a live window."
@@ -1050,7 +1125,6 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
   (unless my/org-latex--edit-post-command-enabled
     (setq-local my/org-latex--edit-post-command-enabled t)
     (my/org-enable-org-appear-for-latex-edit)
-    (my/org-enable-org-fragtog-for-latex-edit)
     (add-hook 'post-command-hook #'my/org-latex-post-command-function nil t)))
 
 (defun my/org-latex--disable-edit-post-command ()
@@ -1058,7 +1132,6 @@ The `typst' backend renders single-dollar `$...$' fragments with Typst.  The
   (when my/org-latex--edit-post-command-enabled
     (setq-local my/org-latex--edit-post-command-enabled nil)
     (my/org-disable-org-appear-for-latex-edit)
-    (my/org-disable-org-fragtog-for-latex-edit)
     (remove-hook 'post-command-hook #'my/org-latex-post-command-function t)))
 
 (defun my/org-latex--ratex-edit-session-active-p ()
@@ -1263,15 +1336,14 @@ fallback edit render."
               my/org-latex--last-pc-tick tick
               my/org-latex--last-pc-cmd this-command
               my/org-latex--last-pc-range my/org-latex--post-command-range)
-        ;; Fast bail: when the buffer holds no LaTeX syntax at all (cached) and
+        ;; Fast bail: when the buffer holds no math syntax at all (cached) and
         ;; we are not tracking a fragment, point movement / typing has nothing
         ;; to do here. This is the dominant case in prose-only Org notes that
         ;; happen to share the LaTeX hooks because they were enabled once.
         (when (or my/org-latex--post-command-range
                   (my/org-latex-buffer-has-fragment-syntax-p))
-          ;; Safety net: if an image overlay still covers point, fragtog
-          ;; failed to clear it.  Remove it now so point is never trapped in
-          ;; a preview.
+          ;; Safety net: if an image overlay still covers point, clear it now
+          ;; so point is never trapped in a preview.
           (when-let* ((ov (my/org-latex--image-overlay-at-point)))
             (my/org-latex--clear-preview-range
              (overlay-start ov) (overlay-end ov))
@@ -1890,6 +1962,23 @@ When MAX-COUNT is non-nil, cancel at most that many processes."
       fallback
     value))
 
+(defun my/org-latex--valid-face-at-point ()
+  "Return a live face at point, ignoring stale overlay face symbols."
+  (let ((face (face-at-point nil t)))
+    (cond
+     ((facep face) face)
+     ((listp face) (or (seq-find #'facep face) 'default))
+     (t 'default))))
+
+(defun my/org-latex--safe-face-attribute (face attribute &optional frame inherit)
+  "Return FACE ATTRIBUTE, falling back to `default' for stale faces."
+  (condition-case nil
+      (if (facep face)
+          (face-attribute face attribute frame inherit)
+        (face-attribute 'default attribute frame inherit))
+    (error
+     (face-attribute 'default attribute frame inherit))))
+
 (defun my/org-latex--display-math-source-p (value)
   "Return non-nil when VALUE is a display-math fragment."
   (let ((trimmed (string-trim-left value)))
@@ -1912,7 +2001,7 @@ part of the Typst preview contract."
 (defun my/org-latex--face-background (face)
   "Return FACE's concrete background color, or nil."
   (when (facep face)
-    (let ((background (face-attribute face :background nil t)))
+    (let ((background (my/org-latex--safe-face-attribute face :background nil t)))
       (unless (my/org--unspecified-color-p background)
         background))))
 
@@ -2131,10 +2220,160 @@ renderer never receives nested `$...$' math."
       (pcase-let ((`(,open ,content ,_close)
                    (ratex--split-delimited-fragment
                     (string-trim source-value))))
-        (if (string= open "$")
-            content
-          source-value))
-    source-value))
+	    (if (string= open "$")
+	        content
+	      source-value))
+	    source-value))
+
+(defun my/org-typst-prettify--face-contains-p (face target)
+  "Return non-nil when FACE or a nested face list contains TARGET."
+  (cond
+   ((eq face target) t)
+   ((listp face)
+    (cl-some (lambda (item)
+               (my/org-typst-prettify--face-contains-p item target))
+             face))
+   (t nil)))
+
+(defun my/org-typst-prettify--math-face-p (pos)
+  "Return non-nil when POS has Org's math font-lock face."
+  (my/org-typst-prettify--face-contains-p
+   (get-text-property pos 'face)
+   'org-latex-and-related))
+
+(defun my/org-typst-prettify--math-context-p (beg end)
+  "Return non-nil when BEG END is inside a Typst Org math fragment."
+  (or (my/org-typst-prettify--math-face-p beg)
+      (and (my/org-latex--range-may-have-fragment-syntax-p
+            (max (point-min) (- beg 80))
+            (min (point-max) (+ end 80)))
+           (save-excursion
+             (goto-char beg)
+             (when-let* ((fragment (my/org-latex--current-fragment beg))
+                         ((string= (plist-get fragment :open) "$")))
+               (and (<= (plist-get fragment :begin) beg)
+                    (<= end (plist-get fragment :end))))))))
+
+(defun my/org-typst-prettify--single-char-entry (entry)
+  "Return ENTRY converted for `prettify-symbols-alist', or nil."
+  (let ((key (car-safe entry))
+        (value (cdr-safe entry)))
+    (cond
+     ((and (stringp key)
+           (characterp value))
+      entry)
+     ((and (stringp key)
+           (stringp value)
+           (= (length value) 1))
+      (cons key (aref value 0)))
+     (t nil))))
+
+(defun my/org-typst-prettify--typst-ts-symbols ()
+  "Return single-character symbols from `typst-ts-symbol-alist'."
+  (when (require 'typst-ts-symbols nil t)
+    (delq nil
+          (mapcar #'my/org-typst-prettify--single-char-entry
+                  typst-ts-symbol-alist))))
+
+(defun my/org-typst-prettify--symbols-alist ()
+  "Return the effective Typst symbol prettification alist for Org math."
+  (delete-dups
+   (append
+    (delq nil
+          (mapcar #'my/org-typst-prettify--single-char-entry
+                  my/org-typst-prettify-symbols-alist))
+    (my/org-typst-prettify--typst-ts-symbols))))
+
+(defun my/org-typst-prettify--identifier-char-p (char)
+  "Return non-nil when CHAR can continue a Typst symbol identifier."
+  (and char
+       (not (memq char '(?$ ?_ ?^)))
+       (or (memq (char-syntax char) '(?w ?_))
+           (= char ?.))))
+
+(defun my/org-typst-prettify--symbol-boundary-p (beg end)
+  "Return non-nil when BEG END is not inside a longer Typst symbol name."
+  (and (not (my/org-typst-prettify--identifier-char-p
+             (char-before beg)))
+       (not (my/org-typst-prettify--identifier-char-p
+             (char-after end)))))
+
+(defun my/org-typst-prettify-symbol-compose-p (beg end _match)
+  "Compose Typst symbols only inside Org `$...$' math fragments."
+  (and (my/org-typst-prettify--symbol-boundary-p beg end)
+       (my/org-typst-prettify--math-context-p beg end)))
+
+(defun my/org-typst-prettify-symbols-setup ()
+  "Enable Typst symbol prettification in Org math fragments."
+  (when (derived-mode-p 'org-mode)
+    (let ((symbols (my/org-typst-prettify--symbols-alist)))
+      (when symbols
+        (setq-local prettify-symbols-alist
+                    (append symbols prettify-symbols-alist))
+        (setq-local prettify-symbols-compose-predicate
+                    #'my/org-typst-prettify-symbol-compose-p)
+        (prettify-symbols-mode 1)))))
+
+(defun my/org-typst-prettify--clear-script-props (beg end)
+  "Clear script display properties between BEG and END."
+  (let ((pos beg)
+        next)
+    (while (< pos end)
+      (setq next (next-single-property-change pos 'my/org-typst-script nil end))
+      (when (get-text-property pos 'my/org-typst-script)
+        (remove-text-properties
+         pos next
+         '(display nil rear-nonsticky nil my/org-typst-script nil)))
+      (setq pos next))))
+
+(defun my/org-typst-prettify--script-atom-range ()
+  "Return the current Typst script atom range after point.
+Point must be just after `_' or `^'."
+  (cond
+   ((looking-at "{\\([^{}\n]+\\)}")
+    (cons (match-beginning 1) (match-end 1)))
+   ((looking-at "[[:alnum:].]+")
+    (cons (match-beginning 0) (match-end 0)))))
+
+(defun my/org-typst-prettify-scripts-jit (start end)
+  "Raise/lower Typst script atoms in Org math between START and END."
+  (when my/org-typst-prettify-scripts
+    (let ((scan-start (max (point-min) (- start 8)))
+          (scan-end (min (point-max) (+ end 80))))
+      (my/org-typst-prettify--clear-script-props scan-start scan-end)
+      (save-excursion
+        (goto-char scan-start)
+        (while (re-search-forward "[_^]" scan-end t)
+          (let* ((op (char-before))
+                 (op-beg (1- (point)))
+                 (range (my/org-typst-prettify--script-atom-range)))
+            (when (and range
+                       (my/org-typst-prettify--math-context-p
+                        op-beg (cdr range)))
+              (add-text-properties
+               (car range) (cdr range)
+               `(rear-nonsticky (display my/org-typst-script)
+                 display ,(if (= op ?_)
+                              '(raise -0.35)
+                            '(raise 0.45))
+                 my/org-typst-script t)))))))))
+
+(defun my/org-typst-prettify-scripts-cleanup ()
+  "Disable Typst script prettification in the current Org buffer."
+  (when (boundp 'jit-lock-functions)
+    (jit-lock-unregister #'my/org-typst-prettify-scripts-jit))
+  (my/org-typst-prettify--clear-script-props (point-min) (point-max))
+  (remove-hook 'change-major-mode-hook #'my/org-typst-prettify-scripts-cleanup t)
+  (remove-hook 'kill-buffer-hook #'my/org-typst-prettify-scripts-cleanup t))
+
+(defun my/org-typst-prettify-scripts-setup ()
+  "Enable Typst `^' and `_' script display in Org math fragments."
+  (when (and (derived-mode-p 'org-mode)
+             my/org-typst-prettify-scripts
+             (boundp 'jit-lock-functions))
+    (jit-lock-register #'my/org-typst-prettify-scripts-jit t)
+    (add-hook 'change-major-mode-hook #'my/org-typst-prettify-scripts-cleanup nil t)
+    (add-hook 'kill-buffer-hook #'my/org-typst-prettify-scripts-cleanup nil t)))
 
 (defun my/org-latex--typst-color (value fallback)
   "Return VALUE as a Typst rgb string, or FALLBACK when it cannot be parsed."
@@ -2148,11 +2387,11 @@ renderer never receives nested `$...$' math."
 
 (defun my/org-latex--typst-font-family ()
   "Return the font family used for Typst math previews."
-  my/latex-preview-math-font)
+  my/org-typst-preview-math-font)
 
 (defun my/org-latex--typst-font-path ()
   "Return an extra Typst font search path for the preferred math font."
-  (when-let* ((font-file (my/latex-preview--preferred-math-font-file)))
+  (when-let* ((font-file (my/org-typst-preview--preferred-math-font-file)))
     (file-name-directory font-file)))
 
 (defun my/org-latex--typst-command ()
@@ -2201,62 +2440,90 @@ renderer never receives nested `$...$' math."
        (format "$%s$\n" body)))))
 
 (defun my/org-latex--fragment-spec (beg end source-value render-value &optional fragment)
-  "Return render metadata for a LaTeX fragment between BEG and END.
+  "Return render metadata for a math fragment between BEG and END.
 SOURCE-VALUE is the exact buffer text covered by the preview overlay.
-RENDER-VALUE is the snippet sent to the LaTeX renderer."
+RENDER-VALUE is the snippet sent to the active renderer."
   (save-excursion
     (goto-char beg)
     (let* ((backend (my/org-latex--backend-for-fragment fragment))
-           (processing-type org-preview-latex-default-process)
+           (typst-p (eq backend 'typst))
+           (processing-type
+            (unless typst-p
+              org-preview-latex-default-process))
            (processing-info
-            (or (cdr (assq processing-type org-preview-latex-process-alist))
-                (user-error "Unknown Org LaTeX preview process: %s" processing-type)))
+            (unless typst-p
+              (or (cdr (assq processing-type org-preview-latex-process-alist))
+                  (user-error "Unknown Org LaTeX preview process: %s" processing-type))))
            (dir (my/org-latex--preview-base-directory))
-           (prefix (concat org-preview-latex-image-directory
-                           (if (eq backend 'typst) "org-typstimg" "org-ltximg")))
-           (face (or (face-at-point nil t) 'default))
+           (prefix (if typst-p
+                       (concat (file-name-as-directory
+                                my/org-typst-preview-image-directory)
+                               "org-typstimg")
+                     (concat org-preview-latex-image-directory "org-ltximg")))
+           (face (my/org-latex--valid-face-at-point))
            (default-fg
             (my/org-latex--normalize-preview-color
-             (face-attribute 'default :foreground nil)
+             (my/org-latex--safe-face-attribute 'default :foreground nil)
              "Black"))
            (default-bg
             (my/org-latex--normalize-preview-color
-             (face-attribute 'default :background nil)
+             (my/org-latex--safe-face-attribute 'default :background nil)
              "Transparent"))
+           (latex-options (unless typst-p org-format-latex-options))
            (fg
-            (let ((color (plist-get org-format-latex-options :foreground)))
-              (my/org-latex--normalize-preview-color
-               (cond
-                ((eq color 'auto) (face-attribute face :foreground nil 'default))
-                ((eq color 'default) (face-attribute 'default :foreground nil))
-                (t color))
-               default-fg)))
+            (if typst-p
+                (my/org-latex--normalize-preview-color
+                 (my/org-latex--safe-face-attribute face :foreground nil 'default)
+                 default-fg)
+              (let ((color (plist-get latex-options :foreground)))
+                (my/org-latex--normalize-preview-color
+                 (cond
+                  ((eq color 'auto) (my/org-latex--safe-face-attribute face :foreground nil 'default))
+                  ((eq color 'default) (my/org-latex--safe-face-attribute 'default :foreground nil))
+                  (t color))
+                 default-fg))))
            (block-bg (my/org-latex--block-background-at-point beg))
            (bg
-            (let ((color (plist-get org-format-latex-options :background)))
-              (my/org-latex--normalize-preview-color
-               (cond
-                ((and block-bg
-                      (or (memq color '(auto default))
-                          (null color)
-                          (and (stringp color)
-                               (string= color "Transparent"))))
-                 block-bg)
-                ((eq color 'auto) (face-attribute face :background nil 'default))
-                ((eq color 'default) (face-attribute 'default :background nil))
-                (t color))
-               default-bg)))
-           (latex-header (my/org-latex--preview-header-for-snippet render-value))
+            (if typst-p
+                (my/org-latex--normalize-preview-color
+                 (or block-bg
+                     (my/org-latex--safe-face-attribute face :background nil 'default))
+                 default-bg)
+              (let ((color (plist-get latex-options :background)))
+                (my/org-latex--normalize-preview-color
+                 (cond
+                  ((and block-bg
+                        (or (memq color '(auto default))
+                            (null color)
+                            (and (stringp color)
+                                 (string= color "Transparent"))))
+                   block-bg)
+                  ((eq color 'auto) (my/org-latex--safe-face-attribute face :background nil 'default))
+                  ((eq color 'default) (my/org-latex--safe-face-attribute 'default :background nil))
+                  (t color))
+                 default-bg))))
+           (latex-header
+            (unless typst-p
+              (my/org-latex--preview-header-for-snippet render-value)))
            (display-math (my/org-latex--fragment-display-p fragment source-value))
            (hash (sha1 (prin1-to-string
-                        (list backend
-                              display-math
-                              latex-header
-                              nil
-                              nil
-                              org-format-latex-options
-                              t render-value fg bg))))
-           (imagetype (if (eq backend 'typst)
+                        (if typst-p
+                            (list backend
+                                  display-math
+                                  render-value
+                                  fg
+                                  bg
+                                  my/org-typst-preview-math-font
+                                  (my/org-latex--typst-font-path)
+                                  (my/org-latex--typst-text-size))
+                          (list backend
+                                display-math
+                                latex-header
+                                nil
+                                nil
+                                latex-options
+                                t render-value fg bg)))))
+           (imagetype (if typst-p
                           "svg"
                         (or (plist-get processing-info :image-output-type) "png")))
            (movefile (format "%s_%s.%s"
@@ -2264,9 +2531,11 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
                              hash
                              imagetype))
            (options
-            (org-combine-plists
-             org-format-latex-options
-             `(:foreground ,fg :background ,bg))))
+            (if typst-p
+                `(:foreground ,fg :background ,bg)
+              (org-combine-plists
+               latex-options
+               `(:foreground ,fg :background ,bg)))))
       (list :beg beg
             :end end
             :value source-value
@@ -2280,7 +2549,7 @@ RENDER-VALUE is the snippet sent to the LaTeX renderer."
             :backend backend
             :display-math display-math
             :typst-source
-            (when (eq backend 'typst)
+            (when typst-p
               (my/org-latex--typst-source
                render-value
                (my/org-latex--typst-color fg "#000000")
@@ -2518,12 +2787,12 @@ block body should be sent to the LaTeX renderer."
                     (my/org-latex--place-waiter-preview
                      waiter target (plist-get job :imagetype))
                   (error
-                   (message "[org-latex] Preview overlay skipped for %s: %s"
+                   (message "[org-math] Preview overlay skipped for %s: %s"
                             (file-name-nondirectory target)
                             (error-message-string err))))))
             (unless (or success cancelled)
               (my/org-latex--mark-render-failed target)
-              (message "[org-latex] Preview failed for %s"
+              (message "[org-math] Preview failed for %s"
                        (file-name-nondirectory target)))
             (my/org-latex--pump-render-queue))))
       (my/org-latex--trim-log-buffer (process-buffer process))
@@ -2554,7 +2823,7 @@ block body should be sent to the LaTeX renderer."
          (log-buffer (get-buffer-create "*Org Async LaTeX Preview*"))
          (process
           (make-process
-           :name (format "org-latex-preview-%s"
+           :name (format "org-math-preview-%s"
                          (substring (sha1 (plist-get job :file)) 0 8))
            :buffer log-buffer
            :command (or (plist-get job :command-list)
@@ -2610,7 +2879,7 @@ block body should be sent to the LaTeX renderer."
                  (my/org-latex--mark-render-failed target))
                (my/org-latex--release-waiters job)
                (my/org-latex--cleanup-job-files job)
-               (message "[org-latex] %s" (error-message-string err))))))))))
+               (message "[org-math] %s" (error-message-string err))))))))))
 
 (defun my/org-latex--enqueue-fragment (spec &optional priority no-pump)
   "Place or queue preview work described by SPEC.
@@ -2793,30 +3062,30 @@ queued work."
     (clrhash my/org-latex--failed-renders)))
 
 (defun my/org-latex-preview-command (&optional arg)
-  "Asynchronously preview Org LaTeX fragments like `org-latex-preview'."
+  "Asynchronously preview Org math fragments with the configured backend."
   (interactive "P")
   (cond
    ((not (display-graphic-p)) nil)
    ((and (bound-and-true-p untrusted-content)
-         (not (bound-and-true-p org--latex-preview-when-risky)))
+         (not my/org-math-preview-when-risky))
     nil)
    ((equal arg '(64))
     (my/org-latex-cancel-pending-renders)
     (my/org-latex--clear-preview-range (point-min) (point-max))
-    (message "LaTeX previews removed from buffer"))
+    (message "Math previews removed from buffer"))
    ((equal arg '(16))
     (my/org-latex--preview-range (point-min) (point-max))
-    (message "Queueing LaTeX previews for buffer..."))
+    (message "Queueing math previews for buffer..."))
    ((equal arg '(4))
      (pcase-let ((`(,beg . ,end) (if (use-region-p)
                                     (cons (region-beginning) (region-end))
                                   (my/org-latex--section-range))))
-      (my/org-latex-cancel-pending-renders)
-      (my/org-latex--clear-preview-range beg end)
-      (message "LaTeX previews removed")))
+	      (my/org-latex-cancel-pending-renders)
+	      (my/org-latex--clear-preview-range beg end)
+	      (message "Math previews removed")))
    ((use-region-p)
     (my/org-latex--preview-range (region-beginning) (region-end))
-    (message "Queueing LaTeX previews for region..."))
+    (message "Queueing math previews for region..."))
    ((let ((fragment (my/org-latex--current-fragment)))
       (and fragment
            (pcase-let ((`(,beg . ,end) (my/org-latex--fragment-range fragment)))
@@ -2828,14 +3097,7 @@ queued work."
    (t
     (pcase-let ((`(,beg . ,end) (my/org-latex--section-range)))
       (my/org-latex--preview-range beg end)
-      (message "Queueing LaTeX previews for section...")))))
-
-(defun my/org-latex-preview-advice (orig &optional arg)
-  "Route `org-latex-preview' through the async renderer in Org buffers."
-  (if (or my/org-latex--allow-native-preview
-          (not (derived-mode-p 'org-mode)))
-      (funcall orig arg)
-    (my/org-latex-preview-command arg)))
+      (message "Queueing math previews for section...")))))
 
 (defun my/org-latex-preview-visible-now (&optional window buffer)
   "Preview visible Org LaTeX fragments asynchronously in WINDOW for BUFFER."
@@ -2930,30 +3192,8 @@ queued work."
         (condition-case err
             (my/org-latex-preview-visible-now window)
           (error
-           (message "Org LaTeX initial preview skipped: %s"
+           (message "Org math initial preview skipped: %s"
                     (error-message-string err))))))))
-
-(defun my/org-fragtog-enable-frag-advice (orig frag)
-  "Make `org-fragtog' re-enable FRAG through async preview."
-  (if (not (my/org-latex--async-preview-active-p))
-      (funcall orig frag)
-    (save-excursion
-      (org-fragtog--disable-frag frag)
-      (my/org-latex--preview-fragment frag))))
-
-(defun my/org-fragtog-disable-frag-preserve-point-a (orig frag &optional renew)
-  "Run ORIG without letting `org-fragtog' relocate point.
-`org-fragtog--disable-frag' moves point when it thinks the cursor entered a
-preview from the right.  With the delayed edit timer this can fire while
-typing into a freshly expanded display-math snippet and jump point to `\\]'."
-  (if (not (derived-mode-p 'org-mode))
-      (funcall orig frag renew)
-    (let ((point-marker (copy-marker (point) t)))
-      (unwind-protect
-          (funcall orig frag renew)
-        (when (marker-buffer point-marker)
-          (goto-char point-marker))
-        (set-marker point-marker nil)))))
 
 (defun my/org-latex-enable-scroll-preview ()
   "Enable on-demand LaTeX preview for visible area after scrolling."
@@ -2984,9 +3224,18 @@ typing into a freshly expanded display-math snippet and jump point to `\\]'."
       (my/org-latex-install-syntax-watch))))
 
 (add-hook 'org-mode-hook #'my/org-latex-enable-scroll-preview)
+(add-hook 'org-mode-hook #'my/org-typst-prettify-symbols-setup)
+(add-hook 'org-mode-hook #'my/org-typst-prettify-scripts-setup)
+
+(defalias 'my/org-math-preview-command
+  #'my/org-latex-preview-command)
+(defalias 'my/org-math-preview-visible-now
+  #'my/org-latex-preview-visible-now)
+(defalias 'my/org-math-preview-visible-debounced
+  #'my/org-latex-preview-visible-debounced)
 
 (defun my/org-latex-open-preview-at-point (&optional arg)
-  "On a LaTeX preview overlay: clear it and move point inside the fragment.
+  "On a math preview overlay: clear it and move point inside the fragment.
 Anywhere else: run `org-return' as usual."
   (interactive "P")
   (if-let* ((ov (my/org-latex--image-overlay-at-point)))
@@ -2999,20 +3248,9 @@ Anywhere else: run `org-return' as usual."
 
 ;; 手动刷新绑定
 (with-eval-after-load 'org
-  (advice-add 'org-latex-preview :around #'my/org-latex-preview-advice)
-  (define-key org-mode-map (kbd "C-c C-x C-l") #'my/org-latex-preview-command)
-  (define-key org-mode-map (kbd "C-c C-x v") #'my/org-latex-preview-visible-now)
+  (define-key org-mode-map (kbd "C-c C-x C-l") #'my/org-math-preview-command)
+  (define-key org-mode-map (kbd "C-c C-x v") #'my/org-math-preview-visible-now)
   (define-key org-mode-map (kbd "RET") #'my/org-latex-open-preview-at-point))
-
-(with-eval-after-load 'org-fragtog
-  (unless (advice-member-p #'my/org-fragtog-enable-frag-advice
-                           'org-fragtog--enable-frag)
-    (advice-add 'org-fragtog--enable-frag
-                :around #'my/org-fragtog-enable-frag-advice))
-  (unless (advice-member-p #'my/org-fragtog-disable-frag-preserve-point-a
-                           'org-fragtog--disable-frag)
-    (advice-add 'org-fragtog--disable-frag
-                :around #'my/org-fragtog-disable-frag-preserve-point-a)))
 
 (with-eval-after-load 'ox-latex
   (setq org-latex-compiler "xelatex")
@@ -3036,32 +3274,30 @@ Anywhere else: run `org-return' as usual."
         '("latexmk -xelatex -interaction=nonstopmode -synctex=1 -output-directory=%o %f"))
   (setq org-latex-packages-alist nil)
 
-  ;; 2. 定义处理程序 (保持不变)
-  (let ((tool (expand-file-name "tools/org-xdvisvgm-hires" user-emacs-directory)))
-    (add-to-list 'org-preview-latex-process-alist
-                 `(xdvisvgm-hires-script
-                   :programs ("xelatex" "dvisvgm")
-                   :description "xelatex -> xdv -> (dvisvgm via script) -> svg"
-                   :image-input-type "xdv"
-                   :image-output-type "svg"
-                   :image-size-adjust (1.0 . 1.0)
-                   :latex-compiler ("xelatex -no-pdf -interaction nonstopmode -halt-on-error -output-directory %o %f")
-                   :image-converter (,(format "%s %%f %%O" (shell-quote-argument tool))))))
+  (when (eq my/org-math-preview-backend 'latex)
+    (let ((tool (expand-file-name "tools/org-xdvisvgm-hires" user-emacs-directory)))
+      (add-to-list 'org-preview-latex-process-alist
+                   `(xdvisvgm-hires-script
+                     :programs ("xelatex" "dvisvgm")
+                     :description "xelatex -> xdv -> (dvisvgm via script) -> svg"
+                     :image-input-type "xdv"
+                     :image-output-type "svg"
+                     :image-size-adjust (1.0 . 1.0)
+                     :latex-compiler ("xelatex -no-pdf -interaction nonstopmode -halt-on-error -output-directory %o %f")
+                     :image-converter (,(format "%s %%f %%O" (shell-quote-argument tool))))))
 
-  (setq org-preview-latex-default-process 'xdvisvgm-hires-script)
-  (setq org-format-latex-options (plist-put org-format-latex-options :scale 1.5))
-
-  ;; 3. 极简 Header (确保没有占位符)
-  (setq org-format-latex-header
-        (concat "\\documentclass{article}
+    (setq org-preview-latex-default-process 'xdvisvgm-hires-script)
+    (setq org-format-latex-options (plist-put org-format-latex-options :scale 1.5))
+    (setq org-format-latex-header
+          (concat "\\documentclass{article}
 \\usepackage[usenames]{color}
 "
-                (mapconcat #'identity
-                           (my/org-latex-common-paper-preamble-lines)
-                           "\n")
-                "
+                  (mapconcat #'identity
+                             (my/org-latex-common-paper-preamble-lines)
+                             "\n")
+                  "
 \\pagestyle{empty}
-")))
+"))))
 
 (provide 'init-org-latex)
 ;;; init-org-latex.el ends here

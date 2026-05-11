@@ -17,7 +17,6 @@
 (declare-function my/eglot-ensure-unless-lsp-mode "init-lsp")
 (declare-function my/eglot-set-workspace-configuration "init-lsp" (configuration))
 (declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
-(declare-function my/latex-preview--preferred-math-font-file "init-org-latex" ())
 (declare-function eglot-current-server "eglot" ())
 (declare-function eglot-managed-p "eglot" ())
 (declare-function eglot-signal-didChangeConfiguration "eglot" (server))
@@ -35,6 +34,7 @@
 (defvar previewer-external-start-function nil)
 (defvar previewer-external-browser-backend nil)
 (defvar previewer-external-open-delay nil)
+(defvar treesit-font-lock-level)
 
 (defvar-local my/typst-preview--start-timer nil
   "Retry timer used while waiting for Tinymist Eglot startup.")
@@ -77,6 +77,55 @@
                  (const "always")
                  string)
   :group 'my/typst)
+
+(defcustom my/typst-preview-math-font "GFS Neohellenic Math"
+  "Preferred math font family used by Typst preview tools."
+  :type 'string
+  :group 'my/typst)
+
+(defvar my/typst-preview--math-font-line-cache nil)
+
+(defvaralias 'my/org-typst-preview-math-font 'my/typst-preview-math-font)
+(defvaralias 'my/latex-preview-math-font 'my/typst-preview-math-font)
+
+(defun my/typst-preview--preferred-math-font-file ()
+  "Return the first preferred Typst math-font file available on this machine."
+  (let ((candidates
+         (list (expand-file-name "~/Library/Fonts/GFSNeohellenicMath.otf")
+               (expand-file-name "~/Library/Fonts/STIXTwoMath-Regular.ttf")
+               (expand-file-name "~/Library/Fonts/LibertinusMath-Regular.otf")
+               "/System/Library/Fonts/Supplemental/STIXTwoMath.otf")))
+    (or
+     (catch 'font
+       (dolist (candidate candidates)
+         (when (file-exists-p candidate)
+           (throw 'font candidate))))
+     (when (executable-find "kpsewhich")
+       (let ((lm-math
+              (string-trim
+               (shell-command-to-string "kpsewhich latinmodern-math.otf 2>/dev/null"))))
+         (unless (string-empty-p lm-math)
+           lm-math))))))
+
+(defalias 'my/org-typst-preview--preferred-math-font-file
+  #'my/typst-preview--preferred-math-font-file)
+(defalias 'my/latex-preview--preferred-math-font-file
+  #'my/typst-preview--preferred-math-font-file)
+
+(defun my/typst-preview-math-font-line ()
+  "Return the `\\setmathfont' line used by LaTeX export fallback snippets."
+  (or my/typst-preview--math-font-line-cache
+      (setq my/typst-preview--math-font-line-cache
+            (if-let* ((font-file (my/typst-preview--preferred-math-font-file)))
+                (format "\\setmathfont[Path=%s]{%s}"
+                        (file-name-as-directory (file-name-directory font-file))
+                        (file-name-nondirectory font-file))
+              (format "\\setmathfont{%s}" my/typst-preview-math-font)))))
+
+(defalias 'my/org-typst-preview-math-font-line
+  #'my/typst-preview-math-font-line)
+(defalias 'my/latex-preview-math-font-line
+  #'my/typst-preview-math-font-line)
 
 (defcustom my/typst-preview-host "127.0.0.1:23635"
   "Host and port used for Tinymist's official web preview."
@@ -173,8 +222,8 @@ Use port 0 to let Tinymist choose a free port."
          (append
           (copy-sequence my/typst-lsp-extra-font-paths)
           (list
-           (when (fboundp 'my/latex-preview--preferred-math-font-file)
-             (when-let* ((font-file (my/latex-preview--preferred-math-font-file)))
+           (when (fboundp 'my/org-typst-preview--preferred-math-font-file)
+             (when-let* ((font-file (my/org-typst-preview--preferred-math-font-file)))
                (file-name-directory font-file))))))))
 
 (defun my/typst-eglot-server-command ()
@@ -515,6 +564,13 @@ Use port 0 to let Tinymist choose a free port."
   (previewer-workbench)
   (message "Started Tinymist official previewer"))
 
+(defun my/typst-ts-pretty-setup ()
+  "Keep Typst buffers on `typst-ts-mode' native math script rendering."
+  (setq-local treesit-font-lock-level
+              (max 3 (if (integerp treesit-font-lock-level)
+                         treesit-font-lock-level
+                       0))))
+
 (use-package typst-ts-mode
   :ensure t
   :mode ("\\.typ\\'" . typst-ts-mode)
@@ -525,6 +581,7 @@ Use port 0 to let Tinymist choose a free port."
          (typst-ts-mode . my/typst-company-setup)
          (typst-ts-mode . my/typst-previewer-setup)
          (typst-ts-mode . my/typst-preview-buffer-setup)
+         (typst-ts-mode . my/typst-ts-pretty-setup)
          (typst-ts-mode . flymake-mode)))
 
 (dolist (hook '(typst-mode-hook my/typst-mode-hook))

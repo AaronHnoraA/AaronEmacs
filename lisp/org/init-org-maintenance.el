@@ -50,9 +50,9 @@ scope, not only files below these directory names."
 (defcustom my/org-maintenance-excluded-directory-names
   '(".git" ".cache" ".direnv" ".venv" "node_modules"
     "public" "publish" "dist" "build" "css" "js" "CV"
-    "ltximg" "org-latex-preview-cache")
+    "ltximg" "org-latex-preview-cache" "org-typst-preview-cache")
   "Directory names ignored while scanning media and attachment candidates.
-Published output and Org LaTeX preview cache directories are deliberately
+Published output and Org math preview cache directories are deliberately
 excluded from media cleanup."
   :type '(repeat string)
   :group 'my/org-maintenance)
@@ -141,10 +141,12 @@ current project.  If there is no project, scan the current directory."
            sum (my/org-maintenance--file-size file)))
 
 (defun my/org-maintenance--latex-cache-name-p (name)
-  "Return non-nil when NAME denotes an Org LaTeX preview cache artifact."
+  "Return non-nil when NAME denotes an Org math preview cache artifact."
   (or (string= name my/org-maintenance-latex-cache-directory-name)
       (string= name "org-latex-preview-cache")
-      (string-prefix-p "org-ltximg" name)))
+      (string= name "org-typst-preview-cache")
+      (string-prefix-p "org-ltximg" name)
+      (string-prefix-p "org-typstimg" name)))
 
 (defun my/org-maintenance--excluded-dir-p (dir &optional include-latex-cache)
   "Return non-nil when DIR should be skipped.
@@ -499,14 +501,15 @@ Attachment links count from any Org file in the current maintenance scope."
           :broken (nreverse broken))))
 
 (defun my/org-maintenance--latex-cache-dirs (root)
-  "Return Org LaTeX preview cache directories below ROOT."
+  "Return Org math preview cache directories below ROOT."
   (sort
    (delete-dups
     (my/org-maintenance--directories-named
      root
      (delete-dups
       (list my/org-maintenance-latex-cache-directory-name
-            "org-latex-preview-cache"))
+            "org-latex-preview-cache"
+            "org-typst-preview-cache"))
      t))
    #'string<))
 

@@ -4,9 +4,9 @@
 
 (require 'aaron-ui)
 
-(declare-function my/latex-preview--preferred-math-font-file "init-org-latex" ())
+(declare-function my/org-typst-preview--preferred-math-font-file "init-typst" ())
 
-(defvar my/latex-preview-math-font)
+(defvar my/org-typst-preview-math-font)
 
 (defconst my/org-ratex--fragment-start-regexp
   "\\$"
@@ -65,10 +65,10 @@
              ratex-diagnose-backend)
   :init
   (setq ratex-render-backend 'typst
-        ratex-typst-font (and (boundp 'my/latex-preview-math-font)
-                              my/latex-preview-math-font)
-        ratex-typst-font-dir (when (fboundp 'my/latex-preview--preferred-math-font-file)
-                               (when-let* ((font-file (my/latex-preview--preferred-math-font-file)))
+        ratex-typst-font (and (boundp 'my/org-typst-preview-math-font)
+                              my/org-typst-preview-math-font)
+        ratex-typst-font-dir (when (fboundp 'my/org-typst-preview--preferred-math-font-file)
+                               (when-let* ((font-file (my/org-typst-preview--preferred-math-font-file)))
                                  (file-name-directory font-file)))
         ratex-edit-preview 'posframe
         ratex-edit-preview-idle-delay 0.30

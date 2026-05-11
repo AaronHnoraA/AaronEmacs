@@ -22,8 +22,7 @@
 (declare-function org-fold-show-entry "org-fold" (&optional hide-drawers))
 (declare-function org-fold-show-subtree "org-fold" ())
 (declare-function my/org-clear-visible-ranges-cache "init-org-ui" (&optional buffer))
-(declare-function my/org-latex-preview-visible-debounced "init-org-latex" (&optional window))
-(declare-function my/org-schedule-pretty-block-refontify "init-org-ui" (&optional force))
+(declare-function my/org-math-preview-visible-debounced "init-org-latex" (&optional window))
 (declare-function my/org-schedule-visible-inline-image-refresh "init-org-core" (&optional force refresh))
 (declare-function org-overview "org" (&optional arg))
 (declare-function flymake-diagnostic-beg "flymake" (diag))
@@ -404,17 +403,15 @@ heading, or before the subtree end when there is no child."
 
 (defun my/fold--org-render-refresh-now (buffer window)
   "Refresh visible Org renderers for BUFFER after fold changes.
-WINDOW is used as a hint for LaTeX preview scheduling."
+WINDOW is used as a hint for math preview scheduling."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (setq-local my/fold--org-render-timer nil)
       (when (my/fold--org-buffer-p)
         (when (fboundp 'my/org-schedule-visible-inline-image-refresh)
           (my/org-schedule-visible-inline-image-refresh t t))
-        (when (fboundp 'my/org-schedule-pretty-block-refontify)
-          (my/org-schedule-pretty-block-refontify t))
-        (when (fboundp 'my/org-latex-preview-visible-debounced)
-          (my/org-latex-preview-visible-debounced
+        (when (fboundp 'my/org-math-preview-visible-debounced)
+          (my/org-math-preview-visible-debounced
            (and (window-live-p window) window)))))))
 
 (defun my/fold--refresh-visible-org-rendering (&rest _)

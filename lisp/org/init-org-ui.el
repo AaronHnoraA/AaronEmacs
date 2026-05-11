@@ -30,8 +30,14 @@
 (defvar-local my/org-appear--last-do-buffer nil)
 (defvar-local my/org-appear--last-elem-toggled nil)
 (defvar-local my/org--latex-edit-appear-enabled nil)
-(defvar-local my/org--latex-edit-fragtog-enabled nil)
 (defvar my/org-special-block--palette-cache (make-hash-table :test #'equal))
+
+(defcustom my/org-pretty-blocks-enabled nil
+  "Whether to enable the legacy Org special-block prettification overlays.
+Typst math preview now owns formula rendering, so this stays off by default to
+keep Org buffers light."
+  :type 'boolean
+  :group 'my/org-ui)
 
 (defcustom my/org-pretty-block-cache-max-entries 256
   "Maximum cached pretty-block signatures per Org buffer.
@@ -378,7 +384,7 @@ Org blocks."
   (org-appear-mode 1))
 
 (defun my/org-enable-org-appear-for-latex-edit ()
-  "Enable `org-appear-mode' only for the current LaTeX edit session."
+  "Enable `org-appear-mode' only for the current math edit session."
   (when (and (derived-mode-p 'org-mode)
              (my/org-rich-ui-buffer-p)
              (not my/org--latex-edit-appear-enabled))
@@ -386,27 +392,11 @@ Org blocks."
     (my/org-enable-org-appear-now)))
 
 (defun my/org-disable-org-appear-for-latex-edit ()
-  "Disable `org-appear-mode' after the current LaTeX edit session ends."
+  "Disable `org-appear-mode' after the current math edit session ends."
   (when my/org--latex-edit-appear-enabled
     (setq-local my/org--latex-edit-appear-enabled nil)
     (when (bound-and-true-p org-appear-mode)
       (org-appear-mode -1))))
-
-(defun my/org-enable-org-fragtog-for-latex-edit ()
-  "Enable `org-fragtog-mode' only for the current LaTeX edit session."
-  (when (and (derived-mode-p 'org-mode)
-             (my/org-rich-ui-buffer-p)
-             (fboundp 'org-fragtog-mode)
-             (not my/org--latex-edit-fragtog-enabled))
-    (setq-local my/org--latex-edit-fragtog-enabled t)
-    (org-fragtog-mode 1)))
-
-(defun my/org-disable-org-fragtog-for-latex-edit ()
-  "Disable `org-fragtog-mode' after the current LaTeX edit session ends."
-  (when my/org--latex-edit-fragtog-enabled
-    (setq-local my/org--latex-edit-fragtog-enabled nil)
-    (when (bound-and-true-p org-fragtog-mode)
-      (org-fragtog-mode -1))))
 
 (defun my/org-setup-polished-document-frame ()
   "Apply small buffer-local polish for reading and note-taking."
@@ -414,7 +404,9 @@ Org blocks."
     (setq-local cursor-type 'bar)
     (setq-local left-margin-width 1)
     (setq-local right-margin-width 1)
-    (setq-local hl-line-face 'my/org-hl-line)))
+    (setq-local hl-line-face (if (facep 'my/org-hl-line)
+                                 'my/org-hl-line
+                               'hl-line))))
 
 (defun my/org-visible-buffer-p (&optional buffer)
   "Return non-nil when BUFFER is visible, or when any Org buffer is visible."
@@ -1206,10 +1198,10 @@ keywords."
   :custom
   (org-appear-autoemphasis t)
   (org-appear-autolinks t)
-  (org-appear-autoentities t)
+  (org-appear-autoentities nil)
   (org-appear-autokeywords t)
   ;; Keep Org's pretty entities/compositions stable while editing formulas.
-  ;; Let the LaTeX preview pipeline handle formula rendering instead.
+  ;; Let the Typst math preview pipeline handle formula rendering instead.
   (org-appear-inside-latex nil)
   ;; 光标进入 `^{}' / `_{}' 时显示标记，避免编辑时只看到渲染结果。
   (org-appear-autosubmarkers t)
@@ -1757,26 +1749,27 @@ content gets rendered with the same latency as an unfolded buffer."
 
 (defun my/org-schedule-pretty-block-refontify (&optional force)
   "Schedule a coalesced pretty-block refontify for the current buffer."
-  (if (my/org-visible-buffer-p (current-buffer))
-      (if (and (not force)
-               (timerp my/org--pretty-block-refontify-timer))
-          ;; The timer reads the current visible ranges when it fires.  Avoid
-          ;; rebuilding the range signature for every scroll redisplay.
-          (setq-local my/org--pretty-block-scheduled-refontify-signature nil)
-        (let ((signature (my/org-pretty-block-refontify-signature)))
-          (when (and signature
-                     (or force
-                         (not (or (equal signature
-                                         my/org--pretty-block-visible-refontify-signature)
-                                  (equal signature
-                                         my/org--pretty-block-scheduled-refontify-signature)))))
-            (my/org-cancel-pretty-block-refontify)
-            (setq-local my/org--pretty-block-scheduled-refontify-signature signature)
-            (setq-local my/org--pretty-block-refontify-timer
-                        (run-with-idle-timer my/org-pretty-block-refontify-idle-delay nil
-                                             #'my/org--pretty-block-refontify-now
-                                             (current-buffer))))))
-    (setq-local my/org--pretty-block-needs-visible-refontify t)))
+  (when my/org-pretty-blocks-enabled
+    (if (my/org-visible-buffer-p (current-buffer))
+        (if (and (not force)
+                 (timerp my/org--pretty-block-refontify-timer))
+            ;; The timer reads the current visible ranges when it fires.  Avoid
+            ;; rebuilding the range signature for every scroll redisplay.
+            (setq-local my/org--pretty-block-scheduled-refontify-signature nil)
+          (let ((signature (my/org-pretty-block-refontify-signature)))
+            (when (and signature
+                       (or force
+                           (not (or (equal signature
+                                           my/org--pretty-block-visible-refontify-signature)
+                                    (equal signature
+                                           my/org--pretty-block-scheduled-refontify-signature)))))
+              (my/org-cancel-pretty-block-refontify)
+              (setq-local my/org--pretty-block-scheduled-refontify-signature signature)
+              (setq-local my/org--pretty-block-refontify-timer
+                          (run-with-idle-timer my/org-pretty-block-refontify-idle-delay nil
+                                               #'my/org--pretty-block-refontify-now
+                                               (current-buffer))))))
+      (setq-local my/org--pretty-block-needs-visible-refontify t))))
 
 (defun my/org-schedule-deferred-pretty-block-refontify (&rest _)
   "Schedule pretty-block refontify for Org buffers that just became visible."
@@ -2367,6 +2360,7 @@ content gets rendered with the same latency as an unfolded buffer."
 (defun my/org-enable-jit-pretty-blocks ()
   "在当前 Buffer 启用 JIT 渲染机制。"
   (when (and (derived-mode-p 'org-mode)
+             my/org-pretty-blocks-enabled
              (my/org-rich-ui-buffer-p)
              (my/org-buffer-has-special-block-p))
     (my/org-cleanup-pretty-block-watch)
@@ -2415,22 +2409,25 @@ content gets rendered with the same latency as an unfolded buffer."
   "调试用：强制清除所有 Overlay 并重绘。"
   (interactive)
   (my/org-clear-pretty-block-state)
-  (my/org-schedule-pretty-block-refontify t))
+  (when my/org-pretty-blocks-enabled
+    (my/org-schedule-pretty-block-refontify t)))
 
 (defun my/org-enable-jit-pretty-blocks-maybe ()
   "Enable pretty-block rendering immediately or arm its on-demand watcher."
   (when (and (derived-mode-p 'org-mode)
+             my/org-pretty-blocks-enabled
              (my/org-rich-ui-buffer-p))
     (if (my/org-buffer-has-special-block-p)
         (my/org-enable-jit-pretty-blocks)
       (my/org-install-pretty-block-watch))))
 
-(add-hook 'org-mode-hook #'my/org-enable-jit-pretty-blocks-maybe)
-(add-hook 'window-configuration-change-hook
-          #'my/org-schedule-deferred-pretty-block-refontify)
-(when (boundp 'window-buffer-change-functions)
-  (add-hook 'window-buffer-change-functions
-            #'my/org-schedule-deferred-pretty-block-refontify))
+(when my/org-pretty-blocks-enabled
+  (add-hook 'org-mode-hook #'my/org-enable-jit-pretty-blocks-maybe)
+  (add-hook 'window-configuration-change-hook
+            #'my/org-schedule-deferred-pretty-block-refontify)
+  (when (boundp 'window-buffer-change-functions)
+    (add-hook 'window-buffer-change-functions
+              #'my/org-schedule-deferred-pretty-block-refontify)))
 
 (provide 'init-org-ui)
 ;;; init-org-ui.el ends here

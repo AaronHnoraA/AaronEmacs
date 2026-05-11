@@ -58,7 +58,7 @@ Rich Org UI is no longer disabled based on buffer size."
 
 (defcustom my/org-pretty-block-max-buffer-size (* 256 1024)
   "Compatibility knob kept for older logic.
-Special block overlays are no longer disabled based on buffer size."
+Special block overlays are disabled by default in this configuration."
   :type 'integer)
 
 (defcustom my/org-toc-depth 3
@@ -96,8 +96,8 @@ into a region that contains them."
 
 (defcustom my/org-feature-detect-idle-delay 1.20
   "Idle delay before scroll-triggered optional Org UI feature discovery.
-This keeps table alignment, pretty blocks and LaTeX previews available while
-avoiding visible-range scans on every scroll event."
+This keeps table alignment and math previews available while avoiding
+visible-range scans on every scroll event."
   :type 'number
   :group 'my/org-ui)
 
@@ -190,7 +190,7 @@ buffers even when this echo helper is disabled."
   "Whether this buffer already ran its one-time TOC refresh after opening.")
 
 (defconst my/org-buffer-feature--scan-regexp
-  "\\(^[ \t]*[|│┃]\\)\\|\\(^[ \t]*#\\+begin_\\)\\|\\(\\$\\|\\\\[([]\\|^[ \t]*#\\+begin_display_latex\\b\\)"
+  "\\(^[ \t]*[|│┃]\\)\\|\\(\\$\\)"
   "Regexp used for one-pass detection of Org features used by UI helpers.")
 
 (defvar-local my/org-buffer-feature--cache nil
@@ -199,11 +199,10 @@ buffers even when this echo helper is disabled."
 (defvar-local my/org-buffer-feature--latched nil
   "Sticky plist of feature flags ever observed in this buffer.
 Once a feature is detected we stop scanning for it on later modification
-ticks: existing on-demand UI helpers (valign, pretty blocks, LaTeX preview)
-only enable themselves when a feature appears; they do not tear themselves
-down when the last instance is removed, so a sticky flag is consistent with
-their actual behavior and cuts per-keystroke scan work to zero once a buffer
-has all three features in scope.")
+ticks: existing on-demand UI helpers only enable themselves when a feature
+appears; they do not tear themselves down when the last instance is removed, so
+a sticky flag is consistent with their actual behavior and cuts per-keystroke
+scan work to zero once a buffer has table and math syntax in scope.")
 
 (defvar-local my/org--fold-generation 0
   "Counter incremented on each Org fold state change in this buffer.
@@ -478,35 +477,30 @@ currently invisible Org text removed."
                  (equal (plist-get my/org-buffer-feature--cache :ranges)
                         ranges))
       (let ((table (plist-get my/org-buffer-feature--latched :table))
-            (special-block (plist-get my/org-buffer-feature--latched :special-block))
-            (latex-candidate (plist-get my/org-buffer-feature--latched
-                                        :latex-candidate)))
-        (unless (and table special-block latex-candidate)
+            (math-candidate (plist-get my/org-buffer-feature--latched
+                                       :math-candidate)))
+        (unless (and table math-candidate)
           (save-excursion
             (save-restriction
               (widen)
               (dolist (range ranges)
                 (goto-char (car range))
-                (while (and (not (and table special-block latex-candidate))
+                (while (and (not (and table math-candidate))
                             (re-search-forward
                              my/org-buffer-feature--scan-regexp (cdr range) t))
                   (cond
                    ((match-beginning 1)
                     (setq table t))
                    ((match-beginning 2)
-                    (setq special-block t))
-                   ((match-beginning 3)
-                    (setq latex-candidate t)))))))
+                    (setq math-candidate t)))))))
           (setq-local my/org-buffer-feature--latched
                       (list :table table
-                            :special-block special-block
-                            :latex-candidate latex-candidate)))
+                            :math-candidate math-candidate)))
         (setq-local my/org-buffer-feature--cache
                     (list :tick tick
                           :ranges ranges
                           :table table
-                          :special-block special-block
-                          :latex-candidate latex-candidate))))
+                          :math-candidate math-candidate))))
     my/org-buffer-feature--cache))
 
 (defun my/org-buffer-feature-present-p (feature)
@@ -975,7 +969,7 @@ headline levels."
   (org-startup-indented t)
   (org-startup-folded 'overview)
   (org-hide-emphasis-markers t)
-  (org-pretty-entities t)
+  (org-pretty-entities nil)
   (org-pretty-entities-include-sub-superscripts nil)
   (org-use-sub-superscripts '{})
   (org-ellipsis " ▾")
