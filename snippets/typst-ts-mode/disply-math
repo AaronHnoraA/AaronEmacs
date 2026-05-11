@@ -1,7 +1,7 @@
 # -*- mode: snippet; require-final-newline: nil -*-
 # type: command
 # name: inline math
-# key: :
+# key: '
 # --
 (let ((text (or yas-selected-text ""))
       (beg (point)))
