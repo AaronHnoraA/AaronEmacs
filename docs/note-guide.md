@@ -10,6 +10,10 @@
   放从 Org 迁过来的工具入口：Zotero metadata 填充、剪贴板图片粘贴。
 - [lisp/note/typst/note.typ](../lisp/note/typst/note.typ)
   note 内部共享 Typst 样式和 helper。
+- `~/HC/Org/_typst/publish.typ`
+  发布用 PDF 样式。它只影响 `make publish` 产物，不改变日常编辑 preview。
+- `~/HC/Org/bin/publish-site`
+  扫描 Typst note metadata，增量编译公开 PDF，并刷新网站 archive / graph 数据。
 - [notes/](../notes/)
   项目外写作样式，当前包含 `assignment.typ`、`rho.typ`、`aleph-notas.typ`。
 - [templates/typst/](../templates/typst/)
@@ -50,6 +54,8 @@
 
 note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note-transclude`、`note-import-path`，以及 `definition`、`theorem`、`proof`、`example`、`remark`、`summary`、`question`、`important`、`warning`、`tip`、`info` 等卡片块。
 
+日常 note 始终导入 `/_typst/note.typ`。这个文件由 Emacs helper 同步，负责写作时的样式、Tinymist preview 和跨 note helper。发布时不要在每篇 note 里改 import；发布脚本会临时把第一处 `"/_typst/note.typ"` 指到 `"/_typst/publish.typ"`。
+
 ## 3. 多文件组合
 
 用 wrapper import 另一个 note 暴露的内容：
@@ -67,7 +73,31 @@ note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note
 
 `note-include` / `note-transclude` 会把被包含文件标成非入口文档，避免子文件自己的目录重复出现在当前 PDF。公式、定理、章节引用仍然使用 Typst 原生 `<label>` / `@label`。
 
-## 4. Assignment 模板
+## 4. 发布 Workflow
+
+Org repo 的发布入口是：
+
+```sh
+cd ~/HC/Org
+make publish
+```
+
+当前发布模型是“网站索引 + 浏览器直接打开 PDF”：
+
+- `roam/**/*.typ` 是唯一 note 源文件。
+- `bin/publish-site` 读取 `#metadata((kind: "note", ...)) <note>` 和 `#note("id")[Title]`。
+- 每篇公开 note 编译成同路径 `public/roam/**/*.pdf`。
+- `public/js/data.js` 只保存 archive / graph 需要的标题、标签、摘要、引用和 PDF 链接。
+- PDF 内的 `#note("id")[Title]` 会在发布临时源里改写为可点击的 web/PDF 链接；默认用 `/roam/...pdf`，需要绝对域名时设置 `PUBLISH_BASE_URL`。
+- 不再生成每篇 note 的 HTML wrapper；浏览器自己的 PDF viewer 负责阅读界面。
+
+因此，`note.css` / `publish.css` 只影响网站壳、archive 和 graph，不影响 PDF 里的 note 视觉。公开 PDF 缺的页面、标题、目录、卡片、页眉页脚等效果，应该补到 `~/HC/Org/_typst/publish.typ`，不要补一个发布专用 CSS，也不要把日常 `/_typst/note.typ` 改成只适合发布。
+
+发布是增量的。依赖快照写在 `public/.deps/`；只有 note 本身、图片、wrapper、`_typst/publish.typ` 等输入变了，才会重新编译对应 PDF。另有忽略提交的 `public/.publish-state.json` 记录上次成功发布的 git `HEAD`；当相关发布输入干净且 `HEAD` 没变时，`make publish` 会整轮快速跳过。`make force` 会绕过这些缓存。
+
+`agent/index/` 还是旧的派生索引层，先保留到后续 Typst index refresh；精确内容仍然回到 `roam/**/*.typ` 核对。
+
+## 5. Assignment 模板
 
 项目外写 assignment 时用 Typst 模板，不再走 LaTeX export：
 
@@ -99,7 +129,7 @@ typst compile --root <project-root> main.typ main.pdf
 
 `notes/assignment.typ` 对应旧 `latex/assignment.cls` 的常用能力：页眉页脚、目录、problem/solution、代码块、数学 operator 和页面引用。`notes/rho.typ`、`notes/aleph-notas.typ` 是从旧 cls 迁过来的项目外写作样式。
 
-## 5. 快捷键
+## 6. 快捷键
 
 Typst buffer 里：
 
@@ -136,7 +166,7 @@ macOS GUI 下，`H-o` 已经转成 note 前缀：
 
 全局 `H-y` 也指向 Typst note 图片粘贴。
 
-## 6. Snippet
+## 7. Snippet
 
 Typst snippets 在 [snippets/typst-ts-mode/](../snippets/typst-ts-mode/)。`typst-mode/` 是同目录软链，所以 `typst-mode`、`typst-ts-mode`、`my/typst-mode` 共用同一套模板。
 
@@ -149,10 +179,11 @@ Typst snippets 在 [snippets/typst-ts-mode/](../snippets/typst-ts-mode/)。`typs
 - 块：`def`、`thm`、`lem`、`proof`、`que`、`summ`、`imp`、`warn`、`tip`、`info`、`rem`、`ex`、`sol`。
 - note link：`nlink` 展开成 `#note("id")[title]`。
 
-## 7. 不再维护
+## 8. 不再维护
 
 - 不再维护 Org 文档主线。
 - 不再维护旧 LaTeX `latex/*.cls` 导出类。
 - 不再把 `H-o` 当作 Org 前缀。
 - 不做 Org 到 Typst 的自动转换。
 - 不实现 Org Babel 的 Typst 等价层。
+- 不再用 per-note HTML 导出来承载公式和 note 页面视觉。

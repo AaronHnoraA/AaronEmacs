@@ -1,15 +1,25 @@
 ;;; init-note-graph.el --- Interactive Typst note graph -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; Generate local graph data for the shared published D3 graph frontend.
+;; Generate local graph data for the shared D3 graph frontend and display
+;; it inside an xwidget-webkit buffer.  Node clicks are routed back to
+;; Emacs via a localhost WebSocket bridge so they open as ordinary
+;; buffers instead of navigating the webview.
 
 ;;; Code:
 
-(require 'browse-url)
 (require 'init-note)
 (require 'json)
 (require 'subr-x)
 (require 'url-util)
+
+(declare-function websocket-server "websocket" (port &rest plist))
+(declare-function websocket-server-close "websocket" (conn))
+(declare-function websocket-frame-payload "websocket" (frame))
+(declare-function xwidget-webkit-browse-url "xwidget" (url &optional new-session))
+(declare-function xwidget-webkit-current-session "xwidget" ())
+(declare-function xwidget-webkit-goto-url "xwidget" (url))
+(declare-function xwidget-webkit-uri "xwidget" (xwidget))
 
 (defcustom my/note-graph-file
   (expand-file-name
@@ -26,6 +36,15 @@
   "Directory containing symlinked shared site graph assets."
   :type 'directory
   :group 'my/note)
+
+(defvar my/note-graph--ws-server nil
+  "Active websocket server process for the note graph, or nil.")
+
+(defvar my/note-graph--ws-port nil
+  "Port the note graph websocket server is listening on.")
+
+(defvar my/note-graph--xwidget-buffer nil
+  "Buffer that currently hosts the note graph xwidget session, or nil.")
 
 (defun my/note-graph--asset-file (relative)
   "Return graph asset RELATIVE below `my/note-graph-asset-directory'."
@@ -161,51 +180,195 @@
       (insert ";\n"))
     file))
 
-(defun my/note-graph--html ()
-  "Return standalone HTML using the shared published graph frontend."
-  (format
-   "<!doctype html>
+(defun my/note-graph--open-note-id (id)
+  "Open the Typst note with ID inside Emacs."
+  (if-let* ((node (my/note--node-by-id id))
+            (file (plist-get node :file)))
+      (let ((buf (find-file-noselect file)))
+        (pop-to-buffer buf)
+        (select-frame-set-input-focus (selected-frame)))
+    (message "note-graph: unknown note id %s" id)))
+
+(defun my/note-graph--ws-on-message (_ws frame)
+  "Handle a WebSocket FRAME from the note graph frontend."
+  (let ((payload (websocket-frame-payload frame)))
+    (when (and payload (stringp payload))
+      (condition-case err
+          (let* ((msg (json-parse-string payload :object-type 'alist))
+                 (type (alist-get 'type msg))
+                 (id (alist-get 'id msg)))
+            (cond
+             ((and (equal type "open") (stringp id))
+              (run-at-time 0 nil #'my/note-graph--open-note-id id))))
+        (error (message "note-graph ws decode error: %s" err))))))
+
+(defun my/note-graph--ws-ensure ()
+  "Start the note graph websocket server if needed; return port."
+  (require 'websocket)
+  (unless (and my/note-graph--ws-server
+               (process-live-p my/note-graph--ws-server))
+    (setq my/note-graph--ws-server
+          (websocket-server
+           0
+           :host 'local
+           :on-message #'my/note-graph--ws-on-message))
+    (setq my/note-graph--ws-port
+          (process-contact my/note-graph--ws-server :service)))
+  my/note-graph--ws-port)
+
+(defun my/note-graph--ws-shutdown ()
+  "Stop the note graph websocket server."
+  (when (and my/note-graph--ws-server
+             (process-live-p my/note-graph--ws-server))
+    (ignore-errors (websocket-server-close my/note-graph--ws-server)))
+  (setq my/note-graph--ws-server nil
+        my/note-graph--ws-port nil))
+
+(add-hook 'kill-emacs-hook #'my/note-graph--ws-shutdown)
+
+(defun my/note-graph--html (ws-port)
+  "Return standalone HTML wired to WS-PORT for the note graph."
+  (let ((knowledge-js (my/note-graph--asset-url "js/knowledge.js"))
+        (graph-js (my/note-graph--asset-url "js/graph.js")))
+    (format
+     "<!doctype html>
 <html lang=\"en\">
 <head>
   <meta charset=\"utf-8\" />
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
   <title>Note Graph</title>
-  <link rel=\"stylesheet\" href=\"%s\" />
+  <script>window.__GRAPH_NO_AUTO_INIT__ = true;</script>
   <script src=\"https://d3js.org/d3.v7.min.js\"></script>
+  <style>
+    :root {
+      --paper:        #f7efde;
+      --paper-strong: #efe1c9;
+      --ink:          #23180f;
+      --muted:        #5a4837;
+      --line-soft:    rgba(90, 69, 42, 0.24);
+      --accent:       #654a2f;
+      --link:         #1d3f66;
+    }
+    html, body {
+      margin: 0; padding: 0; height: 100%%;
+      overflow: hidden;
+      color: var(--ink);
+      font-family: \"Iowan Old Style\", \"Palatino Linotype\", \"Book Antiqua\", serif;
+      background:
+        radial-gradient(circle at top left, rgba(255, 249, 232, 0.7), transparent 22%%),
+        linear-gradient(180deg, #e6d8bf 0%%, #d7c6ab 100%%);
+    }
+    #graph-container {
+      position: fixed; inset: 16px;
+      background: var(--paper);
+      border: 1px solid var(--line-soft);
+      border-radius: 4px;
+      box-shadow: 0 2px 6px rgba(76, 55, 31, 0.12);
+      overflow: hidden;
+    }
+    .graph-links line { stroke-linecap: round; }
+    .graph-labels text { fill: var(--ink); font-family: inherit; }
+    .graph-message { padding: 1em; color: var(--muted); }
+    .graph-toolbar {
+      background: rgba(247, 239, 222, 0.95) !important;
+      border: 1px solid var(--line-soft) !important;
+      color: var(--ink);
+      font-family: \"Avenir Next\", \"Helvetica Neue\", sans-serif !important;
+    }
+    .graph-toolbar-input {
+      border-color: var(--line-soft) !important;
+      background: #fffaee;
+      color: var(--ink);
+    }
+    .graph-toolbar-input:focus { border-color: var(--accent) !important; }
+    .graph-toolbar-btn {
+      background: var(--paper-strong) !important;
+      border-color: var(--line-soft) !important;
+      color: var(--ink);
+    }
+    .graph-toolbar-btn:hover { background: #e6d3ac !important; }
+  </style>
 </head>
-<body class=\"site-home site-archive\">
-  <div class=\"site-shell\">
-    <main class=\"site-main\">
-      <section class=\"section section-wide\">
-        <h1>Note Graph</h1>
-        <p class=\"section-aside\">Local Typst notes rendered through the shared published graph.</p>
-        <div id=\"graph-container\" aria-label=\"Interactive knowledge graph\"></div>
-        <div id=\"graph-focus\" class=\"graph-focus empty\" aria-live=\"polite\"></div>
-      </section>
-    </main>
-  </div>
+<body>
+  <div id=\"graph-container\" data-graph-toolbar=\"true\" aria-label=\"Interactive knowledge graph\"></div>
   <script src=\"js/data.js\"></script>
   <script src=\"%s\"></script>
   <script src=\"%s\"></script>
+  <script>
+    (function () {
+      var port = %d;
+      var ws = null;
+      var queue = [];
+      var retryTimer = 0;
+      function connect() {
+        try {
+          ws = new WebSocket(\"ws://127.0.0.1:\" + port + \"/\");
+        } catch (e) {
+          retryTimer = window.setTimeout(connect, 1500);
+          return;
+        }
+        ws.addEventListener(\"open\", function () {
+          while (queue.length) { ws.send(queue.shift()); }
+        });
+        ws.addEventListener(\"close\", function () {
+          retryTimer = window.setTimeout(connect, 1500);
+        });
+        ws.addEventListener(\"error\", function () {
+          try { ws.close(); } catch (e) {}
+        });
+      }
+      function send(payload) {
+        var msg = JSON.stringify(payload);
+        if (ws && ws.readyState === 1) { ws.send(msg); }
+        else { queue.push(msg); }
+      }
+      connect();
+      document.addEventListener(\"DOMContentLoaded\", function () {
+        window.initKnowledgeGraph({
+          toolbar: true,
+          onNoteOpen: function (note) {
+            send({ type: \"open\", id: note.id || note.key });
+          }
+        });
+      });
+    })();
+  </script>
 </body>
 </html>
 "
-   (my/note-graph--asset-url "css/retro.css")
-   (my/note-graph--asset-url "js/knowledge.js")
-   (my/note-graph--asset-url "js/graph.js")))
+     knowledge-js
+     graph-js
+     ws-port)))
+
+(defun my/note-graph--open-in-xwidget (url)
+  "Display URL inside the dedicated note graph xwidget buffer."
+  (require 'xwidget)
+  (unless (featurep 'xwidget-internal)
+    (user-error "This Emacs build has no xwidget support"))
+  (let ((buf my/note-graph--xwidget-buffer))
+    (cond
+     ((and buf (buffer-live-p buf))
+      (with-current-buffer buf
+        (xwidget-webkit-goto-url url))
+      (pop-to-buffer buf))
+     (t
+      (xwidget-webkit-browse-url url t)
+      (setq my/note-graph--xwidget-buffer (current-buffer))))))
 
 ;;;###autoload
 (defun my/note-graph ()
-  "Generate and open the shared-site interactive note graph."
+  "Generate the note graph and display it in xwidget-webkit."
   (interactive)
   (my/note--ensure-db)
-  (let ((directory (file-name-directory my/note-graph-file)))
+  (let ((directory (file-name-directory my/note-graph-file))
+        (port (my/note-graph--ws-ensure)))
     (make-directory directory t)
-    (my/note-graph--write-site-data directory))
-  (with-temp-file my/note-graph-file
-    (insert (my/note-graph--html)))
-  (browse-url-of-file my/note-graph-file)
-  (message "Note graph written: %s" my/note-graph-file))
+    (my/note-graph--write-site-data directory)
+    (with-temp-file my/note-graph-file
+      (insert (my/note-graph--html port)))
+    (my/note-graph--open-in-xwidget
+     (concat "file://" my/note-graph-file))
+    (message "Note graph ready (ws://127.0.0.1:%d)" port)))
 
 (provide 'init-note-graph)
 ;;; init-note-graph.el ends here

@@ -26,6 +26,7 @@
 - [lisp/note/typst/note.typ](../lisp/note/typst/note.typ)
 - [lisp/init-text.el](../lisp/init-text.el)
 - [lisp/init-auctex.el](../lisp/init-auctex.el)
+- `~/HC/Org/_typst/publish.typ`
 
 重点变量：
 
@@ -48,6 +49,8 @@
   Typst note 根目录、索引、跳转、预览和 helper 写入。
 - `lisp/note/typst/note.typ`
   Typst note 的页面、字体、标题、卡片块和跨 note helper。
+- `~/HC/Org/_typst/publish.typ`
+  发布 PDF 的页面、字体和视觉补齐；只影响 `make publish`，不影响 Emacs 里的日常 preview。
 - `lisp/init-text.el`
   Markdown 里什么时候启用 prose 排版。
 - `lisp/init-auctex.el`
@@ -93,6 +96,13 @@
 - `H-y` / `C-c n y` 的图片粘贴
 - `C-c n z` / `H-o z` 的 Zotero metadata 填充
 - `templates/typst/assignment.typ` 插入时创建项目内 `_typst/*.typ` 软链
+
+发布入口不在 Emacs 配置仓库里，而在 `~/HC/Org`：
+
+- `make publish`
+  扫描 `roam/**/*.typ`，增量编译 `public/roam/**/*.pdf`，刷新 archive / graph 数据。
+- `~/HC/Org/_typst/publish.typ`
+  发布 PDF 专用 Typst 样式。不要为 PDF 视觉补一个 note CSS；PDF 里的视觉缺口直接用 Typst 补。
 
 ## 5. 我要改 AI 助手配置
 
@@ -375,6 +385,7 @@ emacs --debug-init -q -l ./bootstrap.el
 文件：
 
 - [lisp/note/typst/note.typ](../lisp/note/typst/note.typ)
+- `~/HC/Org/_typst/publish.typ`
 - [notes/assignment.typ](../notes/assignment.typ)
 - [notes/rho.typ](../notes/rho.typ)
 - [notes/aleph-notas.typ](../notes/aleph-notas.typ)
@@ -382,14 +393,17 @@ emacs --debug-init -q -l ./bootstrap.el
 职责：
 
 - `lisp/note/typst/note.typ`
-  长期 note 的页面、字体、标题、目录、卡片块和跨 note helper。
+  日常长期 note 的页面、字体、标题、目录、卡片块和跨 note helper。`M-x my/note-db-sync`
+  会把它同步到 note 根目录的 `/_typst/note.typ`。
+- `~/HC/Org/_typst/publish.typ`
+  网站发布时的 PDF 样式。`bin/publish-site` 会临时把 note 里的 `"/_typst/note.typ"`
+  import 指到这个文件，所以公开 PDF 的页眉页脚、纸张、标题、目录和卡片视觉都在这里补。
 - `notes/assignment.typ`
   项目外 assignment 模板样式。
 - `notes/rho.typ` / `notes/aleph-notas.typ`
   从旧 LaTeX class 迁过来的额外写作样式。
 
-这些文件通过项目根目录的 `_typst/*.typ` 软链被导入。改完样式后，旧项目不需要复制文件；
-只要软链存在，重新编译即可吃到新样式。
+日常 note 和 assignment 样式通过项目根目录的 `_typst/*.typ` 软链被导入。改完样式后，旧项目不需要复制文件；只要软链存在，重新编译即可吃到新样式。发布 PDF 样式则由 `~/HC/Org/_typst/publish.typ` 跟随网站仓库维护。
 
 如果项目里已有真实 `_typst/xxx.typ` 文件而不是软链，模板插入逻辑不会覆盖它；手动处理这个
 项目自己的样式即可。

@@ -16,7 +16,7 @@ This directory contains the operational docs for the Emacs configuration. The do
 - [project-guide.md](project-guide.md)
   Project switching, project workbench flow, and how Treemacs / Perspective fit together.
 - [note-guide.md](note-guide.md)
-  Typst-first notes, note tools, assignment templates, project-local Typst styles, links, and backlinks.
+  Typst-first roam notes, note tools, assignment templates, publish PDF styling, links, and backlinks.
 - [dev-guide.md](dev-guide.md)
   Programming, completion, LSP, debugging, terminals, remote work, browser integration, and AI.
 - [research-notes-workflow.md](research-notes-workflow.md)
