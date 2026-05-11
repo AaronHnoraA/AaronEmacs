@@ -378,6 +378,16 @@ FILE is the file path associated with the buffer."
     inset: (x: 0.62em, y: 0.48em),
   )
   show heading: set text(font: (%S, %S, %S), weight: \"bold\")
+  show heading.where(level: 1): it => block[
+    #set text(fill: rgb(\"5c5244\"), size: 1.22em, weight: \"bold\")
+    #it
+    #v(0.22em)
+    #line(length: 100%%, stroke: 0.9pt + rgb(\"d8cfbf\"))
+  ]
+  show heading.where(level: 2): it => block[
+    #set text(fill: rgb(\"6a5f4f\"), weight: \"semibold\")
+    #it
+  ]
   show raw: set text(font: %S, size: 0.92em)
   show math.equation: set text(font: %s)
   show table.cell: set text(size: 0.95em)
@@ -394,7 +404,7 @@ FILE is the file path associated with the buffer."
   body
 }
 
-#let note-card(title, accent, tint, body) = {
+#let note-card(title, accent, tint, marker, body) = {
   block(
     width: 100%%,
     fill: rgb(\"f4f3ef\"),
@@ -422,36 +432,43 @@ FILE is the file path associated with the buffer."
         show math.equation: set text(font: %s)
         body
       }
+      #v(0.42em)
+      #align(right)[
+        #text(
+          fill: rgb(accent),
+          size: 0.78em,
+        )[#marker]
+      ]
     ]
   ]
 }
 
-#let definition(body) = note-card(\"定义\", \"8a6418\", \"f8ecd0\", body)
-#let theorem(body) = note-card(\"定理\", \"2f6f42\", \"e5f3df\", body)
-#let lemma(body) = note-card(\"引理\", \"335f91\", \"e4edf8\", body)
-#let corollary(body) = note-card(\"推论\", \"5a4f91\", \"ece8f8\", body)
+#let definition(body) = note-card(\"📘 定义\", \"8a6418\", \"f8ecd0\", \"◇\", body)
+#let theorem(body) = note-card(\"📐 定理\", \"2f6f42\", \"e5f3df\", \"♥\", body)
+#let lemma(body) = note-card(\"🪜 引理\", \"335f91\", \"e4edf8\", \"⋄\", body)
+#let corollary(body) = note-card(\"🔎 推论\", \"5a4f91\", \"ece8f8\", \"⇒\", body)
 #let cor(body) = corollary(body)
-#let proposition(body) = note-card(\"命题\", \"7a4b2d\", \"f3e6dc\", body)
+#let proposition(body) = note-card(\"📌 命题\", \"7a4b2d\", \"f3e6dc\", \"♠\", body)
 #let prop(body) = proposition(body)
 #let property(body) = proposition(body)
-#let proof(body) = note-card(\"证明\", \"267386\", \"e1f2f4\", body)
-#let example(body) = note-card(\"例子\", \"80623a\", \"f1e5d4\", body)
-#let remark(body) = note-card(\"备注\", \"5f6c7b\", \"e9ece8\", body)
-#let summary(body) = note-card(\"摘要\", \"476f78\", \"e3f1ee\", body)
-#let question(body) = note-card(\"问题\", \"8a6418\", \"f8ecd0\", body)
+#let proof(body) = note-card(\"✍️ 证明\", \"267386\", \"e1f2f4\", \"∎\", body)
+#let example(body) = note-card(\"🧪 例子\", \"80623a\", \"f1e5d4\", \"◦\", body)
+#let remark(body) = note-card(\"💬 备注\", \"5f6c7b\", \"e9ece8\", \"✦\", body)
+#let summary(body) = note-card(\"🧾 摘要\", \"476f78\", \"e3f1ee\", \"☰\", body)
+#let question(body) = note-card(\"❓ 问题\", \"8a6418\", \"f8ecd0\", \"?\", body)
 #let problem(body) = question(body)
-#let solution(body) = note-card(\"解法\", \"2f6f42\", \"e5f3df\", body)
-#let important(body) = note-card(\"重点\", \"9b3b37\", \"f4dfdc\", body)
-#let warning(body) = note-card(\"警告\", \"9b3b37\", \"f4dfdc\", body)
-#let tip(body) = note-card(\"提示\", \"26735f\", \"e1f1ea\", body)
-#let info(body) = note-card(\"信息\", \"335f91\", \"e4edf8\", body)
+#let solution(body) = note-card(\"✅ 解法\", \"2f6f42\", \"e5f3df\", \"✓\", body)
+#let important(body) = note-card(\"⚡ 重点\", \"9b3b37\", \"f4dfdc\", \"!\", body)
+#let warning(body) = note-card(\"⚠️ 警告\", \"9b3b37\", \"f4dfdc\", \"▲\", body)
+#let tip(body) = note-card(\"💡 提示\", \"26735f\", \"e1f1ea\", \"✧\", body)
+#let info(body) = note-card(\"ℹ️ 信息\", \"335f91\", \"e4edf8\", \"i\", body)
 
 #let note(..args) = {
   let pos = args.pos()
   if pos.len() == 2 {
     text(fill: rgb(%S), underline(pos.at(1)))
   } else if pos.len() == 1 {
-    note-card(\"笔记\", \"26735f\", \"e1f1ea\", pos.at(0))
+    note-card(\"📝 笔记\", \"26735f\", \"e1f1ea\", \"✎\", pos.at(0))
   }
 }
 "

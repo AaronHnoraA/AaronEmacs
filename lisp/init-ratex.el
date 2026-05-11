@@ -87,6 +87,8 @@
          (tex-mode . ratex-turn-on)
          (TeX-mode . ratex-turn-on)
          (markdown-mode . ratex-turn-on)
+         (gfm-mode . ratex-turn-on)
+         (markdown-ts-mode . ratex-turn-on)
          (plain-tex-mode . ratex-turn-on)
          (plain-TeX-mode . ratex-turn-on)
          (docTeX-mode . ratex-turn-on)))

@@ -950,8 +950,7 @@ headline levels."
          (org-mode . my/org-force-indent-mode)
          (org-mode . my/org-setup-indent-after-local-variables)
          (org-mode . my/org-setup-buffer-spacing)
-         (org-mode . my/org-setup-toc-auto-update)
-         (org-mode . my/org-enable-typography-maybe)) ; 缩进模式
+         (org-mode . my/org-setup-toc-auto-update)) ; 缩进模式
   :bind (("C-c a" . org-agenda)
          ("C-c c" . org-capture)
          :map org-mode-map

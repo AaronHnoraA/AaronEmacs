@@ -87,6 +87,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-server)
 (require 'init-previewer)
 (require 'init-md)
+(require 'init-ratex)
 (my/require-module-safely 'init-note)
 
 ;; standalone apps

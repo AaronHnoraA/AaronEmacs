@@ -85,24 +85,6 @@ clearly far away from any math block."
   "Default backend SVG font size."
   :type 'number)
 
-(defcustom ratex-render-backend 'latex
-  "Renderer used for RaTeX previews.
-The `latex' backend uses the RaTeX backend process.  The `typst' backend uses
-the Typst CLI for `$$...$$' fragments."
-  :type '(choice (const :tag "LaTeX" latex)
-                 (const :tag "Typst" typst)))
-
-(defcustom ratex-typst-font nil
-  "Font family used by the Typst preview backend.
-When nil, Typst uses its default math font."
-  :type '(choice (const :tag "Typst default" nil)
-                 string))
-
-(defcustom ratex-typst-font-dir nil
-  "Extra font directory passed to `typst compile --font-path'."
-  :type '(choice (const :tag "No extra font path" nil)
-                 directory))
-
 (defcustom ratex-svg-padding 2.0
   "Default SVG padding sent to the backend."
   :type 'number)
