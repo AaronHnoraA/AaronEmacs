@@ -15,7 +15,15 @@
   :ensure t
   :after flymake
   :config
-  (setq flymake-vale-executable "vale")
+  (setq flymake-vale-program "vale"
+        flymake-vale-modes '(text-mode latex-mode org-mode markdown-mode
+                                        message-mode typst-ts-mode typst-mode
+                                        my/typst-mode)
+        flymake-vale-mode-file-exts
+        (append '((typst-ts-mode . "typ")
+                  (typst-mode . "typ")
+                  (my/typst-mode . "typ"))
+                flymake-vale-mode-file-exts))
 
   ;; 一个统一的入口：本地文件才启用
   (defun my/flymake-vale-setup ()
@@ -32,7 +40,10 @@
    (tex-mode . my/flymake-vale-setup)
    (TeX-mode . my/flymake-vale-setup)
    (plain-tex-mode . my/flymake-vale-setup)
-   (plain-TeX-mode . my/flymake-vale-setup)))
+   (plain-TeX-mode . my/flymake-vale-setup)
+   (typst-ts-mode . my/flymake-vale-setup)
+   (typst-mode . my/flymake-vale-setup)
+   (my/typst-mode . my/flymake-vale-setup)))
 
 (setq flymake-fringe-indicator-position 'right-fringe)
 
