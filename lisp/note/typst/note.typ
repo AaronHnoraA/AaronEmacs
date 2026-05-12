@@ -8,6 +8,9 @@
 #let note-paper = rgb("e7e5df")
 #let note-ink = rgb("29251f")
 #let note-link-fill = rgb("1d4ed8")
+#let note-zotero-fill = rgb("6d3b8a")
+#let note-zotero-soft = rgb("f0e7f7")
+#let note-zotero-rule = rgb("cab6dc")
 
 #let note-include-active = state("my-note-include-active", false)
 #let note-path(id) = "/_typst/notes/" + id + ".typ"
@@ -33,63 +36,108 @@
 #let note-code-font = "Menlo"
 #let note-math-font = ("GFS Neohellenic Math",)
 
-#let note-theme(body) = {
+#let note-theme(
+  body,
+  page-fill: note-paper,
+  page-margin: (x: 6.5em, y: 5.5em),
+  page-header: none,
+  page-footer: context align(center)[
+    #text(fill: note-accent, size: 0.82em)[#counter(page).display()]
+  ],
+  text-size: 12pt,
+  text-fill: note-ink,
+  par-leading: 0.72em,
+  table-stroke: 0.65pt + note-rule,
+  table-cell-size: 0.95em,
+  raw-size: 0.92em,
+  heading1-v-before: 0.55em,
+  heading1-fill: note-accent-soft,
+  heading1-stroke: 0.7pt + rgb("bfd0e5"),
+  heading1-radius: 3pt,
+  heading1-inset: (x: 0.76em, y: 0.48em),
+  heading1-text-fill: note-accent,
+  heading1-text-size: 1.22em,
+  heading2-style: "marker",
+  heading2-v-before: 0.35em,
+  heading2-marker-fill: note-accent,
+  heading2-marker-text-fill: rgb("4a5d72"),
+  heading2-rule-stroke: 0.65pt + note-rule,
+  heading2-rule-text-fill: note-ink,
+) = {
   set page(
-    fill: note-paper,
-    margin: (x: 6.5em, y: 5.5em),
-    footer: context align(center)[
-      #text(fill: note-accent, size: 0.82em)[#counter(page).display()]
-    ],
+    fill: page-fill,
+    margin: page-margin,
+    header: page-header,
+    footer: page-footer,
   )
   set text(
     font: note-body-font,
-    size: 12pt,
-    fill: note-ink,
+    size: text-size,
+    fill: text-fill,
     lang: "en",
   )
-  set par(leading: 0.72em, justify: true)
+  set par(leading: par-leading, justify: true)
   set table(
-    stroke: 0.65pt + note-rule,
+    stroke: table-stroke,
     inset: (x: 0.62em, y: 0.48em),
   )
   show heading: set text(font: note-heading-font, weight: "bold")
   show heading.where(level: 1): it => block[
-    #v(0.55em)
+    #v(heading1-v-before)
     #block(
       width: 100%,
-      fill: note-accent-soft,
-      stroke: 0.7pt + rgb("bfd0e5"),
-      radius: 3pt,
-      inset: (x: 0.76em, y: 0.48em),
+      fill: heading1-fill,
+      stroke: heading1-stroke,
+      radius: heading1-radius,
+      inset: heading1-inset,
     )[
-      #text(fill: note-accent, size: 1.22em, weight: "bold")[#it]
+      #text(fill: heading1-text-fill, size: heading1-text-size, weight: "bold")[#it]
     ]
     #v(0.18em)
   ]
   show heading.where(level: 2): it => block[
-    #v(0.35em)
-    #grid(
-      columns: (0.28em, 1fr),
-      gutter: 0.56em,
-      rect(width: 0.28em, height: 1.05em, fill: note-accent, radius: 1pt),
-      text(fill: rgb("4a5d72"), weight: "semibold")[#it],
-    )
+    #v(heading2-v-before)
+    #if heading2-style == "rule" {
+      block(
+        width: 100%,
+        stroke: (bottom: heading2-rule-stroke),
+        inset: (bottom: 0.2em),
+      )[
+        #text(fill: heading2-rule-text-fill, weight: "semibold")[#it]
+      ]
+    } else {
+      grid(
+        columns: (0.28em, 1fr),
+        gutter: 0.56em,
+        rect(width: 0.28em, height: 1.05em, fill: heading2-marker-fill, radius: 1pt),
+        text(fill: heading2-marker-text-fill, weight: "semibold")[#it],
+      )
+    }
   ]
-  show raw: set text(font: note-code-font, size: 0.92em)
+  show raw: set text(font: note-code-font, size: raw-size)
   show math.equation: set text(font: note-math-font)
-  show table.cell: set text(size: 0.95em)
+  show table.cell: set text(size: table-cell-size)
   body
 }
 
-#let note-entry(toc: true, body) = {
-  show: note-theme
+#let note-entry-with(
+  body,
+  toc: true,
+  theme: note-theme,
+  toc-title: [目录],
+  toc-depth: 2,
+  toc-wrapper: it => it,
+) = {
+  show: theme
   context {
     if not note-include-active.get() and toc {
-      outline(title: [目录], depth: 2)
+      toc-wrapper(outline(title: toc-title, depth: toc-depth))
     }
   }
   body
 }
+
+#let note-entry(toc: true, body) = note-entry-with(body, toc: toc)
 
 #let note-card(title, accent, tint, marker, body) = {
   block(
@@ -143,6 +191,37 @@
     note-card("📝 笔记", "26735f", "e1f1ea", "✎", pos.at(0))
   }
 }
+
+#let zoterolink(url, body) = link(url)[
+  #box(
+    fill: note-zotero-soft,
+    stroke: 0.55pt + note-zotero-rule,
+    inset: (x: 0.42em, y: 0.08em),
+    outset: (y: 0.12em),
+    radius: 2pt,
+    baseline: 0.04em,
+  )[
+    #text(fill: note-zotero-fill, weight: "bold", size: 0.72em)[ZOTERO]
+    #h(0.35em)
+    #text(fill: note-link-fill)[#body]
+  ]
+]
+
+#let bib(path: "/references/references.bib", title: [References], style: "apa") = {
+  v(0.8em)
+  block(
+    width: 100%,
+    fill: rgb("f4f0e8"),
+    stroke: 0.45pt + rgb("d2c8b8"),
+    radius: 2pt,
+    inset: (x: 0.82em, y: 0.6em),
+    breakable: true,
+  )[
+    #bibliography(path, title: title, style: style)
+  ]
+}
+
+#let references = bib
 
 // --- Status chips (inline, e.g. `- #todo[Write proof of Lemma 3]`).
 // Scanned by `my/note-agenda` on the Emacs side; keep the call form

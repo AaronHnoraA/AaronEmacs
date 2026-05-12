@@ -67,7 +67,7 @@ TITLE drives the filename slug and headline."
     (find-file file)
     (insert (my/note-capture--entry-source id title tags))
     (save-buffer)
-    (my/note-db-sync)
+    (my/note-db-sync-file file)
     file))
 
 ;;;###autoload
@@ -89,7 +89,7 @@ TITLE drives the filename slug and headline."
     (insert (format "== %s\n\n" (format-time-string "%H:%M")))
     (when fresh
       (save-buffer)
-      (my/note-db-sync))
+      (my/note-db-sync-file file))
     file))
 
 (provide 'init-note-capture)

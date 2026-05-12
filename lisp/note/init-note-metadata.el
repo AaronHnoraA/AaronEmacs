@@ -99,9 +99,10 @@
     value))
 
 (defun my/note--after-metadata-edit (message value)
-  "Save current note, sync the index, and report MESSAGE with VALUE."
+  "Save current note, sync its index row, and report MESSAGE with VALUE."
   (save-buffer)
-  (my/note-db-sync)
+  (when buffer-file-name
+    (my/note-db-sync-file buffer-file-name))
   (message message value))
 
 ;;;###autoload

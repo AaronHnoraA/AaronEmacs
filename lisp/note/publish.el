@@ -1,4 +1,4 @@
-;;; publish.el --- org-publish config -*- lexical-binding: t; -*-
+;;; publish.el --- Note site publish config -*- lexical-binding: t; -*-
 
 (require 'json)
 (require 'ox-html)
@@ -11,8 +11,15 @@
 (require 'subr-x)
 
 (defconst my/site-asset-version "20260426-19")
+(defconst my/site-root
+  (file-name-as-directory
+   (file-truename
+    (if (boundp 'my-org-root)
+        my-org-root
+      (expand-file-name "~/HC/Org/"))))
+  "Root directory for the note publishing site.")
 (defconst my/site-roam-directory
-  (expand-file-name "roam/" (file-name-directory load-file-name)))
+  (expand-file-name "roam/" my/site-root))
 (defconst my/site-roam-html-asset-directory "assets")
 (defconst my/site-roam-image-extensions
   '("png" "jpg" "jpeg" "gif" "svg" "webp" "avif"))
@@ -23,9 +30,9 @@
 (defconst my/site-hidden-filetags '("private")
   "Filetags that force an Org file to publish as a hidden placeholder.")
 (defconst my/site-timestamp-directory
-  (expand-file-name ".cache/org-timestamps/" (file-name-directory load-file-name)))
+  (expand-file-name ".cache/org-timestamps/" my/site-root))
 (defconst my/site-org-id-locations-file
-  (expand-file-name ".cache/org-id-locations" (file-name-directory load-file-name)))
+  (expand-file-name ".cache/org-id-locations" my/site-root))
 (defvar my/site-id-link-table nil
   "Hash table mapping uppercase Org IDs to source files.")
 (defvar my/site-publish-root nil
@@ -924,10 +931,10 @@ target, but their Org content is not exported."
       "* Sitemap generation log (ignore this file)")))
 
 (setq org-publish-project-alist
-      '(("site-org"
-         :base-directory "~/HC/Org/"
+      `(("site-org"
+         :base-directory ,my/site-root
          :base-extension "org"
-         :publishing-directory "~/HC/Org/public/"
+         :publishing-directory ,(expand-file-name "public/" my/site-root)
          :recursive t
          :publishing-function my/site-html-head
          :exclude "public/\\|ltximg/\\|homepage.html\\|js/\\|css/\\|CV/.+\\.org$"
@@ -936,9 +943,9 @@ target, but their Org content is not exported."
          :sitemap-filename "sitemap-log.org"
          :sitemap-function my/generate-data-and-index)
         ("site-static"
-         :base-directory "~/HC/Org/"
+         :base-directory ,my/site-root
          :base-extension "css\\|js\\|png\\|jpg\\|jpeg\\|gif\\|svg\\|webp\\|avif\\|pdf"
-         :publishing-directory "~/HC/Org/public/"
+         :publishing-directory ,(expand-file-name "public/" my/site-root)
          :recursive t
          :exclude "public/\\|ltximg/\\|CV/jpg/\\|daily/\\|roam/"
          :publishing-function org-publish-attachment)
@@ -949,4 +956,4 @@ target, but their Org content is not exported."
 (setq org-html-validation-link nil)
 (setq org-publish-timestamp-directory my/site-timestamp-directory)
 (setq org-id-locations-file my/site-org-id-locations-file)
-(setq my/site-publish-root (expand-file-name "~/HC/Org/"))
+(setq my/site-publish-root my/site-root)

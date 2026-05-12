@@ -84,29 +84,6 @@
       "Root"
     (car (split-string group-key "/" t))))
 
-(defun my/note-graph--summary-from-file (file)
-  "Return a compact summary extracted from Typst FILE."
-  (with-temp-buffer
-    (insert-file-contents file)
-    (goto-char (point-min))
-    (let (lines)
-      (while (and (not (eobp)) (< (length lines) 3))
-        (let ((line (string-trim
-                     (buffer-substring-no-properties
-                      (line-beginning-position)
-                      (line-end-position)))))
-          (unless (or (string-empty-p line)
-                      (string-prefix-p "#" line)
-                      (string-prefix-p "=" line)
-                      (string-prefix-p "//" line))
-            (push line lines)))
-        (forward-line 1))
-      (truncate-string-to-width
-       (replace-regexp-in-string
-        "[ \t\n\r]+" " "
-        (string-trim (mapconcat #'identity (nreverse lines) " ")))
-       180 nil nil t))))
-
 (defun my/note-graph--site-data ()
   "Return note index data using the published site's SITE_DATA schema."
   (let* ((node-rows
@@ -115,6 +92,7 @@
                    n.file,
                    n.title,
                    coalesce(n.date, ''),
+                   coalesce(n.summary, ''),
                    coalesce((select group_concat(tag, ',')
                              from tags where node_id = n.id), '')
             from nodes n
@@ -137,7 +115,7 @@
     (let ((notes
            (mapcar
             (lambda (row)
-              (pcase-let* ((`(,id ,file ,title ,date ,tags-raw) row)
+              (pcase-let* ((`(,id ,file ,title ,date ,summary ,tags-raw) row)
                            (tags (if (and tags-raw
                                           (not (string-empty-p tags-raw)))
                                      (sort (split-string tags-raw "," t)
@@ -151,7 +129,7 @@
                   ("title" . ,title)
                   ("link" . ,(my/note-graph--file-url file))
                   ("date" . ,date)
-                  ("summary" . ,(my/note-graph--summary-from-file file))
+                  ("summary" . ,summary)
                   ("groupKey" . ,group-key)
                   ("groupLabel" . ,(my/note-graph--group-label group-key))
                   ("section" . ,(my/note-graph--section-name group-key))
@@ -228,7 +206,8 @@
 
 (defun my/note-graph--html (ws-port)
   "Return standalone HTML wired to WS-PORT for the note graph."
-  (let ((knowledge-js (my/note-graph--asset-url "js/knowledge.js"))
+  (let ((retro-css (my/note-graph--asset-url "css/retro.css"))
+        (knowledge-js (my/note-graph--asset-url "js/knowledge.js"))
         (graph-js (my/note-graph--asset-url "js/graph.js")))
     (format
      "<!doctype html>
@@ -238,55 +217,18 @@
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
   <title>Note Graph</title>
   <script>window.__GRAPH_NO_AUTO_INIT__ = true;</script>
+  <link rel=\"stylesheet\" href=\"%s\" />
   <script src=\"https://d3js.org/d3.v7.min.js\"></script>
   <style>
-    :root {
-      --paper:        #f7efde;
-      --paper-strong: #efe1c9;
-      --ink:          #23180f;
-      --muted:        #5a4837;
-      --line-soft:    rgba(90, 69, 42, 0.24);
-      --accent:       #654a2f;
-      --link:         #1d3f66;
-    }
     html, body {
       margin: 0; padding: 0; height: 100%%;
       overflow: hidden;
-      color: var(--ink);
-      font-family: \"Iowan Old Style\", \"Palatino Linotype\", \"Book Antiqua\", serif;
-      background:
-        radial-gradient(circle at top left, rgba(255, 249, 232, 0.7), transparent 22%%),
-        linear-gradient(180deg, #e6d8bf 0%%, #d7c6ab 100%%);
     }
     #graph-container {
       position: fixed; inset: 16px;
-      background: var(--paper);
-      border: 1px solid var(--line-soft);
-      border-radius: 4px;
-      box-shadow: 0 2px 6px rgba(76, 55, 31, 0.12);
+      width: auto; height: auto; min-height: 0;
       overflow: hidden;
     }
-    .graph-links line { stroke-linecap: round; }
-    .graph-labels text { fill: var(--ink); font-family: inherit; }
-    .graph-message { padding: 1em; color: var(--muted); }
-    .graph-toolbar {
-      background: rgba(247, 239, 222, 0.95) !important;
-      border: 1px solid var(--line-soft) !important;
-      color: var(--ink);
-      font-family: \"Avenir Next\", \"Helvetica Neue\", sans-serif !important;
-    }
-    .graph-toolbar-input {
-      border-color: var(--line-soft) !important;
-      background: #fffaee;
-      color: var(--ink);
-    }
-    .graph-toolbar-input:focus { border-color: var(--accent) !important; }
-    .graph-toolbar-btn {
-      background: var(--paper-strong) !important;
-      border-color: var(--line-soft) !important;
-      color: var(--ink);
-    }
-    .graph-toolbar-btn:hover { background: #e6d3ac !important; }
   </style>
 </head>
 <body>
@@ -336,6 +278,7 @@
 </body>
 </html>
 "
+     retro-css
      knowledge-js
      graph-js
      ws-port)))

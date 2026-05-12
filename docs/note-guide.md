@@ -5,7 +5,7 @@
 ## 1. 模块边界
 
 - [lisp/note/init-note.el](../lisp/note/init-note.el)
-  负责 note 根目录、索引、跳转、反链、Tinymist 预览同步，以及写入 note helper。
+  负责 note 根目录、索引、跳转、反链、doctor、Tinymist 预览同步，以及写入 note helper。
 - [lisp/note/init-note-metadata.el](../lisp/note/init-note-metadata.el)
   编辑 metadata 块：加 tag（completing-read 已有 tag）、加 alias。
 - [lisp/note/init-note-capture.el](../lisp/note/init-note-capture.el)
@@ -18,6 +18,8 @@
   本地 graph 视图。
 - [lisp/note/init-note-tools.el](../lisp/note/init-note-tools.el)
   Zotero metadata 填充、剪贴板图片粘贴。
+- [lisp/note/publish.el](../lisp/note/publish.el)
+  旧 Org 网站发布配置；现在跟 note 发布链放在一起，发布根目录显式指向 `~/HC/Org/`。
 - [lisp/note/typst/note.typ](../lisp/note/typst/note.typ)
   note 内部共享 Typst 样式和 helper。
 - `~/HC/Org/_typst/publish.typ`
@@ -55,7 +57,15 @@
 #note("20260511T120000-example")[Example]
 ```
 
-`M-x my/note-db-sync` 会重建 `var/note/note.db`，并在 note 根目录写入：
+Zotero 链接：
+
+```typst
+#zoterolink("zotero://select/items/1_BJ9K8NAX")[Paper title]
+```
+
+在 Typst preview / PDF 中它会渲染成可点击的 Zotero link；在 Emacs note buffer 里光标位于 URL 或 label 上按 `RET` / `C-c n RET` 会调用系统 URL handler 打开 Zotero。
+
+保存 note 时默认会单文件更新索引；可用 `my/note-auto-sync-on-save` 关闭。`M-x my/note-db-sync` 会增量同步 `var/note/note.db`，并在 note 根目录写入：
 
 - `_typst/note.typ`
   从 [lisp/note/typst/note.typ](../lisp/note/typst/note.typ) 复制出来的 helper。
@@ -63,6 +73,10 @@
   每个 note 的小 wrapper，用于跨文件 import/include。
 
 note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note-transclude`、`note-import-path`，以及 `definition`、`theorem`、`proof`、`example`、`remark`、`summary`、`question`、`important`、`warning`、`tip`、`info` 等卡片块。
+
+Bib helper：`#bib()` 默认读取 `/references/references.bib`，等价别名是 `#references()`；可用 `#bib(path: "/path/to/file.bib", style: "apa")` 指定 bibliography 文件和样式。
+
+`M-x my/note-doctor` 检查悬空 `#note`、重复 id、缺 date、孤立 note 和 alias 冲突；报告里的路径可点击跳转。
 
 行内任务 chip：`#todo[...]`、`#doing[...]`、`#waiting[...]`、`#done[...]`、`#cancelled[...]`。常配合列表使用，例如 `- #todo[Write proof of Lemma 3]`。这些 chip 是 `my/note-agenda` 的扫描入口，调用形式 `#<state>[body]` 不要改。`done` 和 `cancelled` 会自动给 body 加灰色 + 删除线。
 
@@ -89,7 +103,9 @@ note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note
 
 这部分接住了过去 org-capture + org-agenda 的工作流。所有产物都是 Typst note，直接进 `note.db` 索引。
 
-**Capture**：`my/note-capture`（`H-o c` / `C-c n c`）从 `my/note-capture-categories` 默认列表 `idea / inbox / mail / note / meeting / protocol / uni / life` 里选分类，输入 title，写入 `<note-directory>/daily/<category>/<slug>-YYYYMMDD.typ`。文件自带完整 metadata + 一级标题，落地后立即触发 `my/note-db-sync`。新增分类只需修改 `my/note-capture-categories`。
+**New note**：`my/note-new`（`H-o n` / `C-c n n`）保留旧入口，创建默认 roam note。`my/note-new-of-type`（`H-o N` / `C-c n N`）从 `my/note-types` 选择模板；默认提供 `default`、`literature`、`fleeting`。类型可以定义文件名前缀、默认 tags、id 策略和模板函数。
+
+**Capture**：`my/note-capture`（`H-o c` / `C-c n c`）从 `my/note-capture-categories` 默认列表 `idea / inbox / mail / note / meeting / protocol / uni / life` 里选分类，输入 title，写入 `<note-directory>/daily/<category>/<slug>-YYYYMMDD.typ`。文件自带完整 metadata + 一级标题，落地后立即触发单文件索引更新。新增分类只需修改 `my/note-capture-categories`。
 
 **Daily**：`my/note-daily-today`（`H-o d` / `C-c n d`）打开当天的滚动文件 `<note-directory>/daily/YYYY-MM-DD.typ`（所有时段写在同一篇），并在末尾追加 `== HH:MM` 小节作为新时段入口。文件不存在时自动写 metadata 并 sync。文件名格式由 `my/note-daily-rolling-file-format` 控制。
 

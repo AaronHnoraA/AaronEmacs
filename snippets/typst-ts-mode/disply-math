@@ -3,7 +3,14 @@
 # name: outline math
 # key: :
 # --
-(let ((text (or yas-selected-text ""))
-      (beg (point)))
-  (insert "$ " text " $")
-  (goto-char (+ beg 2 (length text))))
+(let ((text (or yas-selected-text "")))
+  ;; If current line is not empty, move to a new line first.
+  (unless (string-match-p "\\`[ \t]*\\'"
+                          (buffer-substring-no-properties
+                           (line-beginning-position)
+                           (line-end-position)))
+    (end-of-line)
+    (newline))
+  (let ((beg (point)))
+    (insert "$ " text " $")
+    (goto-char (+ beg 2 (length text)))))

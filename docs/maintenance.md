@@ -163,6 +163,8 @@ make bootstrap-health
 - `make clean-build`
 - `make clean-eln`
 - `make health`
+- `make note-test`
+  只跑 Typst note 系统的 ERT 覆盖，包含 metadata/link 解析、SQLite 索引、wrapper 写入和 Zotero helper。
 
 leader 入口：
 

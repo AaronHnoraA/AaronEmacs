@@ -68,6 +68,7 @@ precedence over `my/template-current' when choosing the template file.")
 
 (defconst my/template-typst-style-links
   '(("assignment.typ" . "notes/assignment.typ")
+    ("beamer.typ" . "notes/beamer.typ")
     ("rho.typ" . "notes/rho.typ")
     ("aleph-notas.typ" . "notes/aleph-notas.typ")
     ("note.typ" . "lisp/note/typst/note.typ"))
@@ -197,7 +198,7 @@ first and then opening it."
 
 (defun my/template--ensure-typst-style-links (template)
   "Create project-local Typst style links for TEMPLATE."
-  (when (and (member template '("assignment.typ"))
+  (when (and (member template '("assignment.typ" "slide.typ"))
              buffer-file-name
              (not (file-remote-p buffer-file-name)))
     (let* ((root (my/template--project-root))

@@ -10,7 +10,7 @@ BOOTSTRAP_AUDIT = BOOTSTRAP_MODE=audit $(BOOTSTRAP)
 .PHONY: default help up setup setup-full bootstrap-health install lock audit-lock doctor build build-force \
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
-        health health-startup health-byte health-native
+        health health-startup health-byte health-native note-test
 
 default: up
 
@@ -42,7 +42,8 @@ help:
 	  '  make health               Run startup + byte + native smoke checks' \
 	  '  make health-startup       Run startup smoke check' \
 	  '  make health-byte          Run byte-compile smoke check' \
-	  '  make health-native        Run native-compile smoke check'
+	  '  make health-native        Run native-compile smoke check' \
+	  '  make note-test            Run Typst note ERT tests'
 
 up:
 	@if [ -n "$(SNAPSHOT)" ]; then \
@@ -122,3 +123,6 @@ health-byte:
 
 health-native:
 	$(BATCH) --eval '(prin1 (my/health-native-compile-check))'
+
+note-test:
+	$(BATCH) -l test/note-tests.el -f ert-run-tests-batch-and-exit

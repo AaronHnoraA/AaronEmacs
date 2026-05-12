@@ -70,12 +70,93 @@
   :type '(repeat string)
   :group 'my/note)
 
+(defcustom my/note-auto-sync-on-save t
+  "When non-nil, re-index a Typst note file after saving it."
+  :type 'boolean
+  :group 'my/note)
+
+(defcustom my/note-before-sync-hook nil
+  "Hook run before a full `my/note-db-sync'."
+  :type 'hook
+  :group 'my/note)
+
+(defcustom my/note-after-sync-hook nil
+  "Hook run after a full `my/note-db-sync'.
+Hook functions receive CHANGED, REMOVED, and KEPT counts."
+  :type 'hook
+  :group 'my/note)
+
 (defconst my/note-metadata-label "note"
   "Typst label used for file-level note metadata.")
 
 (defconst my/note-helper-import-source
   "#import \"/_typst/note.typ\": *\n#show: note-entry\n"
   "Root-relative Typst import for the shared note helper.")
+
+(cl-defstruct my/note-type
+  name prompt slug-prefix default-tags id-strategy template-fn)
+
+(defun my/note--template-default (id title tags)
+  "Return default Typst note source for ID TITLE and TAGS."
+  (concat my/note-helper-import-source
+          "\n"
+          (my/note--metadata-source id title tags)
+          "\n= " title "\n\n"))
+
+(defun my/note--template-literature (id title tags)
+  "Return literature Typst note source for ID TITLE and TAGS."
+  (concat (my/note--template-default id title tags)
+          "== Reference\n\n"
+          "== Summary\n\n"
+          "== Notes\n\n"))
+
+(defun my/note--template-fleeting (id title tags)
+  "Return fleeting Typst note source for ID TITLE and TAGS."
+  (concat (my/note--template-default id title tags)
+          "== Thought\n\n"
+          "== Next\n\n"))
+
+(defcustom my/note-types
+  (list
+   (make-my/note-type
+    :name 'default
+    :prompt "Default note"
+    :slug-prefix ""
+    :default-tags nil
+    :id-strategy 'timestamp-slug
+    :template-fn #'my/note--template-default)
+   (make-my/note-type
+    :name 'literature
+    :prompt "Literature note"
+    :slug-prefix "lit-"
+    :default-tags '("literature")
+    :id-strategy 'timestamp-slug
+    :template-fn #'my/note--template-literature)
+   (make-my/note-type
+    :name 'fleeting
+    :prompt "Fleeting note"
+    :slug-prefix "fl-"
+    :default-tags '("fleeting")
+    :id-strategy 'timestamp-slug
+    :template-fn #'my/note--template-fleeting))
+  "Registered Typst note creation templates."
+  :type 'sexp
+  :group 'my/note)
+
+(defcustom my/note-new-hook nil
+  "Hook run after a new note is created.
+Hook functions receive the parsed note plist."
+  :type 'hook
+  :group 'my/note)
+
+(defconst my/note--schema-version 3
+  "Current SQLite schema version for the Typst note index.")
+
+(defvar my/note--db-ro nil
+  "Cached read-only SQLite connection for note index queries.")
+
+(defvar my/note--db-ro-file nil
+  "Database file currently used by `my/note--db-ro'.")
 
 (defun my/note--sqlite-available-p ()
   "Return non-nil when Emacs has SQLite support."
@@ -95,12 +176,34 @@ When READONLY is non-nil, open it read-only."
     (make-directory (file-name-directory my/note-db-file) t))
   (sqlite-open my/note-db-file readonly))
 
+(defun my/note--db-version (db)
+  "Return SQLite user_version for DB."
+  (or (caar (sqlite-select db "pragma user_version")) 0))
+
+(defun my/note--db-set-version (db version)
+  "Set SQLite user_version for DB to VERSION."
+  (sqlite-execute db (format "pragma user_version = %d" version)))
+
+(defun my/note--db-column-exists-p (db table column)
+  "Return non-nil when TABLE has COLUMN in DB."
+  (seq-some (lambda (row)
+              (equal (nth 1 row) column))
+            (sqlite-select db (format "pragma table_info(%s)" table))))
+
+(defun my/note--db-add-column-if-missing (db table column definition)
+  "Add COLUMN with DEFINITION to TABLE in DB when it is missing."
+  (unless (my/note--db-column-exists-p db table column)
+    (sqlite-execute db
+                    (format "alter table %s add column %s %s"
+                            table column definition))))
+
 (defun my/note--db-init (db)
   "Initialize note schema in DB."
   (dolist (sql
            '("create table if not exists files (
                 path text primary key,
                 mtime real not null,
+                size integer not null default 0,
                 title text,
                 node_id text
               )"
@@ -109,6 +212,7 @@ When READONLY is non-nil, open it read-only."
                 file text not null,
                 title text not null,
                 date text,
+                summary text not null default '',
                 position integer not null
               )"
              "create table if not exists tags (
@@ -131,12 +235,60 @@ When READONLY is non-nil, open it read-only."
              "create index if not exists note_aliases_node_idx on aliases(node_id)"
              "create index if not exists note_links_target_idx on links(target_id)"
              "create index if not exists note_links_source_idx on links(source_id)"))
-    (sqlite-execute db sql)))
+    (sqlite-execute db sql))
+  (my/note--db-add-column-if-missing db "files" "size"
+                                    "integer not null default 0")
+  (my/note--db-add-column-if-missing db "nodes" "summary"
+                                    "text not null default ''")
+  (when (< (my/note--db-version db) my/note--schema-version)
+    (my/note--db-set-version db my/note--schema-version)))
+
+(defun my/note--db-ro-close ()
+  "Close the cached read-only note DB connection."
+  (when my/note--db-ro
+    (ignore-errors (sqlite-close my/note--db-ro))
+    (setq my/note--db-ro nil
+          my/note--db-ro-file nil)))
+
+(defun my/note--db-ro ()
+  "Return a cached read-only note DB connection."
+  (my/note--ensure-db)
+  (unless (and my/note--db-ro
+               (equal my/note--db-ro-file my/note-db-file))
+    (my/note--db-ro-close)
+    (setq my/note--db-ro (my/note--db-open t)
+          my/note--db-ro-file my/note-db-file))
+  my/note--db-ro)
+
+(defmacro my/note--with-write-db (db &rest body)
+  "Evaluate BODY with writable note DB bound to DB."
+  (declare (indent 1))
+  `(progn
+     (my/note--db-ro-close)
+     (let ((,db (my/note--db-open)))
+       (unwind-protect
+           (progn ,@body)
+         (sqlite-close ,db)))))
+
+(add-hook 'kill-emacs-hook #'my/note--db-ro-close)
 
 (defun my/note--db-clear (db)
   "Clear all indexed note rows in DB."
   (dolist (table '("links" "aliases" "tags" "nodes" "files"))
     (sqlite-execute db (format "delete from %s" table))))
+
+(defun my/note--db-delete-file (db file)
+  "Delete DB rows derived from FILE."
+  (let ((ids (mapcar #'car
+                     (sqlite-select db
+                                    "select id from nodes where file = ?"
+                                    (vector file)))))
+    (dolist (id ids)
+      (sqlite-execute db "delete from links where source_id = ?" (vector id))
+      (sqlite-execute db "delete from tags where node_id = ?" (vector id))
+      (sqlite-execute db "delete from aliases where node_id = ?" (vector id))
+      (sqlite-execute db "delete from nodes where id = ?" (vector id)))
+    (sqlite-execute db "delete from files where path = ?" (vector file))))
 
 (defun my/note--sql-value (value)
   "Return VALUE or nil for SQLite insertion."
@@ -150,12 +302,19 @@ When READONLY is non-nil, open it read-only."
         (id (plist-get note :id))
         (title (plist-get note :title))
         (date (plist-get note :date))
+        (summary (plist-get note :summary))
         (position (plist-get note :position))
-        (mtime (plist-get note :mtime)))
-    (sqlite-execute db "insert into files values (?, ?, ?, ?)"
-                    (vector file mtime title id))
-    (sqlite-execute db "insert into nodes values (?, ?, ?, ?, ?)"
-                    (vector id file title (my/note--sql-value date) position))
+        (mtime (plist-get note :mtime))
+        (size (plist-get note :size)))
+    (sqlite-execute db
+                    "insert into files(path, mtime, size, title, node_id)
+                     values (?, ?, ?, ?, ?)"
+                    (vector file mtime (or size 0) title id))
+    (sqlite-execute db
+                    "insert into nodes(id, file, title, date, summary, position)
+                     values (?, ?, ?, ?, ?, ?)"
+                    (vector id file title (my/note--sql-value date)
+                            (or summary "") position))
     (dolist (tag (plist-get note :tags))
       (sqlite-execute db "insert into tags values (?, ?)"
                       (vector id tag)))
@@ -186,10 +345,37 @@ When READONLY is non-nil, open it read-only."
     (goto-char (point-min))
     (when (re-search-forward "#metadata[ \t\n]*((" nil t)
       (let ((beg (point))
-            (pos (match-beginning 0)))
-        (when (search-forward "))" nil t)
-          (cons (buffer-substring-no-properties beg (- (point) 2))
-                pos))))))
+            (pos (match-beginning 0))
+            (depth 2)
+            close-start
+            in-string
+            escaped
+            end)
+        (while (and (not end) (not (eobp)))
+          (let ((char (char-after)))
+            (cond
+             (escaped
+              (setq escaped nil))
+             ((and in-string (eq char ?\\))
+              (setq escaped t))
+             ((eq char ?\")
+              (setq in-string (not in-string)))
+             (in-string)
+             ((eq char ?\()
+              (setq depth (1+ depth)
+                    close-start nil))
+             ((eq char ?\))
+              (setq depth (1- depth))
+              (cond
+               ((= depth 1)
+                (setq close-start (point)))
+               ((zerop depth)
+                (setq end close-start))
+               (t
+                (setq close-start nil)))))
+            (forward-char 1)))
+        (when end
+          (cons (buffer-substring-no-properties beg end) pos))))))
 
 (defun my/note--metadata-string (body key)
   "Return string value for KEY in metadata BODY."
@@ -219,6 +405,28 @@ When READONLY is non-nil, open it read-only."
   (save-excursion
     (goto-char pos)
     (line-number-at-pos)))
+
+(defun my/note--summary-from-current-buffer ()
+  "Return a compact plain-text summary for the current Typst note."
+  (save-excursion
+    (goto-char (point-min))
+    (let (lines)
+      (while (and (not (eobp)) (< (length lines) 3))
+        (let ((line (string-trim
+                     (buffer-substring-no-properties
+                      (line-beginning-position)
+                      (line-end-position)))))
+          (unless (or (string-empty-p line)
+                      (string-prefix-p "#" line)
+                      (string-prefix-p "=" line)
+                      (string-prefix-p "//" line))
+            (push line lines)))
+        (forward-line 1))
+      (truncate-string-to-width
+       (replace-regexp-in-string
+        "[ \t\n\r]+" " "
+        (string-trim (mapconcat #'identity (nreverse lines) " ")))
+       180 nil nil t))))
 
 (defun my/note--scan-links ()
   "Return all `#note(\"id\")[label]' links in the current buffer."
@@ -250,9 +458,13 @@ FILE is the file path associated with the buffer."
               :id id
               :title title
               :date (my/note--metadata-string body "date")
+              :summary (my/note--summary-from-current-buffer)
               :tags (or (my/note--metadata-list body "tags") nil)
               :aliases (or (my/note--metadata-list body "aliases") nil)
               :position (cdr entry)
+              :size (if (and file (file-exists-p file))
+                        (file-attribute-size (file-attributes file))
+                      0)
               :links (my/note--scan-links))))))
 
 (defun my/note-parse-file (file)
@@ -275,6 +487,20 @@ FILE is the file path associated with the buffer."
   "Return Typst note candidate files below `my/note-root'."
   (seq-remove #'my/note--excluded-path-p
               (directory-files-recursively my/note-root "\\.typ\\'")))
+
+(defun my/note--file-fingerprint (file)
+  "Return (MTIME . SIZE) for FILE."
+  (let ((attrs (file-attributes file)))
+    (cons (float-time (file-attribute-modification-time attrs))
+          (file-attribute-size attrs))))
+
+(defun my/note--db-files-state (db)
+  "Return a hash table mapping indexed file paths to (MTIME . SIZE)."
+  (let ((state (make-hash-table :test 'equal)))
+    (dolist (row (sqlite-select db "select path, mtime, size from files"))
+      (pcase-let ((`(,path ,mtime ,size) row))
+        (puthash path (cons mtime size) state)))
+    state))
 
 (defun my/note--root-relative-typst-path (file)
   "Return Typst root-relative path for FILE."
@@ -316,6 +542,21 @@ FILE is the file path associated with the buffer."
     (dolist (note notes)
       (with-temp-file (my/note--wrapper-file (plist-get note :id))
         (insert (my/note--wrapper-source note))))))
+
+(defun my/note-write-wrapper-file (note)
+  "Write the generated Typst wrapper for NOTE."
+  (let ((file (my/note--wrapper-file (plist-get note :id))))
+    (make-directory (file-name-directory file) t)
+    (with-temp-file file
+      (insert (my/note--wrapper-source note)))
+    file))
+
+(defun my/note-delete-wrapper-file (id)
+  "Delete generated Typst wrapper for note ID when it exists."
+  (when (and id (my/note--safe-wrapper-id-p id))
+    (let ((file (my/note--wrapper-file id)))
+      (when (file-exists-p file)
+        (delete-file file)))))
 
 (defun my/note--path-registry-source (notes)
   "Return Typst source resolving note ids through generated wrappers.
@@ -360,47 +601,111 @@ NOTES is accepted for compatibility with callers that pass the indexed set."
       (insert (my/note--helper-source-for-notes notes)))
     file))
 
-;;;###autoload
-(defun my/note-db-sync ()
-  "Rebuild the Typst note index."
-  (interactive)
-  (let ((db (my/note--db-open)))
-    (unwind-protect
-        (progn
-          (my/note--db-init db)
-          (sqlite-transaction db)
-          (condition-case err
-              (progn
-                (my/note--db-clear db)
-                (let ((count 0)
-                      notes)
-                  (dolist (file (my/note--typst-files))
+(defun my/note-db-sync-file (file)
+  "Sync one Typst note FILE into the index."
+  (interactive (list (or buffer-file-name
+                         (read-file-name "Typst note: " my/note-root nil t))))
+  (let ((file (file-truename file))
+        synced)
+    (my/note--with-write-db db
+      (my/note--db-init db)
+      (let (committed)
+        (unwind-protect
+            (progn
+              (sqlite-transaction db)
+              (let ((old-id (caar (sqlite-select db
+                                                 "select node_id from files where path = ?"
+                                                 (vector file)))))
+                (my/note--db-delete-file db file)
+                (if (and (file-exists-p file)
+                         (not (my/note--excluded-path-p file)))
                     (when-let* ((note (my/note-parse-file file)))
                       (my/note--db-insert-note db note)
-                      (push note notes)
-                      (setq count (1+ count))))
-                  (sqlite-commit db)
-                  (my/note-write-wrapper-files notes)
-                  (my/note-write-helper-file notes)
-                  (message "Note index synced: %d Typst notes" count)
-                  count))
-            (error
-             (sqlite-rollback db)
-             (signal (car err) (cdr err)))))
-      (sqlite-close db))))
+                      (my/note-write-wrapper-file note)
+                      (unless (equal old-id (plist-get note :id))
+                        (my/note-delete-wrapper-file old-id))
+                      (setq synced note))
+                  (my/note-delete-wrapper-file old-id)))
+              (sqlite-commit db)
+              (setq committed t))
+          (unless committed
+            (ignore-errors (sqlite-rollback db))))))
+    synced))
+
+;;;###autoload
+(defun my/note-db-sync (&optional force)
+  "Sync the Typst note index incrementally.
+With prefix FORCE, rebuild the whole index and all generated wrappers."
+  (interactive "P")
+  (run-hooks 'my/note-before-sync-hook)
+  (let ((result
+         (my/note--with-write-db db
+           (my/note--db-init db)
+           (let (committed)
+             (unwind-protect
+                 (progn
+                   (sqlite-transaction db)
+                   (let* ((disk-files (mapcar #'file-truename (my/note--typst-files)))
+                          (disk-set (make-hash-table :test 'equal))
+                          (db-state (my/note--db-files-state db))
+                          (changed 0)
+                          (removed 0)
+                          (kept 0)
+                          notes)
+                     (when force
+                       (my/note--db-clear db)
+                       (setq db-state (make-hash-table :test 'equal)))
+                     (dolist (file disk-files)
+                       (puthash file t disk-set)
+                       (let ((fingerprint (my/note--file-fingerprint file)))
+                         (if (and (not force)
+                                  (equal fingerprint (gethash file db-state)))
+                             (setq kept (1+ kept))
+                           (my/note--db-delete-file db file)
+                           (when-let* ((note (my/note-parse-file file)))
+                             (my/note--db-insert-note db note)
+                             (my/note-write-wrapper-file note)
+                             (push note notes)
+                             (setq changed (1+ changed))))))
+                     (maphash
+                      (lambda (file _fingerprint)
+                        (unless (gethash file disk-set)
+                          (let ((old-id (caar (sqlite-select
+                                               db
+                                               "select node_id from files where path = ?"
+                                               (vector file)))))
+                            (my/note--db-delete-file db file)
+                            (my/note-delete-wrapper-file old-id)
+                            (setq removed (1+ removed)))))
+                      db-state)
+                     (when force
+                       (my/note-write-wrapper-files
+                        (mapcar (lambda (row)
+                                  (list :id (nth 0 row) :file (nth 1 row)))
+                                (sqlite-select db "select id, file from nodes"))))
+                     (my/note-write-helper-file notes)
+                     (sqlite-commit db)
+                     (setq committed t)
+                     (let ((total (caar (sqlite-select db "select count(*) from nodes"))))
+                       (list total changed removed kept))))
+               (unless committed
+                 (ignore-errors (sqlite-rollback db))))))))
+    (pcase-let ((`(,total ,changed ,removed ,kept) result))
+      (message "Note index synced: %d Typst notes (%d changed, %d removed, %d kept)"
+               total changed removed kept)
+      (run-hook-with-args 'my/note-after-sync-hook changed removed kept)
+      total)))
 
 (defun my/note--ensure-db ()
   "Ensure the note database exists and has schema."
-  (unless (file-exists-p my/note-db-file)
+  (if (file-exists-p my/note-db-file)
+      (my/note--with-write-db db
+        (my/note--db-init db))
     (my/note-db-sync)))
 
 (defun my/note--rows (sql &optional values)
   "Return rows from note database for SQL and VALUES."
-  (my/note--ensure-db)
-  (let ((db (my/note--db-open t)))
-    (unwind-protect
-        (sqlite-select db sql values)
-      (sqlite-close db))))
+  (sqlite-select (my/note--db-ro) sql values))
 
 (defun my/note--node-plist-from-row (row)
   "Return node plist from SQL ROW."
@@ -550,6 +855,42 @@ NOTES is accepted for compatibility with callers that pass the indexed set."
                 (when (<= call-start pos (point))
                   (throw 'id id))))))))))
 
+(defun my/note--zotero-url-at-point ()
+  "Return the `#zoterolink' URL at point, including when point is on its label."
+  (let ((pos (point))
+        (beg (max (point-min) (- (point) 2000)))
+        (end (min (point-max) (+ (point) 2000)))
+        (case-fold-search nil))
+    (save-excursion
+      (goto-char beg)
+      (catch 'url
+        (while (re-search-forward
+                "#zoterolink[ \t\n]*(\"\\([^\"\\]*\\(?:\\\\.[^\"\\]*\\)*\\)\")"
+                end t)
+          (let ((call-start (match-beginning 0))
+                (url (my/note--typst-string-unescape (match-string 1)))
+                (after-call (match-end 0)))
+            (goto-char after-call)
+            (when (looking-at "[ \t\n]*\\[")
+              (goto-char (match-end 0))
+              (when (search-forward "]" end t)
+                (when (<= call-start pos (point))
+                  (throw 'url url))))))))))
+
+(defun my/note-open-zotero-url (url)
+  "Open Zotero URL using the system URL handler."
+  (unless (and (stringp url)
+               (string-prefix-p "zotero://" url))
+    (user-error "Not a Zotero URL: %s" url))
+  (let ((command (cond
+                  ((eq system-type 'darwin) "open")
+                  ((executable-find "xdg-open") "xdg-open")
+                  (t nil))))
+    (unless command
+      (user-error "No system URL opener found for Zotero links"))
+    (start-process "zotero-opener" nil command url)
+    (message "Opening Zotero link: %s" url)))
+
 (defun my/note--xref-backend ()
   "Return the note xref backend for Typst note links."
   (when (and buffer-file-name
@@ -570,9 +911,13 @@ Return non-nil when a note link was opened."
                              (find-file-noselect file))
       (save-excursion
         (goto-char point)
-        (when-let* ((id (my/note--link-id-at-point)))
-          (my/note-open-id id)
-          t)))))
+        (cond
+         ((when-let* ((url (my/note--zotero-url-at-point)))
+            (my/note-open-zotero-url url)
+            t))
+         ((when-let* ((id (my/note--link-id-at-point)))
+            (my/note-open-id id)
+            t)))))))
 
 (cl-defmethod xref-backend-identifier-at-point ((_backend (eql my/note)))
   "Return the Typst note id at point."
@@ -593,13 +938,53 @@ Return non-nil when a note link was opened."
   "Enable `gd'/`M-.' navigation for Typst `#note' links."
   (add-hook 'xref-backend-functions #'my/note--xref-backend nil t))
 
+(defun my/note--buffer-note-file-p ()
+  "Return non-nil when the current buffer visits an indexed note candidate."
+  (and buffer-file-name
+       (string-suffix-p ".typ" buffer-file-name)
+       (file-in-directory-p (file-truename buffer-file-name)
+                            (file-name-as-directory
+                             (file-truename my/note-root)))
+       (not (my/note--excluded-path-p buffer-file-name))))
+
+(defun my/note-sync-current-buffer ()
+  "Sync the current Typst note buffer into the index."
+  (interactive)
+  (unless (my/note--buffer-note-file-p)
+    (user-error "Current buffer is not a Typst note below my/note-root"))
+  (save-buffer)
+  (my/note-db-sync-file buffer-file-name)
+  (message "Note synced: %s"
+           (file-relative-name buffer-file-name
+                               (file-name-as-directory my/note-root))))
+
+(defun my/note-after-save-sync ()
+  "Update the note index after saving a Typst note buffer."
+  (when (and my/note-auto-sync-on-save
+             (my/note--buffer-note-file-p))
+    (condition-case err
+        (my/note-db-sync-file buffer-file-name)
+      (error
+       (message "Note after-save sync failed: %s" err)))))
+
+(defun my/note-buffer-setup ()
+  "Enable note xref and after-save indexing for Typst buffers."
+  (my/note-xref-setup)
+  (add-hook 'after-save-hook #'my/note-after-save-sync nil t))
+
 ;;;###autoload
 (defun my/note-open-at-point ()
-  "Open the Typst note link at point."
+  "Open the Typst note or Zotero link at point."
   (interactive)
-  (if-let* ((id (my/note--link-id-at-point)))
+  (cond
+   ((when-let* ((url (my/note--zotero-url-at-point)))
+      (my/note-open-zotero-url url)
+      t))
+   ((when-let* ((id (my/note--link-id-at-point)))
       (my/note-open-id id)
-    (user-error "No Typst note link at point")))
+      t))
+   (t
+    (user-error "No Typst note or Zotero link at point"))))
 
 (defun my/note--typst-reference-at-point-p ()
   "Return non-nil when point is on a Typst `@label' reference."
@@ -613,10 +998,12 @@ Return non-nil when a note link was opened."
 
 ;;;###autoload
 (defun my/note-open-or-preview-sync ()
-  "Open a Typst note link, follow a Typst ref, or sync preview to point."
+  "Open a Typst note/Zotero link, follow a Typst ref, or sync preview."
   (interactive)
-  (if-let* ((id (my/note--link-id-at-point)))
-      (my/note-open-id id)
+  (if-let* ((url (my/note--zotero-url-at-point)))
+      (my/note-open-zotero-url url)
+    (if-let* ((id (my/note--link-id-at-point)))
+        (my/note-open-id id)
     (cond
      ((and (my/note--typst-reference-at-point-p)
            (fboundp 'my/navigation-find-definition))
@@ -624,7 +1011,7 @@ Return non-nil when a note link was opened."
      ((fboundp 'my/typst-preview-send-position)
       (my/typst-preview-send-position))
      (t
-      (user-error "Typst preview sync is unavailable")))))
+      (user-error "Typst preview sync is unavailable"))))))
 
 (defun my/note-current-node-id ()
   "Return the current Typst note node id."
@@ -678,6 +1065,141 @@ Return non-nil when a note link was opened."
         (view-mode 1)))
     (pop-to-buffer buffer)))
 
+(defun my/note-doctor--duplicate-ids ()
+  "Return duplicate note id issues discovered by scanning Typst files."
+  (let ((seen (make-hash-table :test 'equal))
+        issues)
+    (dolist (file (my/note--typst-files))
+      (when-let* ((note (ignore-errors (my/note-parse-file file)))
+                  (id (plist-get note :id)))
+        (if-let* ((first (gethash id seen)))
+            (push (list :id id :file file :line 1
+                        :message (format "Duplicate id %s; first seen in %s"
+                                         id
+                                         (file-relative-name
+                                          first
+                                          (file-name-as-directory my/note-root))))
+                  issues)
+          (puthash id file seen))))
+    (nreverse issues)))
+
+(defun my/note-doctor--collect ()
+  "Return a plist describing note index anomalies."
+  (let* ((nodes (my/note--rows
+                 "select id, file, title, coalesce(date, '') from nodes"))
+         (links (my/note--rows
+                 "select source_id, target_id, file, line, coalesce(label, '')
+                  from links"))
+         (aliases (my/note--rows
+                   "select node_id, alias from aliases where alias <> ''"))
+         (id-set (make-hash-table :test 'equal))
+         (outgoing (make-hash-table :test 'equal))
+         (incoming (make-hash-table :test 'equal))
+         (alias-map (make-hash-table :test 'equal))
+         dangling missing-date orphans alias-collisions)
+    (dolist (row nodes)
+      (pcase-let ((`(,id ,file ,_title ,date) row))
+        (puthash id file id-set)
+        (when (string-empty-p date)
+          (push (list :id id :file file :line 1
+                      :message (format "%s has no date" id))
+                missing-date))))
+    (dolist (row links)
+      (pcase-let ((`(,source ,target ,file ,line ,label) row))
+        (puthash source t outgoing)
+        (puthash target t incoming)
+        (unless (gethash target id-set)
+          (push (list :id source :file file :line line
+                      :message (format "%s -> missing %s%s"
+                                       source target
+                                       (if (string-empty-p label)
+                                           ""
+                                         (format " [%s]" label))))
+                dangling))))
+    (dolist (row nodes)
+      (pcase-let ((`(,id ,file ,_title ,_date) row))
+        (unless (or (gethash id outgoing)
+                    (gethash id incoming))
+          (push (list :id id :file file :line 1
+                      :message (format "%s has no note links or backlinks" id))
+                orphans))))
+    (dolist (row aliases)
+      (pcase-let ((`(,node-id ,alias) row))
+        (let ((owners (gethash alias alias-map)))
+          (unless (member node-id owners)
+            (puthash alias (cons node-id owners) alias-map)))))
+    (maphash
+     (lambda (alias owners)
+       (when (> (length owners) 1)
+         (dolist (owner owners)
+           (when-let* ((file (gethash owner id-set)))
+             (push (list :id owner :file file :line 1
+                         :message (format "Alias %S is shared by %s"
+                                          alias
+                                          (string-join (sort (copy-sequence owners)
+                                                             #'string<)
+                                                       ", ")))
+                   alias-collisions)))))
+     alias-map)
+    (list :dangling-links (nreverse dangling)
+          :duplicate-ids (my/note-doctor--duplicate-ids)
+          :missing-date (nreverse missing-date)
+          :orphans (nreverse orphans)
+          :alias-collisions (nreverse alias-collisions))))
+
+(defun my/note-doctor--jump (button)
+  "Open the issue target stored in BUTTON."
+  (let ((file (button-get button 'file))
+        (line (or (button-get button 'line) 1)))
+    (find-file file)
+    (goto-char (point-min))
+    (forward-line (max 0 (1- line)))))
+
+(defun my/note-doctor--insert-section (title issues)
+  "Insert doctor section TITLE with ISSUES."
+  (insert title "\n")
+  (if issues
+      (dolist (issue issues)
+        (let ((file (plist-get issue :file))
+              (line (or (plist-get issue :line) 1)))
+          (insert-text-button
+           (format "  %s:%d"
+                   (file-relative-name file
+                                       (file-name-as-directory my/note-root))
+                   line)
+           'file file
+           'line line
+           'action #'my/note-doctor--jump
+           'follow-link t)
+          (insert "  " (plist-get issue :message) "\n")))
+    (insert "  OK\n"))
+  (insert "\n"))
+
+;;;###autoload
+(defun my/note-doctor ()
+  "Inspect the Typst note knowledge base for common consistency issues."
+  (interactive)
+  (my/note--ensure-db)
+  (let ((report (my/note-doctor--collect))
+        (buffer (get-buffer-create "*note-doctor*")))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (my/note-doctor--insert-section
+         "Dangling #note links" (plist-get report :dangling-links))
+        (my/note-doctor--insert-section
+         "Duplicate ids" (plist-get report :duplicate-ids))
+        (my/note-doctor--insert-section
+         "Missing date" (plist-get report :missing-date))
+        (my/note-doctor--insert-section
+         "Orphan notes" (plist-get report :orphans))
+        (my/note-doctor--insert-section
+         "Alias collisions" (plist-get report :alias-collisions))
+        (goto-char (point-min))
+        (special-mode)))
+    (pop-to-buffer buffer)
+    report))
+
 (defun my/note--slugify (value)
   "Return a conservative filename slug for VALUE."
   (let ((slug (downcase (string-trim value))))
@@ -690,6 +1212,14 @@ Return non-nil when a note link was opened."
   (format "%s-%s"
           (format-time-string "%Y%m%dT%H%M%S")
           (my/note--slugify title)))
+
+(defun my/note--new-id-for-type (type title)
+  "Return a new note id for TYPE and TITLE."
+  (pcase (my/note-type-id-strategy type)
+    ('timestamp-slug (my/note--new-id title))
+    ('date-only (format-time-string "%Y-%m-%d"))
+    ((pred functionp) (funcall (my/note-type-id-strategy type) title))
+    (_ (my/note--new-id title))))
 
 (defun my/note--metadata-source (id title tags)
   "Return Typst metadata source for ID TITLE and TAGS."
@@ -719,29 +1249,72 @@ Return non-nil when a note link was opened."
         (insert (my/note--style-source "note.typ"))))
     file))
 
+(defun my/note--type-by-name (name)
+  "Return registered note type NAME."
+  (seq-find (lambda (type)
+              (eq (my/note-type-name type) name))
+            my/note-types))
+
+(defun my/note--read-type ()
+  "Read a registered note type."
+  (let* ((candidates
+          (mapcar (lambda (type)
+                    (cons (format "%s  %s"
+                                  (my/note-type-name type)
+                                  (my/note-type-prompt type))
+                          type))
+                  my/note-types))
+         (choice (completing-read "Note type: " candidates nil t)))
+    (cdr (assoc choice candidates))))
+
+(defun my/note--create-note-file (type title tags)
+  "Create a note of TYPE with TITLE and TAGS."
+  (let* ((title (string-trim title))
+         (type (or type (my/note--type-by-name 'default)))
+         (tags (seq-uniq
+                (seq-filter (lambda (tag)
+                              (and (stringp tag)
+                                   (not (string-empty-p tag))))
+                            (append tags (my/note-type-default-tags type)))
+                #'string=)))
+    (when (string-empty-p title)
+      (user-error "Title is empty"))
+    (let* ((id (my/note--new-id-for-type type title))
+           (slug (concat (or (my/note-type-slug-prefix type) "")
+                         (my/note--slugify title)))
+           (directory (file-name-as-directory my/note-directory))
+           (file (expand-file-name (concat slug ".typ") directory))
+           (template-fn (or (my/note-type-template-fn type)
+                            #'my/note--template-default)))
+      (make-directory directory t)
+      (my/note-ensure-helper-file)
+      (when (file-exists-p file)
+        (user-error "Note already exists: %s" file))
+      (find-file file)
+      (insert (funcall template-fn id title tags))
+      (save-buffer)
+      (when-let* ((note (my/note-db-sync-file file)))
+        (run-hook-with-args 'my/note-new-hook note))
+      file)))
+
 ;;;###autoload
 (defun my/note-new (title tag)
   "Create a new Typst note with TITLE and TAG."
   (interactive
    (list (read-string "Title: ")
          (read-string "Tag: ")))
-  (let* ((id (my/note--new-id title))
-         (slug (my/note--slugify title))
-         (directory (file-name-as-directory my/note-directory))
-         (file (expand-file-name (concat slug ".typ") directory)))
-    (make-directory directory t)
-    (my/note-ensure-helper-file)
-    (when (file-exists-p file)
-      (user-error "Note already exists: %s" file))
-    (find-file file)
-    (insert my/note-helper-import-source "\n")
-    (insert (my/note--metadata-source id title (if (string-empty-p tag)
-                                                   nil
-                                                 (list tag))))
-    (insert "\n= " title "\n\n")
-    (save-buffer)
-    (my/note-db-sync)
-    file))
+  (my/note--create-note-file
+   (my/note--type-by-name 'default)
+   title
+   (if (string-empty-p tag) nil (list tag))))
+
+;;;###autoload
+(defun my/note-new-of-type (type title)
+  "Create a new Typst note using registered note TYPE."
+  (interactive
+   (let ((type (my/note--read-type)))
+     (list type (read-string "Title: "))))
+  (my/note--create-note-file type title nil))
 
 (defun my/note--setup-keys (map)
   "Bind Typst note keys in MAP."
@@ -749,6 +1322,7 @@ Return non-nil when a note link was opened."
   (define-key map (kbd "C-c n A") #'my/note-agenda)
   (define-key map (kbd "C-c n c") #'my/note-capture)
   (define-key map (kbd "C-c n d") #'my/note-daily-today)
+  (define-key map (kbd "C-c n D") #'my/note-doctor)
   (define-key map (kbd "C-c n f") #'my/note-node-find)
   (define-key map (kbd "C-c n g") #'my/note-graph)
   (define-key map (kbd "C-c n i") #'my/note-node-insert)
@@ -756,6 +1330,7 @@ Return non-nil when a note link was opened."
   (define-key map (kbd "C-c n r") #'my/note-reference-insert)
   (define-key map (kbd "C-c n s") #'my/note-db-sync)
   (define-key map (kbd "C-c n n") #'my/note-new)
+  (define-key map (kbd "C-c n N") #'my/note-new-of-type)
   (define-key map (kbd "C-c n t") #'my/note-tag-add)
   (define-key map (kbd "C-c n RET") #'my/note-open-at-point))
 
@@ -765,11 +1340,13 @@ Return non-nil when a note link was opened."
                    ("A" . my/note-agenda)
                    ("c" . my/note-capture)
                    ("d" . my/note-daily-today)
+                   ("D" . my/note-doctor)
                    ("f" . my/note-node-find)
                    ("g" . my/note-graph)
                    ("i" . my/note-node-insert)
                    ("l" . my/note-backlinks)
                    ("n" . my/note-new)
+                   ("N" . my/note-new-of-type)
                    ("o" . my/note-open-or-preview-sync)
                    ("r" . my/note-reference-insert)
                    ("RET" . my/note-open-at-point)
@@ -790,7 +1367,7 @@ Return non-nil when a note link was opened."
     (my/note--setup-keys typst-ts-mode-map)
     (my/note--setup-evil-keys typst-ts-mode-map)))
 
-(add-hook 'typst-ts-mode-hook #'my/note-xref-setup)
+(add-hook 'typst-ts-mode-hook #'my/note-buffer-setup)
 
 (with-eval-after-load 'typst-mode
   (when (boundp 'typst-mode-map)
@@ -798,7 +1375,7 @@ Return non-nil when a note link was opened."
     (my/note--setup-evil-keys typst-mode-map)))
 
 (dolist (hook '(typst-mode-hook my/typst-mode-hook))
-  (add-hook hook #'my/note-xref-setup))
+  (add-hook hook #'my/note-buffer-setup))
 
 (when (boundp 'my/typst-mode-map)
   (my/note--setup-keys my/typst-mode-map)

@@ -88,12 +88,12 @@
 `telescope`；其他工具用
 `m/s/n/J/R/P`。
 
-Note 前缀 `H-o` 现在挂 Typst note：`n` 新建 note，`f` 查找 note，`i` 插入
-`#note("id")[title]` 链接，`l` 查看反链，`s` 重建索引，`o` 打开 preview 并同步，
+Note 前缀 `H-o` 现在挂 Typst note：`n` 新建 note，`N` 按类型模板新建 note，`f` 查找 note，`i` 插入
+`#note("id")[title]` 链接，`l` 查看反链，`D` 跑 doctor，`s` 重建索引，`o` 打开 preview 并同步，
 `RET` 打开光标处 note，`y` 粘贴剪贴板图片，`z` 填充 Zotero/BibTeX metadata。
 
 Typst note buffer 里 `C-c n` 是本地 note 前缀：`f` 查找 note，`i` 插入
-`#note("id")[title]` 链接，`l` 查看反链，`s` 重建索引，`n` 新建 note，`y` 粘贴图片，
+`#note("id")[title]` 链接，`l` 查看反链，`D` 跑 doctor，`s` 重建索引，`n` 新建 note，`N` 按类型模板新建 note，`y` 粘贴图片，
 `z` 填充 Zotero/BibTeX metadata。
 `C-c C-p` 会用 macOS 系统浏览器打开 Tinymist preview；同一文件复用现有进程保留
 增量更新，切到另一个 Typst buffer 后会切换 preview。
