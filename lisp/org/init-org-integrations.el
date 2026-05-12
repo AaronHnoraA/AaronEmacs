@@ -6,7 +6,6 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'init-org-code)
 (require 'init-org-core)
 (require 'ox)
 (require 'ox-html)

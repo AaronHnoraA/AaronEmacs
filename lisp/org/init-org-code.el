@@ -1,14 +1,11 @@
-;;; init-org-code.el --- Org code execution extras -*- lexical-binding: t; -*-
+;;; init-org-code.el --- Compatibility entry for standalone Babel config -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;;
 
 ;;; Code:
 
-(require 'init-org-babel)
-
-(use-package scala-mode
-  :interpreter ("scala" . scala-mode))
+(require 'init-babel)
 
 (provide 'init-org-code)
 ;;; init-org-code.el ends here

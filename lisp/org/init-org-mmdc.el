@@ -5,7 +5,7 @@
 
 ;;; Code:
 
-(require 'init-org-mmdc-core)
+(require 'init-babel-mermaid)
 
 (provide 'init-org-mmdc)
 ;;; init-org-mmdc.el ends here

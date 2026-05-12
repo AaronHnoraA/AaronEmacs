@@ -80,23 +80,11 @@
       (user-error "Value is empty"))
     value))
 
-(defun my/note--known-tags ()
-  "Return distinct tag strings recorded in the note index."
-  (mapcar #'car
-          (my/note--rows
-           "select distinct tag from tags where tag <> '' order by tag")))
-
 (defun my/note--read-tag (prompt)
-  "Read a tag using PROMPT with completion over existing tags."
-  (let* ((known (my/note--known-tags))
-         (current (and (derived-mode-p 'typst-ts-mode 'typst-mode 'my/typst-mode)
-                       (my/note--metadata-list-values "tags")))
-         (candidates (seq-uniq (append current known) #'string=))
-         (value (string-trim
-                 (completing-read prompt candidates nil nil))))
-    (when (string-empty-p value)
-      (user-error "Value is empty"))
-    value))
+  "Read one or more tags using PROMPT with completion over existing tags."
+  (let ((current (and (derived-mode-p 'typst-ts-mode 'typst-mode 'my/typst-mode)
+                      (my/note--metadata-list-values "tags"))))
+    (my/note--read-tags prompt nil nil current)))
 
 (defun my/note--after-metadata-edit (message value)
   "Save current note, sync its index row, and report MESSAGE with VALUE."
@@ -106,15 +94,19 @@
   (message message value))
 
 ;;;###autoload
-(defun my/note-tag-add (tag)
-  "Add TAG to the current Typst note metadata."
-  (interactive (list (my/note--read-tag "Tag: ")))
+(defun my/note-tag-add (tags)
+  "Add TAGS to the current Typst note metadata."
+  (interactive (list (my/note--read-tag "Tags: ")))
   (unless (derived-mode-p 'typst-ts-mode 'typst-mode 'my/typst-mode)
     (user-error "Not in a Typst note buffer"))
-  (my/note--set-metadata-list
-   "tags"
-   (append (my/note--metadata-list-values "tags") (list tag)))
-  (my/note--after-metadata-edit "Note tag added: %s" tag))
+  (let ((tags (my/note--normalize-tags tags)))
+    (unless tags
+      (user-error "Tags are empty"))
+    (my/note--set-metadata-list
+     "tags"
+     (append (my/note--metadata-list-values "tags") tags))
+    (my/note--after-metadata-edit "Note tags added: %s"
+                                  (string-join tags ", "))))
 
 ;;;###autoload
 (defun my/note-alias-add (alias)

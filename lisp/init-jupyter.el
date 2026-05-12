@@ -1,4 +1,4 @@
-;;; init-jupyter.el --- Compatibility entry for Jupyter config -*- lexical-binding: t; -*-
+;;; init-jupyter.el --- Jupyter configuration entry -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;;

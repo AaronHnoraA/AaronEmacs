@@ -5,7 +5,7 @@
 
 ;;; Code:
 
-(require 'init-org-babel-core)
+(require 'init-babel)
 
 (provide 'init-org-babel)
 ;;; init-org-babel.el ends here

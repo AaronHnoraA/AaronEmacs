@@ -88,15 +88,22 @@
 `telescope`；其他工具用
 `m/s/n/J/R/P`。
 
-Note 前缀 `H-o` 现在挂 Typst note：`n` 新建 note，`N` 按类型模板新建 note，`f` 查找 note，`i` 插入
-`#note("id")[title]` 链接，`l` 查看反链，`D` 跑 doctor，`s` 重建索引，`o` 打开 preview 并同步，
-`RET` 打开光标处 note，`y` 粘贴剪贴板图片，`z` 填充 Zotero/BibTeX metadata。
+Note 前缀 `H-o` 现在挂 Typst note：`n` 新建 note（可选文件夹；默认不强制 tag），`N` 按类型模板新建 note，
+`f` 查找 note，`i` 插入 `#note("id")[title]` 链接，`p` 给当前行创建/复制 `@label`，`r` 插入 reference，
+`R` 插入 citation，`A` 打开 agenda list，`b` 打开 agenda board，`l` 查看反链，`D` 跑 doctor，`s` 重建索引，
+`o` 打开光标处 note/link/reference 或同步 preview，`RET` 打开光标处 note/link/reference，`y` 粘贴剪贴板图片，
+`z` 填充 Zotero/BibTeX metadata。
 
 Typst note buffer 里 `C-c n` 是本地 note 前缀：`f` 查找 note，`i` 插入
-`#note("id")[title]` 链接，`l` 查看反链，`D` 跑 doctor，`s` 重建索引，`n` 新建 note，`N` 按类型模板新建 note，`y` 粘贴图片，
-`z` 填充 Zotero/BibTeX metadata。
+`#note("id")[title]` 链接，`p` 创建/复制当前行 label，`r` 插入 reference，`R` 插入 citation，`A` 打开 agenda，
+`b` 打开 agenda board，`l` 查看反链，`D` 跑 doctor，`s` 重建索引，`n` 新建 note，`N` 按类型模板新建 note，
+`t` 一次加一个或多个 tag，`y` 粘贴图片，`z` 填充 Zotero/BibTeX metadata。
 `C-c C-p` 会用 macOS 系统浏览器打开 Tinymist preview；同一文件复用现有进程保留
 增量更新，切到另一个 Typst buffer 后会切换 preview。
+
+Typst reference 现在统一走 note reference resolver：`#note("id")[...]` 进 note，普通 `#link("path-or-url")[...]`
+打开 URL 或文件，指向 note 文件时优先按 note id 进入，`#zoterolink(...)` 打开 Zotero，本地 `@label` 跳到 `<label>`。
+evil normal `RET`、`C-c n RET` 和 Tinymist preview 点击蓝色下划线回源都使用这套规则。
 
 ## 2. Leader 键分组
 

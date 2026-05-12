@@ -81,8 +81,6 @@
                   (language file &optional quiet))
 (declare-function my/jupyter-set-default-kernel-for-language "init-jupyter"
                   (language kernel))
-(declare-function my/jupyter-use-connection-file-for-org-block "init-jupyter"
-                  (file &optional language))
 (declare-function my/jupyter-run-repl-for-language "init-jupyter" (language))
 (declare-function my/jupyter-lab--command "init-jupyter-lab")
 (declare-function my/jupyter-lab--default-directory "init-jupyter-lab")
@@ -621,7 +619,7 @@ When FILE is nil, prompt for one of the standard config filenames."
   (insert "\n"))
 
 (defun my/jupyter-doctor ()
-  "Open a doctor report for the current Jupyter/Org/Jupytext setup."
+  "Open a doctor report for the current Jupyter/Jupytext setup."
   (interactive)
   (let ((buffer (get-buffer-create my/jupyter-doctor-buffer-name))
         (source (current-buffer)))

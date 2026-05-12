@@ -97,8 +97,8 @@ If one of FEATURES is already available, require MODULE immediately."
 (my/require-module-safely 'init-note-tools)
 
 ;; standalone apps
+(my/require-module-after-any-feature 'init-babel 'org)
 (my/require-module-after-any-feature 'init-org 'org)
-(my/require-module-after-any-feature 'init-org-mmdc 'org)
 (when (eq system-type 'darwin)
   (my/require-module-safely 'init-appine))
 (require 'init-text)

@@ -7,6 +7,7 @@
 
 ;;; Code:
 
+(require 'browse-url)
 (require 'cl-lib)
 (require 'seq)
 (require 'sqlite)
@@ -16,10 +17,13 @@
 (declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
 (declare-function my/navigation-find-definition "init-navigation" ())
 (declare-function my/note-agenda "init-note-agenda" (&optional all))
+(declare-function my/note-agenda-board "init-note-agenda" (&optional all))
 (declare-function my/note-alias-add "init-note-metadata" (alias))
 (declare-function my/note-capture "init-note-capture" (category title))
 (declare-function my/note-daily-today "init-note-capture" ())
 (declare-function my/note-graph "init-note-graph" ())
+(declare-function my/note-citation-insert "init-note-reference" ())
+(declare-function my/note-reference-create-target-dwim "init-note-reference" ())
 (declare-function my/note-reference-insert "init-note-reference" ())
 (declare-function my/note-tag-add "init-note-metadata" (tag))
 (declare-function my/typst-preview-send-position "init-typst" ())
@@ -148,6 +152,21 @@ Hook functions receive CHANGED, REMOVED, and KEPT counts."
 Hook functions receive the parsed note plist."
   :type 'hook
   :group 'my/note)
+
+(defcustom my/note-new-read-directory t
+  "When non-nil, `my/note-new' asks where to place the new note."
+  :type 'boolean
+  :group 'my/note)
+
+(defcustom my/note-new-read-tags nil
+  "When non-nil, `my/note-new' asks for tags.
+Even when this is nil, a prefix argument to `my/note-new' or
+`my/note-new-of-type' still prompts for tags."
+  :type 'boolean
+  :group 'my/note)
+
+(defvar my/note-new-directory-history nil
+  "Minibuffer history for note creation directories.")
 
 (defconst my/note--schema-version 3
   "Current SQLite schema version for the Typst note index.")
@@ -428,8 +447,10 @@ When READONLY is non-nil, open it read-only."
         (string-trim (mapconcat #'identity (nreverse lines) " ")))
        180 nil nil t))))
 
-(defun my/note--scan-links ()
-  "Return all `#note(\"id\")[label]' links in the current buffer."
+(defun my/note--scan-links (&optional file)
+  "Return all note links in the current buffer.
+This includes direct `#note(\"id\")[label]' calls and ordinary
+`#link(\"path\")[label]' calls whose path resolves to a Typst note."
   (let (links)
     (save-excursion
       (goto-char (point-min))
@@ -437,9 +458,26 @@ When READONLY is non-nil, open it read-only."
               "#note[ \t\n]*(\"\\([^\"\\]*\\(?:\\\\.[^\"\\]*\\)*\\)\")[ \t\n]*\\[\\([^]\n]*\\)\\]"
               nil t)
         (push (list :target (my/note--typst-string-unescape (match-string 1))
-                    :label (string-trim (match-string-no-properties 2))
+                    :label (string-trim (or (match-string-no-properties 2)
+                                            ""))
                     :line (my/note--line-at-pos (match-beginning 0)))
-              links)))
+              links))
+      (goto-char (point-min))
+      (while (re-search-forward
+              "#link[ \t\n]*(\"\\([^\"\\]*\\(?:\\\\.[^\"\\]*\\)*\\)\")[ \t\n]*\\[\\([^]\n]*\\)\\]"
+              nil t)
+        (let* ((path (my/note--typst-string-unescape (match-string 1)))
+               (target-file (and (not (my/note--url-p path))
+                                 (my/note--expand-typst-link-path path file)))
+               (target-id (and target-file
+                               (file-exists-p target-file)
+                               (my/note--metadata-id-from-file target-file))))
+          (when target-id
+            (push (list :target target-id
+                        :label (string-trim (or (match-string-no-properties 2)
+                                                ""))
+                        :line (my/note--line-at-pos (match-beginning 0)))
+                  links)))))
     (nreverse links)))
 
 (defun my/note-parse-current-buffer (&optional file)
@@ -465,7 +503,7 @@ FILE is the file path associated with the buffer."
               :size (if (and file (file-exists-p file))
                         (file-attribute-size (file-attributes file))
                       0)
-              :links (my/note--scan-links))))))
+              :links (my/note--scan-links file))))))
 
 (defun my/note-parse-file (file)
   "Parse Typst note metadata and links from FILE."
@@ -473,20 +511,46 @@ FILE is the file path associated with the buffer."
     (insert-file-contents file)
     (my/note-parse-current-buffer file)))
 
+(defun my/note--excluded-directory-name-p (directory)
+  "Return non-nil when DIRECTORY has an ignored basename."
+  (member (file-name-nondirectory (directory-file-name directory))
+          my/note-excluded-directories))
+
 (defun my/note--excluded-path-p (file)
   "Return non-nil when FILE is below an excluded note directory."
   (let* ((relative (file-relative-name
-                    (file-truename file)
-                    (file-name-as-directory (file-truename my/note-root))))
+                    (expand-file-name file)
+                    (file-name-as-directory (expand-file-name my/note-root))))
          (parts (split-string relative "/" t)))
     (seq-some (lambda (part)
                 (member part my/note-excluded-directories))
               parts)))
 
+(defun my/note--typst-file-p (file)
+  "Return non-nil when FILE is a regular Typst file."
+  (and (file-regular-p file)
+       (string-match-p "\\.typ\\'" file)))
+
 (defun my/note--typst-files ()
   "Return Typst note candidate files below `my/note-root'."
-  (seq-remove #'my/note--excluded-path-p
-              (directory-files-recursively my/note-root "\\.typ\\'")))
+  (let ((root (file-name-as-directory (expand-file-name my/note-root)))
+        files)
+    (cl-labels
+        ((walk (directory)
+           (dolist (entry (ignore-errors
+                            (directory-files directory t
+                                             directory-files-no-dot-files-regexp)))
+             (cond
+              ((and (file-directory-p entry)
+                    (not (file-symlink-p entry))
+                    (not (my/note--excluded-directory-name-p entry)))
+               (walk entry))
+              ((and (my/note--typst-file-p entry)
+                    (not (my/note--excluded-path-p entry)))
+               (push (file-truename entry) files))))))
+      (when (file-directory-p root)
+        (walk root)))
+    (sort (delete-dups files) #'string<)))
 
 (defun my/note--file-fingerprint (file)
   "Return (MTIME . SIZE) for FILE."
@@ -785,6 +849,41 @@ With prefix FORCE, rebuild the whole index and all generated wrappers."
                            (vector id)))))
       (my/note--node-plist-from-row row))))
 
+(defun my/note--node-by-file (file)
+  "Return the indexed note node for FILE, or nil."
+  (when (and (stringp file)
+             (file-exists-p file))
+    (when-let* ((row (car (my/note--rows
+                           "select n.id,
+                                   n.file,
+                                   n.title,
+                                   n.date,
+                                   coalesce((select group_concat(tag, ',')
+                                             from tags where node_id = n.id), ''),
+                                   coalesce((select group_concat(alias, char(31))
+                                             from aliases where node_id = n.id), '')
+                            from nodes n
+                            where n.file = ?
+                            limit 1"
+                           (vector (file-truename file))))))
+      (my/note--node-plist-from-row row))))
+
+(defun my/note--metadata-id-from-file (file)
+  "Return Typst note id stored in FILE metadata, or nil."
+  (when (and (stringp file)
+             (file-readable-p file)
+             (string= (downcase (or (file-name-extension file) ""))
+                      "typ"))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (when-let* ((entry (my/note--metadata-body)))
+        (my/note--metadata-string (car entry) "id")))))
+
+(defun my/note--note-id-from-file (file)
+  "Return Typst note id for FILE from the index or file metadata."
+  (or (plist-get (my/note--node-by-file file) :id)
+      (my/note--metadata-id-from-file file)))
+
 (defun my/note--typst-content-escape (value)
   "Escape VALUE for a simple Typst content block."
   (mapconcat
@@ -833,49 +932,140 @@ With prefix FORCE, rebuild the whole index and all generated wrappers."
         (forward-char (aref position 1)))
       (point))))
 
-(defun my/note--link-id-at-point ()
-  "Return the `#note' id at point, including when point is on its label."
+(defun my/note--string-call-arg-at-point (name)
+  "Return first string argument for Typst function NAME at point.
+Point may be on the call or inside the following content block."
   (let ((pos (point))
         (beg (max (point-min) (- (point) 2000)))
         (end (min (point-max) (+ (point) 2000)))
-        (case-fold-search nil))
+        (case-fold-search nil)
+        (regexp (format "#%s[ \t\n]*(\"\\([^\"\\]*\\(?:\\\\.[^\"\\]*\\)*\\)\")"
+                        (regexp-quote name))))
     (save-excursion
       (goto-char beg)
-      (catch 'id
-        (while (re-search-forward
-                "#note[ \t\n]*(\"\\([^\"\\]*\\(?:\\\\.[^\"\\]*\\)*\\)\")"
-                end t)
+      (catch 'arg
+        (while (re-search-forward regexp end t)
           (let ((call-start (match-beginning 0))
-                (id (my/note--typst-string-unescape (match-string 1)))
+                (arg (my/note--typst-string-unescape (match-string 1)))
                 (after-call (match-end 0)))
+            (when (<= call-start pos after-call)
+              (throw 'arg arg))
             (goto-char after-call)
             (when (looking-at "[ \t\n]*\\[")
               (goto-char (match-end 0))
               (when (search-forward "]" end t)
                 (when (<= call-start pos (point))
-                  (throw 'id id))))))))))
+                  (throw 'arg arg))))))))))
+
+(defun my/note--link-id-at-point ()
+  "Return the `#note' id at point, including when point is on its label."
+  (my/note--string-call-arg-at-point "note"))
 
 (defun my/note--zotero-url-at-point ()
   "Return the `#zoterolink' URL at point, including when point is on its label."
+  (my/note--string-call-arg-at-point "zoterolink"))
+
+(defun my/note--typst-link-path-at-point ()
+  "Return the `#link' target at point, including label text."
+  (my/note--string-call-arg-at-point "link"))
+
+(defun my/note--url-p (value)
+  "Return non-nil when VALUE looks like an absolute URL."
+  (and (stringp value)
+       (string-match-p "\\`[a-zA-Z][a-zA-Z0-9+.-]*:" value)))
+
+(defun my/note--expand-typst-link-path (path &optional base-file)
+  "Expand Typst link PATH using BASE-FILE and `my/note-root'."
+  (let ((base (or (and base-file (file-name-directory base-file))
+                  default-directory)))
+    (cond
+     ((or (not (stringp path)) (string-empty-p path))
+      nil)
+     ((my/note--url-p path)
+      path)
+     ((file-name-absolute-p path)
+      (expand-file-name (string-remove-prefix "/" path)
+                        (file-name-as-directory my/note-root)))
+     (t
+      (expand-file-name path base)))))
+
+(defun my/note--wrapper-id-from-path (path)
+  "Return note id when PATH points at a generated note wrapper."
+  (when (and (stringp path)
+             (string= (downcase (or (file-name-extension path) ""))
+                      "typ"))
+    (let* ((wrapper-dir (file-name-as-directory
+                         (expand-file-name my/note--wrapper-directory
+                                           (file-name-as-directory
+                                            my/note-root))))
+           (expanded (expand-file-name path)))
+      (when (string-prefix-p wrapper-dir expanded)
+        (file-name-base expanded)))))
+
+(defun my/note-open-typst-link-path (path &optional base-file noerror)
+  "Open Typst `#link' PATH relative to BASE-FILE.
+When PATH resolves to an indexed note file, open the note itself.
+When NOERROR is non-nil, return nil instead of signalling."
+  (condition-case err
+      (let ((target (my/note--expand-typst-link-path path base-file)))
+        (cond
+         ((not target)
+          nil)
+         ((and (my/note--url-p target)
+               (string-prefix-p "zotero://" target))
+          (my/note-open-zotero-url target)
+          t)
+         ((my/note--url-p target)
+          (browse-url target)
+          t)
+         ((when-let* ((id (my/note--wrapper-id-from-path target)))
+            (my/note-open-id id)
+            t))
+         ((and (file-exists-p target)
+               (when-let* ((id (my/note--note-id-from-file target))
+                            (node (my/note--node-by-id id)))
+                 (find-file (plist-get node :file))
+                 t)))
+         ((file-exists-p target)
+          (find-file target)
+          t)
+         (t
+          (user-error "Typst link target does not exist: %s" target))))
+    (error
+     (unless noerror
+       (signal (car err) (cdr err)))
+     nil)))
+
+(defun my/note--typst-reference-target-at-point ()
+  "Return Typst `@label' target at point, or nil."
   (let ((pos (point))
-        (beg (max (point-min) (- (point) 2000)))
-        (end (min (point-max) (+ (point) 2000)))
         (case-fold-search nil))
     (save-excursion
-      (goto-char beg)
-      (catch 'url
-        (while (re-search-forward
-                "#zoterolink[ \t\n]*(\"\\([^\"\\]*\\(?:\\\\.[^\"\\]*\\)*\\)\")"
-                end t)
-          (let ((call-start (match-beginning 0))
-                (url (my/note--typst-string-unescape (match-string 1)))
-                (after-call (match-end 0)))
-            (goto-char after-call)
-            (when (looking-at "[ \t\n]*\\[")
-              (goto-char (match-end 0))
-              (when (search-forward "]" end t)
-                (when (<= call-start pos (point))
-                  (throw 'url url))))))))))
+      (skip-chars-backward "[:alnum:]_:.-")
+      (when (and (> (point) (point-min))
+                 (eq (char-before) ?@))
+        (backward-char 1))
+      (when (looking-at "@\\([a-zA-Z][a-zA-Z0-9_:.-]*\\)")
+        (let ((start (match-beginning 0))
+              (end (match-end 0))
+              (target (match-string-no-properties 1)))
+          (when (<= start pos end)
+            target))))))
+
+(defun my/note-goto-label (label &optional noerror)
+  "Jump to Typst LABEL in the current buffer.
+When NOERROR is non-nil, return nil instead of signalling."
+  (let ((regexp (format "<%s>" (regexp-quote label))))
+    (goto-char (point-min))
+    (if (re-search-forward regexp nil t)
+        (progn
+          (goto-char (match-beginning 0))
+          (when (get-buffer-window (current-buffer))
+            (recenter 3))
+          t)
+      (unless noerror
+        (user-error "No Typst label in current buffer: %s" label))
+      nil)))
 
 (defun my/note-open-zotero-url (url)
   "Open Zotero URL using the system URL handler."
@@ -890,6 +1080,30 @@ With prefix FORCE, rebuild the whole index and all generated wrappers."
       (user-error "No system URL opener found for Zotero links"))
     (start-process "zotero-opener" nil command url)
     (message "Opening Zotero link: %s" url)))
+
+(defun my/note-open-reference-at-point (&optional noerror)
+  "Open a Typst note, link, Zotero URL, or local `@label' at point.
+When NOERROR is non-nil, return nil instead of signalling."
+  (condition-case err
+      (cond
+       ((when-let* ((url (my/note--zotero-url-at-point)))
+          (my/note-open-zotero-url url)
+          t))
+       ((when-let* ((id (my/note--link-id-at-point)))
+          (my/note-open-id id)
+          t))
+       ((when-let* ((path (my/note--typst-link-path-at-point)))
+          (my/note-open-typst-link-path path buffer-file-name noerror)))
+       ((when-let* ((label (my/note--typst-reference-target-at-point)))
+          (my/note-goto-label label noerror)))
+       (t
+        (unless noerror
+          (user-error "No Typst note/link/reference at point"))
+        nil))
+    (error
+     (unless noerror
+       (signal (car err) (cdr err)))
+     nil)))
 
 (defun my/note--xref-backend ()
   "Return the note xref backend for Typst note links."
@@ -909,15 +1123,8 @@ Return non-nil when a note link was opened."
                             (my/note--position-to-point position)))))
     (with-current-buffer (or (get-file-buffer file)
                              (find-file-noselect file))
-      (save-excursion
-        (goto-char point)
-        (cond
-         ((when-let* ((url (my/note--zotero-url-at-point)))
-            (my/note-open-zotero-url url)
-            t))
-         ((when-let* ((id (my/note--link-id-at-point)))
-            (my/note-open-id id)
-            t)))))))
+      (goto-char point)
+      (my/note-open-reference-at-point t))))
 
 (cl-defmethod xref-backend-identifier-at-point ((_backend (eql my/note)))
   "Return the Typst note id at point."
@@ -974,44 +1181,18 @@ Return non-nil when a note link was opened."
 
 ;;;###autoload
 (defun my/note-open-at-point ()
-  "Open the Typst note or Zotero link at point."
+  "Open the Typst note, link, Zotero URL, or local reference at point."
   (interactive)
-  (cond
-   ((when-let* ((url (my/note--zotero-url-at-point)))
-      (my/note-open-zotero-url url)
-      t))
-   ((when-let* ((id (my/note--link-id-at-point)))
-      (my/note-open-id id)
-      t))
-   (t
-    (user-error "No Typst note or Zotero link at point"))))
-
-(defun my/note--typst-reference-at-point-p ()
-  "Return non-nil when point is on a Typst `@label' reference."
-  (save-excursion
-    (let ((pos (point)))
-      (skip-chars-backward "[:alnum:]_:-")
-      (or (looking-at-p "@[[:alnum:]_:-]+")
-          (and (> (point) (point-min))
-               (eq (char-before) ?@)
-               (<= (point) pos))))))
+  (my/note-open-reference-at-point))
 
 ;;;###autoload
 (defun my/note-open-or-preview-sync ()
-  "Open a Typst note/Zotero link, follow a Typst ref, or sync preview."
+  "Open a Typst note/link/reference at point, or sync preview."
   (interactive)
-  (if-let* ((url (my/note--zotero-url-at-point)))
-      (my/note-open-zotero-url url)
-    (if-let* ((id (my/note--link-id-at-point)))
-        (my/note-open-id id)
-    (cond
-     ((and (my/note--typst-reference-at-point-p)
-           (fboundp 'my/navigation-find-definition))
-      (my/navigation-find-definition))
-     ((fboundp 'my/typst-preview-send-position)
-      (my/typst-preview-send-position))
-     (t
-      (user-error "Typst preview sync is unavailable"))))))
+  (or (my/note-open-reference-at-point t)
+      (if (fboundp 'my/typst-preview-send-position)
+          (my/typst-preview-send-position)
+        (user-error "Typst preview sync is unavailable"))))
 
 (defun my/note-current-node-id ()
   "Return the current Typst note node id."
@@ -1221,6 +1402,160 @@ Return non-nil when a note link was opened."
     ((pred functionp) (funcall (my/note-type-id-strategy type) title))
     (_ (my/note--new-id title))))
 
+(defun my/note--split-tags (value)
+  "Return tag strings parsed from VALUE.
+VALUE may be nil, a string, or a nested list of strings.  Strings
+accept lightweight separators such as commas, spaces, Org-style
+colons, and hash prefixes."
+  (cond
+   ((null value) nil)
+   ((listp value)
+    (apply #'append (mapcar #'my/note--split-tags value)))
+   ((stringp value)
+    (split-string (string-trim value) "[#,:; \t\n\r]+" t))
+   (t nil)))
+
+(defun my/note--normalize-tags (tags)
+  "Return a de-duplicated list of non-empty TAGS."
+  (seq-uniq
+   (seq-filter (lambda (tag)
+                 (and (stringp tag)
+                      (not (string-empty-p tag))))
+               (my/note--split-tags tags))
+   #'string=))
+
+(defun my/note--known-tags ()
+  "Return distinct tag strings recorded in the note index."
+  (or (ignore-errors
+        (mapcar #'car
+                (my/note--rows
+                 "select distinct tag from tags where tag <> '' order by tag")))
+      nil))
+
+(defun my/note--read-tags (prompt &optional allow-empty initial extra-candidates)
+  "Read one or more tags with PROMPT.
+When ALLOW-EMPTY is non-nil, an empty input returns nil.  INITIAL
+and EXTRA-CANDIDATES can be strings or lists accepted by
+`my/note--normalize-tags'."
+  (let* ((crm-separator "[, \t\n]+")
+         (initial-tags (my/note--normalize-tags initial))
+         (candidates (seq-uniq
+                      (append (my/note--normalize-tags extra-candidates)
+                              (my/note--known-tags))
+                      #'string=))
+         (raw (completing-read-multiple
+               prompt
+               candidates
+               nil
+               nil
+               nil
+               nil
+               (and initial-tags (string-join initial-tags ", "))))
+         (tags (my/note--normalize-tags raw)))
+    (when (and (not allow-empty) (null tags))
+      (user-error "Tags are empty"))
+    tags))
+
+(defun my/note--path-under-directory-p (path directory)
+  "Return non-nil when PATH is located under DIRECTORY."
+  (let ((path (file-name-as-directory (expand-file-name path)))
+        (directory (file-name-as-directory (expand-file-name directory))))
+    (string-prefix-p directory path)))
+
+(defun my/note--note-subdirectories (&optional root)
+  "Return non-excluded subdirectories below ROOT or `my/note-directory'."
+  (let ((root (file-name-as-directory
+               (expand-file-name (or root my/note-directory))))
+        directories)
+    (cl-labels
+        ((walk
+          (directory)
+          (dolist (entry (ignore-errors
+                           (directory-files directory t
+                                            directory-files-no-dot-files-regexp)))
+            (when (and (file-directory-p entry)
+                       (not (file-symlink-p entry))
+                       (not (my/note--excluded-directory-name-p entry)))
+              (push (file-name-as-directory (expand-file-name entry))
+                    directories)
+              (walk entry)))))
+      (when (file-directory-p root)
+        (walk root)))
+    (sort directories #'string<)))
+
+(defun my/note--new-directory-candidates ()
+  "Return completion candidates for new note destination directories."
+  (let* ((base (file-name-as-directory (expand-file-name my/note-directory)))
+         (directories (cons base (my/note--note-subdirectories base))))
+    (mapcar
+     (lambda (directory)
+       (cons (my/note--new-directory-label directory)
+             directory))
+     directories)))
+
+(defun my/note--new-directory-label (directory)
+  "Return DIRECTORY as a completion label below `my/note-directory'."
+  (let* ((base (file-name-as-directory (expand-file-name my/note-directory)))
+         (relative (directory-file-name
+                    (file-relative-name directory base))))
+    (if (string= relative ".") "." relative)))
+
+(defun my/note--normalize-new-directory (directory)
+  "Return DIRECTORY as an absolute directory under `my/note-root'."
+  (let* ((value (string-trim (or directory "")))
+         (base (file-name-as-directory (expand-file-name my/note-directory)))
+         (target (cond
+                  ((or (string-empty-p value) (string= value "."))
+                   base)
+                  ((file-name-absolute-p value)
+                   value)
+                  (t
+                   (expand-file-name value base)))))
+    (setq target (file-name-as-directory (expand-file-name target)))
+    (unless (my/note--path-under-directory-p target my/note-root)
+      (user-error "Note directory must be under `my/note-root': %s" target))
+    (when (my/note--excluded-path-p target)
+      (user-error "Note directory is excluded from the index: %s" target))
+    target))
+
+(defun my/note--default-new-directory ()
+  "Return the default destination directory for a new note."
+  (let ((current-directory (and buffer-file-name
+                                (file-name-directory buffer-file-name))))
+    (if (and current-directory
+             (my/note--path-under-directory-p current-directory
+                                              my/note-directory)
+             (not (my/note--excluded-path-p current-directory)))
+        (my/note--normalize-new-directory current-directory)
+      (my/note--normalize-new-directory my/note-directory))))
+
+(defun my/note--read-new-directory ()
+  "Read a destination directory for a new note."
+  (if my/note-new-read-directory
+      (let* ((candidates (my/note--new-directory-candidates))
+             (default-directory (my/note--default-new-directory))
+             (default-choice (my/note--new-directory-label default-directory))
+             (choice (completing-read
+                      "Folder: "
+                      (mapcar #'car candidates)
+                      nil nil nil
+                      'my/note-new-directory-history
+                      default-choice))
+             (directory (or (cdr (assoc choice candidates))
+                            (my/note--normalize-new-directory choice))))
+        (my/note--normalize-new-directory directory))
+    (my/note--normalize-new-directory my/note-directory)))
+
+(defun my/note--read-new-args (&optional prompt-tags)
+  "Read interactive arguments for note creation.
+When PROMPT-TAGS is non-nil, ask for optional tags."
+  (let* ((title (read-string "Title: "))
+         (directory (my/note--read-new-directory))
+         (tags (when (or prompt-tags my/note-new-read-tags)
+                 (my/note--read-tags
+                  "Tags (optional, comma/space/:tag:): " t))))
+    (list title tags directory)))
+
 (defun my/note--metadata-source (id title tags)
   "Return Typst metadata source for ID TITLE and TAGS."
   (format
@@ -1267,22 +1602,23 @@ Return non-nil when a note link was opened."
          (choice (completing-read "Note type: " candidates nil t)))
     (cdr (assoc choice candidates))))
 
-(defun my/note--create-note-file (type title tags)
-  "Create a note of TYPE with TITLE and TAGS."
+(defun my/note--create-note-file (type title tags &optional directory)
+  "Create a note of TYPE with TITLE and TAGS in DIRECTORY."
   (let* ((title (string-trim title))
          (type (or type (my/note--type-by-name 'default)))
          (tags (seq-uniq
                 (seq-filter (lambda (tag)
                               (and (stringp tag)
                                    (not (string-empty-p tag))))
-                            (append tags (my/note-type-default-tags type)))
+                            (append (my/note--normalize-tags tags)
+                                    (my/note-type-default-tags type)))
                 #'string=)))
     (when (string-empty-p title)
       (user-error "Title is empty"))
     (let* ((id (my/note--new-id-for-type type title))
            (slug (concat (or (my/note-type-slug-prefix type) "")
                          (my/note--slugify title)))
-           (directory (file-name-as-directory my/note-directory))
+           (directory (my/note--normalize-new-directory directory))
            (file (expand-file-name (concat slug ".typ") directory))
            (template-fn (or (my/note-type-template-fn type)
                             #'my/note--template-default)))
@@ -1298,28 +1634,31 @@ Return non-nil when a note link was opened."
       file)))
 
 ;;;###autoload
-(defun my/note-new (title tag)
-  "Create a new Typst note with TITLE and TAG."
+(defun my/note-new (title &optional tags directory)
+  "Create a new Typst note with TITLE.
+TAGS may be a list or a lightweight string such as \"a b\" or
+\":a:b:\".  DIRECTORY defaults to `my/note-directory'."
   (interactive
-   (list (read-string "Title: ")
-         (read-string "Tag: ")))
+   (my/note--read-new-args current-prefix-arg))
   (my/note--create-note-file
    (my/note--type-by-name 'default)
    title
-   (if (string-empty-p tag) nil (list tag))))
+   tags
+   directory))
 
 ;;;###autoload
-(defun my/note-new-of-type (type title)
+(defun my/note-new-of-type (type title &optional tags directory)
   "Create a new Typst note using registered note TYPE."
   (interactive
    (let ((type (my/note--read-type)))
-     (list type (read-string "Title: "))))
-  (my/note--create-note-file type title nil))
+     (apply #'list type (my/note--read-new-args current-prefix-arg))))
+  (my/note--create-note-file type title tags directory))
 
 (defun my/note--setup-keys (map)
   "Bind Typst note keys in MAP."
   (define-key map (kbd "C-c n a") #'my/note-alias-add)
   (define-key map (kbd "C-c n A") #'my/note-agenda)
+  (define-key map (kbd "C-c n b") #'my/note-agenda-board)
   (define-key map (kbd "C-c n c") #'my/note-capture)
   (define-key map (kbd "C-c n d") #'my/note-daily-today)
   (define-key map (kbd "C-c n D") #'my/note-doctor)
@@ -1327,7 +1666,9 @@ Return non-nil when a note link was opened."
   (define-key map (kbd "C-c n g") #'my/note-graph)
   (define-key map (kbd "C-c n i") #'my/note-node-insert)
   (define-key map (kbd "C-c n l") #'my/note-backlinks)
+  (define-key map (kbd "C-c n p") #'my/note-reference-create-target-dwim)
   (define-key map (kbd "C-c n r") #'my/note-reference-insert)
+  (define-key map (kbd "C-c n R") #'my/note-citation-insert)
   (define-key map (kbd "C-c n s") #'my/note-db-sync)
   (define-key map (kbd "C-c n n") #'my/note-new)
   (define-key map (kbd "C-c n N") #'my/note-new-of-type)
@@ -1338,6 +1679,7 @@ Return non-nil when a note link was opened."
 (global-set-key (kbd "C-c n") 'my/note-command-map)
 (dolist (binding '(("a" . my/note-alias-add)
                    ("A" . my/note-agenda)
+                   ("b" . my/note-agenda-board)
                    ("c" . my/note-capture)
                    ("d" . my/note-daily-today)
                    ("D" . my/note-doctor)
@@ -1348,7 +1690,9 @@ Return non-nil when a note link was opened."
                    ("n" . my/note-new)
                    ("N" . my/note-new-of-type)
                    ("o" . my/note-open-or-preview-sync)
+                   ("p" . my/note-reference-create-target-dwim)
                    ("r" . my/note-reference-insert)
+                   ("R" . my/note-citation-insert)
                    ("RET" . my/note-open-at-point)
                    ("s" . my/note-db-sync)
                    ("t" . my/note-tag-add)))
