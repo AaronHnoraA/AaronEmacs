@@ -210,7 +210,7 @@ make publish
 - PDF 内的 `#note("id")[Title]` 会在发布临时源里改写为可点击的 web/PDF 链接；默认用 `/roam/...pdf`，需要绝对域名时设置 `PUBLISH_BASE_URL`。
 - 不再生成每篇 note 的 HTML wrapper；浏览器自己的 PDF viewer 负责阅读界面。
 
-因此，`note.css` / `publish.css` 只影响网站壳、archive 和 graph，不影响 PDF 里的 note 视觉。公开 PDF 缺的页面、标题、目录、卡片、页眉页脚等效果，应该补到 `~/HC/Org/_typst/publish.typ`，不要补一个发布专用 CSS，也不要把日常 `/_typst/note.typ` 改成只适合发布。
+因此，`note.css` / `publish.css` 只影响网站壳、archive 和 graph，不影响 PDF 里的 note 视觉。公开 PDF 缺的页面、标题、目录、卡片、页眉页脚和页面背景等效果，应该补到 `~/HC/Org/_typst/publish.typ`，不要补一个发布专用 CSS，也不要把日常 `/_typst/note.typ` 改成只适合发布。`publish.typ` 通过 `note-theme.with(...)` 基于日常 note 样式升级；可以保留公开版的旧纸/folio 主色，但新增背景、边框和目录包装应继续放在 publish 层。
 
 private 配置优先跟随目录。`bin/publish-site` 里的 `PRIVATE_PATH_PREFIXES` 默认把 `roam/daily/` 和 `roam/project/` 整个屏蔽；这些目录下的 note 不需要逐篇加 metadata。单篇 note 仍可用 metadata 额外 opt-in。任一条件命中时，note 会从公开列表和搜索里隐藏，PDF 正文会替换成 sealed 页面，但 graph 数据仍保留标题和 note links，避免关系图断边。发布脚本不会分发正文、摘要、tags 或 private note assets：
 
