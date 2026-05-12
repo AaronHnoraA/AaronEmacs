@@ -241,8 +241,79 @@
   )[#upper(name)]]
 
 #let task-muted = rgb("8a8077")
-#let todo(body) = [#task-tag("todo", "9b3b37", "f4dfdc") #body]
-#let doing(body) = [#task-tag("doing", "9b6017", "fbe9c8") #body]
-#let waiting(body) = [#task-tag("waiting", "5f6c7b", "eceae4") #body]
-#let done(body) = [#task-tag("done", "2f6f42", "e5f3df") #text(fill: task-muted)[#strike[#body]]]
-#let cancelled(body) = [#task-tag("cancelled", "8a8077", "ece8e0") #text(fill: task-muted)[#strike[#body]]]
+#let task-meta-chip(name, value, accent, tint) = {
+  if value != none and value != "" {
+    box(
+      fill: rgb(tint),
+      stroke: 0.45pt + rgb(accent),
+      inset: (x: 0.38em, y: 0.04em),
+      outset: (y: 0.16em),
+      radius: 999pt,
+      baseline: 0.04em,
+    )[
+      #text(fill: rgb(accent), weight: "semibold", size: 0.68em)[#upper(name)]
+      #h(0.24em)
+      #text(fill: rgb(accent), size: 0.68em)[#value]
+    ]
+    h(0.12em)
+  }
+}
+
+#let task-repeat-value(repeat, recurrence) = {
+  if repeat != none and repeat != "" {
+    repeat
+  } else {
+    recurrence
+  }
+}
+
+#let task-body(body, muted: false) = {
+  if muted {
+    text(fill: task-muted)[#strike[#body]]
+  } else {
+    body
+  }
+}
+
+#let task-line(
+  name,
+  accent,
+  tint,
+  body,
+  due: none,
+  scheduled: none,
+  priority: none,
+  repeat: none,
+  recurrence: none,
+  muted: false,
+) = [
+  #task-tag(name, accent, tint)
+  #task-meta-chip("p", priority, "7a4b2d", "f3e6dc")
+  #task-meta-chip("due", due, "9b3b37", "f4dfdc")
+  #task-meta-chip("sched", scheduled, "335f91", "e4edf8")
+  #task-meta-chip("rep", task-repeat-value(repeat, recurrence), "5f6c7b", "eceae4")
+  #task-body(body, muted: muted)
+]
+
+#let todo(due: none, scheduled: none, priority: none, repeat: none, recurrence: none, body) = task-line(
+  "todo", "9b3b37", "f4dfdc", body,
+  due: due, scheduled: scheduled, priority: priority, repeat: repeat, recurrence: recurrence,
+)
+#let doing(due: none, scheduled: none, priority: none, repeat: none, recurrence: none, body) = task-line(
+  "doing", "9b6017", "fbe9c8", body,
+  due: due, scheduled: scheduled, priority: priority, repeat: repeat, recurrence: recurrence,
+)
+#let waiting(due: none, scheduled: none, priority: none, repeat: none, recurrence: none, body) = task-line(
+  "waiting", "5f6c7b", "eceae4", body,
+  due: due, scheduled: scheduled, priority: priority, repeat: repeat, recurrence: recurrence,
+)
+#let done(due: none, scheduled: none, priority: none, repeat: none, recurrence: none, body) = task-line(
+  "done", "2f6f42", "e5f3df", body,
+  due: due, scheduled: scheduled, priority: priority, repeat: repeat, recurrence: recurrence,
+  muted: true,
+)
+#let cancelled(due: none, scheduled: none, priority: none, repeat: none, recurrence: none, body) = task-line(
+  "cancelled", "8a8077", "ece8e0", body,
+  due: due, scheduled: scheduled, priority: priority, repeat: repeat, recurrence: recurrence,
+  muted: true,
+)

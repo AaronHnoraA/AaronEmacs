@@ -959,6 +959,10 @@ The scan happens only when this command is invoked."
              ((org-agenda-overriding-header "↓ DROPPED")))))))
 
   :config
+  (define-key org-agenda-mode-map (kbd "j") #'org-agenda-next-line)
+  (define-key org-agenda-mode-map (kbd "k") #'org-agenda-previous-line)
+  (define-key org-agenda-mode-map (kbd "h") #'beginning-of-line)
+  (define-key org-agenda-mode-map (kbd "l") #'org-agenda-goto)
   (unless (advice-member-p #'my/org-agenda--around 'org-agenda)
     (advice-add 'org-agenda :around #'my/org-agenda--around))
   (unless (advice-member-p #'my/org-agenda--quit-around 'org-agenda-quit)

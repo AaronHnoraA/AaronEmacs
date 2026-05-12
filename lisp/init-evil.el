@@ -220,6 +220,10 @@
                   my/jupyter-manager-mode
                   my/jupyter-doctor-mode
                   my/compile-board-mode
+                  my/note-agenda-mode
+                  my/org-maintenance-board-mode
+                  my/org-task-fast-view-mode
+                  org-agenda-mode
                   my/health-mode
                   ai-workbench-mode
                   ai-workbench-codex-mode
@@ -245,6 +249,10 @@
                   my/jupyter-manager-mode-hook
                   my/jupyter-doctor-mode-hook
                   my/compile-board-mode-hook
+                  my/note-agenda-mode-hook
+                  my/org-maintenance-board-mode-hook
+                  my/org-task-fast-view-mode-hook
+                  org-agenda-mode-hook
                   my/health-mode-hook
                   ai-workbench-mode-hook
                   ai-workbench-codex-mode-hook
@@ -260,6 +268,11 @@
   (add-hook 'dirvish-mode-hook #'my/evil-disable-local-mode-h)
   (add-hook 'eww-mode-hook #'my/evil-disable-local-mode-h)
   (add-hook 'xwidget-webkit-mode-hook #'my/evil-disable-local-mode-h)
+  (dolist (hook '(my/note-agenda-mode-hook
+                  my/org-maintenance-board-mode-hook
+                  my/org-task-fast-view-mode-hook
+                  org-agenda-mode-hook))
+    (add-hook hook #'my/evil-disable-local-mode-h))
   (dolist (hook '(ai-workbench-mode-hook
                   ai-workbench-codex-mode-hook
                   ai-workbench-compose-mode-hook

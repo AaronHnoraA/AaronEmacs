@@ -46,6 +46,9 @@
 (defvar my/note-graph--xwidget-buffer nil
   "Buffer that currently hosts the note graph xwidget session, or nil.")
 
+(defvar-local my/note-graph--buffer-owned nil
+  "Non-nil when the current xwidget buffer is owned by note graph.")
+
 (defun my/note-graph--asset-file (relative)
   "Return graph asset RELATIVE below `my/note-graph-asset-directory'."
   (expand-file-name relative
@@ -84,6 +87,34 @@
       "Root"
     (car (split-string group-key "/" t))))
 
+(defun my/note-graph--clean-search-text ()
+  "Return a compact searchable text string for the current Typst buffer."
+  (save-excursion
+    (goto-char (point-min))
+    (when (re-search-forward "#metadata[ \t\n]*((" nil t)
+      (let ((start (match-beginning 0)))
+        (when (search-forward "))" nil t)
+          (when (looking-at "[ \t\n]*<note>")
+            (goto-char (match-end 0)))
+          (delete-region start (point)))))
+    (goto-char (point-min))
+    (while (re-search-forward "^[ \t]*\\(?:#import\\|#show:\\|#set\\)[^\n]*" nil t)
+      (replace-match " " t t))
+    (let ((text (buffer-string)))
+      (setq text (replace-regexp-in-string
+                  "#note[ \t\n]*(\"[^\"]+\")[ \t\n]*\\[\\([^]\n]+\\)\\]"
+                  "\\2" text))
+      (setq text (replace-regexp-in-string "//.*" " " text))
+      (setq text (replace-regexp-in-string "[#=*$`_{}()\\[\\],]" " " text))
+      (setq text (replace-regexp-in-string "[ \t\n\r]+" " " text))
+      (string-trim text))))
+
+(defun my/note-graph--search-text (file)
+  "Return searchable full text for Typst note FILE."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (my/note-graph--clean-search-text)))
+
 (defun my/note-graph--site-data ()
   "Return note index data using the published site's SITE_DATA schema."
   (let* ((node-rows
@@ -94,7 +125,9 @@
                    coalesce(n.date, ''),
                    coalesce(n.summary, ''),
                    coalesce((select group_concat(tag, ',')
-                             from tags where node_id = n.id), '')
+                             from tags where node_id = n.id), ''),
+                   coalesce((select group_concat(alias, char(31))
+                             from aliases where node_id = n.id), '')
             from nodes n
             order by lower(n.title), n.file"))
          (link-rows
@@ -102,7 +135,8 @@
            "select source_id, target_id from links order by source_id, target_id"))
          (refs-by-source (make-hash-table :test 'equal))
          (backlinks-by-target (make-hash-table :test 'equal))
-         (tag-set (make-hash-table :test 'equal)))
+         (tag-set (make-hash-table :test 'equal))
+         (alias-set (make-hash-table :test 'equal)))
     (dolist (row link-rows)
       (pcase-let ((`(,source ,target) row))
         (unless (string= source target)
@@ -115,26 +149,41 @@
     (let ((notes
            (mapcar
             (lambda (row)
-              (pcase-let* ((`(,id ,file ,title ,date ,summary ,tags-raw) row)
+              (pcase-let* ((`(,id ,file ,title ,date ,summary ,tags-raw ,aliases-raw) row)
                            (tags (if (and tags-raw
                                           (not (string-empty-p tags-raw)))
                                      (sort (split-string tags-raw "," t)
                                            #'string<)
                                    nil))
+                           (aliases (if (and aliases-raw
+                                             (not (string-empty-p aliases-raw)))
+                                        (sort (split-string aliases-raw "\x1f" t)
+                                              #'string<)
+                                      nil))
+                           (relative-path
+                            (file-relative-name
+                             (file-truename file)
+                             (file-name-as-directory
+                              (file-truename my/note-root))))
                            (group-key (my/note-graph--group-key file)))
                 (dolist (tag tags)
                   (puthash tag t tag-set))
+                (dolist (alias aliases)
+                  (puthash alias t alias-set))
                 `(("key" . ,id)
                   ("id" . ,id)
                   ("title" . ,title)
                   ("link" . ,(my/note-graph--file-url file))
+                  ("path" . ,relative-path)
                   ("date" . ,date)
                   ("summary" . ,summary)
+                  ("searchText" . ,(my/note-graph--search-text file))
                   ("groupKey" . ,group-key)
                   ("groupLabel" . ,(my/note-graph--group-label group-key))
                   ("section" . ,(my/note-graph--section-name group-key))
                   ("hidden" . :json-false)
                   ("tags" . ,(vconcat tags))
+                  ("aliases" . ,(vconcat aliases))
                   ("refs" . ,(vconcat (sort (delete-dups
                                              (gethash id refs-by-source))
                                             #'string<)))
@@ -144,7 +193,8 @@
             node-rows)))
       `(("meta" . (("generatedAt" . ,(format-time-string "%Y-%m-%d %H:%M:%S %z"))
                    ("noteCount" . ,(length notes))
-                   ("tagCount" . ,(hash-table-count tag-set))))
+                   ("tagCount" . ,(hash-table-count tag-set))
+                   ("aliasCount" . ,(hash-table-count alias-set))))
         ("notes" . ,(vconcat notes))))))
 
 (defun my/note-graph--write-site-data (directory)
@@ -203,6 +253,12 @@
         my/note-graph--ws-port nil))
 
 (add-hook 'kill-emacs-hook #'my/note-graph--ws-shutdown)
+
+(defun my/note-graph--buffer-kill-h ()
+  "Clean up note graph process state when its xwidget buffer is killed."
+  (when my/note-graph--buffer-owned
+    (setq my/note-graph--xwidget-buffer nil)
+    (my/note-graph--ws-shutdown)))
 
 (defun my/note-graph--html (ws-port)
   "Return standalone HTML wired to WS-PORT for the note graph."
@@ -283,6 +339,27 @@
      graph-js
      ws-port)))
 
+(defun my/note-graph-kill ()
+  "Kill the note graph xwidget buffer and shut down its websocket server."
+  (interactive)
+  (my/note-graph--ws-shutdown)
+  (let* ((buffer (or (and (buffer-live-p my/note-graph--xwidget-buffer)
+                          my/note-graph--xwidget-buffer)
+                     (current-buffer)))
+         (window (get-buffer-window buffer t)))
+    (setq my/note-graph--xwidget-buffer nil)
+    (when (buffer-live-p buffer)
+      (kill-buffer buffer))
+    (when (and (window-live-p window)
+               (not (one-window-p t)))
+      (ignore-errors (delete-window window)))))
+
+(defun my/note-graph--setup-xwidget-buffer ()
+  "Install note graph local keys and cleanup hooks in the current buffer."
+  (setq-local my/note-graph--buffer-owned t)
+  (local-set-key (kbd "M-w") #'my/note-graph-kill)
+  (add-hook 'kill-buffer-hook #'my/note-graph--buffer-kill-h nil t))
+
 (defun my/note-graph--open-in-xwidget (url)
   "Display URL inside the dedicated note graph xwidget buffer."
   (require 'xwidget)
@@ -292,10 +369,12 @@
     (cond
      ((and buf (buffer-live-p buf))
       (with-current-buffer buf
+        (my/note-graph--setup-xwidget-buffer)
         (xwidget-webkit-goto-url url))
       (pop-to-buffer buf))
      (t
       (xwidget-webkit-browse-url url t)
+      (my/note-graph--setup-xwidget-buffer)
       (setq my/note-graph--xwidget-buffer (current-buffer))))))
 
 ;;;###autoload

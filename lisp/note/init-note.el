@@ -26,6 +26,7 @@
 (declare-function my/note-reference-create-target-dwim "init-note-reference" ())
 (declare-function my/note-reference-insert "init-note-reference" ())
 (declare-function my/note-tag-add "init-note-metadata" (tag))
+(declare-function my/note-task-dispatch "init-note-agenda" ())
 (declare-function my/typst-preview-send-position "init-typst" ())
 
 (defgroup my/note nil
@@ -1670,6 +1671,7 @@ TAGS may be a list or a lightweight string such as \"a b\" or
   (define-key map (kbd "C-c n r") #'my/note-reference-insert)
   (define-key map (kbd "C-c n R") #'my/note-citation-insert)
   (define-key map (kbd "C-c n s") #'my/note-db-sync)
+  (define-key map (kbd "C-c n T") #'my/note-task-dispatch)
   (define-key map (kbd "C-c n n") #'my/note-new)
   (define-key map (kbd "C-c n N") #'my/note-new-of-type)
   (define-key map (kbd "C-c n t") #'my/note-tag-add)
@@ -1695,6 +1697,7 @@ TAGS may be a list or a lightweight string such as \"a b\" or
                    ("R" . my/note-citation-insert)
                    ("RET" . my/note-open-at-point)
                    ("s" . my/note-db-sync)
+                   ("T" . my/note-task-dispatch)
                    ("t" . my/note-tag-add)))
   (define-key my/note-command-map (kbd (car binding)) (cdr binding)))
 
