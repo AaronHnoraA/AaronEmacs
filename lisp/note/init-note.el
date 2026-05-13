@@ -1193,6 +1193,11 @@ Return non-nil when a note link was opened."
 
 (defun my/note-buffer-setup ()
   "Enable note xref and after-save indexing for Typst buffers."
+  (when (my/note--buffer-note-file-p)
+    (condition-case err
+        (my/note-ensure-helper-file)
+      (error
+       (message "Note helper setup failed: %s" err))))
   (my/note-xref-setup)
   (add-hook 'after-save-hook #'my/note-after-save-sync nil t))
 

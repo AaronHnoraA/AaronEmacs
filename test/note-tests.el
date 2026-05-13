@@ -162,6 +162,21 @@
                      (buffer-string)))))
       (ignore-errors (delete-directory root t)))))
 
+(ert-deftest my/note-buffer-setup-ensures-helper-modules ()
+  (let ((root (make-temp-file "note-root-" t)))
+    (unwind-protect
+        (let ((my/note-root root))
+          (make-directory (expand-file-name "roam" root))
+          (let ((file (expand-file-name "roam/a.typ" root)))
+            (with-temp-file file
+              (insert "#import \"/_typst/note.typ\": *\n"))
+            (with-temp-buffer
+              (setq buffer-file-name file)
+              (my/note-buffer-setup)))
+          (should (file-exists-p (expand-file-name "_typst/note.typ" root)))
+          (should (file-exists-p (expand-file-name "_typst/math.typ" root))))
+      (ignore-errors (delete-directory root t)))))
+
 (ert-deftest my/note-writes-id-wrapper-files ()
   (let* ((root (make-temp-file "note-root-" t))
          (my/note-root root))
