@@ -96,11 +96,16 @@ See @sec-statement and @eq-main.
 保存 note 时默认会单文件更新索引；可用 `my/note-auto-sync-on-save` 关闭。`M-x my/note-db-sync` 会增量同步 `var/note/note.db`，并在 note 根目录写入：
 
 - `_typst/note.typ`
-  从 [lisp/note/typst/note.typ](../lisp/note/typst/note.typ) 复制出来的 helper。
+  指向 [lisp/note/typst/note.typ](../lisp/note/typst/note.typ) 的 helper 软链。
 - `_typst/math.typ`
-  从 [lisp/note/typst/math.typ](../lisp/note/typst/math.typ) 复制出来的数学宏模块，由 `note.typ` re-export。
+  指向 [lisp/note/typst/math.typ](../lisp/note/typst/math.typ) 的数学宏模块软链，由 `note.typ` re-export。
 - `_typst/extension.typ`
-  从 [lisp/note/typst/extension.typ](../lisp/note/typst/extension.typ) 复制出来的第三方 Typst 扩展配置层。`note.typ` 只调用这里的 `note-extensions`，不直接维护具体 package 配置。
+  指向 [lisp/note/typst/extension.typ](../lisp/note/typst/extension.typ) 的第三方 Typst 扩展配置层软链。`note.typ` 只调用这里的 `note-extensions`，不直接维护具体 package 配置。
+- `_typst/publish.typ` / `_typst/private.typ`
+  指向 [lisp/note/typst/](../lisp/note/typst/) 里的发布 PDF 样式源文件。
+- `css/` / `js/` / `homepage.html` / `notes.html`
+  指向 [lisp/note/assets/](../lisp/note/assets/) 里的网站静态资源源文件；`public/`
+  下的部署文件仍由发布脚本生成。
 - `_typst/notes/<id>.typ`
   每个 note 的小 wrapper，用于跨文件 import/include。
 
@@ -334,6 +339,8 @@ private 配置优先跟随目录。`bin/publish-site` 里的 `PRIVATE_PATH_PREFI
    - `_typst/rho.typ` -> `~/.config/emacs/notes/rho.typ`
    - `_typst/aleph-notas.typ` -> `~/.config/emacs/notes/aleph-notas.typ`
    - `_typst/note.typ` -> `~/.config/emacs/lisp/note/typst/note.typ`
+   - `_typst/math.typ` -> `~/.config/emacs/lisp/note/typst/math.typ`
+   - `_typst/extension.typ` -> `~/.config/emacs/lisp/note/typst/extension.typ`
 
 插入后的文件只需要写：
 

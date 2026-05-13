@@ -154,6 +154,20 @@
           (my/note-write-helper-file nil)
           (should (file-exists-p (expand-file-name "_typst/note.typ" root)))
           (should (file-exists-p (expand-file-name "_typst/math.typ" root)))
+          (should (file-exists-p (expand-file-name "_typst/extension.typ" root)))
+          (should (file-symlink-p (expand-file-name "_typst/note.typ" root)))
+          (should (file-symlink-p (expand-file-name "_typst/math.typ" root)))
+          (should (file-symlink-p (expand-file-name "_typst/extension.typ" root)))
+          (should (file-symlink-p (expand-file-name "_typst/publish.typ" root)))
+          (should (file-symlink-p (expand-file-name "css/retro.css" root)))
+          (should (file-symlink-p (expand-file-name "js/graph.js" root)))
+          (should (file-symlink-p (expand-file-name "homepage.html" root)))
+          (should (string-match-p
+                   "@preview/pinit"
+                   (with-temp-buffer
+                     (insert-file-contents
+                      (expand-file-name "_typst/extension.typ" root))
+                     (buffer-string))))
           (should (string-match-p
                    "#let ket"
                    (with-temp-buffer
@@ -174,7 +188,11 @@
               (setq buffer-file-name file)
               (my/note-buffer-setup)))
           (should (file-exists-p (expand-file-name "_typst/note.typ" root)))
-          (should (file-exists-p (expand-file-name "_typst/math.typ" root))))
+          (should (file-exists-p (expand-file-name "_typst/math.typ" root)))
+          (should (file-exists-p (expand-file-name "_typst/extension.typ" root)))
+          (should (file-symlink-p (expand-file-name "_typst/publish.typ" root)))
+          (should (file-symlink-p (expand-file-name "css/retro.css" root)))
+          (should (file-symlink-p (expand-file-name "js/graph.js" root))))
       (ignore-errors (delete-directory root t)))))
 
 (ert-deftest my/note-writes-id-wrapper-files ()
@@ -306,7 +324,8 @@
                 (let ((default-directory root))
                   (my/template--ensure-typst-style-links "assignment.typ")
                   (should (file-symlink-p (expand-file-name "_typst/assignment.typ" root)))
-                  (should (file-symlink-p (expand-file-name "_typst/note.typ" root))))
+                  (should (file-symlink-p (expand-file-name "_typst/note.typ" root)))
+                  (should (file-symlink-p (expand-file-name "_typst/extension.typ" root))))
               (kill-buffer (current-buffer)))))
       (ignore-errors (delete-directory root t)))))
 
@@ -321,7 +340,8 @@
                 (let ((default-directory root))
                   (my/template--ensure-typst-style-links "slide.typ")
                   (should (file-symlink-p (expand-file-name "_typst/beamer.typ" root)))
-                  (should (file-symlink-p (expand-file-name "_typst/note.typ" root))))
+                  (should (file-symlink-p (expand-file-name "_typst/note.typ" root)))
+                  (should (file-symlink-p (expand-file-name "_typst/extension.typ" root))))
               (kill-buffer (current-buffer)))))
       (ignore-errors (delete-directory root t)))))
 

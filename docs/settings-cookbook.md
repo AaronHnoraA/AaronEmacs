@@ -399,26 +399,27 @@ emacs --debug-init -q -l ./bootstrap.el
 
 - `lisp/note/typst/note.typ`
   日常长期 note 的页面、字体、标题、目录、卡片块和跨 note helper。`M-x my/note-db-sync`
-  会把它同步到 note 根目录的 `/_typst/note.typ`。
+  会把 note 根目录的 `/_typst/note.typ` 链到这里。
 - `lisp/note/typst/math.typ`
   日常 note 的数学记号模块。`note.typ` 会 re-export 它，`M-x my/note-db-sync`
-  会把它同步到 note 根目录的 `/_typst/math.typ`。
+  会把 note 根目录的 `/_typst/math.typ` 链到这里。
 - `lisp/note/typst/extension.typ`
   日常 note 的第三方 Typst package 配置层。这里维护 `codly` 代码块配置，以及
   pseudocode、diagram、automata、quantum circuit 和 CeTZ canvas 等可选写作别名；
-  `M-x my/note-db-sync` 会把它同步到 note 根目录的 `/_typst/extension.typ`。
-- `~/HC/Org/_typst/publish.typ`
+  `M-x my/note-db-sync` 会把 note 根目录的 `/_typst/extension.typ` 链到这里。
+- `lisp/note/typst/publish.typ`
   网站发布时的 PDF 样式。`bin/publish-site` 会临时把 note 里的 `"/_typst/note.typ"`
-  import 指到这个文件，所以公开 PDF 的页眉页脚、纸张、标题、目录和卡片视觉都在这里补。
+  import 指到 note 根目录的 `/_typst/publish.typ` 软链，所以公开 PDF 的页眉页脚、纸张、标题、目录和卡片视觉都在这里补。
+- `lisp/note/assets/`
+  网站壳使用的 `css/`、`js/`、`homepage.html` 和 `notes.html` 源文件。`~/HC/Org`
+  根目录下的同名静态文件通过软链指向这里；`public/` 仍由发布脚本生成自包含文件。
 - `notes/assignment.typ`
   项目外 assignment 模板样式。
 - `notes/rho.typ` / `notes/aleph-notas.typ`
   从旧 LaTeX class 迁过来的额外写作样式。
 
-日常 note 和 assignment 样式通过项目根目录的 `_typst/*.typ` 软链被导入。改完样式后，旧项目不需要复制文件；只要软链存在，重新编译即可吃到新样式。发布 PDF 样式则由 `~/HC/Org/_typst/publish.typ` 跟随网站仓库维护。
-
-如果项目里已有真实 `_typst/xxx.typ` 文件而不是软链，模板插入逻辑不会覆盖它；手动处理这个
-项目自己的样式即可。
+日常 note、publish 样式和网站静态资源都通过项目根目录里的软链消费。改完 Emacs
+配置里的源文件后，旧项目不需要复制文件；只要软链存在，重新编译或发布即可吃到新版本。
 
 ## 15. 我要改运行时状态目录
 

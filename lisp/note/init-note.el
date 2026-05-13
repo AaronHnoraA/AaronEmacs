@@ -71,8 +71,28 @@
 
 (defcustom my/note-helper-modules
   '("note.typ" "math.typ" "extension.typ")
-  "Typst helper modules copied below the note root's `_typst' directory."
+  "Typst helper modules linked below the note root's `_typst' directory."
   :type '(repeat string)
+  :group 'my/note)
+
+(defcustom my/note-root-asset-links
+  '(("_typst/publish.typ" . "lisp/note/typst/publish.typ")
+    ("_typst/private.typ" . "lisp/note/typst/private.typ")
+    ("css/retro.css" . "lisp/note/assets/css/retro.css")
+    ("css/style.css" . "lisp/note/assets/css/style.css")
+    ("css/home-bookshelf.css" . "lisp/note/assets/css/home-bookshelf.css")
+    ("css/cv.svg" . "lisp/note/assets/css/cv.svg")
+    ("js/app.js" . "lisp/note/assets/js/app.js")
+    ("js/graph.js" . "lisp/note/assets/js/graph.js")
+    ("js/knowledge.js" . "lisp/note/assets/js/knowledge.js")
+    ("js/note-page.js" . "lisp/note/assets/js/note-page.js")
+    ("js/home-bookshelf.js" . "lisp/note/assets/js/home-bookshelf.js")
+    ("js/oneko.js" . "lisp/note/assets/js/oneko.js")
+    ("js/oneko.gif" . "lisp/note/assets/js/oneko.gif")
+    ("homepage.html" . "lisp/note/assets/site/homepage.html")
+    ("notes.html" . "lisp/note/assets/site/notes.html"))
+  "Static note-root assets linked from the Emacs configuration."
+  :type '(alist :key-type string :value-type string)
   :group 'my/note)
 
 (defcustom my/note-excluded-directories
@@ -664,13 +684,41 @@ NOTES is accepted for compatibility with callers that pass the indexed set."
   (my/note--style-source "note.typ"))
 
 (defun my/note--write-helper-module (name)
-  "Write Typst helper module NAME below `my/note-root'."
+  "Ensure Typst helper module NAME is linked below `my/note-root'."
   (let ((file (expand-file-name (concat "_typst/" name)
-                                (file-name-as-directory my/note-root))))
+                                (file-name-as-directory my/note-root)))
+        (target (my/note--style-file name)))
+    (unless (file-readable-p target)
+      (user-error "Missing Typst note style file: %s" target))
     (make-directory (file-name-directory file) t)
-    (with-temp-file file
-      (insert (my/note--style-source name)))
+    (unless (and (file-symlink-p file)
+                 (file-equal-p file target))
+      (when (or (file-exists-p file)
+                (file-symlink-p file))
+        (delete-file file))
+      (make-symbolic-link target file))
     file))
+
+(defun my/note--ensure-root-asset-link (relative target-relative)
+  "Ensure note-root RELATIVE links to config TARGET-RELATIVE."
+  (let ((file (expand-file-name relative
+                                (file-name-as-directory my/note-root)))
+        (target (locate-user-emacs-file target-relative)))
+    (unless (file-readable-p target)
+      (user-error "Missing note root asset source: %s" target))
+    (make-directory (file-name-directory file) t)
+    (unless (and (file-symlink-p file)
+                 (file-equal-p file target))
+      (when (or (file-exists-p file)
+                (file-symlink-p file))
+        (delete-file file))
+      (make-symbolic-link target file))
+    file))
+
+(defun my/note-ensure-root-asset-links ()
+  "Ensure shared site assets are linked below `my/note-root'."
+  (dolist (link my/note-root-asset-links)
+    (my/note--ensure-root-asset-link (car link) (cdr link))))
 
 (defun my/note-write-helper-file (notes)
   "Write shared Typst note helper modules for NOTES."
@@ -680,6 +728,7 @@ NOTES is accepted for compatibility with callers that pass the indexed set."
       (let ((file (my/note--write-helper-module module)))
         (when (string= module "note.typ")
           (setq note-file file))))
+    (my/note-ensure-root-asset-links)
     note-file))
 
 (defun my/note-db-sync-file (file)
@@ -1602,10 +1651,10 @@ When PROMPT-TAGS is non-nil, ask for optional tags."
     (dolist (module my/note-helper-modules)
       (let ((file (expand-file-name (concat "_typst/" module)
                                     (file-name-as-directory my/note-root))))
-        (unless (file-exists-p file)
-          (my/note--write-helper-module module))
+        (my/note--write-helper-module module)
         (when (string= module "note.typ")
           (setq note-file file))))
+    (my/note-ensure-root-asset-links)
     note-file))
 
 (defun my/note--type-by-name (name)

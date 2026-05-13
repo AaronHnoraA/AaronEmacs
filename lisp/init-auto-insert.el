@@ -72,7 +72,8 @@ precedence over `my/template-current' when choosing the template file.")
     ("rho.typ" . "notes/rho.typ")
     ("aleph-notas.typ" . "notes/aleph-notas.typ")
     ("note.typ" . "lisp/note/typst/note.typ")
-    ("math.typ" . "lisp/note/typst/math.typ"))
+    ("math.typ" . "lisp/note/typst/math.typ")
+    ("extension.typ" . "lisp/note/typst/extension.typ"))
   "Typst style symlinks created below a project's `_typst' directory.")
 
 (defun my/template--safe-kinds-p (value)
@@ -189,7 +190,8 @@ first and then opening it."
         (delete-file link)
         (make-symbolic-link target link)))
      ((file-exists-p link)
-      nil)
+      (delete-file link)
+      (make-symbolic-link target link))
      (t
       (make-symbolic-link target link)))))
 
