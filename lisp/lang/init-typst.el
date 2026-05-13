@@ -22,6 +22,11 @@
 (declare-function eglot-signal-didChangeConfiguration "eglot" (server))
 (declare-function company-mode "company" (&optional arg))
 (declare-function previewer-workbench "previewer" ())
+(declare-function my/forward-delimiter-or-copilot-dwim "init-copilot" ())
+(declare-function my/backward-delimiter-or-snippet-dwim "init-copilot" ())
+(declare-function my/copilot-auto-enable-h "init-copilot" ())
+(declare-function my/copilot-completion-visible-p "init-copilot" ())
+(declare-function copilot-accept-completion "copilot" (&optional transform-fn))
 (declare-function websocket-open "websocket" (url &rest args))
 (declare-function websocket-close "websocket" (websocket))
 (declare-function websocket-send-text "websocket" (websocket text))
@@ -747,17 +752,119 @@ When FORCE is non-nil, restart even if the current buffer already owns it."
                          treesit-font-lock-level
                        0))))
 
+(defun my/typst--bracket-syntax-context-p (&optional pos)
+  "Return non-nil when POS is inside a string or comment."
+  (save-excursion
+    (let ((state (syntax-ppss (or pos (point)))))
+      (or (nth 3 state) (nth 4 state)))))
+
+(defun my/typst--matching-close-bracket (open)
+  "Return point after the matching `]' for Typst content bracket OPEN."
+  (save-excursion
+    (goto-char open)
+    (let ((depth 0)
+          target)
+      (while (and (not target)
+                  (re-search-forward "[][]" nil t))
+        (unless (my/typst--bracket-syntax-context-p (match-beginning 0))
+          (pcase (char-before)
+            (?\[
+             (setq depth (1+ depth)))
+            (?\]
+             (setq depth (1- depth))
+             (when (zerop depth)
+               (setq target (point)))))))
+      target)))
+
+(defun my/typst--containing-open-bracket (&optional pos)
+  "Return the nearest unmatched Typst `[' before POS or point."
+  (save-excursion
+    (goto-char (or pos (point)))
+    (let ((depth 0)
+          target)
+      (while (and (not target)
+                  (re-search-backward "[][]" nil t))
+        (unless (my/typst--bracket-syntax-context-p (point))
+          (pcase (char-after)
+            (?\]
+             (setq depth (1+ depth)))
+            (?\[
+             (if (zerop depth)
+                 (setq target (point))
+               (setq depth (1- depth)))))))
+      target)))
+
+(defun my/typst-forward-content-bracket-dwim ()
+  "Jump forward to the matching Typst content `]'.
+This command intentionally targets square content brackets only, so Typst
+function calls like `#foo(...)[...]' do not get hijacked by parentheses."
+  (interactive)
+  (let* ((open (cond
+                ((eq (char-after) ?\[) (point))
+                ((and (> (point) (point-min))
+                      (eq (char-before) ?\[))
+                 (1- (point)))
+                (t
+                 (my/typst--containing-open-bracket))))
+         (target (and open (my/typst--matching-close-bracket open))))
+    (cond
+     ((and (fboundp 'copilot-accept-completion)
+           (fboundp 'my/copilot-completion-visible-p)
+           (my/copilot-completion-visible-p))
+      (copilot-accept-completion))
+     (target
+      (goto-char target))
+     ((fboundp 'my/forward-delimiter-or-copilot-dwim)
+      (my/forward-delimiter-or-copilot-dwim))
+     (t
+      (user-error "No forward Typst content bracket found")))))
+
+(defun my/typst-backward-content-bracket-dwim ()
+  "Jump backward to the inside of the current Typst content `[ ... ]' block."
+  (interactive)
+  (let* ((search-pos (cond
+                      ((eq (char-after) ?\]) (point))
+                      ((and (> (point) (point-min))
+                            (eq (char-before) ?\]))
+                       (1- (point)))
+                      (t
+                       (point))))
+         (open (my/typst--containing-open-bracket search-pos)))
+    (cond
+     (open
+      (goto-char (1+ open)))
+     ((fboundp 'my/backward-delimiter-or-snippet-dwim)
+      (my/backward-delimiter-or-snippet-dwim))
+     (t
+      (user-error "No backward Typst content bracket found")))))
+
+(defun my/typst-setup-bracket-dwim-keys ()
+  "Use Typst-specific square bracket navigation in this buffer."
+  (local-set-key (kbd "M-]") #'my/typst-forward-content-bracket-dwim)
+  (local-set-key (kbd "M-[") #'my/typst-backward-content-bracket-dwim))
+
+(defun my/typst-copilot-auto-enable ()
+  "Auto-enable Copilot in Typst buffers when the integration is available."
+  (when (or (fboundp 'my/copilot-auto-enable-h)
+            (require 'init-copilot nil t))
+    (when (fboundp 'my/copilot-auto-enable-h)
+      (my/copilot-auto-enable-h))))
+
 (use-package typst-ts-mode
   :ensure t
   :mode ("\\.typ\\'" . typst-ts-mode)
   :bind (:map typst-ts-mode-map
               ("C-c C-p" . my/typst-preview)
-              ("C-c C-j" . my/typst-preview-send-position))
+              ("C-c C-j" . my/typst-preview-send-position)
+              ("M-]" . my/typst-forward-content-bracket-dwim)
+              ("M-[" . my/typst-backward-content-bracket-dwim))
   :hook ((typst-ts-mode . my/typst-eglot-setup)
          (typst-ts-mode . my/typst-company-setup)
          (typst-ts-mode . my/typst-previewer-setup)
          (typst-ts-mode . my/typst-preview-buffer-setup)
          (typst-ts-mode . my/typst-ts-pretty-setup)
+         (typst-ts-mode . my/typst-setup-bracket-dwim-keys)
+         (typst-ts-mode . my/typst-copilot-auto-enable)
          (typst-ts-mode . flymake-mode)))
 
 (dolist (hook '(typst-mode-hook my/typst-mode-hook))
@@ -765,6 +872,8 @@ When FORCE is non-nil, restart even if the current buffer already owns it."
   (add-hook hook #'my/typst-company-setup)
   (add-hook hook #'my/typst-previewer-setup)
   (add-hook hook #'my/typst-preview-buffer-setup)
+  (add-hook hook #'my/typst-setup-bracket-dwim-keys)
+  (add-hook hook #'my/typst-copilot-auto-enable)
   (add-hook hook #'flymake-mode))
 
 (add-hook 'buffer-list-update-hook #'my/typst-preview-follow-selected-window)
@@ -772,10 +881,14 @@ When FORCE is non-nil, restart even if the current buffer already owns it."
 (with-eval-after-load 'typst-mode
   (when (boundp 'typst-mode-map)
     (define-key typst-mode-map (kbd "C-c C-p") #'my/typst-preview)
-    (define-key typst-mode-map (kbd "C-c C-j") #'my/typst-preview-send-position)))
+    (define-key typst-mode-map (kbd "C-c C-j") #'my/typst-preview-send-position)
+    (define-key typst-mode-map (kbd "M-]") #'my/typst-forward-content-bracket-dwim)
+    (define-key typst-mode-map (kbd "M-[") #'my/typst-backward-content-bracket-dwim)))
 
 (define-key my/typst-mode-map (kbd "C-c C-p") #'my/typst-preview)
 (define-key my/typst-mode-map (kbd "C-c C-j") #'my/typst-preview-send-position)
+(define-key my/typst-mode-map (kbd "M-]") #'my/typst-forward-content-bracket-dwim)
+(define-key my/typst-mode-map (kbd "M-[") #'my/typst-backward-content-bracket-dwim)
 
 (use-package eglot
   :ensure nil

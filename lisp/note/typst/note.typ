@@ -198,14 +198,24 @@
 
 #let comment(body) = note-comment-box(body)
 #let annotation(body) = note-comment-box(body, accent: "7a4b2d", tint: "f3e6dc", title: "注")
-#let marginal(body) = note-comment-box(body, accent: "335f91", tint: "e4edf8", title: "旁注")
+#let note-side-width = 12em
+#let note-margin-width = 5.4em
+#let note-floating-side(body, dx: 24em, width: note-side-width, title: "侧注") = block(
+  width: 100%,
+  height: 0pt,
+  above: 0pt,
+  below: 0pt,
+)[
+  #place(top + left, dx: dx, dy: -0.15em)[
+    #block(width: width)[
+      #note-comment-box(body, accent: "335f91", tint: "e4edf8", title: title)
+    ]
+  ]
+]
+#let marginal(body) = note-floating-side(body, dx: -6.1em, width: note-margin-width, title: "旁注")
 #let margin-note(body) = marginal(body)
-#let sidecomment(body) = grid(
-  columns: (1fr, 12em),
-  gutter: 0.9em,
-  [],
-  note-comment-box(body, accent: "335f91", tint: "e4edf8", title: "侧注"),
-)
+#let mnote(body) = marginal(body)
+#let sidecomment(body) = note-floating-side(body, dx: 24em, title: "侧注")
 #let sidenote(body) = sidecomment(body)
 #let fn(body) = footnote(body)
 #let foot(body) = footnote(body)

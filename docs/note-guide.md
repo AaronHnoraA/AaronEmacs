@@ -112,11 +112,11 @@ note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note
 ]
 
 #marginal[
-  旁注块。适合短提醒、术语说明、阅读批注。
+  旁注块。单独一行使用；PDF 里会浮放到正文左侧，不占正文流。
 ]
 
 #sidenote[
-  侧边评论。PDF 里会排成正文右侧的一列说明。
+  侧边评论。单独一行使用；PDF 里会浮放到正文右侧，不占正文流。
 ]
 
 正文里可以直接接脚注#fn[这里是脚注内容]，也可以写成#foot[同义别名]。
@@ -125,7 +125,7 @@ note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note
 H#topmark[2]O 或 X#bottommark[i]。
 ```
 
-`#comment`、`#annotation`、`#marginal` 更像完整块；`#fn`、`#foot`、`#topmark`、`#bottommark` 是行内用法。不要定义 `#top` / `#bottom` 这类别名，因为 Typst 自己有 `top`、`bottom` 对齐值，遮蔽后会破坏 `place(top + left)` 这种页面背景代码。
+`#comment`、`#annotation` 更像完整块；`#marginal` / `#margin-note` / `#mnote` 是左侧零高度浮放块，`#sidenote` / `#sidecomment` 是右侧零高度浮放块，最好独立成行放在要标注的段落之后；`#fn`、`#foot`、`#topmark`、`#bottommark` 是行内用法。不要定义 `#top` / `#bottom` 这类别名，因为 Typst 自己有 `top`、`bottom` 对齐值，遮蔽后会破坏 `place(top + left)` 这种页面背景代码。
 
 Bib helper：`#bib()` 默认读取 `/references/references.bib`，等价别名是 `#references()`；可用 `#bib(path: "/path/to/file.bib", style: "apa")` 指定 bibliography 文件和样式。
 
@@ -291,6 +291,8 @@ Typst buffer 里：
   打开 Tinymist preview。
 - `C-c C-j`
   preview 同步到当前源码位置。
+- `M-]` / `M-[`
+  在 Typst 里优先按 `[...]` 内容块跳到右/左括号；有 Copilot ghost text 时 `M-]` 仍先接受补全。Typst mode 默认自动尝试开启 Copilot。
 - `C-c n n`
   新建 Typst note；选择目标文件夹，默认不强制输入 tag。
 - `C-u C-c n n`
