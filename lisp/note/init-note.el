@@ -70,7 +70,7 @@
   :group 'my/note)
 
 (defcustom my/note-helper-modules
-  '("note.typ" "math.typ")
+  '("note.typ" "math.typ" "extension.typ")
   "Typst helper modules copied below the note root's `_typst' directory."
   :type '(repeat string)
   :group 'my/note)

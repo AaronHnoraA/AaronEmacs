@@ -389,6 +389,7 @@ emacs --debug-init -q -l ./bootstrap.el
 
 - [lisp/note/typst/note.typ](../lisp/note/typst/note.typ)
 - [lisp/note/typst/math.typ](../lisp/note/typst/math.typ)
+- [lisp/note/typst/extension.typ](../lisp/note/typst/extension.typ)
 - `~/HC/Org/_typst/publish.typ`
 - [notes/assignment.typ](../notes/assignment.typ)
 - [notes/rho.typ](../notes/rho.typ)
@@ -402,6 +403,10 @@ emacs --debug-init -q -l ./bootstrap.el
 - `lisp/note/typst/math.typ`
   日常 note 的数学记号模块。`note.typ` 会 re-export 它，`M-x my/note-db-sync`
   会把它同步到 note 根目录的 `/_typst/math.typ`。
+- `lisp/note/typst/extension.typ`
+  日常 note 的第三方 Typst package 配置层。这里维护 `codly` 代码块配置，以及
+  pseudocode、diagram、automata、quantum circuit 和 CeTZ canvas 等可选写作别名；
+  `M-x my/note-db-sync` 会把它同步到 note 根目录的 `/_typst/extension.typ`。
 - `~/HC/Org/_typst/publish.typ`
   网站发布时的 PDF 样式。`bin/publish-site` 会临时把 note 里的 `"/_typst/note.typ"`
   import 指到这个文件，所以公开 PDF 的页眉页脚、纸张、标题、目录和卡片视觉都在这里补。
@@ -454,6 +459,12 @@ Typst 模板集中在 [templates/typst/](../templates/typst/)。当前 assignmen
 导入项目根目录下的 `/_typst/assignment.typ`；插入模板时 Emacs 会自动创建这些
 `_typst/*.typ` 软链，样式源文件统一维护在 [notes/](../notes/) 和
 [lisp/note/typst/](../lisp/note/typst/)。
+
+其中 `default.typ` 以及 research / proof / experiment / meeting / writing 等模板是
+Typst note 模板，会导入 `/_typst/note.typ`。`academic-report.typ`、
+`manuscript-review.typ`、`rebuttal-letter.typ`、`longform-book.typ`、
+`project-financial-report.typ`、`lab-report.typ`、`grant-proposal.typ` 是普通独立
+Typst 文档模板，不依赖 note helper。
 
 项目内按目录开关（`.dir-locals.el`）：
 

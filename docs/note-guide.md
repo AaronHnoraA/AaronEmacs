@@ -99,10 +99,12 @@ See @sec-statement and @eq-main.
   从 [lisp/note/typst/note.typ](../lisp/note/typst/note.typ) 复制出来的 helper。
 - `_typst/math.typ`
   从 [lisp/note/typst/math.typ](../lisp/note/typst/math.typ) 复制出来的数学宏模块，由 `note.typ` re-export。
+- `_typst/extension.typ`
+  从 [lisp/note/typst/extension.typ](../lisp/note/typst/extension.typ) 复制出来的第三方 Typst 扩展配置层。`note.typ` 只调用这里的 `note-extensions`，不直接维护具体 package 配置。
 - `_typst/notes/<id>.typ`
   每个 note 的小 wrapper，用于跨文件 import/include。
 
-note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note-transclude`、`note-import-path`，以及 `definition`、`theorem`、`proof`、`example`、`remark`、`summary`、`question`、`important`、`warning`、`tip`、`info` 等卡片块。数学记号宏单独维护在 `math.typ`，日常 note 通过 `note.typ` 自动拿到；宏表和 snippet key 见 [typst-math-macros.md](typst-math-macros.md)。
+note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note-transclude`、`note-import-path`，以及 `definition`、`theorem`、`proof`、`example`、`remark`、`summary`、`question`、`important`、`warning`、`tip`、`info` 等卡片块。数学记号宏单独维护在 `math.typ`，日常 note 通过 `note.typ` 自动拿到；宏表和 snippet key 见 [typst-math-macros.md](typst-math-macros.md)。第三方 Typst package 集中维护在 `extension.typ`：默认配置 `codly` 代码块，并提供 `pseudo` / `pseudo-figure`、`diagram` / `node` / `edge`、`automaton`、`quantum-circuit`、`note-canvas` 等别名。Checklist 不接入这里；agenda 任务仍然只认 `#todo[]` / `#doing[]` / `#waiting[]` 这套 note task chip。
 
 批注 / 脚注 / 侧注 helper 也在 `/_typst/note.typ` 里。常用写法：
 

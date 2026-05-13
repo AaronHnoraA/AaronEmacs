@@ -3,6 +3,7 @@
 // Typst replacement for latex/default.cls plus the old generated note helper.
 
 #import "/_typst/math.typ": *
+#import "/_typst/extension.typ": *
 
 #let note-accent = rgb("3c71b7")
 #let note-accent-soft = rgb("e6eef8")
@@ -66,6 +67,7 @@
   heading2-rule-stroke: 0.65pt + note-rule,
   heading2-rule-text-fill: note-ink,
 ) = {
+  show: note-extensions
   set page(
     fill: page-fill,
     margin: page-margin,
