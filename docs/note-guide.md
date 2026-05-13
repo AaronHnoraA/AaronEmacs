@@ -104,7 +104,7 @@ See @sec-statement and @eq-main.
 - `_typst/notes/<id>.typ`
   每个 note 的小 wrapper，用于跨文件 import/include。
 
-note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note-transclude`、`note-import-path`，以及 `definition`、`theorem`、`proof`、`example`、`remark`、`summary`、`question`、`important`、`warning`、`tip`、`info` 等卡片块。数学记号宏单独维护在 `math.typ`，日常 note 通过 `note.typ` 自动拿到；宏表和 snippet key 见 [typst-math-macros.md](typst-math-macros.md)。第三方 Typst package 集中维护在 `extension.typ`：默认配置 `codly` 代码块，并提供 `pseudo` / `pseudo-figure`、`diagram` / `node` / `edge`、`automaton`、`quantum-circuit`、`note-canvas` 等别名。Checklist 不接入这里；agenda 任务仍然只认 `#todo[]` / `#doing[]` / `#waiting[]` 这套 note task chip。
+note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note-transclude`、`note-import-path`，以及 `definition`、`theorem`、`proof`、`example`、`remark`、`summary`、`question`、`important`、`warning`、`tip`、`info` 等卡片块。数学记号宏单独维护在 `math.typ`，日常 note 通过 `note.typ` 自动拿到；宏表和 snippet key 见 [typst-math-macros.md](typst-math-macros.md)。第三方 Typst package 集中维护在 `extension.typ`：默认配置 `codly` 代码块，并提供 `pseudo` / `pseudo-figure`、`diagram` / `node` / `edge`、`automaton`、`quantum-circuit`、`note-canvas`、`note-pin` / `note-pinit-*` 等别名。Checklist 不接入这里；agenda 任务仍然只认 `#todo[]` / `#doing[]` / `#waiting[]` 这套 note task chip。
 
 第三方扩展的日常用法：
 
@@ -151,9 +151,26 @@ $)
   line((0, 0), (2, 0), mark: (end: ">"))
   content((1, 0.35), [$x$])
 })
+
+// pinit: 给正文中的局部内容打 pin，再画高亮或指向性批注。
+A #note-pin("a")highlighted phrase#note-pin("b").
+
+#note-pinit-highlight("a", "b")
+#note-pinit-point-from(("a", "b"))[
+  Annotation attached to the phrase.
+]
 ````
 
-这些 helper 面向 note；普通独立 Typst 文档模板不默认导入 `/_typst/note.typ`，需要第三方包时应在文档里显式 `#import "@preview/..."`。
+这些 helper 面向 note；普通独立 Typst 文档模板不默认导入 `/_typst/note.typ`，需要第三方包时应在文档里显式 `#import "@preview/..."`。Touying 是独立 slides 模板，不进入 note helper；用 `templates/typst/touying-simple.typ` 新建演示文稿。
+
+WASM / Typst plugin 默认保持静默：`extension.typ` 不导入任何 WASM package，也不自动读取 `.wasm` 文件。确实需要手动启用时，在具体文档里显式声明：
+
+```typst
+#let my-plugin = plugin("path/to/plugin.wasm")
+#my-plugin.some-function(args)
+```
+
+这样普通 note preview 不会因为缺少本地 WASM 文件或插件初始化而变慢或报错。
 
 批注 / 脚注 / 侧注 helper 也在 `/_typst/note.typ` 里。常用写法：
 
@@ -424,7 +441,7 @@ Typst snippets 在 [snippets/typst-ts-mode/](../snippets/typst-ts-mode/)。`typs
 - 装饰：`bar`、`hat`、`tilde`、`dot`、`ddot`、`vec`。
 - 矩阵：`mat`、`pmat`、`bmat`、`cases`。
 - 分节和引用：`sec`、`sub`、`ref`、`cite`、`figure:ref`、`table:ref`。
-- 第三方扩展：`code`、`pseudo`、`diagram`、`automaton`、`qcirc`、`canvas`。
+- 第三方扩展：`code`、`pseudo`、`diagram`、`automaton`、`qcirc`、`canvas`、`pinit`、`wasm`。
 - 块：`def`、`thm`、`lem`、`proof`、`que`、`summ`、`imp`、`warn`、`tip`、`info`、`rem`、`ex`、`sol`。
 - 批注 / 标注：`comment` / `cmt`、`annotation` / `ann`、`marginal`、`mnote`、`sidenote` / `side`。
 - 行内注记：`fn` / `foot`、`topmark` / `supmark`、`bottommark` / `submark`。

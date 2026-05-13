@@ -464,7 +464,8 @@ Typst 模板集中在 [templates/typst/](../templates/typst/)。当前 assignmen
 Typst note 模板，会导入 `/_typst/note.typ`。`academic-report.typ`、
 `manuscript-review.typ`、`rebuttal-letter.typ`、`longform-book.typ`、
 `project-financial-report.typ`、`lab-report.typ`、`grant-proposal.typ` 是普通独立
-Typst 文档模板，不依赖 note helper。
+Typst 文档模板，不依赖 note helper。`touying-simple.typ` 是 Touying slides 模板，
+也保持独立，不进入 note helper。
 
 项目内按目录开关（`.dir-locals.el`）：
 

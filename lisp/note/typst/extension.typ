@@ -11,6 +11,7 @@
 #import "@preview/finite:0.5.1" as finite
 #import "@preview/quill:0.7.2" as quill
 #import "@preview/cetz:0.5.2" as cetz
+#import "@preview/pinit:0.2.2" as pinit
 
 #let note-code-languages = codly-languages
 
@@ -50,3 +51,14 @@
 // General drawing.  Use `note-canvas' for small inline scientific diagrams;
 // for advanced drawings, import `cetz.draw' locally inside the canvas body.
 #let note-canvas = cetz.canvas
+
+// Relative placement by pins.  These are useful for lightweight annotations in
+// notes and for slides that import the note extension explicitly.
+#let note-pin = pinit.pin
+#let note-pinit = pinit.pinit
+#let note-pinit-highlight = pinit.pinit-highlight
+#let note-pinit-place = pinit.pinit-place
+#let note-pinit-point-from = pinit.pinit-point-from
+#let note-pinit-point-to = pinit.pinit-point-to
+#let note-pinit-arrow = pinit.pinit-arrow
+#let note-pinit-line = pinit.pinit-line
