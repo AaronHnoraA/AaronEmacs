@@ -70,6 +70,31 @@ previously inlined in every org-mode snippet file."
   (add-hook 'yas-after-exit-snippet-hook
             #'my/yas-org-cleanup-trailing-newline nil t))
 
+(defun my/yas-typst-cleanup-inline-math-newline ()
+  "Delete snippet final newline when it splits an inline Typst math span.
+
+Many one-line Typst snippets are stored with a final file newline.  When such a
+snippet expands inside `$...$', yas can leave that newline before the closing
+`$', which turns the formula into display math."
+  (save-excursion
+    (when (and (eq (char-after) ?\n)
+               (save-excursion
+                 (forward-char 1)
+                 (skip-chars-forward " \t\n")
+                 (eq (char-after) ?$))
+               (save-excursion
+                 (skip-chars-backward "^$")
+                 (eq (char-before) ?$)))
+      (let ((inhibit-modification-hooks t))
+        (delete-char 1)))))
+
+(defun my/yas-setup-typst-behavior ()
+  "Keep Typst snippet expansion conservative inside inline math."
+  (setq-local yas-indent-line 'fixed)
+  (setq-local yas-also-indent-empty-lines nil)
+  (add-hook 'yas-after-exit-snippet-hook
+            #'my/yas-typst-cleanup-inline-math-newline nil t))
+
 (use-package yasnippet
   :ensure t
   :defer 2
@@ -89,6 +114,9 @@ previously inlined in every org-mode snippet file."
    (typst-ts-mode . my/yas-setup-typst-extra-modes)
    (typst-mode . my/yas-setup-typst-extra-modes)
    (my/typst-mode . my/yas-setup-typst-extra-modes)
+   (typst-ts-mode . my/yas-setup-typst-behavior)
+   (typst-mode . my/yas-setup-typst-behavior)
+   (my/typst-mode . my/yas-setup-typst-behavior)
    (yas-minor-mode . my/yas-setup-treesit-extra-modes)
    (LaTeX-mode . my/yas-setup-auctex-extra-modes)
    (plain-TeX-mode . my/yas-setup-auctex-extra-modes))
