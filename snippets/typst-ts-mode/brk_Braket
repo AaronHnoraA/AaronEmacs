@@ -2,4 +2,4 @@
 # name: Braket
 # key: bk
 # --
-lr(angle.l ${1:phi}|${2:psi} angle.r) $0
+braket(${1:phi}, ${2:psi}) $0

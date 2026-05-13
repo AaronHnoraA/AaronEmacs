@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Heisenberg equation
+# key: heisenberg
+# --
+heisenbergEq(${1:A}) $0

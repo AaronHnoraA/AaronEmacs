@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Reduced Planck constant
+# key: hbar
+# --
+hbar$0

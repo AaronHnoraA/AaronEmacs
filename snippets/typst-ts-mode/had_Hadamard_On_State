@@ -2,4 +2,4 @@
 # name: Hadamard on state
 # key: had
 # --
-H lr(|${1:psi} angle.r) $0
+Had ket(${1:psi}) $0

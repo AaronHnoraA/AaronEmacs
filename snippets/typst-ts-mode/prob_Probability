@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Probability
+# key: prob
+# --
+prob(${1:E}, sub: ${2:X}) $0

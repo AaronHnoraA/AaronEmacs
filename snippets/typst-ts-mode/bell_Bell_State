@@ -2,4 +2,4 @@
 # name: Bell state
 # key: bell
 # --
-1/sqrt(2) lr(( lr(|00 angle.r) + lr(|11 angle.r) )) $0
+bell00$0

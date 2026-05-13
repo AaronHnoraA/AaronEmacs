@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Derivative
+# key: deriv
+# --
+deriv(${1:f}, ${2:x}) $0

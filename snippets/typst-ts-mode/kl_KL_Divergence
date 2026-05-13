@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: KL divergence
+# key: kl
+# --
+kl(${1:P}, ${2:Q}) $0

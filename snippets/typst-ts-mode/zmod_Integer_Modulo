@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Integers modulo n
+# key: zmod
+# --
+zmod(${1:n}) $0

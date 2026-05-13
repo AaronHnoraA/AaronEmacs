@@ -2,4 +2,4 @@
 # name: Hamiltonian
 # key: HH
 # --
-cal(H)
+hamiltonian

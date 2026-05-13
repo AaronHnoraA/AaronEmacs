@@ -2,4 +2,4 @@
 # name: Angle Brackets
 # key: avg
 # --
-lr(angle.l $1 angle.r) $2
+lr(chevron.l $1 chevron.r) $2

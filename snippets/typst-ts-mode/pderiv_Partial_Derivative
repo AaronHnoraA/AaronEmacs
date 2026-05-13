@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Partial derivative
+# key: pderiv
+# --
+pderiv(${1:f}, ${2:x}) $0

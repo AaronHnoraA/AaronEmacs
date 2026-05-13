@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Transition function
+# key: trans
+# --
+transition(${1:delta}, ${2:q}, ${3:a}) $0

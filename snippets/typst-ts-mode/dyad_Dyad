@@ -2,4 +2,4 @@
 # name: Dyad
 # key: dyad
 # --
-lr(|${1:phi} angle.r) lr(angle.l ${2:psi}|) $0
+dyad(${1:phi}, ${2:psi}) $0

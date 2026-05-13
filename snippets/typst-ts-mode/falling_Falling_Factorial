@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Falling factorial
+# key: falling
+# --
+falling(${1:x}, ${2:n}) $0

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Spectrum
+# key: Spec
+# --
+spectrum(${1:R}) $0

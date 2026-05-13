@@ -2,4 +2,4 @@
 # name: Matrix element
 # key: me
 # --
-lr(angle.l ${1:phi}| ${2:A} |${3:psi} angle.r) $0
+amp(${1:phi}, ${2:A}, ${3:psi}) $0

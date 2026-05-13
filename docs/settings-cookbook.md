@@ -24,6 +24,7 @@
 - [lisp/init-base.el](../lisp/init-base.el)
 - [lisp/note/init-note.el](../lisp/note/init-note.el)
 - [lisp/note/typst/note.typ](../lisp/note/typst/note.typ)
+- [lisp/note/typst/math.typ](../lisp/note/typst/math.typ)
 - [lisp/init-text.el](../lisp/init-text.el)
 - [lisp/init-auctex.el](../lisp/init-auctex.el)
 - `~/HC/Org/_typst/publish.typ`
@@ -49,6 +50,8 @@
   Typst note 根目录、索引、跳转、预览和 helper 写入。
 - `lisp/note/typst/note.typ`
   Typst note 的页面、字体、标题、卡片块和跨 note helper。
+- `lisp/note/typst/math.typ`
+  TCS、量子计算、代数、计算和物理常用数学宏；宏表见 [typst-math-macros.md](typst-math-macros.md)。
 - `~/HC/Org/_typst/publish.typ`
   发布 PDF 的页面、字体和视觉补齐；只影响 `make publish`，不影响 Emacs 里的日常 preview。
 - `lisp/init-text.el`
@@ -385,6 +388,7 @@ emacs --debug-init -q -l ./bootstrap.el
 文件：
 
 - [lisp/note/typst/note.typ](../lisp/note/typst/note.typ)
+- [lisp/note/typst/math.typ](../lisp/note/typst/math.typ)
 - `~/HC/Org/_typst/publish.typ`
 - [notes/assignment.typ](../notes/assignment.typ)
 - [notes/rho.typ](../notes/rho.typ)
@@ -395,6 +399,9 @@ emacs --debug-init -q -l ./bootstrap.el
 - `lisp/note/typst/note.typ`
   日常长期 note 的页面、字体、标题、目录、卡片块和跨 note helper。`M-x my/note-db-sync`
   会把它同步到 note 根目录的 `/_typst/note.typ`。
+- `lisp/note/typst/math.typ`
+  日常 note 的数学记号模块。`note.typ` 会 re-export 它，`M-x my/note-db-sync`
+  会把它同步到 note 根目录的 `/_typst/math.typ`。
 - `~/HC/Org/_typst/publish.typ`
   网站发布时的 PDF 样式。`bin/publish-site` 会临时把 note 里的 `"/_typst/note.typ"`
   import 指到这个文件，所以公开 PDF 的页眉页脚、纸张、标题、目录和卡片视觉都在这里补。

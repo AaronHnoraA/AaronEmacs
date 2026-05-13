@@ -2,4 +2,4 @@
 # name: Big O
 # key: bigO
 # --
-O lr((${1:f(n)})) $0
+bigO(${1:f(n)}) $0

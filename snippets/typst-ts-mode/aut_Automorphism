@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Automorphism group
+# key: aut
+# --
+aut(${1:G}) $0

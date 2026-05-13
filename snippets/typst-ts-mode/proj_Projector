@@ -2,4 +2,4 @@
 # name: Projector
 # key: proj
 # --
-lr(|${1:psi} angle.r) lr(angle.l ${1:psi}|) $0
+proj(${1:psi}) $0

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Uncertainty relation
+# key: uncertainty
+# --
+uncertainty(${1:x}, ${2:p}) $0

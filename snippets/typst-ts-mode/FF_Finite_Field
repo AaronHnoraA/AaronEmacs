@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Finite field
+# key: FF
+# --
+FF(${1:q}) $0

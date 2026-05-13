@@ -966,7 +966,7 @@ headline levels."
 
   ;; --- Appearance Basics ---
   (org-startup-indented t)
-  (org-startup-folded 'overview)
+  (org-startup-folded nil)
   (org-hide-emphasis-markers t)
   (org-pretty-entities nil)
   (org-pretty-entities-include-sub-superscripts nil)

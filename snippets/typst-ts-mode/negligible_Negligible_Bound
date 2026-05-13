@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Negligible bound
+# key: neglb
+# --
+negligible(fn: ${1:epsilon}, sec: ${2:lambda}) $0

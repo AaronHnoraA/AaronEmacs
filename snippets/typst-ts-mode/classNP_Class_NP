@@ -2,4 +2,4 @@
 # name: Class NP
 # key: classNP
 # --
-sans("NP")$0
+classNP$0

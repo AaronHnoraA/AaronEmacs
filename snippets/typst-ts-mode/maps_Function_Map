@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Function map
+# key: maps
+# --
+maps(${1:f}, ${2:X}, ${3:Y}) $0

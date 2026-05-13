@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: D'Alembertian
+# key: dalembert
+# --
+dalembert(${1:phi}) $0

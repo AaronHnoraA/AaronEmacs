@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Turing reduction
+# key: turingred
+# --
+turingred(${1:A}, ${2:B}) $0

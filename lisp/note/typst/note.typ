@@ -2,6 +2,8 @@
 //
 // Typst replacement for latex/default.cls plus the old generated note helper.
 
+#import "/_typst/math.typ": *
+
 #let note-accent = rgb("3c71b7")
 #let note-accent-soft = rgb("e6eef8")
 #let note-rule = rgb("c8c1b4")

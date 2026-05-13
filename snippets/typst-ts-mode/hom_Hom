@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Hom
+# key: hom
+# --
+hom(${1:V}, ${2:W}) $0

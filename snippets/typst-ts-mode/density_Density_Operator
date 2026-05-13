@@ -2,4 +2,4 @@
 # name: Density operator
 # key: density
 # --
-rho = sum_${1:i} ${2:p_i} lr(|${3:psi_i} angle.r) lr(angle.l ${3:psi_i}|)$0
+rho = sum_${1:i} ${2:p_i} density(${3:psi_i})$0

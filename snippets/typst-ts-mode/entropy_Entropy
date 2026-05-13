@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Entropy
+# key: entropy
+# --
+entropy(${1:X}) $0

@@ -2,4 +2,4 @@
 # name: Class PSPACE
 # key: PSPACE
 # --
-sans("PSPACE")$0
+PSPACE$0

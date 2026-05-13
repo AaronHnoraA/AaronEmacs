@@ -2,4 +2,4 @@
 # name: Soft O
 # key: tildeO
 # --
-tilde(O) lr((${1:f(n)})) $0
+softO(${1:f(n)}) $0

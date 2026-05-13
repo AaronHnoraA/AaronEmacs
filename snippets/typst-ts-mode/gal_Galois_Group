@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Galois group
+# key: gal
+# --
+gal(${1:L}, ${2:K}) $0

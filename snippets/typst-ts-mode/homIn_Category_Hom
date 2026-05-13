@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Hom in category
+# key: homin
+# --
+homIn(${1:C}, ${2:X}, ${3:Y}) $0

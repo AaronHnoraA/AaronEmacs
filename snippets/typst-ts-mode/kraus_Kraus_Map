@@ -2,4 +2,4 @@
 # name: Kraus map
 # key: kraus
 # --
-cal(${1:E})(rho) = sum_${2:k} ${3:E_k} rho ${3:E_k}^dagger $0
+cal(${1:E})(${2:rho}) = kraus(state: ${2:rho}, index: ${3:k}, op: ${1:E}) $0

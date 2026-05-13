@@ -2,4 +2,4 @@
 # name: Class QMA
 # key: QMA
 # --
-sans("QMA")$0
+QMA$0

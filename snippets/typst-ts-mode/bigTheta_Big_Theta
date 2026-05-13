@@ -2,4 +2,4 @@
 # name: Big Theta
 # key: bigTheta
 # --
-Theta lr((${1:f(n)})) $0
+bigTheta(${1:f(n)}) $0

@@ -2,4 +2,4 @@
 # name: Trace
 # key: trace
 # --
-"Tr"
+trace(${1:A}) $0

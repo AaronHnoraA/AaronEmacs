@@ -2,4 +2,4 @@
 # name: Expectation value
 # key: expval
 # --
-lr(angle.l ${1:psi}| ${2:A} |${1:psi} angle.r) $0
+expval(${1:A}, state: ${2:psi}) $0

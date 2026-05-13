@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Localization
+# key: loc
+# --
+localization(${1:R}, ${2:p}) $0

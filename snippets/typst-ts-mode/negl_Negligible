@@ -2,4 +2,4 @@
 # name: Negligible
 # key: negl
 # --
-"negl" lr((${1:lambda})) $0
+negl(${1:lambda}) $0

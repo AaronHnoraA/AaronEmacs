@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Metric tensor
+# key: metric
+# --
+metric(${1:mu}, ${2:nu}) $0

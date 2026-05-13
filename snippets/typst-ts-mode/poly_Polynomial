@@ -2,4 +2,4 @@
 # name: Polynomial
 # key: poly
 # --
-"poly" lr((${1:n})) $0
+poly(${1:n}) $0

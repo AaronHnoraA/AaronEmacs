@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Gibbs state
+# key: gibbs
+# --
+gibbs(${1:beta}) $0

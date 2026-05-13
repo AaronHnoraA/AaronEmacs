@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Maxwell equations
+# key: maxwell
+# --
+maxwell1(${1:rho})
+maxwell2
+maxwell3
+maxwell4() $0

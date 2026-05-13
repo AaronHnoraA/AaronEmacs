@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: General linear group
+# key: GL
+# --
+GL(${1:n}, ${2:F}) $0

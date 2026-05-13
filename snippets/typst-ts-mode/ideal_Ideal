@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Ideal
+# key: ideal
+# --
+ideal(${1:p}) $0

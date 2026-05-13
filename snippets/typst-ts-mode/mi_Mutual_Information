@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Mutual information
+# key: mi
+# --
+mutualinfo(${1:X}, ${2:Y}) $0

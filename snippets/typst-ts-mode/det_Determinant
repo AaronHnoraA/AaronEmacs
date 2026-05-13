@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Determinant
+# key: det
+# --
+det(${1:A}) $0

@@ -2,4 +2,4 @@
 # name: bra
 # key: bra
 # --
-lr(angle.l ${1:psi}|) $0
+bra(${1:phi}) $0

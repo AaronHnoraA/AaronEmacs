@@ -2,4 +2,4 @@
 # name: Schrödinger equation
 # key: sch
 # --
-i hbar diff / (diff t) lr(|psi(t) angle.r) = H lr(|psi(t) angle.r) $0
+schrodinger(state: ket(${1:psi(t)})) $0

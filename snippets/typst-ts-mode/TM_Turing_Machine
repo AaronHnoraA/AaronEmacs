@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Turing machine
+# key: TM
+# --
+TM$0

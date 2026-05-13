@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Semidirect product
+# key: semidirect
+# --
+semidirect(${1:G}, ${2:H}) $0

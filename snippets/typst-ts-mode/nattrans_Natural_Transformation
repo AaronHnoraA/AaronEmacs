@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Natural transformation
+# key: nattrans
+# --
+nattrans(${1:eta}, ${2:F}, ${3:G}) $0

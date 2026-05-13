@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Reduction
+# key: reduce
+# --
+reduce(${1:A}, ${2:B}, kind: "${3:m}") $0

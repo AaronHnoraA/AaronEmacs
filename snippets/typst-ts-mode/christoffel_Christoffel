@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Christoffel symbol
+# key: christoffel
+# --
+christoffel(${1:rho}, ${2:mu}, ${3:nu}) $0

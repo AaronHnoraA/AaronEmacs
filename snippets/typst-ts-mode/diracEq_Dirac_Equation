@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Dirac equation
+# key: diraceq
+# --
+diracEq(psi: ${1:psi}, mass: ${2:m}) $0

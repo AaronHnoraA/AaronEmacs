@@ -2,4 +2,4 @@
 # name: Big Omega
 # key: bigOmega
 # --
-Omega lr((${1:f(n)})) $0
+bigOmega(${1:f(n)}) $0

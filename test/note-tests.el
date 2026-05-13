@@ -143,9 +143,24 @@
     (should (string-match-p "#let zoterolink" source))
     (should (string-match-p "#let bib" source))
     (should (string-match-p "#let definition" source))
-    (should (string-match-p "underline(pos\\.at(1))" source))
-    (should (string-match-p "/_typst/notes/\" \\+ id \\+ \"\\.typ" source))
-    (should-not (string-match-p "/roam/a.typ" source))))
+	    (should (string-match-p "underline(pos\\.at(1))" source))
+	    (should (string-match-p "/_typst/notes/\" \\+ id \\+ \"\\.typ" source))
+	    (should-not (string-match-p "/roam/a.typ" source))))
+
+(ert-deftest my/note-writes-helper-modules ()
+  (let ((root (make-temp-file "note-root-" t)))
+    (unwind-protect
+        (let ((my/note-root root))
+          (my/note-write-helper-file nil)
+          (should (file-exists-p (expand-file-name "_typst/note.typ" root)))
+          (should (file-exists-p (expand-file-name "_typst/math.typ" root)))
+          (should (string-match-p
+                   "#let ket"
+                   (with-temp-buffer
+                     (insert-file-contents
+                      (expand-file-name "_typst/math.typ" root))
+                     (buffer-string)))))
+      (ignore-errors (delete-directory root t)))))
 
 (ert-deftest my/note-writes-id-wrapper-files ()
   (let* ((root (make-temp-file "note-root-" t))

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Set comprehension
+# key: setof
+# --
+setof(${1:x}, cond: ${2:x in X}) $0

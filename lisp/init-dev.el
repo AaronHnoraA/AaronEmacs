@@ -235,6 +235,11 @@ commands still save their state."
        (ignore-errors (treesit-ready-p nil t))
        (string-match-p "-ts-mode\\'" (symbol-name major-mode))))
 
+(defun my/fold--skip-auto-restore-p ()
+  "Return non-nil when opening this buffer should not restore folds."
+  (or (derived-mode-p 'org-mode)
+      (memq major-mode '(typst-ts-mode typst-mode my/typst-mode))))
+
 (defun my/fold--backend ()
   "Return the preferred fold backend for the current buffer."
   (cond
@@ -809,14 +814,16 @@ This covers buffers opened before `find-file-hook' started restoring folds."
   (dolist (buffer (buffer-list))
     (with-current-buffer buffer
       (when (and buffer-file-name
-                 (derived-mode-p 'prog-mode))
+                 (derived-mode-p 'prog-mode)
+                 (not (my/fold--skip-auto-restore-p)))
         (ignore-errors
           (my/fold-restore-buffer-state))))))
 
 (defun my/fold-restore-buffer-state-on-open ()
   "Restore fold state as soon as the current file finishes opening."
   (when (and buffer-file-name
-             (derived-mode-p 'prog-mode))
+             (derived-mode-p 'prog-mode)
+             (not (my/fold--skip-auto-restore-p)))
     (ignore-errors
       (my/fold-restore-buffer-state))))
 

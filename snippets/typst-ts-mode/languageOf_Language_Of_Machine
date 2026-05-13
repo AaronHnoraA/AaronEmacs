@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Language of machine
+# key: langof
+# --
+languageOf(${1:M}) $0

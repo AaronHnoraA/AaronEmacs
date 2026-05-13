@@ -2,4 +2,4 @@
 # name: Class BQP
 # key: BQP
 # --
-sans("BQP")$0
+BQP$0

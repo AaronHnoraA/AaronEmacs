@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Ketbra
+# key: kb
+# --
+ketbra(${1:psi}, ${2:phi}) $0

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Tor group
+# key: Tor
+# --
+torGroup(${1:n}, ${2:A}, ${3:B}) $0

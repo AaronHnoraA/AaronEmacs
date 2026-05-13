@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Partition function
+# key: partition
+# --
+partition(${1:beta}) $0

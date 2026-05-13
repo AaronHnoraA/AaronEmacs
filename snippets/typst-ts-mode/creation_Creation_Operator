@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Creation operator
+# key: create
+# --
+creation(${1:a}) $0

@@ -2,4 +2,4 @@
 # name: Polylogarithmic
 # key: polylog
 # --
-"polylog" lr((${1:n})) $0
+polylog(${1:n}) $0

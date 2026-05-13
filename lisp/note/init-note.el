@@ -69,6 +69,12 @@
   :type 'directory
   :group 'my/note)
 
+(defcustom my/note-helper-modules
+  '("note.typ" "math.typ")
+  "Typst helper modules copied below the note root's `_typst' directory."
+  :type '(repeat string)
+  :group 'my/note)
+
 (defcustom my/note-excluded-directories
   '("_typst" "public" "var" ".git" ".direnv" ".venv" "node_modules")
   "Directory names ignored while scanning Typst notes."
@@ -657,14 +663,24 @@ NOTES is accepted for compatibility with callers that pass the indexed set."
   (ignore notes)
   (my/note--style-source "note.typ"))
 
-(defun my/note-write-helper-file (notes)
-  "Write the shared Typst note helper for NOTES."
-  (let ((file (expand-file-name "_typst/note.typ"
+(defun my/note--write-helper-module (name)
+  "Write Typst helper module NAME below `my/note-root'."
+  (let ((file (expand-file-name (concat "_typst/" name)
                                 (file-name-as-directory my/note-root))))
     (make-directory (file-name-directory file) t)
     (with-temp-file file
-      (insert (my/note--helper-source-for-notes notes)))
+      (insert (my/note--style-source name)))
     file))
+
+(defun my/note-write-helper-file (notes)
+  "Write shared Typst note helper modules for NOTES."
+  (ignore notes)
+  (let (note-file)
+    (dolist (module my/note-helper-modules)
+      (let ((file (my/note--write-helper-module module)))
+        (when (string= module "note.typ")
+          (setq note-file file))))
+    note-file))
 
 (defun my/note-db-sync-file (file)
   "Sync one Typst note FILE into the index."
@@ -1576,14 +1592,16 @@ When PROMPT-TAGS is non-nil, ask for optional tags."
    my/note-metadata-label))
 
 (defun my/note-ensure-helper-file ()
-  "Ensure the shared Typst note helper exists below `my/note-root'."
-  (let ((file (expand-file-name "_typst/note.typ"
-                                (file-name-as-directory my/note-root))))
-    (unless (file-exists-p file)
-      (make-directory (file-name-directory file) t)
-      (with-temp-file file
-        (insert (my/note--style-source "note.typ"))))
-    file))
+  "Ensure the shared Typst note helper modules exist below `my/note-root'."
+  (let (note-file)
+    (dolist (module my/note-helper-modules)
+      (let ((file (expand-file-name (concat "_typst/" module)
+                                    (file-name-as-directory my/note-root))))
+        (unless (file-exists-p file)
+          (my/note--write-helper-module module))
+        (when (string= module "note.typ")
+          (setq note-file file))))
+    note-file))
 
 (defun my/note--type-by-name (name)
   "Return registered note type NAME."

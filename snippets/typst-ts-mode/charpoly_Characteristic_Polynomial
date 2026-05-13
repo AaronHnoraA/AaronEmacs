@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Characteristic polynomial
+# key: charpoly
+# --
+charpoly(${1:A}) $0

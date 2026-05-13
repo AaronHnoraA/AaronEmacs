@@ -2,4 +2,4 @@
 # name: Quantum gate
 # key: qgate
 # --
-"${1:U}"$0
+gate("${1:U}")$0

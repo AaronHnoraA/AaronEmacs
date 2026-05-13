@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Isomorphism
+# key: isom
+# --
+iso(${1:G}, ${2:H}) $0

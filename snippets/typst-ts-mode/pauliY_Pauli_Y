@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Pauli Y
+# key: pauliY
+# --
+pauliY$0

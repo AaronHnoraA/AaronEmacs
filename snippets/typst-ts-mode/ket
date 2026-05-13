@@ -2,4 +2,4 @@
 # name: ket
 # key: ket
 # --
-lr(|${1:psi} angle.r) $0
+ket(${1:psi}) $0

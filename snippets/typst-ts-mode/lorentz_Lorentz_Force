@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Lorentz force
+# key: lorentz
+# --
+lorentz(${1:q}) $0

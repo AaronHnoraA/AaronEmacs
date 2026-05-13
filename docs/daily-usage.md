@@ -566,12 +566,14 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 
 打开文件时：
 
-- Org 默认按 `overview` 进入折叠；文件自己的 `#+startup:` 设置仍可覆盖
+- Org 和 Typst 打开文件时默认不自动折叠；文件自己的 `#+startup:` 设置仍可覆盖 Org
+  的 startup 行为
 - Org 标题在半展开状态时，`za` / `H-<tab>` 会收起整个 subtree；只有完全收起时
   才打开一层
 - 在 `#+title:` 或第一个 heading 前按 `za` / `H-<tab>` 时，会切换整个 Org
   buffer 的 compact / open 状态
-- 代码 buffer 若没有保存过手动折叠状态，会在打开时直接折叠全部代码块
+- 代码 buffer 若没有保存过手动折叠状态，会按 `my/fold-prog-startup` 应用默认折叠；
+  Org / Typst 不恢复保存的折叠状态
 - 自动默认折叠不会写入 `var/fold-state.el`；只有通过 `za` / `zo` / `zc` /
   `zM` 或 `SPC z ...` 改过的代码折叠状态才持久化；`zR` 展开全部会清掉当前
   buffer 的保存折叠状态，下次重新回到默认压缩视图

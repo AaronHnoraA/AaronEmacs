@@ -22,6 +22,8 @@
   旧 Org 网站发布配置；现在跟 note 发布链放在一起，发布根目录显式指向 `~/HC/Org/`。
 - [lisp/note/typst/note.typ](../lisp/note/typst/note.typ)
   note 内部共享 Typst 样式和 helper。
+- [lisp/note/typst/math.typ](../lisp/note/typst/math.typ)
+  TCS、量子计算、代数、计算和物理常用数学记号宏；完整表见 [typst-math-macros.md](typst-math-macros.md)。
 - `~/HC/Org/_typst/publish.typ`
   发布用 PDF 样式。它只影响 `make publish` 产物，不改变日常编辑 preview。
 - `~/HC/Org/bin/publish-site`
@@ -95,10 +97,12 @@ See @sec-statement and @eq-main.
 
 - `_typst/note.typ`
   从 [lisp/note/typst/note.typ](../lisp/note/typst/note.typ) 复制出来的 helper。
+- `_typst/math.typ`
+  从 [lisp/note/typst/math.typ](../lisp/note/typst/math.typ) 复制出来的数学宏模块，由 `note.typ` re-export。
 - `_typst/notes/<id>.typ`
   每个 note 的小 wrapper，用于跨文件 import/include。
 
-note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note-transclude`、`note-import-path`，以及 `definition`、`theorem`、`proof`、`example`、`remark`、`summary`、`question`、`important`、`warning`、`tip`、`info` 等卡片块。
+note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note-transclude`、`note-import-path`，以及 `definition`、`theorem`、`proof`、`example`、`remark`、`summary`、`question`、`important`、`warning`、`tip`、`info` 等卡片块。数学记号宏单独维护在 `math.typ`，日常 note 通过 `note.typ` 自动拿到；宏表和 snippet key 见 [typst-math-macros.md](typst-math-macros.md)。
 
 批注 / 脚注 / 侧注 helper 也在 `/_typst/note.typ` 里。常用写法：
 

@@ -2,4 +2,4 @@
 # name: Bloch form
 # key: bloch
 # --
-rho = 1/2 lr(( I + arrow(${1:r}) dot arrow(sigma) )) $0
+bloch(${1:r}) $0
