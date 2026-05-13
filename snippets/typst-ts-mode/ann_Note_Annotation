@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Note annotation
+# key: ann
+# --
+#annotation[
+  $0
+]

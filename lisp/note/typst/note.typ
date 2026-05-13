@@ -174,7 +174,7 @@
 #let proof(body) = note-card("✍️ 证明", "267386", "e1f2f4", "∎", body)
 #let example(body) = note-card("🧪 例子", "80623a", "f1e5d4", "◦", body)
 #let remark(body) = note-card("💬 备注", "5f6c7b", "e9ece8", "✦", body)
-#let summary(body) = note-card("🧾 摘要", "476f78", "e3f1ee", "☰", body)
+#let summary(body) = note-card("🧾 摘要", "476f78", "e3f1ee", "SUM", body)
 #let question(body) = note-card("❓ 问题", "8a6418", "f8ecd0", "?", body)
 #let problem(body) = question(body)
 #let solution(body) = note-card("✅ 解法", "2f6f42", "e5f3df", "✓", body)
@@ -182,6 +182,37 @@
 #let warning(body) = note-card("⚠️ 警告", "9b3b37", "f4dfdc", "▲", body)
 #let tip(body) = note-card("💡 提示", "26735f", "e1f1ea", "✧", body)
 #let info(body) = note-card("ℹ️ 信息", "335f91", "e4edf8", "i", body)
+
+#let note-comment-box(body, accent: "5f6c7b", tint: "eceae4", title: "批注") = block(
+  width: 100%,
+  fill: rgb(tint),
+  stroke: (left: 1.2pt + rgb(accent), rest: 0.35pt + rgb("d8d1c4")),
+  radius: 2pt,
+  inset: (x: 0.68em, y: 0.46em),
+  breakable: true,
+)[
+  #text(fill: rgb(accent), weight: "semibold", size: 0.78em)[#title]
+  #h(0.35em)
+  #text(fill: rgb("3f3932"), size: 0.9em)[#body]
+]
+
+#let comment(body) = note-comment-box(body)
+#let annotation(body) = note-comment-box(body, accent: "7a4b2d", tint: "f3e6dc", title: "注")
+#let marginal(body) = note-comment-box(body, accent: "335f91", tint: "e4edf8", title: "旁注")
+#let margin-note(body) = marginal(body)
+#let sidecomment(body) = grid(
+  columns: (1fr, 12em),
+  gutter: 0.9em,
+  [],
+  note-comment-box(body, accent: "335f91", tint: "e4edf8", title: "侧注"),
+)
+#let sidenote(body) = sidecomment(body)
+#let fn(body) = footnote(body)
+#let foot(body) = footnote(body)
+#let topmark(body) = super(body)
+#let bottommark(body) = sub(body)
+#let supmark(body) = super(body)
+#let submark(body) = sub(body)
 
 #let note(..args) = {
   let pos = args.pos()

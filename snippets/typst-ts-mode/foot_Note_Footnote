@@ -1,0 +1,5 @@
+# -*- mode: snippet; require-final-newline: nil -*-
+# name: Note footnote
+# key: foot
+# --
+#foot[$1]$0

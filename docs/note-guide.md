@@ -100,6 +100,33 @@ See @sec-statement and @eq-main.
 
 note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note-transclude`、`note-import-path`，以及 `definition`、`theorem`、`proof`、`example`、`remark`、`summary`、`question`、`important`、`warning`、`tip`、`info` 等卡片块。
 
+批注 / 脚注 / 侧注 helper 也在 `/_typst/note.typ` 里。常用写法：
+
+```typst
+#comment[
+  这里放普通批注。适合记录“为什么这里这样写”。
+]
+
+#annotation[
+  这里放更正式的注解，颜色比 comment 稍暖。
+]
+
+#marginal[
+  旁注块。适合短提醒、术语说明、阅读批注。
+]
+
+#sidenote[
+  侧边评论。PDF 里会排成正文右侧的一列说明。
+]
+
+正文里可以直接接脚注#fn[这里是脚注内容]，也可以写成#foot[同义别名]。
+
+需要文本顶标或底标时，用不会遮蔽 Typst 内置对齐名的别名：
+H#topmark[2]O 或 X#bottommark[i]。
+```
+
+`#comment`、`#annotation`、`#marginal` 更像完整块；`#fn`、`#foot`、`#topmark`、`#bottommark` 是行内用法。不要定义 `#top` / `#bottom` 这类别名，因为 Typst 自己有 `top`、`bottom` 对齐值，遮蔽后会破坏 `place(top + left)` 这种页面背景代码。
+
 Bib helper：`#bib()` 默认读取 `/references/references.bib`，等价别名是 `#references()`；可用 `#bib(path: "/path/to/file.bib", style: "apa")` 指定 bibliography 文件和样式。
 
 `M-x my/note-doctor` 检查悬空 `#note`、重复 id、缺 date、孤立 note 和 alias 冲突；报告里的路径可点击跳转。
@@ -341,6 +368,8 @@ Typst snippets 在 [snippets/typst-ts-mode/](../snippets/typst-ts-mode/)。`typs
 - 矩阵：`mat`、`pmat`、`bmat`、`cases`。
 - 分节和引用：`sec`、`sub`、`ref`、`cite`、`figure:ref`、`table:ref`。
 - 块：`def`、`thm`、`lem`、`proof`、`que`、`summ`、`imp`、`warn`、`tip`、`info`、`rem`、`ex`、`sol`。
+- 批注 / 标注：`comment` / `cmt`、`annotation` / `ann`、`marginal`、`mnote`、`sidenote` / `side`。
+- 行内注记：`fn` / `foot`、`topmark` / `supmark`、`bottommark` / `submark`。
 - note link：`nlink` 展开成 `#note("id")[title]`。
 
 ## 9. 不再维护
