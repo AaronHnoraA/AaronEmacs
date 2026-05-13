@@ -6,11 +6,11 @@
   kind: "algorithm",
   supplement: [${1:Algorithm}],
   caption: [$4],
-  ```
+  \`\`\`
   Input:  $input$
   Output: $output$
   $6
   return $state$
-  ```
+  \`\`\`
 ) <alg:$5>
 $0
