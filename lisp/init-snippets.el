@@ -70,23 +70,101 @@ previously inlined in every org-mode snippet file."
   (add-hook 'yas-after-exit-snippet-hook
             #'my/yas-org-cleanup-trailing-newline nil t))
 
-(defun my/yas-typst-cleanup-inline-math-newline ()
-  "Delete snippet final newline when it splits an inline Typst math span.
+(defun my/yas-typst--position (value)
+  "Return VALUE as a buffer position, or nil."
+  (cond
+   ((integerp value) value)
+   ((markerp value) (marker-position value))))
 
-Many one-line Typst snippets are stored with a final file newline.  When such a
-snippet expands inside `$...$', yas can leave that newline before the closing
-`$', which turns the formula into display math."
+(defun my/yas-typst--unescaped-dollar-count (beg end)
+  "Return the number of unescaped dollar signs between BEG and END."
+  (let ((count 0))
+    (save-excursion
+      (goto-char beg)
+      (while (search-forward "$" end t)
+        (unless (eq (char-before (1- (point))) ?\\)
+          (setq count (1+ count)))))
+    count))
+
+(defun my/yas-typst--math-open-before-p (pos)
+  "Return non-nil when POS is after an open dollar math span on its line."
+  (= (mod (my/yas-typst--unescaped-dollar-count
+           (save-excursion
+             (goto-char pos)
+             (line-beginning-position))
+           pos)
+          2)
+     1))
+
+(defun my/yas-typst--blank-tail-p (newline-pos tail-end)
+  "Return non-nil when NEWLINE-POS to TAIL-END is newline plus blanks."
   (save-excursion
-    (when (and (eq (char-after) ?\n)
-               (save-excursion
-                 (forward-char 1)
-                 (skip-chars-forward " \t\n")
-                 (eq (char-after) ?$))
-               (save-excursion
-                 (skip-chars-backward "^$")
-                 (eq (char-before) ?$)))
+    (goto-char (1+ newline-pos))
+    (skip-chars-forward " \t" tail-end)
+    (= (point) tail-end)))
+
+(defun my/yas-typst--snippet-trailing-newline ()
+  "Return (NEWLINE-POS . END) for the exited snippet's final blank tail."
+  (let ((beg (and (boundp 'yas-snippet-beg)
+                  (my/yas-typst--position yas-snippet-beg)))
+        (end (and (boundp 'yas-snippet-end)
+                  (my/yas-typst--position yas-snippet-end))))
+    (when (and beg end (< beg end))
+      (save-excursion
+        (goto-char end)
+        (skip-chars-backward " \t" beg)
+        (let ((newline-pos (1- (point))))
+          (when (and (>= newline-pos beg)
+                     (eq (char-after newline-pos) ?\n)
+                     (my/yas-typst--blank-tail-p newline-pos end)
+                     (save-excursion
+                       (goto-char beg)
+                       (not (search-forward "\n" newline-pos t))))
+            (cons newline-pos end)))))))
+
+(defun my/yas-typst--point-trailing-newline ()
+  "Return (NEWLINE-POS . END) near point as a fallback."
+  (or
+   (when (eq (char-after) ?\n)
+     (cons (point) (1+ (point))))
+   (save-excursion
+     (skip-chars-backward " \t")
+     (when (eq (char-before) ?\n)
+       (cons (1- (point)) (save-excursion
+                            (skip-chars-forward " \t")
+                            (point)))))))
+
+(defun my/yas-typst--cleanup-newline-at (newline-pos tail-end)
+  "Delete NEWLINE-POS through TAIL-END when it splits Typst math."
+  (when (and (integerp newline-pos)
+             (integerp tail-end)
+             (>= newline-pos (point-min))
+             (<= tail-end (point-max))
+             (< newline-pos tail-end)
+             (eq (char-after newline-pos) ?\n)
+             (my/yas-typst--blank-tail-p newline-pos tail-end)
+             (my/yas-typst--math-open-before-p newline-pos))
+    (save-excursion
+      (goto-char newline-pos)
       (let ((inhibit-modification-hooks t))
-        (delete-char 1)))))
+        (delete-region newline-pos tail-end)))
+    t))
+
+(defun my/yas-typst-cleanup-inline-math-newline ()
+  "Delete snippet final newline when it splits a Typst `$...$' span.
+
+Many one-line Typst snippets are stored with a final file newline.  Yas can
+leave point either before or after that newline, so prefer `yas-snippet-end'
+and keep point-adjacent positions as a fallback."
+  (let ((candidates (list (my/yas-typst--snippet-trailing-newline)
+                          (my/yas-typst--point-trailing-newline))))
+    (catch 'done
+      (dolist (candidate candidates)
+        (when (and candidate
+                   (my/yas-typst--cleanup-newline-at
+                    (car candidate)
+                    (cdr candidate)))
+          (throw 'done t))))))
 
 (defun my/yas-setup-typst-behavior ()
   "Keep Typst snippet expansion conservative inside inline math."
