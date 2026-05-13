@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+# name: Algorithmic pseudocode
+# key: pseudo
+# --
+#pseudo({
+  import algorithmic: *
+  ${1:Assign}[$${2:x}$$][$${3:1}$$]
+  Return[$${2:x}$$]
+})
+$0

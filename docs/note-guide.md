@@ -106,6 +106,55 @@ See @sec-statement and @eq-main.
 
 note helper 提供 `note-entry`、`note-theme`、`note`、`note-include`、`note-transclude`、`note-import-path`，以及 `definition`、`theorem`、`proof`、`example`、`remark`、`summary`、`question`、`important`、`warning`、`tip`、`info` 等卡片块。数学记号宏单独维护在 `math.typ`，日常 note 通过 `note.typ` 自动拿到；宏表和 snippet key 见 [typst-math-macros.md](typst-math-macros.md)。第三方 Typst package 集中维护在 `extension.typ`：默认配置 `codly` 代码块，并提供 `pseudo` / `pseudo-figure`、`diagram` / `node` / `edge`、`automaton`、`quantum-circuit`、`note-canvas` 等别名。Checklist 不接入这里；agenda 任务仍然只认 `#todo[]` / `#doing[]` / `#waiting[]` 这套 note task chip。
 
+第三方扩展的日常用法：
+
+````typst
+// codly: 普通 Typst raw block 会自动套用 extension.typ 里的 codly 样式。
+```rust
+fn main() {
+  println!("hello");
+}
+```
+
+// algorithmic: 用 pseudo 包一段 algorithmic DSL。
+#pseudo({
+  import algorithmic: *
+  Assign[$x$][$1$]
+  Return[$x$]
+})
+
+// fletcher: 小型交换图、流程图、状态图。
+#diagram(cell-size: 15mm, $
+  A edge(f, ->) & B \
+  C edge(g, ->) & D
+$)
+
+// finite: 自动机 transition table。
+#automaton(
+  (
+    q0: (q1: "0", q0: "1"),
+    q1: none,
+  ),
+  initial: "q0",
+  final: ("q1",),
+)
+
+// quill: 量子线路。整数表示空 wire cell，[\ ] 开新 wire。
+#quantum-circuit(
+  qlstick($|0 chevron.r$), $H$, qctrl(1), qrstick($(|00 chevron.r + |11 chevron.r) / sqrt(2)$, n: 2), [\ ],
+  qlstick($|0 chevron.r$), 1, qtarg(), 1,
+)
+
+// CeTZ: 小型科学示意图；复杂图可以在 body 内 import cetz.draw。
+#note-canvas({
+  import cetz.draw: *
+  line((0, 0), (2, 0), mark: (end: ">"))
+  content((1, 0.35), [$x$])
+})
+````
+
+这些 helper 面向 note；普通独立 Typst 文档模板不默认导入 `/_typst/note.typ`，需要第三方包时应在文档里显式 `#import "@preview/..."`。
+
 批注 / 脚注 / 侧注 helper 也在 `/_typst/note.typ` 里。常用写法：
 
 ```typst
@@ -375,6 +424,7 @@ Typst snippets 在 [snippets/typst-ts-mode/](../snippets/typst-ts-mode/)。`typs
 - 装饰：`bar`、`hat`、`tilde`、`dot`、`ddot`、`vec`。
 - 矩阵：`mat`、`pmat`、`bmat`、`cases`。
 - 分节和引用：`sec`、`sub`、`ref`、`cite`、`figure:ref`、`table:ref`。
+- 第三方扩展：`code`、`pseudo`、`diagram`、`automaton`、`qcirc`、`canvas`。
 - 块：`def`、`thm`、`lem`、`proof`、`que`、`summ`、`imp`、`warn`、`tip`、`info`、`rem`、`ex`、`sol`。
 - 批注 / 标注：`comment` / `cmt`、`annotation` / `ann`、`marginal`、`mnote`、`sidenote` / `side`。
 - 行内注记：`fn` / `foot`、`topmark` / `supmark`、`bottommark` / `submark`。

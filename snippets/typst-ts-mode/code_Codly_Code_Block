@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Codly code block
+# key: code
+# --
+```${1:rust}
+$0
+```

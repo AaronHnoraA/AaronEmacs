@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: Fletcher diagram
+# key: diagram
+# --
+#diagram(cell-size: ${1:15mm}, $
+  ${2:A} edge(${3:f}, ->) & ${4:B} \
+  ${5:C} edge(${6:g}, ->) & ${7:D}
+$)
+$0
