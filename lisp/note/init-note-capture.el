@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 ;; Replacement for the org-capture / daily flow.  Captures land in
-;; `<note-directory>/daily/<category>/<slug>-YYYYMMDD.typ' with a populated
+;; `<note-root>/roam/daily/<category>/<slug>-YYYYMMDD.typ' with a populated
 ;; note-entry preamble so they immediately participate in the index.
 
 ;;; Code:
@@ -12,20 +12,20 @@
 
 (defcustom my/note-capture-categories
   '("idea" "inbox" "mail" "note" "meeting" "protocol" "uni" "life")
-  "Daily capture sub-directories under `<note-directory>/daily/'."
+  "Daily capture sub-directories under `<note-root>/roam/daily/'."
   :type '(repeat string)
   :group 'my/note)
 
 (defcustom my/note-daily-rolling-file-format "%Y-%m-%d"
-  "`format-time-string' template for the rolling daily file under daily/."
+  "`format-time-string' template for the rolling daily file under roam/daily/."
   :type 'string
   :group 'my/note)
 
 (defun my/note-capture--daily-dir (&optional subdir)
   "Return the daily directory, optionally below SUBDIR."
   (let ((root (expand-file-name
-               "daily"
-               (file-name-as-directory my/note-directory))))
+               "roam/daily"
+               (file-name-as-directory my/note-root))))
     (if subdir
         (expand-file-name subdir root)
       root)))
@@ -44,7 +44,7 @@
 
 ;;;###autoload
 (defun my/note-capture (category title)
-  "Capture a fresh Typst note under daily/<CATEGORY>/.
+  "Capture a fresh Typst note under roam/daily/<CATEGORY>/.
 TITLE drives the filename slug and headline."
   (interactive
    (let* ((cat (completing-read "Category: "

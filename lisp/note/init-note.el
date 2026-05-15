@@ -561,7 +561,7 @@ FILE is the file path associated with the buffer."
 
 (defun my/note--typst-files ()
   "Return Typst note candidate files below `my/note-root'."
-  (let ((root (file-name-as-directory (expand-file-name my/note-root)))
+  (let ((root (file-name-as-directory (expand-file-name my/note-directory)))
         files)
     (cl-labels
         ((walk (directory)
