@@ -40,7 +40,9 @@
 (defvar previewer-external-start-function nil)
 (defvar previewer-external-browser-backend nil)
 (defvar previewer-external-open-delay nil)
+(defvar previewer-external-window-side nil)
 (defvar treesit-font-lock-level)
+(defvar typst-ts-compile-executable-location)
 
 (defvar-local my/typst-preview--start-timer nil
   "Retry timer used while waiting for Tinymist Eglot startup.")
@@ -156,6 +158,11 @@ Use port 0 to let Tinymist choose a free port."
   :type 'number
   :group 'my/typst)
 
+(defcustom my/typst-preview-open-delay 1.2
+  "Seconds to wait before opening the browser preview after Tinymist starts."
+  :type 'number
+  :group 'my/typst)
+
 (defcustom my/typst-preview-center-source t
   "When non-nil, recenter source buffers after preview click synchronization."
   :type 'boolean
@@ -245,6 +252,10 @@ Provides a visual cue so the new cursor position is easy to spot."
   "Return the tinymist executable path, or nil when unavailable."
   (my/typst--find-executable my/typst-lsp-executable))
 
+(defun my/typst-command ()
+  "Return the Typst CLI executable path, or nil when unavailable."
+  (my/typst--find-executable "typst"))
+
 (defun my/typst-lsp-font-paths ()
   "Return font paths that should be visible to tinymist."
   (delete-dups
@@ -311,12 +322,17 @@ Provides a visual cue so the new cursor position is easy to spot."
   "Return the URL for Tinymist's official web preview."
   (format "http://%s" my/typst-preview-host))
 
+(defun my/typst-start-fresh-preview ()
+  "Clear stale Tinymist preview state, then start a fresh preview server."
+  (my/typst-start-default-preview t))
+
 (defun my/typst-previewer-setup ()
   "Route Previewer to Tinymist's official web preview for this buffer."
   (setq-local previewer-external-url-function #'my/typst-preview-url)
-  (setq-local previewer-external-start-function #'my/typst-start-default-preview)
+  (setq-local previewer-external-start-function #'my/typst-start-fresh-preview)
   (setq-local previewer-external-browser-backend 'system)
-  (setq-local previewer-external-open-delay 0.8))
+  (setq-local previewer-external-window-side 'auto)
+  (setq-local previewer-external-open-delay my/typst-preview-open-delay))
 
 (defun my/typst-eglot-workspace-configuration ()
   "Return workspace configuration for Tinymist."
@@ -699,7 +715,7 @@ When FORCE is non-nil, restart even if the current buffer already owns it."
                 my/typst-preview--owner-buffer source-buffer))))))
 
 (defun my/typst-preview ()
-  "Start Tinymist's official preview and open it with the system browser."
+  "Start Tinymist's official preview and open it with Previewer."
   (interactive)
   (my/typst-previewer-setup)
   (previewer-workbench)
@@ -865,7 +881,14 @@ function calls like `#foo(...)[...]' do not get hijacked by parentheses."
          (typst-ts-mode . my/typst-ts-pretty-setup)
          (typst-ts-mode . my/typst-setup-bracket-dwim-keys)
          (typst-ts-mode . my/typst-copilot-auto-enable)
-         (typst-ts-mode . flymake-mode)))
+         (typst-ts-mode . flymake-mode))
+  :config
+  (when-let* ((typst (my/typst-command)))
+    (setq typst-ts-compile-executable-location typst)))
+
+(with-eval-after-load 'typst-ts-variables
+  (when-let* ((typst (my/typst-command)))
+    (setq typst-ts-compile-executable-location typst)))
 
 (dolist (hook '(typst-mode-hook my/typst-mode-hook))
   (add-hook hook #'my/typst-eglot-setup)

@@ -17,6 +17,7 @@
 (declare-function my/org-example-block-background "init-org-ui")
 (declare-function my/org-typst-preview--preferred-math-font-file "init-typst" ())
 (declare-function my/org-typst-preview-math-font-line "init-typst" ())
+(declare-function my/typst-command "init-typst" ())
 (declare-function ratex-fragments-in-region "ratex-math-detect" (beg end))
 (declare-function ratex-fragment-at-point "ratex-math-detect" ())
 (declare-function ratex--split-delimited-fragment "ratex-math-detect" (value))
@@ -2407,7 +2408,9 @@ Point must be just after `_' or `^'."
 
 (defun my/org-latex--typst-command ()
   "Return an executable Typst command path, including login-shell lookup."
-  (or (executable-find "typst")
+  (or (and (fboundp 'my/typst-command)
+           (my/typst-command))
+      (executable-find "typst")
       (seq-find #'file-executable-p
                 (list "/opt/homebrew/bin/typst"
                       "/usr/local/bin/typst"

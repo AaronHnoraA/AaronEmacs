@@ -33,6 +33,7 @@
 #let Ext = m-op("Ext")
 #let Tor = m-op("Tor")
 #let Ann = m-op("Ann")
+#let Rad = m-op("Rad")
 #let ord = m-op("ord")
 #let val = m-op("val")
 

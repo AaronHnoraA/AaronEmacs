@@ -167,25 +167,43 @@
   ]
 }
 
-#let definition(body) = note-card("📘 定义", "8a6418", "f8ecd0", "◇", body)
-#let theorem(body) = note-card("📐 定理", "2f6f42", "e5f3df", "♥", body)
-#let lemma(body) = note-card("🪜 引理", "335f91", "e4edf8", "⋄", body)
-#let corollary(body) = note-card("🔎 推论", "5a4f91", "ece8f8", "⇒", body)
-#let cor(body) = corollary(body)
-#let proposition(body) = note-card("📌 命题", "7a4b2d", "f3e6dc", "♠", body)
-#let prop(body) = proposition(body)
-#let property(body) = proposition(body)
-#let proof(body) = note-card("✍️ 证明", "267386", "e1f2f4", "∎", body)
-#let example(body) = note-card("🧪 例子", "80623a", "f1e5d4", "◦", body)
-#let remark(body) = note-card("💬 备注", "5f6c7b", "e9ece8", "✦", body)
-#let summary(body) = note-card("🧾 摘要", "476f78", "e3f1ee", "SUM", body)
-#let question(body) = note-card("❓ 问题", "8a6418", "f8ecd0", "?", body)
-#let problem(body) = question(body)
-#let solution(body) = note-card("✅ 解法", "2f6f42", "e5f3df", "✓", body)
-#let important(body) = note-card("⚡ 重点", "9b3b37", "f4dfdc", "!", body)
-#let warning(body) = note-card("⚠️ 警告", "9b3b37", "f4dfdc", "▲", body)
-#let tip(body) = note-card("💡 提示", "26735f", "e1f1ea", "✧", body)
-#let info(body) = note-card("ℹ️ 信息", "335f91", "e4edf8", "i", body)
+#let note-card-title(base, title) = {
+  if title == none {
+    base
+  } else {
+    [#base：#title]
+  }
+}
+#let note-math-block(base-title, accent, tint, marker, args) = {
+  let pos = args.pos()
+  if pos.len() == 1 {
+    note-card(base-title, accent, tint, marker, pos.at(0))
+  } else if pos.len() == 2 {
+    note-card(note-card-title(base-title, pos.at(0)), accent, tint, marker, pos.at(1))
+  } else {
+    panic("note block expects body or title plus body")
+  }
+}
+
+#let definition(..args) = note-math-block("📘 定义", "8a6418", "f8ecd0", "◇", args)
+#let theorem(..args) = note-math-block("📐 定理", "2f6f42", "e5f3df", "♥", args)
+#let lemma(..args) = note-math-block("🪜 引理", "335f91", "e4edf8", "⋄", args)
+#let corollary(..args) = note-math-block("🔎 推论", "5a4f91", "ece8f8", "⇒", args)
+#let cor(..args) = note-math-block("🔎 推论", "5a4f91", "ece8f8", "⇒", args)
+#let proposition(..args) = note-math-block("📌 命题", "7a4b2d", "f3e6dc", "♠", args)
+#let prop(..args) = note-math-block("📌 命题", "7a4b2d", "f3e6dc", "♠", args)
+#let property(..args) = note-math-block("📌 命题", "7a4b2d", "f3e6dc", "♠", args)
+#let proof(..args) = note-math-block("✍️ 证明", "267386", "e1f2f4", "∎", args)
+#let example(..args) = note-math-block("🧪 例子", "80623a", "f1e5d4", "◦", args)
+#let remark(..args) = note-math-block("💬 备注", "5f6c7b", "e9ece8", "✦", args)
+#let summary(..args) = note-math-block("🧾 摘要", "476f78", "e3f1ee", "SUM", args)
+#let question(..args) = note-math-block("❓ 问题", "8a6418", "f8ecd0", "?", args)
+#let problem(..args) = note-math-block("❓ 问题", "8a6418", "f8ecd0", "?", args)
+#let solution(..args) = note-math-block("✅ 解法", "2f6f42", "e5f3df", "✓", args)
+#let important(..args) = note-math-block("⚡ 重点", "9b3b37", "f4dfdc", "!", args)
+#let warning(..args) = note-math-block("⚠️ 警告", "9b3b37", "f4dfdc", "▲", args)
+#let tip(..args) = note-math-block("💡 提示", "26735f", "e1f1ea", "✧", args)
+#let info(..args) = note-math-block("ℹ️ 信息", "335f91", "e4edf8", "i", args)
 
 #let note-comment-box(body, accent: "5f6c7b", tint: "eceae4", title: "批注") = block(
   width: 100%,

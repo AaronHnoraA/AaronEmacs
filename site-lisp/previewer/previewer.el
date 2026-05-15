@@ -252,6 +252,8 @@ of serving its own HTML content.")
   "Seconds to wait before opening an external preview URL.")
 (defvar-local previewer-external-window-side nil
   "Buffer-local side preference for external preview xwidget windows.")
+(defvar-local previewer--external-open-timer nil
+  "Pending delayed timer for opening an external preview URL.")
 (defvar previewer--external-active nil
   "Non-nil when Previewer is showing an externally managed preview URL.")
 
@@ -1017,18 +1019,35 @@ When FORCE is nil, only refresh stale or missing assets."
     (funcall previewer-external-start-function)))
 
 (defun previewer--split-side-for-window (window)
-  "Return the concrete preview split side for WINDOW."
+  "Return the preferred preview split side for WINDOW."
   (let ((side (or (and (previewer--external-url)
                        previewer-external-window-side)
                   previewer-window-side
                   'auto)))
     (if (not (eq side 'auto))
         side
-      (let ((width (float (max 1 (window-total-width window))))
-            (height (float (max 1 (window-total-height window)))))
-        (if (>= (/ width height) previewer-wide-window-min-ratio)
-            'left
-          'above)))))
+      (ignore window)
+      'left)))
+
+(defun previewer--fallback-split-side (side)
+  "Return a fallback preview split side for SIDE."
+  (pcase side
+    ((or 'left 'right) 'above)
+    ((or 'above 'below) 'left)
+    (_ 'above)))
+
+(defun previewer--split-window-prefer-side (window side)
+  "Split WINDOW on SIDE, falling back when that split is too small.
+Return (PREVIEW-WINDOW . ACTUAL-SIDE)."
+  (let ((fallback (previewer--fallback-split-side side)))
+    (or (when-let* ((win (ignore-errors
+                           (split-window window nil side))))
+          (cons win side))
+        (when (not (eq fallback side))
+          (when-let* ((win (ignore-errors
+                             (split-window window nil fallback))))
+            (cons win fallback)))
+        (cons (split-window window nil side) side))))
 
 (defun previewer--xwidget-preview-buffer-live-p ()
   "Return non-nil when the Previewer xwidget buffer is still live."
@@ -1052,11 +1071,14 @@ When FORCE is nil, only refresh stale or missing assets."
          (side (previewer--split-side-for-window source-window))
          (existing-window (and (buffer-live-p previewer--xwidget-buffer)
                                (get-buffer-window previewer--xwidget-buffer t)))
+         (split-result (unless existing-window
+                         (previewer--split-window-prefer-side source-window side)))
+         (actual-side (or (cdr split-result) side))
          (preview-window
           (or existing-window
-              (split-window source-window nil side))))
+              (car split-result))))
     (unless existing-window
-      (pcase side
+      (pcase actual-side
         ((or 'left 'right)
          (let* ((total (window-total-width source-window))
                 (target (max 24 (floor (* total previewer-window-size)))))
@@ -1103,17 +1125,22 @@ When FORCE is nil, only refresh stale or missing assets."
 
 (defun previewer-open-external-browser-maybe-delayed (url)
   "Open external preview URL, respecting `previewer-external-open-delay'."
+  (when (timerp previewer--external-open-timer)
+    (cancel-timer previewer--external-open-timer))
+  (setq previewer--external-open-timer nil)
   (if (and (numberp previewer-external-open-delay)
            (> previewer-external-open-delay 0))
       (let ((buffer (current-buffer)))
-        (run-at-time
-         previewer-external-open-delay nil
-         (lambda (buf delayed-url)
-           (when (buffer-live-p buf)
-             (with-current-buffer buf
-               (previewer-open-external-browser delayed-url))))
-         buffer
-         url))
+        (setq previewer--external-open-timer
+              (run-at-time
+               previewer-external-open-delay nil
+               (lambda (buf delayed-url)
+                 (when (buffer-live-p buf)
+                   (with-current-buffer buf
+                     (setq previewer--external-open-timer nil)
+                     (previewer-open-external-browser delayed-url))))
+               buffer
+               url)))
     (previewer-open-external-browser url)))
 
 (defun previewer-init ()
@@ -1139,6 +1166,9 @@ When FORCE is nil, only refresh stale or missing assets."
         previewer-sync-sending nil
         previewer--last-sync-key nil)
   (previewer--cancel-content-timer)
+  (when (timerp previewer--external-open-timer)
+    (cancel-timer previewer--external-open-timer))
+  (setq previewer--external-open-timer nil)
   (when previewer-server
     (ws-stop previewer-server)
     (setq previewer-server nil))
