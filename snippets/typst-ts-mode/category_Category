@@ -2,4 +2,4 @@
 # name: Category
 # key: cat
 # --
-category(${1:C}) $0
+cal(${1:C}) $0

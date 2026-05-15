@@ -2,4 +2,4 @@
 # name: Expectation
 # key: expect
 # --
-expect(${2:f(x)}, sub: ${1:x in D}) $0
+bb(E)_${1:x in D} lr([${2:f(x)}]) $0

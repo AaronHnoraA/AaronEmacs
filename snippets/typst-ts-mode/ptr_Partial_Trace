@@ -2,4 +2,4 @@
 # name: Partial trace
 # key: ptr
 # --
-ptrace(${1:B}, rho_(${2:AB})) $0
+"Tr"_${1:B} lr((rho_(${2:AB}))) $0

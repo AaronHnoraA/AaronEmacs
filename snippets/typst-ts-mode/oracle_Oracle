@@ -2,4 +2,4 @@
 # name: Oracle
 # key: oracle
 # --
-oracle(${1:O}) parens(${2:x}) $0
+cal(${1:O}) lr((${2:x})) $0

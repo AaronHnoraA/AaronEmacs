@@ -2,4 +2,4 @@
 # name: Pauli X
 # key: pauliX
 # --
-pauliX$0
+mat(0, 1; 1, 0)$0

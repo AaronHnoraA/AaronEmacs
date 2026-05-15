@@ -2,4 +2,4 @@
 # name: Xor macro
 # key: mxor
 # --
-xor(${1:x}, ${2:y}) $0
+${1:x} plus.o ${2:y} $0

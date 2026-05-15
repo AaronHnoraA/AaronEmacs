@@ -2,4 +2,4 @@
 # name: Braket
 # key: bk
 # --
-braket(${1:phi}, ${2:psi}) $0
+chevron.l ${1:phi} | ${2:psi} chevron.r $0

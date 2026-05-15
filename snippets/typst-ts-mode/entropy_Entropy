@@ -2,4 +2,4 @@
 # name: Entropy
 # key: entropy
 # --
-entropy(${1:X}) $0
+H lr((${1:X})) $0

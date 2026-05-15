@@ -2,4 +2,4 @@
 # name: Transition function
 # key: trans
 # --
-transition(${1:delta}, ${2:q}, ${3:a}) $0
+${1:delta} lr((${2:q}, ${3:a})) $0

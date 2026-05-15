@@ -2,4 +2,4 @@
 # name: Annihilation operator
 # key: annihilate
 # --
-annihilation(${1:a}) $0
+${1:a} $0

@@ -28,6 +28,7 @@
 (declare-function my/note-tag-add "init-note-metadata" (tag))
 (declare-function my/note-task-dispatch "init-note-agenda" ())
 (declare-function my/typst-preview-send-position "init-typst" ())
+(declare-function my/typst-command "init-typst" ())
 
 (defgroup my/note nil
   "Typst-backed note-taking helpers."
@@ -1702,9 +1703,103 @@ When PROMPT-TAGS is non-nil, ask for optional tags."
       (find-file file)
       (insert (funcall template-fn id title tags))
       (save-buffer)
-      (when-let* ((note (my/note-db-sync-file file)))
-        (run-hook-with-args 'my/note-new-hook note))
-      file)))
+	      (when-let* ((note (my/note-db-sync-file file)))
+	        (run-hook-with-args 'my/note-new-hook note))
+	      file)))
+
+(defun my/note--typst-export-command ()
+  "Return the Typst executable for note PDF export."
+  (or (and (fboundp 'my/typst-command)
+           (my/typst-command))
+      (executable-find "typst")
+      (user-error "Cannot find typst")))
+
+(defun my/note--typst-export-current-file ()
+  "Return the current Typst note file, or signal an error."
+  (unless buffer-file-name
+    (user-error "Save this Typst note before exporting"))
+  (unless (string= (file-name-extension buffer-file-name) "typ")
+    (user-error "Current buffer is not a Typst file"))
+  (when (buffer-modified-p)
+    (save-buffer))
+  (file-truename buffer-file-name))
+
+(defun my/note--typst-export-output-file (file mode)
+  "Return Desktop PDF output path for FILE exported with MODE."
+  (let* ((desktop (expand-file-name "~/Desktop/"))
+         (base (file-name-base file))
+         (suffix (if (eq mode 'publish) "-publish" "")))
+    (make-directory desktop t)
+    (expand-file-name (concat base suffix ".pdf") desktop)))
+
+(defun my/note--typst-publish-temp-source (file)
+  "Create and return a temporary publish-mode Typst source for FILE."
+  (let* ((directory (file-name-directory file))
+         (base (file-name-base file))
+         (temp (make-temp-file
+                (expand-file-name (concat "." base "-publish-") directory)
+                nil ".typ"))
+         (source (with-temp-buffer
+                   (insert-file-contents file)
+                   (buffer-string))))
+    (with-temp-file temp
+      (insert
+       (if (string-match-p
+            (regexp-quote "#import \"/_typst/note.typ\": *")
+            source)
+           (replace-regexp-in-string
+            (regexp-quote "#import \"/_typst/note.typ\": *")
+            "#import \"/_typst/publish.typ\": *"
+            source t t)
+         (concat "#import \"/_typst/publish.typ\": *\n" source))))
+    temp))
+
+(defun my/note--typst-run-export (source output)
+  "Compile Typst SOURCE to OUTPUT."
+  (let* ((command (my/note--typst-export-command))
+         (root (file-name-as-directory (file-truename my/note-root)))
+         (buffer (get-buffer-create "*note typst export*"))
+         status)
+    (with-current-buffer buffer
+      (erase-buffer)
+      (insert (format "$ %s compile --root %s %s %s\n\n"
+                      command root source output)))
+    (setq status
+          (call-process command nil buffer t
+                        "compile" "--root" root source output))
+    (unless (zerop status)
+      (display-buffer buffer)
+      (user-error "Typst export failed; see %s" (buffer-name buffer)))
+    output))
+
+;;;###autoload
+(defun my/note-typst-export-pdf (&optional mode)
+  "Export the current Typst note to a Desktop PDF.
+MODE is `note' for the original note style or `publish' for the public
+publish style.  Interactively, prompt for MODE with `note' as the default."
+  (interactive
+   (list
+    (intern
+     (let ((choice (completing-read
+                    "Export mode (default note): "
+                    '("note" "origin" "publish")
+                    nil t nil nil "note")))
+       (if (string= choice "origin") "note" choice)))))
+  (let* ((mode (or mode 'note))
+         (file (my/note--typst-export-current-file))
+         (output (my/note--typst-export-output-file file mode))
+         (source file)
+         temp)
+    (unwind-protect
+        (progn
+          (when (eq mode 'publish)
+            (setq temp (my/note--typst-publish-temp-source file)
+                  source temp))
+          (my/note--typst-run-export source output)
+          (message "Exported %s PDF: %s" mode output)
+          output)
+      (when (and temp (file-exists-p temp))
+        (delete-file temp)))))
 
 ;;;###autoload
 (defun my/note-new (title &optional tags directory)
@@ -1735,6 +1830,7 @@ TAGS may be a list or a lightweight string such as \"a b\" or
   (define-key map (kbd "C-c n c") #'my/note-capture)
   (define-key map (kbd "C-c n d") #'my/note-daily-today)
   (define-key map (kbd "C-c n D") #'my/note-doctor)
+  (define-key map (kbd "C-c n e") #'my/note-typst-export-pdf)
   (define-key map (kbd "C-c n f") #'my/note-node-find)
   (define-key map (kbd "C-c n g") #'my/note-graph)
   (define-key map (kbd "C-c n i") #'my/note-node-insert)
@@ -1754,10 +1850,11 @@ TAGS may be a list or a lightweight string such as \"a b\" or
 (dolist (binding '(("a" . my/note-alias-add)
                    ("A" . my/note-agenda)
                    ("b" . my/note-agenda-board)
-                   ("c" . my/note-capture)
-                   ("d" . my/note-daily-today)
-                   ("D" . my/note-doctor)
-                   ("f" . my/note-node-find)
+	                   ("c" . my/note-capture)
+	                   ("d" . my/note-daily-today)
+	                   ("D" . my/note-doctor)
+	                   ("e" . my/note-typst-export-pdf)
+	                   ("f" . my/note-node-find)
                    ("g" . my/note-graph)
                    ("i" . my/note-node-insert)
                    ("l" . my/note-backlinks)

@@ -2,4 +2,4 @@
 # name: Heisenberg equation
 # key: heisenberg
 # --
-heisenbergEq(${1:A}) $0
+frac(dif ${1:A}, dif t) = frac(i, "ℏ") lr([${2:H}, ${1:A}]) $0

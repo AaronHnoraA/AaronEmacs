@@ -2,4 +2,4 @@
 # name: Variance
 # key: var
 # --
-variance(${1:X}) $0
+"Var" lr([${1:X}]) $0

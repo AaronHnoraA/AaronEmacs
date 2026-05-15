@@ -2,4 +2,4 @@
 # name: Density operator
 # key: density
 # --
-rho = sum_${1:i} ${2:p_i} density(${3:psi_i})$0
+rho = sum_${1:i} ${2:p_i} |${3:psi_i} chevron.r chevron.l ${3:psi_i}|$0

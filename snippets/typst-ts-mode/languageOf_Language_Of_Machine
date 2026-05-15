@@ -2,4 +2,4 @@
 # name: Language of machine
 # key: langof
 # --
-languageOf(${1:M}) $0
+L lr((${1:M})) $0

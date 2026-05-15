@@ -2,4 +2,4 @@
 # name: Gibbs state
 # key: gibbs
 # --
-gibbs(${1:beta}) $0
+rho = frac(exp(-${1:beta} ${2:H}), "Tr" lr((exp(-${1:beta} ${2:H})))) $0

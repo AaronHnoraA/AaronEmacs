@@ -2,4 +2,4 @@
 # name: Integers modulo n
 # key: zmod
 # --
-zmod(${1:n}) $0
+bb(Z) / ${1:n} bb(Z) $0

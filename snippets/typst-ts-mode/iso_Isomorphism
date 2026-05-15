@@ -2,4 +2,4 @@
 # name: Isomorphism
 # key: isom
 # --
-iso(${1:G}, ${2:H}) $0
+${1:G} tilde.equiv ${2:H} $0

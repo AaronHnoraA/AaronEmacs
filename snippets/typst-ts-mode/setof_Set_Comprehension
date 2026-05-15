@@ -2,4 +2,4 @@
 # name: Set comprehension
 # key: setof
 # --
-setof(${1:x}, cond: ${2:x in X}) $0
+lr({${1:x} | ${2:x in X}}) $0

@@ -2,4 +2,4 @@
 # name: Indicator
 # key: indic
 # --
-indicator(${1:E}) $0
+bold(1) lr({${1:E}}) $0

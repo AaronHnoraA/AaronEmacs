@@ -2,4 +2,4 @@
 # name: Conditional entropy
 # key: condH
 # --
-condentropy(${1:X}, ${2:Y}) $0
+H lr((${1:X} | ${2:Y})) $0

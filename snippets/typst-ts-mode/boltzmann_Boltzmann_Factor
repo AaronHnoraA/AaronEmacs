@@ -2,4 +2,4 @@
 # name: Boltzmann factor
 # key: boltzmann
 # --
-boltzmann(${1:E}, ${2:T}) $0
+exp(-${1:E} / (k_B ${2:T})) $0

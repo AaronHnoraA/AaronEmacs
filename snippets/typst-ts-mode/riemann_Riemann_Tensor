@@ -2,4 +2,4 @@
 # name: Riemann tensor
 # key: riemann
 # --
-riemann(${1:rho}, ${2:sigma}, ${3:mu}, ${4:nu}) $0
+R^(${1:rho})_(${2:sigma} ${3:mu} ${4:nu}) $0

@@ -2,4 +2,4 @@
 # name: Galois group
 # key: gal
 # --
-gal(${1:L}, ${2:K}) $0
+"Gal" lr((${1:L} / ${2:K})) $0

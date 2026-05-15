@@ -2,4 +2,4 @@
 # name: Inner product
 # key: inner
 # --
-inner(${1:x}, ${2:y}) $0
+chevron.l ${1:x}, ${2:y} chevron.r $0

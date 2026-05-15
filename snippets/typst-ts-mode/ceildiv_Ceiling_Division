@@ -2,4 +2,4 @@
 # name: Ceiling division
 # key: ceildiv
 # --
-ceildiv(${1:n}, ${2:2}) $0
+ceil.l frac(${1:n}, ${2:2}) ceil.r $0

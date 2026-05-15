@@ -2,4 +2,4 @@
 # name: Expectation value
 # key: expval
 # --
-expval(${1:A}, state: ${2:psi}) $0
+chevron.l ${2:psi} | ${1:A} | ${2:psi} chevron.r $0

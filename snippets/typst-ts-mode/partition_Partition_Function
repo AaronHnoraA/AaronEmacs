@@ -2,4 +2,4 @@
 # name: Partition function
 # key: partition
 # --
-partition(${1:beta}) $0
+Z = "Tr" lr((exp(-${1:beta} ${2:H}))) $0

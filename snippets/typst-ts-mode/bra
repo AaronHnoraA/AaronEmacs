@@ -2,4 +2,4 @@
 # name: bra
 # key: bra
 # --
-bra(${1:phi}) $0
+chevron.l ${1:phi}| $0

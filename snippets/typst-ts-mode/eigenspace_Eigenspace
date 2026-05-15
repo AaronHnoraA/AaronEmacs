@@ -2,4 +2,4 @@
 # name: Eigenspace
 # key: eigenspace
 # --
-eigenspace(${1:A}, ${2:lambda}) $0
+"ker" lr((${1:A} - ${2:lambda} I)) $0

@@ -2,4 +2,4 @@
 # name: Language over bits
 # key: lang
 # --
-lang(${1:L}) subset.eq bitstrings(${2:*}) $0
+cal(${1:L}) subset.eq lr({0, 1})^${2:*} $0

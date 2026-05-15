@@ -2,4 +2,4 @@
 # name: Lorentz force
 # key: lorentz
 # --
-lorentz(${1:q}) $0
+bold(F) = ${1:q} lr((bold(E) + ${2:bold(v)} times bold(B))) $0

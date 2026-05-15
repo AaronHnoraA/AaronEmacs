@@ -2,4 +2,4 @@
 # name: Legendre symbol
 # key: legendre
 # --
-legendre(${1:a}, ${2:p}) $0
+lr((${1:a} / ${2:p})) $0

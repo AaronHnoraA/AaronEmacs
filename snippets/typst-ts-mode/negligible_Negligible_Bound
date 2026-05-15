@@ -2,4 +2,4 @@
 # name: Negligible bound
 # key: neglb
 # --
-negligible(fn: ${1:epsilon}, sec: ${2:lambda}) $0
+${1:epsilon} lr((${2:lambda})) <= "negl" lr((${2:lambda})) $0

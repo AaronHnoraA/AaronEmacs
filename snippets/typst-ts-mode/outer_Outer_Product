@@ -2,4 +2,4 @@
 # name: Outer Product
 # key: outer
 # --
-ketbra(${1:psi}, ${2:phi}) $0
+|${1:psi} chevron.r chevron.l ${2:phi}| $0

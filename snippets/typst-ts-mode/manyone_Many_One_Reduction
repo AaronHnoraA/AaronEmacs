@@ -2,4 +2,4 @@
 # name: Many-one reduction
 # key: manyone
 # --
-manyone(${1:A}, ${2:B}) $0
+${1:A} <=_m ${2:B} $0

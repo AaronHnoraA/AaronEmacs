@@ -2,4 +2,4 @@
 # name: Finite field
 # key: FF
 # --
-FF(${1:q}) $0
+bb(F)_${1:q} $0

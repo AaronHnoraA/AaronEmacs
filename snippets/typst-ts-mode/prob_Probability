@@ -2,4 +2,4 @@
 # name: Probability
 # key: prob
 # --
-prob(${1:E}, sub: ${2:X}) $0
+bb(P)_${2:X} lr([${1:E}]) $0

@@ -2,4 +2,4 @@
 # name: Partial derivative
 # key: pderiv
 # --
-pderiv(${1:f}, ${2:x}) $0
+frac(partial ${1:f}, partial ${2:x}) $0

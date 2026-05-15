@@ -2,4 +2,4 @@
 # name: Automorphism group
 # key: aut
 # --
-aut(${1:G}) $0
+"Aut" lr((${1:G})) $0

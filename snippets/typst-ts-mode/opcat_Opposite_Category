@@ -2,4 +2,4 @@
 # name: Opposite category
 # key: opcat
 # --
-opcat(${1:C}) $0
+${1:C}^("op") $0

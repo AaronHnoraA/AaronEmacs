@@ -2,4 +2,4 @@
 # name: Gamma matrix
 # key: gammamat
 # --
-gammaMat(${1:mu}) $0
+gamma^${1:mu} $0

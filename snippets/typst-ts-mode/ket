@@ -2,4 +2,4 @@
 # name: ket
 # key: ket
 # --
-ket(${1:psi}) $0
+|${1:psi} chevron.r $0

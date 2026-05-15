@@ -2,4 +2,4 @@
 # name: Localization
 # key: loc
 # --
-localization(${1:R}, ${2:p}) $0
+${1:R}_${2:p} $0

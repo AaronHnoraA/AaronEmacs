@@ -2,4 +2,4 @@
 # name: Ideal
 # key: ideal
 # --
-ideal(${1:p}) $0
+frak(${1:p}) $0

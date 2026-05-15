@@ -718,8 +718,12 @@ When FORCE is non-nil, restart even if the current buffer already owns it."
   "Start Tinymist's official preview and open it with Previewer."
   (interactive)
   (my/typst-previewer-setup)
-  (previewer-workbench)
-  (message "Started Tinymist official previewer"))
+  (if (my/typst-preview--global-active-p)
+      (progn
+        (my/typst-start-default-preview t)
+        (message "Refreshed Tinymist official previewer"))
+    (previewer-workbench)
+    (message "Started Tinymist official previewer")))
 
 (defun my/typst-preview--buffer-p (buffer)
   "Return non-nil when BUFFER is a Typst file buffer."

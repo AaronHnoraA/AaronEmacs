@@ -2,4 +2,4 @@
 # name: Projector
 # key: proj
 # --
-proj(${1:psi}) $0
+|${1:psi} chevron.r chevron.l ${1:psi}| $0

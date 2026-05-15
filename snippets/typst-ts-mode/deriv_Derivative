@@ -2,4 +2,4 @@
 # name: Derivative
 # key: deriv
 # --
-deriv(${1:f}, ${2:x}) $0
+frac(dif ${1:f}, dif ${2:x}) $0

@@ -2,4 +2,4 @@
 # name: Binomial coefficient
 # key: choose
 # --
-choose(${1:n}, ${2:k}) $0
+binom(${1:n}, ${2:k}) $0

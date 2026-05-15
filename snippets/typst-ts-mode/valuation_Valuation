@@ -2,4 +2,4 @@
 # name: Valuation
 # key: val
 # --
-valuation(${1:x}, ${2:p}) $0
+v_${2:p} lr((${1:x})) $0

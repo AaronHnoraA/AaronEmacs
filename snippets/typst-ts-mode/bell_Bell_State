@@ -2,4 +2,4 @@
 # name: Bell state
 # key: bell
 # --
-bell00$0
+frac(|0 0 chevron.r + |1 1 chevron.r, sqrt(2))$0

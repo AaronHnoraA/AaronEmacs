@@ -2,10 +2,10 @@
 # name: Pinit annotation
 # key: pinit
 # --
-${1:Start} #note-pin("${2:a}")${3:highlighted text}#note-pin("${4:b}").
+${3:Start} #note-pin("${1:`(format "p%03x" (random #x1000))`}")${4:highlighted text}#note-pin("${2:`(format "p%03x" (random #x1000))`}").
 
-#note-pinit-highlight("${2:a}", "${4:b}")
-#note-pinit-point-from(("${2:a}", "${4:b}"))[
+#note-pinit-highlight("${1}", "${2}")
+#note-pinit-point-from(("${1}", "${2}"))[
   ${5:annotation}
 ]
 $0

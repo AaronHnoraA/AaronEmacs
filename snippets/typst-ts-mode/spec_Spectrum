@@ -2,4 +2,4 @@
 # name: Spectrum
 # key: Spec
 # --
-spectrum(${1:R}) $0
+"Spec" lr((${1:R})) $0

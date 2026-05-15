@@ -2,4 +2,4 @@
 # name: Quotient
 # key: quot
 # --
-quotient(${1:G}, ${2:H}) $0
+${1:G} / ${2:H} $0

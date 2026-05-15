@@ -2,4 +2,4 @@
 # name: Machine accepts
 # key: accept
 # --
-accept(${1:M}, ${2:x}) $0
+${1:M} lr((${2:x})) = 1 $0

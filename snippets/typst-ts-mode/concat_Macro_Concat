@@ -2,4 +2,4 @@
 # name: Concatenation macro
 # key: mconcat
 # --
-concat(${1:x}, ${2:y}) $0
+${1:x} ++ ${2:y} $0
