@@ -658,7 +658,7 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 
 ## 7. 有冲突时优先记住什么
 
-- `M-w` 现在是正常复制，不再关窗口
+- `M-w` 关闭当前 buffer，行为与 `C-x k` 一致
 - 关 frame 用 `H-w`
 - 普通 warning 现在只写入 `*Warnings*`，不再自动弹窗抢操作；需要时用 `SPC h w`
 - `C-c y` 现在是 snippet 前缀，不再直接展开
