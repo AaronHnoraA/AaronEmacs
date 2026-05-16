@@ -42,6 +42,7 @@
 (declare-function evil-emacs-state "evil")
 (declare-function evil-force-normal-state "evil")
 (declare-function evil-local-mode "evil")
+(declare-function evil-normal-state "evil")
 (declare-function evil-save-state "evil")
 
 (defun my/evil-clear-ex-highlights-h ()
@@ -54,11 +55,60 @@
 
 (defun my/evil-force-normal-state-h ()
   "Return to normal state before `my/escape' falls back to `keyboard-quit'."
-  (when (and (bound-and-true-p evil-local-mode)
-             (fboundp 'evil-force-normal-state)
-             (memq evil-state '(insert replace visual operator)))
-    (evil-force-normal-state)
+  (when (my/evil-normal-state-maybe)
     t))
+
+(defconst my/evil-emacs-state-modes
+  '(ibuffer-mode
+    debugger-mode
+    dired-mode
+    dirvish-mode
+    eww-mode
+    xwidget-webkit-mode
+    my/diagnostics-mode
+    my/language-server-manager-mode
+    my/language-server-doctor-mode
+    my/jupyter-manager-mode
+    my/jupyter-doctor-mode
+    my/compile-board-mode
+    my/note-agenda-mode
+    my/org-maintenance-board-mode
+    my/org-task-fast-view-mode
+    org-agenda-mode
+    my/health-mode
+    ai-workbench-mode
+    ai-workbench-codex-mode
+    ai-workbench-compose-mode
+    ai-workbench-output-mode
+    ai-workbench-result-mode
+    ai-workbench-diff-mode)
+  "Major modes that intentionally stay outside Evil normal-state editing.")
+
+(defun my/evil-normal-editing-buffer-p ()
+  "Return non-nil when the current buffer should recover to Evil normal state."
+  (and (not (minibufferp))
+       (not (apply #'derived-mode-p my/evil-emacs-state-modes))
+       (not (string-match-p "\\` \\|\\`\\*"
+                            (buffer-name)))))
+
+(defun my/evil-normal-state-maybe ()
+  "Recover Evil normal state in ordinary editing buffers.
+This is deliberately conservative so special buffers that are configured for
+Emacs state keep their local behavior."
+  (when (and (bound-and-true-p evil-mode)
+             (my/evil-normal-editing-buffer-p))
+    (unless (bound-and-true-p evil-local-mode)
+      (when (fboundp 'evil-local-mode)
+        (evil-local-mode 1)))
+    (when (and (bound-and-true-p evil-local-mode)
+               (boundp 'evil-state)
+               (memq evil-state '(insert replace visual operator emacs motion)))
+      (cond
+       ((fboundp 'evil-force-normal-state)
+        (evil-force-normal-state))
+       ((fboundp 'evil-normal-state)
+        (evil-normal-state)))
+      t)))
 
 (defun my/evil--first-indent-width (&rest variables)
   "Return the first positive integer value among VARIABLES."

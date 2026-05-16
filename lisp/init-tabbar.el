@@ -336,6 +336,16 @@ When FRAME is nil, use the selected frame."
                  (target (nth (mod (+ index step) count) buffers)))
             (my/tab-line-switch-to-buffer target window)))))))
 
+(defun my/tab-line-next-buffer ()
+  "Switch to the next buffer shown in the centered tab line."
+  (interactive)
+  (my/tab-line-cycle 1))
+
+(defun my/tab-line-previous-buffer ()
+  "Switch to the previous buffer shown in the centered tab line."
+  (interactive)
+  (my/tab-line-cycle -1))
+
 (defun my/tab-line-wheel-allow-p (window step &optional now)
   "Return non-nil when a wheel STEP on WINDOW should switch tabs.
 NOW is a float timestamp in seconds and defaults to the current time."
@@ -783,6 +793,16 @@ not allocate a fresh compound key during every redisplay."
   (when (fboundp 'centaur-tabs-mode)
     (ignore-errors (centaur-tabs-mode -1)))
   (advice-add 'tab-line-format :override #'my/tab-line-format)
+  (global-set-key (kbd "C-<tab>") #'my/tab-line-next-buffer)
+  (global-set-key (kbd "C-S-<tab>") #'my/tab-line-previous-buffer)
+  (global-set-key (kbd "C-<backtab>") #'my/tab-line-previous-buffer)
+  (global-set-key (kbd "C-<iso-lefttab>") #'my/tab-line-previous-buffer)
+  (when (boundp 'tab-bar-mode-map)
+    (define-key tab-bar-mode-map (kbd "C-<tab>") #'my/tab-line-next-buffer)
+    (define-key tab-bar-mode-map (kbd "C-S-<tab>") #'my/tab-line-previous-buffer)
+    (define-key tab-bar-mode-map (kbd "C-<backtab>") #'my/tab-line-previous-buffer)
+    (define-key tab-bar-mode-map (kbd "C-<iso-lefttab>")
+                #'my/tab-line-previous-buffer))
   (add-to-list 'tab-line-exclude-modes 'dashboard-mode)
   (add-hook 'buffer-list-update-hook #'my/tab-line-schedule-invalidate-cache)
   (add-hook 'kill-buffer-hook #'my/tab-line-invalidate-cache)

@@ -60,6 +60,8 @@
   "Websocket connected to Tinymist's control-plane server.")
 (defvar-local my/typst-preview--sync-timer nil
   "Idle timer used to sync unsaved Typst buffer contents to Tinymist.")
+(defvar-local my/typst-preview--control-output-tail ""
+  "Recent preview process output used to detect split control-plane messages.")
 
 (defgroup my/typst nil
   "Typst editing and language-server integration."
@@ -547,11 +549,19 @@ Provides a visual cue so the new cursor position is easy to spot."
 
 (defun my/typst-preview--maybe-connect-control (source-buffer output)
   "Parse Tinymist OUTPUT and connect SOURCE-BUFFER to control-plane if ready."
-  (when (and (buffer-live-p source-buffer)
-             (string-match "Control panel server listening on: \\(.+\\)" output))
-    (my/typst-preview--connect-control
-     source-buffer
-     (string-trim (match-string 1 output)))))
+  (when (buffer-live-p source-buffer)
+    (with-current-buffer source-buffer
+      (unless my/typst-preview--socket
+        (let ((text (concat my/typst-preview--control-output-tail output)))
+          (setq my/typst-preview--control-output-tail
+                (if (> (length text) 240)
+                    (substring text -240)
+                  text))
+          (when (string-match
+                 "Control panel server listening on: \\(.+\\)" text)
+            (my/typst-preview--connect-control
+             source-buffer
+             (string-trim (match-string 1 text)))))))))
 
 (defun my/typst-preview--point-position ()
   "Return (LINE . CHARACTER) for point in Tinymist's 0-based, codepoint form.
@@ -622,7 +632,8 @@ absolute positions."
         my/typst-preview--process-args nil
         my/typst-preview--process-root nil
         my/typst-preview--control-host nil
-        my/typst-preview--socket nil)
+        my/typst-preview--socket nil
+        my/typst-preview--control-output-tail "")
   (when (eq my/typst-preview--owner-buffer (current-buffer))
     (setq my/typst-preview--owner-buffer nil)))
 
@@ -681,9 +692,9 @@ When FORCE is non-nil, restart even if the current buffer already owns it."
                                  ((buffer-live-p buffer)))
                        (with-current-buffer buffer
                          (goto-char (point-max))
-                         (insert output)
-                         (my/typst-preview--maybe-connect-control
-                          source-buffer (buffer-string)))
+                         (insert output))
+                       (my/typst-preview--maybe-connect-control
+                        source-buffer output)
                        (when (and (not error-shown)
                                   (string-match-p
                                    "\\(?:compilation failed\\|^error:\\)"

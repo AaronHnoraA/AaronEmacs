@@ -141,6 +141,102 @@
 (autoload 'my/note-zotero-fill-metadata "init-note-tools" nil t)
 (autoload 'my/reference-insert-dispatch "init-note-reference" nil t)
 
+(defun my/parameter-adjust--number-bounds ()
+  "Return bounds for the number at point or just before point."
+  (let* ((line-beg (line-beginning-position))
+         (line-end (line-end-position))
+         (positions (list (point)
+                          (max line-beg (1- (point))))))
+    (catch 'bounds
+      (dolist (pos positions)
+        (save-excursion
+          (goto-char line-beg)
+          (while (re-search-forward "[-+]?[0-9]+\\(?:\\.[0-9]+\\)?" line-end t)
+            (when (and (<= (match-beginning 0) pos)
+                       (< pos (match-end 0)))
+              (throw 'bounds (cons (match-beginning 0)
+                                   (match-end 0))))))))))
+
+(defun my/parameter-adjust--format-number (text value)
+  "Format numeric VALUE using TEXT's sign, width, and precision style."
+  (if (string-match-p "\\." text)
+      (let* ((precision (if (string-match "\\.\\([0-9]+\\)" text)
+                            (length (match-string 1 text))
+                          0))
+             (formatted (format (format "%%.%df" precision) value)))
+        (if (and (string-prefix-p "+" text)
+                 (not (string-prefix-p "-" formatted)))
+            (concat "+" formatted)
+          formatted))
+    (let* ((rounded (truncate value))
+           (sign (cond
+                  ((< rounded 0) "-")
+                  ((string-prefix-p "+" text) "+")
+                  (t "")))
+           (digits (replace-regexp-in-string "\\`[-+]" "" text))
+           (width (length digits)))
+      (concat sign
+              (format (format "%%0%dd" width)
+                      (abs rounded))))))
+
+(defun my/parameter-adjust--number (delta)
+  "Adjust the number at point by DELTA."
+  (when-let* ((bounds (my/parameter-adjust--number-bounds)))
+    (let* ((beg (car bounds))
+           (end (cdr bounds))
+           (old (buffer-substring-no-properties beg end))
+           (offset (- (point) beg))
+           (new (my/parameter-adjust--format-number
+                 old
+                 (+ (string-to-number old) delta))))
+      (delete-region beg end)
+      (insert new)
+      (goto-char (+ beg (min (max offset 0) (length new))))
+      t)))
+
+(defun my/parameter-adjust--letter-pos ()
+  "Return the position of an ASCII letter at or just before point."
+  (cond
+   ((and (char-after)
+         (or (<= ?a (char-after) ?z)
+             (<= ?A (char-after) ?Z)))
+    (point))
+   ((and (> (point) (point-min))
+         (let ((char (char-before)))
+           (or (<= ?a char ?z)
+               (<= ?A char ?Z))))
+    (1- (point)))))
+
+(defun my/parameter-adjust--letter (delta)
+  "Adjust the ASCII letter at point by DELTA."
+  (when-let* ((pos (my/parameter-adjust--letter-pos)))
+    (let* ((char (char-after pos))
+           (base (if (<= ?a char ?z) ?a ?A))
+           (next (+ base (mod (+ (- char base) delta) 26))))
+      (save-excursion
+        (goto-char pos)
+        (delete-char 1)
+        (insert-char next))
+      t)))
+
+(defun my/parameter-adjust (delta)
+  "Adjust a number or ASCII letter at point by DELTA."
+  (interactive "p")
+  (atomic-change-group
+    (unless (or (my/parameter-adjust--number delta)
+                (my/parameter-adjust--letter delta))
+      (user-error "No number or letter at point"))))
+
+(defun my/parameter-increment (&optional arg)
+  "Increment the number or letter at point by ARG."
+  (interactive "p")
+  (my/parameter-adjust (or arg 1)))
+
+(defun my/parameter-decrement (&optional arg)
+  "Decrement the number or letter at point by ARG."
+  (interactive "p")
+  (my/parameter-adjust (- (or arg 1))))
+
 (defvar my/macos-idle-gc-timer nil
   "Timer used to run a delayed GC after the UI goes idle on macOS.")
 
@@ -416,6 +512,8 @@ With positive ARG, enable it.  With zero or negative ARG, disable it."
                      ("H-/" . mc/mark-all-like-this-dwim)
                      ("H--" . my/contract-region)
                      ("H-=" . my/expand-region)
+                     ("H-<left>" . my/parameter-decrement)
+                     ("H-<right>" . my/parameter-increment)
                      ("H-<up>" . move-text-up)
                      ("H-<down>" . move-text-down)
                      ("H-`" . popper-toggle)))
