@@ -50,8 +50,7 @@ does not reinterpret their syntax on first load."
 
 (defcustom Aaronnote-note-directories nil
   "Note directories exported to the Aaronnote frontend.
-When nil, prefer `my/note-directory' from the Typst note system, then
-`my/note-root'/roam when available."
+When nil, use `~/HC/Org/roam' when it exists."
   :type '(repeat directory)
   :group 'Aaronnote)
 
@@ -169,26 +168,81 @@ When nil, use `yas-snippet-dirs' if it is bound, otherwise
           (insert content)
           (goto-char (min point-pos (point-max)))
           (save-buffer)))
-    (with-temp-file file
+  (with-temp-file file
       (insert content)))
-  (when (and (fboundp 'my/note-db-sync-file)
-             (string= (downcase (or (file-name-extension file) "")) "typ"))
-    (ignore-errors
-      (my/note-db-sync-file file))))
+  file)
 
 (defun Aaronnote--note-dirs ()
   "Return readable note directories for Aaronnote export."
   (let ((dirs (or Aaronnote-note-directories
-                  (and (boundp 'my/note-directory)
-                       (list (symbol-value 'my/note-directory)))
-                  (and (boundp 'my/note-root)
-                       (list (expand-file-name "roam"
-                                               (file-name-as-directory
-                                                (symbol-value 'my/note-root))))))))
+                  (list (expand-file-name "~/HC/Org/roam")))))
     (when (stringp dirs)
       (setq dirs (list dirs)))
     (seq-filter #'file-directory-p
                 (mapcar #'expand-file-name dirs))))
+
+(defun Aaronnote--meta-block ()
+  "Return md `#+begin meta' fields in the current buffer."
+  (save-excursion
+    (goto-char (point-min))
+    (let (fields)
+      (when (re-search-forward "^[ \t]*#\\+begin[ \t]+meta[ \t]*$" nil t)
+        (let ((end (save-excursion
+                     (re-search-forward "^[ \t]*#\\+end[ \t]+meta[ \t]*$" nil t))))
+          (while (and end (< (point) end))
+            (when (looking-at "^[ \t]*\\([A-Za-z0-9_-]+\\)[ \t]*:[ \t]*\\(.*\\)$")
+              (push (cons (downcase (match-string 1))
+                          (string-trim (match-string 2)))
+                    fields))
+            (forward-line 1))))
+      fields)))
+
+(defun Aaronnote--meta-value (metadata key)
+  "Return KEY value from md METADATA."
+  (cdr (assoc key metadata)))
+
+(defun Aaronnote--split-meta-list (value)
+  "Return VALUE parsed as a comma/space separated metadata list."
+  (seq-filter
+   (lambda (item) (not (string-empty-p item)))
+   (mapcar #'string-trim
+           (split-string (or value "") "[, ]+" t))))
+
+(defun Aaronnote--typst-metadata-body ()
+  "Return Typst #metadata body from the current buffer."
+  (save-excursion
+    (goto-char (point-min))
+    (when (re-search-forward "#metadata[ \t\n]*((" nil t)
+      (let ((start (point)))
+        (when (re-search-forward "))[ \t\n]*<note>" nil t)
+          (buffer-substring-no-properties start (match-beginning 0)))))))
+
+(defun Aaronnote--typst-field (body key)
+  "Return Typst metadata field KEY from BODY."
+  (when body
+    (let ((case-fold-search nil))
+      (when (string-match
+             (format "\\_<%s[ \t\n]*:[ \t\n]*\\(\"\\(?:[^\"\\]\\|\\\\.\\)*\"\\|(\\(?:.\\|\n\\)*?)\\|[^,\n]+\\)" (regexp-quote key))
+             body)
+        (string-trim (match-string 1 body))))))
+
+(defun Aaronnote--typst-string-value (raw)
+  "Return unquoted Typst string RAW."
+  (when raw
+    (if (string-match "\\`\"\\(\\(?:[^\"\\]\\|\\\\.\\)*\\)\"\\'" raw)
+        (replace-regexp-in-string "\\\\\"" "\"" (match-string 1 raw))
+      raw)))
+
+(defun Aaronnote--typst-list-value (raw)
+  "Return Typst string tuple RAW as a list."
+  (let (items)
+    (when raw
+      (with-temp-buffer
+        (insert raw)
+        (goto-char (point-min))
+        (while (re-search-forward "\"\\(\\(?:[^\"\\]\\|\\\\.\\)*\\)\"" nil t)
+          (push (replace-regexp-in-string "\\\\\"" "\"" (match-string 1)) items))))
+    (nreverse items)))
 
 (defun Aaronnote--ignored-note-path-p (file root)
   "Return non-nil when FILE under ROOT is in an excluded directory."
@@ -200,35 +254,118 @@ When nil, use `yas-snippet-dirs' if it is bound, otherwise
 
 (defun Aaronnote--scan-note-title ()
   "Return a title for the current buffer note."
-  (save-excursion
-    (goto-char (point-min))
-    (cond
-     ((re-search-forward "^[ \t]*title:[ \t\n]*\"\\([^\"]+\\)\"" nil t)
-      (match-string 1))
-     ((re-search-forward "^=+[ \t]+\\(.+\\)$" nil t)
-      (string-trim (match-string 1)))
-     ((re-search-forward "^#+[ \t]+\\(.+\\)$" nil t)
-      (string-trim (match-string 1))))))
+  (let* ((md-meta (Aaronnote--meta-block))
+         (typst-body (Aaronnote--typst-metadata-body))
+         (meta-title (or (Aaronnote--meta-value md-meta "title")
+                         (Aaronnote--typst-string-value
+                          (Aaronnote--typst-field typst-body "title")))))
+    (or (and meta-title (not (string-empty-p meta-title)) meta-title)
+        (save-excursion
+          (goto-char (point-min))
+          (cond
+           ((re-search-forward "^=+[ \t]+\\(.+\\)$" nil t)
+            (string-trim (match-string 1)))
+           ((re-search-forward "^#+[ \t]+\\(.+\\)$" nil t)
+            (string-trim (match-string 1))))))))
 
 (defun Aaronnote--scan-note-id ()
-  "Return a Typst note id for the current buffer, when present."
+  "Return a note id for the current buffer, when present."
+  (let ((md-meta (Aaronnote--meta-block))
+        (typst-body (Aaronnote--typst-metadata-body)))
+    (or (Aaronnote--meta-value md-meta "id")
+        (Aaronnote--typst-string-value
+         (Aaronnote--typst-field typst-body "id")))))
+
+(defun Aaronnote--scan-note-tags ()
+  "Return current buffer note tags."
+  (let ((md-meta (Aaronnote--meta-block))
+        (typst-body (Aaronnote--typst-metadata-body)))
+    (or (Aaronnote--split-meta-list (Aaronnote--meta-value md-meta "tags"))
+        (Aaronnote--typst-list-value
+         (Aaronnote--typst-field typst-body "tags"))
+        nil)))
+
+(defun Aaronnote--scan-note-refs ()
+  "Return current buffer note outgoing refs."
+  (let ((refs (Aaronnote--split-meta-list
+               (Aaronnote--meta-value (Aaronnote--meta-block) "refs"))))
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward "#note(\"\\([^\"]+\\)\")" nil t)
+        (push (match-string 1) refs))
+      (goto-char (point-min))
+      (while (re-search-forward "\\[\\[\\([^]\n]+\\)\\]\\]" nil t)
+        (push (string-trim (match-string 1)) refs)))
+    (delete-dups (seq-filter (lambda (ref) (not (string-empty-p ref))) refs))))
+
+(defun Aaronnote--scan-note-summary ()
+  "Return a compact summary for the current buffer note."
   (save-excursion
     (goto-char (point-min))
-    (when (re-search-forward "^[ \t]*id:[ \t\n]*\"\\([^\"]+\\)\"" nil t)
-      (match-string 1))))
+    (let (parts in-meta)
+      (while (and (< (length (string-join (nreverse parts) " ")) 220)
+                  (not (eobp)))
+        (let ((line (string-trim (buffer-substring-no-properties
+                                  (line-beginning-position)
+                                  (line-end-position)))))
+          (cond
+           ((string-match-p "\\`#\\+begin[ \t]+meta\\'" line)
+            (setq in-meta t))
+           ((string-match-p "\\`#\\+end[ \t]+meta\\'" line)
+            (setq in-meta nil))
+           ((or in-meta
+                (string-empty-p line)
+                (string-match-p "\\`#\\(import\\|show\\|set\\|metadata\\)" line)))
+           (t
+            (push (string-trim
+                   (replace-regexp-in-string
+                    "[#*_`$()[\\]{}]" " "
+                    (replace-regexp-in-string "#note(\"[^\"]+\")\\[\\([^]]+\\)\\]" "\\1" line)))
+                  parts))))
+        (forward-line 1))
+      (truncate-string-to-width (string-join (nreverse parts) " ") 220 nil nil "..."))))
+
+(defun Aaronnote--scan-note-date ()
+  "Return current buffer note date."
+  (let ((md-meta (Aaronnote--meta-block))
+        (typst-body (Aaronnote--typst-metadata-body)))
+    (or (Aaronnote--meta-value md-meta "date")
+        (Aaronnote--typst-string-value
+         (Aaronnote--typst-field typst-body "date"))
+        "")))
+
+(defun Aaronnote--scan-note-source ()
+  "Return current buffer source metadata."
+  (Aaronnote--meta-value (Aaronnote--meta-block) "source"))
 
 (defun Aaronnote--scan-note-file (file root)
   "Return a frontend note summary for FILE below ROOT."
   (with-temp-buffer
     (insert-file-contents file nil 0 12000)
-    (let* ((title (or (Aaronnote--scan-note-title)
+    (let* ((rel (file-relative-name file (file-name-as-directory root)))
+           (group-key (let ((dir (file-name-directory rel)))
+                        (if (or (null dir) (string= dir "")) "Root" (directory-file-name dir))))
+           (group-label (if (string= group-key "Root")
+                            "Root"
+                          (file-name-nondirectory group-key)))
+           (title (or (Aaronnote--scan-note-title)
                       (file-name-base file)))
-           (id (or (Aaronnote--scan-note-id)
-                   (file-relative-name file (file-name-as-directory root)))))
-      `(("id" . ,id)
+           (id (or (Aaronnote--scan-note-id) rel)))
+      `(("key" . ,id)
+        ("id" . ,id)
         ("title" . ,title)
         ("file" . ,(file-truename file))
-        ("tags" . [])))))
+        ("path" . ,rel)
+        ("link" . ,rel)
+        ("date" . ,(Aaronnote--scan-note-date))
+        ("groupKey" . ,group-key)
+        ("groupLabel" . ,group-label)
+        ("section" . ,(car (split-string group-key "/" t)))
+        ("source" . ,(or (Aaronnote--scan-note-source) ""))
+        ("summary" . ,(Aaronnote--scan-note-summary))
+        ("tags" . ,(vconcat (Aaronnote--scan-note-tags)))
+        ("refs" . ,(vconcat (Aaronnote--scan-note-refs)))
+        ("backlinks" . [])))))
 
 (defun Aaronnote--scanned-note-summaries ()
   "Return note summaries by scanning note directories."
@@ -240,6 +377,42 @@ When nil, use `yas-snippet-dirs' if it is bound, otherwise
         (when (and (file-regular-p file)
                    (not (Aaronnote--ignored-note-path-p file root)))
           (push (Aaronnote--scan-note-file file root) notes))))
+    (let ((by-id (make-hash-table :test #'equal)))
+      (dolist (note notes)
+        (let* ((id (cdr (assoc "id" note)))
+               (current (gethash id by-id))
+               (note-ext (downcase (or (file-name-extension (cdr (assoc "file" note))) "")))
+               (current-ext (downcase (or (and current (file-name-extension (cdr (assoc "file" current)))) ""))))
+          (when (or (null current)
+                    (and (string= note-ext "md")
+                         (not (string= current-ext "md"))))
+            (puthash id note by-id))))
+      (setq notes (hash-table-values by-id)))
+    (let ((by-id (make-hash-table :test #'equal))
+          (by-path (make-hash-table :test #'equal)))
+      (dolist (note notes)
+        (puthash (cdr (assoc "id" note)) note by-id)
+        (puthash (cdr (assoc "path" note)) note by-path)
+        (puthash (file-name-nondirectory (cdr (assoc "path" note))) note by-path))
+      (dolist (note notes)
+        (let (resolved)
+          (dolist (ref (append (cdr (assoc "refs" note)) nil))
+            (when-let* ((target (or (gethash ref by-id)
+                                    (gethash ref by-path)
+                                    (gethash (string-remove-prefix "./" ref) by-path))))
+              (let ((target-id (cdr (assoc "id" target)))
+                    (source-id (cdr (assoc "id" note))))
+                (unless (equal target-id source-id)
+                  (push target-id resolved)
+                  (setcdr (assoc "backlinks" target)
+                          (vconcat
+                           (append (append (cdr (assoc "backlinks" target)) nil)
+                                   (list source-id)))))))
+          (setcdr (assoc "refs" note)
+                  (vconcat (delete-dups (nreverse resolved))))))
+      (dolist (note notes)
+        (setcdr (assoc "backlinks" note)
+                (vconcat (delete-dups (append (cdr (assoc "backlinks" note)) nil)))))))
     (vconcat
      (sort notes
            (lambda (a b)
@@ -247,33 +420,9 @@ When nil, use `yas-snippet-dirs' if it is bound, otherwise
               (downcase (or (cdr (assoc "title" a)) ""))
               (downcase (or (cdr (assoc "title" b)) ""))))))))
 
-(defun Aaronnote--indexed-note-summaries ()
-  "Return indexed Typst note summaries for the frontend, when available."
-  (require 'init-note nil t)
-  (when (and (fboundp 'my/note--node-rows)
-             (fboundp 'my/note--node-plist-from-row))
-    (condition-case nil
-        (progn
-          (when (fboundp 'my/note--ensure-db)
-            (my/note--ensure-db))
-          (let ((rows (my/note--node-rows)))
-            (when rows
-              (vconcat
-               (mapcar
-                (lambda (row)
-                  (let ((node (my/note--node-plist-from-row row)))
-                    `(("id" . ,(plist-get node :id))
-                      ("title" . ,(plist-get node :title))
-                      ("file" . ,(plist-get node :file))
-                      ("tags" . ,(vconcat (or (plist-get node :tags) nil))))))
-                rows)))))
-      (error nil))))
-
 (defun Aaronnote--note-summaries ()
   "Return note summaries for the frontend."
-  (or (Aaronnote--indexed-note-summaries)
-      (Aaronnote--scanned-note-summaries)
-      []))
+  (or (Aaronnote--scanned-note-summaries) []))
 
 (defun Aaronnote--snippet-dirs ()
   "Return readable snippet directories for Aaronnote export."
@@ -412,7 +561,10 @@ When nil, use `yas-snippet-dirs' if it is bound, otherwise
                   ("message" . "Bad save payload"))))))
        ((equal type "open-file")
         (when-let* ((file (alist-get 'file message)))
-          (run-at-time 0 nil #'find-file file)))))))
+          (run-at-time 0 nil #'find-file file)))
+       ((equal type "open-url")
+        (when-let* ((url (alist-get 'url message)))
+          (Aaronnote--open-system-url url)))))))
 
 (defun Aaronnote--ws-on-message (ws frame)
   "Decode WebSocket FRAME from WS."

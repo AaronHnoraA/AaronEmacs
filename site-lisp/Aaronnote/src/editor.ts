@@ -11,6 +11,27 @@ import { markdownInputRules, spaceBreaksStoredMarks } from "./input-rules.ts";
 import { normalizeInlinePlugin } from "./normalize.ts";
 import { schema } from "./schema.ts";
 
+function externalProtocolHref(href: string): boolean {
+  const match = href.match(/^([A-Za-z][\w+.-]*):/);
+  if (!match) return false;
+  return !["http", "https", "mailto"].includes(match[1]!.toLowerCase());
+}
+
+function openExternalHref(href: string): void {
+  const event = new CustomEvent("aaronnote:open-url", {
+    bubbles: true,
+    cancelable: true,
+    detail: { href },
+  });
+  if (document.dispatchEvent(event) && externalProtocolHref(href)) {
+    window.location.href = href;
+    return;
+  }
+  if (!event.defaultPrevented) {
+    window.open(href, "_blank", "noopener,noreferrer");
+  }
+}
+
 // Open `<a>` links on Cmd/Ctrl+click. Inside contenteditable, a plain
 // click moves the caret instead of navigating — opting in to the
 // modifier preserves selection-by-click while letting users follow
@@ -28,7 +49,7 @@ function openLinkOnModClickPlugin(): Plugin {
         const href = a.getAttribute("href");
         if (!href) return false;
         event.preventDefault();
-        window.open(href, "_blank", "noopener,noreferrer");
+        openExternalHref(href);
         return true;
       },
     },

@@ -107,6 +107,10 @@ export class ParserState {
     this.top().content.push(node);
   }
 
+  addInlineTokens(tokens: readonly Token[] = []): void {
+    for (const token of tokens) handleInline(this, token);
+  }
+
   finish(): PMNode {
     while (this.stack.length > 1) this.closeNode();
     const root = this.stack[0]!;

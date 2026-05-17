@@ -88,13 +88,6 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-previewer)
 (require 'init-md)
 (require 'init-ratex)
-(my/require-module-safely 'init-note)
-(my/require-module-safely 'init-note-metadata)
-(my/require-module-safely 'init-note-capture)
-(my/require-module-safely 'init-note-reference)
-(my/require-module-safely 'init-note-agenda)
-(my/require-module-safely 'init-note-graph)
-(my/require-module-safely 'init-note-tools)
 
 ;; standalone apps
 (my/require-module-after-any-feature 'init-babel 'org)

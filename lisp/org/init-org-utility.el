@@ -56,7 +56,6 @@
 (declare-function org-download-clipboard "org-download")
 (declare-function org-download--dir "org-download")
 (declare-function org-download-screenshot "org-download")
-(declare-function my/note-read-node "init-note" (&optional prompt))
 (declare-function vertico--candidate "vertico" (&optional highlight))
 
 (defun my/org-reference--display-math-bounds ()
@@ -263,20 +262,8 @@ the user to fill in."
     (insert (format "[[%s]]" target))))
 
 (defun my/org-reference--read-source ()
-  "Read a source file or note node for reference insertion."
-  (let* ((choice (completing-read "Reference from: "
-                                  '("Note node" "File path")
-                                  nil t))
-         (note-p (string= choice "Note node")))
-    (if note-p
-        (progn
-          (require 'init-note)
-          (let ((node (my/note-read-node "Note node: ")))
-            (list :kind 'note
-                  :file (plist-get node :file)
-                  :id (plist-get node :id)
-                  :title (plist-get node :title))))
-      (let* ((current-file (buffer-file-name (buffer-base-buffer)))
+  "Read a source file for reference insertion."
+  (let* ((current-file (buffer-file-name (buffer-base-buffer)))
              (file (read-file-name "Reference file: "
                                    (or (and current-file
                                             (file-name-directory current-file))

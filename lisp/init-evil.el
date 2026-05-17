@@ -71,7 +71,6 @@
     my/jupyter-manager-mode
     my/jupyter-doctor-mode
     my/compile-board-mode
-    my/note-agenda-mode
     my/org-maintenance-board-mode
     my/org-task-fast-view-mode
     org-agenda-mode
@@ -270,7 +269,6 @@ Emacs state keep their local behavior."
                   my/jupyter-manager-mode
                   my/jupyter-doctor-mode
                   my/compile-board-mode
-                  my/note-agenda-mode
                   my/org-maintenance-board-mode
                   my/org-task-fast-view-mode
                   org-agenda-mode
@@ -299,7 +297,6 @@ Emacs state keep their local behavior."
                   my/jupyter-manager-mode-hook
                   my/jupyter-doctor-mode-hook
                   my/compile-board-mode-hook
-                  my/note-agenda-mode-hook
                   my/org-maintenance-board-mode-hook
                   my/org-task-fast-view-mode-hook
                   org-agenda-mode-hook
@@ -318,8 +315,7 @@ Emacs state keep their local behavior."
   (add-hook 'dirvish-mode-hook #'my/evil-disable-local-mode-h)
   (add-hook 'eww-mode-hook #'my/evil-disable-local-mode-h)
   (add-hook 'xwidget-webkit-mode-hook #'my/evil-disable-local-mode-h)
-  (dolist (hook '(my/note-agenda-mode-hook
-                  my/org-maintenance-board-mode-hook
+  (dolist (hook '(my/org-maintenance-board-mode-hook
                   my/org-task-fast-view-mode-hook
                   org-agenda-mode-hook))
     (add-hook hook #'my/evil-disable-local-mode-h))

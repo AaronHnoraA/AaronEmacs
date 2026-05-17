@@ -1,5 +1,5 @@
 /*
- * Typora-flavored minimal theme.
+ * Paper-flavored minimal theme.
  *
  * Aesthetic only. Light, thin, restrained — closer to a manuscript
  * than a GitHub README. No heading underlines, light borders, soft
@@ -10,12 +10,13 @@
  */
 
 .ProseMirror {
-  font-family: -apple-system, "PingFang SC", "Helvetica Neue", Helvetica,
-    Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-  font-size: 16px;
-  line-height: 1.7;
-  color: #1f1f1f;
+  font-family: var(--aaron-font-english), var(--aaron-font-chinese);
+  font-size: 17.5px;
+  line-height: 1.68;
+  color: var(--aaron-ink, #24201a);
   word-wrap: break-word;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
 }
 
 /* ─── headings ───────────────────────────────────────────────────── */
@@ -25,59 +26,96 @@
 .ProseMirror h4,
 .ProseMirror h5,
 .ProseMirror h6 {
-  margin: 1.6em 0 0.8em;
-  font-weight: 600;
-  line-height: 1.3;
-  color: #1f1f1f;
+  margin: 1.85em 0 0.72em;
+  font-family: var(--aaron-font-heading);
+  font-weight: 700;
+  line-height: 1.22;
+  color: var(--aaron-ink, #1f2522);
 }
 .ProseMirror > :first-child { margin-top: 0; }
-.ProseMirror h1 { font-size: 1.75em; }
-.ProseMirror h2 { font-size: 1.45em; }
-.ProseMirror h3 { font-size: 1.2em; }
-.ProseMirror h4 { font-size: 1.05em; }
-.ProseMirror h5 { font-size: 1em; }
-.ProseMirror h6 { font-size: 0.95em; color: #666; }
+.ProseMirror h1 {
+  margin-bottom: 1.1em;
+  font-size: 2.05em;
+  letter-spacing: 0;
+  text-align: center;
+}
+.ProseMirror h1::after {
+  content: "";
+  display: block;
+  width: 96px;
+  height: 1px;
+  margin: 0.62em auto 0;
+  background: var(--aaron-red, #b31b1b);
+}
+.ProseMirror h2 {
+  font-size: 1.34em;
+  padding-bottom: 0.26em;
+  border-bottom: 1px solid var(--aaron-paper-line, #d9d2c4);
+}
+.ProseMirror h3 {
+  font-size: 1.14em;
+  font-style: italic;
+}
+.ProseMirror h4 { font-size: 1.04em; }
+.ProseMirror h5 { font-size: 1em; color: var(--aaron-muted, #4f5c54); }
+.ProseMirror h6 {
+  font-size: 0.88em;
+  color: var(--aaron-muted, #7a7165);
+  text-transform: uppercase;
+}
 
 /* ─── paragraphs ─────────────────────────────────────────────────── */
-.ProseMirror p { margin: 0 0 1em; }
+.ProseMirror p { margin: 0 0 1.05em; }
+.ProseMirror p:has(> .aaronnote-math-block) {
+  margin: 0.22em 0;
+  line-height: 1.2;
+}
+.ProseMirror p:has(> .aaronnote-math-block) + p:has(> .aaronnote-math-block) {
+  margin-top: -0.08em;
+}
 .ProseMirror p:last-child { margin-bottom: 0; }
 
 /* ─── links ──────────────────────────────────────────────────────── */
 .ProseMirror a {
-  color: #4078c0;
+  color: var(--aaron-link, #2368a2);
   text-decoration: none;
-  border-bottom: 1px solid rgba(64, 120, 192, 0.25);
+  border-bottom: 1px solid color-mix(in srgb, var(--aaron-link, #2368a2), transparent 70%);
 }
 .ProseMirror a:hover {
-  border-bottom-color: #4078c0;
+  color: var(--aaron-link, #184b76);
+  border-bottom-color: currentColor;
 }
 
 /* ─── inline code / pre ──────────────────────────────────────────── */
 .ProseMirror code {
-  font-family: "SF Mono", "Source Code Pro", Consolas, ui-monospace, monospace;
-  font-size: 0.9em;
-  padding: 0.15em 0.35em;
+  font-family: var(--aaron-font-mono);
+  font-size: 0.86em;
+  padding: 0.12em 0.34em;
   margin: 0;
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 3px;
+  color: var(--aaron-ink, #25362e);
+  background: var(--aaron-paper-soft, #f6f1e8);
+  border: 1px solid var(--aaron-paper-line, #d8e4da);
+  border-radius: 2px;
   white-space: break-spaces;
 }
 .ProseMirror pre {
-  font-family: "SF Mono", "Source Code Pro", Consolas, ui-monospace, monospace;
+  font-family: var(--aaron-font-mono);
   font-size: 0.88em;
-  line-height: 1.5;
-  background: #f8f8f8;
-  padding: 12px 14px;
-  margin: 0 0 1em;
-  border-radius: 4px;
+  line-height: 1.56;
+  background: var(--aaron-paper-soft, #f7f5ef);
+  padding: 14px 16px;
+  margin: 0 0 1.2em;
+  border-radius: 2px;
   overflow: auto;
-  border: 1px solid #ececec;
+  border: 1px solid var(--aaron-paper-line, #d9d8cf);
+  border-left: 3px solid var(--aaron-red, #b31b1b);
 }
 .ProseMirror pre code {
   display: inline;
   padding: 0;
   margin: 0;
   background: transparent;
+  border: 0;
   border-radius: 0;
   font-size: 100%;
   white-space: pre;
@@ -85,10 +123,12 @@
 
 /* ─── blockquote ─────────────────────────────────────────────────── */
 .ProseMirror blockquote {
-  margin: 0 0 1em;
-  padding: 0 0 0 1em;
-  color: #666;
-  border-left: 3px solid #ddd;
+  margin: 0 0 1.15em;
+  padding: 0.64em 1em 0.64em 1.05em;
+  color: var(--aaron-muted, #4e554f);
+  background: transparent;
+  border-left: 3px solid var(--aaron-paper-line, #b7ad9e);
+  border-radius: 0;
 }
 .ProseMirror blockquote > :first-child { margin-top: 0; }
 .ProseMirror blockquote > :last-child { margin-bottom: 0; }
@@ -96,7 +136,7 @@
 /* ─── lists ──────────────────────────────────────────────────────── */
 .ProseMirror ul,
 .ProseMirror ol {
-  margin: 0 0 1em;
+  margin: 0 0 1.05em;
   padding-left: 1.6em;
 }
 .ProseMirror ul ul,
@@ -109,28 +149,195 @@
 .ProseMirror hr {
   height: 1px;
   padding: 0;
-  margin: 1.6em 0;
-  background: #ddd;
+  margin: 2em 0;
+  background: linear-gradient(90deg, transparent, var(--aaron-paper-line, #b8aa90) 18%, var(--aaron-paper-line, #b8aa90) 82%, transparent);
   border: 0;
 }
 
 /* ─── tables (cells; layout from widgets.css) ────────────────────── */
 .ProseMirror table th,
 .ProseMirror table td {
-  padding: 6px 10px;
-  border: 1px solid #ddd;
+  padding: 7px 10px;
+  border: 1px solid var(--aaron-paper-line, #d4d1c7);
   vertical-align: top;
 }
 .ProseMirror table th {
   font-weight: 600;
-  background: #fafafa;
+  background: var(--aaron-paper-soft, #f1f2ec);
 }
+.ProseMirror table tr:nth-child(2n) { background: color-mix(in srgb, var(--aaron-paper-soft, #fbfbf7), transparent 35%); }
 
 /* ─── extension marks ────────────────────────────────────────────── */
 .ProseMirror mark {
-  background: #fff3a3;
+  background: #fff0a8;
   color: inherit;
-  padding: 0 0.1em;
+  padding: 0 0.12em;
   border-radius: 2px;
 }
 .ProseMirror del { color: inherit; }
+
+/* ─── org-style theorem/proof blocks ─────────────────────────────── */
+.ProseMirror org-env-block {
+  --block-c: var(--c-note);
+  --block-l: attr(data-label);
+  display: block;
+  margin: 1.2rem 0;
+  overflow: visible;
+  border: 0;
+  border-left: 3px solid color-mix(in srgb, var(--block-c), black 18%);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0.2rem 0 0.35rem 1.15rem;
+  white-space: pre-wrap;
+  color: var(--aaron-ink, #24201a);
+  font-family: var(--aaron-font-english), var(--aaron-font-chinese);
+}
+
+.ProseMirror org-env-block .org-env-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.7rem;
+  padding: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--block-c), black 44%);
+  font-family: var(--aaron-font-english), var(--aaron-font-chinese);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.ProseMirror org-env-block .org-env-heading-title {
+  display: inline-block;
+  min-width: 9ch;
+  width: min(32ch, 58vw);
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--block-c), transparent 45%);
+  padding: 0 0 0.08rem;
+  background: transparent;
+  color: color-mix(in srgb, var(--block-c), black 48%);
+  font: inherit;
+  font-weight: 650;
+  outline: none;
+  cursor: text;
+}
+
+.ProseMirror org-env-block .org-env-heading-title[data-empty="true"]::after {
+  content: none;
+}
+
+.ProseMirror org-env-block .org-env-content {
+  display: block;
+}
+
+.ProseMirror org-env-block .org-env-content a {
+  cursor: pointer;
+  color: color-mix(in srgb, var(--aaron-link, #2368a2), var(--aaron-ink, #24201a) 12%);
+  border-bottom-color: color-mix(in srgb, var(--aaron-link, #2368a2), transparent 48%);
+}
+
+.ProseMirror org-env-block .org-env-content a[href^="zotero:"] {
+  color: color-mix(in srgb, #3f756e, var(--aaron-ink, #24201a) 12%);
+  border-bottom-color: color-mix(in srgb, #3f756e, transparent 42%);
+}
+
+.ProseMirror org-env-block .org-env-content a:hover {
+  border-bottom-color: currentColor;
+}
+
+.ProseMirror org-env-block[data-kind="definition"] { --block-c: var(--c-def); }
+.ProseMirror org-env-block[data-kind="defn"] { --block-c: var(--c-def); }
+.ProseMirror org-env-block[data-kind="theorem"] { --block-c: var(--c-thm); }
+.ProseMirror org-env-block[data-kind="thm"] { --block-c: var(--c-thm); }
+.ProseMirror org-env-block[data-kind="lemma"] { --block-c: var(--c-lemma); }
+.ProseMirror org-env-block[data-kind="corollary"] { --block-c: var(--c-cor); }
+.ProseMirror org-env-block[data-kind="cor"] { --block-c: var(--c-cor); }
+.ProseMirror org-env-block[data-kind="proposition"] { --block-c: var(--c-prop); }
+.ProseMirror org-env-block[data-kind="prop"] { --block-c: var(--c-prop); }
+.ProseMirror org-env-block[data-kind="property"] { --block-c: var(--c-prop); }
+.ProseMirror org-env-block[data-kind="proof"] { --block-c: var(--c-proof); }
+.ProseMirror org-env-block[data-kind="example"] { --block-c: var(--c-example); }
+.ProseMirror org-env-block[data-kind="attention"] { --block-c: var(--c-attend); }
+.ProseMirror org-env-block[data-kind="warning"] { --block-c: var(--c-attend); }
+.ProseMirror org-env-block[data-kind="note"] { --block-c: var(--c-note); }
+.ProseMirror org-env-block[data-kind="info"] { --block-c: var(--c-note); }
+.ProseMirror org-env-block[data-kind="meta"] {
+  --block-c: var(--aaron-muted, #6f6a61);
+  font-size: 0.86em;
+  line-height: 1.45;
+  border-left: 0;
+  padding: 0.35rem 0;
+}
+
+.ProseMirror org-env-block[data-kind="meta"] .org-env-heading,
+.ProseMirror org-env-block[data-kind="meta"] .org-env-content {
+  display: none;
+}
+
+.ProseMirror org-env-block .org-env-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.46rem;
+  align-items: center;
+  white-space: normal;
+}
+
+.ProseMirror org-env-block .org-env-meta-pill {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), var(--aaron-muted, #6f6a61) 18%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--aaron-paper-soft, #f8f4ea), white 28%);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 48%) inset;
+  overflow: hidden;
+}
+
+.ProseMirror org-env-block .org-env-meta-key {
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.52rem 0.18rem 0.62rem;
+  background: color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), transparent 38%);
+  color: color-mix(in srgb, var(--aaron-muted, #6f6a61), black 22%);
+  font: 750 0.78em/1.2 var(--aaron-font-sans, system-ui);
+  text-transform: uppercase;
+}
+
+.ProseMirror org-env-block .org-env-meta-value {
+  min-width: 1ch;
+  max-width: min(58ch, 72vw);
+  padding: 0.18rem 0.7rem 0.18rem 0.5rem;
+  outline: none;
+  color: var(--aaron-ink, #24201a);
+  overflow-wrap: anywhere;
+}
+
+.ProseMirror org-env-block .org-env-meta-value:focus {
+  background: color-mix(in srgb, var(--c-note), transparent 78%);
+}
+
+.ProseMirror org-env-block .org-env-meta-empty {
+  color: var(--aaron-muted, #6f6a61);
+  font-style: italic;
+}
+
+.ProseMirror org-env-block[data-kind="proof"]::after {
+  content: "□";
+  display: block;
+  text-align: right;
+  line-height: 1;
+}
+
+.ProseMirror org-env-block > br:first-child {
+  display: none;
+}
+
+.ProseMirror .katex,
+.ProseMirror .katex * {
+  font-family: var(--aaron-font-math), var(--aaron-font-chinese) !important;
+}
+
+.ProseMirror .katex .mord.mathnormal {
+  font-family: var(--aaron-font-math) !important;
+}

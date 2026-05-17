@@ -31,7 +31,6 @@
 (declare-function websocket-close "websocket" (websocket))
 (declare-function websocket-send-text "websocket" (websocket text))
 (declare-function websocket-frame-text "websocket" (frame))
-(declare-function my/note-open-link-at-file-position "init-note" (file position))
 (autoload 'previewer-workbench "previewer" nil t)
 (defvar company-backends)
 (defvar company-idle-delay)
@@ -288,11 +287,9 @@ Provides a visual cue so the new cursor position is easy to spot."
 (defun my/typst-preview-root (&optional file)
   "Return the project root Tinymist should use for FILE."
   (let* ((file (file-truename (or file buffer-file-name default-directory)))
-         (note-root (when (and (boundp 'my/note-root)
-                               (stringp my/note-root))
-                      (file-truename
-                       (file-name-as-directory
-                        (expand-file-name my/note-root))))))
+         (note-root (file-truename
+                     (file-name-as-directory
+                      (expand-file-name "~/HC/Org")))))
     (file-name-as-directory
      (or (and note-root
               (file-in-directory-p file note-root)
@@ -506,9 +503,7 @@ Provides a visual cue so the new cursor position is easy to spot."
           ("editorScrollTo"
            (let ((file (gethash "filepath" message))
                  (position (gethash "start" message)))
-             (unless (and (fboundp 'my/note-open-link-at-file-position)
-                          (my/note-open-link-at-file-position file position))
-               (my/typst-preview--goto-file-position file position))
+             (my/typst-preview--goto-file-position file position)
              (my/typst-preview--flash-source-cursor)))
           ("syncEditorChanges"
            (when (buffer-live-p source-buffer)

@@ -1,8 +1,57 @@
+@font-face {
+  font-family: "Aaron Excalifont";
+  src:
+    local("Excalifont-Regular"),
+    local("Excalifont Regular"),
+    local("Excalifont");
+}
+
+@font-face {
+  font-family: "Aaron LiuGongQuan";
+  src:
+    local("FZLIUGQKSJF--GBK1-0"),
+    local("FZLiuGongQuanKaiShuJF"),
+    local("方正柳公权楷书 简繁");
+}
+
+@font-face {
+  font-family: "Aaron GFS Neohellenic Math";
+  src:
+    local("GFSNeohellenicMath"),
+    local("GFS Neohellenic Math");
+}
+
 :root {
-  color-scheme: light;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #f5f4ef;
-  color: #24201a;
+  --aaron-font-english: "New Computer Modern", "Libertinus Serif", "Times New Roman", "Iowan Old Style", "New York", Georgia, serif;
+  --aaron-font-chinese: "Aaron LiuGongQuan", "FZLiuGongQuanKaiShuJF", "方正柳公权楷书 简繁", "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", serif;
+  --aaron-font-title: "Aaron Excalifont", "Excalifont", "Aaron LiuGongQuan", "FZLiuGongQuanKaiShuJF", "New Computer Modern", "Times New Roman", serif;
+  --aaron-font-heading: "Aaron Excalifont", "Excalifont", "Aaron LiuGongQuan", "FZLiuGongQuanKaiShuJF", "New Computer Modern", "Times New Roman", serif;
+  --aaron-font-math: "Aaron GFS Neohellenic Math", "GFS Neohellenic Math", KaTeX_Main, "New Computer Modern", "Times New Roman", serif;
+  --aaron-font-sans: "Avenir Next", Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --aaron-font-mono: "JetBrains Mono", "SF Mono", SFMono-Regular, Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --aaron-paper-bg: #eeeae1;
+  --aaron-paper: #f7f4ed;
+  --aaron-paper-soft: #f8f4ea;
+  --aaron-paper-line: #d8d0c2;
+  --aaron-ink: #1e1a16;
+  --aaron-muted: #6c6358;
+  --aaron-faint: #8a8175;
+  --aaron-red: #b31b1b;
+  --aaron-red-dark: #7b1113;
+  --aaron-link: #145c8c;
+  --aaron-shadow: 0 18px 42px rgb(52 39 22 / 12%);
+  --c-def: #f9e2af;
+  --c-thm: #bbf7b8;
+  --c-lemma: #a9cbff;
+  --c-cor: #b4befe;
+  --c-prop: #f5e0dc;
+  --c-proof: #9de7ff;
+  --c-example: #d8b27f;
+  --c-attend: #d79a9a;
+  --c-note: #a8f0e3;
+  font-family: var(--aaron-font-sans);
+  background: var(--aaron-paper-bg);
+  color: var(--aaron-ink);
 }
 
 html,
@@ -21,17 +70,20 @@ input {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  background: var(--aaron-paper-bg);
 }
 
 .aaronnote-toolbar {
-  height: 46px;
+  min-height: 48px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 12px;
-  padding: 0 14px;
-  border-bottom: 1px solid #d8d3c8;
-  background: #fbfaf7;
+  padding: 0 16px;
+  border-top: 4px solid var(--aaron-red);
+  border-bottom: 1px solid var(--aaron-paper-line);
+  background: var(--aaron-paper);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 50%) inset;
 }
 
 .aaronnote-title {
@@ -42,7 +94,9 @@ input {
 }
 
 .aaronnote-title strong {
+  color: var(--aaron-red-dark);
   font-size: 14px;
+  letter-spacing: 0.02em;
 }
 
 .aaronnote-title span {
@@ -50,7 +104,7 @@ input {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #736b5d;
+  color: var(--aaron-muted);
   font-size: 12px;
 }
 
@@ -62,10 +116,10 @@ input {
 
 .aaronnote-actions button,
 .aaronnote-note {
-  border: 1px solid #cfc7b8;
-  background: #ffffff;
-  color: #2d2a24;
-  border-radius: 6px;
+  border: 1px solid var(--aaron-paper-line);
+  background: var(--aaron-paper);
+  color: var(--aaron-ink);
+  border-radius: 3px;
   cursor: pointer;
 }
 
@@ -76,87 +130,68 @@ input {
 
 .aaronnote-actions button:hover,
 .aaronnote-note:hover {
-  border-color: #7e6b50;
-  background: #f7f2e8;
+  border-color: var(--aaron-red);
+  background: var(--aaron-paper-soft);
 }
 
 .aaronnote-status {
   min-width: 84px;
-  color: #5c6554;
+  color: var(--aaron-muted);
   font-size: 12px;
   text-align: right;
 }
 
 .aaronnote-vim-mode {
   min-width: 48px;
-  border: 1px solid #d8d3c8;
-  border-radius: 6px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
   padding: 3px 7px;
-  color: #6f5f45;
-  background: #f5f0e8;
+  color: var(--aaron-muted);
+  background: var(--aaron-paper-soft);
   font: 600 11px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   text-align: center;
 }
 
 [data-vim-mode="normal"] .aaronnote-vim-mode {
-  color: #174335;
-  background: #e7f1eb;
-  border-color: #a8c7b7;
+  color: #1b5d45;
+  background: color-mix(in srgb, #e7f1eb, var(--aaron-paper) 20%);
+  border-color: #8fb6a3;
 }
 
-[data-vim-mode="normal"] .aaronnote-editor .ProseMirror,
-[data-vim-mode="normal"] .aaronnote-editor .typora-web-source {
-  caret-color: transparent;
+[data-vim-mode="visual"] .aaronnote-vim-mode {
+  color: #744108;
+  background: color-mix(in srgb, #fff1d6, var(--aaron-paper) 20%);
+  border-color: #d2a45b;
+}
+
+[data-vim-mode="visual-line"] .aaronnote-vim-mode {
+  min-width: 82px;
+  color: #744108;
+  background: color-mix(in srgb, #fff1d6, var(--aaron-paper) 20%);
+  border-color: #d2a45b;
 }
 
 .aaronnote-body {
-  min-height: 0;
+  min-height: calc(100vh - 46px);
   flex: 1;
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-}
-
-.aaronnote-sidebar {
-  min-height: 0;
-  border-right: 1px solid #d8d3c8;
-  background: #efede6;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.aaronnote-sidebar-section {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.aaronnote-sidebar-section:first-child {
-  flex: 1 1 45%;
-}
-
-.aaronnote-sidebar-section:last-child {
-  flex: 1 1 55%;
-}
-
-.aaronnote-sidebar input {
-  width: 100%;
-  box-sizing: border-box;
-  height: 32px;
-  border: 1px solid #cfc7b8;
-  border-radius: 6px;
-  padding: 0 9px;
-  background: #fffdfa;
+  display: block;
 }
 
 .aaronnote-note-list {
   min-height: 0;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.aaronnote-note-group {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+  border-bottom: 1px solid var(--aaron-paper-line);
+  padding-bottom: 4px;
+  color: var(--aaron-muted);
+  font: 800 11px/1.2 var(--aaron-font-sans);
+  text-transform: uppercase;
 }
 
 .aaronnote-snippet {
@@ -165,29 +200,53 @@ input {
 }
 
 .aaronnote-note {
-  min-height: 32px;
-  padding: 6px 8px;
+  min-height: 38px;
+  padding: 8px 10px;
   text-align: left;
+  overflow: hidden;
+  display: grid;
+  gap: 3px;
+}
+
+.aaronnote-note strong,
+.aaronnote-note span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.aaronnote-note span {
+  color: var(--aaron-muted);
+  font-size: 11px;
+}
+
 .aaronnote-empty {
-  color: #81786b;
+  color: var(--aaron-muted);
   font-size: 12px;
   padding: 8px 2px;
 }
 
 .aaronnote-editor {
   min-width: 0;
-  padding: 24px 32px 48px;
+  min-height: calc(100vh - 46px);
+  padding: 38px 32px 72px;
   overflow: auto;
+  background: var(--aaron-paper);
+}
+
+.aaronnote-editor.is-source-mode {
+  padding: 0;
 }
 
 .aaronnote-editor .typora-web-wrap {
-  max-width: 880px;
+  max-width: 900px;
   margin: 0 auto;
+}
+
+.aaronnote-editor.is-source-mode .typora-web-wrap {
+  max-width: none;
+  margin: 0;
 }
 
 .aaronnote-editor .ProseMirror,
@@ -196,14 +255,340 @@ input {
   box-sizing: border-box;
 }
 
+.aaronnote-editor .ProseMirror {
+  padding: 48px 24px 72px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.aaronnote-editor.is-source-mode .typora-web-source {
+  min-height: calc(100vh - 46px);
+  padding: 32px 42px 80px;
+  background: var(--aaron-paper);
+}
+
+.aaronnote-notes,
+.aaronnote-graph {
+  min-height: calc(100vh - 46px);
+  box-sizing: border-box;
+  padding: 48px 32px 64px;
+  background: var(--aaron-paper-bg);
+}
+
+.aaronnote-notes-inner,
+.aaronnote-graph-inner {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 40px 44px;
+  background: var(--aaron-paper);
+  border: 1px solid var(--aaron-paper-line);
+  box-shadow: var(--aaron-shadow);
+}
+
+.aaronnote-notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.aaronnote-notes-head h1 {
+  margin: 0;
+  color: var(--aaron-red-dark);
+  font: 750 30px/1.1 "Avenir Next", Inter, ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0;
+}
+
+.aaronnote-notes input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 38px;
+  margin-bottom: 14px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  padding: 0 10px;
+  background: var(--aaron-paper);
+  color: var(--aaron-ink);
+}
+
+.aaronnote-graph-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.aaronnote-graph-toolbar input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 38px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  padding: 0 10px;
+  background: var(--aaron-paper);
+  color: var(--aaron-ink);
+}
+
+.aaronnote-graph-toolbar span {
+  color: var(--aaron-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.aaronnote-graph-grid {
+  min-height: 480px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 14px;
+}
+
+.aaronnote-graph-canvas,
+.aaronnote-graph-focus {
+  min-height: 480px;
+  border: 1px solid var(--aaron-paper-line);
+  background: var(--aaron-paper-soft);
+}
+
+.aaronnote-graph-canvas {
+  overflow: hidden;
+  position: relative;
+}
+
+.aaronnote-graph-canvas svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 480px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.aaronnote-graph-links line {
+  stroke: #9b8f7f;
+  stroke-width: 1.1;
+  opacity: 0.42;
+}
+
+.aaronnote-graph-links line.is-active {
+  stroke: var(--aaron-red);
+  stroke-width: 1.8;
+  opacity: 0.9;
+}
+
+.aaronnote-graph-node {
+  cursor: grab;
+}
+
+.aaronnote-graph-node circle {
+  fill: #5f8f83;
+  stroke: #ffffff;
+  stroke-width: 1.4;
+}
+
+.aaronnote-graph-node text {
+  max-width: 120px;
+  fill: var(--aaron-muted);
+  font: 11px/1 var(--aaron-font-sans);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--aaron-paper-soft);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.aaronnote-graph-node.is-active circle {
+  fill: var(--aaron-red);
+  stroke: var(--aaron-red-dark);
+  stroke-width: 2;
+}
+
+.aaronnote-graph-node.is-related circle {
+  fill: var(--aaron-link);
+}
+
+.aaronnote-graph-node.is-muted {
+  opacity: 0.28;
+}
+
+.aaronnote-graph-focus {
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 16px;
+}
+
+.aaronnote-graph-focus-head {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.aaronnote-graph-focus-head span,
+.aaronnote-graph-meta,
+.aaronnote-graph-tags {
+  color: var(--aaron-muted);
+  font-size: 12px;
+}
+
+.aaronnote-graph-focus-head strong {
+  color: var(--aaron-red-dark);
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+.aaronnote-graph-focus p {
+  margin: 0 0 12px;
+  color: var(--aaron-ink);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.aaronnote-graph-meta,
+.aaronnote-graph-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.aaronnote-graph-meta span,
+.aaronnote-graph-tags span {
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  padding: 3px 6px;
+  background: var(--aaron-paper);
+}
+
+.aaronnote-graph-open,
+.aaronnote-graph-related button {
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  background: var(--aaron-paper);
+  color: var(--aaron-ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.aaronnote-graph-open {
+  margin-bottom: 12px;
+  text-align: center;
+  color: var(--aaron-red-dark);
+  font-weight: 700;
+}
+
+.aaronnote-graph-related {
+  display: grid;
+  gap: 6px;
+}
+
+.aaronnote-graph-related span {
+  color: var(--aaron-muted);
+  font-size: 12px;
+}
+
+.aaronnote-notes-head button {
+  height: 32px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  background: var(--aaron-paper);
+  color: var(--aaron-ink);
+  cursor: pointer;
+}
+
+.aaronnote-notes-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 16px;
+  border-bottom: 1px solid var(--aaron-paper-line);
+  padding-bottom: 8px;
+}
+
+.aaronnote-notes-tabs button,
+.aaronnote-management-grid button {
+  min-height: 32px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  background: var(--aaron-paper);
+  color: var(--aaron-ink);
+  cursor: pointer;
+}
+
+.aaronnote-notes-tabs button {
+  padding: 0 10px;
+}
+
+.aaronnote-notes-tabs button.is-active {
+  border-color: var(--aaron-red);
+  color: var(--aaron-red-dark);
+  background: var(--aaron-paper-soft);
+  font-weight: 700;
+}
+
+.aaronnote-management-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.aaronnote-management-grid button {
+  min-height: 64px;
+  text-align: center;
+  font-weight: 750;
+}
+
+.aaronnote-management-status {
+  margin-top: 16px;
+  border: 1px solid var(--aaron-paper-line);
+  background: var(--aaron-paper-soft);
+  padding: 14px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--aaron-muted);
+}
+
+.aaronnote-management-status strong {
+  color: var(--aaron-red-dark);
+  font-size: 24px;
+}
+
+[data-vim-mode="normal"] .aaronnote-editor .ProseMirror,
+[data-vim-mode="visual"] .aaronnote-editor .ProseMirror,
+[data-vim-mode="visual-line"] .aaronnote-editor .ProseMirror,
+[data-vim-mode="normal"] .aaronnote-editor .typora-web-source,
+[data-vim-mode="visual"] .aaronnote-editor .typora-web-source,
+[data-vim-mode="visual-line"] .aaronnote-editor .typora-web-source {
+  caret-color: transparent;
+}
+
+.aaronnote-vim-cursor {
+  position: fixed;
+  z-index: 70;
+  background: color-mix(in srgb, var(--aaron-ink), transparent 25%);
+  border-radius: 1px;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+
+[data-vim-mode="visual"] .aaronnote-vim-cursor,
+[data-vim-mode="visual-line"] .aaronnote-vim-cursor {
+  background: rgb(148 95 28 / 72%);
+}
+
 .aaronnote-editor .typora-web-source {
   width: 100%;
   resize: none;
-  border: 1px solid #d8d3c8;
-  border-radius: 8px;
-  background: #fffdfa;
-  padding: 20px;
-  color: #24201a;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 48px 24px 72px;
+  color: var(--aaron-ink);
+  box-shadow: none;
 }
 
 .aaronnote-math-inline {
@@ -213,8 +598,10 @@ input {
 
 .aaronnote-math-block {
   display: block;
-  margin: 0.9em 0;
-  overflow-x: auto;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0.22em auto;
+  overflow: visible;
   text-align: center;
 }
 
@@ -222,7 +609,7 @@ input {
   color: #9f1239;
   background: #fff1f2;
   border: 1px solid #fecdd3;
-  border-radius: 4px;
+  border-radius: 3px;
   padding: 0.08em 0.32em;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -232,10 +619,10 @@ input {
   position: fixed;
   z-index: 50;
   box-sizing: border-box;
-  border: 1px solid #b9ad9c;
-  border-radius: 8px;
-  background: #fffdfa;
-  box-shadow: 0 16px 40px rgb(45 42 36 / 18%);
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 4px;
+  background: var(--aaron-paper);
+  box-shadow: var(--aaron-shadow);
 }
 
 .aaronnote-snippet-popup {
@@ -248,21 +635,21 @@ input {
   width: 100%;
   min-height: 32px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 3px;
   display: grid;
   grid-template-columns: minmax(64px, auto) minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   padding: 5px 8px;
   background: transparent;
-  color: #2d2a24;
+  color: var(--aaron-ink);
   cursor: pointer;
   text-align: left;
 }
 
 .aaronnote-snippet-option:hover,
 .aaronnote-snippet-option.is-active {
-  background: #ede6d8;
+  background: var(--aaron-paper-soft);
 }
 
 .aaronnote-snippet-option-key {
@@ -277,7 +664,7 @@ input {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #736b5d;
+  color: var(--aaron-muted);
   font-size: 11px;
 }
 
@@ -286,11 +673,111 @@ input {
   max-height: 240px;
   overflow: auto;
   padding: 10px 12px;
-  color: #24201a;
+  color: var(--aaron-ink);
 }
 
 .aaronnote-math-preview.is-display {
   padding: 12px 16px;
+}
+
+.aaronnote-selection-tool {
+  position: fixed;
+  z-index: 60;
+  height: 30px;
+  border: 1px solid var(--aaron-red);
+  border-radius: 3px;
+  background: var(--aaron-red);
+  color: #ffffff;
+  cursor: pointer;
+  font: 700 12px/1 "Avenir Next", Inter, ui-sans-serif, system-ui, sans-serif;
+  box-shadow: 0 10px 26px rgb(67 39 25 / 18%);
+}
+
+.aaronnote-selection-tool:hover {
+  background: var(--aaron-red-dark);
+  border-color: var(--aaron-red-dark);
+}
+
+.aaronnote-floating-toc {
+  position: fixed;
+  right: 22px;
+  top: 78px;
+  z-index: 45;
+  width: 272px;
+  max-height: min(520px, calc(100vh - 120px));
+  overflow: hidden;
+  border: 1px solid var(--aaron-paper-line);
+  background: color-mix(in srgb, var(--aaron-paper), transparent 7%);
+  box-shadow: var(--aaron-shadow);
+  backdrop-filter: blur(8px);
+}
+
+.aaronnote-floating-toc > button {
+  width: 100%;
+  height: 36px;
+  border: 0;
+  border-bottom: 1px solid var(--aaron-paper-line);
+  background: var(--aaron-paper-soft);
+  color: var(--aaron-red-dark);
+  cursor: pointer;
+  font: 750 12px/1 "Avenir Next", Inter, ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.08em;
+}
+
+.aaronnote-floating-toc nav {
+  max-height: 480px;
+  overflow: auto;
+  padding: 8px;
+}
+
+.aaronnote-floating-toc.is-collapsed {
+  width: 56px;
+}
+
+.aaronnote-floating-toc.is-collapsed nav {
+  display: none;
+}
+
+.aaronnote-toc-item {
+  width: 100%;
+  min-height: 28px;
+  border: 0;
+  border-radius: 2px;
+  padding: 6px 8px 6px calc(8px + var(--toc-depth) * 12px);
+  background: transparent;
+  color: var(--aaron-muted);
+  cursor: pointer;
+  text-align: left;
+  font: 12px/1.28 "Avenir Next", Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.aaronnote-toc-item:hover,
+.aaronnote-toc-item.is-active {
+  background: var(--aaron-paper-soft);
+  color: var(--aaron-red-dark);
+}
+
+.aaronnote-toc-item.is-active {
+  box-shadow: inset 3px 0 0 var(--aaron-red);
+}
+
+.aaronnote-toc-section {
+  margin: 14px 0 6px;
+  padding: 10px 8px 0;
+  border-top: 1px solid var(--aaron-paper-line);
+  color: var(--aaron-muted);
+  font: 800 11px/1.2 "Avenir Next", Inter, ui-sans-serif, system-ui, sans-serif;
+  text-transform: uppercase;
+}
+
+.aaronnote-toc-related {
+  color: var(--aaron-link);
+}
+
+.aaronnote-toc-empty {
+  padding: 8px;
+  color: var(--aaron-muted);
+  font-size: 12px;
 }
 
 @media (max-width: 760px) {
@@ -309,17 +796,37 @@ input {
     text-align: left;
   }
 
-  .aaronnote-body {
+  .aaronnote-editor {
+    padding: 14px;
+  }
+
+  .aaronnote-editor .ProseMirror,
+  .aaronnote-editor .typora-web-source {
+    padding: 24px 20px 36px;
+  }
+
+  .aaronnote-notes,
+  .aaronnote-graph {
+    padding: 14px;
+  }
+
+  .aaronnote-notes-inner,
+  .aaronnote-graph-inner {
+    padding: 22px 18px;
+  }
+
+  .aaronnote-graph-toolbar,
+  .aaronnote-graph-grid {
     grid-template-columns: 1fr;
   }
 
-  .aaronnote-sidebar {
-    max-height: 170px;
-    border-right: 0;
-    border-bottom: 1px solid #d8d3c8;
+  .aaronnote-graph-focus {
+    min-height: 220px;
   }
 
-  .aaronnote-editor {
-    padding: 16px;
+  .aaronnote-floating-toc {
+    right: 12px;
+    top: auto;
+    bottom: 12px;
   }
 }
