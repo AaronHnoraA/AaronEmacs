@@ -1,15 +1,7 @@
 # Typst Math Macros
 
-这份表维护 note 里的数学宏和对应 snippet。宏源文件是
-[lisp/note/typst/math.typ](../lisp/note/typst/math.typ)，同步后落到 note 根目录的
-`/_typst/math.typ`。日常 note 仍然只需要：
-
-```typst
-#import "/_typst/note.typ": *
-#show: note-entry
-```
-
-[lisp/note/typst/note.typ](../lisp/note/typst/note.typ) 会 import `/_typst/math.typ` 并 re-export。
+这份表维护过去 Typst 写作里用过的数学宏和对应 snippet。当前 note helper 已经移除；
+这里保留的是宏设计和 snippet 对照，供后续独立 Typst 模板继续参考。
 
 ## 宏和 snippet 的分工
 

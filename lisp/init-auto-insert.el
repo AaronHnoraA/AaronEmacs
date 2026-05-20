@@ -22,7 +22,7 @@
 
 (defcustom my/template-current
   '((org . "default.org")
-    (typst . "default.typ")
+    (typst . "academic-report.typ")
     (c . "default.c")
     (cc . "default.cc")
     (js . "default.js")
@@ -70,10 +70,7 @@ precedence over `my/template-current' when choosing the template file.")
   '(("assignment.typ" . "notes/assignment.typ")
     ("beamer.typ" . "notes/beamer.typ")
     ("rho.typ" . "notes/rho.typ")
-    ("aleph-notas.typ" . "notes/aleph-notas.typ")
-    ("note.typ" . "lisp/note/typst/note.typ")
-    ("math.typ" . "lisp/note/typst/math.typ")
-    ("extension.typ" . "lisp/note/typst/extension.typ"))
+    ("aleph-notas.typ" . "notes/aleph-notas.typ"))
   "Typst style symlinks created below a project's `_typst' directory.")
 
 (defun my/template--safe-kinds-p (value)

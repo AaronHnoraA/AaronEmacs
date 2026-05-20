@@ -2,7 +2,7 @@
 
 A macOS-first Emacs workstation for local software work, SSH/TRAMP remote editing, Org-based knowledge work, and a tightly integrated terminal/browser/AI toolchain.
 
-This is not a minimal starter kit, and it is not trying to be a zero-assumption cross-platform distribution. It is a long-lived personal system built around one idea: coding, project navigation, remote work, note-taking, research, and publishing should share the same operating surface.
+This is not a minimal starter kit, and it is not trying to be a zero-assumption cross-platform distribution. It is a long-lived personal system built around one idea: coding, project navigation, remote work, research, and publishing should share the same operating surface.
 
 ## Positioning
 
@@ -20,7 +20,7 @@ This configuration is designed to solve a concrete set of problems:
 - Programming and debugging
   The default route is `eglot`, with `lsp-mode` used selectively where needed. Completion, diagnostics, build/test, debugging, tree-sitter, snippets, code navigation, and an on-demand SQL/database client are already wired together.
 - Org and research writing
-  Agenda, capture, Typst notes, LaTeX preview, AUCTeX, Jupyter, citations, and PDF workflows are treated as long-term maintained parts of the system.
+  Agenda, capture, LaTeX preview, AUCTeX, Jupyter, citations, and PDF workflows are treated as long-term maintained parts of the system.
 - Remote work and terminals
   TRAMP and `my/vterm-ssh` are first-class. The goal is not merely to “support remote files”, but to make remote work part of the default workflow.
 - Browser and system integration
@@ -63,7 +63,6 @@ Detailed operational documentation lives in [`docs/`](docs/). The documents them
 - First setup and dependencies: [docs/quick-start.md](docs/quick-start.md)
 - Daily usage and keybindings: [docs/daily-usage.md](docs/daily-usage.md)
 - Project workflow: [docs/project-guide.md](docs/project-guide.md)
-- Typst note roam workflow: [docs/note-guide.md](docs/note-guide.md)
 - Org inside Emacs: [docs/org-guide.md](docs/org-guide.md)
 - Programming, LSP, remote work, terminals, AI: [docs/dev-guide.md](docs/dev-guide.md)
 - Configuration cookbook: [docs/settings-cookbook.md](docs/settings-cookbook.md)

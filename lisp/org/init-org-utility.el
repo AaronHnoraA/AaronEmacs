@@ -264,17 +264,17 @@ the user to fill in."
 (defun my/org-reference--read-source ()
   "Read a source file for reference insertion."
   (let* ((current-file (buffer-file-name (buffer-base-buffer)))
-             (file (read-file-name "Reference file: "
-                                   (or (and current-file
-                                            (file-name-directory current-file))
-                                       default-directory)
-                                   current-file
-                                   t
-                                   (and current-file
-                                        (file-name-nondirectory current-file)))))
-        (list :kind 'file
-              :file (expand-file-name file)
-              :title (file-name-base file))))))
+         (file (read-file-name "Reference file: "
+                               (or (and current-file
+                                        (file-name-directory current-file))
+                                   default-directory)
+                               current-file
+                               t
+                               (and current-file
+                                    (file-name-nondirectory current-file)))))
+    (list :kind 'file
+          :file (expand-file-name file)
+          :title (file-name-base file))))
 
 (defun my/org-reference--candidate-line ()
   "Return a compact preview line at point."

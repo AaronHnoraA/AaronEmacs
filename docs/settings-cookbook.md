@@ -22,12 +22,8 @@
 文件：
 
 - [lisp/init-base.el](../lisp/init-base.el)
-- [lisp/note/init-note.el](../lisp/note/init-note.el)
-- [lisp/note/typst/note.typ](../lisp/note/typst/note.typ)
-- [lisp/note/typst/math.typ](../lisp/note/typst/math.typ)
 - [lisp/init-text.el](../lisp/init-text.el)
 - [lisp/init-auctex.el](../lisp/init-auctex.el)
-- `~/HC/Org/_typst/publish.typ`
 
 重点变量：
 
@@ -46,14 +42,6 @@
 
 - `lisp/init-base.el`
   基础字体族、字号、中文 fontset 绑定、共享排版 helper。
-- `lisp/note/init-note.el`
-  Typst note 根目录、索引、跳转、预览和 helper 写入。
-- `lisp/note/typst/note.typ`
-  Typst note 的页面、字体、标题、卡片块和跨 note helper。
-- `lisp/note/typst/math.typ`
-  TCS、量子计算、代数、计算和物理常用数学宏；宏表见 [typst-math-macros.md](typst-math-macros.md)。
-- `~/HC/Org/_typst/publish.typ`
-  发布 PDF 的页面、字体和视觉补齐；只影响 `make publish`，不影响 Emacs 里的日常 preview。
 - `lisp/init-text.el`
   Markdown 里什么时候启用 prose 排版。
 - `lisp/init-auctex.el`
@@ -63,51 +51,7 @@
 
 - `M-x my/font-reset-all`
 
-## 3. 我要改 Note 根目录
-
-文件：
-
-- [lisp/note/init-note.el](../lisp/note/init-note.el)
-
-重点变量：
-
-- `my/note-root`
-- `my/note-roam-dir`
-- `my/note-db-file`
-- `my/note-style-directory`
-
-如果你迁移目录，建议一起检查：
-
-- `templates/typst/`
-- `notes/*.typ`
-- `my/template-typst-style-links`
-- Tinymist / Typst 的 project root
-
-## 4. 我要改 Note / Typst 写作入口
-
-文件：
-
-- [lisp/note/init-note.el](../lisp/note/init-note.el)
-- [lisp/note/init-note-tools.el](../lisp/note/init-note-tools.el)
-- [lisp/init-macos.el](../lisp/init-macos.el)
-- [lisp/init-auto-insert.el](../lisp/init-auto-insert.el)
-
-这里集中维护：
-
-- `C-c n ...` 的 Typst note map
-- `H-o ...` 的 macOS note 前缀
-- `H-y` / `C-c n y` 的图片粘贴
-- `C-c n z` / `H-o z` 的 Zotero metadata 填充
-- `templates/typst/assignment.typ` 插入时创建项目内 `_typst/*.typ` 软链
-
-发布入口不在 Emacs 配置仓库里，而在 `~/HC/Org`：
-
-- `make publish`
-  扫描 `roam/**/*.typ`，增量编译 `public/roam/**/*.pdf`，刷新 archive / graph 数据。
-- `~/HC/Org/_typst/publish.typ`
-  发布 PDF 专用 Typst 样式。不要为 PDF 视觉补一个 note CSS；PDF 里的视觉缺口直接用 Typst 补。
-
-## 5. 我要改 AI 助手配置
+## 3. 我要改 AI 助手配置
 
 文件：
 
@@ -383,45 +327,7 @@ emacs --debug-init -q -l ./bootstrap.el
 - `init-windows.el`
   `dirvish` 的 UI 和键位
 
-## 14. 我要改 Typst note 样式
-
-文件：
-
-- [lisp/note/typst/note.typ](../lisp/note/typst/note.typ)
-- [lisp/note/typst/math.typ](../lisp/note/typst/math.typ)
-- [lisp/note/typst/extension.typ](../lisp/note/typst/extension.typ)
-- `~/HC/Org/_typst/publish.typ`
-- [notes/assignment.typ](../notes/assignment.typ)
-- [notes/rho.typ](../notes/rho.typ)
-- [notes/aleph-notas.typ](../notes/aleph-notas.typ)
-
-职责：
-
-- `lisp/note/typst/note.typ`
-  日常长期 note 的页面、字体、标题、目录、卡片块和跨 note helper。`M-x my/note-db-sync`
-  会把 note 根目录的 `/_typst/note.typ` 链到这里。
-- `lisp/note/typst/math.typ`
-  日常 note 的数学记号模块。`note.typ` 会 re-export 它，`M-x my/note-db-sync`
-  会把 note 根目录的 `/_typst/math.typ` 链到这里。
-- `lisp/note/typst/extension.typ`
-  日常 note 的第三方 Typst package 配置层。这里维护 `codly` 代码块配置，以及
-  pseudocode、diagram、automata、quantum circuit 和 CeTZ canvas 等可选写作别名；
-  `M-x my/note-db-sync` 会把 note 根目录的 `/_typst/extension.typ` 链到这里。
-- `lisp/note/typst/publish.typ`
-  网站发布时的 PDF 样式。`bin/publish-site` 会临时把 note 里的 `"/_typst/note.typ"`
-  import 指到 note 根目录的 `/_typst/publish.typ` 软链，所以公开 PDF 的页眉页脚、纸张、标题、目录和卡片视觉都在这里补。
-- `lisp/note/assets/`
-  网站壳使用的 `css/`、`js/`、`homepage.html` 和 `notes.html` 源文件。`~/HC/Org`
-  根目录下的同名静态文件通过软链指向这里；`public/` 仍由发布脚本生成自包含文件。
-- `notes/assignment.typ`
-  项目外 assignment 模板样式。
-- `notes/rho.typ` / `notes/aleph-notas.typ`
-  从旧 LaTeX class 迁过来的额外写作样式。
-
-日常 note、publish 样式和网站静态资源都通过项目根目录里的软链消费。改完 Emacs
-配置里的源文件后，旧项目不需要复制文件；只要软链存在，重新编译或发布即可吃到新版本。
-
-## 15. 我要改运行时状态目录
+## 14. 我要改运行时状态目录
 
 文件：
 
@@ -436,7 +342,7 @@ emacs --debug-init -q -l ./bootstrap.el
 
 现在所有这些都写到 [var/](../var/)。
 
-## 16. 我要改新建文件模板（auto-insert）
+## 15. 我要改新建文件模板（auto-insert）
 
 文件：
 
@@ -458,15 +364,12 @@ emacs --debug-init -q -l ./bootstrap.el
 
 Typst 模板集中在 [templates/typst/](../templates/typst/)。当前 assignment 模板会
 导入项目根目录下的 `/_typst/assignment.typ`；插入模板时 Emacs 会自动创建这些
-`_typst/*.typ` 软链，样式源文件统一维护在 [notes/](../notes/) 和
-[lisp/note/typst/](../lisp/note/typst/)。
+`_typst/*.typ` 软链，样式源文件统一维护在 [notes/](../notes/)。
 
-其中 `default.typ` 以及 research / proof / experiment / meeting / writing 等模板是
-Typst note 模板，会导入 `/_typst/note.typ`。`academic-report.typ`、
-`manuscript-review.typ`、`rebuttal-letter.typ`、`longform-book.typ`、
-`project-financial-report.typ`、`lab-report.typ`、`grant-proposal.typ` 是普通独立
-Typst 文档模板，不依赖 note helper。`touying-simple.typ` 是 Touying slides 模板，
-也保持独立，不进入 note helper。
+`default.typ`、`academic-report.typ`、`manuscript-review.typ`、
+`rebuttal-letter.typ`、`longform-book.typ`、`project-financial-report.typ`、
+`lab-report.typ`、`grant-proposal.typ` 是普通独立 Typst 文档模板。
+`touying-simple.typ` 是 Touying slides 模板。
 
 项目内按目录开关（`.dir-locals.el`）：
 

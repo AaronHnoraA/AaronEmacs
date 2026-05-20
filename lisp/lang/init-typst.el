@@ -286,15 +286,9 @@ Provides a visual cue so the new cursor position is easy to spot."
 
 (defun my/typst-preview-root (&optional file)
   "Return the project root Tinymist should use for FILE."
-  (let* ((file (file-truename (or file buffer-file-name default-directory)))
-         (note-root (file-truename
-                     (file-name-as-directory
-                      (expand-file-name "~/HC/Org")))))
+  (let ((file (file-truename (or file buffer-file-name default-directory))))
     (file-name-as-directory
-     (or (and note-root
-              (file-in-directory-p file note-root)
-              note-root)
-         (my/typst-preview--root-candidate file "typst.toml")
+     (or (my/typst-preview--root-candidate file "typst.toml")
          (my/typst-preview--root-candidate file ".git")
          (file-name-directory file)))))
 

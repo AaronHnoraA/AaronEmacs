@@ -199,16 +199,10 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 ## 6. 路径约定
 
-### Notes
+### Typst
 
-[lisp/note/init-note.el](../lisp/note/init-note.el) 里默认写死：
-
-- `~/HC/Org/`
-- `~/HC/Org/roam/`
-
-Typst note 共享样式在 [lisp/note/typst/note.typ](../lisp/note/typst/note.typ)。
 项目外写 assignment 时，用 `templates/typst/assignment.typ` 插入模板；插入时会在项目根目录创建
-`_typst/*.typ` 软链，指向这里维护的样式文件。
+`_typst/*.typ` 软链，指向 [notes/](../notes/) 里维护的样式文件。
 
 ### AI 助手
 
@@ -267,15 +261,14 @@ Typst note 共享样式在 [lisp/note/typst/note.typ](../lisp/note/typst/note.ty
 建议启动 Emacs 后依次确认：
 
 1. 主题和字体是否正常
-2. `M-x my/note-db-sync` 是否能重建 Typst note 索引
-3. `C-x C-f` / `C-x b` / `C-s` 是否符合预期
-4. `M-x my/vterm-ssh` 是否能读到 SSH 主机
-5. `C-c C-'` 是否能打开 claude-code-ide 菜单（需要 claude CLI 已安装）
-6. `C-x g` 是否能打开 Magit
+2. `C-x C-f` / `C-x b` / `C-s` 是否符合预期
+3. `M-x my/vterm-ssh` 是否能读到 SSH 主机
+4. `C-c C-'` 是否能打开 claude-code-ide 菜单（需要 claude CLI 已安装）
+5. `C-x g` 是否能打开 Magit
 
 ## 8. 下一步看什么
 
 - 日常使用：看 [daily-usage.md](daily-usage.md)
-- Notes / Typst 写作：看 [note-guide.md](note-guide.md)
+- Typst 写作：看 [settings-cookbook.md](settings-cookbook.md)
 - 编程 / 远程：看 [dev-guide.md](dev-guide.md)
 - 想自己改：看 [settings-cookbook.md](settings-cookbook.md)
