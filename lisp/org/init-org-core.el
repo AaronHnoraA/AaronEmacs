@@ -39,7 +39,7 @@
 
 ;; References
 (defvar pv/org-refile-file (expand-file-name "refile.org" my-org-root))
-(defvar pv/org-bibtex-dir (expand-file-name "references/" my-org-root))
+(defvar pv/org-bibtex-dir (expand-file-name "references/" my-org-note-dir))
 (defvar pv/org-bibtex-files (list (expand-file-name "references.bib" pv/org-bibtex-dir)))
 
 ;; Ensure core directories exist (Optimized)
