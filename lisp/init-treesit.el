@@ -17,6 +17,7 @@
         (html       "https://github.com/tree-sitter/tree-sitter-html")
         (java       "https://github.com/tree-sitter/tree-sitter-java")
         (javascript "https://github.com/tree-sitter/tree-sitter-javascript")
+        (jsdoc      "https://github.com/tree-sitter/tree-sitter-jsdoc")
         (json       "https://github.com/tree-sitter/tree-sitter-json")
         (python     "https://github.com/tree-sitter/tree-sitter-python")
         (rust       "https://github.com/tree-sitter/tree-sitter-rust")
@@ -47,7 +48,7 @@
 (use-package treesit-auto
   :ensure t
   :custom
-  (treesit-auto-install 'prompt)          ;; 关键：不要在打开文件时提示/安装
+  (treesit-auto-install nil)              ;; 关键：不要在打开文件时提示/安装
   :config
   (treesit-auto-add-to-auto-mode-alist 'all)
   ;; Keep Markdown on classic `markdown-mode`; its UI/customizations are better
@@ -57,6 +58,19 @@
          (lambda (entry)
            (equal entry '("\\.md\\'" . markdown-ts-mode)))
          auto-mode-alist))
+  ;; `js-ts-mode' can require the companion `jsdoc' grammar on newer Emacs
+  ;; builds.  Route JS through `my/js-auto-mode' so missing grammars fall back
+  ;; to `js2-mode' instead of prompting while opening files.
+  (setq auto-mode-alist
+        (cl-remove-if
+         (lambda (entry)
+           (and (member (car-safe entry) '("\\.js\\'" "\\.mjs\\'" "\\.cjs\\'"))
+                (eq (cdr-safe entry) 'js-ts-mode)))
+         auto-mode-alist))
+  (when (fboundp 'my/js-auto-mode)
+    (add-to-list 'auto-mode-alist '("\\.cjs\\'" . my/js-auto-mode))
+    (add-to-list 'auto-mode-alist '("\\.mjs\\'" . my/js-auto-mode))
+    (add-to-list 'auto-mode-alist '("\\.js\\'" . my/js-auto-mode)))
   (global-treesit-auto-mode -1))      ;; 打开时不接管
 
 (defconst my/treesit-major-mode-remap-candidates
