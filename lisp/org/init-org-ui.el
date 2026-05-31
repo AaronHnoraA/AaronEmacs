@@ -9,8 +9,14 @@
 (require 'color)
 (require 'aaron-ui)
 (require 'init-org-core)
+(require 'init-package-utils)
 (require 'org-element)
 (require 'subr-x)
+
+(my/package-register-vc
+ 'org-modern-indent
+ '(:url "https://github.com/jdtsmith/org-modern-indent.git"
+   :rev :last-release))
 
 (defvar-local my/org--olivetti-auto-state nil)
 (defvar-local my/org-pretty-block-cache nil)

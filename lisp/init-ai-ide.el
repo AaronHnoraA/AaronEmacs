@@ -27,6 +27,17 @@
 
 ;;; Code:
 
+(require 'init-package-utils)
+
+(my/package-register-vc
+ 'claude-code-ide
+ '(:url "https://github.com/manzaltu/claude-code-ide.el"
+   :rev :last-release))
+(my/package-register-vc
+ 'codex-cli
+ '(:url "https://github.com/bennfocus/codex-cli.el"
+   :rev :last-release))
+
 (add-to-list 'load-path
              (file-name-as-directory
               (locate-user-emacs-file "site-lisp/ai-workbench")))

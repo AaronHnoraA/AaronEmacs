@@ -1,8 +1,8 @@
 ;;; init-java.el --- Java config -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;; Keep Java support minimal. Prefer `lsp-mode' for Java buffers and load
-;; `lsp-java' only when it is already installed locally.
+;; Prefer `lsp-mode' for Java buffers.  `lsp-java' manages the JDT LS
+;; integration, including Gradle project import.
 
 ;;; Code:
 
@@ -16,10 +16,10 @@
 (add-hook 'java-mode-hook #'my/lsp-mode-ensure)
 (add-hook 'java-ts-mode-hook #'my/lsp-mode-ensure)
 
-(when (locate-library "lsp-java")
-  (use-package lsp-java
-    :after lsp-mode
-    :defer t))
+(use-package lsp-java
+  :ensure t
+  :after lsp-mode
+  :defer t)
 
 (provide 'init-java)
 ;;; init-java.el ends here

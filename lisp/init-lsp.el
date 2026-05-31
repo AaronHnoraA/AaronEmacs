@@ -532,6 +532,8 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
       (my/language-server-stop-eglot)
       (if (my/lsp-mode-supported-p)
           (progn
+            (when (fboundp 'my/direnv-update-environment-maybe)
+              (my/direnv-update-environment-maybe))
             (my/language-server-apply-process-environment)
             (my/language-server-apply-lsp-local-settings)
             (lsp-deferred))
