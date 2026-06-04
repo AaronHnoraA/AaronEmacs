@@ -11,6 +11,7 @@
 (require 'seq)
 (require 'subr-x)
 (require 'transient)
+(require 'xref)
 
 (defvar typst-ts-mode-map)
 
@@ -299,24 +300,136 @@
     ("T" "todos"       my/typst-roam-todos)
     ("u" "update db"   my/typst-roam-update-db)]])
 
+(my/leader!
+  "r t" '(:def my/typst-roam-dispatch :which-key "typst roam"))
+
+;; ── xref backend: gd / M-. for note-link ─────────────────────────────────
+
+(defun my/typst-roam--all-slugs-cached ()
+  "Return all roam slugs from DB when available, else from file scan."
+  (if-let* ((db    (my/typst-roam--db))
+            (notes (gethash "notes" db)))
+      (hash-table-keys notes)
+    (mapcar #'my/typst-roam--file-to-slug (my/typst-roam--all-files))))
+
+(defun my/typst-roam-xref-backend ()
+  "Use typst-roam as xref backend when point is on a #note-link slug."
+  (when (my/typst-roam--slug-at-point) 'typst-roam))
+
+(cl-defmethod xref-backend-identifier-at-point ((_backend (eql typst-roam)))
+  (my/typst-roam--slug-at-point))
+
+(cl-defmethod xref-backend-definitions ((_backend (eql typst-roam)) slug)
+  (let ((file (my/typst-roam--slug-to-file slug)))
+    (when (file-exists-p file)
+      (list (xref-make (concat "note: " slug)
+                       (xref-make-file-location file 1 0))))))
+
+(cl-defmethod xref-backend-identifier-completion-table ((_backend (eql typst-roam)))
+  (my/typst-roam--all-slugs-cached))
+
+(defun my/typst-roam--xref-setup ()
+  "Register typst-roam xref backend for this buffer (highest priority)."
+  (add-hook 'xref-backend-functions #'my/typst-roam-xref-backend -90 t))
+
+;; ── Preview click → note-link intercept ──────────────────────────────────
+
+(defcustom my/typst-roam-preview-follow-links t
+  "Auto-follow #note-link after a tinymist preview→source jump."
+  :type 'boolean
+  :group 'my/typst-roam)
+
+(defun my/typst-roam--preview-intercept (&rest _)
+  "After a preview jump, follow the note-link if point landed on one."
+  (when my/typst-roam-preview-follow-links
+    (let ((buf (current-buffer)))
+      (run-with-idle-timer
+       0.05 nil
+       (lambda ()
+         (when (buffer-live-p buf)
+           (with-current-buffer buf
+             (when-let* ((slug (my/typst-roam--slug-at-point))
+                         (file (my/typst-roam--slug-to-file slug))
+                         ((file-exists-p file)))
+               (find-file file)))))))))
+
+;; Attach after init-typst loads so the target function exists.
+(with-eval-after-load 'init-typst
+  (advice-add 'my/typst-preview--goto-file-position
+              :after #'my/typst-roam--preview-intercept))
+
+;; ── capf: #note-link("…") slug completion ────────────────────────────────
+
+(defun my/typst-roam--capf ()
+  "Completion-at-point for slugs inside #note-link(\"...\")."
+  (when (looking-back "#note-link(\"[^\"]*" (line-beginning-position))
+    (let* ((end   (point))
+           (start (save-excursion
+                    (re-search-backward "#note-link(\"" nil t)
+                    (match-end 0))))
+      (list start end
+            (completion-table-dynamic
+             (lambda (_) (my/typst-roam--all-slugs-cached)))
+            :exclusive 'no
+            :annotation-function #'my/typst-roam--note-annotator
+            :company-kind (lambda (_) 'file)))))
+
+(defun my/typst-roam--capf-setup ()
+  "Add roam slug completion to `completion-at-point-functions'."
+  (add-hook 'completion-at-point-functions #'my/typst-roam--capf nil t))
+
+;; ── Daily note ────────────────────────────────────────────────────────────
+
+(defun my/typst-roam-daily-note ()
+  "Open or create today's daily note at daily/YYYY-MM-DD."
+  (interactive)
+  (let* ((slug (concat "daily/" (format-time-string "%Y-%m-%d")))
+         (file (my/typst-roam--slug-to-file slug)))
+    (if (file-exists-p file)
+        (find-file file)
+      (my/typst-roam-new-note slug))))
+
+;; ── Wire everything up ────────────────────────────────────────────────────
+
+(define-key my/typst-roam-map (kbd "d") #'my/typst-roam-daily-note)
+
 (defun my/typst-roam-setup-keys ()
   "Install Typst roam keys in the current buffer."
-  (local-set-key (kbd "C-c r") my/typst-roam-map)
-  (local-set-key (kbd "C-c C-o") #'my/typst-roam-follow-link))
+  (local-set-key (kbd "C-c r")   my/typst-roam-map)
+  (local-set-key (kbd "C-c C-o") #'my/typst-roam-follow-link)
+  (my/typst-roam--xref-setup)
+  (my/typst-roam--capf-setup))
 
 (with-eval-after-load 'typst-ts-mode
-  (define-key typst-ts-mode-map (kbd "C-c r") my/typst-roam-map)
+  (define-key typst-ts-mode-map (kbd "C-c r")   my/typst-roam-map)
   (define-key typst-ts-mode-map (kbd "C-c C-o") #'my/typst-roam-follow-link)
+  (add-hook 'typst-ts-mode-hook #'my/typst-roam--xref-setup)
+  (add-hook 'typst-ts-mode-hook #'my/typst-roam--capf-setup)
   (with-eval-after-load 'which-key
     (which-key-add-key-based-replacements
-      "C-c C-o" "typst roam open link"
-      "C-c r" "typst roam")))
+      "C-c C-o" "roam: open link"
+      "C-c r"   "roam")))
 
 (dolist (hook '(typst-mode-hook my/typst-mode-hook))
   (add-hook hook #'my/typst-roam-setup-keys))
 
-(my/leader!
-  "r t" '(:def my/typst-roam-dispatch :which-key "typst roam"))
+;; Update transient with daily + gd hint
+(transient-define-prefix my/typst-roam-dispatch ()
+  "Typst roam command menu."
+  [["Notes"
+    ("o" "open link   C-c C-o" my/typst-roam-follow-link)
+    ("f" "find note"            my/typst-roam-find-note)
+    ("i" "insert link"          my/typst-roam-insert-link)
+    ("n" "new note"             my/typst-roam-new-note)
+    ("d" "daily note"           my/typst-roam-daily-note)]
+   ["DB"
+    ("b" "backlinks"            my/typst-roam-backlinks)
+    ("t" "tags"                 my/typst-roam-tags)
+    ("T" "todos"                my/typst-roam-todos)
+    ("u" "update db"            my/typst-roam-update-db)]
+   ["Nav (gd = xref)"
+    ("." "xref definition"      xref-find-definitions)
+    ("r" "xref references"      xref-find-references)]])
 
 (provide 'init-typst-roam)
 ;;; init-typst-roam.el ends here
