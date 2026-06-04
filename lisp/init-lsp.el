@@ -32,6 +32,9 @@
 Each entry is a plist with at least `:mode', `:feature', `:source', and
 optional `:note' keys.")
 
+(defvar my/language-server-disabled-modes nil
+  "Major modes that should never auto-start a language server.")
+
 (defvar my/eglot-custom-server-program-metadata nil
   "Metadata for locally registered `eglot-server-programs' entries.
 
@@ -321,11 +324,14 @@ byte-compile backend does not emit noisy warnings on startup."
 
 (defun my/language-server-preferred-backend ()
   "Return the preferred backend for the current buffer."
-  (or (my/language-server-project-backend-override)
-      (if (and my/lsp-mode-preferred-modes
-               (apply #'derived-mode-p my/lsp-mode-preferred-modes))
-          'lsp-mode
-        'eglot)))
+  (if (and my/language-server-disabled-modes
+           (apply #'derived-mode-p my/language-server-disabled-modes))
+      'disabled
+    (or (my/language-server-project-backend-override)
+        (if (and my/lsp-mode-preferred-modes
+                 (apply #'derived-mode-p my/lsp-mode-preferred-modes))
+            'lsp-mode
+          'eglot))))
 
 (defun my/language-server-project-environment ()
   "Return the merged project-local environment for language servers."

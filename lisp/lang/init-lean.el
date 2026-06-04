@@ -26,11 +26,57 @@
 
 (defvar my/lean-project-symbol-history nil)
 (defvar lean4-executable-name)
+(defvar lean4-fringe-data)
 (defvar lean4-show-file-progress)
+(defvar company-idle-delay)
+(defvar flycheck-after-syntax-check-hook)
+(defvar flymake-no-changes-timeout)
+(defvar lsp-eldoc-enable-hover)
+(defvar lsp-enable-file-watchers)
+(defvar lsp-enable-on-type-formatting)
+(defvar lsp-enable-symbol-highlighting)
+(defvar lsp-file-watch-threshold)
+(defvar lsp-idle-delay)
+(defvar lsp-inlay-hint-enable)
+(defvar lsp-warn-no-matched-clients)
 (defvar lsp-semantic-tokens-enable)
+(defvar lean4-info-buffer-debounce-delay-sec)
+(defvar lean4-info-buffer-debounce-upper-bound-sec)
 (defvar-local lean4-fringe-delay-timer nil)
 (defvar-local lean4-rootdir nil)
 (defvar-local my/lean4-remote-ui-error-reported nil)
+(defvar-local my/lean4-info-source-buffer nil)
+(defvar-local my/lean4-progress-mode-line-string nil)
+
+(declare-function lean4-info-buffer-refresh "lean4-info" ())
+(declare-function lean4-info-buffer-redisplay-debounced "lean4-info" ())
+(declare-function lean4-toggle-info "lean4-info" ())
+(declare-function lean4-refresh-file-dependencies "lean4-mode" ())
+(declare-function lsp-workspace-restart "lsp-mode" (&optional workspace))
+(declare-function magit-current-section "magit-section" ())
+(declare-function magit-section-toggle "magit-section" (section))
+(declare-function magit-section-forward "magit-section" ())
+(declare-function magit-section-backward "magit-section" ())
+
+(defcustom my/lean4-info-max-current-messages 12
+  "Maximum diagnostics rendered in the expanded current-message section."
+  :type 'integer
+  :group 'my/language-server)
+
+(defcustom my/lean4-info-max-context-messages 6
+  "Maximum diagnostics rendered in collapsed above/below message sections."
+  :type 'integer
+  :group 'my/language-server)
+
+(defcustom my/lean4-full-ui-local t
+  "Enable richer Lean UI features in local buffers."
+  :type 'boolean
+  :group 'my/language-server)
+
+(defcustom my/lean4-info-window-width 84
+  "Preferred width for the Lean info side window."
+  :type 'integer
+  :group 'my/language-server)
 
 (defun my/lean4-remote-rootdir ()
   "Return Lean's remote executable root as a plain Unix path."
@@ -154,19 +200,186 @@
 
 (defvar magit-region-highlight-hook)
 
+(defun my/lean4-info-buffer ()
+  "Return the Lean goal buffer, if it exists."
+  (get-buffer "*Lean Goal*"))
+
+(defun my/lean4-info-source-buffer ()
+  "Return the source Lean buffer associated with the current info buffer."
+  (cond
+   ((derived-mode-p 'lean4-mode)
+    (current-buffer))
+   ((buffer-live-p my/lean4-info-source-buffer)
+    my/lean4-info-source-buffer)
+   (t
+    (seq-find (lambda (buffer)
+                (with-current-buffer buffer
+                  (derived-mode-p 'lean4-mode)))
+              (buffer-list)))))
+
 (defun my/lean4-info-buffer-setup (&rest _)
   "Adjust the Lean goal buffer after it is created or shown."
-  (let ((buffer (get-buffer "*Lean Goal*")))
+  (let ((buffer (my/lean4-info-buffer))
+        (source (and (derived-mode-p 'lean4-mode)
+                     (current-buffer))))
     (when buffer
       (with-current-buffer buffer
         ;; Lean's info buffer uses `magit-section-mode' for rendering, but it
         ;; is not a diff buffer and does not need Magit's diff-specific region
         ;; highlighting hook.
-        (setq-local magit-region-highlight-hook nil)))))
+        (setq-local magit-region-highlight-hook nil)
+        ;; `lean4-info-mode' derives from `prog-mode', but it is a rendered UI
+        ;; buffer.  It should never try to attach its own language server.
+        (setq-local lsp-warn-no-matched-clients nil)
+        (when (buffer-live-p source)
+          (setq-local my/lean4-info-source-buffer source))))))
+
+(defun my/lean4-display-info-buffer ()
+  "Show the Lean info view in a stable right-side window."
+  (interactive)
+  (let ((source (current-buffer)))
+    (lean4-toggle-info)
+    (when-let* ((buffer (my/lean4-info-buffer)))
+      (with-current-buffer buffer
+        (setq-local my/lean4-info-source-buffer source))
+      (display-buffer-in-side-window
+       buffer
+       `((side . right)
+         (slot . 1)
+         (window-width . ,my/lean4-info-window-width)
+         (dedicated . t)))
+      (with-current-buffer source
+        (when (fboundp 'lean4-info-buffer-refresh)
+          (lean4-info-buffer-refresh))))))
+
+(defun my/lean4-info-refresh ()
+  "Refresh the Lean info view from its source buffer."
+  (interactive)
+  (if-let* ((source (my/lean4-info-source-buffer)))
+      (with-current-buffer source
+        (lean4-info-buffer-refresh))
+    (user-error "No Lean source buffer associated with this info view")))
+
+(defun my/lean4-info-jump-to-source ()
+  "Jump from the Lean info view back to its source buffer."
+  (interactive)
+  (if-let* ((source (my/lean4-info-source-buffer)))
+      (pop-to-buffer source)
+    (user-error "No Lean source buffer associated with this info view")))
+
+(defun my/lean4-info-ret ()
+  "Activate buttons or toggle sections in the Lean info view."
+  (interactive)
+  (cond
+   ((button-at (point))
+    (push-button))
+   ((fboundp 'magit-section-toggle)
+    (magit-section-toggle (magit-current-section)))
+   (t
+    (user-error "No action at point"))))
+
+(defun my/lean4-info-mode-keys ()
+  "Install practical keys for the Lean info buffer."
+  (local-set-key (kbd "g") #'my/lean4-info-refresh)
+  (local-set-key (kbd "RET") #'my/lean4-info-ret)
+  (local-set-key (kbd "TAB") #'magit-section-toggle)
+  (local-set-key (kbd "n") #'magit-section-forward)
+  (local-set-key (kbd "p") #'magit-section-backward)
+  (local-set-key (kbd "o") #'my/lean4-info-jump-to-source)
+  (local-set-key (kbd "q") #'quit-window))
+
+(defun my/lean4-mode-keys ()
+  "Install project-oriented Lean editing keys after `lean4-mode' setup."
+  (local-set-key (kbd "C-c C-i") #'my/lean4-display-info-buffer)
+  (local-set-key (kbd "C-c C-g") #'my/lean4-display-info-buffer)
+  (local-set-key (kbd "C-c C-u") #'my/lean4-toggle-rich-ui)
+  (local-set-key (kbd "C-c C-r") #'lsp-workspace-restart)
+  (local-set-key (kbd "C-c C-d") #'lean4-refresh-file-dependencies)
+  (local-set-key (kbd "C-c C-k") #'quail-show-key))
 
 (with-eval-after-load 'lean4-info
   (advice-add 'lean4-ensure-info-buffer :after #'my/lean4-info-buffer-setup)
-  (advice-add 'lean4-toggle-info-buffer :after #'my/lean4-info-buffer-setup))
+  (advice-add 'lean4-toggle-info-buffer :after #'my/lean4-info-buffer-setup)
+  (add-hook 'lean4-info-mode-hook #'my/lean4-info-mode-keys)
+  (add-to-list 'my/language-server-disabled-modes 'lean4-info-mode)
+  (setq lean4-info-buffer-debounce-delay-sec 0.2
+        lean4-info-buffer-debounce-upper-bound-sec 0.8)
+
+  (define-advice lean4-info--mk-message-section
+      (:override (value caption messages buffer) my/fold-noisy-context)
+    "Render Lean diagnostics compactly in the info view.
+
+The local section is expanded because it is usually actionable.  Context
+sections above and below point are collapsed and capped so old diagnostics do
+not dominate redisplay time or screen space."
+    (when-let* ((msgs messages))
+      (let* ((context-p (memq value '(errors-above errors-below)))
+             (limit (if context-p
+                        my/lean4-info-max-context-messages
+                      my/lean4-info-max-current-messages))
+             (total (length msgs))
+             (trimmed
+              (cond
+               ((<= total limit) msgs)
+               ((eq value 'errors-above)
+                (last msgs limit))
+               (t
+                (cl-subseq msgs 0 limit))))
+             (heading (if (> total (length trimmed))
+                          (format "%s (%d, showing %d):"
+                                  (string-remove-suffix ":" caption)
+                                  total
+                                  (length trimmed))
+                        caption)))
+        (magit-insert-section (magit-section value nil context-p)
+          (magit-insert-heading heading)
+          (magit-insert-section-body
+            (dolist (e trimmed)
+              (-let (((&Diagnostic :message
+                                   :range (&Range :start
+                                                  (&Position :line :character)))
+                      e))
+                (let ((ln (1+ (lsp-translate-line line)))
+                      (col (lsp-translate-column character)))
+                  (insert-text-button
+                   (format "%d:%d:" ln col)
+                   'action #'lean4-info--error-button-action
+                   'button-data (list buffer ln col)
+                   'face 'magit-section-heading
+                   'help-echo "mouse-2: visit this file, line and column"))
+                (lean4-info--insert-highlight-inaccessible-names
+                 "\n" message "\n"))))))))
+  )
+
+(defun my/lean4-tune-responsive-ui ()
+  "Enable a richer Lean UI while keeping refreshes reasonably debounced."
+  (setq-local lsp-idle-delay 0.8
+              flymake-no-changes-timeout 1.2
+              company-idle-delay 0.45
+              lean4-show-file-progress my/lean4-full-ui-local
+              lsp-enable-file-watchers nil
+              lsp-file-watch-threshold 0
+              lsp-enable-symbol-highlighting my/lean4-full-ui-local
+              lsp-enable-on-type-formatting nil
+              lsp-inlay-hint-enable my/lean4-full-ui-local
+              lsp-semantic-tokens-enable my/lean4-full-ui-local
+              lsp-eldoc-enable-hover my/lean4-full-ui-local)
+  (my/lean4-progress-mode-line-mode 1))
+
+(defun my/lean4-toggle-rich-ui ()
+  "Toggle rich Lean UI features in the current buffer."
+  (interactive)
+  (setq-local my/lean4-full-ui-local (not my/lean4-full-ui-local))
+  (my/lean4-tune-responsive-ui)
+  (when (bound-and-true-p lsp-managed-mode)
+    (when (and (fboundp 'lsp-inlay-hints-mode)
+               (boundp 'lsp-inlay-hints-mode))
+      (lsp-inlay-hints-mode (if lsp-inlay-hint-enable 1 -1)))
+    (when (and (fboundp 'lsp-semantic-tokens-mode)
+               (boundp 'lsp-semantic-tokens-mode))
+      (lsp-semantic-tokens-mode (if lsp-semantic-tokens-enable 1 -1))))
+  (message "Lean rich UI %s"
+           (if my/lean4-full-ui-local "enabled" "disabled")))
 
 (defun my/lean4-setup-remote-rootdir ()
   "Make `lean4-mode' resolve Lean toolchain paths correctly over TRAMP."
@@ -196,6 +409,61 @@
       (cancel-timer lean4-fringe-delay-timer)
       (setq-local lean4-fringe-delay-timer nil))))
 
+(defun my/lean4-lsp-mode-ensure-deferred ()
+  "Start Lean's `lsp-mode' after mode setup has returned to the command loop."
+  (let ((buffer (current-buffer)))
+    (run-at-time
+     0 nil
+     (lambda (buf)
+       (when (buffer-live-p buf)
+         (with-current-buffer buf
+           (my/lsp-mode-ensure))))
+     buffer)))
+
+(defun my/lean4-progress-kind (item)
+  "Return Lean progress ITEM kind, across lsp-mode data representations."
+  (cond
+   ((hash-table-p item)
+    (or (gethash "kind" item)
+        (gethash :kind item)))
+   ((and (consp item) (plist-member item :kind))
+    (plist-get item :kind))
+   ((consp item)
+    (or (alist-get 'kind item)
+        (alist-get :kind item)))
+   (t nil)))
+
+(defun my/lean4-progress-mode-line-text ()
+  "Return compact mode-line text for Lean file progress."
+  (let* ((items (and (boundp 'lean4-fringe-data)
+                     lean4-fringe-data))
+         (total (length items))
+         (processing (seq-count
+                      (lambda (item)
+                        (eq (my/lean4-progress-kind item) 1))
+                      items))
+         (errors (- total processing)))
+    (cond
+     ((> errors 0)
+      (propertize (format " λ✕%d" errors) 'face 'error))
+     ((> processing 0)
+      (propertize (format " λ…%d" processing) 'face 'warning))
+     (t
+      (propertize " λ✓" 'face 'success)))))
+
+(defun my/lean4-progress-mode-line-refresh ()
+  "Refresh Lean progress state in the mode line."
+  (setq my/lean4-progress-mode-line-string
+        (my/lean4-progress-mode-line-text))
+  (force-mode-line-update t))
+
+(define-minor-mode my/lean4-progress-mode-line-mode
+  "Show Lean processing state in the mode line."
+  :lighter (:eval my/lean4-progress-mode-line-string)
+  (if my/lean4-progress-mode-line-mode
+      (my/lean4-progress-mode-line-refresh)
+    (setq my/lean4-progress-mode-line-string nil)))
+
 (defun my/lean4-report-remote-ui-error (error)
   "Report remote Lean UI ERROR only once per buffer."
   (unless my/lean4-remote-ui-error-reported
@@ -209,8 +477,10 @@
   (when (fboundp 'my/register-lsp-mode-preference)
     (my/register-lsp-mode-preference 'lean4-mode))
   (add-hook 'lean4-mode-hook #'my/lean4-setup-remote-rootdir)
+  (add-hook 'lean4-mode-hook #'my/lean4-tune-responsive-ui)
   (add-hook 'lean4-mode-hook #'my/lean4-tune-remote-ui)
-  (add-hook 'lean4-mode-hook #'my/lsp-mode-ensure)
+  (add-hook 'lean4-mode-hook #'my/lean4-mode-keys)
+  (add-hook 'lean4-mode-hook #'my/lean4-lsp-mode-ensure-deferred)
   :mode ("\\\\.lean\\\\'" . lean4-mode))
 
 (with-eval-after-load 'lean4-mode
@@ -223,16 +493,24 @@
       (funcall fn))))
 
 (with-eval-after-load 'lean4-fringe
+  (define-advice lean4-fringe-update (:after (&rest _) my/mode-line-progress)
+    "Keep Lean mode-line progress in sync with file progress notifications."
+    (when (derived-mode-p 'lean4-mode)
+      (my/lean4-progress-mode-line-refresh)))
+
   (define-advice lean4-fringe-update-progress-overlays
       (:around (fn) my/lean4-remote-safe-progress)
     "Ignore invalid remote progress overlays instead of wedging the session."
-    (if (file-remote-p default-directory)
-        (condition-case err
-            (funcall fn)
-          (error
-           (my/lean4-tune-remote-ui)
-           (my/lean4-report-remote-ui-error err)))
-      (funcall fn))))
+    (unwind-protect
+        (if (file-remote-p default-directory)
+            (condition-case err
+                (funcall fn)
+              (error
+               (my/lean4-tune-remote-ui)
+               (my/lean4-report-remote-ui-error err)))
+          (funcall fn))
+      (when (derived-mode-p 'lean4-mode)
+        (my/lean4-progress-mode-line-refresh)))))
 
 (with-eval-after-load 'lean4-info
   (define-advice lean4-info-buffer-redisplay

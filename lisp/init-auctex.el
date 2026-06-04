@@ -44,15 +44,29 @@
   "Enable PDF Tools without forcing an unnecessary rebuild.
 
 If the bundled `epdfinfo' is already executable and healthy, reuse it.
-Only fall back to `pdf-tools-install' when the checker fails."
+Return non-nil when the PDF Tools server is usable.  Missing or broken
+`epdfinfo' should not abort Emacs startup."
   (let ((bundled-epdfinfo
          (expand-file-name "elpa/pdf-tools-20260102.1101/epdfinfo"
                            user-emacs-directory)))
     (when (file-executable-p bundled-epdfinfo)
       (setq pdf-info-epdfinfo-program bundled-epdfinfo))
-    (if (ignore-errors (pdf-info-check-epdfinfo) t)
-        (pdf-tools-install)
-      (pdf-tools-install :no-query))))
+    (cond
+     ((ignore-errors (pdf-info-check-epdfinfo) t)
+      (pdf-tools-install)
+      t)
+     ((ignore-errors
+        (pdf-tools-install :no-query)
+        (pdf-info-check-epdfinfo)
+        t)
+      t)
+     (t
+      (display-warning
+       'init-auctex
+       (format "PDF Tools disabled because epdfinfo is not executable: %s"
+               pdf-info-epdfinfo-program)
+       :warning)
+      nil))))
 
 (defun my/auctex-register-command (entry)
   "Register TeX command ENTRY without duplicating existing items."
@@ -462,25 +476,25 @@ Only fall back to `pdf-tools-install' when the checker fails."
   :config
   (setq pdf-tools-enabled-modes my/pdf-tools-enabled-modes)
   (setq pdf-outline-enable-imenu t)
-  (my/pdf-tools-activate)
-  (require 'pdf-sync)
-  (require 'pdf-links)
-  (require 'pdf-history)
-  (require 'pdf-outline)
-  (require 'pdf-annot)
-  (require 'pdf-occur)
-  (require 'pdf-misc)
-  (require 'pdf-cache)
+  (when (my/pdf-tools-activate)
+    (require 'pdf-sync)
+    (require 'pdf-links)
+    (require 'pdf-history)
+    (require 'pdf-outline)
+    (require 'pdf-annot)
+    (require 'pdf-occur)
+    (require 'pdf-misc)
+    (require 'pdf-cache)
 
-  (advice-add 'pdf-sync-forward-correlate :around
-              #'my/pdf-sync-forward-correlate-advice)
+    (advice-add 'pdf-sync-forward-correlate :around
+                #'my/pdf-sync-forward-correlate-advice)
 
-  (advice-add 'TeX-view :around #'my/TeX-view-subfile-advice)
+    (advice-add 'TeX-view :around #'my/TeX-view-subfile-advice)
 
-  (add-hook 'pdf-view-mode-hook #'my/pdf-view-enable-capabilities)
-  (add-hook 'pdf-view-mode-hook #'my/pdf-view-enable-auto-refresh)
-  (add-hook 'pdf-view-mode-hook #'my/pdf-view-setup-interaction)
-  (my/pdf-view-configure-open-buffers))
+    (add-hook 'pdf-view-mode-hook #'my/pdf-view-enable-capabilities)
+    (add-hook 'pdf-view-mode-hook #'my/pdf-view-enable-auto-refresh)
+    (add-hook 'pdf-view-mode-hook #'my/pdf-view-setup-interaction)
+    (my/pdf-view-configure-open-buffers)))
 
 (defun pdf-view-kill-rmn-ring-save ()
   "Copy the region to the `kill-ring' after remove all newline characters."
