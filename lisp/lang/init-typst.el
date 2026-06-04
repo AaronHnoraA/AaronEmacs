@@ -936,5 +936,137 @@ function calls like `#foo(...)[...]' do not get hijacked by parentheses."
      :executables (list my/typst-lsp-executable)
      :note "Typst buffers use tinymist through Eglot.")))
 
+;; ── Roam note navigation ─────────────────────────────────────────────────
+
+(defcustom my/typst-roam-root "/Users/hc/Documents/AaronNote/"
+  "Root directory of the Typst roam note vault."
+  :type 'directory
+  :group 'my/typst)
+
+(defun my/typst-roam-root ()
+  "Return the roam notes root, preferring typst.toml discovery."
+  (or (when buffer-file-name
+        (when-let* ((dir (locate-dominating-file buffer-file-name "typst.toml")))
+          (file-truename dir)))
+      (file-name-as-directory (expand-file-name my/typst-roam-root))))
+
+(defun my/typst-roam--slug-at-point ()
+  "Return the note-link slug at or near point, or nil."
+  (save-excursion
+    (let* ((line-start (line-beginning-position))
+           (line-end   (line-end-position))
+           (line (buffer-substring-no-properties line-start line-end))
+           ;; find rightmost note-link( whose open position is <= point offset
+           (offset (- (point) line-start))
+           result)
+      (let ((pos 0))
+        (while (string-match "#note-link(\"\\([^\"]+\\)\"" line pos)
+          (let ((call-start (match-beginning 0))
+                (call-end   (match-end 0))
+                (slug       (match-string 1 line)))
+            (when (<= call-start offset)
+              (setq result slug))
+            (setq pos (1+ call-start)))))
+      result)))
+
+(defun my/typst-roam--all-files ()
+  "Return all roam .typ note files, excluding _typst/."
+  (seq-filter
+   (lambda (f) (not (string-match-p "/_typst/" f)))
+   (directory-files-recursively (my/typst-roam-root) "\\.typ$")))
+
+(defun my/typst-roam--file-to-slug (file)
+  "Convert FILE path to a roam slug (path relative to root, no .typ)."
+  (string-remove-suffix ".typ"
+    (file-relative-name file (my/typst-roam-root))))
+
+(defun my/typst-roam--slug-to-file (slug)
+  "Convert SLUG to an absolute .typ path under the roam root."
+  (expand-file-name (concat slug ".typ") (my/typst-roam-root)))
+
+(defun my/typst-roam-follow-link ()
+  "Jump to the note referenced by the #note-link at point."
+  (interactive)
+  (if-let* ((slug (my/typst-roam--slug-at-point)))
+      (let ((file (my/typst-roam--slug-to-file slug)))
+        (if (file-exists-p file)
+            (find-file file)
+          (when (yes-or-no-p (format "Note '%s' not found. Create it? " slug))
+            (my/typst-roam-new-note slug))))
+    (user-error "No #note-link found at point")))
+
+(defun my/typst-roam-find-note ()
+  "Find a roam note by slug with completion."
+  (interactive)
+  (let* ((files (my/typst-roam--all-files))
+         (slugs (mapcar #'my/typst-roam--file-to-slug files))
+         (slug  (completing-read "Roam note: " slugs nil t)))
+    (find-file (my/typst-roam--slug-to-file slug))))
+
+(defun my/typst-roam-insert-link ()
+  "Insert a #note-link at point with slug and display text chosen via completion."
+  (interactive)
+  (let* ((files (my/typst-roam--all-files))
+         (slugs (mapcar #'my/typst-roam--file-to-slug files))
+         (slug  (completing-read "Link to note: " slugs nil t))
+         (default-text (file-name-nondirectory slug))
+         (text  (read-string (format "Display text [%s]: " default-text)
+                             nil nil default-text)))
+    (insert (format "#note-link(\"%s\")[%s]" slug text))))
+
+(defun my/typst-roam-new-note (&optional slug)
+  "Create a new roam note, prompting for SLUG, title, and tags."
+  (interactive)
+  (let* ((slug  (or slug (read-string "Slug (e.g. math/my-note): ")))
+         (title (read-string "Title: "
+                             (capitalize (replace-regexp-in-string
+                                          "[-/]" " "
+                                          (file-name-nondirectory slug)))))
+         (tags  (read-string "Tags (comma-separated, or blank): "))
+         (file  (my/typst-roam--slug-to-file slug))
+         (tag-str (if (string-empty-p tags)
+                      ""
+                    (mapconcat (lambda (t) (format "\"%s\"" (string-trim t)))
+                               (split-string tags ",") ", "))))
+    (make-directory (file-name-directory file) t)
+    (find-file file)
+    (when (= (buffer-size) 0)
+      (insert (format "\
+#import \"/_typst/template.typ\": *
+#show: note.with(
+  title: \"%s\",
+  tags: (%s),
+  created: datetime(year: %s, month: %s, day: %s),
+)
+
+= %s
+
+"
+                      title
+                      tag-str
+                      (format-time-string "%Y")
+                      (string-to-number (format-time-string "%m"))
+                      (string-to-number (format-time-string "%d"))
+                      title)))))
+
+;; Keybindings (C-c r prefix = roam)
+(defvar my/typst-roam-map
+  (let ((m (make-sparse-keymap)))
+    (define-key m (kbd "f") #'my/typst-roam-find-note)
+    (define-key m (kbd "o") #'my/typst-roam-follow-link)
+    (define-key m (kbd "i") #'my/typst-roam-insert-link)
+    (define-key m (kbd "n") #'my/typst-roam-new-note)
+    m)
+  "Roam keymap for Typst buffers. Bound to C-c r.")
+
+(with-eval-after-load 'typst-ts-mode
+  (define-key typst-ts-mode-map (kbd "C-c r") my/typst-roam-map)
+  (define-key typst-ts-mode-map (kbd "C-c C-o") #'my/typst-roam-follow-link))
+
+(dolist (hook '(typst-mode-hook my/typst-mode-hook))
+  (add-hook hook (lambda ()
+                   (local-set-key (kbd "C-c r") my/typst-roam-map)
+                   (local-set-key (kbd "C-c C-o") #'my/typst-roam-follow-link))))
+
 (provide 'init-typst)
 ;;; init-typst.el ends here
