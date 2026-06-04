@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Hybrid game
+# key: hybrid
+# --
+H_${1:i}: ${2:...}$0

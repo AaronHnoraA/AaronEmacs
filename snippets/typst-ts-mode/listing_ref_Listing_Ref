@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Listing ref
+# key: listing:ref
+# --
+@lst:$1$0

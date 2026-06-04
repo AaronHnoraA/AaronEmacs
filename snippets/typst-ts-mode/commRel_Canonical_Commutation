@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Canonical commutation relation
+# key: commrel
+# --
+lr([${1:x}, ${2:p}]) = ${3:i "ℏ"} $0

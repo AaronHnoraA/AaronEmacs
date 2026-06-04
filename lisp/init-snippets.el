@@ -1,0 +1,233 @@
+;;; init-snippets.el --- yasnippet config -*- lexical-binding: t; -*-
+
+;;; Commentary:
+;; - 所有 prog-mode 自动启用 yas-minor-mode
+;; - TAB 不给 yas 用（缩进 / company 用）
+;; - `C-c y` 是 snippet 前缀
+;; - `C-c y y` 展开 snippet
+;; - `C-c y i` 打开 snippet 菜单
+
+;;; Code:
+
+(declare-function yas-activate-extra-mode "yasnippet" (mode))
+(declare-function yas-reload-all "yasnippet" (&optional no-jit interactive))
+(declare-function yas-next-field "yasnippet" (&optional arg))
+(declare-function yas-prev-field "yasnippet" (&optional arg))
+(declare-function my/copilot-setup-dwim-keys "init-copilot" (keymap))
+
+(defconst my/yas-treesit-extra-modes
+  '((bash-ts-mode sh-mode)
+    (c-ts-mode c-mode)
+    (c++-ts-mode c++-mode)
+    (css-ts-mode css-mode)
+    (go-ts-mode go-mode)
+    (html-ts-mode html-mode)
+    (java-ts-mode java-mode)
+    (js-ts-mode js-mode js2-mode)
+    (json-ts-mode json-mode)
+    (markdown-ts-mode markdown-mode)
+    (python-ts-mode python-mode)
+    (rust-ts-mode rust-mode)
+    (toml-ts-mode conf-toml-mode)
+    (typescript-ts-mode typescript-mode)
+    (yaml-ts-mode yaml-mode))
+  "Snippet parent modes reused by tree-sitter major modes.")
+
+(defun my/yas-setup-auctex-extra-modes ()
+  "Make AUCTeX buffers reuse `latex-mode' and `tex-mode' snippets."
+  (yas-activate-extra-mode 'latex-mode)
+  (yas-activate-extra-mode 'tex-mode))
+
+(defun my/yas-setup-typst-extra-modes ()
+  "Make all Typst buffers share the same snippet set."
+  (yas-activate-extra-mode 'typst-ts-mode)
+  (yas-activate-extra-mode 'typst-mode)
+  (yas-activate-extra-mode 'my/typst-mode))
+
+(defun my/yas-setup-treesit-extra-modes ()
+  "Make tree-sitter buffers reuse snippets from their original major modes."
+  (when-let* ((extra-modes (alist-get major-mode my/yas-treesit-extra-modes)))
+    (dolist (mode (if (listp extra-modes) extra-modes (list extra-modes)))
+      (yas-activate-extra-mode mode))))
+
+(defun my/yas-org-cleanup-trailing-newline ()
+  "Silently delete a trailing newline left by a snippet at point.
+Replicates the per-snippet `inhibit-modification-hooks' cleanup that was
+previously inlined in every org-mode snippet file."
+  (save-excursion
+    (when (and (not (eobp))
+               (eq (char-after) ?\n))
+      (let ((inhibit-modification-hooks t))
+        (ignore-errors (delete-char 1))))))
+
+(defun my/yas-setup-org-behavior ()
+  "Keep Org snippet expansion conservative around indentation and newlines."
+  (setq-local yas-indent-line 'fixed)
+  (setq-local yas-also-indent-empty-lines nil)
+  ;; After each snippet exits, clean up any trailing newline it may have left.
+  ;; This replicates the per-snippet inline lisp that was removed from snippet
+  ;; files, while keeping the inhibit-modification-hooks suppression centralized.
+  (add-hook 'yas-after-exit-snippet-hook
+            #'my/yas-org-cleanup-trailing-newline nil t))
+
+(defun my/yas-typst--position (value)
+  "Return VALUE as a buffer position, or nil."
+  (cond
+   ((integerp value) value)
+   ((markerp value) (marker-position value))))
+
+(defun my/yas-typst--unescaped-dollar-count (beg end)
+  "Return the number of unescaped dollar signs between BEG and END."
+  (let ((count 0))
+    (save-excursion
+      (goto-char beg)
+      (while (search-forward "$" end t)
+        (unless (eq (char-before (1- (point))) ?\\)
+          (setq count (1+ count)))))
+    count))
+
+(defun my/yas-typst--math-open-before-p (pos)
+  "Return non-nil when POS is after an open dollar math span on its line."
+  (= (mod (my/yas-typst--unescaped-dollar-count
+           (save-excursion
+             (goto-char pos)
+             (line-beginning-position))
+           pos)
+          2)
+     1))
+
+(defun my/yas-typst--blank-tail-p (newline-pos tail-end)
+  "Return non-nil when NEWLINE-POS to TAIL-END is newline plus blanks."
+  (save-excursion
+    (goto-char (1+ newline-pos))
+    (skip-chars-forward " \t" tail-end)
+    (= (point) tail-end)))
+
+(defun my/yas-typst--snippet-trailing-newline ()
+  "Return (NEWLINE-POS . END) for the exited snippet's final blank tail."
+  (let ((beg (and (boundp 'yas-snippet-beg)
+                  (my/yas-typst--position yas-snippet-beg)))
+        (end (and (boundp 'yas-snippet-end)
+                  (my/yas-typst--position yas-snippet-end))))
+    (when (and beg end (< beg end))
+      (save-excursion
+        (goto-char end)
+        (skip-chars-backward " \t" beg)
+        (let ((newline-pos (1- (point))))
+          (when (and (>= newline-pos beg)
+                     (eq (char-after newline-pos) ?\n)
+                     (my/yas-typst--blank-tail-p newline-pos end)
+                     (save-excursion
+                       (goto-char beg)
+                       (not (search-forward "\n" newline-pos t))))
+            (cons newline-pos end)))))))
+
+(defun my/yas-typst--point-trailing-newline ()
+  "Return (NEWLINE-POS . END) near point as a fallback."
+  (or
+   (when (eq (char-after) ?\n)
+     (cons (point) (1+ (point))))
+   (save-excursion
+     (skip-chars-backward " \t")
+     (when (eq (char-before) ?\n)
+       (cons (1- (point)) (save-excursion
+                            (skip-chars-forward " \t")
+                            (point)))))))
+
+(defun my/yas-typst--cleanup-newline-at (newline-pos tail-end)
+  "Delete NEWLINE-POS through TAIL-END when it splits Typst math."
+  (when (and (integerp newline-pos)
+             (integerp tail-end)
+             (>= newline-pos (point-min))
+             (<= tail-end (point-max))
+             (< newline-pos tail-end)
+             (eq (char-after newline-pos) ?\n)
+             (my/yas-typst--blank-tail-p newline-pos tail-end)
+             (my/yas-typst--math-open-before-p newline-pos))
+    (save-excursion
+      (goto-char newline-pos)
+      (let ((inhibit-modification-hooks t))
+        (delete-region newline-pos tail-end)))
+    t))
+
+(defun my/yas-typst-cleanup-inline-math-newline ()
+  "Delete snippet final newline when it splits a Typst `$...$' span.
+
+Many one-line Typst snippets are stored with a final file newline.  Yas can
+leave point either before or after that newline, so prefer `yas-snippet-end'
+and keep point-adjacent positions as a fallback."
+  (let ((candidates (list (my/yas-typst--snippet-trailing-newline)
+                          (my/yas-typst--point-trailing-newline))))
+    (catch 'done
+      (dolist (candidate candidates)
+        (when (and candidate
+                   (my/yas-typst--cleanup-newline-at
+                    (car candidate)
+                    (cdr candidate)))
+          (throw 'done t))))))
+
+(defun my/yas-setup-typst-behavior ()
+  "Keep Typst snippet expansion conservative inside inline math."
+  (setq-local yas-indent-line 'fixed)
+  (setq-local yas-also-indent-empty-lines nil)
+  (add-hook 'yas-after-exit-snippet-hook
+            #'my/yas-typst-cleanup-inline-math-newline nil t))
+
+(use-package yasnippet
+  :ensure t
+  :defer 2
+  :commands (yas-expand yas-insert-snippet yas-new-snippet yas-visit-snippet-file)
+  :init
+  ;; 你自己的 snippets 目录：~/.emacs.d/snippets
+  (setq yas-snippet-dirs
+        (list (expand-file-name "snippets" user-emacs-directory)))
+  :hook
+  ((prog-mode . yas-minor-mode)
+   (text-mode . yas-minor-mode)
+   (org-mode . yas-minor-mode)
+   (org-mode . my/yas-setup-org-behavior)
+   (typst-ts-mode . yas-minor-mode)
+   (typst-mode . yas-minor-mode)
+   (my/typst-mode . yas-minor-mode)
+   (typst-ts-mode . my/yas-setup-typst-extra-modes)
+   (typst-mode . my/yas-setup-typst-extra-modes)
+   (my/typst-mode . my/yas-setup-typst-extra-modes)
+   (typst-ts-mode . my/yas-setup-typst-behavior)
+   (typst-mode . my/yas-setup-typst-behavior)
+   (my/typst-mode . my/yas-setup-typst-behavior)
+   (yas-minor-mode . my/yas-setup-treesit-extra-modes)
+   (LaTeX-mode . my/yas-setup-auctex-extra-modes)
+   (plain-TeX-mode . my/yas-setup-auctex-extra-modes))
+  :config
+  (yas-reload-all)
+
+  (with-eval-after-load 'yasnippet
+    ;; snippet 会话中的跳转仍统一走全局 DWIM 调度，避免直接触碰脆弱内部状态。
+    (my/copilot-setup-dwim-keys yas-keymap)
+    ;; 不让 yas 抢 TAB
+    (define-key yas-keymap (kbd "TAB") nil)
+    (define-key yas-keymap (kbd "<tab>") nil)))
+
+(use-package yasnippet-snippets
+  :ensure t
+  :after yasnippet
+  :defer t
+  :config
+  ;; 把包自带 snippets 也加入
+  (add-to-list 'yas-snippet-dirs
+               (expand-file-name
+                "snippets"
+                (file-name-directory
+                 (locate-library "yasnippet-snippets"))))
+  (yas-reload-all))
+
+;; 全局 snippet 前缀，避免覆盖 `rg' 默认的 `C-c s' 搜索入口。
+(define-prefix-command 'my/snippet-map)
+(global-set-key (kbd "C-c y") #'my/snippet-map)
+(keymap-set my/snippet-map "y" #'yas-expand)
+(keymap-set my/snippet-map "i" #'yas-insert-snippet)
+(keymap-set my/snippet-map "n" #'yas-new-snippet)
+(keymap-set my/snippet-map "v" #'yas-visit-snippet-file)
+
+(provide 'init-snippets)
+;;; init-snippets.el ends here

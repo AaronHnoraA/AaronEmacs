@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Corollary (no label)
+# key: corollary
+# --
+#corollary[
+  $0
+]

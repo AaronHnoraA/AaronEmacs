@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Section ref
+# key: section:ref
+# --
+@sec:$1$0

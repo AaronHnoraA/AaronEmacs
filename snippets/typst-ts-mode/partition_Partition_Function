@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Partition function
+# key: partition
+# --
+Z = "Tr" lr((exp(-${1:beta} ${2:H}))) $0

@@ -1,0 +1,83 @@
+extends: existence
+message: "'%s' is too wordy."
+ignorecase: true
+level: suggestion
+tokens:
+  - a number of
+  - accede to
+  - adversely impact
+  - aforementioned
+  - all of
+  - all things considered
+  - along the lines of
+  - already existing
+  - as a matter of fact
+  - as a means of
+  - as of yet
+  - as to
+  - at the present time
+  - at this time
+  - because of the fact that
+  - by means of
+  - by virtue of
+  - by virtue of the fact that
+  - close proximity
+  - commence
+  - due to the fact that
+  - each and every
+  - endeavor
+  - expedite
+  - facilitate
+  - factual evidence
+  - finalize
+  - first and foremost
+  - for all intents and purposes
+  - for the purpose of
+  - have a tendency to
+  - if and when
+  - in a manner of speaking
+  - in a timely manner
+  - in a very real sense
+  - in an effort to
+  - in excess of
+  - in light of the fact that
+  - in order to
+  - in regard to
+  - in some instances
+  - in the event that
+  - in the final analysis
+  - in the process of
+  - irregardless
+  - it is essential
+  - it seems that
+  - null and void
+  - one particular
+  - optimum
+  - owing to the fact that
+  - pass away
+  - pertaining to
+  - point in time
+  - prior to
+  - prioritize
+  - procure
+  - put simply
+  - refer back
+  - reside
+  - should you wish
+  - span across
+  - strategize
+  - successfully complete
+  - terminate
+  - the month of
+  - the point I am trying to make
+  - time period
+  - transpire
+  - until such time as
+  - utilization
+  - utilize
+  - various different
+  - what I mean to say is
+  - whether or not
+  - with respect to
+  - with the exception of
+  - witnessed

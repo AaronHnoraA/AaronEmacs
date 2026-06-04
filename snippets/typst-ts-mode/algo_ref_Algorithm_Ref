@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Algorithm ref
+# key: algo:ref
+# --
+@alg:$1$0

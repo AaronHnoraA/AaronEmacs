@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Note summary card
+# key: summ
+# --
+#summary[
+  $0
+]

@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: Theorem (no label)
+# key: theorem
+# -- Add a theorem without label
+# --
+\begin{theorem}{$1}
+	$2
+\end{theorem}
+$0

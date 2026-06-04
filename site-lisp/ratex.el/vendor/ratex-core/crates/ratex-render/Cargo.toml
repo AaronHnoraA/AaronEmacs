@@ -1,0 +1,23 @@
+[package]
+name = "ratex-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Raster and image rendering for RaTeX math typesetting"
+
+[dependencies]
+ratex-types = { workspace = true }
+ratex-font = { workspace = true }
+ratex-layout = { workspace = true }
+ratex-parser = { workspace = true }
+tiny-skia = "0.11"
+ab_glyph = "0.2"
+png = "0.17"
+serde_json = "1"
+
+[[bin]]
+name = "render"
+path = "src/main.rs"

@@ -1,0 +1,12 @@
+# -*- mode: snippet -*-
+# name: @unpublished
+# key: @unpublished
+# -- An unpublished article, book, thesis, etc.
+# --
+@unpublished{${1:name},
+    author = {${2:author}},
+    title = {${3:title}},
+    year = {${4:?_year}},
+    month = {${5:?_month}},
+    note = {${6:note}},
+}

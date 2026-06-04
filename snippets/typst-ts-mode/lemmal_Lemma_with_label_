@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Lemma (with label)
+# key: lemmal
+# --
+#lemma(name: [$1])[
+  $2
+] <lem:$1>
+$0

@@ -1,0 +1,15 @@
+# -*- mode: snippet -*-
+# name: @mastersthesis
+# key: @mastersthesis
+# -- Master's thesis
+# --
+@mastersthesis{${1:name},
+    author = {${2:author}},
+    title = {${3:title}},
+    school = {${4:school}},
+    type = {${5:?_type}},
+    address = {${6:?_address}},
+    year = {${7:year}},
+    month = {${8:?_month}},
+    note = {${9:?_note}},
+}

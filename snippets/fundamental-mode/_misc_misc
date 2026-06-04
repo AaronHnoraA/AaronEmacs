@@ -1,0 +1,13 @@
+# -*- mode: snippet -*-
+# name: @misc
+# key: @misc
+# -- Template useful for other kinds of publication
+# --
+@misc{${1:name},
+    author = {${2:?_author}},
+    title = {${3:?_title}},
+    howpublished = {${4:?_howpublished}},
+    year = {${5:?_year}},
+    month = {${6:?_month}},
+    note = {${7:?_note}},
+}

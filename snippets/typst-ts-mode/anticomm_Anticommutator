@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Anticommutator
+# key: anticomm
+# --
+lr({${1:A}, ${2:B}}) $0

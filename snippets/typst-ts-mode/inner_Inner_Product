@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Inner product
+# key: inner
+# --
+chevron.l ${1:x}, ${2:y} chevron.r $0

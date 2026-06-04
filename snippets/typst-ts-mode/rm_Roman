@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Roman
+# key: rm
+# --
+upright($1)$2

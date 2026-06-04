@@ -1,0 +1,20 @@
+# -*- mode: snippet -*-
+# name: @conference
+# key: @conference
+# -- Equal to inproceedings
+# --
+@conference{${1:name},
+    author = {${2:author}},
+    title = {${3:title}},
+    booktitle = {${4:booktitle}},
+    editor = {${5:?_editor}},
+    volume = {${6:?_volume}},
+    number = {${7:?_number}},
+    series = {${8:?_series}},
+    pages = {${9:?_pages}},
+    address = {${10:?_address}},
+    year = {${11:year}},
+    month = {${12:?_month}},
+    publisher = {${13:?_publisher}},
+    note = {${14:?_note}},
+}

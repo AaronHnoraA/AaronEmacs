@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Pauli Z
+# key: pauliZ
+# --
+mat(1, 0; 0, -1)$0

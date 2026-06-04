@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+# name: Tabular (with label)
+# key: tabl
+# --
+#figure(
+  table(
+    columns: ${1:2},
+    $0
+  ),
+) <tab:$2>

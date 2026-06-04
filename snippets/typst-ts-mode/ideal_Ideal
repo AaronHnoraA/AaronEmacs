@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Ideal
+# key: ideal
+# --
+frak(${1:p}) $0

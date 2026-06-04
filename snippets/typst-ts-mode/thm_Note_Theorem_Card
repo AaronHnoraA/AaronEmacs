@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Note theorem card
+# key: thm
+# --
+#theorem[
+  $0
+]

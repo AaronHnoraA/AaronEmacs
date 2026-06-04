@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Congruence
+# key: congmod
+# --
+${1:a} equiv ${2:b} mod ${3:n} $0

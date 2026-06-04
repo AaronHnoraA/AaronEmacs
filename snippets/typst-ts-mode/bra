@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: bra
+# key: bra
+# --
+chevron.l ${1:phi}| $0

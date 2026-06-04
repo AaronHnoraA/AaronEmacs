@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Key generation
+# key: KeyGen
+# --
+(${1:pk}, ${2:sk}) <- "KeyGen" lr((1^(${3:lambda}))) $0

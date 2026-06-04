@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Gamma matrix
+# key: gammamat
+# --
+gamma^${1:mu} $0

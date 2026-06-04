@@ -1,0 +1,16 @@
+# -*- mode: snippet -*-
+# name: @techreport
+# key: @techreport
+# -- Technical report from educational, commercial or standardization institution.
+# --
+@techreport{${1:name},
+    author = {${2:author}},
+    title = {${3:title}},
+    institution = {${4:institution}},
+    type = {${5:?_type}},
+    number = {${6:?_number}},
+    address = {${7:?_address}},
+    year = {${8:year}},
+    month = {${9:?_month}},
+    note = {${10:?_note}},
+}

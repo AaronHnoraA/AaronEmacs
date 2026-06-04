@@ -1,0 +1,14 @@
+# -*- mode: snippet -*-
+# name: @booklet
+# key: @booklet
+# -- A bound work without a named publisher or sponsor.
+# --
+@booklet{${1:name},
+    author = {${1:?_author}},
+    title = {${2:title}},
+    howpublished = {${3:?_howpublished}},
+    address = {${4:?_address}},
+    year = {${5:?_year}},
+    month = {${6:?_month}},
+    note = {${7:?_note}},
+}

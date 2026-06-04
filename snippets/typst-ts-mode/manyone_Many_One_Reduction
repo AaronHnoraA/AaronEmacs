@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Many-one reduction
+# key: manyone
+# --
+${1:A} <=_m ${2:B} $0

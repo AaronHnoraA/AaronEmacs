@@ -1,0 +1,14 @@
+# -*- mode: snippet -*-
+# name: Table (ACM wide)
+# key: table:acm:*
+# --
+#figure(
+  table(
+    columns: ${3:3},
+    table.header[*a*][*b*][*c*],
+    [d], [e], [f],
+  ),
+  caption: [$1],
+  placement: top,
+) <tab:$2>
+$0

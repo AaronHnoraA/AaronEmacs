@@ -1,0 +1,16 @@
+# -*- mode: snippet -*-
+# name: @article
+# key: @article
+# -- An article from a magazine or a journal.
+# --
+@article{${1:name},
+    author = {${2:author}},
+    title = {${3:title}},
+    journal = {${4:journal}},
+    volume = {${5:?_volume}},
+    number = {${6:?_number}},
+    pages = {${7:?_pages}},
+    year = {${8:year}},
+    month = {${9:?_month}},
+    note = {${10:?_note}},
+}

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Automorphism group
+# key: aut
+# --
+"Aut" lr((${1:G})) $0

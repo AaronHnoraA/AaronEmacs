@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Signature
+# key: Sign
+# --
+${1:sigma} <- "Sign"_(${2:sk}) lr((${3:m})) $0

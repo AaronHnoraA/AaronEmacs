@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Valuation
+# key: val
+# --
+v_${2:p} lr((${1:x})) $0

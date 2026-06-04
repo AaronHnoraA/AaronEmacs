@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Sub Paragraph (no label)
+# key: subp
+# --
+===== $1
+${0}

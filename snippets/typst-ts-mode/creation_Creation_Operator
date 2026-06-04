@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Creation operator
+# key: create
+# --
+${1:a}^dagger $0

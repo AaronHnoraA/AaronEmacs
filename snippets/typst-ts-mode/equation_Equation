@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Equation
+# key: equation
+# --
+#note-equation("eq:$2")[
+  $ $1 $
+]

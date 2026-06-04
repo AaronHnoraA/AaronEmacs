@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Double Dot Accent
+# key: ddot
+# --
+dot.double($1)$2

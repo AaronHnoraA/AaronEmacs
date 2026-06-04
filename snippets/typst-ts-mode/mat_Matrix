@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Matrix
+# key: mat
+# --
+mat(
+  $0;
+  ;
+)

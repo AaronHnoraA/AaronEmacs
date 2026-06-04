@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Commitment
+# key: Com
+# --
+(${1:c}, ${2:d}) <- "Com" lr((${3:m}; ${4:r})) $0

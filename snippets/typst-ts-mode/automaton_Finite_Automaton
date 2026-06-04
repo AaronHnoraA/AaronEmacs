@@ -1,0 +1,13 @@
+# -*- mode: snippet -*-
+# name: Finite automaton
+# key: automaton
+# --
+#automaton(
+  (
+    ${1:q0}: (${2:q1}: "${3:0}", ${1:q0}: "${4:1}"),
+    ${2:q1}: none,
+  ),
+  initial: "${1:q0}",
+  final: ("${2:q1}",),
+)
+$0

@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Definition alias
+# key: defn
+# --
+#definition[
+  $0
+]

@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Array
+# key: array
+# --
+mat(delim: #none,
+  $0
+)

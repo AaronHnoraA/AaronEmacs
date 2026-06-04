@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Curl
+# key: curl
+# --
+curl(${1:F}) $0

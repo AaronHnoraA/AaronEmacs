@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Lorentz force
+# key: lorentz
+# --
+bold(F) = ${1:q} lr((bold(E) + ${2:bold(v)} times bold(B))) $0

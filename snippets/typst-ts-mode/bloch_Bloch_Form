@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Bloch form
+# key: bloch
+# --
+bloch(${1:r}) $0

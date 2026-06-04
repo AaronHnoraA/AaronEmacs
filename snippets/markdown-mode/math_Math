@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: Math
+# key: math
+# -- Add a Math
+# --
+\begin{math}
+	$1
+\end{math}
+$0

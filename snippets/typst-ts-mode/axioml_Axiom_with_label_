@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Axiom (with label)
+# key: axioml
+# --
+#axiom(name: [$1])[
+  $2
+] <axi:$1>
+$0

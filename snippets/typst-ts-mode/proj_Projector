@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Projector
+# key: proj
+# --
+|${1:psi} chevron.r chevron.l ${1:psi}| $0

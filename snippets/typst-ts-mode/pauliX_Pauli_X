@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Pauli X
+# key: pauliX
+# --
+mat(0, 1; 1, 0)$0

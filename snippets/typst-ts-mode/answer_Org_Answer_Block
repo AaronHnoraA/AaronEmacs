@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Answer
+# key: answer
+# --
+#answer[
+  $0
+]

@@ -1,0 +1,124 @@
+;;; init-modules.el --- Load init modules in order -*- lexical-binding: t; -*-
+
+;;; Commentary:
+;;
+
+;;; Code:
+
+(defun my/require-module-safely (module)
+  "Require MODULE and report errors without aborting the rest of init."
+  (condition-case err
+      (require module)
+    (error
+     (display-warning
+      'init-modules
+      (format "Failed to load %s: %s" module (error-message-string err))
+      :error)
+     nil)))
+
+(defun my/require-module-after-any-feature (module &rest features)
+  "Require MODULE after any of FEATURES loads.
+If one of FEATURES is already available, require MODULE immediately."
+  (if (catch 'loaded
+        (dolist (feature features)
+          (when (featurep feature)
+            (throw 'loaded t))))
+      (my/require-module-safely module)
+    (dolist (feature features)
+      (with-eval-after-load feature
+        (my/require-module-safely module)))))
+
+(require 'init-utils)
+(require 'init-base)
+(require 'init-open)
+(when (eq system-type 'darwin)
+  (my/require-module-safely 'init-macos))
+(require 'init-tramp)
+(require 'init-ui)
+(require 'init-tabbar)
+(require 'init-display-rules)
+(require 'init-tools)
+(require 'init-evil)
+(require 'init-lsp)
+(require 'init-format)
+(require 'init-problems)
+(require 'init-symbols)
+(require 'init-workspace-symbol)
+(require 'init-lsp-ops)
+(require 'init-lsp-tools)
+(require 'init-code-actions)
+(require 'init-git)
+(require 'init-smerge)
+(require 'init-dev)
+(require 'init-clutch)
+(require 'init-navigation)
+(require 'init-navigation-extra)
+(require 'init-dired)
+(my/require-module-safely 'init-zoxide)
+(my/require-module-safely 'init-ai-ide)
+(require 'init-copilot)
+(require 'init-minibuffer)
+(require 'init-consult-project)
+(require 'init-snippets)
+(require 'init-auto-insert)
+(require 'init-doom-extra)
+(require 'init-treesit)
+(require 'init-windows)
+(require 'init-expand-region)
+(require 'init-treemacs-bridge)
+(require 'init-project)
+(require 'init-workspaces)
+(require 'init-scratch)
+(require 'init-project-local)
+(require 'init-dir-locals)
+(require 'init-rename)
+(require 'init-harpoon)
+(require 'init-test)
+(require 'init-task)
+(require 'init-project-run)
+(require 'init-debug-profile)
+(require 'init-output)
+(require 'init-session)
+(require 'init-maintenance)
+(require 'init-performance)
+(require 'init-diagnostics-ui)
+(require 'init-diagnostics-extra)
+(require 'init-health)
+(require 'init-server)
+(require 'init-previewer)
+(require 'init-md)
+(require 'init-ratex)
+
+;; standalone apps
+(my/require-module-after-any-feature 'init-babel 'org)
+(my/require-module-after-any-feature 'init-org 'org)
+(when (eq system-type 'darwin)
+  (my/require-module-safely 'init-appine))
+(require 'init-text)
+(require 'init-shell)
+(require 'init-remote-connectboard)
+(my/require-module-safely 'init-spell)
+(require 'init-search)
+(require 'init-search-extra)
+(require 'init-telescope)
+(require 'init-direnv)
+(require 'init-smartparens)
+(require 'init-rainbow-delimiters)
+(require 'init-avy)
+(require 'init-multiple-cursors)
+(my/require-module-after-any-feature 'init-auctex 'tex 'tex-site 'pdf-tools 'pdf-view)
+(my/require-module-safely 'init-jupyter)
+(my/require-module-safely 'init-browser)
+(my/require-module-safely 'init-fzfs)
+(require 'init-function-keys)
+(require 'init-hyper)
+(require 'init-mouse)
+(my/package-register-vc 'joplin-mode
+                        '(:url "https://github.com/cinsk/joplin-mode.git"
+                          :rev :last-release))
+(with-eval-after-load 'markdown-mode
+  (my/require-module-safely 'init-joplin))
+(require 'init-ignored)
+
+(provide 'init-modules)
+;;; init-modules.el ends here

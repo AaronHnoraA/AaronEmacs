@@ -1,0 +1,23 @@
+# -*- mode: snippet -*-
+# name: @incollection
+# key: @incollection
+# -- A section of a book having its own title.
+# --
+@incollection{${1:name},
+    author = {${2:author}},
+    title = {${3:title}},
+    booktitle = {${4:booktitle}},
+    publisher = {${5:publisher}},
+    editor = {${6:?_editor}},
+    volume = {${7:?_volume}},
+    number = {${8:?_number}},
+    series = {${9:?_series}},
+    type = {${10:?_type}},
+    chapter = {${11:?_chapter}},
+    pages = {${12:?_pages}},
+    address = {${13:?_address}},
+    edition = {${14:?_edition}},
+    year = {${15:year}},
+    month = {${16:?_month}},
+    note = {${17:?_note}},
+}

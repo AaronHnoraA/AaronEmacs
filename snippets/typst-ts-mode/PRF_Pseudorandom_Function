@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: PRF
+# key: PRF
+# --
+${1:F}_(${2:k}) lr((${3:x})) $0

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Many-one reduction
+# key: redm
+# --
+${1:A} <=_m^p ${2:B} $0

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Expectation value
+# key: expval
+# --
+chevron.l ${2:psi} | ${1:A} | ${2:psi} chevron.r $0

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Finite field
+# key: FF
+# --
+bb(F)_${1:q} $0

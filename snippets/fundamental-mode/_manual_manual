@@ -1,0 +1,15 @@
+# -*- mode: snippet -*-
+# name: @manual
+# key: @manual
+# -- Technical manual
+# --
+@manual{${1:name},
+    title = {${2:title}},
+    author = {${3:?_author}},
+    organization = {${4:?_organization}},
+    address = {${5:?_address}},
+    edition = {${6:?_edition}},
+    year = {${7:year}},
+    month = {${8:?_month}},
+    note = {${9:?_note}},
+}

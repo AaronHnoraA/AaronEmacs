@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Sub Sub Section (no label)
+# key: subs
+# --
+=== $1
+${0}

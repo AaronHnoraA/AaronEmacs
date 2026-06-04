@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Theorem (with label)
+# key: thml
+# --
+#theorem(name: [$1])[
+  $2
+] <thm:$1>
+$0

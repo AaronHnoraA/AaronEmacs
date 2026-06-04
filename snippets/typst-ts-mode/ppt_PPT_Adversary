@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: PPT
+# key: ppt
+# --
+sans("PPT")$0

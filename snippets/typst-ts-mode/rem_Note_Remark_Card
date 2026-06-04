@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Note remark card
+# key: rem
+# --
+#remark[
+  $0
+]

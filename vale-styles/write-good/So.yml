@@ -1,0 +1,6 @@
+extends: existence
+message: "Sentence-openers like '%s' read conversationally; consider a more direct transition."
+level: suggestion
+scope: sentence
+tokens:
+  - '^So(?:,)?\b'

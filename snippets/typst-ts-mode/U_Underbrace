@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Underbrace
+# key: U
+# --
+underbrace(${2:`yas-selected-text`}, $1)

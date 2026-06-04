@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Note definition card
+# key: def
+# --
+#definition[
+  $0
+]

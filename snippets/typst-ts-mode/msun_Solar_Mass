@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Solar Mass
+# key: msun
+# --
+M_dot.circle

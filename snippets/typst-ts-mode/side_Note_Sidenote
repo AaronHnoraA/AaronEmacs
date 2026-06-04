@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Note sidenote (short)
+# key: side
+# --
+#sidenote[
+  $0
+]

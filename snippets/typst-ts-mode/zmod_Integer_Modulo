@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Integers modulo n
+# key: zmod
+# --
+bb(Z) / ${1:n} bb(Z) $0

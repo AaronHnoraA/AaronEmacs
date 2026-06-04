@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Advantage
+# key: advantage
+# --
+advantage(${1:game}, ${2:A}, ${3:lambda}) $0

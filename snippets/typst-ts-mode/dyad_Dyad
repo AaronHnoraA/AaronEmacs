@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Dyad
+# key: dyad
+# --
+dyad(${1:phi}, ${2:psi}) $0

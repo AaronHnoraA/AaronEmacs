@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Braket
+# key: bk
+# --
+chevron.l ${1:phi} | ${2:psi} chevron.r $0

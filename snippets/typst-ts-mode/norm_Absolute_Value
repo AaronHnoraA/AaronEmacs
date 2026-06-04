@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Absolute Value
+# key: norm
+# --
+lr(|$1|) $2

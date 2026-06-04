@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Language over bits
+# key: lang
+# --
+cal(${1:L}) subset.eq lr({0, 1})^${2:*} $0

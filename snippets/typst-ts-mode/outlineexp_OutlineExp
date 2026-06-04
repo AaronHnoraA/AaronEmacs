@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Display math
+# key: outlineexp
+# --
+\$ $1 \$

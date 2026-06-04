@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Convolution
+# key: conv
+# --
+convolution(${1:f}, ${2:g}) $0

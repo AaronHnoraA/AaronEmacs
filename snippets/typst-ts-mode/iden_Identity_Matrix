@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+# name: Identity Matrix
+# key: iden
+# --
+mat(delim: "(",
+  1, 0, dots.h.c, 0;
+  0, 1, dots.h.c, 0;
+  dots.v, dots.v, dots.down, dots.v;
+  0, 0, dots.h.c, 1
+)

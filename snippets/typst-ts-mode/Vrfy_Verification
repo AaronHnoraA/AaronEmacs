@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Signature verification
+# key: Vrfy
+# --
+"Vrfy"_(${1:pk}) lr((${2:m}, ${3:sigma})) = ${4:1} $0

@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Isomorphism
+# key: isom
+# --
+${1:G} tilde.equiv ${2:H} $0

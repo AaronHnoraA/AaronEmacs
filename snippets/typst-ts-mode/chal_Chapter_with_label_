@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Chapter (with label)
+# key: chal
+# --
+= $1 <chap:$1>
+${0}

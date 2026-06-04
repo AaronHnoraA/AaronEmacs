@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Boltzmann factor
+# key: boltzmann
+# --
+exp(-${1:E} / (k_B ${2:T})) $0

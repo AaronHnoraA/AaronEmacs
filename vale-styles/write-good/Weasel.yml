@@ -1,0 +1,20 @@
+extends: existence
+message: "'%s' is a weasel word!"
+ignorecase: true
+level: suggestion
+tokens:
+  - clearly
+  - exceedingly
+  - excellent
+  - extremely
+  - fairly
+  - huge
+  - interestingly
+  - is a number
+  - obviously
+  - quite
+  - remarkably
+  - surprisingly
+  - tiny
+  - vast
+  - very

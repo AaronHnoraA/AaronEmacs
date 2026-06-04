@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+# name: Figure (ACM wide)
+# key: figure:acm:*
+# --
+#figure(
+  image("figures/$1", width: 100%),
+  caption: [$2],
+  placement: top,
+) <fig:$3>
+$0

@@ -1,0 +1,22 @@
+# -*- mode: snippet -*-
+# name: @inbook
+# key: @inbook
+# -- A section of a book without its own title.
+# --
+@inbook{${1:name},
+    author = {${2:author}},
+    editor = {${3:editor}},
+    title = {${4:title}},
+    chapter = {${5:chapter}},
+    pages = {${6:pages}},
+    publisher = {${7:publisher}},
+    volume = {${8:?_volume}},
+    number = {${9:?_number}},
+    series = {${10:?_series}},
+    type = {${11:?_type}},
+    address = {${12:?_address}},
+    edition = {${13:?_edition}},
+    year = {${14:year}},
+    month = {${15:?_month}},
+    note = {${16:?_note}},
+}

@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: Quill quantum circuit
+# key: qcirc
+# --
+#quantum-circuit(
+  qlstick($|0 chevron.r$), $H$, qctrl(1), qrstick($(|00 chevron.r + |11 chevron.r) / sqrt(2)$, n: 2), [\ ],
+  qlstick($|0 chevron.r$), 1, qtarg(), 1,
+)
+$0

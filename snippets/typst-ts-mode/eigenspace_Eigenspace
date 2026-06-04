@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Eigenspace
+# key: eigenspace
+# --
+"ker" lr((${1:A} - ${2:lambda} I)) $0

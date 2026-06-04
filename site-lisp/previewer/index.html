@@ -1,0 +1,506 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Org Preview</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{ css }}
+    <style>
+      html, body {
+        min-height: 100%;
+        margin: 0;
+      }
+
+      body {
+        background: #f7f5f0;
+      }
+
+      .preview-shell {
+        box-sizing: border-box;
+        min-height: 100vh;
+        padding: 24px 28px 55vh;
+      }
+
+      pre code.hljs {
+        padding: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="preview-shell">
+      <article id="preview" class="markdown-body previewer-org-page">Text Preview</article>
+    </main>
+  </body>
+  {{ js }}
+  <script type="text/javascript">
+    (function () {
+      var preview = document.getElementById("preview");
+      var sourceAnchors = [];
+      var syncScrollFromBrowser = true;
+      var websocket = null;
+      var activeSourcePos = 0;
+      var lastContentHash = "";
+      var suppressScrollEvent = false;
+      var scrollTimer = 0;
+      var config = window.PreviewerConfig || {};
+      var mathJaxLoading = null;
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function send(message) {
+        if (websocket && websocket.readyState === WebSocket.OPEN) {
+          websocket.send(JSON.stringify(message));
+        }
+      }
+
+      function mathJaxTypeset(root) {
+        if (window.MathJax && typeof window.MathJax.typesetPromise === "function") {
+          window.MathJax.typesetPromise([root || preview]).catch(function (error) {
+            console.log(error);
+          });
+        }
+      }
+
+      function ensureMathJax(callback) {
+        if (window.MathJax && typeof window.MathJax.typesetPromise === "function") {
+          callback();
+          return;
+        }
+        if (mathJaxLoading) {
+          mathJaxLoading.then(callback).catch(function (error) { console.log(error); });
+          return;
+        }
+        mathJaxLoading = new Promise(function (resolve, reject) {
+          var script = document.createElement("script");
+          script.src = config.mathJaxPath || "/preview/static/vendor/mathjax/tex-mml-chtml.js";
+          script.async = true;
+          script.onload = resolve;
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+        mathJaxLoading.then(callback).catch(function (error) { console.log(error); });
+      }
+
+      function fallbackMath(span, tex, display) {
+        span.classList.add("preview-math-fallback");
+        span.textContent = display ? "\\[" + tex + "\\]" : "\\(" + tex + "\\)";
+      }
+
+      function renderMathTextNode(node) {
+        var text = node.nodeValue;
+        if (!text || !/(\\\(|\\\[|\$\$)/.test(text)) {
+          return;
+        }
+
+        var pattern = /(\\\[((?:.|\n)*?)\\\]|\\\(((?:.|\n)*?)\\\)|\$\$((?:.|\n)*?)\$\$)/g;
+        var fragment = document.createDocumentFragment();
+        var last = 0;
+        var match;
+
+        while ((match = pattern.exec(text)) !== null) {
+          if (match.index > last) {
+            fragment.appendChild(document.createTextNode(text.slice(last, match.index)));
+          }
+
+          var display = Boolean(match[2] || match[4]);
+          var tex = match[2] || match[3] || match[4] || "";
+          var span = document.createElement(display ? "div" : "span");
+          span.className = display ? "preview-math preview-math-display" : "preview-math preview-math-inline";
+          span.dataset.tex = tex;
+
+          if (config.mathEngine === "mathjax") {
+            span.textContent = display ? "\\[" + tex + "\\]" : "\\(" + tex + "\\)";
+          } else if (window.katex && typeof window.katex.render === "function") {
+            try {
+              window.katex.render(tex, span, {
+                displayMode: display,
+                throwOnError: true,
+                strict: "ignore",
+                trust: true
+              });
+            } catch (error) {
+              fallbackMath(span, tex, display);
+              if (config.mathJaxLazyFallback !== false) {
+                span.dataset.mathjaxPending = "true";
+              }
+            }
+          } else {
+            fallbackMath(span, tex, display);
+          }
+
+          fragment.appendChild(span);
+          last = pattern.lastIndex;
+        }
+
+        if (last < text.length) {
+          fragment.appendChild(document.createTextNode(text.slice(last)));
+        }
+
+        node.parentNode.replaceChild(fragment, node);
+      }
+
+      function renderMath(root) {
+        root = root || preview;
+        if (config.mathEngine === "none" || !/(\\\(|\\\[|\$\$)/.test(root.textContent || "")) {
+          return;
+        }
+        var walker = document.createTreeWalker(
+          root,
+          NodeFilter.SHOW_TEXT,
+          {
+            acceptNode: function (node) {
+              var parent = node.parentElement;
+              if (!parent || /^(SCRIPT|STYLE|TEXTAREA|CODE|PRE)$/i.test(parent.tagName)) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          }
+        );
+        var nodes = [];
+        while (walker.nextNode()) {
+          nodes.push(walker.currentNode);
+        }
+        nodes.forEach(renderMathTextNode);
+        if (config.mathEngine === "mathjax") {
+          mathJaxTypeset(root);
+        } else if (config.mathJaxLazyFallback !== false && root.querySelector("[data-mathjax-pending]")) {
+          ensureMathJax(function () {
+            mathJaxTypeset(root);
+            root.querySelectorAll("[data-mathjax-pending]").forEach(function (node) {
+              delete node.dataset.mathjaxPending;
+            });
+          });
+        }
+      }
+
+      function initCodeAndDiagrams(root) {
+        root = root || preview;
+        if (window.hljs) {
+          root.querySelectorAll("pre code").forEach(function (node) {
+            window.hljs.highlightElement(node);
+          });
+        }
+        if (window.mermaid) {
+          try {
+            window.mermaid.init(undefined, root.querySelectorAll(".mermaid"));
+          } catch (error) {
+            console.log(error);
+          }
+        }
+      }
+
+      function normalizeText(value) {
+        return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+      }
+
+      function sourceCandidateSelector(kind) {
+        if (kind === "heading") {
+          return "h1,h2,h3,h4,h5,h6";
+        }
+        if (kind === "block") {
+          return ".definition,.defn,.theorem,.thm,.lemma,.cor,.prop,.property,.proof,.example,.attention,.note,.info,.warning,blockquote,pre";
+        }
+        return "p,li,dd,dt,blockquote,pre,td,th,tr";
+      }
+
+      function mergeSourceAnchors(patchAnchors, chunkBeg, chunkEnd) {
+        patchAnchors = Array.isArray(patchAnchors) ? patchAnchors : [];
+        var beg = Number(chunkBeg || 0);
+        var end = Number(chunkEnd || 0);
+        if (!beg || !end) {
+          return patchAnchors;
+        }
+        return sourceAnchors
+          .filter(function (anchor) {
+            var pos = Number(anchor.pos || 0);
+            return pos < beg || pos >= end;
+          })
+          .concat(patchAnchors)
+          .sort(function (a, b) {
+            return Number(a.pos || 0) - Number(b.pos || 0);
+          });
+      }
+
+      function removeGeneratedToc(root) {
+        (root || preview).querySelectorAll("#table-of-contents,.table-of-contents").forEach(function (node) {
+          node.remove();
+        });
+      }
+
+      function removeEmptyListArtifacts(root) {
+        root = root || preview;
+        root.querySelectorAll("li").forEach(function (node) {
+          if (!node.textContent.trim() && !node.querySelector("img,svg,math,mjx-container,pre,code,table")) {
+            node.remove();
+          }
+        });
+        var changed = true;
+        while (changed) {
+          changed = false;
+          root.querySelectorAll("ul,ol").forEach(function (node) {
+            if (!node.querySelector("li") && !node.textContent.trim()) {
+              node.remove();
+              changed = true;
+            }
+          });
+        }
+      }
+
+      function attachSourceAnchors(anchors, root) {
+        root = root || preview;
+        if (root.querySelector("[data-source-pos]")) {
+          return;
+        }
+        var used = new Set();
+        var candidateCache = {};
+        root.querySelectorAll("[data-source-pos]").forEach(function (node) {
+          delete node.dataset.sourcePos;
+          delete node.dataset.sourceLine;
+          delete node.dataset.sourcePercent;
+          node.classList.remove("preview-source-anchor");
+        });
+
+        anchors.forEach(function (anchor) {
+          var selector = sourceCandidateSelector(anchor.kind);
+          var candidates = candidateCache[selector];
+          if (!candidates) {
+            candidates = Array.prototype.slice.call(root.querySelectorAll(selector));
+            candidateCache[selector] = candidates;
+          }
+          var wanted = normalizeText(anchor.text);
+          var target = null;
+
+          if (wanted) {
+            target = candidates.find(function (node) {
+              if (used.has(node)) return false;
+              var text = normalizeText(node.textContent);
+              return text && (text.indexOf(wanted) >= 0 || wanted.indexOf(text.slice(0, 48)) >= 0);
+            });
+          }
+
+          if (!target) {
+            target = candidates.find(function (node) {
+              return !used.has(node);
+            });
+          }
+
+          if (target) {
+            used.add(target);
+            target.dataset.sourcePos = String(anchor.pos);
+            target.dataset.sourceLine = String(anchor.line);
+            target.dataset.sourcePercent = String(anchor.percent);
+            target.classList.add("preview-source-anchor");
+          }
+        });
+      }
+
+      function renderContent(payload) {
+        sourceAnchors = Array.isArray(payload.anchors) ? payload.anchors : [];
+        syncScrollFromBrowser = payload.syncScrollFromBrowser !== false;
+        activeSourcePos = Number(payload.point || 0);
+
+        if (payload.contentHash && payload.contentHash === lastContentHash) {
+          return;
+        }
+        lastContentHash = payload.contentHash || "";
+
+        if (payload.format === "org-html") {
+          preview.classList.add("previewer-org-page");
+          preview.innerHTML = payload.html || "";
+        } else if (payload.format === "html") {
+          preview.classList.remove("previewer-org-page");
+          preview.innerHTML = payload.html || "";
+        } else if (window.marked) {
+          preview.classList.remove("previewer-org-page");
+          preview.innerHTML = window.marked.parse(payload.html || "");
+        } else {
+          preview.innerHTML = "<pre>" + escapeHtml(payload.html || "") + "</pre>";
+        }
+
+        removeGeneratedToc(preview);
+        removeEmptyListArtifacts(preview);
+        attachSourceAnchors(sourceAnchors);
+        renderMath(preview);
+        initCodeAndDiagrams();
+      }
+
+      function findChunk(chunkId) {
+        var chunks = Array.prototype.slice.call(preview.querySelectorAll("[data-preview-chunk]"));
+        return chunks.find(function (node) {
+          return node.dataset.previewChunk === chunkId;
+        });
+      }
+
+      function renderPatch(payload) {
+        var patchAnchors = Array.isArray(payload.anchors) ? payload.anchors : [];
+        sourceAnchors = mergeSourceAnchors(patchAnchors, payload.chunkBeg, payload.chunkEnd);
+        activeSourcePos = Number(payload.point || 0);
+
+        var chunk = findChunk(payload.chunkId);
+        if (!chunk) {
+          chunk = document.createElement("section");
+          chunk.dataset.previewChunk = payload.chunkId;
+          chunk.dataset.sourcePos = String(payload.chunkBeg || payload.point || 0);
+          preview.appendChild(chunk);
+        }
+
+        if (payload.contentHash && chunk.dataset.contentHash === payload.contentHash) {
+          return;
+        }
+
+        chunk.dataset.contentHash = payload.contentHash || "";
+        chunk.innerHTML = payload.html || "";
+        removeGeneratedToc(chunk);
+        removeEmptyListArtifacts(chunk);
+        attachSourceAnchors(patchAnchors, chunk);
+        renderMath(chunk);
+        initCodeAndDiagrams(chunk);
+      }
+
+      function nearestAnchorForPos(pos, line) {
+        var anchors = Array.prototype.slice.call(preview.querySelectorAll("[data-source-pos]"));
+        if (anchors.length === 0 || !pos) {
+          return null;
+        }
+        var best = anchors[0];
+        var bestDistance = Infinity;
+        var sourceLine = Number(line || 0);
+        anchors.forEach(function (node) {
+          var anchorLine = Number(node.dataset.sourceLine || 0);
+          var lineDistance = sourceLine && anchorLine ? Math.abs(anchorLine - sourceLine) : 0;
+          var posDistance = Math.abs(Number(node.dataset.sourcePos || 0) - pos);
+          var distance = lineDistance * 1000000 + posDistance;
+          if (distance < bestDistance) {
+            best = node;
+            bestDistance = distance;
+          }
+        });
+        return best;
+      }
+
+      function targetInViewport(target) {
+        if (!target) return false;
+        var rect = target.getBoundingClientRect();
+        return rect.top >= 0 && rect.top <= window.innerHeight;
+      }
+
+      function scrollToSource(pos, percent, viewportRatio, line) {
+        var target = nearestAnchorForPos(Number(pos || 0), line);
+        var ratio = Number(viewportRatio);
+        if (!Number.isFinite(ratio)) ratio = 0.45;
+        ratio = Math.max(0.08, Math.min(0.92, ratio));
+        if (target) {
+          if (targetInViewport(target)) {
+            return;
+          }
+          suppressScrollEvent = true;
+          var rect = target.getBoundingClientRect();
+          var top = window.scrollY + rect.top - window.innerHeight * ratio;
+          window.scrollTo({ top: Math.max(0, top), behavior: "auto" });
+        } else if (percent !== false && percent !== undefined) {
+          suppressScrollEvent = true;
+          var fallbackTop = Math.max(0, document.documentElement.scrollHeight * (Number(percent) / 100) - window.innerHeight * ratio);
+          window.scrollTo({ top: fallbackTop, behavior: "auto" });
+        } else {
+          return;
+        }
+        window.setTimeout(function () {
+          suppressScrollEvent = false;
+        }, 350);
+      }
+
+      function handleSync(payload) {
+        activeSourcePos = Number(payload.point || 0);
+        scrollToSource(payload.point, payload.percent, payload.viewportRatio, payload.line);
+      }
+
+      function handleLegacyText(text) {
+        if (text.endsWith("<!-- iframe -->")) {
+          preview.innerHTML = text.replace("<!-- iframe -->", "");
+        } else if (window.marked) {
+          preview.innerHTML = window.marked.parse(text);
+        } else {
+          preview.innerHTML = "<pre>" + escapeHtml(text) + "</pre>";
+        }
+        renderMath(preview);
+        initCodeAndDiagrams();
+      }
+
+      function visibleSourceAnchor() {
+        var nodes = Array.prototype.slice.call(preview.querySelectorAll("[data-source-pos]"));
+        var best = null;
+        nodes.forEach(function (node) {
+          var rect = node.getBoundingClientRect();
+          if (rect.top <= 120) {
+            best = node;
+          } else if (!best && rect.top < window.innerHeight) {
+            best = node;
+          }
+        });
+        return best;
+      }
+
+      window.addEventListener("scroll", function () {
+        if (!syncScrollFromBrowser || suppressScrollEvent) {
+          return;
+        }
+        window.clearTimeout(scrollTimer);
+        scrollTimer = window.setTimeout(function () {
+          var anchor = visibleSourceAnchor();
+          if (!anchor) return;
+          var pos = Number(anchor.dataset.sourcePos || 0);
+          if (pos && Math.abs(pos - activeSourcePos) > 8) {
+            activeSourcePos = pos;
+            send({ type: "goto", pos: pos, passive: true });
+          }
+        }, 180);
+      });
+
+      preview.addEventListener("click", function (event) {
+        var anchor = event.target.closest("[data-source-pos]");
+        if (anchor && (event.metaKey || event.altKey)) {
+          event.preventDefault();
+          send({ type: "goto", pos: Number(anchor.dataset.sourcePos || 0) });
+        }
+      });
+
+      websocket = new WebSocket("ws://{{ websocket }}");
+      websocket.onopen = function () {
+        websocket.send(JSON.stringify({ type: "ready" }));
+      };
+      websocket.onclose = function () {
+        document.body.classList.add("preview-disconnected");
+      };
+      websocket.onmessage = function (event) {
+        var text = event.data || "";
+        if (text.charAt(0) === "{") {
+          try {
+            var payload = JSON.parse(text);
+            if (payload.type === "content") {
+              renderContent(payload);
+            } else if (payload.type === "patch") {
+              renderPatch(payload);
+            } else if (payload.type === "sync") {
+              handleSync(payload);
+            }
+            return;
+          } catch (error) {
+            console.log(error);
+          }
+        }
+        handleLegacyText(text);
+      };
+      websocket.onerror = function (event) {
+        console.log(event);
+      };
+    })();
+  </script>
+</html>

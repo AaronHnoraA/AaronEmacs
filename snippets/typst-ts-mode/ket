@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: ket
+# key: ket
+# --
+|${1:psi} chevron.r $0

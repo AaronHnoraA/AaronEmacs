@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# =========================
+# Org 根目录（唯一需要维护）
+# =========================
+ORG_ROOT="$HOME/HC/Org"
+
+# 先找出所有 ltximg 目录
+mapfile -t TARGETS < <(
+  find "$ORG_ROOT" \
+    -type d \
+    -name 'ltximg'
+)
+
+if [ "${#TARGETS[@]}" -eq 0 ]; then
+  echo "未找到任何 ltximg 目录"
+  exit 0
+fi
+
+echo "找到以下 ltximg 目录："
+for d in "${TARGETS[@]}"; do
+  echo "  $d"
+done
+
+echo
+read -r -p "确认全部递归删除以上目录？[y/N] " ans
+
+case "$ans" in
+  y|Y)
+    for d in "${TARGETS[@]}"; do
+      rm -rf -- "$d"
+      echo "已删除：$d"
+    done
+    ;;
+  *)
+    echo "已取消"
+    ;;
+esac

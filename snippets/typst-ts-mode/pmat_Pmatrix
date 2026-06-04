@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Pmatrix
+# key: pmat
+# --
+mat(delim: "(",
+  $0
+)

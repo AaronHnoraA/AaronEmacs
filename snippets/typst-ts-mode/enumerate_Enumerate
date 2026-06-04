@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: Enumerate
+# key: enumerate
+# --
++ $0

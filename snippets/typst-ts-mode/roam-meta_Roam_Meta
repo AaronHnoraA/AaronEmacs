@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+# name: Roam note metadata header
+# key: roam-meta
+# --
+#roam-meta(
+  title: "$1",
+  date: "$2",
+  tags: ("$3",),
+  source: "$4",
+)$0
