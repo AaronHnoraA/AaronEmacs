@@ -50,8 +50,16 @@ does not reinterpret their syntax on first load."
 
 (defcustom Aaronnote-note-directories nil
   "Note directories exported to the Aaronnote frontend.
-When nil, use `~/HC/Org/roam' when it exists."
+When nil, use the Typst roam root."
   :type '(repeat directory)
+  :group 'Aaronnote)
+
+(defcustom Aaronnote-note-root nil
+  "Typst roam root used by Aaronnote.
+When nil, prefer `my/typst-roam-root' when it is loaded, otherwise use
+`~/Documents/AaronNote/'."
+  :type '(choice (const :tag "Use Typst roam default" nil)
+                 directory)
   :group 'Aaronnote)
 
 (defcustom Aaronnote-note-scan-extensions '("typ" "md" "markdown")
@@ -175,11 +183,20 @@ When nil, use `yas-snippet-dirs' if it is bound, otherwise
 (defun Aaronnote--note-dirs ()
   "Return readable note directories for Aaronnote export."
   (let ((dirs (or Aaronnote-note-directories
-                  (list (expand-file-name "~/HC/Org/roam")))))
+                  (list (Aaronnote--note-root)))))
     (when (stringp dirs)
       (setq dirs (list dirs)))
     (seq-filter #'file-directory-p
                 (mapcar #'expand-file-name dirs))))
+
+(defun Aaronnote--note-root ()
+  "Return the Typst roam root for Aaronnote."
+  (file-name-as-directory
+   (expand-file-name
+    (or Aaronnote-note-root
+        (and (fboundp 'my/typst-roam-root)
+             (my/typst-roam-root))
+        "~/Documents/AaronNote/"))))
 
 (defun Aaronnote--meta-block ()
   "Return md `#+begin meta' fields in the current buffer."
@@ -668,6 +685,7 @@ With prefix argument PORT, prompt for the Vite server port."
              :command (list Aaronnote-npm-command
                             "run" "start" "--"
                             "--port" (number-to-string Aaronnote-port)
+                            "--root" (Aaronnote--note-root)
                             "--strictPort")
              :connection-type 'pipe
              :noquery t))))

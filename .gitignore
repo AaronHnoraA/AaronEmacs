@@ -37,7 +37,19 @@
 /Org
 /eaf/
 /tramp-rpc/
-/site-lisp/ratex.el/backend/target/
+
+# JavaScript/TypeScript dependencies and build output
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+coverage/
+
+# Rust build output
+target/
+
+# Local agent/workspace scratch state
+.claude/
 
 # Local config and app state kept under etc/
 /etc/eshell/
@@ -65,6 +77,7 @@ __pycache__/
 *~
 \#*\#
 .\#*
+*.log
 *.~undo-tree
 .flycheck*
 *.bak-*

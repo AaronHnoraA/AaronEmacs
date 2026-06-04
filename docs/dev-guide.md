@@ -123,6 +123,25 @@ Doctor 更适合快速排查：
 
 详细模型看 [lsp-workflow.org](lsp-workflow.org)。
 
+### Lean interactive infoview
+
+Lean 4 继续走 `lean4-mode` + `lsp-mode`，但本地 buffer 的 `*Lean Goal*`
+优先使用 Lean server 的 interactive RPC widget 协议：
+
+- 源 buffer 按 URI 懒创建 `$/lean/rpc/connect` session。
+- 每 20 秒发送 `$/lean/rpc/keepAlive`，buffer teardown 时取消 timer。
+- 刷新通过 `$/lean/rpc/call` 并发拉
+  `Lean.Widget.getInteractiveGoals`、
+  `Lean.Widget.getInteractiveTermGoal` 和
+  `Lean.Widget.getInteractiveDiagnostics`。
+- TaggedText 渲染成普通 Emacs 文本，同时把 `WithRpcRef` 存成 text property；
+  hover 时再懒调用 `Lean.Widget.InteractiveDiagnostics.infoToInteractive`。
+- RPC ref cache 只在当前 session 内有效；buffer modification tick 改变、
+  session 断开、worker crash 或 Lean 要求 reconnect 时都会丢 session 和 cache。
+
+TRAMP buffer 不启用 interactive RPC infoview，仍走 lean4-mode 原来的
+`$/lean/plainGoal` / `$/lean/plainTermGoal` plain fallback。
+
 ## 3. 调试
 
 这套配置使用 `dape`。

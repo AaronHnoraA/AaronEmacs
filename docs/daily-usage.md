@@ -105,6 +105,13 @@ Typst reference 现在统一走 note reference resolver：`#note("id")[...]` 进
 打开 URL 或文件，指向 note 文件时优先按 note id 进入，`#zoterolink(...)` 打开 Zotero，本地 `@label` 跳到 `<label>`。
 evil normal `RET`、`C-c n RET` 和 Tinymist preview 点击蓝色下划线回源都使用这套规则。
 
+Lean 4 buffer 里 `C-c C-i` / `C-c C-g` 打开右侧 `*Lean Goal*`。
+本地文件默认使用 interactive infoview：目标和 hypotheses 是可折叠的
+`magit-section`，`TAB` / `RET` 折叠或展开，`K` 在子表达式上显示类型/doc。
+诊断区也在同一个 buffer 里，trace 节点可折叠，懒加载节点会显示可点击的
+`load trace children`。`C-c C-w` 在当前 Lean buffer 切换 interactive/plain
+infoview；TRAMP Lean buffer 始终走 plain fallback。
+
 Note task chip 支持 `priority`、`due`、`scheduled`、`repeat`，例如
 `#todo(priority: "A", due: "2026-05-20")[Write proof]`。`*Note Agenda*`
 里 `c` 循环状态，`t` 选择状态，`s` 设置 scheduled，`D` 设置 due，`p`

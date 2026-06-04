@@ -137,7 +137,6 @@ orgpresent
 orgpublish
 orgref
 orgremark
-orgroam
 orgtbl
 datetree
 logseq

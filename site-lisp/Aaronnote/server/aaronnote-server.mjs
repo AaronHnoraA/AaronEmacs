@@ -34,7 +34,7 @@ function parseArgs(argv) {
 const args = parseArgs(process.argv.slice(2));
 const host = String(args.host || process.env.AARONNOTE_HOST || "127.0.0.1");
 const port = Number(args.port || process.env.AARONNOTE_PORT || 5179);
-const noteRoot = resolve(String(args.root || process.env.AARONNOTE_ROOT || join(appDir, "..", "roam")));
+const noteRoot = resolve(String(args.root || process.env.AARONNOTE_ROOT || join(homedir(), "Documents", "AaronNote")));
 const noteScanRoot = noteRoot;
 const excludedDirs = new Set(["_typst", "public", "var", ".git", ".direnv", ".venv", "node_modules"]);
 const noteExts = new Set([".typ", ".md", ".markdown"]);

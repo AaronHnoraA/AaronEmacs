@@ -12,11 +12,20 @@
 (require 'compile)
 (require 'cl-lib)
 (require 'json)
+(require 'transient)
 (require 'websocket)
 
 (declare-function my/eglot-ensure-unless-lsp-mode "init-lsp")
 (declare-function my/eglot-set-workspace-configuration "init-lsp" (configuration))
 (declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
+(declare-function my/language-server-code-actions "init-lsp" ())
+(declare-function my/language-server-format-buffer "init-lsp" ())
+(declare-function my/language-server-manager "init-lsp-tools" ())
+(declare-function my/language-server-rename "init-lsp" ())
+(declare-function my/problems-buffer "init-problems" ())
+(declare-function typst-ts-compile "typst-ts-compile" (&optional preview))
+(declare-function typst-ts-compile-and-preview "typst-ts-compile" ())
+(declare-function typst-ts-watch-mode "typst-ts-watch-mode" (&optional arg))
 (declare-function eglot-current-server "eglot" ())
 (declare-function eglot-managed-p "eglot" ())
 (declare-function eglot-signal-didChangeConfiguration "eglot" (server))
@@ -31,6 +40,7 @@
 (declare-function websocket-close "websocket" (websocket))
 (declare-function websocket-send-text "websocket" (websocket text))
 (declare-function websocket-frame-text "websocket" (frame))
+(declare-function evil-local-set-key "evil-core" (state key def))
 (autoload 'previewer-workbench "previewer" nil t)
 (defvar company-backends)
 (defvar company-idle-delay)
@@ -42,6 +52,15 @@
 (defvar previewer-external-window-side nil)
 (defvar treesit-font-lock-level)
 (defvar typst-ts-compile-executable-location)
+(defvar typst-ts-mode-map)
+
+(defconst my/typst--module-file
+  (or load-file-name buffer-file-name)
+  "Absolute path of `init-typst.el' at load time.")
+
+(defconst my/typst-preview-sync-keys
+  '("C-c C-j" "s-<return>" "M-<return>" "H-<return>")
+  "Key descriptions that sync the Typst source cursor to preview.")
 
 (defvar-local my/typst-preview--start-timer nil
   "Retry timer used while waiting for Tinymist Eglot startup.")
@@ -164,6 +183,11 @@ Use port 0 to let Tinymist choose a free port."
   :type 'number
   :group 'my/typst)
 
+(defcustom my/typst-preview-verbose t
+  "When non-nil, ask Tinymist preview to print control-plane startup details."
+  :type 'boolean
+  :group 'my/typst)
+
 (defcustom my/typst-preview-center-source t
   "When non-nil, recenter source buffers after preview click synchronization."
   :type 'boolean
@@ -187,6 +211,16 @@ Provides a visual cue so the new cursor position is easy to spot."
 
 (defcustom my/typst-preview-follow-delay 0.25
   "Idle seconds before an active Typst preview follows buffer switches."
+  :type 'number
+  :group 'my/typst)
+
+(defcustom my/typst-preview-clean-stale-port-on-start t
+  "When non-nil, clear stale listeners on `my/typst-preview-host' before start."
+  :type 'boolean
+  :group 'my/typst)
+
+(defcustom my/typst-preview-port-cleanup-timeout 1.5
+  "Seconds to wait for the Typst preview TCP port to become free."
   :type 'number
   :group 'my/typst)
 
@@ -221,30 +255,29 @@ Provides a visual cue so the new cursor position is easy to spot."
 
 (defun my/typst--candidate-executable-paths (program)
   "Return common absolute install locations for PROGRAM."
-  (list (format "/opt/homebrew/bin/%s" program)
-        (format "/usr/local/bin/%s" program)
-        (expand-file-name (format "~/.nix-profile/bin/%s" program))
+  (list (expand-file-name (format "~/.nix-profile/bin/%s" program))
         (format "/etc/profiles/per-user/%s/bin/%s"
                 (user-login-name)
                 program)
-        (format "/run/current-system/sw/bin/%s" program)))
+        (format "/run/current-system/sw/bin/%s" program)
+        (format "/opt/homebrew/bin/%s" program)
+        (format "/usr/local/bin/%s" program)))
 
 (defun my/typst--find-executable (program)
   "Return PROGRAM's executable path, including GUI Emacs fallback paths."
-  (or (executable-find program)
-      (seq-find #'file-executable-p
+  (or (seq-find #'file-executable-p
                 (my/typst--candidate-executable-paths program))
+      (executable-find program)
       (let* ((shell (or (getenv "SHELL") shell-file-name))
              (path
               (when (and shell (file-executable-p shell))
-                (string-trim
-                 (with-temp-buffer
-                   (when (zerop
-                          (call-process
-                           shell nil t nil "-lc"
-                           (format "command -v %s 2>/dev/null"
-                                   (shell-quote-argument program))))
-                     (buffer-string)))))))
+                (with-temp-buffer
+                  (when (zerop
+                         (call-process
+                          shell nil t nil "-lc"
+                          (format "command -v %s 2>/dev/null"
+                                  (shell-quote-argument program))))
+                    (string-trim (buffer-string)))))))
         (and (stringp path)
              (not (string-empty-p path))
              path))))
@@ -279,6 +312,18 @@ Provides a visual cue so the new cursor position is easy to spot."
               (list "--font-path"
                     (mapconcat #'identity font-paths path-separator))))))
 
+(defun my/typst-register-eglot-server ()
+  "Register Tinymist as the Typst Eglot server."
+  (when (and (fboundp 'my/register-eglot-server-program)
+             (boundp 'eglot-server-programs))
+    (my/register-eglot-server-program
+     '(typst-ts-mode typst-mode my/typst-mode)
+     (my/typst-eglot-server-command)
+     :label "tinymist"
+     :executables (list my/typst-lsp-executable)
+     :source my/typst--module-file
+     :note "Typst buffers use tinymist through Eglot.")))
+
 (defun my/typst-preview--root-candidate (file marker)
   "Return the directory containing MARKER above FILE, or nil."
   (when-let* ((directory (locate-dominating-file file marker)))
@@ -304,6 +349,8 @@ Provides a visual cue so the new cursor position is easy to spot."
          "--root"
          root
          (format "--invert-colors=%s" my/typst-preview-invert-colors))
+   (when my/typst-preview-verbose
+     (list "--verbose"))
    (when my/typst-preview-partial-rendering
      (list "--partial-rendering=true"))
    (when-let* ((font-paths (seq-filter #'file-directory-p
@@ -358,6 +405,7 @@ Provides a visual cue so the new cursor position is easy to spot."
 (defun my/typst-eglot-ensure ()
   "Start Eglot for Typst buffers when tinymist is available."
   (when (my/typst-eglot-available-p)
+    (my/typst-register-eglot-server)
     (my/eglot-ensure-unless-lsp-mode)))
 
 (defun my/typst-company-setup ()
@@ -543,11 +591,12 @@ Provides a visual cue so the new cursor position is easy to spot."
       (unless my/typst-preview--socket
         (let ((text (concat my/typst-preview--control-output-tail output)))
           (setq my/typst-preview--control-output-tail
-                (if (> (length text) 240)
-                    (substring text -240)
+                (if (> (length text) 1200)
+                    (substring text -1200)
                   text))
           (when (string-match
-                 "Control panel server listening on: \\(.+\\)" text)
+                 "[Cc]ontrol panel server listening on:[[:space:]]*\\(?:ws://\\|http://\\)?\\([^[:space:]\",}]+\\)"
+                 text)
             (my/typst-preview--connect-control
              source-buffer
              (string-trim (match-string 1 text)))))))))
@@ -635,6 +684,66 @@ absolute positions."
   (add-hook 'after-change-functions #'my/typst-preview-after-change nil t)
   (add-hook 'kill-buffer-hook #'my/typst-preview-cleanup nil t))
 
+(defun my/typst-preview--host-port (&optional host)
+  "Return the numeric TCP port from HOST."
+  (let ((host (or host my/typst-preview-host)))
+    (when (and (stringp host)
+               (string-match ":\\([0-9]+\\)\\'" host))
+      (string-to-number (match-string 1 host)))))
+
+(defun my/typst-preview--port-listener-pids (port)
+  "Return process ids listening on TCP PORT."
+  (when (and (integerp port)
+             (> port 0)
+             (executable-find "lsof"))
+    (with-temp-buffer
+      (call-process "lsof" nil t nil
+                    (format "-tiTCP:%d" port)
+                    "-sTCP:LISTEN")
+      (seq-filter
+       (lambda (pid) (string-match-p "\\`[0-9]+\\'" pid))
+       (split-string (buffer-string) "\n" t)))))
+
+(defun my/typst-preview--wait-port-free (port &optional ignored-pid timeout)
+  "Wait until TCP PORT is free, ignoring IGNORED-PID."
+  (let ((deadline (+ (float-time)
+                     (or timeout my/typst-preview-port-cleanup-timeout)))
+        remaining)
+    (while (and (< (float-time) deadline)
+                (setq remaining
+                      (remove ignored-pid
+                              (my/typst-preview--port-listener-pids port))))
+      (sleep-for 0.05))
+    (or (remove ignored-pid
+                (my/typst-preview--port-listener-pids port))
+        nil)))
+
+(defun my/typst-preview--signal-pids (pids signal)
+  "Send SIGNAL to each process id in PIDS."
+  (dolist (pid pids)
+    (condition-case nil
+        (signal-process (string-to-number pid) signal)
+      (error nil))))
+
+(defun my/typst-preview-clean-stale-port ()
+  "Clear stale Tinymist preview listeners on `my/typst-preview-host'."
+  (when my/typst-preview-clean-stale-port-on-start
+    (when-let* ((port (my/typst-preview--host-port))
+                (pids (my/typst-preview--port-listener-pids port)))
+      (let ((remaining pids)
+            (signals '(interrupt term kill))
+            (slice (/ my/typst-preview-port-cleanup-timeout 3.0)))
+        (while (and remaining signals)
+          (my/typst-preview--signal-pids remaining (pop signals))
+          (setq remaining (my/typst-preview--wait-port-free port nil slice)))
+        (if remaining
+            (user-error "Typst preview port %d is still occupied by PID(s): %s"
+                        port
+                        (string-join remaining ", "))
+          (message "Cleared stale Typst preview listener(s) on port %d: %s"
+                   port
+                   (string-join pids ", ")))))))
+
 (defun my/typst-start-default-preview (&optional force)
   "Start Tinymist's official preview server for the current buffer.
 When FORCE is non-nil, restart even if the current buffer already owns it."
@@ -656,6 +765,7 @@ When FORCE is non-nil, restart even if the current buffer already owns it."
                    (equal my/typst-preview--process-args args)
                    (equal my/typst-preview--process-root root))
         (my/typst-stop-preview)
+        (my/typst-preview-clean-stale-port)
         (let* ((command command)
                (args args)
                (source-buffer (current-buffer))
@@ -768,9 +878,18 @@ When FORCE is non-nil, restart even if the current buffer already owns it."
 (defun my/typst-ts-pretty-setup ()
   "Keep Typst buffers on `typst-ts-mode' native math script rendering."
   (setq-local treesit-font-lock-level
-              (max 3 (if (integerp treesit-font-lock-level)
+              (max 4 (if (integerp treesit-font-lock-level)
                          treesit-font-lock-level
                        0))))
+
+(defun my/typst-auto-mode ()
+  "Use `typst-ts-mode' when its grammar is ready, otherwise use fallback mode."
+  (interactive)
+  (if (and (fboundp 'typst-ts-mode)
+           (fboundp 'treesit-ready-p)
+           (treesit-ready-p 'typst t))
+      (typst-ts-mode)
+    (my/typst-mode)))
 
 (defun my/typst--bracket-syntax-context-p (&optional pos)
   "Return non-nil when POS is inside a string or comment."
@@ -863,6 +982,17 @@ function calls like `#foo(...)[...]' do not get hijacked by parentheses."
   (local-set-key (kbd "M-]") #'my/typst-forward-content-bracket-dwim)
   (local-set-key (kbd "M-[") #'my/typst-backward-content-bracket-dwim))
 
+(defun my/typst-setup-preview-sync-keys ()
+  "Use Cmd+Enter to sync the current source cursor to Typst preview."
+  (dolist (key my/typst-preview-sync-keys)
+    (local-set-key (kbd key) #'my/typst-preview-send-position))
+  (when (fboundp 'evil-local-set-key)
+    (dolist (state '(normal insert visual motion operator replace emacs))
+      (dolist (key my/typst-preview-sync-keys)
+        (evil-local-set-key state
+                            (kbd key)
+                            #'my/typst-preview-send-position)))))
+
 (defun my/typst-copilot-auto-enable ()
   "Auto-enable Copilot in Typst buffers when the integration is available."
   (when (or (fboundp 'my/copilot-auto-enable-h)
@@ -872,10 +1002,14 @@ function calls like `#foo(...)[...]' do not get hijacked by parentheses."
 
 (use-package typst-ts-mode
   :ensure t
-  :mode ("\\.typ\\'" . typst-ts-mode)
+  :mode ("\\.typ\\'" . my/typst-auto-mode)
   :bind (:map typst-ts-mode-map
+              ("C-c C-m" . my/typst-dispatch)
               ("C-c C-p" . my/typst-preview)
               ("C-c C-j" . my/typst-preview-send-position)
+              ("s-<return>" . my/typst-preview-send-position)
+              ("M-<return>" . my/typst-preview-send-position)
+              ("H-<return>" . my/typst-preview-send-position)
               ("M-]" . my/typst-forward-content-bracket-dwim)
               ("M-[" . my/typst-backward-content-bracket-dwim))
   :hook ((typst-ts-mode . my/typst-eglot-setup)
@@ -884,6 +1018,7 @@ function calls like `#foo(...)[...]' do not get hijacked by parentheses."
          (typst-ts-mode . my/typst-preview-buffer-setup)
          (typst-ts-mode . my/typst-ts-pretty-setup)
          (typst-ts-mode . my/typst-setup-bracket-dwim-keys)
+         (typst-ts-mode . my/typst-setup-preview-sync-keys)
          (typst-ts-mode . my/typst-copilot-auto-enable)
          (typst-ts-mode . flymake-mode))
   :config
@@ -900,6 +1035,7 @@ function calls like `#foo(...)[...]' do not get hijacked by parentheses."
   (add-hook hook #'my/typst-previewer-setup)
   (add-hook hook #'my/typst-preview-buffer-setup)
   (add-hook hook #'my/typst-setup-bracket-dwim-keys)
+  (add-hook hook #'my/typst-setup-preview-sync-keys)
   (add-hook hook #'my/typst-copilot-auto-enable)
   (add-hook hook #'flymake-mode))
 
@@ -909,11 +1045,17 @@ function calls like `#foo(...)[...]' do not get hijacked by parentheses."
   (when (boundp 'typst-mode-map)
     (define-key typst-mode-map (kbd "C-c C-p") #'my/typst-preview)
     (define-key typst-mode-map (kbd "C-c C-j") #'my/typst-preview-send-position)
+    (define-key typst-mode-map (kbd "s-<return>") #'my/typst-preview-send-position)
+    (define-key typst-mode-map (kbd "M-<return>") #'my/typst-preview-send-position)
+    (define-key typst-mode-map (kbd "H-<return>") #'my/typst-preview-send-position)
     (define-key typst-mode-map (kbd "M-]") #'my/typst-forward-content-bracket-dwim)
     (define-key typst-mode-map (kbd "M-[") #'my/typst-backward-content-bracket-dwim)))
 
 (define-key my/typst-mode-map (kbd "C-c C-p") #'my/typst-preview)
 (define-key my/typst-mode-map (kbd "C-c C-j") #'my/typst-preview-send-position)
+(define-key my/typst-mode-map (kbd "s-<return>") #'my/typst-preview-send-position)
+(define-key my/typst-mode-map (kbd "M-<return>") #'my/typst-preview-send-position)
+(define-key my/typst-mode-map (kbd "H-<return>") #'my/typst-preview-send-position)
 (define-key my/typst-mode-map (kbd "M-]") #'my/typst-forward-content-bracket-dwim)
 (define-key my/typst-mode-map (kbd "M-[") #'my/typst-backward-content-bracket-dwim)
 
@@ -928,145 +1070,49 @@ function calls like `#foo(...)[...]' do not get hijacked by parentheses."
   (cl-defmethod eglot-unregister-capability
     (_server (method (eql workspace/didChangeConfiguration)) _id &rest _params)
     nil)
-  (when (fboundp 'my/register-eglot-server-program)
-    (my/register-eglot-server-program
-     '(typst-ts-mode typst-mode my/typst-mode)
-     (my/typst-eglot-server-command)
-     :label "tinymist"
-     :executables (list my/typst-lsp-executable)
-     :note "Typst buffers use tinymist through Eglot.")))
+  (my/typst-register-eglot-server))
 
-;; ── Roam note navigation ─────────────────────────────────────────────────
+(my/typst-register-eglot-server)
 
-(defcustom my/typst-roam-root "/Users/hc/Documents/AaronNote/"
-  "Root directory of the Typst roam note vault."
-  :type 'directory
-  :group 'my/typst)
-
-(defun my/typst-roam-root ()
-  "Return the roam notes root, preferring typst.toml discovery."
-  (or (when buffer-file-name
-        (when-let* ((dir (locate-dominating-file buffer-file-name "typst.toml")))
-          (file-truename dir)))
-      (file-name-as-directory (expand-file-name my/typst-roam-root))))
-
-(defun my/typst-roam--slug-at-point ()
-  "Return the note-link slug at or near point, or nil."
-  (save-excursion
-    (let* ((line-start (line-beginning-position))
-           (line-end   (line-end-position))
-           (line (buffer-substring-no-properties line-start line-end))
-           ;; find rightmost note-link( whose open position is <= point offset
-           (offset (- (point) line-start))
-           result)
-      (let ((pos 0))
-        (while (string-match "#note-link(\"\\([^\"]+\\)\"" line pos)
-          (let ((call-start (match-beginning 0))
-                (call-end   (match-end 0))
-                (slug       (match-string 1 line)))
-            (when (<= call-start offset)
-              (setq result slug))
-            (setq pos (1+ call-start)))))
-      result)))
-
-(defun my/typst-roam--all-files ()
-  "Return all roam .typ note files, excluding _typst/."
-  (seq-filter
-   (lambda (f) (not (string-match-p "/_typst/" f)))
-   (directory-files-recursively (my/typst-roam-root) "\\.typ$")))
-
-(defun my/typst-roam--file-to-slug (file)
-  "Convert FILE path to a roam slug (path relative to root, no .typ)."
-  (string-remove-suffix ".typ"
-    (file-relative-name file (my/typst-roam-root))))
-
-(defun my/typst-roam--slug-to-file (slug)
-  "Convert SLUG to an absolute .typ path under the roam root."
-  (expand-file-name (concat slug ".typ") (my/typst-roam-root)))
-
-(defun my/typst-roam-follow-link ()
-  "Jump to the note referenced by the #note-link at point."
-  (interactive)
-  (if-let* ((slug (my/typst-roam--slug-at-point)))
-      (let ((file (my/typst-roam--slug-to-file slug)))
-        (if (file-exists-p file)
-            (find-file file)
-          (when (yes-or-no-p (format "Note '%s' not found. Create it? " slug))
-            (my/typst-roam-new-note slug))))
-    (user-error "No #note-link found at point")))
-
-(defun my/typst-roam-find-note ()
-  "Find a roam note by slug with completion."
-  (interactive)
-  (let* ((files (my/typst-roam--all-files))
-         (slugs (mapcar #'my/typst-roam--file-to-slug files))
-         (slug  (completing-read "Roam note: " slugs nil t)))
-    (find-file (my/typst-roam--slug-to-file slug))))
-
-(defun my/typst-roam-insert-link ()
-  "Insert a #note-link at point with slug and display text chosen via completion."
-  (interactive)
-  (let* ((files (my/typst-roam--all-files))
-         (slugs (mapcar #'my/typst-roam--file-to-slug files))
-         (slug  (completing-read "Link to note: " slugs nil t))
-         (default-text (file-name-nondirectory slug))
-         (text  (read-string (format "Display text [%s]: " default-text)
-                             nil nil default-text)))
-    (insert (format "#note-link(\"%s\")[%s]" slug text))))
-
-(defun my/typst-roam-new-note (&optional slug)
-  "Create a new roam note, prompting for SLUG, title, and tags."
-  (interactive)
-  (let* ((slug  (or slug (read-string "Slug (e.g. math/my-note): ")))
-         (title (read-string "Title: "
-                             (capitalize (replace-regexp-in-string
-                                          "[-/]" " "
-                                          (file-name-nondirectory slug)))))
-         (tags  (read-string "Tags (comma-separated, or blank): "))
-         (file  (my/typst-roam--slug-to-file slug))
-         (tag-str (if (string-empty-p tags)
-                      ""
-                    (mapconcat (lambda (t) (format "\"%s\"" (string-trim t)))
-                               (split-string tags ",") ", "))))
-    (make-directory (file-name-directory file) t)
-    (find-file file)
-    (when (= (buffer-size) 0)
-      (insert (format "\
-#import \"/_typst/template.typ\": *
-#show: note.with(
-  title: \"%s\",
-  tags: (%s),
-  created: datetime(year: %s, month: %s, day: %s),
-)
-
-= %s
-
-"
-                      title
-                      tag-str
-                      (format-time-string "%Y")
-                      (string-to-number (format-time-string "%m"))
-                      (string-to-number (format-time-string "%d"))
-                      title)))))
-
-;; Keybindings (C-c r prefix = roam)
-(defvar my/typst-roam-map
-  (let ((m (make-sparse-keymap)))
-    (define-key m (kbd "f") #'my/typst-roam-find-note)
-    (define-key m (kbd "o") #'my/typst-roam-follow-link)
-    (define-key m (kbd "i") #'my/typst-roam-insert-link)
-    (define-key m (kbd "n") #'my/typst-roam-new-note)
-    m)
-  "Roam keymap for Typst buffers. Bound to C-c r.")
+(transient-define-prefix my/typst-dispatch ()
+  "Typst command menu."
+  [["Preview"
+    ("p" "preview" my/typst-preview)
+    ("P" "restart preview" my/typst-start-fresh-preview)
+    ("j" "sync position" my/typst-preview-send-position)
+    ("s" "stop preview" my/typst-stop-preview)
+    ("l" "preview log" my/typst-preview-show-log)]
+   ["Build"
+    ("c" "compile" typst-ts-compile)
+    ("C" "compile and preview" typst-ts-compile-and-preview)
+    ("w" "watch" typst-ts-watch-mode)]
+   ["LSP"
+    ("e" "ensure" my/typst-eglot-setup)
+    ("a" "code actions" my/language-server-code-actions)
+    ("f" "format" my/language-server-format-buffer)
+    ("r" "rename" my/language-server-rename)
+    ("d" "problems" my/problems-buffer)
+    ("h" "hub" my/language-server-manager)]])
 
 (with-eval-after-load 'typst-ts-mode
-  (define-key typst-ts-mode-map (kbd "C-c r") my/typst-roam-map)
-  (define-key typst-ts-mode-map (kbd "C-c C-o") #'my/typst-roam-follow-link))
+  (define-key typst-ts-mode-map (kbd "C-c C-m") #'my/typst-dispatch)
+  (with-eval-after-load 'which-key
+    (which-key-add-key-based-replacements
+      "C-c C-m" "typst menu"
+      "C-c C-p" "typst preview"
+      "C-c C-j" "typst sync preview"
+      "s-<return>" "typst sync preview"
+      "M-<return>" "typst sync preview"
+      "H-<return>" "typst sync preview")))
 
 (dolist (hook '(typst-mode-hook my/typst-mode-hook))
   (add-hook hook (lambda ()
-                   (local-set-key (kbd "C-c r") my/typst-roam-map)
-                   (local-set-key (kbd "C-c C-o") #'my/typst-roam-follow-link))))
+                   (local-set-key (kbd "C-c C-m") #'my/typst-dispatch))))
+
+(define-key my/typst-mode-map (kbd "C-c C-m") #'my/typst-dispatch)
+
+(my/leader!
+  "c t" '(:def my/typst-dispatch :which-key "typst"))
 
 (provide 'init-typst)
 ;;; init-typst.el ends here

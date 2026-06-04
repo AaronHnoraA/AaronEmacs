@@ -10,6 +10,9 @@
 
 (my/package-ensure-installed-list '(dash magit-section lsp-mode))
 (my/package-ensure-vc 'lean4-mode "https://github.com/leanprover-community/lean4-mode.git")
+;; Load xwidget infoview support lazily (no hooks installed here)
+(with-eval-after-load 'lean4-mode
+  (require 'init-lean-infoview nil t))
 
 (defvar lean4-mode-hook)
 (declare-function lean4-lake-find-dir "lean4-lake")
@@ -293,6 +296,7 @@
   (local-set-key (kbd "C-c C-i") #'my/lean4-display-info-buffer)
   (local-set-key (kbd "C-c C-g") #'my/lean4-display-info-buffer)
   (local-set-key (kbd "C-c C-u") #'my/lean4-toggle-rich-ui)
+  (local-set-key (kbd "C-c C-w") #'my/lean4-iv-toggle)
   (local-set-key (kbd "C-c C-r") #'lsp-workspace-restart)
   (local-set-key (kbd "C-c C-d") #'lean4-refresh-file-dependencies)
   (local-set-key (kbd "C-c C-k") #'quail-show-key))
@@ -481,6 +485,10 @@ not dominate redisplay time or screen space."
   (add-hook 'lean4-mode-hook #'my/lean4-tune-remote-ui)
   (add-hook 'lean4-mode-hook #'my/lean4-mode-keys)
   (add-hook 'lean4-mode-hook #'my/lean4-lsp-mode-ensure-deferred)
+  (add-hook 'lean4-mode-hook
+            (lambda ()
+              (add-hook 'post-command-hook #'my/lean4-iv-sync-cursor-h nil t)
+              (add-hook 'kill-buffer-hook  #'my/lean4-iv-teardown-h nil t)))
   :mode ("\\\\.lean\\\\'" . lean4-mode))
 
 (with-eval-after-load 'lean4-mode
