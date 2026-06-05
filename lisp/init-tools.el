@@ -116,7 +116,7 @@
   :bind (:map prog-mode-map
          ("C-c '" . separedit))
   :custom
-  (separedit-default-mode 'markdown-mode)
+  (separedit-default-mode 'text-mode)
   (separedit-remove-trailing-spaces-in-comment t)
   (separedit-continue-fill-column t)
   (separedit-buffer-creation-hook #'auto-fill-mode))
@@ -242,8 +242,8 @@
          (atomic-chrome-edit-mode . delete-other-windows))
   :custom
   (atomic-chrome-buffer-open-style 'frame)
-  (atomic-chrome-default-major-mode 'markdown-mode)
-  (atomic-chrome-url-major-mode-alist '(("github\\.com" . gfm-mode))))
+  (atomic-chrome-default-major-mode 'text-mode)
+  (atomic-chrome-url-major-mode-alist nil))
 
 ;; IRC client
 (use-package rcirc

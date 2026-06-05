@@ -1,0 +1,30 @@
+# -*- mode: snippet -*-
+# name: Weekly review
+# key: weekly-review
+# group: templates
+# --
+# Weekly Review - {{date}}
+
+## Highlights
+
+- ${1:What moved forward}
+
+## Completed
+
+- [ ] 
+
+## Open Loops
+
+- [ ] 
+
+## Decisions
+
+- 
+
+## Next Week
+
+- Focus:
+- Risks:
+- First action:
+
+$0

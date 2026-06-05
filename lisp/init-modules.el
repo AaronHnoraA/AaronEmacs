@@ -89,6 +89,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-ratex)
 (require 'init-note-code)
 (require 'init-aaronnote)
+(require 'init-md-roam)
 
 ;; standalone apps
 (my/require-module-after-any-feature 'init-babel 'org)
@@ -116,8 +117,6 @@ If one of FEATURES is already available, require MODULE immediately."
 (my/package-register-vc 'joplin-mode
                         '(:url "https://github.com/cinsk/joplin-mode.git"
                           :rev :last-release))
-(with-eval-after-load 'markdown-mode
-  (my/require-module-safely 'init-joplin))
 (require 'init-ignored)
 
 (provide 'init-modules)

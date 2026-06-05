@@ -25,7 +25,6 @@
     (java-ts-mode java-mode)
     (js-ts-mode js-mode js2-mode)
     (json-ts-mode json-mode)
-    (markdown-ts-mode markdown-mode)
     (python-ts-mode python-mode)
     (rust-ts-mode rust-mode)
     (toml-ts-mode conf-toml-mode)

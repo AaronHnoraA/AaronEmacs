@@ -637,7 +637,7 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
 (defconst my/company-text-backends
   '((company-capf
      company-files
-     :with company-yasnippet
+     company-yasnippet
      company-dabbrev))
   "Company backends for prose and document buffers.")
 

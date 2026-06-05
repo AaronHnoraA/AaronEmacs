@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: subscript n
+# key: _n
+# group: Aaronnote syntax
+# --
+ₙ

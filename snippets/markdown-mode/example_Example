@@ -1,9 +1,0 @@
-# -*- mode: snippet -*-
-# name: Example
-# key: example
-# -- Add a exercise
-# --
-\begin{example}
-	$1
-\end{example}
-$0

@@ -693,7 +693,7 @@ following."
                          (treemacs--flatten-imenu-index index)))
            (first (caar flat-index))
            (semantic? (and (consp first) (overlayp (cdr first))))
-           (compare-func (if (memq major-mode '(markdown-mode adoc-mode))
+           (compare-func (if (eq major-mode 'adoc-mode)
                              #'treemacs--compare-markdown-tag-paths
                            #'treemacs--compare-tag-paths)))
       (when semantic?

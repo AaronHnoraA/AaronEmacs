@@ -51,13 +51,6 @@
   (treesit-auto-install nil)              ;; 关键：不要在打开文件时提示/安装
   :config
   (treesit-auto-add-to-auto-mode-alist 'all)
-  ;; Keep Markdown on classic `markdown-mode`; its UI/customizations are better
-  ;; aligned with this config than `markdown-ts-mode`.
-  (setq auto-mode-alist
-        (cl-remove-if
-         (lambda (entry)
-           (equal entry '("\\.md\\'" . markdown-ts-mode)))
-         auto-mode-alist))
   ;; `js-ts-mode' can require the companion `jsdoc' grammar on newer Emacs
   ;; builds.  Route JS through `my/js-auto-mode' so missing grammars fall back
   ;; to `js2-mode' instead of prompting while opening files.

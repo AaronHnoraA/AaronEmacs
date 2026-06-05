@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Bra
-# key: bra
-# --
-\bra{$1} $2

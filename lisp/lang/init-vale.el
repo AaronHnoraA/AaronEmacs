@@ -24,7 +24,7 @@
   :after flymake
   :config
   (setq flymake-vale-program "vale"
-        flymake-vale-modes '(text-mode latex-mode org-mode markdown-mode
+        flymake-vale-modes '(text-mode latex-mode org-mode
                                         message-mode typst-ts-mode typst-mode
                                         my/typst-mode)
         flymake-vale-mode-file-exts
@@ -36,7 +36,6 @@
   :hook
   ((text-mode . my/flymake-vale-setup)
    (org-mode . my/flymake-vale-setup)
-   (markdown-mode . my/flymake-vale-setup)
    (latex-mode . my/flymake-vale-setup)
    (LaTeX-mode . my/flymake-vale-setup)
    (tex-mode . my/flymake-vale-setup)

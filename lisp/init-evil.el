@@ -671,35 +671,7 @@ Emacs state keep their local behavior."
       "gv" 'find-variable
       "gl" 'find-library))
 
-  (with-eval-after-load 'markdown-mode
-    (dolist (map-symbol '(markdown-mode-map markdown-ts-mode-map))
-      (when (boundp map-symbol)
-        (define-key (symbol-value map-symbol)
-                    (kbd "s-<return>")
-                    #'my/aaronnote-sync-cursor)
-        (define-key (symbol-value map-symbol)
-                    (kbd "C-c C-p")
-                    #'my/aaronnote-preview)))
-    (my/local-leader!
-      :keymaps '(markdown-mode-map markdown-ts-mode-map)
-      "p" 'my/aaronnote-preview
-      "r" 'my/aaronnote-refresh
-      "g" 'my/aaronnote-roam-graph)))
-
-  (with-eval-after-load 'markdown-ts-mode
-    (define-key markdown-ts-mode-map
-                (kbd "s-<return>")
-                #'my/aaronnote-sync-cursor)
-    (define-key markdown-ts-mode-map
-                (kbd "C-c C-p")
-                #'my/aaronnote-preview))
-
-
-
-
-
-
-
+)
 
 (provide 'init-evil)
 ;;; init-evil.el ends here

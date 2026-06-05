@@ -394,46 +394,58 @@ browser pipeline 额外提供：
 - 文件、URL 需要系统应用接管时走 `system` / macOS `open`
 - 关闭 Appine 的最后一个标签会自动清掉 host buffer
 
-## 8. Aaronote Markdown 实时预览
+## 8. Aaronnote Markdown Web/Appine
 
 ### 架构
 
-Markdown 笔记通过 `lisp/roam/` 下的桥接层嵌入 `xwidget-webkit`：
+Markdown 笔记现在由 Aaronnote Web 自己编辑和渲染，Emacs 只负责启动、
+打开、粗粒度命令和文件定位：
 
 ```
 Emacs (init-aaronnote.el)
-  └─ spawn node aaronnote-web-host.mjs
-       ├─ 静态服务 var/publish/Aaronnote/dist/aaronnote/
+  └─ spawn node lisp/roam/aaronnote/web-host.mjs
+       ├─ 静态服务 lisp/roam/aaronnote/dist/aaronnote/
+       ├─ 运行时 lisp/roam/aaronnote/server/ + shared/
        ├─ 注入 window.aaronnoteApi 适配器（替代 Electron preload）
-       ├─ GET  /sse            ← 服务端推送 preview / command 事件
-       └─ POST /emacs/command  ← Emacs 控制通道
-  └─ xwidget-webkit 加载 http://127.0.0.1:<port>/
+       ├─ POST /api            ← Web app 调 runtime 保存/索引/文件操作
+       ├─ GET  /events         ← Emacs 控制事件推送到页面
+       └─ POST /emacs/command  ← Emacs 粗粒度控制通道
+  └─ 当前 window 直接切到 Appine/xwidget，加载 http://127.0.0.1:<port>/?file=<md>
 ```
 
-笔记仓库通过 `.roam` 符号链接挂载（机器本地，不入 git），
-Aaronote 应用路径通过 `var/publish` → `~/HC/Org` 符号链接解析。
+笔记仓库通过 `.roam` 符号链接挂载（机器本地，不入 git）。Aaronnote 是
+`lisp/roam/aaronnote/` 下的完整项目，源码、build、runtime、plugins 和
+roam-tools JS 都在其中；运行时不依赖 `~/HC/Org`。
+
+Aaronnote 与 Emacs 共用：
+
+- 状态与缓存：`var/aaronnote/`
+- snippets：`snippets/`（Markdown、Lean、TeX 使用 Aaronnote 版本，其它语言保留 Emacs 原有版本）
+- Markdown templates：`lisp/roam/aaronnote/templates/`
 
 ### 关键文件
 
 | 文件 | 用途 |
 |------|------|
-| `lisp/roam/init-aaronnote.el` | Emacs 入口：进程管理、HTTP 控制、buffer hook |
-| `lisp/roam/aaronnote-web-host.mjs` | Node HTTP+SSE 桥接服务器 |
+| `lisp/roam/init-aaronnote.el` | Emacs 入口：进程管理、Appine/xwidget 打开、控制命令 |
+| `lisp/roam/aaronnote/` | 完整 Aaronnote 项目 |
+| `lisp/roam/aaronnote/web-host.mjs` | Node HTTP+SSE 桥接服务器和 preload adapter |
+| `lisp/roam/aaronnote/dist/aaronnote/` | Aaronnote static build |
 | `.roam` | → Markdown 笔记目录（`AARONNOTE_ROOT`） |
-| `var/publish` | → `~/HC/Org`（未来 publish 用） |
 
-### 实时预览工作原理
+### 边界
 
-1. 编辑触发 `after-change-functions`，经 idle timer 去抖（默认 0.8 s）
-2. Emacs POST `{"type":"preview","content":"..."}` 到 `/emacs/command`
-3. 服务端通过 SSE `preview` 事件推送到已打开页面
-4. 客户端适配器计算最小前缀/后缀 diff，调用 CM6 `view.dispatch` 局部更新，不重载页面
+- Aaronnote Web 拥有 CodeMirror 文档状态、输入手感、保存、文件树、graph。
+- Emacs 打开 `.md` / `.markdown` / `README.md` 时直接交给 Aaronnote，并关闭临时 Markdown buffer。
+- Emacs 不再通过 `after-change-functions` 推送 buffer 全文，也不做 per-keystroke preview。
+- Emacs 侧命令只做打开当前 note、打开 graph、发送小型 command，以及接收 Web 端 “open in Emacs” 事件。
+- 后续融合优先通过 Appine/webhook/pipeline 做文件管理、外部动作和索引刷新，而不是恢复 Emacs→browser 实时全文同步。
 
 ### 诊断
 
 - 服务日志：buffer ` *aaronnote-web-host*`
 - 手动停止：`M-x my/aaronnote-stop`
-- 强制重推：`M-x my/aaronnote-refresh`（localleader `r`）
+- 重新打开当前 note：`M-x my/aaronnote-refresh`（localleader `r`）
 
 ## 9. AI
 

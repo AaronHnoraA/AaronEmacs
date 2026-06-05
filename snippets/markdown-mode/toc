@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: Table of contents
+# key: toc
+# group: Aaronnote syntax
+# --
+[toc]
+$0

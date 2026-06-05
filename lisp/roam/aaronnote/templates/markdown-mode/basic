@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Basic Markdown note
+# key: basic
+# group: templates
+# --
+# {{title}}
+
+$0

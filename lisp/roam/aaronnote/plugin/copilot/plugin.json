@@ -1,0 +1,37 @@
+{
+  "id": "copilot",
+  "name": "GitHub Copilot",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "autoload": true,
+  "commands": ["copilot-inline", "copilot-sign-in", "copilot-sign-out"],
+  "blocks": [],
+  "actions": [
+    { "id": "sign-in", "label": "Login" },
+    { "id": "status", "label": "Status" },
+    { "id": "quota", "label": "Quota" },
+    { "id": "trigger", "label": "Suggest now" },
+    { "id": "log", "label": "Logs" },
+    { "id": "sign-out", "label": "Logout" }
+  ],
+  "settings": [
+    {
+      "id": "idleDelayMs",
+      "label": "Idle delay",
+      "type": "number",
+      "default": 850,
+      "min": 0,
+      "step": 50,
+      "unit": "ms"
+    },
+    {
+      "id": "largeBufferThresholdKb",
+      "label": "Max buffer",
+      "type": "number",
+      "default": 512,
+      "min": 0,
+      "step": 64,
+      "unit": "KiB"
+    }
+  ]
+}

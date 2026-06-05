@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Braket
-# key: brk
-# --
-\braket{ $1 | $2 } $3

@@ -1,9 +1,0 @@
-# -*- mode: snippet -*-
-# name: OutlineExp
-# key: outlineexp
-# -- Outline Expression
-# --
-\\[
-	$1
-\\]
-$0

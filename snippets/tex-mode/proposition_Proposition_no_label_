@@ -1,9 +1,0 @@
-# -*- mode: snippet -*-
-# name: Proposition (no label)
-# key: proposition
-# -- Add a proposition without label
-# --
-\begin{proposition}{$1}
-		$2
-\end{proposition}
-$0

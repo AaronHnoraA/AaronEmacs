@@ -1,0 +1,33 @@
+# -*- mode: snippet -*-
+# name: Reading notes
+# key: reading
+# group: templates
+# --
+# {{title}}
+
+## Source
+
+- Author:
+- Link:
+- Date: {{date}}
+- Tags: {{tags}}
+
+## Summary
+
+${1:One paragraph summary}
+
+## Key Ideas
+
+- 
+
+## Quotes
+
+> 
+
+## Questions
+
+- 
+
+## My Take
+
+$0

@@ -1,0 +1,29 @@
+# -*- mode: snippet -*-
+# name: Decision record
+# key: decision
+# group: templates
+# --
+# {{title}}
+
+Date: {{date}}
+Status: proposed
+
+## Context
+
+${1:What is forcing this decision}
+
+## Options
+
+1. 
+2. 
+3. 
+
+## Decision
+
+$0
+
+## Consequences
+
+- Positive:
+- Negative:
+- Follow-up:

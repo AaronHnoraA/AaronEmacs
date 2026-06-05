@@ -1,0 +1,24 @@
+# -*- mode: snippet -*-
+# name: Zettel
+# key: zettel
+# group: templates
+# --
+# {{title}}
+
+Tags: {{tags}}
+
+## Claim
+
+${1:One clear idea}
+
+## Notes
+
+$0
+
+## Evidence
+
+- 
+
+## Links
+
+- 

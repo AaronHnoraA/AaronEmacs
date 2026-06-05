@@ -156,8 +156,7 @@
   :hook ((prog-mode
           text-mode
           conf-mode
-          org-mode
-          markdown-mode) . ligature-mode)
+          org-mode) . ligature-mode)
   :config
   (ligature-set-ligatures
    't
@@ -316,11 +315,7 @@ Org, help, terminals and side buffers avoid the redisplay cost by default."
   (mixed-pitch-set-height t)
   :config
   ;; 只让代码和结构标记保持等宽，标题仍然交给各模式自己的 face。
-  (dolist (face '(font-latex-verbatim-face
-                  markdown-header-delimiter-face
-                  markdown-markup-face
-                  markdown-pre-face
-                  markdown-table-face))
+  (dolist (face '(font-latex-verbatim-face))
     (add-to-list 'mixed-pitch-fixed-pitch-faces face))
   (setq mixed-pitch-fixed-pitch-faces
         (delq 'font-latex-sectioning-5-face mixed-pitch-fixed-pitch-faces)))
@@ -566,30 +561,6 @@ glyph keeps its shape while point moves through composed text."
                   org-latex-and-related))
     (my/font--set-code-face face :inherit 'fixed-pitch)))
 
-(defun my/font--apply-markdown-faces ()
-  "Apply typography for Markdown headings and code spans."
-  (let ((heights (cdr (my/font--title-heights))))
-    (cl-mapc #'my/font--set-title-face
-             '(markdown-header-face-1
-               markdown-header-face-2
-               markdown-header-face-3
-               markdown-header-face-4
-               markdown-header-face-5
-               markdown-header-face-6)
-             heights))
-  (my/font--set-title-face 'markdown-header-face (- my/h-title 12))
-  (dolist (face '(markdown-code-face
-                  markdown-comment-face
-                  markdown-header-delimiter-face
-                  markdown-inline-code-face
-                  markdown-language-info-face
-                  markdown-language-keyword-face
-                  markdown-markup-face
-                  markdown-math-face
-                  markdown-pre-face
-                  markdown-table-face))
-    (my/font--set-code-face face :inherit 'fixed-pitch)))
-
 (defun my/font--apply-latex-faces ()
   "Apply typography for LaTeX sectioning and literal faces."
   (let ((heights (cdr (my/font--title-heights))))
@@ -636,8 +607,6 @@ glyph keeps its shape while point moves through composed text."
   "Refresh mode-specific faces for already loaded writing packages."
   (when (featurep 'org)
     (my/font--apply-org-faces))
-  (when (featurep 'markdown-mode)
-    (my/font--apply-markdown-faces))
   (when (featurep 'font-latex)
     (my/font--apply-latex-faces))
   (when (featurep 'dashboard)
@@ -682,9 +651,6 @@ glyph keeps its shape while point moves through composed text."
 
 (with-eval-after-load 'org
   (my/font--apply-org-faces))
-
-(with-eval-after-load 'markdown-mode
-  (my/font--apply-markdown-faces))
 
 (with-eval-after-load 'font-latex
   (my/font--apply-latex-faces))

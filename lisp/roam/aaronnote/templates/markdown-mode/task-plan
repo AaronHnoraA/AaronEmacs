@@ -1,0 +1,30 @@
+# -*- mode: snippet -*-
+# name: Task plan
+# key: task-plan
+# group: templates
+# --
+# {{title}}
+
+## Goal
+
+${1:Target outcome}
+
+## Checklist
+
+- [ ] 
+
+## Constraints
+
+- 
+
+## Steps
+
+1. 
+2. 
+3. 
+
+## Done When
+
+- 
+
+$0

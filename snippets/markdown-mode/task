@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Task item
+# key: todo
+# group: Aaronnote syntax
+# --
+- [ ] ${1:Task}$0

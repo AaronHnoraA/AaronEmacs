@@ -1,0 +1,145 @@
+{
+  "name": "aaronnote",
+  "version": "0.3.1",
+  "description": "AaronNote: a roam-centered Typora-style Markdown editor.",
+  "license": "MIT",
+  "author": "Yanzhen Yu",
+  "homepage": "https://yuyz0112.github.io/typora-web/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yuyz0112/typora-web.git"
+  },
+  "type": "module",
+  "main": "./desktop/main.mjs",
+  "module": "./dist/lib/typora-web.js",
+  "exports": {
+    ".": {
+      "import": "./dist/lib/typora-web.js"
+    },
+    "./widgets.css": "./src/styles/widgets.css",
+    "./theme-typora.css": "./src/styles/theme-typora.css"
+  },
+  "files": [
+    "dist/lib",
+    "src/styles",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "vp dev",
+    "start:vite": "vp dev --config vite.aaronnote.config.ts --host 127.0.0.1",
+    "build:aaronnote": "tsc && vp build --config vite.aaronnote.config.ts",
+    "build:desktop": "node --check desktop/main.mjs && node --check desktop/preload.cjs && node --check server/lib/runtime.mjs && node --check server/lib/prose-check.mjs && node --check shared/prose-mask.mjs && npm run build:aaronnote && electron-builder --mac dir",
+    "build": "tsc && vp build",
+    "build:lib": "tsc && vp build --config vite.lib.config.ts",
+    "preview": "vp preview",
+    "snippets:migrate-nvim": "node scripts/migrate-yas-to-nvim-snippets.mjs",
+    "test": "vp test --run",
+    "prepublishOnly": "npm run build:lib"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@types/turndown": "^5.0.6",
+    "electron": "^37.8.0",
+    "electron-builder": "^26.0.12",
+    "happy-dom": "^20.9.0",
+    "typescript": "~6.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
+    "vite-plus": "latest"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "^6.20.2",
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.43.0",
+    "@lezer/markdown": "^1.6.3",
+    "dompurify": "^3.4.4",
+    "katex": "^0.16.47",
+    "markdown-it": "^14.1.1",
+    "markdown-it-emoji": "^3.0.0",
+    "mermaid": "^11.15.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
+  },
+  "build": {
+    "appId": "com.aaronnote.desktop",
+    "productName": "AaronNote",
+    "asarUnpack": [],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/**/*",
+      "server/**/*",
+      "shared/**/*",
+      "dist/aaronnote/**/*",
+      "js/**/*",
+      "templates/**/*",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "js",
+        "to": "js",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "identity": null,
+      "icon": "build/Aaronnote.icns",
+      "category": "public.app-category.productivity",
+      "extendInfo": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Markdown Document",
+            "CFBundleTypeRole": "Editor",
+            "CFBundleTypeIconFile": "icon.icns",
+            "LSHandlerRank": "Owner",
+            "CFBundleTypeExtensions": [
+              "md",
+              "markdown"
+            ],
+            "LSItemContentTypes": [
+              "com.aaronnote.markdown",
+              "net.daringfireball.markdown"
+            ]
+          }
+        ],
+        "UTExportedTypeDeclarations": [
+          {
+            "UTTypeIdentifier": "com.aaronnote.markdown",
+            "UTTypeDescription": "AaronNote Markdown Document",
+            "UTTypeConformsTo": [
+              "net.daringfireball.markdown",
+              "public.text"
+            ],
+            "UTTypeTagSpecification": {
+              "public.filename-extension": [
+                "md",
+                "markdown"
+              ],
+              "public.mime-type": [
+                "text/markdown",
+                "text/x-markdown"
+              ]
+            }
+          }
+        ]
+      },
+      "target": [
+        "dir"
+      ]
+    }
+  }
+}

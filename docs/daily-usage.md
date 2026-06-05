@@ -88,10 +88,9 @@
 `telescope`；其他工具用
 `m/s/n/J/R/P`。
 
-Markdown note buffer 里 localleader（`SPC m` / `,`）：
-- `p` — `my/aaronnote-preview` 打开 Aaronote xwidget 侧窗并开始实时 preview
-- `r` — `my/aaronnote-refresh` 强制重推当前 buffer 内容（不重载页面）
-- `g` — `my/aaronnote-roam-graph` 让 Aaronote 显示 roam graph 视图
+打开 `.md`、`.markdown` 或 `README.md` 时，Emacs 会直接把文件交给
+Aaronnote Web/Appine，并关闭临时 Markdown buffer。Markdown 编辑、保存、
+文件树和 graph 都在 Aaronnote 内完成；Emacs 只保留粗粒度 bridge 命令。
 
 Lean 4 buffer 里 `C-c C-i` 打开右侧官方 xwidget infoview。
 目标、hypotheses、诊断、trace、Try this、code actions 等交互都走

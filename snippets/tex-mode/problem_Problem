@@ -1,9 +1,0 @@
-# -*- mode: snippet -*-
-# name: Problem
-# key: problem
-# -- Add a exercise
-# --
-\begin{problem}
-	$1
-\end{problem}
-$0

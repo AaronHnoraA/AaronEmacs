@@ -5,11 +5,9 @@
 (defvar joplin-token-file)
 
 (use-package joplin-mode
-  :requires markdown-mode
   :commands joplin-note-mode
   :init
   (setq joplin-token-file
-        (expand-file-name "etc/joplin.token" user-emacs-directory))
-  :hook (markdown-mode . joplin-note-mode))
+        (expand-file-name "etc/joplin.token" user-emacs-directory)))
 
 (provide 'init-joplin)

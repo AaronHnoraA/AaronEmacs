@@ -1,9 +1,0 @@
-# -*- mode: snippet -*-
-# name: Solution
-# key: solution
-# -- Add a remark
-# --
-\begin{solution}
-	$1
-\end{solution}
-$0

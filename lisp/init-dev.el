@@ -152,8 +152,7 @@ commands still save their state."
   :hook ((prog-mode
           text-mode
           conf-mode
-          org-mode
-          markdown-mode) . hl-todo-mode)
+          org-mode) . hl-todo-mode)
   :bind (:map hl-todo-mode-map
          ("C-c t p" . hl-todo-previous)
          ("C-c t n" . hl-todo-next)

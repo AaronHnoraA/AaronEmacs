@@ -1,0 +1,573 @@
+import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+// @ts-ignore The server is a Node ESM module outside the TS app graph.
+import { configure } from "../server/lib/state.mjs";
+// @ts-ignore The server is a Node ESM module outside the TS app graph.
+import * as serverIndex from "../server/lib/index.mjs";
+// @ts-ignore The server is a Node ESM module outside the TS app graph.
+import { saveNote } from "../server/lib/save.mjs";
+
+const {
+  graphPayload,
+  notesIndexPayload,
+  refsFromContent,
+  rewriteMarkdownPathReferences,
+  roamDbRefsFromContent,
+  roamTagOverlapReport,
+  scanNotes,
+  tagIndexPayload,
+} = serverIndex as any;
+
+async function setupRoot(prefix: string) {
+  const root = await mkdtemp(join(tmpdir(), prefix));
+  await mkdir(root, { recursive: true });
+  configure({
+    root,
+    workspaceRoot: root,
+    pluginRoot: join(root, "plugin"),
+  });
+  return root;
+}
+
+describe("server note refs", () => {
+  test("extracts markdown note refs whose paths contain balanced parentheses", () => {
+    expect(
+      refsFromContent("[eq:1](roam/project/UNSW/ISO(202603)/meeting.md#eq-eq%3A1)"),
+    ).toContain("roam/project/UNSW/ISO(202603)/meeting.md");
+  });
+
+  test("extracts encoded markdown note refs and decodes path syntax", () => {
+    expect(
+      refsFromContent("[eq:1](roam/project/UNSW/ISO%28202603%29/meeting.md#eq-eq%3A1)"),
+    ).toContain("roam/project/UNSW/ISO(202603)/meeting.md");
+  });
+
+  test("extracts Typst refs from markdown links", () => {
+    expect(
+      refsFromContent("[def](project/UNSW/ISO%28202603%29/definition.typ#eq-main)"),
+    ).toContain("project/UNSW/ISO(202603)/definition.typ");
+  });
+
+  test("extracts roam idlinks from markdown links and bare hrefs", () => {
+    expect(refsFromContent("[density](roam://20260520T120000-density-operator#eq-eq%3A1)"))
+      .toContain("20260520T120000-density-operator");
+    expect(refsFromContent("[#anchor](roam://20260520T120000-density-operator#tag-anchor)"))
+      .toContain("20260520T120000-density-operator");
+    expect(refsFromContent("See roam://20260520T120000-density-operator."))
+      .toContain("20260520T120000-density-operator");
+  });
+
+  test("keeps plain markdown file links out of roam db refs", () => {
+    const refs = roamDbRefsFromContent([
+      "[path](project/note.md#section)",
+      "[roam](roam://node-id#section)",
+      "[wiki](unrelated-node#anchor)",
+      "[[Wiki Note]]",
+    ].join("\n"));
+    expect(refs).not.toContain("project/note.md");
+    expect(refs).not.toContain("project/note.md#section");
+    expect(refs).toEqual(expect.arrayContaining(["node-id", "unrelated-node", "Wiki Note"]));
+  });
+
+  test("extracts roam core tag and DOM link targets", () => {
+    const refs = refsFromContent([
+      "[tag](20260520T120000-density-operator#section-anchor)",
+      "[dom](20260520T120000-density-operator@main-title)",
+      "[nested-dom](20260520T120000-density-operator@chapter@main-title)",
+      "[current](./#local-anchor)",
+      "[path-dom](roam/project/note.md@main-title)",
+      "[path-nested-dom](roam/project/note.md@chapter@main-title)",
+      "[roam-dom](roam://20260520T120000-density-operator@main-title)",
+      "[roam-nested-dom](roam://20260520T120000-density-operator@chapter@main-title)",
+    ].join("\n"));
+
+    expect(refs).toContain("20260520T120000-density-operator");
+    expect(refs).toContain("roam/project/note.md");
+    expect(refs).not.toContain("20260520T120000-density-operator@chapter");
+    expect(refs).not.toContain("roam/project/note.md@chapter");
+    expect(refs).not.toContain("./");
+  });
+
+  test("extracts wiki links as note refs", () => {
+    expect(refsFromContent("See [[ Density Operator ]] and [[Alias A]].")).toEqual([
+      "Density Operator",
+      "Alias A",
+    ]);
+  });
+
+  test("resolves wiki links by note title and aliases during scan", async () => {
+    const root = await setupRoot("aaronnote-refs-");
+    try {
+      await writeFile(join(root, "target.md"), [
+        "---",
+        "id: target-id",
+        "aliases:",
+        "  - Alias A",
+        "---",
+        "# Density Operator",
+        "",
+      ].join("\n"), "utf8");
+      await writeFile(join(root, "source.md"), [
+        "---",
+        "id: source-id",
+        "---",
+        "# Source",
+        "",
+        "See [[Density Operator]] and [[Alias A]].",
+        "",
+      ].join("\n"), "utf8");
+
+      const payload = await notesIndexPayload();
+      const source = payload.notes.find((note: { id: string }) => note.id === "source-id");
+      const target = payload.notes.find((note: { id: string }) => note.id === "target-id");
+      expect(source.refs).toEqual(["target-id"]);
+      expect(target.backlinks).toEqual(["source-id"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps raw unresolved refs so a later note can resolve them", async () => {
+    const root = await setupRoot("aaronnote-refs-");
+    try {
+      await writeFile(join(root, "source.md"), [
+        "---",
+        "id: source-id",
+        "---",
+        "# Source",
+        "",
+        "See [[Future Target]].",
+        "",
+      ].join("\n"), "utf8");
+
+      const first = await notesIndexPayload();
+      const firstSource = first.notes.find((note: { id: string }) => note.id === "source-id");
+      expect(firstSource.refs).toEqual([]);
+
+      const targetFile = join(root, "target.md");
+      const saved = await saveNote({
+        file: targetFile,
+        content: [
+          "---",
+          "id: target-id",
+          "---",
+          "# Future Target",
+          "",
+        ].join("\n"),
+        clientId: "test",
+        seq: 1,
+        force: true,
+        refresh: "deferred",
+      });
+      expect((saved as { ok?: boolean }).ok).toBe(true);
+
+      const second = await notesIndexPayload();
+      const source = second.notes.find((note: { id: string }) => note.id === "source-id");
+      const target = second.notes.find((note: { id: string }) => note.id === "target-id");
+      expect(source.refs).toEqual(["target-id"]);
+      expect(target.backlinks).toEqual(["source-id"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("serves a compact graph payload", async () => {
+    const root = await setupRoot("aaronnote-graph-");
+    try {
+      await writeFile(join(root, "target.md"), [
+        "---",
+        "id: target-id",
+        "aliases:",
+        "  - Alias A",
+        "tags:",
+        "  - graph",
+        "---",
+        "# Target",
+        "",
+      ].join("\n"), "utf8");
+      await writeFile(join(root, "source.md"), [
+        "---",
+        "id: source-id",
+        "---",
+        "# Source",
+        "",
+        "See [[Alias A]].",
+        "",
+      ].join("\n"), "utf8");
+
+      const payload = graphPayload(await scanNotes());
+      expect(payload.type).toBe("graph");
+      expect(payload.nodes).toEqual(expect.arrayContaining([
+        expect.objectContaining({ key: "target-id", title: "Target", aliases: ["Alias A"], tags: ["graph"] }),
+        expect.objectContaining({ key: "source-id", title: "Source" }),
+      ]));
+      expect(payload.edges).toEqual([
+        { source: "source-id", target: "target-id" },
+      ]);
+      expect(payload.nodes[0]).not.toHaveProperty("summary");
+      expect(payload.meta).toMatchObject({ noteCount: 2, edgeCount: 1, tagCount: 1 });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("serves a tag inverted index", async () => {
+    const root = await setupRoot("aaronnote-tags-");
+    try {
+      await writeFile(join(root, "a.md"), [
+        "---",
+        "id: a-id",
+        "tags:",
+        "  - graph",
+        "---",
+        "# A",
+        "",
+        "Body @@tag[inline-ref]",
+        "",
+      ].join("\n"), "utf8");
+      await writeFile(join(root, "b.md"), [
+        "---",
+        "id: b-id",
+        "tags:",
+        "  - graph",
+        "---",
+        "# B",
+        "",
+      ].join("\n"), "utf8");
+
+      const payload = tagIndexPayload(await scanNotes());
+      expect(payload.type).toBe("tags");
+      expect(payload.tags).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          name: "graph",
+          count: 2,
+          metaCount: 2,
+          inlineCount: 0,
+          notes: expect.arrayContaining([
+            expect.objectContaining({ key: "a-id", title: "A" }),
+            expect.objectContaining({ key: "b-id", title: "B" }),
+          ]),
+        }),
+        expect.objectContaining({
+          name: "inline-ref",
+          count: 1,
+          metaCount: 0,
+          inlineCount: 1,
+          notes: [expect.objectContaining({ key: "a-id", title: "A" })],
+        }),
+      ]));
+      expect(payload.meta).toMatchObject({ tagCount: 2, noteCount: 2 });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("treats included book files as part of the cover roam node", async () => {
+    const root = await setupRoot("aaronnote-book-");
+    try {
+      await mkdir(join(root, "books/demo/chapters"), { recursive: true });
+      await writeFile(join(root, "books/demo/index.md"), [
+        "#+begin meta",
+        "id: book-demo",
+        "title: Demo Book",
+        "book: true",
+        "tags: book",
+        "#+end meta",
+        "",
+        "@@include [chapters/chapter-1.md]",
+        "",
+      ].join("\n"), "utf8");
+      await writeFile(join(root, "books/demo/chapters/chapter-1.md"), [
+        "#+begin meta",
+        "title: Chapter One",
+        "book: included@../index.md",
+        "#+end meta",
+        "",
+        "# Chapter One",
+        "",
+        "@@tag[chapter-anchor]",
+        "",
+      ].join("\n"), "utf8");
+      await writeFile(join(root, "source.md"), [
+        "---",
+        "id: source-id",
+        "---",
+        "# Source",
+        "",
+        "[chapter](books/demo/chapters/chapter-1.md)",
+        "",
+      ].join("\n"), "utf8");
+
+      const payload = await notesIndexPayload();
+      const cover = payload.notes.find((note: { id: string }) => note.id === "book-demo");
+      const child = payload.notes.find((note: { path: string }) => note.path === "books/demo/chapters/chapter-1.md");
+      const source = payload.notes.find((note: { id: string }) => note.id === "source-id");
+
+      expect(cover).toMatchObject({
+        id: "book-demo",
+        roam: true,
+        bookRole: "cover",
+        bookIncludedPaths: ["books/demo/chapters/chapter-1.md"],
+      });
+      expect(cover.inlineTags).toContain("chapter-anchor");
+      expect(child).toMatchObject({
+        roam: false,
+        bookRole: "included",
+        bookCoverId: "book-demo",
+      });
+      expect(source.refs).toEqual(["book-demo"]);
+
+      const cache = JSON.parse(await readFile(join(root, "var/aaronnote/book/book-demo.json"), "utf8"));
+      expect(cache).toMatchObject({
+        id: "book-demo",
+        title: "Demo Book",
+        coverPath: "books/demo/index.md",
+      });
+      expect(cache.toc).toEqual(expect.arrayContaining([
+        expect.objectContaining({ text: "Chapter One", path: "books/demo/chapters/chapter-1.md" }),
+      ]));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("deferred book saves return resolved book metadata", async () => {
+    const root = await setupRoot("aaronnote-book-save-");
+    try {
+      await mkdir(join(root, "books/demo/chapters"), { recursive: true });
+      const coverFile = join(root, "books/demo/index.md");
+      const childFile = join(root, "books/demo/chapters/chapter-1.md");
+      await writeFile(coverFile, [
+        "#+begin meta",
+        "id: book-save-demo",
+        "title: Save Demo Book",
+        "book: true",
+        "#+end meta",
+        "",
+        "@@include [chapters/chapter-1.md]",
+        "",
+      ].join("\n"), "utf8");
+      await writeFile(childFile, [
+        "#+begin meta",
+        "title: Chapter One",
+        "book: included@../index.md",
+        "#+end meta",
+        "",
+        "# Chapter One",
+        "",
+      ].join("\n"), "utf8");
+
+      await notesIndexPayload();
+      const savedCover = await saveNote({
+        file: coverFile,
+        content: [
+          "#+begin meta",
+          "id: book-save-demo",
+          "title: Save Demo Book",
+          "book: true",
+          "#+end meta",
+          "",
+          "@@part [Part One]",
+          "",
+          "# Cover Heading",
+          "",
+          "@@include [chapters/chapter-1.md]",
+          "",
+        ].join("\n"),
+        clientId: "book-save-test",
+        seq: 1,
+        force: true,
+        refresh: "deferred",
+      }) as { notesRefresh?: string; note?: any; notes?: any[] };
+      expect(savedCover.notesRefresh).toBe("book");
+      expect(savedCover.note).toMatchObject({
+        id: "book-save-demo",
+        bookRole: "cover",
+        bookIncludedPaths: ["books/demo/chapters/chapter-1.md"],
+      });
+      expect(savedCover.note?.bookToc).toEqual(expect.arrayContaining([
+        expect.objectContaining({ text: "Part One", level: 1, path: "books/demo/index.md" }),
+        expect.objectContaining({ text: "Cover Heading", level: 6, path: "books/demo/index.md" }),
+        expect.objectContaining({ text: "Chapter One", path: "books/demo/chapters/chapter-1.md" }),
+      ]));
+
+      const savedChild = await saveNote({
+        file: childFile,
+        content: [
+          "#+begin meta",
+          "title: Chapter One",
+          "book: included@../index.md",
+          "#+end meta",
+          "",
+          "@@section(sub) [Semantic Child]{id: semantic-child}",
+          "",
+          "# Chapter One",
+          "",
+          "## Child Update",
+          "",
+        ].join("\n"),
+        clientId: "book-save-test",
+        seq: 2,
+        force: true,
+        refresh: "deferred",
+      }) as { notesRefresh?: string; note?: any; notes?: any[] };
+      expect(savedChild.notesRefresh).toBe("book");
+      expect(savedChild.note).toMatchObject({
+        bookRole: "included",
+        bookCoverId: "book-save-demo",
+      });
+      const cover = savedChild.notes?.find((note) => note.id === "book-save-demo");
+      expect(cover?.bookToc).toEqual(expect.arrayContaining([
+        expect.objectContaining({ text: "Semantic Child", level: 3, slug: "semantic-child", path: "books/demo/chapters/chapter-1.md" }),
+        expect.objectContaining({ text: "Child Update", level: 7, path: "books/demo/chapters/chapter-1.md" }),
+      ]));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("roam: off notes and meta blocks without ids stay out of roam graph and tag index", async () => {
+    const root = await setupRoot("aaronnote-roam-off-");
+    try {
+      await writeFile(join(root, "visible.md"), [
+        "---",
+        "id: visible-id",
+        "tags:",
+        "  - graph",
+        "---",
+        "# Visible",
+        "",
+        "See [[Hidden]].",
+        "",
+      ].join("\n"), "utf8");
+      await writeFile(join(root, "hidden.md"), [
+        "#+begin meta",
+        "id: hidden-id",
+        "title: Hidden",
+        "roam: off",
+        "tags: graph",
+        "#+end meta",
+        "# Hidden",
+        "",
+      ].join("\n"), "utf8");
+      await writeFile(join(root, "metadata-only.md"), [
+        "#+begin meta",
+        "title: Metadata Only",
+        "tags: graph",
+        "#+end meta",
+        "# Metadata Only",
+        "",
+      ].join("\n"), "utf8");
+
+      const notes = await scanNotes();
+      expect(notes).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "hidden-id", roam: false, tags: expect.arrayContaining(["graph"]) }),
+        expect.objectContaining({ path: "metadata-only.md", roam: false, tags: expect.arrayContaining(["graph"]) }),
+      ]));
+      expect(graphPayload(notes).nodes).toEqual([
+        expect.objectContaining({ key: "visible-id" }),
+      ]);
+      expect(tagIndexPayload(notes).tags).toEqual([
+        expect.objectContaining({ name: "graph", count: 1 }),
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("indexes hierarchical DOM targets for note link completion without rescanning on demand", async () => {
+    const root = await setupRoot("aaronnote-dom-targets-");
+    try {
+      await writeFile(join(root, "paper.md"), [
+        "#+begin meta",
+        "id: paper-id",
+        "title: Paper",
+        "#+end meta",
+        "",
+        "# Background",
+        "",
+        "## Tensor Graphs",
+        "",
+        "### Plan",
+        "",
+      ].join("\n"), "utf8");
+
+      const payload = await notesIndexPayload();
+      const paper = payload.notes.find((note: { id?: string }) => note.id === "paper-id");
+      expect(paper?.domTargets).toEqual(expect.arrayContaining([
+        expect.objectContaining({ slug: "background", path: ["background"] }),
+        expect.objectContaining({ slug: "tensor-graphs", path: ["background", "tensor-graphs"] }),
+        expect.objectContaining({ slug: "plan", path: ["background", "tensor-graphs", "plan"] }),
+      ]));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("reports case duplicate and overlapping roam tags", async () => {
+    const root = await setupRoot("aaronnote-tag-tools-");
+    try {
+      await writeFile(join(root, "a.md"), [
+        "---",
+        "id: a-id",
+        "tags:",
+        "  - qc",
+        "  - math",
+        "---",
+        "# A",
+      ].join("\n"), "utf8");
+      await writeFile(join(root, "b.md"), [
+        "---",
+        "id: b-id",
+        "tags:",
+        "  - QC",
+        "  - math",
+        "---",
+        "# B",
+      ].join("\n"), "utf8");
+
+      const report = await roamTagOverlapReport() as { duplicateCase?: Array<{ variants?: string[] }>; overlaps?: Array<{ a?: string; b?: string }> };
+      expect(report.duplicateCase?.[0]?.variants).toEqual(expect.arrayContaining(["QC", "qc"]));
+      expect(report.overlaps?.some((item) => new Set([item.a, item.b]).size === 2
+        && new Set([item.a, item.b]).has("qc")
+        && new Set([item.a, item.b]).has("math"))).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("previews markdown path reference rewrites without touching roam links", async () => {
+    const root = await setupRoot("aaronnote-path-rewrite-");
+    try {
+      await mkdir(join(root, "folder"), { recursive: true });
+      await writeFile(join(root, "source.md"), [
+        "---",
+        "id: source-id",
+        "---",
+        "# Source",
+        "",
+        "[path](folder/old.md#section)",
+        "[roam](roam://old-id#section)",
+      ].join("\n"), "utf8");
+      await writeFile(join(root, "folder", "old.md"), [
+        "---",
+        "id: old-id",
+        "---",
+        "# Old",
+      ].join("\n"), "utf8");
+
+      const result = await rewriteMarkdownPathReferences({
+        oldPath: "folder/old.md",
+        newPath: "folder/new.md",
+        dryRun: true,
+      }) as { changedCount?: number; referenceCount?: number };
+      expect(result.changedCount).toBe(1);
+      expect(result.referenceCount).toBe(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});

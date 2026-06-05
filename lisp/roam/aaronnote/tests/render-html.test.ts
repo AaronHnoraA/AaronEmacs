@@ -1,0 +1,407 @@
+import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
+
+import { noteCssHrefFromMarkdown, renderMarkdownHTML, renderPublishedNoteHTML } from "../src/render-html.ts";
+
+describe("shared markdown HTML renderer", () => {
+  test("renders math and org env blocks with editor DOM", () => {
+    const html = renderMarkdownHTML(String.raw`#+begin theorem Spectral
+Inline $x+1$.
+
+$$
+y^2
+$$
+#+end theorem`);
+
+    expect(html).toContain("<org-env-block");
+    expect(html).toContain('data-kind="theorem"');
+    expect(html).toContain("aaronnote-math-inline");
+    expect(html).toContain("<math");
+    expect(html).toContain("<math-block");
+    expect(html).toContain("math-block-rendered");
+    expect(html).not.toContain("math-block-source");
+    expect(html).not.toContain("<h1");
+  });
+
+  test("renders math errors instead of empty previews", () => {
+    const html = renderMarkdownHTML(String.raw`Inline $\notacommand$.
+
+$$
+\notacommand
+$$`);
+
+    expect(html.match(/aaronnote-math-error/g)).toHaveLength(2);
+    expect(html).toContain("KaTeX parse error");
+    expect(html).toContain("Undefined control sequence");
+  });
+
+  test("keeps markdown and math literal inside fenced and inline code", () => {
+    const fenced = renderMarkdownHTML("```\ninline $x+1$ and [[wiki]] and **bold**\n```");
+    expect(fenced).toContain("<code");
+    expect(fenced).not.toContain("aaronnote-math-inline");
+    expect(fenced).not.toContain("<strong");
+    expect(fenced).toContain("$x+1$");
+
+    const inline = renderMarkdownHTML("a `$x+1$` b");
+    expect(inline).not.toContain("aaronnote-math-inline");
+    expect(inline).toContain("<code>$x+1$</code>");
+  });
+
+  test("keeps org-env syntax literal inside fenced markdown code", () => {
+    const html = renderMarkdownHTML([
+      "```md",
+      "#+begin meta",
+      "tags: algebra, linear-algebra, math, reading",
+      "#+end meta",
+      "```",
+    ].join("\n"));
+
+    expect(html).toContain("<code");
+    expect(html).toContain("#+begin meta");
+    expect(html).not.toContain("aaronnote-meta-cover");
+  });
+
+  test("marks roam core links for special rendering", () => {
+    const html = renderMarkdownHTML("[section](roam://node-id@main-heading) and [tag](node-id#anchor)");
+
+    expect(html).toContain('class="aaronnote-roam-link"');
+    expect(html).toContain('data-roam-link="true"');
+  });
+
+  test("marks jupyter links with toc selectors, including spaces", () => {
+    const html = renderMarkdownHTML("[toc](./attachments/tset.ipynb@4) [heading](./attachments/tset.ipynb@test file) [hash](./attachments/tset.ipynb#4)");
+
+    expect(html.match(/data-jupyter-link="true"/g)?.length).toBe(3);
+    expect(html).toContain('href="./attachments/tset.ipynb@test file"');
+  });
+
+  test("renders meta blocks with the preview cover", () => {
+    const html = renderMarkdownHTML([
+      "#+begin meta",
+      "title: Meta Cover",
+      "date: 2026-05-21",
+      "tags: preview, internal_tag, #publish",
+      "#+end meta",
+    ].join("\n"));
+
+    expect(html).toContain('<div class="cm-org-env-block org-env-block" data-kind="meta" data-label="Meta">');
+    expect(html).toContain('<div class="org-env-meta aaronnote-meta-cover">');
+    expect(html).toContain('<h1 class="aaronnote-meta-title">Meta Cover</h1>');
+    expect(html).toContain('<p class="aaronnote-meta-date">2026-05-21</p>');
+    expect(html).toContain('<button class="aaronnote-meta-tag">#preview</button>');
+    expect(html).toContain('<button class="aaronnote-meta-tag">#publish</button>');
+    expect(html).toContain('class="aaronnote-meta-roam-badge"');
+    expect(html).not.toContain("#internal_tag");
+  });
+
+  test("marks meta covers that are not indexed by roam db", () => {
+    const indexed = renderMarkdownHTML([
+      "#+begin meta",
+      "id: indexed-id",
+      "title: Indexed",
+      "#+end meta",
+    ].join("\n"));
+    const off = renderMarkdownHTML([
+      "#+begin meta",
+      "id: off-id",
+      "title: Off",
+      "roam: off",
+      "#+end meta",
+    ].join("\n"));
+
+    expect(indexed).not.toContain("aaronnote-meta-roam-badge");
+    expect(off).toContain('class="aaronnote-meta-roam-badge"');
+  });
+
+  test("renders html org env as sanitized html content", () => {
+    const html = renderMarkdownHTML([
+      "#+begin html",
+      '<section class="raw-panel" onclick="alert(1)"><strong>Raw HTML</strong></section>',
+      "<script>alert(2)</script>",
+      "#+end html",
+    ].join("\n"));
+
+    expect(html).toContain('class="aaronnote-html"');
+    expect(html).toContain('<section class="raw-panel"><strong>Raw HTML</strong></section>');
+    expect(html).not.toContain("&lt;section");
+    expect(html).not.toContain("onclick");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("<org-env-block");
+  });
+
+  test("renders spaced tikz org env as sandboxed TikZJax iframe fallback", () => {
+    const html = renderMarkdownHTML([
+      "#+ begin tikz axis 20260525-120000",
+      "\\draw (0,0) -- (1,1);",
+      "#+ end tikz",
+    ].join("\n"));
+
+    expect(html).toContain("aaronnote-tikz");
+    expect(html).toContain('class="aaronnote-tikz-embed aaronnote-visual-embed"');
+    expect(html).toContain('sandbox="allow-scripts"');
+    expect(html).toContain("tikzjax.js");
+    expect(html).toContain("\\begin{tikzpicture}");
+    expect(html).toContain("\\draw (0,0) -- (1,1);");
+    expect(html).not.toContain("<org-env-block");
+  });
+
+  test("applies image layout attrs to tikz org env fallback", () => {
+    const html = renderMarkdownHTML([
+      "#+ begin tikz axis 20260525-120000 {size:320 align:right wrap}",
+      "\\draw (0,0) -- (1,1);",
+      "#+ end tikz",
+    ].join("\n"));
+
+    expect(html).toContain("aaronnote-image-align-right");
+    expect(html).toContain("aaronnote-image-wrap");
+    expect(html).toContain('data-aaronnote-image-wrap="true"');
+    expect(html).toContain("--aaronnote-image-width: 320px");
+  });
+
+  test("renders lean4 org env as a code cell without markdown parsing", () => {
+    const html = renderMarkdownHTML([
+      "#+begin lean4 basic",
+      "import Mathlib.Tactic",
+      "",
+      "-- identity",
+      "example : True := by",
+      "  trivial",
+      "#+end lean4",
+    ].join("\n"));
+
+    expect(html).toContain('data-kind="lean4"');
+    expect(html).toContain('class="language-lean4"');
+    expect(html).toContain("aaronnote-lean-code");
+    expect(html).toContain("code-token-keyword");
+    expect(html).toContain("code-token-comment");
+    expect(html).not.toContain("<p>import Mathlib.Tactic");
+  });
+
+  test("renders @@lean4 regions from publish/export mirror data", () => {
+    const html = renderMarkdownHTML([
+      "Before",
+      "",
+      "@@lean4 [proof-main]",
+      "",
+      "After",
+    ].join("\n"), {
+      leanRegions: {
+        "proof-main": [
+          "import Mathlib",
+          "-- exported proof",
+          "example : True := by",
+          "  trivial",
+        ].join("\n"),
+      },
+    });
+
+    expect(html).toContain('data-lean-region="true"');
+    expect(html).toContain(">proof-main<");
+    expect(html).toContain("exported proof");
+    expect(html).toContain("code-token-keyword");
+    expect(html).not.toContain("@@lean4");
+  });
+
+  test("renders @@lean4 linked-file regions when the selector contains parentheses", () => {
+    const html = renderMarkdownHTML(
+      "@@lean4(../../../../project/UNSW/ISO(202603)/GraphTensor.lean) [lean-mps0spux]",
+      { leanRegions: { "lean-mps0spux": "#check Nat\n" } },
+    );
+
+    expect(html).toContain("org-env-lean4-region");
+    expect(html).toContain("#check");
+    expect(html).not.toContain("@@lean4");
+  });
+
+  test("renders semantic part and section headings as outline blocks", () => {
+    const html = renderMarkdownHTML([
+      "@@part [Foundations]",
+      "",
+      "@@section(sub) [Inner products]{id: inner-products}",
+      "",
+      "# Markdown detail",
+    ].join("\n"));
+
+    expect(html).toContain('class="aaronnote-section-heading"');
+    expect(html).toContain('data-outline-level="1"');
+    expect(html).toContain('data-outline-level="3"');
+    expect(html).toContain('id="inner-products"');
+    expect(html).toContain('class="aaronnote-section-heading-inner"');
+    expect(html).toContain('<span class="aaronnote-section-title">Inner products</span>');
+    expect(html).not.toContain("@@section");
+  });
+
+  test("keeps resolved Aaronnote asset image URLs", () => {
+    const html = renderMarkdownHTML("![plot](./images/plot.png)", {
+      assetResolver: (src) => `aaronnote-asset://media/?file=${encodeURIComponent(src)}`,
+    });
+
+    expect(html).toContain('src="aaronnote-asset://media/?file=.%2Fimages%2Fplot.png"');
+    expect(html).toContain('alt="plot"');
+  });
+
+  test("applies Aaronnote image trailing attrs", () => {
+    const html = renderMarkdownHTML("![plot](./images/plot.png){size:300%; align:right; wrap:on}");
+
+    expect(html).toContain("aaronnote-image");
+    expect(html).toContain("aaronnote-image-align-right");
+    expect(html).toContain("aaronnote-image-wrap");
+    expect(html).toContain('data-aaronnote-image-align="right"');
+    expect(html).toContain('data-aaronnote-image-wrap="true"');
+    expect(html).toContain("--aaronnote-image-width: 300%");
+    expect(html).toContain("--aaronnote-image-max-width: none");
+    expect(html).toContain("--aaronnote-image-max-height: none");
+    expect(html).not.toContain("{size:300%");
+  });
+
+  test("accepts bare wrap layout attrs", () => {
+    const imageHtml = renderMarkdownHTML("![plot](./images/plot.png){size:40% align:left wrap}");
+    expect(imageHtml).toContain("aaronnote-image-wrap");
+    expect(imageHtml).toContain("aaronnote-image-align-left");
+    expect(imageHtml).toContain('data-aaronnote-image-wrap="true"');
+    expect(imageHtml).toContain("--aaronnote-image-width: 40%");
+
+    const diagramHtml = renderMarkdownHTML([
+      "```marmind",
+      "Root",
+      "```",
+      "{wrap}",
+    ].join("\n"));
+    expect(diagramHtml).toContain("aaronnote-diagram-wrap");
+  });
+
+  test("renders draw.io image syntax as a visual attachment iframe", () => {
+    const html = renderMarkdownHTML("![diagram](./attachments/demo.drawio){size:640; align:left}");
+
+    expect(html).toContain("aaronnote-visual-attachment-drawio");
+    expect(html).toContain("aaronnote-visual-embed-drawio");
+    expect(html).toContain("embed.diagrams.net");
+    expect(html).toContain('srcdoc="');
+    expect(html).toContain('data-aaronnote-visual-kind="drawio"');
+    expect(html).toContain("diagram");
+    expect(html).not.toContain("<img");
+  });
+
+  test("renders html image syntax as an isolated visual attachment iframe", () => {
+    const html = renderMarkdownHTML("![panel](./attachments/demo.html){size:640; align:left}");
+
+    expect(html).toContain("aaronnote-visual-attachment-html");
+    expect(html).toContain("aaronnote-visual-embed-html");
+    expect(html).toContain('src="./attachments/demo.html"');
+    expect(html).toContain('sandbox="allow-scripts allow-forms allow-popups allow-downloads"');
+    expect(html).toContain('data-aaronnote-visual-kind="html"');
+    expect(html).toContain("panel");
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("allow-same-origin");
+  });
+
+  test("renders empty html links as isolated iframes", () => {
+    const html = renderMarkdownHTML("[](./attachments/demo.html)");
+
+    expect(html).toContain("aaronnote-visual-attachment-html");
+    expect(html).toContain("aaronnote-visual-embed-html");
+    expect(html).toContain('src="./attachments/demo.html"');
+    expect(html).toContain('data-aaronnote-visual-kind="html"');
+    expect(html).not.toContain("<img");
+  });
+
+  test("applies Aaronnote table trailing attrs", () => {
+    const html = renderMarkdownHTML([
+      "| A | B |",
+      "| --- | --- |",
+      "| 1 | 2 |",
+      "{size:75%; align:right; wrap:on}",
+    ].join("\n"));
+
+    expect(html).toContain("<table");
+    expect(html).toContain("aaronnote-table-align-right");
+    expect(html).toContain("aaronnote-table-wrap");
+    expect(html).toContain("--aaronnote-table-width: 75%");
+    expect(html).not.toContain("{size:75%");
+  });
+
+  test("applies Aaronnote diagram trailing attrs", () => {
+    const html = renderMarkdownHTML([
+      "```marmind",
+      "graph LR",
+      "A --- B",
+      "```",
+      "{size:180%; align:left; wrap:on}",
+    ].join("\n"));
+
+    expect(html).toContain("aaronnote-diagram-code");
+    expect(html).toContain("aaronnote-diagram-align-left");
+    expect(html).toContain("aaronnote-diagram-wrap");
+    expect(html).toContain("--aaronnote-diagram-width: 180%");
+    expect(html).not.toContain("{size:180%");
+  });
+
+  test("renders published notes with the Aaronnote preview shell", () => {
+    const html = renderPublishedNoteHTML("Body", {
+      title: "Preview Shell",
+      group: "QC",
+      date: "2026-05-21",
+      root: "../",
+      kind: "default",
+      noteThemeVersion: "test",
+    });
+
+    expect(html).toContain('<main class="aaronnote-shell published-note-page" data-note-kind="default">');
+    expect(html).toContain('<section class="aaronnote-body">');
+    expect(html).toContain('<section class="aaronnote-editor" id="editor">');
+    expect(html).toContain('<span class="aaronnote-vim-mode">READ</span>');
+    expect(html).toContain("<p>Body</p>");
+  });
+
+  test("published notes append meta css after built-in and kind styles", () => {
+    const markdown = [
+      "#+begin meta",
+      "title: Styled Note",
+      "css: /tmp/aaronnote/css/note override.css",
+      "#+end meta",
+      "",
+      "Body",
+    ].join("\n");
+    const html = renderPublishedNoteHTML(markdown, {
+      title: "Styled Note",
+      root: "./",
+      kind: "slides",
+      kindAssetsHtml: '  <link rel="stylesheet" href="./kinds/slides/index.css" />',
+    });
+
+    expect(noteCssHrefFromMarkdown(markdown)).toBe("file:///tmp/aaronnote/css/note%20override.css");
+    expect(html).toContain('data-aaronnote-note-css href="file:///tmp/aaronnote/css/note%20override.css"');
+    expect(html.indexOf("./kinds/slides/index.css")).toBeLessThan(html.indexOf("data-aaronnote-note-css"));
+    expect(html.indexOf("css/aaronnote-published.css")).toBeLessThan(html.indexOf("data-aaronnote-note-css"));
+  });
+
+  test("ignores relative meta css paths", () => {
+    expect(noteCssHrefFromMarkdown("#+begin meta\ncss: ./local.css\n#+end meta")).toBe("");
+  });
+
+  test("published notes keep the preview-rendered body", () => {
+    const markdown = [
+      "#+begin meta",
+      "title: Meta Title",
+      "date: 2026-05-21",
+      "#+end meta",
+      "",
+      "# Meta Title",
+      "",
+      "## Body Heading",
+    ].join("\n");
+    const previewHtml = renderMarkdownHTML(markdown);
+    const html = renderPublishedNoteHTML(markdown, {
+      title: "Meta Title",
+      date: "2026-05-21",
+      root: "./",
+      kind: "default",
+    });
+
+    expect(html).toContain(previewHtml);
+    expect(html).toContain('<h1 class="aaronnote-meta-title">Meta Title</h1>');
+    expect(html).toContain('data-kind="meta"');
+    expect(html).toContain("<h1>Meta Title</h1>");
+    expect(html).toContain("<h2>Body Heading</h2>");
+    expect(html).not.toContain("published-note-cover");
+  });
+});

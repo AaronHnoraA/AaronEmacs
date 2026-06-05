@@ -1,9 +1,0 @@
-# -*- mode: snippet -*-
-# name: Note
-# key: note
-# -- Add a note
-# --
-\begin{note}
-	$1
-\end{note}
-$0

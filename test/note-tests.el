@@ -3,7 +3,7 @@
 ;;; Code:
 
 (load-file
- (expand-file-name "typst-roam-tests.el"
+ (expand-file-name "md-roam-tests.el"
                    (file-name-directory (or load-file-name buffer-file-name))))
 (load-file
  (expand-file-name "note-code-tests.el"

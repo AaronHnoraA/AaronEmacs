@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Vmatrix
-# key: vmat
-# --
-\begin{vmatrix}
-$1
-\end{vmatrix}

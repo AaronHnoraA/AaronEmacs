@@ -1,0 +1,30 @@
+# -*- mode: snippet -*-
+# name: Meeting notes
+# key: meeting
+# group: templates
+# --
+# {{title}}
+
+Date: {{date}}
+Time: {{time}}
+Tags: {{tags}}
+
+## Attendees
+
+- ${1:Name}
+
+## Agenda
+
+- 
+
+## Notes
+
+$0
+
+## Decisions
+
+- 
+
+## Action Items
+
+- [ ] 

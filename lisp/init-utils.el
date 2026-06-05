@@ -55,8 +55,7 @@ name and search again. Typically OP is nil or \"common\"."
                                 (with-current-buffer buf
                                   (erase-buffer)
                                   (insert (base64-decode-string content))
-                                  (when (functionp 'markdown-mode)
-                                    (markdown-mode))
+                                  (text-mode)
                                   (view-mode +1)
                                   (pop-to-buffer buf)))))
                         (when (buffer-live-p response-buffer)

@@ -43,7 +43,7 @@ help:
 	  '  make health-startup       Run startup smoke check' \
 	  '  make health-byte          Run byte-compile smoke check' \
 	  '  make health-native        Run native-compile smoke check' \
-	  '  make note-test            Run Typst note ERT tests'
+	  '  make note-test            Run Markdown roam/note ERT tests'
 
 up:
 	@if [ -n "$(SNAPSHOT)" ]; then \
@@ -126,4 +126,8 @@ health-native:
 
 note-test:
 	$(BATCH) -l test/note-tests.el -f ert-run-tests-batch-and-exit
-	typst compile --root . test/note-code-render-fixture.typ /tmp/note-code-render-fixture.pdf
+	@if command -v typst >/dev/null 2>&1; then \
+	  typst compile --root . test/note-code-render-fixture.typ /tmp/note-code-render-fixture.pdf; \
+	else \
+	  printf 'Skipping optional Typst render smoke test: typst not found\n'; \
+	fi

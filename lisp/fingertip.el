@@ -180,9 +180,7 @@
              (fingertip-in-comment-p))
          (insert ")"))
         ;; Insert ) directly in sh-mode for case ... in syntax.
-        ((or
-          (derived-mode-p 'sh-mode)
-          (derived-mode-p 'markdown-mode))
+        ((derived-mode-p 'sh-mode)
          (insert ")"))
         (t
          (fingertip-fix-unbalanced-parentheses))))
@@ -209,9 +207,7 @@
              (fingertip-in-comment-p))
          (insert "）"))
         ;; Insert ) directly in sh-mode for case ... in syntax.
-        ((or
-          (derived-mode-p 'sh-mode)
-          (derived-mode-p 'markdown-mode))
+        ((derived-mode-p 'sh-mode)
          (insert "）"))
         (t
          (fingertip-fix-unbalanced-parentheses))))
@@ -235,7 +231,6 @@
 (defun fingertip-single-quote ()
   (interactive)
   (cond ((or (fingertip-is-lisp-mode-p)
-             (derived-mode-p 'markdown-mode)
              (derived-mode-p 'rust-mode)
              (derived-mode-p 'rust-ts-mode)
              (fingertip-in-comment-p)
