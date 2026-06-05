@@ -11,15 +11,6 @@ import { setFindHighlightRanges } from "../src/cm6/find-highlight.ts";
 import { markdownHrefAt } from "../src/cm6/editor-cm6.ts";
 import { setKnownRoamRefs } from "../src/cm6/roam-link-status.ts";
 import { proseDiagnosticsAt, setProseDiagnostics, type ProseDiagnostic } from "../src/cm6/prose-diagnostics.ts";
-import {
-  activeLeanController,
-  clearLeanSnippetCache,
-  getLeanController,
-  setLeanLocationsPicker,
-  type LeanEditAction,
-  type LeanLocation,
-  type LeanLspAction,
-} from "../src/cm6/widgets/lean-placeholder.ts";
 import { equationTagsFromText, getEquationTagHits } from "../src/equation-tags.ts";
 import { INLINE_MATH_RE, isLikelyInlineMath } from "../src/inline-math.ts";
 import { getBlockMathRanges, rangeAtPosition, rangeOverlapsAny } from "../src/cm6/math-ranges.ts";
@@ -27,9 +18,7 @@ import { formatMathRenderError, renderMathLazy } from "../src/math-render.ts";
 import { noteCssHrefFromMarkdown } from "../src/render-html.ts";
 import { safeHref } from "../src/url-safety.ts";
 import { visualMarkdownAttachmentP } from "../src/visual-attachments.ts";
-import { createAgendaManager } from "./agenda.ts";
 import { createUnusedAssetsManager } from "./asset-cleanup.ts";
-import { createFilesystemBrowser } from "./filesystem.ts";
 import {
   collectFindMatches,
   collectFindMatchesInRanges,
@@ -39,15 +28,10 @@ import {
   type FindMatch,
 } from "./find.ts";
 import { createFloatingTocPanel, inlineTagAnchorsFromText, markdownHeadingsFromText } from "./floating-toc.ts";
-import { createLeanPanel } from "./lean-panel.ts";
-import { createJupyterPanel, type JupyterTarget } from "./jupyter-panel.ts";
-import { leanSpliceField, setLeanNotePath } from "../src/cm6/widgets/lean-block.ts";
 import { setBookContext, type BookEditorContext, type BookEditorTocItem } from "../src/cm6/widgets/block-extras.ts";
-import { createGraphPanel } from "./graph-panel.ts";
 import { createLinkPreviewController, type LinkPreviewTarget } from "./link-preview.ts";
 import { createLocalGraphPanel } from "./local-graph.ts";
 import { clampCommandIndex, filterCommands, type AaronnoteCommand } from "./command-palette.ts";
-import { canonicalLeanSelector, formatLeanPlaceholder, parseLeanPlaceholderLine, scanMarkdownLeanPlaceholders as scanMarkdownLeanPlaceholdersShared } from "../shared/lean-placeholder.mjs";
 import {
   canonicalRoamNoteId,
   escapeMarkdownLinkText,
@@ -89,6 +73,41 @@ declare global {
 }
 
 window.__GRAPH_NO_AUTO_INIT__ = true;
+
+// Stubs for removed panels (lean, jupyter, agenda, filesystem, git, graph).
+// These replaced the deleted panel modules; the HTML chrome still references
+// them via DOM queries, but the functionality is now in Emacs.
+type _PanelStub = { visible: boolean; show: () => void; hide: () => void; destroy: () => void };
+type _JupyterTarget = { kind?: string; file?: string; kernel?: string };
+type LeanLocation = { file?: string; line?: number; col?: number };
+function createLeanPanel(_opts: { root: HTMLElement }): _PanelStub {
+  return { visible: false, show() {}, hide() {}, destroy() {} };
+}
+function createJupyterPanel(_opts: { root: HTMLElement }): _PanelStub & { setTarget: (_t: _JupyterTarget) => void } {
+  return { visible: false, show() {}, hide() {}, setTarget() {}, destroy() {} };
+}
+function createAgendaManager(_opts: unknown): { refresh: () => void; destroy: () => void } {
+  return { refresh() {}, destroy() {} };
+}
+function createFilesystemBrowser(_opts: unknown): { focus: () => boolean; focusRecent: () => boolean; destroy: () => void } {
+  return { focus: () => false, focusRecent: () => false, destroy() {} };
+}
+function createGraphPanel(_opts: unknown): _PanelStub {
+  return { visible: false, show() {}, hide() {}, destroy() {} };
+}
+type JupyterTarget = _JupyterTarget;
+function activeLeanController(_file: string) { return null; }
+function clearLeanSnippetCache() {}
+function getLeanController(_file: string) { return null; }
+function setLeanLocationsPicker(_picker: unknown) {}
+function setLeanNotePath(_view: unknown, _file: string) {}
+type LeanEditAction = { kind: string };
+type LeanLspAction = { kind: string };
+function canonicalLeanSelector(s: string) { return s; }
+function formatLeanPlaceholder(_sel: string, _tag: string) { return ""; }
+function parseLeanPlaceholderLine(_line: string) { return null; }
+function scanMarkdownLeanPlaceholdersShared(_md: string) { return []; }
+const leanSpliceField: unknown = null;
 
 const params = new URLSearchParams(window.location.search);
 const hostAssetResolver = window.AaronnoteResolveAssetUrl;
