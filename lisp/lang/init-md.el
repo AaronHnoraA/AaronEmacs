@@ -22,6 +22,9 @@
   '("README\\(?:\\.md\\)?\\'" "\\.markdown\\'" "\\.md\\'")
   "File patterns redirected from Emacs buffers into Aaronnote.")
 
+(defvar-local my/aaronnote--markdown-redirected nil
+  "Non-nil when this buffer has already been handed to Aaronnote.")
+
 (defun my/aaronnote--markdown-auto-mode-entry-p (entry)
   "Return non-nil when ENTRY is a Markdown auto-mode entry."
   (and (consp entry)
@@ -59,21 +62,34 @@
                  (file-equal-p buffer-file-name file))
         (kill-buffer buffer)))))
 
+(defun my/aaronnote--redirect-current-markdown-buffer ()
+  "Open the current Markdown buffer in Aaronnote and optionally close it."
+  (let ((file buffer-file-name)
+        (buffer (current-buffer)))
+    (unless (and file (my/aaronnote--markdown-file-p file))
+      (user-error "Current buffer is not visiting a Markdown file"))
+    (setq-local my/aaronnote--markdown-redirected t)
+    (fundamental-mode)
+    (setq-local buffer-read-only t)
+    (let ((target (my/aaronnote--ensure-markdown-file file)))
+      (my/aaronnote-open-file target)
+      (when my/aaronnote-close-emacs-markdown-buffer
+        (run-at-time 0 nil
+                     #'my/aaronnote--kill-redirected-markdown-buffer
+                     buffer target)))))
+
+(defun my/aaronnote-redirect-markdown-file-h ()
+  "Fallback Markdown handoff for packages that override `auto-mode-alist'."
+  (when (and buffer-file-name
+             (my/aaronnote--markdown-file-p buffer-file-name)
+             (not my/aaronnote--markdown-redirected))
+    (my/aaronnote--redirect-current-markdown-buffer)))
+
 ;;;###autoload
 (defun my/aaronnote-markdown-redirect-mode ()
   "Major-mode replacement that opens the current Markdown file in Aaronnote."
   (interactive)
-  (let ((file buffer-file-name)
-        (buffer (current-buffer)))
-    (fundamental-mode)
-    (setq-local buffer-read-only t)
-    (when file
-      (let ((target (my/aaronnote--ensure-markdown-file file)))
-        (my/aaronnote-open-file target)
-        (when my/aaronnote-close-emacs-markdown-buffer
-          (run-at-time 0 nil
-                       #'my/aaronnote--kill-redirected-markdown-buffer
-                       buffer target))))))
+  (my/aaronnote--redirect-current-markdown-buffer))
 
 (my/aaronnote--pin-markdown-redirect-mode)
 
@@ -81,6 +97,12 @@
 ;; the Aaronnote handoff after that package loads so no grammar prompt runs.
 (with-eval-after-load 'treesit-auto
   (my/aaronnote--pin-markdown-redirect-mode))
+
+(with-eval-after-load 'init-treesit
+  (my/aaronnote--pin-markdown-redirect-mode))
+
+(add-hook 'after-init-hook #'my/aaronnote--pin-markdown-redirect-mode 90)
+(add-hook 'find-file-hook #'my/aaronnote-redirect-markdown-file-h)
 
 (provide 'init-md)
 

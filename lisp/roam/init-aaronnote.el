@@ -13,6 +13,7 @@
 
 (declare-function my/open-xwidget-url "init-browser" (url &optional reuse-selected))
 (declare-function my/appine-open-url "init-appine" (url))
+(declare-function appine-focus "appine" ())
 
 (defgroup my/aaronnote nil
   "Aaronnote Markdown web editor integration."
@@ -76,7 +77,9 @@
 
 (defun my/aaronnote--markdown-file-p (file)
   "Return non-nil when FILE is a Markdown file."
-  (and file (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file)))
+  (and file
+       (or (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file)
+           (string-equal (file-name-nondirectory file) "README"))))
 
 (defun my/aaronnote--ensure-server (&optional callback)
   "Start the web-host if needed, then call CALLBACK."
@@ -217,7 +220,12 @@
       (setq buffer-read-only t))
     (set-window-buffer (selected-window) buffer)
     (with-current-buffer buffer
-      (my/appine-open-url url))))
+      (my/appine-open-url url))
+    (when (fboundp 'appine-focus)
+      (run-at-time 0.05 nil
+                   (lambda ()
+                     (when (get-buffer-window buffer 'visible)
+                       (ignore-errors (appine-focus))))))))
 
 (defun my/aaronnote--open-url (url)
   "Open Aaronnote URL using `my/aaronnote-backend'."
@@ -282,9 +290,12 @@ When FILE is nil, use the current buffer."
   (interactive "fMarkdown file: ")
   (unless (my/aaronnote--markdown-file-p file)
     (user-error "Aaronnote opens Markdown files, not %s" file))
-  (let ((file (expand-file-name file)))
+  (let ((file (expand-file-name file))
+        (target-window (selected-window)))
     (my/aaronnote--ensure-server
      (lambda ()
+       (when (window-live-p target-window)
+         (select-window target-window))
        (my/aaronnote--open-url (my/aaronnote--app-url file))
        (run-at-time 0.3 nil #'my/aaronnote--open-file-in-web file)))))
 
@@ -314,6 +325,32 @@ Cursor-level sync is intentionally no longer a per-keystroke preview channel."
   "Reopen the current Markdown note in Aaronnote."
   (interactive)
   (my/aaronnote-open-current-note))
+
+;;;###autoload
+(defun my/aaronnote-command (command &optional detail)
+  "Send COMMAND with optional DETAIL to the open Aaronnote page."
+  (interactive "sAaronnote command: ")
+  (my/aaronnote--ensure-server
+   (lambda ()
+     (my/aaronnote--send-command command detail))))
+
+;;;###autoload
+(defun my/aaronnote-escape ()
+  "Tell Aaronnote to handle Escape."
+  (interactive)
+  (my/aaronnote-command "escape"))
+
+;;;###autoload
+(defun my/aaronnote-save ()
+  "Tell Aaronnote to save the current note."
+  (interactive)
+  (my/aaronnote-command "save"))
+
+;;;###autoload
+(defun my/aaronnote-focus ()
+  "Tell Aaronnote to focus its editor."
+  (interactive)
+  (my/aaronnote-command "focus"))
 
 ;;;###autoload
 (defun my/aaronnote-roam-graph ()

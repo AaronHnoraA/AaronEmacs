@@ -14,6 +14,7 @@ type SaveBody = {
 type NativeApi = {
   notes?: {
     bootstrap?: (file?: string) => Promise<unknown>;
+    open?: (file: string) => Promise<unknown>;
     save?: (body: SaveBody) => Promise<unknown>;
   };
   assets?: {
@@ -49,6 +50,10 @@ export const api = {
   notes: {
     async bootstrap(file?: string): Promise<OpenMsg> {
       const call = requireMethod(nativeApi().notes?.bootstrap, "Open");
+      return ensureOk(await call(file) as OpenMsg, "Open failed");
+    },
+    async open(file: string): Promise<OpenMsg> {
+      const call = requireMethod(nativeApi().notes?.open, "Open");
       return ensureOk(await call(file) as OpenMsg, "Open failed");
     },
     async save(body: SaveBody): Promise<SavedMsg> {

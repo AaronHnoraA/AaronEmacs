@@ -40,7 +40,10 @@
 (declare-function appine-refresh "appine")
 (declare-function appine-open-file-by-file-chooser "appine")
 (declare-function appine-native-action "appine" (name))
+(declare-function my/aaronnote-command "init-aaronnote" (command &optional detail))
+(declare-function my/aaronnote-save "init-aaronnote" ())
 (declare-function my/macos-open-target "init-macos" (target))
+(defvar my/aaronnote--port)
 
 (defun my/appine-current-file ()
   "Return the current Appine local file path, or nil for non-file tabs."
@@ -416,6 +419,39 @@ With DIRED-P, the main path button opens via `dired'."
   "Scroll Appine view one page up."
   (interactive)
   (appine-native-action "scrollPageUp"))
+
+;;; ── Aaronnote bridge ───────────────────────────────────────────────────
+
+(defun my/appine-aaronnote-url-p (&optional url)
+  "Return non-nil when URL is the current local Aaronnote page."
+  (let ((url (or url my/appine-last-url)))
+    (and (stringp url)
+         (boundp 'my/aaronnote--port)
+         (integerp my/aaronnote--port)
+         (string-prefix-p
+          (format "http://127.0.0.1:%d/" my/aaronnote--port)
+          url))))
+
+(defun my/appine-aaronnote-command (command)
+  "Send COMMAND to Aaronnote when the active Appine tab is Aaronnote."
+  (when (and (my/appine-aaronnote-url-p)
+             (fboundp 'my/aaronnote-command))
+    (my/aaronnote-command command)
+    (when (fboundp 'appine-focus)
+      (run-at-time 0.02 nil #'appine-focus))
+    t))
+
+(defun my/appine-aaronnote-escape ()
+  "Route Escape to Aaronnote when Appine is showing Aaronnote."
+  (interactive)
+  (unless (my/appine-aaronnote-command "escape")
+    (keyboard-escape-quit)))
+
+(defun my/appine-aaronnote-save-or-native ()
+  "Save Aaronnote from Appine, otherwise ask Appine's native view to save."
+  (interactive)
+  (unless (my/appine-aaronnote-command "save")
+    (appine-native-action "save")))
 
 ;;; Plugin directories:
 ;;;   User plugins live in etc/appine/plugins/ (version-controlled with user config).
@@ -1063,6 +1099,10 @@ buffer/window selection changes."
     (define-key appine-active-map (kbd "d")   #'my/appine-close-tab)
     (define-key appine-active-map (kbd "n")   #'my/appine-new-tab)
     (define-key appine-active-map (kbd "/")   #'my/appine-find)
+    (define-key appine-active-map [escape]    #'my/appine-aaronnote-escape)
+    (define-key appine-active-map (kbd "C-[") #'my/appine-aaronnote-escape)
+    (define-key appine-active-map [?\s-s]     #'my/appine-aaronnote-save-or-native)
+    (define-key appine-active-map (kbd "C-s") #'my/appine-aaronnote-save-or-native)
     (define-key appine-active-map (kbd "W")   #'my/appine-to-eww)
     (define-key appine-active-map (kbd "X") #'my/appine-to-xwidget)
     (define-key appine-active-map (kbd "Q") #'my/appine-kill-all)
