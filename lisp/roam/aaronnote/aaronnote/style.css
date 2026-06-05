@@ -5,6 +5,8 @@
   --aaronnote-chrome: #fbf8f1;
   --aaronnote-border: rgb(109 90 56 / 18%);
   --aaronnote-muted: rgb(82 70 50 / 70%);
+  --aaronnote-vim-accent: #1d6f72;
+  --aaronnote-vim-visual: #7b4acb;
   --aaron-ink: #24201a;
 }
 
@@ -70,6 +72,19 @@ button.is-active {
   font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+#app[data-vim-mode="normal"] .aaronnote-focused-bar [data-vim-mode] {
+  border-color: rgb(29 111 114 / 42%);
+  background: rgb(29 111 114 / 10%);
+  color: var(--aaronnote-vim-accent);
+}
+
+#app[data-vim-mode="visual"] .aaronnote-focused-bar [data-vim-mode],
+#app[data-vim-mode="visual-line"] .aaronnote-focused-bar [data-vim-mode] {
+  border-color: rgb(123 74 203 / 42%);
+  background: rgb(123 74 203 / 10%);
+  color: var(--aaronnote-vim-visual);
+}
+
 .aaronnote-focused-editor {
   min-height: 0;
   overflow: auto;
@@ -77,4 +92,19 @@ button.is-active {
 
 .aaronnote-focused-editor > .cm-editor {
   min-height: 100%;
+}
+
+#app[data-vim-mode="normal"] .cm-cursor {
+  width: 0.68em;
+  border-left: 0;
+  outline: 1px solid rgb(29 111 114 / 78%);
+  background: rgb(29 111 114 / 20%);
+}
+
+#app[data-vim-mode="visual"] .cm-cursor,
+#app[data-vim-mode="visual-line"] .cm-cursor {
+  width: 0.68em;
+  border-left: 0;
+  outline: 1px solid rgb(123 74 203 / 78%);
+  background: rgb(123 74 203 / 20%);
 }

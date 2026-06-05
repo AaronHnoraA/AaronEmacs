@@ -227,16 +227,26 @@
                      (when (get-buffer-window buffer 'visible)
                        (ignore-errors (appine-focus))))))))
 
+(defun my/aaronnote--appine-available-p ()
+  "Return non-nil when Aaronnote can dispatch opens through Appine."
+  (condition-case err
+      (progn
+        (unless (fboundp 'my/appine-open-url)
+          (require 'init-appine))
+        (fboundp 'my/appine-open-url))
+    (error
+     (message "Aaronnote: Appine unavailable (%s)"
+              (error-message-string err))
+     nil)))
+
 (defun my/aaronnote--open-url (url)
   "Open Aaronnote URL using `my/aaronnote-backend'."
   (pcase my/aaronnote-backend
     ('appine
-     (condition-case err
+     (if (my/aaronnote--appine-available-p)
          (my/aaronnote--open-appine url)
-       (error
-        (message "Aaronnote: Appine unavailable, using xwidget (%s)"
-                 (error-message-string err))
-        (my/aaronnote--open-xwidget url))))
+       (message "Aaronnote: using xwidget because Appine is unavailable")
+       (my/aaronnote--open-xwidget url)))
     ('xwidget (my/aaronnote--open-xwidget url))
     (_ (user-error "Unsupported Aaronnote backend: %S" my/aaronnote-backend))))
 

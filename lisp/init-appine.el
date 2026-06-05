@@ -432,11 +432,11 @@ With DIRED-P, the main path button opens via `dired'."
           (format "http://127.0.0.1:%d/" my/aaronnote--port)
           url))))
 
-(defun my/appine-aaronnote-command (command)
-  "Send COMMAND to Aaronnote when the active Appine tab is Aaronnote."
+(defun my/appine-aaronnote-command (command &optional detail)
+  "Send COMMAND and optional DETAIL when the active Appine tab is Aaronnote."
   (when (and (my/appine-aaronnote-url-p)
              (fboundp 'my/aaronnote-command))
-    (my/aaronnote-command command)
+    (my/aaronnote-command command detail)
     (when (fboundp 'appine-focus)
       (run-at-time 0.02 nil #'appine-focus))
     t))
@@ -452,6 +452,29 @@ With DIRED-P, the main path button opens via `dired'."
   (interactive)
   (unless (my/appine-aaronnote-command "save")
     (appine-native-action "save")))
+
+(defun my/appine-keep-emacs-prefix-keys (map)
+  "Remove Appine bindings that should remain normal Emacs prefixes in MAP."
+  (dolist (key '("C-x C-f"
+                 "C-c f"
+                 "C-c b"
+                 "C-c C-f"
+                 "C-c C-b"
+                 "<escape>"
+                 "C-["
+                 "C-s"
+                 "H"
+                 "L"
+                 "["
+                 "]"
+                 "d"
+                 "n"
+                 "/"
+                 "W"
+                 "X"
+                 "Q"
+                 "?"))
+    (define-key map (kbd key) nil)))
 
 ;;; Plugin directories:
 ;;;   User plugins live in etc/appine/plugins/ (version-controlled with user config).
@@ -1091,22 +1114,8 @@ buffer/window selection changes."
   (add-hook 'window-buffer-change-functions #'my/appine--schedule-refresh-visible)
   (add-hook 'window-selection-change-functions #'my/appine--schedule-refresh-visible)
   (when (boundp 'appine-active-map)
-    (define-key appine-active-map (kbd "H")   #'my/appine-back)
-    (define-key appine-active-map (kbd "L")   #'my/appine-forward)
-    (define-key appine-active-map (kbd "M-w") #'my/appine-close-tab)
-    (define-key appine-active-map (kbd "[")   #'my/appine-prev-tab)
-    (define-key appine-active-map (kbd "]")   #'my/appine-next-tab)
-    (define-key appine-active-map (kbd "d")   #'my/appine-close-tab)
-    (define-key appine-active-map (kbd "n")   #'my/appine-new-tab)
-    (define-key appine-active-map (kbd "/")   #'my/appine-find)
-    (define-key appine-active-map [escape]    #'my/appine-aaronnote-escape)
-    (define-key appine-active-map (kbd "C-[") #'my/appine-aaronnote-escape)
-    (define-key appine-active-map [?\s-s]     #'my/appine-aaronnote-save-or-native)
-    (define-key appine-active-map (kbd "C-s") #'my/appine-aaronnote-save-or-native)
-    (define-key appine-active-map (kbd "W")   #'my/appine-to-eww)
-    (define-key appine-active-map (kbd "X") #'my/appine-to-xwidget)
-    (define-key appine-active-map (kbd "Q") #'my/appine-kill-all)
-    (define-key appine-active-map (kbd "?") #'my/appine-board)))
+    (my/appine-keep-emacs-prefix-keys appine-active-map)
+    (define-key appine-active-map [?\s-s]     #'my/appine-aaronnote-save-or-native)))
 
 (provide 'init-appine)
 ;;; init-appine.el ends here

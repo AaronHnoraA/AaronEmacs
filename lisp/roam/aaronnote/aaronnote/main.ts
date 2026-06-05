@@ -5,7 +5,7 @@ import "./style.css";
 import { createEditor, type EditorCommand } from "../src/lib.ts";
 import { setupCopilot } from "../src/copilot/index.ts";
 import { api } from "./api-client.ts";
-import { createVimLite, type VimLiteMode } from "./vim-lite.ts";
+import { createVimLite, type VimLiteKey, type VimLiteMode } from "./vim-lite.ts";
 
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("Missing #app");
@@ -84,6 +84,8 @@ function updateTitle(): void {
 function updateModeLabel(mode: VimLiteMode): void {
   modeLabel.textContent = mode.toUpperCase();
   modeLabel.dataset.mode = mode;
+  root.dataset.vimMode = mode;
+  host.dataset.vimMode = mode;
 }
 
 function subscribe<K extends keyof DocumentEventMap>(
@@ -253,9 +255,55 @@ function runFormattingShortcut(event: KeyboardEvent): boolean {
   return true;
 }
 
+function insertHostKeyText(key: string, text?: string): boolean {
+  const literal = typeof text === "string" ? text
+    : key === "Enter" ? "\n"
+      : key === "Tab" ? "\t"
+        : key.length === 1 ? key
+          : "";
+  if (!literal) return false;
+  editor.insertText(literal);
+  return true;
+}
+
+function deleteHostKeyText(key: string): boolean {
+  const { from, to } = editor.getMarkdownSelection();
+  if (from !== to) {
+    editor.replaceMarkdownRange(from, to, "", "start");
+    return true;
+  }
+  if (key === "Backspace" && from > 0) {
+    editor.replaceMarkdownRange(from - 1, from, "", "start");
+    return true;
+  }
+  if (key === "Delete") {
+    editor.replaceMarkdownRange(from, Math.min(from + 1, editor.getMarkdown().length), "", "start");
+    return true;
+  }
+  return false;
+}
+
+function runHostKey(body: Record<string, unknown>): boolean {
+  const key = String(body.key || "");
+  if (!key) return false;
+  const hostKey: VimLiteKey = {
+    key,
+    ctrlKey: Boolean(body.ctrlKey),
+    metaKey: Boolean(body.metaKey),
+    altKey: Boolean(body.altKey),
+    shiftKey: Boolean(body.shiftKey),
+  };
+  editor.focus();
+  if (vim.handleKey(hostKey)) return true;
+  if (vim.mode() !== "insert" || hostKey.ctrlKey || hostKey.metaKey || hostKey.altKey) return false;
+  if (key === "Backspace" || key === "Delete") return deleteHostKeyText(key);
+  return insertHostKeyText(key, typeof body.text === "string" ? body.text : undefined);
+}
+
 function runHostCommand(detail: unknown): boolean {
   const body = (detail && typeof detail === "object" ? detail : {}) as {
     command?: string;
+    key?: string;
     value?: string;
     mode?: VimLiteMode;
   };
@@ -263,6 +311,8 @@ function runHostCommand(detail: unknown): boolean {
   if (!command) return false;
 
   switch (command) {
+    case "key":
+      return runHostKey(body as Record<string, unknown>);
     case "save":
       void save();
       return true;

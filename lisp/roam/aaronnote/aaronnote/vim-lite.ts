@@ -3,9 +3,19 @@ import type { Text } from "@codemirror/state";
 
 export type VimLiteMode = "insert" | "normal" | "visual" | "visual-line";
 
+export type VimLiteKey = {
+  key: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+  isComposing?: boolean;
+};
+
 export type VimLiteController = {
   mode(): VimLiteMode;
   setMode(mode: VimLiteMode): void;
+  handleKey(event: VimLiteKey): boolean;
   handleKeyDown(event: KeyboardEvent): boolean;
 };
 
@@ -21,12 +31,12 @@ type LineInfo = {
   column: number;
 };
 
-function hasCommandModifier(event: KeyboardEvent): boolean {
-  return event.metaKey || event.altKey || event.ctrlKey;
+function hasCommandModifier(event: VimLiteKey): boolean {
+  return Boolean(event.metaKey || event.altKey || event.ctrlKey);
 }
 
-function isEscape(event: KeyboardEvent): boolean {
-  return event.key === "Escape" || (event.ctrlKey && event.key === "[");
+function isEscape(event: VimLiteKey): boolean {
+  return event.key === "Escape" || Boolean(event.ctrlKey && event.key === "[");
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -705,6 +715,32 @@ export function createVimLite(
   return {
     mode: () => mode,
     setMode,
+    handleKey(event: VimLiteKey): boolean {
+      if (event.isComposing) return false;
+      if (isEscape(event)) {
+        setMode("normal");
+        return true;
+      }
+
+      if (mode === "insert") {
+        if (!hasCommandModifier(event) && !event.shiftKey && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+          goalColumn = moveLine(editor, event.key === "ArrowDown" ? 1 : -1, goalColumn);
+          return true;
+        }
+        return false;
+      }
+      if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "r") {
+        return options.onRedo?.() ?? false;
+      }
+      if (hasCommandModifier(event)) return false;
+
+      const handled = mode === "visual-line"
+        ? visualLineCommand(event.key)
+        : mode === "visual"
+          ? visualCommand(event.key)
+          : normalCommand(event.key);
+      return handled;
+    },
     handleKeyDown(event: KeyboardEvent): boolean {
       if (!targetInEditor(host, event.target)) return false;
       if (event.isComposing) return false;
@@ -725,25 +761,7 @@ export function createVimLite(
         return false;
       }
 
-      if (mode === "insert") {
-        if (!hasCommandModifier(event) && !event.shiftKey && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-          event.preventDefault();
-          goalColumn = moveLine(editor, event.key === "ArrowDown" ? 1 : -1, goalColumn);
-          return true;
-        }
-        return false;
-      }
-      if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "r") {
-        event.preventDefault();
-        return options.onRedo?.() ?? false;
-      }
-      if (hasCommandModifier(event)) return false;
-
-      const handled = mode === "visual-line"
-        ? visualLineCommand(event.key)
-        : mode === "visual"
-          ? visualCommand(event.key)
-          : normalCommand(event.key);
+      const handled = this.handleKey(event);
       if (handled) event.preventDefault();
       return handled;
     },
