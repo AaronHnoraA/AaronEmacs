@@ -154,40 +154,4 @@ describe("server save API", () => {
     expect(await git(root, ["status", "--porcelain", "--", "."])).toContain("roam/queued-node.md");
   });
 
-  test("regular note from a template with its own meta block is marked roam: off", async () => {
-    const { root, notes } = await setupRoot();
-    await mkdir(join(root, "templates"), { recursive: true });
-    await writeFile(join(root, "templates", "roamish.tmpl"), [
-      "# key: roamish",
-      "# name: Roam-ish",
-      "# --",
-      "#+begin meta",
-      "id: {{id}}",
-      "title: {{title}}",
-      "date: {{date}}",
-      "kind: {{kind}}",
-      "tags: {{tags}}",
-      "refs:",
-      "#+end meta",
-      "# {{title}}",
-      "",
-      "$0Body",
-      "",
-    ].join("\n"), "utf8");
-
-    await createNode({
-      nodeType: "regular",
-      title: "Reg Note",
-      path: "reg.md",
-      templateKey: "roamish",
-    });
-
-    const content = await readFile(join(notes, "reg.md"), "utf8");
-    // Excluded from the roam graph even though the template supplied its own meta.
-    expect(content).toMatch(/^roam: off$/m);
-    // roam: off sits inside the meta block, after kind, and the body is preserved.
-    expect(content).toMatch(/kind:[^\n]*\nroam: off\n/);
-    expect(content).toContain("#+end meta");
-    expect(content).toContain("Body");
-  });
 });

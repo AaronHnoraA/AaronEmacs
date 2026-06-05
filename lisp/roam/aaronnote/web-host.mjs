@@ -236,10 +236,6 @@ async function snippetsPayload(force = false) {
   return { type: "snippets", snippets: await scanSnippets({ force }) };
 }
 
-async function pluginsPayload(force = false) {
-  return { type: "plugins", plugins: await scanPlugins({ force }), root: pluginRoot };
-}
-
 function resolveShellPath(file) {
   const raw = String(file || "").trim();
   if (!raw || raw === "Root") return noteRoot;
@@ -326,10 +322,6 @@ const apiHandlers = {
   "aaronnote:api:session:positions": async () => ({ type: "positions", positions: await readCursorPositions() }),
   "aaronnote:api:session:save-position": async (position) => ({ type: "positions", positions: await touchCursorPosition(position || {}) }),
 
-  "aaronnote:api:plugins:list": (force) => pluginsPayload(force === true),
-  "aaronnote:api:plugins:overrides": async () => ({ type: "plugin-overrides", overrides: await readPluginOverrides() }),
-  "aaronnote:api:plugins:save-overrides": async (overrides) => ({ type: "plugin-overrides", overrides: await writePluginOverrides(overrides || {}) }),
-
   "aaronnote:api:fs:rename": (body) => renameManagedPath(body || {}),
   "aaronnote:api:fs:move": (body) => moveManagedPath(body || {}),
   "aaronnote:api:fs:duplicate": (body) => duplicateManagedFile(body || {}),
@@ -349,11 +341,6 @@ const apiHandlers = {
   "aaronnote:api:shell:open-directory-in-kitty": () => ({ ok: false, message: "Kitty integration is not available in the Emacs web host yet" }),
   "aaronnote:api:shell:show-attachment-menu": (file) => openPath(file),
   "aaronnote:api:shell:show-editor-context-menu": () => ({ ok: true }),
-  "aaronnote:api:shell:show-lean-editor-menu": () => ({ ok: true }),
-  "aaronnote:api:shell:open-lean-location": (target) => {
-    const t = target || {};
-    return apiOpenInEmacs(t.file || "", t.line || 1, t.col || 0);
-  },
   "aaronnote:api:emacs:open": (body) => apiOpenInEmacs(body?.file ?? body, body?.line, body?.col),
 };
 
@@ -533,9 +520,7 @@ function adapterScript(origin) {
       openDirectory: function(path, base) { return call("aaronnote:api:shell:open-directory", [{path: String(path || ""), base: String(base || "")}]); },
       openDirectoryInKitty: function(path, base) { return call("aaronnote:api:shell:open-directory-in-kitty", [{path: String(path || ""), base: String(base || "")}]); },
       showAttachmentMenu: function(file, base, options) { return call("aaronnote:api:shell:show-attachment-menu", [String(file || ""), String(base || ""), options || {}]); },
-      showEditorContextMenu: function(options) { return call("aaronnote:api:shell:show-editor-context-menu", [options || {}]); },
-      showLeanEditorMenu: function(options) { return call("aaronnote:api:shell:show-lean-editor-menu", [options || {}]); },
-      openLeanLocation: function(target) { return call("aaronnote:api:shell:open-lean-location", [target || {}]); }
+      showEditorContextMenu: function(options) { return call("aaronnote:api:shell:show-editor-context-menu", [options || {}]); }
     },
     proseCheck: {
       run: function(body) { return call("aaronnote:api:prose-check:run", [body || {}]); },

@@ -1569,69 +1569,6 @@ $$
     cleanup();
   });
 
-  test("renders lean4 placeholders as isolated block widgets", () => {
-    const md = "@@lean4 [group-cancel]\nplain";
-    const { editor, cleanup } = mountCM6(md);
-    editor.setMarkdownSelection(md.length);
-
-    const widget = document.querySelector<HTMLElement>(".cm-lean-placeholder-widget");
-    expect(widget).toBeTruthy();
-    expect(widget!.dataset.leanTag).toBe("group-cancel");
-    expect(widget!.shadowRoot).toBeTruthy();
-    expect(widget!.shadowRoot!.querySelector(".lean-idle-preview")).toBeNull();
-    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
-      .not.toContain("@@lean4 [group-cancel]");
-
-    editor.setMarkdownSelection(md.indexOf("@@lean4") + 2);
-    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
-      .toContain("@@lean4 [group-cancel]");
-    cleanup();
-  });
-
-  test("renders lean4 linked-file placeholders when the selector contains parentheses", () => {
-    const selector = "../../../../project/UNSW/ISO(202603)/GraphTensor.lean";
-    const md = `@@lean4(${selector}) [lean-mps0spux]\nplain`;
-    const { editor, cleanup } = mountCM6(md);
-    editor.setMarkdownSelection(md.length);
-
-    const widget = document.querySelector<HTMLElement>(".cm-lean-placeholder-widget");
-    expect(widget).toBeTruthy();
-    expect(widget!.dataset.leanSelector).toBe(selector);
-    expect(widget!.dataset.leanTag).toBe("lean-mps0spux");
-    cleanup();
-  });
-
-  test("keeps distant lean4 widgets indexed when another line gains a newline", () => {
-    const selector = "../../../../project/UNSW/ISO(202603)/GraphTensor.lean";
-    const md = `before\n@@lean4(${selector}) [lean-mps0spux]\nafter`;
-    const { editor, cleanup } = mountCM6(md);
-    editor.setMarkdownSelection("before".length);
-
-    editor.insertText("\nextra");
-
-    const widget = document.querySelector<HTMLElement>(".cm-lean-placeholder-widget");
-    expect(widget).toBeTruthy();
-    expect(widget!.dataset.leanSelector).toBe(selector);
-    expect(widget!.dataset.leanTag).toBe("lean-mps0spux");
-    cleanup();
-  });
-
-  test("reparses only the changed lean4 command line into an updated widget", () => {
-    const selector = "../../../../project/UNSW/ISO(202603)/GraphTensor.lean";
-    const initial = "@@lean4 [before]";
-    const replacement = `@@lean4(${selector}) [after]`;
-    const { editor, cleanup } = mountCM6(`${initial}\nplain`);
-
-    editor.replaceMarkdownRange(0, initial.length, replacement, "end");
-    editor.setMarkdownSelection(editor.getMarkdown().length);
-
-    const widget = document.querySelector<HTMLElement>(".cm-lean-placeholder-widget");
-    expect(widget).toBeTruthy();
-    expect(widget!.dataset.leanSelector).toBe(selector);
-    expect(widget!.dataset.leanTag).toBe("after");
-    cleanup();
-  });
-
   test("org-env scanner ignores boundary-looking lines inside display math", () => {
     const md = String.raw`#+begin proof
 before

@@ -34,7 +34,7 @@ separate editor implementation.
 | `server/lib/runtime.mjs` | Server-side note/index/save/runtime; Copilot LSP bridge. |
 | `server/lib/copilot.mjs` | Re-export barrel for Copilot LSP bridge (uses Emacs-managed binary). |
 | `web-host.mjs` | Node HTTP server: API handlers, `/graph` route, static serving, Emacs event bridge. |
-| `plugin/copilot/index.ts` | Copilot inline UI and key handling for the main editor. |
+| `src/copilot/index.ts` | Built-in Copilot inline UI and key handling for the main editor. |
 
 ## Emacs handoff
 

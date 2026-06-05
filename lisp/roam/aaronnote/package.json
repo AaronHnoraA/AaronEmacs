@@ -10,7 +10,6 @@
     "url": "git+https://github.com/Yuyz0112/typora-web.git"
   },
   "type": "module",
-  "main": "./desktop/main.mjs",
   "module": "./dist/lib/typora-web.js",
   "exports": {
     ".": {
@@ -29,7 +28,6 @@
     "dev": "vp dev",
     "start:vite": "vp dev --config vite.aaronnote.config.ts --host 127.0.0.1",
     "build:aaronnote": "tsc && vp build --config vite.aaronnote.config.ts",
-    "build:desktop": "node --check desktop/main.mjs && node --check desktop/preload.cjs && node --check server/lib/runtime.mjs && node --check server/lib/prose-check.mjs && node --check shared/prose-mask.mjs && npm run build:aaronnote && electron-builder --mac dir",
     "build": "tsc && vp build",
     "build:lib": "tsc && vp build --config vite.lib.config.ts",
     "preview": "vp preview",
@@ -40,8 +38,6 @@
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
     "@types/turndown": "^5.0.6",
-    "electron": "^37.8.0",
-    "electron-builder": "^26.0.12",
     "happy-dom": "^20.9.0",
     "typescript": "~6.0.2",
     "vite": "npm:@voidzero-dev/vite-plus-core@latest",
@@ -68,78 +64,5 @@
     "react-dom": "^18.2.0",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"
-  },
-  "build": {
-    "appId": "com.aaronnote.desktop",
-    "productName": "AaronNote",
-    "asarUnpack": [],
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "desktop/**/*",
-      "server/**/*",
-      "shared/**/*",
-      "dist/aaronnote/**/*",
-      "js/**/*",
-      "templates/**/*",
-      "package.json",
-      "node_modules/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "js",
-        "to": "js",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
-    "mac": {
-      "identity": null,
-      "icon": "build/Aaronnote.icns",
-      "category": "public.app-category.productivity",
-      "extendInfo": {
-        "CFBundleDocumentTypes": [
-          {
-            "CFBundleTypeName": "Markdown Document",
-            "CFBundleTypeRole": "Editor",
-            "CFBundleTypeIconFile": "icon.icns",
-            "LSHandlerRank": "Owner",
-            "CFBundleTypeExtensions": [
-              "md",
-              "markdown"
-            ],
-            "LSItemContentTypes": [
-              "com.aaronnote.markdown",
-              "net.daringfireball.markdown"
-            ]
-          }
-        ],
-        "UTExportedTypeDeclarations": [
-          {
-            "UTTypeIdentifier": "com.aaronnote.markdown",
-            "UTTypeDescription": "AaronNote Markdown Document",
-            "UTTypeConformsTo": [
-              "net.daringfireball.markdown",
-              "public.text"
-            ],
-            "UTTypeTagSpecification": {
-              "public.filename-extension": [
-                "md",
-                "markdown"
-              ],
-              "public.mime-type": [
-                "text/markdown",
-                "text/x-markdown"
-              ]
-            }
-          }
-        ]
-      },
-      "target": [
-        "dir"
-      ]
-    }
   }
 }

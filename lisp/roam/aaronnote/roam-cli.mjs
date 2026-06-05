@@ -41,7 +41,6 @@ async function main() {
   runtime.configure({
     root,
     workspaceRoot,
-    pluginRoot: resolve(runtimeRoot, "plugin"),
   });
 
   let result;

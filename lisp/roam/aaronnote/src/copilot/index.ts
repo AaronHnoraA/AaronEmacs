@@ -61,18 +61,8 @@ type RuntimeSettings = {
 type NativeCopilotApi = {
   request?: (action: string, body?: unknown) => Promise<unknown>;
 };
-type AuxiliaryContext = Partial<Context> & {
-  id?: string;
-  ack?: () => void;
-};
-type SetupOptions = {
-  auxiliaryEvents?: boolean;
-};
-
 const defaultIdleDelayMs = 850;
 const defaultLargeBufferThresholdKb = 512;
-const auxiliaryRegisterEvent = "aaronnote:copilot-register-editor";
-const auxiliaryDisposeEvent = "aaronnote:copilot-dispose-editor";
 const forwardKeys = new Set(["]", "】", "］", "」", "〕"]);
 const backwardKeys = new Set(["[", "【", "［", "「", "〔"]);
 const wordKeys = new Set(["\\", "、", "＼"]);
@@ -258,7 +248,7 @@ function trimmedCompletionInsertText(
   return { insertText, acceptedBaseLength: 0 };
 }
 
-function setupCopilot(context: Context, options: SetupOptions = {}): () => void {
+export function setupCopilot(context: Context): () => void {
   const ghost = document.createElement("div");
   ghost.className = "aaronnote-copilot-ghost";
   ghost.hidden = true;
@@ -284,7 +274,6 @@ function setupCopilot(context: Context, options: SetupOptions = {}): () => void 
 }
 `;
   document.head.appendChild(style);
-  ghost.classList.toggle("aaronnote-copilot-ghost--lean", context.host.classList.contains("cm-lean-placeholder-widget"));
 
   let timer = 0;
   let seq = 0;
@@ -293,7 +282,6 @@ function setupCopilot(context: Context, options: SetupOptions = {}): () => void 
   let visible: VisibleCompletion | null = null;
   let settings = normalizeSettings(context.getSettings());
   const cleanups: Array<() => void> = [];
-  const auxiliaryCleanups = new Map<string, () => void>();
 
   function clearCompletion(): void {
     visible = null;
@@ -581,54 +569,6 @@ function setupCopilot(context: Context, options: SetupOptions = {}): () => void 
   window.addEventListener("resize", renderCompletion);
   cleanups.push(() => window.removeEventListener("resize", renderCompletion));
 
-  if (options.auxiliaryEvents !== false) {
-    const disposeAuxiliary = (id: string): void => {
-      const cleanup = auxiliaryCleanups.get(id);
-      if (!cleanup) return;
-      auxiliaryCleanups.delete(id);
-      cleanup();
-    };
-    const registerAuxiliary = (event: Event): void => {
-      const detail = (event as CustomEvent<AuxiliaryContext>).detail;
-      const id = String(detail?.id || "");
-      if (!id || !detail?.editor || !(detail.host instanceof HTMLElement)) return;
-      if (auxiliaryCleanups.has(id)) {
-        detail.ack?.();
-        return;
-      }
-      for (const existingId of [...auxiliaryCleanups.keys()]) disposeAuxiliary(existingId);
-      const auxiliaryContext: Context = {
-        editor: detail.editor,
-        host: detail.host,
-        currentFile: typeof detail.currentFile === "function" ? detail.currentFile : context.currentFile,
-        vimMode: typeof detail.vimMode === "function" ? detail.vimMode : context.vimMode,
-        setStatus: typeof detail.setStatus === "function" ? detail.setStatus : context.setStatus,
-        onChange: typeof detail.onChange === "function" ? detail.onChange : () => () => {},
-        onKeyDown: typeof detail.onKeyDown === "function" ? detail.onKeyDown : () => () => {},
-        onAction: () => () => {},
-        onSettingsChange: context.onSettingsChange,
-        getSettings: context.getSettings,
-        onDocumentEvent: typeof detail.onDocumentEvent === "function" ? detail.onDocumentEvent : context.onDocumentEvent,
-        jumpSnippetNext: typeof detail.jumpSnippetNext === "function" ? detail.jumpSnippetNext : () => false,
-        jumpSnippetPrevious: typeof detail.jumpSnippetPrevious === "function" ? detail.jumpSnippetPrevious : () => false,
-        forwardDelimiter: typeof detail.forwardDelimiter === "function" ? detail.forwardDelimiter : () => false,
-        backwardDelimiter: typeof detail.backwardDelimiter === "function" ? detail.backwardDelimiter : () => false,
-      };
-      auxiliaryCleanups.set(id, setupCopilot(auxiliaryContext, { auxiliaryEvents: false }));
-      detail.ack?.();
-    };
-    const disposeAuxiliaryEvent = (event: Event): void => {
-      const id = String((event as CustomEvent<{ id?: string }>).detail?.id || "");
-      if (id) disposeAuxiliary(id);
-    };
-    window.addEventListener(auxiliaryRegisterEvent, registerAuxiliary as EventListener);
-    window.addEventListener(auxiliaryDisposeEvent, disposeAuxiliaryEvent as EventListener);
-    cleanups.push(() => {
-      window.removeEventListener(auxiliaryRegisterEvent, registerAuxiliary as EventListener);
-      window.removeEventListener(auxiliaryDisposeEvent, disposeAuxiliaryEvent as EventListener);
-      for (const id of [...auxiliaryCleanups.keys()]) disposeAuxiliary(id);
-    });
-  }
   schedule();
 
   return () => {
@@ -637,8 +577,4 @@ function setupCopilot(context: Context, options: SetupOptions = {}): () => void 
     ghost.remove();
     style.remove();
   };
-}
-
-export function setup(context: Context): () => void {
-  return setupCopilot(context, { auxiliaryEvents: true });
 }

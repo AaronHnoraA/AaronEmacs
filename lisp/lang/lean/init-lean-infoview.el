@@ -19,6 +19,7 @@
 (require 'seq)
 (require 'subr-x)
 (require 'url)
+(require 'url-util)
 
 (declare-function lean-dev-log "init-lean" (format-string &rest args))
 (declare-function lean--ensure-eglot "init-lean")
@@ -27,6 +28,7 @@
 (declare-function xwidget-webkit-browse-url "xwidget" (url &optional new-session))
 (declare-function xwidget-webkit-current-session "xwidget" ())
 (declare-function xwidget-webkit-execute-script "xwidget" (xwidget script))
+(declare-function xwidget-webkit-goto-uri "xwidget" (xwidget uri))
 (declare-function xwidget-at "xwidget" (pos))
 (declare-function xwidget-buffer "xwidget" (xwidget))
 (defvar xwidget-list)
@@ -69,10 +71,83 @@
   :type 'integer
   :group 'lean)
 
+(defcustom lean-iv-font-size 16
+  "Base font size in pixels for the Lean infoview."
+  :type 'integer
+  :group 'lean)
+
 (defun lean--iv-log (format-string &rest args)
   "Write an infoview FORMAT-STRING with ARGS to the Lean development log."
   (when (fboundp 'lean-dev-log)
     (apply #'lean-dev-log (concat "infoview: " format-string) args)))
+
+;; ── Emacs theme bridge ───────────────────────────────────────────────────────
+
+(defun lean--iv-face-color (face attribute fallback)
+  "Return FACE ATTRIBUTE as a CSS color, or FALLBACK."
+  (let ((value (and (facep face)
+                    (face-attribute face attribute nil t))))
+    (if (and (stringp value)
+             (not (string-empty-p value))
+             (not (string-prefix-p "unspecified" value)))
+        value
+      fallback)))
+
+(defun lean--iv-font-family ()
+  "Return the current Emacs code font family for CSS."
+  (let ((family (face-attribute 'default :family nil t)))
+    (if (and (stringp family)
+             (not (string-empty-p family))
+             (not (member family '("default" "unspecified"))))
+        family
+      "monospace")))
+
+(defun lean--iv-theme-data ()
+  "Return current Emacs typography and face colors for the infoview."
+  `(("mode" . ,(if (eq (frame-parameter nil 'background-mode) 'light)
+                   "light"
+                 "dark"))
+    ("fontFamily" . ,(lean--iv-font-family))
+    ("fontSize" . ,(number-to-string lean-iv-font-size))
+    ("bg" . ,(lean--iv-face-color 'default :background "#1f1f28"))
+    ("fg" . ,(lean--iv-face-color 'default :foreground "#dcd7ba"))
+    ("surface" . ,(lean--iv-face-color 'mode-line-inactive :background "#16161d"))
+    ("surfaceRaised" . ,(lean--iv-face-color 'mode-line :background "#2a2a37"))
+    ("border" . ,(lean--iv-face-color 'vertical-border :foreground "#363646"))
+    ("muted" . ,(lean--iv-face-color 'font-lock-comment-face :foreground "#727169"))
+    ("accent" . ,(lean--iv-face-color 'font-lock-function-name-face :foreground "#7e9cd8"))
+    ("cyan" . ,(lean--iv-face-color 'font-lock-type-face :foreground "#7aa89f"))
+    ("green" . ,(lean--iv-face-color 'success :foreground "#98bb6c"))
+    ("yellow" . ,(lean--iv-face-color 'warning :foreground "#e6c384"))
+    ("red" . ,(lean--iv-face-color 'error :foreground "#e46876"))
+    ("selection" . ,(lean--iv-face-color 'region :background "#2d4f67"))))
+
+(defun lean--iv-theme-query ()
+  "Return current infoview theme as a URL query string."
+  (mapconcat
+   (lambda (entry)
+     (format "%s=%s"
+             (url-hexify-string (car entry))
+             (url-hexify-string (cdr entry))))
+   (lean--iv-theme-data)
+   "&"))
+
+(defun lean--iv-theme-script ()
+  "Return JavaScript that applies the current Emacs theme."
+  (format "window.applyEmacsTheme && window.applyEmacsTheme(%s);"
+          (json-encode (lean--iv-theme-data))))
+
+(defun lean-iv-sync-theme-h ()
+  "Apply the current Emacs theme to every live Lean infoview."
+  (maphash
+   (lambda (_root buf)
+     (when-let* (((buffer-live-p buf))
+                 (xw (lean--iv-xwidget-of buf)))
+       (ignore-errors
+         (xwidget-webkit-execute-script xw (lean--iv-theme-script)))))
+   lean--iv--xwidget-buffers))
+
+(add-hook 'after-load-theme-hook #'lean-iv-sync-theme-h)
 
 ;; ── Availability checks ───────────────────────────────────────────────────────
 
@@ -192,18 +267,24 @@ Polls every 0.5 s, giving up after `lean-iv-port-wait-timeout' seconds."
   "Display the infoview xwidget for SOURCE buffer at PORT in a side window."
   (let* ((root  (with-current-buffer source
                   (lean--iv-project-root)))
-         (url   (format "http://127.0.0.1:%d/" port))
+         (url   (format "http://127.0.0.1:%d/?%s" port (lean--iv-theme-query)))
          (name  (format "*Lean Infoview<%s>*"
                         (file-name-nondirectory
                          (directory-file-name root))))
-         (xbuf  (or (when-let* ((existing (get-buffer name))
-                                ((lean--iv-xwidget-of existing)))
-                      existing)
-                    (lean--iv-project-xwidget-buf root)
+         (existing (or (when-let* ((buf (get-buffer name))
+                                   ((lean--iv-xwidget-of buf)))
+                         buf)
+                       (lean--iv-project-xwidget-buf root)))
+         (xbuf  (or existing
                     (lean--iv-make-xwidget-buf url name))))
     (with-current-buffer source
       (setq lean--iv--xwidget-buf xbuf))
     (puthash root xbuf lean--iv--xwidget-buffers)
+    (when-let* ((xw (lean--iv-xwidget-of xbuf)))
+      (ignore-errors
+        (if existing
+            (xwidget-webkit-goto-uri xw url)
+          (xwidget-webkit-execute-script xw (lean--iv-theme-script)))))
     (display-buffer-in-side-window
      xbuf
      `((side . right)

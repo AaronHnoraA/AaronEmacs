@@ -25,7 +25,22 @@
 (defun my/aaronnote--markdown-auto-mode-entry-p (entry)
   "Return non-nil when ENTRY is a Markdown auto-mode entry."
   (and (consp entry)
-       (member (car entry) my/aaronnote-markdown-auto-mode-patterns)))
+       (let ((pattern (car entry)))
+         (and (stringp pattern)
+              (or (member pattern my/aaronnote-markdown-auto-mode-patterns)
+                  (string-match-p
+                   "\\(?:markdown\\|md\\)"
+                   pattern))))))
+
+(defun my/aaronnote--pin-markdown-redirect-mode ()
+  "Keep Markdown file patterns routed to Aaronnote ahead of other modes."
+  (setq auto-mode-alist
+        (append
+         (mapcar (lambda (pattern)
+                   (cons pattern #'my/aaronnote-markdown-redirect-mode))
+                 my/aaronnote-markdown-auto-mode-patterns)
+         (cl-remove-if #'my/aaronnote--markdown-auto-mode-entry-p
+                       auto-mode-alist))))
 
 (defun my/aaronnote--ensure-markdown-file (file)
   "Ensure Markdown FILE exists before Aaronnote opens it."
@@ -60,13 +75,12 @@
                        #'my/aaronnote--kill-redirected-markdown-buffer
                        buffer target))))))
 
-(setq auto-mode-alist
-      (append
-       (mapcar (lambda (pattern)
-                 (cons pattern #'my/aaronnote-markdown-redirect-mode))
-               my/aaronnote-markdown-auto-mode-patterns)
-       (cl-remove-if #'my/aaronnote--markdown-auto-mode-entry-p
-                     auto-mode-alist)))
+(my/aaronnote--pin-markdown-redirect-mode)
+
+;; `treesit-auto' adds its own Markdown entries during configuration.  Re-pin
+;; the Aaronnote handoff after that package loads so no grammar prompt runs.
+(with-eval-after-load 'treesit-auto
+  (my/aaronnote--pin-markdown-redirect-mode))
 
 (provide 'init-md)
 

@@ -20,7 +20,39 @@ function installWebKitPolyfills() {
 
 installWebKitPolyfills()
 
+type EmacsTheme = Record<string, string>
+
+const themeProperties: Record<string, string> = {
+  fontFamily: '--lean-font-family',
+  fontSize: '--lean-font-size',
+  bg: '--lean-bg',
+  fg: '--lean-fg',
+  surface: '--lean-surface',
+  surfaceRaised: '--lean-surface-raised',
+  border: '--lean-border',
+  muted: '--lean-muted',
+  accent: '--lean-accent',
+  cyan: '--lean-cyan',
+  green: '--lean-green',
+  yellow: '--lean-yellow',
+  red: '--lean-red',
+  selection: '--lean-selection',
+}
+
+function applyEmacsTheme(theme: EmacsTheme) {
+  const root = document.documentElement
+  for (const [key, property] of Object.entries(themeProperties)) {
+    const value = theme[key]
+    if (value) root.style.setProperty(property, key === 'fontSize' ? `${value}px` : value)
+  }
+  document.body.classList.toggle('vscode-light', theme.mode === 'light')
+  document.body.classList.toggle('vscode-dark', theme.mode !== 'light')
+}
+
+;(window as unknown as Record<string, unknown>).applyEmacsTheme = applyEmacsTheme
+
 document.body.classList.add('vscode-dark', 'lean-iv-body')
+applyEmacsTheme(Object.fromEntries(new URLSearchParams(window.location.search)))
 
 const host = document.getElementById('root')!
 host.innerHTML = `

@@ -11,7 +11,6 @@ import { changedRoamFilesSince, commitRoam, fileHistory, restoreFileFromCommit, 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 let workspaceRoot = resolve(process.env.AARONNOTE_WORKSPACE_ROOT || resolve(appDir, ".."));
 let publishJsDir = resolve(process.env.AARONNOTE_PUBLISH_JS_DIR || join(workspaceRoot, "js"));
-let pluginRoot = resolve(process.env.AARONNOTE_PLUGIN_ROOT || join(workspaceRoot, "plugin"));
 let stateRoot = resolve(process.env.AARONNOTE_STATE_DIR || join(workspaceRoot, "var", "aaronnote"));
 let snippetsRoot = resolve(process.env.AARONNOTE_SNIPPETS_ROOT || join(workspaceRoot, "snippets"));
 let templatesRoot = resolve(process.env.AARONNOTE_TEMPLATES_ROOT || join(appDir, "templates"));
@@ -52,11 +51,9 @@ let notesSnapshotFullDirty = true;
 let dirtyNoteFiles = new Set();
 let snippetCache = { key: "", scannedAt: 0, snippets: [] };
 let templateCache = { key: "", scannedAt: 0, templates: [] };
-let pluginCache = { key: "", scannedAt: 0, plugins: [] };
 let copilotClient = null;
 let copilotLog = [];
 let copilotLogRecording = false;
-let roamLookupSession = null;
 let roamSyncTimer = null;
 let roamSyncInFlight = null;
 let queuedRoamSyncNotes = null;
@@ -66,8 +63,6 @@ const CURRENT_DB_SCHEMA = 1;
 const BOOK_CACHE_SCHEMA = 1;
 const ASSET_CLEANUP_SCHEMA = 2;
 const scanConcurrency = Math.max(1, Math.min(64, Number(process.env.AARONNOTE_SCAN_CONCURRENCY) || 16));
-const roamLookupIdleMs = Math.max(10_000, Number(process.env.AARONNOTE_ROAMLOOKUP_IDLE_MS) || 60_000);
-const roamLookupQueryTimeoutMs = Math.max(30_000, Number(process.env.AARONNOTE_ROAMLOOKUP_QUERY_TIMEOUT_MS) || 180_000);
 const saveRequestVersions = new Map();
 const saveWriteQueues = new Map();
 const contentTypes = new Map([
@@ -839,35 +834,6 @@ export async function touchRecentNote(file, openedAt = Date.now()) {
 
 function positionStoreFile() {
   return join(stateRoot, "positions.json");
-}
-
-function pluginOverridesStoreFile() {
-  return join(stateRoot, "plugin-overrides.json");
-}
-
-function normalizePluginOverrides(value) {
-  const overrides = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  const out = {};
-  for (const [id, state] of Object.entries(overrides)) {
-    if (!id || (state !== "on" && state !== "off")) continue;
-    out[String(id)] = state;
-  }
-  return out;
-}
-
-export async function readPluginOverrides() {
-  try {
-    const raw = await readFile(pluginOverridesStoreFile(), "utf8");
-    return normalizePluginOverrides(JSON.parse(raw));
-  } catch {
-    return {};
-  }
-}
-
-export async function writePluginOverrides(overrides) {
-  const next = normalizePluginOverrides(overrides);
-  await atomicWriteFile(pluginOverridesStoreFile(), `${JSON.stringify(next, null, 2)}\n`, "utf8");
-  return next;
 }
 
 function normalizeCursorPositions(entries) {
@@ -3073,47 +3039,6 @@ async function templateByKey(key) {
     ?? null;
 }
 
-export async function scanPlugins(options = {}) {
-  const root = resolve(pluginRoot);
-  const key = root;
-  const now = Date.now();
-  if (!options.force && pluginCache.key === key && now - pluginCache.scannedAt < 10_000) {
-    return pluginCache.plugins;
-  }
-  const plugins = [];
-  if (existsSync(root)) {
-    const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-      const dir = resolve(root, entry.name);
-      const manifestFile = resolve(dir, "plugin.json");
-      try {
-        const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
-        const id = String(manifest.id || entry.name).trim();
-        if (!id || !/^[a-z0-9_-]+$/i.test(id)) continue;
-        plugins.push({
-          id,
-          name: String(manifest.name || id),
-          version: String(manifest.version || ""),
-          entry: String(manifest.entry || ""),
-          autoload: manifest.autoload === true,
-          path: relative(workspaceRoot, dir).replace(/\\/g, "/"),
-          commands: Array.isArray(manifest.commands) ? manifest.commands.map(String) : [],
-          blocks: Array.isArray(manifest.blocks) ? manifest.blocks.map(String) : [],
-          actions: Array.isArray(manifest.actions) ? manifest.actions : [],
-          settings: Array.isArray(manifest.settings) ? manifest.settings : [],
-        });
-      } catch {}
-    }
-  }
-  pluginCache = {
-    key,
-    scannedAt: now,
-    plugins: plugins.sort((a, b) => a.id.localeCompare(b.id)),
-  };
-  return pluginCache.plugins;
-}
-
 export function offsetToPosition(text, offset) {
   const source = String(text || "");
   const target = Math.max(0, Math.min(Number(offset) || 0, source.length));
@@ -3373,7 +3298,7 @@ class CopilotLspClient {
     pushCopilotLog("start", { commands: commands.map((cmd) => ({ command: cmd.command, args: cmd.args, env: cmd.env || {} })) });
     if (commands.length === 0) {
       pushCopilotLog("missing-server", { rawCommands: copilotDiagnostics().rawCommands });
-      throw new Error("Copilot language server is not installed. Run npm install @github/copilot-language-server.");
+      throw new Error("Copilot language server is unavailable. Set AARONNOTE_COPILOT_LANGUAGE_SERVER to Emacs's copilot-server-executable.");
     }
     let lastError = null;
     for (const cmd of commands) {
@@ -3718,11 +3643,6 @@ export async function handleCopilotRequest(action, body = {}) {
     }
     return copilotDiagnostics();
   }
-  const overrides = await readPluginOverrides();
-  if (overrides.copilot === "off" && !["sign-in", "sign-out"].includes(action)) {
-    copilotClient?.stop();
-    return { ok: false, disabled: true, message: "Copilot plugin is disabled", status: { message: "Disabled", kind: "Inactive", busy: false } };
-  }
   const client = getCopilotClient();
   if (action === "inline") return client.inline(body);
   if (action === "shown") return client.shown(body);
@@ -3735,273 +3655,6 @@ export async function handleCopilotRequest(action, body = {}) {
     return { type: "copilot-status", status: client.status };
   }
   return { ok: false, message: "Unknown Copilot action" };
-}
-
-const defaultCodexSearchPaths = [
-  "/opt/homebrew/bin/codex",
-  "/usr/local/bin/codex",
-  "/usr/bin/codex",
-  "/bin/codex",
-];
-
-export function codexEnvPath(basePath = process.env.PATH || "") {
-  const extras = [
-    "/opt/homebrew/bin",
-    "/opt/homebrew/sbin",
-    "/usr/local/bin",
-    "/usr/local/sbin",
-    "/usr/bin",
-    "/bin",
-  ];
-  const parts = String(basePath || "").split(":").filter(Boolean);
-  for (const entry of extras) {
-    if (!parts.includes(entry)) parts.push(entry);
-  }
-  return parts.join(":");
-}
-
-export function codexCommand() {
-  const configured = String(process.env.AARONNOTE_CODEX || process.env.CODEX || "").trim();
-  if (configured) return configured;
-  for (const candidate of defaultCodexSearchPaths) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return "codex";
-}
-
-function codexSpawnError(err) {
-  if (err && typeof err === "object" && err.code === "ENOENT") {
-    const command = codexCommand();
-    return new Error(
-      `Codex executable not found: ${command}. Set AARONNOTE_CODEX or CODEX to the full path, for example /opt/homebrew/bin/codex.`,
-    );
-  }
-  return err;
-}
-
-function roamLookupPromptFile() {
-  return resolve(String(process.env.AARONNOTE_LOOKUP_PROMPT || join(workspaceRoot, "agent", "skill", "lookup.md")));
-}
-
-function shortSessionId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function stripAnsi(text) {
-  return String(text || "")
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    .trim();
-}
-
-class RoamLookupSession {
-  constructor() {
-    this.id = shortSessionId();
-    this.createdAt = Date.now();
-    this.lastInteraction = this.createdAt;
-    this.history = [];
-    this.proc = null;
-    this.idleTimer = null;
-    this.busy = false;
-    this.closed = false;
-    this.status = "Ready";
-    this.scheduleIdle();
-  }
-
-  summary() {
-    return {
-      type: "roamlookup-session",
-      ok: !this.closed,
-      sessionId: this.id,
-      busy: this.busy,
-      status: this.status,
-      idleMs: roamLookupIdleMs,
-      createdAt: this.createdAt,
-      lastInteraction: this.lastInteraction,
-      turns: this.history.length,
-    };
-  }
-
-  touch() {
-    this.lastInteraction = Date.now();
-    this.scheduleIdle();
-  }
-
-  scheduleIdle() {
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    if (this.closed) return;
-    const wait = Math.max(1_000, roamLookupIdleMs - (Date.now() - this.lastInteraction));
-    this.idleTimer = setTimeout(() => {
-      if (this.closed) return;
-      if (this.busy) {
-        this.scheduleIdle();
-        return;
-      }
-      this.close("idle");
-      if (roamLookupSession === this) roamLookupSession = null;
-    }, wait);
-  }
-
-  close(reason = "closed") {
-    this.closed = true;
-    this.status = reason === "idle" ? "Idle timeout" : "Closed";
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = null;
-    if (this.proc) {
-      this.proc.kill("SIGTERM");
-      this.proc = null;
-    }
-    return { ...this.summary(), ok: true, closed: true, reason };
-  }
-
-  async buildPrompt(query) {
-    const lookupPrompt = await readFile(roamLookupPromptFile(), "utf8");
-    const transcript = this.history.slice(-8).map((turn, index) => [
-      `### Turn ${index + 1} User`,
-      turn.query,
-      "",
-      `### Turn ${index + 1} Assistant`,
-      turn.answer,
-    ].join("\n")).join("\n\n");
-    return [
-      lookupPrompt,
-      "## Aaronnote RoamLookup Runtime",
-      "You are answering inside Aaronnote. Keep the task read-only. Use local shell search only when needed, and verify precise claims against original Markdown files under roam/.",
-      "Answer only the current user query. If the previous turns are relevant, use them as conversation context.",
-      transcript ? `## Previous Turns\n\n${transcript}` : "",
-      `## Current User Query\n\n${query}`,
-    ].filter(Boolean).join("\n\n");
-  }
-
-  async ask(query) {
-    if (this.closed) {
-      const err = new Error("RoamLookup session is closed");
-      err.statusCode = 410;
-      throw err;
-    }
-    const cleanQuery = String(query || "").trim();
-    if (!cleanQuery) {
-      const err = new Error("Missing lookup query");
-      err.statusCode = 400;
-      throw err;
-    }
-    if (this.busy) {
-      const err = new Error("RoamLookup is already answering");
-      err.statusCode = 409;
-      throw err;
-    }
-
-    this.touch();
-    this.busy = true;
-    this.status = "Running";
-    try {
-      const answer = await this.runCodex(await this.buildPrompt(cleanQuery));
-      this.history.push({ query: cleanQuery, answer, at: Date.now() });
-      if (this.history.length > 12) this.history = this.history.slice(-12);
-      this.status = "Ready";
-      return { ...this.summary(), answer };
-    } catch (err) {
-      this.status = err instanceof Error ? err.message : "RoamLookup failed";
-      throw err;
-    } finally {
-      this.busy = false;
-      this.proc = null;
-      this.touch();
-    }
-  }
-
-  async runCodex(prompt) {
-    const tmp = await mkdtemp(join(tmpdir(), "aaronnote-roamlookup-"));
-    const outputFile = join(tmp, "last-message.md");
-    const args = [
-      "exec",
-      "--cd", workspaceRoot,
-      "--sandbox", "read-only",
-      "--ephemeral",
-      "--color", "never",
-      "--output-last-message", outputFile,
-      "-",
-    ];
-    let stdout = "";
-    let stderr = "";
-    try {
-      const result = await new Promise((resolveRun, rejectRun) => {
-        const proc = spawn(codexCommand(), args, {
-          cwd: workspaceRoot,
-          env: { ...process.env, PATH: codexEnvPath(process.env.PATH) },
-          stdio: ["pipe", "pipe", "pipe"],
-        });
-        this.proc = proc;
-        const timer = setTimeout(() => {
-          proc.kill("SIGTERM");
-          rejectRun(new Error("RoamLookup query timed out"));
-        }, roamLookupQueryTimeoutMs);
-        proc.stdout.on("data", (chunk) => {
-          stdout += String(chunk || "");
-        });
-        proc.stderr.on("data", (chunk) => {
-          stderr += String(chunk || "");
-        });
-        proc.once("error", (err) => {
-          clearTimeout(timer);
-          rejectRun(codexSpawnError(err));
-        });
-        proc.once("exit", (code, signal) => {
-          clearTimeout(timer);
-          if (code === 0) resolveRun({ code, signal });
-          else rejectRun(new Error(stripAnsi(stderr || stdout) || `Codex exited (${signal || (code ?? "unknown")})`));
-        });
-        proc.stdin.end(prompt);
-      });
-      void result;
-      const answer = await readFile(outputFile, "utf8").catch(() => "");
-      return stripAnsi(answer || stdout) || "RoamLookup returned no answer.";
-    } finally {
-      await rm(tmp, { recursive: true, force: true }).catch(() => {});
-    }
-  }
-}
-
-function getRoamLookupSession(sessionId = "") {
-  if (roamLookupSession && !roamLookupSession.closed) {
-    if (!sessionId || sessionId === roamLookupSession.id) return roamLookupSession;
-    roamLookupSession.close("replaced");
-  }
-  roamLookupSession = new RoamLookupSession();
-  return roamLookupSession;
-}
-
-export async function handleRoamLookupRequest(action, body = {}) {
-  const overrides = await readPluginOverrides();
-  if (overrides.roamlookup === "off") {
-    roamLookupSession?.close("disabled");
-    roamLookupSession = null;
-    return { ok: false, disabled: true, message: "RoamLookup plugin is disabled" };
-  }
-  if (action === "start") {
-    const session = getRoamLookupSession(String(body.sessionId || ""));
-    session.touch();
-    return session.summary();
-  }
-  if (action === "query") {
-    const session = getRoamLookupSession(String(body.sessionId || ""));
-    return session.ask(body.query);
-  }
-  if (action === "close") {
-    const sessionId = String(body.sessionId || "");
-    if (roamLookupSession && (!sessionId || sessionId === roamLookupSession.id)) {
-      const result = roamLookupSession.close("closed");
-      roamLookupSession = null;
-      return result;
-    }
-    return { type: "roamlookup-session", ok: true, closed: true, reason: "missing" };
-  }
-  if (action === "status") {
-    if (!roamLookupSession || roamLookupSession.closed) {
-      return { type: "roamlookup-session", ok: false, sessionId: "", busy: false, status: "Not started", idleMs: roamLookupIdleMs };
-    }
-    return roamLookupSession.summary();
-  }
-  return { ok: false, message: "Unknown RoamLookup action" };
 }
 
 export async function readNote(file, options = {}) {
@@ -4506,13 +4159,6 @@ async function uniqueTrashPath(file) {
 }
 
 async function moveToTrash(file) {
-  try {
-    const electron = await import("electron");
-    if (electron.shell?.trashItem) {
-      await electron.shell.trashItem(file);
-      return "system-trash";
-    }
-  } catch {}
   if (process.platform === "darwin") {
     try {
       await execFileAsync("osascript", [
@@ -4554,13 +4200,6 @@ export function runtimeDebugSnapshot() {
       busy: Boolean(copilotClient?.status?.busy),
       status: copilotClient?.status?.message || "Not started",
     },
-    roamLookup: {
-      started: Boolean(roamLookupSession && !roamLookupSession.closed),
-      busy: Boolean(roamLookupSession?.busy),
-      status: roamLookupSession && !roamLookupSession.closed
-        ? roamLookupSession.status
-        : "Not started",
-    },
   };
 }
 
@@ -4576,13 +4215,11 @@ export async function deleteNote(body) {
   try {
     info = await stat(file);
   } catch {}
-  const leanTargets = await managedLeanTargetsForPath(file, info);
   try {
     trashedTo = await moveToTrash(file);
   } catch (err) {
     if (err?.code !== "ENOENT") throw err;
   }
-  await deleteLeanTargets(leanTargets);
   markNotesDirty(file);
   const index = await notesIndexPayload();
   if (!standaloneFile(file)) queueRoamDbSync(index.notes, [file]);
@@ -4792,9 +4429,7 @@ export async function trashManagedPath(body) {
     err.statusCode = 400;
     throw err;
   }
-  const leanTargets = await managedLeanTargetsForPath(file, info);
   const trashedTo = await moveToTrash(file);
-  await deleteLeanTargets(leanTargets);
   markNotesDirty();
   return fsPayload({
     type: "fs-trashed",
@@ -5090,13 +4725,11 @@ export function configure(options = {}) {
   noteScanRoot = noteRoot;
   workspaceRoot = resolve(String(options.workspaceRoot || process.env.AARONNOTE_WORKSPACE_ROOT || resolve(appDir, "..")));
   publishJsDir = resolve(String(options.publishJsDir || process.env.AARONNOTE_PUBLISH_JS_DIR || join(workspaceRoot, "js")));
-  pluginRoot = resolve(String(options.pluginRoot || process.env.AARONNOTE_PLUGIN_ROOT || join(workspaceRoot, "plugin")));
   stateRoot = resolve(String(options.stateRoot || process.env.AARONNOTE_STATE_DIR || join(workspaceRoot, "var", "aaronnote")));
   snippetsRoot = resolve(String(options.snippetsRoot || process.env.AARONNOTE_SNIPPETS_ROOT || join(workspaceRoot, "snippets")));
   templatesRoot = resolve(String(options.templatesRoot || process.env.AARONNOTE_TEMPLATES_ROOT || join(appDir, "templates")));
   snippetCache = { key: "", scannedAt: 0, snippets: [] };
   templateCache = { key: "", scannedAt: 0, templates: [] };
-  pluginCache = { key: "", scannedAt: 0, plugins: [] };
   markNotesDirty();
 }
 

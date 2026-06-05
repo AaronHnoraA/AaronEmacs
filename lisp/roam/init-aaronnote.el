@@ -98,9 +98,13 @@
         my/aaronnote--port nil
         my/aaronnote--ready nil)
   (let* ((log-buf (get-buffer-create " *aaronnote-web-host*"))
+         (copilot-server
+          (when (require 'copilot nil t)
+            (ignore-errors (copilot-server-executable))))
          (process-environment
           (append
-           (list
+           (delq nil
+            (list
             (format "AARONNOTE_ROOT=%s" (expand-file-name my/aaronnote--notes-root))
             (format "AARONNOTE_WEB_DIR=%s" (expand-file-name my/aaronnote--web-dir))
             (format "AARONNOTE_RUNTIME_ROOT=%s" (expand-file-name my/aaronnote--runtime-root))
@@ -109,7 +113,10 @@
                     (expand-file-name "js" my/aaronnote--runtime-root))
             (format "AARONNOTE_STATE_DIR=%s" (expand-file-name my/aaronnote--state-root))
             (format "AARONNOTE_SNIPPETS_ROOT=%s" (expand-file-name my/aaronnote--snippets-root))
-            (format "AARONNOTE_TEMPLATES_ROOT=%s" (expand-file-name my/aaronnote--templates-root)))
+            (format "AARONNOTE_TEMPLATES_ROOT=%s" (expand-file-name my/aaronnote--templates-root))
+            (when copilot-server
+              (format "AARONNOTE_COPILOT_LANGUAGE_SERVER=%s"
+                      (expand-file-name copilot-server)))))
            process-environment))
          (proc (make-process
                 :name "aaronnote-web-host"

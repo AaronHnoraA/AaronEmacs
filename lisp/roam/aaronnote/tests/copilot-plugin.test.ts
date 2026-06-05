@@ -1,7 +1,6 @@
 import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
 
-// @ts-ignore The plugin is bundled from the local Aaronnote plugin directory.
-import { setup } from "../plugin/copilot/index.ts";
+import { setupCopilot } from "../src/copilot/index.ts";
 
 class FakeEditor {
   markdown: string;
@@ -85,7 +84,7 @@ describe("copilot plugin insertion", () => {
       return { ok: true };
     });
 
-    const cleanup = setup({
+    const cleanup = setupCopilot({
       editor,
       host,
       currentFile: () => "/tmp/copilot.md",
@@ -165,7 +164,7 @@ describe("copilot plugin insertion", () => {
       return { ok: true };
     });
 
-    const cleanup = setup({
+    const cleanup = setupCopilot({
       editor,
       host,
       currentFile: () => "/tmp/copilot.md",
@@ -247,7 +246,7 @@ describe("copilot plugin insertion", () => {
       return { ok: true };
     });
 
-    const cleanup = setup({
+    const cleanup = setupCopilot({
       editor,
       host,
       currentFile: () => "/tmp/copilot.md",
@@ -335,7 +334,7 @@ describe("copilot plugin insertion", () => {
       return { ok: true };
     });
 
-    const cleanup = setup({
+    const cleanup = setupCopilot({
       editor,
       host,
       currentFile: () => "/tmp/document.md",
@@ -399,7 +398,7 @@ describe("copilot plugin insertion", () => {
       return { ok: true };
     });
 
-    const cleanup = setup({
+    const cleanup = setupCopilot({
       editor,
       host,
       currentFile: () => "/tmp/large.md",
