@@ -290,6 +290,7 @@ function applyOpenedNote(opened: Awaited<ReturnType<typeof api.notes.bootstrap>>
   hideMathPreview();
   vim.setMode("insert");
   updateTitle();
+  void api.emacs.currentFile(currentFile);
   setStatus(currentFile ? "Ready" : "Scratch");
   editor.focus();
   scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });

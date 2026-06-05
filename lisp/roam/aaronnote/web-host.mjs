@@ -288,6 +288,13 @@ async function apiOpenInEmacs(file, line = 1, col = 0) {
   return { ok: true, file: target, line, col };
 }
 
+async function apiCurrentFile(file) {
+  const raw = String(file || "").trim();
+  const target = raw ? resolveShellPath(raw) : "";
+  process.stdout.write(`aaronote-event:current-file:${JSON.stringify({ file: target })}\n`);
+  return { ok: true, file: target };
+}
+
 const apiHandlers = {
   "aaronnote:api:notes:bootstrap": (file) => bootstrapNote(file || undefined),
   "aaronnote:api:notes:open": (file) => readNote(file),
@@ -342,6 +349,7 @@ const apiHandlers = {
   "aaronnote:api:shell:show-attachment-menu": (file) => openPath(file),
   "aaronnote:api:shell:show-editor-context-menu": () => ({ ok: true }),
   "aaronnote:api:emacs:open": (body) => apiOpenInEmacs(body?.file ?? body, body?.line, body?.col),
+  "aaronnote:api:emacs:current-file": (file) => apiCurrentFile(file),
 };
 
 async function callApi(channel, args = []) {
@@ -513,6 +521,9 @@ function adapterScript(origin) {
       tag: function(body) { return call("aaronnote:api:meta:tag", [body || {}]); },
       hideRoam: function(body) { return call("aaronnote:api:meta:hide-roam", [body || {}]); },
       activateRoam: function(body) { return call("aaronnote:api:meta:activate-roam", [body || {}]); }
+    },
+    emacs: {
+      currentFile: function(file) { return call("aaronnote:api:emacs:current-file", [String(file || "")]); }
     },
     shell: {
       showInFolder: function(file) { return call("aaronnote:api:shell:show-in-folder", [String(file || "")]); },
@@ -792,6 +803,10 @@ const server = createServer(async (req, res) => {
       const body = await readJson(req, 1024 * 1024);
       if (body.type === "open" || body.type === "goto") {
         sendJson(res, 200, await apiOpenInEmacs(body.file, body.line, body.col));
+        return;
+      }
+      if (body.type === "current-file") {
+        sendJson(res, 200, await apiCurrentFile(body.file));
         return;
       }
       sendJson(res, 400, { ok: false, message: "Unknown event type" });

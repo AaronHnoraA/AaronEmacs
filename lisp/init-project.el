@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'init-treemacs-bridge)
+(require 'subr-x)
 
 (eval-when-compile
   (require 'treemacs-workspaces nil t))
@@ -22,6 +23,7 @@
 (defvar winner-pending-undo-ring)
 (defvar winner-ring-alist)
 (defvar winner-undo-frame)
+(defvar-local my/aaronnote-buffer-file-name)
 
 (declare-function project--ensure-read-project-list "project")
 (declare-function project--write-project-list "project")
@@ -743,6 +745,7 @@ actually change."
       (with-current-buffer buffer
         (list :buffer buffer
               :window window
+              :file (my/treemacs-source-file)
               :point (point)
               :tick (buffer-chars-modified-tick))))))
 
@@ -778,7 +781,7 @@ actually change."
   "Return non-nil when the current buffer should drive Treemacs following."
   (and (not (minibufferp))
        (not (derived-mode-p 'treemacs-mode))
-       (or buffer-file-name
+       (or (my/treemacs-source-file)
            (eq major-mode 'dired-mode))))
 
 (defun my/treemacs-follow-context-active-p (&optional buffer)
@@ -798,11 +801,19 @@ When BUFFER is nil, use the current buffer in the selected window."
   (when (my/treemacs-source-buffer-p)
     (apply orig-fn args)))
 
+(defun my/treemacs-source-file ()
+  "Return the real or Aaronnote virtual file for the current buffer."
+  (or buffer-file-name
+      (and (boundp 'my/aaronnote-buffer-file-name)
+           (stringp my/aaronnote-buffer-file-name)
+           (not (string-empty-p my/aaronnote-buffer-file-name))
+           my/aaronnote-buffer-file-name)))
+
 (defun my/treemacs-follow-path ()
   "Return the current buffer path Treemacs should follow."
   (cond
-   (buffer-file-name
-    (my/project-canonical-path buffer-file-name))
+   ((my/treemacs-source-file)
+    (my/project-canonical-path (my/treemacs-source-file)))
    ((derived-mode-p 'dired-mode)
     (my/project-canonical-path default-directory))))
 
@@ -934,8 +945,9 @@ When PREFER-TAG is non-nil, prefer following the current tag when one exists."
       (save-selected-window
         (let ((default-directory root))
           (treemacs-add-and-display-current-project-exclusively)
-          (with-current-buffer source-buffer
-            (my/treemacs-follow-source-silently t)))))))
+          (when (buffer-live-p source-buffer)
+            (with-current-buffer source-buffer
+              (my/treemacs-follow-source-silently t))))))))
 
 (defun my/project-remove-from-treemacs-workspaces (project-root)
   "Remove PROJECT-ROOT from every Treemacs workspace."
@@ -1258,7 +1270,10 @@ Returns the number of killed buffers."
      (treemacs-git-mode 'deferred))
     (`(t . _)
      (treemacs-git-mode 'simple)))
-  (treemacs-hide-gitignored-files-mode nil)
+  ;; Treemacs' ignored-file prefetch can emit invalid Lisp for Git-quoted paths.
+  ;; Keep it disabled and prevent accidental toggles from starting that process.
+  (put 'treemacs-hide-gitignored-files-mode :prefetch-done t)
+  (treemacs-hide-gitignored-files-mode -1)
   (treemacs-project-follow-mode t)
   (my/treemacs-cursor-follow-mode t))
 

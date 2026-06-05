@@ -30,6 +30,9 @@ type NativeApi = {
     hideRoam?: (body: Record<string, unknown>) => Promise<unknown>;
     activateRoam?: (body: Record<string, unknown>) => Promise<unknown>;
   };
+  emacs?: {
+    currentFile?: (file: string) => Promise<unknown>;
+  };
   roamTools?: {
     renameTag?: (body: Record<string, unknown>) => Promise<unknown>;
     deleteTag?: (body: Record<string, unknown>) => Promise<unknown>;
@@ -116,6 +119,13 @@ export const api = {
     async activateRoam(body: Record<string, unknown>): Promise<OpenMsg> {
       const call = requireMethod(nativeApi().meta?.activateRoam, "Roam activate");
       return ensureOk(await call(body) as OpenMsg, "Roam activate failed");
+    },
+  },
+  emacs: {
+    async currentFile(file: string): Promise<void> {
+      const call = window.aaronnoteApi?.emacs?.currentFile;
+      if (!call) return;
+      await call(file).catch(() => {});
     },
   },
   roamTools: {

@@ -205,21 +205,32 @@ Scrolling in the opposite direction is allowed immediately."
   "Return the buffer shown in the selected window."
   (window-buffer (minibuffer-selected-window)))
 
+(defvar-local my/aaronnote-buffer-file-name)
+
+(defun my/tab-bar--buffer-file-name ()
+  "Return the current buffer's real file or Aaronnote virtual file."
+  (or buffer-file-name
+      (and (boundp 'my/aaronnote-buffer-file-name)
+           (stringp my/aaronnote-buffer-file-name)
+           (not (string-empty-p my/aaronnote-buffer-file-name))
+           my/aaronnote-buffer-file-name)))
+
 (defun my/tab-bar--buffer-title ()
   "Return the current buffer title for the custom top tab bar."
   (with-current-buffer (my/tab-bar--current-buffer)
     (cond
-     ((and buffer-file-name default-directory)
-      (let ((dir (file-name-nondirectory
-                  (directory-file-name
-                   (expand-file-name default-directory)))))
+     ((and (my/tab-bar--buffer-file-name) default-directory)
+      (let* ((file (my/tab-bar--buffer-file-name))
+             (dir (file-name-nondirectory
+                   (directory-file-name
+                    (expand-file-name default-directory)))))
         (concat
          (when-let* ((icon (my/file-icon-for-file
-                            buffer-file-name
+                            file
                             :height 0.9 :v-adjust -0.05 :image-height 15)))
            (concat icon " "))
          (propertize (format "%s/" dir) 'face 'my/tab-bar-buffer-path-face)
-         (propertize (file-name-nondirectory buffer-file-name)
+         (propertize (file-name-nondirectory file)
                      'face 'my/tab-bar-buffer-face))))
      (t
       (propertize (buffer-name) 'face 'my/tab-bar-buffer-face)))))

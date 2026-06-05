@@ -64,6 +64,11 @@
 (defvar my/aaronnote--app-buffer nil
   "Buffer hosting the Appine/xwidget Aaronnote page.")
 
+(defvar-local my/aaronnote-buffer-file-name nil
+  "Current note file represented by an Aaronnote Appine/xwidget buffer.")
+
+(put 'my/aaronnote-buffer-file-name 'permanent-local t)
+
 (defun my/aaronnote--server-url (&optional path)
   "Return the local Aaronnote URL for PATH."
   (format "http://127.0.0.1:%d%s" my/aaronnote--port (or path "/")))
@@ -143,7 +148,8 @@
   "Handle one web-host stdout LINE."
   (let ((ready-prefix "aaronote-web-host:ready:")
         (goto-prefix "aaronote-event:goto:")
-        (open-prefix "aaronote-event:open:"))
+        (open-prefix "aaronote-event:open:")
+        (current-file-prefix "aaronote-event:current-file:"))
     (cond
      ((string-prefix-p ready-prefix line)
       (let ((port (string-to-number (substring line (length ready-prefix)))))
@@ -166,9 +172,20 @@
                  (file (alist-get 'file payload))
                  (line-number (or (alist-get 'line payload) 1))
                  (column (or (alist-get 'col payload) 0)))
+            (my/aaronnote--sync-app-buffer-file file)
             (my/aaronnote--goto-location file line-number column))
         (error
-         (message "Aaronnote event parse failed: %s" (error-message-string err))))))))
+         (message "Aaronnote event parse failed: %s" (error-message-string err)))))
+     ((string-prefix-p current-file-prefix line)
+      (condition-case err
+          (let* ((payload (json-parse-string
+                           (substring line (length current-file-prefix))
+                           :object-type 'alist))
+                 (file (alist-get 'file payload)))
+            (my/aaronnote--sync-app-buffer-file file))
+        (error
+         (message "Aaronnote current-file parse failed: %s"
+                  (error-message-string err))))))))
 
 (defun my/aaronnote--process-filter (proc output)
   "Process web-host OUTPUT from PROC."
@@ -196,23 +213,49 @@
     (unless (string-match-p "^finished" event)
       (message "Aaronnote web-host: %s" (string-trim event)))))
 
-(defun my/aaronnote--track-app-buffer (buffer)
-  "Track BUFFER as the embedded Aaronnote browser buffer."
-  (setq my/aaronnote--app-buffer buffer))
+(defun my/aaronnote-buffer-file (&optional buffer)
+  "Return the Aaronnote note file represented by BUFFER.
+When BUFFER is nil, inspect the current buffer."
+  (when (buffer-live-p (or buffer (current-buffer)))
+    (with-current-buffer (or buffer (current-buffer))
+      (and (stringp my/aaronnote-buffer-file-name)
+           (not (string-empty-p my/aaronnote-buffer-file-name))
+           my/aaronnote-buffer-file-name))))
 
-(defun my/aaronnote--open-xwidget (url)
+(defun my/aaronnote--sync-app-buffer-file (file)
+  "Record FILE as the current note for the tracked Aaronnote app buffer."
+  (let ((file (and (stringp file)
+                   (not (string-empty-p file))
+                   (expand-file-name file))))
+    (when (buffer-live-p my/aaronnote--app-buffer)
+      (with-current-buffer my/aaronnote--app-buffer
+        (setq-local my/aaronnote-buffer-file-name file)
+        (when file
+          (setq-local default-directory
+                      (file-name-as-directory (file-name-directory file))))
+        (force-mode-line-update)
+        (force-window-update (current-buffer))))))
+
+(defun my/aaronnote--track-app-buffer (buffer &optional file)
+  "Track BUFFER as the embedded Aaronnote browser buffer.
+When FILE is non-nil, also remember it as the current note."
+  (setq my/aaronnote--app-buffer buffer)
+  (when file
+    (my/aaronnote--sync-app-buffer-file file)))
+
+(defun my/aaronnote--open-xwidget (url &optional file)
   "Open Aaronnote URL in xwidget in the selected window."
   (unless (fboundp 'xwidget-webkit-browse-url)
     (require 'xwidget))
   (my/open-xwidget-url url t)
-  (my/aaronnote--track-app-buffer (current-buffer)))
+  (my/aaronnote--track-app-buffer (current-buffer) file))
 
-(defun my/aaronnote--open-appine (url)
+(defun my/aaronnote--open-appine (url &optional file)
   "Open Aaronnote URL in Appine in the selected window."
   (unless (fboundp 'my/appine-open-url)
     (require 'init-appine))
   (let ((buffer (get-buffer-create "*Appine Window*")))
-    (my/aaronnote--track-app-buffer buffer)
+    (my/aaronnote--track-app-buffer buffer file)
     (with-current-buffer buffer
       (setq-local mode-line-format nil)
       (setq-local header-line-format nil)
@@ -239,15 +282,15 @@
               (error-message-string err))
      nil)))
 
-(defun my/aaronnote--open-url (url)
+(defun my/aaronnote--open-url (url &optional file)
   "Open Aaronnote URL using `my/aaronnote-backend'."
   (pcase my/aaronnote-backend
     ('appine
      (if (my/aaronnote--appine-available-p)
-         (my/aaronnote--open-appine url)
+         (my/aaronnote--open-appine url file)
        (message "Aaronnote: using xwidget because Appine is unavailable")
-       (my/aaronnote--open-xwidget url)))
-    ('xwidget (my/aaronnote--open-xwidget url))
+       (my/aaronnote--open-xwidget url file)))
+    ('xwidget (my/aaronnote--open-xwidget url file))
     (_ (user-error "Unsupported Aaronnote backend: %S" my/aaronnote-backend))))
 
 (defun my/aaronnote--post (payload)
@@ -264,6 +307,7 @@
 
 (defun my/aaronnote--open-file-in-web (file)
   "Ask the already open Aaronnote page to open FILE."
+  (my/aaronnote--sync-app-buffer-file file)
   (my/aaronnote--post `((type . "open") (file . ,(expand-file-name file)))))
 
 (defun my/aaronnote--send-command (command &optional detail)
@@ -306,7 +350,7 @@ When FILE is nil, use the current buffer."
      (lambda ()
        (when (window-live-p target-window)
          (select-window target-window))
-       (my/aaronnote--open-url (my/aaronnote--app-url file))
+       (my/aaronnote--open-url (my/aaronnote--app-url file) file)
        (run-at-time 0.3 nil #'my/aaronnote--open-file-in-web file)))))
 
 ;;;###autoload
