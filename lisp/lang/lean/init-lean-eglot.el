@@ -73,9 +73,6 @@ Use `note' to show all Lean informational output, including `#check' results."
 (defvar-local lean--file-progress nil
   "Vector of Lean file-progress items for the current buffer.")
 
-(defvar-local lean--file-progress-signature nil
-  "Last compact signature for Lean file-progress overlays.")
-
 (defvar-local lean--flymake-diagnostics nil
   "Current Flymake diagnostics produced from Lean publishDiagnostics.")
 
@@ -447,9 +444,12 @@ Use `note' to show all Lean informational output, including `#check' results."
                       (remove #'lean-flymake-backend
                               (remove #'eglot-flymake-backend
                                       flymake-diagnostic-functions)))))
-  (setq-local flymake-error-bitmap 'lean-fringe-blocked-bitmap
-              flymake-warning-bitmap 'lean-fringe-warning-bitmap
-              flymake-note-bitmap 'lean-fringe-note-bitmap)
+  (setq-local flymake-error-bitmap
+              '(lean-fringe-blocked-bitmap lean-fringe-error-face)
+              flymake-warning-bitmap
+              '(lean-fringe-warning-bitmap lean-fringe-warning-face)
+              flymake-note-bitmap
+              '(lean-fringe-note-bitmap lean-fringe-note-face))
   (when (fboundp 'lean-dev-log)
     (lean-dev-log "flymake backend installed: funcs=%S"
                   (and (boundp 'flymake-diagnostic-functions)
@@ -457,11 +457,10 @@ Use `note' to show all Lean informational output, including `#check' results."
 
 (defun lean--schedule-notification-flush ()
   "Schedule one rendering pass for the latest Lean notification state."
-  (when (timerp lean--notification-timer)
-    (cancel-timer lean--notification-timer))
-  (setq lean--notification-timer
-        (run-at-time (max 0 lean-notification-debounce-delay) nil
-                     #'lean--flush-notifications (current-buffer))))
+  (unless (timerp lean--notification-timer)
+    (setq lean--notification-timer
+          (run-at-time (max 0 lean-notification-debounce-delay) nil
+                       #'lean--flush-notifications (current-buffer)))))
 
 (defun lean--flush-notifications (buffer)
   "Render the latest Lean notification state for BUFFER."
@@ -484,7 +483,7 @@ Use `note' to show all Lean informational output, including `#check' results."
   (let ((incoming (lean--diagnostics-list diagnostics)))
     (setq lean--raw-diagnostics
           (if incremental
-              (append lean--raw-diagnostics incoming)
+              (nconc lean--raw-diagnostics incoming)
             incoming)
           lean--diagnostics-version
           (or (and (boundp 'eglot--docver) eglot--docver) version)))
@@ -516,20 +515,6 @@ Use `note' to show all Lean informational output, including `#check' results."
    ((listp processing) processing)
    (t nil)))
 
-(defun lean--file-progress-make-signature (items)
-  "Return a compact signature for file-progress ITEMS."
-  (mapcar
-   (lambda (item)
-     (let* ((range (plist-get item :range))
-            (start (plist-get range :start))
-            (end (plist-get range :end)))
-       (list (plist-get item :kind)
-             (plist-get start :line)
-             (plist-get start :character)
-             (plist-get end :line)
-             (plist-get end :character))))
-   items))
-
 (cl-defmethod eglot-handle-notification
   (_server (_method (eql \$/lean/fileProgress))
    &key textDocument processing &allow-other-keys)
@@ -538,11 +523,9 @@ Use `note' to show all Lean informational output, including `#check' results."
               (path (ignore-errors (eglot-uri-to-path uri)))
               (buf  (find-buffer-visiting path)))
     (with-current-buffer buf
-      (let* ((items (lean--file-progress-list processing))
-             (signature (lean--file-progress-make-signature items)))
-        (setq-local lean--file-progress items)
-        (unless (equal signature lean--file-progress-signature)
-          (setq-local lean--file-progress-signature signature)
+      (let ((items (lean--file-progress-list processing)))
+        (unless (equal items lean--file-progress)
+          (setq-local lean--file-progress items)
           (lean--schedule-notification-flush)
           (when (fboundp 'lean-dev-log)
             (lean-dev-log "fileProgress: file=%s items=%d"
@@ -552,22 +535,26 @@ Use `note' to show all Lean informational output, including `#check' results."
 ;; ── Fringe overlays ───────────────────────────────────────────────────────────
 
 (defface lean-fringe-processing-face
-  '((t :foreground "chocolate"))
+  '((((background dark)) :foreground "#4AA5FF" :weight bold)
+    (((background light)) :foreground "#006EDC" :weight bold))
   "Fringe face for Lean files being elaborated."
   :group 'lean)
 
 (defface lean-fringe-error-face
-  '((t :foreground "red"))
+  '((((background dark)) :foreground "#FF5F5F" :weight bold)
+    (((background light)) :foreground "#C00000" :weight bold))
   "Fringe face for Lean files with errors."
   :group 'lean)
 
 (defface lean-fringe-warning-face
-  '((t :foreground "orange"))
+  '((((background dark)) :foreground "#FFB454" :weight bold)
+    (((background light)) :foreground "#A85B00" :weight bold))
   "Fringe face for Lean warnings."
   :group 'lean)
 
 (defface lean-fringe-note-face
-  '((t :foreground "cyan"))
+  '((((background dark)) :foreground "#5FD7FF" :weight bold)
+    (((background light)) :foreground "#007C91" :weight bold))
   "Fringe face for Lean notes."
   :group 'lean)
 
@@ -612,7 +599,8 @@ Use `note' to show all Lean informational output, including `#check' results."
    #b00000000])
 
 (defface lean-fringe-success-face
-  '((t :inherit success))
+  '((((background dark)) :foreground "#7BD88F" :weight bold)
+    (((background light)) :foreground "#137333" :weight bold))
   "Fringe face for accomplished Lean goals."
   :group 'lean)
 
@@ -722,7 +710,6 @@ BITMAP, FACE, HELP, and PROPERTY describe the marker."
   "Remove all Lean fringe overlays from current buffer."
   (lean--clear-progress-overlays)
   (lean--clear-task-overlays)
-  (setq lean--file-progress-signature nil)
   (when (fboundp 'lean-clear-sideline-overlays)
     (lean-clear-sideline-overlays)))
 
@@ -738,8 +725,7 @@ BITMAP, FACE, HELP, and PROPERTY describe the marker."
         lean--diagnostics-version nil
         lean--flymake-diagnostics nil
         lean--flymake-counts '(:error 0 :warning 0 :note 0)
-        lean--file-progress nil
-        lean--file-progress-signature nil)
+        lean--file-progress nil)
   (lean--clear-fringe-overlays))
 
 ;; ── Refresh file dependencies ──────────────────────────────────────────────────

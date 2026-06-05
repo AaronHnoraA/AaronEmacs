@@ -94,6 +94,10 @@ const sseClients   = new Set()
 const rpcSessions  = new Map()  // sessionId → keepAlive timer
 const progressCache    = new Map()
 const diagnosticsCache = new Map()
+const pendingEglotProgress    = new Map()
+const pendingEglotDiagnostics = new Map()
+let progressFlushTimer = null
+let diagnosticsFlushTimer = null
 let lastCursor = null
 
 // ── SSE helpers ───────────────────────────────────────────────────────────────
@@ -103,6 +107,39 @@ function sseEmit(method, params) {
   for (const res of sseClients) {
     try { res.write(payload) } catch { sseClients.delete(res) }
   }
+}
+
+function flushEglotProgress() {
+  progressFlushTimer = null
+  for (const params of pendingEglotProgress.values())
+    toEglot({ jsonrpc: '2.0', method: '$/lean/fileProgress', params })
+  pendingEglotProgress.clear()
+}
+
+function flushEglotDiagnostics() {
+  diagnosticsFlushTimer = null
+  for (const params of pendingEglotDiagnostics.values())
+    toEglot({ jsonrpc: '2.0', method: 'textDocument/publishDiagnostics', params })
+  pendingEglotDiagnostics.clear()
+}
+
+function queueEglotNotification(msg) {
+  if (msg.method === '$/lean/fileProgress') {
+    const uri = msg.params?.textDocument?.uri ?? ''
+    if (!uri) return false
+    pendingEglotProgress.set(uri, msg.params)
+    progressFlushTimer ??= setTimeout(flushEglotProgress, 75)
+    return true
+  }
+  if (msg.method === 'textDocument/publishDiagnostics') {
+    const uri = msg.params?.uri ?? ''
+    if (!uri) return false
+    pendingEglotDiagnostics.set(uri, diagnosticsCache.get(uri) ?? msg.params)
+    if (diagnosticsFlushTimer) clearTimeout(diagnosticsFlushTimer)
+    diagnosticsFlushTimer = setTimeout(flushEglotDiagnostics, 100)
+    return true
+  }
+  return false
 }
 
 // ── Tap lake → Eglot notifications ───────────────────────────────────────────
@@ -115,7 +152,15 @@ function tapServerMsg(msg) {
     sseEmit('$/lean/fileProgress', msg.params)
   } else if (msg.method === 'textDocument/publishDiagnostics') {
     const uri = msg.params?.uri ?? ''
-    if (uri) diagnosticsCache.set(uri, msg.params)
+    if (uri) {
+      const previous = diagnosticsCache.get(uri)?.diagnostics ?? []
+      const incoming = msg.params?.diagnostics ?? []
+      diagnosticsCache.set(uri, {
+        ...msg.params,
+        diagnostics: msg.params?.isIncremental ? [...previous, ...incoming] : incoming,
+        isIncremental: false,
+      })
+    }
     sseEmit('textDocument/publishDiagnostics', msg.params)
   }
 }
@@ -132,7 +177,13 @@ function tapClientMsg(msg) {
     sseEmit('client:textDocument/didChange', msg.params)
   } else if (msg.method === 'textDocument/didClose') {
     const uri = msg.params?.textDocument?.uri
-    if (uri) eglotOpenDocs.delete(uri)
+    if (uri) {
+      eglotOpenDocs.delete(uri)
+      progressCache.delete(uri)
+      diagnosticsCache.delete(uri)
+      pendingEglotProgress.delete(uri)
+      pendingEglotDiagnostics.delete(uri)
+    }
     sseEmit('client:textDocument/didClose', msg.params)
   }
 }
@@ -179,7 +230,7 @@ function fromLake(msg) {
   if (hasMethod && !hasId) {
     // Notification from lake — forward to Eglot, tap for SSE
     tapServerMsg(msg)
-    toEglot(msg)
+    if (!queueEglotNotification(msg)) toEglot(msg)
     return
   }
 }
@@ -299,6 +350,12 @@ function startLake() {
       clearTimeout(timer); reject(new Error(`lake exited (${signal ?? code ?? 'unknown'})`))
     }
     ivPending.clear()
+    if (progressFlushTimer) clearTimeout(progressFlushTimer)
+    if (diagnosticsFlushTimer) clearTimeout(diagnosticsFlushTimer)
+    progressFlushTimer = null
+    diagnosticsFlushTimer = null
+    pendingEglotProgress.clear()
+    pendingEglotDiagnostics.clear()
     for (const t of rpcSessions.values()) clearInterval(t)
     rpcSessions.clear()
     sseEmit('lean:status', {

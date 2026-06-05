@@ -32,6 +32,29 @@
         (lean--record-diagnostics (vector last) 3 nil)
         (should (equal lean--raw-diagnostics (list last)))))))
 
+(ert-deftest lean-notification-scheduling-reuses-pending-timer ()
+  (with-temp-buffer
+    (let ((lean-notification-debounce-delay 60))
+      (unwind-protect
+          (progn
+            (lean--schedule-notification-flush)
+            (let ((first lean--notification-timer))
+              (lean--schedule-notification-flush)
+              (should (eq lean--notification-timer first))))
+        (when (timerp lean--notification-timer)
+          (cancel-timer lean--notification-timer))))))
+
+(ert-deftest lean-flymake-bitmaps-use-lean-faces ()
+  (with-temp-buffer
+    (setq-local flymake-diagnostic-functions '(eglot-flymake-backend))
+    (lean-setup-flymake-backend)
+    (should (equal flymake-error-bitmap
+                   '(lean-fringe-blocked-bitmap lean-fringe-error-face)))
+    (should (equal flymake-warning-bitmap
+                   '(lean-fringe-warning-bitmap lean-fringe-warning-face)))
+    (should (equal flymake-note-bitmap
+                   '(lean-fringe-note-bitmap lean-fringe-note-face)))))
+
 (ert-deftest lean-task-tags-create-distinct-markers ()
   (with-temp-buffer
     (insert "theorem x := by\n  trivial\n")

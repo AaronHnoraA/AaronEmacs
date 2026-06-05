@@ -39,15 +39,18 @@
 (declare-function my/symbols-make-file-line-candidate "init-symbols")
 (declare-function my/symbols-read-file-line-candidates "init-symbols")
 (declare-function my/symbols-register-project-fallback "init-symbols")
+(declare-function company-mode "company" (&optional arg))
 (declare-function eldoc-box-hover-at-point-mode "eldoc-box" (&optional arg))
 (declare-function eldoc-doc-buffer "eldoc" ())
 (declare-function eldoc-mode "eldoc" (&optional arg))
 (declare-function eglot "eglot" (managed-major-modes project class contact language-ids
                                                      &optional interactive))
 (declare-function eglot-code-actions "eglot" ())
+(declare-function eglot-inlay-hints-mode "eglot" (&optional arg))
 (declare-function eglot-reconnect "eglot")
 (declare-function eglot-ensure "eglot")
 (declare-function eglot-managed-p "eglot")
+(declare-function eglot-semantic-tokens-mode "eglot" (&optional arg))
 (declare-function flymake-mode "flymake" (&optional arg))
 (declare-function flymake-start "flymake" (&optional deferred force))
 (declare-function lean-setup-flymake-backend "init-lean-eglot" ())
@@ -318,11 +321,77 @@ lake serve / lean --server connection otherwise."
 (defvar-local lean--eglot-start-timer nil
   "Timer used to start Eglot for the current Lean buffer.")
 
+(defcustom lean-eglot-deferred-ui-delays
+  '((company . 0.15)
+    (eldoc-box . 0.25)
+    (inlay-hints . 0.45)
+    (semantic-tokens . 0.80))
+  "Idle delays before enabling expensive Lean Eglot UI features."
+  :type '(alist :key-type symbol :value-type number)
+  :group 'lean)
+
+(defvar-local lean--eglot-ui-timers nil
+  "Idle timers used to stage Lean Eglot UI activation.")
+
 (defun lean--cancel-eglot-start-timer ()
   "Cancel a pending Lean Eglot startup timer."
   (when (timerp lean--eglot-start-timer)
     (cancel-timer lean--eglot-start-timer))
   (setq lean--eglot-start-timer nil))
+
+(defun lean--cancel-eglot-ui-timers ()
+  "Cancel pending deferred Lean Eglot UI activation."
+  (mapc (lambda (timer)
+          (when (timerp timer)
+            (cancel-timer timer)))
+        lean--eglot-ui-timers)
+  (setq lean--eglot-ui-timers nil))
+
+(defun lean--enable-eglot-ui-feature (buffer feature)
+  "Enable deferred Eglot UI FEATURE in Lean BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (and (derived-mode-p 'lean-mode)
+                 (fboundp 'eglot-managed-p)
+                 (eglot-managed-p))
+        (pcase feature
+          ('company
+           (when (fboundp 'company-mode)
+             (company-mode 1)))
+          ('eldoc-box
+           (when (fboundp 'eldoc-box-hover-at-point-mode)
+             (eldoc-box-hover-at-point-mode 1)))
+          ('inlay-hints
+           (when (fboundp 'eglot-inlay-hints-mode)
+             (eglot-inlay-hints-mode 1)))
+          ('semantic-tokens
+           (when (fboundp 'eglot-semantic-tokens-mode)
+             (eglot-semantic-tokens-mode 1))))))))
+
+(defun lean--schedule-eglot-ui ()
+  "Enable expensive Lean Eglot UI features in separate idle slices."
+  (lean--cancel-eglot-ui-timers)
+  (dolist (entry lean-eglot-deferred-ui-delays)
+    (push (run-with-idle-timer
+           (max 0 (cdr entry)) nil
+           #'lean--enable-eglot-ui-feature (current-buffer) (car entry))
+          lean--eglot-ui-timers)))
+
+(defun lean--eglot-maybe-activate-editing-mode-a (fn &rest args)
+  "Activate Lean Eglot protocol support before its expensive UI features."
+  (if (and (derived-mode-p 'lean-mode)
+           (not (bound-and-true-p eglot--managed-mode)))
+      (cl-letf (((symbol-function 'company-mode) (lambda (&optional _arg) nil))
+                ((symbol-function 'eldoc-box-hover-at-point-mode)
+                 (lambda (&optional _arg) nil))
+                ((symbol-function 'eglot-inlay-hints-mode)
+                 (lambda (&optional _arg) nil))
+                ((symbol-function 'eglot-semantic-tokens-mode)
+                 (lambda (&optional _arg) nil)))
+        (prog1 (apply fn args)
+          (when (and (fboundp 'eglot-managed-p) (eglot-managed-p))
+            (lean--schedule-eglot-ui))))
+    (apply fn args)))
 
 (defun lean--setup-diagnostics-ui ()
   "Enable AaronNote diagnostics UI pieces for the current Lean buffer."
@@ -594,6 +663,7 @@ while using eglot (not lsp-mode) as the language server backend."
 (defun lean--buffer-teardown-h ()
   "Cancel timers, clear overlays, and close the infoview on buffer kill."
   (lean--cancel-eglot-start-timer)
+  (lean--cancel-eglot-ui-timers)
   (when (fboundp 'lean-notification-cleanup)
     (lean-notification-cleanup))
   (when (fboundp 'lean--clear-fringe-overlays)
@@ -624,9 +694,14 @@ while using eglot (not lsp-mode) as the language server backend."
                         completion-at-point-functions))
       (when (fboundp 'lean-notification-cleanup)
         (lean-notification-cleanup))
+      (lean--cancel-eglot-ui-timers)
       (lean-dev-log "eglot managed mode inactive: buffer=%s" (buffer-name)))))
 
 (with-eval-after-load 'eglot
+  (unless (advice-member-p #'lean--eglot-maybe-activate-editing-mode-a
+                           'eglot--maybe-activate-editing-mode)
+    (advice-add 'eglot--maybe-activate-editing-mode
+                :around #'lean--eglot-maybe-activate-editing-mode-a))
   (add-hook 'eglot-connect-hook #'lean--eglot-connect-log-h)
   (add-hook 'eglot-managed-mode-hook #'lean--eglot-managed-mode-log-h)
   (when (fboundp 'my/register-eglot-server-program)

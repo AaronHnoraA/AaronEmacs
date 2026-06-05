@@ -8,12 +8,17 @@
 
 (require 'json)
 (require 'subr-x)
+(require 'cl-lib)
 (require 'url)
 (require 'url-util)
 
 (declare-function my/open-xwidget-url "init-browser" (url &optional reuse-selected))
 (declare-function my/appine-open-url "init-appine" (url))
+(declare-function my/appine--tab-forget "init-appine" (url))
+(declare-function my/appine--tab-reset "init-appine" ())
+(declare-function my/appine--switch-to-tab-index "init-appine" (target-index))
 (declare-function appine-focus "appine" ())
+(defvar my/appine-tab-list)
 
 (defgroup my/aaronnote nil
   "Aaronnote Markdown web editor integration."
@@ -259,14 +264,19 @@ When FILE is non-nil, also remember it as the current note."
   (my/open-xwidget-url url t)
   (my/aaronnote--track-app-buffer (current-buffer) file))
 
-(defun my/aaronnote--open-appine (url &optional file)
+(defun my/aaronnote--open-appine (url &optional file force-new)
   "Open Aaronnote URL in Appine, one Appine tab per md file.
-If a tab with URL already exists, switch to it; otherwise open a new tab."
+If a tab with URL already exists, switch to it; otherwise open a new tab.
+
+With FORCE-NEW non-nil, always open a fresh native tab.  Singleton pages
+like the roam graph use this: their native tab may have been closed via the
+Appine toolbar (which bypasses `appine-close-tab' and leaves the Emacs-side
+tab registry stale), so trusting a remembered index would silently no-op."
   (unless (fboundp 'my/appine-open-url)
     (require 'init-appine))
   (let* ((norm-url (and (fboundp 'my/appine--normalize-url)
                         (my/appine--normalize-url url)))
-         (existing-idx (and norm-url
+         (existing-idx (and (not force-new) norm-url
                             (cl-position norm-url my/appine-tab-list :test #'equal)))
          (buffer (get-buffer-create "*Appine Window*")))
     (my/aaronnote--track-app-buffer buffer file)
@@ -276,6 +286,10 @@ If a tab with URL already exists, switch to it; otherwise open a new tab."
       (setq-local cursor-type nil)
       (setq buffer-read-only t))
     (set-window-buffer (selected-window) buffer)
+    ;; When forcing a fresh tab, drop any stale registry entry for this URL so
+    ;; repeated opens (after a native toolbar close) do not accumulate.
+    (when (and force-new norm-url (fboundp 'my/appine--tab-forget))
+      (my/appine--tab-forget norm-url))
     (if existing-idx
         (when (fboundp 'my/appine--switch-to-tab-index)
           (my/appine--switch-to-tab-index existing-idx))
@@ -299,12 +313,14 @@ If a tab with URL already exists, switch to it; otherwise open a new tab."
               (error-message-string err))
      nil)))
 
-(defun my/aaronnote--open-url (url &optional file)
-  "Open Aaronnote URL using `my/aaronnote-backend'."
+(defun my/aaronnote--open-url (url &optional file force-new)
+  "Open Aaronnote URL using `my/aaronnote-backend'.
+FORCE-NEW, when non-nil, asks the Appine backend for a fresh tab instead of
+reusing a remembered one (see `my/aaronnote--open-appine')."
   (pcase my/aaronnote-backend
     ('appine
      (if (my/aaronnote--appine-available-p)
-         (my/aaronnote--open-appine url file)
+         (my/aaronnote--open-appine url file force-new)
        (message "Aaronnote: using xwidget because Appine is unavailable")
        (my/aaronnote--open-xwidget url file)))
     ('xwidget (my/aaronnote--open-xwidget url file))
@@ -424,15 +440,19 @@ Cursor-level sync is intentionally no longer a per-keystroke preview channel."
 
 ;;;###autoload
 (defun my/aaronnote-roam-graph ()
-  "Open the standalone roam graph view in a browser window."
+  "Open the standalone roam graph view in Aaronnote.
+Always opens a fresh tab so it reliably reappears even after the previous
+graph tab was closed via the Appine toolbar."
   (interactive)
   (my/aaronnote--ensure-server
    (lambda ()
-     (my/aaronnote--open-url (my/aaronnote--server-url "/graph")))))
+     (my/aaronnote--open-url (my/aaronnote--server-url "/graph") nil t))))
 
 ;;;###autoload
 (defun my/aaronnote-stop ()
-  "Kill the Aaronnote web-host process."
+  "Kill the Aaronnote web-host process and reset Appine tab state.
+The web-host (Node) is the backend; once it is gone, any Appine tabs showing
+its pages are dead, so the Emacs-side tab registry is cleared too."
   (interactive)
   (when (and my/aaronnote--process (process-live-p my/aaronnote--process))
     (delete-process my/aaronnote--process))
@@ -440,6 +460,8 @@ Cursor-level sync is intentionally no longer a per-keystroke preview channel."
         my/aaronnote--port nil
         my/aaronnote--ready nil
         my/aaronnote--ready-callbacks nil)
+  (when (fboundp 'my/appine--tab-reset)
+    (my/appine--tab-reset))
   (message "Aaronnote web-host stopped."))
 
 (add-hook 'kill-emacs-hook #'my/aaronnote-stop)

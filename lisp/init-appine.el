@@ -8,6 +8,8 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+
 (my/package-ensure-vc 'appine "https://github.com/chaoswork/appine.git")
 
 (defconst my/appine-buffer-name "*Appine Window*"
@@ -104,6 +106,27 @@
               (max 0 (min my/appine-tab-index (1- (length my/appine-tab-list))))
               my/appine-last-url (my/appine--tab-current-url))
       (my/appine--tab-reset))))
+
+(defun my/appine--tab-forget (url)
+  "Drop URL from the registry, fixing the active index.
+URL is normalized before lookup.  Use this when a tab is known to be gone
+\(for example a singleton page whose native tab was closed via the Appine
+toolbar, which bypasses `appine-close-tab')."
+  (let* ((norm (my/appine--normalize-url url))
+         (pos (cl-position norm my/appine-tab-list :test #'equal)))
+    (when pos
+      (setq my/appine-tab-list
+            (append (seq-take my/appine-tab-list pos)
+                    (seq-drop my/appine-tab-list (1+ pos))))
+      (cond
+       ((null my/appine-tab-list) (my/appine--tab-reset))
+       ((> my/appine-tab-index pos)
+        (setq my/appine-tab-index (1- my/appine-tab-index)
+              my/appine-last-url (my/appine--tab-current-url)))
+       ((= my/appine-tab-index pos)
+        (setq my/appine-tab-index
+              (min my/appine-tab-index (1- (length my/appine-tab-list)))
+              my/appine-last-url (my/appine--tab-current-url)))))))
 
 (defun my/appine--tab-next ()
   "Update registry after switching to the next tab."

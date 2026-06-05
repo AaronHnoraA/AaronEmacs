@@ -2445,6 +2445,7 @@ canonical `roam://note-id#tag' target."
     (define-key map (kbd "S") #'my/aaronnote-roam-db-status)
     (define-key map (kbd "V") #'my/aaronnote-roam-magit)
     (define-key map (kbd "D") #'my/aaronnote-roam-dired)
+    (define-key map (kbd "Q") #'my/aaronnote-stop)
     (define-key map (kbd "m") #'my/aaronnote-roam-dispatch)
     map)
   "Roam keymap for Markdown buffers. Bound to C-c r.")
@@ -2580,7 +2581,8 @@ canonical `roam://note-id#tag' target."
     ("S" "db status"            my/aaronnote-roam-db-status)]
    ["Files"
     ("V" "version (magit)"      my/aaronnote-roam-magit)
-    ("D" "dired (file browser)" my/aaronnote-roam-dired)]
+    ("D" "dired (file browser)" my/aaronnote-roam-dired)
+    ("Q" "stop web-host"        my/aaronnote-stop)]
    ["Nav (gd = xref)"
     ("." "xref definition"      xref-find-definitions)
     ("x" "xref references"      xref-find-references)]])
