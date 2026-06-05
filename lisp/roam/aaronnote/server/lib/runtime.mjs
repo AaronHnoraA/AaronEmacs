@@ -2799,7 +2799,10 @@ function existingUniqueDirs(dirs) {
 function snippetDirs() {
   const raw = process.env.AARONNOTE_SNIPPETS;
   if (raw) return existingUniqueDirs(raw.split(delimiter).filter(Boolean));
-  return existingUniqueDirs([snippetsRoot]);
+  return existingUniqueDirs([
+    process.env.AARONNOTE_EMACS_SNIPPETS_ROOT || join(homedir(), ".config", "emacs", "snippets"),
+    snippetsRoot,
+  ]);
 }
 
 async function snippetRoots() {
@@ -4797,7 +4800,7 @@ export async function saveNote(body) {
 
 export async function bootstrapNote(file) {
   if (file) {
-    return readNote(file);
+    return readNote(file, { includeIndex: true });
   }
   noteScanRoot = noteRoot;
   const index = await notesIndexPayload();

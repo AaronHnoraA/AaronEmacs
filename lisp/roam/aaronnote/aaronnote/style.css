@@ -1,6 +1,17 @@
+@font-face {
+  font-family: "ExcalifontLocal";
+  src:
+    local("Excalifont"),
+    local("Excalifont Regular"),
+    url("/fonts/Excalifont-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
-  font-family: system-ui, sans-serif;
+  font-family: var(--aaron-font-body);
   --aaronnote-bg: #fffdf8;
   --aaronnote-chrome: #fbf8f1;
   --aaronnote-border: rgb(109 90 56 / 18%);
@@ -8,6 +19,21 @@
   --aaronnote-vim-accent: #1d6f72;
   --aaronnote-vim-visual: #7b4acb;
   --aaron-ink: #24201a;
+  --aaron-muted: rgb(82 70 50 / 70%);
+  --aaron-paper: #fffdf8;
+  --aaron-paper-soft: #fbf8f1;
+  --aaron-paper-line: rgb(109 90 56 / 18%);
+  --aaron-red: #8d202c;
+  --aaron-red-dark: #6f1721;
+  --aaron-shadow: 0 10px 28px rgb(49 38 22 / 14%);
+  --aaron-font-english: "Merriweather";
+  --aaron-font-chinese: "FZLiuGongQuanKaiShuJF";
+  --aaron-font-body: var(--aaron-font-english), var(--aaron-font-chinese), Georgia, serif;
+  --aaron-font-heading: "ExcalifontLocal", "Excalifont", var(--aaron-font-chinese), Georgia, serif;
+  --aaron-font-title: var(--aaron-font-heading);
+  --aaron-font-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --aaron-font-math: KaTeX_Main, "STIX Two Math", "Times New Roman", serif;
+  --aaron-font-sans: system-ui, sans-serif;
 }
 
 * {
@@ -22,6 +48,7 @@ body,
   margin: 0;
   background: var(--aaronnote-bg);
   color: var(--aaron-ink);
+  font-family: var(--aaron-font-body);
 }
 
 button {
@@ -88,10 +115,58 @@ button.is-active {
 .aaronnote-focused-editor {
   min-height: 0;
   overflow: auto;
+  padding: 0 clamp(14px, 3vw, 64px);
 }
 
 .aaronnote-focused-editor > .cm-editor {
+  width: 100%;
+  max-width: min(1380px, 100%);
   min-height: 100%;
+  margin: 0 auto;
+  font-family: var(--aaron-font-body);
+}
+
+.aaronnote-focused-editor .cm-scroller {
+  font-family: var(--aaron-font-body);
+}
+
+.aaronnote-focused-editor .cm-content {
+  padding:
+    clamp(20px, 3vw, 40px)
+    clamp(28px, 4vw, 76px)
+    clamp(56px, 7vw, 96px)
+    clamp(78px, 6vw, 118px);
+}
+
+.aaronnote-focused-editor .cm-line {
+  font-family: var(--aaron-font-body);
+}
+
+.aaronnote-focused-editor .cm-editor h1,
+.aaronnote-focused-editor .cm-editor h2,
+.aaronnote-focused-editor .cm-editor h3,
+.aaronnote-focused-editor .cm-editor h4,
+.aaronnote-focused-editor .cm-editor h5,
+.aaronnote-focused-editor .cm-editor h6,
+.aaronnote-focused-editor .cm-editor .cm-line.cm-md-h1,
+.aaronnote-focused-editor .cm-editor .cm-line.cm-md-h2,
+.aaronnote-focused-editor .cm-editor .cm-line.cm-md-h3,
+.aaronnote-focused-editor .cm-editor .cm-line.cm-md-h4,
+.aaronnote-focused-editor .cm-editor .cm-line.cm-md-h5,
+.aaronnote-focused-editor .cm-editor .cm-line.cm-md-h6,
+.aaronnote-focused-editor .cm-editor .aaronnote-section-heading,
+.aaronnote-focused-editor .cm-editor .aaronnote-section-heading-inner,
+.aaronnote-focused-editor .cm-editor .org-env-heading,
+.aaronnote-focused-editor .cm-editor .org-env-heading-title,
+.aaronnote-focused-editor .cm-editor .cm-org-env-heading-widget {
+  font-family: var(--aaron-font-heading) !important;
+}
+
+.aaronnote-focused-editor .cm-line code,
+.aaronnote-focused-editor .cm-line pre,
+.aaronnote-focused-editor .cm-inline-code,
+.aaronnote-focused-editor .cm-monospace {
+  font-family: var(--aaron-font-mono);
 }
 
 #app[data-vim-mode="normal"] .cm-cursor {
@@ -107,4 +182,485 @@ button.is-active {
   border-left: 0;
   outline: 1px solid rgb(123 74 203 / 78%);
   background: rgb(123 74 203 / 20%);
+}
+
+#app[data-vim-mode="normal"] .aaronnote-focused-editor .cm-editor,
+#app[data-vim-mode="visual"] .aaronnote-focused-editor .cm-editor,
+#app[data-vim-mode="visual-line"] .aaronnote-focused-editor .cm-editor {
+  caret-color: transparent;
+}
+
+.aaronnote-vim-cursor {
+  position: fixed;
+  z-index: 70;
+  border-radius: 1px;
+  background: var(--aaronnote-vim-accent);
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+
+body[data-vim-mode="visual"] .aaronnote-vim-cursor,
+body[data-vim-mode="visual-line"] .aaronnote-vim-cursor {
+  background: var(--aaronnote-vim-visual);
+}
+
+.aaronnote-snippet-popup,
+.aaronnote-math-preview {
+  position: fixed;
+  z-index: 50;
+  box-sizing: border-box;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 4px;
+  background: var(--aaron-paper);
+  color: var(--aaron-ink);
+  box-shadow: var(--aaron-shadow);
+}
+
+.aaronnote-snippet-popup {
+  max-height: 240px;
+  overflow: auto;
+  padding: 4px;
+}
+
+.aaronnote-snippet-option {
+  width: 100%;
+  min-height: 32px;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 3px;
+  display: grid;
+  grid-template-columns: 22px minmax(64px, auto) minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px 5px 5px;
+  background: transparent;
+  color: var(--aaron-ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.aaronnote-snippet-option:hover {
+  background: var(--aaron-paper-soft);
+}
+
+.aaronnote-snippet-option.is-active {
+  border-left-color: var(--aaron-red);
+  background: color-mix(in srgb, var(--aaron-paper-soft), var(--aaron-red) 7%);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--aaron-red), transparent 62%),
+    0 1px 0 rgb(255 255 255 / 48%) inset;
+}
+
+.aaronnote-snippet-option.is-active::after {
+  content: "CR";
+  color: var(--aaron-red-dark);
+  font: 800 10px/1 var(--aaron-font-sans);
+  text-align: center;
+}
+
+.aaronnote-snippet-option-number {
+  color: var(--aaron-muted);
+  font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-align: right;
+}
+
+.aaronnote-snippet-option-key {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.aaronnote-snippet-option.is-active .aaronnote-snippet-option-number,
+.aaronnote-snippet-option.is-active .aaronnote-snippet-option-key {
+  color: var(--aaron-red-dark);
+}
+
+.aaronnote-snippet-option-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--aaron-muted);
+  font-size: 11px;
+}
+
+.aaronnote-snippet-option-preview {
+  grid-column: 2 / -1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--aaron-muted), var(--aaron-ink) 18%);
+}
+
+.aaronnote-math-preview {
+  max-width: min(680px, calc(100vw - 16px));
+  max-height: min(420px, calc(100vh - 24px));
+  overflow: hidden;
+  padding: 10px 12px;
+}
+
+.aaronnote-math-preview.is-display {
+  max-width: calc(100vw - 16px);
+  padding: 12px 16px;
+}
+
+.aaronnote-math-preview.is-overflowing {
+  overflow: auto;
+}
+
+.aaronnote-math-preview.is-error {
+  max-width: min(420px, calc(100vw - 16px));
+  overflow: auto;
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: #9f1239;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.aaronnote-tools-panel {
+  position: fixed;
+  right: 14px;
+  top: 42px;
+  z-index: 80;
+  width: min(360px, calc(100vw - 28px));
+  max-height: min(620px, calc(100vh - 56px));
+  overflow: hidden;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--aaron-paper), transparent 4%);
+  color: var(--aaron-ink);
+  box-shadow: var(--aaron-shadow);
+  backdrop-filter: blur(8px);
+}
+
+.aaronnote-tools-panel[hidden] {
+  display: none;
+}
+
+.aaronnote-tools-head,
+.aaronnote-roam-tools header {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--aaron-paper-line);
+  padding: 0 10px;
+  background: var(--aaron-paper-soft);
+  font-family: var(--aaron-font-sans);
+}
+
+.aaronnote-tools-head strong,
+.aaronnote-roam-tools header strong {
+  color: var(--aaron-red-dark);
+  font-size: 12px;
+}
+
+.aaronnote-tools-list {
+  max-height: calc(min(620px, 100vh - 56px) - 38px);
+  overflow: auto;
+  display: grid;
+  gap: 1px;
+  padding: 6px;
+}
+
+.aaronnote-tool-action {
+  width: 100%;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--aaron-ink);
+  text-align: left;
+}
+
+.aaronnote-tool-action:hover {
+  border-color: var(--aaron-paper-line);
+  background: var(--aaron-paper);
+}
+
+.aaronnote-tool-action strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 750 12px/1.2 var(--aaron-font-sans);
+}
+
+.aaronnote-tool-action span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--aaron-muted);
+  font: 11px/1.2 var(--aaron-font-sans);
+}
+
+.aaronnote-roam-tools {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 75;
+  width: min(620px, calc(100vw - 28px));
+  max-height: min(460px, calc(100vh - 84px));
+  overflow: hidden;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 4px;
+  background: var(--aaron-paper);
+  box-shadow: var(--aaron-shadow);
+}
+
+.aaronnote-roam-tools[hidden] {
+  display: none;
+}
+
+.aaronnote-roam-tools-list {
+  max-height: calc(min(460px, 100vh - 84px) - 38px);
+  overflow: auto;
+  display: grid;
+  gap: 1px;
+  padding: 8px;
+}
+
+.aaronnote-roam-tool-item {
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 6px 8px;
+  background: var(--aaron-paper-soft);
+}
+
+.aaronnote-roam-tool-item:hover {
+  border-color: var(--aaron-paper-line);
+}
+
+.aaronnote-roam-tool-kind {
+  color: var(--aaron-red-dark);
+  font: 750 10px/1 var(--aaron-font-sans);
+}
+
+.aaronnote-roam-tool-body {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.aaronnote-roam-tool-body strong,
+.aaronnote-roam-tool-body span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aaronnote-roam-tool-body strong {
+  color: var(--aaron-ink);
+  font: 750 12px/1.2 var(--aaron-font-sans);
+}
+
+.aaronnote-roam-tool-body span {
+  color: var(--aaron-muted);
+  font: 11px/1.2 var(--aaron-font-sans);
+}
+
+.aaronnote-empty {
+  padding: 14px;
+  color: var(--aaron-muted);
+  font: 12px/1.4 var(--aaron-font-sans);
+}
+
+.aaronnote-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: rgb(30 26 22 / 22%);
+}
+
+.aaronnote-modal[hidden] {
+  display: none;
+}
+
+.aaronnote-modal-panel {
+  width: min(460px, calc(100vw - 32px));
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 4px;
+  padding: 18px;
+  background: var(--aaron-paper);
+  color: var(--aaron-ink);
+  box-shadow: var(--aaron-shadow);
+}
+
+.aaronnote-modal-panel.has-tags {
+  width: min(680px, calc(100vw - 32px));
+}
+
+.aaronnote-modal-panel h2 {
+  margin: 0 0 4px;
+  color: var(--aaron-red-dark);
+  font: 750 20px/1.2 var(--aaron-font-sans);
+}
+
+.aaronnote-modal-panel label {
+  display: grid;
+  gap: 5px;
+  color: var(--aaron-muted);
+  font: 650 12px/1.3 var(--aaron-font-sans);
+}
+
+.aaronnote-modal-panel input {
+  height: 34px;
+  box-sizing: border-box;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  padding: 0 9px;
+  background: var(--aaron-paper-soft);
+  color: var(--aaron-ink);
+  font: 13px/1.2 var(--aaron-font-sans);
+}
+
+.aaronnote-modal-tag-picker {
+  max-height: 180px;
+  overflow: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.aaronnote-modal-tag-picker button {
+  min-height: 24px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  padding: 0 8px;
+  background: var(--aaron-paper-soft);
+  color: var(--aaron-ink);
+  font: 11px/1 var(--aaron-font-sans);
+}
+
+.aaronnote-modal-tag-picker button:hover {
+  border-color: var(--aaron-red);
+  color: var(--aaron-red-dark);
+}
+
+.aaronnote-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.aaronnote-floating-toc {
+  position: fixed;
+  right: 14px;
+  top: 42px;
+  z-index: 60;
+  width: clamp(280px, 24vw, 380px);
+  max-height: min(520px, calc(100vh - 58px));
+  overflow: hidden;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--aaron-paper), transparent 5%);
+  color: var(--aaron-ink);
+  box-shadow: var(--aaron-shadow);
+  backdrop-filter: blur(8px);
+  resize: horizontal;
+}
+
+.aaronnote-floating-toc.is-collapsed {
+  display: none;
+}
+
+.aaronnote-floating-toc nav {
+  max-height: min(520px, calc(100vh - 58px));
+  overflow: auto;
+  padding: 6px;
+  scrollbar-gutter: stable;
+}
+
+.aaronnote-toc-status {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -6px -6px 4px;
+  border-bottom: 1px solid var(--aaron-paper-line);
+  padding: 7px 10px;
+  background: color-mix(in srgb, var(--aaron-paper), transparent 4%);
+  color: var(--aaron-muted);
+  font: 700 11px/1 var(--aaron-font-sans);
+}
+
+.aaronnote-toc-item {
+  width: 100%;
+  min-height: 27px;
+  border: 0;
+  border-radius: 2px;
+  padding: 5px 8px 5px calc(9px + var(--toc-depth) * 13px);
+  background: transparent;
+  color: var(--aaron-muted);
+  cursor: pointer;
+  text-align: left;
+  font: 12px/1.28 var(--aaron-font-sans);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aaronnote-toc-item:hover,
+.aaronnote-toc-item.is-active {
+  background: var(--aaron-paper-soft);
+  color: var(--aaron-red-dark);
+}
+
+.aaronnote-toc-item.is-active {
+  box-shadow: inset 3px 0 0 var(--aaron-red);
+  font-weight: 750;
+}
+
+.aaronnote-toc-section {
+  margin: 12px 0 4px;
+  padding: 9px 8px 0;
+  border-top: 1px solid var(--aaron-paper-line);
+  color: var(--aaron-muted);
+  font: 800 11px/1.2 var(--aaron-font-sans);
+  text-transform: uppercase;
+}
+
+.aaronnote-toc-empty {
+  padding: 12px;
+  color: var(--aaron-muted);
+  font: 12px/1.4 var(--aaron-font-sans);
+}
+
+@media (max-width: 720px) {
+  .aaronnote-focused-editor {
+    padding: 0 8px;
+  }
+
+  .aaronnote-focused-editor .cm-content {
+    padding: 18px 20px 48px 64px;
+  }
+
+  .aaronnote-floating-toc,
+  .aaronnote-tools-panel,
+  .aaronnote-roam-tools {
+    left: 8px;
+    right: 8px;
+    width: auto;
+  }
 }
