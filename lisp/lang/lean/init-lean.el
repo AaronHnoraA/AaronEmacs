@@ -58,6 +58,7 @@
 (declare-function lean-iv-setup-buffer-sync "init-lean-infoview")
 (declare-function lean-iv-teardown-h "init-lean-infoview")
 (declare-function lean-iv-toggle "init-lean-infoview")
+(declare-function lean-iv-restart "init-lean-infoview")
 (declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
 (declare-function my/flymake-diagnostic-at-point-mode "init-lsp" (&optional arg))
 (declare-function my/problems-buffer "init-problems" ())
@@ -372,6 +373,7 @@ Completion uses the global corfu+capf surface — no company-mode override."
   "Install Lean-specific keys in the current buffer."
   ;; Official Lean infoview rendered in xwidget-webkit.
   (local-set-key (kbd "C-c C-i") #'lean-iv-toggle)
+  (local-set-key (kbd "C-c i r") #'lean-iv-restart)
   ;; LSP management
   (local-set-key (kbd "C-c C-r") #'eglot-reconnect)
   (local-set-key (kbd "C-c C-d") #'lean-refresh-file-dependencies)

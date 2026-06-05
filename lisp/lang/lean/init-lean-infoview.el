@@ -477,6 +477,26 @@ This is the single Lean infoview entry point bound to \\[lean-iv-toggle]."
         (lean--ensure-eglot))
       (lean--iv-open-current-buffer)))))
 
+(defun lean-iv-restart ()
+  "Restart the Lean infoview bridge for the current buffer's project.
+Kills the bridge `node' process (so edits to server.mjs take effect) and the
+xwidget page, then reopens the infoview with a fresh server and page."
+  (interactive)
+  (unless (derived-mode-p 'lean-mode)
+    (user-error "Must be called from a Lean source buffer"))
+  (let* ((root (lean--iv-project-root))
+         (xbuf (lean--iv-project-xwidget-buf root)))
+    (lean--iv-log "restart requested: root=%s" root)
+    (when (buffer-live-p xbuf)
+      (delete-windows-on xbuf)
+      (kill-buffer xbuf))
+    (setq lean--iv--xwidget-buf nil)
+    (lean-iv-stop-server root)
+    (setq lean--iv--last-cursor nil)
+    (when (fboundp 'lean--ensure-eglot)
+      (lean--ensure-eglot))
+    (lean--iv-open-current-buffer)))
+
 ;; ── Editor reverse channel (infoview → Emacs) ────────────────────────────────
 ;; The bridge server emits `EMACS_CMD={...}\n' lines to stdout.
 ;; The process filter in `lean-iv-start-server' scans for them and dispatches

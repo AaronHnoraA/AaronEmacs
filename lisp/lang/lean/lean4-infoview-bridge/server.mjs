@@ -23,6 +23,7 @@ class LspClient {
     this._buf  = Buffer.alloc(0)
     this._pending  = new Map()   // id → {res,rej,timer}
     this._listeners = new Map()  // method → Set<fn>
+    this._onRequest = null       // server → client request handler
     this._id = 1
     log(`spawning LSP: ${cmd} ${args.join(' ')} cwd=${cwd}`)
     this.proc = spawn(cmd, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -60,9 +61,19 @@ class LspClient {
       this._pending.delete(msg.id)
       clearTimeout(timer)
       msg.error ? rej(msg.error) : res(msg.result)
+    } else if (msg.id != null && msg.method) {
+      // Server → client REQUEST (has both id and method): Lean blocks on these
+      // until answered (e.g. workspace/configuration before it elaborates).
+      let result = null
+      try { result = this._onRequest ? this._onRequest(msg.method, msg.params) : null } catch {}
+      this._respond(msg.id, result)
     } else if (msg.method) {
       this._listeners.get(msg.method)?.forEach(fn => { try { fn(msg.params) } catch {} })
     }
+  }
+
+  _respond(id, result) {
+    this._frame({ jsonrpc: '2.0', id, result: result ?? null })
   }
 
   _rejectAll(err) {
@@ -100,6 +111,8 @@ class LspClient {
     this._listeners.get(method).add(fn)
     return () => this._listeners.get(method)?.delete(fn)
   }
+
+  onRequest(fn) { this._onRequest = fn }
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -110,6 +123,8 @@ let lastCursor = null          // latest Emacs cursor location for late SSE clie
 const openDocs     = new Map() // uri → {version, text}
 const rpcSessions  = new Map() // sessionId → keepAliveTimer
 const sseClients   = new Set() // active SSE response objects
+const progressCache    = new Map() // uri → latest $/lean/fileProgress params
+const diagnosticsCache = new Map() // uri → latest publishDiagnostics params
 
 function sseEmit(method, params) {
   const payload = `data: ${JSON.stringify({method, params})}\n\n`
@@ -123,8 +138,36 @@ function sseEmit(method, params) {
 async function startLsp() {
   log(`initializing LSP for root ${ROOT}`)
   lsp = new LspClient('lake', ['serve'], ROOT)
-  lsp.on('$/lean/fileProgress',            p => sseEmit('$/lean/fileProgress', p))
-  lsp.on('textDocument/publishDiagnostics', p => sseEmit('textDocument/publishDiagnostics', p))
+  // Cache the latest progress/diagnostics per URI so late SSE clients (every
+  // infoview reopen, and most first-opens where the doc is opened before the
+  // xwidget boots) can be replayed the final state — otherwise the infoview
+  // never hears "processing done" (permanent goal spinner) or receives any
+  // diagnostics (permanent "Loading messages…").
+  lsp.on('$/lean/fileProgress', p => {
+    const uri = p?.textDocument?.uri ?? ''
+    if (uri) progressCache.set(uri, p)
+    sseEmit('$/lean/fileProgress', p)
+  })
+  lsp.on('textDocument/publishDiagnostics', p => {
+    const uri = p?.uri ?? ''
+    if (uri) diagnosticsCache.set(uri, p)
+    sseEmit('textDocument/publishDiagnostics', p)
+  })
+  // Answer server → client requests so Lean does not stall (it waits on
+  // workspace/configuration before elaborating; registerCapability etc. too).
+  lsp.onRequest((method, params) => {
+    if (method === 'workspace/configuration') {
+      const items = Array.isArray(params?.items) ? params.items : []
+      return items.map(() => ({}))
+    }
+    if (method === 'window/showMessageRequest') {
+      const actions = Array.isArray(params?.actions) ? params.actions : []
+      return actions[0] ?? null
+    }
+    // client/registerCapability, window/workDoneProgress/create,
+    // workspace/semanticTokens/refresh, … — acknowledge with null.
+    return null
+  })
 
   initResult = await lsp.request('initialize', {
     processId: process.pid,
@@ -247,6 +290,14 @@ const http = createServer(async (req, res) => {
     if (lastCursor) res.write(`data: ${JSON.stringify({method:'emacs:cursor',params:lastCursor})}\n\n`)
     // If LSP already initialized, notify immediately.
     if (initResult) res.write(`data: ${JSON.stringify({method:'lsp:ready',params:initResult})}\n\n`)
+    // Replay cached progress + diagnostics (after lsp:ready so the infoview is
+    // restarted first) so a late client converges to the real current state.
+    for (const p of progressCache.values()) {
+      res.write(`data: ${JSON.stringify({method:'$/lean/fileProgress',params:p})}\n\n`)
+    }
+    for (const p of diagnosticsCache.values()) {
+      res.write(`data: ${JSON.stringify({method:'textDocument/publishDiagnostics',params:p})}\n\n`)
+    }
     req.on('close', () => sseClients.delete(res))
     return
   }
