@@ -569,14 +569,15 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
 
 (defun my/eglot-ensure-deferred ()
   "Start `eglot' after the current buffer has finished opening."
-  (let ((buffer (current-buffer)))
-    (run-at-time
-     0 nil
-     (lambda (buf)
-       (when (buffer-live-p buf)
-         (with-current-buffer buf
-           (my/eglot-ensure))))
-     buffer)))
+  (unless (derived-mode-p 'lean-mode)
+    (let ((buffer (current-buffer)))
+      (run-at-time
+       0 nil
+       (lambda (buf)
+         (when (buffer-live-p buf)
+           (with-current-buffer buf
+             (my/eglot-ensure))))
+       buffer))))
 
 (defun my/language-server-ensure ()
   "Start the preferred language server backend for the current buffer."

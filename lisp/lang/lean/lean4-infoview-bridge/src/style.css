@@ -1,0 +1,254 @@
+:root {
+  --vscode-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --vscode-font-size: 13px;
+  --vscode-font-weight: 400;
+  --vscode-editor-font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --vscode-editor-font-feature-settings: "liga" 0;
+  --vscode-editor-font-weight: 400;
+  --vscode-editor-font-size: 13px;
+  --vscode-editor-line-height: 1.45;
+  --vscode-editor-background: #111315;
+  --vscode-editor-foreground: #d9dee7;
+  --vscode-sideBar-background: #15181c;
+  --vscode-sideBar-border: #252a31;
+  --vscode-dropdown-background: #1a1f25;
+  --vscode-dropdown-foreground: #d9dee7;
+  --vscode-dropdown-border: #343b45;
+  --vscode-button-background: #245a48;
+  --vscode-button-foreground: #f4fbf8;
+  --vscode-button-hoverBackground: #2d7059;
+  --vscode-textLink-foreground: #64b5f6;
+  --vscode-editorHoverWidget-background: #1b2027;
+  --vscode-editorHoverWidget-foreground: #e2e7ef;
+  --vscode-editorHoverWidget-border: #38404b;
+  --vscode-textCodeBlock-background: #191d23;
+  --vscode-editor-selectionBackground: rgba(82, 139, 255, 0.28);
+  --vscode-editorOverviewRuler-rangeHighlightForeground: rgba(214, 168, 78, 0.22);
+  --vscode-editor-findMatchBackground: rgba(245, 197, 92, 0.32);
+  --vscode-widget-shadow: rgba(0, 0, 0, 0.42);
+  --vscode-diffEditor-insertedTextBackground: rgba(38, 161, 123, 0.22);
+  --vscode-diffEditor-removedTextBackground: rgba(238, 91, 91, 0.20);
+  --vscode-diffEditor-insertedTextBorder: rgba(38, 161, 123, 0.55);
+  --vscode-diffEditor-removedTextBorder: rgba(238, 91, 91, 0.55);
+  --vscode-lean4-infoView\.goalCount: #7bd88f;
+  --vscode-lean4-infoView\.turnstile: #f0c36a;
+  --vscode-lean4-infoView\.caseLabel: #ffb86c;
+  --vscode-lean4-infoView\.hypothesisName: #9cdcfe;
+  --vscode-lean4-infoView\.inaccessibleHypothesisName: #8993a4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+body.lean-iv-body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  -webkit-font-smoothing: antialiased;
+}
+
+.lean-shell {
+  display: grid;
+  grid-template-rows: 36px minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  background: var(--vscode-editor-background);
+}
+
+.lean-toolbar {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 8px;
+  background: #171b21;
+  border-bottom: 1px solid var(--vscode-sideBar-border);
+}
+
+.lean-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lean-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: #b9c2cf;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  appearance: none;
+  cursor: default;
+}
+
+.lean-tool:hover {
+  color: #eef3f8;
+  background: #20262e;
+  border-color: #303842;
+}
+
+.lean-tool:active,
+.lean-tool.is-active {
+  color: #f3fff8;
+  background: #1f4f40;
+  border-color: #2d7059;
+}
+
+.lean-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  color: #aeb8c6;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.lean-status-pill {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  color: #bff4d0;
+  background: rgba(31, 79, 64, 0.72);
+  border: 1px solid rgba(45, 112, 89, 0.86);
+  border-radius: 6px;
+}
+
+.lean-status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lean-infoview-root {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px 14px;
+  scrollbar-color: #424b57 #15181c;
+}
+
+.lean-infoview-root > div {
+  min-width: 0;
+}
+
+.lean-infoview-root details {
+  border-top: 1px solid #242a32;
+}
+
+.lean-infoview-root details:first-child {
+  border-top: 0;
+}
+
+.lean-infoview-root summary {
+  min-height: 26px;
+  padding: 4px 2px;
+  color: #dce3ed;
+  outline: none;
+}
+
+.lean-infoview-root summary:hover {
+  background: #181d23;
+}
+
+.lean-infoview-root .fr .codicon,
+.lean-infoview-root a.codicon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: #9facbd;
+  border-radius: 5px;
+  text-decoration: none;
+}
+
+.lean-infoview-root .fr .codicon:hover,
+.lean-infoview-root a.codicon:hover {
+  color: #eef3f8;
+  background: #222933;
+}
+
+.lean-infoview-root pre,
+.lean-infoview-root .font-code {
+  font-family: var(--vscode-editor-font-family);
+  line-height: var(--vscode-editor-line-height);
+}
+
+.lean-infoview-root pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.lean-infoview-root .error {
+  color: #ff7b72;
+}
+
+.lean-infoview-root .warning {
+  color: #f0c36a;
+}
+
+.lean-infoview-root .information {
+  color: #7bd88f;
+}
+
+.lean-infoview-root .restart-file-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  margin: 10px 0 2px;
+  padding: 3px 10px;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border: 1px solid #36745d;
+  border-radius: 6px;
+  font-family: var(--vscode-font-family);
+  font-size: 12px;
+}
+
+.lean-infoview-root .restart-file-button:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.lean-infoview-root code,
+.lean-infoview-root .font-code,
+.lean-infoview-root .goal-hyp,
+.lean-infoview-root .goal-vdash {
+  letter-spacing: 0;
+}
+
+@media (max-width: 520px) {
+  .lean-toolbar {
+    grid-template-columns: max-content minmax(70px, 1fr) max-content;
+    gap: 4px;
+    padding-inline: 5px;
+  }
+
+  .lean-tool {
+    width: 26px;
+    height: 26px;
+  }
+
+  .lean-status-pill {
+    display: none;
+  }
+}

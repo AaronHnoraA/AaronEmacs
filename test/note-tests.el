@@ -5,5 +5,8 @@
 (load-file
  (expand-file-name "typst-roam-tests.el"
                    (file-name-directory (or load-file-name buffer-file-name))))
+(load-file
+ (expand-file-name "note-code-tests.el"
+                   (file-name-directory (or load-file-name buffer-file-name))))
 
 ;;; note-tests.el ends here

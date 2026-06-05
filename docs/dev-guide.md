@@ -123,24 +123,48 @@ Doctor 更适合快速排查：
 
 详细模型看 [lsp-workflow.org](lsp-workflow.org)。
 
-### Lean interactive infoview
+### Lean (eglot + xwidget infoview)
 
-Lean 4 继续走 `lean4-mode` + `lsp-mode`，但本地 buffer 的 `*Lean Goal*`
-优先使用 Lean server 的 interactive RPC widget 协议：
+Lean 4 走自定义 `lean-mode`（eglot 作为 LSP 客户端），不再使用 `lean4-mode` +
+`lsp-mode`。模块分层如下：
 
-- 源 buffer 按 URI 懒创建 `$/lean/rpc/connect` session。
-- 每 20 秒发送 `$/lean/rpc/keepAlive`，buffer teardown 时取消 timer。
-- 刷新通过 `$/lean/rpc/call` 并发拉
-  `Lean.Widget.getInteractiveGoals`、
-  `Lean.Widget.getInteractiveTermGoal` 和
-  `Lean.Widget.getInteractiveDiagnostics`。
-- TaggedText 渲染成普通 Emacs 文本，同时把 `WithRpcRef` 存成 text property；
-  hover 时再懒调用 `Lean.Widget.InteractiveDiagnostics.infoToInteractive`。
-- RPC ref cache 只在当前 session 内有效；buffer modification tick 改变、
-  session 断开、worker crash 或 Lean 要求 reconnect 时都会丢 session 和 cache。
+| 模块 | 职责 |
+|------|------|
+| `lisp/lang/lean/init-lean.el` | 主 mode、eglot 注册、project 定位、ripgrep 符号搜索、UI 总入口 |
+| `lisp/lang/lean/init-lean-eglot.el` | `$/lean/fileProgress` 通知、fringe/sideline 进度与 Flymake 兼容层 |
+| `lisp/lang/lean/init-lean-infoview.el` | 官方 xwidget infoview 桥接（`C-c C-i`）|
+| `lisp/lang/lean/lean4-infoview-bridge/` | Node.js HTTP bridge：转发 LSP、服务官方 React infoview |
 
-TRAMP buffer 不启用 interactive RPC infoview，仍走 lean4-mode 原来的
-`$/lean/plainGoal` / `$/lean/plainTermGoal` plain fallback。
+**键位（lean-mode buffer）**
+
+| 键 | 命令 |
+|----|------|
+| `C-c C-i` | 切换官方 xwidget infoview |
+| `C-c C-r` | 重连 eglot |
+| `C-c C-d` | 重刷文件依赖 |
+| `C-c C-a` | eglot code actions |
+| `C-c C-l` | 打开 Lean dev log |
+| `C-c C-k` | 查 unicode 输入法键位 |
+
+**Xwidget infoview 架构**
+
+1. `lean-iv-toggle` 启动 `lisp/lang/lean/lean4-infoview-bridge/server.mjs`（Node.js），参数为
+   `<port> <project-root>`；server 内部运行 `lake serve`（LSP）。
+2. Bridge 在 stdout 输出 `LEAN_INFOVIEW_PORT=<N>`，Emacs 进程 filter 捕获后开
+   启 xwidget-webkit 窗口（`http://127.0.0.1:<N>/`），加载官方 `@leanprover/infoview`。
+3. **Emacs→infoview**：`lean-iv-sync-cursor-h` 在每次 `post-command-hook` 调用
+   `window.updateCursor(uri, line, char)`；文本变化通过 HTTP POST `/cursor` 同步。
+4. **Infoview→Emacs 反向通道**：infoview 点击/触发动作时，前端 POST 到 bridge
+   的 `/editor/<cmd>` 路由；bridge 将 `EMACS_CMD={...}` 写到 stdout；Emacs 进程
+   filter 解析后分发：
+   - `show-document` → `pop-to-buffer` + 跳转行列（点击 goal 定位）
+   - `insert-text` → 在活跃 lean buffer 插入文字（"Try this" 建议）
+   - `apply-edit` → 应用文本编辑（code actions）
+   - `restart-file` → 调用 `lean-refresh-file-dependencies`
+
+**补全**：lean buffer 使用全局 capf + corfu + nerd-icons 补全，不启用 company-mode。
+
+TRAMP 远程 buffer：xwidget infoview 不可用（xwidget 需要本地 bridge）。
 
 ## 3. 调试
 

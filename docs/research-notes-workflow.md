@@ -259,3 +259,43 @@ org <-> jupytext <-> ipynb
 - 结果索引页
 
 但这些都属于优化，不是前提。
+# Embedded Source Regions
+
+Typst notes can render tagged regions from source files with `#note-code`.
+Lean uses the Aaronnote mirror rule, so the source path may be omitted:
+
+```typst
+#import "/_typst/roam.typ": *
+#let note-code = note-code.with(note-path: "math/group.typ")
+
+#note-code(lang: lean)[group-cancel]
+```
+
+For `math/group.typ`, this reads the region after
+`-- @aaronnote group-cancel` from `/.lean/math/group.lean`, stopping at the
+next `@aaronnote` or `@note-code` marker.
+
+Every other language requires an explicit project-root source path:
+
+```typst
+#note-code(lang: "python", path: "/src/demo.py")[example]
+```
+
+Use `C-c C-n` to insert a source reference. `C-c C-o` opens either a
+`#note-link` or the source region referenced by `#note-code`.
+
+Typst preview defaults to Tinymist SVG for low-latency editing and
+source-position synchronization. Use the Typst transient menu's preview
+backend toggle to switch to semantic HTML. In AaronNote-style projects, HTML
+output follows the source path below `public/`, so `daily/example.typ` writes
+`public/daily/example.html`; the generated page embeds Aaronnote's paper theme
+and can be reused for publishing.
+
+The paged Typst theme is the canonical rendering design. Tinymist and PDF use
+it directly. Semantic HTML cannot translate Typst paged show rules into browser
+layout, so `roam/render.css` remains a thin DOM adapter that mirrors the Typst
+theme rather than an independent design.
+
+Tinymist preview passes `aaronnote-preview=continuous`, so notes render as one
+continuous Typst page without browser page seams or pagination whitespace.
+Normal PDF compilation does not receive this input and remains A4 paged output.

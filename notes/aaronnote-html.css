@@ -1,0 +1,38 @@
+/* Standalone Typst HTML shell using Aaronnote's paper-theme variables. */
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--aaron-paper-bg);
+}
+
+.aaronnote-typst-shell {
+  box-sizing: border-box;
+  width: min(100%, 68rem);
+  min-height: 100vh;
+  margin: 0 auto;
+  background: var(--aaron-paper);
+}
+
+article.aaronnote-typst-note {
+  box-sizing: border-box;
+  width: min(100%, 58rem);
+  margin: 0 auto;
+  padding: clamp(1.4rem, 4vw, 3.5rem);
+  font-size: 16px !important;
+  line-height: 1.46 !important;
+}
+
+article.aaronnote-typst-note > h2:first-of-type {
+  display: block;
+}
+
+@media (min-width: 72rem) {
+  .aaronnote-typst-shell {
+    box-shadow: var(--aaron-shadow, 0 18px 42px rgb(52 39 22 / 12%));
+  }
+}

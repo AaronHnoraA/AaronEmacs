@@ -9,6 +9,14 @@
 ;; ---------------------------
 (my/package-ensure-vc 'flymake-vale "https://github.com/tpeacock19/flymake-vale.git")
 
+(defun my/flymake-vale-setup ()
+  "Enable Flymake and the Vale backend for eligible local buffers."
+  (when (and buffer-file-name
+             (not (file-remote-p buffer-file-name))
+             (executable-find "vale")
+             (require 'flymake-vale nil t))
+    (flymake-mode 1)
+    (flymake-vale-load)))
 
 ;; flymake-vale
 (use-package flymake-vale
@@ -24,12 +32,6 @@
                   (typst-mode . "typ")
                   (my/typst-mode . "typ"))
                 flymake-vale-mode-file-exts))
-
-  ;; 一个统一的入口：本地文件才启用
-  (defun my/flymake-vale-setup ()
-    "Enable Flymake + Vale backend for local buffers."
-      (flymake-mode 1)        ;; 关键：确保 flymake 初始化
-      (flymake-vale-load))   ;; 再加载 vale backend
 
   :hook
   ((text-mode . my/flymake-vale-setup)

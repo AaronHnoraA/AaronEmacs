@@ -6,6 +6,18 @@ const ROOT = "/Users/hc/Documents/AaronNote";
 const LANGLE = `upright("${String.fromCodePoint(0x27e8)}")`;
 const RANGLE = `upright("${String.fromCodePoint(0x27e9)}")`;
 const VBAR = 'upright("|")';
+const TIMES = String.fromCodePoint(0x00d7);
+const OTIMES = String.fromCodePoint(0x2297);
+const OPLUS = String.fromCodePoint(0x2295);
+const CONG = String.fromCodePoint(0x2245);
+const SIM = String.fromCodePoint(0x223c);
+const SIMEQ = String.fromCodePoint(0x2243);
+const IN = String.fromCodePoint(0x2208);
+const INFTY = String.fromCodePoint(0x221e);
+const NOTIN = String.fromCodePoint(0x2209);
+const SUBSET = String.fromCodePoint(0x2282);
+const SUBSETEQ = String.fromCodePoint(0x2286);
+const SETMINUS = String.fromCodePoint(0x2216);
 
 function parseArgs(argv) {
   const args = { root: ROOT, outRoot: null, write: false };
@@ -176,11 +188,11 @@ function convertCases(body) {
     .map((row) => {
       const cells = row
         .split("&")
-        .map((cell) => convertMath(cell.trim()).replace(/,+$/g, ""))
+        .map((cell) => replaceCommasOutsideStrings(convertMath(cell.trim()).replace(/[,.]+$/g, "")))
         .filter((cell) => cell.length > 0);
       return cells.join(", ");
     });
-  return `cases(${rows.join("; ")})`;
+  return `mat(delim: "{", ${rows.join("; ")})`;
 }
 
 function normalizeScript(body) {
@@ -208,6 +220,97 @@ function normalizeScript(body) {
   });
 }
 
+function escapeAngleCommas(value) {
+  let out = "";
+  let depth = 0;
+  for (let i = 0; i < value.length; ) {
+    if (value.startsWith(LANGLE, i)) {
+      depth++;
+      out += LANGLE;
+      i += LANGLE.length;
+      continue;
+    }
+    if (value.startsWith(RANGLE, i)) {
+      depth = Math.max(0, depth - 1);
+      out += RANGLE;
+      i += RANGLE.length;
+      continue;
+    }
+    if (value[i] === '"') {
+      const start = i;
+      i++;
+      while (i < value.length) {
+        if (value[i] === '"' && value[i - 1] !== "\\") {
+          i++;
+          break;
+        }
+        i++;
+      }
+      out += value.slice(start, i);
+      continue;
+    }
+    if (value[i] === "," && depth > 0) {
+      out += ' upright(",") ';
+      i++;
+      continue;
+    }
+    out += value[i++];
+  }
+  return out;
+}
+
+function replacePipesOutsideStrings(value) {
+  let out = "";
+  for (let i = 0; i < value.length; ) {
+    if (value[i] === '"') {
+      const start = i;
+      i++;
+      while (i < value.length) {
+        if (value[i] === '"' && value[i - 1] !== "\\") {
+          i++;
+          break;
+        }
+        i++;
+      }
+      out += value.slice(start, i);
+      continue;
+    }
+    if (value[i] === "|") {
+      out += ` ${VBAR} `;
+      i++;
+      continue;
+    }
+    out += value[i++];
+  }
+  return out;
+}
+
+function replaceCommasOutsideStrings(value) {
+  let out = "";
+  for (let i = 0; i < value.length; ) {
+    if (value[i] === '"') {
+      const start = i;
+      i++;
+      while (i < value.length) {
+        if (value[i] === '"' && value[i - 1] !== "\\") {
+          i++;
+          break;
+        }
+        i++;
+      }
+      out += value.slice(start, i);
+      continue;
+    }
+    if (value[i] === ",") {
+      out += ' upright(",") ';
+      i++;
+      continue;
+    }
+    out += value[i++];
+  }
+  return out;
+}
+
 function convertMath(input) {
   let s = String(input ?? "").trim();
 
@@ -232,7 +335,10 @@ function convertMath(input) {
   };
   s = replaceCommand1(s, "\\mathbb", (a) => alphabet[a.trim()] || `bb(${a.trim()})`);
   s = replaceCommand1(s, "\\mathcal", (a) => `cal(${a.trim()})`);
-  s = replaceCommand1(s, "\\operatorname", (a) => a.trim());
+  s = replaceCommand1(s, "\\operatorname", (a) => {
+    const op = a.trim();
+    return op === "tr" ? op : `upright(${JSON.stringify(op)})`;
+  });
   s = replaceCommand1(s, "\\mathrm", (a) => `upright(${JSON.stringify(a)})`);
   s = replaceCommand1(s, "\\text", (a) => `text(${JSON.stringify(a.replace(/\\,/g, " "))})`);
   s = replaceCommand1(s, "\\hat", (a) => `hat(${convertMath(a)})`);
@@ -241,7 +347,7 @@ function convertMath(input) {
   s = replaceCommand1(s, "\\bar", (a) => `overline(${convertMath(a)})`);
 
   const commands = new Map([
-    ["\\langle", `${LANGLE} `],
+    ["\\langle", ` ${LANGLE} `],
     ["\\rangle", ` ${RANGLE}`],
     ["\\mid", " | "],
     ["\\vert", " | "],
@@ -263,17 +369,18 @@ function convertMath(input) {
     ["\\psi", " psi "],
     ["\\phi", " phi "],
     ["\\ell", " ell "],
-    ["\\times", " times "],
-    ["\\otimes", " otimes "],
-    ["\\oplus", " oplus "],
-    ["\\cong", " cong "],
-    ["\\sim", " sim "],
-    ["\\simeq", " simeq "],
-    ["\\in", " in "],
-    ["\\notin", "in.not"],
-    ["\\subseteq", " subset.eq "],
-    ["\\subset", " subset "],
-    ["\\setminus", "\\"],
+    ["\\times", ` ${TIMES} `],
+    ["\\otimes", ` ${OTIMES} `],
+    ["\\oplus", ` ${OPLUS} `],
+    ["\\cong", ` ${CONG} `],
+    ["\\sim", ` ${SIM} `],
+    ["\\simeq", ` ${SIMEQ} `],
+    ["\\infty", ` ${INFTY} `],
+    ["\\in", ` ${IN} `],
+    ["\\notin", ` ${NOTIN} `],
+    ["\\subseteq", ` ${SUBSETEQ} `],
+    ["\\subset", ` ${SUBSET} `],
+    ["\\setminus", ` ${SETMINUS} `],
     ["\\geq", ">="],
     ["\\ge", ">="],
     ["\\leq", "<="],
@@ -317,11 +424,21 @@ function convertMath(input) {
     s = s.replaceAll(from, to);
   }
 
-  s = s.replace(/\|/g, ` ${VBAR} `);
+  s = replacePipesOutsideStrings(s);
+  s = escapeAngleCommas(s);
   s = s.replace(/_\{([^{}]+)\}/g, (_m, body) => `_(${normalizeScript(body)})`);
   s = s.replace(/\^\{([^{}]+)\}/g, (_m, body) => `^(${normalizeScript(body)})`);
   s = s.replace(/\baP_/g, "a P_");
   s = s.replace(/\bdE_/g, "d E_");
+  s = s.replace(/\bab\b/g, "a b");
+  s = s.replace(/\b([A-Z])([A-Z])\b/g, (word, a, b) => {
+    if (["RR", "CC", "NN", "ZZ", "QQ", "FF", "PP"].includes(word)) return word;
+    return `${a} ${b}`;
+  });
+  s = s.replace(/\b([A-Z])([a-z])\b/g, (word, a, b) => {
+    if (word === "Pr") return word;
+    return `${a} ${b}`;
+  });
   s = s.replace(/\\([A-Za-z]+)/g, "$1");
   s = s.replace(/\s+/g, " ").trim();
   return s;
@@ -458,8 +575,12 @@ function convertBody(lines) {
       continue;
     }
 
-    if (trimmed.startsWith("@@lean4")) {
-      out.push(`#remark[*Lean4 block.* ${convertInline(trimmed.replace(/^@@lean4\s*/, ""))}]`);
+    const leanPlaceholder = /^@@lean4(?:\(([^)]*)\))?\s+\[([^\]]+)\]\s*$/.exec(trimmed);
+    if (leanPlaceholder) {
+      const selector = (leanPlaceholder[1] || "").trim();
+      const tag = leanPlaceholder[2].trim();
+      const pathArg = selector ? `, path: ${typstString(selector)}` : "";
+      out.push(`#note-code(lang: lean${pathArg})[${tag}]`);
       continue;
     }
 
@@ -522,6 +643,7 @@ function convertFile(source, root, file) {
   const sourceLabel = meta.source || relSource;
   const header = [
     '#import "/_typst/roam.typ": *',
+    `#let note-code = note-code.with(note-path: ${typstString(relSource.replace(/\.md$/, ".typ"))})`,
     "#show: note.with(",
     `  id: ${typstString(id)},`,
     `  title: ${typstString(title)},`,
@@ -532,7 +654,22 @@ function convertFile(source, root, file) {
     `// source: ${sourceLabel}`,
     "",
   ];
-  return header.join("\n") + convertBody(body);
+  const converted = convertBody(body);
+  const noteStem = relSource.replace(/\.md$/, "");
+  const leanDir = path.posix.dirname(`/.lean/${noteStem}.lean`);
+  return header.join("\n") + converted.replace(
+    /#note-code\(lang: lean, path: "([^"]+)"\)/g,
+    (_match, selector) => {
+      const newfile = /^newfile(?::(\d+))?$/i.exec(selector);
+      const resolved = newfile
+        ? `/.lean/${noteStem}.mirror-${Number(newfile[1] || 1)}.lean`
+        : path.posix.normalize(path.posix.join(
+          leanDir,
+          path.posix.extname(selector) ? selector : `${selector}.lean`,
+        ));
+      return `#note-code(lang: lean, path: ${typstString(resolved)})`;
+    },
+  );
 }
 
 async function main() {

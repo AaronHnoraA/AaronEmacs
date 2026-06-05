@@ -146,6 +146,7 @@
   (add-to-list 'load-path (file-name-as-directory roam-dir))
   (add-to-list 'load-path (file-name-as-directory telescope-dir))
   (add-to-list 'load-path (file-name-as-directory (expand-file-name "lang" dir)))
+  (add-to-list 'load-path (file-name-as-directory (expand-file-name "lang/lean" dir)))
   (add-to-list 'load-path (file-name-as-directory general-dir))
   (add-to-list 'load-path (file-name-as-directory aaron-ui-dir)))
 

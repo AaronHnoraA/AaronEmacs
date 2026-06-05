@@ -126,3 +126,4 @@ health-native:
 
 note-test:
 	$(BATCH) -l test/note-tests.el -f ert-run-tests-batch-and-exit
+	typst compile --root . test/note-code-render-fixture.typ /tmp/note-code-render-fixture.pdf

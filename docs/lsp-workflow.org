@@ -169,25 +169,32 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 例如当前已有：
 
 - =java-mode= / =java-ts-mode= -> =lsp-java=
-- =lean4-mode= -> =lsp-mode=
+- =lean-mode= -> Eglot（=lean4-infoview-bridge= + xwidget）
 
-** Lean interactive infoview
+** Lean eglot route + xwidget infoview
 
-=lean4-mode= 保持显式 =lsp-mode= backend，不切到 Eglot。Lean 的信息面板在本地
-buffer 优先走 =lisp/lang/init-lean-infoview.el=：
+Lean 4 使用自定义 =lean-mode=（=lisp/lang/lean/=），以 Eglot 作为 LSP 客户端。
+不再依赖 =lean4-mode.el= 主文件（避免触发其 =lsp-mode= 注册），只加载其语法/缩进
+子文件（=lean4-syntax=、=lean4-eri=、=lean4-input=）。
 
-- =lean4-info-buffer-refresh= 外层 advice 先判断是否可用 interactive infoview。
-- 可用时通过 =$/lean/rpc/connect= 建 session，并用 =$/lean/rpc/call= 拉
-  interactive goals、term goal 和 diagnostics。
-- TaggedText 渲染进 =*Lean Goal*=，RPC ref 存成 text property；=K= / eldoc
-  再按 ref 调 =Lean.Widget.InteractiveDiagnostics.infoToInteractive=。
-- session keepAlive 是通知，每 20 秒发送一次；kill buffer / major mode change
-  会取消 timer 并清 ref cache。
-- =C-c C-w= 可按 buffer 切回 plain infoview。
+Eglot server program 通过 =my/register-eglot-server-program= 注册：
+- Lake 项目（有 lakefile.lean/toml）：=lake serve=
+- 单文件：=lean --server=
 
-TRAMP Lean buffer 不尝试 interactive RPC connect，继续使用 upstream
-=lean4-info.el= 的 =$/lean/plainGoal= fallback；远程调优逻辑仍在
-=lisp/lang/init-lean.el=。
+信息面板（infoview）只走 xwidget-webkit + Node.js bridge：
+
+- =C-c C-i= 启动 =lisp/lang/lean/lean4-infoview-bridge/server.mjs=，server 内运行 =lake serve=
+  并桥接给 React 版官方 =@leanprover/infoview=；Emacs 打开 xwidget side window。
+- Emacs → infoview：=post-command-hook= 注入 =window.updateCursor=；文本变化通
+  过 HTTP POST =/cursor= 同步到 bridge。
+- Infoview → Emacs（反向通道）：infoview 动作 POST 到 bridge 的 =/editor/<cmd>=
+  路由；bridge 将 =EMACS_CMD={...}= 写到 stdout；进程 filter 分发：
+  - =show-document= 跳转到 goal 中点击的源码位置
+  - =insert-text= 应用 "Try this" 建议
+  - =apply-edit= 应用 code action 文本编辑
+  - =restart-file= 触发 =lean-refresh-file-dependencies=
+
+TRAMP 远程 buffer：xwidget infoview 不可用。=eglot-ensure= 跳过远程 buffer（不做自动 connect）。
 
 * Add A Custom Eglot Mapping
 

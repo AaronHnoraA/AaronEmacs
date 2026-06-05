@@ -5,27 +5,36 @@
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
 import { readFileSync, existsSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join, extname } from 'node:path'
 
 const __dir = dirname(fileURLToPath(import.meta.url))
 const PORT = parseInt(process.argv[2] ?? '0')
 const ROOT  = process.argv[3] ?? process.cwd()
 
+function log(message) {
+  process.stdout.write(`[lean-iv ${new Date().toISOString()}] ${message}\n`)
+}
+
 // ── LSP stdio client ─────────────────────────────────────────────────────────
 
 class LspClient {
   constructor(cmd, args, cwd) {
     this._buf  = Buffer.alloc(0)
-    this._pending  = new Map()   // id → {res,rej}
+    this._pending  = new Map()   // id → {res,rej,timer}
     this._listeners = new Map()  // method → Set<fn>
     this._id = 1
+    log(`spawning LSP: ${cmd} ${args.join(' ')} cwd=${cwd}`)
     this.proc = spawn(cmd, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] })
     this.proc.stdout.on('data', c => this._ingest(c))
     this.proc.stderr.on('data', d => process.stderr.write(d))
-    this.proc.on('exit', code => {
-      for (const {rej} of this._pending.values()) rej(new Error(`server exit ${code}`))
-      this._pending.clear()
+    this.proc.on('error', err => {
+      log(`LSP process error: ${err.message}`)
+      this._rejectAll(err)
+    })
+    this.proc.on('exit', (code, signal) => {
+      log(`LSP process exited: code=${code} signal=${signal}`)
+      this._rejectAll(new Error(`server exit ${code ?? signal}`))
     })
   }
 
@@ -47,12 +56,21 @@ class LspClient {
 
   _dispatch(msg) {
     if (msg.id != null && this._pending.has(msg.id)) {
-      const {res,rej} = this._pending.get(msg.id)
+      const {res,rej,timer} = this._pending.get(msg.id)
       this._pending.delete(msg.id)
+      clearTimeout(timer)
       msg.error ? rej(msg.error) : res(msg.result)
     } else if (msg.method) {
       this._listeners.get(msg.method)?.forEach(fn => { try { fn(msg.params) } catch {} })
     }
+  }
+
+  _rejectAll(err) {
+    for (const {rej,timer} of this._pending.values()) {
+      clearTimeout(timer)
+      rej(err)
+    }
+    this._pending.clear()
   }
 
   _frame(msg) {
@@ -61,10 +79,14 @@ class LspClient {
     this.proc.stdin.write(frame, 'utf8')
   }
 
-  request(method, params) {
+  request(method, params, timeoutMs = 30_000) {
     const id = this._id++
     return new Promise((res, rej) => {
-      this._pending.set(id, {res, rej})
+      const timer = setTimeout(() => {
+        this._pending.delete(id)
+        rej({ code: -32800, message: `${method} timed out after ${timeoutMs}ms` })
+      }, timeoutMs)
+      this._pending.set(id, {res, rej, timer})
       this._frame({ jsonrpc: '2.0', id, method, params })
     })
   }
@@ -84,6 +106,7 @@ class LspClient {
 
 let lsp
 let initResult = null          // cached initialize result
+let lastCursor = null          // latest Emacs cursor location for late SSE clients
 const openDocs     = new Map() // uri → {version, text}
 const rpcSessions  = new Map() // sessionId → keepAliveTimer
 const sseClients   = new Set() // active SSE response objects
@@ -98,49 +121,68 @@ function sseEmit(method, params) {
 // ── LSP lifecycle ─────────────────────────────────────────────────────────────
 
 async function startLsp() {
+  log(`initializing LSP for root ${ROOT}`)
   lsp = new LspClient('lake', ['serve'], ROOT)
   lsp.on('$/lean/fileProgress',            p => sseEmit('$/lean/fileProgress', p))
   lsp.on('textDocument/publishDiagnostics', p => sseEmit('textDocument/publishDiagnostics', p))
 
   initResult = await lsp.request('initialize', {
     processId: process.pid,
-    rootUri:  `file://${ROOT}`,
+    rootUri:  pathToFileURL(ROOT).href,
     capabilities: {
       textDocument: { synchronization: { dynamicRegistration: false } },
     },
-  })
+  }, 180_000)
   lsp.notify('initialized', {})
+  log('LSP initialized')
   // Notify the page that LSP is ready (passes the InitializeResult)
   sseEmit('lsp:ready', initResult)
 }
 
 function ensureOpen(uri) {
   if (openDocs.has(uri)) return
-  const path = uri.replace(/^file:\/\//, '')
+  const path = uriToPath(uri)
   if (!existsSync(path)) return
   const text = readFileSync(path, 'utf8')
   openDocs.set(uri, { version: 1, text })
-  lsp.notify('textDocument/didOpen', {
+  log(`didOpen ${uri} bytes=${Buffer.byteLength(text, 'utf8')}`)
+  const params = {
     textDocument: { uri, languageId: 'lean4', version: 1, text },
-  })
+  }
+  lsp.notify('textDocument/didOpen', params)
+  sseEmit('client:textDocument/didOpen', params)
+}
+
+function uriToPath(uri) {
+  try {
+    return fileURLToPath(uri)
+  } catch {
+    return decodeURIComponent(uri.replace(/^file:\/\//, ''))
+  }
 }
 
 function syncDoc(uri, text) {
   if (!openDocs.has(uri)) {
     openDocs.set(uri, { version: 1, text })
-    lsp.notify('textDocument/didOpen', {
+    log(`didOpen ${uri} bytes=${Buffer.byteLength(text, 'utf8')}`)
+    const params = {
       textDocument: { uri, languageId: 'lean4', version: 1, text },
-    })
+    }
+    lsp.notify('textDocument/didOpen', params)
+    sseEmit('client:textDocument/didOpen', params)
     return
   }
   const prev = openDocs.get(uri)
   if (prev.text === text) return
   const version = prev.version + 1
   openDocs.set(uri, { version, text })
-  lsp.notify('textDocument/didChange', {
+  log(`didChange ${uri} version=${version} bytes=${Buffer.byteLength(text, 'utf8')}`)
+  const params = {
     textDocument: { uri, version },
     contentChanges: [{ text }],
-  })
+  }
+  lsp.notify('textDocument/didChange', params)
+  sseEmit('client:textDocument/didChange', params)
 }
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
@@ -150,6 +192,7 @@ const MIME = {
   '.js':   'application/javascript; charset=utf-8',
   '.css':  'text/css; charset=utf-8',
   '.svg':  'image/svg+xml',
+  '.ttf':  'font/ttf',
   '.woff2':'font/woff2',
   '.json': 'application/json; charset=utf-8',
   '.ico':  'image/x-icon',
@@ -160,7 +203,12 @@ function serveStatic(res, relPath) {
   const full = join(__dir, 'dist', relPath)
   if (!existsSync(full)) { res.writeHead(404); res.end('not found'); return }
   res.setHeader('Content-Type', MIME[extname(full)] ?? 'application/octet-stream')
-  res.setHeader('Cache-Control', 'public, max-age=3600')
+  res.setHeader(
+    'Cache-Control',
+    extname(full) === '.html'
+      ? 'no-cache'
+      : 'public, max-age=31536000, immutable',
+  )
   res.writeHead(200); res.end(readFileSync(full))
 }
 
@@ -194,7 +242,10 @@ const http = createServer(async (req, res) => {
     res.setHeader('Connection', 'keep-alive')
     res.writeHead(200)
     sseClients.add(res)
-    // If LSP already initialized, notify immediately
+    // Late xwidget clients need the cursor before lsp:ready so the official
+    // infoview is initialized at a real Lean location, not at an empty :1:0.
+    if (lastCursor) res.write(`data: ${JSON.stringify({method:'emacs:cursor',params:lastCursor})}\n\n`)
+    // If LSP already initialized, notify immediately.
     if (initResult) res.write(`data: ${JSON.stringify({method:'lsp:ready',params:initResult})}\n\n`)
     req.on('close', () => sseClients.delete(res))
     return
@@ -204,11 +255,16 @@ const http = createServer(async (req, res) => {
   if (url.pathname === '/rpc' && req.method === 'POST') {
     try {
       const { uri, method, params } = await readJSON(req)
-      if (!lsp) { jsonResp(res, null); return }
+      if (!lsp) {
+        jsonResp(res, { code: -32098, message: 'Lean server is not ready' })
+        return
+      }
       if (uri) ensureOpen(uri)
+      log(`rpc ${method} uri=${uri ?? ''}`)
       const result = await lsp.request(method, params)
       jsonResp(res, result)
     } catch (err) {
+      log(`rpc error: ${String(err?.message ?? err)}`)
       const code = err?.code ?? -32000
       jsonResp(res, { code, message: String(err?.message ?? err) }, 200)
     }
@@ -220,6 +276,7 @@ const http = createServer(async (req, res) => {
     try {
       const { uri, method, params } = await readJSON(req)
       if (lsp) { if (uri) ensureOpen(uri); lsp.notify(method, params) }
+      log(`notify ${method} uri=${uri ?? ''}`)
     } catch {}
     res.writeHead(200); res.end(); return
   }
@@ -233,16 +290,26 @@ const http = createServer(async (req, res) => {
   if (url.pathname === '/create-session' && req.method === 'POST') {
     try {
       const { uri } = await readJSON(req)
-      if (!lsp) { jsonResp(res, { sessionId: '' }); return }
+      if (!lsp) {
+        jsonResp(res, { code: -32098, message: 'Lean server is not ready' })
+        return
+      }
       ensureOpen(uri)
-      const { sessionId } = await lsp.request('$/lean/rpc/connect', { uri })
+      log(`create RPC session uri=${uri}`)
+      const result = await lsp.request('$/lean/rpc/connect', { uri })
+      const sessionId = typeof result === 'string' ? result : result?.sessionId
+      if (!sessionId) {
+        throw { code: -32000, message: `invalid RPC session response: ${JSON.stringify(result)}` }
+      }
       const timer = setInterval(() => {
         lsp.notify('$/lean/rpc/keepAlive', { uri, sessionId })
       }, 20_000)
       rpcSessions.set(sessionId, timer)
       jsonResp(res, { sessionId })
     } catch (err) {
-      jsonResp(res, { error: String(err) }, 500)
+      log(`create RPC session error: ${String(err?.message ?? err)}`)
+      const code = err?.code ?? -32000
+      jsonResp(res, { code, message: String(err?.message ?? err) }, 200)
     }
     return
   }
@@ -252,6 +319,7 @@ const http = createServer(async (req, res) => {
       const { sessionId } = await readJSON(req)
       const timer = rpcSessions.get(sessionId)
       if (timer) { clearInterval(timer); rpcSessions.delete(sessionId) }
+      log(`close RPC session id=${sessionId}`)
     } catch {}
     res.writeHead(200); res.end(); return
   }
@@ -259,9 +327,29 @@ const http = createServer(async (req, res) => {
   // Cursor sync from Emacs (open + sync doc, no response needed) ──────────────
   if (url.pathname === '/cursor' && req.method === 'POST') {
     try {
-      const { uri, text } = await readJSON(req)
-      if (lsp && uri) { text ? syncDoc(uri, text) : ensureOpen(uri) }
+      const { uri, text, line, character } = await readJSON(req)
+      if (lsp && uri) {
+        typeof text === 'string' ? syncDoc(uri, text) : ensureOpen(uri)
+      }
+      if (uri && Number.isFinite(line) && Number.isFinite(character)) {
+        lastCursor = { uri, line, character }
+        sseEmit('emacs:cursor', lastCursor)
+      }
+      log(`cursor uri=${uri ?? ''} line=${line ?? ''} char=${character ?? ''} text=${typeof text === 'string' ? Buffer.byteLength(text, 'utf8') : 0}`)
     } catch {}
+    res.writeHead(200); res.end(); return
+  }
+
+  // Editor reverse channel (infoview → Emacs via stdout EMACS_CMD lines) ─────
+  if (url.pathname.startsWith('/editor/') && req.method === 'POST') {
+    try {
+      const body = await readJSON(req)
+      const cmd  = url.pathname.slice('/editor/'.length)  // e.g. 'show-document'
+      process.stdout.write(`EMACS_CMD=${JSON.stringify({ cmd, ...body })}\n`)
+      log(`editor reverse: cmd=${cmd}`)
+    } catch (err) {
+      log(`editor reverse error: ${String(err?.message ?? err)}`)
+    }
     res.writeHead(200); res.end(); return
   }
 
@@ -275,6 +363,7 @@ const http = createServer(async (req, res) => {
 http.listen(PORT, '127.0.0.1', async () => {
   const port = http.address().port
   process.stdout.write(`LEAN_INFOVIEW_PORT=${port}\n`)
+  log(`HTTP bridge listening on 127.0.0.1:${port}`)
   try {
     await startLsp()
     process.stderr.write(`lean4-infoview-bridge :${port}  root: ${ROOT}\n`)

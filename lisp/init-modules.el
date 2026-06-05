@@ -88,6 +88,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-previewer)
 (require 'init-md)
 (require 'init-ratex)
+(require 'init-note-code)
 (require 'init-typst-roam)
 
 ;; standalone apps

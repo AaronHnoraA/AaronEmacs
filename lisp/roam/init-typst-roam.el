@@ -591,30 +591,33 @@ Each entry is a plist with :id, :text, and :pos."
     (display-buffer buf)))
 
 (defun my/typst-roam-follow-link ()
-  "Jump to the note referenced by the #note-link at point.
+  "Jump to the note or source region referenced at point.
 Targets may use Aaronnote roam syntax:
   roam://note-id
   roam://note-id#tag
   roam://note-id@dom-target
 Path-like refs are accepted and resolved to canonical note ids."
   (interactive)
-  (if-let* ((target (my/typst-roam--target-at-point))
-            (parsed (my/typst-roam--parse-target target))
-            (note-id (plist-get parsed :slug))
-            (file (plist-get parsed :file)))
-      (let ((ref (plist-get parsed :ref)))
-        (if (file-exists-p file)
-            (progn
-              (my/typst-roam--touch-recent note-id)
-              (find-file file)
-              (cond
-               ((plist-get parsed :id)
-                (my/typst-roam--goto-tag-id (plist-get parsed :id)))
-               ((plist-get parsed :dom)
-                (my/typst-roam--goto-dom-target (plist-get parsed :dom)))))
-          (when (yes-or-no-p (format "Note '%s' not found. Create it? " ref))
-            (my/typst-roam-new-note ref))))
-    (user-error "No #note-link found at point")))
+  (if (and (fboundp 'my/note-code-at-point)
+           (my/note-code-at-point))
+      (my/note-code-open-at-point)
+    (if-let* ((target (my/typst-roam--target-at-point))
+              (parsed (my/typst-roam--parse-target target))
+              (note-id (plist-get parsed :slug))
+              (file (plist-get parsed :file)))
+        (let ((ref (plist-get parsed :ref)))
+          (if (file-exists-p file)
+              (progn
+                (my/typst-roam--touch-recent note-id)
+                (find-file file)
+                (cond
+                 ((plist-get parsed :id)
+                  (my/typst-roam--goto-tag-id (plist-get parsed :id)))
+                 ((plist-get parsed :dom)
+                  (my/typst-roam--goto-dom-target (plist-get parsed :dom)))))
+            (when (yes-or-no-p (format "Note '%s' not found. Create it? " ref))
+              (my/typst-roam-new-note ref))))
+      (user-error "No #note-link or #note-code found at point"))))
 
 (defun my/typst-roam-find-note ()
   "Find a roam note by Aaronnote id/path/title with completion."

@@ -31,17 +31,21 @@
 (declare-function eglot-signal-didChangeConfiguration "eglot" (server))
 (declare-function company-mode "company" (&optional arg))
 (declare-function previewer-workbench "previewer" ())
+(declare-function previewer-open-external-browser-maybe-delayed "previewer" (url))
 (declare-function my/forward-delimiter-or-copilot-dwim "init-copilot" ())
 (declare-function my/backward-delimiter-or-snippet-dwim "init-copilot" ())
-(declare-function my/copilot-auto-enable-h "init-copilot" ())
 (declare-function my/copilot-completion-visible-p "init-copilot" ())
 (declare-function copilot-accept-completion "copilot" (&optional transform-fn))
+(declare-function my/flymake-vale-setup "init-vale" ())
 (declare-function websocket-open "websocket" (url &rest args))
 (declare-function websocket-close "websocket" (websocket))
 (declare-function websocket-send-text "websocket" (websocket text))
 (declare-function websocket-frame-text "websocket" (frame))
 (declare-function evil-local-set-key "evil-core" (state key def))
 (autoload 'previewer-workbench "previewer" nil t)
+(autoload 'typst-ts-compile "typst-ts-compile" nil t)
+(autoload 'typst-ts-compile-and-preview "typst-ts-compile" nil t)
+(autoload 'typst-ts-watch-mode "typst-ts-watch-mode" nil t)
 (defvar company-backends)
 (defvar company-idle-delay)
 (defvar company-minimum-prefix-length)
@@ -78,6 +82,8 @@
   "Websocket connected to Tinymist's control-plane server.")
 (defvar-local my/typst-preview--sync-timer nil
   "Idle timer used to sync unsaved Typst buffer contents to Tinymist.")
+(defvar-local my/typst-html-preview--save-timer nil
+  "Idle timer used to save edits for Typst's HTML watch server.")
 (defvar-local my/typst-preview--control-output-tail ""
   "Recent preview process output used to detect split control-plane messages.")
 
@@ -97,6 +103,12 @@
 
 (defcustom my/typst-preview-partial-rendering t
   "When non-nil, enable partial rendering in `tinymist preview'."
+  :type 'boolean
+  :group 'my/typst)
+
+(defcustom my/typst-preview-continuous-page t
+  "When non-nil, render Aaronnote Tinymist previews as one continuous page.
+Formal PDF compilation remains paged because this is passed only to Tinymist."
   :type 'boolean
   :group 'my/typst)
 
@@ -160,6 +172,45 @@
 (defcustom my/typst-preview-host "127.0.0.1:23635"
   "Host and port used for Tinymist's official web preview."
   :type 'string
+  :group 'my/typst)
+
+(defcustom my/typst-preview-backend 'tinymist
+  "Backend used by `my/typst-preview'.
+Tinymist previews paged SVG with unsaved-buffer sync and source navigation.
+HTML uses Typst's experimental semantic HTML watch server and native browser
+controls, but refreshes from saved files only."
+  :type '(choice (const :tag "Tinymist SVG" tinymist)
+                 (const :tag "Typst HTML" html))
+  :group 'my/typst)
+
+(defcustom my/typst-html-preview-host "127.0.0.1:23636"
+  "Host and port used for Typst's HTML watch preview."
+  :type 'string
+  :group 'my/typst)
+
+(defcustom my/typst-html-preview-directory
+  (expand-file-name "var/typst-html-preview/" user-emacs-directory)
+  "Fallback directory receiving generated HTML preview files.
+AaronNote-style projects with `_typst/roam.typ' write to their `public/'
+directory instead."
+  :type 'directory
+  :group 'my/typst)
+
+(defcustom my/typst-html-preview-publish-directory "public"
+  "Project-relative output directory for AaronNote HTML preview and publish."
+  :type 'string
+  :group 'my/typst)
+
+(defcustom my/typst-html-preview-save-on-change t
+  "When non-nil, save Typst buffers after idle edits during HTML preview.
+Typst's HTML watch server observes disk files rather than Emacs buffer memory,
+so this enables live reload at the cost of saving edits automatically."
+  :type 'boolean
+  :group 'my/typst)
+
+(defcustom my/typst-html-preview-save-delay 0.25
+  "Idle seconds before saving edits for HTML preview live reload."
+  :type 'number
   :group 'my/typst)
 
 (defcustom my/typst-preview-control-host "127.0.0.1:0"
@@ -341,7 +392,10 @@ Provides a visual cue so the new cursor position is easy to spot."
   "Return Tinymist CLI preview launch arguments for ROOT."
   (append
    (list "preview"
-         "--no-open"
+         "--no-open")
+   (when my/typst-preview-continuous-page
+     (list "--input" "aaronnote-preview=continuous"))
+   (list
          "--data-plane-host"
          my/typst-preview-host
          "--control-plane-host"
@@ -359,15 +413,19 @@ Provides a visual cue so the new cursor position is easy to spot."
            (mapconcat #'identity font-paths path-separator)))))
 
 (defun my/typst-preview-url ()
-  "Return the URL for Tinymist's official web preview."
-  (format "http://%s" my/typst-preview-host))
+  "Return the URL for the configured Typst preview backend."
+  (format "http://%s"
+          (if (eq my/typst-preview-backend 'html)
+              my/typst-html-preview-host
+            my/typst-preview-host)))
 
 (defun my/typst-start-fresh-preview ()
-  "Clear stale Tinymist preview state, then start a fresh preview server."
-  (my/typst-start-default-preview t))
+  "Clear stale preview state, then start the configured preview backend."
+  (interactive)
+  (my/typst-start-preview t))
 
 (defun my/typst-previewer-setup ()
-  "Route Previewer to Tinymist's official web preview for this buffer."
+  "Route Previewer to the configured Typst preview backend."
   (setq-local previewer-external-url-function #'my/typst-preview-url)
   (setq-local previewer-external-start-function #'my/typst-start-fresh-preview)
   (setq-local previewer-external-browser-backend 'system)
@@ -390,6 +448,7 @@ Provides a visual cue so the new cursor position is easy to spot."
 
 (defun my/typst-eglot-setup ()
   "Configure and start Eglot for Typst buffers when tinymist is available."
+  (interactive)
   (when (fboundp 'my/eglot-set-workspace-configuration)
     (my/eglot-set-workspace-configuration
      (my/typst-eglot-workspace-configuration)))
@@ -431,6 +490,22 @@ Provides a visual cue so the new cursor position is easy to spot."
   (when (timerp my/typst-preview--sync-timer)
     (cancel-timer my/typst-preview--sync-timer))
   (setq my/typst-preview--sync-timer nil))
+
+(defun my/typst-html-preview--cancel-save-timer ()
+  "Cancel a pending HTML preview save."
+  (when (timerp my/typst-html-preview--save-timer)
+    (cancel-timer my/typst-html-preview--save-timer))
+  (setq my/typst-html-preview--save-timer nil))
+
+(defun my/typst-html-preview-save-buffer (buffer)
+  "Save BUFFER when it is still owned by an active HTML preview."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq my/typst-html-preview--save-timer nil)
+      (when (and (eq my/typst-preview-backend 'html)
+                 (my/typst-preview--active-p)
+                 (buffer-modified-p))
+        (save-buffer)))))
 
 (defun my/typst-preview--active-p ()
   "Return non-nil when this buffer owns a live Tinymist preview process."
@@ -498,15 +573,25 @@ Provides a visual cue so the new cursor position is easy to spot."
                       (error-message-string err)))))))))
 
 (defun my/typst-preview-after-change (&rest _)
-  "Schedule an in-memory sync so Tinymist sees unsaved buffer edits."
-  (when (and (my/typst-preview--active-p)
-             my/typst-preview--socket)
+  "Schedule the configured preview backend's edit synchronization."
+  (cond
+   ((and (eq my/typst-preview-backend 'html)
+         my/typst-html-preview-save-on-change
+         (my/typst-preview--active-p))
+    (my/typst-html-preview--cancel-save-timer)
+    (setq my/typst-html-preview--save-timer
+          (run-with-idle-timer
+           my/typst-html-preview-save-delay nil
+           #'my/typst-html-preview-save-buffer
+           (current-buffer))))
+   ((and (my/typst-preview--active-p)
+         my/typst-preview--socket)
     (my/typst-preview--cancel-sync-timer)
     (setq my/typst-preview--sync-timer
           (run-with-idle-timer
            my/typst-preview-sync-delay nil
            #'my/typst-preview-sync-memory
-           (current-buffer)))))
+           (current-buffer))))))
 
 (defun my/typst-preview--goto-file-position (file-name position)
   "Open FILE-NAME and move point to Tinymist zero-based POSITION."
@@ -659,6 +744,7 @@ absolute positions."
   (interactive)
   (my/typst--cancel-preview-start-timer)
   (my/typst-preview--cancel-sync-timer)
+  (my/typst-html-preview--cancel-save-timer)
   (when my/typst-preview--socket
     (condition-case nil
         (websocket-close my/typst-preview--socket)
@@ -726,9 +812,12 @@ absolute positions."
       (error nil))))
 
 (defun my/typst-preview-clean-stale-port ()
-  "Clear stale Tinymist preview listeners on `my/typst-preview-host'."
+  "Clear stale listeners for the configured Typst preview backend."
   (when my/typst-preview-clean-stale-port-on-start
-    (when-let* ((port (my/typst-preview--host-port))
+    (when-let* ((host (if (eq my/typst-preview-backend 'html)
+                          my/typst-html-preview-host
+                        my/typst-preview-host))
+                (port (my/typst-preview--host-port host))
                 (pids (my/typst-preview--port-listener-pids port)))
       (let ((remaining pids)
             (signals '(interrupt term kill))
@@ -743,6 +832,93 @@ absolute positions."
           (message "Cleared stale Typst preview listener(s) on port %d: %s"
                    port
                    (string-join pids ", ")))))))
+
+(defun my/typst-html-preview-output (root file)
+  "Return generated HTML preview path below ROOT for FILE."
+  (let* ((aaronnote-p
+          (file-exists-p (expand-file-name "_typst/roam.typ" root)))
+         (output
+          (if aaronnote-p
+              (expand-file-name
+               (concat
+                (file-name-sans-extension (file-relative-name file root))
+                ".html")
+               (expand-file-name my/typst-html-preview-publish-directory root))
+            (expand-file-name
+             (format "%s-%s.html"
+                     (file-name-base file)
+                     (substring (secure-hash 'sha1 (file-truename file)) 0 10))
+             my/typst-html-preview-directory))))
+    (make-directory (file-name-directory output) t)
+    output))
+
+(defun my/typst-html-preview-args (root file)
+  "Return Typst HTML watch arguments for ROOT and FILE."
+  (append
+   (list "watch"
+         "--features" "html"
+         "--root" root
+         "--port" (number-to-string
+                    (or (my/typst-preview--host-port
+                         my/typst-html-preview-host)
+                        23636)))
+   (when-let* ((font-paths (seq-filter #'file-directory-p
+                                       (my/typst-lsp-font-paths))))
+     (list "--font-path"
+           (mapconcat #'identity font-paths path-separator)))
+   (list file (my/typst-html-preview-output root file))))
+
+(defun my/typst-start-html-preview (&optional force)
+  "Start Typst's semantic HTML watch server.
+When FORCE is non-nil, restart an already active preview."
+  (unless (my/typst-command)
+    (user-error "Cannot find typst"))
+  (unless buffer-file-name
+    (user-error "Save this Typst buffer before starting preview"))
+  (when (buffer-modified-p)
+    (save-buffer))
+  (let* ((file (file-truename buffer-file-name))
+         (root (my/typst-preview-root file))
+         (args (my/typst-html-preview-args root file)))
+    (my/typst-preview-stop-active (current-buffer))
+    (unless (and (not force)
+                 (process-live-p my/typst-preview--process)
+                 (equal my/typst-preview--process-file file)
+                 (equal my/typst-preview--process-args args)
+                 (equal my/typst-preview--process-root root))
+      (my/typst-stop-preview)
+      (my/typst-preview-clean-stale-port)
+      (let ((source-buffer (current-buffer))
+            (log-buffer (my/typst-preview-log-buffer))
+            (default-directory root))
+        (with-current-buffer log-buffer
+          (erase-buffer)
+          (insert (format "cwd: %s\n$ %s %s\n\n"
+                          root (my/typst-command)
+                          (mapconcat #'shell-quote-argument args " "))))
+        (setq my/typst-preview--process
+              (make-process
+               :name "typst-html-preview"
+               :buffer log-buffer
+               :command (cons (my/typst-command) args)
+               :noquery t
+               :connection-type 'pipe
+               :sentinel
+               (lambda (process event)
+                 (unless (process-live-p process)
+                   (when (buffer-live-p source-buffer)
+                     (with-current-buffer source-buffer
+                       (when (eq process my/typst-preview--process)
+                         (setq my/typst-preview--process nil)
+                         (when (eq my/typst-preview--owner-buffer source-buffer)
+                           (setq my/typst-preview--owner-buffer nil)))))
+                   (message "Typst HTML preview %s; see %s"
+                            (string-trim event)
+                            (buffer-name (process-buffer process)))))))
+        (setq my/typst-preview--process-file file
+              my/typst-preview--process-args args
+              my/typst-preview--process-root root
+              my/typst-preview--owner-buffer source-buffer)))))
 
 (defun my/typst-start-default-preview (&optional force)
   "Start Tinymist's official preview server for the current buffer.
@@ -824,16 +1000,42 @@ When FORCE is non-nil, restart even if the current buffer already owns it."
                 my/typst-preview--process-root root
                 my/typst-preview--owner-buffer source-buffer))))))
 
+(defun my/typst-start-preview (&optional force)
+  "Start the configured Typst preview backend.
+When FORCE is non-nil, restart the current preview."
+  (pcase my/typst-preview-backend
+    ('html (my/typst-start-html-preview force))
+    (_ (my/typst-start-default-preview force))))
+
+(defun my/typst-preview-set-backend (backend)
+  "Switch Typst preview to BACKEND and restart it."
+  (interactive
+   (list
+    (intern
+     (completing-read "Typst preview backend: "
+                      '("tinymist" "html") nil t nil nil
+                      (symbol-name my/typst-preview-backend)))))
+  (setq my/typst-preview-backend backend)
+  (my/typst-preview))
+
+(defun my/typst-preview-toggle-backend ()
+  "Toggle between Tinymist SVG and Typst HTML preview."
+  (interactive)
+  (my/typst-preview-set-backend
+   (if (eq my/typst-preview-backend 'html) 'tinymist 'html)))
+
 (defun my/typst-preview ()
-  "Start Tinymist's official preview and open it with Previewer."
+  "Start the configured Typst preview backend and open it with Previewer."
   (interactive)
   (my/typst-previewer-setup)
   (if (my/typst-preview--global-active-p)
       (progn
-        (my/typst-start-default-preview t)
-        (message "Refreshed Tinymist official previewer"))
+        (my/typst-start-preview t)
+        (previewer-open-external-browser-maybe-delayed
+         (my/typst-preview-url))
+        (message "Refreshed Typst %s preview" my/typst-preview-backend))
     (previewer-workbench)
-    (message "Started Tinymist official previewer")))
+    (message "Started Typst %s preview" my/typst-preview-backend)))
 
 (defun my/typst-preview--buffer-p (buffer)
   "Return non-nil when BUFFER is a Typst file buffer."
@@ -852,11 +1054,12 @@ When FORCE is non-nil, restart even if the current buffer already owns it."
       (my/typst-previewer-setup)
       (condition-case err
           (progn
-            (my/typst-start-default-preview t)
-            (message "Tinymist preview follows %s"
+            (my/typst-start-preview t)
+            (message "Typst %s preview follows %s"
+                     my/typst-preview-backend
                      (file-name-nondirectory buffer-file-name)))
         (error
-         (message "Tinymist preview follow failed: %s"
+         (message "Typst preview follow failed: %s"
                   (error-message-string err)))))))
 
 (defun my/typst-preview-follow-selected-window ()
@@ -993,18 +1196,17 @@ function calls like `#foo(...)[...]' do not get hijacked by parentheses."
                             (kbd key)
                             #'my/typst-preview-send-position)))))
 
-(defun my/typst-copilot-auto-enable ()
-  "Auto-enable Copilot in Typst buffers when the integration is available."
-  (when (or (fboundp 'my/copilot-auto-enable-h)
-            (require 'init-copilot nil t))
-    (when (fboundp 'my/copilot-auto-enable-h)
-      (my/copilot-auto-enable-h))))
+(defun my/typst-vale-auto-enable ()
+  "Enable Vale in the current Typst buffer, including the first opened one."
+  (when (or (fboundp 'my/flymake-vale-setup)
+            (require 'init-vale nil t))
+    (my/flymake-vale-setup)))
 
 (use-package typst-ts-mode
   :ensure t
   :mode ("\\.typ\\'" . my/typst-auto-mode)
   :bind (:map typst-ts-mode-map
-              ("C-c C-m" . my/typst-dispatch)
+              ("C-c m" . my/typst-dispatch)
               ("C-c C-p" . my/typst-preview)
               ("C-c C-j" . my/typst-preview-send-position)
               ("s-<return>" . my/typst-preview-send-position)
@@ -1019,7 +1221,7 @@ function calls like `#foo(...)[...]' do not get hijacked by parentheses."
          (typst-ts-mode . my/typst-ts-pretty-setup)
          (typst-ts-mode . my/typst-setup-bracket-dwim-keys)
          (typst-ts-mode . my/typst-setup-preview-sync-keys)
-         (typst-ts-mode . my/typst-copilot-auto-enable)
+         (typst-ts-mode . my/typst-vale-auto-enable)
          (typst-ts-mode . flymake-mode))
   :config
   (when-let* ((typst (my/typst-command)))
@@ -1036,7 +1238,7 @@ function calls like `#foo(...)[...]' do not get hijacked by parentheses."
   (add-hook hook #'my/typst-preview-buffer-setup)
   (add-hook hook #'my/typst-setup-bracket-dwim-keys)
   (add-hook hook #'my/typst-setup-preview-sync-keys)
-  (add-hook hook #'my/typst-copilot-auto-enable)
+  (add-hook hook #'my/typst-vale-auto-enable)
   (add-hook hook #'flymake-mode))
 
 (add-hook 'buffer-list-update-hook #'my/typst-preview-follow-selected-window)
@@ -1079,6 +1281,8 @@ function calls like `#foo(...)[...]' do not get hijacked by parentheses."
   [["Preview"
     ("p" "preview" my/typst-preview)
     ("P" "restart preview" my/typst-start-fresh-preview)
+    ("b" "choose backend" my/typst-preview-set-backend)
+    ("B" "toggle HTML/SVG" my/typst-preview-toggle-backend)
     ("j" "sync position" my/typst-preview-send-position)
     ("s" "stop preview" my/typst-stop-preview)
     ("l" "preview log" my/typst-preview-show-log)]
@@ -1095,10 +1299,10 @@ function calls like `#foo(...)[...]' do not get hijacked by parentheses."
     ("h" "hub" my/language-server-manager)]])
 
 (with-eval-after-load 'typst-ts-mode
-  (define-key typst-ts-mode-map (kbd "C-c C-m") #'my/typst-dispatch)
+  (define-key typst-ts-mode-map (kbd "C-c m") #'my/typst-dispatch)
   (with-eval-after-load 'which-key
     (which-key-add-key-based-replacements
-      "C-c C-m" "typst menu"
+      "C-c m" "typst menu"
       "C-c C-p" "typst preview"
       "C-c C-j" "typst sync preview"
       "s-<return>" "typst sync preview"
@@ -1107,9 +1311,9 @@ function calls like `#foo(...)[...]' do not get hijacked by parentheses."
 
 (dolist (hook '(typst-mode-hook my/typst-mode-hook))
   (add-hook hook (lambda ()
-                   (local-set-key (kbd "C-c C-m") #'my/typst-dispatch))))
+                   (local-set-key (kbd "C-c m") #'my/typst-dispatch))))
 
-(define-key my/typst-mode-map (kbd "C-c C-m") #'my/typst-dispatch)
+(define-key my/typst-mode-map (kbd "C-c m") #'my/typst-dispatch)
 
 (my/leader!
   "c t" '(:def my/typst-dispatch :which-key "typst"))
