@@ -1,0 +1,148 @@
+@font-face {
+  font-family: "Aaron Excalifont";
+  src:
+    local("Excalifont-Regular"),
+    local("Excalifont Regular"),
+    local("Excalifont");
+}
+
+@font-face {
+  font-family: "Aaron LiuGongQuan";
+  src:
+    local("FZLIUGQKSJF--GBK1-0"),
+    local("FZLiuGongQuanKaiShuJF"),
+    local("方正柳公权楷书 简繁");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "Aaron GFS Neohellenic Math";
+  src:
+    local("GFSNeohellenicMath"),
+    local("GFS Neohellenic Math");
+}
+
+:root {
+  --aaron-font-english: "New Computer Modern", "Libertinus Serif", "Times New Roman", "Iowan Old Style", "New York", Georgia;
+  --aaron-font-chinese: "Aaron LiuGongQuan", "FZLiuGongQuanKaiShuJF", "方正柳公权楷书 简繁";
+  --aaron-font-body: var(--aaron-font-english), var(--aaron-font-chinese), serif;
+  --aaron-font-title: "Aaron Excalifont", "Excalifont", var(--aaron-font-chinese), "New Computer Modern", "Times New Roman", serif;
+  --aaron-font-heading: "Aaron Excalifont", "Excalifont", var(--aaron-font-chinese), "New Computer Modern", "Times New Roman", serif;
+  --aaron-font-math: "Aaron GFS Neohellenic Math", "GFS Neohellenic Math", KaTeX_Main, "New Computer Modern", "Times New Roman", serif;
+  --aaron-font-sans: "Avenir Next", Inter, var(--aaron-font-chinese), system-ui, sans-serif;
+  --aaron-font-mono: "JetBrains Mono", "SF Mono", SFMono-Regular, Menlo, Consolas, var(--aaron-font-chinese), monospace;
+  --aaron-paper-bg: #eeeae1;
+  --aaron-paper: #f7f4ed;
+  --aaron-paper-soft: #f8f4ea;
+  --aaron-paper-line: #d8d0c2;
+  --aaron-ink: #1e1a16;
+  --aaron-muted: #6c6358;
+  --aaron-faint: #8a8175;
+  --aaron-red: #b31b1b;
+  --aaron-red-dark: #7b1113;
+  --aaron-link: #145c8c;
+  --aaron-shadow: 0 18px 42px rgb(52 39 22 / 12%);
+  --c-def: #f9e2af;
+  --c-thm: #bbf7b8;
+  --c-lemma: #a9cbff;
+  --c-cor: #b4befe;
+  --c-prop: #f5e0dc;
+  --c-proof: #9de7ff;
+  --c-example: #d8b27f;
+  --c-attend: #d79a9a;
+  --c-note: #a8f0e3;
+  color: var(--aaron-ink);
+  background: var(--aaron-paper-bg);
+  font-family: var(--aaron-font-sans);
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--aaron-paper-bg);
+}
+
+.aaronnote-shell,
+.aaronnote-body,
+.aaronnote-editor {
+  min-height: 100vh;
+}
+
+.aaronnote-shell {
+  display: flex;
+  flex-direction: column;
+  background: var(--aaron-paper-bg);
+}
+
+.aaronnote-body {
+  flex: 1;
+}
+
+.aaronnote-editor {
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px clamp(18px, 2.2vw, 38px) 36px;
+  overflow: auto;
+  background: var(--aaron-paper);
+  cursor: default;
+}
+
+.aaronnote-editor .typora-web-wrap {
+  width: min(1420px, calc(100vw - 58px));
+  max-width: none !important;
+  margin: 0 auto;
+}
+
+.aaronnote-editor .typora-web-editor-host,
+.aaronnote-editor .cm-editor {
+  width: 100%;
+  max-width: none !important;
+}
+
+.aaronnote-editor .cm-editor {
+  min-height: calc(100vh - 52px);
+  box-sizing: border-box;
+  padding: 18px 0 52px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.aaronnote-editor .cm-editor .cm-cjk-text {
+  font-family: var(--aaron-font-chinese) !important;
+}
+
+.aaronnote-preview-shell .cm-content {
+  caret-color: transparent;
+}
+
+.aaronnote-preview-shell .cm-line.aaronnote-reveal-line {
+  background: color-mix(in srgb, var(--aaron-red), transparent 88%);
+  box-shadow: -4px 0 0 color-mix(in srgb, var(--aaron-red), transparent 20%);
+}
+
+@media (max-width: 760px) {
+  .aaronnote-editor {
+    padding: 8px 14px 28px;
+  }
+
+  .aaronnote-editor .typora-web-wrap {
+    width: auto;
+  }
+
+  .aaronnote-editor .cm-editor {
+    padding: 18px 0 36px;
+  }
+}
