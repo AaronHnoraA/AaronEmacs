@@ -20,6 +20,9 @@
 (declare-function flymake-diagnostic-type "flymake" (diag))
 
 (defvar eglot--docver)
+(defvar flymake-error-bitmap)
+(defvar flymake-warning-bitmap)
+(defvar flymake-note-bitmap)
 (defvar flymake-diagnostic-functions)
 
 (defcustom lean-sideline-enabled nil
@@ -45,21 +48,14 @@ Use `note' to show all Lean informational output, including `#check' results."
                  (const :tag "Notes, warnings, and errors" note))
   :group 'lean)
 
-(defcustom lean-progress-fringe-enabled nil
+(defcustom lean-progress-fringe-enabled t
   "When non-nil, show Lean file-progress markers in the fringe."
   :type 'boolean
   :group 'lean)
 
-(defcustom lean-diagnostic-fringe-enabled t
-  "When non-nil, show Lean diagnostic markers in the fringe."
-  :type 'boolean
-  :group 'lean)
-
-(defcustom lean-diagnostic-fringe-minimum-severity 'note
-  "Minimum diagnostic severity rendered as Lean fringe markers."
-  :type '(choice (const :tag "Errors only" error)
-                 (const :tag "Warnings and errors" warning)
-                 (const :tag "Notes, warnings, and errors" note))
+(defcustom lean-notification-debounce-delay 0.10
+  "Seconds to coalesce Lean diagnostics and progress UI notifications."
+  :type 'number
   :group 'lean)
 
 (defcustom lean-sideline-prefixes
@@ -89,11 +85,20 @@ Use `note' to show all Lean informational output, including `#check' results."
 (defvar-local lean--flymake-report-fn nil
   "Flymake report function for `lean-flymake-backend'.")
 
-(defvar-local lean--fringe-overlays nil
-  "Fringe overlays for Lean file-progress markers.")
+(defvar-local lean--raw-diagnostics nil
+  "Latest complete raw Lean diagnostics state.")
 
-(defvar-local lean--diagnostic-fringe-overlays nil
-  "Fringe overlays for Lean diagnostic markers.")
+(defvar-local lean--diagnostics-version nil
+  "Document version associated with `lean--raw-diagnostics'.")
+
+(defvar-local lean--notification-timer nil
+  "Timer used to coalesce Lean diagnostics and progress rendering.")
+
+(defvar-local lean--fringe-overlays nil
+  "Fringe overlays for Lean file-progress and task markers.")
+
+(defvar-local lean--task-overlays nil
+  "Fringe overlays for Lean goal status markers.")
 
 ;; ── Lightweight sideline rendering ───────────────────────────────────────────
 
@@ -396,6 +401,14 @@ Use `note' to show all Lean informational output, including `#check' results."
         (_ (setq notes (1+ notes)))))
     (list :error errors :warning warnings :note notes)))
 
+(defun lean--diagnostic-silent-p (diagnostic)
+  "Return non-nil when Lean DIAGNOSTIC should not enter Flymake."
+  (eq (plist-get diagnostic :isSilent) t))
+
+(defun lean--visible-diagnostics ()
+  "Return raw Lean diagnostics that should be visible through Flymake."
+  (seq-remove #'lean--diagnostic-silent-p lean--raw-diagnostics))
+
 (defun lean--diagnostic-to-flymake (diagnostic version)
   "Convert Lean LSP DIAGNOSTIC at VERSION to a Flymake diagnostic."
   (when-let* ((region (lean--diagnostic-region diagnostic)))
@@ -409,7 +422,7 @@ Use `note' to show all Lean informational output, including `#check' results."
        (eglot--doc-version . ,version)))))
 
 (defun lean--publish-flymake-diagnostics (diagnostics version)
-  "Publish Lean LSP DIAGNOSTICS at VERSION through Flymake."
+  "Publish visible Lean LSP DIAGNOSTICS at VERSION through Flymake."
   (setq lean--flymake-counts (lean--count-diagnostics diagnostics))
   (setq lean--flymake-diagnostics
         (delq nil
@@ -417,20 +430,14 @@ Use `note' to show all Lean informational output, including `#check' results."
                         (lean--diagnostic-to-flymake diagnostic version))
                       (lean--diagnostics-list diagnostics))))
   (when lean--flymake-report-fn
-    (funcall lean--flymake-report-fn lean--flymake-diagnostics))
-  (when (fboundp 'lean-progress-mode-line-refresh)
-    (lean-progress-mode-line-refresh))
-  (when (fboundp 'lean-schedule-sideline-refresh)
-    (lean-schedule-sideline-refresh))
-  (if lean-diagnostic-fringe-enabled
-      (lean--update-diagnostic-fringe-overlays lean--flymake-diagnostics)
-    (lean--clear-diagnostic-fringe-overlays))
-  (force-mode-line-update))
+    (funcall lean--flymake-report-fn lean--flymake-diagnostics
+             :force t :region (cons (point-min) (point-max)))))
 
 (defun lean-flymake-backend (report-fn &rest _args)
   "Flymake backend fed by Lean publishDiagnostics notifications."
   (setq lean--flymake-report-fn report-fn)
-  (funcall report-fn lean--flymake-diagnostics))
+  (funcall report-fn lean--flymake-diagnostics
+           :force t :region (cons (point-min) (point-max))))
 
 (defun lean-setup-flymake-backend ()
   "Install the Lean publishDiagnostics Flymake backend in the current buffer."
@@ -440,32 +447,64 @@ Use `note' to show all Lean informational output, including `#check' results."
                       (remove #'lean-flymake-backend
                               (remove #'eglot-flymake-backend
                                       flymake-diagnostic-functions)))))
+  (setq-local flymake-error-bitmap 'lean-fringe-blocked-bitmap
+              flymake-warning-bitmap 'lean-fringe-warning-bitmap
+              flymake-note-bitmap 'lean-fringe-note-bitmap)
   (when (fboundp 'lean-dev-log)
     (lean-dev-log "flymake backend installed: funcs=%S"
                   (and (boundp 'flymake-diagnostic-functions)
                        flymake-diagnostic-functions))))
 
-(defun lean--eglot-flymake-handle-push-a
-    (fn server uri diagnostics version then)
-  "Let Lean publishDiagnostics reach Flymake when Lean reports stale VERSION."
-  (let* ((buf (lean--diagnostics-buffer-for-uri uri))
-         (lean-buffer-p (and (buffer-live-p buf)
-                             (with-current-buffer buf
-                               (derived-mode-p 'lean-mode)))))
-    (if lean-buffer-p
+(defun lean--schedule-notification-flush ()
+  "Schedule one rendering pass for the latest Lean notification state."
+  (when (timerp lean--notification-timer)
+    (cancel-timer lean--notification-timer))
+  (setq lean--notification-timer
+        (run-at-time (max 0 lean-notification-debounce-delay) nil
+                     #'lean--flush-notifications (current-buffer))))
+
+(defun lean--flush-notifications (buffer)
+  "Render the latest Lean notification state for BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq lean--notification-timer nil)
+      (lean--publish-flymake-diagnostics
+       (lean--visible-diagnostics) lean--diagnostics-version)
+      (lean--update-task-overlays lean--raw-diagnostics)
+      (if lean-progress-fringe-enabled
+          (lean--update-fringe-overlays lean--file-progress)
+        (lean--clear-progress-overlays))
+      (when (fboundp 'lean-progress-mode-line-refresh)
+        (lean-progress-mode-line-refresh))
+      (when (fboundp 'lean-schedule-sideline-refresh)
+        (lean-schedule-sideline-refresh)))))
+
+(defun lean--record-diagnostics (diagnostics version incremental)
+  "Record Lean DIAGNOSTICS at VERSION, appending when INCREMENTAL."
+  (let ((incoming (lean--diagnostics-list diagnostics)))
+    (setq lean--raw-diagnostics
+          (if incremental
+              (append lean--raw-diagnostics incoming)
+            incoming)
+          lean--diagnostics-version
+          (or (and (boundp 'eglot--docver) eglot--docver) version)))
+  (lean--schedule-notification-flush))
+
+(cl-defmethod eglot-handle-notification :around
+  (_server (_method (eql textDocument/publishDiagnostics))
+          &key uri diagnostics version isIncremental &allow-other-keys)
+  "Handle Lean diagnostics with batching, otherwise use Eglot's normal path."
+  (let ((buf (lean--diagnostics-buffer-for-uri uri)))
+    (if (and (buffer-live-p buf)
+             (with-current-buffer buf (derived-mode-p 'lean-mode)))
         (with-current-buffer buf
-          (let* ((docver (and (boundp 'eglot--docver) eglot--docver))
-                 (compat (and version docver (/= version docver))))
-            (lean--publish-flymake-diagnostics diagnostics
-                                               (or docver version))
-            (when (fboundp 'lean-dev-log)
-              (lean-dev-log
-               "publishDiagnostics: file=%s diagnostics=%d version=%S docver=%S applied-version-compat=%S"
-               (file-name-nondirectory (or buffer-file-name (buffer-name)))
-               (lean--diagnostics-count diagnostics)
-               version docver compat))
-            nil))
-      (funcall fn server uri diagnostics version then))))
+          (lean--record-diagnostics diagnostics version (eq isIncremental t))
+          (when (fboundp 'lean-dev-log)
+            (lean-dev-log
+             "publishDiagnostics queued: file=%s diagnostics=%d incremental=%S"
+             (file-name-nondirectory (or buffer-file-name (buffer-name)))
+             (lean--diagnostics-count diagnostics) isIncremental)))
+      (cl-call-next-method))))
 
 ;; ── fileProgress notification ─────────────────────────────────────────────────
 ;; Lean sends: {"textDocument": {"uri": "..."}, "processing": [{...}]}
@@ -482,10 +521,13 @@ Use `note' to show all Lean informational output, including `#check' results."
   (mapcar
    (lambda (item)
      (let* ((range (plist-get item :range))
-            (start (plist-get range :start)))
+            (start (plist-get range :start))
+            (end (plist-get range :end)))
        (list (plist-get item :kind)
              (plist-get start :line)
-             (plist-get start :character))))
+             (plist-get start :character)
+             (plist-get end :line)
+             (plist-get end :character))))
    items))
 
 (cl-defmethod eglot-handle-notification
@@ -501,18 +543,11 @@ Use `note' to show all Lean informational output, including `#check' results."
         (setq-local lean--file-progress items)
         (unless (equal signature lean--file-progress-signature)
           (setq-local lean--file-progress-signature signature)
-          (if lean-progress-fringe-enabled
-              (lean--update-fringe-overlays lean--file-progress)
-            (when lean--fringe-overlays
-              (lean--clear-fringe-overlays)))
+          (lean--schedule-notification-flush)
           (when (fboundp 'lean-dev-log)
             (lean-dev-log "fileProgress: file=%s items=%d"
                           (file-name-nondirectory path)
-                          (length lean--file-progress)))
-          (when (fboundp 'lean-progress-mode-line-refresh)
-            (lean-progress-mode-line-refresh))
-          (when (fboundp 'lean-schedule-sideline-refresh)
-            (lean-schedule-sideline-refresh)))))))
+                          (length lean--file-progress))))))))
 
 ;; ── Fringe overlays ───────────────────────────────────────────────────────────
 
@@ -576,79 +611,67 @@ Use `note' to show all Lean informational output, including `#check' results."
    #b00000000
    #b00000000])
 
-(defun lean--severity-rank (kind)
-  "Return numeric severity rank for KIND."
-  (pcase kind
-    ('error 0)
-    ('warning 1)
-    ('note 2)
-    (_ 3)))
+(defface lean-fringe-success-face
+  '((t :inherit success))
+  "Fringe face for accomplished Lean goals."
+  :group 'lean)
 
-(defun lean--diagnostic-fringe-kind-visible-p (kind)
-  "Return non-nil when KIND should get a fringe marker."
-  (<= (lean--severity-rank kind)
-      (lean--severity-rank lean-diagnostic-fringe-minimum-severity)))
+(define-fringe-bitmap 'lean-fringe-progress-bar-bitmap
+  [#b00000110 #b00000110 #b00000110 #b00000110
+   #b00000110 #b00000110 #b00000110 #b00000110])
 
-(defun lean--diagnostic-fringe-face (kind)
-  "Return fringe face for diagnostic KIND."
-  (pcase kind
-    ('error 'lean-fringe-error-face)
-    ('warning 'lean-fringe-warning-face)
-    (_ 'lean-fringe-note-face)))
+(define-fringe-bitmap 'lean-fringe-success-bitmap
+  [#b00000000 #b01000010 #b00100100 #b00011000
+   #b01000010 #b00100100 #b00011000 #b00000000])
 
-(defun lean--diagnostic-fringe-bitmap (_kind)
-  "Return fringe bitmap for diagnostic KIND."
-  'lean-fringe-blocked-bitmap)
+(define-fringe-bitmap 'lean-fringe-wip-bitmap
+  [#b01111110 #b01011010 #b01011010 #b01011010
+   #b01011010 #b01111110 #b00000000 #b00000000])
 
-(defun lean--clear-diagnostic-fringe-overlays ()
-  "Remove all Lean diagnostic fringe overlays from current buffer."
-  (dolist (ov lean--diagnostic-fringe-overlays)
-    (delete-overlay ov))
-  (setq lean--diagnostic-fringe-overlays nil))
+(defun lean--clear-task-overlays ()
+  "Remove all Lean task status overlays from current buffer."
+  (mapc #'delete-overlay lean--task-overlays)
+  (setq lean--task-overlays nil))
 
-(defun lean--diagnostic-fringe-line-entries (diagnostics)
-  "Return one highest-severity diagnostic per line from DIAGNOSTICS."
-  (let (entries)
-    (dolist (diag diagnostics)
-      (when-let* ((beg (ignore-errors (flymake-diagnostic-beg diag))))
-        (let* ((line (line-number-at-pos beg t))
-               (kind (lean--flymake-kind diag))
-               (text (flymake-diagnostic-text diag))
-               (existing (assoc line entries)))
-          (when (lean--diagnostic-fringe-kind-visible-p kind)
-            (unless (and existing
-                         (>= (lean--severity-rank kind)
-                             (lean--severity-rank
-                              (plist-get (cdr existing) :kind))))
-              (when existing
-                (setq entries (delq existing entries)))
-              (push (cons line (list :pos beg :kind kind :text text))
-                    entries))))))
-    entries))
+(defun lean--diagnostic-tags (diagnostic)
+  "Return Lean tags from DIAGNOSTIC as a list."
+  (lean--diagnostics-list (plist-get diagnostic :leanTags)))
 
-(defun lean--update-diagnostic-fringe-overlays (diagnostics)
-  "Update Lean diagnostic fringe markers from DIAGNOSTICS."
-  (lean--clear-diagnostic-fringe-overlays)
-  (dolist (entry (lean--diagnostic-fringe-line-entries diagnostics))
-    (let* ((data (cdr entry))
-           (pos (plist-get data :pos))
-           (kind (plist-get data :kind))
-           (help (plist-get data :text)))
-      (save-excursion
-        (goto-char pos)
-        (let ((ov (make-overlay (line-beginning-position)
-                                (min (point-max) (1+ (line-beginning-position)))
-                                nil nil t)))
-          (overlay-put ov 'before-string
-                       (propertize " " 'display
-                                   `(right-fringe
-                                     ,(lean--diagnostic-fringe-bitmap kind)
-                                     ,(lean--diagnostic-fringe-face kind))
-                                   'help-echo help))
-          (overlay-put ov 'help-echo help)
-          (overlay-put ov 'lean-diagnostic-fringe t)
-          (overlay-put ov 'priority 2000)
-          (push ov lean--diagnostic-fringe-overlays))))))
+(defun lean--add-fringe-overlay (pos bitmap face help property collection)
+  "Add a right-fringe marker at POS and return updated COLLECTION.
+BITMAP, FACE, HELP, and PROPERTY describe the marker."
+  (save-excursion
+    (goto-char pos)
+    (let ((ov (make-overlay (line-beginning-position)
+                            (min (point-max) (1+ (line-beginning-position)))
+                            nil nil t)))
+      (overlay-put ov 'before-string
+                   (propertize " " 'display `(right-fringe ,bitmap ,face)
+                               'help-echo help))
+      (overlay-put ov 'help-echo help)
+      (overlay-put ov property t)
+      (overlay-put ov 'priority 2000)
+      (cons ov collection))))
+
+(defun lean--update-task-overlays (diagnostics)
+  "Update Lean goal status markers from raw DIAGNOSTICS."
+  (lean--clear-task-overlays)
+  (dolist (diagnostic diagnostics)
+    (when-let* ((tags (lean--diagnostic-tags diagnostic))
+                (region (lean--diagnostic-region diagnostic)))
+      (cond
+       ((memq 2 tags)
+        (setq lean--task-overlays
+              (lean--add-fringe-overlay
+               (car region) 'lean-fringe-success-bitmap
+               'lean-fringe-success-face "Lean goals accomplished"
+               'lean-task-fringe lean--task-overlays)))
+       ((memq 1 tags)
+        (setq lean--task-overlays
+              (lean--add-fringe-overlay
+               (car region) 'lean-fringe-wip-bitmap
+               'lean-fringe-warning-face "Lean has unsolved goals"
+               'lean-task-fringe lean--task-overlays)))))))
 
 (defun lean--progress-help (item)
   "Return tooltip text for Lean file-progress ITEM."
@@ -656,47 +679,68 @@ Use `note' to show all Lean informational output, including `#check' results."
          (range (plist-get item :range))
          (start (plist-get range :start))
          (line (plist-get start :line))
-         (status (if (eq kind 1) "processing" "blocked/error")))
+         (status (if (or (null kind) (eq kind 1))
+                     "processing" "blocked/error")))
     (format "Lean %s at line %s" status (and line (1+ line)))))
+
+(defun lean--progress-region (item)
+  "Return the buffer region covered by Lean file-progress ITEM."
+  (when-let* ((range (plist-get item :range))
+              (start (plist-get range :start))
+              (end (plist-get range :end)))
+    (cons (eglot--lsp-position-to-point start)
+          (eglot--lsp-position-to-point end))))
 
 (defun lean--update-fringe-overlays (items)
   "Update fringe overlays from progress ITEMS list."
-  (dolist (ov lean--fringe-overlays)
-    (delete-overlay ov))
-  (setq lean--fringe-overlays nil)
+  (lean--clear-progress-overlays)
   (dolist (item items)
-    (let* ((range      (plist-get item :range))
-           (kind       (plist-get item :kind))
-           (start      (plist-get range :start))
-           (start-line (plist-get start :line))
-           (processing (eq kind 1))
-           (face       (if processing 'lean-fringe-processing-face
-                         'lean-fringe-error-face))
-           (bitmap     (if processing 'lean-fringe-processing-bitmap
-                         'lean-fringe-blocked-bitmap)))
-      (when (and start-line (numberp start-line))
+    (when-let* ((region (lean--progress-region item)))
+      (let* ((kind       (plist-get item :kind))
+             (processing (or (null kind) (eq kind 1)))
+             (face       (if processing 'lean-fringe-processing-face
+                           'lean-fringe-error-face))
+             (help       (lean--progress-help item)))
         (save-excursion
-          (goto-char (point-min))
-          (forward-line start-line)
-          (let ((ov (make-overlay (point) (1+ (point)))))
-            (overlay-put ov 'before-string
-                         (propertize " " 'display
-                                     `(left-fringe ,bitmap ,face)
-                                     'help-echo (lean--progress-help item)))
-            (overlay-put ov 'help-echo (lean--progress-help item))
-            (overlay-put ov 'lean-fringe t)
-            (push ov lean--fringe-overlays)))))))
+          (goto-char (car region))
+          (let ((done nil))
+            (while (not done)
+              (setq lean--fringe-overlays
+                    (lean--add-fringe-overlay
+                     (point) 'lean-fringe-progress-bar-bitmap face help
+                     'lean-fringe lean--fringe-overlays))
+              (setq done
+                    (or (>= (line-end-position) (cdr region))
+                        (/= (forward-line 1) 0))))))))))
+
+(defun lean--clear-progress-overlays ()
+  "Remove Lean file-progress overlays from current buffer."
+  (mapc #'delete-overlay lean--fringe-overlays)
+  (setq lean--fringe-overlays nil))
 
 (defun lean--clear-fringe-overlays ()
   "Remove all Lean fringe overlays from current buffer."
-  (dolist (ov lean--fringe-overlays)
-    (delete-overlay ov))
-  (setq lean--fringe-overlays nil
-        lean--file-progress-signature nil)
-  (when (fboundp 'lean--clear-diagnostic-fringe-overlays)
-    (lean--clear-diagnostic-fringe-overlays))
+  (lean--clear-progress-overlays)
+  (lean--clear-task-overlays)
+  (setq lean--file-progress-signature nil)
   (when (fboundp 'lean-clear-sideline-overlays)
     (lean-clear-sideline-overlays)))
+
+(defun lean-notification-cleanup ()
+  "Cancel pending Lean notification work and clear its UI state."
+  (when (timerp lean--notification-timer)
+    (cancel-timer lean--notification-timer))
+  (when lean--flymake-report-fn
+    (funcall lean--flymake-report-fn nil
+             :force t :region (cons (point-min) (point-max))))
+  (setq lean--notification-timer nil
+        lean--raw-diagnostics nil
+        lean--diagnostics-version nil
+        lean--flymake-diagnostics nil
+        lean--flymake-counts '(:error 0 :warning 0 :note 0)
+        lean--file-progress nil
+        lean--file-progress-signature nil)
+  (lean--clear-fringe-overlays))
 
 ;; ── Refresh file dependencies ──────────────────────────────────────────────────
 
@@ -721,20 +765,13 @@ Use `note' to show all Lean informational output, including `#check' results."
                              (jsonrpc-notify srv 'textDocument/didOpen
                                              `(:textDocument ,item)))))))))))
 
-(with-eval-after-load 'eglot
-  (when (fboundp 'eglot--flymake-handle-push)
-    (unless (advice-member-p #'lean--eglot-flymake-handle-push-a
-                             'eglot--flymake-handle-push)
-      (advice-add 'eglot--flymake-handle-push
-                  :around #'lean--eglot-flymake-handle-push-a))))
-
 ;; ── lean/restartFile custom notification (from infoview proxy) ────────────────
 ;; The lean-proxy.mjs sends a lean/restartFile notification to Eglot when the
 ;; infoview's "restart file" button is clicked.  Eglot receives it as a
 ;; server→client notification and dispatches it here.
 
 (cl-defmethod eglot-handle-notification
-  (server (_method (eql lean/restartFile)) &key uri)
+  (_server (_method (eql lean/restartFile)) &key uri)
   "Handle a lean/restartFile notification from the infoview proxy.
 Finds the buffer for URI and calls `lean-refresh-file-dependencies'."
   (when-let* ((path (ignore-errors (eglot-uri-to-path uri)))

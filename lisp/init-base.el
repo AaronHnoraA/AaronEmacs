@@ -1199,6 +1199,24 @@ escape from the process sentinel."
     (cancel-timer amx-short-idle-update-timer))
   (setq amx-short-idle-update-timer nil))
 
+(defconst my/disabled-pandoc-export-commands
+  '(org-pandoc-export-as-typst
+    org-pandoc-export-to-typst
+    org-pandoc-export-to-typst-and-open
+    org-pandoc-export-to-typst-pdf
+    org-pandoc-export-to-typst-pdf-and-open)
+  "Pandoc export commands intentionally omitted from `M-x'.")
+
+(defun my/disable-pandoc-export-commands ()
+  "Remove disabled Pandoc export commands from the command registry."
+  (dolist (command my/disabled-pandoc-export-commands)
+    (when (fboundp command)
+      (fmakunbound command))))
+
+(my/disable-pandoc-export-commands)
+(with-eval-after-load 'ox-pandoc
+  (my/disable-pandoc-export-commands))
+
 (use-package mwim
   :ensure t
   :bind

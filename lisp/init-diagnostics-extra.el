@@ -28,6 +28,8 @@
 (defvar my/diagnostics--refresh-timer nil
   "Idle timer used to coalesce diagnostics UI refreshes.")
 
+(defvar my/diagnostics-modeline-mode)
+
 (defvar-local my/diagnostics--modeline-cache nil
   "Cached diagnostics mode line string for the current buffer.")
 
@@ -51,9 +53,11 @@
         (warnings 0)
         (notes 0))
     (dolist (diag (or diags (flymake-diagnostics)))
-      (pcase (flymake-diagnostic-type diag)
-        (:error (setq errors (1+ errors)))
-        (:warning (setq warnings (1+ warnings)))
+      (pcase (flymake--lookup-type-property
+              (flymake-diagnostic-type diag)
+              'flymake-category)
+        ('flymake-error (setq errors (1+ errors)))
+        ('flymake-warning (setq warnings (1+ warnings)))
         (_ (setq notes (1+ notes)))))
     (list :error errors :warning warnings :note notes)))
 

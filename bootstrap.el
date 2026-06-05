@@ -9,7 +9,7 @@
       gc-cons-percentage 0.6)
 
 (require 'cl-lib)
-;; Some package autoloads, notably typst-ts-mode, currently emit top-level
+;; Some package autoloads currently emit top-level
 ;; `define-compilation-mode' forms.  `package-initialize' evaluates those
 ;; autoload files while activating packages, so make the built-in provider
 ;; available before activation.

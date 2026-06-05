@@ -49,9 +49,10 @@
 (declare-function eglot-ensure "eglot")
 (declare-function eglot-managed-p "eglot")
 (declare-function flymake-mode "flymake" (&optional arg))
-(declare-function flymake-start "flymake" (&optional report-fn))
+(declare-function flymake-start "flymake" (&optional deferred force))
 (declare-function lean-setup-flymake-backend "init-lean-eglot" ())
 (declare-function lean-setup-sideline "init-lean-eglot" ())
+(declare-function lean-notification-cleanup "init-lean-eglot" ())
 (declare-function lean-refresh-file-dependencies "init-lean-eglot")
 (declare-function lean--clear-fringe-overlays "init-lean-eglot")
 (declare-function lean-iv-sync-cursor-h "init-lean-infoview")
@@ -73,6 +74,7 @@
 (defvar lean--fringe-overlays)
 (defvar eglot-connect-timeout)
 (defvar eglot-lsp-context)
+(defvar eglot-stay-out-of)
 (defvar flymake-fringe-indicator-position)
 (defvar flymake-mode)
 (defvar project-find-functions)
@@ -258,7 +260,7 @@ lake serve / lean --server connection otherwise."
 
 (defun lean-progress-kind (item)
   "Return the :kind field from a fileProgress ITEM (plist)."
-  (plist-get item :kind))
+  (or (plist-get item :kind) 1))
 
 (defun lean--flymake-count (kind)
   "Return cached Lean Flymake diagnostic count for KIND."
@@ -334,18 +336,8 @@ lake serve / lean --server connection otherwise."
 (defun lean--setup-managed-ui ()
   "Enable Lean-specific UI after Eglot starts managing this buffer.
 Completion uses the global corfu+capf surface — no company-mode override."
-  (when (fboundp 'lean-setup-flymake-backend)
-    (lean-setup-flymake-backend))
   (when (fboundp 'lean-setup-sideline)
     (lean-setup-sideline))
-  (lean--setup-diagnostics-ui)
-  (when (fboundp 'eldoc-mode)
-    (eldoc-mode 1))
-  (when (fboundp 'eldoc-box-hover-at-point-mode)
-    (eldoc-box-hover-at-point-mode 1))
-  (when (and (fboundp 'flymake-start)
-             (bound-and-true-p flymake-mode))
-    (flymake-start))
   (lean-dev-log "eglot UI active: flymake=%S eldoc=%S eldoc-box=%S fringe=%S"
                 (bound-and-true-p flymake-mode)
                 (bound-and-true-p eldoc-mode)
@@ -511,10 +503,22 @@ while using eglot (not lsp-mode) as the language server backend."
   (lean--setup-keys)
   ;; Eglot startup policy
   (lean--apply-eglot-settings)
+  ;; Lean owns diagnostics so it can preserve Lean-specific tags and coalesce
+  ;; the large initial publishDiagnostics burst.
+  (when (boundp 'eglot-stay-out-of)
+    (setq-local eglot-stay-out-of
+                (cons 'flymake (remove 'flymake eglot-stay-out-of))))
+  (when (fboundp 'lean-setup-flymake-backend)
+    (lean-setup-flymake-backend))
   ;; Mode-line progress indicator
   (lean-progress-mode-line-mode 1)
   ;; AaronNote Flymake diagnostics UI; managed-mode hook completes the rest.
   (lean--setup-diagnostics-ui)
+  ;; `prog-mode' hooks may have enabled Flymake before the Lean backend was
+  ;; installed.  Start it once here so the backend receives its report function.
+  (when (and (fboundp 'flymake-start)
+             (bound-and-true-p flymake-mode))
+    (flymake-start nil t))
   ;; Remote tuning
   (lean--tune-remote)
   ;; Keep the infoview bridge's shadow LSP document in sync while visible.
@@ -590,6 +594,8 @@ while using eglot (not lsp-mode) as the language server backend."
 (defun lean--buffer-teardown-h ()
   "Cancel timers, clear overlays, and close the infoview on buffer kill."
   (lean--cancel-eglot-start-timer)
+  (when (fboundp 'lean-notification-cleanup)
+    (lean-notification-cleanup))
   (when (fboundp 'lean--clear-fringe-overlays)
     (lean--clear-fringe-overlays))
   (when (fboundp 'lean-iv-teardown-h)
@@ -607,13 +613,18 @@ while using eglot (not lsp-mode) as the language server backend."
 (defun lean--eglot-managed-mode-log-h ()
   "Log when Eglot activates editing support in a Lean buffer."
   (when (derived-mode-p 'lean-mode)
-    (lean--setup-managed-ui)
-    (lean-dev-log "eglot managed mode active: buffer=%s lsp-root=%s flymake=%S eldoc=%S capf=%S"
-                  (buffer-name)
-                  (or (lean--eglot-project-root-candidate) "<none>")
-                  (bound-and-true-p flymake-mode)
-                  (bound-and-true-p eldoc-mode)
-                  completion-at-point-functions)))
+    (if (and (fboundp 'eglot-managed-p) (eglot-managed-p))
+        (progn
+          (lean--setup-managed-ui)
+          (lean-dev-log "eglot managed mode active: buffer=%s lsp-root=%s flymake=%S eldoc=%S capf=%S"
+                        (buffer-name)
+                        (or (lean--eglot-project-root-candidate) "<none>")
+                        (bound-and-true-p flymake-mode)
+                        (bound-and-true-p eldoc-mode)
+                        completion-at-point-functions))
+      (when (fboundp 'lean-notification-cleanup)
+        (lean-notification-cleanup))
+      (lean-dev-log "eglot managed mode inactive: buffer=%s" (buffer-name)))))
 
 (with-eval-after-load 'eglot
   (add-hook 'eglot-connect-hook #'lean--eglot-connect-log-h)

@@ -473,8 +473,21 @@ With DIRED-P, the main path button opens via `dired'."
                  "W"
                  "X"
                  "Q"
-                 "?"))
+                 "?"
+                 "H-i"
+                 "H-a"))
     (define-key map (kbd key) nil)))
+
+(defun my/appine--switch-to-tab-index (target-index)
+  "Switch to the Appine tab at TARGET-INDEX by cycling minimum steps."
+  (let ((n (length my/appine-tab-list)))
+    (when (and (> n 1) (>= target-index 0) (< target-index n)
+               (/= target-index my/appine-tab-index))
+      (let* ((steps-fwd (mod (- target-index my/appine-tab-index) n))
+             (steps-bwd (mod (- my/appine-tab-index target-index) n)))
+        (if (<= steps-fwd steps-bwd)
+            (dotimes (_ steps-fwd) (appine-next-tab))
+          (dotimes (_ steps-bwd) (appine-prev-tab)))))))
 
 ;;; Plugin directories:
 ;;;   User plugins live in etc/appine/plugins/ (version-controlled with user config).

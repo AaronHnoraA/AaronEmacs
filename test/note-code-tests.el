@@ -25,7 +25,7 @@
 (ert-deftest my/note-code-resolves-lean-mirror-and-explicit-path ()
   (let* ((root (make-temp-file "note-code-test-" t))
          (my/note-code-root root)
-         (my/typst-roam-root root)
+         (my/aaronnote-roam-root root)
          (buffer-file-name (expand-file-name "math/group.typ" root)))
     (should (equal (my/note-code-lean-mirror-path)
                    (expand-file-name ".lean/math/group.lean" root)))
@@ -35,7 +35,7 @@
 
 (ert-deftest my/note-code-requires-path-for-non-lean ()
   (let ((my/note-code-root temporary-file-directory)
-        (my/typst-roam-root temporary-file-directory))
+        (my/aaronnote-roam-root temporary-file-directory))
     (should-error
      (my/note-code-source-path '(:lang "rust" :path nil :tag "x"))
      :type 'user-error)))
@@ -49,7 +49,7 @@
 (ert-deftest my/note-code-preamble-uses-only-roam-entrypoint ()
   (let* ((root (make-temp-file "note-code-test-" t))
          (my/note-code-root root)
-         (my/typst-roam-root root)
+         (my/aaronnote-roam-root root)
          (buffer-file-name (expand-file-name "math/group.typ" root)))
     (with-temp-buffer
       (setq buffer-file-name (expand-file-name "math/group.typ" root))

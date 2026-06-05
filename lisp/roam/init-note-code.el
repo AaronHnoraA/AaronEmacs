@@ -11,7 +11,7 @@
 
 (defgroup my/note-code nil
   "Tagged source regions embedded in Typst notes."
-  :group 'my/typst-roam)
+  :group 'my/aaronnote-roam)
 
 (defcustom my/note-code-root "/Users/hc/Documents/AaronNote/"
   "Root containing Typst notes, source files, and the `.lean/' mirror."
@@ -37,8 +37,8 @@
   "Return the normalized note root."
   (file-name-as-directory
    (expand-file-name
-    (if (boundp 'my/typst-roam-root)
-        my/typst-roam-root
+    (if (boundp 'my/aaronnote-roam-root)
+        my/aaronnote-roam-root
       my/note-code-root))))
 
 (defun my/note-code--arg (name args)
@@ -81,12 +81,12 @@
       (user-error "Note is outside note-code root: %s" root))
     relative))
 
-(defun my/note-code-lean-mirror-path (&optional note-file)
-  "Return the default Lean mirror path for NOTE-FILE."
-  (let* ((relative (my/note-code--note-relative-path note-file))
-         (stem (file-name-sans-extension relative)))
-    (expand-file-name (concat ".lean/" stem ".lean")
-                      (my/note-code--root))))
+(defun my/note-code-lean-path (selector)
+  "Resolve @@lean4 SELECTOR to an absolute path under <root>/lean/.
+SELECTOR is a path relative to the lean/ directory, e.g. \"math/foo.lean\"."
+  (expand-file-name
+   (string-remove-prefix "./" selector)
+   (expand-file-name "lean" (my/note-code--root))))
 
 (defun my/note-code-source-path (call)
   "Resolve source path for note-code CALL."
@@ -94,10 +94,10 @@
         (path (plist-get call :path)))
     (cond
      (path
-      (expand-file-name (string-remove-prefix "/" path)
-                        (my/note-code--root)))
-     ((member lang '("lean" "lean4"))
-      (my/note-code-lean-mirror-path))
+      (if (member lang '("lean" "lean4"))
+          (my/note-code-lean-path path)
+        (expand-file-name (string-remove-prefix "/" path)
+                          (my/note-code--root))))
      (t
       (user-error "note-code path is required for language `%s'" lang)))))
 
@@ -182,14 +182,6 @@
               (when (file-exists-p link)
                 (delete-file link))
               (make-symbolic-link source link))))))))
-
-(defun my/note-code-setup ()
-  "Install note-code keys in the current Typst buffer."
-  (my/note-code-ensure-style-link)
-  (local-set-key (kbd "C-c C-n") #'my/note-code-insert))
-
-(dolist (hook '(typst-ts-mode-hook typst-mode-hook my/typst-mode-hook))
-  (add-hook hook #'my/note-code-setup))
 
 (provide 'init-note-code)
 ;;; init-note-code.el ends here

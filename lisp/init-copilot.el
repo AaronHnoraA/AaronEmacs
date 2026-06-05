@@ -35,6 +35,19 @@ Large generated files can make inline completion unnecessarily expensive."
   :type 'boolean
   :group 'my/copilot)
 
+(defcustom my/copilot-deferred-modes '(lean-mode)
+  "Major modes where automatic Copilot startup waits for editor idle time."
+  :type '(repeat symbol)
+  :group 'my/copilot)
+
+(defcustom my/copilot-deferred-idle-delay 1.5
+  "Idle seconds before automatically enabling Copilot in deferred modes."
+  :type 'number
+  :group 'my/copilot)
+
+(defvar-local my/copilot--auto-enable-timer nil
+  "Idle timer used to defer automatic Copilot startup.")
+
 (defun my/copilot-buffer-eligible-p ()
   "Return non-nil when the current buffer is cheap enough for Copilot."
   (and (not buffer-read-only)
@@ -55,10 +68,35 @@ Large generated files can make inline completion unnecessarily expensive."
          (when-let* ((server (copilot-server-executable)))
            (file-exists-p server)))))
 
+(defun my/copilot--cancel-auto-enable ()
+  "Cancel deferred Copilot startup in the current buffer."
+  (when (timerp my/copilot--auto-enable-timer)
+    (cancel-timer my/copilot--auto-enable-timer))
+  (setq my/copilot--auto-enable-timer nil))
+
+(defun my/copilot--enable-buffer (buffer)
+  "Enable Copilot in BUFFER when it is still eligible."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq my/copilot--auto-enable-timer nil)
+      (when (my/copilot-available-p)
+        (copilot-mode 1)))))
+
 (defun my/copilot-auto-enable-h ()
-  "Auto-enable `copilot-mode' in supported editing buffers."
-  (when (my/copilot-available-p)
-    (copilot-mode 1)))
+  "Auto-enable `copilot-mode' in supported editing buffers.
+Modes in `my/copilot-deferred-modes' start only after editor idle time."
+  (my/copilot--cancel-auto-enable)
+  (if (and my/copilot-deferred-modes
+           (apply #'derived-mode-p my/copilot-deferred-modes))
+      (progn
+        (setq my/copilot--auto-enable-timer
+              (run-with-idle-timer my/copilot-deferred-idle-delay nil
+                                   #'my/copilot--enable-buffer
+                                   (current-buffer)))
+        (add-hook 'kill-buffer-hook #'my/copilot--cancel-auto-enable nil t)
+        (add-hook 'change-major-mode-hook #'my/copilot--cancel-auto-enable nil t))
+    (when (my/copilot-available-p)
+      (copilot-mode 1))))
 
 (defun my/copilot-completion-visible-p ()
   "Return non-nil when Copilot currently shows a completion overlay."
@@ -162,10 +200,7 @@ method maps the bracket key to full-width punctuation.")
   :ensure t
   :hook ((prog-mode . my/copilot-auto-enable-h)
          (org-mode . my/copilot-auto-enable-h)
-         (org-src-mode . my/copilot-auto-enable-h)
-         (typst-ts-mode . my/copilot-auto-enable-h)
-         (typst-mode . my/copilot-auto-enable-h)
-         (my/typst-mode . my/copilot-auto-enable-h))
+         (org-src-mode . my/copilot-auto-enable-h))
   :custom
   (copilot-install-dir (expand-file-name "var/copilot" user-emacs-directory))
   (copilot-idle-delay my/copilot-idle-delay)

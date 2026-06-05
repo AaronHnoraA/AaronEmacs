@@ -84,6 +84,16 @@ commands still save their state."
   :type 'number
   :group 'my/fold)
 
+(defcustom my/fold-deferred-modes '(lean-mode)
+  "Programming modes where startup fold restoration waits for idle time."
+  :type '(repeat symbol)
+  :group 'my/fold)
+
+(defcustom my/fold-restore-idle-delay 0.5
+  "Idle seconds before restoring folds in `my/fold-deferred-modes'."
+  :type 'number
+  :group 'my/fold)
+
 (defvar my/fold-state-table nil
   "Alist mapping file names to persisted fold start lines.")
 
@@ -101,6 +111,9 @@ commands still save their state."
 
 (defvar-local my/fold--org-render-timer nil
   "Pending lightweight Org render refresh after fold changes.")
+
+(defvar-local my/fold--restore-timer nil
+  "Idle timer used to defer startup fold restoration.")
 
 ;; Compilation Mode
 (use-package compile
@@ -236,8 +249,7 @@ commands still save their state."
 
 (defun my/fold--skip-auto-restore-p ()
   "Return non-nil when opening this buffer should not restore folds."
-  (or (derived-mode-p 'org-mode)
-      (memq major-mode '(typst-ts-mode typst-mode my/typst-mode))))
+  (derived-mode-p 'org-mode))
 
 (defun my/fold--backend ()
   "Return the preferred fold backend for the current buffer."
@@ -823,8 +835,22 @@ This covers buffers opened before `find-file-hook' started restoring folds."
   (when (and buffer-file-name
              (derived-mode-p 'prog-mode)
              (not (my/fold--skip-auto-restore-p)))
-    (ignore-errors
-      (my/fold-restore-buffer-state))))
+    (if (and my/fold-deferred-modes
+             (apply #'derived-mode-p my/fold-deferred-modes))
+        (let ((buffer (current-buffer)))
+          (when (timerp my/fold--restore-timer)
+            (cancel-timer my/fold--restore-timer))
+          (setq my/fold--restore-timer
+                (run-with-idle-timer
+                 my/fold-restore-idle-delay nil
+                 (lambda ()
+                   (when (buffer-live-p buffer)
+                     (with-current-buffer buffer
+                       (setq my/fold--restore-timer nil)
+                       (ignore-errors
+                         (my/fold-restore-buffer-state))))))))
+      (ignore-errors
+        (my/fold-restore-buffer-state)))))
 
 (defun my/hs-set-up-overlay (overlay)
   "Render a concise folding indicator for hidden OVERLAY."

@@ -24,14 +24,7 @@
   :after flymake
   :config
   (setq flymake-vale-program "vale"
-        flymake-vale-modes '(text-mode latex-mode org-mode
-                                        message-mode typst-ts-mode typst-mode
-                                        my/typst-mode)
-        flymake-vale-mode-file-exts
-        (append '((typst-ts-mode . "typ")
-                  (typst-mode . "typ")
-                  (my/typst-mode . "typ"))
-                flymake-vale-mode-file-exts))
+        flymake-vale-modes '(text-mode latex-mode org-mode message-mode))
 
   :hook
   ((text-mode . my/flymake-vale-setup)
@@ -41,10 +34,7 @@
    (tex-mode . my/flymake-vale-setup)
    (TeX-mode . my/flymake-vale-setup)
    (plain-tex-mode . my/flymake-vale-setup)
-   (plain-TeX-mode . my/flymake-vale-setup)
-   (typst-ts-mode . my/flymake-vale-setup)
-   (typst-mode . my/flymake-vale-setup)
-   (my/typst-mode . my/flymake-vale-setup)))
+   (plain-TeX-mode . my/flymake-vale-setup)))
 
 (setq flymake-fringe-indicator-position 'right-fringe)
 

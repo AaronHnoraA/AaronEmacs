@@ -282,10 +282,12 @@ async function openDirectory(body) {
   return { ...result, file: target };
 }
 
-async function apiOpenInEmacs(file, line = 1, col = 0) {
+async function apiOpenInEmacs(file, line = 1, col = 0, tag = "") {
   const target = resolveShellPath(file);
-  process.stdout.write(`aaronote-event:open:${JSON.stringify({ file: target, line, col })}\n`);
-  return { ok: true, file: target, line, col };
+  const payload = { file: target, line, col };
+  if (tag) payload.tag = String(tag);
+  process.stdout.write(`aaronote-event:open:${JSON.stringify(payload)}\n`);
+  return { ok: true, ...payload };
 }
 
 async function apiCurrentFile(file) {
@@ -348,7 +350,7 @@ const apiHandlers = {
   "aaronnote:api:shell:open-directory-in-kitty": () => ({ ok: false, message: "Kitty integration is not available in the Emacs web host yet" }),
   "aaronnote:api:shell:show-attachment-menu": (file) => openPath(file),
   "aaronnote:api:shell:show-editor-context-menu": () => ({ ok: true }),
-  "aaronnote:api:emacs:open": (body) => apiOpenInEmacs(body?.file ?? body, body?.line, body?.col),
+  "aaronnote:api:emacs:open": (body) => apiOpenInEmacs(body?.file ?? body, body?.line, body?.col, body?.tag),
   "aaronnote:api:emacs:current-file": (file) => apiCurrentFile(file),
 };
 
@@ -362,6 +364,7 @@ function adapterScript(origin) {
   return `<script>
 (function() {
   var BASE = ${JSON.stringify(origin)};
+  window.__aaronnoteNotesRoot = ${JSON.stringify(noteRoot)};
   function call(channel, args) {
     return fetch(BASE + "/api", {
       method: "POST",
@@ -523,6 +526,7 @@ function adapterScript(origin) {
       activateRoam: function(body) { return call("aaronnote:api:meta:activate-roam", [body || {}]); }
     },
     emacs: {
+      open: function(body) { return call("aaronnote:api:emacs:open", [body || {}]); },
       currentFile: function(file) { return call("aaronnote:api:emacs:current-file", [String(file || "")]); }
     },
     shell: {
@@ -802,7 +806,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/emacs/event" && req.method === "POST") {
       const body = await readJson(req, 1024 * 1024);
       if (body.type === "open" || body.type === "goto") {
-        sendJson(res, 200, await apiOpenInEmacs(body.file, body.line, body.col));
+        sendJson(res, 200, await apiOpenInEmacs(body.file, body.line, body.col, body.tag));
         return;
       }
       if (body.type === "current-file") {
@@ -823,21 +827,92 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // Serve roam-pub JS files (D3, knowledge.js, graph.js) via plain HTTP
+    if (url.pathname.startsWith("/roam-pub/")) {
+      const name = url.pathname.slice("/roam-pub/".length);
+      let filePath;
+      if (name === "d3.min.js") filePath = resolve(runtimeRoot, "node_modules/d3/dist/d3.min.js");
+      else if (name === "knowledge.js" || name === "graph.js") filePath = resolve(publishJsDir, name);
+      else { sendText(res, 404, "Not found"); return; }
+      if (!(await isFile(filePath))) { sendText(res, 404, "Not found"); return; }
+      const data = await readFile(filePath);
+      res.writeHead(200, {
+        "Content-Type": "application/javascript; charset=utf-8",
+        "Cache-Control": "no-cache",
+      });
+      res.end(data);
+      return;
+    }
+
     if (url.pathname === "/graph") {
       const notes = await scanNotes();
-      const payload = graphPayload(notes);
-      const graphJs = resolve(publishJsDir, "graph.js");
-      const hasGraphJs = await isFile(graphJs);
-      const scriptTag = hasGraphJs
-        ? `<script src="${origin}/aaronnote-asset?url=${encodeURIComponent("aaronnote-asset://roam-tools/graph.js")}"></script>`
-        : `<script>console.warn("graph.js not found at ${graphJs}")</script>`;
+      const raw = graphPayload(notes);
+      // Build SITE_DATA in the format knowledge.js expects:
+      // { notes: [{ key, title, link, path, tags, aliases, refs, backlinks, groupKey, groupLabel }] }
+      const backlinksMap = {};
+      for (const edge of raw.edges ?? []) {
+        if (!backlinksMap[edge.target]) backlinksMap[edge.target] = [];
+        backlinksMap[edge.target].push(edge.source);
+      }
+      const siteData = {
+        notes: raw.nodes.map((n) => ({
+          key: n.key,
+          id: n.id || n.key,
+          title: n.title,
+          link: n.link || n.path,
+          path: n.path,
+          groupKey: n.groupKey || "Root",
+          groupLabel: n.groupLabel || n.groupKey || "Root",
+          tags: n.tags ?? [],
+          aliases: n.aliases ?? [],
+          refs: (raw.edges ?? []).filter((e) => e.source === n.key).map((e) => e.target),
+          backlinks: backlinksMap[n.key] ?? [],
+        })),
+      };
       sendHtmlNoStore(res, `<!doctype html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#fff}</style>
-<script>window.ROAM_GRAPH_DATA=${JSON.stringify(payload).replace(/</g,"\\u003c")};</script>
+${adapterScript(origin)}
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;width:100vw;height:100vh;overflow:hidden;display:flex}
+#graph-container{flex:1;width:0;height:100vh;position:relative}
+#graph-focus{width:280px;min-width:280px;height:100vh;overflow-y:auto;border-left:1px solid #d8d0c2;background:color-mix(in srgb,#fffaf0,white 12%)}
+#graph-focus:empty,#graph-focus.empty{display:none}
+</style>
+<script>var SITE_DATA=${JSON.stringify(siteData).replace(/</g,"\\u003c")};</script>
+<script src="${origin}/roam-pub/knowledge.js"></script>
+<script>window.__GRAPH_NO_AUTO_INIT__=true;</script>
 </head>
-<body>${scriptTag}</body>
+<body>
+<div id="graph-container" data-graph-toolbar="true"></div>
+<div id="graph-focus" class="graph-focus"></div>
+<script src="${origin}/roam-pub/d3.min.js"></script>
+<script src="${origin}/roam-pub/graph.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var root = window.__aaronnoteNotesRoot || "";
+  window.initKnowledgeGraph({
+    onNoteOpen: function (note) {
+      var path = (note && (note.path || note.link)) || "";
+      if (!path) return;
+      var abs = path;
+      if (root) {
+        var r = root;
+        while (r.length && r.charAt(r.length - 1) === "/") r = r.slice(0, -1);
+        var p = path;
+        while (p.length && p.charAt(0) === "/") p = p.slice(1);
+        abs = r + "/" + p;
+      }
+      var api = window.aaronnoteApi;
+      if (api && api.emacs && api.emacs.open) {
+        api.emacs.open({ file: abs }).catch(function () {});
+      }
+    }
+  });
+});
+</script>
+</body>
 </html>`);
       return;
     }

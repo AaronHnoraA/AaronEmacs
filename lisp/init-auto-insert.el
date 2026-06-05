@@ -22,7 +22,6 @@
 
 (defcustom my/template-current
   '((org . "default.org")
-    (typst . "academic-report.typ")
     (c . "default.c")
     (cc . "default.cc")
     (js . "default.js")
@@ -40,7 +39,7 @@ Each entry is (KIND . FILENAME), where KIND maps to templates/KIND/FILENAME."
   :group 'my/template)
 
 (defconst my/template-kinds
-  '(org typst c cc js ts sh tex python nix makefile cmake)
+  '(org c cc js ts sh tex python nix makefile cmake)
   "Template kinds supported by this configuration.")
 
 (defcustom my/template-auto-insert-enabled-kinds
@@ -65,14 +64,6 @@ precedence over `my/template-current' when choosing the template file.")
 
 (defvar-local my/template--remote-placeholder-created nil
   "Whether this buffer bootstrapped a missing remote file for auto-insert.")
-
-(defconst my/template-typst-style-links
-  '(("assignment.typ" . "notes/assignment.typ")
-    ("beamer.typ" . "notes/beamer.typ")
-    ("rho.typ" . "notes/rho.typ")
-    ("aleph-notas.typ" . "notes/aleph-notas.typ")
-    ("note-code.typ" . "notes/note-code.typ"))
-  "Typst style symlinks created below a project's `_typst' directory.")
 
 (defun my/template--safe-kinds-p (value)
   (and (listp value)
@@ -109,7 +100,6 @@ first and then opening it."
   (when-let* ((ext (file-name-extension (or file ""))))
     (pcase (downcase ext)
       ("org" 'org)
-      ("typ" 'typst)
       ("py" 'python)
       ((or "js" "jsx" "mjs" "cjs") 'js)
       ((or "ts" "tsx") 'ts)
@@ -125,10 +115,6 @@ first and then opening it."
 (defun my/template--kind (&optional file)
   (or (cond
        ((derived-mode-p 'org-mode) 'org)
-       ((or (derived-mode-p 'typst-ts-mode)
-            (derived-mode-p 'typst-mode)
-            (derived-mode-p 'my/typst-mode))
-        'typst)
        ((or (derived-mode-p 'python-mode) (eq major-mode 'python-ts-mode)) 'python)
        ((or (derived-mode-p 'js-mode) (eq major-mode 'js-ts-mode)) 'js)
        ((or (derived-mode-p 'typescript-mode) (eq major-mode 'typescript-ts-mode) (eq major-mode 'tsx-ts-mode)) 'ts)
@@ -192,23 +178,6 @@ first and then opening it."
       (make-symbolic-link target link))
      (t
       (make-symbolic-link target link)))))
-
-(defun my/template--typst-style-source (relative)
-  "Return config-local Typst style source RELATIVE path."
-  (expand-file-name relative user-emacs-directory))
-
-(defun my/template--ensure-typst-style-links (template)
-  "Create project-local Typst style links for TEMPLATE."
-  (when (and (member template '("assignment.typ" "slide.typ"))
-             buffer-file-name
-             (not (file-remote-p buffer-file-name)))
-    (let* ((root (my/template--project-root))
-           (dir (expand-file-name "_typst" root)))
-      (make-directory dir t)
-      (dolist (link my/template-typst-style-links)
-        (my/template--ensure-symlink
-         (my/template--typst-style-source (cdr link))
-         (expand-file-name (car link) dir))))))
 
 (defun my/template--available-kinds ()
   (seq-filter (lambda (kind)
@@ -312,8 +281,6 @@ template filename under templates/KIND/."
     (erase-buffer))
   (let* ((kind (or kind (my/template--kind) (my/template--read-kind)))
          (template (or template (my/template--current kind))))
-    (when (eq kind 'typst)
-      (my/template--ensure-typst-style-links template))
     (my/auto-insert--insert-template-file (my/template--path kind template))))
 
 (defun my/template--auto-insert-allowed-p ()
@@ -379,7 +346,6 @@ name, falling back to a prompt."
   (auto-insert-query nil)
   :config
   (define-auto-insert (rx ".org" string-end) (lambda () (my/template-auto-insert 'org)))
-  (define-auto-insert (rx ".typ" string-end) (lambda () (my/template-auto-insert 'typst)))
   (define-auto-insert (rx ".py" string-end) (lambda () (my/template-auto-insert 'python)))
   (define-auto-insert (rx ".js" string-end) (lambda () (my/template-auto-insert 'js)))
   (define-auto-insert (rx ".cjs" string-end) (lambda () (my/template-auto-insert 'js "default.cjs")))

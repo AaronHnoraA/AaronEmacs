@@ -1,9 +1,7 @@
 ;;; init-md-roam.el --- Markdown roam note navigation -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;; Roam-style helpers for Aaronnote Markdown notes.  The file keeps the old
-;; `my/typst-roam-*' names as compatibility aliases for the earlier Typst
-;; workflow while the implementation now targets `.md' notes.
+;; Roam-style helpers for Aaronnote Markdown notes.
 
 ;;; Code:
 
@@ -19,57 +17,57 @@
 (declare-function my/navigation--push-jump "init-navigation")
 (declare-function my/navigation-find-definition "init-navigation")
 
-(defgroup my/typst-roam nil
+(defgroup my/aaronnote-roam nil
   "Roam-style navigation for Aaronnote Markdown notes."
   :group 'my/aaronnote)
 
-(defconst my/typst-roam--module-directory
+(defconst my/aaronnote-roam--module-directory
   (file-name-directory (or load-file-name buffer-file-name))
   "Directory containing the Markdown roam Emacs bridge.")
 
-(defcustom my/typst-roam-root
+(defcustom my/aaronnote-roam-root
   (expand-file-name ".roam" user-emacs-directory)
   "Root directory of the Markdown roam note vault."
   :type 'directory
-  :group 'my/typst-roam)
+  :group 'my/aaronnote-roam)
 
-(defcustom my/typst-roam-recent-limit 24
+(defcustom my/aaronnote-roam-recent-limit 24
   "Maximum number of recent Markdown roam notes kept in memory."
   :type 'integer
-  :group 'my/typst-roam)
+  :group 'my/aaronnote-roam)
 
-(defcustom my/typst-roam-select-window-height 0.32
+(defcustom my/aaronnote-roam-select-window-height 0.32
   "Height for the bottom Markdown roam selector window."
   :type '(choice (number :tag "Fraction or rows")
                  (function :tag "Window height function"))
-  :group 'my/typst-roam)
+  :group 'my/aaronnote-roam)
 
-(defcustom my/typst-roam-runtime-root
-  (expand-file-name "aaronnote" my/typst-roam--module-directory)
+(defcustom my/aaronnote-roam-runtime-root
+  (expand-file-name "aaronnote" my/aaronnote-roam--module-directory)
   "Root of the vendored Aaronnote runtime used by Markdown roam tooling."
   :type 'directory
-  :group 'my/typst-roam)
+  :group 'my/aaronnote-roam)
 
-(defcustom my/typst-roam-runtime-cli
-  (expand-file-name "roam-cli.mjs" my/typst-roam-runtime-root)
+(defcustom my/aaronnote-roam-runtime-cli
+  (expand-file-name "roam-cli.mjs" my/aaronnote-roam-runtime-root)
   "Node bridge used to call the vendored Aaronnote roam runtime from Emacs."
   :type 'file
-  :group 'my/typst-roam)
+  :group 'my/aaronnote-roam)
 
-(defcustom my/typst-roam-sync-delay 1.5
+(defcustom my/aaronnote-roam-sync-delay 1.5
   "Seconds to debounce automatic incremental roam-db sync after saving."
   :type 'number
-  :group 'my/typst-roam)
+  :group 'my/aaronnote-roam)
 
-(defvar my/typst-roam--recent nil
+(defvar my/aaronnote-roam--recent nil
   "Recently opened Markdown roam note ids, newest first.")
 
-(defvar my/typst-roam--runtime-index-cache nil)
-(defvar my/typst-roam--runtime-index-cache-key nil)
-(defvar my/typst-roam--sync-timer nil)
-(defvar my/typst-roam--sync-changed-files nil)
+(defvar my/aaronnote-roam--runtime-index-cache nil)
+(defvar my/aaronnote-roam--runtime-index-cache-key nil)
+(defvar my/aaronnote-roam--sync-timer nil)
+(defvar my/aaronnote-roam--sync-changed-files nil)
 
-(defun my/typst-roam-root ()
+(defun my/aaronnote-roam-root ()
   "Return the Markdown roam notes root."
   (or (when buffer-file-name
         (when-let* ((dir (or (locate-dominating-file
@@ -79,46 +77,46 @@
           (file-truename dir)))
       (when (boundp 'my/aaronnote--notes-root)
         (file-name-as-directory (expand-file-name my/aaronnote--notes-root)))
-      (file-name-as-directory (expand-file-name my/typst-roam-root))))
+      (file-name-as-directory (expand-file-name my/aaronnote-roam-root))))
 
-(defun my/typst-roam--clear-runtime-cache ()
+(defun my/aaronnote-roam--clear-runtime-cache ()
   "Clear cached Aaronnote runtime payloads."
-  (setq my/typst-roam--runtime-index-cache nil
-        my/typst-roam--runtime-index-cache-key nil
-        my/typst-roam--scan-cache nil
-        my/typst-roam--db-cache nil
-        my/typst-roam--db-path-cache nil
-        my/typst-roam--db-mtime nil))
+  (setq my/aaronnote-roam--runtime-index-cache nil
+        my/aaronnote-roam--runtime-index-cache-key nil
+        my/aaronnote-roam--scan-cache nil
+        my/aaronnote-roam--db-cache nil
+        my/aaronnote-roam--db-path-cache nil
+        my/aaronnote-roam--db-mtime nil))
 
-(defun my/typst-roam--runtime-available-p ()
+(defun my/aaronnote-roam--runtime-available-p ()
   "Return non-nil when the Aaronnote runtime bridge is available."
-  (and (file-exists-p my/typst-roam-runtime-cli)
+  (and (file-exists-p my/aaronnote-roam-runtime-cli)
        (file-exists-p
         (expand-file-name "server/lib/index.mjs"
-                          my/typst-roam-runtime-root))))
+                          my/aaronnote-roam-runtime-root))))
 
-(defun my/typst-roam--runtime-call (action &rest args)
+(defun my/aaronnote-roam--runtime-call (action &rest args)
   "Call Aaronnote roam runtime ACTION synchronously with ARGS.
 Return parsed JSON as hash tables/lists, or nil when the runtime is unavailable
 or the command fails."
-  (when (my/typst-roam--runtime-available-p)
+  (when (my/aaronnote-roam--runtime-available-p)
     (with-temp-buffer
-      (let* ((root (my/typst-roam-root))
-             (default-directory my/typst-roam--module-directory)
+      (let* ((root (my/aaronnote-roam-root))
+             (default-directory my/aaronnote-roam--module-directory)
              (process-environment
               (append (list (format "AARONNOTE_ROOT=%s" root)
                             (format "AARONNOTE_RUNTIME_ROOT=%s"
                                     (expand-file-name
-                                     my/typst-roam-runtime-root))
+                                     my/aaronnote-roam-runtime-root))
                             (format "AARONNOTE_WORKSPACE_ROOT=%s"
                                     user-emacs-directory))
                       process-environment))
              (status (apply #'process-file
                             "node" nil (current-buffer) nil
-                            my/typst-roam-runtime-cli
+                            my/aaronnote-roam-runtime-cli
                             action
                             "--root" root
-                            "--runtime" my/typst-roam-runtime-root
+                            "--runtime" my/aaronnote-roam-runtime-root
                             "--workspace" user-emacs-directory
                             args)))
         (if (zerop status)
@@ -130,32 +128,32 @@ or the command fails."
                    (string-trim (buffer-string)))
           nil)))))
 
-(defun my/typst-roam--runtime-index ()
+(defun my/aaronnote-roam--runtime-index ()
   "Return cached Aaronnote runtime index payload, or nil."
-  (let ((key (list (file-truename (my/typst-roam-root))
+  (let ((key (list (file-truename (my/aaronnote-roam-root))
                    (file-truename
-                    (expand-file-name my/typst-roam-runtime-root)))))
-    (if (and my/typst-roam--runtime-index-cache
-             (equal key my/typst-roam--runtime-index-cache-key))
-        my/typst-roam--runtime-index-cache
-      (setq my/typst-roam--runtime-index-cache
-            (my/typst-roam--runtime-call "index")
-            my/typst-roam--runtime-index-cache-key key)
-      my/typst-roam--runtime-index-cache)))
+                    (expand-file-name my/aaronnote-roam-runtime-root)))))
+    (if (and my/aaronnote-roam--runtime-index-cache
+             (equal key my/aaronnote-roam--runtime-index-cache-key))
+        my/aaronnote-roam--runtime-index-cache
+      (setq my/aaronnote-roam--runtime-index-cache
+            (my/aaronnote-roam--runtime-call "index")
+            my/aaronnote-roam--runtime-index-cache-key key)
+      my/aaronnote-roam--runtime-index-cache)))
 
-(defun my/typst-roam--runtime-sync (&optional full changed-files)
+(defun my/aaronnote-roam--runtime-sync (&optional full changed-files)
   "Run Aaronnote roam-db sync asynchronously.
 When FULL is non-nil, force a full rebuild.  CHANGED-FILES are passed to the
 runtime incremental sync."
-  (if (not (my/typst-roam--runtime-available-p))
+  (if (not (my/aaronnote-roam--runtime-available-p))
       (message "Aaronnote roam runtime not found; cache refreshed only")
-    (let* ((root (my/typst-roam-root))
+    (let* ((root (my/aaronnote-roam-root))
            (buf (get-buffer-create "*roam-index*"))
            (args (append
-                  (list my/typst-roam-runtime-cli
+                  (list my/aaronnote-roam-runtime-cli
                         "sync"
                         "--root" root
-                        "--runtime" my/typst-roam-runtime-root
+                        "--runtime" my/aaronnote-roam-runtime-root
                         "--workspace" user-emacs-directory)
                   (when full (list "--full"))
                   (mapcan (lambda (file) (list "--changed" file))
@@ -169,10 +167,10 @@ runtime incremental sync."
        :sentinel
        (lambda (_proc event)
          (when (memq (process-status _proc) '(exit signal))
-           (my/typst-roam--clear-runtime-cache)
+           (my/aaronnote-roam--clear-runtime-cache)
            (message "Aaronnote roam sync: %s" (string-trim event))))))))
 
-(defun my/typst-roam--target-at-point ()
+(defun my/aaronnote-roam--target-at-point ()
   "Return the raw Markdown roam link target at or near point, or nil."
   (save-excursion
     (let* ((line-start (line-beginning-position))
@@ -204,7 +202,7 @@ runtime incremental sync."
           (while (string-match "\\[\\[\\([^]\n]+\\)\\]\\]" line pos)
             (record (match-beginning 0) (match-end 0)
                     (concat "roam://"
-                            (my/typst-roam--encode-ref
+                            (my/aaronnote-roam--encode-ref
                              (string-trim (match-string 1 line)))))
             (setq pos (1+ (match-beginning 0)))))
         (let ((pos 0))
@@ -220,17 +218,17 @@ runtime incremental sync."
             (setq pos (1+ (match-beginning 0))))))
       result)))
 
-(defun my/typst-roam--decode-ref (ref)
+(defun my/aaronnote-roam--decode-ref (ref)
   "Percent-decode note REF, returning REF unchanged on malformed input."
   (condition-case nil
       (url-unhex-string (or ref ""))
     (error (or ref ""))))
 
-(defun my/typst-roam--encode-ref (ref)
+(defun my/aaronnote-roam--encode-ref (ref)
   "Percent-encode REF for use in Aaronnote roam URLs."
   (url-hexify-string (or ref "")))
 
-(defun my/typst-roam--split-target (target)
+(defun my/aaronnote-roam--split-target (target)
   "Split Aaronnote TARGET into note ref plus optional tag or DOM target.
 Canonical targets look like `roam://note-id', `roam://note-id#tag', and
 `roam://note-id@dom-target'.  Path-like refs are accepted as input and later
@@ -244,28 +242,28 @@ resolved using the same note lookup path."
       (cond
        ((string-match "\\`\\(.*?\\)#\\([^#]*\\)\\'" body)
         (setq ref (match-string 1 body)
-              tag (my/typst-roam--decode-ref (match-string 2 body))))
+              tag (my/aaronnote-roam--decode-ref (match-string 2 body))))
        ((string-match "\\`\\(.*?\\)@\\([^#]*\\)\\'" body)
         (setq ref (match-string 1 body)
-              dom (my/typst-roam--decode-ref (match-string 2 body))))
+              dom (my/aaronnote-roam--decode-ref (match-string 2 body))))
        (t
         (setq ref body)))
       (list :raw raw
             :ref (string-trim
                   (replace-regexp-in-string
                    "\\`/+" ""
-                   (my/typst-roam--decode-ref (or ref ""))))
+                   (my/aaronnote-roam--decode-ref (or ref ""))))
             :tag (and tag (not (string-empty-p tag)) tag)
             :dom (and dom (not (string-empty-p dom)) dom)))))
 
-(defun my/typst-roam--parse-target (target)
+(defun my/aaronnote-roam--parse-target (target)
   "Parse note-link TARGET into Aaronnote-compatible target metadata."
-  (when-let* ((parts (my/typst-roam--split-target target)))
+  (when-let* ((parts (my/aaronnote-roam--split-target target)))
     (let* ((ref (plist-get parts :ref))
-           (resolved (my/typst-roam--resolve-note ref))
+           (resolved (my/aaronnote-roam--resolve-note ref))
            (id (or (plist-get resolved :id) ref))
            (file (or (plist-get resolved :file)
-                     (my/typst-roam--ref-to-file-fallback ref))))
+                     (my/aaronnote-roam--ref-to-file-fallback ref))))
       (append parts
               (list :slug id
                     :note-id id
@@ -274,53 +272,53 @@ resolved using the same note lookup path."
                     :key (plist-get resolved :key)
                     :note (plist-get resolved :note))))))
 
-(defun my/typst-roam--slug-at-point ()
+(defun my/aaronnote-roam--slug-at-point ()
   "Return the note-link slug at or near point, or nil."
-  (plist-get (my/typst-roam--parse-target (my/typst-roam--target-at-point))
+  (plist-get (my/aaronnote-roam--parse-target (my/aaronnote-roam--target-at-point))
              :slug))
 
-(defun my/typst-roam--all-files ()
+(defun my/aaronnote-roam--all-files ()
   "Return all Markdown roam note files, excluding generated/private dirs."
   (seq-filter
    (lambda (file)
-     (let ((rel (file-relative-name file (my/typst-roam-root))))
+     (let ((rel (file-relative-name file (my/aaronnote-roam-root))))
        (not (string-match-p
              "\\`\\(?:\\.git/\\|\\.lean/\\|_typst/\\|node_modules/\\)"
              rel))))
    (directory-files-recursively
-    (my/typst-roam-root) "\\.\\(?:md\\|markdown\\)$")))
+    (my/aaronnote-roam-root) "\\.\\(?:md\\|markdown\\)$")))
 
-(defun my/typst-roam--file-to-slug (file)
+(defun my/aaronnote-roam--file-to-slug (file)
   "Convert FILE path to a roam slug, relative to root and without extension."
-  (my/typst-roam--path-without-note-extension
-   (file-relative-name file (my/typst-roam-root))))
+  (my/aaronnote-roam--path-without-note-extension
+   (file-relative-name file (my/aaronnote-roam-root))))
 
-(defun my/typst-roam--file-to-note-id (file)
+(defun my/aaronnote-roam--file-to-note-id (file)
   "Return the canonical note id for FILE, falling back to its path slug."
-  (let* ((slug (my/typst-roam--file-to-slug file))
-         (resolved (my/typst-roam--resolve-note slug)))
+  (let* ((slug (my/aaronnote-roam--file-to-slug file))
+         (resolved (my/aaronnote-roam--resolve-note slug)))
     (or (plist-get resolved :id) slug)))
 
-(defun my/typst-roam--ref-has-extension-p (ref)
+(defun my/aaronnote-roam--ref-has-extension-p (ref)
   "Return non-nil when REF already names a note file extension."
   (string-match-p "\\.\\(?:typ\\|md\\|markdown\\)\\'" (or ref "")))
 
-(defun my/typst-roam--path-without-note-extension (path)
+(defun my/aaronnote-roam--path-without-note-extension (path)
   "Remove a note file extension from PATH."
   (replace-regexp-in-string "\\.\\(?:typ\\|md\\|markdown\\)\\'" "" (or path "")))
 
-(defun my/typst-roam--strip-vault-prefix (ref)
+(defun my/aaronnote-roam--strip-vault-prefix (ref)
   "Remove Aaronnote's exported `roam/' prefix from path REF."
   (let ((clean (replace-regexp-in-string "\\`/+" "" (or ref ""))))
     (if (string-prefix-p "roam/" clean)
         (substring clean 5)
       clean)))
 
-(defun my/typst-roam--ref-to-file-fallback (ref)
+(defun my/aaronnote-roam--ref-to-file-fallback (ref)
   "Return the best filesystem fallback for unresolved note REF."
-  (let* ((clean (my/typst-roam--strip-vault-prefix
+  (let* ((clean (my/aaronnote-roam--strip-vault-prefix
                  (string-trim (or ref ""))))
-         (root (my/typst-roam-root))
+         (root (my/aaronnote-roam-root))
          (path (if (file-name-absolute-p clean)
                    clean
                  (expand-file-name clean root))))
@@ -329,24 +327,24 @@ resolved using the same note lookup path."
            (file-exists-p path))
       path)
      ((and (not (string-empty-p clean))
-           (not (my/typst-roam--ref-has-extension-p clean))
+           (not (my/aaronnote-roam--ref-has-extension-p clean))
            (file-exists-p (concat path ".md")))
       (concat path ".md"))
      ((and (not (string-empty-p clean))
-           (not (my/typst-roam--ref-has-extension-p clean))
+           (not (my/aaronnote-roam--ref-has-extension-p clean))
            (file-exists-p (concat path ".markdown")))
       (concat path ".markdown"))
-     ((my/typst-roam--ref-has-extension-p clean)
+     ((my/aaronnote-roam--ref-has-extension-p clean)
       path)
      (t
       (concat path ".md")))))
 
-(defun my/typst-roam--slug-to-file (slug)
+(defun my/aaronnote-roam--slug-to-file (slug)
   "Convert SLUG, id, or path-like ref to an absolute note path."
-  (or (plist-get (my/typst-roam--resolve-note slug) :file)
-      (my/typst-roam--ref-to-file-fallback slug)))
+  (or (plist-get (my/aaronnote-roam--resolve-note slug) :file)
+      (my/aaronnote-roam--ref-to-file-fallback slug)))
 
-(defun my/typst-roam--slugify-title (title)
+(defun my/aaronnote-roam--slugify-title (title)
   "Return an Aaronnote-style slug for TITLE."
   (let ((slug (downcase
                (replace-regexp-in-string
@@ -358,59 +356,59 @@ resolved using the same note lookup path."
                   (string-trim title)))))))
     (if (string-empty-p slug) "untitled" slug)))
 
-(defun my/typst-roam--timestamp-id ()
+(defun my/aaronnote-roam--timestamp-id ()
   "Return an Aaronnote-style timestamp id."
   (format-time-string "%Y%m%dT%H%M%S"))
 
-(defun my/typst-roam--open-slug (slug &optional no-recent)
+(defun my/aaronnote-roam--open-slug (slug &optional no-recent)
   "Open roam note SLUG/id/path and record it in recent notes unless NO-RECENT."
-  (let* ((resolved (my/typst-roam--resolve-note slug))
+  (let* ((resolved (my/aaronnote-roam--resolve-note slug))
          (note-id (or (plist-get resolved :id) slug))
          (file (or (plist-get resolved :file)
-                   (my/typst-roam--ref-to-file-fallback slug))))
+                   (my/aaronnote-roam--ref-to-file-fallback slug))))
     (unless (file-exists-p file)
       (user-error "Note not found: %s" slug))
     (unless no-recent
-      (my/typst-roam--touch-recent note-id))
+      (my/aaronnote-roam--touch-recent note-id))
     (find-file file)))
 
-(defun my/typst-roam--touch-recent (slug)
+(defun my/aaronnote-roam--touch-recent (slug)
   "Move SLUG to the front of the recent list."
   (when (and (stringp slug) (not (string-empty-p slug)))
-    (setq my/typst-roam--recent
-          (seq-take (cons slug (delete slug my/typst-roam--recent))
-                    my/typst-roam-recent-limit))))
+    (setq my/aaronnote-roam--recent
+          (seq-take (cons slug (delete slug my/aaronnote-roam--recent))
+                    my/aaronnote-roam-recent-limit))))
 
-(defun my/typst-roam--note-title (slug)
+(defun my/aaronnote-roam--note-title (slug)
   "Return display title for SLUG."
-  (or (when-let* ((note (my/typst-roam--db-note slug)))
+  (or (when-let* ((note (my/aaronnote-roam--db-note slug)))
         (gethash "title" note))
-      (plist-get (my/typst-roam--resolve-note slug) :title)
+      (plist-get (my/aaronnote-roam--resolve-note slug) :title)
       (file-name-nondirectory slug)))
 
-(defun my/typst-roam--note-tags (slug)
+(defun my/aaronnote-roam--note-tags (slug)
   "Return tags for SLUG."
-  (when-let* ((note (my/typst-roam--db-note slug)))
-    (my/typst-roam--note-list-field note "tags")))
+  (when-let* ((note (my/aaronnote-roam--db-note slug)))
+    (my/aaronnote-roam--note-list-field note "tags")))
 
-(defun my/typst-roam--note-links (slug)
+(defun my/aaronnote-roam--note-links (slug)
   "Return normalized outgoing link slugs for SLUG."
-  (when-let* ((note (my/typst-roam--db-note slug)))
+  (when-let* ((note (my/aaronnote-roam--db-note slug)))
     (delete-dups
      (seq-filter #'identity
-                 (mapcar #'my/typst-roam--target-slug
-                         (or (my/typst-roam--note-list-field note "links")
-                             (my/typst-roam--note-list-field note "refs")))))))
+                 (mapcar #'my/aaronnote-roam--target-slug
+                         (or (my/aaronnote-roam--note-list-field note "links")
+                             (my/aaronnote-roam--note-list-field note "refs")))))))
 
-(defun my/typst-roam--note-summary (slug)
+(defun my/aaronnote-roam--note-summary (slug)
   "Return a compact text summary for SLUG."
-  (or (when-let* ((note (my/typst-roam--db-note slug)))
-        (my/typst-roam--note-field note "summary"))
-      (let ((file (my/typst-roam--slug-to-file slug)))
+  (or (when-let* ((note (my/aaronnote-roam--db-note slug)))
+        (my/aaronnote-roam--note-field note "summary"))
+      (let ((file (my/aaronnote-roam--slug-to-file slug)))
         (when (file-exists-p file)
           (with-temp-buffer
             (insert-file-contents file nil 0 20000)
-            (or (my/typst-roam--extract-summary-block)
+            (or (my/aaronnote-roam--extract-summary-block)
                 (let (parts in-meta)
                   (goto-char (point-min))
                   (while (and (not (eobp))
@@ -443,26 +441,26 @@ resolved using the same note lookup path."
                    (string-join (nreverse parts) " ") 220 nil nil
                    "..."))))))))
 
-(defun my/typst-roam--all-note-summaries ()
+(defun my/aaronnote-roam--all-note-summaries ()
   "Return note summary plists for all notes."
   (mapcar (lambda (record)
             (let* ((id (plist-get record :id))
                    (note (plist-get record :note)))
               (list :slug id
                     :title (or (plist-get record :title)
-                               (my/typst-roam--note-title id))
-                    :path (or (my/typst-roam--note-field note "path")
-                              (my/typst-roam--note-field note "link"))
-                    :aliases (my/typst-roam--note-list-field note "aliases")
-                    :tags (my/typst-roam--note-tags id)
-                    :links (my/typst-roam--note-links id)
-                    :backlinks (my/typst-roam--db-backlinks-to id)
-                    :summary (my/typst-roam--note-summary id))))
-          (sort (my/typst-roam--note-records)
+                               (my/aaronnote-roam--note-title id))
+                    :path (or (my/aaronnote-roam--note-field note "path")
+                              (my/aaronnote-roam--note-field note "link"))
+                    :aliases (my/aaronnote-roam--note-list-field note "aliases")
+                    :tags (my/aaronnote-roam--note-tags id)
+                    :links (my/aaronnote-roam--note-links id)
+                    :backlinks (my/aaronnote-roam--db-backlinks-to id)
+                    :summary (my/aaronnote-roam--note-summary id))))
+          (sort (my/aaronnote-roam--note-records)
                 (lambda (a b)
                   (string< (plist-get a :id) (plist-get b :id))))))
 
-(defun my/typst-roam--candidate-haystack (entry)
+(defun my/aaronnote-roam--candidate-haystack (entry)
   "Return searchable text for note summary ENTRY."
   (string-join
    (delq nil
@@ -474,9 +472,9 @@ resolved using the same note lookup path."
                (string-join (or (plist-get entry :tags) nil) " ")))
    " "))
 
-(defun my/typst-roam--read-note (prompt &optional entries)
+(defun my/aaronnote-roam--read-note (prompt &optional entries)
   "Read a note slug with PROMPT from ENTRIES or all summaries."
-  (let* ((items (or entries (my/typst-roam--all-note-summaries)))
+  (let* ((items (or entries (my/aaronnote-roam--all-note-summaries)))
          (table (mapcar (lambda (entry)
                           (cons (plist-get entry :slug) entry))
                         items))
@@ -501,9 +499,9 @@ resolved using the same note lookup path."
                 nil t)))
     slug))
 
-(defun my/typst-roam--read-note-id (prompt)
+(defun my/aaronnote-roam--read-note-id (prompt)
   "Read an Aaronnote note id with PROMPT."
-  (let* ((records (my/typst-roam--note-records))
+  (let* ((records (my/aaronnote-roam--note-records))
          (candidates (mapcar (lambda (record)
                                (plist-get record :id))
                              records))
@@ -522,26 +520,26 @@ resolved using the same note lookup path."
                       (concat
                        "  "
                        (or (plist-get record :title) "")
-                       (when-let* ((path (or (my/typst-roam--note-field note "path")
-                                             (my/typst-roam--note-field note "link"))))
+                       (when-let* ((path (or (my/aaronnote-roam--note-field note "path")
+                                             (my/aaronnote-roam--note-field note "link"))))
                          (concat "  " path))
-                       (when-let* ((tags (my/typst-roam--note-list-field note "tags")))
+                       (when-let* ((tags (my/aaronnote-roam--note-list-field note "tags")))
                          (concat "  #" (string-join tags " #")))))))))
          (complete-with-action action candidates string pred)))
      nil t)))
 
-(defun my/typst-roam--roam-href (note-id &optional kind target)
+(defun my/aaronnote-roam--roam-href (note-id &optional kind target)
   "Return canonical Aaronnote roam href for NOTE-ID and optional TARGET."
   (concat "roam://"
-          (my/typst-roam--encode-ref note-id)
+          (my/aaronnote-roam--encode-ref note-id)
           (pcase kind
-            ('tag (concat "#" (my/typst-roam--encode-ref target)))
-            ('dom (concat "@" (mapconcat #'my/typst-roam--encode-ref
-                                          (my/typst-roam--dom-target-segments target)
+            ('tag (concat "#" (my/aaronnote-roam--encode-ref target)))
+            ('dom (concat "@" (mapconcat #'my/aaronnote-roam--encode-ref
+                                          (my/aaronnote-roam--dom-target-segments target)
                                           "@")))
             (_ ""))))
 
-(defun my/typst-roam--heading-labels (&optional file)
+(defun my/aaronnote-roam--heading-labels (&optional file)
   "Return Markdown heading ids/labels in FILE or the current buffer.
 Each entry is a plist with :id, :text, and :pos."
   (let ((text (if (and file (file-exists-p file))
@@ -575,7 +573,7 @@ Each entry is a plist with :id, :text, and :pos."
             (push (list :id id :text id :pos (match-beginning 0)) labels)))))
     (nreverse labels)))
 
-(defun my/typst-roam--goto-tag-id (id)
+(defun my/aaronnote-roam--goto-tag-id (id)
   "Jump to Markdown heading/tag ID in the current buffer."
   (goto-char (point-min))
   (cond
@@ -590,14 +588,14 @@ Each entry is a plist with :id, :text, and :pos."
        (format "<%s>" (regexp-quote id))
        nil t))
     (goto-char (match-beginning 0)))
-   ((when-let* ((target (my/typst-roam--find-dom-target id)))
-      (my/typst-roam--goto-pos (plist-get target :pos))
+   ((when-let* ((target (my/aaronnote-roam--find-dom-target id)))
+      (my/aaronnote-roam--goto-pos (plist-get target :pos))
       t))
    (t
     (user-error "Tag id not found: %s" id)))
   (recenter-top-bottom))
 
-(defun my/typst-roam--heading-items (&optional file)
+(defun my/aaronnote-roam--heading-items (&optional file)
   "Return heading plists for FILE or the current buffer."
   (let ((text (if (and file (file-exists-p file))
                   (with-temp-buffer
@@ -623,48 +621,48 @@ Each entry is a plist with :id, :text, and :pos."
               items)))
     (nreverse items)))
 
-(defun my/typst-roam--goto-pos (pos)
+(defun my/aaronnote-roam--goto-pos (pos)
   "Move to POS, treating nil or synthetic zero positions as file start."
   (goto-char (if (and (integerp pos) (>= pos (point-min)))
                  pos
                (point-min))))
 
-(defun my/typst-roam--normalize-dom-target (value)
+(defun my/aaronnote-roam--normalize-dom-target (value)
   "Normalize Aaronnote DOM target VALUE for matching."
   (string-trim
    (replace-regexp-in-string
     "\\s-+" " "
     (replace-regexp-in-string
      "[][\r\n]" " "
-     (string-remove-prefix "@" (my/typst-roam--decode-ref (or value "")))))))
+     (string-remove-prefix "@" (my/aaronnote-roam--decode-ref (or value "")))))))
 
-(defun my/typst-roam--slug-dom-target (value)
+(defun my/aaronnote-roam--slug-dom-target (value)
   "Return Aaronnote's DOM target slug for VALUE."
   (let ((clean (downcase
                 (replace-regexp-in-string
                  "[`*_~()[\\]{}#+.!<>:;,'\"@]" " "
-                 (my/typst-roam--normalize-dom-target value)))))
+                 (my/aaronnote-roam--normalize-dom-target value)))))
     (replace-regexp-in-string
      "\\s-+" "-"
      (string-trim clean))))
 
-(defun my/typst-roam--dom-target-segments (value)
+(defun my/aaronnote-roam--dom-target-segments (value)
   "Return normalized DOM target path segments from VALUE."
   (seq-filter
    (lambda (segment) (not (string-empty-p segment)))
-   (mapcar #'my/typst-roam--slug-dom-target
+   (mapcar #'my/aaronnote-roam--slug-dom-target
            (split-string (string-remove-prefix "@" (or value "")) "@"))))
 
-(defun my/typst-roam--dom-targets (&optional file note-id)
+(defun my/aaronnote-roam--dom-targets (&optional file note-id)
   "Return Aaronnote-style DOM/TOC targets for FILE or current buffer."
-  (let ((items (my/typst-roam--heading-items file))
+  (let ((items (my/aaronnote-roam--heading-items file))
         (stack nil)
         (label-stack nil)
         targets)
     (when-let* ((note-id)
-                (title (plist-get (my/typst-roam--resolve-note note-id) :title)))
-      (let ((label (my/typst-roam--normalize-dom-target title))
-            (slug (my/typst-roam--slug-dom-target title)))
+                (title (plist-get (my/aaronnote-roam--resolve-note note-id) :title)))
+      (let ((label (my/aaronnote-roam--normalize-dom-target title))
+            (slug (my/aaronnote-roam--slug-dom-target title)))
         (when (and (not (string-empty-p label))
                    (not (string-empty-p slug)))
           (push (list :slug slug
@@ -678,9 +676,9 @@ Each entry is a plist with :id, :text, and :pos."
                 targets))))
     (dolist (item items)
       (let* ((level (max 1 (plist-get item :level)))
-             (label (my/typst-roam--normalize-dom-target
+             (label (my/aaronnote-roam--normalize-dom-target
                      (plist-get item :text)))
-             (slug (my/typst-roam--slug-dom-target label)))
+             (slug (my/aaronnote-roam--slug-dom-target label)))
         (when (and (not (string-empty-p label))
                    (not (string-empty-p slug)))
           (setq stack (seq-take stack (1- level))
@@ -697,14 +695,14 @@ Each entry is a plist with :id, :text, and :pos."
                 targets))))
     (nreverse targets)))
 
-(defun my/typst-roam--dom-target-path-label (target)
+(defun my/aaronnote-roam--dom-target-path-label (target)
   "Return a readable label path for TARGET."
   (string-join (plist-get target :label-path) " / "))
 
-(defun my/typst-roam--target-path-matches-p (actual wanted &optional allow-suffix)
+(defun my/aaronnote-roam--target-path-matches-p (actual wanted &optional allow-suffix)
   "Return non-nil when ACTUAL target path matches WANTED."
-  (let ((actual (mapcar #'my/typst-roam--slug-dom-target actual))
-        (wanted (mapcar #'my/typst-roam--slug-dom-target wanted)))
+  (let ((actual (mapcar #'my/aaronnote-roam--slug-dom-target actual))
+        (wanted (mapcar #'my/aaronnote-roam--slug-dom-target wanted)))
     (cond
      ((or (null actual) (null wanted)) nil)
      ((equal actual wanted) t)
@@ -712,24 +710,24 @@ Each entry is a plist with :id, :text, and :pos."
            (>= (length actual) (length wanted)))
       (equal (last actual (length wanted)) wanted)))))
 
-(defun my/typst-roam--find-dom-target (dom &optional file note-id)
+(defun my/aaronnote-roam--find-dom-target (dom &optional file note-id)
   "Find DOM target DOM in FILE or current buffer."
-  (let* ((wanted (my/typst-roam--dom-target-segments dom))
-         (targets (my/typst-roam--dom-targets file note-id)))
+  (let* ((wanted (my/aaronnote-roam--dom-target-segments dom))
+         (targets (my/aaronnote-roam--dom-targets file note-id)))
     (cond
      ((null wanted) nil)
      ((> (length wanted) 1)
       (or (seq-find (lambda (target)
-                      (my/typst-roam--target-path-matches-p
+                      (my/aaronnote-roam--target-path-matches-p
                        (plist-get target :path) wanted))
                     targets)
           (seq-find (lambda (target)
-                      (my/typst-roam--target-path-matches-p
+                      (my/aaronnote-roam--target-path-matches-p
                        (plist-get target :path) wanted t))
                     targets)))
      (t
       (let* ((wanted-segment (car wanted))
-             (wanted-label (my/typst-roam--normalize-dom-target dom)))
+             (wanted-label (my/aaronnote-roam--normalize-dom-target dom)))
         (seq-find
          (lambda (target)
            (or (equal (plist-get target :slug) wanted-segment)
@@ -737,20 +735,20 @@ Each entry is a plist with :id, :text, and :pos."
                       (downcase wanted-label))))
          targets))))))
 
-(defun my/typst-roam--goto-dom-target (dom)
+(defun my/aaronnote-roam--goto-dom-target (dom)
   "Jump to Aaronnote DOM/TOC target DOM in the current buffer."
-  (let* ((target (my/typst-roam--find-dom-target dom))
+  (let* ((target (my/aaronnote-roam--find-dom-target dom))
          (pos (and target (plist-get target :pos))))
     (unless pos
       (user-error "DOM target not found: %s" dom))
-    (my/typst-roam--goto-pos pos)
+    (my/aaronnote-roam--goto-pos pos)
     (recenter-top-bottom)))
 
-(defun my/typst-roam--read-dom-target (note-id)
+(defun my/aaronnote-roam--read-dom-target (note-id)
   "Read an Aaronnote DOM/TOC target for NOTE-ID."
-  (let* ((record (my/typst-roam--resolve-note note-id))
+  (let* ((record (my/aaronnote-roam--resolve-note note-id))
          (file (plist-get record :file))
-         (targets (my/typst-roam--dom-targets file note-id))
+         (targets (my/aaronnote-roam--dom-targets file note-id))
          (table (mapcar (lambda (target)
                           (cons (string-join (plist-get target :path) "@")
                                 target))
@@ -764,15 +762,15 @@ Each entry is a plist with :id, :text, and :pos."
                            . (lambda (candidate)
                                (when-let* ((target (cdr (assoc candidate table))))
                                  (concat "  "
-                                         (my/typst-roam--dom-target-path-label
+                                         (my/aaronnote-roam--dom-target-path-label
                                           target))))))
                       (complete-with-action action table string pred)))
                   nil t)))
     (cdr (assoc choice table))))
 
-(defun my/typst-roam--show-toc (&optional file title)
+(defun my/aaronnote-roam--show-toc (&optional file title)
   "Show a heading TOC for FILE or the current buffer."
-  (let* ((items (my/typst-roam--heading-items file))
+  (let* ((items (my/aaronnote-roam--heading-items file))
          (buf (get-buffer-create "*roam-toc*"))
          (target-file file))
     (with-current-buffer buf
@@ -791,14 +789,14 @@ Each entry is a plist with :id, :text, and :pos."
                'action (lambda (_)
                          (when target-file
                            (find-file target-file))
-                         (my/typst-roam--goto-pos pos)
+                         (my/aaronnote-roam--goto-pos pos)
                          (recenter-top-bottom))
                'follow-link t))))
         (goto-char (point-min))
         (special-mode)))
     (display-buffer buf)))
 
-(defun my/typst-roam-follow-link ()
+(defun my/aaronnote-roam-follow-link ()
   "Jump to the note or source region referenced at point.
 Targets may use Aaronnote roam syntax:
   roam://note-id
@@ -809,36 +807,36 @@ Path-like refs are accepted and resolved to canonical note ids."
   (if (and (fboundp 'my/note-code-at-point)
            (my/note-code-at-point))
       (my/note-code-open-at-point)
-    (if-let* ((target (my/typst-roam--target-at-point))
-              (parsed (my/typst-roam--parse-target target))
+    (if-let* ((target (my/aaronnote-roam--target-at-point))
+              (parsed (my/aaronnote-roam--parse-target target))
               (note-id (plist-get parsed :slug))
               (file (plist-get parsed :file)))
         (let ((ref (plist-get parsed :ref)))
           (if (file-exists-p file)
               (progn
-                (my/typst-roam--touch-recent note-id)
+                (my/aaronnote-roam--touch-recent note-id)
                 (find-file file)
                 (cond
                  ((plist-get parsed :id)
-                  (my/typst-roam--goto-tag-id (plist-get parsed :id)))
+                  (my/aaronnote-roam--goto-tag-id (plist-get parsed :id)))
                  ((plist-get parsed :dom)
-                  (my/typst-roam--goto-dom-target (plist-get parsed :dom)))))
+                  (my/aaronnote-roam--goto-dom-target (plist-get parsed :dom)))))
             (when (yes-or-no-p (format "Note '%s' not found. Create it? " ref))
-              (my/typst-roam-new-note ref))))
+              (my/aaronnote-roam-new-note ref))))
       (user-error "No Markdown roam link or #note-code found at point"))))
 
-(defun my/typst-roam-find-note ()
+(defun my/aaronnote-roam-find-note ()
   "Find a roam note by Aaronnote id/path/title with completion."
   (interactive)
-  (my/typst-roam--open-slug
-   (my/typst-roam--read-note-id "Roam note: ")))
+  (my/aaronnote-roam--open-slug
+   (my/aaronnote-roam--read-note-id "Roam note: ")))
 
-(defun my/typst-roam-insert-link ()
+(defun my/aaronnote-roam-insert-link ()
   "Open the interactive selector and insert a Markdown roam link."
   (interactive)
-  (my/typst-roam-select-link))
+  (my/aaronnote-roam-select-link))
 
-(defun my/typst-roam-new-note (&optional slug title tags)
+(defun my/aaronnote-roam-new-note (&optional slug title tags)
   "Create a new roam note, prompting for SLUG, TITLE, and TAGS."
   (interactive)
   (let* ((slug (or slug (read-string "Slug (e.g. math/my-note): ")))
@@ -848,8 +846,8 @@ Path-like refs are accepted and resolved to canonical note ids."
                                               "[-/]" " "
                                               (file-name-nondirectory slug))))))
          (tags (or tags (read-string "Tags (comma-separated, or blank): ")))
-         (file (my/typst-roam--slug-to-file slug))
-         (rel (file-relative-name file (my/typst-roam-root)))
+         (file (my/aaronnote-roam--slug-to-file slug))
+         (rel (file-relative-name file (my/aaronnote-roam-root)))
          (tag-str (mapconcat #'string-trim (split-string tags "," t) ", ")))
     (make-directory (file-name-directory file) t)
     (find-file file)
@@ -874,29 +872,29 @@ source: roam/%s
                       slug title (format-time-string "%Y-%m-%d")
                       tag-str rel title)))))
 
-(defun my/typst-roam-new-node (&optional title directory)
+(defun my/aaronnote-roam-new-node (&optional title directory)
   "Create a new timestamped Markdown roam node from TITLE in DIRECTORY."
   (interactive)
   (let* ((title (or title (read-string "Node title: ")))
          (directory (or directory (read-string "Directory [.]: " nil nil ".")))
          (id (format "%s-%s"
-                     (my/typst-roam--timestamp-id)
-                     (my/typst-roam--slugify-title title)))
+                     (my/aaronnote-roam--timestamp-id)
+                     (my/aaronnote-roam--slugify-title title)))
          (slug (if (string= directory ".")
                    id
                  (concat (string-remove-suffix "/" directory) "/" id))))
-    (my/typst-roam-new-note slug title "")))
+    (my/aaronnote-roam-new-note slug title "")))
 
 ;; ── Roam DB ──────────────────────────────────────────────────────────────────
 
-(defvar my/typst-roam--db-cache nil)
-(defvar my/typst-roam--db-path-cache nil)
-(defvar my/typst-roam--db-mtime nil)
-(defvar my/typst-roam--scan-cache nil)
+(defvar my/aaronnote-roam--db-cache nil)
+(defvar my/aaronnote-roam--db-path-cache nil)
+(defvar my/aaronnote-roam--db-mtime nil)
+(defvar my/aaronnote-roam--scan-cache nil)
 
-(defun my/typst-roam--db-path ()
+(defun my/aaronnote-roam--db-path ()
   "Return path to an optional Markdown roam-db.json for the current vault."
-  (let* ((root (my/typst-roam-root))
+  (let* ((root (my/aaronnote-roam-root))
          (candidates (mapcar
                       (lambda (rel) (expand-file-name rel root))
                       '("roam-db.json"
@@ -908,35 +906,35 @@ source: roam/%s
     (or (seq-find #'file-exists-p candidates)
         (car candidates))))
 
-(defun my/typst-roam--db ()
+(defun my/aaronnote-roam--db ()
   "Return the parsed roam-db.json, refreshing cache when the file changes."
-  (let ((path (my/typst-roam--db-path)))
+  (let ((path (my/aaronnote-roam--db-path)))
     (when (file-exists-p path)
       (let ((mtime (file-attribute-modification-time (file-attributes path))))
-        (when (or (not my/typst-roam--db-cache)
-                  (not (equal path my/typst-roam--db-path-cache))
-                  (time-less-p my/typst-roam--db-mtime mtime))
-          (setq my/typst-roam--db-cache
+        (when (or (not my/aaronnote-roam--db-cache)
+                  (not (equal path my/aaronnote-roam--db-path-cache))
+                  (time-less-p my/aaronnote-roam--db-mtime mtime))
+          (setq my/aaronnote-roam--db-cache
                 (with-temp-buffer
                   (insert-file-contents path)
                   (json-parse-buffer :object-type 'hash-table :array-type 'list))
-                my/typst-roam--db-path-cache path
-                my/typst-roam--db-mtime mtime))))
-    my/typst-roam--db-cache))
+                my/aaronnote-roam--db-path-cache path
+                my/aaronnote-roam--db-mtime mtime))))
+    my/aaronnote-roam--db-cache))
 
-(defun my/typst-roam--db-notes ()
+(defun my/aaronnote-roam--db-notes ()
   "Return the DB notes hash table, or nil."
-  (when-let* ((db (my/typst-roam--db)))
+  (when-let* ((db (my/aaronnote-roam--db)))
     (gethash "notes" db)))
 
-(defun my/typst-roam--note-field (note key)
+(defun my/aaronnote-roam--note-field (note key)
   "Return string field KEY from NOTE."
   (when (hash-table-p note)
     (let ((value (gethash key note)))
       (when (and (stringp value) (not (string-empty-p value)))
         value))))
 
-(defun my/typst-roam--note-list-field (note key)
+(defun my/aaronnote-roam--note-list-field (note key)
   "Return list field KEY from NOTE."
   (let ((value (and (hash-table-p note) (gethash key note))))
     (cond
@@ -944,7 +942,7 @@ source: roam/%s
      ((vectorp value) (append value nil))
      ((and (stringp value) (not (string-empty-p value))) (list value)))))
 
-(defun my/typst-roam--split-list-value (value)
+(defun my/aaronnote-roam--split-list-value (value)
   "Split comma/space separated Markdown meta VALUE into a clean string list."
   (cond
    ((null value) nil)
@@ -962,31 +960,31 @@ source: roam/%s
                  (string-trim clean)))
              (split-string value "[,\n]" t))))))
 
-(defun my/typst-roam--put-note-field (note key value)
+(defun my/aaronnote-roam--put-note-field (note key value)
   "Set NOTE KEY to VALUE when VALUE is present."
   (when (and value
              (not (and (stringp value) (string-empty-p (string-trim value)))))
     (puthash key value note)))
 
-(defun my/typst-roam--parse-meta-line (note line)
+(defun my/aaronnote-roam--parse-meta-line (note line)
   "Parse one KEY: VALUE metadata LINE into NOTE."
   (when (string-match "\\`\\([^:]+\\):\\s-*\\(.*\\)\\'" line)
     (let* ((key (downcase (string-trim (match-string 1 line))))
            (value (string-trim (match-string 2 line))))
       (pcase key
         ((or "tags" "aliases" "refs" "links" "backlinks" "inlinetags")
-         (my/typst-roam--put-note-field
-          note key (my/typst-roam--split-list-value value)))
+         (my/aaronnote-roam--put-note-field
+          note key (my/aaronnote-roam--split-list-value value)))
         (_
-         (my/typst-roam--put-note-field note key value))))))
+         (my/aaronnote-roam--put-note-field note key value))))))
 
-(defun my/typst-roam--read-org-meta-block (note)
+(defun my/aaronnote-roam--read-org-meta-block (note)
   "Read an Aaronnote `#+begin meta' block at point into NOTE."
   (when (looking-at-p "\\s-*#\\+begin meta\\b")
     (forward-line 1)
     (while (and (not (eobp))
                 (not (looking-at-p "\\s-*#\\+end meta\\b")))
-      (my/typst-roam--parse-meta-line
+      (my/aaronnote-roam--parse-meta-line
        note
        (string-trim (buffer-substring-no-properties
                      (line-beginning-position)
@@ -994,13 +992,13 @@ source: roam/%s
       (forward-line 1))
     t))
 
-(defun my/typst-roam--read-yaml-frontmatter (note)
+(defun my/aaronnote-roam--read-yaml-frontmatter (note)
   "Read simple YAML frontmatter at point into NOTE."
   (when (looking-at-p "\\s-*---\\s-*$")
     (forward-line 1)
     (while (and (not (eobp))
                 (not (looking-at-p "\\s-*---\\s-*$")))
-      (my/typst-roam--parse-meta-line
+      (my/aaronnote-roam--parse-meta-line
        note
        (string-trim (buffer-substring-no-properties
                      (line-beginning-position)
@@ -1008,7 +1006,7 @@ source: roam/%s
       (forward-line 1))
     t))
 
-(defun my/typst-roam--extract-summary-block ()
+(defun my/aaronnote-roam--extract-summary-block ()
   "Return the first `#+begin summary' block text in the current buffer."
   (save-excursion
     (goto-char (point-min))
@@ -1019,7 +1017,7 @@ source: roam/%s
           (string-trim
            (buffer-substring-no-properties start (match-beginning 0))))))))
 
-(defun my/typst-roam--internal-target-p (target)
+(defun my/aaronnote-roam--internal-target-p (target)
   "Return non-nil when Markdown link TARGET is a roam note reference."
   (let ((clean (string-trim (or target ""))))
     (or (string-match-p "\\`roam://" clean)
@@ -1031,28 +1029,28 @@ source: roam/%s
                    "\\.\\(?:png\\|jpe?g\\|gif\\|svg\\|webp\\|pdf\\)\\(?:[#?].*\\)?\\'"
                    clean))))))
 
-(defun my/typst-roam--extract-links-from-buffer ()
+(defun my/aaronnote-roam--extract-links-from-buffer ()
   "Return Markdown roam references from the current buffer."
   (let (links)
     (save-excursion
       (goto-char (point-min))
       (while (re-search-forward "\\[\\[\\([^]\n]+\\)\\]\\]" nil t)
         (push (concat "roam://"
-                      (my/typst-roam--encode-ref
+                      (my/aaronnote-roam--encode-ref
                        (string-trim (match-string 1))))
               links))
       (goto-char (point-min))
       (while (re-search-forward "\\(!?\\)\\[[^]\n]*\\](\\([^)\n]+\\))" nil t)
         (unless (equal (match-string 1) "!")
           (let ((href (string-trim (match-string 2))))
-            (when (my/typst-roam--internal-target-p href)
+            (when (my/aaronnote-roam--internal-target-p href)
               (push href links)))))
       (goto-char (point-min))
       (while (re-search-forward "\\_<roam://[^][<>()[:space:]]+" nil t)
         (push (match-string 0) links)))
     (delete-dups (nreverse links))))
 
-(defun my/typst-roam--first-markdown-heading ()
+(defun my/aaronnote-roam--first-markdown-heading ()
   "Return the first Markdown heading text in the current buffer."
   (save-excursion
     (goto-char (point-min))
@@ -1062,9 +1060,9 @@ source: roam/%s
         "[ \t]+{#[[:alnum:]_:-]+}[ \t]*\\'" ""
         (match-string 1))))))
 
-(defun my/typst-roam--scan-note-file (file)
+(defun my/aaronnote-roam--scan-note-file (file)
   "Return a note hash table by scanning Markdown FILE."
-  (let* ((root (my/typst-roam-root))
+  (let* ((root (my/aaronnote-roam-root))
          (rel (file-relative-name file root))
          (note (make-hash-table :test 'equal)))
     (puthash "file" file note)
@@ -1076,45 +1074,45 @@ source: roam/%s
       (goto-char (point-min))
       (cond
        ((looking-at-p "\\s-*#\\+begin meta\\b")
-        (my/typst-roam--read-org-meta-block note))
+        (my/aaronnote-roam--read-org-meta-block note))
        ((looking-at-p "\\s-*---\\s-*$")
-        (my/typst-roam--read-yaml-frontmatter note)))
-      (my/typst-roam--put-note-field
+        (my/aaronnote-roam--read-yaml-frontmatter note)))
+      (my/aaronnote-roam--put-note-field
        note "title"
-       (or (my/typst-roam--note-field note "title")
-           (my/typst-roam--first-markdown-heading)
+       (or (my/aaronnote-roam--note-field note "title")
+           (my/aaronnote-roam--first-markdown-heading)
            (file-name-base file)))
-      (my/typst-roam--put-note-field
+      (my/aaronnote-roam--put-note-field
        note "id"
-       (or (my/typst-roam--note-field note "id")
-           (my/typst-roam--path-without-note-extension rel)))
-      (my/typst-roam--put-note-field
+       (or (my/aaronnote-roam--note-field note "id")
+           (my/aaronnote-roam--path-without-note-extension rel)))
+      (my/aaronnote-roam--put-note-field
        note "summary"
-       (my/typst-roam--extract-summary-block))
-      (my/typst-roam--put-note-field
+       (my/aaronnote-roam--extract-summary-block))
+      (my/aaronnote-roam--put-note-field
        note "links"
-       (append (my/typst-roam--note-list-field note "refs")
-               (my/typst-roam--extract-links-from-buffer))))
+       (append (my/aaronnote-roam--note-list-field note "refs")
+               (my/aaronnote-roam--extract-links-from-buffer))))
     note))
 
-(defun my/typst-roam--canonical-note-id (key note)
+(defun my/aaronnote-roam--canonical-note-id (key note)
   "Return Aaronnote's canonical note id for NOTE with DB KEY."
-  (or (my/typst-roam--note-field note "id")
-      (my/typst-roam--note-field note "key")
-      (my/typst-roam--note-field note "source")
-      (my/typst-roam--note-field note "path")
-      (my/typst-roam--note-field note "link")
-      (my/typst-roam--note-field note "file")
+  (or (my/aaronnote-roam--note-field note "id")
+      (my/aaronnote-roam--note-field note "key")
+      (my/aaronnote-roam--note-field note "source")
+      (my/aaronnote-roam--note-field note "path")
+      (my/aaronnote-roam--note-field note "link")
+      (my/aaronnote-roam--note-field note "file")
       key))
 
-(defun my/typst-roam--note-file-from-fields (key note)
+(defun my/aaronnote-roam--note-file-from-fields (key note)
   "Return the best note file path for DB KEY and NOTE."
-  (let* ((root (my/typst-roam-root))
-         (raw (my/typst-roam--strip-vault-prefix
-               (or (my/typst-roam--note-field note "file")
-                   (my/typst-roam--note-field note "path")
-                   (my/typst-roam--note-field note "link")
-                   (my/typst-roam--note-field note "source")
+  (let* ((root (my/aaronnote-roam-root))
+         (raw (my/aaronnote-roam--strip-vault-prefix
+               (or (my/aaronnote-roam--note-field note "file")
+                   (my/aaronnote-roam--note-field note "path")
+                   (my/aaronnote-roam--note-field note "link")
+                   (my/aaronnote-roam--note-field note "source")
                    key)))
          (path (and raw
                     (if (file-name-absolute-p raw)
@@ -1122,112 +1120,112 @@ source: roam/%s
                       (expand-file-name raw root)))))
     (cond
      ((and path (file-exists-p path)) path)
-     ((and path raw (not (my/typst-roam--ref-has-extension-p raw))
+     ((and path raw (not (my/aaronnote-roam--ref-has-extension-p raw))
            (file-exists-p (concat path ".md")))
       (concat path ".md"))
-     ((and path raw (not (my/typst-roam--ref-has-extension-p raw))
+     ((and path raw (not (my/aaronnote-roam--ref-has-extension-p raw))
            (file-exists-p (concat path ".markdown")))
       (concat path ".markdown"))
      (path path))))
 
-(defun my/typst-roam--note-search-values (key note)
+(defun my/aaronnote-roam--note-search-values (key note)
   "Return Aaronnote-style searchable values for NOTE with DB KEY."
-  (let* ((file (my/typst-roam--note-field note "file"))
+  (let* ((file (my/aaronnote-roam--note-field note "file"))
          (rel-file (and file
                         (file-name-absolute-p file)
-                        (file-relative-name file (my/typst-roam-root))))
+                        (file-relative-name file (my/aaronnote-roam-root))))
          (values (append
                   (list key
-                        (my/typst-roam--canonical-note-id key note)
-                        (my/typst-roam--note-field note "id")
-                        (my/typst-roam--note-field note "key")
-                        (my/typst-roam--note-field note "title")
-                        (my/typst-roam--note-field note "path")
-                        (my/typst-roam--note-field note "link")
-                        (my/typst-roam--note-field note "source")
+                        (my/aaronnote-roam--canonical-note-id key note)
+                        (my/aaronnote-roam--note-field note "id")
+                        (my/aaronnote-roam--note-field note "key")
+                        (my/aaronnote-roam--note-field note "title")
+                        (my/aaronnote-roam--note-field note "path")
+                        (my/aaronnote-roam--note-field note "link")
+                        (my/aaronnote-roam--note-field note "source")
                         file
                         rel-file
                         (and rel-file
-                             (my/typst-roam--path-without-note-extension rel-file))
+                             (my/aaronnote-roam--path-without-note-extension rel-file))
                         (and rel-file (concat "roam/" rel-file))
                         (and rel-file
                              (concat "roam/"
-                                     (my/typst-roam--path-without-note-extension
+                                     (my/aaronnote-roam--path-without-note-extension
                                       rel-file))))
-                  (my/typst-roam--note-list-field note "aliases")
-                  (my/typst-roam--note-list-field note "tags"))))
+                  (my/aaronnote-roam--note-list-field note "aliases")
+                  (my/aaronnote-roam--note-list-field note "tags"))))
     (delete-dups
      (seq-filter (lambda (value)
                    (and (stringp value) (not (string-empty-p value))))
                  values))))
 
-(defun my/typst-roam--scanned-note-records ()
+(defun my/aaronnote-roam--scanned-note-records ()
   "Return cached note records by scanning Markdown files."
-  (or my/typst-roam--scan-cache
-      (setq my/typst-roam--scan-cache
+  (or my/aaronnote-roam--scan-cache
+      (setq my/aaronnote-roam--scan-cache
             (mapcar (lambda (file)
-                      (let* ((note (my/typst-roam--scan-note-file file))
-                             (key (my/typst-roam--file-to-slug file))
-                             (id (my/typst-roam--canonical-note-id key note)))
+                      (let* ((note (my/aaronnote-roam--scan-note-file file))
+                             (key (my/aaronnote-roam--file-to-slug file))
+                             (id (my/aaronnote-roam--canonical-note-id key note)))
                         (list :key key
                               :id id
                               :note note
                               :file file
-                              :title (or (my/typst-roam--note-field note "title")
+                              :title (or (my/aaronnote-roam--note-field note "title")
                                          id)
-                              :values (my/typst-roam--note-search-values
+                              :values (my/aaronnote-roam--note-search-values
                                        key note))))
-                    (my/typst-roam--all-files)))))
+                    (my/aaronnote-roam--all-files)))))
 
-(defun my/typst-roam--runtime-note-records ()
+(defun my/aaronnote-roam--runtime-note-records ()
   "Return note records from the vendored Aaronnote runtime."
-  (when-let* ((payload (my/typst-roam--runtime-index))
+  (when-let* ((payload (my/aaronnote-roam--runtime-index))
               (notes (gethash "notes" payload)))
     (mapcar (lambda (note)
-              (let* ((key (or (my/typst-roam--note-field note "key")
-                              (my/typst-roam--note-field note "id")
-                              (my/typst-roam--note-field note "path")
-                              (my/typst-roam--note-field note "link")))
-                     (id (my/typst-roam--canonical-note-id key note)))
+              (let* ((key (or (my/aaronnote-roam--note-field note "key")
+                              (my/aaronnote-roam--note-field note "id")
+                              (my/aaronnote-roam--note-field note "path")
+                              (my/aaronnote-roam--note-field note "link")))
+                     (id (my/aaronnote-roam--canonical-note-id key note)))
                 (list :key key
                       :id id
                       :note note
-                      :file (my/typst-roam--note-file-from-fields key note)
-                      :title (or (my/typst-roam--note-field note "title") id)
-                      :values (my/typst-roam--note-search-values key note))))
+                      :file (my/aaronnote-roam--note-file-from-fields key note)
+                      :title (or (my/aaronnote-roam--note-field note "title") id)
+                      :values (my/aaronnote-roam--note-search-values key note))))
             notes)))
 
-(defun my/typst-roam--note-records ()
+(defun my/aaronnote-roam--note-records ()
   "Return note records with :key, :id, :note, :file, :title, and :values."
-  (or (my/typst-roam--runtime-note-records)
-      (if-let* ((notes (my/typst-roam--db-notes)))
+  (or (my/aaronnote-roam--runtime-note-records)
+      (if-let* ((notes (my/aaronnote-roam--db-notes)))
           (let (records)
             (maphash
              (lambda (key note)
-               (let ((id (my/typst-roam--canonical-note-id key note)))
+               (let ((id (my/aaronnote-roam--canonical-note-id key note)))
                  (push (list :key key
                              :id id
                              :note note
-                             :file (my/typst-roam--note-file-from-fields key note)
-                             :title (or (my/typst-roam--note-field note "title") id)
-                             :values (my/typst-roam--note-search-values key note))
+                             :file (my/aaronnote-roam--note-file-from-fields key note)
+                             :title (or (my/aaronnote-roam--note-field note "title") id)
+                             :values (my/aaronnote-roam--note-search-values key note))
                        records)))
              notes)
             (nreverse records))
-        (my/typst-roam--scanned-note-records))))
+        (my/aaronnote-roam--scanned-note-records))))
 
-(defun my/typst-roam--target-note-ref (target)
+(defun my/aaronnote-roam--target-note-ref (target)
   "Return the note ref portion of TARGET."
-  (plist-get (my/typst-roam--split-target target) :ref))
+  (plist-get (my/aaronnote-roam--split-target target) :ref))
 
-(defun my/typst-roam--resolve-note (ref)
+(defun my/aaronnote-roam--resolve-note (ref)
   "Resolve REF to an Aaronnote note record plist.
 Exact id/key/path/title/alias/tag matches win first; substring matches are
 accepted as a fallback, matching Aaronnote search behavior."
-  (let* ((clean (or (my/typst-roam--target-note-ref ref) ref))
+  (let* ((clean (or (my/aaronnote-roam--target-note-ref ref) ref))
          (clean (string-trim (or clean "")))
          (query (downcase clean))
-         (records (my/typst-roam--note-records)))
+         (records (my/aaronnote-roam--note-records)))
     (or
      (seq-find
       (lambda (record)
@@ -1243,39 +1241,39 @@ accepted as a fallback, matching Aaronnote search behavior."
               (plist-get record :values)))
            records)))))
 
-(defun my/typst-roam--db-note (slug)
+(defun my/aaronnote-roam--db-note (slug)
   "Return the DB hash-table for SLUG/id/path, or nil."
-  (plist-get (my/typst-roam--resolve-note slug) :note))
+  (plist-get (my/aaronnote-roam--resolve-note slug) :note))
 
-(defun my/typst-roam--target-slug (target)
+(defun my/aaronnote-roam--target-slug (target)
   "Return normalized canonical note id from a note-link TARGET."
-  (plist-get (my/typst-roam--parse-target target) :slug))
+  (plist-get (my/aaronnote-roam--parse-target target) :slug))
 
-(defun my/typst-roam--db-backlinks-to (slug)
+(defun my/aaronnote-roam--db-backlinks-to (slug)
   "Return DB backlinks to SLUG/id, normalizing Aaronnote targets."
-  (when-let* ((target-id (or (plist-get (my/typst-roam--resolve-note slug) :id)
+  (when-let* ((target-id (or (plist-get (my/aaronnote-roam--resolve-note slug) :id)
                              slug)))
-    (or (when-let* ((note (my/typst-roam--db-note target-id)))
-          (my/typst-roam--note-list-field note "backlinks"))
+    (or (when-let* ((note (my/aaronnote-roam--db-note target-id)))
+          (my/aaronnote-roam--note-list-field note "backlinks"))
         (let (backlinks)
-          (dolist (record (my/typst-roam--note-records))
+          (dolist (record (my/aaronnote-roam--note-records))
             (let* ((note (plist-get record :note))
                    (source (plist-get record :key))
-                   (links (or (my/typst-roam--note-list-field note "links")
-                              (my/typst-roam--note-list-field note "refs"))))
+                   (links (or (my/aaronnote-roam--note-list-field note "links")
+                              (my/aaronnote-roam--note-list-field note "refs"))))
               (when (member target-id
-                            (mapcar #'my/typst-roam--target-slug links))
-                (push (my/typst-roam--canonical-note-id source note) backlinks))))
+                            (mapcar #'my/aaronnote-roam--target-slug links))
+                (push (my/aaronnote-roam--canonical-note-id source note) backlinks))))
           (delete-dups (nreverse backlinks))))))
 
-(defun my/typst-roam--current-slug ()
+(defun my/aaronnote-roam--current-slug ()
   "Return the canonical roam id for the current buffer, or nil."
   (when buffer-file-name
-    (my/typst-roam--file-to-note-id buffer-file-name)))
+    (my/aaronnote-roam--file-to-note-id buffer-file-name)))
 
 ;; ── Tag ids and TOC ───────────────────────────────────────────────────────────
 
-(defun my/typst-roam--slugify-tag-id (text)
+(defun my/aaronnote-roam--slugify-tag-id (text)
   "Return a stable Markdown heading id for TEXT."
   (let* ((plain (string-trim
                  (replace-regexp-in-string
@@ -1291,7 +1289,7 @@ accepted as a fallback, matching Aaronnote search behavior."
         (substring (secure-hash 'sha1 text) 0 10)
       slug)))
 
-(defun my/typst-roam--tag-id-exists-p (id)
+(defun my/aaronnote-roam--tag-id-exists-p (id)
   "Return non-nil when ID already exists in the current buffer."
   (save-excursion
     (goto-char (point-min))
@@ -1300,16 +1298,16 @@ accepted as a fallback, matching Aaronnote search behavior."
           (goto-char (point-min))
           (re-search-forward (format "<%s>" (regexp-quote id)) nil t)))))
 
-(defun my/typst-roam--unique-tag-id (base)
+(defun my/aaronnote-roam--unique-tag-id (base)
   "Return BASE or BASE-N so it is unique in the current buffer."
   (let ((candidate base)
         (n 2))
-    (while (my/typst-roam--tag-id-exists-p candidate)
+    (while (my/aaronnote-roam--tag-id-exists-p candidate)
       (setq candidate (format "%s-%d" base n)
             n (1+ n)))
     candidate))
 
-(defun my/typst-roam-generate-tag-id (&optional text)
+(defun my/aaronnote-roam-generate-tag-id (&optional text)
   "Generate a unique Markdown heading id from TEXT or context."
   (interactive)
   (let* ((source (or text
@@ -1325,20 +1323,20 @@ accepted as a fallback, matching Aaronnote search behavior."
                             (match-string 1))
                          (thing-at-point 'line t)))
                      "tag"))
-         (id (my/typst-roam--unique-tag-id
-              (my/typst-roam--slugify-tag-id source))))
+         (id (my/aaronnote-roam--unique-tag-id
+              (my/aaronnote-roam--slugify-tag-id source))))
     (when (called-interactively-p 'interactive)
       (kill-new id)
       (message "Tag id copied: %s" id))
     id))
 
-(defun my/typst-roam-insert-tag-id (&optional id)
+(defun my/aaronnote-roam-insert-tag-id (&optional id)
   "Insert or append Markdown heading ID at point.
 On a heading line, append `{#id}` unless an id already exists."
   (interactive)
   (let ((id (or id
                 (read-string "Tag id: "
-                             (my/typst-roam-generate-tag-id)))))
+                             (my/aaronnote-roam-generate-tag-id)))))
     (save-excursion
       (beginning-of-line)
       (if (looking-at
@@ -1349,33 +1347,33 @@ On a heading line, append `{#id}` unless an id already exists."
             (insert (format " {#%s}" id)))
         (insert (format "{#%s}" id))))))
 
-(defun my/typst-roam-insert-toc-link ()
+(defun my/aaronnote-roam-insert-toc-link ()
   "Open the interactive selector and insert a DOM/TOC note-link."
   (interactive)
-  (my/typst-roam-select-link 'toc))
+  (my/aaronnote-roam-select-link 'toc))
 
-(defun my/typst-roam-insert-tag-id-link ()
+(defun my/aaronnote-roam-insert-tag-id-link ()
   "Open the interactive selector and insert a tag-id note-link."
   (interactive)
-  (my/typst-roam-select-link 'tag))
+  (my/aaronnote-roam-select-link 'tag))
 
 ;; ── DB commands ───────────────────────────────────────────────────────────────
 
-(defun my/typst-roam-update-db (&optional full)
+(defun my/aaronnote-roam-update-db (&optional full)
   "Refresh Markdown roam cache and sync `roam.db' via Aaronnote runtime.
 With prefix argument FULL, force a full roam-db rebuild."
   (interactive "P")
-  (my/typst-roam--clear-runtime-cache)
-  (if (my/typst-roam--runtime-available-p)
-      (my/typst-roam--runtime-sync full nil)
+  (my/aaronnote-roam--clear-runtime-cache)
+  (if (my/aaronnote-roam--runtime-available-p)
+      (my/aaronnote-roam--runtime-sync full nil)
     (message "Markdown roam cache refreshed")))
 
-(defun my/typst-roam-backlinks ()
+(defun my/aaronnote-roam-backlinks ()
   "Show backlinks for the current note in a dedicated buffer."
   (interactive)
-  (let* ((slug (my/typst-roam--current-slug))
-         (note (and slug (my/typst-roam--db-note slug)))
-         (bls  (or (and slug (my/typst-roam--db-backlinks-to slug))
+  (let* ((slug (my/aaronnote-roam--current-slug))
+         (note (and slug (my/aaronnote-roam--db-note slug)))
+         (bls  (or (and slug (my/aaronnote-roam--db-backlinks-to slug))
                    (and note (gethash "backlinks" note))))
          (buf  (get-buffer-create "*roam-backlinks*")))
     (unless slug (user-error "Not in a roam note"))
@@ -1387,22 +1385,22 @@ With prefix argument FULL, force a full roam-db rebuild."
         (if (null bls)
             (insert "(no backlinks)\n")
           (dolist (bl bls)
-            (let* ((bl-note (my/typst-roam--db-note bl))
+            (let* ((bl-note (my/aaronnote-roam--db-note bl))
                    (title   (if bl-note (gethash "title" bl-note) bl)))
               (insert-text-button
                (format "  %-40s %s\n" title bl)
-               'action (lambda (_) (my/typst-roam--open-slug bl))
+               'action (lambda (_) (my/aaronnote-roam--open-slug bl))
                'follow-link t))))
         (goto-char (point-min))
         (special-mode)))
     (display-buffer buf)))
 
-(defun my/typst-roam-tags ()
+(defun my/aaronnote-roam-tags ()
   "Browse notes by tag with completion."
   (interactive)
   (let ((tags-ht (make-hash-table :test 'equal)))
-    (dolist (record (my/typst-roam--note-records))
-      (dolist (tag (my/typst-roam--note-list-field
+    (dolist (record (my/aaronnote-roam--note-records))
+      (dolist (tag (my/aaronnote-roam--note-list-field
                     (plist-get record :note) "tags"))
         (puthash tag
                  (cons (plist-get record :id)
@@ -1413,12 +1411,12 @@ With prefix argument FULL, force a full roam-db rebuild."
            (slugs (sort (delete-dups (gethash tag tags-ht)) #'string<))
            (slug (completing-read (format "Notes tagged [%s]: " tag)
                                   slugs nil t)))
-      (my/typst-roam--open-slug slug))))
+      (my/aaronnote-roam--open-slug slug))))
 
-(defun my/typst-roam--scan-todos ()
+(defun my/aaronnote-roam--scan-todos ()
   "Return todo hash tables scanned from Markdown notes."
   (let (todos)
-    (dolist (record (my/typst-roam--note-records))
+    (dolist (record (my/aaronnote-roam--note-records))
       (let ((file (plist-get record :file)))
         (when (and file (file-exists-p file))
           (with-temp-buffer
@@ -1440,18 +1438,18 @@ With prefix argument FULL, force a full roam-db rebuild."
               (forward-line 1))))))
     (nreverse todos)))
 
-(defun my/typst-roam-todos ()
+(defun my/aaronnote-roam-todos ()
   "List all vault todos in a *roam-todos* buffer."
   (interactive)
-  (let* ((runtime (my/typst-roam--runtime-call "todos"))
+  (let* ((runtime (my/aaronnote-roam--runtime-call "todos"))
          (runtime-todos (and runtime (gethash "todos" runtime)))
          (runtime-todos (if (hash-table-p runtime-todos)
                             (gethash "todos" runtime-todos)
                           runtime-todos))
-         (db    (my/typst-roam--db))
+         (db    (my/aaronnote-roam--db))
          (todos (or runtime-todos
                     (and db (gethash "todos" db))
-                    (my/typst-roam--scan-todos)))
+                    (my/aaronnote-roam--scan-todos)))
          (buf   (get-buffer-create "*roam-todos*")))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
@@ -1475,7 +1473,7 @@ With prefix argument FULL, force a full roam-db rebuild."
               (insert-text-button
                (format "  [%s]  %s\n" title text)
                'action (lambda (_)
-                         (my/typst-roam--open-slug note-slug)
+                         (my/aaronnote-roam--open-slug note-slug)
                          (when (integerp line)
                            (goto-char (point-min))
                            (forward-line (1- line))))
@@ -1486,7 +1484,7 @@ With prefix argument FULL, force a full roam-db rebuild."
 
 ;; ── Aaronnote-style note tools ────────────────────────────────────────────────
 
-(defun my/typst-roam--insert-note-button (entry &optional prefix)
+(defun my/aaronnote-roam--insert-note-button (entry &optional prefix)
   "Insert a clickable note button for summary ENTRY with PREFIX."
   (let* ((slug (plist-get entry :slug))
          (title (or (plist-get entry :title) slug))
@@ -1497,16 +1495,16 @@ With prefix argument FULL, force a full roam-db rebuild."
              (or prefix "")
              title
              slug)
-     'action (lambda (_) (my/typst-roam--open-slug slug))
+     'action (lambda (_) (my/aaronnote-roam--open-slug slug))
      'follow-link t)
     (when tags
       (insert (format "    #%s\n" (string-join tags " #"))))
     (when (and summary (not (string-empty-p summary)))
       (insert (format "    %s\n" summary)))))
 
-(defun my/typst-roam--show-note-list (title entries &optional empty-text)
+(defun my/aaronnote-roam--show-note-list (title entries &optional empty-text)
   "Show TITLE and note ENTRIES in a special buffer."
-  (let ((buf (get-buffer-create "*typst-roam-notes*")))
+  (let ((buf (get-buffer-create "*aaronnote-roam-notes*")))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
@@ -1514,13 +1512,13 @@ With prefix argument FULL, force a full roam-db rebuild."
         (if (null entries)
             (insert (or empty-text "(no notes)") "\n")
           (dolist (entry entries)
-            (my/typst-roam--insert-note-button entry)
+            (my/aaronnote-roam--insert-note-button entry)
             (insert "\n")))
         (goto-char (point-min))
         (special-mode)))
     (display-buffer buf)))
 
-(defun my/typst-roam-search-notes (&optional query)
+(defun my/aaronnote-roam-search-notes (&optional query)
   "Search notes by path, title, tag, id, and summary."
   (interactive)
   (let* ((query (or query (read-string "Search notes: ")))
@@ -1528,48 +1526,48 @@ With prefix argument FULL, force a full roam-db rebuild."
          (entries (seq-filter
                    (lambda (entry)
                      (let ((haystack (downcase
-                                      (my/typst-roam--candidate-haystack entry))))
+                                      (my/aaronnote-roam--candidate-haystack entry))))
                        (seq-every-p
                         (lambda (part) (string-match-p (regexp-quote part) haystack))
                         parts)))
-                   (my/typst-roam--all-note-summaries))))
+                   (my/aaronnote-roam--all-note-summaries))))
     (if (called-interactively-p 'interactive)
         (if (= (length entries) 1)
-            (my/typst-roam--open-slug (plist-get (car entries) :slug))
-          (my/typst-roam--show-note-list
+            (my/aaronnote-roam--open-slug (plist-get (car entries) :slug))
+          (my/aaronnote-roam--show-note-list
            (format "Markdown roam search: %s" query)
            entries
            "(no matching notes)"))
       entries)))
 
-(defun my/typst-roam-recent-notes ()
+(defun my/aaronnote-roam-recent-notes ()
   "Show recently opened roam notes."
   (interactive)
-  (my/typst-roam--show-note-list
+  (my/aaronnote-roam--show-note-list
    "Recent Markdown roam notes"
    (seq-filter
     #'identity
     (mapcar (lambda (slug)
               (seq-find (lambda (entry)
                           (equal (plist-get entry :slug) slug))
-                        (my/typst-roam--all-note-summaries)))
+                        (my/aaronnote-roam--all-note-summaries)))
             (seq-filter (lambda (slug)
-                          (file-exists-p (my/typst-roam--slug-to-file slug)))
-                        my/typst-roam--recent)))
+                          (file-exists-p (my/aaronnote-roam--slug-to-file slug)))
+                        my/aaronnote-roam--recent)))
    "(no recent notes)"))
 
-(defun my/typst-roam-related-notes ()
+(defun my/aaronnote-roam-related-notes ()
   "Show outgoing links and backlinks for the current note."
   (interactive)
-  (let* ((slug (my/typst-roam--current-slug))
-         (links (and slug (my/typst-roam--note-links slug)))
-         (backlinks (and slug (my/typst-roam--db-backlinks-to slug)))
-         (summaries (my/typst-roam--all-note-summaries))
+  (let* ((slug (my/aaronnote-roam--current-slug))
+         (links (and slug (my/aaronnote-roam--note-links slug)))
+         (backlinks (and slug (my/aaronnote-roam--db-backlinks-to slug)))
+         (summaries (my/aaronnote-roam--all-note-summaries))
          (by-slug (lambda (target)
                     (seq-find (lambda (entry)
                                 (equal (plist-get entry :slug) target))
                               summaries)))
-         (buf (get-buffer-create "*typst-roam-related*")))
+         (buf (get-buffer-create "*aaronnote-roam-related*")))
     (unless slug (user-error "Not in a roam note"))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
@@ -1579,134 +1577,300 @@ With prefix argument FULL, force a full roam-db rebuild."
         (if links
             (dolist (target links)
               (when-let* ((entry (funcall by-slug target)))
-                (my/typst-roam--insert-note-button entry "  ")))
+                (my/aaronnote-roam--insert-note-button entry "  ")))
           (insert "  (none)\n"))
         (insert "\nBacklinks\n\n")
         (if backlinks
             (dolist (target backlinks)
               (when-let* ((entry (funcall by-slug target)))
-                (my/typst-roam--insert-note-button entry "  ")))
+                (my/aaronnote-roam--insert-note-button entry "  ")))
           (insert "  (none)\n"))
         (goto-char (point-min))
         (special-mode)))
     (display-buffer buf)))
 
-(defun my/typst-roam-graph ()
-  "Show an Emacs text graph of roam note links."
-  (interactive)
-  (let* ((entries (my/typst-roam--all-note-summaries))
-         (buf (get-buffer-create "*typst-roam-graph*")))
-    (with-current-buffer buf
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert (format "Markdown roam graph: %d nodes\n\n" (length entries)))
-        (dolist (entry entries)
-          (let ((slug (plist-get entry :slug))
-                (links (plist-get entry :links))
-                (backlinks (plist-get entry :backlinks)))
-            (insert-text-button
-             (format "%s\n" slug)
-             'action (lambda (_) (my/typst-roam--open-slug slug))
-             'follow-link t)
-            (insert (format "  links: %s\n"
-                            (if links (string-join links ", ") "(none)")))
-            (insert (format "  backlinks: %s\n\n"
-                            (if backlinks (string-join backlinks ", ") "(none)")))))
-        (goto-char (point-min))
-        (special-mode)))
-    (display-buffer buf)))
-
-(defun my/typst-roam-management ()
+(defun my/aaronnote-roam-management ()
   "Show roam management commands and index status."
   (interactive)
-  (let* ((entries (my/typst-roam--all-note-summaries))
-         (db (my/typst-roam--db))
+  (let* ((entries (my/aaronnote-roam--all-note-summaries))
+         (db (my/aaronnote-roam--db))
          (generated (and db (gethash "generated" db)))
-         (buf (get-buffer-create "*typst-roam-management*")))
+         (buf (get-buffer-create "*aaronnote-roam-management*")))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert "Markdown roam management\n\n")
-        (insert (format "Root: %s\n" (my/typst-roam-root)))
+        (insert (format "Root: %s\n" (my/aaronnote-roam-root)))
         (insert (format "Nodes: %d\n" (length entries)))
         (insert (format "DB generated: %s\n\n" (or generated "unknown")))
         (insert-text-button "Sync roam-db"
-                            'action (lambda (_) (my/typst-roam-update-db))
+                            'action (lambda (_) (my/aaronnote-roam-update-db))
                             'follow-link t)
         (insert "\n")
         (insert-text-button "New node"
-                            'action (lambda (_) (call-interactively #'my/typst-roam-new-node))
+                            'action (lambda (_) (call-interactively #'my/aaronnote-roam-new-node))
                             'follow-link t)
         (insert "\n")
         (insert-text-button "Search notes"
-                            'action (lambda (_) (call-interactively #'my/typst-roam-search-notes))
+                            'action (lambda (_) (call-interactively #'my/aaronnote-roam-search-notes))
                             'follow-link t)
         (goto-char (point-min))
         (special-mode)))
     (display-buffer buf)))
 
+;; ── Roam agenda ─────────────────────────────────────────────────────────────
+
+(defun my/aaronnote-roam--todo-ddl (entry)
+  "Return deadline string for todo ENTRY, or nil."
+  (let ((ddl (or (gethash "ddl" entry) (gethash "deadline" entry))))
+    (and ddl (not (string-empty-p (or ddl ""))) ddl)))
+
+(defun my/aaronnote-roam--todo-overdue-p (ddl)
+  "Return non-nil when DDL string is in the past."
+  (when (and ddl (not (string-empty-p ddl)))
+    (condition-case nil
+        (time-less-p (encode-time (parse-time-string ddl)) (current-time))
+      (error nil))))
+
+(defun my/aaronnote-roam-agenda ()
+  "Show a roam notes agenda: todos from md notes grouped by status/ddl."
+  (interactive)
+  (let* ((runtime (my/aaronnote-roam--runtime-call "todos"))
+         (runtime-todos (and runtime (gethash "todos" runtime)))
+         (runtime-todos (if (hash-table-p runtime-todos)
+                            (gethash "todos" runtime-todos)
+                          runtime-todos))
+         (db    (my/aaronnote-roam--db))
+         (todos (or runtime-todos
+                    (and db (gethash "todos" db))
+                    (my/aaronnote-roam--scan-todos)))
+         (overdue nil) (today nil) (upcoming nil) (no-ddl nil)
+         (today-str (format-time-string "%Y-%m-%d")))
+    (dolist (entry (or todos '()))
+      (let ((ddl (my/aaronnote-roam--todo-ddl entry))
+            (status (or (gethash "status" entry) "")))
+        (unless (member status '("done" "cancelled"))
+          (cond
+           ((and ddl (my/aaronnote-roam--todo-overdue-p ddl))
+            (push entry overdue))
+           ((and ddl (string= ddl today-str))
+            (push entry today))
+           (ddl (push entry upcoming))
+           (t   (push entry no-ddl))))))
+    (let ((buf (get-buffer-create "*roam-agenda*")))
+      (with-current-buffer buf
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert (format "Roam Agenda  %s\n\n" today-str))
+          (cl-flet ((insert-group
+                     (title group)
+                     (when group
+                       (insert (format "%s\n%s\n" title (make-string (length title) ?-)))
+                       (dolist (entry (nreverse group))
+                         (let* ((note-slug (or (gethash "note" entry)
+                                               (gethash "noteId" entry)
+                                               (gethash "path" entry)))
+                                (title (or (gethash "title" entry)
+                                           (gethash "noteTitle" entry)
+                                           note-slug))
+                                (text  (or (gethash "text" entry)
+                                           (gethash "context" entry) ""))
+                                (ddl   (my/aaronnote-roam--todo-ddl entry))
+                                (line  (gethash "line" entry)))
+                           (insert-text-button
+                            (format "  %-12s  %-32s  %s\n"
+                                    (or ddl "")
+                                    (truncate-string-to-width (or title "") 32 nil nil "…")
+                                    text)
+                            'action (let ((s note-slug) (l line))
+                                      (lambda (_)
+                                        (my/aaronnote-roam--open-slug s)
+                                        (when (integerp l)
+                                          (goto-char (point-min))
+                                          (forward-line (1- l)))))
+                            'follow-link t)))
+                       (insert "\n"))))
+            (insert-group "OVERDUE" overdue)
+            (insert-group "TODAY"   today)
+            (insert-group "UPCOMING" upcoming)
+            (insert-group "NO DEADLINE" no-ddl))
+          (when (= (point) (+ (point-min) (length (format "Roam Agenda  %s\n\n" today-str))))
+            (insert "(no open todos)\n"))
+          (goto-char (point-min))
+          (special-mode)))
+      (display-buffer buf))))
+
+;; ── Roam DB utilities ─────────────────────────────────────────────────────────
+
+(defun my/aaronnote-roam-sync-full ()
+  "Force a full roam-db rebuild (clears incremental state)."
+  (interactive)
+  (message "Rebuilding roam-db from scratch…")
+  (when (my/aaronnote-roam--runtime-available-p)
+    (my/aaronnote-roam--runtime-sync t nil))
+  (message "Roam-db full rebuild done."))
+
+(defun my/aaronnote-roam-db-status ()
+  "Show roam-db sync state from .aaronnote-sync-state.json."
+  (interactive)
+  (let* ((root (my/aaronnote-roam-root))
+         (state-file (expand-file-name ".aaronnote-sync-state.json" root))
+         (buf (get-buffer-create "*roam-db-status*")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (format "Roam DB Status\n\nRoot: %s\n" root))
+        (if (file-exists-p state-file)
+            (progn
+              (insert (format "State: %s\n\n" state-file))
+              (let ((state (condition-case nil
+                               (json-parse-string
+                                (with-temp-buffer
+                                  (insert-file-contents state-file)
+                                  (buffer-string))
+                                :object-type 'hash-table)
+                             (error nil))))
+                (if state
+                    (maphash (lambda (k v)
+                               (insert (format "  %-24s %s\n" k (if (eq v :null) "(null)" v))))
+                             state)
+                  (insert "  (could not parse state file)\n"))))
+          (insert "State: not found (no initial sync?)\n"))
+        (insert "\n")
+        (insert-text-button "Incremental sync"
+                            'action (lambda (_) (my/aaronnote-roam-update-db))
+                            'follow-link t)
+        (insert "  ")
+        (insert-text-button "Full rebuild"
+                            'action (lambda (_) (my/aaronnote-roam-sync-full))
+                            'follow-link t)
+        (goto-char (point-min))
+        (special-mode)))
+    (display-buffer buf)))
+
+(defun my/aaronnote-roam-magit ()
+  "Open magit-status in the roam notes root."
+  (interactive)
+  (unless (require 'magit nil t)
+    (user-error "magit is not available — install it first"))
+  (magit-status (my/aaronnote-roam-root)))
+
+(defun my/aaronnote-roam-dired ()
+  "Open dired at the roam notes root."
+  (interactive)
+  (dired (my/aaronnote-roam-root)))
+
+;; ── Roam completion-at-point (roam:// and ../ paths) ─────────────────────────
+
+(defun my/aaronnote-roam-capf ()
+  "Completion-at-point for roam:// links and relative paths in Typst/md buffers."
+  (let ((roam-prefix "roam://")
+        (dotdot-re "\\.\\./"))
+    (cond
+     ;; roam://... completion
+     ((and (looking-back (concat roam-prefix "[^][\n\t ]*") (line-beginning-position) t)
+           (save-excursion
+             (re-search-backward (concat roam-prefix "\\([^][\n\t ]*\\)")
+                                 (line-beginning-position) t)))
+      (let* ((start (match-beginning 0))
+             (end   (match-end 0))
+             (candidates
+              (mapcar (lambda (entry)
+                        (concat roam-prefix
+                                (or (plist-get entry :slug) (plist-get entry :id) "")))
+                      (my/aaronnote-roam--all-note-summaries))))
+        (when candidates
+          (list start end candidates :exclusive 'no))))
+     ;; ../  relative path completion
+     ((looking-back (concat dotdot-re "[^][\n\t ]*") (line-beginning-position) t)
+      (let* ((root (my/aaronnote-roam-root))
+             (start (save-excursion
+                      (re-search-backward (concat dotdot-re "\\([^][\n\t ]*\\)")
+                                          (line-beginning-position) t)
+                      (match-beginning 0)))
+             (end (point))
+             (candidates
+              (when (file-directory-p root)
+                (let ((rel (buffer-substring-no-properties start end))
+                      result)
+                  (dolist (f (my/aaronnote-roam--all-files))
+                    (let ((r (file-relative-name f (file-name-directory
+                                                    (or buffer-file-name root)))))
+                      (when (string-prefix-p rel r)
+                        (push r result))))
+                  result))))
+        (when candidates
+          (list start end candidates :exclusive 'no))))
+     (t nil))))
+
+(defun my/aaronnote-roam--capf-setup ()
+  "Register roam capf for this buffer."
+  (add-hook 'completion-at-point-functions #'my/aaronnote-roam-capf nil t))
+
+(add-hook 'markdown-mode-hook #'my/aaronnote-roam--capf-setup)
+
 ;; ── Interactive Markdown roam link selector ──────────────────────────────────
 
-(defvar-local my/typst-roam-select--origin-marker nil)
-(defvar-local my/typst-roam-select--current-note-id nil)
-(defvar-local my/typst-roam-select--preferred-kind nil)
-(defvar-local my/typst-roam-select--view nil)
-(defvar-local my/typst-roam-select--path "")
-(defvar-local my/typst-roam-select--query nil)
-(defvar-local my/typst-roam-select--target-record nil)
-(defvar-local my/typst-roam-select--target-basis 'id)
-(defvar-local my/typst-roam-select--toc-parent nil)
+(defvar-local my/aaronnote-roam-select--origin-marker nil)
+(defvar-local my/aaronnote-roam-select--current-note-id nil)
+(defvar-local my/aaronnote-roam-select--preferred-kind nil)
+(defvar-local my/aaronnote-roam-select--view nil)
+(defvar-local my/aaronnote-roam-select--path "")
+(defvar-local my/aaronnote-roam-select--query nil)
+(defvar-local my/aaronnote-roam-select--target-record nil)
+(defvar-local my/aaronnote-roam-select--target-basis 'id)
+(defvar-local my/aaronnote-roam-select--toc-parent nil)
 
-(defvar my/typst-roam-select-mode-map
+(defvar my/aaronnote-roam-select-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "RET") #'my/typst-roam-select-activate)
-    (define-key map (kbd "i") #'my/typst-roam-select-insert-current)
-    (define-key map (kbd "/") #'my/typst-roam-select-search)
-    (define-key map (kbd "s") #'my/typst-roam-select-search)
-    (define-key map (kbd "g") #'my/typst-roam-select-root)
-    (define-key map (kbd ".") #'my/typst-roam-select-context)
-    (define-key map (kbd "u") #'my/typst-roam-select-up)
-    (define-key map (kbd "^") #'my/typst-roam-select-up)
-    (define-key map (kbd "r") #'my/typst-roam-select-refresh)
+    (define-key map (kbd "RET") #'my/aaronnote-roam-select-activate)
+    (define-key map (kbd "i") #'my/aaronnote-roam-select-insert-current)
+    (define-key map (kbd "/") #'my/aaronnote-roam-select-search)
+    (define-key map (kbd "s") #'my/aaronnote-roam-select-search)
+    (define-key map (kbd "g") #'my/aaronnote-roam-select-root)
+    (define-key map (kbd ".") #'my/aaronnote-roam-select-context)
+    (define-key map (kbd "u") #'my/aaronnote-roam-select-up)
+    (define-key map (kbd "^") #'my/aaronnote-roam-select-up)
+    (define-key map (kbd "r") #'my/aaronnote-roam-select-refresh)
     (define-key map (kbd "q") #'quit-window)
     map)
-  "Keymap for `my/typst-roam-select-mode'.")
+  "Keymap for `my/aaronnote-roam-select-mode'.")
 
-(define-derived-mode my/typst-roam-select-mode special-mode "Roam-Select"
+(define-derived-mode my/aaronnote-roam-select-mode special-mode "Roam-Select"
   "Interactive Markdown roam link selector."
   (setq-local truncate-lines t))
 
-(defun my/typst-roam--record-path-ref (record)
+(defun my/aaronnote-roam--record-path-ref (record)
   "Return RECORD's path-like link ref."
   (let* ((note (plist-get record :note))
          (file (plist-get record :file))
          (rel-file (and file
                         (file-name-absolute-p file)
-                        (file-relative-name file (my/typst-roam-root)))))
-    (or (my/typst-roam--note-field note "path")
-        (my/typst-roam--note-field note "link")
+                        (file-relative-name file (my/aaronnote-roam-root)))))
+    (or (my/aaronnote-roam--note-field note "path")
+        (my/aaronnote-roam--note-field note "link")
         rel-file
         (plist-get record :key)
         (plist-get record :id))))
 
-(defun my/typst-roam--target-suffix (kind target)
+(defun my/aaronnote-roam--target-suffix (kind target)
   "Return Markdown roam link suffix for KIND and TARGET."
   (pcase kind
-    ('tag (concat "#" (my/typst-roam--encode-ref target)))
-    ('dom (concat "@" (mapconcat #'my/typst-roam--encode-ref
-                                  (my/typst-roam--dom-target-segments target)
+    ('tag (concat "#" (my/aaronnote-roam--encode-ref target)))
+    ('dom (concat "@" (mapconcat #'my/aaronnote-roam--encode-ref
+                                  (my/aaronnote-roam--dom-target-segments target)
                                   "@")))
     (_ "")))
 
-(defun my/typst-roam--link-target-for-record (record basis &optional kind target)
+(defun my/aaronnote-roam--link-target-for-record (record basis &optional kind target)
   "Return Markdown roam link target for RECORD using BASIS, KIND, and TARGET."
   (let ((basis (if (stringp basis) (intern basis) basis)))
     (if (eq basis 'path)
-        (concat (my/typst-roam--record-path-ref record)
-                (my/typst-roam--target-suffix kind target))
-      (my/typst-roam--roam-href (plist-get record :id) kind target))))
+        (concat (my/aaronnote-roam--record-path-ref record)
+                (my/aaronnote-roam--target-suffix kind target))
+      (my/aaronnote-roam--roam-href (plist-get record :id) kind target))))
 
-(defun my/typst-roam--insert-note-link-target (target text &optional marker)
+(defun my/aaronnote-roam--insert-note-link-target (target text &optional marker)
   "Insert Markdown link TARGET with TEXT at MARKER or point."
   (let ((link (format "[%s](%s)"
                       (replace-regexp-in-string "\\]" "\\\\]" (or text ""))
@@ -1719,12 +1883,12 @@ With prefix argument FULL, force a full roam-db rebuild."
       (insert link))
     link))
 
-(defun my/typst-roam--tag-targets (record)
+(defun my/aaronnote-roam--tag-targets (record)
   "Return tag target plists for RECORD."
   (let* ((file (plist-get record :file))
          (note (plist-get record :note))
-         (labels (and file (my/typst-roam--heading-labels file)))
-         (inline-tags (my/typst-roam--note-list-field note "inlineTags"))
+         (labels (and file (my/aaronnote-roam--heading-labels file)))
+         (inline-tags (my/aaronnote-roam--note-list-field note "inlineTags"))
          seen targets)
     (dolist (entry labels)
       (let ((id (plist-get entry :id)))
@@ -1741,7 +1905,7 @@ With prefix argument FULL, force a full roam-db rebuild."
           (lambda (a b)
             (string< (plist-get a :id) (plist-get b :id))))))
 
-(defun my/typst-roam--tag-target-display (target)
+(defun my/aaronnote-roam--tag-target-display (target)
   "Return completion display string for tag TARGET."
   (let ((id (plist-get target :id))
         (label (plist-get target :label)))
@@ -1749,11 +1913,11 @@ With prefix argument FULL, force a full roam-db rebuild."
         (format "%s  %s" id label)
       id)))
 
-(defun my/typst-roam--read-tag-target (record)
+(defun my/aaronnote-roam--read-tag-target (record)
   "Read a tag target for RECORD."
-  (let* ((targets (my/typst-roam--tag-targets record))
+  (let* ((targets (my/aaronnote-roam--tag-targets record))
          (table (mapcar (lambda (target)
-                          (cons (my/typst-roam--tag-target-display target)
+                          (cons (my/aaronnote-roam--tag-target-display target)
                                 target))
                         targets))
          (choice (if table
@@ -1761,13 +1925,13 @@ With prefix argument FULL, force a full roam-db rebuild."
                    (user-error "No tag ids in this note"))))
     (cdr (assoc choice table))))
 
-(defun my/typst-roam-select--toc-targets (record)
+(defun my/aaronnote-roam-select--toc-targets (record)
   "Return TOC targets for RECORD."
   (let* ((file (plist-get record :file))
          (note-id (plist-get record :id))
          (seen nil)
          targets)
-    (dolist (target (my/typst-roam--dom-targets file note-id))
+    (dolist (target (my/aaronnote-roam--dom-targets file note-id))
       (let ((key (string-join (plist-get target :path) "@")))
         (when (and (not (plist-get target :synthetic))
                    (not (string-empty-p key))
@@ -1776,18 +1940,18 @@ With prefix argument FULL, force a full roam-db rebuild."
           (push target targets))))
     (nreverse targets)))
 
-(defun my/typst-roam-select--toc-dom (target)
+(defun my/aaronnote-roam-select--toc-dom (target)
   "Return DOM target string for TOC TARGET."
   (string-join (plist-get target :path) "@"))
 
-(defun my/typst-roam-select--read-basis ()
+(defun my/aaronnote-roam-select--read-basis ()
   "Read target basis for the selected note."
   (intern
    (completing-read "Target ref: "
                     '("id" "path")
                     nil t nil nil "id")))
 
-(defun my/typst-roam-select--read-kind ()
+(defun my/aaronnote-roam-select--read-kind ()
   "Read exact target kind for the selected note."
   (pcase (completing-read "Target kind: "
                           '("note" "tag" "toc")
@@ -1796,60 +1960,60 @@ With prefix argument FULL, force a full roam-db rebuild."
     ("toc" 'toc)
     (_ 'note)))
 
-(defun my/typst-roam-select--default-note-text (record)
+(defun my/aaronnote-roam-select--default-note-text (record)
   "Return default display text for RECORD."
   (or (plist-get record :title)
       (plist-get record :id)))
 
-(defun my/typst-roam-select--finish-target (record basis kind target default-text)
+(defun my/aaronnote-roam-select--finish-target (record basis kind target default-text)
   "Insert final note-link for RECORD, BASIS, KIND, TARGET, and DEFAULT-TEXT."
-  (let* ((href (my/typst-roam--link-target-for-record record basis kind target))
+  (let* ((href (my/aaronnote-roam--link-target-for-record record basis kind target))
          (text (read-string (format "Display text [%s]: " default-text)
                             nil nil default-text)))
-    (my/typst-roam--insert-note-link-target
-     href text my/typst-roam-select--origin-marker)
-    (when-let* (((derived-mode-p 'my/typst-roam-select-mode))
+    (my/aaronnote-roam--insert-note-link-target
+     href text my/aaronnote-roam-select--origin-marker)
+    (when-let* (((derived-mode-p 'my/aaronnote-roam-select-mode))
                 (window (get-buffer-window (current-buffer))))
       (quit-window t window))))
 
-(defun my/typst-roam-select--choose-record (record)
+(defun my/aaronnote-roam-select--choose-record (record)
   "Choose exact target for note RECORD."
-  (let* ((basis (my/typst-roam-select--read-basis))
-         (kind (or my/typst-roam-select--preferred-kind
-                   (my/typst-roam-select--read-kind))))
+  (let* ((basis (my/aaronnote-roam-select--read-basis))
+         (kind (or my/aaronnote-roam-select--preferred-kind
+                   (my/aaronnote-roam-select--read-kind))))
     (pcase kind
       ('tag
-       (let* ((tag (my/typst-roam--read-tag-target record))
+       (let* ((tag (my/aaronnote-roam--read-tag-target record))
               (id (plist-get tag :id))
               (label (or (plist-get tag :label) id)))
-         (my/typst-roam-select--finish-target
+         (my/aaronnote-roam-select--finish-target
           record basis 'tag id label)))
       ('toc
-       (setq my/typst-roam-select--target-record record
-             my/typst-roam-select--target-basis basis
-             my/typst-roam-select--toc-parent nil
-             my/typst-roam-select--query nil)
-       (my/typst-roam-select--render-toc))
+       (setq my/aaronnote-roam-select--target-record record
+             my/aaronnote-roam-select--target-basis basis
+             my/aaronnote-roam-select--toc-parent nil
+             my/aaronnote-roam-select--query nil)
+       (my/aaronnote-roam-select--render-toc))
       (_
-       (my/typst-roam-select--finish-target
+       (my/aaronnote-roam-select--finish-target
         record basis nil nil
-        (my/typst-roam-select--default-note-text record))))))
+        (my/aaronnote-roam-select--default-note-text record))))))
 
-(defun my/typst-roam-select--record-relative-file (record)
+(defun my/aaronnote-roam-select--record-relative-file (record)
   "Return RECORD's relative file under the roam root, or nil."
   (when-let* ((file (plist-get record :file)))
-    (let ((rel (file-relative-name file (my/typst-roam-root))))
+    (let ((rel (file-relative-name file (my/aaronnote-roam-root))))
       (unless (or (string-prefix-p "../" rel)
                   (string-prefix-p "/.." rel)
                   (string-match-p "\\`_typst/" rel))
         rel))))
 
-(defun my/typst-roam-select--directory-items (dir)
+(defun my/aaronnote-roam-select--directory-items (dir)
   "Return directory and note items immediately inside DIR."
   (let ((dir (if (string-empty-p (or dir "")) "" dir))
         dirs notes seen-dirs)
-    (dolist (record (my/typst-roam--note-records))
-      (when-let* ((rel (my/typst-roam-select--record-relative-file record)))
+    (dolist (record (my/aaronnote-roam--note-records))
+      (when-let* ((rel (my/aaronnote-roam-select--record-relative-file record)))
         (when (string-prefix-p dir rel)
           (let ((rest (substring rel (length dir))))
             (unless (string-empty-p rest)
@@ -1871,109 +2035,109 @@ With prefix argument FULL, force a full roam-db rebuild."
                    (string< (or (plist-get (plist-get a :record) :title) "")
                             (or (plist-get (plist-get b :record) :title) "")))))))
 
-(defun my/typst-roam-select--insert-row (label item &optional face)
+(defun my/aaronnote-roam-select--insert-row (label item &optional face)
   "Insert a selectable row LABEL carrying ITEM."
   (let ((start (point)))
     (insert label "\n")
     (add-text-properties
      start (point)
-     `(my/typst-roam-select-item ,item
+     `(my/aaronnote-roam-select-item ,item
        mouse-face highlight
        help-echo "RET: open/select, i: insert/select"))
     (when face
       (add-face-text-property start (point) face))))
 
-(defun my/typst-roam-select--note-label (record &optional prefix)
+(defun my/aaronnote-roam-select--note-label (record &optional prefix)
   "Return display label for note RECORD with PREFIX."
-  (let* ((title (my/typst-roam-select--default-note-text record))
-         (path (my/typst-roam--record-path-ref record))
-         (tags (my/typst-roam--note-list-field (plist-get record :note) "tags")))
+  (let* ((title (my/aaronnote-roam-select--default-note-text record))
+         (path (my/aaronnote-roam--record-path-ref record))
+         (tags (my/aaronnote-roam--note-list-field (plist-get record :note) "tags")))
     (concat (or prefix "")
             (format "%-38s %s" title (plist-get record :id))
             (when path (concat "  " path))
             (when tags (concat "  #" (string-join tags " #"))))))
 
-(defun my/typst-roam-select--render-header (title)
+(defun my/aaronnote-roam-select--render-header (title)
   "Render selector TITLE and help."
   (insert title "\n")
   (insert "RET select/open  i insert/select  / or s search  g root  . current  u up  r refresh  q quit\n\n"))
 
-(defun my/typst-roam-select--render-root (&optional dir)
+(defun my/aaronnote-roam-select--render-root (&optional dir)
   "Render roam root tree at DIR."
-  (setq my/typst-roam-select--view 'root
-        my/typst-roam-select--path (or dir ""))
+  (setq my/aaronnote-roam-select--view 'root
+        my/aaronnote-roam-select--path (or dir ""))
   (let ((inhibit-read-only t))
     (erase-buffer)
-    (my/typst-roam-select--render-header
-     (format "Roam root: /%s" my/typst-roam-select--path))
-    (let ((items (my/typst-roam-select--directory-items
-                  my/typst-roam-select--path)))
+    (my/aaronnote-roam-select--render-header
+     (format "Roam root: /%s" my/aaronnote-roam-select--path))
+    (let ((items (my/aaronnote-roam-select--directory-items
+                  my/aaronnote-roam-select--path)))
       (if items
           (dolist (item items)
             (pcase (plist-get item :type)
               ('dir
-               (my/typst-roam-select--insert-row
+               (my/aaronnote-roam-select--insert-row
                 (format "[dir]  %s/" (plist-get item :name))
                 item 'font-lock-keyword-face))
               ('note
-               (my/typst-roam-select--insert-row
-                (my/typst-roam-select--note-label
+               (my/aaronnote-roam-select--insert-row
+                (my/aaronnote-roam-select--note-label
                  (plist-get item :record) "[note] ")
                 item))))
         (insert "(empty)\n")))
     (goto-char (point-min))
     (forward-line 2)))
 
-(defun my/typst-roam-select--render-context ()
+(defun my/aaronnote-roam-select--render-context ()
   "Render current-note context."
-  (setq my/typst-roam-select--view 'context)
-  (let ((record (and my/typst-roam-select--current-note-id
-                     (my/typst-roam--resolve-note
-                      my/typst-roam-select--current-note-id)))
+  (setq my/aaronnote-roam-select--view 'context)
+  (let ((record (and my/aaronnote-roam-select--current-note-id
+                     (my/aaronnote-roam--resolve-note
+                      my/aaronnote-roam-select--current-note-id)))
         entries)
     (when record
       (push record entries)
-      (dolist (id (append (my/typst-roam--note-links (plist-get record :id))
-                          (my/typst-roam--db-backlinks-to
+      (dolist (id (append (my/aaronnote-roam--note-links (plist-get record :id))
+                          (my/aaronnote-roam--db-backlinks-to
                            (plist-get record :id))))
-        (when-let* ((related (my/typst-roam--resolve-note id)))
+        (when-let* ((related (my/aaronnote-roam--resolve-note id)))
           (push related entries))))
     (setq entries (delete-dups (nreverse entries)))
     (let ((inhibit-read-only t))
       (erase-buffer)
-      (my/typst-roam-select--render-header
+      (my/aaronnote-roam-select--render-header
        (format "Current roam context: %s"
-               (or my/typst-roam-select--current-note-id "(none)")))
+               (or my/aaronnote-roam-select--current-note-id "(none)")))
       (if entries
           (dolist (entry entries)
-            (my/typst-roam-select--insert-row
-             (my/typst-roam-select--note-label entry "[note] ")
+            (my/aaronnote-roam-select--insert-row
+             (my/aaronnote-roam-select--note-label entry "[note] ")
              (list :type 'note :record entry)))
         (insert "(not in a roam note; press g for root)\n"))
       (goto-char (point-min))
       (forward-line 2))))
 
-(defun my/typst-roam-select--render-search (query)
+(defun my/aaronnote-roam-select--render-search (query)
   "Render global note search for QUERY."
-  (setq my/typst-roam-select--view 'search
-        my/typst-roam-select--query query)
-  (let ((entries (my/typst-roam-search-notes query)))
+  (setq my/aaronnote-roam-select--view 'search
+        my/aaronnote-roam-select--query query)
+  (let ((entries (my/aaronnote-roam-search-notes query)))
     (let ((inhibit-read-only t))
       (erase-buffer)
-      (my/typst-roam-select--render-header
+      (my/aaronnote-roam-select--render-header
        (format "Roam search: %s" query))
       (if entries
           (dolist (entry entries)
-            (when-let* ((record (my/typst-roam--resolve-note
+            (when-let* ((record (my/aaronnote-roam--resolve-note
                                  (plist-get entry :slug))))
-              (my/typst-roam-select--insert-row
-               (my/typst-roam-select--note-label record "[note] ")
+              (my/aaronnote-roam-select--insert-row
+               (my/aaronnote-roam-select--note-label record "[note] ")
                (list :type 'note :record record))))
         (insert "(no matching notes)\n"))
       (goto-char (point-min))
       (forward-line 2))))
 
-(defun my/typst-roam-select--toc-children (targets parent)
+(defun my/aaronnote-roam-select--toc-children (targets parent)
   "Return direct TOC children from TARGETS under PARENT."
   (let ((parent (or parent nil))
         (len (length parent)))
@@ -1985,7 +2149,7 @@ With prefix argument FULL, force a full roam-db rebuild."
                   (equal (seq-take path len) parent)))))
      targets)))
 
-(defun my/typst-roam-select--toc-has-children-p (targets target)
+(defun my/aaronnote-roam-select--toc-has-children-p (targets target)
   "Return non-nil if TARGET has child targets in TARGETS."
   (let* ((path (plist-get target :path))
          (len (length path)))
@@ -1996,12 +2160,12 @@ With prefix argument FULL, force a full roam-db rebuild."
               (equal (seq-take candidate-path len) path))))
      targets)))
 
-(defun my/typst-roam-select--render-toc ()
-  "Render TOC selector for `my/typst-roam-select--target-record'."
-  (setq my/typst-roam-select--view 'toc)
-  (let* ((record my/typst-roam-select--target-record)
-         (targets (my/typst-roam-select--toc-targets record))
-         (query my/typst-roam-select--query)
+(defun my/aaronnote-roam-select--render-toc ()
+  "Render TOC selector for `my/aaronnote-roam-select--target-record'."
+  (setq my/aaronnote-roam-select--view 'toc)
+  (let* ((record my/aaronnote-roam-select--target-record)
+         (targets (my/aaronnote-roam-select--toc-targets record))
+         (query my/aaronnote-roam-select--query)
          (visible (if (and query (not (string-empty-p query)))
                       (seq-filter
                        (lambda (target)
@@ -2014,25 +2178,25 @@ With prefix argument FULL, force a full roam-db rebuild."
                             (regexp-quote (downcase query))
                             haystack)))
                        targets)
-                    (my/typst-roam-select--toc-children
-                     targets my/typst-roam-select--toc-parent))))
+                    (my/aaronnote-roam-select--toc-children
+                     targets my/aaronnote-roam-select--toc-parent))))
     (let ((inhibit-read-only t))
       (erase-buffer)
-      (my/typst-roam-select--render-header
+      (my/aaronnote-roam-select--render-header
        (format "TOC: %s%s"
-               (my/typst-roam-select--default-note-text record)
+               (my/aaronnote-roam-select--default-note-text record)
                (if query (format " / search: %s" query) "")))
-      (when my/typst-roam-select--toc-parent
+      (when my/aaronnote-roam-select--toc-parent
         (insert (format "Path: %s\n\n"
-                        (string-join my/typst-roam-select--toc-parent " / "))))
+                        (string-join my/aaronnote-roam-select--toc-parent " / "))))
       (if visible
           (dolist (target visible)
             (let* ((has-children (and (not query)
-                                      (my/typst-roam-select--toc-has-children-p
+                                      (my/aaronnote-roam-select--toc-has-children-p
                                        targets target)))
-                   (label (my/typst-roam--dom-target-path-label target))
+                   (label (my/aaronnote-roam--dom-target-path-label target))
                    (prefix (if has-children "[+] " "[toc] ")))
-              (my/typst-roam-select--insert-row
+              (my/aaronnote-roam-select--insert-row
                (concat prefix label)
                (list :type 'toc
                      :target target
@@ -2042,144 +2206,144 @@ With prefix argument FULL, force a full roam-db rebuild."
       (goto-char (point-min))
       (forward-line 2))))
 
-(defun my/typst-roam-select--item-at-point ()
+(defun my/aaronnote-roam-select--item-at-point ()
   "Return selector item at point."
-  (or (get-text-property (point) 'my/typst-roam-select-item)
-      (get-text-property (line-beginning-position) 'my/typst-roam-select-item)
+  (or (get-text-property (point) 'my/aaronnote-roam-select-item)
+      (get-text-property (line-beginning-position) 'my/aaronnote-roam-select-item)
       (get-text-property (max (point-min) (1- (point)))
-                         'my/typst-roam-select-item)))
+                         'my/aaronnote-roam-select-item)))
 
-(defun my/typst-roam-select--finish-toc-target (target)
+(defun my/aaronnote-roam-select--finish-toc-target (target)
   "Insert the selected TOC TARGET."
-  (let* ((record my/typst-roam-select--target-record)
-         (dom (my/typst-roam-select--toc-dom target))
-         (label (my/typst-roam--dom-target-path-label target)))
-    (my/typst-roam-select--finish-target
-     record my/typst-roam-select--target-basis 'dom dom label)))
+  (let* ((record my/aaronnote-roam-select--target-record)
+         (dom (my/aaronnote-roam-select--toc-dom target))
+         (label (my/aaronnote-roam--dom-target-path-label target)))
+    (my/aaronnote-roam-select--finish-target
+     record my/aaronnote-roam-select--target-basis 'dom dom label)))
 
-(defun my/typst-roam-select-activate ()
+(defun my/aaronnote-roam-select-activate ()
   "Activate the selector item at point."
   (interactive)
-  (pcase-let* ((item (my/typst-roam-select--item-at-point))
+  (pcase-let* ((item (my/aaronnote-roam-select--item-at-point))
                (type (plist-get item :type)))
     (pcase type
       ('dir
-       (my/typst-roam-select--render-root (plist-get item :path)))
+       (my/aaronnote-roam-select--render-root (plist-get item :path)))
       ('note
-       (my/typst-roam-select--choose-record (plist-get item :record)))
+       (my/aaronnote-roam-select--choose-record (plist-get item :record)))
       ('toc
        (if (and (plist-get item :has-children)
                 (not (plist-get item :search)))
            (progn
-             (setq my/typst-roam-select--toc-parent
+             (setq my/aaronnote-roam-select--toc-parent
                    (plist-get (plist-get item :target) :path)
-                   my/typst-roam-select--query nil)
-             (my/typst-roam-select--render-toc))
-         (my/typst-roam-select--finish-toc-target
+                   my/aaronnote-roam-select--query nil)
+             (my/aaronnote-roam-select--render-toc))
+         (my/aaronnote-roam-select--finish-toc-target
           (plist-get item :target))))
       (_
        (user-error "No selectable roam item at point")))))
 
-(defun my/typst-roam-select-insert-current ()
+(defun my/aaronnote-roam-select-insert-current ()
   "Insert/select the current selector item without descending."
   (interactive)
-  (let ((item (my/typst-roam-select--item-at-point)))
+  (let ((item (my/aaronnote-roam-select--item-at-point)))
     (pcase (plist-get item :type)
       ('toc
-       (my/typst-roam-select--finish-toc-target
+       (my/aaronnote-roam-select--finish-toc-target
         (plist-get item :target)))
       (_
-       (my/typst-roam-select-activate)))))
+       (my/aaronnote-roam-select-activate)))))
 
-(defun my/typst-roam-select-search ()
+(defun my/aaronnote-roam-select-search ()
   "Search notes globally, or TOC headings inside a TOC view."
   (interactive)
   (let ((query (read-string "Search: ")))
-    (if (eq my/typst-roam-select--view 'toc)
+    (if (eq my/aaronnote-roam-select--view 'toc)
         (progn
-          (setq my/typst-roam-select--query query
-                my/typst-roam-select--toc-parent nil)
-          (my/typst-roam-select--render-toc))
-      (my/typst-roam-select--render-search query))))
+          (setq my/aaronnote-roam-select--query query
+                my/aaronnote-roam-select--toc-parent nil)
+          (my/aaronnote-roam-select--render-toc))
+      (my/aaronnote-roam-select--render-search query))))
 
-(defun my/typst-roam-select-root ()
+(defun my/aaronnote-roam-select-root ()
   "Render the roam root tree."
   (interactive)
-  (my/typst-roam-select--render-root ""))
+  (my/aaronnote-roam-select--render-root ""))
 
-(defun my/typst-roam-select-context ()
+(defun my/aaronnote-roam-select-context ()
   "Render current-note context."
   (interactive)
-  (if my/typst-roam-select--current-note-id
-      (my/typst-roam-select--render-context)
-    (my/typst-roam-select--render-root "")))
+  (if my/aaronnote-roam-select--current-note-id
+      (my/aaronnote-roam-select--render-context)
+    (my/aaronnote-roam-select--render-root "")))
 
-(defun my/typst-roam-select-up ()
+(defun my/aaronnote-roam-select-up ()
   "Move one selector level up."
   (interactive)
-  (pcase my/typst-roam-select--view
+  (pcase my/aaronnote-roam-select--view
     ('root
-     (let* ((path (string-remove-suffix "/" my/typst-roam-select--path))
+     (let* ((path (string-remove-suffix "/" my/aaronnote-roam-select--path))
             (parent (if (string-match "\\`\\(.*?/\\)?[^/]+\\'" path)
                         (or (match-string 1 path) "")
                       "")))
-       (my/typst-roam-select--render-root parent)))
+       (my/aaronnote-roam-select--render-root parent)))
     ('toc
-     (setq my/typst-roam-select--query nil
-           my/typst-roam-select--toc-parent
-           (butlast my/typst-roam-select--toc-parent))
-     (my/typst-roam-select--render-toc))
+     (setq my/aaronnote-roam-select--query nil
+           my/aaronnote-roam-select--toc-parent
+           (butlast my/aaronnote-roam-select--toc-parent))
+     (my/aaronnote-roam-select--render-toc))
     (_
-     (my/typst-roam-select-context))))
+     (my/aaronnote-roam-select-context))))
 
-(defun my/typst-roam-select-refresh ()
+(defun my/aaronnote-roam-select-refresh ()
   "Refresh the current selector view."
   (interactive)
-  (pcase my/typst-roam-select--view
-    ('root (my/typst-roam-select--render-root my/typst-roam-select--path))
-    ('search (my/typst-roam-select--render-search my/typst-roam-select--query))
-    ('toc (my/typst-roam-select--render-toc))
-    (_ (my/typst-roam-select-context))))
+  (pcase my/aaronnote-roam-select--view
+    ('root (my/aaronnote-roam-select--render-root my/aaronnote-roam-select--path))
+    ('search (my/aaronnote-roam-select--render-search my/aaronnote-roam-select--query))
+    ('toc (my/aaronnote-roam-select--render-toc))
+    (_ (my/aaronnote-roam-select-context))))
 
-(defun my/typst-roam-select--display-buffer (buffer)
+(defun my/aaronnote-roam-select--display-buffer (buffer)
   "Display selector BUFFER in a focused bottom side window."
   (let* ((alist `((side . bottom)
                   (slot . 1)
-                  (window-height . ,my/typst-roam-select-window-height)))
+                  (window-height . ,my/aaronnote-roam-select-window-height)))
          (window (or (get-buffer-window buffer)
                      (display-buffer-in-side-window buffer alist))))
     (set-window-buffer window buffer)
     (select-window window)
     window))
 
-(defun my/typst-roam-select-link (&optional preferred-kind)
+(defun my/aaronnote-roam-select-link (&optional preferred-kind)
   "Open an interactive note-link selector.
 PREFERRED-KIND may be `tag' or `toc' to skip the target-kind prompt."
   (interactive)
   (let ((origin (copy-marker (point) t))
-        (current-note-id (my/typst-roam--current-slug))
-        (buf (get-buffer-create "*typst-roam-select*")))
+        (current-note-id (my/aaronnote-roam--current-slug))
+        (buf (get-buffer-create "*aaronnote-roam-select*")))
     (with-current-buffer buf
-      (my/typst-roam-select-mode)
-      (setq-local my/typst-roam-select--origin-marker origin
-                  my/typst-roam-select--current-note-id current-note-id
-                  my/typst-roam-select--preferred-kind preferred-kind
-                  my/typst-roam-select--target-record nil
-                  my/typst-roam-select--target-basis 'id
-                  my/typst-roam-select--toc-parent nil
-                  my/typst-roam-select--query nil)
-      (my/typst-roam-select--render-search ""))
-    (my/typst-roam-select--display-buffer buf)))
+      (my/aaronnote-roam-select-mode)
+      (setq-local my/aaronnote-roam-select--origin-marker origin
+                  my/aaronnote-roam-select--current-note-id current-note-id
+                  my/aaronnote-roam-select--preferred-kind preferred-kind
+                  my/aaronnote-roam-select--target-record nil
+                  my/aaronnote-roam-select--target-basis 'id
+                  my/aaronnote-roam-select--toc-parent nil
+                  my/aaronnote-roam-select--query nil)
+      (my/aaronnote-roam-select--render-search ""))
+    (my/aaronnote-roam-select--display-buffer buf)))
 
-(defun my/typst-roam-copy-link-to-here ()
+(defun my/aaronnote-roam-copy-link-to-here ()
   "Copy a Markdown roam link to the current note or current heading.
 When point is on a heading, ensure a Markdown `{#tag-id}' exists and copy a
 canonical `roam://note-id#tag' target."
   (interactive)
   (unless buffer-file-name
     (user-error "Current buffer has no file"))
-  (let* ((note-id (my/typst-roam--current-slug))
-         (title (my/typst-roam--note-title note-id))
+  (let* ((note-id (my/aaronnote-roam--current-slug))
+         (title (my/aaronnote-roam--note-title note-id))
          target text)
     (unless note-id
       (user-error "Not in a roam note"))
@@ -2193,12 +2357,12 @@ canonical `roam://note-id#tag' target."
                    (replace-regexp-in-string
                     "[ \t]+{#[[:alnum:]_:-]+}[ \t]*\\'" "" heading)))
             (unless id
-              (setq id (my/typst-roam-generate-tag-id heading))
+              (setq id (my/aaronnote-roam-generate-tag-id heading))
               (end-of-line)
               (insert (format " {#%s}" id)))
-            (setq target (my/typst-roam--roam-href note-id 'tag id)
+            (setq target (my/aaronnote-roam--roam-href note-id 'tag id)
                   text heading))
-        (setq target (my/typst-roam--roam-href note-id)
+        (setq target (my/aaronnote-roam--roam-href note-id)
               text title)))
     (let ((link (format "[%s](%s)"
                         (replace-regexp-in-string "\\]" "\\\\]" (or text ""))
@@ -2207,12 +2371,12 @@ canonical `roam://note-id#tag' target."
       (message "Copied %s" link))))
 
 ;; Enhanced find-note with DB annotation
-(defun my/typst-roam--note-annotator (slug)
+(defun my/aaronnote-roam--note-annotator (slug)
   "Return annotation for SLUG in completing-read."
-  (when-let* ((record (my/typst-roam--resolve-note slug))
+  (when-let* ((record (my/aaronnote-roam--resolve-note slug))
               (note (plist-get record :note)))
-    (let ((tags (my/typst-roam--note-list-field note "tags"))
-          (bls  (length (or (my/typst-roam--db-backlinks-to
+    (let ((tags (my/aaronnote-roam--note-list-field note "tags"))
+          (bls  (length (or (my/aaronnote-roam--db-backlinks-to
                              (plist-get record :id))
                             (gethash "backlinks" note)))))
       (concat "  "
@@ -2220,12 +2384,12 @@ canonical `roam://note-id#tag' target."
               (when (> bls 0) (format " ←%d" bls))))))
 
 ;; Auto-update DB on save
-(defun my/typst-roam--note-file-p (file)
+(defun my/aaronnote-roam--note-file-p (file)
   "Return non-nil when FILE is a Markdown roam note in the current vault."
   (when (and file
              (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file))
     (let* ((root (file-name-as-directory
-                  (file-truename (my/typst-roam-root))))
+                  (file-truename (my/aaronnote-roam-root))))
            (truename (file-truename file))
            (rel (file-relative-name truename root)))
       (and (string-prefix-p root truename)
@@ -2233,84 +2397,93 @@ canonical `roam://note-id#tag' target."
                  "\\`\\(?:\\.git/\\|\\.lean/\\|_typst/\\|node_modules/\\)"
                  rel))))))
 
-(defun my/typst-roam--schedule-runtime-sync (file)
+(defun my/aaronnote-roam--schedule-runtime-sync (file)
   "Debounce an incremental runtime sync for changed Markdown note FILE."
-  (when (timerp my/typst-roam--sync-timer)
-    (cancel-timer my/typst-roam--sync-timer))
-  (push file my/typst-roam--sync-changed-files)
-  (setq my/typst-roam--sync-changed-files
+  (when (timerp my/aaronnote-roam--sync-timer)
+    (cancel-timer my/aaronnote-roam--sync-timer))
+  (push file my/aaronnote-roam--sync-changed-files)
+  (setq my/aaronnote-roam--sync-changed-files
         (delete-dups
-         (seq-filter #'identity my/typst-roam--sync-changed-files)))
-  (setq my/typst-roam--sync-timer
+         (seq-filter #'identity my/aaronnote-roam--sync-changed-files)))
+  (setq my/aaronnote-roam--sync-timer
         (run-at-time
-         my/typst-roam-sync-delay nil
+         my/aaronnote-roam-sync-delay nil
          (lambda ()
-           (let ((changed my/typst-roam--sync-changed-files))
-             (setq my/typst-roam--sync-timer nil
-                   my/typst-roam--sync-changed-files nil)
-             (if (my/typst-roam--runtime-available-p)
-                 (my/typst-roam--runtime-sync nil changed)
+           (let ((changed my/aaronnote-roam--sync-changed-files))
+             (setq my/aaronnote-roam--sync-timer nil
+                   my/aaronnote-roam--sync-changed-files nil)
+             (if (my/aaronnote-roam--runtime-available-p)
+                 (my/aaronnote-roam--runtime-sync nil changed)
                (message "Markdown roam cache refreshed")))))))
 
 ;; ── Keymaps & menus ───────────────────────────────────────────────────────────
 
-(defvar my/typst-roam-map
+(defvar my/aaronnote-roam-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "f") #'my/typst-roam-find-note)
-    (define-key map (kbd "o") #'my/typst-roam-follow-link)
-    (define-key map (kbd "i") #'my/typst-roam-insert-link)
-    (define-key map (kbd "RET") #'my/typst-roam-select-link)
-    (define-key map (kbd "I") #'my/typst-roam-insert-tag-id-link)
-    (define-key map (kbd "c") #'my/typst-roam-insert-toc-link)
-    (define-key map (kbd "y") #'my/typst-roam-copy-link-to-here)
-    (define-key map (kbd "n") #'my/typst-roam-new-note)
-    (define-key map (kbd "N") #'my/typst-roam-new-node)
-    (define-key map (kbd "#") #'my/typst-roam-insert-tag-id)
-    (define-key map (kbd "g") #'my/typst-roam-generate-tag-id)
-    (define-key map (kbd "s") #'my/typst-roam-search-notes)
-    (define-key map (kbd "r") #'my/typst-roam-recent-notes)
-    (define-key map (kbd "R") #'my/typst-roam-related-notes)
-    (define-key map (kbd "G") #'my/typst-roam-graph)
-    (define-key map (kbd "M") #'my/typst-roam-management)
-    (define-key map (kbd "b") #'my/typst-roam-backlinks)
-    (define-key map (kbd "t") #'my/typst-roam-tags)
-    (define-key map (kbd "T") #'my/typst-roam-todos)
-    (define-key map (kbd "u") #'my/typst-roam-update-db)
-    (define-key map (kbd "m") #'my/typst-roam-dispatch)
+    (define-key map (kbd "f") #'my/aaronnote-roam-find-note)
+    (define-key map (kbd "o") #'my/aaronnote-roam-follow-link)
+    (define-key map (kbd "i") #'my/aaronnote-roam-insert-link)
+    (define-key map (kbd "RET") #'my/aaronnote-roam-select-link)
+    (define-key map (kbd "I") #'my/aaronnote-roam-insert-tag-id-link)
+    (define-key map (kbd "c") #'my/aaronnote-roam-insert-toc-link)
+    (define-key map (kbd "y") #'my/aaronnote-roam-copy-link-to-here)
+    (define-key map (kbd "n") #'my/aaronnote-roam-new-note)
+    (define-key map (kbd "N") #'my/aaronnote-roam-new-node)
+    (define-key map (kbd "#") #'my/aaronnote-roam-insert-tag-id)
+    (define-key map (kbd "g") #'my/aaronnote-roam-generate-tag-id)
+    (define-key map (kbd "s") #'my/aaronnote-roam-search-notes)
+    (define-key map (kbd "r") #'my/aaronnote-roam-recent-notes)
+    (define-key map (kbd "R") #'my/aaronnote-roam-related-notes)
+    (define-key map (kbd "G") #'my/aaronnote-roam-graph)
+    (define-key map (kbd "M") #'my/aaronnote-roam-management)
+    (define-key map (kbd "b") #'my/aaronnote-roam-backlinks)
+    (define-key map (kbd "t") #'my/aaronnote-roam-tags)
+    (define-key map (kbd "T") #'my/aaronnote-roam-todos)
+    (define-key map (kbd "A") #'my/aaronnote-roam-agenda)
+    (define-key map (kbd "u") #'my/aaronnote-roam-update-db)
+    (define-key map (kbd "U") #'my/aaronnote-roam-sync-full)
+    (define-key map (kbd "S") #'my/aaronnote-roam-db-status)
+    (define-key map (kbd "V") #'my/aaronnote-roam-magit)
+    (define-key map (kbd "D") #'my/aaronnote-roam-dired)
+    (define-key map (kbd "m") #'my/aaronnote-roam-dispatch)
     map)
   "Roam keymap for Markdown buffers. Bound to C-c r.")
 
 (my/leader!
-  "r m" '(:def my/typst-roam-dispatch :which-key "md roam")
-  "r t" '(:def my/typst-roam-dispatch :which-key "md roam"))
+  "r m" '(:def my/aaronnote-roam-dispatch :which-key "md roam")
+  "r t" '(:def my/aaronnote-roam-dispatch :which-key "md roam")
+  "r a" '(:def my/aaronnote-roam-agenda   :which-key "roam agenda")
+  "r d" '(:def my/aaronnote-roam-dired    :which-key "roam dired")
+  "r v" '(:def my/aaronnote-roam-magit    :which-key "roam magit")
+  "r S" '(:def my/aaronnote-roam-db-status :which-key "roam db status"))
 
 ;; ── xref backend: gd / M-. for note-link ─────────────────────────────────
 
-(defun my/typst-roam--all-slugs-cached ()
+(defun my/aaronnote-roam--all-slugs-cached ()
   "Return all canonical roam note ids."
   (mapcar (lambda (record) (plist-get record :id))
-          (my/typst-roam--note-records)))
+          (my/aaronnote-roam--note-records)))
 
-(defun my/typst-roam-xref-backend ()
-  "Use typst-roam as xref backend when point is on a Markdown roam link."
-  (when (my/typst-roam--target-at-point) 'typst-roam))
+(defun my/aaronnote-roam-xref-backend ()
+  "Use aaronnote-roam as xref backend when point is on a Markdown roam link."
+  (when (my/aaronnote-roam--target-at-point) 'aaronnote-roam))
 
-(cl-defmethod xref-backend-identifier-at-point ((_backend (eql typst-roam)))
-  (my/typst-roam--target-at-point))
+(cl-defmethod xref-backend-identifier-at-point ((_backend (eql aaronnote-roam)))
+  (my/aaronnote-roam--target-at-point))
 
-(defun my/typst-roam-goto-definition ()
+(defun my/aaronnote-roam-goto-definition ()
   "Jump to the note-link target at point, falling back to normal gd."
   (interactive)
-  (if (my/typst-roam--target-at-point)
+  (if (my/aaronnote-roam--target-at-point)
       (progn
         (when (fboundp 'my/navigation--push-jump)
           (my/navigation--push-jump))
-        (my/typst-roam-follow-link))
+        (my/aaronnote-roam-follow-link))
     (if (fboundp 'my/navigation-find-definition)
         (call-interactively #'my/navigation-find-definition)
       (call-interactively #'xref-find-definitions))))
 
-(defun my/typst-roam--xref-location (file parsed)
+(defun my/aaronnote-roam--xref-location (file parsed)
   "Return an xref location in FILE for PARSED target."
   (with-temp-buffer
     (insert-file-contents file)
@@ -2331,77 +2504,83 @@ canonical `roam://note-id#tag' target."
                          (match-beginning 0)))))
                 ((plist-get parsed :dom)
                  (plist-get
-                  (my/typst-roam--find-dom-target
+                  (my/aaronnote-roam--find-dom-target
                    (plist-get parsed :dom) file (plist-get parsed :slug))
                   :pos)))))
       (if pos
           (progn
-            (my/typst-roam--goto-pos pos)
+            (my/aaronnote-roam--goto-pos pos)
             (xref-make-file-location file
                                      (line-number-at-pos)
                                      (current-column)))
         (xref-make-file-location file 1 0)))))
 
-(cl-defmethod xref-backend-definitions ((_backend (eql typst-roam)) target)
-  (when-let* ((parsed (my/typst-roam--parse-target target))
+(cl-defmethod xref-backend-definitions ((_backend (eql aaronnote-roam)) target)
+  (when-let* ((parsed (my/aaronnote-roam--parse-target target))
               (file (plist-get parsed :file))
               ((file-exists-p file)))
     (list (xref-make (concat "note: " target)
-                     (my/typst-roam--xref-location file parsed)))))
+                     (my/aaronnote-roam--xref-location file parsed)))))
 
-(cl-defmethod xref-backend-identifier-completion-table ((_backend (eql typst-roam)))
-  (mapcar #'my/typst-roam--roam-href
-          (my/typst-roam--all-slugs-cached)))
+(cl-defmethod xref-backend-identifier-completion-table ((_backend (eql aaronnote-roam)))
+  (mapcar #'my/aaronnote-roam--roam-href
+          (my/aaronnote-roam--all-slugs-cached)))
 
-(defun my/typst-roam--xref-setup ()
-  "Register typst-roam xref backend for this buffer (highest priority)."
-  (add-hook 'xref-backend-functions #'my/typst-roam-xref-backend -90 t))
+(defun my/aaronnote-roam--xref-setup ()
+  "Register aaronnote-roam xref backend for this buffer (highest priority)."
+  (add-hook 'xref-backend-functions #'my/aaronnote-roam-xref-backend -90 t))
 
 ;; ── Preview click → note-link intercept ──────────────────────────────────
 
 ;; ── Daily note ────────────────────────────────────────────────────────────
 
-(defun my/typst-roam-daily-note ()
+(defun my/aaronnote-roam-daily-note ()
   "Open or create today's daily note at daily/YYYY-MM-DD."
   (interactive)
   (let* ((slug (concat "daily/" (format-time-string "%Y-%m-%d")))
-         (file (my/typst-roam--slug-to-file slug)))
+         (file (my/aaronnote-roam--slug-to-file slug)))
     (if (file-exists-p file)
-        (my/typst-roam--open-slug slug)
-      (my/typst-roam-new-note slug))))
+        (my/aaronnote-roam--open-slug slug)
+      (my/aaronnote-roam-new-note slug))))
 
 ;; ── Wire everything up ────────────────────────────────────────────────────
 
-(define-key my/typst-roam-map (kbd "d") #'my/typst-roam-daily-note)
+(define-key my/aaronnote-roam-map (kbd "d") #'my/aaronnote-roam-daily-note)
 
 ;; Update transient with daily + gd hint
-(transient-define-prefix my/typst-roam-dispatch ()
+(transient-define-prefix my/aaronnote-roam-dispatch ()
   "Markdown roam command menu."
   [["Notes"
-    ("RET" "select link"         my/typst-roam-select-link)
-    ("o" "open link   C-c C-o" my/typst-roam-follow-link)
-    ("f" "find note"            my/typst-roam-find-note)
-    ("i" "insert link"          my/typst-roam-insert-link)
-    ("I" "insert tag link"      my/typst-roam-insert-tag-id-link)
-    ("c" "insert toc link"      my/typst-roam-insert-toc-link)
-    ("y" "copy link here"       my/typst-roam-copy-link-to-here)
-    ("n" "new note"             my/typst-roam-new-note)
-    ("N" "new node"             my/typst-roam-new-node)
-    ("d" "daily note"           my/typst-roam-daily-note)]
+    ("RET" "select link"         my/aaronnote-roam-select-link)
+    ("o" "open link   C-c C-o" my/aaronnote-roam-follow-link)
+    ("f" "find note"            my/aaronnote-roam-find-note)
+    ("i" "insert link"          my/aaronnote-roam-insert-link)
+    ("I" "insert tag link"      my/aaronnote-roam-insert-tag-id-link)
+    ("c" "insert toc link"      my/aaronnote-roam-insert-toc-link)
+    ("y" "copy link here"       my/aaronnote-roam-copy-link-to-here)
+    ("n" "new note"             my/aaronnote-roam-new-note)
+    ("N" "new node"             my/aaronnote-roam-new-node)
+    ("d" "daily note"           my/aaronnote-roam-daily-note)]
    ["Tag ids"
-    ("#" "insert tag id"        my/typst-roam-insert-tag-id)
-    ("g" "generate tag id"      my/typst-roam-generate-tag-id)]
+    ("#" "insert tag id"        my/aaronnote-roam-insert-tag-id)
+    ("g" "generate tag id"      my/aaronnote-roam-generate-tag-id)]
    ["Explore"
-    ("s" "search/filter"        my/typst-roam-search-notes)
-    ("r" "recent"               my/typst-roam-recent-notes)
-    ("R" "related"              my/typst-roam-related-notes)
-    ("G" "graph"                my/typst-roam-graph)
-    ("M" "management"           my/typst-roam-management)]
-   ["DB"
-    ("b" "backlinks"            my/typst-roam-backlinks)
-    ("t" "tags"                 my/typst-roam-tags)
-    ("T" "todos"                my/typst-roam-todos)
-    ("u" "update db"            my/typst-roam-update-db)]
+    ("s" "search/filter"        my/aaronnote-roam-search-notes)
+    ("r" "recent"               my/aaronnote-roam-recent-notes)
+    ("R" "related"              my/aaronnote-roam-related-notes)
+    ("G" "graph"                my/aaronnote-roam-graph)
+    ("M" "management"           my/aaronnote-roam-management)]
+   ["DB & Agenda"
+    ("b" "backlinks"            my/aaronnote-roam-backlinks)
+    ("t" "tags"                 my/aaronnote-roam-tags)
+    ("T" "todos"                my/aaronnote-roam-todos)
+    ("A" "agenda"               my/aaronnote-roam-agenda)
+    ("u" "sync (incremental)"   my/aaronnote-roam-update-db)
+    ("U" "sync (full rebuild)"  my/aaronnote-roam-sync-full)
+    ("S" "db status"            my/aaronnote-roam-db-status)]
+   ["Files"
+    ("V" "version (magit)"      my/aaronnote-roam-magit)
+    ("D" "dired (file browser)" my/aaronnote-roam-dired)]
    ["Nav (gd = xref)"
     ("." "xref definition"      xref-find-definitions)
     ("x" "xref references"      xref-find-references)]])

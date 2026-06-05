@@ -191,6 +191,84 @@ class TodoWidget extends MeasuredWidget {
 }
 
 // ---------------------------------------------------------------------------
+// Lean4Widget — @@lean4(path)[tag] static display + "Open in Emacs" button
+// ---------------------------------------------------------------------------
+
+class Lean4Widget extends MeasuredWidget {
+  cmd: InlineCommand;
+
+  constructor(cmd: InlineCommand) {
+    super();
+    this.cmd = cmd;
+  }
+
+  protected measureKey(): string { return ""; }
+  protected get measuredBlock(): boolean { return false; }
+
+  eq(other: Lean4Widget): boolean {
+    return (
+      this.cmd.argsRaw === other.cmd.argsRaw &&
+      this.cmd.context === other.cmd.context &&
+      this.cmd.fullFrom === other.cmd.fullFrom &&
+      this.cmd.fullTo === other.cmd.fullTo
+    );
+  }
+
+  toDOM(): HTMLElement {
+    const { cmd } = this;
+    const path = (cmd.argsRaw ?? "").trim();
+    const tag = cmd.context.trim();
+
+    const wrap = document.createElement("span");
+    wrap.className = "inline-lean4-widget inline-command-token";
+
+    const chip = document.createElement("span");
+    chip.className = "inline-lean4-chip";
+
+    const icon = document.createElement("span");
+    icon.className = "inline-lean4-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = "λ";
+    chip.append(icon);
+
+    const pathEl = document.createElement("span");
+    pathEl.className = "inline-lean4-path";
+    pathEl.textContent = path || "(no path)";
+    chip.append(pathEl);
+
+    if (tag) {
+      const tagEl = document.createElement("span");
+      tagEl.className = "inline-lean4-tag";
+      tagEl.textContent = `#${tag}`;
+      chip.append(tagEl);
+    }
+
+    wrap.append(chip);
+
+    const btn = document.createElement("button");
+    btn.className = "inline-lean4-open-btn";
+    btn.type = "button";
+    btn.textContent = "Open in Emacs";
+    btn.title = path ? `Open ${path} in Emacs${tag ? ` at #${tag}` : ""}` : "Open in Emacs";
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const api = window.aaronnoteApi?.emacs?.open;
+      if (!api || !path) return;
+      const root: string = (window as any).__aaronnoteNotesRoot ?? "";
+      const leanDir = root ? `${root}/lean/` : "";
+      const absPath = leanDir + path.replace(/^\.\//, "");
+      api({ file: absPath, ...(tag ? { tag } : {}) }).catch(() => {});
+    });
+    wrap.append(btn);
+
+    return wrap;
+  }
+
+  ignoreEvent(): boolean { return false; }
+}
+
+// ---------------------------------------------------------------------------
 // ViewPlugin
 // ---------------------------------------------------------------------------
 
@@ -222,6 +300,13 @@ function buildInlineCommandDecos(
         decos.push(
           Decoration.replace({
             widget: new TodoWidget({ ...cmd, fullFrom: from, fullTo: to }),
+          }).range(from, to),
+        );
+      }
+      if (cmd.name === "lean4" && !cursorInside) {
+        decos.push(
+          Decoration.replace({
+            widget: new Lean4Widget({ ...cmd, fullFrom: from, fullTo: to }),
           }).range(from, to),
         );
       }

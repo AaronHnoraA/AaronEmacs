@@ -171,9 +171,18 @@
                            :object-type 'alist))
                  (file (alist-get 'file payload))
                  (line-number (or (alist-get 'line payload) 1))
-                 (column (or (alist-get 'col payload) 0)))
-            (my/aaronnote--sync-app-buffer-file file)
-            (my/aaronnote--goto-location file line-number column))
+                 (column (or (alist-get 'col payload) 0))
+                 (tag (alist-get 'tag payload)))
+            (if (and (my/aaronnote--markdown-file-p file)
+                     (or (null tag) (string-empty-p (or tag ""))))
+                ;; Markdown note (e.g. graph double-click): open in Aaronnote.
+                (my/aaronnote-open-file file)
+              ;; Source region (lean, etc.) or explicit tag: open in Emacs.
+              (my/aaronnote--sync-app-buffer-file file)
+              (my/aaronnote--goto-location file line-number column)
+              (when (and tag (not (string-empty-p (or tag ""))))
+                (when (require 'init-note-code nil t)
+                  (ignore-errors (my/note-code--goto-tag tag))))))
         (error
          (message "Aaronnote event parse failed: %s" (error-message-string err)))))
      ((string-prefix-p current-file-prefix line)
@@ -251,10 +260,15 @@ When FILE is non-nil, also remember it as the current note."
   (my/aaronnote--track-app-buffer (current-buffer) file))
 
 (defun my/aaronnote--open-appine (url &optional file)
-  "Open Aaronnote URL in Appine in the selected window."
+  "Open Aaronnote URL in Appine, one Appine tab per md file.
+If a tab with URL already exists, switch to it; otherwise open a new tab."
   (unless (fboundp 'my/appine-open-url)
     (require 'init-appine))
-  (let ((buffer (get-buffer-create "*Appine Window*")))
+  (let* ((norm-url (and (fboundp 'my/appine--normalize-url)
+                        (my/appine--normalize-url url)))
+         (existing-idx (and norm-url
+                            (cl-position norm-url my/appine-tab-list :test #'equal)))
+         (buffer (get-buffer-create "*Appine Window*")))
     (my/aaronnote--track-app-buffer buffer file)
     (with-current-buffer buffer
       (setq-local mode-line-format nil)
@@ -262,8 +276,11 @@ When FILE is non-nil, also remember it as the current note."
       (setq-local cursor-type nil)
       (setq buffer-read-only t))
     (set-window-buffer (selected-window) buffer)
-    (with-current-buffer buffer
-      (my/appine-open-url url))
+    (if existing-idx
+        (when (fboundp 'my/appine--switch-to-tab-index)
+          (my/appine--switch-to-tab-index existing-idx))
+      (with-current-buffer buffer
+        (my/appine-open-url url)))
     (when (fboundp 'appine-focus)
       (run-at-time 0.05 nil
                    (lambda ()
@@ -350,8 +367,7 @@ When FILE is nil, use the current buffer."
      (lambda ()
        (when (window-live-p target-window)
          (select-window target-window))
-       (my/aaronnote--open-url (my/aaronnote--app-url file) file)
-       (run-at-time 0.3 nil #'my/aaronnote--open-file-in-web file)))))
+       (my/aaronnote--open-url (my/aaronnote--app-url file) file)))))
 
 ;;;###autoload
 (defun my/aaronnote-open-current-note ()

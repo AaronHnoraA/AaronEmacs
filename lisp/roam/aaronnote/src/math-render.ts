@@ -75,8 +75,9 @@ export function renderMathHTML(
     return cached;
   }
   try {
-    const html = katex.renderToString(tex, katexOptions(options));
-    ensureKatexCss(katexCssUrl);
+    const resolved = katexOptions(options);
+    const html = katex.renderToString(tex, resolved);
+    if (resolved.output !== "mathml") ensureKatexCss(katexCssUrl);
     const rendered = { html };
     rememberMathHtml(key, rendered);
     return rendered;
@@ -120,7 +121,6 @@ function applyRenderedMath(
   onError: (error: string) => void,
 ): void {
   if (!rendered.error) {
-    ensureKatexCss(katexCssUrl);
     element.innerHTML = rendered.html;
     fitRenderedMath(element);
     return;
@@ -137,7 +137,7 @@ function katexOptions(options: KatexRenderOptions): KatexRenderOptions {
     throwOnError: true,
     strict: options.strict,
     trust: options.trust,
-    output: options.output,
+    output: options.output ?? "mathml",
   };
 }
 
