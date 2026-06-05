@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Reduction
-# key: reduce
-# --
-${1:A} <=_${3:m} ${2:B} $0

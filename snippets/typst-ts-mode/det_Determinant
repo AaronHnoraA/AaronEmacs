@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Determinant
-# key: det
-# --
-"det" lr((${1:A})) $0

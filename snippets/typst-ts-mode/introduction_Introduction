@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Introduction
-# key: introduction
-# --
-#introduction[
-  $0
-]

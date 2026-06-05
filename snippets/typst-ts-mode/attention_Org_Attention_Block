@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Attention
-# key: attention
-# --
-#attention[
-  $0
-]

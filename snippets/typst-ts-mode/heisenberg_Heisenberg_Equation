@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Heisenberg equation
-# key: heisenberg
-# --
-frac(dif ${1:A}, dif t) = frac(i, "ℏ") lr([${2:H}, ${1:A}]) $0

@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Axiom (no label)
-# key: axiom
-# --
-#axiom[
-  $0
-]

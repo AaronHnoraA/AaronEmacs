@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Bitstrings
-# key: bits
-# --
-lr({0, 1})^${1:n} $0

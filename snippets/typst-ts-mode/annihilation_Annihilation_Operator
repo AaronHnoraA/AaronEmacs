@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Annihilation operator
-# key: annihilate
-# --
-${1:a} $0

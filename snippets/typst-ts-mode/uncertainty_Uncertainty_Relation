@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Uncertainty relation
-# key: uncertainty
-# --
-Delta ${1:x} Delta ${2:p} >= frac(1, 2) lr(|chevron.l lr([${1:x}, ${2:p}]) chevron.r|) $0

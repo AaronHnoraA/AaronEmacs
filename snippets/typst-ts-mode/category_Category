@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Category
-# key: cat
-# --
-cal(${1:C}) $0

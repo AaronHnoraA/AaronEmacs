@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Hadamard on state
-# key: had
-# --
-sans("H") |${1:psi} chevron.r $0

@@ -1,5 +1,0 @@
-# -*- mode: snippet; require-final-newline: nil -*-
-# name: Note subscript marker (bottommark)
-# key: bottommark
-# --
-#bottommark[$1]$0

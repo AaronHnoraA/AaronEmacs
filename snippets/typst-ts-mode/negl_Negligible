@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Negligible
-# key: negl
-# --
-negl(${1:lambda}) $0

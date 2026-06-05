@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Machine accepts
-# key: accept
-# --
-${1:M} lr((${2:x})) = 1 $0

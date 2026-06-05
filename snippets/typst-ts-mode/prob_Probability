@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Probability
-# key: prob
-# --
-bb(P)_${2:X} lr([${1:E}]) $0

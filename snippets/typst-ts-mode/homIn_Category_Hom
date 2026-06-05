@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Hom in category
-# key: homin
-# --
-"Hom"_${1:C} lr((${2:X}, ${3:Y})) $0

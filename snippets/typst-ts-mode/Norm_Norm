@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Norm
-# key: Norm
-# --
-norm($1) $2

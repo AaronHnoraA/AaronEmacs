@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Derivative
-# key: deriv
-# --
-frac(dif ${1:f}, dif ${2:x}) $0

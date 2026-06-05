@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Figure ref
-# key: figure:ref
-# --
-@fig:$1$0

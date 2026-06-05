@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Turing reduction
-# key: turingred
-# --
-${1:A} <=_T ${2:B} $0

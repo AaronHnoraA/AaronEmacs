@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Negligible bound
-# key: neglb
-# --
-${1:epsilon} lr((${2:lambda})) <= "negl" lr((${2:lambda})) $0

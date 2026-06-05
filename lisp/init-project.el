@@ -27,6 +27,7 @@
 (declare-function project--write-project-list "project")
 (declare-function dashboard-projects-backend-load-projects "dashboard-widgets")
 (declare-function imenu--subalist-p "imenu" (item))
+(declare-function my/file-icon-for-file "init-ui" (file &rest args))
 (declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
 (declare-function get-current-persp "perspective")
 (declare-function persp-parameter "perspective" (parameter &optional persp))
@@ -1153,6 +1154,19 @@ Returns the number of killed buffers."
         ("C-x t C-t" . treemacs-find-file)
         ("C-x t M-t" . treemacs-find-tag))
   :config
+  (treemacs-modify-theme "Default"
+    :icon-directory (expand-file-name "assets/icons" user-emacs-directory)
+    :config
+    (let ((lean-icon (my/file-icon-for-file
+                      "file.lean" :height 1.0 :v-adjust -0.05)))
+      (treemacs-create-icon
+       :icon lean-icon
+       :extensions ("lean")
+       :fallback "L ")
+      (treemacs-create-icon
+       :file "Aaronnote.svg"
+       :extensions ("md")
+       :fallback "✎ ")))
   (setq treemacs-buffer-name-function #'treemacs-default-buffer-name
         treemacs-buffer-name-prefix " *Treemacs-Buffer-"
         treemacs-collapse-dirs (if treemacs-python-executable 3 0)

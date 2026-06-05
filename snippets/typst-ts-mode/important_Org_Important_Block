@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Important
-# key: important
-# --
-#important[
-  $0
-]

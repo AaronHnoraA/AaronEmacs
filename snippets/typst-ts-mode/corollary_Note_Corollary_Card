@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Note corollary card
-# key: corollary
-# --
-#corollary[
-  $0
-]

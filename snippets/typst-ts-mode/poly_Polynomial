@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Polynomial
-# key: poly
-# --
-poly(${1:n}) $0

@@ -1,6 +1,0 @@
-# -*- mode: snippet -*-
-# name: Paragraph (no label)
-# key: par
-# --
-==== $1
-${0}

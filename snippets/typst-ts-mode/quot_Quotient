@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Quotient
-# key: quot
-# --
-${1:G} / ${2:H} $0

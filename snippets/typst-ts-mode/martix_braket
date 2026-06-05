@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Matrix element
-# key: me
-# --
-amp(${1:phi}, ${2:A}, ${3:psi}) $0

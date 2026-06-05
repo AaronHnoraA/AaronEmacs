@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Integral 0 to Infinity
-# key: oinf
-# --
-integral_0^infinity $1 dif $2 $3

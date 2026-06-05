@@ -106,7 +106,7 @@ language server without user action."
   :type 'integer
   :group 'lean)
 
-(defcustom lean-dev-log-enabled t
+(defcustom lean-dev-log-enabled nil
   "When non-nil, write Lean integration events to `lean-dev-log-buffer-name'."
   :type 'boolean
   :group 'lean)

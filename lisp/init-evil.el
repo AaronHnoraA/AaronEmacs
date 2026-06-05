@@ -613,7 +613,6 @@ Emacs state keep their local behavior."
       "s" 'org-schedule
       "t" 'org-todo
       "T" 'org-todo-list
-      "P" 'my/previewer-org-workbench
       "v" 'my/org-latex-preview-visible-now
 
       ;; babel
@@ -670,7 +669,14 @@ Emacs state keep their local behavior."
       ;; goto
       "gf" 'find-function
       "gv" 'find-variable
-      "gl" 'find-library)))
+      "gl" 'find-library))
+
+  (with-eval-after-load 'markdown-mode
+    (my/local-leader!
+      :keymaps '(markdown-mode-map markdown-ts-mode-map)
+      "p" 'my/aaronnote-preview
+      "r" 'my/aaronnote-refresh
+      "g" 'my/aaronnote-roam-graph)))
 
 
 

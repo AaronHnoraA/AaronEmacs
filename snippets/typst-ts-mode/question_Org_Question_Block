@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Question
-# key: question
-# --
-#question[
-  $0
-]

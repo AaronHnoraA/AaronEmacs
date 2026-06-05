@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Dirac delta
-# key: dirac
-# --
-dirac(${1:x}) $0

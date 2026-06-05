@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Set comprehension
-# key: setof
-# --
-lr({${1:x} | ${2:x in X}}) $0

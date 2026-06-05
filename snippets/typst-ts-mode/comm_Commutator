@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Commutator
-# key: comm
-# --
-lr([${1:A}, ${2:B}]) $0

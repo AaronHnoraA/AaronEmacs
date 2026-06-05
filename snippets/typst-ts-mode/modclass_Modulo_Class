@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Modulo class
-# key: modclass
-# --
-[${1:a}]_(${2:n}) $0

@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Postulate (no label)
-# key: postulate
-# --
-#postulate[
-  $0
-]

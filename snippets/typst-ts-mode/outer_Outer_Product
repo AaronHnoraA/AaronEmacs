@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Outer Product
-# key: outer
-# --
-|${1:psi} chevron.r chevron.l ${2:phi}| $0

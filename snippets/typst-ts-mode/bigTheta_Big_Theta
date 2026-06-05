@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Big Theta
-# key: bigTheta
-# --
-Theta lr((${1:f(n)})) $0

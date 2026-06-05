@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Circuit family
-# key: circuit
-# --
-circuit(${1:C}, size: ${2:n}) $0

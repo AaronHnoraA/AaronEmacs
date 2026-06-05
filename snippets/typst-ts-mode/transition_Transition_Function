@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Transition function
-# key: trans
-# --
-${1:delta} lr((${2:q}, ${3:a})) $0

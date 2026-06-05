@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Vmatrix
-# key: vmat
-# --
-mat(delim: "|",
-  $0
-)

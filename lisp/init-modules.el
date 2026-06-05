@@ -85,15 +85,13 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-diagnostics-extra)
 (require 'init-health)
 (require 'init-server)
-(require 'init-previewer)
 (require 'init-md)
 (require 'init-ratex)
 (require 'init-note-code)
-(require 'init-typst-roam)
+(require 'init-aaronnote)
 
 ;; standalone apps
 (my/require-module-after-any-feature 'init-babel 'org)
-(my/require-module-after-any-feature 'init-org 'org)
 (when (eq system-type 'darwin)
   (my/require-module-safely 'init-appine))
 (require 'init-text)

@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Binomial coefficient
-# key: choose
-# --
-binom(${1:n}, ${2:k}) $0

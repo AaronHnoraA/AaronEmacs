@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Xor macro
-# key: mxor
-# --
-${1:x} plus.o ${2:y} $0

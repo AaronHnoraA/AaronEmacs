@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Tip
-# key: tip
-# --
-#tip[
-  $0
-]

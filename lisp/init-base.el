@@ -19,6 +19,10 @@
 (declare-function diff-hl-mode "diff-hl" (&optional arg))
 (declare-function vc-git-root "vc-git" (file))
 (declare-function my/project-current-root "init-project")
+(declare-function async-handle-result "async" (callback result &optional buf))
+
+(defvar async-callback)
+(defvar async-debug)
 
 (defvar project-current-directory-override)
 
@@ -1194,6 +1198,27 @@ Else, call `comment-or-uncomment-region' on the current line."
 
 (autoload 'dired-async-mode "dired-async.el" nil t)
 (dired-async-mode 1)
+
+(defun my/async-when-done-handle-empty-result-a (orig-fn proc &optional change)
+  "Treat an empty successful async PROC result as nil.
+Some async file operations can exit successfully without printing a readable
+Lisp value.  `async-when-done' otherwise lets the resulting `end-of-file'
+escape from the process sentinel."
+  (condition-case err
+      (funcall orig-fn proc change)
+    (end-of-file
+     (if (and (eq (process-status proc) 'exit)
+              (zerop (process-exit-status proc))
+              (buffer-live-p (process-buffer proc)))
+         (with-current-buffer (process-buffer proc)
+           (async-handle-result async-callback nil (current-buffer))
+           (unless async-debug
+             (kill-buffer (current-buffer))))
+       (signal (car err) (cdr err))))))
+
+(with-eval-after-load 'async
+  (advice-remove 'async-when-done #'my/async-when-done-handle-empty-result-a)
+  (advice-add 'async-when-done :around #'my/async-when-done-handle-empty-result-a))
 
 (use-package amx
   :ensure t

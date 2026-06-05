@@ -1,9 +1,0 @@
-# -*- mode: snippet; require-final-newline: nil -*-
-# type: command
-# name: inline math
-# key: ;
-# --
-(let ((text (or yas-selected-text ""))
-      (beg (point)))
-  (insert "$" text "$")
-  (goto-char (+ beg 1 (length text))))

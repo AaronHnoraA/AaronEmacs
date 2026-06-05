@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Hom
-# key: hom
-# --
-"Hom" lr((${1:V}, ${2:W})) $0

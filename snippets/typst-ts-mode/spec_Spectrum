@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Spectrum
-# key: Spec
-# --
-"Spec" lr((${1:R})) $0

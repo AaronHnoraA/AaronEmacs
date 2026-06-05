@@ -1,5 +1,0 @@
-# -*- mode: snippet; require-final-newline: nil -*-
-# name: Note superscript marker (topmark)
-# key: topmark
-# --
-#topmark[$1]$0

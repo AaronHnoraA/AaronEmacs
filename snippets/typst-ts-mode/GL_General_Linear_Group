@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: General linear group
-# key: GL
-# --
-"GL"_${1:n} lr((${2:F})) $0

@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Integral -Inf to Inf
-# key: infi
-# --
-integral_(-infinity)^(infinity) $1 dif $2 $3

@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Note example card
-# key: ex
-# --
-#example[
-  $0
-]

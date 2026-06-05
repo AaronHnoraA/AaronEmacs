@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Expectation
-# key: expect
-# --
-bb(E)_${1:x in D} lr([${2:f(x)}]) $0

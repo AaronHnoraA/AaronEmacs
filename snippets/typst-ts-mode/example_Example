@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Example
-# key: example
-# --
-#example[
-  $0
-]

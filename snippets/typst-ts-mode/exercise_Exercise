@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Exercise
-# key: exercise
-# --
-#exercise[
-  $0
-]

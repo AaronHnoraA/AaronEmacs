@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Note solution card
-# key: sol
-# --
-#solution[
-  $0
-]

@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Opposite category
-# key: opcat
-# --
-${1:C}^("op") $0

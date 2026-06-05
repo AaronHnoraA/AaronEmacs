@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Integral
-# key: int
-# --
-integral $1 dif $2 $3

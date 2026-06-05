@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Floor
-# key: floor
-# --
-floor($1) $2

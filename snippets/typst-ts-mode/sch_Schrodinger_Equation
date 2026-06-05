@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Schrödinger equation
-# key: sch
-# --
-i "ℏ" frac(dif ${1:psi(t)}, dif t) = ${2:H} ${1:psi(t)} $0

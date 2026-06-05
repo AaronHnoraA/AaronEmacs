@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Quantum Fourier transform
-# key: qft
-# --
-"QFT"_${1:n} |${2:x} chevron.r = frac(1, sqrt(2^${1:n})) sum_(${3:y}=0)^(2^${1:n} - 1) exp(2 pi i ${2:x} ${3:y} / 2^${1:n}) |${3:y} chevron.r $0

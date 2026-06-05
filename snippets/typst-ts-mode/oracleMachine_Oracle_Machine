@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Oracle machine
-# key: omach
-# --
-oracleMachine(${1:M}, ${2:O}) $0

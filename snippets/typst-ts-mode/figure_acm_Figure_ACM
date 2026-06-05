@@ -1,9 +1,0 @@
-# -*- mode: snippet -*-
-# name: Figure (ACM)
-# key: figure:acm
-# --
-#figure(
-  image("figures/$1", width: 45%),
-  caption: [$2],
-) <fig:$3>
-$0

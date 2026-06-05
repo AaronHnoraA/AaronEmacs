@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Warning
-# key: warning
-# --
-#warning[
-  $0
-]

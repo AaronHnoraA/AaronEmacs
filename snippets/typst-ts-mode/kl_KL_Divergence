@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: KL divergence
-# key: kl
-# --
-D_("KL") lr((${1:P} || ${2:Q})) $0

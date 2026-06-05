@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Fourier transform
-# key: fourier
-# --
-fourier(${1:f}) $0

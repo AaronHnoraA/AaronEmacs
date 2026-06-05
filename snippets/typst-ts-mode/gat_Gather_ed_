@@ -1,6 +1,0 @@
-# -*- mode: snippet -*-
-# name: Gather(ed)
-# key: gat
-# --
-$ $1 \\
-  $0 $

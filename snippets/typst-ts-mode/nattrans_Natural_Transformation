@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Natural transformation
-# key: nattrans
-# --
-${1:eta}: ${2:F} arrow.double ${3:G} $0

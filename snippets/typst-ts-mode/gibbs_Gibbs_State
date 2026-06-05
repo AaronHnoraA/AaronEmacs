@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Gibbs state
-# key: gibbs
-# --
-rho = frac(exp(-${1:beta} ${2:H}), "Tr" lr((exp(-${1:beta} ${2:H})))) $0

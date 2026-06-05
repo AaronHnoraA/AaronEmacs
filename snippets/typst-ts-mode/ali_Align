@@ -1,6 +1,0 @@
-# -*- mode: snippet -*-
-# name: Align
-# key: ali
-# --
-$ $1 &= $2 \\
-  $3 &= $0 $

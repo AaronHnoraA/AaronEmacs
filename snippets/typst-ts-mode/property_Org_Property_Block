@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Property
-# key: property
-# --
-#property[
-  $0
-]

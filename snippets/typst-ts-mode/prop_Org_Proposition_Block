@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Proposition
-# key: prop
-# --
-#proposition[
-  $0
-]

@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Legendre symbol
-# key: legendre
-# --
-lr((${1:a} / ${2:p})) $0

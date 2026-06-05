@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Remark
-# key: remark
-# --
-#remark[
-  $0
-]

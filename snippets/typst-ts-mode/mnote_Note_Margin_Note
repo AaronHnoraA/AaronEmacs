@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Note margin note
-# key: mnote
-# --
-#margin-note[
-  $0
-]

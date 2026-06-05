@@ -19,6 +19,7 @@
 (declare-function centaur-tabs-mode "centaur-tabs" (&optional arg))
 (declare-function global-tab-line-mode "tab-line" (&optional arg))
 (declare-function get-current-persp "perspective" ())
+(declare-function my/file-icon-for-file "init-ui" (file &rest args))
 (declare-function persp-parameter "perspective" (parameter &optional persp))
 (declare-function persp-current-buffers* "perspective" (&optional include-global))
 (declare-function set-persp-parameter "perspective" (parameter value &optional persp))
@@ -213,6 +214,10 @@ Scrolling in the opposite direction is allowed immediately."
                   (directory-file-name
                    (expand-file-name default-directory)))))
         (concat
+         (when-let* ((icon (my/file-icon-for-file
+                            buffer-file-name
+                            :height 0.9 :v-adjust -0.05 :image-height 15)))
+           (concat icon " "))
          (propertize (format "%s/" dir) 'face 'my/tab-bar-buffer-path-face)
          (propertize (file-name-nondirectory buffer-file-name)
                      'face 'my/tab-bar-buffer-face))))
@@ -532,13 +537,20 @@ When MAX-WIDTH is non-nil, use it to shrink labels in narrow windows."
 (defun my/tab-line-tab-string (buffer &optional max-width)
   "Return the clickable tab label for BUFFER.
 When MAX-WIDTH is non-nil, use it to shrink labels in narrow windows."
-  (let ((current (eq buffer (my/tab-line-current-buffer)))
-        (name (my/tab-line-display-name buffer max-width)))
+  (let* ((current (eq buffer (my/tab-line-current-buffer)))
+         (name (my/tab-line-display-name buffer max-width))
+         (face (if current
+                   'my/tab-line-current-face
+                 'my/tab-line-inactive-face))
+         (icon (my/file-icon-for-file
+                (buffer-file-name buffer)
+                :height 0.9 :v-adjust -0.05 :image-height 15))
+         (label (concat " "
+                        (when icon (concat icon " "))
+                        (propertize name 'face face)
+                        " ")))
     (propertize
-     (format " %s " name)
-     'face (if current
-               'my/tab-line-current-face
-             'my/tab-line-inactive-face)
+     label
      'tab buffer
      'local-map my/tab-line-click-map
      'keymap my/tab-line-click-map

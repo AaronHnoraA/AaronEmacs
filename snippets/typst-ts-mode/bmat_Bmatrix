@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Bmatrix
-# key: bmat
-# --
-mat(delim: "[",
-  $0
-)

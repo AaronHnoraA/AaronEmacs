@@ -1,6 +1,0 @@
-# -*- mode: snippet -*-
-# name: Part
-# key: part
-# --
-= $1
-${0}

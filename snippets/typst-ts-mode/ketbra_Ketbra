@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Ketbra
-# key: kb
-# --
-|${1:psi} chevron.r chevron.l ${2:phi}| $0

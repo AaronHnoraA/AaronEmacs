@@ -15,6 +15,55 @@
   "Last theme signature applied by `my/dashboard-apply-ui'.")
 (defvar my/chunlian--visibility-timer nil
   "Idle timer used to coalesce dashboard visibility checks.")
+(defvar my/file-icon-image-cache (make-hash-table :test #'equal)
+  "Cached image descriptors for custom file icons.")
+
+(defcustom my/aaronnote-icon-file
+  (expand-file-name "assets/icons/Aaronnote.svg" user-emacs-directory)
+  "SVG icon used for Markdown files."
+  :type 'file
+  :group 'appearance)
+
+(declare-function all-the-icons-fileicon "all-the-icons" (icon-name &rest args))
+(declare-function dashboard-icon-for-file "dashboard-widgets" (file &rest args))
+
+(defun my/file-icon-for-file (file &rest args)
+  "Return a custom icon for FILE, or nil.
+ARGS are passed to font icons.  The optional `:image-height' controls SVG
+height in pixels."
+  (let* ((extension (and file (downcase (or (file-name-extension file) ""))))
+         (image-height (or (plist-get args :image-height) 20))
+         (font-args
+          (let ((rest args)
+                result)
+            (while rest
+              (unless (eq (car rest) :image-height)
+                (setq result (append result (list (car rest) (cadr rest)))))
+              (setq rest (cddr rest)))
+            result)))
+    (pcase extension
+      ("lean"
+       (when (require 'all-the-icons nil t)
+         (apply #'all-the-icons-fileicon "lean" font-args)))
+      ("md"
+       (when (and (display-graphic-p)
+                  (image-type-available-p 'svg)
+                  (file-readable-p my/aaronnote-icon-file))
+         (propertize
+          " "
+          'display
+          (or (gethash image-height my/file-icon-image-cache)
+              (puthash image-height
+                       (create-image my/aaronnote-icon-file 'svg nil
+                                     :height image-height :ascent 'center)
+                       my/file-icon-image-cache)))))
+      (_ nil))))
+
+(defun my/dashboard-icon-for-file-a (orig-fn file &rest args)
+  "Use custom icons before calling Dashboard's ORIG-FN for FILE."
+  (or (apply #'my/file-icon-for-file file args)
+      (apply orig-fn file args)))
+
 ;; Emacs 31 rejects nil as a face attribute value; themes written for earlier
 ;; Emacs versions may still pass nil.  Convert nil → 'unspecified at the call
 ;; site so the "nil value is invalid" warning is never emitted.
@@ -145,6 +194,11 @@
   (interactive)
   (my/package-upgrade-all-noninteractive))
 
+(defun my/dashboard-initialize-full-frame-a (orig-fn &rest args)
+  "Run dashboard initialization in the frame's only ordinary window."
+  (delete-other-windows)
+  (apply orig-fn args))
+
 (use-package dashboard
   :ensure t
   :init
@@ -166,6 +220,10 @@
   (defconst homepage-url "https://git.pwo101.top/")
   (defconst stars-url (concat "https://github.com/AaronHnoraA/AaronEmacs" "/stargazers"))
   (defconst issue-url (concat "https://github.com/AaronHnoraA/AaronEmacs" "/issues/new"))
+  (advice-remove 'dashboard-initialize #'my/dashboard-initialize-full-frame-a)
+  (advice-add 'dashboard-initialize :around #'my/dashboard-initialize-full-frame-a)
+  (advice-remove 'dashboard-icon-for-file #'my/dashboard-icon-for-file-a)
+  (advice-add 'dashboard-icon-for-file :around #'my/dashboard-icon-for-file-a)
 
   :custom
   ;; Keep the dashboard banner in `etc/` with other local UI config.
@@ -356,9 +414,8 @@
 ;;; Cursor:
 
 (setopt cursor-type 'box
-        ;; 在 non-selected window 中也 展示 cursor,
-        ;; 但是 是 镂空的.
-        cursor-in-non-selected-windows t)
+        ;; Avoid a second, misleading cursor in inactive windows.
+        cursor-in-non-selected-windows nil)
 (setopt x-stretch-cursor t)  ; 在 TAB 字符上拉长 cursor.
 
 (blink-cursor-mode -1)

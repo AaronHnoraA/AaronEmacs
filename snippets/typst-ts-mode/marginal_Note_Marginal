@@ -1,7 +1,0 @@
-# -*- mode: snippet -*-
-# name: Note marginal comment
-# key: marginal
-# --
-#marginal[
-  $0
-]

@@ -89,3 +89,6 @@ __pycache__/
 
 # OS junk
 .DS_Store
+
+# Machine-local symlinks
+/.roam

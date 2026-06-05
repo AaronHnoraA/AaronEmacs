@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Angle Brackets
-# key: avg
-# --
-lr(chevron.l $1 chevron.r) $2

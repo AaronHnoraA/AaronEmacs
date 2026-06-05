@@ -1,5 +1,0 @@
-# -*- mode: snippet -*-
-# name: Functor
-# key: functor
-# --
-${1:F}: ${2:C} -> ${3:D} $0
