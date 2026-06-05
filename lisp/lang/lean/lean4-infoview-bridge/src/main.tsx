@@ -1,11 +1,6 @@
-import {
-  defaultInfoviewConfig,
-  renderInfoview,
-  type InfoviewActionKind,
-  type InfoviewConfig,
-} from '@leanprover/infoview'
-import type { InitializeResult } from 'vscode-languageserver-protocol'
-import { createEditorApi } from './editor-api'
+import { type InfoviewActionKind } from '@leanprover/infoview-api'
+import { createLeanOfficialInfoviewHost, type LeanOfficialInfoviewHost } from './lean-infoview-host'
+import { apiLean } from './api-lean'
 import '../node_modules/@leanprover/infoview/dist/index.css'
 import './style.css'
 
@@ -13,11 +8,9 @@ function installWebKitPolyfills() {
   const arrayProto = Array.prototype as unknown as {
     toSorted?: <T>(this: T[], compareFn?: (a: T, b: T) => number) => T[]
   }
-
   if (!arrayProto.toSorted) {
     Object.defineProperty(Array.prototype, 'toSorted', {
-      configurable: true,
-      writable: true,
+      configurable: true, writable: true,
       value<T>(this: T[], compareFn?: (a: T, b: T) => number): T[] {
         return [...this].sort(compareFn)
       },
@@ -26,8 +19,6 @@ function installWebKitPolyfills() {
 }
 
 installWebKitPolyfills()
-
-const editorApi = createEditorApi()
 
 document.body.classList.add('vscode-dark', 'lean-iv-body')
 
@@ -74,111 +65,105 @@ const serverStateEl = document.getElementById('lean-server-state')!
 const cursorStateEl = document.getElementById('lean-cursor-state')!
 const followButton = host.querySelector<HTMLButtonElement>('[data-action="follow"]')!
 
-// Mount official infoview inside the xwidget shell.
-const infoviewApi = renderInfoview(editorApi, infoviewRoot)
-
-let initialized = false
-let serverReady = false
-let pendingCursor: { uri: string; line: number; character: number } | null = null
-let currentCursor: { uri: string; line: number; character: number } | null = null
+let infoviewHost: LeanOfficialInfoviewHost | null = null
 let followCursor = true
 let paused = false
-let currentConfig: InfoviewConfig = loadConfig()
-
-function loadConfig(): InfoviewConfig {
-  try {
-    const raw = localStorage.getItem('lean.infoview.config')
-    return raw ? { ...defaultInfoviewConfig, ...JSON.parse(raw) } : defaultInfoviewConfig
-  } catch {
-    return defaultInfoviewConfig
-  }
-}
+let currentUri: string | null = null
 
 function displayUri(uri: string): string {
   try {
     const path = decodeURIComponent(new URL(uri).pathname)
     const parts = path.split('/').filter(Boolean)
     return parts.length > 0 ? parts[parts.length - 1] : uri
-  } catch {
-    return uri
-  }
+  } catch { return uri }
 }
 
-function updateStatus() {
-  if (!currentCursor) {
-    cursorStateEl.textContent = ':1:0'
-    return
-  }
-  cursorStateEl.textContent =
-    `${displayUri(currentCursor.uri)}:${currentCursor.line + 1}:${currentCursor.character}`
-}
-
-async function pushCursor(cursor: { uri: string; line: number; character: number }) {
-  currentCursor = cursor
-  updateStatus()
-  if (!followCursor) return
-  const location = {
-    uri: cursor.uri,
-    range: {
-      start: { line: cursor.line, character: cursor.character },
-      end: { line: cursor.line, character: cursor.character },
-    },
-  }
-  await infoviewApi.changedCursorLocation(location).catch((err) => {
-    console.warn('changedCursorLocation failed', err)
-  })
-}
-
-async function initializeAtCursor(cursor: { uri: string; line: number; character: number }) {
-  if (initialized) {
-    await pushCursor(cursor)
-    return
-  }
-  initialized = true
-  const location = {
-    uri: cursor.uri,
-    range: {
-      start: { line: cursor.line, character: cursor.character },
-      end: { line: cursor.line, character: cursor.character },
-    },
-  }
-  await infoviewApi.initialize(location)
-  await pushCursor(cursor)
-}
-
-async function acceptCursor(cursor: { uri: string; line: number; character: number }) {
-  pendingCursor = cursor
-  currentCursor = cursor
-  updateStatus()
-  if (!serverReady) return
-  await initializeAtCursor(cursor)
-}
-
-function requestAction(kind: InfoviewActionKind) {
-  void infoviewApi.requestedAction({ kind }).catch((err) => {
-    console.warn(`infoview action failed: ${kind}`, err)
-  })
+function updateCursorState(uri: string, line: number, character: number) {
+  cursorStateEl.textContent = `${displayUri(uri)}:${line + 1}:${character}`
+  currentUri = uri
 }
 
 function setPaused(next: boolean) {
   paused = next
-  const button = host.querySelector<HTMLButtonElement>('[data-action="pause"]')
-  button?.classList.toggle('is-active', paused)
-  button?.querySelector('.codicon')?.classList.toggle('codicon-debug-continue', paused)
-  button?.querySelector('.codicon')?.classList.toggle('codicon-debug-pause', !paused)
-  if (button) {
-    button.title = paused ? 'Resume current state' : 'Pause current state'
-    button.setAttribute('aria-label', button.title)
+  const btn = host.querySelector<HTMLButtonElement>('[data-action="pause"]')
+  btn?.classList.toggle('is-active', paused)
+  btn?.querySelector('.codicon')?.classList.toggle('codicon-debug-continue', paused)
+  btn?.querySelector('.codicon')?.classList.toggle('codicon-debug-pause', !paused)
+  if (btn) {
+    btn.title = paused ? 'Resume current state' : 'Pause current state'
+    btn.setAttribute('aria-label', btn.title)
   }
 }
 
-async function applyConfig() {
-  await infoviewApi.changedInfoviewConfig(currentConfig).catch((err) => {
-    console.warn('changedInfoviewConfig failed', err)
-  })
+function requestAction(kind: InfoviewActionKind) {
+  infoviewHost?.requestAction(kind)
 }
 
-host.addEventListener('click', async (ev) => {
+// Reverse-channel callbacks: infoview → Emacs via standard LSP
+async function handleShowDocument(show: unknown) {
+  await fetch('/editor/show-document', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(show),
+  }).catch(() => {})
+}
+
+async function handleApplyEdit(edit: unknown) {
+  await fetch('/editor/apply-edit', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ edit }),
+  }).catch(() => {})
+}
+
+async function handleInsertText(
+  text: string,
+  kind: unknown,
+  pos?: unknown,
+) {
+  await fetch('/editor/insert-text', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, kind, pos }),
+  }).catch(() => {})
+}
+
+async function handleRestartFile(uri: string) {
+  await fetch('/editor/restart-file', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uri }),
+  }).catch(() => {})
+}
+
+// Mount infoview host
+infoviewHost = createLeanOfficialInfoviewHost(infoviewRoot, {
+  showDocument: handleShowDocument,
+  applyEdit: handleApplyEdit,
+  insertText: handleInsertText,
+  restartFile: handleRestartFile,
+  onReady: () => { serverStateEl.textContent = 'ready' },
+  onContentChange: () => {},
+})
+
+// Status updates
+apiLean.onStatus((raw) => {
+  const data = raw as { kind?: string; message?: string }
+  if (data.kind === 'Ready' || data.kind === 'Normal') {
+    serverStateEl.textContent = 'ready'
+  } else if (data.kind === 'Error' || data.kind === 'Inactive') {
+    serverStateEl.textContent = 'stopped'
+  } else {
+    serverStateEl.textContent = 'starting'
+  }
+})
+
+// Cursor from Emacs
+apiLean.onCursor((raw) => {
+  const cursor = raw as { uri: string; line: number; character: number }
+  updateCursorState(cursor.uri, cursor.line, cursor.character)
+  if (!followCursor || paused) return
+  infoviewHost?.setLocation({ uri: cursor.uri, line: cursor.line, character: cursor.character })
+})
+
+// Toolbar
+host.addEventListener('click', (ev) => {
   const button = (ev.target as HTMLElement).closest<HTMLButtonElement>('.lean-tool')
   if (!button) return
   const action = button.dataset.action
@@ -193,55 +178,29 @@ host.addEventListener('click', async (ev) => {
     requestAction('toggleExpectedType')
   } else if (action === 'copy') {
     requestAction('copyToComment')
-  } else if (action === 'restart' && currentCursor?.uri) {
-    await editorApi.restartFile(currentCursor.uri)
+  } else if (action === 'restart' && currentUri) {
+    void handleRestartFile(currentUri)
   } else if (action === 'follow') {
     followCursor = !followCursor
     followButton.classList.toggle('is-active', followCursor)
     followButton.title = followCursor ? 'Follow Emacs cursor' : 'Infoview cursor follow is locked'
     followButton.setAttribute('aria-label', followButton.title)
-    if (followCursor && pendingCursor) await pushCursor(pendingCursor)
   }
 })
 
-// Forward bridge SSE events → InfoviewApi
-editorApi.onServerNotification(async (method, params) => {
-  if (method === 'lsp:ready') {
-    serverReady = true
-    serverStateEl.textContent = 'ready'
-    // LSP server initialized — kick off the infoview
-    await infoviewApi.serverRestarted(params as InitializeResult)
-    await applyConfig()
-    if (pendingCursor) await initializeAtCursor(pendingCursor)
-  } else if (method === 'emacs:cursor') {
-    const cursor = params as { uri: string; line: number; character: number }
-    await acceptCursor(cursor)
-  } else if (method.startsWith('client:')) {
-    await infoviewApi
-      .sentClientNotification(method.slice('client:'.length), params)
-      .catch(() => {})
-  } else {
-    await infoviewApi.gotServerNotification(method, params).catch(() => {})
-  }
-})
-
-// Expose updateCursor for Emacs → xwidget-webkit-execute-script
-;(window as unknown as Record<string, unknown>).updateCursor = async (
+// Expose window.updateCursor for xwidget-webkit-execute-script fast path
+;(window as unknown as Record<string, unknown>).updateCursor = (
   uri: string,
   line: number,
   character: number,
 ) => {
-  await acceptCursor({ uri, line, character })
+  updateCursorState(uri, line, character)
+  if (!followCursor || paused) return
+  infoviewHost?.setLocation({ uri, line, character })
 }
 
-;(window as unknown as Record<string, unknown>).requestInfoviewAction = (kind: InfoviewActionKind) => {
-  requestAction(kind)
-}
-
-;(window as unknown as Record<string, unknown>).setInfoviewConfig = async (
-  patch: Partial<InfoviewConfig>,
+;(window as unknown as Record<string, unknown>).requestInfoviewAction = (
+  kind: InfoviewActionKind,
 ) => {
-  currentConfig = { ...currentConfig, ...patch }
-  localStorage.setItem('lean.infoview.config', JSON.stringify(currentConfig))
-  await applyConfig()
+  requestAction(kind)
 }

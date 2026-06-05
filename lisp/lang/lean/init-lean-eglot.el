@@ -728,5 +728,22 @@ Use `note' to show all Lean informational output, including `#check' results."
       (advice-add 'eglot--flymake-handle-push
                   :around #'lean--eglot-flymake-handle-push-a))))
 
+;; ── lean/restartFile custom notification (from infoview proxy) ────────────────
+;; The lean-proxy.mjs sends a lean/restartFile notification to Eglot when the
+;; infoview's "restart file" button is clicked.  Eglot receives it as a
+;; server→client notification and dispatches it here.
+
+(cl-defmethod eglot-handle-notification
+  (server (_method (eql lean/restartFile)) &key uri)
+  "Handle a lean/restartFile notification from the infoview proxy.
+Finds the buffer for URI and calls `lean-refresh-file-dependencies'."
+  (when-let* ((path (ignore-errors (eglot-uri-to-path uri)))
+              (buf  (find-buffer-visiting path)))
+    (with-current-buffer buf
+      (when (fboundp 'lean-refresh-file-dependencies)
+        (lean-refresh-file-dependencies))
+      (when (fboundp 'lean-dev-log)
+        (lean-dev-log "lean/restartFile notification: uri=%s" uri)))))
+
 (provide 'init-lean-eglot)
 ;;; init-lean-eglot.el ends here

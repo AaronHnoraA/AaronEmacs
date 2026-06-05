@@ -59,6 +59,8 @@
 (declare-function lean-iv-teardown-h "init-lean-infoview")
 (declare-function lean-iv-toggle "init-lean-infoview")
 (declare-function lean-iv-restart "init-lean-infoview")
+(declare-function lean-iv-node-p "init-lean-infoview")
+(defvar lean--iv--script-dir)
 (declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
 (declare-function my/flymake-diagnostic-at-point-mode "init-lsp" (&optional arg))
 (declare-function my/problems-buffer "init-problems" ())
@@ -195,16 +197,60 @@ language server without user action."
 
 ;;; ── Eglot server contact ─────────────────────────────────────────────────────
 
+(defcustom lean-infoview-proxy-enabled t
+  "When non-nil, route Eglot through lean-proxy.mjs for infoview support.
+The proxy is a transparent JSON-RPC passthrough to lake serve; it also
+serves the official @leanprover/infoview over HTTP+SSE so a single Lean
+LSP session drives both editing and the xwidget infoview.
+Set to nil for a direct, no-proxy lake serve connection."
+  :type 'boolean
+  :group 'lean)
+
+(defun lean--proxy-script ()
+  "Return the absolute path to lean-proxy.mjs, or nil if not found."
+  (let ((script (expand-file-name "lean-proxy.mjs" lean--iv--script-dir)))
+    (when (file-exists-p script) script)))
+
+(defun lean--proxy-available-p ()
+  "Return non-nil if the infoview proxy can be used for the current buffer."
+  (and lean-infoview-proxy-enabled
+       (executable-find "node")
+       (lean--proxy-script)
+       (lean-iv-node-p)           ; dist/index.html must be built
+       (not (file-remote-p default-directory))))
+
+(defun lean--proxy-port-file (root)
+  "Return the port-file path for ROOT's proxy instance."
+  (let* ((hash (md5 (expand-file-name root)))
+         (dir  (expand-file-name "lean" (or (bound-and-true-p no-littering-var-directory)
+                                             (expand-file-name "var" user-emacs-directory)))))
+    (expand-file-name (format "infoview-%s.json" (substring hash 0 12)) dir)))
+
 (defun lean--server-contact (&optional _interactive _project)
   "Return the Lean LSP server command for the current buffer.
-Accepts the optional INTERACTIVE and PROJECT args that eglot passes to
-function contacts in `eglot-server-programs' (both are ignored here).
-Uses `lake serve' inside a Lake project, else `lean --server'.
-Safe over TRAMP (no version-probe subprocess)."
-  (if (locate-dominating-file (or buffer-file-name default-directory ".")
-                              #'lean-root-dir-p)
-      '("lake" "serve")
-    (list (or (executable-find "lean") "lean") "--server")))
+When `lean-infoview-proxy-enabled' is non-nil and the proxy script and
+dist/ bundle are present, routes Eglot through lean-proxy.mjs so the
+infoview shares the single Lean LSP session.  Falls back to a direct
+lake serve / lean --server connection otherwise."
+  (let* ((root    (file-name-as-directory
+                   (expand-file-name (lean-project-root))))
+         (in-lake (locate-dominating-file
+                   (or buffer-file-name default-directory ".") #'lean-root-dir-p))
+         (direct  (if in-lake
+                      '("lake" "serve")
+                    (list (or (executable-find "lean") "lean") "--server"))))
+    (if (lean--proxy-available-p)
+        (let ((script    (lean--proxy-script))
+              (port-file (lean--proxy-port-file root))
+              (downstream direct))
+          (lean-dev-log "server-contact: proxy root=%s port-file=%s downstream=%S"
+                        root port-file downstream)
+          `("node" ,script
+            "--root"      ,root
+            "--port-file" ,port-file
+            "--"          ,@downstream))
+      (lean-dev-log "server-contact: direct contact=%S" direct)
+      direct)))
 
 ;;; ── Mode-line progress ───────────────────────────────────────────────────────
 
