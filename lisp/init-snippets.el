@@ -43,6 +43,22 @@
     (dolist (mode (if (listp extra-modes) extra-modes (list extra-modes)))
       (yas-activate-extra-mode mode))))
 
+(defun my/yas--trim-fieldless-trailing-newline (args)
+  "Filter-args advice for `yas-expand-snippet'.
+Strip a single trailing newline from field-less templates — those with no
+user-interactive fields ($1, $2, …).  The newline is a Unix file artifact,
+not intentional content.  Templates with user fields are left untouched."
+  (let ((content (car args)))
+    (if (and (stringp content)
+             (string-suffix-p "\n" content)
+             (not (string-suffix-p "\n\n" content))
+             (not (string-match-p "\\$\\(?:{?[1-9]\\)" content)))
+        (cons (substring content 0 -1) (cdr args))
+      args)))
+
+(advice-add 'yas-expand-snippet :filter-args
+            #'my/yas--trim-fieldless-trailing-newline)
+
 (defun my/yas-org-cleanup-trailing-newline ()
   "Silently delete a trailing newline left by a snippet at point.
 Replicates the per-snippet `inhibit-modification-hooks' cleanup that was

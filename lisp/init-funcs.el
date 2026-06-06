@@ -302,10 +302,48 @@ When already at an inner start, try to escape to the parent delimiter."
       (user-error "No backward opening delimiter found"))))
 
 (defun my/backward-delimiter-or-snippet-dwim ()
-  "Prefer snippet field retreat, then delimiter backward jump."
+  "Prefer snippet field retreat, then language-specific or delimiter backward jump."
   (interactive)
   (if (my/snippet-active-p)
       (my/snippet-previous-field-dwim)
+    (my/jump-backward-dwim)))
+
+;;; ── Per-language jump registry ───────────────────────────────────────────────
+
+(defvar my/jump-handler-alist nil
+  "Alist of (MODES . PLIST) for per-language jump handlers.
+MODES is a major-mode symbol or list of symbols.  PLIST keys: :forward FN,
+:backward FN.  Registered via `my/register-jump-handler'.")
+
+(defun my/register-jump-handler (modes &rest props)
+  "Register :forward / :backward jump functions for MODES.
+MODES may be a single major-mode symbol or a list.  Replaces any prior
+registration whose MODES list is `equal' to the new one."
+  (let ((modes (if (listp modes) modes (list modes))))
+    (setq my/jump-handler-alist
+          (cons (cons modes props)
+                (cl-remove-if
+                 (lambda (entry) (equal (car entry) modes))
+                 my/jump-handler-alist)))))
+
+(defun my/jump--handler (key)
+  "Return the :forward or :backward handler for the current buffer, or nil."
+  (cl-loop for (modes . plist) in my/jump-handler-alist
+           when (apply #'derived-mode-p modes)
+           return (plist-get plist key)))
+
+(defun my/jump-forward-dwim ()
+  "Language-specific forward jump, else structural delimiter jump."
+  (interactive)
+  (if-let* ((fn (my/jump--handler :forward)))
+      (funcall fn)
+    (my/forward-delimiter-dwim)))
+
+(defun my/jump-backward-dwim ()
+  "Language-specific backward jump, else structural delimiter jump."
+  (interactive)
+  (if-let* ((fn (my/jump--handler :backward)))
+      (funcall fn)
     (my/backward-delimiter-dwim)))
 
 (defun my/evil-define-key (state keymap key command)

@@ -12,6 +12,7 @@
 (declare-function my/snippet-active-p "init-funcs" ())
 (declare-function my/snippet-next-field-dwim "init-funcs" ())
 (declare-function my/forward-delimiter-dwim "init-funcs" ())
+(declare-function my/jump-forward-dwim "init-funcs" ())
 (declare-function my/backward-delimiter-or-snippet-dwim "init-funcs" ())
 
 (defgroup my/copilot nil
@@ -105,7 +106,7 @@ Modes in `my/copilot-deferred-modes' start only after editor idle time."
        (copilot--overlay-visible)))
 
 (defun my/forward-delimiter-or-copilot-dwim ()
-  "Prefer active snippet/Copilot actions, then jump forward by delimiter."
+  "Prefer active snippet/Copilot actions, then language-specific or delimiter jump."
   (interactive)
   (cond
    ((my/snippet-active-p)
@@ -114,10 +115,10 @@ Modes in `my/copilot-deferred-modes' start only after editor idle time."
          (my/copilot-completion-visible-p))
     (copilot-accept-completion))
    (t
-    (my/forward-delimiter-dwim))))
+    (my/jump-forward-dwim))))
 
 (defun my/forward-delimiter-or-copilot-by-word-dwim ()
-  "Prefer snippet field advance, then Copilot accept-by-word, then jump."
+  "Prefer snippet field advance, then Copilot accept-by-word, then language-specific or delimiter jump."
   (interactive)
   (cond
    ((my/snippet-active-p)
@@ -129,10 +130,10 @@ Modes in `my/copilot-deferred-modes' start only after editor idle time."
          (my/copilot-completion-visible-p))
     (copilot-accept-completion))
    (t
-    (my/forward-delimiter-dwim))))
+    (my/jump-forward-dwim))))
 
 (defun my/forward-delimiter-or-copilot-to-char-dwim ()
-  "Prefer snippet field advance, then Copilot accept-to-char, then jump."
+  "Prefer snippet field advance, then Copilot accept-to-char, then language-specific or delimiter jump."
   (interactive)
   (cond
    ((my/snippet-active-p)
@@ -144,7 +145,7 @@ Modes in `my/copilot-deferred-modes' start only after editor idle time."
          (my/copilot-completion-visible-p))
     (copilot-accept-completion))
    (t
-    (my/forward-delimiter-dwim))))
+    (my/jump-forward-dwim))))
 
 (defconst my/copilot-forward-delimiter-keys '("M-]" "M-】" "M-］" "M-」" "M-〕")
   "Keys that accept Copilot or move forward by delimiter.

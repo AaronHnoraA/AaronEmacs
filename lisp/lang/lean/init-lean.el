@@ -565,6 +565,7 @@ while using eglot (not lsp-mode) as the language server backend."
   ;; Sibling modules — loaded here so they are ready before eglot connects.
   (require 'init-lean-eglot    nil t)
   (require 'init-lean-infoview nil t)
+  (require 'init-lean-jump     nil t)
   ;; Projectile may install its project backend after init-lean loads.  Re-pin
   ;; the Lean finder before Eglot asks project.el for an LSP root.
   (lean--install-project-finder)
