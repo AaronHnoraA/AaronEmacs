@@ -1970,7 +1970,7 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
 .cm-editor .cm-note-code-body {
   padding: 0.55rem 0.65rem;
   color: var(--aaron-ink, #1e1a16);
-  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .cm-editor .cm-note-code-body pre {
