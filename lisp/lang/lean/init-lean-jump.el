@@ -10,6 +10,12 @@
 ;;  backward: find the start of the current same-goal run within bounds;
 ;;            if already at the start, jump to the previous run's start.
 ;;
+;; Syntactic fallback (lean-jump-syntactic-fallback):
+;;  When goal info is nil at point (broken tactic, e.g. `rw [a, broken, b]'),
+;;  the goal-based search cannot proceed.  The fallback steps through tactic
+;;  argument separators (`,', `[', `]', `;', newline) using text-only search,
+;;  so M-]/M-[ remain usable while debugging broken commands.
+;;
 ;; Scoping: every search is capped to the current Lean declaration
 ;; (theorem / lemma / def / example / …).  This prevents the exponential
 ;; probing from escaping across declarations or into the file header when
@@ -47,6 +53,13 @@ Set to t for sub-expression granularity (stops at every identifier)."
 (defcustom lean-jump-request-timeout 1.5
   "Seconds to wait for each LSP request when probing."
   :type 'number
+  :group 'lean-jump)
+
+(defcustom lean-jump-syntactic-fallback t
+  "When non-nil, fall back to tactic-argument stepping when goal info is
+unavailable (e.g. a broken `rw'/`simp' lemma).
+Keeps M-]/M-[ usable while debugging broken tactics."
+  :type 'boolean
   :group 'lean-jump)
 
 ;;; ── Cache ────────────────────────────────────────────────────────────────────
@@ -129,14 +142,16 @@ Both valid and nil results are cached for the current modification tick."
 ;;; ── Boundary search ──────────────────────────────────────────────────────────
 
 (defun lean-jump--find-forward (base-fp start end)
-  "Return the first position in (START END] where goal differs from BASE-FP.
-Nil-fingerprint positions (server error/busy) are skipped — they do not
-count as a boundary.  Returns nil when no boundary is found."
-  (let ((step    1)
+  "Return the first position in (START END) where goal differs from BASE-FP.
+END is exclusive (start of next declaration or point-max); the search never
+probes or returns END itself.  Nil-fingerprint positions are skipped.
+Returns nil when no boundary is found."
+  (let ((last    (1- end))   ; last valid position inside this declaration
+        (step    1)
         (probe   start)
         (changed nil))
-    (while (and (not changed) (<= (+ probe step) end))
-      (setq probe (min end (+ probe step)))
+    (while (and (not changed) (< probe last))
+      (setq probe (min last (+ probe step)))
       (let ((fp (lean-jump--info-at probe)))
         (when (and fp (not (equal fp base-fp)))
           (setq changed probe)))
@@ -150,11 +165,12 @@ count as a boundary.  Returns nil when no boundary is found."
             (if (and fp (not (equal fp base-fp)))
                 (setq hi mid)
               (setq lo mid))))
-        ;; Land on the first non-whitespace character of the new region.
+        ;; Land on the first non-whitespace character of the new region,
+        ;; clamped to last so we never land on the next declaration.
         (save-excursion
           (goto-char hi)
           (skip-chars-forward " \t\n")
-          (min (point) end))))))
+          (min (point) last))))))
 
 (defun lean-jump--run-start (fp pos beg)
   "Return the leftmost position >= BEG in POS's same-fingerprint run.
@@ -184,44 +200,107 @@ Returns POS itself when no backward boundary is found."
       ;; No boundary found within [beg..pos]: run extends to beg.
       (max beg probe))))
 
+;;; ── Syntactic fallback (text-only, no LSP) ───────────────────────────────────
+
+(defconst lean-jump--sep-re "[,;]\\|\\[\\|\\]\\|\n"
+  "Regexp matching tactic argument separators used by the syntactic fallback.")
+
+(defun lean-jump--syntactic-forward (pos end)
+  "Return the next tactic-argument start after POS, within END.
+Searches for a separator (`,', `;', `[', `]', newline) then skips whitespace
+to land on a non-whitespace character.  Returns nil when no such character
+exists within END (e.g. after the closing `]' of a tactic list)."
+  (save-excursion
+    (goto-char pos)
+    (when (re-search-forward lean-jump--sep-re end t)
+      (skip-chars-forward " \t\n" end)
+      (let* ((dest (point))
+             (ch   (char-after)))
+        (when (and (> dest pos) (<= dest end)
+                   ch (not (memq ch '(?\s ?\t ?\n ?\r))))
+          dest)))))
+
+(defun lean-jump--syntactic-backward (pos beg)
+  "Return the previous tactic-argument start before POS, within BEG.
+If not at the current token start, returns that start.
+If already at a token start, returns the previous token's start."
+  (let ((cur (save-excursion
+               (goto-char pos)
+               (if (re-search-backward lean-jump--sep-re beg t)
+                   (progn (forward-char 1)
+                          (skip-chars-forward " \t\n")
+                          (point))
+                 (goto-char beg)
+                 (skip-chars-forward " \t\n")
+                 (point)))))
+    (cond
+     ((> cur pos) nil)
+     ;; Not at token start yet → go there.
+     ((< cur pos) (when (>= cur beg) cur))
+     ;; Already at token start: find the separator before this token,
+     ;; then the separator before the previous token.
+     (t
+      (save-excursion
+        (goto-char pos)
+        (when (re-search-backward lean-jump--sep-re beg t)
+          (let ((dest
+                 (if (re-search-backward lean-jump--sep-re beg t)
+                     (progn (forward-char 1)
+                            (skip-chars-forward " \t\n")
+                            (point))
+                   (goto-char beg)
+                   (skip-chars-forward " \t\n")
+                   (point))))
+            (when (and (>= dest beg) (< dest pos)) dest))))))))
+
 ;;; ── Interactive commands ─────────────────────────────────────────────────────
 
 (defun lean-jump-forward ()
-  "Jump to the next position where the Lean goal changes, within the declaration."
+  "Jump to the next position where the Lean goal changes, within the declaration.
+Falls back to syntactic argument stepping when goal info is unavailable."
   (interactive)
   (unless (eglot-managed-p)
     (user-error "No Lean LSP server connected"))
   (let* ((pos    (point))
          (bounds (lean-jump--decl-bounds))
          (end    (cdr bounds))
-         (fp     (lean-jump--info-at pos)))
-    (unless fp
-      (user-error "No Lean goal info at point (incomplete tactic or error)"))
-    (if-let* ((dest (lean-jump--find-forward fp pos end)))
-        (goto-char dest)
-      (user-error "No goal change found forward in this declaration"))))
+         (last   (1- end))
+         (fp     (lean-jump--info-at pos))
+         (dest   (and fp (lean-jump--find-forward fp pos end))))
+    (cond
+     (dest (goto-char dest))
+     ((and lean-jump-syntactic-fallback
+           (setq dest (lean-jump--syntactic-forward pos last)))
+      (goto-char dest))
+     (fp (user-error "No goal change found forward in this declaration"))
+     (t  (user-error "No Lean goal info at point (incomplete tactic or error)")))))
 
 (defun lean-jump-backward ()
-  "Jump to the start of the previous Lean goal region, within the declaration."
+  "Jump to the start of the previous Lean goal region, within the declaration.
+Falls back to syntactic argument stepping when goal info is unavailable."
   (interactive)
   (unless (eglot-managed-p)
     (user-error "No Lean LSP server connected"))
   (let* ((pos    (point))
          (bounds (lean-jump--decl-bounds))
          (beg    (car bounds))
-         (fp     (lean-jump--info-at pos)))
-    (unless fp
-      (user-error "No Lean goal info at point (incomplete tactic or error)"))
-    (let ((run-start (lean-jump--run-start fp pos beg)))
-      (if (< run-start pos)
-          ;; Not at node start yet → go there.
-          (goto-char run-start)
-        ;; Already at node start → find the previous node.
-        (let* ((prev    (max beg (1- run-start)))
-               (prev-fp (lean-jump--info-at prev)))
-          (if (and prev-fp (not (equal prev-fp fp)))
-              (goto-char (lean-jump--run-start prev-fp prev beg))
-            (user-error "No goal change found backward in this declaration")))))))
+         (fp     (lean-jump--info-at pos))
+         (dest
+          (when fp
+            (let ((run-start (lean-jump--run-start fp pos beg)))
+              (if (< run-start pos)
+                  run-start
+                (let* ((prev    (max beg (1- run-start)))
+                       (prev-fp (lean-jump--info-at prev)))
+                  (when (and prev-fp (not (equal prev-fp fp)))
+                    (lean-jump--run-start prev-fp prev beg))))))))
+    (cond
+     (dest (goto-char dest))
+     ((and lean-jump-syntactic-fallback
+           (setq dest (lean-jump--syntactic-backward pos beg)))
+      (goto-char dest))
+     (fp (user-error "No goal change found backward in this declaration"))
+     (t  (user-error "No Lean goal info at point (incomplete tactic or error)")))))
 
 ;;; ── Registration ─────────────────────────────────────────────────────────────
 

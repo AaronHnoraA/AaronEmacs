@@ -492,8 +492,8 @@ resolved using the same note lookup path."
                (plist-get entry :title)
                (plist-get entry :path)
                (plist-get entry :summary)
-               (string-join (or (plist-get entry :aliases) nil) " ")
-               (string-join (or (plist-get entry :tags) nil) " ")))
+               (string-join (seq-filter #'stringp (or (plist-get entry :aliases) nil)) " ")
+               (string-join (seq-filter #'stringp (or (plist-get entry :tags) nil)) " ")))
    " "))
 
 (defun my/aaronnote-roam--read-note (prompt &optional entries)
@@ -506,19 +506,19 @@ resolved using the same note lookup path."
                 prompt
                 (lambda (string pred action)
                   (if (eq action 'metadata)
-                      '(metadata
+                      `(metadata
                         (annotation-function
-                         . (lambda (candidate)
-                             (when-let* ((entry (cdr (assoc candidate table))))
-                               (let ((tags (plist-get entry :tags))
-                                     (backlinks (length (or (plist-get entry :backlinks) nil))))
-                                 (concat
-                                  "  "
-                                  (or (plist-get entry :title) "")
-                                  (when tags
-                                    (concat "  #" (string-join tags " #")))
-                                  (when (> backlinks 0)
-                                    (format " ←%d" backlinks))))))))
+                         . ,(lambda (candidate)
+                              (when-let* ((entry (cdr (assoc candidate table))))
+                                (let ((tags (plist-get entry :tags))
+                                      (backlinks (length (or (plist-get entry :backlinks) nil))))
+                                  (concat
+                                   "  "
+                                   (or (plist-get entry :title) "")
+                                   (when-let* ((strtags (seq-filter #'stringp tags)))
+                                     (concat "  #" (string-join strtags " #")))
+                                   (when (> backlinks 0)
+                                     (format " ←%d" backlinks))))))))
                     (complete-with-action action table string pred)))
                 nil t)))
     slug))
@@ -536,19 +536,20 @@ resolved using the same note lookup path."
      prompt
      (lambda (string pred action)
        (if (eq action 'metadata)
-           '(metadata
+           `(metadata
              (annotation-function
-              . (lambda (candidate)
-                  (when-let* ((record (cdr (assoc candidate table))))
-                    (let ((note (plist-get record :note)))
-                      (concat
-                       "  "
-                       (or (plist-get record :title) "")
-                       (when-let* ((path (or (my/aaronnote-roam--note-field note "path")
-                                             (my/aaronnote-roam--note-field note "link"))))
-                         (concat "  " path))
-                       (when-let* ((tags (my/aaronnote-roam--note-list-field note "tags")))
-                         (concat "  #" (string-join tags " #")))))))))
+              . ,(lambda (candidate)
+                   (when-let* ((record (cdr (assoc candidate table))))
+                     (let ((note (plist-get record :note)))
+                       (concat
+                        "  "
+                        (or (plist-get record :title) "")
+                        (when-let* ((path (or (my/aaronnote-roam--note-field note "path")
+                                              (my/aaronnote-roam--note-field note "link"))))
+                          (concat "  " path))
+                        (when-let* ((tags (seq-filter #'stringp
+                                                      (my/aaronnote-roam--note-list-field note "tags"))))
+                          (concat "  #" (string-join tags " #")))))))))
          (complete-with-action action candidates string pred)))
      nil t)))
 
@@ -2916,7 +2917,8 @@ With prefix argument FULL, force a full roam-db rebuild."
     (concat (or prefix "")
             (format "%-38s %s" title (plist-get record :id))
             (when path (concat "  " path))
-            (when tags (concat "  #" (string-join tags " #"))))))
+            (when-let* ((strtags (seq-filter #'stringp tags)))
+              (concat "  #" (string-join strtags " #"))))))
 
 (defun my/aaronnote-roam-select--render-header (title)
   "Render selector TITLE and help."
@@ -3280,7 +3282,7 @@ canonical `roam://note-id#tag' target."
                              (plist-get record :id))
                             (gethash "backlinks" note)))))
       (concat "  "
-              (if tags (string-join tags ",") "")
+              (if tags (string-join (seq-filter #'stringp tags) ",") "")
               (when (> bls 0) (format " ←%d" bls))))))
 
 ;; Auto-update DB on save
