@@ -58,7 +58,7 @@ import {
   readCursorPositions,
   touchCursorPosition,
 } from "./server/lib/session.mjs";
-import { handleCopilotRequest } from "./server/lib/copilot.mjs";
+import { handleCopilotRequest, shutdownCopilot } from "./server/lib/copilot.mjs";
 import { runExternalProseChecks } from "./server/lib/prose-check.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -116,6 +116,19 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   process.stderr.write(`[aaronnote-web] unhandledRejection: ${reason?.stack || reason}\n`);
 });
+
+async function shutdown() {
+  clearInterval(sseHeartbeatInterval);
+  for (const res of eventClients) {
+    try { res.end(); } catch {}
+  }
+  eventClients.clear();
+  server.close();
+  try { await shutdownCopilot(); } catch {}
+  process.exit(0);
+}
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
 
 const MIME = {
   ".css": "text/css; charset=utf-8",
@@ -241,18 +254,28 @@ async function notesListPayload(force = false) {
   return { type: "notes", ...await notesIndexPayload(), root: noteRoot };
 }
 
+function roamSyncStats(index) {
+  const noteList = index.notes || [];
+  return {
+    noteCount: noteList.length,
+    linkCount: noteList.reduce((sum, n) => sum + (n.refs?.length || 0), 0),
+    tagCount: new Set(noteList.flatMap(n => n.tags || [])).size,
+    dirCount: (index.directories || []).length,
+  };
+}
+
 async function roamSyncPayload(reload = false) {
   if (reload) markNotesDirty();
   const notes = await syncRoamDb();
   const index = await notesIndexPayload(notes);
-  return { type: "notes", ...index, root: noteRoot, db: join(noteRoot, "roam.db") };
+  return { type: "notes", ...index, stats: roamSyncStats(index), root: noteRoot, db: join(noteRoot, "roam.db") };
 }
 
 async function roamSyncFullPayload() {
   markNotesDirty();
   const notes = await syncRoamDb(null, { mode: "full" });
   const index = await notesIndexPayload(notes);
-  return { type: "notes", ...index, root: noteRoot, db: join(noteRoot, "roam.db") };
+  return { type: "notes", ...index, stats: roamSyncStats(index), root: noteRoot, db: join(noteRoot, "roam.db") };
 }
 
 async function templatesPayload(force = false) {

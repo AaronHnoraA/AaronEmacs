@@ -3782,6 +3782,13 @@ function getCopilotClient() {
   return copilotClient;
 }
 
+export async function shutdownCopilot() {
+  if (copilotClient) {
+    copilotClient.stop();
+    copilotClient = null;
+  }
+}
+
 export async function handleCopilotRequest(action, body = {}) {
   if (action === "log") {
     if (body?.record === true) {

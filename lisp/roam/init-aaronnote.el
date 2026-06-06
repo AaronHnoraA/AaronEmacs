@@ -14,6 +14,7 @@
 
 (declare-function my/open-xwidget-url "init-browser" (url &optional reuse-selected))
 (declare-function my/appine-open-url "init-appine" (url))
+(declare-function my/appine-kill-all "init-appine" ())
 (declare-function my/appine--tab-forget "init-appine" (url))
 (declare-function my/appine--tab-reset "init-appine" ())
 (declare-function my/appine--switch-to-tab-index "init-appine" (target-index))
@@ -57,6 +58,15 @@
   :type '(choice (const :tag "Appine" appine)
                  (const :tag "xwidget-webkit" xwidget))
   :group 'my/aaronnote)
+
+(defcustom my/aaronnote-web-port 50815
+  "Fixed port for the Aaronnote web host.
+Set to 0 to let the OS pick a random port (breaks cross-session Appine tabs)."
+  :type 'integer
+  :group 'my/aaronnote)
+
+(defvar my/aaronnote--last-sync-stats nil
+  "String summary from the last successful Roam DB sync, or nil.")
 
 (defvar my/aaronnote--process nil
   "Running Aaronnote web-host child process, or nil.")
@@ -110,6 +120,10 @@
       (push callback my/aaronnote--ready-callbacks))
     (unless (and my/aaronnote--process
                  (process-live-p my/aaronnote--process))
+      (when (fboundp 'my/appine-kill-all)
+        (ignore-errors (my/appine-kill-all)))
+      (when (fboundp 'my/appine--tab-reset)
+        (my/appine--tab-reset))
       (my/aaronnote--start-server)
       (when my/aaronnote--ready-watchdog
         (cancel-timer my/aaronnote--ready-watchdog))
@@ -123,8 +137,13 @@
   (unless (file-directory-p my/aaronnote--web-dir)
     (user-error "Aaronnote: built web app not found at %s; run `npm run build' in %s"
                 my/aaronnote--web-dir my/aaronnote--runtime-root))
-  (when (and my/aaronnote--process (process-live-p my/aaronnote--process))
-    (delete-process my/aaronnote--process))
+  (let ((old-proc my/aaronnote--process))
+    (when (and old-proc (process-live-p old-proc))
+      (ignore-errors (signal-process old-proc 'SIGTERM))
+      (run-at-time 1.5 nil
+        (lambda ()
+          (when (process-live-p old-proc)
+            (delete-process old-proc))))))
   (setq my/aaronnote--process nil
         my/aaronnote--port nil
         my/aaronnote--ready nil)
@@ -145,6 +164,7 @@
             (format "AARONNOTE_STATE_DIR=%s" (expand-file-name my/aaronnote--state-root))
             (format "AARONNOTE_SNIPPETS_ROOT=%s" (expand-file-name my/aaronnote--snippets-root))
             (format "AARONNOTE_TEMPLATES_ROOT=%s" (expand-file-name my/aaronnote--templates-root))
+            (format "AARONNOTE_WEB_PORT=%d" my/aaronnote-web-port)
             (when copilot-server
               (format "AARONNOTE_COPILOT_LANGUAGE_SERVER=%s"
                       (expand-file-name copilot-server)))))
@@ -309,7 +329,7 @@ tab registry stale), so trusting a remembered index would silently no-op."
     (my/aaronnote--track-app-buffer buffer file)
     (with-current-buffer buffer
       (setq-local mode-line-format nil)
-      (setq-local header-line-format nil)
+      (setq-local header-line-format '(:eval (my/aaronnote--header-line)))
       (setq-local cursor-type nil)
       (setq buffer-read-only t))
     (set-window-buffer (selected-window) buffer)
@@ -317,16 +337,17 @@ tab registry stale), so trusting a remembered index would silently no-op."
     ;; repeated opens (after a native toolbar close) do not accumulate.
     (when (and force-new norm-url (fboundp 'my/appine--tab-forget))
       (my/appine--tab-forget norm-url))
-    (if existing-idx
-        (when (fboundp 'my/appine--switch-to-tab-index)
-          (my/appine--switch-to-tab-index existing-idx))
-      (with-current-buffer buffer
-        (my/appine-open-url url)))
-    (when (fboundp 'appine-focus)
-      (run-at-time 0.05 nil
-                   (lambda ()
-                     (when (get-buffer-window buffer 'visible)
-                       (ignore-errors (appine-focus))))))))
+    (let ((is-new (not existing-idx)))
+      (if existing-idx
+          (when (fboundp 'my/appine--switch-to-tab-index)
+            (my/appine--switch-to-tab-index existing-idx))
+        (with-current-buffer buffer
+          (my/appine-open-url url)))
+      (when (fboundp 'appine-focus)
+        (run-at-time (if is-new 0.4 0.05) nil
+                     (lambda ()
+                       (when (get-buffer-window buffer 'visible)
+                         (ignore-errors (appine-focus)))))))))
 
 (defun my/aaronnote--appine-available-p ()
   "Return non-nil when Aaronnote can dispatch opens through Appine."
@@ -535,17 +556,129 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
   (when my/aaronnote--ready-watchdog
     (cancel-timer my/aaronnote--ready-watchdog)
     (setq my/aaronnote--ready-watchdog nil))
-  (when (and my/aaronnote--process (process-live-p my/aaronnote--process))
-    (delete-process my/aaronnote--process))
-  (setq my/aaronnote--process nil
-        my/aaronnote--port nil
-        my/aaronnote--ready nil
-        my/aaronnote--ready-callbacks nil)
+  (let ((proc my/aaronnote--process))
+    (setq my/aaronnote--process nil
+          my/aaronnote--port nil
+          my/aaronnote--ready nil
+          my/aaronnote--ready-callbacks nil)
+    (when (and proc (process-live-p proc))
+      (ignore-errors (signal-process proc 'SIGTERM))
+      (run-at-time 1.5 nil
+        (lambda ()
+          (when (process-live-p proc)
+            (delete-process proc))))))
   (when (fboundp 'my/appine--tab-reset)
     (my/appine--tab-reset))
   (message "Aaronnote web-host stopped."))
 
 (add-hook 'kill-emacs-hook #'my/aaronnote-stop)
+
+;;; API call — POST to /api and parse JSON response.
+
+(defun my/aaronnote--api-call (channel args callback)
+  "POST CHANNEL with ARGS to /api; parse JSON response and call CALLBACK."
+  (when my/aaronnote--ready
+    (let* ((url-request-method "POST")
+           (url-request-extra-headers '(("Content-Type" . "application/json")))
+           (url-request-data
+            (encode-coding-string
+             (json-encode `((channel . ,channel) (args . ,args)))
+             'utf-8)))
+      (url-retrieve
+       (my/aaronnote--server-url "/api")
+       (lambda (status)
+         (unwind-protect
+             (unless (plist-get status :error)
+               (goto-char (point-min))
+               (when (re-search-forward "^\r?\n" nil t)
+                 (condition-case err
+                     (funcall callback
+                              (json-parse-string
+                               (buffer-substring (point) (point-max))
+                               :object-type 'alist))
+                   (error
+                    (message "Aaronnote API parse error: %s"
+                             (error-message-string err))))))
+           (when (buffer-live-p (current-buffer))
+             (kill-buffer (current-buffer)))))
+       nil t t))))
+
+;;;###autoload
+(defun my/aaronnote-roam-sync ()
+  "Sync the Roam DB and show statistics in the minibuffer."
+  (interactive)
+  (unless my/aaronnote--ready
+    (user-error "Aaronnote: server not running"))
+  (message "Aaronnote: syncing Roam DB...")
+  (my/aaronnote--api-call
+   "aaronnote:api:notes:roam-sync" [t]
+   (lambda (result)
+     (let* ((stats (alist-get 'stats result))
+            (notes (or (alist-get 'noteCount stats) 0))
+            (links (or (alist-get 'linkCount stats) 0))
+            (tags  (or (alist-get 'tagCount stats) 0))
+            (dirs  (or (alist-get 'dirCount stats) 0)))
+       (setq my/aaronnote--last-sync-stats
+             (format "%d notes · %d links · %d tags · %d dirs"
+                     notes links tags dirs))
+       (message "Roam synced: %s" my/aaronnote--last-sync-stats)))))
+
+;;; Header-line for the Aaronnote app buffer.
+
+(defun my/aaronnote--header-line ()
+  "Return the header-line string for the Aaronnote app buffer."
+  (let* ((file (and (buffer-live-p my/aaronnote--app-buffer)
+                    (my/aaronnote-buffer-file my/aaronnote--app-buffer)))
+         (name (if file (file-name-nondirectory file) "Aaronnote"))
+         (status (cond
+                  ((not my/aaronnote--ready) " ○ offline")
+                  (my/aaronnote--last-sync-stats
+                   (format " ◉ %s" my/aaronnote--last-sync-stats))
+                  (t " ● ready"))))
+    (concat "  " (propertize name 'face 'mode-line-buffer-id) status)))
+
+;;; Dispatch transient.
+
+(defun my/aaronnote--dispatch-header ()
+  "Header string for the Aaronnote dispatch transient."
+  (let ((status (cond
+                 ((not my/aaronnote--ready)
+                  (propertize "offline" 'face 'error))
+                 (t (propertize (format "port %d" my/aaronnote--port)
+                                'face 'success))))
+        (sync (or my/aaronnote--last-sync-stats "not synced")))
+    (format "Aaronnote  [%s]  %s" status sync)))
+
+(with-eval-after-load 'transient
+  (transient-define-prefix my/aaronnote-dispatch ()
+    "Aaronnote note editor."
+    [:description my/aaronnote--dispatch-header
+     ["Note"
+      ("o" "open current note" my/aaronnote-open-current-note)
+      ("s" "save"              my/aaronnote-save)
+      ("r" "refresh"          my/aaronnote-refresh)
+      ("f" "focus editor"     my/aaronnote-focus)
+      ("e" "escape"           my/aaronnote-escape)]
+     ["Roam"
+      ("y" "sync DB"          my/aaronnote-roam-sync)
+      ("g" "roam graph"       my/aaronnote-roam-graph)]
+     ["Server"
+      ("." "stop server"      my/aaronnote-stop)]]))
+
+;;; Keybindings.
+
+;; Global: H-o opens the Aaronnote dispatch panel (o for "org notes").
+(general-define-key "H-o" #'my/aaronnote-dispatch)
+
+;; Appine buffer direct keys — override global H- bindings that are irrelevant
+;; when focused in the Aaronnote pane.
+(with-eval-after-load 'appine
+  (when (boundp 'appine-active-map)
+    (define-key appine-active-map (kbd "H-o") #'my/aaronnote-dispatch)
+    (define-key appine-active-map (kbd "H-s") #'my/aaronnote-save)
+    (define-key appine-active-map (kbd "H-r") #'my/aaronnote-refresh)
+    (define-key appine-active-map (kbd "H-y") #'my/aaronnote-roam-sync)
+    (define-key appine-active-map (kbd "H-g") #'my/aaronnote-roam-graph)))
 
 (provide 'init-aaronnote)
 ;;; init-aaronnote.el ends here
