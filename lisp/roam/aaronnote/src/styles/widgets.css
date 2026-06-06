@@ -33,7 +33,7 @@
   overflow: hidden;
   border: none;
   outline: none;
-  font: 17px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 17px/1.65 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
   background: transparent;
   color: inherit;
   white-space: pre-wrap;
@@ -110,7 +110,7 @@
 
 /* Code block lines — monospace background */
 .cm-editor .cm-md-code-block {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-size: 0.875em;
   background: var(--aaron-code-bg, #f6f8fa);
   padding-left: 0.5em;
@@ -190,7 +190,7 @@
 }
 .cm-editor .cm-strike { text-decoration: line-through; }
 .cm-editor .cm-inline-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-size: 0.86em;
   padding: 0.12em 0.34em;
   background: var(--aaron-paper-soft, #f6f1e8);
@@ -1958,7 +1958,7 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
   padding: 0.32rem 0.55rem;
   border-bottom: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), transparent 20%);
   color: color-mix(in srgb, var(--aaron-ink, #1e1a16), var(--aaron-muted, #666) 34%);
-  font: 700 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 700 11px/1.35 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 .cm-editor .cm-note-code-title {
@@ -1970,7 +1970,7 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
 .cm-editor .cm-note-code-body {
   padding: 0.55rem 0.65rem;
   color: var(--aaron-ink, #1e1a16);
-  font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 14px/1.55 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 .cm-editor .cm-note-code-body pre {

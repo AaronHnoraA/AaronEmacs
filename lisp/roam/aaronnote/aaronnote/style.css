@@ -26,7 +26,7 @@
   --aaron-red: #8d202c;
   --aaron-red-dark: #6f1721;
   --aaron-shadow: 0 10px 28px rgb(49 38 22 / 14%);
-  --aaron-font-english: "New York", ui-serif;
+  --aaron-font-english: -apple-system, BlinkMacSystemFont, "SF Pro Text";
   --aaron-font-chinese: "FZLiuGongQuanKaiShuJF";
   --aaron-font-body: var(--aaron-font-english), var(--aaron-font-chinese), Georgia, serif;
   --aaron-font-heading: "ExcalifontLocal", "Excalifont", var(--aaron-font-chinese), Georgia, serif;

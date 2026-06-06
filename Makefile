@@ -1,4 +1,5 @@
 EMACS ?= emacs
+AARONNOTE_DIR = lisp/roam/aaronnote
 EMACS_BATCH_BASE = $(EMACS) --batch --no-site-file --no-site-lisp --no-splash --init-directory=$(CURDIR) -q
 # Load early-init first so native-comp never writes into top-level eln-cache.
 BATCH = $(EMACS_BATCH_BASE) -l ./early-init.el -l ./init.el
@@ -8,9 +9,10 @@ BOOTSTRAP_EXPORT = BOOTSTRAP_MODE=export $(BOOTSTRAP)
 BOOTSTRAP_AUDIT = BOOTSTRAP_MODE=audit $(BOOTSTRAP)
 
 .PHONY: default help up setup setup-full bootstrap-health install lock audit-lock doctor build build-force \
+        aaronnote-build \
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
-        health health-startup health-byte health-native note-test
+        health health-startup health-byte health-native
 
 default: up
 
@@ -27,8 +29,9 @@ help:
 	  '  make doctor               Open/check the config health doctor report in batch' \
 	  '  make state-backup         Snapshot migration-worthy local state into var/backup-snapshots' \
 	  '  make state-restore SNAPSHOT=/path/to/archive.tar.gz  Restore a saved state snapshot' \
-	  '  make build                Full byte + native compile for config and third-party Elisp' \
+	  '  make build                Full Elisp compile plus Aaronnote static build' \
 	  '  make build-force          Same as build, but reset ELN cache first' \
+	  '  make aaronnote-build      Build Aaronnote static assets' \
 	  '  make compile              btye and native compile'\
 	  '  make compile-force        Force btye and native compile'\
 	  '  make compile-byte         SByte-compile the local Emacs config' \
@@ -42,8 +45,7 @@ help:
 	  '  make health               Run startup + byte + native smoke checks' \
 	  '  make health-startup       Run startup smoke check' \
 	  '  make health-byte          Run byte-compile smoke check' \
-	  '  make health-native        Run native-compile smoke check' \
-	  '  make note-test            Run Markdown roam/note ERT tests'
+	  '  make health-native        Run native-compile smoke check'
 
 up:
 	@if [ -n "$(SNAPSHOT)" ]; then \
@@ -78,9 +80,14 @@ state-restore:
 
 build:
 	$(BATCH) --eval '(my/build-all)'
+	$(MAKE) aaronnote-build
 
 build-force:
 	$(BATCH) --eval '(my/build-all t)'
+	$(MAKE) aaronnote-build
+
+aaronnote-build:
+	npm --prefix $(AARONNOTE_DIR) run build:aaronnote
 
 compile: compile-byte  compare-native
 
@@ -123,11 +130,3 @@ health-byte:
 
 health-native:
 	$(BATCH) --eval '(prin1 (my/health-native-compile-check))'
-
-note-test:
-	$(BATCH) -l test/note-tests.el -f ert-run-tests-batch-and-exit
-	@if command -v typst >/dev/null 2>&1; then \
-	  typst compile --root . test/note-code-render-fixture.typ /tmp/note-code-render-fixture.pdf; \
-	else \
-	  printf 'Skipping optional Typst render smoke test: typst not found\n'; \
-	fi
