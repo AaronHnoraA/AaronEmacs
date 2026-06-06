@@ -1677,13 +1677,7 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
   background: linear-gradient(180deg,
     color-mix(in srgb, var(--inline-todo-bg), white 8%),
     color-mix(in srgb, var(--inline-todo-bg), var(--inline-todo-accent) 18%));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--inline-todo-accent), transparent 70%);
-  animation: aaronnote-todo-doing-pulse 2.4s ease-in-out infinite;
-}
-
-@keyframes aaronnote-todo-doing-pulse {
-  0%, 100% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--inline-todo-accent), transparent 70%); }
-  50%      { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--inline-todo-accent), transparent 38%); }
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--inline-todo-accent), transparent 50%);
 }
 
 .cm-editor .inline-todo-chip[data-status="done"] {
@@ -1764,13 +1758,8 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
 .cm-editor .inline-todo-date[data-when="future"]  { --date-accent: #475569; --date-bg: #e2e8f0; }
 
 .cm-editor .inline-todo-date[data-when="overdue"] {
-  animation: aaronnote-todo-overdue-pulse 2.6s ease-in-out infinite;
-}
-
-@keyframes aaronnote-todo-overdue-pulse {
-  0%, 100% { box-shadow: inset 0 0 0 1px color-mix(in srgb, white, transparent 60%); }
-  50%      { box-shadow: inset 0 0 0 1px color-mix(in srgb, white, transparent 30%),
-                          0 0 0 2px color-mix(in srgb, var(--date-accent), transparent 78%); }
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white, transparent 50%),
+              0 0 0 2px color-mix(in srgb, var(--date-accent), transparent 70%);
 }
 
 .cm-editor .inline-todo-date-key {
@@ -2023,11 +2012,9 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
   margin: 0 -1px;
   background: #1f1f1f;
   vertical-align: text-bottom;
-  animation: play-caret-blink 1s step-end infinite;
   user-select: none;
   pointer-events: none;
 }
-@keyframes play-caret-blink { 50% { opacity: 0; } }
 .cm-focused .play-caret { display: none; }
 .cm-editor .selection-marker {
   color: #1f1f1f;

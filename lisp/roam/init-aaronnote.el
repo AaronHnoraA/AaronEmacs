@@ -168,7 +168,10 @@
   (let ((callbacks (nreverse my/aaronnote--ready-callbacks)))
     (setq my/aaronnote--ready-callbacks nil)
     (dolist (callback callbacks)
-      (run-at-time 0 nil callback))))
+      (run-at-time 0 nil callback)))
+  (my/aaronnote--install-activity-hooks)
+  ;; Do an initial activity check after the page has had time to load.
+  (run-with-idle-timer 2 nil #'my/aaronnote--update-activity))
 
 (defun my/aaronnote--handle-process-line (line)
   "Handle one web-host stdout LINE."
@@ -472,12 +475,63 @@ graph tab was closed via the Appine toolbar."
    (lambda ()
      (my/aaronnote--open-url (my/aaronnote--server-url "/graph") nil t))))
 
+;;; Pause/resume — freeze WebKit animations when Aaronnote is not visible.
+
+(defvar my/aaronnote--paused nil
+  "Non-nil when the browser page has been sent a pause command.")
+(defvar my/aaronnote--activity-timer nil
+  "Debounce timer for `my/aaronnote--update-activity'.")
+
+(defun my/aaronnote--app-buffer-visible-p ()
+  "Return non-nil when the Aaronnote buffer is visible in a focused frame."
+  (when (buffer-live-p my/aaronnote--app-buffer)
+    (let ((win (get-buffer-window my/aaronnote--app-buffer 'visible)))
+      (and win
+           (frame-focus-state (window-frame win))))))
+
+(defun my/aaronnote--apply-activity (active)
+  "Send pause or resume to the browser when the active state changes."
+  (unless (eq (not active) (not my/aaronnote--paused))
+    (setq my/aaronnote--paused (not active))
+    (my/aaronnote--send-command (if active "resume" "pause"))))
+
+(defun my/aaronnote--update-activity (&rest _)
+  "Debounced check: pause or resume the browser based on buffer visibility."
+  (when my/aaronnote--activity-timer
+    (cancel-timer my/aaronnote--activity-timer))
+  (setq my/aaronnote--activity-timer
+        (run-with-idle-timer
+         0.3 nil
+         (lambda ()
+           (setq my/aaronnote--activity-timer nil)
+           (when my/aaronnote--ready
+             (my/aaronnote--apply-activity
+              (my/aaronnote--app-buffer-visible-p)))))))
+
+(defun my/aaronnote--install-activity-hooks ()
+  "Add hooks that trigger the pause/resume check."
+  (add-function :after after-focus-change-function
+                #'my/aaronnote--update-activity)
+  (add-hook 'window-buffer-change-functions #'my/aaronnote--update-activity)
+  (add-hook 'window-selection-change-functions #'my/aaronnote--update-activity))
+
+(defun my/aaronnote--remove-activity-hooks ()
+  "Remove pause/resume hooks and cancel any pending debounce timer."
+  (remove-function after-focus-change-function #'my/aaronnote--update-activity)
+  (remove-hook 'window-buffer-change-functions #'my/aaronnote--update-activity)
+  (remove-hook 'window-selection-change-functions #'my/aaronnote--update-activity)
+  (when my/aaronnote--activity-timer
+    (cancel-timer my/aaronnote--activity-timer)
+    (setq my/aaronnote--activity-timer nil))
+  (setq my/aaronnote--paused nil))
+
 ;;;###autoload
 (defun my/aaronnote-stop ()
   "Kill the Aaronnote web-host process and reset Appine tab state.
 The web-host (Node) is the backend; once it is gone, any Appine tabs showing
 its pages are dead, so the Emacs-side tab registry is cleared too."
   (interactive)
+  (my/aaronnote--remove-activity-hooks)
   (when my/aaronnote--ready-watchdog
     (cancel-timer my/aaronnote--ready-watchdog)
     (setq my/aaronnote--ready-watchdog nil))

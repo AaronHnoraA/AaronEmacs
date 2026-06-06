@@ -2662,6 +2662,12 @@ function runHostCommand(detail: unknown): boolean {
   switch (command) {
     case "key":
       return runHostKey(body as Record<string, unknown>);
+    case "pause":
+      document.documentElement.classList.add("aaronnote-paused");
+      return true;
+    case "resume":
+      document.documentElement.classList.remove("aaronnote-paused");
+      return true;
     case "save":
       void save();
       return true;
@@ -2770,6 +2776,13 @@ window.addEventListener("aaronnote:open-file", (event) => {
 });
 window.addEventListener("aaronnote:command", (event) => {
   runHostCommand((event as CustomEvent<unknown>).detail);
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    document.documentElement.classList.add("aaronnote-paused");
+  } else {
+    document.documentElement.classList.remove("aaronnote-paused");
+  }
 });
 window.addEventListener("pagehide", () => {
   if (currentFile && revision !== savedRevision) api.notes.saveKeepalive(saveBody());

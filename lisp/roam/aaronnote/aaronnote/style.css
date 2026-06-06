@@ -9,6 +9,25 @@
   font-display: swap;
 }
 
+/* 用 unicode-range 把中文字体精确限定在 CJK 码点，
+   这样即使排在英文字体前面也不影响拉丁字母的渲染。 */
+@font-face {
+  font-family: "FZLiuGongQuanKaiShuJF";
+  src: local("FZLiuGongQuanKaiShuJF");
+  unicode-range:
+    U+2E80-2FFF,   /* CJK Radicals / Kangxi */
+    U+3000-312F,   /* CJK Symbols, Hiragana, Katakana, Bopomofo */
+    U+31F0-31FF,   /* Katakana Phonetic Extensions */
+    U+3400-4DBF,   /* CJK Extension A */
+    U+4E00-9FFF,   /* CJK Unified Ideographs */
+    U+F900-FAFF,   /* CJK Compatibility Ideographs */
+    U+FE30-FE4F,   /* CJK Compatibility Forms */
+    U+FF00-FFEF;   /* Halfwidth/Fullwidth Forms */
+  font-style: normal;
+  font-weight: normal;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
   font-family: var(--aaron-font-body);
@@ -28,7 +47,7 @@
   --aaron-shadow: 0 10px 28px rgb(49 38 22 / 14%);
   --aaron-font-english: -apple-system, BlinkMacSystemFont, "SF Pro Text";
   --aaron-font-chinese: "FZLiuGongQuanKaiShuJF";
-  --aaron-font-body: var(--aaron-font-english), var(--aaron-font-chinese), Georgia, serif;
+  --aaron-font-body: var(--aaron-font-chinese), var(--aaron-font-english), Georgia, serif;
   --aaron-font-heading: "ExcalifontLocal", "Excalifont", var(--aaron-font-chinese), Georgia, serif;
   --aaron-font-title: var(--aaron-font-heading);
   --aaron-font-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -663,4 +682,18 @@ body[data-vim-mode="visual-line"] .aaronnote-vim-cursor {
     right: 8px;
     width: auto;
   }
+}
+
+/* Freeze all animations when Emacs signals the page is not active. */
+html.aaronnote-paused *,
+html.aaronnote-paused *::before,
+html.aaronnote-paused *::after {
+  animation-play-state: paused !important;
+  transition: none !important;
+}
+html.aaronnote-paused .cm-cursorLayer {
+  animation: none !important;
+}
+html.aaronnote-paused .cm-cursor {
+  animation: none !important;
 }
