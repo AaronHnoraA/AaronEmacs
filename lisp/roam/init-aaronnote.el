@@ -637,6 +637,36 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
                   (t " ● ready"))))
     (concat "  " (propertize name 'face 'mode-line-buffer-id) status)))
 
+;;; Web-editor command wrappers.
+;; These generate named interactive commands for every web-host editor command
+;; so each entry in the dispatch hub is `commandp', appears in M-x, and can
+;; be verified with `commandp' in batch tests.
+
+(defmacro my/aaronnote--def-editor-cmd (suffix command &optional doc)
+  "Define `my/aaronnote-SUFFIX' that sends editor COMMAND to the web page."
+  `(defun ,(intern (format "my/aaronnote-%s" suffix)) ()
+     ,(or doc (format "Send the Aaronnote `%s' editor command." command))
+     (interactive)
+     (my/aaronnote-command ,command)))
+
+(my/aaronnote--def-editor-cmd "toggle-source"   "toggle-source"   "Toggle source / rendered view.")
+(my/aaronnote--def-editor-cmd "undo"            "undo"            "Undo last edit in Aaronnote.")
+(my/aaronnote--def-editor-cmd "redo"            "redo"            "Redo last undone edit in Aaronnote.")
+(my/aaronnote--def-editor-cmd "bold"            "bold"            "Toggle bold at point.")
+(my/aaronnote--def-editor-cmd "italic"          "italic"          "Toggle italic at point.")
+(my/aaronnote--def-editor-cmd "code-inline"     "code"            "Toggle inline code at point.")
+(my/aaronnote--def-editor-cmd "highlight"       "highlight"       "Toggle highlight at point.")
+(my/aaronnote--def-editor-cmd "strike"          "strike"          "Toggle strikethrough at point.")
+(my/aaronnote--def-editor-cmd "blockquote"      "blockquote"      "Toggle blockquote on paragraph.")
+(my/aaronnote--def-editor-cmd "bullet-list"     "bullet-list"     "Toggle bullet list.")
+(my/aaronnote--def-editor-cmd "ordered-list"    "ordered-list"    "Toggle ordered list.")
+(my/aaronnote--def-editor-cmd "task-list"       "task-list"       "Toggle task/checkbox list.")
+(my/aaronnote--def-editor-cmd "code-block"      "code-block"      "Insert/toggle fenced code block.")
+(my/aaronnote--def-editor-cmd "paragraph-menu"  "paragraph-menu"  "Open heading/paragraph type menu.")
+(my/aaronnote--def-editor-cmd "insert-table"    "insert-table"    "Insert a Markdown table.")
+(my/aaronnote--def-editor-cmd "insert-math"     "insert-math-block" "Insert a math block.")
+(my/aaronnote--def-editor-cmd "insert-toc"      "insert-toc"      "Insert a table of contents.")
+
 ;;; Dispatch transient.
 
 (defun my/aaronnote--dispatch-header ()
@@ -651,19 +681,67 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
 
 (with-eval-after-load 'transient
   (transient-define-prefix my/aaronnote-dispatch ()
-    "Aaronnote note editor."
+    "Aaronnote note-editor and roam hub.  H-o from anywhere."
     [:description my/aaronnote--dispatch-header
-     ["Note"
-      ("o" "open current note" my/aaronnote-open-current-note)
-      ("s" "save"              my/aaronnote-save)
+     ;; Row 1 ─────────────────────────────────────────────────────────────────
+     ["Note (web)"
+      ("o" "open current"     my/aaronnote-open-current-note)
+      ("O" "open file…"       my/aaronnote-open-file)
+      ("s" "save"             my/aaronnote-save)
       ("r" "refresh"          my/aaronnote-refresh)
       ("f" "focus editor"     my/aaronnote-focus)
-      ("e" "escape"           my/aaronnote-escape)]
-     ["Roam"
+      ("e" "escape/normal"    my/aaronnote-escape)
+      ("v" "toggle source"    my/aaronnote-toggle-source)
+      ("R" "raw edit in Emacs" my/aaronnote-open-markdown-raw)]
+     ["Find / Browse"
+      ("j" "find note"        my/aaronnote-roam-find-note)
+      ("/" "search…"          my/aaronnote-roam-search-notes)
+      ("l" "recent notes"     my/aaronnote-roam-recent-notes)
+      ("." "follow link"      my/aaronnote-roam-follow-link)
+      ("b" "backlinks"        my/aaronnote-roam-backlinks)
+      ("x" "related notes"    my/aaronnote-roam-related-notes)
+      ("G" "goto definition"  my/aaronnote-roam-goto-definition)]
+     ["Insert"
+      ("i" "roam link"        my/aaronnote-roam-insert-link)
+      ("I" "TOC link"         my/aaronnote-roam-insert-toc-link)
+      ("t" "tag id"           my/aaronnote-roam-insert-tag-id)
+      ("T" "tag-id link"      my/aaronnote-roam-insert-tag-id-link)
+      ("w" "copy link here"   my/aaronnote-roam-copy-link-to-here)
+      ("c" "note-code"        my/note-code-insert)]
+     ;; Row 2 ─────────────────────────────────────────────────────────────────
+     ["Knowledge"
+      ("n" "new note"         my/aaronnote-roam-new-node)
+      ("d" "daily note"       my/aaronnote-roam-daily-note)
+      ("a" "browse tags"      my/aaronnote-roam-tags)
+      ("g" "roam graph"       my/aaronnote-roam-graph)
+      ("k" "tasks"            my/aaronnote-roam-todos)
+      ("A" "agenda"           my/aaronnote-roam-agenda)
+      ("M" "management"       my/aaronnote-roam-management)]
+     ["Index / Files"
       ("y" "sync DB"          my/aaronnote-roam-sync)
-      ("g" "roam graph"       my/aaronnote-roam-graph)]
-     ["Server"
-      ("." "stop server"      my/aaronnote-stop)]]))
+      ("u" "update index"     my/aaronnote-roam-update-db)
+      ("F" "full rebuild"     my/aaronnote-roam-sync-full)
+      ("S" "DB status"        my/aaronnote-roam-db-status)
+      ("D" "dired"            my/aaronnote-roam-dired)
+      ("m" "magit"            my/aaronnote-roam-magit)
+      ("q" "stop server"      my/aaronnote-stop)]
+     ["Format (web)"
+      ("1" "bold"             my/aaronnote-bold)
+      ("2" "italic"           my/aaronnote-italic)
+      ("3" "code inline"      my/aaronnote-code-inline)
+      ("4" "highlight"        my/aaronnote-highlight)
+      ("5" "strike"           my/aaronnote-strike)
+      ("6" "blockquote"       my/aaronnote-blockquote)
+      ("7" "bullet list"      my/aaronnote-bullet-list)
+      ("8" "ordered list"     my/aaronnote-ordered-list)
+      ("9" "task list"        my/aaronnote-task-list)
+      ("0" "code block"       my/aaronnote-code-block)
+      ("p" "heading menu"     my/aaronnote-paragraph-menu)
+      ("z" "insert table"     my/aaronnote-insert-table)
+      ("E" "math block"       my/aaronnote-insert-math)
+      ("C" "insert TOC"       my/aaronnote-insert-toc)
+      ("U" "undo"             my/aaronnote-undo)
+      ("Y" "redo"             my/aaronnote-redo)]]))
 
 ;;; Keybindings.
 

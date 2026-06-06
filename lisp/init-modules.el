@@ -88,6 +88,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-md)
 (require 'init-aaronnote)
 (require 'init-md-roam)
+(require 'init-note-code)
 
 ;; standalone apps
 (my/require-module-after-any-feature 'init-babel 'org)

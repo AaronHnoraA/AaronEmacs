@@ -70,7 +70,7 @@
 - `H-0` / `H-1` / `H-2` / `H-3`
   关当前窗口 / 单窗口切换 / 上下分屏 / 左右分屏
 - `H-o` / `H-O` / `H-k` / `H-K`
-  Note 快捷前缀 / 上方开新行 / 向下复制当前行或区域 / 向上复制当前行或区域
+  Aaronnote 全功能 hub (见下) / 上方开新行 / 向下复制当前行或区域 / 向上复制当前行或区域
 - `H-<up>` / `H-<down>` / `H--` / `H-=`
   上移 / 下移当前行或区域 / 收缩选择 / 扩大选择
 - `H-;` / `H-'` / `H-[` / `H-]` / `H-/`
@@ -91,6 +91,17 @@
 打开 `.md`、`.markdown` 或 `README.md` 时，Emacs 会直接把文件交给
 Aaronnote Web/Appine，并关闭临时 Markdown buffer。Markdown 编辑、保存、
 文件树和 graph 都在 Aaronnote 内完成；Emacs 只保留粗粒度 bridge 命令。
+
+`H-o` 打开 Aaronnote 全功能 hub（6 组，单页 Transient）：
+
+| 分组 | 常用键 |
+|------|--------|
+| **Note (web)** | `o` 打开当前, `O` 选文件, `s` 保存, `r` 刷新, `f` 聚焦, `e` Esc/normal, `v` 切换源码视图, `R` Emacs 原始编辑 |
+| **Find/Browse** | `j` 查找笔记, `/` 搜索, `l` 最近, `.` 跟随链接, `b` 反向链接, `x` 相关, `G` 跳转定义 |
+| **Insert** | `i` roam 链接, `I` TOC 链接, `t` tag id, `T` tag-id 链接, `w` 复制链接到此处, `c` note-code |
+| **Knowledge** | `n` 新笔记, `d` 今日日记, `a` 按标签浏览, `g` roam graph, `k` 任务, `A` 日程, `M` 管理 |
+| **Index/Files** | `y` 同步 DB, `u` 增量更新, `F` 全量重建, `S` DB 状态, `D` dired, `m` magit, `q` 停止服务 |
+| **Format (web)** | `1-9/0` 粗/斜/代码/高亮/删除线/引用/列表×3/代码块, `p` 段落菜单, `z` 表格, `E` 数学块, `C` 目录, `U/Y` undo/redo |
 
 Lean 4 buffer 里 `C-c C-i` 打开右侧官方 xwidget infoview。
 目标、hypotheses、诊断、trace、Try this、code actions 等交互都走
