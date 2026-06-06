@@ -11,7 +11,7 @@
 
 .cm-editor {
   font-family: var(--aaron-font-body, var(--aaron-font-english, serif), var(--aaron-font-chinese, serif), serif);
-  font-size: 16px;
+  font-size: 20px;
   line-height: 1.46;
   color: var(--aaron-ink, #24201a);
   word-wrap: break-word;
@@ -613,7 +613,7 @@
 /* Root typography (extends widgets.css base) */
 .cm-editor {
   font-family: var(--aaron-font-body, var(--aaron-font-english, serif), var(--aaron-font-chinese, serif), serif);
-  font-size: 16px;
+  font-size: 20px;
   color: var(--aaron-ink, #24201a);
 }
 

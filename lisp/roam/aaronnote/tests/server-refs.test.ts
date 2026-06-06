@@ -132,6 +132,38 @@ describe("server note refs", () => {
     }
   });
 
+  test("keeps inline aliases with spaces intact during scan", async () => {
+    const root = await setupRoot("aaronnote-refs-");
+    try {
+      await writeFile(join(root, "target.md"), [
+        "---",
+        "id: target-id",
+        "aliases: density matrix",
+        "---",
+        "# Density Operator",
+        "",
+      ].join("\n"), "utf8");
+      await writeFile(join(root, "source.md"), [
+        "---",
+        "id: source-id",
+        "---",
+        "# Source",
+        "",
+        "See [[density matrix]].",
+        "",
+      ].join("\n"), "utf8");
+
+      const payload = await notesIndexPayload();
+      const source = payload.notes.find((note: { id: string }) => note.id === "source-id");
+      const target = payload.notes.find((note: { id: string }) => note.id === "target-id");
+      expect(target.aliases).toEqual(["density matrix"]);
+      expect(source.refs).toEqual(["target-id"]);
+      expect(target.backlinks).toEqual(["source-id"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("keeps raw unresolved refs so a later note can resolve them", async () => {
     const root = await setupRoot("aaronnote-refs-");
     try {

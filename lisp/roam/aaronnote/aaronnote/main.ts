@@ -2273,44 +2273,53 @@ function acceptSnippetPopupItem(): boolean {
   return true;
 }
 
+function snippetPopupKeyName(key: string): string {
+  const normalized = String(key || "");
+  if (/^(?:Enter|Return|RET|CR|NumpadEnter)$/i.test(normalized)) return "Enter";
+  if (/^(?:Esc|Escape)$/i.test(normalized)) return "Escape";
+  if (/^(?:Backtab|Shift-Tab)$/i.test(normalized)) return "Shift-Tab";
+  return normalized;
+}
+
 function handleSnippetPopupKey(event: KeyboardEvent): boolean {
   if (snippetPopup.hidden || event.isComposing) return false;
   if (event.metaKey || event.ctrlKey || event.altKey) return false;
+  const key = snippetPopupKeyName(event.key);
   if (snippetPopupItems.length === 0) {
     hideSnippetPopup();
     return false;
   }
-  if (event.key === "ArrowDown") {
+  if (key === "ArrowDown") {
     event.preventDefault();
     snippetPopupIndex = (snippetPopupIndex + 1) % snippetPopupItems.length;
     renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
     return true;
   }
-  if (event.key === "ArrowUp") {
+  if (key === "ArrowUp") {
     event.preventDefault();
     snippetPopupIndex = (snippetPopupIndex + snippetPopupItems.length - 1) % snippetPopupItems.length;
     renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
     return true;
   }
-  if (event.key === "PageDown" || event.key === "PageUp") {
+  if (key === "PageDown" || key === "PageUp") {
     event.preventDefault();
-    const delta = event.key === "PageDown" ? 6 : -6;
+    const delta = key === "PageDown" ? 6 : -6;
     snippetPopupIndex = ((snippetPopupIndex + delta) % snippetPopupItems.length + snippetPopupItems.length) % snippetPopupItems.length;
     renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
     return true;
   }
-  if (event.key === "Home" || event.key === "End") {
+  if (key === "Home" || key === "End") {
     event.preventDefault();
-    snippetPopupIndex = event.key === "Home" ? 0 : snippetPopupItems.length - 1;
+    snippetPopupIndex = key === "Home" ? 0 : snippetPopupItems.length - 1;
     renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
     return true;
   }
-  if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
+  if (key === "Enter" || (key === "Tab" && !event.shiftKey)) {
     event.preventDefault();
     acceptSnippetPopupItem();
     return true;
   }
-  if (event.key === "Escape") {
+  if (key === "Escape") {
     event.preventDefault();
     snippetSuppressedPrefix = snippetPopup.dataset.prefix ?? "";
     hideSnippetPopup();
@@ -2321,35 +2330,36 @@ function handleSnippetPopupKey(event: KeyboardEvent): boolean {
 
 function handleSnippetPopupHostKey(key: VimLiteKey): boolean {
   if (snippetPopup.hidden || key.metaKey || key.ctrlKey || key.altKey) return false;
+  const name = snippetPopupKeyName(key.key);
   if (snippetPopupItems.length === 0) {
     hideSnippetPopup();
     return false;
   }
-  if (key.key === "ArrowDown") {
+  if (name === "ArrowDown") {
     snippetPopupIndex = (snippetPopupIndex + 1) % snippetPopupItems.length;
     renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
     return true;
   }
-  if (key.key === "ArrowUp") {
+  if (name === "ArrowUp") {
     snippetPopupIndex = (snippetPopupIndex + snippetPopupItems.length - 1) % snippetPopupItems.length;
     renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
     return true;
   }
-  if (key.key === "PageDown" || key.key === "PageUp") {
-    const delta = key.key === "PageDown" ? 6 : -6;
+  if (name === "PageDown" || name === "PageUp") {
+    const delta = name === "PageDown" ? 6 : -6;
     snippetPopupIndex = ((snippetPopupIndex + delta) % snippetPopupItems.length + snippetPopupItems.length) % snippetPopupItems.length;
     renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
     return true;
   }
-  if (key.key === "Home" || key.key === "End") {
-    snippetPopupIndex = key.key === "Home" ? 0 : snippetPopupItems.length - 1;
+  if (name === "Home" || name === "End") {
+    snippetPopupIndex = name === "Home" ? 0 : snippetPopupItems.length - 1;
     renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
     return true;
   }
-  if (key.key === "Enter" || (key.key === "Tab" && !key.shiftKey)) {
+  if (name === "Enter" || (name === "Tab" && !key.shiftKey)) {
     return acceptSnippetPopupItem();
   }
-  if (key.key === "Escape") {
+  if (name === "Escape") {
     snippetSuppressedPrefix = snippetPopup.dataset.prefix ?? "";
     hideSnippetPopup();
     return true;

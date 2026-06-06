@@ -1036,7 +1036,7 @@ function modeForFile(file) {
   return "source";
 }
 
-function parseListValue(value) {
+function parseListValue(value, options = {}) {
   const trimmed = String(value || "").trim();
   if (!trimmed) return [];
   if (trimmed.startsWith("(")) {
@@ -1044,7 +1044,8 @@ function parseListValue(value) {
       .map((match) => match[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\"))
       .filter(Boolean);
   }
-  return trimmed.split(/[, ]+/).map((item) => item.trim()).filter(Boolean);
+  const separator = options.splitSpaces === false ? /[,\n]+/ : /[, ]+/;
+  return trimmed.split(separator).map((item) => item.trim()).filter(Boolean);
 }
 
 function parseMetaScalar(value) {
@@ -1078,7 +1079,7 @@ function parseMetaLines(raw) {
       continue;
     }
     if (key === "tags" || key === "refs" || key === "aliases") {
-      meta[key] = parseListValue(value);
+      meta[key] = parseListValue(value, { splitSpaces: key !== "aliases" });
     } else {
       meta[key] = parseMetaScalar(value);
     }

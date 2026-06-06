@@ -129,8 +129,10 @@ or the command fails."
         (unwind-protect
             (if (zerop status)
                 (condition-case err
-                    (json-parse-buffer :object-type 'hash-table
-                                       :array-type 'list)
+                    (progn
+                      (goto-char (point-min))
+                      (json-parse-buffer :object-type 'hash-table
+                                         :array-type 'list))
                   (error
                    (let ((stderr (with-temp-buffer
                                    (ignore-errors (insert-file-contents stderr-file))
@@ -963,6 +965,25 @@ Path-like refs are accepted and resolved to canonical note ids."
         name
       (concat directory "/" name))))
 
+(defun my/aaronnote-roam-new--path-file (path)
+  "Return absolute file for vault-relative PATH."
+  (expand-file-name path (file-name-as-directory (my/aaronnote-roam-root))))
+
+(defun my/aaronnote-roam-new--unique-path (path)
+  "Return PATH, or a numbered variant, that does not already exist."
+  (let* ((path (string-trim (or path "")))
+         (dir (or (file-name-directory path) ""))
+         (base (file-name-base path))
+         (ext (or (file-name-extension path t) ".md"))
+         (candidate path)
+         (n 2))
+    (while (and (not (string-empty-p candidate))
+                (file-exists-p
+                 (my/aaronnote-roam-new--path-file candidate)))
+      (setq candidate (concat dir base "-" (number-to-string n) ext)
+            n (1+ n)))
+    candidate))
+
 (defun my/aaronnote-roam-new--normalize-tags (tags)
   "Return TAGS as a clean string list."
   (delete-dups
@@ -977,7 +998,8 @@ Path-like refs are accepted and resolved to canonical note ids."
   "Return a default Roam New draft rooted in DIRECTORY."
   (list :node-type "roam"
         :title "Untitled"
-        :path (my/aaronnote-roam-new--default-path "Untitled" directory)
+        :path (my/aaronnote-roam-new--unique-path
+               (my/aaronnote-roam-new--default-path "Untitled" directory))
         :kind "note"
         :template-key "roam"
         :tags nil))
@@ -993,12 +1015,17 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
             "roam"))
          (title (string-trim (or (plist-get draft :title) "")))
          (title (if (string-empty-p title) "Untitled" title))
-         (path (string-trim (or (plist-get draft :path) "")))
-         (path (if (string-empty-p path)
-                   (my/aaronnote-roam-new--default-path
-                    title
-                    (or directory my/aaronnote-roam-new--base-directory))
-                 path))
+         (base-directory
+          (or directory my/aaronnote-roam-new--base-directory))
+         (raw-path (string-trim (or (plist-get draft :path) "")))
+         (untitled-path
+          (my/aaronnote-roam-new--default-path "Untitled" base-directory))
+         (path (if (or (string-empty-p raw-path)
+                       (and (not (string= title "Untitled"))
+                            (equal raw-path untitled-path)))
+                   (my/aaronnote-roam-new--default-path title base-directory)
+                 raw-path))
+         (path (my/aaronnote-roam-new--unique-path path))
          (kind (string-trim (or (plist-get draft :kind) "")))
          (kind (if (string-empty-p kind)
                    (if (string= node-type "roam") "note" "default")
@@ -1745,12 +1772,14 @@ creation commands while using the Aaronnote runtime."
 (defun my/aaronnote-roam--note-file-from-fields (key note)
   "Return the best note file path for DB KEY and NOTE."
   (let* ((root (my/aaronnote-roam-root))
-         (raw (my/aaronnote-roam--strip-vault-prefix
-               (or (my/aaronnote-roam--note-field note "file")
-                   (my/aaronnote-roam--note-field note "path")
-                   (my/aaronnote-roam--note-field note "link")
-                   (my/aaronnote-roam--note-field note "source")
-                   key)))
+         (raw-value (or (my/aaronnote-roam--note-field note "file")
+                        (my/aaronnote-roam--note-field note "path")
+                        (my/aaronnote-roam--note-field note "link")
+                        (my/aaronnote-roam--note-field note "source")
+                        key))
+         (raw (if (and raw-value (file-name-absolute-p raw-value))
+                  raw-value
+                (my/aaronnote-roam--strip-vault-prefix raw-value)))
          (path (and raw
                     (if (file-name-absolute-p raw)
                         raw

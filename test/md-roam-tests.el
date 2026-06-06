@@ -511,21 +511,47 @@ source: roam/demo/analysis.md
     (should (equal (plist-get my/aaronnote-roam-new--draft :path)
                    "projects/project-atlas.md"))))
 
-(ert-deftest my/aaronnote-roam-new-create-defaults-match-aaronnote ()
-  (let ((my/aaronnote-roam-new--base-directory "projects"))
-    (let ((draft
-           (my/aaronnote-roam-new--draft-for-create
-            '(:node-type "regular"
-              :title " "
-              :path ""
-              :kind ""
-              :template-key ""
-              :tags (" work " "" "work")))))
-      (should (equal (plist-get draft :node-type) "regular"))
+(ert-deftest my/aaronnote-roam-new-default-draft-avoids-existing-untitled ()
+  (my/aaronnote-roam-test-with-vault
+    (my/aaronnote-roam-test--write-file
+     (expand-file-name "projects/untitled.md" root)
+     "# Untitled\n")
+    (let ((draft (my/aaronnote-roam-new--default-draft "projects")))
       (should (equal (plist-get draft :title) "Untitled"))
-      (should (equal (plist-get draft :path) "projects/untitled.md"))
-      (should (equal (plist-get draft :kind) "default"))
-      (should (equal (plist-get draft :tags) '("work"))))))
+      (should (equal (plist-get draft :path) "projects/untitled-2.md")))))
+
+(ert-deftest my/aaronnote-roam-new-create-refreshes-stale-untitled-path ()
+  (my/aaronnote-roam-test-with-vault
+    (my/aaronnote-roam-test--write-file
+     (expand-file-name "projects/project-atlas.md" root)
+     "# Project Atlas\n")
+    (let* ((my/aaronnote-roam-new--base-directory "projects")
+           (draft (my/aaronnote-roam-new--draft-for-create
+                   '(:node-type "roam"
+                     :title "Project Atlas"
+                     :path "projects/untitled.md"
+                     :kind "note"
+                     :template-key "roam"
+                     :tags nil))))
+      (should (equal (plist-get draft :path)
+                     "projects/project-atlas-2.md")))))
+
+(ert-deftest my/aaronnote-roam-new-create-defaults-match-aaronnote ()
+  (my/aaronnote-roam-test-with-vault
+    (let ((my/aaronnote-roam-new--base-directory "projects"))
+      (let ((draft
+             (my/aaronnote-roam-new--draft-for-create
+              '(:node-type "regular"
+                :title " "
+                :path ""
+                :kind ""
+                :template-key ""
+                :tags (" work " "" "work")))))
+        (should (equal (plist-get draft :node-type) "regular"))
+        (should (equal (plist-get draft :title) "Untitled"))
+        (should (equal (plist-get draft :path) "projects/untitled.md"))
+        (should (equal (plist-get draft :kind) "default"))
+        (should (equal (plist-get draft :tags) '("work")))))))
 
 (ert-deftest my/aaronnote-roam-new-create-uses-aaronnote-runtime-draft ()
   (my/aaronnote-roam-test-with-vault
