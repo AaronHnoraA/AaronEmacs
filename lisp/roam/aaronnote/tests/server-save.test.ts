@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "@voidzero-dev/vite-plus-test";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
 import { configure } from "../server/lib/state.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
-import { getTodos, notesIndexPayload } from "../server/lib/index.mjs";
+import { getTodos, notesIndexPayload, readNote } from "../server/lib/index.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
 import { saveNote } from "../server/lib/save.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
@@ -60,6 +60,44 @@ describe("server save API", () => {
     expect(msg.note?.title).toBe("A");
     expect(msg.notesRefresh).toBe("deferred");
     expect(await readFile(file, "utf8")).toBe("# A\n\nBody\n");
+  });
+
+  test("symlinked note root still treats real-path files as roam notes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-symlink-root-"));
+    const notes = join(root, "AaronNote");
+    const linkedNotes = join(root, ".roam");
+    await mkdir(notes, { recursive: true });
+    await symlink(notes, linkedNotes, "dir");
+    roots.push(root);
+    configure({
+      root: linkedNotes,
+      workspaceRoot: root,
+      pluginRoot: join(root, "plugin"),
+    });
+    const file = join(notes, "a.md");
+    await writeFile(file, "# A\n", "utf8");
+    const base = await stat(file);
+    expect((await notesIndexPayload()).notes).toHaveLength(1);
+
+    const opened = await readNote(file) as { standalone?: boolean; file?: string };
+    expect(opened.standalone).toBe(false);
+    expect(opened.file).toBe(file);
+
+    const saved = await saveNote({
+      file,
+      content: "# A\n\nBody\n",
+      clientId: "test",
+      seq: 1,
+      baseMtimeMs: base.mtimeMs,
+      refresh: "deferred",
+    }) as { standalone?: boolean; note?: { path?: string }; notesRefresh?: string };
+
+    expect(saved.standalone).toBe(false);
+    expect(saved.note?.path).toBe("a.md");
+    expect(saved.notesRefresh).toBe("deferred");
+    const indexed = await notesIndexPayload() as { notes?: Array<{ file?: string; path?: string }> };
+    expect(indexed.notes).toHaveLength(1);
+    expect(indexed.notes?.[0]).toMatchObject({ file, path: "a.md" });
   });
 
   test("mtime mismatch reports a conflict and preserves disk content", async () => {

@@ -1161,10 +1161,6 @@ async function manageNoteTags(): Promise<void> {
 }
 
 async function insertRoamIdLink(): Promise<void> {
-  if (!roamFeaturesEnabled()) {
-    setStatus("Roam links are disabled for this standalone note");
-    return;
-  }
   const selection = editor.getMarkdownSelection();
   const selected = selection.from === selection.to ? "" : editor.textBetween(selection.from, selection.to).trim();
   const result = await openFormModal("Insert roam idlink", [
@@ -1264,10 +1260,6 @@ function changedRows(changed: unknown): Array<{ title: string; detail?: string; 
 }
 
 function showRoamToolRows(title: string, rows: Array<{ title: string; detail?: string; kind?: string }>): void {
-  if (!roamFeaturesEnabled()) {
-    setStatus("Roam tools are disabled for this standalone note");
-    return;
-  }
   roamToolsTitle.textContent = title;
   const frag = document.createDocumentFragment();
   if (rows.length === 0) {
@@ -1300,10 +1292,6 @@ function showRoamToolRows(title: string, rows: Array<{ title: string; detail?: s
 }
 
 async function renameRoamTagTool(): Promise<void> {
-  if (!roamFeaturesEnabled()) {
-    setStatus("Roam tools are disabled for this standalone note");
-    return;
-  }
   const result = await openFormModal("Rename roam tag", [
     { id: "from", label: "Current tag", type: "tags", value: "", suggestions: tagSuggestions() },
     { id: "to", label: "New tag", value: "" },
@@ -1322,10 +1310,6 @@ async function renameRoamTagTool(): Promise<void> {
 }
 
 async function deleteRoamTagTool(): Promise<void> {
-  if (!roamFeaturesEnabled()) {
-    setStatus("Roam tools are disabled for this standalone note");
-    return;
-  }
   const result = await openFormModal("Delete roam tag", [
     { id: "tag", label: "Tag", type: "tags", value: "", suggestions: tagSuggestions() },
     { id: "confirm", label: "Type DELETE to remove it from all roam notes", value: "" },
@@ -1343,10 +1327,6 @@ async function deleteRoamTagTool(): Promise<void> {
 }
 
 async function tagOverlapReportTool(): Promise<void> {
-  if (!roamFeaturesEnabled()) {
-    setStatus("Roam tools are disabled for this standalone note");
-    return;
-  }
   setStatus("Scanning tag overlap");
   try {
     const report = await api.roamTools.tagOverlap();
@@ -1370,10 +1350,6 @@ async function tagOverlapReportTool(): Promise<void> {
 }
 
 async function rewritePathRefsTool(): Promise<void> {
-  if (!roamFeaturesEnabled()) {
-    setStatus("Roam tools are disabled for this standalone note");
-    return;
-  }
   const result = await openFormModal("Rewrite path references", [
     { id: "oldPath", label: "Old target path", value: "", suggestions: pathSuggestions },
     { id: "newPath", label: "New target path", value: "", suggestions: pathSuggestions },
@@ -1404,7 +1380,6 @@ function toolActions(): ToolAction[] {
     { id: "tag-ref", title: "Tag / copy ref", detail: "Equation tag, inline anchor, reference copy", run: () => void tagOrCopyRef() },
     { id: "reload-snippets", title: "Reload snippets", detail: "Refresh Emacs md/tex snippets", run: () => void reloadSnippets() },
   ];
-  if (!roamFeaturesEnabled()) return common;
   return [
     ...common,
     { id: "reload-index", title: "Reload roam index", detail: "Refresh notes, tags, links", run: () => void reloadNotes(true) },

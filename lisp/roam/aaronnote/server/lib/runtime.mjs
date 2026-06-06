@@ -1,5 +1,5 @@
 import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { execFile, spawn } from "node:child_process";
@@ -134,9 +134,38 @@ async function atomicWriteFile(file, data, options) {
   }
 }
 
+function canonicalExistingPath(path) {
+  const resolved = resolve(String(path || ""));
+  let probe = resolved;
+  const missingParts = [];
+  while (!existsSync(probe)) {
+    const parent = dirname(probe);
+    if (parent === probe) return resolved;
+    missingParts.unshift(basename(probe));
+    probe = parent;
+  }
+  try {
+    const real = realpathSync.native(probe);
+    return missingParts.length ? join(real, ...missingParts) : real;
+  } catch {
+    return resolved;
+  }
+}
+
+function relativeInsideP(rel) {
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
 function inside(child, parent) {
   const rel = relative(parent, child);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  if (relativeInsideP(rel)) return true;
+  return relativeInsideP(relative(canonicalExistingPath(parent), canonicalExistingPath(child)));
+}
+
+function relativeCanonical(parent, child) {
+  const rel = relative(parent, child);
+  if (relativeInsideP(rel)) return rel;
+  return relative(canonicalExistingPath(parent), canonicalExistingPath(child));
 }
 
 function expandUserPath(input) {
@@ -155,19 +184,19 @@ function slashPath(path) {
 }
 
 function displayPathForFile(file, root = noteScanRoot) {
-  if (inside(file, noteRoot)) return slashPath(relative(noteRoot, file));
+  if (inside(file, noteRoot)) return slashPath(relativeCanonical(noteRoot, file));
   const home = homedir();
   if (inside(file, home)) {
-    const rel = slashPath(relative(home, file));
+    const rel = slashPath(relativeCanonical(home, file));
     return rel ? `~/${rel}` : "~";
   }
-  if (root && inside(file, root)) return slashPath(relative(root, file));
+  if (root && inside(file, root)) return slashPath(relativeCanonical(root, file));
   return slashPath(file);
 }
 
 function displayPathForScanRoot(file, root = noteScanRoot) {
   if (root && inside(file, root)) {
-    const rel = slashPath(relative(root, file));
+    const rel = slashPath(relativeCanonical(root, file));
     return rel || "";
   }
   return displayPathForFile(file, root);
@@ -254,7 +283,7 @@ async function uniqueAssetPath(dir, name) {
 
 function markdownRelativePath(fromFile, targetFile) {
   const fromDir = fromFile ? dirname(safeOpenFile(fromFile)) : noteRoot;
-  let rel = relative(fromDir, targetFile).split(sep).join("/");
+  let rel = relativeCanonical(fromDir, targetFile).split(sep).join("/");
   if (!rel.startsWith(".") && !rel.startsWith("/")) rel = `./${rel}`;
   return rel;
 }
@@ -600,7 +629,7 @@ function pathSuggestionDirectory(current, prefix) {
   const relativeDir = rootBased ? displayPrefix.replace(/^\/+/, "") : displayPrefix;
   const dir = resolve(baseDir, relativeDir || ".");
   if (!inside(dir, allowedRoot)) return null;
-  const relParts = relative(allowedRoot, dir).split(sep).filter(Boolean);
+  const relParts = relativeCanonical(allowedRoot, dir).split(sep).filter(Boolean);
   if (relParts.some((part) => excludedDirs.has(part))) return null;
   return { dir, displayPrefix };
 }
@@ -737,7 +766,7 @@ export async function readNoteCodeRegion(body) {
 }
 
 function assetCandidateFile(file) {
-  const relParts = relative(noteRoot, file).split(sep).map((part) => part.toLowerCase());
+  const relParts = relativeCanonical(noteRoot, file).split(sep).map((part) => part.toLowerCase());
   if (relParts.includes(".lean")) return false;
   if (!relParts.includes("images") && !relParts.includes("attachments")) return false;
   const ext = extname(file).toLowerCase();
@@ -745,7 +774,7 @@ function assetCandidateFile(file) {
 }
 
 function assetReferenceSourceFile(file) {
-  const relParts = relative(noteRoot, file).split(sep).map((part) => part.toLowerCase());
+  const relParts = relativeCanonical(noteRoot, file).split(sep).map((part) => part.toLowerCase());
   if (relParts.includes(".lean")) return false;
   return /\.(?:md|markdown|typ)$/i.test(file);
 }
@@ -894,7 +923,7 @@ export async function scanUnusedAssets() {
     try {
       const info = await stat(file);
       if (!info.isFile() || referenced.has(file)) return null;
-      const rel = relative(noteRoot, file).split(sep).join("/");
+      const rel = relativeCanonical(noteRoot, file).split(sep).join("/");
       return {
         file,
         path: rel,
@@ -1756,7 +1785,7 @@ function titleFromContent(file, content) {
 
 function idFromContent(file, root, content) {
   const meta = noteMetadata(content);
-  return meta.id || yamlishValue(content, "id") || relative(root, file);
+  return meta.id || yamlishValue(content, "id") || relativeCanonical(root, file);
 }
 
 export function tagsFromContent(content) {
@@ -2623,9 +2652,9 @@ export async function scanNotes() {
   if (notesSnapshot && !notesSnapshotFullDirty && dirtyNoteFiles.size > 0) {
     const dirty = [...dirtyNoteFiles].filter((file) => notePathMayAffectIndex(file));
     dirtyNoteFiles = new Set();
-    const dirtySet = new Set(dirty);
+    const dirtySet = new Set(dirty.map(canonicalExistingPath));
     const rawNotes = cloneNotes(notesRawSnapshot || [])
-      .filter((note) => !dirtySet.has(note.file));
+      .filter((note) => !dirtySet.has(canonicalExistingPath(note.file)));
     const dirtyNotes = [];
     for (const file of dirty) {
       const note = await noteFromFileForIndex(file);
@@ -4020,16 +4049,18 @@ async function appendRoamNodeStatements(statements, note, roamIds, refIndex, opt
 async function incrementalRoamDbStatements(scanned, changedFiles) {
   const files = [...new Set((changedFiles || []).map((file) => resolveUserPath(file)).filter((file) => inside(file, noteRoot)))];
   if (files.length === 0) return null;
-  const fileSet = new Set(files);
-  const changedNotes = scanned.filter((note) => note.file && fileSet.has(note.file));
+  const fileKeySet = new Set(files.map(canonicalExistingPath));
+  const noteFileChanged = (note) => Boolean(note.file && fileKeySet.has(canonicalExistingPath(note.file)));
+  const changedNotes = scanned.filter(noteFileChanged);
   const changedIds = [...new Set(changedNotes.map((note) => note.id).filter(Boolean))];
   if (changedIds.length === 0) return null;
   const roamNotes = scanned.filter((note) => note.roam && note.file);
   const roamIds = new Set(roamNotes.map((note) => note.id));
   const refIndex = serverNoteReferenceIndex(roamNotes);
   const affectedSources = roamNotes.filter((note) =>
-    fileSet.has(note.file) || (note.refs || []).some((ref) => changedIds.includes(ref)));
+    noteFileChanged(note) || (note.refs || []).some((ref) => changedIds.includes(ref)));
   const linkRefreshFiles = [...new Set([...files, ...affectedSources.map((note) => note.file).filter(Boolean)])];
+  const changedDbFiles = [...new Set([...files, ...changedNotes.map((note) => note.file).filter(Boolean)])];
   const statements = [
     "PRAGMA foreign_keys = OFF;",
     "BEGIN;",
@@ -4037,13 +4068,13 @@ async function incrementalRoamDbStatements(scanned, changedFiles) {
     `DELETE FROM links WHERE file IN (${linkRefreshFiles.map(sqlString).join(", ")}) OR source_id IN (${changedIds.map(sqlString).join(", ")}) OR target_id IN (${changedIds.map(sqlString).join(", ")});`,
     `DELETE FROM tags WHERE node_id IN (${changedIds.map(sqlString).join(", ")});`,
     `DELETE FROM aliases WHERE node_id IN (${changedIds.map(sqlString).join(", ")});`,
-    `DELETE FROM nodes WHERE id IN (${changedIds.map(sqlString).join(", ")}) OR file IN (${files.map(sqlString).join(", ")});`,
-    `DELETE FROM files WHERE path IN (${files.map(sqlString).join(", ")});`,
+    `DELETE FROM nodes WHERE id IN (${changedIds.map(sqlString).join(", ")}) OR file IN (${changedDbFiles.map(sqlString).join(", ")});`,
+    `DELETE FROM files WHERE path IN (${changedDbFiles.map(sqlString).join(", ")});`,
   ];
   for (const note of changedNotes.filter((note) => note.roam && note.file)) {
     await appendRoamNodeStatements(statements, note, roamIds, refIndex, { includeNode: true });
   }
-  for (const note of affectedSources.filter((note) => !fileSet.has(note.file))) {
+  for (const note of affectedSources.filter((note) => !noteFileChanged(note))) {
     await appendRoamNodeStatements(statements, note, roamIds, refIndex, { includeNode: false });
   }
   statements.push("COMMIT;");
@@ -4778,7 +4809,7 @@ function markdownHrefMatch(href, note, oldKeys) {
   if (path.startsWith("/")) {
     const resolved = resolveUserPath(path);
     if (inside(resolved, noteRoot)) {
-      const rel = slashPath(relative(noteRoot, resolved));
+      const rel = slashPath(relativeCanonical(noteRoot, resolved));
       if ([...notePathKeyVariants(rel)].some((key) => oldKeys.has(key))) return { sourceDir, relative: false };
     }
     return null;

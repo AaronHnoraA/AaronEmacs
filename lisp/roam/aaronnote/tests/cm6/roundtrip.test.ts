@@ -1550,14 +1550,21 @@ $$
 
   test("renders note-code commands as highlighted read-only code cards", async () => {
     const previous = window.aaronnoteApi;
+    const openCalls: Array<{ file?: string; tag?: string }> = [];
     window.aaronnoteApi = {
       noteCode: {
         readRegion: async (body: unknown) => ({
           ok: true,
+          file: "/Proofs/Sample.lean",
           body: "theorem sample : True := by\n  trivial",
           language: "lean4",
           ...(body as Record<string, unknown>),
         }),
+      },
+      emacs: {
+        open: async (body: { file: string; tag?: string }) => {
+          openCalls.push(body);
+        },
       },
     };
     const md = "@@note-code(/Proofs/Sample.lean)[sample]\nplain";
@@ -1571,6 +1578,18 @@ $$
       expect(card!.textContent).toContain("theorem sample");
       expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
         .not.toContain("@@note-code");
+
+      const openButton = card!.querySelector<HTMLButtonElement>(".cm-note-code-open-btn");
+      expect(openButton).toBeTruthy();
+      expect(openButton!.disabled).toBe(false);
+      const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+      openButton!.dispatchEvent(down);
+      expect(down.defaultPrevented).toBe(true);
+
+      openButton!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      expect(openCalls).toEqual([]);
+      openButton!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true }));
+      expect(openCalls).toEqual([{ file: "/Proofs/Sample.lean", tag: "sample" }]);
     } finally {
       cleanup();
       window.aaronnoteApi = previous;

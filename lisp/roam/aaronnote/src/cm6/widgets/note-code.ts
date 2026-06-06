@@ -121,6 +121,11 @@ function highlightedCode(code: string, language: string): HTMLElement {
   return pre;
 }
 
+function primaryOpenModifier(event: MouseEvent): boolean {
+  if (event.metaKey && !event.ctrlKey) return true;
+  return !/Mac/.test(navigator.platform) && event.ctrlKey && !event.metaKey;
+}
+
 class NoteCodeWidget extends MeasuredWidget {
   notePath: string;
   spec: NoteCodeLine;
@@ -164,10 +169,24 @@ class NoteCodeWidget extends MeasuredWidget {
     header.append(title);
 
     const openBtn = document.createElement("button");
+    let openFile = "";
+    let openTag = "";
+    openBtn.type = "button";
     openBtn.className = "cm-note-code-open-btn";
     openBtn.textContent = "Open in Emacs";
+    openBtn.title = "Cmd-click to open in Emacs";
+    openBtn.setAttribute("aria-label", "Cmd-click to open in Emacs");
     openBtn.disabled = true;
-    openBtn.addEventListener("click", (e) => { e.stopPropagation(); });
+    openBtn.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    openBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!openFile || !primaryOpenModifier(event)) return;
+      void api.emacs.open({ file: openFile, tag: openTag });
+    });
     header.append(openBtn);
 
     wrap.append(header);
@@ -187,13 +206,9 @@ class NoteCodeWidget extends MeasuredWidget {
         } else {
           body.append(highlightedCode(result.body, result.language || "lean4"));
           if (result.file) {
-            const absFile = String(result.file);
-            const tag = this.spec.id;
+            openFile = String(result.file);
+            openTag = this.spec.id;
             openBtn.disabled = false;
-            openBtn.onclick = (e) => {
-              e.stopPropagation();
-              void api.emacs.open({ file: absFile, tag });
-            };
           }
         }
         scheduleViewportDecorationRefresh(view);
@@ -208,7 +223,7 @@ class NoteCodeWidget extends MeasuredWidget {
     return this.registerMeasured(wrap, view);
   }
 
-  ignoreEvent(): boolean { return false; }
+  ignoreEvent(): boolean { return true; }
 }
 
 function buildNoteCodeDecos(view: EditorView): DecorationSet {
