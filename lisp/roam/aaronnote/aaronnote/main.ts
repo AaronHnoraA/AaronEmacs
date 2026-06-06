@@ -165,6 +165,10 @@ const editorCommands = new Set<EditorCommand>([
 
 window.AaronnoteCurrentFile = () => currentFile;
 
+function roamFeaturesEnabled(): boolean {
+  return !currentStandalone;
+}
+
 function setStatus(message: string): void {
   statusLabel.textContent = message;
 }
@@ -929,7 +933,7 @@ function nextAnchorTagSuggestion(kind: "equation" | "inline"): string {
 
 function noteAnchorHref(note: NoteSummary | undefined, hash: string): string {
   const cleanHash = String(hash || "").replace(/^#/, "");
-  if (!currentStandalone && note?.roam) return roamHrefForNote(note, cleanHash);
+  if (roamFeaturesEnabled() && note?.roam) return roamHrefForNote(note, cleanHash);
   const target = note?.path || note?.link || currentFile || note?.file || fileNameFromPath(currentFile || "note.md");
   return `${encodeMarkdownHrefPath(target)}${cleanHash ? `#${cleanHash}` : ""}`;
 }
@@ -1157,6 +1161,10 @@ async function manageNoteTags(): Promise<void> {
 }
 
 async function insertRoamIdLink(): Promise<void> {
+  if (!roamFeaturesEnabled()) {
+    setStatus("Roam links are disabled for this standalone note");
+    return;
+  }
   const selection = editor.getMarkdownSelection();
   const selected = selection.from === selection.to ? "" : editor.textBetween(selection.from, selection.to).trim();
   const result = await openFormModal("Insert roam idlink", [
@@ -1256,6 +1264,10 @@ function changedRows(changed: unknown): Array<{ title: string; detail?: string; 
 }
 
 function showRoamToolRows(title: string, rows: Array<{ title: string; detail?: string; kind?: string }>): void {
+  if (!roamFeaturesEnabled()) {
+    setStatus("Roam tools are disabled for this standalone note");
+    return;
+  }
   roamToolsTitle.textContent = title;
   const frag = document.createDocumentFragment();
   if (rows.length === 0) {
@@ -1288,6 +1300,10 @@ function showRoamToolRows(title: string, rows: Array<{ title: string; detail?: s
 }
 
 async function renameRoamTagTool(): Promise<void> {
+  if (!roamFeaturesEnabled()) {
+    setStatus("Roam tools are disabled for this standalone note");
+    return;
+  }
   const result = await openFormModal("Rename roam tag", [
     { id: "from", label: "Current tag", type: "tags", value: "", suggestions: tagSuggestions() },
     { id: "to", label: "New tag", value: "" },
@@ -1306,6 +1322,10 @@ async function renameRoamTagTool(): Promise<void> {
 }
 
 async function deleteRoamTagTool(): Promise<void> {
+  if (!roamFeaturesEnabled()) {
+    setStatus("Roam tools are disabled for this standalone note");
+    return;
+  }
   const result = await openFormModal("Delete roam tag", [
     { id: "tag", label: "Tag", type: "tags", value: "", suggestions: tagSuggestions() },
     { id: "confirm", label: "Type DELETE to remove it from all roam notes", value: "" },
@@ -1323,6 +1343,10 @@ async function deleteRoamTagTool(): Promise<void> {
 }
 
 async function tagOverlapReportTool(): Promise<void> {
+  if (!roamFeaturesEnabled()) {
+    setStatus("Roam tools are disabled for this standalone note");
+    return;
+  }
   setStatus("Scanning tag overlap");
   try {
     const report = await api.roamTools.tagOverlap();
@@ -1346,6 +1370,10 @@ async function tagOverlapReportTool(): Promise<void> {
 }
 
 async function rewritePathRefsTool(): Promise<void> {
+  if (!roamFeaturesEnabled()) {
+    setStatus("Roam tools are disabled for this standalone note");
+    return;
+  }
   const result = await openFormModal("Rewrite path references", [
     { id: "oldPath", label: "Old target path", value: "", suggestions: pathSuggestions },
     { id: "newPath", label: "New target path", value: "", suggestions: pathSuggestions },
@@ -1371,8 +1399,14 @@ type ToolAction = {
 };
 
 function toolActions(): ToolAction[] {
-  return [
+  const common: ToolAction[] = [
     { id: "toc", title: "Toggle TOC", detail: "Page headings, anchors, tags, backlinks", run: () => { floatingTocPanel.toggle(); updateFloatingToc(); } },
+    { id: "tag-ref", title: "Tag / copy ref", detail: "Equation tag, inline anchor, reference copy", run: () => void tagOrCopyRef() },
+    { id: "reload-snippets", title: "Reload snippets", detail: "Refresh Emacs md/tex snippets", run: () => void reloadSnippets() },
+  ];
+  if (!roamFeaturesEnabled()) return common;
+  return [
+    ...common,
     { id: "reload-index", title: "Reload roam index", detail: "Refresh notes, tags, links", run: () => void reloadNotes(true) },
     { id: "add-meta", title: "Add meta", detail: "Register title/kind/tags", run: () => void quickAddMeta() },
     { id: "remove-meta", title: "Remove meta", detail: "Delete current note meta block", run: () => void unregisterMeta() },
@@ -1380,13 +1414,11 @@ function toolActions(): ToolAction[] {
     { id: "activate-roam", title: "Clear roam off", detail: "Activate current note in roam graph", run: () => void updateNoteMeta(api.meta.activateRoam, {}, "roam: off cleared") },
     { id: "add-tag", title: "Add tag", detail: "Append tags to current note", run: () => void addTag() },
     { id: "manage-tags", title: "Manage note tags", detail: "Replace current note tag list", run: () => void manageNoteTags() },
-    { id: "tag-ref", title: "Tag / copy ref", detail: "Equation tag, inline anchor, reference copy", run: () => void tagOrCopyRef() },
     { id: "insert-roam-idlink", title: "Insert roam idlink", detail: "Search roam note and insert id link", run: () => void insertRoamIdLink() },
     { id: "rename-tag", title: "Rename roam tag", detail: "Bulk rename tag in roam notes", run: () => void renameRoamTagTool() },
     { id: "delete-tag", title: "Delete roam tag", detail: "Bulk remove tag in roam notes", run: () => void deleteRoamTagTool() },
     { id: "tag-overlap", title: "Tag overlap report", detail: "Find duplicate/overlapping tags", run: () => void tagOverlapReportTool() },
     { id: "rewrite-paths", title: "Rewrite path refs", detail: "Bulk rewrite Markdown path links", run: () => void rewritePathRefsTool() },
-    { id: "reload-snippets", title: "Reload snippets", detail: "Refresh Emacs md/tex snippets", run: () => void reloadSnippets() },
   ];
 }
 
@@ -1891,6 +1923,7 @@ function matchingDomCompletions(note: NoteSummary, prefix: string, parentSegment
 }
 
 function matchingRoamCompletions(prefix: string): SnippetSummary[] {
+  if (!roamFeaturesEnabled()) return [];
   const needle = prefix.trim().toLowerCase();
   return notes
     .filter((note) => note.roam && canonicalRoamNoteId(note))
@@ -1966,7 +1999,7 @@ function matchingPathCompletions(prefix: string): SnippetSummary[] {
     .map((path) => {
       const displayPath = displayPathCompletion(path, prefix);
       const note = resolveHrefNote(displayPath);
-      const roamId = note?.roam ? canonicalRoamNoteId(note) : "";
+      const roamId = roamFeaturesEnabled() && note?.roam ? canonicalRoamNoteId(note) : "";
       return {
         key: displayPath,
         name: displayPath,
@@ -2005,6 +2038,7 @@ function linkTargetCompletionMatches(href: string, prefix: string): {
 
   const roamPrefix = targetPrefix.match(/^roam:\/\/(.*)$/i)?.[1];
   if (roamPrefix != null) {
+    if (!roamFeaturesEnabled()) return null;
     const matches = matchingRoamCompletions(roamPrefix);
     return { renderPrefix: `roam://${roamPrefix}`, deleteBefore: roamPrefix.length, matches };
   }
