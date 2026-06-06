@@ -6,7 +6,9 @@
 ;;; Code:
 
 (require 'init-funcs)
+(require 'init-md-roam-ui)
 (require 'cl-lib)
+(require 'json)
 (require 'seq)
 (require 'subr-x)
 (require 'transient)
@@ -768,32 +770,81 @@ Each entry is a plist with :id, :text, and :pos."
                   nil t)))
     (cdr (assoc choice table))))
 
+(defun my/aaronnote-roam--ui-actions (&optional leading)
+  "Return standard native roam view actions after optional LEADING actions."
+  (append
+   leading
+   '((:label "g Refresh"
+      :command my/aaronnote-roam-ui-refresh
+      :help "Refresh this Aaronnote roam view"
+      :primary t)
+     (:label "q Close"
+      :command quit-window
+      :help "Close this Aaronnote roam view"))))
+
+(defun my/aaronnote-roam--prepare-ui-buffer
+    (name title icon refresh-function &optional status)
+  "Prepare native roam buffer NAME with TITLE, ICON, REFRESH-FUNCTION, and STATUS."
+  (let ((buffer (get-buffer-create name)))
+    (with-current-buffer buffer
+      (unless (derived-mode-p 'my/aaronnote-roam-ui-mode)
+        (my/aaronnote-roam-ui-mode))
+      (setq-local my/aaronnote-roam-ui-refresh-function refresh-function)
+      (my/aaronnote-roam-ui-set-header title icon status))
+    buffer))
+
 (defun my/aaronnote-roam--show-toc (&optional file title)
   "Show a heading TOC for FILE or the current buffer."
-  (let* ((items (my/aaronnote-roam--heading-items file))
-         (buf (get-buffer-create "*roam-toc*"))
-         (target-file file))
+  (let* ((source-buffer (current-buffer))
+         (target-file (or file buffer-file-name))
+         (items (if file
+                    (my/aaronnote-roam--heading-items file)
+                  (with-current-buffer source-buffer
+                    (my/aaronnote-roam--heading-items))))
+         (display-title (or title file (buffer-name source-buffer)))
+         (refresh
+          (let ((source source-buffer) (f file) (label title))
+            (lambda ()
+              (if (buffer-live-p source)
+                  (with-current-buffer source
+                    (my/aaronnote-roam--show-toc f label))
+                (my/aaronnote-roam--show-toc f label)))))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*roam-toc*" "Roam TOC" 'toc refresh
+               (format "%d headings" (length items)))))
     (with-current-buffer buf
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert (format "TOC: %s\n\n" (or title (or file (buffer-name)))))
-        (if (null items)
-            (insert "(no headings)\n")
-          (dolist (item items)
-            (let ((pos (plist-get item :pos))
-                  (label (format "%s%s\n"
-                                 (make-string (* 2 (1- (plist-get item :level))) ?\s)
-                                 (plist-get item :text))))
-              (insert-text-button
-               label
-               'action (lambda (_)
-                         (when target-file
-                           (find-file target-file))
-                         (my/aaronnote-roam--goto-pos pos)
-                         (recenter-top-bottom))
-               'follow-link t))))
-        (goto-char (point-min))
-        (special-mode)))
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          "Table of contents"
+          :icon 'toc
+          :subtitle (format "%s" display-title)
+          :stats (list (cons (format "%d headings" (length items)) 'info))
+          :actions (my/aaronnote-roam--ui-actions))
+         (my/aaronnote-roam-ui-insert-section "Headings" (length items))
+         (if (null items)
+             (my/aaronnote-roam-ui-insert-empty "No headings in this note.")
+           (dolist (item items)
+             (let ((pos (plist-get item :pos))
+                   (level (plist-get item :level))
+                   (text (plist-get item :text)))
+               (my/aaronnote-roam-ui-insert-row
+                :id pos
+                :icon 'toc
+                :title text
+                :meta (format "H%d" level)
+                :indent (1- level)
+                :action
+                (let ((target target-file)
+                      (source source-buffer)
+                      (position pos))
+                  (lambda (_button)
+                    (cond
+                     (target (find-file target))
+                     ((buffer-live-p source) (pop-to-buffer source))
+                     (t (user-error "TOC source buffer is no longer available")))
+                    (my/aaronnote-roam--goto-pos position)
+                    (recenter-top-bottom))))))))))
     (display-buffer buf)))
 
 (defun my/aaronnote-roam-follow-link ()
@@ -836,54 +887,471 @@ Path-like refs are accepted and resolved to canonical note ids."
   (interactive)
   (my/aaronnote-roam-select-link))
 
-(defun my/aaronnote-roam-new-note (&optional slug title tags)
-  "Create a new roam note, prompting for SLUG, TITLE, and TAGS."
+(defvar-local my/aaronnote-roam-new--draft nil
+  "Draft plist edited by the current Roam New buffer.")
+
+(defvar-local my/aaronnote-roam-new--templates nil
+  "Template records available to the current Roam New buffer.")
+
+(defvar-local my/aaronnote-roam-new--base-directory ""
+  "Relative default directory used by the current Roam New buffer.")
+
+(defvar my/aaronnote-roam-new-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map my/aaronnote-roam-ui-mode-map)
+    (define-key map (kbd "c") #'my/aaronnote-roam-new-create)
+    (define-key map (kbd "R") #'my/aaronnote-roam-new-reset)
+    (define-key map (kbd "t") #'my/aaronnote-roam-new-edit-type)
+    (define-key map (kbd "T") #'my/aaronnote-roam-new-edit-template)
+    map)
+  "Keymap for `my/aaronnote-roam-new-mode'.")
+
+(define-derived-mode my/aaronnote-roam-new-mode my/aaronnote-roam-ui-mode "Roam-New"
+  "Native workbench for creating Aaronnote Markdown notes."
+  (setq-local my/aaronnote-roam-ui-refresh-function
+              #'my/aaronnote-roam-new-refresh)
+  (my/aaronnote-roam-ui-set-header "Roam New" 'new "draft"))
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'my/aaronnote-roam-new-mode 'emacs))
+
+(defun my/aaronnote-roam-new--normalize-directory (directory)
+  "Return DIRECTORY as a clean vault-relative directory."
+  (let ((directory
+         (replace-regexp-in-string
+          "/+\\'" ""
+          (replace-regexp-in-string
+           "\\`\\./" ""
+           (string-trim (or directory ""))))))
+    (if (member directory '("" "." "Root")) "" directory)))
+
+(defun my/aaronnote-roam-new--default-path (title &optional directory)
+  "Return the default Markdown path for TITLE in DIRECTORY."
+  (let ((directory (my/aaronnote-roam-new--normalize-directory directory))
+        (name (concat (my/aaronnote-roam--slugify-title title) ".md")))
+    (if (string-empty-p directory)
+        name
+      (concat directory "/" name))))
+
+(defun my/aaronnote-roam-new--normalize-tags (tags)
+  "Return TAGS as a clean string list."
+  (delete-dups
+   (seq-filter
+    (lambda (tag) (not (string-empty-p tag)))
+    (mapcar #'string-trim
+            (if (listp tags)
+                tags
+              (split-string (or tags "") "," t))))))
+
+(defun my/aaronnote-roam-new--default-draft (&optional directory)
+  "Return a default Roam New draft rooted in DIRECTORY."
+  (list :node-type "roam"
+        :title "Untitled"
+        :path (my/aaronnote-roam-new--default-path "Untitled" directory)
+        :kind "note"
+        :template-key "roam"
+        :tags nil))
+
+(defun my/aaronnote-roam-new--template-field (template field)
+  "Return FIELD from TEMPLATE, which may be a hash table or plist."
+  (if (hash-table-p template)
+      (gethash (substring (symbol-name field) 1) template)
+    (plist-get template field)))
+
+(defun my/aaronnote-roam-new--load-templates ()
+  "Return templates reported by the Aaronnote runtime."
+  (let ((response (my/aaronnote-roam--runtime-call "templates" "--force")))
+    (or (and response (gethash "templates" response))
+        '((:key "basic" :name "Basic Markdown note")
+          (:key "roam" :name "Roam note")))))
+
+(defun my/aaronnote-roam-new--template-label (key)
+  "Return a display label for template KEY."
+  (if (string-empty-p (or key ""))
+      "None"
+    (let ((template
+           (seq-find
+            (lambda (candidate)
+              (equal (my/aaronnote-roam-new--template-field candidate :key)
+                     key))
+            my/aaronnote-roam-new--templates)))
+      (or (and template
+               (my/aaronnote-roam-new--template-field template :name))
+          key))))
+
+(defun my/aaronnote-roam-new--template-candidates ()
+  "Return display-name and key pairs for available templates."
+  (let* ((active-kind (plist-get my/aaronnote-roam-new--draft :kind))
+         (templates
+          (seq-filter
+           (lambda (template)
+             (let ((kind
+                    (my/aaronnote-roam-new--template-field template :kind)))
+               (or (string-empty-p (or kind ""))
+                   (equal kind active-kind))))
+           my/aaronnote-roam-new--templates)))
+    (cons
+     '("None" . "")
+     (mapcar
+      (lambda (template)
+        (let ((key (my/aaronnote-roam-new--template-field template :key))
+              (name (my/aaronnote-roam-new--template-field template :name))
+              (kind (my/aaronnote-roam-new--template-field template :kind)))
+          (cons (format "%s%s"
+                        (or name key "Template")
+                        (if (string-empty-p (or kind ""))
+                            ""
+                          (format " (%s)" kind)))
+                key)))
+      templates))))
+
+(defun my/aaronnote-roam-new--path-suggestions ()
+  "Return vault-relative directory suggestions for Roam New."
+  (let ((root (file-name-as-directory (my/aaronnote-roam-root)))
+        (directories '("")))
+    (dolist (record (my/aaronnote-roam--note-records))
+      (when-let* ((file (plist-get record :file))
+                  ((file-name-absolute-p file))
+                  (relative (file-relative-name file root))
+                  (directory (file-name-directory relative)))
+        (push directory directories)))
+    (sort (delete-dups directories) #'string<)))
+
+(defun my/aaronnote-roam-new--tag-suggestions ()
+  "Return known roam tags for Roam New."
+  (sort
+   (delete-dups
+    (apply #'append
+           (mapcar
+            (lambda (record)
+              (my/aaronnote-roam--note-list-field
+               (plist-get record :note) "tags"))
+            (my/aaronnote-roam--note-records))))
+   #'string<))
+
+(defun my/aaronnote-roam-new--kind-suggestions ()
+  "Return known note kinds for Roam New."
+  (sort
+   (delete-dups
+    (cons "note"
+          (cons "default"
+                (delq nil
+                      (mapcar
+                       (lambda (record)
+                         (my/aaronnote-roam--note-field
+                          (plist-get record :note) "kind"))
+                       (my/aaronnote-roam--note-records))))))
+   #'string<))
+
+(defun my/aaronnote-roam-new--set (key value)
+  "Set draft KEY to VALUE and rerender the Roam New buffer."
+  (setq-local my/aaronnote-roam-new--draft
+              (plist-put my/aaronnote-roam-new--draft key value))
+  (my/aaronnote-roam-new-render))
+
+(defun my/aaronnote-roam-new-edit-type ()
+  "Edit the note type in the current Roam New draft."
   (interactive)
-  (let* ((slug (or slug (read-string "Slug (e.g. math/my-note): ")))
-         (title (or title
-                    (read-string "Title: "
-                                 (capitalize (replace-regexp-in-string
-                                              "[-/]" " "
-                                              (file-name-nondirectory slug))))))
-         (tags (or tags (read-string "Tags (comma-separated, or blank): ")))
-         (file (my/aaronnote-roam--slug-to-file slug))
-         (rel (file-relative-name file (my/aaronnote-roam-root)))
-         (tag-str (mapconcat #'string-trim (split-string tags "," t) ", ")))
-    (make-directory (file-name-directory file) t)
-    (find-file file)
-    (when (= (buffer-size) 0)
-      (insert (format "\
-#+begin meta
-id: %s
-title: %s
-date: %s
-kind: default
-tags: %s
-refs:
-source: roam/%s
-#+end meta
+  (let* ((old (plist-get my/aaronnote-roam-new--draft :node-type))
+         (next (completing-read "Note type: " '("roam" "regular")
+                                nil t nil nil old))
+         (template (plist-get my/aaronnote-roam-new--draft :template-key))
+         (kind (plist-get my/aaronnote-roam-new--draft :kind)))
+    (setq-local my/aaronnote-roam-new--draft
+                (plist-put my/aaronnote-roam-new--draft :node-type next))
+    (when (member template '("roam" "basic"))
+      (setq-local my/aaronnote-roam-new--draft
+                  (plist-put my/aaronnote-roam-new--draft :template-key
+                             (if (string= next "roam") "roam" "basic"))))
+    (when (member kind '("note" "default"))
+      (setq-local my/aaronnote-roam-new--draft
+                  (plist-put my/aaronnote-roam-new--draft :kind
+                             (if (string= next "roam") "note" "default"))))
+    (my/aaronnote-roam-new-render)))
 
-#+begin summary
-#+end summary
+(defun my/aaronnote-roam-new-edit-title ()
+  "Edit the title in the current Roam New draft."
+  (interactive)
+  (let* ((old-title (plist-get my/aaronnote-roam-new--draft :title))
+         (old-default
+          (my/aaronnote-roam-new--default-path
+           old-title my/aaronnote-roam-new--base-directory))
+         (title (read-string "Title: " old-title)))
+    (setq-local my/aaronnote-roam-new--draft
+                (plist-put my/aaronnote-roam-new--draft :title title))
+    (when (equal (plist-get my/aaronnote-roam-new--draft :path) old-default)
+      (setq-local my/aaronnote-roam-new--draft
+                  (plist-put
+                   my/aaronnote-roam-new--draft :path
+                   (my/aaronnote-roam-new--default-path
+                    title my/aaronnote-roam-new--base-directory))))
+    (my/aaronnote-roam-new-render)))
 
-# %s
+(defun my/aaronnote-roam-new-edit-path ()
+  "Edit the save path in the current Roam New draft."
+  (interactive)
+  (my/aaronnote-roam-new--set
+   :path
+   (completing-read "Save path: "
+                    (my/aaronnote-roam-new--path-suggestions)
+                    nil nil nil nil
+                    (plist-get my/aaronnote-roam-new--draft :path))))
 
-"
-                      slug title (format-time-string "%Y-%m-%d")
-                      tag-str rel title)))))
+(defun my/aaronnote-roam-new-edit-kind ()
+  "Edit the note kind in the current Roam New draft."
+  (interactive)
+  (my/aaronnote-roam-new--set
+   :kind
+   (completing-read "Kind: " (my/aaronnote-roam-new--kind-suggestions)
+                    nil nil nil nil
+                    (plist-get my/aaronnote-roam-new--draft :kind))))
+
+(defun my/aaronnote-roam-new-edit-template ()
+  "Edit the template in the current Roam New draft."
+  (interactive)
+  (let* ((candidates (my/aaronnote-roam-new--template-candidates))
+         (current (my/aaronnote-roam-new--template-label
+                   (plist-get my/aaronnote-roam-new--draft :template-key)))
+         (choice (completing-read "Template: " candidates nil t nil nil current)))
+    (my/aaronnote-roam-new--set :template-key
+                                (or (cdr (assoc choice candidates)) ""))))
+
+(defun my/aaronnote-roam-new-edit-tags ()
+  "Edit tags in the current Roam New draft."
+  (interactive)
+  (my/aaronnote-roam-new--set
+   :tags
+   (my/aaronnote-roam-new--normalize-tags
+    (completing-read-multiple
+     "Tags: " (my/aaronnote-roam-new--tag-suggestions)
+     nil nil
+     (string-join (plist-get my/aaronnote-roam-new--draft :tags) ", ")))))
+
+(defun my/aaronnote-roam-new--insert-field
+    (id icon label value detail action &optional tone)
+  "Insert one editable Roam New field."
+  (my/aaronnote-roam-ui-insert-row
+   :id id
+   :icon icon
+   :badge label
+   :badge-tone (or tone 'muted)
+   :title (if (and value (not (string-empty-p (format "%s" value))))
+              (format "%s" value)
+            "None")
+   :detail detail
+   :action (lambda (_ignored) (call-interactively action))
+   :help (format "RET/mouse-1: edit %s" (downcase label))))
+
+(defun my/aaronnote-roam-new-render ()
+  "Render the current Roam New draft."
+  (interactive)
+  (let* ((draft my/aaronnote-roam-new--draft)
+         (node-type (plist-get draft :node-type))
+         (title (plist-get draft :title))
+         (path (plist-get draft :path))
+         (kind (plist-get draft :kind))
+         (template-key (plist-get draft :template-key))
+         (template-label (my/aaronnote-roam-new--template-label template-key))
+         (tags (plist-get draft :tags))
+         (id (plist-get draft :id)))
+    (my/aaronnote-roam-ui-set-header
+     "Roam New" 'new (format "%s draft" node-type))
+    (my/aaronnote-roam-ui-render
+     (lambda ()
+       (my/aaronnote-roam-ui-insert-page-header
+        "New note"
+        :icon 'new
+        :subtitle "Aaronnote-compatible draft: edit fields, then create"
+        :stats (list (cons (upcase node-type)
+                           (if (string= node-type "roam") 'info 'muted))
+                     (cons template-label 'muted))
+        :actions
+        '((:label "c Create"
+           :command my/aaronnote-roam-new-create
+           :help "Create this note through the Aaronnote runtime"
+           :primary t)
+          (:label "t Type"
+           :command my/aaronnote-roam-new-edit-type
+           :help "Switch between roam and regular Markdown notes")
+          (:label "T Template"
+           :command my/aaronnote-roam-new-edit-template
+           :help "Choose a Markdown template")
+          (:label "R Reset"
+           :command my/aaronnote-roam-new-reset
+           :help "Reset this draft")
+          (:label "q Close"
+           :command quit-window
+           :help "Close without creating")))
+       (my/aaronnote-roam-ui-insert-section "Draft" 6)
+       (my/aaronnote-roam-new--insert-field
+        'type 'status "TYPE" node-type
+        "Roam notes join the graph; regular notes are marked roam: off."
+        #'my/aaronnote-roam-new-edit-type
+        (if (string= node-type "roam") 'info 'muted))
+       (my/aaronnote-roam-new--insert-field
+        'title 'note "TITLE" title
+        "Used for the heading, metadata, and default save path."
+        #'my/aaronnote-roam-new-edit-title)
+       (my/aaronnote-roam-new--insert-field
+        'path 'path "SAVE PATH" path
+        "Vault-relative .md or .markdown path."
+        #'my/aaronnote-roam-new-edit-path)
+       (my/aaronnote-roam-new--insert-field
+        'kind 'status "KIND" kind
+        "Controls Aaronnote note-kind behavior."
+        #'my/aaronnote-roam-new-edit-kind)
+       (my/aaronnote-roam-new--insert-field
+        'template 'template "TEMPLATE" template-label
+        "Template variables and tabstops are expanded by Aaronnote."
+        #'my/aaronnote-roam-new-edit-template)
+       (my/aaronnote-roam-new--insert-field
+        'tags 'tag "TAGS" (and tags (string-join tags ", "))
+        "Comma-separated graph tags with completion from the vault."
+        #'my/aaronnote-roam-new-edit-tags)
+       (insert "\n")
+       (my/aaronnote-roam-ui-insert-section "Result")
+       (my/aaronnote-roam-ui-insert-field
+        "Node ID" (or id (if (string= node-type "roam")
+                             "timestamped on create"
+                           "none")))
+       (my/aaronnote-roam-ui-insert-field
+        "Absolute path"
+        (abbreviate-file-name
+         (expand-file-name path (my/aaronnote-roam-root)))
+        'my/aaronnote-roam-ui-path)
+       (my/aaronnote-roam-ui-insert-field
+        "Create engine" "Aaronnote runtime" 'my/aaronnote-roam-ui-meta)))
+    (unless (get-text-property (point) 'my/aaronnote-roam-ui-item-id)
+      (my/aaronnote-roam-ui-goto-first-item))))
+
+(defun my/aaronnote-roam-new-refresh ()
+  "Reload templates and rerender the current Roam New draft."
+  (interactive)
+  (setq-local my/aaronnote-roam-new--templates
+              (my/aaronnote-roam-new--load-templates))
+  (my/aaronnote-roam-new-render))
+
+(defun my/aaronnote-roam-new-reset ()
+  "Reset the current Roam New draft."
+  (interactive)
+  (setq-local my/aaronnote-roam-new--draft
+              (my/aaronnote-roam-new--default-draft
+               my/aaronnote-roam-new--base-directory))
+  (my/aaronnote-roam-new-render))
+
+(defun my/aaronnote-roam-new (&optional base-directory draft)
+  "Open the native Roam New workbench.
+BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist."
+  (interactive)
+  (let* ((base-directory
+          (my/aaronnote-roam-new--normalize-directory
+           (or base-directory
+               (when-let* ((file buffer-file-name)
+                           ((file-in-directory-p file
+                                                 (my/aaronnote-roam-root))))
+                 (file-relative-name
+                  (file-name-directory file)
+                  (my/aaronnote-roam-root)))
+               "")))
+         (buffer (get-buffer-create "*roam-new*")))
+    (with-current-buffer buffer
+      (my/aaronnote-roam-new-mode)
+      (setq-local my/aaronnote-roam-new--base-directory base-directory
+                  my/aaronnote-roam-new--templates
+                  (my/aaronnote-roam-new--load-templates)
+                  my/aaronnote-roam-new--draft
+                  (or draft
+                      (my/aaronnote-roam-new--default-draft base-directory)))
+      (my/aaronnote-roam-new-render))
+    (pop-to-buffer buffer)))
+
+(defun my/aaronnote-roam-new--payload (draft)
+  "Return Aaronnote runtime JSON payload for DRAFT."
+  (delq nil
+        `((nodeType . ,(plist-get draft :node-type))
+          (title . ,(plist-get draft :title))
+          (path . ,(plist-get draft :path))
+          (kind . ,(plist-get draft :kind))
+          (templateKey . ,(or (plist-get draft :template-key) ""))
+          (tags . ,(vconcat (plist-get draft :tags)))
+          ,(when-let* ((id (plist-get draft :id)))
+             `(id . ,id)))))
+
+(defun my/aaronnote-roam-new--create-draft (draft)
+  "Create and open DRAFT through the Aaronnote runtime."
+  (let* ((title (string-trim (or (plist-get draft :title) "")))
+         (path (string-trim (or (plist-get draft :path) ""))))
+    (when (string-empty-p title)
+      (user-error "Title cannot be empty"))
+    (when (string-empty-p path)
+      (user-error "Save path cannot be empty"))
+    (let* ((response
+            (my/aaronnote-roam--runtime-call
+             "create" "--json"
+             (json-encode (my/aaronnote-roam-new--payload draft))))
+           (file (and response (gethash "file" response))))
+      (unless (and file (file-exists-p file))
+        (user-error "Aaronnote runtime did not create the note"))
+      (my/aaronnote-roam--clear-runtime-cache)
+      (when (derived-mode-p 'my/aaronnote-roam-new-mode)
+        (kill-buffer (current-buffer)))
+      (if (fboundp 'my/aaronnote-open-file)
+          (my/aaronnote-open-file file)
+        (find-file file))
+      file)))
+
+(defun my/aaronnote-roam-new-create ()
+  "Create the current Roam New draft."
+  (interactive)
+  (my/aaronnote-roam-new--create-draft my/aaronnote-roam-new--draft))
+
+(defun my/aaronnote-roam-new-note (&optional slug title tags)
+  "Create a roam note, or open Roam New when called interactively.
+Non-interactive SLUG, TITLE, and TAGS calls preserve compatibility with link
+creation commands while using the Aaronnote runtime."
+  (interactive)
+  (if (called-interactively-p 'interactive)
+      (my/aaronnote-roam-new)
+    (let* ((slug (my/aaronnote-roam--strip-vault-prefix (or slug "")))
+           (path (if (my/aaronnote-roam--ref-has-extension-p slug)
+                     slug
+                   (concat slug ".md")))
+           (id (file-name-sans-extension slug))
+           (title
+            (or title
+                (capitalize
+                 (replace-regexp-in-string
+                  "[-_/]" " " (file-name-nondirectory id))))))
+      (my/aaronnote-roam-new--create-draft
+       (list :node-type "roam"
+             :id id
+             :title title
+             :path path
+             :kind "note"
+             :template-key "roam"
+             :tags (my/aaronnote-roam-new--normalize-tags tags))))))
 
 (defun my/aaronnote-roam-new-node (&optional title directory)
-  "Create a new timestamped Markdown roam node from TITLE in DIRECTORY."
+  "Open Roam New, or create a timestamped node from TITLE in DIRECTORY."
   (interactive)
-  (let* ((title (or title (read-string "Node title: ")))
-         (directory (or directory (read-string "Directory [.]: " nil nil ".")))
-         (id (format "%s-%s"
-                     (my/aaronnote-roam--timestamp-id)
-                     (my/aaronnote-roam--slugify-title title)))
-         (slug (if (string= directory ".")
-                   id
-                 (concat (string-remove-suffix "/" directory) "/" id))))
-    (my/aaronnote-roam-new-note slug title "")))
+  (if (called-interactively-p 'interactive)
+      (my/aaronnote-roam-new directory)
+    (let* ((title (or title "Untitled"))
+           (directory (my/aaronnote-roam-new--normalize-directory directory))
+           (id (format "%s-%s"
+                       (my/aaronnote-roam--timestamp-id)
+                       (my/aaronnote-roam--slugify-title title)))
+           (path (if (string-empty-p directory)
+                     (concat id ".md")
+                   (concat directory "/" id ".md"))))
+      (my/aaronnote-roam-new--create-draft
+       (list :node-type "roam"
+             :id id
+             :title title
+             :path path
+             :kind "note"
+             :template-key "roam"
+             :tags nil)))))
 
 ;; ── Roam DB ──────────────────────────────────────────────────────────────────
 
@@ -1368,31 +1836,47 @@ With prefix argument FULL, force a full roam-db rebuild."
       (my/aaronnote-roam--runtime-sync full nil)
     (message "Markdown roam cache refreshed")))
 
-(defun my/aaronnote-roam-backlinks ()
+(defun my/aaronnote-roam--summary-entry-for-slug (slug &optional summaries)
+  "Return a note summary entry for SLUG from optional SUMMARIES."
+  (or (seq-find (lambda (entry)
+                  (equal (plist-get entry :slug) slug))
+                (or summaries (my/aaronnote-roam--all-note-summaries)))
+      (list :slug slug
+            :title (my/aaronnote-roam--note-title slug)
+            :tags (my/aaronnote-roam--note-tags slug)
+            :summary (my/aaronnote-roam--note-summary slug))))
+
+(defun my/aaronnote-roam-backlinks (&optional target-slug)
   "Show backlinks for the current note in a dedicated buffer."
   (interactive)
-  (let* ((slug (my/aaronnote-roam--current-slug))
+  (let* ((slug (or target-slug (my/aaronnote-roam--current-slug)))
          (note (and slug (my/aaronnote-roam--db-note slug)))
          (bls  (or (and slug (my/aaronnote-roam--db-backlinks-to slug))
                    (and note (gethash "backlinks" note))))
-         (buf  (get-buffer-create "*roam-backlinks*")))
+         (summaries (my/aaronnote-roam--all-note-summaries))
+         (refresh (let ((target slug))
+                    (lambda () (my/aaronnote-roam-backlinks target))))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*roam-backlinks*" "Roam Backlinks" 'backlink refresh
+               (format "%d backlinks" (length bls)))))
     (unless slug (user-error "Not in a roam note"))
     (with-current-buffer buf
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert (format "Backlinks for: %s\n\n"
-                        (if note (gethash "title" note) slug)))
-        (if (null bls)
-            (insert "(no backlinks)\n")
-          (dolist (bl bls)
-            (let* ((bl-note (my/aaronnote-roam--db-note bl))
-                   (title   (if bl-note (gethash "title" bl-note) bl)))
-              (insert-text-button
-               (format "  %-40s %s\n" title bl)
-               'action (lambda (_) (my/aaronnote-roam--open-slug bl))
-               'follow-link t))))
-        (goto-char (point-min))
-        (special-mode)))
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          "Backlinks"
+          :icon 'backlink
+          :subtitle (format "References to %s"
+                            (or (and note (gethash "title" note)) slug))
+          :stats (list (cons (format "%d backlinks" (length bls)) 'info))
+          :actions (my/aaronnote-roam--ui-actions))
+         (my/aaronnote-roam-ui-insert-section "Referenced by" (length bls))
+         (if (null bls)
+             (my/aaronnote-roam-ui-insert-empty
+              "No notes currently link to this note.")
+           (dolist (bl bls)
+             (my/aaronnote-roam--insert-note-button
+              (my/aaronnote-roam--summary-entry-for-slug bl summaries)))))))
     (display-buffer buf)))
 
 (defun my/aaronnote-roam-tags ()
@@ -1438,48 +1922,117 @@ With prefix argument FULL, force a full roam-db rebuild."
               (forward-line 1))))))
     (nreverse todos)))
 
-(defun my/aaronnote-roam-todos ()
-  "List all vault todos in a *roam-todos* buffer."
-  (interactive)
+(defun my/aaronnote-roam--todos ()
+  "Return todos from the Aaronnote runtime, roam DB, or local scan."
   (let* ((runtime (my/aaronnote-roam--runtime-call "todos"))
          (runtime-todos (and runtime (gethash "todos" runtime)))
          (runtime-todos (if (hash-table-p runtime-todos)
                             (gethash "todos" runtime-todos)
                           runtime-todos))
-         (db    (my/aaronnote-roam--db))
-         (todos (or runtime-todos
-                    (and db (gethash "todos" db))
-                    (my/aaronnote-roam--scan-todos)))
-         (buf   (get-buffer-create "*roam-todos*")))
+         (db (my/aaronnote-roam--db)))
+    (or runtime-todos
+        (and db (gethash "todos" db))
+        (my/aaronnote-roam--scan-todos))))
+
+(defun my/aaronnote-roam--todo-field (entry &rest keys)
+  "Return the first non-nil field from todo ENTRY matching KEYS."
+  (seq-some
+   (lambda (key)
+     (cond
+      ((hash-table-p entry) (gethash key entry))
+      ((plistp entry) (plist-get entry (intern (concat ":" key))))
+      ((listp entry)
+       (or (cdr (assoc key entry))
+           (cdr (assq (intern key) entry))))
+      (t nil)))
+   keys))
+
+(defun my/aaronnote-roam--todo-status (entry)
+  "Return normalized status string for todo ENTRY."
+  (downcase (format "%s" (or (my/aaronnote-roam--todo-field entry "status")
+                              "todo"))))
+
+(defun my/aaronnote-roam--todo-tone (entry)
+  "Return display tone for todo ENTRY."
+  (pcase (my/aaronnote-roam--todo-status entry)
+    ((or "done" "complete" "completed") 'success)
+    ((or "blocked" "cancelled" "canceled") 'danger)
+    ((or "doing" "waiting" "in-progress") 'warning)
+    (_ 'info)))
+
+(defun my/aaronnote-roam--visit-todo (entry)
+  "Open the note and source line represented by todo ENTRY."
+  (let ((note-slug (my/aaronnote-roam--todo-field
+                    entry "note" "noteId" "noteKey" "path"))
+        (line (my/aaronnote-roam--todo-field entry "line")))
+    (unless note-slug
+      (user-error "Todo has no source note"))
+    (my/aaronnote-roam--open-slug note-slug)
+    (when (integerp line)
+      (goto-char (point-min))
+      (forward-line (1- line))
+      (recenter))))
+
+(defun my/aaronnote-roam--insert-todo-row (entry &optional deadline-tone)
+  "Insert a compact task row for ENTRY using optional DEADLINE-TONE."
+  (let* ((note-slug (my/aaronnote-roam--todo-field
+                     entry "note" "noteId" "noteKey" "path"))
+         (note-title (or (my/aaronnote-roam--todo-field
+                          entry "title" "noteTitle")
+                         note-slug
+                         "Unknown note"))
+         (text (or (my/aaronnote-roam--todo-field
+                    entry "text" "context" "source")
+                   "(empty todo)"))
+         (line (my/aaronnote-roam--todo-field entry "line"))
+         (ddl (my/aaronnote-roam--todo-ddl entry))
+         (status (my/aaronnote-roam--todo-status entry))
+         (meta (string-join
+                (delq nil
+                      (list (and ddl (format "DDL %s" ddl))
+                            (and (integerp line) (format "line %d" line))))
+                "  ·  ")))
+    (my/aaronnote-roam-ui-insert-row
+     :id (list note-slug line text)
+     :icon 'todo
+     :badge (upcase status)
+     :badge-tone (or deadline-tone (my/aaronnote-roam--todo-tone entry))
+     :title text
+     :meta meta
+     :detail note-title
+     :action (let ((todo entry))
+               (lambda (_button)
+                 (my/aaronnote-roam--visit-todo todo))))))
+
+(defun my/aaronnote-roam-todos ()
+  "List all vault todos in a *roam-todos* buffer."
+  (interactive)
+  (let* ((todos (my/aaronnote-roam--todos))
+         (active (seq-count
+                  (lambda (entry)
+                    (not (member (my/aaronnote-roam--todo-status entry)
+                                 '("done" "complete" "completed"
+                                   "cancelled" "canceled"))))
+                  todos))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*roam-todos*" "Roam Tasks" 'todo
+               #'my/aaronnote-roam-todos
+               (format "%d tasks" (length todos)))))
     (with-current-buffer buf
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert "Roam TODOs\n\n")
-        (if (null todos)
-            (insert "(none)\n")
-          (dolist (entry todos)
-            (let* ((note-slug (or (gethash "note" entry)
-                                  (gethash "noteId" entry)
-                                  (gethash "noteKey" entry)
-                                  (gethash "path" entry)))
-                   (title     (or (gethash "title" entry)
-                                  (gethash "noteTitle" entry)
-                                  note-slug))
-                   (text      (or (gethash "text" entry)
-                                  (gethash "context" entry)
-                                  (gethash "source" entry)
-                                  ""))
-                   (line      (gethash "line" entry)))
-              (insert-text-button
-               (format "  [%s]  %s\n" title text)
-               'action (lambda (_)
-                         (my/aaronnote-roam--open-slug note-slug)
-                         (when (integerp line)
-                           (goto-char (point-min))
-                           (forward-line (1- line))))
-               'follow-link t))))
-        (goto-char (point-min))
-        (special-mode)))
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          "Tasks"
+          :icon 'todo
+          :subtitle "All indexed Aaronnote Markdown tasks"
+          :stats (list (cons (format "%d active" active) 'warning)
+                       (cons (format "%d total" (length todos)) 'info))
+          :actions (my/aaronnote-roam--ui-actions))
+         (my/aaronnote-roam-ui-insert-section "All tasks" (length todos))
+         (if (null todos)
+             (my/aaronnote-roam-ui-insert-empty "No indexed tasks.")
+           (dolist (entry todos)
+             (my/aaronnote-roam--insert-todo-row entry))))))
     (display-buffer buf)))
 
 ;; ── Aaronnote-style note tools ────────────────────────────────────────────────
@@ -1488,34 +2041,52 @@ With prefix argument FULL, force a full roam-db rebuild."
   "Insert a clickable note button for summary ENTRY with PREFIX."
   (let* ((slug (plist-get entry :slug))
          (title (or (plist-get entry :title) slug))
+         (path (or (plist-get entry :path) slug))
          (tags (plist-get entry :tags))
-         (summary (plist-get entry :summary)))
-    (insert-text-button
-     (format "%s%-42s %s\n"
-             (or prefix "")
-             title
-             slug)
-     'action (lambda (_) (my/aaronnote-roam--open-slug slug))
-     'follow-link t)
-    (when tags
-      (insert (format "    #%s\n" (string-join tags " #"))))
-    (when (and summary (not (string-empty-p summary)))
-      (insert (format "    %s\n" summary)))))
+         (summary (plist-get entry :summary))
+         (indent (/ (length (or prefix "")) 2)))
+    (my/aaronnote-roam-ui-insert-row
+     :id slug
+     :icon 'note
+     :title title
+     :meta path
+     :detail summary
+     :tags tags
+     :indent indent
+     :action (let ((target slug))
+               (lambda (_button)
+                 (my/aaronnote-roam--open-slug target))))))
 
-(defun my/aaronnote-roam--show-note-list (title entries &optional empty-text)
+(defun my/aaronnote-roam--show-note-list
+    (title entries &optional empty-text refresh-function icon)
   "Show TITLE and note ENTRIES in a special buffer."
-  (let ((buf (get-buffer-create "*aaronnote-roam-notes*")))
+  (let* ((refresh
+          (or refresh-function
+              (let ((page-title title)
+                    (page-entries entries)
+                    (page-empty empty-text)
+                    (page-icon icon))
+                (lambda ()
+                  (my/aaronnote-roam--show-note-list
+                   page-title page-entries page-empty nil page-icon)))))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*aaronnote-roam-notes*" title (or icon 'note) refresh
+               (format "%d notes" (length entries)))))
     (with-current-buffer buf
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert title "\n\n")
-        (if (null entries)
-            (insert (or empty-text "(no notes)") "\n")
-          (dolist (entry entries)
-            (my/aaronnote-roam--insert-note-button entry)
-            (insert "\n")))
-        (goto-char (point-min))
-        (special-mode)))
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          title
+          :icon (or icon 'note)
+          :subtitle "Aaronnote Markdown roam notes"
+          :stats (list (cons (format "%d notes" (length entries)) 'info))
+          :actions (my/aaronnote-roam--ui-actions))
+         (my/aaronnote-roam-ui-insert-section "Notes" (length entries))
+         (if (null entries)
+             (my/aaronnote-roam-ui-insert-empty
+              (or empty-text "No notes."))
+           (dolist (entry entries)
+             (my/aaronnote-roam--insert-note-button entry))))))
     (display-buffer buf)))
 
 (defun my/aaronnote-roam-search-notes (&optional query)
@@ -1537,7 +2108,11 @@ With prefix argument FULL, force a full roam-db rebuild."
           (my/aaronnote-roam--show-note-list
            (format "Markdown roam search: %s" query)
            entries
-           "(no matching notes)"))
+           "No matching notes."
+           (let ((search-query query))
+             (lambda ()
+               (my/aaronnote-roam-search-notes search-query)))
+           'search))
       entries)))
 
 (defun my/aaronnote-roam-recent-notes ()
@@ -1554,12 +2129,14 @@ With prefix argument FULL, force a full roam-db rebuild."
             (seq-filter (lambda (slug)
                           (file-exists-p (my/aaronnote-roam--slug-to-file slug)))
                         my/aaronnote-roam--recent)))
-   "(no recent notes)"))
+   "No recent notes."
+   #'my/aaronnote-roam-recent-notes
+   'note))
 
-(defun my/aaronnote-roam-related-notes ()
+(defun my/aaronnote-roam-related-notes (&optional target-slug)
   "Show outgoing links and backlinks for the current note."
   (interactive)
-  (let* ((slug (my/aaronnote-roam--current-slug))
+  (let* ((slug (or target-slug (my/aaronnote-roam--current-slug)))
          (links (and slug (my/aaronnote-roam--note-links slug)))
          (backlinks (and slug (my/aaronnote-roam--db-backlinks-to slug)))
          (summaries (my/aaronnote-roam--all-note-summaries))
@@ -1567,26 +2144,40 @@ With prefix argument FULL, force a full roam-db rebuild."
                     (seq-find (lambda (entry)
                                 (equal (plist-get entry :slug) target))
                               summaries)))
-         (buf (get-buffer-create "*aaronnote-roam-related*")))
+         (refresh (let ((target slug))
+                    (lambda () (my/aaronnote-roam-related-notes target))))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*aaronnote-roam-related*" "Related Notes" 'related refresh
+               (format "%d links · %d backlinks"
+                       (length links) (length backlinks)))))
     (unless slug (user-error "Not in a roam note"))
     (with-current-buffer buf
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert (format "Related notes: %s\n\n" slug))
-        (insert "Links\n\n")
-        (if links
-            (dolist (target links)
-              (when-let* ((entry (funcall by-slug target)))
-                (my/aaronnote-roam--insert-note-button entry "  ")))
-          (insert "  (none)\n"))
-        (insert "\nBacklinks\n\n")
-        (if backlinks
-            (dolist (target backlinks)
-              (when-let* ((entry (funcall by-slug target)))
-                (my/aaronnote-roam--insert-note-button entry "  ")))
-          (insert "  (none)\n"))
-        (goto-char (point-min))
-        (special-mode)))
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          "Related notes"
+          :icon 'related
+          :subtitle (my/aaronnote-roam--note-title slug)
+          :stats (list (cons (format "%d outgoing" (length links)) 'info)
+                       (cons (format "%d backlinks" (length backlinks)) 'muted))
+          :actions (my/aaronnote-roam--ui-actions))
+         (my/aaronnote-roam-ui-insert-section "Outgoing links" (length links))
+         (if links
+             (dolist (target links)
+               (when-let* ((entry (or (funcall by-slug target)
+                                      (my/aaronnote-roam--summary-entry-for-slug
+                                       target summaries))))
+                 (my/aaronnote-roam--insert-note-button entry)))
+           (my/aaronnote-roam-ui-insert-empty "No outgoing note links."))
+         (insert "\n")
+         (my/aaronnote-roam-ui-insert-section "Backlinks" (length backlinks))
+         (if backlinks
+             (dolist (target backlinks)
+               (when-let* ((entry (or (funcall by-slug target)
+                                      (my/aaronnote-roam--summary-entry-for-slug
+                                       target summaries))))
+                 (my/aaronnote-roam--insert-note-button entry)))
+           (my/aaronnote-roam-ui-insert-empty "No backlinks.")))))
     (display-buffer buf)))
 
 (defun my/aaronnote-roam-management ()
@@ -1595,34 +2186,53 @@ With prefix argument FULL, force a full roam-db rebuild."
   (let* ((entries (my/aaronnote-roam--all-note-summaries))
          (db (my/aaronnote-roam--db))
          (generated (and db (gethash "generated" db)))
-         (buf (get-buffer-create "*aaronnote-roam-management*")))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*aaronnote-roam-management*" "Roam Management" 'management
+               #'my/aaronnote-roam-management
+               (format "%d nodes" (length entries)))))
     (with-current-buffer buf
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert "Markdown roam management\n\n")
-        (insert (format "Root: %s\n" (my/aaronnote-roam-root)))
-        (insert (format "Nodes: %d\n" (length entries)))
-        (insert (format "DB generated: %s\n\n" (or generated "unknown")))
-        (insert-text-button "Sync roam-db"
-                            'action (lambda (_) (my/aaronnote-roam-update-db))
-                            'follow-link t)
-        (insert "\n")
-        (insert-text-button "New node"
-                            'action (lambda (_) (call-interactively #'my/aaronnote-roam-new-node))
-                            'follow-link t)
-        (insert "\n")
-        (insert-text-button "Search notes"
-                            'action (lambda (_) (call-interactively #'my/aaronnote-roam-search-notes))
-                            'follow-link t)
-        (goto-char (point-min))
-        (special-mode)))
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          "Roam management"
+          :icon 'management
+          :subtitle "Index status and common Aaronnote operations"
+          :stats (list (cons (format "%d nodes" (length entries)) 'info)
+                       (cons (if generated "DB ready" "DB unknown")
+                             (if generated 'success 'warning)))
+          :actions (my/aaronnote-roam--ui-actions))
+         (my/aaronnote-roam-ui-insert-section "Index")
+         (my/aaronnote-roam-ui-insert-field
+          "Root" (abbreviate-file-name (my/aaronnote-roam-root))
+          'my/aaronnote-roam-ui-path)
+         (my/aaronnote-roam-ui-insert-field "Nodes" (length entries))
+         (my/aaronnote-roam-ui-insert-field
+          "DB generated" (or generated "unknown")
+          'my/aaronnote-roam-ui-meta)
+         (insert "\n")
+         (my/aaronnote-roam-ui-insert-section "Actions")
+         (insert "   ")
+         (my/aaronnote-roam-ui-insert-actions
+          '((:label "Sync roam-db"
+             :command my/aaronnote-roam-update-db
+             :help "Run incremental roam-db sync"
+             :primary t)
+            (:label "New note"
+             :command my/aaronnote-roam-new-note
+             :help "Open the native Roam New workbench")
+            (:label "Search notes"
+             :command my/aaronnote-roam-search-notes
+             :help "Search Aaronnote roam notes")
+            (:label "DB status"
+             :command my/aaronnote-roam-db-status
+             :help "Open roam-db status"))))))
     (display-buffer buf)))
 
 ;; ── Roam agenda ─────────────────────────────────────────────────────────────
 
 (defun my/aaronnote-roam--todo-ddl (entry)
   "Return deadline string for todo ENTRY, or nil."
-  (let ((ddl (or (gethash "ddl" entry) (gethash "deadline" entry))))
+  (let ((ddl (my/aaronnote-roam--todo-field entry "ddl" "deadline")))
     (and ddl (not (string-empty-p (or ddl ""))) ddl)))
 
 (defun my/aaronnote-roam--todo-overdue-p (ddl)
@@ -1635,20 +2245,12 @@ With prefix argument FULL, force a full roam-db rebuild."
 (defun my/aaronnote-roam-agenda ()
   "Show a roam notes agenda: todos from md notes grouped by status/ddl."
   (interactive)
-  (let* ((runtime (my/aaronnote-roam--runtime-call "todos"))
-         (runtime-todos (and runtime (gethash "todos" runtime)))
-         (runtime-todos (if (hash-table-p runtime-todos)
-                            (gethash "todos" runtime-todos)
-                          runtime-todos))
-         (db    (my/aaronnote-roam--db))
-         (todos (or runtime-todos
-                    (and db (gethash "todos" db))
-                    (my/aaronnote-roam--scan-todos)))
+  (let* ((todos (my/aaronnote-roam--todos))
          (overdue nil) (today nil) (upcoming nil) (no-ddl nil)
          (today-str (format-time-string "%Y-%m-%d")))
     (dolist (entry (or todos '()))
       (let ((ddl (my/aaronnote-roam--todo-ddl entry))
-            (status (or (gethash "status" entry) "")))
+            (status (my/aaronnote-roam--todo-status entry)))
         (unless (member status '("done" "cancelled"))
           (cond
            ((and ddl (my/aaronnote-roam--todo-overdue-p ddl))
@@ -1657,47 +2259,40 @@ With prefix argument FULL, force a full roam-db rebuild."
             (push entry today))
            (ddl (push entry upcoming))
            (t   (push entry no-ddl))))))
-    (let ((buf (get-buffer-create "*roam-agenda*")))
+    (let* ((open-count (+ (length overdue) (length today)
+                          (length upcoming) (length no-ddl)))
+           (buf (my/aaronnote-roam--prepare-ui-buffer
+                 "*roam-agenda*" "Roam Agenda" 'agenda
+                 #'my/aaronnote-roam-agenda
+                 (format "%d open" open-count))))
       (with-current-buffer buf
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (insert (format "Roam Agenda  %s\n\n" today-str))
-          (cl-flet ((insert-group
-                     (title group)
-                     (when group
-                       (insert (format "%s\n%s\n" title (make-string (length title) ?-)))
-                       (dolist (entry (nreverse group))
-                         (let* ((note-slug (or (gethash "note" entry)
-                                               (gethash "noteId" entry)
-                                               (gethash "path" entry)))
-                                (title (or (gethash "title" entry)
-                                           (gethash "noteTitle" entry)
-                                           note-slug))
-                                (text  (or (gethash "text" entry)
-                                           (gethash "context" entry) ""))
-                                (ddl   (my/aaronnote-roam--todo-ddl entry))
-                                (line  (gethash "line" entry)))
-                           (insert-text-button
-                            (format "  %-12s  %-32s  %s\n"
-                                    (or ddl "")
-                                    (truncate-string-to-width (or title "") 32 nil nil "…")
-                                    text)
-                            'action (let ((s note-slug) (l line))
-                                      (lambda (_)
-                                        (my/aaronnote-roam--open-slug s)
-                                        (when (integerp l)
-                                          (goto-char (point-min))
-                                          (forward-line (1- l)))))
-                            'follow-link t)))
-                       (insert "\n"))))
-            (insert-group "OVERDUE" overdue)
-            (insert-group "TODAY"   today)
-            (insert-group "UPCOMING" upcoming)
-            (insert-group "NO DEADLINE" no-ddl))
-          (when (= (point) (+ (point-min) (length (format "Roam Agenda  %s\n\n" today-str))))
-            (insert "(no open todos)\n"))
-          (goto-char (point-min))
-          (special-mode)))
+        (my/aaronnote-roam-ui-render
+         (lambda ()
+           (my/aaronnote-roam-ui-insert-page-header
+            "Agenda"
+            :icon 'agenda
+            :subtitle (format "Open Aaronnote tasks for %s" today-str)
+            :stats (list (cons (format "%d overdue" (length overdue))
+                               (if overdue 'danger 'muted))
+                         (cons (format "%d today" (length today))
+                               (if today 'warning 'muted))
+                         (cons (format "%d open" open-count) 'info))
+            :actions (my/aaronnote-roam--ui-actions))
+           (cl-labels
+               ((insert-group
+                 (title group tone)
+                 (when group
+                   (my/aaronnote-roam-ui-insert-section
+                    title (length group) tone)
+                   (dolist (entry (nreverse group))
+                     (my/aaronnote-roam--insert-todo-row entry tone))
+                   (insert "\n"))))
+             (insert-group "Overdue" overdue 'danger)
+             (insert-group "Today" today 'warning)
+             (insert-group "Upcoming" upcoming 'info)
+             (insert-group "No deadline" no-ddl 'muted))
+           (when (zerop open-count)
+             (my/aaronnote-roam-ui-insert-empty "No open tasks.")))))
       (display-buffer buf))))
 
 ;; ── Roam DB utilities ─────────────────────────────────────────────────────────
@@ -1715,37 +2310,58 @@ With prefix argument FULL, force a full roam-db rebuild."
   (interactive)
   (let* ((root (my/aaronnote-roam-root))
          (state-file (expand-file-name ".aaronnote-sync-state.json" root))
-         (buf (get-buffer-create "*roam-db-status*")))
+         (state
+          (when (file-exists-p state-file)
+            (condition-case nil
+                (json-parse-string
+                 (with-temp-buffer
+                   (insert-file-contents state-file)
+                   (buffer-string))
+                 :object-type 'hash-table)
+              (error nil))))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*roam-db-status*" "Roam DB Status" 'database
+               #'my/aaronnote-roam-db-status
+               (if state "state ready" "state missing"))))
     (with-current-buffer buf
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert (format "Roam DB Status\n\nRoot: %s\n" root))
-        (if (file-exists-p state-file)
-            (progn
-              (insert (format "State: %s\n\n" state-file))
-              (let ((state (condition-case nil
-                               (json-parse-string
-                                (with-temp-buffer
-                                  (insert-file-contents state-file)
-                                  (buffer-string))
-                                :object-type 'hash-table)
-                             (error nil))))
-                (if state
-                    (maphash (lambda (k v)
-                               (insert (format "  %-24s %s\n" k (if (eq v :null) "(null)" v))))
-                             state)
-                  (insert "  (could not parse state file)\n"))))
-          (insert "State: not found (no initial sync?)\n"))
-        (insert "\n")
-        (insert-text-button "Incremental sync"
-                            'action (lambda (_) (my/aaronnote-roam-update-db))
-                            'follow-link t)
-        (insert "  ")
-        (insert-text-button "Full rebuild"
-                            'action (lambda (_) (my/aaronnote-roam-sync-full))
-                            'follow-link t)
-        (goto-char (point-min))
-        (special-mode)))
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          "Roam DB status"
+          :icon 'database
+          :subtitle "Aaronnote incremental index state"
+          :stats (list (cons (if state "State ready" "State missing")
+                             (if state 'success 'warning)))
+          :actions
+          (my/aaronnote-roam--ui-actions
+           '((:label "Incremental sync"
+              :command my/aaronnote-roam-update-db
+              :help "Run incremental roam-db sync"
+              :primary t)
+             (:label "Full rebuild"
+              :command my/aaronnote-roam-sync-full
+              :help "Rebuild the roam-db index from scratch"))))
+         (my/aaronnote-roam-ui-insert-section "Location")
+         (my/aaronnote-roam-ui-insert-field
+          "Root" (abbreviate-file-name root) 'my/aaronnote-roam-ui-path)
+         (my/aaronnote-roam-ui-insert-field
+          "State file" (abbreviate-file-name state-file)
+          'my/aaronnote-roam-ui-path)
+         (insert "\n")
+         (my/aaronnote-roam-ui-insert-section "State")
+         (cond
+          (state
+           (dolist (key (sort (hash-table-keys state) #'string<))
+             (let ((value (gethash key state)))
+               (my/aaronnote-roam-ui-insert-field
+                key (if (eq value :null) "(null)" value)
+                'my/aaronnote-roam-ui-meta))))
+          ((file-exists-p state-file)
+           (my/aaronnote-roam-ui-insert-empty
+            "The state file exists but could not be parsed."))
+          (t
+           (my/aaronnote-roam-ui-insert-empty
+            "No sync state yet. Run an incremental sync or full rebuild."))))))
     (display-buffer buf)))
 
 (defun my/aaronnote-roam-magit ()
@@ -1823,6 +2439,7 @@ With prefix argument FULL, force a full roam-db rebuild."
 
 (defvar my/aaronnote-roam-select-mode-map
   (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map my/aaronnote-roam-ui-mode-map)
     (define-key map (kbd "RET") #'my/aaronnote-roam-select-activate)
     (define-key map (kbd "i") #'my/aaronnote-roam-select-insert-current)
     (define-key map (kbd "/") #'my/aaronnote-roam-select-search)
@@ -1836,9 +2453,15 @@ With prefix argument FULL, force a full roam-db rebuild."
     map)
   "Keymap for `my/aaronnote-roam-select-mode'.")
 
-(define-derived-mode my/aaronnote-roam-select-mode special-mode "Roam-Select"
+(define-derived-mode my/aaronnote-roam-select-mode my/aaronnote-roam-ui-mode "Roam-Select"
   "Interactive Markdown roam link selector."
-  (setq-local truncate-lines t))
+  (setq-local truncate-lines t)
+  (setq-local my/aaronnote-roam-ui-refresh-function
+              #'my/aaronnote-roam-select-refresh)
+  (my/aaronnote-roam-ui-set-header "Roam Selector" 'search "search"))
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'my/aaronnote-roam-select-mode 'emacs))
 
 (defun my/aaronnote-roam--record-path-ref (record)
   "Return RECORD's path-like link ref."
@@ -2037,15 +2660,49 @@ With prefix argument FULL, force a full roam-db rebuild."
 
 (defun my/aaronnote-roam-select--insert-row (label item &optional face)
   "Insert a selectable row LABEL carrying ITEM."
-  (let ((start (point)))
-    (insert label "\n")
-    (add-text-properties
-     start (point)
-     `(my/aaronnote-roam-select-item ,item
-       mouse-face highlight
-       help-echo "RET: open/select, i: insert/select"))
-    (when face
-      (add-face-text-property start (point) face))))
+  (let* ((type (plist-get item :type))
+         (record (plist-get item :record))
+         (target (plist-get item :target))
+         (title (pcase type
+                  ('dir (format "%s/" (plist-get item :name)))
+                  ('note (my/aaronnote-roam-select--default-note-text record))
+                  ('toc (my/aaronnote-roam--dom-target-path-label target))
+                  (_ label)))
+         (meta (pcase type
+                 ('dir (plist-get item :path))
+                 ('note (my/aaronnote-roam--record-path-ref record))
+                 ('toc (if (plist-get item :has-children) "branch" "heading"))
+                 (_ nil)))
+         (detail (and (eq type 'note) (plist-get record :id)))
+         (tags (and (eq type 'note)
+                    (my/aaronnote-roam--note-list-field
+                     (plist-get record :note) "tags")))
+         (id (pcase type
+               ('dir (plist-get item :path))
+               ('note (plist-get record :id))
+               ('toc (my/aaronnote-roam-select--toc-dom target))
+               (_ label))))
+    (my/aaronnote-roam-ui-insert-row
+     :id id
+     :icon (pcase type
+             ('dir 'directory)
+             ('toc 'toc)
+             (_ 'note))
+     :badge (pcase type
+              ('dir "DIR")
+              ('toc (if (plist-get item :has-children) "BRANCH" "TOC"))
+              (_ nil))
+     :badge-tone (if (eq type 'dir) 'warning 'info)
+     :title title
+     :title-face (or face 'my/aaronnote-roam-ui-row-title)
+     :meta meta
+     :detail detail
+     :tags tags
+     :action
+     (lambda (_ignored)
+       (my/aaronnote-roam-select-activate))
+     :help "RET: open/select, i: insert/select"
+     :properties `(my/aaronnote-roam-select-item ,item))))
 
 (defun my/aaronnote-roam-select--note-label (record &optional prefix)
   "Return display label for note RECORD with PREFIX."
@@ -2059,34 +2716,65 @@ With prefix argument FULL, force a full roam-db rebuild."
 
 (defun my/aaronnote-roam-select--render-header (title)
   "Render selector TITLE and help."
-  (insert title "\n")
-  (insert "RET select/open  i insert/select  / or s search  g root  . current  u up  r refresh  q quit\n\n"))
+  (let ((icon (pcase my/aaronnote-roam-select--view
+                ('root 'directory)
+                ('context 'related)
+                ('toc 'toc)
+                (_ 'search))))
+    (my/aaronnote-roam-ui-set-header
+     "Roam Selector" icon
+     (format "%s view" (or my/aaronnote-roam-select--view 'search)))
+    (my/aaronnote-roam-ui-insert-page-header
+     title
+     :icon icon
+     :subtitle "Choose a note, tag, or TOC target without leaving the keyboard"
+     :stats (list (cons (format "%s view"
+                               (or my/aaronnote-roam-select--view 'search))
+                       'info))
+     :actions
+     '((:label "RET Select"
+        :command my/aaronnote-roam-select-activate
+        :help "Open or select the current item"
+        :primary t)
+       (:label "/ Search"
+        :command my/aaronnote-roam-select-search
+        :help "Search notes or TOC headings")
+       (:label "g Root"
+        :command my/aaronnote-roam-select-root
+        :help "Show the roam root")
+       (:label "r Refresh"
+        :command my/aaronnote-roam-select-refresh
+        :help "Refresh the current selector view")
+       (:label "q Close"
+        :command quit-window
+        :help "Close the selector")))))
 
 (defun my/aaronnote-roam-select--render-root (&optional dir)
   "Render roam root tree at DIR."
   (setq my/aaronnote-roam-select--view 'root
         my/aaronnote-roam-select--path (or dir ""))
-  (let ((inhibit-read-only t))
-    (erase-buffer)
-    (my/aaronnote-roam-select--render-header
-     (format "Roam root: /%s" my/aaronnote-roam-select--path))
-    (let ((items (my/aaronnote-roam-select--directory-items
-                  my/aaronnote-roam-select--path)))
-      (if items
-          (dolist (item items)
-            (pcase (plist-get item :type)
-              ('dir
-               (my/aaronnote-roam-select--insert-row
-                (format "[dir]  %s/" (plist-get item :name))
-                item 'font-lock-keyword-face))
-              ('note
-               (my/aaronnote-roam-select--insert-row
-                (my/aaronnote-roam-select--note-label
-                 (plist-get item :record) "[note] ")
-                item))))
-        (insert "(empty)\n")))
-    (goto-char (point-min))
-    (forward-line 2)))
+  (my/aaronnote-roam-ui-render
+   (lambda ()
+     (my/aaronnote-roam-select--render-header
+      (format "Roam root: /%s" my/aaronnote-roam-select--path))
+     (let ((items (my/aaronnote-roam-select--directory-items
+                   my/aaronnote-roam-select--path)))
+       (my/aaronnote-roam-ui-insert-section "Contents" (length items))
+       (if items
+           (dolist (item items)
+             (pcase (plist-get item :type)
+               ('dir
+                (my/aaronnote-roam-select--insert-row
+                 (format "%s/" (plist-get item :name))
+                 item 'my/aaronnote-roam-ui-row-title))
+               ('note
+                (my/aaronnote-roam-select--insert-row
+                 (my/aaronnote-roam-select--note-label
+                  (plist-get item :record))
+                 item))))
+         (my/aaronnote-roam-ui-insert-empty "This directory is empty.")))))
+  (unless (my/aaronnote-roam-select--item-at-point)
+    (my/aaronnote-roam-ui-goto-first-item)))
 
 (defun my/aaronnote-roam-select--render-context ()
   "Render current-note context."
@@ -2103,39 +2791,44 @@ With prefix argument FULL, force a full roam-db rebuild."
         (when-let* ((related (my/aaronnote-roam--resolve-note id)))
           (push related entries))))
     (setq entries (delete-dups (nreverse entries)))
-    (let ((inhibit-read-only t))
-      (erase-buffer)
-      (my/aaronnote-roam-select--render-header
-       (format "Current roam context: %s"
-               (or my/aaronnote-roam-select--current-note-id "(none)")))
-      (if entries
-          (dolist (entry entries)
-            (my/aaronnote-roam-select--insert-row
-             (my/aaronnote-roam-select--note-label entry "[note] ")
-             (list :type 'note :record entry)))
-        (insert "(not in a roam note; press g for root)\n"))
-      (goto-char (point-min))
-      (forward-line 2))))
+    (my/aaronnote-roam-ui-render
+     (lambda ()
+       (my/aaronnote-roam-select--render-header
+        (format "Current roam context: %s"
+                (or my/aaronnote-roam-select--current-note-id "(none)")))
+       (my/aaronnote-roam-ui-insert-section "Context" (length entries))
+       (if entries
+           (dolist (entry entries)
+             (my/aaronnote-roam-select--insert-row
+              (my/aaronnote-roam-select--note-label entry)
+              (list :type 'note :record entry)))
+         (my/aaronnote-roam-ui-insert-empty
+          "Not in a roam note. Press g to browse the root."))))
+    (unless (my/aaronnote-roam-select--item-at-point)
+      (my/aaronnote-roam-ui-goto-first-item))))
 
 (defun my/aaronnote-roam-select--render-search (query)
   "Render global note search for QUERY."
   (setq my/aaronnote-roam-select--view 'search
         my/aaronnote-roam-select--query query)
   (let ((entries (my/aaronnote-roam-search-notes query)))
-    (let ((inhibit-read-only t))
-      (erase-buffer)
-      (my/aaronnote-roam-select--render-header
-       (format "Roam search: %s" query))
-      (if entries
-          (dolist (entry entries)
-            (when-let* ((record (my/aaronnote-roam--resolve-note
-                                 (plist-get entry :slug))))
-              (my/aaronnote-roam-select--insert-row
-               (my/aaronnote-roam-select--note-label record "[note] ")
-               (list :type 'note :record record))))
-        (insert "(no matching notes)\n"))
-      (goto-char (point-min))
-      (forward-line 2))))
+    (my/aaronnote-roam-ui-render
+     (lambda ()
+       (my/aaronnote-roam-select--render-header
+        (if (string-empty-p (or query ""))
+            "Search all roam notes"
+          (format "Roam search: %s" query)))
+       (my/aaronnote-roam-ui-insert-section "Matches" (length entries))
+       (if entries
+           (dolist (entry entries)
+             (when-let* ((record (my/aaronnote-roam--resolve-note
+                                  (plist-get entry :slug))))
+               (my/aaronnote-roam-select--insert-row
+                (my/aaronnote-roam-select--note-label record)
+                (list :type 'note :record record))))
+         (my/aaronnote-roam-ui-insert-empty "No matching notes."))))
+    (unless (my/aaronnote-roam-select--item-at-point)
+      (my/aaronnote-roam-ui-goto-first-item))))
 
 (defun my/aaronnote-roam-select--toc-children (targets parent)
   "Return direct TOC children from TARGETS under PARENT."
@@ -2180,31 +2873,34 @@ With prefix argument FULL, force a full roam-db rebuild."
                        targets)
                     (my/aaronnote-roam-select--toc-children
                      targets my/aaronnote-roam-select--toc-parent))))
-    (let ((inhibit-read-only t))
-      (erase-buffer)
-      (my/aaronnote-roam-select--render-header
-       (format "TOC: %s%s"
-               (my/aaronnote-roam-select--default-note-text record)
-               (if query (format " / search: %s" query) "")))
-      (when my/aaronnote-roam-select--toc-parent
-        (insert (format "Path: %s\n\n"
-                        (string-join my/aaronnote-roam-select--toc-parent " / "))))
-      (if visible
-          (dolist (target visible)
-            (let* ((has-children (and (not query)
-                                      (my/aaronnote-roam-select--toc-has-children-p
-                                       targets target)))
-                   (label (my/aaronnote-roam--dom-target-path-label target))
-                   (prefix (if has-children "[+] " "[toc] ")))
-              (my/aaronnote-roam-select--insert-row
-               (concat prefix label)
-               (list :type 'toc
-                     :target target
-                     :has-children has-children
-                     :search query))))
-        (insert "(no TOC targets)\n"))
-      (goto-char (point-min))
-      (forward-line 2))))
+    (my/aaronnote-roam-ui-render
+     (lambda ()
+       (my/aaronnote-roam-select--render-header
+        (format "TOC: %s%s"
+                (my/aaronnote-roam-select--default-note-text record)
+                (if query (format " / search: %s" query) "")))
+       (when my/aaronnote-roam-select--toc-parent
+         (my/aaronnote-roam-ui-insert-field
+          "Path" (string-join my/aaronnote-roam-select--toc-parent " / ")
+          'my/aaronnote-roam-ui-path)
+         (insert "\n"))
+       (my/aaronnote-roam-ui-insert-section "Headings" (length visible))
+       (if visible
+           (dolist (target visible)
+             (let* ((has-children
+                     (and (not query)
+                          (my/aaronnote-roam-select--toc-has-children-p
+                           targets target)))
+                    (label (my/aaronnote-roam--dom-target-path-label target)))
+               (my/aaronnote-roam-select--insert-row
+                label
+                (list :type 'toc
+                      :target target
+                      :has-children has-children
+                      :search query))))
+         (my/aaronnote-roam-ui-insert-empty "No TOC targets."))))
+    (unless (my/aaronnote-roam-select--item-at-point)
+      (my/aaronnote-roam-ui-goto-first-item))))
 
 (defun my/aaronnote-roam-select--item-at-point ()
   "Return selector item at point."
@@ -2456,7 +3152,8 @@ canonical `roam://note-id#tag' target."
   "r a" '(:def my/aaronnote-roam-agenda   :which-key "roam agenda")
   "r d" '(:def my/aaronnote-roam-dired    :which-key "roam dired")
   "r v" '(:def my/aaronnote-roam-magit    :which-key "roam magit")
-  "r S" '(:def my/aaronnote-roam-db-status :which-key "roam db status"))
+  "r S" '(:def my/aaronnote-roam-db-status :which-key "roam db status")
+  "r e" '(:def my/aaronnote-open-markdown-raw :which-key "edit raw md"))
 
 ;; ── xref backend: gd / M-. for note-link ─────────────────────────────────
 
@@ -2538,11 +3235,19 @@ canonical `roam://note-id#tag' target."
 (defun my/aaronnote-roam-daily-note ()
   "Open or create today's daily note at daily/YYYY-MM-DD."
   (interactive)
-  (let* ((slug (concat "daily/" (format-time-string "%Y-%m-%d")))
+  (let* ((date (format-time-string "%Y-%m-%d"))
+         (slug (concat "daily/" date))
          (file (my/aaronnote-roam--slug-to-file slug)))
     (if (file-exists-p file)
         (my/aaronnote-roam--open-slug slug)
-      (my/aaronnote-roam-new-note slug))))
+      (my/aaronnote-roam-new--create-draft
+       (list :node-type "roam"
+             :id slug
+             :title (format "%s Daily" date)
+             :path (concat slug ".md")
+             :kind "note"
+             :template-key "daily"
+             :tags nil)))))
 
 ;; ── Wire everything up ────────────────────────────────────────────────────
 
@@ -2559,8 +3264,8 @@ canonical `roam://note-id#tag' target."
     ("I" "insert tag link"      my/aaronnote-roam-insert-tag-id-link)
     ("c" "insert toc link"      my/aaronnote-roam-insert-toc-link)
     ("y" "copy link here"       my/aaronnote-roam-copy-link-to-here)
-    ("n" "new note"             my/aaronnote-roam-new-note)
-    ("N" "new node"             my/aaronnote-roam-new-node)
+    ("n" "new note UI"          my/aaronnote-roam-new-note)
+    ("N" "new node UI"          my/aaronnote-roam-new-node)
     ("d" "daily note"           my/aaronnote-roam-daily-note)]
    ["Tag ids"
     ("#" "insert tag id"        my/aaronnote-roam-insert-tag-id)

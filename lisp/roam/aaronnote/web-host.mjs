@@ -88,7 +88,33 @@ configure({
   templatesRoot,
 });
 
+if (!existsSync(webDir)) {
+  process.stderr.write(
+    `[aaronnote-web] FATAL: web app directory not found: ${webDir}\n` +
+    `[aaronnote-web] Run "npm run build" in ${runtimeRoot} to build first.\n`
+  );
+  process.exit(1);
+}
+
 const eventClients = new Set();
+
+// SSE keepalive heartbeat — prevents hung-client memory leak and keeps
+// connections alive through idle-timeout proxies.
+const sseHeartbeatInterval = setInterval(() => {
+  const dead = [];
+  for (const res of eventClients) {
+    try { res.write(": keepalive\n\n"); } catch { dead.push(res); }
+  }
+  dead.forEach((res) => eventClients.delete(res));
+}, 25000);
+sseHeartbeatInterval.unref();
+
+process.on("uncaughtException", (err) => {
+  process.stderr.write(`[aaronnote-web] uncaughtException: ${err?.stack || err}\n`);
+});
+process.on("unhandledRejection", (reason) => {
+  process.stderr.write(`[aaronnote-web] unhandledRejection: ${reason?.stack || reason}\n`);
+});
 
 const MIME = {
   ".css": "text/css; charset=utf-8",
@@ -266,14 +292,16 @@ async function macOpen(args) {
 
 async function showInFolder(file) {
   const target = resolveShellPath(file);
-  const result = await macOpen(["-R", target]);
-  return { ...result, file: target };
+  const safeTarget = isWithin(noteRoot, target) ? target : noteRoot;
+  const result = await macOpen(["-R", safeTarget]);
+  return { ...result, file: safeTarget };
 }
 
 async function openPath(file) {
   const target = resolveShellPath(file);
-  const result = await macOpen([target]);
-  return { ...result, file: target };
+  const safeTarget = isWithin(noteRoot, target) ? target : noteRoot;
+  const result = await macOpen([safeTarget]);
+  return { ...result, file: safeTarget };
 }
 
 async function openDirectory(body) {
@@ -371,6 +399,16 @@ function adapterScript(origin) {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({channel: channel, args: args || []})
     }).then(function(res) { return res.json(); });
+  }
+  function callKeepalive(channel, args) {
+    try {
+      fetch(BASE + "/api", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({channel: channel, args: args || []}),
+        keepalive: true
+      }).catch(function() {});
+    } catch (_) {}
   }
   function assetProxy(raw) {
     return BASE + "/aaronnote-asset?url=" + encodeURIComponent(String(raw || ""));
@@ -483,6 +521,7 @@ function adapterScript(origin) {
       open: function(file) { return call("aaronnote:api:notes:open", [String(file || "")]); },
       list: function(force) { return call("aaronnote:api:notes:list", [force === true]); },
       save: function(body) { return call("aaronnote:api:notes:save", [body || {}]); },
+      saveKeepalive: function(body) { callKeepalive("aaronnote:api:notes:save", [body || {}]); },
       createNode: function(draft) { return call("aaronnote:api:notes:create-node", [draft || {}]); },
       deleteNote: function(file) { return call("aaronnote:api:notes:delete", [String(file || "")]); },
       createFolder: function(path) { return call("aaronnote:api:notes:create-folder", [String(path || "")]); },
@@ -938,6 +977,10 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 });
 
+server.on("error", (err) => {
+  process.stderr.write(`[aaronnote-web] Failed to start server: ${err.message}\n`);
+  process.exit(1);
+});
 server.listen(bindPort, bindHost, () => {
   const port = server.address().port;
   process.stdout.write(`aaronote-web-host:ready:${port}\n`);

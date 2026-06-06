@@ -656,7 +656,7 @@ async function readAssetCleanupState() {
 }
 
 async function writeAssetCleanupState(next) {
-  await writeFile(assetCleanupStateFile(), `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  await atomicWriteFile(assetCleanupStateFile(), `${JSON.stringify(next, null, 2)}\n`, "utf8");
 }
 
 async function assetReferenceFiles() {
@@ -3769,7 +3769,7 @@ async function writeSyncState(patch) {
     current = JSON.parse(raw);
   } catch {}
   const next = { ...current, ...patch };
-  await writeFile(roamSyncStateFile(), JSON.stringify(next, null, 2), "utf8");
+  await atomicWriteFile(roamSyncStateFile(), JSON.stringify(next, null, 2), "utf8");
 }
 
 function sqlString(value) {
@@ -4740,6 +4740,12 @@ export async function saveNote(body) {
   const file = safeOpenFile(body.file);
   const content = String(body.content ?? "");
   const previousContent = await readFile(file, "utf8").catch(() => "");
+  if (body.force !== true && content.trim() === "" && previousContent.trim() !== "") {
+    return {
+      type: "saved", ok: false, file,
+      message: "Refusing to save empty content over a non-empty file. Use force: true to override.",
+    };
+  }
   const bookSensitiveSave = contentMayAffectBook(previousContent) || contentMayAffectBook(content);
   const force = body.force === true;
   const baseMtimeMs = Number(body.baseMtimeMs);

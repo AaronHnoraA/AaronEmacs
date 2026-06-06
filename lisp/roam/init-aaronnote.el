@@ -45,8 +45,8 @@
   "Path to Aaronnote snippets shared with Emacs.")
 
 (defvar my/aaronnote--templates-root
-  (expand-file-name "lisp/roam/aaronnote/templates" user-emacs-directory)
-  "Path to templates owned by the Aaronnote project.")
+  (expand-file-name "templates/aaronnote" user-emacs-directory)
+  "Path to Markdown templates shared by Emacs and Aaronnote.")
 
 (defvar my/aaronnote--notes-root
   (expand-file-name ".roam" user-emacs-directory)
@@ -68,6 +68,8 @@
   "Callbacks waiting for the web-host to become ready.")
 (defvar my/aaronnote--app-buffer nil
   "Buffer hosting the Appine/xwidget Aaronnote page.")
+(defvar my/aaronnote--ready-watchdog nil
+  "Watchdog timer cancelled when the web-host becomes ready.")
 
 (defvar-local my/aaronnote-buffer-file-name nil
   "Current note file represented by an Aaronnote Appine/xwidget buffer.")
@@ -91,6 +93,13 @@
        (or (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file)
            (string-equal (file-name-nondirectory file) "README"))))
 
+(defun my/aaronnote--watchdog-fire ()
+  "Called when the web-host fails to become ready within the timeout."
+  (setq my/aaronnote--ready-watchdog nil)
+  (unless my/aaronnote--ready
+    (setq my/aaronnote--ready-callbacks nil)
+    (message "Aaronnote: web-host did not become ready (check *aaronnote-web-host* for errors)")))
+
 (defun my/aaronnote--ensure-server (&optional callback)
   "Start the web-host if needed, then call CALLBACK."
   (if (and my/aaronnote--process
@@ -101,10 +110,19 @@
       (push callback my/aaronnote--ready-callbacks))
     (unless (and my/aaronnote--process
                  (process-live-p my/aaronnote--process))
-      (my/aaronnote--start-server))))
+      (my/aaronnote--start-server)
+      (when my/aaronnote--ready-watchdog
+        (cancel-timer my/aaronnote--ready-watchdog))
+      (setq my/aaronnote--ready-watchdog
+            (run-at-time 10 nil #'my/aaronnote--watchdog-fire)))))
 
 (defun my/aaronnote--start-server ()
   "Spawn the vendored Aaronnote web-host."
+  (unless (executable-find "node")
+    (user-error "Aaronnote: `node' not found in exec-path; install Node.js"))
+  (unless (file-directory-p my/aaronnote--web-dir)
+    (user-error "Aaronnote: built web app not found at %s; run `npm run build' in %s"
+                my/aaronnote--web-dir my/aaronnote--runtime-root))
   (when (and my/aaronnote--process (process-live-p my/aaronnote--process))
     (delete-process my/aaronnote--process))
   (setq my/aaronnote--process nil
@@ -144,6 +162,9 @@
 
 (defun my/aaronnote--flush-ready-callbacks ()
   "Run callbacks waiting for the server to become ready."
+  (when my/aaronnote--ready-watchdog
+    (cancel-timer my/aaronnote--ready-watchdog)
+    (setq my/aaronnote--ready-watchdog nil))
   (let ((callbacks (nreverse my/aaronnote--ready-callbacks)))
     (setq my/aaronnote--ready-callbacks nil)
     (dolist (callback callbacks)
@@ -220,6 +241,9 @@
   "Handle web-host PROC state change EVENT."
   (when (and (eq proc my/aaronnote--process)
              (not (process-live-p proc)))
+    (when my/aaronnote--ready-watchdog
+      (cancel-timer my/aaronnote--ready-watchdog)
+      (setq my/aaronnote--ready-watchdog nil))
     (setq my/aaronnote--process nil
           my/aaronnote--port nil
           my/aaronnote--ready nil
@@ -454,6 +478,9 @@ graph tab was closed via the Appine toolbar."
 The web-host (Node) is the backend; once it is gone, any Appine tabs showing
 its pages are dead, so the Emacs-side tab registry is cleared too."
   (interactive)
+  (when my/aaronnote--ready-watchdog
+    (cancel-timer my/aaronnote--ready-watchdog)
+    (setq my/aaronnote--ready-watchdog nil))
   (when (and my/aaronnote--process (process-live-p my/aaronnote--process))
     (delete-process my/aaronnote--process))
   (setq my/aaronnote--process nil

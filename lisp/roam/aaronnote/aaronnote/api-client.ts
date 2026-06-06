@@ -20,6 +20,7 @@ type NativeApi = {
     list?: (force?: boolean) => Promise<unknown>;
     pathSuggestions?: (file: string) => Promise<unknown>;
     save?: (body: SaveBody) => Promise<unknown>;
+    saveKeepalive?: (body: SaveBody) => void;
     snippets?: () => Promise<unknown>;
     metaAdd?: (body: Record<string, unknown>) => Promise<unknown>;
   };
@@ -96,8 +97,13 @@ export const api = {
       return ensureOk(await call() as SnippetsMsg & { snippets?: SnippetSummary[] }, "Snippet reload failed");
     },
     saveKeepalive(body: SaveBody): void {
-      const call = requireMethod(nativeApi().notes?.save, "Save");
-      void call(body).catch(() => {});
+      const api = window.aaronnoteApi?.notes;
+      if (!api) return;
+      if (api.saveKeepalive) {
+        api.saveKeepalive(body);
+        return;
+      }
+      if (api.save) void api.save(body).catch(() => {});
     },
   },
   meta: {
