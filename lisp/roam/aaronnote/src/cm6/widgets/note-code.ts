@@ -162,6 +162,14 @@ class NoteCodeWidget extends MeasuredWidget {
     title.className = "cm-note-code-title";
     title.textContent = `${this.spec.path} [${this.spec.id}]`;
     header.append(title);
+
+    const openBtn = document.createElement("button");
+    openBtn.className = "cm-note-code-open-btn";
+    openBtn.textContent = "Open in Emacs";
+    openBtn.disabled = true;
+    openBtn.addEventListener("click", (e) => { e.stopPropagation(); });
+    header.append(openBtn);
+
     wrap.append(header);
 
     const body = document.createElement("div");
@@ -178,6 +186,15 @@ class NoteCodeWidget extends MeasuredWidget {
           body.textContent = result.message || "Code region not found";
         } else {
           body.append(highlightedCode(result.body, result.language || "lean4"));
+          if (result.file) {
+            const absFile = String(result.file);
+            const tag = this.spec.id;
+            openBtn.disabled = false;
+            openBtn.onclick = (e) => {
+              e.stopPropagation();
+              void api.emacs.open({ file: absFile, tag });
+            };
+          }
         }
         scheduleViewportDecorationRefresh(view);
       })

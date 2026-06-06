@@ -1956,6 +1956,29 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
   white-space: nowrap;
 }
 
+.cm-editor .cm-note-code-open-btn {
+  flex-shrink: 0;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), var(--aaron-muted, #666) 30%);
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity 0.12s, background 0.12s;
+}
+
+.cm-editor .cm-note-code-open-btn:not(:disabled):hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--aaron-paper-soft, #f7f3ea), var(--aaron-muted, #666) 12%);
+}
+
+.cm-editor .cm-note-code-open-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .cm-editor .cm-note-code-body {
   padding: 0.55rem 0.65rem;
   color: var(--aaron-ink, #1e1a16);
