@@ -13,9 +13,12 @@
 (require 'subr-x)
 (require 'transient)
 (require 'url-util)
+(require 'wid-edit)
 (require 'xref)
 
 (declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
+(declare-function evil-set-initial-state "evil-core" (mode state))
+(declare-function my/aaronnote-open-file "init-aaronnote" (file))
 (declare-function my/navigation--push-jump "init-navigation")
 (declare-function my/navigation-find-definition "init-navigation")
 
@@ -113,22 +116,39 @@ or the command fails."
                             (format "AARONNOTE_WORKSPACE_ROOT=%s"
                                     user-emacs-directory))
                       process-environment))
+             ;; Capture stderr separately so it does not corrupt the JSON stdout.
+             (stderr-file (make-temp-file "aaronnote-runtime-"))
              (status (apply #'process-file
-                            "node" nil (current-buffer) nil
+                            "node" nil (list (current-buffer) stderr-file) nil
                             my/aaronnote-roam-runtime-cli
                             action
                             "--root" root
                             "--runtime" my/aaronnote-roam-runtime-root
                             "--workspace" user-emacs-directory
                             args)))
-        (if (zerop status)
-            (condition-case nil
-                (json-parse-buffer :object-type 'hash-table
-                                   :array-type 'list)
-              (error nil))
-          (message "Aaronnote roam runtime failed: %s"
-                   (string-trim (buffer-string)))
-          nil)))))
+        (unwind-protect
+            (if (zerop status)
+                (condition-case err
+                    (json-parse-buffer :object-type 'hash-table
+                                       :array-type 'list)
+                  (error
+                   (let ((stderr (with-temp-buffer
+                                   (ignore-errors (insert-file-contents stderr-file))
+                                   (string-trim (buffer-string)))))
+                     (message "Aaronnote roam runtime: JSON parse failed: %s%s"
+                              err
+                              (if (string-empty-p stderr) "" (concat "\n" stderr))))
+                   nil))
+              (let ((stderr (with-temp-buffer
+                               (ignore-errors (insert-file-contents stderr-file))
+                               (string-trim (buffer-string)))))
+                (message "Aaronnote roam runtime failed (%s): %s"
+                         action
+                         (if (string-empty-p stderr)
+                             (string-trim (buffer-string))
+                           stderr))
+                nil))
+          (ignore-errors (delete-file stderr-file)))))))
 
 (defun my/aaronnote-roam--runtime-index ()
   "Return cached Aaronnote runtime index payload, or nil."
@@ -896,6 +916,9 @@ Path-like refs are accepted and resolved to canonical note ids."
 (defvar-local my/aaronnote-roam-new--base-directory ""
   "Relative default directory used by the current Roam New buffer.")
 
+(defvar-local my/aaronnote-roam-new--widgets nil
+  "Editable widgets in the current Roam New buffer.")
+
 (defvar my/aaronnote-roam-new-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map my/aaronnote-roam-ui-mode-map)
@@ -903,13 +926,20 @@ Path-like refs are accepted and resolved to canonical note ids."
     (define-key map (kbd "R") #'my/aaronnote-roam-new-reset)
     (define-key map (kbd "t") #'my/aaronnote-roam-new-edit-type)
     (define-key map (kbd "T") #'my/aaronnote-roam-new-edit-template)
+    (define-key map (kbd "a") #'my/aaronnote-roam-new-edit-tags)
+    (define-key map (kbd "p") #'my/aaronnote-roam-new-edit-path)
     map)
   "Keymap for `my/aaronnote-roam-new-mode'.")
 
 (define-derived-mode my/aaronnote-roam-new-mode my/aaronnote-roam-ui-mode "Roam-New"
   "Native workbench for creating Aaronnote Markdown notes."
+  ;; This view is a form.  Keep it writable so Emacs widget fields accept direct
+  ;; typing instead of forcing every edit through the minibuffer.
+  (setq-local buffer-read-only nil)
   (setq-local my/aaronnote-roam-ui-refresh-function
               #'my/aaronnote-roam-new-refresh)
+  (setq-local widget-button-face 'my/aaronnote-roam-ui-action)
+  (setq-local widget-field-face 'my/aaronnote-roam-ui-row-title)
   (my/aaronnote-roam-ui-set-header "Roam New" 'new "draft"))
 
 (with-eval-after-load 'evil
@@ -952,6 +982,37 @@ Path-like refs are accepted and resolved to canonical note ids."
         :template-key "roam"
         :tags nil))
 
+(defun my/aaronnote-roam-new--draft-for-create (draft &optional directory)
+  "Return DRAFT normalized like Aaronnote New before creation.
+Empty title, path, and kind fields receive the same defaults as Aaronnote's
+New Note form.  DIRECTORY defaults to the current Roam New base directory."
+  (let* ((node-type
+          (if (string= (downcase (format "%s" (plist-get draft :node-type)))
+                       "regular")
+              "regular"
+            "roam"))
+         (title (string-trim (or (plist-get draft :title) "")))
+         (title (if (string-empty-p title) "Untitled" title))
+         (path (string-trim (or (plist-get draft :path) "")))
+         (path (if (string-empty-p path)
+                   (my/aaronnote-roam-new--default-path
+                    title
+                    (or directory my/aaronnote-roam-new--base-directory))
+                 path))
+         (kind (string-trim (or (plist-get draft :kind) "")))
+         (kind (if (string-empty-p kind)
+                   (if (string= node-type "roam") "note" "default")
+                 kind))
+         (normalized (copy-sequence draft)))
+    (setq normalized (plist-put normalized :node-type node-type)
+          normalized (plist-put normalized :title title)
+          normalized (plist-put normalized :path path)
+          normalized (plist-put normalized :kind kind)
+          normalized (plist-put normalized :tags
+                                (my/aaronnote-roam-new--normalize-tags
+                                 (plist-get draft :tags))))
+    normalized))
+
 (defun my/aaronnote-roam-new--template-field (template field)
   "Return FIELD from TEMPLATE, which may be a hash table or plist."
   (if (hash-table-p template)
@@ -963,7 +1024,15 @@ Path-like refs are accepted and resolved to canonical note ids."
   (let ((response (my/aaronnote-roam--runtime-call "templates" "--force")))
     (or (and response (gethash "templates" response))
         '((:key "basic" :name "Basic Markdown note")
-          (:key "roam" :name "Roam note")))))
+          (:key "daily" :name "Daily note")
+          (:key "decision" :name "Decision record")
+          (:key "meeting" :name "Meeting notes")
+          (:key "project" :name "Project brief")
+          (:key "reading" :name "Reading notes")
+          (:key "roam" :name "Roam note")
+          (:key "task-plan" :name "Task plan")
+          (:key "weekly-review" :name "Weekly review")
+          (:key "zettel" :name "Zettel")))))
 
 (defun my/aaronnote-roam-new--template-label (key)
   "Return a display label for template KEY."
@@ -1045,13 +1114,36 @@ Path-like refs are accepted and resolved to canonical note ids."
 
 (defun my/aaronnote-roam-new--set (key value)
   "Set draft KEY to VALUE and rerender the Roam New buffer."
+  (my/aaronnote-roam-new--sync-draft-from-widgets)
   (setq-local my/aaronnote-roam-new--draft
               (plist-put my/aaronnote-roam-new--draft key value))
   (my/aaronnote-roam-new-render))
 
+(defun my/aaronnote-roam-new--plain-widget-value (key)
+  "Return editable widget KEY's plain string value, or nil."
+  (when-let* ((widget (alist-get key my/aaronnote-roam-new--widgets)))
+    (substring-no-properties (format "%s" (widget-value widget)))))
+
+(defun my/aaronnote-roam-new--sync-draft-from-widgets ()
+  "Copy editable field widget values into the current Roam New draft."
+  (when (and my/aaronnote-roam-new--widgets my/aaronnote-roam-new--draft)
+    (let ((draft my/aaronnote-roam-new--draft))
+      (dolist (entry '((:title . title)
+                       (:path . path)
+                       (:kind . kind)))
+        (when-let* ((value (my/aaronnote-roam-new--plain-widget-value
+                            (cdr entry))))
+          (setq draft (plist-put draft (car entry) value))))
+      (when-let* ((tags (my/aaronnote-roam-new--plain-widget-value 'tags)))
+        (setq draft
+              (plist-put draft :tags
+                         (my/aaronnote-roam-new--normalize-tags tags))))
+      (setq-local my/aaronnote-roam-new--draft draft))))
+
 (defun my/aaronnote-roam-new-edit-type ()
   "Edit the note type in the current Roam New draft."
   (interactive)
+  (my/aaronnote-roam-new--sync-draft-from-widgets)
   (let* ((old (plist-get my/aaronnote-roam-new--draft :node-type))
          (next (completing-read "Note type: " '("roam" "regular")
                                 nil t nil nil old))
@@ -1072,6 +1164,7 @@ Path-like refs are accepted and resolved to canonical note ids."
 (defun my/aaronnote-roam-new-edit-title ()
   "Edit the title in the current Roam New draft."
   (interactive)
+  (my/aaronnote-roam-new--sync-draft-from-widgets)
   (let* ((old-title (plist-get my/aaronnote-roam-new--draft :title))
          (old-default
           (my/aaronnote-roam-new--default-path
@@ -1088,14 +1181,15 @@ Path-like refs are accepted and resolved to canonical note ids."
     (my/aaronnote-roam-new-render)))
 
 (defun my/aaronnote-roam-new-edit-path ()
-  "Edit the save path in the current Roam New draft."
+  "Edit the save path in the current Roam New draft using file completion."
   (interactive)
-  (my/aaronnote-roam-new--set
-   :path
-   (completing-read "Save path: "
-                    (my/aaronnote-roam-new--path-suggestions)
-                    nil nil nil nil
-                    (plist-get my/aaronnote-roam-new--draft :path))))
+  (my/aaronnote-roam-new--sync-draft-from-widgets)
+  (let* ((root (file-name-as-directory (expand-file-name (my/aaronnote-roam-root))))
+         (current (plist-get my/aaronnote-roam-new--draft :path))
+         (abs (expand-file-name (or current "") root))
+         (raw (read-file-name "Save path: " root abs nil current)))
+    (my/aaronnote-roam-new--set
+     :path (file-relative-name (expand-file-name raw root) root))))
 
 (defun my/aaronnote-roam-new-edit-kind ()
   "Edit the note kind in the current Roam New draft."
@@ -1109,6 +1203,7 @@ Path-like refs are accepted and resolved to canonical note ids."
 (defun my/aaronnote-roam-new-edit-template ()
   "Edit the template in the current Roam New draft."
   (interactive)
+  (my/aaronnote-roam-new--sync-draft-from-widgets)
   (let* ((candidates (my/aaronnote-roam-new--template-candidates))
          (current (my/aaronnote-roam-new--template-label
                    (plist-get my/aaronnote-roam-new--draft :template-key)))
@@ -1117,19 +1212,31 @@ Path-like refs are accepted and resolved to canonical note ids."
                                 (or (cdr (assoc choice candidates)) ""))))
 
 (defun my/aaronnote-roam-new-edit-tags ()
-  "Edit tags in the current Roam New draft."
+  "Edit tags in the current Roam New draft, adding one at a time."
   (interactive)
-  (my/aaronnote-roam-new--set
-   :tags
-   (my/aaronnote-roam-new--normalize-tags
-    (completing-read-multiple
-     "Tags: " (my/aaronnote-roam-new--tag-suggestions)
-     nil nil
-     (string-join (plist-get my/aaronnote-roam-new--draft :tags) ", ")))))
+  (my/aaronnote-roam-new--sync-draft-from-widgets)
+  (let* ((suggestions (my/aaronnote-roam-new--tag-suggestions))
+         (tags (copy-sequence
+                (or (plist-get my/aaronnote-roam-new--draft :tags) nil))))
+    (catch 'done
+      (while t
+        (let* ((status (if tags
+                           (concat " [" (string-join tags ", ") "]")
+                         ""))
+               (input (string-trim
+                       (completing-read
+                        (format "Add tag%s (empty to finish): " status)
+                        suggestions nil nil))))
+          (if (string-empty-p input)
+              (throw 'done nil)
+            (unless (member input tags)
+              (setq tags (append tags (list input))))))))
+    (my/aaronnote-roam-new--set
+     :tags (my/aaronnote-roam-new--normalize-tags tags))))
 
 (defun my/aaronnote-roam-new--insert-field
     (id icon label value detail action &optional tone)
-  "Insert one editable Roam New field."
+  "Insert one selectable Roam New field."
   (my/aaronnote-roam-ui-insert-row
    :id id
    :icon icon
@@ -1142,9 +1249,64 @@ Path-like refs are accepted and resolved to canonical note ids."
    :action (lambda (_ignored) (call-interactively action))
    :help (format "RET/mouse-1: edit %s" (downcase label))))
 
+(defun my/aaronnote-roam-new--editable-width ()
+  "Return a reasonable width for Roam New editable fields."
+  (max 24 (min 72 (- (window-width) 32))))
+
+(defun my/aaronnote-roam-new--insert-editable-field
+    (id icon label value detail key &optional placeholder)
+  "Insert directly editable Roam New field KEY.
+ID, ICON, LABEL, VALUE, DETAIL, and PLACEHOLDER control display."
+  (let ((start (point))
+        (value (or value "")))
+    (insert "   "
+            (propertize (my/aaronnote-roam-ui-icon icon)
+                        'face 'my/aaronnote-roam-ui-icon)
+            "  ")
+    (my/aaronnote-roam-ui-insert-badge label 'muted)
+    (insert "  ")
+    (let* ((label-end (point))
+           (widget
+            (widget-create
+             'editable-field
+             :size (my/aaronnote-roam-new--editable-width)
+             :format "%v"
+             :help-echo (format "Edit %s directly" (downcase label))
+             :notify
+             (lambda (_widget &rest _ignored)
+               (my/aaronnote-roam-new--sync-draft-from-widgets))
+             (if (string-empty-p value) (or placeholder "") value))))
+      (push (cons key widget) my/aaronnote-roam-new--widgets)
+      (insert "\n")
+      (when (and detail (not (string-empty-p detail)))
+        (insert "      "
+                (propertize detail 'face 'my/aaronnote-roam-ui-detail)
+                "\n"))
+      (let ((end (point))
+            (action (let ((w widget))
+                      (lambda (_)
+                        (when-let* ((marker (widget-get w :from)))
+                          (goto-char marker))))))
+        (add-text-properties
+         start end
+         `(my/aaronnote-roam-ui-item-id ,id
+           help-echo ,(format "RET: jump into %s field; type to edit" (downcase label))))
+        ;; Apply row-action only to the label area so the widget's own keymap is not masked.
+        (add-text-properties
+         start label-end
+         `(my/aaronnote-roam-ui-row-action ,action
+           mouse-face my/aaronnote-roam-ui-row-highlight
+           keymap ,my/aaronnote-roam-ui-row-map))))))
+
 (defun my/aaronnote-roam-new-render ()
   "Render the current Roam New draft."
   (interactive)
+  (my/aaronnote-roam-new--sync-draft-from-widgets)
+  ;; Delete stale widget registrations before erasing; otherwise widget-setup
+  ;; sees both old and new fields and raises "Overlapping fields".
+  (dolist (entry my/aaronnote-roam-new--widgets)
+    (condition-case nil (widget-delete (cdr entry)) (error nil)))
+  (setq-local my/aaronnote-roam-new--widgets nil)
   (let* ((draft my/aaronnote-roam-new--draft)
          (node-type (plist-get draft :node-type))
          (title (plist-get draft :title))
@@ -1158,10 +1320,11 @@ Path-like refs are accepted and resolved to canonical note ids."
      "Roam New" 'new (format "%s draft" node-type))
     (my/aaronnote-roam-ui-render
      (lambda ()
+       (setq-local my/aaronnote-roam-new--widgets nil)
        (my/aaronnote-roam-ui-insert-page-header
         "New note"
         :icon 'new
-        :subtitle "Aaronnote-compatible draft: edit fields, then create"
+        :subtitle "Type in fields; p for path; a to add tags one by one; c to create"
         :stats (list (cons (upcase node-type)
                            (if (string= node-type "roam") 'info 'muted))
                      (cons template-label 'muted))
@@ -1176,6 +1339,12 @@ Path-like refs are accepted and resolved to canonical note ids."
           (:label "T Template"
            :command my/aaronnote-roam-new-edit-template
            :help "Choose a Markdown template")
+          (:label "p Path"
+           :command my/aaronnote-roam-new-edit-path
+           :help "Choose save path with file completion")
+          (:label "a Tags"
+           :command my/aaronnote-roam-new-edit-tags
+           :help "Add tags one by one with vault completion")
           (:label "R Reset"
            :command my/aaronnote-roam-new-reset
            :help "Reset this draft")
@@ -1185,29 +1354,30 @@ Path-like refs are accepted and resolved to canonical note ids."
        (my/aaronnote-roam-ui-insert-section "Draft" 6)
        (my/aaronnote-roam-new--insert-field
         'type 'status "TYPE" node-type
-        "Roam notes join the graph; regular notes are marked roam: off."
+        "Press RET or t to switch roam / regular."
         #'my/aaronnote-roam-new-edit-type
         (if (string= node-type "roam") 'info 'muted))
-       (my/aaronnote-roam-new--insert-field
+       (my/aaronnote-roam-new--insert-editable-field
         'title 'note "TITLE" title
         "Used for the heading, metadata, and default save path."
-        #'my/aaronnote-roam-new-edit-title)
-       (my/aaronnote-roam-new--insert-field
+        'title "Untitled")
+       (my/aaronnote-roam-new--insert-editable-field
         'path 'path "SAVE PATH" path
-        "Vault-relative .md or .markdown path."
-        #'my/aaronnote-roam-new-edit-path)
-       (my/aaronnote-roam-new--insert-field
+        "Vault-relative .md or .markdown path; p chooses with file completion."
+        'path "untitled.md")
+       (my/aaronnote-roam-new--insert-editable-field
         'kind 'status "KIND" kind
         "Controls Aaronnote note-kind behavior."
-        #'my/aaronnote-roam-new-edit-kind)
+        'kind (if (string= node-type "roam") "note" "default"))
        (my/aaronnote-roam-new--insert-field
         'template 'template "TEMPLATE" template-label
-        "Template variables and tabstops are expanded by Aaronnote."
+        "Press RET or T to choose a template."
         #'my/aaronnote-roam-new-edit-template)
-       (my/aaronnote-roam-new--insert-field
-        'tags 'tag "TAGS" (and tags (string-join tags ", "))
-        "Comma-separated graph tags with completion from the vault."
-        #'my/aaronnote-roam-new-edit-tags)
+       (my/aaronnote-roam-new--insert-editable-field
+        'tags 'tag "TAGS"
+        (if tags (string-join tags ", ") nil)
+        "Comma-separated graph tags; a adds with completion."
+        'tags "")
        (insert "\n")
        (my/aaronnote-roam-ui-insert-section "Result")
        (my/aaronnote-roam-ui-insert-field
@@ -1220,7 +1390,8 @@ Path-like refs are accepted and resolved to canonical note ids."
          (expand-file-name path (my/aaronnote-roam-root)))
         'my/aaronnote-roam-ui-path)
        (my/aaronnote-roam-ui-insert-field
-        "Create engine" "Aaronnote runtime" 'my/aaronnote-roam-ui-meta)))
+        "Create engine" "Aaronnote runtime" 'my/aaronnote-roam-ui-meta)
+       (widget-setup)))
     (unless (get-text-property (point) 'my/aaronnote-roam-ui-item-id)
       (my/aaronnote-roam-ui-goto-first-item))))
 
@@ -1279,30 +1450,28 @@ BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist."
 
 (defun my/aaronnote-roam-new--create-draft (draft)
   "Create and open DRAFT through the Aaronnote runtime."
-  (let* ((title (string-trim (or (plist-get draft :title) "")))
-         (path (string-trim (or (plist-get draft :path) ""))))
-    (when (string-empty-p title)
-      (user-error "Title cannot be empty"))
-    (when (string-empty-p path)
-      (user-error "Save path cannot be empty"))
-    (let* ((response
-            (my/aaronnote-roam--runtime-call
-             "create" "--json"
-             (json-encode (my/aaronnote-roam-new--payload draft))))
-           (file (and response (gethash "file" response))))
-      (unless (and file (file-exists-p file))
-        (user-error "Aaronnote runtime did not create the note"))
-      (my/aaronnote-roam--clear-runtime-cache)
-      (when (derived-mode-p 'my/aaronnote-roam-new-mode)
-        (kill-buffer (current-buffer)))
-      (if (fboundp 'my/aaronnote-open-file)
-          (my/aaronnote-open-file file)
-        (find-file file))
-      file)))
+  (let* ((draft (my/aaronnote-roam-new--draft-for-create draft))
+         (payload (my/aaronnote-roam-new--payload draft))
+         (json (json-encode payload))
+         (response (my/aaronnote-roam--runtime-call "create" "--json" json))
+         (file (and response (gethash "file" response))))
+    (unless response
+      (user-error "Aaronnote runtime failed — see *Messages* for details"))
+    (unless (and file (file-exists-p file))
+      (user-error "Aaronnote runtime did not create the note (path: %s)"
+                  (or file "nil")))
+    (my/aaronnote-roam--clear-runtime-cache)
+    (when (derived-mode-p 'my/aaronnote-roam-new-mode)
+      (kill-buffer (current-buffer)))
+    (if (fboundp 'my/aaronnote-open-file)
+        (my/aaronnote-open-file file)
+      (find-file file))
+    file))
 
 (defun my/aaronnote-roam-new-create ()
   "Create the current Roam New draft."
   (interactive)
+  (my/aaronnote-roam-new--sync-draft-from-widgets)
   (my/aaronnote-roam-new--create-draft my/aaronnote-roam-new--draft))
 
 (defun my/aaronnote-roam-new-note (&optional slug title tags)
@@ -2089,6 +2258,19 @@ With prefix argument FULL, force a full roam-db rebuild."
              (my/aaronnote-roam--insert-note-button entry))))))
     (display-buffer buf)))
 
+(defun my/aaronnote-roam--show-search-results (query entries)
+  "Show note search QUERY and ENTRIES with a live refresh action."
+  (my/aaronnote-roam--show-note-list
+   (format "Markdown roam search: %s" query)
+   entries
+   "No matching notes."
+   (let ((search-query query))
+     (lambda ()
+       (my/aaronnote-roam--show-search-results
+        search-query
+        (my/aaronnote-roam-search-notes search-query))))
+   'search))
+
 (defun my/aaronnote-roam-search-notes (&optional query)
   "Search notes by path, title, tag, id, and summary."
   (interactive)
@@ -2105,14 +2287,7 @@ With prefix argument FULL, force a full roam-db rebuild."
     (if (called-interactively-p 'interactive)
         (if (= (length entries) 1)
             (my/aaronnote-roam--open-slug (plist-get (car entries) :slug))
-          (my/aaronnote-roam--show-note-list
-           (format "Markdown roam search: %s" query)
-           entries
-           "No matching notes."
-           (let ((search-query query))
-             (lambda ()
-               (my/aaronnote-roam-search-notes search-query)))
-           'search))
+          (my/aaronnote-roam--show-search-results query entries))
       entries)))
 
 (defun my/aaronnote-roam-recent-notes ()
@@ -2253,10 +2428,10 @@ With prefix argument FULL, force a full roam-db rebuild."
             (status (my/aaronnote-roam--todo-status entry)))
         (unless (member status '("done" "cancelled"))
           (cond
-           ((and ddl (my/aaronnote-roam--todo-overdue-p ddl))
-            (push entry overdue))
            ((and ddl (string= ddl today-str))
             (push entry today))
+           ((and ddl (my/aaronnote-roam--todo-overdue-p ddl))
+            (push entry overdue))
            (ddl (push entry upcoming))
            (t   (push entry no-ddl))))))
     (let* ((open-count (+ (length overdue) (length today)
@@ -3252,6 +3427,16 @@ canonical `roam://note-id#tag' target."
 ;; ── Wire everything up ────────────────────────────────────────────────────
 
 (define-key my/aaronnote-roam-map (kbd "d") #'my/aaronnote-roam-daily-note)
+
+(defun my/aaronnote-roam-setup-keys ()
+  "Set up Aaronnote roam keys and xref for the current Markdown buffer.
+Binds `C-c r' to `my/aaronnote-roam-map' and registers the roam xref
+backend.  Does not install completion-at-point functions (those are
+added separately by `my/aaronnote-roam--capf-setup')."
+  (local-set-key (kbd "C-c r") my/aaronnote-roam-map)
+  (my/aaronnote-roam--xref-setup))
+
+(add-hook 'markdown-mode-hook #'my/aaronnote-roam-setup-keys)
 
 ;; Update transient with daily + gd hint
 (transient-define-prefix my/aaronnote-roam-dispatch ()

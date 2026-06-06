@@ -81,12 +81,24 @@
       (user-error "Note is outside note-code root: %s" root))
     relative))
 
+(defun my/note-code-lean-mirror-path (&optional selector file)
+  "Return the `.lean/' mirror path for SELECTOR or FILE.
+SELECTOR is relative to the `.lean/' mirror.  Without SELECTOR, derive the
+mirror path from FILE, or from the current `buffer-file-name'."
+  (let* ((source
+          (if (and selector (not (string-empty-p selector)))
+              (string-remove-prefix "/" (string-remove-prefix "./" selector))
+            (my/note-code--note-relative-path file)))
+         (lean-relative
+          (concat (file-name-sans-extension source) ".lean")))
+    (expand-file-name lean-relative
+                      (expand-file-name ".lean" (my/note-code--root)))))
+
 (defun my/note-code-lean-path (selector)
-  "Resolve @@lean4 SELECTOR to an absolute path under <root>/lean/.
-SELECTOR is a path relative to the lean/ directory, e.g. \"math/foo.lean\"."
+  "Resolve Lean SELECTOR to an absolute path under <root>/.lean/.
+SELECTOR is a path relative to the `.lean/' mirror, e.g. \"math/foo.lean\"."
   (expand-file-name
-   (string-remove-prefix "./" selector)
-   (expand-file-name "lean" (my/note-code--root))))
+   (my/note-code-lean-mirror-path selector)))
 
 (defun my/note-code-source-path (call)
   "Resolve source path for note-code CALL."
@@ -98,6 +110,8 @@ SELECTOR is a path relative to the lean/ directory, e.g. \"math/foo.lean\"."
           (my/note-code-lean-path path)
         (expand-file-name (string-remove-prefix "/" path)
                           (my/note-code--root))))
+     ((member lang '("lean" "lean4"))
+      (my/note-code-lean-mirror-path))
      (t
       (user-error "note-code path is required for language `%s'" lang)))))
 

@@ -77,7 +77,7 @@ export function renderMathHTML(
   try {
     const resolved = katexOptions(options);
     const html = katex.renderToString(tex, resolved);
-    if (resolved.output !== "mathml") ensureKatexCss(katexCssUrl);
+    ensureKatexCss(katexCssUrl);
     const rendered = { html };
     rememberMathHtml(key, rendered);
     return rendered;

@@ -35,12 +35,18 @@ async function main() {
     "--runtime",
     process.env.AARONNOTE_RUNTIME_ROOT || scriptDir,
   ));
+  const templatesRoot = resolve(argValue(
+    args,
+    "--templates",
+    process.env.AARONNOTE_TEMPLATES_ROOT || resolve(workspaceRoot, "templates", "aaronnote"),
+  ));
   const runtimeUrl = pathToFileURL(resolve(runtimeRoot, "server/lib/index.mjs")).href;
   const runtime = await import(runtimeUrl);
 
   runtime.configure({
     root,
     workspaceRoot,
+    templatesRoot,
   });
 
   let result;
@@ -52,6 +58,12 @@ async function main() {
     result = runtime.tagIndexPayload(await runtime.scanNotes());
   } else if (action === "todos") {
     result = await runtime.getTodos(argValue(args, "--file", ""));
+  } else if (action === "templates") {
+    result = {
+      templates: await runtime.scanTemplates({ force: hasArg(args, "--force") }),
+    };
+  } else if (action === "create") {
+    result = await runtime.createNode(JSON.parse(argValue(args, "--json", "{}")));
   } else if (action === "sync") {
     const notes = await runtime.syncRoamDb(null, {
       mode: hasArg(args, "--full") ? "full" : "auto",

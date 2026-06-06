@@ -23,6 +23,7 @@ import {
   graphPayload,
   scanNotes,
   pathSuggestionsForFile,
+  readNoteCodeRegion,
   syncRoamDb,
   scanSnippets,
   scanTemplates,
@@ -70,7 +71,7 @@ const noteRoot = resolve(process.env.AARONNOTE_ROOT || join(workspaceRoot, ".roa
 const publishJsDir = resolve(process.env.AARONNOTE_PUBLISH_JS_DIR || join(runtimeRoot, "js"));
 const stateRoot = resolve(process.env.AARONNOTE_STATE_DIR || join(workspaceRoot, "var", "aaronnote"));
 const snippetsRoot = resolve(process.env.AARONNOTE_SNIPPETS_ROOT || join(workspaceRoot, "snippets"));
-const templatesRoot = resolve(process.env.AARONNOTE_TEMPLATES_ROOT || join(runtimeRoot, "templates"));
+const templatesRoot = resolve(process.env.AARONNOTE_TEMPLATES_ROOT || join(workspaceRoot, "templates", "aaronnote"));
 const bindHost = process.env.AARONNOTE_WEB_HOST || "127.0.0.1";
 const bindPort = Number(process.env.AARONNOTE_WEB_PORT || 0);
 const liuGongQuanFontCandidates = [
@@ -333,7 +334,12 @@ const apiHandlers = {
   "aaronnote:api:notes:create-node": (draft) => createNode(draft || {}),
   "aaronnote:api:notes:delete": (file) => deleteNote({ file }),
   "aaronnote:api:notes:create-folder": (path) => createFolder({ path }),
-  "aaronnote:api:notes:path-suggestions": async (file) => ({ type: "path-suggestions", paths: await pathSuggestionsForFile(file || "") }),
+  "aaronnote:api:notes:path-suggestions": async (body) => {
+    const file = typeof body === "string" ? body : body?.file;
+    const prefix = typeof body === "string" ? "./" : body?.prefix;
+    return { type: "path-suggestions", paths: await pathSuggestionsForFile(file || "", prefix || "./") };
+  },
+  "aaronnote:api:note-code:read-region": (body) => readNoteCodeRegion(body || {}),
   "aaronnote:api:notes:roam-sync": (reload) => roamSyncPayload(reload === true),
   "aaronnote:api:notes:roam-sync-full": () => roamSyncFullPayload(),
   "aaronnote:api:notes:templates": (force) => templatesPayload(force === true),
@@ -525,12 +531,17 @@ function adapterScript(origin) {
       createNode: function(draft) { return call("aaronnote:api:notes:create-node", [draft || {}]); },
       deleteNote: function(file) { return call("aaronnote:api:notes:delete", [String(file || "")]); },
       createFolder: function(path) { return call("aaronnote:api:notes:create-folder", [String(path || "")]); },
-      pathSuggestions: function(file) { return call("aaronnote:api:notes:path-suggestions", [String(file || "")]); },
+      pathSuggestions: function(file, prefix) {
+        return call("aaronnote:api:notes:path-suggestions", [{ file: String(file || ""), prefix: String(prefix || "./") }]);
+      },
       roamSync: function(reload) { return call("aaronnote:api:notes:roam-sync", [reload === true]); },
       roamSyncFull: function() { return call("aaronnote:api:notes:roam-sync-full", []); },
       templates: function(force) { return call("aaronnote:api:notes:templates", [force === true]); },
       snippets: function() { return call("aaronnote:api:notes:snippets", []); },
       metaAdd: function(body) { return call("aaronnote:api:notes:meta-add", [body || {}]); }
+    },
+    noteCode: {
+      readRegion: function(body) { return call("aaronnote:api:note-code:read-region", [body || {}]); }
     },
     roamTools: {
       renameTag: function(body) { return call("aaronnote:api:roam-tools:rename-tag", [body || {}]); },

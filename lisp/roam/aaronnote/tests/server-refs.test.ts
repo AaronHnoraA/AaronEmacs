@@ -13,6 +13,8 @@ import { saveNote } from "../server/lib/save.mjs";
 const {
   graphPayload,
   notesIndexPayload,
+  pathSuggestionsForFile,
+  readNoteCodeRegion,
   refsFromContent,
   rewriteMarkdownPathReferences,
   roamDbRefsFromContent,
@@ -169,6 +171,70 @@ describe("server note refs", () => {
       const target = second.notes.find((note: { id: string }) => note.id === "target-id");
       expect(source.refs).toEqual(["target-id"]);
       expect(target.backlinks).toEqual(["source-id"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("suggests paths from relative, parent, and roam-root prefixes without hidden entries", async () => {
+    const root = await setupRoot("aaronnote-paths-");
+    try {
+      await mkdir(join(root, "project", "sub"), { recursive: true });
+      await mkdir(join(root, "Proofs"), { recursive: true });
+      await mkdir(join(root, ".hidden"), { recursive: true });
+      await writeFile(join(root, "project", "note.md"), "# Note\n", "utf8");
+      await writeFile(join(root, "project", "other.md"), "# Other\n", "utf8");
+      await writeFile(join(root, "Proofs", "Sample.lean"), "-- lean\n", "utf8");
+      await writeFile(join(root, ".hidden", "inside.lean"), "-- hidden\n", "utf8");
+      await writeFile(join(root, ".secret.lean"), "-- hidden file\n", "utf8");
+
+      expect(await pathSuggestionsForFile(join(root, "project", "note.md"), "./")).toEqual([
+        "./sub/",
+        "./note.md",
+        "./other.md",
+      ]);
+      expect(await pathSuggestionsForFile(join(root, "project", "note.md"), "../")).toEqual(
+        expect.arrayContaining(["../Proofs/", "../project/"]),
+      );
+      expect(await pathSuggestionsForFile(join(root, "project", "note.md"), "/")).toEqual(
+        expect.arrayContaining(["/Proofs/", "/project/"]),
+      );
+      expect(await pathSuggestionsForFile(join(root, "project", "note.md"), "/")).not.toContain("/.hidden/");
+      expect(await pathSuggestionsForFile(join(root, "project", "note.md"), "/")).not.toContain("/.secret.lean");
+      expect(await pathSuggestionsForFile(join(root, "project", "note.md"), "/.hidden/")).toEqual(["/.hidden/inside.lean"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("reads note-code lean regions by roam-root path", async () => {
+    const root = await setupRoot("aaronnote-note-code-");
+    try {
+      await mkdir(join(root, "project"), { recursive: true });
+      await mkdir(join(root, "Proofs"), { recursive: true });
+      const note = join(root, "project", "note.md");
+      const lean = join(root, "Proofs", "Sample.lean");
+      await writeFile(note, "@@note-code(/Proofs/Sample.lean)[main]\n", "utf8");
+      await writeFile(lean, [
+        "-- @aaronnote main",
+        "theorem sample : True := by",
+        "  trivial",
+        "-- @aaronnote second",
+        "def x := 1",
+        "",
+      ].join("\n"), "utf8");
+
+      const msg = await readNoteCodeRegion({
+        notePath: note,
+        path: "/Proofs/Sample.lean",
+        id: "main",
+      });
+
+      expect(msg.ok).toBe(true);
+      expect(msg.file).toBe(lean);
+      expect(msg.language).toBe("lean4");
+      expect(msg.body).toContain("theorem sample");
+      expect(msg.body).not.toContain("def x");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

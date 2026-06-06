@@ -18,11 +18,14 @@ type NativeApi = {
     bootstrap?: (file?: string) => Promise<unknown>;
     open?: (file: string) => Promise<unknown>;
     list?: (force?: boolean) => Promise<unknown>;
-    pathSuggestions?: (file: string) => Promise<unknown>;
+    pathSuggestions?: (file: string, prefix?: string) => Promise<unknown>;
     save?: (body: SaveBody) => Promise<unknown>;
     saveKeepalive?: (body: SaveBody) => void;
     snippets?: () => Promise<unknown>;
     metaAdd?: (body: Record<string, unknown>) => Promise<unknown>;
+  };
+  noteCode?: {
+    readRegion?: (body?: unknown) => Promise<unknown>;
   };
   meta?: {
     add?: (body: Record<string, unknown>) => Promise<unknown>;
@@ -84,9 +87,9 @@ export const api = {
       const call = requireMethod(nativeApi().notes?.list, "Note index");
       return ensureOk(await call(force) as NotesMsg, "Note index failed");
     },
-    async pathSuggestions(file: string): Promise<{ paths?: string[] }> {
+    async pathSuggestions(file: string, prefix = "./"): Promise<{ paths?: string[] }> {
       const call = requireMethod(nativeApi().notes?.pathSuggestions, "Path suggestions");
-      return ensureOk(await call(file) as { paths?: string[] }, "Path suggestions failed");
+      return ensureOk(await call(file, prefix) as { paths?: string[] }, "Path suggestions failed");
     },
     async save(body: SaveBody): Promise<SavedMsg> {
       const call = requireMethod(nativeApi().notes?.save, "Save");
@@ -104,6 +107,12 @@ export const api = {
         return;
       }
       if (api.save) void api.save(body).catch(() => {});
+    },
+  },
+  noteCode: {
+    async readRegion(body: unknown): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().noteCode?.readRegion, "Note code");
+      return ensureOk(await call(body) as Record<string, unknown>, "Note code failed");
     },
   },
   meta: {

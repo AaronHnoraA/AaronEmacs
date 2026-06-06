@@ -190,78 +190,44 @@ class TodoWidget extends MeasuredWidget {
   ignoreEvent(): boolean { return false; }
 }
 
-// ---------------------------------------------------------------------------
-// Lean4Widget — @@lean4(path)[tag] static display + "Open in Emacs" button
-// ---------------------------------------------------------------------------
+class TagWidget extends MeasuredWidget {
+  tag: string;
+  from: number;
+  to: number;
 
-class Lean4Widget extends MeasuredWidget {
-  cmd: InlineCommand;
-
-  constructor(cmd: InlineCommand) {
+  constructor(tag: string, from: number, to: number) {
     super();
-    this.cmd = cmd;
+    this.tag = tag;
+    this.from = from;
+    this.to = to;
   }
 
   protected measureKey(): string { return ""; }
   protected get measuredBlock(): boolean { return false; }
 
-  eq(other: Lean4Widget): boolean {
-    return (
-      this.cmd.argsRaw === other.cmd.argsRaw &&
-      this.cmd.context === other.cmd.context &&
-      this.cmd.fullFrom === other.cmd.fullFrom &&
-      this.cmd.fullTo === other.cmd.fullTo
-    );
+  eq(other: TagWidget): boolean {
+    return this.tag === other.tag && this.from === other.from && this.to === other.to;
   }
 
   toDOM(): HTMLElement {
-    const { cmd } = this;
-    const path = (cmd.argsRaw ?? "").trim();
-    const tag = cmd.context.trim();
-
     const wrap = document.createElement("span");
-    wrap.className = "inline-lean4-widget inline-command-token";
+    wrap.className = "inline-tag-widget inline-command-token";
+    wrap.dataset.cmSourceFrom = String(this.from);
+    wrap.dataset.cmSourceTo = String(this.to);
+    wrap.dataset.cmOpenSource = "true";
+    wrap.title = `@@tag[${this.tag}]`;
+    wrap.setAttribute("aria-label", `Inline anchor ${this.tag}`);
 
-    const chip = document.createElement("span");
-    chip.className = "inline-lean4-chip";
+    const marker = document.createElement("span");
+    marker.className = "inline-tag-anchor";
+    marker.setAttribute("aria-hidden", "true");
+    marker.textContent = "§";
 
-    const icon = document.createElement("span");
-    icon.className = "inline-lean4-icon";
-    icon.setAttribute("aria-hidden", "true");
-    icon.textContent = "λ";
-    chip.append(icon);
+    const label = document.createElement("span");
+    label.className = "inline-tag-label";
+    label.textContent = this.tag;
 
-    const pathEl = document.createElement("span");
-    pathEl.className = "inline-lean4-path";
-    pathEl.textContent = path || "(no path)";
-    chip.append(pathEl);
-
-    if (tag) {
-      const tagEl = document.createElement("span");
-      tagEl.className = "inline-lean4-tag";
-      tagEl.textContent = `#${tag}`;
-      chip.append(tagEl);
-    }
-
-    wrap.append(chip);
-
-    const btn = document.createElement("button");
-    btn.className = "inline-lean4-open-btn";
-    btn.type = "button";
-    btn.textContent = "Open in Emacs";
-    btn.title = path ? `Open ${path} in Emacs${tag ? ` at #${tag}` : ""}` : "Open in Emacs";
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const api = window.aaronnoteApi?.emacs?.open;
-      if (!api || !path) return;
-      const root: string = (window as any).__aaronnoteNotesRoot ?? "";
-      const leanDir = root ? `${root}/lean/` : "";
-      const absPath = leanDir + path.replace(/^\.\//, "");
-      api({ file: absPath, ...(tag ? { tag } : {}) }).catch(() => {});
-    });
-    wrap.append(btn);
-
+    wrap.append(marker, label);
     return wrap;
   }
 
@@ -287,7 +253,6 @@ function buildInlineCommandDecos(
   const decos: Range<Decoration>[] = [];
   const sel = view.state.selection.main;
   const doc = view.state.doc;
-  const lineTags = new Map<number, string[]>();
 
   for (const { from: vFrom, to: vTo } of view.visibleRanges) {
     const text = doc.sliceString(vFrom, vTo);
@@ -303,34 +268,18 @@ function buildInlineCommandDecos(
           }).range(from, to),
         );
       }
-      if (cmd.name === "lean4" && !cursorInside) {
-        decos.push(
-          Decoration.replace({
-            widget: new Lean4Widget({ ...cmd, fullFrom: from, fullTo: to }),
-          }).range(from, to),
-        );
-      }
       if (cmd.name === "tag") {
         const tag = cleanTag(cmd.context);
         if (!tag) continue;
-        const line = doc.lineAt(from);
-        const current = lineTags.get(line.from) ?? [];
-        if (!current.includes(tag)) current.push(tag);
-        lineTags.set(line.from, current);
         if (!cursorInside) {
-          decos.push(Decoration.replace({}).range(from, to));
+          decos.push(
+            Decoration.replace({
+              widget: new TagWidget(tag, from, to),
+            }).range(from, to),
+          );
         }
       }
     }
-  }
-
-  for (const [lineFrom, tags] of lineTags) {
-    decos.push(Decoration.line({
-      attributes: {
-        class: "cm-line-has-aaronnote-tags",
-        "data-aaronnote-tags": tags.map((tag) => `#${tag}`).join("\n"),
-      },
-    }).range(lineFrom));
   }
 
   decos.sort((a, b) => a.from - b.from || a.to - b.to);

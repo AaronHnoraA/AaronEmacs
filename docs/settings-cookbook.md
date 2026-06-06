@@ -362,6 +362,11 @@ emacs --debug-init -q -l ./bootstrap.el
 - `org` 默认不在 allowlist 里（避免干扰 `org-capture` 和 note 模板）
 - 模板存放在 `templates/<kind>/`；模板里的占位符支持 `{{date}}` / `{{title}}` / `{{file}}` / `{{author}}` / `{{cursor}}` 等
 
+Aaronnote / Roam New 的 Markdown 模板集中在
+[templates/aaronnote/markdown-mode/](../templates/aaronnote/markdown-mode/)。它们使用 Aaronnote 的
+snippet-style header、`{{title}}` / `{{date}}` / `{{tags}}` 等变量和 `$0` tabstop，
+由 Aaronnote runtime 展开，不进入普通 `auto-insert` allowlist。
+
 Typst 模板集中在 [templates/typst/](../templates/typst/)。当前 assignment 模板会
 导入项目根目录下的 `/_typst/assignment.typ`；插入模板时 Emacs 会自动创建这些
 `_typst/*.typ` 软链，样式源文件统一维护在 [notes/](../notes/)。

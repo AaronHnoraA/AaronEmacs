@@ -2267,6 +2267,12 @@ function chooseSnippetPopupItem(): void {
   insertSnippet(snippet, deleteBefore);
 }
 
+function acceptSnippetPopupItem(): boolean {
+  if (snippetPopup.hidden || snippetPopupItems.length === 0) return false;
+  chooseSnippetPopupItem();
+  return true;
+}
+
 function handleSnippetPopupKey(event: KeyboardEvent): boolean {
   if (snippetPopup.hidden || event.isComposing) return false;
   if (event.metaKey || event.ctrlKey || event.altKey) return false;
@@ -2301,11 +2307,49 @@ function handleSnippetPopupKey(event: KeyboardEvent): boolean {
   }
   if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
     event.preventDefault();
-    chooseSnippetPopupItem();
+    acceptSnippetPopupItem();
     return true;
   }
   if (event.key === "Escape") {
     event.preventDefault();
+    snippetSuppressedPrefix = snippetPopup.dataset.prefix ?? "";
+    hideSnippetPopup();
+    return true;
+  }
+  return false;
+}
+
+function handleSnippetPopupHostKey(key: VimLiteKey): boolean {
+  if (snippetPopup.hidden || key.metaKey || key.ctrlKey || key.altKey) return false;
+  if (snippetPopupItems.length === 0) {
+    hideSnippetPopup();
+    return false;
+  }
+  if (key.key === "ArrowDown") {
+    snippetPopupIndex = (snippetPopupIndex + 1) % snippetPopupItems.length;
+    renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
+    return true;
+  }
+  if (key.key === "ArrowUp") {
+    snippetPopupIndex = (snippetPopupIndex + snippetPopupItems.length - 1) % snippetPopupItems.length;
+    renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
+    return true;
+  }
+  if (key.key === "PageDown" || key.key === "PageUp") {
+    const delta = key.key === "PageDown" ? 6 : -6;
+    snippetPopupIndex = ((snippetPopupIndex + delta) % snippetPopupItems.length + snippetPopupItems.length) % snippetPopupItems.length;
+    renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
+    return true;
+  }
+  if (key.key === "Home" || key.key === "End") {
+    snippetPopupIndex = key.key === "Home" ? 0 : snippetPopupItems.length - 1;
+    renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
+    return true;
+  }
+  if (key.key === "Enter" || (key.key === "Tab" && !key.shiftKey)) {
+    return acceptSnippetPopupItem();
+  }
+  if (key.key === "Escape") {
     snippetSuppressedPrefix = snippetPopup.dataset.prefix ?? "";
     hideSnippetPopup();
     return true;
@@ -2538,6 +2582,10 @@ function runHostKey(body: Record<string, unknown>): boolean {
     shiftKey: Boolean(body.shiftKey),
   };
   editor.focus();
+  if (handleSnippetPopupHostKey(hostKey)) {
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
+    return true;
+  }
   if (vim.handleKey(hostKey)) {
     scheduleAssistUpdate({ cursor: true });
     return true;

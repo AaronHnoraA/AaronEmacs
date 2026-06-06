@@ -13,7 +13,7 @@ let workspaceRoot = resolve(process.env.AARONNOTE_WORKSPACE_ROOT || resolve(appD
 let publishJsDir = resolve(process.env.AARONNOTE_PUBLISH_JS_DIR || join(workspaceRoot, "js"));
 let stateRoot = resolve(process.env.AARONNOTE_STATE_DIR || join(workspaceRoot, "var", "aaronnote"));
 let snippetsRoot = resolve(process.env.AARONNOTE_SNIPPETS_ROOT || join(workspaceRoot, "snippets"));
-let templatesRoot = resolve(process.env.AARONNOTE_TEMPLATES_ROOT || join(appDir, "templates"));
+let templatesRoot = resolve(process.env.AARONNOTE_TEMPLATES_ROOT || join(workspaceRoot, "templates", "aaronnote"));
 const execFileAsync = promisify(execFile);
 
 let noteRoot = resolveUserPath(process.env.AARONNOTE_ROOT || join(appDir, "..", "roam"));
@@ -59,12 +59,17 @@ let roamSyncInFlight = null;
 let queuedRoamSyncNotes = null;
 let queuedRoamSyncChangedFiles = [];
 let atomicWriteCounter = 0;
+const noteCodeFileCache = new Map();
+const noteCodeFilePending = new Map();
+let noteCodeFileCacheBytes = 0;
 const CURRENT_DB_SCHEMA = 1;
 const BOOK_CACHE_SCHEMA = 1;
 const ASSET_CLEANUP_SCHEMA = 2;
 const scanConcurrency = Math.max(1, Math.min(64, Number(process.env.AARONNOTE_SCAN_CONCURRENCY) || 16));
 const saveRequestVersions = new Map();
 const saveWriteQueues = new Map();
+const NOTE_CODE_FILE_CACHE_LIMIT = 64;
+const NOTE_CODE_FILE_CACHE_BYTES = 8_000_000;
 const contentTypes = new Map([
   [".html", "text/html; charset=utf-8"],
   [".js", "application/javascript; charset=utf-8"],
@@ -258,6 +263,29 @@ function resolveInputPath(input, root) {
   const raw = String(input || "");
   if (/^~(?:$|[\\/])/.test(raw) || isAbsolute(raw)) return resolveUserPath(raw);
   return resolve(root, raw);
+}
+
+function resolveInternalContentPath(input, baseDir, allowedRoot = noteRoot) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  let file = "";
+  if (/^file:\/\//i.test(raw)) {
+    try {
+      file = fileURLToPath(raw);
+    } catch {
+      file = resolveUserPath(raw.replace(/^file:\/\//i, ""));
+    }
+  } else if (/^file:/i.test(raw)) {
+    file = resolveUserPath(raw.replace(/^file:/i, ""));
+  } else if (/^~(?:$|[\\/])/.test(raw)) {
+    file = resolveUserPath(raw);
+  } else if (raw.startsWith("/")) {
+    file = resolve(noteRoot, raw.replace(/^\/+/, ""));
+  } else {
+    file = resolve(baseDir, raw);
+  }
+  if (!inside(file, noteRoot) && !inside(file, allowedRoot)) return "";
+  return file;
 }
 
 function assetFolderName(current) {
@@ -558,35 +586,154 @@ export async function renderTikzAsset(body) {
   }
 }
 
-export async function pathSuggestionsForFile(file) {
+function pathSuggestionDirectoryPrefix(value) {
+  const raw = String(value || "./").replace(/\\/g, "/");
+  const slash = raw.lastIndexOf("/");
+  return slash >= 0 ? raw.slice(0, slash + 1) : "./";
+}
+
+function pathSuggestionDirectory(current, prefix) {
+  const displayPrefix = pathSuggestionDirectoryPrefix(prefix);
+  const rootBased = displayPrefix.startsWith("/");
+  const baseDir = rootBased ? noteRoot : dirname(current);
+  const allowedRoot = rootBased || !standaloneFile(current) ? noteRoot : dirname(current);
+  const relativeDir = rootBased ? displayPrefix.replace(/^\/+/, "") : displayPrefix;
+  const dir = resolve(baseDir, relativeDir || ".");
+  if (!inside(dir, allowedRoot)) return null;
+  const relParts = relative(allowedRoot, dir).split(sep).filter(Boolean);
+  if (relParts.some((part) => excludedDirs.has(part))) return null;
+  return { dir, displayPrefix };
+}
+
+export async function pathSuggestionsForFile(file, prefix = "./") {
   const current = file ? safeOpenFile(file) : "";
-  const scanRoot = current && standaloneFile(current) ? dirname(current) : noteRoot;
-  const out = new Set();
-  async function walk(dir) {
-    let entries = [];
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (entry.name.startsWith(".")) continue;
-      const full = join(dir, entry.name);
-      if (!inside(full, scanRoot)) continue;
-      if (entry.isDirectory()) {
-        if (excludedDirs.has(entry.name)) continue;
-        out.add(`${markdownRelativePath(current, full)}/`);
-        await walk(full);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      const ext = extname(entry.name).toLowerCase();
-      if (!contentTypes.has(ext) && !pathSuggestionCodeExts.has(ext) && !imageAssetP(entry.name) && !visualAssetP(entry.name)) continue;
-      out.add(markdownRelativePath(current, full));
-    }
+  if (!current) return [];
+  const target = pathSuggestionDirectory(current, prefix);
+  if (!target) return [];
+  let entries = [];
+  try {
+    entries = await readdir(target.dir, { withFileTypes: true });
+  } catch {
+    return [];
   }
-  await walk(scanRoot);
-  return [...out].sort((a, b) => a.localeCompare(b)).slice(0, 2000);
+  return entries
+    .filter((entry) => !entry.name.startsWith("."))
+    .filter((entry) => entry.isFile() || (entry.isDirectory() && !excludedDirs.has(entry.name)))
+    .map((entry) => `${target.displayPrefix}${entry.name}${entry.isDirectory() ? "/" : ""}`)
+    .sort((a, b) => {
+      const aDir = a.endsWith("/");
+      const bDir = b.endsWith("/");
+      return aDir === bDir ? a.localeCompare(b) : aDir ? -1 : 1;
+    })
+    .slice(0, 500);
+}
+
+function normalizeLeanTag(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^\[|\]$/g, "")
+    .replace(/[^A-Za-z0-9_.:-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+function scanLeanRegions(text) {
+  const source = String(text || "");
+  const regions = [];
+  const matches = [];
+  const tagRe = /^--[ \t]*@aaronnote[ \t]+([A-Za-z0-9_.:-]+)[ \t]*$/gm;
+  let match;
+  while ((match = tagRe.exec(source)) !== null) {
+    const markerFrom = match.index;
+    const markerTo = tagRe.lastIndex;
+    const bodyFrom = source.slice(markerTo, markerTo + 1) === "\n" ? markerTo + 1 : markerTo;
+    matches.push({ tag: match[1], markerFrom, markerTo, bodyFrom });
+  }
+  for (let i = 0; i < matches.length; i++) {
+    const current = matches[i];
+    const next = matches[i + 1];
+    const bodyTo = next ? next.markerFrom : source.length;
+    regions.push({ ...current, bodyTo, body: source.slice(current.bodyFrom, bodyTo) });
+  }
+  return regions;
+}
+
+function rememberNoteCodeFile(file, info, text, regions) {
+  const bytes = Buffer.byteLength(text, "utf8");
+  const existing = noteCodeFileCache.get(file);
+  if (existing) noteCodeFileCacheBytes -= existing.bytes;
+  noteCodeFileCache.delete(file);
+  noteCodeFileCache.set(file, { mtimeMs: info.mtimeMs, size: info.size, bytes, regions });
+  noteCodeFileCacheBytes += bytes;
+  while (noteCodeFileCache.size > NOTE_CODE_FILE_CACHE_LIMIT || noteCodeFileCacheBytes > NOTE_CODE_FILE_CACHE_BYTES) {
+    const oldest = noteCodeFileCache.keys().next().value;
+    if (!oldest) break;
+    const removed = noteCodeFileCache.get(oldest);
+    noteCodeFileCache.delete(oldest);
+    noteCodeFileCacheBytes -= removed?.bytes || 0;
+  }
+}
+
+async function loadNoteCodeRegionsForFile(file) {
+  const info = await stat(file);
+  if (!info.isFile()) {
+    const err = new Error(`Not a regular file: ${file}`);
+    err.statusCode = 400;
+    throw err;
+  }
+  const cached = noteCodeFileCache.get(file);
+  if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) {
+    noteCodeFileCache.delete(file);
+    noteCodeFileCache.set(file, cached);
+    return { info, regions: cached.regions };
+  }
+  const text = await readFile(file, "utf8");
+  const regions = scanLeanRegions(text);
+  rememberNoteCodeFile(file, info, text, regions);
+  return { info, regions };
+}
+
+function noteCodeRegionsForFile(file) {
+  const existing = noteCodeFilePending.get(file);
+  if (existing) return existing;
+  const pending = loadNoteCodeRegionsForFile(file)
+    .finally(() => {
+      if (noteCodeFilePending.get(file) === pending) noteCodeFilePending.delete(file);
+    });
+  noteCodeFilePending.set(file, pending);
+  return pending;
+}
+
+export async function readNoteCodeRegion(body) {
+  const notePath = safeOpenFile(body?.notePath || body?.file || "");
+  const rawPath = String(body?.path || "").trim();
+  const id = normalizeLeanTag(body?.id || "");
+  if (!rawPath || !id) {
+    const err = new Error("Missing note-code path or id");
+    err.statusCode = 400;
+    throw err;
+  }
+  const baseDir = dirname(notePath);
+  const allowedRoot = standaloneFile(notePath) ? baseDir : noteRoot;
+  const file = resolveInternalContentPath(rawPath, baseDir, allowedRoot);
+  if (!file) {
+    const err = new Error(`Code file is outside the allowed root: ${rawPath}`);
+    err.statusCode = 403;
+    throw err;
+  }
+  if (extname(file).toLowerCase() !== ".lean") {
+    const err = new Error("@@note-code currently supports .lean files only");
+    err.statusCode = 400;
+    throw err;
+  }
+  const { info, regions } = await noteCodeRegionsForFile(file);
+  const region = regions.find((item) => item.tag === id);
+  if (!region) {
+    const err = new Error(`Lean region not found: ${id}`);
+    err.statusCode = 404;
+    throw err;
+  }
+  return { ok: true, file, path: rawPath, id, body: region.body, language: "lean4", mtimeMs: info.mtimeMs, size: info.size };
 }
 
 function assetCandidateFile(file) {
@@ -4730,9 +4877,12 @@ export function configure(options = {}) {
   publishJsDir = resolve(String(options.publishJsDir || process.env.AARONNOTE_PUBLISH_JS_DIR || join(workspaceRoot, "js")));
   stateRoot = resolve(String(options.stateRoot || process.env.AARONNOTE_STATE_DIR || join(workspaceRoot, "var", "aaronnote")));
   snippetsRoot = resolve(String(options.snippetsRoot || process.env.AARONNOTE_SNIPPETS_ROOT || join(workspaceRoot, "snippets")));
-  templatesRoot = resolve(String(options.templatesRoot || process.env.AARONNOTE_TEMPLATES_ROOT || join(appDir, "templates")));
+  templatesRoot = resolve(String(options.templatesRoot || process.env.AARONNOTE_TEMPLATES_ROOT || join(workspaceRoot, "templates", "aaronnote")));
   snippetCache = { key: "", scannedAt: 0, snippets: [] };
   templateCache = { key: "", scannedAt: 0, templates: [] };
+  noteCodeFileCache.clear();
+  noteCodeFilePending.clear();
+  noteCodeFileCacheBytes = 0;
   markNotesDirty();
 }
 

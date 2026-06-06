@@ -185,7 +185,7 @@ $$`;
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
 
-    expect(document.querySelector(".cm-line-has-aaronnote-tags")).toBeNull();
+    expect(document.querySelector(".inline-tag-widget")).toBeNull();
     expect(document.querySelector(".cm-image-widget")).toBeNull();
     expect(document.querySelectorAll(".cm-math-inline")).toHaveLength(2);
     cleanup();
@@ -1521,14 +1521,16 @@ $$
     cleanup();
   });
 
-  test("renders compact inline tags in the left line gutter without inline text", () => {
+  test("renders compact inline tags as inline anchor markers", () => {
     const md = "alpha @@tag[qc]\nplain";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
 
-    const line = document.querySelector<HTMLElement>(".cm-line-has-aaronnote-tags");
-    expect(line).toBeTruthy();
-    expect(line!.dataset.aaronnoteTags).toBe("#qc");
+    const tag = document.querySelector<HTMLElement>(".inline-tag-widget");
+    expect(tag).toBeTruthy();
+    expect(tag!.textContent).toBe("§qc");
+    expect(tag!.querySelector(".inline-tag-anchor")?.textContent).toBe("§");
+    expect(tag!.querySelector(".inline-tag-label")?.textContent).toBe("qc");
     expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
       .not.toContain("@@tag[qc]");
 
@@ -1538,12 +1540,41 @@ $$
     cleanup();
   });
 
-  test("stacks multiple inline tags in the line gutter", () => {
+  test("renders multiple inline tags as inline anchor markers", () => {
     const { cleanup } = mountCM6("alpha @@tag[first] @@tag[second]\nplain");
-    const line = document.querySelector<HTMLElement>(".cm-line-has-aaronnote-tags");
-    expect(line).toBeTruthy();
-    expect(line!.dataset.aaronnoteTags).toBe("#first\n#second");
+    const tags = Array.from(document.querySelectorAll<HTMLElement>(".inline-tag-widget"))
+      .map((tag) => tag.textContent);
+    expect(tags).toEqual(["§first", "§second"]);
     cleanup();
+  });
+
+  test("renders note-code commands as highlighted read-only code cards", async () => {
+    const previous = window.aaronnoteApi;
+    window.aaronnoteApi = {
+      noteCode: {
+        readRegion: async (body: unknown) => ({
+          ok: true,
+          body: "theorem sample : True := by\n  trivial",
+          language: "lean4",
+          ...(body as Record<string, unknown>),
+        }),
+      },
+    };
+    const md = "@@note-code(/Proofs/Sample.lean)[sample]\nplain";
+    const { editor, cleanup } = mountCM6(md);
+    try {
+      editor.setMarkdownSelection(md.length);
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+      const card = document.querySelector<HTMLElement>(".cm-note-code-widget");
+      expect(card).toBeTruthy();
+      expect(card!.textContent).toContain("/Proofs/Sample.lean [sample]");
+      expect(card!.textContent).toContain("theorem sample");
+      expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
+        .not.toContain("@@note-code");
+    } finally {
+      cleanup();
+      window.aaronnoteApi = previous;
+    }
   });
 
   test("renders inline todo widgets with a right-side rail", () => {

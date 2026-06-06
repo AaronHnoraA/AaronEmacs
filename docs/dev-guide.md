@@ -421,7 +421,7 @@ Aaronnote 与 Emacs 共用：
 
 - 状态与缓存：`var/aaronnote/`
 - snippets：`snippets/`（Markdown、Lean、TeX 使用 Aaronnote 版本，其它语言保留 Emacs 原有版本）
-- Markdown templates：`lisp/roam/aaronnote/templates/`
+- Markdown templates：`templates/aaronnote/markdown-mode/`
 
 ### 关键文件
 

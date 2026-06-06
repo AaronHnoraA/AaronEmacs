@@ -107,6 +107,22 @@ Note task chip 支持 `priority`、`due`、`scheduled`、`repeat`，例如
 `tag:` / `alias:` / `path:` / `title:` 过滤，并会提示 tag / alias / path 等候选。
 本地 graph xwidget buffer 里 `M-w` 会 kill graph buffer 并关掉 graph websocket。
 
+Aaronnote 的 Emacs 原生 roam buffer（Agenda、Tasks、TOC、Backlinks、Related、
+Management、DB Status、note list 和 Roam Selector）使用统一的紧凑 workbench UI：
+header-line 显示当前视图状态，正文使用工具栏、分组、状态徽章和可点击行。通用按键为
+`g` 刷新、`q` 关闭、`RET` 打开当前行、`j` / `k` 或 `n` / `p` 上下移动，
+`TAB` / `S-TAB` 在工具栏按钮间移动。Roam Selector 另外保留 `/` / `s` 搜索、
+`g` 回根目录、`.` 回当前 note context、`u` / `^` 上一级、`r` 刷新和 `i`
+直接插入当前目标。这些是 Emacs buffer 的界面和按键，不影响 Aaronnote Web UI。
+
+`C-c r n` / Roam 菜单里的 `new note` 打开 `*roam-new*` 原生新建面板。字段与
+Aaronnote New Note 一致：Type、Title、Save path、Kind、Template、Tags；Title、Save
+path、Kind 和 Tags 可在面板里直接输入，`c` 创建，`t` / `RET` 切换 roam / regular，
+`T` 选模板，`R` 重置。创建实际走
+Aaronnote runtime，所以默认值、路径校验、meta、模板变量和 tabstop 展开逻辑保持一致。
+Markdown 模板统一存放在 `templates/aaronnote/markdown-mode/`，供 Emacs 启动的 Aaronnote 与
+Roam New 共用。
+
 ## 2. Leader 键分组
 
 ### 文件 `SPC f`

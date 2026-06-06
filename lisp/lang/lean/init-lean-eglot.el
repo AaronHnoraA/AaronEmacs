@@ -94,6 +94,9 @@ Use `note' to show all Lean informational output, including `#check' results."
 (defvar-local lean--fringe-overlays nil
   "Fringe overlays for Lean file-progress and task markers.")
 
+(defvar-local lean--progress-fringe-timer nil
+  "Debounce timer for viewport-bounded progress fringe refresh.")
+
 (defvar-local lean--task-overlays nil
   "Fringe overlays for Lean goal status markers.")
 
@@ -139,6 +142,7 @@ Use `note' to show all Lean informational output, including `#check' results."
 (defun lean-sideline-cleanup ()
   "Release Lean sideline hooks, timer, and overlays."
   (lean--sideline-cancel)
+  (lean--progress-fringe-cancel)
   (lean-clear-sideline-overlays)
   (remove-hook 'window-scroll-functions #'lean-sideline-window-scroll-h t)
   (remove-hook 'window-size-change-functions #'lean-sideline-window-size-h t)
@@ -319,12 +323,14 @@ Use `note' to show all Lean informational output, including `#check' results."
 (defun lean-sideline-window-scroll-h (_window _start)
   "Refresh Lean sideline overlays after scrolling."
   (when (derived-mode-p 'lean-mode)
-    (lean-schedule-sideline-refresh)))
+    (lean-schedule-sideline-refresh)
+    (lean--schedule-progress-fringe-refresh)))
 
 (defun lean-sideline-window-size-h (_frame)
   "Refresh Lean sideline overlays after window size changes."
   (when (derived-mode-p 'lean-mode)
-    (lean-schedule-sideline-refresh)))
+    (lean-schedule-sideline-refresh)
+    (lean--schedule-progress-fringe-refresh)))
 
 (defun lean-setup-sideline ()
   "Install Lean sideline rendering hooks in the current buffer."
@@ -679,27 +685,55 @@ BITMAP, FACE, HELP, and PROPERTY describe the marker."
     (cons (eglot--lsp-position-to-point start)
           (eglot--lsp-position-to-point end))))
 
+(defun lean--progress-fringe-cancel ()
+  "Cancel a pending progress fringe refresh."
+  (when (timerp lean--progress-fringe-timer)
+    (cancel-timer lean--progress-fringe-timer))
+  (setq lean--progress-fringe-timer nil))
+
+(defun lean--refresh-progress-fringe (&optional buffer)
+  "Redraw visible progress fringe markers for BUFFER."
+  (let ((buffer (or buffer (current-buffer))))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (setq lean--progress-fringe-timer nil)
+        (when (and lean-progress-fringe-enabled
+                   (derived-mode-p 'lean-mode))
+          (lean--update-fringe-overlays lean--file-progress))))))
+
+(defun lean--schedule-progress-fringe-refresh ()
+  "Schedule a debounced viewport progress fringe refresh."
+  (lean--progress-fringe-cancel)
+  (setq lean--progress-fringe-timer
+        (run-at-time lean-sideline-delay nil
+                     #'lean--refresh-progress-fringe (current-buffer))))
+
 (defun lean--update-fringe-overlays (items)
-  "Update fringe overlays from progress ITEMS list."
+  "Update fringe overlays from progress ITEMS, limited to visible lines."
   (lean--clear-progress-overlays)
-  (dolist (item items)
-    (when-let* ((region (lean--progress-region item)))
-      (let* ((kind       (plist-get item :kind))
-             (processing (or (null kind) (eq kind 1)))
-             (face       (if processing 'lean-fringe-processing-face
-                           'lean-fringe-error-face))
-             (help       (lean--progress-help item)))
-        (save-excursion
-          (goto-char (car region))
-          (let ((done nil))
-            (while (not done)
-              (setq lean--fringe-overlays
-                    (lean--add-fringe-overlay
-                     (point) 'lean-fringe-progress-bar-bitmap face help
-                     'lean-fringe lean--fringe-overlays))
-              (setq done
-                    (or (>= (line-end-position) (cdr region))
-                        (/= (forward-line 1) 0))))))))))
+  (let ((ranges (lean--visible-ranges)))
+    (dolist (item items)
+      (when-let* ((region (lean--progress-region item)))
+        (let* ((kind       (plist-get item :kind))
+               (processing (or (null kind) (eq kind 1)))
+               (face       (if processing 'lean-fringe-processing-face
+                             'lean-fringe-error-face))
+               (help       (lean--progress-help item)))
+          (dolist (vr ranges)
+            (let ((beg (max (car region) (car vr)))
+                  (end (min (cdr region) (cdr vr))))
+              (when (< beg end)
+                (save-excursion
+                  (goto-char beg)
+                  (let ((done nil))
+                    (while (not done)
+                      (setq lean--fringe-overlays
+                            (lean--add-fringe-overlay
+                             (point) 'lean-fringe-progress-bar-bitmap
+                             face help 'lean-fringe lean--fringe-overlays))
+                      (setq done
+                            (or (>= (line-end-position) end)
+                                (/= (forward-line 1) 0))))))))))))))
 
 (defun lean--clear-progress-overlays ()
   "Remove Lean file-progress overlays from current buffer."
@@ -717,6 +751,7 @@ BITMAP, FACE, HELP, and PROPERTY describe the marker."
   "Cancel pending Lean notification work and clear its UI state."
   (when (timerp lean--notification-timer)
     (cancel-timer lean--notification-timer))
+  (lean--progress-fringe-cancel)
   (when lean--flymake-report-fn
     (funcall lean--flymake-report-fn nil
              :force t :region (cons (point-min) (point-max))))

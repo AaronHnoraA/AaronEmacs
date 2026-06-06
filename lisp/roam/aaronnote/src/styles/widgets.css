@@ -1513,11 +1513,13 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
   text-align: left;
 }
 
-/* MathML math font — set GFS Neohellenic Math (matching Org/Typst preview).
-   KaTeX outputs MathML; WebKit renders it with the font-family below. */
-.cm-editor math,
-.cm-editor math * {
-  font-family: var(--aaron-font-math);
+/* KaTeX font in CM6 — applied to math widget elements inside .cm-editor */
+.cm-editor .katex,
+.cm-editor .katex * {
+  font-family: var(--aaron-font-math, KaTeX_Main, "Times New Roman", serif) !important;
+}
+.cm-editor .katex .mord.mathnormal {
+  font-family: var(--aaron-font-math, KaTeX_Math, "Times New Roman", serif) !important;
 }
 
 /* Display math is a real block node. The fences are node chrome, so editing
@@ -1910,28 +1912,75 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
   color: color-mix(in srgb, var(--inline-todo-accent), var(--aaron-ink, #1f2937) 26%);
 }
 
-.cm-editor .cm-line-has-aaronnote-tags::after {
-  content: attr(data-aaronnote-tags);
-  position: absolute;
-  left: calc(-150px - var(--aaronnote-line-tag-gutter));
-  top: 0.32em;
-  max-width: 66px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: pre-line;
-  box-sizing: border-box;
-  border: 1px solid color-mix(in srgb, var(--aaron-red, #b31b1b), transparent 45%);
-  border-radius: 3px;
-  padding: 1px 5px;
-  background: color-mix(in srgb, var(--aaron-paper-soft, #f7f3ea), white 18%);
-  color: var(--aaron-red-dark, #7f1515);
-  font: 800 10px/1.35 var(--aaron-font-sans, system-ui, sans-serif);
-  pointer-events: none;
-  user-select: none;
+.cm-editor .inline-tag-widget {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.26em;
+  vertical-align: baseline;
+  min-height: 1.28em;
+  margin: 0 0.1em;
+  border: 1px solid color-mix(in srgb, #0f766e, transparent 58%);
+  border-left-width: 3px;
+  border-radius: 4px;
+  padding: 0.02em 0.36em 0.04em 0.22em;
+  background: color-mix(in srgb, #14b8a6, transparent 92%);
+  color: #0f5f58;
+  font: 720 0.76em/1.35 var(--aaron-font-sans, system-ui, sans-serif);
+  cursor: text;
 }
 
-.cm-editor .cm-org-env-line.cm-line-has-aaronnote-tags::after {
-  left: calc(-150px - var(--aaronnote-line-tag-gutter) - var(--org-env-depth, 0) * 1.1rem - 1rem - 3px);
+.cm-editor .inline-tag-anchor {
+  color: #0d9488;
+  font-family: var(--aaron-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.cm-editor .inline-tag-label {
+  overflow-wrap: anywhere;
+}
+
+.cm-editor .cm-note-code-widget {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0.45rem 0;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), var(--aaron-muted, #6c6358) 14%);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--aaron-paper-soft, #f7f3ea), white 12%);
+  overflow: hidden;
+}
+
+.cm-editor .cm-note-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.32rem 0.55rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), transparent 20%);
+  color: color-mix(in srgb, var(--aaron-ink, #1e1a16), var(--aaron-muted, #666) 34%);
+  font: 700 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.cm-editor .cm-note-code-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cm-editor .cm-note-code-body {
+  padding: 0.55rem 0.65rem;
+  color: var(--aaron-ink, #1e1a16);
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.cm-editor .cm-note-code-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cm-editor .cm-note-code-error .cm-note-code-body {
+  color: var(--aaron-red-dark, #7f1515);
 }
 
 @media (max-width: 900px) {
@@ -2635,46 +2684,4 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
 
 .cm-editor .cm-html-env-widget.cm-aaronnote-measured-widget {
   display: flow-root;
-}
-
-/* @@lean4(path)[tag] inline widget */
-.cm-editor .inline-lean4-widget {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  vertical-align: middle;
-  font-size: 0.85em;
-  line-height: 1.4;
-}
-.cm-editor .inline-lean4-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: #1e1b4b;
-  border: 1px solid #4338ca;
-  border-radius: 4px;
-  padding: 1px 6px;
-  color: #a5b4fc;
-  font-family: var(--font-mono, monospace);
-}
-.cm-editor .inline-lean4-icon {
-  color: #818cf8;
-  font-style: italic;
-  font-weight: bold;
-}
-.cm-editor .inline-lean4-path { color: #c7d2fe; }
-.cm-editor .inline-lean4-tag  { color: #6ee7b7; opacity: 0.8; }
-.cm-editor .inline-lean4-open-btn {
-  font-size: 0.8em;
-  padding: 1px 6px;
-  border-radius: 3px;
-  border: 1px solid #4338ca;
-  background: #312e81;
-  color: #c7d2fe;
-  cursor: pointer;
-  line-height: 1.4;
-}
-.cm-editor .inline-lean4-open-btn:hover {
-  background: #3730a3;
-  color: #e0e7ff;
 }
