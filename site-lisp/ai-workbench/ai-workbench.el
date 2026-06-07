@@ -15,6 +15,8 @@
 (require 'ai-workbench-status)
 (require 'ai-workbench-adapter-claude)
 (require 'ai-workbench-adapter-codex)
+(require 'ai-workbench-adapter-opencode)
+(require 'ai-workbench-adapter-gptel)
 (require 'ai-workbench-tools)
 
 (declare-function ai-workbench-claude-session-live-p "ai-workbench-adapter-claude" (&optional project-root))
@@ -22,6 +24,12 @@
 (declare-function ai-workbench-claude-stop "ai-workbench-adapter-claude" (&optional project-root))
 (declare-function ai-workbench-claude-draft-prompt "ai-workbench-adapter-claude" (prompt &optional project-root))
 (declare-function ai-workbench-codex-draft-prompt "ai-workbench-adapter-codex" (prompt &optional project-root))
+(declare-function ai-workbench-opencode-session-live-p "ai-workbench-adapter-opencode" (&optional project-root))
+(declare-function ai-workbench-opencode-stop "ai-workbench-adapter-opencode" (&optional project-root))
+(declare-function ai-workbench-opencode-draft-prompt "ai-workbench-adapter-opencode" (prompt &optional project-root))
+(declare-function ai-workbench-gptel-session-live-p "ai-workbench-adapter-gptel" (&optional project-root))
+(declare-function ai-workbench-gptel-stop "ai-workbench-adapter-gptel" (&optional project-root))
+(declare-function ai-workbench-gptel-draft-prompt "ai-workbench-adapter-gptel" (prompt &optional project-root))
 (declare-function ai-workbench-status-open "ai-workbench-status" ())
 
 (defgroup ai-workbench nil
@@ -77,7 +85,7 @@ Append LABEL when non-nil."
   "Prompt for the backend used by PROJECT-ROOT."
   (intern
    (completing-read "AI backend: "
-                    '("claude" "codex")
+                     '("claude" "codex" "opencode" "gptel")
                     nil t nil nil
                     (symbol-name (ai-workbench-session-backend project-root)))))
 
@@ -95,6 +103,8 @@ Append LABEL when non-nil."
   (pcase (ai-workbench-session-backend project-root)
     ('claude (ai-workbench-claude-session-live-p project-root))
     ('codex (ai-workbench-codex-session-live-p project-root))
+    ('opencode (ai-workbench-opencode-session-live-p project-root))
+    ('gptel (ai-workbench-gptel-session-live-p project-root))
     (_ nil)))
 
 (defun ai-workbench--reset-selection (project-root)
@@ -114,6 +124,14 @@ Append LABEL when non-nil."
      (ai-workbench-codex-ensure-session project-root)
      (ai-workbench-codex-prime-session project-root)
      (ai-workbench-session-set-last-status "Codex session ready" project-root))
+    ('opencode
+     (ai-workbench-opencode-ensure-session project-root)
+     (ai-workbench-opencode-prime-session project-root)
+     (ai-workbench-session-set-last-status "OpenCode session ready" project-root))
+    ('gptel
+     (ai-workbench-gptel-ensure-session project-root)
+     (ai-workbench-gptel-prime-session project-root)
+     (ai-workbench-session-set-last-status "gptel session ready" project-root))
     (_ (user-error "Unsupported backend"))))
 
 (defun ai-workbench--save-buffer-if-needed (buffer)
@@ -150,11 +168,15 @@ Append LABEL when non-nil."
 (defalias 'ai-workbench #'ai-workbench-open)
 
 (defun ai-workbench-cycle-backend ()
-  "Cycle the current project backend between Claude and Codex."
+  "Cycle the current project backend among Claude, Codex, and OpenCode."
   (interactive)
   (let* ((project-root (ai-workbench-project-root))
          (current (ai-workbench-session-backend project-root))
-         (next (if (eq current 'claude) 'codex 'claude)))
+         (next (pcase current
+                 ('claude 'codex)
+                 ('codex 'opencode)
+                 ('opencode 'gptel)
+                 (_ 'claude))))
     (ai-workbench-session-set-backend next project-root)
     (ai-workbench-session-reset-profile-injected project-root)
     (message "ai-workbench backend: %s" next)
@@ -235,6 +257,8 @@ Append LABEL when non-nil."
   (pcase (ai-workbench-session-backend)
     ('claude (ai-workbench-claude-open-buffer))
     ('codex (ai-workbench-codex-open-buffer))
+    ('opencode (ai-workbench-opencode-open-buffer))
+    ('gptel (ai-workbench-gptel-open-buffer))
     (_ (user-error "Unsupported backend"))))
 
 (defun ai-workbench-toggle-codex-mode ()
@@ -250,6 +274,8 @@ Append LABEL when non-nil."
   (pcase (ai-workbench-session-backend)
     ('codex (ai-workbench-codex-stop))
     ('claude (ai-workbench-claude-stop))
+    ('opencode (ai-workbench-opencode-stop))
+    ('gptel (ai-workbench-gptel-stop))
     (_ (user-error "Unsupported backend"))))
 
 (defun ai-workbench-kill ()
@@ -259,6 +285,8 @@ Append LABEL when non-nil."
     (pcase (ai-workbench-session-backend project-root)
       ('codex (ai-workbench-codex-stop project-root))
       ('claude (ai-workbench-claude-stop project-root))
+      ('opencode (ai-workbench-opencode-stop project-root))
+      ('gptel (ai-workbench-gptel-stop project-root))
       (_ (user-error "Unsupported backend")))
     (ai-workbench--reset-selection project-root)
     (message "ai-workbench killed current backend session")))
@@ -285,6 +313,8 @@ Append LABEL when non-nil."
       (pcase backend
         ('claude (ai-workbench-claude-send-prompt effective-prompt root))
         ('codex (ai-workbench-codex-send-prompt effective-prompt root))
+        ('opencode (ai-workbench-opencode-send-prompt effective-prompt root))
+        ('gptel (ai-workbench-gptel-send-prompt effective-prompt root))
         (_ (user-error "Unsupported backend: %s" backend))))
     (ai-workbench-session-mark-profile-bootstrap-sent backend root)
     (ai-workbench-session-mark-profile-injected backend root)
@@ -300,6 +330,8 @@ Append LABEL when non-nil."
   (pcase backend
     ('claude (ai-workbench-claude-draft-prompt prompt project-root))
     ('codex (ai-workbench-codex-draft-prompt prompt project-root))
+    ('opencode (ai-workbench-opencode-draft-prompt prompt project-root))
+    ('gptel (ai-workbench-gptel-draft-prompt prompt project-root))
     (_ (user-error "Unsupported backend: %s" backend))))
 
 (defun ai-workbench--effective-prompt (backend prompt project-root)

@@ -7,6 +7,7 @@ Current upstream import sources:
 
 - `elpa/claude-code-ide/`
 - `elpa/codex-cli/`
+- `https://github.com/karthink/gptel`
 
 Current vendoring policy:
 

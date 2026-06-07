@@ -24,6 +24,11 @@
 ;;     C-c A w     ai-workbench-writing-prompt
 ;;     C-c A k     ai-workbench-kill
 ;;     C-c A i r/b/f send region / buffer / file via current backend
+;;
+;;   OpenCode (opencode) — opencode CLI agent
+;;     C-c o t     toggle panel
+;;     C-c o s/q   start / stop
+;;     C-c o p/r/f send prompt / region / file
 
 ;;; Code:
 
@@ -40,16 +45,10 @@
 
 (add-to-list 'load-path
              (file-name-as-directory
-              (locate-user-emacs-file "site-lisp/ai-workbench")))
-
+              (locate-user-emacs-file "site-lisp/ai-workbench/vendor/codex-cli")))
 (add-to-list 'load-path
              (file-name-as-directory
-              (locate-user-emacs-file
-               "site-lisp/ai-workbench/vendor/claude-code-ide")))
-(add-to-list 'load-path
-             (file-name-as-directory
-              (locate-user-emacs-file
-               "site-lisp/ai-workbench/vendor/codex-cli")))
+              (locate-user-emacs-file "site-lisp/ai-workbench/vendor/gptel")))
 
 (autoload 'ai-workbench "ai-workbench" nil t)
 (autoload 'ai-workbench-open "ai-workbench" nil t)
@@ -60,6 +59,8 @@
 (autoload 'ai-workbench-context-prompt "ai-workbench-tools" nil t)
 (autoload 'ai-workbench-writing-prompt "ai-workbench-tools" nil t)
 (autoload 'ai-workbench-docs-ask "ai-workbench-docs" nil t)
+(autoload 'ai-workbench-gptel-open-buffer "ai-workbench-adapter-gptel" nil t)
+(autoload 'ai-workbench-gptel-register-backends "ai-workbench-adapter-gptel" nil t)
 
 (defvar-keymap my/ai-workbench-prefix-map
   :doc "Prefix map for ai-workbench commands."
@@ -134,6 +135,35 @@
 (global-set-key (kbd "C-c c n") #'codex-cli-toggle-all-next-page)
 (global-set-key (kbd "C-c c b") #'codex-cli-toggle-all-prev-page)
 
+;; ── OpenCode ────────────────────────────────────────────────────────────
+
+(autoload 'ai-workbench-opencode-open-buffer "ai-workbench-adapter-opencode" nil t)
+(autoload 'ai-workbench-opencode-send-prompt "ai-workbench-adapter-opencode" nil t)
+(autoload 'ai-workbench-opencode-stop "ai-workbench-adapter-opencode" nil t)
+
+(global-set-key (kbd "C-c o t") #'ai-workbench-opencode-open-buffer)
+(global-set-key (kbd "C-c o s") #'ai-workbench-open)
+(global-set-key (kbd "C-c o q") #'ai-workbench-opencode-stop)
+(global-set-key (kbd "C-c o p") #'ai-workbench-context-prompt)
+(global-set-key (kbd "C-c o r") #'ai-workbench-send-region)
+(global-set-key (kbd "C-c o f") #'ai-workbench-send-file)
+
+;; ── gptel ───────────────────────────────────────────────────────────────────
+
+(global-set-key (kbd "C-c g") #'ai-workbench-gptel-open-buffer)
+(global-set-key (kbd "C-c G")
+                (lambda ()
+                  (interactive)
+                  (ai-workbench-gptel-register-backends)
+                  (message "gptel backends reloaded from JSON")))
+
+;; Register gptel backends eagerly so gptel-mode works without manual setup.
+(with-eval-after-load 'gptel
+  (ai-workbench-gptel-register-backends))
+
+;; Also register early so `gptel` command works out of the box.
+(when (require 'gptel nil t)
+  (ai-workbench-gptel-register-backends))
 
 (provide 'init-ai-ide)
 ;;; init-ai-ide.el ends here
