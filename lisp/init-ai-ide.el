@@ -61,6 +61,7 @@
 (autoload 'ai-workbench-docs-ask "ai-workbench-docs" nil t)
 (autoload 'ai-workbench-gptel-open-buffer "ai-workbench-adapter-gptel" nil t)
 (autoload 'ai-workbench-gptel-register-backends "ai-workbench-adapter-gptel" nil t)
+(autoload 'ai-workbench-hub "ai-workbench-hub" nil t)
 
 (defvar-keymap my/ai-workbench-prefix-map
   :doc "Prefix map for ai-workbench commands."
@@ -151,6 +152,7 @@
 ;; ── gptel ───────────────────────────────────────────────────────────────────
 
 (global-set-key (kbd "C-c g") #'ai-workbench-gptel-open-buffer)
+(global-set-key (kbd "C-c A H") #'ai-workbench-hub)
 (global-set-key (kbd "C-c G")
                 (lambda ()
                   (interactive)

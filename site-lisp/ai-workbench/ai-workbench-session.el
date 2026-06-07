@@ -22,7 +22,7 @@
 
 (defun ai-workbench--normalize-backend (backend)
   "Return BACKEND when supported, otherwise fall back to the default backend."
-  (if (memq backend '(claude codex))
+  (if (memq backend '(claude codex opencode gptel))
       backend
     ai-workbench-default-backend))
 
