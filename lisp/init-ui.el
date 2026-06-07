@@ -415,7 +415,9 @@ height in pixels."
 
 (setopt cursor-type 'box
         ;; Avoid a second, misleading cursor in inactive windows.
-        cursor-in-non-selected-windows nil)
+        cursor-in-non-selected-windows nil
+        ;; don't highlight region/line in inactive windows either
+        highlight-nonselected-windows nil)
 (setopt x-stretch-cursor t)  ; 在 TAB 字符上拉长 cursor.
 
 (blink-cursor-mode -1)

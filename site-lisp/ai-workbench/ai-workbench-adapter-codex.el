@@ -2,35 +2,13 @@
 
 ;;; Commentary:
 ;;
-;; This module integrates Codex interactive terminal workflows into
-;; ai-workbench using the same style as the Claude adapter: one process and
-;; one terminal buffer per project, popup display delegated to
-;; `init-vterm-popup.el', and prompt injection done directly through the
-;; terminal backend.
+;; Registers the Codex CLI tool spec with `ai-workbench-cli' and exposes
+;; thin public wrappers that the rest of ai-workbench calls by name.
+;; All session logic lives in ai-workbench-cli.el.
 
 ;;; Code:
 
-(require 'cl-lib)
-(require 'project)
-(require 'subr-x)
-(require 'ai-workbench-session)
-(require 'ai-workbench-profile)
-
-(defvar my/terminal-startup-cd-inhibited)
-(defvar vterm-shell)
-(defvar vterm-environment)
-(defvar eat-terminal)
-(defvar eat-term-name)
-
-(declare-function my/vterm-popup-display-buffer "init-vterm-popup" (buffer))
-(declare-function turn-off-evil-mode "evil" ())
-(declare-function evil-emacs-state "evil" ())
-(declare-function vterm "vterm" (&optional arg))
-(declare-function vterm-send-string "vterm" (string &optional paste-p))
-(declare-function vterm-send-return "vterm" ())
-(declare-function eat-mode "eat" ())
-(declare-function eat-exec "eat" (buffer name command startfile &rest switches))
-(declare-function eat-term-send-string "eat" (terminal string))
+(require 'ai-workbench-cli)
 
 (defgroup ai-workbench-codex nil
   "Codex terminal integration for ai-workbench."
@@ -52,365 +30,98 @@
   :type '(choice (const vterm) (const eat))
   :group 'ai-workbench-codex)
 
-(defcustom ai-workbench-codex-buffer-name-function
-  #'ai-workbench-codex--default-buffer-name
-  "Function used to compute Codex buffer names."
-  :type 'function
-  :group 'ai-workbench-codex)
-
 (defvar ai-workbench-codex-use-exec nil
   "Deprecated toggle kept for compatibility. Codex defaults to terminal mode.")
-
-(defvar ai-workbench-codex--processes (make-hash-table :test 'equal)
-  "Hashtable mapping project roots to active Codex processes.")
 
 (define-minor-mode ai-workbench-codex-mode
   "Minor mode marker for ai-workbench Codex terminal buffers."
   :init-value nil
   :lighter " AI-Codex")
 
-(defun ai-workbench-codex--configure-buffer (buffer project-root)
-  "Apply ai-workbench Codex local UI and state to BUFFER for PROJECT-ROOT."
-  (with-current-buffer buffer
-    (setq default-directory project-root)
-    (setq-local my/vterm-popup-kind 'ai-codex)
-    (setq-local my/vterm-popup-title
-                (format "Codex  %s"
-                        (abbreviate-file-name project-root)))
-    (when (fboundp 'evil-emacs-state)
-      (evil-emacs-state))
-    (when (bound-and-true-p evil-local-mode)
-      (turn-off-evil-mode))
-    (ai-workbench-codex-mode 1)))
+;; ── Tool spec registration ────────────────────────────────────────────────────
 
-(defun ai-workbench-codex--default-buffer-name (directory)
-  "Return the default Codex buffer name for DIRECTORY."
-  (format "*codex[%s]*"
-          (file-name-nondirectory (directory-file-name directory))))
+(ai-workbench-cli-register-tool 'codex
+  :name "Codex CLI"
+  :executable-var 'ai-workbench-codex-executable
+  :extra-args-var 'ai-workbench-codex-extra-args
+  :terminal-backend-var 'ai-workbench-codex-terminal-backend
+  :env-vars '("TERM_PROGRAM=emacs" "FORCE_CODE_TERMINAL=true")
+  :buffer-prefix "codex"
+  :popup-kind 'ai-codex
+  :minor-mode 'ai-workbench-codex-mode
+  :exec-args-fn
+  (lambda (prompt output-file root)
+    (list (if (and (boundp 'ai-workbench-codex-executable)
+                   (stringp ai-workbench-codex-executable)
+                   (not (string-empty-p ai-workbench-codex-executable)))
+              ai-workbench-codex-executable
+            "codex")
+          "exec"
+          "--skip-git-repo-check"
+          "--ephemeral"
+          "--color" "never"
+          "-C" root
+          "-s" "workspace-write"
+          "-o" output-file
+          prompt))
+  :exec-output 'file)
 
-(defun ai-workbench-codex--working-directory (&optional directory)
-  "Return DIRECTORY or infer the current project directory."
-  (or directory
-      (if-let* ((project (project-current nil default-directory)))
-          (expand-file-name (project-root project))
-        (expand-file-name default-directory))))
-
-(defun ai-workbench-codex-buffer-name (&optional directory)
-  "Return the Codex buffer name for DIRECTORY."
-  (funcall ai-workbench-codex-buffer-name-function
-           (ai-workbench-codex--working-directory directory)))
-
-(defun ai-workbench-codex-buffer (&optional project-root)
-  "Return the Codex session buffer for PROJECT-ROOT."
-  (get-buffer (ai-workbench-codex-buffer-name project-root)))
-
-(defun ai-workbench-codex--get-process (&optional project-root)
-  "Return the tracked Codex process for PROJECT-ROOT."
-  (gethash (ai-workbench-codex--working-directory project-root)
-           ai-workbench-codex--processes))
-
-(defun ai-workbench-codex--set-process (process &optional project-root)
-  "Track PROCESS for PROJECT-ROOT."
-  (puthash (ai-workbench-codex--working-directory project-root)
-           process
-           ai-workbench-codex--processes))
-
-(defun ai-workbench-codex--cleanup-dead-processes ()
-  "Remove dead Codex process table entries."
-  (maphash
-   (lambda (directory process)
-     (unless (process-live-p process)
-       (remhash directory ai-workbench-codex--processes)))
-   ai-workbench-codex--processes))
-
-(defun ai-workbench-codex--cleanup-on-exit (project-root)
-  "Clean up Codex state for PROJECT-ROOT."
-  (remhash project-root ai-workbench-codex--processes)
-  (ai-workbench-session-clear-profile-injected 'codex project-root)
-  (let ((buffer (get-buffer (ai-workbench-codex-buffer-name project-root))))
-    (when (buffer-live-p buffer)
-      (let ((kill-buffer-hook nil)
-            (kill-buffer-query-functions nil))
-        (kill-buffer buffer)))))
-
-(add-hook 'kill-emacs-hook
-          (lambda ()
-            (maphash
-             (lambda (_directory process)
-               (when (process-live-p process)
-                 (delete-process process)))
-             ai-workbench-codex--processes)))
-
-(defun ai-workbench-codex--terminal-ensure-backend ()
-  "Ensure the configured Codex terminal backend is available."
-  (pcase ai-workbench-codex-terminal-backend
-    ('vterm
-     (unless (featurep 'vterm)
-       (require 'vterm nil t))
-     (unless (featurep 'vterm)
-       (user-error "The package vterm is not installed")))
-    ('eat
-     (unless (featurep 'eat)
-       (require 'eat nil t))
-     (unless (featurep 'eat)
-       (user-error "The package eat is not installed")))
-    (_
-     (user-error "Unsupported Codex terminal backend: %s"
-                 ai-workbench-codex-terminal-backend))))
-
-(defun ai-workbench-codex--terminal-send-string (string)
-  "Send STRING to the current Codex terminal buffer."
-  (pcase ai-workbench-codex-terminal-backend
-    ('vterm
-     (vterm-send-string string))
-    ('eat
-     (when eat-terminal
-       (eat-term-send-string eat-terminal string)))
-    (_
-     (error "Unsupported Codex terminal backend: %s"
-            ai-workbench-codex-terminal-backend))))
-
-(defun ai-workbench-codex--terminal-paste-string (string)
-  "Send STRING to the current Codex terminal buffer using bracketed paste mode.
-Bracketed paste prevents Codex from interpreting embedded newlines as
-Enter and submitting partial input."
-  (pcase ai-workbench-codex-terminal-backend
-    ('vterm
-     (vterm-send-string string t))
-    ('eat
-     (when eat-terminal
-       (eat-term-send-string eat-terminal "\e[200~")
-       (eat-term-send-string eat-terminal string)
-       (eat-term-send-string eat-terminal "\e[201~")))
-    (_
-     (error "Unsupported Codex terminal backend: %s"
-            ai-workbench-codex-terminal-backend))))
-
-(defun ai-workbench-codex--terminal-send-return ()
-  "Send return to the current Codex terminal buffer."
-  (pcase ai-workbench-codex-terminal-backend
-    ('vterm
-     (vterm-send-return))
-    ('eat
-     (when eat-terminal
-       (eat-term-send-string eat-terminal "\r")))
-    (_
-     (error "Unsupported Codex terminal backend: %s"
-            ai-workbench-codex-terminal-backend))))
-
-(defun ai-workbench-codex--build-command ()
-  "Return the Codex command string."
-  (string-join
-   (cons (shell-quote-argument ai-workbench-codex-executable)
-         (mapcar #'shell-quote-argument ai-workbench-codex-extra-args))
-   " "))
-
-(defun ai-workbench-codex--create-terminal-session (buffer-name project-root)
-  "Create a Codex terminal session in BUFFER-NAME for PROJECT-ROOT."
-  (ai-workbench-codex--terminal-ensure-backend)
-  (let* ((command-string (ai-workbench-codex--build-command))
-         (default-directory project-root)
-         (env-vars (list "TERM_PROGRAM=emacs"
-                         "FORCE_CODE_TERMINAL=true")))
-    (pcase ai-workbench-codex-terminal-backend
-      ('vterm
-       (let* ((vterm-buffer-name buffer-name)
-              (vterm-shell command-string)
-              (vterm-environment (append env-vars vterm-environment))
-              (buffer (let ((my/terminal-startup-cd-inhibited t))
-                        (save-window-excursion
-                          (vterm vterm-buffer-name)))))
-         (unless buffer
-           (error "Failed to create Codex vterm buffer"))
-         (ai-workbench-codex--configure-buffer buffer project-root)
-         (let ((process (get-buffer-process buffer)))
-           (unless process
-             (error "Failed to get Codex vterm process"))
-           (cons buffer process))))
-      ('eat
-       (let* ((buffer (get-buffer-create buffer-name))
-              (eat-term-name "xterm-256color")
-              (parts (split-string-shell-command command-string))
-              (program (car parts))
-              (args (cdr parts)))
-         (with-current-buffer buffer
-           (unless (eq major-mode 'eat-mode)
-             (eat-mode))
-            (setq-local process-environment (append env-vars process-environment))
-           (let ((my/terminal-startup-cd-inhibited t))
-             (apply #'eat-exec buffer buffer-name program nil args))
-           (ai-workbench-codex--configure-buffer buffer project-root)
-           (let ((process (get-buffer-process buffer)))
-             (unless process
-               (error "Failed to create Codex eat process"))
-             (cons buffer process)))))
-      (_
-       (error "Unsupported Codex terminal backend: %s"
-              ai-workbench-codex-terminal-backend)))))
+;; ── Public wrappers ───────────────────────────────────────────────────────────
 
 (defun ai-workbench-codex-available-p ()
   "Return non-nil when the Codex executable is available."
-  (or (file-executable-p ai-workbench-codex-executable)
-      (executable-find ai-workbench-codex-executable)))
+  (ai-workbench-cli-available-p 'codex))
 
 (defun ai-workbench-codex-load ()
   "Validate the Codex executable and terminal backend."
   (unless (ai-workbench-codex-available-p)
     (error "Codex executable not found: %s" ai-workbench-codex-executable))
-  (ai-workbench-codex--terminal-ensure-backend))
+  (ai-workbench-cli--ensure-terminal-backend 'codex))
 
-(defun ai-workbench-codex-open-buffer ()
-  "Open the current project's Codex session buffer via popup window logic."
-  (interactive)
-  (if-let* ((buffer (ai-workbench-codex-buffer (ai-workbench-project-root))))
-      (my/vterm-popup-display-buffer buffer)
-    (user-error "No Codex session for this project")))
+(defun ai-workbench-codex-buffer (&optional project-root)
+  "Return the Codex session buffer for PROJECT-ROOT, or nil."
+  (ai-workbench-cli-buffer 'codex project-root))
 
 (defun ai-workbench-codex-session-live-p (&optional project-root)
   "Return non-nil when the Codex session for PROJECT-ROOT is live."
-  (let* ((root (ai-workbench-codex--working-directory project-root))
-         (tracked-process (ai-workbench-codex--get-process root))
-         (buffer-process (when-let* ((buffer (ai-workbench-codex-buffer root)))
-                           (get-buffer-process buffer)))
-         (live-process (cond
-                        ((and tracked-process
-                              (process-live-p tracked-process))
-                         tracked-process)
-                        ((and buffer-process
-                              (process-live-p buffer-process))
-                         buffer-process))))
-    (when live-process
-      (unless (eq live-process tracked-process)
-        (ai-workbench-codex--set-process live-process root))
-      t)))
-
-(defun ai-workbench-codex-open-active-buffer ()
-  "Open the active Codex buffer."
-  (interactive)
-  (ai-workbench-codex-open-buffer))
+  (ai-workbench-cli-session-live-p 'codex project-root))
 
 (defun ai-workbench-codex-ensure-session (&optional project-root)
   "Ensure a live Codex session exists for PROJECT-ROOT."
-  (let* ((root (ai-workbench-codex--working-directory project-root))
-         (buffer-name (ai-workbench-codex-buffer-name root)))
-    (ai-workbench-codex-load)
-    (ai-workbench-codex--cleanup-dead-processes)
-    (unless (ai-workbench-codex-session-live-p root)
-      (let* ((buffer-and-process
-              (ai-workbench-codex--create-terminal-session buffer-name root))
-             (buffer (car buffer-and-process))
-             (process (cdr buffer-and-process)))
-        (ai-workbench-codex--set-process process root)
-        (set-process-sentinel
-         process
-         (lambda (_process event)
-           (when (or (string-match "finished" event)
-                     (string-match "exited" event)
-                     (string-match "killed" event)
-                     (string-match "terminated" event))
-             (ai-workbench-codex--cleanup-on-exit root))))
-        (with-current-buffer buffer
-          (add-hook 'kill-buffer-hook
-                    (lambda ()
-                      (ai-workbench-codex--cleanup-on-exit root))
-                    nil t))))
-    (ai-workbench-codex-buffer root)))
+  (ai-workbench-cli-ensure-session 'codex project-root))
 
-(defun ai-workbench-codex--profile-prompt (&optional project-root)
-  "Return the Codex profile prompt for PROJECT-ROOT."
-  (ai-workbench-profile-build-prompt project-root))
+(defun ai-workbench-codex-open-buffer ()
+  "Open the current project's Codex session buffer via popup."
+  (interactive)
+  (ai-workbench-cli-open-buffer 'codex (ai-workbench-project-root)))
 
-(defun ai-workbench-codex--cd-prompt (project-root)
-  "Return the cd line sent to Codex before the profile for PROJECT-ROOT."
-  (format "cd %s"
-          (shell-quote-argument
-           (directory-file-name (expand-file-name project-root)))))
-
-(defun ai-workbench-codex--bootstrap-prompt (project-root)
-  "Return the combined cd+profile bootstrap prompt for PROJECT-ROOT.
-Sent as a single message so Codex does not need to finish processing
-the cd line before the profile body arrives."
-  (concat (ai-workbench-codex--cd-prompt project-root)
-          "\n\n"
-          (ai-workbench-codex--profile-prompt project-root)))
+(defalias 'ai-workbench-codex-open-active-buffer #'ai-workbench-codex-open-buffer)
 
 (defun ai-workbench-codex-prime-session (&optional project-root)
-  "Inject the working directory and profile into Codex for PROJECT-ROOT.
-The cd line and profile body are sent as a single auto-submitted
-message via bracketed paste so embedded newlines are preserved and
-Codex does not need to round-trip the cd line before the profile
-arrives."
-  (let ((root (or project-root default-directory)))
-    (unless (ai-workbench-session-profile-injected-p 'codex root)
-      (ai-workbench-codex-send-prompt
-       (ai-workbench-codex--bootstrap-prompt root)
-       root)
-      (ai-workbench-session-mark-profile-bootstrap-sent 'codex root)
-      (ai-workbench-session-mark-profile-injected 'codex root)
-      (ai-workbench-session-set-last-status "Codex profile injected" root))))
-
-(defun ai-workbench-codex--send-prompt-retry (prompt project-root attempts)
-  "Send PROMPT for PROJECT-ROOT, retrying up to ATTEMPTS times."
-  (if-let* ((buffer (ai-workbench-codex-buffer project-root))
-            (process (get-buffer-process buffer))
-            ((process-live-p process)))
-      (with-current-buffer buffer
-        (ai-workbench-codex--terminal-paste-string prompt)
-        (sit-for 0.1)
-        (ai-workbench-codex--terminal-send-return))
-    (if (> attempts 0)
-        (run-with-timer 0.3 nil
-                        #'ai-workbench-codex--send-prompt-retry
-                        prompt project-root (1- attempts))
-      (error "Codex session did not become ready"))))
+  "Inject the working directory and profile into Codex for PROJECT-ROOT."
+  (ai-workbench-cli-prime-session 'codex project-root))
 
 (defun ai-workbench-codex-send-prompt (prompt &optional project-root)
   "Send PROMPT to Codex, starting a session for PROJECT-ROOT when needed."
-  (let ((root (ai-workbench-codex--working-directory project-root)))
-    (ai-workbench-codex-ensure-session root)
-    (run-with-timer 0.3 nil
-                    #'ai-workbench-codex--send-prompt-retry
-                    prompt root 8)))
-
-(defun ai-workbench-codex--draft-prompt-retry (prompt project-root attempts)
-  "Insert PROMPT into Codex for PROJECT-ROOT without pressing return."
-  (if-let* ((buffer (ai-workbench-codex-buffer project-root))
-            (process (get-buffer-process buffer))
-            ((process-live-p process)))
-      (with-current-buffer buffer
-        (ai-workbench-codex--terminal-paste-string prompt))
-    (if (> attempts 0)
-        (run-with-timer 0.3 nil
-                        #'ai-workbench-codex--draft-prompt-retry
-                        prompt project-root (1- attempts))
-      (error "Codex session did not become ready"))))
+  (ai-workbench-cli-send-prompt 'codex prompt project-root))
 
 (defun ai-workbench-codex-draft-prompt (prompt &optional project-root)
-  "Insert PROMPT into Codex, starting a session for PROJECT-ROOT when needed.
-The prompt is inserted but not submitted."
-  (let ((root (ai-workbench-codex--working-directory project-root)))
-    (ai-workbench-codex-ensure-session root)
-    (run-with-timer 0.3 nil
-                    #'ai-workbench-codex--draft-prompt-retry
-                    prompt root 8)))
+  "Insert PROMPT into Codex without submitting for PROJECT-ROOT."
+  (ai-workbench-cli-draft-prompt 'codex prompt project-root))
 
 (defun ai-workbench-codex-stop (&optional project-root)
-  "Stop the active Codex run for PROJECT-ROOT."
+  "Stop the active Codex session for PROJECT-ROOT."
   (interactive)
-  (let ((root (ai-workbench-codex--working-directory project-root)))
-    (when-let* ((process (ai-workbench-codex--get-process root)))
-      (when (process-live-p process)
-        (delete-process process)))
-    (ai-workbench-codex--cleanup-on-exit root)
-    (ai-workbench-session-set-last-status "Stopped active Codex run" root)
-    (message "ai-workbench stopped Codex run")))
+  (ai-workbench-cli-stop 'codex project-root))
+
+;; ── Deprecated shims ──────────────────────────────────────────────────────────
 
 (defun ai-workbench-codex-execution-mode ()
-  "Return the current ai-workbench Codex execution mode."
+  "Return the current Codex execution mode (always terminal)."
   'terminal)
 
 (defun ai-workbench-codex-toggle-execution-mode ()
-  "Keep compatibility while no longer defaulting to exec mode."
+  "No-op kept for compatibility. Codex always uses terminal mode."
   (interactive)
   (setq ai-workbench-codex-use-exec nil)
   (message "ai-workbench Codex mode: terminal"))

@@ -5,6 +5,7 @@
 
 - 美化 emacs的界面
 - 发布笔记
+- Jupyter 支持
 
 
 ##  Bugs

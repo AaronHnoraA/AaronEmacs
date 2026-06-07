@@ -736,6 +736,8 @@ glyph keeps its shape while point moves through composed text."
   (kill-region-dwim 'unix-word)
   ;; eliminate duplicates
   (kill-do-not-save-duplicates t)
+  ;; repeat C-SPC after C-u C-SPC to keep popping the mark ring
+  (set-mark-command-repeat-pop t)
   ;; include '\n' when point starts at the beginning-of-line
   (kill-whole-line t)
   ;; show cwd when `shell-command' and `async-shell-command'

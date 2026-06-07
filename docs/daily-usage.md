@@ -9,7 +9,9 @@
 - `M-c` / `M-v`
   系统剪贴板复制 / 粘贴
 - `H-?`
-  用一次性 Codex 问本地 `docs/` 里的这套 Emacs 配置怎么用；结果直接显示在 echo area / `*Messages*`
+  用一次性 CLI 请求问本地 `docs/` 里的这套 Emacs 配置怎么用；结果显示在浮层。
+  默认引擎 Codex；问题前加 `:c ` 改用 CC（`claude -p`），加 `:o ` 改用 OpenCode。
+  例：`C-c A ?` / `H-?` → `:c 如何配置 LSP？`
 - `SPC`
   Evil leader，总入口。
 - `SPC SPC`
@@ -665,6 +667,8 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 
 ## 6. 窗口和弹出层
 
+- `C-x 1`
+  `my/toggle-delete-other-windows` — 最大化当前窗口，再次执行恢复先前布局（依赖 winner-mode）
 - `M-o`
   `ace-window`
 - `M-\``
@@ -681,3 +685,21 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 - 普通 warning 现在只写入 `*Warnings*`，不再自动弹窗抢操作；需要时用 `SPC h w`
 - `C-c y` 现在是 snippet 前缀，不再直接展开
 - `C-c n` 是 Typst note 前缀，不再给 centaur-tabs
+
+## 8. AI Workbench
+
+统一入口，把 CLI 引擎（CC/Codex/OpenCode）和 HTTP 模型（ChatGPT、Claude-API 等）放到同一个 picker 里。`gptel` 是内部 HTTP 集成层，不在 picker 里显示。
+
+| 键 | 功能 |
+|----|------|
+| `C-c A W` | 打开/选择引擎（首次弹 picker：Codex/CC/OpenCode/ChatGPT/Claude…） |
+| `C-c A .` | 带上下文发送 prompt 到当前引擎 |
+| `C-c A w` | writing prompt |
+| `C-c A k` | 关闭当前引擎 session 并重置选择 |
+| `C-c A H` | 打开管理 Hub（CLI Engines + Chat Models + Profiles） |
+| `C-c A ?` | docs-ask（默认 Codex；`:c ` 前缀用 CC；`:o ` 前缀用 OpenCode） |
+| `C-c A i r/b/f` | 发送选区 / 当前 buffer / 文件给当前引擎 |
+| `C-c g` | 直接打开 HTTP chat buffer（gptel）|
+| `C-c G` | 从 JSON 重新加载 HTTP chat 后端 |
+
+HTTP 后端在 `etc/ai-workbench/backends.json` 里配置（OpenAI、Anthropic、Ollama 等），CLI 引擎（Codex、OpenCode）通过 `ai-workbench-adapter-*.el` 的 `defcustom` 配置可执行路径。

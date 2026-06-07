@@ -19,11 +19,17 @@
 ;;   AI Workbench (ai-workbench) — unified Emacs-native entry layer
 ;;     M-x ai-workbench               open backend interactive buffer
 ;;     C-c M-a     ai-workbench-context-prompt
-;;     C-c A W     ai-workbench
+;;     C-c A W     ai-workbench (open/select engine)
 ;;     C-c A .     ai-workbench-context-prompt
 ;;     C-c A w     ai-workbench-writing-prompt
 ;;     C-c A k     ai-workbench-kill
 ;;     C-c A i r/b/f send region / buffer / file via current backend
+;;     C-c A H     ai-workbench-hub (management dashboard)
+;;     C-c A ?     ai-workbench-docs-ask (:c CC, :o OpenCode, default Codex)
+;;
+;;   HTTP chat via gptel (hidden integration layer)
+;;     C-c g       ai-workbench-chat  (open HTTP chat buffer)
+;;     C-c G       reload chat backends from JSON
 ;;
 ;;   OpenCode (opencode) — opencode CLI agent
 ;;     C-c o t     toggle panel
@@ -45,6 +51,9 @@
 
 (add-to-list 'load-path
              (file-name-as-directory
+              (locate-user-emacs-file "site-lisp/ai-workbench")))
+(add-to-list 'load-path
+             (file-name-as-directory
               (locate-user-emacs-file "site-lisp/ai-workbench/vendor/codex-cli")))
 (add-to-list 'load-path
              (file-name-as-directory
@@ -59,8 +68,9 @@
 (autoload 'ai-workbench-context-prompt "ai-workbench-tools" nil t)
 (autoload 'ai-workbench-writing-prompt "ai-workbench-tools" nil t)
 (autoload 'ai-workbench-docs-ask "ai-workbench-docs" nil t)
-(autoload 'ai-workbench-gptel-open-buffer "ai-workbench-adapter-gptel" nil t)
-(autoload 'ai-workbench-gptel-register-backends "ai-workbench-adapter-gptel" nil t)
+(autoload 'ai-workbench-chat "ai-workbench-chat" nil t)
+(autoload 'ai-workbench-chat-open-buffer "ai-workbench-chat" nil t)
+(autoload 'ai-workbench-chat-register-backends "ai-workbench-chat" nil t)
 (autoload 'ai-workbench-hub "ai-workbench-hub" nil t)
 
 (defvar-keymap my/ai-workbench-prefix-map
@@ -70,6 +80,7 @@
   "." #'ai-workbench-context-prompt
   "?" #'ai-workbench-docs-ask
   "k" #'ai-workbench-kill
+  "H" #'ai-workbench-hub
   "i r" #'ai-workbench-send-region
   "i b" #'ai-workbench-send-current-buffer
   "i f" #'ai-workbench-send-file)
@@ -136,7 +147,7 @@
 (global-set-key (kbd "C-c c n") #'codex-cli-toggle-all-next-page)
 (global-set-key (kbd "C-c c b") #'codex-cli-toggle-all-prev-page)
 
-;; ── OpenCode ────────────────────────────────────────────────────────────
+;; ── OpenCode ────────────────────────────────────────────────────────────────
 
 (autoload 'ai-workbench-opencode-open-buffer "ai-workbench-adapter-opencode" nil t)
 (autoload 'ai-workbench-opencode-send-prompt "ai-workbench-adapter-opencode" nil t)
@@ -149,23 +160,24 @@
 (global-set-key (kbd "C-c o r") #'ai-workbench-send-region)
 (global-set-key (kbd "C-c o f") #'ai-workbench-send-file)
 
-;; ── gptel ───────────────────────────────────────────────────────────────────
+;; ── HTTP Chat (gptel integration layer) ─────────────────────────────────────
 
-(global-set-key (kbd "C-c g") #'ai-workbench-gptel-open-buffer)
-(global-set-key (kbd "C-c A H") #'ai-workbench-hub)
+(global-set-key (kbd "C-c g") #'ai-workbench-chat)
 (global-set-key (kbd "C-c G")
                 (lambda ()
                   (interactive)
-                  (ai-workbench-gptel-register-backends)
-                  (message "gptel backends reloaded from JSON")))
+                  (ai-workbench-chat-register-backends)
+                  (message "Chat backends reloaded from JSON")))
 
-;; Register gptel backends eagerly so gptel-mode works without manual setup.
+;; Register HTTP chat backends eagerly so gptel-mode works without manual setup.
 (with-eval-after-load 'gptel
-  (ai-workbench-gptel-register-backends))
+  (when (fboundp 'ai-workbench-chat-register-backends)
+    (ai-workbench-chat-register-backends)))
 
-;; Also register early so `gptel` command works out of the box.
+;; Also register early so the `gptel' command works out of the box.
 (when (require 'gptel nil t)
-  (ai-workbench-gptel-register-backends))
+  (when (fboundp 'ai-workbench-chat-register-backends)
+    (ai-workbench-chat-register-backends)))
 
 (provide 'init-ai-ide)
 ;;; init-ai-ide.el ends here

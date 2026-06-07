@@ -507,6 +507,22 @@ Otherwise, use `ace-window' to choose the target window."
          ("M-O" . my/swap-window-dwim)
          ("C-c w s" . my/swap-window-dwim)))
 
+;; split proportionally from all sibling windows, not just the split one
+(setopt window-combination-resize t)
+
+(defun my/toggle-delete-other-windows ()
+  "Delete other windows, or restore the previous layout if already sole window.
+Relies on `winner-mode' (enabled below) to undo a prior delete."
+  (interactive)
+  (if (and winner-mode
+           (eq (selected-window) (next-window)))
+      (winner-undo)
+    (delete-other-windows)))
+
+(general-define-key
+ :keymaps 'global
+ "C-x 1" #'my/toggle-delete-other-windows)
+
 (use-package winner
   :ensure nil
   :config (winner-mode 1))

@@ -22,7 +22,7 @@
 
 (defun ai-workbench--normalize-backend (backend)
   "Return BACKEND when supported, otherwise fall back to the default backend."
-  (if (memq backend '(claude codex opencode gptel))
+  (if (memq backend '(claude codex opencode chat))
       backend
     ai-workbench-default-backend))
 
@@ -32,6 +32,7 @@
     (or (gethash root ai-workbench--session-table)
         (let ((session (list :project-root root
                              :backend ai-workbench-default-backend
+                             :chat-backend nil
                              :profile "default"
                              :initialized nil
                              :profile-bootstrap-sent-backends nil
@@ -59,6 +60,18 @@
     (setq session (plist-put session :backend value))
     (puthash root session ai-workbench--session-table)
     value))
+
+(defun ai-workbench-session-chat-backend (&optional project-root)
+  "Return the selected HTTP chat model name for PROJECT-ROOT, or nil."
+  (plist-get (ai-workbench-session-get project-root) :chat-backend))
+
+(defun ai-workbench-session-set-chat-backend (name &optional project-root)
+  "Store HTTP chat model NAME in the session for PROJECT-ROOT and return it."
+  (let* ((root (or project-root (ai-workbench-project-root)))
+         (session (copy-sequence (ai-workbench-session-get root))))
+    (setq session (plist-put session :chat-backend name))
+    (puthash root session ai-workbench--session-table)
+    name))
 
 (defun ai-workbench-session-set-profile (profile &optional project-root)
   "Store PROFILE in the session for PROJECT-ROOT and return it."

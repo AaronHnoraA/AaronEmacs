@@ -174,14 +174,12 @@ Returns nil when no boundary is found."
           (skip-chars-forward " \t\n")
           (min (point) last))))))
 
-(defun lean-jump--run-start (fp pos beg)
-  "Return the leftmost position >= BEG in POS's same-fingerprint run.
-Nil-fingerprint positions are treated as boundaries (they mark the edge
-of the region where the server has valid goal info).
-Returns POS itself when no backward boundary is found."
+(defun lean-jump--fragment-start (fp pos beg)
+  "Leftmost position in POS's contiguous same-fp run, stopping at nil.
+Uses exponential probe + bisect.  Returns POS when no backward extension exists."
   (let ((step  1)
         (probe pos)
-        (bnd   nil))          ; bnd = (lo . hi) where lo has different/nil fp
+        (bnd   nil))
     (while (and (not bnd) (> probe beg))
       (let* ((cand (max beg (- probe step)))
              (cfp  (lean-jump--info-at cand)))
@@ -190,7 +188,6 @@ Returns POS itself when no backward boundary is found."
           (setq probe cand)))
       (setq step (* step 2)))
     (if bnd
-        ;; Bisect: find the leftmost position that still has fp.
         (let ((lo (car bnd)) (hi (cdr bnd)))
           (while (> (- hi lo) 1)
             (let* ((mid (/ (+ lo hi) 2))
@@ -199,8 +196,69 @@ Returns POS itself when no backward boundary is found."
                   (setq hi mid)
                 (setq lo mid))))
           hi)
-      ;; No boundary found within [beg..pos]: run extends to beg.
       (max beg probe))))
+
+(defun lean-jump--prev-non-nil (pos beg)
+  "Return the rightmost position in [BEG, POS) with a non-nil goal, or nil."
+  (let ((p (1- pos)))
+    (while (and (>= p beg) (null (lean-jump--info-at p)))
+      (cl-decf p))
+    (when (>= p beg) p)))
+
+(defun lean-jump--run-start (fp pos beg)
+  "Return the leftmost position >= BEG in POS's same-fingerprint run.
+Nil-fingerprint positions are treated as transparent: the run extends across
+nil gaps if the same fp resumes on the other side (e.g. inside `rw [← lemma]'
+where `←' returns nil but the surrounding positions share the same goal).
+Returns POS itself when no backward extension is possible."
+  ;; catch/throw is the return path: thrown value IS the function's return value.
+  (catch 'lean-jump--run-start
+    (let ((left pos))
+      (while t
+        (let* ((frag (lean-jump--fragment-start fp left beg))
+               (q    (lean-jump--prev-non-nil frag beg)))
+          (if (and q (equal (lean-jump--info-at q) fp))
+              (setq left q)            ; same fp past nil gap: extend leftward
+            (throw 'lean-jump--run-start frag)))))))
+
+(defun lean-jump--ws-landing (pos)
+  "Position reached by skipping whitespace forward from POS.
+Mirrors the landing of `lean-jump--find-forward' and `lean-jump-backward'."
+  (save-excursion
+    (goto-char pos)
+    (skip-chars-forward " \t\n")
+    (point)))
+
+(defun lean-jump--prev-stop (pos beg)
+  "Return the previous goal-change boundary whose landing is strictly before POS.
+A boundary is the leftmost non-nil position of a maximal nil-transparent
+fingerprint run.  This is the inverse of `lean-jump--find-forward': it works
+regardless of whether POS itself has a goal (nil at POS, e.g. on the `←'
+inside `rw [← lemma]', is handled by stepping back to the nearest non-nil
+position first).
+
+Forward search guarantees progress by probing for a *different* goal; this
+mirror must do the same.  A region's whitespace-skipped landing may coincide
+with POS (the inter-tactic whitespace before a tactic keyword often reports
+that tactic's own goal), so we reject any boundary whose landing is not
+strictly left of POS and keep stepping back to the preceding region.  Without
+this check, M-[ gets stuck at a tactic line start instead of reaching the
+previous tactic."
+  (let ((probe pos)
+        (result nil))
+    (while (and (not result) (> probe beg))
+      (let* ((q  (lean-jump--prev-non-nil probe beg))
+             (fq (and q (lean-jump--info-at q))))
+        (if (not fq)
+            (setq probe beg)            ; nothing non-nil left: stop
+          (let* ((s       (lean-jump--run-start fq q beg))
+                 (landing (lean-jump--ws-landing s)))
+            (if (< landing pos)
+                (setq result landing)
+              ;; This region's landing is not before POS; look further back.
+              ;; PROBE strictly decreases (S <= Q < PROBE), so this terminates.
+              (setq probe s))))))
+    result))
 
 ;;; ── Syntactic fallback (text-only, no LSP) ───────────────────────────────────
 
@@ -258,14 +316,13 @@ If already at a token start, returns the previous token's start."
 ;;; ── Interactive commands ─────────────────────────────────────────────────────
 
 (defun lean-jump-forward ()
-  "Jump to the next position where the Lean goal changes, within the declaration.
+  "Jump to the next position where the Lean goal changes.
 Falls back to syntactic argument stepping when goal info is unavailable."
   (interactive)
   (unless (eglot-managed-p)
     (user-error "No Lean LSP server connected"))
   (let* ((pos    (point))
-         (bounds (lean-jump--decl-bounds))
-         (end    (cdr bounds))
+         (end    (point-max))
          (last   (1- end))
          (fp     (lean-jump--info-at pos))
          ;; When fp is nil (cursor before proof starts, e.g. declaration keyword),
@@ -276,37 +333,32 @@ Falls back to syntactic argument stepping when goal info is unavailable."
      ((and lean-jump-syntactic-fallback
            (setq dest (lean-jump--syntactic-forward pos last)))
       (goto-char dest))
-     (fp (user-error "No goal change found forward in this declaration"))
+     (fp (user-error "No goal change found forward"))
      (t  (user-error "No Lean goal info at point (incomplete tactic or error)")))))
 
 (defun lean-jump-backward ()
-  "Jump to the start of the previous Lean goal region, within the declaration.
+  "Jump to the start of the previous Lean goal region.
 Falls back to syntactic argument stepping when goal info is unavailable."
   (interactive)
   (unless (eglot-managed-p)
     (user-error "No Lean LSP server connected"))
-  (let* ((pos    (point))
-         (bounds (lean-jump--decl-bounds))
-         (beg    (car bounds))
-         (fp     (lean-jump--info-at pos))
-         (dest
-          (when fp
-            (let ((run-start (lean-jump--run-start fp pos beg)))
-              (if (< run-start pos)
-                  run-start
-                (let* ((prev    (max beg (1- run-start)))
-                       (prev-fp (lean-jump--info-at prev)))
-                  (when (and prev-fp (not (equal prev-fp fp)))
-                    (lean-jump--run-start prev-fp prev beg))))))))
+  (let* ((pos  (point))
+         (beg  (point-min))
+         ;; Symmetric with lean-jump-forward: a single boundary search that
+         ;; tolerates a nil fingerprint at point, instead of bailing straight
+         ;; to the syntactic fallback whenever the cursor sits on a nil
+         ;; position (which is why M-[ used to "not move" while M-] worked).
+         (dest (lean-jump--prev-stop pos beg)))
     (cond
      (dest (goto-char dest)
            ;; Skip leading whitespace so we land on the tactic keyword,
            ;; matching the non-whitespace landing of lean-jump--find-forward.
-           (skip-chars-forward " \t\n" (cdr bounds)))
+           (skip-chars-forward " \t\n"))
      ((and lean-jump-syntactic-fallback
            (setq dest (lean-jump--syntactic-backward pos beg)))
       (goto-char dest))
-     (fp (user-error "No goal change found backward in this declaration"))
+     ((lean-jump--info-at pos)
+      (user-error "No goal change found backward"))
      (t  (user-error "No Lean goal info at point (incomplete tactic or error)")))))
 
 ;;; ── Registration ─────────────────────────────────────────────────────────────
