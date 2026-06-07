@@ -13,8 +13,10 @@
 ;; Syntactic fallback (lean-jump-syntactic-fallback):
 ;;  When goal info is nil at point (broken tactic, e.g. `rw [a, broken, b]'),
 ;;  the goal-based search cannot proceed.  The fallback steps through tactic
-;;  argument separators (`,', `[', `]', `;', newline) using text-only search,
-;;  so M-]/M-[ remain usable while debugging broken commands.
+;;  argument separators (`,', `[', `]', `;') using text-only search, so
+;;  M-]/M-[ remain usable while debugging broken commands.  Newline is
+;;  intentionally NOT a separator: it would cause spurious jumps past the end
+;;  of a complete proof into trailing blank lines.
 ;;
 ;; Scoping: every search is capped to the current Lean declaration
 ;; (theorem / lemma / def / example / …).  This prevents the exponential
@@ -80,8 +82,8 @@ Keeps M-]/M-[ usable while debugging broken tactics."
 ;;; ── Declaration bounds ───────────────────────────────────────────────────────
 
 (defconst lean-jump--decl-re
-  "^\\(?:theorem\\|lemma\\|def\\|abbrev\\|example\\|instance\\|class\\|structure\\|noncomputable\\|private\\|protected\\)"
-  "Regex matching the first word of a top-level Lean declaration.")
+  "^\\(?:theorem\\|lemma\\|def\\|abbrev\\|example\\|instance\\|class\\|structure\\|noncomputable\\|private\\|protected\\|end\\)"
+  "Regex matching the first word of a top-level Lean declaration or scope closer.")
 
 (defun lean-jump--decl-bounds ()
   "Return (BEG . END) of the current Lean declaration, or buffer bounds.
@@ -202,12 +204,12 @@ Returns POS itself when no backward boundary is found."
 
 ;;; ── Syntactic fallback (text-only, no LSP) ───────────────────────────────────
 
-(defconst lean-jump--sep-re "[,;]\\|\\[\\|\\]\\|\n"
+(defconst lean-jump--sep-re "[,;]\\|\\[\\|\\]"
   "Regexp matching tactic argument separators used by the syntactic fallback.")
 
 (defun lean-jump--syntactic-forward (pos end)
   "Return the next tactic-argument start after POS, within END.
-Searches for a separator (`,', `;', `[', `]', newline) then skips whitespace
+Searches for a separator (`,', `;', `[', `]') then skips whitespace
 to land on a non-whitespace character.  Returns nil when no such character
 exists within END (e.g. after the closing `]' of a tactic list)."
   (save-excursion
@@ -216,7 +218,7 @@ exists within END (e.g. after the closing `]' of a tactic list)."
       (skip-chars-forward " \t\n" end)
       (let* ((dest (point))
              (ch   (char-after)))
-        (when (and (> dest pos) (<= dest end)
+        (when (and (> dest pos) (< dest end)
                    ch (not (memq ch '(?\s ?\t ?\n ?\r))))
           dest)))))
 
@@ -266,7 +268,9 @@ Falls back to syntactic argument stepping when goal info is unavailable."
          (end    (cdr bounds))
          (last   (1- end))
          (fp     (lean-jump--info-at pos))
-         (dest   (and fp (lean-jump--find-forward fp pos end))))
+         ;; When fp is nil (cursor before proof starts, e.g. declaration keyword),
+         ;; lean-jump--find-forward nil … still finds the first non-nil goal position.
+         (dest   (lean-jump--find-forward fp pos end)))
     (cond
      (dest (goto-char dest))
      ((and lean-jump-syntactic-fallback
@@ -295,7 +299,10 @@ Falls back to syntactic argument stepping when goal info is unavailable."
                   (when (and prev-fp (not (equal prev-fp fp)))
                     (lean-jump--run-start prev-fp prev beg))))))))
     (cond
-     (dest (goto-char dest))
+     (dest (goto-char dest)
+           ;; Skip leading whitespace so we land on the tactic keyword,
+           ;; matching the non-whitespace landing of lean-jump--find-forward.
+           (skip-chars-forward " \t\n" (cdr bounds)))
      ((and lean-jump-syntactic-fallback
            (setq dest (lean-jump--syntactic-backward pos beg)))
       (goto-char dest))

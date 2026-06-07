@@ -353,7 +353,13 @@ const apiHandlers = {
   "aaronnote:api:notes:bootstrap": (file) => bootstrapNote(file || undefined),
   "aaronnote:api:notes:open": (file) => readNote(file),
   "aaronnote:api:notes:list": (force) => notesListPayload(force === true),
-  "aaronnote:api:notes:save": (body) => saveNote(body || {}),
+  "aaronnote:api:notes:save": async (body) => {
+    const result = await saveNote(body || {});
+    if (result?.ok && !result?.conflict && result?.file) {
+      process.stdout.write(`aaronote-event:saved:${JSON.stringify({ file: String(result.file) })}\n`);
+    }
+    return result;
+  },
   "aaronnote:api:notes:create-node": (draft) => createNode(draft || {}),
   "aaronnote:api:notes:delete": (file) => deleteNote({ file }),
   "aaronnote:api:notes:create-folder": (path) => createFolder({ path }),

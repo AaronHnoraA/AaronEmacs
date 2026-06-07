@@ -3508,5 +3508,22 @@ added separately by `my/aaronnote-roam--capf-setup')."
     ("." "xref definition"      xref-find-definitions)
     ("x" "xref references"      xref-find-references)]])
 
+;;; Public lifecycle API (called from init-aaronnote.el).
+
+(defun my/aaronnote-roam--cancel-sync-timer ()
+  "Cancel any pending debounced roam sync and clear the changed-files list."
+  (when (timerp my/aaronnote-roam--sync-timer)
+    (cancel-timer my/aaronnote-roam--sync-timer))
+  (setq my/aaronnote-roam--sync-timer nil
+        my/aaronnote-roam--sync-changed-files nil))
+
+(defun my/aaronnote-roam-note-changed (file)
+  "Schedule an incremental roam index refresh for a saved in-vault FILE.
+Called from init-aaronnote.el when the web editor emits a saved event."
+  (when (and (stringp file)
+             (not (string-empty-p file))
+             (my/aaronnote-roam--note-in-vault-p (expand-file-name file)))
+    (my/aaronnote-roam--schedule-runtime-sync (expand-file-name file))))
+
 (provide 'init-md-roam)
 ;;; init-md-roam.el ends here

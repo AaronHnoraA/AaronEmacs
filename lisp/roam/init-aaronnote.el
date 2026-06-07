@@ -19,6 +19,9 @@
 (declare-function my/appine--tab-reset "init-appine" ())
 (declare-function my/appine--switch-to-tab-index "init-appine" (target-index))
 (declare-function appine-focus "appine" ())
+(declare-function my/aaronnote-roam-note-changed "init-md-roam" (file))
+(declare-function my/aaronnote-roam--clear-runtime-cache "init-md-roam" ())
+(declare-function my/aaronnote-roam--cancel-sync-timer "init-md-roam" ())
 (defvar my/appine-tab-list)
 
 (defgroup my/aaronnote nil
@@ -198,7 +201,8 @@ Set to 0 to let the OS pick a random port (breaks cross-session Appine tabs)."
   (let ((ready-prefix "aaronote-web-host:ready:")
         (goto-prefix "aaronote-event:goto:")
         (open-prefix "aaronote-event:open:")
-        (current-file-prefix "aaronote-event:current-file:"))
+        (current-file-prefix "aaronote-event:current-file:")
+        (saved-prefix "aaronote-event:saved:"))
     (cond
      ((string-prefix-p ready-prefix line)
       (let ((port (string-to-number (substring line (length ready-prefix)))))
@@ -243,6 +247,18 @@ Set to 0 to let the OS pick a random port (breaks cross-session Appine tabs)."
             (my/aaronnote--sync-app-buffer-file file))
         (error
          (message "Aaronnote current-file parse failed: %s"
+                  (error-message-string err)))))
+     ((string-prefix-p saved-prefix line)
+      (condition-case err
+          (let* ((payload (json-parse-string
+                           (substring line (length saved-prefix))
+                           :object-type 'alist))
+                 (file (alist-get 'file payload)))
+            (when (and (stringp file) (not (string-empty-p file)))
+              (when (fboundp 'my/aaronnote-roam-note-changed)
+                (my/aaronnote-roam-note-changed file))))
+        (error
+         (message "Aaronnote saved-event parse failed: %s"
                   (error-message-string err))))))))
 
 (defun my/aaronnote--process-filter (proc output)
@@ -553,6 +569,8 @@ The web-host (Node) is the backend; once it is gone, any Appine tabs showing
 its pages are dead, so the Emacs-side tab registry is cleared too."
   (interactive)
   (my/aaronnote--remove-activity-hooks)
+  (when (fboundp 'my/aaronnote-roam--cancel-sync-timer)
+    (my/aaronnote-roam--cancel-sync-timer))
   (when my/aaronnote--ready-watchdog
     (cancel-timer my/aaronnote--ready-watchdog)
     (setq my/aaronnote--ready-watchdog nil))
@@ -621,6 +639,8 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
        (setq my/aaronnote--last-sync-stats
              (format "%d notes · %d links · %d tags · %d dirs"
                      notes links tags dirs))
+       (when (fboundp 'my/aaronnote-roam--clear-runtime-cache)
+         (my/aaronnote-roam--clear-runtime-cache))
        (message "Roam synced: %s" my/aaronnote--last-sync-stats)))))
 
 ;;; Header-line for the Aaronnote app buffer.

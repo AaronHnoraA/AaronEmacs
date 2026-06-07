@@ -409,6 +409,30 @@
                           (plist-get state-report :paths)))
           (insert (format "%-28s %S\n" "missing-paths"
                           (plist-get state-report :missing-paths))))
+        (insert "\nAaronnote\n")
+        (insert "---------\n")
+        (insert (format "%-28s %s\n" "process"
+                        (if (and (boundp 'my/aaronnote--process)
+                                 (processp my/aaronnote--process)
+                                 (process-live-p my/aaronnote--process))
+                            "running" "stopped")))
+        (insert (format "%-28s %s\n" "ready"
+                        (if (and (boundp 'my/aaronnote--ready)
+                                 my/aaronnote--ready)
+                            (format "yes (port %s)"
+                                    (if (boundp 'my/aaronnote--port)
+                                        (number-to-string my/aaronnote--port)
+                                      "?"))
+                          "no")))
+        (insert (format "%-28s %s\n" "runtime"
+                        (if (and (fboundp 'my/aaronnote-roam--runtime-available-p)
+                                 (my/aaronnote-roam--runtime-available-p))
+                            "available" "missing")))
+        (insert (format "%-28s %s\n" "last-sync"
+                        (if (and (boundp 'my/aaronnote--last-sync-stats)
+                                 my/aaronnote--last-sync-stats)
+                            my/aaronnote--last-sync-stats
+                          "never")))
         (goto-char (point-min))
         (use-local-map (copy-keymap special-mode-map))
         (local-set-key (kbd "g") #'my/health-report)))

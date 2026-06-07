@@ -441,11 +441,34 @@ Aaronnote 与 Emacs 共用：
 - Emacs 侧命令只做打开当前 note、打开 graph、发送小型 command，以及接收 Web 端 “open in Emacs” 事件。
 - 后续融合优先通过 Appine/webhook/pipeline 做文件管理、外部动作和索引刷新，而不是恢复 Emacs→browser 实时全文同步。
 
+### stdout 事件协议
+
+web-host 向 Emacs 进程 stdout 发送换行分隔的文本事件，由
+`my/aaronnote--handle-process-line` 解析：
+
+| 前缀 | 格式 | 用途 |
+|------|------|------|
+| `aaronote-web-host:ready:` | `:<port>` | 服务器启动完成 |
+| `aaronote-event:goto:` | `<line>:<col>` | 跳转到当前 buffer 位置 |
+| `aaronote-event:open:` | JSON `{file,line,col,tag}` | 在 Emacs 打开文件/位置 |
+| `aaronote-event:current-file:` | JSON `{file}` | 告知 Emacs 当前活跃笔记 |
+| `aaronote-event:saved:` | JSON `{file}` | 笔记保存成功后触发 roam index 刷新 |
+
+`saved` 事件是 Emacs roam 缓存自动更新的驱动源。收到后 Emacs 以 1.5s
+debounce 异步调用 `my/aaronnote-roam--runtime-sync`（即
+`my/aaronnote-roam-note-changed` → `my/aaronnote-roam--schedule-runtime-sync`），
+sentinel 清空 in-process 缓存。这保证补全/反向链接/xref 在每次 web 保存后自动
+更新，无需手动 sync。
+
+手动 "y sync DB"（`my/aaronnote-roam-sync`）走 `/api` 路径，成功回调同样清空
+in-process 缓存，与自动刷新保持一致。
+
 ### 诊断
 
 - 服务日志：buffer ` *aaronnote-web-host*`
 - 手动停止：`M-x my/aaronnote-stop`
 - 重新打开当前 note：`M-x my/aaronnote-refresh`（localleader `r`）
+- 健康状态：`M-x my/health-report` → Aaronnote 栏（process、ready、runtime、last-sync）
 
 ## 9. AI
 
