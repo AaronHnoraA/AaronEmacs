@@ -149,56 +149,91 @@ answer-block regex matching; this makes session-mode parsing reliable."
 Calls FSM/CALLBACK when the answer block appears or the timeout expires.
 
 Detection strategy (in order):
-1. `#+end answer' block in the vterm buffer (primary, with ANSI stripping).
-2. Output stability: buffer unchanged for `ai-workbench-engine-cli--session-idle-cycles'
+1. Polling for a `.done` file created by the agent in `var/ai-workbench/`.
+2. `#+end answer` block in the vterm buffer (primary, with ANSI stripping).
+3. Output stability: buffer unchanged for `ai-workbench-engine-cli--session-idle-cycles`
    polls, meaning the agent has likely finished.
-3. Hard timeout (`ai-workbench-engine-cli--session-timeout')."
+4. Hard timeout (`ai-workbench-engine-cli--session-timeout`)."
   (let* ((session-buf (ai-workbench-cli-buffer tool-id root))
          (start-pos (with-current-buffer session-buf (point-max)))
          (timeout ai-workbench-engine-cli--session-timeout)
-         (poll-interval 0.8)
+         (poll-interval 2.0)
          (prev-size 0)
          (idle-count 0)
          (elapsed 0)
+         (temp-dir (locate-user-emacs-file "var/ai-workbench/"))
+         (output-file (make-temp-file (expand-file-name "session-out-" temp-dir) nil ".txt"))
+         (done-file (concat output-file ".done"))
          timer)
-    (ai-workbench-cli-send-prompt tool-id prompt root)
+    (unless (file-exists-p temp-dir)
+      (make-directory temp-dir t))
+    (ignore-errors (delete-file output-file))
+    (ignore-errors (delete-file done-file))
+
+    ;; Inject file-based completion instructions
+    (let ((injected-prompt
+           (concat prompt
+                   (format "\n\n[SYSTEM: When you have finished your response, you MUST write your full final response (including the #+begin answer block) to the file %s and then create an empty file at %s to signal completion. Both files must be written. Do not ask for confirmation.]"
+                           (shell-quote-argument output-file)
+                           (shell-quote-argument done-file)))))
+      (ai-workbench-cli-send-prompt tool-id injected-prompt root))
+
     (setq timer
           (run-with-timer
            poll-interval poll-interval
            (lambda ()
              (setq elapsed (+ elapsed poll-interval))
              (let (result raw-text)
-               (when (buffer-live-p session-buf)
-                 (with-current-buffer session-buf
-                   (let* ((end (point-max))
-                          (size (- end start-pos))
-                          (text (when (> size 0)
-                                  (buffer-substring-no-properties start-pos end))))
-                     (when text
-                       (setq raw-text text)
-                       (let ((clean (ai-workbench--strip-ansi text))
-                             (parsed (ai-workbench-parse-answer-block clean)))
-                         (when (and parsed (eq (car parsed) :ok))
-                           (setq result (cdr parsed)))))
+               ;; 1. Check for the file-based completion signal
+               (if (file-exists-p done-file)
+                   (progn
+                     (when (file-exists-p output-file)
+                       (with-temp-buffer
+                         (insert-file-contents output-file)
+                         (setq raw-text (buffer-string)))
+                       (let* ((clean (ai-workbench--strip-ansi raw-text))
+                              (parsed (ai-workbench-parse-answer-block clean)))
+                         (if (and parsed (eq (car parsed) :ok))
+                             (setq result (cdr parsed))
+                           (setq result raw-text))))
+                     (ignore-errors (delete-file done-file))
+                     (ignore-errors (delete-file output-file)))
+                 ;; 2. Fallback to scraping the vterm buffer
+                 (when (buffer-live-p session-buf)
+                   (with-current-buffer session-buf
+                     (let* ((end (point-max))
+                            (size (- end start-pos))
+                            (text (when (> size 0)
+                                    (buffer-substring-no-properties start-pos end))))
+                       (when text
+                         (setq raw-text text)
+                         (let ((clean (ai-workbench--strip-ansi text))
+                               (parsed (ai-workbench-parse-answer-block clean)))
+                           (when (and parsed (eq (car parsed) :ok))
+                             (setq result (cdr parsed)))))
 
-                     ;; Stability detection: buffer hasn't grown for N cycles
-                     (if (and (> size 0) (= size prev-size))
-                         (setq idle-count (1+ idle-count))
-                       (setq idle-count 0))
-                     (setq prev-size size)
+                       ;; Stability detection: buffer hasn't grown for N cycles
+                       (if (and (> size 0) (= size prev-size))
+                           (setq idle-count (1+ idle-count))
+                         (setq idle-count 0))
+                       (setq prev-size size)
 
-                     ;; Fallback: stable output without answer block
-                     (when (and (not result)
-                                (> size 0)
-                                (>= idle-count ai-workbench-engine-cli--session-idle-cycles))
-                       (setq result raw-text)))))
+                       ;; Fallback: stable output without answer block
+                       (when (and (not result)
+                                  (> size 0)
+                                  (>= idle-count ai-workbench-engine-cli--session-idle-cycles))
+                         (setq result raw-text))))))
 
                (cond
                 (result
                  (cancel-timer timer)
+                 (ignore-errors (delete-file done-file))
+                 (ignore-errors (delete-file output-file))
                  (ai-workbench-cli--finish fsm nil callback result nil))
                 ((>= elapsed timeout)
                  (cancel-timer timer)
+                 (ignore-errors (delete-file done-file))
+                 (ignore-errors (delete-file output-file))
                  ;; Last-resort: use whatever text we have
                  (if raw-text
                      (ai-workbench-cli--finish fsm nil callback raw-text nil)
