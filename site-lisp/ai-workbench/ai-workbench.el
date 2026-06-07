@@ -320,6 +320,46 @@ Selecting one opens the corresponding vterm session.")
     (ai-workbench--reset-selection project-root)
     (message "ai-workbench killed current backend session")))
 
+;; ── Compose buffer ────────────────────────────────────────────────────────────
+
+(defvar-keymap ai-workbench-compose-mode-map
+  :doc "Keymap for `ai-workbench-compose-mode'."
+  "C-c C-c" #'ai-workbench-compose-submit
+  "C-c C-k" #'ai-workbench-compose-cancel)
+
+(define-derived-mode ai-workbench-compose-mode text-mode "AI-Compose"
+  "Major mode for editing an AI prompt before sending to the backend session.
+Type your message, then press \\[ai-workbench-compose-submit] to send."
+  (setq-local header-line-format
+              "  C-c C-c send · C-c C-k cancel"))
+
+(defvar-local ai-workbench-compose-backend nil
+  "Backend symbol for the current compose buffer.")
+(defvar-local ai-workbench-compose-root nil
+  "Project root for the current compose buffer.")
+
+(defun ai-workbench-compose-submit ()
+  "Submit the compose buffer content to the AI backend session."
+  (interactive)
+  (let* ((buf (current-buffer))
+         (backend ai-workbench-compose-backend)
+         (root ai-workbench-compose-root)
+         (content (string-trim (buffer-substring-no-properties (point-min) (point-max)))))
+    (unless (and backend root)
+      (user-error "Not an ai-workbench compose buffer"))
+    (unless content
+      (user-error "Nothing to send"))
+    (unless (ai-workbench--backend-session-live-p root)
+      (user-error "Session went away. Reopen with `ai-workbench-open' (C-c A W)"))
+    (kill-buffer buf)
+    (ai-workbench-send-string backend content root)))
+
+(defun ai-workbench-compose-cancel ()
+  "Cancel the compose buffer."
+  (interactive)
+  (when (y-or-n-p "Discard this draft?")
+    (kill-buffer (current-buffer))))
+
 ;; ── Public: send / draft ──────────────────────────────────────────────────────
 
 (defun ai-workbench-send-string (backend prompt &optional project-root)
@@ -370,9 +410,8 @@ Selecting one opens the corresponding vterm session.")
     (ai-workbench-profile-wrap-user-prompt prompt project-root)))
 
 (defun ai-workbench-draft-string (backend prompt &optional project-root)
-  "Insert PROMPT into BACKEND for PROJECT-ROOT without submitting.
-Requires the backend session to be already active. If no session is
-active, call `ai-workbench-open' first."
+  "Open a compose buffer with PROMPT for editing before sending to BACKEND.
+Requires the backend session to be already active."
   (ai-workbench--save-current-file-buffer)
   (let* ((root (or project-root (ai-workbench-project-root))))
     (unless (ai-workbench--backend-session-live-p root)
@@ -388,10 +427,17 @@ active, call `ai-workbench-open' first."
              (abbreviate-file-name root)
              prompt)
      root)
-    (ai-workbench-open-backend-buffer)
-    (ai-workbench--draft-string-now backend prompt root)
-    (ai-workbench-session-set-last-status (format "Drafted prompt to %s" backend) root)
-    (message "ai-workbench drafted prompt to %s; press RET in the agent buffer to submit" backend)))
+    (let ((buf (get-buffer-create "*ai-workbench-compose*")))
+      (with-current-buffer buf
+        (erase-buffer)
+        (insert prompt)
+        (goto-char (point-max))
+        (ai-workbench-compose-mode)
+        (setq-local ai-workbench-compose-backend backend)
+        (setq-local ai-workbench-compose-root root))
+      (display-buffer buf)
+      (ai-workbench-open-backend-buffer)
+      (message "Compose: edit then press C-c C-c to send to %s" backend))))
 
 (defun ai-workbench-resend-last-prompt ()
   "Resend the last prompt for the current project."
@@ -401,6 +447,8 @@ active, call `ai-workbench-open' first."
          (prompt (ai-workbench-session-last-prompt project-root)))
     (unless prompt
       (user-error "No previous prompt for this project"))
+    (unless (ai-workbench--backend-session-live-p project-root)
+      (user-error "No active session. Start one first with `ai-workbench-open'"))
     (ai-workbench-send-string backend prompt project-root)))
 
 (defun ai-workbench-clear-session ()
