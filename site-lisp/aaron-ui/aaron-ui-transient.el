@@ -58,6 +58,13 @@
   (aaron-ui-set-face 'which-key-highlighted-command-face   :foreground 'accent-yellow)
   (aaron-ui-set-face 'which-key-docstring-face             :foreground 'fg-dim))
 
+;; RET dismisses the current transient level (natural "close" gesture).
+;; Nested transients (e.g. magit) fall back to the parent; single-level
+;; dispatch menus close completely.
+(with-eval-after-load 'transient
+  (keymap-set transient-base-map "RET"    #'transient-quit-one)
+  (keymap-set transient-base-map "<return>" #'transient-quit-one))
+
 (add-hook 'after-init-hook              #'aaron-ui-transient-apply-faces)
 (add-hook 'server-after-make-frame-hook #'aaron-ui-transient-apply-faces)
 (add-hook 'after-load-theme-hook        #'aaron-ui-transient-apply-faces)
