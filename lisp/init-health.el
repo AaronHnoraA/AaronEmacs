@@ -5,6 +5,7 @@
 
 ;;; Code:
 
+(require 'aaron-ui-board)
 (require 'init-funcs)
 (require 'subr-x)
 (require 'transient)
@@ -87,7 +88,7 @@
   (executable-find
    (if (boundp 'codex-cli-executable) codex-cli-executable "codex")))
 
-(define-derived-mode my/health-mode special-mode "Health"
+(define-derived-mode my/health-mode aaron-ui-board-mode "Health"
   "Major mode for config health reports.")
 
 (defun my/health-config-root ()
@@ -301,14 +302,21 @@
 
 (defun my/health--insert-check (label result)
   "Insert LABEL and RESULT into the current health buffer."
-  (insert (format "%-20s %s\n"
-                  label
-                  (if (plist-get result :ok) "OK" "FAIL")))
-  (when-let* ((status (plist-get result :status)))
-    (insert (format "  exit: %s\n" status)))
-  (when-let* ((output (plist-get result :output))
-              ((not (string-empty-p output))))
-    (insert (format "  %s\n" output))))
+  (let ((ok (plist-get result :ok)))
+    (insert "   "
+            (propertize (format "%-20s" label) 'face 'aaron-ui-board-meta)
+            (propertize (if ok "OK" "FAIL")
+                        'face (if ok 'aaron-ui-board-good 'aaron-ui-board-bad))
+            "\n")
+    (when-let* ((status (plist-get result :status)))
+      (insert "   "
+              (propertize (format "exit: %s" status) 'face 'aaron-ui-board-detail)
+              "\n"))
+    (when-let* ((output (plist-get result :output))
+                ((not (string-empty-p output))))
+      (insert "   "
+              (propertize output 'face 'aaron-ui-board-detail)
+              "\n"))))
 
 (defun my/health-report ()
   "Open a health report buffer for this Emacs config."
@@ -328,115 +336,159 @@
                            (my/maintenance-state-report))))
     (with-current-buffer buffer
       (my/health-mode)
+      (aaron-ui-board-set-header "Config Health" 'health)
+      (setq-local aaron-ui-board-refresh-function #'my/health-report)
       (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert (format "Health report for %s\n\n"
-                        (abbreviate-file-name (my/health-config-root))))
-        (insert "Current session\n")
-        (insert "---------------\n")
-        (insert (format "%-20s %s\n" "Startup time"
-                        (if my/health-startup-time
-                            (format "%.2fs" my/health-startup-time)
-                          "N/A")))
-        (insert (format "%-20s %s\n" "GCs"
-                        (if my/health-startup-gcs
-                            (number-to-string my/health-startup-gcs)
-                          "N/A")))
-        (insert (format "%-20s %s\n\n" "Packages"
-                        (if my/health-startup-package-count
-                            (number-to-string my/health-startup-package-count)
-                          "N/A")))
-        (insert "Batch checks\n")
-        (insert "------------\n")
-        (my/health--insert-check "Startup smoke" startup)
-        (insert "\n")
-        (my/health--insert-check "Byte compile" compile)
-        (insert "\n")
-        (my/health--insert-check "Native compile" native)
-        (insert "\nExecutables\n")
-        (insert "-----------\n")
-        (dolist (entry executables)
-          (insert (format "%-20s %s\n"
-                          (car entry)
-                          (or (cdr entry) "MISSING"))))
-        (insert "\nCommands\n")
-        (insert "--------\n")
-        (dolist (entry commands)
-          (insert (format "%-28s %s\n"
-                          (car entry)
-                          (if (cdr entry) "OK" "MISSING"))))
-        (insert "\nLibraries\n")
-        (insert "---------\n")
-        (dolist (entry libraries)
-          (insert (format "%-28s %s\n"
-                          (car entry)
-                          (or (cdr entry) "MISSING"))))
-        (insert "\nArtifacts\n")
-        (insert "---------\n")
-        (dolist (entry artifacts)
-          (insert (format "%-28s %s\n"
-                          (car entry)
-                          (or (cdr entry) "MISSING"))))
-        (insert "\nCritical features\n")
-        (insert "-----------------\n")
-        (dolist (entry features)
-          (insert (format "%-28s %s\n"
-                          (car entry)
-                          (if (cdr entry) "OK" "MISSING"))))
-        (when lock-report
-          (insert "\nLock Audit\n")
-          (insert "----------\n")
-          (insert (format "%-28s %s\n" "lock-status"
-                          (if (plist-get lock-report :ok) "OK" "DRIFT")))
-          (insert (format "%-28s %s\n" "lock-version"
-                          (or (plist-get lock-report :lock-version) "MISSING")))
-          (insert (format "%-28s %S\n" "archive-missing"
-                          (plist-get lock-report :archive-missing-in-lock)))
-          (insert (format "%-28s %S\n" "archive-extra"
-                          (plist-get lock-report :archive-extra-in-lock)))
-          (insert (format "%-28s %S\n" "vc-missing"
-                          (plist-get lock-report :vc-missing-in-lock)))
-          (insert (format "%-28s %S\n" "vc-extra"
-                          (plist-get lock-report :vc-extra-in-lock))))
-        (when state-report
-          (insert "\nState Snapshot\n")
-          (insert "--------------\n")
-          (insert (format "%-28s %s\n" "tar"
-                          (or (plist-get state-report :tar) "MISSING")))
-          (insert (format "%-28s %s\n" "backup-dir"
-                          (or (plist-get state-report :backup-dir) "MISSING")))
-          (insert (format "%-28s %S\n" "paths"
-                          (plist-get state-report :paths)))
-          (insert (format "%-28s %S\n" "missing-paths"
-                          (plist-get state-report :missing-paths))))
-        (insert "\nAaronnote\n")
-        (insert "---------\n")
-        (insert (format "%-28s %s\n" "process"
-                        (if (and (boundp 'my/aaronnote--process)
-                                 (processp my/aaronnote--process)
-                                 (process-live-p my/aaronnote--process))
-                            "running" "stopped")))
-        (insert (format "%-28s %s\n" "ready"
-                        (if (and (boundp 'my/aaronnote--ready)
-                                 my/aaronnote--ready)
-                            (format "yes (port %s)"
-                                    (if (boundp 'my/aaronnote--port)
-                                        (number-to-string my/aaronnote--port)
-                                      "?"))
-                          "no")))
-        (insert (format "%-28s %s\n" "runtime"
-                        (if (and (fboundp 'my/aaronnote-roam--runtime-available-p)
-                                 (my/aaronnote-roam--runtime-available-p))
-                            "available" "missing")))
-        (insert (format "%-28s %s\n" "last-sync"
-                        (if (and (boundp 'my/aaronnote--last-sync-stats)
-                                 my/aaronnote--last-sync-stats)
-                            my/aaronnote--last-sync-stats
-                          "never")))
-        (goto-char (point-min))
-        (use-local-map (copy-keymap special-mode-map))
-        (local-set-key (kbd "g") #'my/health-report)))
-    (pop-to-buffer buffer)))
+        (aaron-ui-board-render
+         (lambda ()
+           (aaron-ui-board-insert-page-header
+            "Config Health"
+            :icon 'health
+            :subtitle (abbreviate-file-name (my/health-config-root)))
+
+           ;; --- Session ---
+           (aaron-ui-board-insert-section "Current Session")
+           (aaron-ui-board-insert-field
+            "Startup time"
+            (if my/health-startup-time (format "%.2fs" my/health-startup-time) "N/A"))
+           (aaron-ui-board-insert-field
+            "GCs"
+            (if my/health-startup-gcs (number-to-string my/health-startup-gcs) "N/A"))
+           (aaron-ui-board-insert-field
+            "Packages"
+            (if my/health-startup-package-count
+                (number-to-string my/health-startup-package-count) "N/A"))
+           (insert "\n")
+
+           ;; --- Batch checks ---
+           (aaron-ui-board-insert-section "Batch Checks")
+           (my/health--insert-check "Startup smoke" startup)
+           (my/health--insert-check "Byte compile"  compile)
+           (my/health--insert-check "Native compile" native)
+           (insert "\n")
+
+           ;; --- Executables ---
+           (aaron-ui-board-insert-section "Executables" (length executables))
+           (dolist (entry executables)
+             (aaron-ui-board-insert-field
+              (symbol-name (car entry))
+              (or (cdr entry) "MISSING")
+              (if (cdr entry) 'aaron-ui-board-good 'aaron-ui-board-bad)))
+           (insert "\n")
+
+           ;; --- Commands ---
+           (aaron-ui-board-insert-section "Commands" (length commands))
+           (dolist (entry commands)
+             (aaron-ui-board-insert-field
+              (symbol-name (car entry))
+              (if (cdr entry) "OK" "MISSING")
+              (if (cdr entry) 'aaron-ui-board-good 'aaron-ui-board-bad)))
+           (insert "\n")
+
+           ;; --- Libraries ---
+           (aaron-ui-board-insert-section "Libraries" (length libraries))
+           (dolist (entry libraries)
+             (aaron-ui-board-insert-field
+              (symbol-name (car entry))
+              (if (cdr entry) (abbreviate-file-name (cdr entry)) "MISSING")
+              (if (cdr entry) 'aaron-ui-board-good 'aaron-ui-board-bad)))
+           (insert "\n")
+
+           ;; --- Artifacts ---
+           (aaron-ui-board-insert-section "Artifacts" (length artifacts))
+           (dolist (entry artifacts)
+             (if (cdr entry)
+                 (progn
+                   (insert "   "
+                           (propertize (format "%-16s" (symbol-name (car entry)))
+                                       'face 'aaron-ui-board-meta))
+                   (aaron-ui-board-insert-openable-path
+                    (if (stringp (cdr entry)) (cdr entry)
+                      (format "%s" (cdr entry))))
+                   (insert "\n"))
+               (aaron-ui-board-insert-field
+                (symbol-name (car entry)) "MISSING" 'aaron-ui-board-bad)))
+           (insert "\n")
+
+           ;; --- Features ---
+           (aaron-ui-board-insert-section "Critical Features" (length features))
+           (dolist (entry features)
+             (aaron-ui-board-insert-field
+              (symbol-name (car entry))
+              (if (cdr entry) "OK" "MISSING")
+              (if (cdr entry) 'aaron-ui-board-good 'aaron-ui-board-bad)))
+           (insert "\n")
+
+           ;; --- Lock audit ---
+           (when lock-report
+             (aaron-ui-board-insert-section
+              "Lock Audit" nil
+              (if (plist-get lock-report :ok) 'success 'warning))
+             (aaron-ui-board-insert-field
+              "lock-status"
+              (if (plist-get lock-report :ok) "OK" "DRIFT")
+              (if (plist-get lock-report :ok) 'aaron-ui-board-good 'aaron-ui-board-warn))
+             (aaron-ui-board-insert-field
+              "lock-version"
+              (or (plist-get lock-report :lock-version) "MISSING"))
+             (aaron-ui-board-insert-field
+              "archive-missing"
+              (format "%S" (plist-get lock-report :archive-missing-in-lock)))
+             (aaron-ui-board-insert-field
+              "archive-extra"
+              (format "%S" (plist-get lock-report :archive-extra-in-lock)))
+             (aaron-ui-board-insert-field
+              "vc-missing"
+              (format "%S" (plist-get lock-report :vc-missing-in-lock)))
+             (aaron-ui-board-insert-field
+              "vc-extra"
+              (format "%S" (plist-get lock-report :vc-extra-in-lock)))
+             (insert "\n"))
+
+           ;; --- State snapshot ---
+           (when state-report
+             (aaron-ui-board-insert-section "State Snapshot")
+             (aaron-ui-board-insert-field
+              "tar" (or (plist-get state-report :tar) "MISSING"))
+             (aaron-ui-board-insert-field
+              "backup-dir" (or (plist-get state-report :backup-dir) "MISSING"))
+             (aaron-ui-board-insert-field
+              "paths" (format "%S" (plist-get state-report :paths)))
+             (aaron-ui-board-insert-field
+              "missing-paths" (format "%S" (plist-get state-report :missing-paths)))
+             (insert "\n"))
+
+           ;; --- Aaronnote ---
+           (aaron-ui-board-insert-section "Aaronnote")
+           (let ((running (and (boundp 'my/aaronnote--process)
+                               (processp my/aaronnote--process)
+                               (process-live-p my/aaronnote--process)))
+                 (ready (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)))
+             (aaron-ui-board-insert-field
+              "process" (if running "running" "stopped")
+              (if running 'aaron-ui-board-good 'aaron-ui-board-meta))
+             (aaron-ui-board-insert-field
+              "ready"
+              (if ready
+                  (format "yes (port %s)"
+                          (if (boundp 'my/aaronnote--port)
+                              (number-to-string my/aaronnote--port) "?"))
+                "no")
+              (if ready 'aaron-ui-board-good 'aaron-ui-board-meta)))
+           (aaron-ui-board-insert-field
+            "runtime"
+            (if (and (fboundp 'my/aaronnote-roam--runtime-available-p)
+                     (my/aaronnote-roam--runtime-available-p))
+                "available" "missing"))
+           (aaron-ui-board-insert-field
+            "last-sync"
+            (if (and (boundp 'my/aaronnote--last-sync-stats)
+                     my/aaronnote--last-sync-stats)
+                my/aaronnote--last-sync-stats
+              "never"))
+           (insert "\n")
+           (aaron-ui-board-insert-key-hints "Keys: g refresh  q quit"))))
+      (pop-to-buffer buffer))))
 
 (transient-define-prefix my/health-dispatch ()
   "Health check workflow."

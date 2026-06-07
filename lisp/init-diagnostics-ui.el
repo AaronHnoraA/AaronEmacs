@@ -5,7 +5,7 @@
 
 ;;; Code:
 
-(require 'aaron-ui)
+(require 'aaron-ui-board)
 (require 'init-funcs)
 (require 'project)
 (require 'seq)
@@ -62,7 +62,7 @@ When `other', show only other files.")
     map)
   "Keymap for `my/diagnostics-mode'.")
 
-(define-derived-mode my/diagnostics-mode special-mode "Diagnostics"
+(define-derived-mode my/diagnostics-mode aaron-ui-board-mode "Diagnostics"
   "Major mode for persistent diagnostics lists.")
 
 (defun my/diagnostics-apply-ui ()
@@ -256,12 +256,7 @@ When `other', show only other files.")
 
 (defun my/diagnostics--insert-action-button (label command help)
   "Insert an action button with LABEL, COMMAND, and HELP."
-  (insert-text-button
-   label
-   'help-echo help
-   'follow-link t
-   'action (lambda (_button)
-             (call-interactively command))))
+  (aaron-ui-board-insert-action label command help))
 
 (defun my/diagnostics--goto-location (file buffer-name position)
   "Visit FILE or BUFFER-NAME and move to POSITION."
@@ -283,51 +278,42 @@ When `other', show only other files.")
 
 (defun my/diagnostics--insert-toolbar ()
   "Insert the diagnostics toolbar."
-  (insert (propertize (format "%s\n" my/diagnostics-buffer-title)
-                      'face 'bold))
-  (insert (format "Current: %s\n" (my/diagnostics--origin-buffer-name)))
-  (when-let* ((root (and (eq my/diagnostics-buffer-scope 'project)
-                         (my/diagnostics--origin-project-root))))
-    (insert (format "Project: %s\n" root)))
-  (insert (format "View: %s, %s\n"
-                  (my/diagnostics--file-scope-label)
-                  (my/diagnostics--severity-filter-label)))
-  (insert "Actions: ")
+  (let* ((root (and (eq my/diagnostics-buffer-scope 'project)
+                    (my/diagnostics--origin-project-root)))
+         (subtitle (if root
+                       (format "Current: %s  Project: %s  View: %s, %s"
+                               (my/diagnostics--origin-buffer-name)
+                               root
+                               (my/diagnostics--file-scope-label)
+                               (my/diagnostics--severity-filter-label))
+                     (format "Current: %s  View: %s, %s"
+                             (my/diagnostics--origin-buffer-name)
+                             (my/diagnostics--file-scope-label)
+                             (my/diagnostics--severity-filter-label)))))
+    (aaron-ui-board-insert-page-header
+     (or my/diagnostics-buffer-title "Diagnostics")
+     :icon 'diagnostics
+     :subtitle subtitle))
+  (insert "   ")
   (if (eq my/diagnostics-buffer-scope 'project)
       (progn
-        (my/diagnostics--insert-action-button "[a] all" #'my/diagnostics-show-all-files
-                                              "Show diagnostics from all files")
+        (aaron-ui-board-insert-action "All Files"    #'my/diagnostics-show-all-files    "Show all files")
         (insert " ")
-        (my/diagnostics--insert-action-button "[c] current" #'my/diagnostics-show-current-file
-                                              "Show diagnostics from the current file")
+        (aaron-ui-board-insert-action "Current File" #'my/diagnostics-show-current-file "Current file only")
         (insert " ")
-        (my/diagnostics--insert-action-button "[o] other" #'my/diagnostics-show-other-files
-                                              "Show diagnostics from other files")
+        (aaron-ui-board-insert-action "Other Files"  #'my/diagnostics-show-other-files  "Other files only")
         (insert " "))
-    (my/diagnostics--insert-action-button "[a] all" #'my/diagnostics-show-all-files
-                                          "Show all diagnostics in this buffer")
+    (aaron-ui-board-insert-action "All Files" #'my/diagnostics-show-all-files "Show all files" t)
     (insert " "))
-  (my/diagnostics--insert-action-button "[d] all severities"
-                                        #'my/diagnostics-clear-severity-filter
-                                        "Clear the severity filter")
+  (aaron-ui-board-insert-action "All Sev"   #'my/diagnostics-clear-severity-filter "All severities")
   (insert " ")
-  (my/diagnostics--insert-action-button "[e] errors" #'my/diagnostics-show-errors
-                                        "Show only errors")
+  (aaron-ui-board-insert-action "Errors"    #'my/diagnostics-show-errors    "Errors only")
   (insert " ")
-  (my/diagnostics--insert-action-button "[w] warnings" #'my/diagnostics-show-warnings
-                                        "Show only warnings")
+  (aaron-ui-board-insert-action "Warnings"  #'my/diagnostics-show-warnings  "Warnings only")
   (insert " ")
-  (my/diagnostics--insert-action-button "[n] notes" #'my/diagnostics-show-notes
-                                        "Show only notes")
+  (aaron-ui-board-insert-action "Notes"     #'my/diagnostics-show-notes     "Notes only")
   (insert " ")
-  (my/diagnostics--insert-action-button "[g] refresh" #'my/diagnostics-refresh
-                                        "Refresh diagnostics")
-  (insert " ")
-  (my/diagnostics--insert-action-button "[x] recheck" #'my/diagnostics-rerun
-                                        "Run Flymake again in the source buffer")
-  (insert " ")
-  (my/diagnostics--insert-action-button "[q] close" #'quit-window
-                                        "Close the diagnostics window")
+  (aaron-ui-board-insert-action "Recheck"   #'my/diagnostics-rerun          "Run Flymake again")
   (insert "\n\n"))
 
 (defun my/diagnostics--insert-diag-button (diag)
@@ -351,15 +337,18 @@ When `other', show only other files.")
 
 (defun my/diagnostics--insert-section (title diags empty-message)
   "Insert TITLE for DIAGS or EMPTY-MESSAGE when DIAGS is empty."
-  (insert (propertize
-           (format "%s (%s, %d)\n" title
-                   (my/diagnostics--counts-string diags)
-                   (length diags))
-           'face 'bold))
+  (aaron-ui-board-insert-section
+   (format "%s (%s)" title (my/diagnostics--counts-string diags))
+   (length diags)
+   (cond
+    ((seq-find (lambda (d) (eq 'error (my/diagnostics--severity-category d))) diags) 'danger)
+    ((seq-find (lambda (d) (eq 'warning (my/diagnostics--severity-category d))) diags) 'warning)
+    (diags 'info)
+    (t 'muted)))
   (if diags
       (dolist (diag diags)
         (my/diagnostics--insert-diag-button diag))
-    (insert (format "%s\n" empty-message)))
+    (aaron-ui-board-insert-empty empty-message))
   (insert "\n"))
 
 (defun my/diagnostics-refresh ()
@@ -424,6 +413,8 @@ BUFFER-NAME overrides the generated buffer name."
                   #'my/diagnostics--clear-origin-buffer-references nil t)))
     (with-current-buffer buffer
       (my/diagnostics-mode)
+      (aaron-ui-board-set-header (or title "Diagnostics") 'diagnostics)
+      (setq-local aaron-ui-board-refresh-function #'my/diagnostics-refresh)
       (setq-local my/diagnostics-buffer-scope scope)
       (setq-local my/diagnostics-buffer-filter filter)
       (setq-local my/diagnostics-buffer-file-scope file-scope)

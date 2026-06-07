@@ -5,6 +5,7 @@
 
 ;;; Code:
 
+(require 'aaron-ui-board)
 (require 'cl-lib)
 (require 'bytecomp)
 (require 'subr-x)
@@ -108,7 +109,7 @@
 (defvar my/native-comp--progress-start-time nil
   "When native compilation progress reporting started.")
 
-(define-derived-mode my/compile-board-mode special-mode "Compile-Board"
+(define-derived-mode my/compile-board-mode aaron-ui-board-mode "Compile-Board"
   "Major mode for the compile management board.")
 
 (defun my/compile--root-file-paths ()
@@ -546,12 +547,8 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
    'help-echo help))
 
 (defun my/compile-board--insert-openable-path (path)
-  "Insert PATH as a button."
-  (my/compile-board--insert-button
-   (abbreviate-file-name (expand-file-name path))
-   (lambda (_button)
-     (find-file path))
-   "Open this path"))
+  "Insert PATH as a clickable button."
+  (aaron-ui-board-insert-openable-path path))
 
 (defun my/compile-board-refresh ()
   "Refresh the compile management board."
@@ -559,141 +556,87 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
   (let ((inhibit-read-only t)
         (target-files (my/compile--target-el-files))
         (native-available (my/native-comp-available-p)))
-    (erase-buffer)
-    (insert "Compile Board\n")
-    (insert "=============\n\n")
-    (insert "Keys: g refresh, b byte config, B force byte, n native config, N force native, f byte file, F native file, c clean .elc, C clean config .eln, X reset eln cache, l native log, s startup smoke, y byte smoke, Y native smoke, t toggle auto native on save, o docs, ? dispatch, q quit\n\n")
+    (aaron-ui-board-render
+     (lambda ()
+       (aaron-ui-board-insert-page-header
+        "Compile Board"
+        :icon 'compile
+        :stats (list
+                (cons (format "%d .el" (length target-files)) nil)
+                (cons (format "%d .elc" (my/compile--count-existing-elc-files)) nil)
+                (cons (format "%d .eln" (my/compile--count-existing-config-eln-files)) nil))
+        :actions '((:label "Dispatch" :command my/compile-dispatch :primary t :help "Transient menu")
+                   (:label "Docs"     :command my/compile-open-docs             :help "Maintenance docs")))
 
-    (insert "Overview\n")
-    (insert "--------\n")
-    (insert (format "%-24s %s\n" "Emacs" emacs-version))
-    (insert (format "%-24s " "Config root"))
-    (my/compile-board--insert-openable-path my/compile-config-root)
-    (insert "\n")
-    (insert (format "%-24s %d\n" "Managed .el files" (length target-files)))
-    (insert (format "%-24s %d\n" "Existing .elc files"
-                    (my/compile--count-existing-elc-files)))
-    (insert (format "%-24s %d\n\n" "Managed .eln files"
-                    (my/compile--count-existing-config-eln-files)))
+       ;; Overview
+       (aaron-ui-board-insert-section "Overview")
+       (aaron-ui-board-insert-field "Emacs" emacs-version)
+       (insert "   " (propertize (format "%-16s" "Config root") 'face 'aaron-ui-board-meta))
+       (my/compile-board--insert-openable-path my/compile-config-root)
+       (insert "\n")
+       (insert "   " (propertize (format "%-16s" "ELN cache") 'face 'aaron-ui-board-meta))
+       (my/compile-board--insert-openable-path my/native-comp-cache-dir)
+       (insert "\n\n")
 
-    (insert "Native Compile\n")
-    (insert "--------------\n")
-    (insert (format "%-24s %s\n" "Available" (if native-available "yes" "no")))
-    (insert (format "%-24s %s\n" "Package native compile"
-                    (if (and (boundp 'package-native-compile)
-                             package-native-compile)
-                        "enabled"
-                      "disabled")))
-    (insert (format "%-24s %s\n" "JIT"
-                    (if (and (boundp 'native-comp-jit-compilation)
-                             native-comp-jit-compilation)
-                        "enabled"
-                      "disabled")))
-    (insert (format "%-24s %s\n" "Deferred"
-                    (if (and (boundp 'native-comp-deferred-compilation)
-                             native-comp-deferred-compilation)
-                        "enabled"
-                      "disabled")))
-    (insert (format "%-24s %s\n" "Warning policy"
-                    (if (boundp 'native-comp-async-report-warnings-errors)
-                        (format "%S" native-comp-async-report-warnings-errors)
-                      (format "%S" my/native-comp-async-report-policy))))
-    (insert (format "%-24s %s\n" "Missing source warning"
-                    (if (and (boundp 'native-comp-warning-on-missing-source)
-                             native-comp-warning-on-missing-source)
-                        "enabled"
-                      "disabled")))
-    (insert (format "%-24s %s\n" "comp-speed"
-                    (if (boundp 'comp-speed)
-                        (number-to-string comp-speed)
-                      (number-to-string my/native-comp-speed))))
-    (insert (format "%-24s %d\n" "Queue size" (my/native-comp--queue-size)))
-    (insert (format "%-24s " "ELN cache"))
-    (my/compile-board--insert-openable-path my/native-comp-cache-dir)
-    (insert "\n")
-    (insert (format "%-24s %d\n\n" "Cached .eln files"
-                    (my/compile--count-cache-eln-files)))
+       ;; Native Compile
+       (aaron-ui-board-insert-section
+        "Native Compile" nil
+        (if native-available 'success 'warning))
+       (aaron-ui-board-insert-field
+        "Available" (if native-available "yes" "no")
+        (if native-available 'aaron-ui-board-good 'aaron-ui-board-warn))
+       (aaron-ui-board-insert-field
+        "Package compile"
+        (if (and (boundp 'package-native-compile) package-native-compile) "enabled" "disabled"))
+       (aaron-ui-board-insert-field
+        "JIT"
+        (if (and (boundp 'native-comp-jit-compilation) native-comp-jit-compilation)
+            "enabled" "disabled"))
+       (aaron-ui-board-insert-field
+        "Warning policy"
+        (if (boundp 'native-comp-async-report-warnings-errors)
+            (format "%S" native-comp-async-report-warnings-errors)
+          (format "%S" my/native-comp-async-report-policy)))
+       (aaron-ui-board-insert-field
+        "comp-speed"
+        (if (boundp 'comp-speed)
+            (number-to-string comp-speed)
+          (number-to-string my/native-comp-speed)))
+       (aaron-ui-board-insert-field "Queue size" (number-to-string (my/native-comp--queue-size)))
+       (aaron-ui-board-insert-field
+        "Cached .eln" (number-to-string (my/compile--count-cache-eln-files)))
+       (insert "\n")
 
-    (insert "Automation\n")
-    (insert "----------\n")
-    (insert (format "%-24s %s\n\n" "Auto native on save"
-                    (if my/compile-auto-native-on-save "enabled" "disabled")))
+       ;; Automation
+       (aaron-ui-board-insert-section "Automation")
+       (aaron-ui-board-insert-field
+        "Auto native on save"
+        (if my/compile-auto-native-on-save "enabled" "disabled")
+        (if my/compile-auto-native-on-save 'aaron-ui-board-good 'aaron-ui-board-meta))
+       (insert "\n")
 
-    (insert "Actions\n")
-    (insert "-------\n")
-    (my/compile-board--insert-button
-     "[byte config]"
-     (lambda (_button) (my/byte-compile-config))
-     "Byte-compile the managed config")
-    (insert " ")
-    (my/compile-board--insert-button
-     "[force byte]"
-     (lambda (_button) (my/byte-compile-config t))
-     "Force byte-compilation for the managed config")
-    (insert " ")
-    (my/compile-board--insert-button
-     "[native config]"
-     (lambda (_button) (my/native-compile-config))
-     "Queue native compilation for the managed config")
-    (insert " ")
-    (my/compile-board--insert-button
-     "[force native]"
-     (lambda (_button) (my/native-compile-config t))
-     "Force native compilation for the managed config")
-    (insert "\n")
-    (my/compile-board--insert-button
-     "[byte current]"
-     (lambda (_button) (call-interactively #'my/byte-compile-current-file))
-     "Byte-compile the current file")
-    (insert " ")
-    (my/compile-board--insert-button
-     "[native current]"
-     (lambda (_button) (call-interactively #'my/native-compile-current-file))
-     "Queue native compilation for the current file")
-    (insert " ")
-    (my/compile-board--insert-button
-     "[clean .elc]"
-     (lambda (_button) (my/compile-clean-byte-artifacts))
-     "Delete managed .elc files")
-    (insert " ")
-    (my/compile-board--insert-button
-     "[clean config .eln]"
-     (lambda (_button) (my/compile-clean-native-artifacts))
-     "Delete managed .eln files")
-    (insert " ")
-    (my/compile-board--insert-button
-     "[reset eln cache]"
-     (lambda (_button) (my/native-comp-reset-cache))
-     "Delete the dedicated local ELN cache")
-    (insert "\n")
-    (my/compile-board--insert-button
-     "[native log]"
-     (lambda (_button) (my/native-comp-open-log))
-     "Open the native compilation log")
-    (insert " ")
-    (my/compile-board--insert-button
-     "[warnings]"
-     (lambda (_button)
-       (if (fboundp 'my/show-warnings-buffer)
-           (my/show-warnings-buffer)
-         (user-error "Warnings buffer helper is not loaded yet")))
-     "Open the warnings buffer")
-    (insert " ")
-    (my/compile-board--insert-button
-     "[toggle auto native]"
-     (lambda (_button) (my/compile-toggle-auto-native-on-save))
-     "Toggle native compilation on save for this config")
-    (insert " ")
-    (my/compile-board--insert-button
-     "[docs]"
-     (lambda (_button) (my/compile-open-docs))
-     "Open maintenance documentation")
-    (insert "\n\n")
+       ;; Actions
+       (aaron-ui-board-insert-section "Actions")
+       (insert "   ")
+       (aaron-ui-board-insert-actions
+        '((:label "Byte Config"    :command my/byte-compile-config         :primary t :help "Byte-compile config")
+          (:label "Native Config"  :command my/native-compile-config       :help "Native-compile config")
+          (:label "Byte Current"   :command my/byte-compile-current-file   :help "Byte-compile current file")
+          (:label "Native Current" :command my/native-compile-current-file :help "Native-compile current file")))
+       (insert "\n   ")
+       (aaron-ui-board-insert-actions
+        '((:label "Clean .elc"     :command my/compile-clean-byte-artifacts   :help "Delete .elc files")
+          (:label "Clean .eln"     :command my/compile-clean-native-artifacts :help "Delete .eln files")
+          (:label "Reset ELN"      :command my/native-comp-reset-cache        :help "Reset ELN cache")
+          (:label "Native Log"     :command my/native-comp-open-log           :help "Open native log")
+          (:label "Auto Native"    :command my/compile-toggle-auto-native-on-save
+                  :help "Toggle auto native on save")))
+       (insert "\n\n")
 
-    (insert "Health\n")
-    (insert "------\n")
-    (insert "Use `s`, `y`, `Y` or the dispatch menu for startup and compile smoke checks.\n")
-    (goto-char (point-min))))
+       ;; Health hint
+       (aaron-ui-board-insert-section "Health")
+       (aaron-ui-board-insert-key-hints
+        "Keys: g refresh  b byte  n native  f byte-file  F native-file  c clean .elc  C clean .eln  s smoke  ? dispatch  q quit")))))
 
 (defun my/compile-board ()
   "Open the compile management board."
@@ -701,6 +644,8 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
   (let ((buffer (get-buffer-create my/compile-board-buffer-name)))
     (with-current-buffer buffer
       (my/compile-board-mode)
+      (aaron-ui-board-set-header "Compile Board" 'compile)
+      (setq-local aaron-ui-board-refresh-function #'my/compile-board-refresh)
       (let ((map (copy-keymap special-mode-map)))
         (use-local-map map)
         (local-set-key (kbd "g") #'my/compile-board-refresh)

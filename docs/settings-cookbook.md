@@ -432,3 +432,36 @@ Typst 模板集中在 [templates/typst/](../templates/typst/)。当前 assignmen
 **env 刷新**：`SPC p e r` 在 dir-locals 重载后会调用 `my/direnv-update-environment-maybe`，使 PATH、编译器路径等 shell 层变量在 Emacs 里同步更新，不需要重启。
 
 **`eval` 说明**：`silence` 命令跳过 `eval` 条目（涉及安全确认）。如需 silence `eval` 形式，手动将其加入 `safe-local-eval-forms`。
+
+---
+
+## 新建只读 dashboard / report / hub buffer
+
+需要新建只读面板（`special-mode` 风格）时，**请使用 `aaron-ui-board`**，不要手工构建 face 和 insert 样板：
+
+```elisp
+(require 'aaron-ui-board)
+
+(define-derived-mode my/foo-mode aaron-ui-board-mode "Foo")
+
+(defun my/foo-refresh ()
+  (interactive)
+  (let ((inhibit-read-only t))
+    (aaron-ui-board-render
+     (lambda ()
+       (aaron-ui-board-insert-page-header "Foo" :icon 'gear)
+       (aaron-ui-board-insert-section "Details")
+       (aaron-ui-board-insert-field "Key" "Value")
+       (aaron-ui-board-insert-key-hints "Keys: g refresh  q quit")))))
+
+(defun my/foo ()
+  (interactive)
+  (with-current-buffer (get-buffer-create "*Foo*")
+    (my/foo-mode)
+    (aaron-ui-board-set-header "Foo" 'gear)
+    (setq-local aaron-ui-board-refresh-function #'my/foo-refresh)
+    (my/foo-refresh))
+  (pop-to-buffer "*Foo*"))
+```
+
+完整 API 见 [dev-guide.md](dev-guide.md) §10。

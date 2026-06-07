@@ -8,6 +8,7 @@
 
 ;;; Code:
 
+(require 'aaron-ui-board)
 (require 'cl-lib)
 
 (my/package-ensure-vc 'appine "https://github.com/chaoswork/appine.git")
@@ -304,36 +305,29 @@ toolbar, which bypasses `appine-close-tab')."
 
 ;;; ── Board UI helpers ────────────────────────────────────────────────────
 
-(define-derived-mode my/appine-board-mode special-mode "Appine-Board"
+(define-derived-mode my/appine-board-mode aaron-ui-board-mode "Appine-Board"
   "Major mode for the Appine management board.")
 
 (defun my/appine-board--insert-button (label action help)
-  "Insert a text button with LABEL, ACTION (symbol or lambda), and HELP.
-The action is wrapped so it always receives a single ignored button arg,
-then calls the function interactively (prompting for any arguments)."
-  (let ((wrapped (if (and (symbolp action) (commandp action))
-                     (lambda (_b) (call-interactively action))
-                   ;; Lambda passed directly — must already accept one arg.
-                   action)))
-    (insert-text-button label 'action wrapped 'follow-link t 'help-echo help)))
+  "Insert a text button with LABEL, ACTION (symbol or lambda), and HELP."
+  (let ((command (if (and (symbolp action) (commandp action)) action
+                   (lambda () (funcall action nil)))))
+    (aaron-ui-board-insert-action label command help)))
 
 (defun my/appine-board--insert-openable-path (path &optional dired-p)
   "Insert PATH as clickable Emacs and macOS-open buttons.
 With DIRED-P, the main path button opens via `dired'."
   (if (and path (stringp path))
       (let ((expanded (expand-file-name path)))
-        (my/appine-board--insert-button
-         (abbreviate-file-name expanded)
+        (aaron-ui-board-insert-openable-path
+         path
          (if dired-p
-             (lambda (_b) (dired path))
-           (lambda (_b) (find-file path)))
-         (if dired-p "Open directory in Emacs" "Open this file in Emacs"))
+             (abbreviate-file-name expanded)
+           (abbreviate-file-name expanded)))
         (insert " ")
-        (my/appine-board--insert-button
-         "[open]"
-         (lambda (_b) (my/appine--macos-open expanded))
-         "Open with macOS open"))
-    (insert "<unset>")))
+        (aaron-ui-board-insert-action
+         "open" (lambda () (my/appine--macos-open expanded)) "Open with macOS open"))
+    (insert (propertize "<unset>" 'face 'aaron-ui-board-meta))))
 
 (defun my/appine-board--insert-openable-url (url)
   "Insert URL as clickable Appine and macOS-open buttons."
@@ -351,18 +345,20 @@ With DIRED-P, the main path button opens via `dired'."
     (insert "<none>")))
 
 (defun my/appine-board--insert-value-line (label value)
-  "Insert LABEL and VALUE as a formatted line."
-  (insert (format "%-24s %s\n" label value)))
+  "Insert LABEL and VALUE as a formatted field."
+  (aaron-ui-board-insert-field label (format "%s" value)))
 
 (defun my/appine-board--insert-path-line (label path &optional dired-p)
   "Insert LABEL and PATH as a button line."
-  (insert (format "%-24s " label))
+  (insert "   "
+          (propertize (format "%-16s" label) 'face 'aaron-ui-board-meta))
   (my/appine-board--insert-openable-path path dired-p)
   (insert "\n"))
 
 (defun my/appine-board--insert-url-line (label url)
   "Insert LABEL and URL as a button line."
-  (insert (format "%-24s " label))
+  (insert "   "
+          (propertize (format "%-16s" label) 'face 'aaron-ui-board-meta))
   (my/appine-board--insert-openable-url url)
   (insert "\n"))
 
@@ -392,20 +388,26 @@ With DIRED-P, the main path button opens via `dired'."
 
 (defun my/appine-board--insert-action-line (pairs)
   "Insert a row of action buttons from PAIRS of (label fn help)."
-  (dolist (pair pairs)
-    (pcase-let ((`(,label ,fn ,help) pair))
-      (my/appine-board--insert-button label fn help)
-      (insert "  ")))
+  (insert "   ")
+  (let ((first t))
+    (dolist (pair pairs)
+      (pcase-let ((`(,label ,fn ,help) pair))
+        (unless first (insert " "))
+        (setq first nil)
+        (my/appine-board--insert-button label fn help))))
   (insert "\n"))
 
 (defun my/appine-board--section (title)
-  "Insert a bold section TITLE with an underline."
-  (insert (format "\n%s\n%s\n" title (make-string (length title) ?-))))
+  "Insert a board section heading for TITLE."
+  (insert "\n")
+  (aaron-ui-board-insert-section title))
 
 (defun my/appine-board--hint-row (&rest pairs)
-  "Insert a row of KEY DESC hints from PAIRS."
+  "Insert a dim row of KEY DESC hints from PAIRS."
+  (insert "   ")
   (dolist (pair pairs)
-    (insert (format "  %-6s %-18s" (car pair) (cadr pair))))
+    (insert (propertize (format "  %-6s %-18s" (car pair) (cadr pair))
+                        'face 'aaron-ui-board-meta)))
   (insert "\n"))
 
 ;;; ── Tool functions (scroll, find, plugins, JS) ──────────────────────────
@@ -831,11 +833,19 @@ export default {
          (file     (my/appine-current-file))
          (alive    (get-buffer my/appine-buffer-name))
          (plugins  (my/appine--list-plugins)))
-    (erase-buffer)
-
+    (aaron-ui-board-render
+     (lambda ()
     ;; ── Header ──────────────────────────────────────────────────────────
-    (insert "Appine Board\n")
-    (insert "============\n")
+    (aaron-ui-board-insert-page-header
+     "Appine Board"
+     :icon 'terminal
+     :stats (list
+             (cons (if alive "alive" "stopped")
+                   (if alive 'success 'muted))
+             (cons (if (my/appine-visible-p) "visible" "hidden")
+                   (if (my/appine-visible-p) 'info 'muted)))
+     :actions '((:label "Focus/Open" :command my/appine-focus-or-open :primary t :help "Focus or create Appine")
+                (:label "Kill All"   :command my/appine-kill-all               :help "Kill all views")))
 
     ;; ── Status ──────────────────────────────────────────────────────────
     (my/appine-board--section "Status")
@@ -973,8 +983,7 @@ export default {
                                '("S"  "storage")       '("xc/xC" "clear"))
     (my/appine-board--hint-row '("bi" "brave cookies") '("t"  "org links")
                                '("D"  "docs")          '("q"  "quit"))
-    (insert "\n")
-    (goto-char (point-min))))
+    (insert "\n")))))
 
 (defun my/appine-board ()
   "Open the Appine management board."
@@ -982,6 +991,8 @@ export default {
   (let ((buffer (get-buffer-create my/appine-board-buffer-name)))
     (with-current-buffer buffer
       (my/appine-board-mode)
+      (aaron-ui-board-set-header "Appine Board" 'terminal)
+      (setq-local aaron-ui-board-refresh-function #'my/appine-board-refresh)
       (let ((map (copy-keymap special-mode-map)))
         (use-local-map map)
         (define-key map (kbd "g")   #'my/appine-board-refresh)

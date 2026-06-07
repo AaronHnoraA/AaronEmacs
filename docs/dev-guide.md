@@ -520,3 +520,48 @@ in-process 缓存，与自动刷新保持一致。
 5. TRAMP 主机是否能正常登录
 
 更详细的维护和排查见 [lsp-workflow.org](lsp-workflow.org) 和 [maintenance.md](maintenance.md)。
+
+## 10. Board UI 工具库 (`aaron-ui-board`)
+
+所有只读 dashboard / hub / report buffer 都通过 `site-lisp/aaron-ui/aaron-ui-board.el`
+渲染，该库建立在 `aaron-ui` 语义 palette 之上，提供统一的 Kanagawa Wave 风格：
+大标题 + icon、badge 标签/统计、action toolbar、section 分区 + count badge、
+label-badge 字段行、hl-line 行高亮、styled header-line。
+
+**基础 API**
+
+| 函数 | 说明 |
+|------|------|
+| `(aaron-ui-board-set-header TITLE ICON &optional STATUS)` | 设置 header-line |
+| `(aaron-ui-board-render RENDERER)` | 保位刷新（保留当前行/item） |
+| `(aaron-ui-board-insert-page-header TITLE &key icon subtitle stats actions)` | 渲染页头 |
+| `(aaron-ui-board-insert-section TITLE &optional COUNT TONE)` | 渲染 section 标题 |
+| `(aaron-ui-board-insert-field LABEL VALUE &optional FACE)` | 渲染字段行 |
+| `(aaron-ui-board-insert-row &key id icon badge title meta detail action ...)` | 渲染可点击行 |
+| `(aaron-ui-board-insert-badge LABEL &optional TONE)` | 渲染 badge（info/success/warning/danger/muted）|
+| `(aaron-ui-board-insert-action LABEL COMMAND HELP &optional PRIMARY)` | toolbar 按钮 |
+| `(aaron-ui-board-insert-actions ACTIONS)` | 渲染多个按钮（plist 列表）|
+| `(aaron-ui-board-insert-metric LABEL VALUE &optional RATIO SUFFIX)` | 带进度条的指标行 |
+| `(aaron-ui-board-bar RATIO &optional WIDTH)` | 返回文本进度条字符串 |
+| `(aaron-ui-board--level-face RATIO)` | 根据 ratio 返回 good/warn/bad face |
+| `(aaron-ui-board-insert-openable-path PATH &optional LABEL)` | 可点击路径按钮 |
+| `(aaron-ui-board-insert-key-hints TEXT)` | 渲染 dim 的快捷键提示行 |
+
+**新建 dashboard 的步骤**
+
+1. `(require 'aaron-ui-board)` 并从 `aaron-ui-board-mode` 派生 major mode
+2. 在 `with-current-buffer` 里调用 `(aaron-ui-board-set-header TITLE ICON)` 和
+   `(setq-local aaron-ui-board-refresh-function #'my-refresh-fn)`
+3. 刷新函数内调用 `(aaron-ui-board-render (lambda () ...))`，lambda 内用上述
+   `insert-*` 原语构建内容
+4. 其他自定义按键用 `(local-set-key …)` 叠加即可
+
+**已迁移的 dashboards**
+
+- Aaronnote Roam views（`init-md-roam-ui.el` → shim）
+- Config Health（`init-health.el`）
+- Language Server Hub + Doctor（`init-lsp-tools.el`）
+- Performance Watch（`init-performance.el`）
+- Compile Board（`init-compile.el`）
+- Diagnostics UI（`init-diagnostics-ui.el`）
+- Appine Board（`init-appine.el`）

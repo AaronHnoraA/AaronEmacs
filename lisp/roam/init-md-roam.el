@@ -1317,13 +1317,13 @@ ID, ICON, LABEL, VALUE, DETAIL, and PLACEHOLDER control display."
                           (goto-char marker))))))
         (add-text-properties
          start end
-         `(my/aaronnote-roam-ui-item-id ,id
+         `(aaron-ui-board--item-id ,id
            help-echo ,(format "RET: jump into %s field; type to edit" (downcase label))))
         ;; Apply row-action only to the label area so the widget's own keymap is not masked.
         (add-text-properties
          start label-end
-         `(my/aaronnote-roam-ui-row-action ,action
-           mouse-face my/aaronnote-roam-ui-row-highlight
+         `(aaron-ui-board--row-action ,action
+           mouse-face aaron-ui-board-row-highlight
            keymap ,my/aaronnote-roam-ui-row-map))))))
 
 (defun my/aaronnote-roam-new-render ()
@@ -1420,7 +1420,7 @@ ID, ICON, LABEL, VALUE, DETAIL, and PLACEHOLDER control display."
        (my/aaronnote-roam-ui-insert-field
         "Create engine" "Aaronnote runtime" 'my/aaronnote-roam-ui-meta)
        (widget-setup)))
-    (unless (get-text-property (point) 'my/aaronnote-roam-ui-item-id)
+    (unless (get-text-property (point) 'aaron-ui-board--item-id)
       (my/aaronnote-roam-ui-goto-first-item))))
 
 (defun my/aaronnote-roam-new-refresh ()

@@ -5,6 +5,7 @@
 
 ;;; Code:
 
+(require 'aaron-ui-board)
 (require 'cl-lib)
 (require 'init-funcs)
 (require 'seq)
@@ -95,7 +96,7 @@
   "Face for high performance values."
   :group 'my/performance)
 
-(define-derived-mode my/performance-watch-mode special-mode "PerfWatch"
+(define-derived-mode my/performance-watch-mode aaron-ui-board-mode "PerfWatch"
   "Major mode for the runtime performance watch board."
   (setq-local cursor-type nil)
   (when (fboundp 'evil-local-mode)
@@ -140,28 +141,15 @@
 
 (defun my/performance--section (title)
   "Insert a styled section TITLE."
-  (insert (propertize title 'face 'my/performance-section-face) "\n")
-  (insert (propertize (make-string (length title) ?-) 'face 'my/performance-dim-face)
-          "\n"))
+  (aaron-ui-board-insert-section title))
 
 (defun my/performance--level-face (ratio)
   "Return a face for normalized RATIO."
-  (cond
-   ((>= ratio 0.85) 'my/performance-bad-face)
-   ((>= ratio 0.55) 'my/performance-warn-face)
-   (t 'my/performance-good-face)))
+  (aaron-ui-board--level-face ratio))
 
 (defun my/performance--bar (ratio &optional width)
   "Return a text bar for normalized RATIO."
-  (let* ((width (or width 24))
-         (ratio (max 0.0 (min 1.0 (or ratio 0.0))))
-         (filled (round (* ratio width)))
-         (empty (- width filled))
-         (face (my/performance--level-face ratio)))
-    (concat "["
-            (propertize (make-string filled ?#) 'face face)
-            (propertize (make-string empty ?-) 'face 'my/performance-dim-face)
-            "]")))
+  (aaron-ui-board-bar ratio width))
 
 (defun my/performance--format-kb (kb)
   "Return KB as a human readable size."
@@ -631,30 +619,26 @@ This samples once and does not mutate or display the performance board."
 
 (defun my/performance--insert-header (sample inspected-buffer)
   "Insert board usage and metadata for SAMPLE inspecting INSPECTED-BUFFER."
-  (insert (propertize "Performance Watch" 'face 'my/performance-title-face) "\n")
-  (insert (propertize "=================" 'face 'my/performance-dim-face) "\n\n")
-  (insert (propertize "Usage" 'face 'my/performance-section-face) "\n")
-  (insert "  g  refresh now        y  copy full page          a  toggle auto refresh\n")
-  (insert "  s  save one record    R  toggle recording        o  open record directory\n")
-  (insert "  p  start CPU profiler P  profiler report         q  close performance frame\n\n")
-  (insert (format "Updated: %s    Inspecting: %s\n"
-                  (plist-get sample :timestamp)
-                  (if (buffer-live-p inspected-buffer)
-                      (buffer-name inspected-buffer)
-                    "-")))
-  (insert (format "Auto refresh: %s every %.1fs    Recording: %s    Record file: %s\n\n"
-                  (if (timerp my/performance--auto-refresh-timer) "on" "off")
-                  my/performance-refresh-interval
-                  (if my/performance--recording "on" "off")
-                  (abbreviate-file-name (my/performance-record-file)))))
+  (aaron-ui-board-insert-page-header
+   "Performance Watch"
+   :icon 'chart
+   :subtitle (format "Inspecting: %s   Updated: %s"
+                     (if (buffer-live-p inspected-buffer)
+                         (buffer-name inspected-buffer)
+                       "-")
+                     (plist-get sample :timestamp))
+   :stats (list
+           (cons (format "auto %s" (if (timerp my/performance--auto-refresh-timer) "on" "off"))
+                 (if (timerp my/performance--auto-refresh-timer) 'success 'muted))
+           (cons (format "rec %s" (if my/performance--recording "on" "off"))
+                 (if my/performance--recording 'warning 'muted))))
+  (aaron-ui-board-insert-key-hints
+   "Keys: g refresh  y copy page  a auto-refresh  s save record  R recording  o record dir  p profiler  q quit")
+  (insert "\n"))
 
 (defun my/performance--insert-metric (label value ratio &optional suffix)
   "Insert one visual metric LABEL VALUE with normalized RATIO and SUFFIX."
-  (insert (format "%-18s %8s %-4s %s\n"
-                  label
-                  value
-                  (or suffix "")
-                  (my/performance--bar ratio 28))))
+  (aaron-ui-board-insert-metric label value ratio suffix))
 
 (defun my/performance--insert-overview (sample)
   "Insert visual overview for SAMPLE."
@@ -781,7 +765,9 @@ This samples once and does not mutate or display the performance board."
         (buffer (get-buffer-create my/performance-buffer-name)))
     (with-current-buffer buffer
       (my/performance-watch-mode)
+      (aaron-ui-board-set-header "Performance Watch" 'chart)
       (setq-local my/performance--inspected-buffer inspected-buffer)
+      (setq-local aaron-ui-board-refresh-function #'my/performance-watch-refresh)
       (let ((map (copy-keymap special-mode-map)))
         (use-local-map map)
         (local-set-key (kbd "g") #'my/performance-watch-refresh)

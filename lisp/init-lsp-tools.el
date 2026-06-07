@@ -8,6 +8,7 @@
 
 ;;; Code:
 
+(require 'aaron-ui-board)
 (require 'cl-lib)
 (require 'easymenu)
 (require 'init-funcs)
@@ -80,10 +81,10 @@
 (declare-function eglot-inlay-hints-mode "eglot" (&optional arg))
 (declare-function lsp-inlay-hints-mode "lsp-mode" (&optional arg))
 
-(define-derived-mode my/language-server-manager-mode special-mode "Lang-Server-Hub"
+(define-derived-mode my/language-server-manager-mode aaron-ui-board-mode "Lang-Server-Hub"
   "Major mode for the language-server dashboard.")
 
-(define-derived-mode my/language-server-doctor-mode special-mode "Lang-Server-Doctor"
+(define-derived-mode my/language-server-doctor-mode aaron-ui-board-mode "Lang-Server-Doctor"
   "Major mode for the language-server doctor report.")
 
 (defun my/language-server-manager--assert-view-buffer ()
@@ -288,12 +289,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 
 (defun my/language-server--insert-openable-path (path)
   "Insert PATH as a button that opens it."
-  (insert-text-button
-   (my/language-server--openable-path path)
-   'follow-link t
-   'help-echo "Open this path"
-   'action (lambda (_button)
-             (find-file path))))
+  (aaron-ui-board-insert-openable-path path (my/language-server--openable-path path)))
 
 (defun my/language-server--entry-source (entry)
   "Return ENTRY's source file path, if any."
@@ -701,170 +697,112 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 (defun my/language-server-manager-insert-maintenance-section ()
   "Insert the top-level maintenance section."
   (my/language-server-manager--assert-view-buffer)
-  (insert "Maintenance\n")
-  (insert "-----------\n")
-  (insert (format "explicit lsp-mode routes: %d\n"
-                  (length (my/language-server-lsp-mode-preference-entries))))
-  (insert (format "custom eglot mappings: %d\n"
-                  (length (my/language-server-eglot-program-entries))))
-  (insert "actions: ")
-  (my/language-server--insert-button
-   "[doctor]"
-   (lambda (_button) (my/language-server-doctor))
-   "Open the language-server doctor report")
-  (insert " ")
-  (my/language-server--insert-button
-   "[dispatch]"
-   (lambda (_button) (my/language-server-dispatch))
-   "Open the transient dispatch menu")
-  (insert " ")
-  (my/language-server--insert-button
-   "[docs]"
-   (lambda (_button) (my/language-server-manager-open-docs))
-   "Open the workflow documentation")
-  (insert " ")
-  (my/language-server--insert-button
-   "[project problems]"
-   (lambda (_button) (my/language-server-manager-problems-project))
-   "Open the project problems view")
+  (aaron-ui-board-insert-section "Maintenance")
+  (aaron-ui-board-insert-field
+   "lsp-mode routes"
+   (number-to-string (length (my/language-server-lsp-mode-preference-entries))))
+  (aaron-ui-board-insert-field
+   "eglot mappings"
+   (number-to-string (length (my/language-server-eglot-program-entries))))
+  (insert "   ")
+  (aaron-ui-board-insert-actions
+   '((:label "Doctor"    :command my/language-server-doctor    :help "Doctor report")
+     (:label "Dispatch"  :command my/language-server-dispatch  :help "Transient menu")
+     (:label "Docs"      :command my/language-server-manager-open-docs :help "Workflow docs")
+     (:label "Problems"  :command my/language-server-manager-problems-project :help "Project problems")))
   (insert "\n\n"))
 
 (defun my/language-server-manager--insert-settings-section ()
   "Insert quick runtime settings for the language-server stack."
   (my/language-server-manager--assert-view-buffer)
-  (insert "Quick Settings\n")
-  (insert "--------------\n")
-  (insert "These toggles only affect the current Emacs session.  If one of them proves useful, move it back into the corresponding init file.\n")
-  (insert (format "eglot-autoreconnect: %s\n"
-                  (my/language-server--value-or-unset 'eglot-autoreconnect)))
-  (insert (format "eglot-autoshutdown: %s\n"
-                  (my/language-server--value-or-unset 'eglot-autoshutdown)))
-  (insert (format "lsp-log-io: %s\n"
-                  (my/language-server--value-or-unset 'lsp-log-io)))
-  (insert (format "lsp-inlay-hint-enable: %s\n"
-                  (my/language-server--value-or-unset 'lsp-inlay-hint-enable)))
-  (insert (format "read-process-output-max: %s\n"
-                  (my/language-server--value-or-unset 'read-process-output-max)))
-  (insert (format "eglot-events-buffer-size: %s\n"
-                  (my/language-server--value-or-unset 'eglot-events-buffer-size)))
-  (insert "actions: ")
-  (my/language-server--insert-button
-   "[toggle autoreconnect]"
-   (lambda (_button) (my/language-server-toggle-eglot-autoreconnect))
-   "Toggle eglot autoreconnect")
+  (aaron-ui-board-insert-section "Quick Settings")
+  (aaron-ui-board-insert-field
+   "eglot-autoreconnect"
+   (format "%s" (my/language-server--value-or-unset 'eglot-autoreconnect)))
+  (aaron-ui-board-insert-field
+   "eglot-autoshutdown"
+   (format "%s" (my/language-server--value-or-unset 'eglot-autoshutdown)))
+  (aaron-ui-board-insert-field
+   "lsp-log-io"
+   (format "%s" (my/language-server--value-or-unset 'lsp-log-io)))
+  (aaron-ui-board-insert-field
+   "lsp-inlay-hints"
+   (format "%s" (my/language-server--value-or-unset 'lsp-inlay-hint-enable)))
+  (aaron-ui-board-insert-field
+   "read-process-output-max"
+   (format "%s" (my/language-server--value-or-unset 'read-process-output-max)))
+  (aaron-ui-board-insert-field
+   "eglot-events-buffer"
+   (format "%s" (my/language-server--value-or-unset 'eglot-events-buffer-size)))
+  (insert "   ")
+  (aaron-ui-board-insert-actions
+   '((:label "Autoreconnect" :command my/language-server-toggle-eglot-autoreconnect
+              :help "Toggle eglot autoreconnect")
+     (:label "Autoshutdown"  :command my/language-server-toggle-eglot-autoshutdown
+              :help "Toggle eglot autoshutdown")
+     (:label "Log IO"        :command my/language-server-toggle-lsp-log-io
+              :help "Toggle lsp-mode wire logging")
+     (:label "Inlay Hints"   :command my/language-server-toggle-inlay-hints
+              :help "Toggle inlay hints")))
   (insert " ")
-  (my/language-server--insert-button
-   "[toggle autoshutdown]"
-   (lambda (_button) (my/language-server-toggle-eglot-autoshutdown))
-   "Toggle eglot autoshutdown")
+  (aaron-ui-board-insert-action
+   "Output Max" #'my/language-server-set-read-process-output-max "Set read-process-output-max")
   (insert " ")
-  (my/language-server--insert-button
-   "[toggle log-io]"
-   (lambda (_button) (my/language-server-toggle-lsp-log-io))
-   "Toggle lsp-mode wire logging")
-  (insert " ")
-  (my/language-server--insert-button
-   "[toggle inlay hints]"
-   (lambda (_button) (my/language-server-toggle-inlay-hints))
-   "Toggle inlay hints for the current session")
-  (insert " ")
-  (my/language-server--insert-button
-   "[set output max]"
-   (lambda (_button) (call-interactively #'my/language-server-set-read-process-output-max))
-   "Set read-process-output-max")
-  (insert " ")
-  (my/language-server--insert-button
-   "[set events buffer]"
-   (lambda (_button) (call-interactively #'my/language-server-set-eglot-events-buffer-size))
-   "Set eglot-events-buffer-size")
+  (aaron-ui-board-insert-action
+   "Events Buf" #'my/language-server-set-eglot-events-buffer-size "Set eglot-events-buffer-size")
   (insert "\n\n"))
 
 (defun my/language-server-manager--insert-current-buffer-section ()
   "Insert the current-buffer status section."
   (my/language-server-manager--assert-view-buffer)
-  (insert "Current Buffer\n")
-  (insert "--------------\n")
+  (aaron-ui-board-insert-section "Current Buffer")
   (if-let* ((status (my/language-server--source-status)))
       (progn
-        (insert (format "buffer: %s\n" (plist-get status :buffer)))
-        (insert (format "file: %s\n" (plist-get status :file)))
-        (insert (format "major mode: %s\n" (plist-get status :major-mode)))
-        (insert (format "default-directory: %s\n"
-                        (plist-get status :default-directory)))
-        (insert (format "project root: %s\n" (plist-get status :project-root)))
-        (insert (format "route policy: %s\n" (plist-get status :policy)))
-        (insert (format "active backend: %s\n"
-                        (plist-get status :active-backend)))
-        (insert (format "required lsp feature: %s (%s)\n"
-                        (plist-get status :required-feature)
-                        (plist-get status :feature-status)))
-        (insert (format "matching custom eglot mapping: %s\n"
-                        (plist-get status :eglot-match)))
-        (insert (format "flymake/company/breadcrumb: %s / %s / %s\n"
-                        (plist-get status :flymake)
-                        (plist-get status :company)
-                        (plist-get status :breadcrumb)))
-        (insert (format "local eglot workspace config: %s\n"
-                        (if (plist-get status :workspace-set)
-                            "set"
-                          "unset")))
+        (aaron-ui-board-insert-field "buffer"      (plist-get status :buffer))
+        (aaron-ui-board-insert-field "file"        (plist-get status :file))
+        (aaron-ui-board-insert-field "major mode"  (format "%s" (plist-get status :major-mode)))
+        (aaron-ui-board-insert-field "directory"   (plist-get status :default-directory))
+        (aaron-ui-board-insert-field "project root" (plist-get status :project-root))
+        (aaron-ui-board-insert-field "route policy" (plist-get status :policy))
+        (aaron-ui-board-insert-field "active backend" (format "%s" (plist-get status :active-backend)))
+        (aaron-ui-board-insert-field
+         "lsp feature"
+         (format "%s (%s)" (plist-get status :required-feature) (plist-get status :feature-status)))
+        (aaron-ui-board-insert-field "eglot mapping" (plist-get status :eglot-match))
+        (aaron-ui-board-insert-field
+         "flymake/company"
+         (format "%s / %s / %s"
+                 (plist-get status :flymake)
+                 (plist-get status :company)
+                 (plist-get status :breadcrumb)))
+        (aaron-ui-board-insert-field
+         "workspace config"
+         (if (plist-get status :workspace-set) "set" "unset"))
         (when-let* ((workspace (plist-get status :workspace)))
-          (insert (format "  %s\n" workspace)))
-        (insert "actions: ")
-        (my/language-server--insert-button
-         "[ensure]"
-         (lambda (_button) (my/language-server-manager-ensure))
-         "Ensure the preferred backend for the source buffer")
-        (insert " ")
-        (my/language-server--insert-button
-         "[restart]"
-         (lambda (_button) (my/language-server-manager-restart))
-         "Restart the active language server")
-        (insert " ")
-        (my/language-server--insert-button
-         "[shutdown]"
-         (lambda (_button) (my/language-server-manager-shutdown))
-         "Shutdown the active language server")
-        (insert " ")
-        (my/language-server--insert-button
-         "[log]"
-         (lambda (_button) (my/language-server-manager-open-log))
-         "Open the active backend log")
-        (insert " ")
-        (my/language-server--insert-button
-         "[session]"
-         (lambda (_button) (my/language-server-manager-describe-session))
-         "Describe the current language-server session")
-        (insert " ")
-        (my/language-server--insert-button
-         "[config]"
-         (lambda (_button) (my/language-server-manager-show-workspace-configuration))
-         "Show backend workspace configuration")
-        (insert " ")
-        (my/language-server--insert-button
-         "[actions]"
-         (lambda (_button) (my/language-server-manager-code-actions))
-         "Run code actions")
-        (insert " ")
-        (my/language-server--insert-button
-         "[format]"
-         (lambda (_button) (my/language-server-manager-format-buffer))
-         "Format the current buffer")
-        (insert " ")
-        (my/language-server--insert-button
-         "[rename]"
-         (lambda (_button) (my/language-server-manager-rename))
-         "Rename the symbol at point")
+          (insert "   "
+                  (propertize workspace 'face 'aaron-ui-board-path)
+                  "\n"))
+        (insert "   ")
+        (aaron-ui-board-insert-actions
+         '((:label "Ensure"    :command my/language-server-manager-ensure    :primary t
+                   :help "Ensure backend")
+           (:label "Restart"   :command my/language-server-manager-restart   :help "Restart server")
+           (:label "Shutdown"  :command my/language-server-manager-shutdown  :help "Shutdown server")
+           (:label "Log"       :command my/language-server-manager-open-log  :help "Open log")
+           (:label "Session"   :command my/language-server-manager-describe-session :help "Session info")
+           (:label "Config"    :command my/language-server-manager-show-workspace-configuration
+                   :help "Workspace config")
+           (:label "Actions"   :command my/language-server-manager-code-actions   :help "Code actions")
+           (:label "Format"    :command my/language-server-manager-format-buffer  :help "Format buffer")
+           (:label "Rename"    :command my/language-server-manager-rename         :help "Rename symbol")))
         (insert "\n\n"))
-    (insert "No source buffer.\n\n")))
+    (aaron-ui-board-insert-empty "No source buffer.")))
 
 (defun my/language-server-manager--insert-routing-section ()
   "Insert explicit `lsp-mode' routing overrides."
   (my/language-server-manager--assert-view-buffer)
-  (insert "Explicit lsp-mode Routes\n")
-  (insert "------------------------\n")
-  (insert "Default behavior: `prog-mode' buffers prefer Eglot unless a mode is explicitly routed to `lsp-mode`.\n\n")
   (let ((entries (my/language-server-lsp-mode-preference-entries)))
+    (aaron-ui-board-insert-section "Explicit lsp-mode Routes" (length entries))
     (if entries
         (dolist (entry entries)
           (let* ((mode (plist-get entry :mode))
@@ -875,40 +813,34 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
                  (current (with-current-buffer (my/language-server--source-buffer)
                             (derived-mode-p mode)))
                  (start (point)))
-            (insert (format "%-18s backend=lsp-mode feature=%-12s status=%s%s\n"
-                            mode
-                            (or feature "-")
-                            status
-                            (if current " current=yes" "")))
-            (insert "  source: ")
-            (if source
-                (my/language-server--insert-openable-path source)
-              (insert "-"))
-            (insert "\n")
+            (aaron-ui-board-insert-field
+             (symbol-name mode)
+             (format "lsp-mode  feature=%s  %s%s"
+                     (or feature "-") status
+                     (if current "  ●current" ""))
+             (if current 'aaron-ui-board-badge-info nil))
+            (when source
+              (insert "   " (propertize "source  " 'face 'aaron-ui-board-meta))
+              (my/language-server--insert-openable-path source)
+              (insert "\n"))
             (when note
-              (insert (format "  note: %s\n" note)))
-            (insert "  actions: ")
-            (if source
-                (my/language-server--insert-button
-                 "[source]"
-                 (lambda (_button) (find-file source))
-                 "Open the file defining this route")
-              (insert "-"))
-            (insert "\n\n")
+              (insert "   " (propertize note 'face 'aaron-ui-board-detail) "\n"))
+            (when source
+              (insert "   ")
+              (aaron-ui-board-insert-action
+               "Open source" (lambda () (find-file source)) "Open the file defining this route")
+              (insert "\n"))
+            (insert "\n")
             (my/language-server-manager--set-entry-properties
              start (point)
-             (list :kind 'route
-                   :source source
-                   :mode mode))))
-      (insert "No explicit lsp-mode overrides are registered.\n\n"))))
+             (list :kind 'route :source source :mode mode))))
+      (aaron-ui-board-insert-empty "No explicit lsp-mode overrides are registered."))))
 
 (defun my/language-server-manager--insert-eglot-section ()
   "Insert locally registered Eglot server mappings."
   (my/language-server-manager--assert-view-buffer)
-  (insert "Custom Eglot Server Mappings\n")
-  (insert "----------------------------\n")
-  (insert "Built-in Eglot mappings still apply.  This section only lists local additions/overrides registered through `my/register-eglot-server-program`.\n\n")
   (let ((entries (my/language-server-eglot-program-entries)))
+    (aaron-ui-board-insert-section "Custom Eglot Server Mappings" (length entries))
     (if entries
         (dolist (entry entries)
           (let* ((modes (plist-get entry :modes))
@@ -921,43 +853,36 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
                            entry
                            (my/language-server--source-buffer)))
                  (start (point)))
-            (insert (format "%s%s\n"
-                            (my/language-server--format-mode-list modes)
-                            (if current "  current=yes" "")))
-            (insert (format "  server: %s\n" label))
-            (insert (format "  executables: %s\n"
-                            (my/language-server--executable-summary executables)))
-            (insert "  source: ")
-            (if source
-                (my/language-server--insert-openable-path source)
-              (insert "-"))
-            (insert "\n")
+            (aaron-ui-board-insert-field
+             (my/language-server--format-mode-list modes)
+             (concat label (if current "  ●current" ""))
+             (if current 'aaron-ui-board-badge-info nil))
+            (aaron-ui-board-insert-field
+             "executables"
+             (my/language-server--executable-summary executables))
+            (when source
+              (insert "   " (propertize "source  " 'face 'aaron-ui-board-meta))
+              (my/language-server--insert-openable-path source)
+              (insert "\n"))
             (when note
-              (insert (format "  note: %s\n" note)))
-            (insert "  actions: ")
-            (if source
-                (my/language-server--insert-button
-                 "[source]"
-                 (lambda (_button) (find-file source))
-                 "Open the file defining this mapping")
-              (insert "-"))
-            (insert "\n\n")
+              (insert "   " (propertize note 'face 'aaron-ui-board-detail) "\n"))
+            (when source
+              (insert "   ")
+              (aaron-ui-board-insert-action
+               "Open source" (lambda () (find-file source)) "Open the file defining this mapping")
+              (insert "\n"))
+            (insert "\n")
             (my/language-server-manager--set-entry-properties
              start (point)
-             (list :kind 'eglot
-                   :source source
-                   :modes modes))))
-      (insert "No custom Eglot mappings are registered.\n\n"))))
+             (list :kind 'eglot :source source :modes modes))))
+      (aaron-ui-board-insert-empty "No custom Eglot mappings are registered."))))
 
 (defun my/language-server-manager--insert-runtime-knobs ()
   "Insert the runtime knobs section."
   (my/language-server-manager--assert-view-buffer)
-  (insert "Runtime Knobs\n")
-  (insert "-------------\n")
+  (aaron-ui-board-insert-section "Runtime Knobs")
   (dolist (entry (my/language-server--runtime-knob-entries))
-    (insert (format "%-28s %s\n"
-                    (car entry)
-                    (or (cdr entry) "-"))))
+    (aaron-ui-board-insert-field (car entry) (format "%s" (or (cdr entry) "-"))))
   (insert "\n"))
 
 (defun my/language-server-manager-refresh ()
@@ -965,46 +890,44 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
   (interactive)
   (my/language-server-manager--assert-view-buffer)
   (let ((inhibit-read-only t))
-    (erase-buffer)
-    (insert "Language Server Hub\n")
-    (insert "===================\n\n")
-    (insert "Keys: g refresh, e ensure, r restart, k shutdown, l log, s session, c config, o organize imports, a code actions, f format, R rename, p problems, P project problems, d diagnostics ui, m diagnostics menu, A autoreconnect, S autoshutdown, L log-io, I inlay hints, M output max, E events buffer, D doctor, O docs, ? dispatch, RET context action, q quit\n\n")
-    (my/language-server-manager-insert-maintenance-section)
-    (run-hooks 'my/language-server-manager-extra-section-functions)
-    (my/language-server-manager--insert-current-buffer-section)
-    (my/language-server-manager--insert-settings-section)
-    (my/language-server-manager--insert-routing-section)
-    (my/language-server-manager--insert-eglot-section)
-    (my/language-server-manager--insert-runtime-knobs)
-    (goto-char (point-min))))
+    (aaron-ui-board-render
+     (lambda ()
+       (aaron-ui-board-insert-page-header
+        "Language Server Hub"
+        :icon 'server
+        :actions '((:label "Doctor"   :command my/language-server-doctor   :help "Doctor report")
+                   (:label "Dispatch" :command my/language-server-dispatch :help "Transient menu" :primary t)
+                   (:label "Docs"     :command my/language-server-manager-open-docs :help "Workflow docs")))
+       (my/language-server-manager-insert-maintenance-section)
+       (run-hooks 'my/language-server-manager-extra-section-functions)
+       (my/language-server-manager--insert-current-buffer-section)
+       (my/language-server-manager--insert-settings-section)
+       (my/language-server-manager--insert-routing-section)
+       (my/language-server-manager--insert-eglot-section)
+       (my/language-server-manager--insert-runtime-knobs)
+       (aaron-ui-board-insert-key-hints
+        "Keys: g refresh  e ensure  r restart  k shutdown  l log  s session  c config  o imports  a actions  f format  R rename  p problems  D doctor  q quit")))))
 
 (defun my/language-server--doctor-insert-libraries ()
   "Insert the library availability section."
   (my/language-server-doctor--assert-view-buffer)
-  (insert "Libraries\n")
-  (insert "---------\n")
-  (dolist (library '("eglot"
-                     "lsp-mode"
-                     "company"
-                     "company-box"
-                     "company-prescient"
-                     "flymake-diagnostic-at-point"
-                     "eldoc-box"
-                     "breadcrumb"
-                     "dape"))
+  (aaron-ui-board-insert-section "Libraries")
+  (dolist (library '("eglot" "lsp-mode" "company" "company-box"
+                     "company-prescient" "flymake-diagnostic-at-point"
+                     "eldoc-box" "breadcrumb" "dape"))
     (let ((path (my/language-server--library-path library)))
-      (insert (format "%-28s " library))
       (if path
-          (my/language-server--insert-openable-path path)
-        (insert "MISSING"))
-      (insert "\n")))
+          (progn
+            (insert "   "
+                    (propertize (format "%-24s" library) 'face 'aaron-ui-board-meta))
+            (my/language-server--insert-openable-path path)
+            (insert "\n"))
+        (aaron-ui-board-insert-field library "MISSING" 'aaron-ui-board-bad))))
   (insert "\n"))
 
 (defun my/language-server--doctor-insert-executables ()
   "Insert the executable availability section."
   (my/language-server-doctor--assert-view-buffer)
-  (insert "Executables\n")
-  (insert "-----------\n")
   (let ((names (delete-dups
                 (apply #'append
                        (delq nil
@@ -1012,83 +935,90 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
                                        (copy-sequence
                                         (plist-get entry :executables)))
                                      (my/language-server-eglot-program-entries)))))))
+    (aaron-ui-board-insert-section "Executables" (length names))
     (if names
         (dolist (name names)
           (let ((report (my/language-server--executable-report name)))
-            (insert (format "%-28s " (plist-get report :name)))
             (if-let* ((path (plist-get report :path)))
-                (my/language-server--insert-openable-path path)
-              (insert "MISSING"))
-            (insert "\n")))
-      (insert "No custom server executables are registered.\n"))
+                (progn
+                  (insert "   "
+                          (propertize (format "%-24s" (plist-get report :name))
+                                      'face 'aaron-ui-board-meta))
+                  (my/language-server--insert-openable-path path)
+                  (insert "\n"))
+              (aaron-ui-board-insert-field name "MISSING" 'aaron-ui-board-bad))))
+      (aaron-ui-board-insert-empty "No custom server executables are registered."))
     (insert "\n")))
 
 (defun my/language-server--doctor-insert-current-buffer (source)
   "Insert a current-buffer report for SOURCE."
   (my/language-server-doctor--assert-view-buffer)
-  (insert "Current Buffer\n")
-  (insert "--------------\n")
+  (aaron-ui-board-insert-section "Current Buffer")
   (if-let* ((status (my/language-server--source-status source)))
       (progn
-        (insert (format "buffer: %s\n" (plist-get status :buffer)))
-        (insert (format "file: %s\n" (plist-get status :file)))
-        (insert (format "major mode: %s\n" (plist-get status :major-mode)))
-        (insert (format "default-directory: %s\n"
-                        (plist-get status :default-directory)))
-        (insert (format "project root: %s\n" (plist-get status :project-root)))
-        (insert (format "route policy: %s\n" (plist-get status :policy)))
-        (insert (format "active backend: %s\n"
-                        (plist-get status :active-backend)))
-        (insert (format "required lsp feature: %s (%s)\n"
-                        (plist-get status :required-feature)
-                        (plist-get status :feature-status)))
-        (insert (format "matching custom eglot mapping: %s\n"
-                        (plist-get status :eglot-match)))
-        (insert (format "flymake/company/breadcrumb: %s / %s / %s\n"
-                        (plist-get status :flymake)
-                        (plist-get status :company)
-                        (plist-get status :breadcrumb)))
-        (insert (format "local eglot workspace config: %s\n"
-                        (if (plist-get status :workspace-set)
-                            "set"
-                          "unset")))
+        (aaron-ui-board-insert-field "buffer"      (plist-get status :buffer))
+        (aaron-ui-board-insert-field "file"        (plist-get status :file))
+        (aaron-ui-board-insert-field "major mode"  (format "%s" (plist-get status :major-mode)))
+        (aaron-ui-board-insert-field "directory"   (plist-get status :default-directory))
+        (aaron-ui-board-insert-field "project root" (plist-get status :project-root))
+        (aaron-ui-board-insert-field "route policy" (plist-get status :policy))
+        (aaron-ui-board-insert-field "active backend" (format "%s" (plist-get status :active-backend)))
+        (aaron-ui-board-insert-field
+         "lsp feature"
+         (format "%s (%s)" (plist-get status :required-feature) (plist-get status :feature-status)))
+        (aaron-ui-board-insert-field "eglot mapping"   (plist-get status :eglot-match))
+        (aaron-ui-board-insert-field
+         "flymake/company"
+         (format "%s / %s / %s"
+                 (plist-get status :flymake)
+                 (plist-get status :company)
+                 (plist-get status :breadcrumb)))
+        (aaron-ui-board-insert-field
+         "workspace config"
+         (if (plist-get status :workspace-set) "set" "unset"))
         (when-let* ((workspace (plist-get status :workspace)))
-          (insert workspace)
-          (insert "\n")))
-    (insert "No source buffer.\n"))
+          (insert "   "
+                  (propertize workspace 'face 'aaron-ui-board-path)
+                  "\n")))
+    (aaron-ui-board-insert-empty "No source buffer."))
   (insert "\n"))
 
 (defun my/language-server--doctor-insert-routing ()
   "Insert routing and mapping summaries."
   (my/language-server-doctor--assert-view-buffer)
-  (insert "Routing Summary\n")
-  (insert "---------------\n")
-  (insert (format "explicit lsp-mode routes: %d\n"
-                  (length (my/language-server-lsp-mode-preference-entries))))
-  (dolist (entry (my/language-server-lsp-mode-preference-entries))
-    (insert (format "  %-18s feature=%-12s status=%s\n"
-                    (plist-get entry :mode)
-                    (or (plist-get entry :feature) "-")
-                    (my/language-server--feature-status
-                     (plist-get entry :feature)))))
-  (insert (format "custom eglot mappings: %d\n"
-                  (length (my/language-server-eglot-program-entries))))
-  (dolist (entry (my/language-server-eglot-program-entries))
-    (insert (format "  %-36s executables=%s\n"
-                    (my/language-server--format-mode-list (plist-get entry :modes))
-                    (my/language-server--executable-summary
-                     (plist-get entry :executables)))))
-  (insert "\n"))
+  (let ((lsp-entries (my/language-server-lsp-mode-preference-entries))
+        (eglot-entries (my/language-server-eglot-program-entries)))
+    (aaron-ui-board-insert-section
+     "Routing Summary"
+     (+ (length lsp-entries) (length eglot-entries)))
+    (aaron-ui-board-insert-field "lsp-mode routes"  (number-to-string (length lsp-entries)))
+    (dolist (entry lsp-entries)
+      (insert "   "
+              (propertize (format "  %-18s " (plist-get entry :mode)) 'face 'aaron-ui-board-detail)
+              (propertize (format "feature=%-12s status=%s"
+                                  (or (plist-get entry :feature) "-")
+                                  (my/language-server--feature-status (plist-get entry :feature)))
+                          'face 'aaron-ui-board-meta)
+              "\n"))
+    (aaron-ui-board-insert-field "eglot mappings" (number-to-string (length eglot-entries)))
+    (dolist (entry eglot-entries)
+      (insert "   "
+              (propertize (format "  %-36s " (my/language-server--format-mode-list
+                                              (plist-get entry :modes)))
+                          'face 'aaron-ui-board-detail)
+              (propertize (format "executables=%s"
+                                  (my/language-server--executable-summary
+                                   (plist-get entry :executables)))
+                          'face 'aaron-ui-board-meta)
+              "\n"))
+    (insert "\n")))
 
 (defun my/language-server--doctor-insert-runtime-knobs ()
   "Insert runtime knob values."
   (my/language-server-doctor--assert-view-buffer)
-  (insert "Runtime Knobs\n")
-  (insert "-------------\n")
+  (aaron-ui-board-insert-section "Runtime Knobs")
   (dolist (entry (my/language-server--runtime-knob-entries))
-    (insert (format "%-28s %s\n"
-                    (car entry)
-                    (or (cdr entry) "-"))))
+    (aaron-ui-board-insert-field (car entry) (format "%s" (or (cdr entry) "-"))))
   (insert "\n"))
 
 (defun my/language-server-doctor-refresh ()
@@ -1097,15 +1027,20 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
   (my/language-server-doctor--assert-view-buffer)
   (let ((source (my/language-server--source-buffer))
         (inhibit-read-only t))
-    (erase-buffer)
-    (insert "Language Server Doctor\n")
-    (insert "======================\n\n")
-    (my/language-server--doctor-insert-libraries)
-    (my/language-server--doctor-insert-executables)
-    (my/language-server--doctor-insert-current-buffer source)
-    (my/language-server--doctor-insert-routing)
-    (my/language-server--doctor-insert-runtime-knobs)
-    (goto-char (point-min))))
+    (aaron-ui-board-render
+     (lambda ()
+       (aaron-ui-board-insert-page-header
+        "Language Server Doctor"
+        :icon 'diagnostics
+        :actions '((:label "Hub"      :command my/language-server-manager  :help "Open Hub"  :primary t)
+                   (:label "Dispatch" :command my/language-server-dispatch :help "Transient menu")))
+       (my/language-server--doctor-insert-libraries)
+       (my/language-server--doctor-insert-executables)
+       (my/language-server--doctor-insert-current-buffer source)
+       (my/language-server--doctor-insert-routing)
+       (my/language-server--doctor-insert-runtime-knobs)
+       (aaron-ui-board-insert-key-hints
+        "Keys: g refresh  h hub  e ensure  r restart  k shutdown  l log  s session  D doctor  q quit")))))
 
 (defun my/language-server-doctor ()
   "Open a doctor report for the language-server stack."
@@ -1114,7 +1049,9 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
         (source (my/language-server--source-buffer)))
     (with-current-buffer buffer
       (my/language-server-doctor-mode)
+      (aaron-ui-board-set-header "Language Server Doctor" 'diagnostics)
       (setq-local my/language-server-manager-source-buffer source)
+      (setq-local aaron-ui-board-refresh-function #'my/language-server-doctor-refresh)
       (my/language-server--watch-source-buffer source)
       (let ((inhibit-read-only t))
         (use-local-map (copy-keymap special-mode-map))
@@ -1176,7 +1113,9 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
         (source (my/language-server--source-buffer)))
     (with-current-buffer buffer
       (my/language-server-manager-mode)
+      (aaron-ui-board-set-header "Language Server Hub" 'server)
       (setq-local my/language-server-manager-source-buffer source)
+      (setq-local aaron-ui-board-refresh-function #'my/language-server-manager-refresh)
       (my/language-server--watch-source-buffer source)
       (let ((inhibit-read-only t))
         (use-local-map (copy-keymap special-mode-map))
