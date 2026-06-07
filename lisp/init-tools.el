@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'aaron-ui-transient)
+
 (declare-function my/browse-url "init-browser" (url &optional new-window))
 
 ;; Tips for next keystroke

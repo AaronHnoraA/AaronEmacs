@@ -465,3 +465,10 @@ Typst 模板集中在 [templates/typst/](../templates/typst/)。当前 assignmen
 ```
 
 完整 API 见 [dev-guide.md](dev-guide.md) §10。
+
+## 新建 transient dispatch 菜单
+
+直接用 `transient-define-prefix` 即可。`aaron-ui-transient` 在启动时自动将 Kanagawa
+palette 应用到所有 transient 共享 faces，**新菜单无需单独配色**。如需调整颜色，
+修改 `site-lisp/aaron-ui/aaron-ui-transient.el` 中的 `aaron-ui-transient-apply-faces`
+即可影响全部菜单。详见 [dev-guide.md](dev-guide.md) §11。

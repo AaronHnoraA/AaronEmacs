@@ -565,3 +565,15 @@ label-badge 字段行、hl-line 行高亮、styled header-line。
 - Compile Board（`init-compile.el`）
 - Diagnostics UI（`init-diagnostics-ui.el`）
 - Appine Board（`init-appine.el`）
+
+## 11. Transient 菜单 + which-key 主题（`aaron-ui-transient`）
+
+所有 `transient-define-prefix` 菜单（23+个 dispatch，包括 health、compile、git、
+lsp、project 等）和 which-key popup 通过 `site-lisp/aaron-ui/aaron-ui-transient.el`
+统一配色，**无需对每个 dispatch 单独修改**。
+
+- heading = accent-cyan bold；key = accent-cyan；stay = accent-green；
+  exit = accent-mauve；return = accent-yellow；noop/inactive = fg-faint
+- 新增 dispatch 自动继承，不需要任何额外设置
+- 配置入口：`lisp/init-tools.el` → `(require 'aaron-ui-transient)`
+- 主题切换后自动重新应用（`after-load-theme-hook` + signature guard）
