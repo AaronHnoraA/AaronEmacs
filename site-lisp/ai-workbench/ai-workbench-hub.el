@@ -3,8 +3,12 @@
 ;;; Commentary:
 ;;
 ;; A management dashboard for the ai-workbench system using the aaron-ui-board
-;; toolkit.  Shows project state, CLI engine status, configured HTTP chat
-;; models, and provides actions for all lifecycle operations.
+;; toolkit.  Shows registered CLI agent backends (CC, Codex, OpenCode) and
+;; provides actions for lifecycle, profile, and session management.
+;;
+;; HTTP model backends have been removed.  CLI agents are the only backends.
+;; Use `ai-workbench' (C-c A W) to pick and open an interactive vterm session,
+;; or `ai-workbench-chat' (C-c g) to open a ai-workbench chat buffer for one-shot use.
 
 ;;; Code:
 
@@ -29,8 +33,7 @@
 (declare-function ai-workbench-claude-session-live-p   "ai-workbench-adapter-claude"   (&optional project-root))
 (declare-function ai-workbench-codex-session-live-p    "ai-workbench-adapter-codex"    (&optional project-root))
 (declare-function ai-workbench-opencode-session-live-p "ai-workbench-adapter-opencode" (&optional project-root))
-(declare-function ai-workbench-chat-register-backends  "ai-workbench-chat" ())
-(declare-function ai-workbench-chat-backend-names      "ai-workbench-chat" ())
+(declare-function ai-workbench-engine-cli-activate-backend "ai-workbench-engine-cli" (tool-id))
 
 (defconst ai-workbench-hub-buffer-name "*AI Workbench Hub*"
   "Buffer name for the ai-workbench management hub.")
@@ -50,7 +53,6 @@
     (define-key map (kbd "r") #'ai-workbench-hub-open-result)
     (define-key map (kbd "x") #'ai-workbench-hub-stop)
     (define-key map (kbd "k") #'ai-workbench-hub-kill)
-    (define-key map (kbd "c") #'ai-workbench-hub-reload-chat-backends)
     (define-key map (kbd "q") #'quit-window)
     map)
   "Keymap for `ai-workbench-hub-mode'.")
@@ -83,10 +85,6 @@
     ('codex    "Codex CLI")
     ('opencode "OpenCode")
     (_ (format "%s" backend))))
-
-(defun ai-workbench-hub--cli-icon (_backend)
-  "Return the icon kind for all CLI backends."
-  'terminal)
 
 ;; ── Actions ───────────────────────────────────────────────────────────────────
 
@@ -176,14 +174,6 @@
     (call-interactively #'ai-workbench-kill)
     (ai-workbench-hub-refresh)))
 
-(defun ai-workbench-hub-reload-chat-backends ()
-  "Reload HTTP chat backend configuration from JSON."
-  (interactive)
-  (when (fboundp 'ai-workbench-chat-register-backends)
-    (ai-workbench-chat-register-backends)
-    (message "Chat backends reloaded from JSON"))
-  (ai-workbench-hub-refresh))
-
 ;; ── Render helpers ────────────────────────────────────────────────────────────
 
 (defun ai-workbench-hub--render-section-overview (project-root)
@@ -198,14 +188,11 @@
                   ('claude   "CC – Claude Code")
                   ('codex    "Codex CLI")
                   ('opencode "OpenCode")
-                  ('chat
-                   (format "Chat: %s"
-                           (or (ai-workbench-session-chat-backend project-root)
-                               "HTTP")))
+                  ('chat     "Chat (engine frontend)")
                   (_ (symbol-name backend)))))
     (aaron-ui-board-insert-field "Active Backend" label))
   (let ((profile (ai-workbench-session-profile project-root)))
-    (aaron-ui-board-insert-field "Profile" profile))
+    (aaron-ui-board-insert-field "Profile" (or profile "default")))
   (aaron-ui-board-insert-field
    "Initialized"
    (if (ai-workbench-session-initialized-p project-root) "yes" "no"))
@@ -224,11 +211,10 @@
     (let* ((live   (ai-workbench-hub--cli-session-live-p backend project-root))
            (tone   (ai-workbench-hub--backend-tone live))
            (label  (ai-workbench-hub--cli-label backend))
-           (icon   (ai-workbench-hub--cli-icon backend))
            (active (eq backend (ai-workbench-session-backend project-root))))
       (aaron-ui-board-insert-row
        :id backend
-       :icon icon
+       :icon 'terminal
        :badge (if live "live" "idle")
        :badge-tone tone
        :title (if active (concat label "  ●active") label)
@@ -237,40 +223,14 @@
        :action (lambda (_)
                  (let ((default-directory project-root))
                    (ai-workbench-session-set-backend backend)
-                   (ai-workbench-open)
-                   (ai-workbench-open-backend-buffer)
+                   (ai-workbench-session-set-initialized t project-root)
+                   ;; Sync the engine's ai-workbench-backend var and persist.
+                   (when (fboundp 'ai-workbench-engine-cli-activate-backend)
+                     (ai-workbench-engine-cli-activate-backend backend))
+                   (message "ai-workbench default backend: %s" label)
                    (ai-workbench-hub-refresh)))
-       :help (format "RET: switch to %s and open buffer" label))))
+       :help (format "RET: set default backend to %s" label))))
   (insert "\n"))
-
-(defun ai-workbench-hub--render-section-chat-models (project-root)
-  "Render the configured HTTP chat models when available."
-  (when (fboundp 'ai-workbench-chat-backend-names)
-    (let ((names (ai-workbench-chat-backend-names))
-          (active-model (when (eq (ai-workbench-session-backend project-root) 'chat)
-                          (ai-workbench-session-chat-backend project-root))))
-      (aaron-ui-board-insert-section "Chat Models (HTTP)" (length names))
-      (if names
-          (dolist (name names)
-            (let ((active (and active-model (equal name active-model))))
-              (aaron-ui-board-insert-row
-               :id (intern name)
-               :icon 'gear
-               :badge (if active "active" nil)
-               :badge-tone (if active 'info 'muted)
-               :title (if active (concat name "  ●active") name)
-               :title-face (if active 'aaron-ui-board-badge-info nil)
-               :action (lambda (_)
-                         (let ((default-directory project-root))
-                           (ai-workbench-session-set-backend 'chat)
-                           (ai-workbench-session-set-chat-backend name project-root)
-                           (ai-workbench-session-reset-profile-injected project-root)
-                           (ai-workbench-open)
-                           (ai-workbench-hub-refresh)))
-               :help (format "RET: switch to %s (HTTP)" name))))
-        (aaron-ui-board-insert-empty "No chat models configured.
-  Add entries to etc/ai-workbench/backends.json"))
-      (insert "\n"))))
 
 (defun ai-workbench-hub--render-section-profiles (project-root)
   "Render the profile management section for PROJECT-ROOT."
@@ -300,9 +260,9 @@
   (aaron-ui-board-insert-section "Actions")
   (aaron-ui-board-insert-actions
    `((:label "Open Backend" :command ai-workbench-hub-open-backend-buffer
-      :help "Open the active backend buffer" :primary t)
+      :help "Launch & open the default backend's session" :primary t)
      (:label "Cycle" :command ai-workbench-hub-cycle-backend
-      :help "Switch to the next backend")
+      :help "Cycle default backend: cc → codex → opencode")
      (:label "Stop" :command ai-workbench-hub-stop
       :help "Stop the active backend run")
      (:label "Kill" :command ai-workbench-hub-kill
@@ -321,9 +281,7 @@
       :help "Edit a prompt template")))
   (insert "\n")
   (aaron-ui-board-insert-actions
-   `((:label "Reload Chat Backends" :command ai-workbench-hub-reload-chat-backends
-      :help "Reload HTTP chat backends from JSON config")
-     (:label "Output Log" :command ai-workbench-hub-open-output
+   `((:label "Output Log" :command ai-workbench-hub-open-output
       :help "View the output log")
      (:label "Result" :command ai-workbench-hub-open-result
       :help "View the last result")))
@@ -344,17 +302,16 @@
         "AI Workbench Hub"
         :icon 'management
         :subtitle (format "Project: %s" (abbreviate-file-name project-root))
-        :stats '(("CLI Engines" . info) ("Chat Models" . info))
+        :stats '(("CLI Engines" . info))
         :actions '((:label "Open Backend" :command ai-workbench-hub-open-backend-buffer :primary t)
                    (:label "Cycle" :command ai-workbench-hub-cycle-backend)
                    (:label "Refresh" :command ai-workbench-hub-refresh)))
        (ai-workbench-hub--render-section-overview project-root)
        (ai-workbench-hub--render-section-cli-backends project-root)
-       (ai-workbench-hub--render-section-chat-models project-root)
        (ai-workbench-hub--render-section-profiles project-root)
        (ai-workbench-hub--render-section-actions project-root)
        (aaron-ui-board-insert-key-hints
-        "b cycle  B open  p profile  v preview  + new profile  e edit profile  s snippet  t template  o output  r result  x stop  k kill  c reload chat  g refresh  q quit")))))
+        "RET set default  b cycle  B launch open  p profile  v preview  + new profile  e edit  s snippet  t template  o output  r result  x stop  k kill  g refresh  q quit")))))
 
 (defun ai-workbench-hub ()
   "Open the ai-workbench management hub."

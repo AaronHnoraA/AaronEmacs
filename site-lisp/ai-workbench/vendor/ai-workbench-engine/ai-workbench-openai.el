@@ -1,4 +1,4 @@
-;;; gptel-openai.el ---  ChatGPT suppport for gptel  -*- lexical-binding: t; -*-
+;;; ai-workbench-openai.el ---  ChatGPT suppport for ai-workbench-engine  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2023-2026  Karthik Chikmagalur
 
@@ -19,32 +19,32 @@
 
 ;;; Commentary:
 
-;; This file adds support for the ChatGPT API to gptel
+;; This file adds support for the ChatGPT API to ai-workbench-engine
 
 ;;; Code:
 (require 'cl-generic)
 (eval-when-compile (require 'cl-lib))
 (require 'map)
-(eval-and-compile (require 'gptel-request))
+(eval-and-compile (require 'ai-workbench-request))
 
 (defvar json-object-type)
-(defvar gptel-mode)
-(declare-function gptel-context--collect-media "gptel-context")
+(defvar ai-workbench-mode)
+(declare-function ai-workbench-context--collect-media "ai-workbench-context")
 (declare-function json-read "json")
-(declare-function gptel-context--wrap "gptel-context")
+(declare-function ai-workbench-context--wrap "ai-workbench-context")
 
 ;; OpenAI Completions Backend
-(cl-defstruct (gptel-openai (:constructor gptel--make-openai)
+(cl-defstruct (ai-workbench-openai (:constructor ai-workbench--make-openai)
                             (:copier nil)
-                            (:include gptel-backend)))
+                            (:include ai-workbench-backend)))
 
 ;; OpenAI Responses Backend
-(cl-defstruct (gptel-openai-responses (:constructor gptel--make-openai-responses)
+(cl-defstruct (ai-workbench-openai-responses (:constructor ai-workbench--make-openai-responses)
                                       (:copier nil)
-                                      (:include gptel-backend)))
+                                      (:include ai-workbench-backend)))
 
 
-(defun gptel--openai-update-tokens (usage info)
+(defun ai-workbench--openai-update-tokens (usage info)
   "Update token usage information from USAGE.
 USAGE is part of the response, INFO is the request plist.
 
@@ -63,7 +63,7 @@ back to the LLM)."
       (let ((tokens (list :input (- input cached) :output output :cached cached)))
         (plist-put info :tokens tokens) ;Tokens for this turn
         (plist-put info :tokens-full    ;Tokens for full request
-                   (gptel--sum-plists (plist-get info :tokens-full) tokens))))))
+                   (ai-workbench--sum-plists (plist-get info :tokens-full) tokens))))))
 
 ;; How the following function works:
 ;;
@@ -91,7 +91,7 @@ back to the LLM)."
 ;; Finally we append any tool calls and accumulated reasoning text (from
 ;; :reasoning-chunks) to the (INFO -> :data -> :messages) list of prompts.
 
-(cl-defmethod gptel-curl--parse-stream ((_backend gptel-openai) info)
+(cl-defmethod ai-workbench-curl--parse-stream ((_backend ai-workbench-openai) info)
   "Parse an OpenAI API data stream.
 
 Return the text response accumulated since the last call to this
@@ -111,7 +111,7 @@ information if the stream contains it."
                               (args (apply #'concat (nreverse (plist-get info :partial_json))))
                               (func (plist-get (car tool-use) :function)))
                     (plist-put func :arguments args) ;Update arguments for last recorded tool
-                    (gptel--inject-prompt
+                    (ai-workbench--inject-prompt
                      (plist-get info :backend) (plist-get info :data)
                      `( :role "assistant" :content :null :tool_calls ,(vconcat tool-use) ; :refusal :null
                         ;; Return reasoning if available
@@ -123,7 +123,7 @@ information if the stream contains it."
                      for spec = (plist-get tool-call :function)
                      collect (list :id (plist-get tool-call :id)
                                    :name (plist-get spec :name)
-                                   :args (ignore-errors (gptel--json-read-string
+                                   :args (ignore-errors (ai-workbench--json-read-string
                                                          (plist-get spec :arguments))))
                      into call-specs
                      finally (plist-put info :tool-use call-specs)))
@@ -132,11 +132,11 @@ information if the stream contains it."
                                            (forward-line -1)
                                            (and (re-search-backward "^data:" nil t)
                                                 (goto-char (match-end 0))
-                                                (ignore-errors (gptel--json-read)))))
+                                                (ignore-errors (ai-workbench--json-read)))))
                               (usage (plist-get last-resp :usage)))
-                    (gptel--openai-update-tokens usage info))
+                    (ai-workbench--openai-update-tokens usage info))
                   (when (plist-member info :reasoning-chunks) (plist-put info :reasoning-chunks nil)))
-              (when-let* ((response (gptel--json-read))
+              (when-let* ((response (ai-workbench--json-read))
                           (delta (map-nested-elt response '(:choices 0 :delta))))
                 (if-let* ((content (plist-get delta :content))
                           ((not (or (eq content :null) (string-empty-p content)))))
@@ -180,7 +180,7 @@ information if the stream contains it."
       (error (goto-char (match-beginning 0))))
     (apply #'concat (nreverse content-strs))))
 
-(cl-defmethod gptel--parse-response ((_backend gptel-openai) response info)
+(cl-defmethod ai-workbench--parse-response ((_backend ai-workbench-openai) response info)
   "Parse an OpenAI (non-streaming) RESPONSE and return response text.
 
 Mutate state INFO with response metadata."
@@ -189,19 +189,19 @@ Mutate state INFO with response metadata."
          (content (plist-get message :content)))
     (plist-put info :stop-reason
                (plist-get choice0 :finish_reason))
-    (gptel--openai-update-tokens (map-nested-elt response '(:usage)) info)
+    (ai-workbench--openai-update-tokens (map-nested-elt response '(:usage)) info)
     ;; OpenAI returns either non-blank text content or a tool call, not both.
     ;; However OpenAI-compatible APIs like llama.cpp can include both (#819), so
     ;; we check for both tool calls and responses independently.
     (when-let* ((tool-calls (plist-get message :tool_calls))
                 ((not (eq tool-calls :null))))
-      (gptel--inject-prompt        ; First add the tool call to the prompts list
+      (ai-workbench--inject-prompt        ; First add the tool call to the prompts list
        (plist-get info :backend) (plist-get info :data) message)
       (cl-loop             ;Then capture the tool call data for running the tool
        for tool-call across tool-calls  ;replace ":arguments" with ":args"
        for call-spec = (copy-sequence (plist-get tool-call :function))
        do (ignore-errors (plist-put call-spec :args
-                                    (gptel--json-read-string
+                                    (ai-workbench--json-read-string
                                      (plist-get call-spec :arguments))))
        (plist-put call-spec :arguments nil)
        (plist-put call-spec :id (plist-get tool-call :id))
@@ -214,56 +214,56 @@ Mutate state INFO with response metadata."
     (when (and content (not (or (eq content :null) (string-empty-p content))))
       content)))
 
-(cl-defmethod gptel--request-data ((backend gptel-openai) prompts)
+(cl-defmethod ai-workbench--request-data ((backend ai-workbench-openai) prompts)
   "JSON encode PROMPTS for sending to ChatGPT."
-  (when gptel-system-prompt
+  (when ai-workbench-system-prompt
     (push (list :role "system"
-                :content gptel-system-prompt)
+                :content ai-workbench-system-prompt)
           prompts))
   (let ((prompts-plist
-         (list :model (gptel--model-name gptel-model)
+         (list :model (ai-workbench--model-name ai-workbench-model)
                :messages (vconcat prompts)
-               :stream (or gptel-stream :json-false))))
-    (when gptel-stream
+               :stream (or ai-workbench-stream :json-false))))
+    (when ai-workbench-stream
       (plist-put prompts-plist :stream_options '(:include_usage t)))
-    (when gptel-temperature
-      (plist-put prompts-plist :temperature gptel-temperature))
-    (when gptel-use-tools
-      (when (eq gptel-use-tools 'force)
+    (when ai-workbench-temperature
+      (plist-put prompts-plist :temperature ai-workbench-temperature))
+    (when ai-workbench-use-tools
+      (when (eq ai-workbench-use-tools 'force)
         (plist-put prompts-plist :tool_choice "required"))
-      (when gptel-tools
+      (when ai-workbench-llm-tools
         (plist-put prompts-plist :tools
-                   (gptel--parse-tools backend gptel-tools))
+                   (ai-workbench--parse-tools backend ai-workbench-llm-tools))
         (plist-put prompts-plist :parallel_tool_calls t)))
-    (when gptel-max-tokens
+    (when ai-workbench-max-tokens
       ;; HACK: The OpenAI API has deprecated max_tokens, but we still need it
       ;; for OpenAI-compatible APIs like GPT4All (#485)
-      (plist-put prompts-plist :max_tokens gptel-max-tokens))
-    (when gptel--schema
+      (plist-put prompts-plist :max_tokens ai-workbench-max-tokens))
+    (when ai-workbench--schema
       (plist-put prompts-plist
-                 :response_format (gptel--parse-schema backend gptel--schema)))
+                 :response_format (ai-workbench--parse-schema backend ai-workbench--schema)))
     ;; Merge request params with model and backend params.
-    (gptel--merge-plists
+    (ai-workbench--merge-plists
      prompts-plist
-     gptel--request-params
-     (gptel-backend-request-params gptel-backend)
-     (gptel--model-request-params  gptel-model))))
+     ai-workbench--request-params
+     (ai-workbench-backend-request-params ai-workbench-backend)
+     (ai-workbench--model-request-params  ai-workbench-model))))
 
-(cl-defmethod gptel--parse-schema ((_backend gptel-openai) schema)
+(cl-defmethod ai-workbench--parse-schema ((_backend ai-workbench-openai) schema)
   (list :type "json_schema"
         :json_schema
         (list :name (md5 (format "%s" (random)))
-              :schema (gptel--preprocess-schema
-                       (gptel--dispatch-schema-type schema))
+              :schema (ai-workbench--preprocess-schema
+                       (ai-workbench--dispatch-schema-type schema))
               :strict t)))
 
-;; NOTE: No `gptel--parse-tools' method required for gptel-openai, since this is
+;; NOTE: No `ai-workbench--parse-tools' method required for ai-workbench-openai, since this is
 ;; handled by its defgeneric implementation
 
-(cl-defmethod gptel--inject-tool-call ((_backend gptel-openai) data tool-call new-call)
+(cl-defmethod ai-workbench--inject-tool-call ((_backend ai-workbench-openai) data tool-call new-call)
   "Replace TOOL-CALL in query DATA with NEW-CALL.
 
-BACKEND is the `gptel-backend'.  See the generic function documentation
+BACKEND is the `ai-workbench-backend'.  See the generic function documentation
 for details.  This implementation handles the OpenAI-compatible
 Completions API."
   ;; FIXME: We currently assume that the tool call being modified is in the last
@@ -288,16 +288,16 @@ Completions API."
                        (vconcat (substring calls 0 index)
                                 (substring calls (1+ index)))))
         (when-let* ((args (plist-get new-call :args)))
-          (plist-put call :arguments (gptel--json-encode args)))
+          (plist-put call :arguments (ai-workbench--json-encode args)))
         (when-let* ((name (plist-get new-call :name)))
           (plist-put call :name name)))
     (display-warning
-     '(gptel tool-call)
+     '(ai-workbench-engine tool-call)
      (format "Could not inject updated tool-call arguments for tool call %s, %s"
              (plist-get tool-call :name)
              (truncate-string-to-width (prin1-to-string new-call) 50 nil nil t)))))
 
-(cl-defmethod gptel--parse-tool-results ((_backend gptel-openai) tool-use)
+(cl-defmethod ai-workbench--parse-tool-results ((_backend ai-workbench-openai) tool-use)
   "Return a prompt containing tool call results in TOOL-USE."
   ;; (declare (side-effect-free t))
   (mapcar
@@ -309,7 +309,7 @@ Completions API."
    tool-use))
 
 ;; TODO: Remove these functions (#792)
-(defun gptel--openai-format-tool-id (tool-id)
+(defun ai-workbench--openai-format-tool-id (tool-id)
   "Format TOOL-ID for OpenAI.
 
 If the ID has the format used by a different backend, use as-is."
@@ -322,16 +322,16 @@ If the ID has the format used by a different backend, use as-is."
       tool-id
     (format "call_%s" tool-id)))
 
-(defun gptel--openai-unformat-tool-id (tool-id)
+(defun ai-workbench--openai-unformat-tool-id (tool-id)
   "Return the raw tool ID for TOOL-ID."
   (or (and (string-match "call_\\(.+\\)" tool-id)
            (match-string 1 tool-id))
       tool-id))
 
-;; NOTE: No `gptel--inject-prompt' method required for gptel-openai, since this
+;; NOTE: No `ai-workbench--inject-prompt' method required for ai-workbench-openai, since this
 ;; is handled by its defgeneric implementation
 
-(cl-defmethod gptel--parse-list ((backend gptel-openai) prompt-list)
+(cl-defmethod ai-workbench--parse-list ((backend ai-workbench-openai) prompt-list)
   (if (consp (car prompt-list))
       (let ((full-prompt))              ; Advanced format, list of lists
         (dolist (entry prompt-list)
@@ -342,7 +342,7 @@ If the ID has the format used by a different backend, use as-is."
              (push (list :role "assistant" :content (or (car-safe msg) msg)) full-prompt))
             (`(tool . ,call)
              (unless (plist-get call :id)
-               (plist-put call :id (gptel--openai-format-tool-id nil)))
+               (plist-put call :id (ai-workbench--openai-format-tool-id nil)))
              (push
               (list
                :role "assistant"
@@ -352,26 +352,26 @@ If the ID has the format used by a different backend, use as-is."
                       :id (plist-get call :id)
                       :function `( :name ,(plist-get call :name)
                                    :arguments ,(decode-coding-string
-                                                (gptel--json-encode (plist-get call :args))
+                                                (ai-workbench--json-encode (plist-get call :args))
                                                 'utf-8 t)))))
               full-prompt)
-             (push (car (gptel--parse-tool-results backend (list (cdr entry)))) full-prompt))))
+             (push (car (ai-workbench--parse-tool-results backend (list (cdr entry)))) full-prompt))))
         (nreverse full-prompt))
     (cl-loop for text in prompt-list    ; Simple format, list of strings
              for role = t then (not role)
              if text collect
              (list :role (if role "user" "assistant") :content text))))
 
-(cl-defmethod gptel--parse-buffer ((backend gptel-openai) &optional max-entries)
+(cl-defmethod ai-workbench--parse-buffer ((backend ai-workbench-openai) &optional max-entries)
   (let ((prompts) (prev-pt (point)))
-    (if (or gptel-mode gptel-track-response)
+    (if (or ai-workbench-mode ai-workbench-track-response)
         (while (and (or (not max-entries) (>= max-entries 0))
                     (/= prev-pt (point-min))
                     (goto-char (previous-single-property-change
-                                (point) 'gptel nil (point-min))))
-          (pcase (get-char-property (point) 'gptel)
+                                (point) 'ai-workbench-engine nil (point-min))))
+          (pcase (get-char-property (point) 'ai-workbench-engine)
             ('response
-             (when-let* ((content (gptel--trim-prefixes
+             (when-let* ((content (ai-workbench--trim-prefixes
                                    (buffer-substring-no-properties (point) prev-pt))))
                (push (list :role "assistant" :content content) prompts)))
             (`(tool . ,id)
@@ -380,14 +380,14 @@ If the ID has the format used by a different backend, use as-is."
                    (let* ((tool-call (read (current-buffer)))
                           (name (plist-get tool-call :name))
                           (arguments (decode-coding-string
-                                      (gptel--json-encode (plist-get tool-call :args))
+                                      (ai-workbench--json-encode (plist-get tool-call :args))
                                       'utf-8 t)))
-                     (setq id (gptel--openai-format-tool-id id))
+                     (setq id (ai-workbench--openai-format-tool-id id))
                      (plist-put tool-call :id id)
                      (plist-put tool-call :result
                                 (string-trim (buffer-substring-no-properties
                                               (point) prev-pt)))
-                     (push (car (gptel--parse-tool-results backend (list tool-call)))
+                     (push (car (ai-workbench--parse-tool-results backend (list tool-call)))
                            prompts)
                      (push (list :role "assistant"
                                  :tool_calls
@@ -402,13 +402,13 @@ If the ID has the format used by a different backend, use as-is."
             ('ignore)
             ('nil
              (and max-entries (cl-decf max-entries))
-             (if gptel-track-media
-                 (when-let* ((content (gptel--openai-parse-multipart
-                                       (gptel--parse-media-links major-mode
+             (if ai-workbench-track-media
+                 (when-let* ((content (ai-workbench--openai-parse-multipart
+                                       (ai-workbench--parse-media-links major-mode
                                                                  (point) prev-pt))))
                    (when (> (length content) 0)
                      (push (list :role "user" :content content) prompts)))
-               (when-let* ((content (gptel--trim-prefixes (buffer-substring-no-properties
+               (when-let* ((content (ai-workbench--trim-prefixes (buffer-substring-no-properties
                                                            (point) prev-pt))))
                  (push (list :role "user" :content content) prompts)))))
           (setq prev-pt (point)))
@@ -418,7 +418,7 @@ If the ID has the format used by a different backend, use as-is."
     prompts))
 
 ;; TODO This could be a generic function
-(defun gptel--openai-parse-multipart (parts)
+(defun ai-workbench--openai-parse-multipart (parts)
   "Convert a multipart prompt PARTS to the OpenAI API format.
 
 The input is an alist of the form
@@ -435,18 +435,18 @@ format."
    for text = (plist-get part :text)
    for media = (plist-get part :media)
    if text do
-   (and (or (= n 1) (= n last)) (setq text (gptel--trim-prefixes text)))
+   (and (or (= n 1) (= n last)) (setq text (ai-workbench--trim-prefixes text)))
    and if text
    collect `(:type "text" :text ,text) into parts-array end
    else if media collect
    `(:type "image_url"
      :image_url (:url ,(concat "data:" (plist-get part :mime)
-                        ";base64," (gptel--base64-encode media))))
+                        ";base64," (ai-workbench--base64-encode media))))
    into parts-array
    else if (plist-get part :textfile) collect
    `(:type "text"
      :text ,(with-temp-buffer
-              (gptel--insert-file-string (plist-get part :textfile))
+              (ai-workbench--insert-file-string (plist-get part :textfile))
               (buffer-string)))
    into parts-array end and
    if (plist-get part :url)
@@ -456,21 +456,21 @@ format."
    into parts-array
    finally return (vconcat parts-array)))
 
-(cl-defmethod gptel--inject-media ((_backend gptel-openai) prompts)
+(cl-defmethod ai-workbench--inject-media ((_backend ai-workbench-openai) prompts)
   "Wrap the first user prompt in PROMPTS with included media files.
 
-Media files, if present, are placed in `gptel-context'."
-  (when-let* ((media-list (gptel-context--collect-media)))
+Media files, if present, are placed in `ai-workbench-context'."
+  (when-let* ((media-list (ai-workbench-context--collect-media)))
     (cl-callf (lambda (current)
                 (vconcat
-                 (gptel--openai-parse-multipart media-list)
+                 (ai-workbench--openai-parse-multipart media-list)
                  (cl-typecase current
                    (string `((:type "text" :text ,current)))
                    (vector current)
                    (t current))))
         (plist-get (car prompts) :content))))
 
-(defconst gptel--openai-models
+(defconst ai-workbench--openai-models
   '((gpt-5.4-mini
      :description "Faster, more cost-efficient version of GPT-5.4"
      :capabilities (media tool-use json url responses-api)
@@ -704,17 +704,17 @@ sources:
 - <https://platform.openai.com/docs/models>")
 
 ;;;###autoload
-(cl-defun gptel-make-openai
-    (name &key curl-args (models gptel--openai-models)
+(cl-defun ai-workbench-make-openai
+    (name &key curl-args (models ai-workbench--openai-models)
           stream key request-params
           (header
            (lambda (_info)
-             (when-let* ((key (gptel--get-api-key)))
+             (when-let* ((key (ai-workbench--get-api-key)))
                `(("Authorization" . ,(concat "Bearer " key))))))
           (host "api.openai.com")
           (protocol "https")
           endpoint)
-  "Register an OpenAI API-compatible backend for gptel with NAME.
+  "Register an OpenAI API-compatible backend for ai-workbench-engine with NAME.
 
 Keyword arguments:
 
@@ -730,7 +730,7 @@ information, in the form
  (model-name . plist)
 
 For a list of currently recognized plist keys, see
-`gptel--openai-models'.  An example of a model specification
+`ai-workbench--openai-models'.  An example of a model specification
 including both kinds of specs:
 
 :models
@@ -761,7 +761,7 @@ function that returns the key.
 
 REQUEST-PARAMS (optional) is a plist of additional HTTP request
 parameters (as plist keys) and values supported by the API.  Use
-these to set parameters that gptel does not provide user options
+these to set parameters that ai-workbench-engine does not provide user options
 for."
   (declare (indent 1))
   (let* ((responses-api (string-match-p "api\\.openai\\.com" host))
@@ -770,9 +770,9 @@ for."
          ;; reliable.  For example, it won't work when using the Responses API
          ;; via a proxy.
          (constructor (if (not responses-api)
-                          #'gptel--make-openai
-                        (require 'gptel-openai-responses)
-                        #'gptel--make-openai-responses))
+                          #'ai-workbench--make-openai
+                        (require 'ai-workbench-openai-responses)
+                        #'ai-workbench--make-openai-responses))
          (endpoint (or endpoint
                        (if responses-api "/v1/responses"  "/v1/chat/completions")))
          (backend (funcall constructor
@@ -781,7 +781,7 @@ for."
                            :host host
                            :header header
                            :key key
-                           :models (gptel--process-models models)
+                           :models (ai-workbench--process-models models)
                            :protocol protocol
                            :endpoint endpoint
                            :stream stream
@@ -790,19 +790,19 @@ for."
                                     (concat protocol "://" host endpoint)
                                   (concat host endpoint)))))
     (prog1 backend
-      (setf (alist-get name gptel--known-backends
+      (setf (alist-get name ai-workbench--known-backends
                        nil nil #'equal)
                   backend))))
 
 ;;; Azure
 ;;;###autoload
-(cl-defun gptel-make-azure
+(cl-defun ai-workbench-make-azure
     (name &key curl-args host
           (protocol "https")
-          (header (lambda (_info) `(("api-key" . ,(gptel--get-api-key)))))
-          (key 'gptel-api-key)
+          (header (lambda (_info) `(("api-key" . ,(ai-workbench--get-api-key)))))
+          (key 'ai-workbench-api-key)
           models stream endpoint request-params)
-  "Register an Azure backend for gptel with NAME.
+  "Register an Azure backend for ai-workbench-engine with NAME.
 
 Keyword arguments:
 
@@ -829,13 +829,13 @@ function that returns the key.
 
 REQUEST-PARAMS (optional) is a plist of additional HTTP request
 parameters (as plist keys) and values supported by the API.  Use
-these to set parameters that gptel does not provide user options
+these to set parameters that ai-workbench-engine does not provide user options
 for.
 
 Example:
 -------
 
- (gptel-make-azure
+ (ai-workbench-make-azure
   \"Azure-1\"
   :protocol \"https\"
   :host \"RESOURCE_NAME.openai.azure.com\"
@@ -844,13 +844,13 @@ Example:
   :stream t
   :models \\='(gpt-3.5-turbo gpt-4))"
   (declare (indent 1))
-  (let ((backend (gptel--make-openai
+  (let ((backend (ai-workbench--make-openai
                   :curl-args curl-args
                   :name name
                   :host host
                   :header header
                   :key key
-                  :models (gptel--process-models models)
+                  :models (ai-workbench--process-models models)
                   :protocol protocol
                   :endpoint endpoint
                   :stream stream
@@ -859,14 +859,14 @@ Example:
                            (concat protocol "://" host endpoint)
                          (concat host endpoint)))))
     (prog1 backend
-      (setf (alist-get name gptel--known-backends
+      (setf (alist-get name ai-workbench--known-backends
                        nil nil #'equal)
             backend))))
 
 ;; GPT4All
 ;;;###autoload
-(defalias 'gptel-make-gpt4all 'gptel-make-openai
-  "Register a GPT4All backend for gptel with NAME.
+(defalias 'ai-workbench-make-gpt4all 'ai-workbench-make-openai
+  "Register a GPT4All backend for ai-workbench-engine with NAME.
 
 Keyword arguments:
 
@@ -895,20 +895,20 @@ local models like GPT4All.
 
 REQUEST-PARAMS (optional) is a plist of additional HTTP request
 parameters (as plist keys) and values supported by the API.  Use
-these to set parameters that gptel does not provide user options
+these to set parameters that ai-workbench-engine does not provide user options
 for.
 
 Example:
 -------
 
-(gptel-make-gpt4all
+(ai-workbench-make-gpt4all
  \"GPT4All\"
  :protocol \"http\"
  :host \"localhost:4891\"
  :models \\='(mistral-7b-openorca.Q4_0.gguf))")
 
-(provide 'gptel-openai)
-;;; gptel-openai.el ends here
+(provide 'ai-workbench-openai)
+;;; ai-workbench-openai.el ends here
 
 ;; Local Variables:
 ;; byte-compile-warnings: (not docstrings)

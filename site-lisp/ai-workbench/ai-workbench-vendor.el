@@ -18,7 +18,7 @@
   "Directory holding vendored upstream packages.")
 
 (defconst ai-workbench--vendored-packages
-  '(claude-code-ide codex-cli gptel)
+  '(claude-code-ide codex-cli ai-workbench-engine)
   "Packages currently vendored under ai-workbench.")
 
 (defun ai-workbench-vendor-package-directory (package)

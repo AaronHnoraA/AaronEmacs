@@ -3,14 +3,20 @@
 ;;; Commentary:
 ;;
 ;; Unified entry points for AI coding and chat sessions.
-;; Engines: CLI tools (claude/CC, codex, opencode) + HTTP chat models via gptel.
-;; gptel is the HTTP integration layer, not a user-visible engine name.
+;; Backends: CLI tools (cc/Claude Code, codex, opencode) for interactive vterm
+;; sessions, plus `chat' which opens an engine chat buffer backed by the same
+;; CLI agents via one-shot exec.
+;;
+;; HTTP model backends have been removed.  All AI execution goes through CLI
+;; agents.  ai-workbench-engine is the Emacs-native frontend (buffer / HCI), not as
+;; an HTTP client.
 
 ;;; Code:
 
 (require 'subr-x)
 (require 'ai-workbench-vendor)
 (require 'ai-workbench-session)
+(require 'ai-workbench-answer)
 (require 'ai-workbench-output)
 (require 'ai-workbench-result)
 (require 'ai-workbench-profile)
@@ -49,56 +55,28 @@
   :type 'boolean
   :group 'ai-workbench)
 
-;; ── Picker labels ─────────────────────────────────────────────────────────────
+;; ── Backend selection ─────────────────────────────────────────────────────────
+;; `ai-workbench' is the interactive vterm agent launcher.  Its picker offers
+;; the three CLI engines (CC, Codex, OpenCode); selecting one opens that tool's
+;; interactive vterm session.  Use `ai-workbench-chat' (`C-c g') to open a
+;; engine buffer for one-shot exec queries instead.
 
 (defconst ai-workbench--cli-candidates
-  '(("Codex (CLI)"              . codex)
-    ("CC – Claude Code (CLI)"   . claude)
+  '(("CC – Claude Code (CLI)"   . claude)
+    ("Codex (CLI)"              . codex)
     ("OpenCode (CLI)"           . opencode))
-  "Fixed alist mapping display strings to CLI engine backend symbols.")
+  "CLI engine entries for the ai-workbench picker.
+Selecting one opens the corresponding vterm session.")
 
-(defun ai-workbench--backend-candidates ()
-  "Return an alist of display-string → (backend-symbol . chat-model-name-or-nil).
-CLI engines are listed first, then registered HTTP chat models."
-  (let ((cli (mapcar (lambda (e) (cons (car e) (cons (cdr e) nil)))
-                     ai-workbench--cli-candidates))
-        (http (when (fboundp 'ai-workbench-chat-backend-names)
-                (mapcar (lambda (n) (cons n (cons 'chat n)))
-                        (ai-workbench-chat-backend-names)))))
-    (append cli http)))
-
-(defun ai-workbench--backend-to-display (backend &optional project-root)
-  "Return the display string for BACKEND as shown in the picker."
-  (pcase backend
-    ('codex    "Codex (CLI)")
-    ('claude   "CC – Claude Code (CLI)")
-    ('opencode "OpenCode (CLI)")
-    ('chat
-     (or (ai-workbench-session-chat-backend project-root) "Chat (HTTP)"))
-    (_ (symbol-name backend))))
-
-;; ── Backend selection ─────────────────────────────────────────────────────────
-
-(defun ai-workbench--select-backend (project-root)
-  "Prompt the user to select an engine for PROJECT-ROOT.
-Returns the backend symbol; also sets :chat-backend in the session as a
-side effect when an HTTP model is selected."
-  (let* ((candidates (ai-workbench--backend-candidates))
-         (default-str (ai-workbench--backend-to-display
-                       (ai-workbench-session-backend project-root)
-                       project-root))
-         (chosen (completing-read
-                  "AI engine: "
-                  (mapcar #'car candidates)
-                  nil t nil nil default-str))
-         (entry (assoc chosen candidates)))
-    (when entry
-      (let* ((val       (cdr entry))
-             (backend   (car val))
-             (chat-name (cdr val)))
-        (when (and (eq backend 'chat) (stringp chat-name))
-          (ai-workbench-session-set-chat-backend chat-name project-root))
-        backend))))
+(defun ai-workbench--select-backend (_project-root)
+  "Prompt for a CLI vterm engine (CC, Codex, OpenCode) and return its symbol.
+This command launches interactive terminal agents only.  HTTP chat
+models are managed separately via the Hub and `C-c g')."
+  (let* ((cli-names (mapcar #'car ai-workbench--cli-candidates))
+         (current-backend (ai-workbench-session-backend))
+         (default (car (rassq current-backend ai-workbench--cli-candidates)))
+         (chosen (completing-read "AI engine: " cli-names nil t nil nil default)))
+    (cdr (assoc chosen ai-workbench--cli-candidates))))
 
 (defun ai-workbench--ensure-initialized (project-root)
   "Ensure PROJECT-ROOT has an initialized ai-workbench session."
@@ -225,14 +203,13 @@ side effect when an HTTP model is selected."
 (defalias 'ai-workbench #'ai-workbench-open)
 
 (defun ai-workbench-cycle-backend ()
-  "Cycle the current project backend: claude → codex → opencode → chat → claude."
+  "Cycle the current project vterm engine: claude → codex → opencode → claude."
   (interactive)
   (let* ((project-root (ai-workbench-project-root))
          (current (ai-workbench-session-backend project-root))
          (next (pcase current
                  ('claude   'codex)
                  ('codex    'opencode)
-                 ('opencode 'chat)
                  (_ 'claude))))
     (ai-workbench-session-set-backend next project-root)
     (ai-workbench-session-reset-profile-injected project-root)

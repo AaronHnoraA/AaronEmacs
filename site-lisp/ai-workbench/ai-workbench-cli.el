@@ -417,23 +417,25 @@ Returns the process object so callers can check liveness."
                      (if (and (eq (process-status proc) 'exit)
                               (zerop (process-exit-status proc)))
                          (let ((result
-                                (pcase exec-output
-                                  ('file
-                                   (if (and output-file (file-exists-p output-file))
-                                       (with-temp-buffer
-                                         (insert-file-contents output-file)
-                                         (string-trim (buffer-string)))
-                                     (error "No output file produced by %s" id)))
-                                  ('stdout
-                                   (if (buffer-live-p log-buf)
-                                       (with-current-buffer log-buf
-                                         (string-trim (buffer-string)))
-                                     "")))))
+                                (ai-workbench-cli--strip-ansi
+                                 (pcase exec-output
+                                   ('file
+                                    (if (and output-file (file-exists-p output-file))
+                                        (with-temp-buffer
+                                          (insert-file-contents output-file)
+                                          (string-trim (buffer-string)))
+                                      (error "No output file produced by %s" id)))
+                                   ('stdout
+                                    (if (buffer-live-p log-buf)
+                                        (with-current-buffer log-buf
+                                          (string-trim (buffer-string)))
+                                      ""))))))
                            (when callback (funcall callback result)))
-                       (let ((details (if (buffer-live-p log-buf)
-                                          (with-current-buffer log-buf
-                                            (string-trim (buffer-string)))
-                                        "")))
+                       (let ((details (ai-workbench-cli--strip-ansi
+                                       (if (buffer-live-p log-buf)
+                                           (with-current-buffer log-buf
+                                             (string-trim (buffer-string)))
+                                         ""))))
                          (when on-error (funcall on-error event details))))
                    (when (and output-file (file-exists-p output-file))
                      (ignore-errors (delete-file output-file)))
@@ -453,6 +455,21 @@ Returns the process object so callers can check liveness."
                            (when (buffer-live-p log-buf)
                              (kill-buffer log-buf)))))
       process)))
+
+;; ── ANSI stripping ────────────────────────────────────────────────────────────
+
+(defun ai-workbench-cli--strip-ansi (str)
+  "Remove ANSI/VT100 escape sequences from STR.
+CLI tools emit terminal control codes that must be stripped before
+the output is shown in an Emacs buffer or passed to the engine."
+  (when (stringp str)
+    (let ((s str))
+      (setq s (replace-regexp-in-string "\033\\][^\007]*\007" "" s))
+      (setq s (replace-regexp-in-string "\033\\][^\033]*\033\\\\" "" s))
+      (setq s (replace-regexp-in-string "\033\\[[?!>]?[0-9;]*[A-Za-z]" "" s))
+      (setq s (replace-regexp-in-string "\033O[A-Za-z]" "" s))
+      (setq s (replace-regexp-in-string "\033." "" s))
+      s)))
 
 (provide 'ai-workbench-cli)
 ;;; ai-workbench-cli.el ends here

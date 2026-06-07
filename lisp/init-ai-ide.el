@@ -27,9 +27,10 @@
 ;;     C-c A H     ai-workbench-hub (management dashboard)
 ;;     C-c A ?     ai-workbench-docs-ask (:c CC, :o OpenCode, default Codex)
 ;;
-;;   HTTP chat via gptel (hidden integration layer)
-;;     C-c g       ai-workbench-chat  (open HTTP chat buffer)
-;;     C-c G       reload chat backends from JSON
+;;   AI Engine chat (ai-workbench-engine + CLI agents via one-shot exec)
+;;     C-c g       ai-workbench-chat  (open engine buffer backed by CLI agent)
+;;     C-c A m     ai-workbench-menu  (engine transient menu)
+;;     C-c A r     ai-workbench-rewrite  (rewrite region)
 ;;
 ;;   OpenCode (opencode) — opencode CLI agent
 ;;     C-c o t     toggle panel
@@ -57,7 +58,7 @@
               (locate-user-emacs-file "site-lisp/ai-workbench/vendor/codex-cli")))
 (add-to-list 'load-path
              (file-name-as-directory
-              (locate-user-emacs-file "site-lisp/ai-workbench/vendor/gptel")))
+              (locate-user-emacs-file "site-lisp/ai-workbench/vendor/ai-workbench-engine")))
 
 (autoload 'ai-workbench "ai-workbench" nil t)
 (autoload 'ai-workbench-open "ai-workbench" nil t)
@@ -70,8 +71,14 @@
 (autoload 'ai-workbench-docs-ask "ai-workbench-docs" nil t)
 (autoload 'ai-workbench-chat "ai-workbench-chat" nil t)
 (autoload 'ai-workbench-chat-open-buffer "ai-workbench-chat" nil t)
-(autoload 'ai-workbench-chat-register-backends "ai-workbench-chat" nil t)
 (autoload 'ai-workbench-hub "ai-workbench-hub" nil t)
+
+;; Engine commands (from vendored ai-workbench-engine, loaded lazily via chat-load).
+;; These autoloads ensure keybindings activate load before the engine is required.
+(autoload 'ai-workbench-send "ai-workbench-engine" nil t)
+(autoload 'ai-workbench-rewrite "ai-workbench-rewrite" nil t)
+(autoload 'ai-workbench-menu "ai-workbench-transient" nil t)
+(autoload 'ai-workbench-add "ai-workbench-context" nil t)
 
 (defvar-keymap my/ai-workbench-prefix-map
   :doc "Prefix map for ai-workbench commands."
@@ -81,6 +88,8 @@
   "?" #'ai-workbench-docs-ask
   "k" #'ai-workbench-kill
   "H" #'ai-workbench-hub
+  "m" #'ai-workbench-menu
+  "r" #'ai-workbench-rewrite
   "i r" #'ai-workbench-send-region
   "i b" #'ai-workbench-send-current-buffer
   "i f" #'ai-workbench-send-file)
@@ -160,24 +169,21 @@
 (global-set-key (kbd "C-c o r") #'ai-workbench-send-region)
 (global-set-key (kbd "C-c o f") #'ai-workbench-send-file)
 
-;; ── HTTP Chat (gptel integration layer) ─────────────────────────────────────
+;; ── AI Engine chat (ai-workbench-engine + CLI) ──────────────────────────────
 
 (global-set-key (kbd "C-c g") #'ai-workbench-chat)
-(global-set-key (kbd "C-c G")
-                (lambda ()
-                  (interactive)
-                  (ai-workbench-chat-register-backends)
-                  (message "Chat backends reloaded from JSON")))
 
-;; Register HTTP chat backends eagerly so gptel-mode works without manual setup.
-(with-eval-after-load 'gptel
-  (when (fboundp 'ai-workbench-chat-register-backends)
-    (ai-workbench-chat-register-backends)))
-
-;; Also register early so the `gptel' command works out of the box.
-(when (require 'gptel nil t)
-  (when (fboundp 'ai-workbench-chat-register-backends)
-    (ai-workbench-chat-register-backends)))
+;; Register CLI backends + restore persisted backend after Emacs finishes
+;; initialising.  `after-init-hook' runs after all init files so transient
+;; and other deps are guaranteed to be loaded by then.
+(add-hook 'after-init-hook
+          (lambda ()
+            (condition-case err
+                (when (require 'ai-workbench-vendor nil t)
+                  (when (ai-workbench-vendor-package-present-p 'ai-workbench-engine)
+                    (require 'ai-workbench-chat nil t)
+                    (ai-workbench-chat-load)))
+              (error (message "ai-workbench: init hook error: %s" err)))))
 
 (provide 'init-ai-ide)
 ;;; init-ai-ide.el ends here

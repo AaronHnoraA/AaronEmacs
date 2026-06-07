@@ -10,11 +10,44 @@
 (require 'ai-workbench-session)
 (require 'ai-workbench-profile)
 (require 'ai-workbench-vendor)
+(require 'ai-workbench-cli)
 
 (defvar my/terminal-startup-cd-inhibited)
 (defvar claude-code-ide-use-ide-diff)
 (defvar claude-code-ide-terminal-backend)
+(defvar claude-code-ide-cli-path)
 (defvar eat-terminal)
+
+(defcustom ai-workbench-claude-executable
+  (if (and (boundp 'claude-code-ide-cli-path)
+           (stringp claude-code-ide-cli-path)
+           (not (string-empty-p claude-code-ide-cli-path)))
+      claude-code-ide-cli-path
+    "claude")
+  "Path to the Claude CLI used for headless (engine-cli bridge) requests.
+The interactive vterm session is still driven by `claude-code-ide';
+this executable is only used for one-shot `claude -p' chat requests."
+  :type 'string
+  :group 'ai-workbench)
+
+;; ── Headless tool spec (engine-cli bridge / one-shot exec) ─────────────────────────
+;; The interactive Claude session uses claude-code-ide and is not registered
+;; with ai-workbench-cli.  This spec only provides the headless `claude -p'
+;; path used by the CLI→engine-cli bridge.
+(ai-workbench-cli-register-tool 'claude
+  :name "CC – Claude Code"
+  :executable-var 'ai-workbench-claude-executable
+  :buffer-prefix "claude"
+  :exec-args-fn
+  (lambda (prompt _output-file _root)
+    (list (if (and (boundp 'ai-workbench-claude-executable)
+                   (stringp ai-workbench-claude-executable)
+                   (not (string-empty-p ai-workbench-claude-executable)))
+              ai-workbench-claude-executable
+            "claude")
+          "-p" "--output-format" "text"
+          prompt))
+  :exec-output 'stdout)
 
 (declare-function my/vterm-popup-display-buffer "init-vterm-popup" (buffer))
 (declare-function claude-code-ide "claude-code-ide" ())

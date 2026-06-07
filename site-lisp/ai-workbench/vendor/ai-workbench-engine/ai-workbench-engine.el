@@ -1,4 +1,4 @@
-;;; gptel.el --- Interact with ChatGPT or other LLMs     -*- lexical-binding: t; -*-
+;;; ai-workbench-engine.el --- Interact with ChatGPT or other LLMs     -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2023-2025  Karthik Chikmagalur
 
@@ -6,7 +6,7 @@
 ;; Version: 0.9.9.5
 ;; Package-Requires: ((emacs "27.1") (transient "0.7.8") (compat "30.1.0.0"))
 ;; Keywords: convenience, tools
-;; URL: https://github.com/karthink/gptel
+;; URL: https://github.com/karthink/ai-workbench-engine
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -27,12 +27,12 @@
 
 ;;; Commentary:
 
-;; gptel is a simple Large Language Model chat client, with support for multiple
+;; ai-workbench-engine is a simple Large Language Model chat client, with support for multiple
 ;; models and backends.
 ;;
 ;; It works in the spirit of Emacs, available at any time and in any buffer.
 ;;
-;; gptel supports:
+;; ai-workbench-engine supports:
 ;;
 ;; - The services ChatGPT, Azure, Gemini, Anthropic AI, Together.ai, Perplexity,
 ;;   AI/ML API, Anyscale, OpenRouter, Groq, PrivateGPT, DeepSeek, Cerebras, Github Models,
@@ -62,139 +62,139 @@
 ;;
 ;; Requirements for ChatGPT, Azure, Gemini or Kagi:
 ;;
-;; - You need an appropriate API key.  Set the variable `gptel-api-key' to the
+;; - You need an appropriate API key.  Set the variable `ai-workbench-api-key' to the
 ;;   key or to a function of no arguments that returns the key.  (It tries to
 ;;   use `auth-source' by default)
 ;;
 ;; ChatGPT is configured out of the box.  For the other sources:
 ;;
-;; - For Azure: define a gptel-backend with `gptel-make-azure'.
-;; - For Gemini: define a gptel-backend with `gptel-make-gemini'.
-;; - For Anthropic (Claude): define a gptel-backend with `gptel-make-anthropic'.
+;; - For Azure: define a ai-workbench-backend with `ai-workbench-make-azure'.
+;; - For Gemini: define a ai-workbench-backend with `ai-workbench-make-gemini'.
+;; - For Anthropic (Claude): define a ai-workbench-backend with `ai-workbench-make-anthropic'.
 ;; - For AI/ML API, Together.ai, Anyscale, Groq, OpenRouter, DeepSeek, Cerebras
-;;   or Github Models: define a gptel-backend with `gptel-make-openai'.
-;; - For PrivateGPT: define a backend with `gptel-make-privategpt'.
-;; - For Perplexity: define a backend with `gptel-make-perplexity'.
-;; - For Deepseek: define a backend with `gptel-make-deepseek'.
-;; - For Kagi: define a gptel-backend with `gptel-make-kagi'.
+;;   or Github Models: define a ai-workbench-backend with `ai-workbench-make-openai'.
+;; - For PrivateGPT: define a backend with `ai-workbench-make-privategpt'.
+;; - For Perplexity: define a backend with `ai-workbench-make-perplexity'.
+;; - For Deepseek: define a backend with `ai-workbench-make-deepseek'.
+;; - For Kagi: define a ai-workbench-backend with `ai-workbench-make-kagi'.
 ;;
 ;; For local models using Ollama, Llama.cpp or GPT4All:
 ;;
 ;; - The model has to be running on an accessible address (or localhost)
-;; - Define a gptel-backend with `gptel-make-ollama' or `gptel-make-gpt4all'.
-;; - Llama.cpp or Llamafiles: Define a gptel-backend with `gptel-make-openai'.
+;; - Define a ai-workbench-backend with `ai-workbench-make-ollama' or `ai-workbench-make-gpt4all'.
+;; - Llama.cpp or Llamafiles: Define a ai-workbench-backend with `ai-workbench-make-openai'.
 ;;
 ;; Consult the package README for examples and more help with configuring
 ;; backends.
 ;;
 ;; Usage:
 ;;
-;; gptel can be used in any buffer or in a dedicated chat buffer.  The
+;; ai-workbench-engine can be used in any buffer or in a dedicated chat buffer.  The
 ;; interaction model is simple: Type in a query and the response will be
 ;; inserted below.  You can continue the conversation by typing below the
 ;; response.
 ;;
 ;; To use this in any buffer:
 ;;
-;; - Call `gptel-send' to send the buffer's text up to the cursor.  Select a
+;; - Call `ai-workbench-send' to send the buffer's text up to the cursor.  Select a
 ;;   region to send only the region.
 ;;
 ;; - You can select previous prompts and responses to continue the conversation.
 ;;
-;; - Call `gptel-send' with a prefix argument to access a menu where you can set
+;; - Call `ai-workbench-send' with a prefix argument to access a menu where you can set
 ;;   your backend, model and other parameters, or to redirect the
 ;;   prompt/response.
 ;;
 ;; To use this in a dedicated buffer:
 ;; 
-;; - M-x gptel: Start a chat session.
+;; - M-x ai-workbench-engine: Start a chat session.
 ;;
-;; - In the chat session: Press `C-c RET' (`gptel-send') to send your prompt.
+;; - In the chat session: Press `C-c RET' (`ai-workbench-send') to send your prompt.
 ;;   Use a prefix argument (`C-u C-c RET') to access a menu.  In this menu you
 ;;   can set chat parameters like the system directives, active backend or
 ;;   model, or choose to redirect the input or output elsewhere (such as to the
 ;;   kill ring or the echo area).
 ;;
 ;; - You can save this buffer to a file.  When opening this file, turn on
-;;   `gptel-mode' before editing it to restore the conversation state and
+;;   `ai-workbench-mode' before editing it to restore the conversation state and
 ;;   continue chatting.
 ;;
 ;; - To include media files with your request, you can add them to the context
 ;;   (described next), or include them as links in Org or Markdown mode chat
 ;;   buffers.  Sending media is disabled by default, you can turn it on globally
-;;   via `gptel-track-media', or locally in a chat buffer via the header line.
+;;   via `ai-workbench-track-media', or locally in a chat buffer via the header line.
 ;; 
 ;; Include more context with requests:
 ;;
 ;; If you want to provide the LLM with more context, you can add arbitrary
-;; regions, buffers, files or directories to the query with `gptel-add'.  To add
-;; text or media files, call `gptel-add' in Dired or use the dedicated
-;; `gptel-add-file'.
+;; regions, buffers, files or directories to the query with `ai-workbench-add'.  To add
+;; text or media files, call `ai-workbench-add' in Dired or use the dedicated
+;; `ai-workbench-add-file'.
 ;;
-;; You can also add context from gptel's menu instead (`gptel-send' with a
+;; You can also add context from ai-workbench-engine's menu instead (`ai-workbench-send' with a
 ;; prefix arg), as well as examine or modify context.
 ;;
-;; When context is available, gptel will include it with each LLM query.
+;; When context is available, ai-workbench-engine will include it with each LLM query.
 ;;
 ;; LLM Tool use:
 ;;
-;; gptel supports "tool calling" behavior, where LLMs can specify arguments with
+;; ai-workbench-engine supports "tool calling" behavior, where LLMs can specify arguments with
 ;; which to call provided "tools" (elisp functions).  The results of running the
 ;; tools are fed back to the LLM, giving it capabilities and knowledge beyond
 ;; what is available out of the box.  For example, tools can perform web
 ;; searches or API lookups, modify files and directories, and so on.
 ;;
-;; Tools can be specified via `gptel-make-tool', or obtained from other
+;; Tools can be specified via `ai-workbench-make-tool', or obtained from other
 ;; repositories, or from Model Context Protocol (MCP) servers using the mcp.el
 ;; package.  See the README for details.
 ;;
-;; Tools can be included with LLM queries using gptel's menu, or from
-;; `gptel-tools'.
+;; Tools can be included with LLM queries using ai-workbench-engine's menu, or from
+;; `ai-workbench-llm-tools'.
 ;;
 ;; Rewrite interface
 ;;
 ;; In any buffer: with a region selected, you can rewrite prose, refactor code
-;; or fill in the region.  This is accessible via `gptel-rewrite', and also from
-;; the `gptel-send' menu.
+;; or fill in the region.  This is accessible via `ai-workbench-rewrite', and also from
+;; the `ai-workbench-send' menu.
 ;;
 ;; Presets
 ;;
 ;; Define a bundle of configuration (model, backend, system message, tools etc)
 ;; as a "preset" that can be applied together, making it easy to switch between
-;; tasks in gptel.  Presets can be saved and applied from gptel's transient
+;; tasks in ai-workbench-engine.  Presets can be saved and applied from ai-workbench-engine's transient
 ;; menu.  You can also include a cookie of the form "@preset-name" in the prompt
 ;; to send a request with a preset applied.  This feature works everywhere, but
 ;; preset cookies are also fontified in chat buffers.
 ;;
-;; gptel in Org mode:
+;; ai-workbench-engine in Org mode:
 ;;
-;; gptel offers a few extra conveniences in Org mode:
+;; ai-workbench-engine offers a few extra conveniences in Org mode:
 ;;
 ;; - You can limit the conversation context to an Org heading with
-;;   `gptel-org-set-topic'.
+;;   `ai-workbench-org-set-topic'.
 ;;   
 ;; - You can have branching conversations in Org mode, where each hierarchical
 ;;   outline path through the document is a separate conversation branch.
-;;   See the variable `gptel-org-branching-context'.
+;;   See the variable `ai-workbench-org-branching-context'.
 ;;   
-;; - You can declare the gptel model, backend, temperature, system message and
+;; - You can declare the ai-workbench-engine model, backend, temperature, system message and
 ;;   other parameters as Org properties with the command
-;;   `gptel-org-set-properties'.  gptel queries under the corresponding heading
+;;   `ai-workbench-org-set-properties'.  ai-workbench-engine queries under the corresponding heading
 ;;   will always use these settings, allowing you to create mostly reproducible
 ;;   LLM chat notebooks.
 ;;
-;; Finally, gptel offers a general purpose API for writing LLM ineractions that
-;; suit your workflow.  See `gptel-request', and `gptel-fsm' for more advanced
+;; Finally, ai-workbench-engine offers a general purpose API for writing LLM ineractions that
+;; suit your workflow.  See `ai-workbench-request', and `ai-workbench-fsm' for more advanced
 ;; usage.
 
 ;;; Code:
-(defconst gptel-version "0.9.9.5")
+(defconst ai-workbench-version "0.9.9.5")
 
 (declare-function markdown-mode "markdown-mode")
-(declare-function gptel-menu "gptel-transient")
-(declare-function gptel-system-prompt "gptel-transient")
-(declare-function gptel-tools "gptel-transient")
-(declare-function gptel--vterm-pre-insert "gptel-integrations")
+(declare-function ai-workbench-menu "ai-workbench-transient")
+(declare-function ai-workbench-system-prompt "ai-workbench-transient")
+(declare-function ai-workbench-llm-tools "ai-workbench-transient")
+(declare-function ai-workbench--vterm-pre-insert "ai-workbench-integrations")
 (declare-function pulse-momentary-highlight-region "pulse")
 
 (declare-function ediff-make-cloned-buffer "ediff-util")
@@ -202,12 +202,12 @@
 (declare-function hl-line-highlight "hl-line")
 
 (declare-function org-escape-code-in-string "org-src")
-(declare-function gptel-org-set-topic "gptel-org")
-(declare-function gptel-org--save-state "gptel-org")
-(declare-function gptel-org--restore-state "gptel-org")
-(declare-function gptel-org--annotate-links "gptel-org")
+(declare-function ai-workbench-org-set-topic "ai-workbench-org")
+(declare-function ai-workbench-org--save-state "ai-workbench-org")
+(declare-function ai-workbench-org--restore-state "ai-workbench-org")
+(declare-function ai-workbench-org--annotate-links "ai-workbench-org")
 (define-obsolete-function-alias
-  'gptel-set-topic 'gptel-org-set-topic "0.7.5")
+  'ai-workbench-set-topic 'ai-workbench-org-set-topic "0.7.5")
 
 (declare-function markdown-link-at-pos "markdown-mode")
 
@@ -219,11 +219,11 @@
 (require 'map)
 (require 'text-property-search)
 (require 'cl-generic)
-(eval-and-compile (require 'gptel-request))
+(eval-and-compile (require 'ai-workbench-request))
 
 
 ;;; User options
-(defcustom gptel-pre-response-hook nil
+(defcustom ai-workbench-pre-response-hook nil
   "Hook run before inserting the LLM response into the current buffer.
 
 This hook is called in the buffer where the LLM response will be
@@ -231,15 +231,15 @@ inserted.
 
 Note: this hook only runs if the request succeeds."
   :type 'hook
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
 (define-obsolete-variable-alias
-  'gptel-post-response-hook 'gptel-post-response-functions
+  'ai-workbench-post-response-hook 'ai-workbench-post-response-functions
   "0.6.0"
   "Post-response functions are now called with two arguments: the
 start and end buffer positions of the response.")
 
-(defcustom gptel-post-response-functions nil
+(defcustom ai-workbench-post-response-functions nil
   "Abnormal hook run after inserting the LLM response into the current buffer.
 
 This hook is called in the buffer to which the LLM response is
@@ -251,19 +251,19 @@ Note: this hook runs even if the request fails.  In this case the
 response beginning and end positions are both the cursor position
 at the time of the request."
   :type 'hook
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
-(add-hook 'gptel-post-response-functions 'pulse-momentary-highlight-region 70)
+(add-hook 'ai-workbench-post-response-functions 'pulse-momentary-highlight-region 70)
 
-(defcustom gptel-post-stream-hook nil
+(defcustom ai-workbench-post-stream-hook nil
   "Hook run after each insertion of the LLM's streaming response.
 
 This hook is called in the buffer from which the prompt was sent
 to the LLM, and after a text insertion."
   :type 'hook
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
-(defcustom gptel-pre-tool-call-functions nil
+(defcustom ai-workbench-pre-tool-call-functions nil
   "Abnormal hook called before each tool call.
 
 Each hook function is called a plist with the following keys:
@@ -279,8 +279,8 @@ Each hook function is called a plist with the following keys:
    :replacement \"...\")
 
 :buffer  - The name of the buffer from which the request was sent.
-:backend - The name of the gptel backend used for the request.
-:model   - The name of the gptel model used for the request.
+:backend - The name of the ai-workbench-engine backend used for the request.
+:model   - The name of the ai-workbench-engine model used for the request.
 
 The function can work by side effects and return nil, or return a plist
 with one or more of the following keys.
@@ -298,15 +298,15 @@ with one or more of the following keys.
            t and nil are both meaningful, signifying that the tool call
            should and should not seek user confirmation, respectively.
            When present, this key overrides all other confirmation
-           options (such as `gptel-confirm-tool-calls' and the tool's
+           options (such as `ai-workbench-confirm-tool-calls' and the tool's
            CONFIRM slot).
 :args    - The updated argument plist for the tool call.
 :result  - The result of this tool call, used instead of the tool call
            output.  Not marked as an error."
   :type 'hook
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
-(defcustom gptel-post-tool-call-functions nil
+(defcustom ai-workbench-post-tool-call-functions nil
   "Abnormal hook called after each tool call.
 
 Each hook function is called a plist with the following keys:
@@ -323,8 +323,8 @@ Each hook function is called a plist with the following keys:
 
 :result  - The tool call result, serialized to a string.
 :buffer  - The name of the buffer from which the request was sent.
-:backend - The name of the gptel backend used for the request.
-:model   - The name of the gptel model used for the request.
+:backend - The name of the ai-workbench-engine backend used for the request.
+:model   - The name of the ai-workbench-engine model used for the request.
 
 The function can work by side effects and return nil, or return a plist
 with one or more of the following keys.
@@ -341,42 +341,42 @@ with one or more of the following keys.
 :result  - The updated result of this tool call, used instead of the
            tool call output.  Not marked as an error."
   :type 'hook
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
-(defcustom gptel-save-state-hook nil
-  "Hook run before gptel saves model parameters to a file.
+(defcustom ai-workbench-save-state-hook nil
+  "Hook run before ai-workbench-engine saves model parameters to a file.
 
 You can use this hook to store additional conversation state or
 model parameters to the chat buffer, or to modify the buffer in
 some other way."
   :type 'hook
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
-(defcustom gptel-default-mode (if (fboundp 'markdown-mode)
+(defcustom ai-workbench-default-mode (if (fboundp 'markdown-mode)
 				  'markdown-mode
 				'text-mode)
   "The default major mode for dedicated chat buffers.
 
-If `markdown-mode' is available, it is used.  Otherwise gptel
+If `markdown-mode' is available, it is used.  Otherwise ai-workbench-engine
 defaults to `text-mode'."
   :type 'function
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
-(defcustom gptel-use-header-line t
-  "Whether `gptel-mode' should use header-line for status information.
+(defcustom ai-workbench-use-header-line t
+  "Whether `ai-workbench-mode' should use header-line for status information.
 
 When set to nil, use the mode line for (minimal) status
 information and the echo area for messages."
   :type 'boolean
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
 ;; Set minimally to avoid display-buffer action alist conflicts (#533)
-(defcustom gptel-display-buffer-action `(nil (body-function . ,#'select-window))
-  "The action used to display gptel chat buffers.
+(defcustom ai-workbench-display-buffer-action `(nil (body-function . ,#'select-window))
+  "The action used to display ai-workbench-engine chat buffers.
 
-The gptel buffer is displayed in a window using
+The ai-workbench-engine buffer is displayed in a window using
 
-  (display-buffer BUFFER gptel-display-buffer-action)
+  (display-buffer BUFFER ai-workbench-display-buffer-action)
 
 The value of this option has the form (FUNCTION . ALIST),
 where FUNCTION is a function or a list of functions.  Each such
@@ -384,62 +384,62 @@ function should accept two arguments: a buffer to display and an
 alist of the same form as ALIST.  See info node `(elisp)Choosing
 Window' for details."
   :type display-buffer--action-custom-type
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
-(defcustom gptel-crowdsourced-prompts-file
+(defcustom ai-workbench-crowdsourced-prompts-file
   (let ((cache-dir (or (eval-when-compile
 			 (require 'xdg)
 			 (xdg-cache-home))
                        user-emacs-directory)))
-    (expand-file-name "gptel-crowdsourced-prompts.csv" cache-dir))
+    (expand-file-name "ai-workbench-crowdsourced-prompts.csv" cache-dir))
   "File used to store crowdsourced system prompts.
 
 These are prompts cached from an online source (see
-`gptel--crowdsourced-prompts-url'), and can be set from the
-transient menu interface provided by `gptel-menu'."
+`ai-workbench--crowdsourced-prompts-url'), and can be set from the
+transient menu interface provided by `ai-workbench-menu'."
   :type 'file
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
-(defvar gptel-refresh-buffer-hook '(jit-lock-refontify)
-  "Hook run in gptel buffers after changing gptel's configuration.
+(defvar ai-workbench-refresh-buffer-hook '(jit-lock-refontify)
+  "Hook run in ai-workbench-engine buffers after changing ai-workbench-engine's configuration.
 
-This hook runs in gptel chat buffers after making a change to gptel's
+This hook runs in ai-workbench-engine chat buffers after making a change to ai-workbench-engine's
 configuration that might require a UI update.")
 
-(defvar-local gptel--bounds nil)
-(put 'gptel--bounds 'safe-local-variable #'listp)
+(defvar-local ai-workbench--bounds nil)
+(put 'ai-workbench--bounds 'safe-local-variable #'listp)
 
-(defvar gptel--preset nil
-  "Name of last applied gptel preset.
+(defvar ai-workbench--preset nil
+  "Name of last applied ai-workbench-engine preset.
 
 For internal use only.")
-(put 'gptel--preset 'safe-local-variable #'symbolp)
+(put 'ai-workbench--preset 'safe-local-variable #'symbolp)
 
-(defvar-local gptel--tool-names nil
+(defvar-local ai-workbench--tool-names nil
   "Store to persist tool names to file across Emacs sessions.
 
-Note: Changing this variable does not affect gptel\\='s behavior
+Note: Changing this variable does not affect ai-workbench-engine\\='s behavior
 in any way.")
-(put 'gptel--tool-names 'safe-local-variable #'listp)
+(put 'ai-workbench--tool-names 'safe-local-variable #'listp)
 
-(defvar-local gptel--backend-name nil
+(defvar-local ai-workbench--backend-name nil
   "Store to persist backend name across Emacs sessions.
 
-Note: Changing this variable does not affect gptel\\='s behavior
+Note: Changing this variable does not affect ai-workbench-engine\\='s behavior
 in any way.")
-(put 'gptel--backend-name 'safe-local-variable #'stringp)
+(put 'ai-workbench--backend-name 'safe-local-variable #'stringp)
 
-(defvar-local gptel--old-header-line nil)
+(defvar-local ai-workbench--old-header-line nil)
 
-(defvar gptel--markdown-block-map
+(defvar ai-workbench--markdown-block-map
   (define-keymap
-    "<tab>" 'gptel-markdown-cycle-block
-    "TAB"   'gptel-markdown-cycle-block)
+    "<tab>" 'ai-workbench-markdown-cycle-block
+    "TAB"   'ai-workbench-markdown-cycle-block)
   "Keymap for folding and unfolding Markdown code blocks.")
 
 
 ;;; Utility functions
-(defun gptel--modify-value (original new-spec)
+(defun ai-workbench--modify-value (original new-spec)
   "Combine ORIGINAL with NEW-SPEC and return the new result.
 
 This function is non-destructive, ORIGINAL is not modified.
@@ -472,11 +472,11 @@ form it is returned as is.
                               (append form current)))
                   (:eval (eval form t))
                   (:function (funcall form current))
-                  (:merge (gptel--merge-plists (copy-sequence current) form))
+                  (:merge (ai-workbench--merge-plists (copy-sequence current) form))
                   (_ new-spec)))))
       current)))
 
-(defun gptel-auto-scroll ()
+(defun ai-workbench-auto-scroll ()
   "Scroll window if LLM response continues below viewport.
 
 Note: This will move the cursor."
@@ -488,13 +488,13 @@ Note: This will move the cursor."
           (scroll-up-command))
       (error nil))))
 
-(defun gptel-beginning-of-response (&optional beg _end arg)
+(defun ai-workbench-beginning-of-response (&optional beg _end arg)
   "Move point to BEG, or to the beginning of the LLM response ARG times."
   (interactive (list nil nil
                      (prefix-numeric-value current-prefix-arg)))
-  (gptel-end-of-response beg nil (- (or arg 1))))
+  (ai-workbench-end-of-response beg nil (- (or arg 1))))
 
-(defun gptel-end-of-response (&optional beg end arg)
+(defun ai-workbench-end-of-response (&optional beg end arg)
   "Move point to end of LLM response.
 
 With BEG, start search from BEG when ARG is negative.
@@ -507,13 +507,13 @@ Otherwise move ARG times, defaulting to 1."
                      #'text-property-search-forward
                    #'text-property-search-backward))
          (goto-prefix-end
-          (lambda () (when-let* ((prefix (gptel-prompt-prefix-string))
+          (lambda () (when-let* ((prefix (ai-workbench-prompt-prefix-string))
                             ((not (string-empty-p prefix)))
                             ((looking-at (concat "\n\\{1,2\\}"
                                                  (regexp-quote prefix) "?"))))
                   (goto-char (match-end 0)))))
          (goto-prefix-beg
-          (lambda () (when-let* ((prefix (gptel-response-prefix-string))
+          (lambda () (when-let* ((prefix (ai-workbench-response-prefix-string))
                             ((not (string-empty-p prefix)))
                             ((looking-back (concat (regexp-quote prefix) "?")
                                            (point-min))))
@@ -522,12 +522,12 @@ Otherwise move ARG times, defaulting to 1."
      ((and end (> arg 0)) (goto-char end) (cl-decf arg) (funcall goto-prefix-end))
      ((and beg (< arg 0)) (goto-char beg) (cl-incf arg) (funcall goto-prefix-beg)))
     (dotimes (_ (abs arg))
-      (funcall search 'gptel 'response t)
+      (funcall search 'ai-workbench-engine 'response t)
       (if (> arg 0)
           (funcall goto-prefix-end)
         (funcall goto-prefix-beg)))))
 
-(defun gptel-markdown-cycle-block ()
+(defun ai-workbench-markdown-cycle-block ()
   "Cycle code blocks in Markdown."
   (interactive)
   (save-excursion
@@ -560,12 +560,12 @@ Otherwise move ARG times, defaulting to 1."
             (overlay-put hide-ov 'before-string
                          (propertize "..." 'face 'shadow))))))))
 
-(defsubst gptel--annotate-link (ov link-status)
+(defsubst ai-workbench--annotate-link (ov link-status)
   "Annotate link overlay OV according to LINK-STATUS.
 
-LINK-STATUS is a list of link properties relevant to gptel queries, of
-the form (valid . REST).  See `gptel-markdown--validate-link' for
-details.  Indicate the (in)validity of the link for inclusion with gptel
+LINK-STATUS is a list of link properties relevant to ai-workbench-engine queries, of
+the form (valid . REST).  See `ai-workbench-markdown--validate-link' for
+details.  Indicate the (in)validity of the link for inclusion with ai-workbench-engine
 queries via OV."
   (cl-destructuring-bind
       (valid _ path resource-type user-check readablep mime-valid _mime)
@@ -578,14 +578,14 @@ queries via OV."
                    (if (display-graphic-p)
                        (propertize " " 'display '(space :width 0.5)) " ")))
           (overlay-put ov 'help-echo
-                       (format "Sending %s %s with gptel requests" resource-type path)))
+                       (format "Sending %s %s with ai-workbench-engine requests" resource-type path)))
       (overlay-put ov 'before-string
                    (concat (propertize "!" 'face '(:inherit error))
                            (propertize " " 'display '(space :width 0.3))))
       (overlay-put
        ov 'help-echo
        (concat
-        "Sending only link text with gptel requests, "
+        "Sending only link text with ai-workbench-engine requests, "
         "this link will not be followed to its source.\n\nReason: "
         (cond
          ((not resource-type) "Not a supported link type\
@@ -593,24 +593,24 @@ queries via OV."
          ((not user-check)
           (concat
            "\nNot a standalone link -- separate link from text around it. \n           (OR)
-Link failed to validate, see `gptel-markdown-validate-link' or `gptel-org-validate-link'."))
+Link failed to validate, see `ai-workbench-markdown-validate-link' or `ai-workbench-org-validate-link'."))
          ((not readablep) (format "File %s is not readable" path))
          ((not mime-valid)
           (pcase resource-type
-            ('file (format "%s does not support binary file %s" gptel-model path))
-            ('url (format "%s does not support fetching non-image URLs" gptel-model))))))))))
+            ('file (format "%s does not support binary file %s" ai-workbench-model path))
+            ('url (format "%s does not support fetching non-image URLs" ai-workbench-model))))))))))
 
-(defun gptel--annotate-link-clear (&optional beg end)
-  "Delete all gptel org link annotations between BEG and END."
+(defun ai-workbench--annotate-link-clear (&optional beg end)
+  "Delete all ai-workbench-engine org link annotations between BEG and END."
   (mapc #'delete-overlay
         (cl-delete-if-not
-         (lambda (o) (overlay-get o 'gptel-track-media))
+         (lambda (o) (overlay-get o 'ai-workbench-track-media))
          (overlays-in (or beg (point-min)) (or end (point-max))))))
 
 ;;;; Response text recognition
 
-(defun gptel--get-buffer-bounds ()
-  "Return the gptel response boundaries in the buffer as an alist."
+(defun ai-workbench--get-buffer-bounds ()
+  "Return the ai-workbench-engine response boundaries in the buffer as an alist."
   (save-excursion
     (save-restriction
       (widen)
@@ -618,8 +618,8 @@ Link failed to validate, see `gptel-markdown-validate-link' or `gptel-org-valida
       (let ((bounds) (prev-pt (point)))
         (while (and (/= prev-pt (point-min))
                     (goto-char (previous-single-property-change
-                                (point) 'gptel nil (point-min))))
-          (when-let* ((prop (get-char-property (point) 'gptel)))
+                                (point) 'ai-workbench-engine nil (point-min))))
+          (when-let* ((prop (get-char-property (point) 'ai-workbench-engine)))
             (let* ((prop-name (if (symbolp prop) prop (car prop)))
                    (val (when (consp prop) (cdr prop)))
                    (bound (if val
@@ -630,43 +630,43 @@ Link failed to validate, see `gptel-markdown-validate-link' or `gptel-org-valida
         bounds))))
 
 (define-obsolete-function-alias
-  'gptel--get-bounds 'gptel--get-response-bounds "0.9.8")
+  'ai-workbench--get-bounds 'ai-workbench--get-response-bounds "0.9.8")
 
-(defun gptel--get-response-bounds ()
-  "Return the gptel response boundaries around point."
+(defun ai-workbench--get-response-bounds ()
+  "Return the ai-workbench-engine response boundaries around point."
   (let (prop)
     (save-excursion
       (when (text-property-search-forward
-                          'gptel 'response t)
+                          'ai-workbench-engine 'response t)
         (when (setq prop (text-property-search-backward
-                          'gptel 'response t))
+                          'ai-workbench-engine 'response t))
           (cons (prop-match-beginning prop)
                 (prop-match-end prop)))))))
 
-(defun gptel--in-response-p (&optional pt)
-  "Check if position PT is inside a gptel response."
-  (eq (get-char-property (or pt (point)) 'gptel) 'response))
+(defun ai-workbench--in-response-p (&optional pt)
+  "Check if position PT is inside a ai-workbench-engine response."
+  (eq (get-char-property (or pt (point)) 'ai-workbench-engine) 'response))
 
-(defun gptel--at-response-history-p (&optional pt)
-  "Check if gptel response at position PT has variants."
-  (get-char-property (or pt (point)) 'gptel-history))
+(defun ai-workbench--at-response-history-p (&optional pt)
+  "Check if ai-workbench-engine response at position PT has variants."
+  (get-char-property (or pt (point)) 'ai-workbench-history))
 
 
 ;;; Saving and restoring state
 
-(defun gptel--restore-props (bounds-alist)
+(defun ai-workbench--restore-props (bounds-alist)
   "Restore text properties from BOUNDS-ALIST.
 BOUNDS-ALIST is (PROP . BOUNDS).  BOUNDS is a list of BOUND.  Each BOUND
 is either (BEG END VAL) or (BEG END).
 
-For (BEG END VAL) forms, even if VAL is nil, the gptel property will be
+For (BEG END VAL) forms, even if VAL is nil, the ai-workbench-engine property will be
 set to (PROP . VAL).  For (BEG END) forms, except when PROP is response,
-the gptel property is set to just PROP.
+the ai-workbench-engine property is set to just PROP.
 
 The legacy structure, a list of (BEG . END) is also supported and will be
 applied before being re-persisted in the new structure."
-  ;; Run silently to avoid `gptel--inherit-stickiness' and other hooks that
-  ;; might modify the gptel text property.
+  ;; Run silently to avoid `ai-workbench--inherit-stickiness' and other hooks that
+  ;; might modify the ai-workbench-engine text property.
   (with-silent-modifications
     (if (symbolp (caar bounds-alist))
         (mapc
@@ -678,8 +678,8 @@ applied before being re-persisted in the new structure."
                   (add-text-properties
                    (pop bound) (pop bound)
                    (if (eq prop 'response)
-                       '(gptel response front-sticky (gptel))
-                     (list 'gptel
+                       '(ai-workbench-engine response front-sticky (ai-workbench-engine))
+                     (list 'ai-workbench-engine
                            (if prop-has-val
                                (cons prop (pop bound))
                              prop))))))
@@ -687,180 +687,180 @@ applied before being re-persisted in the new structure."
          bounds-alist)
       (mapc (lambda (bound)
               (add-text-properties
-               (car bound) (cdr bound) '(gptel response front-sticky (gptel))))
+               (car bound) (cdr bound) '(ai-workbench-engine response front-sticky (ai-workbench-engine))))
             bounds-alist))))
 
-(defun gptel--restore-state ()
-  "Restore gptel state when turning on `gptel-mode'."
+(defun ai-workbench--restore-state ()
+  "Restore ai-workbench-engine state when turning on `ai-workbench-mode'."
   (when (buffer-file-name)
     (if (derived-mode-p 'org-mode)
         (progn
-          (require 'gptel-org)
-          (gptel-org--restore-state))
-      (when gptel--bounds
-        (gptel--restore-props gptel--bounds)
-        (message "gptel chat restored."))
-      (when gptel--preset
-        (if (gptel-get-preset gptel--preset)
-            (gptel--apply-preset
-             gptel--preset (lambda (sym val) (set (make-local-variable sym) val)))
+          (require 'ai-workbench-org)
+          (ai-workbench-org--restore-state))
+      (when ai-workbench--bounds
+        (ai-workbench--restore-props ai-workbench--bounds)
+        (message "ai-workbench-engine chat restored."))
+      (when ai-workbench--preset
+        (if (ai-workbench-get-preset ai-workbench--preset)
+            (ai-workbench--apply-preset
+             ai-workbench--preset (lambda (sym val) (set (make-local-variable sym) val)))
           (display-warning
-           '(gptel presets)
-           (format "Could not activate gptel preset `%s' in buffer \"%s\""
-                   gptel--preset (buffer-name)))))
-      (when gptel--backend-name
+           '(ai-workbench-engine presets)
+           (format "Could not activate ai-workbench-engine preset `%s' in buffer \"%s\""
+                   ai-workbench--preset (buffer-name)))))
+      (when ai-workbench--backend-name
         (if-let* ((backend (alist-get
-                            gptel--backend-name gptel--known-backends
+                            ai-workbench--backend-name ai-workbench--known-backends
                             nil nil #'equal)))
-            (setq-local gptel-backend backend)
+            (setq-local ai-workbench-backend backend)
           (message
            (substitute-command-keys
             (concat
-             "Could not activate gptel backend \"%s\"!  "
-             "Switch backends with \\[universal-argument] \\[gptel-send]"
-             " before using gptel."))
-           gptel--backend-name)))
-      (when gptel--tool-names
+             "Could not activate ai-workbench-engine backend \"%s\"!  "
+             "Switch backends with \\[universal-argument] \\[ai-workbench-send]"
+             " before using ai-workbench-engine."))
+           ai-workbench--backend-name)))
+      (when ai-workbench--tool-names
         (if-let* ((tools (cl-loop
-                          for tname in gptel--tool-names
-                          for tool = (with-demoted-errors "gptel: %S"
-                                       (gptel-get-tool tname))
+                          for tname in ai-workbench--tool-names
+                          for tool = (with-demoted-errors "ai-workbench-engine: %S"
+                                       (ai-workbench-get-tool tname))
                           if tool collect tool else do
                           (display-warning
-                           '(gptel org tools)
+                           '(ai-workbench-engine org tools)
                            (format "Tool %s not found, ignoring" tname)))))
-            (setq-local gptel-tools tools))))))
+            (setq-local ai-workbench-llm-tools tools))))))
 
-(defun gptel--save-state ()
-  "Write the gptel state to the buffer.
+(defun ai-workbench--save-state ()
+  "Write the ai-workbench-engine state to the buffer.
 
 This saves chat metadata when writing the buffer to disk.  To
-restore a chat session, turn on `gptel-mode' after opening the
+restore a chat session, turn on `ai-workbench-mode' after opening the
 file.
 
-If a gptel preset has been applied in this buffer, a reference to it is
+If a ai-workbench-engine preset has been applied in this buffer, a reference to it is
 saved.
 
 Additional metadata is stored only if no preset was applied or if it
 differs from the preset specification.  This is limited to the active
-gptel model and backend names, the system message, active tools, the
+ai-workbench-engine model and backend names, the system message, active tools, the
 response temperature, max tokens and number of conversation turns to
-send in queries.  (See `gptel--num-messages-to-send' for the last one.)"
-  (run-hooks 'gptel-save-state-hook)
+send in queries.  (See `ai-workbench--num-messages-to-send' for the last one.)"
+  (run-hooks 'ai-workbench-save-state-hook)
   (if (derived-mode-p 'org-mode)
       (progn
-        (require 'gptel-org)
-        (gptel-org--save-state))
+        (require 'ai-workbench-org)
+        (ai-workbench-org--save-state))
     (let ((print-escape-newlines t)
-          (preset-spec (and gptel--preset
-                            (gptel-get-preset gptel--preset))))
+          (preset-spec (and ai-workbench--preset
+                            (ai-workbench-get-preset ai-workbench--preset))))
       (save-excursion
         (save-restriction
 
           (if preset-spec
-              (add-file-local-variable 'gptel--preset gptel--preset)
-            (delete-file-local-variable 'gptel--preset))
+              (add-file-local-variable 'ai-workbench--preset ai-workbench--preset)
+            (delete-file-local-variable 'ai-workbench--preset))
 
           ;; Model and backend
-          (if (gptel--preset-mismatch-value preset-spec :model gptel-model)
-              (add-file-local-variable 'gptel-model gptel-model))
-          (if (gptel--preset-mismatch-value preset-spec :backend gptel-backend)
-              (add-file-local-variable 'gptel--backend-name
-                                       (gptel-backend-name gptel-backend)))
+          (if (ai-workbench--preset-mismatch-value preset-spec :model ai-workbench-model)
+              (add-file-local-variable 'ai-workbench-model ai-workbench-model))
+          (if (ai-workbench--preset-mismatch-value preset-spec :backend ai-workbench-backend)
+              (add-file-local-variable 'ai-workbench--backend-name
+                                       (ai-workbench-backend-name ai-workbench-backend)))
           ;; System message compat
           ;; TODO(v1.0): Remove this fix for duplicate system prompts
-          (delete-file-local-variable 'gptel--system-message)
+          (delete-file-local-variable 'ai-workbench--system-message)
           ;; System message
-          (let ((parsed (car-safe (gptel--parse-directive gptel-system-prompt))))
-            (if (gptel--preset-mismatch-value preset-spec :system parsed)
-                (add-file-local-variable 'gptel-system-prompt parsed)
-              (delete-file-local-variable 'gptel-system-prompt)))
+          (let ((parsed (car-safe (ai-workbench--parse-directive ai-workbench-system-prompt))))
+            (if (ai-workbench--preset-mismatch-value preset-spec :system parsed)
+                (add-file-local-variable 'ai-workbench-system-prompt parsed)
+              (delete-file-local-variable 'ai-workbench-system-prompt)))
           ;; Tools
-          (let ((tool-names (mapcar #'gptel-tool-name gptel-tools)))
-            (if (gptel--preset-mismatch-value preset-spec :tools tool-names)
-                (add-file-local-variable 'gptel--tool-names tool-names)
-              (delete-file-local-variable 'gptel--tool-names)))
+          (let ((tool-names (mapcar #'ai-workbench-tool-name ai-workbench-llm-tools)))
+            (if (ai-workbench--preset-mismatch-value preset-spec :tools tool-names)
+                (add-file-local-variable 'ai-workbench--tool-names tool-names)
+              (delete-file-local-variable 'ai-workbench--tool-names)))
           ;; Temperature, max tokens and cutoff
-          (if (and (gptel--preset-mismatch-value preset-spec :temperature gptel-temperature)
-                   (not (equal (default-value 'gptel-temperature) gptel-temperature)))
-              (add-file-local-variable 'gptel-temperature gptel-temperature)
-            (delete-file-local-variable 'gptel-temperature))
-          (if (and (gptel--preset-mismatch-value preset-spec :max-tokens gptel-max-tokens)
-                   gptel-max-tokens)
-              (add-file-local-variable 'gptel-max-tokens gptel-max-tokens)
-            (delete-file-local-variable 'gptel-max-tokens))
-          (if (and (gptel--preset-mismatch-value
-                    preset-spec :num-messages-to-send gptel--num-messages-to-send)
-                   (natnump gptel--num-messages-to-send))
-              (add-file-local-variable 'gptel--num-messages-to-send
-                                       gptel--num-messages-to-send)
-            (delete-file-local-variable 'gptel--num-messages-to-send))
-          (add-file-local-variable 'gptel--bounds (gptel--get-buffer-bounds)))))))
+          (if (and (ai-workbench--preset-mismatch-value preset-spec :temperature ai-workbench-temperature)
+                   (not (equal (default-value 'ai-workbench-temperature) ai-workbench-temperature)))
+              (add-file-local-variable 'ai-workbench-temperature ai-workbench-temperature)
+            (delete-file-local-variable 'ai-workbench-temperature))
+          (if (and (ai-workbench--preset-mismatch-value preset-spec :max-tokens ai-workbench-max-tokens)
+                   ai-workbench-max-tokens)
+              (add-file-local-variable 'ai-workbench-max-tokens ai-workbench-max-tokens)
+            (delete-file-local-variable 'ai-workbench-max-tokens))
+          (if (and (ai-workbench--preset-mismatch-value
+                    preset-spec :num-messages-to-send ai-workbench--num-messages-to-send)
+                   (natnump ai-workbench--num-messages-to-send))
+              (add-file-local-variable 'ai-workbench--num-messages-to-send
+                                       ai-workbench--num-messages-to-send)
+            (delete-file-local-variable 'ai-workbench--num-messages-to-send))
+          (add-file-local-variable 'ai-workbench--bounds (ai-workbench--get-buffer-bounds)))))))
 
 
 ;;; Minor modes and UI
 
 ;; NOTE: It's not clear that this is the best strategy:
-(cl-pushnew '(gptel . t) (default-value 'text-property-default-nonsticky)
+(cl-pushnew '(ai-workbench-engine . t) (default-value 'text-property-default-nonsticky)
             :test #'equal)
 
-(defun gptel--inherit-stickiness (beg end _pre)
+(defun ai-workbench--inherit-stickiness (beg end _pre)
   "Mark any change to an LLM response region as a response.
 
-Intended to be added to `after-change-functions' in gptel chat buffers,
+Intended to be added to `after-change-functions' in ai-workbench-engine chat buffers,
 which see for BEG, END and PRE."
   (and (/= beg end) (< end (point-max))
-       (and-let* ((val (get-text-property end 'gptel)))
+       (and-let* ((val (get-text-property end 'ai-workbench-engine)))
          (add-text-properties
-          beg end `(gptel ,val front-sticky (gptel))))))
+          beg end `(ai-workbench-engine ,val front-sticky (ai-workbench-engine))))))
 
-(defun gptel-markdown--annotate-links (beg end)
-  "Annotate Markdown links whose sources will be sent with `gptel-send'.
+(defun ai-workbench-markdown--annotate-links (beg end)
+  "Annotate Markdown links whose sources will be sent with `ai-workbench-send'.
 
 Search between BEG and END."
-  (when gptel-track-media
+  (when ai-workbench-track-media
     (save-excursion
       (goto-char beg) (forward-line -1)
       (let ((link-ovs (cl-loop for o in (overlays-in (point) end)
-                               if (overlay-get o 'gptel-track-media)
+                               if (overlay-get o 'ai-workbench-track-media)
                                collect o into os finally return os)))
-        (while (re-search-forward gptel-markdown--link-regex end t)
-          (unless (gptel--in-response-p (1- (point)))
+        (while (re-search-forward ai-workbench-markdown--link-regex end t)
+          (unless (ai-workbench--in-response-p (1- (point)))
             (let* ((link (markdown-link-at-pos (point)))
                    (from (car link)) (to (cadr link))
-                   (link-status (gptel-markdown--validate-link link))
+                   (link-status (ai-workbench-markdown--validate-link link))
                    (ov (cl-loop for o in (overlays-in from to)
-                                if (overlay-get o 'gptel-track-media)
+                                if (overlay-get o 'ai-workbench-track-media)
                                 return o)))
               (if ov                    ; Ensure overlay over each link
                   (progn (move-overlay ov from to)
                          (setq link-ovs (delq ov link-ovs)))
                 (setq ov (make-overlay from to nil t))
-                (overlay-put ov 'gptel-track-media t)
+                (overlay-put ov 'ai-workbench-track-media t)
                 (overlay-put ov 'evaporate t)
                 (overlay-put ov 'priority -80))
               ;; Check if link will be sent, and annotate accordingly
-              (gptel--annotate-link ov link-status))))
+              (ai-workbench--annotate-link ov link-status))))
         (and link-ovs (mapc #'delete-overlay link-ovs))))
     `(jit-lock-bounds ,beg . ,end)))
 
 ;;;; Header line formatting
-(defvar gptel--header-line-info
+(defvar ai-workbench--header-line-info
   '(:eval
-    (let* ((model (gptel--model-name gptel-model))
+    (let* ((model (ai-workbench--model-name ai-workbench-model))
            (system
             (propertize
              (buttonize
               (format "[Prompt: %s]"
-                      (or (car-safe (rassoc gptel-system-prompt gptel-directives))
-                          (gptel--describe-directive gptel-system-prompt 15)))
-              (lambda (&rest _) (gptel-system-prompt)))
+                      (or (car-safe (rassoc ai-workbench-system-prompt ai-workbench-directives))
+                          (ai-workbench--describe-directive ai-workbench-system-prompt 15)))
+              (lambda (&rest _) (ai-workbench-system-prompt)))
              'mouse-face 'highlight
              'help-echo "System message for session"))
            (context
-            (and gptel-context
+            (and ai-workbench-context
                  (cl-loop
-                  for entry in gptel-context
+                  for entry in ai-workbench-context
                   if (bufferp (or (car-safe entry) entry)) count it into bufs
                   else count (stringp (or (car-safe entry) entry)) into files
                   finally return
@@ -872,23 +872,23 @@ Search between BEG and END."
                             (and (> files 0) (format "%d file" files))
                             (and (> files 1) "s") "]")
                     (lambda (&rest _)
-                      (require 'gptel-context)
-                      (gptel-context--buffer-setup)))
+                      (require 'ai-workbench-context)
+                      (ai-workbench-context--buffer-setup)))
                    'mouse-face 'highlight
-                   'help-echo "Active gptel context"))))
+                   'help-echo "Active ai-workbench-engine context"))))
            (toggle-track-media
             (lambda (&rest _)
-              (setq-local gptel-track-media (not gptel-track-media))
-              (if gptel-track-media
+              (setq-local ai-workbench-track-media (not ai-workbench-track-media))
+              (if ai-workbench-track-media
                   (progn
-                    (run-hooks 'gptel-refresh-buffer-hook)
+                    (run-hooks 'ai-workbench-refresh-buffer-hook)
                     (message "Sending media from included links."))
-                (without-restriction (gptel--annotate-link-clear))
+                (without-restriction (ai-workbench--annotate-link-clear))
                 (message "Ignoring links.  Only link text will be sent."))
               (run-at-time 0 nil #'force-mode-line-update)))
            (track-media
-            (and (gptel--model-capable-p 'media)
-                 (if gptel-track-media
+            (and (ai-workbench--model-capable-p 'media)
+                 (if ai-workbench-track-media
                      (propertize
                       (buttonize "[Media: Send]" toggle-track-media)
                       'mouse-face 'highlight
@@ -901,36 +901,36 @@ Search between BEG and END."
                     "Ignoring media from links/urls.\nClick to toggle"))))
            (toggle-tools (lambda (&rest _) (interactive)
                            (run-at-time 0 nil
-                                        (lambda () (call-interactively #'gptel-tools)))))
-           (tools (when (and gptel-use-tools gptel-tools)
+                                        (lambda () (call-interactively #'ai-workbench-llm-tools)))))
+           (tools (when (and ai-workbench-use-tools ai-workbench-llm-tools)
                     (propertize
-                     (buttonize (pcase (length gptel-tools)
+                     (buttonize (pcase (length ai-workbench-llm-tools)
                                   (0 "[No tools]") (1 "[1 tool]")
                                   (len (format "[%d tools]" len)))
                                 toggle-tools)
                      'mouse-face 'highlight
                      'help-echo "Select tools")))
            (usage
-            (and-let* ((idx (car-safe gptel--token-usage-strings))
-                       (entry (or (nth (1+ idx) gptel--token-usage-strings)
+            (and-let* ((idx (car-safe ai-workbench--token-usage-strings))
+                       (entry (or (nth (1+ idx) ai-workbench--token-usage-strings)
                                   "[usage...]"))
                        (noinfo "[No info]")
                        (toggle-usage
                         (lambda (strings) (interactive)
                           (and (car-safe strings)
                                (cl-callf (lambda (pos) (% (1+ pos) 2)) (car strings))))))
-              (buttonize entry toggle-usage gptel--token-usage-strings
+              (buttonize entry toggle-usage ai-workbench--token-usage-strings
                          (concat "Token usage (C = cached tokens)\nLast request: "
-                                 (or (cadr gptel--token-usage-strings) noinfo)
+                                 (or (cadr ai-workbench--token-usage-strings) noinfo)
                                  "\nThis buffer:  "
-                                 (or (caddr gptel--token-usage-strings) noinfo))))))
+                                 (or (caddr ai-workbench--token-usage-strings) noinfo))))))
       (let ((rhs (concat
                   usage (and usage " ") tools (and tools " ")
                   track-media (and track-media " ")
                   context (and context " ") system " "
                   (propertize
                    (buttonize (concat "[" model "]")
-                              (lambda (&rest _) (gptel-menu)))
+                              (lambda (&rest _) (ai-workbench-menu)))
                    'mouse-face 'highlight
                    'help-echo "Model in use"))))
         (concat
@@ -941,10 +941,10 @@ Search between BEG and END."
               `(space :align-to (- right (,(string-pixel-width rhs))))
             `(space :align-to (- right ,(+ 5 (string-width rhs))))))
          rhs))))
-  "Information segment for the header-line in `gptel-mode'.")
+  "Information segment for the header-line in `ai-workbench-mode'.")
 
-(defun gptel-use-header-line ()
-  "Set up the header-line for a gptel buffer.
+(defun ai-workbench-use-header-line ()
+  "Set up the header-line for a ai-workbench-engine buffer.
 
 It is composed of three segments: the backend name, the
 status (Ready/Waiting etc) and the info segment, showing the current
@@ -952,13 +952,13 @@ context, tools, system prompt, model and more."
   (setq
    header-line-format
    (list '(:eval (concat (propertize " " 'display '(space :align-to 0))
-                         (format "%s" (gptel-backend-name gptel-backend))))
+                         (format "%s" (ai-workbench-backend-name ai-workbench-backend))))
          (propertize " Ready" 'face 'success)
-         gptel--header-line-info)))
+         ai-workbench--header-line-info)))
 
 ;;;; Token usage display UI
-(defvar-local gptel--token-usage nil
-  "Token usage details for gptel.
+(defvar-local ai-workbench--token-usage nil
+  "Token usage details for ai-workbench-engine.
 
 This is a list of two plists, the token usage for the ongoing/last
 request and for the buffer/session:
@@ -966,14 +966,14 @@ request and for the buffer/session:
   ((:input ... :output ... :cache ... :cached ...)
    (:input ... :output ... :cache ... :cached ...))")
 
-(defvar-local gptel--token-usage-strings nil
+(defvar-local ai-workbench--token-usage-strings nil
   "Token usage strings formatted for display.
 
 This is a list (IDX REQUEST BUFFER), where IDX is the usage type to
 display (0 or 1), and REQUEST and BUFFER are the token usage for the
 last request and the buffer/session.")
 
-(defun gptel--format-token-usage (token-plist)
+(defun ai-workbench--format-token-usage (token-plist)
   "Format TOKEN-PLIST (token usage) for display."
   (when token-plist
     (let ((input (plist-get token-plist :input))
@@ -988,128 +988,128 @@ last request and the buffer/session.")
                         "↑"))
        (and output (concat " " (file-size-human-readable output 'si) "↓")) "]"))))
 
-(defun gptel--update-token-usage (tokens &optional tokens-full)
+(defun ai-workbench--update-token-usage (tokens &optional tokens-full)
   "Update token usage information for buffer from TOKENS.
 
 TOKENS is the token usage for the current turn.
 TOKENS-FULL is the cumulative token usage for the request (so far)."
   (when tokens
     (let ((tokens-full (or tokens-full tokens)))
-      (if (not gptel--token-usage)
-          (setq gptel--token-usage (list tokens-full (copy-sequence tokens-full)))
-        (setcar gptel--token-usage tokens-full)
-        (cl-callf gptel--sum-plists (nth 1 gptel--token-usage) tokens))
-      (unless gptel--token-usage-strings ;show buffer usage by default
-        (setq gptel--token-usage-strings (list 1)))
-      (setcdr gptel--token-usage-strings
-              (mapcar #'gptel--format-token-usage gptel--token-usage)))))
+      (if (not ai-workbench--token-usage)
+          (setq ai-workbench--token-usage (list tokens-full (copy-sequence tokens-full)))
+        (setcar ai-workbench--token-usage tokens-full)
+        (cl-callf ai-workbench--sum-plists (nth 1 ai-workbench--token-usage) tokens))
+      (unless ai-workbench--token-usage-strings ;show buffer usage by default
+        (setq ai-workbench--token-usage-strings (list 1)))
+      (setcdr ai-workbench--token-usage-strings
+              (mapcar #'ai-workbench--format-token-usage ai-workbench--token-usage)))))
 
 ;;;; Minor mode
 ;;;###autoload
-(define-minor-mode gptel-mode
+(define-minor-mode ai-workbench-mode
   "Minor mode for interacting with LLMs."
   :lighter " GPT"
   :keymap
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c RET") #'gptel-send)
+    (define-key map (kbd "C-c RET") #'ai-workbench-send)
     map)
-  (if gptel-mode
+  (if ai-workbench-mode
       (progn
         (unless (derived-mode-p 'org-mode 'markdown-mode 'text-mode)
-          (gptel-mode -1)
-          (user-error (format "`gptel-mode' is not supported in `%s'." major-mode)))
-        (add-hook 'before-save-hook #'gptel--save-state nil t)
-        (add-hook 'after-change-functions 'gptel--inherit-stickiness nil t)
-        (gptel--prettify-preset)
+          (ai-workbench-mode -1)
+          (user-error (format "`ai-workbench-mode' is not supported in `%s'." major-mode)))
+        (add-hook 'before-save-hook #'ai-workbench--save-state nil t)
+        (add-hook 'after-change-functions 'ai-workbench--inherit-stickiness nil t)
+        (ai-workbench--prettify-preset)
         (cond
          ((derived-mode-p 'org-mode)
-          (require 'gptel-org)
-          (jit-lock-register 'gptel-org--annotate-links)
+          (require 'ai-workbench-org)
+          (jit-lock-register 'ai-workbench-org--annotate-links)
           ;; Work around bug in `org-fontify-extend-region'.
-          (add-hook 'gptel-post-response-functions #'font-lock-flush nil t))
+          (add-hook 'ai-workbench-post-response-functions #'font-lock-flush nil t))
          ((derived-mode-p 'markdown-mode)
           (font-lock-add-keywords ;keymap is a font-lock-managed property in markdown-mode
            nil '(("^```[ \t]*\\([[:alpha:]][^\n]*\\)?$" ;match code fences
-                  0 (list 'face nil 'keymap gptel--markdown-block-map))))
-          (jit-lock-register 'gptel-markdown--annotate-links)))
-        (gptel--restore-state)
-        (if gptel-use-header-line
-            (progn (setq gptel--old-header-line header-line-format)
-                   (gptel-use-header-line))
-          (gptel--update-status " Ready" 'success)))
-    (remove-hook 'before-save-hook #'gptel--save-state t)
-    (remove-hook 'after-change-functions 'gptel--inherit-stickiness t)
+                  0 (list 'face nil 'keymap ai-workbench--markdown-block-map))))
+          (jit-lock-register 'ai-workbench-markdown--annotate-links)))
+        (ai-workbench--restore-state)
+        (if ai-workbench-use-header-line
+            (progn (setq ai-workbench--old-header-line header-line-format)
+                   (ai-workbench-use-header-line))
+          (ai-workbench--update-status " Ready" 'success)))
+    (remove-hook 'before-save-hook #'ai-workbench--save-state t)
+    (remove-hook 'after-change-functions 'ai-workbench--inherit-stickiness t)
     (cond
      ((derived-mode-p 'org-mode)
-      (jit-lock-unregister #'gptel-org--annotate-links)
-      (without-restriction (gptel--annotate-link-clear)))
+      (jit-lock-unregister #'ai-workbench-org--annotate-links)
+      (without-restriction (ai-workbench--annotate-link-clear)))
      ((derived-mode-p 'markdown-mode)
-      (jit-lock-unregister #'gptel-markdown--annotate-links)
-      (without-restriction (gptel--annotate-link-clear))))
-    (gptel--prettify-preset)
-    (if gptel-use-header-line
-        (setq header-line-format gptel--old-header-line
-              gptel--old-header-line nil)
+      (jit-lock-unregister #'ai-workbench-markdown--annotate-links)
+      (without-restriction (ai-workbench--annotate-link-clear))))
+    (ai-workbench--prettify-preset)
+    (if ai-workbench-use-header-line
+        (setq header-line-format ai-workbench--old-header-line
+              ai-workbench--old-header-line nil)
       (setq mode-line-process nil))))
 
 ;; ;TODO(request-lib): Declaration no longer needed
-(defvar gptel--fsm-last)                ;Defined further below
-(defun gptel--update-status (msg &optional face)
+(defvar ai-workbench--fsm-last)                ;Defined further below
+(defun ai-workbench--update-status (msg &optional face)
   "Update status MSG with FACE."
-  (when gptel-mode
-    (let* ((inspect (lambda (&rest _) (gptel--inspect-fsm)))
+  (when ai-workbench-mode
+    (let* ((inspect (lambda (&rest _) (ai-workbench--inspect-fsm)))
            (button (propertize (buttonize msg inspect)
                               'mouse-face 'highlight)))
       (when face (setq button (propertize button 'face face)))
-      (if gptel-use-header-line
+      (if ai-workbench-use-header-line
           (and (consp header-line-format) (setf (nth 1 header-line-format) button))
         (if (equal msg " Ready")
             (setq mode-line-process
-                  `(:eval (concat " " (buttonize (gptel--model-name gptel-model)
+                  `(:eval (concat " " (buttonize (ai-workbench--model-name ai-workbench-model)
                                                  ,inspect))))
           (setq mode-line-process button)
           (message msg))))
     (force-mode-line-update)))
 
 
-;;;; gptel-highlight-mode
+;;;; ai-workbench-highlight-mode
 
-(defcustom gptel-highlight-methods '(margin)
-  "Types of LLM response highlighting used by `gptel-highlight-mode'.
+(defcustom ai-workbench-highlight-methods '(margin)
+  "Types of LLM response highlighting used by `ai-workbench-highlight-mode'.
 
 This must be a list of symbols denoting types of highlighting for LLM responses:
-- face: highlight LLM responses using face `gptel-response-highlight'.
+- face: highlight LLM responses using face `ai-workbench-response-highlight'.
 - fringe: highlight using a (left) fringe marker.
 - margin: highlight in the (left) display margin.
 
 margin and fringe markings are mutually exclusive, and use the
-`gptel-response-fringe-highlight' face."
+`ai-workbench-response-fringe-highlight' face."
   :type '(set (const :tag "Fringe marker" fringe)
               (const :tag "Face highlighting" face)
               (const :tag "Margin indicator" margin))
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
-(defface gptel-response-highlight
+(defface ai-workbench-response-highlight
   '((((background light) (min-colors 88)) :background "linen" :extend t)
     (((background dark)  (min-colors 88)) :background "gray14" :extend t)
     (t :inherit mode-line))
-  "Face used to highlight LLM responses when using `gptel-highlight-mode'.
+  "Face used to highlight LLM responses when using `ai-workbench-highlight-mode'.
 
-To enable this face for responses, `gptel-highlight-methods' must be set."
-  :group 'gptel)
+To enable this face for responses, `ai-workbench-highlight-methods' must be set."
+  :group 'ai-workbench-engine)
 
-(defface gptel-response-fringe-highlight
+(defface ai-workbench-response-fringe-highlight
   ;; NOTE: Remove conditional after we drop Emacs 28.1 (#1254)
   (if (< emacs-major-version 29)
       '((t :inherit outline-1 :height 1.0))
     '((t :inherit outline-1 :height reset)))
-  "LLM response fringe/margin face when using `gptel-highlight-mode'.
+  "LLM response fringe/margin face when using `ai-workbench-highlight-mode'.
 
-To enable response highlights in the fringe, `gptel-highlight-methods'
+To enable response highlights in the fringe, `ai-workbench-highlight-methods'
 must be set."
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
-(define-fringe-bitmap 'gptel-highlight-fringe
+(define-fringe-bitmap 'ai-workbench-highlight-fringe
   (make-vector 28 #b01100000)
   nil nil 'center)
 
@@ -1120,7 +1120,7 @@ must be set."
 ;; BOX DRAWINGS HEAVY VERTICAL  0x002503
 ;; VERTICAL ONE EIGHTH BLOCK-2  0x01FB70
 
-(defun gptel-highlight--margin-prefix (type)
+(defun ai-workbench-highlight--margin-prefix (type)
   "Create margin prefix string for TYPE.
 
 Supported TYPEs are response, ignore and tool calls."
@@ -1128,165 +1128,165 @@ Supported TYPEs are response, ignore and tool calls."
               `( (margin left-margin)
                  ,(propertize "▎" 'face
                               (pcase type
-                                ('response 'gptel-response-fringe-highlight)
+                                ('response 'ai-workbench-response-fringe-highlight)
                                 ('ignore 'shadow)
                                 (`(tool . ,_) 'shadow))))))
 
-(defun gptel-highlight--fringe-prefix (type)
+(defun ai-workbench-highlight--fringe-prefix (type)
   "Create fringe prefix string for TYPE.
 
 Supported TYPEs are response, ignore and tool calls."
   (propertize ">" 'display
-              `( left-fringe gptel-highlight-fringe
+              `( left-fringe ai-workbench-highlight-fringe
                  ,(pcase type
-                    ('response 'gptel-response-fringe-highlight)
+                    ('response 'ai-workbench-response-fringe-highlight)
                     ('ignore 'shadow)
                     (`(tool . ,_) 'shadow)))))
 
-(defun gptel-highlight--decorate (ov &optional val)
-  "Decorate gptel indicator overlay OV whose type is VAL."
+(defun ai-workbench-highlight--decorate (ov &optional val)
+  "Decorate ai-workbench-engine indicator overlay OV whose type is VAL."
   (overlay-put ov 'evaporate t)
-  (overlay-put ov 'gptel-highlight t)
-  (when (memq 'face gptel-highlight-methods)
+  (overlay-put ov 'ai-workbench-highlight t)
+  (when (memq 'face ai-workbench-highlight-methods)
     (overlay-put ov 'font-lock-face
                  (pcase val
-                   ('response 'gptel-response-highlight)
+                   ('response 'ai-workbench-response-highlight)
                    ('ignore 'shadow)
                    (`(tool . ,_) 'shadow))))
   (when-let* ((prefix
-               (cond ((memq 'margin gptel-highlight-methods)
-                      (gptel-highlight--margin-prefix (or val 'response)))
-                     ((memq 'fringe gptel-highlight-methods)
-                      (gptel-highlight--fringe-prefix (or val 'response))))))
+               (cond ((memq 'margin ai-workbench-highlight-methods)
+                      (ai-workbench-highlight--margin-prefix (or val 'response)))
+                     ((memq 'fringe ai-workbench-highlight-methods)
+                      (ai-workbench-highlight--fringe-prefix (or val 'response))))))
     (overlay-put ov 'line-prefix prefix)
     (overlay-put ov 'wrap-prefix prefix)))
 
-(defun gptel-highlight--update (beg end)
-  "JIT-lock function: mark gptel response/reasoning regions.
+(defun ai-workbench-highlight--update (beg end)
+  "JIT-lock function: mark ai-workbench-engine response/reasoning regions.
 
 BEG and END delimit the region to refresh."
-  (save-excursion                ;Scan across region for the gptel text property
+  (save-excursion                ;Scan across region for the ai-workbench-engine text property
     (let ((prev-pt (goto-char end)))
       (while (and (goto-char (previous-single-property-change
-                              (point) 'gptel nil beg))
+                              (point) 'ai-workbench-engine nil beg))
                   (/= (point) prev-pt))
-        (pcase (get-char-property (point) 'gptel)
+        (pcase (get-char-property (point) 'ai-workbench-engine)
           ((and (or 'response 'ignore `(tool . ,_)) val)
            (if-let* ((ov (or (cdr-safe (get-char-property-and-overlay
-                                        (point) 'gptel-highlight))
+                                        (point) 'ai-workbench-highlight))
                              (cdr-safe (get-char-property-and-overlay
-                                        prev-pt 'gptel-highlight))))
+                                        prev-pt 'ai-workbench-highlight))))
                      (from (overlay-start ov)) (to (overlay-end ov)))
                (unless (<= from (point) prev-pt to)
                  (move-overlay ov (min from (point)) (max to prev-pt)))
-             (gptel-highlight--decorate ;Or make new overlay covering just region
+             (ai-workbench-highlight--decorate ;Or make new overlay covering just region
               (make-overlay (point) prev-pt nil t) val)))
           ('nil                     ;If there's an overlay, we need to split it.
            (when-let* ((ov (cdr-safe (get-char-property-and-overlay
-                                      (point) 'gptel-highlight)))
+                                      (point) 'ai-workbench-highlight)))
                        (from (overlay-start ov)) (to (overlay-end ov)))
              (move-overlay ov from (point)) ;Move overlay to left side
-             (gptel-highlight--decorate     ;Make a new one on the right
+             (ai-workbench-highlight--decorate     ;Make a new one on the right
               (make-overlay prev-pt to nil t)
-              (get-char-property prev-pt 'gptel)))))
+              (get-char-property prev-pt 'ai-workbench-engine)))))
         (setq prev-pt (point)))))
   `(jit-lock-bounds ,beg . ,end))
 
-(define-minor-mode gptel-highlight-mode
+(define-minor-mode ai-workbench-highlight-mode
   "Visually highlight LLM respones regions.
 
 Highlighting is via fringe or margin markers, and optionally a response
-face.  See `gptel-highlight-methods' for highlighting methods, and
-`gptel-response-highlight' and `gptel-response-fringe-highlight' for the
+face.  See `ai-workbench-highlight-methods' for highlighting methods, and
+`ai-workbench-response-highlight' and `ai-workbench-response-fringe-highlight' for the
 faces.
 
-This minor mode can be used anywhere in Emacs, and not just gptel chat
+This minor mode can be used anywhere in Emacs, and not just ai-workbench-engine chat
 buffers."
   :lighter nil
   :global nil
   (cond
-   (gptel-highlight-mode
-    (when (memq 'margin gptel-highlight-methods)
+   (ai-workbench-highlight-mode
+    (when (memq 'margin ai-workbench-highlight-methods)
       (setq left-margin-width (1+ left-margin-width))
       (if-let* ((win (get-buffer-window (current-buffer))))
           (set-window-buffer win (current-buffer))))
-    (jit-lock-register #'gptel-highlight--update)
-    (gptel-highlight--update (point-min) (point-max)))
-   (t (when (memq 'margin gptel-highlight-methods)
+    (jit-lock-register #'ai-workbench-highlight--update)
+    (ai-workbench-highlight--update (point-min) (point-max)))
+   (t (when (memq 'margin ai-workbench-highlight-methods)
         (setq left-margin-width (max (1- left-margin-width) 0))
         (if-let* ((win (get-buffer-window (current-buffer))))
             (set-window-buffer win (current-buffer))))
-      (jit-lock-unregister #'gptel-highlight--update)
+      (jit-lock-unregister #'ai-workbench-highlight--update)
       (without-restriction
-        (remove-overlays nil nil 'gptel-highlight t)))))
+        (remove-overlays nil nil 'ai-workbench-highlight t)))))
 
 
-;;; State machine additions for `gptel-send'.
+;;; State machine additions for `ai-workbench-send'.
 
-(defvar gptel-send--transitions
+(defvar ai-workbench-send--transitions
   `((INIT . ((t                       . WAIT)))
     (WAIT . ((t                       . TYPE)))
-    (TYPE . ((,#'gptel--error-p       . ERRS)
-             (,#'gptel--tool-use-p    . TPRE)
+    (TYPE . ((,#'ai-workbench--error-p       . ERRS)
+             (,#'ai-workbench--tool-use-p    . TPRE)
              (t                       . DONE)))
-    (TPRE . ((,#'gptel--error-p       . ERRS)
+    (TPRE . ((,#'ai-workbench--error-p       . ERRS)
              (t                       . TOOL)))
     (TOOL . ((t                       . TRET)))
-    (TRET . ((,#'gptel--error-p       . ERRS)
-             (,#'gptel--tool-result-p . WAIT)
+    (TRET . ((,#'ai-workbench--error-p       . ERRS)
+             (,#'ai-workbench--tool-result-p . WAIT)
              (t                       . DONE))))
-  "Alist specifying state transitions for `gptel-send'.
+  "Alist specifying state transitions for `ai-workbench-send'.
 
-See `gptel-request--transitions' for details.")
+See `ai-workbench-request--transitions' for details.")
 
-(defvar gptel-send--handlers
-  `((WAIT ,#'gptel--handle-wait ,#'gptel--update-wait)
-    (TYPE ,#'gptel--handle-pre-insert)
-    (ERRS ,#'gptel--handle-error ,#'gptel--fsm-last)
-    (TPRE ,#'gptel--handle-token-usage ,#'gptel--handle-pre-tool
-          ,#'gptel--fsm-transition)
-    (TOOL ,#'gptel--update-tool-call ,#'gptel--handle-tool-use
-          ,#'gptel--update-tool-ask)
-    (TRET ,#'gptel--handle-post-tool ,#'gptel--handle-tool-result)
-    (DONE ,#'gptel--handle-post-insert ,#'gptel--fsm-last)
-    (ABRT ,#'gptel--handle-abort))
-  "Alist specifying handlers for `gptel-send' state transitions.
+(defvar ai-workbench-send--handlers
+  `((WAIT ,#'ai-workbench--handle-wait ,#'ai-workbench--update-wait)
+    (TYPE ,#'ai-workbench--handle-pre-insert)
+    (ERRS ,#'ai-workbench--handle-error ,#'ai-workbench--fsm-last)
+    (TPRE ,#'ai-workbench--handle-token-usage ,#'ai-workbench--handle-pre-tool
+          ,#'ai-workbench--fsm-transition)
+    (TOOL ,#'ai-workbench--update-tool-call ,#'ai-workbench--handle-tool-use
+          ,#'ai-workbench--update-tool-ask)
+    (TRET ,#'ai-workbench--handle-post-tool ,#'ai-workbench--handle-tool-result)
+    (DONE ,#'ai-workbench--handle-post-insert ,#'ai-workbench--fsm-last)
+    (ABRT ,#'ai-workbench--handle-abort))
+  "Alist specifying handlers for `ai-workbench-send' state transitions.
 
-See `gptel-request--handlers' for details.")
+See `ai-workbench-request--handlers' for details.")
 
-(defvar-local gptel--fsm-last nil
+(defvar-local ai-workbench--fsm-last nil
   "State machine for latest request in the buffer.")
 
-(defun gptel--fsm-last (fsm)
+(defun ai-workbench--fsm-last (fsm)
     "Capture the latest request state FSM for introspection."
-    (let ((info (gptel-fsm-info fsm)))
-      (unless gptel-log-level
+    (let ((info (ai-workbench-fsm-info fsm)))
+      (unless ai-workbench-log-level
         (let ((data (plist-get info :data)))
           (dolist (key '(:messages :contents :query))
             (setf (plist-get data key) nil))))
-      (setf (gptel-fsm-info fsm)
+      (setf (ai-workbench-fsm-info fsm)
             (plist-put info :end-time (current-time-string)))
       (with-current-buffer (plist-get info :buffer)
-        (setq gptel--fsm-last fsm))))
+        (setq ai-workbench--fsm-last fsm))))
 
-(defun gptel--inspect-fsm (&optional fsm)
-  "Inspect gptel request state FSM.
+(defun ai-workbench--inspect-fsm (&optional fsm)
+  "Inspect ai-workbench-engine request state FSM.
 
 FSM defaults to the state of the last request in the current
 buffer."
   (unless fsm
-    (setq fsm (or gptel--fsm-last
+    (setq fsm (or ai-workbench--fsm-last
                   (cadr (cl-find-if
                          (lambda (proc-list)
                            (eq (thread-first (cadr proc-list)
-                                             (gptel-fsm-info)
+                                             (ai-workbench-fsm-info)
                                              (plist-get :buffer))
                                (current-buffer)))
-                         gptel--request-alist)))))
-  (unless (cl-typep fsm 'gptel-fsm)
-    (user-error "No gptel request log in this buffer yet!"))
+                         ai-workbench--request-alist)))))
+  (unless (cl-typep fsm 'ai-workbench-fsm)
+    (user-error "No ai-workbench-engine request log in this buffer yet!"))
   (require 'tabulated-list)
-  (with-current-buffer (get-buffer-create "*gptel-diagnostic*")
+  (with-current-buffer (get-buffer-create "*ai-workbench-diagnostic*")
     (setq tabulated-list-format [("Request attribute" 30 t) ("Value" 30)])
     (let* ((pb (lambda (s) (propertize s 'face 'font-lock-builtin-face)))
            (ps (lambda (s) (propertize s 'face 'font-lock-string-face)))
@@ -1297,7 +1297,7 @@ buffer."
                              ((stringp s) (string-replace "\n" "⮐ " s))
                              (t (prin1-to-string s)))))
            (inhibit-read-only t)
-           (info (gptel-fsm-info fsm))
+           (info (ai-workbench-fsm-info fsm))
            (entries-info
             (cl-loop
              for idx upfrom 3
@@ -1319,7 +1319,7 @@ buffer."
             (nconc (list `(2 [,(funcall pb ":state")
                               ,(funcall ps
                                 (mapconcat
-                                 fmt (reverse (cons (gptel-fsm-state fsm)
+                                 fmt (reverse (cons (ai-workbench-fsm-state fsm)
                                                (plist-get info :history)))
                                  " → "))]))
                    entries-info
@@ -1337,24 +1337,24 @@ buffer."
          (body-function . select-window))))))
 
 ;;;; State machine handlers
-;; The next few functions are default state handlers for gptel-send, see
-;; `gptel-send--handlers'.
+;; The next few functions are default state handlers for ai-workbench-send, see
+;; `ai-workbench-send--handlers'.
 
-(defun gptel--handle-pre-insert (fsm)
+(defun ai-workbench--handle-pre-insert (fsm)
   "Tasks before inserting the LLM response for state FSM.
 
 Handle read-only buffers and run pre-response hooks (but only if
 the request succeeded)."
-  (let* ((info (gptel-fsm-info fsm))
+  (let* ((info (ai-workbench-fsm-info fsm))
          (start-marker (plist-get info :position)))
     (when (memq (plist-get info :callback)
-                '(gptel--insert-response gptel-curl--stream-insert-response))
+                '(ai-workbench--insert-response ai-workbench-curl--stream-insert-response))
       (with-current-buffer (marker-buffer start-marker)
         (when (or buffer-read-only (get-char-property start-marker 'read-only))
           (cond
            ((derived-mode-p 'vterm-mode)
-            (require 'gptel-integrations)
-            (gptel--vterm-pre-insert info))
+            (require 'ai-workbench-integrations)
+            (ai-workbench--vterm-pre-insert info))
            (t
             (message "Buffer is read only, displaying reply in buffer \"*LLM response*\"")
             (display-buffer
@@ -1368,130 +1368,130 @@ the request succeeded)."
                (reusable-frames . visible))))))))
     (with-current-buffer (marker-buffer start-marker)
       (when (plist-get info :stream)
-        (gptel--update-status " Typing..." 'success))
+        (ai-workbench--update-status " Typing..." 'success))
       (save-excursion
         (goto-char start-marker)
         (when (and (member (plist-get info :http-status) '("200" "100"))
-                   gptel-pre-response-hook)
-          (run-hooks 'gptel-pre-response-hook))))))
+                   ai-workbench-pre-response-hook)
+          (run-hooks 'ai-workbench-pre-response-hook))))))
 
-(defun gptel--handle-post-insert (fsm)
+(defun ai-workbench--handle-post-insert (fsm)
   "Tasks after successfully inserting the LLM response with state FSM.
 
-Indicate gptel status, pulse the inserted text and run post-response hooks.
+Indicate ai-workbench-engine status, pulse the inserted text and run post-response hooks.
 
 No state transition here since that's handled by the process sentinels."
-  (let* ((info (gptel-fsm-info fsm))
+  (let* ((info (ai-workbench-fsm-info fsm))
          (start-marker (plist-get info :position))
          (tracking-marker (or (plist-get info :tracking-marker)
                               start-marker))
          ;; start-marker may have been moved if :buffer was read-only
-         (gptel-buffer (marker-buffer start-marker)))
-    (with-current-buffer gptel-buffer
+         (ai-workbench-buffer (marker-buffer start-marker)))
+    (with-current-buffer ai-workbench-buffer
       (if (not tracking-marker)         ;Empty response
-          (when gptel-mode (gptel--update-status " Empty response" 'success))
+          (when ai-workbench-mode (ai-workbench--update-status " Empty response" 'success))
         (set-marker-insertion-type tracking-marker nil) ;Lock tracking-marker
-        (when gptel-mode
+        (when ai-workbench-mode
           (unless (plist-get info :in-place)
             (save-excursion (goto-char tracking-marker)
-                            (insert gptel-response-separator
-                                    (gptel-prompt-prefix-string))))
-          (gptel--update-status  " Ready" 'success)
-          (gptel--update-token-usage (plist-get info :tokens)
+                            (insert ai-workbench-response-separator
+                                    (ai-workbench-prompt-prefix-string))))
+          (ai-workbench--update-status  " Ready" 'success)
+          (ai-workbench--update-token-usage (plist-get info :tokens)
                                      (plist-get info :tokens-full)))))
     ;; Run hook in visible window to set window-point, BUG #269
-    (if-let* ((gptel-window (get-buffer-window gptel-buffer 'visible)))
-        (with-selected-window gptel-window
+    (if-let* ((ai-workbench-window (get-buffer-window ai-workbench-buffer 'visible)))
+        (with-selected-window ai-workbench-window
           (mapc (lambda (f) (funcall f info)) (plist-get info :post))
           (run-hook-with-args
-           'gptel-post-response-functions
+           'ai-workbench-post-response-functions
            (marker-position start-marker) (marker-position tracking-marker)))
-      (with-current-buffer gptel-buffer
+      (with-current-buffer ai-workbench-buffer
         (mapc (lambda (f) (funcall f info)) (plist-get info :post))
         (run-hook-with-args
-         'gptel-post-response-functions
+         'ai-workbench-post-response-functions
          (marker-position start-marker) (marker-position tracking-marker))))))
 
-(defun gptel--handle-error (fsm)
+(defun ai-workbench--handle-error (fsm)
   "Check for errors in request state FSM.
 
 Perform UI updates and run post-response hooks."
-  (when-let* ((info (gptel-fsm-info fsm))
+  (when-let* ((info (ai-workbench-fsm-info fsm))
               (error-data (plist-get info :error)))
     (let* ((status (plist-get info :status))
-           (gptel-buffer (plist-get info :buffer))
+           (ai-workbench-buffer (plist-get info :buffer))
            (start-marker (plist-get info :position))
            (tracking-marker (or (plist-get info :tracking-marker)
                                 start-marker))
            (backend-name
-            (gptel-backend-name
-             (buffer-local-value 'gptel-backend gptel-buffer))))
+            (ai-workbench-backend-name
+             (buffer-local-value 'ai-workbench-backend ai-workbench-buffer))))
       (if (stringp error-data)
           (message "%s error: (%s) %s" backend-name status (string-trim error-data))
         (when-let* ((error-type (plist-get error-data :type)))
           (setq status (concat "("  status ") "
-                               (string-trim (gptel--to-string error-type)))))
+                               (string-trim (ai-workbench--to-string error-type)))))
         (when-let* ((error-msg (plist-get error-data :message)))
           (message "%s error: (%s) %s" backend-name status
-                   (string-trim (gptel--to-string error-msg)))))
-      (if-let* ((gptel-window (get-buffer-window gptel-buffer 'visible)))
-          (with-selected-window gptel-window
+                   (string-trim (ai-workbench--to-string error-msg)))))
+      (if-let* ((ai-workbench-window (get-buffer-window ai-workbench-buffer 'visible)))
+          (with-selected-window ai-workbench-window
             (mapc (lambda (f) (funcall f info)) (plist-get info :post))
             (run-hook-with-args
-             'gptel-post-response-functions
+             'ai-workbench-post-response-functions
              (marker-position start-marker) (marker-position tracking-marker)))
-        (with-current-buffer gptel-buffer
+        (with-current-buffer ai-workbench-buffer
           (mapc (lambda (f) (funcall f info)) (plist-get info :post))
           (run-hook-with-args
-           'gptel-post-response-functions
+           'ai-workbench-post-response-functions
            (marker-position start-marker) (marker-position tracking-marker))))
-      (with-current-buffer gptel-buffer
-        (when gptel-mode
-          (gptel--update-status (format " Error: %s" status) 'error)
-          (gptel--update-token-usage (plist-get info :tokens)
+      (with-current-buffer ai-workbench-buffer
+        (when ai-workbench-mode
+          (ai-workbench--update-status (format " Error: %s" status) 'error)
+          (ai-workbench--update-token-usage (plist-get info :tokens)
                                      (plist-get info :tokens-full)))))))
 
-(defun gptel--handle-abort (fsm)
-  "Perform UI update on `gptel-abort' for FSM."
-  (when-let* ((info (gptel-fsm-info fsm))
-              (gptel-buffer (plist-get info :buffer))
+(defun ai-workbench--handle-abort (fsm)
+  "Perform UI update on `ai-workbench-abort' for FSM."
+  (when-let* ((info (ai-workbench-fsm-info fsm))
+              (ai-workbench-buffer (plist-get info :buffer))
               (start-marker (plist-get info :position))
               (tracking-marker (or (plist-get info :tracking-marker)
                                    start-marker)))
-    (if-let* ((gptel-window (get-buffer-window gptel-buffer 'visible)))
-        (with-selected-window gptel-window
+    (if-let* ((ai-workbench-window (get-buffer-window ai-workbench-buffer 'visible)))
+        (with-selected-window ai-workbench-window
           (mapc (lambda (f) (funcall f info)) (plist-get info :post))
           (run-hook-with-args
-           'gptel-post-response-functions
+           'ai-workbench-post-response-functions
            (marker-position start-marker) (marker-position tracking-marker)))
-      (with-current-buffer gptel-buffer
+      (with-current-buffer ai-workbench-buffer
         (mapc (lambda (f) (funcall f info)) (plist-get info :post))
         (run-hook-with-args
-         'gptel-post-response-functions
+         'ai-workbench-post-response-functions
          (marker-position start-marker) (marker-position tracking-marker))))
-    (with-current-buffer gptel-buffer
-      (when gptel-mode
-        (gptel--update-status  " Abort" 'error)
-        (gptel--update-token-usage (plist-get info :tokens)
+    (with-current-buffer ai-workbench-buffer
+      (when ai-workbench-mode
+        (ai-workbench--update-status  " Abort" 'error)
+        (ai-workbench--update-token-usage (plist-get info :tokens)
                                    (plist-get info :tokens-full))))))
 
 ;; NOTE: Some other FSM handlers do this internally instead of calling this
 ;; dedicated function.
-(defun gptel--handle-token-usage (fsm)
-  "Update token usage in gptel buffers for FSM."
-  (let* ((info (gptel-fsm-info fsm))
+(defun ai-workbench--handle-token-usage (fsm)
+  "Update token usage in ai-workbench-engine buffers for FSM."
+  (let* ((info (ai-workbench-fsm-info fsm))
          (buffer (plist-get info :buffer)))
     (when (and (buffer-live-p buffer)
-               (buffer-local-value 'gptel-mode buffer))
+               (buffer-local-value 'ai-workbench-mode buffer))
       (with-current-buffer buffer
-        (gptel--update-token-usage (plist-get info :tokens)
+        (ai-workbench--update-token-usage (plist-get info :tokens)
                                    (plist-get info :tokens-full))))))
 
-(defun gptel--handle-pre-tool (fsm)
-  "Run `gptel-pre-tool-call-functions' for FSM."
-  (let* ((info (gptel-fsm-info fsm))
+(defun ai-workbench--handle-pre-tool (fsm)
+  "Run `ai-workbench-pre-tool-call-functions' for FSM."
+  (let* ((info (ai-workbench-fsm-info fsm))
          (buffer (plist-get info :buffer)))
-    (when (buffer-local-value 'gptel-pre-tool-call-functions buffer)
+    (when (buffer-local-value 'ai-workbench-pre-tool-call-functions buffer)
       ;; This function might run many times, so only act on the remaining tool calls.
       (let ((tool-use (cl-remove-if (lambda (tc) (plist-get tc :result))
                                     (plist-get info :tool-use)))
@@ -1500,14 +1500,14 @@ Perform UI updates and run post-response hooks."
                                   :model (plist-get info :model))))
         (with-current-buffer buffer
           (run-hook-wrapped             ; Run pre tool call functions
-           'gptel-pre-tool-call-functions
+           'ai-workbench-pre-tool-call-functions
            (lambda (hook-func)
              (prog1 nil
                (dolist (tool-call tool-use)
                  (let* ((name (plist-get tool-call :name))
                         (args (plist-get tool-call :args))
                         (hook-func-result
-                         (with-demoted-errors "gptel-pre-tool-call hook error: %S"
+                         (with-demoted-errors "ai-workbench-pre-tool-call hook error: %S"
                            (funcall hook-func (nconc (list :name name :args args)
                                                      hook-func-args)))))
                    (if (plist-get hook-func-result :stop) ; Stop the request immediately
@@ -1527,11 +1527,11 @@ Perform UI updates and run post-response hooks."
                      (when (or (plist-get hook-func-result :args)
                                (plist-get hook-func-result :name))
                        ;; Merge with args in the messages array sent to the LLM
-                       (gptel--inject-tool-call
+                       (ai-workbench--inject-tool-call
                         (plist-get info :backend) (plist-get info :data)
                         tool-call hook-func-result)
                        ;; Merge with the tool-call in tool-use that actually runs
-                       (gptel--merge-plists tool-call hook-func-result))
+                       (ai-workbench--merge-plists tool-call hook-func-result))
                      ;; TODO(tool-hooks): :block behavior not final!
                      (let ((blockp (plist-get hook-func-result :block))
                            (result (plist-get hook-func-result :result)))
@@ -1543,29 +1543,29 @@ Perform UI updates and run post-response hooks."
                                          (format "Tool %s blocked by user" name))
                                        "\n</tool_call_error>")))
                        (when result
-                         (gptel--process-tool-call
-                          fsm (cl-find-if (lambda (ts) (equal (gptel-tool-name ts) name))
+                         (ai-workbench--process-tool-call
+                          fsm (cl-find-if (lambda (ts) (equal (ai-workbench-tool-name ts) name))
                                           (plist-get info :tools))
                           tool-call result))))))))))))))
 
-(defun gptel--handle-post-tool (fsm)
-  "Run `gptel-post-tool-call-functions for FSM."
-  (let* ((info (gptel-fsm-info fsm))
+(defun ai-workbench--handle-post-tool (fsm)
+  "Run `ai-workbench-post-tool-call-functions for FSM."
+  (let* ((info (ai-workbench-fsm-info fsm))
          (buffer (plist-get info :buffer)))
-    (when (buffer-local-value 'gptel-post-tool-call-functions buffer)
+    (when (buffer-local-value 'ai-workbench-post-tool-call-functions buffer)
       (let ((hook-func-args (list :buffer (buffer-name buffer)
                                   :backend (plist-get info :backend)
                                   :model (plist-get info :model))))
         (with-current-buffer buffer
           (run-hook-wrapped             ; Run pre tool call functions
-           'gptel-post-tool-call-functions
+           'ai-workbench-post-tool-call-functions
            (lambda (hook-func)
              (prog1 nil
                (dolist (tool-call (plist-get info :tool-use))
                  (let* ((name (plist-get tool-call :name))
                         (args (plist-get tool-call :args))
                         (hook-func-result
-                         (with-demoted-errors "gptel-post-tool-call hook error: %S"
+                         (with-demoted-errors "ai-workbench-post-tool-call hook error: %S"
                            (funcall hook-func
                                     (nconc (list :name name :args args
                                                  :result (plist-get tool-call :result))
@@ -1593,32 +1593,32 @@ Perform UI updates and run post-response hooks."
                          (cl-loop       ; Update results sent to callback
                           for call in (plist-get info :tool-result)
                           for (spec stored-args _) = call
-                          when (and (equal (gptel-tool-name spec) name)
+                          when (and (equal (ai-workbench-tool-name spec) name)
                                     (null (cl-set-difference
                                            stored-args args :test #'equal)))
                           do (setf (caddr call) result) and return nil
                           finally
                           (display-warning
-                           '(gptel tools)
+                           '(ai-workbench-engine tools)
                            (format "Tool %s: Could not replace tool results" name)))
                          ;; Update results sent to LLM
                          (plist-put tool-call :result result))))))))))))))
 
-(defun gptel--update-wait (fsm)
-  "Update gptel's status in FSM after sending a request."
-  (with-current-buffer (plist-get (gptel-fsm-info fsm) :buffer)
-    (when gptel-mode
-      (gptel--update-status " Waiting..." 'warning))))
+(defun ai-workbench--update-wait (fsm)
+  "Update ai-workbench-engine's status in FSM after sending a request."
+  (with-current-buffer (plist-get (ai-workbench-fsm-info fsm) :buffer)
+    (when ai-workbench-mode
+      (ai-workbench--update-status " Waiting..." 'warning))))
 
-(defun gptel--update-tool-call (fsm)
-  "Update gptel's status in FSM when calling a tool."
-  (with-current-buffer (plist-get (gptel-fsm-info fsm) :buffer)
-    (setq gptel--fsm-last fsm)
-    (when gptel-mode
-      (if-let* ((info (gptel-fsm-info fsm))
+(defun ai-workbench--update-tool-call (fsm)
+  "Update ai-workbench-engine's status in FSM when calling a tool."
+  (with-current-buffer (plist-get (ai-workbench-fsm-info fsm) :buffer)
+    (setq ai-workbench--fsm-last fsm)
+    (when ai-workbench-mode
+      (if-let* ((info (ai-workbench-fsm-info fsm))
                 (names (cl-loop for call in (plist-get info :tool-use)
                                 collect (plist-get call :name))))
-          (gptel--update-status
+          (ai-workbench--update-status
            (concat
             (propertize
              (if (length> names 1) " Calling tools (" " Calling tool (")
@@ -1627,22 +1627,22 @@ Perform UI updates and run post-response hooks."
                        names (propertize ", " 'face 'mode-line-emphasis))
             (propertize ")" 'face 'mode-line-emphasis)))
         ;; FIXME: Is this branch reachable?
-        (gptel--update-status " Calling tool..." 'mode-line-emphasis)))))
+        (ai-workbench--update-status " Calling tool..." 'mode-line-emphasis)))))
 
-(defun gptel--update-tool-ask (fsm)
-  "Update gptel's status in FSM when there are pending tool-calls."
-  (when (plist-get (gptel-fsm-info fsm) :tool-pending)
-    (plist-put (gptel-fsm-info fsm) :tool-pending nil)
-    (let* ((info (gptel-fsm-info fsm))
+(defun ai-workbench--update-tool-ask (fsm)
+  "Update ai-workbench-engine's status in FSM when there are pending tool-calls."
+  (when (plist-get (ai-workbench-fsm-info fsm) :tool-pending)
+    (plist-put (ai-workbench-fsm-info fsm) :tool-pending nil)
+    (let* ((info (ai-workbench-fsm-info fsm))
            (buf (plist-get info :buffer)))
       (with-current-buffer buf
-        (when gptel-mode
-          (gptel--update-status " Run tools?" 'mode-line-emphasis))))))
+        (when ai-workbench-mode
+          (ai-workbench--update-status " Run tools?" 'mode-line-emphasis))))))
 
 
 ;;; Send queries, handle responses
 ;;;###autoload
-(defun gptel-send (&optional arg)
+(defun ai-workbench-send (&optional arg)
   "Submit this prompt to the current LLM backend.
 
 By default, the contents of the buffer up to the cursor position
@@ -1657,67 +1657,67 @@ more options instead.
 This command is asynchronous, you can continue to use Emacs while
 waiting for the response."
   (interactive "P")
-  (if (and arg (require 'gptel-transient nil t))
-      (call-interactively #'gptel-menu)
-    (gptel--sanitize-model)
-    (let ((fsm (gptel-make-fsm :table gptel-send--transitions
-                               :handlers gptel-send--handlers)))
-      (gptel-request nil
-        :stream gptel-stream
-        :transforms gptel-prompt-transform-functions
+  (if (and arg (require 'ai-workbench-transient nil t))
+      (call-interactively #'ai-workbench-menu)
+    (ai-workbench--sanitize-model)
+    (let ((fsm (ai-workbench-make-fsm :table ai-workbench-send--transitions
+                               :handlers ai-workbench-send--handlers)))
+      (ai-workbench-request nil
+        :stream ai-workbench-stream
+        :transforms ai-workbench-prompt-transform-functions
         :fsm fsm)
       (message "Querying %s..."
-               (thread-first (gptel-fsm-info fsm)
+               (thread-first (ai-workbench-fsm-info fsm)
                              (plist-get :backend)
-                             (or gptel-backend)
-                             (gptel-backend-name))))
-    (gptel--update-status " Waiting..." 'warning)))
+                             (or ai-workbench-backend)
+                             (ai-workbench-backend-name))))
+    (ai-workbench--update-status " Waiting..." 'warning)))
 
 (declare-function json-pretty-print-buffer "json")
-(defun gptel--inspect-query (&optional request-fsm format)
+(defun ai-workbench--inspect-query (&optional request-fsm format)
   "Show the full LLM query that will be sent in a buffer.
 
-This functions as a dry run of `gptel-send'.  The request data
+This functions as a dry run of `ai-workbench-send'.  The request data
 may be edited and the query continued from this buffer.
 
 REQUEST-FSM is the state of the request, as returned by
-`gptel-request'.  If FORMAT is the symbol json, show the encoded
-JSON query instead of the Lisp structure gptel uses."
-  (unless request-fsm (setq request-fsm gptel--fsm-last))
-  (if (bufferp (plist-get (gptel-fsm-info request-fsm) :data))
+`ai-workbench-request'.  If FORMAT is the symbol json, show the encoded
+JSON query instead of the Lisp structure ai-workbench-engine uses."
+  (unless request-fsm (setq request-fsm ai-workbench--fsm-last))
+  (if (bufferp (plist-get (ai-workbench-fsm-info request-fsm) :data))
       (letrec ((dry-run-poll
                 (run-with-timer
                  0 1 (lambda (fsm form)
-                       (unless (bufferp (plist-get (gptel-fsm-info fsm) :data))
+                       (unless (bufferp (plist-get (ai-workbench-fsm-info fsm) :data))
                          (cancel-timer dry-run-poll)
-                         (gptel--inspect-query fsm form)))
+                         (ai-workbench--inspect-query fsm form)))
                  request-fsm format))))
-    (with-current-buffer (plist-get (gptel-fsm-info request-fsm) :buffer)
-      (gptel--update-status " Ready" 'success))
-    (with-current-buffer (get-buffer-create "*gptel-query*")
+    (with-current-buffer (plist-get (ai-workbench-fsm-info request-fsm) :buffer)
+      (ai-workbench--update-status " Ready" 'success))
+    (with-current-buffer (get-buffer-create "*ai-workbench-query*")
       (let* ((standard-output (current-buffer))
              (inhibit-read-only t)
              (request-data
-              (plist-get (gptel-fsm-info request-fsm) :data)))
+              (plist-get (ai-workbench-fsm-info request-fsm) :data)))
         (buffer-disable-undo)
         (erase-buffer)
         (if (eq format 'json)
             (progn (fundamental-mode)
-                   (insert (gptel--json-encode request-data))
+                   (insert (ai-workbench--json-encode request-data))
                    (json-pretty-print-buffer))
           (lisp-data-mode)
           (prin1 request-data)
           (pp-buffer))
-        (setq-local gptel--fsm-last request-fsm)
+        (setq-local ai-workbench--fsm-last request-fsm)
         (goto-char (point-min))
         (view-mode 1)
         (setq buffer-undo-list nil)
         (use-local-map
          (make-composed-keymap
           (define-keymap
-            "C-c C-c" #'gptel--continue-query
+            "C-c C-c" #'ai-workbench--continue-query
             "C-c C-w" (lambda () "Copy Curl command for query."
-                        (interactive) (gptel--continue-query 'copy))
+                        (interactive) (ai-workbench--continue-query 'copy))
             "C-c C-k" #'quit-window)
           (current-local-map)))
         (unless header-line-format
@@ -1725,14 +1725,14 @@ JSON query instead of the Lisp structure gptel uses."
                 (substitute-command-keys
                  (concat
                   "Edit request: \\[read-only-mode],"
-                  " Send request: \\[gptel--continue-query],"
+                  " Send request: \\[ai-workbench--continue-query],"
                   (format " Copy Curl: %s"
                           (propertize "C-c C-w" 'face 'help-key-binding))
                   " Quit: \\[quit-window]"))))
-        (display-buffer (current-buffer) gptel-display-buffer-action)))))
+        (display-buffer (current-buffer) ai-workbench-display-buffer-action)))))
 
-(defun gptel--continue-query (&optional copy)
-  "Continue sending the gptel query displayed in this buffer.
+(defun ai-workbench--continue-query (&optional copy)
+  "Continue sending the ai-workbench-engine query displayed in this buffer.
 
 The request is continued with the same parameters as originally
 specified.
@@ -1740,58 +1740,58 @@ specified.
 With prefix arg COPY, copy the Curl command for the request to the
 kill ring instead."
   (interactive "P" lisp-data-mode fundamental-mode)
-  (unless (equal (buffer-name) "*gptel-query*")
-    (user-error "This command is meant for use in a gptel dry-run buffer"))
+  (unless (equal (buffer-name) "*ai-workbench-query*")
+    (user-error "This command is meant for use in a ai-workbench-engine dry-run buffer"))
   (save-excursion
     (goto-char (point-min))
     (condition-case-unless-debug nil
         (when-let* ((data (if (eq major-mode 'lisp-data-mode)
                               (read (current-buffer))
-                            (gptel--json-read))))
-          (cl-assert (cl-typep gptel--fsm-last 'gptel-fsm))
-          (plist-put (gptel-fsm-info gptel--fsm-last) :data data)
+                            (ai-workbench--json-read))))
+          (cl-assert (cl-typep ai-workbench--fsm-last 'ai-workbench-fsm))
+          (plist-put (ai-workbench-fsm-info ai-workbench--fsm-last) :data data)
           (if copy                 ;Copy Curl command instead of sending request
-              (let ((args (gptel-curl--get-args (gptel-fsm-info gptel--fsm-last)
+              (let ((args (ai-workbench-curl--get-args (ai-workbench-fsm-info ai-workbench--fsm-last)
                                                 (md5 (format "%s" (random))) t)))
                 (kill-new
                  (mapconcat #'shell-quote-argument
-                            (cons (gptel--curl-path) args) " \\\n"))
+                            (cons (ai-workbench--curl-path) args) " \\\n"))
                 (message "Curl command for request copied to kill-ring"))
-            (gptel--fsm-transition gptel--fsm-last) ;INIT -> WAIT
+            (ai-workbench--fsm-transition ai-workbench--fsm-last) ;INIT -> WAIT
             (quit-window)))
       (error
        (user-error "Can not resume request: could not read data from buffer!")))))
 
-(defun gptel--insert-response (response info &optional raw)
-  "Insert the LLM RESPONSE into the gptel buffer.
+(defun ai-workbench--insert-response (response info &optional raw)
+  "Insert the LLM RESPONSE into the ai-workbench-engine buffer.
 
 INFO is a plist containing information relevant to this buffer.
-See `gptel--url-get-response' for details.
+See `ai-workbench--url-get-response' for details.
 
 Optional RAW disables text properties and transformation."
-  (let* ((gptel-buffer (plist-get info :buffer))
+  (let* ((ai-workbench-buffer (plist-get info :buffer))
          (start-marker (plist-get info :position))
          (tracking-marker (plist-get info :tracking-marker)))
     (pcase response
       ((pred stringp)                ;Response text
-       (with-current-buffer gptel-buffer
+       (with-current-buffer ai-workbench-buffer
          (when tracking-marker           ;separate from previous response
-           (setq response (concat gptel-response-separator response)))
+           (setq response (concat ai-workbench-response-separator response)))
          (save-excursion
            (with-current-buffer (marker-buffer start-marker)
              (goto-char (or tracking-marker start-marker))
-             ;; (run-hooks 'gptel-pre-response-hook)
+             ;; (run-hooks 'ai-workbench-pre-response-hook)
              (unless (or (bobp) (plist-get info :in-place)
                          tracking-marker)
-               (insert gptel-response-separator)
-               (when gptel-mode
-                 (insert (gptel-response-prefix-string)))
+               (insert ai-workbench-response-separator)
+               (when ai-workbench-mode
+                 (insert (ai-workbench-response-prefix-string)))
                (move-marker start-marker (point)))
              (unless raw
                (when-let* ((transformer (plist-get info :transformer)))
                  (setq response (funcall transformer response)))
                (add-text-properties
-                0 (length response) '(gptel response front-sticky (gptel)) response))
+                0 (length response) '(ai-workbench-engine response front-sticky (ai-workbench-engine)) response))
              (insert response)
              (plist-put info :tracking-marker (setq tracking-marker (point-marker)))
              ;; for uniformity with streaming responses
@@ -1804,27 +1804,27 @@ Optional RAW disables text properties and transformation."
                (save-excursion (goto-char (point-max)) (insert text)))
            (with-current-buffer (marker-buffer start-marker)
              (let ((separator         ;Separate from response prefix if required
-                    (and (not tracking-marker) gptel-mode
-                         (not (string-suffix-p "\n" (gptel-response-prefix-string)))
+                    (and (not tracking-marker) ai-workbench-mode
+                         (not (string-suffix-p "\n" (ai-workbench-response-prefix-string)))
                          "\n"))
                    (blocks (if (derived-mode-p 'org-mode)
                                `("#+begin_reasoning\n" . ,(concat "\n#+end_reasoning"
-                                                           gptel-response-separator))
+                                                           ai-workbench-response-separator))
                              ;; TODO(reasoning) remove properties and strip instead
-                             (cons (propertize "``` reasoning\n" 'gptel 'ignore
-                                               'keymap gptel--markdown-block-map)
-                                   (concat (propertize "\n```" 'gptel 'ignore
-                                                       'keymap gptel--markdown-block-map)
-                                           gptel-response-separator)))))
+                             (cons (propertize "``` reasoning\n" 'ai-workbench-engine 'ignore
+                                               'keymap ai-workbench--markdown-block-map)
+                                   (concat (propertize "\n```" 'ai-workbench-engine 'ignore
+                                                       'keymap ai-workbench--markdown-block-map)
+                                           ai-workbench-response-separator)))))
                (if (eq include 'ignore)
                    (progn
                      (add-text-properties
-                      0 (length text) '(gptel ignore front-sticky (gptel)) text)
-                     (gptel--insert-response
+                      0 (length text) '(ai-workbench-engine ignore front-sticky (ai-workbench-engine)) text)
+                     (ai-workbench--insert-response
                       (concat (car blocks) text (cdr blocks)) info t))
-                 (gptel--insert-response (concat separator (car blocks)) info t)
-                 (gptel--insert-response text info)
-                 (gptel--insert-response (cdr blocks) info t))
+                 (ai-workbench--insert-response (concat separator (car blocks)) info t)
+                 (ai-workbench--insert-response text info)
+                 (ai-workbench--insert-response (cdr blocks) info t))
                (save-excursion
                  (goto-char (plist-get info :tracking-marker))
                  (if (derived-mode-p 'org-mode) ;fold block
@@ -1832,17 +1832,17 @@ Optional RAW disables text properties and transformation."
                             (when (looking-at "^#\\+end_reasoning")
                               (org-cycle)))
                    (when (re-search-backward "^```" start-marker t)
-                     (gptel-markdown-cycle-block)))))))))
+                     (ai-workbench-markdown-cycle-block)))))))))
       (`(tool-call . ,tool-calls)
-       (gptel--display-tool-calls tool-calls info))
+       (ai-workbench--display-tool-calls tool-calls info))
       (`(tool-result . ,tool-results)
-       (gptel--display-tool-results tool-results info)))))
+       (ai-workbench--display-tool-results tool-results info)))))
 
-(defun gptel-curl--stream-insert-response (response info &optional raw)
-  "Insert streaming RESPONSE from an LLM into the gptel buffer.
+(defun ai-workbench-curl--stream-insert-response (response info &optional raw)
+  "Insert streaming RESPONSE from an LLM into the ai-workbench-engine buffer.
 
 INFO is a mutable plist containing information relevant to this buffer.
-See `gptel--url-get-response' for details.
+See `ai-workbench--url-get-response' for details.
 
 Optional RAW disables text properties and transformation."
   (pcase response
@@ -1855,10 +1855,10 @@ Optional RAW disables text properties and transformation."
            (unless tracking-marker
              (goto-char start-marker)
              (unless (or (bobp) (plist-get info :in-place))
-               (insert gptel-response-separator)
-               (when gptel-mode
+               (insert ai-workbench-response-separator)
+               (when ai-workbench-mode
                  ;; Put prefix before AI response.
-                 (insert (gptel-response-prefix-string)))
+                 (insert (ai-workbench-response-prefix-string)))
                (move-marker start-marker (point)))
              (setq tracking-marker (set-marker (make-marker) (point)))
              (set-marker-insertion-type tracking-marker t)
@@ -1868,17 +1868,17 @@ Optional RAW disables text properties and transformation."
              (when transformer
                (setq response (funcall transformer response)))
              (add-text-properties
-              0 (length response) '(gptel response front-sticky (gptel))
+              0 (length response) '(ai-workbench-engine response front-sticky (ai-workbench-engine))
               response))
-           ;; (run-hooks 'gptel-pre-stream-hook)
+           ;; (run-hooks 'ai-workbench-pre-stream-hook)
            (insert response)
-           (run-hooks 'gptel-post-stream-hook)))))
+           (run-hooks 'ai-workbench-post-stream-hook)))))
     (`(reasoning . ,text)
-     (gptel--display-reasoning-stream text info))
+     (ai-workbench--display-reasoning-stream text info))
     (`(tool-call . ,tool-calls)
-     (gptel--display-tool-calls tool-calls info))
+     (ai-workbench--display-tool-calls tool-calls info))
     (`(tool-result . ,tool-results)
-     (gptel--display-tool-results tool-results info)
+     (ai-workbench--display-tool-results tool-results info)
      ;; Adjust for tool calls inside reasoning blocks
      (when (eq (plist-get info :reasoning-block) 'in)
        (when-let* ((rm (plist-get info :reasoning-marker))
@@ -1886,34 +1886,34 @@ Optional RAW disables text properties and transformation."
          (move-marker rm tm (marker-buffer tm)))))))
 
 ;;;###autoload
-(defun gptel (name &optional _ initial interactivep)
+(defun ai-workbench-engine (name &optional _ initial interactivep)
   "Switch to or start a chat session with NAME.
 
-Ask for API-KEY if `gptel-api-key' is unset.
+Ask for API-KEY if `ai-workbench-api-key' is unset.
 
 If region is active, use it as the INITIAL prompt.  Returns the
 buffer created or switched to.
 
-INTERACTIVEP is t when gptel is called interactively."
+INTERACTIVEP is t when ai-workbench-engine is called interactively."
   (interactive
    (progn
-     (gptel--sanitize-model :backend (default-value 'gptel-backend)
+     (ai-workbench--sanitize-model :backend (default-value 'ai-workbench-backend)
                             :shoosh t)
-     (let* ((backend (default-value 'gptel-backend))
+     (let* ((backend (default-value 'ai-workbench-backend))
             (backend-name
-             (format "*%s*" (gptel-backend-name backend))))
+             (format "*%s*" (ai-workbench-backend-name backend))))
        (list (read-buffer
-              "Create or choose gptel buffer: "
+              "Create or choose ai-workbench-engine buffer: "
               backend-name nil          ; DEFAULT and REQUIRE-MATCH
               (lambda (b)                    ; PREDICATE
                 ;; NOTE: buffer check is required (#450)
                 (and-let* ((buf (get-buffer (or (car-safe b) b))))
-                  (buffer-local-value 'gptel-mode buf))))
+                  (buffer-local-value 'ai-workbench-mode buf))))
              (condition-case nil
-                 (gptel--get-api-key
-                  (gptel-backend-key backend))
+                 (ai-workbench--get-api-key
+                  (ai-workbench-backend-key backend))
                ((error user-error)
-                (setq gptel-api-key
+                (setq ai-workbench-api-key
                       (read-passwd
                        (format "%s API key: " backend-name)))))
              (and (use-region-p)
@@ -1922,30 +1922,30 @@ INTERACTIVEP is t when gptel is called interactively."
              t))))
   (with-current-buffer (get-buffer-create name)
     (cond                               ;Set major mode
-     ((eq major-mode gptel-default-mode))
-     ((eq gptel-default-mode 'text-mode)
+     ((eq major-mode ai-workbench-default-mode))
+     ((eq ai-workbench-default-mode 'text-mode)
       (text-mode)
       (visual-line-mode 1))
-     (t (funcall gptel-default-mode)))
-    (gptel--sanitize-model :backend (default-value 'gptel-backend)
-                           :model (default-value 'gptel-model)
+     (t (funcall ai-workbench-default-mode)))
+    (ai-workbench--sanitize-model :backend (default-value 'ai-workbench-backend)
+                           :model (default-value 'ai-workbench-model)
                            :shoosh nil)
-    (unless gptel-mode (gptel-mode 1))
+    (unless ai-workbench-mode (ai-workbench-mode 1))
     (goto-char (point-max))
     (skip-chars-backward "\t\r\n")
-    (if (bobp) (insert (or initial (gptel-prompt-prefix-string))))
+    (if (bobp) (insert (or initial (ai-workbench-prompt-prefix-string))))
     (when interactivep
-      (display-buffer (current-buffer) gptel-display-buffer-action)
+      (display-buffer (current-buffer) ai-workbench-display-buffer-action)
       (message "Send your query with %s!"
-               (substitute-command-keys "\\[gptel-send]")))
+               (substitute-command-keys "\\[ai-workbench-send]")))
     (current-buffer)))
 
 
 ;;; Reasoning content UI
-(defun gptel--display-reasoning-stream (text info)
+(defun ai-workbench--display-reasoning-stream (text info)
   "Show reasoning TEXT in an appropriate location.
 
-INFO is the request INFO, see `gptel--url-get-response'.  This is
+INFO is the request INFO, see `ai-workbench--url-get-response'.  This is
 for streaming responses only."
   (when-let* ((include (plist-get info :include-reasoning)))
     (if (stringp include)
@@ -1959,13 +1959,13 @@ for streaming responses only."
         (with-current-buffer (marker-buffer start-marker)
           (if (eq text t)               ;end of stream
               (progn
-                (gptel-curl--stream-insert-response
+                (ai-workbench-curl--stream-insert-response
                  (concat (if (derived-mode-p 'org-mode)
                              "\n#+end_reasoning"
                            ;; TODO(reasoning) remove properties and strip instead
-                           (propertize "\n```" 'gptel 'ignore
-                                       'keymap gptel--markdown-block-map))
-                         gptel-response-separator)
+                           (propertize "\n```" 'ai-workbench-engine 'ignore
+                                       'keymap ai-workbench--markdown-block-map))
+                         ai-workbench-response-separator)
                  info t)
                 (ignore-errors          ;fold block
                   (save-excursion
@@ -1975,35 +1975,35 @@ for streaming responses only."
                                (when (looking-at "^#\\+end_reasoning")
                                  (org-cycle)))
                       (when (re-search-backward "^```" start-marker t)
-                        (gptel-markdown-cycle-block))))))
+                        (ai-workbench-markdown-cycle-block))))))
             (unless (and reasoning-marker tracking-marker
                          (= reasoning-marker tracking-marker))
               (let ((separator        ;Separate from response prefix if required
-                     (and (not tracking-marker) gptel-mode
+                     (and (not tracking-marker) ai-workbench-mode
                           (not (string-suffix-p
-                                "\n" (gptel-response-prefix-string)))
+                                "\n" (ai-workbench-response-prefix-string)))
                           "\n")))
-                (gptel-curl--stream-insert-response
+                (ai-workbench-curl--stream-insert-response
                  (concat separator
                          (if (derived-mode-p 'org-mode)
                              "#+begin_reasoning\n"
                            ;; TODO(reasoning) remove properties and strip instead
-                           (propertize "``` reasoning\n" 'gptel 'ignore
-                                       'keymap gptel--markdown-block-map)))
+                           (propertize "``` reasoning\n" 'ai-workbench-engine 'ignore
+                                       'keymap ai-workbench--markdown-block-map)))
                  info t)))
             (if (eq include 'ignore)
                 (progn
                   (add-text-properties
-                   0 (length text) '(gptel ignore front-sticky (gptel)) text)
-                  (gptel-curl--stream-insert-response text info t))
-              (gptel-curl--stream-insert-response text info)))
+                   0 (length text) '(ai-workbench-engine ignore front-sticky (ai-workbench-engine)) text)
+                  (ai-workbench-curl--stream-insert-response text info t))
+              (ai-workbench-curl--stream-insert-response text info)))
           (setq tracking-marker (plist-get info :tracking-marker))
           (if reasoning-marker
               (move-marker reasoning-marker tracking-marker)
             (plist-put info :reasoning-marker
                        (copy-marker tracking-marker nil))))))))
 
-(defvar gptel--tool-preview-alist nil
+(defvar ai-workbench--tool-preview-alist nil
   "Alist mapping tool names to preview functions for tools.
 
 Each key is a tool name (string) and value is a list of one or two
@@ -2014,7 +2014,7 @@ corresponding tool call arguments and the request INFO plist.  It must
 set up the preview for the tool call and return a handle to the preview,
 which can be any object, but typically an overlay or a buffer.
 
-The preview-setup can integrate with gptel's default previewer by
+The preview-setup can integrate with ai-workbench-engine's default previewer by
 inserting at point (and moving point), or use a different preview method
 entirely.
 
@@ -2026,14 +2026,14 @@ Note: This tool call preview API is currently experimental.")
 
 
 ;;; Tool use UI
-(defvar-keymap gptel-tool-call-actions-map
+(defvar-keymap ai-workbench-tool-call-actions-map
   :doc "Keymap for actions on tool calls."
-  "<mouse-1>" #'gptel--dispatch-tool-calls
-  "C-c C-c" #'gptel--accept-tool-calls
-  "C-c C-k" #'gptel--reject-tool-calls
-  "C-c C-i" #'gptel--inspect-tool-calls)
+  "<mouse-1>" #'ai-workbench--dispatch-tool-calls
+  "C-c C-c" #'ai-workbench--accept-tool-calls
+  "C-c C-k" #'ai-workbench--reject-tool-calls
+  "C-c C-i" #'ai-workbench--inspect-tool-calls)
 
-(defun gptel--display-tool-calls (tool-calls info &optional use-minibuffer)
+(defun ai-workbench--display-tool-calls (tool-calls info &optional use-minibuffer)
   "Handle tool call confirmation.
 
 TOOL-CALLS should be a list of tool call specifications or results,
@@ -2055,9 +2055,9 @@ USE-MINIBUFFER is non-nil)."
                (max (point-min) (1- (or tracking-marker start-marker)))
                'read-only))
           (let* ((minibuffer-allow-text-properties t)
-                 (backend-name (gptel-backend-name (plist-get info :backend)))
+                 (backend-name (ai-workbench-backend-name (plist-get info :backend)))
                  (tool-call-names
-                  (mapconcat (lambda (c) (propertize (gptel-tool-name (car c))
+                  (mapconcat (lambda (c) (propertize (ai-workbench-tool-name (car c))
                                                 'face 'font-lock-keyword-face))
                              tool-calls ", "))
                  (len (length tool-calls))
@@ -2068,11 +2068,11 @@ USE-MINIBUFFER is non-nil)."
                             (?i "Inspect or edit")))
                  (choice (read-multiple-choice prompt choices)))
             (pcase (car choice)
-              (?y (gptel--accept-tool-calls tool-calls))
-              (?n (gptel--reject-tool-calls))
-              (?i (gptel--inspect-tool-calls tool-calls info))))
+              (?y (ai-workbench--accept-tool-calls tool-calls))
+              (?n (ai-workbench--reject-tool-calls))
+              (?i (ai-workbench--inspect-tool-calls tool-calls info))))
         ;; Prompt for confirmation from the response buffer
-        (let* ((backend-name (gptel-backend-name (plist-get info :backend)))
+        (let* ((backend-name (ai-workbench-backend-name (plist-get info :backend)))
                (actions-string
                 (concat (propertize "Run tools: " 'face 'font-lock-string-face)
                         (propertize "C-c C-c" 'face 'help-key-binding)
@@ -2085,11 +2085,11 @@ USE-MINIBUFFER is non-nil)."
                ;; this is fragile
                (ov-start (save-excursion
                            (goto-char start-marker)
-                           (text-property-search-backward 'gptel 'response)
+                           (text-property-search-backward 'ai-workbench-engine 'response)
                            (point)))
                (preview-handlers)
                (ov (or (cdr-safe (get-char-property-and-overlay
-                                  start-marker 'gptel-tool))
+                                  start-marker 'ai-workbench-tool))
                        (make-overlay ov-start (or tracking-marker start-marker)
                                      nil nil nil)))
                (arg-values)
@@ -2101,14 +2101,14 @@ USE-MINIBUFFER is non-nil)."
             (goto-char (overlay-end ov))
             (pcase-dolist (`(,tool-spec ,arg-plist _) tool-calls)
               ;; Call tool-specific confirmation prompt
-              (setq arg-values (gptel--map-tool-args tool-spec arg-plist))
-              (if-let* ((funcs (cdr (assoc (gptel-tool-name tool-spec)
-                                           gptel--tool-preview-alist)))
+              (setq arg-values (ai-workbench--map-tool-args tool-spec arg-plist))
+              (if-let* ((funcs (cdr (assoc (ai-workbench-tool-name tool-spec)
+                                           ai-workbench--tool-preview-alist)))
                         ((functionp (car-safe funcs))))
                   ;;preview-teardown func   preview-handle overlay/buffer
                   (push (list (cadr funcs) (funcall (car funcs) arg-values info))
                         preview-handlers)
-                (push (gptel--format-tool-call (gptel-tool-name tool-spec) arg-values)
+                (push (ai-workbench--format-tool-call (ai-workbench-tool-name tool-spec) arg-values)
                       confirm-strings)))
             (and confirm-strings (apply #'insert (nreverse confirm-strings)))
             (add-text-properties (overlay-end ov) (1- (point))
@@ -2139,14 +2139,14 @@ USE-MINIBUFFER is non-nil)."
           ;; management and updates)
           (overlay-put ov 'info info)
           (overlay-put ov 'mouse-face 'highlight)
-          (overlay-put ov 'gptel-tool
-                       (nconc (overlay-get ov 'gptel-tool) tool-calls))
+          (overlay-put ov 'ai-workbench-tool
+                       (nconc (overlay-get ov 'ai-workbench-tool) tool-calls))
           (overlay-put ov 'help-echo
                        (concat "Tool call(s) requested: " actions-string))
-          (overlay-put ov 'keymap gptel-tool-call-actions-map)
+          (overlay-put ov 'keymap ai-workbench-tool-call-actions-map)
           prompt-ov)))))
 
-(defun gptel--display-tool-results (tool-results info)
+(defun ai-workbench--display-tool-results (tool-results info)
   "Insert TOOL-RESULTS into buffer.
 
 TOOL-RESULTS is
@@ -2159,27 +2159,27 @@ for tool call results.  INFO contains the state of the request."
          (tracking-marker (plist-get info :tracking-marker)))
     ;; Insert tool results
     (with-current-buffer (marker-buffer start-marker)
-      (when gptel-include-tool-results
+      (when ai-workbench-include-tool-results
         (cl-loop
          for (tool args result) in tool-results
          with include-names =
-         (mapcar #'gptel-tool-name
-                 (cl-remove-if-not #'gptel-tool-include (plist-get info :tools)))
-         if (or (eq gptel-include-tool-results t)
-                (member (gptel-tool-name tool) include-names))
+         (mapcar #'ai-workbench-tool-name
+                 (cl-remove-if-not #'ai-workbench-tool-include (plist-get info :tools)))
+         if (or (eq ai-workbench-include-tool-results t)
+                (member (ai-workbench-tool-name tool) include-names))
          do (funcall
              (plist-get info :callback)
-             (let* ((name (gptel-tool-name tool))
+             (let* ((name (ai-workbench-tool-name tool))
                     (separator        ;Separate from response prefix if required
                      (cond ((not tracking-marker)
-                            (and gptel-mode
+                            (and ai-workbench-mode
                                  (not (string-suffix-p
-                                       "\n" (gptel-response-prefix-string)))
+                                       "\n" (ai-workbench-response-prefix-string)))
                                  "\n")) ;start of response
-                           ((not tool-marker) gptel-response-separator)
+                           ((not tool-marker) ai-workbench-response-separator)
                            ((and (not (= tracking-marker tool-marker))
                                  (not (eq (char-before tracking-marker) ?\n)))
-                            gptel-response-separator)))
+                            ai-workbench-response-separator)))
                     (tool-use
                      ;; TODO(tool) also check args since there may be more than
                      ;; one call/result for the same tool
@@ -2202,7 +2202,7 @@ for tool call results.  INFO contains the state of the request."
                     truncated-call
                     (propertize
                      (org-escape-code-in-string (concat "\n" call "\n\n" result))
-                     'gptel `(tool . ,id))
+                     'ai-workbench-engine `(tool . ,id))
                     "\n#+end_tool\n")
                  ;; TODO(tool) else branch is handling all front-ends as markdown.
                  ;; At least escape markdown.
@@ -2210,14 +2210,14 @@ for tool call results.  INFO contains the state of the request."
                   separator
                   ;; TODO(tool) remove properties and strip instead of ignoring
                   (propertize (format "``` tool %s" truncated-call)
-                              'gptel 'ignore 'keymap gptel--markdown-block-map)
+                              'ai-workbench-engine 'ignore 'keymap ai-workbench--markdown-block-map)
                   (propertize
                    ;; TODO(tool) escape markdown in result
                    (concat "\n" call "\n\n" result)
-                   'gptel `(tool . ,id))
+                   'ai-workbench-engine `(tool . ,id))
                   ;; TODO(tool) remove properties and strip instead of ignoring
-                  (propertize "\n```\n" 'gptel 'ignore
-                              'keymap gptel--markdown-block-map))))
+                  (propertize "\n```\n" 'ai-workbench-engine 'ignore
+                              'keymap ai-workbench--markdown-block-map))))
              info
              'raw)
          ;; tool-result insertion has updated the tracking marker
@@ -2233,9 +2233,9 @@ for tool call results.  INFO contains the state of the request."
              (forward-line -1)
              (if (derived-mode-p 'org-mode)
                  (when (looking-at-p "^#\\+end_tool") (org-cycle))
-               (when (looking-at-p "^```") (gptel-markdown-cycle-block))))))))))
+               (when (looking-at-p "^```") (ai-workbench-markdown-cycle-block))))))))))
 
-(defun gptel--format-tool-call (name arg-values)
+(defun ai-workbench--format-tool-call (name arg-values)
   "Format a tool call for display in the buffer.
 
 NAME and ARG-VALUES are the name and arguments for the call."
@@ -2253,20 +2253,20 @@ NAME and ARG-VALUES are the name and arguments for the call."
                       arg-values " ")
            'font-lock-face 'font-lock-constant-face)))
 
-(defun gptel--accept-tool-calls (&optional tool-calls ov)
+(defun ai-workbench--accept-tool-calls (&optional tool-calls ov)
   "Run pending tool-calls.
 
 TOOL-CALLS is the edited tool call list, OV is the tool call dispatch
 overlay in the query buffer."
   (interactive (pcase-let ((`(,resp . ,o) (get-char-property-and-overlay
-                                           (point) 'gptel-tool)))
+                                           (point) 'ai-workbench-tool)))
                  (list resp o)))
   (when (overlayp ov)                   ;Update UI indicator
     (with-current-buffer (overlay-buffer ov)
-      (when gptel-mode
+      (when ai-workbench-mode
         (let ((names (cl-loop for call in tool-calls
-                              collect (gptel-tool-name (car call)))))
-          (gptel--update-status
+                              collect (ai-workbench-tool-name (car call)))))
+          (ai-workbench--update-status
            (concat
             (propertize
              (if (length> names 1) " Calling tools (" " Calling tool (")
@@ -2289,27 +2289,27 @@ overlay in the query buffer."
     (delete-overlay ov))
   (message "Continuing query...")
   (cl-loop for (tool-spec arg-plist process-tool-result) in tool-calls
-           for arg-values = (gptel--map-tool-args tool-spec arg-plist)
+           for arg-values = (ai-workbench--map-tool-args tool-spec arg-plist)
            do
-           (if (gptel-tool-async tool-spec)
-               (apply (gptel-tool-function tool-spec)
+           (if (ai-workbench-tool-async tool-spec)
+               (apply (ai-workbench-tool-function tool-spec)
                       process-tool-result arg-values)
              (let ((result
                     (condition-case errdata
-                        (apply (gptel-tool-function tool-spec) arg-values)
-                      (error (mapconcat #'gptel--to-string errdata " ")))))
+                        (apply (ai-workbench-tool-function tool-spec) arg-values)
+                      (error (mapconcat #'ai-workbench--to-string errdata " ")))))
                (funcall process-tool-result result)))))
 
-(defun gptel--reject-tool-calls (&optional _tool-calls ov)
+(defun ai-workbench--reject-tool-calls (&optional _tool-calls ov)
   "Cancel pending tool-calls.
 
 OV is the tool call dispatch overlay."
   (interactive (pcase-let ((`(,resp . ,o) (get-char-property-and-overlay
-                                           (point) 'gptel-tool)))
+                                           (point) 'ai-workbench-tool)))
                  (list resp o)))
-  (gptel--update-status " Tools cancelled" 'error)
+  (ai-workbench--update-status " Tools cancelled" 'error)
   (message (substitute-command-keys
-            "Tool calls canceled.  \\[gptel-menu] to continue them!"))
+            "Tool calls canceled.  \\[ai-workbench-menu] to continue them!"))
   (when (and (overlayp ov) (overlay-buffer ov))
     (with-current-buffer (overlay-buffer ov)
       (when-let* ((preview-handles (overlay-get ov 'previews)))
@@ -2322,7 +2322,7 @@ OV is the tool call dispatch overlay."
                          (overlay-end prompt-ov)))))
     (delete-overlay ov)))
 
-(defun gptel--dispatch-tool-calls (choice)
+(defun ai-workbench--dispatch-tool-calls (choice)
   "Dispatch on tool-calls with CHOICE."
   (interactive
    (list
@@ -2330,18 +2330,18 @@ OV is the tool call dispatch overlay."
                      (?k "cancel request") (?i "inspect call(s)"))))
       (read-multiple-choice "Run tool calls? " choices))))
   (pcase (car choice)
-    (?y (call-interactively #'gptel--accept-tool-calls))
-    (?k (call-interactively #'gptel--reject-tool-calls))
-    (?i (call-interactively #'gptel--inspect-tool-calls))))
+    (?y (call-interactively #'ai-workbench--accept-tool-calls))
+    (?k (call-interactively #'ai-workbench--reject-tool-calls))
+    (?i (call-interactively #'ai-workbench--inspect-tool-calls))))
 
 ;;;; Tool call inspection UI
-(defvar-keymap gptel-tool-call-inspection-map
-  :doc "Actions in the gptel tool inspection buffer."
-  "C-c C-c" #'gptel--inspect-accept-tool-calls
-  "C-c C-k" #'gptel--inspect-reject-tool-calls
-  "C-c C-i" #'gptel--inspect-quit-tool-calls)
+(defvar-keymap ai-workbench-tool-call-inspection-map
+  :doc "Actions in the ai-workbench-engine tool inspection buffer."
+  "C-c C-c" #'ai-workbench--inspect-accept-tool-calls
+  "C-c C-k" #'ai-workbench--inspect-reject-tool-calls
+  "C-c C-i" #'ai-workbench--inspect-quit-tool-calls)
 
-(defun gptel--inspect-accept-tool-calls (&optional _)
+(defun ai-workbench--inspect-accept-tool-calls (&optional _)
   "Run possibly edited tool-calls read from the tool call inspection buffer."
   (interactive)
   (let ((call) (index)
@@ -2351,15 +2351,15 @@ OV is the tool call dispatch overlay."
         (apply-error
          (lambda () (message "Cannot apply argument modifications.  \
 This is a bug, please report it!"))))
-    (unless (gptel-fsm-p gptel--fsm-last) (funcall apply-error))
+    (unless (ai-workbench-fsm-p ai-workbench--fsm-last) (funcall apply-error))
     (cond
      ((buffer-modified-p)
-      (let* ((info (gptel-fsm-info gptel--fsm-last))
+      (let* ((info (ai-workbench-fsm-info ai-workbench--fsm-last))
              (backend (plist-get info :backend))
              (tool-use (plist-get info :tool-use))
              (tool-spec-args-cb) (name)
              (tool-calls))
-        (dolist (o (cl-remove-if-not (lambda (ov) (overlay-get ov 'gptel-overlay))
+        (dolist (o (cl-remove-if-not (lambda (ov) (overlay-get ov 'ai-workbench-overlay))
                                      (overlays-in (point-min) (point-max))))
           (goto-char (overlay-start o))
           (condition-case nil
@@ -2370,10 +2370,10 @@ This is a bug, please report it!"))))
                   (setq call (read (current-buffer))
                         name (plist-get call :name))))
             (error (funcall read-error)))
-          (unless (integerp (setq index (overlay-get o 'gptel-overlay)))
+          (unless (integerp (setq index (overlay-get o 'ai-workbench-overlay)))
             (funcall read-error))
           ;; Merge with or remove from messages array...
-          (gptel--inject-tool-call
+          (ai-workbench--inject-tool-call
            backend (plist-get info :data) (nth index tool-use) call)
           (if (not call)
               ;; Remove from tool-use
@@ -2381,42 +2381,42 @@ This is a bug, please report it!"))))
                          (append (cl-subseq tool-use 0 index)
                                  (cl-subseq tool-use (1+ index))))
             ;; ...before modifying the tool use block
-            (gptel--merge-plists (nth index tool-use) call)
-            (setq tool-spec-args-cb (overlay-get o 'gptel-tool))
+            (ai-workbench--merge-plists (nth index tool-use) call)
+            (setq tool-spec-args-cb (overlay-get o 'ai-workbench-tool))
             ;; and modifying the arguments sent to the callback
             (setf (nth 0 tool-spec-args-cb)
                   (or (cl-find name (plist-get info :tools)
-                               :key #'gptel-tool-name :test #'string=)
-                      (gptel-get-tool name)))
+                               :key #'ai-workbench-tool-name :test #'string=)
+                      (ai-workbench-get-tool name)))
             (setf (nth 1 tool-spec-args-cb) (plist-get call :args))
             (push tool-spec-args-cb tool-calls)))
-        (gptel--accept-tool-calls   ;include overlay to clean up if there is one
+        (ai-workbench--accept-tool-calls   ;include overlay to clean up if there is one
          tool-calls (cadr (plist-get info :tool-display)))))
-     (t (let* ((tool-display (plist-get (gptel-fsm-info gptel--fsm-last)
+     (t (let* ((tool-display (plist-get (ai-workbench-fsm-info ai-workbench--fsm-last)
                                         :tool-display)))
-          (apply #'gptel--accept-tool-calls tool-display)))))
+          (apply #'ai-workbench--accept-tool-calls tool-display)))))
   (quit-window t))
 
-(defun gptel--inspect-reject-tool-calls (&optional _)
+(defun ai-workbench--inspect-reject-tool-calls (&optional _)
   "Cancel tool-calls and return to query buffer."
   (interactive)
-  (apply #'gptel--reject-tool-calls
-   (thread-first (gptel-fsm-info gptel--fsm-last)
+  (apply #'ai-workbench--reject-tool-calls
+   (thread-first (ai-workbench-fsm-info ai-workbench--fsm-last)
                  (plist-get :tool-display)))
   (quit-window t))
 
-(defun gptel--inspect-quit-tool-calls (&optional _)
+(defun ai-workbench--inspect-quit-tool-calls (&optional _)
   "Quit inspection window and return to query buffer."
   (interactive)
   (quit-window t))
 
-(defalias 'gptel--inspect-tool-post-command
+(defalias 'ai-workbench--inspect-tool-post-command
   (let ((highlight-ov))
     (lambda ()
       (unless (memq highlight-ov (overlays-at (point)))
         (let ((context-ov
                (cl-loop for ov in (overlays-at (point))
-                        thereis (and (overlay-get ov 'gptel-overlay) ov)))
+                        thereis (and (overlay-get ov 'ai-workbench-overlay) ov)))
               (line (propertize "\n" 'font-lock-face
                                 '(:inherit separator-line :extend t))))
           (when highlight-ov
@@ -2424,40 +2424,40 @@ This is a bug, please report it!"))))
             (overlay-put highlight-ov 'before-string nil)
             (overlay-put highlight-ov 'after-string nil))
           (when context-ov
-            (overlay-put context-ov 'face 'gptel-response-highlight)
+            (overlay-put context-ov 'face 'ai-workbench-response-highlight)
             (overlay-put context-ov 'before-string line)
             (overlay-put context-ov 'after-string (concat "\n" line)))
           (setq highlight-ov context-ov)))))
-  "Highlight tool call under cursor in gptel tool call inspection buffers.")
+  "Highlight tool call under cursor in ai-workbench-engine tool call inspection buffers.")
 
-(defun gptel--inspect-tool-calls (tool-calls info &optional tool-overlay)
+(defun ai-workbench--inspect-tool-calls (tool-calls info &optional tool-overlay)
   "Set up and switch to a buffer to inspect pending tool-calls.
 
 TOOL-CALLS is the alist of tool calls.  INFO is the request context
 plist.  TOOL-OVERLAY is the tool call dispatch overlay (if any) in the
 query buffer."
   (interactive (pcase-let ((`(,resp . ,o) (get-char-property-and-overlay
-                                           (point) 'gptel-tool)))
+                                           (point) 'ai-workbench-tool)))
                  (list resp (overlay-get o 'info) o)))
-  (with-current-buffer (get-buffer-create "*gptel-tool-calls*")
+  (with-current-buffer (get-buffer-create "*ai-workbench-tool-calls*")
     (let ((inhibit-read-only t)
           (tool-use (plist-get info :tool-use)))
       (remove-overlays)
       (erase-buffer)
       (unless (derived-mode-p 'lisp-data-mode)
         (lisp-data-mode)
-        (add-hook 'post-command-hook #'gptel--inspect-tool-post-command nil t))
+        (add-hook 'post-command-hook #'ai-workbench--inspect-tool-post-command nil t))
       ;; NOTE: This needs to be called after setting the major mode, as
       ;; buffer-local variables are wiped out.
       ;; Required to store state for accepting/rejecting calls
-      (setq gptel--fsm-last (gptel-make-fsm :info info))
+      (setq ai-workbench--fsm-last (ai-workbench-make-fsm :info info))
       (plist-put info :tool-display (list tool-calls tool-overlay)) ;NOTE: INFO is never nil
       (insert ";; Inspect or edit tool calls.
 ;; Adding or deleting tool calls is not supported.\n\n")
       (cl-loop for tool-spec-args-cb in tool-calls
                for (tool-spec arg-plist _process-tool-result) = tool-spec-args-cb
                with o
-               for name = (gptel-tool-name tool-spec)
+               for name = (ai-workbench-tool-name tool-spec)
                for pt = (point)
                for index =
                (cl-position-if
@@ -2471,36 +2471,36 @@ query buffer."
                          (current-buffer) '((length . nil) (level . nil)))
                (insert "\n\n")          ;Avoid extending the overlay
                (setq o (make-overlay pt (- (point) 2) nil nil t))
-               (overlay-put o 'gptel-tool tool-spec-args-cb)
-               (overlay-put o 'gptel-overlay index))
+               (overlay-put o 'ai-workbench-tool tool-spec-args-cb)
+               (overlay-put o 'ai-workbench-overlay index))
       (goto-char (point-min)) (forward-line 3))
     (use-local-map
      (make-composed-keymap
-      gptel-tool-call-inspection-map (current-local-map)))
+      ai-workbench-tool-call-inspection-map (current-local-map)))
     (unless header-line-format
       (setq header-line-format
             (substitute-command-keys
              (concat
               (propertize "Tool calls" 'face 'font-lock-string-face) ": "
-              (buttonize "Confirm" #'gptel--inspect-accept-tool-calls)
-              " \\[gptel--inspect-accept-tool-calls], "
-              (buttonize "Cancel" #'gptel--inspect-reject-tool-calls)
-              " \\[gptel--inspect-reject-tool-calls], "
-              (buttonize "Return" #'gptel--inspect-quit-tool-calls)
-              " \\[gptel--inspect-quit-tool-calls], "
+              (buttonize "Confirm" #'ai-workbench--inspect-accept-tool-calls)
+              " \\[ai-workbench--inspect-accept-tool-calls], "
+              (buttonize "Cancel" #'ai-workbench--inspect-reject-tool-calls)
+              " \\[ai-workbench--inspect-reject-tool-calls], "
+              (buttonize "Return" #'ai-workbench--inspect-quit-tool-calls)
+              " \\[ai-workbench--inspect-quit-tool-calls], "
               (buttonize "Edit" (lambda (_) (read-only-mode 'toggle)))
               " \\[read-only-mode]"))))
     (set-buffer-modified-p nil)
     (read-only-mode)
-    (gptel--inspect-tool-post-command)
-    (display-buffer (current-buffer) gptel-display-buffer-action)))
+    (ai-workbench--inspect-tool-post-command)
+    (display-buffer (current-buffer) ai-workbench-display-buffer-action)))
 
 
 ;;; Presets
 ;;;; Presets implementation
-(defvar gptel--known-presets
-  '((gptel-default
-     :description "Use gptel's default configuration."
+(defvar ai-workbench--known-presets
+  '((ai-workbench-default
+     :description "Use ai-workbench-engine's default configuration."
      :context nil :use-context system
      :tools nil :use-tools t
      :temperature nil :max-tokens nil
@@ -2512,20 +2512,20 @@ query buffer."
      :system nil
      :stream t
      :cache nil))
-  "Alist of presets for gptel.
+  "Alist of presets for ai-workbench-engine.
 
 Each entry maps a preset name (a symbol) to a plist of
-specifications (see `gptel-make-preset').")
+specifications (see `ai-workbench-make-preset').")
 
-(defun gptel-make-preset (name &rest keys)
-  "Define a gptel preset with NAME.
+(defun ai-workbench-make-preset (name &rest keys)
+  "Define a ai-workbench-engine preset with NAME.
 
-A preset is a combination of gptel options intended to be applied and
-used together.  Presets can make it less tedious to change gptel
+A preset is a combination of ai-workbench-engine options intended to be applied and
+used together.  Presets can make it less tedious to change ai-workbench-engine
 settings on the fly.
 
 Typically this will include a model, backend, system message and perhaps
-some tools, but any set of gptel options can be set this way.
+some tools, but any set of ai-workbench-engine options can be set this way.
 
 NAME must be a symbol.  KEYS is a plist corresponding to the options
 being set.  All KEYS are optional.
@@ -2541,36 +2541,36 @@ one.
 PRE and POST are functions to run before and after the preset is
 applied.  They take no arguments.
 
-BACKEND is the `gptel-backend' to set, or its name (like \"ChatGPT\").
+BACKEND is the `ai-workbench-backend' to set, or its name (like \"ChatGPT\").
 
-MODEL is the `gptel-model', a symbol.
+MODEL is the `ai-workbench-model', a symbol.
 
 SYSTEM is the directive.  It can be
 - the system message (a string),
 - a list of strings (a conversation template)
 - or a function (dynamic system message).
-- It can also be a symbol naming a directive in `gptel-directives'.
+- It can also be a symbol naming a directive in `ai-workbench-directives'.
 
-TOOLS is a list of gptel tools or tool names, like
+TOOLS is a list of ai-workbench-engine tools or tool names, like
 \\='(\"read_url\" \"read_buffer\" ...)
 
 Recognized keys are not limited to the above.  Any other key (like
-`:foo') corresponds to the value of either `gptel-foo' (preferred) or
-`gptel--foo'.
-- So TOOLS corresponds to option `gptel-tools',
-- CONFIRM-TOOL-CALLS to `gptel-confirm-tool-calls',
-- TEMPERATURE to `gptel-temperature' and so on.
-See gptel's customization options for all available settings.
+`:foo') corresponds to the value of either `ai-workbench-foo' (preferred) or
+`ai-workbench--foo'.
+- So TOOLS corresponds to option `ai-workbench-llm-tools',
+- CONFIRM-TOOL-CALLS to `ai-workbench-confirm-tool-calls',
+- TEMPERATURE to `ai-workbench-temperature' and so on.
+See ai-workbench-engine's customization options for all available settings.
 
-Specifying the value of a key will set the corresponding gptel option to
+Specifying the value of a key will set the corresponding ai-workbench-engine option to
 it.  For example,
 
-  (gptel-make-preset \\='websearch
+  (ai-workbench-make-preset \\='websearch
     :tools \\='(\"search_web\" \"read_url\")
     :system \"Use the provided tools to search the web
               for up-to-date information\")
 
-will replace the currently active option `gptel-tools' and the system
+will replace the currently active option `ai-workbench-llm-tools' and the system
 message.
 
 Alternatively,
@@ -2580,7 +2580,7 @@ Alternatively,
   specifying the value as a plist instead with the keys `:prepend' or
   `:append'.
 
-  (gptel-make-preset \\='websearch
+  (ai-workbench-make-preset \\='websearch
     :tools  \\='(:append (\"search_web\" \"read_url\"))
     :system \\='(:prepend \"Use the provided tools to search the web
                         for up-to-date information.\"))
@@ -2591,68 +2591,68 @@ Alternatively,
 
   An `:eval' form is evaluated when the preset is applied:
 
-  (gptel-make-preset \\='visible-buffers
+  (ai-workbench-make-preset \\='visible-buffers
     :description \"Include the full text of all buffers visible in the
                  frame.\"
     :context \\='(:eval (mapcar #\\='window-buffer (window-list))))
     ▲                ▲
     │                ╰╴evaluated when preset is applied
-    ╰╴sets `gptel-context'
+    ╰╴sets `ai-workbench-context'
 
   `:function' should take the current value of the key as an input and
   return the new value.  Here we combine it with `:append' in the plist.
 
-  (gptel-make-preset \\='github-read-only
+  (ai-workbench-make-preset \\='github-read-only
     :description \"Provide read-only GitHub tools\"
-    :pre (lambda () (gptel-mcp-connect \\='(\"github\") \\='sync))
+    :pre (lambda () (ai-workbench-mcp-connect \\='(\"github\") \\='sync))
     :tools
     \\='( :append (\"mcp-github\")       ;Adds all github MCP tools
        :function (lambda (tools)
                    (cl-delete-if    ;Remove \"write\" access to GitHub
                     (lambda (tool)
-                      (string-match-p \"create_\" (gptel-tool-name tool)))
+                      (string-match-p \"create_\" (ai-workbench-tool-name tool)))
                     tools))))
 
   NOTE: `:eval' and `:function' are evaluated in a temporary buffer, and
   not the buffer from which the request is sent."
   (declare (indent 1))
-  (if-let* ((p (assoc name gptel--known-presets)))
+  (if-let* ((p (assoc name ai-workbench--known-presets)))
       (setcdr p keys)
-    (setq gptel--known-presets          ;Add at end of presets for menu ordering
-          (nconc gptel--known-presets (list (cons name keys))))))
+    (setq ai-workbench--known-presets          ;Add at end of presets for menu ordering
+          (nconc ai-workbench--known-presets (list (cons name keys))))))
 
-(defun gptel-get-preset (name)
-  "Get the gptel preset spec with NAME."
-  (alist-get name gptel--known-presets nil nil #'equal))
+(defun ai-workbench-get-preset (name)
+  "Get the ai-workbench-engine preset spec with NAME."
+  (alist-get name ai-workbench--known-presets nil nil #'equal))
 
-(defun gptel--save-preset (name &optional description)
-  "Save gptel's current settings as a preset with NAME.
+(defun ai-workbench--save-preset (name &optional description)
+  "Save ai-workbench-engine's current settings as a preset with NAME.
 
 NAME must be a symbol.  DESCRIPTION is added if provided.  In addition
 to registering the preset, elisp code to do the same is copied to the
 `kill-ring'."
   (interactive
-   (list (intern (completing-read "Save gptel settings to (existing or new) preset: "
-                                  gptel--known-presets))
+   (list (intern (completing-read "Save ai-workbench-engine settings to (existing or new) preset: "
+                                  ai-workbench--known-presets))
          (read-string "Description (optional): ")))
   (let ((preset-code
-         `(gptel-make-preset ',name
+         `(ai-workbench-make-preset ',name
            :description ,(when (and description
                                 (not (string-blank-p description)))
                           description)
-           :backend ,(gptel-backend-name gptel-backend)
-           :model ',gptel-model
-           :system ,(if-let* ((directive (car-safe (rassoc gptel-system-prompt
-                                                           gptel-directives))))
+           :backend ,(ai-workbench-backend-name ai-workbench-backend)
+           :model ',ai-workbench-model
+           :system ,(if-let* ((directive (car-safe (rassoc ai-workbench-system-prompt
+                                                           ai-workbench-directives))))
                          `',directive
-                      gptel-system-prompt)
-           :tools ',(mapcar #'gptel-tool-name gptel-tools)
-           :stream ,gptel-stream
-           :temperature ,gptel-temperature
-           :max-tokens ,gptel-max-tokens
-           :use-context ',gptel-use-context
-           :track-media ,gptel-track-media
-           :include-reasoning ,(let ((reasoning gptel-include-reasoning))
+                      ai-workbench-system-prompt)
+           :tools ',(mapcar #'ai-workbench-tool-name ai-workbench-llm-tools)
+           :stream ,ai-workbench-stream
+           :temperature ,ai-workbench-temperature
+           :max-tokens ,ai-workbench-max-tokens
+           :use-context ',ai-workbench-use-context
+           :track-media ,ai-workbench-track-media
+           :include-reasoning ,(let ((reasoning ai-workbench-include-reasoning))
                                    (if (eq reasoning 'ignore)
                                        ''ignore reasoning)))))
     (kill-new (pp-to-string preset-code))
@@ -2660,32 +2660,32 @@ to registering the preset, elisp code to do the same is copied to the
     (message "Preset %s saved. (Lisp expression for preset saved to kill-ring)"
              (propertize (symbol-name name) 'face 'highlight))))
 
-(defvar gptel--rewrite-directive)
-(defun gptel--apply-preset (preset &optional setter)
-  "Apply gptel PRESET with SETTER.
+(defvar ai-workbench--rewrite-directive)
+(defun ai-workbench--apply-preset (preset &optional setter)
+  "Apply ai-workbench-engine PRESET with SETTER.
 
 PRESET is the name of a preset, or a spec (plist) of the form
  (:KEY1 VAL1 :KEY2 VAL2 ...).
 
-SETTER is the function used to set the gptel options.  It must accept
+SETTER is the function used to set the ai-workbench-engine options.  It must accept
 two arguments, the symbol being set and the value to set it to.  It
 defaults to `set', and can be set to a different function to (for
 example) apply the preset buffer-locally."
   (unless setter (setq setter #'set))
   (cl-flet ((preset-spec (preset)
               (if (memq (type-of preset) '(symbol string))
-                  (or (gptel-get-preset preset)
-                      (user-error "gptel preset \"%s\": Cannot find preset"
+                  (or (ai-workbench-get-preset preset)
+                      (user-error "ai-workbench-engine preset \"%s\": Cannot find preset"
                                   preset))
                 preset)))
     ;; Record preset name for persistence and UI display
     (when (memq (type-of preset) '(string symbol))
-      (funcall setter 'gptel--preset preset))
+      (funcall setter 'ai-workbench--preset preset))
     ;; Ensure that preset is a plist spec
     (setq preset (preset-spec preset))
     (when-let* ((func (plist-get preset :pre))) (funcall func))
     (when-let* ((parents (plist-get preset :parents)))
-      (mapc (lambda (parent) (gptel--apply-preset (preset-spec parent) setter))
+      (mapc (lambda (parent) (ai-workbench--apply-preset (preset-spec parent) setter))
             (ensure-list parents))))
   (map-do
    (lambda (key val)
@@ -2694,7 +2694,7 @@ example) apply the preset buffer-locally."
        ;; TODO(v1.0): Remove :system-message from this list
        ((or :system :system-prompt :system-message :rewrite-directive)
         (let ((sym (if (eq key :rewrite-directive)
-                       'gptel--rewrite-directive 'gptel-system-prompt)))
+                       'ai-workbench--rewrite-directive 'ai-workbench-system-prompt)))
           (when (consp val)
             ;; Possibly complain about trying to compose a system message string
             ;; with a non-string
@@ -2702,56 +2702,56 @@ example) apply the preset buffer-locally."
             (and (or (plist-member val :append) (plist-member val :prepend))
                  (not (stringp (symbol-value sym)))
                  (user-error "Composing non-string system messages is not implemented"))
-            (setq val (gptel--modify-value (symbol-value sym) val)))
+            (setq val (ai-workbench--modify-value (symbol-value sym) val)))
           (if (and val (symbolp val) (not (functionp val)))
-              (if-let* ((directive (alist-get val gptel-directives)))
+              (if-let* ((directive (alist-get val ai-workbench-directives)))
                   (funcall setter sym directive)
-                (user-error "gptel preset: Cannot find directive %s" val))
+                (user-error "ai-workbench-engine preset: Cannot find directive %s" val))
             (funcall setter sym val))))
        (:backend
-        (when (consp val) (setq val (gptel--modify-value 'gptel-backend val)))
+        (when (consp val) (setq val (ai-workbench--modify-value 'ai-workbench-backend val)))
         (setq val (cl-etypecase val
-                    (gptel-backend val)
-                    (string (gptel-get-backend val))))
+                    (ai-workbench-backend val)
+                    (string (ai-workbench-get-backend val))))
         (unless val
-          (user-error "gptel preset: Cannot find backend %s" val))
-        (funcall setter 'gptel-backend val))
+          (user-error "ai-workbench-engine preset: Cannot find backend %s" val))
+        (funcall setter 'ai-workbench-backend val))
        (:tools                          ;TEMP Confirm this `:append' convention
-        (setq val (gptel--modify-value gptel-tools val))
+        (setq val (ai-workbench--modify-value ai-workbench-llm-tools val))
         (let* ((tools
                 (flatten-list
                  (cl-loop for tool-name in (ensure-list val)
                           for tool = (cl-etypecase tool-name
-                                       (gptel-tool tool-name)
+                                       (ai-workbench-tool tool-name)
                                        (string (ignore-errors
-                                                 (gptel-get-tool tool-name))))
+                                                 (ai-workbench-get-tool tool-name))))
                           do (unless tool
-                               (user-error "gptel preset: Cannot find tool %S"
+                               (user-error "ai-workbench-engine preset: Cannot find tool %S"
                                            tool-name))
                           collect tool))))
-          (funcall setter 'gptel-tools (cl-delete-duplicates tools :test #'eq))))
+          (funcall setter 'ai-workbench-llm-tools (cl-delete-duplicates tools :test #'eq))))
        ((and (let sym (or (intern-soft
-                           (concat "gptel-" (substring (symbol-name key) 1)))
+                           (concat "ai-workbench-" (substring (symbol-name key) 1)))
                           (intern-soft
-                           (concat "gptel--" (substring (symbol-name key) 1)))))
+                           (concat "ai-workbench--" (substring (symbol-name key) 1)))))
              (guard (and sym (boundp sym))))
         (funcall setter sym (if (consp val)
-                                (gptel--modify-value (symbol-value sym) val)
+                                (ai-workbench--modify-value (symbol-value sym) val)
                               val)))
        (_ (display-warning
-           '(gptel presets)
-           (format "gptel preset: setting for %s not found, ignoring." key)))))
+           '(ai-workbench-engine presets)
+           (format "ai-workbench-engine preset: setting for %s not found, ignoring." key)))))
    preset)
   (when-let* ((func (plist-get preset :post))) (funcall func)))
 
-(defun gptel--preset-syms (preset)
-  "Return a list of gptel variables (symbols) set by PRESET.
+(defun ai-workbench--preset-syms (preset)
+  "Return a list of ai-workbench-engine variables (symbols) set by PRESET.
 
 PRESET is the name of a preset, or a spec (plist) of the form
  (:KEY1 VAL1 :KEY2 VAL2 ...)."
   (when (memq (type-of preset) '(string symbol))
-    (let ((spec (or (gptel-get-preset preset)
-                    (user-error "gptel preset \"%s\": Cannot find preset"
+    (let ((spec (or (ai-workbench-get-preset preset)
+                    (user-error "ai-workbench-engine preset \"%s\": Cannot find preset"
                                 preset))))
       (setq preset spec)))
   (let* ((index preset)
@@ -2762,26 +2762,26 @@ PRESET is the name of a preset, or a spec (plist) of the form
         ((or :description :pre :post))
         (:parents
          (setq syms
-               (nconc syms (mapcan #'gptel--preset-syms (ensure-list val)))))
-        (:system (push 'gptel-system-prompt syms))
+               (nconc syms (mapcan #'ai-workbench--preset-syms (ensure-list val)))))
+        (:system (push 'ai-workbench-system-prompt syms))
         (_ (if-let* ((var (or (intern-soft
-                               (concat "gptel-" (substring (symbol-name key) 1)))
+                               (concat "ai-workbench-" (substring (symbol-name key) 1)))
                               (intern-soft
-                               (concat "gptel--" (substring (symbol-name key) 1))))))
+                               (concat "ai-workbench--" (substring (symbol-name key) 1))))))
                (push var syms)
              (display-warning
-              '(gptel presets)
-              (format "gptel preset \"%s\": setting for %s not found, ignoring."
+              '(ai-workbench-engine presets)
+              (format "ai-workbench-engine preset \"%s\": setting for %s not found, ignoring."
                       (car preset) key))))))
     (cl-delete-duplicates syms)))
 
 ;; This is identical to `cl-progv', only we let-bind symbols SYM from the preset
 ;; to their current values instead of evaluating the values explicitly. (#1005)
-(defmacro gptel-with-preset (name &rest body)
-  "Run BODY with gptel preset NAME applied.
+(defmacro ai-workbench-with-preset (name &rest body)
+  "Run BODY with ai-workbench-engine preset NAME applied.
 
-This macro can be used to create `gptel-request' command with settings
-from a gptel preset applied.
+This macro can be used to create `ai-workbench-request' command with settings
+from a ai-workbench-engine preset applied.
 
 NAME is the name of a preset, or a spec (plist) of the form
  (:KEY1 VAL1 :KEY2 VAL2 ...).  It must be quoted."
@@ -2790,24 +2790,24 @@ NAME is the name of a preset, or a spec (plist) of the form
         (binds (make-symbol "binds"))
         (bodyfun (make-symbol "body")))
     ;; Let-bind symbols that we want to modify with the presets.  Also include
-    ;; `gptel--preset' in this list as we don't want to change its value outside
+    ;; `ai-workbench--preset' in this list as we don't want to change its value outside
     ;; of this macro's scope.
-    `(let* ((,syms (cons 'gptel--preset (gptel--preset-syms ,name)))
-            (,bodyfun (lambda () (gptel--apply-preset ,name) ,@body))
+    `(let* ((,syms (cons 'ai-workbench--preset (ai-workbench--preset-syms ,name)))
+            (,bodyfun (lambda () (ai-workbench--apply-preset ,name) ,@body))
             (,binds nil))
        (while ,syms (push (list (car ,syms) (pop ,syms)) ,binds))
        (eval (list 'let (nreverse ,binds) (list 'funcall (list 'quote ,bodyfun)))))))
 
-(defun gptel--preset-mismatch-value (preset-spec key val)
+(defun ai-workbench--preset-mismatch-value (preset-spec key val)
   "Determine if the value of KEY in PRESET-SPEC matches VAL.
 
 This is an imperfect check for whether the value corresponding to KEY (a
 keyword) in PRESET-SPEC (a plist) matches VAL.  This is required
-primarily to identify which gptel variable values have changed since
-PRESET-SPEC was applied, which is relevant when writing gptel metadata
+primarily to identify which ai-workbench-engine variable values have changed since
+PRESET-SPEC was applied, which is relevant when writing ai-workbench-engine metadata
 to a chat file.
 
-See also `gptel--preset-mismatch-p'."
+See also `ai-workbench--preset-mismatch-p'."
   ;; In all cases, assume a mismatch if the preset's value for KEY is a
   ;; modify-list spec, such as (:append ...)
   ;; Mismatches may not even be well-defined/determinable in these cases.
@@ -2820,14 +2820,14 @@ See also `gptel--preset-mismatch-p'."
                (functionp system)
                (and (consp system) (keywordp (car system)))
                (and (consp system)
-                    (not (equal (car-safe (gptel--parse-directive system))
+                    (not (equal (car-safe (ai-workbench--parse-directive system))
                                 val))))))
         (:backend
          (let ((backend (plist-get preset-spec :backend)))
            (or (and (consp backend) (keywordp (car-safe backend)))
-               (not (equal (or (and (gptel-backend-p val) (gptel-backend-name val))
+               (not (equal (or (and (ai-workbench-backend-p val) (ai-workbench-backend-name val))
                                val)
-                           (or (and (gptel-backend-p backend) (gptel-backend-name backend))
+                           (or (and (ai-workbench-backend-p backend) (ai-workbench-backend-name backend))
                                backend))))))
         ;; FIXME: We're assuming that val is a list of tool names, not tools
         (:tools
@@ -2837,7 +2837,7 @@ See also `gptel--preset-mismatch-p'."
                 for tool in preset-tools
                 for tool-name =
                 (or (and (stringp tool) tool)
-                    (ignore-errors (gptel-tool-name tool)))
+                    (ignore-errors (ai-workbench-tool-name tool)))
                 if (not (member tool-name uniq-tool-names))
                 collect tool-name into uniq-tool-names
                 finally return
@@ -2849,26 +2849,26 @@ See also `gptel--preset-mismatch-p'."
                  (not (equal field-val val))))))))
 
 ;;;; Presets in-buffer UI
-(defun gptel--transform-apply-preset (_fsm)
-  "Apply a gptel preset to the buffer depending on the prompt.
+(defun ai-workbench--transform-apply-preset (_fsm)
+  "Apply a ai-workbench-engine preset to the buffer depending on the prompt.
 
 If the last user prompt includes @foo, the preset foo is applied.
 Before applying the preset, \"@foo\" is removed from the prompt and
 point is placed at its position."
-  (when gptel--known-presets
-    (text-property-search-backward 'gptel nil t)
+  (when ai-workbench--known-presets
+    (text-property-search-backward 'ai-workbench-engine nil t)
     (while (re-search-forward "@\\([^[:space:]]+\\)\\_>" nil t)
       ;; The following convoluted check is because re-search is much faster if
       ;; the search pattern begins with a non-whitespace char.
       (when (or (= (match-beginning 0) (point-min))
                 (memq (char-syntax (char-before (match-beginning 0))) '(32 62)))
         (when-let* ((name (match-string 1))
-                    (preset (or (gptel-get-preset (intern-soft name))
-                                (gptel-get-preset name))))
+                    (preset (or (ai-workbench-get-preset (intern-soft name))
+                                (ai-workbench-get-preset name))))
           (delete-region (match-beginning 0) (match-end 0))
           ;; Point must be after @foo when the preset is applied to allow for
           ;; more advanced transformations.
-          (gptel--apply-preset preset
+          (ai-workbench--apply-preset preset
                                (lambda (sym val)
                                  (set (make-local-variable sym) val))))))))
 
@@ -2878,78 +2878,78 @@ point is placed at its position."
 ;;          (looking-at "\\([^[:blank:]]+?\\)[[:punct:]]?\\s-+"))
 ;;     do-stuff)
 
-(defun gptel--fontify-preset-keyword (end)
+(defun ai-workbench--fontify-preset-keyword (end)
   "Font-lock function for preset indicators in chat buffers.
 
 Return preset fontification info for text up to END."
   (and (re-search-forward "@\\([^[:space:]]+\\)\\_>" end t)
        (or (= (match-beginning 0) (point-min))
            (memq (char-syntax (char-before (match-beginning 0))) '(32 62)))
-       (not (plist-get (text-properties-at (match-beginning 1)) 'gptel))))
+       (not (plist-get (text-properties-at (match-beginning 1)) 'ai-workbench-engine))))
 
-(defun gptel-preset-capf ()
-  "Completion at point for gptel presets in `gptel-mode'.
+(defun ai-workbench-preset-capf ()
+  "Completion at point for ai-workbench-engine presets in `ai-workbench-mode'.
 
 Add this to `completion-at-point-functions'."
-  (and gptel--known-presets
+  (and ai-workbench--known-presets
        (save-excursion
          (let ((num (- (skip-syntax-backward "w_"))))
            (when (eql (char-before) ?@)
              (list (point) (+ (point) num)
-                   gptel--known-presets
+                   ai-workbench--known-presets
                    :exclusive 'no
                    :annotation-function
                    #'(lambda (c) (thread-first
                               (intern-soft c)
-                              (assq gptel--known-presets) (cdr)
+                              (assq ai-workbench--known-presets) (cdr)
                               (plist-get :description)))))))))
 
-(defun gptel--prettify-preset ()
-  "Get visual and completion help with presets in gptel buffers.
+(defun ai-workbench--prettify-preset ()
+  "Get visual and completion help with presets in ai-workbench-engine buffers.
 
-Intended to be added to `gptel-mode-hook'."
-  (let ((keyword '((gptel--fontify-preset-keyword
+Intended to be added to `ai-workbench-mode-hook'."
+  (let ((keyword '((ai-workbench--fontify-preset-keyword
                     ;; subexp 0 here is not required, we retain it to make it
                     ;; easy to swtich to more complex patterns in the future
                     0 (when-let* ((comps (all-completions (match-string 1)
-                                          gptel--known-presets))
+                                          ai-workbench--known-presets))
                                   ((member (match-string 1) comps)))
                        '(:box -1 :inherit secondary-selection))
                     prepend))))
     (cond
-     (gptel-mode
+     (ai-workbench-mode
       (font-lock-add-keywords nil keyword t)
-      (add-hook 'completion-at-point-functions #'gptel-preset-capf nil t))
+      (add-hook 'completion-at-point-functions #'ai-workbench-preset-capf nil t))
      (t (font-lock-remove-keywords nil keyword)
-        (remove-hook 'completion-at-point-functions #'gptel-preset-capf t)))))
+        (remove-hook 'completion-at-point-functions #'ai-workbench-preset-capf t)))))
 
 
 ;;; Response tweaking commands
 
-(defun gptel--attach-response-history (history &optional buf)
-  "Attach HISTORY to the next gptel response in buffer BUF.
+(defun ai-workbench--attach-response-history (history &optional buf)
+  "Attach HISTORY to the next ai-workbench-engine response in buffer BUF.
 
 HISTORY is a list of strings typically containing text replaced
-by gptel.  BUF is the current buffer if not specified.
+by ai-workbench-engine.  BUF is the current buffer if not specified.
 
 This is used to maintain variants of prompts or responses to diff
 against if required."
   (with-current-buffer (or buf (current-buffer))
-    (letrec ((gptel--attach-after
+    (letrec ((ai-workbench--attach-after
               (lambda (b e)
                 (when (and b e)
                   (add-text-properties
-                   b e `(gptel-history
+                   b e `(ai-workbench-history
                          ,(append (ensure-list history)
-                           (get-char-property (1- e) 'gptel-history))
-                         front-sticky (gptel gptel-history))))
-                (remove-hook 'gptel-post-response-functions
-                             gptel--attach-after 'local))))
-      (add-hook 'gptel-post-response-functions gptel--attach-after
+                           (get-char-property (1- e) 'ai-workbench-history))
+                         front-sticky (ai-workbench-engine ai-workbench-history))))
+                (remove-hook 'ai-workbench-post-response-functions
+                             ai-workbench--attach-after 'local))))
+      (add-hook 'ai-workbench-post-response-functions ai-workbench--attach-after
                 nil 'local))))
 
-(defun gptel--ediff (&optional arg bounds-func)
-  "Ediff response at point against previous gptel responses.
+(defun ai-workbench--ediff (&optional arg bounds-func)
+  "Ediff response at point against previous ai-workbench-engine responses.
 
 If prefix ARG is non-nil, select the previous response to ediff
 against interactively.
@@ -2958,14 +2958,14 @@ If specified, use BOUNDS-FUNC to compute the bounds of the
 response at point.  This can be used to include additional
 context for the ediff session."
   (interactive "P")
-  (when (gptel--at-response-history-p)
-    (pcase-let* ((`(,beg . ,end) (funcall (or bounds-func #'gptel--get-response-bounds)))
+  (when (ai-workbench--at-response-history-p)
+    (pcase-let* ((`(,beg . ,end) (funcall (or bounds-func #'ai-workbench--get-response-bounds)))
                  (prev-response
                   (if arg
                       (completing-read "Choose response variant to diff against: "
-                                       (get-char-property (point) 'gptel-history)
+                                       (get-char-property (point) 'ai-workbench-history)
                                        nil t)
-                    (car-safe (get-char-property (point) 'gptel-history))))
+                    (car-safe (get-char-property (point) 'ai-workbench-history))))
                  (buffer-mode major-mode)
                  (bufname (buffer-name))
                  (`(,new-buf ,new-beg ,new-end)
@@ -2978,17 +2978,17 @@ context for the ediff session."
                       (insert prev-response)
                       (goto-char (point-min))
                       (list (current-buffer) (point-min) (point-max))))))
-      (unless prev-response (user-error "gptel response is additive: no changes to ediff"))
+      (unless prev-response (user-error "ai-workbench-engine response is additive: no changes to ediff"))
       (require 'ediff)
       (letrec ((cwc (current-window-configuration))
-               (gptel--ediff-restore
+               (ai-workbench--ediff-restore
                 (lambda ()
                   (when (window-configuration-p cwc)
                     (set-window-configuration cwc))
                   (kill-buffer (get-buffer (concat bufname "-PREVIOUS-*")))
                   (kill-buffer (get-buffer (concat bufname "-CURRENT-*")))
-                  (remove-hook 'ediff-quit-hook gptel--ediff-restore))))
-        (add-hook 'ediff-quit-hook gptel--ediff-restore)
+                  (remove-hook 'ediff-quit-hook ai-workbench--ediff-restore))))
+        (add-hook 'ediff-quit-hook ai-workbench--ediff-restore)
         (apply
          #'ediff-regions-internal
          (get-buffer (ediff-make-cloned-buffer (current-buffer) "-CURRENT-*"))
@@ -3000,18 +3000,18 @@ context for the ediff session."
          ;;   (list 'ediff-regions-linewise nil nil))
          )))))
 
-(defun gptel--mark-response ()
-  "Mark gptel response at point, if any."
+(defun ai-workbench--mark-response ()
+  "Mark ai-workbench-engine response at point, if any."
   (interactive)
-  (unless (gptel--in-response-p) (user-error "No gptel response at point"))
-  (pcase-let ((`(,beg . ,end) (gptel--get-response-bounds)))
+  (unless (ai-workbench--in-response-p) (user-error "No ai-workbench-engine response at point"))
+  (pcase-let ((`(,beg . ,end) (ai-workbench--get-response-bounds)))
     (goto-char beg) (push-mark) (goto-char end) (activate-mark)))
 
-(defun gptel--previous-variant (&optional arg)
-  "Switch to ARG previous gptel-response at this point, if it exists."
+(defun ai-workbench--previous-variant (&optional arg)
+  "Switch to ARG previous ai-workbench-response at this point, if it exists."
   (interactive "p")
-  (pcase-let* ((`(,beg . ,end) (gptel--get-response-bounds))
-               (history (get-char-property (point) 'gptel-history))
+  (pcase-let* ((`(,beg . ,end) (ai-workbench--get-response-bounds))
+               (history (get-char-property (point) 'ai-workbench-history))
                (alt-response (car-safe history))
                (offset))
     (unless (and history alt-response)
@@ -3025,7 +3025,7 @@ context for the ediff session."
                      (nbutlast history))))
     (add-text-properties
              0 (length alt-response)
-             `(gptel response gptel-history ,history)
+             `(ai-workbench-engine response ai-workbench-history ,history)
              alt-response)
     (setq offset (min (- (point) beg) (1- (length alt-response))))
     (delete-region beg end)
@@ -3033,14 +3033,14 @@ context for the ediff session."
     (goto-char (+ beg offset))
     (pulse-momentary-highlight-region beg (+ beg (length alt-response)))))
 
-(defun gptel--next-variant (&optional arg)
-  "Switch to ARG next gptel-response at this point, if it exists."
+(defun ai-workbench--next-variant (&optional arg)
+  "Switch to ARG next ai-workbench-response at this point, if it exists."
   (interactive "p")
-  (gptel--previous-variant (- arg)))
+  (ai-workbench--previous-variant (- arg)))
 
-(provide 'gptel)
-;;; gptel.el ends here
+(provide 'ai-workbench-engine)
+;;; ai-workbench-engine.el ends here
 
 ;; Local Variables:
-;; bug-reference-url-format: "https://github.com/karthink/gptel/issues/%s"
+;; bug-reference-url-format: "https://github.com/karthink/ai-workbench-engine/issues/%s"
 ;; End:

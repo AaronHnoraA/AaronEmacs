@@ -48,15 +48,13 @@
   :minor-mode 'ai-workbench-opencode-mode
   :exec-args-fn
   (lambda (prompt _output-file _root)
-    ;; OpenCode non-interactive/print mode: `opencode --print PROMPT'.
-    ;; Adjust if your opencode version uses a different flag.
-    (list (if (and (boundp 'ai-workbench-opencode-executable)
-                   (stringp ai-workbench-opencode-executable)
-                   (not (string-empty-p ai-workbench-opencode-executable)))
-              ai-workbench-opencode-executable
-            "opencode")
-          "--print"
-          prompt))
+    ;; `opencode run <message>' runs non-interactively and exits.
+    (let ((exe (if (and (boundp 'ai-workbench-opencode-executable)
+                        (stringp ai-workbench-opencode-executable)
+                        (not (string-empty-p ai-workbench-opencode-executable)))
+                   ai-workbench-opencode-executable
+                 "opencode")))
+      (list exe "run" prompt)))
   :exec-output 'stdout)
 
 ;; ── Public wrappers ───────────────────────────────────────────────────────────

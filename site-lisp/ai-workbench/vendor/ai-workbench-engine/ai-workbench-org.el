@@ -1,4 +1,4 @@
-;;; gptel-org.el --- Org functions for gptel         -*- lexical-binding: t; -*-
+;;; ai-workbench-org.el --- Org functions for ai-workbench-engine         -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2024-2026  Karthik Chikmagalur
 
@@ -27,36 +27,36 @@
 (require 'org-element)
 (require 'outline)
 (require 'mailcap)                    ;FIXME Avoid this somehow
-(eval-when-compile (require 'gptel-request))
+(eval-when-compile (require 'ai-workbench-request))
 
-;; Functions used for saving/restoring gptel state in Org buffers
-(defvar gptel--num-messages-to-send)
+;; Functions used for saving/restoring ai-workbench-engine state in Org buffers
+(defvar ai-workbench--num-messages-to-send)
 (defvar org-entry-property-inherited-from)
-(defvar gptel-backend)
-(defvar gptel--known-backends)
-(defvar gptel-system-prompt)
-(defvar gptel-model)
-(defvar gptel-temperature)
-(defvar gptel-max-tokens)
-(defvar gptel--link-type-cache)
-(defvar gptel--preset)
+(defvar ai-workbench-backend)
+(defvar ai-workbench--known-backends)
+(defvar ai-workbench-system-prompt)
+(defvar ai-workbench-model)
+(defvar ai-workbench-temperature)
+(defvar ai-workbench-max-tokens)
+(defvar ai-workbench--link-type-cache)
+(defvar ai-workbench--preset)
 
 (defvar org-link-angle-re)
 (defvar org-link-bracket-re)
 (declare-function mailcap-file-name-to-mime-type "mailcap")
-(declare-function gptel--model-capable-p "gptel-request")
-(declare-function gptel--model-mime-capable-p "gptel-request")
-(declare-function gptel--model-name "gptel-request")
-(declare-function gptel--to-string "gptel-request")
-(declare-function gptel--to-number "gptel-request")
-(declare-function gptel--intern "gptel-request")
-(declare-function gptel-backend-name "gptel-request")
-(declare-function gptel--parse-buffer "gptel-request")
-(declare-function gptel--parse-directive "gptel-request")
-(declare-function gptel--with-buffer-copy "gptel-request")
-(declare-function gptel--file-binary-p "gptel-request")
-(declare-function gptel--get-buffer-bounds "gptel")
-(declare-function gptel--restore-props "gptel")
+(declare-function ai-workbench--model-capable-p "ai-workbench-request")
+(declare-function ai-workbench--model-mime-capable-p "ai-workbench-request")
+(declare-function ai-workbench--model-name "ai-workbench-request")
+(declare-function ai-workbench--to-string "ai-workbench-request")
+(declare-function ai-workbench--to-number "ai-workbench-request")
+(declare-function ai-workbench--intern "ai-workbench-request")
+(declare-function ai-workbench-backend-name "ai-workbench-request")
+(declare-function ai-workbench--parse-buffer "ai-workbench-request")
+(declare-function ai-workbench--parse-directive "ai-workbench-request")
+(declare-function ai-workbench--with-buffer-copy "ai-workbench-request")
+(declare-function ai-workbench--file-binary-p "ai-workbench-request")
+(declare-function ai-workbench--get-buffer-bounds "ai-workbench-engine")
+(declare-function ai-workbench--restore-props "ai-workbench-engine")
 (declare-function org-entry-get "org")
 (declare-function org-entry-put "org")
 (declare-function org-with-wide-buffer "org-macs")
@@ -71,8 +71,8 @@
 (eval-and-compile
   (if (fboundp 'org-element-lineage-map)
       (progn (declare-function org-element-lineage-map "org-element-ast")
-             (defalias 'gptel-org--element-lineage-map 'org-element-lineage-map))
-    (defun gptel-org--element-lineage-map (datum fun &optional types with-self first-match)
+             (defalias 'ai-workbench-org--element-lineage-map 'org-element-lineage-map))
+    (defun ai-workbench-org--element-lineage-map (datum fun &optional types with-self first-match)
       "Map FUN across ancestors of DATUM, from closest to furthest.
 
 DATUM is an object or element.  For TYPES, WITH-SELF and
@@ -97,28 +97,28 @@ of Org."
       (progn (declare-function org-element-begin "org-element")
              (declare-function org-element-end "org-element")
              (declare-function org-element-parent "org-element")
-             (defalias 'gptel-org--element-begin 'org-element-begin)
-             (defalias 'gptel-org--element-end 'org-element-end)
-             (defalias 'gptel-org--element-parent 'org-element-parent))
-    (defsubst gptel-org--element-begin (node)
+             (defalias 'ai-workbench-org--element-begin 'org-element-begin)
+             (defalias 'ai-workbench-org--element-end 'org-element-end)
+             (defalias 'ai-workbench-org--element-parent 'org-element-parent))
+    (defsubst ai-workbench-org--element-begin (node)
       "Get `:begin' property of NODE."
       (org-element-property :begin node))
-    (defsubst gptel-org--element-end (node)
+    (defsubst ai-workbench-org--element-end (node)
       "Get `:end' property of NODE."
       (org-element-property :end node))
-    (defsubst gptel-org--element-parent (node)
+    (defsubst ai-workbench-org--element-parent (node)
       "Return `:parent' property of NODE."
       (org-element-property :parent node))))
 
 
 ;;; User options
-(defcustom gptel-org-branching-context nil
-  "Use the lineage of the current heading as the context for gptel in Org buffers.
+(defcustom ai-workbench-org-branching-context nil
+  "Use the lineage of the current heading as the context for ai-workbench-engine in Org buffers.
 
 This makes each same level heading a separate conversation
 branch.
 
-By default, gptel uses a linear context: all the text up to the
+By default, ai-workbench-engine uses a linear context: all the text up to the
 cursor is sent to the LLM.  Enabling this option makes the
 context the hierarchical lineage of the current Org heading.  In
 this example:
@@ -153,26 +153,26 @@ heading 2.2 text
 
 This makes it feasible to have multiple conversation branches."
   :type 'boolean
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
-(defcustom gptel-org-ignore-elements '(property-drawer)
+(defcustom ai-workbench-org-ignore-elements '(property-drawer)
   "Types of Org elements to be stripped from the prompt before sending.
 
-By default gptel will remove Org property drawers from the
+By default ai-workbench-engine will remove Org property drawers from the
 prompt.  For the full list of available elements, please see
 `org-element-all-elements'.
 
 Please note: Removing property-drawer elements is fast, but
 adding elements to this list can significantly slow down
-`gptel-send'."
-  :group 'gptel
+`ai-workbench-send'."
+  :group 'ai-workbench-engine
   :type '(repeat symbol))
 
-(defcustom gptel-org-validate-link #'always
-  "Validate links to be sent as context with gptel queries.
+(defcustom ai-workbench-org-validate-link #'always
+  "Validate links to be sent as context with ai-workbench-engine queries.
 
-When `gptel-track-media' is enabled, this option determines if a
-supported link will be followed and its source included with gptel
+When `ai-workbench-track-media' is enabled, this option determines if a
+supported link will be followed and its source included with ai-workbench-engine
 queries from Org buffers.  Currently only \"file\" and \"attachment\"
 link types are supported (along with web URLs if the model supports
 them).
@@ -182,26 +182,26 @@ non-nil if the link should be followed.
 
 By default, all links are considered valid.
 
-Set this to `gptel-org--link-standalone-p' to only follow links placed
+Set this to `ai-workbench-org--link-standalone-p' to only follow links placed
 on a line by themselves, separated from surrounding text."
-  :group 'gptel
+  :group 'ai-workbench-engine
   :type '(choice
           (const :tag "All links" always)
-          (const :tag "Standalone links" gptel-org--link-standalone-p)
+          (const :tag "Standalone links" ai-workbench-org--link-standalone-p)
           (function :tag "Function")))
 
-(defconst gptel-org--link-regex
+(defconst ai-workbench-org--link-regex
   (concat "\\(?:" org-link-bracket-re "\\|" org-link-angle-re "\\)")
-  "Link regex for `gptel-mode' in Org mode.")
+  "Link regex for `ai-workbench-mode' in Org mode.")
 
 
 ;;; Setting context and creating queries
-(defun gptel-org--get-topic-start ()
+(defun ai-workbench-org--get-topic-start ()
   "If a conversation topic is set, return it."
   (when (org-entry-get (point) "GPTEL_TOPIC" 'inherit)
     (marker-position org-entry-property-inherited-from)))
 
-(defun gptel-org-set-topic (topic)
+(defun ai-workbench-org-set-topic (topic)
   "Set a TOPIC and limit this conversation to the current heading.
 
 This limits the context sent to the LLM to the text between the current
@@ -223,35 +223,35 @@ heading (i.e. the heading with the topic set) and the cursor position."
   (when (stringp topic) (org-set-property "GPTEL_TOPIC" topic)))
 
 ;; NOTE: This can be converted to a cl-defmethod for
-;; `gptel--create-prompt-buffer' (conceptually cleaner), but will cause
-;; load-order issues in gptel.el and might be harder to debug.
-(defun gptel-org--create-prompt-buffer (&optional prompt-end)
+;; `ai-workbench--create-prompt-buffer' (conceptually cleaner), but will cause
+;; load-order issues in ai-workbench-engine.el and might be harder to debug.
+(defun ai-workbench-org--create-prompt-buffer (&optional prompt-end)
   "Return a buffer with the conversation prompt to be sent.
 
 If the region is active limit the prompt text to the region contents.
 Otherwise the prompt text is constructed from the contents of the
 current buffer up to point, or PROMPT-END if provided.  Its contents
-depend on the value of `gptel-org-branching-context', which see."
+depend on the value of `ai-workbench-org-branching-context', which see."
   (when (use-region-p)
     (narrow-to-region (region-beginning) (region-end))
     (setq prompt-end (point-max)))
   (goto-char (or prompt-end (setq prompt-end (point))))
-  (let ((topic-start (gptel-org--get-topic-start)))
+  (let ((topic-start (ai-workbench-org--get-topic-start)))
     (when topic-start
       ;; narrow to GPTEL_TOPIC property scope
       (narrow-to-region topic-start prompt-end))
-    (if (and gptel-org-branching-context
+    (if (and ai-workbench-org-branching-context
              (or (fboundp 'org-element-lineage-map)
                  (prog1 nil
                    (display-warning
-                    '(gptel org)
-                    "Using `gptel-org-branching-context' requires Org version 9.7 or higher, it will be ignored."))))
+                    '(ai-workbench-engine org)
+                    "Using `ai-workbench-org-branching-context' requires Org version 9.7 or higher, it will be ignored."))))
         ;; Create prompt from direct ancestors of point
         (save-excursion
           (let* ((org-buf (current-buffer))
                  ;; Collect all heading start positions in the lineage
-                 (full-bounds (gptel-org--element-lineage-map
-                                  (org-element-at-point) #'gptel-org--element-begin
+                 (full-bounds (ai-workbench-org--element-lineage-map
+                                  (org-element-at-point) #'ai-workbench-org--element-begin
                                 '(headline) 'with-self) )
                  ;; lineage-map returns the full lineage in the unnarrowed
                  ;; buffer.  Remove heading start positions before (point-min)
@@ -271,18 +271,18 @@ depend on the value of `gptel-org-branching-context', which see."
                    do (goto-char pos) (outline-next-heading)
                    collect (point) into ends
                    finally return (cons prompt-end ends))))
-            (gptel--with-buffer-copy org-buf nil nil
+            (ai-workbench--with-buffer-copy org-buf nil nil
               (cl-loop for start in start-bounds
                        for end in end-bounds
                        do (insert-buffer-substring org-buf start end)
                        (goto-char (point-min)))
               (goto-char (point-max))
-              (gptel-org--unescape-tool-results)
-              (gptel-org--strip-block-headers)
-              (when-let* ((gptel-org-ignore-elements ;not copied by -with-buffer-copy
-                           (buffer-local-value 'gptel-org-ignore-elements
+              (ai-workbench-org--unescape-tool-results)
+              (ai-workbench-org--strip-block-headers)
+              (when-let* ((ai-workbench-org-ignore-elements ;not copied by -with-buffer-copy
+                           (buffer-local-value 'ai-workbench-org-ignore-elements
                                                org-buf)))
-                (gptel-org--strip-elements))
+                (ai-workbench-org--strip-elements))
               (setq org-complex-heading-regexp ;For org-element-context to run
                     (buffer-local-value 'org-complex-heading-regexp org-buf))
               (setq tab-width      ;Match source indentation for list parsing
@@ -291,23 +291,23 @@ depend on the value of `gptel-org-branching-context', which see."
       ;; Create prompt the usual way
       (let ((org-buf (current-buffer))
             (beg (point-min)))
-        (gptel--with-buffer-copy org-buf beg prompt-end
-          (gptel-org--unescape-tool-results)
-          (gptel-org--strip-block-headers)
-          (when-let* ((gptel-org-ignore-elements ;not copied by -with-buffer-copy
-                       (buffer-local-value 'gptel-org-ignore-elements
+        (ai-workbench--with-buffer-copy org-buf beg prompt-end
+          (ai-workbench-org--unescape-tool-results)
+          (ai-workbench-org--strip-block-headers)
+          (when-let* ((ai-workbench-org-ignore-elements ;not copied by -with-buffer-copy
+                       (buffer-local-value 'ai-workbench-org-ignore-elements
                                            org-buf)))
-                (gptel-org--strip-elements))
+                (ai-workbench-org--strip-elements))
           (setq org-complex-heading-regexp ;For org-element-context to run
                 (buffer-local-value 'org-complex-heading-regexp org-buf))
           (setq tab-width      ;Match source indentation for list parsing
                 (buffer-local-value 'tab-width org-buf))
           (current-buffer))))))
 
-(defun gptel-org--strip-elements ()
-  "Remove all elements in `gptel-org-ignore-elements' from the prompt."
+(defun ai-workbench-org--strip-elements ()
+  "Remove all elements in `ai-workbench-org-ignore-elements' from the prompt."
   (let ((major-mode 'org-mode) element-markers)
-    (if (equal '(property-drawer) gptel-org-ignore-elements)
+    (if (equal '(property-drawer) ai-workbench-org-ignore-elements)
         (save-excursion
           (goto-char (point-min))
           (while (re-search-forward org-property-drawer-re nil t)
@@ -323,16 +323,16 @@ depend on the value of `gptel-org-branching-context', which see."
       ;; NOTE: `org-element-map' takes a third KEEP-DEFERRED argument in newer
       ;; Org versions
       (org-element-map (org-element-parse-buffer 'element nil)
-          gptel-org-ignore-elements
+          ai-workbench-org-ignore-elements
         (lambda (node)
-          (push (list (gptel-org--element-begin node)
-                      (gptel-org--element-end node))
+          (push (list (ai-workbench-org--element-begin node)
+                      (ai-workbench-org--element-end node))
                 element-markers)))
       (dolist (bounds element-markers)
         (apply #'delete-region bounds)))))
 
-(defun gptel-org--strip-block-headers ()
-  "Remove all gptel-specific block headers and footers.
+(defun ai-workbench-org--strip-block-headers ()
+  "Remove all ai-workbench-specific block headers and footers.
 Every line that matches will be removed entirely.
 
 This removal is necessary to avoid auto-mimicry by LLMs."
@@ -346,17 +346,17 @@ This removal is necessary to avoid auto-mimicry by LLMs."
       (delete-region (match-beginning 0)
                      (min (point-max) (1+ (line-end-position)))))))
 
-(defun gptel-org--unescape-tool-results ()
+(defun ai-workbench-org--unescape-tool-results ()
   "Undo escapes done to keep results from escaping blocks.
-Scans backward for gptel tool text property, then unescapes the block
+Scans backward for ai-workbench-engine tool text property, then unescapes the block
 contents."
   (save-excursion
     (goto-char (point-max))
     (let ((prev-pt (point)))
       (while (> prev-pt (point-min))
         (goto-char
-         (previous-single-char-property-change (point) 'gptel))
-        (let ((prop (get-text-property (point) 'gptel))
+         (previous-single-char-property-change (point) 'ai-workbench-engine))
+        (let ((prop (get-text-property (point) 'ai-workbench-engine))
               (backward-progress (point)))
           (when (eq (car-safe prop) 'tool)
             ;; User edits to clean up can potentially insert a tool-call header
@@ -372,11 +372,11 @@ contents."
              (min prev-pt (point)) prev-pt))
           (goto-char (setq prev-pt backward-progress)))))))
 
-(defun gptel-org--link-standalone-p (object)
+(defun ai-workbench-org--link-standalone-p (object)
   "Check if link OBJECT is on a line by itself."
-  (when-let* ((par (gptel-org--element-parent object))
+  (when-let* ((par (ai-workbench-org--element-parent object))
               ((eq (org-element-type par) 'paragraph)))
-    (and (= (gptel-org--element-begin object)
+    (and (= (ai-workbench-org--element-begin object)
             (save-excursion
               (goto-char (org-element-property :contents-begin par))
               (skip-chars-forward "\t ")
@@ -385,49 +385,49 @@ contents."
                 (org-element-property :end object))
              1))))
 
-(defsubst gptel-org--validate-link (link)
-  "Validate an Org LINK as sendable under the current gptel settings.
+(defsubst ai-workbench-org--validate-link (link)
+  "Validate an Org LINK as sendable under the current ai-workbench-engine settings.
 
 Return a form (validp link-type path . REST), where REST is a list
-explaining why sending the link is not supported by gptel.  Only the
+explaining why sending the link is not supported by ai-workbench-engine.  Only the
 first nil value in REST is guaranteed to be correct."
   (let ((mime))
     (if-let* ((link-type (org-element-property :type link))
               (resource-type
                (or (and (member link-type '("attachment" "file")) 'file)
-                   (and (gptel--model-capable-p 'url)
+                   (and (ai-workbench--model-capable-p 'url)
                         (member link-type '("http" "https" "ftp")) 'url)))
               (path (org-element-property :path link))
-              (user-check (funcall gptel-org-validate-link link))
+              (user-check (funcall ai-workbench-org-validate-link link))
               (readablep (or (eq resource-type 'url) (file-remote-p path)
                              (file-readable-p path)))
               (mime-valid
                (or (eq resource-type 'url)
                    (and (with-memoization
                             (alist-get (expand-file-name path)
-                                       gptel--link-type-cache
+                                       ai-workbench--link-type-cache
                                        nil nil #'string=)
-                          (if (gptel--file-binary-p path) t))
+                          (if (ai-workbench--file-binary-p path) t))
                         (setq mime (mailcap-file-name-to-mime-type path))
-                        (gptel--model-mime-capable-p mime))
+                        (ai-workbench--model-mime-capable-p mime))
                    t)))
         (list t link-type path resource-type user-check readablep mime-valid mime)
       (list nil link-type path resource-type user-check readablep mime-valid mime))))
 
-(cl-defmethod gptel--parse-media-links ((_mode (eql 'org-mode)) beg end)
+(cl-defmethod ai-workbench--parse-media-links ((_mode (eql 'org-mode)) beg end)
   "Parse text and actionable links between BEG and END.
 
 Return a list of the form
  ((:text \"some text\")
   (:media \"/path/to/media.png\" :mime \"image/png\")
   (:text \"More text\"))
-for inclusion into the user prompt for the gptel request."
+for inclusion into the user prompt for the ai-workbench-engine request."
   (let ((parts) (from-pt))
     (save-excursion
       (setq from-pt (goto-char beg))
-      (while (re-search-forward gptel-org--link-regex end t)
+      (while (re-search-forward ai-workbench-org--link-regex end t)
         (let* ((link (org-element-context))
-               (link-status (gptel-org--validate-link link)))
+               (link-status (ai-workbench-org--validate-link link)))
           (cl-destructuring-bind
               (valid type path resource-type user-check readablep mime-valid mime)
               link-status
@@ -435,7 +435,7 @@ for inclusion into the user prompt for the gptel request."
              ((and valid (member type '("file" "attachment")))
               ;; Text file or supported binary file: collect text up to link
               (when-let* ((text (buffer-substring-no-properties
-                                 from-pt (gptel-org--element-begin link))))
+                                 from-pt (ai-workbench-org--element-begin link))))
                 (unless (string-blank-p text) (push (list :text text) parts)))
               ;; collect link
               (push (if mime (list :media path :mime mime) (list :textfile path))
@@ -444,16 +444,16 @@ for inclusion into the user prompt for the gptel request."
              ((and valid (member type '("http" "https" "ftp")))
               ;; Collect text up to this image, and collect this image url
               (when-let* ((text (buffer-substring-no-properties
-                                 from-pt (gptel-org--element-begin link))))
+                                 from-pt (ai-workbench-org--element-begin link))))
                 (unless (string-blank-p text) (push (list :text text) parts)))
               (push (list :url (org-element-property :raw-link link) :mime mime) parts)
               (setq from-pt (point)))
              ((not resource-type)
               (message "Link source not followed for unsupported link type \"%s\"." type))
              ((not user-check)
-              (message (if (eq gptel-org-validate-link 'gptel--link-standalone-p)
+              (message (if (eq ai-workbench-org-validate-link 'ai-workbench--link-standalone-p)
                            "Ignoring non-standalone link \"%s\"."
-                         "Link %s failed to validate, see `gptel-org-validate-link'.")
+                         "Link %s failed to validate, see `ai-workbench-org-validate-link'.")
                        path))
              ((not readablep)
               (message "Ignoring inaccessible file \"%s\"." path))
@@ -463,70 +463,70 @@ for inclusion into the user prompt for the gptel request."
         (push (list :text (buffer-substring-no-properties from-pt end)) parts)))
     (nreverse parts)))
 
-(defun gptel-org--annotate-links (beg end)
-  "Annotate Org links whose sources will be sent with `gptel-send'.
+(defun ai-workbench-org--annotate-links (beg end)
+  "Annotate Org links whose sources will be sent with `ai-workbench-send'.
 
 Search between BEG and END."
-  (when gptel-track-media
+  (when ai-workbench-track-media
     (save-excursion
       (goto-char beg) (forward-line -1)
       (let ((link-ovs (cl-loop for o in (overlays-in (point) end)
-                               if (overlay-get o 'gptel-track-media)
+                               if (overlay-get o 'ai-workbench-track-media)
                                collect o into os finally return os)))
-        (while (re-search-forward gptel-org--link-regex end t)
-          (unless (gptel--in-response-p (1- (point)))
+        (while (re-search-forward ai-workbench-org--link-regex end t)
+          (unless (ai-workbench--in-response-p (1- (point)))
             (let* ((link (org-element-context))
                    (from (org-element-begin link))
                    (to (org-element-end link))
-                   (link-status (gptel-org--validate-link link))
+                   (link-status (ai-workbench-org--validate-link link))
                    (ov (cl-loop for o in (overlays-in from to)
-                                if (overlay-get o 'gptel-track-media)
+                                if (overlay-get o 'ai-workbench-track-media)
                                 return o)))
               (if ov                    ; Ensure overlay over each link
                   (progn (move-overlay ov from to)
                          (setq link-ovs (delq ov link-ovs)))
                 (setq ov (make-overlay from to nil t))
-                (overlay-put ov 'gptel-track-media t)
+                (overlay-put ov 'ai-workbench-track-media t)
                 (overlay-put ov 'evaporate t)
                 (overlay-put ov 'priority -80))
               ;; Check if link will be sent, and annotate accordingly
-              (gptel--annotate-link ov link-status))))
+              (ai-workbench--annotate-link ov link-status))))
         (and link-ovs (mapc #'delete-overlay link-ovs))))
     `(jit-lock-bounds ,beg . ,end)))
 
-(defun gptel-org--send-with-props (send-fun &rest args)
+(defun ai-workbench-org--send-with-props (send-fun &rest args)
   "Conditionally modify SEND-FUN's calling environment.
 
-If in an Org buffer under a heading containing a stored gptel
+If in an Org buffer under a heading containing a stored ai-workbench-engine
 configuration, use that for requests instead.  This includes the
 system message, model and provider (backend), among other
 parameters.
 
 ARGS are the original function call arguments."
   (if (derived-mode-p 'org-mode)
-      (pcase-let ((`( ,gptel--preset ,gptel-system-prompt ,gptel-backend
-                      ,gptel-model ,gptel-temperature ,gptel-max-tokens
-                      ,gptel--num-messages-to-send ,gptel-tools)
+      (pcase-let ((`( ,ai-workbench--preset ,ai-workbench-system-prompt ,ai-workbench-backend
+                      ,ai-workbench-model ,ai-workbench-temperature ,ai-workbench-max-tokens
+                      ,ai-workbench--num-messages-to-send ,ai-workbench-llm-tools)
                    (seq-mapn (lambda (a b) (or a b))
-                             (gptel-org--entry-properties)
-                             (list gptel--preset gptel-system-prompt gptel-backend
-                                   gptel-model gptel-temperature gptel-max-tokens
-                                   gptel--num-messages-to-send gptel-tools))))
+                             (ai-workbench-org--entry-properties)
+                             (list ai-workbench--preset ai-workbench-system-prompt ai-workbench-backend
+                                   ai-workbench-model ai-workbench-temperature ai-workbench-max-tokens
+                                   ai-workbench--num-messages-to-send ai-workbench-llm-tools))))
         (apply send-fun args))
     (apply send-fun args)))
 
-(advice-add 'gptel-send :around #'gptel-org--send-with-props)
-(advice-add 'gptel--suffix-send :around #'gptel-org--send-with-props)
+(advice-add 'ai-workbench-send :around #'ai-workbench-org--send-with-props)
+(advice-add 'ai-workbench--suffix-send :around #'ai-workbench-org--send-with-props)
 
-;; ;; NOTE: Basic uses in org-mode are covered by advising gptel-send and
-;; ;; gptel--suffix-send.  For custom commands it might be necessary to advise
-;; ;; gptel-request instead.
-;; (advice-add 'gptel-request :around #'gptel-org--send-with-props)
+;; ;; NOTE: Basic uses in org-mode are covered by advising ai-workbench-send and
+;; ;; ai-workbench--suffix-send.  For custom commands it might be necessary to advise
+;; ;; ai-workbench-request instead.
+;; (advice-add 'ai-workbench-request :around #'ai-workbench-org--send-with-props)
 
 
 ;;; Saving and restoring state
-(defun gptel-org--entry-properties (&optional pt)
-  "Find gptel configuration properties stored at PT."
+(defun ai-workbench-org--entry-properties (&optional pt)
+  "Find ai-workbench-engine configuration properties stored at PT."
   (pcase-let
       ((`(,preset ,system ,backend ,model ,temperature ,tokens ,num ,tools)
          (mapcar
@@ -534,83 +534,83 @@ ARGS are the original function call arguments."
           '("GPTEL_PRESET" "GPTEL_SYSTEM" "GPTEL_BACKEND"
             "GPTEL_MODEL" "GPTEL_TEMPERATURE" "GPTEL_MAX_TOKENS"
             "GPTEL_NUM_MESSAGES_TO_SEND" "GPTEL_TOOLS"))))
-    (when preset (setq preset (gptel--intern preset)))
+    (when preset (setq preset (ai-workbench--intern preset)))
     (when system
       (setq system (string-replace "\\n" "\n" system)))
     (when backend
-      (setq backend (alist-get backend gptel--known-backends
+      (setq backend (alist-get backend ai-workbench--known-backends
                                nil nil #'equal)))
-    (when model (setq model (gptel--intern model)))
+    (when model (setq model (ai-workbench--intern model)))
     (when temperature
-      (setq temperature (gptel--to-number temperature)))
-    (when tokens (setq tokens (gptel--to-number tokens)))
-    (when num (setq num (gptel--to-number num)))
+      (setq temperature (ai-workbench--to-number temperature)))
+    (when tokens (setq tokens (ai-workbench--to-number tokens)))
+    (when num (setq num (ai-workbench--to-number num)))
     (when tools
       (setq tools (cl-loop
                    for tname in (split-string tools)
-                   for tool = (with-demoted-errors "gptel: %S"
-                                (gptel-get-tool tname))
+                   for tool = (with-demoted-errors "ai-workbench-engine: %S"
+                                (ai-workbench-get-tool tname))
                    if tool collect tool else do
                    (display-warning
-                    '(gptel org tools)
+                    '(ai-workbench-engine org tools)
                     (format "Tool %s not found, ignoring" tname)))))
     (list preset system backend model temperature tokens num tools)))
 
-(defun gptel-org--restore-state ()
-  "Restore gptel state for Org buffers when turning on `gptel-mode'."
+(defun ai-workbench-org--restore-state ()
+  "Restore ai-workbench-engine state for Org buffers when turning on `ai-workbench-mode'."
   (save-restriction
     (widen)
     (condition-case status
         (progn
           (when-let* ((bounds (org-entry-get (point-min) "GPTEL_BOUNDS")))
-            (gptel--restore-props (read bounds)))
+            (ai-workbench--restore-props (read bounds)))
           (pcase-let ((`(,preset ,system ,backend ,model ,temperature ,tokens ,num ,tools)
-                       (gptel-org--entry-properties (point-min))))
+                       (ai-workbench-org--entry-properties (point-min))))
             (when preset
-              (if (gptel-get-preset preset)
-                  (progn (gptel--apply-preset
+              (if (ai-workbench-get-preset preset)
+                  (progn (ai-workbench--apply-preset
                           preset (lambda (sym val) (set (make-local-variable sym) val)))
-                         (setq gptel--preset preset))
+                         (setq ai-workbench--preset preset))
                 (display-warning
-                 '(gptel presets)
-                 (format "Could not activate gptel preset `%s' in buffer \"%s\""
+                 '(ai-workbench-engine presets)
+                 (format "Could not activate ai-workbench-engine preset `%s' in buffer \"%s\""
                          preset (buffer-name)))))
-            (when system (setq-local gptel-system-prompt system))
-            (if backend (setq-local gptel-backend backend)
+            (when system (setq-local ai-workbench-system-prompt system))
+            (if backend (setq-local ai-workbench-backend backend)
               (message
                (substitute-command-keys
                 (concat
-                 "Could not activate gptel backend \"%s\"!  "
-                 "Switch backends with \\[universal-argument] \\[gptel-send]"
-                 " before using gptel."))
+                 "Could not activate ai-workbench-engine backend \"%s\"!  "
+                 "Switch backends with \\[universal-argument] \\[ai-workbench-send]"
+                 " before using ai-workbench-engine."))
                backend))
-            (when model (setq-local gptel-model model))
-            (when temperature (setq-local gptel-temperature temperature))
-            (when tokens (setq-local gptel-max-tokens tokens))
-            (when num (setq-local gptel--num-messages-to-send num))
-            (when tools (setq-local gptel-tools tools))))
-      (:success (message "gptel chat restored."))
-      (error (message "Could not restore gptel state, sorry! Error: %s" status)))))
+            (when model (setq-local ai-workbench-model model))
+            (when temperature (setq-local ai-workbench-temperature temperature))
+            (when tokens (setq-local ai-workbench-max-tokens tokens))
+            (when num (setq-local ai-workbench--num-messages-to-send num))
+            (when tools (setq-local ai-workbench-llm-tools tools))))
+      (:success (message "ai-workbench-engine chat restored."))
+      (error (message "Could not restore ai-workbench-engine state, sorry! Error: %s" status)))))
 
-(defun gptel-org-set-properties (pt &optional msg)
-  "Store the active gptel configuration under the current heading.
+(defun ai-workbench-org-set-properties (pt &optional msg)
+  "Store the active ai-workbench-engine configuration under the current heading.
 
 PT is the cursor position by default.  If MSG is non-nil (default),
 display a message afterwards.
 
-If a gptel preset has been applied in this buffer, a reference to it is
+If a ai-workbench-engine preset has been applied in this buffer, a reference to it is
 saved.
 
 Additional metadata is stored only if no preset was applied or if it
 differs from the preset specification.  This is limited to the active
-gptel model and backend names, the system message, active tools, the
+ai-workbench-engine model and backend names, the system message, active tools, the
 response temperature, max tokens and number of conversation turns to
-send in queries.  (See `gptel--num-messages-to-send' for the last one.)"
+send in queries.  (See `ai-workbench--num-messages-to-send' for the last one.)"
   (interactive (list (point) t))
-  (require 'gptel)
-  (let ((preset-spec (and gptel--preset (gptel-get-preset gptel--preset))))
+  (require 'ai-workbench-engine)
+  (let ((preset-spec (and ai-workbench--preset (ai-workbench-get-preset ai-workbench--preset))))
     (if preset-spec
-        (org-entry-put pt "GPTEL_PRESET" (gptel--to-string gptel--preset))
+        (org-entry-put pt "GPTEL_PRESET" (ai-workbench--to-string ai-workbench--preset))
       (org-entry-delete pt "GPTEL_PRESET"))
 
     ;; FIXME: nil can mean "no value was explicitly set by the user" as well as
@@ -620,55 +620,55 @@ send in queries.  (See `gptel--num-messages-to-send' for the last one.)"
     ;; captured when saving Org buffers.
 
     ;; Model and backend
-    (if (gptel--preset-mismatch-value preset-spec :model gptel-model)
-        (org-entry-put pt "GPTEL_MODEL" (gptel--model-name gptel-model)))
-    (if (gptel--preset-mismatch-value preset-spec :backend gptel-backend)
-        (org-entry-put pt "GPTEL_BACKEND" (gptel-backend-name gptel-backend)))
+    (if (ai-workbench--preset-mismatch-value preset-spec :model ai-workbench-model)
+        (org-entry-put pt "GPTEL_MODEL" (ai-workbench--model-name ai-workbench-model)))
+    (if (ai-workbench--preset-mismatch-value preset-spec :backend ai-workbench-backend)
+        (org-entry-put pt "GPTEL_BACKEND" (ai-workbench-backend-name ai-workbench-backend)))
     ;; System message
-    (let ((parsed (car-safe (gptel--parse-directive gptel-system-prompt))))
-      (if (gptel--preset-mismatch-value preset-spec :system parsed)
+    (let ((parsed (car-safe (ai-workbench--parse-directive ai-workbench-system-prompt))))
+      (if (ai-workbench--preset-mismatch-value preset-spec :system parsed)
           (when parsed
             (org-entry-put pt "GPTEL_SYSTEM" (string-replace "\n" "\\n" parsed)))
         (org-entry-delete pt "GPTEL_SYSTEM")))
     ;; Tools
-    (let ((tool-names (mapcar #'gptel-tool-name gptel-tools)))
-      (if (gptel--preset-mismatch-value preset-spec :tools tool-names)
+    (let ((tool-names (mapcar #'ai-workbench-tool-name ai-workbench-llm-tools)))
+      (if (ai-workbench--preset-mismatch-value preset-spec :tools tool-names)
           (org-entry-put pt "GPTEL_TOOLS" (string-join tool-names " "))
         (org-entry-delete pt "GPTEL_TOOLS")))
     ;; Temperature, max tokens and cutoff
-    (if (and (gptel--preset-mismatch-value preset-spec :temperature gptel-temperature)
-             (not (equal (default-value 'gptel-temperature) gptel-temperature)))
-        (org-entry-put pt "GPTEL_TEMPERATURE" (number-to-string gptel-temperature))
+    (if (and (ai-workbench--preset-mismatch-value preset-spec :temperature ai-workbench-temperature)
+             (not (equal (default-value 'ai-workbench-temperature) ai-workbench-temperature)))
+        (org-entry-put pt "GPTEL_TEMPERATURE" (number-to-string ai-workbench-temperature))
       (org-entry-delete pt "GPTEL_TEMPERATURE"))
-    (if (and (gptel--preset-mismatch-value preset-spec :max-tokens gptel-max-tokens)
-             gptel-max-tokens)
-        (org-entry-put pt "GPTEL_MAX_TOKENS" (number-to-string gptel-max-tokens))
+    (if (and (ai-workbench--preset-mismatch-value preset-spec :max-tokens ai-workbench-max-tokens)
+             ai-workbench-max-tokens)
+        (org-entry-put pt "GPTEL_MAX_TOKENS" (number-to-string ai-workbench-max-tokens))
       (org-entry-delete pt "GPTEL_MAX_TOKENS"))
-    (if (and (gptel--preset-mismatch-value
-              preset-spec :num-messages-to-send gptel--num-messages-to-send)
-             (natnump gptel--num-messages-to-send))
+    (if (and (ai-workbench--preset-mismatch-value
+              preset-spec :num-messages-to-send ai-workbench--num-messages-to-send)
+             (natnump ai-workbench--num-messages-to-send))
         (org-entry-put pt "GPTEL_NUM_MESSAGES_TO_SEND"
-                       (number-to-string gptel--num-messages-to-send))
+                       (number-to-string ai-workbench--num-messages-to-send))
       (org-entry-delete pt "GPTEL_NUM_MESSAGES_TO_SEND")))
   (when msg
-    (message "Added gptel configuration to current headline.")))
+    (message "Added ai-workbench-engine configuration to current headline.")))
 
-(defun gptel-org--save-state ()
-  "Write the gptel state to the Org buffer as Org properties."
+(defun ai-workbench-org--save-state ()
+  "Write the ai-workbench-engine state to the Org buffer as Org properties."
   (org-with-wide-buffer
    (goto-char (point-min))
    (when (org-at-heading-p)
      (org-open-line 1))
-   (gptel-org-set-properties (point-min))
+   (ai-workbench-org-set-properties (point-min))
    ;; Save response boundaries
    (letrec ((write-bounds
              (lambda (attempts)
-               (when-let* ((bounds (gptel--get-buffer-bounds))
+               (when-let* ((bounds (ai-workbench--get-buffer-bounds))
                            ;; first value of ((prop . ((beg end val)...))...)
                            (offset (caadar bounds))
                            (offset-marker (set-marker (make-marker) offset)))
                  (org-entry-put (point-min) "GPTEL_BOUNDS"
-                                (prin1-to-string (gptel--get-buffer-bounds)))
+                                (prin1-to-string (ai-workbench--get-buffer-bounds)))
                  (when (and (not (= (marker-position offset-marker) offset))
                             (> attempts 0))
                    (funcall write-bounds (1- attempts)))))))
@@ -677,7 +677,7 @@ send in queries.  (See `gptel--num-messages-to-send' for the last one.)"
 
 ;;; Transforming responses
 ;;;###autoload
-(defun gptel--convert-markdown->org (str)
+(defun ai-workbench--convert-markdown->org (str)
   "Convert string STR from markdown to org markup.
 
 This is a very basic converter that handles only a few markup
@@ -689,13 +689,13 @@ elements."
       (pcase (match-string 0)
         ;; Handle backticks
         ((and (guard (eq (char-before) ?`)) ticks)
-         (gptel--replace-source-marker (length ticks))
+         (ai-workbench--replace-source-marker (length ticks))
          (save-match-data
            (catch 'block-end
              (while (search-forward ticks nil t)
                (unless (or (eq (char-before (match-beginning 0)) ?`)
                            (eq (char-after) ?`))
-                 (gptel--replace-source-marker (length ticks) 'end)
+                 (ai-workbench--replace-source-marker (length ticks) 'end)
                  (throw 'block-end nil))))))
         ;; Handle headings
         ((and (guard (eq (char-before) ?#)) heading)
@@ -737,7 +737,7 @@ elements."
            (delete-char -1) (insert "-"))))))
     (buffer-string)))
 
-(defun gptel--replace-source-marker (num-ticks &optional end)
+(defun ai-workbench--replace-source-marker (num-ticks &optional end)
   "Replace markdown style backticks with Org equivalents.
 
 NUM-TICKS is the number of backticks being replaced.  If END is
@@ -754,7 +754,7 @@ This is intended for use in the markdown to org stream converter."
       (insert "="))))
 
 ;;;###autoload
-(defun gptel--stream-convert-markdown->org (start-marker)
+(defun ai-workbench--stream-convert-markdown->org (start-marker)
   "Return a Markdown to Org converter.
 
 This function parses a stream of Markdown text to Org
@@ -766,7 +766,7 @@ cleaning up after."
   (letrec ((in-src-block nil)           ;explicit nil to address BUG #183
            (in-org-src-block nil)
            (temp-buf ; NOTE: Switch to `generate-new-buffer' after we drop Emacs 27.1
-            (gptel--temp-buffer " *gptel-temp*"))
+            (ai-workbench--temp-buffer " *ai-workbench-temp*"))
            (start-pt (make-marker))
            (ticks-total 0)      ;MAYBE should we let-bind case-fold-search here?
            (cleanup-fn
@@ -776,8 +776,8 @@ cleaning up after."
                 (when (buffer-live-p (get-buffer temp-buf))
                   (set-marker start-pt nil)
                   (kill-buffer temp-buf))
-                (remove-hook 'gptel-post-response-functions cleanup-fn)))))
-    (add-hook 'gptel-post-response-functions cleanup-fn)
+                (remove-hook 'ai-workbench-post-response-functions cleanup-fn)))))
+    (add-hook 'ai-workbench-post-response-functions cleanup-fn)
     (lambda (str)
       (let ((noop-p) (ticks 0))
         (with-current-buffer (get-buffer temp-buf)
@@ -808,12 +808,12 @@ cleaning up after."
                     ;; Ticks balanced, end src block
                     ((= ticks 0)
                      (progn (setq in-src-block nil)
-                            (gptel--replace-source-marker ticks-total 'end)))
+                            (ai-workbench--replace-source-marker ticks-total 'end)))
                     ;; Positive number of ticks, start an src block
                     ((and (> ticks 0) (not in-src-block))
                      (setq ticks-total ticks
                            in-src-block t)
-                     (gptel--replace-source-marker ticks-total))
+                     (ai-workbench--replace-source-marker ticks-total))
                     ;; Negative number of ticks or in a src block already,
                     ;; reset ticks
                     (t (setq ticks ticks-total)))))
@@ -875,8 +875,8 @@ cleaning up after."
             (prog1 (buffer-substring (point) (point-max))
                    (set-marker start-pt (point-max)))))))))
 
-(provide 'gptel-org)
-;;; gptel-org.el ends here
+(provide 'ai-workbench-org)
+;;; ai-workbench-org.el ends here
 
 ;; Silence warnings about `org-element-type-p' and `org-element-parent', see #294.
 ;; Local Variables:

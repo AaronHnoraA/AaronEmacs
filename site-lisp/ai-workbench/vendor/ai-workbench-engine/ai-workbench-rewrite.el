@@ -1,4 +1,4 @@
-;;; gptel-rewrite.el --- Refactoring functions for gptel  -*- lexical-binding: t; -*-
+;;; ai-workbench-rewrite.el --- Refactoring functions for ai-workbench-engine  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2024-2026  Karthik Chikmagalur
 
@@ -23,7 +23,7 @@
 ;;
 
 ;;; Code:
-(require 'gptel-transient)
+(require 'ai-workbench-transient)
 (require 'cl-lib)
 
 (defvar eldoc-documentation-functions)
@@ -37,8 +37,8 @@
 
 ;; * User options
 
-(defcustom gptel-rewrite-directives-hook nil
-  "Hook run to generate gptel's default rewrite directives.
+(defcustom ai-workbench-rewrite-directives-hook nil
+  "Hook run to generate ai-workbench-engine's default rewrite directives.
 
 Each function in this hook is called with no arguments until one
 returns a non-nil value, the base string to use as the
@@ -47,11 +47,11 @@ rewrite instruction.
 Use this hook to tailor context-specific rewrite directives.
 For example, you can specialize the default rewrite directive
 for a particular major-mode or project."
-  :group 'gptel
+  :group 'ai-workbench-engine
   :type 'hook)
 
-(defcustom gptel-post-rewrite-functions nil
-  "Abnormal hook run after a `gptel-rewrite' action.
+(defcustom ai-workbench-post-rewrite-functions nil
+  "Abnormal hook run after a `ai-workbench-rewrite' action.
 
 This hook is called after the LLM response for the rewrite action
 has been fully received in a temporary buffer.  Each function is
@@ -60,10 +60,10 @@ positions.
 
 Note: this hook only runs if the rewrite request succeeds."
   :type 'hook
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
-(defcustom gptel-rewrite-default-action nil
-  "Action to take when rewriting a text region using gptel.
+(defcustom ai-workbench-rewrite-default-action nil
+  "Action to take when rewriting a text region using ai-workbench-engine.
 
 When the LLM response with the rewritten text is received, you can
 - merge it with the current region, possibly creating a merge conflict,
@@ -71,14 +71,14 @@ When the LLM response with the rewritten text is received, you can
 - or accept it in place, replacing the original region.
 - display a dispatch menu with the above choices.
 
-If this option is nil (the default), gptel waits for an explicit
+If this option is nil (the default), ai-workbench-engine waits for an explicit
 command.  Set it to the symbol `merge', `diff', `ediff', `accept'
 or `dispatch' to automatically do one of these things instead.
 
 You can also set it to a function of your choosing for a custom
 action.  This function receives one argument, the rewrite
 overlay."
-  :group 'gptel
+  :group 'ai-workbench-engine
   :type '(choice
           (const :tag "Wait" nil)
           (const :tag "Merge with current region" merge)
@@ -88,57 +88,57 @@ overlay."
           (const :tag "Dispatch" dispatch)
           (function :tag "Custom action")))
 
-(defface gptel-rewrite-highlight-face
+(defface ai-workbench-rewrite-highlight-face
   '((((class color) (min-colors 88) (background dark))
      :background "#041714" :extend t :inherit default)
     (((class color) (min-colors 88) (background light))
      :background "light goldenrod yellow" :extend t :inherit default)
     (t :inherit secondary-selection))
   "Face for highlighting regions with pending rewrites."
-  :group 'gptel)
+  :group 'ai-workbench-engine)
 
 ;; * Variables
 
-(defvar-keymap gptel-rewrite-actions-map
-  :doc "Keymap for gptel rewrite actions at point."
-  "RET" #'gptel--rewrite-dispatch
-  "<mouse-1>" #'gptel--rewrite-dispatch
-  "C-c C-a" #'gptel--rewrite-accept
-  "C-c C-r" #'gptel--rewrite-iterate
-  "C-c C-k" #'gptel--rewrite-reject
-  "C-c C-d" #'gptel--rewrite-diff
-  "C-c C-e" #'gptel--rewrite-ediff
-  "C-c C-n" #'gptel--rewrite-next
-  "C-c C-p" #'gptel--rewrite-previous
-  "C-c C-m" #'gptel--rewrite-merge)
+(defvar-keymap ai-workbench-rewrite-actions-map
+  :doc "Keymap for ai-workbench-engine rewrite actions at point."
+  "RET" #'ai-workbench--rewrite-dispatch
+  "<mouse-1>" #'ai-workbench--rewrite-dispatch
+  "C-c C-a" #'ai-workbench--rewrite-accept
+  "C-c C-r" #'ai-workbench--rewrite-iterate
+  "C-c C-k" #'ai-workbench--rewrite-reject
+  "C-c C-d" #'ai-workbench--rewrite-diff
+  "C-c C-e" #'ai-workbench--rewrite-ediff
+  "C-c C-n" #'ai-workbench--rewrite-next
+  "C-c C-p" #'ai-workbench--rewrite-previous
+  "C-c C-m" #'ai-workbench--rewrite-merge)
 
-(defvar-local gptel--rewrite-overlays nil
+(defvar-local ai-workbench--rewrite-overlays nil
   "List of active rewrite overlays in the buffer.")
 
-(defvar-local gptel--rewrite-message nil
-  "Request-specific instructions for a `gptel-rewrite' action.")
+(defvar-local ai-workbench--rewrite-message nil
+  "Request-specific instructions for a `ai-workbench-rewrite' action.")
 
-;; Add the rewrite directive to `gptel-directives'
-(unless (alist-get 'rewrite gptel-directives)
-  (add-to-list 'gptel-directives `(rewrite . ,#'gptel--rewrite-directive-default)))
+;; Add the rewrite directive to `ai-workbench-directives'
+(unless (alist-get 'rewrite ai-workbench-directives)
+  (add-to-list 'ai-workbench-directives `(rewrite . ,#'ai-workbench--rewrite-directive-default)))
 
-(defvar gptel--rewrite-directive
-  (or (alist-get 'rewrite gptel-directives)
-      #'gptel--rewrite-directive-default)
+(defvar ai-workbench--rewrite-directive
+  (or (alist-get 'rewrite ai-workbench-directives)
+      #'ai-workbench--rewrite-directive-default)
   "Active system message for rewrite actions.
 
 This variable is for internal use only.  To customize the rewrite
 system message, set a system message (or function that generates
 the system message) as the value of the `rewrite' key in
-`gptel-directives':
+`ai-workbench-directives':
 
- (setf (alist-get \\='rewrite gptel-directives)
+ (setf (alist-get \\='rewrite ai-workbench-directives)
        #\\='my-rewrite-message-generator)
 
-You can also customize `gptel-rewrite-directives-hook' to
+You can also customize `ai-workbench-rewrite-directives-hook' to
 dynamically inject a rewrite-specific system message.")
 
-(defun gptel--rewrite-directive-default ()
+(defun ai-workbench--rewrite-directive-default ()
   "Generic directive for rewriting or refactoring.
 
 These are instructions not specific to any particular required
@@ -146,12 +146,12 @@ change.
 
 The returned string is interpreted as the system message for the
 rewrite request.  To use your own, add a different directive to
-`gptel-directives', or add to `gptel-rewrite-directives-hook',
+`ai-workbench-directives', or add to `ai-workbench-rewrite-directives-hook',
 which see."
   (or (save-mark-and-excursion
         (run-hook-with-args-until-success
-         'gptel-rewrite-directives-hook))
-      (let* ((lang (downcase (gptel--strip-mode-suffix major-mode)))
+         'ai-workbench-rewrite-directives-hook))
+      (let* ((lang (downcase (ai-workbench--strip-mode-suffix major-mode)))
              (article (if (and lang (not (string-empty-p lang))
                                (memq (aref lang 0) '(?a ?e ?i ?o ?u)))
                           "an" "a")))
@@ -174,27 +174,27 @@ which see."
            "  Generate ONLY the replacement text,"
            " without any explanation or markdown code fences.")))))
 
-;; MAYBE: Save FSM to `gptel--fsm-last' on request end?
-(defvar gptel--rewrite-handlers
-  `((WAIT ,#'gptel--handle-wait ,#'gptel--rewrite-update-wait)
-    (TPRE ,#'gptel--handle-pre-tool ,#'gptel--fsm-transition)
-    (TOOL ,#'gptel--rewrite-update-tool-call ,#'gptel--handle-tool-use)
-    (TRET ,#'gptel--handle-post-tool ,#'gptel--rewrite-update-tool-call
-          ,#'gptel--handle-tool-result))
-  "Alist specifying FSM handlers for `gptel-rewrite' state transitions.")
+;; MAYBE: Save FSM to `ai-workbench--fsm-last' on request end?
+(defvar ai-workbench--rewrite-handlers
+  `((WAIT ,#'ai-workbench--handle-wait ,#'ai-workbench--rewrite-update-wait)
+    (TPRE ,#'ai-workbench--handle-pre-tool ,#'ai-workbench--fsm-transition)
+    (TOOL ,#'ai-workbench--rewrite-update-tool-call ,#'ai-workbench--handle-tool-use)
+    (TRET ,#'ai-workbench--handle-post-tool ,#'ai-workbench--rewrite-update-tool-call
+          ,#'ai-workbench--handle-tool-result))
+  "Alist specifying FSM handlers for `ai-workbench-rewrite' state transitions.")
 
 ;; * Helper functions
 
 ;; ** UI Indicators
-(defun gptel--rewrite-update-tool-call (fsm)
+(defun ai-workbench--rewrite-update-tool-call (fsm)
   "Update the rewrite overlay to indicate tool call progress for FSM."
-  (when-let* ((info (gptel-fsm-info fsm))
+  (when-let* ((info (ai-workbench-fsm-info fsm))
               (ov (car-safe (plist-get info :context)))
               (names (cl-loop for call in (plist-get info :tool-use)
                               collect (plist-get call :name))))
     (with-current-buffer (plist-get info :buffer)
-      (setq gptel--fsm-last fsm)
-      (gptel--rewrite-update-status
+      (setq ai-workbench--fsm-last fsm)
+      (ai-workbench--rewrite-update-status
        ov (concat
            (propertize
             (if (length> names 1) " Calling tools (" " Calling tool (")
@@ -203,12 +203,12 @@ which see."
                       names (propertize ", " 'face '(mode-line-emphasis default)))
            (propertize ")" 'face '(mode-line-emphasis default)))))))
 
-(defun gptel--rewrite-update-wait (fsm)
+(defun ai-workbench--rewrite-update-wait (fsm)
   "Update the rewrite overlay status for FSM to indicate a waiting state."
-  (when-let* ((info (gptel-fsm-info fsm))
+  (when-let* ((info (ai-workbench-fsm-info fsm))
               (ov (car-safe (plist-get info :context)))
-              (model (gptel--model-name
-                      (or (plist-get info :model) gptel-model)))
+              (model (ai-workbench--model-name
+                      (or (plist-get info :model) ai-workbench-model)))
               (hint-str (concat "[" model "]\n")))
     (overlay-put
      ov 'status
@@ -223,7 +223,7 @@ which see."
            (propertize hint-str 'face '(warning default)))) ;status element 3
     (overlay-put ov 'before-string (apply #'concat (overlay-get ov 'status)))))
 
-(defun gptel--rewrite-update-status (ov msg &optional face)
+(defun ai-workbench--rewrite-update-status (ov msg &optional face)
   "Update overlay OV's status with MSG and refresh its before-string.
 If FACE is non-nil, apply that face to MSG when storing the status."
   (setq msg (or msg ""))
@@ -231,58 +231,58 @@ If FACE is non-nil, apply that face to MSG when storing the status."
         (if face (propertize msg 'face face) msg))
   (overlay-put ov 'before-string (apply #'concat (overlay-get ov 'status))))
 
-(defun gptel--rewrite-key-help (callback)
-  "Eldoc documentation function for gptel rewrite actions.
+(defun ai-workbench--rewrite-key-help (callback)
+  "Eldoc documentation function for ai-workbench-engine rewrite actions.
 
 CALLBACK is supplied by Eldoc, see
 `eldoc-documentation-functions'."
-  (when (and gptel--rewrite-overlays
-             (get-char-property (point) 'gptel-rewrite))
+  (when (and ai-workbench--rewrite-overlays
+             (get-char-property (point) 'ai-workbench-rewrite))
       (funcall callback
-               (format (substitute-command-keys "%s rewrite available: accept \\[gptel--rewrite-accept], iterate \\[gptel--rewrite-iterate], clear \\[gptel--rewrite-reject], merge \\[gptel--rewrite-merge], diff \\[gptel--rewrite-diff] or ediff \\[gptel--rewrite-ediff]")
-                       (propertize (gptel--model-name gptel-model) 'face 'mode-line-emphasis)))))
+               (format (substitute-command-keys "%s rewrite available: accept \\[ai-workbench--rewrite-accept], iterate \\[ai-workbench--rewrite-iterate], clear \\[ai-workbench--rewrite-reject], merge \\[ai-workbench--rewrite-merge], diff \\[ai-workbench--rewrite-diff] or ediff \\[ai-workbench--rewrite-ediff]")
+                       (propertize (ai-workbench--model-name ai-workbench-model) 'face 'mode-line-emphasis)))))
 
 ;; ** Navigation across rewrite regions
 
-(defun gptel--rewrite-move (search-func)
-  "Move directionally to a gptel rewrite location using SEARCH-FUNC."
-  (let* ((ov (cdr (get-char-property-and-overlay (point) 'gptel-rewrite)))
+(defun ai-workbench--rewrite-move (search-func)
+  "Move directionally to a ai-workbench-engine rewrite location using SEARCH-FUNC."
+  (let* ((ov (cdr (get-char-property-and-overlay (point) 'ai-workbench-rewrite)))
          (pt (save-excursion
                (if ov
                    (goto-char
-                    (funcall search-func (overlay-start ov) 'gptel-rewrite))
+                    (funcall search-func (overlay-start ov) 'ai-workbench-rewrite))
                  (goto-char
-                  (max (1- (funcall search-func (point) 'gptel-rewrite))
+                  (max (1- (funcall search-func (point) 'ai-workbench-rewrite))
                        (point-min))))
-               (funcall search-func (point) 'gptel-rewrite))))
-    (if (get-char-property pt 'gptel-rewrite)
+               (funcall search-func (point) 'ai-workbench-rewrite))))
+    (if (get-char-property pt 'ai-workbench-rewrite)
         (goto-char pt)
       (user-error "No further rewrite regions!"))))
 
-(defun gptel--rewrite-next ()
+(defun ai-workbench--rewrite-next ()
   "Go to next pending LLM rewrite in buffer, if one exists."
   (interactive)
-  (gptel--rewrite-move #'next-single-char-property-change))
+  (ai-workbench--rewrite-move #'next-single-char-property-change))
 
-(defun gptel--rewrite-previous ()
+(defun ai-workbench--rewrite-previous ()
   "Go to previous pending LLM rewrite in buffer, if one exists."
   (interactive)
-  (gptel--rewrite-move #'previous-single-char-property-change))
+  (ai-workbench--rewrite-move #'previous-single-char-property-change))
 
 ;; ** Rewrite actions helpers
 
-(defun gptel--rewrite-overlay-at (&optional pt)
-  "Check for a gptel rewrite overlay at PT and return it.
+(defun ai-workbench--rewrite-overlay-at (&optional pt)
+  "Check for a ai-workbench-engine rewrite overlay at PT and return it.
 
 If no suitable overlay is found, raise an error."
   (pcase-let ((`(,response . ,ov)
-               (get-char-property-and-overlay (or pt (point)) 'gptel-rewrite))
+               (get-char-property-and-overlay (or pt (point)) 'ai-workbench-rewrite))
               (diff-entire-buffers nil))
     (unless ov (user-error "Could not find region being rewritten"))
     (unless response (user-error "No LLM output available for this rewrite"))
     ov))
 
-(defun gptel--rewrite-prepare-buffer (ovs &optional buf)
+(defun ai-workbench--rewrite-prepare-buffer (ovs &optional buf)
   "Prepare new buffer with LLM changes applied and return it.
 
 This is used for (e)diff purposes.
@@ -295,7 +295,7 @@ the changed regions.  BUF is the (current) buffer."
           (pmax (point-max))
           (pt   (point))
           ;; (mode major-mode)
-          (newbuf (get-buffer-create "*gptel-diff*"))
+          (newbuf (get-buffer-create "*ai-workbench-diff*"))
           (inhibit-read-only t)
           (inhibit-message t))
       (save-restriction
@@ -310,57 +310,57 @@ the changed regions.  BUF is the (current) buffer."
         ;; (delay-mode-hooks (funcall mode))
         ;; Apply the changes to the new buffer
         (save-excursion
-          (gptel--rewrite-accept ovs newbuf)))
+          (ai-workbench--rewrite-accept ovs newbuf)))
       newbuf)))
 
-(defun gptel--rewrite-read-message (prompt &optional _ history)
+(defun ai-workbench--rewrite-read-message (prompt &optional _ history)
   "Read a rewrite message from the minibuffer.
 
 Provide custom keybindings for cycling, editing, and submitting the
-`gptel-rewrite' action directly from this prompt.
+`ai-workbench-rewrite' action directly from this prompt.
 
 PROMPT is the prompt string to display.  HISTORY, if provided, is the
 input history list."
   (let* ((rewrite-directive
-          (car-safe (gptel--parse-directive gptel--rewrite-directive 'raw)))
+          (car-safe (ai-workbench--parse-directive ai-workbench--rewrite-directive 'raw)))
          (cb (current-buffer))
          (cycle-prefix (lambda () (interactive)
-                         (gptel--read-with-prefix rewrite-directive)
+                         (ai-workbench--read-with-prefix rewrite-directive)
                          (push-mark) (goto-char (point-max))
                          (activate-mark)))
          (set-rewrite-message
           (lambda ()
             (let ((message (buffer-substring-no-properties
                             (minibuffer-prompt-end) (point-max))))
-              (with-current-buffer cb (setq gptel--rewrite-message message))
-              (setf (alist-get 'gptel--infix-rewrite-extra transient-history)
+              (with-current-buffer cb (setq ai-workbench--rewrite-message message))
+              (setf (alist-get 'ai-workbench--infix-rewrite-extra transient-history)
                     (delete-dups (cons message transient--history))))))
          (start-rewrite-maybe
           (lambda () (interactive)
             (when (minibufferp) (funcall set-rewrite-message))
             (if transient--prefix    ;Called from transient? Don't start rewrite
-                (run-at-time 0 nil #'transient-setup 'gptel-rewrite)
+                (run-at-time 0 nil #'transient-setup 'ai-workbench-rewrite)
               (with-current-buffer cb
-                (gptel--suffix-rewrite gptel--rewrite-message)))
+                (ai-workbench--suffix-rewrite ai-workbench--rewrite-message)))
             (when (minibufferp) (exit-minibuffer))))
          (start-transient
           (lambda () (interactive)
-            (run-at-time 0 nil #'transient-setup 'gptel-rewrite)
+            (run-at-time 0 nil #'transient-setup 'ai-workbench-rewrite)
             (when (minibufferp)
               (funcall set-rewrite-message)
               (exit-minibuffer))))
          (edit-in-buffer
           (lambda () (interactive)
             (let ((offset (- (point) (minibuffer-prompt-end))))
-              (gptel--edit-directive 'gptel--rewrite-message
+              (ai-workbench--edit-directive 'ai-workbench--rewrite-message
                 :prompt rewrite-directive :initial (minibuffer-contents)
                 :buffer cb :setup (lambda () (ignore-errors (forward-char offset)))
                 :callback
                 (lambda (msg)
                   (when msg
-                    (push (buffer-local-value 'gptel--rewrite-message cb)
-                          (alist-get 'gptel--infix-rewrite-extra transient-history))
-                    (with-current-buffer cb (gptel--suffix-rewrite)))
+                    (push (buffer-local-value 'ai-workbench--rewrite-message cb)
+                          (alist-get 'ai-workbench--infix-rewrite-extra transient-history))
+                    (with-current-buffer cb (ai-workbench--suffix-rewrite)))
                   (when (minibufferp) (exit-minibuffer)))))))
          (minibuffer-local-map
           (make-composed-keymap (define-keymap
@@ -371,26 +371,26 @@ input history list."
                                 minibuffer-local-map)))
     (minibuffer-with-setup-hook cycle-prefix
       (read-string
-       prompt (or gptel--rewrite-message "Rewrite: ")
+       prompt (or ai-workbench--rewrite-message "Rewrite: ")
        history))))
 
 ;; * Rewrite action functions
 
-(defun gptel--rewrite-reject (&optional ovs)
+(defun ai-workbench--rewrite-reject (&optional ovs)
   "Clear pending LLM responses in OVS or at point."
-  (interactive (list (gptel--rewrite-overlay-at)))
+  (interactive (list (ai-workbench--rewrite-overlay-at)))
   (dolist (ov (ensure-list ovs))
-    (setq gptel--rewrite-overlays (delq ov gptel--rewrite-overlays))
+    (setq ai-workbench--rewrite-overlays (delq ov ai-workbench--rewrite-overlays))
     (delete-overlay ov))
-  (unless gptel--rewrite-overlays
-    (remove-hook 'eldoc-documentation-functions 'gptel--rewrite-key-help 'local))
+  (unless ai-workbench--rewrite-overlays
+    (remove-hook 'eldoc-documentation-functions 'ai-workbench--rewrite-key-help 'local))
   (message "Cleared pending LLM response(s)."))
 
-(defun gptel--rewrite-accept (&optional ovs buf)
+(defun ai-workbench--rewrite-accept (&optional ovs buf)
   "Apply pending LLM responses in OVS or at point.
 
 BUF is the buffer to modify, defaults to the overlay buffer."
-  (interactive (list (gptel--rewrite-overlay-at)))
+  (interactive (list (ai-workbench--rewrite-overlay-at)))
   (when-let* ((ov-buf (overlay-buffer (or (car-safe ovs) ovs)))
               (buf (or buf ov-buf))
               ((buffer-live-p buf)))
@@ -398,7 +398,7 @@ BUF is the buffer to modify, defaults to the overlay buffer."
       (cl-loop for ov in (ensure-list ovs)
                for ov-beg = (overlay-start ov)
                for ov-end = (overlay-end ov)
-               for response = (overlay-get ov 'gptel-rewrite)
+               for response = (overlay-get ov 'ai-workbench-rewrite)
                do (with-current-buffer buf
                     (goto-char ov-beg)
                     (delete-region ov-beg ov-end)
@@ -406,58 +406,58 @@ BUF is the buffer to modify, defaults to the overlay buffer."
     (message "Replaced region(s) with LLM output in buffer: %s."
              (buffer-name ov-buf))))
 
-(defalias 'gptel--rewrite-iterate 'gptel-rewrite
+(defalias 'ai-workbench--rewrite-iterate 'ai-workbench-rewrite
   "Iterate on pending LLM response at point.")
 
-(defun gptel--rewrite-diff (&optional ovs switches)
+(defun ai-workbench--rewrite-diff (&optional ovs switches)
   "Diff pending LLM responses in OVS or at point.
 
 SWITCHES are diff arguments."
-  (interactive (list (gptel--rewrite-overlay-at)))
+  (interactive (list (ai-workbench--rewrite-overlay-at)))
   (when-let* ((ov-buf (overlay-buffer (or (car-safe ovs) ovs)))
               ((buffer-live-p ov-buf)))
     (require 'diff)
-    (let* ((newbuf (gptel--rewrite-prepare-buffer ovs))
+    (let* ((newbuf (ai-workbench--rewrite-prepare-buffer ovs))
            (diff-buf (diff-no-select ov-buf newbuf switches)))
       (with-current-buffer diff-buf
         (setq-local diff-jump-to-old-file t))
       (display-buffer diff-buf))))
 
-(defun gptel--rewrite-ediff (&optional ovs)
+(defun ai-workbench--rewrite-ediff (&optional ovs)
   "Ediff pending LLM responses in OVS or at point."
-  (interactive (list (gptel--rewrite-overlay-at)))
+  (interactive (list (ai-workbench--rewrite-overlay-at)))
   (when-let* ((ov-buf (overlay-buffer (or (car-safe ovs) ovs)))
               ((buffer-live-p ov-buf)))
-    (letrec ((newbuf (gptel--rewrite-prepare-buffer ovs))
+    (letrec ((newbuf (ai-workbench--rewrite-prepare-buffer ovs))
              (cwc (current-window-configuration))
              (hideshow
               (lambda (&optional restore)
                 (dolist (ov (ensure-list ovs))
                   (when-let* ((overlay-buffer ov))
                     (let ((disp (overlay-get ov 'display))
-                          (stored (overlay-get ov 'gptel--ediff)))
-                      (overlay-put ov 'face (and restore 'gptel-rewrite-highlight-face))
+                          (stored (overlay-get ov 'ai-workbench--ediff)))
+                      (overlay-put ov 'face (and restore 'ai-workbench-rewrite-highlight-face))
                       (overlay-put ov 'display (and restore stored))
-                      (overlay-put ov 'gptel--ediff (unless restore disp)))))))
-             (gptel--ediff-restore
+                      (overlay-put ov 'ai-workbench--ediff (unless restore disp)))))))
+             (ai-workbench--ediff-restore
               (lambda ()
                 (when (window-configuration-p cwc)
                   (set-window-configuration cwc))
                 (funcall hideshow 'restore)
-                (remove-hook 'ediff-quit-hook gptel--ediff-restore))))
+                (remove-hook 'ediff-quit-hook ai-workbench--ediff-restore))))
       (funcall hideshow)
-      (add-hook 'ediff-quit-hook gptel--ediff-restore 50)
+      (add-hook 'ediff-quit-hook ai-workbench--ediff-restore 50)
       (let ((ediff-window-setup-function #'ediff-setup-windows-plain)
             (ediff-split-window-function #'split-window-horizontally))
         (ediff-buffers ov-buf newbuf)))))
 
-(defun gptel--rewrite-merge-git (beg end new-str)
+(defun ai-workbench--rewrite-merge-git (beg end new-str)
   "Produce a merge conflict region between BEG and END.
 
 Merge the region with NEW-STR using git merge-file."
-  (let ((original-temp-file (make-temp-file "gptel-merge-"))
-        (empty-temp-file (make-temp-file "gptel-merge-")) ; use /dev/null? (windows?)
-        (new-temp-file (make-temp-file "gptel-merge-")))
+  (let ((original-temp-file (make-temp-file "ai-workbench-merge-"))
+        (empty-temp-file (make-temp-file "ai-workbench-merge-")) ; use /dev/null? (windows?)
+        (new-temp-file (make-temp-file "ai-workbench-merge-")))
     (unwind-protect
         (progn (write-region beg end original-temp-file)
                (with-temp-file empty-temp-file (insert ""))
@@ -467,7 +467,7 @@ Merge the region with NEW-STR using git merge-file."
                (call-process
                 "git" nil (list (current-buffer) nil) nil
                 "merge-file" "--no-diff3" "-L" "original" "-L" "Empty" "-L"
-                (gptel-backend-name gptel-backend) "-p"
+                (ai-workbench-backend-name ai-workbench-backend) "-p"
                 original-temp-file empty-temp-file new-temp-file)
                ;; Make merge marker active if required
                (goto-char beg) (unless (bolp) (insert "\n")))
@@ -475,46 +475,46 @@ Merge the region with NEW-STR using git merge-file."
       (delete-file empty-temp-file)
       (delete-file new-temp-file))))
 
-(defun gptel--rewrite-merge-simple (beg end new-str)
+(defun ai-workbench--rewrite-merge-simple (beg end new-str)
   "Produce a merge conflict region between BEG and END.
 
 NEW-STR is the new string intended to replace the region."
   (goto-char end)                       ;End first to preserve ordering
   (unless (bolp) (insert "\n"))
   (insert "=======\n" new-str "\n>>>>>>> "
-          (gptel-backend-name gptel-backend) "\n")
+          (ai-workbench-backend-name ai-workbench-backend) "\n")
   (goto-char beg)
   (unless (bolp) (insert "\n"))
   (insert-before-markers "<<<<<<< original\n"))
 
-(defun gptel--rewrite-merge (&optional ovs)
+(defun ai-workbench--rewrite-merge (&optional ovs)
   "Insert pending LLM responses in OVS as merge conflicts."
-  (interactive (list (gptel--rewrite-overlay-at)))
+  (interactive (list (ai-workbench--rewrite-overlay-at)))
   (when-let* ((ov-buf (overlay-buffer (or (car-safe ovs) ovs)))
               ((buffer-live-p ov-buf)))
     (with-current-buffer ov-buf
       (let ((changed))
         (dolist (ov (ensure-list ovs))
           (save-excursion
-            (when-let* ((new-str (overlay-get ov 'gptel-rewrite)))
+            (when-let* ((new-str (overlay-get ov 'ai-workbench-rewrite)))
               (if (executable-find "git") ;Replace overlay content with merge result
-                  (gptel--rewrite-merge-git (overlay-start ov) (overlay-end ov) new-str)
-                (gptel--rewrite-merge-simple (overlay-start ov) (overlay-end ov) new-str))
+                  (ai-workbench--rewrite-merge-git (overlay-start ov) (overlay-end ov) new-str)
+                (ai-workbench--rewrite-merge-simple (overlay-start ov) (overlay-end ov) new-str))
               (setq changed t))))
         (when changed (smerge-mode 1)))
-      (gptel--rewrite-reject ovs))))
+      (ai-workbench--rewrite-reject ovs))))
 
-(defun gptel--rewrite-dispatch (&optional ov ci)
-  "Dispatch actions for gptel rewrites.
+(defun ai-workbench--rewrite-dispatch (&optional ov ci)
+  "Dispatch actions for ai-workbench-engine rewrites.
 
 OV is the rewrite overlay, CI is true for interactive calls."
-  (interactive (list (gptel--rewrite-overlay-at) t))
+  (interactive (list (ai-workbench--rewrite-overlay-at) t))
   (let ((choice)
         (orig-status (copy-sequence (overlay-get ov 'status))))
     (unwind-protect
         (pcase-let ((choices '((?a "accept") (?k "reject") (?r "iterate")
                                (?m "merge") (?d "diff") (?e "ediff"))))
-          (gptel--rewrite-update-status
+          (ai-workbench--rewrite-update-status
            ov (when (fboundp #'rmc--add-key-description) ; introduced in Emacs 29
                 (concat " " (mapconcat (lambda (e) (cdr e))
                                        (mapcar #'rmc--add-key-description choices) ", "))))
@@ -522,11 +522,11 @@ OV is the rewrite overlay, CI is true for interactive calls."
       (overlay-put ov 'status orig-status)
       (overlay-put ov 'before-string (apply #'concat orig-status)))
     (if ci
-        (call-interactively (intern (concat "gptel--rewrite-" (cadr choice))))
-      (funcall (intern (concat "gptel--rewrite-" (cadr choice))) ov))))
+        (call-interactively (intern (concat "ai-workbench--rewrite-" (cadr choice))))
+      (funcall (intern (concat "ai-workbench--rewrite-" (cadr choice))) ov))))
 
-(defun gptel--rewrite-callback (response info)
-  "Callback for gptel rewrite actions.
+(defun ai-workbench--rewrite-callback (response info)
+  "Callback for ai-workbench-engine rewrite actions.
 
 Show the rewrite result in an overlay over the original text, and
 set up dispatch actions.
@@ -546,8 +546,8 @@ INFO is the async communication channel for the rewrite request."
               (inhibit-read-only t))
           (when (= (buffer-size) 0)
             (buffer-disable-undo)
-            (overlay-put ov 'gptel-rewrite nil)
-            (gptel--rewrite-update-status ov " Typing..." '(success default))
+            (overlay-put ov 'ai-workbench-rewrite nil)
+            (ai-workbench--rewrite-update-status ov " Typing..." '(success default))
             (insert-buffer-substring buf (overlay-start ov) (overlay-end ov))
             (when (eq (char-before (point-max)) ?\n)
               (plist-put info :newline t))
@@ -558,7 +558,7 @@ INFO is the async communication channel for the rewrite request."
           (unless (eobp) (ignore-errors (delete-char (length response))))
           (font-lock-ensure)
           (overlay-put ov 'display (propertize (buffer-string) 'face 'default))))
-      (unless (plist-get info :stream) (gptel--rewrite-callback t info)))
+      (unless (plist-get info :stream) (ai-workbench--rewrite-callback t info)))
 
      ((eq response 'abort)              ;request aborted
       (when-let* ((proc-buf (cdr-safe (plist-get info :context))))
@@ -566,20 +566,20 @@ INFO is the async communication channel for the rewrite request."
       (delete-overlay ov))
 
      ((eq (car-safe response) 'tool-call) ;tool call confirmation
-      (gptel--rewrite-update-status ov " Run tools?" '(mode-line-emphasis default))
-      (gptel--display-tool-calls   ;use minibuffer
+      (ai-workbench--rewrite-update-status ov " Run tools?" '(mode-line-emphasis default))
+      (ai-workbench--display-tool-calls   ;use minibuffer
        (cdr response) info         ;; (buffer-local-value 'buffer-read-only buf)
        t))
 
      ((null response)                   ;finished with error
       (message (concat "LLM response error: %s. Rewrite in buffer %s canceled.")
                (plist-get info :status) (plist-get info :buffer))
-      (gptel--rewrite-callback 'abort info))
+      (ai-workbench--rewrite-callback 'abort info))
 
      ((eq (car-safe response) 'reasoning) ;Reasoning redirection to other buffer
       (and-let* ((rbuf (plist-get info :include-reasoning))
                  ((stringp rbuf)))
-        (gptel--display-reasoning-stream (cdr response) info))
+        (ai-workbench--display-reasoning-stream (cdr response) info))
       t)
 
      ((consp response))             ;reasoning or tool call result -- don't care
@@ -593,39 +593,39 @@ INFO is the async communication channel for the rewrite request."
             (let ((inhibit-read-only t))
               (delete-region (point) (point-max))
               ;; Run post-rewrite-functions on rewritten text in its buffer
-              (setq-local gptel-post-rewrite-functions
-                          (buffer-local-value 'gptel-post-rewrite-functions buf))
-              (with-demoted-errors "gptel-post-rewrite-functions: %S"
-                (run-hook-with-args 'gptel-post-rewrite-functions (point-min) (point-max)))
+              (setq-local ai-workbench-post-rewrite-functions
+                          (buffer-local-value 'ai-workbench-post-rewrite-functions buf))
+              (with-demoted-errors "ai-workbench-post-rewrite-functions: %S"
+                (run-hook-with-args 'ai-workbench-post-rewrite-functions (point-min) (point-max)))
               (when (and (plist-get info :newline)
                          (not (eq (char-before (point-max)) ?\n)))
                 (insert "\n"))
               (font-lock-ensure))
             (overlay-put ov 'display (buffer-string))
-            (overlay-put ov 'gptel-rewrite (buffer-string))
+            (overlay-put ov 'ai-workbench-rewrite (buffer-string))
             (kill-buffer proc-buf))
           (when (buffer-live-p buf)
             (with-current-buffer buf
               (pulse-momentary-highlight-region (overlay-start ov) (overlay-end ov))
-              (add-hook 'eldoc-documentation-functions #'gptel--rewrite-key-help nil 'local)
-              ;; (overlay-put ov 'gptel-rewrite response)
-              (overlay-put ov 'face 'gptel-rewrite-highlight-face)
+              (add-hook 'eldoc-documentation-functions #'ai-workbench--rewrite-key-help nil 'local)
+              ;; (overlay-put ov 'ai-workbench-rewrite response)
+              (overlay-put ov 'face 'ai-workbench-rewrite-highlight-face)
 	      (overlay-put ov 'priority 2000)
-              (overlay-put ov 'keymap gptel-rewrite-actions-map)
+              (overlay-put ov 'keymap ai-workbench-rewrite-actions-map)
               (overlay-put ov 'mouse-face 'highlight)
               (let ((status (overlay-get ov 'status)))
                 (dolist (idx '(0 1 3))
                   (setf (nth idx status)
                         (propertize (nth idx status) 'face '(success default))))
-                (gptel--rewrite-update-status ov " Ready" '(success default)))
+                (ai-workbench--rewrite-update-status ov " Ready" '(success default)))
               (overlay-put
                ov 'help-echo
-               (format (concat "%s rewrite available: %s or \\[gptel--rewrite-dispatch] for options")
-                       (concat (gptel-backend-name gptel-backend) ":" (gptel--model-name gptel-model))
+               (format (concat "%s rewrite available: %s or \\[ai-workbench--rewrite-dispatch] for options")
+                       (concat (ai-workbench-backend-name ai-workbench-backend) ":" (ai-workbench--model-name ai-workbench-model))
                        mkb))
-              (push ov gptel--rewrite-overlays))
-            (if-let* ((sym gptel-rewrite-default-action))
-                (if-let* ((action (intern (concat "gptel--rewrite-" (symbol-name sym))))
+              (push ov ai-workbench--rewrite-overlays))
+            (if-let* ((sym ai-workbench-rewrite-default-action))
+                (if-let* ((action (intern (concat "ai-workbench--rewrite-" (symbol-name sym))))
                           ((functionp action)))
                     (funcall action ov) (funcall sym ov))
               (message (concat
@@ -633,124 +633,124 @@ INFO is the async communication channel for the rewrite request."
                         (unless (eq (current-buffer) buf)
                           (format " in buffer %s " (buffer-name buf)))
                         (concat " ready: " mkb ", " (propertize "RET" 'face 'help-key-binding)
-                                " or " (substitute-command-keys "\\[gptel-rewrite] to continue."))))))))))))
+                                " or " (substitute-command-keys "\\[ai-workbench-rewrite] to continue."))))))))))))
 
 ;; * Transient Prefixes for rewriting
 
-(transient-define-prefix gptel--rewrite-directive-menu ()
+(transient-define-prefix ai-workbench--rewrite-directive-menu ()
   "Set the directive (system message) for rewrite actions.
 
-By default, gptel uses the directive associated with the `rewrite'
- key in `gptel-directives'.  You can add more rewrite-specific
- directives to `gptel-directives' and pick one from here."
-  [:description gptel-system-prompt--format
-   [(gptel--suffix-rewrite-directive)]
-   [(gptel--infix-variable-scope)]]
+By default, ai-workbench-engine uses the directive associated with the `rewrite'
+ key in `ai-workbench-directives'.  You can add more rewrite-specific
+ directives to `ai-workbench-directives' and pick one from here."
+  [:description ai-workbench-system-prompt--format
+   [(ai-workbench--suffix-rewrite-directive)]
+   [(ai-workbench--infix-variable-scope)]]
    [:class transient-column
     :setup-children
     (lambda (_) (transient-parse-suffixes
-            'gptel--rewrite-directive-menu
-            (gptel--setup-directive-menu
-             'gptel--rewrite-directive "Rewrite directive")))
+            'ai-workbench--rewrite-directive-menu
+            (ai-workbench--setup-directive-menu
+             'ai-workbench--rewrite-directive "Rewrite directive")))
     :pad-keys t])
 
-;;;###autoload (autoload 'gptel-rewrite "gptel-rewrite" nil t)
-(transient-define-prefix gptel-rewrite ()
+;;;###autoload (autoload 'ai-workbench-rewrite "ai-workbench-rewrite" nil t)
+(transient-define-prefix ai-workbench-rewrite ()
   "Rewrite or refactor text region using an LLM."
-  :environment #'gptel--transient-fix-evil-visual
+  :environment #'ai-workbench--transient-fix-evil-visual
   [:description
    (lambda ()
-     (gptel--describe-directive
-      gptel--rewrite-directive (max (- (window-width) 14) 20) " "))
+     (ai-workbench--describe-directive
+      ai-workbench--rewrite-directive (max (- (window-width) 14) 20) " "))
    [""
-    (gptel-preset
+    (ai-workbench-preset
      :transient t
-     :if (lambda () (or (get-char-property (point) 'gptel-rewrite)
+     :if (lambda () (or (get-char-property (point) 'ai-workbench-rewrite)
                    (use-region-p)))
      :key "@" :format "%d"
      :description
      (lambda ()
        (concat (propertize "Instructions" 'face 'transient-heading)
-               (gptel--format-preset-string))))
-    ("s" "Set full directive" gptel--rewrite-directive-menu)
-    (gptel--infix-rewrite-extra)]]
-  ;; FIXME: We are requiring `gptel-transient' because of this suffix, perhaps
+               (ai-workbench--format-preset-string))))
+    ("s" "Set full directive" ai-workbench--rewrite-directive-menu)
+    (ai-workbench--infix-rewrite-extra)]]
+  ;; FIXME: We are requiring `ai-workbench-transient' because of this suffix, perhaps
   ;; we can get find some way around that?
   [:description "Context for rewrite"
    :if use-region-p
-   (gptel--infix-context-remove-all :key "-d")
-   (gptel--suffix-context-buffer :key "C" :format "  %k %d")]
+   (ai-workbench--infix-context-remove-all :key "-d")
+   (ai-workbench--suffix-context-buffer :key "C" :format "  %k %d")]
   [[:description "Diff Options"
-    :if (lambda () gptel--rewrite-overlays)
+    :if (lambda () ai-workbench--rewrite-overlays)
     ("-b" "Ignore whitespace changes"      ("-b" "--ignore-space-change"))
     ("-w" "Ignore all whitespace"          ("-w" "--ignore-all-space"))
     ("-i" "Ignore case"                    ("-i" "--ignore-case"))
-    (gptel--infix-rewrite-diff:-U)]
+    (ai-workbench--infix-rewrite-diff:-U)]
    [:description "Accept all"
-    :if (lambda () gptel--rewrite-overlays)
-    (gptel--suffix-rewrite-merge)
-    (gptel--suffix-rewrite-accept)
+    :if (lambda () ai-workbench--rewrite-overlays)
+    (ai-workbench--suffix-rewrite-merge)
+    (ai-workbench--suffix-rewrite-accept)
     "Reject all"
-    (gptel--suffix-rewrite-reject)]]
+    (ai-workbench--suffix-rewrite-reject)]]
   [[:description "Diff rewrite regions"
-    :if (lambda () gptel--rewrite-overlays)
-    (gptel--suffix-rewrite-diff)
-    (gptel--suffix-rewrite-ediff)]]
+    :if (lambda () ai-workbench--rewrite-overlays)
+    (ai-workbench--suffix-rewrite-diff)
+    (ai-workbench--suffix-rewrite-ediff)]]
   [[:description "Rewrite"
-    :if (lambda () (or (get-char-property (point) 'gptel-rewrite)
+    :if (lambda () (or (get-char-property (point) 'ai-workbench-rewrite)
                   (use-region-p)))
-    (gptel--suffix-rewrite)]
+    (ai-workbench--suffix-rewrite)]
    ["Dry Run"
-    :if (lambda () (and (or gptel-log-level gptel-expert-commands)
-                   (or (get-char-property (point) 'gptel-rewrite)
+    :if (lambda () (and (or ai-workbench-log-level ai-workbench-expert-commands)
+                   (or (get-char-property (point) 'ai-workbench-rewrite)
                        (use-region-p))))
     ("I" "Inspect query (Lisp)"
      (lambda ()
        "Inspect the query that will be sent as a lisp object."
        (interactive)
-       (gptel--sanitize-model)
-       (gptel--inspect-query
-        (gptel--suffix-rewrite gptel--rewrite-message t))))
+       (ai-workbench--sanitize-model)
+       (ai-workbench--inspect-query
+        (ai-workbench--suffix-rewrite ai-workbench--rewrite-message t))))
     ("J" "Inspect query (JSON)"
      (lambda ()
        "Inspect the query that will be sent as a JSON object."
        (interactive)
-       (gptel--sanitize-model)
-       (gptel--inspect-query
-        (gptel--suffix-rewrite gptel--rewrite-message t)
+       (ai-workbench--sanitize-model)
+       (ai-workbench--inspect-query
+        (ai-workbench--suffix-rewrite ai-workbench--rewrite-message t)
         'json)))]]
   (interactive)
-  (gptel--rewrite-sanitize-overlays)
+  (ai-workbench--rewrite-sanitize-overlays)
   (cond
    ((use-region-p)                      ;Start a/another rewrite
     (let ((transient--history ;No transient reader, so We manage history ourselves
-           (alist-get 'gptel--infix-rewrite-extra transient-history)))
-      (gptel--rewrite-read-message
-       (concat "Instructions (" gptel--read-with-prefix-help
+           (alist-get 'ai-workbench--infix-rewrite-extra transient-history)))
+      (ai-workbench--rewrite-read-message
+       (concat "Instructions (" ai-workbench--read-with-prefix-help
                (format " %s%s) "
                        (propertize "M-RET" 'face 'help-key-binding)
                        (propertize ": More options" 'face 'default)))
        nil (cons 'transient--history 1))))
-   (gptel--rewrite-overlays             ;Rewrite actions pending, show options
-    (transient-setup 'gptel-rewrite))
+   (ai-workbench--rewrite-overlays             ;Rewrite actions pending, show options
+    (transient-setup 'ai-workbench-rewrite))
    (t (user-error
-       "`gptel-rewrite' requires an active region or rewrite in progress"))))
+       "`ai-workbench-rewrite' requires an active region or rewrite in progress"))))
 
 ;; * Transient infixes for rewriting
 
-(transient-define-infix gptel--infix-rewrite-extra ()
+(transient-define-infix ai-workbench--infix-rewrite-extra ()
   "Chat directive (system message) to use for rewriting or refactoring."
   :description "Rewrite instruction"
-  :class 'gptel-lisp-variable
-  :variable 'gptel--rewrite-message
-  :set-value #'gptel--set-with-scope
+  :class 'ai-workbench-lisp-variable
+  :variable 'ai-workbench--rewrite-message
+  :set-value #'ai-workbench--set-with-scope
   :display-nil "(None)"
   :key "d"
   :format " %k %d %v"
-  :prompt (concat "Instructions (" gptel--read-with-prefix-help ") ")
-  :reader #'gptel--rewrite-read-message)
+  :prompt (concat "Instructions (" ai-workbench--read-with-prefix-help ") ")
+  :reader #'ai-workbench--rewrite-read-message)
 
-(transient-define-argument gptel--infix-rewrite-diff:-U ()
+(transient-define-argument ai-workbench--infix-rewrite-diff:-U ()
   :description "Context lines"
   :class 'transient-option
   :argument "-U"
@@ -758,7 +758,7 @@ By default, gptel uses the directive associated with the `rewrite'
 
 ;; * Transient suffixes for rewriting
 
-(transient-define-suffix gptel--suffix-rewrite-directive (&optional cancel)
+(transient-define-suffix ai-workbench--suffix-rewrite-directive (&optional cancel)
   "Edit Rewrite directive.
 
 CANCEL is used to avoid touching dynamic rewrite directives,
@@ -768,95 +768,95 @@ generated from functions."
   :key "s"
   (interactive
    (list (and
-          (functionp gptel--rewrite-directive)
+          (functionp ai-workbench--rewrite-directive)
           (not (y-or-n-p
                 "Rewrite directive is dynamically generated: Edit its current value instead?")))))
   (if cancel (progn (message "Edit canceled")
-                    (call-interactively #'gptel-rewrite))
-    (gptel--edit-directive 'gptel--rewrite-directive
-      :callback (lambda (_) (call-interactively #'gptel-rewrite))
+                    (call-interactively #'ai-workbench-rewrite))
+    (ai-workbench--edit-directive 'ai-workbench--rewrite-directive
+      :callback (lambda (_) (call-interactively #'ai-workbench-rewrite))
       :setup #'activate-mark)))
 
-(transient-define-suffix gptel--suffix-rewrite (&optional rewrite-message dry-run)
+(transient-define-suffix ai-workbench--suffix-rewrite (&optional rewrite-message dry-run)
   "Rewrite or refactor region contents."
   :key "r"
-  :description (lambda () (if (get-char-property (point) 'gptel-rewrite) "Iterate" "Rewrite"))
-  (interactive (list gptel--rewrite-message))
-  (let* ((nosystem (gptel--model-capable-p 'nosystem))
+  :description (lambda () (if (get-char-property (point) 'ai-workbench-rewrite) "Iterate" "Rewrite"))
+  (interactive (list ai-workbench--rewrite-message))
+  (let* ((nosystem (ai-workbench--model-capable-p 'nosystem))
          ;; Try to send context with system message
-         (gptel-use-context
-          (and gptel-use-context (if nosystem 'user 'system)))
-         (prompt (list (or (get-char-property (point) 'gptel-rewrite)
+         (ai-workbench-use-context
+          (and ai-workbench-use-context (if nosystem 'user 'system)))
+         (prompt (list (or (get-char-property (point) 'ai-workbench-rewrite)
                            (buffer-substring-no-properties (region-beginning) (region-end)))
                        "What is the required change?  I will generate only the final replacement."
-                       (or rewrite-message gptel--rewrite-message))))
+                       (or rewrite-message ai-workbench--rewrite-message))))
     (when nosystem
-      (setcar prompt (concat (car-safe (gptel--parse-directive
-                                        gptel--rewrite-directive 'raw))
+      (setcar prompt (concat (car-safe (ai-workbench--parse-directive
+                                        ai-workbench--rewrite-directive 'raw))
                              "\n\n" (car prompt))))
-    (prog1 (gptel-request prompt
+    (prog1 (ai-workbench-request prompt
              :dry-run dry-run
-             :system gptel--rewrite-directive
-             :stream gptel-stream
+             :system ai-workbench--rewrite-directive
+             :stream ai-workbench-stream
              :context
-             (let ((ov (or (cdr-safe (get-char-property-and-overlay (point) 'gptel-rewrite))
+             (let ((ov (or (cdr-safe (get-char-property-and-overlay (point) 'ai-workbench-rewrite))
                            (make-overlay (region-beginning) (region-end) nil t))))
                (overlay-put ov 'evaporate t)
                ;; NOTE: Switch to `generate-new-buffer' after we drop Emacs 27.1 (#724)
-               (cons ov (gptel--temp-buffer " *gptel-rewrite*")))
-             :transforms gptel-prompt-transform-functions
-             :fsm (gptel-make-fsm :handlers gptel--rewrite-handlers)
-             :callback #'gptel--rewrite-callback)
+               (cons ov (ai-workbench--temp-buffer " *ai-workbench-rewrite*")))
+             :transforms ai-workbench-prompt-transform-functions
+             :fsm (ai-workbench-make-fsm :handlers ai-workbench--rewrite-handlers)
+             :callback #'ai-workbench--rewrite-callback)
       ;; Move back so that the cursor is on the overlay when done.
-      (unless (get-char-property (point) 'gptel-rewrite)
+      (unless (get-char-property (point) 'ai-workbench-rewrite)
         (when (= (point) (region-end)) (run-at-time 0 nil #'backward-char 1)))
       (setq deactivate-mark t))))
 
 ;; Allow this to be called non-interactively for dry runs
-(put 'gptel--suffix-rewrite 'interactive-only nil)
+(put 'ai-workbench--suffix-rewrite 'interactive-only nil)
 
-(transient-define-suffix gptel--suffix-rewrite-diff (&optional switches)
+(transient-define-suffix ai-workbench--suffix-rewrite-diff (&optional switches)
   "Diff LLM output against buffer."
-  :if (lambda () gptel--rewrite-overlays)
+  :if (lambda () ai-workbench--rewrite-overlays)
   :key "D"
   :description "Diff  LLM rewrites"
   (interactive (list (transient-args transient-current-command)))
-  (gptel--rewrite-diff gptel--rewrite-overlays switches))
+  (ai-workbench--rewrite-diff ai-workbench--rewrite-overlays switches))
 
-(transient-define-suffix gptel--suffix-rewrite-ediff ()
+(transient-define-suffix ai-workbench--suffix-rewrite-ediff ()
   "Ediff LLM output against buffer."
-  :if (lambda () gptel--rewrite-overlays)
+  :if (lambda () ai-workbench--rewrite-overlays)
   :key "E"
   :description "Ediff LLM rewrites"
   (interactive)
-  (gptel--rewrite-ediff gptel--rewrite-overlays))
+  (ai-workbench--rewrite-ediff ai-workbench--rewrite-overlays))
 
-(transient-define-suffix gptel--suffix-rewrite-merge ()
+(transient-define-suffix ai-workbench--suffix-rewrite-merge ()
   "Insert LLM output as merge conflicts."
-  :if (lambda () gptel--rewrite-overlays)
+  :if (lambda () ai-workbench--rewrite-overlays)
   :key "M"
   :description "Merge with conflicts"
   (interactive)
-  (gptel--rewrite-merge gptel--rewrite-overlays))
+  (ai-workbench--rewrite-merge ai-workbench--rewrite-overlays))
 
-(transient-define-suffix gptel--suffix-rewrite-accept ()
+(transient-define-suffix ai-workbench--suffix-rewrite-accept ()
   "Accept pending LLM rewrites."
-  :if (lambda () gptel--rewrite-overlays)
+  :if (lambda () ai-workbench--rewrite-overlays)
   :key "A"
   :description "Accept and replace"
   (interactive)
-  (gptel--rewrite-accept gptel--rewrite-overlays))
+  (ai-workbench--rewrite-accept ai-workbench--rewrite-overlays))
 
-(transient-define-suffix gptel--suffix-rewrite-reject ()
+(transient-define-suffix ai-workbench--suffix-rewrite-reject ()
   "Clear pending LLM rewrites."
-  :if (lambda () gptel--rewrite-overlays)
+  :if (lambda () ai-workbench--rewrite-overlays)
   :key "K"
   :description "Clear pending rewrites"
   (interactive)
-  (gptel--rewrite-reject gptel--rewrite-overlays))
+  (ai-workbench--rewrite-reject ai-workbench--rewrite-overlays))
 
-(provide 'gptel-rewrite)
-;;; gptel-rewrite.el ends here
+(provide 'ai-workbench-rewrite)
+;;; ai-workbench-rewrite.el ends here
 
 ;; Local Variables:
 ;; outline-regexp: "^;; \\*+"

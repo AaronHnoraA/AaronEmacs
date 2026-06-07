@@ -74,6 +74,28 @@
 
 - 统一 `kill ai-ide` 指令
 
+## 架构方向：后端 agent 化 / 前端 gptel 化 (2026-06-07)
+
+**已完成(第一批)：**
+
+- 移除 HTTP model 后端：删除 `backends.json`、`ai-workbench-chat.el` 内全部 HTTP
+  注册/持久化/类型映射逻辑，不再维护 OpenAI / Anthropic / Kimi 等端点配置。
+- 新建 `ai-workbench-answer.el`：统一输出协议模块。
+  - `ai-workbench-wrap-prompt-with-output-contract`：给所有发往 CLI agent 的 prompt
+    附加 `#+begin answer … #+end answer` 输出契约。
+  - `ai-workbench-parse-answer-block`：从 CLI 输出中稳定提取 answer block；解析失败
+    时保留原始输出便于 debug。8 个 ERT 测试，全部通过。
+- `ai-workbench-gptel-cli.el`：one-shot exec 路径已接入 answer-block 协议；prompt
+  包装后发出，结果经 parser 提取 answer 内容后再回传给 gptel callback。
+- Hub 清理：移除 "Chat Models (HTTP)" section、HTTP 相关按键和动作。
+- `init-ai-ide.el`：移除 HTTP backend 注册逻辑与 `C-c G` 快捷键。
+
+**待完成(后续批次)：**
+
+- 第二批：全局 singleton session manager（`ai-workbench-current-session`）。
+- 第三批：session 模式路由——有 session 时把 prompt pipe 进 managed vterm，提取 answer block。
+- 第四批：测试与文档更新。
+
 ## 正在推进
 
 - 写作体验继续围绕 Org/Markdown 场景优化

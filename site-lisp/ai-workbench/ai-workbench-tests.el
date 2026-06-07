@@ -8,6 +8,59 @@
 (require 'ai-workbench-profile)
 (require 'ai-workbench-tools)
 (require 'ai-workbench-status)
+(require 'ai-workbench-answer)
+
+;; ── ai-workbench-answer tests ─────────────────────────────────────────────────
+
+(ert-deftest ai-workbench-answer-parse-single-block ()
+  "Parser should extract content from a single answer block."
+  (let ((output "Some preamble.\n#+begin answer\nHello world\n#+end answer\nTrailing."))
+    (should (equal (ai-workbench-parse-answer-block output)
+                   '(:ok . "Hello world")))))
+
+(ert-deftest ai-workbench-answer-parse-last-of-multiple-blocks ()
+  "Parser should return the last complete answer block when multiple exist."
+  (let ((output "#+begin answer\nfirst\n#+end answer\n#+begin answer\nsecond\n#+end answer"))
+    (should (equal (ai-workbench-parse-answer-block output)
+                   '(:ok . "second")))))
+
+(ert-deftest ai-workbench-answer-parse-no-block-returns-error ()
+  "Parser should return :error with original output when no complete block exists."
+  (let ((output "No block here at all."))
+    (let ((result (ai-workbench-parse-answer-block output)))
+      (should (eq (car result) :error))
+      (should (string= (cdr result) output)))))
+
+(ert-deftest ai-workbench-answer-parse-partial-block-returns-error ()
+  "Parser should not extract content from an incomplete block."
+  (let ((output "#+begin answer\nincomplete without end marker"))
+    (let ((result (ai-workbench-parse-answer-block output)))
+      (should (eq (car result) :error)))))
+
+(ert-deftest ai-workbench-answer-parse-noisy-output-with-ansi ()
+  "Parser should find the answer block even amid ANSI noise and spinner output."
+  (let ((output "\033[1mSpinner…\033[0m\nProcessing…\n#+begin answer\nThe answer\n#+end answer\n\033[K"))
+    (should (equal (ai-workbench-parse-answer-block output)
+                   '(:ok . "The answer")))))
+
+(ert-deftest ai-workbench-answer-parse-empty-block ()
+  "Parser should return an empty string for an empty answer block."
+  (let ((output "#+begin answer\n#+end answer"))
+    (should (equal (ai-workbench-parse-answer-block output)
+                   '(:ok . "")))))
+
+(ert-deftest ai-workbench-answer-parse-tolerates-extra-whitespace ()
+  "Parser should tolerate leading whitespace on begin/end lines."
+  (let ((output "  #+begin answer  \nIndented answer\n  #+end answer  "))
+    (should (equal (ai-workbench-parse-answer-block output)
+                   '(:ok . "Indented answer")))))
+
+(ert-deftest ai-workbench-answer-wrap-prompt-includes-contract ()
+  "Wrapped prompt should include both user task and output contract."
+  (let ((wrapped (ai-workbench-wrap-prompt-with-output-contract "Fix bug")))
+    (should (string-match-p "Fix bug" wrapped))
+    (should (string-search "#+begin answer" wrapped))
+    (should (string-match-p "输出要求" wrapped))))
 
 (ert-deftest ai-workbench-profile-names-prefers-all-search-paths ()
   "Profile names should be collected across configured directories."
