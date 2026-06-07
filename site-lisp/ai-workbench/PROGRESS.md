@@ -105,3 +105,7 @@
 
 - status buffer 只做工作台概览；写作 prompt 应从 Org/Markdown/text buffer 调用。
 - Claude / Codex 的交互 UI 还可以继续压一轮细节。
+
+### Agent Offset 优化 (2026-06-07)
+- 将所有需要传递代码和文本的操作（如 `ai-workbench-tools--writing-text`）从传递源码（`buffer-substring`）全面改为传递 `@range`（文件名及起始/结束行列号）与 `@file`。
+- 确保在向后端 agent 发送任务时，都会将 `default-directory` (工作目录) 切换至 `project-root`，以便 agent 利用工具直接读取文件获得完整视角并节省 token。

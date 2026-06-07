@@ -128,19 +128,37 @@ Parse failures are logged as warnings; raw output is preserved for debug."
         :warning)
        raw-output))))
 
+;; ── ANSI stripping ─────────────────────────────────────────────────────────────
+
+(defun ai-workbench--strip-ansi (text)
+  "Strip ANSI escape sequences from TEXT.
+Vterm buffers contain terminal escape codes that interfere with
+answer-block regex matching; this makes session-mode parsing reliable."
+  (replace-regexp-in-string "\033\\[[0-9;]*[A-Za-z]" "" text))
+
 ;; ── Session routing ───────────────────────────────────────────────────────────
 
 (defvar ai-workbench-engine-cli--session-timeout 180
   "Seconds to wait for an answer block from a managed vterm session.")
 
+(defvar ai-workbench-engine-cli--session-idle-cycles 3
+  "Consecutive polls with no buffer growth to declare output stable.")
+
 (defun ai-workbench-engine-cli--session-request (tool-id prompt root fsm callback)
   "Pipe PROMPT into the live TOOL-ID vterm session and poll for answer block.
-Calls FSM/CALLBACK when the answer block appears or the timeout expires."
+Calls FSM/CALLBACK when the answer block appears or the timeout expires.
+
+Detection strategy (in order):
+1. `#+end answer' block in the vterm buffer (primary, with ANSI stripping).
+2. Output stability: buffer unchanged for `ai-workbench-engine-cli--session-idle-cycles'
+   polls, meaning the agent has likely finished.
+3. Hard timeout (`ai-workbench-engine-cli--session-timeout')."
   (let* ((session-buf (ai-workbench-cli-buffer tool-id root))
-         ;; Snapshot where new output will start.
          (start-pos (with-current-buffer session-buf (point-max)))
          (timeout ai-workbench-engine-cli--session-timeout)
          (poll-interval 0.8)
+         (prev-size 0)
+         (idle-count 0)
          (elapsed 0)
          timer)
     (ai-workbench-cli-send-prompt tool-id prompt root)
@@ -149,25 +167,44 @@ Calls FSM/CALLBACK when the answer block appears or the timeout expires."
            poll-interval poll-interval
            (lambda ()
              (setq elapsed (+ elapsed poll-interval))
-             (let (result)
+             (let (result raw-text)
                (when (buffer-live-p session-buf)
                  (with-current-buffer session-buf
                    (let* ((end (point-max))
-                          (text (when (> end start-pos)
-                                  (buffer-substring-no-properties start-pos end)))
-                          (parsed (when text
-                                    (ai-workbench-parse-answer-block text))))
-                     (when (and parsed (eq (car parsed) :ok))
-                       (setq result (cdr parsed))))))
+                          (size (- end start-pos))
+                          (text (when (> size 0)
+                                  (buffer-substring-no-properties start-pos end))))
+                     (when text
+                       (setq raw-text text)
+                       (let ((clean (ai-workbench--strip-ansi text))
+                             (parsed (ai-workbench-parse-answer-block clean)))
+                         (when (and parsed (eq (car parsed) :ok))
+                           (setq result (cdr parsed)))))
+
+                     ;; Stability detection: buffer hasn't grown for N cycles
+                     (if (and (> size 0) (= size prev-size))
+                         (setq idle-count (1+ idle-count))
+                       (setq idle-count 0))
+                     (setq prev-size size)
+
+                     ;; Fallback: stable output without answer block
+                     (when (and (not result)
+                                (> size 0)
+                                (>= idle-count ai-workbench-engine-cli--session-idle-cycles))
+                       (setq result raw-text)))))
+
                (cond
                 (result
                  (cancel-timer timer)
                  (ai-workbench-cli--finish fsm nil callback result nil))
                 ((>= elapsed timeout)
                  (cancel-timer timer)
-                 (ai-workbench-cli--finish
-                  fsm nil callback nil
-                  (format "Session timeout after %ds - no #+end answer seen" timeout))))))))))
+                 ;; Last-resort: use whatever text we have
+                 (if raw-text
+                     (ai-workbench-cli--finish fsm nil callback raw-text nil)
+                   (ai-workbench-cli--finish
+                    fsm nil callback nil
+                    (format "Session timeout after %ds - no output seen" timeout)))))))))))
 
 (cl-defmethod ai-workbench--get-response ((backend ai-workbench-cli) fsm)
   "Drive the request in FSM through BACKEND.

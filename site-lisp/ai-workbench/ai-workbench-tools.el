@@ -399,11 +399,15 @@
     (user-error "Writing prompt does not copy source code; use context references instead"))
   (cond
    ((use-region-p)
-    (buffer-substring-no-properties (region-beginning) (region-end)))
-   ((let ((text (string-trim
-                 (buffer-substring-no-properties (point-min) (point-max)))))
-      (not (string-empty-p text)))
-    (buffer-substring-no-properties (point-min) (point-max)))
+    (let* ((file (buffer-file-name))
+           (root (ai-workbench-project-root))
+           (rel (if (and file root) (file-relative-name file root) (buffer-name))))
+      (format "@range %s:%d:%d-%d:%d"
+              rel
+              (line-number-at-pos (region-beginning)) (current-column)
+              (line-number-at-pos (region-end)) (save-excursion (goto-char (region-end)) (current-column)))))
+   ((buffer-file-name)
+    (format "@file %s" (file-relative-name (buffer-file-name) (ai-workbench-project-root))))
    (t
     (user-error "No writing text available"))))
 
