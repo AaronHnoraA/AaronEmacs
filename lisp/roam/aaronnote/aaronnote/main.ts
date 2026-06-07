@@ -128,6 +128,7 @@ let tocUpdateRequested = false;
 let mathPreviewKey = "";
 let mathPreviewPendingErrorKey = "";
 let mathPreviewErrorTimer = 0;
+let mathPreviewWidth = 0;
 const clientId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const changeHandlers = new Set<() => void>();
 const MATH_PREVIEW_ERROR_IDLE_MS = 650;
@@ -1454,8 +1455,12 @@ function hideMathPreview(): void {
   mathPreview.hidden = true;
   mathPreview.innerHTML = "";
   mathPreview.classList.remove("is-display", "is-error", "is-overflowing");
+  mathPreview.style.left = "";
+  mathPreview.style.top = "";
+  mathPreview.style.width = "";
   mathPreviewKey = "";
   mathPreviewPendingErrorKey = "";
+  mathPreviewWidth = 0;
 }
 
 function hideSnippetPopup(): void {
@@ -2394,14 +2399,28 @@ function mathPreviewKeyFor(math: { tex: string; display: boolean }): string {
   return `${math.display ? "display" : "inline"}\n${math.tex.trim()}`;
 }
 
+function resetMathPreviewFitState(): void {
+  const child = mathPreview.querySelector<HTMLElement>(".katex-display, .katex, math, mjx-container");
+  if (!child) return;
+  child.style.transform = "";
+  child.style.transformOrigin = "";
+  child.style.display = "";
+  child.style.maxWidth = "";
+  mathPreview.style.minHeight = "";
+  mathPreview.classList.remove("is-math-scaled");
+}
+
 function mathPreviewPreferredWidth(display: boolean): number {
   const margin = 8;
   const maxWidth = Math.max(220, window.innerWidth - margin * 2);
-  const fallback = display ? 640 : 320;
-  const natural = Math.max(mathPreview.scrollWidth, fallback);
-  const padding = display ? 40 : 28;
-  const minimum = display ? 420 : 280;
-  return Math.min(maxWidth, Math.max(Math.min(fallback, maxWidth), minimum, Math.ceil(natural + padding)));
+  const minimum = display ? 220 : 120;
+  const fallback = display ? 420 : 180;
+  const previousWidth = mathPreview.style.width;
+  resetMathPreviewFitState();
+  mathPreview.style.width = "max-content";
+  const natural = Math.ceil(mathPreview.scrollWidth || mathPreview.offsetWidth || fallback);
+  mathPreview.style.width = previousWidth;
+  return Math.min(maxWidth, Math.max(minimum, natural));
 }
 
 function updateMathPreviewOverflow(): void {
@@ -2417,7 +2436,10 @@ function placeMathPreview(
   bottomRect?: { bottom: number } | null,
 ): void {
   mathPreview.classList.remove("is-overflowing");
-  placeFloatingAbove(mathPreview, anchorRect, mathPreviewPreferredWidth(display), bottomRect);
+  if (!mathPreviewWidth || mathPreviewWidth > window.innerWidth - 16) {
+    mathPreviewWidth = mathPreviewPreferredWidth(display);
+  }
+  placeFloatingAbove(mathPreview, anchorRect, mathPreviewWidth, bottomRect);
   updateMathPreviewOverflow();
 }
 
@@ -2438,6 +2460,7 @@ function scheduleMathPreviewError(nextKey: string, error: string, display: boole
     mathPreview.classList.add("is-error");
     mathPreview.classList.toggle("is-display", math.display);
     mathPreview.hidden = false;
+    mathPreviewWidth = 0;
     placeFloatingAbove(mathPreview, anchorRect, math.display ? 640 : 320, bottomRect);
   }, MATH_PREVIEW_ERROR_IDLE_MS);
 }
@@ -2460,6 +2483,7 @@ function updateMathPreview(ctx: ReturnType<typeof editor.cursorContext>, allowNe
   if (mathPreviewKey !== nextKey) {
     clearMathPreviewErrorTimer();
     mathPreviewKey = nextKey;
+    mathPreviewWidth = 0;
     mathPreview.innerHTML = "";
     mathPreview.classList.remove("is-error");
     mathPreview.classList.toggle("is-display", math.display);

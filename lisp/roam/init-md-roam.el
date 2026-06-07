@@ -3517,6 +3517,12 @@ added separately by `my/aaronnote-roam--capf-setup')."
   (setq my/aaronnote-roam--sync-timer nil
         my/aaronnote-roam--sync-changed-files nil))
 
+(defun my/aaronnote-roam--note-in-vault-p (file)
+  "Return non-nil when FILE is a Markdown note inside the vault root."
+  (let ((root (file-name-as-directory (expand-file-name (my/aaronnote-roam-root)))))
+    (and (string-prefix-p root file)
+         (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file))))
+
 (defun my/aaronnote-roam-note-changed (file)
   "Schedule an incremental roam index refresh for a saved in-vault FILE.
 Called from init-aaronnote.el when the web editor emits a saved event."
