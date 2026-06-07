@@ -19,6 +19,9 @@
 (declare-function ai-workbench-draft-string "ai-workbench" (backend prompt &optional project-root))
 (declare-function ai-workbench-send-string "ai-workbench" (backend prompt &optional project-root))
 (declare-function ai-workbench-open "ai-workbench" ())
+(declare-function ai-workbench-claude-session-live-p "ai-workbench-adapter-claude" (&optional project-root))
+(declare-function ai-workbench-codex-session-live-p  "ai-workbench-adapter-codex"  (&optional project-root))
+(declare-function ai-workbench-opencode-session-live-p "ai-workbench-adapter-opencode" (&optional project-root))
 
 (autoload 'ai-workbench-draft-string "ai-workbench")
 (autoload 'ai-workbench-send-string "ai-workbench")
@@ -438,47 +441,57 @@
      ("text" . ,text))))
 
 (defun ai-workbench-tools--context-dispatch (send-immediately)
-  "Build context references, then draft or send based on SEND-IMMEDIATELY."
+  "Build context references, then draft or send based on SEND-IMMEDIATELY.
+Requires an active backend session."
   (let* ((project-root (ai-workbench-project-root))
-         (choices (ai-workbench-tools--selected-symbols))
-         (task (read-string "AI task: "))
-         (context (ai-workbench-tools--build-references choices project-root))
-         (references (plist-get context :references))
-         (backend (ai-workbench-session-backend project-root))
-         (prompt (ai-workbench-tools--prompt-template task references)))
-    (unless references
-      (user-error "No references selected"))
-    (unless (ai-workbench-session-initialized-p project-root)
-      (ai-workbench-open)
-      (setq backend (ai-workbench-session-backend project-root)))
-    (if send-immediately
-        (progn
-          (ai-workbench-send-string backend prompt project-root)
-          (message "ai-workbench sent prompt with %d reference(s)"
-                   (length references)))
-      (ai-workbench-draft-string backend prompt project-root)
-      (message "ai-workbench drafted prompt with %d reference(s); press RET to submit"
-               (length references)))))
+         (backend (ai-workbench-session-backend project-root)))
+    (unless (and backend
+                (pcase backend
+                  ('claude   (ai-workbench-claude-session-live-p project-root))
+                  ('codex    (ai-workbench-codex-session-live-p  project-root))
+                  ('opencode (ai-workbench-opencode-session-live-p project-root))
+                  (_ nil)))
+      (user-error "No active session. Start one first with `ai-workbench-open' (C-c A W)"))
+    (let* ((choices (ai-workbench-tools--selected-symbols))
+           (task (read-string "AI task: "))
+           (context (ai-workbench-tools--build-references choices project-root))
+           (references (plist-get context :references))
+           (prompt (ai-workbench-tools--prompt-template task references)))
+      (unless references
+        (user-error "No references selected"))
+      (if send-immediately
+          (progn
+            (ai-workbench-send-string backend prompt project-root)
+            (message "ai-workbench sent prompt with %d reference(s)"
+                     (length references)))
+        (ai-workbench-draft-string backend prompt project-root)
+        (message "ai-workbench drafted prompt with %d reference(s); press RET to submit"
+                 (length references))))))
 
 (defun ai-workbench-writing-prompt ()
-  "Draft an AI writing prompt from region or current buffer."
+  "Draft an AI writing prompt from region or current buffer.
+Requires an active backend session."
   (interactive)
   (let* ((project-root (ai-workbench-project-root))
-         (mode-label (completing-read "Writing mode: "
-                                      (mapcar #'car ai-workbench-writing-modes)
-                                      nil t nil nil "润色"))
-         (task (read-string "Writing task: "))
-         (text (ai-workbench-tools--writing-text))
-         (context (ai-workbench-tools--writing-context project-root))
-         (backend (ai-workbench-session-backend project-root))
-         (prompt (ai-workbench-tools--writing-prompt
-                  mode-label task text context)))
-    (unless (ai-workbench-session-initialized-p project-root)
-      (ai-workbench-open)
-      (setq backend (ai-workbench-session-backend project-root)))
-    (ai-workbench-draft-string backend prompt project-root)
-    (message "ai-workbench drafted writing prompt to %s; press RET to submit"
-             backend)))
+         (backend (ai-workbench-session-backend project-root)))
+    (unless (and backend
+                (pcase backend
+                  ('claude   (ai-workbench-claude-session-live-p project-root))
+                  ('codex    (ai-workbench-codex-session-live-p  project-root))
+                  ('opencode (ai-workbench-opencode-session-live-p project-root))
+                  (_ nil)))
+      (user-error "No active session. Start one first with `ai-workbench-open' (C-c A W)"))
+    (let* ((mode-label (completing-read "Writing mode: "
+                                        (mapcar #'car ai-workbench-writing-modes)
+                                        nil t nil nil "润色"))
+           (task (read-string "Writing task: "))
+           (text (ai-workbench-tools--writing-text))
+           (context (ai-workbench-tools--writing-context project-root))
+           (prompt (ai-workbench-tools--writing-prompt
+                    mode-label task text context)))
+      (ai-workbench-draft-string backend prompt project-root)
+      (message "ai-workbench drafted writing prompt to %s; press RET to submit"
+               backend))))
 
 (defun ai-workbench-context-prompt ()
   "Draft a reference-style prompt into the current AI backend."

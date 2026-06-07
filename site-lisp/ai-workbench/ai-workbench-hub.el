@@ -7,8 +7,7 @@
 ;; provides actions for lifecycle, profile, and session management.
 ;;
 ;; HTTP model backends have been removed.  CLI agents are the only backends.
-;; Use `ai-workbench' (C-c A W) to pick and open an interactive vterm session,
-;; or `ai-workbench-chat' (C-c g) to open a ai-workbench chat buffer for one-shot use.
+;; Use `ai-workbench' (C-c A W) to pick and open an interactive vterm session.
 
 ;;; Code:
 

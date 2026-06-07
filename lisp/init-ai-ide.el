@@ -27,10 +27,11 @@
 ;;     C-c A H     ai-workbench-hub (management dashboard)
 ;;     C-c A ?     ai-workbench-docs-ask (:c CC, :o OpenCode, default Codex)
 ;;
-;;   AI Engine chat (ai-workbench-engine + CLI agents via one-shot exec)
-;;     C-c g       ai-workbench-chat  (open engine buffer backed by CLI agent)
+;;   AI Engine commands (ai-workbench-engine via CLI agents)
 ;;     C-c A m     ai-workbench-menu  (engine transient menu)
 ;;     C-c A r     ai-workbench-rewrite  (rewrite region)
+;;     C-c A k     ai-workbench-kill  (kill backend session)
+;;     C-c A c     ai-workbench-cancel  (cancel current operation)
 ;;
 ;;   OpenCode (opencode) — opencode CLI agent
 ;;     C-c o t     toggle panel
@@ -69,9 +70,9 @@
 (autoload 'ai-workbench-context-prompt "ai-workbench-tools" nil t)
 (autoload 'ai-workbench-writing-prompt "ai-workbench-tools" nil t)
 (autoload 'ai-workbench-docs-ask "ai-workbench-docs" nil t)
-(autoload 'ai-workbench-chat "ai-workbench-chat" nil t)
-(autoload 'ai-workbench-chat-open-buffer "ai-workbench-chat" nil t)
 (autoload 'ai-workbench-hub "ai-workbench-hub" nil t)
+(autoload 'ai-workbench-cancel "ai-workbench" nil t)
+(autoload 'ai-workbench-kill "ai-workbench" nil t)
 
 ;; Engine commands (from vendored ai-workbench-engine, loaded lazily via chat-load).
 ;; These autoloads ensure keybindings activate load before the engine is required.
@@ -87,6 +88,7 @@
   "." #'ai-workbench-context-prompt
   "?" #'ai-workbench-docs-ask
   "k" #'ai-workbench-kill
+  "c" #'ai-workbench-cancel
   "H" #'ai-workbench-hub
   "m" #'ai-workbench-menu
   "r" #'ai-workbench-rewrite
@@ -169,9 +171,7 @@
 (global-set-key (kbd "C-c o r") #'ai-workbench-send-region)
 (global-set-key (kbd "C-c o f") #'ai-workbench-send-file)
 
-;; ── AI Engine chat (ai-workbench-engine + CLI) ──────────────────────────────
-
-(global-set-key (kbd "C-c g") #'ai-workbench-chat)
+;; ── AI Engine commands (ai-workbench-engine + CLI) ─────────────────────────
 
 ;; Register CLI backends + restore persisted backend after Emacs finishes
 ;; initialising.  `after-init-hook' runs after all init files so transient
@@ -180,9 +180,10 @@
           (lambda ()
             (condition-case err
                 (when (require 'ai-workbench-vendor nil t)
-                  (when (ai-workbench-vendor-package-present-p 'ai-workbench-engine)
-                    (require 'ai-workbench-chat nil t)
-                    (ai-workbench-chat-load)))
+                  (ai-workbench-add-vendor-to-load-path 'ai-workbench-engine)
+                  (require 'ai-workbench-engine nil t)
+                  (require 'ai-workbench-engine-cli nil t)
+                  (ai-workbench-engine-cli-register))
               (error (message "ai-workbench: init hook error: %s" err)))))
 
 (provide 'init-ai-ide)

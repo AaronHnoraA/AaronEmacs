@@ -2,14 +2,9 @@
 
 ;;; Commentary:
 ;;
-;; Unified entry points for AI coding and chat sessions.
+;; Unified entry points for AI coding sessions.
 ;; Backends: CLI tools (cc/Claude Code, codex, opencode) for interactive vterm
-;; sessions, plus `chat' which opens an engine chat buffer backed by the same
-;; CLI agents via one-shot exec.
-;;
-;; HTTP model backends have been removed.  All AI execution goes through CLI
-;; agents.  ai-workbench-engine is the Emacs-native frontend (buffer / HCI), not as
-;; an HTTP client.
+;; sessions. All AI execution goes through CLI agents.
 
 ;;; Code:
 
@@ -24,25 +19,8 @@
 (require 'ai-workbench-adapter-claude)
 (require 'ai-workbench-adapter-codex)
 (require 'ai-workbench-adapter-opencode)
-(require 'ai-workbench-chat)
 (require 'ai-workbench-tools)
 
-(declare-function ai-workbench-claude-session-live-p "ai-workbench-adapter-claude" (&optional project-root))
-(declare-function ai-workbench-codex-session-live-p  "ai-workbench-adapter-codex"  (&optional project-root))
-(declare-function ai-workbench-claude-stop           "ai-workbench-adapter-claude" (&optional project-root))
-(declare-function ai-workbench-claude-draft-prompt   "ai-workbench-adapter-claude" (prompt &optional project-root))
-(declare-function ai-workbench-codex-draft-prompt    "ai-workbench-adapter-codex"  (prompt &optional project-root))
-(declare-function ai-workbench-opencode-session-live-p "ai-workbench-adapter-opencode" (&optional project-root))
-(declare-function ai-workbench-opencode-stop         "ai-workbench-adapter-opencode" (&optional project-root))
-(declare-function ai-workbench-opencode-draft-prompt "ai-workbench-adapter-opencode" (prompt &optional project-root))
-(declare-function ai-workbench-chat-session-live-p   "ai-workbench-chat" (&optional project-root))
-(declare-function ai-workbench-chat-stop             "ai-workbench-chat" (&optional project-root))
-(declare-function ai-workbench-chat-draft-prompt     "ai-workbench-chat" (prompt &optional project-root))
-(declare-function ai-workbench-chat-ensure-session   "ai-workbench-chat" (&optional project-root))
-(declare-function ai-workbench-chat-prime-session    "ai-workbench-chat" (&optional project-root))
-(declare-function ai-workbench-chat-open-buffer      "ai-workbench-chat" ())
-(declare-function ai-workbench-chat-send-prompt      "ai-workbench-chat" (prompt &optional project-root))
-(declare-function ai-workbench-chat-backend-names    "ai-workbench-chat" ())
 (declare-function ai-workbench-status-open           "ai-workbench-status" ())
 
 (defgroup ai-workbench nil
@@ -58,8 +36,7 @@
 ;; ── Backend selection ─────────────────────────────────────────────────────────
 ;; `ai-workbench' is the interactive vterm agent launcher.  Its picker offers
 ;; the three CLI engines (CC, Codex, OpenCode); selecting one opens that tool's
-;; interactive vterm session.  Use `ai-workbench-chat' (`C-c g') to open a
-;; engine buffer for one-shot exec queries instead.
+;; interactive vterm session.
 
 (defconst ai-workbench--cli-candidates
   '(("CC – Claude Code (CLI)"   . claude)
@@ -69,9 +46,7 @@
 Selecting one opens the corresponding vterm session.")
 
 (defun ai-workbench--select-backend (_project-root)
-  "Prompt for a CLI vterm engine (CC, Codex, OpenCode) and return its symbol.
-This command launches interactive terminal agents only.  HTTP chat
-models are managed separately via the Hub and `C-c g')."
+  "Prompt for a CLI vterm engine (CC, Codex, OpenCode) and return its symbol."
   (let* ((cli-names (mapcar #'car ai-workbench--cli-candidates))
          (current-backend (ai-workbench-session-backend))
          (default (car (rassq current-backend ai-workbench--cli-candidates)))
@@ -95,7 +70,6 @@ models are managed separately via the Hub and `C-c g')."
     ('claude   (ai-workbench-claude-session-live-p project-root))
     ('codex    (ai-workbench-codex-session-live-p  project-root))
     ('opencode (ai-workbench-opencode-session-live-p project-root))
-    ('chat     (ai-workbench-chat-session-live-p   project-root))
     (_ nil)))
 
 (defun ai-workbench--reset-selection (project-root)
@@ -121,10 +95,6 @@ models are managed separately via the Hub and `C-c g')."
      (ai-workbench-opencode-ensure-session project-root)
      (ai-workbench-opencode-prime-session project-root)
      (ai-workbench-session-set-last-status "OpenCode session ready" project-root))
-    ('chat
-     (ai-workbench-chat-ensure-session project-root)
-     (ai-workbench-chat-prime-session project-root)
-     (ai-workbench-session-set-last-status "Chat session ready" project-root))
     (_ (user-error "Unsupported backend"))))
 
 ;; ── Context helpers ───────────────────────────────────────────────────────────
@@ -294,7 +264,6 @@ models are managed separately via the Hub and `C-c g')."
     ('claude   (ai-workbench-claude-open-buffer))
     ('codex    (ai-workbench-codex-open-buffer))
     ('opencode (ai-workbench-opencode-open-buffer))
-    ('chat     (ai-workbench-chat-open-buffer))
     (_ (user-error "Unsupported backend"))))
 
 (defun ai-workbench-toggle-codex-mode ()
@@ -313,8 +282,31 @@ models are managed separately via the Hub and `C-c g')."
     ('claude   (ai-workbench-claude-stop))
     ('codex    (ai-workbench-codex-stop))
     ('opencode (ai-workbench-opencode-stop))
-    ('chat     (ai-workbench-chat-stop))
     (_ (user-error "Unsupported backend"))))
+
+(defun ai-workbench-cancel ()
+  "Cancel the current AI operation in the active backend session."
+  (interactive)
+  (let* ((project-root (ai-workbench-project-root))
+         (backend (ai-workbench-session-backend project-root)))
+    (pcase backend
+      ('claude
+       (when-let* ((buf (ai-workbench-claude-buffer project-root))
+                   (proc (get-buffer-process buf)))
+         (interrupt-process proc)))
+      ('codex
+       (when-let* ((buf (ai-workbench-codex-buffer project-root))
+                   (proc (get-buffer-process buf)))
+         (interrupt-process proc)))
+      ('opencode
+       (when-let* ((buf (ai-workbench-opencode-buffer project-root))
+                   (proc (get-buffer-process buf)))
+         (interrupt-process proc)))
+      (_ (user-error "Unsupported backend")))
+    (when (fboundp 'ai-workbench-abort)
+      (ignore-errors (ai-workbench-abort)))
+    (ai-workbench-session-set-last-status (format "Canceled %s operation" backend) project-root)
+    (message "ai-workbench canceled %s operation" backend)))
 
 (defun ai-workbench-kill ()
   "Kill the current backend session and reset backend selection."
@@ -324,7 +316,6 @@ models are managed separately via the Hub and `C-c g')."
       ('claude   (ai-workbench-claude-stop project-root))
       ('codex    (ai-workbench-codex-stop  project-root))
       ('opencode (ai-workbench-opencode-stop project-root))
-      ('chat     (ai-workbench-chat-stop   project-root))
       (_ (user-error "Unsupported backend")))
     (ai-workbench--reset-selection project-root)
     (message "ai-workbench killed current backend session")))
@@ -354,7 +345,6 @@ models are managed separately via the Hub and `C-c g')."
         ('claude   (ai-workbench-claude-send-prompt   effective-prompt root))
         ('codex    (ai-workbench-codex-send-prompt    effective-prompt root))
         ('opencode (ai-workbench-opencode-send-prompt effective-prompt root))
-        ('chat     (ai-workbench-chat-send-prompt     effective-prompt root))
         (_ (user-error "Unsupported backend: %s" backend))))
     (ai-workbench-session-mark-profile-bootstrap-sent backend root)
     (ai-workbench-session-mark-profile-injected backend root)
@@ -371,7 +361,6 @@ models are managed separately via the Hub and `C-c g')."
     ('claude   (ai-workbench-claude-draft-prompt   prompt project-root))
     ('codex    (ai-workbench-codex-draft-prompt    prompt project-root))
     ('opencode (ai-workbench-opencode-draft-prompt prompt project-root))
-    ('chat     (ai-workbench-chat-draft-prompt     prompt project-root))
     (_ (user-error "Unsupported backend: %s" backend))))
 
 (defun ai-workbench--effective-prompt (backend prompt project-root)
@@ -382,13 +371,14 @@ models are managed separately via the Hub and `C-c g')."
 
 (defun ai-workbench-draft-string (backend prompt &optional project-root)
   "Insert PROMPT into BACKEND for PROJECT-ROOT without submitting.
-The profile is injected eagerly by `ai-workbench--prepare-backend';
-when that injection just ran the draft is delayed so it does not
-collide with the in-flight bootstrap messages."
+Requires the backend session to be already active. If no session is
+active, call `ai-workbench-open' first."
   (ai-workbench--save-current-file-buffer)
-  (let* ((root (or project-root (ai-workbench-project-root)))
-         (profile-already-injected
-          (ai-workbench-session-profile-injected-p backend root)))
+  (let* ((root (or project-root (ai-workbench-project-root))))
+    (unless (ai-workbench--backend-session-live-p root)
+      (user-error "No active session. Start one first with `ai-workbench-open' (C-c A W)"))
+    (unless (ai-workbench-session-profile-injected-p backend root)
+      (ai-workbench--prepare-backend root))
     (ai-workbench-session-set-last-prompt prompt root)
     (ai-workbench-session-set-last-error nil root)
     (ai-workbench-output-append
@@ -398,13 +388,8 @@ collide with the in-flight bootstrap messages."
              (abbreviate-file-name root)
              prompt)
      root)
-    (ai-workbench--prepare-backend root)
     (ai-workbench-open-backend-buffer)
-    (if profile-already-injected
-        (ai-workbench--draft-string-now backend prompt root)
-      (run-with-timer 1.5 nil
-                      #'ai-workbench--draft-string-now
-                      backend prompt root))
+    (ai-workbench--draft-string-now backend prompt root)
     (ai-workbench-session-set-last-status (format "Drafted prompt to %s" backend) root)
     (message "ai-workbench drafted prompt to %s; press RET in the agent buffer to submit" backend)))
 
@@ -429,7 +414,7 @@ collide with the in-flight bootstrap messages."
 ;; ── Public: context senders ───────────────────────────────────────────────────
 
 (defun ai-workbench-send-region (start end)
-  "Send a reference to the active region to the current backend."
+  "Send a reference to the active region to the current backend as a draft."
   (interactive "r")
   (unless (use-region-p)
     (user-error "No active region"))
@@ -441,10 +426,10 @@ collide with the in-flight bootstrap messages."
                   "Reference: region"
                   (ai-workbench--range-reference
                    source-file start end project-root "selection"))))
-    (ai-workbench-send-string backend prompt project-root)))
+    (ai-workbench-draft-string backend prompt project-root)))
 
 (defun ai-workbench-send-current-buffer ()
-  "Send a reference to the current buffer to the current backend."
+  "Send a reference to the current buffer to the current backend as a draft."
   (interactive)
   (let* ((project-root (ai-workbench-project-root))
          (backend (ai-workbench-session-backend project-root))
@@ -455,10 +440,10 @@ collide with the in-flight bootstrap messages."
                   (format "@file %s"
                           (ai-workbench--context-relative-path
                            source-file project-root)))))
-    (ai-workbench-send-string backend prompt project-root)))
+    (ai-workbench-draft-string backend prompt project-root)))
 
 (defun ai-workbench-send-file (file)
-  "Send a reference to FILE to the current backend."
+  "Send a reference to FILE to the current backend as a draft."
   (interactive
    (list (read-file-name "Send file: " (ai-workbench-project-root) nil t)))
   (let* ((project-root (ai-workbench-project-root))
@@ -470,7 +455,7 @@ collide with the in-flight bootstrap messages."
                           (ai-workbench--context-relative-path
                            expanded project-root)))))
     (ai-workbench--save-file-buffer-if-open expanded)
-    (ai-workbench-send-string backend prompt project-root)))
+    (ai-workbench-draft-string backend prompt project-root)))
 
 (provide 'ai-workbench)
 ;;; ai-workbench.el ends here
