@@ -409,25 +409,34 @@ When BUFFER is nil, inspect the current buffer."
            my/aaronnote-buffer-file-name))))
 
 (defun my/aaronnote--sync-app-buffer-file (file)
-  "Record FILE as the current note for the tracked Aaronnote app buffer."
+  "Record FILE as the current note in the matching Aaronnote buffer.
+Finds the buffer already tracking FILE, or falls back to the most recently
+focused Aaronnote buffer."
   (let ((file (and (stringp file)
                    (not (string-empty-p file))
                    (expand-file-name file))))
-    (when (buffer-live-p my/aaronnote--app-buffer)
-      (with-current-buffer my/aaronnote--app-buffer
-        (setq-local my/aaronnote-buffer-file-name file)
+    (let ((target (or (and file (my/aaronnote--buffer-for-file file))
+                      my/aaronnote--app-buffer)))
+      (when (buffer-live-p target)
+        (with-current-buffer target
+          (setq-local my/aaronnote-buffer-file-name file)
+          (when file
+            (setq-local default-directory
+                        (file-name-as-directory (file-name-directory file))))
+          (force-mode-line-update)
+          (force-window-update (current-buffer)))
         (when file
-          (setq-local default-directory
-                      (file-name-as-directory (file-name-directory file))))
-        (force-mode-line-update)
-        (force-window-update (current-buffer))))))
+          (setq my/aaronnote--app-buffer target))))))
 
 (defun my/aaronnote--track-app-buffer (buffer &optional file)
-  "Track BUFFER as the embedded Aaronnote browser buffer.
-When FILE is non-nil, also remember it as the current note."
+  "Record BUFFER as the active Aaronnote browser buffer.
+When FILE is non-nil, set buffer-local file tracking directly."
   (setq my/aaronnote--app-buffer buffer)
-  (when file
-    (my/aaronnote--sync-app-buffer-file file)))
+  (when (and file (buffer-live-p buffer))
+    (with-current-buffer buffer
+      (setq-local my/aaronnote-buffer-file-name (expand-file-name file))
+      (setq-local default-directory
+                  (file-name-as-directory (file-name-directory file))))))
 
 (defun my/aaronnote--xwidget-buffer-p (&optional buffer)
   "Return non-nil when BUFFER hosts the local Aaronnote xwidget page."
@@ -456,41 +465,44 @@ When FILE is non-nil, also remember it as the current note."
       (setq unread-command-events
             (nconc (list event) unread-command-events)))))
 
-(defun my/aaronnote--open-xwidget (url &optional file)
-  "Open Aaronnote in a single shared xwidget session (id \"aaronnote\").
-All Aaronnote content – notes and the graph – shares one session so the web
-app is always initialized before any file navigation command arrives.
+(defun my/aaronnote--buffer-for-file (file)
+  "Return a live Aaronnote buffer tracking FILE, or nil."
+  (when (and (stringp file) (not (string-empty-p file)))
+    (let ((abs (expand-file-name file)))
+      (cl-find-if
+       (lambda (buf)
+         (and (buffer-live-p buf)
+              (with-current-buffer buf
+                (and (stringp my/aaronnote-buffer-file-name)
+                     (string-equal (expand-file-name my/aaronnote-buffer-file-name)
+                                   abs)))))
+       (buffer-list)))))
 
-When FILE is given and the session already exists the file is opened via a
-POST command instead of reloading the page.  When no session exists yet the
-root URL is loaded first; a buffer-local pending-file flag then fires the
-POST once the page reports load-finished."
+(defun my/aaronnote--open-xwidget (url &optional file)
+  "Open Aaronnote in a per-file xwidget session.
+Each Markdown FILE gets its own dedicated xwidget session and buffer.
+Switching to an already-open file reuses the existing buffer without
+reloading.  Non-file opens (roam graph, etc.) share the singleton
+\"aaronnote\" session."
   (unless (fboundp 'my/xwidget-open-url)
     (require 'init-browser))
-  (let* ((id "aaronnote")
+  (let* ((id (if file
+                 (format "aaronnote:%s" (expand-file-name file))
+               "aaronnote"))
          (existing (and (fboundp 'my/xwidget-session-buffer)
                         (my/xwidget-session-buffer id))))
-    (if (and existing file)
-        ;; Session is already alive: display it and POST the file navigation.
+    (if existing
+        ;; Session already alive for this file: switch to it without reloading.
         (progn
           (switch-to-buffer existing)
-          (my/aaronnote--open-file-in-web file)
           (run-at-time 0.3 nil #'my/xwidget-focus existing)
-          (let ((name (format "*aaronnote: %s*" (file-name-nondirectory file))))
-            (with-current-buffer existing
-              (setq-local my/aaronnote--xwidget-forced-name name)
-              (rename-buffer name t)))
-          (my/aaronnote--track-app-buffer existing file))
-      ;; No live session, or non-file navigation (graph etc.): open URL.
-      ;; For a file request without an existing session, load the root page
-      ;; first so the web app can fully initialize before the POST arrives.
-      (let* ((open-url (if (and file (not existing))
-                           (my/aaronnote--server-url "/")
-                         url))
-             (buffer (my/xwidget-open-url open-url
-                                          :id id
-                                          :display 'current
-                                          :reuse-selected t)))
+          (my/aaronnote--track-app-buffer existing file)
+          existing)
+      ;; New session: open directly at the target URL.
+      (let ((buffer (my/xwidget-open-url url
+                                         :id id
+                                         :display 'current
+                                         :reuse-selected t)))
         (when (buffer-live-p buffer)
           (with-current-buffer buffer
             (setq-local my/xwidget-focus-script my/aaronnote--xwidget-focus-script)
@@ -498,10 +510,7 @@ POST once the page reports load-finished."
                             (format "*aaronnote: %s*" (file-name-nondirectory file))
                           "*aaronnote*")))
               (setq-local my/aaronnote--xwidget-forced-name name)
-              (rename-buffer name t))
-            (when file
-              ;; Will be consumed by the load-finished branch of the callback advice.
-              (setq-local my/aaronnote--xwidget-pending-file file))))
+              (rename-buffer name t))))
         (my/aaronnote--track-app-buffer buffer file)
         buffer))))
 
@@ -713,7 +722,13 @@ graph tab was closed via the Appine toolbar."
     (my/aaronnote--send-command (if active "resume" "pause"))))
 
 (defun my/aaronnote--update-activity (&rest _)
-  "Debounced check: pause or resume the browser based on buffer visibility."
+  "Debounced check: pause or resume the browser based on buffer visibility.
+Also tracks which Aaronnote buffer is currently focused so key forwarding
+routes to the right session when multiple files are open."
+  ;; Update the active buffer pointer immediately on window-selection changes.
+  (let ((cur (current-buffer)))
+    (when (my/aaronnote--xwidget-buffer-p cur)
+      (setq my/aaronnote--app-buffer cur)))
   (when my/aaronnote--activity-timer
     (cancel-timer my/aaronnote--activity-timer))
   (setq my/aaronnote--activity-timer

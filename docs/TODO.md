@@ -5,7 +5,7 @@
 
 ### Features
 - 美化 emacs的界面: nerd, unicode, emoji 
-- Jupyter 支持
+- Jupyter xweight支持
 - AI融合
   - send 不直接提交
   - 权限严格隔离: ask 的时候不允许改动, 要求改动的时候不需要审批 
@@ -31,6 +31,7 @@
 
 ### Bugs
 - TOC pop 窗口大小调整问题
+
 
 
 
