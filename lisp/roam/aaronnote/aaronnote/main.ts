@@ -141,10 +141,8 @@ let revision = 0;
 let savedRevision = 0;
 let applyingContent = false;
 let saveTimer = 0;
-let cursorPositionSaveTimer = 0;
 let cursorPositionsLoaded = false;
 let cursorPositions: CursorPosition[] = [];
-let pendingCursorPositionKey = "";
 let lastSavedCursorPositionKey = "";
 let snippets: SnippetSummary[] = [];
 let notes: NoteSummary[] = [];
@@ -171,7 +169,6 @@ const clientId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.rand
 const changeHandlers = new Set<() => void>();
 const MATH_PREVIEW_ERROR_IDLE_MS = 650;
 const MATH_PREVIEW_ERROR_MAX_LENGTH = 180;
-const CURSOR_POSITION_SAVE_IDLE_MS = 1200;
 const editorCommands = new Set<EditorCommand>([
   "bold",
   "italic",
@@ -246,8 +243,6 @@ const editor = createEditor(host, {
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
     scheduleSave();
   },
-  onSelectionChange: () => scheduleCursorPositionSave(),
-  onBlur: () => void flushCursorPosition(),
 });
 
 function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
@@ -370,23 +365,10 @@ function rememberedCursorPosition(file: string, positions = cursorPositions): Cu
   return positions.find((position) => position.file === file);
 }
 
-function scheduleCursorPositionSave(): void {
-  if (!currentFile || applyingContent) return;
-  const position = currentCursorPosition();
-  if (!position) return;
-  const key = cursorPositionKey(position);
-  if (key === pendingCursorPositionKey || key === lastSavedCursorPositionKey) return;
-  pendingCursorPositionKey = key;
-  window.clearTimeout(cursorPositionSaveTimer);
-  cursorPositionSaveTimer = window.setTimeout(() => void flushCursorPosition(), CURSOR_POSITION_SAVE_IDLE_MS);
-}
-
 async function flushCursorPosition(): Promise<void> {
-  window.clearTimeout(cursorPositionSaveTimer);
   const position = currentCursorPosition();
   if (!position) return;
   const key = cursorPositionKey(position);
-  pendingCursorPositionKey = "";
   if (key === lastSavedCursorPositionKey) return;
   try {
     const result = await api.session.savePosition(position);
@@ -430,7 +412,6 @@ function applyOpenedNote(
   applyingContent = false;
   const restored = currentCursorPosition();
   lastSavedCursorPositionKey = restored ? cursorPositionKey(restored) : "";
-  pendingCursorPositionKey = "";
   snippetSession.clear();
   hideSnippetPopup();
   hideMathPreview();
@@ -3108,3 +3089,6 @@ window.addEventListener("pagehide", () => {
 });
 
 void openInitialFile();
+window.addEventListener("beforeunload", () => {
+  void flushCursorPosition();
+});

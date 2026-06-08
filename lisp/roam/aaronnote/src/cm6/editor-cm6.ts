@@ -830,10 +830,6 @@ function buildExtensions(options: EditorOptions, previewCompartment: Compartment
           options.onChange(md);
         }
       }
-      if ((update.selectionSet || update.docChanged) && options.onSelectionChange) {
-        const { from, to } = update.state.selection.main;
-        options.onSelectionChange({ from, to });
-      }
     }),
     EditorView.domEventHandlers({
       mousedown: (event, eventView) => event.button === 0 && (
