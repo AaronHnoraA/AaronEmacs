@@ -2357,7 +2357,7 @@ function applySnippetPopupKeyAction(action: ReturnType<typeof snippetPopupKeyAct
 
 function handleSnippetPopupKey(event: KeyboardEvent): boolean {
   const handled = applySnippetPopupKeyAction(snippetPopupKeyAction({
-    key: event.key,
+    key: event.key === "\t" ? "Tab" : event.key, // xwidget may send "\t" instead of "Tab"
     shiftKey: event.shiftKey,
     commandKey: event.metaKey && !event.ctrlKey,
     ctrlKey: event.ctrlKey,
@@ -2765,7 +2765,7 @@ document.addEventListener("keydown", (event) => {
     scheduleAssistUpdate({ cursor: true, toc: true });
     return;
   }
-  if (vim.mode() === "insert" && event.key === "Tab" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+  if (vim.mode() === "insert" && (event.key === "Tab" || event.key === "\t") && !event.metaKey && !event.ctrlKey && !event.altKey) {
     const handled = event.shiftKey
       ? jumpSnippetTabstopBack()
       : jumpSnippetTabstop() || expandSnippetAtCursor();
@@ -2802,6 +2802,28 @@ document.addEventListener("keydown", (event) => {
   }
 }, true);
 document.addEventListener("beforeinput", (event) => {
+  const ie = event as InputEvent;
+  // xwidget Tab: may arrive only as beforeinput(insertText, "\t") with no keydown.
+  // Try snippet popup acceptance and snippet expansion before letting CM6 insert \t.
+  if (ie.inputType === "insertText" && ie.data === "\t"
+      && vim.mode() === "insert"
+      && modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden) {
+    const accepted = applySnippetPopupKeyAction(snippetPopupKeyAction({
+      key: "Tab", shiftKey: false, commandKey: false, ctrlKey: false, altKey: false, isComposing: false,
+    }));
+    if (accepted) {
+      event.preventDefault();
+      scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
+      return;
+    }
+    if (jumpSnippetTabstop() || expandSnippetAtCursor()) {
+      event.preventDefault();
+      scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
+      return;
+    }
+    // No snippet match: fall through so CM6 inserts \t naturally
+    return;
+  }
   if (handleXwidgetControlBeforeInput(event as InputEvent, {
     editor,
     editorHost: host,

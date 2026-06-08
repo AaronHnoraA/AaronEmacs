@@ -462,6 +462,8 @@ If OTHER-WINDOW is non-nil, jump in another window on final selection."
   :config
   (setq ibuffer-saved-filter-groups
         '(("default"
+           ("Aaronnote" (or (name . "^\\*aaronnote")
+                            (name . "^\\*Appine Window\\*$")))
            ("Code"  (or (mode . c-mode) (mode . c-ts-mode)
                         (mode . c++-mode) (mode . c++-ts-mode)
                         (mode . python-mode) (mode . python-ts-mode)

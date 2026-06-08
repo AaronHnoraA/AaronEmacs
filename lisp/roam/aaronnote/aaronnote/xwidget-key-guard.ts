@@ -234,6 +234,7 @@ function shouldHandleXwidgetVimKey(event: KeyboardEvent | InputEvent, context: X
 export function handleXwidgetSpecialKeydown(event: KeyboardEvent, context: XwidgetKeyContext): boolean {
   const key = specialKeyFromKeyboardEvent(event);
   if (!shouldHandleXwidgetSpecialEvent(event, context, key)) return false;
+  if (key === "Tab") return false; // snippet popup / vim snippets handle Tab; >> / << for indent
   if (!runEditorSpecialKey(key, context, shiftForSpecialKeyboardEvent(event))) return false;
   hardStop(event);
   noteHandledKeydown(context.editor, key);
@@ -284,6 +285,7 @@ export function handleXwidgetControlBeforeInput(event: InputEvent, context: Xwid
 export function handleXwidgetSpecialBeforeInput(event: InputEvent, context: XwidgetKeyContext): boolean {
   const key = specialKeyFromInputEvent(event);
   if (!shouldHandleXwidgetSpecialEvent(event, context, key)) return false;
+  if (key === "Tab") return false; // let CM6 insert \t naturally; snippet expansion happens in keydown
   hardStop(event);
   if (!recentlyHandledKeydown(context.editor, key)) runEditorSpecialKey(key, context);
   return true;
