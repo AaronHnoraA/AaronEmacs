@@ -345,7 +345,7 @@ export function renderMermaidLazy(
       const idle = window.requestIdleCallback ?? ((cb: IdleRequestCallback) => window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 }), 16));
       idle(() => resolve(), { timeout: 180 });
     });
-    if (element.getAttribute("data-diagram-render-key") !== key) return;
+    if (element.getAttribute("data-diagram-render-key") !== key || !element.isConnected) return;
     try {
       const mermaid = (await import("mermaid")).default;
       // Aaron mindmap (marmind/markmind): antiscript lets the per-diagram frontmatter
@@ -358,7 +358,7 @@ export function renderMermaidLazy(
       }
       const id = `aaronnote-mermaid-${Date.now()}-${seq}`;
       const result = await mermaid.render(id, renderSource);
-      if (element.getAttribute("data-diagram-render-key") !== key) return;
+      if (element.getAttribute("data-diagram-render-key") !== key || !element.isConnected) return;
       const html = sanitizeSvg(result.svg);
       rememberMermaid(key, { html });
       element.innerHTML = html;
@@ -367,7 +367,7 @@ export function renderMermaidLazy(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       rememberMermaid(key, { html: "", error: message });
-      if (element.getAttribute("data-diagram-render-key") !== key) return;
+      if (element.getAttribute("data-diagram-render-key") !== key || !element.isConnected) return;
       onError(message);
       options.onRender?.();
     }

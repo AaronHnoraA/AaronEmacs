@@ -55,6 +55,7 @@
                 :name "aaronnote-test-process"
                 :buffer buffer
                 :command (list "cat")))
+         (my/aaronnote--process proc)
          (my/aaronnote--port nil)
          (my/aaronnote--ready nil)
          (flush-count 0))
@@ -126,6 +127,36 @@
     (should-not window-buffer-change-functions)
     (should-not window-selection-change-functions)
     (should-not my/aaronnote--paused)))
+
+(ert-deftest my/aaronnote-process-filter-ignores-stale-proc-ready-line ()
+  "A dying old process emitting a ready: line must not clobber the new port."
+  (let* ((buffer (generate-new-buffer " *aaronnote-stale-proc-test*"))
+         (stale-proc (make-process
+                      :name "aaronnote-stale-test"
+                      :buffer buffer
+                      :command (list "cat")))
+         ;; Simulate a new process by using a different proc object as current.
+         (new-proc (make-process
+                    :name "aaronnote-new-test"
+                    :buffer buffer
+                    :command (list "cat")))
+         (my/aaronnote--process new-proc)
+         (my/aaronnote--port 60000)
+         (my/aaronnote--ready t)
+         (flush-count 0))
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/aaronnote--flush-ready-callbacks)
+                   (lambda () (cl-incf flush-count))))
+          ;; stale-proc (not current) emits a ready: line with a different port.
+          (my/aaronnote--process-filter stale-proc "aaronote-web-host:ready:99999\n")
+          ;; Port and ready state must be unchanged.
+          (should (= my/aaronnote--port 60000))
+          (should my/aaronnote--ready)
+          (should (= flush-count 0)))
+      (dolist (p (list stale-proc new-proc))
+        (when (process-live-p p) (delete-process p)))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
 
 (provide 'init-aaronnote-tests)
 ;;; init-aaronnote-tests.el ends here

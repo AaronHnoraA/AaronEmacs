@@ -378,10 +378,16 @@ KEY-STRING is used only for diagnostics."
       (insert output)))
   (let ((pending (or (process-get proc 'aaronnote-pending) "")))
     (setq pending (concat pending output))
+    ;; Safety cap: a pathological unterminated line must not grow without bound.
+    (when (> (length pending) 262144)
+      (setq pending ""))
     (let (newline)
       (while (setq newline (string-match "\n" pending))
-        (my/aaronnote--handle-process-line
-         (string-trim-right (substring pending 0 newline) "\r"))
+        ;; Only mutate shared bridge state for the current process; a dying old
+        ;; process emitting a trailing ready: line must not clobber the new port.
+        (when (eq proc my/aaronnote--process)
+          (my/aaronnote--handle-process-line
+           (string-trim-right (substring pending 0 newline) "\r")))
         (setq pending (substring pending (1+ newline)))))
     (process-put proc 'aaronnote-pending pending)))
 
@@ -998,10 +1004,15 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
         (when (and my/aaronnote--xwidget-pending-file
                    (eq _event-type 'load-changed)
                    (string-equal (nth 3 last-input-event) "load-finished"))
-          (let ((file my/aaronnote--xwidget-pending-file))
+          (let ((file my/aaronnote--xwidget-pending-file)
+                (pending-buf (current-buffer)))
             (setq-local my/aaronnote--xwidget-pending-file nil)
             ;; Short pause so page JS finishes before the POST arrives.
-            (run-at-time 0.3 nil #'my/aaronnote--open-file-in-web file)))))))
+            ;; Guard: the xwidget buffer may have been killed in that window.
+            (run-at-time 0.3 nil
+                         (lambda ()
+                           (when (buffer-live-p pending-buf)
+                             (my/aaronnote--open-file-in-web file))))))))))
 
 (defvar my/aaronnote--xwidget-advice-installed nil
   "Non-nil when `my/aaronnote--xwidget-callback-advice' has been added.")

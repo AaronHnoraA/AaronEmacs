@@ -145,9 +145,8 @@ let cursorPositionsLoaded = false;
 let cursorPositions: CursorPosition[] = [];
 let lastSavedCursorPositionKey = "";
 let lastTrackedCursorPositionKey = "";
-let cursorPositionDirtyCount = 0;
-let cursorPositionLastFlushAt = 0;
 let cursorPositionFlushInFlight = false;
+let cursorPositionFlushQueued = false;
 let navigationBackStack: CursorPosition[] = [];
 let restoringNavigationBack = false;
 let snippets: SnippetSummary[] = [];
@@ -175,9 +174,6 @@ const clientId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.rand
 const changeHandlers = new Set<() => void>();
 const MATH_PREVIEW_ERROR_IDLE_MS = 650;
 const MATH_PREVIEW_ERROR_MAX_LENGTH = 180;
-const CURSOR_POSITION_FLUSH_MIN_INTERVAL_MS = 5000;
-const CURSOR_POSITION_FLUSH_EVENT_INTERVAL = 8;
-const CURSOR_POSITION_FLUSH_EVENT_MAX = 32;
 const NAVIGATION_BACK_STACK_MAX = 80;
 const editorCommands = new Set<EditorCommand>([
   "bold",
@@ -257,8 +253,10 @@ const editor = createEditor(host, {
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
     scheduleSave();
   },
-  onSelectionChange: () => { trackCursorPosition(); },
-  onBlur: () => { onBlurVimReset?.(); },
+  onBlur: () => {
+    onBlurVimReset?.();
+    void flushCursorPosition();
+  },
 });
 
 function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
@@ -318,9 +316,13 @@ async function save(): Promise<void> {
   window.clearTimeout(saveTimer);
   if (!currentFile || revision === savedRevision) return;
   const savingRevision = revision;
+  const savingFile = currentFile;
   setStatus("Saving...");
   try {
     const result = await api.notes.save(saveBody());
+    // If the user switched notes while this save was in flight, discard the
+    // result — applying metadata to the new note would corrupt its dirty tracking.
+    if (savingFile !== currentFile) return;
     if (result.conflict) {
       setStatus(result.message || "Save conflict; reopen from Emacs");
       return;
@@ -366,9 +368,13 @@ function currentCursorPosition(): CursorPosition | null {
 }
 
 function rememberCursorPosition(position: CursorPosition, positions?: CursorPosition[]): void {
-  cursorPositions = Array.isArray(positions)
-    ? positions
-    : [position, ...cursorPositions.filter((entry) => entry.file !== position.file)];
+  if (Array.isArray(positions)) {
+    cursorPositions = positions;
+    return;
+  }
+  const index = cursorPositions.findIndex((entry) => entry.file === position.file);
+  if (index >= 0) cursorPositions[index] = position;
+  else cursorPositions.unshift(position);
 }
 
 async function loadCursorPositions(): Promise<CursorPosition[]> {
@@ -391,10 +397,9 @@ function trackCursorPosition(): CursorPosition | null {
   const position = currentCursorPosition();
   if (!position) return null;
   const key = cursorPositionKey(position);
-  rememberCursorPosition(position);
   if (key !== lastTrackedCursorPositionKey) {
     lastTrackedCursorPositionKey = key;
-    if (key !== lastSavedCursorPositionKey) cursorPositionDirtyCount += 1;
+    rememberCursorPosition(position);
   }
   return position;
 }
@@ -402,29 +407,31 @@ function trackCursorPosition(): CursorPosition | null {
 async function persistCursorPosition(position: CursorPosition): Promise<void> {
   const key = cursorPositionKey(position);
   if (key === lastSavedCursorPositionKey) return;
-  if (cursorPositionFlushInFlight) return;
+  if (cursorPositionFlushInFlight) {
+    cursorPositionFlushQueued = true;
+    return;
+  }
   cursorPositionFlushInFlight = true;
   try {
     const result = await api.session.savePosition(position);
     rememberCursorPosition(position, result.positions);
     lastSavedCursorPositionKey = key;
-    cursorPositionDirtyCount = 0;
-    cursorPositionLastFlushAt = Date.now();
   } catch {
     // Cursor position memory is best-effort and should never block editing.
   } finally {
     cursorPositionFlushInFlight = false;
+    if (cursorPositionFlushQueued) {
+      cursorPositionFlushQueued = false;
+      const latest = trackCursorPosition();
+      if (latest && cursorPositionKey(latest) !== lastSavedCursorPositionKey) {
+        void persistCursorPosition(latest);
+      }
+    }
   }
 }
 
 function noteCursorPositionEvent(): void {
-  const position = trackCursorPosition();
-  if (!position || cursorPositionKey(position) === lastSavedCursorPositionKey) return;
-  const elapsed = Date.now() - cursorPositionLastFlushAt;
-  const enoughEvents = cursorPositionDirtyCount >= CURSOR_POSITION_FLUSH_EVENT_INTERVAL
-    && elapsed >= CURSOR_POSITION_FLUSH_MIN_INTERVAL_MS;
-  const tooManyEvents = cursorPositionDirtyCount >= CURSOR_POSITION_FLUSH_EVENT_MAX;
-  if (enoughEvents || tooManyEvents) void persistCursorPosition(position);
+  trackCursorPosition();
 }
 
 function pushNavigationBackLocation(location = trackCursorPosition()): void {
@@ -508,7 +515,7 @@ function applyOpenedNote(
   const restored = currentCursorPosition();
   lastSavedCursorPositionKey = restored ? cursorPositionKey(restored) : "";
   lastTrackedCursorPositionKey = lastSavedCursorPositionKey;
-  cursorPositionDirtyCount = 0;
+  if (restored) rememberCursorPosition(restored);
   snippetSession.clear();
   hideSnippetPopup();
   hideMathPreview();
@@ -593,7 +600,7 @@ function toggleSourceMode(): void {
   editor.toggleSource();
   sourceButton.classList.toggle("is-active", editor.isSourceMode());
   editor.focus();
-  scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+  scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
 }
 
 function isEditorCommand(command: string): command is EditorCommand {
@@ -2753,6 +2760,14 @@ function activeEditorSelection(): { text: string; rect: DOMRect } | null {
   return { text, rect };
 }
 
+function selectionTouchesEditor(): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return false;
+  const anchor = selection.anchorNode;
+  const focus = selection.focusNode;
+  return Boolean(anchor && focus && host.contains(anchor) && host.contains(focus));
+}
+
 function updateSelectionTool(active = activeEditorSelection()): void {
   if (!active || !modal.hidden) {
     selectionTool.hidden = true;
@@ -2965,7 +2980,7 @@ function runHostKey(body: Record<string, unknown>): boolean {
   if (key === "Enter") {
     const handled = exitEmptyMarkdownBlock(editor.view) || continueMarkdownBlock(editor.view);
     if (!handled) editor.insertText("\n");
-    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
     return true;
   }
   if (key === "Backspace" || key === "Delete") {
@@ -3076,7 +3091,7 @@ document.addEventListener("keydown", (event) => {
     enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
   })) {
     if (plainEscapeKey(event)) noteCursorPositionEvent();
-    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
     return;
   }
   if (handleXwidgetVimKeydown(event, {
@@ -3086,7 +3101,7 @@ document.addEventListener("keydown", (event) => {
     enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
   })) {
     if (plainEscapeKey(event)) noteCursorPositionEvent();
-    scheduleAssistUpdate({ cursor: true, toc: true });
+    scheduleAssistUpdate({ cursor: true });
     return;
   }
   if (vim.mode() === "insert" && (event.key === "Tab" || event.key === "\t") && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -3105,12 +3120,12 @@ document.addEventListener("keydown", (event) => {
     vim,
     enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
   })) {
-    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
     return;
   }
   if (vim.handleKeyDown(event)) {
     if (plainEscapeKey(event)) noteCursorPositionEvent();
-    scheduleAssistUpdate({ cursor: true, toc: true });
+    scheduleAssistUpdate({ cursor: true });
     event.stopPropagation();
     return;
   }
@@ -3121,7 +3136,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (runFormattingShortcut(event)) {
-    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
     event.stopPropagation();
     return;
   }
@@ -3155,7 +3170,7 @@ document.addEventListener("beforeinput", (event) => {
     vim,
     enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
   })) {
-    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
     return;
   }
   if (handleXwidgetSpecialBeforeInput(event as InputEvent, {
@@ -3164,7 +3179,7 @@ document.addEventListener("beforeinput", (event) => {
     vim,
     enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
   })) {
-    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
     return;
   }
   if (handleXwidgetVimBeforeInput(event as InputEvent, {
@@ -3173,19 +3188,24 @@ document.addEventListener("beforeinput", (event) => {
     vim,
     enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
   })) {
-    scheduleAssistUpdate({ cursor: true, toc: true });
+    scheduleAssistUpdate({ cursor: true });
   }
 }, true);
-document.addEventListener("selectionchange", () => scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true, selectionTool: true }));
+document.addEventListener("selectionchange", () => {
+  if (!editorSurfaceVisible()) return;
+  if (selectionTouchesEditor() || !selectionTool.hidden) {
+    scheduleAssistUpdate({ selectionTool: true });
+  }
+});
 document.addEventListener("mouseup", (event) => {
   if (!editorSurfaceVisible()) return;
   if (event.target instanceof Node && host.contains(event.target)) noteCursorPositionEvent();
   scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: true });
 });
 window.addEventListener("resize", () => {
-  scheduleAssistUpdate({ mathPreview: true, cursor: true, toc: true, selectionTool: !selectionTool.hidden });
+  scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: !selectionTool.hidden });
 });
-window.addEventListener("scroll", () => scheduleAssistUpdate({ mathPreview: true, cursor: true, toc: true, selectionTool: !selectionTool.hidden }), true);
+window.addEventListener("scroll", () => scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: !selectionTool.hidden }), true);
 selectionTool.addEventListener("mousedown", (event) => event.preventDefault());
 selectionTool.addEventListener("click", (event) => {
   const button = (event.target as Element | null)?.closest<HTMLButtonElement>("[data-selection-command]");
@@ -3212,6 +3232,7 @@ window.addEventListener("aaronnote:command", (event) => {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     document.documentElement.classList.add("aaronnote-paused");
+    void flushCursorPosition();
   } else {
     document.documentElement.classList.remove("aaronnote-paused");
   }

@@ -3821,9 +3821,17 @@ class CopilotLspClient {
   }
 
   stop() {
-    this.proc?.kill();
+    const proc = this.proc;
     this.proc = null;
     this.ready = null;
+    if (!proc) return;
+    proc.kill(); // SIGTERM
+    // Escalate to SIGKILL after 2 s if the language server ignores SIGTERM.
+    const fallback = setTimeout(() => {
+      try { proc.kill("SIGKILL"); } catch (_) {}
+    }, 2000);
+    fallback.unref?.();
+    proc.once("exit", () => clearTimeout(fallback));
   }
 }
 
