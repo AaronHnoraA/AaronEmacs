@@ -1,8 +1,9 @@
-import type { Inbound, SnippetSummary } from "./types.ts";
+import type { CursorPosition, Inbound, SnippetSummary } from "./types.ts";
 
 type OpenMsg = Extract<Inbound, { type: "open" }>;
 type SavedMsg = Extract<Inbound, { type: "saved" }>;
 type NotesMsg = Extract<Inbound, { type: "notes" }>;
+type PositionsMsg = Extract<Inbound, { type: "positions" }>;
 type SnippetsMsg = Extract<Inbound, { type: "snippets" }>;
 type SaveBody = {
   file: string;
@@ -44,6 +45,10 @@ type NativeApi = {
     deleteTag?: (body: Record<string, unknown>) => Promise<unknown>;
     tagOverlap?: () => Promise<unknown>;
     rewritePathRefs?: (body: Record<string, unknown>) => Promise<unknown>;
+  };
+  session?: {
+    getPositions?: () => Promise<unknown>;
+    savePosition?: (position: Partial<CursorPosition> & { file: string }) => Promise<unknown>;
   };
   assets?: {
     renderTikz?: (body: { file: string; id: string; timestamp: string; source: string }) => Promise<unknown>;
@@ -171,6 +176,18 @@ export const api = {
     async rewritePathRefs(body: Record<string, unknown>): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().roamTools?.rewritePathRefs, "Rewrite path refs");
       return ensureOk(await call(body) as Record<string, unknown>, "Rewrite path refs failed");
+    },
+  },
+  session: {
+    async getPositions(): Promise<PositionsMsg> {
+      const call = window.aaronnoteApi?.session?.getPositions;
+      if (!call) return { type: "positions", positions: [] };
+      return ensureOk(await call() as PositionsMsg, "Cursor positions failed");
+    },
+    async savePosition(position: Partial<CursorPosition> & { file: string }): Promise<PositionsMsg> {
+      const call = window.aaronnoteApi?.session?.savePosition;
+      if (!call) return { type: "positions", positions: [] };
+      return ensureOk(await call(position) as PositionsMsg, "Cursor position save failed");
     },
   },
   assets: {

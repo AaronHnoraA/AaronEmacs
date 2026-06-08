@@ -146,5 +146,6 @@ export type Inbound =
   | { type: "open"; file?: string; title?: string; content?: string; kind?: string; mode?: "markdown" | "source"; standalone?: boolean; mtimeMs?: number; size?: number; notes?: NoteSummary[]; directories?: DirectorySummary[]; files?: FileSummary[]; snippets?: SnippetSummary[]; templates?: TemplateSummary[]; selection?: { from?: number; to?: number } }
   | { type: "saved"; ok?: boolean; message?: string; file?: string; kind?: string; standalone?: boolean; stale?: boolean; conflict?: boolean; mtimeMs?: number; size?: number; note?: NoteSummary; notes?: NoteSummary[]; directories?: DirectorySummary[]; files?: FileSummary[]; notesRefresh?: "full" | "deferred" }
   | { type: "notes"; notes?: NoteSummary[]; directories?: DirectorySummary[]; files?: FileSummary[] }
+  | { type: "positions"; positions?: CursorPosition[] }
   | { type: "snippets"; snippets?: SnippetSummary[] }
   | { type: "templates"; templates?: TemplateSummary[] };

@@ -21,7 +21,7 @@ import {
   roamNoteSearchValue,
 } from "./roam-idlink.ts";
 import { matchingSnippetsForPrefix, SnippetSession, snippetDetail, snippetLabel, snippetPopupKeyAction } from "./snippets.ts";
-import type { NoteSummary, SnippetSummary } from "./types.ts";
+import type { CursorPosition, NoteSummary, SnippetSummary } from "./types.ts";
 import { createVimCursor, updateVimCursor } from "./vim-cursor.ts";
 import { createVimLite, type VimLiteKey, type VimLiteMode } from "./vim-lite.ts";
 import {
@@ -141,6 +141,11 @@ let revision = 0;
 let savedRevision = 0;
 let applyingContent = false;
 let saveTimer = 0;
+let cursorPositionSaveTimer = 0;
+let cursorPositionsLoaded = false;
+let cursorPositions: CursorPosition[] = [];
+let pendingCursorPositionKey = "";
+let lastSavedCursorPositionKey = "";
 let snippets: SnippetSummary[] = [];
 let notes: NoteSummary[] = [];
 let pathSuggestions: string[] = [];
@@ -166,6 +171,7 @@ const clientId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.rand
 const changeHandlers = new Set<() => void>();
 const MATH_PREVIEW_ERROR_IDLE_MS = 650;
 const MATH_PREVIEW_ERROR_MAX_LENGTH = 180;
+const CURSOR_POSITION_SAVE_IDLE_MS = 1200;
 const editorCommands = new Set<EditorCommand>([
   "bold",
   "italic",
@@ -240,6 +246,8 @@ const editor = createEditor(host, {
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
     scheduleSave();
   },
+  onSelectionChange: () => scheduleCursorPositionSave(),
+  onBlur: () => void flushCursorPosition(),
 });
 
 function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
@@ -317,26 +325,112 @@ function scheduleSave(): void {
   saveTimer = window.setTimeout(() => void save(), 650);
 }
 
-function applyOpenedNote(opened: Awaited<ReturnType<typeof api.notes.bootstrap>>, fallbackFile?: string): void {
+function cursorPositionKey(position: Pick<CursorPosition, "file" | "mode" | "from" | "to" | "scrollY">): string {
+  return [
+    position.file,
+    position.mode,
+    Math.max(0, Math.floor(position.from)),
+    Math.max(0, Math.floor(position.to)),
+    Math.max(0, Math.floor(position.scrollY)),
+  ].join("|");
+}
+
+function currentCursorPosition(): CursorPosition | null {
+  if (!currentFile) return null;
+  const { from, to } = editor.getMarkdownSelection();
+  return {
+    file: currentFile,
+    mode: editor.isSourceMode() ? "source" : "markdown",
+    from: Math.max(0, from),
+    to: Math.max(0, to),
+    scrollY: Math.max(0, Math.floor(window.scrollY || 0)),
+    updatedAt: Date.now(),
+  };
+}
+
+function rememberCursorPosition(position: CursorPosition, positions?: CursorPosition[]): void {
+  cursorPositions = Array.isArray(positions)
+    ? positions
+    : [position, ...cursorPositions.filter((entry) => entry.file !== position.file)];
+}
+
+async function loadCursorPositions(): Promise<CursorPosition[]> {
+  if (cursorPositionsLoaded) return cursorPositions;
+  cursorPositionsLoaded = true;
+  try {
+    const result = await api.session.getPositions();
+    cursorPositions = Array.isArray(result.positions) ? result.positions : [];
+  } catch {
+    cursorPositions = [];
+  }
+  return cursorPositions;
+}
+
+function rememberedCursorPosition(file: string, positions = cursorPositions): CursorPosition | undefined {
+  return positions.find((position) => position.file === file);
+}
+
+function scheduleCursorPositionSave(): void {
+  if (!currentFile || applyingContent) return;
+  const position = currentCursorPosition();
+  if (!position) return;
+  const key = cursorPositionKey(position);
+  if (key === pendingCursorPositionKey || key === lastSavedCursorPositionKey) return;
+  pendingCursorPositionKey = key;
+  window.clearTimeout(cursorPositionSaveTimer);
+  cursorPositionSaveTimer = window.setTimeout(() => void flushCursorPosition(), CURSOR_POSITION_SAVE_IDLE_MS);
+}
+
+async function flushCursorPosition(): Promise<void> {
+  window.clearTimeout(cursorPositionSaveTimer);
+  const position = currentCursorPosition();
+  if (!position) return;
+  const key = cursorPositionKey(position);
+  pendingCursorPositionKey = "";
+  if (key === lastSavedCursorPositionKey) return;
+  try {
+    const result = await api.session.savePosition(position);
+    rememberCursorPosition(position, result.positions);
+    lastSavedCursorPositionKey = key;
+  } catch {
+    // Cursor position memory is best-effort and should never block editing.
+  }
+}
+
+function applyOpenedNote(
+  opened: Awaited<ReturnType<typeof api.notes.bootstrap>>,
+  fallbackFile?: string,
+  rememberedPositions: CursorPosition[] = cursorPositions,
+): void {
   currentFile = String(opened.file || fallbackFile || "");
   currentKind = String(opened.kind || "");
   currentStandalone = Boolean(opened.standalone);
   applyIndexPayload(opened);
   if (Array.isArray(opened.snippets)) snippets = opened.snippets;
   currentMtimeMs = Number(opened.mtimeMs) || 0;
+  const remembered = !opened.selection && !pendingOpenHash && !pendingOpenDomTarget
+    ? rememberedCursorPosition(currentFile, rememberedPositions)
+    : undefined;
   applyingContent = true;
   editor.setMarkdown(String(opened.content || ""), { history: "reset" });
-  applyingContent = false;
   revision = 0;
   savedRevision = 0;
-  if ((opened.mode === "source") !== editor.isSourceMode()) editor.toggleSource();
+  const mode = remembered?.mode || opened.mode;
+  if ((mode === "source") !== editor.isSourceMode()) editor.toggleSource();
   sourceButton.classList.toggle("is-active", editor.isSourceMode());
-  const from = Number(opened.selection?.from);
-  const to = Number(opened.selection?.to ?? from);
+  const from = Number(opened.selection?.from ?? remembered?.from);
+  const to = Number(opened.selection?.to ?? remembered?.to ?? from);
   if (Number.isFinite(from)) {
-    editor.setMarkdownSelection(from, Number.isFinite(to) ? to : from);
+    const length = editor.getMarkdown().length;
+    const safeFrom = Math.min(Math.max(0, from), length);
+    const safeTo = Math.min(Math.max(0, Number.isFinite(to) ? to : from), length);
+    editor.setMarkdownSelection(safeFrom, safeTo);
     editor.revealCursor();
   }
+  applyingContent = false;
+  const restored = currentCursorPosition();
+  lastSavedCursorPositionKey = restored ? cursorPositionKey(restored) : "";
+  pendingCursorPositionKey = "";
   snippetSession.clear();
   hideSnippetPopup();
   hideMathPreview();
@@ -366,14 +460,16 @@ function applyOpenedNote(opened: Awaited<ReturnType<typeof api.notes.bootstrap>>
 async function openFile(file?: string, bootstrap = false): Promise<void> {
   const target = file || undefined;
   try {
+    if (currentFile) await flushCursorPosition();
     if (currentFile && revision !== savedRevision) {
       await save();
       if (revision !== savedRevision) return;
     }
-    const opened = target && !bootstrap
-      ? await api.notes.open(target)
-      : await api.notes.bootstrap(target);
-    applyOpenedNote(opened, target);
+    const openPromise = target && !bootstrap
+      ? api.notes.open(target)
+      : api.notes.bootstrap(target);
+    const [opened, positions] = await Promise.all([openPromise, loadCursorPositions()]);
+    applyOpenedNote(opened, target, positions);
   } catch (error) {
     applyingContent = false;
     setStatus(error instanceof Error ? error.message : "Open failed");
@@ -3007,6 +3103,7 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 window.addEventListener("pagehide", () => {
+  void flushCursorPosition();
   if (currentFile && revision !== savedRevision) api.notes.saveKeepalive(saveBody());
 });
 
