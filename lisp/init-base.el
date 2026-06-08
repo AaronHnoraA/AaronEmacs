@@ -990,6 +990,18 @@ Else, call `comment-or-uncomment-region' on the current line."
 ;; Buffer manager
 ;;
 ;; `sR': switch to saved filter groups
+(require 'ibuf-ext)
+
+(defun my/ibuffer-aaronnote-buffer-p (buffer)
+  "Return non-nil when BUFFER hosts an Aaronnote app."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (or (and (boundp 'my/aaronnote-buffer-file-name)
+                  my/aaronnote-buffer-file-name)
+             (and (boundp 'my/aaronnote--xwidget-forced-name)
+                  my/aaronnote--xwidget-forced-name)
+             (string-match-p "\\`\\*aaronnote:" (buffer-name buffer))))))
+
 (use-package ibuffer
   :ensure nil
   :hook (ibuffer-mode . ibuffer-auto-mode)
@@ -1007,8 +1019,10 @@ Else, call `comment-or-uncomment-region' on the current line."
                    (name . "\\*Packages\\*")
                    (name . "\\*Messages\\*")
                    (name . "\\*Customize\\*")))
-      ("Browser" (or (mode . eww-mode)
-                     (mode . xwidget-webkit-mode)))
+      ("Aaronnote" (aaronnote . t))
+      ("Browser" (and (or (mode . eww-mode)
+                          (mode . xwidget-webkit-mode))
+                      (not (aaronnote . t))))
       ("Help" (or (name . "\\*Help\\*")
                   (name . "\\*Apropos\\*")
                   (name . "\\*info\\*")
@@ -1041,7 +1055,12 @@ Else, call `comment-or-uncomment-region' on the current line."
                    (not (starred-name))))
       ("Dired" (mode . dired-mode))
       ("IRC" (or (mode . rcirc-mode)
-                 (mode . erc-mode)))))))
+                 (mode . erc-mode))))))
+  :config
+  (define-ibuffer-filter aaronnote
+      "Toggle current view to buffers hosting Aaronnote."
+    (:description "Aaronnote")
+    (my/ibuffer-aaronnote-buffer-p buf)))
 
 (defvar my/ibuffer-ui--theme-signature nil
   "Last theme signature applied by `my/ibuffer-apply-ui'.")

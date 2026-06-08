@@ -26,6 +26,7 @@ import type { Range } from "@codemirror/state";
 import { blockMathRangesOverlapping, mergeOverlappingRanges, rangeInsideAny } from "../math-ranges.ts";
 import { scanInlineMathRanges } from "../../inline-math.ts";
 import { applyImageLayout, imageLayoutFromAttrs, readImageTrailingAttrs, type ImageLayoutAttrs } from "../../image-attrs.ts";
+import { markdownLinkDestination } from "../../markdown-link.ts";
 import {
   VISUAL_ATTACHMENT_IFRAME_ALLOW,
   visualAttachmentEmbeddableP,
@@ -182,13 +183,6 @@ function rangeOverlaps(from: number, to: number, ranges: ReadonlyArray<{ from: n
   return ranges.some((range) => from < range.to && to > range.from);
 }
 
-function markdownLinkSrc(raw: string): string {
-  return String(raw || "")
-    .replace(/\s+"[^"]*"\s*$/, "")
-    .replace(/\s+'[^']*'\s*$/, "")
-    .trim();
-}
-
 function imageExcludedRanges(view: EditorView): Array<{ from: number; to: number }> {
   const visibleRanges = view.visibleRanges;
   const ranges: Array<{ from: number; to: number }> = blockMathRangesOverlapping(view.state, visibleRanges)
@@ -238,7 +232,7 @@ function buildImageDecorations(view: EditorView): DecorationSet {
         const alt = m?.[1] ?? "";
         // src may include optional title; strip the title part and trim
         const srcFull = m?.[2] ?? "";
-        const src = srcFull.replace(/\s+"[^"]*"\s*$/, "").replace(/\s+'[^']*'\s*$/, "").trim();
+        const src = markdownLinkDestination(srcFull);
         const layout = imageLayoutFromAttrs(trailing?.attrs ?? {});
 
         decos.push(
@@ -262,7 +256,7 @@ function buildImageDecorations(view: EditorView): DecorationSet {
           const matchText = match[0] ?? "";
           if (line.text[(match.index ?? 0) - 1] === "!") continue;
           const alt = "";
-          const src = markdownLinkSrc(match[1] ?? "");
+          const src = markdownLinkDestination(match[1] ?? "");
           if (visualAttachmentKind(src) !== "html") continue;
           const from = line.from + (match.index ?? 0);
           const to = from + matchText.length;
@@ -316,7 +310,7 @@ function activeImageSourceKey(view: EditorView): string {
     let link: RegExpExecArray | null;
     while ((link = EMPTY_HTML_LINK_EMBED_RE.exec(line.text)) !== null) {
       if (line.text[(link.index ?? 0) - 1] === "!") continue;
-      const src = markdownLinkSrc(link[1] ?? "");
+      const src = markdownLinkDestination(link[1] ?? "");
       if (visualAttachmentKind(src) !== "html") continue;
       const from = line.from + (link.index ?? 0);
       const to = from + (link[0] ?? "").length;

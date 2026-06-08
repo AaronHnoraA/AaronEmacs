@@ -9,6 +9,7 @@ import { supportedDiagramLang } from "./diagram-langs.ts";
 import { imageLayoutClasses, imageLayoutFromAttrs, imageLayoutStyle, readImageTrailingAttrs } from "./image-attrs.ts";
 import { layoutClasses, layoutFromAttrs, layoutStyle, readLayoutAttrsLine, type LayoutAttrs } from "./layout-attrs.ts";
 import { renderMathHTML } from "./math-render.ts";
+import { markdownLinkDestination } from "./markdown-link.ts";
 import { safeHref } from "./url-safety.ts";
 import { scanInlineCommands } from "./command-syntax.ts";
 import { semanticOutlineFromCommand } from "./semantic-outline.ts";
@@ -479,19 +480,12 @@ function renderVisualAttachmentImage(token: Token, kind: VisualAttachmentKind, r
   return `<figure ${attrs.join(" ")}>${body}${caption}</figure>`;
 }
 
-function markdownLinkSrc(raw: string): string {
-  return String(raw || "")
-    .replace(/\s+"[^"]*"\s*$/, "")
-    .replace(/\s+'[^']*'\s*$/, "")
-    .trim();
-}
-
 function emptyHtmlLinkEmbedRule(state: StateInline, silent: boolean): boolean {
   if (state.src.charCodeAt(state.pos) !== 0x5b || state.src.charCodeAt(state.pos + 1) !== 0x5d) return false;
   const match = state.src.slice(state.pos).match(/^\[\]\(([^)\n]+)\)/);
   if (!match) return false;
   const alt = "";
-  const src = markdownLinkSrc(match[1] ?? "");
+  const src = markdownLinkDestination(match[1] ?? "");
   if (!safeHref(src) || visualAttachmentKind(src) !== "html") return false;
   if (!silent) {
     const token = state.push("image", "img", 0);
@@ -511,7 +505,7 @@ function jupyterLinkRule(state: StateInline, silent: boolean): boolean {
   const closeHref = state.src.indexOf(")", closeLabel + 2);
   if (closeHref < 0) return false;
   const label = state.src.slice(start + 1, closeLabel);
-  const href = markdownLinkSrc(state.src.slice(closeLabel + 2, closeHref));
+  const href = markdownLinkDestination(state.src.slice(closeLabel + 2, closeHref));
   if (!label || label.includes("\n") || href.includes("\n") || !isJupyterHref(href) || !safeHref(href)) return false;
   if (silent) return true;
   const open = state.push("link_open", "a", 1);

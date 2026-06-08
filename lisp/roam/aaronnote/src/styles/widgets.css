@@ -1478,6 +1478,15 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
 .cm-editor .cm-diagram-interactive a {
   cursor: pointer;
 }
+
+.aaronnote-local-graph-canvas {
+  overscroll-behavior: contain;
+}
+
+.aaronnote-local-graph-svg {
+  touch-action: none;
+}
+
 .cm-editor .cm-diagram-selected {
   filter: drop-shadow(0 0 3px color-mix(in srgb, var(--aaron-red, #b31b1b), transparent 18%));
 }

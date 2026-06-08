@@ -1006,6 +1006,9 @@
       });
 
       svg.call(zoomBehavior);
+      svg.node()?.addEventListener("wheel", (event) => {
+        event.preventDefault();
+      }, { passive: false, capture: true });
       svg.on("click", () => setSelected(null, { dispatch: false }));
 
       dragBehavior = d3.drag()
@@ -1215,6 +1218,7 @@
         position: relative;
         min-height: 560px;
         overflow: hidden;
+        overscroll-behavior: contain;
         border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), #8792a2 18%);
         background:
           radial-gradient(circle at 18px 18px, rgba(91, 102, 121, 0.10) 1px, transparent 1.4px),
@@ -1229,6 +1233,7 @@
         width: 100%;
         height: 100%;
         min-height: inherit;
+        touch-action: none;
       }
       .graph-message {
         display: grid;

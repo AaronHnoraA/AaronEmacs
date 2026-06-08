@@ -220,6 +220,24 @@ describe("xwidget key guard", () => {
     }
   });
 
+  test("keeps insert-mode Shift-Tab from escaping focus on plain text", () => {
+    const host = withMounted(document.createElement("section"));
+    const editor = createEditor(host, { initialContent: "plain" });
+    const vim = createVimLite(editor, host);
+    vim.setMode("insert");
+    editor.setMarkdownSelection(5);
+    try {
+      const event = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
+      Object.defineProperty(event, "target", { value: document.body });
+      expect(handleXwidgetSpecialKeydown(event, { editor, editorHost: host, vim })).toBe(true);
+      expect(event.defaultPrevented).toBe(true);
+      expect(editor.getMarkdown()).toBe("plain");
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
+
   test("handles insert-mode arrow keys through CM6 cursor commands", () => {
     const host = withMounted(document.createElement("section"));
     const editor = createEditor(host, { initialContent: "abc" });

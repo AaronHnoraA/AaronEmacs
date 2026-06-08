@@ -323,6 +323,10 @@ function assetFolderName(current) {
   return sanitizeAssetName(basename(current, ext), "note");
 }
 
+function standaloneAssetRoot(file) {
+  return dirname(dirname(file));
+}
+
 export function resolveMediaFile(file, base = "") {
   const raw = String(file || "");
   if (!raw) {
@@ -332,8 +336,11 @@ export function resolveMediaFile(file, base = "") {
   }
   const baseFile = base ? safeOpenFile(base) : "";
   const baseDir = baseFile ? dirname(baseFile) : noteRoot;
-  const allowedRoot = baseFile && standaloneFile(baseFile) ? baseDir : noteRoot;
-  const resolved = isAbsolute(raw) ? resolve(raw) : resolve(baseDir, raw);
+  const allowedRoot = baseFile && standaloneFile(baseFile) ? standaloneAssetRoot(baseFile) : noteRoot;
+  let resolved = isAbsolute(raw) ? resolve(raw) : resolve(baseDir, raw);
+  if (!inside(resolved, noteRoot) && !inside(resolved, allowedRoot) && raw.startsWith("/")) {
+    resolved = resolve(allowedRoot, raw.replace(/^\/+/, ""));
+  }
   if (!inside(resolved, noteRoot) && !inside(resolved, allowedRoot)) {
     const err = new Error(`Media file is outside the current document folder: ${resolved}`);
     err.statusCode = 403;

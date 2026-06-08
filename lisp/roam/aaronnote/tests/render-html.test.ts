@@ -203,6 +203,15 @@ $$`);
     expect(html).toContain('alt="plot"');
   });
 
+  test("keeps parent-directory image URLs for asset resolution", () => {
+    const html = renderMarkdownHTML('![plot](<../images/plot.png> "Plot")', {
+      assetResolver: (src) => `aaronnote-asset://media/?file=${encodeURIComponent(src)}`,
+    });
+
+    expect(html).toContain('src="aaronnote-asset://media/?file=..%2Fimages%2Fplot.png"');
+    expect(html).toContain('alt="plot"');
+  });
+
   test("applies Aaronnote image trailing attrs", () => {
     const html = renderMarkdownHTML("![plot](./images/plot.png){size:300%; align:right; wrap:on}");
 

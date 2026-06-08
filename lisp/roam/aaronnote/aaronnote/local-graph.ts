@@ -52,6 +52,12 @@ type LocalLink = {
 
 const MAX_LOCAL_GRAPH_NODES = 72;
 const MAX_LOCAL_GRAPH_LINKS = 160;
+const LOCAL_GRAPH_MIN_ZOOM = 0.45;
+const LOCAL_GRAPH_MAX_ZOOM = 2.8;
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
 
 function noteKey(note: NoteSummary | undefined): string {
   return note?.key || note?.id || note?.path || note?.file || note?.title || "";
@@ -417,12 +423,54 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
     svg.setAttribute("aria-label", "Local graph");
     svg.classList.add("aaronnote-local-graph-svg");
 
+    const viewportLayer = document.createElementNS(svg.namespaceURI, "g");
+    viewportLayer.classList.add("aaronnote-local-graph-viewport");
     const linkLayer = document.createElementNS(svg.namespaceURI, "g");
     linkLayer.classList.add("aaronnote-local-graph-links");
     const nodeLayer = document.createElementNS(svg.namespaceURI, "g");
     nodeLayer.classList.add("aaronnote-local-graph-nodes");
-    svg.append(linkLayer, nodeLayer);
+    viewportLayer.append(linkLayer, nodeLayer);
+    svg.append(viewportLayer);
     options.canvas.replaceChildren(svg);
+
+    let zoom = { x: 0, y: 0, k: 1 };
+
+    function pointIn(element: SVGGraphicsElement, event: MouseEvent | PointerEvent | WheelEvent): DOMPoint | null {
+      const point = svg.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      const matrix = element.getScreenCTM();
+      return matrix ? point.matrixTransform(matrix.inverse()) : null;
+    }
+
+    function applyViewportTransform(): void {
+      viewportLayer.setAttribute(
+        "transform",
+        `translate(${zoom.x.toFixed(2)} ${zoom.y.toFixed(2)}) scale(${zoom.k.toFixed(3)})`,
+      );
+    }
+
+    function wheelDeltaPixels(event: WheelEvent): number {
+      if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 16;
+      if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * 320;
+      return event.deltaY;
+    }
+
+    svg.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const svgPoint = pointIn(svg, event);
+      const graphPoint = pointIn(viewportLayer, event);
+      if (!svgPoint || !graphPoint) return;
+      const factor = Math.exp(-wheelDeltaPixels(event) * 0.0015);
+      const nextK = clampNumber(zoom.k * factor, LOCAL_GRAPH_MIN_ZOOM, LOCAL_GRAPH_MAX_ZOOM);
+      zoom = {
+        k: nextK,
+        x: svgPoint.x - graphPoint.x * nextK,
+        y: svgPoint.y - graphPoint.y * nextK,
+      };
+      applyViewportTransform();
+    }, { passive: false });
 
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
     const linkEls = links.map((link) => {
@@ -459,12 +507,8 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
       });
       group.addEventListener("pointermove", (event) => {
         if (dragNode !== node) return;
-        const point = svg.createSVGPoint();
-        point.x = event.clientX;
-        point.y = event.clientY;
-        const matrix = svg.getScreenCTM();
-        if (!matrix) return;
-        const local = point.matrixTransform(matrix.inverse());
+        const local = pointIn(viewportLayer, event);
+        if (!local) return;
         if (Math.abs(local.x - node.x) + Math.abs(local.y - node.y) > 3) dragMoved = true;
         node.fx = Math.max(14, Math.min(width - 14, local.x));
         node.fy = Math.max(14, Math.min(height - 22, local.y));

@@ -9,7 +9,6 @@ import {
   cursorLineUp,
   cursorPageDown,
   cursorPageUp,
-  indentWithTab,
   insertNewlineAndIndent,
   selectCharLeft,
   selectCharRight,
@@ -21,7 +20,7 @@ import {
   selectPageUp,
 } from "@codemirror/commands";
 import { insertNewlineContinueMarkup } from "@codemirror/lang-markdown";
-import { exitEmptyMarkdownBlock, indentMarkdownList } from "../src/cm6/commands.ts";
+import { exitEmptyMarkdownBlock, indentMarkdownBlock } from "../src/cm6/commands.ts";
 
 type XwidgetControlKey = "Escape" | "Delete" | "Backspace";
 type XwidgetSpecialKey =
@@ -194,9 +193,7 @@ function runEditorSpecialKey(key: XwidgetSpecialKey, context: XwidgetKeyContext,
       case "Enter":
         return () => exitEmptyMarkdownBlock(view) || insertNewlineContinueMarkup(view) || insertNewlineAndIndent(view);
       case "Tab":
-        return () => shiftKey
-          ? indentMarkdownList(view, -1)
-          : indentMarkdownList(view, 1) || indentWithTab.run?.(view) === true;
+        return () => indentMarkdownBlock(view, shiftKey ? -1 : 1);
       case "ArrowLeft":
         return shiftKey ? selectCharLeft : cursorCharLeft;
       case "ArrowRight":
@@ -365,9 +362,9 @@ export function shouldForwardToEmacs(event: KeyboardEvent): boolean {
   if (event.altKey && !event.metaKey && !event.ctrlKey) {
     return codeToBaseKey(event.code, event.shiftKey) !== null;
   }
-  // M-x (Cmd+X, no shift/alt)
+  // M-x (Cmd+X), M-w (kill-ring-save), M-q (fill-paragraph)
   if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
-    return event.code === "KeyX";
+    return event.code === "KeyX" || event.code === "KeyW" || event.code === "KeyQ";
   }
   // Bare Ctrl: C-g, C-x prefix, C-c prefix
   if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {

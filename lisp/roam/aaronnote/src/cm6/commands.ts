@@ -23,6 +23,7 @@ import {
   builtInQuickInsertProvider,
   quickMatches,
 } from "../editor-api.ts";
+import { indentLess, indentMore } from "@codemirror/commands";
 
 // ---------------------------------------------------------------------------
 // Inline wrap (bold / italic / highlight / strike / code / link / image)
@@ -174,6 +175,13 @@ export function indentMarkdownList(view: EditorView, direction: 1 | -1): boolean
     },
     scrollIntoView: true,
   });
+  return true;
+}
+
+export function indentMarkdownBlock(view: EditorView, direction: 1 | -1): boolean {
+  if (indentMarkdownList(view, direction)) return true;
+  const fallback = direction > 0 ? indentMore : indentLess;
+  fallback(view);
   return true;
 }
 

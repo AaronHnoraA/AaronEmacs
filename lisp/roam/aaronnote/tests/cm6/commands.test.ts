@@ -193,7 +193,7 @@ maybeDescribe("CM6 markdown typing affordances", () => {
 
   it("Tab and Shift-Tab indent selected markdown list items", async () => {
     const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
-    const { indentMarkdownList } = await import("../../src/cm6/commands.ts");
+    const { indentMarkdownBlock, indentMarkdownList } = await import("../../src/cm6/commands.ts");
     const host = document.createElement("div");
     const ed = createEditorCM6(host, { initialContent: "- one\n- two\nplain" });
     ed.setSelection(0, "- one\n- two".length);
@@ -201,6 +201,9 @@ maybeDescribe("CM6 markdown typing affordances", () => {
     expect(indentMarkdownList(ed.view, 1)).toBe(true);
     expect(ed.getMarkdown()).toBe("  - one\n  - two\nplain");
     expect(indentMarkdownList(ed.view, -1)).toBe(true);
+    expect(ed.getMarkdown()).toBe("- one\n- two\nplain");
+    ed.setSelection(ed.getMarkdown().length);
+    expect(indentMarkdownBlock(ed.view, -1)).toBe(true);
     expect(ed.getMarkdown()).toBe("- one\n- two\nplain");
     ed.destroy();
   });

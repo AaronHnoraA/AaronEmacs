@@ -1726,6 +1726,18 @@ after
     window.AaronnoteResolveAssetUrl = original;
   });
 
+  test("image widgets keep parent-directory asset paths before resolving", () => {
+    const original = window.AaronnoteResolveAssetUrl;
+    window.AaronnoteResolveAssetUrl = (src) => `/api/media?file=${encodeURIComponent(src)}&base=notes%2Ftopic.md`;
+    const { editor, cleanup } = mountCM6("before\n\n![alt](<../images/example.png> \"Plot\")");
+    editor.setMarkdownSelection(0);
+    const image = document.querySelector<HTMLImageElement>(".cm-image-widget img");
+    expect(image).toBeTruthy();
+    expect(image!.getAttribute("src")).toBe("/api/media?file=..%2Fimages%2Fexample.png&base=notes%2Ftopic.md");
+    cleanup();
+    window.AaronnoteResolveAssetUrl = original;
+  });
+
   test("image widgets render alt text as a caption", () => {
     const md = "![Diagram title](missing.png)\n\ntext";
     const { editor, cleanup } = mountCM6(md);
@@ -2125,6 +2137,30 @@ maybeDescribe("cm6 kernel: selection", () => {
     vim.setMode("normal");
     press("p");
     expect(editor.getMarkdown()).toBe("abcdab");
+    cleanup();
+  });
+
+  test("vim-lite a and i at line end do not cross into the next line", () => {
+    const { editor, cleanup } = mountCM6("abc\ndef");
+    const target = (editor.view as unknown as { contentDOM: HTMLElement }).contentDOM;
+    const vim = createVimLite(editor, document.body);
+    function press(key: string): void {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      Object.defineProperty(event, "target", { value: target });
+      vim.handleKeyDown(event);
+    }
+
+    editor.setMarkdownSelection(3);
+    vim.setMode("normal");
+    press("a");
+    expect(vim.mode()).toBe("insert");
+    expect(editor.getMarkdownSelection()).toEqual({ from: 3, to: 3 });
+
+    vim.setMode("normal");
+    editor.setMarkdownSelection(3);
+    press("i");
+    expect(vim.mode()).toBe("insert");
+    expect(editor.getMarkdownSelection()).toEqual({ from: 3, to: 3 });
     cleanup();
   });
 

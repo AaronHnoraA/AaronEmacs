@@ -380,21 +380,30 @@ export function createVimLite(
 
   function paste(where: "before" | "after"): void {
     resetMotionMemory();
+    if (register) {
+      insertText(editor, register, where);
+      setMode("normal");
+      return;
+    }
     void (navigator.clipboard?.readText() ?? Promise.reject())
       .then(
         (clipText) => {
-          const text = clipText || register;
+          const text = clipText || "";
           if (!text) return;
           if (clipText) register = clipText;
           insertText(editor, text, where);
         },
-        () => { if (register) insertText(editor, register, where); },
+        () => {},
       )
       .finally(() => setMode("normal"));
   }
 
   function appendChar(): void {
-    moveChar(editor, 1);
+    const text = doc(editor);
+    const selection = editor.getMarkdownSelection();
+    const pos = selection.from === selection.to ? selection.from : selection.to;
+    const line = docLineInfo(text, pos);
+    setPos(editor, Math.min(line.end, pos + 1));
     setMode("insert");
   }
 

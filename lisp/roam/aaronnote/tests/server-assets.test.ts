@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
 import { assetRefsFromContent, storeAssetFromPath } from "../server/lib/assets.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
+import { resolveMediaFile } from "../server/lib/media.mjs";
+// @ts-ignore The server is a Node ESM module outside the TS app graph.
 import { configure } from "../server/lib/state.mjs";
 
 const noteRoot = decodeURIComponent(new URL("../../roam", import.meta.url).pathname.replace(/^\/@fs/, "").replace(/\/$/, ""));
@@ -56,5 +58,32 @@ describe("server asset refs", () => {
     expect(msg.isImage).toBe(true);
     expect(msg.markdownPath).toBe("./images/topic/plot.png");
     expect(await readFile(join(notes, "images", "topic", "plot.png"), "utf8")).toBe("PNGDATA");
+  });
+
+  test("resolves parent-directory media paths relative to the current note", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-media-"));
+    roots.push(root);
+    const notes = join(root, "roam");
+    await mkdir(join(notes, "sub"), { recursive: true });
+    configure({ root: notes, workspaceRoot: root, pluginRoot: join(root, "plugin") });
+
+    expect(resolveMediaFile("../images/plot.png", join(notes, "sub", "topic.md")))
+      .toBe(join(notes, "images", "plot.png"));
+  });
+
+  test("resolves standalone note sibling image folders above the note directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-standalone-media-"));
+    roots.push(root);
+    const notes = join(root, "roam");
+    const project = join(root, "lab01");
+    await mkdir(join(notes), { recursive: true });
+    await mkdir(join(project, "spec"), { recursive: true });
+    configure({ root: notes, workspaceRoot: root, pluginRoot: join(root, "plugin") });
+    const note = join(project, "spec", "CoreAverage.md");
+
+    expect(resolveMediaFile("../images/AverageMainFunction.png", note))
+      .toBe(join(project, "images", "AverageMainFunction.png"));
+    expect(resolveMediaFile("/images/AverageTestRun.png", note))
+      .toBe(join(project, "images", "AverageTestRun.png"));
   });
 });

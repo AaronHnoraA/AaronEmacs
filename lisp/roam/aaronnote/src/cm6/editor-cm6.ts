@@ -23,7 +23,6 @@ import {
   redo as cmRedo,
   defaultKeymap,
   historyKeymap,
-  indentWithTab,
 } from "@codemirror/commands";
 import { closeBrackets } from "@codemirror/autocomplete";
 import { syntaxTree } from "@codemirror/language";
@@ -45,7 +44,7 @@ import {
   getBlockContextCM6,
   createQuickInsertRegistry,
   exitEmptyMarkdownBlock,
-  indentMarkdownList,
+  indentMarkdownBlock,
 } from "./commands.ts";
 import { markdownFromClipboard } from "../clipboard.ts";
 import { renderMarkdownHTML } from "../render-html.ts";
@@ -803,12 +802,11 @@ function buildExtensions(options: EditorOptions, previewCompartment: Compartment
     keymap.of([
       { key: "Enter", run: exitEmptyMarkdownBlock },
       { key: "Mod-Enter", run: exitCurrentOrgEnv },
-      { key: "Tab", run: (view) => indentMarkdownList(view, 1) || indentWithTab.run?.(view) === true },
-      { key: "Shift-Tab", run: (view) => indentMarkdownList(view, -1) },
+      { key: "Tab", run: (view) => indentMarkdownBlock(view, 1) },
+      { key: "Shift-Tab", run: (view) => indentMarkdownBlock(view, -1) },
       { key: "Mod-d", run: selectNextMarkdownOccurrence },
       { key: "Mod-Shift-z", run: cmRedo },
       { key: "Meta-Shift-z", run: cmRedo },
-      indentWithTab,
       ...defaultKeymap,
       ...historyKeymap,
     ]),
