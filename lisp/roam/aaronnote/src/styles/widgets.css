@@ -2704,3 +2704,13 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
 .cm-editor .cm-html-env-widget.cm-aaronnote-measured-widget {
   display: flow-root;
 }
+
+/* Block-level raw HTML (HTMLBlock nodes) */
+.cm-editor .cm-html-block-widget.cm-aaronnote-measured-widget {
+  display: flow-root;
+}
+
+/* Inline raw HTML tag replacement */
+.cm-editor .cm-html-inline-widget {
+  display: inline;
+}

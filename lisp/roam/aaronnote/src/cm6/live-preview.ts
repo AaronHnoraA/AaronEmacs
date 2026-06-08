@@ -4,6 +4,7 @@
  * Phase 2 — Inline marks: EmphasisMark, CodeMark, StrikethroughMark, LinkMark/URL
  * Phase 3 — Block marks: HeaderMark (heading), QuoteMark (blockquote), ListMark
  * Phase 6 — HTML comments (CommentBlock / Comment), Escape backslash, Autolink brackets
+ * Phase 7 — Raw HTML: HTMLBlock (block-level), HTMLTag (inline mid-prose)
  *
  * Strategy:
  *   • Inline marks: cursor OUTSIDE parent span → syntax-hidden (font-size:0)
@@ -11,6 +12,10 @@
  *   • Block marks: cursor on SAME LINE → syntax-hint
  *                  cursor on OTHER line → syntax-hidden
  *   • ListMark: always visible, just adds a `.list-marker` class for styling
+ *   • HTMLBlock: block widget (Decoration.replace) — hidden when cursor outside,
+ *                source revealed when cursor moves inside the block
+ *   • HTMLTag (inline): replace widget — hidden when cursor outside the tag run,
+ *                       source revealed when cursor is inside
  *
  * Lezer markdown node names used (from @lezer/markdown / @codemirror/lang-markdown):
  *   EmphasisMark       — * / _ delimiting Emphasis and StrongEmphasis
@@ -25,6 +30,8 @@
  *   Comment            — <!-- ... --> HTML comment inline
  *   Escape             — \ before an escaped character
  *   Autolink           — <url> auto-link (< and > folded when cursor outside)
+ *   HTMLBlock          — block-level raw HTML (e.g. <table>…</table> on its own lines)
+ *   HTMLTag            — inline raw HTML tag (e.g. <sub>, <br>)
  *
  * CSS classes .syntax-hidden / .syntax-hint are defined in widgets.css under
  * the .cm-editor root.
@@ -35,6 +42,7 @@ import {
   Decoration,
   EditorView,
   ViewPlugin,
+  WidgetType,
   type DecorationSet,
   type ViewUpdate,
 } from "@codemirror/view";
@@ -53,6 +61,8 @@ import {
 } from "../layout-attrs.ts";
 import { tocIndexFromState } from "./toc-index.ts";
 import { hasViewportDecorationRefresh } from "./viewport-refresh.ts";
+import { getFencedCodeRanges } from "./code-ranges.ts";
+import { orgEnvContextForRange } from "./widgets/block-extras.ts";
 
 // ---------------------------------------------------------------------------
 // Node name sets
@@ -132,7 +142,8 @@ type LivePreviewToken =
   | { kind: "block-mark"; from: number; to: number; line: number }
   | { kind: "autolink"; from: number; to: number }
   | { kind: "wikilink"; from: number; openTo: number; closeFrom: number; to: number }
-  | { kind: "static"; from: number; to: number; cls: string };
+  | { kind: "static"; from: number; to: number; cls: string }
+  | { kind: "html-inline"; from: number; to: number; source: string };
 
 function selectionIntersectsSpan(sel: { from: number; to: number; empty: boolean }, from: number, to: number): boolean {
   return sel.empty ? sel.from > from && sel.from < to : sel.from < to && sel.to > from;
@@ -302,6 +313,13 @@ function collectLivePreviewTokens(
           tokens.push({ kind: "autolink", from: node.from, to: node.to });
           return false;
         }
+
+        // ── Inline HTML tag: replace with rendered DOM when cursor outside ─
+        if (node.name === "HTMLTag") {
+          const source = doc.sliceString(node.from, node.to);
+          tokens.push({ kind: "html-inline", from: node.from, to: node.to, source });
+          return false;
+        }
       },
     });
   }
@@ -357,6 +375,15 @@ function buildDecorations(view: EditorView, tokens = collectLivePreviewTokens(vi
       case "static":
         pushMark(decos, token.from, token.to, token.cls);
         break;
+      case "html-inline": {
+        const inSpan = selectionIntersectsSpan(sel, token.from, token.to);
+        if (!inSpan) {
+          decos.push(
+            Decoration.replace({ widget: new HtmlInlineWidget(token.source) }).range(token.from, token.to),
+          );
+        }
+        break;
+      }
     }
   }
 
@@ -379,6 +406,7 @@ function selectionAffectingTokenKey(state: EditorState, tokens: readonly LivePre
         break;
       case "autolink":
       case "wikilink":
+      case "html-inline":
         if (selectionIntersectsSpan(sel, token.from, token.to)) {
           keys.push(`${token.kind}:${token.from}:${token.to}`);
         }
@@ -487,6 +515,26 @@ function addCjkTextTokens(
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Inline HTML widget
+// ---------------------------------------------------------------------------
+
+class HtmlInlineWidget extends WidgetType {
+  source: string;
+  constructor(source: string) { super(); this.source = source; }
+
+  eq(other: HtmlInlineWidget): boolean { return this.source === other.source; }
+
+  toDOM(): HTMLElement {
+    const span = document.createElement("span");
+    span.className = "cm-html-inline-widget";
+    span.innerHTML = this.source;
+    return span;
+  }
+
+  ignoreEvent(): boolean { return true; }
 }
 
 function pushMark(
@@ -1560,7 +1608,145 @@ function patchLineDecosNearChanges(
 }
 
 // ---------------------------------------------------------------------------
+// Block HTML widget + StateField
+// ---------------------------------------------------------------------------
+
+class HtmlBlockWidget extends MeasuredWidget {
+  source: string;
+  from: number;
+  to: number;
+  constructor(source: string, from: number, to: number) {
+    super();
+    this.source = source;
+    this.from = from;
+    this.to = to;
+  }
+
+  protected measureKey(): string { return `html-block:${shortHash(this.source)}`; }
+
+  protected measureGroupKey(): string {
+    const lines = Math.min(8, Math.ceil(this.source.split(/\n/).length / 4));
+    return `html-block:lines:${lines}`;
+  }
+
+  protected estimatedHeightFallback(): number {
+    return Math.max(48, this.source.split(/\n/).length * 20);
+  }
+
+  eq(other: HtmlBlockWidget): boolean {
+    return this.source === other.source && this.from === other.from && this.to === other.to;
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const div = document.createElement("div");
+    div.className = "cm-html-block-widget";
+    div.dataset.cmFrom = String(this.from);
+    div.dataset.cmTo = String(this.to);
+    div.innerHTML = this.source;
+    return this.registerMeasured(div, view);
+  }
+
+  ignoreEvent(): boolean { return true; }
+}
+
+function collectHtmlBlockDecoRanges(
+  state: EditorState,
+  from = 0,
+  to = state.doc.length,
+): Range<Decoration>[] {
+  const decos: Range<Decoration>[] = [];
+  const sel = state.selection.main;
+  const fencedRanges = getFencedCodeRanges(state);
+  const mathRanges = getBlockMathRanges(state);
+
+  syntaxTree(state).iterate({
+    from,
+    to,
+    enter(node) {
+      if (node.name !== "HTMLBlock") return;
+      if (rangeOverlapsAny(node.from, node.to, fencedRanges)) return false;
+      if (rangeOverlapsAny(node.from, node.to, mathRanges)) return false;
+      // Skip nodes inside org-env blocks (e.g. #+begin html body lines)
+      if (orgEnvContextForRange(state, node.from, node.to)) return false;
+      // Reveal source when cursor is inside the block
+      if (sel.from <= node.to && sel.to >= node.from) return false;
+      const source = state.doc.sliceString(node.from, node.to);
+      decos.push(
+        Decoration.replace({
+          widget: new HtmlBlockWidget(source, node.from, node.to),
+          block: true,
+        }).range(node.from, node.to),
+      );
+      return false;
+    },
+  });
+
+  return decos;
+}
+
+function buildHtmlBlockDecos(state: EditorState): DecorationSet {
+  return Decoration.set(collectHtmlBlockDecoRanges(state), true);
+}
+
+function patchHtmlBlockDecosNearChanges(
+  state: EditorState,
+  mapped: DecorationSet,
+  changes: ChangeSet,
+): DecorationSet {
+  let fromB = Number.POSITIVE_INFINITY;
+  let toB = 0;
+  changes.iterChanges((_fromA, _toA, nextFrom, nextTo) => {
+    fromB = Math.min(fromB, nextFrom);
+    toB = Math.max(toB, nextTo);
+  });
+  if (!Number.isFinite(fromB)) return mapped;
+  const startLine = state.doc.lineAt(Math.max(0, Math.min(fromB, state.doc.length))).number;
+  const endLine = state.doc.lineAt(Math.max(0, Math.min(toB, state.doc.length))).number;
+  const affectedFrom = state.doc.line(Math.max(1, startLine)).from;
+  const affectedTo = state.doc.line(Math.min(state.doc.lines, endLine)).to;
+  return mapped
+    .update({ filterFrom: affectedFrom, filterTo: affectedTo, filter: () => false })
+    .update({ add: collectHtmlBlockDecoRanges(state, affectedFrom, affectedTo), sort: true });
+}
+
+function activeHtmlBlockKey(state: EditorState): string {
+  const sel = state.selection.main;
+  const fencedRanges = getFencedCodeRanges(state);
+  const mathRanges = getBlockMathRanges(state);
+  const keys: string[] = [];
+  syntaxTree(state).iterate({
+    from: sel.from,
+    to: sel.to,
+    enter(node) {
+      if (node.name !== "HTMLBlock") return;
+      if (rangeOverlapsAny(node.from, node.to, fencedRanges)) return false;
+      if (rangeOverlapsAny(node.from, node.to, mathRanges)) return false;
+      if (orgEnvContextForRange(state, node.from, node.to)) return false;
+      keys.push(`${node.from}:${node.to}`);
+      return false;
+    },
+  });
+  return keys.join("|");
+}
+
+const htmlBlockDecoField = StateField.define<DecorationSet>({
+  create: (state) => buildHtmlBlockDecos(state),
+  update(value, tr) {
+    if (tr.docChanged) {
+      return patchHtmlBlockDecosNearChanges(tr.state, value.map(tr.changes), tr.changes);
+    }
+    if (tr.selection != null) {
+      const oldKey = activeHtmlBlockKey(tr.startState);
+      const newKey = activeHtmlBlockKey(tr.state);
+      if (oldKey !== newKey) return buildHtmlBlockDecos(tr.state);
+    }
+    return value.map(tr.changes);
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+// ---------------------------------------------------------------------------
 // Public export — inline mark plugin + line decoration field
 // ---------------------------------------------------------------------------
 
-export const livePreviewExtension = [livePreviewPlugin, markdownTablesField, lineDecoField, tableDecoField];
+export const livePreviewExtension = [livePreviewPlugin, markdownTablesField, lineDecoField, tableDecoField, htmlBlockDecoField];
