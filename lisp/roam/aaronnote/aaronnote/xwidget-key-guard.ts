@@ -1,7 +1,39 @@
 import type { Editor } from "../src/lib.ts";
 import type { VimLiteController } from "./vim-lite.ts";
+import {
+  cursorCharLeft,
+  cursorCharRight,
+  cursorLineBoundaryBackward,
+  cursorLineBoundaryForward,
+  cursorLineDown,
+  cursorLineUp,
+  cursorPageDown,
+  cursorPageUp,
+  indentWithTab,
+  insertNewlineAndIndent,
+  selectCharLeft,
+  selectCharRight,
+  selectLineBoundaryBackward,
+  selectLineBoundaryForward,
+  selectLineDown,
+  selectLineUp,
+  selectPageDown,
+  selectPageUp,
+} from "@codemirror/commands";
+import { exitEmptyMarkdownBlock, indentMarkdownList } from "../src/cm6/commands.ts";
 
 type XwidgetControlKey = "Escape" | "Delete" | "Backspace";
+type XwidgetSpecialKey =
+  | "Enter"
+  | "Tab"
+  | "ArrowLeft"
+  | "ArrowRight"
+  | "ArrowUp"
+  | "ArrowDown"
+  | "Home"
+  | "End"
+  | "PageUp"
+  | "PageDown";
 type XwidgetKeyContext = {
   editor: Editor;
   editorHost: HTMLElement;
@@ -10,6 +42,18 @@ type XwidgetKeyContext = {
 };
 
 const XWIDGET_CONTROL_KEYS = new Set<XwidgetControlKey>(["Escape", "Delete", "Backspace"]);
+const XWIDGET_SPECIAL_KEYS = new Set<XwidgetSpecialKey>([
+  "Enter",
+  "Tab",
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+]);
 const DUPLICATE_BEFOREINPUT_MS = 80;
 let lastHandledKeydown: { editor: Editor; key: string; at: number } | null = null;
 
@@ -55,6 +99,18 @@ function controlKeyFromInputEvent(event: InputEvent): XwidgetControlKey | null {
   return null;
 }
 
+function specialKeyFromKeyboardEvent(event: KeyboardEvent): XwidgetSpecialKey | null {
+  return XWIDGET_SPECIAL_KEYS.has(event.key as XwidgetSpecialKey)
+    ? event.key as XwidgetSpecialKey
+    : null;
+}
+
+function specialKeyFromInputEvent(event: InputEvent): XwidgetSpecialKey | null {
+  if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") return "Enter";
+  if (event.inputType === "insertText" && event.data === "\t") return "Tab";
+  return null;
+}
+
 function shouldHandleXwidgetControlEvent(
   event: KeyboardEvent | InputEvent,
   editorHost: HTMLElement,
@@ -65,6 +121,20 @@ function shouldHandleXwidgetControlEvent(
   if (!key) return false;
   if (isTextEditingTarget(event.target, editorHost)) return false;
   if (isTextEditingTarget(document.activeElement, editorHost)) return false;
+  return true;
+}
+
+function shouldHandleXwidgetSpecialEvent(
+  event: KeyboardEvent | InputEvent,
+  context: XwidgetKeyContext,
+  key: XwidgetSpecialKey | null,
+): key is XwidgetSpecialKey {
+  if (context.enabled === false || context.vim.mode() !== "insert") return false;
+  if (event.defaultPrevented || event.isComposing) return false;
+  if (!key) return false;
+  if (event instanceof KeyboardEvent && (event.ctrlKey || event.metaKey || event.altKey)) return false;
+  if (isTextEditingTarget(event.target, context.editorHost)) return false;
+  if (isTextEditingTarget(document.activeElement, context.editorHost)) return false;
   return true;
 }
 
@@ -116,11 +186,53 @@ function runEditorControlKey(key: XwidgetControlKey, context: XwidgetKeyContext)
   context.editor.focus();
 }
 
+function runEditorSpecialKey(key: XwidgetSpecialKey, context: XwidgetKeyContext, shiftKey = false): boolean {
+  const view = context.editor.view;
+  const command = (() => {
+    switch (key) {
+      case "Enter":
+        return () => exitEmptyMarkdownBlock(view) || insertNewlineAndIndent(view);
+      case "Tab":
+        return () => shiftKey
+          ? indentMarkdownList(view, -1)
+          : indentMarkdownList(view, 1) || indentWithTab.run?.(view) === true;
+      case "ArrowLeft":
+        return shiftKey ? selectCharLeft : cursorCharLeft;
+      case "ArrowRight":
+        return shiftKey ? selectCharRight : cursorCharRight;
+      case "ArrowUp":
+        return shiftKey ? selectLineUp : cursorLineUp;
+      case "ArrowDown":
+        return shiftKey ? selectLineDown : cursorLineDown;
+      case "Home":
+        return shiftKey ? selectLineBoundaryBackward : cursorLineBoundaryBackward;
+      case "End":
+        return shiftKey ? selectLineBoundaryForward : cursorLineBoundaryForward;
+      case "PageUp":
+        return shiftKey ? selectPageUp : cursorPageUp;
+      case "PageDown":
+        return shiftKey ? selectPageDown : cursorPageDown;
+    }
+  })();
+  const handled = command(view);
+  if (handled) context.editor.focus();
+  return handled;
+}
+
 function shouldHandleXwidgetVimKey(event: KeyboardEvent | InputEvent, context: XwidgetKeyContext): boolean {
   if (context.enabled === false || context.vim.mode() === "insert") return false;
   if (event.defaultPrevented || event.isComposing) return false;
   if (isTextEditingTarget(event.target, context.editorHost)) return false;
   if (isTextEditingTarget(document.activeElement, context.editorHost)) return false;
+  return true;
+}
+
+export function handleXwidgetSpecialKeydown(event: KeyboardEvent, context: XwidgetKeyContext): boolean {
+  const key = specialKeyFromKeyboardEvent(event);
+  if (!shouldHandleXwidgetSpecialEvent(event, context, key)) return false;
+  if (!runEditorSpecialKey(key, context, event.shiftKey)) return false;
+  hardStop(event);
+  noteHandledKeydown(context.editor, event.key);
   return true;
 }
 
@@ -162,6 +274,14 @@ export function handleXwidgetControlBeforeInput(event: InputEvent, context: Xwid
   if (!shouldHandleXwidgetControlEvent(event, context.editorHost, key)) return false;
   hardStop(event);
   if (!recentlyHandledKeydown(context.editor, key)) runEditorControlKey(key, context);
+  return true;
+}
+
+export function handleXwidgetSpecialBeforeInput(event: InputEvent, context: XwidgetKeyContext): boolean {
+  const key = specialKeyFromInputEvent(event);
+  if (!shouldHandleXwidgetSpecialEvent(event, context, key)) return false;
+  hardStop(event);
+  if (!recentlyHandledKeydown(context.editor, key)) runEditorSpecialKey(key, context);
   return true;
 }
 

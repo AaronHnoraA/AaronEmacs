@@ -7,6 +7,8 @@ import {
   handleXwidgetControlBeforeInput,
   guardXwidgetControlKeydown,
   handleXwidgetControlKeydown,
+  handleXwidgetSpecialBeforeInput,
+  handleXwidgetSpecialKeydown,
   handleXwidgetVimBeforeInput,
   handleXwidgetVimKeydown,
 } from "../aaronnote/xwidget-key-guard.ts";
@@ -171,6 +173,88 @@ describe("xwidget key guard", () => {
       Object.defineProperty(backspace, "target", { value: document.body });
       expect(handleXwidgetControlBeforeInput(backspace, { editor, editorHost: host, vim })).toBe(true);
       expect(editor.getMarkdown()).toBe("ac");
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
+
+  test("handles insert-mode Enter through CM6 commands when focus is not in CM6", () => {
+    const host = withMounted(document.createElement("section"));
+    const editor = createEditor(host, { initialContent: "abc" });
+    const vim = createVimLite(editor, host);
+    vim.setMode("insert");
+    editor.setMarkdownSelection(1);
+    try {
+      const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      Object.defineProperty(event, "target", { value: document.body });
+      expect(handleXwidgetSpecialKeydown(event, { editor, editorHost: host, vim })).toBe(true);
+      expect(event.defaultPrevented).toBe(true);
+      expect(editor.getMarkdown()).toBe("a\nbc");
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
+
+  test("handles insert-mode Tab and Shift-Tab through CM6 list indentation", () => {
+    const host = withMounted(document.createElement("section"));
+    const editor = createEditor(host, { initialContent: "- item" });
+    const vim = createVimLite(editor, host);
+    vim.setMode("insert");
+    editor.setMarkdownSelection(2);
+    try {
+      const tab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+      Object.defineProperty(tab, "target", { value: document.body });
+      expect(handleXwidgetSpecialKeydown(tab, { editor, editorHost: host, vim })).toBe(true);
+      expect(tab.defaultPrevented).toBe(true);
+      expect(editor.getMarkdown()).toBe("  - item");
+
+      const shiftTab = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
+      Object.defineProperty(shiftTab, "target", { value: document.body });
+      expect(handleXwidgetSpecialKeydown(shiftTab, { editor, editorHost: host, vim })).toBe(true);
+      expect(editor.getMarkdown()).toBe("- item");
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
+
+  test("handles insert-mode arrow keys through CM6 cursor commands", () => {
+    const host = withMounted(document.createElement("section"));
+    const editor = createEditor(host, { initialContent: "abc" });
+    const vim = createVimLite(editor, host);
+    vim.setMode("insert");
+    editor.setMarkdownSelection(2);
+    try {
+      const event = new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true });
+      Object.defineProperty(event, "target", { value: document.body });
+      expect(handleXwidgetSpecialKeydown(event, { editor, editorHost: host, vim })).toBe(true);
+      expect(event.defaultPrevented).toBe(true);
+      expect(editor.getMarkdownSelection().from).toBe(1);
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
+
+  test("maps insertParagraph beforeinput into CM6 Enter behavior", () => {
+    const host = withMounted(document.createElement("section"));
+    const editor = createEditor(host, { initialContent: "abc" });
+    const vim = createVimLite(editor, host);
+    vim.setMode("insert");
+    editor.setMarkdownSelection(1);
+    try {
+      const event = new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        data: null,
+        inputType: "insertParagraph",
+      });
+      Object.defineProperty(event, "target", { value: document.body });
+      expect(handleXwidgetSpecialBeforeInput(event, { editor, editorHost: host, vim })).toBe(true);
+      expect(event.defaultPrevented).toBe(true);
+      expect(editor.getMarkdown()).toBe("a\nbc");
     } finally {
       editor.destroy();
       host.remove();

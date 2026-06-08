@@ -26,6 +26,8 @@ import { createVimLite, type VimLiteKey, type VimLiteMode } from "./vim-lite.ts"
 import {
   handleXwidgetControlBeforeInput,
   handleXwidgetControlKeydown,
+  handleXwidgetSpecialBeforeInput,
+  handleXwidgetSpecialKeydown,
   handleXwidgetVimBeforeInput,
   handleXwidgetVimKeydown,
 } from "./xwidget-key-guard.ts";
@@ -215,6 +217,19 @@ const editor = createEditor(host, {
     scheduleSave();
   },
 });
+
+function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
+  const target = event.target;
+  if (!(target instanceof Node) || !host.contains(target)) return;
+  const element = target instanceof Element ? target : target.parentElement;
+  if (element?.closest("input, textarea, select, button, a")) return;
+  editor.focus();
+  window.setTimeout(() => editor.focus(), 0);
+}
+
+host.addEventListener("pointerdown", activateEditorFromPointer, { capture: true });
+host.addEventListener("mousedown", activateEditorFromPointer, { capture: true });
+
 const snippetSession = new SnippetSession(editor);
 host.addEventListener("aaronnote-assist-update", () => scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true }));
 
@@ -2743,6 +2758,15 @@ document.addEventListener("keydown", (event) => {
       return;
     }
   }
+  if (handleXwidgetSpecialKeydown(event, {
+    editor,
+    editorHost: host,
+    vim,
+    enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
+  })) {
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+    return;
+  }
   if (vim.handleKeyDown(event)) {
     scheduleAssistUpdate({ cursor: true, toc: true });
     event.stopPropagation();
@@ -2762,6 +2786,15 @@ document.addEventListener("keydown", (event) => {
 }, true);
 document.addEventListener("beforeinput", (event) => {
   if (handleXwidgetControlBeforeInput(event as InputEvent, {
+    editor,
+    editorHost: host,
+    vim,
+    enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
+  })) {
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+    return;
+  }
+  if (handleXwidgetSpecialBeforeInput(event as InputEvent, {
     editor,
     editorHost: host,
     vim,

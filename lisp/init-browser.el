@@ -162,6 +162,59 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
         (kill-new url)
         (message "Copied URL."))
     (user-error "No xwidget URL available")))
+
+(defun my/xwidget-keep-emacs-prefix-keys (map)
+  "Remove xwidget bindings that should remain normal Emacs keys in MAP."
+  (dolist (key '("M-x"
+                 "C-x C-f"
+                 "C-x"
+                 "C-c f"
+                 "C-c b"
+                 "C-c C-f"
+                 "C-c C-b"
+                 "C-s"
+                 "H-i"
+                 "H-a"))
+    (define-key map (kbd key) nil)))
+
+(defun my/xwidget-pass-editing-keys (map)
+  "Send editing/navigation keys in MAP to WebKit instead of Emacs."
+  (when (fboundp 'xwidget-webkit-pass-command-event)
+    (dolist (key '("<escape>"
+                   "<delete>"
+                   "<backspace>"
+                   "DEL"
+                   "RET"
+                   "<return>"
+                   "TAB"
+                   "<tab>"
+                   "<backtab>"
+                   "<left>"
+                   "<right>"
+                   "<up>"
+                   "<down>"
+                   "<home>"
+                   "<end>"
+                   "<prior>"
+                   "<next>"))
+      (define-key map (kbd key) #'xwidget-webkit-pass-command-event))))
+
+(defun my/xwidget--split-to-ibuffer (split-fn)
+  "Run SPLIT-FN, select the new window, and show `ibuffer'."
+  (let ((window (funcall split-fn)))
+    (select-window window)
+    (ibuffer)))
+
+(defun my/xwidget-split-window-below-ibuffer ()
+  "Split below from xwidget and show `ibuffer' in the new window."
+  (interactive)
+  (my/xwidget--split-to-ibuffer #'split-window-below))
+
+(defun my/xwidget-split-window-right-ibuffer ()
+  "Split right from xwidget and show `ibuffer' in the new window."
+  (interactive)
+  (my/xwidget--split-to-ibuffer #'split-window-right))
+
 ;; 共享 Brave 的所有数据（需要关闭 Brave）
 (setq xwidget-webkit-cookie-file 
       (expand-file-name "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"))
@@ -205,6 +258,10 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
 
   ;; 进入 xwidget buffer 时给常用键（不会污染全局）
   (with-eval-after-load 'xwidget
+    (my/xwidget-keep-emacs-prefix-keys xwidget-webkit-mode-map)
+    (my/xwidget-pass-editing-keys xwidget-webkit-mode-map)
+    (define-key xwidget-webkit-mode-map [remap split-window-below] #'my/xwidget-split-window-below-ibuffer)
+    (define-key xwidget-webkit-mode-map [remap split-window-right] #'my/xwidget-split-window-right-ibuffer)
     (define-key xwidget-webkit-mode-map (kbd "q") #'quit-window)
     (define-key xwidget-webkit-mode-map (kbd "g") #'my/xwidget-reload)
     (define-key xwidget-webkit-mode-map (kbd "M-r") #'my/refresh-current-content)
