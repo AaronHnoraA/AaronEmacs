@@ -2699,6 +2699,24 @@ export async function scanNotes() {
   return cloneNotes(sorted);
 }
 
+// Always scan from noteRoot regardless of the current standalone-file scan context.
+// The graph view is a global roam view and must not inherit a standalone file's directory.
+export async function scanRoamNotes() {
+  const prev = noteScanRoot;
+  if (prev !== noteRoot) {
+    noteScanRoot = noteRoot;
+    notesSnapshotDirty = true;
+  }
+  try {
+    return await scanNotes();
+  } finally {
+    if (prev !== noteRoot) {
+      noteScanRoot = prev;
+      notesSnapshotDirty = true;
+    }
+  }
+}
+
 const todoStatuses = new Set(["todo", "doing", "done", "blocked"]);
 
 const DATE_KEYS = new Set(["ddl", "due", "deadline", "scheduled", "start", "done", "date", "when"]);

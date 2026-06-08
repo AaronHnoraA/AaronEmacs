@@ -23,6 +23,7 @@ type VimLiteOptions = {
   onModeChange?: (mode: VimLiteMode) => void;
   onUndo?: () => boolean;
   onRedo?: () => boolean;
+  onIndent?: (direction: 1 | -1) => boolean;
 };
 
 type LineInfo = {
@@ -261,16 +262,11 @@ export function createVimLite(
     if (!text) return;
     register = text;
     (window as unknown as Record<string, unknown>).__aaronoteVimRegister = text;
-    void (navigator.clipboard?.writeText(text) ?? Promise.reject())
-      .catch(() => {
-        const el = document.createElement("textarea");
-        el.value = text;
-        el.style.cssText = "position:fixed;opacity:0;pointer-events:none";
-        document.body.appendChild(el);
-        el.select();
-        try { document.execCommand("copy"); } catch (_) {}
-        document.body.removeChild(el);
-      });
+    void fetch("/api/clipboard", {
+      method: "POST",
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      body: text,
+    }).catch(() => {});
   }
 
   function resetMotionMemory(): void {
@@ -389,22 +385,17 @@ export function createVimLite(
 
   function paste(where: "before" | "after"): void {
     resetMotionMemory();
-    if (register) {
-      insertText(editor, register, where);
+    const doInsert = (text: string) => {
+      if (text) {
+        register = text;
+        insertText(editor, text, where);
+      }
       setMode("normal");
-      return;
-    }
-    void (navigator.clipboard?.readText() ?? Promise.reject())
-      .then(
-        (clipText) => {
-          const text = clipText || "";
-          if (!text) return;
-          if (clipText) register = clipText;
-          insertText(editor, text, where);
-        },
-        () => {},
-      )
-      .finally(() => setMode("normal"));
+    };
+    void fetch("/api/clipboard")
+      .then(r => r.ok ? r.text() : Promise.reject())
+      .then(text => doInsert(text || register))
+      .catch(() => doInsert(register));
   }
 
   function appendChar(): void {
@@ -513,6 +504,22 @@ export function createVimLite(
       if (key === "g") {
         resetMotionMemory();
         docBoundary(editor, "start");
+      }
+      return true;
+    }
+    if (pending === ">") {
+      pending = "";
+      if (key === ">") {
+        resetMotionMemory();
+        options.onIndent?.(1);
+      }
+      return true;
+    }
+    if (pending === "<") {
+      pending = "";
+      if (key === "<") {
+        resetMotionMemory();
+        options.onIndent?.(-1);
       }
       return true;
     }
@@ -627,6 +634,12 @@ export function createVimLite(
         return true;
       case "y":
         pending = "y";
+        return true;
+      case ">":
+        pending = ">";
+        return true;
+      case "<":
+        pending = "<";
         return true;
       case "Escape":
         setMode("normal");

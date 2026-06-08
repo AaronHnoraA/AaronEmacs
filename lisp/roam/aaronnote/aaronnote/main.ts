@@ -239,6 +239,7 @@ const vim = createVimLite(editor, host, {
   onModeChange: updateModeLabel,
   onUndo: () => editor.undo(),
   onRedo: () => editor.redo(),
+  onIndent: (dir) => indentMarkdownBlock(editor.view, dir),
 });
 updateModeLabel(vim.mode());
 
@@ -2634,14 +2635,22 @@ function runHostKey(body: Record<string, unknown>): boolean {
     scheduleAssistUpdate({ cursor: true });
     return true;
   }
-  if (vim.mode() !== "insert" || hostKey.ctrlKey || hostKey.metaKey || hostKey.altKey) return false;
   if (key === "Tab") {
-    const handled = hostKey.shiftKey
-      ? jumpSnippetTabstopBack() || indentMarkdownBlock(editor.view, -1)
-      : jumpSnippetTabstop() || expandSnippetAtCursor() || indentMarkdownBlock(editor.view, 1);
-    if (handled) scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
-    return handled;
+    if (vim.mode() !== "insert") return false;
+    editor.focus();
+    if (hostKey.shiftKey) {
+      const handled = jumpSnippetTabstopBack();
+      if (handled) scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
+      return handled;
+    }
+    const snippetHandled = jumpSnippetTabstop() || expandSnippetAtCursor();
+    if (snippetHandled) {
+      scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
+      return true;
+    }
+    // no snippet — fall through to insertHostKeyText("\t")
   }
+  if (vim.mode() !== "insert" || hostKey.ctrlKey || hostKey.metaKey || hostKey.altKey) return false;
   if (key === "Backspace" || key === "Delete") {
     const handled = deleteHostKeyText(key);
     if (handled) scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });

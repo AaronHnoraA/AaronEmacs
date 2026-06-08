@@ -10,7 +10,7 @@
 import { createServer } from "node:http";
 import { existsSync, statSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,7 +21,7 @@ import {
   readNote,
   notesIndexPayload,
   graphPayload,
-  scanNotes,
+  scanRoamNotes,
   pathSuggestionsForFile,
   readNoteCodeRegion,
   syncRoamDb,
@@ -227,6 +227,23 @@ function transformJavaScript(text) {
 function cleanStatusCode(err, fallback = 500) {
   const code = Number(err?.statusCode || err?.status);
   return Number.isFinite(code) && code >= 400 && code < 600 ? code : fallback;
+}
+
+function readText(req, maxBytes = 4 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(Object.assign(new Error("Request body too large"), { statusCode: 413 }));
+      } else {
+        chunks.push(chunk);
+      }
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
 }
 
 function readJson(req, maxBytes = 64 * 1024 * 1024) {
@@ -866,6 +883,35 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/api/clipboard") {
+      if (req.method === "GET") {
+        try {
+          const { stdout } = await execFileAsync("pbpaste");
+          res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+          res.end(stdout);
+        } catch (_) {
+          res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+          res.end("");
+        }
+        return;
+      }
+      if (req.method === "POST") {
+        try {
+          const text = await readText(req);
+          await new Promise((resolve) => {
+            const proc = spawn("pbcopy");
+            proc.stdin.write(text, "utf8");
+            proc.stdin.end();
+            proc.on("close", resolve);
+            proc.on("error", resolve);
+          });
+        } catch (_) {}
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+    }
+
     if (url.pathname === "/api" && req.method === "POST") {
       const body = await readJson(req);
       const result = await callApi(String(body.channel || ""), body.args);
@@ -933,7 +979,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === "/graph") {
-      const notes = await scanNotes();
+      const notes = await scanRoamNotes();
       const raw = graphPayload(notes);
       // Build SITE_DATA in the format knowledge.js expects:
       // { notes: [{ key, title, link, path, tags, aliases, refs, backlinks, groupKey, groupLabel }] }

@@ -27,11 +27,10 @@
 - 深化表格能力
 - 附件M-click跳转能力
 - 接受 <!-- omit in toc -->语法
-- xwigeht eamacs顶部提供front back按钮
+
 
 ### Bugs
 - TOC pop 窗口大小调整问题
-- graph 必须先与note启动不然就会报错
 
 
 

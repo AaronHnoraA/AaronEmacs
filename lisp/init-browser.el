@@ -311,6 +311,29 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
 
 
 
+;;;; xwidget header-line navigation bar
+
+(defun my/xwidget--nav-button (label action help)
+  "Return a propertized header-line button for LABEL, ACTION, and HELP."
+  (let ((map (make-sparse-keymap)))
+    (define-key map [header-line mouse-1]
+      (lambda () (interactive) (funcall action)))
+    (propertize (concat " " label " ")
+                'mouse-face 'mode-line-highlight
+                'help-echo help
+                'local-map map)))
+
+(defun my/xwidget-setup-header-line ()
+  "Install back/forward/reload nav buttons in this xwidget buffer's header line."
+  (setq-local header-line-format
+              (list
+               (my/xwidget--nav-button "◀" #'my/xwidget-back   "Back [b]")
+               (my/xwidget--nav-button "▶" #'my/xwidget-forward "Forward [f]")
+               (my/xwidget--nav-button "↺" #'my/xwidget-reload  "Reload [g]")
+               "  "
+               '(:eval (propertize (or (my/xwidget-current-url) "")
+                                   'face 'shadow)))))
+
 ;;;; xwidget-webkit 基础配置（macOS / emacs-plus with-xwidgets）
 
 (when (featurep 'xwidget-internal)
@@ -608,7 +631,8 @@ window, avoiding orphan browser buffers/windows."
 (with-eval-after-load 'xwidget
   (define-key xwidget-webkit-mode-map (kbd "M-w") #'my/browser-close-current)
   (define-key xwidget-webkit-mode-map (kbd "W") #'my/xwidget-to-eww)
-  (define-key xwidget-webkit-mode-map (kbd "A") #'my/xwidget-to-appine))
+  (define-key xwidget-webkit-mode-map (kbd "A") #'my/xwidget-to-appine)
+  (add-hook 'xwidget-webkit-mode-hook #'my/xwidget-setup-header-line))
 
 
 

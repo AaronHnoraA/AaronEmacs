@@ -43,5 +43,6 @@ export {
   deleteRoamTag,
   roamTagOverlapReport,
   rewriteMarkdownPathReferences,
+  scanRoamNotes,
   configure,
 } from "./runtime.mjs";

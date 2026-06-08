@@ -14,6 +14,8 @@
 
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
 (declare-function my/xwidget-current-url "init-browser" (&optional buffer))
+(declare-function my/xwidget-session-buffer "init-browser" (id))
+(declare-function my/xwidget-focus "init-browser" (&optional buffer))
 (declare-function my/appine-open-url "init-appine" (url))
 (declare-function my/appine-open-url-fresh "init-appine" (url))
 (declare-function my/appine-kill-all "init-appine" ())
@@ -99,6 +101,11 @@ Set to 0 to let the OS pick a random port."
   "When set, xwidget title changes will not rename this buffer.")
 
 (put 'my/aaronnote--xwidget-forced-name 'permanent-local t)
+
+(defvar-local my/aaronnote--xwidget-pending-file nil
+  "File to POST to Aaronnote once the page has finished loading, or nil.")
+
+(put 'my/aaronnote--xwidget-pending-file 'permanent-local t)
 
 (defconst my/aaronnote--xwidget-focus-script
   "(() => {
@@ -450,30 +457,53 @@ When FILE is non-nil, also remember it as the current note."
             (nconc (list event) unread-command-events)))))
 
 (defun my/aaronnote--open-xwidget (url &optional file)
-  "Open Aaronnote URL in xwidget, one buffer per file."
+  "Open Aaronnote in a single shared xwidget session (id \"aaronnote\").
+All Aaronnote content – notes and the graph – shares one session so the web
+app is always initialized before any file navigation command arrives.
+
+When FILE is given and the session already exists the file is opened via a
+POST command instead of reloading the page.  When no session exists yet the
+root URL is loaded first; a buffer-local pending-file flag then fires the
+POST once the page reports load-finished."
   (unless (fboundp 'my/xwidget-open-url)
     (require 'init-browser))
-  (let* ((id (if file
-                 (concat "aaronnote-" (md5 (expand-file-name file)))
-               "aaronnote"))
-         (buffer (my/xwidget-open-url url
-                                      :id id
-                                      :display 'current
-                                      :reuse-selected t)))
-    ;; Provide the Aaronnote-specific focus script so the generic mechanism
-    ;; (my/xwidget--load-finished-focus) can place the cursor inside CodeMirror.
-    (when (buffer-live-p buffer)
-      (with-current-buffer buffer
-        (setq-local my/xwidget-focus-script my/aaronnote--xwidget-focus-script)))
-    (when (and file (buffer-live-p buffer))
-      (let ((desired-name (format "*aaronnote: %s*"
-                                  (file-name-nondirectory file))))
-        (with-current-buffer buffer
-          (setq-local my/aaronnote--xwidget-forced-name desired-name)
-          (unless (equal (buffer-name buffer) desired-name)
-            (rename-buffer desired-name t)))))
-    (my/aaronnote--track-app-buffer buffer file)
-    ))
+  (let* ((id "aaronnote")
+         (existing (and (fboundp 'my/xwidget-session-buffer)
+                        (my/xwidget-session-buffer id))))
+    (if (and existing file)
+        ;; Session is already alive: display it and POST the file navigation.
+        (progn
+          (switch-to-buffer existing)
+          (my/aaronnote--open-file-in-web file)
+          (run-at-time 0.3 nil #'my/xwidget-focus existing)
+          (let ((name (format "*aaronnote: %s*" (file-name-nondirectory file))))
+            (with-current-buffer existing
+              (setq-local my/aaronnote--xwidget-forced-name name)
+              (rename-buffer name t)))
+          (my/aaronnote--track-app-buffer existing file))
+      ;; No live session, or non-file navigation (graph etc.): open URL.
+      ;; For a file request without an existing session, load the root page
+      ;; first so the web app can fully initialize before the POST arrives.
+      (let* ((open-url (if (and file (not existing))
+                           (my/aaronnote--server-url "/")
+                         url))
+             (buffer (my/xwidget-open-url open-url
+                                          :id id
+                                          :display 'current
+                                          :reuse-selected t)))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (setq-local my/xwidget-focus-script my/aaronnote--xwidget-focus-script)
+            (let ((name (if file
+                            (format "*aaronnote: %s*" (file-name-nondirectory file))
+                          "*aaronnote*")))
+              (setq-local my/aaronnote--xwidget-forced-name name)
+              (rename-buffer name t))
+            (when file
+              ;; Will be consumed by the load-finished branch of the callback advice.
+              (setq-local my/aaronnote--xwidget-pending-file file))))
+        (my/aaronnote--track-app-buffer buffer file)
+        buffer))))
 
 (defun my/aaronnote--open-appine (url &optional file force-new)
   "Open Aaronnote URL in Appine, one Appine tab per md file.
@@ -930,13 +960,22 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
 
 ;; Preserve forced buffer names when xwidget-webkit-callback renames on load.
 (defun my/aaronnote--xwidget-callback-advice (_xwidget _event-type)
-  "After callback, restore forced name for Aaronnote xwidget buffers."
+  "After xwidget callback: restore forced name and fire pending file POST."
   (let ((buf (and (fboundp 'xwidget-buffer)
                   (xwidget-buffer _xwidget))))
-    (when (and (buffer-live-p buf)
-               (buffer-local-value 'my/aaronnote--xwidget-forced-name buf))
+    (when (buffer-live-p buf)
       (with-current-buffer buf
-        (rename-buffer my/aaronnote--xwidget-forced-name t)))))
+        ;; Keep the buffer name stable despite xwidget title updates.
+        (when my/aaronnote--xwidget-forced-name
+          (rename-buffer my/aaronnote--xwidget-forced-name t))
+        ;; On load-finished, send any pending file open command.
+        (when (and my/aaronnote--xwidget-pending-file
+                   (eq _event-type 'load-changed)
+                   (string-equal (nth 3 last-input-event) "load-finished"))
+          (let ((file my/aaronnote--xwidget-pending-file))
+            (setq-local my/aaronnote--xwidget-pending-file nil)
+            ;; Short pause so page JS finishes before the POST arrives.
+            (run-at-time 0.3 nil #'my/aaronnote--open-file-in-web file)))))))
 
 (with-eval-after-load 'xwidget
   (advice-add 'xwidget-webkit-callback :after
