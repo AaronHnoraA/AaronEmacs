@@ -394,6 +394,12 @@ browser pipeline 额外提供：
 - 文件、URL 需要系统应用接管时走 `system` / macOS `open`
 - 关闭 Appine 的最后一个标签会自动清掉 host buffer
 
+**xwidget 焦点**：页面加载完成（`load-finished`）时自动开启 `xwidget-webkit-edit-mode`、
+注入一次 `<right>` 唤醒 native WebKit first-responder、并运行 buffer-local `my/xwidget-focus-script`
+（如 Aaronnote 的 CodeMirror 聚焦 JS）。打开后无需手动先按键即可直接输入。
+相关开关：`my/xwidget-auto-focus-on-load`、`my/xwidget-prime-native-focus`、`my/xwidget-prime-key`。
+手动恢复焦点：`M-x my/xwidget-focus`（xwidget buffer 内绑定到 `i`）。
+
 ## 8. Aaronnote Markdown Web/Appine
 
 ### 架构

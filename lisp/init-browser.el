@@ -43,6 +43,53 @@
 (defvar-local my/xwidget-session-url nil
   "Last URL recorded for this xwidget buffer.")
 
+(defcustom my/xwidget-auto-focus-on-load t
+  "Auto-focus xwidget buffer when its page finishes loading."
+  :type 'boolean
+  :group 'xwidget)
+
+(defvar-local my/xwidget-focus-script nil
+  "Optional JS to focus an editable element inside this xwidget buffer.
+Set buffer-locally before the page loads (e.g. in the open function).")
+(put 'my/xwidget-focus-script 'permanent-local t)
+
+(defun my/xwidget-focus (&optional buffer)
+  "Focus the xwidget in BUFFER (default: current buffer) for keyboard input.
+Enables edit-mode, runs any buffer-local JS focus script, and switches
+to evil insert state if evil is active in the buffer."
+  (interactive)
+  (let ((buf (or buffer (current-buffer))))
+    (when (and (buffer-live-p buf)
+               (with-current-buffer buf
+                 (eq major-mode 'xwidget-webkit-mode)))
+      (with-current-buffer buf
+        (when (fboundp 'xwidget-webkit-edit-mode)
+          (ignore-errors (xwidget-webkit-edit-mode 1)))
+        (when-let* ((session (and (fboundp 'xwidget-webkit-current-session)
+                                  (ignore-errors (xwidget-webkit-current-session)))))
+          (when (and my/xwidget-focus-script
+                     (fboundp 'xwidget-webkit-execute-script))
+            (ignore-errors
+              (xwidget-webkit-execute-script session my/xwidget-focus-script))))
+        ;; Switch to evil insert state when evil is active so the modeline
+        ;; reflects editing intent and insert-state key overrides are active.
+        (when (and (featurep 'evil) (bound-and-true-p evil-local-mode))
+          (ignore-errors (evil-insert-state)))))))
+
+(defun my/xwidget--load-finished-focus (xwidget _xwidget-event-type)
+  "Schedule focus for XWIDGET's buffer after page load-finished."
+  ;; Capture the load-finished detail immediately (last-input-event is ephemeral).
+  (when (and my/xwidget-auto-focus-on-load
+             (eq _xwidget-event-type 'load-changed)
+             (string-equal (nth 3 last-input-event) "load-finished"))
+    (let ((buf (and (fboundp 'xwidget-buffer)
+                    (ignore-errors (xwidget-buffer xwidget)))))
+      (when (and (buffer-live-p buf)
+                 (or (eq buf (current-buffer))
+                     (get-buffer-window buf)))
+        ;; Delay 0.3 s to let WebKit finish rendering before injecting focus.
+        (run-at-time 0.3 nil #'my/xwidget-focus buf)))))
+
 (defun my/xwidget--ensure-available ()
   "Ensure native xwidget-webkit primitives are available."
   (unless (fboundp 'xwidget-webkit-browse-url)
@@ -107,6 +154,8 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
             (user-error "xwidget-webkit-goto-uri is not available"))
           (my/xwidget--record-buffer existing id url)
           (my/xwidget--display-buffer existing display)
+          ;; Page already loaded — no load-finished will fire; schedule focus.
+          (run-at-time 0.3 nil #'my/xwidget-focus existing)
           existing)
       (let ((buffer
              (if (eq display 'side)
@@ -187,7 +236,10 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
                    "<home>"
                    "<end>"
                    "<prior>"
-                   "<next>"))
+                   "<next>"
+                   ;; macOS: Cmd = Meta; pass clipboard shortcuts to WebKit
+                   "M-c"
+                   "M-v"))
       (define-key map (kbd key) #'xwidget-webkit-pass-command-event))))
 
 (defun my/xwidget--split-to-ibuffer (split-fn)
@@ -252,6 +304,7 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
     (my/xwidget-keep-emacs-prefix-keys xwidget-webkit-mode-map)
     (my/xwidget-keep-emacs-prefix-keys xwidget-webkit-edit-mode-map)
     (my/xwidget-pass-editing-keys xwidget-webkit-mode-map)
+    (my/xwidget-pass-editing-keys xwidget-webkit-edit-mode-map)
     (define-key xwidget-webkit-mode-map [remap split-window-below] #'my/xwidget-split-window-below-ibuffer)
     (define-key xwidget-webkit-mode-map [remap split-window-right] #'my/xwidget-split-window-right-ibuffer)
     (define-key xwidget-webkit-mode-map (kbd "q") #'quit-window)
@@ -261,7 +314,10 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
     (define-key xwidget-webkit-mode-map (kbd "b") #'my/xwidget-back)
     (define-key xwidget-webkit-mode-map (kbd "f") #'my/xwidget-forward)
     (define-key xwidget-webkit-mode-map (kbd "y") #'my/xwidget-copy-selection)
-    (define-key xwidget-webkit-mode-map (kbd "Y") #'my/xwidget-copy-url)))
+    (define-key xwidget-webkit-mode-map (kbd "Y") #'my/xwidget-copy-url)
+    (define-key xwidget-webkit-mode-map (kbd "i") #'my/xwidget-focus)
+    ;; Drive auto-focus from the load-finished event via callback advice.
+    (advice-add 'xwidget-webkit-callback :after #'my/xwidget--load-finished-focus)))
 
 ;;;; browse-url 统一入口：默认策略由 init-open.el 维护
 

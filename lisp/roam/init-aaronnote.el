@@ -397,28 +397,6 @@ When FILE is non-nil, also remember it as the current note."
   (when file
     (my/aaronnote--sync-app-buffer-file file)))
 
-(defun my/aaronnote--focus-xwidget-buffer (buffer)
-  "Focus the Aaronnote editor inside xwidget BUFFER when possible."
-  (when (and (buffer-live-p buffer)
-             (fboundp 'xwidget-webkit-current-session)
-             (fboundp 'xwidget-webkit-execute-script))
-    (with-current-buffer buffer
-      (when (eq major-mode 'xwidget-webkit-mode)
-        (ignore-errors
-          (xwidget-webkit-execute-script
-           (xwidget-webkit-current-session)
-           my/aaronnote--xwidget-focus-script))))))
-
-(defun my/aaronnote--prepare-xwidget-buffer (buffer)
-  "Enable reliable editing/focus behavior for Aaronnote xwidget BUFFER."
-  (when (buffer-live-p buffer)
-    (with-current-buffer buffer
-      (when (and (eq major-mode 'xwidget-webkit-mode)
-                 (fboundp 'xwidget-webkit-edit-mode))
-        (ignore-errors (xwidget-webkit-edit-mode 1))))
-    (dolist (delay '(0.05 0.2 0.6 1.2 2.5))
-      (run-at-time delay nil #'my/aaronnote--focus-xwidget-buffer buffer))))
-
 (defun my/aaronnote--open-xwidget (url &optional file)
   "Open Aaronnote URL in xwidget, one buffer per file."
   (unless (fboundp 'my/xwidget-open-url)
@@ -430,6 +408,11 @@ When FILE is non-nil, also remember it as the current note."
                                       :id id
                                       :display 'current
                                       :reuse-selected t)))
+    ;; Provide the Aaronnote-specific focus script so the generic mechanism
+    ;; (my/xwidget--load-finished-focus) can place the cursor inside CodeMirror.
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (setq-local my/xwidget-focus-script my/aaronnote--xwidget-focus-script)))
     (when (and file (buffer-live-p buffer))
       (let ((desired-name (format "*aaronnote: %s*"
                                   (file-name-nondirectory file))))
@@ -438,7 +421,13 @@ When FILE is non-nil, also remember it as the current note."
           (unless (equal (buffer-name buffer) desired-name)
             (rename-buffer desired-name t)))))
     (my/aaronnote--track-app-buffer buffer file)
-    (my/aaronnote--prepare-xwidget-buffer buffer)))
+    ;; Aaronnote is a full editor: use evil Normal mode for vimium-style
+    ;; navigation (j/k scroll, H/L history, i to edit).  The mode hook
+    ;; disabled evil globally for xwidget; re-enable it here specifically.
+    (when (and (buffer-live-p buffer) (fboundp 'evil-local-mode))
+      (with-current-buffer buffer
+        (evil-local-mode 1)
+        (evil-normal-state)))))
 
 (defun my/aaronnote--open-appine (url &optional file force-new)
   "Open Aaronnote URL in Appine, one Appine tab per md file.

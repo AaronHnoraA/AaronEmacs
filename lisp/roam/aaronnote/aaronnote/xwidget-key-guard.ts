@@ -20,6 +20,7 @@ import {
   selectPageDown,
   selectPageUp,
 } from "@codemirror/commands";
+import { insertNewlineContinueMarkup } from "@codemirror/lang-markdown";
 import { exitEmptyMarkdownBlock, indentMarkdownList } from "../src/cm6/commands.ts";
 
 type XwidgetControlKey = "Escape" | "Delete" | "Backspace";
@@ -191,7 +192,7 @@ function runEditorSpecialKey(key: XwidgetSpecialKey, context: XwidgetKeyContext,
   const command = (() => {
     switch (key) {
       case "Enter":
-        return () => exitEmptyMarkdownBlock(view) || insertNewlineAndIndent(view);
+        return () => exitEmptyMarkdownBlock(view) || insertNewlineContinueMarkup(view) || insertNewlineAndIndent(view);
       case "Tab":
         return () => shiftKey
           ? indentMarkdownList(view, -1)
