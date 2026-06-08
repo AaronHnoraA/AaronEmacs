@@ -349,6 +349,13 @@ async function apiCurrentFile(file) {
   return { ok: true, file: target };
 }
 
+async function apiEmacsKey(key) {
+  const k = String(key || "").trim();
+  if (!k || k.length > 32) return { ok: false, message: "Invalid key" };
+  process.stdout.write(`aaronote-event:key:${JSON.stringify({ key: k })}\n`);
+  return { ok: true };
+}
+
 const apiHandlers = {
   "aaronnote:api:notes:bootstrap": (file) => bootstrapNote(file || undefined),
   "aaronnote:api:notes:open": (file) => readNote(file),
@@ -415,6 +422,7 @@ const apiHandlers = {
   "aaronnote:api:shell:show-editor-context-menu": () => ({ ok: true }),
   "aaronnote:api:emacs:open": (body) => apiOpenInEmacs(body?.file ?? body, body?.line, body?.col, body?.tag),
   "aaronnote:api:emacs:current-file": (file) => apiCurrentFile(file),
+  "aaronnote:api:emacs:key": (key) => apiEmacsKey(key),
 };
 
 async function callApi(channel, args = []) {
@@ -606,7 +614,8 @@ function adapterScript(origin) {
     },
     emacs: {
       open: function(body) { return call("aaronnote:api:emacs:open", [body || {}]); },
-      currentFile: function(file) { return call("aaronnote:api:emacs:current-file", [String(file || "")]); }
+      currentFile: function(file) { return call("aaronnote:api:emacs:current-file", [String(file || "")]); },
+      key: function(k) { return call("aaronnote:api:emacs:key", [String(k || "")]); }
     },
     shell: {
       showInFolder: function(file) { return call("aaronnote:api:shell:show-in-folder", [String(file || "")]); },

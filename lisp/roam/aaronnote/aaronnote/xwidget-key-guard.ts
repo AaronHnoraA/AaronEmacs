@@ -312,3 +312,120 @@ export function guardXwidgetControlBeforeInput(event: InputEvent): boolean {
   hardStop(event);
   return true;
 }
+
+// ── Emacs key forwarding ──────────────────────────────────────────────────────
+// macOS modifier mapping from init-macos.el:
+//   mac-option-modifier 'hyper  → Option/altKey  → H-
+//   mac-command-modifier 'meta  → Cmd/metaKey    → M-
+//   Ctrl stays Ctrl             → ctrlKey        → C-
+// We use event.code (physical key) not event.key because Option turns letters
+// into diacritics (Option+O → "œ").
+
+function codeToBaseKey(code: string, shifted: boolean): string | null {
+  const m = /^Key([A-Z])$/.exec(code);
+  if (m) return shifted ? m[1].toUpperCase() : m[1].toLowerCase();
+  const d = /^Digit(\d)$/.exec(code);
+  if (d) return d[1];
+  return null;
+}
+
+/**
+ * Key string for any event — including bare keys (no modifiers).
+ * Used to capture the second key of a C-x / C-c prefix sequence.
+ */
+function keyStringFromEvent(event: KeyboardEvent): string | null {
+  const base = codeToBaseKey(event.code, event.shiftKey);
+  if (!base) return null;
+  const mods: string[] = [];
+  if (event.altKey && !event.metaKey && !event.ctrlKey) mods.push("H");
+  else if (event.metaKey && !event.ctrlKey && !event.altKey) mods.push("M");
+  else if (event.ctrlKey && !event.metaKey && !event.altKey) mods.push("C");
+  return mods.length ? mods.join("-") + "-" + base : base;
+}
+
+/** Build the Emacs key string for a top-level chord — requires at least one modifier. */
+export function emacsKeyFromEvent(event: KeyboardEvent): string | null {
+  const key = keyStringFromEvent(event);
+  // Must have a modifier prefix to be a top-level forwarded chord
+  if (!key || !key.includes("-")) return null;
+  return key;
+}
+
+/**
+ * Returns true when this keystroke should be forwarded to Emacs.
+ *
+ * Scope: all Option(H-) chords, plus M-x / C-g / C-x / C-c control chords.
+ * The editor's own Cmd shortcuts (S=save, B/I/K=format, Z/Y=undo) are not
+ * captured here and continue to work normally.
+ */
+export function shouldForwardToEmacs(event: KeyboardEvent): boolean {
+  if (event.isComposing) return false;
+  // Option = Hyper: forward all H- chords
+  if (event.altKey && !event.metaKey && !event.ctrlKey) {
+    return codeToBaseKey(event.code, event.shiftKey) !== null;
+  }
+  // M-x (Cmd+X, no shift/alt)
+  if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+    return event.code === "KeyX";
+  }
+  // Bare Ctrl: C-g, C-x prefix, C-c prefix
+  if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+    return event.code === "KeyG" || event.code === "KeyX" || event.code === "KeyC";
+  }
+  return false;
+}
+
+function forwardEmacsKey(keyString: string): void {
+  void (window.aaronnoteApi as { emacs?: { key?: (k: string) => unknown } })
+    ?.emacs?.key?.(keyString);
+}
+
+// When the user presses C-x or C-c, we enter prefix mode and capture the
+// NEXT keystroke before forwarding. Without this, C-x goes to Emacs but C-f
+// still goes to WebKit (which holds OS focus), so "C-x C-f" would never work.
+let pendingPrefix: string | null = null;
+
+/**
+ * Call at the top of the main keydown handler, before editing handlers.
+ * Stops the event and forwards to Emacs if the chord matches the forward scope.
+ * Prefix keys (C-x, C-c) accumulate the following key before forwarding.
+ */
+export function handleXwidgetEmacsKeydown(event: KeyboardEvent): boolean {
+  if (pendingPrefix !== null) {
+    // C-g while in prefix mode: cancel prefix, forward C-g as keyboard-quit
+    if (event.ctrlKey && !event.metaKey && !event.altKey && event.code === "KeyG") {
+      pendingPrefix = null;
+      hardStop(event);
+      forwardEmacsKey("C-g");
+      return true;
+    }
+    // Any other key: complete the prefix sequence
+    if (!event.isComposing) {
+      const nextKey = keyStringFromEvent(event);
+      if (nextKey) {
+        const fullKey = pendingPrefix + " " + nextKey;
+        pendingPrefix = null;
+        hardStop(event);
+        forwardEmacsKey(fullKey);
+        return true;
+      }
+    }
+    // Unmappable key (modifier-only, etc.): cancel prefix silently
+    pendingPrefix = null;
+    return false;
+  }
+
+  if (!shouldForwardToEmacs(event)) return false;
+  const key = emacsKeyFromEvent(event);
+  if (!key) return false;
+  hardStop(event);
+
+  // C-x and C-c are prefix keys — accumulate the next keystroke
+  if (key === "C-x" || key === "C-c") {
+    pendingPrefix = key;
+    return true;
+  }
+
+  forwardEmacsKey(key);
+  return true;
+}

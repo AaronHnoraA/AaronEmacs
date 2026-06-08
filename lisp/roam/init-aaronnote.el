@@ -23,6 +23,9 @@
 (declare-function my/aaronnote-roam-note-changed "init-md-roam" (file))
 (declare-function my/aaronnote-roam--clear-runtime-cache "init-md-roam" ())
 (declare-function my/aaronnote-roam--cancel-sync-timer "init-md-roam" ())
+(declare-function xwidget-webkit-current-session "xwidget" ())
+(declare-function xwidget-webkit-edit-mode "xwidget" (&optional arg))
+(declare-function xwidget-webkit-execute-script "xwidget" (xwidget script &optional callback))
 (defvar my/appine-tab-list)
 
 (defgroup my/aaronnote nil
@@ -89,6 +92,37 @@ Set to 0 to let the OS pick a random port."
   "Current note file represented by an Aaronnote Appine/xwidget buffer.")
 
 (put 'my/aaronnote-buffer-file-name 'permanent-local t)
+
+(defvar-local my/aaronnote--xwidget-forced-name nil
+  "When set, xwidget title changes will not rename this buffer.")
+
+(put 'my/aaronnote--xwidget-forced-name 'permanent-local t)
+
+(defconst my/aaronnote--xwidget-focus-script
+  "(() => {
+  const focusEditor = () => {
+    try {
+      window.dispatchEvent(new CustomEvent('aaronnote:command', {
+        detail: { command: 'focus' }
+      }));
+    } catch (_) {}
+    const target = document.querySelector(
+      '.cm-content, .cm-editor [contenteditable=\"true\"], [data-editor] [contenteditable=\"true\"]'
+    );
+    if (!target || typeof target.focus !== 'function') return false;
+    try {
+      target.focus({ preventScroll: true });
+    } catch (_) {
+      target.focus();
+    }
+    return true;
+  };
+  focusEditor();
+  requestAnimationFrame(focusEditor);
+  setTimeout(focusEditor, 50);
+  return true;
+})()"
+  "JavaScript used to move focus into the Aaronnote editor inside xwidget.")
 
 (defun my/aaronnote--server-url (&optional path)
   "Return the local Aaronnote URL for PATH."
@@ -197,13 +231,44 @@ Set to 0 to let the OS pick a random port."
   ;; Do an initial activity check after the page has had time to load.
   (run-with-idle-timer 2 nil #'my/aaronnote--update-activity))
 
+(defun my/aaronnote--execute-key (keys key-string)
+  "Run KEYS (key vector) forwarded from the Aaronnote browser.
+Calls the bound command interactively, or pushes prefix-map keys onto
+`unread-command-events' so the user can complete the sequence."
+  (let ((binding (key-binding keys)))
+    (cond
+     ((commandp binding)
+      (call-interactively binding))
+     ((keymapp binding)
+      (setq unread-command-events
+            (nconc (listify-key-sequence keys)
+                   unread-command-events)))
+     (t
+      (message "Aaronnote: no binding for %s" key-string)))))
+
+(defun my/aaronnote--run-emacs-key (key-string)
+  "Execute Emacs key KEY-STRING forwarded from the Aaronnote browser."
+  (condition-case err
+      (let ((keys (ignore-errors (kbd key-string))))
+        (when (and keys (> (length keys) 0))
+          (let ((win (and (buffer-live-p my/aaronnote--app-buffer)
+                          (get-buffer-window my/aaronnote--app-buffer 'visible))))
+            (if (window-live-p win)
+                (with-selected-window win
+                  (my/aaronnote--execute-key keys key-string))
+              (my/aaronnote--execute-key keys key-string)))))
+    (error
+     (message "Aaronnote key forward failed (%s): %s"
+              key-string (error-message-string err)))))
+
 (defun my/aaronnote--handle-process-line (line)
   "Handle one web-host stdout LINE."
   (let ((ready-prefix "aaronote-web-host:ready:")
         (goto-prefix "aaronote-event:goto:")
         (open-prefix "aaronote-event:open:")
         (current-file-prefix "aaronote-event:current-file:")
-        (saved-prefix "aaronote-event:saved:"))
+        (saved-prefix "aaronote-event:saved:")
+        (key-prefix "aaronote-event:key:"))
     (cond
      ((string-prefix-p ready-prefix line)
       (let ((port (string-to-number (substring line (length ready-prefix)))))
@@ -260,6 +325,17 @@ Set to 0 to let the OS pick a random port."
                 (my/aaronnote-roam-note-changed file))))
         (error
          (message "Aaronnote saved-event parse failed: %s"
+                  (error-message-string err)))))
+     ((string-prefix-p key-prefix line)
+      (condition-case err
+          (let* ((payload (json-parse-string
+                           (substring line (length key-prefix))
+                           :object-type 'alist))
+                 (key (alist-get 'key payload)))
+            (when (stringp key)
+              (my/aaronnote--run-emacs-key key)))
+        (error
+         (message "Aaronnote key-event parse failed: %s"
                   (error-message-string err))))))))
 
 (defun my/aaronnote--process-filter (proc output)
@@ -321,15 +397,48 @@ When FILE is non-nil, also remember it as the current note."
   (when file
     (my/aaronnote--sync-app-buffer-file file)))
 
+(defun my/aaronnote--focus-xwidget-buffer (buffer)
+  "Focus the Aaronnote editor inside xwidget BUFFER when possible."
+  (when (and (buffer-live-p buffer)
+             (fboundp 'xwidget-webkit-current-session)
+             (fboundp 'xwidget-webkit-execute-script))
+    (with-current-buffer buffer
+      (when (eq major-mode 'xwidget-webkit-mode)
+        (ignore-errors
+          (xwidget-webkit-execute-script
+           (xwidget-webkit-current-session)
+           my/aaronnote--xwidget-focus-script))))))
+
+(defun my/aaronnote--prepare-xwidget-buffer (buffer)
+  "Enable reliable editing/focus behavior for Aaronnote xwidget BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (and (eq major-mode 'xwidget-webkit-mode)
+                 (fboundp 'xwidget-webkit-edit-mode))
+        (ignore-errors (xwidget-webkit-edit-mode 1))))
+    (dolist (delay '(0.05 0.2 0.6 1.2 2.5))
+      (run-at-time delay nil #'my/aaronnote--focus-xwidget-buffer buffer))))
+
 (defun my/aaronnote--open-xwidget (url &optional file)
-  "Open Aaronnote URL in xwidget in the selected window."
+  "Open Aaronnote URL in xwidget, one buffer per file."
   (unless (fboundp 'my/xwidget-open-url)
     (require 'init-browser))
-  (my/xwidget-open-url url
-                       :id "aaronnote"
-                       :display 'current
-                       :reuse-selected t)
-  (my/aaronnote--track-app-buffer (current-buffer) file))
+  (let* ((id (if file
+                 (concat "aaronnote-" (md5 (expand-file-name file)))
+               "aaronnote"))
+         (buffer (my/xwidget-open-url url
+                                      :id id
+                                      :display 'current
+                                      :reuse-selected t)))
+    (when (and file (buffer-live-p buffer))
+      (let ((desired-name (format "*aaronnote: %s*"
+                                  (file-name-nondirectory file))))
+        (with-current-buffer buffer
+          (setq-local my/aaronnote--xwidget-forced-name desired-name)
+          (unless (equal (buffer-name buffer) desired-name)
+            (rename-buffer desired-name t)))))
+    (my/aaronnote--track-app-buffer buffer file)
+    (my/aaronnote--prepare-xwidget-buffer buffer)))
 
 (defun my/aaronnote--open-appine (url &optional file force-new)
   "Open Aaronnote URL in Appine, one Appine tab per md file.
@@ -783,6 +892,20 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
     (define-key appine-active-map (kbd "H-r") #'my/aaronnote-refresh)
     (define-key appine-active-map (kbd "H-y") #'my/aaronnote-roam-sync)
     (define-key appine-active-map (kbd "H-g") #'my/aaronnote-roam-graph)))
+
+;; Preserve forced buffer names when xwidget-webkit-callback renames on load.
+(defun my/aaronnote--xwidget-callback-advice (_xwidget _event-type)
+  "After callback, restore forced name for Aaronnote xwidget buffers."
+  (let ((buf (and (fboundp 'xwidget-buffer)
+                  (xwidget-buffer _xwidget))))
+    (when (and (buffer-live-p buf)
+               (buffer-local-value 'my/aaronnote--xwidget-forced-name buf))
+      (with-current-buffer buf
+        (rename-buffer my/aaronnote--xwidget-forced-name t)))))
+
+(with-eval-after-load 'xwidget
+  (advice-add 'xwidget-webkit-callback :after
+              #'my/aaronnote--xwidget-callback-advice))
 
 (provide 'init-aaronnote)
 ;;; init-aaronnote.el ends here

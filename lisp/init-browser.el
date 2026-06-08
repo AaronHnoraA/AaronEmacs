@@ -165,16 +165,7 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
 
 (defun my/xwidget-keep-emacs-prefix-keys (map)
   "Remove xwidget bindings that should remain normal Emacs keys in MAP."
-  (dolist (key '("M-x"
-                 "C-x C-f"
-                 "C-x"
-                 "C-c f"
-                 "C-c b"
-                 "C-c C-f"
-                 "C-c C-b"
-                 "C-s"
-                 "H-i"
-                 "H-a"))
+  (dolist (key '("M-x" "C-x C-f" "C-x" "C-c" "C-s" "C-g"))
     (define-key map (kbd key) nil)))
 
 (defun my/xwidget-pass-editing-keys (map)
@@ -259,6 +250,7 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
   ;; 进入 xwidget buffer 时给常用键（不会污染全局）
   (with-eval-after-load 'xwidget
     (my/xwidget-keep-emacs-prefix-keys xwidget-webkit-mode-map)
+    (my/xwidget-keep-emacs-prefix-keys xwidget-webkit-edit-mode-map)
     (my/xwidget-pass-editing-keys xwidget-webkit-mode-map)
     (define-key xwidget-webkit-mode-map [remap split-window-below] #'my/xwidget-split-window-below-ibuffer)
     (define-key xwidget-webkit-mode-map [remap split-window-right] #'my/xwidget-split-window-right-ibuffer)

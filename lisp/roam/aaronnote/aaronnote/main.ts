@@ -26,6 +26,7 @@ import { createVimLite, type VimLiteKey, type VimLiteMode } from "./vim-lite.ts"
 import {
   handleXwidgetControlBeforeInput,
   handleXwidgetControlKeydown,
+  handleXwidgetEmacsKeydown,
   handleXwidgetSpecialBeforeInput,
   handleXwidgetSpecialKeydown,
   handleXwidgetVimBeforeInput,
@@ -2710,6 +2711,7 @@ roamToolsClose.addEventListener("click", closeRoamToolsPanel);
 sourceButton.addEventListener("click", toggleSourceMode);
 saveButton.addEventListener("click", () => void save());
 document.addEventListener("keydown", (event) => {
+  if (handleXwidgetEmacsKeydown(event)) return;
   snippetSuppressedPrefix = event.key === "Escape" ? snippetSuppressedPrefix : "";
   if (handleSnippetPopupKey(event)) {
     event.stopPropagation();

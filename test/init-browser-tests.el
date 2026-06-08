@@ -88,5 +88,6 @@
           (when (buffer-live-p buf2)
             (kill-buffer buf2)))))))
 
+
 (provide 'init-browser-tests)
 ;;; init-browser-tests.el ends here
