@@ -110,6 +110,27 @@ mathPreview.className = "aaronnote-math-preview";
 mathPreview.hidden = true;
 document.body.appendChild(mathPreview);
 
+const selectionTool = document.createElement("div");
+selectionTool.className = "aaronnote-selection-tool";
+selectionTool.innerHTML = `
+  <button type="button" data-selection-command="bold" title="Bold">B</button>
+  <button type="button" data-selection-command="italic" title="Italic">I</button>
+  <button type="button" data-selection-command="highlight" title="Highlight">==</button>
+  <button type="button" data-selection-command="strike" title="Strikethrough">~~</button>
+  <button type="button" data-selection-command="code" title="Inline code">&lt;&gt;</button>
+  <button type="button" data-selection-command="link" title="Link">@</button>
+  <span aria-hidden="true"></span>
+  <button type="button" data-selection-command="copy" title="Copy">Copy</button>
+  <button type="button" data-selection-command="more" title="More actions">...</button>
+  <div class="aaronnote-selection-more" data-selection-more hidden>
+    <button type="button" data-selection-command="insert-roam-idlink">Insert roam idlink...</button>
+  </div>
+`;
+selectionTool.hidden = true;
+document.body.appendChild(selectionTool);
+const selectionMore = selectionTool.querySelector<HTMLElement>("[data-selection-more]")!;
+const selectionRoamIdlink = selectionTool.querySelector<HTMLButtonElement>("[data-selection-command='insert-roam-idlink']")!;
+
 const vimCursor = createVimCursor();
 
 let currentFile = "";
@@ -136,6 +157,7 @@ let snippetScanRequested = false;
 let mathPreviewUpdateRequested = false;
 let vimCursorUpdateRequested = false;
 let tocUpdateRequested = false;
+let selectionToolUpdateRequested = false;
 let mathPreviewKey = "";
 let mathPreviewPendingErrorKey = "";
 let mathPreviewErrorTimer = 0;
@@ -318,6 +340,8 @@ function applyOpenedNote(opened: Awaited<ReturnType<typeof api.notes.bootstrap>>
   snippetSession.clear();
   hideSnippetPopup();
   hideMathPreview();
+  selectionTool.hidden = true;
+  selectionMore.hidden = true;
   vim.setMode("insert");
   updateTitle();
   void api.emacs.currentFile(currentFile);
@@ -2512,11 +2536,90 @@ function updateMathPreview(ctx: ReturnType<typeof editor.cursorContext>, allowNe
   });
 }
 
+function activeEditorSelection(): { text: string; rect: DOMRect } | null {
+  if (editor.isSourceMode()) return null;
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+  const anchor = selection.anchorNode;
+  const focus = selection.focusNode;
+  if (!anchor || !focus || !host.contains(anchor) || !host.contains(focus)) return null;
+  const logical = editor.getSelection();
+  const from = Math.min(logical.from, logical.to);
+  const to = Math.max(logical.from, logical.to);
+  const text = from < to ? editor.textBetween(from, to) : selection.toString();
+  if (!text.trim()) return null;
+  const rect = selection.getRangeAt(0).getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return null;
+  return { text, rect };
+}
+
+function updateSelectionTool(active = activeEditorSelection()): void {
+  if (!active || !modal.hidden) {
+    selectionTool.hidden = true;
+    selectionMore.hidden = true;
+    return;
+  }
+  selectionRoamIdlink.hidden = currentStandalone;
+  const margin = 8;
+  const width = Math.min(520, Math.max(360, selectionTool.offsetWidth || 440));
+  const left = Math.min(
+    Math.max(margin, active.rect.left + active.rect.width / 2 - width / 2),
+    Math.max(margin, window.innerWidth - width - margin),
+  );
+  const top = Math.max(margin, active.rect.top - 46);
+  selectionTool.style.left = `${left}px`;
+  selectionTool.style.top = `${top}px`;
+  selectionTool.hidden = false;
+}
+
+async function copyActiveSelection(): Promise<void> {
+  const active = activeEditorSelection();
+  if (!active) return;
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(active.text);
+    copied = true;
+  } catch {
+    const fallback = document.createElement("textarea");
+    fallback.value = active.text;
+    fallback.style.position = "fixed";
+    fallback.style.left = "-9999px";
+    document.body.appendChild(fallback);
+    fallback.select();
+    copied = document.execCommand("copy");
+    fallback.remove();
+  }
+  setStatus(copied ? "Selection copied" : "Copy failed");
+  selectionTool.hidden = true;
+}
+
+function runSelectionCommand(command: string): void {
+  if (command === "copy") {
+    void copyActiveSelection();
+    return;
+  }
+  if (command === "more") {
+    selectionMore.hidden = !selectionMore.hidden;
+    return;
+  }
+  if (command === "insert-roam-idlink") {
+    selectionMore.hidden = true;
+    selectionTool.hidden = true;
+    void insertRoamIdLink();
+    return;
+  }
+  if (!["bold", "italic", "highlight", "strike", "code", "link"].includes(command)) return;
+  editor.runCommand(command as EditorCommand);
+  selectionTool.hidden = true;
+  selectionMore.hidden = true;
+}
+
 type AssistUpdateOptions = {
   snippets?: boolean;
   mathPreview?: boolean;
   cursor?: boolean;
   toc?: boolean;
+  selectionTool?: boolean;
 };
 
 function scheduleAssistUpdate(options: AssistUpdateOptions = {}): void {
@@ -2525,6 +2628,7 @@ function scheduleAssistUpdate(options: AssistUpdateOptions = {}): void {
     mathPreviewUpdateRequested = false;
     vimCursorUpdateRequested = false;
     tocUpdateRequested = false;
+    selectionToolUpdateRequested = false;
     window.cancelAnimationFrame(assistFrame);
     return;
   }
@@ -2533,16 +2637,19 @@ function scheduleAssistUpdate(options: AssistUpdateOptions = {}): void {
   mathPreviewUpdateRequested = mathPreviewUpdateRequested || options.mathPreview === true;
   vimCursorUpdateRequested = vimCursorUpdateRequested || (explicit ? options.cursor === true : true);
   tocUpdateRequested = tocUpdateRequested || options.toc === true;
+  selectionToolUpdateRequested = selectionToolUpdateRequested || (explicit ? options.selectionTool === true : true);
   window.cancelAnimationFrame(assistFrame);
   assistFrame = window.requestAnimationFrame(() => {
     const shouldScanSnippets = snippetScanRequested;
     const shouldUpdateMathPreview = mathPreviewUpdateRequested;
     const shouldUpdateVimCursor = vimCursorUpdateRequested;
     const shouldUpdateToc = tocUpdateRequested;
+    const shouldUpdateSelectionTool = selectionToolUpdateRequested;
     snippetScanRequested = false;
     mathPreviewUpdateRequested = false;
     vimCursorUpdateRequested = false;
     tocUpdateRequested = false;
+    selectionToolUpdateRequested = false;
 
     const needsCursorContext = vim.mode() === "insert" && (
       shouldScanSnippets
@@ -2553,6 +2660,10 @@ function scheduleAssistUpdate(options: AssistUpdateOptions = {}): void {
     const ctx = needsCursorContext ? editor.cursorContext(!snippetPopup.hidden ? 640 : 320) : null;
     if (shouldUpdateVimCursor || ctx) updateVimCursor(vimCursor, editor, vim.mode(), ctx?.rect);
     if (shouldUpdateToc) updateFloatingToc();
+    if (shouldUpdateSelectionTool) {
+      const activeSelection = snippetPopup.hidden && modal.hidden ? activeEditorSelection() : null;
+      updateSelectionTool(activeSelection);
+    }
     if (vim.mode() !== "insert") {
       hideSnippetPopup();
       hideMathPreview();
@@ -2851,9 +2962,23 @@ document.addEventListener("beforeinput", (event) => {
     scheduleAssistUpdate({ cursor: true, toc: true });
   }
 }, true);
-document.addEventListener("selectionchange", () => scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true }));
-window.addEventListener("resize", () => scheduleAssistUpdate({ mathPreview: true, cursor: true, toc: true }));
-window.addEventListener("scroll", () => scheduleAssistUpdate({ mathPreview: true, cursor: true, toc: true }), true);
+document.addEventListener("selectionchange", () => scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true, selectionTool: true }));
+document.addEventListener("mouseup", () => {
+  if (!editorSurfaceVisible()) return;
+  scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: true });
+});
+window.addEventListener("resize", () => {
+  scheduleAssistUpdate({ mathPreview: true, cursor: true, toc: true, selectionTool: !selectionTool.hidden });
+});
+window.addEventListener("scroll", () => scheduleAssistUpdate({ mathPreview: true, cursor: true, toc: true, selectionTool: !selectionTool.hidden }), true);
+selectionTool.addEventListener("mousedown", (event) => event.preventDefault());
+selectionTool.addEventListener("click", (event) => {
+  const button = (event.target as Element | null)?.closest<HTMLButtonElement>("[data-selection-command]");
+  if (!button) return;
+  event.preventDefault();
+  event.stopPropagation();
+  runSelectionCommand(button.dataset.selectionCommand || "");
+});
 document.addEventListener("aaronnote:open-url", (event) => {
   const custom = event as CustomEvent<{ href?: string; newWindow?: boolean }>;
   const href = custom.detail?.href;

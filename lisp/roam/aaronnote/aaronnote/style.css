@@ -719,3 +719,71 @@ html.aaronnote-paused .cm-cursorLayer {
 html.aaronnote-paused .cm-cursor {
   animation: none !important;
 }
+
+/* ── Selection pop-up toolbar ─────────────────────────────────────── */
+.aaronnote-selection-tool {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--aaron-red), transparent 24%);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--aaron-paper), white 18%);
+  color: var(--aaron-ink);
+  font: 700 12px/1 "Avenir Next", Inter, ui-sans-serif, system-ui, sans-serif;
+  box-shadow: 0 10px 26px rgb(67 39 25 / 18%);
+}
+
+.aaronnote-selection-tool[hidden] {
+  display: none;
+}
+
+.aaronnote-selection-tool button {
+  height: 26px;
+  min-width: 28px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.aaronnote-selection-tool button:hover {
+  border-color: var(--aaron-paper-line);
+  background: var(--aaron-paper-soft);
+  color: var(--aaron-red-dark);
+}
+
+.aaronnote-selection-tool span {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--aaron-paper-line);
+}
+
+.aaronnote-selection-more {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 184px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid color-mix(in srgb, var(--aaron-red), transparent 30%);
+  border-radius: 5px;
+  padding: 4px;
+  background: color-mix(in srgb, var(--aaron-paper), white 18%);
+  box-shadow: 0 10px 26px rgb(67 39 25 / 18%);
+}
+
+.aaronnote-selection-more[hidden] {
+  display: none;
+}
+
+.aaronnote-selection-more button {
+  width: 100%;
+  text-align: left;
+}
