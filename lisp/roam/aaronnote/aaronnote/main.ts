@@ -19,7 +19,7 @@ import {
   roamHrefForNote,
   roamNoteSearchValue,
 } from "./roam-idlink.ts";
-import { matchingSnippetsForPrefix, SnippetSession, snippetDetail, snippetLabel } from "./snippets.ts";
+import { matchingSnippetsForPrefix, SnippetSession, snippetDetail, snippetLabel, snippetPopupKeyAction } from "./snippets.ts";
 import type { NoteSummary, SnippetSummary } from "./types.ts";
 import { createVimCursor, updateVimCursor } from "./vim-cursor.ts";
 import { createVimLite, type VimLiteKey, type VimLiteMode } from "./vim-lite.ts";
@@ -120,6 +120,7 @@ let snippetPopupIndex = 0;
 let snippetDeleteBefore = 0;
 let snippetSuppressedPrefix = "";
 let snippetRenderKey = "";
+let snippetPopupMatchKey = "";
 let assistFrame = 0;
 let snippetScanRequested = false;
 let mathPreviewUpdateRequested = false;
@@ -1469,6 +1470,7 @@ function hideSnippetPopup(): void {
   snippetPopupIndex = 0;
   snippetDeleteBefore = 0;
   snippetRenderKey = "";
+  snippetPopupMatchKey = "";
 }
 
 function placeFloating(el: HTMLElement, rect: { left: number; top: number; bottom: number } | null, width = 340): void {
@@ -2078,8 +2080,7 @@ function renderSnippetPopup(prefix: string, rect: { left: number; top: number; b
     button.addEventListener("mouseenter", () => {
       if (snippetPopupIndex === index) return;
       snippetPopupIndex = index;
-      snippetRenderKey = "";
-      renderSnippetPopup(snippetPopup.dataset.prefix ?? prefix, editor.cursorRect());
+      updateSnippetPopupActiveOption();
     });
     snippetPopup.appendChild(button);
   });
@@ -2088,6 +2089,30 @@ function renderSnippetPopup(prefix: string, rect: { left: number; top: number; b
   snippetPopup.hidden = false;
   placeFloating(snippetPopup, rect);
   snippetPopup.querySelector(".aaronnote-snippet-option.is-active")?.scrollIntoView({ block: "nearest" });
+}
+
+function updateSnippetPopupActiveOption(): void {
+  snippetPopup.querySelectorAll<HTMLButtonElement>(".aaronnote-snippet-option").forEach((button, index) => {
+    const active = index === snippetPopupIndex;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  snippetPopup.setAttribute("aria-activedescendant", `aaronnote-snippet-option-${snippetPopupIndex}`);
+  snippetPopup.querySelector(".aaronnote-snippet-option.is-active")?.scrollIntoView({ block: "nearest" });
+}
+
+function showSnippetPopup(prefix: string, items: SnippetSummary[], deleteBefore: number, rect: { left: number; top: number; bottom: number } | null): void {
+  const matchKey = `${prefix}\n${items.map((snippet) => `${snippet.kind}:${snippet.mode}:${snippet.group}:${snippet.key}:${snippet.name}`).join("\n")}`;
+  snippetDeleteBefore = deleteBefore;
+  if (matchKey !== snippetPopupMatchKey) {
+    snippetPopupIndex = 0;
+    snippetRenderKey = "";
+  } else {
+    snippetPopupIndex = Math.min(snippetPopupIndex, items.length - 1);
+  }
+  snippetPopupMatchKey = matchKey;
+  snippetPopupItems = items;
+  renderSnippetPopup(prefix, rect);
 }
 
 function mathAtCursor(ctx: ReturnType<typeof editor.cursorContext>): {
@@ -2142,10 +2167,7 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
       hideSnippetPopup();
       return;
     }
-    snippetDeleteBefore = linkMatches.deleteBefore;
-    snippetPopupIndex = Math.min(snippetPopupIndex, linkMatches.matches.length - 1);
-    snippetPopupItems = linkMatches.matches;
-    renderSnippetPopup(linkMatches.renderPrefix, ctx.rect);
+    showSnippetPopup(linkMatches.renderPrefix, linkMatches.matches, linkMatches.deleteBefore, ctx.rect);
     return;
   }
   const domContext = domCompletionContext(ctx.before);
@@ -2160,10 +2182,7 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
       hideSnippetPopup();
       return;
     }
-    snippetDeleteBefore = domContext.domPrefix.length;
-    snippetPopupIndex = Math.min(snippetPopupIndex, matches.length - 1);
-    snippetPopupItems = matches;
-    renderSnippetPopup(renderPrefix, ctx.rect);
+    showSnippetPopup(renderPrefix, matches, domContext.domPrefix.length, ctx.rect);
     return;
   }
   const tagContext = tagCompletionContext(ctx.before);
@@ -2178,10 +2197,7 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
       hideSnippetPopup();
       return;
     }
-    snippetDeleteBefore = tagContext.tagPrefix.length;
-    snippetPopupIndex = Math.min(snippetPopupIndex, matches.length - 1);
-    snippetPopupItems = matches;
-    renderSnippetPopup(renderPrefix, ctx.rect);
+    showSnippetPopup(renderPrefix, matches, tagContext.tagPrefix.length, ctx.rect);
     return;
   }
   const inlineTagPrefix = inlineTagCompletionPrefix(ctx.before);
@@ -2196,10 +2212,7 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
       hideSnippetPopup();
       return;
     }
-    snippetDeleteBefore = inlineTagPrefix.length;
-    snippetPopupIndex = Math.min(snippetPopupIndex, matches.length - 1);
-    snippetPopupItems = matches;
-    renderSnippetPopup(renderPrefix, ctx.rect);
+    showSnippetPopup(renderPrefix, matches, inlineTagPrefix.length, ctx.rect);
     return;
   }
   const wikilinkPrefix = wikilinkCompletionPrefix(ctx.before);
@@ -2214,10 +2227,7 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
       hideSnippetPopup();
       return;
     }
-    snippetDeleteBefore = wikilinkPrefix.length;
-    snippetPopupIndex = Math.min(snippetPopupIndex, matches.length - 1);
-    snippetPopupItems = matches;
-    renderSnippetPopup(renderPrefix, ctx.rect);
+    showSnippetPopup(renderPrefix, matches, wikilinkPrefix.length, ctx.rect);
     return;
   }
   const roamPrefix = roamCompletionPrefix(ctx.before);
@@ -2232,10 +2242,7 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
       hideSnippetPopup();
       return;
     }
-    snippetDeleteBefore = roamPrefix.length;
-    snippetPopupIndex = Math.min(snippetPopupIndex, matches.length - 1);
-    snippetPopupItems = matches;
-    renderSnippetPopup(renderPrefix, ctx.rect);
+    showSnippetPopup(renderPrefix, matches, roamPrefix.length, ctx.rect);
     return;
   }
   const pathPrefix = pathCompletionPrefix(ctx.before);
@@ -2249,10 +2256,7 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
       hideSnippetPopup();
       return;
     }
-    snippetDeleteBefore = pathPrefix.length;
-    snippetPopupIndex = Math.min(snippetPopupIndex, matches.length - 1);
-    snippetPopupItems = matches;
-    renderSnippetPopup(pathPrefix, ctx.rect);
+    showSnippetPopup(pathPrefix, matches, pathPrefix.length, ctx.rect);
     return;
   }
   const prefix = snippetPrefix(ctx.before);
@@ -2266,10 +2270,7 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
     hideSnippetPopup();
     return;
   }
-  snippetDeleteBefore = prefix.length;
-  snippetPopupIndex = Math.min(snippetPopupIndex, matches.length - 1);
-  snippetPopupItems = matches;
-  renderSnippetPopup(prefix, ctx.rect);
+  showSnippetPopup(prefix, matches, prefix.length, ctx.rect);
 }
 
 function chooseSnippetPopupItem(): void {
@@ -2287,98 +2288,67 @@ function acceptSnippetPopupItem(): boolean {
   return true;
 }
 
-function snippetPopupKeyName(key: string): string {
-  const normalized = String(key || "");
-  if (/^(?:Enter|Return|RET|CR|NumpadEnter)$/i.test(normalized)) return "Enter";
-  if (/^(?:Esc|Escape)$/i.test(normalized)) return "Escape";
-  if (/^(?:Backtab|Shift-Tab)$/i.test(normalized)) return "Shift-Tab";
-  return normalized;
+function applySnippetPopupKeyAction(action: ReturnType<typeof snippetPopupKeyAction>): boolean {
+  if (snippetPopup.hidden) return false;
+  if (snippetPopupItems.length === 0) {
+    hideSnippetPopup();
+    return false;
+  }
+  switch (action.type) {
+    case "move":
+      snippetPopupIndex = (snippetPopupIndex + action.delta + snippetPopupItems.length) % snippetPopupItems.length;
+      updateSnippetPopupActiveOption();
+      return true;
+    case "page":
+      snippetPopupIndex = ((snippetPopupIndex + action.delta) % snippetPopupItems.length + snippetPopupItems.length) % snippetPopupItems.length;
+      updateSnippetPopupActiveOption();
+      return true;
+    case "edge":
+      snippetPopupIndex = action.edge === "first" ? 0 : snippetPopupItems.length - 1;
+      updateSnippetPopupActiveOption();
+      return true;
+    case "accept":
+      return acceptSnippetPopupItem();
+    case "consume":
+      return true;
+    case "select":
+      if (action.index < 0 || action.index >= snippetPopupItems.length) return false;
+      snippetPopupIndex = action.index;
+      chooseSnippetPopupItem();
+      return true;
+    case "dismiss":
+      snippetSuppressedPrefix = snippetPopup.dataset.prefix ?? "";
+      hideSnippetPopup();
+      return true;
+    case "none":
+      return false;
+  }
 }
 
 function handleSnippetPopupKey(event: KeyboardEvent): boolean {
-  if (snippetPopup.hidden || event.isComposing) return false;
-  if (event.metaKey || event.ctrlKey || event.altKey) return false;
-  const key = snippetPopupKeyName(event.key);
-  if (snippetPopupItems.length === 0) {
-    hideSnippetPopup();
-    return false;
-  }
-  if (key === "ArrowDown") {
+  const handled = applySnippetPopupKeyAction(snippetPopupKeyAction({
+    key: event.key,
+    shiftKey: event.shiftKey,
+    commandKey: event.metaKey && !event.ctrlKey,
+    ctrlKey: event.ctrlKey,
+    altKey: event.altKey,
+    isComposing: event.isComposing,
+  }));
+  if (handled) {
     event.preventDefault();
-    snippetPopupIndex = (snippetPopupIndex + 1) % snippetPopupItems.length;
-    renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
-    return true;
   }
-  if (key === "ArrowUp") {
-    event.preventDefault();
-    snippetPopupIndex = (snippetPopupIndex + snippetPopupItems.length - 1) % snippetPopupItems.length;
-    renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
-    return true;
-  }
-  if (key === "PageDown" || key === "PageUp") {
-    event.preventDefault();
-    const delta = key === "PageDown" ? 6 : -6;
-    snippetPopupIndex = ((snippetPopupIndex + delta) % snippetPopupItems.length + snippetPopupItems.length) % snippetPopupItems.length;
-    renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
-    return true;
-  }
-  if (key === "Home" || key === "End") {
-    event.preventDefault();
-    snippetPopupIndex = key === "Home" ? 0 : snippetPopupItems.length - 1;
-    renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
-    return true;
-  }
-  if (key === "Enter" || (key === "Tab" && !event.shiftKey)) {
-    event.preventDefault();
-    acceptSnippetPopupItem();
-    return true;
-  }
-  if (key === "Escape") {
-    event.preventDefault();
-    snippetSuppressedPrefix = snippetPopup.dataset.prefix ?? "";
-    hideSnippetPopup();
-    return true;
-  }
-  return false;
+  return handled;
 }
 
 function handleSnippetPopupHostKey(key: VimLiteKey): boolean {
-  if (snippetPopup.hidden || key.metaKey || key.ctrlKey || key.altKey) return false;
-  const name = snippetPopupKeyName(key.key);
-  if (snippetPopupItems.length === 0) {
-    hideSnippetPopup();
-    return false;
-  }
-  if (name === "ArrowDown") {
-    snippetPopupIndex = (snippetPopupIndex + 1) % snippetPopupItems.length;
-    renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
-    return true;
-  }
-  if (name === "ArrowUp") {
-    snippetPopupIndex = (snippetPopupIndex + snippetPopupItems.length - 1) % snippetPopupItems.length;
-    renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
-    return true;
-  }
-  if (name === "PageDown" || name === "PageUp") {
-    const delta = name === "PageDown" ? 6 : -6;
-    snippetPopupIndex = ((snippetPopupIndex + delta) % snippetPopupItems.length + snippetPopupItems.length) % snippetPopupItems.length;
-    renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
-    return true;
-  }
-  if (name === "Home" || name === "End") {
-    snippetPopupIndex = name === "Home" ? 0 : snippetPopupItems.length - 1;
-    renderSnippetPopup(snippetPopup.dataset.prefix ?? "", editor.cursorRect());
-    return true;
-  }
-  if (name === "Enter" || (name === "Tab" && !key.shiftKey)) {
-    return acceptSnippetPopupItem();
-  }
-  if (name === "Escape") {
-    snippetSuppressedPrefix = snippetPopup.dataset.prefix ?? "";
-    hideSnippetPopup();
-    return true;
-  }
-  return false;
+  return applySnippetPopupKeyAction(snippetPopupKeyAction({
+    key: key.key,
+    shiftKey: key.shiftKey,
+    commandKey: key.metaKey && !key.ctrlKey,
+    ctrlKey: key.ctrlKey,
+    altKey: key.altKey,
+    isComposing: key.isComposing,
+  }));
 }
 
 function expandSnippetAtCursor(): boolean {

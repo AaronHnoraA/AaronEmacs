@@ -491,18 +491,28 @@ export function snippetDetail(snippet: SnippetSummary): string {
   return [snippet.name, snippet.mode, kind, snippet.group].filter(Boolean).join(" / ");
 }
 
+function snippetKey(snippet: SnippetSummary): string {
+  return String(snippet.key ?? "").trim();
+}
+
+function fuzzyPrefixMatch(candidate: string, query: string): boolean {
+  if (!query) return false;
+  let pos = 0;
+  for (const ch of query) {
+    pos = candidate.indexOf(ch, pos);
+    if (pos < 0) return false;
+    pos += 1;
+  }
+  return true;
+}
+
 export function snippetScore(snippet: SnippetSummary, query: string): number {
-  const key = (snippet.key ?? "").toLowerCase();
-  const name = (snippet.name ?? "").toLowerCase();
-  const mode = (snippet.mode ?? "").toLowerCase();
-  const group = (snippet.group ?? "").toLowerCase();
-  const kind = (snippet.kind ?? "").toLowerCase();
+  const key = snippetKey(snippet).toLowerCase();
+  if (!key || !query) return Number.POSITIVE_INFINITY;
   if (key === query) return 0;
   if (key.startsWith(query)) return 1;
-  if (name.startsWith(query)) return 2;
-  if (key.includes(query)) return 3;
-  if (name.includes(query)) return 4;
-  if (mode.includes(query) || group.includes(query) || kind.includes(query)) return 5;
+  if (key.includes(query)) return 2;
+  if (fuzzyPrefixMatch(key, query)) return 3;
   return Number.POSITIVE_INFINITY;
 }
 
@@ -529,4 +539,60 @@ export function matchingSnippetsForPrefix(
     })
     .slice(0, limit)
     .map((item) => item.snippet);
+}
+
+export type SnippetPopupKeyAction =
+  | { type: "none" }
+  | { type: "consume" }
+  | { type: "move"; delta: number }
+  | { type: "page"; delta: number }
+  | { type: "edge"; edge: "first" | "last" }
+  | { type: "accept" }
+  | { type: "select"; index: number }
+  | { type: "dismiss" };
+
+export type SnippetPopupKeyInput = {
+  key: string;
+  shiftKey?: boolean;
+  commandKey?: boolean;
+  ctrlKey?: boolean;
+  altKey?: boolean;
+  isComposing?: boolean;
+};
+
+export function snippetPopupKeyName(key: string): string {
+  const normalized = String(key || "");
+  if (/^(?:Enter|Return|RET|CR|NumpadEnter)$/i.test(normalized)) return "Enter";
+  if (/^(?:Esc|Escape)$/i.test(normalized)) return "Escape";
+  if (/^(?:Backtab|Shift-Tab)$/i.test(normalized)) return "Shift-Tab";
+  return normalized;
+}
+
+function snippetPopupDigitIndex(key: string): number | null {
+  if (/^[1-9]$/.test(key)) return Number(key) - 1;
+  if (key === "0") return 9;
+  const digit = key.match(/^Digit([0-9])$/)?.[1] ?? key.match(/^Numpad([0-9])$/)?.[1];
+  if (digit == null) return null;
+  return digit === "0" ? 9 : Number(digit) - 1;
+}
+
+export function snippetPopupKeyAction(input: SnippetPopupKeyInput): SnippetPopupKeyAction {
+  if (input.isComposing) return { type: "none" };
+  const key = snippetPopupKeyName(input.key);
+  const selectorModOnly = Boolean(input.commandKey || input.altKey) && !input.ctrlKey && !input.shiftKey;
+  if (selectorModOnly) {
+    const index = snippetPopupDigitIndex(key);
+    return index == null ? { type: "none" } : { type: "select", index };
+  }
+  if (input.commandKey || input.ctrlKey || input.altKey) return { type: "none" };
+  if (key === "ArrowDown") return { type: "move", delta: 1 };
+  if (key === "ArrowUp") return { type: "move", delta: -1 };
+  if (key === "PageDown") return { type: "page", delta: 6 };
+  if (key === "PageUp") return { type: "page", delta: -6 };
+  if (key === "Home") return { type: "edge", edge: "first" };
+  if (key === "End") return { type: "edge", edge: "last" };
+  if (key === "Enter") return { type: "consume" };
+  if (key === "Tab" && !input.shiftKey) return { type: "accept" };
+  if (key === "Escape") return { type: "dismiss" };
+  return { type: "none" };
 }

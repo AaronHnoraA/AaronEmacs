@@ -14,6 +14,7 @@
 
 (declare-function my/open-xwidget-url "init-browser" (url &optional reuse-selected))
 (declare-function my/appine-open-url "init-appine" (url))
+(declare-function my/appine-open-url-fresh "init-appine" (url))
 (declare-function my/appine-kill-all "init-appine" ())
 (declare-function my/appine--tab-forget "init-appine" (url))
 (declare-function my/appine--tab-reset "init-appine" ())
@@ -358,7 +359,9 @@ tab registry stale), so trusting a remembered index would silently no-op."
           (when (fboundp 'my/appine--switch-to-tab-index)
             (my/appine--switch-to-tab-index existing-idx))
         (with-current-buffer buffer
-          (my/appine-open-url url)))
+          (if (and force-new (fboundp 'my/appine-open-url-fresh))
+              (my/appine-open-url-fresh url)
+            (my/appine-open-url url))))
       (when (fboundp 'appine-focus)
         (run-at-time (if is-new 0.4 0.05) nil
                      (lambda ()
@@ -447,7 +450,7 @@ When FILE is nil, use the current buffer."
      (lambda ()
        (when (window-live-p target-window)
          (select-window target-window))
-       (my/aaronnote--open-url (my/aaronnote--app-url file) file)))))
+       (my/aaronnote--open-url (my/aaronnote--app-url file) file t)))))
 
 ;;;###autoload
 (defun my/aaronnote-open-current-note ()

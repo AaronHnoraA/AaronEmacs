@@ -2,7 +2,13 @@ import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
 
 import type { Editor } from "../src/lib.ts";
 import { createEditor } from "../src/lib.ts";
-import { expandSnippetBody, insertExpandedSnippetIntoContentEditable, matchingSnippetsForPrefix, SnippetSession } from "../aaronnote/snippets.ts";
+import {
+  expandSnippetBody,
+  insertExpandedSnippetIntoContentEditable,
+  matchingSnippetsForPrefix,
+  SnippetSession,
+  snippetPopupKeyAction,
+} from "../aaronnote/snippets.ts";
 
 class TextEditor {
   text = "";
@@ -63,6 +69,38 @@ describe("aaronnote snippets", () => {
     ], "a", { mode: "markdown-mode", kind: "", limit: 10 });
 
     expect(matches.map((snippet) => snippet.key)).toEqual(["alpha"]);
+  });
+
+  test("matches VS Code-style snippet prefixes without searching metadata", () => {
+    const matches = matchingSnippetsForPrefix([
+      { key: "for-const", name: "Loop", mode: "markdown-mode", group: "control", body: "for const" },
+      { key: "ratio", name: "Fraction", mode: "markdown-mode", body: "frac" },
+      { key: "note", name: "fc", mode: "markdown-mode", body: "note" },
+      { key: "proof", name: "Proof", mode: "markdown-mode", group: "fc", body: "proof" },
+      { key: "kinded", name: "Kinded", mode: "markdown-mode", kind: "fc", body: "kinded" },
+    ], "fc", { mode: "markdown-mode", kind: "", limit: 10 });
+
+    expect(matches.map((snippet) => snippet.key)).toEqual(["for-const"]);
+  });
+
+  test("orders exact, prefix, substring, then fuzzy prefix matches", () => {
+    const matches = matchingSnippetsForPrefix([
+      { key: "for-const", name: "Fuzzy", mode: "markdown-mode", body: "" },
+      { key: "prefix-fc", name: "Substring", mode: "markdown-mode", body: "" },
+      { key: "fc", name: "Exact", mode: "markdown-mode", body: "" },
+      { key: "fc-block", name: "Prefix", mode: "markdown-mode", body: "" },
+    ], "fc", { mode: "markdown-mode", limit: 10 });
+
+    expect(matches.map((snippet) => snippet.key)).toEqual(["fc", "fc-block", "prefix-fc", "for-const"]);
+  });
+
+  test("snippet popup accepts tab and cmd-number but not enter", () => {
+    expect(snippetPopupKeyAction({ key: "Enter" })).toEqual({ type: "consume" });
+    expect(snippetPopupKeyAction({ key: "Tab" })).toEqual({ type: "accept" });
+    expect(snippetPopupKeyAction({ key: "2", commandKey: true })).toEqual({ type: "select", index: 1 });
+    expect(snippetPopupKeyAction({ key: "3", altKey: true })).toEqual({ type: "select", index: 2 });
+    expect(snippetPopupKeyAction({ key: "0", commandKey: true })).toEqual({ type: "select", index: 9 });
+    expect(snippetPopupKeyAction({ key: "Tab", isComposing: true })).toEqual({ type: "none" });
   });
 
   test("expands nested tabstops inside placeholder defaults", () => {

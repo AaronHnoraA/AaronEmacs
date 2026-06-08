@@ -113,9 +113,9 @@
 URL is normalized before lookup.  Use this when a tab is known to be gone
 \(for example a singleton page whose native tab was closed via the Appine
 toolbar, which bypasses `appine-close-tab')."
-  (let* ((norm (my/appine--normalize-url url))
-         (pos (cl-position norm my/appine-tab-list :test #'equal)))
-    (when pos
+  (let ((norm (my/appine--normalize-url url))
+        pos)
+    (while (setq pos (cl-position norm my/appine-tab-list :test #'equal))
       (setq my/appine-tab-list
             (append (seq-take my/appine-tab-list pos)
                     (seq-drop my/appine-tab-list (1+ pos))))
@@ -148,6 +148,11 @@ toolbar, which bypasses `appine-close-tab')."
   (setq my/appine-tab-list nil
         my/appine-tab-index -1
         my/appine-last-url nil))
+
+(defun my/appine--discard-registry-if-host-dead ()
+  "Drop remembered tabs when the Appine host buffer is gone."
+  (unless (get-buffer my/appine-buffer-name)
+    (my/appine--tab-reset)))
 
 ;;; ── Advisors ─────────────────────────────────────────────────────────────
 
@@ -202,6 +207,14 @@ toolbar, which bypasses `appine-close-tab')."
 (defun my/appine-open-url (url)
   "Open URL in Appine (tab registry is updated via advice on `appine-open-url')."
   (interactive "sURL: ")
+  (my/appine--discard-registry-if-host-dead)
+  (appine-open-url (my/appine--normalize-url url)))
+
+(defun my/appine-open-url-fresh (url)
+  "Forget any remembered URL entry, then open URL in a fresh Appine tab."
+  (interactive "sURL: ")
+  (my/appine--discard-registry-if-host-dead)
+  (my/appine--tab-forget url)
   (appine-open-url (my/appine--normalize-url url)))
 
 (defun my/appine-open-at-point ()
@@ -216,6 +229,7 @@ toolbar, which bypasses `appine-close-tab')."
 (defun my/appine-open-file (path)
   "Open PATH in Appine (tab registry is updated via advice on `appine-open-url')."
   (interactive "fFile: ")
+  (my/appine--discard-registry-if-host-dead)
   (appine-open-file path))
 
 (defun my/appine--open-current-file ()
@@ -478,9 +492,20 @@ With DIRED-P, the main path button opens via `dired'."
   (unless (my/appine-aaronnote-command "save")
     (appine-native-action "save")))
 
+(defun my/appine-aaronnote-meta-digit (digit)
+  "Route Emacs M-DIGIT to Aaronnote as an Appine host key."
+  (interactive "cDigit: ")
+  (let ((key (char-to-string digit)))
+    (unless (my/appine-aaronnote-command
+             "key"
+             `((key . ,key)
+               (altKey . t)))
+      (message "M-%s is only routed for Aaronnote Appine tabs" key))))
+
 (defun my/appine-keep-emacs-prefix-keys (map)
   "Remove Appine bindings that should remain normal Emacs prefixes in MAP."
   (dolist (key '("C-x C-f"
+                 "C-x"
                  "C-c f"
                  "C-c b"
                  "C-c C-f"
@@ -1162,7 +1187,13 @@ buffer/window selection changes."
   (add-hook 'window-selection-change-functions #'my/appine--schedule-refresh-visible)
   (when (boundp 'appine-active-map)
     (my/appine-keep-emacs-prefix-keys appine-active-map)
-    (define-key appine-active-map [?\s-s]     #'my/appine-aaronnote-save-or-native)))
+    (define-key appine-active-map [?\s-s]     #'my/appine-aaronnote-save-or-native)
+    (dotimes (i 10)
+      (let ((digit (number-to-string i)))
+        (define-key appine-active-map (kbd (format "M-%s" digit))
+                    (lambda ()
+                      (interactive)
+                      (my/appine-aaronnote-meta-digit (string-to-char digit))))))))
 
 (provide 'init-appine)
 ;;; init-appine.el ends here
