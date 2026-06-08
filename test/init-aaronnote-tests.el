@@ -9,13 +9,17 @@
         (unread-command-events nil)
         (my/aaronnote--app-buffer nil)
         focused-frame
+        edit-mode-arg
         scheduled-fn)
     (unwind-protect
         (progn
           (switch-to-buffer buffer)
+          (setq-local major-mode 'xwidget-webkit-mode)
           (setq my/aaronnote--app-buffer buffer)
           (cl-letf (((symbol-function 'select-frame-set-input-focus)
                      (lambda (frame) (setq focused-frame frame)))
+                    ((symbol-function 'xwidget-webkit-edit-mode)
+                     (lambda (arg) (setq edit-mode-arg arg)))
                     ((symbol-function 'run-at-time)
                      (lambda (_time _repeat function &rest _args)
                        (setq scheduled-fn function)
@@ -25,6 +29,7 @@
                          (listify-key-sequence (kbd "M-x"))))
           (should (eq (selected-window) (get-buffer-window buffer 'visible)))
           (should (eq focused-frame (selected-frame)))
+          (should (equal edit-mode-arg -1))
           (should (eq scheduled-fn #'my/aaronnote--focus-minibuffer-if-active)))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))

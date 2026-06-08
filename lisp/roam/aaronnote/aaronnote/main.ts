@@ -2614,14 +2614,16 @@ function deleteHostKeyText(key: string): boolean {
 }
 
 function runHostKey(body: Record<string, unknown>): boolean {
-  const key = String(body.key || "");
+  const rawKey = String(body.key || "");
+  const shiftTabAlias = rawKey === "Backtab" || rawKey === "ISO_Left_Tab" || rawKey === "Shift-Tab";
+  const key = shiftTabAlias ? "Tab" : rawKey;
   if (!key) return false;
   const hostKey: VimLiteKey = {
     key,
     ctrlKey: Boolean(body.ctrlKey),
     metaKey: Boolean(body.metaKey),
     altKey: Boolean(body.altKey),
-    shiftKey: Boolean(body.shiftKey),
+    shiftKey: Boolean(body.shiftKey) || shiftTabAlias,
   };
   editor.focus();
   if (handleSnippetPopupHostKey(hostKey)) {

@@ -260,8 +260,17 @@ export function createVimLite(
   function yank(text: string): void {
     if (!text) return;
     register = text;
-    void navigator.clipboard?.writeText(text)
-      .catch((err) => console.warn("[vim] clipboard copy failed", err));
+    (window as unknown as Record<string, unknown>).__aaronoteVimRegister = text;
+    void (navigator.clipboard?.writeText(text) ?? Promise.reject())
+      .catch(() => {
+        const el = document.createElement("textarea");
+        el.value = text;
+        el.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+        document.body.appendChild(el);
+        el.select();
+        try { document.execCommand("copy"); } catch (_) {}
+        document.body.removeChild(el);
+      });
   }
 
   function resetMotionMemory(): void {

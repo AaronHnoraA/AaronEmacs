@@ -330,38 +330,6 @@ Emacs state keep their local behavior."
   (shut-up! #'evil-indent)
   (add-hook 'my/escape-hook #'my/evil-force-normal-state-h)
   (add-hook 'my/escape-hook #'my/evil-clear-ex-highlights-h)
-  ;; xwidget: when returning to Normal state, exit WebKit edit mode.
-  (add-hook 'evil-normal-state-entry-hook
-            (lambda ()
-              (when (and (eq major-mode 'xwidget-webkit-mode)
-                         (bound-and-true-p xwidget-webkit-edit-mode))
-                (xwidget-webkit-edit-mode -1))))
-  ;; xwidget Normal/Insert state bindings (only active in evil-enabled xwidget
-  ;; buffers; generic xwidgets have evil disabled via the mode hook above).
-  (with-eval-after-load 'xwidget
-    ;; Normal state: vimium-style page navigation; i/a enter edit mode.
-    ;; Use the keymap VALUE (not a quoted symbol) so evil-define-key* can
-    ;; call keymapp on it without error when xwidget loads inside a timer.
-    (evil-define-key* 'normal xwidget-webkit-mode-map
-      "j"           #'xwidget-webkit-scroll-up-line
-      "k"           #'xwidget-webkit-scroll-down-line
-      "h"           #'xwidget-webkit-scroll-backward
-      "l"           #'xwidget-webkit-scroll-forward
-      (kbd "C-d")   #'xwidget-webkit-scroll-up
-      (kbd "C-u")   #'xwidget-webkit-scroll-down
-      "H"           #'xwidget-webkit-back
-      "L"           #'xwidget-webkit-forward
-      "r"           #'xwidget-webkit-reload
-      "i"           #'my/xwidget-focus
-      "a"           #'my/xwidget-focus)
-    ;; Insert state: pass editing keys through to WebKit instead of evil.
-    (dolist (key '([backspace] [tab] [return] [escape]
-                   [left] [right] [up] [down]
-                   [home] [end] [prior] [next] [delete]
-                   [C-left] [C-right] [C-up] [C-down]
-                   [S-left] [S-right] [S-up] [S-down]))
-      (evil-define-key* 'insert xwidget-webkit-mode-map
-        key #'xwidget-webkit-pass-command-event)))
   (add-hook 'after-change-major-mode-hook #'my/evil-sync-shift-width)
   (add-hook 'hack-local-variables-hook #'my/evil-sync-shift-width)
   (my/evil-sync-shift-width-existing-buffers)

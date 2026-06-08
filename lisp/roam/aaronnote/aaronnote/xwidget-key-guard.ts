@@ -54,6 +54,7 @@ const XWIDGET_SPECIAL_KEYS = new Set<XwidgetSpecialKey>([
   "PageUp",
   "PageDown",
 ]);
+const XWIDGET_SHIFT_TAB_KEYS = new Set(["Backtab", "ISO_Left_Tab", "Shift-Tab"]);
 const DUPLICATE_BEFOREINPUT_MS = 80;
 let lastHandledKeydown: { editor: Editor; key: string; at: number } | null = null;
 
@@ -100,9 +101,14 @@ function controlKeyFromInputEvent(event: InputEvent): XwidgetControlKey | null {
 }
 
 function specialKeyFromKeyboardEvent(event: KeyboardEvent): XwidgetSpecialKey | null {
+  if (XWIDGET_SHIFT_TAB_KEYS.has(event.key)) return "Tab";
   return XWIDGET_SPECIAL_KEYS.has(event.key as XwidgetSpecialKey)
     ? event.key as XwidgetSpecialKey
     : null;
+}
+
+function shiftForSpecialKeyboardEvent(event: KeyboardEvent): boolean {
+  return event.shiftKey || XWIDGET_SHIFT_TAB_KEYS.has(event.key);
 }
 
 function specialKeyFromInputEvent(event: InputEvent): XwidgetSpecialKey | null {
@@ -228,9 +234,9 @@ function shouldHandleXwidgetVimKey(event: KeyboardEvent | InputEvent, context: X
 export function handleXwidgetSpecialKeydown(event: KeyboardEvent, context: XwidgetKeyContext): boolean {
   const key = specialKeyFromKeyboardEvent(event);
   if (!shouldHandleXwidgetSpecialEvent(event, context, key)) return false;
-  if (!runEditorSpecialKey(key, context, event.shiftKey)) return false;
+  if (!runEditorSpecialKey(key, context, shiftForSpecialKeyboardEvent(event))) return false;
   hardStop(event);
-  noteHandledKeydown(context.editor, event.key);
+  noteHandledKeydown(context.editor, key);
   return true;
 }
 
@@ -378,6 +384,36 @@ function forwardEmacsKey(keyString: string): void {
     ?.emacs?.key?.(keyString);
 }
 
+function releaseWebInputFocus(): void {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && active !== document.body) {
+    active.blur();
+  }
+
+  const body = document.body;
+  if (!body || document.activeElement === body) return;
+  const hadTabIndex = body.hasAttribute("tabindex");
+  const previousTabIndex = body.getAttribute("tabindex");
+  if (!hadTabIndex) body.setAttribute("tabindex", "-1");
+  try {
+    body.focus({ preventScroll: true });
+  } catch (_) {
+    body.focus();
+  } finally {
+    if (hadTabIndex) {
+      body.setAttribute("tabindex", previousTabIndex ?? "");
+    } else {
+      body.removeAttribute("tabindex");
+    }
+  }
+}
+
+function forwardEmacsKeyAndReleaseInput(event: KeyboardEvent, keyString: string): void {
+  hardStop(event);
+  releaseWebInputFocus();
+  forwardEmacsKey(keyString);
+}
+
 // When the user presses C-x or C-c, we enter prefix mode and capture the
 // NEXT keystroke before forwarding. Without this, C-x goes to Emacs but C-f
 // still goes to WebKit (which holds OS focus), so "C-x C-f" would never work.
@@ -393,8 +429,7 @@ export function handleXwidgetEmacsKeydown(event: KeyboardEvent): boolean {
     // C-g while in prefix mode: cancel prefix, forward C-g as keyboard-quit
     if (event.ctrlKey && !event.metaKey && !event.altKey && event.code === "KeyG") {
       pendingPrefix = null;
-      hardStop(event);
-      forwardEmacsKey("C-g");
+      forwardEmacsKeyAndReleaseInput(event, "C-g");
       return true;
     }
     // Any other key: complete the prefix sequence
@@ -403,8 +438,7 @@ export function handleXwidgetEmacsKeydown(event: KeyboardEvent): boolean {
       if (nextKey) {
         const fullKey = pendingPrefix + " " + nextKey;
         pendingPrefix = null;
-        hardStop(event);
-        forwardEmacsKey(fullKey);
+        forwardEmacsKeyAndReleaseInput(event, fullKey);
         return true;
       }
     }
@@ -416,14 +450,14 @@ export function handleXwidgetEmacsKeydown(event: KeyboardEvent): boolean {
   if (!shouldForwardToEmacs(event)) return false;
   const key = emacsKeyFromEvent(event);
   if (!key) return false;
-  hardStop(event);
 
   // C-x and C-c are prefix keys — accumulate the next keystroke
   if (key === "C-x" || key === "C-c") {
+    hardStop(event);
     pendingPrefix = key;
     return true;
   }
 
-  forwardEmacsKey(key);
+  forwardEmacsKeyAndReleaseInput(event, key);
   return true;
 }

@@ -30,9 +30,9 @@
 - xwigeht eamacs顶部提供front back按钮
 
 ### Bugs
-- graphview 鼠标滚轮问题
 - TOC pop 窗口大小调整问题
-- Aaronote 中输入M-x等指令 不回focus在emacs指令上 
+- graph 必须先与note启动不然就会报错
+
 
 
 

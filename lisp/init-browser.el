@@ -71,10 +71,7 @@ to evil insert state if evil is active in the buffer."
                      (fboundp 'xwidget-webkit-execute-script))
             (ignore-errors
               (xwidget-webkit-execute-script session my/xwidget-focus-script))))
-        ;; Switch to evil insert state when evil is active so the modeline
-        ;; reflects editing intent and insert-state key overrides are active.
-        (when (and (featurep 'evil) (bound-and-true-p evil-local-mode))
-          (ignore-errors (evil-insert-state)))))))
+))))
 
 (defun my/xwidget--load-finished-focus (xwidget _xwidget-event-type)
   "Schedule focus for XWIDGET's buffer after page load-finished."
@@ -214,7 +211,7 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
 
 (defun my/xwidget-keep-emacs-prefix-keys (map)
   "Remove xwidget bindings that should remain normal Emacs keys in MAP."
-  (dolist (key '("M-x" "C-x C-f" "C-x" "C-c" "C-s" "C-g"))
+  (dolist (key '("M-x" "C-x C-f" "C-x" "C-c" "C-s" "C-g" "M-w" "M-q"))
     (define-key map (kbd key) nil)))
 
 (defun my/xwidget-pass-editing-keys (map)

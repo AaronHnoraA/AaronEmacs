@@ -4,6 +4,7 @@ import { createEditor } from "../src/lib.ts";
 import { createVimLite } from "../aaronnote/vim-lite.ts";
 import {
   guardXwidgetControlBeforeInput,
+  handleXwidgetEmacsKeydown,
   handleXwidgetControlBeforeInput,
   guardXwidgetControlKeydown,
   handleXwidgetControlKeydown,
@@ -238,6 +239,24 @@ describe("xwidget key guard", () => {
     }
   });
 
+  test("handles Backtab as insert-mode Shift-Tab", () => {
+    const host = withMounted(document.createElement("section"));
+    const editor = createEditor(host, { initialContent: "  - item" });
+    const vim = createVimLite(editor, host);
+    vim.setMode("insert");
+    editor.setMarkdownSelection(4);
+    try {
+      const event = new KeyboardEvent("keydown", { key: "Backtab", bubbles: true, cancelable: true });
+      Object.defineProperty(event, "target", { value: document.body });
+      expect(handleXwidgetSpecialKeydown(event, { editor, editorHost: host, vim })).toBe(true);
+      expect(event.defaultPrevented).toBe(true);
+      expect(editor.getMarkdown()).toBe("- item");
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
+
   test("handles insert-mode arrow keys through CM6 cursor commands", () => {
     const host = withMounted(document.createElement("section"));
     const editor = createEditor(host, { initialContent: "abc" });
@@ -392,5 +411,42 @@ describe("xwidget key guard", () => {
     });
     expect(guardXwidgetControlBeforeInput(normalText)).toBe(false);
     expect(normalText.defaultPrevented).toBe(false);
+  });
+
+  test("releases web input focus before forwarding a top-level Emacs key", () => {
+    const input = withMounted(document.createElement("input"));
+    const forwarded: string[] = [];
+    const win = window as Window & {
+      aaronnoteApi?: { emacs?: { key?: (key: string) => unknown } };
+    };
+    const previousApi = win.aaronnoteApi;
+    try {
+      win.aaronnoteApi = {
+        emacs: {
+          key: async (key) => {
+            forwarded.push(key);
+          },
+        },
+      };
+      input.focus();
+      expect(document.activeElement).toBe(input);
+
+      const event = new KeyboardEvent("keydown", {
+        key: "ø",
+        code: "KeyO",
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(event, "target", { value: input });
+
+      expect(handleXwidgetEmacsKeydown(event)).toBe(true);
+      expect(event.defaultPrevented).toBe(true);
+      expect(forwarded).toEqual(["H-o"]);
+      expect(document.activeElement).not.toBe(input);
+    } finally {
+      win.aaronnoteApi = previousApi;
+      input.remove();
+    }
   });
 });

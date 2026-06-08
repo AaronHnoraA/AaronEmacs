@@ -247,6 +247,14 @@ Set to 0 to let the OS pick a random port."
   (when-let* ((window (active-minibuffer-window)))
     (my/aaronnote--select-emacs-window window)))
 
+(defun my/aaronnote--release-xwidget-input ()
+  "Exit Aaronnote xwidget edit mode before Emacs handles forwarded keys."
+  (when (and (buffer-live-p my/aaronnote--app-buffer)
+             (fboundp 'xwidget-webkit-edit-mode))
+    (with-current-buffer my/aaronnote--app-buffer
+      (when (eq major-mode 'xwidget-webkit-mode)
+        (ignore-errors (xwidget-webkit-edit-mode -1))))))
+
 (defun my/aaronnote--queue-emacs-key (keys key-string)
   "Queue KEYS forwarded from Aaronnote for Emacs' normal command loop.
 KEY-STRING is used only for diagnostics."
@@ -265,6 +273,7 @@ KEY-STRING is used only for diagnostics."
   (condition-case err
       (let ((keys (ignore-errors (kbd key-string))))
         (when (and keys (> (length keys) 0))
+          (my/aaronnote--release-xwidget-input)
           (let ((win (and (buffer-live-p my/aaronnote--app-buffer)
                           (get-buffer-window my/aaronnote--app-buffer 'visible))))
             (if (window-live-p win)
@@ -464,13 +473,7 @@ When FILE is non-nil, also remember it as the current note."
           (unless (equal (buffer-name buffer) desired-name)
             (rename-buffer desired-name t)))))
     (my/aaronnote--track-app-buffer buffer file)
-    ;; Aaronnote is a full editor: use evil Normal mode for vimium-style
-    ;; navigation (j/k scroll, H/L history, i to edit).  The mode hook
-    ;; disabled evil globally for xwidget; re-enable it here specifically.
-    (when (and (buffer-live-p buffer) (fboundp 'evil-local-mode))
-      (with-current-buffer buffer
-        (evil-local-mode 1)
-        (evil-normal-state)))))
+    ))
 
 (defun my/aaronnote--open-appine (url &optional file force-new)
   "Open Aaronnote URL in Appine, one Appine tab per md file.
