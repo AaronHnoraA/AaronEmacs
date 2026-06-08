@@ -245,6 +245,9 @@ function subscribe<K extends keyof DocumentEventMap>(
   return () => document.removeEventListener(type, handler, options);
 }
 
+// Forward ref patched after vim is created (avoids TDZ while keeping reset near vim).
+let onBlurVimReset: (() => void) | undefined;
+
 const editor = createEditor(host, {
   initialContent: "",
   onChange: () => {
@@ -255,6 +258,7 @@ const editor = createEditor(host, {
     scheduleSave();
   },
   onSelectionChange: () => { trackCursorPosition(); },
+  onBlur: () => { onBlurVimReset?.(); },
 });
 
 function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
@@ -262,6 +266,9 @@ function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
   if (!(target instanceof Node) || !host.contains(target)) return;
   const element = target instanceof Element ? target : target.parentElement;
   if (element?.closest("input, textarea, select, button, a")) return;
+  // Two focus calls: the first is immediate, the second is deferred one tick.
+  // xwidget may not deliver the first call if Emacs still holds focus at event
+  // time; the deferred call lands after the event loop yields to WebKit.
   editor.focus();
   window.setTimeout(() => editor.focus(), 0);
 }
@@ -279,6 +286,9 @@ const vim = createVimLite(editor, host, {
   onIndent: (dir) => indentMarkdownBlock(editor.view, dir),
 });
 updateModeLabel(vim.mode());
+// Reset to normal mode when the editor loses focus (xwidget buffer switch).
+// Prevents silent insert/visual mode on return from another Emacs buffer.
+onBlurVimReset = () => { if (vim.mode() !== "normal") vim.setMode("normal"); };
 
 const floatingTocPanel = createFloatingTocPanel({
   toc,

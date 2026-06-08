@@ -111,7 +111,7 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 | table `\\| a \\| b \\|` | :white_check_mark: |  |
 | YAML front matter | :white_check_mark: |  |
 | reference link def `[id]: url` | :yellow_circle: | live entry committed as block; reload drops the def node (markdown-it consumes it on parse) |
-| HTML block | :pause_button: | needs sanitizer policy; planned as opt-in plugin |
+| HTML block | :white_check_mark: | block widget; sanitized via `sanitizeEmbeddedHtml` (DOMPurify, forbids script/iframe/object) |
 | math block `$$…$$` | :white_check_mark: | block node, source-preserving parse/serialize, rendered preview |
 
 ### Inline syntax
@@ -132,7 +132,7 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 | hard break (2-space + `\n`) | :white_check_mark: |  |
 | soft break (`\n` in para) | :white_check_mark: |  |
 | backslash escape `\*` | :yellow_circle: | round-trip works; no input-time UX |
-| inline HTML | :pause_button: | paired with HTML block decision |
+| inline HTML | :white_check_mark: | inline widget; sanitized via `sanitizeEmbeddedHtml` |
 | inline math `$x$` | :white_check_mark: | raw TeX preserved; rendered inline preview |
 
 ### Typora extensions

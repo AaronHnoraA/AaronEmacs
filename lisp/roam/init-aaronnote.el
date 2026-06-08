@@ -584,12 +584,15 @@ reusing a remembered one."
   (when my/aaronnote--ready
     (let* ((url-request-method "POST")
            (url-request-extra-headers '(("Content-Type" . "application/json")))
-           (url-request-data (encode-coding-string (json-encode payload) 'utf-8)))
-      (url-retrieve (my/aaronnote--server-url "/emacs/command")
-                    (lambda (_status)
-                      (when (buffer-live-p (current-buffer))
-                        (kill-buffer (current-buffer))))
-                    nil t t))))
+           (url-request-data (encode-coding-string (json-encode payload) 'utf-8))
+           (buf (url-retrieve (my/aaronnote--server-url "/emacs/command")
+                              (lambda (_status)
+                                (when (buffer-live-p (current-buffer))
+                                  (kill-buffer (current-buffer))))
+                              nil t t)))
+      ;; Fallback: kill response buffer if server never replies within 5 s.
+      (when (buffer-live-p buf)
+        (run-at-time 5 nil (lambda () (when (buffer-live-p buf) (kill-buffer buf))))))))
 
 (defun my/aaronnote--open-file-in-web (file)
   "Ask the already open Aaronnote page to open FILE."
@@ -801,25 +804,28 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
            (url-request-data
             (encode-coding-string
              (json-encode `((channel . ,channel) (args . ,args)))
-             'utf-8)))
-      (url-retrieve
-       (my/aaronnote--server-url "/api")
-       (lambda (status)
-         (unwind-protect
-             (unless (plist-get status :error)
-               (goto-char (point-min))
-               (when (re-search-forward "^\r?\n" nil t)
-                 (condition-case err
-                     (funcall callback
-                              (json-parse-string
-                               (buffer-substring (point) (point-max))
-                               :object-type 'alist))
-                   (error
-                    (message "Aaronnote API parse error: %s"
-                             (error-message-string err))))))
-           (when (buffer-live-p (current-buffer))
-             (kill-buffer (current-buffer)))))
-       nil t t))))
+             'utf-8))
+           (buf (url-retrieve
+                 (my/aaronnote--server-url "/api")
+                 (lambda (status)
+                   (unwind-protect
+                       (unless (plist-get status :error)
+                         (goto-char (point-min))
+                         (when (re-search-forward "^\r?\n" nil t)
+                           (condition-case err
+                               (funcall callback
+                                        (json-parse-string
+                                         (buffer-substring (point) (point-max))
+                                         :object-type 'alist))
+                             (error
+                              (message "Aaronnote API parse error: %s"
+                                       (error-message-string err))))))
+                     (when (buffer-live-p (current-buffer))
+                       (kill-buffer (current-buffer)))))
+                 nil t t)))
+      ;; Fallback: kill response buffer if server never replies within 10 s.
+      (when (buffer-live-p buf)
+        (run-at-time 10 nil (lambda () (when (buffer-live-p buf) (kill-buffer buf))))))))
 
 ;;;###autoload
 (defun my/aaronnote-roam-sync ()
@@ -997,9 +1003,14 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
             ;; Short pause so page JS finishes before the POST arrives.
             (run-at-time 0.3 nil #'my/aaronnote--open-file-in-web file)))))))
 
+(defvar my/aaronnote--xwidget-advice-installed nil
+  "Non-nil when `my/aaronnote--xwidget-callback-advice' has been added.")
+
 (with-eval-after-load 'xwidget
-  (advice-add 'xwidget-webkit-callback :after
-              #'my/aaronnote--xwidget-callback-advice))
+  (unless my/aaronnote--xwidget-advice-installed
+    (advice-add 'xwidget-webkit-callback :after
+                #'my/aaronnote--xwidget-callback-advice)
+    (setq my/aaronnote--xwidget-advice-installed t)))
 
 (with-eval-after-load 'xwidget
   (dolist (map (list xwidget-webkit-mode-map xwidget-webkit-edit-mode-map))

@@ -43,6 +43,14 @@
 (defvar-local my/xwidget-session-url nil
   "Last URL recorded for this xwidget buffer.")
 
+(defvar-local my/xwidget--session-id nil
+  "Session id for this xwidget buffer, used to remove its hash entry on kill.")
+
+(defun my/xwidget--session-cleanup ()
+  "Remove this buffer's entry from `my/xwidget--sessions' when the buffer is killed."
+  (when my/xwidget--session-id
+    (remhash my/xwidget--session-id my/xwidget--sessions)))
+
 (defcustom my/xwidget-auto-focus-on-load t
   "Auto-focus xwidget buffer when its page finishes loading."
   :type 'boolean
@@ -116,7 +124,10 @@ to evil insert state if evil is active in the buffer."
   "Record BUFFER as xwidget session ID with URL."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
-      (setq-local my/xwidget-session-url url))
+      (setq-local my/xwidget-session-url url)
+      (when id
+        (setq-local my/xwidget--session-id id)
+        (add-hook 'kill-buffer-hook #'my/xwidget--session-cleanup nil t)))
     (when id
       (puthash id buffer my/xwidget--sessions))))
 

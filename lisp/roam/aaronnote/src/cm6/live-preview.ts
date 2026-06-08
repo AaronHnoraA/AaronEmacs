@@ -52,6 +52,7 @@ import { StateField, type ChangeSet, type EditorState, type Text } from "@codemi
 import type { Range } from "@codemirror/state";
 import { getBlockMathRanges, mergeOverlappingRanges, rangeInsideAny, rangeOverlapsAny } from "./math-ranges.ts";
 import { scanInlineMathRanges } from "../inline-math.ts";
+import { sanitizeEmbeddedHtml } from "../sanitize-html.ts";
 import { renderMarkdownHTML } from "../render-html.ts";
 import {
   applyLayoutAttrs,
@@ -60,7 +61,7 @@ import {
   type LayoutAttrs,
 } from "../layout-attrs.ts";
 import { tocIndexFromState } from "./toc-index.ts";
-import { hasViewportDecorationRefresh } from "./viewport-refresh.ts";
+import { hasViewportDecorationRefresh, refreshViewportDecorations } from "./viewport-refresh.ts";
 import { getFencedCodeRanges } from "./code-ranges.ts";
 import { orgEnvContextForRange } from "./widgets/block-extras.ts";
 
@@ -530,7 +531,7 @@ class HtmlInlineWidget extends WidgetType {
   toDOM(): HTMLElement {
     const span = document.createElement("span");
     span.className = "cm-html-inline-widget";
-    span.innerHTML = this.source;
+    span.innerHTML = sanitizeEmbeddedHtml(this.source);
     return span;
   }
 
@@ -1423,6 +1424,7 @@ function patchTableDecosForSelectionChange(
 const tableDecoField = StateField.define<DecorationSet>({
   create: (state) => buildTableDecos(state),
   update(value, tr) {
+    if (tr.effects.some((e) => e.is(refreshViewportDecorations))) return buildTableDecos(tr.state);
     if (tr.docChanged) {
       const tables = markdownTablesFromState(tr.startState);
       return canMapMarkdownTables(tr.startState.doc, tables, tr.changes)
@@ -1533,6 +1535,7 @@ function buildLineDecos(state: EditorState): DecorationSet {
 const lineDecoField = StateField.define<DecorationSet>({
   create: (state) => buildLineDecos(state),
   update(value, tr) {
+    if (tr.effects.some((e) => e.is(refreshViewportDecorations))) return buildLineDecos(tr.state);
     if (tr.docChanged) {
       if (canMapLineDecos(tr.startState.doc, tr.changes)) return value.map(tr.changes);
       if (canPatchLineDecosNearChanges(tr.startState.doc, tr.changes)) {
@@ -1642,7 +1645,7 @@ class HtmlBlockWidget extends MeasuredWidget {
     div.className = "cm-html-block-widget";
     div.dataset.cmFrom = String(this.from);
     div.dataset.cmTo = String(this.to);
-    div.innerHTML = this.source;
+    div.innerHTML = sanitizeEmbeddedHtml(this.source);
     return this.registerMeasured(div, view);
   }
 
@@ -1732,6 +1735,7 @@ function activeHtmlBlockKey(state: EditorState): string {
 const htmlBlockDecoField = StateField.define<DecorationSet>({
   create: (state) => buildHtmlBlockDecos(state),
   update(value, tr) {
+    if (tr.effects.some((e) => e.is(refreshViewportDecorations))) return buildHtmlBlockDecos(tr.state);
     if (tr.docChanged) {
       return patchHtmlBlockDecosNearChanges(tr.state, value.map(tr.changes), tr.changes);
     }
