@@ -43,6 +43,7 @@ import {
   runCommandCM6,
   getBlockContextCM6,
   createQuickInsertRegistry,
+  continueMarkdownBlock,
   exitEmptyMarkdownBlock,
   indentMarkdownBlock,
 } from "./commands.ts";
@@ -800,7 +801,7 @@ function buildExtensions(options: EditorOptions, previewCompartment: Compartment
     EditorView.inputHandler.of(wrapSelectedMarkdownInput),
     rectangularSelection(),
     keymap.of([
-      { key: "Enter", run: exitEmptyMarkdownBlock },
+      { key: "Enter", run: (view) => exitEmptyMarkdownBlock(view) || continueMarkdownBlock(view) },
       { key: "Mod-Enter", run: exitCurrentOrgEnv },
       { key: "Tab", run: (view) => indentMarkdownBlock(view, 1) },
       { key: "Shift-Tab", run: (view) => indentMarkdownBlock(view, -1) },

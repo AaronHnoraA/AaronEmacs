@@ -20,7 +20,7 @@ import {
   selectPageUp,
 } from "@codemirror/commands";
 import { insertNewlineContinueMarkup } from "@codemirror/lang-markdown";
-import { exitEmptyMarkdownBlock, indentMarkdownBlock } from "../src/cm6/commands.ts";
+import { continueMarkdownBlock, exitEmptyMarkdownBlock } from "../src/cm6/commands.ts";
 
 type XwidgetControlKey = "Escape" | "Delete" | "Backspace";
 type XwidgetSpecialKey =
@@ -113,6 +113,7 @@ function shiftForSpecialKeyboardEvent(event: KeyboardEvent): boolean {
 
 function specialKeyFromInputEvent(event: InputEvent): XwidgetSpecialKey | null {
   if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") return "Enter";
+  if (event.inputType === "insertText" && (event.data === "\n" || event.data === "\r")) return "Enter";
   if (event.inputType === "insertText" && event.data === "\t") return "Tab";
   return null;
 }
@@ -193,13 +194,16 @@ function runEditorControlKey(key: XwidgetControlKey, context: XwidgetKeyContext)
 }
 
 function runEditorSpecialKey(key: XwidgetSpecialKey, context: XwidgetKeyContext, shiftKey = false): boolean {
+  if (key === "Tab") {
+    const handled = runXwidgetTabKey(context.editor, shiftKey);
+    if (handled) context.editor.focus();
+    return handled;
+  }
   const view = context.editor.view;
   const command = (() => {
     switch (key) {
       case "Enter":
-        return () => exitEmptyMarkdownBlock(view) || insertNewlineContinueMarkup(view) || insertNewlineAndIndent(view);
-      case "Tab":
-        return () => indentMarkdownBlock(view, shiftKey ? -1 : 1);
+        return () => exitEmptyMarkdownBlock(view) || continueMarkdownBlock(view) || insertNewlineContinueMarkup(view) || insertNewlineAndIndent(view);
       case "ArrowLeft":
         return shiftKey ? selectCharLeft : cursorCharLeft;
       case "ArrowRight":
@@ -223,6 +227,21 @@ function runEditorSpecialKey(key: XwidgetSpecialKey, context: XwidgetKeyContext,
   return handled;
 }
 
+function runXwidgetTabKey(editor: Editor, shiftKey: boolean): boolean {
+  const doc = editor.view.state.doc;
+  const { from } = editor.getMarkdownSelection();
+  const line = doc.lineAt(Math.max(0, Math.min(from, doc.length)));
+  const text = line.text;
+  if (shiftKey) {
+    const remove = text.startsWith("  ") ? 2 : text.startsWith(" ") ? 1 : 0;
+    if (remove > 0) editor.replaceMarkdownRange(line.from, line.from + remove, "", "start");
+    return true;
+  }
+  if (!/^\s*(?:[-+*]|\d+[.)])\s/.test(text)) return false;
+  editor.replaceMarkdownRange(line.from, line.from, "  ", "end");
+  return true;
+}
+
 function shouldHandleXwidgetVimKey(event: KeyboardEvent | InputEvent, context: XwidgetKeyContext): boolean {
   if (context.enabled === false || context.vim.mode() === "insert") return false;
   if (event.defaultPrevented || event.isComposing) return false;
@@ -234,7 +253,6 @@ function shouldHandleXwidgetVimKey(event: KeyboardEvent | InputEvent, context: X
 export function handleXwidgetSpecialKeydown(event: KeyboardEvent, context: XwidgetKeyContext): boolean {
   const key = specialKeyFromKeyboardEvent(event);
   if (!shouldHandleXwidgetSpecialEvent(event, context, key)) return false;
-  if (key === "Tab") return false; // snippet popup / vim snippets handle Tab; >> / << for indent
   if (!runEditorSpecialKey(key, context, shiftForSpecialKeyboardEvent(event))) return false;
   hardStop(event);
   noteHandledKeydown(context.editor, key);

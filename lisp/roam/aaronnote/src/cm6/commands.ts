@@ -70,6 +70,9 @@ const LIST_PREFIX_RE = /^\s*(?:[-*+]\s+|\d+[.)]\s+|- \[[ xX]\]\s+)/;
 const EMPTY_LIST_RE = /^(\s*)(?:[-*+]\s+|\d+[.)]\s+|- \[[ xX]\]\s*)$/;
 const LIST_LINE_RE = /^(\s*)(?:[-*+]\s+|\d+[.)]\s+|- \[[ xX]\]\s+)/;
 const EMPTY_QUOTE_RE = /^\s{0,3}>\s?$/;
+const EMPTY_QUOTE_LIST_RE = /^(\s{0,3}(?:>\s*)+)(?:[-*+]\s*|\d+[.)]\s*|- \[[ xX]\]\s*)$/;
+const CONTINUE_MARKUP_RE = /^(\s{0,3}(?:>\s*)*)(\s*)(?:(- \[[ xX]\]\s+)|([-*+])\s+|(\d+)([.)])\s+)(.*)$/;
+const CONTINUE_QUOTE_RE = /^(\s{0,3}(?:>\s*)+)(.*)$/;
 
 // ---------------------------------------------------------------------------
 // Block insert (inserts below current line when it is non-empty)
@@ -101,6 +104,16 @@ export function exitEmptyMarkdownBlock(view: EditorView): boolean {
   const sel = view.state.selection.main;
   if (!sel.empty) return false;
   const line = view.state.doc.lineAt(sel.from);
+  const quoteList = line.text.match(EMPTY_QUOTE_LIST_RE);
+  if (quoteList) {
+    const prefix = quoteList[1] ?? "";
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: prefix },
+      selection: { anchor: line.from + prefix.length },
+      scrollIntoView: true,
+    });
+    return true;
+  }
   if (!EMPTY_LIST_RE.test(line.text) && !EMPTY_QUOTE_RE.test(line.text)) return false;
   view.dispatch({
     changes: { from: line.from, to: line.to, insert: "" },
@@ -108,6 +121,59 @@ export function exitEmptyMarkdownBlock(view: EditorView): boolean {
     scrollIntoView: true,
   });
   return true;
+}
+
+export function continueMarkdownMarkup(view: EditorView): boolean {
+  const sel = view.state.selection.main;
+  if (!sel.empty) return false;
+  const line = view.state.doc.lineAt(sel.from);
+  const beforeCursor = view.state.doc.sliceString(line.from, sel.from);
+  const match = beforeCursor.match(CONTINUE_MARKUP_RE);
+  if (!match) return false;
+  const content = match[7] ?? "";
+  if (content.trim().length === 0) return false;
+
+  const quotePrefix = match[1] ?? "";
+  const indent = match[2] ?? "";
+  const task = match[3];
+  const bullet = match[4];
+  const ordered = match[5];
+  const orderedDelim = match[6] ?? ".";
+  const nextMarker = task
+    ? task
+    : bullet
+      ? `${bullet} `
+      : `${Number(ordered) + 1}${orderedDelim} `;
+  const insert = `\n${quotePrefix}${indent}${nextMarker}`;
+  view.dispatch({
+    changes: { from: sel.from, insert },
+    selection: { anchor: sel.from + insert.length },
+    scrollIntoView: true,
+  });
+  return true;
+}
+
+export function continueMarkdownQuote(view: EditorView): boolean {
+  const sel = view.state.selection.main;
+  if (!sel.empty) return false;
+  const line = view.state.doc.lineAt(sel.from);
+  const beforeCursor = view.state.doc.sliceString(line.from, sel.from);
+  const match = beforeCursor.match(CONTINUE_QUOTE_RE);
+  if (!match) return false;
+  const content = match[2] ?? "";
+  if (content.trim().length === 0) return false;
+  const prefix = match[1] ?? "";
+  const insert = `\n${prefix}`;
+  view.dispatch({
+    changes: { from: sel.from, insert },
+    selection: { anchor: sel.from + insert.length },
+    scrollIntoView: true,
+  });
+  return true;
+}
+
+export function continueMarkdownBlock(view: EditorView): boolean {
+  return continueMarkdownMarkup(view) || continueMarkdownQuote(view);
 }
 
 function lineStartOffsets(lines: readonly string[]): number[] {

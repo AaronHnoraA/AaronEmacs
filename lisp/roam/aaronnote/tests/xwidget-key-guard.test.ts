@@ -298,6 +298,29 @@ describe("xwidget key guard", () => {
     }
   });
 
+  test("maps raw newline beforeinput into markdown continuation", () => {
+    const host = withMounted(document.createElement("section"));
+    const editor = createEditor(host, { initialContent: "> - item" });
+    const vim = createVimLite(editor, host);
+    vim.setMode("insert");
+    editor.setMarkdownSelection(editor.getMarkdown().length);
+    try {
+      const event = new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        data: "\n",
+        inputType: "insertText",
+      });
+      Object.defineProperty(event, "target", { value: document.body });
+      expect(handleXwidgetSpecialBeforeInput(event, { editor, editorHost: host, vim })).toBe(true);
+      expect(event.defaultPrevented).toBe(true);
+      expect(editor.getMarkdown()).toBe("> - item\n> - ");
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
+
   test("handles Escape as a first-layer Vim mode switch", () => {
     const host = withMounted(document.createElement("section"));
     const editor = createEditor(host, { initialContent: "abc" });

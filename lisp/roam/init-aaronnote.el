@@ -707,6 +707,8 @@ graph tab was closed via the Appine toolbar."
   "Non-nil when the browser page has been sent a pause command.")
 (defvar my/aaronnote--activity-timer nil
   "Debounce timer for `my/aaronnote--update-activity'.")
+(defvar my/aaronnote--activity-hooks-installed nil
+  "Non-nil when Aaronnote pause/resume activity hooks are installed.")
 
 (defun my/aaronnote--app-buffer-visible-p ()
   "Return non-nil when the Aaronnote buffer is visible in a focused frame."
@@ -742,10 +744,12 @@ routes to the right session when multiple files are open."
 
 (defun my/aaronnote--install-activity-hooks ()
   "Add hooks that trigger the pause/resume check."
-  (add-function :after after-focus-change-function
-                #'my/aaronnote--update-activity)
-  (add-hook 'window-buffer-change-functions #'my/aaronnote--update-activity)
-  (add-hook 'window-selection-change-functions #'my/aaronnote--update-activity))
+  (unless my/aaronnote--activity-hooks-installed
+    (add-function :after after-focus-change-function
+                  #'my/aaronnote--update-activity)
+    (add-hook 'window-buffer-change-functions #'my/aaronnote--update-activity)
+    (add-hook 'window-selection-change-functions #'my/aaronnote--update-activity)
+    (setq my/aaronnote--activity-hooks-installed t)))
 
 (defun my/aaronnote--remove-activity-hooks ()
   "Remove pause/resume hooks and cancel any pending debounce timer."
@@ -755,7 +759,8 @@ routes to the right session when multiple files are open."
   (when my/aaronnote--activity-timer
     (cancel-timer my/aaronnote--activity-timer)
     (setq my/aaronnote--activity-timer nil))
-  (setq my/aaronnote--paused nil))
+  (setq my/aaronnote--paused nil
+        my/aaronnote--activity-hooks-installed nil))
 
 ;;;###autoload
 (defun my/aaronnote-stop ()

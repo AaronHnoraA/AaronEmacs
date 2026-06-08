@@ -191,6 +191,62 @@ maybeDescribe("CM6 markdown typing affordances", () => {
     ed.destroy();
   });
 
+  it("Enter continues blockquote list markers", async () => {
+    const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
+    const { continueMarkdownMarkup } = await import("../../src/cm6/commands.ts");
+    const host = document.createElement("div");
+    const ed = createEditorCM6(host, { initialContent: "> - item" });
+    ed.setSelection(ed.getMarkdown().length, ed.getMarkdown().length);
+
+    expect(continueMarkdownMarkup(ed.view)).toBe(true);
+    expect(ed.getMarkdown()).toBe("> - item\n> - ");
+    expect(ed.getMarkdownSelection()).toEqual({ from: 13, to: 13 });
+    ed.destroy();
+  });
+
+  it("Enter continues plain blockquotes", async () => {
+    const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
+    const { continueMarkdownBlock } = await import("../../src/cm6/commands.ts");
+    const host = document.createElement("div");
+    const ed = createEditorCM6(host, { initialContent: "> Once completed" });
+    ed.setSelection(ed.getMarkdown().length, ed.getMarkdown().length);
+
+    expect(continueMarkdownBlock(ed.view)).toBe(true);
+    expect(ed.getMarkdown()).toBe("> Once completed\n> ");
+    expect(ed.getMarkdownSelection()).toEqual({ from: 19, to: 19 });
+    ed.destroy();
+  });
+
+  it("Enter continues ordered and task markers inside blockquotes", async () => {
+    const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
+    const { continueMarkdownMarkup } = await import("../../src/cm6/commands.ts");
+    const host = document.createElement("div");
+    const ed = createEditorCM6(host, { initialContent: "> 3. item" });
+    ed.setSelection(ed.getMarkdown().length, ed.getMarkdown().length);
+
+    expect(continueMarkdownMarkup(ed.view)).toBe(true);
+    expect(ed.getMarkdown()).toBe("> 3. item\n> 4. ");
+
+    ed.setMarkdown("> - [ ] task", { history: "reset" });
+    ed.setSelection(ed.getMarkdown().length, ed.getMarkdown().length);
+    expect(continueMarkdownMarkup(ed.view)).toBe(true);
+    expect(ed.getMarkdown()).toBe("> - [ ] task\n> - [ ] ");
+    ed.destroy();
+  });
+
+  it("Enter exits an empty blockquote list item to quote continuation", async () => {
+    const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
+    const { exitEmptyMarkdownBlock } = await import("../../src/cm6/commands.ts");
+    const host = document.createElement("div");
+    const ed = createEditorCM6(host, { initialContent: "> - " });
+    ed.setSelection(ed.getMarkdown().length, ed.getMarkdown().length);
+
+    expect(exitEmptyMarkdownBlock(ed.view)).toBe(true);
+    expect(ed.getMarkdown()).toBe("> ");
+    expect(ed.getMarkdownSelection()).toEqual({ from: 2, to: 2 });
+    ed.destroy();
+  });
+
   it("Tab and Shift-Tab indent selected markdown list items", async () => {
     const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
     const { indentMarkdownBlock, indentMarkdownList } = await import("../../src/cm6/commands.ts");

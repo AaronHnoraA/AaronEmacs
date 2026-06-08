@@ -4,7 +4,7 @@ import "./style.css";
 
 import { createEditor, type EditorCommand } from "../src/lib.ts";
 import { setupCopilot } from "../src/copilot/index.ts";
-import { indentMarkdownBlock } from "../src/cm6/commands.ts";
+import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownBlock } from "../src/cm6/commands.ts";
 import { getBlockMathRanges, rangeAtPosition, rangeOverlapsAny } from "../src/cm6/math-ranges.ts";
 import { equationTagsFromText, getEquationTagHits } from "../src/equation-tags.ts";
 import { INLINE_MATH_RE, isLikelyInlineMath } from "../src/inline-math.ts";
@@ -2762,6 +2762,12 @@ function runHostKey(body: Record<string, unknown>): boolean {
     // no snippet — fall through to insertHostKeyText("\t")
   }
   if (vim.mode() !== "insert" || hostKey.ctrlKey || hostKey.metaKey || hostKey.altKey) return false;
+  if (key === "Enter") {
+    const handled = exitEmptyMarkdownBlock(editor.view) || continueMarkdownBlock(editor.view);
+    if (!handled) editor.insertText("\n");
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+    return true;
+  }
   if (key === "Backspace" || key === "Delete") {
     const handled = deleteHostKeyText(key);
     if (handled) scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });

@@ -392,10 +392,14 @@ export function createVimLite(
       }
       setMode("normal");
     };
+    if (register) {
+      doInsert(register);
+      return;
+    }
     void fetch("/api/clipboard")
       .then(r => r.ok ? r.text() : Promise.reject())
-      .then(text => doInsert(text || register))
-      .catch(() => doInsert(register));
+      .then(doInsert)
+      .catch(() => setMode("normal"));
   }
 
   function appendChar(): void {
