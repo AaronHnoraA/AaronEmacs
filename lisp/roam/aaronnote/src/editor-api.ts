@@ -11,6 +11,8 @@ export interface EditorOptions {
   initialContent?: string;
   /** Fired on every document transaction; arg is the current markdown. Raw, no debounce. */
   onChange?: (md: string) => void;
+  /** Fired when the markdown selection changes. Raw; consumers should keep it memory-only. */
+  onSelectionChange?: (selection: { from: number; to: number }) => void;
   /** Fired when the editor surface gains focus. */
   onFocus?: () => void;
   /** Fired when the editor surface loses focus. */

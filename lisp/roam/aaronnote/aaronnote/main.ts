@@ -144,6 +144,12 @@ let saveTimer = 0;
 let cursorPositionsLoaded = false;
 let cursorPositions: CursorPosition[] = [];
 let lastSavedCursorPositionKey = "";
+let lastTrackedCursorPositionKey = "";
+let cursorPositionDirtyCount = 0;
+let cursorPositionLastFlushAt = 0;
+let cursorPositionFlushInFlight = false;
+let navigationBackStack: CursorPosition[] = [];
+let restoringNavigationBack = false;
 let snippets: SnippetSummary[] = [];
 let notes: NoteSummary[] = [];
 let pathSuggestions: string[] = [];
@@ -169,6 +175,10 @@ const clientId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.rand
 const changeHandlers = new Set<() => void>();
 const MATH_PREVIEW_ERROR_IDLE_MS = 650;
 const MATH_PREVIEW_ERROR_MAX_LENGTH = 180;
+const CURSOR_POSITION_FLUSH_MIN_INTERVAL_MS = 5000;
+const CURSOR_POSITION_FLUSH_EVENT_INTERVAL = 8;
+const CURSOR_POSITION_FLUSH_EVENT_MAX = 32;
+const NAVIGATION_BACK_STACK_MAX = 80;
 const editorCommands = new Set<EditorCommand>([
   "bold",
   "italic",
@@ -222,6 +232,7 @@ function updateModeLabel(mode: VimLiteMode): void {
   root.dataset.vimMode = mode;
   host.dataset.vimMode = mode;
   document.body.dataset.vimMode = mode;
+  if (mode === "normal") noteCursorPositionEvent();
   scheduleAssistUpdate({ cursor: true });
 }
 
@@ -243,6 +254,7 @@ const editor = createEditor(host, {
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
     scheduleSave();
   },
+  onSelectionChange: () => { trackCursorPosition(); },
 });
 
 function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
@@ -365,18 +377,91 @@ function rememberedCursorPosition(file: string, positions = cursorPositions): Cu
   return positions.find((position) => position.file === file);
 }
 
-async function flushCursorPosition(): Promise<void> {
+function trackCursorPosition(): CursorPosition | null {
   const position = currentCursorPosition();
-  if (!position) return;
+  if (!position) return null;
+  const key = cursorPositionKey(position);
+  rememberCursorPosition(position);
+  if (key !== lastTrackedCursorPositionKey) {
+    lastTrackedCursorPositionKey = key;
+    if (key !== lastSavedCursorPositionKey) cursorPositionDirtyCount += 1;
+  }
+  return position;
+}
+
+async function persistCursorPosition(position: CursorPosition): Promise<void> {
   const key = cursorPositionKey(position);
   if (key === lastSavedCursorPositionKey) return;
+  if (cursorPositionFlushInFlight) return;
+  cursorPositionFlushInFlight = true;
   try {
     const result = await api.session.savePosition(position);
     rememberCursorPosition(position, result.positions);
     lastSavedCursorPositionKey = key;
+    cursorPositionDirtyCount = 0;
+    cursorPositionLastFlushAt = Date.now();
   } catch {
     // Cursor position memory is best-effort and should never block editing.
+  } finally {
+    cursorPositionFlushInFlight = false;
   }
+}
+
+function noteCursorPositionEvent(): void {
+  const position = trackCursorPosition();
+  if (!position || cursorPositionKey(position) === lastSavedCursorPositionKey) return;
+  const elapsed = Date.now() - cursorPositionLastFlushAt;
+  const enoughEvents = cursorPositionDirtyCount >= CURSOR_POSITION_FLUSH_EVENT_INTERVAL
+    && elapsed >= CURSOR_POSITION_FLUSH_MIN_INTERVAL_MS;
+  const tooManyEvents = cursorPositionDirtyCount >= CURSOR_POSITION_FLUSH_EVENT_MAX;
+  if (enoughEvents || tooManyEvents) void persistCursorPosition(position);
+}
+
+function pushNavigationBackLocation(location = trackCursorPosition()): void {
+  if (!location || restoringNavigationBack) return;
+  const key = cursorPositionKey(location);
+  const top = navigationBackStack[navigationBackStack.length - 1];
+  if (top && cursorPositionKey(top) === key) return;
+  navigationBackStack.push({ ...location, updatedAt: Date.now() });
+  if (navigationBackStack.length > NAVIGATION_BACK_STACK_MAX) {
+    navigationBackStack = navigationBackStack.slice(-NAVIGATION_BACK_STACK_MAX);
+  }
+  try {
+    window.history.pushState({ aaronnoteNavigation: true }, "", window.location.href);
+  } catch {
+    // Browser history is an optional convenience; the in-memory stack remains valid.
+  }
+}
+
+function restoreCursorPosition(location: CursorPosition): void {
+  const length = editor.getMarkdown().length;
+  const from = Math.min(Math.max(0, location.from), length);
+  const to = Math.min(Math.max(0, location.to), length);
+  if ((location.mode === "source") !== editor.isSourceMode()) editor.toggleSource();
+  sourceButton.classList.toggle("is-active", editor.isSourceMode());
+  editor.setMarkdownSelection(from, to);
+  editor.revealCursor();
+  editor.focus();
+  trackCursorPosition();
+  scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true, selectionTool: true });
+}
+
+async function restoreNavigationBack(): Promise<boolean> {
+  const location = navigationBackStack.pop();
+  if (!location) return false;
+  restoringNavigationBack = true;
+  try {
+    if (location.file !== currentFile) await openFile(location.file);
+    restoreCursorPosition(location);
+    return true;
+  } finally {
+    restoringNavigationBack = false;
+  }
+}
+
+async function flushCursorPosition(): Promise<void> {
+  const position = trackCursorPosition();
+  if (position) await persistCursorPosition(position);
 }
 
 function applyOpenedNote(
@@ -412,6 +497,8 @@ function applyOpenedNote(
   applyingContent = false;
   const restored = currentCursorPosition();
   lastSavedCursorPositionKey = restored ? cursorPositionKey(restored) : "";
+  lastTrackedCursorPositionKey = lastSavedCursorPositionKey;
+  cursorPositionDirtyCount = 0;
   snippetSession.clear();
   hideSnippetPopup();
   hideMathPreview();
@@ -507,6 +594,10 @@ function primaryMod(event: KeyboardEvent): boolean {
   return /Mac/.test(navigator.platform)
     ? event.metaKey && !event.ctrlKey
     : event.ctrlKey && !event.metaKey;
+}
+
+function plainEscapeKey(event: KeyboardEvent): boolean {
+  return event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.isComposing;
 }
 
 function runFormattingShortcut(event: KeyboardEvent): boolean {
@@ -613,6 +704,8 @@ function openNote(
   options: { newWindow?: boolean; hash?: string; domTarget?: string; equationTag?: string; inlineTag?: string } = {},
 ): void {
   if (!note.file) return;
+  const before = trackCursorPosition();
+  noteCursorPositionEvent();
   if (options.newWindow) {
     const url = new URL(window.location.href);
     url.searchParams.set("file", note.file);
@@ -622,10 +715,18 @@ function openNote(
     return;
   }
   if (note.file === currentFile) {
-    if (options.domTarget && !jumpToDomTarget(options.domTarget)) setStatus(`DOM target not found: ${options.domTarget}`);
-    else if (options.hash && !jumpToHash(options.hash)) setStatus(`Anchor not found: ${options.hash}`);
+    let jumped = false;
+    if (options.domTarget) {
+      jumped = jumpToDomTarget(options.domTarget);
+      if (!jumped) setStatus(`DOM target not found: ${options.domTarget}`);
+    } else if (options.hash) {
+      jumped = jumpToHash(options.hash);
+      if (!jumped) setStatus(`Anchor not found: ${options.hash}`);
+    }
+    if (jumped) pushNavigationBackLocation(before);
     if (options.domTarget || options.hash) return;
   }
+  pushNavigationBackLocation(before);
   pendingOpenHash = options.hash || "";
   pendingOpenDomTarget = options.domTarget || "";
   void openFile(note.file);
@@ -800,6 +901,7 @@ function jumpToHash(hash: string): boolean {
     editor.setMarkdownSelection(equation.from, equation.to);
     editor.revealCursor();
     editor.focus();
+    noteCursorPositionEvent();
     return true;
   }
   const inline = inlineTagAnchorsFromText(editor.getMarkdown())
@@ -809,6 +911,7 @@ function jumpToHash(hash: string): boolean {
     editor.setMarkdownSelection(inline.pos, inline.to);
     editor.revealCursor();
     editor.focus();
+    noteCursorPositionEvent();
     return true;
   }
   const heading = markdownHeadingsFromText(editor.view.state.doc)
@@ -819,6 +922,7 @@ function jumpToHash(hash: string): boolean {
     editor.setMarkdownSelection(heading.pos);
     editor.revealCursor();
     editor.focus();
+    noteCursorPositionEvent();
     return true;
   }
   return false;
@@ -831,6 +935,8 @@ function openExternalUrl(href: string, options: { newWindow?: boolean } = {}): v
     setStatus("Blocked unsafe link");
     return;
   }
+  const before = trackCursorPosition();
+  noteCursorPositionEvent();
   const hash = hrefHash(raw);
   const target = resolveHrefTarget(raw);
   const note = target.note;
@@ -838,11 +944,15 @@ function openExternalUrl(href: string, options: { newWindow?: boolean } = {}): v
   const targetDom = target.domTarget;
   if (note?.file) {
     if (note.file === currentFile && targetDom) {
-      if (!jumpToDomTarget(targetDom)) setStatus(`DOM target not found: ${targetDom}`);
+      const jumped = jumpToDomTarget(targetDom);
+      if (jumped) pushNavigationBackLocation(before);
+      else setStatus(`DOM target not found: ${targetDom}`);
       return;
     }
     if (note.file === currentFile && targetHash) {
-      if (!jumpToHash(targetHash)) setStatus(`Anchor not found: ${targetHash}`);
+      const jumped = jumpToHash(targetHash);
+      if (jumped) pushNavigationBackLocation(before);
+      else setStatus(`Anchor not found: ${targetHash}`);
       return;
     }
     openNote(note, { newWindow: options.newWindow, hash: targetHash, domTarget: targetDom });
@@ -853,7 +963,9 @@ function openExternalUrl(href: string, options: { newWindow?: boolean } = {}): v
     return;
   }
   if (raw.startsWith("#")) {
-    if (!jumpToHash(hash || raw.slice(1))) setStatus(`Anchor not found: ${hash || raw.slice(1)}`);
+    const jumped = jumpToHash(hash || raw.slice(1));
+    if (jumped) pushNavigationBackLocation(before);
+    else setStatus(`Anchor not found: ${hash || raw.slice(1)}`);
     return;
   }
   const protocol = hrefProtocol(raw);
@@ -1009,6 +1121,7 @@ function jumpToDomTarget(rawTarget: string): boolean {
   editor.focus();
   setStatus(`DOM target ${target}`);
   scheduleAssistUpdate({ toc: true });
+  noteCursorPositionEvent();
   return true;
 }
 
@@ -2877,6 +2990,11 @@ function runHostCommand(detail: unknown): boolean {
     case "save":
       void save();
       return true;
+    case "back":
+    case "nav-back":
+    case "navigation-back":
+      void restoreNavigationBack();
+      return true;
     case "focus":
       editor.focus();
       return true;
@@ -2926,7 +3044,7 @@ document.addEventListener("keydown", (event) => {
     event.stopPropagation();
     return;
   }
-  if (event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+  if (plainEscapeKey(event)) {
     if (!modal.hidden) return;
     if (!toolsPanel.hidden) {
       event.preventDefault();
@@ -2947,6 +3065,7 @@ document.addEventListener("keydown", (event) => {
     vim,
     enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
   })) {
+    if (plainEscapeKey(event)) noteCursorPositionEvent();
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
     return;
   }
@@ -2956,6 +3075,7 @@ document.addEventListener("keydown", (event) => {
     vim,
     enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
   })) {
+    if (plainEscapeKey(event)) noteCursorPositionEvent();
     scheduleAssistUpdate({ cursor: true, toc: true });
     return;
   }
@@ -2979,6 +3099,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (vim.handleKeyDown(event)) {
+    if (plainEscapeKey(event)) noteCursorPositionEvent();
     scheduleAssistUpdate({ cursor: true, toc: true });
     event.stopPropagation();
     return;
@@ -3046,8 +3167,9 @@ document.addEventListener("beforeinput", (event) => {
   }
 }, true);
 document.addEventListener("selectionchange", () => scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true, selectionTool: true }));
-document.addEventListener("mouseup", () => {
+document.addEventListener("mouseup", (event) => {
   if (!editorSurfaceVisible()) return;
+  if (event.target instanceof Node && host.contains(event.target)) noteCursorPositionEvent();
   scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: true });
 });
 window.addEventListener("resize", () => {
@@ -3071,6 +3193,7 @@ document.addEventListener("aaronnote:open-url", (event) => {
 });
 window.addEventListener("aaronnote:open-file", (event) => {
   const detail = (event as CustomEvent<{ file?: string }>).detail;
+  if (detail?.file && detail.file !== currentFile) pushNavigationBackLocation();
   void openFile(detail?.file);
 });
 window.addEventListener("aaronnote:command", (event) => {
@@ -3087,8 +3210,11 @@ window.addEventListener("pagehide", () => {
   void flushCursorPosition();
   if (currentFile && revision !== savedRevision) api.notes.saveKeepalive(saveBody());
 });
-
-void openInitialFile();
 window.addEventListener("beforeunload", () => {
   void flushCursorPosition();
 });
+window.addEventListener("popstate", () => {
+  void restoreNavigationBack();
+});
+
+void openInitialFile();

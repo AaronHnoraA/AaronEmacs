@@ -106,6 +106,23 @@ $$`;
 });
 
 describe("editor api source preservation", () => {
+  test("reports markdown selection changes without requiring document edits", () => {
+    const received: Array<{ from: number; to: number }> = [];
+    const mount = document.createElement("div");
+    document.body.appendChild(mount);
+    const editor = createEditor(mount, {
+      initialContent: "Alpha beta",
+      onSelectionChange: (selection) => received.push(selection),
+    });
+    try {
+      editor.setMarkdownSelection(6, 10);
+      expect(received.at(-1)).toEqual({ from: 6, to: 10 });
+    } finally {
+      editor.destroy();
+      mount.remove();
+    }
+  });
+
   test("reports markdown selection offsets in preview and source mode", () => {
     const source = "Alpha beta move";
     const mount = document.createElement("div");
