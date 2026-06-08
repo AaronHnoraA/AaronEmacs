@@ -229,6 +229,9 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
                    "TAB"
                    "<tab>"
                    "<backtab>"
+                   "<iso-lefttab>"
+                   "S-TAB"
+                   "S-<tab>"
                    "<left>"
                    "<right>"
                    "<up>"
@@ -241,6 +244,25 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
                    "M-c"
                    "M-v"))
       (define-key map (kbd key) #'xwidget-webkit-pass-command-event))))
+
+(defun my/xwidget-pass-pointer-keys (map)
+  "Send pointer wheel events in MAP to WebKit instead of Emacs scrolling."
+  (when (fboundp 'xwidget-webkit-pass-command-event)
+    (dolist (key '([wheel-up]
+                   [wheel-down]
+                   [wheel-left]
+                   [wheel-right]
+                   [double-wheel-up]
+                   [double-wheel-down]
+                   [double-wheel-left]
+                   [double-wheel-right]
+                   [triple-wheel-up]
+                   [triple-wheel-down]
+                   [triple-wheel-left]
+                   [triple-wheel-right]
+                   [mouse-4]
+                   [mouse-5]))
+      (define-key map key #'xwidget-webkit-pass-command-event))))
 
 (defun my/xwidget--split-to-ibuffer (split-fn)
   "Run SPLIT-FN, select the new window, and show `ibuffer'."
@@ -305,6 +327,8 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
     (my/xwidget-keep-emacs-prefix-keys xwidget-webkit-edit-mode-map)
     (my/xwidget-pass-editing-keys xwidget-webkit-mode-map)
     (my/xwidget-pass-editing-keys xwidget-webkit-edit-mode-map)
+    (my/xwidget-pass-pointer-keys xwidget-webkit-mode-map)
+    (my/xwidget-pass-pointer-keys xwidget-webkit-edit-mode-map)
     (define-key xwidget-webkit-mode-map [remap split-window-below] #'my/xwidget-split-window-below-ibuffer)
     (define-key xwidget-webkit-mode-map [remap split-window-right] #'my/xwidget-split-window-right-ibuffer)
     (define-key xwidget-webkit-mode-map (kbd "q") #'quit-window)

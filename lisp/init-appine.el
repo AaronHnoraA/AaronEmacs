@@ -502,6 +502,15 @@ With DIRED-P, the main path button opens via `dired'."
                (altKey . t)))
       (message "M-%s is only routed for Aaronnote Appine tabs" key))))
 
+(defun my/appine-aaronnote-shift-tab ()
+  "Route Shift-Tab to Aaronnote when Appine is showing Aaronnote."
+  (interactive)
+  (unless (my/appine-aaronnote-command
+           "key"
+           '((key . "Tab")
+             (shiftKey . t)))
+    (message "Shift-Tab is only routed for Aaronnote Appine tabs")))
+
 (defun my/appine-keep-emacs-prefix-keys (map)
   "Remove Appine bindings that should remain normal Emacs prefixes in MAP."
   (dolist (key '("C-x C-f"
@@ -1188,6 +1197,10 @@ buffer/window selection changes."
   (when (boundp 'appine-active-map)
     (my/appine-keep-emacs-prefix-keys appine-active-map)
     (define-key appine-active-map [?\s-s]     #'my/appine-aaronnote-save-or-native)
+    (define-key appine-active-map (kbd "<backtab>") #'my/appine-aaronnote-shift-tab)
+    (define-key appine-active-map (kbd "<iso-lefttab>") #'my/appine-aaronnote-shift-tab)
+    (define-key appine-active-map (kbd "S-TAB") #'my/appine-aaronnote-shift-tab)
+    (define-key appine-active-map (kbd "S-<tab>") #'my/appine-aaronnote-shift-tab)
     (dotimes (i 10)
       (let ((digit (number-to-string i)))
         (define-key appine-active-map (kbd (format "M-%s" digit))

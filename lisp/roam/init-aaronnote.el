@@ -13,6 +13,7 @@
 (require 'url-util)
 
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
+(declare-function my/xwidget-current-url "init-browser" (&optional buffer))
 (declare-function my/appine-open-url "init-appine" (url))
 (declare-function my/appine-open-url-fresh "init-appine" (url))
 (declare-function my/appine-kill-all "init-appine" ())
@@ -26,6 +27,7 @@
 (declare-function xwidget-webkit-current-session "xwidget" ())
 (declare-function xwidget-webkit-edit-mode "xwidget" (&optional arg))
 (declare-function xwidget-webkit-execute-script "xwidget" (xwidget script &optional callback))
+(declare-function xwidget-webkit-pass-command-event "xwidget" (event))
 (defvar my/appine-tab-list)
 
 (defgroup my/aaronnote nil
@@ -231,18 +233,30 @@ Set to 0 to let the OS pick a random port."
   ;; Do an initial activity check after the page has had time to load.
   (run-with-idle-timer 2 nil #'my/aaronnote--update-activity))
 
-(defun my/aaronnote--execute-key (keys key-string)
-  "Run KEYS (key vector) forwarded from the Aaronnote browser.
-Calls the bound command interactively, or pushes prefix-map keys onto
-`unread-command-events' so the user can complete the sequence."
+(defun my/aaronnote--select-emacs-window (&optional window)
+  "Select WINDOW and ask the window system to focus its frame."
+  (let ((window (or window (selected-window))))
+    (when (window-live-p window)
+      (select-window window)
+      (when (fboundp 'select-frame-set-input-focus)
+        (ignore-errors
+          (select-frame-set-input-focus (window-frame window)))))))
+
+(defun my/aaronnote--focus-minibuffer-if-active ()
+  "Move focus to the active minibuffer after a forwarded Aaronnote key."
+  (when-let* ((window (active-minibuffer-window)))
+    (my/aaronnote--select-emacs-window window)))
+
+(defun my/aaronnote--queue-emacs-key (keys key-string)
+  "Queue KEYS forwarded from Aaronnote for Emacs' normal command loop.
+KEY-STRING is used only for diagnostics."
   (let ((binding (key-binding keys)))
     (cond
-     ((commandp binding)
-      (call-interactively binding))
-     ((keymapp binding)
+     ((or (commandp binding) (keymapp binding))
       (setq unread-command-events
             (nconc (listify-key-sequence keys)
-                   unread-command-events)))
+                   unread-command-events))
+      (run-at-time 0.05 nil #'my/aaronnote--focus-minibuffer-if-active))
      (t
       (message "Aaronnote: no binding for %s" key-string)))))
 
@@ -255,8 +269,10 @@ Calls the bound command interactively, or pushes prefix-map keys onto
                           (get-buffer-window my/aaronnote--app-buffer 'visible))))
             (if (window-live-p win)
                 (with-selected-window win
-                  (my/aaronnote--execute-key keys key-string))
-              (my/aaronnote--execute-key keys key-string)))))
+                  (my/aaronnote--select-emacs-window win)
+                  (my/aaronnote--queue-emacs-key keys key-string))
+              (my/aaronnote--select-emacs-window)
+              (my/aaronnote--queue-emacs-key keys key-string)))))
     (error
      (message "Aaronnote key forward failed (%s): %s"
               key-string (error-message-string err)))))
@@ -396,6 +412,33 @@ When FILE is non-nil, also remember it as the current note."
   (setq my/aaronnote--app-buffer buffer)
   (when file
     (my/aaronnote--sync-app-buffer-file file)))
+
+(defun my/aaronnote--xwidget-buffer-p (&optional buffer)
+  "Return non-nil when BUFFER hosts the local Aaronnote xwidget page."
+  (let ((buffer (or buffer (current-buffer))))
+    (and (buffer-live-p buffer)
+         (or (eq buffer my/aaronnote--app-buffer)
+             (with-current-buffer buffer
+               (and (eq major-mode 'xwidget-webkit-mode)
+                    (integerp my/aaronnote--port)
+                    (fboundp 'my/xwidget-current-url)
+                    (when-let* ((url (my/xwidget-current-url buffer)))
+                      (string-prefix-p
+                       (format "http://127.0.0.1:%d/" my/aaronnote--port)
+                       url))))))))
+
+(defun my/aaronnote-xwidget-shift-tab (event)
+  "Route Shift-Tab to Aaronnote in xwidget without losing the Shift modifier."
+  (interactive "e")
+  (if (my/aaronnote--xwidget-buffer-p)
+      (my/aaronnote-command
+       "key"
+       '((key . "Tab")
+         (shiftKey . t)))
+    (if (fboundp 'xwidget-webkit-pass-command-event)
+        (xwidget-webkit-pass-command-event event)
+      (setq unread-command-events
+            (nconc (list event) unread-command-events)))))
 
 (defun my/aaronnote--open-xwidget (url &optional file)
   "Open Aaronnote URL in xwidget, one buffer per file."
@@ -895,6 +938,11 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
 (with-eval-after-load 'xwidget
   (advice-add 'xwidget-webkit-callback :after
               #'my/aaronnote--xwidget-callback-advice))
+
+(with-eval-after-load 'xwidget
+  (dolist (map (list xwidget-webkit-mode-map xwidget-webkit-edit-mode-map))
+    (dolist (key '("<backtab>" "<iso-lefttab>" "S-TAB" "S-<tab>"))
+      (define-key map (kbd key) #'my/aaronnote-xwidget-shift-tab))))
 
 (provide 'init-aaronnote)
 ;;; init-aaronnote.el ends here

@@ -510,6 +510,35 @@
       );
     }
 
+    function wheelDeltaPixels(event) {
+      if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 16;
+      if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * Math.max(height, 320);
+      return event.deltaY;
+    }
+
+    function zoomAtWheel(event) {
+      if (!svg || !zoomBehavior) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const node = svg.node();
+      if (!node) return;
+
+      const pointer = d3.pointer(event, node);
+      const current = d3.zoomTransform(node);
+      const factor = Math.exp(-wheelDeltaPixels(event) * 0.0015);
+      const nextK = clamp(current.k * factor, 0.32, 3.2);
+      if (Math.abs(nextK - current.k) < 0.001) return;
+
+      const graphX = (pointer[0] - current.x) / current.k;
+      const graphY = (pointer[1] - current.y) / current.k;
+      const nextTransform = d3.zoomIdentity
+        .translate(pointer[0] - graphX * nextK, pointer[1] - graphY * nextK)
+        .scale(nextK);
+
+      svg.call(zoomBehavior.transform, nextTransform);
+    }
+
     function refitGraph(predicate, clearSelection = false) {
       if (clearSelection) {
         setSelected(null, { dispatch: false });
@@ -991,6 +1020,13 @@
         .attr("height", height)
         .attr("viewBox", [0, 0, width, height]);
 
+      svg.append("rect")
+        .attr("class", "graph-hit-area")
+        .attr("x", 0)
+        .attr("y", 0)
+        .attr("width", width)
+        .attr("height", height);
+
       canvas = svg.append("g");
       linkLayer = canvas.append("g").attr("class", "graph-links");
       nodeLayer = canvas.append("g").attr("class", "graph-nodes");
@@ -1007,7 +1043,7 @@
 
       svg.call(zoomBehavior);
       svg.node()?.addEventListener("wheel", (event) => {
-        event.preventDefault();
+        zoomAtWheel(event);
       }, { passive: false, capture: true });
       svg.on("click", () => setSelected(null, { dispatch: false }));
 
@@ -1234,6 +1270,10 @@
         height: 100%;
         min-height: inherit;
         touch-action: none;
+      }
+      .graph-hit-area {
+        fill: transparent;
+        pointer-events: all;
       }
       .graph-message {
         display: grid;

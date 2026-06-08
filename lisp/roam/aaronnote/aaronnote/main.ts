@@ -4,6 +4,7 @@ import "./style.css";
 
 import { createEditor, type EditorCommand } from "../src/lib.ts";
 import { setupCopilot } from "../src/copilot/index.ts";
+import { indentMarkdownBlock } from "../src/cm6/commands.ts";
 import { getBlockMathRanges, rangeAtPosition, rangeOverlapsAny } from "../src/cm6/math-ranges.ts";
 import { equationTagsFromText, getEquationTagHits } from "../src/equation-tags.ts";
 import { INLINE_MATH_RE, isLikelyInlineMath } from "../src/inline-math.ts";
@@ -2633,8 +2634,11 @@ function runHostKey(body: Record<string, unknown>): boolean {
   }
   if (vim.mode() !== "insert" || hostKey.ctrlKey || hostKey.metaKey || hostKey.altKey) return false;
   if (key === "Tab") {
-    if (hostKey.shiftKey) return jumpSnippetTabstopBack();
-    return jumpSnippetTabstop() || expandSnippetAtCursor();
+    const handled = hostKey.shiftKey
+      ? jumpSnippetTabstopBack() || indentMarkdownBlock(editor.view, -1)
+      : jumpSnippetTabstop() || expandSnippetAtCursor() || indentMarkdownBlock(editor.view, 1);
+    if (handled) scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
+    return handled;
   }
   if (key === "Backspace" || key === "Delete") {
     const handled = deleteHostKeyText(key);
