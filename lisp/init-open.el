@@ -62,7 +62,7 @@ macOS `open', Linux `xdg-open', Windows shell open, or `browse-url' fallback."
 (declare-function my/appine-open-file "init-appine" (path))
 (declare-function my/appine-open-url "init-appine" (url))
 (declare-function my/macos-open-target "init-macos" (target))
-(declare-function xwidget-webkit-browse-url "xwidget" (url &optional new-session))
+(declare-function my/xwidget-open-url "init-browser" (url &rest args))
 
 (defvar eww-browse-url-new-window-is-tab)
 
@@ -176,16 +176,10 @@ browser opens do not leave empty splits behind."
        (eww-browse-url (my/open-normalize-url url) t)))))
 
 (defun my/open-xwidget-url (url &optional reuse-selected)
-  "Open URL in a separate xwidget-webkit buffer shown in a side window."
-  (interactive (browse-url-interactive-arg "xwidget-webkit URL: "))
-  (unless (fboundp 'xwidget-webkit-browse-url)
-    (require 'xwidget))
-  (unless (fboundp 'xwidget-webkit-browse-url)
-    (user-error "xwidget-webkit is not available in this Emacs"))
-  (my/open--with-browser-window
-   'xwidget-webkit-mode reuse-selected
-   (lambda ()
-     (xwidget-webkit-browse-url (my/open-normalize-url url) t))))
+  "Compatibility wrapper for `my/xwidget-open-url'."
+  (unless (fboundp 'my/xwidget-open-url)
+    (require 'init-browser))
+  (my/xwidget-open-url url :display 'side :reuse-selected reuse-selected))
 
 (defun my/open-system-target (target)
   "Open TARGET with the operating system."
@@ -216,7 +210,10 @@ browser opens do not leave empty splits behind."
         (backend (my/open-normalize-backend backend)))
     (pcase backend
       ('eww (my/open-eww-url url reuse-selected))
-      ('xwidget (my/open-xwidget-url url reuse-selected))
+      ('xwidget
+       (unless (fboundp 'my/xwidget-open-url)
+         (require 'init-browser))
+       (my/xwidget-open-url url :display 'side :reuse-selected reuse-selected))
       ('appine
        (cond
         ((fboundp 'my/appine-open-url) (my/appine-open-url url))

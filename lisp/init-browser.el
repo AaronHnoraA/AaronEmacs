@@ -7,6 +7,7 @@
 ;;;
 
 (require 'general)
+(require 'cl-lib)
 (require 'init-open)
 
 (declare-function appine-open-url "appine" (url))
@@ -28,7 +29,139 @@
 (declare-function my/open-resolve-backend "init-open" (kind &optional backend))
 (declare-function my/open-url "init-open" (url &optional backend))
 (declare-function my/open-url-with-backend "init-open" (url backend &optional reuse-selected))
-(declare-function my/open-xwidget-url "init-open" (url &optional reuse-selected))
+(declare-function my/open--with-browser-window "init-open" (mode reuse-selected open-fn))
+(declare-function my/open-normalize-url "init-open" (url))
+
+;;;; xwidget API
+
+(defvar my/xwidget--sessions (make-hash-table :test #'equal)
+  "Stable xwidget session id to buffer map.")
+
+(defvar my/xwidget--session-counter 0
+  "Counter used for anonymous xwidget session ids.")
+
+(defvar-local my/xwidget-session-url nil
+  "Last URL recorded for this xwidget buffer.")
+
+(defun my/xwidget--ensure-available ()
+  "Ensure native xwidget-webkit primitives are available."
+  (unless (fboundp 'xwidget-webkit-browse-url)
+    (require 'xwidget))
+  (unless (fboundp 'xwidget-webkit-browse-url)
+    (user-error "xwidget-webkit is not available in this Emacs")))
+
+(defun my/xwidget-session-buffer (id)
+  "Return live xwidget buffer for session ID, or nil."
+  (let ((buffer (and id (gethash id my/xwidget--sessions))))
+    (when (buffer-live-p buffer)
+      buffer)))
+
+(defun my/xwidget-current-url (&optional buffer)
+  "Return current URL for xwidget BUFFER, defaulting to current buffer."
+  (let ((buffer (or buffer (current-buffer))))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (or my/xwidget-session-url
+            (and (eq major-mode 'xwidget-webkit-mode)
+                 (fboundp 'xwidget-webkit-current-session)
+                 (fboundp 'xwidget-webkit-uri)
+                 (ignore-errors
+                   (xwidget-webkit-uri (xwidget-webkit-current-session)))))))))
+
+(defun my/xwidget--record-buffer (buffer id url)
+  "Record BUFFER as xwidget session ID with URL."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq-local my/xwidget-session-url url))
+    (when id
+      (puthash id buffer my/xwidget--sessions))))
+
+(defun my/xwidget--display-buffer (buffer display)
+  "Display BUFFER according to DISPLAY."
+  (pcase display
+    ('none nil)
+    ('current (switch-to-buffer buffer))
+    (_ (pop-to-buffer buffer))))
+
+(cl-defun my/xwidget-open-url (url &key id (display 'side) force-new reuse-selected)
+  "Open URL through the customized xwidget API.
+ID identifies a stable session.  DISPLAY may be `side', `current' or `none'.
+When FORCE-NEW is non-nil, replace the old buffer for ID."
+  (interactive
+   (list (read-string "xwidget URL: ")
+         :display 'side))
+  (my/xwidget--ensure-available)
+  (let* ((url (my/open-normalize-url url))
+         (id (or id (format "xwidget-%d" (cl-incf my/xwidget--session-counter))))
+         (existing (my/xwidget-session-buffer id)))
+    (when (and existing force-new)
+      (remhash id my/xwidget--sessions)
+      (kill-buffer existing)
+      (setq existing nil))
+    (if existing
+        (progn
+          (if (and (fboundp 'xwidget-webkit-current-session)
+                   (fboundp 'xwidget-webkit-goto-uri))
+              (with-current-buffer existing
+                (xwidget-webkit-goto-uri (xwidget-webkit-current-session) url))
+            (user-error "xwidget-webkit-goto-uri is not available"))
+          (my/xwidget--record-buffer existing id url)
+          (my/xwidget--display-buffer existing display)
+          existing)
+      (let ((buffer
+             (if (eq display 'side)
+                 (my/open--with-browser-window
+                  'xwidget-webkit-mode reuse-selected
+                  (lambda ()
+                    (xwidget-webkit-browse-url url t)
+                    (current-buffer)))
+               (xwidget-webkit-browse-url url t)
+               (current-buffer))))
+        (my/xwidget--record-buffer buffer id url)
+        (my/xwidget--display-buffer buffer display)
+        buffer))))
+
+(defun my/xwidget-open-url-current (url)
+  "Open URL in xwidget using the selected window."
+  (interactive (browse-url-interactive-arg "xwidget URL: "))
+  (my/xwidget-open-url url :display 'current :reuse-selected t))
+
+(defun my/xwidget-reload ()
+  "Reload the current xwidget page through the customized API."
+  (interactive)
+  (if (fboundp 'xwidget-webkit-reload)
+      (call-interactively #'xwidget-webkit-reload)
+    (user-error "xwidget reload is not available")))
+
+(defun my/xwidget-back ()
+  "Navigate the current xwidget page backward."
+  (interactive)
+  (if (fboundp 'xwidget-webkit-back)
+      (call-interactively #'xwidget-webkit-back)
+    (user-error "xwidget back is not available")))
+
+(defun my/xwidget-forward ()
+  "Navigate the current xwidget page forward."
+  (interactive)
+  (if (fboundp 'xwidget-webkit-forward)
+      (call-interactively #'xwidget-webkit-forward)
+    (user-error "xwidget forward is not available")))
+
+(defun my/xwidget-copy-selection ()
+  "Copy selection from the current xwidget page."
+  (interactive)
+  (if (fboundp 'xwidget-webkit-copy-selection-as-kill)
+      (call-interactively #'xwidget-webkit-copy-selection-as-kill)
+    (user-error "xwidget copy selection is not available")))
+
+(defun my/xwidget-copy-url ()
+  "Copy current xwidget URL."
+  (interactive)
+  (if-let* ((url (my/xwidget-current-url)))
+      (progn
+        (kill-new url)
+        (message "Copied URL."))
+    (user-error "No xwidget URL available")))
 ;; 共享 Brave 的所有数据（需要关闭 Brave）
 (setq xwidget-webkit-cookie-file 
       (expand-file-name "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"))
@@ -73,20 +206,13 @@
   ;; 进入 xwidget buffer 时给常用键（不会污染全局）
   (with-eval-after-load 'xwidget
     (define-key xwidget-webkit-mode-map (kbd "q") #'quit-window)
-    (define-key xwidget-webkit-mode-map (kbd "g") #'xwidget-webkit-reload)
+    (define-key xwidget-webkit-mode-map (kbd "g") #'my/xwidget-reload)
     (define-key xwidget-webkit-mode-map (kbd "M-r") #'my/refresh-current-content)
-    (define-key xwidget-webkit-mode-map (kbd "l") #'my/open-xwidget-url)
-    (define-key xwidget-webkit-mode-map (kbd "b") #'xwidget-webkit-back)
-    (define-key xwidget-webkit-mode-map (kbd "f") #'xwidget-webkit-forward)
-    (define-key xwidget-webkit-mode-map (kbd "y") #'xwidget-webkit-copy-selection-as-kill)
-
-    ;; 有些版本提供复制 URL 的命令；若没有也不影响
-    (when (fboundp 'xwidget-webkit-current-url)
-      (define-key xwidget-webkit-mode-map (kbd "Y")
-        (lambda ()
-          (interactive)
-          (kill-new (xwidget-webkit-current-url))
-          (message "Copied URL."))))))
+    (define-key xwidget-webkit-mode-map (kbd "l") #'my/xwidget-open-url-current)
+    (define-key xwidget-webkit-mode-map (kbd "b") #'my/xwidget-back)
+    (define-key xwidget-webkit-mode-map (kbd "f") #'my/xwidget-forward)
+    (define-key xwidget-webkit-mode-map (kbd "y") #'my/xwidget-copy-selection)
+    (define-key xwidget-webkit-mode-map (kbd "Y") #'my/xwidget-copy-url)))
 
 ;;;; browse-url 统一入口：默认策略由 init-open.el 维护
 
@@ -102,7 +228,7 @@
 (general-define-key
  :keymaps 'global
  "C-c w e" #'my/open-eww-url
- "C-c w x" #'my/open-xwidget-url
+ "C-c w x" #'my/xwidget-open-url
  "C-c w a" #'my/appine-open-url
  "C-c w f" #'my/appine-open-file
  "C-c w g" #'my/appine-open-at-point
@@ -145,7 +271,7 @@
 (defun my/xwidget-get-url ()
   "获取当前 Xwidget buffer 的 URL，带空值检查"
   (if (eq major-mode 'xwidget-webkit-mode)
-      (xwidget-webkit-uri (xwidget-webkit-current-session))
+      (my/xwidget-current-url)
     nil))
 
 (defun my/browser-build-search-url (search-term engine)
@@ -228,7 +354,7 @@ window, avoiding orphan browser buffers/windows."
    ((derived-mode-p 'eww-mode)
     (call-interactively #'eww-reload))
    ((eq major-mode 'xwidget-webkit-mode)
-    (call-interactively #'xwidget-webkit-reload))
+    (call-interactively #'my/xwidget-reload))
    ((or (buffer-file-name) (derived-mode-p 'dired-mode))
     (if (buffer-modified-p)
         (user-error "当前 buffer 有未保存修改，先保存再刷新")
@@ -310,7 +436,7 @@ window, avoiding orphan browser buffers/windows."
         (progn
           (message "正在切换至 Xwidget: %s" url)
           ;; 启动 xwidget
-          (my/open-xwidget-url url t)
+          (my/xwidget-open-url url :display 'current :reuse-selected t)
           ;; 【关键修正】：不要立即杀 buffer。
           ;; 使用 run-at-time 0 让 Emacs 先完成 buffer 切换和界面重绘，
           ;; 待事件循环空闲时再回头杀掉旧 buffer。

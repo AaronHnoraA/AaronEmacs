@@ -593,7 +593,7 @@ Emacs state keep their local behavior."
     "oS" 'my/vterm-ssh
     "ow" 'my/open-eww-url
     "oW" 'my/browser-open-search
-    "ox" 'my/open-xwidget-url
+    "ox" 'my/xwidget-open-url
     "oB" 'my/browser-switch-to
     "os" 'shell-toggle)
 

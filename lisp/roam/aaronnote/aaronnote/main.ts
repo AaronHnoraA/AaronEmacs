@@ -23,6 +23,12 @@ import { matchingSnippetsForPrefix, SnippetSession, snippetDetail, snippetLabel,
 import type { NoteSummary, SnippetSummary } from "./types.ts";
 import { createVimCursor, updateVimCursor } from "./vim-cursor.ts";
 import { createVimLite, type VimLiteKey, type VimLiteMode } from "./vim-lite.ts";
+import {
+  handleXwidgetControlBeforeInput,
+  handleXwidgetControlKeydown,
+  handleXwidgetVimBeforeInput,
+  handleXwidgetVimKeydown,
+} from "./xwidget-key-guard.ts";
 
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("Missing #app");
@@ -1087,6 +1093,12 @@ function openFormModal(title: string, fields: ModalField[], submitLabel = "OK"):
     modal.addEventListener("mousedown", (event) => {
       if (event.target === modal) close(null);
     }, { once: true });
+    panel.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      close(null);
+    });
     panel.addEventListener("submit", (event) => {
       event.preventDefault();
       const value: Record<string, string> = {};
@@ -2703,6 +2715,24 @@ document.addEventListener("keydown", (event) => {
       return;
     }
   }
+  if (handleXwidgetControlKeydown(event, {
+    editor,
+    editorHost: host,
+    vim,
+    enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
+  })) {
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+    return;
+  }
+  if (handleXwidgetVimKeydown(event, {
+    editor,
+    editorHost: host,
+    vim,
+    enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
+  })) {
+    scheduleAssistUpdate({ cursor: true, toc: true });
+    return;
+  }
   if (vim.mode() === "insert" && event.key === "Tab" && !event.metaKey && !event.ctrlKey && !event.altKey) {
     const handled = event.shiftKey
       ? jumpSnippetTabstopBack()
@@ -2727,6 +2757,26 @@ document.addEventListener("keydown", (event) => {
   if (runFormattingShortcut(event)) {
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
     event.stopPropagation();
+    return;
+  }
+}, true);
+document.addEventListener("beforeinput", (event) => {
+  if (handleXwidgetControlBeforeInput(event as InputEvent, {
+    editor,
+    editorHost: host,
+    vim,
+    enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
+  })) {
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+    return;
+  }
+  if (handleXwidgetVimBeforeInput(event as InputEvent, {
+    editor,
+    editorHost: host,
+    vim,
+    enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
+  })) {
+    scheduleAssistUpdate({ cursor: true, toc: true });
   }
 }, true);
 document.addEventListener("selectionchange", () => scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true }));

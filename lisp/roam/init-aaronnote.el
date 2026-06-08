@@ -12,7 +12,7 @@
 (require 'url)
 (require 'url-util)
 
-(declare-function my/open-xwidget-url "init-browser" (url &optional reuse-selected))
+(declare-function my/xwidget-open-url "init-browser" (url &rest args))
 (declare-function my/appine-open-url "init-appine" (url))
 (declare-function my/appine-open-url-fresh "init-appine" (url))
 (declare-function my/appine-kill-all "init-appine" ())
@@ -57,15 +57,15 @@
   (expand-file-name ".roam" user-emacs-directory)
   "Path to the Markdown notes directory.")
 
-(defcustom my/aaronnote-backend 'appine
+(defcustom my/aaronnote-backend 'xwidget
   "Backend used to display Aaronnote."
-  :type '(choice (const :tag "Appine" appine)
-                 (const :tag "xwidget-webkit" xwidget))
+  :type '(choice (const :tag "xwidget-webkit" xwidget)
+                 (const :tag "Appine" appine))
   :group 'my/aaronnote)
 
 (defcustom my/aaronnote-web-port 50815
   "Fixed port for the Aaronnote web host.
-Set to 0 to let the OS pick a random port (breaks cross-session Appine tabs)."
+Set to 0 to let the OS pick a random port."
   :type 'integer
   :group 'my/aaronnote)
 
@@ -321,11 +321,16 @@ When FILE is non-nil, also remember it as the current note."
   (when file
     (my/aaronnote--sync-app-buffer-file file)))
 
-(defun my/aaronnote--open-xwidget (url &optional file)
-  "Open Aaronnote URL in xwidget in the selected window."
-  (unless (fboundp 'xwidget-webkit-browse-url)
-    (require 'xwidget))
-  (my/open-xwidget-url url t)
+(defun my/aaronnote--open-xwidget (url &optional file force-new)
+  "Open Aaronnote URL in xwidget in the selected window.
+With FORCE-NEW non-nil, replace the remembered Aaronnote xwidget session."
+  (unless (fboundp 'my/xwidget-open-url)
+    (require 'init-browser))
+  (my/xwidget-open-url url
+                       :id "aaronnote"
+                       :display 'current
+                       :reuse-selected t
+                       :force-new force-new)
   (my/aaronnote--track-app-buffer (current-buffer) file))
 
 (defun my/aaronnote--open-appine (url &optional file force-new)
@@ -383,14 +388,14 @@ tab registry stale), so trusting a remembered index would silently no-op."
 (defun my/aaronnote--open-url (url &optional file force-new)
   "Open Aaronnote URL using `my/aaronnote-backend'.
 FORCE-NEW, when non-nil, asks the Appine backend for a fresh tab instead of
-reusing a remembered one (see `my/aaronnote--open-appine')."
+reusing a remembered one, or replaces the remembered xwidget session."
   (pcase my/aaronnote-backend
     ('appine
      (if (my/aaronnote--appine-available-p)
          (my/aaronnote--open-appine url file force-new)
        (message "Aaronnote: using xwidget because Appine is unavailable")
-       (my/aaronnote--open-xwidget url file)))
-    ('xwidget (my/aaronnote--open-xwidget url file))
+       (my/aaronnote--open-xwidget url file force-new)))
+    ('xwidget (my/aaronnote--open-xwidget url file force-new))
     (_ (user-error "Unsupported Aaronnote backend: %S" my/aaronnote-backend))))
 
 (defun my/aaronnote--post (payload)
