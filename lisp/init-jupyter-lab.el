@@ -102,6 +102,25 @@ When nil, prefer the current project root, then `default-directory'."
   "Return the URL for the managed local JupyterLab server."
   (format "http://%s:%d/lab" my/jupyter-lab-host my/jupyter-lab-port))
 
+(defun my/jupyter-lab-url-p (url)
+  "Return non-nil when URL targets the managed local JupyterLab server."
+  (and (stringp url)
+       (string-prefix-p
+        (format "http://%s:%d/" my/jupyter-lab-host my/jupyter-lab-port)
+        url)))
+
+(defun my/jupyter-lab-open-path (abs-path &optional selector)
+  "Open notebook ABS-PATH in xwidget, jumping to SELECTOR heading slug if given."
+  (let* ((root (expand-file-name (my/jupyter-lab--default-directory)))
+         (rel  (file-relative-name (expand-file-name abs-path) root))
+         (frag (if (and selector (not (string-empty-p selector)))
+                   (concat "#" (url-hexify-string selector)) ""))
+         (url  (format "http://%s:%d/lab/tree/%s%s"
+                       my/jupyter-lab-host my/jupyter-lab-port
+                       (url-hexify-string rel) frag)))
+    (unless (fboundp 'my/xwidget-open-url) (require 'init-browser))
+    (my/xwidget-open-url url :id "jupyter-lab" :display 'side)))
+
 (defun my/jupyter-lab-running-p ()
   "Return non-nil when the managed local JupyterLab process is alive."
   (and (processp my/jupyter-lab-process)
@@ -190,9 +209,10 @@ When KEEP-LOG-BUFFER is non-nil, do not kill the log buffer."
     (my/jupyter-lab--refresh-manager-maybe)))
 
 (defun my/jupyter-lab-open ()
-  "Open managed local JupyterLab in the default browser."
+  "Open managed local JupyterLab in xwidget."
   (interactive)
-  (browse-url-default-browser (my/jupyter-lab-url)))
+  (unless (fboundp 'my/xwidget-open-url) (require 'init-browser))
+  (my/xwidget-open-url (my/jupyter-lab-url) :id "jupyter-lab" :display 'side))
 
 (defun my/jupyter-lab-start (&optional open)
   "Start managed local JupyterLab in the background.

@@ -344,10 +344,16 @@ KEY-STRING is used only for diagnostics."
                            (substring line (length system-open-prefix))
                            :object-type 'alist))
                  (target (alist-get 'target payload)))
-            (unless (fboundp 'my/open-system-target)
-              (require 'init-open))
             (when (and (stringp target) (not (string-empty-p target)))
-              (my/open-system-target target)))
+              (if (and (fboundp 'my/jupyter-lab-url-p)
+                       (my/jupyter-lab-url-p target))
+                  (progn
+                    (unless (fboundp 'my/xwidget-open-url)
+                      (require 'init-browser))
+                    (my/xwidget-open-url target :id "jupyter-lab" :display 'side))
+                (unless (fboundp 'my/open-system-target)
+                  (require 'init-open))
+                (my/open-system-target target))))
         (error
          (message "Aaronnote system-open event failed: %s"
                   (error-message-string err)))))
@@ -944,6 +950,48 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 (my/aaronnote--def-editor-cmd "insert-math"     "insert-math-block" "Insert a math block.")
 (my/aaronnote--def-editor-cmd "insert-toc"      "insert-toc"      "Insert a table of contents.")
 
+;;; Jupyter integration.
+
+(declare-function my/jupyter-lab-url-p    "init-jupyter-lab" (url))
+(declare-function my/jupyter-lab-open     "init-jupyter-lab" ())
+(declare-function my/jupyter-lab-open-path "init-jupyter-lab" (abs-path &optional selector))
+
+(defun my/aaronnote--infer-notebook ()
+  "Return the .ipynb file co-located with the current Aaronnote note, or nil."
+  (when-let* ((file (my/aaronnote-buffer-file)))
+    (let ((nb (concat (file-name-sans-extension file) ".ipynb")))
+      (when (file-exists-p nb) nb))))
+
+(defun my/aaronnote-jupyter-open ()
+  "Open the notebook associated with the current note in xwidget.
+Falls back to JupyterLab root when no matching .ipynb exists."
+  (interactive)
+  (unless (fboundp 'my/jupyter-lab-open) (require 'init-jupyter-lab))
+  (if-let* ((nb (my/aaronnote--infer-notebook)))
+      (my/jupyter-lab-open-path nb)
+    (my/jupyter-lab-open)))
+
+(defun my/aaronnote-jupyter-open-at-toc ()
+  "Pick a heading from the current note, then open its notebook at that section."
+  (interactive)
+  (let ((file (my/aaronnote-buffer-file)))
+    (unless file (user-error "No current Aaronnote note"))
+    (unless (fboundp 'my/aaronnote-roam--dom-targets)
+      (require 'init-md-roam))
+    (let* ((targets (nreverse (my/aaronnote-roam--dom-targets file)))
+           (choices  (mapcar
+                      (lambda (tgt)
+                        (cons (string-join (plist-get tgt :label-path) " / ")
+                              (car (last (plist-get tgt :path)))))
+                      targets))
+           (choice   (completing-read "Jump to heading: "
+                                      (mapcar #'car choices) nil t))
+           (slug     (cdr (assoc choice choices))))
+      (unless (fboundp 'my/jupyter-lab-open) (require 'init-jupyter-lab))
+      (if-let* ((nb (my/aaronnote--infer-notebook)))
+          (my/jupyter-lab-open-path nb slug)
+        (my/jupyter-lab-open)))))
+
 ;;; Dispatch transient.
 
 (defun my/aaronnote--dispatch-header ()
@@ -1002,6 +1050,9 @@ Blocks the caller until the response arrives (or 8 s timeout)."
       ("D" "dired"            my/aaronnote-roam-dired)
       ("m" "magit"            my/aaronnote-roam-magit)
       ("q" "stop server"      my/aaronnote-stop)]
+     ["Jupyter"
+      ("J" "open notebook"    my/aaronnote-jupyter-open)
+      ("H" "open at heading"  my/aaronnote-jupyter-open-at-toc)]
      ["Format (web)"
       ("1" "bold"             my/aaronnote-bold)
       ("2" "italic"           my/aaronnote-italic)

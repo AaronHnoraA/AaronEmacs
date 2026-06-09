@@ -272,7 +272,8 @@ toolbar, which bypasses `appine-close-tab')."
     (my/appine--tab-reset)
     (when (fboundp 'appine-kill)
       (appine-kill))
-    (message "已清理 %d 个 Appine Buffer/Window。" count)))
+    (when (> count 0)
+      (message "已清理 %d 个 Appine Buffer/Window。" count))))
 
 (defun my/appine-restart ()
   "Restart Appine after clearing old native views."
