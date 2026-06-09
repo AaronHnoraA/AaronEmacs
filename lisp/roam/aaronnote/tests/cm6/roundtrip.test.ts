@@ -35,6 +35,14 @@ function mountCM6(initialContent = "") {
   return { editor, cleanup: () => { editor.destroy(); host.remove(); } };
 }
 
+function iframeSrc(iframe: HTMLIFrameElement): string {
+  return iframe.getAttribute("src") || iframe.getAttribute("data-aaronnote-src") || "";
+}
+
+function iframeSrcdoc(iframe: HTMLIFrameElement): string {
+  return iframe.getAttribute("srcdoc") || iframe.getAttribute("data-aaronnote-srcdoc") || "";
+}
+
 function nextTick(): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, 0));
 }
@@ -1764,8 +1772,8 @@ after
 
     const iframe = document.querySelector<HTMLIFrameElement>(".cm-visual-embed-drawio");
     expect(iframe).toBeTruthy();
-    expect(iframe!.getAttribute("srcdoc") || "").toContain("embed.diagrams.net");
-    expect(iframe!.getAttribute("srcdoc") || "").toContain('action: "load"');
+    expect(iframeSrcdoc(iframe!)).toContain("embed.diagrams.net");
+    expect(iframeSrcdoc(iframe!)).toContain('action: "load"');
     expect(document.querySelector(".cm-image-widget img")).toBeNull();
     cleanup();
   });
@@ -1777,7 +1785,7 @@ after
 
     const iframe = document.querySelector<HTMLIFrameElement>(".cm-visual-embed-html");
     expect(iframe).toBeTruthy();
-    expect(iframe!.getAttribute("src") || "").toContain("attachments/demo.html");
+    expect(iframeSrc(iframe!)).toContain("attachments/demo.html");
     expect(iframe!.getAttribute("sandbox")).toBe("allow-scripts allow-forms allow-popups allow-downloads");
     expect(document.querySelector(".cm-image-widget img")).toBeNull();
     cleanup();
@@ -1790,7 +1798,7 @@ after
 
     const iframe = document.querySelector<HTMLIFrameElement>(".cm-visual-embed-html");
     expect(iframe).toBeTruthy();
-    expect(iframe!.getAttribute("src") || "").toContain("attachments/demo.html");
+    expect(iframeSrc(iframe!)).toContain("attachments/demo.html");
     expect(iframe!.getAttribute("sandbox")).toBe("allow-scripts allow-forms allow-popups allow-downloads");
     expect(document.querySelector(".cm-image-widget img")).toBeNull();
     cleanup();

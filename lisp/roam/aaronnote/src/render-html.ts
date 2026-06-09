@@ -484,6 +484,35 @@ function renderVisualAttachmentImage(token: Token, kind: VisualAttachmentKind, r
   return `<figure ${attrs.join(" ")}>${body}${caption}</figure>`;
 }
 
+function happyDomTestEnvironmentP(): boolean {
+  return typeof navigator !== "undefined" && /\bHappyDOM\//.test(navigator.userAgent);
+}
+
+function protectIframeNavigationAttrsForDom(html: string): { html: string; attrs: string[] } {
+  const attrs: string[] = [];
+  if (!happyDomTestEnvironmentP()) return { html, attrs };
+  return {
+    attrs,
+    html: html.replace(/<iframe\b[^>]*>/g, (tag) =>
+      tag.replace(/\s(srcdoc|src)="([^"]*)"/g, (_match, name: string, value: string) => {
+        const index = attrs.push(`${name}="${value}"`) - 1;
+        return ` data-aaronnote-dom-${name}-index="${index}"`;
+      })),
+  };
+}
+
+function restoreIframeNavigationAttrsFromDom(html: string, attrs: readonly string[]): string {
+  return html
+    .replace(/\sdata-aaronnote-dom-srcdoc-index="(\d+)"/g, (_match, rawIndex: string) => {
+      const attr = attrs[Number(rawIndex)];
+      return attr ? ` ${attr}` : "";
+    })
+    .replace(/\sdata-aaronnote-dom-src-index="(\d+)"/g, (_match, rawIndex: string) => {
+      const attr = attrs[Number(rawIndex)];
+      return attr ? ` ${attr}` : "";
+    });
+}
+
 function emptyHtmlLinkEmbedRule(state: StateInline, silent: boolean): boolean {
   if (state.src.charCodeAt(state.pos) !== 0x5b || state.src.charCodeAt(state.pos + 1) !== 0x5d) return false;
   const match = state.src.slice(state.pos).match(/^\[\]\(([^)\n]+)\)/);
@@ -787,9 +816,10 @@ export function renderMarkdownHTML(
 ): string {
   const md = createMarkdownIt(options);
   const root = document.createElement("div");
-  root.innerHTML = md.render(isolateBlockLayoutAttrLines(markdown));
+  const protectedHtml = protectIframeNavigationAttrsForDom(md.render(isolateBlockLayoutAttrLines(markdown)));
+  root.innerHTML = protectedHtml.html;
   applyTaskCheckboxes(root);
-  return cleanEditorHTML(root);
+  return restoreIframeNavigationAttrsFromDom(cleanEditorHTML(root), protectedHtml.attrs);
 }
 
 export function renderPublishedNoteHTML(

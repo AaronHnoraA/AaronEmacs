@@ -290,6 +290,8 @@ export function cleanEditorHTML(root: HTMLElement): string {
       "data-aaronnote-image-align",
       "data-aaronnote-image-wrap",
       "data-aaronnote-visual-kind",
+      "data-aaronnote-dom-src-index",
+      "data-aaronnote-dom-srcdoc-index",
       "data-aaronnote-protected-srcdoc",
       "data-aaronnote-protected-frame-attrs",
       "href",

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { AssistScheduler, type AssistUpdateFlags } from "../aaronnote/assist-scheduler.ts";
 
 function createFrameApi() {
@@ -32,7 +33,7 @@ function createFrameApi() {
 
 describe("AssistScheduler", () => {
   test("main initializes the scheduler before the first mode-label assist update", () => {
-    const source = readFileSync(new URL("../aaronnote/main.ts", import.meta.url), "utf8");
+    const source = readFileSync(join(process.cwd(), "aaronnote/main.ts"), "utf8");
     const schedulerIndex = source.indexOf("const assistScheduler = new AssistScheduler");
     const firstModeUpdateIndex = source.indexOf("updateModeLabel(vim.mode())");
     expect(schedulerIndex).toBeGreaterThanOrEqual(0);

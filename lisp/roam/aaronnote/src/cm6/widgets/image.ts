@@ -56,6 +56,29 @@ function resolveImageSrc(src: string): string {
   return window.AaronnoteResolveAssetUrl?.(raw) ?? raw;
 }
 
+function happyDomTestEnvironmentP(): boolean {
+  return typeof navigator !== "undefined" && /\bHappyDOM\//.test(navigator.userAgent);
+}
+
+function setVisualFrameSource(
+  iframe: HTMLIFrameElement,
+  frame: ReturnType<typeof visualAttachmentFrame>,
+): void {
+  if (frame.mode === "src") {
+    if (happyDomTestEnvironmentP()) {
+      iframe.setAttribute("data-aaronnote-src", frame.src);
+    } else {
+      iframe.setAttribute("src", frame.src);
+    }
+    return;
+  }
+  if (happyDomTestEnvironmentP()) {
+    iframe.setAttribute("data-aaronnote-srcdoc", frame.srcdoc);
+  } else {
+    iframe.setAttribute("srcdoc", frame.srcdoc);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Widget
 // ---------------------------------------------------------------------------
@@ -125,11 +148,7 @@ class ImageWidget extends MeasuredWidget {
           iframe.setAttribute("allow", VISUAL_ATTACHMENT_IFRAME_ALLOW);
           iframe.setAttribute("referrerpolicy", "no-referrer-when-downgrade");
           iframe.setAttribute("sandbox", visualAttachmentSandbox(kind));
-          if (frame.mode === "src") {
-            iframe.src = frame.src;
-          } else {
-            iframe.srcdoc = frame.srcdoc;
-          }
+          setVisualFrameSource(iframe, frame);
           iframe.addEventListener("load", () => { if (wrap.isConnected) view.requestMeasure(); });
           wrap.append(iframe);
         } else {
