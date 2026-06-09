@@ -9,7 +9,7 @@
 
 import { createServer } from "node:http";
 import { existsSync, statSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, rm, stat } from "node:fs/promises";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
@@ -22,6 +22,8 @@ import {
   notesIndexPayload,
   graphPayload,
   scanRoamNotes,
+  scanNotes,
+  tagIndexPayload,
   pathSuggestionsForFile,
   readNoteCodeRegion,
   syncRoamDb,
@@ -31,6 +33,7 @@ import {
   deleteRoamTag,
   roamTagOverlapReport,
   rewriteMarkdownPathReferences,
+  getTodos,
 } from "./server/lib/index.mjs";
 import { configure, markNotesDirty } from "./server/lib/state.mjs";
 import { saveNote } from "./server/lib/save.mjs";
@@ -60,6 +63,7 @@ import {
 } from "./server/lib/session.mjs";
 import { handleCopilotRequest, shutdownCopilot } from "./server/lib/copilot.mjs";
 import { runExternalProseChecks } from "./server/lib/prose-check.mjs";
+import { runtimeMkdtemp } from "./server/lib/tmp.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -70,6 +74,7 @@ const workspaceRoot = resolve(process.env.AARONNOTE_WORKSPACE_ROOT || resolve(sc
 const noteRoot = resolve(process.env.AARONNOTE_ROOT || join(workspaceRoot, ".roam"));
 const publishJsDir = resolve(process.env.AARONNOTE_PUBLISH_JS_DIR || join(runtimeRoot, "js"));
 const stateRoot = resolve(process.env.AARONNOTE_STATE_DIR || join(workspaceRoot, "var", "aaronnote"));
+const tmpRoot = resolve(process.env.AARONNOTE_TMP_DIR || join(stateRoot, "tmp"));
 const snippetsRoot = resolve(process.env.AARONNOTE_SNIPPETS_ROOT || join(workspaceRoot, "snippets"));
 const templatesRoot = resolve(process.env.AARONNOTE_TEMPLATES_ROOT || join(workspaceRoot, "templates", "aaronnote"));
 const bindHost = process.env.AARONNOTE_WEB_HOST || "127.0.0.1";
@@ -85,6 +90,7 @@ configure({
   workspaceRoot,
   publishJsDir,
   stateRoot,
+  tmpRoot,
   snippetsRoot,
   templatesRoot,
 });
@@ -373,6 +379,17 @@ async function apiEmacsKey(key) {
   return { ok: true };
 }
 
+async function apiSystemOpen(target) {
+  const value = String(target || "").trim();
+  if (!/^zotero:\/\//i.test(value)) {
+    const err = new Error(`Unsupported system-open target: ${value}`);
+    err.statusCode = 400;
+    throw err;
+  }
+  process.stdout.write(`aaronote-event:system-open:${JSON.stringify({ target: value })}\n`);
+  return { ok: true, target: value };
+}
+
 const apiHandlers = {
   "aaronnote:api:notes:bootstrap": (file) => bootstrapNote(file || undefined),
   "aaronnote:api:notes:open": (file) => readNote(file),
@@ -386,11 +403,46 @@ const apiHandlers = {
   },
   "aaronnote:api:notes:create-node": (draft) => createNode(draft || {}),
   "aaronnote:api:notes:delete": (file) => deleteNote({ file }),
+  "aaronnote:api:notes:delete-node": (file) => deleteNote({ file }),
   "aaronnote:api:notes:create-folder": (path) => createFolder({ path }),
   "aaronnote:api:notes:path-suggestions": async (body) => {
     const file = typeof body === "string" ? body : body?.file;
     const prefix = typeof body === "string" ? "./" : body?.prefix;
     return { type: "path-suggestions", paths: await pathSuggestionsForFile(file || "", prefix || "./") };
+  },
+  "aaronnote:api:completions:tags": async (body) => {
+    const prefix = String(body?.prefix || "").toLowerCase();
+    const notes = await scanNotes();
+    const payload = tagIndexPayload(notes);
+    const names = payload.tags.map((t) => t.name);
+    const filtered = prefix ? names.filter((n) => n.toLowerCase().includes(prefix)) : names;
+    return { type: "completion-tags", tags: filtered.slice(0, 50) };
+  },
+  "aaronnote:api:completions:roam": async (body) => {
+    const prefix = String(body?.prefix || "").toLowerCase();
+    const notes = await scanNotes();
+    const roamNotes = notes.filter((n) => n.roam && (n.id || n.key || n.title));
+    const matches = prefix
+      ? roamNotes.filter((n) => {
+          const search = [n.id, n.key, n.title, ...(n.aliases || [])].map((v) => String(v || "").toLowerCase()).join(" ");
+          return search.includes(prefix);
+        })
+      : roamNotes;
+    return {
+      type: "completion-roam",
+      notes: matches.slice(0, 20).map((n) => ({
+        id: n.id || n.key || "",
+        key: n.key || n.id || "",
+        title: n.title || "",
+        path: n.path || n.file || "",
+      })),
+    };
+  },
+  "aaronnote:api:notes:todos": async (body) => {
+    return await getTodos(typeof body === "string" ? body : body?.file || "");
+  },
+  "aaronnote:api:notes:index": async () => {
+    return { type: "notes", ...await notesIndexPayload(), root: noteRoot };
   },
   "aaronnote:api:note-code:read-region": (body) => readNoteCodeRegion(body || {}),
   "aaronnote:api:notes:roam-sync": (reload) => roamSyncPayload(reload === true),
@@ -409,6 +461,7 @@ const apiHandlers = {
   "aaronnote:api:assets:render-tikz": (body) => renderTikzAsset(body || {}),
   "aaronnote:api:assets:scan-orphans": async () => ({ type: "unused-assets", assets: await scanUnusedAssets(), root: noteRoot }),
   "aaronnote:api:assets:trash-orphans": (files) => trashUnusedAssets({ files }),
+  "aaronnote:api:clipboard:read": (body) => readSystemClipboard(body || {}),
 
   "aaronnote:api:session:recent": async () => ({ type: "recent", recent: await readRecentNotes() }),
   "aaronnote:api:session:touch-recent": async (file, openedAt) => ({
@@ -440,7 +493,40 @@ const apiHandlers = {
   "aaronnote:api:emacs:open": (body) => apiOpenInEmacs(body?.file ?? body, body?.line, body?.col, body?.tag),
   "aaronnote:api:emacs:current-file": (file) => apiCurrentFile(file),
   "aaronnote:api:emacs:key": (key) => apiEmacsKey(key),
+  "aaronnote:api:emacs:system-open": (target) => apiSystemOpen(target),
 };
+
+async function readSystemClipboard(body) {
+  const file = String(body.file || "");
+  let tempDir = "";
+  try {
+    tempDir = await runtimeMkdtemp("clipboard", file || "clipboard.png");
+    const target = join(tempDir, "clipboard.png");
+    await execFileAsync("pngpaste", [target]);
+    if (await isFile(target)) {
+      const asset = await storeAssetFromPath({
+        file,
+        path: target,
+        name: "clipboard.png",
+        type: "image/png",
+      });
+      return { kind: "asset", asset };
+    }
+  } catch (_) {
+    // No image on the clipboard, pngpaste unavailable, or asset storage failed.
+  } finally {
+    if (tempDir) {
+      try { await rm(tempDir, { recursive: true, force: true }); } catch {}
+    }
+  }
+
+  try {
+    const { stdout } = await execFileAsync("pbpaste");
+    return stdout ? { kind: "text", text: stdout } : { kind: "empty" };
+  } catch (_) {
+    return { kind: "empty" };
+  }
+}
 
 async function callApi(channel, args = []) {
   const handler = apiHandlers[channel];
@@ -583,6 +669,7 @@ function adapterScript(origin) {
       save: function(body) { return call("aaronnote:api:notes:save", [body || {}]); },
       saveKeepalive: function(body) { callKeepalive("aaronnote:api:notes:save", [body || {}]); },
       createNode: function(draft) { return call("aaronnote:api:notes:create-node", [draft || {}]); },
+      deleteNode: function(file) { return call("aaronnote:api:notes:delete-node", [String(file || "")]); },
       deleteNote: function(file) { return call("aaronnote:api:notes:delete", [String(file || "")]); },
       createFolder: function(path) { return call("aaronnote:api:notes:create-folder", [String(path || "")]); },
       pathSuggestions: function(file, prefix) {
@@ -592,7 +679,13 @@ function adapterScript(origin) {
       roamSyncFull: function() { return call("aaronnote:api:notes:roam-sync-full", []); },
       templates: function(force) { return call("aaronnote:api:notes:templates", [force === true]); },
       snippets: function() { return call("aaronnote:api:notes:snippets", []); },
-      metaAdd: function(body) { return call("aaronnote:api:notes:meta-add", [body || {}]); }
+      metaAdd: function(body) { return call("aaronnote:api:notes:meta-add", [body || {}]); },
+      notesIndex: function() { return call("aaronnote:api:notes:index", []); },
+      todos: function(file) { return call("aaronnote:api:notes:todos", [{ file: String(file || "") }]); }
+    },
+    completions: {
+      tags: function(prefix) { return call("aaronnote:api:completions:tags", [{ prefix: String(prefix || "") }]); },
+      roam: function(prefix) { return call("aaronnote:api:completions:roam", [{ prefix: String(prefix || "") }]); },
     },
     noteCode: {
       readRegion: function(body) { return call("aaronnote:api:note-code:read-region", [body || {}]); }
@@ -609,6 +702,9 @@ function adapterScript(origin) {
       renderTikz: function(body) { return call("aaronnote:api:assets:render-tikz", [body || {}]); },
       scanOrphans: function() { return call("aaronnote:api:assets:scan-orphans", []); },
       trashOrphans: function(files) { return call("aaronnote:api:assets:trash-orphans", [files || []]); }
+    },
+    clipboard: {
+      read: function(body) { return call("aaronnote:api:clipboard:read", [body || {}]); }
     },
     session: {
       getRecent: function() { return call("aaronnote:api:session:recent", []); },
@@ -632,7 +728,8 @@ function adapterScript(origin) {
     emacs: {
       open: function(body) { return call("aaronnote:api:emacs:open", [body || {}]); },
       currentFile: function(file) { return call("aaronnote:api:emacs:current-file", [String(file || "")]); },
-      key: function(k) { return call("aaronnote:api:emacs:key", [String(k || "")]); }
+      key: function(k) { return call("aaronnote:api:emacs:key", [String(k || "")]); },
+      systemOpen: function(target) { return call("aaronnote:api:emacs:system-open", [String(target || "")]); }
     },
     shell: {
       showInFolder: function(file) { return call("aaronnote:api:shell:show-in-folder", [String(file || "")]); },
@@ -1058,6 +1155,7 @@ document.addEventListener("DOMContentLoaded", function () {
         web: webDir,
         runtime: runtimeRoot,
         state: stateRoot,
+        tmp: tmpRoot,
         snippets: snippetsRoot,
         templates: templatesRoot,
       });

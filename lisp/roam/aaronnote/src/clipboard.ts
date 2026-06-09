@@ -24,8 +24,12 @@ export function plainTextLooksLikeMarkdownSource(text: string): boolean {
 }
 
 export function markdownFromClipboard(data: DataTransfer): string {
-  const plain = normalizePastedSourceText(data.getData("text/plain"));
-  const html = data.getData("text/html");
+  return markdownFromClipboardParts(data.getData("text/plain"), data.getData("text/html"));
+}
+
+export function markdownFromClipboardParts(plainText = "", htmlText = ""): string {
+  const plain = normalizePastedSourceText(plainText);
+  const html = htmlText;
   if (plainTextLooksLikeMarkdownSource(plain)) return plain;
   if (html && /<[A-Za-z][\s\S]*>/.test(html)) {
     const md = htmlToMarkdown(html);

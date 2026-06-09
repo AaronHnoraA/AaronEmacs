@@ -1,8 +1,20 @@
 import type { EditorView } from "@codemirror/view";
 
 import { createEditorCM6 } from "./cm6/editor-cm6.ts";
+import type {
+  EditorClipboardPayload,
+  EditorPasteAssetStore,
+  EditorPasteOptions,
+} from "./paste.ts";
 
 export { normalizePastedSourceText } from "./clipboard.ts";
+export type {
+  EditorClipboardPayload,
+  EditorPasteAssetStore,
+  EditorPasteOptions,
+  EditorPastePlacement,
+  StoredPasteAsset,
+} from "./paste.ts";
 
 export type EditorKernel = "cm6";
 
@@ -19,6 +31,12 @@ export interface EditorOptions {
   onBlur?: () => void;
   /** Retained for source compatibility; the only supported kernel is CM6. */
   kernel?: EditorKernel;
+  /** Current note file for note-relative attachment storage. */
+  getCurrentFile?: () => string;
+  /** Optional attachment storage used by the editor paste pipeline. */
+  pasteAssets?: EditorPasteAssetStore;
+  /** Optional host fallback for xwidget/system clipboard reads. */
+  readSystemClipboardFallback?: () => Promise<EditorClipboardPayload | null>;
 }
 
 export type EditorCommand =
@@ -306,6 +324,12 @@ export interface Editor {
   setMarkdown(md: string, options?: SetMarkdownOptions): void;
   /** Insert plain source text at the current selection, optionally replacing chars before point. */
   insertText(text: string, deleteBefore?: number): { from: number; to: number };
+  /** Paste from the browser/system clipboard through the editor paste pipeline. */
+  pasteFromClipboard(options?: EditorPasteOptions): Promise<boolean>;
+  /** Paste a browser DataTransfer through the editor paste pipeline. */
+  pasteFromDataTransfer(data: DataTransfer, options?: EditorPasteOptions): Promise<boolean>;
+  /** Paste plain markdown source text through the editor paste pipeline. */
+  pastePlainText(text: string, options?: EditorPasteOptions): boolean;
   /** Select a source range. */
   setSelection(from: number, to?: number): void;
   /** Select a markdown-source range. */

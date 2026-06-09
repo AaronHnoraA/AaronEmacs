@@ -26,6 +26,13 @@ type VimLiteOptions = {
   onIndent?: (direction: 1 | -1) => boolean;
 };
 
+type VimRegisterKind = "linewise" | "characterwise";
+
+type VimRegister = {
+  text: string;
+  kind: VimRegisterKind;
+};
+
 type LineInfo = {
   start: number;
   end: number;
@@ -230,13 +237,6 @@ function replaceChar(editor: Editor, ch: string): void {
   editor.replaceMarkdownRange(from, end, ch.repeat(Math.max(1, end - from)), "end");
 }
 
-function insertText(editor: Editor, text: string, where: "before" | "after"): void {
-  const length = doc(editor).length;
-  const selection = editor.getMarkdownSelection();
-  const insertAt = where === "after" ? Math.min(length, selection.to + 1) : selection.from;
-  editor.replaceMarkdownRange(insertAt, insertAt, text, "end");
-}
-
 function openLine(editor: Editor, where: "above" | "below"): void {
   const text = doc(editor);
   const pos = editor.getMarkdownSelection().from;
@@ -256,17 +256,34 @@ export function createVimLite(
   let pending = "";
   let visualAnchor: number | null = null;
   let visualHead: number | null = null;
-  let register = "";
+  let register: VimRegister = { text: "", kind: "characterwise" };
 
-  function yank(text: string): void {
+  function writeSystemClipboard(text: string): void {
+    if (typeof window !== "undefined" && window.location.protocol === "about:") return;
+    const hasHostBridge = typeof window !== "undefined"
+      && Boolean((window as unknown as { aaronnoteApi?: unknown }).aaronnoteApi);
+    const canUseHostClipboard = typeof window !== "undefined"
+      && (window.location.hostname === "127.0.0.1" || hasHostBridge);
+    const writeHostClipboard = () => {
+      if (!canUseHostClipboard) return;
+      void fetch("/api/clipboard", {
+        method: "POST",
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+        body: text,
+      }).catch(() => {});
+    };
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(text).catch(writeHostClipboard);
+      return;
+    }
+    writeHostClipboard();
+  }
+
+  function yank(text: string, kind: VimRegisterKind = "characterwise"): void {
     if (!text) return;
-    register = text;
-    (window as unknown as Record<string, unknown>).__aaronoteVimRegister = text;
-    void fetch("/api/clipboard", {
-      method: "POST",
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
-      body: text,
-    }).catch(() => {});
+    register = { text, kind };
+    (window as unknown as Record<string, unknown>).__aaronoteVimRegister = register;
+    writeSystemClipboard(text);
   }
 
   function resetMotionMemory(): void {
@@ -365,13 +382,13 @@ export function createVimLite(
 
   function deleteLineCommand(): void {
     resetMotionMemory();
-    yank(deleteLine(editor));
+    yank(deleteLine(editor), "linewise");
     setMode("normal");
   }
 
-  function yankSelection(): void {
+  function yankSelection(kind: VimRegisterKind = "characterwise"): void {
     resetMotionMemory();
-    yank(currentSelectionText(editor));
+    yank(currentSelectionText(editor), kind);
     setMode("normal");
   }
 
@@ -379,67 +396,24 @@ export function createVimLite(
     resetMotionMemory();
     const text = doc(editor);
     const range = docLineRange(text, editor.getMarkdownSelection().from);
-    if (range.from < range.to) yank(text.sliceString(range.from, range.to));
+    if (range.from < range.to) yank(text.sliceString(range.from, range.to), "linewise");
     setMode("normal");
   }
 
   function paste(where: "before" | "after"): void {
     resetMotionMemory();
-    const doInsertText = (text: string) => {
-      if (text) {
-        register = text;
-        insertText(editor, text, where);
-      }
-      setMode("normal");
-    };
-    const doInsertImage = (src: string) => {
-      const markdown = `![](${src})`;
-      register = markdown;
-      insertText(editor, markdown, where);
-      setMode("normal");
-    };
-    if (register) {
-      insertText(editor, register, where);
-      setMode("normal");
-      return;
-    }
-    // Try modern Clipboard API first (supports images).
-    if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.read) {
-      void navigator.clipboard.read()
-        .then((items) => {
-          for (const item of items) {
-            const imageType = item.types.find((t) => t.startsWith("image/"));
-            if (imageType) {
-              void item.getType(imageType).then((blob) => {
-                const reader = new FileReader();
-                reader.onload = () => doInsertImage(String(reader.result));
-                reader.readAsDataURL(blob);
-              });
-              return;
-            }
+    const placement = register.kind === "linewise"
+      ? { kind: "line" as const, where }
+      : { kind: "character" as const, where };
+    window.setTimeout(() => {
+      void editor.pasteFromClipboard({ placement })
+        .then((handled) => {
+          if (!handled && register.text) {
+            editor.pastePlainText(register.text, { placement });
           }
-          for (const item of items) {
-            if (item.types.includes("text/plain")) {
-              void item.getType("text/plain")
-                .then((blob) => blob.text())
-                .then((text) => doInsertText(text))
-                .catch(() => fallbackPaste());
-              return;
-            }
-          }
-          fallbackPaste();
         })
-        .catch(() => fallbackPaste());
-      return;
-    }
-    fallbackPaste();
-
-    function fallbackPaste(): void {
-      void fetch("/api/clipboard")
-        .then((r) => (r.ok ? r.text() : Promise.reject()))
-        .then(doInsertText)
-        .catch(() => setMode("normal"));
-    }
+        .finally(() => setMode("normal"));
+    }, 0);
   }
 
   function appendChar(): void {
@@ -782,7 +756,7 @@ export function createVimLite(
         deleteLineCommand();
         return true;
       case "y":
-        yankSelection();
+        yankSelection("linewise");
         return true;
       case "V":
       case "v":

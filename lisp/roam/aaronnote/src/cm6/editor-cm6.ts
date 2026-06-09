@@ -48,7 +48,12 @@ import {
   exitEmptyMarkdownBlock,
   indentMarkdownBlock,
 } from "./commands.ts";
-import { markdownFromClipboard } from "../clipboard.ts";
+import {
+  pasteDataTransfer,
+  pasteFromClipboard as runPasteFromClipboard,
+  pastePlainText as runPastePlainText,
+  type EditorPasteOptions,
+} from "../paste.ts";
 import { renderMarkdownHTML } from "../render-html.ts";
 import { blockMathRangesExtension, getBlockMathRanges, positionInsideAnyRange } from "./math-ranges.ts";
 import { scanInlineMathRanges } from "../inline-math.ts";
@@ -461,6 +466,50 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
     return { from: anchor, to: head };
   }
 
+  function pasteInsertRange(options: EditorPasteOptions | undefined, text: string): { from: number; to: number; text: string } {
+    const placement = options?.placement;
+    const selection = view.state.selection.main;
+    if (!placement || placement.kind == null || placement.kind === "selection") {
+      return { from: selection.from, to: selection.to, text };
+    }
+
+    if (placement.kind === "character") {
+      const line = view.state.doc.lineAt(Math.max(0, Math.min(selection.from, view.state.doc.length)));
+      const from = placement.where === "after"
+        ? Math.min(line.to, selection.empty ? selection.to + 1 : selection.to)
+        : selection.from;
+      return { from, to: from, text };
+    }
+    if (placement.kind !== "line") {
+      return { from: selection.from, to: selection.to, text };
+    }
+
+    const docLength = view.state.doc.length;
+    const line = view.state.doc.lineAt(Math.max(0, Math.min(selection.from, docLength)));
+    let insert = text.endsWith("\n") ? text : `${text}\n`;
+    let from = line.from;
+    if (placement.where === "after") {
+      if (line.to < docLength) {
+        from = line.to + 1;
+      } else {
+        from = line.to;
+        if (docLength > 0) insert = `\n${insert}`;
+      }
+    }
+    return { from, to: from, text: insert };
+  }
+
+  function insertPastedMarkdown(text: string, options?: EditorPasteOptions): boolean {
+    if (!text) return false;
+    const range = pasteInsertRange(options, text);
+    view.dispatch({
+      changes: { from: range.from, to: range.to, insert: range.text },
+      selection: { anchor: range.from + range.text.length },
+      scrollIntoView: true,
+    });
+    return true;
+  }
+
   // ---------------------------------------------------------------------------
   // Editor interface implementation
   // ---------------------------------------------------------------------------
@@ -500,6 +549,33 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
         scrollIntoView: true,
       });
       return { from: insertFrom, to: insertFrom + text.length };
+    },
+
+    async pasteFromClipboard(pasteOptions: EditorPasteOptions = {}): Promise<boolean> {
+      return runPasteFromClipboard({
+        currentFile: options.getCurrentFile,
+        assets: options.pasteAssets,
+        readSystemClipboardFallback: options.readSystemClipboardFallback,
+        insertMarkdown: insertPastedMarkdown,
+      }, pasteOptions);
+    },
+
+    async pasteFromDataTransfer(data: DataTransfer, pasteOptions: EditorPasteOptions = {}): Promise<boolean> {
+      return pasteDataTransfer(data, {
+        currentFile: options.getCurrentFile,
+        assets: options.pasteAssets,
+        readSystemClipboardFallback: options.readSystemClipboardFallback,
+        insertMarkdown: insertPastedMarkdown,
+      }, pasteOptions);
+    },
+
+    pastePlainText(text: string, pasteOptions: EditorPasteOptions = {}): boolean {
+      return runPastePlainText(text, {
+        currentFile: options.getCurrentFile,
+        assets: options.pasteAssets,
+        readSystemClipboardFallback: options.readSystemClipboardFallback,
+        insertMarkdown: insertPastedMarkdown,
+      }, pasteOptions);
     },
 
     setSelection(from: number, to?: number): void {
@@ -831,17 +907,25 @@ function buildExtensions(options: EditorOptions, previewCompartment: Compartment
       blur: () => { options.onBlur?.(); return false; },
       paste: (event, pasteView) => {
         const data = event.clipboardData;
-        if (!data || data.files.length > 0) return false;
-        const text = markdownFromClipboard(data);
-        if (!text) return false;
+        if (!data) return false;
         event.preventDefault();
-        const { from, to } = pasteView.state.selection.main;
-        pasteView.dispatch({
-          changes: { from, to, insert: text },
-          selection: { anchor: from + text.length },
-          scrollIntoView: true,
-        });
         pasteView.focus();
+        void pasteDataTransfer(data, {
+          currentFile: options.getCurrentFile,
+          assets: options.pasteAssets,
+          readSystemClipboardFallback: options.readSystemClipboardFallback,
+          insertMarkdown: (markdown, pasteOptions) => {
+            if (!markdown) return false;
+            const selection = pasteView.state.selection.main;
+            pasteView.dispatch({
+              changes: { from: selection.from, to: selection.to, insert: markdown },
+              selection: { anchor: selection.from + markdown.length },
+              scrollIntoView: true,
+            });
+            void pasteOptions;
+            return true;
+          },
+        }).catch(() => {});
         return true;
       },
     }),

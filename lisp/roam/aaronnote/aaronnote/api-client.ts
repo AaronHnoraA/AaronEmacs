@@ -1,4 +1,4 @@
-import type { CursorPosition, Inbound, SnippetSummary } from "./types.ts";
+import type { CursorPosition, Inbound, SnippetSummary, UnusedAsset } from "./types.ts";
 
 type OpenMsg = Extract<Inbound, { type: "open" }>;
 type SavedMsg = Extract<Inbound, { type: "saved" }>;
@@ -14,6 +14,15 @@ type SaveBody = {
   baseMtimeMs?: number;
   refresh?: string;
 };
+type AssetStoreMsg = {
+  ok?: boolean;
+  file?: string;
+  name?: string;
+  type?: string;
+  isImage?: boolean;
+  markdownPath?: string;
+  message?: string;
+};
 type NativeApi = {
   notes?: {
     bootstrap?: (file?: string) => Promise<unknown>;
@@ -24,6 +33,15 @@ type NativeApi = {
     saveKeepalive?: (body: SaveBody) => void;
     snippets?: () => Promise<unknown>;
     metaAdd?: (body: Record<string, unknown>) => Promise<unknown>;
+    notesIndex?: () => Promise<unknown>;
+    todos?: (file: string) => Promise<unknown>;
+  };
+  completions?: {
+    tags?: (prefix: string) => Promise<unknown>;
+    roam?: (prefix: string) => Promise<unknown>;
+  };
+  clipboard?: {
+    read?: (body?: { file?: string }) => Promise<unknown>;
   };
   noteCode?: {
     readRegion?: (body?: unknown) => Promise<unknown>;
@@ -39,6 +57,7 @@ type NativeApi = {
     open?: (body: { file: string; tag?: string; line?: number; col?: number }) => Promise<unknown>;
     currentFile?: (file: string) => Promise<unknown>;
     key?: (keyString: string) => Promise<unknown>;
+    systemOpen?: (target: string) => Promise<unknown>;
   };
   roamTools?: {
     renameTag?: (body: Record<string, unknown>) => Promise<unknown>;
@@ -51,7 +70,11 @@ type NativeApi = {
     savePosition?: (position: Partial<CursorPosition> & { file: string }) => Promise<unknown>;
   };
   assets?: {
+    upload?: (body: { file?: string; name?: string; type?: string; data?: string }) => Promise<unknown>;
+    storeFromPath?: (body: { file?: string; path?: string; source?: string; name?: string; type?: string }) => Promise<unknown>;
     renderTikz?: (body: { file: string; id: string; timestamp: string; source: string }) => Promise<unknown>;
+    scanOrphans?: () => Promise<unknown>;
+    trashOrphans?: (files: string[]) => Promise<unknown>;
   };
 };
 
@@ -159,6 +182,14 @@ export const api = {
       if (!call) return;
       await call(keyString).catch(() => {});
     },
+    async systemOpen(target: string): Promise<void> {
+      const call = window.aaronnoteApi?.emacs?.systemOpen;
+      if (!call) {
+        window.location.href = target;
+        return;
+      }
+      await call(target);
+    },
   },
   roamTools: {
     async renameTag(body: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -190,10 +221,44 @@ export const api = {
       return ensureOk(await call(position) as PositionsMsg, "Cursor position save failed");
     },
   },
+  completions: {
+    async tags(prefix = ""): Promise<{ tags?: string[] }> {
+      const call = window.aaronnoteApi?.completions?.tags;
+      if (!call) return { tags: [] };
+      return await call(prefix) as { tags?: string[] };
+    },
+    async roam(prefix = ""): Promise<{ notes?: Array<{ id: string; key: string; title: string; path: string }> }> {
+      const call = window.aaronnoteApi?.completions?.roam;
+      if (!call) return { notes: [] };
+      return await call(prefix) as { notes?: Array<{ id: string; key: string; title: string; path: string }> };
+    },
+  },
+  clipboard: {
+    async read(body: { file?: string } = {}): Promise<unknown> {
+      const call = requireMethod(nativeApi().clipboard?.read, "Clipboard read");
+      return await call(body);
+    },
+  },
   assets: {
+    async upload(body: { file?: string; name?: string; type?: string; data?: string }): Promise<AssetStoreMsg> {
+      const call = requireMethod(nativeApi().assets?.upload, "Asset upload");
+      return ensureOk(await call(body) as AssetStoreMsg, "Asset upload failed");
+    },
+    async storeFromPath(body: { file?: string; path?: string; source?: string; name?: string; type?: string }): Promise<AssetStoreMsg> {
+      const call = requireMethod(nativeApi().assets?.storeFromPath, "Asset import");
+      return ensureOk(await call(body) as AssetStoreMsg, "Asset import failed");
+    },
     async renderTikz(body: { file: string; id: string; timestamp: string; source: string }) {
       const call = requireMethod(nativeApi().assets?.renderTikz, "TikZ render");
       return ensureOk(await call(body) as { ok?: boolean; file?: string; markdownPath?: string; message?: string }, "TikZ render failed");
+    },
+    async scanOrphans(): Promise<Record<string, unknown> & { assets?: UnusedAsset[]; message?: string }> {
+      const call = requireMethod(nativeApi().assets?.scanOrphans, "Asset scan");
+      return ensureOk(await call() as Record<string, unknown> & { assets?: UnusedAsset[]; message?: string }, "Asset scan failed");
+    },
+    async trashOrphans(files: string[]): Promise<Record<string, unknown> & { assets?: UnusedAsset[]; trashed?: unknown[]; message?: string }> {
+      const call = requireMethod(nativeApi().assets?.trashOrphans, "Asset trash");
+      return ensureOk(await call(files) as Record<string, unknown> & { assets?: UnusedAsset[]; trashed?: unknown[]; message?: string }, "Asset trash failed");
     },
   },
 };

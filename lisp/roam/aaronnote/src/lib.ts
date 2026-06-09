@@ -8,10 +8,15 @@ export { createEditor } from "./editor-api.ts";
 export type {
   Editor,
   EditorBlockContext,
+  EditorClipboardPayload,
   EditorCommand,
   EditorOptions,
+  EditorPasteAssetStore,
+  EditorPasteOptions,
+  EditorPastePlacement,
   QuickInsertContext,
   QuickInsertItem,
   QuickInsertProvider,
+  StoredPasteAsset,
   WritingModeOptions,
 } from "./editor-api.ts";

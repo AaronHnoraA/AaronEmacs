@@ -379,6 +379,36 @@
   border-bottom-color: color-mix(in srgb, #3f756e, transparent 42%);
 }
 
+.cm-editor a.aaronnote-zotero-link,
+.aaronnote-zotero-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+  max-width: 100%;
+  padding: 0.02em 0.42em 0.05em;
+  border: 1px solid color-mix(in srgb, #3f756e, transparent 58%);
+  border-radius: 5px;
+  background: color-mix(in srgb, #3f756e, transparent 91%);
+  color: color-mix(in srgb, #2f625c, var(--aaron-ink, #24201a) 18%);
+  font-weight: 650;
+  text-decoration: none;
+  vertical-align: baseline;
+}
+
+.cm-editor a.aaronnote-zotero-link::before,
+.aaronnote-zotero-link::before {
+  content: "Z";
+  flex: 0 0 auto;
+  font: 800 0.72em/1 var(--aaron-font-sans, system-ui, sans-serif);
+  color: #2f625c;
+}
+
+.cm-editor a.aaronnote-zotero-link:hover,
+.aaronnote-zotero-link:hover {
+  border-color: color-mix(in srgb, #3f756e, transparent 30%);
+  background: color-mix(in srgb, #3f756e, transparent 86%);
+}
+
 .cm-editor org-env-block .org-env-content a:hover {
   border-bottom-color: currentColor;
 }

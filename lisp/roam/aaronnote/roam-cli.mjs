@@ -35,6 +35,16 @@ async function main() {
     "--runtime",
     process.env.AARONNOTE_RUNTIME_ROOT || scriptDir,
   ));
+  const stateRoot = resolve(argValue(
+    args,
+    "--state",
+    process.env.AARONNOTE_STATE_DIR || resolve(workspaceRoot, "var", "aaronnote"),
+  ));
+  const tmpRoot = resolve(argValue(
+    args,
+    "--tmp",
+    process.env.AARONNOTE_TMP_DIR || resolve(stateRoot, "tmp"),
+  ));
   const templatesRoot = resolve(argValue(
     args,
     "--templates",
@@ -46,6 +56,8 @@ async function main() {
   runtime.configure({
     root,
     workspaceRoot,
+    stateRoot,
+    tmpRoot,
     templatesRoot,
   });
 
@@ -64,6 +76,10 @@ async function main() {
     };
   } else if (action === "create") {
     result = await runtime.createNode(JSON.parse(argValue(args, "--json", "{}")));
+  } else if (action === "delete-node") {
+    const body = JSON.parse(argValue(args, "--json", "{}"));
+    const file = argValue(args, "--file", argValue(args, "--path", ""));
+    result = await runtime.deleteNote(file ? { ...body, file } : body);
   } else if (action === "sync") {
     const notes = await runtime.syncRoamDb(null, {
       mode: hasArg(args, "--full") ? "full" : "auto",

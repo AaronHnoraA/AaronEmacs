@@ -74,6 +74,14 @@ $$`);
     expect(html).toContain('href="./attachments/tset.ipynb@test file"');
   });
 
+  test("marks Zotero links for the Emacs system opener UI", () => {
+    const html = renderMarkdownHTML("[paper](zotero://select/items/1_ABCD)");
+
+    expect(html).toContain('class="aaronnote-zotero-link"');
+    expect(html).toContain('data-zotero-link="true"');
+    expect(html).toContain('href="zotero://select/items/1_ABCD"');
+  });
+
   test("renders meta blocks with the preview cover", () => {
     const html = renderMarkdownHTML([
       "#+begin meta",

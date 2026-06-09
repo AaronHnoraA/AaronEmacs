@@ -59,6 +59,22 @@
   :type 'file
   :group 'my/aaronnote-roam)
 
+(defun my/aaronnote-roam--state-root ()
+  "Return the Aaronnote var/state directory shared with the web host."
+  (expand-file-name
+   (if (boundp 'my/aaronnote--state-root)
+       my/aaronnote--state-root
+     "var/aaronnote")
+   user-emacs-directory))
+
+(defun my/aaronnote-roam--tmp-root ()
+  "Return the Aaronnote runtime tmp directory shared with the web host."
+  (expand-file-name
+   (if (boundp 'my/aaronnote--tmp-root)
+       my/aaronnote--tmp-root
+     "tmp")
+   (my/aaronnote-roam--state-root)))
+
 (defcustom my/aaronnote-roam-sync-delay 1.5
   "Seconds to debounce automatic incremental roam-db sync after saving."
   :type 'number
@@ -75,10 +91,7 @@
 (defun my/aaronnote-roam-root ()
   "Return the Markdown roam notes root."
   (or (when buffer-file-name
-        (when-let* ((dir (or (locate-dominating-file
-                              buffer-file-name ".aaronnote-sync-state.json")
-                             (locate-dominating-file
-                              buffer-file-name ".aaronnote-asset-cleanup-state.json"))))
+        (when-let* ((dir (locate-dominating-file buffer-file-name "roam.db")))
           (file-truename dir)))
       (when (boundp 'my/aaronnote--notes-root)
         (file-name-as-directory (expand-file-name my/aaronnote--notes-root)))
@@ -100,11 +113,59 @@
         (expand-file-name "server/lib/index.mjs"
                           my/aaronnote-roam-runtime-root))))
 
+(defun my/aaronnote-roam--action-to-channel (action)
+  "Map roam-cli ACTION keyword to web-host /api channel string, or nil."
+  (cdr (assoc action
+              '(("index"     . "aaronnote:api:notes:index")
+                ("tags"      . "aaronnote:api:completions:tags")
+                ("todos"     . "aaronnote:api:notes:todos")
+                ("templates" . "aaronnote:api:notes:templates")
+                ("create"    . "aaronnote:api:notes:create-node")
+                ("delete-node" . "aaronnote:api:notes:delete-node")
+                ("sync"      . "aaronnote:api:notes:roam-sync")))))
+
+(defun my/aaronnote-roam--runtime-call-via-api (action args)
+  "Delegate ACTION with roam-cli ARGS to the running web-host /api.
+Maps the action to its /api channel, converts positional ARGS to
+the expected body, and returns parsed JSON or nil."
+  (let ((channel (my/aaronnote-roam--action-to-channel action)))
+    (when channel
+      (let ((api-args
+             (pcase action
+               ("create"
+                (let ((json-str (cadr (member "--json" args))))
+                  (when json-str
+                    (condition-case nil
+                        (vector (json-parse-string json-str :object-type 'hash-table))
+                      (error nil)))))
+               ("delete-node"
+                (vector (or (cadr (member "--file" args))
+                            (cadr (member "--path" args))
+                            "")))
+               ("sync"
+                (vector (if (member "--full" args) t :false)))
+               ("todos"
+                (let ((file (cadr (member "--file" args))))
+                  (vector (or file ""))))
+               ("tags"
+                (vector (make-hash-table)))
+               (_
+                []))))
+        (when api-args
+          (my/aaronnote--api-call-sync channel api-args))))))
+
 (defun my/aaronnote-roam--runtime-call (action &rest args)
   "Call Aaronnote roam runtime ACTION synchronously with ARGS.
-Return parsed JSON as hash tables/lists, or nil when the runtime is unavailable
-or the command fails."
-  (when (my/aaronnote-roam--runtime-available-p)
+When the web-host is running, delegates to its /api so all callers share the
+same in-memory index.  Falls back to spawning roam-cli.mjs when the web-host
+is down (offline / not yet started)."
+  (or
+   ;; Prefer the running web-host's in-memory index.
+   (and (boundp 'my/aaronnote--ready)
+        my/aaronnote--ready
+        (my/aaronnote-roam--runtime-call-via-api action args))
+   ;; Fallback: spawn roam-cli.mjs directly.
+   (when (my/aaronnote-roam--runtime-available-p)
     (with-temp-buffer
       (let* ((root (my/aaronnote-roam-root))
              (default-directory my/aaronnote-roam--module-directory)
@@ -114,9 +175,12 @@ or the command fails."
                                     (expand-file-name
                                      my/aaronnote-roam-runtime-root))
                             (format "AARONNOTE_WORKSPACE_ROOT=%s"
-                                    user-emacs-directory))
+                                    user-emacs-directory)
+                            (format "AARONNOTE_STATE_DIR=%s"
+                                    (my/aaronnote-roam--state-root))
+                            (format "AARONNOTE_TMP_DIR=%s"
+                                    (my/aaronnote-roam--tmp-root)))
                       process-environment))
-             ;; Capture stderr separately so it does not corrupt the JSON stdout.
              (stderr-file (make-temp-file "aaronnote-runtime-"))
              (status (apply #'process-file
                             "node" nil (list (current-buffer) stderr-file) nil
@@ -125,6 +189,8 @@ or the command fails."
                             "--root" root
                             "--runtime" my/aaronnote-roam-runtime-root
                             "--workspace" user-emacs-directory
+                            "--state" (my/aaronnote-roam--state-root)
+                            "--tmp" (my/aaronnote-roam--tmp-root)
                             args)))
         (unwind-protect
             (if (zerop status)
@@ -150,7 +216,7 @@ or the command fails."
                              (string-trim (buffer-string))
                            stderr))
                 nil))
-          (ignore-errors (delete-file stderr-file)))))))
+          (ignore-errors (delete-file stderr-file))))))))
 
 (defun my/aaronnote-roam--runtime-index ()
   "Return cached Aaronnote runtime index payload, or nil."
@@ -174,25 +240,37 @@ runtime incremental sync."
     (let* ((root (my/aaronnote-roam-root))
            (buf (get-buffer-create "*roam-index*"))
            (args (append
-                  (list my/aaronnote-roam-runtime-cli
-                        "sync"
-                        "--root" root
-                        "--runtime" my/aaronnote-roam-runtime-root
-                        "--workspace" user-emacs-directory)
-                  (when full (list "--full"))
-                  (mapcan (lambda (file) (list "--changed" file))
-                          (delete-dups
-                           (seq-filter #'identity changed-files))))))
-      (make-process
-       :name "aaronnote-roam-sync"
-       :buffer buf
-       :command (cons "node" args)
-       :noquery t
-       :sentinel
-       (lambda (_proc event)
-         (when (memq (process-status _proc) '(exit signal))
-           (my/aaronnote-roam--clear-runtime-cache)
-           (message "Aaronnote roam sync: %s" (string-trim event))))))))
+	                  (list my/aaronnote-roam-runtime-cli
+	                        "sync"
+	                        "--root" root
+	                        "--runtime" my/aaronnote-roam-runtime-root
+	                        "--workspace" user-emacs-directory
+	                        "--state" (my/aaronnote-roam--state-root)
+	                        "--tmp" (my/aaronnote-roam--tmp-root))
+	                  (when full (list "--full"))
+	                  (mapcan (lambda (file) (list "--changed" file))
+	                          (delete-dups
+	                           (seq-filter #'identity changed-files))))))
+      (let ((process-environment
+             (append (list (format "AARONNOTE_ROOT=%s" root)
+                           (format "AARONNOTE_RUNTIME_ROOT=%s"
+                                   (expand-file-name my/aaronnote-roam-runtime-root))
+                           (format "AARONNOTE_WORKSPACE_ROOT=%s" user-emacs-directory)
+                           (format "AARONNOTE_STATE_DIR=%s"
+                                   (my/aaronnote-roam--state-root))
+                           (format "AARONNOTE_TMP_DIR=%s"
+                                   (my/aaronnote-roam--tmp-root)))
+                     process-environment)))
+        (make-process
+         :name "aaronnote-roam-sync"
+         :buffer buf
+         :command (cons "node" args)
+         :noquery t
+         :sentinel
+         (lambda (_proc event)
+           (when (memq (process-status _proc) '(exit signal))
+             (my/aaronnote-roam--clear-runtime-cache)
+             (message "Aaronnote roam sync: %s" (string-trim event)))))))))
 
 (defun my/aaronnote-roam--target-at-point ()
   "Return the raw Markdown roam link target at or near point, or nil."
@@ -905,6 +983,31 @@ Path-like refs are accepted and resolved to canonical note ids."
   (my/aaronnote-roam--open-slug
    (my/aaronnote-roam--read-note-id "Roam note: ")))
 
+(defun my/aaronnote-roam-delete-node (note-id)
+  "Move NOTE-ID's Markdown node to trash through the Aaronnote runtime."
+  (interactive (list (my/aaronnote-roam--read-note-id "Delete roam node: ")))
+  (let* ((record (seq-find
+                  (lambda (candidate)
+                    (equal (plist-get candidate :id) note-id))
+                  (my/aaronnote-roam--note-records)))
+         (file (plist-get record :file))
+         (title (plist-get record :title)))
+    (unless (and record file (file-exists-p file))
+      (user-error "No file found for node: %s" note-id))
+    (when (yes-or-no-p
+           (format "Move node '%s' (%s) to trash? "
+                   (or title note-id)
+                   (abbreviate-file-name file)))
+      (let ((delete-current-buffer
+             (and buffer-file-name
+                  (file-equal-p buffer-file-name file))))
+        (my/aaronnote-roam--runtime-call "delete-node" "--file" file)
+        (my/aaronnote-roam--clear-runtime-cache)
+        (when delete-current-buffer
+          (kill-buffer (current-buffer)))
+        (message "Aaronnote node moved to trash: %s"
+                 (abbreviate-file-name file))))))
+
 (defun my/aaronnote-roam-insert-link ()
   "Open the interactive selector and insert a Markdown roam link."
   (interactive)
@@ -965,6 +1068,19 @@ Path-like refs are accepted and resolved to canonical note ids."
     (if (string-empty-p directory)
         name
       (concat directory "/" name))))
+
+(defun my/aaronnote-roam-new--path-directory (path)
+  "Return PATH's vault-relative directory."
+  (my/aaronnote-roam-new--normalize-directory
+   (or (file-name-directory (or path "")) "")))
+
+(defun my/aaronnote-roam-new--path-basename (path title)
+  "Return PATH's filename, falling back to TITLE's default Markdown filename."
+  (let ((name (file-name-nondirectory (or path ""))))
+    (if (string-empty-p name)
+        (file-name-nondirectory
+         (my/aaronnote-roam-new--default-path title))
+      name)))
 
 (defun my/aaronnote-roam-new--path-file (path)
   "Return absolute file for vault-relative PATH."
@@ -1145,7 +1261,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
   (my/aaronnote-roam-new--sync-draft-from-widgets)
   (setq-local my/aaronnote-roam-new--draft
               (plist-put my/aaronnote-roam-new--draft key value))
-  (my/aaronnote-roam-new-render))
+  (my/aaronnote-roam-new-render t))
 
 (defun my/aaronnote-roam-new--plain-widget-value (key)
   "Return editable widget KEY's plain string value, or nil."
@@ -1187,7 +1303,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
       (setq-local my/aaronnote-roam-new--draft
                   (plist-put my/aaronnote-roam-new--draft :kind
                              (if (string= next "roam") "note" "default"))))
-    (my/aaronnote-roam-new-render)))
+    (my/aaronnote-roam-new-render t)))
 
 (defun my/aaronnote-roam-new-edit-title ()
   "Edit the title in the current Roam New draft."
@@ -1206,18 +1322,34 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
                    my/aaronnote-roam-new--draft :path
                    (my/aaronnote-roam-new--default-path
                     title my/aaronnote-roam-new--base-directory))))
-    (my/aaronnote-roam-new-render)))
+    (my/aaronnote-roam-new-render t)))
 
 (defun my/aaronnote-roam-new-edit-path ()
-  "Edit the save path in the current Roam New draft using file completion."
+  "Edit the save directory in the current Roam New draft."
   (interactive)
   (my/aaronnote-roam-new--sync-draft-from-widgets)
   (let* ((root (file-name-as-directory (expand-file-name (my/aaronnote-roam-root))))
          (current (plist-get my/aaronnote-roam-new--draft :path))
-         (abs (expand-file-name (or current "") root))
-         (raw (read-file-name "Save path: " root abs nil current)))
+         (title (plist-get my/aaronnote-roam-new--draft :title))
+         (current-dir (my/aaronnote-roam-new--path-directory current))
+         (filename (my/aaronnote-roam-new--path-basename current title))
+         (initial-dir (expand-file-name current-dir root))
+         (raw-dir (read-directory-name "Save directory: "
+                                       initial-dir initial-dir nil))
+         (selected-dir (file-name-as-directory (expand-file-name raw-dir root))))
+    (unless (file-in-directory-p selected-dir root)
+      (user-error "Save directory must be inside the Aaronnote vault"))
     (my/aaronnote-roam-new--set
-     :path (file-relative-name (expand-file-name raw root) root))))
+     :path
+     (my/aaronnote-roam-new--unique-path
+      (concat
+       (let ((relative-dir
+              (my/aaronnote-roam-new--normalize-directory
+               (file-relative-name selected-dir root))))
+         (if (string-empty-p relative-dir)
+             ""
+           (concat relative-dir "/")))
+       filename)))))
 
 (defun my/aaronnote-roam-new-edit-kind ()
   "Edit the note kind in the current Roam New draft."
@@ -1282,9 +1414,9 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
   (max 24 (min 72 (- (window-width) 32))))
 
 (defun my/aaronnote-roam-new--insert-editable-field
-    (id icon label value detail key &optional placeholder)
+    (id icon label value detail key &optional placeholder action)
   "Insert directly editable Roam New field KEY.
-ID, ICON, LABEL, VALUE, DETAIL, and PLACEHOLDER control display."
+ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
   (let ((start (point))
         (value (or value "")))
     (insert "   "
@@ -1311,25 +1443,33 @@ ID, ICON, LABEL, VALUE, DETAIL, and PLACEHOLDER control display."
                 (propertize detail 'face 'my/aaronnote-roam-ui-detail)
                 "\n"))
       (let ((end (point))
-            (action (let ((w widget))
-                      (lambda (_)
-                        (when-let* ((marker (widget-get w :from)))
-                          (goto-char marker))))))
+            (row-action
+             (if action
+                 (lambda (_ignored) (call-interactively action))
+               (let ((w widget))
+                 (lambda (_ignored)
+                   (when-let* ((marker (widget-get w :from)))
+                     (goto-char marker)))))))
         (add-text-properties
          start end
          `(aaron-ui-board--item-id ,id
-           help-echo ,(format "RET: jump into %s field; type to edit" (downcase label))))
+           help-echo ,(if action
+                          (format "RET: edit %s; type in field to edit directly"
+                                  (downcase label))
+                        (format "RET: jump into %s field; type to edit"
+                                (downcase label)))))
         ;; Apply row-action only to the label area so the widget's own keymap is not masked.
         (add-text-properties
          start label-end
-         `(aaron-ui-board--row-action ,action
+         `(aaron-ui-board--row-action ,row-action
            mouse-face aaron-ui-board-row-highlight
            keymap ,my/aaronnote-roam-ui-row-map))))))
 
-(defun my/aaronnote-roam-new-render ()
+(defun my/aaronnote-roam-new-render (&optional skip-sync)
   "Render the current Roam New draft."
   (interactive)
-  (my/aaronnote-roam-new--sync-draft-from-widgets)
+  (unless skip-sync
+    (my/aaronnote-roam-new--sync-draft-from-widgets))
   ;; Delete stale widget registrations before erasing; otherwise widget-setup
   ;; sees both old and new fields and raises "Overlapping fields".
   (dolist (entry my/aaronnote-roam-new--widgets)
@@ -1391,8 +1531,8 @@ ID, ICON, LABEL, VALUE, DETAIL, and PLACEHOLDER control display."
         'title "Untitled")
        (my/aaronnote-roam-new--insert-editable-field
         'path 'path "SAVE PATH" path
-        "Vault-relative .md or .markdown path; p chooses with file completion."
-        'path "untitled.md")
+        "Vault-relative .md or .markdown path; p chooses a folder."
+        'path "untitled.md" #'my/aaronnote-roam-new-edit-path)
        (my/aaronnote-roam-new--insert-editable-field
         'kind 'status "KIND" kind
         "Controls Aaronnote note-kind behavior."
@@ -1405,7 +1545,7 @@ ID, ICON, LABEL, VALUE, DETAIL, and PLACEHOLDER control display."
         'tags 'tag "TAGS"
         (if tags (string-join tags ", ") nil)
         "Comma-separated graph tags; a adds with completion."
-        'tags "")
+        'tags "" #'my/aaronnote-roam-new-edit-tags)
        (insert "\n")
        (my/aaronnote-roam-ui-insert-section "Result")
        (my/aaronnote-roam-ui-insert-field
@@ -2511,10 +2651,10 @@ With prefix argument FULL, force a full roam-db rebuild."
   (message "Roam-db full rebuild done."))
 
 (defun my/aaronnote-roam-db-status ()
-  "Show roam-db sync state from .aaronnote-sync-state.json."
+  "Show roam-db sync state from Aaronnote var."
   (interactive)
-  (let* ((root (my/aaronnote-roam-root))
-         (state-file (expand-file-name ".aaronnote-sync-state.json" root))
+  (let* ((state-file (expand-file-name "sync/state.json"
+                                       (my/aaronnote-roam--state-root)))
          (state
           (when (file-exists-p state-file)
             (condition-case nil

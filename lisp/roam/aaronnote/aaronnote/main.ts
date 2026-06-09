@@ -2,7 +2,12 @@ import "../src/styles/widgets.css";
 import "../src/styles/theme-typora.css";
 import "./style.css";
 
-import { createEditor, type EditorCommand } from "../src/lib.ts";
+import {
+  createEditor,
+  type EditorClipboardPayload,
+  type EditorCommand,
+  type StoredPasteAsset,
+} from "../src/lib.ts";
 import { setupCopilot } from "../src/copilot/index.ts";
 import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownBlock } from "../src/cm6/commands.ts";
 import { getBlockMathRanges, rangeAtPosition, rangeOverlapsAny } from "../src/cm6/math-ranges.ts";
@@ -11,6 +16,9 @@ import { INLINE_MATH_RE, isLikelyInlineMath } from "../src/inline-math.ts";
 import { formatMathRenderError, renderMathLazy } from "../src/math-render.ts";
 import { hrefProtocol, safeHref } from "../src/url-safety.ts";
 import { api } from "./api-client.ts";
+import { Epoch } from "../src/async-epoch.ts";
+import { CoalescedTimer } from "../src/coalesced-timer.ts";
+import { blobToBase64 } from "../src/paste.ts";
 import { createFloatingTocPanel, inlineTagAnchorsFromText, markdownHeadingsFromText } from "./floating-toc.ts";
 import { createLocalGraphPanel } from "./local-graph.ts";
 import {
@@ -183,6 +191,13 @@ let restoringNavigationBack = false;
 let snippets: SnippetSummary[] = [];
 let notes: NoteSummary[] = [];
 let pathSuggestions: string[] = [];
+// Ephemeral request-level cache for completions — NOT a roam business cache.
+// Holds results only for the duration of the current completion session (same
+// context key). Discarded as soon as the context key changes.
+const completionEpoch = new Epoch();
+const completionTimer = new CoalescedTimer(60);
+let completionContextKey = "";
+let completionPendingItems: SnippetSummary[] | null = null;
 let pendingOpenHash = "";
 let pendingOpenDomTarget = "";
 let snippetPopupItems: SnippetSummary[] = [];
@@ -240,6 +255,39 @@ const editorCommands = new Set<EditorCommand>([
 
 window.AaronnoteCurrentFile = () => currentFile;
 
+async function uploadPasteBlobAsset(
+  blob: Blob,
+  meta: { file?: string; name?: string; type?: string },
+): Promise<StoredPasteAsset> {
+  return api.assets.upload({
+    file: meta.file || currentFile,
+    name: meta.name,
+    type: meta.type || blob.type,
+    data: await blobToBase64(blob),
+  });
+}
+
+async function storePasteAssetFromPath(
+  path: string,
+  meta: { file?: string; name?: string; type?: string },
+): Promise<StoredPasteAsset> {
+  return api.assets.storeFromPath({
+    file: meta.file || currentFile,
+    path,
+    name: meta.name,
+    type: meta.type,
+  });
+}
+
+async function readSystemClipboardForPaste(): Promise<EditorClipboardPayload | null> {
+  try {
+    const payload = await api.clipboard.read({ file: currentFile }) as EditorClipboardPayload;
+    return payload && typeof payload === "object" ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
 function roamFeaturesEnabled(): boolean {
   return !currentStandalone;
 }
@@ -278,6 +326,12 @@ let onBlurVimReset: (() => void) | undefined;
 
 const editor = createEditor(host, {
   initialContent: "",
+  getCurrentFile: () => currentFile,
+  pasteAssets: {
+    uploadBlobAsset: uploadPasteBlobAsset,
+    storeAssetFromPath: storePasteAssetFromPath,
+  },
+  readSystemClipboardFallback: readSystemClipboardForPaste,
   onChange: () => {
     if (!applyingContent) revision += 1;
     updateTitle();
@@ -1041,6 +1095,12 @@ function openExternalUrl(href: string, options: { newWindow?: boolean } = {}): v
   const protocol = hrefProtocol(raw);
   if (!protocol) {
     setStatus(`Note not found: ${hrefPath(raw) || raw}`);
+    return;
+  }
+  if (protocol === "zotero") {
+    void api.emacs.systemOpen(raw)
+      .then(() => setStatus("Opened Zotero link"))
+      .catch((err) => setStatus(err instanceof Error ? err.message : "Failed to open Zotero link"));
     return;
   }
   if (options.newWindow) {
@@ -1999,21 +2059,9 @@ function inlineTagCompletionPrefix(before: string): string | null {
   return match ? match[1] ?? "" : null;
 }
 
-function noteCompletionSearch(note: NoteSummary): string {
-  return noteSearchValues(note).join(" ").toLowerCase();
-}
-
 function displayPathCompletion(path: string, prefix: string): string {
   if (prefix.startsWith("./") && !path.startsWith("./") && !path.startsWith("../") && !path.startsWith("/")) return `./${path}`;
   return path;
-}
-
-function pathCompletionMatches(path: string, prefix: string): boolean {
-  const query = prefix.toLowerCase();
-  const display = displayPathCompletion(path, prefix).toLowerCase();
-  if (display.startsWith(query)) return true;
-  if (query.startsWith("./")) return path.toLowerCase().startsWith(query.slice(2));
-  return false;
 }
 
 function isPureTraversalPath(path: string): boolean {
@@ -2029,40 +2077,6 @@ function pathCompletionRank(path: string, prefix: string): number {
   const directoryBoost = display.endsWith("/") ? -2 : 0;
   const exactPrefixBoost = display.toLowerCase().startsWith(prefix.toLowerCase()) ? -4 : 0;
   return sameDir + parentPenalty + dirPenalty + directoryBoost + exactPrefixBoost;
-}
-
-function relativeNotePath(fromDir: string, toPath: string): string {
-  const from = normalizeNotePath(fromDir);
-  const target = normalizeNotePath(toPath);
-  if (!target) return "";
-  if (!from || from.startsWith("/") !== target.startsWith("/")) return target;
-  const fromParts = from.split("/").filter(Boolean);
-  const targetParts = target.split("/").filter(Boolean);
-  let shared = 0;
-  while (shared < fromParts.length && shared < targetParts.length && fromParts[shared] === targetParts[shared]) shared++;
-  const up = Array.from({ length: fromParts.length - shared }, () => "..");
-  const down = targetParts.slice(shared);
-  return [...up, ...down].join("/") || fileNameFromPath(target);
-}
-
-function indexedPathSuggestions(): string[] {
-  const values = new Set(pathSuggestions);
-  const current = currentNote();
-  const currentPath = String(current?.path || current?.link || "").trim();
-  const baseDir = dirnamePath(currentPath);
-  for (const note of notes) {
-    const rawPaths = [note.path, note.link, note.file]
-      .map((value) => String(value || "").trim())
-      .filter(Boolean);
-    rawPaths.forEach((path) => values.add(path));
-    const notePath = String(note.path || note.link || "").trim();
-    if (!currentPath || !notePath) continue;
-    const relativePath = relativeNotePath(baseDir, notePath);
-    if (!relativePath) continue;
-    values.add(relativePath);
-    if (!relativePath.startsWith(".") && !relativePath.startsWith("/")) values.add(`./${relativePath}`);
-  }
-  return [...values].sort((a, b) => a.localeCompare(b));
 }
 
 function noteFromCompletionRef(ref: string): NoteSummary | undefined {
@@ -2118,18 +2132,18 @@ function domCompletionContext(before: string): { note: NoteSummary; domPrefix: s
   return { note, domPrefix: parts.domPrefix, parentSegments: parts.parentSegments };
 }
 
-function noteInlineTagsForCompletion(note: NoteSummary): string[] {
-  const tags = note.file === currentFile
-    ? allAnchorTagSuggestions()
-    : [...(note.inlineTags ?? [])];
-  return [...new Set(tags.map((tag) => normalizeInlineTag(tag).replace(/^#/, "")).filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b));
-}
-
-function matchingTagCompletions(note: NoteSummary, prefix: string): SnippetSummary[] {
+async function matchingTagCompletions(note: NoteSummary, prefix: string): Promise<SnippetSummary[]> {
   const query = prefix.toLowerCase().replace(/^tag-/, "");
-  return noteInlineTagsForCompletion(note)
-    .filter((tag) => tag.toLowerCase().includes(query))
+  let tags: string[];
+  if (note.file === currentFile) {
+    tags = [...new Set(allAnchorTagSuggestions().map((tag) => normalizeInlineTag(tag).replace(/^#/, "")).filter(Boolean))].sort();
+  } else {
+    // For roam://noteid# and ./path.md# anchor completion: show only the inline
+    // tags defined in the target note (not global roam tags from all notes).
+    tags = [...(note.inlineTags ?? [])].map((t) => normalizeInlineTag(t).replace(/^#/, "")).filter(Boolean);
+  }
+  return [...new Set(tags)]
+    .filter((tag) => !query || tag.toLowerCase().includes(query))
     .slice(0, 12)
     .map((tag) => ({
       key: tag,
@@ -2218,33 +2232,30 @@ function matchingDomCompletions(note: NoteSummary, prefix: string, parentSegment
   }));
 }
 
-function matchingRoamCompletions(prefix: string): SnippetSummary[] {
+async function matchingRoamCompletions(prefix: string): Promise<SnippetSummary[]> {
   if (!roamFeaturesEnabled()) return [];
   const needle = prefix.trim().toLowerCase();
-  return notes
-    .filter((note) => note.roam && canonicalRoamNoteId(note))
-    .filter((note) => !needle || noteCompletionSearch(note).includes(needle))
-    .slice(0, 12)
-    .map((note) => {
-      const id = canonicalRoamNoteId(note);
-      return {
-        key: note.title || id,
-        name: note.title || id,
-        body: `${encodeURIComponent(id)}`,
-        mode: "markdown-mode",
-        group: "roam",
-        source: note.path || note.file || id,
-      };
-    });
+  try {
+    const result = await api.completions.roam(needle);
+    return (result.notes ?? []).map((note) => ({
+      key: note.title || note.id,
+      name: note.title || note.id,
+      body: `${encodeURIComponent(note.id || note.key)}`,
+      mode: "markdown-mode",
+      group: "roam",
+      source: note.path || note.id,
+    }));
+  } catch {
+    return [];
+  }
 }
 
-function matchingWikilinkCompletions(prefix: string): SnippetSummary[] {
+async function matchingWikilinkCompletions(prefix: string): Promise<SnippetSummary[]> {
   const needle = prefix.trim().toLowerCase();
-  return notes
-    .filter((note) => !needle || noteCompletionSearch(note).includes(needle))
-    .slice(0, 12)
-    .map((note) => {
-      const label = String(note.title || note.path || note.link || note.file || canonicalRoamNoteId(note) || "Untitled")
+  try {
+    const result = await api.completions.roam(needle);
+    return (result.notes ?? []).map((note) => {
+      const label = String(note.title || note.path || note.id || "Untitled")
         .replace(/[\r\n\]]+/g, " ")
         .replace(/\s+/g, " ")
         .trim() || "Untitled";
@@ -2254,16 +2265,27 @@ function matchingWikilinkCompletions(prefix: string): SnippetSummary[] {
         body: `${label}]]`,
         mode: "markdown-mode",
         group: "wikilink",
-        source: note.path || note.file || "",
+        source: note.path || "",
       };
     });
+  } catch {
+    return [];
+  }
 }
 
-function matchingInlineTagCompletions(prefix: string): SnippetSummary[] {
+async function matchingInlineTagCompletions(prefix: string): Promise<SnippetSummary[]> {
   const needle = normalizeInlineTag(prefix).toLowerCase();
+  const localTags = allAnchorTagSuggestions().map(normalizeInlineTag).filter(Boolean);
+  let backendTags: string[] = [];
+  try {
+    const result = await api.completions.tags(needle);
+    backendTags = result.tags ?? [];
+  } catch {
+    // fall back to local tags only
+  }
   const tags = new Map<string, string>();
-  for (const tag of [...allAnchorTagSuggestions(), ...notes.flatMap((note) => note.inlineTags ?? [])]) {
-    const clean = normalizeInlineTag(tag);
+  for (const tag of [...localTags, ...backendTags]) {
+    const clean = normalizeInlineTag(tag).replace(/^#/, "");
     if (!clean) continue;
     const key = clean.toLowerCase();
     if (!tags.has(key)) tags.set(key, clean);
@@ -2282,70 +2304,36 @@ function matchingInlineTagCompletions(prefix: string): SnippetSummary[] {
     }));
 }
 
-function matchingPathCompletions(prefix: string): SnippetSummary[] {
-  if (!prefix) return [];
-  return indexedPathSuggestions()
-    .filter((path) => pathCompletionMatches(path, prefix))
-    .filter((path) => !isPureTraversalPath(displayPathCompletion(path, prefix)))
-    .sort((a, b) => {
-      const rank = pathCompletionRank(a, prefix) - pathCompletionRank(b, prefix);
-      return rank || displayPathCompletion(a, prefix).localeCompare(displayPathCompletion(b, prefix));
-    })
-    .slice(0, 8)
-    .map((path) => {
-      const displayPath = displayPathCompletion(path, prefix);
-      const note = resolveHrefNote(displayPath);
-      const roamId = roamFeaturesEnabled() && note?.roam ? canonicalRoamNoteId(note) : "";
-      return {
-        key: displayPath,
-        name: displayPath,
-        mode: "markdown-mode",
-        group: "path",
-        body: roamId ? roamHrefForNote(note) : displayPath,
-        source: note?.title && note.title !== displayPath ? note.title : "",
-      };
-    });
+async function matchingPathCompletions(prefix: string): Promise<SnippetSummary[]> {
+  if (!prefix || !currentFile) return [];
+  try {
+    const result = await api.notes.pathSuggestions(currentFile, prefix);
+    const paths = result.paths ?? [];
+    return paths
+      .filter((path) => !isPureTraversalPath(displayPathCompletion(path, prefix)))
+      .sort((a, b) => {
+        const rank = pathCompletionRank(a, prefix) - pathCompletionRank(b, prefix);
+        return rank || displayPathCompletion(a, prefix).localeCompare(displayPathCompletion(b, prefix));
+      })
+      .slice(0, 8)
+      .map((path) => {
+        const displayPath = displayPathCompletion(path, prefix);
+        const note = resolveHrefNote(displayPath);
+        const roamId = roamFeaturesEnabled() && note?.roam ? canonicalRoamNoteId(note) : "";
+        return {
+          key: displayPath,
+          name: displayPath,
+          mode: "markdown-mode",
+          group: "path",
+          body: roamId ? roamHrefForNote(note) : displayPath,
+          source: note?.title && note.title !== displayPath ? note.title : "",
+        };
+      });
+  } catch {
+    return [];
+  }
 }
 
-function linkTargetCompletionMatches(href: string, prefix: string): {
-  renderPrefix: string;
-  deleteBefore: number;
-  matches: SnippetSummary[];
-} | null {
-  const targetPrefix = cleanHref(prefix);
-  const target = cleanHref(href);
-  const hashIndex = targetPrefix.lastIndexOf("#");
-  if (hashIndex >= 0) {
-    const ref = targetPrefix.slice(0, hashIndex);
-    const note = noteFromCompletionRef(ref || target);
-    if (!note) return null;
-    const tagPrefix = targetPrefix.slice(hashIndex + 1);
-    const matches = matchingTagCompletions(note, tagPrefix);
-    return { renderPrefix: `#${tagPrefix}`, deleteBefore: tagPrefix.length, matches };
-  }
-
-  const domParts = domCompletionParts(targetPrefix);
-  if (domParts) {
-    const note = noteFromCompletionRef(domParts.ref);
-    if (!note) return null;
-    const matches = matchingDomCompletions(note, domParts.domPrefix, domParts.parentSegments);
-    return { renderPrefix: `@${domParts.domPrefix}`, deleteBefore: domParts.domPrefix.length, matches };
-  }
-
-  const roamPrefix = targetPrefix.match(/^roam:\/\/(.*)$/i)?.[1];
-  if (roamPrefix != null) {
-    if (!roamFeaturesEnabled()) return null;
-    const matches = matchingRoamCompletions(roamPrefix);
-    return { renderPrefix: `roam://${roamPrefix}`, deleteBefore: roamPrefix.length, matches };
-  }
-
-  if (/^\.{1,2}\//.test(targetPrefix)) {
-    const matches = matchingPathCompletions(targetPrefix);
-    return { renderPrefix: targetPrefix, deleteBefore: targetPrefix.length, matches };
-  }
-
-  return null;
-}
 
 function renderSnippetPopup(prefix: string, rect: { left: number; top: number; bottom: number } | null): void {
   const nextKey = `${prefix}\n${snippetPopupIndex}\n${snippetPopupItems.map((snippet) => `${snippet.mode}:${snippet.key}:${snippet.name}`).join("\n")}`;
@@ -2469,110 +2457,205 @@ function snippetContextMode(ctx: ReturnType<typeof editor.cursorContext>): strin
   return mathAtCursor(ctx) ? "tex-mode" : "markdown-mode";
 }
 
+function clearCompletionCache(): void {
+  completionEpoch.cancel();
+  completionTimer.cancel();
+  completionContextKey = "";
+  completionPendingItems = null;
+}
+
+function scheduleAsyncCompletion(
+  contextKey: string,
+  renderPrefix: string,
+  deleteBefore: number,
+  rect: { left: number; top: number; bottom: number } | null,
+  fetchFn: () => Promise<SnippetSummary[]>,
+): void {
+  if (renderPrefix === snippetSuppressedPrefix) {
+    hideSnippetPopup();
+    clearCompletionCache();
+    return;
+  }
+  // Same context: show cached result immediately, no new request needed.
+  if (contextKey === completionContextKey && completionPendingItems !== null) {
+    if (completionPendingItems.length > 0) {
+      showSnippetPopup(renderPrefix, completionPendingItems, deleteBefore, rect);
+    } else {
+      hideSnippetPopup();
+    }
+    return;
+  }
+  // New context: start a fresh epoch; keep old popup visible while request is in flight.
+  completionContextKey = contextKey;
+  completionPendingItems = null;
+  const run = completionEpoch.begin();
+  completionTimer.schedule(() => {
+    void fetchFn().then((items) => {
+      if (!run.current) return;
+      completionPendingItems = items;
+      if (items.length > 0) {
+        showSnippetPopup(renderPrefix, items, deleteBefore, rect);
+      } else {
+        hideSnippetPopup();
+      }
+    }).catch(() => {
+      if (!run.current) return;
+      hideSnippetPopup();
+    });
+  });
+}
+
 function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void {
   if (!editorOwnsActiveSurface()) {
     hideSnippetPopup();
+    clearCompletionCache();
     return;
   }
+
+  // Link target completion ([...](here) or inline href position)
   const linkTarget = markdownInlineLinkTargetAtCursor();
-  const linkMatches = linkTarget ? linkTargetCompletionMatches(linkTarget.href, linkTarget.prefix) : null;
-  if (linkMatches) {
-    if (linkMatches.renderPrefix === snippetSuppressedPrefix || linkMatches.matches.length === 0) {
-      hideSnippetPopup();
+  if (linkTarget) {
+    const targetPrefix = cleanHref(linkTarget.prefix);
+    const target = cleanHref(linkTarget.href);
+
+    const hashIndex = targetPrefix.lastIndexOf("#");
+    if (hashIndex >= 0) {
+      const ref = targetPrefix.slice(0, hashIndex);
+      const note = noteFromCompletionRef(ref || target);
+      if (!note) { hideSnippetPopup(); clearCompletionCache(); return; }
+      const tagPrefix = targetPrefix.slice(hashIndex + 1);
+      const renderPrefix = `#${tagPrefix}`;
+      scheduleAsyncCompletion(
+        `link-tag:${note.file}:${tagPrefix}`,
+        renderPrefix,
+        tagPrefix.length,
+        ctx.rect,
+        () => matchingTagCompletions(note, tagPrefix),
+      );
       return;
     }
-    showSnippetPopup(linkMatches.renderPrefix, linkMatches.matches, linkMatches.deleteBefore, ctx.rect);
+
+    const domParts = domCompletionParts(targetPrefix);
+    if (domParts) {
+      const note = noteFromCompletionRef(domParts.ref);
+      if (!note) { hideSnippetPopup(); clearCompletionCache(); return; }
+      const renderPrefix = `@${domParts.domPrefix}`;
+      if (renderPrefix === snippetSuppressedPrefix) { hideSnippetPopup(); clearCompletionCache(); return; }
+      const matches = matchingDomCompletions(note, domParts.domPrefix, domParts.parentSegments);
+      if (matches.length === 0) { hideSnippetPopup(); clearCompletionCache(); return; }
+      clearCompletionCache();
+      showSnippetPopup(renderPrefix, matches, domParts.domPrefix.length, ctx.rect);
+      return;
+    }
+
+    const roamLinkPrefix = targetPrefix.match(/^roam:\/\/(.*)$/i)?.[1];
+    if (roamLinkPrefix != null) {
+      if (!roamFeaturesEnabled()) { hideSnippetPopup(); clearCompletionCache(); return; }
+      const renderPrefix = `roam://${roamLinkPrefix}`;
+      scheduleAsyncCompletion(
+        `link-roam:${roamLinkPrefix}`,
+        renderPrefix,
+        roamLinkPrefix.length,
+        ctx.rect,
+        () => matchingRoamCompletions(roamLinkPrefix),
+      );
+      return;
+    }
+
+    if (/^\.{1,2}\//.test(targetPrefix)) {
+      scheduleAsyncCompletion(
+        `link-path:${currentFile}:${targetPrefix}`,
+        targetPrefix,
+        targetPrefix.length,
+        ctx.rect,
+        () => matchingPathCompletions(targetPrefix),
+      );
+      return;
+    }
+
+    hideSnippetPopup();
+    clearCompletionCache();
     return;
   }
+
   const domContext = domCompletionContext(ctx.before);
   if (domContext) {
     const renderPrefix = `@${domContext.domPrefix}`;
-    if (renderPrefix === snippetSuppressedPrefix) {
-      hideSnippetPopup();
-      return;
-    }
+    if (renderPrefix === snippetSuppressedPrefix) { hideSnippetPopup(); clearCompletionCache(); return; }
     const matches = matchingDomCompletions(domContext.note, domContext.domPrefix, domContext.parentSegments);
-    if (matches.length === 0) {
-      hideSnippetPopup();
-      return;
-    }
+    if (matches.length === 0) { hideSnippetPopup(); clearCompletionCache(); return; }
+    clearCompletionCache();
     showSnippetPopup(renderPrefix, matches, domContext.domPrefix.length, ctx.rect);
     return;
   }
+
   const tagContext = tagCompletionContext(ctx.before);
   if (tagContext) {
     const renderPrefix = `#${tagContext.tagPrefix}`;
-    if (renderPrefix === snippetSuppressedPrefix) {
-      hideSnippetPopup();
-      return;
-    }
-    const matches = matchingTagCompletions(tagContext.note, tagContext.tagPrefix);
-    if (matches.length === 0) {
-      hideSnippetPopup();
-      return;
-    }
-    showSnippetPopup(renderPrefix, matches, tagContext.tagPrefix.length, ctx.rect);
+    scheduleAsyncCompletion(
+      `tag:${tagContext.note.file}:${tagContext.tagPrefix}`,
+      renderPrefix,
+      tagContext.tagPrefix.length,
+      ctx.rect,
+      () => matchingTagCompletions(tagContext.note, tagContext.tagPrefix),
+    );
     return;
   }
+
   const inlineTagPrefix = inlineTagCompletionPrefix(ctx.before);
   if (inlineTagPrefix !== null) {
     const renderPrefix = `@@tag[${inlineTagPrefix}`;
-    if (renderPrefix === snippetSuppressedPrefix) {
-      hideSnippetPopup();
-      return;
-    }
-    const matches = matchingInlineTagCompletions(inlineTagPrefix);
-    if (matches.length === 0) {
-      hideSnippetPopup();
-      return;
-    }
-    showSnippetPopup(renderPrefix, matches, inlineTagPrefix.length, ctx.rect);
+    scheduleAsyncCompletion(
+      `inline-tag:${inlineTagPrefix}`,
+      renderPrefix,
+      inlineTagPrefix.length,
+      ctx.rect,
+      () => matchingInlineTagCompletions(inlineTagPrefix),
+    );
     return;
   }
+
   const wikilinkPrefix = wikilinkCompletionPrefix(ctx.before);
   if (wikilinkPrefix !== null) {
     const renderPrefix = `[[${wikilinkPrefix}`;
-    if (renderPrefix === snippetSuppressedPrefix) {
-      hideSnippetPopup();
-      return;
-    }
-    const matches = matchingWikilinkCompletions(wikilinkPrefix);
-    if (matches.length === 0) {
-      hideSnippetPopup();
-      return;
-    }
-    showSnippetPopup(renderPrefix, matches, wikilinkPrefix.length, ctx.rect);
+    scheduleAsyncCompletion(
+      `wikilink:${wikilinkPrefix}`,
+      renderPrefix,
+      wikilinkPrefix.length,
+      ctx.rect,
+      () => matchingWikilinkCompletions(wikilinkPrefix),
+    );
     return;
   }
+
   const roamPrefix = roamCompletionPrefix(ctx.before);
   if (roamPrefix !== null) {
+    if (!roamFeaturesEnabled()) { hideSnippetPopup(); clearCompletionCache(); return; }
     const renderPrefix = `roam://${roamPrefix}`;
-    if (renderPrefix === snippetSuppressedPrefix) {
-      hideSnippetPopup();
-      return;
-    }
-    const matches = matchingRoamCompletions(roamPrefix);
-    if (matches.length === 0) {
-      hideSnippetPopup();
-      return;
-    }
-    showSnippetPopup(renderPrefix, matches, roamPrefix.length, ctx.rect);
+    scheduleAsyncCompletion(
+      `roam:${roamPrefix}`,
+      renderPrefix,
+      roamPrefix.length,
+      ctx.rect,
+      () => matchingRoamCompletions(roamPrefix),
+    );
     return;
   }
+
   const pathPrefix = pathCompletionPrefix(ctx.before);
   if (pathPrefix) {
-    if (pathPrefix === snippetSuppressedPrefix) {
-      hideSnippetPopup();
-      return;
-    }
-    const matches = matchingPathCompletions(pathPrefix);
-    if (matches.length === 0) {
-      hideSnippetPopup();
-      return;
-    }
-    showSnippetPopup(pathPrefix, matches, pathPrefix.length, ctx.rect);
+    scheduleAsyncCompletion(
+      `path:${currentFile}:${pathPrefix}`,
+      pathPrefix,
+      pathPrefix.length,
+      ctx.rect,
+      () => matchingPathCompletions(pathPrefix),
+    );
     return;
   }
+
+  // Plain snippet completion — synchronous, no backend needed.
+  clearCompletionCache();
   const prefix = snippetPrefix(ctx.before);
   if (!prefix || prefix === snippetSuppressedPrefix) {
     hideSnippetPopup();
@@ -3079,6 +3162,10 @@ function runHostCommand(detail: unknown): boolean {
       return true;
     case "focus":
       editor.focus();
+      return true;
+    case "paste":
+      editor.focus();
+      void editor.pasteFromClipboard();
       return true;
     case "escape":
     case "normal":

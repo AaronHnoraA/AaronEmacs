@@ -23,6 +23,7 @@
 (declare-function my/appine--tab-reset "init-appine" ())
 (declare-function my/appine--switch-to-tab-index "init-appine" (target-index))
 (declare-function appine-focus "appine" ())
+(declare-function my/open-system-target "init-open" (target))
 (declare-function my/aaronnote-roam-note-changed "init-md-roam" (file))
 (declare-function my/aaronnote-roam--clear-runtime-cache "init-md-roam" ())
 (declare-function my/aaronnote-roam--cancel-sync-timer "init-md-roam" ())
@@ -51,6 +52,10 @@
 (defvar my/aaronnote--state-root
   (expand-file-name "var/aaronnote" user-emacs-directory)
   "Path to Aaronnote state files under the Emacs config.")
+
+(defvar my/aaronnote--tmp-root
+  (expand-file-name "tmp" my/aaronnote--state-root)
+  "Path to Aaronnote runtime temporary files under the Emacs config.")
 
 (defvar my/aaronnote--snippets-root
   (expand-file-name "snippets" user-emacs-directory)
@@ -204,6 +209,7 @@ Set to 0 to let the OS pick a random port."
             (format "AARONNOTE_PUBLISH_JS_DIR=%s"
                     (expand-file-name "js" my/aaronnote--runtime-root))
             (format "AARONNOTE_STATE_DIR=%s" (expand-file-name my/aaronnote--state-root))
+            (format "AARONNOTE_TMP_DIR=%s" (expand-file-name my/aaronnote--tmp-root))
             (format "AARONNOTE_SNIPPETS_ROOT=%s" (expand-file-name my/aaronnote--snippets-root))
             (format "AARONNOTE_TEMPLATES_ROOT=%s" (expand-file-name my/aaronnote--templates-root))
             (format "AARONNOTE_WEB_PORT=%d" my/aaronnote-web-port)
@@ -292,8 +298,9 @@ KEY-STRING is used only for diagnostics."
   "Handle one web-host stdout LINE."
   (let ((ready-prefix "aaronote-web-host:ready:")
         (goto-prefix "aaronote-event:goto:")
-        (open-prefix "aaronote-event:open:")
-        (current-file-prefix "aaronote-event:current-file:")
+	(open-prefix "aaronote-event:open:")
+        (system-open-prefix "aaronote-event:system-open:")
+	(current-file-prefix "aaronote-event:current-file:")
         (saved-prefix "aaronote-event:saved:")
         (key-prefix "aaronote-event:key:"))
     (cond
@@ -311,7 +318,7 @@ KEY-STRING is used only for diagnostics."
         (when (> line-number 0)
           (my/aaronnote--goto-location nil line-number column))))
      ((string-prefix-p open-prefix line)
-      (condition-case err
+	      (condition-case err
           (let* ((payload (json-parse-string
                            (substring line (length open-prefix))
                            :object-type 'alist))
@@ -329,8 +336,21 @@ KEY-STRING is used only for diagnostics."
               (when (and tag (not (string-empty-p (or tag ""))))
                 (when (require 'init-note-code nil t)
                   (ignore-errors (my/note-code--goto-tag tag))))))
+	        (error
+	         (message "Aaronnote event parse failed: %s" (error-message-string err)))))
+     ((string-prefix-p system-open-prefix line)
+      (condition-case err
+          (let* ((payload (json-parse-string
+                           (substring line (length system-open-prefix))
+                           :object-type 'alist))
+                 (target (alist-get 'target payload)))
+            (unless (fboundp 'my/open-system-target)
+              (require 'init-open))
+            (when (and (stringp target) (not (string-empty-p target)))
+              (my/open-system-target target)))
         (error
-         (message "Aaronnote event parse failed: %s" (error-message-string err)))))
+         (message "Aaronnote system-open event failed: %s"
+                  (error-message-string err)))))
      ((string-prefix-p current-file-prefix line)
       (condition-case err
           (let* ((payload (json-parse-string
@@ -796,6 +816,36 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
 
 ;;; API call — POST to /api and parse JSON response.
 
+(defun my/aaronnote--api-call-sync (channel args)
+  "POST CHANNEL with ARGS to /api synchronously; return parsed JSON or nil.
+Only usable when the web-host is running (`my/aaronnote--ready' is non-nil).
+Blocks the caller until the response arrives (or 8 s timeout)."
+  (when my/aaronnote--ready
+    (let* ((url-request-method "POST")
+           (url-request-extra-headers '(("Content-Type" . "application/json")))
+           (url-request-data
+            (encode-coding-string
+             (json-encode `((channel . ,channel) (args . ,args)))
+             'utf-8))
+           (buf (url-retrieve-synchronously
+                 (my/aaronnote--server-url "/api")
+                 t nil 8)))
+      (when (buffer-live-p buf)
+        (unwind-protect
+            (with-current-buffer buf
+              (goto-char (point-min))
+              (when (re-search-forward "^\r?\n" nil t)
+                (condition-case err
+                    (json-parse-string
+                     (buffer-substring (point) (point-max))
+                     :object-type 'hash-table
+                     :array-type 'list)
+                  (error
+                   (message "Aaronnote API parse error: %s"
+                            (error-message-string err))
+                   nil))))
+          (kill-buffer buf))))))
+
 (defun my/aaronnote--api-call (channel args callback)
   "POST CHANNEL with ARGS to /api; parse JSON response and call CALLBACK."
   (when my/aaronnote--ready
@@ -878,6 +928,7 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
 (my/aaronnote--def-editor-cmd "toggle-source"   "toggle-source"   "Toggle source / rendered view.")
 (my/aaronnote--def-editor-cmd "undo"            "undo"            "Undo last edit in Aaronnote.")
 (my/aaronnote--def-editor-cmd "redo"            "redo"            "Redo last undone edit in Aaronnote.")
+(my/aaronnote--def-editor-cmd "paste"           "paste"           "Paste through Aaronnote's editor pipeline.")
 (my/aaronnote--def-editor-cmd "bold"            "bold"            "Toggle bold at point.")
 (my/aaronnote--def-editor-cmd "italic"          "italic"          "Toggle italic at point.")
 (my/aaronnote--def-editor-cmd "code-inline"     "code"            "Toggle inline code at point.")
@@ -967,7 +1018,8 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
       ("E" "math block"       my/aaronnote-insert-math)
       ("C" "insert TOC"       my/aaronnote-insert-toc)
       ("U" "undo"             my/aaronnote-undo)
-      ("Y" "redo"             my/aaronnote-redo)]]))
+      ("Y" "redo"             my/aaronnote-redo)
+      ("V" "paste"            my/aaronnote-paste)]]))
 
 ;;; Keybindings.
 

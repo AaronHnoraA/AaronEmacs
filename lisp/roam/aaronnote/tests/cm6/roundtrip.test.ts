@@ -35,6 +35,15 @@ function mountCM6(initialContent = "") {
   return { editor, cleanup: () => { editor.destroy(); host.remove(); } };
 }
 
+function nextTick(): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, 0));
+}
+
+async function settlePaste(): Promise<void> {
+  await nextTick();
+  await nextTick();
+}
+
 // ---------------------------------------------------------------------------
 // getMarkdown / setMarkdown
 // ---------------------------------------------------------------------------
@@ -2048,6 +2057,38 @@ maybeDescribe("cm6 kernel: text mutations", () => {
     expect(editor.getMarkdown()).toBe("## Title\n\nPlain body");
     cleanup();
   });
+
+  test("paste stores image files through the editor asset adapter", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const editor = createEditor(host, {
+      kernel: "cm6",
+      initialContent: "",
+      getCurrentFile: () => "/notes/topic.md",
+      pasteAssets: {
+        uploadBlobAsset: async (_blob, meta) => ({
+          ok: true,
+          isImage: true,
+          name: meta.name,
+          type: meta.type,
+          markdownPath: "./images/topic/plot.png",
+        }),
+      },
+    });
+    try {
+      const file = new File(["PNG"], "plot.png", { type: "image/png" });
+      const handled = await editor.pasteFromDataTransfer({
+        files: [file],
+        items: [],
+        getData: () => "",
+      } as unknown as DataTransfer);
+      expect(handled).toBe(true);
+      expect(editor.getMarkdown()).toBe("![plot.png](./images/topic/plot.png)");
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2098,7 +2139,7 @@ maybeDescribe("cm6 kernel: selection", () => {
     cleanup();
   });
 
-  test("vim-lite restores core normal and visual commands on CM6", () => {
+  test("vim-lite restores core normal and visual commands on CM6", async () => {
     const { editor, cleanup } = mountCM6("abc\ndef\nghi");
     const target = (editor.view as unknown as { contentDOM: HTMLElement }).contentDOM;
     const vim = createVimLite(editor, document.body);
@@ -2116,7 +2157,9 @@ maybeDescribe("cm6 kernel: selection", () => {
     expect(editor.getMarkdownSelection().from).toBe(1);
     press("x");
     expect(editor.getMarkdown()).toBe("ac\ndef\nghi");
+    await nextTick();
     press("p");
+    await settlePaste();
     expect(editor.getMarkdown()).toBe("acb\ndef\nghi");
 
     editor.setMarkdown("one\ntwo\nthree");
@@ -2136,6 +2179,7 @@ maybeDescribe("cm6 kernel: selection", () => {
     editor.setMarkdownSelection(editor.getMarkdown().length);
     vim.setMode("normal");
     press("p");
+    await settlePaste();
     expect(editor.getMarkdown()).toBe("abcdab");
     cleanup();
   });
@@ -2164,7 +2208,7 @@ maybeDescribe("cm6 kernel: selection", () => {
     cleanup();
   });
 
-  test("vim-lite visual mode extends backward past the anchor", () => {
+  test("vim-lite visual mode extends backward past the anchor", async () => {
     const { editor, cleanup } = mountCM6("abcdef");
     const target = (editor.view as unknown as { contentDOM: HTMLElement }).contentDOM;
     const vim = createVimLite(editor, document.body);
@@ -2189,6 +2233,7 @@ maybeDescribe("cm6 kernel: selection", () => {
     editor.setMarkdownSelection(editor.getMarkdown().length);
     vim.setMode("normal");
     press("p");
+    await settlePaste();
     expect(editor.getMarkdown()).toBe("abcdefbc");
     cleanup();
   });

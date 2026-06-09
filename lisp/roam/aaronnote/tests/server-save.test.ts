@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "@voidzero-dev/vite-plus-test";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
@@ -60,6 +60,25 @@ describe("server save API", () => {
     expect(msg.note?.title).toBe("A");
     expect(msg.notesRefresh).toBe("deferred");
     expect(await readFile(file, "utf8")).toBe("# A\n\nBody\n");
+  });
+
+  test("saving a note does not leave runtime temp files in the note directory", async () => {
+    const { notes } = await setupRoot();
+    const file = join(notes, "a.md");
+    await writeFile(file, "# A\n", "utf8");
+    const base = await stat(file);
+
+    await saveNote({
+      file,
+      content: "# A\n\nBody\n",
+      clientId: "test",
+      seq: 1,
+      baseMtimeMs: base.mtimeMs,
+      refresh: "deferred",
+    });
+
+    const entries = await readdir(notes);
+    expect(entries.filter((name) => name.includes(".tmp") || name === ".tmp")).toEqual([]);
   });
 
   test("symlinked note root still treats real-path files as roam notes", async () => {
@@ -190,6 +209,20 @@ describe("server save API", () => {
 
     expect(await git(root, ["rev-list", "--count", "HEAD"])).toBe("1");
     expect(await git(root, ["status", "--porcelain", "--", "."])).toContain("roam/queued-node.md");
+  });
+
+  test("creating nodes and folders does not write Aaronnote keep files", async () => {
+    const { notes } = await setupRoot();
+
+    await createNode({
+      nodeType: "roam",
+      id: "clean-node",
+      title: "Clean Node",
+      path: "nested/clean-node.md",
+    });
+
+    expect(await readdir(notes)).not.toContain(".aaronnote-keep");
+    expect(await readdir(join(notes, "nested"))).not.toContain(".aaronnote-keep");
   });
 
 });

@@ -415,6 +415,10 @@ function isJupyterHref(href: string): boolean {
   return /\.ipynb(?:[?@#]|$)/i.test(raw);
 }
 
+function isZoteroHref(href: string): boolean {
+  return /^zotero:\/\//i.test(String(href || "").trim());
+}
+
 function joinTokenStyle(token: Token, style: string): void {
   if (!style) return;
   const current = token.attrGet("style");
@@ -734,6 +738,9 @@ function createMarkdownIt(options: RenderMarkdownHTMLOptions): MarkdownIt {
     } else if (href && isJupyterHref(href)) {
       token.attrJoin("class", "aaronnote-jupyter-link");
       token.attrSet("data-jupyter-link", "true");
+    } else if (href && isZoteroHref(href)) {
+      token.attrJoin("class", "aaronnote-zotero-link");
+      token.attrSet("data-zotero-link", "true");
     }
     return originalLinkOpen(tokens, idx, opts, env, self);
   };

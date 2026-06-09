@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Inline Code fence
+# key: icode
+# group: Aaronnote syntax
+# --
+`$1` $0

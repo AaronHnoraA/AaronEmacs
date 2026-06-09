@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
+import { runtimeMkdtemp } from "./tmp.mjs";
 
 import {
   AARONNOTE_ACCEPTED_WORDS,
@@ -412,7 +413,7 @@ function tempMarkdownName(file) {
 
 export async function runExternalProseChecks({ file = "", content = "", ranges = [], segments = [], totalChars = 0 } = {}) {
   const source = String(content || "");
-  const tempDir = await mkdtemp(join(tmpdir(), "aaronnote-prose-"));
+  const tempDir = await runtimeMkdtemp("prose", file || "Aaronnote.md");
   try {
     const baseName = tempMarkdownName(file);
     const segmentList = normalizeCheckSegments(segments);

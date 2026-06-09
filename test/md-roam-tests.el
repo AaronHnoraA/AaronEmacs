@@ -511,6 +511,84 @@ source: roam/demo/analysis.md
     (should (equal (plist-get my/aaronnote-roam-new--draft :path)
                    "projects/project-atlas.md"))))
 
+(ert-deftest my/aaronnote-roam-new-edit-path-chooses-directory ()
+  (my/aaronnote-roam-test-with-vault
+    (make-directory (expand-file-name "archive" root) t)
+    (with-temp-buffer
+      (my/aaronnote-roam-new-mode)
+      (setq-local my/aaronnote-roam-new--base-directory "projects"
+                  my/aaronnote-roam-new--templates
+                  '((:key "roam" :name "Roam note"))
+                  my/aaronnote-roam-new--draft
+                  (my/aaronnote-roam-new--default-draft "projects"))
+      (my/aaronnote-roam-new-render)
+      (cl-letf (((symbol-function 'read-directory-name)
+                 (lambda (&rest _args) (expand-file-name "archive" root))))
+        (my/aaronnote-roam-new-edit-path))
+      (should (equal (plist-get my/aaronnote-roam-new--draft :path)
+                     "archive/untitled.md"))
+      (should (equal (widget-value
+                      (alist-get 'path my/aaronnote-roam-new--widgets))
+                     "archive/untitled.md")))))
+
+(ert-deftest my/aaronnote-roam-new-edit-tags-updates-field ()
+  (my/aaronnote-roam-test-with-vault
+    (with-temp-buffer
+      (my/aaronnote-roam-new-mode)
+      (setq-local my/aaronnote-roam-new--base-directory "projects"
+                  my/aaronnote-roam-new--templates
+                  '((:key "roam" :name "Roam note"))
+                  my/aaronnote-roam-new--draft
+                  (my/aaronnote-roam-new--default-draft "projects"))
+      (my/aaronnote-roam-new-render)
+      (let ((answers '("math" "logic" "")))
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (&rest _args) (pop answers))))
+          (my/aaronnote-roam-new-edit-tags)))
+      (should (equal (plist-get my/aaronnote-roam-new--draft :tags)
+                     '("math" "logic")))
+      (should (equal (widget-value
+                      (alist-get 'tags my/aaronnote-roam-new--widgets))
+                     "math, logic")))))
+
+(ert-deftest my/aaronnote-roam-new-path-and-tags-labels-run-actions ()
+  (my/aaronnote-roam-test-with-vault
+    (make-directory (expand-file-name "archive" root) t)
+    (with-temp-buffer
+      (my/aaronnote-roam-new-mode)
+      (setq-local my/aaronnote-roam-new--base-directory "projects"
+                  my/aaronnote-roam-new--templates
+                  '((:key "roam" :name "Roam note"))
+                  my/aaronnote-roam-new--draft
+                  (my/aaronnote-roam-new--default-draft "projects"))
+      (my/aaronnote-roam-new-render)
+      (let ((case-fold-search nil))
+        (goto-char (point-min))
+        (search-forward "SAVE PATH")
+        (let ((action (get-text-property
+                       (match-beginning 0) 'aaron-ui-board--row-action)))
+          (should action)
+          (cl-letf (((symbol-function 'read-directory-name)
+                     (lambda (&rest _args) (expand-file-name "archive" root))))
+            (funcall action nil))))
+      (should (equal (plist-get my/aaronnote-roam-new--draft :path)
+                     "archive/untitled.md"))
+      (let ((case-fold-search nil))
+        (goto-char (point-min))
+        (search-forward "TAGS")
+        (let ((action (get-text-property
+                       (match-beginning 0) 'aaron-ui-board--row-action))
+              (answers '("math" "")))
+          (should action)
+          (cl-letf (((symbol-function 'completing-read)
+                     (lambda (&rest _args) (pop answers))))
+            (funcall action nil))))
+      (should (equal (plist-get my/aaronnote-roam-new--draft :tags)
+                     '("math")))
+      (should (equal (widget-value
+                      (alist-get 'tags my/aaronnote-roam-new--widgets))
+                     "math")))))
+
 (ert-deftest my/aaronnote-roam-new-default-draft-avoids-existing-untitled ()
   (my/aaronnote-roam-test-with-vault
     (my/aaronnote-roam-test--write-file

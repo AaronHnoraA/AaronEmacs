@@ -303,13 +303,16 @@ With a prefix argument, always prompt."
      ,@body))
 
 (defun my/project-switch (project-root &optional arg)
-  "Switch to PROJECT-ROOT, optionally using Projectile commander with ARG."
+  "Switch to PROJECT-ROOT and open its root directory.
+With ARG, use Projectile's commander action instead."
   (interactive (list (my/project-read-known-project "Switch to project: ")
                      current-prefix-arg))
   (setq project-root (my/project-normalize-root project-root))
   (my/project-switch-perspective project-root)
   (my/with-project-root-context project-root
-    (projectile-switch-project-by-name project-root arg)))
+    (if arg
+        (projectile-switch-project-by-name project-root arg)
+      (dired project-root))))
 
 (defun my/project-ensure-treemacs ()
   "Load Treemacs integrations needed for project-aware navigation."

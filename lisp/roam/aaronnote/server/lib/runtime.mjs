@@ -1,17 +1,19 @@
-import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { changedRoamFilesSince, commitRoam, fileHistory, restoreFileFromCommit, discardFileChanges, roamRepoStatus, roamRepoChanges, diffRoamFile, diffRoamCommit, pullRoam, pushRoam, repoHistory, headSha } from "./roam-git.mjs";
+import { configureTmpRoot, aaronnoteTmpRoot, runtimeMkdtemp, runtimeTmpFile } from "./tmp.mjs";
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 let workspaceRoot = resolve(process.env.AARONNOTE_WORKSPACE_ROOT || resolve(appDir, ".."));
 let publishJsDir = resolve(process.env.AARONNOTE_PUBLISH_JS_DIR || join(workspaceRoot, "js"));
 let stateRoot = resolve(process.env.AARONNOTE_STATE_DIR || join(workspaceRoot, "var", "aaronnote"));
+let runtimeTmpRoot = configureTmpRoot(process.env.AARONNOTE_TMP_DIR || join(stateRoot, "tmp"));
 let snippetsRoot = resolve(process.env.AARONNOTE_SNIPPETS_ROOT || join(workspaceRoot, "snippets"));
 let templatesRoot = resolve(process.env.AARONNOTE_TEMPLATES_ROOT || join(workspaceRoot, "templates", "aaronnote"));
 const execFileAsync = promisify(execFile);
@@ -124,10 +126,16 @@ const pathSuggestionCodeExts = new Set([
 ]);
 async function atomicWriteFile(file, data, options) {
   await mkdir(dirname(file), { recursive: true });
-  const tmp = join(dirname(file), `.${basename(file)}.${process.pid}.${Date.now()}.${++atomicWriteCounter}.tmp`);
+  const tmp = await runtimeTmpFile("save", file, `.tmp-${process.pid}-${Date.now()}-${++atomicWriteCounter}`);
   try {
     await writeFile(tmp, data, options);
-    await rename(tmp, file);
+    try {
+      await rename(tmp, file);
+    } catch (err) {
+      if (err?.code !== "EXDEV") throw err;
+      await copyFile(tmp, file);
+      await rm(tmp, { force: true }).catch(() => {});
+    }
   } catch (err) {
     await rm(tmp, { force: true }).catch(() => {});
     throw err;
@@ -535,7 +543,7 @@ export async function renderTikzAsset(body) {
     throw err;
   }
 
-  const tmp = await mkdtemp(join(tmpdir(), "aaronnote-tikz-"));
+  const tmp = await runtimeMkdtemp("tikz", current);
   let latexError = null;
   let dvisvgmError = null;
   let mutoolError = null;
@@ -826,7 +834,7 @@ export function assetRefsFromContent(content, noteFile) {
 }
 
 function assetCleanupStateFile() {
-  return join(noteRoot, ".aaronnote-asset-cleanup-state.json");
+  return join(stateRoot, "asset-cleanup", "state.json");
 }
 
 async function readAssetCleanupState() {
@@ -1745,7 +1753,7 @@ function markdownForPdf(content) {
 }
 
 export async function exportPdf(file, content) {
-  const dir = await mkdtemp(join(tmpdir(), "aaronnote-pdf-"));
+  const dir = await runtimeMkdtemp("pdf", file || "Aaronnote.pdf");
   const input = join(dir, "input.md");
   const out = join(dir, "output.pdf");
   await writeFile(input, markdownForPdf(content), "utf8");
@@ -3291,7 +3299,7 @@ function copilotUriForFile(file) {
       return pathToFileURL(safeOpenFile(file)).href;
     } catch {}
   }
-  return pathToFileURL(join(noteRoot, ".aaronnote-copilot.md")).href;
+  return pathToFileURL(join(runtimeTmpRoot || aaronnoteTmpRoot(), "copilot", "aaronnote-copilot.md")).href;
 }
 
 function uniqueExistingCommands(commands) {
@@ -3967,7 +3975,7 @@ function roamDbFile() {
 }
 
 function roamSyncStateFile() {
-  return join(noteRoot, ".aaronnote-sync-state.json");
+  return join(stateRoot, "sync", "state.json");
 }
 
 async function readSyncState() {
@@ -4118,7 +4126,7 @@ async function runFullRoamSync(scanned, dbFile) {
   const roamNotes = scanned.filter((note) => note.roam && note.file);
   const roamIds = new Set(roamNotes.map((note) => note.id));
   const refIndex = serverNoteReferenceIndex(roamNotes);
-  const tmpDb = `${dbFile}.tmp-${process.pid}-${Date.now()}-${++atomicWriteCounter}`;
+  const tmpDb = await runtimeTmpFile("db", dbFile, `.tmp-${process.pid}-${Date.now()}-${++atomicWriteCounter}`);
   const statements = [
     "PRAGMA foreign_keys = OFF;",
     "BEGIN;",
@@ -4139,7 +4147,13 @@ async function runFullRoamSync(scanned, dbFile) {
       cwd: noteRoot,
       maxBuffer: 1024 * 1024 * 8,
     });
-    await rename(tmpDb, dbFile);
+    try {
+      await rename(tmpDb, dbFile);
+    } catch (err) {
+      if (err?.code !== "EXDEV") throw err;
+      await copyFile(tmpDb, dbFile);
+      await rm(tmpDb, { force: true }).catch(() => {});
+    }
   } finally {
     await rm(tmpDb, { force: true }).catch(() => {});
   }
@@ -4280,7 +4294,6 @@ export async function createNode(body) {
   }
   const dir = dirname(file);
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, ".aaronnote-keep"), "", { flag: "a" }).catch(() => {});
   if (existsSync(file)) {
     const err = new Error(`Node already exists: ${file}`);
     err.statusCode = 409;
@@ -4358,7 +4371,6 @@ export async function createFolder(body) {
     throw err;
   }
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, ".aaronnote-keep"), "", { flag: "a" }).catch(() => {});
   markNotesDirty();
   const index = await notesIndexPayload();
   return {
@@ -4413,6 +4425,10 @@ export function runtimeDebugSnapshot() {
       queued: Boolean(queuedRoamSyncNotes) || queuedRoamSyncChangedFiles.length > 0,
       changedFiles: queuedRoamSyncChangedFiles.length,
       inFlight: Boolean(roamSyncInFlight),
+    },
+    paths: {
+      stateRoot,
+      tmpRoot: runtimeTmpRoot || aaronnoteTmpRoot(),
     },
     saveWrites: {
       queuedFiles: saveWriteQueues.size,
@@ -4948,6 +4964,7 @@ export function configure(options = {}) {
   workspaceRoot = resolve(String(options.workspaceRoot || process.env.AARONNOTE_WORKSPACE_ROOT || resolve(appDir, "..")));
   publishJsDir = resolve(String(options.publishJsDir || process.env.AARONNOTE_PUBLISH_JS_DIR || join(workspaceRoot, "js")));
   stateRoot = resolve(String(options.stateRoot || process.env.AARONNOTE_STATE_DIR || join(workspaceRoot, "var", "aaronnote")));
+  runtimeTmpRoot = configureTmpRoot(options.tmpRoot || process.env.AARONNOTE_TMP_DIR || join(stateRoot, "tmp"));
   snippetsRoot = resolve(String(options.snippetsRoot || process.env.AARONNOTE_SNIPPETS_ROOT || join(workspaceRoot, "snippets")));
   templatesRoot = resolve(String(options.templatesRoot || process.env.AARONNOTE_TEMPLATES_ROOT || join(workspaceRoot, "templates", "aaronnote")));
   snippetCache = { key: "", scannedAt: 0, snippets: [] };

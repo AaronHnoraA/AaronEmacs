@@ -13,8 +13,8 @@
    
 
 ###  Bugs
-- 现在我的对html的支持是org-env(html) 但是舒服他们很多情况是直接使用html再md里面, 我不知道要不要支持. 我觉得这样的支持丑陋
-  
+ - space p . p 打开新项目后不要进入现在的选择文件界面, 而是直接进入新项目的根目录
+ 
 ---
 
 ##  Aaronnote && Roam
@@ -25,15 +25,11 @@
 - vim在中文输入法下的适配能力
 - 深化表格能力(参考OB - Markup插件)
 - 附件M-click跳转能力
-- 接受 <!-- omit in toc -->语法
+- 接受 `<!-- omit in toc -->`语法
 
 
 ### Bugs
 - TOC pop 窗口大小调整问题
-- appine rss cache 再docs/ 应该放进var/
-- roam node的local greph 报错
-- vim-lite p不是完全的cmd v逻辑 无法触发做图片复制,资产归位的处理
-
-
-
+- roam node的local greph 报错(似乎是hidden的那些还有什么的 但是其实这些再roam里面是存在的至少tag是存在的也有局部的link关系图)
+- 表格/html `<img>` 中对图片和../支持不健全
 

@@ -34,6 +34,17 @@
 (defvar my/appine--refresh-timer nil
   "Timer used to refresh Appine after Emacs window changes settle.")
 
+(defconst my/appine-rss-state-dir
+  (file-name-as-directory
+   (expand-file-name "appine-rss"
+                     (or (and (boundp 'my/state-dir) my/state-dir)
+                         (expand-file-name "var" user-emacs-directory))))
+  "State directory for Appine RSS runtime files.")
+
+(defconst my/appine-rss-source-dir
+  (expand-file-name "source" my/appine-rss-state-dir)
+  "Mirrored Appine RSS source directory passed to the native backend.")
+
 (declare-function appine--buffer "appine")
 (declare-function appine--get-active-window-for-buffer "appine" (buffer-name))
 (declare-function appine--sync-active-state "appine" (&rest args))
@@ -43,6 +54,7 @@
 (declare-function appine-refresh "appine")
 (declare-function appine-open-file-by-file-chooser "appine")
 (declare-function appine-native-action "appine" (name))
+(declare-function appine-native-open-rss-in-rect "appine" (path x y w h))
 (declare-function my/aaronnote-command "init-aaronnote" (command &optional detail))
 (declare-function my/aaronnote-save "init-aaronnote" ())
 (declare-function my/macos-open-target "init-macos" (target))
@@ -547,6 +559,105 @@ With DIRED-P, the main path button opens via `dired'."
         (if (<= steps-fwd steps-bwd)
             (dotimes (_ steps-fwd) (appine-next-tab))
           (dotimes (_ steps-bwd) (appine-prev-tab)))))))
+
+;;; Appine RSS:
+;;; Native Appine stores RSS cache beside the source path it receives.  Feed
+;;; configs may live in docs/, but runtime db/cache belongs under var/.
+
+(defun my/appine-rss--load-path-from-custom-file ()
+  "Ask Appine to recover `appine-rss-path' from `custom-file' when available."
+  (when (fboundp 'appine-rss--load-path-from-custom-file)
+    (appine-rss--load-path-from-custom-file)))
+
+(defun my/appine-rss--clear-source-links ()
+  "Clear mirrored RSS source entries, preserving Appine's own runtime cache."
+  (make-directory my/appine-rss-source-dir t)
+  (dolist (entry (directory-files my/appine-rss-source-dir nil "\\`[^.]"))
+    (unless (string= entry "appine-rss")
+      (let ((path (expand-file-name entry my/appine-rss-source-dir)))
+        (cond
+         ((file-symlink-p path) (delete-file path))
+         ((file-directory-p path) (delete-directory path t))
+         ((file-exists-p path) (delete-file path)))))))
+
+(defun my/appine-rss--link-source-entry (source target)
+  "Link SOURCE to TARGET, falling back to copying when symlinks fail."
+  (condition-case nil
+      (make-symbolic-link source target t)
+    (file-error
+     (if (file-directory-p source)
+         (copy-directory source target t t t)
+       (copy-file source target t)))))
+
+(defun my/appine-rss--materialize-source (path)
+  "Return a var-backed source path for Appine RSS source PATH."
+  (let ((source (expand-file-name path)))
+    (unless (file-exists-p source)
+      (user-error "Appine RSS source does not exist: %s"
+                  (abbreviate-file-name source)))
+    (my/appine-rss--clear-source-links)
+    (if (file-directory-p source)
+        (progn
+          (dolist (entry (directory-files source nil "\\`[^.]"))
+            (unless (string= entry "appine-rss")
+              (my/appine-rss--link-source-entry
+               (expand-file-name entry source)
+               (expand-file-name entry my/appine-rss-source-dir))))
+          my/appine-rss-source-dir)
+      (let ((target (expand-file-name
+                     (file-name-nondirectory source)
+                     my/appine-rss-source-dir)))
+        (my/appine-rss--link-source-entry source target)
+        target))))
+
+(defun my/appine-rss--migrate-old-cache (path)
+  "Move legacy Appine RSS cache beside PATH into `my/appine-rss-source-dir'."
+  (let* ((source (expand-file-name path))
+         (work-dir (if (file-directory-p source)
+                       source
+                     (file-name-directory source)))
+         (old-cache (and work-dir (expand-file-name "appine-rss" work-dir)))
+         (new-cache (expand-file-name "appine-rss" my/appine-rss-source-dir)))
+    (when (and old-cache
+               (file-directory-p old-cache)
+               (not (and (file-exists-p new-cache)
+                         (file-equal-p old-cache new-cache))))
+      (make-directory my/appine-rss-source-dir t)
+      (if (file-exists-p new-cache)
+          (delete-directory old-cache t)
+        (rename-file old-cache new-cache))
+      (message "Appine RSS: moved runtime cache to %s"
+               (abbreviate-file-name new-cache)))))
+
+(defun my/appine-rss-open (&optional path)
+  "Open Appine RSS using PATH while keeping runtime cache under var/."
+  (interactive)
+  (require 'appine)
+  (my/appine-rss--load-path-from-custom-file)
+  (unless (boundp 'appine-rss-path)
+    (user-error "Appine RSS is unavailable"))
+  (unless (or path appine-rss-path)
+    (customize-save-variable
+     'appine-rss-path
+     (read-file-name
+      "Select a single elfeed.org file, or a directory containing such files: ")))
+  (let* ((source (or path appine-rss-path))
+         (source (expand-file-name source))
+         (runtime-source (my/appine-rss--materialize-source source)))
+    (my/appine-rss--migrate-old-cache source)
+    (pcase-let* ((`(,x ,y ,w ,h) (appine--rect)))
+      (appine-native-open-rss-in-rect runtime-source x y w h)
+      (let ((win (appine--get-active-window-for-buffer appine--buffer-name)))
+        (when win (select-window win)))
+      (appine--set-active t))))
+
+(defun my/appine-rss--around (orig-fn &rest args)
+  "Keep `appine-rss' runtime files under var/ while preserving ORIG-FN fallback."
+  (if (called-interactively-p 'interactive)
+      (call-interactively #'my/appine-rss-open)
+    (condition-case nil
+        (apply #'my/appine-rss-open args)
+      (error (apply orig-fn args)))))
 
 ;;; Plugin directories:
 ;;;   User plugins live in etc/appine/plugins/ (version-controlled with user config).
@@ -1191,6 +1302,7 @@ buffer/window selection changes."
   (advice-add 'appine-next-tab  :around #'my/appine--track-next-tab-a)
   (advice-add 'appine-prev-tab  :around #'my/appine--track-prev-tab-a)
   (advice-add 'appine-close-tab :around #'my/appine--track-close-tab-a)
+  (advice-add 'appine-rss       :around #'my/appine-rss--around)
   (add-hook 'window-configuration-change-hook #'my/appine--schedule-refresh-visible)
   (add-hook 'window-buffer-change-functions #'my/appine--schedule-refresh-visible)
   (add-hook 'window-selection-change-functions #'my/appine--schedule-refresh-visible)
