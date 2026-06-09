@@ -186,7 +186,6 @@ function buildLookup(notes: NoteSummary[]): Map<string, NoteSummary> {
 
 export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGraphPanel {
   let renderKey = "";
-  let animationFrame = 0;
   const resizeTimer = new CoalescedTimer(40);
   let expandedOnce = false;
 
@@ -205,9 +204,7 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
   }
 
   function clearGraph(): void {
-    window.cancelAnimationFrame(animationFrame);
     resizeTimer.cancel();
-    animationFrame = 0;
     options.canvas.replaceChildren();
   }
 
@@ -555,80 +552,78 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
       }
     }
 
-    let tick = 0;
-    function step(): void {
-      if (isCollapsed()) return;
-      const alpha = Math.max(0.018, 0.13 * (1 - tick / 120));
-      for (const { link } of linkEls) {
-        const source = nodeMap.get(link.source);
-        const target = nodeMap.get(link.target);
-        if (!source || !target) continue;
-        const dx = target.x - source.x;
-        const dy = target.y - source.y;
-        const distance = Math.max(1, Math.hypot(dx, dy));
-        const desired = link.type === "tag" ? 64 : 92;
-        const strength = (distance - desired) / distance * (link.type === "tag" ? 0.018 : 0.024) * alpha;
-        const fx = dx * strength;
-        const fy = dy * strength;
-        if (source.fx == null) {
-          source.vx += fx;
-          source.vy += fy;
-        }
-        if (target.fx == null) {
-          target.vx -= fx;
-          target.vy -= fy;
-        }
-      }
-      for (let i = 0; i < nodes.length; i += 1) {
-        const a = nodes[i]!;
-        for (let j = i + 1; j < nodes.length; j += 1) {
-          const b = nodes[j]!;
-          const dx = b.x - a.x || 0.01;
-          const dy = b.y - a.y || 0.01;
-          const distance = Math.max(12, Math.hypot(dx, dy));
-          const strength = (a.type === "tag" || b.type === "tag" ? 44 : 66) / (distance * distance) * alpha;
+    function runSimulation(ticks: number): void {
+      for (let tick = 0; tick < ticks; tick += 1) {
+        if (isCollapsed()) return;
+        const alpha = Math.max(0.018, 0.13 * (1 - tick / 120));
+        for (const { link } of linkEls) {
+          const source = nodeMap.get(link.source);
+          const target = nodeMap.get(link.target);
+          if (!source || !target) continue;
+          const dx = target.x - source.x;
+          const dy = target.y - source.y;
+          const distance = Math.max(1, Math.hypot(dx, dy));
+          const desired = link.type === "tag" ? 64 : 92;
+          const strength = (distance - desired) / distance * (link.type === "tag" ? 0.018 : 0.024) * alpha;
           const fx = dx * strength;
           const fy = dy * strength;
-          if (a.fx == null) {
-            a.vx -= fx;
-            a.vy -= fy;
+          if (source.fx == null) {
+            source.vx += fx;
+            source.vy += fy;
           }
-          if (b.fx == null) {
-            b.vx += fx;
-            b.vy += fy;
+          if (target.fx == null) {
+            target.vx -= fx;
+            target.vy -= fy;
+          }
+        }
+        for (let i = 0; i < nodes.length; i += 1) {
+          const a = nodes[i]!;
+          for (let j = i + 1; j < nodes.length; j += 1) {
+            const b = nodes[j]!;
+            const dx = b.x - a.x || 0.01;
+            const dy = b.y - a.y || 0.01;
+            const distance = Math.max(12, Math.hypot(dx, dy));
+            const strength = (a.type === "tag" || b.type === "tag" ? 44 : 66) / (distance * distance) * alpha;
+            const fx = dx * strength;
+            const fy = dy * strength;
+            if (a.fx == null) {
+              a.vx -= fx;
+              a.vy -= fy;
+            }
+            if (b.fx == null) {
+              b.vx += fx;
+              b.vy += fy;
+            }
+          }
+        }
+        for (const node of nodes) {
+          const targetRadius = Math.min(width, height) * (node.depth === 0 ? 0 : node.depth === 1 ? 0.24 : 0.39);
+          const dx = node.x - width / 2;
+          const dy = node.y - height / 2;
+          const distance = Math.max(1, Math.hypot(dx, dy));
+          const tx = width / 2 + dx / distance * targetRadius;
+          const ty = height / 2 + dy / distance * targetRadius;
+          if (node.fx == null) {
+            node.vx += (tx - node.x) * 0.006 * alpha;
+            node.vy += (ty - node.y) * 0.006 * alpha;
+            if (node.type === "current") {
+              node.vx += (width / 2 - node.x) * 0.03 * alpha;
+              node.vy += (height / 2 - node.y) * 0.03 * alpha;
+            }
+            node.x = Math.max(18, Math.min(width - 18, node.x + node.vx));
+            node.y = Math.max(20, Math.min(height - 26, node.y + node.vy));
+            node.vx *= 0.82;
+            node.vy *= 0.82;
+          } else {
+            node.x = node.fx;
+            node.y = node.fy ?? node.y;
           }
         }
       }
-      for (const node of nodes) {
-        const targetRadius = Math.min(width, height) * (node.depth === 0 ? 0 : node.depth === 1 ? 0.24 : 0.39);
-        const dx = node.x - width / 2;
-        const dy = node.y - height / 2;
-        const distance = Math.max(1, Math.hypot(dx, dy));
-        const tx = width / 2 + dx / distance * targetRadius;
-        const ty = height / 2 + dy / distance * targetRadius;
-        if (node.fx == null) {
-          node.vx += (tx - node.x) * 0.006 * alpha;
-          node.vy += (ty - node.y) * 0.006 * alpha;
-          if (node.type === "current") {
-            node.vx += (width / 2 - node.x) * 0.03 * alpha;
-            node.vy += (height / 2 - node.y) * 0.03 * alpha;
-          }
-          node.x = Math.max(18, Math.min(width - 18, node.x + node.vx));
-          node.y = Math.max(20, Math.min(height - 26, node.y + node.vy));
-          node.vx *= 0.82;
-          node.vy *= 0.82;
-        } else {
-          node.x = node.fx;
-          node.y = node.fy ?? node.y;
-        }
-      }
-      applyPositions();
-      tick += 1;
-      if (tick < 140 || dragNode) animationFrame = window.requestAnimationFrame(step);
     }
 
+    runSimulation(300);
     applyPositions();
-    animationFrame = window.requestAnimationFrame(step);
     options.status.textContent = `${nodes.length} nodes · ${links.length} links${graph.truncated ? " · capped" : ""}`;
   }
 
@@ -658,7 +653,7 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
     options.root.classList.toggle("is-collapsed", !collapsed);
     options.toggleButton.setAttribute("aria-expanded", collapsed ? "true" : "false");
     if (collapsed) {
-      window.requestAnimationFrame(() => update(true));
+      update(true);
     } else {
       clearGraph();
     }

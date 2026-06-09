@@ -12,6 +12,7 @@ import { formatMathRenderError, renderMathLazy } from "../src/math-render.ts";
 import { hrefProtocol, safeHref } from "../src/url-safety.ts";
 import { api } from "./api-client.ts";
 import { createFloatingTocPanel, inlineTagAnchorsFromText, markdownHeadingsFromText } from "./floating-toc.ts";
+import { createLocalGraphPanel } from "./local-graph.ts";
 import {
   canonicalRoamNoteId,
   escapeMarkdownLinkText,
@@ -44,6 +45,7 @@ root.innerHTML = `
       <span data-vim-mode>INSERT</span>
       <span data-status>Opening...</span>
       <button type="button" data-toc-toggle aria-expanded="false">TOC</button>
+      <button type="button" data-graph-toggle aria-expanded="false">Graph</button>
       <button type="button" data-tools-toggle aria-expanded="false">Tools</button>
       <button type="button" data-source>Source</button>
       <button type="button" data-save>Save</button>
@@ -57,9 +59,38 @@ const fileLabel = root.querySelector<HTMLElement>("[data-file]")!;
 const modeLabel = root.querySelector<HTMLElement>("[data-vim-mode]")!;
 const statusLabel = root.querySelector<HTMLElement>("[data-status]")!;
 const tocButton = root.querySelector<HTMLButtonElement>("[data-toc-toggle]")!;
+const graphButton = root.querySelector<HTMLButtonElement>("[data-graph-toggle]")!;
 const toolsButton = root.querySelector<HTMLButtonElement>("[data-tools-toggle]")!;
 const sourceButton = root.querySelector<HTMLButtonElement>("[data-source]")!;
 const saveButton = root.querySelector<HTMLButtonElement>("[data-save]")!;
+
+const graphPanelRoot = document.createElement("aside");
+graphPanelRoot.className = "aaronnote-local-graph-panel is-collapsed";
+graphPanelRoot.innerHTML = `
+  <header>
+    <strong>Local graph</strong>
+    <button type="button" data-graph-close>Close</button>
+  </header>
+  <div class="aaronnote-local-graph-controls">
+    <label>Depth <input type="range" data-graph-depth min="1" max="2" value="1" /></label>
+    <span data-graph-depth-label>1</span>
+    <label><input type="checkbox" data-graph-refs checked /> Refs</label>
+    <label><input type="checkbox" data-graph-backlinks checked /> Back</label>
+    <label><input type="checkbox" data-graph-tags checked /> Tags</label>
+  </div>
+  <div class="aaronnote-local-graph-canvas" data-graph-canvas></div>
+  <div class="aaronnote-local-graph-status" data-graph-status></div>
+`;
+document.body.appendChild(graphPanelRoot);
+const graphDepthInput = graphPanelRoot.querySelector<HTMLInputElement>("[data-graph-depth]")!;
+const graphDepthLabel = graphPanelRoot.querySelector<HTMLElement>("[data-graph-depth-label]")!;
+const graphRefsInput = graphPanelRoot.querySelector<HTMLInputElement>("[data-graph-refs]")!;
+const graphBacklinksInput = graphPanelRoot.querySelector<HTMLInputElement>("[data-graph-backlinks]")!;
+const graphTagsInput = graphPanelRoot.querySelector<HTMLInputElement>("[data-graph-tags]")!;
+const graphCanvas = graphPanelRoot.querySelector<HTMLElement>("[data-graph-canvas]")!;
+const graphStatus = graphPanelRoot.querySelector<HTMLElement>("[data-graph-status]")!;
+const graphClose = graphPanelRoot.querySelector<HTMLButtonElement>("[data-graph-close]")!;
+
 const toc = document.createElement("aside");
 toc.className = "aaronnote-floating-toc is-collapsed";
 toc.innerHTML = `<nav data-toc-list aria-label="Page outline"></nav>`;
@@ -300,6 +331,26 @@ const floatingTocPanel = createFloatingTocPanel({
   openNote,
   openTag: openTagFilter,
 });
+
+const localGraphPanel = createLocalGraphPanel({
+  root: graphPanelRoot,
+  toggleButton: graphButton,
+  depthInput: graphDepthInput,
+  depthLabel: graphDepthLabel,
+  refsInput: graphRefsInput,
+  backlinksInput: graphBacklinksInput,
+  tagsInput: graphTagsInput,
+  canvas: graphCanvas,
+  status: graphStatus,
+  getNotes: () => notes,
+  getCurrentNote: currentNote,
+  getMarkdown: () => editor.getMarkdown(),
+  resolveNoteRef,
+  openNote,
+  openTag: openTagFilter,
+});
+
+graphClose.addEventListener("click", () => localGraphPanel.collapse());
 
 function saveBody() {
   return {
@@ -668,6 +719,7 @@ function applyIndexPayload(payload: { notes?: NoteSummary[]; note?: NoteSummary;
     .filter(Boolean))]
     .sort((a, b) => a.localeCompare(b));
   scheduleAssistUpdate({ toc: true });
+  localGraphPanel.invalidate();
 }
 
 async function reloadNotes(force = false): Promise<void> {

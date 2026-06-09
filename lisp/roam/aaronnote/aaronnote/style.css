@@ -646,6 +646,79 @@ body[data-vim-mode="visual-line"] .aaronnote-vim-cursor {
   font: 700 11px/1 var(--aaron-font-sans);
 }
 
+/* ── Local graph panel ────────────────────────────────────────────── */
+.aaronnote-local-graph-panel {
+  position: fixed;
+  right: 14px;
+  top: 42px;
+  z-index: 60;
+  width: clamp(300px, 28vw, 440px);
+  max-height: min(520px, calc(100vh - 58px));
+  overflow: hidden;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--aaron-paper), transparent 5%);
+  color: var(--aaron-ink);
+  box-shadow: var(--aaron-shadow);
+  backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+}
+.aaronnote-local-graph-panel.is-collapsed {
+  display: none;
+}
+.aaronnote-local-graph-panel header {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--aaron-paper-line);
+  padding: 0 10px;
+  background: var(--aaron-paper-soft);
+  font-family: var(--aaron-font-sans);
+  flex-shrink: 0;
+}
+.aaronnote-local-graph-panel header strong {
+  color: var(--aaron-red-dark);
+  font-size: 12px;
+}
+.aaronnote-local-graph-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--aaron-paper-line);
+  background: var(--aaron-paper-soft);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.aaronnote-local-graph-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--aaron-muted);
+}
+.aaronnote-local-graph-controls input[type="range"] {
+  width: 48px;
+}
+.aaronnote-local-graph-canvas {
+  flex: 1 1 auto;
+  min-height: 200px;
+  overflow: hidden;
+  position: relative;
+}
+.aaronnote-local-graph-status {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--aaron-muted);
+  border-top: 1px solid var(--aaron-paper-line);
+  background: var(--aaron-paper-soft);
+  flex-shrink: 0;
+}
+
 .aaronnote-toc-item {
   width: 100%;
   min-height: 27px;

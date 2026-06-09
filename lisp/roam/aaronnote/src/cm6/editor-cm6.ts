@@ -16,6 +16,7 @@ import {
   keymap,
   highlightActiveLine,
   rectangularSelection,
+  drawSelection,
 } from "@codemirror/view";
 import {
   history,
@@ -380,11 +381,6 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
   editorHost.className = "typora-web-editor-host";
   wrap.append(editorHost);
   host.append(wrap);
-  const caretFlash = document.createElement("div");
-  caretFlash.className = "typora-web-caret-flash";
-  caretFlash.hidden = true;
-  document.body.append(caretFlash);
-
   const initialDoc = options.initialContent ?? "";
   const createState = (doc: string): EditorState => EditorState.create({
     doc,
@@ -653,7 +649,6 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
     destroy(): void {
       view.contentDOM.removeEventListener("mousedown", onSourceWidgetMouseDown, { capture: true });
       view.destroy();
-      caretFlash.remove();
       wrap.remove();
       disposeHighlightWorker();
       void import("../diagram-render.ts").then(({ disposeDiagramRuntime }) => disposeDiagramRuntime());
@@ -669,22 +664,7 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
   return editor;
 
   function flashCaret(): void {
-    window.requestAnimationFrame(() => {
-      const { from } = view.state.selection.main;
-      const coords = view.coordsAtPos(from);
-      if (!coords) return;
-      caretFlash.hidden = false;
-      caretFlash.style.left = `${coords.left}px`;
-      caretFlash.style.top = `${coords.top}px`;
-      caretFlash.style.height = `${Math.max(16, coords.bottom - coords.top)}px`;
-      caretFlash.classList.remove("is-active");
-      void caretFlash.offsetWidth;
-      caretFlash.classList.add("is-active");
-      window.setTimeout(() => {
-        caretFlash.classList.remove("is-active");
-        caretFlash.hidden = true;
-      }, 950);
-    });
+    // No-op: caret-flash animation removed for performance.
   }
 
   function coordsTopAt(pos: number): number | null {
@@ -796,6 +776,7 @@ function buildExtensions(options: EditorOptions, previewCompartment: Compartment
   return [
     EditorState.allowMultipleSelections.of(true),
     EditorView.clickAddsSelectionRange.of((event) => event.altKey || event.metaKey || event.ctrlKey),
+    drawSelection({ cursorBlinkRate: -1 }),
     history({ minDepth: 200, newGroupDelay: 500 }),
     closeBrackets(),
     EditorView.inputHandler.of(wrapSelectedMarkdownInput),

@@ -30,6 +30,7 @@
 
 ### Bugs
 - TOC pop 窗口大小调整问题
+- local graph 显示 No local graph
 
 
 
