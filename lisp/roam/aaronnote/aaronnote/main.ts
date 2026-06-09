@@ -396,7 +396,7 @@ const localGraphPanel = createLocalGraphPanel({
   tagsInput: graphTagsInput,
   canvas: graphCanvas,
   status: graphStatus,
-  getNotes: () => notes,
+  getNotes: () => notes.filter(note => note.roam !== false),
   getCurrentNote: currentNote,
   getMarkdown: () => editor.getMarkdown(),
   resolveNoteRef,

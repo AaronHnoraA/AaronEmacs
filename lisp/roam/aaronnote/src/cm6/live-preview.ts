@@ -66,6 +66,31 @@ import { getFencedCodeRanges } from "./code-ranges.ts";
 import { orgEnvContextForRange } from "./widgets/block-extras.ts";
 
 // ---------------------------------------------------------------------------
+// Asset URL helpers for raw HTML embedded in the live preview.
+// Markdown images go through renderMarkdownHTML → md.renderer.rules.image →
+// AaronnoteResolveAssetUrl automatically.  Raw <img> tags inside HTML
+// inline/block widgets bypass that path, so we patch their src attributes
+// explicitly after DOMPurify runs.
+// ---------------------------------------------------------------------------
+
+declare global {
+  interface Window {
+    AaronnoteResolveAssetUrl?: (src: string) => string;
+  }
+}
+
+/** Apply AaronnoteResolveAssetUrl to every <img src> inside ROOT that looks like a local path. */
+function resolveHtmlImgSrcs(root: HTMLElement): void {
+  const resolver = window.AaronnoteResolveAssetUrl;
+  if (!resolver) return;
+  for (const img of root.querySelectorAll<HTMLImageElement>("img[src]")) {
+    const src = img.getAttribute("src");
+    if (!src || /^(?:data:|https?:|blob:|#)/i.test(src)) continue;
+    img.setAttribute("src", resolver(src));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Node name sets
 // ---------------------------------------------------------------------------
 
@@ -532,6 +557,7 @@ class HtmlInlineWidget extends WidgetType {
     const span = document.createElement("span");
     span.className = "cm-html-inline-widget";
     span.innerHTML = sanitizeEmbeddedHtml(this.source);
+    resolveHtmlImgSrcs(span);
     return span;
   }
 
@@ -879,7 +905,16 @@ function updateMarkdownTablesNearChanges(
 }
 
 function inlineMarkdownHTML(markdown: string): string {
-  const html = renderMarkdownHTML(markdown);
+  // Convert <img> HTML tags to markdown image syntax so renderMarkdownHTML
+  // routes them through its image renderer (which applies AaronnoteResolveAssetUrl).
+  const preprocessed = markdown.includes("<img")
+    ? markdown.replace(/<img\b([^>]*)>/gi, (_tag, attrs: string) => {
+        const src = /\bsrc=["']([^"']+)["']/i.exec(attrs)?.[1] ?? "";
+        const alt = /\balt=["']([^"']*?)["']/i.exec(attrs)?.[1] ?? "";
+        return src ? `![${alt}](${src})` : "";
+      })
+    : markdown;
+  const html = renderMarkdownHTML(preprocessed);
   const match = /^<p>([\s\S]*)<\/p>\n?$/.exec(html.trim());
   return match ? match[1] : html;
 }
@@ -1646,6 +1681,7 @@ class HtmlBlockWidget extends MeasuredWidget {
     div.dataset.cmFrom = String(this.from);
     div.dataset.cmTo = String(this.to);
     div.innerHTML = sanitizeEmbeddedHtml(this.source);
+    resolveHtmlImgSrcs(div);
     return this.registerMeasured(div, view);
   }
 
