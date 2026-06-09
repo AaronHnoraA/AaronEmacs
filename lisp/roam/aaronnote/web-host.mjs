@@ -34,6 +34,7 @@ import {
   roamTagOverlapReport,
   rewriteMarkdownPathReferences,
   getTodos,
+  runtimeDebugSnapshot,
 } from "./server/lib/index.mjs";
 import { configure, markNotesDirty } from "./server/lib/state.mjs";
 import { saveNote } from "./server/lib/save.mjs";
@@ -444,6 +445,7 @@ const apiHandlers = {
   "aaronnote:api:notes:index": async () => {
     return { type: "notes", ...await notesIndexPayload(), root: noteRoot };
   },
+  "aaronnote:api:runtime:debug": async () => ({ type: "runtime-debug", ...runtimeDebugSnapshot() }),
   "aaronnote:api:note-code:read-region": (body) => readNoteCodeRegion(body || {}),
   "aaronnote:api:notes:roam-sync": (reload) => roamSyncPayload(reload === true),
   "aaronnote:api:notes:roam-sync-full": () => roamSyncFullPayload(),

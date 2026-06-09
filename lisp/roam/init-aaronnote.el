@@ -779,6 +779,8 @@ graph tab was closed via the Appine toolbar."
 
 (defvar my/aaronnote--paused nil
   "Non-nil when the browser page has been sent a pause command.")
+(defvar my/aaronnote--manual-paused nil
+  "Non-nil when Aaronnote was paused explicitly by the user.")
 (defvar my/aaronnote--activity-timer nil
   "Debounce timer for `my/aaronnote--update-activity'.")
 (defvar my/aaronnote--activity-hooks-installed nil
@@ -793,9 +795,32 @@ graph tab was closed via the Appine toolbar."
 
 (defun my/aaronnote--apply-activity (active)
   "Send pause or resume to the browser when the active state changes."
-  (unless (eq (not active) (not my/aaronnote--paused))
-    (setq my/aaronnote--paused (not active))
-    (my/aaronnote--send-command (if active "resume" "pause"))))
+  (let ((effective-active (and active (not my/aaronnote--manual-paused))))
+    (unless (eq (not effective-active) my/aaronnote--paused)
+      (setq my/aaronnote--paused (not effective-active))
+      (my/aaronnote--send-command (if effective-active "resume" "pause")))))
+
+;;;###autoload
+(defun my/aaronnote-pause ()
+  "Pause Aaronnote assist rendering until explicitly resumed."
+  (interactive)
+  (setq my/aaronnote--manual-paused t)
+  (my/aaronnote--apply-activity nil))
+
+;;;###autoload
+(defun my/aaronnote-resume ()
+  "Resume Aaronnote assist rendering when the app buffer is visible."
+  (interactive)
+  (setq my/aaronnote--manual-paused nil)
+  (my/aaronnote--apply-activity (my/aaronnote--app-buffer-visible-p)))
+
+;;;###autoload
+(defun my/aaronnote-toggle-pause ()
+  "Toggle manual pause for Aaronnote assist rendering."
+  (interactive)
+  (if my/aaronnote--manual-paused
+      (my/aaronnote-resume)
+    (my/aaronnote-pause)))
 
 (defun my/aaronnote--update-activity (&rest _)
   "Debounced check: pause or resume the browser based on buffer visibility.
@@ -834,6 +859,7 @@ routes to the right session when multiple files are open."
     (cancel-timer my/aaronnote--activity-timer)
     (setq my/aaronnote--activity-timer nil))
   (setq my/aaronnote--paused nil
+        my/aaronnote--manual-paused nil
         my/aaronnote--activity-hooks-installed nil))
 
 ;;;###autoload
@@ -931,6 +957,32 @@ Blocks the caller until the response arrives (or 8 s timeout)."
       ;; Fallback: kill response buffer if server never replies within 10 s.
       (when (buffer-live-p buf)
         (run-at-time 10 nil (lambda () (when (buffer-live-p buf) (kill-buffer buf))))))))
+
+(defun my/aaronnote-runtime-status ()
+  "Display the Aaronnote runtime debug snapshot."
+  (interactive)
+  (unless my/aaronnote--ready
+    (user-error "Aaronnote web-host is not ready"))
+  (let ((payload (my/aaronnote--api-call-sync
+                  "aaronnote:api:runtime:debug" [])))
+    (unless payload
+      (user-error "Aaronnote runtime status unavailable"))
+    (puthash "emacsActivity"
+             (let ((activity (make-hash-table :test 'equal)))
+               (puthash "paused" (if my/aaronnote--paused t :false) activity)
+               (puthash "manualPaused" (if my/aaronnote--manual-paused t :false) activity)
+               (puthash "bufferVisible" (if (my/aaronnote--app-buffer-visible-p) t :false) activity)
+               activity)
+             payload)
+    (with-current-buffer (get-buffer-create "*aaronnote-runtime-status*")
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (json-serialize payload
+                                :false-object :false
+                                :null-object nil))
+        (goto-char (point-min))
+        (special-mode))
+      (display-buffer (current-buffer)))))
 
 ;;;###autoload
 (defun my/aaronnote-roam-sync ()
@@ -1096,6 +1148,8 @@ Falls back to JupyterLab root when no matching .ipynb exists."
       ("u" "update index"     my/aaronnote-roam-update-db)
       ("F" "full rebuild"     my/aaronnote-roam-sync-full)
       ("S" "DB status"        my/aaronnote-roam-db-status)
+      ("P" "pause/resume"     my/aaronnote-toggle-pause)
+      ("R" "runtime status"   my/aaronnote-runtime-status)
       ("D" "dired"            my/aaronnote-roam-dired)
       ("m" "magit"            my/aaronnote-roam-magit)
       ("q" "stop server"      my/aaronnote-stop)]

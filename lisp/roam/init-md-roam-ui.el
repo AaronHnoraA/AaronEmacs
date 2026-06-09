@@ -48,9 +48,10 @@
 (defvaralias 'my/aaronnote-roam-ui-header-status   'aaron-ui-board-header-status)
 (defvaralias 'my/aaronnote-roam-ui-refresh-function 'aaron-ui-board-refresh-function)
 
-;;; --- mode alias ---
+;;; --- compatibility mode ---
 
-(defalias 'my/aaronnote-roam-ui-mode 'aaron-ui-board-mode)
+(define-derived-mode my/aaronnote-roam-ui-mode aaron-ui-board-mode "Roam-UI"
+  "Backward-compatible mode name for Aaronnote roam board buffers.")
 
 ;;; --- function aliases ---
 
@@ -71,7 +72,22 @@
 (defalias 'my/aaronnote-roam-ui-insert-section    #'aaron-ui-board-insert-section)
 (defalias 'my/aaronnote-roam-ui-insert-empty      #'aaron-ui-board-insert-empty)
 (defalias 'my/aaronnote-roam-ui-insert-field      #'aaron-ui-board-insert-field)
-(defalias 'my/aaronnote-roam-ui-insert-row        #'aaron-ui-board-insert-row)
+(defun my/aaronnote-roam-ui-insert-row (&rest args)
+  "Insert a roam UI row while preserving legacy text properties."
+  (let* ((id (plist-get args :id))
+         (title-face (plist-get args :title-face))
+         (action (plist-get args :action))
+         (properties (plist-get args :properties))
+         (legacy-properties
+          (append `(my/aaronnote-roam-ui-item-id    ,id
+                    my/aaronnote-roam-ui-row-action ,action)
+                  properties))
+         (args (plist-put (copy-sequence args)
+                          :properties legacy-properties)))
+    (unless title-face
+      (setq args (plist-put args :title-face
+                            'my/aaronnote-roam-ui-row-title)))
+    (apply #'aaron-ui-board-insert-row args)))
 (defalias 'my/aaronnote-roam-ui--goto-item-id     #'aaron-ui-board--goto-item-id)
 (defalias 'my/aaronnote-roam-ui-goto-first-item   #'aaron-ui-board-goto-first-item)
 (defalias 'my/aaronnote-roam-ui-render            #'aaron-ui-board-render)

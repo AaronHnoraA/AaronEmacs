@@ -4414,7 +4414,11 @@ export function queueRoamDbSync(notes = null, changedFiles = []) {
   if (notes) queuedRoamSyncNotes = notes;
   const files = Array.isArray(changedFiles) ? changedFiles : [changedFiles];
   for (const file of files) {
-    if (file) queuedRoamSyncChangedFiles.push(file);
+    if (!file) continue;
+    const normalized = resolveUserPath(file);
+    if (!queuedRoamSyncChangedFiles.includes(normalized)) {
+      queuedRoamSyncChangedFiles.push(normalized);
+    }
   }
   if (roamSyncTimer) {
     clearTimeout(roamSyncTimer);
@@ -4975,6 +4979,13 @@ export function configure(options = {}) {
   noteCodeFileCache.clear();
   noteCodeFilePending.clear();
   noteCodeFileCacheBytes = 0;
+  if (roamSyncTimer) {
+    clearTimeout(roamSyncTimer);
+    roamSyncTimer = null;
+  }
+  roamSyncInFlight = null;
+  queuedRoamSyncNotes = null;
+  queuedRoamSyncChangedFiles = [];
   markNotesDirty();
 }
 

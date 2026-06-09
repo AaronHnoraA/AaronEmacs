@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
 import { configure } from "../server/lib/state.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
-import { getTodos, notesIndexPayload, readNote } from "../server/lib/index.mjs";
+import { getTodos, notesIndexPayload, queueRoamDbSync, readNote, runtimeDebugSnapshot } from "../server/lib/index.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
 import { saveNote } from "../server/lib/save.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
@@ -223,6 +223,37 @@ describe("server save API", () => {
 
     expect(await readdir(notes)).not.toContain(".aaronnote-keep");
     expect(await readdir(join(notes, "nested"))).not.toContain(".aaronnote-keep");
+  });
+
+  test("runtime debug reports deduplicated queued roam sync files", async () => {
+    const { notes } = await setupRoot();
+    const file = join(notes, "a.md");
+    await writeFile(file, "# A\n", "utf8");
+
+    queueRoamDbSync(null, [file, file, join(notes, ".", "a.md")]);
+    const debug = runtimeDebugSnapshot() as {
+      roamDbSync?: { queued?: boolean; changedFiles?: number; inFlight?: boolean };
+      paths?: { stateRoot?: string; tmpRoot?: string };
+      saveWrites?: { queuedFiles?: number };
+    };
+
+    expect(debug.roamDbSync?.queued).toBe(true);
+    expect(debug.roamDbSync?.changedFiles).toBe(1);
+    expect(debug.roamDbSync?.inFlight).toBe(false);
+    expect(debug.paths?.stateRoot).toBeTruthy();
+    expect(debug.paths?.tmpRoot).toBeTruthy();
+    expect(debug.saveWrites?.queuedFiles).toBe(0);
+  });
+
+  test("configure clears stale queued roam sync state", async () => {
+    const { notes } = await setupRoot();
+    const file = join(notes, "a.md");
+    queueRoamDbSync(null, [file]);
+    expect((runtimeDebugSnapshot() as { roamDbSync?: { queued?: boolean } }).roamDbSync?.queued).toBe(true);
+
+    await setupRoot();
+    expect((runtimeDebugSnapshot() as { roamDbSync?: { queued?: boolean; changedFiles?: number } }).roamDbSync)
+      .toMatchObject({ queued: false, changedFiles: 0 });
   });
 
 });

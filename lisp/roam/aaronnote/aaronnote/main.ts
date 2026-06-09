@@ -19,6 +19,7 @@ import { api } from "./api-client.ts";
 import { Epoch } from "../src/async-epoch.ts";
 import { CoalescedTimer } from "../src/coalesced-timer.ts";
 import { blobToBase64 } from "../src/paste.ts";
+import { AssistScheduler, type AssistUpdateFlags, type AssistUpdateOptions } from "./assist-scheduler.ts";
 import { createFloatingTocPanel, inlineTagAnchorsFromText, markdownHeadingsFromText } from "./floating-toc.ts";
 import { createLocalGraphPanel } from "./local-graph.ts";
 import {
@@ -206,13 +207,8 @@ let snippetDeleteBefore = 0;
 let snippetSuppressedPrefix = "";
 let snippetRenderKey = "";
 let snippetPopupMatchKey = "";
-let assistFrame = 0;
 let paused = false;
-let snippetScanRequested = false;
-let mathPreviewUpdateRequested = false;
-let vimCursorUpdateRequested = false;
-let tocUpdateRequested = false;
-let selectionToolUpdateRequested = false;
+const pauseReasons = new Set<string>();
 let mathPreviewKey = "";
 let mathPreviewPendingErrorKey = "";
 let mathPreviewErrorTimer = 0;
@@ -369,6 +365,7 @@ const vim = createVimLite(editor, host, {
   onRedo: () => editor.redo(),
   onIndent: (dir) => indentMarkdownBlock(editor.view, dir),
 });
+const assistScheduler = new AssistScheduler(window, editorSurfaceVisible, runAssistUpdate);
 updateModeLabel(vim.mode());
 // Reset to normal mode when the editor loses focus (xwidget buffer switch).
 // Prevents silent insert/visual mode on return from another Emacs buffer.
@@ -2823,7 +2820,7 @@ function scheduleMathPreviewError(nextKey: string, error: string, display: boole
   const message = `Math error: ${formatMathRenderError(error, MATH_PREVIEW_ERROR_MAX_LENGTH)}`;
   mathPreviewErrorTimer = window.setTimeout(() => {
     if (mathPreviewPendingErrorKey !== nextKey || mathPreviewKey !== nextKey) return;
-    if (vim.mode() !== "insert" || !editorSurfaceVisible()) return;
+    if (paused || vim.mode() !== "insert" || !editorSurfaceVisible()) return;
     const ctx = editor.cursorContext(display ? 640 : 320);
     const math = mathAtCursor(ctx);
     if (!math || mathPreviewKeyFor(math) !== nextKey) return;
@@ -2880,7 +2877,7 @@ function updateMathPreview(ctx: ReturnType<typeof editor.cursorContext>, allowNe
   mathPreview.hidden = false;
   placeMathPreview(anchorRect, math.display, bottomRect);
   window.requestAnimationFrame(() => {
-    if (mathPreviewKey === nextKey && !mathPreview.hidden) {
+    if (!paused && editorSurfaceVisible() && mathPreviewKey === nextKey && !mathPreview.hidden) {
       placeMathPreview(anchorRect, math.display, bottomRect);
     }
   });
@@ -2972,66 +2969,61 @@ function runSelectionCommand(command: string): void {
   selectionMore.hidden = true;
 }
 
-type AssistUpdateOptions = {
-  snippets?: boolean;
-  mathPreview?: boolean;
-  cursor?: boolean;
-  toc?: boolean;
-  selectionTool?: boolean;
-};
-
-function scheduleAssistUpdate(options: AssistUpdateOptions = {}): void {
-  if (paused || !editorSurfaceVisible()) {
-    snippetScanRequested = false;
-    mathPreviewUpdateRequested = false;
-    vimCursorUpdateRequested = false;
-    tocUpdateRequested = false;
-    selectionToolUpdateRequested = false;
-    window.cancelAnimationFrame(assistFrame);
+function runAssistUpdate(flags: AssistUpdateFlags): void {
+  const needsCursorContext = vim.mode() === "insert" && (
+    flags.snippets
+    || flags.mathPreview
+    || !snippetPopup.hidden
+    || !mathPreview.hidden
+  );
+  const ctx = needsCursorContext ? editor.cursorContext(!snippetPopup.hidden ? 640 : 320) : null;
+  if (flags.cursor || ctx) updateVimCursor(vimCursor, editor, vim.mode(), ctx?.rect);
+  if (flags.toc) updateFloatingToc();
+  if (flags.selectionTool) {
+    const activeSelection = snippetPopup.hidden && modal.hidden ? activeEditorSelection() : null;
+    updateSelectionTool(activeSelection);
+  }
+  if (vim.mode() !== "insert") {
+    hideSnippetPopup();
+    hideMathPreview();
     return;
   }
-  const explicit = Object.keys(options).length > 0;
-  snippetScanRequested = snippetScanRequested || options.snippets === true;
-  mathPreviewUpdateRequested = mathPreviewUpdateRequested || options.mathPreview === true;
-  vimCursorUpdateRequested = vimCursorUpdateRequested || (explicit ? options.cursor === true : true);
-  tocUpdateRequested = tocUpdateRequested || options.toc === true;
-  selectionToolUpdateRequested = selectionToolUpdateRequested || (explicit ? options.selectionTool === true : true);
-  window.cancelAnimationFrame(assistFrame);
-  assistFrame = window.requestAnimationFrame(() => {
-    const shouldScanSnippets = snippetScanRequested;
-    const shouldUpdateMathPreview = mathPreviewUpdateRequested;
-    const shouldUpdateVimCursor = vimCursorUpdateRequested;
-    const shouldUpdateToc = tocUpdateRequested;
-    const shouldUpdateSelectionTool = selectionToolUpdateRequested;
-    snippetScanRequested = false;
-    mathPreviewUpdateRequested = false;
-    vimCursorUpdateRequested = false;
-    tocUpdateRequested = false;
-    selectionToolUpdateRequested = false;
+  if (ctx) {
+    if (flags.snippets || !snippetPopup.hidden) updateSnippetPopup(ctx);
+    updateMathPreview(ctx, flags.mathPreview);
+  }
+}
 
-    const needsCursorContext = vim.mode() === "insert" && (
-      shouldScanSnippets
-      || shouldUpdateMathPreview
-      || !snippetPopup.hidden
-      || !mathPreview.hidden
-    );
-    const ctx = needsCursorContext ? editor.cursorContext(!snippetPopup.hidden ? 640 : 320) : null;
-    if (shouldUpdateVimCursor || ctx) updateVimCursor(vimCursor, editor, vim.mode(), ctx?.rect);
-    if (shouldUpdateToc) updateFloatingToc();
-    if (shouldUpdateSelectionTool) {
-      const activeSelection = snippetPopup.hidden && modal.hidden ? activeEditorSelection() : null;
-      updateSelectionTool(activeSelection);
-    }
-    if (vim.mode() !== "insert") {
-      hideSnippetPopup();
-      hideMathPreview();
-      return;
-    }
-    if (ctx) {
-      if (shouldScanSnippets || !snippetPopup.hidden) updateSnippetPopup(ctx);
-      updateMathPreview(ctx, shouldUpdateMathPreview);
-    }
-  });
+function cancelAssistWork(): void {
+  assistScheduler.cancel();
+  clearCompletionCache();
+  clearMathPreviewErrorTimer();
+  hideSnippetPopup();
+  hideMathPreview();
+  selectionTool.hidden = true;
+  selectionMore.hidden = true;
+}
+
+function applyPaused(next: boolean): void {
+  if (paused === next) return;
+  paused = next;
+  assistScheduler.setPaused(next);
+  document.documentElement.classList.toggle("aaronnote-paused", next);
+  if (next) {
+    cancelAssistWork();
+  } else {
+    scheduleAssistUpdate({ cursor: true, mathPreview: true, selectionTool: true, toc: true });
+  }
+}
+
+function setPausedReason(reason: string, active: boolean): void {
+  if (active) pauseReasons.add(reason);
+  else pauseReasons.delete(reason);
+  applyPaused(pauseReasons.size > 0);
+}
+
+function scheduleAssistUpdate(options: AssistUpdateOptions = {}): void {
+  assistScheduler.schedule(options);
 }
 
 function updateFloatingToc(): void {
@@ -3150,14 +3142,13 @@ function runHostCommand(detail: unknown): boolean {
     case "key":
       return runHostKey(body as Record<string, unknown>);
     case "pause":
-      paused = true;
-      document.documentElement.classList.add("aaronnote-paused");
-      window.cancelAnimationFrame(assistFrame);
-      assistFrame = 0;
+      setPausedReason("host", true);
       return true;
     case "resume":
-      paused = false;
-      document.documentElement.classList.remove("aaronnote-paused");
+      setPausedReason("host", false);
+      return true;
+    case "toggle-pause":
+      setPausedReason("host", !pauseReasons.has("host"));
       return true;
     case "save":
       void save();
@@ -3382,14 +3373,10 @@ window.addEventListener("aaronnote:command", (event) => {
 });
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
-    paused = true;
-    document.documentElement.classList.add("aaronnote-paused");
-    window.cancelAnimationFrame(assistFrame);
-    assistFrame = 0;
+    setPausedReason("visibility", true);
     void flushCursorPosition();
   } else {
-    paused = false;
-    document.documentElement.classList.remove("aaronnote-paused");
+    setPausedReason("visibility", false);
   }
 });
 window.addEventListener("pagehide", () => {
