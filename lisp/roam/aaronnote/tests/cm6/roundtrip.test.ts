@@ -2160,7 +2160,7 @@ maybeDescribe("cm6 kernel: selection", () => {
     await nextTick();
     press("p");
     await settlePaste();
-    expect(editor.getMarkdown()).toBe("acb\ndef\nghi");
+    expect(editor.getMarkdown()).toBe("abc\ndef\nghi");
 
     editor.setMarkdown("one\ntwo\nthree");
     editor.setMarkdownSelection(5);

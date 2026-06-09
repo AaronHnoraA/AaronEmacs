@@ -1094,7 +1094,14 @@ function openExternalUrl(href: string, options: { newWindow?: boolean } = {}): v
   }
   const protocol = hrefProtocol(raw);
   if (!protocol) {
-    setStatus(`Note not found: ${hrefPath(raw) || raw}`);
+    // Resolve relative paths against the current note's directory, then
+    // hand the absolute path to Emacs for smart routing (dired, find-file,
+    // system open, etc.).
+    const resolved = currentFile
+      ? joinNotePath(dirnamePath(currentFile), hrefPath(raw) || raw)
+      : (hrefPath(raw) || raw);
+    void api.emacs.systemOpen(resolved)
+      .catch((err) => setStatus(err instanceof Error ? err.message : `Cannot open: ${resolved}`));
     return;
   }
   if (protocol === "zotero") {

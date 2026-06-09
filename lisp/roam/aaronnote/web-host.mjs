@@ -381,8 +381,8 @@ async function apiEmacsKey(key) {
 
 async function apiSystemOpen(target) {
   const value = String(target || "").trim();
-  if (!/^zotero:\/\//i.test(value)) {
-    const err = new Error(`Unsupported system-open target: ${value}`);
+  if (!value) {
+    const err = new Error("system-open: empty target");
     err.statusCode = 400;
     throw err;
   }

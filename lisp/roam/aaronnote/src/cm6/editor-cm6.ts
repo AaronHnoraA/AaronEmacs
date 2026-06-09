@@ -476,7 +476,7 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
     if (placement.kind === "character") {
       const line = view.state.doc.lineAt(Math.max(0, Math.min(selection.from, view.state.doc.length)));
       const from = placement.where === "after"
-        ? Math.min(line.to, selection.empty ? selection.to + 1 : selection.to)
+        ? Math.min(line.to, selection.to)
         : selection.from;
       return { from, to: from, text };
     }

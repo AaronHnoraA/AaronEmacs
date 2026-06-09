@@ -345,15 +345,20 @@ KEY-STRING is used only for diagnostics."
                            :object-type 'alist))
                  (target (alist-get 'target payload)))
             (when (and (stringp target) (not (string-empty-p target)))
-              (if (and (fboundp 'my/jupyter-lab-url-p)
-                       (my/jupyter-lab-url-p target))
-                  (progn
-                    (unless (fboundp 'my/xwidget-open-url)
-                      (require 'init-browser))
-                    (my/xwidget-open-url target :id "jupyter-lab" :display 'side))
-                (unless (fboundp 'my/open-system-target)
-                  (require 'init-open))
-                (my/open-system-target target))))
+              (cond
+               ((and (fboundp 'my/jupyter-lab-url-p)
+                     (my/jupyter-lab-url-p target))
+                (unless (fboundp 'my/xwidget-open-url) (require 'init-browser))
+                (my/xwidget-open-url target :id "jupyter-lab" :display 'side))
+               ;; Absolute file/dir path: use smart routing (dired, find-file,
+               ;; pdf->system, etc.) instead of delegating to macOS `open'.
+               ((file-name-absolute-p target)
+                (require 'init-open)
+                (my/open-file target))
+               ;; URL schemes (http, zotero, …): system open as before.
+               (t
+                (require 'init-open)
+                (my/open-system-target target)))))
         (error
          (message "Aaronnote system-open event failed: %s"
                   (error-message-string err)))))

@@ -35,7 +35,7 @@
     ("\\*claude-code-ide\\*"     :select t :align right :size ,my/display-rules-side-size :regexp t)
     ("\\*Diagnostics:.*\\*"      :select t :align below :size ,my/display-rules-bottom-size :regexp t)
     ;; Roam UI panels — right side, consistent width
-    ("\\*roam-\\|\\*aaronnote-roam-" :select t :align right :size my/display-rules-roam-size :regexp t))
+    ("\\*roam-\\|\\*aaronnote-roam-" :select t :align right :size ,my/display-rules-roam-size :regexp t))
   "Additional `shackle-rules' for development workflows.")
 
 (with-eval-after-load 'shackle

@@ -358,14 +358,16 @@ resolved using the same note lookup path."
             :tag (and tag (not (string-empty-p tag)) tag)
             :dom (and dom (not (string-empty-p dom)) dom)))))
 
-(defun my/aaronnote-roam--parse-target (target)
-  "Parse note-link TARGET into Aaronnote-compatible target metadata."
+(defun my/aaronnote-roam--parse-target (target &optional base-dir)
+  "Parse note-link TARGET into Aaronnote-compatible target metadata.
+BASE-DIR is forwarded to `my/aaronnote-roam--ref-to-file-fallback' for
+plain-relative refs (./x, ../x); defaults to the current buffer's directory."
   (when-let* ((parts (my/aaronnote-roam--split-target target)))
     (let* ((ref (plist-get parts :ref))
            (resolved (my/aaronnote-roam--resolve-note ref))
            (id (or (plist-get resolved :id) ref))
            (file (or (plist-get resolved :file)
-                     (my/aaronnote-roam--ref-to-file-fallback ref))))
+                     (my/aaronnote-roam--ref-to-file-fallback ref base-dir))))
       (append parts
               (list :slug id
                     :note-id id
@@ -416,30 +418,49 @@ resolved using the same note lookup path."
         (substring clean 5)
       clean)))
 
-(defun my/aaronnote-roam--ref-to-file-fallback (ref)
-  "Return the best filesystem fallback for unresolved note REF."
-  (let* ((clean (my/aaronnote-roam--strip-vault-prefix
-                 (string-trim (or ref ""))))
-         (root (my/aaronnote-roam-root))
-         (path (if (file-name-absolute-p clean)
-                   clean
-                 (expand-file-name clean root))))
-    (cond
-     ((and (not (string-empty-p clean))
-           (file-exists-p path))
-      path)
-     ((and (not (string-empty-p clean))
-           (not (my/aaronnote-roam--ref-has-extension-p clean))
-           (file-exists-p (concat path ".md")))
-      (concat path ".md"))
-     ((and (not (string-empty-p clean))
-           (not (my/aaronnote-roam--ref-has-extension-p clean))
-           (file-exists-p (concat path ".markdown")))
-      (concat path ".markdown"))
-     ((my/aaronnote-roam--ref-has-extension-p clean)
-      path)
-     (t
-      (concat path ".md")))))
+(defun my/aaronnote-roam--ref-to-file-fallback (ref &optional base-dir)
+  "Return the best filesystem fallback for unresolved note REF.
+BASE-DIR is used for refs starting with ./ or ../ (plain-relative paths);
+defaults to the current buffer's directory."
+  (let* ((raw (string-trim (or ref ""))))
+    (if (string-match-p "\\`\\.\\." raw)
+        ;; Plain relative path: resolve against the note's own directory.
+        (let* ((base (or base-dir
+                         (and buffer-file-name
+                              (file-name-directory buffer-file-name))
+                         default-directory))
+               (path (expand-file-name raw base)))
+          (cond
+           ((file-exists-p path) path)
+           ((and (not (my/aaronnote-roam--ref-has-extension-p raw))
+                 (file-exists-p (concat path ".md")))
+            (concat path ".md"))
+           ((and (not (my/aaronnote-roam--ref-has-extension-p raw))
+                 (file-exists-p (concat path ".markdown")))
+            (concat path ".markdown"))
+           (t path)))
+      ;; Non-relative: resolve against the roam vault root.
+      (let* ((clean (my/aaronnote-roam--strip-vault-prefix raw))
+             (root (my/aaronnote-roam-root))
+             (path (if (file-name-absolute-p clean)
+                       clean
+                     (expand-file-name clean root))))
+        (cond
+         ((and (not (string-empty-p clean))
+               (file-exists-p path))
+          path)
+         ((and (not (string-empty-p clean))
+               (not (my/aaronnote-roam--ref-has-extension-p clean))
+               (file-exists-p (concat path ".md")))
+          (concat path ".md"))
+         ((and (not (string-empty-p clean))
+               (not (my/aaronnote-roam--ref-has-extension-p clean))
+               (file-exists-p (concat path ".markdown")))
+          (concat path ".markdown"))
+         ((my/aaronnote-roam--ref-has-extension-p clean)
+          path)
+         (t
+          (concat path ".md")))))))
 
 (defun my/aaronnote-roam--slug-to-file (slug)
   "Convert SLUG, id, or path-like ref to an absolute note path."
@@ -948,34 +969,52 @@ Each entry is a plist with :id, :text, and :pos."
                     (recenter-top-bottom))))))))))
     (display-buffer buf)))
 
+(defun my/aaronnote-roam--open-file-smart (file parsed)
+  "Open FILE using smart routing based on its type.
+PARSED is the plist from `my/aaronnote-roam--parse-target'; it carries the
+optional #tag / @dom target for Markdown notes."
+  (cond
+   ;; Directory → dired.
+   ((file-directory-p file)
+    (dired file))
+   ;; Markdown note → Emacs + optional in-note navigation.
+   ((string-match-p "\\.\\(?:md\\|markdown\\)\\'" file)
+    (my/aaronnote-roam--touch-recent (plist-get parsed :slug))
+    (find-file file)
+    (cond
+     ((plist-get parsed :id)
+      (my/aaronnote-roam--goto-tag-id (plist-get parsed :id)))
+     ((plist-get parsed :dom)
+      (my/aaronnote-roam--goto-dom-target (plist-get parsed :dom)))))
+   ;; Everything else (PDF, image, Lean source, etc.) → central open route.
+   (t
+    (require 'init-open)
+    (my/open-file file))))
+
 (defun my/aaronnote-roam-follow-link ()
   "Jump to the note or source region referenced at point.
 Targets may use Aaronnote roam syntax:
   roam://note-id
   roam://note-id#tag
   roam://note-id@dom-target
-Path-like refs are accepted and resolved to canonical note ids."
+Plain-relative refs (./x, ../x) are resolved against the current note's
+directory; /x is resolved against the roam vault root."
   (interactive)
   (if (and (fboundp 'my/note-code-at-point)
            (my/note-code-at-point))
       (my/note-code-open-at-point)
-    (if-let* ((target (my/aaronnote-roam--target-at-point))
-              (parsed (my/aaronnote-roam--parse-target target))
-              (note-id (plist-get parsed :slug))
-              (file (plist-get parsed :file)))
-        (let ((ref (plist-get parsed :ref)))
-          (if (file-exists-p file)
-              (progn
-                (my/aaronnote-roam--touch-recent note-id)
-                (find-file file)
-                (cond
-                 ((plist-get parsed :id)
-                  (my/aaronnote-roam--goto-tag-id (plist-get parsed :id)))
-                 ((plist-get parsed :dom)
-                  (my/aaronnote-roam--goto-dom-target (plist-get parsed :dom)))))
+    (let* ((base-dir (and buffer-file-name
+                          (file-name-directory buffer-file-name)))
+           (target (my/aaronnote-roam--target-at-point))
+           (parsed (and target (my/aaronnote-roam--parse-target target base-dir)))
+           (file (and parsed (plist-get parsed :file)))
+           (ref (and parsed (plist-get parsed :ref))))
+      (if (and file (file-exists-p file))
+          (my/aaronnote-roam--open-file-smart file parsed)
+        (if ref
             (when (yes-or-no-p (format "Note '%s' not found. Create it? " ref))
-              (my/aaronnote-roam-new-note ref))))
-      (user-error "No Markdown roam link or #note-code found at point"))))
+              (my/aaronnote-roam-new-note ref))
+          (user-error "No Markdown roam link or #note-code found at point"))))))
 
 (defun my/aaronnote-roam-find-note ()
   "Find a roam note by Aaronnote id/path/title with completion."
@@ -2653,7 +2692,8 @@ With prefix argument FULL, force a full roam-db rebuild."
 (defun my/aaronnote-roam-db-status ()
   "Show roam-db sync state from Aaronnote var."
   (interactive)
-  (let* ((state-file (expand-file-name "sync/state.json"
+  (let* ((root (my/aaronnote-roam-root))
+         (state-file (expand-file-name "sync/state.json"
                                        (my/aaronnote-roam--state-root)))
          (state
           (when (file-exists-p state-file)
