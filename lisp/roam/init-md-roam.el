@@ -87,6 +87,10 @@
 (defvar my/aaronnote-roam--runtime-index-cache-key nil)
 (defvar my/aaronnote-roam--sync-timer nil)
 (defvar my/aaronnote-roam--sync-changed-files nil)
+(defvar my/aaronnote-roam--all-files-cache nil
+  "Cached result of `my/aaronnote-roam--all-files'.")
+(defvar my/aaronnote-roam--all-note-summaries-cache nil
+  "Cached result of `my/aaronnote-roam--all-note-summaries'.")
 
 (defun my/aaronnote-roam-root ()
   "Return the Markdown roam notes root."
@@ -104,7 +108,9 @@
         my/aaronnote-roam--scan-cache nil
         my/aaronnote-roam--db-cache nil
         my/aaronnote-roam--db-path-cache nil
-        my/aaronnote-roam--db-mtime nil))
+        my/aaronnote-roam--db-mtime nil
+        my/aaronnote-roam--all-files-cache nil
+        my/aaronnote-roam--all-note-summaries-cache nil))
 
 (defun my/aaronnote-roam--runtime-available-p ()
   "Return non-nil when the Aaronnote runtime bridge is available."
@@ -238,7 +244,9 @@ runtime incremental sync."
   (if (not (my/aaronnote-roam--runtime-available-p))
       (message "Aaronnote roam runtime not found; cache refreshed only")
     (let* ((root (my/aaronnote-roam-root))
-           (buf (get-buffer-create "*roam-index*"))
+           (buf (with-current-buffer (get-buffer-create "*roam-index*")
+                  (erase-buffer)
+                  (current-buffer)))
            (args (append
 	                  (list my/aaronnote-roam-runtime-cli
 	                        "sync"
@@ -383,14 +391,16 @@ plain-relative refs (./x, ../x); defaults to the current buffer's directory."
 
 (defun my/aaronnote-roam--all-files ()
   "Return all Markdown roam note files, excluding generated/private dirs."
-  (seq-filter
-   (lambda (file)
-     (let ((rel (file-relative-name file (my/aaronnote-roam-root))))
-       (not (string-match-p
-             "\\`\\(?:\\.git/\\|\\.lean/\\|_typst/\\|node_modules/\\)"
-             rel))))
-   (directory-files-recursively
-    (my/aaronnote-roam-root) "\\.\\(?:md\\|markdown\\)$")))
+  (or my/aaronnote-roam--all-files-cache
+      (setq my/aaronnote-roam--all-files-cache
+            (seq-filter
+             (lambda (file)
+               (let ((rel (file-relative-name file (my/aaronnote-roam-root))))
+                 (not (string-match-p
+                       "\\`\\(?:\\.git/\\|\\.lean/\\|_typst/\\|node_modules/\\)"
+                       rel))))
+             (directory-files-recursively
+              (my/aaronnote-roam-root) "\\.\\(?:md\\|markdown\\)$")))))
 
 (defun my/aaronnote-roam--file-to-slug (file)
   "Convert FILE path to a roam slug, relative to root and without extension."
@@ -564,24 +574,50 @@ defaults to the current buffer's directory."
                    (string-join (nreverse parts) " ") 220 nil nil
                    "..."))))))))
 
+(defun my/aaronnote-roam--backlinks-map (records)
+  "Return a hash-table mapping note id → list of backlink ids from RECORDS.
+Builds the reverse-link index in one pass to avoid O(n²) per-note lookups."
+  (let ((map (make-hash-table :test 'equal)))
+    (dolist (record records)
+      (let* ((note   (plist-get record :note))
+             (source (plist-get record :id))
+             (links  (or (my/aaronnote-roam--note-list-field note "links")
+                         (my/aaronnote-roam--note-list-field note "refs"))))
+        (dolist (link links)
+          (let ((target (my/aaronnote-roam--target-slug link)))
+            (when target
+              (puthash target
+                       (cons source (gethash target map))
+                       map))))))
+    map))
+
 (defun my/aaronnote-roam--all-note-summaries ()
-  "Return note summary plists for all notes."
-  (mapcar (lambda (record)
-            (let* ((id (plist-get record :id))
-                   (note (plist-get record :note)))
-              (list :slug id
-                    :title (or (plist-get record :title)
-                               (my/aaronnote-roam--note-title id))
-                    :path (or (my/aaronnote-roam--note-field note "path")
-                              (my/aaronnote-roam--note-field note "link"))
-                    :aliases (my/aaronnote-roam--note-list-field note "aliases")
-                    :tags (my/aaronnote-roam--note-tags id)
-                    :links (my/aaronnote-roam--note-links id)
-                    :backlinks (my/aaronnote-roam--db-backlinks-to id)
-                    :summary (my/aaronnote-roam--note-summary id))))
-          (sort (my/aaronnote-roam--note-records)
-                (lambda (a b)
-                  (string< (plist-get a :id) (plist-get b :id))))))
+  "Return note summary plists for all notes, memoised between syncs."
+  (or my/aaronnote-roam--all-note-summaries-cache
+      (setq my/aaronnote-roam--all-note-summaries-cache
+            (let* ((records (sort (my/aaronnote-roam--note-records)
+                                  (lambda (a b)
+                                    (string< (plist-get a :id) (plist-get b :id)))))
+                   ;; Build backlink map in one pass; fall back to DB field when present.
+                   (bl-map (my/aaronnote-roam--backlinks-map records)))
+              (mapcar (lambda (record)
+                        (let* ((id   (plist-get record :id))
+                               (note (plist-get record :note))
+                               ;; Prefer the DB-provided backlinks field when available.
+                               (bl   (or (my/aaronnote-roam--note-list-field note "backlinks")
+                                         (delete-dups
+                                          (nreverse (gethash id bl-map))))))
+                          (list :slug      id
+                                :title     (or (plist-get record :title)
+                                               (my/aaronnote-roam--note-title id))
+                                :path      (or (my/aaronnote-roam--note-field note "path")
+                                               (my/aaronnote-roam--note-field note "link"))
+                                :aliases   (my/aaronnote-roam--note-list-field note "aliases")
+                                :tags      (my/aaronnote-roam--note-tags id)
+                                :links     (my/aaronnote-roam--note-links id)
+                                :backlinks bl
+                                :summary   (my/aaronnote-roam--note-summary id))))
+                      records)))))
 
 (defun my/aaronnote-roam--candidate-haystack (entry)
   "Return searchable text for note summary ENTRY."
@@ -2776,10 +2812,8 @@ With prefix argument FULL, force a full roam-db rebuild."
       (let* ((start (match-beginning 0))
              (end   (match-end 0))
              (candidates
-              (mapcar (lambda (entry)
-                        (concat roam-prefix
-                                (or (plist-get entry :slug) (plist-get entry :id) "")))
-                      (my/aaronnote-roam--all-note-summaries))))
+              (mapcar (lambda (slug) (concat roam-prefix slug))
+                      (my/aaronnote-roam--all-slugs-cached))))
         (when candidates
           (list start end candidates :exclusive 'no))))
      ;; ../  relative path completion
@@ -2843,7 +2877,12 @@ With prefix argument FULL, force a full roam-db rebuild."
   (setq-local truncate-lines t)
   (setq-local my/aaronnote-roam-ui-refresh-function
               #'my/aaronnote-roam-select-refresh)
-  (my/aaronnote-roam-ui-set-header "Roam Selector" 'search "search"))
+  (my/aaronnote-roam-ui-set-header "Roam Selector" 'search "search")
+  (add-hook 'kill-buffer-hook
+            (lambda ()
+              (when (markerp my/aaronnote-roam-select--origin-marker)
+                (set-marker my/aaronnote-roam-select--origin-marker nil)))
+            nil t))
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'my/aaronnote-roam-select-mode 'emacs))

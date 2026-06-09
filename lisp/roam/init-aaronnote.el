@@ -96,6 +96,10 @@ Set to 0 to let the OS pick a random port."
   "Buffer hosting the Appine/xwidget Aaronnote page.")
 (defvar my/aaronnote--ready-watchdog nil
   "Watchdog timer cancelled when the web-host becomes ready.")
+(defvar my/aaronnote--goto-timer nil
+  "Debounce timer for coalescing goto events from the web-host.")
+(defvar my/aaronnote--goto-last nil
+  "Last applied goto key (truename-file line col), for dedup.")
 
 (defvar-local my/aaronnote-buffer-file-name nil
   "Current note file represented by an Aaronnote Appine/xwidget buffer.")
@@ -316,7 +320,18 @@ KEY-STRING is used only for diagnostics."
              (line-number (string-to-number (or (car parts) "0")))
              (column (string-to-number (or (cadr parts) "0"))))
         (when (> line-number 0)
-          (my/aaronnote--goto-location nil line-number column))))
+          ;; Coalesce burst goto events: cancel any pending jump and schedule
+          ;; a fresh one.  Normal (not idle) timer so jumps are not deferred
+          ;; indefinitely during continuous Emacs activity.
+          (when my/aaronnote--goto-timer
+            (cancel-timer my/aaronnote--goto-timer))
+          (setq my/aaronnote--goto-timer
+                (run-at-time
+                 0.05 nil
+                 (let ((ln line-number) (col column))
+                   (lambda ()
+                     (setq my/aaronnote--goto-timer nil)
+                     (my/aaronnote--goto-location nil ln col))))))))
      ((string-prefix-p open-prefix line)
 	      (condition-case err
           (let* ((payload (json-parse-string
@@ -401,7 +416,14 @@ KEY-STRING is used only for diagnostics."
   (when (buffer-live-p (process-buffer proc))
     (with-current-buffer (process-buffer proc)
       (goto-char (point-max))
-      (insert output)))
+      (insert output)
+      ;; Bound log growth: keep only the most recent ~200 KB, trimming at a
+      ;; complete line boundary so no partial lines are left behind.
+      ;; The parser accumulator lives in the process property, not this buffer.
+      (when (> (point-max) 204800)
+        (goto-char (- (point-max) 102400))
+        (forward-line 1)
+        (delete-region (point-min) (point)))))
   (let ((pending (or (process-get proc 'aaronnote-pending) "")))
     (setq pending (concat pending output))
     ;; Safety cap: a pathological unterminated line must not grow without bound.
@@ -424,7 +446,11 @@ KEY-STRING is used only for diagnostics."
     (when my/aaronnote--ready-watchdog
       (cancel-timer my/aaronnote--ready-watchdog)
       (setq my/aaronnote--ready-watchdog nil))
-    (setq my/aaronnote--process nil
+    (when my/aaronnote--goto-timer
+      (cancel-timer my/aaronnote--goto-timer)
+      (setq my/aaronnote--goto-timer nil))
+    (setq my/aaronnote--goto-last nil
+          my/aaronnote--process nil
           my/aaronnote--port nil
           my/aaronnote--ready nil
           my/aaronnote--ready-callbacks nil)
@@ -447,22 +473,28 @@ focused Aaronnote buffer."
   (let ((file (and (stringp file)
                    (not (string-empty-p file))
                    (expand-file-name file))))
-    (let ((target (or (and file (my/aaronnote--buffer-for-file file))
-                      my/aaronnote--app-buffer)))
-      (when (buffer-live-p target)
-        (with-current-buffer target
-          (let ((changed (not (equal my/aaronnote-buffer-file-name file))))
-            (setq-local my/aaronnote-buffer-file-name file)
-            (when file
-              (setq-local default-directory
-                          (file-name-as-directory (file-name-directory file))))
-            ;; Skip the redisplay pass when the file pointer hasn't changed;
-            ;; current-file events arrive on every navigation even without a switch.
-            (when changed
-              (force-mode-line-update)
-              (force-window-update (current-buffer)))))
-        (when file
-          (setq my/aaronnote--app-buffer target))))))
+    ;; Early-out: current-file events fire on every navigation; skip the buffer
+    ;; lookup altogether when the app buffer already tracks the same file.
+    (when (or (null file)
+              (not (buffer-live-p my/aaronnote--app-buffer))
+              (not (with-current-buffer my/aaronnote--app-buffer
+                     (equal my/aaronnote-buffer-file-name file))))
+      (let ((target (or (and file (my/aaronnote--buffer-for-file file))
+                        my/aaronnote--app-buffer)))
+        (when (buffer-live-p target)
+          (with-current-buffer target
+            (let ((changed (not (equal my/aaronnote-buffer-file-name file))))
+              (setq-local my/aaronnote-buffer-file-name file)
+              (when file
+                (setq-local default-directory
+                            (file-name-as-directory (file-name-directory file))))
+              ;; Skip the redisplay pass when the file pointer hasn't changed;
+              ;; current-file events arrive on every navigation even without a switch.
+              (when changed
+                (force-mode-line-update)
+                (force-window-update (current-buffer)))))
+          (when file
+            (setq my/aaronnote--app-buffer target)))))))
 
 (defun my/aaronnote--track-app-buffer (buffer &optional file)
   "Record BUFFER as the active Aaronnote browser buffer.
@@ -618,8 +650,9 @@ reusing a remembered one."
            (url-request-data (encode-coding-string (json-encode payload) 'utf-8))
            (buf (url-retrieve (my/aaronnote--server-url "/emacs/command")
                               (lambda (_status)
-                                (when (buffer-live-p (current-buffer))
-                                  (kill-buffer (current-buffer))))
+                                (unwind-protect nil
+                                  (when (buffer-live-p (current-buffer))
+                                    (kill-buffer (current-buffer)))))
                               nil t t)))
       ;; Fallback: kill response buffer if server never replies within 5 s.
       (when (buffer-live-p buf)
@@ -640,23 +673,30 @@ reusing a remembered one."
 (defun my/aaronnote--goto-location (file line col)
   "Open FILE in Emacs and move to one-based LINE and zero-based COL.
 When FILE is nil, use the current buffer."
-  (let ((buffer (if (and file (not (string-empty-p file)))
-                    (find-file-noselect file)
-                  (current-buffer))))
-    (when (buffer-live-p buffer)
-      (let ((window (or (get-buffer-window buffer t)
-                        (display-buffer buffer))))
-        (when (window-live-p window)
-          (select-window window)))
-      (with-current-buffer buffer
-        (save-restriction
-          (widen)
-          (goto-char (point-min))
-          (forward-line (max 0 (1- (truncate (or line 1)))))
-          (forward-char (min (max 0 (truncate (or col 0)))
-                             (- (line-end-position) (point)))))
-        (when (require 'pulse nil t)
-          (pulse-momentary-highlight-one-line (point)))))))
+  (let* ((abs (and (stringp file)
+                   (not (string-empty-p file))
+                   (ignore-errors (file-truename (expand-file-name file)))))
+         (key (list abs (truncate (or line 1)) (truncate (or col 0)))))
+    ;; Skip window selection + point move + pulse when we are already there.
+    (unless (equal key my/aaronnote--goto-last)
+      (setq my/aaronnote--goto-last key)
+      (let ((buffer (if abs
+                        (find-file-noselect abs)
+                      (current-buffer))))
+        (when (buffer-live-p buffer)
+          (let ((window (or (get-buffer-window buffer t)
+                            (display-buffer buffer))))
+            (when (window-live-p window)
+              (select-window window)))
+          (with-current-buffer buffer
+            (save-restriction
+              (widen)
+              (goto-char (point-min))
+              (forward-line (max 0 (1- (truncate (or line 1)))))
+              (forward-char (min (max 0 (truncate (or col 0)))
+                                 (- (line-end-position) (point)))))
+            (when (require 'pulse nil t)
+              (pulse-momentary-highlight-one-line (point)))))))))
 
 ;;;###autoload
 (defun my/aaronnote-open-file (file)
@@ -808,6 +848,10 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
   (when my/aaronnote--ready-watchdog
     (cancel-timer my/aaronnote--ready-watchdog)
     (setq my/aaronnote--ready-watchdog nil))
+  (when my/aaronnote--goto-timer
+    (cancel-timer my/aaronnote--goto-timer)
+    (setq my/aaronnote--goto-timer nil
+          my/aaronnote--goto-last nil))
   (let ((proc my/aaronnote--process))
     (setq my/aaronnote--process nil
           my/aaronnote--port nil
