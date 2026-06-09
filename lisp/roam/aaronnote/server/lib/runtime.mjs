@@ -67,6 +67,7 @@ let noteCodeFileCacheBytes = 0;
 const CURRENT_DB_SCHEMA = 1;
 const BOOK_CACHE_SCHEMA = 1;
 const ASSET_CLEANUP_SCHEMA = 2;
+const ROAM_FULL_SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const scanConcurrency = Math.max(1, Math.min(64, Number(process.env.AARONNOTE_SCAN_CONCURRENCY) || 16));
 const saveRequestVersions = new Map();
 const saveWriteQueues = new Map();
@@ -886,9 +887,10 @@ async function assetRefsByFileIncremental() {
   const sourceSet = new Set(sourceFiles);
   const sourceStats = await assetSourceStats(sourceFiles);
   const previousStats = state.sourceStats && typeof state.sourceStats === "object" ? state.sourceStats : {};
-  const forceFull = !schemaOk
-    || !state.lastScannedCommit
-    || Math.random() < 0.02;
+  const assetStale = state.lastFullAt
+    ? (Date.now() - new Date(state.lastFullAt).getTime()) > ROAM_FULL_SYNC_INTERVAL_MS
+    : false;
+  const forceFull = !schemaOk || !state.lastScannedCommit || assetStale;
   let refsByFile = {};
   let full = forceFull;
   let changedFiles = null;
@@ -4193,15 +4195,16 @@ export async function syncRoamDb(notes = null, options = {}) {
     const dbExists = existsSync(dbFile);
     const now = new Date().toISOString();
 
-    // Determine whether we must do a full rebuild
-    const needFull = forceMode
-      || !dbExists
-      || !schemaOk
-      || !state.lastSyncedCommit
-      || Math.random() < 0.01; // 1/100 probabilistic self-correction
+    // Determine whether we must do a full rebuild.
+    // Use a deterministic time-based policy instead of random sampling so the
+    // save path has predictable latency.  Weekly rebuild provides self-healing.
+    const stale = state.lastFullAt
+      ? (Date.now() - new Date(state.lastFullAt).getTime()) > ROAM_FULL_SYNC_INTERVAL_MS
+      : false;
+    const needFull = forceMode || !dbExists || !schemaOk || !state.lastSyncedCommit || stale;
 
     if (needFull) {
-      const reason = forceMode ? "forced" : !dbExists ? "no-db" : !schemaOk ? "schema" : !state.lastSyncedCommit ? "no-state" : "random";
+      const reason = forceMode ? "forced" : !dbExists ? "no-db" : !schemaOk ? "schema" : !state.lastSyncedCommit ? "no-state" : "stale";
       console.log(`[roam-sync] full rebuild (${reason})`);
       await runFullRoamSync(scanned, dbFile);
       const sha = await commitRoam(noteRoot, `roam sync: ${now}`);

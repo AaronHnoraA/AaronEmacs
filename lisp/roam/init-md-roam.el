@@ -19,6 +19,7 @@
 (declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
 (declare-function evil-set-initial-state "evil-core" (mode state))
 (declare-function my/aaronnote-open-file "init-aaronnote" (file))
+(declare-function my/aaronnote--api-call "init-aaronnote" (channel args callback))
 (declare-function my/navigation--push-jump "init-navigation")
 (declare-function my/navigation-find-definition "init-navigation")
 
@@ -87,6 +88,8 @@
 (defvar my/aaronnote-roam--runtime-index-cache-key nil)
 (defvar my/aaronnote-roam--sync-timer nil)
 (defvar my/aaronnote-roam--sync-changed-files nil)
+(defvar my/aaronnote-roam--sync-process nil
+  "In-flight CLI offline sync process, or nil.")
 (defvar my/aaronnote-roam--all-files-cache nil
   "Cached result of `my/aaronnote-roam--all-files'.")
 (defvar my/aaronnote-roam--all-note-summaries-cache nil
@@ -238,47 +241,54 @@ is down (offline / not yet started)."
       my/aaronnote-roam--runtime-index-cache)))
 
 (defun my/aaronnote-roam--runtime-sync (&optional full changed-files)
-  "Run Aaronnote roam-db sync asynchronously.
-When FULL is non-nil, force a full rebuild.  CHANGED-FILES are passed to the
-runtime incremental sync."
+  "Run Aaronnote roam-db sync via CLI subprocess — offline fallback only.
+The web-host is the authoritative roam.db writer during normal operation.
+Only call this when the web-host is not running.
+When FULL is non-nil, force a full rebuild.  CHANGED-FILES are passed as
+incremental hints."
   (if (not (my/aaronnote-roam--runtime-available-p))
       (message "Aaronnote roam runtime not found; cache refreshed only")
-    (let* ((root (my/aaronnote-roam-root))
-           (buf (with-current-buffer (get-buffer-create "*roam-index*")
-                  (erase-buffer)
-                  (current-buffer)))
-           (args (append
-	                  (list my/aaronnote-roam-runtime-cli
-	                        "sync"
-	                        "--root" root
-	                        "--runtime" my/aaronnote-roam-runtime-root
-	                        "--workspace" user-emacs-directory
-	                        "--state" (my/aaronnote-roam--state-root)
-	                        "--tmp" (my/aaronnote-roam--tmp-root))
-	                  (when full (list "--full"))
-	                  (mapcan (lambda (file) (list "--changed" file))
-	                          (delete-dups
-	                           (seq-filter #'identity changed-files))))))
-      (let ((process-environment
-             (append (list (format "AARONNOTE_ROOT=%s" root)
-                           (format "AARONNOTE_RUNTIME_ROOT=%s"
-                                   (expand-file-name my/aaronnote-roam-runtime-root))
-                           (format "AARONNOTE_WORKSPACE_ROOT=%s" user-emacs-directory)
-                           (format "AARONNOTE_STATE_DIR=%s"
-                                   (my/aaronnote-roam--state-root))
-                           (format "AARONNOTE_TMP_DIR=%s"
-                                   (my/aaronnote-roam--tmp-root)))
-                     process-environment)))
-        (make-process
-         :name "aaronnote-roam-sync"
-         :buffer buf
-         :command (cons "node" args)
-         :noquery t
-         :sentinel
-         (lambda (_proc event)
-           (when (memq (process-status _proc) '(exit signal))
-             (my/aaronnote-roam--clear-runtime-cache)
-             (message "Aaronnote roam sync: %s" (string-trim event)))))))))
+    (if (and my/aaronnote-roam--sync-process
+             (process-live-p my/aaronnote-roam--sync-process))
+        (message "Aaronnote roam: CLI sync already in flight, skipping")
+      (let* ((root (my/aaronnote-roam-root))
+             (buf (generate-new-buffer " *aaronnote-roam-sync*"))
+             (args (append
+                    (list my/aaronnote-roam-runtime-cli
+                          "sync"
+                          "--root" root
+                          "--runtime" my/aaronnote-roam-runtime-root
+                          "--workspace" user-emacs-directory
+                          "--state" (my/aaronnote-roam--state-root)
+                          "--tmp" (my/aaronnote-roam--tmp-root))
+                    (when full (list "--full"))
+                    (mapcan (lambda (file) (list "--changed" file))
+                            (delete-dups (seq-filter #'identity changed-files)))))
+             (process-environment
+              (append (list (format "AARONNOTE_ROOT=%s" root)
+                            (format "AARONNOTE_RUNTIME_ROOT=%s"
+                                    (expand-file-name my/aaronnote-roam-runtime-root))
+                            (format "AARONNOTE_WORKSPACE_ROOT=%s" user-emacs-directory)
+                            (format "AARONNOTE_STATE_DIR=%s"
+                                    (my/aaronnote-roam--state-root))
+                            (format "AARONNOTE_TMP_DIR=%s"
+                                    (my/aaronnote-roam--tmp-root)))
+                      process-environment))
+             (proc (make-process
+                    :name "aaronnote-roam-sync"
+                    :buffer buf
+                    :command (cons "node" args)
+                    :noquery t
+                    :sentinel
+                    (lambda (p event)
+                      (when (memq (process-status p) '(exit signal))
+                        (when (eq p my/aaronnote-roam--sync-process)
+                          (setq my/aaronnote-roam--sync-process nil))
+                        (my/aaronnote-roam--clear-runtime-cache)
+                        (message "Aaronnote roam sync: %s" (string-trim event))
+                        (when (buffer-live-p buf)
+                          (kill-buffer buf)))))))
+        (setq my/aaronnote-roam--sync-process proc)))))
 
 (defun my/aaronnote-roam--target-at-point ()
   "Return the raw Markdown roam link target at or near point, or nil."
@@ -2242,13 +2252,27 @@ On a heading line, append `{#id}` unless an id already exists."
 ;; ── DB commands ───────────────────────────────────────────────────────────────
 
 (defun my/aaronnote-roam-update-db (&optional full)
-  "Refresh Markdown roam cache and sync `roam.db' via Aaronnote runtime.
-With prefix argument FULL, force a full roam-db rebuild."
+  "Refresh Markdown roam cache and sync roam.db via Aaronnote runtime.
+With prefix argument FULL, force a full roam-db rebuild.
+When the web-host is running, delegates to its /api (async, non-blocking).
+Falls back to a CLI subprocess when the web-host is offline."
   (interactive "P")
   (my/aaronnote-roam--clear-runtime-cache)
-  (if (my/aaronnote-roam--runtime-available-p)
-      (my/aaronnote-roam--runtime-sync full nil)
-    (message "Markdown roam cache refreshed")))
+  (cond
+   ;; Online: delegate to web-host /api; it is the authoritative writer.
+   ((and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
+    (message "Aaronnote: syncing roam DB...")
+    (my/aaronnote--api-call
+     (if full "aaronnote:api:notes:roam-sync-full" "aaronnote:api:notes:roam-sync")
+     (if full [] [t])
+     (lambda (_result)
+       (my/aaronnote-roam--clear-runtime-cache)
+       (message "Aaronnote roam sync: done"))))
+   ;; Offline fallback: CLI subprocess.
+   ((my/aaronnote-roam--runtime-available-p)
+    (my/aaronnote-roam--runtime-sync full nil))
+   (t
+    (message "Markdown roam cache refreshed"))))
 
 (defun my/aaronnote-roam--summary-entry-for-slug (slug &optional summaries)
   "Return a note summary entry for SLUG from optional SUMMARIES."
@@ -3730,11 +3754,16 @@ added separately by `my/aaronnote-roam--capf-setup')."
 ;;; Public lifecycle API (called from init-aaronnote.el).
 
 (defun my/aaronnote-roam--cancel-sync-timer ()
-  "Cancel any pending debounced roam sync and clear the changed-files list."
+  "Cancel pending debounced roam sync, clear the changed-files list, and
+kill any in-flight CLI offline sync process."
   (when (timerp my/aaronnote-roam--sync-timer)
     (cancel-timer my/aaronnote-roam--sync-timer))
   (setq my/aaronnote-roam--sync-timer nil
-        my/aaronnote-roam--sync-changed-files nil))
+        my/aaronnote-roam--sync-changed-files nil)
+  (when (and my/aaronnote-roam--sync-process
+             (process-live-p my/aaronnote-roam--sync-process))
+    (delete-process my/aaronnote-roam--sync-process))
+  (setq my/aaronnote-roam--sync-process nil))
 
 (defun my/aaronnote-roam--note-in-vault-p (file)
   "Return non-nil when FILE is a Markdown note inside the vault root."
@@ -3743,12 +3772,13 @@ added separately by `my/aaronnote-roam--capf-setup')."
          (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file))))
 
 (defun my/aaronnote-roam-note-changed (file)
-  "Schedule an incremental roam index refresh for a saved in-vault FILE.
-Called from init-aaronnote.el when the web editor emits a saved event."
+  "Invalidate Emacs-side caches when the web-host reports FILE was saved.
+The web-host is the authoritative roam.db writer and handles its own sync
+via queueRoamDbSync; Emacs must not trigger a redundant sync from this event."
   (when (and (stringp file)
              (not (string-empty-p file))
              (my/aaronnote-roam--note-in-vault-p (expand-file-name file)))
-    (my/aaronnote-roam--schedule-runtime-sync (expand-file-name file))))
+    (my/aaronnote-roam--clear-runtime-cache)))
 
 (provide 'init-md-roam)
 ;;; init-md-roam.el ends here
