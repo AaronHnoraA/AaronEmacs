@@ -611,7 +611,7 @@ body[data-vim-mode="visual-line"] .aaronnote-vim-cursor {
   right: 14px;
   top: 42px;
   z-index: 60;
-  width: clamp(280px, 24vw, 380px);
+  width: clamp(300px, 26vw, 480px);
   max-height: min(520px, calc(100vh - 58px));
   overflow: hidden;
   border: 1px solid var(--aaron-paper-line);
