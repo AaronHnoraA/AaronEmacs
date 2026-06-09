@@ -97,11 +97,6 @@ Set to 0 to let the OS pick a random port."
 
 (put 'my/aaronnote-buffer-file-name 'permanent-local t)
 
-(defvar-local my/aaronnote--xwidget-forced-name nil
-  "When set, xwidget title changes will not rename this buffer.")
-
-(put 'my/aaronnote--xwidget-forced-name 'permanent-local t)
-
 (defvar-local my/aaronnote--xwidget-pending-file nil
   "File to POST to Aaronnote once the page has finished loading, or nil.")
 
@@ -515,12 +510,7 @@ reloading.  Non-file opens (roam graph, etc.) share the singleton
                                          :reuse-selected t)))
         (when (buffer-live-p buffer)
           (with-current-buffer buffer
-            (setq-local my/xwidget-focus-script my/aaronnote--xwidget-focus-script)
-            (let ((name (if file
-                            (format "*aaronnote: %s*" (file-name-nondirectory file))
-                          "*aaronnote*")))
-              (setq-local my/aaronnote--xwidget-forced-name name)
-              (rename-buffer name t))))
+            (setq-local my/xwidget-focus-script my/aaronnote--xwidget-focus-script)))
         (my/aaronnote--track-app-buffer buffer file)
         buffer))))
 
@@ -994,32 +984,25 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
     (define-key appine-active-map (kbd "H-y") #'my/aaronnote-roam-sync)
     (define-key appine-active-map (kbd "H-g") #'my/aaronnote-roam-graph)))
 
-;; Preserve forced buffer names when xwidget-webkit-callback renames on load.
+;; On xwidget load-finished, send any pending file open command.
 (defun my/aaronnote--xwidget-callback-advice (_xwidget _event-type)
-  "After xwidget callback: restore forced name and fire pending file POST."
-  (let ((buf (and (fboundp 'xwidget-buffer)
-                  (xwidget-buffer _xwidget))))
-    (when (buffer-live-p buf)
-      (with-current-buffer buf
-        ;; Keep the buffer name stable despite xwidget title updates.
-        ;; Only rename on title-changed events; other events (scroll, paint, etc.)
-        ;; fire at 60 fps and have nothing to do with the buffer name.
-        (when (and my/aaronnote--xwidget-forced-name
-                   (eq _event-type 'title-changed))
-          (rename-buffer my/aaronnote--xwidget-forced-name t))
-        ;; On load-finished, send any pending file open command.
-        (when (and my/aaronnote--xwidget-pending-file
-                   (eq _event-type 'load-changed)
-                   (string-equal (nth 3 last-input-event) "load-finished"))
-          (let ((file my/aaronnote--xwidget-pending-file)
-                (pending-buf (current-buffer)))
-            (setq-local my/aaronnote--xwidget-pending-file nil)
-            ;; Short pause so page JS finishes before the POST arrives.
-            ;; Guard: the xwidget buffer may have been killed in that window.
-            (run-at-time 0.3 nil
-                         (lambda ()
-                           (when (buffer-live-p pending-buf)
-                             (my/aaronnote--open-file-in-web file))))))))))
+  "After xwidget callback: fire pending file POST on load-finished."
+  (when (and (eq _event-type 'load-changed)
+             (string-equal (nth 3 last-input-event) "load-finished"))
+    (let ((buf (and (fboundp 'xwidget-buffer)
+                    (xwidget-buffer _xwidget))))
+      (when (buffer-live-p buf)
+        (with-current-buffer buf
+          (when my/aaronnote--xwidget-pending-file
+            (let ((file my/aaronnote--xwidget-pending-file)
+                  (pending-buf (current-buffer)))
+              (setq-local my/aaronnote--xwidget-pending-file nil)
+              ;; Short pause so page JS finishes before the POST arrives.
+              ;; Guard: the xwidget buffer may have been killed in that window.
+              (run-at-time 0.3 nil
+                           (lambda ()
+                             (when (buffer-live-p pending-buf)
+                               (my/aaronnote--open-file-in-web file)))))))))))
 
 (defvar my/aaronnote--xwidget-advice-installed nil
   "Non-nil when `my/aaronnote--xwidget-callback-advice' has been added.")

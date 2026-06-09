@@ -385,21 +385,61 @@ export function createVimLite(
 
   function paste(where: "before" | "after"): void {
     resetMotionMemory();
-    const doInsert = (text: string) => {
+    const doInsertText = (text: string) => {
       if (text) {
         register = text;
         insertText(editor, text, where);
       }
       setMode("normal");
     };
+    const doInsertImage = (src: string) => {
+      const markdown = `![](${src})`;
+      register = markdown;
+      insertText(editor, markdown, where);
+      setMode("normal");
+    };
     if (register) {
-      doInsert(register);
+      insertText(editor, register, where);
+      setMode("normal");
       return;
     }
-    void fetch("/api/clipboard")
-      .then(r => r.ok ? r.text() : Promise.reject())
-      .then(doInsert)
-      .catch(() => setMode("normal"));
+    // Try modern Clipboard API first (supports images).
+    if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.read) {
+      void navigator.clipboard.read()
+        .then((items) => {
+          for (const item of items) {
+            const imageType = item.types.find((t) => t.startsWith("image/"));
+            if (imageType) {
+              void item.getType(imageType).then((blob) => {
+                const reader = new FileReader();
+                reader.onload = () => doInsertImage(String(reader.result));
+                reader.readAsDataURL(blob);
+              });
+              return;
+            }
+          }
+          for (const item of items) {
+            if (item.types.includes("text/plain")) {
+              void item.getType("text/plain")
+                .then((blob) => blob.text())
+                .then((text) => doInsertText(text))
+                .catch(() => fallbackPaste());
+              return;
+            }
+          }
+          fallbackPaste();
+        })
+        .catch(() => fallbackPaste());
+      return;
+    }
+    fallbackPaste();
+
+    function fallbackPaste(): void {
+      void fetch("/api/clipboard")
+        .then((r) => (r.ok ? r.text() : Promise.reject()))
+        .then(doInsertText)
+        .catch(() => setMode("normal"));
+    }
   }
 
   function appendChar(): void {

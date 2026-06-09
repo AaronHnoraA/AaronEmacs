@@ -23,16 +23,16 @@
 - roam 发布笔记
 - 脱离链接附件检测
 - vim在中文输入法下的适配能力
-- 深化表格能力
+- 深化表格能力(参考OB - Markup插件)
 - 附件M-click跳转能力
 - 接受 <!-- omit in toc -->语法
 
 
 ### Bugs
 - TOC pop 窗口大小调整问题
-- local graph 显示 No local graph
-
-
+- appine rss cache 再docs/ 应该放进var/
+- roam node的local greph 报错
+- vim-lite p不是完全的cmd v逻辑 无法触发做图片复制,资产归位的处理
 
 
 

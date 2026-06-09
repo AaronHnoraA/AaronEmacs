@@ -719,6 +719,49 @@ body[data-vim-mode="visual-line"] .aaronnote-vim-cursor {
   flex-shrink: 0;
 }
 
+.aaronnote-local-graph-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.aaronnote-local-graph-link {
+  stroke: var(--aaron-paper-line);
+  stroke-width: 1.5;
+}
+.aaronnote-local-graph-link.is-tag {
+  stroke: var(--aaron-green-soft, #8fbc8f);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+}
+.aaronnote-local-graph-node {
+  cursor: pointer;
+}
+.aaronnote-local-graph-node circle {
+  fill: var(--aaron-ink);
+  stroke: var(--aaron-paper);
+  stroke-width: 2;
+}
+.aaronnote-local-graph-node.is-current circle {
+  fill: var(--aaron-red, #b31b1b);
+}
+.aaronnote-local-graph-node.is-tag circle {
+  fill: var(--aaron-green-soft, #8fbc8f);
+}
+.aaronnote-local-graph-node text {
+  fill: var(--aaron-muted);
+  font-size: 10px;
+  font-family: var(--aaron-font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
+  text-anchor: middle;
+  pointer-events: none;
+  user-select: none;
+}
+.aaronnote-local-graph-empty {
+  padding: 40px 10px;
+  text-align: center;
+  color: var(--aaron-muted);
+  font-size: 14px;
+}
+
 .aaronnote-toc-item {
   width: 100%;
   min-height: 27px;
