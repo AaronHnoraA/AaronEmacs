@@ -706,18 +706,19 @@ body[data-vim-mode="visual-line"] .aaronnote-vim-cursor {
   }
 }
 
-/* Freeze all animations when Emacs signals the page is not active. */
+/* Disable CM6 cursor blink globally — static cursor only. */
+.cm-cursorLayer,
+.cm-cursor {
+  animation: none !important;
+}
+
+/* Belt-and-suspenders: kill any remaining animations when Emacs
+   signals the page is background. */
 html.aaronnote-paused *,
 html.aaronnote-paused *::before,
 html.aaronnote-paused *::after {
   animation-play-state: paused !important;
   transition: none !important;
-}
-html.aaronnote-paused .cm-cursorLayer {
-  animation: none !important;
-}
-html.aaronnote-paused .cm-cursor {
-  animation: none !important;
 }
 
 /* ── Selection pop-up toolbar ─────────────────────────────────────── */

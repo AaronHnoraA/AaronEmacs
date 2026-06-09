@@ -54,13 +54,6 @@
   pointer-events: none;
 }
 .typora-web-caret-flash[hidden] { display: none; }
-.typora-web-caret-flash.is-active {
-  animation: typora-web-caret-flash 0.9s linear;
-}
-@keyframes typora-web-caret-flash {
-  0%, 18%, 38%, 58%, 78%, 100% { opacity: 1; }
-  8%, 28%, 48%, 68%, 88% { opacity: 0; }
-}
 
 /* ─── CM6 base typography ────────────────────────────────────────── */
 /* Override CM6's default monospace theme so prose reads correctly.   */
@@ -132,7 +125,6 @@
 /* Focus mode: dim all lines; the active line (.cm-activeLine) stays full */
 .typora-web-focus-mode .cm-editor .cm-line {
   opacity: 0.42;
-  transition: opacity 120ms ease;
 }
 .typora-web-focus-mode .cm-editor .cm-activeLine {
   opacity: 1;
@@ -1200,7 +1192,6 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
   line-height: 1.4;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background 0.12s;
 }
 .cm-editor .cm-org-env-block .org-env-comment-btn:hover {
   background: color-mix(in srgb, var(--block-c), transparent 78%);
@@ -1975,7 +1966,6 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
   font: inherit;
   cursor: pointer;
   opacity: 0.75;
-  transition: opacity 0.12s, background 0.12s;
 }
 
 .cm-editor .cm-note-code-open-btn:not(:disabled):hover {

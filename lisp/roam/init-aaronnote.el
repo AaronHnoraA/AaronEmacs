@@ -425,12 +425,16 @@ focused Aaronnote buffer."
                       my/aaronnote--app-buffer)))
       (when (buffer-live-p target)
         (with-current-buffer target
-          (setq-local my/aaronnote-buffer-file-name file)
-          (when file
-            (setq-local default-directory
-                        (file-name-as-directory (file-name-directory file))))
-          (force-mode-line-update)
-          (force-window-update (current-buffer)))
+          (let ((changed (not (equal my/aaronnote-buffer-file-name file))))
+            (setq-local my/aaronnote-buffer-file-name file)
+            (when file
+              (setq-local default-directory
+                          (file-name-as-directory (file-name-directory file))))
+            ;; Skip the redisplay pass when the file pointer hasn't changed;
+            ;; current-file events arrive on every navigation even without a switch.
+            (when changed
+              (force-mode-line-update)
+              (force-window-update (current-buffer)))))
         (when file
           (setq my/aaronnote--app-buffer target))))))
 
@@ -998,7 +1002,10 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
     (when (buffer-live-p buf)
       (with-current-buffer buf
         ;; Keep the buffer name stable despite xwidget title updates.
-        (when my/aaronnote--xwidget-forced-name
+        ;; Only rename on title-changed events; other events (scroll, paint, etc.)
+        ;; fire at 60 fps and have nothing to do with the buffer name.
+        (when (and my/aaronnote--xwidget-forced-name
+                   (eq _event-type 'title-changed))
           (rename-buffer my/aaronnote--xwidget-forced-name t))
         ;; On load-finished, send any pending file open command.
         (when (and my/aaronnote--xwidget-pending-file

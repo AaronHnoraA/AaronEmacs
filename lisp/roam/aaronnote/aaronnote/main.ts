@@ -161,6 +161,7 @@ let snippetSuppressedPrefix = "";
 let snippetRenderKey = "";
 let snippetPopupMatchKey = "";
 let assistFrame = 0;
+let paused = false;
 let snippetScanRequested = false;
 let mathPreviewUpdateRequested = false;
 let vimCursorUpdateRequested = false;
@@ -2838,7 +2839,7 @@ type AssistUpdateOptions = {
 };
 
 function scheduleAssistUpdate(options: AssistUpdateOptions = {}): void {
-  if (!editorSurfaceVisible()) {
+  if (paused || !editorSurfaceVisible()) {
     snippetScanRequested = false;
     mathPreviewUpdateRequested = false;
     vimCursorUpdateRequested = false;
@@ -3007,9 +3008,13 @@ function runHostCommand(detail: unknown): boolean {
     case "key":
       return runHostKey(body as Record<string, unknown>);
     case "pause":
+      paused = true;
       document.documentElement.classList.add("aaronnote-paused");
+      window.cancelAnimationFrame(assistFrame);
+      assistFrame = 0;
       return true;
     case "resume":
+      paused = false;
       document.documentElement.classList.remove("aaronnote-paused");
       return true;
     case "save":
@@ -3231,9 +3236,13 @@ window.addEventListener("aaronnote:command", (event) => {
 });
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
+    paused = true;
     document.documentElement.classList.add("aaronnote-paused");
+    window.cancelAnimationFrame(assistFrame);
+    assistFrame = 0;
     void flushCursorPosition();
   } else {
+    paused = false;
     document.documentElement.classList.remove("aaronnote-paused");
   }
 });
