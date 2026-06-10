@@ -869,28 +869,15 @@ export function renderPublishedNoteHTML(
         <nav data-toc-list aria-label="Page outline"></nav>
       </aside>
 `;
-  const localGraphHtml = pdf ? "" : `      <aside class="aaronnote-local-graph is-collapsed" data-published-local-graph hidden>
-        <button type="button" data-local-graph-toggle aria-expanded="false">Graph</button>
-        <section class="aaronnote-local-graph-panel" aria-label="Local graph">
-          <header>
-            <strong>Local graph</strong>
-            <span data-local-graph-status></span>
-          </header>
-          <div class="aaronnote-local-graph-controls">
-            <label class="aaronnote-local-graph-depth">
-              <span>Depth</span>
-              <input data-local-graph-depth type="range" min="1" max="2" step="1" value="1" />
-              <b data-local-graph-depth-label>1</b>
-            </label>
-            <label><input data-local-graph-refs type="checkbox" checked /> Refs</label>
-            <label><input data-local-graph-backlinks type="checkbox" checked /> Backlinks</label>
-            <label><input data-local-graph-tags type="checkbox" checked /> Tags</label>
-          </div>
-          <div class="aaronnote-local-graph-canvas" data-local-graph-canvas></div>
-        </section>
-      </aside>
+  const localGraphHtml = pdf ? "" : `      <div class="aaronnote-local-graph-trigger-wrap" data-published-local-graph>
+        <button type="button" class="macwin-graph-trigger" data-local-graph-open aria-label="Open local graph">
+          ⬡ Graph
+        </button>
+      </div>
 `;
-  const scriptHtml = pdf ? "" : `  <script src="${assetRoot}Aaronnote/aaronnote/published-toc.js?v=${escapeAttr(version)}"></script>
+  const scriptHtml = pdf ? "" : `  <script src="${assetRoot}js/note-page.js?v=${escapeAttr(version)}"></script>
+  <script src="${assetRoot}Aaronnote/aaronnote/published-toc.js?v=${escapeAttr(version)}"></script>
+  <script src="${assetRoot}js/mac-window.js?v=${escapeAttr(version)}"></script>
   <script type="module" src="${assetRoot}Aaronnote/aaronnote/published-local-graph.js?v=${escapeAttr(version)}"></script>
 `;
   const bookDataHtml = !pdf && options.book?.toc?.length
@@ -906,7 +893,9 @@ export function renderPublishedNoteHTML(
   <link rel="stylesheet" href="${assetRoot}Aaronnote/aaronnote/style.css?v=${escapeAttr(version)}" />
   <link rel="stylesheet" href="${assetRoot}Aaronnote/src/styles/widgets.css?v=${escapeAttr(version)}" />
   <link rel="stylesheet" href="${assetRoot}Aaronnote/src/styles/theme-typora.css?v=${escapeAttr(version)}" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.47/dist/katex.min.css" crossorigin="anonymous" />
   <link rel="stylesheet" href="${assetRoot}css/aaronnote-published.css?v=${escapeAttr(version)}" />
+  <link rel="stylesheet" href="${assetRoot}css/mac-window.css?v=${escapeAttr(version)}" />
 ${kindAssetsHtml}${noteCssHtml}</head>
 <body class="${pdf ? "aaronnote-published-document aaronnote-pdf-document" : "aaronnote-published-document"}" data-note-kind="${escapeAttr(kind)}">
   <main class="${escapeAttr(shellClass)}" data-note-kind="${escapeAttr(kind)}">

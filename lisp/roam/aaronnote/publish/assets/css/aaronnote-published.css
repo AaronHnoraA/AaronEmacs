@@ -551,3 +551,72 @@
     width: min(360px, calc(100vw - 18px));
   }
 }
+
+/* ─── Published note content layout — mirrors .aaronnote-focused-editor ──── */
+
+.published-note-page .aaronnote-editor {
+  overflow: auto;
+  padding: 0 clamp(14px, 3vw, 54px);
+}
+
+.published-note-page .typora-web-wrap,
+.published-note-page .typora-web-editor-host {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.published-note-page .aaronnote-editor article.cm-editor {
+  width: 100%;
+  max-width: min(860px, 100%);
+  margin: 0 auto;
+  padding: clamp(20px, 3vw, 40px) clamp(16px, 2.5vw, 36px) clamp(56px, 7vw, 96px);
+  /* reset aaronnote/style.css button base that would affect macwin-graph-trigger */
+}
+
+/* Fix button reset from aaronnote/style.css so macwin-graph-trigger doesn't inherit white bg */
+.published-note-page button.macwin-graph-trigger {
+  border: 1px solid #2d3149;
+  border-radius: 6px;
+  padding: 6px 14px;
+  background: #1a1b26;
+  color: #9aa5ce;
+}
+
+.published-note-page button.macwin-graph-trigger:hover {
+  background: #1e2030;
+  color: #c0caf5;
+}
+
+/* ─── Local graph trigger wrapper ──────────────────────────────────────────── */
+
+.aaronnote-local-graph-trigger-wrap {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 0 0;
+  position: sticky;
+  bottom: 20px;
+  pointer-events: none;
+}
+
+.aaronnote-local-graph-trigger-wrap button {
+  pointer-events: all;
+}
+
+/* ─── KaTeX font fix for published pages ──────────────────────────────────
+   widgets.css overrides every .katex * with !important to apply the local
+   custom math font (GFS Neohellenic Math / Libertinus Math). Those fonts are
+   only available in the desktop app context. On the web, the KaTeX CDN CSS
+   is loaded and provides proper @font-face for each alphabet. The rules below
+   restore KaTeX's own per-alphabet font assignments so that blackboard-bold,
+   calligraphic, Fraktur, etc. render correctly from the CDN fonts.          */
+
+.aaronnote-published-document .cm-editor .katex .mathbb  { font-family: KaTeX_AMS, "Times New Roman", serif !important; }
+.aaronnote-published-document .cm-editor .katex .mathcal { font-family: KaTeX_Caligraphic, "Times New Roman", serif !important; }
+.aaronnote-published-document .cm-editor .katex .mathscr { font-family: KaTeX_Script, cursive !important; }
+.aaronnote-published-document .cm-editor .katex .mathfrak { font-family: KaTeX_Fraktur, "Palatino Linotype", Palatino, serif !important; }
+.aaronnote-published-document .cm-editor .katex .mathtt  { font-family: KaTeX_Typewriter, monospace !important; }
+.aaronnote-published-document .cm-editor .katex .mathsf  { font-family: KaTeX_SansSerif, sans-serif !important; }
+.aaronnote-published-document .cm-editor .katex .mathit,
+.aaronnote-published-document .cm-editor .katex .mord.mathnormal { font-family: KaTeX_Math, "Times New Roman", serif !important; }
+

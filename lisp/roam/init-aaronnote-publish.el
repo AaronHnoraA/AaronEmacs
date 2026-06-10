@@ -55,7 +55,7 @@
   :type 'string
   :group 'my/aaronnote-publish)
 
-(defcustom my/aaronnote-publish-nas-enable nil
+(defcustom my/aaronnote-publish-nas-enable t
   "When non-nil, rsync to NAS after git push during deploy."
   :type 'boolean
   :group 'my/aaronnote-publish)

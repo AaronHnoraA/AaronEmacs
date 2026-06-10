@@ -4,218 +4,101 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Aaron He | Mathematics Notes</title>
-  <link rel="stylesheet" href="css/retro.css?v=20260522-graph-ui" />
-  <link rel="stylesheet" href="css/home-wiki.css?v=20260525-bookshelf-demo" />
+  <title>Aaron He</title>
   <link rel="shortcut icon"
     href="https://raw.githubusercontent.com/AaronHnoraA/AaronHnoraA.github.io/refs/heads/master/css/cv.svg"
     type="image/x-icon">
-  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <link rel="stylesheet" href="css/home-cli.css?v=20260610-cli5" />
+  <link rel="stylesheet" href="css/mac-window.css?v=20260610-cli5" />
 </head>
 
-<body class="site-home home-wiki">
-  <div class="site-shell">
-    <header class="hero home-masthead" id="top">
-      <div class="home-identity">
-        <p class="hero-kicker">Personal page and public knowledge base</p>
-        <h1>Aaron He</h1>
-        <p class="hero-subtitle">
-          Mathematics notes, research interests, and work in progress written for public inspection.
-        </p>
-        <p class="hero-affil">
-          Undergraduate, School of Mathematics and Statistics, University of New South Wales, Sydney.<br>
-          Member, <a href="https://www.unsw.edu.au/science/student-life-resources/student-opportunities/talented-students-program">Talented Students Program</a>;
-          supervisor: <a href="https://sites.google.com/site/jimmyqiao86/" target="_blank" rel="noreferrer">Youming Qiao</a>.
-        </p>
+<body class="site-home home-cli">
+
+  <!-- macOS terminal window -->
+  <div class="terminal-window">
+
+    <!-- Title bar -->
+    <div class="terminal-chrome">
+      <div class="window-controls">
+        <span class="wc wc-close"></span>
+        <span class="wc wc-min"></span>
+        <span class="wc wc-max"></span>
       </div>
+      <div class="window-title">hc@Aaron — homepage</div>
+    </div>
 
-      <aside class="home-profile" aria-label="Profile links">
-        <h2>Profile</h2>
-        <dl>
-          <dt>Fields</dt>
-          <dd>Quantum computing, linear algebra, algebraic structure, theoretical computer science.</dd>
-          <dt>Contact</dt>
-          <dd><a href="mailto:aaron.he@student.unsw.edu.au">aaron.he@student.unsw.edu.au</a></dd>
-          <dt>Links</dt>
-          <dd>
-            <a href="CV/Aaron_He_CV.pdf" target="_blank" rel="noreferrer">CV</a>
-            <span aria-hidden="true">·</span>
-            <a href="https://github.com/AaronHnoraA" target="_blank" rel="noreferrer">GitHub</a>
-          </dd>
-        </dl>
-      </aside>
-    </header>
+    <!-- Scrollable body -->
+    <div class="terminal-body">
+      <div class="terminal-scroll" id="terminal-scroll">
 
-    <nav class="site-nav" aria-label="Primary">
-      <a href="#about">About</a>
-      <a href="#research">Research</a>
-      <a href="#current-interests">Current</a>
-      <a href="#notes-section">Knowledge base</a>
-      <a href="#bookshelf">Bookshelf</a>
-      <a href="#selected-notes">Selected notes</a>
-      <a href="#materials">Materials</a>
-      <a href="notes.html">Archive</a>
-    </nav>
+        <!-- ── Static boot output ── -->
+        <div class="terminal-static">
 
-    <main class="site-main">
-      <div class="home-layout">
-        <div class="home-primary">
-          <div class="home-columns">
-            <section id="about" class="section section-prose wiki-panel">
-              <h2>About</h2>
-              <p>
-                I am a mathematics undergraduate at UNSW. I keep these notes in public so each topic has
-                to survive careful writing, revision, and cross-reference.
-              </p>
-              <p>
-                The site is a study record rather than a finished textbook. Notes may be expanded as the
-                surrounding definitions, examples, and proofs become clearer.
-              </p>
-            </section>
+          <span class="t-line t-dim" data-login-time>login time: ... on ttys004</span>
+          <span class="t-blank"></span>
 
-            <section id="research" class="section section-prose wiki-panel">
-              <h2>Research interests</h2>
-              <dl class="prose-defs">
-                <dt>Quantum computing</dt>
-                <dd>Quantum states, observables, density operators, and the linear algebra behind them.</dd>
-                <dt>Theoretical computer science</dt>
-                <dd>Complexity, algorithms, combinatorics, and communication complexity.</dd>
-              </dl>
-            </section>
+          <!-- Neofetch box -->
+          <div class="neofetch-block" id="neofetch-static">
+            <!-- Populated by home-cli.js on DOMContentLoaded -->
           </div>
 
-          <section id="notes-section" class="section section-wide knowledge-portal">
-            <header class="section-head">
-              <h2>Public knowledge base</h2>
-              <p>
-                Published notes are indexed by topic and relation. Search the archive, inspect the graph,
-                or browse the full note list below.
-              </p>
-            </header>
+          <!-- Recent notes preview — rendered by home-cli.js -->
+          <div class="recent-block" id="recent-static"></div>
 
-            <div class="toolbar knowledge-search" aria-label="Search published notes">
-              <div class="search-wrapper">
-                <label class="sr-only" for="note-search">Search notes</label>
-                <span class="search-icon" aria-hidden="true">/</span>
-                <input type="text" id="note-search" placeholder="Search titles, summaries, paths, or tags" autocomplete="off" />
-                <button id="reset-search" type="button" style="display:none" aria-label="Clear search">
-                  <span aria-hidden="true">x</span>
-                </button>
-              </div>
+          <!-- Fortune / cow — rendered by home-cli.js -->
+          <div class="fortune-block" id="fortune-static"></div>
 
-              <div class="sort-wrapper">
-                <label for="sort-select">Sort by:</label>
-                <select id="sort-select">
-                  <option value="date-desc">Newest First</option>
-                  <option value="date-asc">Oldest First</option>
-                  <option value="title-asc">Title A-Z</option>
-                </select>
-              </div>
-            </div>
-
-            <div id="notes-summary" class="notes-summary" aria-live="polite"></div>
-            <div id="notes-actions" class="notes-actions" aria-label="Knowledge tools"></div>
-
-            <div class="knowledge-grid">
-              <section class="wiki-panel graph-panel" aria-labelledby="graph-title">
-                <h3 id="graph-title">Knowledge graph</h3>
-                <div id="graph-container" aria-label="Interactive knowledge graph" data-graph-toolbar="true"></div>
-                <div id="graph-focus" class="graph-focus empty" aria-live="polite"></div>
-              </section>
-
-              <section class="wiki-panel index-panel" aria-labelledby="index-title">
-                <h3 id="index-title">Index</h3>
-                <div id="active-filters" class="active-filters" aria-live="polite"></div>
-                <div id="tag-cloud"></div>
-                <div id="app-tabs"></div>
-              </section>
-            </div>
-          </section>
-
-          <section id="bookshelf" class="section section-wide wiki-panel bookshelf-showcase">
-            <header class="section-head">
-              <h2>Bookshelf</h2>
-              <p>
-                Long-form notes are grouped as volumes. Open a book to inspect its table of contents and preview before reading.
-              </p>
-            </header>
-            <div id="books-panel" class="academic-panel" aria-live="polite"></div>
-          </section>
-
-          <div class="home-columns note-columns">
-            <section id="current-interests" class="section section-prose wiki-panel">
-              <h2>Current</h2>
-              <div id="current-interests-panel" class="academic-panel" aria-live="polite"></div>
-            </section>
-
-            <section id="selected-notes" class="section section-prose wiki-panel">
-              <h2>Selected notes</h2>
-              <div id="selected-notes-panel" class="academic-panel" aria-live="polite"></div>
-            </section>
-          </div>
-
-          <section id="recent-updates" class="section section-prose wiki-panel">
-            <h2>Recent updates</h2>
-            <div id="recent-updates-panel" class="academic-panel" aria-live="polite"></div>
-          </section>
+          <span class="t-blank"></span>
+          <span class="t-line t-hint" id="terminal-hint" style="visibility:hidden">
+Type <span class="t-cmd">help</span> for available commands. &nbsp;<span class="t-dim">notes · books · recent · about · graph · cv · github</span></span>
+          <span class="t-blank"></span>
         </div>
 
-        <aside class="home-sidebar" aria-label="Site reference">
-          <section class="section wiki-panel sidebar-panel">
-            <h2>Contents</h2>
-            <nav class="contents-list" aria-label="Page contents">
-              <a href="#top">Profile</a>
-              <a href="#notes-section">Public knowledge base</a>
-              <a href="#about">About</a>
-              <a href="#research">Research interests</a>
-              <a href="#bookshelf">Bookshelf</a>
-              <a href="#current-interests">Current work</a>
-              <a href="#selected-notes">Selected notes</a>
-              <a href="#recent-updates">Recent updates</a>
-              <a href="#materials">Materials</a>
-            </nav>
-          </section>
+        <!-- ── Dynamic command history ── -->
+        <div class="terminal-history" id="terminal-history"></div>
 
-          <section id="materials" class="section section-prose wiki-panel sidebar-panel">
-            <h2>Materials</h2>
-            <dl class="prose-defs">
-              <dt>Coursework</dt>
-              <dd>Course notes and worked summaries will be listed here as they are cleaned up.</dd>
-              <dt>Writing</dt>
-              <dd>Longer expository notes and drafts will be added here.</dd>
-              <dt>CV</dt>
-              <dd><a href="CV/Aaron_He_CV.pdf" target="_blank" rel="noreferrer">PDF</a>.</dd>
-            </dl>
-          </section>
+        <!-- ── Input prompt ── -->
+        <div class="prompt-area">
+          <span class="prompt-ps1">
+            <span class="p-user">hc</span><span class="p-at">@</span><span class="p-host">Aaron</span>
+            <span class="p-sep"> </span><span class="p-path">~</span>
+            <span class="p-sep"> </span><span class="p-sym">%</span>
+          </span>
+          <input
+            type="text"
+            id="terminal-input"
+            class="terminal-input"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            autofocus
+          />
+        </div>
+      </div><!-- /terminal-scroll -->
+    </div><!-- /terminal-body -->
+  </div><!-- /terminal-window -->
 
-          <section id="reading-list" class="section section-prose wiki-panel sidebar-panel">
-            <h2>Reading</h2>
-            <ul class="plain-list">
-              <li>冯克勤, <cite>近世代数引论（第四版）</cite>.</li>
-              <li>章璞, <cite>伽罗瓦理论：天才的激情</cite>.</li>
-              <li>Nielsen and Chuang, <cite>Quantum Computation and Quantum Information</cite>.</li>
-            </ul>
-          </section>
-        </aside>
-      </div>
-    </main>
+  <!-- Stone badge — fixed corner -->
+  <a href="https://stone.professorlee.work"
+     target="_blank"
+     rel="noreferrer"
+     style="position:fixed;bottom:14px;right:16px;opacity:0.7;transition:opacity .2s;z-index:10;"
+     onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">
+    <img src="https://stone.professorlee.work/api/stone/AaronHnoraA/AaronHnoraA.github.io"
+         alt="Stone Badge"
+         width="50" height="50"
+         loading="lazy" />
+  </a>
 
-    <footer class="site-footer">
-      <span class="footer-text">&copy; 2026 Aaron He | Built with Emacs and Org Mode.</span>
-      <span><a href="#top">Back to top</a></span>
-      <span class="footer-stone" aria-hidden="true">
-        <img src="https://stone.professorlee.work/api/stone/AaronHnoraA/AaronHnoraA.github.io"
-             alt="Stone Badge"
-             width="62" height="62"
-             loading="lazy" />
-      </span>
-    </footer>
-  </div>
-  <script src="js/data.js?v=20260522-graph-ui"></script>
-  <script src="js/knowledge.js?v=20260522-graph-ui"></script>
-  <script src="js/app.js?v=20260525-bookshelf-demo"></script>
-  <script src="js/graph.js?v=20260522-graph-ui"></script>
-  <script src="js/oneko.js?v=20260522-graph-ui"></script>
+  <!-- Data & scripts -->
+  <script src="js/data.js?v=20260610-cli6"></script>
+  <script src="js/knowledge.js?v=20260610-cli6"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="js/graph.js?v=20260610-cli6"></script>
+  <script src="js/mac-window.js?v=20260610-cli6"></script>
+  <script src="js/home-cli.js?v=20260610-cli6"></script>
+  <script src="js/oneko.js?v=20260610-cli6"></script>
 </body>
 
 </html>

@@ -42,7 +42,7 @@ PUBLIC = ROOT
 
 PUBLISH_STATE = STATE_DIR / "state.json"
 ASSET_VERSION = "20260517-md"
-NOTE_THEME_VERSION = "20260525-book-toc"
+NOTE_THEME_VERSION = "20260610-katex-notepage"
 BOOK_CACHE_SCHEMA = 1
 BOOK_CACHE_DIR = STATE_DIR / "book"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif"}
@@ -893,8 +893,16 @@ def roam_inputs_dirty() -> bool:
 
 
 def git_inputs_dirty() -> bool:
-    # Source assets now live outside ROOT; treat ROOT as clean for rebuild tracking.
-    return False
+    """Return True if ASSETS_DIR has uncommitted changes (modified or untracked)."""
+    try:
+        output = subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=all", "."],
+            cwd=ASSETS_DIR,
+            text=True,
+        )
+        return bool(output.strip())
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
 
 
 def publish_outputs_exist(notes: list[Note]) -> bool:
@@ -904,7 +912,7 @@ def publish_outputs_exist(notes: list[Note]) -> bool:
 
 
 def publish_state_current(notes: list[Note], head: str | None, roam_head: str | None) -> bool:
-    if publish_forced() or not head or roam_inputs_dirty() or not PUBLISH_STATE.exists():
+    if publish_forced() or not head or roam_inputs_dirty() or git_inputs_dirty() or not PUBLISH_STATE.exists():
         return False
     try:
         state = json.loads(PUBLISH_STATE.read_text(encoding="utf-8"))
@@ -960,6 +968,7 @@ def deps_for_note(note: Note, notes_by_rel: dict[str, Note] | None = None) -> se
         str(RUNTIME_ROOT / "aaronnote" / "style.css"),
         str(RUNTIME_ROOT / "aaronnote" / "published-toc.js"),
         str(RUNTIME_ROOT / "aaronnote" / "published-local-graph.js"),
+        str(RUNTIME_ROOT / "js" / "note-page.js"),
         str(RUNTIME_ROOT / "src" / "styles" / "widgets.css"),
         str(RUNTIME_ROOT / "src" / "styles" / "theme-typora.css"),
         str(ASSETS_DIR / "css" / "aaronnote-published.css"),
@@ -1895,6 +1904,7 @@ def main() -> None:
         return
 
     clean_stale_outputs(notes)
+    copy_published_assets(PUBLIC)
     copy_static(notes)
     skipped = 0
     pending_renders: list[PendingNoteRender] = []

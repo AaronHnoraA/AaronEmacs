@@ -151,19 +151,6 @@ function initPublishedLocalGraph() {
   const likelyRoamPage = normalizePath(window.location.pathname).includes("/roam/");
   if (!likelyRoamPage) return;
 
-  const toggle = root.querySelector("[data-local-graph-toggle]");
-  const depthInput = root.querySelector("[data-local-graph-depth]");
-  const depthLabel = root.querySelector("[data-local-graph-depth-label]");
-  const refsInput = root.querySelector("[data-local-graph-refs]");
-  const backlinksInput = root.querySelector("[data-local-graph-backlinks]");
-  const tagsInput = root.querySelector("[data-local-graph-tags]");
-  const canvas = root.querySelector("[data-local-graph-canvas]");
-  const status = root.querySelector("[data-local-graph-status]");
-  if (!(toggle instanceof HTMLButtonElement) || !(depthInput instanceof HTMLInputElement) || !(depthLabel instanceof HTMLElement)
-    || !(refsInput instanceof HTMLInputElement) || !(backlinksInput instanceof HTMLInputElement) || !(tagsInput instanceof HTMLInputElement)
-    || !(canvas instanceof HTMLElement) || !(status instanceof HTMLElement)) return;
-
-  root.hidden = false;
   const siteRoot = scriptRoot();
   let knowledgePromise = null;
   let currentNote = null;
@@ -171,20 +158,30 @@ function initPublishedLocalGraph() {
   let renderKey = "";
   let animationFrame = 0;
 
+  // DOM refs — set from existing HTML (old mode) or created on demand (new mode)
+  let canvas, depthInput, depthLabel, refsInput, backlinksInput, tagsInput, status;
+  // In new (MacWindow) mode "collapsed" is a plain boolean — no class toggling on root
+  let _newModeCollapsed = true;
+  const openBtn = root.querySelector("[data-local-graph-open]");
+
   function collapsed() {
-    return root.classList.contains("is-collapsed");
+    return openBtn ? _newModeCollapsed : root.classList.contains("is-collapsed");
   }
 
   function clearGraph() {
     window.cancelAnimationFrame(animationFrame);
     animationFrame = 0;
-    canvas.replaceChildren();
+    canvas?.replaceChildren();
   }
 
   function setCollapsed(value) {
-    root.classList.toggle("is-collapsed", value);
-    toggle.setAttribute("aria-expanded", value ? "false" : "true");
-    window.localStorage?.setItem(STORAGE_KEY, String(value));
+    if (openBtn) {
+      _newModeCollapsed = value;
+    } else {
+      root.classList.toggle("is-collapsed", value);
+      if (depthInput) root.querySelector("[data-local-graph-toggle]")?.setAttribute("aria-expanded", value ? "false" : "true");
+      window.localStorage?.setItem(STORAGE_KEY, String(value));
+    }
     if (value) clearGraph();
   }
 
@@ -211,10 +208,10 @@ function initPublishedLocalGraph() {
 
   function settings() {
     return {
-      depth: Math.max(1, Math.min(2, Number(depthInput.value) || 1)),
-      refs: refsInput.checked,
-      backlinks: backlinksInput.checked,
-      tags: tagsInput.checked,
+      depth: Math.max(1, Math.min(2, Number(depthInput?.value) || 1)),
+      refs: depthInput ? (refsInput?.checked ?? true) : true,
+      backlinks: depthInput ? (backlinksInput?.checked ?? true) : true,
+      tags: depthInput ? (tagsInput?.checked ?? true) : true,
     };
   }
 
@@ -329,7 +326,7 @@ function initPublishedLocalGraph() {
 
   function render() {
     if (collapsed() || !currentNote) return;
-    depthLabel.textContent = depthInput.value;
+    if (depthLabel && depthInput) depthLabel.textContent = depthInput.value;
     const key = [
       noteKey(currentNote),
       depthInput.value,
@@ -449,39 +446,112 @@ function initPublishedLocalGraph() {
 
     applyPositions();
     animationFrame = window.requestAnimationFrame(step);
-    status.textContent = `${graph.nodes.length} nodes · ${graph.links.length} links${graph.truncated ? " · capped" : ""}`;
+    if (status) status.textContent = `${graph.nodes.length} nodes · ${graph.links.length} links${graph.truncated ? " · capped" : ""}`;
   }
 
   async function expandAndRender() {
     setCollapsed(false);
-    status.textContent = "Loading";
+    if (status) status.textContent = "Loading";
     const ok = await ensureKnowledge();
     if (!ok) return;
-    status.textContent = "";
+    if (status) status.textContent = "";
     renderKey = "";
     render();
   }
+
+  function wireControls() {
+    [depthInput, refsInput, backlinksInput, tagsInput].forEach((input) => {
+      input?.addEventListener("input", () => { renderKey = ""; render(); });
+      input?.addEventListener("change", () => { renderKey = ""; render(); });
+    });
+    window.addEventListener("resize", () => {
+      if (!collapsed()) { renderKey = ""; render(); }
+    });
+  }
+
+  // ── New mode: floating MacWindow ─────────────────────────────────────────
+  if (openBtn instanceof HTMLButtonElement) {
+    let winHandle = null;
+    openBtn.addEventListener("click", () => {
+      if (winHandle) {
+        /* Bring existing window to front */
+        winHandle.el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        return;
+      }
+      if (!window.MacWindow) return;
+
+      const controls = document.createElement("div");
+      controls.className = "aaronnote-local-graph-controls";
+      controls.innerHTML = `
+        <label class="aaronnote-local-graph-depth">
+          <span>Depth</span>
+          <input data-local-graph-depth type="range" min="1" max="2" step="1" value="1" />
+          <b data-local-graph-depth-label>1</b>
+        </label>
+        <label><input data-local-graph-refs type="checkbox" checked /> Refs</label>
+        <label><input data-local-graph-backlinks type="checkbox" checked /> Backlinks</label>
+        <label><input data-local-graph-tags type="checkbox" checked /> Tags</label>
+        <span class="aaronnote-local-graph-status" data-local-graph-status></span>
+      `;
+
+      const graphCanvas = document.createElement("div");
+      graphCanvas.className = "aaronnote-local-graph-canvas";
+      graphCanvas.style.cssText = "flex:1;min-height:0;overflow:hidden;";
+
+      winHandle = window.MacWindow.open({
+        title: "Local Graph",
+        width: 520,
+        height: 420,
+        onClose() {
+          clearGraph();
+          winHandle = null;
+          depthInput = depthLabel = refsInput = backlinksInput = tagsInput = canvas = status = null;
+          _newModeCollapsed = true;
+          knowledgePromise = null; /* allow re-init on next open */
+        },
+        build(body) {
+          body.style.display = "flex";
+          body.style.flexDirection = "column";
+          body.style.overflow = "hidden";
+          body.appendChild(controls);
+          body.appendChild(graphCanvas);
+
+          depthInput  = controls.querySelector("[data-local-graph-depth]");
+          depthLabel  = controls.querySelector("[data-local-graph-depth-label]");
+          refsInput   = controls.querySelector("[data-local-graph-refs]");
+          backlinksInput = controls.querySelector("[data-local-graph-backlinks]");
+          tagsInput   = controls.querySelector("[data-local-graph-tags]");
+          canvas      = graphCanvas;
+          status      = controls.querySelector("[data-local-graph-status]");
+
+          wireControls();
+          setTimeout(() => void expandAndRender(), 50);
+        },
+      });
+    });
+    return;
+  }
+
+  // ── Old mode: aside panel toggle ─────────────────────────────────────────
+  const toggle = root.querySelector("[data-local-graph-toggle]");
+  depthInput = root.querySelector("[data-local-graph-depth]");
+  depthLabel = root.querySelector("[data-local-graph-depth-label]");
+  refsInput  = root.querySelector("[data-local-graph-refs]");
+  backlinksInput = root.querySelector("[data-local-graph-backlinks]");
+  tagsInput  = root.querySelector("[data-local-graph-tags]");
+  canvas     = root.querySelector("[data-local-graph-canvas]");
+  status     = root.querySelector("[data-local-graph-status]");
+  if (!(toggle instanceof HTMLButtonElement) || !(depthInput instanceof HTMLInputElement) || !(depthLabel instanceof HTMLElement)
+    || !(refsInput instanceof HTMLInputElement) || !(backlinksInput instanceof HTMLInputElement) || !(tagsInput instanceof HTMLInputElement)
+    || !(canvas instanceof HTMLElement) || !(status instanceof HTMLElement)) return;
+
+  root.hidden = false;
 
   toggle.addEventListener("click", () => {
     if (collapsed()) void expandAndRender();
     else setCollapsed(true);
   });
-  [depthInput, refsInput, backlinksInput, tagsInput].forEach((input) => {
-    input.addEventListener("input", () => {
-      renderKey = "";
-      render();
-    });
-    input.addEventListener("change", () => {
-      renderKey = "";
-      render();
-    });
-  });
-  window.addEventListener("resize", () => {
-    if (!collapsed()) {
-      renderKey = "";
-      render();
-    }
-  });
+  wireControls();
   setCollapsed(window.localStorage?.getItem(STORAGE_KEY) !== "false");
   if (!collapsed()) void expandAndRender();
 }
