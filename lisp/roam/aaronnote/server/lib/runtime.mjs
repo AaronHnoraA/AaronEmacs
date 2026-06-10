@@ -137,6 +137,7 @@ async function atomicWriteFile(file, data, options) {
       await copyFile(tmp, file);
       await rm(tmp, { force: true }).catch(() => {});
     }
+    noteSelfWrite(file);
   } catch (err) {
     await rm(tmp, { force: true }).catch(() => {});
     throw err;
@@ -2333,7 +2334,7 @@ async function scanFilesystemEntries(notes = []) {
 export async function notesIndexPayload(notes = null) {
   const scanned = notes ?? await scanNotes();
   const fs = await scanFilesystemEntries(scanned);
-  return { notes: scanned, directories: fs.directories, files: fs.files };
+  return { notes: scanned, directories: fs.directories, files: fs.files, indexVersion: notesIndexVersionValue() };
 }
 
 function preferNote(candidate, current) {
@@ -2418,7 +2419,44 @@ function cloneNotes(notes) {
   return notes.map(cloneNote);
 }
 
+// Monotonically-increasing version counter. Bumped on every markNotesDirty()
+// so clients can detect external index changes via the indexVersion field in
+// notesIndexPayload() responses and refresh without polling.
+let notesIndexVersion = 1;
+export function notesIndexVersionValue() { return notesIndexVersion; }
+
+// Registry of files the server wrote itself (atomic renames). The watcher
+// ignores self-writes within a 2-second window to avoid triggering redundant
+// re-scans immediately after save. Capped at 256 entries to prevent unbounded growth.
+const recentSelfWrites = new Map();
+export function noteSelfWrite(file) {
+  recentSelfWrites.set(file, Date.now());
+  if (recentSelfWrites.size > 256) {
+    // Delete the oldest entry
+    const oldest = recentSelfWrites.keys().next().value;
+    recentSelfWrites.delete(oldest);
+  }
+}
+export function noteSelfWriteRecently(file, windowMs = 2000) {
+  const ts = recentSelfWrites.get(file);
+  if (!ts) return false;
+  if (Date.now() - ts > windowMs) { recentSelfWrites.delete(file); return false; }
+  return true;
+}
+
+// Whether a vault-relative path is eligible to affect the note index.
+// Mirrors the filter in walkFiles so the watcher and the scanner agree.
+export function notePathWatchRelevant(relPath) {
+  if (!relPath) return false;
+  const parts = String(relPath).replace(/\\/g, "/").split("/").filter(Boolean);
+  if (parts.some((p) => excludedDirs.has(p) || p.startsWith("."))) return false;
+  const name = parts[parts.length - 1] || "";
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 && noteExts.has(name.slice(dot).toLowerCase());
+}
+
 export function markNotesDirty(file = "") {
+  notesIndexVersion++;
   notesSnapshotDirty = true;
   if (file && inside(file, noteScanRoot)) {
     dirtyNoteFiles.add(file);
@@ -4564,6 +4602,7 @@ export async function renameManagedPath(body) {
   const target = targetPathForRename(file, body.name || body.targetName);
   assertTargetWritable(file, target);
   await rename(file, target);
+  noteSelfWrite(file); noteSelfWrite(target);
   await renameManagedLeanMirror(file, target, info);
   markNotesDirty();
   return fsPayload({
@@ -4591,6 +4630,7 @@ export async function moveManagedPath(body) {
   assertTargetWritable(file, target);
   await assertMoveTargetParent(target);
   await rename(file, target);
+  noteSelfWrite(file); noteSelfWrite(target);
   await renameManagedLeanMirror(file, target, info);
   markNotesDirty();
   return fsPayload({

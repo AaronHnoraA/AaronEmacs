@@ -76,11 +76,6 @@
      "tmp")
    (my/aaronnote-roam--state-root)))
 
-(defcustom my/aaronnote-roam-sync-delay 1.5
-  "Seconds to debounce automatic incremental roam-db sync after saving."
-  :type 'number
-  :group 'my/aaronnote-roam)
-
 (defvar my/aaronnote-roam--recent nil
   "Recently opened Markdown roam note ids, newest first.")
 
@@ -3527,39 +3522,6 @@ canonical `roam://note-id#tag' target."
       (concat "  "
               (if tags (string-join (seq-filter #'stringp tags) ",") "")
               (when (> bls 0) (format " ←%d" bls))))))
-
-;; Auto-update DB on save
-(defun my/aaronnote-roam--note-file-p (file)
-  "Return non-nil when FILE is a Markdown roam note in the current vault."
-  (when (and file
-             (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file))
-    (let* ((root (file-name-as-directory
-                  (file-truename (my/aaronnote-roam-root))))
-           (truename (file-truename file))
-           (rel (file-relative-name truename root)))
-      (and (string-prefix-p root truename)
-           (not (string-match-p
-                 "\\`\\(?:\\.git/\\|\\.lean/\\|_typst/\\|node_modules/\\)"
-                 rel))))))
-
-(defun my/aaronnote-roam--schedule-runtime-sync (file)
-  "Debounce an incremental runtime sync for changed Markdown note FILE."
-  (when (timerp my/aaronnote-roam--sync-timer)
-    (cancel-timer my/aaronnote-roam--sync-timer))
-  (push file my/aaronnote-roam--sync-changed-files)
-  (setq my/aaronnote-roam--sync-changed-files
-        (delete-dups
-         (seq-filter #'identity my/aaronnote-roam--sync-changed-files)))
-  (setq my/aaronnote-roam--sync-timer
-        (run-at-time
-         my/aaronnote-roam-sync-delay nil
-         (lambda ()
-           (let ((changed my/aaronnote-roam--sync-changed-files))
-             (setq my/aaronnote-roam--sync-timer nil
-                   my/aaronnote-roam--sync-changed-files nil)
-             (if (my/aaronnote-roam--runtime-available-p)
-                 (my/aaronnote-roam--runtime-sync nil changed)
-               (message "Markdown roam cache refreshed")))))))
 
 ;; ── Keymaps & menus ───────────────────────────────────────────────────────────
 

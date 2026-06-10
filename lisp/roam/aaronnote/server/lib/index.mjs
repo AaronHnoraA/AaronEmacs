@@ -46,4 +46,9 @@ export {
   rewriteMarkdownPathReferences,
   scanRoamNotes,
   configure,
+  markNotesDirty,
+  notesIndexVersionValue,
+  noteSelfWrite,
+  noteSelfWriteRecently,
+  notePathWatchRelevant,
 } from "./runtime.mjs";

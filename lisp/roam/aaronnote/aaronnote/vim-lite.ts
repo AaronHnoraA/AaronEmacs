@@ -257,33 +257,37 @@ export function createVimLite(
   let visualAnchor: number | null = null;
   let visualHead: number | null = null;
   let register: VimRegister = { text: "", kind: "characterwise" };
+  // Tracks the in-flight system clipboard write so paste() can wait for it
+  // before reading back. Avoids the dd→p race where writeText is async.
+  let pendingClipboardWrite: Promise<void> = Promise.resolve();
 
-  function writeSystemClipboard(text: string): void {
-    if (typeof window !== "undefined" && window.location.protocol === "about:") return;
+  function writeSystemClipboard(text: string): Promise<void> {
+    if (typeof window !== "undefined" && window.location.protocol === "about:") {
+      return Promise.resolve();
+    }
     const hasHostBridge = typeof window !== "undefined"
       && Boolean((window as unknown as { aaronnoteApi?: unknown }).aaronnoteApi);
     const canUseHostClipboard = typeof window !== "undefined"
       && (window.location.hostname === "127.0.0.1" || hasHostBridge);
-    const writeHostClipboard = () => {
-      if (!canUseHostClipboard) return;
-      void fetch("/api/clipboard", {
+    const writeHostClipboard = (): Promise<void> => {
+      if (!canUseHostClipboard) return Promise.resolve();
+      return fetch("/api/clipboard", {
         method: "POST",
         headers: { "Content-Type": "text/plain; charset=utf-8" },
         body: text,
-      }).catch(() => {});
+      }).then(() => {}).catch(() => {});
     };
     if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      void navigator.clipboard.writeText(text).catch(writeHostClipboard);
-      return;
+      return navigator.clipboard.writeText(text).catch(() => writeHostClipboard());
     }
-    writeHostClipboard();
+    return writeHostClipboard();
   }
 
   function yank(text: string, kind: VimRegisterKind = "characterwise"): void {
     if (!text) return;
     register = { text, kind };
     (window as unknown as Record<string, unknown>).__aaronoteVimRegister = register;
-    writeSystemClipboard(text);
+    pendingClipboardWrite = writeSystemClipboard(text);
   }
 
   function resetMotionMemory(): void {
@@ -405,14 +409,19 @@ export function createVimLite(
     const placement = register.kind === "linewise"
       ? { kind: "line" as const, where }
       : { kind: "character" as const, where };
+    // Capture the current register in case it changes before the async path runs.
+    const localRegister = register;
+    const pending = pendingClipboardWrite;
     window.setTimeout(() => {
-      void editor.pasteFromClipboard({ placement })
-        .then((handled) => {
-          if (!handled && register.text) {
-            editor.pastePlainText(register.text, { placement });
-          }
-        })
-        .finally(() => setMode("normal"));
+      void (async () => {
+        // Wait for any in-flight clipboard write to land before reading back.
+        // 400 ms guard prevents a stalled write from blocking paste indefinitely.
+        await Promise.race([pending, new Promise<void>((r) => setTimeout(r, 400))]);
+        const handled = await editor.pasteFromClipboard({ placement });
+        if (!handled && localRegister.text) {
+          editor.pastePlainText(localRegister.text, { placement });
+        }
+      })().finally(() => setMode("normal"));
     }, 0);
   }
 

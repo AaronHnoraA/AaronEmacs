@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
@@ -53,4 +53,44 @@ export async function runtimeMkdtemp(kind, originalPath = "") {
   const dir = await runtimeTmpDir(kind);
   const prefix = `${safeKind(kind)}--${encodeOriginalPathToTmpName(originalPath || kind)}--`;
   return mkdtemp(join(dir, prefix));
+}
+
+// One-shot orphan sweep at server startup. Removes entries older than ttlMs
+// under each kind subdirectory of tmpRoot. maxEntries is a safety cap to avoid
+// stat-ing an unexpectedly large directory. No recurring timer.
+export async function sweepRuntimeTmp({ ttlMs = 24 * 60 * 60 * 1000, maxEntries = 2000 } = {}) {
+  const now = Date.now();
+  let scanned = 0;
+  let removed = 0;
+  let kindDirs;
+  try {
+    kindDirs = await readdir(tmpRoot, { withFileTypes: true });
+  } catch {
+    return { scanned, removed };
+  }
+  for (const kindEntry of kindDirs) {
+    if (!kindEntry.isDirectory()) continue;
+    const kindPath = join(tmpRoot, kindEntry.name);
+    let entries;
+    try {
+      entries = await readdir(kindPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (scanned >= maxEntries) break;
+      scanned++;
+      const entryPath = join(kindPath, entry.name);
+      try {
+        const info = await stat(entryPath);
+        if (now - info.mtimeMs > ttlMs) {
+          await rm(entryPath, { recursive: true, force: true });
+          removed++;
+        }
+      } catch {
+        // skip unreadable or already-gone entries
+      }
+    }
+  }
+  return { scanned, removed };
 }

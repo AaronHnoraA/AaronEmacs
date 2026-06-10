@@ -288,9 +288,20 @@ function collectLivePreviewTokens(
         if (LINK_MARK_NODES.has(node.name)) {
           let p = node.node.parent;
           while (p && p.name !== "Link" && p.name !== "Image") p = p.parent;
-          const spanFrom = p?.from ?? node.from;
-          const spanTo = p?.to ?? node.to;
-          const href = p?.name === "Link" ? linkHrefFromSpan(view.state, spanFrom, spanTo) : "";
+
+          // If the parent walk reached null the mark is inside a LinkReference
+          // definition line (`[id]: url "title"`). Hiding it makes the whole
+          // line look blank after reload (Lezer classifies the line as
+          // LinkReference instead of Paragraph). Emit syntax-hint so the
+          // definition is always visible but visually dimmed — Typora style.
+          if (!p) {
+            tokens.push({ kind: "static", from: node.from, to: node.to, cls: "syntax-hint" });
+            return false;
+          }
+
+          const spanFrom = p.from;
+          const spanTo = p.to;
+          const href = p.name === "Link" ? linkHrefFromSpan(view.state, spanFrom, spanTo) : "";
           tokens.push({
             kind: "link-delimiter",
             from: node.from,

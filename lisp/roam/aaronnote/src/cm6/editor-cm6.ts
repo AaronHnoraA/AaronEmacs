@@ -60,6 +60,7 @@ import { scanInlineMathRanges } from "../inline-math.ts";
 import { findHighlightExtension } from "./find-highlight.ts";
 import { roamLinkStatusExtension } from "./roam-link-status.ts";
 import { tocIndexExtension } from "./toc-index.ts";
+import { orderedListRenumber, skipOrderedListRenumber } from "./ordered-list-renumber.ts";
 import { proseDiagnosticsExtension } from "./prose-diagnostics.ts";
 import { scheduleViewportDecorationRefresh } from "./viewport-refresh.ts";
 
@@ -188,7 +189,58 @@ function hrefFromLinkNode(state: EditorState, from: number, to: number): string 
       return false;
     },
   });
-  return href;
+  if (href) return href;
+  // No inline URL found — may be a reference-style link [text][id] or [text].
+  // Scan the document for a matching LinkReference definition.
+  // Only runs on user click (on-demand), never per keystroke.
+  return resolveRefLinkHref(state, from, to);
+}
+
+function resolveRefLinkHref(state: EditorState, linkFrom: number, linkTo: number): string | null {
+  // Extract the reference label from the Link node: [text][label] or [text] (collapsed ref).
+  let label: string | null = null;
+  syntaxTree(state).iterate({
+    from: linkFrom,
+    to: linkTo,
+    enter(node) {
+      if (label !== null) return false;
+      if (node.name === "LinkLabel") {
+        const raw = state.doc.sliceString(node.from, node.to).trim();
+        // LinkLabel includes the brackets: [id] — strip them
+        label = raw.replace(/^\[|\]$/g, "").trim().toLowerCase();
+        return false;
+      }
+    },
+  });
+  // Collapsed reference [text] uses the link text as the label.
+  if (!label) {
+    const linkText = state.doc.sliceString(linkFrom, linkTo);
+    const m = linkText.match(/^\[([^\]\n]+)\]\s*(?:\[\])?/);
+    label = m?.[1]?.trim().toLowerCase() ?? null;
+  }
+  if (!label) return null;
+  // Walk the syntax tree for a matching LinkReference anywhere in the doc.
+  let resolved: string | null = null;
+  syntaxTree(state).iterate({
+    enter(node) {
+      if (resolved) return false;
+      if (node.name !== "LinkReference") return;
+      // The LinkReference has a LinkLabel child and a URL child.
+      let defLabel: string | null = null;
+      let defUrl: string | null = null;
+      node.node.cursor().iterate((child) => {
+        if (child.name === "LinkLabel") {
+          defLabel = state.doc.sliceString(child.from, child.to).replace(/^\[|\]$/g, "").trim().toLowerCase();
+        }
+        if (child.name === "URL") {
+          defUrl = state.doc.sliceString(child.from, child.to).trim();
+        }
+      });
+      if (defLabel === label && defUrl) resolved = defUrl;
+      return false; // don't recurse into LinkReference children twice
+    },
+  });
+  return resolved;
 }
 
 function markdownHrefFromLineAt(state: EditorState, pos: number): string | null {
@@ -536,7 +588,12 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
         changes: { from: 0, to: len, insert: md },
         selection: { anchor: 0 },
         scrollIntoView: true,
-        annotations: setOptions.history === "skip" ? [Transaction.addToHistory.of(false)] : undefined,
+        annotations: [
+          // Programmatic loads must not trigger ordered-list renumber — it would
+          // silently rewrite user content (e.g. a list deliberately starting at 5).
+          skipOrderedListRenumber.of(true),
+          ...(setOptions.history === "skip" ? [Transaction.addToHistory.of(false)] : []),
+        ],
       });
     },
 
@@ -871,6 +928,7 @@ function buildExtensions(options: EditorOptions, previewCompartment: Compartment
     markdown({ base: markdownLanguage }),
     highlightActiveLine(),
     tocIndexExtension,
+    orderedListRenumber,
     leanPlaceholderEditingExtension,
     noteCodeEditingExtension,
     previewCompartment.of(isSourceMode() ? [] : previewExtensions()),

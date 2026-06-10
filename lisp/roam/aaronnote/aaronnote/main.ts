@@ -192,6 +192,13 @@ let restoringNavigationBack = false;
 let snippets: SnippetSummary[] = [];
 let notes: NoteSummary[] = [];
 let pathSuggestions: string[] = [];
+// Tracks the index version from the last notesIndexPayload response so we can
+// detect when the server's watcher has bumped the index due to external changes.
+let lastNotesIndexVersion = 0;
+// True when a notes-index-changed event arrived while the page was hidden;
+// triggers reloadNotes on the next visibility-restore.
+let pendingNotesRefresh = false;
+const notesRefreshTimer = new CoalescedTimer(500);
 // Ephemeral request-level cache for completions — NOT a roam business cache.
 // Holds results only for the duration of the current completion session (same
 // context key). Discarded as soon as the context key changes.
@@ -755,7 +762,10 @@ function encodeMarkdownHrefPath(path: string): string {
     .join("/");
 }
 
-function applyIndexPayload(payload: { notes?: NoteSummary[]; note?: NoteSummary; kind?: string; standalone?: boolean }): void {
+function applyIndexPayload(payload: { notes?: NoteSummary[]; note?: NoteSummary; kind?: string; standalone?: boolean; indexVersion?: number }): void {
+  if (typeof payload.indexVersion === "number" && payload.indexVersion > lastNotesIndexVersion) {
+    lastNotesIndexVersion = payload.indexVersion;
+  }
   if (Array.isArray(payload.notes)) notes = payload.notes;
   else if (payload.note?.file) {
     const index = notes.findIndex((note) => note.file === payload.note?.file);
@@ -3134,11 +3144,24 @@ function runHostCommand(detail: unknown): boolean {
     key?: string;
     value?: string;
     mode?: VimLiteMode;
+    version?: number;
   };
   const command = String(body.command || "").trim().toLowerCase();
   if (!command) return false;
 
   switch (command) {
+    case "notes-index-changed": {
+      const version = typeof body.version === "number" ? body.version : 0;
+      // Ignore stale broadcasts (e.g. replayed on reconnect).
+      if (version && version <= lastNotesIndexVersion) return true;
+      if (version) lastNotesIndexVersion = version;
+      if (pauseReasons.has("visibility")) {
+        pendingNotesRefresh = true;
+      } else {
+        notesRefreshTimer.schedule(() => void reloadNotes(false));
+      }
+      return true;
+    }
     case "key":
       return runHostKey(body as Record<string, unknown>);
     case "pause":
@@ -3377,6 +3400,10 @@ document.addEventListener("visibilitychange", () => {
     void flushCursorPosition();
   } else {
     setPausedReason("visibility", false);
+    if (pendingNotesRefresh) {
+      pendingNotesRefresh = false;
+      notesRefreshTimer.schedule(() => void reloadNotes(false));
+    }
   }
 });
 window.addEventListener("pagehide", () => {

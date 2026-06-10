@@ -36,7 +36,8 @@ import {
   getTodos,
   runtimeDebugSnapshot,
 } from "./server/lib/index.mjs";
-import { configure, markNotesDirty } from "./server/lib/state.mjs";
+import { configure, markNotesDirty, notesIndexVersionValue, noteSelfWriteRecently, notePathWatchRelevant } from "./server/lib/state.mjs";
+import { startNoteWatcher } from "./server/lib/watch.mjs";
 import { saveNote } from "./server/lib/save.mjs";
 import {
   storeAsset,
@@ -64,7 +65,7 @@ import {
 } from "./server/lib/session.mjs";
 import { handleCopilotRequest, shutdownCopilot } from "./server/lib/copilot.mjs";
 import { runExternalProseChecks } from "./server/lib/prose-check.mjs";
-import { runtimeMkdtemp } from "./server/lib/tmp.mjs";
+import { runtimeMkdtemp, sweepRuntimeTmp } from "./server/lib/tmp.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -95,6 +96,33 @@ configure({
   snippetsRoot,
   templatesRoot,
 });
+
+// One-shot orphan sweep: remove staging/clipboard/db temp files older than 24h.
+void sweepRuntimeTmp().then(({ removed }) => {
+  if (removed > 0) process.stderr.write(`[aaronnote-web] swept ${removed} orphaned tmp file(s)\n`);
+}).catch(() => {});
+
+// Vault file watcher: marks the note index dirty on external changes (Emacs
+// saves, git pull, dired renames, etc.) and broadcasts a notes-index-changed
+// SSE event so connected pages can refresh their notes array without polling.
+// Self-writes (the server's own atomic saves/renames) are suppressed within a
+// 2-second window to avoid redundant index re-reads.
+// Set AARONNOTE_WATCH=0 to disable (useful in test environments).
+const noteWatcher = process.env.AARONNOTE_WATCH !== "0"
+  ? startNoteWatcher({
+      root: noteRoot,
+      isRelevant: notePathWatchRelevant,
+      isSelfWrite: (file) => noteSelfWriteRecently(file),
+      onBatch(files) {
+        for (const file of files) markNotesDirty(file);
+        broadcast("command", { command: "notes-index-changed", version: notesIndexVersionValue() });
+      },
+      onFullRescan() {
+        markNotesDirty();
+        broadcast("command", { command: "notes-index-changed", version: notesIndexVersionValue() });
+      },
+    })
+  : { close() {} };
 
 if (!existsSync(webDir)) {
   process.stderr.write(
@@ -130,6 +158,7 @@ async function shutdown() {
     try { res.end(); } catch {}
   }
   eventClients.clear();
+  try { noteWatcher.close(); } catch {}
   server.close();
   try { await shutdownCopilot(); } catch {}
   process.exit(0);
