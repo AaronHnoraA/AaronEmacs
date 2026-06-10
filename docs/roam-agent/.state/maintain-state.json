@@ -1,0 +1,899 @@
+{
+  "last_head": "56220d20eeb89a03eec3e21ea124d5b8842e5707",
+  "notes": {
+    "roam/Philosophy/Read/\u5b9e\u8df5\u54f2\u5b66/\u4f26\u7406\u5b66.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019590473529,
+        "size": 2650
+      },
+      "note": {
+        "date": "2025-05-21",
+        "headings": [
+          [
+            1,
+            "1. \u672c\u4f53\u8bba"
+          ]
+        ],
+        "id": "20240619T000000-lunli-xue",
+        "outgoing_ids": [],
+        "outgoing_refs": [
+          "https://bookshop.pwo101.top/book/807"
+        ],
+        "path": "/Users/hc/HC/Org/roam/Philosophy/Read/\u5b9e\u8df5\u54f2\u5b66/\u4f26\u7406\u5b66.md",
+        "rel_path": "roam/Philosophy/Read/\u5b9e\u8df5\u54f2\u5b66/\u4f26\u7406\u5b66.md",
+        "summary": "\u300a\u4f26\u7406\u5b66\u300b\uff08Ethica in Ordine Geometrico Demonstrata\uff09\u662f\u8377\u5170\u54f2\u5b66\u5bb6\u65af\u5bbe\u8bfa\u838e\u521b\u4f5c\u7684\u54f2\u5b66\u8457\u4f5c\uff0c\u9996\u6b21\u51fa\u7248\u4e8e1677\u5e74\u3002\u300a\u4f26\u7406\u5b66\u300b\u5168\u540d\u4e3a\u300a\u7528\u51e0\u4f55\u5b66\u65b9\u6cd5\u4f5c\u8bba\u8bc1\u7684\u4f26\u7406\u5b66\u300b\uff0c\u8be5\u4e66\u7528\u51e0\u4f55\u5b66\u7684\u65b9\u6cd5\u5199\u6210\uff0c\u8ba4\u4e3a\u53ea\u6709\u51ed\u7406\u6027\u7684\u80fd\u529b\u83b7\u5f97\u7684\u77e5\u8bc6\u624d\u662f\u6700\u53ef\u9760\u7684\u77e5\u8bc6\uff0c\u4eba\u6709\u5929\u8d4b\u7684\u77e5\u8bc6\u80fd\u529b\uff0c\u4e16\u754c\u662f\u53ef\u4ee5\u8ba4\u8bc6\u7684\u3002\u300a\u4f26\u7406\u5b66\u300b\u4ece\u672c\u4f53\u8bba\u3001\u8ba4\u8bc6\u8bba\u5f00\u59cb\uff0c\u6700\u540e\u5f97\u51fa\u300a\u4f26\u7406\u5b66\u300b\u7684\u6700\u9ad8\u6982\u5ff5\u81ea\u7531\uff0c\u4e3a\u4eba\u7684\u5e78\u798f\u6307\u660e\u4e86\u9053\u8def\u3002\u53ef\u4ee5\u8bf4\uff0c\u81ea\u7531\u662f\u65af\u5bbe\u8bfa\u838e\u54f2\u5b66\u7684\u6838\u5fc3\u548c\u6700\u7ec8\u5f52\u5bbf\u3002 \u65af\u5bbe\u8bfa\u838e\u662f\u8d44\u672c\u4e3b\u4e49\u840c\u82bd\u524d\u671f\u7684\u53cd\u5b97\u6559\u54f2\u5b66\u5bb6, \u8be5\u4e66\u5386\u65f6\u5341\u4f59\u5e74\u5b8c\u6210, \u8bb2\u8ff0\u4e86\u65e9\u8d77\u552f\u7269\u4e3b\u4e49\u65e0\u795e\u8bba\u8005\u5bf9\u7269\u8d28,\u7cbe\u795e\u7b49\u6982\u5ff5\u7684\u63a2\u8ba8. \u4f46\u662f\u7531\u4e8e\u65f6\u4ee3\u7684\u5c40\u9650\u6027, \u4ed6\u4ecd\u6709\u4e00\u4e9b\u5f62\u800c\u4e0a\u5b66, \u673a\u68b0\u552f\u7269\u4e3b\u4e49\u7684\u95ee\u9898\u5728\u91cc\u9762,\u4f46\u662f\u5173\u6ce8\u5176\u65f6\u4ee3\u8d21\u732e, \u4ee5\u53ca\u5bf9\u540e\u4e16\u7684\u5f71\u54cd, \u4ecd\u7136\u662f\u4e00\u672c\u503c\u5f97\u4e00\u8bfb\u7684\u54f2\u5b66\u7ecf\u5178. \u65af\u5bbe\u8bfa\u838e\u7684\u4f26\u7406\u5b66\u601d\u60f3\u5bf9\u540e\u6765\u7684\u54f2\u5b66\u5bb6\u5982\u5eb7\u5fb7\u3001\u9ed1\u683c\u5c14\u7b49\u4ea7\u751f\u4e86\u6df1\u8fdc\u7684\u5f71\u54cd, \u4ed6\u7684\u65e0\u795e\u8bba\u548c\u552f\u7269\u4e3b\u4e49\u89c2\u70b9\u4e5f\u4e3a\u73b0\u4ee3\u54f2\u5b66\u7684\u53d1\u5c55\u5960\u5b9a\u4e86\u57fa\u7840. \u603b\u7684...",
+        "tags": [
+          "book",
+          "philosophy",
+          "reading",
+          "\u4f26\u7406\u5b66",
+          "\u54f2\u5b66",
+          "\u552f\u5fc3\u4e3b\u4e49",
+          "\u552f\u7269\u4e3b\u4e49",
+          "\u65af\u5bbe\u8bfa\u838e",
+          "\u65e0\u795e\u8bba"
+        ],
+        "title": "\u4f26\u7406\u5b66",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/Philosophy/Read/\u5b9e\u8df5\u54f2\u5b66/\u4f26\u7406\u5b66.md"
+      }
+    },
+    "roam/Philosophy/Read/\u653f\u6cbb\u54f2\u5b66/\u56fd\u5bb6\u4e0e\u9769\u547d.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019591284339,
+        "size": 351
+      },
+      "note": {
+        "date": "2026-05-21",
+        "headings": [
+          [
+            2,
+            "Summary"
+          ],
+          [
+            2,
+            "Key Ideas"
+          ],
+          [
+            2,
+            "Quotes"
+          ],
+          [
+            2,
+            "Questions"
+          ],
+          [
+            2,
+            "My Take"
+          ]
+        ],
+        "id": "20260521T172123-untitled",
+        "outgoing_ids": [],
+        "outgoing_refs": [
+          "http://bookshop.pwo101.top/book/21"
+        ],
+        "path": "/Users/hc/HC/Org/roam/Philosophy/Read/\u653f\u6cbb\u54f2\u5b66/\u56fd\u5bb6\u4e0e\u9769\u547d.md",
+        "rel_path": "roam/Philosophy/Read/\u653f\u6cbb\u54f2\u5b66/\u56fd\u5bb6\u4e0e\u9769\u547d.md",
+        "summary": "\u5217\u5b81\u7684\u56fd\u5bb6\u4e0e\u9769\u547d Summary One paragraph summary Key Ideas - Quotes Questions - My Take \u906e\u76d6\u4e1c\u897f",
+        "tags": [
+          "philosophy",
+          "\u54f2\u5b66",
+          "\u552f\u7269\u4e3b\u4e49",
+          "\u653f\u6cbb"
+        ],
+        "title": "\u56fd\u5bb6\u4e0e\u9769\u547d",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/Philosophy/Read/\u653f\u6cbb\u54f2\u5b66/\u56fd\u5bb6\u4e0e\u9769\u547d.md"
+      }
+    },
+    "roam/QC/density_operator.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019588498861,
+        "size": 9040
+      },
+      "note": {
+        "date": "2026-01-28",
+        "headings": [
+          [
+            1,
+            "1. Why Density Operators Are Needed \u4e3a\u4ec0\u4e48\u8981\u5f15\u5165\u5bc6\u5ea6\u7b97\u7b26"
+          ],
+          [
+            1,
+            "2. Definition of Density Operator \u5bc6\u5ea6\u7b97\u7b26\u7684\u5b9a\u4e49"
+          ],
+          [
+            1,
+            "3. Density Operator from an Ensemble \u4ece\u7cfb\u7efc\u5f97\u5230\u5bc6\u5ea6\u7b97\u7b26"
+          ],
+          [
+            1,
+            "4. Pure States as Density Operators \u7eaf\u6001\u662f\u7279\u6b8a\u7684\u5bc6\u5ea6\u7b97\u7b26"
+          ],
+          [
+            1,
+            "5. Expectation Value for Pure States \u7eaf\u6001\u671f\u671b\u503c\u516c\u5f0f"
+          ],
+          [
+            1,
+            "6. Pure States and Mixed States \u7eaf\u6001\u4e0e\u6df7\u5408\u6001"
+          ],
+          [
+            1,
+            "7. Geometric Structure \u51e0\u4f55\u7ed3\u6784"
+          ],
+          [
+            1,
+            "8. Pure States as Extreme Points \u7eaf\u6001\u4f5c\u4e3a\u6781\u7aef\u70b9"
+          ],
+          [
+            1,
+            "9. Classical and Quantum Uncertainty \u7ecf\u5178\u4e0d\u786e\u5b9a\u6027\u4e0e\u91cf\u5b50\u4e0d\u786e\u5b9a\u6027"
+          ],
+          [
+            1,
+            "10. Spectral Decomposition \u8c31\u5206\u89e3"
+          ],
+          [
+            1,
+            "Conceptual Summary \u6982\u5ff5\u603b\u7ed3"
+          ]
+        ],
+        "id": "20260128T000000-density-operator",
+        "outgoing_ids": [],
+        "outgoing_refs": [],
+        "path": "/Users/hc/HC/Org/roam/QC/density_operator.md",
+        "rel_path": "roam/QC/density_operator.md",
+        "summary": "A density operator is the most general mathematical representation of a quantum state. It includes both: pure states, which can be represented by a single state vector \\psi\\rangle ; mixed states, which describe probabilistic uncertainty over possible pure states. The density-operator formalism unifies the expectation-value formula as \\langle A\\rangle = \\operatorname{tr}(\\rho A). 1. Why Density Operators Are Needed \u4e3a...",
+        "tags": [
+          "density",
+          "operator",
+          "qc",
+          "state"
+        ],
+        "title": "Density Operator",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/QC/density_operator.md"
+      }
+    },
+    "roam/QC/observable_expectation.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019589623469,
+        "size": 9473
+      },
+      "note": {
+        "date": "2026-01-28",
+        "headings": [
+          [
+            1,
+            "1. Why Observables Are Hermitian Operators \u4e3a\u4ec0\u4e48\u53ef\u89c2\u6d4b\u91cf\u662f\u5384\u7c73\u7b97\u7b26"
+          ],
+          [
+            2,
+            "1.1 Measurement outcomes must be real \u6d4b\u91cf\u7ed3\u679c\u5fc5\u987b\u662f\u5b9e\u6570"
+          ],
+          [
+            2,
+            "1.2 Hermitian operators admit orthogonal spectral decompositions \u5384\u7c73\u7b97\u7b26\u5141\u8bb8\u6b63\u4ea4\u8c31\u5206\u89e3"
+          ],
+          [
+            1,
+            "2. Physical Meaning of Expectation Value \u671f\u671b\u503c\u7684\u7269\u7406\u610f\u4e49"
+          ],
+          [
+            1,
+            "3. Born Rule and Spectral Expansion \u73bb\u6069\u89c4\u5219\u4e0e\u8c31\u5c55\u5f00"
+          ],
+          [
+            1,
+            "4. Derivation of the Operator Formula \u671f\u671b\u503c\u7b97\u7b26\u516c\u5f0f\u7684\u63a8\u5bfc"
+          ],
+          [
+            1,
+            "5. Degenerate Eigenvalues \u7b80\u5e76\u672c\u5f81\u503c\u60c5\u5f62"
+          ],
+          [
+            1,
+            "6. Core Spectral-Theoretic Statement \u8c31\u7406\u8bba\u7684\u6838\u5fc3\u7ed3\u8bba"
+          ],
+          [
+            1,
+            "7. Continuous Spectrum \u8fde\u7eed\u8c31\u60c5\u5f62"
+          ],
+          [
+            1,
+            "8. Geometric Interpretation \u51e0\u4f55\u89e3\u91ca"
+          ],
+          [
+            1,
+            "9. Density-Operator Form \u5bc6\u5ea6\u7b97\u7b26\u5f62\u5f0f"
+          ],
+          [
+            1,
+            "Conceptual Summary \u6982\u5ff5\u603b\u7ed3"
+          ]
+        ],
+        "id": "20260128T000000-observable-expectation",
+        "outgoing_ids": [],
+        "outgoing_refs": [],
+        "path": "/Users/hc/HC/Org/roam/QC/observable_expectation.md",
+        "rel_path": "roam/QC/observable_expectation.md",
+        "summary": "In quantum mechanics, an observable is represented by a Hermitian operator on a Hilbert space. The key chain is: \\text{observable} \\Longrightarrow \\text{Hermitian operator} \\Longrightarrow \\text{spectral decomposition} \\Longrightarrow \\text{measurement outcomes} \\Longrightarrow \\text{Born probabilities} \\Longrightarrow \\text{expectation value}. For a pure state \\psi\\rangle and an observable \\hat{A} , the expectation...",
+        "tags": [
+          "expectation",
+          "observable",
+          "operator",
+          "qc"
+        ],
+        "title": "Observable & Expectation",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/QC/observable_expectation.md"
+      }
+    },
+    "roam/QC/quantum_state.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019589289795,
+        "size": 8507
+      },
+      "note": {
+        "date": "2026-01-28",
+        "headings": [
+          [
+            1,
+            "1. Mathematical Carrier of Quantum States \u91cf\u5b50\u6001\u7684\u6570\u5b66\u8f7d\u4f53"
+          ],
+          [
+            1,
+            "2. Separable Hilbert Spaces \u53ef\u5206\u5e0c\u5c14\u4f2f\u7279\u7a7a\u95f4"
+          ],
+          [
+            1,
+            "3. A Quantum State Is Not Literally a Vector \u91cf\u5b50\u6001\u4e0d\u662f\u5355\u4e2a\u77e2\u91cf"
+          ],
+          [
+            1,
+            "4. Why Global Phase Is Unobservable \u4e3a\u4ec0\u4e48\u6574\u4f53\u76f8\u4f4d\u4e0d\u53ef\u89c2\u6d4b"
+          ],
+          [
+            1,
+            "5. Projective Hilbert Space \u5c04\u5f71\u5e0c\u5c14\u4f2f\u7279\u7a7a\u95f4"
+          ],
+          [
+            1,
+            "6. Why We Still Use State Vectors \u4e3a\u4ec0\u4e48\u5e73\u65f6\u8fd8\u8bf4\u201c\u6001\u77e2\u201d"
+          ],
+          [
+            1,
+            "7. Pure States and Mixed States \u7eaf\u6001\u4e0e\u6df7\u5408\u6001"
+          ],
+          [
+            1,
+            "8. Qubit Example \u5355\u91cf\u5b50\u6bd4\u7279\u4f8b\u5b50"
+          ],
+          [
+            1,
+            "Conceptual Summary \u6982\u5ff5\u603b\u7ed3"
+          ]
+        ],
+        "id": "20260128T000000-quantum-state",
+        "outgoing_ids": [],
+        "outgoing_refs": [],
+        "path": "/Users/hc/HC/Org/roam/QC/quantum_state.md",
+        "rel_path": "roam/QC/quantum_state.md",
+        "summary": "A quantum state describes the physical state of a quantum system. Mathematically, a closed quantum system is associated with a complex Hilbert space H . A pure quantum state is not literally a single vector in H , but a ray, namely a one-dimensional subspace of H . In calculations, we usually choose a normalized representative vector \\psi\\rangle from that ray. 1. Mathematical Carrier of Quantum States \u91cf\u5b50\u6001\u7684\u6570\u5b66\u8f7d\u4f53 In qu...",
+        "tags": [
+          "geometry",
+          "hilbert",
+          "qc",
+          "state"
+        ],
+        "title": "Quantum State",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/QC/quantum_state.md"
+      }
+    },
+    "roam/QC/variance.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019588953538,
+        "size": 6668
+      },
+      "note": {
+        "date": "2026-01-30",
+        "headings": [
+          [
+            1,
+            "1. Setup \u6d4b\u91cf\u8bbe\u5b9a"
+          ],
+          [
+            1,
+            "2. Definition of Variance \u65b9\u5dee\u7684\u5b9a\u4e49"
+          ],
+          [
+            1,
+            "3. Main Formula \u4e3b\u516c\u5f0f"
+          ],
+          [
+            1,
+            "4. Operator Derivation \u7b97\u7b26\u63a8\u5bfc"
+          ],
+          [
+            1,
+            "5. Degenerate Spectrum \u7b80\u5e76\u8c31\u60c5\u5f62"
+          ],
+          [
+            1,
+            "6. Density Operator Form \u5bc6\u5ea6\u7b97\u7b26\u5f62\u5f0f"
+          ],
+          [
+            1,
+            "7. Interpretation \u7269\u7406\u89e3\u91ca"
+          ],
+          [
+            1,
+            "8. Important Special Case: Eigenstates \u672c\u5f81\u6001\u60c5\u5f62"
+          ],
+          [
+            1,
+            "9. Conceptual Summary \u6982\u5ff5\u603b\u7ed3"
+          ]
+        ],
+        "id": "20260130T000000-variance",
+        "outgoing_ids": [],
+        "outgoing_refs": [],
+        "path": "/Users/hc/HC/Org/roam/QC/variance.md",
+        "rel_path": "roam/QC/variance.md",
+        "summary": "In quantum measurement, the variance of an observable M measures how spread out the measurement outcomes are around their expectation value. For an observable M and a state \\psi\\rangle , the variance is (\\Delta M)^2 = \\langle (M-\\langle M\\rangle)^2\\rangle. Equivalently, (\\Delta M)^2 = \\langle M^2\\rangle - \\langle M\\rangle^2. The standard deviation is \\Delta M = \\sqrt{\\langle M^2\\rangle-\\langle M\\rangle^2}. 1. Setup...",
+        "tags": [
+          "concept",
+          "measurement",
+          "qc",
+          "statistics"
+        ],
+        "title": "Variance",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/QC/variance.md"
+      }
+    },
+    "roam/daily/note/Mathlib/\u5317\u5927/lean-workshop-20260523.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019592315986,
+        "size": 2480
+      },
+      "note": {
+        "date": "2026-05-21",
+        "headings": [
+          [
+            1,
+            "Course 1"
+          ],
+          [
+            2,
+            "\u6570\u5b66\u5f62\u5f0f\u5316"
+          ],
+          [
+            2,
+            "Lean\u8bed\u8a00\u57fa\u672c\u8bed\u6cd5"
+          ],
+          [
+            3,
+            "\u8bfe\u540e\u4f5c\u4e1a 01"
+          ],
+          [
+            1,
+            "Course 2"
+          ],
+          [
+            2,
+            "\u8bfe\u540e\u4f5c\u4e1a 02"
+          ]
+        ],
+        "id": "20260521T234934-lean4-mathlib",
+        "outgoing_ids": [],
+        "outgoing_refs": [
+          "https://beta.reaslab.io",
+          "https://leanprover-community.github.io/mathematics_in_lean"
+        ],
+        "path": "/Users/hc/HC/Org/roam/daily/note/Mathlib/\u5317\u5927/lean-workshop-20260523.md",
+        "rel_path": "roam/daily/note/Mathlib/\u5317\u5927/lean-workshop-20260523.md",
+        "summary": "\u8fd9\u662f\u4e00\u4e2a\u5317\u5927ai4math\u56e2\u961f\u7275\u5934\u7684Lean4 Mathlib review\u4e3a\u4e3b\u9898\u7684\u5b66\u4e60\u4ea4\u6d41\u548c\u672a\u6765\u5de5\u4f5c\u5bf9\u63a5\u9879\u76ee. Lean4(Mathlib) \u7684\u601d\u60f3\u6765\u81ea\u4e8e\u76f8\u4fe1\u6240\u6709\u6570\u5b66\u8bed\u53e5\u90fd\u80fd\u8fdb\u884c\u5f62\u5f0f\u5316\u8868\u793a. \u7136\u540e\u5982\u7a0b\u5e8f\u4e00\u822c, \u903b\u8f91\u7684\u5173\u8054\u53ef\u4ee5\u4f7f\u7528\u8bed\u8a00\u7f16\u8bd1\u7b49\u6280\u672f\u8fdb\u884c\u5904\u7406. \u901a\u8fc7\u5f62\u5f0f\u5316\u7684\u65b9\u5f0f,\u6211\u4eec\u53ef\u4ee5\u8ba9\u8ba1\u7b97\u673a\u6765\u9a8c\u8bc1\u6570\u5b66\u5b9a\u7406\u7684\u6b63\u786e\u6027,\u4ece\u800c\u63d0\u9ad8\u6570\u5b66\u7814\u7a76\u7684\u6548\u7387\u548c\u51c6\u786e\u6027. \u540c\u65f6\u53ef\u4ee5\u8ba9\u4eba\u66f4\u591afocus\u5728\u6570\u5b66\u7684\u7b80\u6d01\u6027\u4e0a\u9762. \u6839\u636e\u8fd9\u4e48\u591a\u5e74\u7684\u53d1\u5c55, \u6709\u4e00\u4e9b\u5f88\u4e0d\u9519\u7684\u6210\u679c. \u6bd4\u5982tao\u4e3b\u63a8\u7684Mathlib\u89c6\u56fe\u4ece\u516c\u7406\u5f00\u59cb, \u9010\u6b65\u6784\u5efa\u4e86\u4e00\u4e2a\u5e9e\u5927\u7684\u6570\u5b66\u5e93, \u5305\u542b\u4e86\u5404\u79cd\u6570\u5b66\u9886\u57df\u7684\u5b9a\u7406\u548c\u8bc1\u660e. \u540c\u65f6AI\u7ed3\u5408lean\u6765\u5904\u7406\u6570\u5b66\u95ee\u9898,\u548c\u5e38\u89c4\u6570\u5b66\u8868\u8fbe\u8f6c\u6362\u4e3alean\u7684\u77e5\u8bc6\u5e93\u5206\u53d1\u4e5f\u662f\u4e2a\u5f88\u5927\u7684\u4e3b\u9898. s M2F (\u56e2\u961f\u6210\u5458\u4f5c\u54c1) \u672c\u8bfe\u7a0b\u91c7\u7528Mathematics in Lean \u4f5c\u4e3a\u6559\u6750\u6765\u4f7f\u7528. \u8fd9\u4e2a\u6559\u6750\u662f\u7531lean\u793e\u533a\u7684\u6210\u5458\u7f16\u5199\u7684, \u65e8\u5728\u5e2e\u52a9\u521d\u5b66\u8005\u5b66\u4e60\u5982\u4f55\u4f7f\u7528Lean\u8fdb\u884c\u6570\u5b66\u5f62\u5f0f\u5316....",
+        "tags": [
+          "lean",
+          "math",
+          "mathlib",
+          "workshop"
+        ],
+        "title": "Lean4-Mathlib",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/daily/note/Mathlib/\u5317\u5927/lean-workshop-20260523.md"
+      }
+    },
+    "roam/daily/reading/MATH/Linear Algebra/index.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019592008646,
+        "size": 476
+      },
+      "note": {
+        "date": "2026-05-31",
+        "headings": [
+          [
+            1,
+            "Linear Algebra Dame Right"
+          ]
+        ],
+        "id": "20260531T232525-linear-algebra-index",
+        "outgoing_ids": [],
+        "outgoing_refs": [
+          "zotero://select/items/1_UTWG5UB6",
+          "zotero://select/items/1_4IIXVGUU"
+        ],
+        "path": "/Users/hc/HC/Org/roam/daily/reading/MATH/Linear Algebra/index.md",
+        "rel_path": "roam/daily/reading/MATH/Linear Algebra/index.md",
+        "summary": "Linear Algebra Dame Right \u8fd9\u4e2a\u76ee\u5f55\u4e3b\u8981\u662f\u8bb0\u5f55\u5237 \u590d\u65e6\u9ad8\u4ee3\u7eff\u76ae\u4e66\u767d\u76ae\u4e66 \u7684\u7b14\u8bb0. \u540c\u65f6\u540c\u6b65\u4e00\u4e9bUNSW MATH2601 & Linear Algebra Done right\u7684\u4e1c\u897f\u8fdb\u6765.",
+        "tags": [
+          "algebra",
+          "linear-algebra",
+          "math",
+          "reading",
+          "working"
+        ],
+        "title": "Linear Algebra Index",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/daily/reading/MATH/Linear Algebra/index.md"
+      }
+    },
+    "roam/daily/reading/basic algebra.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019591479301,
+        "size": 433
+      },
+      "note": {
+        "date": "2026-05-08",
+        "headings": [
+          [
+            1,
+            "The Krull-schmit Theorem"
+          ]
+        ],
+        "id": "20260508T000000-basic-algebra",
+        "outgoing_ids": [],
+        "outgoing_refs": [
+          "zotero://select/items/1_MXR8MV8H"
+        ],
+        "path": "/Users/hc/HC/Org/roam/daily/reading/basic algebra.md",
+        "rel_path": "roam/daily/reading/basic algebra.md",
+        "summary": "Book: Jacobson (1985) The Krull-schmit Theorem The results we shall give in this secyino are valid for groups with operators and are of insterest for thes also. asda asda",
+        "tags": [
+          "book",
+          "draft",
+          "reading",
+          "summary"
+        ],
+        "title": "Basic Algebra (Reading Note)",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/daily/reading/basic algebra.md"
+      }
+    },
+    "roam/daily/uni/qc/ReadingGroup/20260508.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019591068625,
+        "size": 1680
+      },
+      "note": {
+        "date": "2026-05-08",
+        "headings": [
+          [
+            1,
+            "Ron Steinfeld"
+          ],
+          [
+            2,
+            "Privacy-Oriented Cryptographic Protocols (Problem)"
+          ],
+          [
+            2,
+            "Quantum-Powered Public-Key Cryptography (Problem)"
+          ],
+          [
+            1,
+            "Khoa Nguyen"
+          ],
+          [
+            2,
+            "New Post-Quantum Hardness Landscapes from Combinatoria Structures"
+          ],
+          [
+            2,
+            "Privacy-Preserving Cryptography with Controlled Information Exposure"
+          ],
+          [
+            2,
+            "Privacy-Preserving Interaction with AI Systems"
+          ],
+          [
+            1,
+            "Clement Canonne"
+          ]
+        ],
+        "id": "20260508T000000-20260508",
+        "outgoing_ids": [],
+        "outgoing_refs": [],
+        "path": "/Users/hc/HC/Org/roam/daily/uni/qc/ReadingGroup/20260508.md",
+        "rel_path": "roam/daily/uni/qc/ReadingGroup/20260508.md",
+        "summary": "Ron Steinfeld Privacy-Oriented Cryptographic Protocols (Problem) Quantum-Powered Public-Key Cryptography (Problem) Khoa Nguyen New Post-Quantum Hardness Landscapes from Combinatoria Structures Privacy-Preserving Cryptography with Controlled Information Exposure Privacy-Preserving Interaction with AI Systems Clement Canonne",
+        "tags": [
+          "cryptography",
+          "qc",
+          "reading-group"
+        ],
+        "title": "Some QC related projects",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/daily/uni/qc/ReadingGroup/20260508.md"
+      }
+    },
+    "roam/math/hermitian_matrix.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019590778494,
+        "size": 14275
+      },
+      "note": {
+        "date": "2026-01-27",
+        "headings": [
+          [
+            1,
+            "Definition \u5b9a\u4e49"
+          ],
+          [
+            1,
+            "Basic Consequences \u57fa\u672c\u7ed3\u8bba"
+          ],
+          [
+            2,
+            "Diagonal entries are real \u4e3b\u5bf9\u89d2\u7ebf\u5143\u7d20\u4e3a\u5b9e\u6570"
+          ],
+          [
+            2,
+            "Eigenvalues are real \u7279\u5f81\u503c\u4e3a\u5b9e\u6570"
+          ],
+          [
+            1,
+            "Properties \u6027\u8d28"
+          ],
+          [
+            2,
+            "1. Sums are Hermitian \u52a0\u6cd5\u5c01\u95ed"
+          ],
+          [
+            2,
+            "2. Scalar multiplication \u6807\u91cf\u4e58\u6cd5"
+          ],
+          [
+            2,
+            "3. Products are Hermitian only under commutativity \u4e58\u79ef\u9700\u8981\u4ea4\u6362\u6027"
+          ],
+          [
+            2,
+            "4. Inverses are Hermitian \u9006\u77e9\u9635\u4ecd\u4e3a Hermitian"
+          ],
+          [
+            2,
+            "5. Powers are Hermitian \u5e42\u4ecd\u4e3a Hermitian"
+          ],
+          [
+            2,
+            "6. Hermitian and skew-Hermitian parts Hermitian \u4e0e\u659c Hermitian \u5206\u89e3"
+          ],
+          [
+            2,
+            "7. Hermitian matrices are normal Hermitian \u77e9\u9635\u662f\u6b63\u89c4\u77e9\u9635"
+          ],
+          [
+            2,
+            "8. Unitary diagonalisation \u9149\u5bf9\u89d2\u5316"
+          ],
+          [
+            2,
+            "9. Dimension as a real vector space \u5b9e\u5411\u91cf\u7a7a\u95f4\u7ef4\u6570"
+          ],
+          [
+            2,
+            "10. Positive definite and positive semidefinite matrices \u6b63\u5b9a\u4e0e\u534a\u6b63\u5b9a"
+          ],
+          [
+            1,
+            "Hermitian Operators \u81ea\u4f34\u7b97\u5b50 / \u5384\u7c73\u7b97\u7b26"
+          ],
+          [
+            1,
+            "Why Observables Are Hermitian \u4e3a\u4ec0\u4e48\u7269\u7406\u91cf\u5bf9\u5e94 Hermitian \u7b97\u7b26"
+          ],
+          [
+            1,
+            "Operator Representation of Observables \u7269\u7406\u91cf\u7684\u7b97\u7b26\u5316\u8868\u793a"
+          ],
+          [
+            1,
+            "Expectation Value as a Statistical Average \u7edf\u8ba1\u610f\u4e49\u4e0b\u7684\u671f\u671b\u503c"
+          ],
+          [
+            1,
+            "Quantum States and Probability Weights \u91cf\u5b50\u6001\u4e0e\u6982\u7387\u6743\u91cd"
+          ],
+          [
+            1,
+            "Operator Formula for Expectation Values \u671f\u671b\u503c\u7684\u7b97\u7b26\u5f62\u5f0f"
+          ],
+          [
+            1,
+            "Modelling Perspective \u91cf\u5316\u5efa\u6a21\u7684\u89c6\u89d2"
+          ],
+          [
+            1,
+            "Conceptual Summary \u6982\u5ff5\u603b\u7ed3"
+          ]
+        ],
+        "id": "20260127T000000-hermitian-matrix",
+        "outgoing_ids": [],
+        "outgoing_refs": [],
+        "path": "/Users/hc/HC/Org/roam/math/hermitian_matrix.md",
+        "rel_path": "roam/math/hermitian_matrix.md",
+        "summary": "A Hermitian matrix is a complex square matrix that equals its own conjugate transpose. Equivalently, a matrix A\u2208Mn\u200b(C) is Hermitian if A\u2020\\=A. In coordinates, this means Aij\u200b\\=Aji\u200b\u200b for all 1\u2264i,j\u2264n. Hermitian matrices are the complex analogue of real symmetric matrices. They are central in linear algebra, spectral theory, and quantum mechanics because their eigenvalues are real and they can be diagonalised by unitary...",
+        "tags": [
+          "concept",
+          "math",
+          "qc"
+        ],
+        "title": "Hermitian Matrix",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/math/hermitian_matrix.md"
+      }
+    },
+    "roam/math/hilbert_space.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019589949518,
+        "size": 10185
+      },
+      "note": {
+        "date": "2026-01-26",
+        "headings": [
+          [
+            2,
+            "1. Mathematical Understanding \u6570\u5b66\u7406\u89e3"
+          ],
+          [
+            3,
+            "Core Components \u6838\u5fc3\u7ec4\u6210"
+          ],
+          [
+            3,
+            "Common Examples \u5e38\u89c1\u4f8b\u5b50"
+          ],
+          [
+            2,
+            "2. Quantum Application \u91cf\u5b50\u5e94\u7528"
+          ],
+          [
+            3,
+            "States \u6001"
+          ],
+          [
+            3,
+            "Superposition \u53e0\u52a0\u539f\u7406"
+          ],
+          [
+            3,
+            "Observables \u53ef\u89c2\u6d4b\u91cf"
+          ],
+          [
+            3,
+            "Born Rule \u73bb\u6069\u89c4\u5219"
+          ],
+          [
+            2,
+            "3. Finite-Dimensional Inner Product Spaces Are Complete"
+          ],
+          [
+            3,
+            "Proof Idea \u8bc1\u660e\u601d\u8def"
+          ],
+          [
+            3,
+            "Step 1: Choose an orthonormal basis"
+          ],
+          [
+            3,
+            "Step 2: Let (v i) be a Cauchy sequence"
+          ],
+          [
+            3,
+            "Step 3: Write each vector in coordinates"
+          ],
+          [
+            3,
+            "Step 4: Use the norm formula in an orthonormal basis"
+          ],
+          [
+            3,
+            "Step 5: Use completeness of \\mathbb{C}"
+          ],
+          [
+            3,
+            "Step 6: Construct the candidate limit vector"
+          ],
+          [
+            3,
+            "Step 7: Show that v i \\to v"
+          ],
+          [
+            2,
+            "4. Interaction of Hilbert Spaces \u5e0c\u5c14\u4f2f\u7279\u7a7a\u95f4\u4e4b\u95f4\u7684\u6784\u9020"
+          ],
+          [
+            3,
+            "Direct Sum \u76f4\u548c"
+          ],
+          [
+            3,
+            "Tensor Product \u5f20\u91cf\u79ef"
+          ],
+          [
+            2,
+            "5. Conceptual Summary \u6982\u5ff5\u603b\u7ed3"
+          ]
+        ],
+        "id": "20260126T000000-hilbert-space",
+        "outgoing_ids": [],
+        "outgoing_refs": [],
+        "path": "/Users/hc/HC/Org/roam/math/hilbert_space.md",
+        "rel_path": "roam/math/hilbert_space.md",
+        "summary": "\"Hilbert space is a big space.\" --- Carlton Caves A Hilbert space is a complete inner product space. Conceptually, it generalises Euclidean space while preserving the geometric notions of length, angle, orthogonality, projection, and convergence. The key chain is: \\text{inner product} \\Longrightarrow \\text{norm} \\Longrightarrow \\text{metric} \\Longrightarrow \\text{convergence} \\Longrightarrow \\text{completeness}. If...",
+        "tags": [
+          "algebra",
+          "concept",
+          "intuition",
+          "linear-algebra",
+          "math",
+          "qc",
+          "structure"
+        ],
+        "title": "Hilbert Space",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/math/hilbert_space.md"
+      }
+    },
+    "roam/math/inner_product_space.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019590237649,
+        "size": 4504
+      },
+      "note": {
+        "date": "2026-01-27",
+        "headings": [
+          [
+            1,
+            "Basic Setup \u57fa\u672c\u8bbe."
+          ],
+          [
+            1,
+            "Axiomatic Definition of an Inner Product \u5185\u79ef\u7684\u516c\u7406\u5316\u5b9a\u4e49"
+          ],
+          [
+            1,
+            "Consequence: Conjugate Linearity in the Second Variable \u7b2c\u4e8c\u53d8\u91cf\u5171\u8f6d\u7ebf\u6027"
+          ]
+        ],
+        "id": "20260127T000000-inner-product-space",
+        "outgoing_ids": [],
+        "outgoing_refs": [],
+        "path": "/Users/hc/HC/Org/roam/math/inner_product_space.md",
+        "rel_path": "roam/math/inner_product_space.md",
+        "summary": "An inner product space is a vector space equipped with an additional operation called an inner product. This operation allows us to define geometric notions such as length, angle, orthogonality, norm, distance, convergence, and completeness. The conceptual chain is: \\text{inner product} \\Longrightarrow \\text{norm} \\Longrightarrow \\text{metric} \\Longrightarrow \\text{convergence} \\Longrightarrow \\text{completeness}. B...",
+        "tags": [
+          "algebra",
+          "concept",
+          "linear-algebra",
+          "math",
+          "qc"
+        ],
+        "title": "Inner Product Space",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/math/inner_product_space.md"
+      }
+    },
+    "roam/project/UNSW/ISO(202603)/GraphTensor.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019591738015,
+        "size": 4136
+      },
+      "note": {
+        "date": "2026-05-18",
+        "headings": [
+          [
+            1,
+            "Construction"
+          ],
+          [
+            1,
+            "Example"
+          ],
+          [
+            1,
+            "Decomposition heuristic"
+          ],
+          [
+            1,
+            "Next questions"
+          ]
+        ],
+        "id": "20260519T053406-graph-tensor",
+        "outgoing_ids": [],
+        "outgoing_refs": [],
+        "path": "/Users/hc/HC/Org/roam/project/UNSW/ISO(202603)/GraphTensor.md",
+        "rel_path": "roam/project/UNSW/ISO(202603)/GraphTensor.md",
+        "summary": "This note records the basic construction that turns a bipartite graph into a 3-tensor. The point is to encode the combinatorics of a graph as a tuple of matrix units, so that graph-theoretic operations can later be compared with linear-algebraic operations on tensors. Let L=[\\ell]=\\{1,\\ldots,\\ell\\}, \\qquad R=[m]=\\{1,\\ldots,m\\}. A bipartite graph on these two parts is determined by its edge sets @@todo(doing) [\u8fd9\u662f\u6211\u7684\u5de5\u4f5c]",
+        "tags": [
+          "algebra",
+          "concept",
+          "graph",
+          "intuition",
+          "linear-algebra",
+          "structure",
+          "tensor",
+          "working"
+        ],
+        "title": "Graph Tensor",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/project/UNSW/ISO(202603)/GraphTensor.md"
+      }
+    },
+    "roam/project/UNSW/ISO(202603)/Krull-Schmit.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019592835122,
+        "size": 352
+      },
+      "note": {
+        "date": "2026-05-18",
+        "headings": [],
+        "id": "20260519T053406-krull-schmit",
+        "outgoing_ids": [],
+        "outgoing_refs": [],
+        "path": "/Users/hc/HC/Org/roam/project/UNSW/ISO(202603)/Krull-Schmit.md",
+        "rel_path": "roam/project/UNSW/ISO(202603)/Krull-Schmit.md",
+        "summary": "As above. --- asdasd",
+        "tags": [
+          "algebra",
+          "tensor"
+        ],
+        "title": "Krull-Schmit",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/project/UNSW/ISO(202603)/Krull-Schmit.md"
+      }
+    },
+    "roam/project/UNSW/ISO(202603)/strassen.md": {
+      "fingerprint": {
+        "mtime_ns": 1780235019592558324,
+        "size": 377
+      },
+      "note": {
+        "date": "2026-05-08",
+        "headings": [
+          [
+            1,
+            "Overview"
+          ],
+          [
+            1,
+            "Reading Note"
+          ],
+          [
+            2,
+            "Degeneration of tensors"
+          ]
+        ],
+        "id": "20260508T000000-strassen",
+        "outgoing_ids": [],
+        "outgoing_refs": [
+          "zotero://select/items/1_C4ULFN2X"
+        ],
+        "path": "/Users/hc/HC/Org/roam/project/UNSW/ISO(202603)/strassen.md",
+        "rel_path": "roam/project/UNSW/ISO(202603)/strassen.md",
+        "summary": "Overview This note is about Strassen, 1969. Reading Note Degeneration of tensors",
+        "tags": [
+          "bilinear-maps",
+          "math",
+          "project",
+          "reading",
+          "strassen",
+          "summary",
+          "tensor-complexity"
+        ],
+        "title": "Sassen",
+        "wiki_path": "/Users/hc/HC/Org/agent/wiki/notes/project/UNSW/ISO(202603)/strassen.md"
+      }
+    }
+  }
+}
