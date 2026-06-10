@@ -7,36 +7,45 @@
 
 (require 'cl-lib)
 
+;; Derive config root from this file's path so batch mode (-Q) gets the right
+;; user-emacs-directory instead of the default ~/.emacs.d/.
+(defconst my/aaronnote-publish--config-root
+  (if load-file-name
+      (file-truename
+       (expand-file-name "../../" (file-name-directory (file-truename load-file-name))))
+    user-emacs-directory)
+  "Emacs config root, derived from load-file-name for batch-mode correctness.")
+
 (defgroup my/aaronnote-publish nil
   "Aaronnote static-site build and deployment."
   :group 'applications)
 
 (defcustom my/aaronnote-publish-root
-  (expand-file-name "publish" user-emacs-directory)
+  (expand-file-name "publish" my/aaronnote-publish--config-root)
   "Path to the publish git repo root (output lands here directly)."
   :type 'directory
   :group 'my/aaronnote-publish)
 
 (defcustom my/aaronnote-publish-engine
-  (expand-file-name "lisp/roam/aaronnote/publish/publish-site" user-emacs-directory)
+  (expand-file-name "lisp/roam/aaronnote/publish/publish-site" my/aaronnote-publish--config-root)
   "Path to the Python publish engine."
   :type 'file
   :group 'my/aaronnote-publish)
 
 (defcustom my/aaronnote-publish-assets-dir
-  (expand-file-name "lisp/roam/aaronnote/publish/assets" user-emacs-directory)
+  (expand-file-name "lisp/roam/aaronnote/publish/assets" my/aaronnote-publish--config-root)
   "Path to publish source assets (css/, kinds/, homepage.html, etc.)."
   :type 'directory
   :group 'my/aaronnote-publish)
 
 (defcustom my/aaronnote-publish-state-dir
-  (expand-file-name "var/aaronnote/publish" user-emacs-directory)
+  (expand-file-name "var/aaronnote/publish" my/aaronnote-publish--config-root)
   "Path to publish cache/state directory (deps/, state.json, book/, cv/)."
   :type 'directory
   :group 'my/aaronnote-publish)
 
 (defcustom my/aaronnote-publish-cv-dir
-  (expand-file-name "lisp/roam/aaronnote/publish/CV" user-emacs-directory)
+  (expand-file-name "lisp/roam/aaronnote/publish/CV" my/aaronnote-publish--config-root)
   "Path to the CV LaTeX source directory."
   :type 'directory
   :group 'my/aaronnote-publish)
@@ -61,21 +70,24 @@
 
 (defun my/aaronnote-publish--runtime-root ()
   "Return the Aaronnote runtime root path."
-  (expand-file-name "lisp/roam/aaronnote" user-emacs-directory))
+  (expand-file-name "lisp/roam/aaronnote" my/aaronnote-publish--config-root))
 
 (defun my/aaronnote-publish--roam-root ()
   "Return the notes vault root."
-  (expand-file-name ".roam" user-emacs-directory))
+  (expand-file-name ".roam" my/aaronnote-publish--config-root))
 
-(defun my/aaronnote-publish--env ()
-  "Return env-var alist for the publish engine process."
+(defun my/aaronnote-publish--env (&optional extra-env)
+  "Return process-environment list for the publish engine subprocess.
+EXTRA-ENV is an optional alist of (VAR . VALUE) pairs prepended as strings.
+Uses string \"VAR=VALUE\" format so both call-process and make-process work."
   (let ((runtime (my/aaronnote-publish--runtime-root)))
     (append
-     (list (cons "AARONNOTE_PUBLISH_OUTPUT"   my/aaronnote-publish-root)
-           (cons "AARONNOTE_RUNTIME_ROOT"     runtime)
-           (cons "AARONNOTE_PUBLISH_ASSETS"   my/aaronnote-publish-assets-dir)
-           (cons "AARONNOTE_PUBLISH_STATE_DIR" my/aaronnote-publish-state-dir)
-           (cons "AARONNOTE_ROAM_ROOT"        (my/aaronnote-publish--roam-root)))
+     (mapcar (lambda (pair) (format "%s=%s" (car pair) (cdr pair))) extra-env)
+     (list (format "AARONNOTE_PUBLISH_OUTPUT=%s"    my/aaronnote-publish-root)
+           (format "AARONNOTE_RUNTIME_ROOT=%s"      runtime)
+           (format "AARONNOTE_PUBLISH_ASSETS=%s"    my/aaronnote-publish-assets-dir)
+           (format "AARONNOTE_PUBLISH_STATE_DIR=%s" my/aaronnote-publish-state-dir)
+           (format "AARONNOTE_ROAM_ROOT=%s"         (my/aaronnote-publish--roam-root)))
      process-environment)))
 
 (defun my/aaronnote-publish--log (msg)
@@ -120,16 +132,60 @@ LABEL is shown in progress messages.  SENTINEL is called when the process exits.
                (setq my/aaronnote-publish--process nil)
                (when sentinel (funcall sentinel ok exit-code))))))))
 
-(defun my/aaronnote-publish--run-sync (label args)
-  "Run ARGS synchronously (for batch/make use).  Signal error on non-zero exit."
+(defun my/aaronnote-publish--run-sync (label args &optional extra-env)
+  "Run ARGS synchronously (for batch/make use), printing output to stdout.
+EXTRA-ENV is an alist of additional env vars.  Signals error on non-zero exit."
   (make-directory my/aaronnote-publish-state-dir t)
-  (message "Aaronnote publish: %s…" label)
-  (let* ((process-environment (my/aaronnote-publish--env))
+  (princ (format "[publish] %s...\n" label))
+  (let* ((process-environment (my/aaronnote-publish--env extra-env))
          (default-directory my/aaronnote-publish-root)
-         (exit-code (apply #'call-process (car args) nil t nil (cdr args))))
-    (unless (zerop exit-code)
-      (error "Aaronnote publish: %s failed (exit %d)" label exit-code))
-    (message "Aaronnote publish: %s done." label)))
+         (out-buf (generate-new-buffer " *aaronnote-publish-out*"))
+         exit-code)
+    (unwind-protect
+        (progn
+          (setq exit-code (apply #'call-process (car args) nil out-buf nil (cdr args)))
+          (let ((output (with-current-buffer out-buf (buffer-string))))
+            (unless (string-empty-p output)
+              (princ output)))
+          (if (zerop exit-code)
+              (princ (format "[publish] %s done.\n" label))
+            (error "Aaronnote publish: %s failed (exit %d)" label exit-code)))
+      (kill-buffer out-buf))))
+
+(defun my/aaronnote-publish--deploy-sync ()
+  "Run git add+commit+push and optional NAS rsync, printing output to stdout."
+  (let ((default-directory my/aaronnote-publish-root)
+        (out-buf (generate-new-buffer " *aaronnote-deploy-out*")))
+    (unwind-protect
+        (progn
+          (princ (format "[publish] deploy: git add + commit (%s)...\n"
+                         (format-time-string "%Y-%m-%d %H:%M:%S")))
+          (call-process-shell-command
+           (format "git add -A && git diff --cached --quiet || git commit -m 'site update: %s'"
+                   (format-time-string "%Y-%m-%d %H:%M:%S"))
+           nil out-buf)
+          (princ (with-current-buffer out-buf (buffer-string)))
+          (with-current-buffer out-buf (erase-buffer))
+          (princ "[publish] git push...\n")
+          (let ((exit (call-process "git" nil out-buf nil "push")))
+            (princ (with-current-buffer out-buf (buffer-string)))
+            (unless (zerop exit)
+              (error "git push failed (exit %d)" exit)))
+          (when my/aaronnote-publish-nas-enable
+            (with-current-buffer out-buf (erase-buffer))
+            (princ (format "[publish] rsync → %s...\n" my/aaronnote-publish-nas-target))
+            (let ((exit (call-process "rsync" nil out-buf nil
+                                      "-avh" "--delete"
+                                      "--exclude" ".deps/"
+                                      "--exclude" "state.json"
+                                      "--exclude" ".DS_Store"
+                                      "--progress" "-e" "ssh"
+                                      (file-name-as-directory my/aaronnote-publish-root)
+                                      my/aaronnote-publish-nas-target)))
+              (princ (with-current-buffer out-buf (buffer-string)))
+              (unless (zerop exit)
+                (error "rsync NAS failed (exit %d)" exit)))))
+      (kill-buffer out-buf))))
 
 (defun my/aaronnote-publish--cv-build-sync ()
   "Compile the LaTeX CV synchronously; copy PDF to publish root."
@@ -139,7 +195,7 @@ LABEL is shown in progress messages.  SENTINEL is called when the process exits.
          (pdf-out (expand-file-name (concat "CV/" jobname ".pdf") my/aaronnote-publish-root)))
     (make-directory cv-state t)
     (make-directory (expand-file-name "CV" my/aaronnote-publish-root) t)
-    (message "Aaronnote publish: compiling CV…")
+    (princ "[publish] compiling CV...\n")
     (let ((exit-code (call-process
                       "latexmk" nil (get-buffer-create my/aaronnote-publish--log-buffer) nil
                       "-xelatex" "-interaction=nonstopmode" "-halt-on-error"
@@ -149,9 +205,8 @@ LABEL is shown in progress messages.  SENTINEL is called when the process exits.
       (if (zerop exit-code)
           (progn
             (copy-file pdf-in pdf-out t)
-            (message "Aaronnote publish: CV compiled → %s" pdf-out))
-        (message "Aaronnote publish: CV compilation failed; see %s"
-                 my/aaronnote-publish--log-buffer)))))
+            (princ (format "[publish] CV compiled → %s\n" pdf-out)))
+        (princ (format "[publish] CV compilation failed (exit %d)\n" exit-code))))))
 
 ;;; Public interactive commands
 
@@ -231,23 +286,23 @@ LABEL is shown in progress messages.  SENTINEL is called when the process exits.
         (my/aaronnote-publish--cv-build-sync)
         (my/aaronnote-publish--run-sync
          "build" (list "python3" my/aaronnote-publish-engine))
-        (let ((default-directory my/aaronnote-publish-root))
-          (call-process-shell-command
-           (format "git add -A && git diff --cached --quiet || git commit -m 'site update: %s'"
-                   (format-time-string "%Y-%m-%d %H:%M:%S"))
-           nil t)
-          (let ((exit (call-process "git" nil t nil "-C" my/aaronnote-publish-root "push")))
-            (unless (zerop exit)
-              (error "git push failed (exit %d)" exit)))
-          (when my/aaronnote-publish-nas-enable
-            (call-process "rsync" nil t nil
-                          "-avh" "--delete"
-                          "--exclude" ".deps/" "--exclude" "state.json"
-                          "--exclude" ".DS_Store" "--progress" "-e" "ssh"
-                          (file-name-as-directory my/aaronnote-publish-root)
-                          my/aaronnote-publish-nas-target))))
-    (error (message "Aaronnote publish failed: %s" (error-message-string err))
-           (kill-emacs 1))))
+        (my/aaronnote-publish--deploy-sync))
+    (error
+     (princ (format "Aaronnote publish FAILED: %s\n" (error-message-string err)))
+     (kill-emacs 1))))
+
+(defun my/aaronnote-publish-force-batch ()
+  "Batch entry: force build + deploy, skipping incremental state check."
+  (condition-case err
+      (progn
+        (my/aaronnote-publish--cv-build-sync)
+        (my/aaronnote-publish--run-sync
+         "build (forced)" (list "python3" my/aaronnote-publish-engine)
+         (list (cons "PUBLISH_FORCE" "1")))
+        (my/aaronnote-publish--deploy-sync))
+    (error
+     (princ (format "Aaronnote publish-force FAILED: %s\n" (error-message-string err)))
+     (kill-emacs 1))))
 
 (defun my/aaronnote-publish-build-batch ()
   "Batch entry: build only (no deploy)."
@@ -256,28 +311,17 @@ LABEL is shown in progress messages.  SENTINEL is called when the process exits.
         (my/aaronnote-publish--cv-build-sync)
         (my/aaronnote-publish--run-sync
          "build" (list "python3" my/aaronnote-publish-engine)))
-    (error (message "Aaronnote publish-build failed: %s" (error-message-string err))
-           (kill-emacs 1))))
+    (error
+     (princ (format "Aaronnote publish-build FAILED: %s\n" (error-message-string err)))
+     (kill-emacs 1))))
 
 (defun my/aaronnote-publish-deploy-batch ()
   "Batch entry: deploy only (git push + optional NAS rsync)."
   (condition-case err
-      (let ((default-directory my/aaronnote-publish-root))
-        (call-process-shell-command
-         (format "git add -A && git diff --cached --quiet || git commit -m 'site update: %s'"
-                 (format-time-string "%Y-%m-%d %H:%M:%S"))
-         nil t)
-        (let ((exit (call-process "git" nil t nil "-C" my/aaronnote-publish-root "push")))
-          (unless (zerop exit) (error "git push failed (exit %d)" exit)))
-        (when my/aaronnote-publish-nas-enable
-          (call-process "rsync" nil t nil
-                        "-avh" "--delete"
-                        "--exclude" ".deps/" "--exclude" "state.json"
-                        "--exclude" ".DS_Store" "--progress" "-e" "ssh"
-                        (file-name-as-directory my/aaronnote-publish-root)
-                        my/aaronnote-publish-nas-target)))
-    (error (message "Aaronnote publish-deploy failed: %s" (error-message-string err))
-           (kill-emacs 1))))
+      (my/aaronnote-publish--deploy-sync)
+    (error
+     (princ (format "Aaronnote publish-deploy FAILED: %s\n" (error-message-string err)))
+     (kill-emacs 1))))
 
 (defun my/aaronnote-publish-clean-batch ()
   "Batch entry: clean publish state."

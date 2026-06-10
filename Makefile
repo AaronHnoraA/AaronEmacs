@@ -14,7 +14,7 @@ BOOTSTRAP_AUDIT = BOOTSTRAP_MODE=audit $(BOOTSTRAP)
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
         health health-startup health-byte health-native \
-        publish publish-build publish-deploy publish-clean
+        publish publish-force publish-build publish-deploy publish-clean
 
 default: up
 
@@ -50,6 +50,7 @@ help:
 	  '  make health-native        Run native-compile smoke check' \
 	  '' \
 	  '  make publish              Build site + deploy (git push + optional NAS rsync)' \
+	  '  make publish-force        Force full rebuild + deploy (skip incremental state check)' \
 	  '  make publish-build        Build static site only (render notes, compile CV)' \
 	  '  make publish-deploy       Deploy only (git push, optional NAS rsync)' \
 	  '  make publish-clean        Remove publish state/cache/CV intermediates'
@@ -141,6 +142,9 @@ health-native:
 # ── Publish ────────────────────────────────────────────────────────────────
 publish:
 	$(PUBLISH_BATCH) --eval '(my/aaronnote-publish-batch)'
+
+publish-force:
+	$(PUBLISH_BATCH) --eval '(my/aaronnote-publish-force-batch)'
 
 publish-build:
 	$(PUBLISH_BATCH) --eval '(my/aaronnote-publish-build-batch)'
