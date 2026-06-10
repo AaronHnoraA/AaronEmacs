@@ -61,6 +61,7 @@ import { findHighlightExtension } from "./find-highlight.ts";
 import { roamLinkStatusExtension } from "./roam-link-status.ts";
 import { tocIndexExtension } from "./toc-index.ts";
 import { orderedListRenumber, skipOrderedListRenumber } from "./ordered-list-renumber.ts";
+import { headingFoldExtension } from "./heading-fold.ts";
 import { proseDiagnosticsExtension } from "./prose-diagnostics.ts";
 import { scheduleViewportDecorationRefresh } from "./viewport-refresh.ts";
 
@@ -929,6 +930,7 @@ function buildExtensions(options: EditorOptions, previewCompartment: Compartment
     highlightActiveLine(),
     tocIndexExtension,
     orderedListRenumber,
+    headingFoldExtension,
     leanPlaceholderEditingExtension,
     noteCodeEditingExtension,
     previewCompartment.of(isSourceMode() ? [] : previewExtensions()),

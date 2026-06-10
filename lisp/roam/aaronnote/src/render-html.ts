@@ -2,6 +2,7 @@ import MarkdownIt from "markdown-it";
 import { full as emoji } from "markdown-it-emoji";
 import type Token from "markdown-it/lib/token.mjs";
 import type StateBlock from "markdown-it/lib/rules_block/state_block.mjs";
+import type StateCore from "markdown-it/lib/rules_core/state_core.mjs";
 import type StateInline from "markdown-it/lib/rules_inline/state_inline.mjs";
 
 import { cleanEditorHTML } from "./export-html.ts";
@@ -729,6 +730,56 @@ function isolateBlockLayoutAttrLines(markdown: string): string {
   return out.join("\n");
 }
 
+// Obsidian-style callout blocks: `> [!type] Optional title`
+// Transforms blockquotes whose first paragraph starts with [!type] into
+// `<blockquote class="callout callout-<type>" data-callout="<type>">` with a
+// `<div class="callout-title">` header. Body content is unchanged.
+function aaronnoteCalloutsRule(state: StateCore): void {
+  const { tokens } = state;
+  for (let i = 0; i < tokens.length; i++) {
+    const bqOpen = tokens[i];
+    if (!bqOpen || bqOpen.type !== "blockquote_open") continue;
+
+    let paraOpen = -1, inlineIdx = -1, paraClose = -1;
+    let depth = 1;
+    for (let j = i + 1; j < tokens.length; j++) {
+      const t = tokens[j]!;
+      if (t.type === "blockquote_open") { depth++; continue; }
+      if (t.type === "blockquote_close") { if (--depth === 0) break; continue; }
+      if (depth !== 1) continue;
+      if (t.type === "paragraph_open" && paraOpen < 0) paraOpen = j;
+      if (t.type === "inline" && inlineIdx < 0 && paraOpen >= 0) inlineIdx = j;
+      if (t.type === "paragraph_close" && paraClose < 0 && inlineIdx >= 0) { paraClose = j; break; }
+    }
+
+    if (inlineIdx < 0) continue;
+
+    const inline = tokens[inlineIdx]!;
+    const firstLine = inline.content.split("\n")[0] ?? "";
+    const m = /^\[!(\w+)\](?:[ \t]+(.*))?$/.exec(firstLine);
+    if (!m) continue;
+
+    const calloutType = m[1]!.toLowerCase();
+    const titleText = m[2] ?? "";
+
+    bqOpen.attrJoin("class", `callout callout-${calloutType}`);
+    bqOpen.attrSet("data-callout", calloutType);
+
+    if (paraOpen >= 0 && paraClose >= 0) {
+      tokens[paraOpen]!.tag = "div";
+      tokens[paraOpen]!.attrJoin("class", "callout-title");
+      tokens[paraClose]!.tag = "div";
+    }
+
+    // Strip [!type] from inline content; re-tokenize so inline formatting in title survives
+    const restLines = inline.content.includes("\n") ? inline.content.split("\n").slice(1) : [];
+    const newContent = restLines.length > 0 ? titleText + "\n" + restLines.join("\n") : titleText;
+    inline.content = newContent;
+    const parsed = state.md.parseInline(newContent, state.env as Record<string, unknown>);
+    inline.children = parsed[0]?.children ?? [];
+  }
+}
+
 function createMarkdownIt(options: RenderMarkdownHTMLOptions): MarkdownIt {
   const md = new MarkdownIt({
     html: false,
@@ -742,6 +793,7 @@ function createMarkdownIt(options: RenderMarkdownHTMLOptions): MarkdownIt {
   md.block.ruler.before("fence", "math_block", mathBlockRule, { alt: ["paragraph", "reference", "blockquote"] });
   md.block.ruler.before("paragraph", "semantic_heading_block", semanticHeadingBlockRule, { alt: ["paragraph"] });
   md.block.ruler.before("paragraph", "toc_block", tocRule, { alt: ["paragraph"] });
+  md.core.ruler.push("aaronnote_callouts", aaronnoteCalloutsRule);
   md.inline.ruler.before("link", "empty_html_link_embed", emptyHtmlLinkEmbedRule);
   md.inline.ruler.before("link", "jupyter_link", jupyterLinkRule);
   md.inline.ruler.after("escape", "math_inline", mathInlineRule);

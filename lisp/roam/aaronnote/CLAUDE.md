@@ -32,8 +32,13 @@ separate editor implementation.
 | `src/styles/*.css` | CM6 editor chrome and swappable Markdown themes. |
 | `aaronnote/main.ts` | Emacs-embedded app shell: notes UI, command palette, jump stack. |
 | `server/lib/runtime.mjs` | Server-side note/index/save/runtime; Copilot LSP bridge. |
+| `server/lib/watch.mjs` | Recursive fs watcher for vault freshness; SSE broadcast on batch change. |
+| `server/lib/tmp.mjs` | Runtime temp staging (`mkdtemp`, atomic writes, TTL orphan sweep). |
 | `server/lib/copilot.mjs` | Re-export barrel for Copilot LSP bridge (uses Emacs-managed binary). |
 | `web-host.mjs` | Node HTTP server: API handlers, `/graph` route, static serving, Emacs event bridge. |
+| `src/cm6/heading-fold.ts` | Heading fold service + hover-only chevron widget; reuses `tocIndexField`. |
+| `src/cm6/ordered-list-renumber.ts` | Auto-renumber ordered lists; bounded `ensureSyntaxTree`; single-undo transaction. |
+| `src/cm6/toc-index.ts` | Incremental TOC / heading index state field; used by outline and fold. |
 | `src/copilot/index.ts` | Built-in Copilot inline UI and key handling for the main editor. |
 
 ## Emacs handoff

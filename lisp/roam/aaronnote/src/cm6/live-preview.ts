@@ -1546,7 +1546,15 @@ function buildLineDecoRanges(
       if (rangeInsideAny(node.from, node.to, lineExcludedRanges)) return false;
 
       if (node.name === "Blockquote") {
-        pushLineRange(node.from, node.to, "cm-md-blockquote");
+        const firstLine = doc.lineAt(node.from);
+        const calloutM = /^>\s*\[!(\w+)\]/.exec(firstLine.text);
+        if (calloutM) {
+          const type = calloutM[1]!.toLowerCase();
+          pushLineRange(node.from, node.to, `cm-md-blockquote cm-md-callout cm-md-callout-${type}`);
+          decos.push(Decoration.line({ attributes: { class: "cm-md-callout-title" } }).range(firstLine.from));
+        } else {
+          pushLineRange(node.from, node.to, "cm-md-blockquote");
+        }
         return false;
       }
       if (node.name === "FencedCode" || node.name === "CodeBlock") {

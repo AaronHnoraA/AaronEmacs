@@ -2591,6 +2591,16 @@ body.note-page {
   color: rgba(31, 29, 26, 0.82);
 }
 
+.note-page blockquote.callout { padding-top: 0; }
+.note-page blockquote.callout .callout-title { font-weight: 600; padding: 0.4em 0 0.2em; margin: 0; }
+.note-page blockquote.callout-note    { border-left-color: #4a9eff; }
+.note-page blockquote.callout-tip     { border-left-color: #2ecc71; }
+.note-page blockquote.callout-info    { border-left-color: #3498db; }
+.note-page blockquote.callout-warning { border-left-color: #f39c12; }
+.note-page blockquote.callout-danger,
+.note-page blockquote.callout-error   { border-left-color: #e74c3c; }
+.note-page blockquote.callout-quote   { border-left-color: #9b59b6; }
+
 .note-page .definition,
 .note-page .defn,
 .note-page .theorem,

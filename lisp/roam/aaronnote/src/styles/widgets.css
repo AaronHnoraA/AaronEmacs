@@ -101,6 +101,16 @@
   color: var(--aaron-muted, #666);
 }
 
+/* Callout blocks — override border colour per type; title line is bold */
+.cm-editor .cm-md-callout-note    { border-left-color: var(--aaron-callout-note,    #4a9eff); }
+.cm-editor .cm-md-callout-tip     { border-left-color: var(--aaron-callout-tip,     #2ecc71); }
+.cm-editor .cm-md-callout-info    { border-left-color: var(--aaron-callout-info,    #3498db); }
+.cm-editor .cm-md-callout-warning { border-left-color: var(--aaron-callout-warning, #f39c12); }
+.cm-editor .cm-md-callout-danger,
+.cm-editor .cm-md-callout-error   { border-left-color: var(--aaron-callout-danger,  #e74c3c); }
+.cm-editor .cm-md-callout-quote   { border-left-color: var(--aaron-callout-quote,   #9b59b6); }
+.cm-editor .cm-md-callout-title   { font-weight: 600; }
+
 /* Code block lines — monospace background */
 .cm-editor .cm-md-code-block {
   font-family: var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);

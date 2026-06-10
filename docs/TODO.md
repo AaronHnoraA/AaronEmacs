@@ -25,6 +25,8 @@
 - 深化表格能力(参考OB - Markup插件)
 - 附件M-click跳转能力
 - 接受 `<!-- omit in toc -->`语法
+- md通用本文件toc跳转语法`#toc` 
+- toc 折叠
 
 
 ### Bugs

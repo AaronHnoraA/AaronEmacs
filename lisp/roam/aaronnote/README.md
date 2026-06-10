@@ -110,7 +110,7 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 | thematic break `---` | :white_check_mark: |  |
 | table `\\| a \\| b \\|` | :white_check_mark: |  |
 | YAML front matter | :white_check_mark: |  |
-| reference link def `[id]: url` | :yellow_circle: | live entry committed as block; reload drops the def node (markdown-it consumes it on parse) |
+| reference link def `[id]: url` | :white_check_mark: | definition line renders as dimmed `syntax-hint`; `[text][id]` click resolves via on-demand syntax scan |
 | HTML block | :white_check_mark: | block widget; sanitized via `sanitizeEmbeddedHtml` (DOMPurify, forbids script/iframe/object) |
 | math block `$$…$$` | :white_check_mark: | block node, source-preserving parse/serialize, rendered preview |
 
@@ -128,7 +128,7 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 | empty-text link `[](url)` | :white_check_mark: |  |
 | image `![alt](src)` | :white_check_mark: |  |
 | autolink `<https://x.com>` | :white_check_mark: |  |
-| reference-style link `[t][id]` | :yellow_circle: | resolves to inline link on parse; def block is the :yellow_circle: piece |
+| reference-style link `[t][id]` | :white_check_mark: | click resolves via on-demand LinkReference scan; def block preserved in source |
 | hard break (2-space + `\n`) | :white_check_mark: |  |
 | soft break (`\n` in para) | :white_check_mark: |  |
 | backslash escape `\*` | :yellow_circle: | round-trip works; no input-time UX |
@@ -147,21 +147,25 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 | HTML comment `<!-- -->`           | :white_check_mark: |                                           |
 | inline command `@@cmd(x) [y]{k: v}` | :white_check_mark: | TODO uses `@@todo(doing) [task]{ddl: 2026-05-20}`; `@@todo [task]` defaults to `todo` |
 | org command block `#+begin kind`   | :white_check_mark: | rendered through the org-env CM6 widget   |
+| callout block `> [!note]`          | :white_check_mark: | editor shows left-border colour + title bold; HTML export wraps in `.callout` + `.callout-title` |
+| heading fold `zc` / `zo` / `za`   | :white_check_mark: | foldService + chevron (hover-only); state lives in CM6 foldState |
 | diagram fences (mermaid, flow, …) | :yellow_circle:    | `mermaid` preview exists for fenced code blocks; broader diagram families are not implemented |
 
 ### Editor behaviors
 
 | Behavior                             | Status             | Notes |
 | ------------------------------------ | :----------------: | ----- |
-| cursor-aware delimiter hinting       | :white_check_mark: |       |
-| auto-pair brackets                   | :white_check_mark: |       |
-| lossless `parse → serialize → parse` | :white_check_mark: |       |
+| cursor-aware delimiter hinting       | :white_check_mark: | |
+| auto-pair brackets                   | :white_check_mark: | |
+| ordered-list auto-renumber           | :white_check_mark: | move/paste/delete renumbers in same transaction (single undo); `.`/`)` marker preserved |
+| heading fold (`zc`/`zo`/`za`/`zM`/`zR`) | :white_check_mark: | foldService + hover-only chevron; state in CM6 foldState |
+| lossless `parse → serialize → parse` | :white_check_mark: | |
 
 ## Current Notes
 
 - Math is no longer a planned feature. The repo already contains parser, serializer, render, and editor tests for inline and display math.
 - Mermaid is partially implemented through fenced-code preview and lazy rendering. The README used to describe it as future work; that is no longer accurate.
-- The main unresolved edge cases are still reference-definition reload, complex inline link parsing, triple-emphasis nesting, and indented-code shape preservation.
+- The remaining edge cases are complex inline link parsing (nested `]` / `\]`), triple-emphasis nesting, and indented-code shape preservation. Reference-definition reload is fixed (live-preview renders the def block as `syntax-hint`; click-to-jump resolves via on-demand scan).
 
 ## Spec
 

@@ -208546,7 +208546,14 @@ $$
 $$
 
 The main technical danger is confusing a coordinate representation with
-the invariant object it represents.
+the invariant object it represents. this is harf to ses ssssssssssssssssssssssssssssssssssssssssss sssssssss We can check it later to 
+
+1. a 
+2. 3
+3. 4
+4. 4
+5. 
+
 #+end summary
 
 ---
@@ -208556,7 +208563,9 @@ the invariant object it represents.
 #+begin summary Section overview
 This section discusses a synthetic but mathematically coherent collection
 of ideas around density operators, tensor encodings, graph-like reductions,
-and algebraic isomorphism problems.
+and algebraic isomorphism problems. this is hard 
+> ss `asda da`  s ad
+> 
 
 The running theme is that a mathematical object may have several equivalent
 representations:
@@ -208731,7 +208740,7 @@ $$
 
 #+begin define Structure tensor
 Let $V$ and $W$ be finite-dimensional vector spaces over a field $F$.
-The structure tensor associated with a bilinear map $\mu:V\times V\to W$
+The structure tensor associated with a bilinear map $\mu:V\times V\to W s \alpha$
 is the tensor $T_\mu$ whose coordinates are the structure constants of
 $\mu$ in chosen bases.
 
@@ -208786,7 +208795,7 @@ Let $X$ be a space of encodings of algebraic structures, and let $G$ be
 the group of admissible changes of coordinates. If two encodings represent
 isomorphic structures exactly when they differ by a change of coordinates,
 then the isomorphism problem is equivalent to deciding whether two points
-of $X$ lie in the same $G$-orbit.
+of $X$ lie in the same $G$-orbit. 
 #+end theorem
 
 #+begin proof Proof idea
@@ -208940,7 +208949,7 @@ The proof compares inclusions and projections between summands. By composing
 maps around an indecomposable component, one obtains endomorphisms. The
 locality of endomorphism rings forces at least one component map to be
 invertible. This identifies one matching pair of summands. Removing that
-pair and applying induction proves the result.
+pair and applying induction proves the result. [[Synthetic Quantum and TCS Research Note]]]]
 #+end proof
 
 中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
