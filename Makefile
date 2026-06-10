@@ -1,6 +1,7 @@
 EMACS ?= emacs
 AARONNOTE_DIR = lisp/roam/aaronnote
 EMACS_BATCH_BASE = $(EMACS) --batch --no-site-file --no-site-lisp --no-splash --init-directory=$(CURDIR) -q
+PUBLISH_BATCH = $(EMACS_BATCH_BASE) -L lisp -L lisp/roam -l ./lisp/roam/init-aaronnote-publish.el
 # Load early-init first so native-comp never writes into top-level eln-cache.
 BATCH = $(EMACS_BATCH_BASE) -l ./early-init.el -l ./init.el
 BOOTSTRAP = $(EMACS_BATCH_BASE) -l ./early-init.el -l ./bootstrap.el
@@ -12,7 +13,8 @@ BOOTSTRAP_AUDIT = BOOTSTRAP_MODE=audit $(BOOTSTRAP)
         aaronnote-build \
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
-        health health-startup health-byte health-native
+        health health-startup health-byte health-native \
+        publish publish-build publish-deploy publish-clean
 
 default: up
 
@@ -45,7 +47,12 @@ help:
 	  '  make health               Run startup + byte + native smoke checks' \
 	  '  make health-startup       Run startup smoke check' \
 	  '  make health-byte          Run byte-compile smoke check' \
-	  '  make health-native        Run native-compile smoke check'
+	  '  make health-native        Run native-compile smoke check' \
+	  '' \
+	  '  make publish              Build site + deploy (git push + optional NAS rsync)' \
+	  '  make publish-build        Build static site only (render notes, compile CV)' \
+	  '  make publish-deploy       Deploy only (git push, optional NAS rsync)' \
+	  '  make publish-clean        Remove publish state/cache/CV intermediates'
 
 up:
 	@if [ -n "$(SNAPSHOT)" ]; then \
@@ -130,3 +137,16 @@ health-byte:
 
 health-native:
 	$(BATCH) --eval '(prin1 (my/health-native-compile-check))'
+
+# ── Publish ────────────────────────────────────────────────────────────────
+publish:
+	$(PUBLISH_BATCH) --eval '(my/aaronnote-publish-batch)'
+
+publish-build:
+	$(PUBLISH_BATCH) --eval '(my/aaronnote-publish-build-batch)'
+
+publish-deploy:
+	$(PUBLISH_BATCH) --eval '(my/aaronnote-publish-deploy-batch)'
+
+publish-clean:
+	$(PUBLISH_BATCH) --eval '(my/aaronnote-publish-clean-batch)'

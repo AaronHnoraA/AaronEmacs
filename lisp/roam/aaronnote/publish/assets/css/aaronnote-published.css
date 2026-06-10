@@ -1,0 +1,553 @@
+.published-note-page .aaronnote-actions a {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  padding: 0 10px;
+  background: var(--aaron-paper);
+  color: var(--aaron-ink);
+  text-decoration: none;
+}
+
+.published-note-page .aaronnote-actions a:hover {
+  border-color: var(--aaron-red);
+  background: var(--aaron-paper-soft);
+}
+
+.published-note-page .cm-editor {
+  box-sizing: border-box;
+  --note-image-max: 420px;
+  --note-table-image-max: 180px;
+  --note-table-image-max-height: 160px;
+  --note-diagram-max: 480px;
+}
+
+.aaronnote-pdf-document {
+  background: #fff;
+}
+
+.published-note-pdf {
+  width: 100%;
+  min-height: auto;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
+}
+
+.published-note-pdf .aaronnote-body,
+.published-note-pdf .aaronnote-editor,
+.published-note-pdf .typora-web-wrap,
+.published-note-pdf .typora-web-editor-host {
+  display: block;
+  min-height: auto;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+}
+
+.published-note-pdf .cm-editor {
+  width: 100%;
+  max-width: none;
+  min-height: auto;
+  padding: 0;
+  font-size: 0.82rem;
+  line-height: 1.42;
+}
+
+@page {
+  size: A4;
+  margin: 10mm 10mm 11mm;
+}
+
+.published-note-page .aaronnote-editor .cm-editor {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.published-note-page .cm-editor org-env-block .org-env-heading-title[data-empty="true"] {
+  display: none;
+}
+
+.published-note-page .sealed-note-message {
+  box-sizing: border-box;
+  width: min(420px, 100%);
+  min-height: 188px;
+  margin: clamp(2.5rem, 12vh, 7.5rem) auto 0;
+  padding: 88px 30px 30px;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line), var(--aaron-red) 16%);
+  border-radius: 4px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--aaron-paper), white 24%),
+      color-mix(in srgb, var(--aaron-paper-soft), white 12%)
+    );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white, transparent 24%);
+  color: var(--aaron-muted);
+  line-height: 1.6;
+  text-align: center;
+  position: relative;
+}
+
+.published-note-page .sealed-note-message::before {
+  content: "Sealed";
+  position: absolute;
+  top: 28px;
+  left: 50%;
+  width: 92px;
+  min-height: 34px;
+  border: 1px solid color-mix(in srgb, var(--aaron-red), var(--aaron-paper-line) 52%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--aaron-paper), var(--aaron-red) 8%);
+  color: var(--aaron-red);
+  font: 600 13px/34px var(--aaron-font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
+  transform: translateX(-50%);
+}
+
+/* ─── published note body: image / mermaid / table / figure ───────── */
+.published-note-page .cm-editor img,
+.published-note-page .cm-editor .cm-image-render,
+.published-note-page .cm-editor img.image-render {
+  display: block;
+  width: var(--aaronnote-image-width, auto);
+  height: var(--aaronnote-image-height, auto);
+  max-width: var(--aaronnote-image-max-width, min(100%, var(--note-image-max, 520px)));
+  max-height: var(--aaronnote-image-max-height, 280px);
+  margin: 0.38rem auto;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line), var(--aaron-muted) 12%);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--aaron-paper-soft), white 26%);
+  object-fit: contain;
+}
+
+.published-note-page .cm-editor img.aaronnote-image-align-left {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+.published-note-page .cm-editor img.aaronnote-image-align-right {
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.published-note-page .cm-editor img.aaronnote-image-wrap.aaronnote-image-align-left {
+  float: left;
+  width: var(--aaronnote-image-width, min(42%, var(--note-image-max, 360px)));
+  margin: 0.25rem 1rem 0.7rem 0;
+}
+
+.published-note-page .cm-editor img.aaronnote-image-wrap.aaronnote-image-align-right {
+  float: right;
+  width: var(--aaronnote-image-width, min(42%, var(--note-image-max, 360px)));
+  margin: 0.25rem 0 0.7rem 1rem;
+}
+
+.published-note-page .cm-editor figure {
+  margin: 0.5rem auto;
+  text-align: center;
+}
+
+.published-note-page .cm-editor figure img {
+  margin: 0 auto 0.35rem;
+}
+
+.published-note-page .cm-editor figcaption {
+  margin: 0.1rem auto 0;
+  max-width: min(100%, var(--note-image-max, 520px));
+  color: var(--aaron-muted);
+  font-size: 0.86em;
+  font-style: italic;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.published-note-page .cm-editor table img,
+.published-note-page .cm-editor table .cm-image-render,
+.published-note-page .cm-editor table img.image-render {
+  width: auto;
+  max-width: min(100%, var(--note-table-image-max, 180px));
+  max-height: var(--note-table-image-max-height, 160px);
+  margin: 0.2rem auto;
+}
+
+.published-note-page .cm-editor table figure {
+  max-width: min(100%, var(--note-table-image-max, 180px));
+  margin: 0.2rem auto;
+}
+
+.published-note-page .cm-editor table figcaption {
+  max-width: min(100%, var(--note-table-image-max, 180px));
+  font-size: 0.78em;
+}
+
+.published-note-page .cm-editor table.aaronnote-table,
+.published-note-page .cm-editor .cm-table-block {
+  width: var(--aaronnote-table-width, 100%);
+  max-width: var(--aaronnote-table-max-width, 100%);
+  height: var(--aaronnote-table-height, auto);
+  max-height: var(--aaronnote-table-max-height, none);
+}
+
+.published-note-page .cm-editor table.aaronnote-table-align-left,
+.published-note-page .cm-editor .cm-table-block.aaronnote-table-align-left {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+.published-note-page .cm-editor table.aaronnote-table-align-center,
+.published-note-page .cm-editor .cm-table-block.aaronnote-table-align-center {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.published-note-page .cm-editor table.aaronnote-table-align-right,
+.published-note-page .cm-editor .cm-table-block.aaronnote-table-align-right {
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.published-note-page .cm-editor table.aaronnote-table-wrap.aaronnote-table-align-left,
+.published-note-page .cm-editor .cm-table-block.aaronnote-table-wrap.aaronnote-table-align-left {
+  float: left;
+  width: var(--aaronnote-table-width, min(56%, 520px));
+  margin: 0.25rem 1rem 0.7rem 0;
+}
+
+.published-note-page .cm-editor table.aaronnote-table-wrap.aaronnote-table-align-right,
+.published-note-page .cm-editor .cm-table-block.aaronnote-table-wrap.aaronnote-table-align-right {
+  float: right;
+  width: var(--aaronnote-table-width, min(56%, 520px));
+  margin: 0.25rem 0 0.7rem 1rem;
+}
+
+.published-note-page .cm-editor .mermaid,
+.published-note-page .cm-editor svg.mermaid-svg,
+.published-note-page .cm-editor pre.cb-diagram-preview,
+.published-note-page .cm-editor pre.cb-diagram-rendered .cb-diagram-preview,
+.published-note-page .cm-editor pre.cb-diagram-rendered svg,
+.published-note-page .cm-editor .cb-diagram-preview svg {
+  display: block;
+  max-width: min(100%, var(--note-diagram-max, 600px));
+  height: auto;
+  margin: 0.4rem auto;
+  overflow: visible;
+}
+
+.published-note-page .cm-editor pre.cb-diagram-preview,
+.published-note-page .cm-editor pre.cb-diagram-rendered .cb-diagram-preview {
+  width: var(--aaronnote-diagram-width, min(100%, var(--note-diagram-max, 600px)));
+  max-width: var(--aaronnote-diagram-max-width, 100%);
+  height: var(--aaronnote-diagram-height, auto);
+  max-height: var(--aaronnote-diagram-max-height, none);
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line), var(--aaron-muted) 12%);
+  border-radius: 4px;
+  background:
+    linear-gradient(color-mix(in srgb, var(--aaron-paper), white 34%), color-mix(in srgb, var(--aaron-paper-soft), white 28%)),
+    var(--aaron-paper);
+}
+
+.published-note-page .cm-editor svg.mermaid-svg,
+.published-note-page .cm-editor pre.cb-diagram-rendered svg,
+.published-note-page .cm-editor .cb-diagram-preview svg {
+  max-width: var(--aaronnote-diagram-max-width, min(100%, var(--note-diagram-max, 600px)));
+  max-height: var(--aaronnote-diagram-max-height, 330px);
+  width: auto;
+  height: auto;
+  cursor: grab;
+}
+
+.published-note-page .cm-editor .cm-mermaid-block,
+.published-note-page .cm-editor .cm-mermaid-block-preview,
+.published-note-page .cm-editor pre.aaronnote-diagram {
+  width: var(--aaronnote-diagram-width, min(100%, var(--note-diagram-max, 600px)));
+  max-width: var(--aaronnote-diagram-max-width, 100%);
+  height: var(--aaronnote-diagram-height, auto);
+  max-height: var(--aaronnote-diagram-max-height, none);
+}
+
+.published-note-page .cm-editor .aaronnote-diagram-align-left {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+.published-note-page .cm-editor .aaronnote-diagram-align-center {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.published-note-page .cm-editor .aaronnote-diagram-align-right {
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.published-note-page .cm-editor .aaronnote-diagram-wrap.aaronnote-diagram-align-left {
+  float: left;
+  width: var(--aaronnote-diagram-width, min(48%, var(--note-diagram-max, 420px)));
+  margin: 0.25rem 1rem 0.7rem 0;
+}
+
+.published-note-page .cm-editor .aaronnote-diagram-wrap.aaronnote-diagram-align-right {
+  float: right;
+  width: var(--aaronnote-diagram-width, min(48%, var(--note-diagram-max, 420px)));
+  margin: 0.25rem 0 0.7rem 1rem;
+}
+
+.published-note-page .cm-editor .cm-diagram-interactive a {
+  cursor: pointer;
+}
+
+.published-note-page .cm-editor .cm-diagram-selected {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--aaron-red), transparent 18%));
+}
+
+.published-note-page .cm-editor .cm-diagram-selected text,
+.published-note-page .cm-editor text.cm-diagram-selected {
+  font-weight: 700;
+}
+
+.published-note-page .aaronnote-book-cover-toc {
+  max-width: min(940px, 100%);
+  margin: 1.35rem auto 1.8rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line), var(--aaron-muted) 18%);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--aaron-paper-soft), white 24%);
+}
+
+.published-note-page .aaronnote-book-cover-toc strong {
+  display: block;
+  margin-bottom: 0.45rem;
+  color: var(--aaron-ink);
+  font-size: 0.85rem;
+  letter-spacing: 0;
+}
+
+.published-note-page .aaronnote-book-cover-toc ol {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.published-note-page .aaronnote-book-cover-toc li {
+  margin: 0.18rem 0;
+}
+
+.published-note-page .aaronnote-book-cover-toc li[data-level="2"] {
+  margin-left: 0.8rem;
+}
+
+.published-note-page .aaronnote-book-cover-toc li[data-level="3"] {
+  margin-left: 1.6rem;
+}
+
+.published-note-page .aaronnote-book-include-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-sizing: border-box;
+  width: min(760px, 100%);
+  min-height: 38px;
+  margin: 0.9rem auto;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line), var(--aaron-link) 24%);
+  border-radius: 5px;
+  padding: 7px 12px;
+  background: color-mix(in srgb, var(--aaron-paper-soft), var(--aaron-link) 6%);
+  color: var(--aaron-ink);
+  text-decoration: none;
+  box-shadow: 0 5px 16px color-mix(in srgb, #1f2937, transparent 92%);
+}
+
+.published-note-page .aaronnote-book-include-card:hover {
+  border-color: var(--aaron-link);
+  background: color-mix(in srgb, var(--aaron-paper-soft), var(--aaron-link) 11%);
+}
+
+.published-note-page .aaronnote-book-include-card.is-missing {
+  border-color: color-mix(in srgb, var(--aaron-red), var(--aaron-paper-line) 35%);
+  background: color-mix(in srgb, var(--aaron-paper-soft), var(--aaron-red) 7%);
+}
+
+.published-note-page .aaronnote-book-include-badge {
+  display: inline-grid;
+  place-items: center;
+  min-height: 20px;
+  border-radius: 999px;
+  padding: 0 8px;
+  background: color-mix(in srgb, var(--aaron-link), white 82%);
+  color: var(--aaron-link);
+  font: 850 10px/1 var(--aaron-font-sans);
+  text-transform: uppercase;
+}
+
+.published-note-page .aaronnote-book-include-card strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aaron-link);
+  font: 750 13px/1.25 var(--aaron-font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.published-note-page .aaronnote-book-include-card small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aaron-muted);
+  font: 11px/1.25 var(--aaron-font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aaronnote-published-document .aaronnote-published-book-trigger {
+  position: fixed;
+  right: 16px;
+  bottom: 20px;
+  z-index: 58;
+  width: 52px;
+  height: 38px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 999px;
+  background: var(--aaron-paper);
+  color: var(--aaron-red-dark);
+  cursor: pointer;
+  font: 800 11px/1 var(--aaron-font-sans);
+  box-shadow: 0 2px 8px rgb(52 39 22 / 14%);
+}
+
+.aaronnote-published-document .aaronnote-published-book-trigger:hover {
+  border-color: var(--aaron-red);
+  box-shadow: 0 4px 14px rgb(52 39 22 / 22%);
+}
+
+.aaronnote-published-document.published-book-toc-open .published-note-page .aaronnote-editor {
+  margin-right: var(--published-book-toc-width, 380px);
+  transition: margin-right 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.aaronnote-published-document .aaronnote-published-book-toc {
+  position: fixed;
+  right: 0;
+  top: 41px;
+  bottom: 0;
+  z-index: 57;
+  width: var(--published-book-toc-width, 380px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid color-mix(in srgb, var(--aaron-paper-line), var(--aaron-red) 18%);
+  background: color-mix(in srgb, var(--aaron-paper), transparent 3%);
+  box-shadow: -2px 0 14px rgb(52 39 22 / 11%);
+  backdrop-filter: blur(8px);
+  transform: translateX(0);
+  transition: transform 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.aaronnote-published-document .aaronnote-published-book-toc.is-collapsed {
+  transform: translateX(105%);
+  pointer-events: none;
+}
+
+.aaronnote-published-document .aaronnote-published-book-toc nav {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 8px;
+  scrollbar-gutter: stable;
+}
+
+.aaronnote-published-document .aaronnote-published-book-toc-status {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: -8px -8px 6px;
+  border-bottom: 1px solid var(--aaron-paper-line);
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--aaron-paper), transparent 4%);
+}
+
+.aaronnote-published-document .aaronnote-published-book-toc-status strong {
+  color: var(--aaron-red-dark);
+  font: 800 13px/1.2 var(--aaron-font-sans);
+}
+
+.aaronnote-published-document .aaronnote-published-book-toc-status span {
+  color: var(--aaron-muted);
+  font: 700 11px/1 var(--aaron-font-sans);
+}
+
+.aaronnote-published-document .aaronnote-published-book-toc-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  min-height: 30px;
+  padding-left: calc(var(--book-depth, 0) * 14px);
+}
+
+.aaronnote-published-document .aaronnote-published-book-toc-branch,
+.aaronnote-published-document .aaronnote-published-book-toc-spacer {
+  width: 24px;
+  height: 26px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--aaron-muted);
+  cursor: pointer;
+  font: 800 12px/1 var(--aaron-font-sans);
+}
+
+.aaronnote-published-document .aaronnote-published-book-toc-spacer {
+  cursor: default;
+}
+
+.aaronnote-published-document .aaronnote-published-book-toc-branch:hover {
+  background: var(--aaron-paper-soft);
+  color: var(--aaron-red-dark);
+}
+
+.aaronnote-published-document .aaronnote-published-book-toc-item {
+  display: block;
+  min-height: 28px;
+  border-radius: 2px;
+  padding: 5px 8px;
+  color: var(--aaron-muted);
+  cursor: pointer;
+  font: 12px/1.3 var(--aaron-font-sans);
+  overflow: hidden;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aaronnote-published-document .aaronnote-published-book-toc-item:hover,
+.aaronnote-published-document .aaronnote-published-book-toc-item.is-current-file {
+  background: var(--aaron-paper-soft);
+  color: var(--aaron-red-dark);
+}
+
+.aaronnote-published-document .aaronnote-published-book-toc-item.is-active {
+  box-shadow: inset 3px 0 0 var(--aaron-red);
+  font-weight: 800;
+}
+
+@media (max-width: 760px) {
+  .published-note-page .aaronnote-book-include-card {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .aaronnote-published-document.published-book-toc-open .published-note-page .aaronnote-editor {
+    margin-right: 0;
+  }
+
+  .aaronnote-published-document .aaronnote-published-book-toc {
+    width: min(360px, calc(100vw - 18px));
+  }
+}

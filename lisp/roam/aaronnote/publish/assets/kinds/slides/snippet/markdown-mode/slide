@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: Slide heading
+# key: slide
+# group: slides
+# --
+# ${1:Slide title}
+
+$0

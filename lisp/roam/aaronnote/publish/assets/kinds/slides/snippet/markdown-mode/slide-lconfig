@@ -1,0 +1,12 @@
+# -*- mode: snippet -*-
+# name: Slide local config
+# key: slc
+# group: slides
+# --
+#+begin slideLConfig
+title-position: ${1:top}
+title-align: ${2:left}
+css:
+  ${3:}
+#+end slideLConfig
+$0

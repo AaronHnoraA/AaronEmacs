@@ -1,0 +1,13 @@
+# -*- mode: snippet -*-
+# name: Slides global config
+# key: sgc
+# group: slides
+# --
+#+begin slideGConfig
+toc: ${1:false}
+title-position: ${2:top}
+title-align: ${3:left}
+css:
+  ${4:}
+#+end slideGConfig
+$0

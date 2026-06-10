@@ -33,6 +33,12 @@
 (declare-function xwidget-webkit-pass-command-event "xwidget" (event))
 (defvar my/appine-tab-list)
 
+;; Publish module — lazy, loaded only when a publish command is first invoked.
+(autoload 'my/aaronnote-publish              "init-aaronnote-publish" nil t)
+(autoload 'my/aaronnote-publish-build        "init-aaronnote-publish" nil t)
+(autoload 'my/aaronnote-publish-deploy       "init-aaronnote-publish" nil t)
+(autoload 'my/aaronnote-publish-clean        "init-aaronnote-publish" nil t)
+
 (defgroup my/aaronnote nil
   "Aaronnote Markdown web editor integration."
   :group 'applications)
@@ -1153,6 +1159,11 @@ Falls back to JupyterLab root when no matching .ipynb exists."
       ("D" "dired"            my/aaronnote-roam-dired)
       ("m" "magit"            my/aaronnote-roam-magit)
       ("q" "stop server"      my/aaronnote-stop)]
+     ["Publish"
+      ("X"  "build + deploy"  my/aaronnote-publish)
+      ("xb" "build only"      my/aaronnote-publish-build)
+      ("xd" "deploy only"     my/aaronnote-publish-deploy)
+      ("xc" "clean cache"     my/aaronnote-publish-clean)]
      ["Jupyter"
       ("J" "open notebook"    my/aaronnote-jupyter-open)
       ("H" "open at heading"  my/aaronnote-jupyter-open-at-toc)]

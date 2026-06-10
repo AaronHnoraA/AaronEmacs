@@ -1,0 +1,213 @@
+body[data-note-kind="slides"] {
+  --slides-ink: #1f2937;
+  --slides-muted: #6b7280;
+  --slides-line: #d7dce3;
+  --slides-paper: #fbfaf7;
+  --slides-accent: #b42318;
+}
+
+body[data-note-kind="slides"] .aaronnote-editor {
+  background:
+    linear-gradient(90deg, rgba(180, 35, 24, 0.06), transparent 28%),
+    var(--slides-paper);
+}
+
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor,
+body[data-note-kind="slides"] #content {
+  max-width: min(1120px, calc(100vw - 56px));
+  min-height: calc(100vh - 128px);
+  margin: 0 auto;
+  padding: clamp(28px, 5vw, 72px);
+  color: var(--slides-ink);
+}
+
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor > *,
+body[data-note-kind="slides"] #content > * {
+  max-width: 820px;
+}
+
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor > org-env-block[data-kind="meta"],
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor > org-env-block[data-kind="slidegconfig"],
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor > org-env-block[data-kind="slide-g-config"],
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor > org-env-block[data-kind="slidesconfig"],
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor > org-env-block[data-kind="slideconfig"],
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor > org-env-block[data-kind="slidelconfig"],
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor > org-env-block[data-kind="slide-l-config"],
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor > org-env-block[data-kind="slidelocalconfig"],
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor > org-env-block[data-kind="slide-local-config"],
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor > org-env-block[data-kind="lconfig"],
+body[data-note-kind="slides"] #content > org-env-block[data-kind="meta"],
+body[data-note-kind="slides"] #content > org-env-block[data-kind="slidegconfig"],
+body[data-note-kind="slides"] #content > org-env-block[data-kind="slide-g-config"],
+body[data-note-kind="slides"] #content > org-env-block[data-kind="slidesconfig"],
+body[data-note-kind="slides"] #content > org-env-block[data-kind="slideconfig"],
+body[data-note-kind="slides"] #content > org-env-block[data-kind="slidelconfig"],
+body[data-note-kind="slides"] #content > org-env-block[data-kind="slide-l-config"],
+body[data-note-kind="slides"] #content > org-env-block[data-kind="slidelocalconfig"],
+body[data-note-kind="slides"] #content > org-env-block[data-kind="slide-local-config"],
+body[data-note-kind="slides"] #content > org-env-block[data-kind="lconfig"] {
+  display: none !important;
+}
+
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor > .aaronnote-slide-hidden,
+body[data-note-kind="slides"] #content > .aaronnote-slide-hidden {
+  display: none !important;
+}
+
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor h1,
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor h2,
+body[data-note-kind="slides"] #content h1,
+body[data-note-kind="slides"] #content h2 {
+  letter-spacing: 0;
+}
+
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor h1,
+body[data-note-kind="slides"] #content h1 {
+  margin-top: 0;
+  font-size: clamp(2.1rem, 6vw, 4.8rem);
+  line-height: 0.98;
+  color: var(--slides-ink);
+}
+
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor h2,
+body[data-note-kind="slides"] #content h2 {
+  margin-top: 1.3rem;
+  font-size: clamp(1.4rem, 3vw, 2.2rem);
+}
+
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor p,
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor li,
+body[data-note-kind="slides"] #content p,
+body[data-note-kind="slides"] #content li {
+  font-size: clamp(1.08rem, 2vw, 1.55rem);
+  line-height: 1.55;
+}
+
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor ul,
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor ol,
+body[data-note-kind="slides"] #content ul,
+body[data-note-kind="slides"] #content ol {
+  padding-left: 1.4em;
+}
+
+body[data-note-kind="slides"] .aaronnote-editor .cm-editor .title,
+body[data-note-kind="slides"] #content .title {
+  color: var(--slides-accent);
+}
+
+.aaronnote-slides-controls {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--slides-line);
+  border-radius: 8px;
+  background: rgba(251, 250, 247, 0.94);
+  box-shadow: 0 12px 30px rgba(31, 41, 55, 0.14);
+}
+
+.aaronnote-slides-controls button {
+  height: 32px;
+  min-width: 54px;
+  border: 1px solid var(--slides-line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--slides-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.aaronnote-slides-controls button:hover {
+  border-color: var(--slides-accent);
+}
+
+.aaronnote-slides-controls button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.aaronnote-slides-counter {
+  min-width: 54px;
+  color: var(--slides-muted);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.aaronnote-slides-progress {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 49;
+  height: 4px;
+  background: rgba(215, 220, 227, 0.7);
+}
+
+.aaronnote-slides-progress span {
+  display: block;
+  width: var(--slides-progress, 0%);
+  height: 100%;
+  background: var(--slides-accent);
+  transition: width 160ms ease;
+}
+
+.aaronnote-slides-toc {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 50;
+  display: grid;
+  gap: 4px;
+  max-width: min(260px, calc(100vw - 36px));
+  max-height: min(48vh, 420px);
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--slides-line);
+  border-radius: 8px;
+  background: rgba(251, 250, 247, 0.94);
+  box-shadow: 0 12px 30px rgba(31, 41, 55, 0.14);
+}
+
+.aaronnote-slides-toc button {
+  width: 100%;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--slides-muted);
+  font: 600 0.78rem/1.25 system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+.aaronnote-slides-toc button:hover,
+.aaronnote-slides-toc button.is-active {
+  background: rgba(180, 35, 24, 0.08);
+  color: var(--slides-ink);
+}
+
+@media (max-width: 720px) {
+  body[data-note-kind="slides"] .aaronnote-editor .cm-editor,
+  body[data-note-kind="slides"] #content {
+    max-width: calc(100vw - 24px);
+    min-height: calc(100vh - 112px);
+    padding: 24px 14px 92px;
+  }
+
+  .aaronnote-slides-controls {
+    left: 12px;
+    right: 12px;
+    justify-content: center;
+  }
+
+  .aaronnote-slides-toc {
+    left: 12px;
+    right: 12px;
+    bottom: 68px;
+    max-width: none;
+    max-height: 28vh;
+  }
+}
