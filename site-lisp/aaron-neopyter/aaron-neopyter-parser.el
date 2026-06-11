@@ -79,6 +79,20 @@ Return a plist (:type TYPE :title TITLE :metadata META)."
     (goto-char pos)
     (line-beginning-position)))
 
+(defun aaron-neopyter-parser--markdown-uncomment-line (line)
+  "Remove one script comment prefix from markdown LINE.
+Jupytext percent-format Python/R markdown cells are usually written as
+comments so the language server can still parse the script buffer."
+  (if (string-match "\\`#\\(?:[ \t]\\)?\\(.*\\)\\'" line)
+      (match-string 1 line)
+    line))
+
+(defun aaron-neopyter-parser--markdown-rpc-text (text)
+  "Return markdown TEXT as it should be sent to JupyterLab."
+  (mapconcat #'aaron-neopyter-parser--markdown-uncomment-line
+             (split-string text "\n")
+             "\n"))
+
 ;;; Main entry point
 
 (defun aaron-neopyter-parse-buffer ()
@@ -193,8 +207,12 @@ Each map has string keys \"source\" and \"cell_type\"."
                           (type-str (pcase raw-type
                                       ('markdown "markdown")
                                       ('raw      "raw")
-                                      (_         "code"))))
-                     (list (cons "source"    (aaron-neopyter-cell-text cell))
+                                      (_         "code")))
+                          (source (if (eq raw-type 'markdown)
+                                      (aaron-neopyter-parser--markdown-rpc-text
+                                       (aaron-neopyter-cell-text cell))
+                                    (aaron-neopyter-cell-text cell))))
+                     (list (cons "source"    source)
                            (cons "cell_type" type-str))))
                  cells)))
 

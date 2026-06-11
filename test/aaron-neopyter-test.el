@@ -168,6 +168,16 @@
         (should (string= "markdown" (alist-get "cell_type" c1 nil nil #'string=)))
         (should (string-match-p "x = 1" (alist-get "source" c0 nil nil #'string=)))))))
 
+(ert-deftest anp-cells-to-rpc-strips-markdown-comment-prefix ()
+  "Markdown cells are uncommented when sent to JupyterLab."
+  (with-temp-script "# %% [markdown]\n# # Heading\n#\n# - item\nplain line\n"
+    (let* ((cells   (aaron-neopyter-parse-buffer))
+           (rpc-vec (aaron-neopyter-cells-to-rpc cells))
+           (cell    (aref rpc-vec 0)))
+      (should (string= "markdown" (alist-get "cell_type" cell nil nil #'string=)))
+      (should (string= "# Heading\n\n- item\nplain line"
+                       (alist-get "source" cell nil nil #'string=))))))
+
 ;;; ──────────────────────────────────────────────────────────────────────
 ;;; msgpack-rpc encode/decode round-trip tests
 ;;; ──────────────────────────────────────────────────────────────────────
