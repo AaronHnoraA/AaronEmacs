@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "/Users/hc/.config/emacs/bin/sage-jupyter-kernel",
+    "-f",
+    "{connection_file}"
+  ],
+  "display_name": "SageMath 10.9",
+  "language": "sage",
+  "env": {
+    "HOME": "/Users/hc",
+    "USER": "hc",
+    "LOGNAME": "hc",
+    "SHELL": "/bin/zsh",
+    "DOT_SAGE": "/Users/hc/.sage",
+    "IPYTHONDIR": "/Users/hc/.ipython",
+    "SAGE_JUPYTER_LOG": "/Users/hc/.config/emacs/var/log/sagemath-kernel.log",
+    "SAGE_ROOT": "/var/tmp/sage-10.9-current",
+    "SAGE_LOCAL": "/var/tmp/sage-10.9-current/local",
+    "PATH": "/var/tmp/sage-10.9-current/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  },
+  "metadata": {
+    "debugger": false
+  }
+}

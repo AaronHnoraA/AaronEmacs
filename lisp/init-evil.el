@@ -495,6 +495,7 @@ Emacs state keep their local behavior."
     "cx" 'quickrun
     "ce" 'my/byte-recompile-lisp-dir
     "cE" 'my/native-compile-lisp-dir
+    "cy" 'my/note-code-copy-reference
 
     ;; window
     "w"  'evil-window-map

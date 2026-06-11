@@ -60,13 +60,13 @@
      :extension "py")
     ("sage"
      :kernel-language "sage"
-     :preferred-kernels ("sagemath-10.8")
+     :preferred-kernels ("sagemath-10.9" "sagemath-10.8")
      :session "sage"
      :mode python
      :extension "sage")
     ("sagemath"
      :kernel-language "sage"
-     :preferred-kernels ("sagemath-10.8")
+     :preferred-kernels ("sagemath-10.9" "sagemath-10.8")
      :session "sagemath"
      :mode python
      :extension "sage")

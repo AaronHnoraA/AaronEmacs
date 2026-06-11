@@ -9,6 +9,10 @@
 
 (require 'subr-x)
 
+(declare-function my/aaronnote-roam-root "init-md-roam" ())
+(defvar my/aaronnote--notes-root)
+(defvar my/aaronnote-roam-root)
+
 (defgroup my/note-code nil
   "Tagged source regions embedded in Typst notes."
   :group 'my/aaronnote-roam)
@@ -37,9 +41,16 @@
   "Return the normalized note root."
   (file-name-as-directory
    (expand-file-name
-    (if (boundp 'my/aaronnote-roam-root)
-        my/aaronnote-roam-root
-      my/note-code-root))))
+    (cond
+     ((fboundp 'my/aaronnote-roam-root)
+      (my/aaronnote-roam-root))
+     ((and (boundp 'my/aaronnote--notes-root)
+           (stringp my/aaronnote--notes-root))
+      my/aaronnote--notes-root)
+     ((and (boundp 'my/aaronnote-roam-root)
+           (stringp my/aaronnote-roam-root))
+      my/aaronnote-roam-root)
+     (t my/note-code-root)))))
 
 (defun my/note-code--arg (name args)
   "Read NAME from Typst argument string ARGS."
@@ -196,6 +207,109 @@ SELECTOR is a path relative to the `.lean/' mirror, e.g. \"math/foo.lean\"."
               (when (file-exists-p link)
                 (delete-file link))
               (make-symbolic-link source link))))))))
+
+;;; ──────────────────────────────────────────────────────────────────
+;;; @@note-code reference generation (from source code buffers)
+;;; ──────────────────────────────────────────────────────────────────
+
+(defun my/note-code--comment-prefix ()
+  "Return the single-line comment prefix for the current major mode.
+Uses `comment-start' when available; falls back to \"# \"."
+  (let ((cs (or (bound-and-true-p comment-start) "#")))
+    (concat (string-trim-right cs) " ")))
+
+(defun my/note-code--ref-path ()
+  "Return the path component for an @@note-code(...) reference.
+For files inside the roam/notes root the path is root-relative to noteRoot.
+For other project files the path is root-relative to the project root.
+Signals an error if the buffer is not visiting a file."
+  (unless buffer-file-name
+    (user-error "Buffer is not visiting a file"))
+  (let* ((file   (expand-file-name buffer-file-name))
+         (roam   (my/note-code--root))
+         (proj   (when (and (fboundp 'project-current)
+                            (fboundp 'project-root))
+                   (when-let* ((p (project-current)))
+                     (file-name-as-directory
+                      (expand-file-name (project-root p)))))))
+    (cond
+     ;; A leading slash means "from the active content root" to Aaronnote:
+     ;; noteRoot for roam files, project root for standalone project files.
+     ((and roam (file-in-directory-p file roam))
+      (concat "/" (file-relative-name file roam)))
+     ((and proj (file-in-directory-p file proj))
+      (concat "/" (file-relative-name file proj)))
+     ;; Fallback: absolute path
+     (t file))))
+
+(defun my/note-code--marker-on-line ()
+  "Return the @aaronnote/@note-code tag already present on the current line.
+Returns nil if the line is not a marker line."
+  (save-excursion
+    (goto-char (line-beginning-position))
+    (when (re-search-forward my/note-code--marker-regexp (line-end-position) t)
+      (string-trim (match-string-no-properties 1)))))
+
+(defun my/note-code--default-tag ()
+  "Return a plausible tag default: function name at point or a timestamp slug."
+  (or (and (fboundp 'which-function) (which-function))
+      (format-time-string "region-%Y%m%d%H%M%S")))
+
+;;;###autoload
+(defun my/note-code-copy-reference ()
+  "Copy an @@note-code(path)[id] reference to the kill ring.
+
+With an active region: prompt for a tag (default: function name or
+timestamp), insert an @aaronnote marker comment before the first line
+of the region, deactivate the mark, and copy @@note-code(PATH)[TAG].
+
+Without a region: if the current line is already a marker comment,
+copy its reference.  Otherwise prompt for a tag, insert the marker
+before the current line, and copy the reference.
+
+PATH uses a leading slash for files inside the roam vault or current project,
+so AaronNote resolves it from the relevant root rather than the note directory."
+  (interactive)
+  (require 'project nil t)
+  (let ((path (my/note-code--ref-path)))
+    (if (use-region-p)
+        ;; ── region active: insert marker before region, copy ref ──────────
+        (let* ((default (my/note-code--default-tag))
+               (tag (string-trim
+                     (read-string (format "Reference tag [%s]: " default)
+                                  nil nil default))))
+          (when (string-empty-p tag)
+            (user-error "Tag cannot be empty"))
+          (save-excursion
+            (goto-char (region-beginning))
+            (goto-char (line-beginning-position))
+            (insert (format "%s@aaronnote %s\n"
+                            (my/note-code--comment-prefix) tag)))
+          (deactivate-mark)
+          (let ((ref (format "@@note-code(%s)[%s]" path tag)))
+            (kill-new ref)
+            (message "Copied  %s" ref)))
+      ;; ── no region ─────────────────────────────────────────────────────
+      (let ((existing (my/note-code--marker-on-line)))
+        (if existing
+            ;; Current line is already a marker — just copy its reference
+            (let ((ref (format "@@note-code(%s)[%s]" path existing)))
+              (kill-new ref)
+              (message "Copied  %s" ref))
+          ;; Current line is regular code — insert a new marker and copy ref
+          (let* ((default (my/note-code--default-tag))
+                 (tag (string-trim
+                       (read-string (format "Reference tag [%s]: " default)
+                                    nil nil default))))
+            (when (string-empty-p tag)
+              (user-error "Tag cannot be empty"))
+            (save-excursion
+              (goto-char (line-beginning-position))
+              (insert (format "%s@aaronnote %s\n"
+                              (my/note-code--comment-prefix) tag)))
+            (let ((ref (format "@@note-code(%s)[%s]" path tag)))
+              (kill-new ref)
+              (message "Copied  %s" ref))))))))
 
 (provide 'init-note-code)
 ;;; init-note-code.el ends here

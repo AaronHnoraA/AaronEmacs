@@ -3,6 +3,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'cl-lib)
 (require 'init-note-code)
 
 (ert-deftest my/note-code-parses-lean-default-mirror ()
@@ -58,6 +59,27 @@
                (regexp-quote "#import \"/_typst/roam.typ\": *")
                (buffer-string)))
       (should-not (string-match-p "note-code\\.typ" (buffer-string))))))
+
+(ert-deftest my/note-code-ref-path-uses-root-relative-roam-path ()
+  (let* ((root (file-name-as-directory (make-temp-file "note-code-test-" t)))
+         (buffer-file-name (expand-file-name "project/demo/source.py" root)))
+    (cl-letf (((symbol-function 'my/note-code--root)
+               (lambda () root)))
+      (should (equal (my/note-code--ref-path)
+                     "/project/demo/source.py")))))
+
+(ert-deftest my/note-code-ref-path-uses-root-relative-project-path ()
+  (let* ((roam (file-name-as-directory (make-temp-file "note-code-roam-" t)))
+         (project (file-name-as-directory (make-temp-file "note-code-project-" t)))
+         (buffer-file-name (expand-file-name "src/demo.py" project)))
+    (cl-letf (((symbol-function 'my/note-code--root)
+               (lambda () roam))
+              ((symbol-function 'project-current)
+               (lambda (&rest _args) 'mock-project))
+              ((symbol-function 'project-root)
+               (lambda (_project) project)))
+      (should (equal (my/note-code--ref-path)
+                     "/src/demo.py")))))
 
 (provide 'note-code-tests)
 ;;; note-code-tests.el ends here

@@ -430,6 +430,7 @@ With positive ARG, enable it.  With zero or negative ARG, disable it."
                      ("H-T" . my/test-dispatch)
                      ("H-m" . magit-status)
                      ("H-a" . org-agenda)
+                     ("C-H-a" . org-agenda)
                      ("H-l" . claude-code-ide-menu)
                      ("H-?" . ai-workbench-docs-ask)
                      ("H-h" . help-command)

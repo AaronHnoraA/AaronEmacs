@@ -111,15 +111,25 @@
 
 (defun my/jupyter--jupyter-command ()
   "Return the Jupyter executable used for local config discovery."
-  (cond
-   ((and (boundp 'my/jupyter-lab-command)
-         (stringp my/jupyter-lab-command)
-         (file-executable-p my/jupyter-lab-command))
-    my/jupyter-lab-command)
-   ((and (fboundp 'my/jupyter-lab--command)
-         (ignore-errors (my/jupyter-lab--command))))
-   ((executable-find "jupyter"))
-   (t (user-error "Cannot find a usable Jupyter executable"))))
+  (let* ((lab-command
+          (cond
+           ((and (boundp 'my/jupyter-lab-command)
+                 (stringp my/jupyter-lab-command)
+                 (file-executable-p my/jupyter-lab-command))
+            my/jupyter-lab-command)
+           ((and (fboundp 'my/jupyter-lab--command)
+                 (ignore-errors (my/jupyter-lab--command))))))
+         (sibling
+          (and lab-command
+               (string= (file-name-nondirectory lab-command) "jupyter-lab")
+               (expand-file-name "jupyter" (file-name-directory lab-command)))))
+    (cond
+     ((and sibling (file-executable-p sibling)) sibling)
+     ((and lab-command
+           (not (string= (file-name-nondirectory lab-command) "jupyter-lab")))
+      lab-command)
+     ((executable-find "jupyter"))
+     (t (user-error "Cannot find a usable Jupyter executable")))))
 
 (defun my/jupyter--command-json (program &rest args)
   "Run PROGRAM with ARGS and parse JSON output."
@@ -167,7 +177,10 @@
   "Return the kernelspec JSON entry for KERNEL."
   (let* ((json (my/jupyter--kernelspec-list-json))
          (specs (alist-get 'kernelspecs json nil nil #'equal)))
-    (alist-get kernel specs nil nil #'equal)))
+    (cdr (cl-find-if
+          (lambda (entry)
+            (equal (format "%s" (car entry)) kernel))
+          specs))))
 
 (defun my/jupyter--kernelspec-resource-dir (kernel)
   "Return the resource directory for KERNEL."

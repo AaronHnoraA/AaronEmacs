@@ -91,12 +91,34 @@ inserted and should insert any desired text into the current buffer.")
 (declare-function jupyter-run-repl "jupyter-repl"
                   (kernel-name &optional repl-name associate-buffer client-class display))
 (declare-function jupyter-runtime-directory "jupyter-env")
+(declare-function my/jupyter-lab--default-directory "init-jupyter-lab")
+(declare-function my/jupyter-lab--process-environment "init-jupyter-lab")
 
 (defun my/jupyter--ensure-kernel-client (object)
   "Signal unless OBJECT is a `jupyter-kernel-client' instance."
   (unless (and (eieio-object-p object)
                (object-of-class-p object 'jupyter-kernel-client))
     (signal 'wrong-type-argument (list 'jupyter-kernel-client object))))
+
+(defun my/jupyter--working-directory ()
+  "Return the preferred cwd for Jupyter commands."
+  (file-name-as-directory
+   (expand-file-name
+    (if (fboundp 'my/jupyter-lab--default-directory)
+        (my/jupyter-lab--default-directory)
+      default-directory))))
+
+(defun my/jupyter-run-repl (&optional kernel-name repl-name associate-buffer client-class display)
+  "Run a Jupyter REPL with the preferred project or roam cwd."
+  (interactive)
+  (let ((default-directory (my/jupyter--working-directory))
+        (process-environment
+         (if (fboundp 'my/jupyter-lab--process-environment)
+             (my/jupyter-lab--process-environment)
+           process-environment)))
+    (if kernel-name
+        (jupyter-run-repl kernel-name repl-name associate-buffer client-class display)
+      (call-interactively #'jupyter-run-repl))))
 
 (defun my/jupyter--normalize-language (language)
   "Normalize LANGUAGE to a stable Jupyter-facing identifier."
@@ -332,7 +354,7 @@ kernelspec for the language."
       (let ((kernel (my/jupyter--first-available-kernel-for-language language)))
         (unless kernel
           (user-error "No kernelspec is available for language %s" language))
-        (jupyter-run-repl kernel nil t nil t)))))
+        (my/jupyter-run-repl kernel nil t nil t)))))
 
 (defvar-local my/jupyter-manager-source-buffer nil
   "Buffer from which the current Jupyter manager view was opened.")
@@ -546,7 +568,7 @@ kernelspec for the language."
             (my/jupyter-manager--insert-button
              "[repl]"
              (lambda (_button)
-               (jupyter-run-repl kernel nil t nil t))
+               (my/jupyter-run-repl kernel nil t nil t))
              "Start a REPL using this kernelspec")
             (insert " ")
             (my/jupyter-manager--insert-button
@@ -638,7 +660,7 @@ kernelspec for the language."
   (let ((entry (my/jupyter-manager--current-entry)))
     (pcase (plist-get entry :kind)
       ('kernel
-       (jupyter-run-repl (plist-get entry :kernel) nil t nil t))
+       (my/jupyter-run-repl (plist-get entry :kernel) nil t nil t))
       (_
        (my/jupyter-run-repl-for-language
         (or (my/jupyter-manager--entry-language entry)
@@ -830,7 +852,7 @@ When QUIET is non-nil, skip the confirmation message."
   "Prefer connecting to an existing kernel; with ARG, start a new one."
   (interactive "P")
   (if arg
-      (call-interactively #'jupyter-run-repl)
+      (call-interactively #'my/jupyter-run-repl)
     (let* ((language (my/jupyter-current-language))
            (file (and language
                       (my/jupyter-language-connection-file language))))
@@ -971,9 +993,11 @@ Sage-specific `PYTHONPATH`, into the external Jupytext process."
     (replace-regexp-in-string "\\.ju\\.\\([^.]+\\)\\'" ".\\1" file)))
 
 (defun my/jupytext--default-notebook-file (&optional script-file)
-  "Infer the paired notebook path for SCRIPT-FILE or the current buffer."
+  "Infer the paired notebook path for SCRIPT-FILE or the current buffer.
+Strips an optional `.ju.' infix so `foo.ju.py' maps to `foo.ipynb'."
   (concat (file-name-sans-extension
-           (expand-file-name (or script-file (my/jupytext--script-file))))
+           (my/jupytext--canonical-script-file
+            (or script-file (my/jupytext--script-file))))
           my/jupytext-default-notebook-extension))
 
 (defun my/jupytext--default-format (&optional script-file)
@@ -1162,8 +1186,15 @@ When ANNOUNCE is non-nil, show a success message."
   (my/jupytext--revert-buffer-if-needed))
 
 (defun my/jupytext--after-save ()
-  "Synchronize the current script buffer with its paired notebook."
-  (when jupytext-mode
+  "Synchronize the current script buffer with its paired notebook.
+Skipped when aaron-neopyter-mode is active and connected — Neopyter
+provides live RPC sync and the disk write would be redundant."
+  (when (and jupytext-mode
+             (not (and (bound-and-true-p aaron-neopyter-mode)
+                       (fboundp 'aaron-neopyter-rpc-connected-p)
+                       (bound-and-true-p aaron-neopyter--connection)
+                       (aaron-neopyter-rpc-connected-p
+                        aaron-neopyter--connection))))
     (condition-case err
         (progn
           (my/jupytext--sync t)
@@ -1172,13 +1203,18 @@ When ANNOUNCE is non-nil, show a success message."
        (message "Jupytext sync failed: %s" (error-message-string err))))))
 
 (defun my/jupytext-auto-enable-mode ()
-  "Enable `jupytext-mode' automatically for matching paired script buffers."
+  "Enable the Jupytext workflow mode for matching paired script buffers.
+Prefers `aaron-neopyter-mode' when available (it subsumes jupytext-mode,
+adding live RPC sync while keeping the save-to-disk fallback).  Falls back
+to plain `jupytext-mode' when Neopyter is not loaded."
   (when (and buffer-file-name
              (not jupytext-mode)
              (string-match-p my/jupytext-auto-mode-file-regexp buffer-file-name))
     (let ((script-file (my/jupytext--script-file)))
       (condition-case err
-          (jupytext-mode 1)
+          (if (fboundp 'aaron-neopyter-mode)
+              (aaron-neopyter-mode 1)
+            (jupytext-mode 1))
         (error
          (message "Skipping automatic jupytext-mode for %s: %s"
                   (file-name-nondirectory script-file)
@@ -1248,11 +1284,12 @@ Reload the notebook from disk in JupyterLab to keep running there."
              my/jupyter-prune-stale-connections
              my/jupyter-register-language-connection-file
              my/jupyter-refresh-kernelspecs-and-reconfigure
+             my/jupyter-run-repl
              my/jupyter-run-repl-for-language
              my/jupyter-edit-remote-connectboard-config
              my/jupyter-set-default-kernel-for-language)
   :bind (("C-c j r" . my/jupyter-connect-repl-dwim)
-         ("C-c j R" . jupyter-run-repl)
+         ("C-c j R" . my/jupyter-run-repl)
          ("C-c j a" . my/jupyter-lab-start)
          ("C-c j A" . my/jupyter-lab-start-and-open)
          ("C-c j b" . my/jupyter-lab-open)

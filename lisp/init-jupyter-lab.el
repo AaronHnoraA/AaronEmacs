@@ -7,8 +7,10 @@
 ;;; Code:
 
 (require 'browse-url)
+(require 'cl-lib)
 (require 'project)
 (require 'subr-x)
+(require 'url)
 
 (require 'init-funcs)
 
@@ -17,7 +19,15 @@
   :group 'tools
   :prefix "my/jupyter-")
 
-(defcustom my/jupyter-lab-command "/opt/homebrew/anaconda3/bin/jupyter"
+(defconst my/jupyter-lab--config-directory
+  (file-name-as-directory
+   (file-name-directory
+    (directory-file-name
+     (or (file-name-directory (or load-file-name buffer-file-name))
+         user-emacs-directory))))
+  "Directory containing this Emacs configuration.")
+
+(defcustom my/jupyter-lab-command "/opt/homebrew/bin/jupyter-lab"
   "Absolute path to the Jupyter executable used for local JupyterLab."
   :type 'string
   :group 'my/jupyter)
@@ -35,13 +45,20 @@
 (defcustom my/jupyter-lab-default-directory nil
   "Default working directory for the managed local JupyterLab server.
 
-When nil, prefer the current project root, then `default-directory'."
+When nil, prefer the roam notes root for roam files, then the current
+project root, then `default-directory'."
   :type '(choice (const :tag "Dynamic" nil) directory)
   :group 'my/jupyter)
 
 (defcustom my/jupyter-lab-log-buffer-name "*jupyter-lab*"
   "Buffer used to capture the managed local JupyterLab output."
   :type 'string
+  :group 'my/jupyter)
+
+(defcustom my/jupyter-lab-jupyter-path
+  (expand-file-name "jupyter" my/jupyter-lab--config-directory)
+  "Jupyter data directory prepended when starting managed local JupyterLab."
+  :type 'directory
   :group 'my/jupyter)
 
 (defvar my/jupyter-lab-process nil
@@ -51,7 +68,12 @@ When nil, prefer the current project root, then `default-directory'."
   "Last working directory used to start managed local JupyterLab.")
 
 (defvar my/jupyter-lab--restart-open nil
-  "Non-nil means the next restart should open JupyterLab in the browser.")
+  "Non-nil means the next restart should open JupyterLab in the browser.
+
+When this is a string, open that URL after restart.")
+
+(defvar my/jupyter-lab--restart-directory nil
+  "Working directory to use for a pending JupyterLab restart.")
 
 (defvar my/jupyter-lab--shutdown-response-timer nil
   "Timer used to answer JupyterLab's shutdown prompt.")
@@ -62,23 +84,147 @@ When nil, prefer the current project root, then `default-directory'."
 (defvar my/jupyter-lab--open-timer nil
   "Timer used to open JupyterLab after startup.")
 
+(defvar jupytext-mode nil)
+(defvar-local my/jupytext-notebook-file nil)
+
 (declare-function my/jupyter-manager-refresh "init-jupyter-core")
 (declare-function my/jupyter-manager--insert-button "init-jupyter-core"
                   (label action help))
+(declare-function my/aaronnote-roam-root "init-md-roam")
+(declare-function my/jupytext--ensure-pair "init-jupyter-core")
+(declare-function my/jupytext--sync "init-jupyter-core" (&optional announce))
 
-(defun my/jupyter-lab--project-root ()
-  "Return the current project root, or nil."
-  (when-let* ((project (project-current nil)))
-    (expand-file-name (project-root project))))
+(defun my/jupyter-lab--env-get (env name)
+  "Return NAME's value in ENV."
+  (when-let* ((entry (cl-find-if
+                      (lambda (item)
+                        (string-prefix-p (concat name "=") item))
+                      env)))
+    (substring entry (1+ (length name)))))
+
+(defun my/jupyter-lab--env-set (env name value)
+  "Return ENV with NAME set to VALUE."
+  (cons (format "%s=%s" name value)
+        (cl-remove-if
+         (lambda (item)
+           (string-prefix-p (concat name "=") item))
+         env)))
+
+(defun my/jupyter-lab--prepend-path (value directory)
+  "Prepend DIRECTORY to path-like VALUE."
+  (let ((directory (directory-file-name (expand-file-name directory))))
+    (string-join
+     (delete-dups
+      (delq nil
+            (cons directory
+                  (and value
+                       (not (string-empty-p value))
+                       (split-string value path-separator t)))))
+     path-separator)))
+
+(defun my/jupyter-lab--jupyter-path (env)
+  "Return the Jupyter data path for ENV."
+  (my/jupyter-lab--prepend-path
+   (my/jupyter-lab--env-get env "JUPYTER_PATH")
+   my/jupyter-lab-jupyter-path))
+
+(defun my/jupyter-lab--process-environment ()
+  "Return a process environment suitable for local Jupyter and kernels."
+  (let* ((home (expand-file-name "~"))
+         (sage-root "/var/tmp/sage-10.9-current")
+         (sage-local (expand-file-name "local" sage-root))
+         (base-path
+          (string-join
+           (delete-dups
+            (append
+             (list (expand-file-name "bin" sage-local)
+                   "/opt/homebrew/bin"
+                   "/opt/homebrew/sbin"
+                   "/usr/local/bin"
+                   "/usr/bin"
+                   "/bin"
+                   "/usr/sbin"
+                   "/sbin")
+             (split-string (or (getenv "PATH") "") path-separator t)))
+           path-separator))
+         (env process-environment))
+    (dolist (entry `(("HOME" . ,home)
+                     ("USER" . ,(user-login-name))
+                     ("LOGNAME" . ,(user-login-name))
+                     ("SHELL" . "/bin/zsh")
+                     ("DOT_SAGE" . ,(expand-file-name ".sage" home))
+                     ("IPYTHONDIR" . ,(expand-file-name ".ipython" home))
+                     ("TMPDIR" . ,temporary-file-directory)
+                     ("SAGE_ROOT" . ,sage-root)
+                     ("SAGE_LOCAL" . ,sage-local)
+                     ("PATH" . ,base-path)))
+      (setq env (my/jupyter-lab--env-set env (car entry) (cdr entry))))
+    (my/jupyter-lab--env-set env "JUPYTER_PATH"
+                             (my/jupyter-lab--jupyter-path env))))
+
+(setenv "JUPYTER_PATH"
+        (my/jupyter-lab--jupyter-path process-environment))
+
+(defun my/jupyter-lab--context-buffer ()
+  "Return the buffer whose file should drive Jupyter cwd decisions."
+  (if (and (boundp 'my/jupyter-manager-source-buffer)
+           (buffer-live-p my/jupyter-manager-source-buffer))
+      my/jupyter-manager-source-buffer
+    (current-buffer)))
+
+(defun my/jupyter-lab--context-file (&optional buffer)
+  "Return BUFFER's file-like path, if any."
+  (with-current-buffer (or buffer (my/jupyter-lab--context-buffer))
+    (expand-file-name
+     (or buffer-file-name
+         (and (boundp 'my/aaronnote-buffer-file-name)
+              my/aaronnote-buffer-file-name)
+         default-directory))))
+
+(defun my/jupyter-lab--roam-root-for-file (file)
+  "Return the roam notes root when FILE is inside it."
+  (when (stringp file)
+    (when-let* ((root-source
+                 (cond
+                  ((fboundp 'my/aaronnote-roam-root)
+                   (my/aaronnote-roam-root))
+                  ((and (boundp 'my/aaronnote-roam-root)
+                        (stringp my/aaronnote-roam-root))
+                   my/aaronnote-roam-root)))
+                (root (file-name-as-directory (expand-file-name root-source))))
+      (when (file-in-directory-p (expand-file-name file) root)
+        root))))
+
+(defun my/jupyter-lab--project-root (&optional file)
+  "Return the project root for FILE or the current context, if any."
+  (let ((dir (file-name-as-directory
+              (expand-file-name
+               (or (and file
+                        (if (file-directory-p file)
+                            file
+                          (file-name-directory file)))
+                   default-directory)))))
+    (when-let* ((project (project-current nil dir)))
+      (expand-file-name (project-root project)))))
+
+(defun my/jupyter-lab--root-for-file (file)
+  "Return the preferred Jupyter working root for FILE."
+  (file-name-as-directory
+   (expand-file-name
+    (or (my/jupyter-lab--roam-root-for-file file)
+        (my/jupyter-lab--project-root file)
+        (and file
+             (if (file-directory-p file)
+                 file
+               (file-name-directory file)))
+        default-directory
+        "~"))))
 
 (defun my/jupyter-lab--default-directory ()
   "Return the working directory for managed local JupyterLab."
   (expand-file-name
    (or my/jupyter-lab-default-directory
-       my/jupyter-lab-last-directory
-       (my/jupyter-lab--project-root)
-       default-directory
-       "~")))
+       (my/jupyter-lab--root-for-file (my/jupyter-lab--context-file)))))
 
 (defun my/jupyter-lab--command ()
   "Return the executable used to launch local JupyterLab."
@@ -102,6 +248,54 @@ When nil, prefer the current project root, then `default-directory'."
   "Return the URL for the managed local JupyterLab server."
   (format "http://%s:%d/lab" my/jupyter-lab-host my/jupyter-lab-port))
 
+(defun my/jupyter-lab--status-url ()
+  "Return the local JupyterLab status API URL."
+  (format "http://%s:%d/api/status" my/jupyter-lab-host my/jupyter-lab-port))
+
+(defun my/jupyter-lab--ready-p ()
+  "Return non-nil when the managed JupyterLab HTTP server is ready."
+  (let ((url-show-status nil))
+    (when-let* ((buffer (ignore-errors
+                          (url-retrieve-synchronously
+                           (my/jupyter-lab--status-url)
+                           t t 1.0))))
+      (unwind-protect
+          (with-current-buffer buffer
+            (goto-char (point-min))
+            (looking-at-p "HTTP/[0-9.]+ 200\\b"))
+        (kill-buffer buffer)))))
+
+(defun my/jupyter-lab--schedule-open-when-ready (open &optional attempt)
+  "Open JupyterLab target OPEN after the HTTP server becomes ready."
+  (my/jupyter-lab--cancel-open-timer)
+  (let ((attempt (or attempt 0)))
+    (setq my/jupyter-lab--open-timer
+          (run-at-time
+           (if (zerop attempt) 0.2 0.5) nil
+           (lambda (open attempt)
+             (setq my/jupyter-lab--open-timer nil)
+             (cond
+              ((my/jupyter-lab--ready-p)
+               (my/jupyter-lab--open-url open t))
+              ((and (my/jupyter-lab-running-p) (< attempt 80))
+               (my/jupyter-lab--schedule-open-when-ready open (1+ attempt)))
+              (t
+               (message "JupyterLab did not become ready at %s"
+                        (my/jupyter-lab-url)))))
+           open attempt))))
+
+(defun my/jupyter-lab--open-url (open &optional ready)
+  "Open JupyterLab target described by OPEN."
+  (if (or ready (my/jupyter-lab--ready-p))
+      (progn
+        (unless (fboundp 'my/xwidget-open-url) (require 'init-browser))
+        (my/xwidget-open-url
+         (if (stringp open) open (my/jupyter-lab-url))
+         :id "jupyter-lab"
+         :display 'side
+         :force-new t))
+    (my/jupyter-lab--schedule-open-when-ready open)))
+
 (defun my/jupyter-lab-url-p (url)
   "Return non-nil when URL targets the managed local JupyterLab server."
   (and (stringp url)
@@ -109,17 +303,59 @@ When nil, prefer the current project root, then `default-directory'."
         (format "http://%s:%d/" my/jupyter-lab-host my/jupyter-lab-port)
         url)))
 
+(defun my/jupyter-lab--same-root-p (left right)
+  "Return non-nil when LEFT and RIGHT name the same Jupyter root."
+  (and (stringp left)
+       (stringp right)
+       (equal (file-truename (file-name-as-directory (expand-file-name left)))
+              (file-truename (file-name-as-directory (expand-file-name right))))))
+
+(defun my/jupyter-lab--ensure-root (root &optional open)
+  "Ensure managed JupyterLab is running with ROOT as cwd.
+
+OPEN is passed to `my/jupyter-lab-start' or remembered across a restart.
+Return non-nil when JupyterLab is already running at ROOT."
+  (if (my/jupyter-lab-running-p)
+      (if (my/jupyter-lab--same-root-p my/jupyter-lab-last-directory root)
+          t
+        (let ((process my/jupyter-lab-process))
+          (setq my/jupyter-lab--restart-open open)
+          (setq my/jupyter-lab--restart-directory root)
+          (my/jupyter-lab--stop-process process)
+          (message "Restarting JupyterLab from %s..."
+                   (abbreviate-file-name root))
+          nil))
+    (let ((my/jupyter-lab-default-directory root))
+      (my/jupyter-lab-start open))
+    nil))
+
+(defun my/jupyter-lab--current-notebook-file ()
+  "Return the notebook associated with the current buffer, if any."
+  (cond
+   ((and buffer-file-name
+         (string-suffix-p ".ipynb" buffer-file-name t))
+    (expand-file-name buffer-file-name))
+   ((and (bound-and-true-p jupytext-mode)
+         (fboundp 'my/jupytext--ensure-pair))
+    (my/jupytext--ensure-pair)
+    (when (and (not (file-exists-p my/jupytext-notebook-file))
+               (fboundp 'my/jupytext--sync))
+      (my/jupytext--sync t))
+    (and my/jupytext-notebook-file
+         (expand-file-name my/jupytext-notebook-file)))))
+
 (defun my/jupyter-lab-open-path (abs-path &optional selector)
   "Open notebook ABS-PATH in xwidget, jumping to SELECTOR heading slug if given."
-  (let* ((root (expand-file-name (my/jupyter-lab--default-directory)))
+  (let* ((root (file-name-as-directory
+                (expand-file-name (my/jupyter-lab--root-for-file abs-path))))
          (rel  (file-relative-name (expand-file-name abs-path) root))
          (frag (if (and selector (not (string-empty-p selector)))
                    (concat "#" (url-hexify-string selector)) ""))
          (url  (format "http://%s:%d/lab/tree/%s%s"
                        my/jupyter-lab-host my/jupyter-lab-port
                        (url-hexify-string rel) frag)))
-    (unless (fboundp 'my/xwidget-open-url) (require 'init-browser))
-    (my/xwidget-open-url url :id "jupyter-lab" :display 'side)))
+    (when (my/jupyter-lab--ensure-root root url)
+      (my/jupyter-lab--open-url url))))
 
 (defun my/jupyter-lab-running-p ()
   "Return non-nil when the managed local JupyterLab process is alive."
@@ -156,7 +392,8 @@ When KEEP-LOG-BUFFER is non-nil, do not kill the log buffer."
   (my/jupyter-lab--cancel-stop-timers)
   (my/jupyter-lab--cancel-open-timer)
   (setq my/jupyter-lab-process nil
-        my/jupyter-lab--restart-open nil)
+        my/jupyter-lab--restart-open nil
+        my/jupyter-lab--restart-directory nil)
   (unless keep-log-buffer
     (when-let* ((buffer (get-buffer my/jupyter-lab-log-buffer-name)))
       (when (buffer-live-p buffer)
@@ -200,19 +437,28 @@ When KEEP-LOG-BUFFER is non-nil, do not kill the log buffer."
   "Track local JupyterLab PROCESS state changes described by EVENT."
   (when (memq (process-status process) '(exit signal))
     (when (eq process my/jupyter-lab-process)
-      (let ((restart-open my/jupyter-lab--restart-open))
+      (let ((restart-open my/jupyter-lab--restart-open)
+            (restart-directory my/jupyter-lab--restart-directory))
         (my/jupyter-lab--cleanup)
         (when restart-open
-          (setq my/jupyter-lab--restart-open nil)
-          (my/jupyter-lab-start t))))
+          (let ((my/jupyter-lab-default-directory restart-directory))
+            (my/jupyter-lab-start restart-open)))))
     (message "JupyterLab %s" (string-trim event))
     (my/jupyter-lab--refresh-manager-maybe)))
 
-(defun my/jupyter-lab-open ()
-  "Open managed local JupyterLab in xwidget."
-  (interactive)
-  (unless (fboundp 'my/xwidget-open-url) (require 'init-browser))
-  (my/xwidget-open-url (my/jupyter-lab-url) :id "jupyter-lab" :display 'side))
+(defun my/jupyter-lab-open (&optional root-only)
+  "Open managed local JupyterLab in xwidget.
+
+When the current buffer is a notebook or Jupytext script, open that notebook.
+With prefix argument ROOT-ONLY, open the Lab root instead."
+  (interactive "P")
+  (if-let* ((notebook (and (not root-only)
+                           (my/jupyter-lab--current-notebook-file))))
+      (my/jupyter-lab-open-path notebook)
+    (let ((root (file-name-as-directory
+                 (expand-file-name (my/jupyter-lab--default-directory)))))
+      (when (my/jupyter-lab--ensure-root root t)
+        (my/jupyter-lab--open-url t)))))
 
 (defun my/jupyter-lab-start (&optional open)
   "Start managed local JupyterLab in the background.
@@ -223,14 +469,16 @@ When OPEN is non-nil, open the JupyterLab page in the browser after launch."
       (progn
         (message "JupyterLab is already running at %s" (my/jupyter-lab-url))
         (when open
-          (my/jupyter-lab-open)))
+          (my/jupyter-lab--open-url open)))
     (let* ((default-directory (my/jupyter-lab--default-directory))
+           (process-environment (my/jupyter-lab--process-environment))
+           (argv (my/jupyter-lab--argv))
            (buffer (get-buffer-create my/jupyter-lab-log-buffer-name))
            (process
             (make-process
              :name "jupyter-lab"
              :buffer buffer
-             :command (my/jupyter-lab--argv)
+             :command argv
              :coding 'utf-8-unix
              :connection-type 'pty
              :noquery t
@@ -244,21 +492,19 @@ When OPEN is non-nil, open the JupyterLab page in the browser after launch."
           (goto-char (point-max))
           (insert (format "[%s] cwd=%s\n"
                           (format-time-string "%F %T")
-                          (abbreviate-file-name default-directory)))))
+                          (abbreviate-file-name default-directory)))
+          (insert (format "cmd=%s\n"
+                          (string-join
+                           (mapcar #'shell-quote-argument argv)
+                           " ")))
+          (insert (format "jupyter_path=%s\n"
+                          (my/jupyter-lab--env-get
+                           process-environment
+                           "JUPYTER_PATH")))))
       (message "Starting JupyterLab at %s" (my/jupyter-lab-url))
       (my/jupyter-lab--refresh-manager-maybe)
       (when open
-        (my/jupyter-lab--cancel-open-timer)
-        (let (timer)
-          (setq timer
-                (run-at-time
-                 "1 sec" nil
-                 (lambda ()
-                   (when (eq my/jupyter-lab--open-timer timer)
-                     (setq my/jupyter-lab--open-timer nil))
-                   (when (my/jupyter-lab-running-p)
-                     (my/jupyter-lab-open)))))
-          (setq my/jupyter-lab--open-timer timer))))))
+        (my/jupyter-lab--schedule-open-when-ready open)))))
 
 (defun my/jupyter-lab-start-and-open ()
   "Start managed local JupyterLab and open it in the browser."

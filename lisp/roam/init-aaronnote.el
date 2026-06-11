@@ -1204,12 +1204,14 @@ Falls back to JupyterLab root when no matching .ipynb exists."
 
 ;; Global: H-o opens the Aaronnote dispatch panel (o for "org notes").
 (general-define-key "H-o" #'my/aaronnote-dispatch)
+(general-define-key "C-H-o" #'my/aaronnote-dispatch)
 
 ;; Appine buffer direct keys — override global H- bindings that are irrelevant
 ;; when focused in the Aaronnote pane.
 (with-eval-after-load 'appine
   (when (boundp 'appine-active-map)
     (define-key appine-active-map (kbd "H-o") #'my/aaronnote-dispatch)
+    (define-key appine-active-map (kbd "C-H-o") #'my/aaronnote-dispatch)
     (define-key appine-active-map (kbd "H-s") #'my/aaronnote-save)
     (define-key appine-active-map (kbd "H-r") #'my/aaronnote-refresh)
     (define-key appine-active-map (kbd "H-y") #'my/aaronnote-roam-sync)

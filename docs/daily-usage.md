@@ -330,6 +330,11 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
   当前项目 diagnostics panel
 - `SPC c x`
   `quickrun`
+- `SPC c y`
+  `my/note-code-copy-reference` — 从代码 buffer 生成 `@@note-code(path)[tag]` 到剪贴板。
+  选中区域：提示输入 tag，在区域首行前自动插入 `@aaronnote TAG` 注释标记，然后复制引用。
+  未选中：查找光标上方最近的 `@aaronnote`/`@note-code` 标记，复制对应引用。
+  Path 规则：`/...` 表示从当前 content root 开始；roam vault 内是 roam-root，其他项目文件是 project.el 根目录。裸相对路径保留为从当前 note 目录开始。
 
 ### Open `SPC o`
 
@@ -703,3 +708,37 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 | `C-c G` | 从 JSON 重新加载 HTTP chat 后端 |
 
 HTTP 后端在 `etc/ai-workbench/backends.json` 里配置（OpenAI、Anthropic、Ollama 等），CLI 引擎（Codex、OpenCode）通过 `ai-workbench-adapter-*.el` 的 `defcustom` 配置可执行路径。
+
+## 9. Neopyter — JupyterLab 实时同步
+
+对 `*.ju.py` / `*.ju.r` 文件，`aaron-neopyter-mode` 会自动激活（取代原来的 `jupytext-mode`，
+后者作为 sub-mode 保留，负责保存到磁盘）。打开文件后 Emacs 会自动启动 WebSocket 服务并尝试连接
+JupyterLab 扩展。
+
+**前置条件：**
+```bash
+pip install neopyter
+# JupyterLab → Settings → Neopyter → Mode: direct, IP: 127.0.0.1, Port: 9001
+```
+
+**常用操作：**
+
+| 键 | 命令 | 说明 |
+|----|------|------|
+| `C-c C-o` | `aaron-neopyter-open-notebook` | 在 JupyterLab 里打开/创建配对的 `.ipynb` |
+| `C-c C-s` | `aaron-neopyter-sync-current` | 立即强制同步当前 buffer |
+| `C-c C-c` | `aaron-neopyter-run-cell` | 运行当前 cell |
+| `C-c C-a` | `aaron-neopyter-run-all-above` | 运行光标以上所有 cell |
+| `C-c C-b` | `aaron-neopyter-run-all-below` | 运行光标以下所有 cell（含当前） |
+| `C-c C-r` | `aaron-neopyter-restart-kernel` | 重启 kernel |
+| `C-c C-l` | `aaron-neopyter-toggle-follow-point` | 开关 JupyterLab 随光标滚动 |
+| `M-x aaron-neopyter-connect` | — | 手动启动 WS 服务（通常自动） |
+| `M-x aaron-neopyter-health-check` | — | 检查连接状态 + 版本 |
+| `M-x aaron-neopyter-detect-jupyter-root` | — | 从当前打开的 notebook 自动推断 Lab 根目录 |
+
+**文件映射：** `foo.ju.py` → `foo.ipynb`（去掉 `.ju.` infix）；路径以 `aaron-neopyter-jupyter-root`
+为基准转换成 JupyterLab 能识别的相对路径。
+
+**调试：** `M-x aaron-neopyter-show-log` 查看 RPC 日志；`(setq aaron-neopyter-debug t)` 启用详细输出。
+
+协议细节见 `docs/neopyter-protocol-notes.md`；配置选项见 `docs/settings-cookbook.md` 第 16 节。

@@ -433,6 +433,20 @@ function resolveInternalContentPath(input, baseDir, allowedRoot = noteRoot) {
   return file;
 }
 
+function bareRelativeContentPath(input) {
+  const raw = String(input || "").trim();
+  if (!raw || raw.startsWith(".") || raw.startsWith("/") || /^file:/i.test(raw) || /^~(?:$|[\\/])/.test(raw)) return false;
+  return roamPrefixedPath(raw) == null;
+}
+
+function resolveNoteCodePath(input, baseDir, allowedRoot = noteRoot) {
+  const file = resolveInternalContentPath(input, baseDir, allowedRoot);
+  if (!file || !bareRelativeContentPath(input) || existsSync(file)) return file;
+  const rootFile = resolve(allowedRoot, String(input || "").trim());
+  if (inside(rootFile, allowedRoot) && existsSync(rootFile)) return rootFile;
+  return file;
+}
+
 function assetFolderName(current) {
   if (!current) return "scratch";
   const ext = extname(current);
@@ -798,11 +812,13 @@ function normalizeLeanTag(value) {
     .slice(0, 80);
 }
 
-function scanLeanRegions(text) {
+function scanCodeRegions(text) {
   const source = String(text || "");
   const regions = [];
   const matches = [];
-  const tagRe = /^--[ \t]*@aaronnote[ \t]+([A-Za-z0-9_.:-]+)[ \t]*$/gm;
+  // Matches any line-comment prefix (#, //, --, ;) followed by @aaronnote or @note-code + tag.
+  // Leading whitespace is allowed so indented markers work too.
+  const tagRe = /^[ \t]*(?:--|#|\/\/|;)[ \t]*@(?:aaronnote|note-code)[ \t]+([A-Za-z0-9_.:-]+)[ \t]*$/gm;
   let match;
   while ((match = tagRe.exec(source)) !== null) {
     const markerFrom = match.index;
@@ -817,6 +833,21 @@ function scanLeanRegions(text) {
     regions.push({ ...current, bodyTo, body: source.slice(current.bodyFrom, bodyTo) });
   }
   return regions;
+}
+
+function languageForFile(file) {
+  const ext = extname(file).toLowerCase();
+  const map = {
+    ".lean": "lean4", ".py": "python", ".r": "r", ".jl": "julia",
+    ".js": "javascript", ".ts": "typescript", ".jsx": "javascript", ".tsx": "typescript",
+    ".el": "elisp", ".lisp": "lisp", ".scm": "scheme", ".clj": "clojure",
+    ".sh": "bash", ".bash": "bash", ".zsh": "zsh",
+    ".c": "c", ".h": "c", ".cpp": "cpp", ".cc": "cpp", ".hpp": "cpp",
+    ".java": "java", ".rs": "rust", ".go": "go", ".hs": "haskell",
+    ".rb": "ruby", ".kt": "kotlin", ".swift": "swift", ".cs": "csharp",
+    ".ml": "ocaml", ".lua": "lua", ".sql": "sql",
+  };
+  return map[ext] || (ext.length > 1 ? ext.slice(1) : "text");
 }
 
 function rememberNoteCodeFile(file, info, text, regions) {
@@ -849,7 +880,7 @@ async function loadNoteCodeRegionsForFile(file) {
     return { info, regions: cached.regions };
   }
   const text = await readFile(file, "utf8");
-  const regions = scanLeanRegions(text);
+  const regions = scanCodeRegions(text);
   rememberNoteCodeFile(file, info, text, regions);
   return { info, regions };
 }
@@ -876,25 +907,20 @@ export async function readNoteCodeRegion(body) {
   }
   const baseDir = dirname(notePath);
   const allowedRoot = contentRootForFile(notePath);
-  const file = resolveInternalContentPath(rawPath, baseDir, allowedRoot);
+  const file = resolveNoteCodePath(rawPath, baseDir, allowedRoot);
   if (!file) {
     const err = new Error(`Code file is outside the allowed root: ${rawPath}`);
     err.statusCode = 403;
     throw err;
   }
-  if (extname(file).toLowerCase() !== ".lean") {
-    const err = new Error("@@note-code currently supports .lean files only");
-    err.statusCode = 400;
-    throw err;
-  }
   const { info, regions } = await noteCodeRegionsForFile(file);
   const region = regions.find((item) => item.tag === id);
   if (!region) {
-    const err = new Error(`Lean region not found: ${id}`);
+    const err = new Error(`Region not found: ${id}`);
     err.statusCode = 404;
     throw err;
   }
-  return { ok: true, file, path: rawPath, id, body: region.body, language: "lean4", mtimeMs: info.mtimeMs, size: info.size };
+  return { ok: true, file, path: rawPath, id, body: region.body, language: languageForFile(file), mtimeMs: info.mtimeMs, size: info.size };
 }
 
 function assetCandidateFile(file) {

@@ -2103,7 +2103,7 @@ $$
 \mathrm{cTA}.
 $$
 
-The point of such notation is not merely symbolic. Each arrow represents
+The point of such notation is not merely symbolic. Each arrow representsa thsi is hard ssssssssss ssssssssssssssssssssssssssssssssssss $sada$ 
 a concrete polynomial-time encoding transformation.
 
 ## 4.6. Direct sums and decompositions
@@ -46960,7 +46960,7 @@ invertible. This identifies one matching pair of summands. Removing that
 pair and applying induction proves the result.
 #+end proof
 
-中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
+中文直觉：如果整体分解成不可��拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
 
 ## 86.7. Measurement statistics
 

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -u
+
+LOG="${SAGE_JUPYTER_LOG:-/Users/hc/.config/emacs/var/log/sagemath-kernel.log}"
+mkdir -p "$(dirname "$LOG")"
+
+{
+  printf '\n[%s] starting SageMath kernel\n' "$(date '+%F %T')"
+  printf 'cwd=%s\n' "$(pwd)"
+  printf 'argv='
+  printf '%q ' "$@"
+  printf '\n'
+  env | sort | grep -E '^(HOME|USER|LOGNAME|SHELL|PATH|TMPDIR|DOT_SAGE|IPYTHONDIR|JUPYTER|SAGE|PYTHON|CONDA|VIRTUAL_ENV)=' || true
+} >>"$LOG" 2>&1
+
+export HOME="${HOME:-/Users/hc}"
+export USER="${USER:-hc}"
+export LOGNAME="${LOGNAME:-hc}"
+export SHELL="${SHELL:-/bin/zsh}"
+export DOT_SAGE="${DOT_SAGE:-/Users/hc/.sage}"
+export IPYTHONDIR="${IPYTHONDIR:-/Users/hc/.ipython}"
+export TMPDIR="${TMPDIR:-/var/folders/bk/bc5pd3lj30g6zdp_f5jbvs0h0000gn/T/}"
+export SAGE_ROOT="/var/tmp/sage-10.9-current"
+export SAGE_LOCAL="${SAGE_ROOT}/local"
+export PATH="${SAGE_LOCAL}/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+exec /var/tmp/sage-10.9-current/venv/bin/sage --python -m sage.repl.ipython_kernel "$@" 2>>"$LOG"

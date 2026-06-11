@@ -15,6 +15,7 @@ This directory contains the operational docs for the Emacs configuration. The do
 - [dev-guide.md](dev-guide.md) Programming, completion, LSP, debugging, terminals, remote work, browser integration, and AI.
 - [research-notes-workflow.md](research-notes-workflow.md) Division of labor between notes, Jupytext notebooks, Jupyter, and reusable source code.
 - [lsp-workflow.org](lsp-workflow.org) Language-server routing, Hub/Doctor tooling, and the maintenance model.
+- [neopyter-protocol-notes.md](neopyter-protocol-notes.md) Neopyter JupyterLab bridge: wire protocol, RPC method registry, architecture, and Emacs client design.
 
 ## Maintenance
 

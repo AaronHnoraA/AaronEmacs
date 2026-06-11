@@ -390,6 +390,60 @@ Typst 模板集中在 [templates/typst/](../templates/typst/)。当前 assignmen
 - `my/template-current-override` 只接受”文件名”（不能带路径分隔符），指向 `templates/<kind>/` 下的模板文件
 - 新建文件模板只保留这一套内置 `auto-insert`（已移除 Doom 那套 Yasnippet file-templates 的遗留实现，避免重复/分叉维护）
 
+## 16. 我要配置 Neopyter JupyterLab 同步
+
+### 必填：JupyterLab 根目录
+
+JupyterLab 的内容 API 使用相对路径（相对于 `jupyter lab` 的启动目录）。
+必须告诉 Emacs 这个目录，否则路径会被拼成 `/root/Users/...` 的双重结构。
+
+在 `lisp/init-neopyter.el` 或 `etc/local.el` 里设置：
+
+```elisp
+(setq aaron-neopyter-jupyter-root "~/Documents/AaronNote")
+```
+
+如果不确定根目录，先在 JupyterLab 打开任意一个 notebook，然后在 Emacs 里运行：
+
+```
+M-x aaron-neopyter-detect-jupyter-root
+```
+
+会自动查询 `getCurrentNotebook`，推断根目录并设置 `aaron-neopyter-jupyter-root`，
+同时打印结果供复制到配置文件。
+
+### 其他常用选项
+
+```elisp
+;; 监听地址（与 JupyterLab 侧面板保持一致）
+(setq aaron-neopyter-remote-address "127.0.0.1:9001")
+
+;; 同步防抖延迟（秒）
+(setq aaron-neopyter-sync-debounce 0.35)
+
+;; 光标跟随延迟
+(setq aaron-neopyter-cursor-debounce 0.08)
+
+;; 关闭 JupyterLab 滚动跟随（仍同步活动 cell）
+(setq aaron-neopyter-scroll-enable nil)
+
+;; 启用详细 RPC 日志（调试用）
+(setq aaron-neopyter-debug t)
+```
+
+### 禁用自动连接或自动 attach
+
+```elisp
+;; 不自动启动 WS 服务（需手动 M-x aaron-neopyter-connect）
+(setq aaron-neopyter-auto-connect nil)
+
+;; 连接后不自动打开/同步 notebook
+(setq aaron-neopyter-auto-attach nil)
+```
+
+**相关文档：** `docs/neopyter-protocol-notes.md` 有完整 RPC 方法表和路径规约；
+日常快捷键见 `docs/daily-usage.md` §9。
+
 ## 17. 我要配置项目本地 `.dir-locals.el`
 
 文件：

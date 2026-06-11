@@ -295,6 +295,64 @@ describe("server note refs", () => {
     }
   });
 
+  test("reads note-code regions by content-root slash path", async () => {
+    const root = await setupRoot("aaronnote-note-code-root-path-");
+    try {
+      await mkdir(join(root, "project", "UNSW", "lab"), { recursive: true });
+      const note = join(root, "project", "UNSW", "GraphTensor.md");
+      const source = join(root, "project", "UNSW", "lab", "demo.py");
+      await writeFile(note, "@@note-code(/project/UNSW/lab/demo.py)[main]\n", "utf8");
+      await writeFile(source, [
+        "# @aaronnote main",
+        "x = 1",
+        "# @aaronnote second",
+        "x = 2",
+        "",
+      ].join("\n"), "utf8");
+
+      const msg = await readNoteCodeRegion({
+        notePath: note,
+        path: "/project/UNSW/lab/demo.py",
+        id: "main",
+      });
+
+      expect(msg.ok).toBe(true);
+      expect(msg.file).toBe(source);
+      expect(msg.language).toBe("python");
+      expect(msg.body).toContain("x = 1");
+      expect(msg.body).not.toContain("x = 2");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps legacy bare note-code project paths working when local path is missing", async () => {
+    const root = await setupRoot("aaronnote-note-code-legacy-path-");
+    try {
+      await mkdir(join(root, "project", "UNSW", "lab"), { recursive: true });
+      const note = join(root, "project", "UNSW", "GraphTensor.md");
+      const source = join(root, "project", "UNSW", "lab", "demo.py");
+      await writeFile(note, "@@note-code(project/UNSW/lab/demo.py)[main]\n", "utf8");
+      await writeFile(source, [
+        "# @aaronnote main",
+        "x = 1",
+        "",
+      ].join("\n"), "utf8");
+
+      const msg = await readNoteCodeRegion({
+        notePath: note,
+        path: "project/UNSW/lab/demo.py",
+        id: "main",
+      });
+
+      expect(msg.ok).toBe(true);
+      expect(msg.file).toBe(source);
+      expect(msg.body).toContain("x = 1");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("serves a compact graph payload", async () => {
     const root = await setupRoot("aaronnote-graph-");
     try {

@@ -108,6 +108,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-multiple-cursors)
 (my/require-module-after-any-feature 'init-auctex 'tex 'tex-site 'pdf-tools 'pdf-view)
 (my/require-module-safely 'init-jupyter)
+(my/require-module-safely 'init-neopyter)
 (my/require-module-safely 'init-browser)
 (my/require-module-safely 'init-fzfs)
 (require 'init-function-keys)
