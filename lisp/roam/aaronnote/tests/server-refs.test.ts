@@ -239,6 +239,29 @@ describe("server note refs", () => {
     }
   });
 
+  test("suggests standalone slash paths from detected project root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-standalone-paths-"));
+    try {
+      const notes = join(root, "roam");
+      const project = join(root, "assignment");
+      await mkdir(notes, { recursive: true });
+      await mkdir(join(project, "docs", "spec"), { recursive: true });
+      await mkdir(join(project, "attachments"), { recursive: true });
+      await writeFile(join(project, "pom.xml"), "<project />\n", "utf8");
+      await writeFile(join(project, "attachments", "linear_route.png"), "PNG\n", "utf8");
+      const note = join(project, "docs", "spec", "task.md");
+      await writeFile(note, "# Task\n", "utf8");
+      configure({ root: notes, workspaceRoot: root, pluginRoot: join(root, "plugin") });
+
+      expect(await pathSuggestionsForFile(note, "/")).toEqual(
+        expect.arrayContaining(["/attachments/", "/docs/", "/pom.xml"]),
+      );
+      expect(await pathSuggestionsForFile(note, "/")).not.toContain("/roam/");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("reads note-code lean regions by roam-root path", async () => {
     const root = await setupRoot("aaronnote-note-code-");
     try {

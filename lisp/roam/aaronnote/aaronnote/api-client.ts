@@ -57,7 +57,7 @@ type NativeApi = {
     open?: (body: { file: string; tag?: string; line?: number; col?: number }) => Promise<unknown>;
     currentFile?: (file: string) => Promise<unknown>;
     key?: (keyString: string) => Promise<unknown>;
-    systemOpen?: (target: string) => Promise<unknown>;
+    systemOpen?: (target: string, base?: string) => Promise<unknown>;
   };
   roamTools?: {
     renameTag?: (body: Record<string, unknown>) => Promise<unknown>;
@@ -185,13 +185,13 @@ export const api = {
       if (!call) return;
       await call(keyString).catch(() => {});
     },
-    async systemOpen(target: string): Promise<void> {
+    async systemOpen(target: string, base?: string): Promise<void> {
       const call = window.aaronnoteApi?.emacs?.systemOpen;
       if (!call) {
         window.location.href = target;
         return;
       }
-      await call(target);
+      await call(target, base);
     },
   },
   roamTools: {

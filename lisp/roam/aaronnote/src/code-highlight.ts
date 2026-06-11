@@ -1,3 +1,35 @@
+import hljs from "highlight.js/lib/core";
+import bash from "highlight.js/lib/languages/bash";
+import c from "highlight.js/lib/languages/c";
+import cpp from "highlight.js/lib/languages/cpp";
+import csharp from "highlight.js/lib/languages/csharp";
+import css from "highlight.js/lib/languages/css";
+import diff from "highlight.js/lib/languages/diff";
+import dockerfile from "highlight.js/lib/languages/dockerfile";
+import go from "highlight.js/lib/languages/go";
+import haskell from "highlight.js/lib/languages/haskell";
+import ini from "highlight.js/lib/languages/ini";
+import java from "highlight.js/lib/languages/java";
+import javascript from "highlight.js/lib/languages/javascript";
+import json from "highlight.js/lib/languages/json";
+import julia from "highlight.js/lib/languages/julia";
+import kotlin from "highlight.js/lib/languages/kotlin";
+import latex from "highlight.js/lib/languages/latex";
+import lisp from "highlight.js/lib/languages/lisp";
+import lua from "highlight.js/lib/languages/lua";
+import makefile from "highlight.js/lib/languages/makefile";
+import markdown from "highlight.js/lib/languages/markdown";
+import nix from "highlight.js/lib/languages/nix";
+import php from "highlight.js/lib/languages/php";
+import r from "highlight.js/lib/languages/r";
+import ruby from "highlight.js/lib/languages/ruby";
+import rust from "highlight.js/lib/languages/rust";
+import scala from "highlight.js/lib/languages/scala";
+import sql from "highlight.js/lib/languages/sql";
+import typescript from "highlight.js/lib/languages/typescript";
+import xml from "highlight.js/lib/languages/xml";
+import yaml from "highlight.js/lib/languages/yaml";
+
 export type CodeHighlightRange = {
   from: number;
   to: number;
@@ -14,6 +46,41 @@ const HIGHLIGHT_CACHE_BYTES = 4_000_000; // 4 MB
 const MAX_HIGHLIGHT_CHARS = 180_000;
 const cache = new Map<string, CodeHighlightRange[]>();
 let cacheBytes = 0;
+
+for (const [name, language] of Object.entries({
+  bash,
+  c,
+  cpp,
+  csharp,
+  css,
+  diff,
+  dockerfile,
+  go,
+  haskell,
+  ini,
+  java,
+  javascript,
+  json,
+  julia,
+  kotlin,
+  latex,
+  lisp,
+  lua,
+  makefile,
+  markdown,
+  nix,
+  php,
+  r,
+  ruby,
+  rust,
+  scala,
+  sql,
+  typescript,
+  xml,
+  yaml,
+})) {
+  hljs.registerLanguage(name, language);
+}
 
 function highlightEntryBytes(ranges: CodeHighlightRange[]): number {
   return ranges.length * 48;
@@ -54,6 +121,21 @@ function normalizeLang(lang: string): string {
   if (["md", "markdown"].includes(raw)) return "markdown";
   if (["c", "h"].includes(raw)) return "c";
   if (["cc", "cpp", "cxx", "c++", "hpp", "hh", "hxx"].includes(raw)) return "cpp";
+  if (["cs", "c#", "csharp"].includes(raw)) return "csharp";
+  if (["kt", "kts", "kotlin"].includes(raw)) return "kotlin";
+  if (["java"].includes(raw)) return "java";
+  if (["scala", "sc"].includes(raw)) return "scala";
+  if (["rb", "ruby"].includes(raw)) return "ruby";
+  if (["php"].includes(raw)) return "php";
+  if (["r"].includes(raw)) return "r";
+  if (["jl", "julia"].includes(raw)) return "julia";
+  if (["lua"].includes(raw)) return "lua";
+  if (["hs", "haskell"].includes(raw)) return "haskell";
+  if (["tex", "latex"].includes(raw)) return "latex";
+  if (["docker", "dockerfile"].includes(raw)) return "dockerfile";
+  if (["make", "makefile", "mk"].includes(raw)) return "makefile";
+  if (["diff", "patch"].includes(raw)) return "diff";
+  if (["ini", "conf", "cfg"].includes(raw)) return "ini";
   if (["rs", "rust"].includes(raw)) return "rust";
   if (["go", "golang"].includes(raw)) return "go";
   if (["el", "elisp", "emacs-lisp", "lisp", "cl", "clojure", "clj", "scheme", "scm"].includes(raw)) return "lisp";
@@ -63,6 +145,162 @@ function normalizeLang(lang: string): string {
   if (["nix"].includes(raw)) return "nix";
   if (["lean", "lean4"].includes(raw)) return "lean4";
   return raw;
+}
+
+function hljsLangForLang(lang: string): string {
+  switch (normalizeLang(lang)) {
+    case "markup": return "xml";
+    case "shell": return "bash";
+    default: return normalizeLang(lang);
+  }
+}
+
+const HLJS_CLASS_MAP: Record<string, string> = {
+  addition: "code-token-string",
+  attr: "code-token-attr",
+  attribute: "code-token-attr",
+  "built_in": "code-token-function",
+  bullet: "code-token-punctuation",
+  class: "code-token-keyword",
+  code: "code-token-string",
+  comment: "code-token-comment",
+  deletion: "code-token-comment",
+  doctag: "code-token-keyword",
+  emphasis: "code-token-string",
+  "function_": "code-token-function",
+  keyword: "code-token-keyword",
+  link: "code-token-string",
+  literal: "code-token-keyword",
+  meta: "code-token-comment",
+  name: "code-token-tag",
+  number: "code-token-number",
+  operator: "code-token-operator",
+  params: "code-token-variable",
+  property: "code-token-property",
+  punctuation: "code-token-punctuation",
+  quote: "code-token-comment",
+  regexp: "code-token-string",
+  section: "code-token-keyword",
+  "selector-attr": "code-token-attr",
+  "selector-class": "code-token-property",
+  "selector-id": "code-token-property",
+  "selector-pseudo": "code-token-property",
+  "selector-tag": "code-token-tag",
+  string: "code-token-string",
+  strong: "code-token-keyword",
+  subst: "code-token-variable",
+  symbol: "code-token-variable",
+  tag: "code-token-tag",
+  "template-variable": "code-token-variable",
+  title: "code-token-function",
+  type: "code-token-keyword",
+  variable: "code-token-variable",
+};
+
+const HLJS_CLASS_PRIORITY = [
+  "comment",
+  "string",
+  "regexp",
+  "number",
+  "keyword",
+  "literal",
+  "type",
+  "function_",
+  "title",
+  "built_in",
+  "property",
+  "attr",
+  "attribute",
+  "tag",
+  "name",
+  "variable",
+  "template-variable",
+  "params",
+  "operator",
+  "punctuation",
+  "meta",
+];
+
+function mappedHljsClass(rawClass: string): string | null {
+  const classes = rawClass
+    .split(/\s+/)
+    .map((cls) => cls.trim().replace(/^hljs-/, ""))
+    .filter(Boolean);
+  for (const name of HLJS_CLASS_PRIORITY) {
+    if (classes.includes(name)) return HLJS_CLASS_MAP[name] ?? null;
+  }
+  for (const name of classes) {
+    if (HLJS_CLASS_MAP[name]) return HLJS_CLASS_MAP[name];
+  }
+  return null;
+}
+
+function decodeHtmlText(value: string): string {
+  return value.replace(/&(?:#x([0-9a-f]+)|#(\d+)|([a-z]+));/gi, (entity, hex, dec, named) => {
+    if (hex) return String.fromCodePoint(Number.parseInt(hex, 16));
+    if (dec) return String.fromCodePoint(Number.parseInt(dec, 10));
+    switch (String(named || "").toLowerCase()) {
+      case "amp": return "&";
+      case "apos": return "'";
+      case "gt": return ">";
+      case "lt": return "<";
+      case "quot": return "\"";
+      default: return entity;
+    }
+  });
+}
+
+function activeClass(stack: Array<string | null>): string | null {
+  for (let i = stack.length - 1; i >= 0; i--) {
+    if (stack[i]) return stack[i];
+  }
+  return null;
+}
+
+function rangesFromHighlightedHtml(html: string, source: string): CodeHighlightRange[] {
+  const ranges: CodeHighlightRange[] = [];
+  const classStack: Array<string | null> = [];
+  let offset = 0;
+  for (let i = 0; i < html.length;) {
+    if (html[i] === "<") {
+      const end = html.indexOf(">", i + 1);
+      if (end < 0) break;
+      const tag = html.slice(i + 1, end);
+      if (/^\s*\/\s*span\b/i.test(tag)) {
+        classStack.pop();
+      } else if (/^\s*span\b/i.test(tag)) {
+        const match = tag.match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+        classStack.push(mappedHljsClass(match?.[1] ?? match?.[2] ?? match?.[3] ?? ""));
+      }
+      i = end + 1;
+      continue;
+    }
+    const next = html.indexOf("<", i);
+    const end = next < 0 ? html.length : next;
+    const text = decodeHtmlText(html.slice(i, end));
+    const len = text.length;
+    const cls = activeClass(classStack);
+    if (cls && len > 0) {
+      ranges.push({ from: offset, to: offset + len, className: cls });
+    }
+    offset += len;
+    i = end;
+  }
+  if (offset !== source.length) return [];
+  return ranges;
+}
+
+function highlightCodeWithHljs(lang: string, text: string): CodeHighlightRange[] | null {
+  const language = hljsLangForLang(lang);
+  if (!hljs.getLanguage(language)) return null;
+  try {
+    return rangesFromHighlightedHtml(
+      hljs.highlight(text, { language, ignoreIllegals: true }).value,
+      text,
+    );
+  } catch {
+    return null;
+  }
 }
 
 function jsRules(): Rule[] {
@@ -280,6 +518,8 @@ export function highlightCode(lang: string, text: string): CodeHighlightRange[] 
     cache.set(key, cached);
     return cached;
   }
+  const hljsRanges = highlightCodeWithHljs(lang, text);
+  if (hljsRanges) return remember(key, hljsRanges);
   const rules = rulesForLang(lang);
   if (rules.length === 0) return remember(key, []);
 

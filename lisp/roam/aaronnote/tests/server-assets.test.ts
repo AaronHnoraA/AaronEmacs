@@ -71,6 +71,20 @@ describe("server asset refs", () => {
       .toBe(join(notes, "images", "plot.png"));
   });
 
+  test("resolves roam-root media paths from slash and roam prefixes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-roam-root-media-"));
+    roots.push(root);
+    const notes = join(root, "roam");
+    await mkdir(join(notes, "project"), { recursive: true });
+    configure({ root: notes, workspaceRoot: root, pluginRoot: join(root, "plugin") });
+    const note = join(notes, "project", "topic.md");
+
+    expect(resolveMediaFile("/attachments/linear_route.png", note))
+      .toBe(join(notes, "attachments", "linear_route.png"));
+    expect(resolveMediaFile("roam/attachments/linear_route.png", note))
+      .toBe(join(notes, "attachments", "linear_route.png"));
+  });
+
   test("resolves standalone note sibling image folders above the note directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "aaronnote-standalone-media-"));
     roots.push(root);
@@ -85,5 +99,22 @@ describe("server asset refs", () => {
       .toBe(join(project, "images", "AverageMainFunction.png"));
     expect(resolveMediaFile("/images/AverageTestRun.png", note))
       .toBe(join(project, "images", "AverageTestRun.png"));
+  });
+
+  test("resolves standalone slash paths from detected project root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-project-root-media-"));
+    roots.push(root);
+    const notes = join(root, "roam");
+    const project = join(root, "assignment");
+    await mkdir(notes, { recursive: true });
+    await mkdir(join(project, "docs", "spec"), { recursive: true });
+    await writeFile(join(project, "pom.xml"), "<project />\n", "utf8");
+    configure({ root: notes, workspaceRoot: root, pluginRoot: join(root, "plugin") });
+    const note = join(project, "docs", "spec", "CoreAverage.md");
+
+    expect(resolveMediaFile("/attachments/linear_route.png", note))
+      .toBe(join(project, "attachments", "linear_route.png"));
+    expect(resolveMediaFile("./local.png", note))
+      .toBe(join(project, "docs", "spec", "local.png"));
   });
 });

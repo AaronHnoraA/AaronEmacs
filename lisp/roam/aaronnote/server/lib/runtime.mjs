@@ -38,6 +38,28 @@ const excludedDirs = new Set([
 ]);
 const generatedAttachmentDirs = new Set(["asset", "assets", "attachment", "attachments", "file", "files", "img", "imgs", "image", "images", "media", "pdf", "pdfs"]);
 const noteExts = new Set([".typ", ".md", ".markdown"]);
+const projectRootMarkers = [
+  ".git",
+  ".project",
+  ".projectile",
+  ".root",
+  "AGENT.md",
+  "CLAUDE.md",
+  "Makefile",
+  "CMakeLists.txt",
+  "Cargo.toml",
+  "go.mod",
+  "package.json",
+  "pyproject.toml",
+  "requirements.txt",
+  "pom.xml",
+  "build.gradle",
+  "settings.gradle",
+  "flake.nix",
+  "dune-project",
+  "mix.exs",
+  "Gemfile",
+];
 const defaultNoteKind = "default";
 const defaultNoteKindAliases = new Set(["", "default", "note"]);
 const noteKindPattern = /^[a-z0-9_-]+$/;
@@ -65,6 +87,7 @@ const noteCodeFileCache = new Map();
 const noteCodeFilePending = new Map();
 let noteCodeFileCacheBytes = 0;
 const pathSuggestionDirListingCache = new Map();
+const contentRootCache = new Map();
 const CURRENT_DB_SCHEMA = 1;
 const BOOK_CACHE_SCHEMA = 1;
 const ASSET_CLEANUP_SCHEMA = 2;
@@ -249,6 +272,84 @@ function standaloneFile(file) {
   return !inside(file, noteRoot);
 }
 
+function markerProjectRoot(startDir) {
+  const start = resolveUserPath(startDir || "");
+  const cached = contentRootCache.get(start);
+  if (cached) return cached;
+  let dir = start;
+  let root = "";
+  for (let depth = 0; depth < 32; depth++) {
+    if (projectRootMarkers.some((marker) => existsSync(join(dir, marker)))) {
+      root = dir;
+      break;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  if (!root) {
+    const parent = dirname(start);
+    root = parent === start ? start : parent;
+  }
+  contentRootCache.set(start, root);
+  if (contentRootCache.size > 512) contentRootCache.clear();
+  return root;
+}
+
+function contentRootForFile(file) {
+  if (!file || !standaloneFile(file)) return noteRoot;
+  return markerProjectRoot(dirname(file));
+}
+
+function cleanContentPath(input) {
+  let raw = String(input || "").trim();
+  if (raw.startsWith("<") && raw.endsWith(">")) raw = raw.slice(1, -1).trim();
+  return raw.split(/[?#]/, 1)[0].trim();
+}
+
+function roamPrefixedPath(raw) {
+  const clean = String(raw || "").replace(/\\/g, "/").replace(/^\/+/, "");
+  if (clean === "roam") return "";
+  return clean.startsWith("roam/") ? clean.slice("roam/".length) : null;
+}
+
+export function resolveContentFile(input, base = "") {
+  const raw = cleanContentPath(input);
+  if (!raw) {
+    const err = new Error("Missing content file");
+    err.statusCode = 400;
+    throw err;
+  }
+  const baseFile = base ? safeOpenFile(base) : "";
+  const baseDir = baseFile ? dirname(baseFile) : noteRoot;
+  const logicalRoot = contentRootForFile(baseFile);
+  let file = "";
+  const roamPath = roamPrefixedPath(raw);
+  if (/^file:\/\//i.test(raw)) {
+    try {
+      file = fileURLToPath(raw);
+    } catch {
+      file = resolveUserPath(raw.replace(/^file:\/\//i, ""));
+    }
+  } else if (/^file:/i.test(raw)) {
+    file = resolveUserPath(raw.replace(/^file:/i, ""));
+  } else if (/^~(?:$|[\\/])/.test(raw)) {
+    file = resolveUserPath(raw);
+  } else if (roamPath != null) {
+    file = resolve(noteRoot, roamPath);
+  } else if (raw.startsWith("/")) {
+    file = baseFile ? resolve(logicalRoot, raw.replace(/^\/+/, "")) : resolve(raw);
+  } else {
+    file = resolve(baseDir, raw);
+  }
+  if (!inside(file, noteRoot) && !inside(file, logicalRoot)) {
+    const err = new Error(`Content file is outside the allowed root: ${file}`);
+    err.statusCode = 403;
+    throw err;
+  }
+  return file;
+}
+
 async function deleteManagedLeanMirror(_file, _info) {}
 
 async function renameManagedLeanMirror(_file, _target, _info) {}
@@ -310,6 +411,7 @@ function resolveInternalContentPath(input, baseDir, allowedRoot = noteRoot) {
   const raw = String(input || "").trim();
   if (!raw) return "";
   let file = "";
+  const roamPath = roamPrefixedPath(raw);
   if (/^file:\/\//i.test(raw)) {
     try {
       file = fileURLToPath(raw);
@@ -320,8 +422,10 @@ function resolveInternalContentPath(input, baseDir, allowedRoot = noteRoot) {
     file = resolveUserPath(raw.replace(/^file:/i, ""));
   } else if (/^~(?:$|[\\/])/.test(raw)) {
     file = resolveUserPath(raw);
+  } else if (roamPath != null) {
+    file = resolve(noteRoot, roamPath);
   } else if (raw.startsWith("/")) {
-    file = resolve(noteRoot, raw.replace(/^\/+/, ""));
+    file = resolve(allowedRoot, raw.replace(/^\/+/, ""));
   } else {
     file = resolve(baseDir, raw);
   }
@@ -336,7 +440,7 @@ function assetFolderName(current) {
 }
 
 function standaloneAssetRoot(file) {
-  return dirname(dirname(file));
+  return contentRootForFile(file);
 }
 
 export function resolveMediaFile(file, base = "") {
@@ -346,14 +450,14 @@ export function resolveMediaFile(file, base = "") {
     err.statusCode = 400;
     throw err;
   }
-  const baseFile = base ? safeOpenFile(base) : "";
-  const baseDir = baseFile ? dirname(baseFile) : noteRoot;
-  const allowedRoot = baseFile && standaloneFile(baseFile) ? standaloneAssetRoot(baseFile) : noteRoot;
-  let resolved = isAbsolute(raw) ? resolve(raw) : resolve(baseDir, raw);
-  if (!inside(resolved, noteRoot) && !inside(resolved, allowedRoot) && raw.startsWith("/")) {
-    resolved = resolve(allowedRoot, raw.replace(/^\/+/, ""));
+  let resolved;
+  try {
+    resolved = resolveContentFile(raw, base);
+  } catch (err) {
+    if (err?.statusCode === 400) throw err;
+    resolved = "";
   }
-  if (!inside(resolved, noteRoot) && !inside(resolved, allowedRoot)) {
+  if (!resolved) {
     const err = new Error(`Media file is outside the current document folder: ${resolved}`);
     err.statusCode = 403;
     throw err;
@@ -366,7 +470,7 @@ export async function storeAsset(body) {
   const originalName = sanitizeAssetName(body.name, imageAssetP("", body.type) ? "image.png" : "attachment");
   const isImage = imageAssetP(originalName, body.type);
   const baseDir = current ? dirname(current) : noteRoot;
-  const allowedRoot = current && standaloneFile(current) ? baseDir : noteRoot;
+  const allowedRoot = current && standaloneFile(current) ? contentRootForFile(current) : noteRoot;
   const targetDir = join(baseDir, isImage ? "images" : "attachments", assetFolderName(current));
   if (!inside(targetDir, noteRoot) && !inside(targetDir, allowedRoot)) {
     const err = new Error(`Asset directory is outside the current document folder: ${targetDir}`);
@@ -410,7 +514,7 @@ export async function storeAssetFromPath(body) {
   const type = String(body.type || fileContentType(source));
   const isImage = imageAssetP(originalName, type);
   const baseDir = current ? dirname(current) : noteRoot;
-  const allowedRoot = current && standaloneFile(current) ? baseDir : noteRoot;
+  const allowedRoot = current && standaloneFile(current) ? contentRootForFile(current) : noteRoot;
   const targetDir = join(baseDir, isImage ? "images" : "attachments", assetFolderName(current));
   if (!inside(targetDir, noteRoot) && !inside(targetDir, allowedRoot)) {
     const err = new Error(`Asset directory is outside the current document folder: ${targetDir}`);
@@ -517,7 +621,7 @@ export async function renderTikzAsset(body) {
   const id = sanitizeAssetName(body.id || createHash("sha1").update(String(body.source || "")).digest("hex").slice(0, 12), "tikz");
   const timestamp = String(body.timestamp || body.version || "").trim();
   const baseDir = dirname(current);
-  const allowedRoot = current && standaloneFile(current) ? baseDir : noteRoot;
+  const allowedRoot = current && standaloneFile(current) ? contentRootForFile(current) : noteRoot;
   const targetDir = join(baseDir, "images", assetFolderName(current));
   if (!inside(targetDir, noteRoot) && !inside(targetDir, allowedRoot)) {
     const err = new Error(`Asset directory is outside the current document folder: ${targetDir}`);
@@ -643,8 +747,8 @@ function pathSuggestionDirectoryPrefix(value) {
 function pathSuggestionDirectory(current, prefix) {
   const displayPrefix = pathSuggestionDirectoryPrefix(prefix);
   const rootBased = displayPrefix.startsWith("/");
-  const baseDir = rootBased ? noteRoot : dirname(current);
-  const allowedRoot = rootBased || !standaloneFile(current) ? noteRoot : dirname(current);
+  const allowedRoot = contentRootForFile(current);
+  const baseDir = rootBased ? allowedRoot : dirname(current);
   const relativeDir = rootBased ? displayPrefix.replace(/^\/+/, "") : displayPrefix;
   const dir = resolve(baseDir, relativeDir || ".");
   if (!inside(dir, allowedRoot)) return null;
@@ -771,7 +875,7 @@ export async function readNoteCodeRegion(body) {
     throw err;
   }
   const baseDir = dirname(notePath);
-  const allowedRoot = standaloneFile(notePath) ? baseDir : noteRoot;
+  const allowedRoot = contentRootForFile(notePath);
   const file = resolveInternalContentPath(rawPath, baseDir, allowedRoot);
   if (!file) {
     const err = new Error(`Code file is outside the allowed root: ${rawPath}`);
@@ -812,8 +916,12 @@ function resolveReferencedAsset(href, noteFile) {
   if (protocol && protocol !== "file") return "";
   const rawPath = hrefPath(href);
   if (!rawPath || rawPath.startsWith("#")) return "";
-  const file = isAbsolute(rawPath) ? resolve(rawPath) : resolve(dirname(noteFile), rawPath);
-  return inside(file, noteRoot) ? file : "";
+  try {
+    const file = resolveContentFile(rawPath, noteFile);
+    return inside(file, noteRoot) || inside(file, contentRootForFile(noteFile)) ? file : "";
+  } catch {
+    return "";
+  }
 }
 
 export function assetRefsFromContent(content, noteFile) {
@@ -5028,6 +5136,7 @@ export function configure(options = {}) {
   templatesRoot = resolve(String(options.templatesRoot || process.env.AARONNOTE_TEMPLATES_ROOT || join(workspaceRoot, "templates", "aaronnote")));
   snippetCache = { key: "", scannedAt: 0, snippets: [] };
   templateCache = { key: "", scannedAt: 0, templates: [] };
+  contentRootCache.clear();
   noteCodeFileCache.clear();
   noteCodeFilePending.clear();
   noteCodeFileCacheBytes = 0;

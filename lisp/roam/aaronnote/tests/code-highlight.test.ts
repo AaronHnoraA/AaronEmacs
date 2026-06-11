@@ -15,6 +15,10 @@ describe("code highlighting", () => {
   });
 
   test("covers common note code block languages", () => {
+    expect(highlightCode("java", "public class StationInfoResponse {\n  private final String stationId;\n}")
+      .some((range) => range.className === "code-token-keyword")).toBe(true);
+    expect(highlightCode("java", "/** station id */\nprivate final String stationId;")
+      .some((range) => range.className === "code-token-comment")).toBe(true);
     expect(highlightCode("rust", "fn main() { let answer = 42; }")
       .some((range) => range.className === "code-token-keyword")).toBe(true);
     expect(highlightCode("go", "func main() { return }")
@@ -24,7 +28,7 @@ describe("code highlighting", () => {
     expect(highlightCode("sql", "select * from notes where done = false")
       .some((range) => range.className === "code-token-keyword")).toBe(true);
     expect(highlightCode("yaml", "title: Aaronnote\npublished: true")
-      .some((range) => range.className === "code-token-property")).toBe(true);
+      .some((range) => range.className === "code-token-property" || range.className === "code-token-attr")).toBe(true);
     expect(highlightCode("nix", "{ pkgs ? import <nixpkgs> {} }: with pkgs; hello")
       .some((range) => range.className === "code-token-keyword")).toBe(true);
   });

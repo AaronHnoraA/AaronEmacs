@@ -1,4 +1,5 @@
 export {
+  resolveContentFile,
   resolveMediaFile,
   fileContentType,
   exportPdf,

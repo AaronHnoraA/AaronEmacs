@@ -56,7 +56,7 @@ import {
   trashManagedPath,
 } from "./server/lib/fs-ops.mjs";
 import { updateCurrentNoteMeta } from "./server/lib/meta.mjs";
-import { resolveMediaFile, fileContentType } from "./server/lib/media.mjs";
+import { resolveContentFile, resolveMediaFile, fileContentType } from "./server/lib/media.mjs";
 import {
   readRecentNotes,
   touchRecentNote,
@@ -383,6 +383,17 @@ function resolveShellPath(file) {
   return resolve(isAbsolute(raw) ? raw : join(noteRoot, raw));
 }
 
+function openTargetProtocol(value) {
+  return String(value || "").match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase() || "";
+}
+
+function resolveSystemOpenTarget(target, base = "") {
+  const value = String(target || "").trim();
+  const protocol = openTargetProtocol(value);
+  if (protocol && protocol !== "file") return value;
+  return resolveContentFile(value, base);
+}
+
 function resolveShellDirectoryPath(path, base = "") {
   const raw = String(path || "").trim();
   const baseFile = String(base || "").trim() ? resolveShellPath(base) : "";
@@ -447,15 +458,17 @@ async function apiEmacsKey(key) {
   return { ok: true };
 }
 
-async function apiSystemOpen(target) {
-  const value = String(target || "").trim();
+async function apiSystemOpen(body) {
+  const value = String((body && typeof body === "object" ? body.target : body) || "").trim();
+  const base = String((body && typeof body === "object" ? body.base : "") || "");
   if (!value) {
     const err = new Error("system-open: empty target");
     err.statusCode = 400;
     throw err;
   }
-  process.stdout.write(`aaronote-event:system-open:${JSON.stringify({ target: value })}\n`);
-  return { ok: true, target: value };
+  const resolved = resolveSystemOpenTarget(value, base);
+  process.stdout.write(`aaronote-event:system-open:${JSON.stringify({ target: resolved })}\n`);
+  return { ok: true, target: resolved };
 }
 
 const apiHandlers = {
@@ -791,7 +804,11 @@ function adapterScript(origin) {
       open: function(body) { return call("aaronnote:api:emacs:open", [body || {}]); },
       currentFile: function(file) { return call("aaronnote:api:emacs:current-file", [String(file || "")]); },
       key: function(k) { return call("aaronnote:api:emacs:key", [String(k || "")]); },
-      systemOpen: function(target) { return call("aaronnote:api:emacs:system-open", [String(target || "")]); }
+      systemOpen: function(target, base) {
+        return call("aaronnote:api:emacs:system-open", [
+          base ? {target: String(target || ""), base: String(base || "")} : String(target || "")
+        ]);
+      }
     },
     shell: {
       showInFolder: function(file) { return call("aaronnote:api:shell:show-in-folder", [String(file || "")]); },

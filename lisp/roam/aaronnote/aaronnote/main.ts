@@ -1131,14 +1131,9 @@ function openExternalUrl(href: string, options: { newWindow?: boolean } = {}): v
   }
   const protocol = hrefProtocol(raw);
   if (!protocol) {
-    // Resolve relative paths against the current note's directory, then
-    // hand the absolute path to Emacs for smart routing (dired, find-file,
-    // system open, etc.).
-    const resolved = currentFile
-      ? joinNotePath(dirnamePath(currentFile), hrefPath(raw) || raw)
-      : (hrefPath(raw) || raw);
-    void api.emacs.systemOpen(resolved)
-      .catch((err) => setStatus(err instanceof Error ? err.message : `Cannot open: ${resolved}`));
+    const targetPath = hrefPath(raw) || raw;
+    void api.emacs.systemOpen(targetPath, currentFile)
+      .catch((err) => setStatus(err instanceof Error ? err.message : `Cannot open: ${targetPath}`));
     return;
   }
   if (protocol === "zotero") {
@@ -3431,10 +3426,7 @@ document.addEventListener("aaronnote:open-attachment", (event) => {
   if (!href) return;
   event.preventDefault();
   const rawPath = hrefPath(href) || href;
-  const resolved = rawPath.startsWith("/")
-    ? rawPath
-    : currentFile ? joinNotePath(dirnamePath(currentFile), rawPath) : rawPath;
-  void api.emacs.systemOpen(resolved).catch((err) => setStatus(`Open failed: ${String(err)}`));
+  void api.emacs.systemOpen(rawPath, currentFile).catch((err) => setStatus(`Open failed: ${String(err)}`));
 });
 window.addEventListener("aaronnote:open-file", (event) => {
   const detail = (event as CustomEvent<{ file?: string }>).detail;
