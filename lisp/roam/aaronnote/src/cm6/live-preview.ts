@@ -302,6 +302,15 @@ function collectLivePreviewTokens(
           const spanFrom = p.from;
           const spanTo = p.to;
           const href = p.name === "Link" ? linkHrefFromSpan(view.state, spanFrom, spanTo) : "";
+
+          // Empty-text anchor link [](#slug) — show the URL token as clickable text
+          // instead of hiding it, so the link is visible and clickable.
+          if (p.name === "Link" && node.name === "URL"
+            && view.state.doc.sliceString(p.from, p.from + 2) === "[]") {
+            tokens.push({ kind: "static", from: node.from, to: node.to, cls: "cm-link-text cm-empty-anchor-text" });
+            return false;
+          }
+
           tokens.push({
             kind: "link-delimiter",
             from: node.from,

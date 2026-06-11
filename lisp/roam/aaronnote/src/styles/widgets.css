@@ -207,6 +207,12 @@
   text-underline-offset: 2px;
 }
 
+.cm-editor .cm-empty-anchor-text {
+  font-size: 0.75em;
+  opacity: 0.7;
+  font-style: italic;
+}
+
 .cm-editor .cm-roam-link-text {
   color: #7a3e00;
   text-decoration: none;
@@ -507,6 +513,22 @@
 .cm-editor .cm-toc .toc-h4,
 .cm-editor .cm-toc .toc-h5,
 .cm-editor .cm-toc .toc-h6 { font-size: 0.95em; }
+.cm-editor .cm-toc .toc-fold-chevron {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 4px 0 0;
+  font-size: 0.65em;
+  opacity: 0.5;
+  line-height: 1;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.cm-editor .cm-toc .toc-fold-chevron:hover { opacity: 1; }
+.cm-editor .cm-toc .toc-fold-chevron::before { content: "▼"; }
+.cm-editor .cm-toc .toc-fold-chevron.is-folded::before { content: "▶"; }
+.cm-editor .cm-toc .toc-item { display: flex; align-items: center; }
+.cm-editor .cm-toc .toc-item-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 
 .cm-editor .cm-book-contents {
   margin: 0 auto;

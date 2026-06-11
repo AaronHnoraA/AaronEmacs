@@ -16,6 +16,8 @@ export type MarkdownHeading = {
   slug?: string;
   source?: "semantic" | "markdown";
   kind?: string;
+  /** Excluded from [toc] widget and floating outline (heading-fold still works). */
+  omit?: boolean;
 };
 
 export type InlineTagAnchor = {
@@ -42,21 +44,25 @@ type LineScan = {
 };
 
 const FENCE_LINE_RE = /^\s*(```|~~~)/;
+const OMIT_IN_TOC_RE = /<!--\s*omit\s+(?:in|from)\s+toc\s*-->\s*$/i;
 
 function headingFromLine(text: string, from: number): MarkdownHeading | null {
   const match = text.match(/^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/);
   if (!match) return null;
   const rawText = match[2] ?? "";
   const renderLevel = match[1]!.length;
+  const omit = OMIT_IN_TOC_RE.test(rawText);
+  const cleanText = omit ? rawText.replace(OMIT_IN_TOC_RE, "").trimEnd() : rawText;
   return {
     level: renderLevel,
     renderLevel,
-    text: rawText.trim() || "Untitled",
+    text: cleanText.trim() || "Untitled",
     pos: from + Math.max(0, text.indexOf(rawText)),
     to: from + text.length,
     markerFrom: from,
     markerTo: from + Math.max(0, text.indexOf(rawText)),
     source: "markdown",
+    ...(omit ? { omit: true } : {}),
   };
 }
 
@@ -137,7 +143,7 @@ function sortAnchors(items: InlineTagAnchor[]): InlineTagAnchor[] {
 }
 
 function headingSignature(headings: readonly MarkdownHeading[]): string {
-  return headings.map((heading) => `${heading.source || "markdown"}:${heading.level}:${heading.pos}:${heading.text}:${heading.slug || ""}`).join("\n");
+  return headings.map((heading) => `${heading.source || "markdown"}:${heading.level}:${heading.pos}:${heading.text}:${heading.slug || ""}:${heading.omit ? 1 : 0}`).join("\n");
 }
 
 function anchorSignature(anchors: readonly InlineTagAnchor[]): string {

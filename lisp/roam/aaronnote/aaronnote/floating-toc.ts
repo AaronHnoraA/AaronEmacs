@@ -4,6 +4,7 @@ import {
   markdownHeadingsFromText,
   tocIndexFromState,
   type InlineTagAnchor,
+  type MarkdownHeading,
 } from "../src/cm6/toc-index.ts";
 import type { NoteSummary } from "./types.ts";
 
@@ -17,6 +18,49 @@ export type FloatingTocPanel = {
   toggle: () => void;
 };
 
+function floatingTocFoldKeys(headings: readonly MarkdownHeading[]): string[] {
+  const counts = new Map<string, number>();
+  const stack: Array<{ level: number; ordinal: number }> = [];
+  return headings.map((heading) => {
+    while (stack.length > 0 && heading.level <= stack[stack.length - 1]!.level) {
+      stack.pop();
+    }
+    const parentPath = stack.map((part) => part.ordinal).join(".");
+    const siblingGroup = `${parentPath}|${heading.level}`;
+    const ordinal = (counts.get(siblingGroup) ?? 0) + 1;
+    counts.set(siblingGroup, ordinal);
+    const path = parentPath ? `${parentPath}.${ordinal}` : String(ordinal);
+    stack.push({ level: heading.level, ordinal });
+    return `${path}:${heading.level}:${heading.text}`;
+  });
+}
+
+function floatingTocSignature(headings: readonly MarkdownHeading[]): string {
+  const keys = floatingTocFoldKeys(headings);
+  return headings
+    .map((heading, index) => `${keys[index]}\t${heading.level}\t${heading.text}\t${heading.source || "markdown"}\t${heading.kind || ""}\t${heading.omit ? 1 : 0}`)
+    .join("\n");
+}
+
+function floatingTocVisible(
+  headings: readonly MarkdownHeading[],
+  foldState: ReadonlySet<string>,
+  visit: (heading: MarkdownHeading, index: number, key: string) => void,
+): void {
+  const foldedDepths: number[] = [];
+  const keys = floatingTocFoldKeys(headings);
+  for (let index = 0; index < headings.length; index += 1) {
+    const heading = headings[index]!;
+    while (foldedDepths.length > 0 && heading.level <= foldedDepths[foldedDepths.length - 1]!) {
+      foldedDepths.pop();
+    }
+    const visible = foldedDepths.length === 0;
+    const key = keys[index]!;
+    if (visible) visit(heading, index, key);
+    if (visible && foldState.has(key)) foldedDepths.push(heading.level);
+  }
+}
+
 export function createFloatingTocPanel(options: {
   toc: HTMLElement;
   toggleButton: HTMLButtonElement;
@@ -29,9 +73,10 @@ export function createFloatingTocPanel(options: {
   openTag?: (tag: string) => void;
 }): FloatingTocPanel {
   let renderKey = "";
+  const floatingFoldState = new Set<string>();
   let headingDoc: unknown = null;
   let headingCache: {
-    items: Array<{ level: number; text: string; pos: number }>;
+    items: MarkdownHeading[];
     signature: string;
   } = { items: [], signature: "" };
   let anchorDoc: unknown = null;
@@ -41,7 +86,7 @@ export function createFloatingTocPanel(options: {
   } = { items: [], signature: "" };
 
   function editorHeadings(): {
-    items: Array<{ level: number; text: string; pos: number }>;
+    items: MarkdownHeading[];
     signature: string;
   } {
     const state = options.editor.view.state;
@@ -150,14 +195,16 @@ export function createFloatingTocPanel(options: {
     const notes = options.getNotes();
     const headingState = editorHeadings();
     const anchorState = editorInlineAnchors();
-    const headings = headingState.items;
+    const headings = headingState.items.filter((h) => !h.omit);
     const anchors = anchorState.items;
     const selectionPos = options.editor.view.state.selection.main.from;
     const activeIndex = headings.reduce((active, heading, index) => heading.pos <= selectionPos ? index : active, -1);
     const currentNote = notes.find((note) => note.file === options.getCurrentFile());
     const relatedIds = [...(currentNote?.refs ?? []), ...(currentNote?.backlinks ?? [])];
     const tags = currentNote?.tags ?? [];
-    const key = `${activeIndex}\n${currentNote?.id ?? ""}\n${relatedIds.join(",")}\n${tags.join(",")}\n${headingState.signature}\n${anchorState.signature}`;
+    const foldRevision = [...floatingFoldState].sort().join(",");
+    const headingRenderSignature = floatingTocSignature(headings);
+    const key = `${activeIndex}\n${currentNote?.id ?? ""}\n${relatedIds.join(",")}\n${tags.join(",")}\n${headingRenderSignature}\n${anchorState.signature}\n${foldRevision}`;
     if (key === renderKey) return;
     renderKey = key;
     const frag = document.createDocumentFragment();
@@ -182,20 +229,50 @@ export function createFloatingTocPanel(options: {
       relatedCount > 0 ? `${relatedCount} links` : "",
     ].filter(Boolean).join(" · ");
     frag.appendChild(status);
-    headings.forEach((heading, index) => {
+
+    // Determine which headings have children (for chevron)
+    const headingHasChildren = headings.map((_, i) =>
+      i < headings.length - 1 && headings[i + 1]!.level > headings[i]!.level,
+    );
+
+    floatingTocVisible(headings, floatingFoldState, (heading, index, foldKey) => {
+      const row = document.createElement("div");
+      row.className = "aaronnote-toc-row";
+      row.style.setProperty("--toc-depth", String(Math.max(0, heading.level - 1)));
+
+      if (headingHasChildren[index]) {
+        const isFolded = floatingFoldState.has(foldKey);
+        const chevron = document.createElement("button");
+        chevron.type = "button";
+        chevron.className = "aaronnote-toc-chevron";
+        chevron.textContent = isFolded ? "▶" : "▼";
+        chevron.title = isFolded ? "Expand" : "Collapse";
+        chevron.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (floatingFoldState.has(foldKey)) floatingFoldState.delete(foldKey);
+          else floatingFoldState.add(foldKey);
+          renderKey = "";
+          update();
+        });
+        row.appendChild(chevron);
+      }
+
       const button = document.createElement("button");
       button.type = "button";
       button.className = index === activeIndex ? "aaronnote-toc-item is-active" : "aaronnote-toc-item";
-      button.style.setProperty("--toc-depth", String(Math.max(0, heading.level - 1)));
       button.dataset.level = String(heading.level);
       button.title = heading.text;
       if (index === activeIndex) button.setAttribute("aria-current", "location");
       button.textContent = heading.text;
       button.addEventListener("click", () => {
-        options.editor.setSelection(heading.pos);
+        const currentHeadings = editorHeadings().items.filter((item) => !item.omit);
+        const currentKeys = floatingTocFoldKeys(currentHeadings);
+        const currentHeading = currentHeadings[currentKeys.indexOf(foldKey)] ?? heading;
+        options.editor.setSelection(currentHeading.pos);
         options.editor.focus();
       });
-      frag.appendChild(button);
+      row.appendChild(button);
+      frag.appendChild(row);
     });
     renderInlineAnchors(frag, anchors);
     renderCurrentTags(frag, currentNote);

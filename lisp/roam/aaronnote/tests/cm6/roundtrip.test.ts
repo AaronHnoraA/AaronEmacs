@@ -1274,6 +1274,62 @@ $$
     cleanup();
   });
 
+  test("toc fold state is scoped to duplicate heading instances", () => {
+    const md = "# Course\n\n[toc]\n\n## Homework\n\n# Course\n\n## Homework";
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    document.querySelector<HTMLButtonElement>(".cm-toc .toc-fold-chevron")
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+    const items = Array.from(document.querySelectorAll<HTMLElement>(".cm-toc .toc-item"));
+    expect(items.map((item) => item.querySelector(".toc-item-text")?.textContent)).toEqual([
+      "Course",
+      "Course",
+      "Homework",
+    ]);
+    expect(items[0]!.querySelector(".toc-fold-chevron")?.classList.contains("is-folded")).toBe(true);
+    expect(items[1]!.querySelector(".toc-fold-chevron")?.classList.contains("is-folded")).toBe(false);
+    cleanup();
+  });
+
+  test("toc widget stays mounted during ordinary body edits", () => {
+    const md = "# Title\n\n[toc]\n\n## Child\n\nBody";
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    const toc = document.querySelector<HTMLElement>(".cm-toc");
+    expect(toc).toBeTruthy();
+
+    editor.insertText(" edited");
+    editor.setMarkdownSelection(editor.getMarkdown().length);
+
+    expect(document.querySelector<HTMLElement>(".cm-toc")).toBe(toc);
+    document.querySelectorAll<HTMLElement>(".cm-toc .toc-item")[1]
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(editor.getMarkdownSelection().from).toBe(editor.getMarkdown().indexOf("Child"));
+    cleanup();
+  });
+
+  test("toc folding a middle sibling keeps following sibling children visible", () => {
+    const md = "# Course 1\n\n[toc]\n\n## A\n\n# Course 2\n\n## B\n\n# Course 3\n\n## C";
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    document.querySelectorAll<HTMLButtonElement>(".cm-toc .toc-fold-chevron")[1]
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+    const items = Array.from(document.querySelectorAll<HTMLElement>(".cm-toc .toc-item"));
+    expect(items.map((item) => item.querySelector(".toc-item-text")?.textContent)).toEqual([
+      "Course 1",
+      "A",
+      "Course 2",
+      "Course 3",
+      "C",
+    ]);
+    cleanup();
+  });
+
   test("rendered CM6 toc ignores headings inside fenced code", () => {
     const md = "# Title\n\n[toc]\n\n```\n# Example\n```\n\n## Child";
     const { editor, cleanup } = mountCM6(md);

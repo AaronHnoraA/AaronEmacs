@@ -61,6 +61,14 @@ export type EditorCommand =
   | "table-insert-column"
   | "table-delete-row"
   | "table-delete-column"
+  | "table-align-left"
+  | "table-align-center"
+  | "table-align-right"
+  | "table-move-row-up"
+  | "table-move-row-down"
+  | "table-move-column-left"
+  | "table-move-column-right"
+  | "table-format"
   | "heading-1"
   | "heading-2"
   | "heading-3"
@@ -122,6 +130,14 @@ export function blockCommands(type: string): EditorCommand[] {
       "table-insert-column",
       "table-delete-row",
       "table-delete-column",
+      "table-align-left",
+      "table-align-center",
+      "table-align-right",
+      "table-move-row-up",
+      "table-move-row-down",
+      "table-move-column-left",
+      "table-move-column-right",
+      "table-format",
     ];
   }
   if (type === "code_block") return ["copy-code", "code-block"];
@@ -255,6 +271,62 @@ const builtInQuickInsertItems: QuickInsertItem[] = [
     keywords: ["table", "column", "col", "remove"],
   },
   {
+    id: "table-align-left",
+    label: "Align left",
+    detail: "Column",
+    command: "table-align-left",
+    keywords: ["table", "align", "left"],
+  },
+  {
+    id: "table-align-center",
+    label: "Align center",
+    detail: "Column",
+    command: "table-align-center",
+    keywords: ["table", "align", "center"],
+  },
+  {
+    id: "table-align-right",
+    label: "Align right",
+    detail: "Column",
+    command: "table-align-right",
+    keywords: ["table", "align", "right"],
+  },
+  {
+    id: "table-move-row-up",
+    label: "Move row up",
+    detail: "Swap",
+    command: "table-move-row-up",
+    keywords: ["table", "row", "move", "up"],
+  },
+  {
+    id: "table-move-row-down",
+    label: "Move row down",
+    detail: "Swap",
+    command: "table-move-row-down",
+    keywords: ["table", "row", "move", "down"],
+  },
+  {
+    id: "table-move-column-left",
+    label: "Move column left",
+    detail: "Swap",
+    command: "table-move-column-left",
+    keywords: ["table", "column", "col", "move", "left"],
+  },
+  {
+    id: "table-move-column-right",
+    label: "Move column right",
+    detail: "Swap",
+    command: "table-move-column-right",
+    keywords: ["table", "column", "col", "move", "right"],
+  },
+  {
+    id: "table-format",
+    label: "Format table",
+    detail: "Align columns",
+    command: "table-format",
+    keywords: ["table", "format", "align"],
+  },
+  {
     id: "math-block",
     label: "Math block",
     detail: "$$",
@@ -316,6 +388,8 @@ export type SetMarkdownOptions = {
 export interface Editor {
   /** Current markdown source. */
   getMarkdown(): string;
+  /** Current markdown source length without materializing the whole document. */
+  getMarkdownLength(): number;
   /** Current markdown after yielding to async callers. */
   getMarkdownAsync(): Promise<string>;
   /** Render the current document to HTML for clipboard/export integrations. */
@@ -346,6 +420,8 @@ export interface Editor {
   revealCursor(): void;
   /** Plain active-surface text between offsets. */
   textBetween(from: number, to: number): string;
+  /** Plain markdown-source text between offsets. */
+  markdownBetween(from: number, to: number): string;
   /** Replace active-surface text between offsets. */
   replaceRange(from: number, to: number, text: string, select?: SelectionMode): { from: number; to: number };
   /** Undo the active surface if possible. */

@@ -11,6 +11,7 @@
 
 import { EditorView } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
+import { parseTableModel, formatTableLines, tableTooLarge, type TableAlign } from "./table-model.ts";
 import type {
   EditorBlockContext,
   EditorCommand,
@@ -471,6 +472,7 @@ function runTableCommandCM6(view: EditorView, command: EditorCommand): boolean {
   if (!info) return false;
   const { lines, startLineNum, currentRowIdx, currentColIdx } = info;
   const doc = view.state.doc;
+  const { from } = view.state.selection.main;
   const startPos = doc.line(startLineNum).from;
   const endPos = doc.line(startLineNum + lines.length - 1).to;
 
@@ -509,6 +511,57 @@ function runTableCommandCM6(view: EditorView, command: EditorCommand): boolean {
       return buildRow(cells);
     });
     newCursorCol = Math.max(0, Math.min(cursorCol, colCount - 2));
+  } else if (command === "table-align-left" || command === "table-align-center" || command === "table-align-right") {
+    const model = parseTableModel(lines, startLineNum, currentRowIdx, from - (doc.line(startLineNum + currentRowIdx).from));
+    if (model.sepIdx < 0) return false;
+    const targetAlign: TableAlign = command === "table-align-left" ? "left" : command === "table-align-center" ? "center" : "right";
+    const currentAlign = model.aligns[currentColIdx] ?? "none";
+    model.aligns[currentColIdx] = currentAlign === targetAlign ? "none" : targetAlign;
+    if (!tableTooLarge(model)) {
+      newLines = formatTableLines(model);
+    } else {
+      // Only update separator row
+      const sepCells = splitCells(lines[model.sepIdx] ?? "");
+      const colCount = sepCells.length;
+      for (let c = 0; c < colCount; c++) {
+        if (c === currentColIdx) {
+          sepCells[c] = model.aligns[c] === "center" ? `:---:` : model.aligns[c] === "left" ? `:---` : model.aligns[c] === "right" ? `---:` : `---`;
+        }
+      }
+      newLines[model.sepIdx] = buildRow(sepCells);
+    }
+    newCursorRow = currentRowIdx;
+    newCursorCol = currentColIdx;
+  } else if (command === "table-move-row-up" || command === "table-move-row-down") {
+    const sepIdx = lines.findIndex(isSeparatorRow);
+    const firstBodyRow = sepIdx >= 0 ? sepIdx + 1 : 2;
+    if (currentRowIdx < firstBodyRow) return false;
+    if (command === "table-move-row-up" && currentRowIdx === firstBodyRow) return false;
+    if (command === "table-move-row-down" && currentRowIdx === lines.length - 1) return false;
+    const swapWith = command === "table-move-row-up" ? currentRowIdx - 1 : currentRowIdx + 1;
+    if (swapWith < firstBodyRow) return false;
+    const tmp = newLines[currentRowIdx]!;
+    newLines[currentRowIdx] = newLines[swapWith]!;
+    newLines[swapWith] = tmp;
+    newCursorRow = swapWith;
+  } else if (command === "table-move-column-left" || command === "table-move-column-right") {
+    const colCount = splitCells(lines[0] ?? "").length;
+    const swapWith = command === "table-move-column-left" ? currentColIdx - 1 : currentColIdx + 1;
+    if (swapWith < 0 || swapWith >= colCount) return false;
+    newLines = newLines.map((line) => {
+      const cells = splitCells(line);
+      const tmp = cells[currentColIdx]!;
+      cells[currentColIdx] = cells[swapWith]!;
+      cells[swapWith] = tmp;
+      return buildRow(cells);
+    });
+    newCursorCol = swapWith;
+  } else if (command === "table-format") {
+    const model = parseTableModel(lines, startLineNum, currentRowIdx, from - (doc.line(startLineNum + currentRowIdx).from));
+    if (tableTooLarge(model)) return false;
+    newLines = formatTableLines(model);
+    newCursorRow = currentRowIdx;
+    newCursorCol = currentColIdx;
   } else {
     return false;
   }
@@ -516,6 +569,138 @@ function runTableCommandCM6(view: EditorView, command: EditorCommand): boolean {
   const newText = newLines.join("\n");
   const cursorRow = newLines[Math.max(0, Math.min(newCursorRow, newLines.length - 1))] ?? "";
   const cursor = startPos + rowOffset(newLines, newCursorRow) + cellOffset(cursorRow, newCursorCol);
+  view.dispatch({
+    changes: { from: startPos, to: endPos, insert: newText },
+    selection: { anchor: cursor },
+    scrollIntoView: true,
+  });
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Table navigation
+// ---------------------------------------------------------------------------
+
+/** Tab / Shift-Tab cell navigation. Tab at last cell of last row creates a new row. */
+export function tableNavigateCell(view: EditorView, dir: 1 | -1): boolean {
+  const info = findTableInfo(view);
+  if (!info) return false;
+  const { lines, startLineNum, currentRowIdx, currentColIdx } = info;
+  const doc = view.state.doc;
+  const startPos = doc.line(startLineNum).from;
+  const endPos = doc.line(startLineNum + lines.length - 1).to;
+  const { from } = view.state.selection.main;
+
+  const sepIdx = lines.findIndex(isSeparatorRow);
+  const colCount = splitCells(lines[0] ?? "").length;
+  const bodyRows = lines.filter((_, i) => i !== sepIdx);
+
+  // Build flat cell list (skip separator)
+  type Cell = { rowIdx: number; colIdx: number };
+  const cells: Cell[] = [];
+  for (let r = 0; r < lines.length; r++) {
+    if (r === sepIdx) continue;
+    for (let c = 0; c < colCount; c++) cells.push({ rowIdx: r, colIdx: c });
+  }
+  const curCellIdx = cells.findIndex((c) => c.rowIdx === currentRowIdx && c.colIdx === currentColIdx);
+  const targetCellIdx = curCellIdx + dir;
+
+  // Append a new row when Tab past last cell
+  if (dir === 1 && targetCellIdx >= cells.length) {
+    const emptyRow = buildRow(Array(colCount).fill(" "));
+    const newLines = [...lines, emptyRow];
+    // Format if not too large
+    const model = parseTableModel(newLines, startLineNum, newLines.length - 1, 0);
+    const formatted = tableTooLarge(model) ? newLines : formatTableLines(model);
+    const newText = formatted.join("\n");
+    const targetRow = formatted.length - 1;
+    const targetRowText = formatted[targetRow] ?? "";
+    const cursor = startPos + rowOffset(formatted, targetRow) + cellOffset(targetRowText, 0);
+    view.dispatch({
+      changes: { from: startPos, to: endPos, insert: newText },
+      selection: { anchor: cursor },
+      scrollIntoView: true,
+    });
+    return true;
+  }
+  if (targetCellIdx < 0 || targetCellIdx >= cells.length) return false;
+
+  const target = cells[targetCellIdx]!;
+  // Format first if not too large
+  const model = parseTableModel(lines, startLineNum, currentRowIdx, from - doc.line(startLineNum + currentRowIdx).from);
+  const formatted = tableTooLarge(model) ? lines : formatTableLines(model);
+  const newText = formatted.join("\n");
+  const targetRowText = formatted[target.rowIdx] ?? "";
+  const cursor = startPos + rowOffset(formatted, target.rowIdx) + cellOffset(targetRowText, target.colIdx);
+  view.dispatch({
+    changes: { from: startPos, to: endPos, insert: newText },
+    selection: { anchor: cursor },
+    scrollIntoView: true,
+  });
+  void bodyRows;
+  return true;
+}
+
+/** Enter in a table cell: move to same column in next body row; on empty last row exit the table. */
+export function tableEnterSameColumn(view: EditorView): boolean {
+  const info = findTableInfo(view);
+  if (!info) return false;
+  const { lines, startLineNum, currentRowIdx, currentColIdx } = info;
+  const doc = view.state.doc;
+  const startPos = doc.line(startLineNum).from;
+  const endPos = doc.line(startLineNum + lines.length - 1).to;
+  const { from } = view.state.selection.main;
+
+  const sepIdx = lines.findIndex(isSeparatorRow);
+  const firstBodyRow = sepIdx >= 0 ? sepIdx + 1 : 2;
+  const colCount = splitCells(lines[0] ?? "").length;
+
+  // If cursor is in last row and the row is empty → delete it and move below table
+  if (currentRowIdx === lines.length - 1 && currentRowIdx >= firstBodyRow) {
+    const cells = splitCells(lines[currentRowIdx] ?? "");
+    const isEmpty = cells.every((c) => c.trim() === "");
+    if (isEmpty) {
+      const newLines = lines.slice(0, currentRowIdx);
+      const newText = newLines.join("\n");
+      const afterTable = doc.line(startLineNum + lines.length - 1).to + 1;
+      view.dispatch({
+        changes: [
+          { from: startPos, to: endPos, insert: newText },
+        ],
+        selection: { anchor: Math.min(startPos + newText.length + 1, doc.length) },
+        scrollIntoView: true,
+      });
+      void afterTable;
+      return true;
+    }
+  }
+
+  // Find next body row (skip separator)
+  let nextRow = currentRowIdx + 1;
+  if (nextRow === sepIdx) nextRow++;
+  if (nextRow >= lines.length) {
+    // Append a new row
+    const emptyRow = buildRow(Array(colCount).fill(" "));
+    const newLines = [...lines, emptyRow];
+    const model = parseTableModel(newLines, startLineNum, newLines.length - 1, 0);
+    const formatted = tableTooLarge(model) ? newLines : formatTableLines(model);
+    const newText = formatted.join("\n");
+    const targetRow = formatted.length - 1;
+    const targetRowText = formatted[targetRow] ?? "";
+    const cursor = startPos + rowOffset(formatted, targetRow) + cellOffset(targetRowText, currentColIdx);
+    view.dispatch({
+      changes: { from: startPos, to: endPos, insert: newText },
+      selection: { anchor: cursor },
+      scrollIntoView: true,
+    });
+    return true;
+  }
+
+  const model = parseTableModel(lines, startLineNum, currentRowIdx, from - doc.line(startLineNum + currentRowIdx).from);
+  const formatted = tableTooLarge(model) ? lines : formatTableLines(model);
+  const newText = formatted.join("\n");
+  const targetRowText = formatted[nextRow] ?? "";
+  const cursor = startPos + rowOffset(formatted, nextRow) + cellOffset(targetRowText, currentColIdx);
   view.dispatch({
     changes: { from: startPos, to: endPos, insert: newText },
     selection: { anchor: cursor },
@@ -614,7 +799,15 @@ export function runCommandCM6(view: EditorView, command: EditorCommand, value = 
     command === "table-insert-row" ||
     command === "table-insert-column" ||
     command === "table-delete-row" ||
-    command === "table-delete-column"
+    command === "table-delete-column" ||
+    command === "table-align-left" ||
+    command === "table-align-center" ||
+    command === "table-align-right" ||
+    command === "table-move-row-up" ||
+    command === "table-move-row-down" ||
+    command === "table-move-column-left" ||
+    command === "table-move-column-right" ||
+    command === "table-format"
   ) return runTableCommandCM6(view, command);
 
   // ── Line prefix commands (heading / blockquote / lists) ──────────────────

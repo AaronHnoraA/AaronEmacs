@@ -65,6 +65,9 @@ import {
 } from "./server/lib/session.mjs";
 import { handleCopilotRequest, shutdownCopilot } from "./server/lib/copilot.mjs";
 import { runExternalProseChecks } from "./server/lib/prose-check.mjs";
+import { createImeSwitcher } from "./server/lib/ime.mjs";
+
+const ime = createImeSwitcher();
 import { runtimeMkdtemp, sweepRuntimeTmp } from "./server/lib/tmp.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -307,6 +310,41 @@ async function notesListPayload(force = false) {
   return { type: "notes", ...await notesIndexPayload(), root: noteRoot };
 }
 
+let cachedCompletionTags = null;
+let cachedCompletionTagsVersion = -1;
+async function getCachedCompletionTags() {
+  const version = notesIndexVersionValue();
+  if (cachedCompletionTags && cachedCompletionTagsVersion === version) return cachedCompletionTags;
+  const payload = tagIndexPayload(await scanNotes());
+  const names = payload.tags.map((tag) => tag.name);
+  cachedCompletionTags = {
+    names,
+    lowerNames: names.map((name) => name.toLowerCase()),
+  };
+  cachedCompletionTagsVersion = version;
+  return cachedCompletionTags;
+}
+
+let cachedCompletionRoamNotes = null;
+let cachedCompletionRoamVersion = -1;
+async function getCachedCompletionRoamNotes() {
+  const version = notesIndexVersionValue();
+  if (cachedCompletionRoamNotes && cachedCompletionRoamVersion === version) return cachedCompletionRoamNotes;
+  cachedCompletionRoamNotes = (await scanNotes())
+    .filter((note) => note.roam && (note.id || note.key || note.title))
+    .map((note) => ({
+      id: note.id || note.key || "",
+      key: note.key || note.id || "",
+      title: note.title || "",
+      path: note.path || note.file || "",
+      search: [note.id, note.key, note.title, ...(note.aliases || [])]
+        .map((value) => String(value || "").toLowerCase())
+        .join(" "),
+    }));
+  cachedCompletionRoamVersion = version;
+  return cachedCompletionRoamNotes;
+}
+
 function roamSyncStats(index) {
   const noteList = index.notes || [];
   return {
@@ -442,29 +480,21 @@ const apiHandlers = {
   },
   "aaronnote:api:completions:tags": async (body) => {
     const prefix = String(body?.prefix || "").toLowerCase();
-    const notes = await scanNotes();
-    const payload = tagIndexPayload(notes);
-    const names = payload.tags.map((t) => t.name);
-    const filtered = prefix ? names.filter((n) => n.toLowerCase().includes(prefix)) : names;
+    const { names, lowerNames } = await getCachedCompletionTags();
+    const filtered = prefix ? names.filter((_, index) => lowerNames[index].includes(prefix)) : names;
     return { type: "completion-tags", tags: filtered.slice(0, 50) };
   },
   "aaronnote:api:completions:roam": async (body) => {
     const prefix = String(body?.prefix || "").toLowerCase();
-    const notes = await scanNotes();
-    const roamNotes = notes.filter((n) => n.roam && (n.id || n.key || n.title));
-    const matches = prefix
-      ? roamNotes.filter((n) => {
-          const search = [n.id, n.key, n.title, ...(n.aliases || [])].map((v) => String(v || "").toLowerCase()).join(" ");
-          return search.includes(prefix);
-        })
-      : roamNotes;
+    const roamNotes = await getCachedCompletionRoamNotes();
+    const matches = prefix ? roamNotes.filter((note) => note.search.includes(prefix)) : roamNotes;
     return {
       type: "completion-roam",
-      notes: matches.slice(0, 20).map((n) => ({
-        id: n.id || n.key || "",
-        key: n.key || n.id || "",
-        title: n.title || "",
-        path: n.path || n.file || "",
+      notes: matches.slice(0, 20).map((note) => ({
+        id: note.id,
+        key: note.key,
+        title: note.title,
+        path: note.path,
       })),
     };
   },
@@ -515,6 +545,7 @@ const apiHandlers = {
   "aaronnote:api:copilot:request": (action, body) => handleCopilotRequest(String(action || ""), body || {}),
 
   "aaronnote:api:prose-check:run": (body) => runExternalProseChecks(body || {}),
+  "aaronnote:api:ime:vim-mode": (body) => ime.vimMode(String(body?.mode || "")),
   "aaronnote:api:shell:show-in-folder": (file) => showInFolder(file),
   "aaronnote:api:shell:open-path": (file) => openPath(file),
   "aaronnote:api:shell:open-directory": (body) => openDirectory(body),
@@ -780,6 +811,9 @@ function adapterScript(origin) {
     },
     copilot: {
       request: function(action, body) { return call("aaronnote:api:copilot:request", [String(action || ""), body || {}]); }
+    },
+    ime: {
+      vimMode: function(mode) { return call("aaronnote:api:ime:vim-mode", [{ mode: String(mode || "") }]); }
     }
   };
 }());

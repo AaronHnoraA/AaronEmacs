@@ -225,6 +225,10 @@ button.is-active {
   background: rgb(123 74 203 / 20%);
 }
 
+#app[data-vim-mode="visual-line"] .cm-cursor {
+  display: none;
+}
+
 #app[data-vim-mode="normal"] .aaronnote-focused-editor .cm-editor,
 #app[data-vim-mode="visual"] .aaronnote-focused-editor .cm-editor,
 #app[data-vim-mode="visual-line"] .aaronnote-focused-editor .cm-editor {

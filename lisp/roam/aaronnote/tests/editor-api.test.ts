@@ -398,20 +398,24 @@ describe("editor api commands and writing modes", () => {
       editor.setMarkdownSelection(editor.getMarkdown().indexOf("1"));
       const context = editor.getBlockContext();
       expect(context.type).toBe("table_cell");
-      expect(context.commands).toEqual([
+      const expectedTableCommands = [
         "table-insert-row",
         "table-insert-column",
         "table-delete-row",
         "table-delete-column",
-      ]);
+        "table-align-left",
+        "table-align-center",
+        "table-align-right",
+        "table-move-row-up",
+        "table-move-row-down",
+        "table-move-column-left",
+        "table-move-column-right",
+        "table-format",
+      ];
+      expect(context.commands).toEqual(expectedTableCommands);
 
       const commands = editor.getQuickInsertItems("").map((item) => item.command);
-      expect(commands).toEqual([
-        "table-insert-row",
-        "table-insert-column",
-        "table-delete-row",
-        "table-delete-column",
-      ]);
+      expect(commands).toEqual(expectedTableCommands);
     } finally {
       editor.destroy();
       mount.remove();

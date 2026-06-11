@@ -9,7 +9,7 @@ import {
   type StoredPasteAsset,
 } from "../src/lib.ts";
 import { setupCopilot } from "../src/copilot/index.ts";
-import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownBlock } from "../src/cm6/commands.ts";
+import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownBlock, tableNavigateCell, tableEnterSameColumn } from "../src/cm6/commands.ts";
 import { getBlockMathRanges, rangeAtPosition, rangeOverlapsAny } from "../src/cm6/math-ranges.ts";
 import { equationTagsFromText, getEquationTagHits } from "../src/equation-tags.ts";
 import { INLINE_MATH_RE, isLikelyInlineMath } from "../src/inline-math.ts";
@@ -21,6 +21,7 @@ import { CoalescedTimer } from "../src/coalesced-timer.ts";
 import { blobToBase64 } from "../src/paste.ts";
 import { AssistScheduler, type AssistUpdateFlags, type AssistUpdateOptions } from "./assist-scheduler.ts";
 import { createFloatingTocPanel, inlineTagAnchorsFromText, markdownHeadingsFromText } from "./floating-toc.ts";
+import { resolveAnchorHeading } from "../src/heading-slug.ts";
 import { createLocalGraphPanel } from "./local-graph.ts";
 import {
   canonicalRoamNoteId,
@@ -366,8 +367,26 @@ host.addEventListener("mousedown", activateEditorFromPointer, { capture: true })
 const snippetSession = new SnippetSession(editor);
 host.addEventListener("aaronnote-assist-update", () => scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true }));
 
+// IME switching for Vim mode (macOS) — fire-and-forget, never blocks keystrokes.
+// Requires macism or im-select installed; feature silently disables when absent.
+const imeCoalesceTimer = new CoalescedTimer(80);
+let imeEnabled = true;
+let imeLastSentMode: "" | "normal" | "insert" = "";
+function syncImeForVimMode(mode: import("./vim-lite.ts").VimLiteMode): void {
+  if (!imeEnabled) return;
+  const effective: "normal" | "insert" = mode === "insert" ? "insert" : "normal";
+  imeCoalesceTimer.schedule(() => {
+    if (effective === "insert" && !document.hasFocus()) return;
+    if (effective === imeLastSentMode) return;
+    imeLastSentMode = effective;
+    void api.ime.vimMode(effective)
+      .then((r) => { if (r?.enabled === false) imeEnabled = false; })
+      .catch(() => {});
+  });
+}
+
 const vim = createVimLite(editor, host, {
-  onModeChange: updateModeLabel,
+  onModeChange: (mode) => { updateModeLabel(mode); syncImeForVimMode(mode); },
   onUndo: () => editor.undo(),
   onRedo: () => editor.redo(),
   onIndent: (dir) => indentMarkdownBlock(editor.view, dir),
@@ -376,7 +395,16 @@ const assistScheduler = new AssistScheduler(window, editorSurfaceVisible, runAss
 updateModeLabel(vim.mode());
 // Reset to normal mode when the editor loses focus (xwidget buffer switch).
 // Prevents silent insert/visual mode on return from another Emacs buffer.
-onBlurVimReset = () => { if (vim.mode() !== "normal") vim.setMode("normal"); };
+onBlurVimReset = () => {
+  if (vim.mode() !== "normal") vim.setMode("normal");
+  imeLastSentMode = "";
+  syncImeForVimMode("normal");
+};
+// Re-assert IME state when the window regains focus.
+window.addEventListener("focus", () => {
+  imeLastSentMode = "";
+  syncImeForVimMode(vim.mode());
+});
 
 const floatingTocPanel = createFloatingTocPanel({
   toc,
@@ -699,6 +727,7 @@ setupCopilot({
   onAction: () => () => {},
   onSettingsChange: () => () => {},
   getSettings: () => ({ idleDelayMs: 850, largeBufferThresholdKb: 512 }),
+  isActive: () => !paused && editorSurfaceVisible(),
   onDocumentEvent: subscribe,
   jumpSnippetNext: jumpSnippetTabstop,
   jumpSnippetPrevious: jumpSnippetTabstopBack,
@@ -1045,8 +1074,9 @@ function jumpToHash(hash: string): boolean {
     noteCursorPositionEvent();
     return true;
   }
-  const heading = markdownHeadingsFromText(editor.view.state.doc)
-    .find((item) => item.text.toLowerCase() === clean.toLowerCase()
+  const allHeadings = markdownHeadingsFromText(editor.view.state.doc);
+  const heading = resolveAnchorHeading(allHeadings, clean)
+    ?? allHeadings.find((item) => item.text.toLowerCase() === clean.toLowerCase()
       || item.slug === clean
       || slugifyAnchor(item.text) === clean);
   if (heading) {
@@ -3110,10 +3140,14 @@ function runHostKey(body: Record<string, unknown>): boolean {
     if (vim.mode() !== "insert") return false;
     editor.focus();
     if (hostKey.shiftKey) {
+      const tableHandled = tableNavigateCell(editor.view, -1);
+      if (tableHandled) { scheduleAssistUpdate({ cursor: true }); return true; }
       const handled = jumpSnippetTabstopBack();
       if (handled) scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
       return handled;
     }
+    const tableHandled = tableNavigateCell(editor.view, 1);
+    if (tableHandled) { scheduleAssistUpdate({ cursor: true }); return true; }
     const snippetHandled = jumpSnippetTabstop() || expandSnippetAtCursor();
     if (snippetHandled) {
       scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
@@ -3123,7 +3157,7 @@ function runHostKey(body: Record<string, unknown>): boolean {
   }
   if (vim.mode() !== "insert" || hostKey.ctrlKey || hostKey.metaKey || hostKey.altKey) return false;
   if (key === "Enter") {
-    const handled = exitEmptyMarkdownBlock(editor.view) || continueMarkdownBlock(editor.view);
+    const handled = tableEnterSameColumn(editor.view) || exitEmptyMarkdownBlock(editor.view) || continueMarkdownBlock(editor.view);
     if (!handled) editor.insertText("\n");
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
     return true;
@@ -3326,6 +3360,11 @@ document.addEventListener("beforeinput", (event) => {
       scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
       return;
     }
+    if (tableNavigateCell(editor.view, 1)) {
+      event.preventDefault();
+      scheduleAssistUpdate({ cursor: true });
+      return;
+    }
     // No snippet match: fall through so CM6 inserts \t naturally
     return;
   }
@@ -3370,7 +3409,7 @@ document.addEventListener("mouseup", (event) => {
 window.addEventListener("resize", () => {
   scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: !selectionTool.hidden });
 });
-window.addEventListener("scroll", () => scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: !selectionTool.hidden }), true);
+window.addEventListener("scroll", () => scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: !selectionTool.hidden }), { capture: true, passive: true });
 selectionTool.addEventListener("mousedown", (event) => event.preventDefault());
 selectionTool.addEventListener("click", (event) => {
   const button = (event.target as Element | null)?.closest<HTMLButtonElement>("[data-selection-command]");
@@ -3385,6 +3424,17 @@ document.addEventListener("aaronnote:open-url", (event) => {
   if (!href) return;
   event.preventDefault();
   openExternalUrl(href, { newWindow: custom.detail?.newWindow === true });
+});
+document.addEventListener("aaronnote:open-attachment", (event) => {
+  const custom = event as CustomEvent<{ href?: string }>;
+  const href = custom.detail?.href;
+  if (!href) return;
+  event.preventDefault();
+  const rawPath = hrefPath(href) || href;
+  const resolved = rawPath.startsWith("/")
+    ? rawPath
+    : currentFile ? joinNotePath(dirnamePath(currentFile), rawPath) : rawPath;
+  void api.emacs.systemOpen(resolved).catch((err) => setStatus(`Open failed: ${String(err)}`));
 });
 window.addEventListener("aaronnote:open-file", (event) => {
   const detail = (event as CustomEvent<{ file?: string }>).detail;

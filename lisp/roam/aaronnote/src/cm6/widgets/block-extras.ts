@@ -50,6 +50,29 @@ import { scanInlineCommands } from "../../command-syntax.ts";
 import { semanticOutlineFromCommand, type SemanticOutline } from "../../semantic-outline.ts";
 
 // ---------------------------------------------------------------------------
+// TOC fold state (session-level, not editor history)
+// ---------------------------------------------------------------------------
+
+export const tocFoldEffect = StateEffect.define<{ key: string; folded: boolean }>();
+
+function tocFoldReducer(state: Map<string, boolean>, effects: readonly StateEffect<unknown>[]): Map<string, boolean> {
+  let next: Map<string, boolean> | undefined;
+  for (const effect of effects) {
+    if (effect.is(tocFoldEffect)) {
+      if (!next) next = new Map(state);
+      if (effect.value.folded) next.set(effect.value.key, true);
+      else next.delete(effect.value.key);
+    }
+  }
+  return next ?? state;
+}
+
+const tocFoldField = StateField.define<Map<string, boolean>>({
+  create: () => new Map(),
+  update(state, tr) { return tocFoldReducer(state, tr.effects); },
+});
+
+// ---------------------------------------------------------------------------
 // Regexes / parsers
 // ---------------------------------------------------------------------------
 
@@ -300,6 +323,13 @@ const tikzAssetCache = new Map<string, Promise<TikzAssetResult>>();
 const tikzRenderedSourceByAsset = new Map<string, string>();
 const tikzPendingSourceByAsset = new Map<string, string>();
 
+function setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V, limit = 128): void {
+  map.set(key, value);
+  if (map.size <= limit) return;
+  const oldest = map.keys().next();
+  if (!oldest.done) map.delete(oldest.value);
+}
+
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
 }
@@ -455,13 +485,17 @@ export function setBookContext(view: EditorView, context: BookEditorContext | nu
 
 class TocWidget extends MeasuredWidget {
   headings: TocHeading[];
+  foldState: ReadonlyMap<string, boolean>;
+  signature: string;
 
-  constructor(headings: TocHeading[]) {
+  constructor(headings: TocHeading[], foldState: ReadonlyMap<string, boolean>) {
     super();
     this.headings = headings;
+    this.foldState = foldState;
+    this.signature = tocSignature(headings, foldState);
   }
 
-  protected measureKey(): string { return "toc:" + shortHash(tocSignature(this.headings)); }
+  protected measureKey(): string { return "toc:" + shortHash(this.signature); }
 
   protected measureGroupKey(): string {
     const bucket = Math.min(8, Math.ceil(this.headings.length / 8));
@@ -469,14 +503,17 @@ class TocWidget extends MeasuredWidget {
   }
 
   protected estimatedHeightFallback(): number {
-    return Math.max(58, 38 + this.headings.length * 26);
+    let visible = 0;
+    forEachVisibleTocHeading(this.headings, this.foldState, () => { visible++; });
+    return Math.max(58, 38 + visible * 26);
   }
 
   eq(other: TocWidget): boolean {
-    return tocSignature(this.headings) === tocSignature(other.headings);
+    return this.signature === other.signature;
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const foldState = view.state.field(tocFoldField, false) ?? this.foldState;
     const div = document.createElement("div");
     div.className = "toc cm-toc";
     div.addEventListener("mousedown", (event) => {
@@ -492,26 +529,59 @@ class TocWidget extends MeasuredWidget {
       return this.registerMeasured(div, view);
     }
 
+    // Determine which headings have children (for chevron rendering)
+    const hasChildren = new Set<number>();
+    for (let i = 0; i < this.headings.length - 1; i++) {
+      if (this.headings[i + 1]!.level > this.headings[i]!.level) hasChildren.add(i);
+    }
+
     const ul = document.createElement("ul");
     ul.className = "toc-list";
-    for (const heading of this.headings) {
+    forEachVisibleTocHeading(this.headings, foldState, (heading, idx, fKey) => {
+      const isFolded = foldState.get(fKey) ?? false;
       const li = document.createElement("li");
       li.className = `toc-item toc-h${heading.level}`;
       li.style.setProperty("--toc-depth", String(Math.max(0, heading.level - 1)));
       li.dataset.level = String(heading.level);
-      li.textContent = heading.text || "(empty heading)";
-      li.title = heading.text || "(empty heading)";
+      li.dataset.foldKey = fKey;
+
+      if (hasChildren.has(idx)) {
+        const chevron = document.createElement("button");
+        chevron.type = "button";
+        chevron.className = `toc-fold-chevron${isFolded ? " is-folded" : ""}`;
+        chevron.setAttribute("aria-label", isFolded ? "Expand" : "Collapse");
+        chevron.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const nowFolded = !(foldState.get(fKey) ?? false);
+          view.dispatch({
+            effects: tocFoldEffect.of({ key: fKey, folded: nowFolded }),
+          });
+        });
+        li.append(chevron);
+      }
+
+      const span = document.createElement("span");
+      span.className = "toc-item-text";
+      span.textContent = heading.text || "(empty heading)";
+      span.title = heading.text || "(empty heading)";
+      li.append(span);
+
       li.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        view.dispatch({ selection: { anchor: heading.pos }, scrollIntoView: true });
+        const currentHeadings = tocHeadingsFromState(view.state);
+        const currentKeys = tocFoldKeys(currentHeadings);
+        const currentHeading = currentHeadings[currentKeys.indexOf(fKey)] ?? heading;
+        view.dispatch({ selection: { anchor: currentHeading.pos }, scrollIntoView: true });
         view.focus();
-        const dom = view.domAtPos(heading.pos).node;
+        const dom = view.domAtPos(currentHeading.pos).node;
         const el = dom instanceof Element ? dom : dom.parentElement;
         el?.scrollIntoView({ block: "start", behavior: "smooth" });
       });
       ul.append(li);
-    }
+    });
+
     div.append(ul);
     return this.registerMeasured(div, view);
   }
@@ -759,8 +829,56 @@ class SemanticHeadingWidget extends MeasuredWidget {
   ignoreEvent(): boolean { return false; }
 }
 
-function tocSignature(headings: TocHeading[]): string {
-  return headings.map((h) => `${h.pos}\t${h.level}\t${h.text}`).join("\n");
+function tocFoldKeys(headings: readonly TocHeading[]): string[] {
+  const counts = new Map<string, number>();
+  const stack: Array<{ level: number; ordinal: number }> = [];
+  return headings.map((heading) => {
+    while (stack.length > 0 && heading.level <= stack[stack.length - 1]!.level) {
+      stack.pop();
+    }
+    const parentPath = stack.map((part) => part.ordinal).join(".");
+    const siblingGroup = `${parentPath}|${heading.level}`;
+    const ordinal = (counts.get(siblingGroup) ?? 0) + 1;
+    counts.set(siblingGroup, ordinal);
+    const path = parentPath ? `${parentPath}.${ordinal}` : String(ordinal);
+    stack.push({ level: heading.level, ordinal });
+    return `${path}:${heading.level}:${heading.text}`;
+  });
+}
+
+function tocHeadingsFromState(state: EditorState): TocHeading[] {
+  return tocIndexFromState(state).headings.filter((heading) => !heading.omit);
+}
+
+function forEachVisibleTocHeading<T extends TocHeading>(
+  headings: readonly T[],
+  foldState: ReadonlyMap<string, boolean>,
+  visit: (heading: T, index: number, foldKey: string) => void,
+): void {
+  const foldedDepths: number[] = [];
+  const foldKeys = tocFoldKeys(headings);
+  for (let idx = 0; idx < headings.length; idx++) {
+    const heading = headings[idx]!;
+    while (foldedDepths.length > 0 && heading.level <= foldedDepths[foldedDepths.length - 1]!) {
+      foldedDepths.pop();
+    }
+    const visible = foldedDepths.length === 0;
+    const foldKey = foldKeys[idx]!;
+    if (visible) visit(heading, idx, foldKey);
+    if (visible && foldState.get(foldKey)) foldedDepths.push(heading.level);
+  }
+}
+
+function tocSignature(headings: TocHeading[], foldState?: ReadonlyMap<string, boolean>): string {
+  const keys = tocFoldKeys(headings);
+  const base = headings.map((h, index) => `${keys[index]}\t${h.level}\t${h.text}\t${h.source || "markdown"}\t${h.kind || ""}`).join("\n");
+  if (!foldState || foldState.size === 0) return base;
+  const foldedKeys = keys.filter((k) => foldState.get(k)).join(",");
+  return `${base}\nfold:${foldedKeys}`;
+}
+
+function tocContentSignature(state: EditorState): string {
+  return tocSignature(tocHeadingsFromState(state));
 }
 
 function scanBlockExtraLineRanges(
@@ -1241,7 +1359,7 @@ class TikzWidget extends MeasuredWidget {
     const bodyChanged = this.dirty || (previousRenderedSource !== undefined && previousRenderedSource !== this.body);
     if (bodyChanged && pendingSource !== this.body) {
       card.textContent = "Updating TikZ...";
-      tikzPendingSourceByAsset.set(sourceCacheKey, this.body);
+      setBoundedMap(tikzPendingSourceByAsset, sourceCacheKey, this.body);
       scheduleTikzOpenLineUpdate(view, this.from, (info) => {
         const current = completeTikzTitle(info.title);
         if (current.changed) return `${current.id} ${current.timestamp}${current.attrsRaw ? ` ${current.attrsRaw}` : ""}`;
@@ -1261,7 +1379,7 @@ class TikzWidget extends MeasuredWidget {
         view.requestMeasure();
         return;
       }
-      tikzRenderedSourceByAsset.set(sourceCacheKey, this.body);
+      setBoundedMap(tikzRenderedSourceByAsset, sourceCacheKey, this.body);
       tikzPendingSourceByAsset.delete(sourceCacheKey);
       const img = document.createElement("img");
       img.className = "cm-image-render cm-tikz-env-image";
@@ -1976,8 +2094,9 @@ function buildBlockExtraDecoRanges(
   const occupied: Array<[number, number]> = [];
   const sel = state.selection.main;
   const excludedRanges = blockExtraExcludedRanges(state);
-  const headings = tocIndexFromState(state).headings;
+  const headings = tocHeadingsFromState(state);
   const ranges = state.field(blockExtraRangesField, false) ?? scanBlockExtraRanges(state.doc, excludedRanges);
+  const foldState = state.field(tocFoldField, false) ?? new Map<string, boolean>();
 
   // ── [toc] ──────────────────────────────────────────────────────────────
   for (const range of ranges.toc) {
@@ -1985,7 +2104,7 @@ function buildBlockExtraDecoRanges(
     if (rangeOverlapsAny(range.from, range.to, excludedRanges)) continue;
     if (!(sel.from <= range.to && sel.to >= range.from)) {
       decos.push(
-        Decoration.replace({ widget: new TocWidget([...headings]), block: true }).range(range.from, range.to),
+        Decoration.replace({ widget: new TocWidget(headings, foldState), block: true }).range(range.from, range.to),
       );
       occupied.push([range.from, range.to]);
     }
@@ -2065,6 +2184,26 @@ function buildBlockExtraDecoRanges(
 function buildBlockExtraDecos(state: EditorState): DecorationSet {
   const decos = buildBlockExtraDecoRanges(state);
   return Decoration.set(decos, true);
+}
+
+function buildTocWidgetDecoRanges(
+  state: EditorState,
+  ranges = state.field(blockExtraRangesField, false)?.toc ?? [],
+): CMRange<Decoration>[] {
+  if (ranges.length === 0) return [];
+  const decos: CMRange<Decoration>[] = [];
+  const sel = state.selection.main;
+  const excludedRanges = blockExtraExcludedRanges(state);
+  const headings = tocHeadingsFromState(state);
+  const foldState = state.field(tocFoldField, false) ?? new Map<string, boolean>();
+  for (const range of ranges) {
+    if (rangeOverlapsAny(range.from, range.to, excludedRanges)) continue;
+    if (sel.from <= range.to && sel.to >= range.from) continue;
+    decos.push(
+      Decoration.replace({ widget: new TocWidget(headings, foldState), block: true }).range(range.from, range.to),
+    );
+  }
+  return decos;
 }
 
 function changesContainNewline(doc: Text, changes: ChangeSet): boolean {
@@ -2172,7 +2311,6 @@ function canMapBlockExtraDecos(state: EditorState, changes: ChangeSet): boolean 
   const ranges = state.field(blockExtraRangesField, false) ?? scanBlockExtraRanges(state.doc, blockExtraExcludedRanges(state));
   const blocks = state.field(orgEnvBlocksField, false) ?? orgEnvBlocksFromState(state);
 
-  if (ranges.toc.length > 0) return false;
   if (!canMapBlockExtraRanges(state.doc, changes, ranges)) return false;
   if (!canMapOrgEnvBlocks(state.doc, blocks, changes)) return false;
 
@@ -2210,6 +2348,20 @@ function patchBlockExtraDecosForOrgEnvTitleChange(
   return next;
 }
 
+function patchTocWidgetDecos(
+  state: EditorState,
+  current: DecorationSet,
+): DecorationSet {
+  const ranges = state.field(blockExtraRangesField, false)?.toc ?? [];
+  if (ranges.length === 0) return current;
+  let next = current;
+  for (const range of ranges) {
+    next = next.update({ filterFrom: range.from, filterTo: range.to, filter: () => false });
+  }
+  const add = buildTocWidgetDecoRanges(state, ranges);
+  return next.update({ add, sort: true });
+}
+
 function scanFrontMatter(doc: Text): { from: number; to: number; body: string } | null {
   if (doc.lines < 2 || doc.line(1).text.trim() !== "---") return null;
   const bodyLines: string[] = [];
@@ -2233,9 +2385,16 @@ const blockExtrasDecorations = StateField.define<DecorationSet>({
     if (tr.effects.some((effect) => effect.is(setBookContextEffect))) {
       return buildBlockExtraDecos(tr.state);
     }
+    if (tr.effects.some((effect) => effect.is(tocFoldEffect))) {
+      return patchTocWidgetDecos(tr.state, value);
+    }
     if (tr.docChanged) {
       if (canMapBlockExtraDecos(tr.startState, tr.changes)) {
-        return value.map(tr.changes);
+        const mapped = value.map(tr.changes);
+        return (tr.state.field(blockExtraRangesField, false)?.toc.length ?? 0) > 0
+          && tocContentSignature(tr.startState) !== tocContentSignature(tr.state)
+          ? patchTocWidgetDecos(tr.state, mapped)
+          : mapped;
       }
       const blocks = tr.startState.field(orgEnvBlocksField, false) ?? orgEnvBlocksFromState(tr.startState);
       const titlePatch = patchOrgEnvBlocksForTitleChange(tr.startState.doc, tr.state.doc, blocks, tr.changes);
@@ -2259,6 +2418,7 @@ export const blockExtrasExtension: Extension = [
   bookContextField,
   fencedCodeRangesExtension,
   blockExtraRangesField,
+  tocFoldField,
   orgEnvBlocksField,
   dirtyTikzBlocksField,
   blockExtrasDecorations,

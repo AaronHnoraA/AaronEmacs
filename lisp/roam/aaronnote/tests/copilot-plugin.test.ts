@@ -8,6 +8,8 @@ class FakeEditor {
   cursorBefore = "";
   cursorAfter = "";
   insertions: string[] = [];
+  getMarkdownCalls = 0;
+  cursorContextCalls = 0;
 
   constructor(markdown: string) {
     this.markdown = markdown;
@@ -15,7 +17,16 @@ class FakeEditor {
   }
 
   getMarkdown(): string {
+    this.getMarkdownCalls++;
     return this.markdown;
+  }
+
+  getMarkdownLength(): number {
+    return this.markdown.length;
+  }
+
+  markdownBetween(from: number, to: number): string {
+    return this.markdown.slice(from, to);
   }
 
   getMarkdownSelection(): { from: number; to: number } {
@@ -32,6 +43,7 @@ class FakeEditor {
   }
 
   cursorContext(): { before: string; after: string; rect: { left: number; top: number; bottom: number } } {
+    this.cursorContextCalls++;
     return { before: this.cursorBefore, after: this.cursorAfter, rect: { left: 0, top: 0, bottom: 20 } };
   }
 
@@ -432,7 +444,57 @@ describe("copilot plugin insertion", () => {
       expect(inlineBody!.content).toContain("needle");
       expect(inlineBody!.offset).toBe(inlineBody!.content.indexOf("needle") + "needle".length);
       expect(inlineBody!.window?.from).toBeGreaterThan(0);
+      expect(editor.getMarkdownCalls).toBe(0);
       expect(document.querySelector(".aaronnote-copilot-ghost")?.textContent).toBe("Suffix");
+    } finally {
+      cleanup();
+      restoreApi();
+      host.remove();
+    }
+  });
+
+  test("duplicate selectionchange events do not reschedule cursor context work", async () => {
+    const host = document.createElement("div");
+    const target = document.createElement("button");
+    host.appendChild(target);
+    document.body.appendChild(host);
+
+    const editor = new FakeEditor("prefix");
+    const handlers: {
+      selectionchange?: () => void;
+    } = {};
+
+    const restoreApi = installNativeCopilot(async () => ({ ok: true, items: [] }));
+    const cleanup = setupCopilot({
+      editor,
+      host,
+      currentFile: () => "/tmp/copilot.md",
+      vimMode: () => "insert",
+      setStatus: () => {},
+      onChange: () => () => {},
+      onKeyDown: () => () => {},
+      onAction: () => () => {},
+      onSettingsChange: () => () => {},
+      getSettings: () => ({ idleDelayMs: 999_999, largeBufferThresholdKb: 512 }),
+      onDocumentEvent: <K extends keyof DocumentEventMap>(type: K, handler: (event: DocumentEventMap[K]) => void) => {
+        if (type === "selectionchange") handlers.selectionchange = handler as () => void;
+        return () => {
+          if (type === "selectionchange") delete handlers.selectionchange;
+        };
+      },
+      jumpSnippetNext: () => false,
+      jumpSnippetPrevious: () => false,
+      forwardDelimiter: () => false,
+      backwardDelimiter: () => false,
+    });
+
+    try {
+      target.focus();
+      const before = editor.cursorContextCalls;
+      handlers.selectionchange?.();
+      handlers.selectionchange?.();
+      handlers.selectionchange?.();
+      expect(editor.cursorContextCalls - before).toBe(1);
     } finally {
       cleanup();
       restoreApi();

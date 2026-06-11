@@ -47,6 +47,8 @@ import {
   continueMarkdownBlock,
   exitEmptyMarkdownBlock,
   indentMarkdownBlock,
+  tableNavigateCell,
+  tableEnterSameColumn,
 } from "./commands.ts";
 import {
   pasteDataTransfer,
@@ -59,7 +61,8 @@ import { blockMathRangesExtension, getBlockMathRanges, positionInsideAnyRange } 
 import { scanInlineMathRanges } from "../inline-math.ts";
 import { findHighlightExtension } from "./find-highlight.ts";
 import { roamLinkStatusExtension } from "./roam-link-status.ts";
-import { tocIndexExtension } from "./toc-index.ts";
+import { tocIndexExtension, tocIndexFromState } from "./toc-index.ts";
+import { resolveAnchorHeading } from "../heading-slug.ts";
 import { orderedListRenumber, skipOrderedListRenumber } from "./ordered-list-renumber.ts";
 import { headingFoldExtension } from "./heading-fold.ts";
 import { proseDiagnosticsExtension } from "./prose-diagnostics.ts";
@@ -368,10 +371,22 @@ function openMarkdownLinkFromEvent(view: EditorView, event: MouseEvent): boolean
 
   event.preventDefault();
   event.stopPropagation();
-  view.dom.dispatchEvent(new CustomEvent("aaronnote:open-url", {
+  const customEvent = new CustomEvent("aaronnote:open-url", {
     bubbles: true,
+    cancelable: true,
     detail: { href, newWindow: linkOpensNewWindow(href, event) },
-  }));
+  });
+  const handled = !view.dom.dispatchEvent(customEvent);
+  if (!handled && href.startsWith("#")) {
+    const heading = resolveAnchorHeading(tocIndexFromState(view.state).headings, href);
+    if (heading) {
+      view.dispatch({ selection: { anchor: heading.pos }, scrollIntoView: true });
+      view.focus();
+      const dom = view.domAtPos(heading.pos).node;
+      const el = dom instanceof Element ? dom : dom.parentElement;
+      el?.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+  }
   return true;
 }
 
@@ -405,6 +420,43 @@ function attachmentHref(href: string): boolean {
     .split(/[?#]/, 1)[0]
     ?.trim() ?? "";
   return Boolean(path) && !/\.(?:md|markdown|typ)$/i.test(path);
+}
+
+function resolveSourceWidgetHref(view: EditorView, event: MouseEvent): string | null {
+  // Walk up from event target to find a widget with data-cm-source-from/to
+  let el: Element | null = event.target instanceof Element ? event.target : null;
+  while (el) {
+    const fromStr = (el as HTMLElement).dataset?.cmSourceFrom;
+    const toStr = (el as HTMLElement).dataset?.cmSourceTo;
+    if (fromStr != null && toStr != null) {
+      const from = Number(fromStr);
+      const to = Number(toStr);
+      const text = view.state.doc.sliceString(from, to);
+      // Extract markdown image/link destination: ![alt](src) or [text](href)
+      const m = text.match(/^!?\[[^\]]*\]\(([^)]+)\)/);
+      if (m?.[1]) return m[1].trim();
+      return null;
+    }
+    el = el.parentElement;
+  }
+  return null;
+}
+
+function openAttachmentSmartFromEvent(view: EditorView, event: MouseEvent): boolean {
+  // Cmd+click (Mac) on image/attachment widgets — the main use case is images
+  // which currently have no click handler. Text attachment links also benefit.
+  if (!primaryLinkModifier(event) || event.shiftKey || event.button !== 0) return false;
+  const widgetHref = resolveSourceWidgetHref(view, event);
+  if (!widgetHref) return false; // Only intercept widget clicks; text links handled by openMarkdownLinkFromEvent
+  if (!attachmentHref(widgetHref) && !/\.(png|jpe?g|gif|svg|webp|bmp|tiff?|avif|heic|pdf|mp4|mov|mp3|wav|docx?|xlsx?|pptx?|zip|tar|gz)$/i.test(widgetHref)) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  view.dom.dispatchEvent(new CustomEvent("aaronnote:open-attachment", {
+    bubbles: true,
+    cancelable: true,
+    detail: { href: widgetHref },
+  }));
+  return true;
 }
 
 function openAttachmentContextMenuFromEvent(view: EditorView, event: MouseEvent): boolean {
@@ -570,6 +622,10 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
   const editor: Editor = {
     getMarkdown,
 
+    getMarkdownLength(): number {
+      return view.state.doc.length;
+    },
+
     async getMarkdownAsync(): Promise<string> {
       return getMarkdown();
     },
@@ -672,6 +728,13 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
 
     textBetween(from: number, to: number): string {
       return view.state.doc.sliceString(from, to);
+    },
+
+    markdownBetween(from: number, to: number): string {
+      const docLen = view.state.doc.length;
+      const safeFrom = Math.max(0, Math.min(from, docLen));
+      const safeTo = Math.max(safeFrom, Math.min(to, docLen));
+      return view.state.doc.sliceString(safeFrom, safeTo);
     },
 
     replaceRange(
@@ -916,10 +979,10 @@ function buildExtensions(options: EditorOptions, previewCompartment: Compartment
     EditorView.inputHandler.of(wrapSelectedMarkdownInput),
     rectangularSelection(),
     keymap.of([
-      { key: "Enter", run: (view) => exitEmptyMarkdownBlock(view) || continueMarkdownBlock(view) },
+      { key: "Enter", run: (view) => tableEnterSameColumn(view) || exitEmptyMarkdownBlock(view) || continueMarkdownBlock(view) },
       { key: "Mod-Enter", run: exitCurrentOrgEnv },
-      { key: "Tab", run: (view) => indentMarkdownBlock(view, 1) },
-      { key: "Shift-Tab", run: (view) => indentMarkdownBlock(view, -1) },
+      { key: "Tab", run: (view) => tableNavigateCell(view, 1) || indentMarkdownBlock(view, 1) },
+      { key: "Shift-Tab", run: (view) => tableNavigateCell(view, -1) || indentMarkdownBlock(view, -1) },
       { key: "Mod-d", run: selectNextMarkdownOccurrence },
       { key: "Mod-Shift-z", run: cmRedo },
       { key: "Meta-Shift-z", run: cmRedo },
@@ -954,7 +1017,8 @@ function buildExtensions(options: EditorOptions, previewCompartment: Compartment
     }),
     EditorView.domEventHandlers({
       mousedown: (event, eventView) => event.button === 0 && (
-        openIncludeFromEvent(eventView, event)
+        openAttachmentSmartFromEvent(eventView, event)
+        || openIncludeFromEvent(eventView, event)
         || openMarkdownLinkFromEvent(eventView, event)
         || calibrateWrappedLayoutClick(eventView, event)
       ),

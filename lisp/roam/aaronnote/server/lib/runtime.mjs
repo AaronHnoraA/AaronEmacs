@@ -64,6 +64,7 @@ let atomicWriteCounter = 0;
 const noteCodeFileCache = new Map();
 const noteCodeFilePending = new Map();
 let noteCodeFileCacheBytes = 0;
+const pathSuggestionDirListingCache = new Map();
 const CURRENT_DB_SCHEMA = 1;
 const BOOK_CACHE_SCHEMA = 1;
 const ASSET_CLEANUP_SCHEMA = 2;
@@ -73,6 +74,7 @@ const saveRequestVersions = new Map();
 const saveWriteQueues = new Map();
 const NOTE_CODE_FILE_CACHE_LIMIT = 64;
 const NOTE_CODE_FILE_CACHE_BYTES = 8_000_000;
+const PATH_SUGGESTION_DIR_CACHE_LIMIT = 64;
 const contentTypes = new Map([
   [".html", "text/html; charset=utf-8"],
   [".js", "application/javascript; charset=utf-8"],
@@ -656,11 +658,20 @@ export async function pathSuggestionsForFile(file, prefix = "./") {
   if (!current) return [];
   const target = pathSuggestionDirectory(current, prefix);
   if (!target) return [];
-  let entries = [];
-  try {
-    entries = await readdir(target.dir, { withFileTypes: true });
-  } catch {
-    return [];
+  const version = notesIndexVersion;
+  const cached = pathSuggestionDirListingCache.get(target.dir);
+  let entries = cached && cached.version === version ? cached.entries : null;
+  if (!entries) {
+    try {
+      entries = await readdir(target.dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    pathSuggestionDirListingCache.set(target.dir, { entries, version });
+    if (pathSuggestionDirListingCache.size > PATH_SUGGESTION_DIR_CACHE_LIMIT) {
+      const oldest = pathSuggestionDirListingCache.keys().next();
+      if (!oldest.done) pathSuggestionDirListingCache.delete(oldest.value);
+    }
   }
   return entries
     .filter((entry) => !entry.name.startsWith("."))
@@ -2457,6 +2468,7 @@ export function notePathWatchRelevant(relPath) {
 
 export function markNotesDirty(file = "") {
   notesIndexVersion++;
+  pathSuggestionDirListingCache.clear();
   notesSnapshotDirty = true;
   if (file && inside(file, noteScanRoot)) {
     dirtyNoteFiles.add(file);

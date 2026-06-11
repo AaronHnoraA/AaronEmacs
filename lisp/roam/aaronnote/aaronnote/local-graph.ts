@@ -622,7 +622,7 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
       }
     }
 
-    runSimulation(300);
+    runSimulation(150);
     applyPositions();
     options.status.textContent = `${nodes.length} nodes · ${links.length} links${graph.truncated ? " · capped" : ""}`;
   }

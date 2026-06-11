@@ -359,6 +359,14 @@ maybeDescribe("CM6 getBlockContext", () => {
       "table-insert-column",
       "table-delete-row",
       "table-delete-column",
+      "table-align-left",
+      "table-align-center",
+      "table-align-right",
+      "table-move-row-up",
+      "table-move-row-down",
+      "table-move-column-left",
+      "table-move-column-right",
+      "table-format",
     ]);
     ed.destroy();
   });

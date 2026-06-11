@@ -76,6 +76,9 @@ type NativeApi = {
     scanOrphans?: () => Promise<unknown>;
     trashOrphans?: (files: string[]) => Promise<unknown>;
   };
+  ime?: {
+    vimMode?: (mode: string) => Promise<unknown>;
+  };
 };
 
 declare global {
@@ -259,6 +262,17 @@ export const api = {
     async trashOrphans(files: string[]): Promise<Record<string, unknown> & { assets?: UnusedAsset[]; trashed?: unknown[]; message?: string }> {
       const call = requireMethod(nativeApi().assets?.trashOrphans, "Asset trash");
       return ensureOk(await call(files) as Record<string, unknown> & { assets?: UnusedAsset[]; trashed?: unknown[]; message?: string }, "Asset trash failed");
+    },
+  },
+  ime: {
+    async vimMode(mode: "normal" | "insert"): Promise<{ enabled?: boolean }> {
+      const call = window.aaronnoteApi?.ime?.vimMode;
+      if (!call) return { enabled: false };
+      try {
+        return (await call(mode)) as { enabled?: boolean } ?? { enabled: false };
+      } catch (_) {
+        return {};
+      }
     },
   },
 };

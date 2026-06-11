@@ -791,6 +791,8 @@ graph tab was closed via the Appine toolbar."
   "Debounce timer for `my/aaronnote--update-activity'.")
 (defvar my/aaronnote--activity-hooks-installed nil
   "Non-nil when Aaronnote pause/resume activity hooks are installed.")
+(defvar my/aaronnote--last-activity-active :unknown
+  "Last active-state scheduled by `my/aaronnote--update-activity'.")
 
 (defun my/aaronnote--app-buffer-visible-p ()
   "Return non-nil when the Aaronnote buffer is visible in a focused frame."
@@ -836,16 +838,27 @@ routes to the right session when multiple files are open."
   (let ((cur (current-buffer)))
     (when (my/aaronnote--xwidget-buffer-p cur)
       (setq my/aaronnote--app-buffer cur)))
-  (when my/aaronnote--activity-timer
-    (cancel-timer my/aaronnote--activity-timer))
-  (setq my/aaronnote--activity-timer
-        (run-with-idle-timer
-         0.3 nil
-         (lambda ()
-           (setq my/aaronnote--activity-timer nil)
-           (when my/aaronnote--ready
-             (my/aaronnote--apply-activity
-              (my/aaronnote--app-buffer-visible-p)))))))
+  (let ((active (my/aaronnote--app-buffer-visible-p)))
+    (unless (eq active my/aaronnote--last-activity-active)
+      (setq my/aaronnote--last-activity-active active)
+      (when my/aaronnote--activity-timer
+        (cancel-timer my/aaronnote--activity-timer))
+      (setq my/aaronnote--activity-timer
+            (if active
+                (run-with-idle-timer
+                 0.3 nil
+                 (lambda ()
+                   (setq my/aaronnote--activity-timer nil)
+                   (when my/aaronnote--ready
+                     (my/aaronnote--apply-activity
+                      (my/aaronnote--app-buffer-visible-p)))))
+              (run-at-time
+               0.05 nil
+               (lambda ()
+                 (setq my/aaronnote--activity-timer nil)
+                 (when my/aaronnote--ready
+                   (my/aaronnote--apply-activity
+                    (my/aaronnote--app-buffer-visible-p))))))))))
 
 (defun my/aaronnote--install-activity-hooks ()
   "Add hooks that trigger the pause/resume check."
@@ -866,6 +879,7 @@ routes to the right session when multiple files are open."
     (setq my/aaronnote--activity-timer nil))
   (setq my/aaronnote--paused nil
         my/aaronnote--manual-paused nil
+        my/aaronnote--last-activity-active :unknown
         my/aaronnote--activity-hooks-installed nil))
 
 ;;;###autoload

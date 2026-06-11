@@ -1,6 +1,8 @@
 type Rect = { left: number; top: number; bottom: number };
 type EditorLike = {
   getMarkdown(): string;
+  getMarkdownLength?: () => number;
+  markdownBetween?: (from: number, to: number) => string;
   getMarkdownSelection(): { from: number; to: number };
   getSelection?: () => { from: number; to: number };
   insertText(text: string, deleteBefore?: number): { from: number; to: number };
@@ -19,6 +21,7 @@ type Context = {
   onAction: (handler: (action: string) => void) => () => void;
   onSettingsChange: (handler: (settings: PluginSettings) => void) => () => void;
   getSettings: () => PluginSettings;
+  isActive?: () => boolean;
   onDocumentEvent: <K extends keyof DocumentEventMap>(
     type: K,
     handler: (event: DocumentEventMap[K]) => void,
@@ -210,6 +213,31 @@ function completionRequestDocument(
   };
 }
 
+function completionRequestDocumentFromEditor(
+  editor: EditorLike,
+  offset: number,
+  maxChars: number,
+): { content: string; offset: number; from: number; to: number; clipped: boolean } {
+  const length = editor.getMarkdownLength?.() ?? editor.getMarkdown().length;
+  const safeCursor = Math.max(0, Math.min(offset, length));
+  if (maxChars <= 0 || length <= maxChars || !editor.markdownBetween) {
+    return completionRequestDocument(editor.getMarkdown(), safeCursor, maxChars);
+  }
+
+  const beforeBudget = Math.max(0, Math.floor(maxChars * 0.72));
+  let from = Math.max(0, safeCursor - beforeBudget);
+  let to = Math.min(length, from + maxChars);
+  from = Math.max(0, to - maxChars);
+
+  return {
+    content: editor.markdownBetween(from, to),
+    offset: safeCursor - from,
+    from,
+    to,
+    clipped: from > 0 || to < length,
+  };
+}
+
 function trimmedCompletionInsertText(
   choice: InlineChoice,
   markdown: string,
@@ -281,6 +309,7 @@ export function setupCopilot(context: Context): () => void {
   let pendingToChar = false;
   let visible: VisibleCompletion | null = null;
   let settings = normalizeSettings(context.getSettings());
+  let lastScheduleKey = "";
   const cleanups: Array<() => void> = [];
 
   function clearCompletion(): void {
@@ -334,12 +363,29 @@ export function setupCopilot(context: Context): () => void {
     ].join("\0");
   }
 
+  function scheduleKey(): string {
+    const selection = activeSelection(context.editor);
+    return [
+      context.currentFile(),
+      context.vimMode(),
+      selection.from,
+      selection.to,
+    ].join("\0");
+  }
+
   function eligible(): boolean {
-    if (context.vimMode() !== "insert") return false;
-    if (!targetInHost(context.host, document.activeElement)) return false;
+    if (!eligibleShell()) return false;
     const selection = activeSelection(context.editor);
     if (selection.from !== selection.to) return false;
     return !hasRealTextAfterCursorOnLine(context.editor.cursorContext(512).after);
+  }
+
+  function eligibleShell(): boolean {
+    if (context.isActive && !context.isActive()) return false;
+    if (context.vimMode() !== "insert") return false;
+    if (!targetInHost(context.host, document.activeElement)) return false;
+    const selection = activeSelection(context.editor);
+    return selection.from === selection.to;
   }
 
   function schedule(): void {
@@ -351,12 +397,23 @@ export function setupCopilot(context: Context): () => void {
     timer = window.setTimeout(() => void requestCompletion(), settings.idleDelayMs);
   }
 
+  function scheduleIfChanged(): void {
+    if (!eligibleShell()) {
+      window.clearTimeout(timer);
+      clearCompletion();
+      return;
+    }
+    const key = scheduleKey();
+    if (key === lastScheduleKey && !visible) return;
+    lastScheduleKey = key;
+    schedule();
+  }
+
   async function requestCompletion(): Promise<void> {
     if (!eligible()) return;
-    const markdown = context.editor.getMarkdown();
-    if (!eligible()) return;
     const fullOffset = completionOffset(context.editor);
-    const requestDoc = completionRequestDocument(markdown, fullOffset, settings.largeBufferThreshold);
+    const requestDoc = completionRequestDocumentFromEditor(context.editor, fullOffset, settings.largeBufferThreshold);
+    if (!eligible()) return;
     const key = requestKey();
     const currentSeq = ++seq;
     try {
@@ -551,20 +608,21 @@ export function setupCopilot(context: Context): () => void {
   cleanups.push(context.onSettingsChange((next) => {
     settings = normalizeSettings(next);
     clearCompletion();
-    schedule();
+    scheduleIfChanged();
   }));
   cleanups.push(context.onChange(() => {
     if (accepting) return;
     clearCompletion();
-    schedule();
+    lastScheduleKey = "";
+    scheduleIfChanged();
   }));
   cleanups.push(context.onDocumentEvent("selectionchange", () => {
     if (accepting) return;
     clearCompletion();
-    schedule();
+    scheduleIfChanged();
   }));
-  cleanups.push(context.onDocumentEvent("mouseup", schedule));
-  cleanups.push(context.onDocumentEvent("keyup", schedule));
+  cleanups.push(context.onDocumentEvent("mouseup", scheduleIfChanged));
+  cleanups.push(context.onDocumentEvent("keyup", scheduleIfChanged));
   cleanups.push(context.onDocumentEvent("scroll", () => renderCompletion(), { capture: true }));
   window.addEventListener("resize", renderCompletion);
   cleanups.push(() => window.removeEventListener("resize", renderCompletion));
