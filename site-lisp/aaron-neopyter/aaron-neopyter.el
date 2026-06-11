@@ -72,6 +72,12 @@
   :type 'boolean
   :group 'aaron-neopyter)
 
+(defcustom aaron-neopyter-follow-point nil
+  "Whether point movement automatically activates the matching JupyterLab cell.
+When nil, use `aaron-neopyter-sync-point' to sync point manually."
+  :type 'boolean
+  :group 'aaron-neopyter)
+
 (defcustom aaron-neopyter-sync-debounce 0.35
   "Seconds to wait after the last buffer change before syncing."
   :type 'float
@@ -269,6 +275,7 @@ process its own keybindings unexpectedly."
     (define-key map (kbd "C-c C-s") #'aaron-neopyter-sync-current)
     (define-key map (kbd "C-c C-o") #'aaron-neopyter-open-notebook)
     (define-key map (kbd "C-c C-l") #'aaron-neopyter-toggle-follow-point)
+    (define-key map (kbd "M-RET") #'aaron-neopyter-sync-point)
     map)
   "Keymap for `aaron-neopyter-mode'.")
 

@@ -12,6 +12,11 @@
 (require 'aaron-neopyter-jupyter)
 (require 'aaron-neopyter-ui)
 
+(defvar my/xwidget-suppress-auto-focus)
+
+(declare-function my/xwidget-session-buffer "init-browser" (id))
+(declare-function xwidget-webkit-edit-mode "xwidget" (&optional arg))
+
 (defun aaron-neopyter--conn ()
   "Return the current connection or nil."
   (and (boundp 'aaron-neopyter--connection) aaron-neopyter--connection))
@@ -31,6 +36,41 @@
     (unless path
       (user-error "No notebook path for this buffer (run aaron-neopyter-open-notebook)"))
     path))
+
+(defun aaron-neopyter--jupyter-xwidget-buffer ()
+  "Return the visible JupyterLab xwidget buffer, if known."
+  (or (and (fboundp 'my/xwidget-session-buffer)
+           (my/xwidget-session-buffer "jupyter-lab"))
+      (cl-find-if
+       (lambda (buf)
+         (with-current-buffer buf
+           (and (eq major-mode 'xwidget-webkit-mode)
+                (bound-and-true-p my/xwidget-suppress-auto-focus))))
+       (buffer-list))))
+
+(defun aaron-neopyter--release-jupyter-xwidget-input ()
+  "Make sure the JupyterLab xwidget is not left in edit-mode."
+  (when-let* ((buf (aaron-neopyter--jupyter-xwidget-buffer)))
+    (with-current-buffer buf
+      (when (and (eq major-mode 'xwidget-webkit-mode)
+                 (fboundp 'xwidget-webkit-edit-mode))
+        (ignore-errors (xwidget-webkit-edit-mode -1))))))
+
+(defun aaron-neopyter--restore-emacs-focus (window)
+  "Restore keyboard focus to WINDOW's frame after a manual point sync."
+  (aaron-neopyter--release-jupyter-xwidget-input)
+  (when (window-live-p window)
+    (select-window window)
+    (when (fboundp 'select-frame-set-input-focus)
+      (ignore-errors
+        (select-frame-set-input-focus (window-frame window))))))
+
+(defun aaron-neopyter--schedule-focus-restore (window)
+  "Run a short focus restore sequence for WINDOW.
+JupyterLab may take focus asynchronously after activate/scroll RPCs, so a
+single immediate restore is not reliable."
+  (dolist (delay '(0 0.05 0.15 0.35))
+    (run-at-time delay nil #'aaron-neopyter--restore-emacs-focus window)))
 
 ;;;###autoload
 (defun aaron-neopyter-connect ()
@@ -61,6 +101,19 @@
       (user-error "No active Neopyter session in this buffer"))
     (aaron-neopyter-sync-now conn)
     (message "Neopyter: synced %s" (buffer-name))))
+
+;;;###autoload
+(defun aaron-neopyter-sync-point ()
+  "Sync the current buffer and manually follow point in JupyterLab."
+  (interactive)
+  (let ((conn (aaron-neopyter--require-conn))
+        (window (selected-window)))
+    (unless aaron-neopyter--session
+      (aaron-neopyter-sync-init-session))
+    (aaron-neopyter-sync-now conn)
+    (aaron-neopyter-cursor-now conn t)
+    (aaron-neopyter--schedule-focus-restore window)
+    (message "Neopyter: synced point")))
 
 ;;;###autoload
 (defun aaron-neopyter-run-cell ()

@@ -27,6 +27,9 @@ All paths sent over RPC must be relative to this root.
 Set to e.g. \"/Users/hc/Documents/AaronNote\" in your init file or via
 M-x customize-option aaron-neopyter-jupyter-root.")
 
+(defvar aaron-neopyter-follow-point nil
+  "Non-nil means point movement follows into the JupyterLab active cell.")
+
 ;;; Session struct (one per buffer)
 
 (cl-defstruct (aaron-neopyter--session
@@ -37,7 +40,7 @@ M-x customize-option aaron-neopyter-jupyter-root.")
   (version 0)     ; integer: monotonic edit counter
   cell-cache      ; list of aaron-neopyter-cell (last parse result)
   (last-cell-idx -1) ; integer: last activated cell index (-1 = unknown)
-  (follow-point t)   ; boolean
+  (follow-point aaron-neopyter-follow-point) ; boolean
   sync-timer         ; timer or nil
   cursor-timer)      ; timer or nil
 
@@ -152,12 +155,14 @@ Updates the cell cache.  Call from a timer or interactively."
 
 ;;; Cursor / active cell follow
 
-(defun aaron-neopyter-cursor-now (conn)
+(defun aaron-neopyter-cursor-now (conn &optional force)
   "Send activateCell + scrollToItem to JupyterLab based on current point.
-Only sends if the cell index actually changed."
+Only sends if the cell index actually changed.
+When FORCE is non-nil, sync even when automatic follow-point is disabled."
   (when (and aaron-neopyter--session
              (buffer-live-p (current-buffer))
-             (aaron-neopyter--session-follow-point aaron-neopyter--session))
+             (or force
+                 (aaron-neopyter--session-follow-point aaron-neopyter--session)))
     (let* ((session  aaron-neopyter--session)
            (nb-path  (aaron-neopyter--session-notebook-path session))
            (cells    (or (aaron-neopyter--session-cell-cache session)

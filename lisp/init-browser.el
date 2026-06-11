@@ -56,10 +56,31 @@
   :type 'boolean
   :group 'xwidget)
 
+(defvar-local my/xwidget-suppress-auto-focus nil
+  "Non-nil means this xwidget buffer must not auto-focus on load/reuse.")
+(put 'my/xwidget-suppress-auto-focus 'permanent-local t)
+
 (defvar-local my/xwidget-focus-script nil
   "Optional JS to focus an editable element inside this xwidget buffer.
 Set buffer-locally before the page loads (e.g. in the open function).")
 (put 'my/xwidget-focus-script 'permanent-local t)
+
+(defun my/xwidget--jupyter-url-p (url)
+  "Return non-nil when URL points at a known JupyterLab page."
+  (and (stringp url)
+       (or (and (fboundp 'my/jupyter-lab-url-p)
+                (my/jupyter-lab-url-p url))
+           (string-match-p
+            "\\`https?://\\(?:127\\.0\\.0\\.1\\|localhost\\):[0-9]+/lab\\(?:/\\|\\?\\|#\\|\\'\\)"
+            url))))
+
+(defun my/xwidget--auto-focus-allowed-p (&optional buffer)
+  "Return non-nil when BUFFER may receive automatic xwidget focus."
+  (let ((buf (or buffer (current-buffer))))
+    (and my/xwidget-auto-focus-on-load
+         (buffer-live-p buf)
+         (with-current-buffer buf
+           (not my/xwidget-suppress-auto-focus)))))
 
 (defun my/xwidget-focus (&optional buffer)
   "Focus the xwidget in BUFFER (default: current buffer) for keyboard input.
@@ -84,12 +105,12 @@ to evil insert state if evil is active in the buffer."
 (defun my/xwidget--load-finished-focus (xwidget _xwidget-event-type)
   "Schedule focus for XWIDGET's buffer after page load-finished."
   ;; Capture the load-finished detail immediately (last-input-event is ephemeral).
-  (when (and my/xwidget-auto-focus-on-load
-             (eq _xwidget-event-type 'load-changed)
+  (when (and (eq _xwidget-event-type 'load-changed)
              (string-equal (nth 3 last-input-event) "load-finished"))
     (let ((buf (and (fboundp 'xwidget-buffer)
                     (ignore-errors (xwidget-buffer xwidget)))))
       (when (and (buffer-live-p buf)
+                 (my/xwidget--auto-focus-allowed-p buf)
                  (or (eq buf (current-buffer))
                      (get-buffer-window buf)))
         ;; Delay 0.3 s to let WebKit finish rendering before injecting focus.
@@ -125,6 +146,9 @@ to evil insert state if evil is active in the buffer."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (setq-local my/xwidget-session-url url)
+      (setq-local my/xwidget-suppress-auto-focus
+                  (or (equal id "jupyter-lab")
+                      (my/xwidget--jupyter-url-p url)))
       (when id
         (setq-local my/xwidget--session-id id)
         (add-hook 'kill-buffer-hook #'my/xwidget--session-cleanup nil t)))
@@ -163,7 +187,8 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
           (my/xwidget--record-buffer existing id url)
           (my/xwidget--display-buffer existing display)
           ;; Page already loaded — no load-finished will fire; schedule focus.
-          (run-at-time 0.3 nil #'my/xwidget-focus existing)
+          (when (my/xwidget--auto-focus-allowed-p existing)
+            (run-at-time 0.3 nil #'my/xwidget-focus existing))
           existing)
       (let ((buffer
              (if (eq display 'side)
