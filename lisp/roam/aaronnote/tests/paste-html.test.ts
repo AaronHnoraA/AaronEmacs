@@ -23,6 +23,11 @@ describe("HTML paste conversion", () => {
     expect(md).toBe("bad");
   });
 
+  test("keeps plain relative links without dot or slash prefixes", () => {
+    const md = htmlToMarkdown(`<a href="path/note.md#heading">note</a>`);
+    expect(md).toBe("[note](path/note.md#heading)");
+  });
+
   test("keeps Typora-style inline extensions where possible", () => {
     expect(htmlToMarkdown("<p><mark>hot</mark> H<sub>2</sub> E<sup>2</sup></p>"))
       .toBe("==hot== H~2~ E^2^");

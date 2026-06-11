@@ -9,7 +9,7 @@ function neutralizeForbiddenEmbedAttrs(source: string): string {
 // Mirrors the uri allowlist used by paste-html.ts; forbids active/embedding tags.
 export function sanitizeEmbeddedHtml(source: string): string {
   return String(DOMPurify.sanitize(neutralizeForbiddenEmbedAttrs(String(source || "")), {
-    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|file|zotero|roam):|[#/]|\.{0,2}\/|[^a-z])/i,
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|file|zotero|roam):|[^:]*?(?:[/?#]|$))/i,
     FORBID_TAGS: ["script", "style", "iframe", "object", "embed"],
   }));
 }

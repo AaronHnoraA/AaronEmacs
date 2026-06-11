@@ -74,7 +74,7 @@ export function htmlToMarkdown(html: string): string {
   const raw = String(html || "");
   if (raw.length > MAX_HTML_TO_MARKDOWN_CHARS) return plainTextFromHtml(raw);
   const clean = DOMPurify.sanitize(raw, {
-    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|file|zotero|roam):|[#/]|\.{0,2}\/|[^a-z])/i,
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|file|zotero|roam):|[^:]*?(?:[/?#]|$))/i,
     ADD_TAGS: ["math-block"],
     ADD_ATTR: ["data-aaronnote-math-block", "data-display", "data-delimiter", "data-math-render-key", "data-tex"],
     FORBID_TAGS: ["script", "style", "iframe", "object", "embed"],

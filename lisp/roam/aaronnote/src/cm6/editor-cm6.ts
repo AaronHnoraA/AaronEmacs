@@ -589,6 +589,14 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
       return { from: selection.from, to: selection.to, text };
     }
 
+    if (!text.includes("\n")) {
+      const line = view.state.doc.lineAt(Math.max(0, Math.min(selection.from, view.state.doc.length)));
+      const from = placement.where === "after"
+        ? Math.min(line.to, selection.to)
+        : selection.from;
+      return { from, to: from, text };
+    }
+
     const docLength = view.state.doc.length;
     const line = view.state.doc.lineAt(Math.max(0, Math.min(selection.from, docLength)));
     let insert = text.endsWith("\n") ? text : `${text}\n`;

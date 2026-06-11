@@ -2248,6 +2248,53 @@ maybeDescribe("cm6 kernel: selection", () => {
     cleanup();
   });
 
+  test("vim-lite linewise register does not force external single-line paste below", async () => {
+    let clipboardText = "external";
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        readText: async () => clipboardText,
+        writeText: async (text: string) => { clipboardText = text; },
+      },
+    });
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const editor = createEditor(host, {
+      kernel: "cm6",
+      initialContent: "alpha\nbeta",
+      readSystemClipboardFallback: async () => ({ kind: "text", text: clipboardText }),
+    });
+    const target = (editor.view as unknown as { contentDOM: HTMLElement }).contentDOM;
+    const vim = createVimLite(editor, document.body);
+    function press(key: string): void {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      Object.defineProperty(event, "target", { value: target });
+      vim.handleKeyDown(event);
+    }
+
+    try {
+      editor.setMarkdownSelection(editor.getMarkdown().indexOf("beta"));
+      vim.setMode("normal");
+      press("d");
+      press("d");
+      expect(editor.getMarkdown()).toBe("alpha\n");
+
+      clipboardText = "X";
+      editor.setMarkdown("alpha beta", { history: "reset" });
+      editor.setMarkdownSelection("alpha".length);
+      vim.setMode("normal");
+      press("p");
+      await settlePaste();
+      expect(editor.getMarkdown()).toBe("alphaX beta");
+    } finally {
+      editor.destroy();
+      host.remove();
+      if (originalClipboard) Object.defineProperty(navigator, "clipboard", originalClipboard);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
+
   test("vim-lite a and i at line end do not cross into the next line", () => {
     const { editor, cleanup } = mountCM6("abc\ndef");
     const target = (editor.view as unknown as { contentDOM: HTMLElement }).contentDOM;

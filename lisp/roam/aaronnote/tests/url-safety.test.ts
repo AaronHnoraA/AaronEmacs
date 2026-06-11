@@ -5,6 +5,8 @@ import { domHref, safeHref } from "../src/url-safety.ts";
 describe("URL safety", () => {
   test("allows normal note, web, and app links", () => {
     expect(safeHref("./note.md")).toBe(true);
+    expect(safeHref("note.md")).toBe(true);
+    expect(safeHref("path/note.md#heading")).toBe(true);
     expect(safeHref("#heading")).toBe(true);
     expect(safeHref("https://example.com")).toBe(true);
     expect(safeHref("mailto:a@example.com")).toBe(true);

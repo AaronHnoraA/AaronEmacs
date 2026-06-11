@@ -97,10 +97,73 @@ function unique<T>(items: T[], key: (item: T) => string): T[] {
   return out;
 }
 
-function noteTags(note: NoteSummary | undefined): string[] {
-  return unique([...(note?.tags ?? []), ...(note?.inlineTags ?? [])]
+function cleanTags(tags: readonly unknown[]): string[] {
+  return unique(tags
     .map((tag) => String(tag || "").trim().replace(/^#/, ""))
     .filter(Boolean), (tag) => tag.toLowerCase());
+}
+
+function roamTags(note: NoteSummary | undefined): string[] {
+  return cleanTags(note?.tags ?? []);
+}
+
+function parseMetaListValue(value: string): string[] {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith("(")) {
+    return [...trimmed.matchAll(/"((?:[^"\\]|\\.)*)"/g)]
+      .map((match) => String(match[1] || "").replace(/\\"/g, "\"").replace(/\\\\/g, "\\"))
+      .filter(Boolean);
+  }
+  return trimmed.split(/[, ]+/).map((item) => item.trim()).filter(Boolean);
+}
+
+function tagsFromMetaLines(raw: string): string[] | null {
+  const tags: string[] = [];
+  let sawTags = false;
+  let currentList = "";
+  for (const rawLine of String(raw || "").split(/\r?\n/)) {
+    const item = rawLine.match(/^\s*-\s*(.+?)\s*$/);
+    if (item && currentList === "tags") {
+      tags.push(item[1] || "");
+      continue;
+    }
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const pair = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+    if (!pair) {
+      if (currentList === "tags") break;
+      continue;
+    }
+    const key = String(pair[1] || "").toLowerCase();
+    const value = String(pair[2] || "").trim();
+    currentList = value ? "" : key;
+    if (key !== "tags") continue;
+    sawTags = true;
+    tags.push(...parseMetaListValue(value));
+  }
+  return sawTags ? cleanTags(tags) : null;
+}
+
+function markdownRoamTags(markdown: string): string[] | null {
+  const text = String(markdown || "");
+  const metaBlock = text.match(/^\s*#\+begin\s+meta\s*\r?\n([\s\S]*?)\r?\n\s*#\+end\s+meta\s*$/im);
+  if (metaBlock) return tagsFromMetaLines(metaBlock[1] || "");
+  const frontMatter = text.match(/^\s*---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/);
+  return frontMatter ? tagsFromMetaLines(frontMatter[1] || "") : null;
+}
+
+function currentRoamTags(note: NoteSummary | undefined, markdown: string): string[] {
+  const tags = markdownRoamTags(markdown);
+  return tags ?? roamTags(note);
+}
+
+function tagKey(tag: string): string {
+  return String(tag || "").trim().replace(/^#/, "").toLowerCase();
+}
+
+function tagNodeId(tag: string): string {
+  return `tag:${tagKey(tag)}`;
 }
 
 function markdownRefs(markdown: string): string[] {
@@ -123,23 +186,6 @@ function markdownRefs(markdown: string): string[] {
     if (ref) refs.push(ref);
   }
   return unique(refs, normalizeLookup);
-}
-
-function markdownTags(markdown: string): string[] {
-  const tags: string[] = [];
-  const text = String(markdown || "");
-  const inline = /@@tag\[([^\]\n]+)\]/g;
-  let match: RegExpExecArray | null;
-  while ((match = inline.exec(text)) !== null) {
-    const tag = String(match[1] || "").trim().replace(/^#/, "");
-    if (tag) tags.push(tag);
-  }
-  const hash = /(^|[\s([{])#([\p{L}\p{N}_/-]{2,})/gu;
-  while ((match = hash.exec(text)) !== null) {
-    const tag = String(match[2] || "").trim();
-    if (tag) tags.push(tag);
-  }
-  return unique(tags, (tag) => tag.toLowerCase());
 }
 
 function labelFit(label: string, max = 22): string {
@@ -215,7 +261,7 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
       displayTitle(note),
       (note.refs ?? []).join(","),
       (note.backlinks ?? []).join(","),
-      noteTags(note).join(","),
+      roamTags(note).join(","),
     ].join("\t");
   }
 
@@ -242,10 +288,13 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
     const notes = unique([current, ...options.getNotes()], (note) => noteKey(note));
     const byLookup = buildLookup(notes);
     const currentKey = noteKey(current);
-    const currentTags = unique([...noteTags(current), ...markdownTags(options.getMarkdown())], (tag) => tag.toLowerCase());
+    const currentTags = currentRoamTags(current, options.getMarkdown());
     const outgoing = new Map<string, NoteSummary[]>();
     const incoming = new Map<string, NoteSummary[]>();
     const tagsByNote = new Map<string, string[]>();
+    const tagNotes = new Map<string, NoteSummary[]>();
+    const tagLabels = new Map<string, string>();
+    const tagNeighbors = new Map<string, Map<string, string>>();
     const markdownOut = markdownRefs(options.getMarkdown());
 
     for (const note of notes) {
@@ -256,7 +305,29 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
         .map((ref) => resolveRef(ref, byLookup, options.resolveNoteRef))
         .filter((target): target is NoteSummary => Boolean(target && noteKey(target) && noteKey(target) !== key)), noteKey);
       outgoing.set(key, resolved);
-      tagsByNote.set(key, key === currentKey ? currentTags : noteTags(note));
+      const tags = key === currentKey ? currentTags : roamTags(note);
+      tagsByNote.set(key, tags);
+      for (const tag of tags) {
+        const lower = tagKey(tag);
+        if (!lower) continue;
+        if (!tagLabels.has(lower)) tagLabels.set(lower, tag);
+        const tagged = tagNotes.get(lower) ?? [];
+        tagged.push(note);
+        tagNotes.set(lower, unique(tagged, noteKey));
+      }
+      for (let i = 0; i < tags.length; i += 1) {
+        for (let j = i + 1; j < tags.length; j += 1) {
+          const a = tagKey(tags[i] || "");
+          const b = tagKey(tags[j] || "");
+          if (!a || !b || a === b) continue;
+          const aNeighbors = tagNeighbors.get(a) ?? new Map<string, string>();
+          const bNeighbors = tagNeighbors.get(b) ?? new Map<string, string>();
+          aNeighbors.set(b, tagLabels.get(b) || tags[j] || b);
+          bNeighbors.set(a, tagLabels.get(a) || tags[i] || a);
+          tagNeighbors.set(a, aNeighbors);
+          tagNeighbors.set(b, bNeighbors);
+        }
+      }
     }
 
     for (const note of notes) {
@@ -314,7 +385,7 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
     function addTag(tag: string, depth: number): boolean {
       const clean = String(tag || "").trim().replace(/^#/, "");
       if (!clean) return false;
-      const id = `tag:${clean.toLowerCase()}`;
+      const id = tagNodeId(clean);
       if (nodes.has(id)) {
         nodes.get(id)!.depth = Math.min(nodes.get(id)!.depth, depth);
         return true;
@@ -340,6 +411,9 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
 
     function addLink(source: string, target: string, type: LocalLink["type"]): void {
       if (!source || !target || source === target) return;
+      if (type === "tag" && source.startsWith("tag:") && target.startsWith("tag:") && source > target) {
+        [source, target] = [target, source];
+      }
       if (links.size >= MAX_LOCAL_GRAPH_LINKS) {
         truncated = true;
         return;
@@ -379,15 +453,25 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
 
       if (config.tags) {
         for (const tag of tagsByNote.get(key) ?? []) {
-          const tagId = `tag:${tag.toLowerCase()}`;
+          const tagId = tagNodeId(tag);
           if (!addTag(tag, nextDepth)) continue;
           addLink(key, tagId, "tag");
+          const coTags = tagsByNote.get(key) ?? [];
+          for (const coTag of coTags) {
+            const coTagId = tagNodeId(coTag);
+            if (coTagId === tagId || !nodes.has(coTagId)) continue;
+            addLink(tagId, coTagId, "tag");
+          }
           if (nextDepth >= config.depth) continue;
-          const lower = tag.toLowerCase();
-          for (const taggedNote of notes) {
+          const lower = tagKey(tag);
+          for (const relatedTag of tagNeighbors.get(lower)?.values() ?? []) {
+            const relatedTagId = tagNodeId(relatedTag);
+            if (!addTag(relatedTag, nextDepth + 1)) continue;
+            addLink(tagId, relatedTagId, "tag");
+          }
+          for (const taggedNote of tagNotes.get(lower) ?? []) {
             const taggedKey = noteKey(taggedNote);
             if (!taggedKey || taggedKey === key) continue;
-            if (!(tagsByNote.get(taggedKey) ?? []).some((value) => value.toLowerCase() === lower)) continue;
             if (!addNote(taggedNote, nextDepth + 1)) continue;
             addLink(tagId, taggedKey, "tag");
           }
@@ -414,17 +498,17 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
       return;
     }
 
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg") as SVGSVGElement;
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.setAttribute("role", "img");
     svg.setAttribute("aria-label", "Local graph");
     svg.classList.add("aaronnote-local-graph-svg");
 
-    const viewportLayer = document.createElementNS(svg.namespaceURI, "g");
+    const viewportLayer = document.createElementNS(svg.namespaceURI, "g") as SVGGElement;
     viewportLayer.classList.add("aaronnote-local-graph-viewport");
-    const linkLayer = document.createElementNS(svg.namespaceURI, "g");
+    const linkLayer = document.createElementNS(svg.namespaceURI, "g") as SVGGElement;
     linkLayer.classList.add("aaronnote-local-graph-links");
-    const nodeLayer = document.createElementNS(svg.namespaceURI, "g");
+    const nodeLayer = document.createElementNS(svg.namespaceURI, "g") as SVGGElement;
     nodeLayer.classList.add("aaronnote-local-graph-nodes");
     viewportLayer.append(linkLayer, nodeLayer);
     svg.append(viewportLayer);
@@ -471,7 +555,7 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
 
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
     const linkEls = links.map((link) => {
-      const line = document.createElementNS(svg.namespaceURI, "line");
+      const line = document.createElementNS(svg.namespaceURI, "line") as SVGLineElement;
       line.classList.add("aaronnote-local-graph-link", `is-${link.type}`);
       line.dataset.linkType = link.type;
       line.setAttribute("stroke-linecap", "round");
@@ -483,14 +567,14 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
     let dragMoved = false;
 
     const nodeEls = nodes.map((node) => {
-      const group = document.createElementNS(svg.namespaceURI, "g");
+      const group = document.createElementNS(svg.namespaceURI, "g") as SVGGElement;
       group.classList.add("aaronnote-local-graph-node", `is-${node.type}`, `depth-${Math.min(2, node.depth)}`);
       group.setAttribute("tabindex", "0");
       group.setAttribute("role", "button");
       group.setAttribute("aria-label", node.label);
-      const circle = document.createElementNS(svg.namespaceURI, "circle");
+      const circle = document.createElementNS(svg.namespaceURI, "circle") as SVGCircleElement;
       circle.setAttribute("r", node.type === "current" ? "9" : node.type === "tag" ? "5.5" : "7");
-      const text = document.createElementNS(svg.namespaceURI, "text");
+      const text = document.createElementNS(svg.namespaceURI, "text") as SVGTextElement;
       text.textContent = labelFit(node.label);
       text.setAttribute("y", node.type === "tag" ? "17" : "20");
       group.append(circle, text);

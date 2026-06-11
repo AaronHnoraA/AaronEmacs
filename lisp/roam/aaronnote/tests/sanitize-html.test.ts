@@ -28,6 +28,11 @@ describe("sanitizeEmbeddedHtml", () => {
     expect(out).toContain("click");
   });
 
+  test("preserves plain relative link hrefs", () => {
+    const out = sanitizeEmbeddedHtml('<a href="path/note.md#heading">note</a>');
+    expect(out).toContain('href="path/note.md#heading"');
+  });
+
   test("preserves benign inline tags", () => {
     const out = sanitizeEmbeddedHtml('<sub>2</sub><sup>2</sup><br>plain<em>em</em>');
     expect(out).toContain("<sub>2</sub>");

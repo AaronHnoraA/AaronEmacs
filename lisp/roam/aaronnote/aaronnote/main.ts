@@ -771,6 +771,14 @@ function runFormattingShortcut(event: KeyboardEvent): boolean {
   return true;
 }
 
+function runSourceToggleShortcut(event: KeyboardEvent): boolean {
+  if (!primaryMod(event) || event.shiftKey || event.altKey || event.isComposing) return false;
+  if (event.key !== "/" && event.code !== "Slash") return false;
+  event.preventDefault();
+  toggleSourceMode();
+  return true;
+}
+
 function fileNameFromPath(path: string): string {
   return String(path || "").split(/[\\/]/).filter(Boolean).at(-1) || path || "";
 }
@@ -2079,8 +2087,10 @@ function completionPreviewText(snippet: SnippetSummary): string {
 }
 
 function pathCompletionPrefix(before: string): string {
-  const match = before.match(/(?:^|[\s([{"'=])((?:\.{1,2}\/)[^\s\])}"'`<>]*)$/);
-  return match?.[1] ?? "";
+  const match = before.match(/(?:^|[\s([{"'=])([^\s\])}"'`<>#@]*\/[^\s\])}"'`<>#@]*)$/);
+  const prefix = match?.[1] ?? "";
+  if (!prefix || prefix.startsWith("//") || hrefProtocol(prefix)) return "";
+  return prefix;
 }
 
 function roamCompletionPrefix(before: string): string | null {
@@ -2601,7 +2611,7 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
       return;
     }
 
-    if (/^\.{1,2}\//.test(targetPrefix)) {
+    if (pathCompletionPrefix(` ${targetPrefix}`) === targetPrefix) {
       scheduleAsyncCompletion(
         `link-path:${currentFile}:${targetPrefix}`,
         targetPrefix,
@@ -3320,6 +3330,11 @@ document.addEventListener("keydown", (event) => {
   if (vim.handleKeyDown(event)) {
     if (plainEscapeKey(event)) noteCursorPositionEvent();
     scheduleAssistUpdate({ cursor: true });
+    event.stopPropagation();
+    return;
+  }
+  if (runSourceToggleShortcut(event)) {
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
     event.stopPropagation();
     return;
   }

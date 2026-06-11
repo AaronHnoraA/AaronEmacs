@@ -285,9 +285,10 @@ export function createVimLite(
 
   function yank(text: string, kind: VimRegisterKind = "characterwise"): void {
     if (!text) return;
-    register = { text, kind };
+    const registerText = kind === "linewise" && !text.endsWith("\n") ? `${text}\n` : text;
+    register = { text: registerText, kind };
     (window as unknown as Record<string, unknown>).__aaronoteVimRegister = register;
-    pendingClipboardWrite = writeSystemClipboard(text);
+    pendingClipboardWrite = writeSystemClipboard(registerText);
   }
 
   function resetMotionMemory(): void {
