@@ -431,6 +431,7 @@
 .cm-editor org-env-block[data-kind="note"] { --block-c: var(--c-note); }
 .cm-editor org-env-block[data-kind="info"] { --block-c: var(--c-note); }
 .cm-editor org-env-block[data-kind="summary"] { --block-c: var(--c-note); }
+.cm-editor org-env-block[data-kind="fold"] { --block-c: var(--c-note); }
 .cm-editor org-env-block[data-kind="definition"],
 .cm-editor org-env-block[data-kind="defn"],
 .cm-editor org-env-block[data-kind="define"] { --orgenv-end: "◇"; }
@@ -449,12 +450,69 @@
 .cm-editor org-env-block[data-kind="note"],
 .cm-editor org-env-block[data-kind="info"] { --orgenv-end: "·"; }
 .cm-editor org-env-block[data-kind="summary"] { --orgenv-end: "§"; }
-.cm-editor org-env-block:not([data-kind="comment"]):not([data-kind="meta"])::after {
+.cm-editor org-env-block:not([data-kind="comment"]):not([data-kind="fold"]):not([data-kind="meta"])::after {
   content: var(--orgenv-end, "•");
   display: block;
   color: color-mix(in srgb, var(--block-c), black 32%);
   line-height: 1;
   text-align: right;
+}
+
+.cm-editor org-env-block[data-kind="fold"] {
+  position: relative;
+  display: block;
+  width: min(100%, 720px);
+  margin: 0;
+  padding: 0.45rem 0;
+  border-left: 0;
+  overflow: visible;
+}
+
+.cm-editor org-env-block[data-kind="fold"] .org-env-fold-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--block-c), transparent 30%);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--block-c), white 86%);
+  color: color-mix(in srgb, var(--block-c), black 48%);
+  cursor: pointer;
+  font: 700 0.92em/1.35 var(--aaron-font-title, var(--aaron-font-heading, serif));
+  letter-spacing: 0;
+  text-align: left;
+}
+
+.cm-editor org-env-block[data-kind="fold"] .org-env-fold-marker::before {
+  content: "▶";
+  font-size: 0.72em;
+}
+
+.cm-editor org-env-block[data-kind="fold"].org-env-fold-open .org-env-fold-marker::before {
+  content: "▼";
+}
+
+.cm-editor org-env-block[data-kind="fold"] .org-env-fold-title {
+  min-width: 0;
+}
+
+.cm-editor org-env-block[data-kind="fold"] .org-env-fold-title > p {
+  display: inline;
+  margin: 0;
+}
+
+.cm-editor org-env-block[data-kind="fold"] .org-env-fold-content {
+  width: min(100%, 720px);
+  box-sizing: border-box;
+  margin-top: 0.45rem;
+  padding: 0.5rem 0 0.45rem 0.85rem;
+  border-left: 3px solid color-mix(in srgb, var(--block-c), black 18%);
+}
+
+.cm-editor org-env-block[data-kind="fold"] .org-env-fold-content[hidden] {
+  display: none !important;
 }
 .cm-editor org-env-block[data-kind="comment"] {
   --block-c: #f97316;

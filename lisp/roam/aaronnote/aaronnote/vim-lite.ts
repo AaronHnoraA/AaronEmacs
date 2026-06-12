@@ -2,6 +2,7 @@ import type { Editor } from "../src/lib.ts";
 import type { Text } from "@codemirror/state";
 
 export type VimLiteMode = "insert" | "normal" | "visual" | "visual-line";
+export type VimLiteFoldAction = "close" | "open" | "toggle" | "close-all" | "open-all";
 
 export type VimLiteKey = {
   key: string;
@@ -24,6 +25,7 @@ type VimLiteOptions = {
   onUndo?: () => boolean;
   onRedo?: () => boolean;
   onIndent?: (direction: 1 | -1) => boolean;
+  onFold?: (action: VimLiteFoldAction) => boolean;
 };
 
 type VimRegisterKind = "linewise" | "characterwise";
@@ -426,6 +428,11 @@ export function createVimLite(
     }, 0);
   }
 
+  function foldCommand(action: VimLiteFoldAction): boolean {
+    resetMotionMemory();
+    return options.onFold?.(action) ?? true;
+  }
+
   function appendChar(): void {
     const text = doc(editor);
     const selection = editor.getMarkdownSelection();
@@ -535,6 +542,23 @@ export function createVimLite(
       }
       return true;
     }
+    if (pending === "z") {
+      pending = "";
+      switch (key) {
+        case "c":
+          return foldCommand("close");
+        case "o":
+          return foldCommand("open");
+        case "a":
+          return foldCommand("toggle");
+        case "M":
+          return foldCommand("close-all");
+        case "R":
+          return foldCommand("open-all");
+        default:
+          return true;
+      }
+    }
     if (pending === ">") {
       pending = "";
       if (key === ">") {
@@ -602,6 +626,9 @@ export function createVimLite(
         return options.onUndo?.() ?? false;
       case "g":
         pending = "g";
+        return true;
+      case "z":
+        pending = "z";
         return true;
       case "G":
         resetMotionMemory();

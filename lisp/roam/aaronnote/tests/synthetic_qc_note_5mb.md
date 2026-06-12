@@ -1579,10 +1579,20 @@ for every $i$.
 #+end lemma
 
 #+begin proof Proof sketch
-The proof compares inclusions and projections between summands. By composing
-maps around an indecomposable component, one obtains endomorphisms. The
+The proof compares inclusions and projections between summands. By composing ssssssssssssssssssssssss this is hard to sssssssssssssssssssssssssssssssssssss 
+maps around an indecomposable component, one obtains endomorphisms. The jjjjjjjjjjjjjjjjjjjjjjjjj this is hard to see as 
+
+#+begin fold **Details**
+Hidden content.
+#+begin fold **Details**
+Hidden content.
+#+end fold
+
+#+end fold
+
+
 locality of endomorphism rings forces at least one component map to be
-invertible. This identifies one matching pair of summands. Removing that
+invertible. This identifies one matching pair of summands. Removing that this is h   this is hard to sse ta 
 pair and applying induction proves the result.
 #+end proof
 
@@ -41743,7 +41753,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文直觉：正半定保证测量概率非负；迹为一保证总概率为一。
+中文直觉��正半定保证测量概率非负；迹为一保证总概率为一。
 #+end note
 
 The expectation value of an observable $A$ in state $\rho$ is
@@ -121342,7 +121352,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文直觉：正半定保证测量概率非负；迹为一保证总概率为一。
+中文直觉：正半定保证测量概率非负；迹为一保证总概率为���。
 #+end note
 
 The expectation value of an observable $A$ in state $\rho$ is
@@ -219540,7 +219550,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文直觉：正半定保证测量概率非负；迹为一保证总概率为一。
+中文直觉：正半定保证测量概率非���；迹为一保证总概率为一。
 #+end note
 
 The expectation value of an observable $A$ in state $\rho$ is

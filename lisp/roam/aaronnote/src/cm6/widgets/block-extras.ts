@@ -39,6 +39,7 @@ import {
   metaRoamIndexed,
   metaTags,
   parseMetaEntries,
+  renderMarkdownInlineHTML,
   renderMarkdownHTML,
   showMetaTag,
 } from "../../render-html.ts";
@@ -1137,6 +1138,7 @@ function envLabel(kind: string): string {
     info: "Info",
     comment: "Comment",
     summary: "Summary",
+    fold: "Fold",
     lean4: "Lean 4",
     tikz: "TikZ",
   };
@@ -1249,6 +1251,87 @@ class CommentWidget extends MeasuredWidget {
 
     const content = document.createElement("div");
     content.className = "org-env-content";
+    content.hidden = true;
+    content.innerHTML = renderMarkdownHTML(this.body.trim());
+    enhanceRenderedMarkdown(content);
+    stopInteractiveWidgetEvents(content);
+
+    block.append(button, content);
+    return this.registerMeasured(block, view);
+  }
+
+  ignoreEvent(): boolean { return false; }
+}
+
+class FoldWidget extends MeasuredWidget {
+  title: string;
+  body: string;
+  from: number;
+  to: number;
+  depth: number;
+
+  constructor(title: string, body: string, from: number, to: number, depth: number) {
+    super();
+    this.title = title;
+    this.body = body;
+    this.from = from;
+    this.to = to;
+    this.depth = depth;
+  }
+
+  protected measureKey(): string { return "fold:" + shortHash(this.title + ":" + this.body); }
+
+  protected measureGroupKey(): string {
+    return `fold:lines:${Math.min(8, Math.ceil(this.body.split(/\n/).length / 5))}`;
+  }
+
+  protected estimatedHeightFallback(): number { return 46; }
+
+  eq(other: FoldWidget): boolean {
+    return this.title === other.title
+      && this.body === other.body
+      && this.from === other.from
+      && this.to === other.to
+      && this.depth === other.depth;
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const block = document.createElement("org-env-block");
+    block.className = "cm-org-env-fold-widget org-env-block";
+    setSourceRange(block, this.from, this.to);
+    block.dataset.cmOpenSource = "true";
+    block.setAttribute("data-kind", "fold");
+    block.setAttribute("data-title", this.title);
+    block.setAttribute("data-label", envLabel("fold"));
+    block.setAttribute("data-fold-open", "false");
+    block.style.setProperty("--org-env-depth", String(this.depth));
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "org-env-fold-summary";
+    button.setAttribute("aria-expanded", "false");
+
+    const marker = document.createElement("span");
+    marker.className = "org-env-fold-marker";
+    marker.setAttribute("aria-hidden", "true");
+    const title = document.createElement("span");
+    title.className = "org-env-fold-title";
+    title.innerHTML = renderMarkdownInlineHTML(this.title.trim() || "Details");
+    button.append(marker, title);
+    button.addEventListener("mousedown", stopEditorPropagation);
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const open = content.hidden === true;
+      content.hidden = !open;
+      block.classList.toggle("org-env-fold-open", open);
+      block.setAttribute("data-fold-open", open ? "true" : "false");
+      button.setAttribute("aria-expanded", open ? "true" : "false");
+      if (block.isConnected) view.requestMeasure();
+    });
+
+    const content = document.createElement("div");
+    content.className = "org-env-fold-content org-env-content";
     content.hidden = true;
     content.innerHTML = renderMarkdownHTML(this.body.trim());
     enhanceRenderedMarkdown(content);
@@ -1900,6 +1983,7 @@ function buildOrgEnvBodyLineDecoRanges(
 
   for (const block of orgEnvBlocksFromState(state)) {
     if (block.kind === "meta") continue;
+    if (block.kind === "fold" && !selectionTouchesRange(state, block.from, block.to)) continue;
     if (block.bodyTo < windowFrom || block.bodyFrom > windowTo) continue;
     const fromLine = doc.lineAt(Math.max(block.bodyFrom, windowFrom));
     const toLine = doc.lineAt(Math.min(block.bodyTo, windowTo));
@@ -1998,6 +2082,7 @@ function measureOrgEnvRails(view: EditorView): OrgEnvRailMeasure[] {
     .filter((block) => (
       block.kind !== "meta"
       && block.kind !== "comment"
+      && block.kind !== "fold"
       && block.kind !== "html"
       && block.kind !== "tikz"
       && block.openFrom <= visibleTo
@@ -2076,6 +2161,16 @@ function addOrgEnvBlockExtraDecos(
     decos.push(
       Decoration.replace({
         widget: new CommentWidget(block.title, block.body, block.from, block.to, block.depth),
+        block: true,
+      }).range(block.from, block.to),
+    );
+    occupied?.push([block.from, block.to]);
+    return;
+  }
+  if (block.kind === "fold" && !selectionTouchesRange(state, block.from, block.to)) {
+    decos.push(
+      Decoration.replace({
+        widget: new FoldWidget(block.title, block.body, block.from, block.to, block.depth),
         block: true,
       }).range(block.from, block.to),
     );
@@ -2246,8 +2341,8 @@ function activeBlockExtraKey(state: EditorState): string {
     if (sel.from >= range.from && sel.from <= range.to) parts.push(`hr:${range.from}:${range.to}`);
   }
   for (const block of blocks) {
-    if (block.kind === "comment" && selectionTouchesRange(state, block.from, block.to)) {
-      parts.push(`comment:${block.from}:${block.to}`);
+    if ((block.kind === "comment" || block.kind === "fold") && selectionTouchesRange(state, block.from, block.to)) {
+      parts.push(`${block.kind}:${block.from}:${block.to}`);
       continue;
     }
     if (selectionTouchesRange(state, block.openFrom, block.openTo)) {
@@ -2320,7 +2415,7 @@ function canMapBlockExtraDecos(state: EditorState, changes: ChangeSet): boolean 
   if (ranges.hrs.some((range) => changesTouchRange(changes, range.from, range.to))) return false;
   if (ranges.frontMatter && changesTouchRange(changes, ranges.frontMatter.from, ranges.frontMatter.to)) return false;
   if (blocks.some((block) => (
-    (block.kind === "meta" || block.kind === "comment" || block.kind === "html" || block.kind === "tikz")
+    (block.kind === "meta" || block.kind === "comment" || block.kind === "fold" || block.kind === "html" || block.kind === "tikz")
     && changesTouchRange(changes, block.from, block.to)
   ))) {
     return false;
@@ -2338,8 +2433,8 @@ function patchBlockExtraDecosForOrgEnvTitleChange(
   addOrgEnvBlockExtraDecos(decos, null, state, block);
   decos.sort((a, b) => a.from - b.from || a.to - b.to);
 
-  const commentWidgetActive = block.kind === "comment" && !selectionTouchesRange(state, block.from, block.to);
-  let next = commentWidgetActive
+  const fullBlockWidgetActive = (block.kind === "comment" || block.kind === "fold") && !selectionTouchesRange(state, block.from, block.to);
+  let next = fullBlockWidgetActive
     ? mapped.update({ filterFrom: block.from, filterTo: block.to, filter: () => false })
     : mapped
         .update({ filterFrom: block.openFrom, filterTo: block.openTo, filter: () => false })

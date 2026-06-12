@@ -25,6 +25,13 @@ import {
   quickMatches,
 } from "../editor-api.ts";
 import { indentLess, indentMore } from "@codemirror/commands";
+import {
+  foldAllHeadings,
+  foldHeadingAtCursor,
+  toggleFoldAtCursor,
+  unfoldAllHeadings,
+  unfoldHeadingAtCursor,
+} from "./heading-fold.ts";
 
 // ---------------------------------------------------------------------------
 // Inline wrap (bold / italic / highlight / strike / code / link / image)
@@ -714,6 +721,12 @@ export function tableEnterSameColumn(view: EditorView): boolean {
 // ---------------------------------------------------------------------------
 
 export function runCommandCM6(view: EditorView, command: EditorCommand, value = ""): boolean {
+  if (command === "fold-heading") return foldHeadingAtCursor(view);
+  if (command === "unfold-heading") return unfoldHeadingAtCursor(view);
+  if (command === "toggle-fold") return toggleFoldAtCursor(view);
+  if (command === "fold-all-headings") return foldAllHeadings(view);
+  if (command === "unfold-all-headings") return unfoldAllHeadings(view);
+
   // ── Inline marks ────────────────────────────────────────────────────────
   if (command === "bold") return wrapInline(view, "**", "**");
   if (command === "italic") return wrapInline(view, "*", "*");

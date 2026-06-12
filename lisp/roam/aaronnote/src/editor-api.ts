@@ -75,6 +75,11 @@ export type EditorCommand =
   | "heading-4"
   | "heading-5"
   | "heading-6"
+  | "fold-heading"
+  | "unfold-heading"
+  | "toggle-fold"
+  | "fold-all-headings"
+  | "unfold-all-headings"
   | "copy-code";
 
 export type WritingModeOptions = {

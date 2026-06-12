@@ -254,6 +254,11 @@ const editorCommands = new Set<EditorCommand>([
   "heading-4",
   "heading-5",
   "heading-6",
+  "fold-heading",
+  "unfold-heading",
+  "toggle-fold",
+  "fold-all-headings",
+  "unfold-all-headings",
   "copy-code",
 ]);
 
@@ -390,6 +395,13 @@ const vim = createVimLite(editor, host, {
   onUndo: () => editor.undo(),
   onRedo: () => editor.redo(),
   onIndent: (dir) => indentMarkdownBlock(editor.view, dir),
+  onFold: (action) => {
+    if (action === "close") return editor.runCommand("fold-heading");
+    if (action === "open") return editor.runCommand("unfold-heading");
+    if (action === "toggle") return editor.runCommand("toggle-fold");
+    if (action === "close-all") return editor.runCommand("fold-all-headings");
+    return editor.runCommand("unfold-all-headings");
+  },
 });
 const assistScheduler = new AssistScheduler(window, editorSurfaceVisible, runAssistUpdate);
 updateModeLabel(vim.mode());

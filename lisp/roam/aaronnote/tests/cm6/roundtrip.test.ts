@@ -13,6 +13,8 @@
  */
 
 import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
+import { foldedRanges } from "@codemirror/language";
+import type { EditorState } from "@codemirror/state";
 import { createEditor } from "../../src/editor-api.ts";
 import { calibrateWrappedLayoutClick, markdownHrefAt } from "../../src/cm6/editor-cm6.ts";
 import { setKnownRoamRefs } from "../../src/cm6/roam-link-status.ts";
@@ -50,6 +52,12 @@ function nextTick(): Promise<void> {
 async function settlePaste(): Promise<void> {
   await nextTick();
   await nextTick();
+}
+
+function foldedRangeCount(state: EditorState): number {
+  let count = 0;
+  foldedRanges(state).between(0, state.doc.length, () => { count += 1; });
+  return count;
 }
 
 // ---------------------------------------------------------------------------
@@ -2005,6 +2013,45 @@ after
     cleanup();
   });
 
+  test("renders fold org-env collapsed with markdown title and transient open state", () => {
+    const md = "#+begin fold **Details**\nHidden **body**\n#+end fold\n\nAfter";
+    const { editor, cleanup } = mountCM6(md);
+    try {
+      editor.setMarkdownSelection(md.length);
+
+      const fold = document.querySelector<HTMLElement>('org-env-block[data-kind="fold"]');
+      expect(fold).toBeTruthy();
+      expect(fold!.classList.contains("cm-org-env-fold-widget")).toBe(true);
+      expect(fold!.getAttribute("data-fold-open")).toBe("false");
+      expect(document.querySelector('.cm-org-env-rail[data-org-env-kind="fold"]')).toBeNull();
+
+      const button = fold!.querySelector<HTMLButtonElement>(".org-env-fold-summary");
+      const content = fold!.querySelector<HTMLElement>(".org-env-fold-content");
+      expect(button?.getAttribute("aria-expanded")).toBe("false");
+      expect(button?.querySelector(".org-env-fold-title strong")?.textContent).toBe("Details");
+      expect(content?.hidden).toBe(true);
+
+      button!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      expect(button?.getAttribute("aria-expanded")).toBe("true");
+      expect(content?.hidden).toBe(false);
+      expect(content?.querySelector("strong")?.textContent).toBe("body");
+      expect(fold!.classList.contains("org-env-fold-open")).toBe(true);
+
+      editor.setMarkdown(md, { history: "reset" });
+      editor.setMarkdownSelection(md.length);
+      const reloaded = document.querySelector<HTMLElement>('org-env-block[data-kind="fold"]');
+      expect(reloaded?.getAttribute("data-fold-open")).toBe("false");
+      expect(reloaded?.querySelector<HTMLElement>(".org-env-fold-content")?.hidden).toBe(true);
+
+      editor.setMarkdownSelection(md.indexOf("Hidden"));
+      expect(document.querySelector('org-env-block[data-kind="fold"]')).toBeNull();
+      expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
+        .toContain("Hidden **body**");
+    } finally {
+      cleanup();
+    }
+  });
+
   test("renders diagram fences inside collapsed comment content", () => {
     const md = [
       "#+begin comment diagram",
@@ -2246,6 +2293,70 @@ maybeDescribe("cm6 kernel: selection", () => {
     await settlePaste();
     expect(editor.getMarkdown()).toBe("abcdab");
     cleanup();
+  });
+
+  test("vim-lite heading folds use z commands and remember state per file", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    let currentFile = "a.md";
+    const mdA = "# A\n\n## B\n\nBody\n\n# C\n\nTail";
+    const mdB = "# Other\n\nBody";
+    const editor = createEditor(host, {
+      kernel: "cm6",
+      initialContent: mdA,
+      getCurrentFile: () => currentFile,
+    });
+    const target = (editor.view as unknown as { contentDOM: HTMLElement }).contentDOM;
+    const vim = createVimLite(editor, document.body, {
+      onFold: (action) => {
+        if (action === "close") return editor.runCommand("fold-heading");
+        if (action === "open") return editor.runCommand("unfold-heading");
+        if (action === "toggle") return editor.runCommand("toggle-fold");
+        if (action === "close-all") return editor.runCommand("fold-all-headings");
+        return editor.runCommand("unfold-all-headings");
+      },
+    });
+    function press(key: string): void {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      Object.defineProperty(event, "target", { value: target });
+      vim.handleKeyDown(event);
+    }
+
+    try {
+      editor.setMarkdownSelection(0);
+      vim.setMode("normal");
+
+      press("z");
+      press("M");
+      expect(foldedRangeCount(editor.view.state)).toBe(2);
+
+      press("z");
+      press("R");
+      expect(foldedRangeCount(editor.view.state)).toBe(0);
+
+      press("z");
+      press("c");
+      expect(foldedRangeCount(editor.view.state)).toBe(1);
+
+      currentFile = "b.md";
+      editor.setMarkdown(mdB, { history: "reset" });
+      expect(foldedRangeCount(editor.view.state)).toBe(0);
+
+      currentFile = "a.md";
+      editor.setMarkdown(mdA, { history: "reset" });
+      expect(foldedRangeCount(editor.view.state)).toBe(1);
+
+      press("z");
+      press("o");
+      expect(foldedRangeCount(editor.view.state)).toBe(0);
+
+      press("z");
+      press("a");
+      expect(foldedRangeCount(editor.view.state)).toBe(1);
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
   });
 
   test("vim-lite linewise register does not force external single-line paste below", async () => {

@@ -235,6 +235,7 @@ function envLabel(kind: string): string {
     info: "Info",
     comment: "Comment",
     summary: "Summary",
+    fold: "Fold",
     tikz: "TikZ",
   };
   return labels[kind] ?? kind;
@@ -638,6 +639,10 @@ function renderLeanOrgEnv(meta: OrgEnvTokenMeta): string {
   return renderLeanCodeCell(meta.title, meta.body);
 }
 
+function renderMarkdownSummary(md: MarkdownIt, title: string): string {
+  return md.renderInline(title.trim() || "Details");
+}
+
 function renderSemanticHeading(tokens: Token[], idx: number): string {
   const meta = tokens[idx]!.meta as SemanticHeadingTokenMeta;
   const attrs = [
@@ -690,6 +695,14 @@ function renderOrgEnv(md: MarkdownIt, tokens: Token[], idx: number): string {
   const title = meta.title;
   const label = envLabel(kind);
   const body = meta.body.trim() ? md.render(meta.body) : "";
+  if (kind.toLowerCase() === "fold") {
+    return [
+      `<details class="org-env-fold" data-kind="fold" data-title="${escapeAttr(title)}" data-label="${escapeAttr(label)}">`,
+      `<summary class="org-env-fold-summary">${renderMarkdownSummary(md, title)}</summary>`,
+      `<div class="org-env-content">${body}</div>`,
+      "</details>",
+    ].join("");
+  }
   return [
     `<org-env-block data-kind="${escapeAttr(kind)}" data-title="${escapeAttr(title)}" data-label="${escapeAttr(label)}" data-comment-open="false">`,
     `<span class="org-env-heading"><span class="org-env-heading-label">${escapeHtml(label)}</span><span class="org-env-heading-title" data-empty="${title ? "false" : "true"}">${escapeHtml(title)}</span></span>`,
@@ -872,6 +885,16 @@ export function renderMarkdownHTML(
   root.innerHTML = protectedHtml.html;
   applyTaskCheckboxes(root);
   return restoreIframeNavigationAttrsFromDom(cleanEditorHTML(root), protectedHtml.attrs);
+}
+
+export function renderMarkdownInlineHTML(
+  markdown: string,
+  options: RenderMarkdownHTMLOptions = {},
+): string {
+  const md = createMarkdownIt(options);
+  const root = document.createElement("span");
+  root.innerHTML = md.renderInline(markdown);
+  return cleanEditorHTML(root);
 }
 
 export function renderPublishedNoteHTML(

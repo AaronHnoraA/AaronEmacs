@@ -22,6 +22,19 @@ $$
     expect(html).not.toContain("<h1");
   });
 
+  test("renders fold org env as details with markdown summary", () => {
+    const html = renderMarkdownHTML([
+      "#+begin fold **Details**",
+      "Hidden **body**.",
+      "#+end fold",
+    ].join("\n"));
+
+    expect(html).toContain('<details class="org-env-fold"');
+    expect(html).toContain('<summary class="org-env-fold-summary"><strong>Details</strong></summary>');
+    expect(html).toContain("<strong>body</strong>");
+    expect(html).not.toContain("<org-env-block");
+  });
+
   test("renders math errors instead of empty previews", () => {
     const html = renderMarkdownHTML(String.raw`Inline $\notacommand$.
 

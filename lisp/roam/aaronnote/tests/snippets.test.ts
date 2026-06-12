@@ -259,6 +259,40 @@ describe("aaronnote snippets", () => {
     }
   });
 
+  test("fold snippet keeps markdown title and body tabstops", () => {
+    const mount = document.createElement("div");
+    document.body.appendChild(mount);
+    const editor = createEditor(mount);
+    try {
+      const session = new SnippetSession(editor);
+      expect(session.insert({
+        key: "fold",
+        name: "Fold block",
+        mode: "markdown-mode",
+        body: "#+begin fold ${1:**Details**}\n${2:Hidden content.}\n#+end fold\n$0",
+      })).toBe(true);
+
+      expect(editor.getMarkdown().trimEnd()).toBe(
+        "#+begin fold **Details**\nHidden content.\n#+end fold",
+      );
+
+      let selection = editor.getSelection();
+      expect(editor.textBetween(selection.from, selection.to)).toBe("**Details**");
+
+      expect(session.next()).toBe(true);
+      selection = editor.getSelection();
+      expect(editor.textBetween(selection.from, selection.to)).toBe("Hidden content.");
+
+      expect(session.next()).toBe(true);
+      const exit = editor.getSelection();
+      expect(exit.from).toBe(exit.to);
+      expect(exit.from).toBe("#+begin fold **Details**\nHidden content.\n#+end fold\n".length);
+    } finally {
+      editor.destroy();
+      mount.remove();
+    }
+  });
+
   test("display-math snippet keeps the editable field inside the math body", () => {
     const mount = document.createElement("div");
     document.body.appendChild(mount);

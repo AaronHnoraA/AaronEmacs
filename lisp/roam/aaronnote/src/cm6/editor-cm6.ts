@@ -26,7 +26,7 @@ import {
   historyKeymap,
 } from "@codemirror/commands";
 import { closeBrackets } from "@codemirror/autocomplete";
-import { syntaxTree } from "@codemirror/language";
+import { foldEffect, syntaxTree, unfoldEffect } from "@codemirror/language";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { livePreviewExtension } from "./live-preview.ts";
 import { disposeHighlightWorker } from "../code-highlight-async.ts";
@@ -64,7 +64,7 @@ import { roamLinkStatusExtension } from "./roam-link-status.ts";
 import { tocIndexExtension, tocIndexFromState } from "./toc-index.ts";
 import { resolveAnchorHeading } from "../heading-slug.ts";
 import { orderedListRenumber, skipOrderedListRenumber } from "./ordered-list-renumber.ts";
-import { headingFoldExtension } from "./heading-fold.ts";
+import { captureHeadingFoldKeys, headingFoldExtension, restoreHeadingFoldKeys } from "./heading-fold.ts";
 import { proseDiagnosticsExtension } from "./prose-diagnostics.ts";
 import { scheduleViewportDecorationRefresh } from "./viewport-refresh.ts";
 
@@ -492,9 +492,11 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
   wrap.append(editorHost);
   host.append(wrap);
   const initialDoc = options.initialContent ?? "";
+  const headingFoldMemory = new Map<string, string[]>();
+  let activeDocumentKey = currentDocumentKey();
   const createState = (doc: string): EditorState => EditorState.create({
     doc,
-    extensions: buildExtensions(options, previewCompartment, () => inSource),
+    extensions: buildExtensions(options, previewCompartment, () => inSource, rememberHeadingFolds),
   });
 
   const view = new EditorView({
@@ -549,6 +551,20 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
 
   function getMarkdown(): string {
     return view.state.doc.toString();
+  }
+
+  function currentDocumentKey(): string {
+    return String(options.getCurrentFile?.() || "");
+  }
+
+  function rememberHeadingFolds(key = activeDocumentKey): void {
+    if (!key) return;
+    headingFoldMemory.set(key, captureHeadingFoldKeys(view.state));
+  }
+
+  function restoreHeadingFolds(key = activeDocumentKey): void {
+    if (!key) return;
+    restoreHeadingFoldKeys(view, headingFoldMemory.get(key));
   }
 
   function dispatchWithSelect(
@@ -644,7 +660,10 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
 
     setMarkdown(md: string, setOptions: SetMarkdownOptions = {}): void {
       if (setOptions.history === "reset") {
+        rememberHeadingFolds();
+        activeDocumentKey = currentDocumentKey();
         view.setState(createState(md));
+        restoreHeadingFolds();
         scheduleViewportDecorationRefresh(view);
         return;
       }
@@ -977,7 +996,12 @@ export function wrapSelectedMarkdownInput(view: EditorView, _from: number, _to: 
   return true;
 }
 
-function buildExtensions(options: EditorOptions, previewCompartment: Compartment, isSourceMode: () => boolean) {
+function buildExtensions(
+  options: EditorOptions,
+  previewCompartment: Compartment,
+  isSourceMode: () => boolean,
+  onFoldStateChanged: () => void,
+) {
   return [
     EditorState.allowMultipleSelections.of(true),
     EditorView.clickAddsSelectionRange.of((event) => event.altKey || event.metaKey || event.ctrlKey),
@@ -1021,6 +1045,9 @@ function buildExtensions(options: EditorOptions, previewCompartment: Compartment
       if ((update.selectionSet || update.docChanged) && options.onSelectionChange) {
         const { from, to } = update.state.selection.main;
         options.onSelectionChange({ from, to });
+      }
+      if (update.transactions.some((tr) => tr.effects.some((effect) => effect.is(foldEffect) || effect.is(unfoldEffect)))) {
+        onFoldStateChanged();
       }
     }),
     EditorView.domEventHandlers({

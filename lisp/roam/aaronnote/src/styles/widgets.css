@@ -480,6 +480,23 @@
   font-family: ui-monospace, monospace;
 }
 
+/* ─── CM6 heading fold chevron ───────────────────────────────────── */
+.cm-editor .cm-heading-fold-arrow {
+  display: inline-block;
+  width: 1rem;
+  margin-left: -1.15rem;
+  color: var(--aaron-muted, #777);
+  cursor: pointer;
+  opacity: 0;
+  user-select: none;
+}
+.cm-editor .cm-heading-fold-arrow::before { content: "▼"; font-size: 0.7em; }
+.cm-editor .cm-heading-fold-arrow.is-folded::before { content: "▶"; }
+.cm-editor .cm-line:hover .cm-heading-fold-arrow,
+.cm-editor .cm-heading-fold-arrow.is-folded {
+  opacity: 0.72;
+}
+
 /* ─── CM6 TOC widget ─────────────────────────────────────────────── */
 .cm-editor .cm-toc {
   display: block;
@@ -672,6 +689,7 @@
 .cm-editor .cm-org-env-block[data-kind="info"]       { --block-c: var(--c-note, #a8f0e3); }
 .cm-editor .cm-org-env-block[data-kind="comment"]    { --block-c: #f97316; }
 .cm-editor .cm-org-env-block[data-kind="summary"]    { --block-c: var(--c-note, #a8f0e3); }
+.cm-editor .cm-org-env-block[data-kind="fold"]       { --block-c: var(--c-note, #a8f0e3); }
 .cm-editor .cm-org-env-block[data-kind="definition"],
 .cm-editor .cm-org-env-block[data-kind="defn"],
 .cm-editor .cm-org-env-block[data-kind="define"]     { --orgenv-end: "◇"; }
@@ -690,7 +708,7 @@
 .cm-editor .cm-org-env-block[data-kind="note"],
 .cm-editor .cm-org-env-block[data-kind="info"]       { --orgenv-end: "·"; }
 .cm-editor .cm-org-env-block[data-kind="summary"]    { --orgenv-end: "§"; }
-.cm-editor .cm-org-env-block:not([data-kind="comment"]):not([data-kind="meta"])::after {
+.cm-editor .cm-org-env-block:not([data-kind="comment"]):not([data-kind="fold"]):not([data-kind="meta"])::after {
   content: var(--orgenv-end, "•");
   display: block;
   color: color-mix(in srgb, var(--block-c), black 32%);
@@ -716,6 +734,7 @@
 .cm-editor [data-org-env-kind="info"]       { --block-c: var(--c-note, #a8f0e3); }
 .cm-editor [data-org-env-kind="comment"]    { --block-c: #f97316; }
 .cm-editor [data-org-env-kind="summary"]    { --block-c: var(--c-note, #a8f0e3); }
+.cm-editor [data-org-env-kind="fold"]       { --block-c: var(--c-note, #a8f0e3); }
 .cm-editor [data-org-env-kind="definition"],
 .cm-editor [data-org-env-kind="defn"],
 .cm-editor [data-org-env-kind="define"]     { --orgenv-end: "◇"; }
