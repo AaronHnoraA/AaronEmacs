@@ -22,4 +22,4 @@
 - 脱离链接附件检测
 
 ### Bugs
-
+- jupter link应该定位到jupytxt

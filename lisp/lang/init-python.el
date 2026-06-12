@@ -14,20 +14,55 @@
 (defvar-local my/python-imenu-backend nil
   "Original Python imenu backend for the current buffer.")
 
+(defun my/python--project-bin-directory ()
+  "Return the current project-local bin directory, if any."
+  (when-let* ((root (or (locate-dominating-file default-directory "pyrightconfig.json")
+                        (locate-dominating-file default-directory ".envrc")
+                        (locate-dominating-file default-directory ".git"))))
+    (file-name-as-directory (expand-file-name "bin" root))))
+
+(defun my/python--path-without-project-bin ()
+  "Return PATH without the current project's bin directory."
+  (let ((project-bin (my/python--project-bin-directory)))
+    (mapconcat
+     #'identity
+     (delq nil
+           (mapcar
+            (lambda (entry)
+              (let ((normalized (file-name-as-directory (expand-file-name entry))))
+                (unless (and project-bin (string= normalized project-bin))
+                  entry)))
+            (split-string (or (getenv "PATH") "") path-separator t)))
+     path-separator)))
+
+(defun my/python--pyright-contact (program)
+  "Return a clean Eglot contact for local Pyright PROGRAM."
+  (when-let* ((executable (ignore-errors
+                            (my/language-server-executable-find program))))
+    (list "/usr/bin/env"
+          "-u" "PYTHONPATH"
+          "-u" "SAGE_PYTHON"
+          "-u" "SAGE_SITE_PACKAGES"
+          "-u" "DOT_SAGE"
+          (concat "PATH=" (my/python--path-without-project-bin))
+          executable
+          "--stdio")))
+
 (defun my/python-eglot-contact (&optional interactive project)
   "Return the preferred Python Eglot contact for the current buffer."
   (if (file-remote-p default-directory)
       (list (or (ignore-errors (my/language-server-executable-find "pylsp"))
                 "pylsp"))
-    (require 'eglot)
-    (funcall
-     (eglot-alternatives
-      '(("basedpyright-langserver" "--stdio")
-        ("pyright-langserver" "--stdio")
-        ("pylsp")
-        ("jedi-language-server")))
-     interactive
-     project)))
+    (or (my/python--pyright-contact "pyright-langserver")
+        (my/python--pyright-contact "basedpyright-langserver")
+        (progn
+          (require 'eglot)
+          (funcall
+           (eglot-alternatives
+            '(("pylsp")
+              ("jedi-language-server")))
+           interactive
+           project)))))
 
 (defun my/python-eglot-workspace-configuration ()
   "Return Python workspace configuration for the active server."
@@ -58,12 +93,12 @@
     (my/register-eglot-server-program
      '(python-mode python-ts-mode)
      #'my/python-eglot-contact
-     :label "local: basedpyright/pyright, remote: pylsp/jedi"
-     :executables '("basedpyright-langserver"
-                    "pyright-langserver"
+     :label "local: pyright, remote: pylsp/jedi"
+     :executables '("pyright-langserver"
+                    "basedpyright-langserver"
                     "pylsp"
                     "jedi-language-server")
-     :note "Python buffers prefer basedpyright/pyright locally, but prefer pylsp/jedi over TRAMP.")))
+     :note "Python buffers prefer pyright locally, but prefer pylsp/jedi over TRAMP.")))
 
 (use-package python
   :ensure nil
