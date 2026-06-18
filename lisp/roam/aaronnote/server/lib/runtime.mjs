@@ -89,7 +89,6 @@ let noteCodeFileCacheBytes = 0;
 const pathSuggestionDirListingCache = new Map();
 const contentRootCache = new Map();
 const CURRENT_DB_SCHEMA = 1;
-const BOOK_CACHE_SCHEMA = 1;
 const ASSET_CLEANUP_SCHEMA = 2;
 const ROAM_FULL_SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const scanConcurrency = Math.max(1, Math.min(64, Number(process.env.AARONNOTE_SCAN_CONCURRENCY) || 16));
@@ -1449,55 +1448,7 @@ function noteMetadata(content) {
   };
 }
 
-function bookCacheDir() {
-  return join(stateRoot, "book");
-}
-
-function safeBookCacheName(id) {
-  return `${String(id || "book").trim().replace(/[\\/:\0]/g, "_") || "book"}.json`;
-}
-
-function sha256Text(text) {
-  return createHash("sha256").update(String(text || "")).digest("hex");
-}
-
-function bookMetaFromContent(content) {
-  const meta = noteMetadata(content);
-  const value = meta.book;
-  if (value === true) return { role: "cover", parentRef: "" };
-  const raw = String(value || "").trim();
-  if (!raw) return { role: "", parentRef: "" };
-  if (/^(true|yes|book)$/i.test(raw)) return { role: "cover", parentRef: "" };
-  const included = raw.match(/^included@(.+)$/i);
-  if (included) return { role: "included", parentRef: included[1].trim() };
-  return { role: "", parentRef: "" };
-}
-
-function includeRefsFromContent(content) {
-  const refs = [];
-  const re = /^[ \t]*@@include[ \t]+\[([^\]\n]+)\][ \t]*$/gmi;
-  let match;
-  while ((match = re.exec(String(content || ""))) !== null) {
-    const ref = String(match[1] || "").trim();
-    if (ref) refs.push(ref);
-  }
-  return refs;
-}
-
-function markdownHrefPathOnly(raw) {
-  return decodeRef(String(raw || "").trim().split(/[?#]/, 1)[0] || "");
-}
-
-function bookResolvePathFrom(baseFile, rawRef) {
-  const protocol = hrefProtocol(rawRef);
-  if (protocol && protocol !== "file") return "";
-  const rawPath = markdownHrefPathOnly(rawRef);
-  if (!rawPath) return "";
-  const file = resolveInputPath(rawPath, dirname(baseFile));
-  return inside(file, noteRoot) ? file : "";
-}
-
-function slugBookAnchor(value) {
+function slugHeadingAnchor(value) {
   const slug = String(value || "")
     .replace(/\s+/g, " ")
     .trim()
@@ -1527,7 +1478,7 @@ function semanticOutlineFromInlineCommand(command) {
     return {
       level: 1,
       text: title,
-      slug: String(command.args?.id || "").trim() || slugBookAnchor(title),
+      slug: String(command.args?.id || "").trim() || slugHeadingAnchor(title),
       source: "semantic",
       kind: "part",
     };
@@ -1538,13 +1489,13 @@ function semanticOutlineFromInlineCommand(command) {
   return {
     level,
     text: title,
-    slug: String(command.args?.id || "").trim() || slugBookAnchor(title),
+    slug: String(command.args?.id || "").trim() || slugHeadingAnchor(title),
     source: "semantic",
     kind: "section",
   };
 }
 
-function semanticBookHeadingsFromLine(line) {
+function semanticHeadingsFromLine(line) {
   const trimmed = String(line || "").trim();
   if (!trimmed.startsWith("@@part") && !trimmed.startsWith("@@section")) return [];
   const command = scanInlineCommands(trimmed)[0];
@@ -1553,22 +1504,22 @@ function semanticBookHeadingsFromLine(line) {
   return outline ? [outline] : [];
 }
 
-function contentHasSemanticBookHeadings(lines) {
+function contentHasSemanticHeadings(lines) {
   let inFence = false;
   for (const line of lines) {
     if (/^\s*(```|~~~)/.test(line)) {
       inFence = !inFence;
       continue;
     }
-    if (!inFence && semanticBookHeadingsFromLine(line).length > 0) return true;
+    if (!inFence && semanticHeadingsFromLine(line).length > 0) return true;
   }
   return false;
 }
 
-function bookHeadingsFromContent(content, note, used) {
+function noteHeadingsFromContent(content, note, used) {
   const withoutMeta = removeMetaBlock(String(content || ""));
   const lines = withoutMeta.split(/\r?\n/);
-  const hasSemantic = contentHasSemanticBookHeadings(lines);
+  const hasSemantic = contentHasSemanticHeadings(lines);
   const headings = [];
   let hasH1 = false;
   let inFence = false;
@@ -1578,8 +1529,8 @@ function bookHeadingsFromContent(content, note, used) {
       continue;
     }
     if (inFence) continue;
-    for (const semantic of semanticBookHeadingsFromLine(line)) {
-      let slug = semantic.slug || slugBookAnchor(semantic.text);
+    for (const semantic of semanticHeadingsFromLine(line)) {
+      let slug = semantic.slug || slugHeadingAnchor(semantic.text);
       const base = slug;
       for (let i = 2; used.has(slug); i++) slug = `${base}-${i}`;
       used.add(slug);
@@ -1591,14 +1542,14 @@ function bookHeadingsFromContent(content, note, used) {
     const level = hasSemantic ? SEMANTIC_MARKDOWN_OFFSET + markdownLevel : markdownLevel;
     if (level === 1) hasH1 = true;
     const text = match[2].trim() || "Untitled";
-    let slug = slugBookAnchor(text);
+    let slug = slugHeadingAnchor(text);
     const base = slug;
     for (let i = 2; used.has(slug); i++) slug = `${base}-${i}`;
     used.add(slug);
     headings.push({ level, text, slug, path: note.path || "", id: note.id || "", source: "markdown" });
   }
   if (!hasSemantic && !hasH1 && note.title) {
-    let slug = slugBookAnchor(note.title);
+    let slug = slugHeadingAnchor(note.title);
     const base = slug;
     for (let i = 2; used.has(slug); i++) slug = `${base}-${i}`;
     used.add(slug);
@@ -1610,9 +1561,9 @@ function bookHeadingsFromContent(content, note, used) {
 function domTargetsFromContent(content, note) {
   const stack = [];
   const labelStack = [];
-  return bookHeadingsFromContent(content, note, new Set()).map((heading) => {
+  return noteHeadingsFromContent(content, note, new Set()).map((heading) => {
     const label = String(heading.text || heading.slug || "").trim();
-    const slug = String(heading.slug || slugBookAnchor(label)).trim();
+    const slug = String(heading.slug || slugHeadingAnchor(label)).trim();
     const level = Math.max(1, Number(heading.level || 1));
     while (stack.length > 0 && stack[stack.length - 1].level >= level) {
       stack.pop();
@@ -1633,230 +1584,6 @@ function domTargetsFromContent(content, note) {
       notePath: note.path || "",
     };
   }).filter((target) => target.label && target.slug && target.path.length > 0);
-}
-
-function noteBookRefValues(note) {
-  return [
-    note?.id,
-    note?.key,
-    note?.title,
-    note?.path,
-    note?.link,
-    note?.source,
-    note?.file,
-    note?.file ? basename(note.file) : "",
-    ...(note?.aliases || []),
-  ].filter((value) => String(value || "").trim());
-}
-
-function resolveBookRef(notes, ref, fromNote = null) {
-  const raw = String(ref || "").trim();
-  if (!raw) return null;
-  if (fromNote?.file && (raw.includes("/") || /\.(?:md|markdown|typ)$/i.test(markdownHrefPathOnly(raw)))) {
-    const file = bookResolvePathFrom(fromNote.file, raw);
-    if (file) {
-      const byFile = notes.find((note) => note.file === file);
-      if (byFile) return byFile;
-    }
-  }
-  const key = canonicalServerNoteRef(raw);
-  if (!key) return null;
-  return notes.find((note) => noteBookRefValues(note).some((value) => canonicalServerNoteRef(value) === key)) || null;
-}
-
-async function readNoteTextSafe(file) {
-  try {
-    return await readFile(file, "utf8");
-  } catch {
-    return "";
-  }
-}
-
-function contentMayAffectBook(text) {
-  const bookMeta = bookMetaFromContent(text);
-  return Boolean(bookMeta.role || includeRefsFromContent(text).length > 0);
-}
-
-async function applyBookMetadata(notes) {
-  const covers = notes.filter((note) => note.bookRole === "cover" && note.id);
-  const notesByFile = new Map(notes.map((note) => [note.file, note]));
-  const coverById = new Map(covers.map((note) => [note.id, note]));
-  const diagnosticsByCover = new Map(covers.map((note) => [note.id, []]));
-  const includedByCover = new Map(covers.map((note) => [note.id, []]));
-  const treeByCover = new Map(covers.map((note) => [note.id, null]));
-
-  for (const note of notes) {
-    note.bookCoverId = note.bookRole === "cover" ? note.id : "";
-    note.bookIncludedPaths = [];
-    note.bookToc = [];
-    note.bookDomTargets = [];
-    note.bookRawRefs = [];
-  }
-
-  function markIncluded(note, cover, parent = null) {
-    if (!note || !cover || note.file === cover.file) return;
-    note.bookRole = "included";
-    note.bookCoverId = cover.id;
-    note.bookCoverPath = cover.path || "";
-    note.bookParentPath = parent?.path || "";
-    note.roam = false;
-    const list = includedByCover.get(cover.id) || [];
-    if (!list.some((item) => item.file === note.file)) list.push(note);
-    includedByCover.set(cover.id, list);
-  }
-
-  function resolveInclude(note, rawRef, cover) {
-    const file = bookResolvePathFrom(note.file, rawRef);
-    if (!file) {
-      diagnosticsByCover.get(cover.id)?.push({ level: "error", message: `Include is outside note root or invalid: ${rawRef}`, path: note.path || "" });
-      return null;
-    }
-    const child = notesByFile.get(file);
-    if (!child) {
-      diagnosticsByCover.get(cover.id)?.push({ level: "error", message: `Included note not found in index: ${rawRef}`, path: note.path || "" });
-      return null;
-    }
-    if (child.bookRole === "cover" && child.id !== cover.id) {
-      diagnosticsByCover.get(cover.id)?.push({ level: "error", message: `Cannot include another book cover: ${child.path || rawRef}`, path: note.path || "" });
-      return null;
-    }
-    return child;
-  }
-
-  function visitIncludeTree(cover, note, parent, stack) {
-    if (stack.includes(note.file)) {
-      diagnosticsByCover.get(cover.id)?.push({ level: "error", message: `Book include cycle: ${[...stack, note.file].map((file) => notesByFile.get(file)?.path || file).join(" -> ")}`, path: note.path || "" });
-      return null;
-    }
-    if (note !== cover) markIncluded(note, cover, parent);
-    const node = {
-      id: note.id || "",
-      title: note.title || "",
-      path: note.path || "",
-      role: note === cover ? "cover" : "included",
-      children: [],
-    };
-    const nextStack = [...stack, note.file];
-    for (const rawRef of note.bookIncludeRefs || []) {
-      const child = resolveInclude(note, rawRef, cover);
-      if (!child) continue;
-      const childNode = visitIncludeTree(cover, child, note, nextStack);
-      if (childNode) node.children.push(childNode);
-    }
-    return node;
-  }
-
-  function coverFromParentChain(note, seen = new Set()) {
-    if (!note || note.bookRole !== "included" || !note.bookParentRef) return null;
-    if (seen.has(note.file)) return null;
-    seen.add(note.file);
-    const parent = resolveBookRef(notes, note.bookParentRef, note);
-    if (!parent) return null;
-    if (parent.bookRole === "cover") return parent;
-    return coverFromParentChain(parent, seen);
-  }
-
-  for (const cover of covers) {
-    treeByCover.set(cover.id, visitIncludeTree(cover, cover, null, []));
-  }
-  for (const note of notes.filter((item) => item.bookRole === "included")) {
-    const cover = coverById.get(note.bookCoverId) || coverFromParentChain(note);
-    if (cover) markIncluded(note, cover, resolveBookRef(notes, note.bookParentRef, note));
-  }
-
-  for (const [coverId, included] of includedByCover.entries()) {
-    const cover = coverById.get(coverId);
-    if (!cover) continue;
-    const bookNotes = [cover, ...included];
-    const rawRefs = new Set(cover.refs || []);
-    const rawRoamRefs = new Set();
-    const inlineTags = new Set(cover.inlineTags || []);
-    const summaries = [cover.summary || ""];
-    const usedAnchors = new Set();
-    const toc = [];
-    for (const note of bookNotes) {
-      const text = await readNoteTextSafe(note.file);
-      for (const ref of refsFromContent(text)) rawRefs.add(ref);
-      for (const ref of roamDbRefsFromContent(text)) rawRoamRefs.add(ref);
-      for (const tag of inlineTagsFromContent(text)) inlineTags.add(tag);
-      if (note !== cover && note.summary) summaries.push(note.summary);
-      toc.push(...bookHeadingsFromContent(text, note, usedAnchors));
-    }
-    cover.refs = [...rawRefs].filter(Boolean);
-    cover.bookRawRefs = [...rawRoamRefs].filter(Boolean);
-    cover.inlineTags = [...inlineTags].filter(Boolean).sort((a, b) => a.localeCompare(b));
-    cover.summary = summaries.join(" ").replace(/\s+/g, " ").trim().slice(0, 220);
-    cover.bookRole = "cover";
-    cover.bookCoverId = cover.id;
-    cover.bookIncludedPaths = included.map((note) => note.path || "").filter(Boolean);
-    cover.bookToc = toc;
-    cover.bookDomTargets = toc.map((item) => ({ label: item.text, slug: item.slug, path: item.path, level: item.level }));
-    cover.bookIncludeTree = treeByCover.get(cover.id);
-    cover.bookDiagnostics = diagnosticsByCover.get(cover.id) || [];
-  }
-
-  await writeBookCaches(notes, covers, includedByCover, treeByCover, diagnosticsByCover);
-}
-
-async function fileDigestEntry(note) {
-  try {
-    const info = await stat(note.file);
-    const text = await readFile(note.file, "utf8");
-    return {
-      path: note.path || "",
-      file: note.file,
-      mtimeMs: info.mtimeMs,
-      size: info.size,
-      sha256: sha256Text(text),
-    };
-  } catch {
-    return { path: note.path || "", file: note.file, missing: true };
-  }
-}
-
-async function writeJsonIfChanged(file, value) {
-  const text = `${JSON.stringify(value, null, 2)}\n`;
-  try {
-    if (await readFile(file, "utf8") === text) return;
-  } catch {}
-  await atomicWriteFile(file, text, "utf8");
-}
-
-async function writeBookCaches(notes, covers, includedByCover, treeByCover, diagnosticsByCover) {
-  if (covers.length === 0 && !existsSync(bookCacheDir())) return;
-  await mkdir(bookCacheDir(), { recursive: true });
-  const now = new Date().toISOString();
-  const index = { schema: BOOK_CACHE_SCHEMA, updatedAt: now, books: {} };
-  for (const cover of covers) {
-    const included = includedByCover.get(cover.id) || [];
-    const bookNotes = [cover, ...included];
-    const files = [];
-    for (const note of bookNotes) files.push(await fileDigestEntry(note));
-    const cacheFile = safeBookCacheName(cover.id);
-    const cache = {
-      schema: BOOK_CACHE_SCHEMA,
-      id: cover.id,
-      title: cover.title || "Untitled",
-      coverPath: cover.path || "",
-      coverFile: cover.file || "",
-      updatedAt: now,
-      files,
-      includeTree: treeByCover.get(cover.id),
-      toc: cover.bookToc || [],
-      anchors: cover.bookDomTargets || [],
-      diagnostics: diagnosticsByCover.get(cover.id) || [],
-      hash: sha256Text(JSON.stringify(files.map((item) => [item.path, item.sha256 || "", item.mtimeMs || 0, item.size || 0]))),
-    };
-    await writeJsonIfChanged(join(bookCacheDir(), cacheFile), cache);
-    index.books[cover.id] = {
-      id: cover.id,
-      title: cover.title || "Untitled",
-      coverPath: cover.path || "",
-      cacheFile,
-      updatedAt: now,
-    };
-  }
-  await writeJsonIfChanged(join(bookCacheDir(), "index.json"), index);
 }
 
 function pdfExportName(file) {
@@ -2561,14 +2288,10 @@ function serverNoteRefValues(note) {
 
 function serverNoteReferenceIndex(notes) {
   const index = new Map();
-  const byId = new Map(notes.map((note) => [String(note.id || ""), note]));
   for (const note of notes) {
-    const target = note.bookRole === "included" && note.bookCoverId
-      ? byId.get(String(note.bookCoverId)) || note
-      : note;
     for (const value of serverNoteRefValues(note)) {
       const key = canonicalServerNoteRef(value);
-      if (key && !index.has(key)) index.set(key, target);
+      if (key && !index.has(key)) index.set(key, note);
     }
   }
   return index;
@@ -2582,12 +2305,6 @@ function cloneNote(note) {
     inlineTags: [...(note.inlineTags || [])],
     refs: [...(note.refs || [])],
     backlinks: [...(note.backlinks || [])],
-    bookIncludeRefs: [...(note.bookIncludeRefs || [])],
-    bookIncludedPaths: [...(note.bookIncludedPaths || [])],
-    bookToc: [...(note.bookToc || [])],
-    bookDomTargets: [...(note.bookDomTargets || [])],
-    bookRawRefs: [...(note.bookRawRefs || [])],
-    bookDiagnostics: [...(note.bookDiagnostics || [])],
     leanBlocks: [...(note.leanBlocks || [])],
   };
 }
@@ -2663,7 +2380,6 @@ async function noteFromFileForIndex(file) {
     const relPath = displayPathForScanRoot(file, noteScanRoot);
     const groupKey = groupKeyFor(file, noteScanRoot);
     const id = idFromContent(file, noteScanRoot, content);
-    const bookMeta = bookMetaFromContent(content);
     const roam = hasRoamMeta(content);
     const inlineTags = inlineTagsFromContent(content);
     const leanBlocks = [];
@@ -2688,18 +2404,7 @@ async function noteFromFileForIndex(file) {
       refs: refsFromContent(content),
       backlinks: [],
       roam,
-      bookRole: bookMeta.role,
-      bookParentRef: bookMeta.parentRef,
-      bookCoverId: bookMeta.role === "cover" ? id : "",
-      bookCoverPath: "",
-      bookParentPath: "",
-      bookIncludeRefs: includeRefsFromContent(content),
-      bookIncludedPaths: [],
-      bookToc: [],
-      bookDomTargets: [],
       domTargets: [],
-      bookRawRefs: [],
-      bookDiagnostics: [],
       leanBlocks,
       standalone: standaloneFile(file),
     };
@@ -2896,7 +2601,6 @@ export async function scanNotes() {
         dirtyNotes.push(note);
       }
     }
-    await applyBookMetadata(rawNotes);
     const sorted = resolveNoteRelationships(rawNotes);
     rememberNoteSnapshots(rawNotes, sorted);
     notesSnapshotDirty = false;
@@ -2916,7 +2620,6 @@ export async function scanNotes() {
   for (const file of noteCache.keys()) {
     if (!seen.has(file)) noteCache.delete(file);
   }
-  await applyBookMetadata(notes);
   const sorted = resolveNoteRelationships(notes);
   rememberNoteSnapshots(notes, sorted);
   notesSnapshotDirty = false;
@@ -4145,7 +3848,6 @@ async function noteSummaryForFile(file, content = null) {
   const relPath = displayPathForScanRoot(safe, noteScanRoot);
   const groupKey = groupKeyFor(safe, noteScanRoot);
   const id = idFromContent(safe, noteScanRoot, text);
-  const bookMeta = bookMetaFromContent(text);
   const roam = hasRoamMeta(text);
   const note = {
     key: id,
@@ -4168,18 +3870,7 @@ async function noteSummaryForFile(file, content = null) {
     refs: refsFromContent(text),
     backlinks: [],
     roam,
-    bookRole: bookMeta.role,
-    bookParentRef: bookMeta.parentRef,
-    bookCoverId: bookMeta.role === "cover" ? id : "",
-    bookCoverPath: "",
-    bookParentPath: "",
-    bookIncludeRefs: includeRefsFromContent(text),
-    bookIncludedPaths: [],
-    bookToc: [],
-    bookDomTargets: [],
     domTargets: [],
-    bookRawRefs: [],
-    bookDiagnostics: [],
     standalone: standaloneFile(safe),
     mtimeMs: info.mtimeMs,
     size: info.size,
@@ -4291,7 +3982,7 @@ async function appendRoamNodeStatements(statements, note, roamIds, refIndex, opt
       statements.push(`INSERT INTO aliases(node_id, alias) VALUES (${sqlString(note.id)}, ${sqlString(alias)});`);
     }
   }
-  for (const ref of [...new Set([...roamDbRefsFromContent(content), ...(note.bookRawRefs || [])])]) {
+  for (const ref of [...new Set(roamDbRefsFromContent(content))]) {
     const target = refIndex.get(canonicalServerNoteRef(ref));
     const targetId = target?.id || "";
     if (!roamIds.has(targetId) || targetId === note.id) continue;
@@ -5218,7 +4909,6 @@ export async function saveNote(body) {
       message: "Refusing to save empty content over a non-empty file. Use force: true to override.",
     };
   }
-  const bookSensitiveSave = contentMayAffectBook(previousContent) || contentMayAffectBook(content);
   const force = body.force === true;
   const baseMtimeMs = Number(body.baseMtimeMs);
   const wrote = await enqueueSaveWrite(file, async () => {
@@ -5250,24 +4940,6 @@ export async function saveNote(body) {
   const refresh = body.refresh === "deferred" ? "deferred" : "full";
   if (refresh === "deferred") {
     markNotesDirty(file);
-    if (bookSensitiveSave) {
-      const notes = await scanNotes();
-      scheduleRoamDbSync(notes, file);
-      const note = notes.find((item) => item.file === file) || await noteSummaryForFile(file, content);
-      return {
-        type: "saved",
-        ok: true,
-        file,
-        message: "Saved",
-        note,
-        notes,
-        kind: kindFromContent(content),
-        notesRefresh: "book",
-        standalone: false,
-        mtimeMs: wrote.mtimeMs,
-        size: wrote.size,
-      };
-    }
     scheduleRoamDbSync(null, file);
     return { type: "saved", ok: true, file, message: "Saved", note: await noteSummaryForFile(file, content), kind: kindFromContent(content), notesRefresh: "deferred", standalone: false, mtimeMs: wrote.mtimeMs, size: wrote.size };
   }

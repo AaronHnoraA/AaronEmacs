@@ -12,7 +12,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const currentInterestsPanel = document.getElementById("current-interests-panel");
   const selectedNotesPanel = document.getElementById("selected-notes-panel");
   const recentUpdatesPanel = document.getElementById("recent-updates-panel");
-  const booksPanel = document.getElementById("books-panel");
 
   if (!knowledge || !app || !searchWrapper || !searchInput || !resetBtn || !tagCloud || !sortSelect) {
     return;
@@ -236,132 +235,7 @@ document.addEventListener("DOMContentLoaded", () => {
     return String(group.key || "").replace(/^roam\//, "");
   }
 
-  function renderBookshelfPanel(books, selectedNotes, qcNotes) {
-    if (!booksPanel) {
-      return;
-    }
-
-    if (document.body.classList.contains("site-archive")) {
-      booksPanel.innerHTML = books.length > 0
-        ? `
-          <div class="selected-note-list book-note-list">
-            ${books.map((book) => `
-              <article class="selected-note-item book-note-item">
-                <div class="selected-note-meta">
-                  <span>${escapeHtml(String(book.includedCount || 0))} files</span>
-                  <span>${escapeHtml(String(book.tocCount || 0))} headings</span>
-                </div>
-                <h3><a href="${escapeHtml(book.link)}">${escapeHtml(book.title)}</a></h3>
-                <p>${escapeHtml(book.summary || "Long-form Aaronnote book.")}</p>
-              </article>
-            `).join("")}
-          </div>
-        `
-        : `<div class="active-filter-empty">No public books yet.</div>`;
-      return;
-    }
-
-    const coverClasses = ["blue", "green", "red", "violet", "gold", "gray"];
-    const tocLink = (item, fallback) => {
-      const explicit = String(item?.link || "").trim();
-      if (explicit) {
-        return explicit;
-      }
-
-      const path = String(item?.path || "").trim();
-      if (!path) {
-        return fallback;
-      }
-
-      const htmlPath = path.replace(/\.md(?:#.*)?$/i, (match) => match.replace(/\.md/i, ".html"));
-      const slug = String(item?.slug || item?.id || "").trim();
-      return slug && !htmlPath.includes("#") ? `${htmlPath}#${encodeURIComponent(slug)}` : htmlPath;
-    };
-    const shelfBooks = books.slice(0, 6).map((book, index) => ({
-      ...book,
-      key: book.id || book.key || book.link || `book-${index}`,
-      title: String(book.title || `Book ${index + 1}`),
-      link: String(book.link || "#"),
-      summary: String(book.summary || "Long-form Aaronnote book."),
-      includedCount: Number(book.includedCount || book.bookIncludedPaths?.length || 0),
-      tocCount: Number(book.tocCount || book.toc?.length || book.bookToc?.length || 0),
-      toc: Array.isArray(book.toc) ? book.toc : Array.isArray(book.bookToc) ? book.bookToc : [],
-      coverClass: coverClasses[index % coverClasses.length],
-    }));
-
-    if (shelfBooks.length === 0) {
-      booksPanel.innerHTML = `<div class="active-filter-empty">No public books yet.</div>`;
-      return;
-    }
-
-    booksPanel.innerHTML = `
-      <div class="home-bookshelf" data-bookshelf>
-        <div class="bookshelf-case" aria-label="Published books">
-          <div class="bookshelf-back"></div>
-          <div class="bookshelf-books">
-            ${shelfBooks.map((book, index) => `
-              <button
-                type="button"
-                class="bookshelf-volume bookshelf-volume-${escapeHtml(book.coverClass)}${index === 0 ? " is-active" : ""}"
-                data-book-index="${index}"
-                aria-pressed="${index === 0 ? "true" : "false"}"
-              >
-                <span class="bookshelf-volume-count">${String(index + 1).padStart(2, "0")}</span>
-                <span class="bookshelf-volume-title">${escapeHtml(book.title)}</span>
-                <span class="bookshelf-volume-meta">${escapeHtml(String(book.includedCount))} files</span>
-              </button>
-            `).join("")}
-          </div>
-          <div class="bookshelf-plank"></div>
-        </div>
-        <div class="bookshelf-preview-stack">
-          ${shelfBooks.map((book, index) => {
-            const toc = book.toc.slice(0, 5);
-            return `
-              <article class="bookshelf-preview${index === 0 ? " is-active" : ""}" data-book-preview="${index}">
-                <div class="bookshelf-preview-meta">
-                  <span>${escapeHtml("Published book")}</span>
-                  <span>${escapeHtml(String(book.tocCount))} headings</span>
-                </div>
-                <h3><a href="${escapeHtml(book.link)}">${escapeHtml(book.title)}</a></h3>
-                <p>${escapeHtml(book.summary)}</p>
-                <ol class="bookshelf-toc-preview">
-                  ${
-                    toc.length > 0
-                      ? toc.map((item) => `
-                        <li>
-                          <a href="${escapeHtml(tocLink(item, book.link))}">${escapeHtml(item.text || item.label || item.path || "Untitled section")}</a>
-                        </li>
-                      `).join("")
-                      : `<li><a href="${escapeHtml(book.link)}">Open book preview</a></li>`
-                  }
-                </ol>
-                <a class="bookshelf-open-link" href="${escapeHtml(book.link)}">Open volume</a>
-              </article>
-            `;
-          }).join("")}
-        </div>
-      </div>
-    `;
-
-    const root = booksPanel.querySelector("[data-bookshelf]");
-    root?.querySelectorAll("[data-book-index]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const index = button.getAttribute("data-book-index");
-        root.querySelectorAll("[data-book-index]").forEach((item) => {
-          const isActive = item === button;
-          item.classList.toggle("is-active", isActive);
-          item.setAttribute("aria-pressed", isActive ? "true" : "false");
-        });
-        root.querySelectorAll("[data-book-preview]").forEach((preview) => {
-          preview.classList.toggle("is-active", preview.getAttribute("data-book-preview") === index);
-        });
-      });
-    });
-  }
-
   function renderAcademicPanels() {
-    const books = Array.isArray(knowledge.books) ? knowledge.books : [];
     const qcNotes = selectableNotes.filter((note) => note.groupLabel === "QC" || note.tags.includes("qc"));
     const tcsNotes = selectableNotes.filter((note) => note.tags.includes("tcs") || /tcs|complexity|algorithm/i.test(note.groupLabel));
     const selectedTitles = ["Quantum State", "Density Operator", "Observable & Expectation", "Hilbert Space"];
@@ -399,8 +273,6 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>
       `;
     }
-
-    renderBookshelfPanel(books, selectedNotes, qcNotes);
 
     if (selectedNotesPanel) {
       selectedNotesPanel.innerHTML = `

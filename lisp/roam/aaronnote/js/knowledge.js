@@ -233,15 +233,6 @@
 
     const rawNotes = Array.isArray(SITE_DATA.notes) ? SITE_DATA.notes : flattenLegacyData(SITE_DATA);
     const notes = rawNotes.map(normalizeNote);
-    const books = (Array.isArray(SITE_DATA.books) ? SITE_DATA.books : []).map((book) => ({
-      ...book,
-      key: book.id || book.link || book.title,
-      title: String(book.title || "Untitled"),
-      link: String(book.link || "#"),
-      path: String(book.path || ""),
-      tags: normalizeList(book.tags, { lower: true }),
-      toc: Array.isArray(book.toc) ? book.toc : [],
-    }));
     const byKey = new Map(notes.map((note) => [note.key, note]));
 
     notes.forEach((note) => {
@@ -269,7 +260,6 @@
     window.KNOWLEDGE_DATA = {
       raw: SITE_DATA,
       notes,
-      books,
       publicNotes,
       byKey,
       groups: allCollections.groups,

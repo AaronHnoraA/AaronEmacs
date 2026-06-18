@@ -232,26 +232,6 @@ body.home-archive .note-meta { color: #414868; font-size: 12px; }
 
 body.home-archive .note-summary { color: #565f89; font-size: 13px; margin-top: 3px; }
 
-/* ── Bookshelf ─────────────────────────────────────────────────────────── */
-
-body.home-archive #books-panel { margin: 8px 0 16px; }
-
-body.home-archive .book-cover {
-  background: #16213e;
-  border: 1px solid #414868;
-  border-radius: 4px;
-  padding: 10px 14px;
-  margin: 4px 0;
-  display: inline-flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 160px;
-  vertical-align: top;
-}
-
-body.home-archive .book-title { color: #bb9af7; font-weight: bold; font-size: 14px; }
-body.home-archive .book-count { color: #414868; font-size: 12px; }
-
 /* ── Graph panel ───────────────────────────────────────────────────────── */
 
 body.home-archive #graph-container,

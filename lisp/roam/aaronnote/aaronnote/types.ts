@@ -19,17 +19,7 @@ export type NoteSummary = {
   refs?: string[];
   backlinks?: string[];
   roam?: boolean;
-  bookRole?: "" | "cover" | "included";
-  bookParentRef?: string;
-  bookCoverId?: string;
-  bookCoverPath?: string;
-  bookParentPath?: string;
-  bookIncludeRefs?: string[];
-  bookIncludedPaths?: string[];
-  bookToc?: Array<{ level?: number; text?: string; slug?: string; path?: string; id?: string }>;
-  bookDomTargets?: Array<{ label?: string; slug?: string; path?: string; level?: number }>;
   domTargets?: Array<{ label?: string; slug?: string; path?: string[]; labelPath?: string[]; level?: number; notePath?: string }>;
-  bookDiagnostics?: Array<{ level?: string; message?: string; path?: string }>;
   leanBlocks?: Array<{ tag?: string; selector?: string; targetKind?: string; leanPath?: string }>;
   standalone?: boolean;
   mtimeMs?: number;

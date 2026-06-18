@@ -47,25 +47,6 @@ export type RenderPublishedNoteOptions = {
   kindAssetsHtml?: string;
   private?: boolean;
   includePrivateContent?: boolean;
-  book?: PublishedBookPayload;
-};
-
-export type PublishedBookTocItem = {
-  level?: number;
-  text?: string;
-  slug?: string;
-  path?: string;
-  href?: string;
-};
-
-export type PublishedBookPayload = {
-  id?: string;
-  title?: string;
-  role?: string;
-  coverPath?: string;
-  currentPath?: string;
-  coverHref?: string;
-  toc?: PublishedBookTocItem[];
 };
 
 type OrgEnvTokenMeta = {
@@ -97,15 +78,6 @@ function escapeHtml(value: string): string {
 
 function escapeAttr(value: string): string {
   return escapeHtml(value);
-}
-
-function jsonForScript(value: unknown): string {
-  return JSON.stringify(value)
-    .replace(/</g, "\\u003c")
-    .replace(/>/g, "\\u003e")
-    .replace(/&/g, "\\u0026")
-    .replace(/\u2028/g, "\\u2028")
-    .replace(/\u2029/g, "\\u2029");
 }
 
 function safeNoteKind(value: string | undefined): string {
@@ -955,10 +927,6 @@ export function renderPublishedNoteHTML(
   <script src="${assetRoot}js/mac-window.js?v=${escapeAttr(version)}"></script>
   <script type="module" src="${assetRoot}Aaronnote/aaronnote/published-local-graph.js?v=${escapeAttr(version)}"></script>
 `;
-  const bookDataHtml = !pdf && options.book?.toc?.length
-    ? `  <script type="application/json" id="aaronnote-book-toc-data">${jsonForScript(options.book)}</script>\n`
-    : "";
-
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -989,7 +957,7 @@ ${tocHtml}
 ${localGraphHtml}
     </section>
   </main>
-${bookDataHtml}${scriptHtml}
+${scriptHtml}
 </body>
 </html>
 `;

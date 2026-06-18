@@ -198,7 +198,6 @@
           ["tree",         "Directory tree of notes"],
           ["search <q>",   "Search notes by title or tag"],
           ["tags",         "List all tags (click to search)"],
-          ["books",        "List books and note series"],
           ["recent [n]",   "Most recently updated notes"],
           ["random",       "Open a random note"],
           ["graph",        "Open the knowledge graph"],
@@ -449,34 +448,6 @@
       ].join("\n");
     },
 
-    books(_args) {
-      const k = getKnowledge();
-      if (!k) return line("out-warn", "Note data not loaded yet.");
-      const books = k.books || [];
-      if (!books.length) return line("out-warn", "No books published yet.");
-
-      const parts = [
-        blank(),
-        line("out-section-title", "Books & note series"),
-        blank(),
-      ];
-
-      books.forEach((b) => {
-        const linkEl = b.link
-          ? `<a class="out-note-link" href="${escHtml(b.link)}" target="_blank">${escHtml(b.title)}</a>`
-          : escHtml(b.title);
-        const sections = b.toc && b.toc.length
-          ? `<span class="out-note-date"> (${b.toc.length} sections)</span>`
-          : "";
-        const path = b.path
-          ? `<span class="out-note-date"> · ${escHtml(b.path)}</span>`
-          : "";
-        parts.push(`<div class="out-note-item">  ${linkEl}${path}${sections}</div>`);
-      });
-
-      return parts.join("\n");
-    },
-
     recent(args) {
       const k = getKnowledge();
       if (!k) return line("out-warn", "Note data not loaded yet.");
@@ -651,7 +622,6 @@
       if (target === "graph")                            return COMMANDS.graph([]);
       if (target === "cv" || target === "CV")           return COMMANDS.cv([]);
       if (target === "github")                          return COMMANDS.github([]);
-      if (target === "books")                           return COMMANDS.books([]);
       return line("out-error", `open: ${escHtml(target)}: not found`);
     },
   };

@@ -79,7 +79,6 @@ const tocFoldField = StateField.define<Map<string, boolean>>({
 
 // [toc] alone on a line
 const TOC_LINE_RE = /^[ \t]*\[toc\][ \t]*$/im;
-const INCLUDE_LINE_RE = /^[ \t]*@@include[ \t]+\[([^\]\n]+)\][ \t]*$/i;
 
 const HR_LINE_RE = /^[ \t]{0,3}((?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/;
 
@@ -443,45 +442,11 @@ function scheduleTikzOpenLineUpdate(
 
 type TocHeading = MarkdownHeading;
 
-export type BookEditorTocItem = {
-  level?: number;
-  text?: string;
-  slug?: string;
-  path?: string;
-  id?: string;
-};
-
-export type BookEditorContext = {
-  role?: "" | "cover" | "included";
-  title?: string;
-  coverPath?: string;
-  currentPath?: string;
-  includedCount?: number;
-  toc?: BookEditorTocItem[];
-};
-
 interface BlockExtraRanges {
   toc: Array<{ from: number; to: number }>;
-  includes: Array<{ from: number; to: number; ref: string }>;
   semanticHeadings: Array<{ from: number; to: number; outline: SemanticOutline }>;
   hrs: Array<{ from: number; to: number }>;
   frontMatter: { from: number; to: number; body: string } | null;
-}
-
-export const setBookContextEffect = StateEffect.define<BookEditorContext | null>();
-
-const bookContextField = StateField.define<BookEditorContext | null>({
-  create: () => null,
-  update(value, tr) {
-    for (const effect of tr.effects) {
-      if (effect.is(setBookContextEffect)) return effect.value;
-    }
-    return value;
-  },
-});
-
-export function setBookContext(view: EditorView, context: BookEditorContext | null): void {
-  view.dispatch({ effects: setBookContextEffect.of(context) });
 }
 
 class TocWidget extends MeasuredWidget {
@@ -585,167 +550,6 @@ class TocWidget extends MeasuredWidget {
 
     div.append(ul);
     return this.registerMeasured(div, view);
-  }
-
-  ignoreEvent(): boolean { return true; }
-}
-
-function bookPathKey(path: string | undefined): string {
-  return String(path || "").replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/^roam\//, "");
-}
-
-function bookContextSignature(context: BookEditorContext | null): string {
-  if (!context) return "";
-  return [
-    context.role || "",
-    context.title || "",
-    context.coverPath || "",
-    context.currentPath || "",
-    String(context.includedCount || 0),
-    ...(context.toc || []).map((item) => [
-      item.level || 1,
-      item.text || "",
-      item.slug || "",
-      item.path || "",
-      item.id || "",
-    ].join("\t")),
-  ].join("\n");
-}
-
-class BookContentsWidget extends MeasuredWidget {
-  context: BookEditorContext;
-
-  constructor(context: BookEditorContext) {
-    super();
-    this.context = context;
-  }
-
-  protected measureKey(): string { return "book:" + shortHash(bookContextSignature(this.context)); }
-
-  protected measureGroupKey(): string {
-    const count = (this.context.toc || []).filter((item) => item.text || item.path).length;
-    return `book:count:${Math.min(10, Math.ceil(count / 6))}`;
-  }
-
-  protected estimatedHeightFallback(): number {
-    const count = (this.context.toc || []).filter((item) => item.text || item.path).length;
-    return count > 0 ? 84 + count * 38 : 112;
-  }
-
-  eq(other: BookContentsWidget): boolean {
-    return bookContextSignature(this.context) === bookContextSignature(other.context);
-  }
-
-  toDOM(view: EditorView): HTMLElement {
-    const root = document.createElement("section");
-    root.className = "cm-book-contents";
-    root.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
-
-    const title = document.createElement("div");
-    title.className = "cm-book-contents-title";
-    title.textContent = this.context.title || "Book contents";
-    root.append(title);
-
-    const toc = (this.context.toc || []).filter((item) => item.text || item.path);
-    const meta = document.createElement("div");
-    meta.className = "cm-book-contents-meta";
-    meta.textContent = [
-      `${toc.length} headings`,
-      this.context.includedCount ? `${this.context.includedCount} files` : "",
-    ].filter(Boolean).join(" · ");
-    root.append(meta);
-
-    if (toc.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "cm-book-contents-empty";
-      empty.textContent = "No book headings yet";
-      root.append(empty);
-      return this.registerMeasured(root, view);
-    }
-
-    const currentPath = bookPathKey(this.context.currentPath || this.context.coverPath);
-    const list = document.createElement("div");
-    list.className = "cm-book-contents-list";
-    for (const item of toc) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "cm-book-contents-item";
-      button.style.setProperty("--book-depth", String(Math.max(0, Number(item.level || 1) - 1)));
-      button.dataset.path = item.path || "";
-      button.dataset.slug = item.slug || "";
-      button.textContent = item.text || item.path || "Untitled";
-      button.title = [item.text || "", item.path || ""].filter(Boolean).join(" · ");
-      if (bookPathKey(item.path) === currentPath) button.classList.add("is-current-file");
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        view.dom.dispatchEvent(new CustomEvent("aaronnote:book-toc-open", {
-          bubbles: true,
-          detail: { item },
-        }));
-      });
-      list.append(button);
-    }
-    root.append(list);
-    return this.registerMeasured(root, view);
-  }
-
-  ignoreEvent(): boolean { return true; }
-}
-
-class IncludeWidget extends MeasuredWidget {
-  ref: string;
-
-  constructor(ref: string) {
-    super();
-    this.ref = ref;
-  }
-
-  protected measureKey(): string { return "incl:" + this.ref; }
-
-  protected measureGroupKey(): string { return "incl"; }
-
-  protected estimatedHeightFallback(): number { return 36; }
-
-  eq(other: IncludeWidget): boolean {
-    return this.ref === other.ref;
-  }
-
-  toDOM(view: EditorView): HTMLElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.tabIndex = -1;
-    button.className = "cm-book-include";
-    button.title = this.ref;
-
-    const label = document.createElement("span");
-    label.className = "cm-book-include-label";
-    label.textContent = "Include";
-    const path = document.createElement("span");
-    path.className = "cm-book-include-path";
-    path.textContent = this.ref;
-    button.append(label, path);
-
-    button.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    button.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      view.dom.dispatchEvent(new CustomEvent("aaronnote:book-include-open", {
-        bubbles: true,
-        detail: { ref: this.ref },
-      }));
-    });
-    return this.registerMeasured(button, view);
   }
 
   ignoreEvent(): boolean { return true; }
@@ -887,17 +691,14 @@ function scanBlockExtraLineRanges(
   startLine = 1,
   endLine = doc.lines,
   excludedRanges: ReadonlyArray<{ from: number; to: number }> = [],
-): Pick<BlockExtraRanges, "toc" | "includes" | "semanticHeadings" | "hrs"> {
+): Pick<BlockExtraRanges, "toc" | "semanticHeadings" | "hrs"> {
   const toc: Array<{ from: number; to: number }> = [];
-  const includes: Array<{ from: number; to: number; ref: string }> = [];
   const semanticHeadings: Array<{ from: number; to: number; outline: SemanticOutline }> = [];
   const hrs: Array<{ from: number; to: number }> = [];
   for (let lineNum = Math.max(1, startLine); lineNum <= Math.min(doc.lines, endLine); lineNum++) {
     const line = doc.line(lineNum);
     if (rangeOverlapsAny(line.from, line.to, excludedRanges)) continue;
     if (TOC_LINE_RE.test(line.text)) toc.push({ from: line.from, to: line.to });
-    const includeMatch = INCLUDE_LINE_RE.exec(line.text);
-    if (includeMatch?.[1]?.trim()) includes.push({ from: line.from, to: line.to, ref: includeMatch[1].trim() });
     const trimmed = line.text.trim();
     if (trimmed.startsWith("@@part") || trimmed.startsWith("@@section")) {
       const command = scanInlineCommands(trimmed)[0];
@@ -908,15 +709,15 @@ function scanBlockExtraLineRanges(
     }
     if (HR_LINE_RE.test(line.text)) hrs.push({ from: line.from, to: line.to });
   }
-  return { toc, includes, semanticHeadings, hrs };
+  return { toc, semanticHeadings, hrs };
 }
 
 function scanBlockExtraRanges(
   doc: Text,
   excludedRanges: ReadonlyArray<{ from: number; to: number }> = [],
 ): BlockExtraRanges {
-  const { toc, includes, semanticHeadings, hrs } = scanBlockExtraLineRanges(doc, 1, doc.lines, excludedRanges);
-  return { toc, includes, semanticHeadings, hrs, frontMatter: scanFrontMatter(doc) };
+  const { toc, semanticHeadings, hrs } = scanBlockExtraLineRanges(doc, 1, doc.lines, excludedRanges);
+  return { toc, semanticHeadings, hrs, frontMatter: scanFrontMatter(doc) };
 }
 
 const blockExtraRangesField = StateField.define<BlockExtraRanges>({
@@ -979,7 +780,6 @@ function canPatchBlockExtraRangesNearChanges(doc: Text, changes: ChangeSet, rang
 function mapBlockExtraRanges(ranges: BlockExtraRanges, changes: ChangeSet): BlockExtraRanges {
   return {
     toc: ranges.toc.map((range) => ({ from: changes.mapPos(range.from), to: changes.mapPos(range.to) })),
-    includes: ranges.includes.map((range) => ({ from: changes.mapPos(range.from), to: changes.mapPos(range.to), ref: range.ref })),
     semanticHeadings: ranges.semanticHeadings.map((range) => ({ from: changes.mapPos(range.from), to: changes.mapPos(range.to), outline: range.outline })),
     hrs: ranges.hrs.map((range) => ({ from: changes.mapPos(range.from), to: changes.mapPos(range.to) })),
     frontMatter: ranges.frontMatter
@@ -1015,10 +815,6 @@ function patchBlockExtraRangesNearChanges(
     toc: [
       ...mapped.toc.filter((range) => range.to < affectedFrom || range.from > affectedTo),
       ...scanned.toc,
-    ].sort((a, b) => a.from - b.from || a.to - b.to),
-    includes: [
-      ...mapped.includes.filter((range) => range.to < affectedFrom || range.from > affectedTo),
-      ...scanned.includes,
     ].sort((a, b) => a.from - b.from || a.to - b.to),
     semanticHeadings: [
       ...mapped.semanticHeadings.filter((range) => range.to < affectedFrom || range.from > affectedTo),
@@ -2123,16 +1919,6 @@ function addOrgEnvBlockExtraDecos(
       }).range(block.from, block.to),
     );
     occupied?.push([block.from, block.to]);
-    const bookContext = state.field(bookContextField, false);
-    if (bookContext?.role === "cover" && (bookContext.toc || []).length > 0) {
-      decos.push(
-        Decoration.widget({
-          widget: new BookContentsWidget(bookContext),
-          block: true,
-          side: 1,
-        }).range(block.to),
-      );
-    }
     return;
   }
   if (block.kind === "html") {
@@ -2203,21 +1989,6 @@ function buildBlockExtraDecoRanges(
       );
       occupied.push([range.from, range.to]);
     }
-  }
-
-  // ── @@include [path] ───────────────────────────────────────────────────
-  for (const range of ranges.includes) {
-    if (range.to < windowFrom || range.from > windowTo) continue;
-    if (rangeOverlapsAny(range.from, range.to, excludedRanges)) continue;
-    if (occupied.some(([from, to]) => range.from < to && range.to > from)) continue;
-    if (sel.from >= range.from && sel.from <= range.to) {
-      decos.push(Decoration.mark({ class: "syntax-hint" }).range(range.from, range.to));
-      continue;
-    }
-    decos.push(
-      Decoration.replace({ widget: new IncludeWidget(range.ref), block: true }).range(range.from, range.to),
-    );
-    occupied.push([range.from, range.to]);
   }
 
   // ── @@part / @@section semantic headings ──────────────────────────────
@@ -2328,9 +2099,6 @@ function activeBlockExtraKey(state: EditorState): string {
   for (const range of ranges.toc) {
     if (sel.from <= range.to && sel.to >= range.from) parts.push(`toc:${range.from}:${range.to}`);
   }
-  for (const range of ranges.includes) {
-    if (sel.from <= range.to && sel.to >= range.from) parts.push(`include:${range.from}:${range.to}`);
-  }
   for (const range of ranges.semanticHeadings) {
     if (sel.from <= range.to && sel.to >= range.from) parts.push(`semantic:${range.from}:${range.to}`);
   }
@@ -2410,7 +2178,6 @@ function canMapBlockExtraDecos(state: EditorState, changes: ChangeSet): boolean 
   if (!canMapOrgEnvBlocks(state.doc, blocks, changes)) return false;
 
   if (ranges.toc.some((range) => changesTouchRange(changes, range.from, range.to))) return false;
-  if (ranges.includes.some((range) => changesTouchRange(changes, range.from, range.to))) return false;
   if (ranges.semanticHeadings.some((range) => changesTouchRange(changes, range.from, range.to))) return false;
   if (ranges.hrs.some((range) => changesTouchRange(changes, range.from, range.to))) return false;
   if (ranges.frontMatter && changesTouchRange(changes, ranges.frontMatter.from, ranges.frontMatter.to)) return false;
@@ -2477,9 +2244,6 @@ function scanFrontMatter(doc: Text): { from: number; to: number; body: string } 
 const blockExtrasDecorations = StateField.define<DecorationSet>({
   create: (state) => buildBlockExtraDecos(state),
   update(value, tr) {
-    if (tr.effects.some((effect) => effect.is(setBookContextEffect))) {
-      return buildBlockExtraDecos(tr.state);
-    }
     if (tr.effects.some((effect) => effect.is(tocFoldEffect))) {
       return patchTocWidgetDecos(tr.state, value);
     }
@@ -2510,7 +2274,6 @@ const blockExtrasDecorations = StateField.define<DecorationSet>({
 const orgEnvRailExtension = ViewPlugin.fromClass(OrgEnvRailPlugin);
 
 export const blockExtrasExtension: Extension = [
-  bookContextField,
   fencedCodeRangesExtension,
   blockExtraRangesField,
   tocFoldField,

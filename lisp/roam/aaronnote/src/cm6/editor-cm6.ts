@@ -320,16 +320,6 @@ function wikilinkHrefAt(state: EditorState, pos: number): string | null {
   return null;
 }
 
-function includeRefAt(state: EditorState, pos: number): string | null {
-  const line = state.doc.lineAt(Math.max(0, Math.min(pos, state.doc.length)));
-  const match = line.text.match(/^\s*@@include\s+(?:\[([^\]\n]+)\]|(\S+))/);
-  const ref = (match?.[1] || match?.[2] || "").trim();
-  if (!match || !ref) return null;
-  const start = line.from + (match.index || 0);
-  const end = start + match[0].length;
-  return pos >= start && pos <= end ? ref : null;
-}
-
 function linkOpensNewWindow(href: string, event: MouseEvent): boolean {
   void href;
   return event.button === 1 && primaryLinkModifier(event);
@@ -344,22 +334,6 @@ function isLinkOpenMouseEvent(event: MouseEvent): boolean {
   if (event.shiftKey) return false;
   if (event.button !== 0 && event.button !== 1) return false;
   return primaryLinkModifier(event);
-}
-
-function openIncludeFromEvent(view: EditorView, event: MouseEvent): boolean {
-  if (!isLinkOpenMouseEvent(event)) return false;
-  const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
-  if (pos == null) return false;
-  const ref = includeRefAt(view.state, pos);
-  if (!ref) return false;
-
-  event.preventDefault();
-  event.stopPropagation();
-  view.dom.dispatchEvent(new CustomEvent("aaronnote:book-include-open", {
-    bubbles: true,
-    detail: { ref, newWindow: linkOpensNewWindow(ref, event) },
-  }));
-  return true;
 }
 
 function openMarkdownLinkFromEvent(view: EditorView, event: MouseEvent): boolean {
@@ -1053,13 +1027,11 @@ function buildExtensions(
     EditorView.domEventHandlers({
       mousedown: (event, eventView) => event.button === 0 && (
         openAttachmentSmartFromEvent(eventView, event)
-        || openIncludeFromEvent(eventView, event)
         || openMarkdownLinkFromEvent(eventView, event)
         || calibrateWrappedLayoutClick(eventView, event)
       ),
       auxclick: (event, eventView) => event.button === 1 && (
-        openIncludeFromEvent(eventView, event)
-        || openMarkdownLinkFromEvent(eventView, event)
+        openMarkdownLinkFromEvent(eventView, event)
       ),
       contextmenu: (event, eventView) => openAttachmentContextMenuFromEvent(eventView, event),
       focus: () => { options.onFocus?.(); return false; },

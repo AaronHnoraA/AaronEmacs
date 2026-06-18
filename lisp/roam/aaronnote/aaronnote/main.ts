@@ -2230,27 +2230,7 @@ function indexedDomTargets(note: NoteSummary): DomTargetEntry[] {
       .filter(Boolean);
     return { label, slug, path, labelPath, level: Math.max(1, Number(target.level || 1)), notePath: target.notePath || note.path || "" };
   }).filter((target) => target.label && target.slug && target.path.length > 0);
-  if (indexed.length > 0) return indexed;
-
-  const tocStack: Array<{ level: number; path: string[]; labelPath: string[] }> = [];
-  const tocTargets = (note.bookToc ?? []).map((item) => {
-    const level = Math.max(1, Number(item.level || 1));
-    const label = normalizeDomTarget(item.text || item.slug || "");
-    const slug = slugDomTarget(item.slug || label);
-    while (tocStack.length > 0 && tocStack[tocStack.length - 1]!.level >= level) tocStack.pop();
-    const parent = tocStack[tocStack.length - 1];
-    const path = [...(parent?.path ?? []), slug];
-    const labelPath = [...(parent?.labelPath ?? []), label];
-    tocStack.push({ level, path, labelPath });
-    return { label, slug, path, labelPath, level, notePath: item.path || "" };
-  }).filter((target) => target.label && target.slug);
-  if (tocTargets.length > 0) return tocTargets;
-
-  return (note.bookDomTargets ?? []).map((target) => {
-    const label = normalizeDomTarget(target.label || target.slug || "");
-    const slug = slugDomTarget(target.slug || label);
-    return { label, slug, path: [slug], labelPath: [label], level: target.level || 1, notePath: target.path || "" };
-  }).filter((target) => target.label && target.slug);
+  return indexed;
 }
 
 function domTargetsForCompletion(note: NoteSummary): DomTargetEntry[] {

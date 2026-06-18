@@ -7,7 +7,6 @@ from pathlib import Path
 import hashlib
 import json
 import os
-import posixpath
 import re
 import shutil
 import subprocess
@@ -31,7 +30,7 @@ RUNTIME_ROOT = _env_path("AARONNOTE_RUNTIME_ROOT", _SCRIPT_DIR.parent)
 # Publish source assets (css/, kinds/, homepage.html, notes.html, sensitive-tags.json).
 ASSETS_DIR = _env_path("AARONNOTE_PUBLISH_ASSETS", _SCRIPT_DIR / "assets")
 
-# Cache / state directory (deps/, state.json, book/).
+# Cache / state directory (deps/, state.json).
 STATE_DIR = _env_path("AARONNOTE_PUBLISH_STATE_DIR", _SCRIPT_DIR.parents[3] / "var" / "aaronnote" / "publish")
 
 # Note vault root (symlinked at ROOT/roam, or overridden).
@@ -43,8 +42,6 @@ PUBLIC = ROOT
 PUBLISH_STATE = STATE_DIR / "state.json"
 ASSET_VERSION = "20260517-md"
 NOTE_THEME_VERSION = "20260610-katex-notepage"
-BOOK_CACHE_SCHEMA = 1
-BOOK_CACHE_DIR = STATE_DIR / "book"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif"}
 VISUAL_ATTACHMENT_EXTENSIONS = {".drawio", ".dio", ".html", ".htm"}
 STATIC_EXTENSIONS = IMAGE_EXTENSIONS | {".css", ".js", ".pdf", ".drawio", ".dio"}
@@ -62,7 +59,6 @@ ORG_ENV_RE = re.compile(r"(?ms)^#\+begin(?:_|\s+)([A-Za-z][\w-]*)(?:\s+([^\n]+?)
 MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 MD_LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 HTML_MD_LINK_RE = re.compile(r'href="([^"#?:]+)\.md((?:#[^"]*)?)"')
-INCLUDE_RE = re.compile(r"(?im)^[ \t]*@@include[ \t]+\[([^\]\n]+)\][ \t]*$")
 MARKDOWN_LEAN_TAG_RE = re.compile(r"(?m)^[ \t]*@@lean4[ \t]+\[([^\]\n]+)\]")
 LEAN_REGION_MARKER_RE = re.compile(r"(?m)^--[ \t]*@aaronnote[ \t]+([A-Za-z0-9_.:-]+)[ \t]*$")
 KIND_NAME_RE = re.compile(r"^[a-z0-9_-]+$")
@@ -100,18 +96,6 @@ class Note:
     refs: list[str] = field(default_factory=list)
     backlinks: list[str] = field(default_factory=list)
     private: bool = False
-    book_role: str = ""
-    book_parent_ref: str = ""
-    book_cover_id: str = ""
-    book_cover_path: str = ""
-    book_parent_path: str = ""
-    book_include_refs: list[str] = field(default_factory=list)
-    book_included_paths: list[str] = field(default_factory=list)
-    book_toc: list[dict[str, object]] = field(default_factory=list)
-    book_dom_targets: list[dict[str, object]] = field(default_factory=list)
-    book_raw_refs: list[str] = field(default_factory=list)
-    book_diagnostics: list[dict[str, object]] = field(default_factory=list)
-
     @property
     def link(self) -> str:
         if self.private:
@@ -299,123 +283,6 @@ def truthy(value: object) -> bool:
     return str(value or "").strip().lower() in {"true", "yes", "private", "hidden", "sealed", "no-export"}
 
 
-def book_meta_from_metadata(metadata: dict[str, object]) -> tuple[str, str]:
-    value = metadata.get("book")
-    if value is True:
-        return "cover", ""
-    raw = normalize_meta_string(value)
-    if not raw:
-        return "", ""
-    if raw.lower() in {"true", "yes", "book"}:
-        return "cover", ""
-    match = re.match(r"^included@(.+)$", raw, flags=re.I)
-    if match:
-        return "included", match.group(1).strip()
-    return "", ""
-
-
-def include_refs_from_text(text: str) -> list[str]:
-    return [match.group(1).strip() for match in INCLUDE_RE.finditer(text) if match.group(1).strip()]
-
-
-def safe_book_cache_name(book_id: str) -> str:
-    safe = re.sub(r"[\\/:\0]+", "_", str(book_id or "book").strip()) or "book"
-    return f"{safe}.json"
-
-
-def sha256_text(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def strip_meta_block(text: str) -> str:
-    _metadata, body = parse_metadata_block(text)
-    return body.lstrip()
-
-
-def slug_book_anchor(value: str) -> str:
-    slug = re.sub(r"\s+", " ", str(value or "")).strip().lower()
-    slug = re.sub(r"[\x00-\x1f\x7f]", "", slug)
-    slug = re.sub(r"""[!"#$%&'()*+,./:;<=>?@[\\\]^`{|}~]""", "", slug)
-    slug = re.sub(r"\s+", "-", slug)
-    slug = re.sub(r"-+", "-", slug).strip("-")
-    return slug or "section"
-
-
-def book_headings_from_text(text: str, note: Note, used: set[str]) -> list[dict[str, object]]:
-    body = strip_meta_block(text)
-    headings: list[dict[str, object]] = []
-    has_h1 = False
-    for line in body.splitlines():
-        match = re.match(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$", line)
-        if not match:
-            continue
-        level = len(match.group(1))
-        has_h1 = has_h1 or level == 1
-        if level > 3:
-            continue
-        title = match.group(2).strip() or "Untitled"
-        slug = slug_book_anchor(title)
-        base = slug
-        suffix = 2
-        while slug in used:
-            slug = f"{base}-{suffix}"
-            suffix += 1
-        used.add(slug)
-        headings.append({"level": level, "text": title, "slug": slug, "path": note.rel_path, "id": note.id})
-    if not has_h1 and note.title:
-        slug = slug_book_anchor(note.title)
-        base = slug
-        suffix = 2
-        while slug in used:
-            slug = f"{base}-{suffix}"
-            suffix += 1
-        used.add(slug)
-        headings.insert(0, {"level": 1, "text": note.title, "slug": slug, "path": note.rel_path, "id": note.id})
-    return headings
-
-
-def resolve_include_path(note: Note, raw_ref: str) -> Path | None:
-    raw = unquote(str(raw_ref or "").split("#", 1)[0].split("?", 1)[0]).strip()
-    if not raw or re.match(r"^[a-z][a-z0-9+.-]*:", raw, flags=re.I):
-        return None
-    path = Path(raw)
-    resolved = (path if path.is_absolute() else note.path.parent / path).resolve()
-    try:
-        resolved.relative_to(ROAM_ROOT.resolve())
-    except ValueError:
-        return None
-    return resolved
-
-
-def canonical_book_ref(value: object) -> str:
-    raw = normalize_meta_string(value).replace("\\", "/")
-    raw = re.sub(r"^roam://", "", raw, flags=re.I)
-    raw = raw.split("#", 1)[0].split("@", 1)[0].split("?", 1)[0]
-    raw = unquote(raw).strip().lstrip("./")
-    parts: list[str] = []
-    for part in raw.split("/"):
-        if not part or part == ".":
-            continue
-        if part == "..":
-            if parts:
-                parts.pop()
-            continue
-        parts.append(part)
-    return "/".join(parts).lower()
-
-
-def note_book_ref_values(note: Note) -> list[str]:
-    return [
-        note.id,
-        note.title,
-        note.rel_path,
-        note.link,
-        note.path.as_posix(),
-        note.path.name,
-        *note.aliases,
-    ]
-
-
 def private_metadata_p(metadata: dict[str, object], tags: list[str]) -> bool:
     normalized_tags = {tag.lower() for tag in tags}
     visibility = str(metadata.get("visibility") or metadata.get("access") or "").strip().lower()
@@ -568,8 +435,7 @@ def private_static_asset_paths(notes: list[Note]) -> set[Path]:
 def parse_note(path: Path) -> Note | None:
     text = path.read_text(encoding="utf-8")
     metadata, _body = parse_metadata_block(text)
-    book_role, book_parent_ref = book_meta_from_metadata(metadata)
-    note_id = metadata.get("id") or (project_rel_path(path).as_posix() if book_role == "included" else "")
+    note_id = metadata.get("id") or ""
     if not note_id:
         return None
     rel = project_rel_path(path)
@@ -592,10 +458,6 @@ def parse_note(path: Path) -> Note | None:
         search_text=search_text,
         refs=refs,
         private=private,
-        book_role=book_role,
-        book_parent_ref=book_parent_ref,
-        book_cover_id=str(note_id) if book_role == "cover" else "",
-        book_include_refs=include_refs_from_text(text),
     )
 
 
@@ -619,8 +481,7 @@ def parse_note_for_export(path: Path) -> Note:
     tags = [str(tag) for tag in metadata.get("tags", [])] if isinstance(metadata.get("tags"), list) else []
     aliases = [str(alias) for alias in metadata.get("aliases", [])] if isinstance(metadata.get("aliases"), list) else []
     private = private_path_p(rel) or private_metadata_p(metadata, tags)
-    book_role, book_parent_ref = book_meta_from_metadata(metadata)
-    note_id = str(metadata.get("id") or (rel_path if book_role == "included" else path.stem))
+    note_id = str(metadata.get("id") or path.stem)
     return Note(
         path=path,
         rel_path=rel_path,
@@ -634,10 +495,6 @@ def parse_note_for_export(path: Path) -> Note:
         search_text=clean_markdown_text(text),
         refs=sorted(set(MD_LINK_RE.findall(text))),
         private=private,
-        book_role=book_role,
-        book_parent_ref=book_parent_ref,
-        book_cover_id=note_id if book_role == "cover" else "",
-        book_include_refs=include_refs_from_text(text),
     )
 
 
@@ -658,205 +515,6 @@ def find_notes() -> list[Note]:
         if note:
             notes.append(note)
     return sorted(notes, key=lambda note: (note.date, note.title), reverse=True)
-
-
-def resolve_book_ref(notes: list[Note], ref: str, from_note: Note | None = None) -> Note | None:
-    raw = str(ref or "").strip()
-    if not raw:
-        return None
-    if from_note and ("/" in raw or re.search(r"\.(md|markdown|typ)$", raw.split("#", 1)[0], flags=re.I)):
-        resolved = resolve_include_path(from_note, raw)
-        if resolved:
-            for note in notes:
-                if note.path.resolve() == resolved:
-                    return note
-    key = canonical_book_ref(raw)
-    if not key:
-        return None
-    for note in notes:
-        if any(canonical_book_ref(value) == key for value in note_book_ref_values(note)):
-            return note
-    return None
-
-
-def apply_book_metadata(notes: list[Note]) -> None:
-    covers = [note for note in notes if note.book_role == "cover" and note.id]
-    if not covers:
-        return
-    notes_by_file = {note.path.resolve(): note for note in notes}
-    cover_by_id = {note.id: note for note in covers}
-    included_by_cover: dict[str, list[Note]] = {note.id: [] for note in covers}
-    diagnostics_by_cover: dict[str, list[dict[str, object]]] = {note.id: [] for note in covers}
-    tree_by_cover: dict[str, dict[str, object] | None] = {note.id: None for note in covers}
-
-    for note in notes:
-        note.book_cover_id = note.id if note.book_role == "cover" else ""
-        note.book_cover_path = ""
-        note.book_parent_path = ""
-        note.book_included_paths = []
-        note.book_toc = []
-        note.book_dom_targets = []
-        note.book_raw_refs = []
-        note.book_diagnostics = []
-
-    def mark_included(note: Note, cover: Note, parent: Note | None) -> None:
-        if note.path == cover.path:
-            return
-        note.book_role = "included"
-        note.book_cover_id = cover.id
-        note.book_cover_path = cover.rel_path
-        note.book_parent_path = parent.rel_path if parent else ""
-        items = included_by_cover.setdefault(cover.id, [])
-        if not any(item.path == note.path for item in items):
-            items.append(note)
-
-    def visit(cover: Note, note: Note, parent: Note | None, stack: list[Path]) -> dict[str, object] | None:
-        resolved = note.path.resolve()
-        if resolved in stack:
-            diagnostics_by_cover[cover.id].append({
-                "level": "error",
-                "path": note.rel_path,
-                "message": "Book include cycle: " + " -> ".join(
-                    notes_by_file.get(path, note).rel_path for path in [*stack, resolved]
-                ),
-            })
-            return None
-        if note != cover:
-            mark_included(note, cover, parent)
-        node: dict[str, object] = {
-            "id": note.id,
-            "title": note.title,
-            "path": note.rel_path,
-            "role": "cover" if note == cover else "included",
-            "children": [],
-        }
-        children: list[dict[str, object]] = []
-        for raw_ref in note.book_include_refs:
-            child_path = resolve_include_path(note, raw_ref)
-            child = notes_by_file.get(child_path) if child_path else None
-            if not child:
-                diagnostics_by_cover[cover.id].append({
-                    "level": "error",
-                    "path": note.rel_path,
-                    "message": f"Included note not found or outside note root: {raw_ref}",
-                })
-                continue
-            if child.book_role == "cover" and child.id != cover.id:
-                diagnostics_by_cover[cover.id].append({
-                    "level": "error",
-                    "path": note.rel_path,
-                    "message": f"Cannot include another book cover: {child.rel_path}",
-                })
-                continue
-            child_node = visit(cover, child, note, [*stack, resolved])
-            if child_node:
-                children.append(child_node)
-        node["children"] = children
-        return node
-
-    def cover_from_parent_chain(note: Note, seen: set[Path] | None = None) -> Note | None:
-        seen = seen or set()
-        if note.path in seen or not note.book_parent_ref:
-            return None
-        seen.add(note.path)
-        parent = resolve_book_ref(notes, note.book_parent_ref, note)
-        if not parent:
-            return None
-        if parent.book_role == "cover":
-            return parent
-        return cover_from_parent_chain(parent, seen)
-
-    for cover in covers:
-        tree_by_cover[cover.id] = visit(cover, cover, None, [])
-
-    for note in [item for item in notes if item.book_role == "included"]:
-        cover = cover_by_id.get(note.book_cover_id) or cover_from_parent_chain(note)
-        if cover:
-            mark_included(note, cover, resolve_book_ref(notes, note.book_parent_ref, note))
-
-    for cover_id, included in included_by_cover.items():
-        cover = cover_by_id[cover_id]
-        book_notes = [cover, *included]
-        refs = set(cover.refs)
-        book_raw_refs: set[str] = set()
-        inline_tags: set[str] = set()
-        summaries = [cover.summary]
-        toc: list[dict[str, object]] = []
-        used: set[str] = set()
-        for note in book_notes:
-            try:
-                text = note.path.read_text(encoding="utf-8")
-            except OSError:
-                text = ""
-            refs.update(MD_LINK_RE.findall(text))
-            book_raw_refs.update(MD_LINK_RE.findall(text))
-            inline_tags.update(re.findall(r"@@tag\[([^\]\n]+)\]", text))
-            if note != cover and note.summary:
-                summaries.append(note.summary)
-            toc.extend(book_headings_from_text(text, note, used))
-        cover.refs = sorted(ref for ref in refs if ref)
-        cover.book_raw_refs = sorted(ref for ref in book_raw_refs if ref)
-        cover.summary = " ".join(" ".join(summaries).split())[:220]
-        cover.book_included_paths = [note.rel_path for note in included]
-        cover.book_toc = toc
-        cover.book_dom_targets = [
-            {"label": item["text"], "slug": item["slug"], "path": item["path"], "level": item["level"]}
-            for item in toc
-        ]
-        cover.book_diagnostics = diagnostics_by_cover.get(cover.id, [])
-        cover.book_cover_id = cover.id
-    write_book_caches(covers, included_by_cover, tree_by_cover, diagnostics_by_cover)
-
-
-def write_book_caches(
-    covers: list[Note],
-    included_by_cover: dict[str, list[Note]],
-    tree_by_cover: dict[str, dict[str, object] | None],
-    diagnostics_by_cover: dict[str, list[dict[str, object]]],
-) -> None:
-    BOOK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    updated_at = subprocess.check_output(["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"], text=True).strip()
-    index: dict[str, object] = {"schema": BOOK_CACHE_SCHEMA, "updatedAt": updated_at, "books": {}}
-    books = index["books"]
-    assert isinstance(books, dict)
-    for cover in covers:
-        included = included_by_cover.get(cover.id, [])
-        files = []
-        for note in [cover, *included]:
-            try:
-                text = note.path.read_text(encoding="utf-8")
-                stat = note.path.stat()
-                files.append({
-                    "path": note.rel_path,
-                    "mtimeMs": stat.st_mtime * 1000,
-                    "size": stat.st_size,
-                    "sha256": sha256_text(text),
-                })
-            except OSError:
-                files.append({"path": note.rel_path, "missing": True})
-        cache_file = safe_book_cache_name(cover.id)
-        cache = {
-            "schema": BOOK_CACHE_SCHEMA,
-            "id": cover.id,
-            "title": cover.title,
-            "coverPath": cover.rel_path,
-            "updatedAt": updated_at,
-            "files": files,
-            "includeTree": tree_by_cover.get(cover.id),
-            "toc": cover.book_toc,
-            "anchors": cover.book_dom_targets,
-            "diagnostics": diagnostics_by_cover.get(cover.id, []),
-            "hash": sha256_text(json.dumps(files, ensure_ascii=False, sort_keys=True)),
-        }
-        (BOOK_CACHE_DIR / cache_file).write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        books[cover.id] = {
-            "id": cover.id,
-            "title": cover.title,
-            "coverPath": cover.rel_path,
-            "cacheFile": cache_file,
-            "updatedAt": updated_at,
-        }
-    (BOOK_CACHE_DIR / "index.json").write_text(json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def deps_file_for(output_file: Path, output_root: Path = PUBLIC) -> Path:
@@ -984,27 +642,6 @@ def deps_for_note(note: Note, notes_by_rel: dict[str, Note] | None = None) -> se
         note_has_lean_regions = False
     if lean_path.exists() or note_has_lean_regions:
         deps.add(project_rel_path(lean_path).as_posix())
-    if notes_by_rel and note.book_role == "cover":
-        for rel_path in note.book_included_paths:
-            child = notes_by_rel.get(rel_path)
-            if not child:
-                continue
-            deps.add(project_rel_path(child.path).as_posix())
-            child_lean = lean_mirror_path(child.path)
-            try:
-                child_has_lean = bool(MARKDOWN_LEAN_TAG_RE.search(child.path.read_text(encoding="utf-8")))
-            except OSError:
-                child_has_lean = False
-            if child_lean.exists() or child_has_lean:
-                deps.add(project_rel_path(child_lean).as_posix())
-    if notes_by_rel and note.book_role == "included":
-        cover = book_cover_for_note(note, notes_by_rel)
-        if cover:
-            deps.add(project_rel_path(cover.path).as_posix())
-            for rel_path in cover.book_included_paths:
-                child = notes_by_rel.get(rel_path)
-                if child:
-                    deps.add(project_rel_path(child.path).as_posix())
     deps.update(str(path) for path in note_kind_asset_paths(note))
     return deps
 
@@ -1137,132 +774,6 @@ def lean_regions_for_note(note: Note, markdown_text: str) -> dict[str, str]:
     return {tag: body for tag, body in regions.items() if tag in wanted}
 
 
-def note_has_h1(markdown_text: str) -> bool:
-    return bool(re.search(r"(?m)^\s{0,3}#\s+\S", strip_meta_block(markdown_text)))
-
-
-def expanded_book_markdown(note: Note, notes_by_rel: dict[str, Note], stack: list[str] | None = None) -> str:
-    stack = stack or []
-    text = note.path.read_text(encoding="utf-8")
-    if not note.book_role and not note.book_include_refs:
-        return text
-    if note.rel_path in stack:
-        return f"\n\n> Book include cycle: {' -> '.join([*stack, note.rel_path])}\n\n"
-
-    def replace_include(match: re.Match[str]) -> str:
-        raw_ref = match.group(1).strip()
-        child_path = resolve_include_path(note, raw_ref)
-        if not child_path:
-            return f"\n\n> Missing include: {raw_ref}\n\n"
-        try:
-            child_rel = project_rel_path(child_path).as_posix()
-        except ValueError:
-            return f"\n\n> Missing include: {raw_ref}\n\n"
-        child = notes_by_rel.get(child_rel)
-        if not child:
-            return f"\n\n> Missing include: {raw_ref}\n\n"
-        child_text = expanded_book_markdown(child, notes_by_rel, [*stack, note.rel_path])
-        child_body = strip_meta_block(child_text)
-        if not note_has_h1(child_text) and child.title:
-            child_body = f"# {child.title}\n\n{child_body}"
-        return f"\n\n{child_body.rstrip()}\n\n"
-
-    return INCLUDE_RE.sub(replace_include, text)
-
-
-def html_escape(value: object) -> str:
-    return (
-        str(value or "")
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
-
-
-def add_book_toc_after_meta(markdown_text: str, note: Note, notes_by_rel: dict[str, Note] | None = None) -> str:
-    if note.book_role != "cover" or not note.book_toc:
-        return markdown_text
-    items = "\n".join(
-        f'<li data-level="{int(item.get("level") or 1)}"><a href="{html_escape(book_toc_item_href(note, item))}">{html_escape(item.get("text"))}</a></li>'
-        for item in note.book_toc
-        if int(item.get("level") or 1) <= 3
-    )
-    if not items:
-        return markdown_text
-    toc = "\n".join([
-        "#+begin html",
-        '<nav class="aaronnote-book-cover-toc" aria-label="Book contents">',
-        "<strong>Book contents</strong>",
-        f"<ol>{items}</ol>",
-        "</nav>",
-        "#+end html",
-        "",
-    ])
-    match = ORG_META_RE.match(markdown_text)
-    if match:
-        return f"{markdown_text[:match.end()].rstrip()}\n\n{toc}{markdown_text[match.end():].lstrip()}"
-    return f"{toc}{markdown_text}"
-
-
-def book_include_card_html(note: Note, raw_ref: str, notes_by_rel: dict[str, Note]) -> str:
-    child_path = resolve_include_path(note, raw_ref)
-    child: Note | None = None
-    if child_path:
-        try:
-            child = notes_by_rel.get(project_rel_path(child_path).as_posix())
-        except ValueError:
-            child = None
-    if not child:
-        return "\n".join([
-            "#+begin html",
-            '<div class="aaronnote-book-include-card is-missing">',
-            '<span class="aaronnote-book-include-badge">Include</span>',
-            f"<strong>Missing include</strong>",
-            f"<small>{html_escape(raw_ref)}</small>",
-            "</div>",
-            "#+end html",
-        ])
-    href = relative_site_href(note_output_link(note), note_output_link(child))
-    return "\n".join([
-        "#+begin html",
-        f'<a class="aaronnote-book-include-card" href="{html_escape(href)}">',
-        '<span class="aaronnote-book-include-badge">Include</span>',
-        f"<strong>{html_escape(child.public_title)}</strong>",
-        f"<small>{html_escape(child.rel_path)}</small>",
-        "</a>",
-        "#+end html",
-    ])
-
-
-def render_book_include_cards(markdown_text: str, note: Note, notes_by_rel: dict[str, Note]) -> str:
-    if not note.book_include_refs:
-        return markdown_text
-
-    def replace_include(match: re.Match[str]) -> str:
-        raw_ref = match.group(1).strip()
-        return f"\n\n{book_include_card_html(note, raw_ref, notes_by_rel)}\n\n"
-
-    return INCLUDE_RE.sub(replace_include, markdown_text)
-
-
-def lean_regions_for_book(note: Note, markdown_text: str, notes_by_rel: dict[str, Note] | None = None) -> dict[str, str]:
-    regions = lean_regions_for_note(note, markdown_text)
-    if not notes_by_rel or note.book_role != "cover":
-        return regions
-    for rel_path in note.book_included_paths:
-        child = notes_by_rel.get(rel_path)
-        if not child:
-            continue
-        try:
-            child_text = child.path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        for tag, body in lean_regions_for_note(child, child_text).items():
-            regions.setdefault(tag, body)
-    return regions
-
-
 def site_root_for(note_link: str) -> str:
     depth = len(Path(note_link).parent.parts)
     return "../" * depth or "./"
@@ -1276,55 +787,6 @@ def note_output_link(note: Note) -> str:
     if pdf_export_p():
         return Path(note.rel_path).with_suffix(".html").as_posix()
     return note.link
-
-
-def note_link_for_rel_path(rel_path: str) -> str:
-    return Path(rel_path).with_suffix(".html").as_posix()
-
-
-def relative_site_href(from_link: str, to_link: str) -> str:
-    from_dir = posixpath.dirname(from_link) or "."
-    return posixpath.relpath(to_link, from_dir)
-
-
-def book_cover_for_note(note: Note, notes_by_rel: dict[str, Note] | None = None) -> Note | None:
-    if note.book_role == "cover":
-        return note
-    if not notes_by_rel or note.book_role != "included" or not note.book_cover_id:
-        return None
-    for candidate in notes_by_rel.values():
-        if candidate.id == note.book_cover_id:
-            return candidate
-    return None
-
-
-def book_toc_item_href(from_note: Note, item: dict[str, object]) -> str:
-    slug = str(item.get("slug") or "").strip()
-    target_path = str(item.get("path") or from_note.rel_path).strip() or from_note.rel_path
-    hash_part = f"#{slug}" if slug else ""
-    if target_path == from_note.rel_path:
-        return hash_part or "#"
-    return f"{relative_site_href(note_output_link(from_note), note_link_for_rel_path(target_path))}{hash_part}"
-
-
-def published_book_payload(note: Note, notes_by_rel: dict[str, Note] | None = None) -> dict[str, object] | None:
-    cover = book_cover_for_note(note, notes_by_rel)
-    if not cover or not cover.book_toc:
-        return None
-    toc = []
-    for item in cover.book_toc:
-        next_item = dict(item)
-        next_item["href"] = book_toc_item_href(note, item)
-        toc.append(next_item)
-    return {
-        "id": cover.public_id,
-        "title": cover.public_title,
-        "role": note.book_role,
-        "coverPath": cover.rel_path,
-        "currentPath": note.rel_path,
-        "coverHref": relative_site_href(note_output_link(note), note_output_link(cover)),
-        "toc": toc,
-    }
 
 
 def note_render_payload(
@@ -1354,7 +816,6 @@ def note_render_payload(
             "private": note.private,
             "includePrivateContent": include_private_content,
             "leanRegions": lean_regions or {},
-            "book": published_book_payload(note, notes_by_rel),
         },
     }
 
@@ -1392,13 +853,9 @@ def prepare_note_render(
     output_file.parent.mkdir(parents=True, exist_ok=True)
     deps_file.parent.mkdir(parents=True, exist_ok=True)
     markdown_text = note.path.read_text(encoding="utf-8")
-    if note.book_role == "cover":
-        markdown_text = add_book_toc_after_meta(markdown_text, note, notes_by_rel)
-    if notes_by_rel:
-        markdown_text = render_book_include_cards(markdown_text, note, notes_by_rel)
     if not include_private_content:
         markdown_text = sanitize_published_metadata_tags(markdown_text)
-    lean_regions = lean_regions_for_book(note, markdown_text, notes_by_rel)
+    lean_regions = lean_regions_for_note(note, markdown_text)
     return PendingNoteRender(
         note=note,
         output_file=output_file,
@@ -1466,46 +923,22 @@ def note_json(note: Note, public_ids: dict[str, str]) -> dict[str, object]:
         "aliases": [] if note.private else note.aliases,
         "refs": public_ref_keys(note.refs, public_ids),
         "backlinks": public_ref_keys(note.backlinks, public_ids),
-        "bookRole": note.book_role,
-        "bookCoverId": note.book_cover_id,
-        "bookCoverPath": note.book_cover_path,
-        "bookIncludedPaths": note.book_included_paths,
-        "bookToc": note.book_toc,
-        "bookDomTargets": note.book_dom_targets,
     }
 
 
 def write_data(notes: list[Note]) -> None:
     js_dir = PUBLIC / "js"
     js_dir.mkdir(parents=True, exist_ok=True)
-    public_note_items = [note for note in notes if note.book_role != "included"]
+    public_note_items = list(notes)
     tags = sorted({tag for note in public_note_items if not note.private for tag in filter_sensitive_tags(note.tags)})
     public_ids = {note.id: note.public_id for note in notes}
-    books = [
-        {
-            "id": note.public_id,
-            "title": note.public_title,
-            "link": note.link,
-            "path": note.public_path,
-            "date": note.date,
-            "summary": note.summary,
-            "tags": filter_sensitive_tags(note.tags),
-            "tocCount": len(note.book_toc),
-            "includedCount": len(note.book_included_paths),
-            "toc": note.book_toc,
-        }
-        for note in public_note_items
-        if note.book_role == "cover" and not note.private
-    ]
     data = {
         "meta": {
             "generatedAt": subprocess.check_output(["date", "+%Y-%m-%d %H:%M:%S %z"], text=True).strip(),
             "noteCount": len(public_note_items),
             "tagCount": len(tags),
-            "bookCount": len(books),
         },
         "notes": [note_json(note, public_ids) for note in public_note_items],
-        "books": books,
     }
     (js_dir / "data.js").write_text(f"const SITE_DATA = {json.dumps(data, ensure_ascii=False, separators=(',', ':'))};\n", encoding="utf-8")
 
@@ -1581,11 +1014,7 @@ def note_static_asset_paths(note: Note) -> set[Path]:
 
 def copy_note_static_assets(note: Note, output_root: Path, notes_by_rel: dict[str, Note] | None = None) -> None:
     sources = set(note_static_asset_paths(note))
-    if notes_by_rel and note.book_role == "cover":
-        for rel_path in note.book_included_paths:
-            child = notes_by_rel.get(rel_path)
-            if child:
-                sources.update(note_static_asset_paths(child))
+    _ = notes_by_rel
     for source in sources:
         try:
             rel = project_rel_path(source)
@@ -1716,7 +1145,6 @@ def clean_stale_outputs(notes: list[Note]) -> None:
 def collect_notes() -> tuple[list[Note], dict[str, Note]]:
     PUBLIC.mkdir(exist_ok=True)
     notes = find_notes()
-    apply_book_metadata(notes)
     notes_by_id = {note.id: note for note in notes}
     notes_by_rel = {note.rel_path: note for note in notes}
     backlinks: dict[str, list[str]] = {note.id: [] for note in notes}
@@ -1733,10 +1161,7 @@ def collect_notes() -> tuple[list[Note], dict[str, Note]]:
                 continue
             target = notes_by_rel.get(rel)
             if target and target.id != note.id:
-                if target.book_role == "included" and target.book_cover_id:
-                    resolved_refs.add(target.book_cover_id)
-                else:
-                    resolved_refs.add(target.id)
+                resolved_refs.add(target.id)
         note.refs = sorted(resolved_refs)
         for ref in note.refs:
             backlinks.setdefault(ref, []).append(note.id)
@@ -1835,7 +1260,6 @@ def publish_single_note(args: list[str]) -> bool:
         os.environ["AARONNOTE_EXPORT_FORMAT"] = export_format
     note = parse_note_for_export(note_path)
     all_notes = find_notes()
-    apply_book_metadata(all_notes)
     notes_by_rel = {item.rel_path: item for item in all_notes}
     note = notes_by_rel.get(note.rel_path, note)
     output_root.mkdir(parents=True, exist_ok=True)
