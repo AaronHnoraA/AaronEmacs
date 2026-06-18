@@ -71,8 +71,6 @@
     my/jupyter-manager-mode
     my/jupyter-doctor-mode
     my/compile-board-mode
-    my/org-maintenance-board-mode
-    my/org-task-fast-view-mode
     org-agenda-mode
     my/health-mode
     ai-workbench-mode
@@ -269,8 +267,6 @@ Emacs state keep their local behavior."
                   my/jupyter-manager-mode
                   my/jupyter-doctor-mode
                   my/compile-board-mode
-                  my/org-maintenance-board-mode
-                  my/org-task-fast-view-mode
                   org-agenda-mode
                   my/health-mode
                   ai-workbench-mode
@@ -297,8 +293,6 @@ Emacs state keep their local behavior."
                   my/jupyter-manager-mode-hook
                   my/jupyter-doctor-mode-hook
                   my/compile-board-mode-hook
-                  my/org-maintenance-board-mode-hook
-                  my/org-task-fast-view-mode-hook
                   org-agenda-mode-hook
                   my/health-mode-hook
                   ai-workbench-mode-hook
@@ -315,9 +309,7 @@ Emacs state keep their local behavior."
   (add-hook 'dirvish-mode-hook #'my/evil-disable-local-mode-h)
   (add-hook 'eww-mode-hook #'my/evil-disable-local-mode-h)
   (add-hook 'xwidget-webkit-mode-hook #'my/evil-disable-local-mode-h)
-  (dolist (hook '(my/org-maintenance-board-mode-hook
-                  my/org-task-fast-view-mode-hook
-                  org-agenda-mode-hook))
+  (dolist (hook '(org-agenda-mode-hook))
     (add-hook hook #'my/evil-disable-local-mode-h))
   (dolist (hook '(ai-workbench-mode-hook
                   ai-workbench-codex-mode-hook
@@ -371,7 +363,7 @@ Emacs state keep their local behavior."
   (evil-collection-require 'consult)
   :custom
   (evil-collection-setup-debugger-keys nil)
-  (evil-collection-calendar-want-org-bindings t)
+  (evil-collection-calendar-want-org-bindings nil)
   (evil-collection-unimpaired-want-repeat-mode-integration t))
 
 ;; evil leader map
@@ -495,7 +487,6 @@ Emacs state keep their local behavior."
     "cx" 'quickrun
     "ce" 'my/byte-recompile-lisp-dir
     "cE" 'my/native-compile-lisp-dir
-    "cy" 'my/note-code-copy-reference
 
     ;; window
     "w"  'evil-window-map
@@ -556,7 +547,6 @@ Emacs state keep their local behavior."
 
     ;; app
     "a"  '(:ignore t :which-key "app")
-    "aa" 'org-agenda
     "ap" '(:ignore t :which-key "appine")
     "apa" 'my/appine-open-url
     "apf" 'my/appine-open-file
@@ -577,10 +567,8 @@ Emacs state keep their local behavior."
 
     ;; open
     "o"  '(:ignore t :which-key "open")
-    "oc" 'org-capture
     "od" 'dirvish-dwim
     "oD" 'dirvish-fd
-    "ol" 'org-store-link
     "ob" 'browse-url
     "oa" 'my/appine-open-url
     "oe" 'vterm-toggle
@@ -597,65 +585,6 @@ Emacs state keep their local behavior."
     "ox" 'my/xwidget-open-url
     "oB" 'my/browser-switch-to
     "os" 'shell-toggle)
-
-  (with-eval-after-load 'org
-    (my/local-leader!
-      :keymaps 'org-mode-map
-      "." 'org-goto
-      "a" 'org-archive-subtree
-      "d" 'org-deadline
-      "e" 'org-set-effort
-      "f" 'org-footnote-action
-      "l" 'org-lint
-      "o" 'org-toggle-ordered-property
-      "p" 'org-set-property
-      "q" 'org-set-tags-command
-      "r" 'org-refile
-      "s" 'org-schedule
-      "t" 'org-todo
-      "T" 'org-todo-list
-      "v" 'my/org-latex-preview-visible-now
-
-      ;; babel
-      "bp" 'org-babel-previous-src-block
-      "bn" 'org-babel-next-src-block
-      "be" 'org-babel-expand-src-block
-      "bg" 'org-babel-goto-named-src-block
-      "bs" 'org-babel-execute-subtree
-      "bb" 'org-babel-execute-buffer
-      "bt" 'org-babel-tangle
-      "bf" 'org-babel-tangle-file
-      "bc" 'org-babel-check-src-block
-      "bi" 'org-babel-insert-header-arg
-      "bI" 'org-babel-view-src-block-info
-      "bk" 'org-babel-remove-result-one-or-many
-
-      ;; clock
-      "cc" 'org-clock-in
-      "cC" 'org-clock-out
-      "cd" 'org-clock-mark-default-task
-      "ce" 'org-clock-modify-effort-estimate
-      "cg" 'org-clock-goto
-      "cl" 'org-clock-in-last
-      "cr" 'org-clock-report
-      "cs" 'org-clock-display
-      "cx" 'org-clock-cancel
-      "c=" 'org-clock-timestamps-up
-      "c-" 'org-clock-timestamps-down
-
-      ;; insert
-      "id" 'org-insert-drawer
-      "in" 'org-add-note
-      "it" 'org-time-stamp-inactive
-      "iT" 'org-time-stamp
-
-      ;; math graphics
-      "mg" 'my/org-geogebra-tikz-clean-dwim
-      "mf" 'my/org-tikz-toggle-raw-fold-at-point
-      "mF" 'my/org-tikz-fold-generated-raw-blocks
-      "mp" 'my/org-tikz-preview-display-latex-block
-      "mt" 'my/org-tikz-insert-tikzpicture
-      "md" 'my/org-tikz-insert-tikzcd))
 
   (with-eval-after-load 'elisp-mode
     (my/local-leader!

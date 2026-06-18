@@ -283,5 +283,94 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(defmacro my/aaronnote-test--with-xwidget-mocks (&rest body)
+  "Run BODY with mocked xwidget opener state."
+  (declare (indent 0))
+  `(let ((my/aaronnote--file-buffers (make-hash-table :test #'equal))
+         (my/aaronnote--client-buffers (make-hash-table :test #'equal))
+         (my/aaronnote--app-buffer nil)
+         (my/aaronnote--port 50815)
+         opened-urls
+         buffers)
+     (cl-letf (((symbol-function 'my/xwidget-open-url)
+                (lambda (url &rest _args)
+                  (push url opened-urls)
+                  (let ((buffer (generate-new-buffer "*mock-xwidget*")))
+                    (push buffer buffers)
+                    (with-current-buffer buffer
+                      (setq-local major-mode 'xwidget-webkit-mode))
+                    (switch-to-buffer buffer)
+                    buffer)))
+               ((symbol-function 'my/xwidget-session-buffer)
+                (lambda (_id) nil))
+               ((symbol-function 'my/xwidget-focus)
+                (lambda (&optional _buffer) nil))
+               ((symbol-function 'run-at-time)
+                (lambda (&rest _args) 'mock-timer))
+               ((symbol-function 'my/aaronnote--refresh-visible-ibuffers)
+                (lambda () nil)))
+       (unwind-protect
+           (progn ,@body)
+         (dolist (buffer buffers)
+           (when (buffer-live-p buffer)
+             (kill-buffer buffer)))))))
+
+(ert-deftest my/aaronnote-open-xwidget-reuses-file-buffer ()
+  (my/aaronnote-test--with-xwidget-mocks
+    (let* ((file (expand-file-name "note.md" temporary-file-directory))
+           (buf1 (my/aaronnote--open-xwidget "ignored" file))
+           (buf2 (my/aaronnote--open-xwidget "ignored-again" file)))
+      (should (eq buf1 buf2))
+      (should (= (length opened-urls) 1))
+      (should (equal (my/aaronnote-buffer-file buf1) file))
+      (should (string-match-p "\\*aaronnote: note\\.md\\*" (buffer-name buf1)))
+      (should (string-match-p "client=" (car opened-urls))))))
+
+(ert-deftest my/aaronnote-open-xwidget-keeps-files-distinct ()
+  (my/aaronnote-test--with-xwidget-mocks
+    (let* ((file1 (expand-file-name "one.md" temporary-file-directory))
+           (file2 (expand-file-name "two.md" temporary-file-directory))
+           (buf1 (my/aaronnote--open-xwidget "ignored" file1))
+           (buf2 (my/aaronnote--open-xwidget "ignored" file2)))
+      (should-not (eq buf1 buf2))
+      (should (= (length opened-urls) 2))
+      (should (eq (gethash file1 my/aaronnote--file-buffers) buf1))
+      (should (eq (gethash file2 my/aaronnote--file-buffers) buf2)))))
+
+(ert-deftest my/aaronnote-kill-buffer-cleans-registries ()
+  (my/aaronnote-test--with-xwidget-mocks
+    (let* ((file (expand-file-name "cleanup.md" temporary-file-directory))
+           (client (my/aaronnote--xwidget-session-id file))
+           (buffer (my/aaronnote--open-xwidget "ignored" file)))
+      (should (eq (gethash file my/aaronnote--file-buffers) buffer))
+      (should (eq (gethash client my/aaronnote--client-buffers) buffer))
+      (kill-buffer buffer)
+      (should-not (gethash file my/aaronnote--file-buffers))
+      (should-not (gethash client my/aaronnote--client-buffers)))))
+
+(ert-deftest my/aaronnote-current-file-client-targets-buffer ()
+  (my/aaronnote-test--with-xwidget-mocks
+    (let* ((file1 (expand-file-name "first.md" temporary-file-directory))
+           (file2 (expand-file-name "second.md" temporary-file-directory))
+           (buf1 (my/aaronnote--open-xwidget "ignored" file1))
+           (buf2 (my/aaronnote--open-xwidget "ignored" nil)))
+      (my/aaronnote--track-app-buffer buf2 nil "client-two")
+      (setq my/aaronnote--app-buffer buf1)
+      (my/aaronnote--sync-app-buffer-file file2 "client-two")
+      (should (eq my/aaronnote--app-buffer buf2))
+      (should (equal (my/aaronnote-buffer-file buf2) file2))
+      (should (eq (gethash file2 my/aaronnote--file-buffers) buf2)))))
+
+(ert-deftest my/aaronnote-canonical-buffer-prefers-registered-buffer ()
+  (my/aaronnote-test--with-xwidget-mocks
+    (let* ((file (expand-file-name "duplicate.md" temporary-file-directory))
+           (canonical (my/aaronnote--open-xwidget "ignored" file))
+           (duplicate (generate-new-buffer "*aaronnote: duplicate.md*")))
+      (push duplicate buffers)
+      (with-current-buffer duplicate
+        (setq-local major-mode 'xwidget-webkit-mode)
+        (setq-local my/aaronnote-buffer-file-name file))
+      (should (eq (my/aaronnote-canonical-buffer duplicate) canonical)))))
+
 (provide 'init-aaronnote-tests)
 ;;; init-aaronnote-tests.el ends here

@@ -88,6 +88,40 @@
           (when (buffer-live-p buf2)
             (kill-buffer buf2)))))))
 
+(ert-deftest my/xwidget-update-buffer-name-prefers-title ()
+  (let ((buffer (generate-new-buffer "*xwidget*")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (setq-local major-mode 'xwidget-webkit-mode)
+          (setq-local my/xwidget-session-url "https://example.com/path/page.html")
+          (setq-local my/xwidget-session-title "Readable Page")
+          (my/xwidget-update-buffer-name buffer)
+          (should (string-match-p "\\`\\*xwidget: Readable Page\\*" (buffer-name buffer))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
+(ert-deftest my/xwidget-update-buffer-name-falls-back-to-url ()
+  (let ((buffer (generate-new-buffer "*xwidget*")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (setq-local major-mode 'xwidget-webkit-mode)
+          (setq-local my/xwidget-session-url "https://example.com/docs/index.html")
+          (my/xwidget-update-buffer-name buffer)
+          (should (string-match-p "\\`\\*xwidget: index\\.html\\*" (buffer-name buffer))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
+(ert-deftest my/xwidget-update-buffer-name-skips-aaronnote-owned-buffer ()
+  (let ((buffer (generate-new-buffer "*aaronnote: note.md*")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (setq-local major-mode 'xwidget-webkit-mode)
+          (setq-local my/aaronnote--xwidget-forced-name "*aaronnote: note.md*")
+          (setq-local my/xwidget-session-title "Browser Title")
+          (my/xwidget-update-buffer-name buffer)
+          (should (equal (buffer-name buffer) "*aaronnote: note.md*")))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
 
 (provide 'init-browser-tests)
 ;;; init-browser-tests.el ends here

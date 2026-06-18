@@ -239,6 +239,24 @@ org <-> jupytext <-> ipynb
 4. 重复逻辑尽快抽到 `src/`。
 5. 从实验回流到笔记时，整理结论，不复制整份 notebook。
 
+## 11. Wiki 知识健康维护（MediaWiki Special: 类比）
+
+Aaronnote 的 Markdown vault 现在具备 MediaWiki 级别的 wiki 维护能力，所有操作通过 `H-o` 进入，完全 Emacs-native，不需要打开 Web 界面：
+
+| 功能 | 入口 | 说明 |
+|------|------|------|
+| Wanted pages | `H-o !w` | 被 `[[..]]` / `roam://` 链接但尚不存在的笔记；点击行直接进入新建流程 |
+| Orphaned pages | `H-o !o` | 没有任何入链的笔记（自动排除日记） |
+| Dead-end pages | `H-o !d` | 没有任何出链的笔记 |
+| Uncategorized | `H-o !u` | 没有标签的笔记 |
+| Most-linked hubs | `H-o !h` | 按入链数排序的枢纽笔记 |
+| Category 层次浏览 | `H-o C` | 以 `area/topic/subtopic` 嵌套标签为 Category 层次，逐级 drill-down |
+| 高级搜索操作符 | `H-o /` | `intitle:` / `incategory:` / `linksto:` / 全文词可混用 |
+| 移动笔记 | `H-o m` | 重命名文件并自动重写全库反向链接 |
+| 维护仪表板 | `H-o M` | Special:Statistics — 展示所有统计数据 + 一键进入各 Special page + Tag 工具 |
+
+**性能保证**：四个本地报告（Orphaned/Dead-end/Uncategorized/Most-linked）直接从已缓存的 index 派生，无文件 IO；Wanted pages 通过异步后端 API 获取（不阻塞 Emacs）；所有操作上限 200 行，不会因大型 vault 而无界输出。
+
 ## 10. 推荐起步法
 
 如果你现在还没完全定型，可以直接这样开始：

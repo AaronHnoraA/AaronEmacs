@@ -5,7 +5,7 @@
 ;; Reserve F11 for the window manager / system shortcuts.
 ;;
 ;; The rest of the function keys are mapped to one-tap entry points for the
-;; current daily workflow: search, project, run/test/debug, Org, terminal and
+;; current daily workflow: search, project, run/test/debug, terminal and
 ;; LLM.
 
 ;;; Code:
@@ -18,7 +18,6 @@
 (declare-function my/debug-profile-dispatch "init-debug-profile" ())
 (declare-function vterm-toggle "init-vterm-popup" ())
 (declare-function claude-code-ide-menu "claude-code-ide" ())
-(declare-function org-agenda "org" (&optional arg keys restriction))
 (autoload 'olivetti-mode "olivetti" nil t)
 
 (global-set-key (kbd "<f1>") #'help-command)
@@ -29,7 +28,6 @@
 (global-set-key (kbd "<f6>") #'my/test-dispatch)
 (global-set-key (kbd "<f7>") #'my/debug-profile-dispatch)
 (global-set-key (kbd "<f8>") #'olivetti-mode)
-(global-set-key (kbd "<f9>") #'org-agenda)
 (global-set-key (kbd "<f10>") #'vterm-toggle)
 ;; F11 intentionally left alone.
 (global-set-key (kbd "<f12>") #'claude-code-ide-menu)

@@ -21,6 +21,7 @@ import {
   readNote,
   notesIndexPayload,
   graphPayload,
+  wantedPages,
   scanRoamNotes,
   scanNotes,
   tagIndexPayload,
@@ -444,11 +445,14 @@ async function apiOpenInEmacs(file, line = 1, col = 0, tag = "") {
   return { ok: true, ...payload };
 }
 
-async function apiCurrentFile(file) {
-  const raw = String(file || "").trim();
+async function apiCurrentFile(body) {
+  const raw = String((body && typeof body === "object" ? body.file : body) || "").trim();
+  const client = String((body && typeof body === "object" ? body.client : "") || "").trim();
   const target = raw ? resolveShellPath(raw) : "";
-  process.stdout.write(`aaronote-event:current-file:${JSON.stringify({ file: target })}\n`);
-  return { ok: true, file: target };
+  const payload = { file: target };
+  if (client) payload.client = client;
+  process.stdout.write(`aaronote-event:current-file:${JSON.stringify(payload)}\n`);
+  return { ok: true, ...payload };
 }
 
 async function apiEmacsKey(key) {
@@ -519,6 +523,10 @@ const apiHandlers = {
   },
   "aaronnote:api:runtime:debug": async () => ({ type: "runtime-debug", ...runtimeDebugSnapshot() }),
   "aaronnote:api:note-code:read-region": (body) => readNoteCodeRegion(body || {}),
+  "aaronnote:api:notes:wanted": async () => {
+    const notes = await scanRoamNotes();
+    return wantedPages(notes);
+  },
   "aaronnote:api:notes:roam-sync": (reload) => roamSyncPayload(reload === true),
   "aaronnote:api:notes:roam-sync-full": () => roamSyncFullPayload(),
   "aaronnote:api:notes:templates": (force) => templatesPayload(force === true),
@@ -802,7 +810,11 @@ function adapterScript(origin) {
     },
     emacs: {
       open: function(body) { return call("aaronnote:api:emacs:open", [body || {}]); },
-      currentFile: function(file) { return call("aaronnote:api:emacs:current-file", [String(file || "")]); },
+      currentFile: function(file) {
+        return call("aaronnote:api:emacs:current-file", [
+          file && typeof file === "object" ? file : String(file || "")
+        ]);
+      },
       key: function(k) { return call("aaronnote:api:emacs:key", [String(k || "")]); },
       systemOpen: function(target, base) {
         return call("aaronnote:api:emacs:system-open", [

@@ -55,7 +55,7 @@ type NativeApi = {
   };
   emacs?: {
     open?: (body: { file: string; tag?: string; line?: number; col?: number }) => Promise<unknown>;
-    currentFile?: (file: string) => Promise<unknown>;
+    currentFile?: (body: string | { file: string; client?: string }) => Promise<unknown>;
     key?: (keyString: string) => Promise<unknown>;
     systemOpen?: (target: string, base?: string) => Promise<unknown>;
   };
@@ -175,10 +175,11 @@ export const api = {
       if (!call) return;
       await call(body).catch(() => {});
     },
-    async currentFile(file: string): Promise<void> {
+    async currentFile(file: string, client = ""): Promise<void> {
       const call = window.aaronnoteApi?.emacs?.currentFile;
       if (!call) return;
-      await call(file).catch(() => {});
+      const body = client ? { file, client } : file;
+      await call(body).catch(() => {});
     },
     async key(keyString: string): Promise<void> {
       const call = window.aaronnoteApi?.emacs?.key;

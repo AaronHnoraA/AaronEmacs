@@ -1055,7 +1055,7 @@ directory; /x is resolved against the roam vault root."
         (if ref
             (when (yes-or-no-p (format "Note '%s' not found. Create it? " ref))
               (my/aaronnote-roam-new-note ref))
-          (user-error "No Markdown roam link or #note-code found at point"))))))
+          (user-error "No Markdown roam link found at point"))))))
 
 (defun my/aaronnote-roam-find-note ()
   "Find a roam note by Aaronnote id/path/title with completion."
@@ -2535,18 +2535,51 @@ Falls back to a CLI subprocess when the web-host is offline."
         (my/aaronnote-roam-search-notes search-query))))
    'search))
 
+(defun my/aaronnote-roam--search-parse-term (term)
+  "Parse a search TERM into a plist with :scope and :value.
+Scopes: title, category (nested-tag prefix), linksto, plain."
+  (cond
+   ((string-match "\\`\\(?:intitle\\|title\\):\\(.+\\)\\'" term)
+    (list :scope 'title :value (match-string 1 term)))
+   ((string-match "\\`\\(?:incategory\\|tag\\):\\(.+\\)\\'" term)
+    (list :scope 'category :value (match-string 1 term)))
+   ((string-match "\\`linksto:\\(.+\\)\\'" term)
+    (list :scope 'linksto :value (match-string 1 term)))
+   (t (list :scope 'plain :value term))))
+
+(defun my/aaronnote-roam--search-match-p (entry parsed-term)
+  "Return non-nil when ENTRY matches PARSED-TERM."
+  (let ((scope (plist-get parsed-term :scope))
+        (value (plist-get parsed-term :value)))
+    (pcase scope
+      ('title
+       (string-match-p (regexp-quote value)
+                       (downcase (or (plist-get entry :title) ""))))
+      ('category
+       (seq-some (lambda (tag)
+                   (or (string= (downcase tag) value)
+                       (string-prefix-p (concat value "/") (downcase tag))))
+                 (or (plist-get entry :tags) nil)))
+      ('linksto
+       (seq-some (lambda (link) (string-match-p (regexp-quote value) (downcase link)))
+                 (or (plist-get entry :links) nil)))
+      (_
+       (string-match-p (regexp-quote value)
+                       (downcase (my/aaronnote-roam--candidate-haystack entry)))))))
+
 (defun my/aaronnote-roam-search-notes (&optional query)
-  "Search notes by path, title, tag, id, and summary."
+  "Search notes with optional scoped operators.
+Operators: intitle:TEXT, incategory:TAG, tag:TAG, linksto:SLUG, plain text.
+Multiple terms are ANDed."
   (interactive)
-  (let* ((query (or query (read-string "Search notes: ")))
-         (parts (split-string (downcase query) "\\s-+" t))
+  (let* ((query (or query (read-string "Search notes (intitle: incategory: linksto:): ")))
+         (raw-parts (split-string (downcase (string-trim query)) "\\s-+" t))
+         (parsed (mapcar #'my/aaronnote-roam--search-parse-term raw-parts))
          (entries (seq-filter
                    (lambda (entry)
-                     (let ((haystack (downcase
-                                      (my/aaronnote-roam--candidate-haystack entry))))
-                       (seq-every-p
-                        (lambda (part) (string-match-p (regexp-quote part) haystack))
-                        parts)))
+                     (seq-every-p
+                      (lambda (term) (my/aaronnote-roam--search-match-p entry term))
+                      parsed))
                    (my/aaronnote-roam--all-note-summaries))))
     (if (called-interactively-p 'interactive)
         (if (= (length entries) 1)
@@ -3687,7 +3720,8 @@ added separately by `my/aaronnote-roam--capf-setup')."
     ("y" "copy link here"       my/aaronnote-roam-copy-link-to-here)
     ("n" "new note UI"          my/aaronnote-roam-new-note)
     ("N" "new node UI"          my/aaronnote-roam-new-node)
-    ("d" "daily note"           my/aaronnote-roam-daily-note)]
+    ("d" "daily note"           my/aaronnote-roam-daily-note)
+    ("m" "move note"            my/aaronnote-roam-move-note)]
    ["Tag ids"
     ("#" "insert tag id"        my/aaronnote-roam-insert-tag-id)
     ("g" "generate tag id"      my/aaronnote-roam-generate-tag-id)]
@@ -3696,7 +3730,15 @@ added separately by `my/aaronnote-roam--capf-setup')."
     ("r" "recent"               my/aaronnote-roam-recent-notes)
     ("R" "related"              my/aaronnote-roam-related-notes)
     ("G" "graph"                my/aaronnote-roam-graph)
-    ("M" "management"           my/aaronnote-roam-management)]
+    ("C" "categories"           my/aaronnote-roam-categories)
+    ("M" "management/dashboard" my/aaronnote-roam-management)]
+   ["Special pages (wiki)"
+    ("!" "reports hub"          my/aaronnote-roam-reports)
+    ("!w" "wanted pages"        my/aaronnote-roam-report-wanted)
+    ("!o" "orphaned"            my/aaronnote-roam-report-orphaned)
+    ("!d" "dead-end"            my/aaronnote-roam-report-dead-end)
+    ("!u" "uncategorized"       my/aaronnote-roam-report-uncategorized)
+    ("!h" "most-linked (hubs)"  my/aaronnote-roam-report-most-linked)]
    ["DB & Agenda"
     ("b" "backlinks"            my/aaronnote-roam-backlinks)
     ("t" "tags"                 my/aaronnote-roam-tags)
@@ -3712,6 +3754,524 @@ added separately by `my/aaronnote-roam--capf-setup')."
    ["Nav (gd = xref)"
     ("." "xref definition"      xref-find-definitions)
     ("x" "xref references"      xref-find-references)]])
+
+;;; Wiki knowledge-health reports (MediaWiki Special: pages analog).
+
+(defconst my/aaronnote-roam--report-limit 200
+  "Maximum rows shown in a single wiki report.")
+
+(defun my/aaronnote-roam--wiki-stats ()
+  "Return a plist of vault-wide wiki statistics from the cached index."
+  (let* ((entries (my/aaronnote-roam--all-note-summaries))
+         (total (length entries))
+         (orphaned (seq-count
+                    (lambda (e)
+                      (and (null (plist-get e :backlinks))
+                           (not (string-prefix-p "daily/"
+                                                 (or (plist-get e :slug) "")))))
+                    entries))
+         (dead-end (seq-count (lambda (e) (null (plist-get e :links))) entries))
+         (uncategorized (seq-count (lambda (e) (null (plist-get e :tags))) entries))
+         (all-links (seq-mapcat (lambda (e) (plist-get e :links)) entries))
+         (link-count (length all-links))
+         (wanted-count (hash-table-count
+                        (let ((ht (make-hash-table :test 'equal))
+                              (known (make-hash-table :test 'equal)))
+                          (dolist (e entries)
+                            (puthash (plist-get e :slug) t known))
+                          (dolist (lnk all-links)
+                            (unless (gethash lnk known)
+                              (puthash lnk t ht)))
+                          ht))))
+    (list :total total :orphaned orphaned :dead-end dead-end
+          :uncategorized uncategorized :link-count link-count
+          :wanted wanted-count)))
+
+(defun my/aaronnote-roam-report-orphaned ()
+  "Show notes with no backlinks (MediaWiki Special:LonelyPages analog)."
+  (interactive)
+  (let* ((entries (seq-filter
+                   (lambda (e)
+                     (and (null (plist-get e :backlinks))
+                          (not (string-prefix-p "daily/"
+                                                (or (plist-get e :slug) "")))))
+                   (my/aaronnote-roam--all-note-summaries)))
+         (entries (seq-take entries my/aaronnote-roam--report-limit))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*roam-orphaned*" "Orphaned Pages" 'orphan
+               #'my/aaronnote-roam-report-orphaned
+               (format "%d notes" (length entries)))))
+    (with-current-buffer buf
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          "Orphaned pages"
+          :icon 'orphan
+          :subtitle "Notes no other note links to"
+          :stats (list (cons (format "%d notes" (length entries)) 'warning))
+          :actions (my/aaronnote-roam--ui-actions))
+         (my/aaronnote-roam-ui-insert-section "Orphaned" (length entries))
+         (if (null entries)
+             (my/aaronnote-roam-ui-insert-empty "No orphaned notes.")
+           (dolist (entry entries)
+             (my/aaronnote-roam--insert-note-button entry))))))
+    (display-buffer buf)))
+
+(defun my/aaronnote-roam-report-dead-end ()
+  "Show notes that link to no other note (MediaWiki Special:DeadendPages)."
+  (interactive)
+  (let* ((entries (seq-filter
+                   (lambda (e) (null (plist-get e :links)))
+                   (my/aaronnote-roam--all-note-summaries)))
+         (entries (seq-take entries my/aaronnote-roam--report-limit))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*roam-dead-end*" "Dead-end Pages" 'dead-end
+               #'my/aaronnote-roam-report-dead-end
+               (format "%d notes" (length entries)))))
+    (with-current-buffer buf
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          "Dead-end pages"
+          :icon 'dead-end
+          :subtitle "Notes with no outgoing links"
+          :stats (list (cons (format "%d notes" (length entries)) 'warning))
+          :actions (my/aaronnote-roam--ui-actions))
+         (my/aaronnote-roam-ui-insert-section "Dead-end" (length entries))
+         (if (null entries)
+             (my/aaronnote-roam-ui-insert-empty "No dead-end notes.")
+           (dolist (entry entries)
+             (my/aaronnote-roam--insert-note-button entry))))))
+    (display-buffer buf)))
+
+(defun my/aaronnote-roam-report-uncategorized ()
+  "Show notes with no tags (MediaWiki Special:UncategorizedPages analog)."
+  (interactive)
+  (let* ((entries (seq-filter
+                   (lambda (e) (null (plist-get e :tags)))
+                   (my/aaronnote-roam--all-note-summaries)))
+         (entries (seq-take entries my/aaronnote-roam--report-limit))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*roam-uncategorized*" "Uncategorized Pages" 'uncategorized
+               #'my/aaronnote-roam-report-uncategorized
+               (format "%d notes" (length entries)))))
+    (with-current-buffer buf
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          "Uncategorized pages"
+          :icon 'uncategorized
+          :subtitle "Notes with no tags"
+          :stats (list (cons (format "%d notes" (length entries)) 'muted))
+          :actions (my/aaronnote-roam--ui-actions))
+         (my/aaronnote-roam-ui-insert-section "Uncategorized" (length entries))
+         (if (null entries)
+             (my/aaronnote-roam-ui-insert-empty "All notes have tags.")
+           (dolist (entry entries)
+             (my/aaronnote-roam--insert-note-button entry))))))
+    (display-buffer buf)))
+
+(defun my/aaronnote-roam-report-most-linked ()
+  "Show the most-linked notes (MediaWiki Special:MostLinkedPages analog)."
+  (interactive)
+  (let* ((entries (my/aaronnote-roam--all-note-summaries))
+         (sorted (sort (copy-sequence entries)
+                       (lambda (a b)
+                         (> (length (plist-get a :backlinks))
+                            (length (plist-get b :backlinks))))))
+         (top (seq-take sorted my/aaronnote-roam--report-limit))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*roam-most-linked*" "Most-linked Pages" 'hub
+               #'my/aaronnote-roam-report-most-linked
+               (format "top %d" (length top)))))
+    (with-current-buffer buf
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          "Most-linked pages"
+          :icon 'hub
+          :subtitle "Hub notes sorted by incoming links"
+          :stats (list (cons (format "%d notes" (length top)) 'info))
+          :actions (my/aaronnote-roam--ui-actions))
+         (my/aaronnote-roam-ui-insert-section "Hubs" (length top))
+         (if (null top)
+             (my/aaronnote-roam-ui-insert-empty "No linked notes.")
+           (dolist (entry top)
+             (let ((bls (length (plist-get entry :backlinks))))
+               (my/aaronnote-roam-ui-insert-row
+                :id (plist-get entry :slug)
+                :icon 'note
+                :title (or (plist-get entry :title) (plist-get entry :slug))
+                :meta (format "%d backlinks" bls)
+                :tags (plist-get entry :tags)
+                :action (let ((slug (plist-get entry :slug)))
+                          (lambda (_b) (my/aaronnote-roam--open-slug slug))))))))))
+    (display-buffer buf)))
+
+(defun my/aaronnote-roam--render-wanted-buffer (items)
+  "Render wanted-pages ITEMS (a list of alists) into a roam report buffer."
+  (let* ((items (seq-take items my/aaronnote-roam--report-limit))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*roam-wanted*" "Wanted Pages" 'wanted
+               #'my/aaronnote-roam-report-wanted
+               (format "%d targets" (length items)))))
+    (with-current-buffer buf
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          "Wanted pages"
+          :icon 'wanted
+          :subtitle "Link targets that have no matching note"
+          :stats (list (cons (format "%d targets" (length items)) 'danger))
+          :actions (my/aaronnote-roam--ui-actions
+                    (list (list :label "Create all wanted"
+                                :command #'my/aaronnote-roam-report-wanted
+                                :help "Refresh after creating notes"))))
+         (my/aaronnote-roam-ui-insert-section "Wanted" (length items))
+         (if (null items)
+             (my/aaronnote-roam-ui-insert-empty "No wanted pages. All links resolve!")
+           (dolist (item items)
+             (let* ((target (alist-get 'target item))
+                    (by (alist-get 'by item))
+                    (by (cond ((vectorp by) (append by nil))
+                              ((listp by) by)
+                              (t nil)))
+                    (by-count (length by)))
+               (my/aaronnote-roam-ui-insert-row
+                :id target
+                :icon 'wanted
+                :title (format "%s" target)
+                :meta (format "linked from %d note%s" by-count
+                              (if (= by-count 1) "" "s"))
+                :action (let ((ref target))
+                          (lambda (_b)
+                            (my/aaronnote-roam-new-note ref nil nil))))))))))
+    (display-buffer buf)))
+
+(defun my/aaronnote-roam-report-wanted ()
+  "Show link targets that have no corresponding note (MediaWiki Special:WantedPages)."
+  (interactive)
+  (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
+    (user-error "Aaronnote web-host is not running; start it with H-o o first"))
+  (message "Aaronnote: fetching wanted pages...")
+  (my/aaronnote--api-call
+   "aaronnote:api:notes:wanted" []
+   (lambda (result)
+     (let ((items (alist-get 'items result)))
+       (my/aaronnote-roam--render-wanted-buffer
+        (if (vectorp items) (append items nil)
+          (or items nil)))))))
+
+(with-eval-after-load 'transient
+  (transient-define-prefix my/aaronnote-roam-reports ()
+    "Wiki knowledge-health reports."
+    [["Special pages"
+      ("w" "wanted pages"       my/aaronnote-roam-report-wanted)
+      ("o" "orphaned pages"     my/aaronnote-roam-report-orphaned)
+      ("d" "dead-end pages"     my/aaronnote-roam-report-dead-end)
+      ("u" "uncategorized"      my/aaronnote-roam-report-uncategorized)
+      ("h" "most-linked (hubs)" my/aaronnote-roam-report-most-linked)]]))
+
+;;; Wiki category browser (MediaWiki Category: system analog).
+
+(defun my/aaronnote-roam--category-tree (entries)
+  "Build a category hierarchy from tag lists in ENTRIES.
+Returns a sorted list of (CATEGORY-PATH . MEMBER-SLUGS) conses where
+CATEGORY-PATH is a slash-joined string of segments."
+  (let ((ht (make-hash-table :test 'equal)))
+    (dolist (entry entries)
+      (dolist (tag (or (plist-get entry :tags) nil))
+        (let ((slug (plist-get entry :slug))
+              (segments (split-string (downcase tag) "/" t)))
+          (let ((path ""))
+            (dolist (seg segments)
+              (setq path (if (string-empty-p path) seg (concat path "/" seg)))
+              (puthash path
+                       (cons slug (gethash path ht))
+                       ht))))))
+    (let (result)
+      (maphash (lambda (path slugs)
+                 (push (cons path (delete-dups (nreverse slugs))) result))
+               ht)
+      (sort result (lambda (a b) (string< (car a) (car b)))))))
+
+(defun my/aaronnote-roam-categories ()
+  "Browse notes hierarchically by category (nested tags, MediaWiki Category: analog).
+Select a top-level category to drill down; select a note to open it."
+  (interactive)
+  (let* ((entries (my/aaronnote-roam--all-note-summaries))
+         (tree (my/aaronnote-roam--category-tree entries))
+         ;; Navigation state: current prefix path being browsed
+         (prefix ""))
+    (cl-labels
+        ((children-of (pfx)
+           (seq-filter
+            (lambda (pair)
+              (let ((p (car pair)))
+                (if (string-empty-p pfx)
+                    (not (string-match-p "/" p))
+                  (and (string-prefix-p (concat pfx "/") p)
+                       (not (string-match-p "/"
+                             (substring p (1+ (length pfx)))))))))
+            tree))
+         (members-of (pfx)
+           (let ((pair (assoc pfx tree)))
+             (when pair
+               (seq-filter
+                (lambda (e)
+                  (seq-some
+                   (lambda (tag)
+                     (let ((tl (downcase tag)))
+                       (or (string= tl pfx)
+                           (string-prefix-p (concat pfx "/") tl))))
+                   (or (plist-get e :tags) nil)))
+                entries))))
+         (browse (pfx)
+           (let* ((children (children-of pfx))
+                  (members (members-of pfx))
+                  (child-labels (mapcar (lambda (p)
+                                          (cons (format "[+] %s" (car p)) (car p)))
+                                        children))
+                  (member-labels (mapcar (lambda (e)
+                                           (cons (format "    %s" (or (plist-get e :title) (plist-get e :slug)))
+                                                 (plist-get e :slug)))
+                                         members))
+                  (all-choices (append
+                                (when pfx (list (cons ".. (up)" :up)))
+                                child-labels member-labels))
+                  (prompt (if (string-empty-p pfx)
+                              "Category: "
+                            (format "Category [%s]: " pfx)))
+                  (choice (when all-choices
+                            (completing-read prompt
+                                             (mapcar #'car all-choices)
+                                             nil t))))
+             (when (and choice (not (string-empty-p choice)))
+               (let* ((pair (assoc choice all-choices))
+                      (val (cdr pair)))
+                 (cond
+                  ((eq val :up)
+                   (let ((parent (file-name-directory (directory-file-name pfx))))
+                     (browse (if parent
+                                 (string-trim-right parent "/")
+                               ""))))
+                  ((member val (mapcar #'cdr child-labels))
+                   (browse val))
+                  ((stringp val)
+                   (my/aaronnote-roam--open-slug val))))))))
+      (browse prefix))))
+
+;;; Wiki move-page with automatic link rewrite (MediaWiki "Move page").
+
+(defun my/aaronnote-roam-move-note ()
+  "Rename/move a roam note and rewrite all referencing links.
+Prompts for the note to move and a new file name, then calls the
+backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
+  (interactive)
+  (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
+    (user-error "Aaronnote web-host is not running; start it with H-o o first"))
+  (let* ((slug (my/aaronnote-roam--read-note-id "Move note: "))
+         (file (my/aaronnote-roam--slug-to-file slug))
+         (old-name (file-name-nondirectory file))
+         (new-name (read-string (format "New file name for '%s': " old-name)
+                                old-name))
+         (old-rel (file-relative-name file (my/aaronnote-roam-root)))
+         (new-rel (concat (file-name-directory old-rel) new-name)))
+    (unless (file-exists-p file)
+      (user-error "File not found: %s" file))
+    (when (string= old-name new-name)
+      (user-error "New name is the same as old name"))
+    (message "Moving '%s' → '%s' and rewriting links..." old-rel new-rel)
+    (my/aaronnote--api-call
+     "aaronnote:api:fs:rename"
+     (vector (list (cons "file" file) (cons "targetName" new-name)))
+     (lambda (result)
+       (if (not (alist-get 'ok result))
+           (message "Aaronnote move failed: %s" (alist-get 'message result))
+         (my/aaronnote--api-call
+          "aaronnote:api:roam-tools:rewrite-path-refs"
+          (vector (list (cons "oldPath" old-rel) (cons "newPath" new-rel)))
+          (lambda (rewrite-result)
+            (my/aaronnote-roam--clear-runtime-cache)
+            (let ((changed (length (or (alist-get 'changed rewrite-result) []))))
+              (message "Moved '%s' → '%s'; rewrote links in %d file%s."
+                       old-rel new-rel changed
+                       (if (= changed 1) "" "s"))))))))))
+
+;;; Tag management wrappers for the management dashboard.
+
+(defun my/aaronnote-roam-rename-tag ()
+  "Rename a tag across all vault notes via the Aaronnote runtime."
+  (interactive)
+  (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
+    (user-error "Aaronnote web-host is not running"))
+  (let* ((old-tag (read-string "Old tag name: "))
+         (new-tag (read-string (format "Rename '%s' to: " old-tag) old-tag)))
+    (when (string-empty-p old-tag)
+      (user-error "Tag name cannot be empty"))
+    (when (string= old-tag new-tag)
+      (user-error "New tag is the same as old tag"))
+    (message "Renaming tag '%s' → '%s'..." old-tag new-tag)
+    (my/aaronnote--api-call
+     "aaronnote:api:roam-tools:rename-tag"
+     (vector (list (cons "oldTag" old-tag) (cons "newTag" new-tag)))
+     (lambda (result)
+       (my/aaronnote-roam--clear-runtime-cache)
+       (let ((changed (or (alist-get 'changed result) 0)))
+         (message "Renamed tag '%s' → '%s' in %d file%s."
+                  old-tag new-tag changed (if (= changed 1) "" "s")))))))
+
+(defun my/aaronnote-roam-delete-tag ()
+  "Delete a tag from all vault notes via the Aaronnote runtime."
+  (interactive)
+  (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
+    (user-error "Aaronnote web-host is not running"))
+  (let ((tag (read-string "Delete tag: ")))
+    (when (string-empty-p tag)
+      (user-error "Tag name cannot be empty"))
+    (when (yes-or-no-p (format "Delete tag '%s' from all notes? " tag))
+      (message "Deleting tag '%s'..." tag)
+      (my/aaronnote--api-call
+       "aaronnote:api:roam-tools:delete-tag"
+       (vector (list (cons "tag" tag)))
+       (lambda (result)
+         (my/aaronnote-roam--clear-runtime-cache)
+         (let ((changed (or (alist-get 'changed result) 0)))
+           (message "Deleted tag '%s' from %d file%s."
+                    tag changed (if (= changed 1) "" "s"))))))))
+
+(defun my/aaronnote-roam-tag-overlap ()
+  "Show overlapping/redundant tags report via the Aaronnote runtime."
+  (interactive)
+  (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
+    (user-error "Aaronnote web-host is not running"))
+  (message "Analyzing tag overlap...")
+  (my/aaronnote--api-call
+   "aaronnote:api:roam-tools:tag-overlap"
+   []
+   (lambda (result)
+     (let* ((pairs (alist-get 'pairs result))
+            (pairs (if (vectorp pairs) (append pairs nil) (or pairs nil)))
+            (buf (get-buffer-create "*roam-tag-overlap*")))
+       (with-current-buffer buf
+         (let ((inhibit-read-only t))
+           (erase-buffer)
+           (insert "Tag Overlap Report\n\n")
+           (if (null pairs)
+               (insert "No overlapping tags found.\n")
+             (dolist (pair pairs)
+               (insert (format "  %s  ↔  %s  (%.0f%% overlap)\n"
+                               (alist-get 'a pair "?")
+                               (alist-get 'b pair "?")
+                               (* 100 (or (alist-get 'overlap pair) 0))))))
+           (goto-char (point-min))
+           (special-mode)))
+       (display-buffer buf)))))
+
+;;; Upgrade management dashboard with wiki statistics.
+
+(defun my/aaronnote-roam-management ()
+  "Show wiki maintenance dashboard: vault stats and all roam operations."
+  (interactive)
+  (let* ((entries (my/aaronnote-roam--all-note-summaries))
+         (stats (my/aaronnote-roam--wiki-stats))
+         (db (my/aaronnote-roam--db))
+         (generated (and db (gethash "generated" db)))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*aaronnote-roam-management*" "Roam Management" 'management
+               #'my/aaronnote-roam-management
+               (format "%d notes" (plist-get stats :total)))))
+    (with-current-buffer buf
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          "Wiki maintenance dashboard"
+          :icon 'management
+          :subtitle "Special:Statistics — vault health and operations"
+          :stats (list (cons (format "%d notes" (plist-get stats :total)) 'info)
+                       (cons (if generated "DB ready" "DB unknown")
+                             (if generated 'success 'warning)))
+          :actions (my/aaronnote-roam--ui-actions))
+         (my/aaronnote-roam-ui-insert-section "Vault statistics")
+         (my/aaronnote-roam-ui-insert-field
+          "Root" (abbreviate-file-name (my/aaronnote-roam-root))
+          'my/aaronnote-roam-ui-path)
+         (my/aaronnote-roam-ui-insert-field "Total notes"    (plist-get stats :total))
+         (my/aaronnote-roam-ui-insert-field "Total links"    (plist-get stats :link-count))
+         (my/aaronnote-roam-ui-insert-field "Wanted pages"
+                                            (let ((n (plist-get stats :wanted)))
+                                              (if (> n 0) (format "%d ⚠" n) "0"))
+                                            'my/aaronnote-roam-ui-meta)
+         (my/aaronnote-roam-ui-insert-field "Orphaned"
+                                            (let ((n (plist-get stats :orphaned)))
+                                              (if (> n 0) (format "%d ⚠" n) "0"))
+                                            'my/aaronnote-roam-ui-meta)
+         (my/aaronnote-roam-ui-insert-field "Dead-end"
+                                            (let ((n (plist-get stats :dead-end)))
+                                              (if (> n 0) (format "%d" n) "0"))
+                                            'my/aaronnote-roam-ui-meta)
+         (my/aaronnote-roam-ui-insert-field "Uncategorized"
+                                            (let ((n (plist-get stats :uncategorized)))
+                                              (if (> n 0) (format "%d" n) "0"))
+                                            'my/aaronnote-roam-ui-meta)
+         (my/aaronnote-roam-ui-insert-field
+          "DB generated" (or generated "unknown")
+          'my/aaronnote-roam-ui-meta)
+         (insert "\n")
+         (my/aaronnote-roam-ui-insert-section "Special pages")
+         (insert "   ")
+         (my/aaronnote-roam-ui-insert-actions
+          '((:label "Wanted pages"
+             :command my/aaronnote-roam-report-wanted
+             :help "Links to notes that don't exist"
+             :primary t)
+            (:label "Orphaned"
+             :command my/aaronnote-roam-report-orphaned
+             :help "Notes with no incoming links")
+            (:label "Dead-end"
+             :command my/aaronnote-roam-report-dead-end
+             :help "Notes with no outgoing links")
+            (:label "Uncategorized"
+             :command my/aaronnote-roam-report-uncategorized
+             :help "Notes with no tags")
+            (:label "Most-linked"
+             :command my/aaronnote-roam-report-most-linked
+             :help "Hub notes by backlink count")))
+         (insert "\n")
+         (my/aaronnote-roam-ui-insert-section "Tag tools")
+         (insert "   ")
+         (my/aaronnote-roam-ui-insert-actions
+          '((:label "Browse categories"
+             :command my/aaronnote-roam-categories
+             :help "Drill down through nested tags"
+             :primary t)
+            (:label "Browse flat tags"
+             :command my/aaronnote-roam-tags
+             :help "All tags in the vault")
+            (:label "Rename tag"
+             :command my/aaronnote-roam-rename-tag
+             :help "Rename a tag across all notes")
+            (:label "Tag overlap"
+             :command my/aaronnote-roam-tag-overlap
+             :help "Find redundant/overlapping tags")))
+         (insert "\n")
+         (my/aaronnote-roam-ui-insert-section "DB & files")
+         (insert "   ")
+         (my/aaronnote-roam-ui-insert-actions
+          '((:label "Sync roam-db"
+             :command my/aaronnote-roam-update-db
+             :help "Run incremental roam-db sync"
+             :primary t)
+            (:label "Move note"
+             :command my/aaronnote-roam-move-note
+             :help "Rename note + rewrite backlinks")
+            (:label "Recent changes"
+             :command my/aaronnote-roam-recent-notes
+             :help "Recently opened notes")
+            (:label "DB status"
+             :command my/aaronnote-roam-db-status
+             :help "DB sync state file"))))))
+    (display-buffer buf)))
 
 ;;; Public lifecycle API (called from init-aaronnote.el).
 

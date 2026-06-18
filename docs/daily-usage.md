@@ -94,16 +94,32 @@
 Aaronnote Web/Appine，并关闭临时 Markdown buffer。Markdown 编辑、保存、
 文件树和 graph 都在 Aaronnote 内完成；Emacs 只保留粗粒度 bridge 命令。
 
-`H-o` 打开 Aaronnote 全功能 hub（6 组，单页 Transient）：
+`H-o` 打开 Aaronnote 全功能 hub（单页 Transient）：
 
 | 分组 | 常用键 |
 |------|--------|
 | **Note (web)** | `o` 打开当前, `O` 选文件, `s` 保存, `r` 刷新, `f` 聚焦, `e` Esc/normal, `v` 切换源码视图, `R` Emacs 原始编辑 |
-| **Find/Browse** | `j` 查找笔记, `/` 搜索, `l` 最近, `.` 跟随链接, `b` 反向链接, `x` 相关, `G` 跳转定义 |
+| **Find/Browse** | `j` 查找笔记, `/` 搜索（支持 `intitle:` `incategory:` `linksto:` 操作符）, `l` 最近, `.` 跟随链接, `b` 反向链接, `x` 相关, `G` 跳转定义 |
 | **Insert** | `i` roam 链接, `I` TOC 链接, `t` tag id, `T` tag-id 链接, `w` 复制链接到此处, `c` note-code |
-| **Knowledge** | `n` 新笔记, `d` 今日日记, `a` 按标签浏览, `g` roam graph, `k` 任务, `A` 日程, `M` 管理 |
-| **Index/Files** | `y` 同步 DB, `u` 增量更新, `F` 全量重建, `S` DB 状态, `D` dired, `m` magit, `q` 停止服务 |
+| **Knowledge** | `n` 新笔记, `d` 今日日记, `a` 按标签浏览, `C` 分类层次浏览（MediaWiki Category），`g` roam graph, `k` 任务, `A` 日程, `M` 维护仪表板 |
+| **Special pages (wiki)** | `!` 报告总入口, `!w` Wanted Pages, `!o` 孤立页, `!d` 死端页, `!u` 无标签页, `!h` 最多链接页 |
+| **Index/Files** | `y` 同步 DB, `u` 增量更新, `F` 全量重建, `S` DB 状态, `D` dired, `m` 移动笔记（自动重写链接）, `V` magit, `q` 停止服务 |
 | **Format (web)** | `1-9/0` 粗/斜/代码/高亮/删除线/引用/列表×3/代码块, `p` 段落菜单, `z` 表格, `E` 数学块, `C` 目录, `U/Y` undo/redo |
+
+**Wiki 搜索操作符**（`/` 搜索时可混用）：
+- `intitle:关键词` 或 `title:关键词` — 仅匹配标题
+- `incategory:qc/algorithms` 或 `tag:qc` — 按嵌套标签/分类过滤
+- `linksto:slug` — 链接到指定笔记的笔记（逆向链接 as 搜索）
+- 不带前缀的词 → 全文搜索（与原来行为一致）
+
+**Special pages 功能说明**（MediaWiki 对应）：
+- `!w` Wanted pages — 被链接但尚不存在的笔记；点击行直接进入新建流程
+- `!o` Orphaned pages — 没有任何入链的笔记（日记除外）
+- `!d` Dead-end pages — 没有任何出链的笔记
+- `!u` Uncategorized — 没有标签的笔记
+- `!h` Most-linked hubs — 按入链数量排序的枢纽笔记
+
+`M` 管理仪表板（MediaWiki Special:Statistics）内嵌所有统计数据 + 快捷进入各 Special page + Tag 工具（重命名/删除/重叠分析）+ Move note。
 
 Lean 4 buffer 里 `C-c C-i` 打开右侧官方 xwidget infoview。
 目标、hypotheses、诊断、trace、Try this、code actions 等交互都走

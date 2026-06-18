@@ -2273,6 +2273,38 @@ export function graphPayload(notes) {
   };
 }
 
+export function wantedPages(notes) {
+  const graphNotes = notes.filter((note) => note.roam);
+  const byId = new Map();
+  for (const note of graphNotes) {
+    const key = graphNoteKey(note);
+    if (!key) continue;
+    for (const ref of [key, note.id, note.path, note.link, note.source, note.file].filter(Boolean)) {
+      byId.set(String(ref), key);
+    }
+  }
+  const wantedMap = new Map();
+  for (const note of graphNotes) {
+    const source = graphNoteKey(note);
+    if (!source) continue;
+    for (const ref of note.refs || []) {
+      const strRef = String(ref);
+      if (!byId.has(strRef)) {
+        const entry = wantedMap.get(strRef) ?? { target: ref, by: new Set() };
+        entry.by.add(source);
+        wantedMap.set(strRef, entry);
+      }
+    }
+  }
+  return {
+    type: "wanted-pages",
+    items: [...wantedMap.values()].map((entry) => ({
+      target: entry.target,
+      by: [...entry.by],
+    })),
+  };
+}
+
 export function tagIndexPayload(notes) {
   const tags = new Map();
   const add = (tag, note, kind) => {

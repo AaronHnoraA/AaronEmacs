@@ -462,7 +462,9 @@ If OTHER-WINDOW is non-nil, jump in another window on final selection."
   :config
   (setq ibuffer-saved-filter-groups
         '(("default"
-           ("xwidget" (mode . xwidget-webkit-mode))
+           ("Aaronnote" (aaronnote . t))
+           ("xwidget" (and (mode . xwidget-webkit-mode)
+                           (not (aaronnote . t))))
            ("Code"  (or (mode . c-mode) (mode . c-ts-mode)
                         (mode . c++-mode) (mode . c++-ts-mode)
                         (mode . python-mode) (mode . python-ts-mode)

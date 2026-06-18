@@ -106,11 +106,30 @@ Set to 0 to let the OS pick a random port."
   "Debounce timer for coalescing goto events from the web-host.")
 (defvar my/aaronnote--goto-last nil
   "Last applied goto key (truename-file line col), for dedup.")
+(defvar my/aaronnote--file-buffers (make-hash-table :test #'equal)
+  "Canonical Aaronnote file path to browser buffer map.")
+(defvar my/aaronnote--client-buffers (make-hash-table :test #'equal)
+  "Aaronnote browser client id to browser buffer map.")
 
 (defvar-local my/aaronnote-buffer-file-name nil
   "Current note file represented by an Aaronnote Appine/xwidget buffer.")
 
 (put 'my/aaronnote-buffer-file-name 'permanent-local t)
+
+(defvar-local my/aaronnote--client-id nil
+  "Client id for this Aaronnote browser buffer.")
+
+(put 'my/aaronnote--client-id 'permanent-local t)
+
+(defvar-local my/aaronnote--registered-file nil
+  "File path currently registered for this Aaronnote browser buffer.")
+
+(put 'my/aaronnote--registered-file 'permanent-local t)
+
+(defvar-local my/aaronnote--xwidget-forced-name nil
+  "Non-nil display name marker for Aaronnote xwidget buffers.")
+
+(put 'my/aaronnote--xwidget-forced-name 'permanent-local t)
 
 (defvar-local my/aaronnote--xwidget-pending-file nil
   "File to POST to Aaronnote once the page has finished loading, or nil.")
@@ -147,11 +166,35 @@ Set to 0 to let the OS pick a random port."
   "Return the local Aaronnote URL for PATH."
   (format "http://127.0.0.1:%d%s" my/aaronnote--port (or path "/")))
 
-(defun my/aaronnote--app-url (&optional file)
-  "Return the Aaronnote app URL, optionally opening FILE."
-  (let ((base (my/aaronnote--server-url "/")))
-    (if (and file (not (string-empty-p file)))
-        (concat base "?file=" (url-hexify-string (expand-file-name file)))
+(defun my/aaronnote--canonical-file (file)
+  "Return canonical absolute FILE for Aaronnote bookkeeping, or nil."
+  (and (stringp file)
+       (not (string-empty-p file))
+       (expand-file-name file)))
+
+(defun my/aaronnote--xwidget-session-id (&optional file)
+  "Return the stable xwidget session/client id for FILE."
+  (if-let* ((file (my/aaronnote--canonical-file file)))
+      (format "aaronnote:%s" file)
+    "aaronnote"))
+
+(defun my/aaronnote--app-url (&optional file client)
+  "Return the Aaronnote app URL, optionally opening FILE for CLIENT."
+  (let ((base (my/aaronnote--server-url "/"))
+        params)
+    (when-let* ((file (my/aaronnote--canonical-file file)))
+      (push (cons "file" file) params))
+    (when (and (stringp client) (not (string-empty-p client)))
+      (push (cons "client" client) params))
+    (if params
+        (concat base "?"
+                (mapconcat
+                 (lambda (param)
+                   (format "%s=%s"
+                           (url-hexify-string (car param))
+                           (url-hexify-string (cdr param))))
+                 (nreverse params)
+                 "&"))
       base)))
 
 (defun my/aaronnote--markdown-file-p (file)
@@ -388,8 +431,9 @@ KEY-STRING is used only for diagnostics."
           (let* ((payload (json-parse-string
                            (substring line (length current-file-prefix))
                            :object-type 'alist))
-                 (file (alist-get 'file payload)))
-            (my/aaronnote--sync-app-buffer-file file))
+                 (file (alist-get 'file payload))
+                 (client (alist-get 'client payload)))
+            (my/aaronnote--sync-app-buffer-file file client))
         (error
          (message "Aaronnote current-file parse failed: %s"
                   (error-message-string err)))))
@@ -472,45 +516,111 @@ When BUFFER is nil, inspect the current buffer."
            (not (string-empty-p my/aaronnote-buffer-file-name))
            my/aaronnote-buffer-file-name))))
 
-(defun my/aaronnote--sync-app-buffer-file (file)
-  "Record FILE as the current note in the matching Aaronnote buffer.
-Finds the buffer already tracking FILE, or falls back to the most recently
-focused Aaronnote buffer."
-  (let ((file (and (stringp file)
-                   (not (string-empty-p file))
-                   (expand-file-name file))))
-    ;; Early-out: current-file events fire on every navigation; skip the buffer
-    ;; lookup altogether when the app buffer already tracks the same file.
-    (when (or (null file)
-              (not (buffer-live-p my/aaronnote--app-buffer))
-              (not (with-current-buffer my/aaronnote--app-buffer
-                     (equal my/aaronnote-buffer-file-name file))))
-      (let ((target (or (and file (my/aaronnote--buffer-for-file file))
-                        my/aaronnote--app-buffer)))
-        (when (buffer-live-p target)
-          (with-current-buffer target
-            (let ((changed (not (equal my/aaronnote-buffer-file-name file))))
-              (setq-local my/aaronnote-buffer-file-name file)
-              (when file
-                (setq-local default-directory
-                            (file-name-as-directory (file-name-directory file))))
-              ;; Skip the redisplay pass when the file pointer hasn't changed;
-              ;; current-file events arrive on every navigation even without a switch.
-              (when changed
-                (force-mode-line-update)
-                (force-window-update (current-buffer)))))
-          (when file
-            (setq my/aaronnote--app-buffer target)))))))
+(defun my/aaronnote--buffer-display-name (&optional file)
+  "Return the preferred Aaronnote buffer display name for FILE."
+  (if-let* ((file (my/aaronnote--canonical-file file)))
+      (format "*aaronnote: %s*" (file-name-nondirectory file))
+    "*aaronnote*"))
 
-(defun my/aaronnote--track-app-buffer (buffer &optional file)
+(defun my/aaronnote--cleanup-buffer ()
+  "Remove the current buffer from Aaronnote identity registries."
+  (when (and (stringp my/aaronnote--registered-file)
+             (eq (gethash my/aaronnote--registered-file my/aaronnote--file-buffers)
+                 (current-buffer)))
+    (remhash my/aaronnote--registered-file my/aaronnote--file-buffers))
+  (when (and (stringp my/aaronnote--client-id)
+             (eq (gethash my/aaronnote--client-id my/aaronnote--client-buffers)
+                 (current-buffer)))
+    (remhash my/aaronnote--client-id my/aaronnote--client-buffers))
+  (when (eq my/aaronnote--app-buffer (current-buffer))
+    (setq my/aaronnote--app-buffer nil)))
+
+(defun my/aaronnote--refresh-visible-ibuffers ()
+  "Refresh visible ibuffer buffers after Aaronnote identity changes."
+  (when (fboundp 'ibuffer-update)
+    (dolist (buffer (buffer-list))
+      (when (get-buffer-window buffer 'visible)
+        (with-current-buffer buffer
+          (when (derived-mode-p 'ibuffer-mode)
+            (let ((inhibit-message t))
+              (revert-buffer nil t))))))))
+
+(defun my/aaronnote--buffer-for-client (client)
+  "Return the live Aaronnote buffer for CLIENT, or nil."
+  (when (and (stringp client) (not (string-empty-p client)))
+    (let ((buffer (gethash client my/aaronnote--client-buffers)))
+      (if (buffer-live-p buffer)
+          buffer
+        (remhash client my/aaronnote--client-buffers)
+        nil))))
+
+(defun my/aaronnote--register-buffer (buffer file &optional client rename)
+  "Register BUFFER as the Aaronnote browser for FILE and CLIENT.
+When RENAME is non-nil, rename xwidget buffers to a note-specific name."
+  (when (buffer-live-p buffer)
+    (let* ((file (my/aaronnote--canonical-file file))
+           (client (and (stringp client)
+                        (not (string-empty-p client))
+                        client))
+           changed)
+      (with-current-buffer buffer
+        (let ((old-file my/aaronnote--registered-file)
+              (old-client my/aaronnote--client-id))
+          (when (and (stringp old-file)
+                     (not (equal old-file file))
+                     (eq (gethash old-file my/aaronnote--file-buffers) buffer))
+            (remhash old-file my/aaronnote--file-buffers))
+          (when (and (stringp old-client)
+                     (not (equal old-client client))
+                     (eq (gethash old-client my/aaronnote--client-buffers) buffer))
+            (remhash old-client my/aaronnote--client-buffers))
+          (setq changed (or (not (equal my/aaronnote-buffer-file-name file))
+                            (not (equal my/aaronnote--client-id client)))))
+        (setq-local my/aaronnote-buffer-file-name file)
+        (setq-local my/aaronnote--registered-file file)
+        (setq-local my/aaronnote--client-id client)
+        (setq-local my/aaronnote--xwidget-forced-name
+                    (my/aaronnote--buffer-display-name file))
+        (when file
+          (setq-local default-directory
+                      (file-name-as-directory (file-name-directory file))))
+        (add-hook 'kill-buffer-hook #'my/aaronnote--cleanup-buffer nil t)
+        (when (and rename
+                   (eq major-mode 'xwidget-webkit-mode)
+                   (not (equal (buffer-name)
+                               (my/aaronnote--buffer-display-name file))))
+          (rename-buffer (my/aaronnote--buffer-display-name file) t)
+          (setq changed t))
+        (when changed
+          (force-mode-line-update)
+          (force-window-update (current-buffer))))
+      (when file
+        (puthash file buffer my/aaronnote--file-buffers))
+      (when client
+        (puthash client buffer my/aaronnote--client-buffers))
+      (when changed
+        (my/aaronnote--refresh-visible-ibuffers))
+      buffer)))
+
+(defun my/aaronnote--sync-app-buffer-file (file &optional client)
+  "Record FILE as the current note in the matching Aaronnote buffer.
+CLIENT, when present, identifies the exact xwidget page that reported the
+file switch."
+  (let* ((file (my/aaronnote--canonical-file file))
+         (target (or (my/aaronnote--buffer-for-client client)
+                     (and file (my/aaronnote--buffer-for-file file))
+                     my/aaronnote--app-buffer)))
+    (when (buffer-live-p target)
+      (my/aaronnote--register-buffer target file client t)
+      (when file
+        (setq my/aaronnote--app-buffer target)))))
+
+(defun my/aaronnote--track-app-buffer (buffer &optional file client)
   "Record BUFFER as the active Aaronnote browser buffer.
 When FILE is non-nil, set buffer-local file tracking directly."
   (setq my/aaronnote--app-buffer buffer)
-  (when (and file (buffer-live-p buffer))
-    (with-current-buffer buffer
-      (setq-local my/aaronnote-buffer-file-name (expand-file-name file))
-      (setq-local default-directory
-                  (file-name-as-directory (file-name-directory file))))))
+  (when (buffer-live-p buffer)
+    (my/aaronnote--register-buffer buffer file client t)))
 
 (defun my/aaronnote--xwidget-buffer-p (&optional buffer)
   "Return non-nil when BUFFER hosts the local Aaronnote xwidget page."
@@ -541,16 +651,34 @@ When FILE is non-nil, set buffer-local file tracking directly."
 
 (defun my/aaronnote--buffer-for-file (file)
   "Return a live Aaronnote buffer tracking FILE, or nil."
-  (when (and (stringp file) (not (string-empty-p file)))
-    (let ((abs (expand-file-name file)))
-      (cl-find-if
-       (lambda (buf)
-         (and (buffer-live-p buf)
-              (with-current-buffer buf
-                (and (stringp my/aaronnote-buffer-file-name)
-                     (string-equal (expand-file-name my/aaronnote-buffer-file-name)
-                                   abs)))))
-       (buffer-list)))))
+  (when-let* ((abs (my/aaronnote--canonical-file file)))
+    (let ((registered (gethash abs my/aaronnote--file-buffers)))
+      (cond
+       ((buffer-live-p registered) registered)
+       (registered
+        (remhash abs my/aaronnote--file-buffers)
+        nil)
+       (t
+        (when-let* ((found
+                     (cl-find-if
+                      (lambda (buf)
+                        (and (buffer-live-p buf)
+                             (with-current-buffer buf
+                               (and (stringp my/aaronnote-buffer-file-name)
+                                    (string-equal
+                                     (expand-file-name my/aaronnote-buffer-file-name)
+                                     abs)))))
+                      (buffer-list))))
+          (puthash abs found my/aaronnote--file-buffers)
+          found))))))
+
+(defun my/aaronnote-canonical-buffer (&optional buffer)
+  "Return the canonical Aaronnote buffer for BUFFER's file, or BUFFER."
+  (let ((buffer (or buffer (current-buffer))))
+    (when (buffer-live-p buffer)
+      (or (when-let* ((file (my/aaronnote-buffer-file buffer)))
+            (my/aaronnote--buffer-for-file file))
+          buffer))))
 
 (defun my/aaronnote--open-xwidget (url &optional file)
   "Open Aaronnote in a per-file xwidget session.
@@ -560,17 +688,20 @@ reloading.  Non-file opens (roam graph, etc.) share the singleton
 \"aaronnote\" session."
   (unless (fboundp 'my/xwidget-open-url)
     (require 'init-browser))
-  (let* ((id (if file
-                 (format "aaronnote:%s" (expand-file-name file))
-               "aaronnote"))
-         (existing (and (fboundp 'my/xwidget-session-buffer)
-                        (my/xwidget-session-buffer id))))
+  (let* ((file (my/aaronnote--canonical-file file))
+         (id (my/aaronnote--xwidget-session-id file))
+         (url (if file
+                  (my/aaronnote--app-url file id)
+                url))
+         (existing (or (and file (my/aaronnote--buffer-for-file file))
+                       (and (fboundp 'my/xwidget-session-buffer)
+                            (my/xwidget-session-buffer id)))))
     (if existing
         ;; Session already alive for this file: switch to it without reloading.
         (progn
           (switch-to-buffer existing)
           (run-at-time 0.3 nil #'my/xwidget-focus existing)
-          (my/aaronnote--track-app-buffer existing file)
+          (my/aaronnote--track-app-buffer existing file id)
           existing)
       ;; New session: open directly at the target URL.
       (let ((buffer (my/xwidget-open-url url
@@ -580,7 +711,7 @@ reloading.  Non-file opens (roam graph, etc.) share the singleton
         (when (buffer-live-p buffer)
           (with-current-buffer buffer
             (setq-local my/xwidget-focus-script my/aaronnote--xwidget-focus-script)))
-        (my/aaronnote--track-app-buffer buffer file)
+        (my/aaronnote--track-app-buffer buffer file id)
         buffer))))
 
 (defun my/aaronnote--open-appine (url &optional file force-new)
@@ -714,9 +845,12 @@ When FILE is nil, use the current buffer."
         (target-window (selected-window)))
     (my/aaronnote--ensure-server
      (lambda ()
-       (when (window-live-p target-window)
-         (select-window target-window))
-       (my/aaronnote--open-url (my/aaronnote--app-url file) file t)))))
+      (when (window-live-p target-window)
+        (select-window target-window))
+      (my/aaronnote--open-url
+       (my/aaronnote--app-url file (my/aaronnote--xwidget-session-id file))
+       file
+       t)))))
 
 ;;;###autoload
 (defun my/aaronnote-open-current-note ()
@@ -1159,10 +1293,18 @@ Falls back to JupyterLab root when no matching .ipynb exists."
       ("n" "new note"         my/aaronnote-roam-new-node)
       ("d" "daily note"       my/aaronnote-roam-daily-note)
       ("a" "browse tags"      my/aaronnote-roam-tags)
+      ("C" "categories"       my/aaronnote-roam-categories)
       ("g" "roam graph"       my/aaronnote-roam-graph)
       ("k" "tasks"            my/aaronnote-roam-todos)
       ("A" "agenda"           my/aaronnote-roam-agenda)
       ("M" "management"       my/aaronnote-roam-management)]
+     ["Special pages (wiki)"
+      ("!" "reports hub"      my/aaronnote-roam-reports)
+      ("!w" "wanted pages"    my/aaronnote-roam-report-wanted)
+      ("!o" "orphaned"        my/aaronnote-roam-report-orphaned)
+      ("!d" "dead-end"        my/aaronnote-roam-report-dead-end)
+      ("!u" "uncategorized"   my/aaronnote-roam-report-uncategorized)
+      ("!h" "most-linked"     my/aaronnote-roam-report-most-linked)]
      ["Index / Files"
       ("y" "sync DB"          my/aaronnote-roam-sync)
       ("u" "update index"     my/aaronnote-roam-update-db)
@@ -1171,7 +1313,8 @@ Falls back to JupyterLab root when no matching .ipynb exists."
       ("P" "pause/resume"     my/aaronnote-toggle-pause)
       ("R" "runtime status"   my/aaronnote-runtime-status)
       ("D" "dired"            my/aaronnote-roam-dired)
-      ("m" "magit"            my/aaronnote-roam-magit)
+      ("m" "move note"        my/aaronnote-roam-move-note)
+      ("V" "magit"            my/aaronnote-roam-magit)
       ("q" "stop server"      my/aaronnote-stop)]
      ["Publish"
       ("X"  "build + deploy"  my/aaronnote-publish)
@@ -1202,7 +1345,7 @@ Falls back to JupyterLab root when no matching .ipynb exists."
 
 ;;; Keybindings.
 
-;; Global: H-o opens the Aaronnote dispatch panel (o for "org notes").
+;; Global: H-o opens the Aaronnote dispatch panel.
 (general-define-key "H-o" #'my/aaronnote-dispatch)
 (general-define-key "C-H-o" #'my/aaronnote-dispatch)
 

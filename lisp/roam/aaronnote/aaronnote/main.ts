@@ -175,6 +175,7 @@ const selectionRoamIdlink = selectionTool.querySelector<HTMLButtonElement>("[dat
 const vimCursor = createVimCursor();
 
 let currentFile = "";
+let currentClient = "";
 let currentKind = "";
 let currentStandalone = false;
 let currentMtimeMs = 0;
@@ -673,7 +674,7 @@ function applyOpenedNote(
   selectionMore.hidden = true;
   vim.setMode("insert");
   updateTitle();
-  void api.emacs.currentFile(currentFile);
+  void api.emacs.currentFile(currentFile, currentClient);
   setStatus(currentFile ? "Ready" : "Scratch");
   editor.focus();
   scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
@@ -714,6 +715,7 @@ async function openFile(file?: string, bootstrap = false): Promise<void> {
 async function openInitialFile(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const file = params.get("file") || undefined;
+  currentClient = params.get("client") || "";
   pendingOpenHash = params.get("hash") || "";
   pendingOpenDomTarget = params.get("dom") || "";
   await openFile(file, true);

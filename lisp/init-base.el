@@ -73,12 +73,8 @@
   (file-name-as-directory (expand-file-name "undo-tree-history" my/state-dir)))
 (defconst my/treesit-state-dir
   (file-name-as-directory (expand-file-name "tree-sitter" my/state-dir)))
-(defconst my/org-state-dir
-  (file-name-as-directory (expand-file-name "org" my/state-dir)))
 (defconst my/dape-state-dir
   (file-name-as-directory (expand-file-name "dape" my/state-dir)))
-
-(defvar org-id-locations-file)
 
 (dolist (dir (list my/state-dir
                    my/backup-dir
@@ -90,12 +86,8 @@
                    my/eshell-state-dir
                    my/undo-tree-history-state-dir
                    my/treesit-state-dir
-                   my/org-state-dir
                    my/dape-state-dir))
   (make-directory dir t))
-
-(setq org-id-locations-file
-      (expand-file-name "id-locations.el" my/org-state-dir))
 
 (setq make-backup-files t
       backup-by-copying t
@@ -996,11 +988,53 @@ Else, call `comment-or-uncomment-region' on the current line."
   "Return non-nil when BUFFER hosts an Aaronnote app."
   (and (buffer-live-p buffer)
        (with-current-buffer buffer
-         (or (and (boundp 'my/aaronnote-buffer-file-name)
-                  my/aaronnote-buffer-file-name)
+         (or (my/ibuffer-aaronnote-file-name buffer)
              (and (boundp 'my/aaronnote--xwidget-forced-name)
                   my/aaronnote--xwidget-forced-name)
-             (string-match-p "\\`\\*aaronnote:" (buffer-name buffer))))))
+             (string-match-p "\\`\\*aaronnote" (buffer-name buffer))))))
+
+(defun my/ibuffer-aaronnote-file-name (buffer)
+  "Return BUFFER's Aaronnote note file for ibuffer display, or nil."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (and (boundp 'my/aaronnote-buffer-file-name)
+              (stringp my/aaronnote-buffer-file-name)
+              (not (string-empty-p my/aaronnote-buffer-file-name))
+              my/aaronnote-buffer-file-name))))
+
+(defun my/ibuffer-aaronnote-canonical-buffer (buffer)
+  "Return canonical Aaronnote BUFFER when the bridge can resolve one."
+  (or (and (fboundp 'my/aaronnote-canonical-buffer)
+           (my/aaronnote-canonical-buffer buffer))
+      buffer))
+
+(defun my/ibuffer-visit-aaronnote-canonical (orig &rest args)
+  "Visit the canonical Aaronnote buffer instead of stale duplicates."
+  (let* ((buffer (and (fboundp 'ibuffer-current-buffer)
+                      (ignore-errors (ibuffer-current-buffer))))
+         (canonical (and buffer
+                         (my/ibuffer-aaronnote-canonical-buffer buffer))))
+    (if (and (buffer-live-p buffer)
+             (buffer-live-p canonical)
+             (not (eq buffer canonical)))
+        (progn
+          (ibuffer-unmark-forward 1)
+          (switch-to-buffer canonical))
+      (apply orig args))))
+
+(defun my/ibuffer-visit-aaronnote-canonical-other-window (orig &rest args)
+  "Visit the canonical Aaronnote buffer in another window."
+  (let* ((buffer (and (fboundp 'ibuffer-current-buffer)
+                      (ignore-errors (ibuffer-current-buffer))))
+         (canonical (and buffer
+                         (my/ibuffer-aaronnote-canonical-buffer buffer))))
+    (if (and (buffer-live-p buffer)
+             (buffer-live-p canonical)
+             (not (eq buffer canonical)))
+        (progn
+          (ibuffer-unmark-forward 1)
+          (switch-to-buffer-other-window canonical))
+      (apply orig args))))
 
 (use-package ibuffer
   :ensure nil
@@ -1060,7 +1094,11 @@ Else, call `comment-or-uncomment-region' on the current line."
   (define-ibuffer-filter aaronnote
       "Toggle current view to buffers hosting Aaronnote."
     (:description "Aaronnote")
-    (my/ibuffer-aaronnote-buffer-p buf)))
+    (my/ibuffer-aaronnote-buffer-p buf))
+  (advice-add 'ibuffer-visit-buffer :around
+              #'my/ibuffer-visit-aaronnote-canonical)
+  (advice-add 'ibuffer-visit-buffer-other-window :around
+              #'my/ibuffer-visit-aaronnote-canonical-other-window))
 
 (defvar my/ibuffer-ui--theme-signature nil
   "Last theme signature applied by `my/ibuffer-apply-ui'.")
@@ -1219,24 +1257,6 @@ escape from the process sentinel."
   (when (timerp amx-short-idle-update-timer)
     (cancel-timer amx-short-idle-update-timer))
   (setq amx-short-idle-update-timer nil))
-
-(defconst my/disabled-pandoc-export-commands
-  '(org-pandoc-export-as-typst
-    org-pandoc-export-to-typst
-    org-pandoc-export-to-typst-and-open
-    org-pandoc-export-to-typst-pdf
-    org-pandoc-export-to-typst-pdf-and-open)
-  "Pandoc export commands intentionally omitted from `M-x'.")
-
-(defun my/disable-pandoc-export-commands ()
-  "Remove disabled Pandoc export commands from the command registry."
-  (dolist (command my/disabled-pandoc-export-commands)
-    (when (fboundp command)
-      (fmakunbound command))))
-
-(my/disable-pandoc-export-commands)
-(with-eval-after-load 'ox-pandoc
-  (my/disable-pandoc-export-commands))
 
 (use-package mwim
   :ensure t
@@ -1705,12 +1725,6 @@ interrupt the current window layout."
 (setq calendar-mark-diary-entries-flag nil)  ;; 你已经设了
 (setq calendar-view-diary-initially-flag nil)
 (setq calendar-mark-holidays-flag nil)
-
-;; org agenda 里也不要混入 diary
-(setq org-agenda-include-diary nil)
-(setq org-agenda-diary-file nil)
-
-
 
 (use-package popper
   :ensure t ; or :straight t

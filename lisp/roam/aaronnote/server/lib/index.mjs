@@ -4,6 +4,7 @@ export {
   notesIndexPayload,
   scanNotes,
   graphPayload,
+  wantedPages,
   tagIndexPayload,
   getTodos,
   pathSuggestionsForFile,

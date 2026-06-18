@@ -8544,7 +8544,7 @@ Coordinates are useful for computation because they give arrays of field
 elements. Invariance is useful for mathematics because it identifies the
 features of the object that do not depend on the chosen basis.
 
-中文直觉：坐标是“输入格式”，不变量是“结构本身留下的影子”。
+中文直觉：坐标是“输入格式”，不变量是“结构本身留���的影子”。
 #+end remark
 
 If $g \in \operatorname{GL}(V)$ and $h \in \operatorname{GL}(W)$, a change
@@ -41753,7 +41753,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文直觉��正半定保证测量概率非负；迹为一保证总概率为一。
+中文直觉���正半定保证测量概率非负；迹为一保证总概率为一。
 #+end note
 
 The expectation value of an observable $A$ in state $\rho$ is
@@ -121352,7 +121352,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文直觉：正半定保证测量概率非负；迹为一保证总概率为���。
+中文直觉：正半定保证测量概率非负；迹为一保证总概率������。
 #+end note
 
 The expectation value of an observable $A$ in state $\rho$ is
@@ -185256,7 +185256,7 @@ $$
 
 does not uniquely determine the ensemble $\{p_j,|\psi_j\rangle\}_j$.
 
-Different classical preparation procedures may induce the same density
+Different classical preparation procedures may induce the same density this is har d to ses ayhis ta s as asom somthing east to ysea kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk  I will do this later
 operator. Operationally, the density operator is the object that determines
 all measurement statistics.
 #+end important

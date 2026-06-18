@@ -360,13 +360,25 @@
         (symbol-name backend)
       ""))
 
+  (define-ibuffer-column my-filename-and-process
+    (:name "Filename/Process" :inline t)
+    (cond
+     ((and (fboundp 'my/ibuffer-aaronnote-file-name)
+           (my/ibuffer-aaronnote-file-name buffer))
+      (abbreviate-file-name (my/ibuffer-aaronnote-file-name buffer)))
+     ((buffer-local-value 'buffer-file-name buffer)
+      (abbreviate-file-name (buffer-local-value 'buffer-file-name buffer)))
+     ((get-buffer-process buffer)
+      (format "(%s)" (process-name (get-buffer-process buffer))))
+     (t "")))
+
   (setq ibuffer-formats
         '((mark modified read-only locked
                 " " (name 30 30 :left :elide)
                 " " (size 9 -1 :right)
                 " " (mode 18 18 :left :elide)
                 " " (vc-status 10 10 :left)
-                " " filename-and-process)
+                " " my-filename-and-process)
           (mark " " (name 30 -1) " " filename)))
 
   (define-key ibuffer-mode-map (kbd "V") #'ibuffer-vc-set-filter-groups-by-vc-root)
