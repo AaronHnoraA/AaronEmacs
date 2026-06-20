@@ -39,6 +39,8 @@
 - `C-c E`
   切换到下一个 popup `vterm`，`C-u C-c E` 新建一个
 - `C-c C-e`
+  新建 popup `vterm`
+- `C-c M-e`
   切换当前 popup `vterm` 的固定状态
 - `C-\``
   `popper-toggle`
