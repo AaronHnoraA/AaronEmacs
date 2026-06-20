@@ -174,7 +174,7 @@ CURRENT is the currently displayed popup buffer."
      (list " "
            (my/vterm-popup--new-tab-segment)
            " "
-           (propertize "C-c E next  C-c C-e new  C-c M-e pin"
+           (propertize "C-c C-e toggle  C-c E next  C-c M-e pin"
                        'face 'shadow)))))
 
 (defun my/vterm-popup-apply-ui (buffer)
@@ -483,8 +483,9 @@ With prefix ARG, create a new popup vterm and switch to it."
 
 (global-set-key (kbd "M-`") #'vterm-toggle)
 (global-set-key (kbd "C-c e") #'vterm-toggle)
+(global-set-key (kbd "C-c C-e") #'vterm-toggle)
 (global-set-key (kbd "C-c E") #'my/vterm-popup-cycle)
-(global-set-key (kbd "C-c C-e") #'my/vterm-popup-new)
+(global-set-key (kbd "C-c M-E") #'my/vterm-popup-new)
 (global-set-key (kbd "C-c M-e") #'my/vterm-toggle-fixed)
 
 (with-eval-after-load 'savehist

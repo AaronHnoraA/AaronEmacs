@@ -283,9 +283,11 @@ TRAMP 远程 buffer：xwidget infoview 不可用（xwidget 需要本地 bridge�
   `vterm-toggle`
 - `C-c e`
   弹出/收起当前 popup `vterm`
+- `C-c C-e`
+  智能弹出或收回当前 popup `vterm`
 - `C-c E`
   切换到下一个 popup `vterm`；`C-u C-c E` 新建一个
-- `C-c C-e`
+- `C-c M-E`
   新建 popup `vterm`
 - `C-c M-e`
   切换当前 popup `vterm` 的固定状态
