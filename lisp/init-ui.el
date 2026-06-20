@@ -304,14 +304,11 @@ height in pixels."
 (setopt text-quoting-style nil)
 ;;; Fringe:
 
-(set-fringe-mode '(0 . nil))  ; Right-only.
+(set-fringe-mode '(nil . nil)) ; Left: exact-line status; right: overview.
 
 ;;; Scroll Bar:
-
-(setopt scroll-bar-mode 'right)
-
-;; 滚动条落至底部 (overscrolling) 时的行为.
-(setopt scroll-bar-adjust-thumb-portion nil)
+;; The native scrollbar stays disabled; `scrollview-mode' supplies the
+;; lightweight right-fringe document overview.
 
 ;;; Mode Line:
 

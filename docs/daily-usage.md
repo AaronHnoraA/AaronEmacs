@@ -572,6 +572,25 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 
 ## 5. 折叠与结构选择
 
+### 文档概览
+
+GUI frame 的两侧 fringe 分工如下：
+
+- 左侧显示当前位置对应的 Flymake、Git 和代码折叠 indicator
+- 右侧显示 `scrollview` 全文概览，滚动块和标记都可以直接点击跳转
+- TTY 没有 fringe 时，全文概览自动退回右 margin
+
+右侧概览默认汇总搜索结果、诊断、Git 改动、书签和 `symbol-overlay`。超过
+20,000 行或 1 MB 的 buffer 只保留滚动条，不扫描全文标记。帮助、Dired、编译、
+终端和临时面板默认不启用；需要时可运行 `M-x scrollview-mode`。
+
+- `SPC j n`
+  跳到下一个概览标记
+- `SPC j p`
+  跳到上一个概览标记
+- `SPC j v`
+  显示概览标记图例
+
 ### 折叠
 
 - `za`
@@ -606,8 +625,11 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 后端规则：
 
 - `org-mode`：标题折叠走 Org 自己的 subtree folding
-- `*-ts-mode`：优先走 `treesit-fold`，并启用可点击 fringe indicator
-- 其他 `prog-mode`：走 `hideshow`，折叠 indicator 和折叠占位文本可用鼠标点击
+- `*-ts-mode`：只启用 `treesit-fold`，并启用可点击的左 fringe indicator
+- 其他 `prog-mode`：只启用 `hideshow`；Emacs 31+ 使用内置隐藏行计数，indicator
+  和折叠占位文本都可用鼠标点击
+- C/JavaScript 一类花括号语言使用新版 `hideshow` 的原生折叠边界，结束花括号和
+  后续 `else` 保持可见，不额外移动 overlay
 
 打开文件时：
 

@@ -73,6 +73,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-dir-locals)
 (require 'init-rename)
 (require 'init-harpoon)
+(require 'init-scrollview)
 (require 'init-test)
 (require 'init-task)
 (require 'init-project-run)

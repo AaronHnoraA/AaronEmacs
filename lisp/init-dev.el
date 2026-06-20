@@ -242,10 +242,10 @@ commands still save their state."
 
 (defun my/fold--treesit-buffer-p ()
   "Return non-nil when the current buffer should prefer `treesit-fold'."
-  (and (fboundp 'treesit-ready-p)
+  (and (fboundp 'treesit-parser-list)
        (fboundp 'treesit-fold-mode)
-       (ignore-errors (treesit-ready-p nil t))
-       (string-match-p "-ts-mode\\'" (symbol-name major-mode))))
+       (string-match-p "-ts-mode\\'" (symbol-name major-mode))
+       (ignore-errors (treesit-parser-list))))
 
 (defun my/fold--skip-auto-restore-p ()
   "Return non-nil when opening this buffer should not restore folds."
@@ -263,13 +263,17 @@ commands still save their state."
   "Enable the best available folding backend for the current buffer."
   (pcase (my/fold--backend)
     ('treesit
-     (when (fboundp 'hs-minor-mode)
-       (hs-minor-mode 1))
+     (when (bound-and-true-p hs-minor-mode)
+       (hs-minor-mode -1))
      (when (not (bound-and-true-p treesit-fold-mode))
        (treesit-fold-mode 1))
      (when (fboundp 'treesit-fold-indicators-mode)
        (treesit-fold-indicators-mode 1)))
     ('hs
+     (when (bound-and-true-p treesit-fold-indicators-mode)
+       (treesit-fold-indicators-mode -1))
+     (when (bound-and-true-p treesit-fold-mode)
+       (treesit-fold-mode -1))
      (when (fboundp 'hs-minor-mode)
        (hs-minor-mode 1)))))
 
@@ -852,30 +856,46 @@ This covers buffers opened before `find-file-hook' started restoring folds."
       (ignore-errors
         (my/fold-restore-buffer-state)))))
 
+(defvar my/fold-hs-display-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mouse-1] #'my/fold-hs-mouse-toggle)
+    map)
+  "Keymap used by clickable hideshow placeholders.")
+
+(defun my/hs-hidden-line-count (overlay)
+  "Return the number of complete body lines hidden by OVERLAY."
+  (max 1 (1- (count-lines (overlay-start overlay) (overlay-end overlay)))))
+
 (defun my/hs-set-up-overlay (overlay)
-  "Render a concise folding indicator for hidden OVERLAY."
+  "Keep native hideshow rendering and add persistent clicks to OVERLAY.
+On Emacs 30, provide the line-count display that became built in with
+hideshow 6.0.  This function deliberately never changes overlay bounds."
   (when (eq 'code (overlay-get overlay 'hs))
-    (let* ((start (overlay-start overlay))
-           (end (overlay-end overlay))
-           (lines (max 1 (count-lines start end)))
-           (map (let ((map (make-sparse-keymap)))
-                  (define-key map [mouse-1] #'my/fold-hs-mouse-toggle)
-                  map)))
-      (overlay-put overlay 'display
-                   (propertize
-                    (format " ... [%d lines] " lines)
-                    'mouse-face 'highlight
-                    'keymap map))
-      (overlay-put overlay 'help-echo
-                   (format "Hidden code block: %d lines; mouse-1 toggles"
-                           lines)))))
+    (let* ((lines (my/hs-hidden-line-count overlay))
+           (help (format "Hidden code block: %d line%s; mouse-1 toggles"
+                         lines (if (= lines 1) "" "s")))
+           (native-display (and (>= emacs-major-version 31)
+                                (overlay-get overlay 'display)))
+           (display (if (stringp native-display)
+                        (copy-sequence native-display)
+                      (format " ... [%d line%s] "
+                              lines (if (= lines 1) "" "s")))))
+      (add-text-properties
+       0 (length display)
+       (list 'mouse-face 'highlight
+             'keymap my/fold-hs-display-map
+             'help-echo help)
+       display)
+      (overlay-put overlay 'display display)
+      (overlay-put overlay 'help-echo help))))
 
 (defun my/fold-hs-mouse-toggle (event)
   "Toggle a hideshow fold from mouse EVENT and persist the new state."
   (interactive "e")
   (let ((area (and (mouse-event-p event)
                    (posn-area (event-start event)))))
-    (if (memq area '(left-fringe left-margin right-fringe right-margin))
+    (if (and (memq area '(left-fringe left-margin right-fringe right-margin))
+             (fboundp 'hs-indicator-mouse-toggle-hiding))
         (hs-indicator-mouse-toggle-hiding event)
       (hs-toggle-hiding event)))
   (my/fold--mark-buffer-state-dirty-and-save))
@@ -979,16 +999,21 @@ This covers buffers opened before `find-file-hook' started restoring folds."
   (hs-allow-nesting t)
   (hs-show-indicators t)
   (hs-display-lines-hidden t)
-  (hs-indicator-type (if (display-graphic-p) 'fringe 'margin))
+  (hs-indicator-type 'fringe)
   (hs-hide-comments-when-hiding-all nil)
+  (hs-isearch-open t)
   (hs-set-up-overlay #'my/hs-set-up-overlay))
 
 (with-eval-after-load 'hideshow
-  (keymap-set hs-indicators-map "<mouse-1>" #'my/fold-hs-mouse-toggle)
-  (keymap-set hs-indicators-map "<left-margin> <mouse-1>"
-              #'my/fold-hs-mouse-toggle)
-  (keymap-set hs-minor-mode-map "<left-fringe> <mouse-1>"
-              #'my/fold-hs-mouse-toggle))
+  (when (and (fboundp 'hs-indicator-mouse-toggle-hiding)
+             (boundp 'hs-indicators-map))
+    (keymap-set hs-indicators-map "<mouse-1>" #'my/fold-hs-mouse-toggle)
+    (keymap-set hs-indicators-map "<left-margin> <mouse-1>"
+                #'my/fold-hs-mouse-toggle))
+  (when (and (fboundp 'hs-indicator-mouse-toggle-hiding)
+             (boundp 'hs-minor-mode-map))
+    (keymap-set hs-minor-mode-map "<left-fringe> <mouse-1>"
+                #'my/fold-hs-mouse-toggle)))
 
 (with-eval-after-load 'treesit-fold
   (defun my/fold--treesit-command-save-a (&rest _)

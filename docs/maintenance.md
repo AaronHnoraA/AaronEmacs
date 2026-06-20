@@ -231,6 +231,8 @@ leader 入口：
 
 - macOS 默认使用普通滚轮/触控板滚动，不常驻 `pixel-scroll-precision-mode`；
   需要更顺滑手感时可以运行 `M-x my/macos-toggle-pixel-scroll-precision` 临时打开。
+- 原生 GUI scrollbar 保持关闭；`scrollview` 只在编辑/阅读 buffer 绘制右 fringe
+  全文概览。大 buffer 自动停用标记收集，但保留低成本滚动块。
 - macOS 的显式 idle GC 只在焦点离开后作为补充清理，默认不再每次退出 minibuffer 后排一个 GC；
   普通活跃/空闲 GC 交给 `gcmh`。
 - 行号不再全局绘制，只在代码/配置类 buffer 自动打开；普通文本、帮助、终端、侧边栏可手动用

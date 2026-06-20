@@ -772,7 +772,8 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
          ("C-c ?" . my/diagnostics-dispatch))
   :custom
   (flymake-no-changes-timeout 1.0) ; 输入停顿后再自动检查，减少每次按键后的后台唤醒。
-  (flymake-indicator-type 'fringes))
+  (flymake-indicator-type 'fringes)
+  (flymake-fringe-indicator-position 'left-fringe))
 
 ;; 光标停在报错位置时，在 minibuffer 显示诊断
 (add-hook 'flymake-mode-hook #'my/flymake-diagnostic-at-point-mode-sync)

@@ -209,6 +209,7 @@ a Git repository."
   (unless (display-graphic-p)
     (diff-hl-margin-mode))
   :custom
+  (diff-hl-side 'left)
   (diff-hl-update-async t))
 
 (defvar my/git-ui--face-theme-signature nil

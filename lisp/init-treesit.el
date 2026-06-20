@@ -37,7 +37,9 @@
 (use-package treesit-fold
   :commands (treesit-fold-mode
              treesit-fold-toggle
-             treesit-fold-indicators-mode))
+             treesit-fold-indicators-mode)
+  :custom
+  (treesit-fold-indicators-fringe 'left-fringe))
 
 
 

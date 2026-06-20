@@ -266,10 +266,6 @@ Org, help, terminals and side buffers avoid the redisplay cost by default."
 (setq blink-cursor-mode nil)
 
 
-(setopt hs-hide-comments-when-hiding-all t
-        hs-isearch-open t)
-
-
 (setq global-disable-point-adjustment nil)
 
 ;; Smooth scroll & friends
@@ -1204,7 +1200,6 @@ Else, call `comment-or-uncomment-region' on the current line."
 ;; 关闭无用 UI，打开有用能力
 (menu-bar-mode 1)
 (tool-bar-mode -1)
-(scroll-bar-mode -1)
 
 ;; 像素级滚动（Emacs 29）
 ;(pixel-scroll-precision-mode 1)
