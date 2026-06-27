@@ -26,6 +26,7 @@
 
 (declare-function all-the-icons-fileicon "all-the-icons" (icon-name &rest args))
 (declare-function dashboard-icon-for-file "dashboard-widgets" (file &rest args))
+(declare-function my/aaronnote-roam-dashboard-insert-heatmap "init-md-roam" (&optional days))
 
 (defun my/file-icon-for-file (file &rest args)
   "Return a custom icon for FILE, or nil.
@@ -199,6 +200,13 @@ height in pixels."
   (delete-other-windows)
   (apply orig-fn args))
 
+(defun my/dashboard-insert-roam-heatmap ()
+  "Insert the optional Markdown roam activity heatmap on the dashboard."
+  (when (or (featurep 'init-md-roam)
+            (require 'init-md-roam nil t))
+    (when (fboundp 'my/aaronnote-roam-dashboard-insert-heatmap)
+      (my/aaronnote-roam-dashboard-insert-heatmap))))
+
 (use-package dashboard
   :ensure t
   :init
@@ -246,6 +254,8 @@ height in pixels."
                                dashboard-insert-newline
                                dashboard-insert-init-info
                                dashboard-insert-items
+                               dashboard-insert-newline
+                               my/dashboard-insert-roam-heatmap
                                dashboard-insert-newline
                                dashboard-insert-footer)))
 

@@ -9,12 +9,19 @@ const note = {
   key: "a",
   id: "a",
   title: "A",
+  tags: ["math", "topology"],
+  inlineTags: ["local-anchor"],
+  groupKey: "demo",
+  groupLabel: "Demo",
 };
 
 describe("server todo scan", () => {
   test("normalizes explicit todo statuses", () => {
     expect(normalizeTodoStatus("doing")).toBe("doing");
     expect(normalizeTodoStatus("done")).toBe("done");
+    expect(normalizeTodoStatus("cancel")).toBe("cancelled");
+    expect(normalizeTodoStatus("canceled")).toBe("cancelled");
+    expect(normalizeTodoStatus("cancelled")).toBe("cancelled");
     expect(normalizeTodoStatus("")).toBe("todo");
   });
 
@@ -24,6 +31,7 @@ describe("server todo scan", () => {
         "@@todo [plain]",
         "@@todo(done) [closed]",
         "@@todo(doing) [active]{ddl: 2026-05-20}",
+        "@@todo(cancel) [dropped]",
         "@@todo bare task",
         "@@todo(blocked) bare blocked {ddl: 2026-06-01}",
         "@@todo(doing)[not parsed]",
@@ -37,9 +45,19 @@ describe("server todo scan", () => {
       ["todo", "plain", ""],
       ["done", "closed", ""],
       ["doing", "active", "2026-05-20"],
+      ["cancelled", "dropped", ""],
       ["todo", "bare task", ""],
       ["blocked", "bare blocked", "2026-06-01"],
     ]);
+    expect(todos[0]).toMatchObject({
+      tags: ["math", "topology"],
+      inlineTags: ["local-anchor"],
+      roamId: "a",
+      groupKey: "demo",
+      groupLabel: "Demo",
+      parentFile: "a.md",
+      parentTitle: "A",
+    });
   });
 
   test("exposes reusable inline command scanning", () => {

@@ -389,6 +389,179 @@ source: roam/demo/analysis.md
         (when-let* ((buffer (get-buffer "*roam-agenda*")))
           (kill-buffer buffer))))))
 
+(ert-deftest my/aaronnote-roam-agenda-default-hides-closed-tasks ()
+  (my/aaronnote-roam-test-with-vault
+    (let ((todos '((:note "open-note"
+                    :title "Open Note"
+                    :text "Open task"
+                    :status "todo"
+                    :ddl "2026-06-07")
+                   (:note "done-note"
+                    :title "Done Note"
+                    :text "Finished task"
+                    :status "done"
+                    :ddl "2026-06-07")
+                   (:note "cancel-note"
+                    :title "Cancel Note"
+                    :text "Dropped task"
+                    :status "cancelled"
+                    :ddl "2026-06-07"))))
+      (unwind-protect
+          (cl-letf (((symbol-function 'my/aaronnote-roam--todos)
+                     (lambda () todos))
+                    ((symbol-function 'format-time-string)
+                     (lambda (&rest _args) "2026-06-06"))
+                    ((symbol-function 'display-buffer)
+                     (lambda (buffer &rest _args) buffer)))
+            (my/aaronnote-roam-agenda)
+            (with-current-buffer "*roam-agenda*"
+              (should (string-match-p "Open task" (buffer-string)))
+              (should-not (string-match-p "Finished task" (buffer-string)))
+              (should-not (string-match-p "Dropped task" (buffer-string))))
+            (my/aaronnote-roam-agenda 'all nil)
+            (with-current-buffer "*roam-agenda*"
+              (should (string-match-p "Finished task" (buffer-string)))
+              (should (string-match-p "Dropped task" (buffer-string))))
+            (my/aaronnote-roam-agenda 'done nil)
+            (with-current-buffer "*roam-agenda*"
+              (should (string-match-p "Finished task" (buffer-string)))
+              (should-not (string-match-p "Dropped task" (buffer-string))))
+            (my/aaronnote-roam-agenda 'cancelled nil)
+            (with-current-buffer "*roam-agenda*"
+              (should (string-match-p "Dropped task" (buffer-string)))
+              (should-not (string-match-p "Finished task" (buffer-string)))))
+        (when-let* ((buffer (get-buffer "*roam-agenda*")))
+          (kill-buffer buffer))))))
+
+(ert-deftest my/aaronnote-roam-agenda-search-filters-metadata ()
+  (my/aaronnote-roam-test-with-vault
+    (let* ((first '(:note "20260605T120000-topology"
+                    :roamId "20260605T120000-topology"
+                    :title "Topology Note"
+                    :text "Review compact workbench"
+                    :status "todo"
+                    :ddl "2026-06-07"
+                    :tags ("math" "topology")
+                    :inlineTags ("local-anchor")
+                    :path "demo/topology.md"
+                    :groupKey "Research/Math"))
+           (second '(:note "20260605T120000-analysis"
+                     :roamId "20260605T120000-analysis"
+                     :title "Analysis Note"
+                     :text "Write estimate"
+                     :status "todo"
+                     :ddl "2026-07-01"
+                     :tags ("analysis")
+                     :path "demo/analysis.md"
+                     :groupKey "Research/Analysis"))
+           (todos (list first second)))
+      (should (equal (my/aaronnote-roam--agenda-filter-todos
+                      todos 'search
+                      "tag:math title:topology roamid:topology file:topology parent:math date:2026-06-07")
+                     (list first)))
+      (should (equal (my/aaronnote-roam--agenda-filter-todos
+                      todos 'search "from:2026-06-01 to:2026-06-30")
+                     (list first)))
+      (should (equal (my/aaronnote-roam--agenda-filter-todos
+                      todos 'search "estimate")
+                     (list second))))))
+
+(ert-deftest my/aaronnote-roam-agenda-row-buttons-update-status ()
+  (my/aaronnote-roam-test-with-vault
+    (let ((todo '(:note "20260605T120000-topology"
+                  :title "Topology Note"
+                  :text "Review compact workbench"
+                  :status "todo"
+                  :ddl "2026-06-07"))
+          updated)
+      (unwind-protect
+          (cl-letf (((symbol-function 'my/aaronnote-roam--todos)
+                     (lambda () (list todo)))
+                    ((symbol-function 'my/aaronnote-roam-update-todo-status)
+                     (lambda (status &optional entry)
+                       (setq updated (list status entry))))
+                    ((symbol-function 'format-time-string)
+                     (lambda (&rest _args) "2026-06-06"))
+                    ((symbol-function 'display-buffer)
+                     (lambda (buffer &rest _args) buffer)))
+            (my/aaronnote-roam-agenda)
+            (with-current-buffer "*roam-agenda*"
+              (goto-char (point-min))
+              (search-forward " Done ")
+              (push-button (button-at (1- (point)))))
+            (should (equal (car updated) "done"))
+            (should (eq (cadr updated) todo)))
+        (when-let* ((buffer (get-buffer "*roam-agenda*")))
+          (kill-buffer buffer))))))
+
+(ert-deftest my/aaronnote-roam-agenda-calendar-uses-square-cells ()
+  (my/aaronnote-roam-test-with-vault
+    (let* ((decoded (decode-time (current-time)))
+           (month (nth 4 decoded))
+           (year (nth 5 decoded))
+           (date (format "%04d-%02d-15" year month))
+           (todo `(:note "20260605T120000-topology"
+                   :title "Topology Note"
+                   :text "Calendar task"
+                   :status "todo"
+                   :ddl ,date)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'my/aaronnote-roam--todos)
+                     (lambda () (list todo)))
+                    ((symbol-function 'display-buffer)
+                     (lambda (buffer &rest _args) buffer)))
+            (my/aaronnote-roam-agenda-calendar)
+            (with-current-buffer "*roam-agenda-calendar*"
+              (should (string-match-p "SUN      MON      TUE" (buffer-string)))
+              (should (string-match-p
+                       (regexp-quote
+                        (my/aaronnote-roam--agenda-calendar-cell-label 15 1))
+                       (buffer-string)))))
+        (when-let* ((buffer (get-buffer "*roam-agenda-calendar*")))
+          (kill-buffer buffer))))))
+
+(ert-deftest my/aaronnote-roam-current-file-todos-scan-current-buffer ()
+  (my/aaronnote-roam-test-with-vault
+    (my/aaronnote-roam-test--write-file
+     note-file
+     "# Note\n\n@@todo(doing) [write proof]{ddl=2026-06-07}\n\nplain\n\n@@todo [review]\n")
+    (let ((buffer (find-file-noselect note-file)))
+      (unwind-protect
+          (with-current-buffer buffer
+            (cl-letf (((symbol-function 'my/aaronnote-roam--todos)
+                       (lambda () nil)))
+              (let ((todos (my/aaronnote-roam--current-file-todos)))
+                (should (= (length todos) 2))
+                (should (equal (my/aaronnote-roam--todo-status (car todos))
+                               "doing"))
+                (should (equal (my/aaronnote-roam--todo-agenda-date (car todos))
+                               "2026-06-07")))))
+        (kill-buffer buffer)))))
+
+(ert-deftest my/aaronnote-roam-db-status-includes-activity-heatmap ()
+  (my/aaronnote-roam-test-with-vault
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-buffer)
+                   (lambda (buffer &rest _args) buffer)))
+          (my/aaronnote-roam-db-status)
+          (with-current-buffer "*roam-db-status*"
+            (should (string-match-p "Roam activity" (buffer-string)))
+            (should (string-match-p "\\[[ 0-9][ 0-9]\\]" (buffer-string)))))
+      (when-let* ((buffer (get-buffer "*roam-db-status*")))
+        (kill-buffer buffer)))))
+
+(ert-deftest my/aaronnote-roam-management-includes-activity-heatmap ()
+  (my/aaronnote-roam-test-with-vault
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-buffer)
+                   (lambda (buffer &rest _args) buffer)))
+          (my/aaronnote-roam-management)
+          (with-current-buffer "*aaronnote-roam-management*"
+            (should (string-match-p "Roam activity" (buffer-string)))
+            (should (string-match-p "\\[[ 0-9][ 0-9]\\]" (buffer-string)))))
+      (when-let* ((buffer (get-buffer "*aaronnote-roam-management*")))
+        (kill-buffer buffer)))))
+
 (ert-deftest my/aaronnote-roam-search-view-refreshes-results ()
   (my/aaronnote-roam-test-with-vault
     (let ((first '(:slug "first" :title "First result" :path "first.md"))

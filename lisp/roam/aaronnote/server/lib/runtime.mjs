@@ -2646,7 +2646,7 @@ export async function scanRoamNotes() {
   }
 }
 
-const todoStatuses = new Set(["todo", "doing", "done", "blocked"]);
+const todoStatuses = new Set(["todo", "doing", "done", "blocked", "cancelled"]);
 
 const DATE_KEYS = new Set(["ddl", "due", "deadline", "scheduled", "start", "done", "date", "when"]);
 
@@ -2734,6 +2734,7 @@ export function normalizeTodoStatus(raw = "") {
   if (value === "~" || value === "-" || value === "wip" || value === "active") return "doing";
   if (value === "x" || value === "checked" || value === "complete") return "done";
   if (value === "!" || value === "block") return "blocked";
+  if (value === "cancel" || value === "canceled" || value === "cancelled") return "cancelled";
   return todoStatuses.has(value) ? value : "todo";
 }
 
@@ -2908,10 +2909,15 @@ export function extractTodos(content, note, updatedAt) {
       path: note.path,
       noteKey: note.key,
       noteId: note.id,
+      roamId: note.id,
       noteTitle: note.title,
       noteDate: note.date || "",
+      tags: Array.isArray(note.tags) ? [...note.tags] : [],
+      inlineTags: Array.isArray(note.inlineTags) ? [...note.inlineTags] : [],
       groupKey: note.groupKey || "",
       groupLabel: note.groupLabel || "",
+      parentFile: note.path || note.file || "",
+      parentTitle: note.title || "",
       updatedAt,
     });
   }
@@ -3027,7 +3033,7 @@ async function scanTodos() {
   });
   const todos = todoGroups.flat();
   return todos.sort((a, b) => {
-    const statusRank = { blocked: 0, doing: 1, todo: 2, done: 3 };
+    const statusRank = { blocked: 0, doing: 1, todo: 2, done: 3, cancelled: 4 };
     return (statusRank[a.status] ?? 9) - (statusRank[b.status] ?? 9)
       || b.updatedAt - a.updatedAt
       || String(a.noteTitle).localeCompare(String(b.noteTitle));

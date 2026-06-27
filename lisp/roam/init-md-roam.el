@@ -7,6 +7,7 @@
 
 (require 'init-funcs)
 (require 'init-md-roam-ui)
+(require 'calendar)
 (require 'cl-lib)
 (require 'json)
 (require 'seq)
@@ -2400,8 +2401,17 @@ Falls back to a CLI subprocess when the web-host is offline."
 
 (defun my/aaronnote-roam--todo-status (entry)
   "Return normalized status string for todo ENTRY."
-  (downcase (format "%s" (or (my/aaronnote-roam--todo-field entry "status")
-                              "todo"))))
+  (let ((status (downcase
+                 (string-trim
+                  (format "%s" (or (my/aaronnote-roam--todo-field entry "status")
+                                   "todo"))))))
+    (cond
+     ((member status '("" " " "open" "unchecked")) "todo")
+     ((member status '("~" "-" "wip" "active" "in-progress")) "doing")
+     ((member status '("x" "checked" "complete" "completed")) "done")
+     ((member status '("!" "block")) "blocked")
+     ((member status '("cancel" "canceled" "cancelled")) "cancelled")
+     (t status))))
 
 (defun my/aaronnote-roam--todo-tone (entry)
   "Return display tone for todo ENTRY."
@@ -2483,7 +2493,7 @@ Falls back to a CLI subprocess when the web-host is offline."
 (defun my/aaronnote-roam-update-todo-status (status &optional entry)
   "Set current todo ENTRY to STATUS and refresh the current task view."
   (interactive
-   (list (completing-read "Todo status: " '("todo" "doing" "blocked" "done")
+   (list (completing-read "Todo status: " '("todo" "doing" "blocked" "done" "cancelled")
                           nil t nil nil "done")
          nil))
   (let* ((entry (or entry (my/aaronnote-roam--todo-at-point)))
@@ -2527,6 +2537,7 @@ Falls back to a CLI subprocess when the web-host is offline."
          (line (my/aaronnote-roam--todo-field entry "line"))
          (ddl (my/aaronnote-roam--todo-ddl entry))
          (status (my/aaronnote-roam--todo-status entry))
+         (tags (my/aaronnote-roam--todo-tags entry))
          (meta (string-join
                 (delq nil
                       (list (and ddl (format "DDL %s" ddl))
@@ -2540,6 +2551,7 @@ Falls back to a CLI subprocess when the web-host is offline."
      :title text
      :meta meta
      :detail note-title
+     :tags tags
      :action (let ((todo entry))
                (lambda (_button)
                  (my/aaronnote-roam--visit-todo todo)))
@@ -2810,70 +2822,725 @@ Multiple terms are ANDed."
 
 ;; ── Roam agenda ─────────────────────────────────────────────────────────────
 
+(defconst my/aaronnote-roam--agenda-date-fields
+  '("ddl" "deadline" "due" "scheduled" "start" "when" "date")
+  "Todo fields considered date-like in the agenda.")
+
+(defconst my/aaronnote-roam--agenda-closed-statuses
+  '("done" "complete" "completed" "cancelled" "canceled")
+  "Todo statuses treated as closed in the agenda.")
+
+(defun my/aaronnote-roam--todo-value (entry &rest keys)
+  "Return the first non-empty todo ENTRY value for KEYS.
+This checks top-level todo fields first, then the nested args object."
+  (or (seq-some
+       (lambda (key)
+         (let ((value (my/aaronnote-roam--todo-field entry key)))
+           (and value
+                (not (and (stringp value) (string-empty-p value)))
+                value)))
+       keys)
+      (when-let* ((args (my/aaronnote-roam--todo-field entry "args")))
+        (seq-some
+         (lambda (key)
+           (let ((value (my/aaronnote-roam--todo-field args key)))
+             (and value
+                  (not (and (stringp value) (string-empty-p value)))
+                  value)))
+         keys))))
+
+(defun my/aaronnote-roam--todo-string-value (entry &rest keys)
+  "Return a trimmed string todo ENTRY value for KEYS, or nil."
+  (when-let* ((value (apply #'my/aaronnote-roam--todo-value entry keys))
+              (string (string-trim (format "%s" value))))
+    (unless (string-empty-p string)
+      string)))
+
+(defun my/aaronnote-roam--todo-list-value (entry &rest keys)
+  "Return a string list todo ENTRY value for KEYS."
+  (let ((value (apply #'my/aaronnote-roam--todo-value entry keys)))
+    (cond
+     ((null value) nil)
+     ((vectorp value)
+      (mapcar (lambda (item) (format "%s" item)) (append value nil)))
+     ((listp value)
+      (seq-filter
+       (lambda (item) (not (string-empty-p item)))
+       (mapcar (lambda (item) (string-trim (format "%s" item))) value)))
+     ((stringp value)
+      (split-string value "[,[:space:]]+" t))
+     (t (list (format "%s" value))))))
+
+(defun my/aaronnote-roam--todo-tags (entry)
+  "Return file and inline tags inherited by todo ENTRY."
+  (delete-dups
+   (seq-filter
+    (lambda (tag) (not (string-empty-p tag)))
+    (append (my/aaronnote-roam--todo-list-value entry "tags")
+            (my/aaronnote-roam--todo-list-value entry "inlineTags")))))
+
 (defun my/aaronnote-roam--todo-ddl (entry)
   "Return deadline string for todo ENTRY, or nil."
-  (let ((ddl (my/aaronnote-roam--todo-field entry "ddl" "deadline")))
-    (and ddl (not (string-empty-p (or ddl ""))) ddl)))
+  (my/aaronnote-roam--todo-string-value entry "ddl" "deadline" "due"))
+
+(defun my/aaronnote-roam--date-day-string (value)
+  "Return YYYY-MM-DD for date-like VALUE, or nil."
+  (when-let* ((raw (and value (string-trim (format "%s" value)))))
+    (unless (string-empty-p raw)
+      (let ((lower (downcase raw)))
+        (cond
+         ((member lower '("today" "今天"))
+          (format-time-string "%Y-%m-%d"))
+         ((member lower '("tomorrow" "明天"))
+          (format-time-string "%Y-%m-%d" (time-add (current-time) (days-to-time 1))))
+         ((member lower '("yesterday" "昨天"))
+          (format-time-string "%Y-%m-%d" (time-subtract (current-time) (days-to-time 1))))
+         ((string-match
+           "\\`\\([0-9]\\{4\\}\\)[-./年]\\([0-9]\\{1,2\\}\\)[-./月]\\([0-9]\\{1,2\\}\\)"
+           raw)
+          (format "%04d-%02d-%02d"
+                  (string-to-number (match-string 1 raw))
+                  (string-to-number (match-string 2 raw))
+                  (string-to-number (match-string 3 raw))))
+         ((not (string-match-p "[0-9]" raw))
+          nil)
+         (t
+          (condition-case nil
+              (format-time-string "%Y-%m-%d"
+                                  (encode-time (parse-time-string raw)))
+            (error nil))))))))
+
+(defun my/aaronnote-roam--todo-agenda-date (entry)
+  "Return the main agenda date string for todo ENTRY, or nil."
+  (seq-some
+   (lambda (key)
+     (my/aaronnote-roam--date-day-string
+      (my/aaronnote-roam--todo-value entry key)))
+   my/aaronnote-roam--agenda-date-fields))
 
 (defun my/aaronnote-roam--todo-overdue-p (ddl)
   "Return non-nil when DDL string is in the past."
-  (when (and ddl (not (string-empty-p ddl)))
-    (condition-case nil
-        (time-less-p (encode-time (parse-time-string ddl)) (current-time))
-      (error nil))))
+  (when-let* ((day (my/aaronnote-roam--date-day-string ddl)))
+    (string< day (format-time-string "%Y-%m-%d"))))
 
-(defun my/aaronnote-roam-agenda ()
+(defun my/aaronnote-roam--todo-closed-p (entry)
+  "Return non-nil when todo ENTRY is done or cancelled."
+  (member (my/aaronnote-roam--todo-status entry)
+          my/aaronnote-roam--agenda-closed-statuses))
+
+(defun my/aaronnote-roam--todo-cancelled-p (entry)
+  "Return non-nil when todo ENTRY is cancelled."
+  (member (my/aaronnote-roam--todo-status entry) '("cancelled" "canceled")))
+
+(defun my/aaronnote-roam--todo-done-p (entry)
+  "Return non-nil when todo ENTRY is done."
+  (member (my/aaronnote-roam--todo-status entry)
+          '("done" "complete" "completed")))
+
+(defun my/aaronnote-roam--agenda-status-match-p (entry wanted)
+  "Return non-nil when todo ENTRY matches WANTED status."
+  (let* ((raw (downcase (string-trim (format "%s" wanted))))
+         (wanted (if (string= raw "open")
+                     "open"
+                   (my/aaronnote-roam--todo-status `(:status ,raw)))))
+    (pcase wanted
+      ("open" (not (my/aaronnote-roam--todo-closed-p entry)))
+      ("done" (my/aaronnote-roam--todo-done-p entry))
+      ("cancelled" (my/aaronnote-roam--todo-cancelled-p entry))
+      (_ (string= (my/aaronnote-roam--todo-status entry) wanted)))))
+
+(defun my/aaronnote-roam--agenda-todo-haystack (entry)
+  "Return searchable text for todo ENTRY."
+  (downcase
+   (string-join
+    (delq nil
+          (append
+           (list (my/aaronnote-roam--todo-string-value entry "text" "context" "source")
+                 (my/aaronnote-roam--todo-string-value entry "title" "noteTitle" "parentTitle")
+                 (my/aaronnote-roam--todo-string-value entry "note" "noteId" "roamId" "noteKey")
+                 (my/aaronnote-roam--todo-string-value entry "path" "file" "parentFile")
+                 (my/aaronnote-roam--todo-string-value entry "groupKey" "groupLabel"))
+           (my/aaronnote-roam--todo-tags entry)))
+    " ")))
+
+(defun my/aaronnote-roam--agenda-field-contains-p (entry value &rest keys)
+  "Return non-nil when ENTRY fields KEYS contain VALUE."
+  (let ((needle (downcase value))
+        (haystack (downcase
+                   (string-join
+                    (delq nil
+                          (mapcar (lambda (key)
+                                    (my/aaronnote-roam--todo-string-value entry key))
+                                  keys))
+                    " "))))
+    (string-match-p (regexp-quote needle) haystack)))
+
+(defun my/aaronnote-roam--agenda-tag-match-p (entry value)
+  "Return non-nil when todo ENTRY has a tag matching VALUE."
+  (let ((needle (downcase value)))
+    (seq-some
+     (lambda (tag)
+       (let ((tag (downcase tag)))
+         (or (string= tag needle)
+             (string-prefix-p (concat needle "/") tag)
+             (string-match-p (regexp-quote needle) tag))))
+     (my/aaronnote-roam--todo-tags entry))))
+
+(defun my/aaronnote-roam--agenda-date-in-range-p (entry from to)
+  "Return non-nil when ENTRY agenda date is within FROM and TO."
+  (when-let* ((day (my/aaronnote-roam--todo-agenda-date entry)))
+    (and (or (null from) (not (string< day from)))
+         (or (null to) (not (string< to day))))))
+
+(defun my/aaronnote-roam--agenda-search-term-match-p (entry term)
+  "Return non-nil when todo ENTRY matches one search TERM."
+  (if (string-match "\\`\\([^:]+\\):\\(.+\\)\\'" term)
+      (let ((key (downcase (match-string 1 term)))
+            (value (downcase (match-string 2 term))))
+        (pcase key
+          ("status" (my/aaronnote-roam--agenda-status-match-p entry value))
+          ("tag" (my/aaronnote-roam--agenda-tag-match-p entry value))
+          ((or "title" "intitle")
+           (my/aaronnote-roam--agenda-field-contains-p
+            entry value "title" "noteTitle" "parentTitle"))
+          ((or "roamid" "id")
+           (my/aaronnote-roam--agenda-field-contains-p
+            entry value "roamId" "noteId" "note" "noteKey" "id"))
+          ("file"
+           (my/aaronnote-roam--agenda-field-contains-p
+            entry value "path" "file" "parentFile"))
+          ((or "parent" "group")
+           (my/aaronnote-roam--agenda-field-contains-p
+            entry value "groupKey" "groupLabel" "parentFile" "path"))
+          ("date"
+           (let ((day (my/aaronnote-roam--date-day-string value)))
+             (and day (equal day (my/aaronnote-roam--todo-agenda-date entry)))))
+          ("from"
+           (my/aaronnote-roam--agenda-date-in-range-p
+            entry (my/aaronnote-roam--date-day-string value) nil))
+          ("to"
+           (my/aaronnote-roam--agenda-date-in-range-p
+            entry nil (my/aaronnote-roam--date-day-string value)))
+          (_
+           (string-match-p (regexp-quote value)
+                           (my/aaronnote-roam--agenda-todo-haystack entry)))))
+    (string-match-p (regexp-quote (downcase term))
+                    (my/aaronnote-roam--agenda-todo-haystack entry))))
+
+(defun my/aaronnote-roam--agenda-search-match-p (entry query)
+  "Return non-nil when todo ENTRY matches agenda QUERY."
+  (let ((terms (split-string (string-trim (or query "")) "\\s-+" t)))
+    (or (null terms)
+        (seq-every-p
+         (lambda (term)
+           (my/aaronnote-roam--agenda-search-term-match-p entry term))
+         terms))))
+
+(defun my/aaronnote-roam--agenda-filter-todos (todos mode query)
+  "Filter TODOS for agenda MODE and optional QUERY."
+  (let ((today (format-time-string "%Y-%m-%d")))
+    (seq-filter
+     (lambda (entry)
+       (pcase mode
+         ('all t)
+         ('done (my/aaronnote-roam--todo-done-p entry))
+         ('cancelled (my/aaronnote-roam--todo-cancelled-p entry))
+         ('today
+          (and (not (my/aaronnote-roam--todo-closed-p entry))
+               (equal (my/aaronnote-roam--todo-agenda-date entry) today)))
+         ('overdue
+          (and (not (my/aaronnote-roam--todo-closed-p entry))
+               (my/aaronnote-roam--todo-overdue-p
+                (my/aaronnote-roam--todo-agenda-date entry))))
+         ('date
+          (and (not (my/aaronnote-roam--todo-closed-p entry))
+               (equal (my/aaronnote-roam--todo-agenda-date entry)
+                      (my/aaronnote-roam--date-day-string query))))
+         ('search
+          (my/aaronnote-roam--agenda-search-match-p entry query))
+         (_
+          (not (my/aaronnote-roam--todo-closed-p entry)))))
+     (or todos '()))))
+
+(defun my/aaronnote-roam--agenda-sort-todos (todos)
+  "Return TODOS sorted by agenda date, title, and text."
+  (sort
+   (copy-sequence todos)
+   (lambda (a b)
+     (let ((date-a (my/aaronnote-roam--todo-agenda-date a))
+           (date-b (my/aaronnote-roam--todo-agenda-date b))
+           (title-a (or (my/aaronnote-roam--todo-string-value a "title" "noteTitle")
+                        ""))
+           (title-b (or (my/aaronnote-roam--todo-string-value b "title" "noteTitle")
+                        ""))
+           (text-a (or (my/aaronnote-roam--todo-string-value a "text" "source")
+                       ""))
+           (text-b (or (my/aaronnote-roam--todo-string-value b "text" "source")
+                       "")))
+       (cond
+        ((and date-a date-b (not (string= date-a date-b)))
+         (string< date-a date-b))
+        ((and date-a (not date-b)) t)
+        ((and date-b (not date-a)) nil)
+        ((not (string= title-a title-b)) (string< title-a title-b))
+        (t (string< text-a text-b)))))))
+
+(defun my/aaronnote-roam--agenda-groups (todos)
+  "Return agenda groups for TODOS."
+  (let ((today-str (format-time-string "%Y-%m-%d"))
+        overdue today upcoming no-ddl done cancelled)
+    (dolist (entry todos)
+      (let ((date (my/aaronnote-roam--todo-agenda-date entry)))
+        (cond
+         ((my/aaronnote-roam--todo-cancelled-p entry)
+          (push entry cancelled))
+         ((my/aaronnote-roam--todo-done-p entry)
+          (push entry done))
+         ((and date (string= date today-str))
+          (push entry today))
+         ((and date (my/aaronnote-roam--todo-overdue-p date))
+          (push entry overdue))
+         (date
+          (push entry upcoming))
+         (t
+          (push entry no-ddl)))))
+    `(("Overdue" . (,(my/aaronnote-roam--agenda-sort-todos overdue) . danger))
+      ("Today" . (,(my/aaronnote-roam--agenda-sort-todos today) . warning))
+      ("Upcoming" . (,(my/aaronnote-roam--agenda-sort-todos upcoming) . info))
+      ("No deadline" . (,(my/aaronnote-roam--agenda-sort-todos no-ddl) . muted))
+      ("Done" . (,(my/aaronnote-roam--agenda-sort-todos done) . success))
+      ("Cancelled" . (,(my/aaronnote-roam--agenda-sort-todos cancelled) . danger)))))
+
+(defun my/aaronnote-roam--agenda-stats (todos)
+  "Return agenda stat badges for all TODOS."
+  (let* ((open (seq-count
+                (lambda (entry)
+                  (not (my/aaronnote-roam--todo-closed-p entry)))
+                todos))
+         (done (seq-count #'my/aaronnote-roam--todo-done-p todos))
+         (cancelled (seq-count #'my/aaronnote-roam--todo-cancelled-p todos))
+         (today-str (format-time-string "%Y-%m-%d"))
+         (today (seq-count
+                 (lambda (entry)
+                   (and (not (my/aaronnote-roam--todo-closed-p entry))
+                        (equal (my/aaronnote-roam--todo-agenda-date entry)
+                               today-str)))
+                 todos))
+         (overdue (seq-count
+                   (lambda (entry)
+                     (and (not (my/aaronnote-roam--todo-closed-p entry))
+                          (my/aaronnote-roam--todo-overdue-p
+                           (my/aaronnote-roam--todo-agenda-date entry))))
+                   todos)))
+    (list (cons (format "%d overdue" overdue) (if (> overdue 0) 'danger 'muted))
+          (cons (format "%d today" today) (if (> today 0) 'warning 'muted))
+          (cons (format "%d open" open) 'info)
+          (cons (format "%d done" done) 'success)
+          (cons (format "%d cancelled" cancelled) (if (> cancelled 0) 'danger 'muted)))))
+
+(defun my/aaronnote-roam--agenda-subtitle (mode query count)
+  "Return agenda subtitle for MODE, QUERY, and COUNT."
+  (pcase mode
+    ('all (format "All Aaronnote tasks, %d shown" count))
+    ('done (format "Completed Aaronnote tasks, %d shown" count))
+    ('cancelled (format "Cancelled Aaronnote tasks, %d shown" count))
+    ('today (format "Open tasks due today, %d shown" count))
+    ('overdue (format "Overdue open tasks, %d shown" count))
+    ('date (format "Open tasks dated %s, %d shown" query count))
+    ('search (format "Agenda search: %s, %d shown" query count))
+    (_ (format "Open Aaronnote tasks for %s, %d shown"
+               (format-time-string "%Y-%m-%d") count))))
+
+(defun my/aaronnote-roam-agenda-search (&optional query)
+  "Search the roam agenda with QUERY."
+  (interactive (list (read-string
+                      "Agenda search (status: tag: title: roamid: file: parent: date: from: to:): ")))
+  (my/aaronnote-roam-agenda 'search query))
+
+(defun my/aaronnote-roam--agenda-actions (mode query)
+  "Return agenda toolbar actions for MODE and QUERY."
+  (my/aaronnote-roam--ui-actions
+   `((:label "Open"
+      :command ,(lambda () (my/aaronnote-roam-agenda 'open nil))
+      :help "Show open tasks"
+      :primary ,(memq mode '(open nil)))
+     (:label "All"
+      :command ,(lambda () (my/aaronnote-roam-agenda 'all nil))
+      :help "Show all tasks"
+      :primary ,(eq mode 'all))
+     (:label "Done"
+      :command ,(lambda () (my/aaronnote-roam-agenda 'done nil))
+      :help "Show completed tasks"
+      :primary ,(eq mode 'done))
+     (:label "Cancelled"
+      :command ,(lambda () (my/aaronnote-roam-agenda 'cancelled nil))
+      :help "Show cancelled tasks"
+      :primary ,(eq mode 'cancelled))
+     (:label "Today"
+      :command ,(lambda () (my/aaronnote-roam-agenda 'today nil))
+      :help "Show open tasks due today"
+      :primary ,(eq mode 'today))
+     (:label "Overdue"
+      :command ,(lambda () (my/aaronnote-roam-agenda 'overdue nil))
+      :help "Show overdue open tasks"
+      :primary ,(eq mode 'overdue))
+     (:label "Search"
+      :command my/aaronnote-roam-agenda-search
+      :help "Search agenda tasks"
+      :primary ,(eq mode 'search))
+     (:label "Calendar"
+      :command my/aaronnote-roam-agenda-calendar
+      :help "Show agenda deadline calendar"))))
+
+(defun my/aaronnote-roam--agenda-update-todo (entry status)
+  "Set todo ENTRY to STATUS and refresh the agenda."
+  (my/aaronnote-roam-update-todo-status status entry))
+
+(defun my/aaronnote-roam--insert-agenda-todo-row (entry &optional deadline-tone)
+  "Insert one agenda row for todo ENTRY with optional DEADLINE-TONE."
+  (my/aaronnote-roam--insert-todo-row entry deadline-tone)
+  (insert "      ")
+  (if (my/aaronnote-roam--todo-closed-p entry)
+      (my/aaronnote-roam-ui-insert-actions
+       `((:label "Reopen"
+          :command ,(let ((todo entry))
+                      (lambda ()
+                        (my/aaronnote-roam--agenda-update-todo todo "todo")))
+          :help "Mark this task todo")
+         (:label "Doing"
+          :command ,(let ((todo entry))
+                      (lambda ()
+                        (my/aaronnote-roam--agenda-update-todo todo "doing")))
+          :help "Mark this task doing")))
+    (my/aaronnote-roam-ui-insert-actions
+     `((:label "Done"
+        :command ,(let ((todo entry))
+                    (lambda ()
+                      (my/aaronnote-roam--agenda-update-todo todo "done")))
+        :help "Mark this task done"
+        :primary t)
+       (:label "Cancel"
+        :command ,(let ((todo entry))
+                    (lambda ()
+                      (my/aaronnote-roam--agenda-update-todo todo "cancelled")))
+        :help "Mark this task cancelled"))))
+  (insert "\n"))
+
+(defun my/aaronnote-roam--current-buffer-todos ()
+  "Return lightweight todo entries scanned from the current buffer."
+  (let ((file (buffer-file-name))
+        todos)
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (point-min))
+        (while (not (eobp))
+          (let* ((line-start (line-beginning-position))
+                 (line-end (line-end-position))
+                 (line (string-trim
+                        (buffer-substring-no-properties line-start line-end))))
+            (when (or (string-match-p "\\`@@todo\\b" line)
+                      (string-match-p "\\`\\(?:[-*+]\\s-+\\)?\\[ \\]" line)
+                      (string-match-p "\\_<TODO\\_>" line))
+              (let ((entry (list :file file
+                                 :path (and file
+                                            (file-relative-name
+                                             file (my/aaronnote-roam-root)))
+                                 :line (line-number-at-pos line-start t)
+                                 :column 1
+                                 :index (1- line-start)
+                                 :source line
+                                 :text line
+                                 :status (if (string-match
+                                              "\\`@@todo(\\([^)\n]+\\))"
+                                              line)
+                                             (match-string 1 line)
+                                           "todo"))))
+                (push entry todos))))
+          (forward-line 1))))
+    (nreverse todos)))
+
+(defun my/aaronnote-roam--current-file-todos ()
+  "Return todo entries for the current file."
+  (let* ((file (buffer-file-name))
+         (truename (and file (file-truename file)))
+         (indexed
+          (and truename
+               (seq-filter
+                (lambda (entry)
+                  (let ((todo-file (my/aaronnote-roam--todo-field entry "file")))
+                    (and (stringp todo-file)
+                         (file-exists-p todo-file)
+                         (string= (file-truename todo-file) truename))))
+                (or (my/aaronnote-roam--todos) '())))))
+    (or indexed
+        (and file (my/aaronnote-roam--current-buffer-todos)))))
+
+(defun my/aaronnote-roam-jump-file-todo ()
+  "Quickly jump to a todo in the current Markdown roam file."
+  (interactive)
+  (unless buffer-file-name
+    (user-error "Current buffer is not visiting a file"))
+  (let* ((todos (my/aaronnote-roam--current-file-todos))
+         (choices
+          (mapcar
+           (lambda (entry)
+             (let* ((line (or (my/aaronnote-roam--todo-field entry "line") 0))
+                    (status (upcase (my/aaronnote-roam--todo-status entry)))
+                    (date (my/aaronnote-roam--todo-agenda-date entry))
+                    (text (or (my/aaronnote-roam--todo-string-value
+                               entry "text" "source" "context")
+                              "(empty todo)"))
+                    (label (format "%5s  L%-4s  %s%s"
+                                   status line text
+                                   (if date (format "  <%s>" date) ""))))
+               (cons label entry)))
+           todos)))
+    (unless choices
+      (user-error "No todos in current file"))
+    (my/aaronnote-roam--visit-todo
+     (cdr (assoc (completing-read "File todo: " choices nil t) choices)))))
+
+(defun my/aaronnote-roam-agenda (&optional mode query)
   "Show a roam notes agenda: todos from md notes grouped by status/ddl."
   (interactive)
-  (let* ((todos (my/aaronnote-roam--todos))
-         (overdue nil) (today nil) (upcoming nil) (no-ddl nil)
-         (today-str (format-time-string "%Y-%m-%d")))
-    (dolist (entry (or todos '()))
-      (let ((ddl (my/aaronnote-roam--todo-ddl entry))
-            (status (my/aaronnote-roam--todo-status entry)))
-        (unless (member status '("done" "cancelled"))
-          (cond
-           ((and ddl (string= ddl today-str))
-            (push entry today))
-           ((and ddl (my/aaronnote-roam--todo-overdue-p ddl))
-            (push entry overdue))
-           (ddl (push entry upcoming))
-           (t   (push entry no-ddl))))))
-    (let* ((open-count (+ (length overdue) (length today)
-                          (length upcoming) (length no-ddl)))
+  (let* ((mode (or mode 'open))
+         (todos (or (my/aaronnote-roam--todos) '()))
+         (filtered (my/aaronnote-roam--agenda-filter-todos todos mode query))
+         (shown-count (length filtered))
+         (refresh (let ((view-mode mode)
+                        (view-query query))
+                    (lambda ()
+                      (my/aaronnote-roam-agenda view-mode view-query))))
            (buf (my/aaronnote-roam--prepare-ui-buffer
                  "*roam-agenda*" "Roam Agenda" 'agenda
-                 #'my/aaronnote-roam-agenda
-                 (format "%d open" open-count))))
+                 refresh
+                 (format "%d shown" shown-count))))
       (with-current-buffer buf
         (my/aaronnote-roam-ui-render
          (lambda ()
            (my/aaronnote-roam-ui-insert-page-header
             "Agenda"
             :icon 'agenda
-            :subtitle (format "Open Aaronnote tasks for %s" today-str)
-            :stats (list (cons (format "%d overdue" (length overdue))
-                               (if overdue 'danger 'muted))
-                         (cons (format "%d today" (length today))
-                               (if today 'warning 'muted))
-                         (cons (format "%d open" open-count) 'info))
-            :actions (my/aaronnote-roam--ui-actions))
-           (cl-labels
-               ((insert-group
-                 (title group tone)
-                 (when group
+            :subtitle (my/aaronnote-roam--agenda-subtitle mode query shown-count)
+            :stats (my/aaronnote-roam--agenda-stats todos)
+            :actions (my/aaronnote-roam--agenda-actions mode query))
+           (let ((inserted nil))
+             (dolist (group (my/aaronnote-roam--agenda-groups filtered))
+               (let* ((title (car group))
+                      (entries (cadr group))
+                      (tone (cddr group)))
+                 (when entries
+                   (setq inserted t)
                    (my/aaronnote-roam-ui-insert-section
-                    title (length group) tone)
-                   (dolist (entry (nreverse group))
-                     (my/aaronnote-roam--insert-todo-row entry tone))
+                    title (length entries) tone)
+                   (dolist (entry entries)
+                     (my/aaronnote-roam--insert-agenda-todo-row entry tone))
                    (insert "\n"))))
-             (insert-group "Overdue" overdue 'danger)
-             (insert-group "Today" today 'warning)
-             (insert-group "Upcoming" upcoming 'info)
-             (insert-group "No deadline" no-ddl 'muted))
-           (when (zerop open-count)
-             (my/aaronnote-roam-ui-insert-empty "No open tasks.")))))
+             (unless inserted
+               (my/aaronnote-roam-ui-insert-empty
+                (pcase mode
+                  ('search "No matching tasks.")
+                  ('date "No open tasks on this date.")
+                  ('done "No completed tasks.")
+                  ('cancelled "No cancelled tasks.")
+                  (_ "No open tasks."))))))))
       (display-buffer buf))))
+
+(defun my/aaronnote-roam--agenda-calendar-counts (todos)
+  "Return a date -> open todo entries hash table for TODOS."
+  (let ((counts (make-hash-table :test 'equal)))
+    (dolist (entry todos)
+      (unless (my/aaronnote-roam--todo-closed-p entry)
+        (when-let* ((day (my/aaronnote-roam--todo-agenda-date entry)))
+          (puthash day (cons entry (gethash day counts)) counts))))
+    counts))
+
+(defun my/aaronnote-roam--agenda-calendar-cell-label (day count)
+  "Return a fixed-width square calendar label for DAY and COUNT."
+  (format "[%02d %2s]"
+          day
+          (cond
+           ((<= count 0) "")
+           ((> count 99) "99")
+           (t (format "%d" count)))))
+
+(defun my/aaronnote-roam--agenda-calendar-insert-month (year month counts)
+  "Insert agenda calendar for YEAR MONTH using date COUNTS."
+  (let* ((title (format "%04d-%02d" year month))
+         (first-dow (calendar-day-of-week (list month 1 year)))
+         (last-day (calendar-last-day-of-month month year))
+         (today (format-time-string "%Y-%m-%d")))
+    (my/aaronnote-roam-ui-insert-section title)
+    (insert "   SUN      MON      TUE      WED      THU      FRI      SAT\n   ")
+    (dotimes (_ first-dow)
+      (insert "        "))
+    (dotimes (index last-day)
+      (let* ((day (1+ index))
+             (date (format "%04d-%02d-%02d" year month day))
+             (entries (gethash date counts))
+             (count (length entries))
+             (tone (cond
+                    ((string= date today) 'warning)
+                    ((and (> count 0) (string< date today)) 'danger)
+                    ((> count 0) 'info)
+                    (t 'muted)))
+             (label (my/aaronnote-roam--agenda-calendar-cell-label
+                     day count)))
+        (insert-text-button
+         label
+         'action (let ((target-date date))
+                   (lambda (_button)
+                     (my/aaronnote-roam-agenda 'date target-date)))
+         'follow-link t
+         'help-echo (format "Show open tasks dated %s" date)
+         'face (my/aaronnote-roam-ui--tone-face tone))
+        (insert " ")
+        (when (= (mod (+ first-dow day) 7) 0)
+          (insert "\n   "))))
+    (insert "\n\n")))
+
+(defun my/aaronnote-roam-agenda-calendar ()
+  "Show a compact deadline calendar for open roam agenda tasks."
+  (interactive)
+  (let* ((todos (or (my/aaronnote-roam--todos) '()))
+         (counts (my/aaronnote-roam--agenda-calendar-counts todos))
+         (decoded (decode-time (current-time)))
+         (month (nth 4 decoded))
+         (year (nth 5 decoded))
+         (next-month (if (= month 12) 1 (1+ month)))
+         (next-year (if (= month 12) (1+ year) year))
+         (open-count (seq-count
+                      (lambda (entry)
+                        (not (my/aaronnote-roam--todo-closed-p entry)))
+                      todos))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*roam-agenda-calendar*" "Roam Agenda Calendar" 'agenda
+               #'my/aaronnote-roam-agenda-calendar
+               (format "%d open" open-count))))
+    (with-current-buffer buf
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          "Agenda Calendar"
+          :icon 'agenda
+          :subtitle "Open task dates for this month and next month"
+          :stats (list (cons (format "%d open" open-count) 'info))
+          :actions (my/aaronnote-roam--ui-actions
+                    `((:label "Open Agenda"
+                       :command ,(lambda ()
+                                   (my/aaronnote-roam-agenda 'open nil))
+                       :help "Return to the open agenda"
+                       :primary t))))
+         (my/aaronnote-roam--agenda-calendar-insert-month year month counts)
+         (my/aaronnote-roam--agenda-calendar-insert-month
+          next-year next-month counts))))
+    (display-buffer buf)))
+
+;; ── Roam activity heatmap ────────────────────────────────────────────────────
+
+(defconst my/aaronnote-roam--activity-heatmap-days 35
+  "Number of recent days shown in roam activity heatmaps.")
+
+(defun my/aaronnote-roam--activity-date-counts (&optional days)
+  "Return an ordered alist of recent note activity counts for DAYS."
+  (let* ((days (or days my/aaronnote-roam--activity-heatmap-days))
+         (start (time-subtract (current-time) (days-to-time (1- days))))
+         (counts (make-hash-table :test 'equal))
+         ordered)
+    (dotimes (offset days)
+      (let ((day (format-time-string
+                  "%Y-%m-%d" (time-add start (days-to-time offset)))))
+        (push (cons day 0) ordered)
+        (puthash day 0 counts)))
+    (dolist (record (delete-dups (my/aaronnote-roam--note-records)))
+      (when-let* ((file (plist-get record :file))
+                  ((file-exists-p file))
+                  (attrs (file-attributes file 'integer))
+                  (mtime (nth 5 attrs)))
+        (when (not (time-less-p mtime start))
+          (let ((day (format-time-string "%Y-%m-%d" mtime)))
+            (when (gethash day counts)
+              (puthash day (1+ (gethash day counts)) counts))))))
+    (mapcar (lambda (pair)
+              (cons (car pair) (gethash (car pair) counts 0)))
+            (nreverse ordered))))
+
+(defun my/aaronnote-roam--activity-heatmap-tone (count)
+  "Return a display tone for activity COUNT."
+  (cond
+   ((>= count 5) 'success)
+   ((>= count 2) 'warning)
+   ((>= count 1) 'info)
+   (t 'muted)))
+
+(defun my/aaronnote-roam--activity-heatmap-cell (count)
+  "Return a fixed-width heatmap cell label for COUNT."
+  (format "[%2s]"
+          (cond
+           ((<= count 0) "")
+           ((> count 99) "99")
+           (t (format "%d" count)))))
+
+(defun my/aaronnote-roam-ui-insert-activity-heatmap (&optional days)
+  "Insert a board-style roam activity heatmap for recent DAYS."
+  (let* ((counts (my/aaronnote-roam--activity-date-counts days))
+         (total (apply #'+ (mapcar #'cdr counts))))
+    (my/aaronnote-roam-ui-insert-section
+     (format "Roam activity · last %d days" (length counts))
+     total
+     (if (> total 0) 'success 'muted))
+    (insert "   ")
+    (cl-loop for index from 0
+             for (day . count) in counts
+             do
+             (insert-text-button
+              (my/aaronnote-roam--activity-heatmap-cell count)
+              'action (lambda (_button) (my/aaronnote-roam-recent-notes))
+              'follow-link t
+              'help-echo (format "%s: %d modified notes" day count)
+              'face (my/aaronnote-roam-ui--tone-face
+                     (my/aaronnote-roam--activity-heatmap-tone count)))
+             (insert " ")
+             (when (= (mod (1+ index) 7) 0)
+               (insert "\n   ")))
+    (insert "\n   ")
+    (my/aaronnote-roam-ui-insert-badge "0" 'muted)
+    (insert " ")
+    (my/aaronnote-roam-ui-insert-badge "1" 'info)
+    (insert " ")
+    (my/aaronnote-roam-ui-insert-badge "2+" 'warning)
+    (insert " ")
+    (my/aaronnote-roam-ui-insert-badge "5+" 'success)
+    (insert "\n\n")))
+
+(defun my/aaronnote-roam-dashboard-insert-heatmap (&optional days)
+  "Insert a compact roam activity heatmap into the main dashboard."
+  (condition-case nil
+      (let* ((counts (my/aaronnote-roam--activity-date-counts
+                      (or days my/aaronnote-roam--activity-heatmap-days)))
+             (total (apply #'+ (mapcar #'cdr counts))))
+        (when counts
+          (insert (propertize
+                   (format "Roam activity · last %d days · %d changes"
+                           (length counts) total)
+                   'face (if (facep 'dashboard-heading)
+                             'dashboard-heading
+                           'bold))
+                  "\n\n  ")
+          (cl-loop for index from 0
+                   for (_day . count) in counts
+                   do
+                   (insert (propertize
+                            (my/aaronnote-roam--activity-heatmap-cell count)
+                            'face (my/aaronnote-roam-ui--tone-face
+                                   (my/aaronnote-roam--activity-heatmap-tone
+                                    count)))
+                           " ")
+                   (when (= (mod (1+ index) 7) 0)
+                     (insert "\n  ")))
+          (insert "\n\n")))
+    (error nil)))
 
 ;; ── Roam DB utilities ─────────────────────────────────────────────────────────
 
@@ -2922,6 +3589,7 @@ Multiple terms are ANDed."
              (:label "Full rebuild"
               :command my/aaronnote-roam-sync-full
               :help "Rebuild the roam-db index from scratch"))))
+         (my/aaronnote-roam-ui-insert-activity-heatmap)
          (my/aaronnote-roam-ui-insert-section "Location")
          (my/aaronnote-roam-ui-insert-field
           "Root" (abbreviate-file-name root) 'my/aaronnote-roam-ui-path)
@@ -3687,6 +4355,7 @@ canonical `roam://note-id#tag' target."
     (define-key map (kbd "b") #'my/aaronnote-roam-backlinks)
     (define-key map (kbd "t") #'my/aaronnote-roam-tags)
     (define-key map (kbd "T") #'my/aaronnote-roam-todos)
+    (define-key map (kbd "F") #'my/aaronnote-roam-jump-file-todo)
     (define-key map (kbd "A") #'my/aaronnote-roam-agenda)
     (define-key map (kbd "u") #'my/aaronnote-roam-update-db)
     (define-key map (kbd "U") #'my/aaronnote-roam-sync-full)
@@ -3851,6 +4520,7 @@ added separately by `my/aaronnote-roam--capf-setup')."
     ("b" "backlinks"            my/aaronnote-roam-backlinks)
     ("t" "tags"                 my/aaronnote-roam-tags)
     ("T" "todos"                my/aaronnote-roam-todos)
+    ("F" "file todos"           my/aaronnote-roam-jump-file-todo)
     ("A" "agenda"               my/aaronnote-roam-agenda)
     ("u" "sync (incremental)"   my/aaronnote-roam-update-db)
     ("U" "sync (full rebuild)"  my/aaronnote-roam-sync-full)
@@ -4323,9 +4993,10 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
                                               (if (> n 0) (format "%d" n) "0"))
                                             'my/aaronnote-roam-ui-meta)
          (my/aaronnote-roam-ui-insert-field
-          "DB generated" (or generated "unknown")
-          'my/aaronnote-roam-ui-meta)
+         "DB generated" (or generated "unknown")
+         'my/aaronnote-roam-ui-meta)
          (insert "\n")
+         (my/aaronnote-roam-ui-insert-activity-heatmap)
          (my/aaronnote-roam-ui-insert-section "Special pages")
          (insert "   ")
          (my/aaronnote-roam-ui-insert-actions
