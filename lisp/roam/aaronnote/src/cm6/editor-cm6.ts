@@ -10,7 +10,7 @@
  * CM6 doc positions are the markdown source offsets used by the public API.
  */
 
-import { Compartment, EditorSelection, EditorState, Transaction, type Extension } from "@codemirror/state";
+import { Compartment, EditorSelection, EditorState, Transaction, type Extension, type Text as CMText } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -523,8 +523,20 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
   // Internal helpers
   // ---------------------------------------------------------------------------
 
+  // Memoize the full-document serialization by CM6's immutable `Text` identity.
+  // `view.state.doc` is a fresh instance after any edit, so this cache invalidates
+  // automatically and lets the many per-cycle callers (save, assist, word count,
+  // roam graph, copilot) share one toString() instead of each rebuilding a
+  // multi-MB string.
+  let markdownCacheDoc: CMText | null = null;
+  let markdownCacheStr = "";
   function getMarkdown(): string {
-    return view.state.doc.toString();
+    const doc = view.state.doc;
+    if (doc !== markdownCacheDoc) {
+      markdownCacheStr = doc.toString();
+      markdownCacheDoc = doc;
+    }
+    return markdownCacheStr;
   }
 
   function currentDocumentKey(): string {

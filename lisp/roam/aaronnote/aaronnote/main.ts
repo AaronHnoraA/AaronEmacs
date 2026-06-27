@@ -608,7 +608,7 @@ function pushNavigationBackLocation(location = trackCursorPosition()): void {
 }
 
 function restoreCursorPosition(location: CursorPosition): void {
-  const length = editor.getMarkdown().length;
+  const length = editor.getMarkdownLength();
   const from = Math.min(Math.max(0, location.from), length);
   const to = Math.min(Math.max(0, location.to), length);
   if ((location.mode === "source") !== editor.isSourceMode()) editor.toggleSource();
@@ -662,7 +662,7 @@ function applyOpenedNote(
   const from = Number(opened.selection?.from ?? remembered?.from);
   const to = Number(opened.selection?.to ?? remembered?.to ?? from);
   if (Number.isFinite(from)) {
-    const length = editor.getMarkdown().length;
+    const length = editor.getMarkdownLength();
     const safeFrom = Math.min(Math.max(0, from), length);
     const safeTo = Math.min(Math.max(0, Number.isFinite(to) ? to : from), length);
     editor.setMarkdownSelection(safeFrom, safeTo);
@@ -3114,7 +3114,7 @@ function deleteHostKeyText(key: string): boolean {
     return true;
   }
   if (key === "Delete") {
-    editor.replaceMarkdownRange(from, Math.min(from + 1, editor.getMarkdown().length), "", "start");
+    editor.replaceMarkdownRange(from, Math.min(from + 1, editor.getMarkdownLength()), "", "start");
     return true;
   }
   return false;
