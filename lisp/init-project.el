@@ -1297,7 +1297,7 @@ Returns the number of killed buffers."
   :defer 2
   :bind
   (("C-x k" . persp-kill-buffer*)
-   ("M-w" . persp-kill-buffer*))
+   ("M-W" . persp-kill-buffer*))
   :init
   (setq persp-mode-prefix-key (kbd "C-x x")
         persp-initial-frame-name "main")

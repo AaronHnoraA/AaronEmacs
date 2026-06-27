@@ -66,7 +66,7 @@ import {
   touchCursorPosition,
 } from "./server/lib/session.mjs";
 import { handleCopilotRequest, shutdownCopilot } from "./server/lib/copilot.mjs";
-import { runExternalProseChecks } from "./server/lib/prose-check.mjs";
+import { acceptProseWord, runExternalProseChecks } from "./server/lib/prose-check.mjs";
 import { createImeSwitcher } from "./server/lib/ime.mjs";
 
 const ime = createImeSwitcher();
@@ -568,6 +568,7 @@ const apiHandlers = {
   "aaronnote:api:copilot:request": (action, body) => handleCopilotRequest(String(action || ""), body || {}),
 
   "aaronnote:api:prose-check:run": (body) => runExternalProseChecks(body || {}),
+  "aaronnote:api:prose-check:accept-word": (word) => acceptProseWord(word),
   "aaronnote:api:ime:vim-mode": (body) => ime.vimMode(String(body?.mode || "")),
   "aaronnote:api:shell:show-in-folder": (file) => showInFolder(file),
   "aaronnote:api:shell:open-path": (file) => openPath(file),
@@ -835,6 +836,7 @@ function adapterScript(origin) {
     },
     proseCheck: {
       run: function(body) { return call("aaronnote:api:prose-check:run", [body || {}]); },
+      acceptWord: function(word) { return call("aaronnote:api:prose-check:accept-word", [String(word || "")]); },
       browserSpellcheck: function(words) {
         return Array.isArray(words) ? words.map(function(word) {
           return {word: String(word || ""), misspelled: false, suggestions: []};

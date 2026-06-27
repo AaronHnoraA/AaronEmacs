@@ -22,7 +22,6 @@
 (declare-function org-fold-show-entry "org-fold" (&optional hide-drawers))
 (declare-function org-fold-show-subtree "org-fold" ())
 (declare-function my/org-clear-visible-ranges-cache "init-org-ui" (&optional buffer))
-(declare-function my/org-math-preview-visible-debounced "init-org-latex" (&optional window))
 (declare-function my/org-schedule-visible-inline-image-refresh "init-org-core" (&optional force refresh))
 (declare-function org-overview "org" (&optional arg))
 (declare-function flymake-diagnostic-beg "flymake" (diag))
@@ -421,24 +420,19 @@ heading, or before the subtree end when there is no child."
     (cancel-timer my/fold--org-render-timer))
   (setq-local my/fold--org-render-timer nil))
 
-(defun my/fold--org-render-refresh-now (buffer window)
+(defun my/fold--org-render-refresh-now (buffer _window)
   "Refresh visible Org renderers for BUFFER after fold changes.
-WINDOW is used as a hint for math preview scheduling."
+The second argument is kept for compatibility with queued timers."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (setq-local my/fold--org-render-timer nil)
       (when (my/fold--org-buffer-p)
         (when (fboundp 'my/org-schedule-visible-inline-image-refresh)
-          (my/org-schedule-visible-inline-image-refresh t t))
-        (when (fboundp 'my/org-math-preview-visible-debounced)
-          (my/org-math-preview-visible-debounced
-           (and (window-live-p window) window)))))))
+          (my/org-schedule-visible-inline-image-refresh t t))))))
 
 (defun my/fold--refresh-visible-org-rendering (&rest _)
   "Refresh visible Org rendering that intentionally ignores folded text."
   (when (my/fold--org-buffer-p)
-    (when (boundp 'my/org-latex--last-visible-range)
-      (setq my/org-latex--last-visible-range nil))
     (when (fboundp 'my/org-clear-visible-ranges-cache)
       (my/org-clear-visible-ranges-cache (current-buffer)))
     (font-lock-flush (line-beginning-position) (line-end-position))

@@ -26,6 +26,12 @@ import { resolveAnchorHeading } from "../src/heading-slug.ts";
 import { createLocalGraphPanel } from "./local-graph.ts";
 import { setFindHighlightRanges } from "../src/cm6/find-highlight.ts";
 import {
+  allProseDiagnostics,
+  proseDiagnosticsAt,
+  setProseDiagnostics,
+  type ProseDiagnostic,
+} from "../src/cm6/prose-diagnostics.ts";
+import {
   canonicalRoamNoteId,
   escapeMarkdownLinkText,
   markdownRoamIdLink,
@@ -48,12 +54,15 @@ import {
 
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("Missing #app");
+const initialParams = new URLSearchParams(window.location.search);
+const initialReadOnly = initialParams.get("readonly") === "1" || initialParams.get("readonly") === "true";
 
 root.innerHTML = `
   <main class="aaronnote-focused-shell">
     <header class="aaronnote-focused-bar">
       <strong data-file>AaronNote</strong>
       <span data-vim-mode>INSERT</span>
+      <span data-readonly hidden>READ ONLY</span>
       <span data-status>Opening...</span>
       <button type="button" data-toc-toggle aria-expanded="false">TOC</button>
       <button type="button" data-graph-toggle aria-expanded="false">Graph</button>
@@ -68,12 +77,18 @@ root.innerHTML = `
 const host = root.querySelector<HTMLElement>("[data-editor]")!;
 const fileLabel = root.querySelector<HTMLElement>("[data-file]")!;
 const modeLabel = root.querySelector<HTMLElement>("[data-vim-mode]")!;
+const readOnlyLabel = root.querySelector<HTMLElement>("[data-readonly]")!;
 const statusLabel = root.querySelector<HTMLElement>("[data-status]")!;
 const tocButton = root.querySelector<HTMLButtonElement>("[data-toc-toggle]")!;
 const graphButton = root.querySelector<HTMLButtonElement>("[data-graph-toggle]")!;
 const toolsButton = root.querySelector<HTMLButtonElement>("[data-tools-toggle]")!;
 const sourceButton = root.querySelector<HTMLButtonElement>("[data-source]")!;
 const saveButton = root.querySelector<HTMLButtonElement>("[data-save]")!;
+
+const prosePopover = document.createElement("div");
+prosePopover.className = "aaronnote-prose-popover";
+prosePopover.hidden = true;
+document.body.appendChild(prosePopover);
 
 const graphPanelRoot = document.createElement("aside");
 graphPanelRoot.className = "aaronnote-local-graph-panel is-collapsed";
@@ -194,11 +209,15 @@ let currentFile = "";
 let currentClient = "";
 let currentKind = "";
 let currentStandalone = false;
+let currentReadOnly = initialReadOnly;
 let currentMtimeMs = 0;
 let revision = 0;
 let savedRevision = 0;
 let applyingContent = false;
 let saveTimer = 0;
+let saveIdleHandle = 0;
+let proseRequestSeq = 0;
+let activeProseDiagnostic: ProseDiagnostic | null = null;
 let cursorPositionsLoaded = false;
 let cursorPositions: CursorPosition[] = [];
 let lastSavedCursorPositionKey = "";
@@ -243,6 +262,9 @@ const changeHandlers = new Set<() => void>();
 const MATH_PREVIEW_ERROR_IDLE_MS = 650;
 const MATH_PREVIEW_ERROR_MAX_LENGTH = 180;
 const NAVIGATION_BACK_STACK_MAX = 80;
+const PROSE_SCOPE_PADDING = 32 * 1024;
+const PROSE_SCOPE_MAX_CHARS = 180_000;
+const LARGE_DOCUMENT_CHARS = 512 * 1024;
 const editorCommands = new Set<EditorCommand>([
   "bold",
   "italic",
@@ -322,10 +344,32 @@ function setStatus(message: string): void {
   statusLabel.textContent = message;
 }
 
+function applyReadOnlyUi(): void {
+  root.classList.toggle("is-readonly", currentReadOnly);
+  root.dataset.readonly = currentReadOnly ? "true" : "false";
+  document.body.dataset.readonly = currentReadOnly ? "true" : "false";
+  readOnlyLabel.hidden = !currentReadOnly;
+  saveButton.hidden = currentReadOnly;
+  saveButton.disabled = currentReadOnly;
+  if (currentReadOnly) {
+    sourceButton.title = "Toggle source view (read-only)";
+  } else {
+    sourceButton.removeAttribute("title");
+  }
+}
+
+function rejectReadOnlyAction(action = "Read-only pane"): boolean {
+  if (!currentReadOnly) return false;
+  setStatus(action);
+  return true;
+}
+
 function updateTitle(): void {
   const name = currentFile.split(/[\\/]/).at(-1) || "AaronNote";
   fileLabel.textContent = name;
-  document.title = revision === savedRevision ? name : `* ${name}`;
+  document.title = currentReadOnly
+    ? `${name} (read-only)`
+    : revision === savedRevision ? name : `* ${name}`;
 }
 
 function updateModeLabel(mode: VimLiteMode): void {
@@ -352,6 +396,7 @@ let onBlurVimReset: (() => void) | undefined;
 
 const editor = createEditor(host, {
   initialContent: "",
+  readOnly: initialReadOnly,
   getCurrentFile: () => currentFile,
   pasteAssets: {
     uploadBlobAsset: uploadPasteBlobAsset,
@@ -363,7 +408,7 @@ const editor = createEditor(host, {
     updateTitle();
     changeHandlers.forEach((handler) => handler());
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
-    scheduleSave();
+    if (!currentReadOnly) scheduleSave();
   },
   onBlur: () => {
     onBlurVimReset?.();
@@ -487,6 +532,14 @@ function saveBody() {
 
 async function save(): Promise<void> {
   window.clearTimeout(saveTimer);
+  if (saveIdleHandle && "cancelIdleCallback" in window) window.cancelIdleCallback(saveIdleHandle);
+  saveIdleHandle = 0;
+  if (currentReadOnly) {
+    savedRevision = revision;
+    updateTitle();
+    setStatus("Read-only pane");
+    return;
+  }
   if (!currentFile || revision === savedRevision) return;
   const savingRevision = revision;
   const savingFile = currentFile;
@@ -512,9 +565,27 @@ async function save(): Promise<void> {
 
 function scheduleSave(): void {
   window.clearTimeout(saveTimer);
+  if (saveIdleHandle && "cancelIdleCallback" in window) window.cancelIdleCallback(saveIdleHandle);
+  saveIdleHandle = 0;
+  if (currentReadOnly) return;
   if (!currentFile || applyingContent || revision === savedRevision) return;
   setStatus("Edited");
-  saveTimer = window.setTimeout(() => void save(), 650);
+  saveTimer = window.setTimeout(() => {
+    saveTimer = 0;
+    if (editor.getMarkdownLength() < LARGE_DOCUMENT_CHARS || !("requestIdleCallback" in window)) {
+      void save();
+      return;
+    }
+    saveIdleHandle = window.requestIdleCallback(() => {
+      saveIdleHandle = 0;
+      const scheduling = navigator as Navigator & { scheduling?: { isInputPending?: () => boolean } };
+      if (scheduling.scheduling?.isInputPending?.()) {
+        scheduleSave();
+        return;
+      }
+      void save();
+    }, { timeout: 2500 });
+  }, 650);
 }
 
 function cursorPositionKey(position: Pick<CursorPosition, "file" | "mode" | "from" | "to" | "scrollY">): string {
@@ -662,6 +733,8 @@ function applyOpenedNote(
   currentFile = String(opened.file || fallbackFile || "");
   currentKind = String(opened.kind || "");
   currentStandalone = Boolean(opened.standalone);
+  currentReadOnly = initialReadOnly;
+  applyReadOnlyUi();
   applyIndexPayload(opened);
   if (Array.isArray(opened.snippets)) snippets = opened.snippets;
   currentMtimeMs = Number(opened.mtimeMs) || 0;
@@ -685,6 +758,10 @@ function applyOpenedNote(
     editor.revealCursor();
   }
   applyingContent = false;
+  if (currentReadOnly) {
+    revision = savedRevision;
+    setProseDiagnostics(editor.view, []);
+  }
   const restored = currentCursorPosition();
   lastSavedCursorPositionKey = restored ? cursorPositionKey(restored) : "";
   lastTrackedCursorPositionKey = lastSavedCursorPositionKey;
@@ -692,12 +769,15 @@ function applyOpenedNote(
   snippetSession.clear();
   hideSnippetPopup();
   hideMathPreview();
+  proseRequestSeq += 1;
+  setProseDiagnostics(editor.view, []);
+  hideProsePopover();
   selectionTool.hidden = true;
   selectionMore.hidden = true;
   vim.setMode("insert");
   updateTitle();
   void api.emacs.currentFile(currentFile, currentClient);
-  setStatus(currentFile ? "Ready" : "Scratch");
+  setStatus(currentReadOnly ? "Read-only" : currentFile ? "Ready" : "Scratch");
   editor.focus();
   scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
   const targetHash = pendingOpenHash;
@@ -735,11 +815,12 @@ async function openFile(file?: string, bootstrap = false): Promise<void> {
 }
 
 async function openInitialFile(): Promise<void> {
-  const params = new URLSearchParams(window.location.search);
-  const file = params.get("file") || undefined;
-  currentClient = params.get("client") || "";
-  pendingOpenHash = params.get("hash") || "";
-  pendingOpenDomTarget = params.get("dom") || "";
+  const file = initialParams.get("file") || undefined;
+  currentClient = initialParams.get("client") || "";
+  pendingOpenHash = initialParams.get("hash") || "";
+  pendingOpenDomTarget = initialParams.get("dom") || "";
+  currentReadOnly = initialReadOnly;
+  applyReadOnlyUi();
   await openFile(file, true);
 }
 
@@ -788,6 +869,118 @@ function primaryMod(event: KeyboardEvent): boolean {
     : event.ctrlKey && !event.metaKey;
 }
 
+function proseCheckSegments(): Array<{ from: number; text: string }> {
+  const doc = editor.view.state.doc;
+  const selection = editor.getMarkdownSelection();
+  const rawRanges = selection.from !== selection.to
+    ? [{ from: selection.from, to: selection.to }]
+    : editor.view.visibleRanges.map((range) => ({
+      from: Math.max(0, range.from - PROSE_SCOPE_PADDING),
+      to: Math.min(doc.length, range.to + PROSE_SCOPE_PADDING),
+    }));
+  const ranges = rawRanges
+    .map((range) => ({
+      from: doc.lineAt(Math.max(0, Math.min(range.from, doc.length))).from,
+      to: doc.lineAt(Math.max(0, Math.min(range.to, doc.length))).to,
+    }))
+    .sort((a, b) => a.from - b.from || a.to - b.to);
+  const merged: Array<{ from: number; to: number }> = [];
+  for (const range of ranges) {
+    const previous = merged[merged.length - 1];
+    if (previous && range.from <= previous.to + 1) previous.to = Math.max(previous.to, range.to);
+    else merged.push({ ...range });
+  }
+  const segments: Array<{ from: number; text: string }> = [];
+  let remaining = PROSE_SCOPE_MAX_CHARS;
+  for (const range of merged) {
+    if (remaining <= 0) break;
+    const to = Math.min(range.to, range.from + remaining);
+    const text = editor.markdownBetween(range.from, to);
+    if (text) segments.push({ from: range.from, text });
+    remaining -= text.length;
+  }
+  return segments;
+}
+
+function hideProsePopover(): void {
+  prosePopover.hidden = true;
+  prosePopover.replaceChildren();
+  activeProseDiagnostic = null;
+}
+
+async function runProseCheck(): Promise<void> {
+  const requestSeq = ++proseRequestSeq;
+  hideProsePopover();
+  const segments = proseCheckSegments();
+  if (segments.length === 0) {
+    setProseDiagnostics(editor.view, []);
+    setStatus("Nothing to check");
+    return;
+  }
+  setStatus("Checking prose...");
+  try {
+    const result = await api.proseCheck.run({
+      file: currentFile,
+      segments,
+      totalChars: editor.getMarkdownLength(),
+    });
+    if (requestSeq !== proseRequestSeq) return;
+    const diagnostics = (result.diagnostics ?? []) as ProseDiagnostic[];
+    setProseDiagnostics(editor.view, diagnostics);
+    const partial = result.scope?.partial ? " (bounded scope)" : "";
+    const failures = (result.tools ?? []).filter((tool) => tool.ok === false && !tool.optional);
+    setStatus(failures.length > 0
+      ? failures.map((tool) => tool.message || `${tool.source} failed`).join("; ")
+      : `${diagnostics.length} prose issue${diagnostics.length === 1 ? "" : "s"}${partial}`);
+  } catch (error) {
+    if (requestSeq !== proseRequestSeq) return;
+    setStatus(error instanceof Error ? error.message : "Prose check failed");
+  }
+}
+
+function runProseCheckShortcut(event: KeyboardEvent): boolean {
+  if (!primaryMod(event) || !event.shiftKey || event.altKey || event.key.toLowerCase() !== "c") return false;
+  event.preventDefault();
+  void runProseCheck();
+  return true;
+}
+
+function removeProseDiagnostics(predicate: (diagnostic: ProseDiagnostic) => boolean): void {
+  setProseDiagnostics(editor.view, allProseDiagnostics(editor.view).filter((diagnostic) => !predicate(diagnostic)));
+  hideProsePopover();
+}
+
+function showProsePopover(diagnostic: ProseDiagnostic, x: number, y: number): void {
+  activeProseDiagnostic = diagnostic;
+  const message = document.createElement("div");
+  message.className = "aaronnote-prose-message";
+  message.textContent = `${diagnostic.source}: ${diagnostic.message}`;
+  prosePopover.replaceChildren(message);
+  for (const suggestion of (diagnostic.suggestions ?? []).slice(0, 8)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.proseAction = "replace";
+    button.dataset.value = suggestion;
+    button.textContent = suggestion || "Remove";
+    prosePopover.append(button);
+  }
+  const ignore = document.createElement("button");
+  ignore.type = "button";
+  ignore.dataset.proseAction = "ignore";
+  ignore.textContent = "Ignore";
+  prosePopover.append(ignore);
+  if (diagnostic.word) {
+    const accept = document.createElement("button");
+    accept.type = "button";
+    accept.dataset.proseAction = "accept";
+    accept.textContent = `Add “${diagnostic.word}”`;
+    prosePopover.append(accept);
+  }
+  prosePopover.style.left = `${Math.max(8, Math.min(window.innerWidth - 320, x))}px`;
+  prosePopover.style.top = `${Math.max(8, Math.min(window.innerHeight - 160, y + 8))}px`;
+  prosePopover.hidden = false;
+}
+
 function plainEscapeKey(event: KeyboardEvent): boolean {
   return event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.isComposing;
 }
@@ -802,6 +995,7 @@ function runFormattingShortcut(event: KeyboardEvent): boolean {
     : "";
   if (!command) return false;
   event.preventDefault();
+  if (rejectReadOnlyAction("Read-only pane")) return true;
   editor.runCommand(command);
   editor.focus();
   return true;
@@ -1544,6 +1738,7 @@ function runClipboardShortcut(event: KeyboardEvent): boolean {
   }
   if (key === "v") {
     event.preventDefault();
+    if (rejectReadOnlyAction("Read-only pane")) return true;
     editor.focus();
     void editor.pasteFromClipboard();
     return true;
@@ -3150,12 +3345,14 @@ function runSelectionCommand(command: string): void {
     return;
   }
   if (command === "insert-roam-idlink") {
+    if (rejectReadOnlyAction("Read-only pane")) return;
     selectionMore.hidden = true;
     selectionTool.hidden = true;
     void insertRoamIdLink();
     return;
   }
   if (!["bold", "italic", "highlight", "strike", "code", "link"].includes(command)) return;
+  if (rejectReadOnlyAction("Read-only pane")) return;
   editor.runCommand(command as EditorCommand);
   selectionTool.hidden = true;
   selectionMore.hidden = true;
@@ -3287,6 +3484,13 @@ function runHostKey(body: Record<string, unknown>): boolean {
     scheduleAssistUpdate({ cursor: true });
     return true;
   }
+  if (currentReadOnly) {
+    if (key === "Tab" || key === "Enter" || key === "Backspace" || key === "Delete" || (!hostKey.ctrlKey && !hostKey.metaKey && !hostKey.altKey && key.length === 1)) {
+      setStatus("Read-only pane");
+      return true;
+    }
+    return false;
+  }
   if (key === "Tab") {
     if (vim.mode() !== "insert") return false;
     editor.focus();
@@ -3359,7 +3563,12 @@ function runHostCommand(detail: unknown): boolean {
       setPausedReason("host", !pauseReasons.has("host"));
       return true;
     case "save":
+      if (rejectReadOnlyAction("Read-only pane")) return true;
       void save();
+      return true;
+    case "prose-check":
+    case "spell-check":
+      void runProseCheck();
       return true;
     case "back":
     case "nav-back":
@@ -3370,6 +3579,7 @@ function runHostCommand(detail: unknown): boolean {
       editor.focus();
       return true;
     case "paste":
+      if (rejectReadOnlyAction("Read-only pane")) return true;
       editor.focus();
       void editor.pasteFromClipboard();
       return true;
@@ -3389,13 +3599,16 @@ function runHostCommand(detail: unknown): boolean {
       toggleSourceMode();
       return true;
     case "undo":
+      if (rejectReadOnlyAction("Read-only pane")) return true;
       editor.focus();
       return editor.undo();
     case "redo":
+      if (rejectReadOnlyAction("Read-only pane")) return true;
       editor.focus();
       return editor.redo();
     default:
       if (isEditorCommand(command)) {
+        if (rejectReadOnlyAction("Read-only pane")) return true;
         editor.focus();
         return editor.runCommand(command, body.value || "");
       }
@@ -3414,6 +3627,10 @@ sourceButton.addEventListener("click", toggleSourceMode);
 saveButton.addEventListener("click", () => void save());
 document.addEventListener("keydown", (event) => {
   if (runFindShortcut(event)) {
+    event.stopPropagation();
+    return;
+  }
+  if (runProseCheckShortcut(event)) {
     event.stopPropagation();
     return;
   }
@@ -3505,6 +3722,52 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 }, true);
+host.addEventListener("click", (event) => {
+  const target = event.target instanceof Element
+    ? event.target.closest(".cm-prose-diagnostic")
+    : null;
+  if (!target) {
+    if (!prosePopover.contains(event.target as Node)) hideProsePopover();
+    return;
+  }
+  const position = editor.view.posAtCoords({ x: event.clientX, y: event.clientY });
+  if (position == null) return;
+  const diagnostic = proseDiagnosticsAt(editor.view, position)[0];
+  if (!diagnostic) return;
+  event.preventDefault();
+  event.stopPropagation();
+  showProsePopover(diagnostic, event.clientX, event.clientY);
+});
+prosePopover.addEventListener("mousedown", (event) => event.preventDefault());
+prosePopover.addEventListener("click", (event) => {
+  const button = (event.target as Element | null)?.closest<HTMLButtonElement>("[data-prose-action]");
+  const diagnostic = activeProseDiagnostic;
+  if (!button || !diagnostic) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const action = button.dataset.proseAction;
+  if (action === "replace") {
+    if (rejectReadOnlyAction("Read-only pane")) return;
+    editor.replaceMarkdownRange(diagnostic.from, diagnostic.to, button.dataset.value ?? "", "end");
+    removeProseDiagnostics((entry) => entry === diagnostic);
+    editor.focus();
+    return;
+  }
+  if (action === "ignore") {
+    removeProseDiagnostics((entry) => entry === diagnostic);
+    editor.focus();
+    return;
+  }
+  if (action === "accept" && diagnostic.word) {
+    const word = diagnostic.word;
+    void api.proseCheck.acceptWord(word)
+      .then(() => {
+        removeProseDiagnostics((entry) => entry.word?.toLowerCase() === word.toLowerCase());
+        setStatus(`Added “${word}” to the Aaronnote Vale vocabulary`);
+      })
+      .catch((error) => setStatus(error instanceof Error ? error.message : "Adding word failed"));
+  }
+});
 document.addEventListener("beforeinput", (event) => {
   const ie = event as InputEvent;
   // xwidget Tab: may arrive only as beforeinput(insertText, "\t") with no keydown.

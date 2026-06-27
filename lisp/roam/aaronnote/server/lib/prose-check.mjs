@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
-import { rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { runtimeMkdtemp } from "./tmp.mjs";
 
@@ -24,9 +24,15 @@ const CHUNK_TARGET_CHARS = 45_000;
 const MAX_CHUNKS_PER_TOOL = 6;
 const CSPELL_SEPARATOR = "\u001f";
 
-const VALE_CONFIG = join(homedir(), ".config", "vale", ".vale.ini");
+const WORKSPACE_ROOT = process.env.AARONNOTE_WORKSPACE_ROOT || join(homedir(), ".config", "emacs");
+const WORKSPACE_VALE_CONFIG = process.env.AARONNOTE_VALE_CONFIG || join(WORKSPACE_ROOT, "vale-styles", ".vale.ini");
+const VALE_CONFIG = existsSync(WORKSPACE_VALE_CONFIG)
+  ? WORKSPACE_VALE_CONFIG
+  : join(homedir(), ".config", "vale", ".vale.ini");
 const LEGACY_VALE_CONFIG = join(homedir(), ".vale.ini");
 const CSPELL_CONFIG = join(homedir(), ".config", "vale", "aaronnote-cspell.json");
+const USER_WORDS_FILE = process.env.AARONNOTE_VALE_WORDS
+  || join(WORKSPACE_ROOT, "vale-styles", "config", "vocabularies", "Notes", "accept.txt");
 const GUI_TOOL_PATHS = [
   join(homedir(), ".local", "bin"),
   join(homedir(), ".nix-profile", "bin"),
@@ -262,11 +268,47 @@ export function parseValeDiagnostics(stdout, masked) {
       severity: severity(item.Severity),
       message: String(item.Message || item.Check || "Vale issue"),
       rule: String(item.Check || ""),
+      word: String(item.Match || ""),
       suggestions: replacement == null ? [] : [replacement],
     });
     if (diagnostics.length >= MAX_DIAGNOSTICS_PER_TOOL) break;
   }
   return diagnostics;
+}
+
+function normalizedAcceptedWord(value) {
+  const word = String(value || "").trim();
+  if (!/^[A-Za-z][A-Za-z'’-]{1,63}$/.test(word)) return "";
+  return word.toLowerCase();
+}
+
+async function readUserWords() {
+  try {
+    return new Set((await readFile(USER_WORDS_FILE, "utf8"))
+      .split(/\r?\n/)
+      .map(normalizedAcceptedWord)
+      .filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
+export async function acceptProseWord(value) {
+  const word = normalizedAcceptedWord(value);
+  if (!word) return { ok: false, message: "Word must contain 2-64 alphabetic characters" };
+  let entries = [];
+  try {
+    entries = (await readFile(USER_WORDS_FILE, "utf8")).split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
+  } catch {
+    // The vocabulary is created on first use.
+  }
+  if (!entries.some((entry) => normalizedAcceptedWord(entry) === word)) entries.push(String(value).trim());
+  const sorted = entries.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  await mkdir(dirname(USER_WORDS_FILE), { recursive: true });
+  const temporary = `${USER_WORDS_FILE}.${process.pid}.tmp`;
+  await writeFile(temporary, `${sorted.join("\n")}\n`, "utf8");
+  await rename(temporary, USER_WORDS_FILE);
+  return { ok: true, word };
 }
 
 function parseCspellSuggestions(raw) {
@@ -425,20 +467,27 @@ export async function runExternalProseChecks({ file = "", content = "", ranges =
       file: join(tempDir, `${String(chunk.index + 1).padStart(2, "0")}-${baseName}`),
     }));
     await Promise.all(chunks.map((chunk) => writeFile(chunk.file, chunk.text, "utf8")));
-    const results = await Promise.all([
+    const [results, userWords] = await Promise.all([Promise.all([
       runVale(chunks, file, chunkInfo.totalChars),
       runCspell(chunks, chunkInfo.totalChars),
+    ]), readUserWords()]);
+    const acceptedWords = new Set([
+      ...AARONNOTE_ACCEPTED_WORDS.map(normalizedAcceptedWord),
+      ...userWords,
     ]);
+    const diagnostics = results
+      .flatMap((result) => result.diagnostics ?? [])
+      .filter((diagnostic) => !acceptedWords.has(normalizedAcceptedWord(diagnostic.word)));
     return {
       ok: true,
-      diagnostics: results.flatMap((result) => result.diagnostics ?? []),
+      diagnostics,
       tools: results.map(({ source, ok, message, partial, optional }) => ({ source, ok, message: message || "", partial: !!partial, optional: !!optional })),
       scope: {
         checkedChars: chunkInfo.checkedChars,
         totalChars: chunkInfo.totalChars,
         partial: chunkInfo.partial || results.some((result) => result.partial),
       },
-      acceptedWords: AARONNOTE_ACCEPTED_WORDS,
+      acceptedWords: [...acceptedWords],
     };
   } finally {
     await rm(tempDir, { recursive: true, force: true }).catch(() => {});

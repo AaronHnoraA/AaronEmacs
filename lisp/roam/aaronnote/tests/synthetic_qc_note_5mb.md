@@ -41753,7 +41753,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文��觉���正半定保证测量概率非负；迹为一保证总概率为一。
+中文���觉���正半定保证测量概率非负；迹为一保证总概率为一。
 #+end note
 
 The expectation value of an observable $A$ in state $\rho$ is
@@ -143577,7 +143577,18 @@ $$
 ## 263.9. Algorithmic skeleton
 
 The following pseudocode is not intended to solve tensor isomorphism. It
-only gives a schematic form of an invariant-refinement strategy. this is hard to see that 
+only gives a schematic form of an invariant-refinement strategy. this is hard to see that this ishardf this is hard ssssssssssssssssssssssssssssssss I will do this 
+#+begin proof
+asdasdas 
+
+## sasd asd
+adas
+
+asd
+
+aradas awdas ewd
+#+end proof
+
 
 ```python
 from dataclasses import dataclass
@@ -200233,7 +200244,7 @@ invertible. This identifies one matching pair of summands. Removing that
 pair and applying induction proves the result.
 #+end proof
 
-中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
+中文直觉：如果整体分解成不可��拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
 
 ## 367.7. Measurement statistics
 
@@ -248603,7 +248614,7 @@ Coordinates are useful for computation because they give arrays of field
 elements. Invariance is useful for mathematics because it identifies the
 features of the object that do not depend on the chosen basis.
 
-中文直觉：坐标是“输入格式”，不变量是“结构本身留下的影子”。
+中文直觉：坐标是“输入格式”，不变量是“结构本身留下的影��”。
 #+end remark
 
 If $g \in \operatorname{GL}(V)$ and $h \in \operatorname{GL}(W)$, a change

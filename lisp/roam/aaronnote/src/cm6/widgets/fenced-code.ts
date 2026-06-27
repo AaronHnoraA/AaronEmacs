@@ -331,11 +331,20 @@ function collectMermaidBlocks(state: EditorState): readonly MermaidBlock[] {
 
 const DIAGRAM_FENCE_OPENER_RE = /^[ \t]{0,3}(?:`{3,}|~{3,})\s*(?:mermaid|mindmap|marmind|markmind)\b/i;
 
-function docHasDiagramFence(doc: Text): boolean {
-  for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
-    if (DIAGRAM_FENCE_OPENER_RE.test(doc.line(lineNum).text)) return true;
-  }
-  return false;
+function changedLinesHaveDiagramFence(doc: Text, changes: ChangeSet): boolean {
+  let found = false;
+  changes.iterChanges((_fromA, _toA, fromB, toB) => {
+    if (found) return;
+    const startLine = doc.lineAt(Math.min(fromB, doc.length)).number;
+    const endLine = doc.lineAt(Math.min(Math.max(fromB, toB), doc.length)).number;
+    for (let lineNumber = startLine; lineNumber <= endLine; lineNumber++) {
+      if (DIAGRAM_FENCE_OPENER_RE.test(doc.line(lineNumber).text)) {
+        found = true;
+        return;
+      }
+    }
+  });
+  return found;
 }
 
 const mermaidBlocksField = StateField.define<readonly MermaidBlock[]>({
@@ -343,7 +352,7 @@ const mermaidBlocksField = StateField.define<readonly MermaidBlock[]>({
   update(blocks, tr) {
     if (tr.docChanged) {
       if (!canMapMermaidBlocks(tr.startState.doc, blocks, tr.changes)) {
-        if (blocks.length === 0 && !docHasDiagramFence(tr.state.doc)) return blocks;
+        if (blocks.length === 0 && !changedLinesHaveDiagramFence(tr.state.doc, tr.changes)) return blocks;
         return collectMermaidBlocks(tr.state);
       }
       return blocks.map((block) => mapMermaidBlock(block, tr.changes, tr.state.doc));

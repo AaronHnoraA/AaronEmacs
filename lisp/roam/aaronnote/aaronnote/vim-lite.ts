@@ -1,6 +1,13 @@
 import type { Editor } from "../src/lib.ts";
 import type { Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+import {
+  applyVimJump,
+  beginVimJump,
+  clearVimJump,
+  type VimJumpDirection,
+  type VimJumpSession,
+} from "../src/cm6/vim-jump.ts";
 
 export type VimLiteMode = "insert" | "normal" | "visual" | "visual-line";
 export type VimLiteFoldAction = "close" | "open" | "toggle" | "close-all" | "open-all";
@@ -198,14 +205,6 @@ function moveWord(editor: Editor, dir: -1 | 1): void {
   setPos(editor, pos);
 }
 
-function searchChar(editor: Editor, ch: string, dir: -1 | 1): void {
-  const text = doc(editor).toString();
-  const pos = editor.getMarkdownSelection().from;
-  let next = dir > 0 ? text.indexOf(ch, pos + 1) : text.lastIndexOf(ch, pos - 1);
-  if (next < 0) next = dir > 0 ? text.indexOf(ch, 0) : text.lastIndexOf(ch);
-  if (next >= 0) setPos(editor, next);
-}
-
 function deleteChar(editor: Editor): string {
   const text = doc(editor);
   const { from, to } = editor.getMarkdownSelection();
@@ -258,6 +257,8 @@ export function createVimLite(
   let mode: VimLiteMode = "insert";
   let goalColumn: number | null = null;
   let pending = "";
+  let jumpDirection: VimJumpDirection = 1;
+  let jumpSession: VimJumpSession | null = null;
   let visualAnchor: number | null = null;
   let visualHead: number | null = null;
   let register: VimRegister = { text: "", kind: "characterwise" };
@@ -299,14 +300,20 @@ export function createVimLite(
     goalColumn = null;
   }
 
-  function setMode(next: VimLiteMode): void {
-    if (mode === next) return;
-    mode = next;
+  function cancelJump(): void {
     pending = "";
+    jumpSession = null;
+    clearVimJump(editor.view);
+  }
+
+  function setMode(next: VimLiteMode): void {
+    const changed = mode !== next;
+    mode = next;
+    cancelJump();
     visualAnchor = null;
     visualHead = null;
     resetMotionMemory();
-    options.onModeChange?.(mode);
+    if (changed) options.onModeChange?.(mode);
   }
 
   // The tracked moving end of the visual selection. Prefer the local
@@ -512,6 +519,12 @@ export function createVimLite(
   }
 
   function normalCommand(key: string): boolean {
+    if (jumpSession) {
+      const session = jumpSession;
+      cancelJump();
+      applyVimJump(editor.view, session, key);
+      return true;
+    }
     if (pending === "d") {
       pending = "";
       if (key === "d") {
@@ -579,11 +592,16 @@ export function createVimLite(
       return true;
     }
     if (pending === "s" || pending === "S") {
-      const dir = pending === "s" ? 1 : -1;
+      if (key.length !== 1) {
+        cancelJump();
+        return true;
+      }
+      jumpDirection = pending === "s" ? 1 : -1;
       pending = "";
-      if (key.length === 1) {
-        resetMotionMemory();
-        searchChar(editor, key, dir);
+      resetMotionMemory();
+      jumpSession = beginVimJump(editor.view, key, jumpDirection);
+      if (jumpSession.candidates.length === 0) {
+        cancelJump();
       }
       return true;
     }
@@ -824,6 +842,7 @@ export function createVimLite(
     handleKey(event: VimLiteKey): boolean {
       if (event.isComposing) return false;
       if (isEscape(event)) {
+        cancelJump();
         setMode("normal");
         return true;
       }

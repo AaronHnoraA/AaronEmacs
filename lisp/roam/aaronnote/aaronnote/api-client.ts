@@ -23,6 +23,28 @@ type AssetStoreMsg = {
   markdownPath?: string;
   message?: string;
 };
+type ProseCheckBody = {
+  file?: string;
+  content?: string;
+  ranges?: Array<{ from: number; to: number }>;
+  segments?: Array<{ from: number; text: string }>;
+  totalChars?: number;
+};
+type ProseCheckMsg = {
+  ok?: boolean;
+  diagnostics?: Array<{
+    source: "vale" | "cspell" | "browser";
+    from: number;
+    to: number;
+    severity?: "info" | "warning" | "error";
+    message: string;
+    rule?: string;
+    word?: string;
+    suggestions?: string[];
+  }>;
+  tools?: Array<{ source?: string; ok?: boolean; message?: string; partial?: boolean; optional?: boolean }>;
+  scope?: { checkedChars?: number; totalChars?: number; partial?: boolean };
+};
 type NativeApi = {
   notes?: {
     bootstrap?: (file?: string) => Promise<unknown>;
@@ -79,6 +101,10 @@ type NativeApi = {
   };
   ime?: {
     vimMode?: (mode: string) => Promise<unknown>;
+  };
+  proseCheck?: {
+    run?: (body: ProseCheckBody) => Promise<unknown>;
+    acceptWord?: (word: string) => Promise<unknown>;
   };
 };
 
@@ -279,6 +305,16 @@ export const api = {
       } catch (_) {
         return {};
       }
+    },
+  },
+  proseCheck: {
+    async run(body: ProseCheckBody): Promise<ProseCheckMsg> {
+      const call = requireMethod(nativeApi().proseCheck?.run, "Prose check");
+      return ensureOk(await call(body) as ProseCheckMsg, "Prose check failed");
+    },
+    async acceptWord(word: string): Promise<{ ok?: boolean; word?: string }> {
+      const call = requireMethod(nativeApi().proseCheck?.acceptWord, "Prose dictionary");
+      return ensureOk(await call(word) as { ok?: boolean; word?: string }, "Adding word failed");
     },
   },
 };

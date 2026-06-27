@@ -37,6 +37,8 @@ export interface EditorOptions {
   pasteAssets?: EditorPasteAssetStore;
   /** Optional host fallback for xwidget/system clipboard reads. */
   readSystemClipboardFallback?: () => Promise<EditorClipboardPayload | null>;
+  /** When non-nil, the editor renders and navigates normally but rejects edits. */
+  readOnly?: boolean;
 }
 
 export type EditorCommand =

@@ -39,6 +39,7 @@
 (declare-function persp-current-name "perspective" ())
 (declare-function project-current "project" (&optional maybe-prompt dir))
 (declare-function project-root "project" (project))
+(declare-function toggle-one-window "toggle-one-window" ())
 
 (defvar my/bookmark-history nil)
 (defvar my/bookmark-list-buffer-name "*Bookmarks*")
@@ -524,7 +525,9 @@ Relies on `winner-mode' (enabled below) to undo a prior delete."
 
 (general-define-key
  :keymaps 'global
- "C-x 1" #'my/toggle-delete-other-windows)
+ "C-x 1" #'my/toggle-delete-other-windows
+ "C-x SPC" #'toggle-one-window
+ "M-w" #'delete-window)
 
 (use-package winner
   :ensure nil

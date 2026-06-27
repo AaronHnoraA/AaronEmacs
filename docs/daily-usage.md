@@ -14,6 +14,8 @@
   例：`C-c A ?` / `H-?` → `:c 如何配置 LSP？`
 - `SPC`
   Evil leader，总入口。
+- `SPC h K`
+  在 Emacs 内打开本快捷键索引。
 - `SPC SPC`
   `telescope` 统一搜索面板
 - `M-x`
@@ -231,6 +233,8 @@ bookmark 排在前面。上下移动候选时会预览目标位置，确认后�
   下移当前行/区域
 - `SPC e k`
   上移当前行/区域
+- `SPC e b`
+  将光标所在的成对括号在 `()`、`[]`、`{}` 之间轮换；负前缀反向轮换
 - `SPC e 1`
   单窗口 / 恢复窗口布局切换
 
@@ -294,6 +298,8 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
   `helpful-variable`
 - `SPC h k`
   `helpful-key`
+- `SPC h K`
+  以只读方式打开本快捷键索引
 - `SPC h w`
   打开 `*Warnings*` 日志
 - `SPC h d`
@@ -565,6 +571,8 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
   下一个函数
 - `SPC n u`
   跳到外层结构
+- `SPC n l` / `C-c C-j`
+  打开光标处或选区中的 `file:line:column`；前缀参数在其他窗口打开
 - `[f`
   上一个函数
 - `]f`

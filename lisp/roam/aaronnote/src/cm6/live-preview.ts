@@ -61,7 +61,7 @@ import {
   type LayoutAttrs,
 } from "../layout-attrs.ts";
 import { tocIndexFromState } from "./toc-index.ts";
-import { hasViewportDecorationRefresh, refreshViewportDecorations } from "./viewport-refresh.ts";
+import { hasViewportDecorationRefresh, refreshViewportDecorations, viewportDecorationRefreshRanges } from "./viewport-refresh.ts";
 import { getFencedCodeRanges } from "./code-ranges.ts";
 import { orgEnvContextForRange } from "./widgets/block-extras.ts";
 
@@ -1479,7 +1479,7 @@ function patchTableDecosForSelectionChange(
 const tableDecoField = StateField.define<DecorationSet>({
   create: (state) => buildTableDecos(state),
   update(value, tr) {
-    if (tr.effects.some((e) => e.is(refreshViewportDecorations))) return buildTableDecos(tr.state);
+    if (tr.effects.some((e) => e.is(refreshViewportDecorations))) return value;
     if (tr.docChanged) {
       const tables = markdownTablesFromState(tr.startState);
       return canMapMarkdownTables(tr.startState.doc, tables, tr.changes)
@@ -1598,7 +1598,19 @@ function buildLineDecos(state: EditorState): DecorationSet {
 const lineDecoField = StateField.define<DecorationSet>({
   create: (state) => buildLineDecos(state),
   update(value, tr) {
-    if (tr.effects.some((e) => e.is(refreshViewportDecorations))) return buildLineDecos(tr.state);
+    const refreshRanges = viewportDecorationRefreshRanges(tr);
+    if (refreshRanges) {
+      let next = value;
+      for (const range of refreshRanges) {
+        const startLine = tr.state.doc.lineAt(range.from).number;
+        const endLine = tr.state.doc.lineAt(range.to).number;
+        const from = tr.state.doc.line(startLine).from;
+        const to = tr.state.doc.line(endLine).to;
+        next = next.update({ filterFrom: from, filterTo: to, filter: () => false });
+        next = next.update({ add: buildLineDecoRanges(tr.state, startLine, endLine), sort: true });
+      }
+      return next;
+    }
     if (tr.docChanged) {
       if (canMapLineDecos(tr.startState.doc, tr.changes)) return value.map(tr.changes);
       if (canPatchLineDecosNearChanges(tr.startState.doc, tr.changes)) {
@@ -1799,7 +1811,16 @@ function activeHtmlBlockKey(state: EditorState): string {
 const htmlBlockDecoField = StateField.define<DecorationSet>({
   create: (state) => buildHtmlBlockDecos(state),
   update(value, tr) {
-    if (tr.effects.some((e) => e.is(refreshViewportDecorations))) return buildHtmlBlockDecos(tr.state);
+    const refreshRanges = viewportDecorationRefreshRanges(tr);
+    if (refreshRanges) {
+      let next = value;
+      for (const range of refreshRanges) {
+        next = next
+          .update({ filterFrom: range.from, filterTo: range.to, filter: () => false })
+          .update({ add: collectHtmlBlockDecoRanges(tr.state, range.from, range.to), sort: true });
+      }
+      return next;
+    }
     if (tr.docChanged) {
       return patchHtmlBlockDecosNearChanges(tr.state, value.map(tr.changes), tr.changes);
     }

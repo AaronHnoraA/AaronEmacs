@@ -362,6 +362,35 @@ describe("xwidget key guard", () => {
     }
   });
 
+  test("handles normal-mode s jump keydown even when focus is not in CM6", () => {
+    const host = withMounted(document.createElement("section"));
+    const editor = createEditor(host, { initialContent: "alpha beta gamma beta" });
+    const vim = createVimLite(editor, host);
+    vim.setMode("normal");
+    editor.setMarkdownSelection(0);
+    try {
+      const jump = new KeyboardEvent("keydown", { key: "s", bubbles: true, cancelable: true });
+      Object.defineProperty(jump, "target", { value: document.body });
+      expect(handleXwidgetVimKeydown(jump, { editor, editorHost: host, vim })).toBe(true);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
+
+      const target = new KeyboardEvent("keydown", { key: "b", bubbles: true, cancelable: true });
+      Object.defineProperty(target, "target", { value: document.body });
+      expect(handleXwidgetVimKeydown(target, { editor, editorHost: host, vim })).toBe(true);
+      expect(target.defaultPrevented).toBe(true);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(2);
+
+      const label = new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true });
+      Object.defineProperty(label, "target", { value: document.body });
+      expect(handleXwidgetVimKeydown(label, { editor, editorHost: host, vim })).toBe(true);
+      expect(editor.getMarkdownSelection().from).toBe(6);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
+
   test("maps normal-mode beforeinput text into Vim commands instead of inserting", () => {
     const host = withMounted(document.createElement("section"));
     const editor = createEditor(host, { initialContent: "aa\nbbbb\ncc" });

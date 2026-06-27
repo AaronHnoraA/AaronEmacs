@@ -25,10 +25,25 @@
     (let ((fragment (ratex-fragment-at-point)))
       (should (equal (plist-get fragment :content) "x^2")))))
 
-(ert-deftest ratex-ignores-dollar-math ()
+(ert-deftest ratex-detects-single-dollar-math-but-ignores-display-dollars ()
   (with-temp-buffer
     (insert "hello $$x^2$$ world and $y$")
-    (should-not (ratex-fragments-in-buffer))))
+    (let ((fragments (ratex-fragments-in-buffer)))
+      (should (= (length fragments) 1))
+      (should (equal (plist-get (car fragments) :content) "y")))))
+
+(ert-deftest ratex-single-dollar-math-ignores-escaped-delimiters ()
+  (with-temp-buffer
+    (insert "cost \\$5 and $x+1$ and \\$ignored\\$")
+    (let ((fragments (ratex-fragments-in-buffer)))
+      (should (= (length fragments) 1))
+      (should (equal (plist-get (car fragments) :content) "x+1")))))
+
+(ert-deftest ratex-detects-single-dollar-math-at-point ()
+  (with-temp-buffer
+    (insert "before $x+1$ after")
+    (goto-char 10)
+    (should (equal (plist-get (ratex-fragment-at-point) :content) "x+1"))))
 
 (ert-deftest ratex-detects-org-bracket-fragment-with-leading-escaped-hash ()
   (with-temp-buffer
@@ -476,23 +491,31 @@
         (should-not removed)
         (should (equal ensured '("x")))))))
 
-(ert-deftest ratex-post-command-ignores-edits-inside-same-fragment ()
+(ert-deftest ratex-post-command-refreshes-visible-preview-after-edit ()
   (with-temp-buffer
     (insert "a \\(x\\) b")
     (goto-char 5)
     (setq-local ratex-mode t)
+    (setq-local ratex-edit-preview 'posframe)
+    (setq-local ratex--preview-enabled t)
     (setq-local ratex--active-fragment (ratex-fragment-at-point))
+    (setq-local ratex--preview-fragment ratex--active-fragment)
+    (setq-local ratex--preview-key
+                (ratex--fragment-key ratex--preview-fragment))
+    (setq-local ratex--posframe-visible t)
     (insert "y")
-    (let (removed ensured)
+    (let (removed handled)
       (cl-letf (((symbol-function 'ratex-remove-overlay)
                  (lambda (key)
                    (push key removed)))
-                ((symbol-function 'ratex--ensure-fragment-preview)
+                ((symbol-function 'ratex--handle-preview-at-point)
                  (lambda (fragment)
-                   (push (plist-get fragment :content) ensured))))
+                   (push (plist-get fragment :content) handled)))
+                ((symbol-function 'ratex--update-posframe-position)
+                 (lambda () nil)))
         (ratex-handle-post-command)
         (should (equal removed '("3:9:yx")))
-        (should-not ensured)))))
+        (should (equal handled '("yx")))))))
 
 (ert-deftest ratex-post-command-refreshes-active-fragment-without-parser ()
   (with-temp-buffer
@@ -528,6 +551,9 @@
     (setq-local ratex-edit-preview 'posframe)
     (setq-local ratex--preview-enabled t)
     (setq-local ratex--active-fragment (ratex-fragment-at-point))
+    (setq-local ratex--preview-fragment ratex--active-fragment)
+    (setq-local ratex--preview-key
+                (ratex--fragment-key ratex--preview-fragment))
     (setq-local ratex--posframe-visible t)
     (let (removed handled)
       (cl-letf (((symbol-function 'ratex-remove-overlay)

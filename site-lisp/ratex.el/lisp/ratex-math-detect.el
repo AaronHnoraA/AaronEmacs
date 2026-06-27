@@ -12,7 +12,7 @@
   "Lightweight Org math delimiters supported by RaTeX.")
 
 (defconst ratex--active-fragment-preferred-opens
-  '("\\[" "\\(")
+  '("\\[" "\\(" "$")
   "Delimiters preferred for active edit previews.")
 
 (defcustom ratex-region-scan-context-chars 600
@@ -30,6 +30,7 @@ the full delimiter pair without falling back to a full-buffer parse."
         all)
     (dolist (pair ratex--delimiter-pairs)
       (setq all (nconc all (ratex--fragments-with-delimiters (car pair) (cdr pair)))))
+    (setq all (nconc all (ratex--single-dollar-fragments)))
     (setq all (nconc all (ratex--org-display-latex-blocks-in-buffer)))
     (ratex--select-non-overlapping-fragments (nconc org-fragments all))))
 
@@ -49,6 +50,7 @@ startup and refresh work stays local to what is on screen."
       (let (all)
         (dolist (pair ratex--delimiter-pairs)
           (setq all (nconc all (ratex--fragments-with-delimiters (car pair) (cdr pair)))))
+        (setq all (nconc all (ratex--single-dollar-fragments)))
         (setq all (nconc all (ratex--org-display-latex-blocks-in-buffer)))
         (cl-remove-if-not
          (lambda (fragment)
@@ -67,6 +69,7 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
                       (list org-fragment))
                     (cl-loop for (open . close) in ratex--delimiter-pairs
                              nconc (ratex--fragments-with-delimiters-at-point open close))
+                    (ratex--single-dollar-fragments-at-point)
                     (ratex--org-display-latex-blocks-at-point)))
                   (preferred
                    (cl-remove-if-not #'ratex--preferred-active-fragment-p candidates)))
@@ -75,6 +78,50 @@ The plist contains `:begin', `:end' and `:content' when a fragment is found."
     (ratex-debug-log "fragment-at-point pos=%s mode=%s fragment=%S"
                      (point) major-mode fragment)
     fragment))
+
+(defun ratex--single-dollar-at-p (pos)
+  "Return non-nil when POS starts a non-escaped single dollar delimiter."
+  (and (eq (char-after pos) ?$)
+       (not (ratex--escaped-at-p pos))
+       (not (eq (char-before pos) ?$))
+       (not (eq (char-after (1+ pos)) ?$))
+       (not (ratex--code-context-at-p pos))))
+
+(defun ratex--single-dollar-fragments ()
+  "Return single-line $...$ fragments in the accessible buffer region."
+  (save-excursion
+    (goto-char (point-min))
+    (let (fragments)
+      (while (search-forward "$" nil t)
+        (let ((begin (1- (point))))
+          (when (ratex--single-dollar-at-p begin)
+            (let ((content-begin (point))
+                  (line-end (line-end-position))
+                  found-end)
+              (while (and (not found-end) (search-forward "$" line-end t))
+                (let ((close (1- (point))))
+                  (when (ratex--single-dollar-at-p close)
+                    (setq found-end (point)))))
+              (when found-end
+                (push (list :begin begin
+                            :end found-end
+                            :content (buffer-substring-no-properties
+                                      content-begin (1- found-end))
+                            :open "$"
+                            :close "$")
+                      fragments))))))
+      (nreverse fragments))))
+
+(defun ratex--single-dollar-fragments-at-point ()
+  "Return single-dollar fragments on the current line containing point."
+  (let ((pos (point)))
+    (save-restriction
+      (narrow-to-region (line-beginning-position) (line-end-position))
+      (cl-remove-if-not
+       (lambda (fragment)
+         (and (<= (plist-get fragment :begin) pos)
+              (< pos (plist-get fragment :end))))
+       (ratex--single-dollar-fragments)))))
 
 (defun ratex--org-fragment-at-point ()
   "Return Org LaTeX fragment at point as a RaTeX plist, or nil."

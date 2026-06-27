@@ -457,6 +457,7 @@ Emacs state keep their local behavior."
     "eO" 'open-newline-above
     "ej" 'move-text-down
     "ek" 'move-text-up
+    "eb" 'my/pairs-cycle-delimiters
     "e1" 'toggle-one-window
 
     ;; help
@@ -465,6 +466,7 @@ Emacs state keep their local behavior."
     "hc" 'helpful-command
     "hv" 'helpful-variable
     "hk" 'helpful-key
+    "hK" 'my/open-keybinding-guide
     "hw" 'my/show-warnings-buffer
     "hF" 'describe-face
     "hd" 'devdocs-lookup

@@ -5,8 +5,87 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+
 (declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
 (declare-function smartparens-mode "smartparens" (&optional arg))
+
+(defconst my/pairs-delimiter-cycle
+  '((?\( . ?\))
+    (?\[ . ?\])
+    (?{ . ?}))
+  "Delimiter pairs cycled by `my/pairs-cycle-delimiters'.")
+
+(defun my/pairs--cycle-syntax-table ()
+  "Return a syntax table recognizing all supported delimiter pairs."
+  (let ((table (copy-syntax-table (syntax-table))))
+    (modify-syntax-entry ?\( "()" table)
+    (modify-syntax-entry ?\) ")(" table)
+    (modify-syntax-entry ?\[ "(]" table)
+    (modify-syntax-entry ?\] ")[" table)
+    (modify-syntax-entry ?{ "(}" table)
+    (modify-syntax-entry ?} "){" table)
+    table))
+
+(defun my/pairs--delimiter-bounds-at-point ()
+  "Return the enclosing supported delimiter bounds around point.
+The result is (OPEN-POS . CLOSE-POS), with both positions on delimiters."
+  (with-syntax-table (my/pairs--cycle-syntax-table)
+    (let* ((ppss (syntax-ppss))
+           (open-chars (mapcar #'car my/pairs-delimiter-cycle))
+           (close-chars (mapcar #'cdr my/pairs-delimiter-cycle))
+           (open-pos
+            (cond
+             ((nth 8 ppss)
+              (user-error "Point is inside a string or comment"))
+             ((memq (char-after) open-chars)
+              (point))
+             ((memq (char-before) open-chars)
+              (1- (point)))
+             ((memq (char-before) close-chars)
+              (condition-case nil
+                  (scan-sexps (point) -1)
+                (scan-error nil)))
+             ((nth 1 ppss)
+              (nth 1 ppss)))))
+      (unless (and open-pos (memq (char-after open-pos) open-chars))
+        (user-error "No enclosing (), [] or {} pair"))
+      (let* ((open-char (char-after open-pos))
+             (close-pos
+              (condition-case nil
+                  (1- (scan-sexps open-pos 1))
+                (scan-error nil)))
+             (expected-close (cdr (assq open-char my/pairs-delimiter-cycle))))
+        (unless (and close-pos (eq (char-after close-pos) expected-close))
+          (user-error "Delimiter at point is unbalanced"))
+        (cons open-pos close-pos)))))
+
+;;;###autoload
+(defun my/pairs-cycle-delimiters (&optional arg)
+  "Cycle the enclosing delimiters among (), [] and {}.
+Point may be on either delimiter or anywhere inside the pair.  With a
+negative prefix ARG, cycle backwards.  Other numeric values move by that
+many steps."
+  (interactive "p")
+  (pcase-let* ((`(,open-pos . ,close-pos)
+                (my/pairs--delimiter-bounds-at-point))
+               (old-open (char-after open-pos))
+               (old-close (char-after close-pos))
+               (index (cl-position old-open my/pairs-delimiter-cycle
+                                   :key #'car))
+               (step (or arg 1))
+               (new-pair (nth (mod (+ index step)
+                                   (length my/pairs-delimiter-cycle))
+                              my/pairs-delimiter-cycle)))
+    (save-excursion
+      (atomic-change-group
+        (subst-char-in-region close-pos (1+ close-pos)
+                              old-close (cdr new-pair))
+        (subst-char-in-region open-pos (1+ open-pos)
+                              old-open (car new-pair))))
+    (message "%c%c → %c%c"
+             old-open old-close (car new-pair) (cdr new-pair))
+    new-pair))
 
 (defun my/pairs-disable-smartparens ()
   "Disable stale `smartparens-mode' state when reloading the init."

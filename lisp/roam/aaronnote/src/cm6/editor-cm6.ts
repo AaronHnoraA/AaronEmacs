@@ -66,6 +66,7 @@ import { resolveAnchorHeading } from "../heading-slug.ts";
 import { orderedListRenumber, skipOrderedListRenumber } from "./ordered-list-renumber.ts";
 import { captureHeadingFoldKeys, headingFoldExtension, restoreHeadingFoldKeys } from "./heading-fold.ts";
 import { proseDiagnosticsExtension } from "./prose-diagnostics.ts";
+import { vimJumpExtension } from "./vim-jump.ts";
 import { scheduleViewportDecorationRefresh } from "./viewport-refresh.ts";
 
 import type { SyntaxNode } from "@lezer/common";
@@ -559,6 +560,10 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
     text: string,
     select: "start" | "end" | "all" | undefined,
   ): { from: number; to: number } {
+    if (options.readOnly) {
+      const selection = view.state.selection.main;
+      return { from: selection.from, to: selection.to };
+    }
     const insertTo = from + text.length;
     const anchor =
       select === "start" ? from :
@@ -614,9 +619,10 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
     return { from, to: from, text: insert };
   }
 
-  function insertPastedMarkdown(text: string, options?: EditorPasteOptions): boolean {
+  function insertPastedMarkdown(text: string, pasteOptions?: EditorPasteOptions): boolean {
+    if (options.readOnly) return false;
     if (!text) return false;
-    const range = pasteInsertRange(options, text);
+    const range = pasteInsertRange(pasteOptions, text);
     view.dispatch({
       changes: { from: range.from, to: range.to, insert: range.text },
       selection: { anchor: range.from + range.text.length },
@@ -669,6 +675,7 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
 
     insertText(text: string, deleteBefore = 0): { from: number; to: number } {
       const { from, to } = view.state.selection.main;
+      if (options.readOnly) return { from, to };
       const insertFrom = from - deleteBefore;
       view.dispatch({
         changes: { from: insertFrom, to, insert: text },
@@ -679,6 +686,7 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
     },
 
     async pasteFromClipboard(pasteOptions: EditorPasteOptions = {}): Promise<boolean> {
+      if (options.readOnly) return false;
       return runPasteFromClipboard({
         currentFile: options.getCurrentFile,
         assets: options.pasteAssets,
@@ -688,6 +696,7 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
     },
 
     async pasteFromDataTransfer(data: DataTransfer, pasteOptions: EditorPasteOptions = {}): Promise<boolean> {
+      if (options.readOnly) return false;
       return pasteDataTransfer(data, {
         currentFile: options.getCurrentFile,
         assets: options.pasteAssets,
@@ -697,6 +706,7 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
     },
 
     pastePlainText(text: string, pasteOptions: EditorPasteOptions = {}): boolean {
+      if (options.readOnly) return false;
       return runPastePlainText(text, {
         currentFile: options.getCurrentFile,
         assets: options.pasteAssets,
@@ -760,14 +770,17 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
     },
 
     undo(): boolean {
+      if (options.readOnly) return false;
       return cmUndo(view);
     },
 
     redo(): boolean {
+      if (options.readOnly) return false;
       return cmRedo(view);
     },
 
     runCommand(command: EditorCommand, value = ""): boolean {
+      if (options.readOnly) return false;
       return runCommandCM6(view, command, value);
     },
 
@@ -990,6 +1003,8 @@ function buildExtensions(
 ) {
   return [
     EditorState.allowMultipleSelections.of(true),
+    EditorState.readOnly.of(!!options.readOnly),
+    EditorView.editable.of(!options.readOnly),
     EditorView.clickAddsSelectionRange.of((event) => event.altKey || event.metaKey || event.ctrlKey),
     drawSelection({ cursorBlinkRate: -1 }),
     history({ minDepth: 200, newGroupDelay: 500 }),
@@ -1018,6 +1033,7 @@ function buildExtensions(
     findHighlightExtension,
     roamLinkStatusExtension,
     proseDiagnosticsExtension,
+    vimJumpExtension,
     EditorView.lineWrapping,
     EditorView.updateListener.of((update) => {
       if (update.docChanged && options.onChange) {
@@ -1051,6 +1067,10 @@ function buildExtensions(
       paste: (event, pasteView) => {
         const data = event.clipboardData;
         if (!data) return false;
+        if (options.readOnly) {
+          event.preventDefault();
+          return true;
+        }
         event.preventDefault();
         pasteView.focus();
         void pasteDataTransfer(data, {

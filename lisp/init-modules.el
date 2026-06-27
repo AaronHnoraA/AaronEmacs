@@ -106,6 +106,23 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-rainbow-delimiters)
 (require 'init-avy)
 (require 'init-multiple-cursors)
+(dolist (command '(my/latex-preview-dispatch
+                   my/latex-preview-current-buffer
+                   my/latex-preview-open-pdf
+                   my/latex-sync-forward
+                   my/latex-sync-forward-mouse
+                   my/latex-preview-at-point
+                   my/latex-preview-region
+                   my/latex-preview-buffer
+                   my/latex-preview-document
+                   my/latex-preview-clear-at-point
+                   my/latex-preview-clear-region-or-section
+                   my/latex-preview-clear-buffer
+                   my/latex-preview-clear-document
+                   my/latex-preview-compile-and-view
+                   my/latex-preview-view-pdf
+                   my/auctex-live-preview-mode))
+  (autoload command "init-auctex" nil t))
 (my/require-module-after-any-feature 'init-auctex 'tex 'tex-site 'pdf-tools 'pdf-view)
 (my/require-module-safely 'init-jupyter)
 (my/require-module-safely 'init-neopyter)

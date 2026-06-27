@@ -111,6 +111,9 @@ Set to 0 to let the OS pick a random port."
 (defvar my/aaronnote--client-buffers (make-hash-table :test #'equal)
   "Aaronnote browser client id to browser buffer map.")
 
+(defvar my/aaronnote--readonly-split-counter 0
+  "Counter for fresh read-only Aaronnote xwidget split sessions.")
+
 (defvar-local my/aaronnote-buffer-file-name nil
   "Current note file represented by an Aaronnote Appine/xwidget buffer.")
 
@@ -135,6 +138,15 @@ Set to 0 to let the OS pick a random port."
   "File to POST to Aaronnote once the page has finished loading, or nil.")
 
 (put 'my/aaronnote--xwidget-pending-file 'permanent-local t)
+
+(defvar-keymap my/aaronnote-keys-mode-map
+  "M-C" #'my/aaronnote-prose-check)
+
+(define-minor-mode my/aaronnote-keys-mode
+  "Buffer-local keys for an Aaronnote browser surface."
+  :init-value nil
+  :lighter nil
+  :keymap my/aaronnote-keys-mode-map)
 
 (defconst my/aaronnote--xwidget-focus-script
   "(() => {
@@ -178,7 +190,12 @@ Set to 0 to let the OS pick a random port."
       (format "aaronnote:%s" file)
     "aaronnote"))
 
-(defun my/aaronnote--app-url (&optional file client)
+(defun my/aaronnote--readonly-client-p (client)
+  "Return non-nil when CLIENT identifies a read-only split pane."
+  (and (stringp client)
+       (string-prefix-p "aaronnote-readonly:" client)))
+
+(defun my/aaronnote--app-url (&optional file client extra-params)
   "Return the Aaronnote app URL, optionally opening FILE for CLIENT."
   (let ((base (my/aaronnote--server-url "/"))
         params)
@@ -186,6 +203,9 @@ Set to 0 to let the OS pick a random port."
       (push (cons "file" file) params))
     (when (and (stringp client) (not (string-empty-p client)))
       (push (cons "client" client) params))
+    (dolist (param extra-params)
+      (when (and (consp param) (car param) (cdr param))
+        (push (cons (format "%s" (car param)) (format "%s" (cdr param))) params)))
     (if params
         (concat base "?"
                 (mapconcat
@@ -259,6 +279,11 @@ Set to 0 to let the OS pick a random port."
             (format "AARONNOTE_WEB_DIR=%s" (expand-file-name my/aaronnote--web-dir))
             (format "AARONNOTE_RUNTIME_ROOT=%s" (expand-file-name my/aaronnote--runtime-root))
             (format "AARONNOTE_WORKSPACE_ROOT=%s" (expand-file-name user-emacs-directory))
+            (format "AARONNOTE_VALE_CONFIG=%s"
+                    (expand-file-name "vale-styles/.vale.ini" user-emacs-directory))
+            (format "AARONNOTE_VALE_WORDS=%s"
+                    (expand-file-name "vale-styles/config/vocabularies/Notes/accept.txt"
+                                      user-emacs-directory))
             (format "AARONNOTE_PUBLISH_JS_DIR=%s"
                     (expand-file-name "js" my/aaronnote--runtime-root))
             (format "AARONNOTE_STATE_DIR=%s" (expand-file-name my/aaronnote--state-root))
@@ -438,7 +463,8 @@ KEY-STRING is used only for diagnostics."
                            :object-type 'alist))
                  (file (alist-get 'file payload))
                  (client (alist-get 'client payload)))
-            (my/aaronnote--sync-app-buffer-file file client))
+            (unless (my/aaronnote--readonly-client-p client)
+              (my/aaronnote--sync-app-buffer-file file client)))
         (error
          (message "Aaronnote current-file parse failed: %s"
                   (error-message-string err)))))
@@ -586,6 +612,7 @@ When RENAME is non-nil, rename xwidget buffers to a note-specific name."
         (setq-local my/aaronnote--client-id client)
         (setq-local my/aaronnote--xwidget-forced-name
                     (my/aaronnote--buffer-display-name file))
+        (my/aaronnote-keys-mode 1)
         (when file
           (setq-local default-directory
                       (file-name-as-directory (file-name-directory file))))
@@ -864,6 +891,79 @@ When FILE is nil, use the current buffer."
   (unless buffer-file-name
     (user-error "Current buffer is not visiting a file"))
   (my/aaronnote-open-file buffer-file-name))
+
+(defun my/aaronnote--current-note-file ()
+  "Return the Markdown note represented by the current context."
+  (or (my/aaronnote-buffer-file)
+      (and buffer-file-name
+           (my/aaronnote--markdown-file-p buffer-file-name)
+           buffer-file-name)))
+
+(defun my/aaronnote--readonly-split-window ()
+  "Create and select the window for a read-only Aaronnote split."
+  (let ((window (if (>= (window-total-width) 120)
+                    (split-window-right)
+                  (split-window-below))))
+    (select-window window)
+    window))
+
+;;;###autoload
+(defun my/aaronnote-open-current-note-readonly-split ()
+  "Open the current Markdown note in a fresh read-only Aaronnote xwidget split.
+
+This intentionally does not reuse or register the canonical editable
+Aaronnote xwidget for the file.  Multiple xwidget windows for the same live
+session have rendering issues, so this command creates an isolated read-only
+client and keeps it out of the normal file/session sync maps."
+  (interactive)
+  (let ((file (my/aaronnote--current-note-file)))
+    (unless (and file (my/aaronnote--markdown-file-p file))
+      (user-error "No current Markdown note for Aaronnote"))
+    (let ((file (expand-file-name file))
+          (source-window (selected-window)))
+      (my/aaronnote--ensure-server
+       (lambda ()
+         (when (window-live-p source-window)
+           (select-window source-window))
+         (unless (fboundp 'my/xwidget-open-url)
+           (require 'init-browser))
+         (let* ((client (format "aaronnote-readonly:%s:%d"
+                                (file-truename file)
+                                (cl-incf my/aaronnote--readonly-split-counter)))
+                (url (my/aaronnote--app-url
+                      file client
+                      '((readonly . "1"))))
+                (target-window (my/aaronnote--readonly-split-window))
+                (buffer (my/xwidget-open-url
+                         url
+                         :id client
+                         :display 'current
+                         :force-new t
+                         :reuse-selected t)))
+           (when (buffer-live-p buffer)
+             (with-current-buffer buffer
+               (setq-local my/aaronnote-buffer-file-name file)
+               (setq-local my/aaronnote--client-id client)
+               (setq-local my/aaronnote--registered-file nil)
+               (setq-local my/aaronnote--xwidget-forced-name
+                           (format "*aaronnote readonly: %s*"
+                                   (file-name-nondirectory file)))
+               (setq-local my/xwidget-focus-script nil)
+               (setq-local header-line-format
+                           '(:eval
+                             (format "  %s  %s"
+                                     (propertize "Aaronnote readonly" 'face 'mode-line-buffer-id)
+                                     (or (and (my/aaronnote-buffer-file)
+                                              (file-name-nondirectory (my/aaronnote-buffer-file)))
+                                         ""))))
+               (when (eq major-mode 'xwidget-webkit-mode)
+                 (rename-buffer my/aaronnote--xwidget-forced-name t))
+               (when file
+                 (setq-local default-directory
+                             (file-name-as-directory (file-name-directory file))))
+               (my/aaronnote-keys-mode 1)))
+           (when (window-live-p target-window)
+             (select-window target-window))))))))
 
 ;;;###autoload
 (defun my/aaronnote-preview ()
@@ -1209,6 +1309,7 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 (my/aaronnote--def-editor-cmd "insert-table"    "insert-table"    "Insert a Markdown table.")
 (my/aaronnote--def-editor-cmd "insert-math"     "insert-math-block" "Insert a math block.")
 (my/aaronnote--def-editor-cmd "insert-toc"      "insert-toc"      "Insert a table of contents.")
+(my/aaronnote--def-editor-cmd "prose-check"     "prose-check"     "Run bounded Vale/CSpell checks in Aaronnote.")
 
 ;;; Jupyter integration.
 
@@ -1278,6 +1379,7 @@ Falls back to JupyterLab root when no matching .ipynb exists."
       ("f" "focus editor"     my/aaronnote-focus)
       ("e" "escape/normal"    my/aaronnote-escape)
       ("v" "toggle source"    my/aaronnote-toggle-source)
+      ("W" "readonly split"   my/aaronnote-open-current-note-readonly-split)
       ("R" "raw edit in Emacs" my/aaronnote-open-markdown-raw)]
      ["Find / Browse"
       ("j" "find note"        my/aaronnote-roam-find-note)

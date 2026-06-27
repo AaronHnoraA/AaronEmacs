@@ -272,6 +272,30 @@
   text-decoration-color: rgba(37, 99, 235, 0.95);
 }
 
+.cm-editor .cm-vim-jump-label {
+  position: relative;
+  z-index: 20;
+  background: rgba(250, 204, 21, 0.24);
+  border-radius: 2px;
+}
+
+.cm-editor .cm-vim-jump-label::before {
+  content: attr(data-vim-jump-label);
+  position: absolute;
+  left: -0.15em;
+  top: -0.9em;
+  z-index: 30;
+  min-width: 1em;
+  padding: 0 0.18em;
+  color: #111827;
+  background: #facc15;
+  border-radius: 2px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 20%);
+  font: 700 0.72rem/1.15 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: center;
+  pointer-events: none;
+}
+
 /* ─── CM6 math widgets ───────────────────────────────────────────── */
 .cm-editor .cm-math-inline {
   display: inline;

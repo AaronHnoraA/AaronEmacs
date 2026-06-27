@@ -84,6 +84,8 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+
 (defvar toggle-one-window-window-configuration nil
   "The window configuration use for `toggle-one-window'.")
 

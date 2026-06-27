@@ -544,9 +544,7 @@ ordinary edits."
 (defun ratex--preview-current-fragment-p (fragment)
   "Return non-nil when the visible preview still corresponds to FRAGMENT."
   (and (ratex--edit-preview-visible-p)
-       (or (ratex--preview-session-matches-p fragment)
-           (and ratex--active-fragment
-                (ratex--same-fragment-p ratex--active-fragment fragment)))))
+       (ratex--preview-session-matches-p fragment)))
 
 (defun ratex--fragment-key (fragment)
   "Return stable overlay key for FRAGMENT."
