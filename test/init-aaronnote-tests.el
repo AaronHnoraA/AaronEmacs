@@ -15,6 +15,42 @@
       (my/aaronnote-prose-check)
       (should (equal sent '("prose-check" nil))))))
 
+(ert-deftest my/aaronnote-keys-mode-binds-history-chords ()
+  (should (eq (lookup-key my/aaronnote-keys-mode-map (kbd "M-z"))
+              #'my/aaronnote-undo))
+  (should (eq (lookup-key my/aaronnote-keys-mode-map (kbd "M-Z"))
+              #'my/aaronnote-redo))
+  (should (eq (lookup-key my/aaronnote-keys-mode-map (kbd "M-S-z"))
+              #'my/aaronnote-redo)))
+
+(ert-deftest my/aaronnote-xwidget-redo-routes-only-aaronnote-buffer ()
+  (let ((buffer (generate-new-buffer "*aaronnote-test*"))
+        (my/aaronnote--app-buffer nil)
+        sent passed)
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (setq-local major-mode 'xwidget-webkit-mode))
+          (cl-letf (((symbol-function 'my/aaronnote-command)
+                     (lambda (command &optional detail)
+                       (setq sent (list command detail))))
+                    ((symbol-function 'xwidget-webkit-pass-command-event)
+                     (lambda (event)
+                       (setq passed event))))
+            (with-current-buffer buffer
+              (setq my/aaronnote--app-buffer buffer)
+              (my/aaronnote-xwidget-redo 'aaronnote-event))
+            (should (equal sent '("redo" nil)))
+            (should-not passed)
+            (setq sent nil)
+            (with-current-buffer buffer
+              (setq my/aaronnote--app-buffer nil)
+              (my/aaronnote-xwidget-redo 'other-event))
+            (should-not sent)
+            (should (eq passed 'other-event))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (ert-deftest my/aaronnote-readonly-split-opens-fresh-unregistered-xwidget ()
   (let* ((file (make-temp-file "aaronnote-readonly" nil ".md"))
          (source (generate-new-buffer "*aaronnote-readonly-source*"))

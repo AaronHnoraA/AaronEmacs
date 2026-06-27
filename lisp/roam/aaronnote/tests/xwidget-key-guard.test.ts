@@ -8,6 +8,7 @@ import {
   handleXwidgetControlBeforeInput,
   guardXwidgetControlKeydown,
   handleXwidgetControlKeydown,
+  handleXwidgetHistoryKeydown,
   handleXwidgetSpecialBeforeInput,
   handleXwidgetSpecialKeydown,
   handleXwidgetVimBeforeInput,
@@ -58,6 +59,20 @@ function withForwardedEmacsKeys(run: (forwarded: string[]) => void): void {
     run(forwarded);
   } finally {
     win.aaronnoteApi = previousApi;
+  }
+}
+
+function withNavigatorPlatform(platform: string, run: () => void): void {
+  const original = Object.getOwnPropertyDescriptor(navigator, "platform");
+  Object.defineProperty(navigator, "platform", { configurable: true, value: platform });
+  try {
+    run();
+  } finally {
+    if (original) {
+      Object.defineProperty(navigator, "platform", original);
+    } else {
+      delete (navigator as unknown as { platform?: string }).platform;
+    }
   }
 }
 
@@ -317,6 +332,36 @@ describe("xwidget key guard", () => {
       editor.destroy();
       host.remove();
     }
+  });
+
+  test("handles macOS Cmd+Shift+Z redo when focus is outside CM6", () => {
+    withNavigatorPlatform("MacIntel", () => {
+      const host = withMounted(document.createElement("section"));
+      const editor = createEditor(host, { initialContent: "abc" });
+      const vim = createVimLite(editor, host);
+      try {
+        editor.setMarkdownSelection(3);
+        editor.replaceMarkdownRange(3, 3, "d", "end");
+        expect(editor.getMarkdown()).toBe("abcd");
+        expect(editor.undo()).toBe(true);
+        expect(editor.getMarkdown()).toBe("abc");
+        const event = new KeyboardEvent("keydown", {
+          key: "Z",
+          code: "KeyZ",
+          metaKey: true,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        });
+        Object.defineProperty(event, "target", { value: document.body });
+        expect(handleXwidgetHistoryKeydown(event, { editor, editorHost: host, vim })).toBe(true);
+        expect(event.defaultPrevented).toBe(true);
+        expect(editor.getMarkdown()).toBe("abcd");
+      } finally {
+        editor.destroy();
+        host.remove();
+      }
+    });
   });
 
   test("maps insertParagraph beforeinput into CM6 Enter behavior", () => {

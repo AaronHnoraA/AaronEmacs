@@ -348,6 +348,62 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
         (message "Copied URL."))
     (user-error "No xwidget URL available")))
 
+(defun my/xwidget--execute-script (script)
+  "Execute JavaScript SCRIPT in the current xwidget session."
+  (unless (and (fboundp 'xwidget-webkit-current-session)
+               (fboundp 'xwidget-webkit-execute-script))
+    (user-error "xwidget script execution is not available"))
+  (let ((session (xwidget-webkit-current-session)))
+    (unless session
+      (user-error "No current xwidget session"))
+    (xwidget-webkit-execute-script session script)))
+
+(defun my/xwidget--keyboard-command-script (key code modifiers fallback-command)
+  "Return JavaScript that dispatches a keyboard command with FALLBACK-COMMAND."
+  (format
+   "(() => {
+  const target = document.activeElement
+    || document.querySelector('.cm-content, [contenteditable=\"true\"], textarea, input')
+    || document.body;
+  const event = new KeyboardEvent('keydown', {
+    key: %S,
+    code: %S,
+    metaKey: %s,
+    ctrlKey: %s,
+    altKey: %s,
+    shiftKey: %s,
+    bubbles: true,
+    cancelable: true
+  });
+  const handled = !target.dispatchEvent(event) || event.defaultPrevented;
+  if (!handled && document.queryCommandSupported && document.queryCommandSupported(%S)) {
+    document.execCommand(%S);
+  }
+  return true;
+})()"
+   key
+   code
+   (if (plist-get modifiers :meta) "true" "false")
+   (if (plist-get modifiers :ctrl) "true" "false")
+   (if (plist-get modifiers :alt) "true" "false")
+   (if (plist-get modifiers :shift) "true" "false")
+   fallback-command
+   fallback-command))
+
+(defun my/xwidget-undo ()
+  "Run undo in the current xwidget page."
+  (interactive)
+  (my/xwidget--execute-script
+   (my/xwidget--keyboard-command-script
+    "z" "KeyZ" '(:meta t) "undo")))
+
+(defun my/xwidget-redo ()
+  "Run redo in the current xwidget page."
+  (interactive)
+  (my/xwidget--execute-script
+   (my/xwidget--keyboard-command-script
+    "Z" "KeyZ" '(:meta t :shift t) "redo")))
+
 (defun my/xwidget-keep-emacs-prefix-keys (map)
   "Remove xwidget bindings that should remain normal Emacs keys in MAP."
   (dolist (key '("M-x" "C-x C-f" "C-x" "C-c" "C-s" "C-g" "M-w" "M-q"))
@@ -499,19 +555,34 @@ AREA is `mode-line' by default; pass `header-line' for header buttons."
   (my/xwidget--select-event-window event)
   (popup-menu
    (easy-menu-create-menu
-    "Xwidget Window"
+    "Xwidget"
     (list
-     (my/xwidget--window-menu-item "Switch buffer" #'switch-to-buffer)
-     (my/xwidget--window-menu-item "Buffer list" #'ibuffer)
-     (my/xwidget--window-menu-item "Delete window" #'delete-window)
-     (my/xwidget--window-menu-item "Toggle one window" #'toggle-one-window)
-     "---"
-     (my/xwidget--window-menu-item
-      "Split below -> ibuffer"
-      #'my/xwidget-split-window-below-ibuffer)
-     (my/xwidget--window-menu-item
-      "Split right -> ibuffer"
-      #'my/xwidget-split-window-right-ibuffer)))
+     (list
+      "Page"
+      (my/xwidget--window-menu-item "Open URL here" #'my/xwidget-open-url-current)
+      (my/xwidget--window-menu-item "Copy URL" #'my/xwidget-copy-url)
+      (my/xwidget--window-menu-item "Copy selection" #'my/xwidget-copy-selection)
+      "---"
+      (my/xwidget--window-menu-item "Back" #'my/xwidget-back)
+      (my/xwidget--window-menu-item "Forward" #'my/xwidget-forward)
+      (my/xwidget--window-menu-item "Reload" #'my/xwidget-reload)
+      (my/xwidget--window-menu-item "Focus editor" #'my/xwidget-focus)
+      "---"
+      (my/xwidget--window-menu-item "Undo" #'my/xwidget-undo)
+      (my/xwidget--window-menu-item "Redo" #'my/xwidget-redo))
+     (list
+      "Window"
+      (my/xwidget--window-menu-item "Switch buffer" #'switch-to-buffer)
+      (my/xwidget--window-menu-item "Buffer list" #'ibuffer)
+      (my/xwidget--window-menu-item "Delete window" #'delete-window)
+      (my/xwidget--window-menu-item "Toggle one window" #'toggle-one-window)
+      "---"
+      (my/xwidget--window-menu-item
+       "Split below -> ibuffer"
+       #'my/xwidget-split-window-below-ibuffer)
+      (my/xwidget--window-menu-item
+       "Split right -> ibuffer"
+       #'my/xwidget-split-window-right-ibuffer))))
    event))
 
 (defun my/xwidget--header-browser-buttons ()

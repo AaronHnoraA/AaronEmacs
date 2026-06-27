@@ -21,6 +21,7 @@ import {
 } from "@codemirror/commands";
 import { insertNewlineContinueMarkup } from "@codemirror/lang-markdown";
 import { continueMarkdownBlock, exitEmptyMarkdownBlock } from "../src/cm6/commands.ts";
+import { historyChordKind } from "../src/keymap/shortcut-router.ts";
 
 type XwidgetControlKey = "Escape" | "Delete" | "Backspace";
 type XwidgetSpecialKey =
@@ -253,6 +254,28 @@ function shouldHandleXwidgetVimKey(event: KeyboardEvent | InputEvent, context: X
   if (event.defaultPrevented || event.isComposing) return false;
   if (isTextEditingTarget(event.target, context.editorHost)) return false;
   if (isTextEditingTarget(document.activeElement, context.editorHost)) return false;
+  return true;
+}
+
+function shouldHandleXwidgetHistoryKey(
+  event: KeyboardEvent,
+  context: XwidgetKeyContext,
+  kind: "undo" | "redo" | null,
+): kind is "undo" | "redo" {
+  if (context.enabled === false) return false;
+  if (!kind || event.defaultPrevented || event.isComposing) return false;
+  if (isTextEditingTarget(event.target, context.editorHost)) return false;
+  if (isTextEditingTarget(document.activeElement, context.editorHost)) return false;
+  return true;
+}
+
+export function handleXwidgetHistoryKeydown(event: KeyboardEvent, context: XwidgetKeyContext): boolean {
+  const kind = historyChordKind(event);
+  if (!shouldHandleXwidgetHistoryKey(event, context, kind)) return false;
+  hardStop(event);
+  if (kind === "undo") context.editor.undo();
+  else context.editor.redo();
+  context.editor.focus();
   return true;
 }
 

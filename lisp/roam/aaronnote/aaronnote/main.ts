@@ -46,6 +46,7 @@ import {
   handleXwidgetControlBeforeInput,
   handleXwidgetControlKeydown,
   handleXwidgetEmacsKeydown,
+  handleXwidgetHistoryKeydown,
   handleXwidgetSpecialBeforeInput,
   handleXwidgetSpecialKeydown,
   handleXwidgetVimBeforeInput,
@@ -4051,6 +4052,15 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (handleXwidgetEmacsKeydown(event)) return;
+  if (handleXwidgetHistoryKeydown(event, {
+    editor,
+    editorHost: host,
+    vim,
+    enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
+  })) {
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
+    return;
+  }
   snippetSuppressedPrefix = event.key === "Escape" ? snippetSuppressedPrefix : "";
   if (handleSnippetPopupKey(event)) {
     event.stopPropagation();

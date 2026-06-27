@@ -51,6 +51,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-smerge)
 (require 'init-dev)
 (require 'init-clutch)
+(require 'init-filetypes)
 (require 'init-navigation)
 (require 'init-navigation-extra)
 (require 'init-dired)

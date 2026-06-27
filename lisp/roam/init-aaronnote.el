@@ -141,6 +141,9 @@ Set to 0 to let the OS pick a random port."
 (put 'my/aaronnote--xwidget-pending-file 'permanent-local t)
 
 (defvar-keymap my/aaronnote-keys-mode-map
+  "M-z" #'my/aaronnote-undo
+  "M-Z" #'my/aaronnote-redo
+  "M-S-z" #'my/aaronnote-redo
   "M-C" #'my/aaronnote-prose-check)
 
 (define-minor-mode my/aaronnote-keys-mode
@@ -669,18 +672,37 @@ When FILE is non-nil, set buffer-local file tracking directly."
                        (format "http://127.0.0.1:%d/" my/aaronnote--port)
                        url))))))))
 
+(defun my/aaronnote--pass-xwidget-command-event (event)
+  "Pass EVENT through to xwidget when the current buffer is not Aaronnote."
+  (if (fboundp 'xwidget-webkit-pass-command-event)
+      (xwidget-webkit-pass-command-event event)
+    (setq unread-command-events
+          (nconc (list event) unread-command-events))))
+
+(defun my/aaronnote--xwidget-editor-command (event command &optional detail)
+  "Route xwidget EVENT to Aaronnote COMMAND, or pass it through otherwise."
+  (if (my/aaronnote--xwidget-buffer-p)
+      (my/aaronnote-command command detail)
+    (my/aaronnote--pass-xwidget-command-event event)))
+
+(defun my/aaronnote-xwidget-undo (event)
+  "Route Command-z / Meta-z from Aaronnote xwidget to web undo."
+  (interactive "e")
+  (my/aaronnote--xwidget-editor-command event "undo"))
+
+(defun my/aaronnote-xwidget-redo (event)
+  "Route Command-Shift-z / Meta-Shift-z from Aaronnote xwidget to web redo."
+  (interactive "e")
+  (my/aaronnote--xwidget-editor-command event "redo"))
+
 (defun my/aaronnote-xwidget-shift-tab (event)
   "Route Shift-Tab to Aaronnote in xwidget without losing the Shift modifier."
   (interactive "e")
-  (if (my/aaronnote--xwidget-buffer-p)
-      (my/aaronnote-command
-       "key"
-       '((key . "Tab")
-         (shiftKey . t)))
-    (if (fboundp 'xwidget-webkit-pass-command-event)
-        (xwidget-webkit-pass-command-event event)
-      (setq unread-command-events
-            (nconc (list event) unread-command-events)))))
+  (my/aaronnote--xwidget-editor-command
+   event
+   "key"
+   '((key . "Tab")
+     (shiftKey . t))))
 
 (defun my/aaronnote--buffer-for-file (file)
   "Return a live Aaronnote buffer tracking FILE, or nil."
@@ -1469,6 +1491,9 @@ Falls back to JupyterLab root when no matching .ipynb exists."
   (when (boundp 'appine-active-map)
     (define-key appine-active-map (kbd "H-o") #'my/aaronnote-dispatch)
     (define-key appine-active-map (kbd "C-H-o") #'my/aaronnote-dispatch)
+    (define-key appine-active-map (kbd "M-z") #'my/aaronnote-undo)
+    (define-key appine-active-map (kbd "M-Z") #'my/aaronnote-redo)
+    (define-key appine-active-map (kbd "M-S-z") #'my/aaronnote-redo)
     (define-key appine-active-map (kbd "H-s") #'my/aaronnote-save)
     (define-key appine-active-map (kbd "H-r") #'my/aaronnote-refresh)
     (define-key appine-active-map (kbd "H-y") #'my/aaronnote-roam-sync)
@@ -1505,6 +1530,10 @@ Falls back to JupyterLab root when no matching .ipynb exists."
 
 (with-eval-after-load 'xwidget
   (dolist (map (list xwidget-webkit-mode-map xwidget-webkit-edit-mode-map))
+    (dolist (key '("M-z"))
+      (define-key map (kbd key) #'my/aaronnote-xwidget-undo))
+    (dolist (key '("M-Z" "M-S-z"))
+      (define-key map (kbd key) #'my/aaronnote-xwidget-redo))
     (dolist (key '("<backtab>" "<iso-lefttab>" "S-TAB" "S-<tab>"))
       (define-key map (kbd key) #'my/aaronnote-xwidget-shift-tab))))
 

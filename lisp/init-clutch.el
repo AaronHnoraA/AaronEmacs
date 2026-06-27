@@ -71,6 +71,12 @@
   (my/clutch--ensure-loaded)
   (call-interactively #'clutch-debug-mode))
 
+(defun my/clutch-query-sqlite-file (file)
+  "Install/load clutch on demand, then open FILE as a SQLite database."
+  (interactive "fSQLite database: ")
+  (my/clutch--ensure-loaded)
+  (clutch-query-sqlite-file (expand-file-name file)))
+
 (defalias 'clutch-query-console #'my/clutch-query-console)
 (defalias 'clutch-switch-console #'my/clutch-switch-console)
 (defalias 'clutch-mode #'my/clutch-mode)

@@ -1514,7 +1514,10 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
   (setq undo-tree-auto-save-history t)
 
   :after hydra
-  :bind ("C-x C-h u" . hydra-undo-tree/body)
+  :bind (("M-z" . undo-tree-undo)
+         ("M-Z" . undo-tree-redo)
+         ("M-S-z" . undo-tree-redo)
+         ("C-x C-h u" . hydra-undo-tree/body))
   :hydra (hydra-undo-tree (:hint nil)
   "
   _p_: undo  _n_: redo _s_: save _l_: load   "
