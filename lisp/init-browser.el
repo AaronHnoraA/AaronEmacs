@@ -927,7 +927,8 @@ window, avoiding orphan browser buffers/windows."
    (my/browser-build-search-url search-term engine)))
 
 (with-eval-after-load 'xwidget
-  (define-key xwidget-webkit-mode-map (kbd "M-w") #'delete-window)
+  (define-key xwidget-webkit-mode-map (kbd "M-w") #'my/browser-close-current)
+  (define-key xwidget-webkit-edit-mode-map (kbd "M-w") #'my/browser-close-current)
   (define-key xwidget-webkit-mode-map (kbd "W") #'my/xwidget-to-eww)
   (define-key xwidget-webkit-mode-map (kbd "A") #'my/xwidget-to-appine)
   (add-hook 'xwidget-webkit-mode-hook #'my/xwidget-setup-control-line))
