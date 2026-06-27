@@ -33,10 +33,37 @@ export type TopBarHandle = {
 
 const EMPTY_STATS: DocStats = { words: 0, chars: 0 };
 
-/** Count words and characters of a markdown string. Whitespace-delimited words. */
+/**
+ * Matches the JavaScript regex `\s` whitespace set (including non-breaking and
+ * CJK full-width spaces), so word counts agree with a `/\s+/` split.
+ */
+function isWhitespaceCode(code: number): boolean {
+  return (
+    code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d ||
+    code === 0x0c || code === 0x0b || code === 0xa0 || code === 0x1680 ||
+    (code >= 0x2000 && code <= 0x200a) || code === 0x2028 || code === 0x2029 ||
+    code === 0x202f || code === 0x205f || code === 0x3000 || code === 0xfeff
+  );
+}
+
+/**
+ * Count whitespace-delimited words and characters of a markdown string.
+ *
+ * Single pass, O(1) extra space: unlike `trimmed.split(/\s+/).length`, this never
+ * allocates a words array, which matters for large (multi-MB) documents recomputed
+ * on the trailing edge of edits.
+ */
 export function countDocStats(markdown: string): DocStats {
-  const trimmed = markdown.trim();
-  const words = trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length;
+  let words = 0;
+  let inWord = false;
+  for (let i = 0; i < markdown.length; i++) {
+    if (isWhitespaceCode(markdown.charCodeAt(i))) {
+      inWord = false;
+    } else if (!inWord) {
+      inWord = true;
+      words += 1;
+    }
+  }
   return { words, chars: markdown.length };
 }
 

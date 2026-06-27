@@ -21,4 +21,19 @@ describe("countDocStats", () => {
     const md = "a *b* c";
     expect(countDocStats(md).chars).toBe(md.length);
   });
+
+  it("treats CJK full-width and non-breaking spaces as separators", () => {
+    expect(countDocStats("你好 世界　朋友").words).toBe(3);
+    expect(countDocStats("a b").words).toBe(2);
+  });
+
+  it("matches a /\\s+/ split for representative inputs", () => {
+    const splitWords = (s: string): number => {
+      const t = s.trim();
+      return t.length === 0 ? 0 : t.split(/\s+/).length;
+    };
+    for (const sample of ["", "  ", "one two", "a\tb\nc", "你好 世界　朋友", "trailing   "]) {
+      expect(countDocStats(sample).words).toBe(splitWords(sample));
+    }
+  });
 });
