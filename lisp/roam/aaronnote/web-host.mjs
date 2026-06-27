@@ -150,12 +150,27 @@ const sseHeartbeatInterval = setInterval(() => {
 }, 25000);
 sseHeartbeatInterval.unref();
 
-process.on("uncaughtException", (err) => {
-  process.stderr.write(`[aaronnote-web] uncaughtException: ${err?.stack || err}\n`);
-});
-process.on("unhandledRejection", (reason) => {
-  process.stderr.write(`[aaronnote-web] unhandledRejection: ${reason?.stack || reason}\n`);
-});
+// Keep the process alive on unexpected errors (forcing exit would drop any
+// unsaved editor state), but do not let the failure be silent: surface a
+// bounded diagnostic on the SSE stream so the editor / Emacs can react instead
+// of the server wedging in a half-broken state unnoticed.
+function reportServerError(kind, detail) {
+  const text = detail?.stack || String(detail ?? "");
+  process.stderr.write(`[aaronnote-web] ${kind}: ${text}\n`);
+  try {
+    broadcast("command", {
+      command: "server-error",
+      kind,
+      message: (detail instanceof Error ? detail.message : String(detail ?? "")).slice(0, 500),
+      at: Date.now(),
+    });
+  } catch {
+    // Never let diagnostic broadcasting trigger another uncaughtException.
+  }
+}
+
+process.on("uncaughtException", (err) => reportServerError("uncaughtException", err));
+process.on("unhandledRejection", (reason) => reportServerError("unhandledRejection", reason));
 
 async function shutdown() {
   clearInterval(sseHeartbeatInterval);

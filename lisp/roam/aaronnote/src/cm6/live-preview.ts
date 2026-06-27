@@ -1637,12 +1637,20 @@ function canMapLineDecos(doc: Text, changes: ChangeSet): boolean {
 }
 
 function canPatchLineDecosNearChanges(doc: Text, changes: ChangeSet): boolean {
+  // Newline edits (every Enter press) are patched near the change, not full-doc
+  // rebuilt: patchLineDecosNearChanges already expands its window over contiguous
+  // table rows and enclosing code fences, so a newline's structural reach is
+  // covered. This mirrors htmlBlockDecoField, which patches near changes
+  // unconditionally. Without this, each Enter in a large document forced a
+  // whole-document syntaxTree.iterate (full parse) via buildLineDecos.
+  // Semantic part/section headings still need a full rebuild (they renumber
+  // structurally beyond a local window), so they remain excluded.
   let canPatch = true;
   changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
     if (!canPatch) return;
     const removed = doc.sliceString(fromA, toA);
     const added = inserted.toString();
-    if (removed.includes("\n") || added.includes("\n") || SEMANTIC_HEADING_TEXT_RE.test(removed) || SEMANTIC_HEADING_TEXT_RE.test(added)) {
+    if (SEMANTIC_HEADING_TEXT_RE.test(removed) || SEMANTIC_HEADING_TEXT_RE.test(added)) {
       canPatch = false;
     }
   });

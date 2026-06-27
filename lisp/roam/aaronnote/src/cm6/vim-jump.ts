@@ -45,6 +45,13 @@ export function clearVimJump(view: EditorView): void {
   view.dispatch({ effects: setVimJumpHints.of([]) });
 }
 
+// Generous safety cap so a pathological viewport cannot create an unbounded
+// array. The real limit is LABELS.length, applied in beginVimJump AFTER
+// orderedPositions sorts by direction/proximity — capping here (before
+// ordering) would fill the slots with whichever matches happen to scan first
+// (top of viewport) and drop the nearest in-direction targets.
+const MAX_SCAN_MATCHES = 4096;
+
 function candidatePositions(view: EditorView, needle: string): number[] {
   if (!needle) return [];
   const positions: number[] = [];
@@ -56,7 +63,7 @@ function candidatePositions(view: EditorView, needle: string): number[] {
       if (found < 0) break;
       positions.push(range.from + found);
       offset = found + Math.max(1, needle.length);
-      if (positions.length >= LABELS.length) return positions;
+      if (positions.length >= MAX_SCAN_MATCHES) return positions;
     }
   }
   return positions;
@@ -71,11 +78,27 @@ function orderedPositions(positions: readonly number[], cursor: number, directio
     : [...backward, ...forward, ...current];
 }
 
+// Order all matches by direction/proximity, THEN keep the nearest LABELS.length.
+// Capping before ordering (the previous bug) filled the slots with whatever
+// matched first while scanning the viewport top-down, so the nearest in-direction
+// targets — often all of them — were dropped.
+export function selectJumpCandidates(
+  positions: readonly number[],
+  cursor: number,
+  direction: VimJumpDirection,
+  max: number = LABELS.length,
+): number[] {
+  return orderedPositions(positions, cursor, direction).slice(0, max);
+}
+
 export function beginVimJump(view: EditorView, needle: string, direction: VimJumpDirection): VimJumpSession {
   const cursor = view.state.selection.main.head;
-  const candidates = orderedPositions(candidatePositions(view, needle), cursor, direction)
-    .slice(0, LABELS.length)
-    .map((from, index) => ({ from, to: Math.min(from + 1, view.state.doc.length), label: LABELS[index]! }));
+  const candidates = selectJumpCandidates(candidatePositions(view, needle), cursor, direction)
+    .map((from, index) => ({
+      from,
+      to: Math.min(from + needle.length, view.state.doc.length),
+      label: LABELS[index]!,
+    }));
   view.dispatch({ effects: setVimJumpHints.of(candidates) });
   return { doc: view.state.doc, candidates };
 }
