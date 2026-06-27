@@ -85,6 +85,34 @@ export function createFloatingTocPanel(options: {
     signature: string;
   } = { items: [], signature: "" };
 
+  // Heading filter (TOC search). Persisted across re-renders; the input lives above
+  // the list so `replaceChildren` on the list never destroys it.
+  let filterQuery = "";
+  const searchInput = document.createElement("input");
+  searchInput.type = "search";
+  searchInput.className = "aaronnote-toc-search";
+  searchInput.placeholder = "Filter headings…";
+  searchInput.setAttribute("aria-label", "Filter table of contents");
+  searchInput.addEventListener("input", () => {
+    filterQuery = searchInput.value.trim().toLowerCase();
+    renderKey = "";
+    update();
+  });
+  searchInput.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      if (searchInput.value) {
+        searchInput.value = "";
+        filterQuery = "";
+        renderKey = "";
+        update();
+      } else {
+        options.editor.focus();
+      }
+    }
+  });
+  if (options.list.parentElement) options.list.parentElement.insertBefore(searchInput, options.list);
+
   function editorHeadings(): {
     items: MarkdownHeading[];
     signature: string;
@@ -204,43 +232,31 @@ export function createFloatingTocPanel(options: {
     const tags = currentNote?.tags ?? [];
     const foldRevision = [...floatingFoldState].sort().join(",");
     const headingRenderSignature = floatingTocSignature(headings);
-    const key = `${activeIndex}\n${currentNote?.id ?? ""}\n${relatedIds.join(",")}\n${tags.join(",")}\n${headingRenderSignature}\n${anchorState.signature}\n${foldRevision}`;
+    const key = `${activeIndex}\n${currentNote?.id ?? ""}\n${relatedIds.join(",")}\n${tags.join(",")}\n${headingRenderSignature}\n${anchorState.signature}\n${foldRevision}\n${filterQuery}`;
     if (key === renderKey) return;
     renderKey = key;
+
+    const searching = filterQuery !== "";
+    const matchText = (text: string): boolean => !searching || text.toLowerCase().includes(filterQuery);
     const frag = document.createDocumentFragment();
     const relatedCount = relatedIds.length;
     const tagCount = tags.length;
-    const anchorCount = anchors.length;
+    const visibleAnchors = searching ? anchors.filter((a) => matchText(`#${a.tag}`)) : anchors;
+    const anchorCount = visibleAnchors.length;
     options.toggleButton.textContent = headings.length > 0 ? `Page ${headings.length}` : "Page";
-    if (headings.length === 0 && relatedIds.length === 0 && tagCount === 0 && anchorCount === 0) {
-      const empty = document.createElement("div");
-      empty.className = "aaronnote-toc-empty";
-      empty.textContent = "No roam context";
-      frag.appendChild(empty);
-      options.list.replaceChildren(frag);
-      return;
-    }
-    const status = document.createElement("div");
-    status.className = "aaronnote-toc-status";
-    status.textContent = [
-      `${headings.length} headings`,
-      anchorCount > 0 ? `${anchorCount} anchors` : "",
-      tagCount > 0 ? `${tagCount} tags` : "",
-      relatedCount > 0 ? `${relatedCount} links` : "",
-    ].filter(Boolean).join(" · ");
-    frag.appendChild(status);
 
-    // Determine which headings have children (for chevron)
+    const keys = floatingTocFoldKeys(headings);
+    // A heading has children when the next heading is deeper.
     const headingHasChildren = headings.map((_, i) =>
       i < headings.length - 1 && headings[i + 1]!.level > headings[i]!.level,
     );
 
-    floatingTocVisible(headings, floatingFoldState, (heading, index, foldKey) => {
+    const appendHeadingRow = (heading: MarkdownHeading, index: number, foldKey: string, withChevron: boolean): void => {
       const row = document.createElement("div");
       row.className = "aaronnote-toc-row";
       row.style.setProperty("--toc-depth", String(Math.max(0, heading.level - 1)));
 
-      if (headingHasChildren[index]) {
+      if (withChevron && headingHasChildren[index]) {
         const isFolded = floatingFoldState.has(foldKey);
         const chevron = document.createElement("button");
         chevron.type = "button";
@@ -255,6 +271,12 @@ export function createFloatingTocPanel(options: {
           update();
         });
         row.appendChild(chevron);
+      } else {
+        // Reserve the chevron column so titles stay vertically aligned.
+        const spacer = document.createElement("span");
+        spacer.className = "aaronnote-toc-chevron-spacer";
+        spacer.setAttribute("aria-hidden", "true");
+        row.appendChild(spacer);
       }
 
       const button = document.createElement("button");
@@ -273,10 +295,57 @@ export function createFloatingTocPanel(options: {
       });
       row.appendChild(button);
       frag.appendChild(row);
-    });
-    renderInlineAnchors(frag, anchors);
-    renderCurrentTags(frag, currentNote);
-    renderRelatedNotes(frag, currentNote);
+    };
+
+    let visibleHeadingCount = 0;
+    if (searching) {
+      // Flat, fold-agnostic filtered list.
+      for (let index = 0; index < headings.length; index += 1) {
+        const heading = headings[index]!;
+        if (!matchText(heading.text)) continue;
+        visibleHeadingCount += 1;
+        appendHeadingRow(heading, index, keys[index]!, false);
+      }
+    } else {
+      floatingTocVisible(headings, floatingFoldState, (heading, index, foldKey) => {
+        visibleHeadingCount += 1;
+        appendHeadingRow(heading, index, foldKey, true);
+      });
+    }
+
+    const hasAnyContent = headings.length > 0 || relatedCount > 0 || tagCount > 0 || anchors.length > 0;
+    if (!hasAnyContent) {
+      const empty = document.createElement("div");
+      empty.className = "aaronnote-toc-empty";
+      empty.textContent = "No roam context";
+      options.list.replaceChildren(empty);
+      return;
+    }
+    if (searching && visibleHeadingCount === 0 && anchorCount === 0) {
+      const empty = document.createElement("div");
+      empty.className = "aaronnote-toc-empty";
+      empty.textContent = "No matches";
+      options.list.replaceChildren(empty);
+      return;
+    }
+
+    const status = document.createElement("div");
+    status.className = "aaronnote-toc-status";
+    status.textContent = searching
+      ? `${visibleHeadingCount}/${headings.length} headings${anchorCount > 0 ? ` · ${anchorCount} anchors` : ""}`
+      : [
+        `${headings.length} headings`,
+        anchorCount > 0 ? `${anchorCount} anchors` : "",
+        tagCount > 0 ? `${tagCount} tags` : "",
+        relatedCount > 0 ? `${relatedCount} links` : "",
+      ].filter(Boolean).join(" · ");
+    frag.insertBefore(status, frag.firstChild);
+
+    renderInlineAnchors(frag, visibleAnchors);
+    if (!searching) {
+      renderCurrentTags(frag, currentNote);
+      renderRelatedNotes(frag, currentNote);
+    }
     options.list.replaceChildren(frag);
   }
 
