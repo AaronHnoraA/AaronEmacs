@@ -235,20 +235,6 @@ button.is-active {
   caret-color: transparent;
 }
 
-.aaronnote-vim-cursor {
-  position: fixed;
-  z-index: 70;
-  border-radius: 1px;
-  background: var(--aaronnote-vim-accent);
-  pointer-events: none;
-  mix-blend-mode: multiply;
-}
-
-body[data-vim-mode="visual"] .aaronnote-vim-cursor,
-body[data-vim-mode="visual-line"] .aaronnote-vim-cursor {
-  background: var(--aaronnote-vim-visual);
-}
-
 .aaronnote-snippet-popup,
 .aaronnote-math-preview {
   position: fixed;

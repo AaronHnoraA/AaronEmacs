@@ -33,7 +33,6 @@ import {
 } from "./roam-idlink.ts";
 import { matchingSnippetsForPrefix, SnippetSession, snippetDetail, snippetLabel, snippetPopupKeyAction } from "./snippets.ts";
 import type { CursorPosition, NoteSummary, SnippetSummary } from "./types.ts";
-import { createVimCursor, updateVimCursor } from "./vim-cursor.ts";
 import { createVimLite, type VimLiteKey, type VimLiteMode } from "./vim-lite.ts";
 import {
   handleXwidgetControlBeforeInput,
@@ -171,8 +170,6 @@ selectionTool.hidden = true;
 document.body.appendChild(selectionTool);
 const selectionMore = selectionTool.querySelector<HTMLElement>("[data-selection-more]")!;
 const selectionRoamIdlink = selectionTool.querySelector<HTMLButtonElement>("[data-selection-command='insert-roam-idlink']")!;
-
-const vimCursor = createVimCursor();
 
 let currentFile = "";
 let currentClient = "";
@@ -3016,7 +3013,6 @@ function runAssistUpdate(flags: AssistUpdateFlags): void {
     || !mathPreview.hidden
   );
   const ctx = needsCursorContext ? editor.cursorContext(!snippetPopup.hidden ? 640 : 320) : null;
-  if (flags.cursor || ctx) updateVimCursor(vimCursor, editor, vim.mode(), ctx?.rect);
   if (flags.toc) updateFloatingToc();
   if (flags.selectionTool) {
     const activeSelection = snippetPopup.hidden && modal.hidden ? activeEditorSelection() : null;
