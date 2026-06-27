@@ -24,10 +24,16 @@
 (defvar winner-ring-alist)
 (defvar winner-undo-frame)
 (defvar-local my/aaronnote-buffer-file-name)
+(defvar breadcrumb--ipath-plain-cache)
+(defvar breadcrumb--last-update-tick)
+(defvar breadcrumb-local-mode)
+(defvar imenu-auto-rescan)
 
 (declare-function project--ensure-read-project-list "project")
 (declare-function project--write-project-list "project")
 (declare-function dashboard-projects-backend-load-projects "dashboard-widgets")
+(declare-function breadcrumb-local-mode "breadcrumb" (&optional arg))
+(declare-function imenu--make-index-alist "imenu" (&optional noerror))
 (declare-function imenu--subalist-p "imenu" (item))
 (declare-function my/file-icon-for-file "init-ui" (file &rest args))
 (declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
@@ -578,6 +584,47 @@ Emacs 31 `project--remember-dir' takes optional arguments (NO-WRITE STABLE)."
   (treemacs-project-follow-mode 1)
   (my/treemacs-cursor-follow-mode 1))
 
+(defconst my/show-imenu-breadcrumb-header-line
+  '(:eval (breadcrumb--header-line))
+  "Header-line form installed by `breadcrumb-local-mode'.")
+
+(defconst my/show-imenu-breadcrumb-refresh-delays '(0.05 0.35 1.0)
+  "Retry delays used to refresh breadcrumbs after opening Treemacs.")
+
+(defun my/show-imenu-refresh-breadcrumb (buffer)
+  "Synchronously refresh breadcrumb state in source BUFFER."
+  (when (and (buffer-live-p buffer)
+             (require 'breadcrumb nil t))
+    (with-current-buffer buffer
+      (when (and (derived-mode-p 'prog-mode)
+                 (fboundp 'breadcrumb-local-mode))
+        (when (boundp 'breadcrumb--ipath-plain-cache)
+          (setq-local breadcrumb--ipath-plain-cache nil))
+        (when (boundp 'breadcrumb--last-update-tick)
+          (setq-local breadcrumb--last-update-tick -1))
+        (let ((non-essential t)
+              (imenu-auto-rescan t))
+          (ignore-errors
+            (imenu--make-index-alist t)))
+        (when (and header-line-format
+                   (not (listp header-line-format)))
+          (setq-local header-line-format (list header-line-format)))
+        (breadcrumb-local-mode -1)
+        (breadcrumb-local-mode 1)
+        (unless (member my/show-imenu-breadcrumb-header-line
+                        header-line-format)
+          (add-to-list 'header-line-format
+                       my/show-imenu-breadcrumb-header-line))
+        (force-mode-line-update)))
+    (dolist (window (get-buffer-window-list buffer nil t))
+      (force-window-update window))))
+
+(defun my/show-imenu-restore-breadcrumb (buffer)
+  "Restore breadcrumb header-line state in source BUFFER after Treemacs setup."
+  (my/show-imenu-refresh-breadcrumb buffer)
+  (dolist (delay my/show-imenu-breadcrumb-refresh-delays)
+    (run-at-time delay nil #'my/show-imenu-refresh-breadcrumb buffer)))
+
 (defun my/treemacs-markerize-imenu-position (position)
   "Convert integer imenu POSITION values into markers for Treemacs."
   (cond
@@ -950,7 +997,8 @@ When PREFER-TAG is non-nil, prefer following the current tag when one exists."
           (treemacs-add-and-display-current-project-exclusively)
           (when (buffer-live-p source-buffer)
             (with-current-buffer source-buffer
-              (my/treemacs-follow-source-silently t))))))))
+              (my/treemacs-follow-source-silently t))
+            (my/show-imenu-restore-breadcrumb source-buffer)))))))
 
 (defun my/project-remove-from-treemacs-workspaces (project-root)
   "Remove PROJECT-ROOT from every Treemacs workspace."

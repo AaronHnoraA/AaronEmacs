@@ -287,20 +287,28 @@ Language modules should use this hook to add language-specific debug configs.")
 
 (defun my/debug-configure-breakpoint-gutter ()
   "Bind Dape breakpoints to the line-number/margin gutter.
-The left fringe is left mostly free so fold indicators keep their normal
-single-click behavior; use shift-click there for breakpoints."
+The left fringe is where Dape renders breakpoint indicators in graphical
+frames, so direct clicks there toggle breakpoints."
   (when (boundp 'dape-breakpoint-mode-map)
+    (define-key dape-breakpoint-mode-map [left-margin down-mouse-1] #'ignore)
     (define-key dape-breakpoint-mode-map [left-margin mouse-1]
                 #'my/debug-breakpoint-toggle-mouse)
+    (define-key dape-breakpoint-mode-map [left-margin down-mouse-2] #'ignore)
     (define-key dape-breakpoint-mode-map [left-margin mouse-2]
                 #'my/debug-breakpoint-expression-mouse)
+    (define-key dape-breakpoint-mode-map [left-margin down-mouse-3] #'ignore)
     (define-key dape-breakpoint-mode-map [left-margin mouse-3]
                 #'my/debug-breakpoint-log-mouse)
-    (define-key dape-breakpoint-mode-map [left-fringe mouse-1] nil)
+    (define-key dape-breakpoint-mode-map [left-fringe down-mouse-1] #'ignore)
+    (define-key dape-breakpoint-mode-map [left-fringe mouse-1]
+                #'my/debug-breakpoint-toggle-mouse)
+    (define-key dape-breakpoint-mode-map [left-fringe S-down-mouse-1] #'ignore)
     (define-key dape-breakpoint-mode-map [left-fringe S-mouse-1]
                 #'my/debug-breakpoint-toggle-mouse)
+    (define-key dape-breakpoint-mode-map [left-fringe S-down-mouse-2] #'ignore)
     (define-key dape-breakpoint-mode-map [left-fringe S-mouse-2]
                 #'my/debug-breakpoint-expression-mouse)
+    (define-key dape-breakpoint-mode-map [left-fringe S-down-mouse-3] #'ignore)
     (define-key dape-breakpoint-mode-map [left-fringe S-mouse-3]
                 #'my/debug-breakpoint-log-mouse)))
 
