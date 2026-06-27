@@ -20,6 +20,7 @@ import {
   bootstrapNote,
   readNote,
   notesIndexPayload,
+  roamNotesIndexPayload,
   graphPayload,
   wantedPages,
   scanRoamNotes,
@@ -347,7 +348,7 @@ let cachedCompletionRoamVersion = -1;
 async function getCachedCompletionRoamNotes() {
   const version = notesIndexVersionValue();
   if (cachedCompletionRoamNotes && cachedCompletionRoamVersion === version) return cachedCompletionRoamNotes;
-  cachedCompletionRoamNotes = (await scanNotes())
+  cachedCompletionRoamNotes = (await scanRoamNotes())
     .filter((note) => note.roam && (note.id || note.key || note.title))
     .map((note) => ({
       id: note.id || note.key || "",
@@ -537,6 +538,9 @@ const apiHandlers = {
   "aaronnote:api:notes:update-todo": (body) => updateTodoStatus(body || {}),
   "aaronnote:api:notes:index": async () => {
     return { type: "notes", ...await notesIndexPayload(), root: noteRoot };
+  },
+  "aaronnote:api:notes:roam-index": async () => {
+    return { type: "notes", ...await roamNotesIndexPayload(), root: noteRoot };
   },
   "aaronnote:api:runtime:debug": async () => ({ type: "runtime-debug", ...runtimeDebugSnapshot() }),
   "aaronnote:api:note-code:read-region": (body) => readNoteCodeRegion(body || {}),

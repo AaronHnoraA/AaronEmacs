@@ -2241,6 +2241,27 @@ export async function notesIndexPayload(notes = null) {
   return { notes: scanned, directories: fs.directories, files: fs.files, indexVersion: notesIndexVersionValue() };
 }
 
+async function withNoteScanRoot(root, callback) {
+  const prev = noteScanRoot;
+  if (prev !== root) {
+    noteScanRoot = root;
+    notesSnapshotDirty = true;
+  }
+  try {
+    return await callback();
+  } finally {
+    if (prev !== root) {
+      noteScanRoot = prev;
+      notesSnapshotDirty = true;
+    }
+  }
+}
+
+// Global roam callers must not inherit a standalone file's temporary scan root.
+export async function roamNotesIndexPayload() {
+  return await withNoteScanRoot(noteRoot, async () => notesIndexPayload());
+}
+
 function preferNote(candidate, current) {
   if (!current) return candidate;
   if (candidate.ext === "md" && current.ext !== "md") return candidate;
@@ -2628,22 +2649,8 @@ export async function scanNotes() {
   return cloneNotes(sorted);
 }
 
-// Always scan from noteRoot regardless of the current standalone-file scan context.
-// The graph view is a global roam view and must not inherit a standalone file's directory.
 export async function scanRoamNotes() {
-  const prev = noteScanRoot;
-  if (prev !== noteRoot) {
-    noteScanRoot = noteRoot;
-    notesSnapshotDirty = true;
-  }
-  try {
-    return await scanNotes();
-  } finally {
-    if (prev !== noteRoot) {
-      noteScanRoot = prev;
-      notesSnapshotDirty = true;
-    }
-  }
+  return await withNoteScanRoot(noteRoot, async () => scanNotes());
 }
 
 const todoStatuses = new Set(["todo", "doing", "done", "blocked", "cancelled"]);

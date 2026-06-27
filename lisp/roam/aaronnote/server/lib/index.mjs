@@ -2,6 +2,7 @@ export {
   bootstrapNote,
   readNote,
   notesIndexPayload,
+  roamNotesIndexPayload,
   scanNotes,
   graphPayload,
   wantedPages,

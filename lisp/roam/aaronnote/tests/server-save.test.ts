@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
 import { configure } from "../server/lib/state.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
-import { getTodos, notesIndexPayload, queueRoamDbSync, readNote, runtimeDebugSnapshot } from "../server/lib/index.mjs";
+import { getTodos, notesIndexPayload, queueRoamDbSync, readNote, roamNotesIndexPayload, runtimeDebugSnapshot } from "../server/lib/index.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
 import { saveNote } from "../server/lib/save.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
@@ -117,6 +117,24 @@ describe("server save API", () => {
     const indexed = await notesIndexPayload() as { notes?: Array<{ file?: string; path?: string }> };
     expect(indexed.notes).toHaveLength(1);
     expect(indexed.notes?.[0]).toMatchObject({ file, path: "a.md" });
+  });
+
+  test("roam-only index ignores the active standalone markdown scan root", async () => {
+    const { root, notes } = await setupRoot();
+    const roamFile = join(notes, "a.md");
+    const standaloneDir = join(root, "docs", "roam-agent", "wiki", "notes");
+    const standaloneFile = join(standaloneDir, "GraphTensor.md");
+    await mkdir(standaloneDir, { recursive: true });
+    await writeFile(roamFile, "#+begin meta\nid: roam-a\n#+end meta\n\n# A\n", "utf8");
+    await writeFile(standaloneFile, "#+begin meta\nid: docs-graph\n#+end meta\n\n# Graph Tensor\n", "utf8");
+
+    await readNote(standaloneFile);
+    const standaloneIndex = await notesIndexPayload() as { notes?: Array<{ file?: string; id?: string }> };
+    expect(standaloneIndex.notes?.map((note) => note.file)).toContain(standaloneFile);
+
+    const roamIndex = await roamNotesIndexPayload() as { notes?: Array<{ file?: string; id?: string }> };
+    expect(roamIndex.notes?.map((note) => note.file)).toEqual([roamFile]);
+    expect(roamIndex.notes?.map((note) => note.id)).toEqual(["roam-a"]);
   });
 
   test("mtime mismatch reports a conflict and preserves disk content", async () => {

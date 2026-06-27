@@ -121,7 +121,7 @@
 (defun my/aaronnote-roam--action-to-channel (action)
   "Map roam-cli ACTION keyword to web-host /api channel string, or nil."
   (cdr (assoc action
-              '(("index"     . "aaronnote:api:notes:index")
+              '(("index"     . "aaronnote:api:notes:roam-index")
                 ("tags"      . "aaronnote:api:completions:tags")
                 ("todos"     . "aaronnote:api:notes:todos")
                 ("templates" . "aaronnote:api:notes:templates")

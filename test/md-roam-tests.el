@@ -712,6 +712,17 @@ source: roam/demo/analysis.md
         (when-let* ((buffer (get-buffer "*roam-new*")))
           (kill-buffer buffer))))))
 
+(ert-deftest my/aaronnote-roam-runtime-index-uses-roam-only-api ()
+  (let (called-channel)
+    (cl-letf (((symbol-function 'my/aaronnote--api-call-sync)
+               (lambda (channel _args)
+                 (setq called-channel channel)
+                 (let ((response (make-hash-table :test 'equal)))
+                   (puthash "notes" [] response)
+                   response))))
+      (my/aaronnote-roam--runtime-call-via-api "index" nil))
+    (should (equal called-channel "aaronnote:api:notes:roam-index"))))
+
 (ert-deftest my/aaronnote-roam-new-editable-fields-sync-draft ()
   (with-temp-buffer
     (my/aaronnote-roam-new-mode)
