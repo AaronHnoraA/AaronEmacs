@@ -25,7 +25,14 @@ import { syntaxTree } from "@codemirror/language";
 import type { Range } from "@codemirror/state";
 import { blockMathRangesOverlapping, mergeOverlappingRanges, rangeInsideAny } from "../math-ranges.ts";
 import { scanInlineMathRanges } from "../../inline-math.ts";
-import { applyImageLayout, imageLayoutFromAttrs, readImageTrailingAttrs, type ImageLayoutAttrs } from "../../image-attrs.ts";
+import {
+  applyImageLayout,
+  imageLayoutFromAttrs,
+  imageLayoutToTrailingAttrs,
+  readImageTrailingAttrs,
+  type ImageAlign,
+  type ImageLayoutAttrs,
+} from "../../image-attrs.ts";
 import { markdownLinkDestination } from "../../markdown-link.ts";
 import {
   VISUAL_ATTACHMENT_IFRAME_ALLOW,
@@ -184,10 +191,83 @@ class ImageWidget extends MeasuredWidget {
       caption.textContent = this.alt.trim();
       wrap.append(caption);
     }
+
+    // Hover toolbar: align / wrap / width. Each control rewrites the trailing
+    // `{...}` layout attrs on the image source, preserving the base markdown
+    // (including any title) so the change round-trips byte-for-byte.
+    const applyLayout = (next: ImageLayoutAttrs): void => {
+      const full = view.state.doc.sliceString(this.from, this.to);
+      const base = full.match(IMAGE_RE)?.[0] ?? full;
+      const trailing = imageLayoutToTrailingAttrs(next);
+      const insert = trailing ? `${base} ${trailing}` : base;
+      if (insert === full) return;
+      view.dispatch({ changes: { from: this.from, to: this.to, insert } });
+      view.requestMeasure();
+    };
+    wrap.append(buildImageToolbar(this.layout, applyLayout));
+
     return this.registerMeasured(wrap, view);
   }
 
-  ignoreEvent(): boolean { return false; }
+  ignoreEvent(event: Event): boolean {
+    const target = event.target as HTMLElement | null;
+    return Boolean(target?.closest(".cm-image-toolbar"));
+  }
+}
+
+function stopImageEvent(event: Event): void {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function imageToolButton(label: string, title: string, active: boolean, run: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "cm-image-tool-button" + (active ? " is-active" : "");
+  button.textContent = label;
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  button.addEventListener("mousedown", stopImageEvent);
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    run();
+  });
+  return button;
+}
+
+function imageToolSeparator(): HTMLElement {
+  const sep = document.createElement("span");
+  sep.className = "cm-image-tool-sep";
+  sep.setAttribute("aria-hidden", "true");
+  return sep;
+}
+
+function buildImageToolbar(
+  layout: ImageLayoutAttrs,
+  apply: (next: ImageLayoutAttrs) => void,
+): HTMLElement {
+  const bar = document.createElement("div");
+  bar.className = "cm-image-toolbar";
+  bar.addEventListener("mousedown", stopImageEvent);
+  const set = (patch: Partial<ImageLayoutAttrs>): ImageLayoutAttrs => ({ ...layout, ...patch });
+  const isBlock = (align: ImageAlign): boolean => layout.align === align && !layout.wrap;
+  const isWrap = (align: ImageAlign): boolean => layout.align === align && layout.wrap;
+  bar.append(
+    imageToolButton("L", "Align left", isBlock("left"), () => apply(set({ align: "left", wrap: false }))),
+    imageToolButton("C", "Align center", isBlock("center"), () => apply(set({ align: "center", wrap: false }))),
+    imageToolButton("R", "Align right", isBlock("right"), () => apply(set({ align: "right", wrap: false }))),
+    imageToolSeparator(),
+    imageToolButton("◧", "Wrap text, float left", isWrap("left"), () => apply(set({ align: "left", wrap: true }))),
+    imageToolButton("◨", "Wrap text, float right", isWrap("right"), () => apply(set({ align: "right", wrap: true }))),
+    imageToolSeparator(),
+    imageToolButton("25%", "Width 25%", layout.width === "25%", () => apply(set({ width: "25%" }))),
+    imageToolButton("50%", "Width 50%", layout.width === "50%", () => apply(set({ width: "50%" }))),
+    imageToolButton("75%", "Width 75%", layout.width === "75%", () => apply(set({ width: "75%" }))),
+    imageToolButton("100%", "Width 100%", layout.width === "100%", () => apply(set({ width: "100%" }))),
+    imageToolButton("Auto", "Reset width", !layout.width, () => apply(set({ width: "" }))),
+  );
+  return bar;
 }
 
 // ---------------------------------------------------------------------------
