@@ -20,17 +20,18 @@ separate editor implementation.
 |---|---|
 | `src/lib.ts` | Public library API. |
 | `src/editor-api.ts` | Stable `createEditor()` facade and controller types. |
-| `src/cm6/editor-cm6.ts` | CM6 `EditorView` construction and public editor methods. |
+| `src/cm6/editor-cm6.ts` | CM6 `EditorView` construction and public editor methods. `getMarkdown()` is memoized by immutable-`Text` identity; prefer `getMarkdownLength()` when only length is needed. |
 | `src/cm6/live-preview.ts` | Inline Markdown preview decorations and line classes. |
 | `src/cm6/commands.ts` | Editing commands, block context, and quick insert registry. |
 | `src/cm6/widgets/*.ts` | Math, code fence, image, task, TOC, org-env, and related widgets. |
 | `src/render-html.ts` | Shared Markdown-to-HTML export/publish renderer. |
 | `src/attrs-syntax.ts` | Shared `{key: value}` trailing-attribute block parser used by command-syntax and image-attrs. |
 | `src/layout-attrs.ts` | Layout-attribute normalization (align, wrap, width, height) and CSS-class/style helpers. |
-| `src/image-attrs.ts` | Image-specific layout attr reader and DOM/token applicators, built on `layout-attrs.ts`. |
+| `src/image-attrs.ts` | Image-specific layout attr reader/writer and DOM/token applicators, built on `layout-attrs.ts`. `imageLayoutToTrailingAttrs` serializes a layout back to `{...}` source (round-trips through `imageLayoutFromAttrs`); used by the image widget's hover toolbar. |
 | `src/command-syntax.ts` | Inline `@@cmd` and block `#+begin kind` command parser, now delegates to `attrs-syntax.ts`. |
 | `src/styles/*.css` | CM6 editor chrome and swappable Markdown themes. |
 | `aaronnote/main.ts` | Emacs-embedded app shell: notes UI, command palette, jump stack. |
+| `aaronnote/ui/*.tsx` | React app-chrome layer (top bar + live word count). CM6 stays a non-React DOM island; React renders the header once and shares `data-*` hooks with `main.ts`. |
 | `server/lib/runtime.mjs` | Server-side note/index/save/runtime; Copilot LSP bridge. |
 | `server/lib/watch.mjs` | Recursive fs watcher for vault freshness; SSE broadcast on batch change. |
 | `server/lib/tmp.mjs` | Runtime temp staging (`mkdtemp`, atomic writes, TTL orphan sweep). |
@@ -99,6 +100,19 @@ class MyWidget extends MeasuredWidget {
    editor compatibility selectors.
 6. Widget height re-measurement on window resize is handled by `MeasuredWidget`'s
    `ResizeObserver`; widgets must not add their own `window.resize` listeners.
+7. The React app-chrome layer (`aaronnote/ui/`) wraps CM6 but never owns the
+   editor surface: the CM6 `EditorView` stays a plain-DOM island. React renders
+   chrome (e.g. the top bar) once and shares `data-*` hooks with `main.ts`; it
+   drives behavior only through the public editor facade and `api` client.
+
+## React app-chrome layer
+
+`aaronnote/ui/` is a React + Tailwind/shadcn layer for app chrome only, built on
+top of the existing `vite-plus` toolchain (Tailwind `preflight` is disabled so it
+never resets the CM6 editor surface; shadcn tokens live on `:root`). It does not
+replace CM6 or introduce a parallel document model. Keep editing behavior in CM6;
+use React only for surrounding UI (top bar, dialogs, menus). Theme, feel, and roam
+behavior remain owned by aaronnote/Emacs and are out of scope for this layer.
 
 ## Testing
 
