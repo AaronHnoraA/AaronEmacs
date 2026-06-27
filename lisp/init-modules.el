@@ -77,6 +77,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-test)
 (require 'init-task)
 (require 'init-project-run)
+(require 'init-debug)
 (require 'init-debug-profile)
 (require 'init-output)
 (require 'init-session)

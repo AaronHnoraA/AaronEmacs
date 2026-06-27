@@ -20,6 +20,7 @@
 (declare-function my/bookmark-set-no-overwrite "init-windows")
 (declare-function my/bookmark-set-line "init-windows")
 (declare-function my/bookmark-toggle-line "init-windows")
+(declare-function my/debug-dispatch "init-debug" ())
 (declare-function my/kill-buffer-dwim "init-windows")
 (declare-function my/kill-workspace-other-buffers "init-windows")
 (declare-function my/frame-new "init-windows")
@@ -481,7 +482,7 @@ Emacs state keep their local behavior."
     "ck" 'kill-compilation
     "cl" '+switch-to-compilation
     "cL" 'eglot-codelens-mode
-    "cj" 'dape
+    "cj" 'my/debug-dispatch
     "cr" 'my/language-server-rename
     "cw" 'delete-trailing-whitespace
     "cx" 'quickrun

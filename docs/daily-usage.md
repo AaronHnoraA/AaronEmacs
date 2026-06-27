@@ -49,7 +49,7 @@
 - `F1` / `F2` / `F3` / `F4`
   `help-command` / `telescope` / 项目工作台 / 项目 `ripgrep`
 - `F5` / `F6` / `F7` / `F8`
-  运行 profile / 测试菜单 / 调试 profile / `olivetti-mode`
+  运行 profile / 测试菜单 / 调试菜单 / `olivetti-mode`
 - `F9` / `F10` / `F12`
   `org-agenda` / popup `vterm` / Claude Code 菜单
 
@@ -70,7 +70,7 @@
 - `H-e` / `H-E` / `H-d` / `H-D`
   code menu / compile menu / diagnostics menu / debug profile 菜单
 - `H-i` / `H-u` / `H-j` / `H-n` / `H-N`
-  `show-imenu` / language server 菜单 / `dape` / 最近测试 / output 菜单
+  `show-imenu` / language server 菜单 / 调试菜单 / 最近测试 / output 菜单
 - `H-\`` / `H-q` / `H-Q` / `H-w`
   `popper-toggle` / 关闭当前 buffer / 退出 Emacs / 关当前 frame
 - `H-0` / `H-1` / `H-2` / `H-3`
@@ -329,7 +329,7 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC c I`
   `eldoc-box-help-at-point`
 - `SPC c j`
-  `dape`
+  调试菜单：启动 Dape、profile、步进、断点、REPL、locals/watch、adapter doctor
 - `SPC c t`
   测试菜单
 - `SPC c n`

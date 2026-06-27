@@ -8,6 +8,7 @@
 (declare-function my/code-actions-dispatch "init-code-actions" ())
 (declare-function my/compile-board "init-compile" ())
 (declare-function my/compile-dispatch "init-compile" ())
+(declare-function my/debug-dispatch "init-debug" ())
 (declare-function my/debug-profile-dispatch "init-debug-profile" ())
 (declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
 (declare-function my/git-board "init-git-board" ())
@@ -58,7 +59,7 @@
       ("." "code actions" my/code-actions-dispatch :transient transient--do-exit)
       ("e" "compile menu" my/compile-dispatch :transient transient--do-exit)
       ("d" "diagnostics" my/diagnostics-dispatch :transient transient--do-exit)
-      ("D" "debug" my/debug-profile-dispatch :transient transient--do-exit)
+      ("D" "debug" my/debug-dispatch :transient transient--do-exit)
       ("u" "language server menu" my/language-server-dispatch :transient transient--do-exit)
       ("x" "telescope" telescope :transient transient--do-exit)]
      ["More"

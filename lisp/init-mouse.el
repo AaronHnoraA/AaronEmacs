@@ -30,8 +30,14 @@
 (declare-function magit-dispatch "magit" ())
 (declare-function magit-file-dispatch "magit" ())
 (declare-function magit-status "magit" (&optional directory))
+(declare-function dape "dape" (config &optional skip-compile))
+(declare-function dape-breakpoint-toggle "dape" ())
+(declare-function dape-continue "dape" (conn))
+(declare-function dape-next "dape" (conn))
+(declare-function dape-repl "dape" ())
 (declare-function my/code-actions-dispatch "init-code-actions" ())
 (declare-function my/current-language-server-backend "init-lsp" ())
+(declare-function my/debug-dispatch "init-debug" ())
 (declare-function my/diagnostics-buffer-ui "init-diagnostics-ui" ())
 (declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
 (declare-function my/diagnostics-project-ui "init-diagnostics-ui" ())
@@ -337,6 +343,14 @@ The menu is built only on click; there is no per-buffer scanning."
       (my/mouse--menu-item "Open log" 'my/language-server-open-log lsp-active-p)
       (my/mouse--menu-item "Describe session" 'my/language-server-describe-session lsp-active-p))
      (list
+      "Debug"
+      (my/mouse--menu-item "Debug menu" 'my/debug-dispatch lsp-buffer-p)
+      (my/mouse--menu-item "Start / choose config" 'dape lsp-buffer-p)
+      (my/mouse--menu-item "Toggle breakpoint" 'dape-breakpoint-toggle lsp-buffer-p)
+      (my/mouse--menu-item "Continue" 'dape-continue lsp-buffer-p)
+      (my/mouse--menu-item "Step over" 'dape-next lsp-buffer-p)
+      (my/mouse--menu-item "REPL" 'dape-repl lsp-buffer-p))
+     (list
       "Diagnostics"
       (my/mouse--menu-item "Buffer problems" 'my/problems-buffer t)
       (my/mouse--menu-item "Project problems" 'my/problems-project t)
@@ -401,6 +415,12 @@ Dedicated status segments handle their own actions."
       (my/mouse--menu-item "Format buffer" 'my/language-server-format-buffer lsp-active-p)
       (my/mouse--menu-item "Restart" 'my/language-server-restart lsp-active-p)
       (my/mouse--menu-item "Log" 'my/language-server-open-log lsp-active-p))
+     (list
+      "Debug"
+      (my/mouse--menu-item "Debug menu" 'my/debug-dispatch prog-p)
+      (my/mouse--menu-item "Start / choose config" 'dape prog-p)
+      (my/mouse--menu-item "Toggle breakpoint" 'dape-breakpoint-toggle prog-p)
+      (my/mouse--menu-item "REPL" 'dape-repl prog-p))
      (list
       "Diagnostics / Project"
       (my/mouse--menu-item "Buffer problems" 'my/problems-buffer t)

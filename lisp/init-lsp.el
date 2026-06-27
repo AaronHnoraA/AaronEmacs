@@ -67,7 +67,6 @@ Each entry is a plist with keys such as `:modes', `:program',
 (defvar eglot-server-programs)
 (defvar eglot-workspace-configuration)
 (defvar gcmh-high-cons-threshold)
-(defvar my/dape-state-dir)
 (defvar company-dabbrev-ignore-case)
 (defvar company-dabbrev-downcase)
 (defvar company-dabbrev-code-ignore-case)
@@ -141,7 +140,6 @@ Each entry is a plist with keys such as `:modes', `:program',
 (declare-function flymake-diagnostic-text "flymake" (diag))
 (declare-function flymake-diagnostics "flymake" (&optional beg end))
 (declare-function flymake-start "flymake" (&optional report-fn))
-(declare-function dape--live-connection "dape" (&optional kind noerror))
 
 (defun my/language-server--resolve-source (source)
   "Return SOURCE as an absolute file name when available."
@@ -903,117 +901,7 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
          (org-src-mode . breadcrumb-local-mode)))
 
 ;; -------------------------
-;; 7. Dape (Debugging)
-;; -------------------------
-;;
-;; dape 是更适合 Eglot / 原生 Emacs 工作流的 DAP 客户端。
-;; 入口命令是 `M-x dape`。
-;; 推荐打开 `repeat-mode`，这样单步调试体验会更顺。
-;;
-;; 说明：
-;; - 不再使用 dap-ui-mode / dap-auto-configure-mode
-;; - 不再依赖 lsp-mode
-;; - 部分 dap-mode 命令在 dape 中没有 1:1 同名接口，
-;;   这里改成 dape 当前公开可用的命令体系
-;;
-(defvar dape-default-breakpoints-file)
-
-(use-package dape
-  :ensure t
-  :after hydra
-  :commands (dape
-             dape-next
-             dape-step-in
-             dape-step-out
-             dape-continue
-             dape-pause
-             dape-restart
-             dape-quit
-             dape-breakpoint-toggle
-             dape-breakpoint-log
-             dape-breakpoint-expression
-             dape-breakpoint-hits
-             dape-breakpoint-remove-at-point
-             dape-evaluate-expression
-             dape-watch-dwim
-             dape-repl
-             dape-repl-threads
-             dape-repl-stack
-             dape-repl-breakpoints
-             dape-repl-scope
-             dape-repl-watch)
-  :hook
-  (kill-emacs . dape-breakpoint-save)
-  (after-init . dape-breakpoint-load)
-  :custom
-  (dape-default-breakpoints-file
-   (expand-file-name "breakpoints.eld" my/dape-state-dir))
-  (dape-buffer-window-arrangement 'right)
-  :config
-  (repeat-mode 1)
-
-  (add-hook 'dape-display-source-hook #'pulse-momentary-highlight-one-line)
-
-  (add-hook 'dape-start-hook
-            (lambda () (save-some-buffers t t)))
-
-  (with-suppressed-warnings ((docstrings) (callargs))
-    (defhydra hydra-dape-mode
-      (:color pink :hint nil :foreign-keys run)
-      "
-^Stepping^          ^Switch/View^             ^Breakpoints^         ^Debug^                     ^Eval / Watch^
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-_n_: Next           _ss_: Sessions(REPL)      _bb_: Toggle          _dd_: Debug (dape)          _ee_: Eval
-_i_: Step in        _st_: Threads             _bd_: Delete here     _dr_: Restart               _er_: Eval region
-_o_: Step out       _sf_: Stack               _ba_: Log message     _dq_: Quit                  _es_: Eval thing
-_c_: Continue       _sl_: Locals(scope)       _bc_: Condition       _dR_: REPL                  _ea_: Add watch
-_p_: Pause          _sb_: Breakpoints         _bh_: Hit count
-"
-      ("n" dape-next)
-      ("i" dape-step-in)
-      ("o" dape-step-out)
-      ("c" dape-continue)
-      ("p" dape-pause)
-
-      ("ss" dape-repl)
-      ("st" dape-repl-threads)
-      ("sf" dape-repl-stack)
-      ("sl" dape-repl-scope)
-      ("sb" dape-repl-breakpoints)
-
-      ("bb" dape-breakpoint-toggle)
-      ("ba" dape-breakpoint-log)
-      ("bd" dape-breakpoint-remove-at-point)
-      ("bc" dape-breakpoint-expression)
-      ("bh" dape-breakpoint-hits)
-
-      ("dd" dape)
-      ("dr" dape-restart)
-      ("dR" dape-repl)
-      ("dq" dape-quit :color blue)
-
-      ("ee" dape-evaluate-expression)
-      ("ea" dape-watch-dwim)
-      ("er" (if (use-region-p)
-                (dape-evaluate-expression
-                 (or (ignore-errors (dape--live-connection 'stopped t))
-                     (ignore-errors (dape--live-connection 'last)))
-                 (buffer-substring-no-properties
-                  (region-beginning) (region-end)))
-              (user-error "No active region")))
-      ("es" (let ((sym (thing-at-point 'symbol t)))
-              (if sym
-                  (dape-evaluate-expression
-                   (or (ignore-errors (dape--live-connection 'stopped t))
-                       (ignore-errors (dape--live-connection 'last)))
-                   sym)
-                (user-error "No symbol at point"))))
-
-      ("q" nil "quit" :color blue))))
-
-
-;; -------------------------
-;; 8. Misc & Language Init
+;; 7. Misc & Language Init
 ;; -------------------------
 
 (setq tab-always-indent t)
@@ -1041,18 +929,6 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
 
 ;; eglot：永不自动重连（需要你手动 M-x eglot 重新连）
 (setq-default eglot-autoreconnect nil)
-
-;;; ── Dape Toolbar ──────────────────────────────────────────────────────────
-;; Performance notes:
-;;   • Static button bar rendered once per debug session start; no timers or
-;;     background hooks beyond dape's own session lifecycle.
-;;   • cursor-sensor-mode is buffer-local to the toolbar buffer.
-;;   • run-at-time 0 fires once to fit-window-to-buffer after render.
-(use-package dape-toolbar
-  :load-path "~/.emacs.d/site-lisp/dape-toolbar"
-  :after dape
-  :config
-  (dape-toolbar-mode 1))
 
 ;;; ── CodeLens ──────────────────────────────────────────────────────────────
 ;; Off by default. Toggle with SPC c L.

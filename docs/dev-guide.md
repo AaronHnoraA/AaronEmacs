@@ -172,10 +172,25 @@ TRAMP 远程 buffer：xwidget infoview 不可用（xwidget 需要本地 bridge�
 
 入口：
 
-- `SPC c j`
+- `SPC c j` / `H-j` / `F7`
+  调试菜单：启动 Dape、选择项目 profile、步进、断点、REPL、locals/watch、adapter doctor
+- `SPC c J`
+  直接进入 `M-x dape`
 - `M-x dape`
 
-调试期间还有 `hydra-dape-mode`。
+行号/margin 区域可以点击切换断点；左 fringe 保留给折叠图标，调试断点可用
+`S-mouse-1` 在 fringe 上切换。调试期间还有 `hydra-dape-mode`。
+
+默认配置覆盖常见 DAP 工作流：
+
+- Python: `debugpy` / module
+- JavaScript、TypeScript、Chrome、Node attach: `js-debug`
+- Java: `jdtls` + `vscode-java-debug`
+- C、C++、Rust: `lldb-dap` / `lldb-vscode` / `gdb` / `cpptools`
+- Go: `dlv` / test binary
+- Shell、.NET、PHP、Ruby、OCaml: 对应 adapter
+
+`M-x my/debug-adapter-doctor` 可以查看 adapter 可用性和缺失安装项。
 
 ## 4. 编译与测试
 
