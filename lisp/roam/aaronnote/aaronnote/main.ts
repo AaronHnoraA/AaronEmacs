@@ -1,4 +1,3 @@
-import "../src/styles/tailwind.css";
 import "../src/styles/widgets.css";
 import "../src/styles/theme-typora.css";
 import "./style.css";
@@ -45,22 +44,25 @@ import {
   handleXwidgetVimBeforeInput,
   handleXwidgetVimKeydown,
 } from "./xwidget-key-guard.ts";
-import { mountTopBar, countDocStats } from "./ui/top-bar.tsx";
 
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("Missing #app");
 
-// The header is owned by React (aaronnote/ui/top-bar.tsx); the editor section stays a
-// plain-DOM island that CodeMirror 6 fully controls. `display:contents` keeps the
-// React mount transparent to the shell's flex layout.
 root.innerHTML = `
   <main class="aaronnote-focused-shell">
-    <div data-topbar-root style="display: contents"></div>
+    <header class="aaronnote-focused-bar">
+      <strong data-file>AaronNote</strong>
+      <span data-vim-mode>INSERT</span>
+      <span data-status>Opening...</span>
+      <button type="button" data-toc-toggle aria-expanded="false">TOC</button>
+      <button type="button" data-graph-toggle aria-expanded="false">Graph</button>
+      <button type="button" data-tools-toggle aria-expanded="false">Tools</button>
+      <button type="button" data-source>Source</button>
+      <button type="button" data-save>Save</button>
+    </header>
     <section class="aaronnote-focused-editor" data-editor></section>
   </main>
 `;
-
-const topbar = mountTopBar(root.querySelector<HTMLElement>("[data-topbar-root]")!);
 
 const host = root.querySelector<HTMLElement>("[data-editor]")!;
 const fileLabel = root.querySelector<HTMLElement>("[data-file]")!;
@@ -332,13 +334,6 @@ function subscribe<K extends keyof DocumentEventMap>(
 // Forward ref patched after vim is created (avoids TDZ while keeping reset near vim).
 let onBlurVimReset: (() => void) | undefined;
 
-// Debounced live word count for the React top bar; recomputed off the trailing edge
-// of edits so large documents don't pay a full scan per keystroke.
-const wordCountTimer = new CoalescedTimer(300);
-function scheduleWordCount(): void {
-  wordCountTimer.schedule(() => topbar.setStats(countDocStats(editor.getMarkdown())));
-}
-
 const editor = createEditor(host, {
   initialContent: "",
   getCurrentFile: () => currentFile,
@@ -351,7 +346,6 @@ const editor = createEditor(host, {
     if (!applyingContent) revision += 1;
     updateTitle();
     changeHandlers.forEach((handler) => handler());
-    scheduleWordCount();
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
     scheduleSave();
   },
