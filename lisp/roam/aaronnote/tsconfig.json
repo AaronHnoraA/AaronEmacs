@@ -14,11 +14,15 @@
     "moduleDetection": "force",
     "noEmit": true,
 
+    /* React app-chrome layer (aaronnote/ui) */
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "tests", "website"]
+  "include": ["src", "tests", "website", "aaronnote/ui"]
 }

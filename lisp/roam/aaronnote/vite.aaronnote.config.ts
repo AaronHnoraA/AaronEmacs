@@ -35,6 +35,16 @@ export default defineConfig(({ command }) => ({
           if (id.includes("/node_modules/@codemirror/") || id.includes("/node_modules/@lezer/")) {
             return "vendor-editor";
           }
+          if (
+            id.includes("/node_modules/react/") ||
+            id.includes("/node_modules/react-dom/") ||
+            id.includes("/node_modules/scheduler/") ||
+            id.includes("/node_modules/@radix-ui/") ||
+            id.includes("/node_modules/cmdk/") ||
+            id.includes("/node_modules/lucide-react/")
+          ) {
+            return "vendor-react";
+          }
           if (id.includes("/node_modules/katex")) return "vendor-katex";
           if (id.includes("/node_modules/dompurify") || id.includes("/node_modules/turndown")) return "vendor-sanitize";
           if (id.includes("/node_modules/d3")) return "vendor-d3";

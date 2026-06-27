@@ -1,3 +1,4 @@
+import "../src/styles/tailwind.css";
 import "../src/styles/widgets.css";
 import "../src/styles/theme-typora.css";
 import "./style.css";
