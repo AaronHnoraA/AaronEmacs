@@ -557,6 +557,18 @@ If popup is focused, kill it."
       (vterm-copy-mode-done)
     (my/vterm-copy-mode-clear-visual-line-anchor)))
 
+(defun my/vterm-copy-dwim ()
+  "Copy the active VTerm region, or enter visual-line copy mode."
+  (interactive)
+  (cond
+   ((region-active-p)
+    (clipboard-kill-ring-save (region-beginning) (region-end))
+    (deactivate-mark))
+   ((bound-and-true-p vterm-copy-mode)
+    (my/vterm-copy-mode-done))
+   (t
+    (my/vterm-copy-mode-visual-line))))
+
 (defun my/vterm-disable-evil-h ()
   "Keep `vterm' fully detached from `evil'."
   (when (bound-and-true-p evil-local-mode)
@@ -572,9 +584,12 @@ If popup is focused, kill it."
 
 (defun my/vterm-copy-mode-setup-keys ()
   "Install Vim-like copy-mode keys scoped to VTerm."
-  (keymap-set vterm-mode-map "M-v" #'my/vterm-copy-mode-enter)
-  (keymap-set vterm-mode-map "M-c" #'my/vterm-copy-mode-visual-line)
-  (keymap-set vterm-mode-map "M-V" #'vterm-yank)
+  (keymap-set vterm-mode-map "M-c" #'my/vterm-copy-dwim)
+  (keymap-set vterm-mode-map "M-v" #'vterm-yank)
+  (keymap-set vterm-mode-map "M-y" #'my/vterm-copy-mode-enter)
+  (keymap-set vterm-mode-map "M-Y" #'my/vterm-copy-mode-visual-line)
+  (keymap-set vterm-copy-mode-map "M-c" #'my/vterm-copy-mode-done)
+  (keymap-set vterm-copy-mode-map "M-v" #'vterm-yank)
   (keymap-set vterm-copy-mode-map "h" #'backward-char)
   (keymap-set vterm-copy-mode-map "j" #'my/vterm-copy-mode-next-line)
   (keymap-set vterm-copy-mode-map "k" #'my/vterm-copy-mode-previous-line)

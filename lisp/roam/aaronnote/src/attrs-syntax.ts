@@ -49,6 +49,7 @@ export function parseAttrArgs(raw = ""): AttrMap {
 }
 
 export function findSingleLineClose(text: string, open: number, closeChar: "]" | "}"): number {
+  let bracketDepth = 0;
   for (let i = open + 1; i < text.length; i++) {
     const ch = text[i]!;
     if (ch === "\\" && i + 1 < text.length) {
@@ -56,7 +57,27 @@ export function findSingleLineClose(text: string, open: number, closeChar: "]" |
       continue;
     }
     if (ch === "\n" || ch === "\r") return -1;
-    if (ch === closeChar) return i;
+    if (closeChar === "]" && ch === "$") {
+      const display = text[i + 1] === "$";
+      const close = display ? "$$" : "$";
+      const start = i + close.length;
+      const found = text.indexOf(close, start);
+      if (found >= 0 && !/[\n\r]/.test(text.slice(start, found))) {
+        i = found + close.length - 1;
+        continue;
+      }
+    }
+    if (closeChar === "]" && ch === "[") {
+      bracketDepth++;
+      continue;
+    }
+    if (ch === closeChar) {
+      if (closeChar === "]" && bracketDepth > 0) {
+        bracketDepth--;
+        continue;
+      }
+      return i;
+    }
   }
   return -1;
 }

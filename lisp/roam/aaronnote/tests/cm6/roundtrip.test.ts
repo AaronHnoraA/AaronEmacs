@@ -1700,6 +1700,35 @@ $$
     cleanup();
   });
 
+  test("renders bracketed math inside inline todo widgets", () => {
+    const md = String.raw`@@todo [prove $\alpha_{[i]}$ and $\sqrt[3]{x}$]{ddl=2026-06-01}` + "\nplain";
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    const todo = document.querySelector<HTMLElement>(".inline-todo-widget");
+    expect(todo).toBeTruthy();
+    expect(todo!.textContent).toContain("prove");
+    expect(todo!.querySelector(".katex")).toBeTruthy();
+    expect(todo!.querySelector(".inline-todo-date-value")!.textContent).toBe("2026-06-01");
+    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
+      .not.toContain("@@todo");
+    cleanup();
+  });
+
+  test("renders bare inline todo text through the line end", () => {
+    const md = "@@todo 把 λ, κ 的证明与想法整理为可靠资料\nplain";
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    const todo = document.querySelector<HTMLElement>(".inline-todo-widget");
+    expect(todo).toBeTruthy();
+    expect(todo!.dataset.status).toBe("todo");
+    expect(todo!.textContent).toContain("把 λ, κ 的证明与想法整理为可靠资料");
+    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
+      .not.toContain("@@todo");
+    cleanup();
+  });
+
   test("org-env scanner ignores boundary-looking lines inside display math", () => {
     const md = String.raw`#+begin proof
 before

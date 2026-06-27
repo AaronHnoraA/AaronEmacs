@@ -2757,6 +2757,7 @@ export function parseCommandArgs(raw = "") {
 }
 
 function findInlineCommandClose(text, open, closeChar) {
+  let bracketDepth = 0;
   for (let i = open + 1; i < text.length; i++) {
     const ch = text[i];
     if (ch === "\\" && i + 1 < text.length) {
@@ -2764,7 +2765,27 @@ function findInlineCommandClose(text, open, closeChar) {
       continue;
     }
     if (ch === "\n" || ch === "\r") return -1;
-    if (ch === closeChar) return i;
+    if (closeChar === "]" && ch === "$") {
+      const display = text[i + 1] === "$";
+      const close = display ? "$$" : "$";
+      const start = i + close.length;
+      const found = text.indexOf(close, start);
+      if (found >= 0 && !/[\n\r]/.test(text.slice(start, found))) {
+        i = found + close.length - 1;
+        continue;
+      }
+    }
+    if (closeChar === "]" && ch === "[") {
+      bracketDepth++;
+      continue;
+    }
+    if (ch === closeChar) {
+      if (closeChar === "]" && bracketDepth > 0) {
+        bracketDepth--;
+        continue;
+      }
+      return i;
+    }
   }
   return -1;
 }
@@ -2781,21 +2802,32 @@ function inlineCommandMetaRange(text, closeBracket) {
   };
 }
 
+function inlineCommandTrailingMetaBeforeLineEnd(text, bodyFrom, lineEnd) {
+  const line = text.slice(bodyFrom, lineEnd);
+  const match = line.match(/[ \t]+(\{[^{}\n]*\})[ \t]*$/);
+  if (!match || match.index === undefined) return { raw: "", bodyTo: lineEnd, fullTo: lineEnd };
+  return {
+    raw: match[1] || "",
+    bodyTo: bodyFrom + match.index,
+    fullTo: bodyFrom + match.index + match[0].length,
+  };
+}
+
 export function scanInlineCommands(text, name = "") {
   const commands = [];
   const wanted = String(name || "").toLowerCase();
-  const pushCommand = (commandName, switchValue, openBracket, closeBracket, fullFrom, fullTo, argsRaw = "") => {
+  const pushCommand = (commandName, switchValue, contextFrom, contextTo, fullFrom, fullTo, argsRaw = "") => {
     if (wanted && commandName !== wanted) return;
     commands.push({
       name: commandName,
       switchValue,
-      context: text.slice(openBracket + 1, closeBracket),
+      context: text.slice(contextFrom, contextTo),
       argsRaw,
       args: parseCommandArgs(argsRaw),
       fullFrom,
       fullTo,
-      contextFrom: openBracket + 1,
-      contextTo: closeBracket,
+      contextFrom,
+      contextTo,
     });
   };
 
@@ -2805,7 +2837,7 @@ export function scanInlineCommands(text, name = "") {
     const openBracket = tagRe.lastIndex - 1;
     const closeBracket = findInlineCommandClose(text, openBracket, "]");
     if (closeBracket < 0) continue;
-    pushCommand("tag", "", openBracket, closeBracket, tagMatch.index, closeBracket + 1);
+    pushCommand("tag", "", openBracket + 1, closeBracket, tagMatch.index, closeBracket + 1);
     tagRe.lastIndex = closeBracket + 1;
   }
 
@@ -2817,8 +2849,20 @@ export function scanInlineCommands(text, name = "") {
     const closeBracket = findInlineCommandClose(text, openBracket, "]");
     if (closeBracket < 0) continue;
     const meta = inlineCommandMetaRange(text, closeBracket);
-    pushCommand(commandName, String(match[2] || "").trim(), openBracket, closeBracket, match.index, meta.fullTo, meta.raw);
+    pushCommand(commandName, String(match[2] || "").trim(), openBracket + 1, closeBracket, match.index, meta.fullTo, meta.raw);
     re.lastIndex = meta.fullTo;
+  }
+
+  const bareTodoRe = /@@todo(?:\(([^)\n]*)\))?[ \t]+(?!\[)([^\n]+)/gi;
+  let bareTodoMatch;
+  while ((bareTodoMatch = bareTodoRe.exec(text))) {
+    const bodyFrom = bareTodoMatch.index + bareTodoMatch[0].length - String(bareTodoMatch[2] || "").length;
+    const lineEnd = bareTodoMatch.index + bareTodoMatch[0].length;
+    const meta = inlineCommandTrailingMetaBeforeLineEnd(text, bodyFrom, lineEnd);
+    if (text.slice(bodyFrom, meta.bodyTo).trim()) {
+      pushCommand("todo", String(bareTodoMatch[1] || "").trim(), bodyFrom, meta.bodyTo, bareTodoMatch.index, meta.fullTo, meta.raw);
+    }
+    bareTodoRe.lastIndex = lineEnd;
   }
   return commands.sort((a, b) => a.fullFrom - b.fullFrom || a.fullTo - b.fullTo);
 }
@@ -2874,8 +2918,83 @@ export function extractTodos(content, note, updatedAt) {
   return todos;
 }
 
+function todoStatusSource(status) {
+  const normalized = normalizeTodoStatus(status);
+  return normalized === "todo" ? "@@todo " : `@@todo(${normalized}) `;
+}
+
+function replaceTodoStatusInSource(source, status) {
+  const next = todoStatusSource(status);
+  const text = String(source || "");
+  if (/^@@todo(?:\([^)\n]*\))?[ \t]+/i.test(text)) {
+    return text.replace(/^@@todo(?:\([^)\n]*\))?[ \t]+/i, next);
+  }
+  return text;
+}
+
+export async function updateTodoStatus(body = {}) {
+  const file = safeOpenFile(body.file || "");
+  const status = normalizeTodoStatus(body.status || "done");
+  const source = String(body.source || "");
+  const hasIndex = body.index !== undefined && body.index !== null && String(body.index) !== "";
+  const rawIndex = hasIndex ? Number(body.index) : NaN;
+  const content = await readFile(file, "utf8");
+  let from = -1;
+  let to = -1;
+
+  if (Number.isInteger(rawIndex) && rawIndex >= 0 && rawIndex < content.length) {
+    const lineStart = content.lastIndexOf("\n", rawIndex - 1) + 1;
+    const lineEnd = content.indexOf("\n", rawIndex);
+    const boundedTo = lineEnd < 0 ? content.length : lineEnd;
+    if (source && content.slice(rawIndex, Math.min(content.length, rawIndex + source.length)) === source) {
+      from = rawIndex;
+      to = rawIndex + source.length;
+    } else {
+      const line = content.slice(lineStart, boundedTo);
+      const match = line.match(/@@todo(?:\([^)\n]*\))?[ \t]+/i);
+      if (match) {
+        from = lineStart + (match.index || 0);
+        const commands = scanInlineCommands(content.slice(from, boundedTo), "todo");
+        if (commands.length > 0 && commands[0].fullFrom === 0) {
+          to = from + commands[0].fullTo;
+        }
+      }
+    }
+  }
+
+  if (from < 0 || to <= from) {
+    const todos = extractTodos(content, { file, path: displayPathForFile(file), key: "", id: "", title: "" }, 0);
+    const wantedId = String(body.id || "");
+    const wantedText = String(body.text || "");
+    const match = todos.find((todo) =>
+      (wantedId && todo.id === wantedId)
+      || (source && todo.source === source)
+      || (wantedText && todo.text === wantedText));
+    if (match) {
+      from = match.index;
+      to = match.index + match.source.length;
+    }
+  }
+
+  if (from < 0 || to <= from) {
+    const err = new Error("Todo source was not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const oldSource = content.slice(from, to);
+  const nextSource = replaceTodoStatusInSource(oldSource, status);
+  if (nextSource === oldSource) {
+    return { type: "todo-updated", ok: true, file, status, changed: false };
+  }
+
+  await atomicWriteFile(file, content.slice(0, from) + nextSource + content.slice(to), "utf8");
+  markNotesDirty(file);
+  return { type: "todo-updated", ok: true, file, status, changed: true };
+}
+
 function contentMayHaveTodos(content) {
-  return /@@todo(?:\s*\(|[ \t]+\[)/i.test(String(content || ""));
+  return /@@todo(?:\s*\(|[ \t]+)/i.test(String(content || ""));
 }
 
 async function todosForNote(note) {

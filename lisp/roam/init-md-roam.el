@@ -124,6 +124,7 @@
                 ("tags"      . "aaronnote:api:completions:tags")
                 ("todos"     . "aaronnote:api:notes:todos")
                 ("templates" . "aaronnote:api:notes:templates")
+                ("update-todo" . "aaronnote:api:notes:update-todo")
                 ("create"    . "aaronnote:api:notes:create-node")
                 ("delete-node" . "aaronnote:api:notes:delete-node")
                 ("sync"      . "aaronnote:api:notes:roam-sync")))))
@@ -151,6 +152,13 @@ the expected body, and returns parsed JSON or nil."
                ("todos"
                 (let ((file (cadr (member "--file" args))))
                   (vector (or file ""))))
+               ("update-todo"
+                (let ((body (make-hash-table :test 'equal)))
+                  (dolist (key '("--file" "--status" "--source" "--id"
+                                 "--text" "--index"))
+                    (when-let* ((value (cadr (member key args))))
+                      (puthash (string-remove-prefix "--" key) value body)))
+                  (vector body)))
                ("tags"
                 (vector (make-hash-table)))
                (_
@@ -2340,16 +2348,26 @@ Falls back to a CLI subprocess when the web-host is offline."
             (insert-file-contents file)
             (goto-char (point-min))
             (while (not (eobp))
-              (let ((line (string-trim
-                           (buffer-substring-no-properties
-                            (line-beginning-position)
-                            (line-end-position)))))
+              (let* ((line-start (line-beginning-position))
+                     (line-end (line-end-position))
+                     (line (string-trim
+                            (buffer-substring-no-properties
+                             line-start line-end))))
                 (when (or (string-match-p "\\`@@todo\\b" line)
                           (string-match-p "\\`\\(?:[-*+]\\s-+\\)?\\[ \\]" line)
                           (string-match-p "\\_<TODO\\_>" line))
                   (let ((entry (make-hash-table :test 'equal)))
                     (puthash "note" (plist-get record :id) entry)
+                    (puthash "noteId" (plist-get record :id) entry)
+                    (puthash "noteKey" (plist-get record :key) entry)
                     (puthash "title" (plist-get record :title) entry)
+                    (puthash "noteTitle" (plist-get record :title) entry)
+                    (puthash "file" file entry)
+                    (puthash "path" (plist-get record :path) entry)
+                    (puthash "line" (line-number-at-pos line-start t) entry)
+                    (puthash "column" 1 entry)
+                    (puthash "index" (1- line-start) entry)
+                    (puthash "source" line entry)
                     (puthash "text" line entry)
                     (push entry todos))))
               (forward-line 1))))))
@@ -2395,16 +2413,105 @@ Falls back to a CLI subprocess when the web-host is offline."
 
 (defun my/aaronnote-roam--visit-todo (entry)
   "Open the note and source line represented by todo ENTRY."
-  (let ((note-slug (my/aaronnote-roam--todo-field
-                    entry "note" "noteId" "noteKey" "path"))
-        (line (my/aaronnote-roam--todo-field entry "line")))
-    (unless note-slug
-      (user-error "Todo has no source note"))
-    (my/aaronnote-roam--open-slug note-slug)
-    (when (integerp line)
+  (let* ((file (my/aaronnote-roam--todo-field entry "file"))
+         (note-slug (my/aaronnote-roam--todo-field
+                     entry "note" "noteId" "noteKey" "path"))
+         (line (my/aaronnote-roam--todo-field entry "line"))
+         (column (my/aaronnote-roam--todo-field entry "column"))
+         (index (my/aaronnote-roam--todo-field entry "index"))
+         (source (my/aaronnote-roam--todo-field entry "source")))
+    (cond
+     ((and (stringp file) (not (string-empty-p file)) (file-exists-p file))
+      (find-file file))
+     (note-slug
+      (my/aaronnote-roam--open-slug note-slug))
+     (t
+      (user-error "Todo has no source note")))
+    (cond
+     ((and (integerp index) (>= index 0))
+      (goto-char (min (point-max) (1+ index)))
+      (when (and (stringp source) (not (string-empty-p source))
+                 (not (looking-at-p (regexp-quote source))))
+        (let ((line-end (line-end-position)))
+          (when (search-forward source line-end t)
+            (goto-char (match-beginning 0))))))
+     ((integerp line)
       (goto-char (point-min))
-      (forward-line (1- line))
-      (recenter))))
+      (forward-line (max 0 (1- line)))
+      (when (integerp column)
+        (forward-char (min (max 0 (1- column))
+                           (- (line-end-position) (point)))))))
+    (recenter)))
+
+(defun my/aaronnote-roam--todo-at-point ()
+  "Return the todo entry on the current row."
+  (or (get-text-property (point) 'my/aaronnote-roam-todo)
+      (get-text-property (line-beginning-position) 'my/aaronnote-roam-todo)
+      (get-text-property (max (point-min) (1- (point)))
+                         'my/aaronnote-roam-todo)))
+
+(defun my/aaronnote-roam--todo-update-local (entry status)
+  "Update todo ENTRY to STATUS by editing its source file locally."
+  (let* ((file (my/aaronnote-roam--todo-field entry "file"))
+         (index (my/aaronnote-roam--todo-field entry "index"))
+         (source (my/aaronnote-roam--todo-field entry "source"))
+         (status (downcase (format "%s" status)))
+         (prefix (if (string= status "todo")
+                     "@@todo "
+                   (format "@@todo(%s) " status))))
+    (unless (and (stringp file) (file-exists-p file))
+      (user-error "Todo has no editable source file"))
+    (with-current-buffer (find-file-noselect file)
+      (save-excursion
+        (save-restriction
+          (widen)
+          (cond
+           ((and (integerp index) (>= index 0))
+            (goto-char (min (point-max) (1+ index))))
+           (t
+            (goto-char (point-min))))
+          (unless (or (looking-at "@@todo\\(?:([^)\n]*)\\)?[ \t]+")
+                      (and (stringp source)
+                           (search-forward source nil t)
+                           (goto-char (match-beginning 0))
+                           (looking-at "@@todo\\(?:([^)\n]*)\\)?[ \t]+")))
+            (user-error "Todo source was not found"))
+          (replace-match prefix t t nil 0)))
+      (save-buffer)))
+  (my/aaronnote-roam--clear-runtime-cache))
+
+(defun my/aaronnote-roam-update-todo-status (status &optional entry)
+  "Set current todo ENTRY to STATUS and refresh the current task view."
+  (interactive
+   (list (completing-read "Todo status: " '("todo" "doing" "blocked" "done")
+                          nil t nil nil "done")
+         nil))
+  (let* ((entry (or entry (my/aaronnote-roam--todo-at-point)))
+         (file (my/aaronnote-roam--todo-field entry "file"))
+         (index (my/aaronnote-roam--todo-field entry "index"))
+         (source (my/aaronnote-roam--todo-field entry "source"))
+         (id (my/aaronnote-roam--todo-field entry "id"))
+         (text (my/aaronnote-roam--todo-field entry "text")))
+    (unless entry
+      (user-error "No todo on this line"))
+    (or (and file
+             (my/aaronnote-roam--runtime-call
+              "update-todo"
+              "--file" file
+              "--status" status
+              "--index" (format "%s" (or index ""))
+              "--source" (or source "")
+              "--id" (or id "")
+              "--text" (or text "")))
+        (my/aaronnote-roam--todo-update-local entry status))
+    (my/aaronnote-roam--clear-runtime-cache)
+    (message "Todo marked %s" status)
+    (my/aaronnote-roam-ui-refresh)))
+
+(defun my/aaronnote-roam-todo-done ()
+  "Mark the current roam todo done."
+  (interactive)
+  (my/aaronnote-roam-update-todo-status "done"))
 
 (defun my/aaronnote-roam--insert-todo-row (entry &optional deadline-tone)
   "Insert a compact task row for ENTRY using optional DEADLINE-TONE."
@@ -2435,7 +2542,8 @@ Falls back to a CLI subprocess when the web-host is offline."
      :detail note-title
      :action (let ((todo entry))
                (lambda (_button)
-                 (my/aaronnote-roam--visit-todo todo))))))
+                 (my/aaronnote-roam--visit-todo todo)))
+     :properties `(my/aaronnote-roam-todo ,entry))))
 
 (defun my/aaronnote-roam-todos ()
   "List all vault todos in a *roam-todos* buffer."

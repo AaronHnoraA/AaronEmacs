@@ -31,14 +31,30 @@ function metaRange(text: string, closeBracket: number): { raw: string; fullTo: n
   return trailing ? { raw: trailing.raw, fullTo: trailing.to } : { raw: "", fullTo: closeBracket + 1 };
 }
 
+function trailingMetaBeforeLineEnd(text: string, bodyFrom: number, lineEnd: number): {
+  raw: string;
+  bodyTo: number;
+  fullTo: number;
+} {
+  const line = text.slice(bodyFrom, lineEnd);
+  const match = line.match(/[ \t]+(\{[^{}\n]*\})[ \t]*$/);
+  if (!match || match.index === undefined) return { raw: "", bodyTo: lineEnd, fullTo: lineEnd };
+  const raw = match[1]!;
+  return {
+    raw,
+    bodyTo: bodyFrom + match.index,
+    fullTo: bodyFrom + match.index + match[0].length,
+  };
+}
+
 export function scanInlineCommands(text: string, name?: string): InlineCommand[] {
   const commands: InlineCommand[] = [];
   const wanted = name?.toLowerCase();
   const pushCommand = (
     commandName: string,
     switchValue: string,
-    openBracket: number,
-    closeBracket: number,
+    contextFrom: number,
+    contextTo: number,
     fullFrom: number,
     fullTo: number,
     argsRaw = "",
@@ -47,13 +63,13 @@ export function scanInlineCommands(text: string, name?: string): InlineCommand[]
     commands.push({
       name: commandName,
       switchValue,
-      context: text.slice(openBracket + 1, closeBracket),
+      context: text.slice(contextFrom, contextTo),
       argsRaw,
       args: parseCommandArgs(argsRaw),
       fullFrom,
       fullTo,
-      contextFrom: openBracket + 1,
-      contextTo: closeBracket,
+      contextFrom,
+      contextTo,
     });
   };
 
@@ -63,7 +79,7 @@ export function scanInlineCommands(text: string, name?: string): InlineCommand[]
     const openBracket = tagRe.lastIndex - 1;
     const closeBracket = findClose(text, openBracket, "]");
     if (closeBracket < 0) continue;
-    pushCommand("tag", "", openBracket, closeBracket, tagMatch.index, closeBracket + 1);
+    pushCommand("tag", "", openBracket + 1, closeBracket, tagMatch.index, closeBracket + 1);
     tagRe.lastIndex = closeBracket + 1;
   }
 
@@ -75,8 +91,20 @@ export function scanInlineCommands(text: string, name?: string): InlineCommand[]
     const closeBracket = findClose(text, openBracket, "]");
     if (closeBracket < 0) continue;
     const meta = metaRange(text, closeBracket);
-    pushCommand(commandName, match[2]?.trim() ?? "", openBracket, closeBracket, match.index, meta.fullTo, meta.raw);
+    pushCommand(commandName, match[2]?.trim() ?? "", openBracket + 1, closeBracket, match.index, meta.fullTo, meta.raw);
     re.lastIndex = meta.fullTo;
+  }
+
+  const bareTodoRe = /@@todo(?:\(([^)\n]*)\))?[ \t]+(?!\[)([^\n]+)/gi;
+  let bareTodoMatch: RegExpExecArray | null;
+  while ((bareTodoMatch = bareTodoRe.exec(text))) {
+    const bodyFrom = bareTodoMatch.index + bareTodoMatch[0].length - bareTodoMatch[2]!.length;
+    const lineEnd = bareTodoMatch.index + bareTodoMatch[0].length;
+    const meta = trailingMetaBeforeLineEnd(text, bodyFrom, lineEnd);
+    if (text.slice(bodyFrom, meta.bodyTo).trim()) {
+      pushCommand("todo", bareTodoMatch[1]?.trim() ?? "", bodyFrom, meta.bodyTo, bareTodoMatch.index, meta.fullTo, meta.raw);
+    }
+    bareTodoRe.lastIndex = lineEnd;
   }
   return commands.sort((a, b) => a.fullFrom - b.fullFrom || a.fullTo - b.fullTo);
 }

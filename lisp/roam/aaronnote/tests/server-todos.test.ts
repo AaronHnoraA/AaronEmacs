@@ -24,6 +24,8 @@ describe("server todo scan", () => {
         "@@todo [plain]",
         "@@todo(done) [closed]",
         "@@todo(doing) [active]{ddl: 2026-05-20}",
+        "@@todo bare task",
+        "@@todo(blocked) bare blocked {ddl: 2026-06-01}",
         "@@todo(doing)[not parsed]",
         "@@todo[not parsed]",
       ].join("\n"),
@@ -35,6 +37,8 @@ describe("server todo scan", () => {
       ["todo", "plain", ""],
       ["done", "closed", ""],
       ["doing", "active", "2026-05-20"],
+      ["todo", "bare task", ""],
+      ["blocked", "bare blocked", "2026-06-01"],
     ]);
   });
 
@@ -49,6 +53,23 @@ describe("server todo scan", () => {
     ]);
     expect(scanInlineCommands("@@todo(doing) [text]{ddl=2026-05-20}", "todo")[0]?.args)
       .toEqual({ ddl: "2026-05-20" });
+    expect(scanInlineCommands(String.raw`@@todo [prove $\alpha_{[i]}$ and $\sqrt[3]{x}$]{ddl=2026-06-01}`, "todo"))
+      .toMatchObject([
+        {
+          name: "todo",
+          switchValue: "",
+          context: String.raw`prove $\alpha_{[i]}$ and $\sqrt[3]{x}$`,
+          args: { ddl: "2026-06-01" },
+        },
+      ]);
+    expect(scanInlineCommands("@@todo 裸文本 {ddl=2026-06-01}", "todo")).toMatchObject([
+      {
+        name: "todo",
+        switchValue: "",
+        context: "裸文本",
+        args: { ddl: "2026-06-01" },
+      },
+    ]);
     expect(scanInlineCommands("@@tag[qc]", "tag")).toMatchObject([
       {
         name: "tag",

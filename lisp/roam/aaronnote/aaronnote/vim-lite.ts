@@ -1,5 +1,6 @@
 import type { Editor } from "../src/lib.ts";
 import type { Text } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 
 export type VimLiteMode = "insert" | "normal" | "visual" | "visual-line";
 export type VimLiteFoldAction = "close" | "open" | "toggle" | "close-all" | "open-all";
@@ -26,6 +27,7 @@ type VimLiteOptions = {
   onRedo?: () => boolean;
   onIndent?: (direction: 1 | -1) => boolean;
   onFold?: (action: VimLiteFoldAction) => boolean;
+  onFind?: () => boolean;
 };
 
 type VimRegisterKind = "linewise" | "characterwise";
@@ -364,6 +366,7 @@ export function createVimLite(
     visualHead = next.cursor;
     const range = docLineSelectionRange(text, visualAnchor ?? next.cursor, visualHead);
     setSelection(editor, range.from, range.to);
+    editor.view.dispatch({ effects: EditorView.scrollIntoView(visualHead, { y: "nearest" }) });
   }
 
   function visualLineBoundary(which: "start" | "end"): void {
@@ -681,6 +684,9 @@ export function createVimLite(
       case "S":
         pending = key;
         return true;
+      case "/":
+        resetMotionMemory();
+        return options.onFind?.() ?? false;
       case "r":
         pending = "r";
         return true;
@@ -767,6 +773,9 @@ export function createVimLite(
       case "r":
         pending = "r";
         return true;
+      case "/":
+        resetMotionMemory();
+        return options.onFind?.() ?? false;
       case "v":
       case "Escape":
         setMode("normal");
@@ -795,6 +804,9 @@ export function createVimLite(
       case "y":
         yankSelection("linewise");
         return true;
+      case "/":
+        resetMotionMemory();
+        return options.onFind?.() ?? false;
       case "V":
       case "v":
       case "Escape":

@@ -1091,6 +1091,8 @@ Else, call `comment-or-uncomment-region' on the current line."
       "Toggle current view to buffers hosting Aaronnote."
     (:description "Aaronnote")
     (my/ibuffer-aaronnote-buffer-p buf))
+  (keymap-set ibuffer-mode-map "M-<return>" #'ibuffer-visit-buffer-other-window)
+  (keymap-set ibuffer-mode-map "M-RET" #'ibuffer-visit-buffer-other-window)
   (advice-add 'ibuffer-visit-buffer :around
               #'my/ibuffer-visit-aaronnote-canonical)
   (advice-add 'ibuffer-visit-buffer-other-window :around

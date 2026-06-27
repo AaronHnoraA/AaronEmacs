@@ -53,6 +53,11 @@ Use `note' to show all Lean informational output, including `#check' results."
   :type 'boolean
   :group 'lean)
 
+(defcustom lean-declaration-fringe-enabled t
+  "When non-nil, show Lean declaration entry markers in the left fringe."
+  :type 'boolean
+  :group 'lean)
+
 (defcustom lean-notification-debounce-delay 0.10
   "Seconds to coalesce Lean diagnostics and progress UI notifications."
   :type 'number
@@ -100,6 +105,12 @@ Use `note' to show all Lean informational output, including `#check' results."
 (defvar-local lean--task-overlays nil
   "Fringe overlays for Lean goal status markers.")
 
+(defvar-local lean--declaration-fringe-overlays nil
+  "Left-fringe overlays for visible Lean declarations.")
+
+(defvar-local lean--declaration-fringe-timer nil
+  "Debounce timer for visible declaration fringe refresh.")
+
 ;; ── Lightweight sideline rendering ───────────────────────────────────────────
 
 (defvar-local lean--sideline-overlays nil
@@ -139,11 +150,20 @@ Use `note' to show all Lean informational output, including `#check' results."
     (cancel-timer lean--sideline-timer))
   (setq lean--sideline-timer nil))
 
+(defun lean--declaration-fringe-cancel ()
+  "Cancel a pending declaration fringe refresh."
+  (when (timerp lean--declaration-fringe-timer)
+    (cancel-timer lean--declaration-fringe-timer))
+  (setq lean--declaration-fringe-timer nil))
+
 (defun lean-sideline-cleanup ()
   "Release Lean sideline hooks, timer, and overlays."
   (lean--sideline-cancel)
   (lean--progress-fringe-cancel)
+  (lean--declaration-fringe-cancel)
   (lean-clear-sideline-overlays)
+  (lean--clear-declaration-fringe-overlays)
+  (remove-hook 'after-change-functions #'lean--schedule-declaration-fringe-refresh t)
   (remove-hook 'window-scroll-functions #'lean-sideline-window-scroll-h t)
   (remove-hook 'window-size-change-functions #'lean-sideline-window-size-h t)
   (remove-hook 'kill-buffer-hook #'lean-sideline-cleanup t))
@@ -324,20 +344,24 @@ Use `note' to show all Lean informational output, including `#check' results."
   "Refresh Lean sideline overlays after scrolling."
   (when (derived-mode-p 'lean-mode)
     (lean-schedule-sideline-refresh)
-    (lean--schedule-progress-fringe-refresh)))
+    (lean--schedule-progress-fringe-refresh)
+    (lean--schedule-declaration-fringe-refresh)))
 
 (defun lean-sideline-window-size-h (_frame)
   "Refresh Lean sideline overlays after window size changes."
   (when (derived-mode-p 'lean-mode)
     (lean-schedule-sideline-refresh)
-    (lean--schedule-progress-fringe-refresh)))
+    (lean--schedule-progress-fringe-refresh)
+    (lean--schedule-declaration-fringe-refresh)))
 
 (defun lean-setup-sideline ()
   "Install Lean sideline rendering hooks in the current buffer."
+  (add-hook 'after-change-functions #'lean--schedule-declaration-fringe-refresh nil t)
   (add-hook 'window-scroll-functions #'lean-sideline-window-scroll-h nil t)
   (add-hook 'window-size-change-functions #'lean-sideline-window-size-h nil t)
   (add-hook 'kill-buffer-hook #'lean-sideline-cleanup nil t)
-  (lean-schedule-sideline-refresh))
+  (lean-schedule-sideline-refresh)
+  (lean--schedule-declaration-fringe-refresh))
 
 ;; ── publishDiagnostics → Flymake compatibility ───────────────────────────────
 ;;
@@ -564,6 +588,11 @@ Use `note' to show all Lean informational output, including `#check' results."
   "Fringe face for Lean notes."
   :group 'lean)
 
+(defface lean-fringe-declaration-face
+  '((t :inherit shadow :weight bold))
+  "Fringe face for visible Lean declaration entries."
+  :group 'lean)
+
 (define-fringe-bitmap 'lean-fringe-processing-bitmap
   [#b00000000
    #b00011000
@@ -604,6 +633,16 @@ Use `note' to show all Lean informational output, including `#check' results."
    #b00000000
    #b00000000])
 
+(define-fringe-bitmap 'lean-fringe-declaration-bitmap
+  [#b01111110
+   #b01000000
+   #b01111000
+   #b01000000
+   #b01000000
+   #b01000000
+   #b00000000
+   #b00000000])
+
 (defface lean-fringe-success-face
   '((((background dark)) :foreground "#7BD88F" :weight bold)
     (((background light)) :foreground "#137333" :weight bold))
@@ -627,20 +666,79 @@ Use `note' to show all Lean informational output, including `#check' results."
   (mapc #'delete-overlay lean--task-overlays)
   (setq lean--task-overlays nil))
 
+(defconst lean--declaration-fringe-regexp
+  (rx line-start (* blank)
+      (? (seq "private" (+ blank)))
+      (? (seq "noncomputable" (+ blank)))
+      (? (seq "unsafe" (+ blank)))
+      (or "def" "theorem" "lemma" "example" "structure" "class" "inductive"
+          "abbrev" "instance" "axiom" "opaque" "constant")
+      symbol-end)
+  "Regexp matching Lean declaration lines worth marking in the fringe.")
+
+(defun lean--clear-declaration-fringe-overlays ()
+  "Remove Lean declaration fringe overlays from current buffer."
+  (mapc #'delete-overlay lean--declaration-fringe-overlays)
+  (setq lean--declaration-fringe-overlays nil))
+
+(defun lean--declaration-line-help ()
+  "Return tooltip text for the declaration marker on the current line."
+  (format "Lean declaration: %s"
+          (string-trim
+           (buffer-substring-no-properties
+            (line-beginning-position) (line-end-position)))))
+
+(defun lean--update-declaration-fringe-overlays ()
+  "Update left-fringe declaration markers, limited to visible lines."
+  (lean--clear-declaration-fringe-overlays)
+  (when (and lean-declaration-fringe-enabled
+             (derived-mode-p 'lean-mode))
+    (save-excursion
+      (dolist (range (lean--visible-ranges))
+        (goto-char (car range))
+        (beginning-of-line)
+        (while (re-search-forward lean--declaration-fringe-regexp (cdr range) t)
+          (unless (nth 8 (syntax-ppss))
+            (setq lean--declaration-fringe-overlays
+                  (lean--add-fringe-overlay
+                   (line-beginning-position) 'lean-fringe-declaration-bitmap
+                   'lean-fringe-declaration-face (lean--declaration-line-help)
+                   'lean-declaration-fringe lean--declaration-fringe-overlays
+                   'left-fringe)))
+          (forward-line 1))))))
+
+(defun lean--refresh-declaration-fringe (&optional buffer)
+  "Redraw visible declaration fringe markers for BUFFER."
+  (let ((buffer (or buffer (current-buffer))))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (setq lean--declaration-fringe-timer nil)
+        (if lean-declaration-fringe-enabled
+            (lean--update-declaration-fringe-overlays)
+          (lean--clear-declaration-fringe-overlays))))))
+
+(defun lean--schedule-declaration-fringe-refresh (&rest _)
+  "Schedule a debounced viewport declaration fringe refresh."
+  (lean--declaration-fringe-cancel)
+  (setq lean--declaration-fringe-timer
+        (run-at-time lean-sideline-delay nil
+                     #'lean--refresh-declaration-fringe (current-buffer))))
+
 (defun lean--diagnostic-tags (diagnostic)
   "Return Lean tags from DIAGNOSTIC as a list."
   (lean--diagnostics-list (plist-get diagnostic :leanTags)))
 
-(defun lean--add-fringe-overlay (pos bitmap face help property collection)
-  "Add a right-fringe marker at POS and return updated COLLECTION.
-BITMAP, FACE, HELP, and PROPERTY describe the marker."
+(defun lean--add-fringe-overlay (pos bitmap face help property collection &optional side)
+  "Add a fringe marker at POS and return updated COLLECTION.
+BITMAP, FACE, HELP, and PROPERTY describe the marker.
+SIDE defaults to `right-fringe'."
   (save-excursion
     (goto-char pos)
     (let ((ov (make-overlay (line-beginning-position)
                             (min (point-max) (1+ (line-beginning-position)))
                             nil nil t)))
       (overlay-put ov 'before-string
-                   (propertize " " 'display `(right-fringe ,bitmap ,face)
+                   (propertize " " 'display `(,(or side 'right-fringe) ,bitmap ,face)
                                'help-echo help))
       (overlay-put ov 'help-echo help)
       (overlay-put ov property t)
@@ -744,6 +842,7 @@ BITMAP, FACE, HELP, and PROPERTY describe the marker."
   "Remove all Lean fringe overlays from current buffer."
   (lean--clear-progress-overlays)
   (lean--clear-task-overlays)
+  (lean--clear-declaration-fringe-overlays)
   (when (fboundp 'lean-clear-sideline-overlays)
     (lean-clear-sideline-overlays)))
 
@@ -752,6 +851,7 @@ BITMAP, FACE, HELP, and PROPERTY describe the marker."
   (when (timerp lean--notification-timer)
     (cancel-timer lean--notification-timer))
   (lean--progress-fringe-cancel)
+  (lean--declaration-fringe-cancel)
   (when lean--flymake-report-fn
     (funcall lean--flymake-report-fn nil
              :force t :region (cons (point-min) (point-max))))

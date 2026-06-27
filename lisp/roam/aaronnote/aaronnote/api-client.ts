@@ -35,6 +35,7 @@ type NativeApi = {
     metaAdd?: (body: Record<string, unknown>) => Promise<unknown>;
     notesIndex?: () => Promise<unknown>;
     todos?: (file: string) => Promise<unknown>;
+    updateTodo?: (body: Record<string, unknown>) => Promise<unknown>;
   };
   completions?: {
     tags?: (prefix: string) => Promise<unknown>;
@@ -139,6 +140,10 @@ export const api = {
         return;
       }
       if (api.save) void api.save(body).catch(() => {});
+    },
+    async updateTodo(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().notes?.updateTodo, "Todo update");
+      return ensureOk(await call(body) as Record<string, unknown>, "Todo update failed");
     },
   },
   noteCode: {

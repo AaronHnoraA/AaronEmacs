@@ -410,6 +410,11 @@ KEY-STRING is used only for diagnostics."
                  (target (alist-get 'target payload)))
             (when (and (stringp target) (not (string-empty-p target)))
               (cond
+               ((and (string-match-p "\\.ipynb\\(?:@\\|#\\|\\'\\)" target)
+                     (progn
+                       (unless (fboundp 'my/jupyter-lab-open-jupytext-target)
+                         (require 'init-jupyter-lab))
+                       (my/jupyter-lab-open-jupytext-target target))))
                ((and (fboundp 'my/jupyter-lab-url-p)
                      (my/jupyter-lab-url-p target))
                 (unless (fboundp 'my/xwidget-open-url) (require 'init-browser))
@@ -1210,6 +1215,7 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 (declare-function my/jupyter-lab-url-p    "init-jupyter-lab" (url))
 (declare-function my/jupyter-lab-open     "init-jupyter-lab" ())
 (declare-function my/jupyter-lab-open-path "init-jupyter-lab" (abs-path &optional selector))
+(declare-function my/jupyter-lab-open-jupytext-target "init-jupyter-lab" (target))
 
 (defun my/aaronnote--infer-notebook ()
   "Return the .ipynb file co-located with the current Aaronnote note, or nil."

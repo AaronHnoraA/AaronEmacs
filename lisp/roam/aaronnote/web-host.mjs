@@ -35,6 +35,7 @@ import {
   roamTagOverlapReport,
   rewriteMarkdownPathReferences,
   getTodos,
+  updateTodoStatus,
   runtimeDebugSnapshot,
 } from "./server/lib/index.mjs";
 import { configure, markNotesDirty, notesIndexVersionValue, noteSelfWriteRecently, notePathWatchRelevant } from "./server/lib/state.mjs";
@@ -518,6 +519,7 @@ const apiHandlers = {
   "aaronnote:api:notes:todos": async (body) => {
     return await getTodos(typeof body === "string" ? body : body?.file || "");
   },
+  "aaronnote:api:notes:update-todo": (body) => updateTodoStatus(body || {}),
   "aaronnote:api:notes:index": async () => {
     return { type: "notes", ...await notesIndexPayload(), root: noteRoot };
   },
@@ -764,7 +766,8 @@ function adapterScript(origin) {
       snippets: function() { return call("aaronnote:api:notes:snippets", []); },
       metaAdd: function(body) { return call("aaronnote:api:notes:meta-add", [body || {}]); },
       notesIndex: function() { return call("aaronnote:api:notes:index", []); },
-      todos: function(file) { return call("aaronnote:api:notes:todos", [{ file: String(file || "") }]); }
+      todos: function(file) { return call("aaronnote:api:notes:todos", [{ file: String(file || "") }]); },
+      updateTodo: function(body) { return call("aaronnote:api:notes:update-todo", [body || {}]); }
     },
     completions: {
       tags: function(prefix) { return call("aaronnote:api:completions:tags", [{ prefix: String(prefix || "") }]); },

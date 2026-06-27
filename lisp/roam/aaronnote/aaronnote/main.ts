@@ -19,10 +19,12 @@ import { api } from "./api-client.ts";
 import { Epoch } from "../src/async-epoch.ts";
 import { CoalescedTimer } from "../src/coalesced-timer.ts";
 import { blobToBase64 } from "../src/paste.ts";
+import { collectFindMatches, createFindPattern, type FindMatch } from "./find.ts";
 import { AssistScheduler, type AssistUpdateFlags, type AssistUpdateOptions } from "./assist-scheduler.ts";
 import { createFloatingTocPanel, inlineTagAnchorsFromText, markdownHeadingsFromText } from "./floating-toc.ts";
 import { resolveAnchorHeading } from "../src/heading-slug.ts";
 import { createLocalGraphPanel } from "./local-graph.ts";
+import { setFindHighlightRanges } from "../src/cm6/find-highlight.ts";
 import {
   canonicalRoamNoteId,
   escapeMarkdownLinkText,
@@ -170,6 +172,23 @@ selectionTool.hidden = true;
 document.body.appendChild(selectionTool);
 const selectionMore = selectionTool.querySelector<HTMLElement>("[data-selection-more]")!;
 const selectionRoamIdlink = selectionTool.querySelector<HTMLButtonElement>("[data-selection-command='insert-roam-idlink']")!;
+
+const findPanel = document.createElement("div");
+findPanel.className = "aaronnote-find-panel";
+findPanel.hidden = true;
+findPanel.innerHTML = `
+  <input type="search" data-find-query autocomplete="off" spellcheck="false" />
+  <span data-find-count>0/0</span>
+  <button type="button" data-find-prev title="Previous">↑</button>
+  <button type="button" data-find-next title="Next">↓</button>
+  <button type="button" data-find-close title="Close">×</button>
+`;
+document.body.appendChild(findPanel);
+const findInput = findPanel.querySelector<HTMLInputElement>("[data-find-query]")!;
+const findCount = findPanel.querySelector<HTMLElement>("[data-find-count]")!;
+const findPrevButton = findPanel.querySelector<HTMLButtonElement>("[data-find-prev]")!;
+const findNextButton = findPanel.querySelector<HTMLButtonElement>("[data-find-next]")!;
+const findCloseButton = findPanel.querySelector<HTMLButtonElement>("[data-find-close]")!;
 
 let currentFile = "";
 let currentClient = "";
@@ -388,11 +407,17 @@ function syncImeForVimMode(mode: import("./vim-lite.ts").VimLiteMode): void {
   });
 }
 
+function runVimFind(): boolean {
+  openFindPanel();
+  return true;
+}
+
 const vim = createVimLite(editor, host, {
   onModeChange: (mode) => { updateModeLabel(mode); syncImeForVimMode(mode); },
   onUndo: () => editor.undo(),
   onRedo: () => editor.redo(),
   onIndent: (dir) => indentMarkdownBlock(editor.view, dir),
+  onFind: runVimFind,
   onFold: (action) => {
     if (action === "close") return editor.runCommand("fold-heading");
     if (action === "open") return editor.runCommand("unfold-heading");
@@ -1389,6 +1414,12 @@ function inlineTagAtCursor(): string {
     ?.tag ?? "";
 }
 
+function focusedEditableOutsideEditor(): boolean {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || host.contains(active)) return false;
+  return Boolean(active.closest("input, textarea, select, [contenteditable='true']"));
+}
+
 async function copyText(text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
@@ -1402,6 +1433,131 @@ async function copyText(text: string): Promise<void> {
     document.execCommand("copy");
     fallback.remove();
   }
+}
+
+let findMatches: FindMatch[] = [];
+let findIndex = -1;
+
+function selectedMarkdownText(): string {
+  const selection = editor.getMarkdownSelection();
+  const from = Math.min(selection.from, selection.to);
+  const to = Math.max(selection.from, selection.to);
+  return from < to ? editor.textBetween(from, to) : "";
+}
+
+function clearFindHighlights(): void {
+  findMatches = [];
+  findIndex = -1;
+  editor.view.dispatch({ effects: setFindHighlightRanges.of([]) });
+  findCount.textContent = "0/0";
+}
+
+function updateFindHighlights(): void {
+  const ranges = findMatches.map((match, index) => ({
+    from: match.from,
+    to: match.to,
+    current: index === findIndex,
+  }));
+  editor.view.dispatch({ effects: setFindHighlightRanges.of(ranges) });
+}
+
+function gotoFindMatch(index: number): void {
+  if (findMatches.length === 0) {
+    findIndex = -1;
+    updateFindHighlights();
+    findCount.textContent = "0/0";
+    return;
+  }
+  findIndex = ((index % findMatches.length) + findMatches.length) % findMatches.length;
+  const match = findMatches[findIndex]!;
+  editor.setMarkdownSelection(match.from, match.to);
+  updateFindHighlights();
+  findCount.textContent = `${findIndex + 1}/${findMatches.length}`;
+}
+
+function refreshFind(query = findInput.value, keepCurrent = true): void {
+  const result = createFindPattern(query, false);
+  if (result.error) {
+    clearFindHighlights();
+    findCount.textContent = result.error;
+    return;
+  }
+  findMatches = collectFindMatches(editor.getMarkdown(), result.pattern);
+  if (findMatches.length === 0) {
+    findIndex = -1;
+    updateFindHighlights();
+    findCount.textContent = query ? "0/0" : "0/0";
+    return;
+  }
+  if (keepCurrent && findIndex >= 0 && findIndex < findMatches.length) {
+    gotoFindMatch(findIndex);
+    return;
+  }
+  const selection = editor.getMarkdownSelection();
+  const cursor = Math.max(selection.from, selection.to);
+  const next = findMatches.findIndex((match) => match.to >= cursor);
+  gotoFindMatch(next >= 0 ? next : 0);
+}
+
+function openFindPanel(): void {
+  const selected = selectedMarkdownText();
+  if (selected && !selected.includes("\n")) findInput.value = selected;
+  findPanel.hidden = false;
+  selectionTool.hidden = true;
+  refreshFind(findInput.value, false);
+  findInput.focus();
+  findInput.select();
+}
+
+function closeFindPanel(): void {
+  findPanel.hidden = true;
+  clearFindHighlights();
+  editor.focus();
+}
+
+async function copyEditorSelection(): Promise<boolean> {
+  const active = activeEditorSelection();
+  let text = active?.text || "";
+  if (!text) {
+    const selection = editor.getMarkdownSelection();
+    const from = Math.min(selection.from, selection.to);
+    const to = Math.max(selection.from, selection.to);
+    if (from < to) text = editor.textBetween(from, to);
+  }
+  if (!text) return false;
+  await copyText(text);
+  setStatus("Selection copied");
+  selectionTool.hidden = true;
+  return true;
+}
+
+function runClipboardShortcut(event: KeyboardEvent): boolean {
+  if (!primaryMod(event) || event.shiftKey || event.altKey || event.isComposing) return false;
+  if (!modal.hidden || !toolsPanel.hidden || !roamToolsPanel.hidden || focusedEditableOutsideEditor()) return false;
+  const key = event.key.toLowerCase();
+  if (key === "c") {
+    const selection = editor.getMarkdownSelection();
+    if (selection.from === selection.to && !activeEditorSelection()) return false;
+    event.preventDefault();
+    void copyEditorSelection();
+    return true;
+  }
+  if (key === "v") {
+    event.preventDefault();
+    editor.focus();
+    void editor.pasteFromClipboard();
+    return true;
+  }
+  return false;
+}
+
+function runFindShortcut(event: KeyboardEvent): boolean {
+  if (!primaryMod(event) || event.shiftKey || event.altKey || event.isComposing) return false;
+  if (!modal.hidden || !toolsPanel.hidden || !roamToolsPanel.hidden) return false;
+  if (event.key.toLowerCase() !== "f") return false;
+  event.preventDefault();
+  openFindPanel();
+  return true;
 }
 
 function parseTagPrompt(value: string | null): string[] {
@@ -3257,6 +3413,10 @@ roamToolsClose.addEventListener("click", closeRoamToolsPanel);
 sourceButton.addEventListener("click", toggleSourceMode);
 saveButton.addEventListener("click", () => void save());
 document.addEventListener("keydown", (event) => {
+  if (runFindShortcut(event)) {
+    event.stopPropagation();
+    return;
+  }
   if (handleXwidgetEmacsKeydown(event)) return;
   snippetSuppressedPrefix = event.key === "Escape" ? snippetSuppressedPrefix : "";
   if (handleSnippetPopupKey(event)) {
@@ -3315,6 +3475,11 @@ document.addEventListener("keydown", (event) => {
     enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
   })) {
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
+    return;
+  }
+  if (runClipboardShortcut(event)) {
+    scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, selectionTool: true });
+    event.stopPropagation();
     return;
   }
   if (vim.handleKeyDown(event)) {
@@ -3418,6 +3583,23 @@ selectionTool.addEventListener("click", (event) => {
   event.stopPropagation();
   runSelectionCommand(button.dataset.selectionCommand || "");
 });
+
+findInput.addEventListener("input", () => refreshFind(findInput.value, false));
+findInput.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeFindPanel();
+    return;
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    refreshFind(findInput.value, true);
+    gotoFindMatch(findIndex + (event.shiftKey ? -1 : 1));
+  }
+});
+findPrevButton.addEventListener("click", () => gotoFindMatch(findIndex - 1));
+findNextButton.addEventListener("click", () => gotoFindMatch(findIndex + 1));
+findCloseButton.addEventListener("click", closeFindPanel);
 document.addEventListener("aaronnote:open-url", (event) => {
   const custom = event as CustomEvent<{ href?: string; newWindow?: boolean }>;
   const href = custom.detail?.href;

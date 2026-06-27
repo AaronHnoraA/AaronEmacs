@@ -41753,7 +41753,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文直觉���正半定保证测量概率非负；迹为一保证总概率为一。
+中文��觉���正半定保证测量概率非负；迹为一保证总概率为一。
 #+end note
 
 The expectation value of an observable $A$ in state $\rho$ is
@@ -143577,7 +143577,7 @@ $$
 ## 263.9. Algorithmic skeleton
 
 The following pseudocode is not intended to solve tensor isomorphism. It
-only gives a schematic form of an invariant-refinement strategy.
+only gives a schematic form of an invariant-refinement strategy. this is hard to see that 
 
 ```python
 from dataclasses import dataclass

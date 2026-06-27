@@ -922,6 +922,50 @@ html.aaronnote-paused *::after {
   background: var(--aaron-paper-line);
 }
 
+.aaronnote-find-panel {
+  position: fixed;
+  top: 46px;
+  right: 18px;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid var(--aaronnote-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--aaron-paper-soft), white 38%);
+  box-shadow: var(--aaron-shadow);
+  font: 12px/1.4 var(--aaron-font-sans);
+}
+
+.aaronnote-find-panel[hidden] {
+  display: none;
+}
+
+.aaronnote-find-panel input {
+  width: min(260px, 42vw);
+  height: 26px;
+  border: 1px solid var(--aaronnote-border);
+  border-radius: 5px;
+  padding: 3px 8px;
+  background: #fff;
+  color: var(--aaron-ink);
+  font: inherit;
+}
+
+.aaronnote-find-panel [data-find-count] {
+  min-width: 42px;
+  color: var(--aaronnote-muted);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.aaronnote-find-panel button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+}
+
 .aaronnote-selection-more {
   position: absolute;
   top: calc(100% + 6px);

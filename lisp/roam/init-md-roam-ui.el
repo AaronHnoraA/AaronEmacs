@@ -8,6 +8,9 @@
 
 (require 'aaron-ui-board)
 
+(declare-function my/aaronnote-roam-todo-done "init-md-roam" ())
+(declare-function my/aaronnote-roam-update-todo-status "init-md-roam" (status &optional entry))
+
 ;;; --- face aliases ---
 
 (put 'my/aaronnote-roam-ui-title          'face-alias 'aaron-ui-board-title)
@@ -52,6 +55,9 @@
 
 (define-derived-mode my/aaronnote-roam-ui-mode aaron-ui-board-mode "Roam-UI"
   "Backward-compatible mode name for Aaronnote roam board buffers.")
+
+(define-key my/aaronnote-roam-ui-mode-map (kbd "d") #'my/aaronnote-roam-todo-done)
+(define-key my/aaronnote-roam-ui-mode-map (kbd "s") #'my/aaronnote-roam-update-todo-status)
 
 ;;; --- function aliases ---
 

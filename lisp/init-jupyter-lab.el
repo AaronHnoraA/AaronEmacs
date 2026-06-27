@@ -9,6 +9,7 @@
 (require 'browse-url)
 (require 'cl-lib)
 (require 'project)
+(require 'seq)
 (require 'subr-x)
 (require 'url)
 
@@ -343,6 +344,85 @@ Return non-nil when JupyterLab is already running at ROOT."
       (my/jupytext--sync t))
     (and my/jupytext-notebook-file
          (expand-file-name my/jupytext-notebook-file)))))
+
+(defun my/jupyter-lab--split-notebook-target (target)
+  "Return (NOTEBOOK . SELECTOR) parsed from local notebook TARGET."
+  (let* ((raw (url-unhex-string (string-remove-prefix "file:" (or target ""))))
+         (hash-pos (string-match-p "#" raw))
+         (hash-selector (and hash-pos (substring raw (1+ hash-pos))))
+         (raw (if hash-pos (substring raw 0 hash-pos) raw))
+         (at-match (string-match "\\(.+?\\.ipynb\\)@\\(.+\\)\\'" raw)))
+    (if at-match
+        (cons (match-string 1 raw) (match-string 2 raw))
+      (cons raw hash-selector))))
+
+(defun my/jupyter-lab--jupytext-script-candidates (notebook)
+  "Return likely Jupytext script paths for NOTEBOOK."
+  (let* ((base (file-name-sans-extension (expand-file-name notebook)))
+         (dir (file-name-directory base))
+         (stem (file-name-nondirectory base))
+         (exts '(".ju.py" ".py" ".md" ".qmd" ".Rmd" ".rmd" ".jl")))
+    (append
+     (delq nil
+           (mapcar (lambda (buffer)
+                     (with-current-buffer buffer
+                       (when (and buffer-file-name
+                                  (bound-and-true-p jupytext-mode)
+                                  (stringp my/jupytext-notebook-file)
+                                  (file-equal-p
+                                   (expand-file-name my/jupytext-notebook-file)
+                                   (expand-file-name notebook)))
+                         buffer-file-name)))
+                   (buffer-list)))
+     (mapcar (lambda (ext) (concat dir stem ext)) exts))))
+
+(defun my/jupyter-lab-jupytext-script-for-notebook (notebook)
+  "Return an existing Jupytext script paired with NOTEBOOK, or nil."
+  (seq-find #'file-exists-p
+            (delete-dups
+             (my/jupyter-lab--jupytext-script-candidates notebook))))
+
+(defun my/jupyter-lab--selector-slug (value)
+  "Return a loose slug for SELECTOR heading matching."
+  (let ((text (downcase (url-unhex-string (or value "")))))
+    (replace-regexp-in-string
+     "-+" "-"
+     (replace-regexp-in-string "[^[:alnum:]]+" "-" (string-trim text)))))
+
+(defun my/jupyter-lab--goto-selector (selector)
+  "Move point to SELECTOR in the current Jupytext script when possible."
+  (when (and selector (not (string-empty-p selector)))
+    (let* ((decoded (url-unhex-string selector))
+           (slug (my/jupyter-lab--selector-slug decoded))
+           (found nil))
+      (goto-char (point-min))
+      (setq found
+            (or (re-search-forward
+                 (format "^\\s-*#\\{1,6\\}\\s-+.*%s"
+                         (regexp-quote decoded))
+                 nil t)
+                (catch 'match
+                  (while (re-search-forward "^\\s-*#\\{1,6\\}\\s-+\\(.+\\)$" nil t)
+                    (when (string= (my/jupyter-lab--selector-slug (match-string 1))
+                                   slug)
+                      (throw 'match t))))
+                (search-forward decoded nil t)))
+      (if found
+          (progn
+            (beginning-of-line)
+            (recenter))
+        (message "Jupytext selector not found: %s" decoded)))))
+
+(defun my/jupyter-lab-open-jupytext-target (target)
+  "Open TARGET's paired Jupytext script in Emacs.
+Return non-nil when TARGET was handled."
+  (pcase-let* ((`(,notebook . ,selector)
+                (my/jupyter-lab--split-notebook-target target)))
+    (when (string-suffix-p ".ipynb" notebook t)
+      (when-let* ((script (my/jupyter-lab-jupytext-script-for-notebook notebook)))
+        (find-file script)
+        (my/jupyter-lab--goto-selector selector)
+        t))))
 
 (defun my/jupyter-lab-open-path (abs-path &optional selector)
   "Open notebook ABS-PATH in xwidget, jumping to SELECTOR heading slug if given."

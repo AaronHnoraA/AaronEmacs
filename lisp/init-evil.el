@@ -216,8 +216,8 @@ Emacs state keep their local behavior."
 
 (defun my/evil-special-buffer-setup-h ()
   "Use Emacs state plus local `j/k' navigation in interactive special buffers."
+  (my/evil-special-buffer-navigation-mode 1)
   (when (bound-and-true-p evil-local-mode)
-    (my/evil-special-buffer-navigation-mode 1)
     (when (fboundp 'evil-emacs-state)
       (evil-emacs-state))))
 

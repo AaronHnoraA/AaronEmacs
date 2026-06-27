@@ -17,7 +17,7 @@ import { MeasuredWidget } from "./measured-widget.ts";
 import { scanInlineCommands, type InlineCommand } from "../../command-syntax.ts";
 import { renderMarkdownHTML } from "../../render-html.ts";
 import type { Range } from "@codemirror/state";
-import { blockMathRangesOverlapping, mergeOverlappingRanges, rangeOverlapsAny } from "../math-ranges.ts";
+import { blockMathRangesOverlapping, mergeOverlappingRanges, positionInsideAnyRange } from "../math-ranges.ts";
 import { scanCodeRanges } from "../code-ranges.ts";
 import { scanInlineMathRanges } from "../../inline-math.ts";
 import {
@@ -272,7 +272,7 @@ function buildInlineCommandDecos(
     for (const cmd of scanInlineCommands(text)) {
       const from = vFrom + cmd.fullFrom;
       const to = vFrom + cmd.fullTo;
-      if (rangeOverlapsAny(from, to, excludedRanges)) continue;
+      if (positionInsideAnyRange(from, excludedRanges)) continue;
       const cursorInside = sel.from <= to && sel.to >= from;
       if (cmd.name === "todo" && !cursorInside) {
         decos.push(
@@ -312,7 +312,7 @@ function activeInlineCommandKey(view: EditorView): string {
     for (const cmd of scanInlineCommands(line.text)) {
       const from = line.from + cmd.fullFrom;
       const to = line.from + cmd.fullTo;
-      if (rangeOverlapsAny(from, to, inlineMathRanges)) continue;
+      if (positionInsideAnyRange(from, inlineMathRanges)) continue;
       if (sel.from <= to && sel.to >= from) keys.push(`${from}:${to}`);
     }
   }

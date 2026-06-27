@@ -7,6 +7,7 @@ export {
   wantedPages,
   tagIndexPayload,
   getTodos,
+  updateTodoStatus,
   pathSuggestionsForFile,
   readNoteCodeRegion,
   syncRoamDb,
