@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
-import { assetRefsFromContent, storeAssetFromPath } from "../server/lib/assets.mjs";
+import { assetRefsFromContent, scanUnusedAssets, storeAssetFromPath } from "../server/lib/assets.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
 import { resolveMediaFile } from "../server/lib/media.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
@@ -32,6 +32,23 @@ describe("server asset refs", () => {
     expect(
       assetRefsFromContent("![remote](https://example.com/a.png)\n<a href=\"mailto:x@y.z\">x</a>", `${noteRoot}/a.md`),
     ).toEqual([]);
+  });
+
+  test("scans unused assets without reporting referenced files or note sources", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-unused-assets-"));
+    roots.push(root);
+    const notes = join(root, "roam");
+    await mkdir(join(notes, "attachments"), { recursive: true });
+    configure({ root: notes, workspaceRoot: root, pluginRoot: join(root, "plugin") });
+    await writeFile(join(notes, "topic.md"), "[used](./attachments/used.pdf)\n", "utf8");
+    await writeFile(join(notes, "attachments", "used.pdf"), "USED\n", "utf8");
+    await writeFile(join(notes, "attachments", "orphan.pdf"), "ORPHAN\n", "utf8");
+    await writeFile(join(notes, "attachments", "draft.md"), "# Draft\n", "utf8");
+    await writeFile(join(notes, "attachments", ".aaronnote-keep"), "", "utf8");
+
+    const assets = await scanUnusedAssets();
+
+    expect(assets.map((asset: { path: string }) => asset.path)).toEqual(["attachments/orphan.pdf"]);
   });
 
   test("copies native asset paths without base64 encoding", async () => {

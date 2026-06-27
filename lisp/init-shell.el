@@ -39,6 +39,11 @@
   :type 'integer
   :group 'term)
 
+(defcustom my/vterm-wheel-scroll-lines 5
+  "Number of lines to scroll for explicit VTerm wheel bindings."
+  :type 'integer
+  :group 'term)
+
 (defvar my/terminal-startup-cd-inhibited nil
   "When non-nil, start terminal buffers directly in the target directory.")
 
@@ -582,6 +587,48 @@ If popup is focused, kill it."
   "Prefer lower latency over output coalescing in the current VTerm buffer."
   (setq-local process-adaptive-read-buffering nil))
 
+(defun my/vterm--select-event-window (event)
+  "Select the live window from mouse wheel EVENT when possible."
+  (when-let* ((start (event-start event))
+              (window (posn-window start))
+              ((window-live-p window)))
+    (select-window window)))
+
+(defun my/vterm-wheel-scroll-up (event)
+  "Scroll the VTerm window toward older output from wheel EVENT."
+  (interactive "e")
+  (my/vterm--select-event-window event)
+  (condition-case nil
+      (scroll-down-command my/vterm-wheel-scroll-lines)
+    (error nil)))
+
+(defun my/vterm-wheel-scroll-down (event)
+  "Scroll the VTerm window toward newer output from wheel EVENT."
+  (interactive "e")
+  (my/vterm--select-event-window event)
+  (condition-case nil
+      (scroll-up-command my/vterm-wheel-scroll-lines)
+    (error nil)))
+
+(defun my/vterm-bind-wheel-events (map)
+  "Bind vertical and horizontal wheel events in MAP to vertical scrolling."
+  (dolist (event '([wheel-up]
+                   [wheel-left]
+                   [double-wheel-up]
+                   [double-wheel-left]
+                   [triple-wheel-up]
+                   [triple-wheel-left]
+                   [mouse-4]))
+    (define-key map event #'my/vterm-wheel-scroll-up))
+  (dolist (event '([wheel-down]
+                   [wheel-right]
+                   [double-wheel-down]
+                   [double-wheel-right]
+                   [triple-wheel-down]
+                   [triple-wheel-right]
+                   [mouse-5]))
+    (define-key map event #'my/vterm-wheel-scroll-down)))
+
 (defun my/vterm-copy-mode-setup-keys ()
   "Install Vim-like copy-mode keys scoped to VTerm."
   (keymap-set vterm-mode-map "M-c" #'my/vterm-copy-dwim)
@@ -596,7 +643,9 @@ If popup is focused, kill it."
   (keymap-set vterm-copy-mode-map "l" #'forward-char)
   (keymap-set vterm-copy-mode-map "y" #'my/vterm-copy-mode-done)
   (keymap-set vterm-copy-mode-map "q" #'my/vterm-copy-mode-quit)
-  (keymap-set vterm-copy-mode-map "<escape>" #'my/vterm-copy-mode-quit))
+  (keymap-set vterm-copy-mode-map "<escape>" #'my/vterm-copy-mode-quit)
+  (my/vterm-bind-wheel-events vterm-mode-map)
+  (my/vterm-bind-wheel-events vterm-copy-mode-map))
 
 (use-package vterm
   :ensure t

@@ -15,7 +15,7 @@ import { equationTagsFromText, getEquationTagHits } from "../src/equation-tags.t
 import { INLINE_MATH_RE, isLikelyInlineMath } from "../src/inline-math.ts";
 import { formatMathRenderError, renderMathLazy } from "../src/math-render.ts";
 import { hrefProtocol, safeHref } from "../src/url-safety.ts";
-import { api } from "./api-client.ts";
+import { api, type TodoItem } from "./api-client.ts";
 import { Epoch } from "../src/async-epoch.ts";
 import { CoalescedTimer } from "../src/coalesced-timer.ts";
 import { blobToBase64 } from "../src/paste.ts";
@@ -65,6 +65,7 @@ root.innerHTML = `
       <span data-readonly hidden>READ ONLY</span>
       <span data-status>Opening...</span>
       <button type="button" data-toc-toggle aria-expanded="false">TOC</button>
+      <button type="button" data-agenda-toggle aria-expanded="false">Agenda</button>
       <button type="button" data-graph-toggle aria-expanded="false">Graph</button>
       <button type="button" data-tools-toggle aria-expanded="false">Tools</button>
       <button type="button" data-source>Source</button>
@@ -80,6 +81,7 @@ const modeLabel = root.querySelector<HTMLElement>("[data-vim-mode]")!;
 const readOnlyLabel = root.querySelector<HTMLElement>("[data-readonly]")!;
 const statusLabel = root.querySelector<HTMLElement>("[data-status]")!;
 const tocButton = root.querySelector<HTMLButtonElement>("[data-toc-toggle]")!;
+const agendaButton = root.querySelector<HTMLButtonElement>("[data-agenda-toggle]")!;
 const graphButton = root.querySelector<HTMLButtonElement>("[data-graph-toggle]")!;
 const toolsButton = root.querySelector<HTMLButtonElement>("[data-tools-toggle]")!;
 const sourceButton = root.querySelector<HTMLButtonElement>("[data-source]")!;
@@ -245,6 +247,7 @@ let completionContextKey = "";
 let completionPendingItems: SnippetSummary[] | null = null;
 let pendingOpenHash = "";
 let pendingOpenDomTarget = "";
+let pendingTodoTarget: TodoTarget | null = null;
 let snippetPopupItems: SnippetSummary[] = [];
 let snippetPopupIndex = 0;
 let snippetDeleteBefore = 0;
@@ -738,7 +741,7 @@ function applyOpenedNote(
   applyIndexPayload(opened);
   if (Array.isArray(opened.snippets)) snippets = opened.snippets;
   currentMtimeMs = Number(opened.mtimeMs) || 0;
-  const remembered = !opened.selection && !pendingOpenHash && !pendingOpenDomTarget
+  const remembered = !opened.selection && !pendingOpenHash && !pendingOpenDomTarget && !pendingTodoTarget
     ? rememberedCursorPosition(currentFile, rememberedPositions)
     : undefined;
   applyingContent = true;
@@ -782,12 +785,16 @@ function applyOpenedNote(
   scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
   const targetHash = pendingOpenHash;
   const targetDom = pendingOpenDomTarget;
+  const targetTodo = pendingTodoTarget;
   pendingOpenHash = "";
   pendingOpenDomTarget = "";
-  if (targetHash || targetDom) {
+  pendingTodoTarget = null;
+  if (targetHash || targetDom || targetTodo) {
     window.requestAnimationFrame(() => {
+      if (targetTodo && jumpToTodoTarget(targetTodo)) return;
       if (targetDom && jumpToDomTarget(targetDom)) return;
       if (targetHash && jumpToHash(targetHash)) return;
+      if (targetTodo) { setStatus("Todo location not found"); return; }
       setStatus(targetDom ? `DOM target not found: ${targetDom}` : `Anchor not found: ${targetHash}`);
     });
   }
@@ -2073,7 +2080,407 @@ function showRoamToolRows(title: string, rows: Array<{ title: string; detail?: s
     frag.appendChild(item);
   }
   roamToolsList.replaceChildren(frag);
+  roamToolsPanel.classList.remove("is-agenda");
   roamToolsPanel.hidden = false;
+}
+
+type AgendaMode = "open" | "all" | "done" | "cancelled" | "today" | "overdue";
+type TodoTarget = { index?: number; line?: number; source?: string };
+
+let agendaTodos: TodoItem[] = [];
+let agendaMode: AgendaMode = "open";
+let agendaQuery = "";
+
+function todoString(todo: TodoItem, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = todo[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number") return String(value);
+  }
+  return "";
+}
+
+function todoStatus(todo: TodoItem): string {
+  const status = todoString(todo, "status").toLowerCase();
+  if (!status || status === "open" || status === "unchecked") return "todo";
+  if (status === "cancel" || status === "canceled") return "cancelled";
+  if (status === "complete" || status === "completed") return "done";
+  return status;
+}
+
+function todoDate(todo: TodoItem): string {
+  return todoString(todo, "ddl", "deadline", "due", "date").slice(0, 10);
+}
+
+function todoClosed(todo: TodoItem): boolean {
+  return ["done", "cancelled"].includes(todoStatus(todo));
+}
+
+function todoToday(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function todoOverdue(todo: TodoItem): boolean {
+  const date = todoDate(todo);
+  return !!date && date < todoToday() && !todoClosed(todo);
+}
+
+function todoTitle(todo: TodoItem): string {
+  return todoString(todo, "title", "noteTitle", "note", "noteId", "path", "file") || "Untitled";
+}
+
+function todoText(todo: TodoItem): string {
+  return todoString(todo, "text", "context", "source") || "(empty todo)";
+}
+
+function todoTags(todo: TodoItem): string[] {
+  const tags = Array.isArray(todo.tags) ? todo.tags : [];
+  const inlineTags = Array.isArray(todo.inlineTags) ? todo.inlineTags : [];
+  return [...tags, ...inlineTags].map(String).filter(Boolean);
+}
+
+function todoHaystack(todo: TodoItem): string {
+  return [
+    todoStatus(todo),
+    todoDate(todo),
+    todoTitle(todo),
+    todoText(todo),
+    todoString(todo, "id", "noteId", "roamId", "path", "file"),
+    ...todoTags(todo),
+  ].join(" ").toLowerCase();
+}
+
+function agendaMatchesQuery(todo: TodoItem): boolean {
+  const query = agendaQuery.trim().toLowerCase();
+  if (!query) return true;
+  return query.split(/\s+/).every((term) => todoHaystack(todo).includes(term));
+}
+
+function agendaVisibleTodos(): TodoItem[] {
+  return agendaTodos.filter((todo) => {
+    if (!agendaMatchesQuery(todo)) return false;
+    switch (agendaMode) {
+      case "all": return true;
+      case "done": return todoStatus(todo) === "done";
+      case "cancelled": return todoStatus(todo) === "cancelled";
+      case "today": return !todoClosed(todo) && todoDate(todo) === todoToday();
+      case "overdue": return todoOverdue(todo);
+      case "open":
+      default: return !todoClosed(todo);
+    }
+  }).sort((a, b) => {
+    const ad = todoDate(a) || "9999-99-99";
+    const bd = todoDate(b) || "9999-99-99";
+    return ad.localeCompare(bd)
+      || todoStatus(a).localeCompare(todoStatus(b))
+      || todoTitle(a).localeCompare(todoTitle(b))
+      || todoText(a).localeCompare(todoText(b));
+  });
+}
+
+function agendaCounts(): Record<AgendaMode, number> {
+  return {
+    open: agendaTodos.filter((todo) => !todoClosed(todo)).length,
+    all: agendaTodos.length,
+    done: agendaTodos.filter((todo) => todoStatus(todo) === "done").length,
+    cancelled: agendaTodos.filter((todo) => todoStatus(todo) === "cancelled").length,
+    today: agendaTodos.filter((todo) => !todoClosed(todo) && todoDate(todo) === todoToday()).length,
+    overdue: agendaTodos.filter(todoOverdue).length,
+  };
+}
+
+function todoTargetFromItem(todo: TodoItem): TodoTarget {
+  return {
+    index: typeof todo.index === "number" ? todo.index : undefined,
+    line: typeof todo.line === "number" ? todo.line : undefined,
+    source: todoString(todo, "source"),
+  };
+}
+
+// Resolve a todo's source range in the live editor document. Prefers the
+// scanned offset, falls back to a source/line search so it survives small drifts.
+function todoRangeInEditor(target: TodoTarget): { from: number; to: number } | null {
+  const doc = editor.getMarkdown();
+  const source = target.source || "";
+  const firstLine = source.split("\n")[0] || "";
+  if (typeof target.index === "number" && target.index >= 0 && target.index <= doc.length) {
+    if (source && doc.slice(target.index, target.index + source.length) === source) {
+      return { from: target.index, to: target.index + source.length };
+    }
+    if (firstLine && doc.slice(target.index, target.index + firstLine.length) === firstLine) {
+      return { from: target.index, to: target.index + firstLine.length };
+    }
+  }
+  if (firstLine) {
+    const found = doc.indexOf(firstLine);
+    if (found >= 0) return { from: found, to: found + firstLine.length };
+  }
+  if (typeof target.line === "number" && target.line > 0) {
+    let from = 0;
+    for (let line = 1; line < target.line; line += 1) {
+      const next = doc.indexOf("\n", from);
+      if (next < 0) { from = -1; break; }
+      from = next + 1;
+    }
+    if (from >= 0 && from <= doc.length) return { from, to: from };
+  }
+  return null;
+}
+
+function jumpToTodoTarget(target: TodoTarget): boolean {
+  const range = todoRangeInEditor(target);
+  if (!range) return false;
+  editor.setMarkdownSelection(range.from, Math.min(range.to, editor.getMarkdownLength()));
+  editor.revealCursor();
+  editor.focus();
+  noteCursorPositionEvent();
+  return true;
+}
+
+function agendaOpenTodo(todo: TodoItem): void {
+  const file = todoString(todo, "file");
+  if (!file) return;
+  const target = todoTargetFromItem(todo);
+  closeRoamToolsPanel();
+  if (sameOpenFile(file)) {
+    if (!jumpToTodoTarget(target)) setStatus("Todo location not found");
+    return;
+  }
+  pendingTodoTarget = target;
+  void openFile(file);
+}
+
+function todoStatusSourcePrefix(status: string): string {
+  const s = (status || "todo").toLowerCase();
+  return s === "todo" || s === "open" || s === "unchecked" ? "@@todo " : `@@todo(${s}) `;
+}
+
+type TodoUpdateResult = {
+  file?: string;
+  from?: number;
+  to?: number;
+  source?: string;
+  nextSource?: string;
+  mtimeMs?: number;
+};
+
+function fileBasename(path: string): string {
+  return String(path || "").split(/[\\/]/).pop() || String(path || "");
+}
+
+// True when two paths point at the open note. `todo.file`/`result.file` come
+// from different server normalizations than `currentFile`, so exact-string
+// comparison alone is too strict; fall back to basename equality.
+function sameOpenFile(path: string): boolean {
+  const file = String(path || "");
+  if (!file || !currentFile) return false;
+  return file === currentFile || fileBasename(file) === fileBasename(currentFile);
+}
+
+// Reflect a status change in the open editor so the CM6 page updates immediately
+// instead of going stale until the next reload. The server already wrote the same
+// change to disk, so we suppress dirty tracking and resync mtime to avoid a false
+// save conflict. The change is located by the server's exact offset+source first,
+// then by a source-text search so it survives unsaved-edit drift.
+function applyTodoStatusInEditor(todo: TodoItem, status: string, result: TodoUpdateResult): void {
+  if (!sameOpenFile(result.file || todoString(todo, "file"))) return;
+  const doc = editor.getMarkdown();
+  const docLen = doc.length;
+  const oldSource = String(result.source || todoString(todo, "source") || "");
+  let from = -1;
+  let to = -1;
+  const serverFrom = Number(result.from);
+  const serverTo = Number(result.to);
+  // 1) exact server offsets when the source still matches there
+  if (oldSource && Number.isInteger(serverFrom) && serverFrom >= 0 && serverTo > serverFrom
+    && serverTo <= docLen && doc.slice(serverFrom, serverTo) === oldSource) {
+    from = serverFrom;
+    to = serverTo;
+  }
+  // 2) scanned offset on the todo item
+  if (from < 0 && oldSource && typeof todo.index === "number"
+    && todo.index >= 0 && todo.index + oldSource.length <= docLen
+    && doc.slice(todo.index, todo.index + oldSource.length) === oldSource) {
+    from = todo.index;
+    to = todo.index + oldSource.length;
+  }
+  // 3) source-text search (survives offset drift from unsaved edits)
+  if (from < 0 && oldSource) {
+    const found = doc.indexOf(oldSource);
+    if (found >= 0) { from = found; to = found + oldSource.length; }
+  }
+  // 4) last resort: line/index range finder
+  if (from < 0) {
+    const range = todoRangeInEditor(todoTargetFromItem(todo));
+    if (!range) return;
+    from = range.from;
+    to = range.to;
+  }
+  const current = editor.markdownBetween(from, to);
+  const next = result.nextSource && current === oldSource
+    ? String(result.nextSource)
+    : current.replace(/^@@todo(?:\([^)\n]*\))?[ \t]+/i, todoStatusSourcePrefix(status));
+  if (next === current) return;
+  applyingContent = true;
+  editor.replaceMarkdownRange(from, to, next);
+  applyingContent = false;
+  const mtimeMs = Number(result.mtimeMs) || 0;
+  if (mtimeMs) currentMtimeMs = mtimeMs;
+  updateTitle();
+}
+
+async function agendaUpdateTodo(todo: TodoItem, status: string): Promise<void> {
+  try {
+    const result = await api.notes.updateTodo({
+      file: todoString(todo, "file"),
+      id: todoString(todo, "id"),
+      index: todo.index,
+      source: todoString(todo, "source"),
+      text: todoText(todo),
+      status,
+    }) as TodoUpdateResult;
+    applyTodoStatusInEditor(todo, status, result);
+    const payload = await api.notes.todos(currentFile);
+    agendaTodos = Array.isArray(payload.todos) ? payload.todos : [];
+    renderAgendaTool();
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : "Todo update failed");
+  }
+}
+
+function renderAgendaTool(): void {
+  roamToolsTitle.textContent = "Agenda";
+  const counts = agendaCounts();
+  const visible = agendaVisibleTodos();
+  const rootEl = document.createElement("div");
+  rootEl.className = "aaronnote-agenda-tool";
+
+  const filters = document.createElement("div");
+  filters.className = "aaronnote-agenda-filters";
+  const filterLabels: Array<[AgendaMode, string]> = [
+    ["open", "Open"],
+    ["today", "Today"],
+    ["overdue", "Overdue"],
+    ["all", "All"],
+    ["done", "Done"],
+    ["cancelled", "Cancelled"],
+  ];
+  for (const [mode, label] of filterLabels) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = mode === agendaMode ? "is-active" : "";
+    button.textContent = `${label} ${counts[mode]}`;
+    button.addEventListener("click", () => {
+      agendaMode = mode;
+      renderAgendaTool();
+    });
+    filters.appendChild(button);
+  }
+
+  const search = document.createElement("input");
+  search.type = "search";
+  search.value = agendaQuery;
+  search.placeholder = "Search status, tag, title, roam id, file, date...";
+  search.addEventListener("input", () => {
+    agendaQuery = search.value;
+    renderAgendaTool();
+  });
+  filters.appendChild(search);
+  rootEl.appendChild(filters);
+
+  const meta = document.createElement("div");
+  meta.className = "aaronnote-agenda-meta";
+  meta.textContent = `${visible.length} shown - ${todoToday()}`;
+  rootEl.appendChild(meta);
+
+  const list = document.createElement("div");
+  list.className = "aaronnote-agenda-list";
+  if (visible.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "aaronnote-empty";
+    empty.textContent = "No matching tasks";
+    list.appendChild(empty);
+  }
+  for (const todo of visible) {
+    const row = document.createElement("div");
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
+    row.className = "aaronnote-agenda-row";
+    row.dataset.status = todoStatus(todo);
+    row.addEventListener("click", () => agendaOpenTodo(todo));
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        agendaOpenTodo(todo);
+      }
+    });
+
+    const status = document.createElement("span");
+    status.className = "aaronnote-agenda-status";
+    status.textContent = todoStatus(todo).toUpperCase();
+
+    const date = document.createElement("span");
+    date.className = "aaronnote-agenda-date";
+    date.textContent = todoDate(todo) || "no date";
+
+    // Single-file agenda: the note title/file is redundant, so show only the
+    // todo text itself.
+    const body = document.createElement("span");
+    body.className = "aaronnote-agenda-body";
+    const text = document.createElement("span");
+    text.textContent = todoText(todo);
+    body.append(text);
+
+    const line = document.createElement("span");
+    line.className = "aaronnote-agenda-line";
+    const lineValue = typeof todo.line === "number" ? todo.line : "";
+    line.textContent = lineValue ? `L${lineValue}` : "";
+
+    const actions = document.createElement("span");
+    actions.className = "aaronnote-agenda-actions";
+    const closed = todoClosed(todo);
+    const actionLabels: Array<[string, string]> = closed
+      ? [["Reopen", "todo"], ["Doing", "doing"]]
+      : [["Done", "done"], ["Cancel", "cancelled"]];
+    for (const [label, nextStatus] of actionLabels) {
+      const action = document.createElement("button");
+      action.type = "button";
+      action.textContent = label;
+      action.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void agendaUpdateTodo(todo, nextStatus);
+      });
+      actions.appendChild(action);
+    }
+
+    row.append(status, date, body, line, actions);
+    list.appendChild(row);
+  }
+  rootEl.appendChild(list);
+  roamToolsList.replaceChildren(rootEl);
+  roamToolsPanel.classList.add("is-agenda");
+  roamToolsPanel.hidden = false;
+  agendaButton.setAttribute("aria-expanded", "true");
+}
+
+async function openAgendaTool(): Promise<void> {
+  try {
+    roamToolsTitle.textContent = "Agenda";
+    roamToolsList.replaceChildren();
+    const loading = document.createElement("div");
+    loading.className = "aaronnote-empty";
+    loading.textContent = "Loading agenda...";
+    roamToolsList.appendChild(loading);
+    roamToolsPanel.classList.add("is-agenda");
+    roamToolsPanel.hidden = false;
+    const payload = await api.notes.todos(currentFile);
+    agendaTodos = Array.isArray(payload.todos) ? payload.todos : [];
+    agendaMode = "open";
+    renderAgendaTool();
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : "Agenda failed");
+  }
 }
 
 async function renameRoamTagTool(): Promise<void> {
@@ -2216,6 +2623,8 @@ function closeToolsPanel(): void {
 
 function closeRoamToolsPanel(): void {
   roamToolsPanel.hidden = true;
+  roamToolsPanel.classList.remove("is-agenda");
+  agendaButton.setAttribute("aria-expanded", "false");
 }
 
 function editorSurfaceVisible(): boolean {
@@ -3619,6 +4028,13 @@ function runHostCommand(detail: unknown): boolean {
 tocButton.addEventListener("click", () => {
   floatingTocPanel.toggle();
   updateFloatingToc();
+});
+agendaButton.addEventListener("click", () => {
+  if (!roamToolsPanel.hidden && roamToolsPanel.classList.contains("is-agenda")) {
+    closeRoamToolsPanel();
+    return;
+  }
+  void openAgendaTool();
 });
 toolsButton.addEventListener("click", toggleToolsPanel);
 toolsClose.addEventListener("click", closeToolsPanel);

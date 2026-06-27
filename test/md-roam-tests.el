@@ -366,6 +366,74 @@ source: roam/demo/analysis.md
           (when-let* ((buffer (get-buffer name)))
             (kill-buffer buffer)))))))
 
+(ert-deftest my/aaronnote-roam-orphaned-assets-report-renders-api-result ()
+  (my/aaronnote-roam-test-with-vault
+    (let ((my/aaronnote--ready t)
+          (asset-file (expand-file-name "attachments/orphan.pdf" root)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'my/aaronnote--api-call)
+                     (lambda (channel args callback)
+                       (should (equal channel
+                                      "aaronnote:api:assets:scan-orphans"))
+                       (should (equal args []))
+                       (funcall callback
+                                `((type . "unused-assets")
+                                  (root . ,root)
+                                  (assets . [((file . ,asset-file)
+                                              (path . "attachments/orphan.pdf")
+                                              (name . "orphan.pdf")
+                                              (type . "application/pdf")
+                                              (size . 2048)
+                                              (mtimeMs . 1800000000000)
+                                              (isImage . :json-false))])))))
+                    ((symbol-function 'display-buffer)
+                     (lambda (buffer &rest _args) buffer)))
+            (my/aaronnote-roam-report-orphaned-assets)
+            (with-current-buffer "*roam-orphaned-assets*"
+              (should (derived-mode-p 'my/aaronnote-roam-ui-mode))
+              (should (functionp my/aaronnote-roam-ui-refresh-function))
+              (should (string-match-p "Orphaned attachments" (buffer-string)))
+              (should (string-match-p "attachments/orphan.pdf" (buffer-string)))
+              (should (string-match-p "2k" (buffer-string)))))
+        (when-let* ((buffer (get-buffer "*roam-orphaned-assets*")))
+          (kill-buffer buffer))))))
+
+(ert-deftest my/aaronnote-roam-trash-orphaned-assets-confirms-and-refreshes ()
+  (my/aaronnote-roam-test-with-vault
+    (let* ((my/aaronnote--ready t)
+           (asset-file (expand-file-name "attachments/orphan.pdf" root))
+           (asset `((file . ,asset-file)
+                    (path . "attachments/orphan.pdf")
+                    (type . "application/pdf")
+                    (size . 2048)
+                    (mtimeMs . 1800000000000)))
+           called-channel
+           called-args)
+      (unwind-protect
+          (cl-letf (((symbol-function 'yes-or-no-p)
+                     (lambda (&rest _args) t))
+                    ((symbol-function 'my/aaronnote--api-call)
+                     (lambda (channel args callback)
+                       (setq called-channel channel
+                             called-args args)
+                       (funcall callback
+                                `((type . "unused-assets-trash")
+                                  (ok . t)
+                                  (trashed . [,asset])
+                                  (skipped . [])
+                                  (assets . [])))))
+                    ((symbol-function 'display-buffer)
+                     (lambda (buffer &rest _args) buffer)))
+            (my/aaronnote-roam--trash-orphaned-assets (list asset))
+            (should (equal called-channel
+                           "aaronnote:api:assets:trash-orphans"))
+            (should (equal (aref called-args 0) (list asset-file)))
+            (with-current-buffer "*roam-orphaned-assets*"
+              (should (string-match-p "No orphaned attachments"
+                                      (buffer-string)))))
+        (when-let* ((buffer (get-buffer "*roam-orphaned-assets*")))
+          (kill-buffer buffer))))))
+
 (ert-deftest my/aaronnote-roam-agenda-keeps-today-out-of-overdue ()
   (my/aaronnote-roam-test-with-vault
     (let ((todo '(:note "20260605T120000-topology"
@@ -487,6 +555,7 @@ source: roam/demo/analysis.md
             (my/aaronnote-roam-agenda)
             (with-current-buffer "*roam-agenda*"
               (goto-char (point-min))
+              (search-forward "Review compact workbench")
               (search-forward " Done ")
               (push-button (button-at (1- (point)))))
             (should (equal (car updated) "done"))
@@ -546,7 +615,8 @@ source: roam/demo/analysis.md
           (my/aaronnote-roam-db-status)
           (with-current-buffer "*roam-db-status*"
             (should (string-match-p "Roam activity" (buffer-string)))
-            (should (string-match-p "\\[[ 0-9][ 0-9]\\]" (buffer-string)))))
+            (should (string-match-p "W1" (buffer-string)))
+            (should (string-match-p "Sun" (buffer-string)))))
       (when-let* ((buffer (get-buffer "*roam-db-status*")))
         (kill-buffer buffer)))))
 
@@ -558,7 +628,8 @@ source: roam/demo/analysis.md
           (my/aaronnote-roam-management)
           (with-current-buffer "*aaronnote-roam-management*"
             (should (string-match-p "Roam activity" (buffer-string)))
-            (should (string-match-p "\\[[ 0-9][ 0-9]\\]" (buffer-string)))))
+            (should (string-match-p "W1" (buffer-string)))
+            (should (string-match-p "Sun" (buffer-string)))))
       (when-let* ((buffer (get-buffer "*aaronnote-roam-management*")))
         (kill-buffer buffer)))))
 

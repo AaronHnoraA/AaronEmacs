@@ -41753,7 +41753,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文���觉���正半定保证测量概率非负；迹为一保证总概率为一。
+中文����觉���正半定保证测量概率非负；迹为一保证总概率为一。
 #+end note
 
 The expectation value of an observable $A$ in state $\rho$ is
@@ -113177,7 +113177,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文直觉：正半定保证测量概率非负；迹为一保证总概率为一。
+中文直觉：正半定保证测量概率非负；迹为一保证总概率为一��
 #+end note
 
 The expectation value of an observable $A$ in state $\rho$ is
@@ -143576,7 +143576,7 @@ $$
 
 ## 263.9. Algorithmic skeleton
 
-The following pseudocode is not intended to solve tensor isomorphism. It
+The following pseudocode is not intended to solve tensor isomorphism. It this is hard sssssssssssssssssssssssssssss sssssssssssssss sssssss I will do this
 only gives a schematic form of an invariant-refinement strategy. this is hard to see that this ishardf this is hard ssssssssssssssssssssssssssssssss I will do this 
 #+begin proof
 asdasdas 
@@ -143682,7 +143682,7 @@ $$
 $$
 
 In computational complexity, the representation matters because algorithms
-operate on encodings, not on abstract objects directly.
+operate on encodings, not on abstract objects directly. Good improve
 #+end summary
 
 ## 264.1. Quantum states and density operators
@@ -232220,7 +232220,7 @@ Coordinates are useful for computation because they give arrays of field
 elements. Invariance is useful for mathematics because it identifies the
 features of the object that do not depend on the chosen basis.
 
-中文直觉：坐标是“输入格式”，不变量是“结构本身留下的影子”。
+中文直觉：坐标是“��入格式”，不变量是“结构本身留下的影子”。
 #+end remark
 
 If $g \in \operatorname{GL}(V)$ and $h \in \operatorname{GL}(W)$, a change
@@ -252316,7 +252316,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文直觉：正半定保证测量概率非负；迹为一保证总概率为一。
+中文直觉：正半定保证测量概率非负��迹为一保证总概率为一。
 #+end note
 
 The expectation value of an observable $A$ in state $\rho$ is

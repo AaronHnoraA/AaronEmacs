@@ -472,6 +472,21 @@ button:disabled {
   display: none;
 }
 
+/* Agenda opens as a centered modal rather than the bottom-right docked panel. */
+.aaronnote-roam-tools.is-agenda {
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(760px, calc(100vw - 48px));
+  max-height: min(78vh, calc(100vh - 84px));
+}
+
+.aaronnote-roam-tools.is-agenda .aaronnote-roam-tools-list {
+  max-height: calc(min(78vh, 100vh - 84px) - 38px);
+}
+
 .aaronnote-roam-tools-list {
   max-height: calc(min(460px, 100vh - 84px) - 38px);
   overflow: auto;
@@ -523,6 +538,140 @@ button:disabled {
 .aaronnote-roam-tool-body span {
   color: var(--aaron-muted);
   font: 11px/1.2 var(--aaron-font-sans);
+}
+
+.aaronnote-agenda-tool {
+  display: grid;
+  gap: 8px;
+  font-family: var(--aaron-font-sans);
+}
+
+.aaronnote-agenda-filters {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(6, max-content) minmax(160px, 1fr);
+  gap: 6px;
+  padding: 2px 0 6px;
+  background: var(--aaron-paper);
+  border-bottom: 1px solid var(--aaron-paper-line);
+}
+
+.aaronnote-agenda-filters button,
+.aaronnote-agenda-filters input {
+  height: 28px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  background: var(--aaron-paper-soft);
+  color: var(--aaron-ink);
+  font: 700 11px/1 var(--aaron-font-sans);
+}
+
+.aaronnote-agenda-filters button {
+  padding: 0 8px;
+}
+
+.aaronnote-agenda-filters button.is-active {
+  border-color: var(--aaron-red-dark);
+  color: var(--aaron-red-dark);
+  background: color-mix(in srgb, var(--aaron-red-dark), transparent 90%);
+}
+
+.aaronnote-agenda-filters input {
+  min-width: 0;
+  padding: 0 9px;
+  font-weight: 500;
+}
+
+.aaronnote-agenda-meta {
+  color: var(--aaron-muted);
+  font: 11px/1.2 var(--aaron-font-sans);
+}
+
+.aaronnote-agenda-list {
+  display: grid;
+  gap: 1px;
+}
+
+.aaronnote-agenda-row {
+  width: 100%;
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 78px 86px minmax(0, 1fr) 42px 104px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 5px 7px;
+  background: var(--aaron-paper-soft);
+  color: var(--aaron-ink);
+  text-align: left;
+}
+
+.aaronnote-agenda-row:hover {
+  border-color: var(--aaron-paper-line);
+  background: var(--aaron-paper);
+}
+
+.aaronnote-agenda-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--aaron-red-dark);
+  font: 800 10px/1 var(--aaron-font-sans);
+}
+
+.aaronnote-agenda-row[data-status="done"] .aaronnote-agenda-status {
+  color: var(--aaron-green, #2f8f5b);
+}
+
+.aaronnote-agenda-row[data-status="cancelled"] .aaronnote-agenda-status {
+  color: var(--aaron-muted);
+}
+
+.aaronnote-agenda-date,
+.aaronnote-agenda-line {
+  color: var(--aaron-muted);
+  font: 11px/1 var(--aaron-font-mono);
+}
+
+.aaronnote-agenda-body {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: baseline;
+}
+
+.aaronnote-agenda-body span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--aaron-ink);
+  font: 12px/1.2 var(--aaron-font-sans);
+}
+
+.aaronnote-agenda-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.aaronnote-agenda-actions button {
+  height: 24px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  padding: 0 6px;
+  background: var(--aaron-paper);
+  color: var(--aaron-muted);
+  font: 700 10px/1 var(--aaron-font-sans);
+}
+
+.aaronnote-agenda-actions button:hover {
+  border-color: var(--aaron-red-dark);
+  color: var(--aaron-red-dark);
 }
 
 .aaronnote-empty {
@@ -630,6 +779,10 @@ button:disabled {
   box-shadow: var(--aaron-shadow);
   backdrop-filter: blur(8px);
   resize: horizontal;
+  /* Panel is anchored to the right edge, so the resize grip belongs on the
+     left: rtl moves the CSS resize handle to the bottom-left corner, making
+     drag direction match the way the panel grows (leftward). */
+  direction: rtl;
 }
 
 .aaronnote-floating-toc.is-collapsed {
@@ -637,6 +790,7 @@ button:disabled {
 }
 
 .aaronnote-floating-toc nav {
+  direction: ltr;
   max-height: min(520px, calc(100vh - 58px));
   overflow: auto;
   padding: 6px;
@@ -878,6 +1032,28 @@ button:disabled {
     left: 8px;
     right: 8px;
     width: auto;
+  }
+
+  .aaronnote-agenda-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .aaronnote-agenda-filters input {
+    grid-column: 1 / -1;
+  }
+
+  .aaronnote-agenda-row {
+    grid-template-columns: 70px 82px minmax(0, 1fr);
+  }
+
+  .aaronnote-agenda-line,
+  .aaronnote-agenda-actions {
+    display: none;
+  }
+
+  .aaronnote-agenda-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
   }
 }
 

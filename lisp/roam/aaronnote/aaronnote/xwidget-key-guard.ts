@@ -83,21 +83,27 @@ function xwidgetControlText(text: string | null): boolean {
   return typeof text === "string" && /[\u0008\u001b\u007f]/u.test(text);
 }
 
+function controlKeyFromText(text: string | null): XwidgetControlKey | null {
+  if (!xwidgetControlText(text)) return null;
+  if (text!.includes("\u001b")) return "Escape";
+  if (text!.includes("\u007f")) return "Delete";
+  if (text!.includes("\u0008")) return "Backspace";
+  return null;
+}
+
 function controlKeyFromKeyboardEvent(event: KeyboardEvent): XwidgetControlKey | null {
-  return XWIDGET_CONTROL_KEYS.has(event.key as XwidgetControlKey)
-    ? event.key as XwidgetControlKey
-    : null;
+  if (XWIDGET_CONTROL_KEYS.has(event.key as XwidgetControlKey)) {
+    return event.key as XwidgetControlKey;
+  }
+  if (event.key === "Del" || event.key === "DeleteForward") return "Delete";
+  if (event.key === "Esc") return "Escape";
+  return controlKeyFromText(event.key);
 }
 
 function controlKeyFromInputEvent(event: InputEvent): XwidgetControlKey | null {
   if (event.inputType === "deleteContentBackward") return "Backspace";
   if (event.inputType === "deleteContentForward") return "Delete";
-  const data = event.data;
-  if (!xwidgetControlText(data)) return null;
-  if (data!.includes("\u001b")) return "Escape";
-  if (data!.includes("\u007f")) return "Delete";
-  if (data!.includes("\u0008")) return "Backspace";
-  return null;
+  return controlKeyFromText(event.data);
 }
 
 function specialKeyFromKeyboardEvent(event: KeyboardEvent): XwidgetSpecialKey | null {

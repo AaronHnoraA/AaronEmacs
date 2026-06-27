@@ -27,6 +27,7 @@
 (declare-function all-the-icons-fileicon "all-the-icons" (icon-name &rest args))
 (declare-function dashboard-icon-for-file "dashboard-widgets" (file &rest args))
 (declare-function my/aaronnote-roam-dashboard-insert-heatmap "init-md-roam" (&optional days))
+(defvar dashboard-mode-map)
 
 (defun my/file-icon-for-file (file &rest args)
   "Return a custom icon for FILE, or nil.
@@ -188,7 +189,10 @@ height in pixels."
 (use-package nerd-icons
   :ensure t
   :when (display-graphic-p)
-  :demand t)
+  :demand t
+  :config
+  (when (fboundp 'my/font--apply-icon-faces)
+    (my/font--apply-icon-faces)))
 
 (defun my/dashboard-upgrade-packages (&rest _)
   "Upgrade installed packages from the dashboard button."
@@ -206,6 +210,20 @@ height in pixels."
             (require 'init-md-roam nil t))
     (when (fboundp 'my/aaronnote-roam-dashboard-insert-heatmap)
       (my/aaronnote-roam-dashboard-insert-heatmap))))
+
+(defun my/dashboard-ignore-horizontal-wheel (_event)
+  "Ignore horizontal wheel EVENT in dashboard buffers."
+  (interactive "e"))
+
+(defun my/dashboard-bind-horizontal-wheel ()
+  "Keep dashboard wheel input vertical-only."
+  (dolist (event '([wheel-left]
+                   [wheel-right]
+                   [double-wheel-left]
+                   [double-wheel-right]
+                   [triple-wheel-left]
+                   [triple-wheel-right]))
+    (define-key dashboard-mode-map event #'my/dashboard-ignore-horizontal-wheel)))
 
 (use-package dashboard
   :ensure t
@@ -232,6 +250,7 @@ height in pixels."
   (advice-add 'dashboard-initialize :around #'my/dashboard-initialize-full-frame-a)
   (advice-remove 'dashboard-icon-for-file #'my/dashboard-icon-for-file-a)
   (advice-add 'dashboard-icon-for-file :around #'my/dashboard-icon-for-file-a)
+  (my/dashboard-bind-horizontal-wheel)
 
   :custom
   ;; Keep the dashboard banner in `etc/` with other local UI config.
@@ -253,9 +272,10 @@ height in pixels."
                                dashboard-insert-navigator
                                dashboard-insert-newline
                                dashboard-insert-init-info
-                               dashboard-insert-items
                                dashboard-insert-newline
                                my/dashboard-insert-roam-heatmap
+                               dashboard-insert-newline
+                               dashboard-insert-items
                                dashboard-insert-newline
                                dashboard-insert-footer)))
 
@@ -359,6 +379,8 @@ height in pixels."
 
 (defun my/dashboard-apply-ui ()
   "Apply local UI styling to the dashboard."
+  (setq-local truncate-lines nil)
+  (setq-local auto-hscroll-mode nil)
   (when (display-graphic-p)
     (let ((signature (list custom-enabled-themes
                            (face-attribute 'default :background nil t)

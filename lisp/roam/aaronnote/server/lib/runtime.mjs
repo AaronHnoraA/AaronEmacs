@@ -81,7 +81,7 @@ let copilotLogRecording = false;
 let roamSyncTimer = null;
 let roamSyncInFlight = null;
 let queuedRoamSyncNotes = null;
-let queuedRoamSyncChangedFiles = [];
+let queuedRoamSyncChangedFiles = new Set();
 let atomicWriteCounter = 0;
 const noteCodeFileCache = new Map();
 const noteCodeFilePending = new Map();
@@ -2991,12 +2991,16 @@ export async function updateTodoStatus(body = {}) {
   const oldSource = content.slice(from, to);
   const nextSource = replaceTodoStatusInSource(oldSource, status);
   if (nextSource === oldSource) {
-    return { type: "todo-updated", ok: true, file, status, changed: false };
+    let mtimeMs = 0;
+    try { mtimeMs = (await stat(file)).mtimeMs; } catch {}
+    return { type: "todo-updated", ok: true, file, status, changed: false, from, to, source: oldSource, mtimeMs };
   }
 
   await atomicWriteFile(file, content.slice(0, from) + nextSource + content.slice(to), "utf8");
   markNotesDirty(file);
-  return { type: "todo-updated", ok: true, file, status, changed: true };
+  let mtimeMs = 0;
+  try { mtimeMs = (await stat(file)).mtimeMs; } catch {}
+  return { type: "todo-updated", ok: true, file, status, changed: true, from, to, source: oldSource, nextSource, mtimeMs };
 }
 
 function contentMayHaveTodos(content) {
@@ -4211,7 +4215,8 @@ export async function syncRoamDb(notes = null, options = {}) {
     roamSyncTimer = null;
   }
   const queuedNotes = notes ? null : queuedRoamSyncNotes;
-  const queuedFiles = queuedRoamSyncChangedFiles.splice(0);
+  const queuedFiles = [...queuedRoamSyncChangedFiles];
+  queuedRoamSyncChangedFiles.clear();
   queuedRoamSyncNotes = null;
   const optionFiles = Array.isArray(options.changedFiles) ? options.changedFiles : [];
   const pendingFiles = [...new Set([...optionFiles, ...queuedFiles])];
@@ -4447,10 +4452,9 @@ export function queueRoamDbSync(notes = null, changedFiles = []) {
   const files = Array.isArray(changedFiles) ? changedFiles : [changedFiles];
   for (const file of files) {
     if (!file) continue;
-    const normalized = resolveUserPath(file);
-    if (!queuedRoamSyncChangedFiles.includes(normalized)) {
-      queuedRoamSyncChangedFiles.push(normalized);
-    }
+    // Set dedupe keeps a burst of external changes (e.g. a git checkout of many
+    // notes) from accumulating in O(n^2) via repeated Array.includes scans.
+    queuedRoamSyncChangedFiles.add(resolveUserPath(file));
   }
   if (roamSyncTimer) {
     clearTimeout(roamSyncTimer);
@@ -4461,8 +4465,8 @@ export function queueRoamDbSync(notes = null, changedFiles = []) {
 export function runtimeDebugSnapshot() {
   return {
     roamDbSync: {
-      queued: Boolean(queuedRoamSyncNotes) || queuedRoamSyncChangedFiles.length > 0,
-      changedFiles: queuedRoamSyncChangedFiles.length,
+      queued: Boolean(queuedRoamSyncNotes) || queuedRoamSyncChangedFiles.size > 0,
+      changedFiles: queuedRoamSyncChangedFiles.size,
       inFlight: Boolean(roamSyncInFlight),
     },
     paths: {
@@ -5020,7 +5024,7 @@ export function configure(options = {}) {
   }
   roamSyncInFlight = null;
   queuedRoamSyncNotes = null;
-  queuedRoamSyncChangedFiles = [];
+  queuedRoamSyncChangedFiles = new Set();
   markNotesDirty();
 }
 

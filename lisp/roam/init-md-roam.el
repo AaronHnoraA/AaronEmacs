@@ -3196,35 +3196,76 @@ This checks top-level todo fields first, then the nested args object."
   "Set todo ENTRY to STATUS and refresh the agenda."
   (my/aaronnote-roam-update-todo-status status entry))
 
+(defun my/aaronnote-roam--agenda-compact-text (text width)
+  "Return TEXT compacted to display WIDTH."
+  (truncate-string-to-width (string-trim (or text "")) width nil nil "…"))
+
 (defun my/aaronnote-roam--insert-agenda-todo-row (entry &optional deadline-tone)
   "Insert one agenda row for todo ENTRY with optional DEADLINE-TONE."
-  (my/aaronnote-roam--insert-todo-row entry deadline-tone)
-  (insert "      ")
-  (if (my/aaronnote-roam--todo-closed-p entry)
+  (let* ((note-title (or (my/aaronnote-roam--todo-string-value
+                          entry "title" "noteTitle")
+                         (my/aaronnote-roam--todo-string-value
+                          entry "note" "noteId" "path")
+                         "Unknown note"))
+         (text (or (my/aaronnote-roam--todo-string-value
+                    entry "text" "context" "source")
+                   "(empty todo)"))
+         (line (my/aaronnote-roam--todo-field entry "line"))
+         (date (or (my/aaronnote-roam--todo-agenda-date entry) "no-date"))
+         (status (upcase (my/aaronnote-roam--todo-status entry)))
+         (width (max 88 (window-body-width)))
+         (reserved 64)
+         (text-width (max 22 (min 72 (- width reserved))))
+         (start (point)))
+    (insert "  ")
+    (my/aaronnote-roam-ui-insert-badge
+     (format "%-9s" status)
+     (or deadline-tone (my/aaronnote-roam--todo-tone entry)))
+    (insert " ")
+    (insert (propertize (format "%-10s " date)
+                        'face 'my/aaronnote-roam-ui-meta))
+    (insert-text-button
+     (format "%-22s  %s"
+             (my/aaronnote-roam--agenda-compact-text note-title 22)
+             (my/aaronnote-roam--agenda-compact-text text text-width))
+     'action (let ((todo entry))
+               (lambda (_button)
+                 (my/aaronnote-roam--visit-todo todo)))
+     'follow-link t
+     'help-echo "Open todo source"
+     'face 'my/aaronnote-roam-ui-row-title
+     'my/aaronnote-roam-todo entry)
+    (insert (propertize
+             (format "  L%-4s"
+                     (if (integerp line) line "-"))
+             'face 'my/aaronnote-roam-ui-meta))
+    (insert " ")
+    (if (my/aaronnote-roam--todo-closed-p entry)
+        (my/aaronnote-roam-ui-insert-actions
+         `((:label "Reopen"
+            :command ,(let ((todo entry))
+                        (lambda ()
+                          (my/aaronnote-roam--agenda-update-todo todo "todo")))
+            :help "Mark this task todo")
+           (:label "Doing"
+            :command ,(let ((todo entry))
+                        (lambda ()
+                          (my/aaronnote-roam--agenda-update-todo todo "doing")))
+            :help "Mark this task doing")))
       (my/aaronnote-roam-ui-insert-actions
-       `((:label "Reopen"
+       `((:label "Done"
           :command ,(let ((todo entry))
                       (lambda ()
-                        (my/aaronnote-roam--agenda-update-todo todo "todo")))
-          :help "Mark this task todo")
-         (:label "Doing"
+                        (my/aaronnote-roam--agenda-update-todo todo "done")))
+          :help "Mark this task done"
+          :primary t)
+         (:label "Cancel"
           :command ,(let ((todo entry))
                       (lambda ()
-                        (my/aaronnote-roam--agenda-update-todo todo "doing")))
-          :help "Mark this task doing")))
-    (my/aaronnote-roam-ui-insert-actions
-     `((:label "Done"
-        :command ,(let ((todo entry))
-                    (lambda ()
-                      (my/aaronnote-roam--agenda-update-todo todo "done")))
-        :help "Mark this task done"
-        :primary t)
-       (:label "Cancel"
-        :command ,(let ((todo entry))
-                    (lambda ()
-                      (my/aaronnote-roam--agenda-update-todo todo "cancelled")))
-        :help "Mark this task cancelled"))))
-  (insert "\n"))
+                        (my/aaronnote-roam--agenda-update-todo todo "cancelled")))
+          :help "Mark this task cancelled"))))
+    (add-text-properties start (point) `(my/aaronnote-roam-todo ,entry))
+    (insert "\n")))
 
 (defun my/aaronnote-roam--current-buffer-todos ()
   "Return lightweight todo entries scanned from the current buffer."
@@ -3238,7 +3279,12 @@ This checks top-level todo fields first, then the nested args object."
           (let* ((line-start (line-beginning-position))
                  (line-end (line-end-position))
                  (line (string-trim
-                        (buffer-substring-no-properties line-start line-end))))
+                        (buffer-substring-no-properties line-start line-end)))
+                 (ddl (and
+                       (string-match
+                        "{[^}\n]*\\(?:ddl\\|deadline\\|due\\)\\s-*[:=]\\s-*\\([^,;} \t\n]+\\)"
+                        line)
+                       (match-string 1 line))))
             (when (or (string-match-p "\\`@@todo\\b" line)
                       (string-match-p "\\`\\(?:[-*+]\\s-+\\)?\\[ \\]" line)
                       (string-match-p "\\_<TODO\\_>" line))
@@ -3251,6 +3297,7 @@ This checks top-level todo fields first, then the nested args object."
                                  :index (1- line-start)
                                  :source line
                                  :text line
+                                 :ddl ddl
                                  :status (if (string-match
                                               "\\`@@todo(\\([^)\n]+\\))"
                                               line)
@@ -3344,7 +3391,7 @@ This checks top-level todo fields first, then the nested args object."
                   ('date "No open tasks on this date.")
                   ('done "No completed tasks.")
                   ('cancelled "No cancelled tasks.")
-                  (_ "No open tasks."))))))))
+                  (_ "No open tasks.")))))))
       (display-buffer buf))))
 
 (defun my/aaronnote-roam--agenda-calendar-counts (todos)
@@ -3439,7 +3486,7 @@ This checks top-level todo fields first, then the nested args object."
 
 ;; ── Roam activity heatmap ────────────────────────────────────────────────────
 
-(defconst my/aaronnote-roam--activity-heatmap-days 35
+(defconst my/aaronnote-roam--activity-heatmap-days 70
   "Number of recent days shown in roam activity heatmaps.")
 
 (defun my/aaronnote-roam--activity-date-counts (&optional days)
@@ -3476,11 +3523,82 @@ This checks top-level todo fields first, then the nested args object."
 
 (defun my/aaronnote-roam--activity-heatmap-cell (count)
   "Return a fixed-width heatmap cell label for COUNT."
-  (format "[%2s]"
+  (format " %2s "
           (cond
            ((<= count 0) "")
            ((> count 99) "99")
            (t (format "%d" count)))))
+
+(defun my/aaronnote-roam--activity-heatmap-rows (counts)
+  "Return heatmap rows for activity COUNTS.
+Each row is a list of strings or (LABEL . TONE) cells."
+  (let* ((weeks (ceiling (/ (float (length counts)) 7.0)))
+         (grid (make-vector (* weeks 7) nil))
+         rows)
+    (cl-loop for index from 0
+             for pair in counts
+             do (aset grid index pair))
+    (push (list
+           (concat "     "
+                   (mapconcat (lambda (n) (format "W%-2d " n))
+                              (number-sequence 1 weeks)
+                              " ")))
+          rows)
+    (cl-loop for dow from 0 below 7
+             for label in '("Sun" "Mon" "Tue" "Wed" "Thu" "Fri" "Sat")
+             do
+             (push
+              (append
+               (list (format "%3s  " label))
+               (cl-loop
+                for week from 0 below weeks
+                for pair = (aref grid (+ (* week 7) dow))
+                for count = (or (cdr-safe pair) 0)
+                collect
+                (cons (my/aaronnote-roam--activity-heatmap-cell count)
+                      (my/aaronnote-roam--activity-heatmap-tone count))
+                unless (= week (1- weeks))
+                collect " "))
+              rows))
+    (nreverse rows)))
+
+(defun my/aaronnote-roam--activity-heatmap-row-width (row)
+  "Return display width for heatmap ROW."
+  (apply #'+
+         (mapcar
+          (lambda (cell)
+            (string-width (if (consp cell) (car cell) cell)))
+          row)))
+
+(defun my/aaronnote-roam--center-inserted-region (start end width)
+  "Center text from START to END using display WIDTH."
+  (let ((prefix (propertize
+                 " "
+                 'display `(space . (:align-to (- center ,(/ (float width) 2)))))))
+    (add-text-properties start end
+                         `(line-prefix ,prefix indent-prefix ,prefix))))
+
+(defun my/aaronnote-roam--insert-centered-heatmap-row (row &optional face-fn)
+  "Insert heatmap ROW centered.  FACE-FN maps a tone to a face."
+  (let ((start (point))
+        (row-width (my/aaronnote-roam--activity-heatmap-row-width row)))
+    (dolist (cell row)
+      (if (consp cell)
+          (insert (propertize (car cell)
+                              'face (if face-fn
+                                        (funcall face-fn (cdr cell))
+                                      'default)))
+        (insert cell)))
+    (my/aaronnote-roam--center-inserted-region start (point) row-width)
+    (insert "\n")))
+
+(defun my/aaronnote-roam--insert-centered-line (text &optional face)
+  "Insert TEXT centered in the selected window with optional FACE."
+  (let ((start (point)))
+    (insert (if face (propertize text 'face face) text))
+    (my/aaronnote-roam--center-inserted-region
+     start (point) (string-width text))
+    (insert "\n")))
 
 (defun my/aaronnote-roam-ui-insert-activity-heatmap (&optional days)
   "Insert a board-style roam activity heatmap for recent DAYS."
@@ -3490,29 +3608,20 @@ This checks top-level todo fields first, then the nested args object."
      (format "Roam activity · last %d days" (length counts))
      total
      (if (> total 0) 'success 'muted))
-    (insert "   ")
-    (cl-loop for index from 0
-             for (day . count) in counts
-             do
-             (insert-text-button
-              (my/aaronnote-roam--activity-heatmap-cell count)
-              'action (lambda (_button) (my/aaronnote-roam-recent-notes))
-              'follow-link t
-              'help-echo (format "%s: %d modified notes" day count)
-              'face (my/aaronnote-roam-ui--tone-face
-                     (my/aaronnote-roam--activity-heatmap-tone count)))
-             (insert " ")
-             (when (= (mod (1+ index) 7) 0)
-               (insert "\n   ")))
-    (insert "\n   ")
-    (my/aaronnote-roam-ui-insert-badge "0" 'muted)
-    (insert " ")
-    (my/aaronnote-roam-ui-insert-badge "1" 'info)
-    (insert " ")
-    (my/aaronnote-roam-ui-insert-badge "2+" 'warning)
-    (insert " ")
-    (my/aaronnote-roam-ui-insert-badge "5+" 'success)
-    (insert "\n\n")))
+    (dolist (row (my/aaronnote-roam--activity-heatmap-rows counts))
+      (my/aaronnote-roam--insert-centered-heatmap-row
+       row
+       #'my/aaronnote-roam-ui--tone-face))
+    (insert "\n")
+    (my/aaronnote-roam--insert-centered-line
+     "Each square is one day; value is modified note count."
+     'my/aaronnote-roam-ui-meta)
+    (insert "\n")
+    (my/aaronnote-roam--insert-centered-heatmap-row
+     '("Legend  " (" 0 " . muted) " " (" 1 " . info) " "
+       (" 2+ " . warning) " " (" 5+ " . success))
+     #'my/aaronnote-roam-ui--tone-face)
+    (insert "\n")))
 
 (defun my/aaronnote-roam-dashboard-insert-heatmap (&optional days)
   "Insert a compact roam activity heatmap into the main dashboard."
@@ -3521,24 +3630,17 @@ This checks top-level todo fields first, then the nested args object."
                       (or days my/aaronnote-roam--activity-heatmap-days)))
              (total (apply #'+ (mapcar #'cdr counts))))
         (when counts
-          (insert (propertize
-                   (format "Roam activity · last %d days · %d changes"
-                           (length counts) total)
-                   'face (if (facep 'dashboard-heading)
-                             'dashboard-heading
-                           'bold))
-                  "\n\n  ")
-          (cl-loop for index from 0
-                   for (_day . count) in counts
-                   do
-                   (insert (propertize
-                            (my/aaronnote-roam--activity-heatmap-cell count)
-                            'face (my/aaronnote-roam-ui--tone-face
-                                   (my/aaronnote-roam--activity-heatmap-tone
-                                    count)))
-                           " ")
-                   (when (= (mod (1+ index) 7) 0)
-                     (insert "\n  ")))
+          (my/aaronnote-roam--insert-centered-line
+           (format "Roam activity · last %d days · %d changes"
+                   (length counts) total)
+           (if (facep 'dashboard-heading)
+               'dashboard-heading
+             'bold))
+          (insert "\n")
+          (dolist (row (my/aaronnote-roam--activity-heatmap-rows counts))
+            (my/aaronnote-roam--insert-centered-heatmap-row
+             row
+             #'my/aaronnote-roam-ui--tone-face))
           (insert "\n\n")))
     (error nil)))
 
@@ -4740,12 +4842,147 @@ added separately by `my/aaronnote-roam--capf-setup')."
         (if (vectorp items) (append items nil)
           (or items nil)))))))
 
+(defun my/aaronnote-roam--asset-items (items)
+  "Normalize JSON asset ITEMS into a list."
+  (cond
+   ((vectorp items) (append items nil))
+   ((listp items) items)
+   (t nil)))
+
+(defun my/aaronnote-roam--asset-field (asset field)
+  "Return ASSET FIELD from an alist or hash table."
+  (cond
+   ((hash-table-p asset) (gethash (symbol-name field) asset))
+   ((listp asset) (alist-get field asset))
+   (t nil)))
+
+(defun my/aaronnote-roam--asset-file (asset)
+  "Return ASSET absolute file path."
+  (format "%s" (or (my/aaronnote-roam--asset-field asset 'file) "")))
+
+(defun my/aaronnote-roam--format-asset-size (asset)
+  "Return a human-readable size label for ASSET."
+  (let ((size (my/aaronnote-roam--asset-field asset 'size)))
+    (if (numberp size)
+        (file-size-human-readable size)
+      "unknown size")))
+
+(defun my/aaronnote-roam--format-asset-mtime (asset)
+  "Return a human-readable modified-time label for ASSET."
+  (let ((mtime-ms (my/aaronnote-roam--asset-field asset 'mtimeMs)))
+    (if (numberp mtime-ms)
+        (format-time-string "%Y-%m-%d %H:%M"
+                            (seconds-to-time (/ mtime-ms 1000.0)))
+      "unknown mtime")))
+
+(defun my/aaronnote-roam--open-asset (asset)
+  "Open ASSET's file in Emacs."
+  (let ((file (my/aaronnote-roam--asset-file asset)))
+    (if (and (not (string-empty-p file)) (file-exists-p file))
+        (find-file file)
+      (user-error "Asset file does not exist: %s" file))))
+
+(defun my/aaronnote-roam--trash-orphaned-assets (assets)
+  "Move orphaned ASSETS to Trash through the Aaronnote runtime."
+  (let* ((assets (my/aaronnote-roam--asset-items assets))
+         (files (delq nil
+                      (mapcar (lambda (asset)
+                                (let ((file (my/aaronnote-roam--asset-file asset)))
+                                  (unless (string-empty-p file) file)))
+                              assets))))
+    (unless files
+      (user-error "No orphaned attachments to trash"))
+    (when (yes-or-no-p (format "Move %d orphaned attachment%s to Trash? "
+                               (length files)
+                               (if (= (length files) 1) "" "s")))
+      (message "Aaronnote: moving orphaned attachments to Trash...")
+      (my/aaronnote--api-call
+       "aaronnote:api:assets:trash-orphans" (vector files)
+       (lambda (result)
+         (let ((next-assets (my/aaronnote-roam--asset-items
+                             (alist-get 'assets result)))
+               (trashed (my/aaronnote-roam--asset-items
+                         (alist-get 'trashed result)))
+               (skipped (my/aaronnote-roam--asset-items
+                         (alist-get 'skipped result))))
+           (message "Aaronnote: trashed %d orphaned attachment%s%s"
+                    (length trashed)
+                    (if (= (length trashed) 1) "" "s")
+                    (if skipped
+                        (format ", skipped %d" (length skipped))
+                      ""))
+           (my/aaronnote-roam--render-orphaned-assets-buffer next-assets)))))))
+
+(defun my/aaronnote-roam--render-orphaned-assets-buffer (assets)
+  "Render orphaned attachment ASSETS into a roam report buffer."
+  (let* ((items (seq-take (my/aaronnote-roam--asset-items assets)
+                          my/aaronnote-roam--report-limit))
+         (count (length items))
+         (buf (my/aaronnote-roam--prepare-ui-buffer
+               "*roam-orphaned-assets*" "Orphaned Attachments" 'attachment
+               #'my/aaronnote-roam-report-orphaned-assets
+               (format "%d assets" count))))
+    (with-current-buffer buf
+      (my/aaronnote-roam-ui-render
+       (lambda ()
+         (my/aaronnote-roam-ui-insert-page-header
+          "Orphaned attachments"
+          :icon 'attachment
+          :subtitle "Files in asset folders that no note currently references"
+          :stats (list (cons (format "%d assets" count)
+                             (if (> count 0) 'warning 'success)))
+          :actions (my/aaronnote-roam--ui-actions
+                    (when items
+                      `((:label "Trash listed"
+                         :command ,(let ((orphans items))
+                                     (lambda ()
+                                       (my/aaronnote-roam--trash-orphaned-assets
+                                        orphans)))
+                         :help "Move the listed orphaned attachments to Trash"
+                         :primary t)))))
+         (my/aaronnote-roam-ui-insert-section "Attachments" count)
+         (if (null items)
+             (my/aaronnote-roam-ui-insert-empty
+              "No orphaned attachments. All scanned assets are referenced.")
+           (dolist (asset items)
+             (let* ((path (format "%s" (or (my/aaronnote-roam--asset-field asset 'path)
+                                           (my/aaronnote-roam--asset-file asset))))
+                    (type (format "%s" (or (my/aaronnote-roam--asset-field asset 'type)
+                                           "asset"))))
+               (my/aaronnote-roam-ui-insert-row
+                :id (my/aaronnote-roam--asset-file asset)
+                :icon (if (my/aaronnote-roam--asset-field asset 'isImage)
+                          'image
+                        'attachment)
+                :badge type
+                :badge-tone 'muted
+                :title path
+                :meta (my/aaronnote-roam--format-asset-size asset)
+                :detail (my/aaronnote-roam--format-asset-mtime asset)
+                :action (let ((item asset))
+                          (lambda (_b)
+                            (my/aaronnote-roam--open-asset item))))))))))
+    (display-buffer buf)))
+
+(defun my/aaronnote-roam-report-orphaned-assets ()
+  "Show unreferenced Aaronnote attachments and generated media assets."
+  (interactive)
+  (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
+    (user-error "Aaronnote web-host is not running; start it with H-o o first"))
+  (message "Aaronnote: scanning orphaned attachments...")
+  (my/aaronnote--api-call
+   "aaronnote:api:assets:scan-orphans" []
+   (lambda (result)
+     (my/aaronnote-roam--render-orphaned-assets-buffer
+      (alist-get 'assets result)))))
+
 (with-eval-after-load 'transient
   (transient-define-prefix my/aaronnote-roam-reports ()
     "Wiki knowledge-health reports."
     [["Special pages"
       ("w" "wanted pages"       my/aaronnote-roam-report-wanted)
       ("o" "orphaned pages"     my/aaronnote-roam-report-orphaned)
+      ("a" "orphaned attachments" my/aaronnote-roam-report-orphaned-assets)
       ("d" "dead-end pages"     my/aaronnote-roam-report-dead-end)
       ("u" "uncategorized"      my/aaronnote-roam-report-uncategorized)
       ("h" "most-linked (hubs)" my/aaronnote-roam-report-most-linked)]]))
@@ -5007,6 +5244,9 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
             (:label "Orphaned"
              :command my/aaronnote-roam-report-orphaned
              :help "Notes with no incoming links")
+            (:label "Orphaned attachments"
+             :command my/aaronnote-roam-report-orphaned-assets
+             :help "Files in asset folders that no note references")
             (:label "Dead-end"
              :command my/aaronnote-roam-report-dead-end
              :help "Notes with no outgoing links")

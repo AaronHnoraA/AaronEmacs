@@ -369,6 +369,26 @@ glyph keeps its shape while point moves through composed text."
   :type '(repeat string)
   :group 'my/typography)
 
+(defcustom my/font-unicode-symbols
+  '("Apple Symbols" "Noto Sans Symbols 2" "Noto Sans Symbols" "Symbola"
+    "DejaVu Sans")
+  "Fallback fonts for general Unicode symbols."
+  :type '(repeat string)
+  :group 'my/typography)
+
+(defcustom my/font-emoji
+  '("Apple Color Emoji" "Noto Color Emoji" "Segoe UI Emoji")
+  "Fallback fonts for emoji glyphs."
+  :type '(repeat string)
+  :group 'my/typography)
+
+(defcustom my/font-nerd-symbols
+  '("Symbols Nerd Font Mono" "Symbols Nerd Font" "JetBrainsMono Nerd Font Mono"
+    "FiraCode Nerd Font Mono" "Hack Nerd Font Mono")
+  "Fallback fonts for Nerd Font private-use glyphs."
+  :type '(repeat string)
+  :group 'my/typography)
+
 (defcustom my/scale-cn 1.3
   "Scale factor for Chinese glyphs."
   :type 'number
@@ -453,6 +473,12 @@ glyph keeps its shape while point moves through composed text."
                      :height height
                      :weight (or weight my/font-title-weight)))
 
+(defun my/font--available-family (families)
+  "Return the first installed font family from FAMILIES."
+  (seq-find (lambda (family)
+              (member family (font-family-list)))
+            families))
+
 (defun my/font--apply-ui-faces ()
   "Keep UI monospace consistent without using heavy bold weights."
   (my/font--set-code-face 'line-number
@@ -512,6 +538,46 @@ glyph keeps its shape while point moves through composed text."
                                    :slant 'normal)
                         nil
                         'prepend))))
+
+(defun my/font--bind-unicode-symbols-to-fontset ()
+  "Bind broad Unicode symbol fallbacks without overriding math fonts."
+  (when-let* ((family (my/font--available-family my/font-unicode-symbols)))
+    (set-fontset-font t 'symbol
+                      (font-spec :family family
+                                 :weight 'regular
+                                 :slant 'normal)
+                      nil
+                      'append)))
+
+(defun my/font--bind-emoji-to-fontset ()
+  "Prefer an installed color emoji font for emoji glyphs."
+  (when-let* ((family (my/font--available-family my/font-emoji)))
+    (set-fontset-font t 'emoji
+                      (font-spec :family family
+                                 :weight 'regular
+                                 :slant 'normal)
+                      nil
+                      'prepend)))
+
+(defun my/font--bind-nerd-symbols-to-fontset ()
+  "Bind Nerd Font private-use glyph ranges to an installed Nerd Font."
+  (when-let* ((family (my/font--available-family my/font-nerd-symbols)))
+    (dolist (range (list (cons #xe000 #xf8ff)
+                         (cons #xf0000 #xffffd)
+                         (cons #x100000 #x10fffd)))
+      (set-fontset-font t range
+                        (font-spec :family family
+                                   :weight 'regular
+                                   :slant 'normal)
+                        nil
+                        'prepend))))
+
+(defun my/font--apply-icon-faces ()
+  "Keep icon package faces on an installed Nerd Font when available."
+  (when-let* ((family (my/font--available-family my/font-nerd-symbols)))
+    (dolist (face '(nerd-icons-default-face))
+      (when (facep face)
+        (my/font--set-face face :family family)))))
 
 (defun my/font--apply-rescale ()
   "设置中文缩放（只调大小，不负责选字体）。"
@@ -623,7 +689,11 @@ glyph keeps its shape while point moves through composed text."
   (my/font--apply-core-faces)
   (my/font--apply-ui-faces)
   (my/font--bind-chinese-to-fontset)
+  (my/font--bind-unicode-symbols-to-fontset)
   (my/font--bind-math-symbols-to-fontset)
+  (my/font--bind-emoji-to-fontset)
+  (my/font--bind-nerd-symbols-to-fontset)
+  (my/font--apply-icon-faces)
   (my/font--apply-rescale)
   (my/font--apply-document-faces)
 

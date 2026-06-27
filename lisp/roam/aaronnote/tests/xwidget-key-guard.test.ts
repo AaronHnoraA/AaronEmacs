@@ -125,6 +125,30 @@ describe("xwidget key guard", () => {
     }
   });
 
+  test("maps raw xwidget keydown control bytes before they can insert glyphs", () => {
+    const host = withMounted(document.createElement("section"));
+    const editor = createEditor(host, { initialContent: "abc" });
+    const vim = createVimLite(editor, host);
+    const target = document.body;
+    editor.setMarkdownSelection(1);
+    try {
+      const del = new KeyboardEvent("keydown", { key: "\u007f", bubbles: true, cancelable: true });
+      Object.defineProperty(del, "target", { value: target });
+      expect(handleXwidgetControlKeydown(del, { editor, editorHost: host, vim })).toBe(true);
+      expect(del.defaultPrevented).toBe(true);
+      expect(editor.getMarkdown()).toBe("ac");
+
+      const backspace = new KeyboardEvent("keydown", { key: "\u0008", bubbles: true, cancelable: true });
+      Object.defineProperty(backspace, "target", { value: target });
+      expect(handleXwidgetControlKeydown(backspace, { editor, editorHost: host, vim })).toBe(true);
+      expect(backspace.defaultPrevented).toBe(true);
+      expect(editor.getMarkdown()).toBe("c");
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
+
   test("maps xwidget beforeinput control bytes into editor actions", () => {
     const host = withMounted(document.createElement("section"));
     const editor = createEditor(host, { initialContent: "abc" });

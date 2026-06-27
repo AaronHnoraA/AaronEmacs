@@ -45,6 +45,30 @@ type ProseCheckMsg = {
   tools?: Array<{ source?: string; ok?: boolean; message?: string; partial?: boolean; optional?: boolean }>;
   scope?: { checkedChars?: number; totalChars?: number; partial?: boolean };
 };
+export type TodoItem = Record<string, unknown> & {
+  id?: string;
+  file?: string;
+  path?: string;
+  note?: string;
+  noteId?: string;
+  noteTitle?: string;
+  title?: string;
+  text?: string;
+  source?: string;
+  status?: string;
+  ddl?: string;
+  deadline?: string;
+  due?: string;
+  line?: number;
+  index?: number;
+  tags?: string[];
+  inlineTags?: string[];
+};
+export type TodosMsg = {
+  type?: string;
+  todos?: TodoItem[];
+  root?: string;
+};
 type NativeApi = {
   notes?: {
     bootstrap?: (file?: string) => Promise<unknown>;
@@ -157,6 +181,10 @@ export const api = {
     async snippets(): Promise<SnippetsMsg & { snippets?: SnippetSummary[] }> {
       const call = requireMethod(nativeApi().notes?.snippets, "Snippet reload");
       return ensureOk(await call() as SnippetsMsg & { snippets?: SnippetSummary[] }, "Snippet reload failed");
+    },
+    async todos(file = ""): Promise<TodosMsg> {
+      const call = requireMethod(nativeApi().notes?.todos, "Todo agenda");
+      return ensureOk(await call(file) as TodosMsg, "Todo agenda failed");
     },
     saveKeepalive(body: SaveBody): void {
       const api = window.aaronnoteApi?.notes;

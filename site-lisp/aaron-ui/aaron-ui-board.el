@@ -269,6 +269,7 @@
 
 (defconst aaron-ui-board--icons
   '((agenda      "nf-md-calendar_check_outline"       "A")
+    (attachment  "nf-md-paperclip"                    "@")
     (backlink    "nf-md-link_variant"                 "<")
     (chart       "nf-md-chart_bar"                    "~")
     (check       "nf-md-check_circle_outline"         "v")
@@ -280,6 +281,7 @@
     (directory   "nf-md-folder_outline"               "/")
     (gear        "nf-md-cog_outline"                  "G")
     (health      "nf-md-heart_pulse"                  "H")
+    (image       "nf-md-image_outline"                "I")
     (jupyter     "nf-md-language_python"              "J")
     (kernel      "nf-md-chip"                         "K")
     (lock        "nf-md-lock_outline"                 "L")
@@ -363,6 +365,20 @@
 ;;; -----------------------------------------------------------------------
 ;;; Base mode and keymaps
 
+(defun aaron-ui-board-ignore-horizontal-wheel (_event)
+  "Ignore horizontal wheel EVENT in board buffers."
+  (interactive "e"))
+
+(defun aaron-ui-board--bind-horizontal-wheel (map)
+  "Bind horizontal wheel events in MAP to stay vertical-only."
+  (dolist (event '([wheel-left]
+                   [wheel-right]
+                   [double-wheel-left]
+                   [double-wheel-right]
+                   [triple-wheel-left]
+                   [triple-wheel-right]))
+    (define-key map event #'aaron-ui-board-ignore-horizontal-wheel)))
+
 (defvar aaron-ui-board-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map special-mode-map)
@@ -376,6 +392,7 @@
     (define-key map (kbd "n")         #'next-line)
     (define-key map (kbd "k")         #'previous-line)
     (define-key map (kbd "p")         #'previous-line)
+    (aaron-ui-board--bind-horizontal-wheel map)
     map)
   "Keymap for `aaron-ui-board-mode'.")
 
@@ -389,7 +406,8 @@
 
 (define-derived-mode aaron-ui-board-mode special-mode "Board"
   "Base major mode for `aaron-ui' read-only dashboard/hub buffers."
-  (setq-local truncate-lines t)
+  (setq-local truncate-lines nil)
+  (setq-local auto-hscroll-mode nil)
   (setq-local header-line-format '(:eval (aaron-ui-board--header-line)))
   (setq-local cursor-type 'box)
   (setq-local hl-line-face 'aaron-ui-board-row-highlight)
