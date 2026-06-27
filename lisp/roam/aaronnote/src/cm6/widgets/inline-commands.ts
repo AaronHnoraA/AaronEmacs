@@ -15,6 +15,7 @@ import {
 } from "@codemirror/view";
 import { MeasuredWidget } from "./measured-widget.ts";
 import { scanInlineCommands, type InlineCommand } from "../../command-syntax.ts";
+import { renderMarkdownHTML } from "../../render-html.ts";
 import type { Range } from "@codemirror/state";
 import { blockMathRangesOverlapping, mergeOverlappingRanges, rangeOverlapsAny } from "../math-ranges.ts";
 import { scanCodeRanges } from "../code-ranges.ts";
@@ -32,6 +33,18 @@ import { hasViewportDecorationRefresh } from "../viewport-refresh.ts";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Render a @@todo body as inline HTML so embedded markdown — notably inline math
+ * `$…$` — renders inside the chip. The body sits in a replaced widget, so the
+ * usual live-preview math decoration cannot reach it; we render it here instead,
+ * via the same shared renderer the table cells use, and unwrap the `<p>`.
+ */
+export function inlineTodoBodyHTML(markdown: string): string {
+  const html = renderMarkdownHTML(markdown);
+  const match = /^<p>([\s\S]*)<\/p>\n?$/.exec(html.trim());
+  return match ? match[1] : html;
+}
 
 const STATUS_LABELS: Record<string, string> = {
   todo: "TODO",
@@ -125,7 +138,7 @@ class TodoWidget extends MeasuredWidget {
       lBracket.textContent = "[";
       const body = document.createElement("span");
       body.className = "inline-todo-text-body";
-      body.textContent = cmd.context.trim();
+      body.innerHTML = inlineTodoBodyHTML(cmd.context.trim());
       const rBracket = document.createElement("span");
       rBracket.className = "inline-todo-bracket";
       rBracket.setAttribute("aria-hidden", "true");
