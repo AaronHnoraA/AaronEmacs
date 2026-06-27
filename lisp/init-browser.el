@@ -10,6 +10,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'url-parse)
+(require 'easymenu)
 (require 'init-open)
 
 (declare-function appine-open-url "appine" (url))
@@ -33,6 +34,8 @@
 (declare-function my/open-url-with-backend "init-open" (url backend &optional reuse-selected))
 (declare-function my/open--with-browser-window "init-open" (mode reuse-selected open-fn))
 (declare-function my/open-normalize-url "init-open" (url))
+(declare-function nerd-icons-mdicon "nerd-icons" (icon-name &rest args))
+(declare-function nerd-icons-codicon "nerd-icons" (icon-name &rest args))
 
 ;;;; xwidget API
 
@@ -447,28 +450,110 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
 
 
 
-;;;; xwidget header-line navigation bar
+;;;; xwidget line controls
 
-(defun my/xwidget--nav-button (label action help)
-  "Return a propertized header-line button for LABEL, ACTION, and HELP."
+(defun my/xwidget--mode-line-icon (kind icon fallback)
+  "Return nerd ICON of KIND for the xwidget mode line, or FALLBACK."
+  (if (and (display-graphic-p)
+           (pcase kind
+             ('codicon (fboundp 'nerd-icons-codicon))
+             (_ (fboundp 'nerd-icons-mdicon))))
+      (condition-case nil
+          (pcase kind
+            ('codicon (nerd-icons-codicon icon :height 0.95))
+            (_ (nerd-icons-mdicon icon :height 0.95)))
+        (error fallback))
+    fallback))
+
+(defun my/xwidget--select-event-window (event)
+  "Select the window associated with mouse EVENT when possible."
+  (when-let* ((start (event-start event))
+              (window (posn-window start)))
+    (when (and (windowp window)
+               (window-live-p window))
+      (select-window window))))
+
+(defun my/xwidget--nav-button (label action help &optional area)
+  "Return a propertized line button for LABEL, ACTION, and HELP.
+AREA is `mode-line' by default; pass `header-line' for header buttons."
   (let ((map (make-sparse-keymap)))
-    (define-key map [header-line mouse-1]
-      (lambda () (interactive) (funcall action)))
+    (define-key map (vector (or area 'mode-line) 'mouse-1)
+      (lambda (event)
+        (interactive "e")
+        (my/xwidget--select-event-window event)
+        (if (commandp action)
+            (call-interactively action)
+          (funcall action))))
     (propertize (concat " " label " ")
                 'mouse-face 'mode-line-highlight
                 'help-echo help
                 'local-map map)))
 
-(defun my/xwidget-setup-header-line ()
-  "Install back/forward/reload nav buttons in this xwidget buffer's header line."
+(defun my/xwidget--window-menu-item (label command)
+  "Return an easy-menu item for LABEL and COMMAND."
+  (vector label command (fboundp command)))
+
+(defun my/xwidget-window-menu (event)
+  "Show the xwidget window-management popup menu for EVENT."
+  (interactive "e")
+  (my/xwidget--select-event-window event)
+  (popup-menu
+   (easy-menu-create-menu
+    "Xwidget Window"
+    (list
+     (my/xwidget--window-menu-item "Switch buffer" #'switch-to-buffer)
+     (my/xwidget--window-menu-item "Buffer list" #'ibuffer)
+     (my/xwidget--window-menu-item "Delete window" #'delete-window)
+     (my/xwidget--window-menu-item "Toggle one window" #'toggle-one-window)
+     "---"
+     (my/xwidget--window-menu-item
+      "Split below -> ibuffer"
+      #'my/xwidget-split-window-below-ibuffer)
+     (my/xwidget--window-menu-item
+      "Split right -> ibuffer"
+      #'my/xwidget-split-window-right-ibuffer)))
+   event))
+
+(defun my/xwidget--header-browser-buttons ()
+  "Return xwidget header-line buttons for browser controls."
+  (list
+   (my/xwidget--nav-button
+    (my/xwidget--mode-line-icon 'codicon "nf-cod-arrow_left" "back")
+    #'my/xwidget-back
+    "Back [b]"
+    'header-line)
+   (my/xwidget--nav-button
+    (my/xwidget--mode-line-icon 'codicon "nf-cod-arrow_right" "fwd")
+    #'my/xwidget-forward
+    "Forward [f]"
+    'header-line)
+   (my/xwidget--nav-button
+    (my/xwidget--mode-line-icon 'codicon "nf-cod-refresh" "reload")
+    #'my/xwidget-reload
+    "Reload [g]"
+    'header-line)
+   (my/xwidget--nav-button
+    (my/xwidget--mode-line-icon 'codicon "nf-cod-edit" "focus")
+    #'my/xwidget-focus
+    "Focus editor [i]"
+    'header-line)
+   (my/xwidget--nav-button
+    (my/xwidget--mode-line-icon 'codicon "nf-cod-layout" "win")
+    #'my/xwidget-window-menu
+    "Window menu"
+    'header-line)))
+
+(defun my/xwidget-setup-control-line ()
+  "Install browser controls and a window popup in this xwidget header line."
   (setq-local header-line-format
-              (list
-               (my/xwidget--nav-button "◀" #'my/xwidget-back   "Back [b]")
-               (my/xwidget--nav-button "▶" #'my/xwidget-forward "Forward [f]")
-               (my/xwidget--nav-button "↺" #'my/xwidget-reload  "Reload [g]")
-               "  "
-               '(:eval (propertize (or (my/xwidget-current-url) "")
-                                   'face 'shadow)))))
+              `(" "
+                ,@(my/xwidget--header-browser-buttons)
+                "  "
+                (:eval (propertize (or (my/xwidget-current-url) "")
+                                   'face 'shadow))))
+  (kill-local-variable 'mode-line-format))
+
+(defalias 'my/xwidget-setup-header-line #'my/xwidget-setup-control-line)
 
 ;;;; xwidget-webkit 基础配置（macOS / emacs-plus with-xwidgets）
 
@@ -774,7 +859,7 @@ window, avoiding orphan browser buffers/windows."
   (define-key xwidget-webkit-mode-map (kbd "M-w") #'delete-window)
   (define-key xwidget-webkit-mode-map (kbd "W") #'my/xwidget-to-eww)
   (define-key xwidget-webkit-mode-map (kbd "A") #'my/xwidget-to-appine)
-  (add-hook 'xwidget-webkit-mode-hook #'my/xwidget-setup-header-line))
+  (add-hook 'xwidget-webkit-mode-hook #'my/xwidget-setup-control-line))
 
 
 

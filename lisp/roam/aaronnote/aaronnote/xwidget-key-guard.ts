@@ -364,7 +364,8 @@ function codeToBaseKey(code: string, shifted: boolean): string | null {
  * Used to capture the second key of a C-x / C-c prefix sequence.
  */
 function keyStringFromEvent(event: KeyboardEvent): string | null {
-  const base = codeToBaseKey(event.code, event.shiftKey);
+  const plainCtrl = event.ctrlKey && !event.metaKey && !event.altKey;
+  const base = codeToBaseKey(event.code, event.shiftKey && !plainCtrl);
   if (!base) return null;
   const mods: string[] = [];
   if (event.altKey && !event.metaKey && !event.ctrlKey) mods.push("H");
@@ -384,7 +385,7 @@ export function emacsKeyFromEvent(event: KeyboardEvent): string | null {
 /**
  * Returns true when this keystroke should be forwarded to Emacs.
  *
- * Scope: all Option(H-) chords, plus M-x / C-g / C-x / C-c control chords.
+ * Scope: all Option(H-) and bare Ctrl chords, plus selected Cmd(M-) chords.
  * The editor's own Cmd shortcuts (S=save, B/I/K=format, Z/Y=undo) are not
  * captured here and continue to work normally.
  */
@@ -398,9 +399,10 @@ export function shouldForwardToEmacs(event: KeyboardEvent): boolean {
   if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
     return event.code === "KeyX" || event.code === "KeyW" || event.code === "KeyQ";
   }
-  // Bare Ctrl: C-g, C-x prefix, C-c prefix
-  if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
-    return event.code === "KeyG" || event.code === "KeyX" || event.code === "KeyC";
+  // Bare Ctrl: Emacs-style chords. Shift is ignored for letter chords so
+  // xwidget/browser variants such as C-X still become Emacs' C-x.
+  if (event.ctrlKey && !event.metaKey && !event.altKey) {
+    return codeToBaseKey(event.code, false) !== null;
   }
   return false;
 }

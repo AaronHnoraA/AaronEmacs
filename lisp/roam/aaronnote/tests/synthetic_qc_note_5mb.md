@@ -63349,7 +63349,7 @@ invertible. This identifies one matching pair of summands. Removing that
 pair and applying induction proves the result.
 #+end proof
 
-中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
+中文直觉：���果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
 
 ## 116.7. Measurement statistics
 
@@ -70780,7 +70780,7 @@ Coordinates are useful for computation because they give arrays of field
 elements. Invariance is useful for mathematics because it identifies the
 features of the object that do not depend on the chosen basis.
 
-中文直觉：坐标是“输入格式”，不变量是“结构本身留下的影子”。
+中文直觉：坐标是“输入格式”，不变量是“结构���身留下的影子”。
 #+end remark
 
 If $g \in \operatorname{GL}(V)$ and $h \in \operatorname{GL}(W)$, a change
@@ -143688,7 +143688,7 @@ operate on encodings, not on abstract objects directly. Good improve
 ## 264.1. Quantum states and density operators
 
 A pure quantum state is represented by a unit vector $|\psi\rangle$ in a
-Hilbert space $H$. The normalization condition is
+Hs asd as das ilbert space $H$. The normalization condition is
 
 $$
 \langle \psi|\psi\rangle = 1.

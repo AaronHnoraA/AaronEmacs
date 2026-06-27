@@ -41,6 +41,26 @@ function withMounted<T extends HTMLElement>(element: T): T {
   return element;
 }
 
+function withForwardedEmacsKeys(run: (forwarded: string[]) => void): void {
+  const forwarded: string[] = [];
+  const win = window as Window & {
+    aaronnoteApi?: { emacs?: { key?: (key: string) => unknown } };
+  };
+  const previousApi = win.aaronnoteApi;
+  try {
+    win.aaronnoteApi = {
+      emacs: {
+        key: async (key) => {
+          forwarded.push(key);
+        },
+      },
+    };
+    run(forwarded);
+  } finally {
+    win.aaronnoteApi = previousApi;
+  }
+}
+
 describe("xwidget key guard", () => {
   test("guards known control keys outside editor and text controls", () => {
     const host = withMounted(document.createElement("section"));
@@ -491,38 +511,108 @@ describe("xwidget key guard", () => {
 
   test("releases web input focus before forwarding a top-level Emacs key", () => {
     const input = withMounted(document.createElement("input"));
-    const forwarded: string[] = [];
-    const win = window as Window & {
-      aaronnoteApi?: { emacs?: { key?: (key: string) => unknown } };
-    };
-    const previousApi = win.aaronnoteApi;
     try {
-      win.aaronnoteApi = {
-        emacs: {
-          key: async (key) => {
-            forwarded.push(key);
-          },
-        },
-      };
-      input.focus();
-      expect(document.activeElement).toBe(input);
+      withForwardedEmacsKeys((forwarded) => {
+        input.focus();
+        expect(document.activeElement).toBe(input);
 
+        const event = new KeyboardEvent("keydown", {
+          key: "ø",
+          code: "KeyO",
+          altKey: true,
+          bubbles: true,
+          cancelable: true,
+        });
+        Object.defineProperty(event, "target", { value: input });
+
+        expect(handleXwidgetEmacsKeydown(event)).toBe(true);
+        expect(event.defaultPrevented).toBe(true);
+        expect(forwarded).toEqual(["H-o"]);
+        expect(document.activeElement).not.toBe(input);
+      });
+    } finally {
+      input.remove();
+    }
+  });
+
+  test("forwards common bare Ctrl chords to Emacs", () => {
+    withForwardedEmacsKeys((forwarded) => {
       const event = new KeyboardEvent("keydown", {
-        key: "ø",
-        code: "KeyO",
-        altKey: true,
+        key: "a",
+        code: "KeyA",
+        ctrlKey: true,
         bubbles: true,
         cancelable: true,
       });
-      Object.defineProperty(event, "target", { value: input });
-
       expect(handleXwidgetEmacsKeydown(event)).toBe(true);
       expect(event.defaultPrevented).toBe(true);
-      expect(forwarded).toEqual(["H-o"]);
-      expect(document.activeElement).not.toBe(input);
-    } finally {
-      win.aaronnoteApi = previousApi;
-      input.remove();
-    }
+      expect(forwarded).toEqual(["C-a"]);
+    });
+  });
+
+  test("normalizes shifted Ctrl prefix chords before forwarding to Emacs", () => {
+    withForwardedEmacsKeys((forwarded) => {
+      const prefix = new KeyboardEvent("keydown", {
+        key: "X",
+        code: "KeyX",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      expect(handleXwidgetEmacsKeydown(prefix)).toBe(true);
+      expect(prefix.defaultPrevented).toBe(true);
+      expect(forwarded).toEqual([]);
+
+      const next = new KeyboardEvent("keydown", {
+        key: "b",
+        code: "KeyB",
+        bubbles: true,
+        cancelable: true,
+      });
+      expect(handleXwidgetEmacsKeydown(next)).toBe(true);
+      expect(next.defaultPrevented).toBe(true);
+      expect(forwarded).toEqual(["C-x b"]);
+    });
+  });
+
+  test("normalizes shifted Ctrl second keys in Emacs prefix sequences", () => {
+    withForwardedEmacsKeys((forwarded) => {
+      const prefix = new KeyboardEvent("keydown", {
+        key: "x",
+        code: "KeyX",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      expect(handleXwidgetEmacsKeydown(prefix)).toBe(true);
+
+      const next = new KeyboardEvent("keydown", {
+        key: "B",
+        code: "KeyB",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      expect(handleXwidgetEmacsKeydown(next)).toBe(true);
+      expect(next.defaultPrevented).toBe(true);
+      expect(forwarded).toEqual(["C-x C-b"]);
+    });
+  });
+
+  test("forwards M-w so the app keeps Emacs kill-ring-save semantics", () => {
+    withForwardedEmacsKeys((forwarded) => {
+      const event = new KeyboardEvent("keydown", {
+        key: "w",
+        code: "KeyW",
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      expect(handleXwidgetEmacsKeydown(event)).toBe(true);
+      expect(event.defaultPrevented).toBe(true);
+      expect(forwarded).toEqual(["M-w"]);
+    });
   });
 });

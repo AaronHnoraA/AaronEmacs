@@ -16,6 +16,7 @@
 (declare-function my/xwidget-current-url "init-browser" (&optional buffer))
 (declare-function my/xwidget-session-buffer "init-browser" (id))
 (declare-function my/xwidget-focus "init-browser" (&optional buffer))
+(declare-function my/xwidget-setup-control-line "init-browser" ())
 (declare-function my/appine-open-url "init-appine" (url))
 (declare-function my/appine-open-url-fresh "init-appine" (url))
 (declare-function my/appine-kill-all "init-appine" ())
@@ -732,6 +733,9 @@ reloading.  Non-file opens (roam graph, etc.) share the singleton
         ;; Session already alive for this file: switch to it without reloading.
         (progn
           (switch-to-buffer existing)
+          (with-current-buffer existing
+            (when (fboundp 'my/xwidget-setup-control-line)
+              (my/xwidget-setup-control-line)))
           (run-at-time 0.3 nil #'my/xwidget-focus existing)
           (my/aaronnote--track-app-buffer existing file id)
           existing)
@@ -742,7 +746,9 @@ reloading.  Non-file opens (roam graph, etc.) share the singleton
                                          :reuse-selected t)))
         (when (buffer-live-p buffer)
           (with-current-buffer buffer
-            (setq-local my/xwidget-focus-script my/aaronnote--xwidget-focus-script)))
+            (setq-local my/xwidget-focus-script my/aaronnote--xwidget-focus-script)
+            (when (fboundp 'my/xwidget-setup-control-line)
+              (my/xwidget-setup-control-line))))
         (my/aaronnote--track-app-buffer buffer file id)
         buffer))))
 
