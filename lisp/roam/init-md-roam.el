@@ -5200,6 +5200,119 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
 
 ;;; Upgrade management dashboard with wiki statistics.
 
+(defconst my/aaronnote-roam--dashboard-tools
+  '((:id find-note
+     :icon search
+     :badge "FIND"
+     :badge-tone info
+     :title "Find note"
+     :meta "findnode"
+     :detail "Jump by Aaronnote id, path, or title."
+     :command my/aaronnote-roam-find-note
+     :help "Find and open a roam note")
+    (:id create-note
+     :icon new
+     :badge "CREATE"
+     :badge-tone success
+     :title "Create note"
+     :meta "Roam New"
+     :detail "Open the native note creation workbench."
+     :command my/aaronnote-roam-new-note
+     :help "Create a new roam note")
+    (:id create-node
+     :icon new
+     :badge "NODE"
+     :badge-tone success
+     :title "Create node"
+     :meta "timestamped"
+     :detail "Start a timestamped node in the selected directory."
+     :command my/aaronnote-roam-new-node
+     :help "Create a new timestamped node")
+    (:id search-notes
+     :icon search
+     :badge "QUERY"
+     :title "Search notes"
+     :meta "title/tag/linksto"
+     :detail "Filter notes with scoped search operators."
+     :command my/aaronnote-roam-search-notes
+     :help "Search Aaronnote roam notes")
+    (:id daily-note
+     :icon note
+     :badge "TODAY"
+     :badge-tone warning
+     :title "Daily note"
+     :meta "daily/YYYY-MM-DD"
+     :detail "Open or create today's daily note."
+     :command my/aaronnote-roam-daily-note
+     :help "Open today's daily note")
+    (:id agenda
+     :icon agenda
+     :badge "TASKS"
+     :title "Agenda"
+     :meta "open tasks"
+     :detail "Review open todos grouped by due date and status."
+     :command my/aaronnote-roam-agenda
+     :help "Open the roam agenda")
+    (:id todos
+     :icon todo
+     :badge "TODO"
+     :title "Task list"
+     :meta "all todos"
+     :detail "List every indexed task across the vault."
+     :command my/aaronnote-roam-todos
+     :help "List all roam tasks")
+    (:id categories
+     :icon tag
+     :badge "TAGS"
+     :title "Categories"
+     :meta "nested tags"
+     :detail "Browse wiki-style categories from nested tags."
+     :command my/aaronnote-roam-categories
+     :help "Browse nested tag categories")
+    (:id tags
+     :icon tag
+     :badge "TAG"
+     :title "Flat tags"
+     :meta "tag picker"
+     :detail "Pick a tag, then open one of its notes."
+     :command my/aaronnote-roam-tags
+     :help "Browse notes by tag")
+    (:id recent-notes
+     :icon clock
+     :badge "RECENT"
+     :badge-tone muted
+     :title "Recent notes"
+     :meta "history"
+     :detail "Return to recently opened roam notes."
+     :command my/aaronnote-roam-recent-notes
+     :help "Show recently opened roam notes"))
+  "Command rows shown in the Roam management dashboard quick tools section.")
+
+(defun my/aaronnote-roam--dashboard-tool-action (command)
+  "Return a board row action that invokes COMMAND interactively."
+  (lambda (_button)
+    (if (commandp command)
+        (call-interactively command)
+      (funcall command))))
+
+(defun my/aaronnote-roam--dashboard-insert-tools ()
+  "Insert common command shortcuts into the Roam management dashboard."
+  (my/aaronnote-roam-ui-insert-section
+   "Quick tools" (length my/aaronnote-roam--dashboard-tools) 'info)
+  (dolist (tool my/aaronnote-roam--dashboard-tools)
+    (my/aaronnote-roam-ui-insert-row
+     :id (list 'dashboard-tool (plist-get tool :id))
+     :icon (plist-get tool :icon)
+     :badge (plist-get tool :badge)
+     :badge-tone (plist-get tool :badge-tone)
+     :title (plist-get tool :title)
+     :meta (plist-get tool :meta)
+     :detail (plist-get tool :detail)
+     :action (my/aaronnote-roam--dashboard-tool-action
+              (plist-get tool :command))
+     :help (plist-get tool :help)))
+  (insert "\n"))
+
 (defun my/aaronnote-roam-management ()
   "Show wiki maintenance dashboard: vault stats and all roam operations."
   (interactive)
@@ -5248,6 +5361,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
          "DB generated" (or generated "unknown")
          'my/aaronnote-roam-ui-meta)
          (insert "\n")
+         (my/aaronnote-roam--dashboard-insert-tools)
          (my/aaronnote-roam-ui-insert-activity-heatmap)
          (my/aaronnote-roam-ui-insert-section "Special pages")
          (insert "   ")

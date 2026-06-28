@@ -633,6 +633,26 @@ source: roam/demo/analysis.md
       (when-let* ((buffer (get-buffer "*aaronnote-roam-management*")))
         (kill-buffer buffer)))))
 
+(ert-deftest my/aaronnote-roam-management-includes-quick-tools ()
+  (my/aaronnote-roam-test-with-vault
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-buffer)
+                   (lambda (buffer &rest _args) buffer)))
+          (my/aaronnote-roam-management)
+          (with-current-buffer "*aaronnote-roam-management*"
+            (should (string-match-p "Quick tools" (buffer-string)))
+            (dolist (label '("Find note" "Create note" "Create node"
+                             "Search notes" "Agenda" "Task list"))
+              (should (string-match-p label (buffer-string))))
+            (goto-char (point-min))
+            (search-forward "Find note")
+            (should (functionp
+                     (get-text-property
+                      (match-beginning 0)
+                      'my/aaronnote-roam-ui-row-action)))))
+      (when-let* ((buffer (get-buffer "*aaronnote-roam-management*")))
+        (kill-buffer buffer)))))
+
 (ert-deftest my/aaronnote-roam-search-view-refreshes-results ()
   (my/aaronnote-roam-test-with-vault
     (let ((first '(:slug "first" :title "First result" :path "first.md"))
