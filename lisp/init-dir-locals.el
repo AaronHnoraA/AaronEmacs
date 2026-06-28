@@ -14,6 +14,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'seq)
 (require 'pp)
 (require 'subr-x)
@@ -24,8 +26,7 @@
   "Dir-locals management tools."
   :group 'convenience)
 
-(defcustom my/dir-locals-template-root
-  (expand-file-name "templates/emacs" user-emacs-directory)
+(config-defvar my/dir-locals-template-root nil
   "Directory containing .dir-locals.el templates."
   :type 'directory
   :group 'my/dir-locals)

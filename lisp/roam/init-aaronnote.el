@@ -6,6 +6,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'json)
 (require 'subr-x)
 (require 'cl-lib)
@@ -76,13 +78,12 @@
   (expand-file-name ".roam" user-emacs-directory)
   "Path to the Markdown notes directory.")
 
-(defcustom my/aaronnote-backend 'xwidget
+(config-defvar my/aaronnote-backend nil
   "Backend used to display Aaronnote."
-  :type '(choice (const :tag "xwidget-webkit" xwidget)
-                 (const :tag "Appine" appine))
+  :type '(choice (const :tag "xwidget-webkit" xwidget) (const :tag "Appine" appine))
   :group 'my/aaronnote)
 
-(defcustom my/aaronnote-web-port 50815
+(config-defvar my/aaronnote-web-port nil
   "Fixed port for the Aaronnote web host.
 Set to 0 to let the OS pick a random port."
   :type 'integer

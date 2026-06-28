@@ -83,6 +83,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-output)
 (require 'init-session)
 (require 'init-maintenance)
+(my/require-module-safely 'config-tools)
 (require 'init-performance)
 (require 'init-diagnostics-ui)
 (require 'init-diagnostics-extra)

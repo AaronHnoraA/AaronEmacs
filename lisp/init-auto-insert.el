@@ -6,6 +6,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'subr-x)
 (require 'seq)
 (require 'project)
@@ -14,24 +16,12 @@
   "File templates for new files."
   :group 'convenience)
 
-(defcustom my/template-root
-  (expand-file-name "templates" user-emacs-directory)
+(config-defvar my/template-root nil
   "Root directory storing templates."
   :type 'directory
   :group 'my/template)
 
-(defcustom my/template-current
-  '((org . "default.org")
-    (c . "default.c")
-    (cc . "default.cc")
-    (js . "default.js")
-    (ts . "default.ts")
-    (sh . "default.sh")
-    (tex . "article.tex")
-    (python . "default.py")
-    (nix . "default.nix")
-    (makefile . "default.mk")
-    (cmake . "default.cmake"))
+(config-defvar my/template-current nil
   "Current template filename per template kind.
 
 Each entry is (KIND . FILENAME), where KIND maps to templates/KIND/FILENAME."
@@ -42,8 +32,7 @@ Each entry is (KIND . FILENAME), where KIND maps to templates/KIND/FILENAME."
   '(org c cc js ts sh tex python nix makefile cmake)
   "Template kinds supported by this configuration.")
 
-(defcustom my/template-auto-insert-enabled-kinds
-  '(c cc sh python nix)
+(config-defvar my/template-auto-insert-enabled-kinds nil
   "Template kinds enabled for `auto-insert-mode'.
 
 Only kinds in this list will be auto-inserted for new files.  Other kinds can
@@ -51,7 +40,7 @@ still be inserted manually via `my/template-switch'."
   :type '(repeat symbol)
   :group 'my/template)
 
-(defcustom my/template-auto-insert-enabled t
+(config-defvar my/template-auto-insert-enabled nil
   "Whether `auto-insert-mode' should insert templates."
   :type 'boolean
   :group 'my/template)

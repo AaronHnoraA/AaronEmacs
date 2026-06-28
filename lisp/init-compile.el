@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'aaron-ui-board)
 (require 'cl-lib)
 (require 'bytecomp)
@@ -38,67 +40,62 @@
 (defconst my/compile-board-buffer-name "*Compile Board*"
   "Buffer name used by the compile management board.")
 
-(defcustom my/compile-target-files
-  '("early-init.el" "init.el" "bootstrap.el")
+(config-defvar my/compile-target-files nil
   "Top-level Emacs Lisp files managed by the compile helpers."
   :type '(repeat string)
   :group 'my/compile)
 
-(defcustom my/compile-target-directories
-  '("lisp")
+(config-defvar my/compile-target-directories nil
   "Directories managed by the compile helpers."
   :type '(repeat string)
   :group 'my/compile)
 
-(defcustom my/compile-third-party-directories
-  '("site-lisp")
+(config-defvar my/compile-third-party-directories nil
   "Extra directories under the config root included by full build commands."
   :type '(repeat string)
   :group 'my/compile)
 
-(defcustom my/package-enable-native-compile t
+(config-defvar my/package-enable-native-compile nil
   "If non-nil, let package installation native-compile packages when supported."
   :type 'boolean
   :group 'my/compile)
 
-(defcustom my/native-comp-enable-jit t
+(config-defvar my/native-comp-enable-jit nil
   "If non-nil, allow JIT native compilation when Emacs supports it."
   :type 'boolean
   :group 'my/compile)
 
-(defcustom my/native-comp-enable-deferred t
+(config-defvar my/native-comp-enable-deferred nil
   "If non-nil, allow deferred native compilation when Emacs supports it."
   :type 'boolean
   :group 'my/compile)
 
-(defcustom my/native-comp-pop-log nil
+(config-defvar my/native-comp-pop-log nil
   "If non-nil, display the native compilation log buffer after queueing jobs."
   :type 'boolean
   :group 'my/compile)
 
-(defcustom my/native-comp-async-report-policy 'silent
+(config-defvar my/native-comp-async-report-policy nil
   "Value assigned to `native-comp-async-report-warnings-errors' when available."
-  :type '(choice (const :tag "Default (nil)" nil)
-                 (const :tag "Silent (recommended)" silent)
-                 (const :tag "Verbose (t)" t))
+  :type '(choice (const :tag "Default (nil)" nil) (const :tag "Silent (recommended)" silent) (const :tag "Verbose (t)" t))
   :group 'my/compile)
 
-(defcustom my/native-comp-verbose 0
+(config-defvar my/native-comp-verbose nil
   "Value assigned to `native-comp-verbose' when available."
   :type 'integer
   :group 'my/compile)
 
-(defcustom my/native-comp-speed 2
+(config-defvar my/native-comp-speed nil
   "Optimization level used by native compilation when `comp-speed' exists."
   :type 'integer
   :group 'my/compile)
 
-(defcustom my/native-comp-warning-on-missing-source nil
+(config-defvar my/native-comp-warning-on-missing-source nil
   "Value assigned to `native-comp-warning-on-missing-source' when available."
   :type 'boolean
   :group 'my/compile)
 
-(defcustom my/compile-auto-native-on-save nil
+(config-defvar my/compile-auto-native-on-save nil
   "If non-nil, queue native compilation after saving local Emacs Lisp config files."
   :type 'boolean
   :group 'my/compile)

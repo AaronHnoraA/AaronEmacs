@@ -8,6 +8,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'init-funcs)
 (require 'seq)
@@ -74,53 +76,7 @@
   "Debug adapter workflow helpers."
   :group 'tools)
 
-(defcustom my/debug-common-adapter-specs
-  '((python
-     :title "Python"
-     :configs (debugpy debugpy-module python-file python-module)
-     :commands ("python" "python3")
-     :install "python -m pip install debugpy")
-	    (javascript
-	     :title "JavaScript / TypeScript / Chrome"
-	     :configs (js-debug-node js-debug-ts-node js-debug-tsx js-debug-node-attach
-	               js-debug-chrome node-file node-attach chrome ts-node tsx-file)
-	     :commands ("node")
-	     :install "Install vscode-js-debug into dape-adapter-dir/js-debug.")
-	    (c-cpp-rust
-	     :title "C / C++ / Rust"
-	     :configs (lldb-dap lldb-vscode gdb cpptools rust-lldb c-cpp-lldb c-cpp-gdb)
-     :commands ("lldb-dap" "lldb-vscode" "gdb")
-     :install "Install lldb-dap/lldb-vscode or gdb >= 14.1; cpptools needs the cpptools adapter.")
-    (go
-     :title "Go"
-     :configs (dlv gdb-go gdb-go-test go-dlv go-test)
-     :commands ("dlv" "gdb")
-     :install "go install github.com/go-delve/delve/cmd/dlv@latest")
-    (shell
-     :title "Shell"
-     :configs (bash-debug bash-script)
-     :commands ("bash" "node")
-     :install "Install bash-debug into dape-adapter-dir/bash-debug.")
-    (dotnet
-     :title ".NET / C#"
-     :configs (netcoredbg dotnet)
-     :commands ("netcoredbg")
-     :install "Install netcoredbg.")
-    (php
-     :title "PHP"
-     :configs (xdebug php-xdebug)
-     :commands ("node")
-     :install "Install php-debug into dape-adapter-dir/php-debug and enable Xdebug.")
-    (ruby
-     :title "Ruby"
-     :configs (rdbg ruby-rdbg)
-     :commands ("rdbg")
-     :install "gem install debug")
-    (ocaml
-     :title "OCaml"
-     :configs (ocamlearlybird ocaml-earlybird)
-     :commands ("ocamlearlybird")
-     :install "opam install earlybird"))
+(config-defvar my/debug-common-adapter-specs nil
   "Common debug adapters shown by `my/debug-adapter-doctor'."
   :type '(repeat sexp)
   :group 'my/debug)

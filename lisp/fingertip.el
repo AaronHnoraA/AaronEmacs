@@ -86,6 +86,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (defgroup fingertip nil
   "Edit grammatically."
   :group 'fingertip)
@@ -104,7 +106,7 @@
      ,body
      t))
 
-(defcustom fingertip-save-in-kill-ring t
+(config-defvar fingertip-save-in-kill-ring nil
   "Whether save kill thing into kill-ring."
   :type 'boolean
   :group 'fingertip)

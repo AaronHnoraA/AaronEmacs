@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'subr-x)
 (require 'transient)
@@ -94,12 +96,12 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
   (setq TeX-command-list
         (cons entry (assoc-delete-all (car entry) TeX-command-list))))
 
-(defcustom my/auctex-live-save-idle-delay 1.0
+(config-defvar my/auctex-live-save-idle-delay nil
   "Idle seconds before saving a modified LaTeX buffer in live preview mode."
   :type 'number
   :group 'TeX-command)
 
-(defcustom my/pdf-view-auto-refresh-interval 1.2
+(config-defvar my/pdf-view-auto-refresh-interval nil
   "Polling fallback interval for PDF buffers when file notifications are absent."
   :type 'number
   :group 'TeX-command)
@@ -113,7 +115,7 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
 (defvar my/auctex-live-preview--processes (make-hash-table :test #'equal)
   "Live latexmk processes keyed by master TeX file.")
 
-(defcustom my/latex-preview-open-timeout 120.0
+(config-defvar my/latex-preview-open-timeout nil
   "Seconds to keep waiting for the initial PDF after starting live preview."
   :type 'number
   :group 'TeX-command)
@@ -412,7 +414,7 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
      (concat (file-name-sans-extension TeX-master) ".pdf")
      (file-name-directory buffer-file-name))))
 
-(defcustom my/pdf-sync-parent-search-depth 3
+(config-defvar my/pdf-sync-parent-search-depth nil
   "How many parent directories to search for a master SyncTeX file."
   :type 'integer
   :group 'TeX-view)

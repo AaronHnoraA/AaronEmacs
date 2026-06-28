@@ -6,6 +6,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'browse-url)
 (require 'cl-lib)
 (require 'project)
@@ -28,22 +30,22 @@
          user-emacs-directory))))
   "Directory containing this Emacs configuration.")
 
-(defcustom my/jupyter-lab-command "/opt/homebrew/bin/jupyter-lab"
+(config-defvar my/jupyter-lab-command nil
   "Absolute path to the Jupyter executable used for local JupyterLab."
   :type 'string
   :group 'my/jupyter)
 
-(defcustom my/jupyter-lab-host "127.0.0.1"
+(config-defvar my/jupyter-lab-host nil
   "Host used for the managed local JupyterLab server."
   :type 'string
   :group 'my/jupyter)
 
-(defcustom my/jupyter-lab-port 8888
+(config-defvar my/jupyter-lab-port nil
   "Port used for the managed local JupyterLab server."
   :type 'integer
   :group 'my/jupyter)
 
-(defcustom my/jupyter-lab-default-directory nil
+(config-defvar my/jupyter-lab-default-directory nil
   "Default working directory for the managed local JupyterLab server.
 
 When nil, prefer the roam notes root for roam files, then the current
@@ -51,13 +53,12 @@ project root, then `default-directory'."
   :type '(choice (const :tag "Dynamic" nil) directory)
   :group 'my/jupyter)
 
-(defcustom my/jupyter-lab-log-buffer-name "*jupyter-lab*"
+(config-defvar my/jupyter-lab-log-buffer-name nil
   "Buffer used to capture the managed local JupyterLab output."
   :type 'string
   :group 'my/jupyter)
 
-(defcustom my/jupyter-lab-jupyter-path
-  (expand-file-name "jupyter" my/jupyter-lab--config-directory)
+(config-defvar my/jupyter-lab-jupyter-path nil
   "Jupyter data directory prepended when starting managed local JupyterLab."
   :type 'directory
   :group 'my/jupyter)

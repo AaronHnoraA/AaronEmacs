@@ -2,6 +2,17 @@
 
 这份文档回答“我要改点什么，应该改哪里”。
 
+## 0. 统一配置入口（优先看这里）
+
+已注册进 `config` 注册表的项，直接用管理面板改即可——**即时生效、自动持久化**，
+不用找模块、不用重启：
+
+- `M-x config-board`，或 leader `SPC h c`。
+- Lisp：`(config-get 'X)` / `(config-set 'X V)` / `(config-reset 'X)`。
+
+注册表与注册语法见 [config-management.md](config-management.md)。下面各节是「该改哪个
+文件」的底层说明；当某项尚未注册时按下面的指引改源码，并顺手把它注册进 `config`。
+
 ## 1. 我要改主题
 
 文件：

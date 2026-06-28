@@ -77,6 +77,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'thingatpt)
 (require 'seq)
@@ -134,44 +136,32 @@
 
 ;;; Options
 
-(defcustom symbol-overlay-faces '(symbol-overlay-face-1
-                                  symbol-overlay-face-2
-                                  symbol-overlay-face-3
-                                  symbol-overlay-face-4
-                                  symbol-overlay-face-5
-                                  symbol-overlay-face-6
-                                  symbol-overlay-face-7
-                                  symbol-overlay-face-8)
+(config-defvar symbol-overlay-faces nil
   "Faces used for overlays."
   :type '(repeat face)
   :group 'symbol-overlay)
 
-(defcustom symbol-overlay-displayed-window t
+(config-defvar symbol-overlay-displayed-window nil
   "See `symbol-overlay-maybe-put-temp'."
   :group 'symbol-overlay
   :type 'boolean)
 
-(defcustom symbol-overlay-temp-highlight-single nil
+(config-defvar symbol-overlay-temp-highlight-single nil
   "When non-nil, also temporarily highlight symbols that occur only once."
   :group 'symbol-overlay
   :type 'boolean)
 
-(defcustom symbol-overlay-idle-time 0.5
+(config-defvar symbol-overlay-idle-time nil
   "Idle time after every command and before the temporary highlighting."
   :group 'symbol-overlay
   :type 'float)
 
-(defcustom symbol-overlay-overlay-created-functions '()
+(config-defvar symbol-overlay-overlay-created-functions nil
   "Functions called after overlay creation that may modify the overlay."
   :group 'symbol-overlay
   :type 'hook)
 
-(defcustom symbol-overlay-ignore-functions
-  '((c-mode . symbol-overlay-ignore-function-c)
-    (c++-mode . symbol-overlay-ignore-function-c++)
-    (python-mode . symbol-overlay-ignore-function-python)
-    (java-mode . symbol-overlay-ignore-function-java)
-    (go-mode . symbol-overlay-ignore-function-go))
+(config-defvar symbol-overlay-ignore-functions nil
   "Functions to determine whether a symbol should be ignored.
 
 This is an association list that maps a MAJOR-MODE symbol to a
@@ -181,15 +171,15 @@ definitions to prevent a language's keywords from getting highlighted."
   :group 'symbol-overlay
   :type '(repeat (cons (function :tag "Mode") function)))
 
-(defcustom symbol-overlay-priority nil
+(config-defvar symbol-overlay-priority nil
   "Sets the priority of the overlays to a non-default value.
 When multiple overlays appear at the same point, the one with the
 highest priority receives keystrokes, so with this option you can
 prioritise `symbol-overlay' relative to `flymake' or other features."
   :group 'symbol-overlay
-  :type 'integer)
+  :type '(choice (const :tag "Default priority" nil) integer))
 
-(defcustom symbol-overlay-jump-hook nil
+(config-defvar symbol-overlay-jump-hook nil
   "Hook to run after jumping to a symbol."
   :group 'symbol-overlay
   :type 'hook)

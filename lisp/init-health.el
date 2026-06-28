@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'aaron-ui-board)
 (require 'init-funcs)
 (require 'subr-x)
@@ -25,8 +27,7 @@
   (or load-file-name buffer-file-name)
   "Absolute path of `init-health.el' at load time.")
 
-(defcustom my/health-executables
-  '("rg" "git" "python3" "node" "cargo" "go" "just" "make" "latexmk" "gdb" "lldb-dap" "dlv")
+(config-defvar my/health-executables nil
   "Executables checked by `my/health-report'."
   :type '(repeat string)
   :group 'my/health)

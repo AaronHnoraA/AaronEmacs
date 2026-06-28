@@ -96,12 +96,13 @@
 
 ;;; Code:
 
+(require 'config)
+
 (defgroup winpoint nil
   "Remember buffer positions per-window, not per buffer."
   :group 'window)
 
-(defcustom winpoint-non-restore-buffer-list
-  '()
+(config-defvar winpoint-non-restore-buffer-list nil
   "The buffer list that don't restore point."
   :type 'list
   :group 'winpoint)

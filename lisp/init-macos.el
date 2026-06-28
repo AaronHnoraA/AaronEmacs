@@ -4,6 +4,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'browse-url)
 (require 'subr-x)
@@ -158,17 +160,16 @@
   "macOS-specific local integration."
   :group 'environment)
 
-(defcustom my/macos-scroll-profile 'line
+(config-defvar my/macos-scroll-profile nil
   "Default macOS scrolling profile.
 `line' keeps `pixel-scroll-precision-mode' off and lets regular wheel
 scrolling handle trackpad input, which costs much less during long Org
 reading sessions.  `pixel' restores precision pixel scrolling for users who
 prefer the smoother feel over lower power draw."
-  :type '(choice (const :tag "Lower-power line scrolling" line)
-                 (const :tag "Precision pixel scrolling" pixel))
+  :type '(choice (const :tag "Lower-power line scrolling" line) (const :tag "Precision pixel scrolling" pixel))
   :group 'my/macos)
 
-(defcustom my/macos-idle-gc-delay 8.0
+(config-defvar my/macos-idle-gc-delay nil
   "Seconds to wait before the explicit macOS idle GC runs.
 `gcmh' already manages ordinary idle GC.  This macOS hook is only a fallback
 for focus-loss cleanup, so a longer delay avoids waking Emacs immediately
@@ -176,7 +177,7 @@ after short minibuffer or window-management commands."
   :type 'number
   :group 'my/macos)
 
-(defcustom my/macos-gc-after-minibuffer nil
+(config-defvar my/macos-gc-after-minibuffer nil
   "Whether exiting the minibuffer should schedule an explicit macOS idle GC.
 This is disabled by default because `gcmh' already handles normal idle GC and
 minibuffer exits are common during command-heavy work."
@@ -340,8 +341,6 @@ With positive ARG, enable it.  With zero or negative ARG, disable it."
         fast-but-imprecise-scrolling t
         garbage-collection-messages nil
         redisplay-skip-fontification-on-input t)
-  (setq use-dialog-box nil
-        use-file-dialog nil)
 
   (when (boundp 'ns-use-proxy-icon)
     (setq ns-use-proxy-icon nil))
@@ -461,8 +460,6 @@ With positive ARG, enable it.  With zero or negative ARG, disable it."
   (ns-use-native-fullscreen t)
   (ns-use-proxy-icon nil)
   ;(ns-use-native-fullscreen t)
-  (use-dialog-box nil)
-  (use-file-dialog nil)
   ;; Visit files opened outside of Emacs in existing frame, not a new one
   (ns-pop-up-frames nil))
 

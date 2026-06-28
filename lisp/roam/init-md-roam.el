@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'init-funcs)
 (require 'init-md-roam-ui)
 (require 'calendar)
@@ -32,31 +34,27 @@
   (file-name-directory (or load-file-name buffer-file-name))
   "Directory containing the Markdown roam Emacs bridge.")
 
-(defcustom my/aaronnote-roam-root
-  (expand-file-name ".roam" user-emacs-directory)
+(config-defvar my/aaronnote-roam-root nil
   "Root directory of the Markdown roam note vault."
   :type 'directory
   :group 'my/aaronnote-roam)
 
-(defcustom my/aaronnote-roam-recent-limit 24
+(config-defvar my/aaronnote-roam-recent-limit nil
   "Maximum number of recent Markdown roam notes kept in memory."
   :type 'integer
   :group 'my/aaronnote-roam)
 
-(defcustom my/aaronnote-roam-select-window-height 0.32
+(config-defvar my/aaronnote-roam-select-window-height nil
   "Height for the bottom Markdown roam selector window."
-  :type '(choice (number :tag "Fraction or rows")
-                 (function :tag "Window height function"))
+  :type '(choice (number :tag "Fraction or rows") (function :tag "Window height function"))
   :group 'my/aaronnote-roam)
 
-(defcustom my/aaronnote-roam-runtime-root
-  (expand-file-name "aaronnote" my/aaronnote-roam--module-directory)
+(config-defvar my/aaronnote-roam-runtime-root nil
   "Root of the vendored Aaronnote runtime used by Markdown roam tooling."
   :type 'directory
   :group 'my/aaronnote-roam)
 
-(defcustom my/aaronnote-roam-runtime-cli
-  (expand-file-name "roam-cli.mjs" my/aaronnote-roam-runtime-root)
+(config-defvar my/aaronnote-roam-runtime-cli nil
   "Node bridge used to call the vendored Aaronnote roam runtime from Emacs."
   :type 'file
   :group 'my/aaronnote-roam)

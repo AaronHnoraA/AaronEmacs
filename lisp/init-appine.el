@@ -10,6 +10,7 @@
 
 (require 'aaron-ui-board)
 (require 'cl-lib)
+(require 'config)
 
 (my/package-ensure-vc 'appine "https://github.com/chaoswork/appine.git")
 
@@ -28,8 +29,10 @@
 (defvar my/appine-tab-index -1
   "Zero-based index into `my/appine-tab-list' for the active tab. -1 = none.")
 
-(defvar my/appine-default-window-size 0.38
-  "Default height ratio for the Appine window when splitting below.")
+(config-defvar my/appine-default-window-size nil
+  "Default height ratio for the Appine window when splitting below."
+  :type 'float
+  :group 'appine)
 
 (defvar my/appine--refresh-timer nil
   "Timer used to refresh Appine after Emacs window changes settle.")

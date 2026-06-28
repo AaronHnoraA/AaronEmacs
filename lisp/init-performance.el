@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'aaron-ui-board)
 (require 'cl-lib)
 (require 'init-funcs)
@@ -18,32 +20,17 @@
   "Runtime performance and power diagnostics."
   :group 'convenience)
 
-(defcustom my/performance-refresh-interval 2.0
+(config-defvar my/performance-refresh-interval nil
   "Seconds between automatic performance board refreshes."
   :type 'number
   :group 'my/performance)
 
-(defcustom my/performance-record-directory
-  (expand-file-name "var/performance/" user-emacs-directory)
+(config-defvar my/performance-record-directory nil
   "Directory used for saved performance records."
   :type 'directory
   :group 'my/performance)
 
-(defcustom my/performance-watch-hooks
-  '(post-command-hook
-    pre-command-hook
-    after-change-functions
-    before-change-functions
-    before-save-hook
-    after-save-hook
-    window-scroll-functions
-    window-size-change-functions
-    jit-lock-functions
-    org-mode-hook
-    org-cycle-hook
-    org-babel-after-execute-hook
-    kill-buffer-hook
-    change-major-mode-hook)
+(config-defvar my/performance-watch-hooks nil
   "Hooks shown by `my/performance-watch'."
   :type '(repeat symbol)
   :group 'my/performance)

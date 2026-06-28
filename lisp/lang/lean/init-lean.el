@@ -9,6 +9,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'project)
 (require 'seq)
@@ -91,32 +93,31 @@
   "Lean 4 editing support."
   :group 'languages)
 
-(defcustom lean-eglot-connect-timeout 180
+(config-defvar lean-eglot-connect-timeout nil
   "Seconds before timing out Lean Eglot initialization.
 Mathlib projects can legitimately take longer than Eglot's default 30 seconds
 while Lake warms the environment.  Set this to nil to never time out."
-  :type '(choice (const :tag "Never time out" nil)
-                 (integer :tag "Seconds"))
+  :type '(choice (const :tag "Never time out" nil) (integer :tag "Seconds"))
   :group 'lean)
 
-(defcustom lean-eglot-start-delay 0.35
+(config-defvar lean-eglot-start-delay nil
   "Seconds to wait before automatically starting Lean Eglot.
 This keeps freshly opened Mathlib buffers responsive while still starting the
 language server without user action."
   :type 'number
   :group 'lean)
 
-(defcustom lean-info-window-width 84
+(config-defvar lean-info-window-width nil
   "Width for Lean xwidget infoview side windows."
   :type 'integer
   :group 'lean)
 
-(defcustom lean-dev-log-enabled nil
+(config-defvar lean-dev-log-enabled nil
   "When non-nil, write Lean integration events to `lean-dev-log-buffer-name'."
   :type 'boolean
   :group 'lean)
 
-(defcustom lean-dev-log-buffer-name "*Lean Dev Log*"
+(config-defvar lean-dev-log-buffer-name nil
   "Buffer name for Lean integration diagnostics."
   :type 'string
   :group 'lean)
@@ -202,7 +203,7 @@ language server without user action."
 
 ;;; ── Eglot server contact ─────────────────────────────────────────────────────
 
-(defcustom lean-infoview-proxy-enabled t
+(config-defvar lean-infoview-proxy-enabled nil
   "When non-nil, route Eglot through lean-proxy.mjs for infoview support.
 The proxy is a transparent JSON-RPC passthrough to lake serve; it also
 serves the official @leanprover/infoview over HTTP+SSE so a single Lean
@@ -321,11 +322,7 @@ lake serve / lean --server connection otherwise."
 (defvar-local lean--eglot-start-timer nil
   "Timer used to start Eglot for the current Lean buffer.")
 
-(defcustom lean-eglot-deferred-ui-delays
-  '((company . 0.15)
-    (eldoc-box . 0.25)
-    (inlay-hints . 0.45)
-    (semantic-tokens . 0.80))
+(config-defvar lean-eglot-deferred-ui-delays nil
   "Idle delays before enabling expensive Lean Eglot UI features."
   :type '(alist :key-type symbol :value-type number)
   :group 'lean)

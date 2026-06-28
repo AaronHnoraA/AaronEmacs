@@ -30,6 +30,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 
 (declare-function eglot-current-server "eglot" ())
@@ -45,19 +47,19 @@
   "Infoview-change jump for Lean."
   :group 'lean)
 
-(defcustom lean-jump-include-term-goal nil
+(config-defvar lean-jump-include-term-goal nil
   "When non-nil, also consider $/lean/plainTermGoal changes as boundaries.
 Default nil: only stop where the tactic goal state (plainGoal) changes.
 Set to t for sub-expression granularity (stops at every identifier)."
   :type 'boolean
   :group 'lean-jump)
 
-(defcustom lean-jump-request-timeout 1.5
+(config-defvar lean-jump-request-timeout nil
   "Seconds to wait for each LSP request when probing."
   :type 'number
   :group 'lean-jump)
 
-(defcustom lean-jump-syntactic-fallback t
+(config-defvar lean-jump-syntactic-fallback nil
   "When non-nil, fall back to tactic-argument stepping when goal info is
 unavailable (e.g. a broken `rw'/`simp' lemma).
 Keeps M-]/M-[ usable while debugging broken tactics."

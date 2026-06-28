@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'init-funcs)
 (require 'cl-lib)
 (require 'seq)
@@ -12,7 +14,7 @@
 (defvar-local my/expand-region-history nil
   "Previous region states for `my/expand-region'.")
 
-(defcustom my/expand-region-history-limit 64
+(config-defvar my/expand-region-history-limit nil
   "Maximum previous region states kept per buffer."
   :type 'integer
   :group 'editing)

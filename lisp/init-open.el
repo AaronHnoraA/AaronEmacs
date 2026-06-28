@@ -7,6 +7,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'browse-url)
 (require 'general)
 (require 'subr-x)
@@ -15,24 +17,7 @@
   "Central routing for opening URLs and files."
   :group 'convenience)
 
-(defcustom my/open-routes
-  '((url
-     :default menu
-     :menu-default xwidget
-     :backends (xwidget appine eww system))
-    (search
-     :default xwidget
-     :menu-default xwidget
-     :backends (xwidget appine eww system))
-    (file
-     :default emacs
-     :menu-default emacs
-     :backends (emacs appine system))
-    (pdf
-     :match ("\\.pdf\\'")
-     :default system
-     :menu-default system
-     :backends (emacs appine system)))
+(config-defvar my/open-routes nil
   "Open-route DSL.
 
 Each entry has the shape:
@@ -44,7 +29,7 @@ macOS `open', Linux `xdg-open', Windows shell open, or `browse-url' fallback."
   :type '(repeat sexp)
   :group 'my/open)
 
-(defcustom my/open-browser-window-size 0.38
+(config-defvar my/open-browser-window-size nil
   "Width ratio for side browser windows created by open routes."
   :type 'number
   :group 'my/open)

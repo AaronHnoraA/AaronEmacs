@@ -5,13 +5,15 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'init-funcs)
 
 (defgroup my/session nil
   "Session persistence helpers."
   :group 'tools)
 
-(defcustom my/session-auto-save nil
+(config-defvar my/session-auto-save nil
   "Whether to save perspective state automatically on Emacs exit."
   :type 'boolean
   :group 'my/session)

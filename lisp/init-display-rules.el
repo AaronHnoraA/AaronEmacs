@@ -5,23 +5,25 @@
 
 ;;; Code:
 
+(require 'config)
+
 (defgroup my/display-rules nil
   "Extra shackle rules for development buffers."
   :group 'windows)
 
-(defcustom my/display-rules-bottom-size 0.32
+(config-defvar my/display-rules-bottom-size nil
   "Default bottom-side window size for development buffers."
   :type 'float
   :group 'my/display-rules)
 
-(defcustom my/display-rules-side-size 0.33
+(config-defvar my/display-rules-side-size nil
   "Default side window size for side-panel style buffers."
   :type 'float
   :group 'my/display-rules)
 
 (defvar shackle-rules)
 
-(defcustom my/display-rules-roam-size 0.36
+(config-defvar my/display-rules-roam-size nil
   "Width ratio for roam UI side panels."
   :type 'float
   :group 'my/display-rules)

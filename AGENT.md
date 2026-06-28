@@ -70,6 +70,13 @@ This config already has maintenance and workflow entry points. Reuse them:
 - Templates: the built-in `auto-insert` template layer in
   `lisp/init-auto-insert.el`; do not revive the old Doom/Yasnippet file-template
   path.
+- Config registry: the `config` package under `site-lisp/config/`
+  (`config-register`, `config-register-hook`, `config-register-file`,
+  `config-get`, `config-set`, `config-reset`, `config-board`). When a setting
+  should be user-tunable: register it, put the value in `etc/config-store.el`
+  (or a registered `etc/` file), and **remove any scattered `setq` call** — that
+  is variable pollution.  Do NOT encode values in Lisp code if they are tracked
+  here.  See `docs/config-management.md`.
 
 Do not add a repo-wide "unified tool" just to make unrelated domains look
 consistent. Prefer the existing pattern: keep core behavior in the owning

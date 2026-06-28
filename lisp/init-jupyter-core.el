@@ -13,6 +13,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'eieio-core)
 (require 'init-funcs)
@@ -24,13 +26,12 @@
   :group 'tools
   :prefix "my/jupyter-")
 
-(defcustom my/jupyter-known-languages
-  '("python" "sage" "sagemath" "maple")
+(config-defvar my/jupyter-known-languages nil
   "Languages managed through Jupyter connection files."
   :type '(repeat string)
   :group 'my/jupyter)
 
-(defcustom my/jupyter-language-default-kernels nil
+(config-defvar my/jupyter-language-default-kernels nil
   "User-selected default kernelspec names for managed languages.
 
 Each entry is of the form (LANGUAGE . KERNEL), where LANGUAGE is a
@@ -40,7 +41,7 @@ existing-kernel connection file is in use."
   :type '(alist :key-type string :value-type string)
   :group 'my/jupyter)
 
-(defcustom my/jupyter-kernelspec-log-buffer-name "*jupyter-kernelspec*"
+(config-defvar my/jupyter-kernelspec-log-buffer-name nil
   "Buffer used to capture kernelspec installation output."
   :type 'string
   :group 'my/jupyter)
@@ -51,7 +52,7 @@ existing-kernel connection file is in use."
 (defvar my/jupyter-connection-file-history nil
   "History of Jupyter kernel connection files.")
 
-(defcustom my/jupyter-connection-file-history-limit 40
+(config-defvar my/jupyter-connection-file-history-limit nil
   "Maximum remembered Jupyter kernel connection files."
   :type 'integer
   :group 'my/jupyter)
@@ -915,25 +916,22 @@ without forking the dependency."
   :group 'tools
   :prefix "my/jupytext-")
 
-(defcustom my/jupytext-command "jupytext"
+(config-defvar my/jupytext-command nil
   "Command used to run Jupytext."
   :type 'string
   :group 'my/jupytext)
 
-(defcustom my/jupytext-default-notebook-extension ".ipynb"
+(config-defvar my/jupytext-default-notebook-extension nil
   "Notebook extension used when inferring the paired notebook path."
   :type 'string
   :group 'my/jupytext)
 
-(defcustom my/jupytext-auto-mode-file-regexp "\\.ju\\.[^.]+\\'"
+(config-defvar my/jupytext-auto-mode-file-regexp nil
   "File name regexp for script buffers that should auto-enable `jupytext-mode'."
   :type 'regexp
   :group 'my/jupytext)
 
-(defcustom my/jupytext-format-alist
-  '(("py" . "py:percent")
-    ("r" . "R:percent")
-    ("sage" . "sage:percent"))
+(config-defvar my/jupytext-format-alist nil
   "Overrides from file extension to Jupytext format string.
 
 Extensions should not include the leading dot. Any extension not
@@ -942,13 +940,12 @@ usable for other kernels and script types."
   :type '(alist :key-type string :value-type string)
   :group 'my/jupytext)
 
-(defcustom my/jupytext-log-buffer-name "*jupytext*"
+(config-defvar my/jupytext-log-buffer-name nil
   "Buffer used to capture Jupytext stdout and stderr."
   :type 'string
   :group 'my/jupytext)
 
-(defcustom my/jupytext-sanitized-environment-variables
-  '("PYTHONPATH" "PYTHONHOME" "__PYVENV_LAUNCHER__")
+(config-defvar my/jupytext-sanitized-environment-variables nil
   "Environment variables removed before invoking Jupytext.
 
 This avoids leaking per-buffer Python runtime overrides, such as the

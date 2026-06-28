@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'aaron-ui)
 
 (defvar eshell-last-dir-ring)
@@ -29,17 +31,17 @@
 (defvar vterm-mode-map)
 (defvar vterm-copy-mode-map)
 
-(defcustom my/vterm-startup-send-delay 0.05
+(config-defvar my/vterm-startup-send-delay nil
   "Delay between retries when sending startup commands to a fresh VTerm."
   :type 'number
   :group 'term)
 
-(defcustom my/vterm-startup-send-retries 20
+(config-defvar my/vterm-startup-send-retries nil
   "Maximum retry count for startup commands sent to a fresh VTerm."
   :type 'integer
   :group 'term)
 
-(defcustom my/vterm-wheel-scroll-lines 5
+(config-defvar my/vterm-wheel-scroll-lines nil
   "Number of lines to scroll for explicit VTerm wheel bindings."
   :type 'integer
   :group 'term)

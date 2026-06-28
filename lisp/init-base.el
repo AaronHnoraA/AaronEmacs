@@ -11,6 +11,7 @@
 
 (require 'cl-lib)
 (require 'aaron-ui)
+(require 'config)
 
 (declare-function tempo-expand-if-complete "tempo")
 (declare-function magit-toplevel "magit" (&optional directory))
@@ -27,12 +28,8 @@
 (defvar project-current-directory-override)
 
 ;; Suppress GUI features and more
-(setq use-file-dialog nil
-      use-dialog-box nil
-      inhibit-x-resources t
+(setq inhibit-x-resources t
       inhibit-default-init t
-      inhibit-startup-screen t
-      inhibit-startup-message t
       inhibit-startup-buffer-menu t)
 
 ;; Pixelwise resize
@@ -89,23 +86,13 @@
                    my/dape-state-dir))
   (make-directory dir t))
 
-(setq make-backup-files t
-      backup-by-copying t
-      delete-old-versions t
-      version-control t
-      kept-new-versions 10
-      kept-old-versions 3
+(setq version-control t
       backup-directory-alist `(("." . ,my/backup-dir))
-      auto-save-default t
-      auto-save-timeout 20
-      auto-save-interval 200
       auto-save-file-name-transforms `((".*" ,my/auto-save-dir t))
       auto-save-list-file-prefix (expand-file-name ".saves-" my/auto-save-session-dir))
 
-(if (boundp 'lock-file-name-transforms)
-    (setq create-lockfiles t
-          lock-file-name-transforms `((".*" ,my/lockfile-dir t)))
-  (setq create-lockfiles nil))
+(when (boundp 'lock-file-name-transforms)
+  (setq lock-file-name-transforms `((".*" ,my/lockfile-dir t))))
 
 ;; Always load the newest file
 (setq load-prefer-newer t)
@@ -159,28 +146,27 @@
 
 
 
-;; 使用绝对行号
-(setq display-line-numbers-type 'absolute)
-
-(defcustom my/display-line-numbers-auto-modes
-  '(prog-mode conf-mode)
+(defvar my/display-line-numbers-auto-modes nil
   "Major mode families where line numbers are enabled automatically.
 Line numbers stay available through `my/toggle-line-numbers', but prose,
-Org, help, terminals and side buffers avoid the redisplay cost by default."
-  :type '(repeat symbol)
-  :group 'convenience)
+Org, help, terminals and side buffers avoid the redisplay cost by default.")
 
-(defcustom my/display-line-numbers-large-buffer-threshold (* 512 1024)
-  "Maximum buffer size where line numbers are enabled automatically."
-  :type '(choice (const :tag "No size limit" nil)
-                 integer)
-  :group 'convenience)
+(config-register 'my/display-line-numbers-auto-modes
+  :group 'display :type 'sexp
+  :doc "Major mode families where line numbers are enabled automatically.")
 
+(defvar my/display-line-numbers-large-buffer-threshold nil
+  "Maximum buffer size where line numbers are enabled automatically.")
+
+(config-register 'my/display-line-numbers-large-buffer-threshold
+  :group 'display :type 'sexp
+  :doc "Max buffer size for automatic line numbers (nil = no limit).")
 
 ;; 可选：关闭次刻度（避免干扰）
 (setq display-line-numbers-minor-tick 0)
 
 ;; ========= 行号显示策略 =========
+(require 'display-line-numbers)
 (setq display-line-numbers-minor-tick 0)
 
 ;; 1. 设置触发频率（例如每 5 行高亮一次）
@@ -252,32 +238,12 @@ Org, help, terminals and side buffers avoid the redisplay cost by default."
 
 
 
-;; 80 列竖线
-(setq-default fill-column 80)
 ;; 只在编程模式显示竖线
 (add-hook 'prog-mode-hook #'display-fill-column-indicator-mode)
 
 
 
-;; No annoying bell
-(setq ring-bell-function 'ignore)
-
-;; No eyes distraction
-(setq blink-cursor-mode nil)
-
-
 (setq global-disable-point-adjustment nil)
-
-;; Smooth scroll & friends
-(setq scroll-step 2
-      scroll-margin 2
-      hscroll-step 2
-      hscroll-margin 2
-      scroll-conservatively 101
-      scroll-preserve-screen-position 'always)
-
-;; The nano style for truncated long lines.
-(setq auto-hscroll-mode 'current-line)
 
 ;; Disable auto vertical scroll for tall lines
 (setq auto-window-vscroll nil)
@@ -290,11 +256,6 @@ Org, help, terminals and side buffers avoid the redisplay cost by default."
           (lambda ()
             (modify-syntax-entry ?_ "w")))
 
-;; No tabs
-;; Indent settings
-(setq-default indent-tabs-mode nil)
-(setq-default tab-width 4)
-(setq-default c-basic-offset 4)
 
 (use-package mixed-pitch
   :ensure t
@@ -317,117 +278,158 @@ Org, help, terminals and side buffers avoid the redisplay cost by default."
   :group 'faces)
 
 ;; 英文正文 (Body) - prose / variable-pitch
-(defcustom my/font-body "Merriweather"
-  "Serif family used for prose."
-  :type 'string
-  :group 'my/typography)
+(defvar my/font-body nil
+  "Serif family used for prose.")
 
-(defcustom my/h-body 228
-  "Base height for prose text."
-  :type 'integer
-  :group 'my/typography)
+(config-register 'my/font-body
+  :group 'font :type 'string :on-change #'my/font-reset-all
+  :doc "Prose body (variable-pitch) font family.")
 
-(defcustom my/font-body-width 'normal
+(defvar my/h-body nil
+  "Base height for prose text.")
+
+(config-register 'my/h-body
+  :group 'font :type 'integer :on-change #'my/font-reset-all
+  :doc "Base height (×10 = pt) for prose body text.")
+
+(defvar my/font-body-width nil
   "Preferred width for prose Latin text.
-Keep the prose font at its native width so long English lines stay tight."
-  :type 'symbol
-  :group 'my/typography)
+Keep the prose font at its native width so long English lines stay tight.")
+
+(config-register 'my/font-body-width
+  :group 'font :type 'sexp :on-change #'my/font-reset-all
+  :choices '(normal condensed expanded)
+  :doc "Width attribute for prose body text.")
 
 ;; 代码/表格 (Code) - 默认界面 + 代码环境（fixed-pitch）
-(defcustom my/font-code "Fira Code"
-  "Monospace family used for UI and code."
-  :type 'string
-  :group 'my/typography)
+(defvar my/font-code nil
+  "Monospace family used for UI and code.")
 
-(defcustom my/h-code 172
-  "Base height for code and UI text."
-  :type 'integer
-  :group 'my/typography)
+(config-register 'my/font-code
+  :group 'font :type 'string :on-change #'my/font-reset-all
+  :doc "Monospace code / UI font family.")
+
+(defvar my/h-code nil
+  "Base height for code and UI text.")
+
+(config-register 'my/h-code
+  :group 'font :type 'integer :on-change #'my/font-reset-all
+  :doc "Base height (×10 = pt) for code and UI text.")
 
 ;; 标题 (Title) - Org / Markdown / LaTeX 标题
-(defcustom my/font-title "Excalifont"
-  "Display family used for document titles and headings."
-  :type 'string
-  :group 'my/typography)
+(defvar my/font-title nil
+  "Display family used for document titles and headings.")
 
-(defcustom my/h-title 236
-  "Base height for first-level document headings."
-  :type 'integer
-  :group 'my/typography)
+(config-register 'my/font-title
+  :group 'font :type 'string :on-change #'my/font-reset-all
+  :doc "Heading / title font family.")
+
+(defvar my/h-title nil
+  "Base height for first-level document headings.")
+
+(config-register 'my/h-title
+  :group 'font :type 'integer :on-change #'my/font-reset-all
+  :doc "Base height (×10 = pt) for first-level headings.")
 
 ;; 中文 (Chinese)
-(defcustom my/font-cn "FZLiuGongQuanKaiShuJF"
-  "Primary Chinese family."
-  :type 'string
-  :group 'my/typography)
+(defvar my/font-cn nil
+  "Primary Chinese family.")
 
-(defcustom my/font-math-symbols
-  '("Libertinus Math" "Garamond-Math" "STIXGeneral" "DejaVu Sans")
+(config-register 'my/font-cn
+  :group 'font :type 'string :on-change #'my/font-reset-all
+  :doc "Primary Chinese font family.")
+
+(defvar my/font-math-symbols nil
   "Preferred fonts for Unicode math symbols shown inline in text buffers.
 These fonts are used for prettified Org entities such as \\in => ∈ so the
-glyph keeps its shape while point moves through composed text."
-  :type '(repeat string)
-  :group 'my/typography)
+glyph keeps its shape while point moves through composed text.")
 
-(defcustom my/font-unicode-symbols
-  '("Apple Symbols" "Noto Sans Symbols 2" "Noto Sans Symbols" "Symbola"
-    "DejaVu Sans")
-  "Fallback fonts for general Unicode symbols."
-  :type '(repeat string)
-  :group 'my/typography)
+(config-register 'my/font-math-symbols
+  :group 'font :type 'sexp :on-change #'my/font-reset-all
+  :doc "Preferred fonts for Unicode math symbols (ordered fallback list).")
 
-(defcustom my/font-emoji
-  '("Apple Color Emoji" "Noto Color Emoji" "Segoe UI Emoji")
-  "Fallback fonts for emoji glyphs."
-  :type '(repeat string)
-  :group 'my/typography)
+(defvar my/font-unicode-symbols nil
+  "Fallback fonts for general Unicode symbols.")
 
-(defcustom my/font-nerd-symbols
-  '("Symbols Nerd Font Mono" "Symbols Nerd Font" "JetBrainsMono Nerd Font Mono"
-    "FiraCode Nerd Font Mono" "Hack Nerd Font Mono")
-  "Fallback fonts for Nerd Font private-use glyphs."
-  :type '(repeat string)
-  :group 'my/typography)
+(config-register 'my/font-unicode-symbols
+  :group 'font :type 'sexp :on-change #'my/font-reset-all
+  :doc "Fallback fonts for general Unicode symbols (ordered fallback list).")
 
-(defcustom my/scale-cn 1.3
-  "Scale factor for Chinese glyphs."
-  :type 'number
-  :group 'my/typography)
+(defvar my/font-emoji nil
+  "Fallback fonts for emoji glyphs.")
 
-(defcustom my/font-code-weight 'regular
-  "Preferred weight for monospace UI and code."
-  :type 'symbol
-  :group 'my/typography)
+(config-register 'my/font-emoji
+  :group 'font :type 'sexp :on-change #'my/font-reset-all
+  :doc "Fallback fonts for emoji glyphs (ordered fallback list).")
 
-(defcustom my/font-ui-weight 'regular
-  "Preferred weight for general UI text."
-  :type 'symbol
-  :group 'my/typography)
+(defvar my/font-nerd-symbols nil
+  "Fallback fonts for Nerd Font private-use glyphs.")
 
-(defcustom my/font-body-weight 'regular
-  "Preferred weight for prose text."
-  :type 'symbol
-  :group 'my/typography)
+(config-register 'my/font-nerd-symbols
+  :group 'font :type 'sexp :on-change #'my/font-reset-all
+  :doc "Fallback fonts for Nerd Font private-use glyphs (ordered fallback list).")
 
-(defcustom my/font-title-weight 'medium
-  "Preferred weight for document headings."
-  :type 'symbol
-  :group 'my/typography)
+(defvar my/scale-cn nil
+  "Scale factor for Chinese glyphs.")
 
-(defcustom my/font-strong-weight 'medium
-  "Preferred weight for emphasis that should remain readable on transparent backgrounds."
-  :type 'symbol
-  :group 'my/typography)
+(config-register 'my/scale-cn
+  :group 'font :type 'number :on-change #'my/font-reset-all
+  :doc "Scale factor applied to Chinese glyphs.")
 
-(defcustom my/font-popout-weight 'semibold
-  "Preferred weight for the strongest visible accents such as top headings."
-  :type 'symbol
-  :group 'my/typography)
+(defvar my/font-code-weight nil
+  "Preferred weight for monospace UI and code.")
 
-(defcustom my/prose-line-spacing 0.24
-  "Line spacing used in prose buffers."
-  :type 'number
-  :group 'my/typography)
+(config-register 'my/font-code-weight
+  :group 'font :type 'sexp :on-change #'my/font-reset-all
+  :choices '(thin extralight light regular medium semibold bold extrabold)
+  :doc "Weight for code and UI text.")
+
+(defvar my/font-ui-weight nil
+  "Preferred weight for general UI text.")
+
+(config-register 'my/font-ui-weight
+  :group 'font :type 'sexp :on-change #'my/font-reset-all
+  :choices '(thin extralight light regular medium semibold bold extrabold)
+  :doc "Weight for general UI text.")
+
+(defvar my/font-body-weight nil
+  "Preferred weight for prose text.")
+
+(config-register 'my/font-body-weight
+  :group 'font :type 'sexp :on-change #'my/font-reset-all
+  :choices '(thin extralight light regular medium semibold bold extrabold)
+  :doc "Weight for prose body text.")
+
+(defvar my/font-title-weight nil
+  "Preferred weight for document headings.")
+
+(config-register 'my/font-title-weight
+  :group 'font :type 'sexp :on-change #'my/font-reset-all
+  :choices '(thin extralight light regular medium semibold bold extrabold)
+  :doc "Weight for document headings.")
+
+(defvar my/font-strong-weight nil
+  "Preferred weight for emphasis that should remain readable on transparent backgrounds.")
+
+(config-register 'my/font-strong-weight
+  :group 'font :type 'sexp :on-change #'my/font-reset-all
+  :choices '(thin extralight light regular medium semibold bold extrabold)
+  :doc "Weight for emphasis text (readable on transparent backgrounds).")
+
+(defvar my/font-popout-weight nil
+  "Preferred weight for the strongest visible accents such as top headings.")
+
+(config-register 'my/font-popout-weight
+  :group 'font :type 'sexp :on-change #'my/font-reset-all
+  :choices '(thin extralight light regular medium semibold bold extrabold)
+  :doc "Weight for the strongest accents (top-level headings).")
+
+(defvar my/prose-line-spacing nil
+  "Line spacing used in prose buffers.")
+
+(config-register 'my/prose-line-spacing
+  :group 'font :type 'number :on-change #'my/font-reset-all
+  :doc "Extra line spacing in prose buffers.")
 
 ;; ======================================================================
 ;; 2. 核心：应用字体（全局 + 中文绑定）
@@ -740,9 +742,6 @@ glyph keeps its shape while point moves through composed text."
 
 
 
-;; Sane defaults
-(setq use-short-answers t)
-
 ;; Enable the disabled narrow commands
 (put 'narrow-to-defun  'disabled nil)
 (put 'narrow-to-page   'disabled nil)
@@ -770,10 +769,7 @@ glyph keeps its shape while point moves through composed text."
 ;; Highlight parenthesises
 (use-package paren
   :ensure nil
-  :hook (after-init . show-paren-mode)
-  :custom
-  (show-paren-when-point-inside-paren t)
-  (show-paren-when-point-in-periphery t))
+  :hook (after-init . show-paren-mode))
 
 ;; Show line/column number and more
 (use-package simple
@@ -788,16 +784,10 @@ glyph keeps its shape while point moves through composed text."
   (delete-pair-blink-delay 0)
   ;; confusing if no fringes (GUI only).
   (visual-line-fringe-indicators '(nil right-curly-arrow))
-  ;; preserve the previous clipboard entry in the kill ring before replacing it
-  (save-interprogram-paste-before-kill t)
   ;; kill last word if there is no active region. C-w behaves more like vim.
   (kill-region-dwim 'unix-word)
-  ;; eliminate duplicates
-  (kill-do-not-save-duplicates t)
   ;; repeat C-SPC after C-u C-SPC to keep popping the mark ring
   (set-mark-command-repeat-pop t)
-  ;; include '\n' when point starts at the beginning-of-line
-  (kill-whole-line t)
   ;; show cwd when `shell-command' and `async-shell-command'
   (shell-command-prompt-show-cwd t)
   ;; show the name of character in `what-cursor-position'
@@ -815,12 +805,7 @@ glyph keeps its shape while point moves through composed text."
 
 ;; Type text
 (use-package text-mode
-  :ensure nil
-  :custom
-  ;; better word wrapping for CJK characters
-  (word-wrap-by-category t)
-  ;; paragraphs
-  (sentence-end-double-space nil))
+  :ensure nil)
 
 ;; Back to the previous position
 (use-package saveplace
@@ -831,11 +816,7 @@ glyph keeps its shape while point moves through composed text."
 (use-package hl-line
   :ensure nil
   :when (display-graphic-p)
-  :hook (after-init . global-hl-line-mode)
-  :custom
-  ;; Only highlight the selected window; avoids re-painting every visible
-  ;; window's current line on each command.
-  (global-hl-line-sticky-flag nil))
+  :hook (after-init . global-hl-line-mode))
 
 ;; Enable `repeat-mode' to reduce key sequence length
 ;;
@@ -851,14 +832,7 @@ glyph keeps its shape while point moves through composed text."
 ;; Workaround with minified source files
 (use-package so-long
   :ensure nil
-  :hook (after-init . global-so-long-mode)
-  :custom
-  ;; Default 250 triggers on many normal source files and adds advice
-  ;; overhead on every set-auto-mode call.  10000 catches only true
-  ;; minified/generated files.
-  (so-long-threshold 10000)
-  ;; Use the lighter minor-mode action instead of replacing the major mode.
-  (so-long-action 'so-long-minor-mode))
+  :hook (after-init . global-so-long-mode))
 
 ;; Completion engine
 (use-package minibuffer
@@ -879,7 +853,6 @@ glyph keeps its shape while point moves through composed text."
   (completion-show-help nil)
   (completion-auto-select nil)
   (completion-cycle-threshold nil)
-  (enable-recursive-minibuffers t)
   (minibuffer-depth-indicate-mode t)
   ;; shorten " (default %s)" => " [%s]"
   (minibuffer-default-prompt-format " [%s]")
@@ -888,12 +861,6 @@ glyph keeps its shape while point moves through composed text."
   (minibuffer-completion-auto-choose nil)
   ;; One frame one minibuffer.
   (minibuffer-follows-selected-frame nil)
-  ;; Ignore cases when complete
-  (completion-ignore-case t)
-  (read-buffer-completion-ignore-case t)
-  (read-file-name-completion-ignore-case t)
-  ;; `selectrum', `vertico' and `icomplete' will honoring
-  (completion-styles '(basic partial-completion substring flex))
   (completion-category-overrides '((buffer (styles . (flex)))
                                    (file (styles . (substring)))
                                    (eglot-capf (styles . (basic partial-completion)))
@@ -902,9 +869,7 @@ glyph keeps its shape while point moves through composed text."
   (completion-pcm-leading-wildcard t)
   ;; vertical view
   (completions-format 'one-column)
-  (completions-max-height 13)
-  (completions-sort nil)
-  (completions-detailed t))
+  (completions-sort nil))
 
 ;; Holidays
 (use-package calendar
@@ -1107,9 +1072,7 @@ Else, call `comment-or-uncomment-region' on the current line."
   :hook (ibuffer-mode . ibuffer-auto-mode)
   :bind ([remap list-buffers] . ibuffer)
   :custom
-  (ibuffer-expert t)
   (ibuffer-movement-cycle nil)
-  (ibuffer-show-empty-filter-groups nil)
   (ibuffer-saved-filter-groups
    '(("Default"
       ("Emacs" (or (name . "\\*scratch\\*")
@@ -1236,7 +1199,6 @@ Else, call `comment-or-uncomment-region' on the current line."
   :ensure nil
   :hook (after-init . recentf-mode)
   :custom
-  (recentf-max-saved-items 200)
   (recentf-auto-cleanup 'never)
   (recentf-exclude '(;; Folders on MacOS start
                      "^/private/tmp/"
@@ -1277,16 +1239,11 @@ Else, call `comment-or-uncomment-region' on the current line."
 ;(pixel-scroll-precision-mode 1)
 
 
-(setq scroll-conservatively most-positive-fixnum
-      fast-but-imprecise-scrolling t
-      redisplay-skip-fontification-on-input t)
+(setq redisplay-skip-fontification-on-input t)
 
 ;; 高质量渲染
 (setq frame-resize-pixelwise t)
 (setq window-resize-pixelwise t)
-
-(setq treesit-font-lock-level 4)
-(setq compilation-scroll-output t)
 
 (autoload 'dired-async-mode "dired-async.el" nil t)
 (dired-async-mode 1)
@@ -1315,8 +1272,6 @@ escape from the process sentinel."
 (use-package amx
   :ensure t
   :defer 2
-  :custom
-  (amx-history-length 20)
   :config
   (amx-mode 1)
   ;; amx installs a 1-second repeating idle timer to re-check commands.
@@ -1615,9 +1570,6 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
 ;; Debugger 以 C 风格 显示 函数调用, 而不是 Lisp 风格.
 (setopt debugger-stack-frame-as-list nil)
 
-;; GC 时在 echo area 显示信息, 但不会并入到 “*Messages*” 中.
-(setopt garbage-collection-messages t)
-
 (setq auto-mode-case-fold t)
 
 ;; 如有必要, 会在 写入/重命名 文件后 执行 ‘normal-mode’ 以使用恰当的 major mode.
@@ -1643,12 +1595,8 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
 
 ;;; Read
 (setq read-extended-command-predicate #'command-completion-default-include-p
-      read-file-name-completion-ignore-case t
       ;; “C-q” 后接 16 进制.
-      read-quoted-char-radix 16
-      read-buffer-completion-ignore-case t)
-
-(setq enable-recursive-minibuffers t)
+      read-quoted-char-radix 16)
 
 ;; 大部分情况下, 保留从 ‘read-from-minibuffer’ 获取的文本的属性.
 (setq minibuffer-allow-text-properties t)
@@ -1661,39 +1609,27 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
 
 ;;; 性能相关:
 
-;; 不清除 字体 缓存.
-(setq inhibit-compacting-font-caches t)
-
-;; 32G 机器优先减少前台 GC 频率, 让大块编辑/渲染工作更少被打断.
-(setq gc-cons-threshold (* 96 1024 1024)
-      gc-cons-percentage 0.3)
 
 
 
 ;;; Evaluation:
 
-(setopt debug-on-quit nil  ; 按下 “C-g” 时是否要进入 debugger.
-        ;; 在 ‘eval-expression’ 时暂时地将 ‘debug-on-error’ 设置为 t.
-        eval-expression-debug-on-error t)
 
 ;;; 与 宿主 OS 交互
 
 ;;; Process:
 
-(setq read-process-output-max (min (pcase system-type
-                                     ('gnu/linux
-                                      (string-to-number  (shell-command-to-string "cat /proc/sys/fs/pipe-max-size")))
-                                     (_
-                                      most-positive-fixnum))
-                                   (* 8 1024 1024))
-      process-adaptive-read-buffering t
+(config-register 'read-process-output-max
+  :group 'performance :type 'integer
+  :doc "Maximum bytes read from a subprocess in one chunk.")
+
+(setq process-adaptive-read-buffering t
 
       w32-pipe-buffer-size read-process-output-max
       w32-pipe-read-delay 0)
 ;;; File System:
 
 
-(setopt delete-by-moving-to-trash t)
 
 
 ;;; 图片:
@@ -1707,8 +1643,6 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
 ;;; PDF:
 
 
-(setopt user-full-name    "Chang He (Aaron)"
-        user-mail-address "mail")
 
 (defun my/delete-frame-dwim ()
   "Close the current frame when possible, otherwise bury the current buffer."
@@ -1717,20 +1651,22 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
       (delete-frame)
     (bury-buffer)))
 
-(defcustom my/warning-popup-minimum-level :error
+(defvar my/warning-popup-minimum-level nil
   "Minimum warning severity that may auto-display the warnings buffer.
 Warnings below this level are still logged to `*Warnings*', but they do not
-interrupt the current window layout."
-  :type '(choice (const :tag "Debug" :debug)
-                 (const :tag "Warning" :warning)
-                 (const :tag "Error" :error)
-                 (const :tag "Emergency" :emergency))
-  :group 'convenience)
+interrupt the current window layout.")
 
-(defcustom my/warning-suppress-elpa-noise t
-  "Whether to suppress low-severity startup noise from third-party ELPA packages."
-  :type 'boolean
-  :group 'convenience)
+(config-register 'my/warning-popup-minimum-level
+  :group 'debug :type 'sexp
+  :choices '(:debug :warning :error :emergency)
+  :doc "Minimum warning severity that auto-pops the warnings buffer.")
+
+(defvar my/warning-suppress-elpa-noise nil
+  "Whether to suppress low-severity startup noise from third-party ELPA packages.")
+
+(config-register 'my/warning-suppress-elpa-noise
+  :group 'debug :type 'boolean
+  :doc "Suppress low-severity startup noise from third-party ELPA packages.")
 
 (defconst my/warnings-buffer-name "*Warnings*")
 
@@ -1840,6 +1776,345 @@ interrupt the current window layout."
 
 ;; 确保所有文件路径都解析 symlink
 (setq find-file-visit-truename t)
+
+;;; -------------------------------------------------------------------------
+;;; Config registry: registrations for init-base.el
+;;;
+;;; Every user-tunable setting from this file is registered here so it can be
+;;; viewed, edited, and live-applied from `M-x config-board' (SPC h c).
+;;; Initial values live in `etc/config-store.el' — no hardcoded setq needed.
+;;; Other modules register their own items incrementally as they are migrated.
+;;; -------------------------------------------------------------------------
+
+(defvar my/clutch--config-loaded)
+(declare-function my/clutch--load-config "init-clutch")
+
+;;; --- Startup ---------------------------------------------------------------
+
+(config-register 'inhibit-startup-screen
+  :group 'startup :type 'boolean
+  :doc "Skip the splash screen at startup.")
+
+(config-register 'inhibit-startup-message
+  :group 'startup :type 'boolean
+  :doc "Skip the startup message in the echo area.")
+
+(config-register 'use-short-answers
+  :group 'startup :type 'boolean
+  :doc "Accept y/n instead of yes/no at prompts.")
+
+(config-register 'confirm-kill-emacs
+  :group 'startup :type 'function
+  :choices '(nil yes-or-no-p y-or-n-p)
+  :doc "Function asked to confirm quitting Emacs (nil = no prompt).")
+
+(config-register 'use-file-dialog
+  :group 'startup :type 'boolean
+  :doc "Allow file-chooser dialogs from the OS.")
+
+(config-register 'use-dialog-box
+  :group 'startup :type 'boolean
+  :doc "Allow dialog boxes for simple yes/no questions.")
+
+(config-register 'user-full-name
+  :group 'startup :type 'string
+  :doc "Full name of the Emacs user.")
+
+(config-register 'user-mail-address
+  :group 'startup :type 'string
+  :doc "E-mail address of the Emacs user.")
+
+;;; --- Display ---------------------------------------------------------------
+
+(config-register 'blink-cursor-mode
+  :group 'display :type 'boolean
+  :doc "Enable cursor blinking.")
+
+(config-register 'display-line-numbers-type
+  :group 'display :type 'sexp
+  :choices '(t relative visual nil)
+  :doc "Default style for `display-line-numbers-mode'.")
+
+(config-register 'fill-column
+  :group 'display :type 'integer
+  :get (lambda (_n) (default-value 'fill-column))
+  :set (lambda (_n v) (setq-default fill-column v))
+  :doc "Column width for fill commands and the fill-column indicator.")
+
+(config-register 'treesit-font-lock-level
+  :group 'display :type 'integer
+  :doc "Depth of Tree-sitter font-lock highlighting (1–4).")
+
+(config-register 'ring-bell-function
+  :group 'display :type 'function
+  :choices '(ignore nil)
+  :doc "Function called to ring the bell (ignore = silent).")
+
+;;; --- Scroll ----------------------------------------------------------------
+
+(config-register 'scroll-step
+  :group 'scroll :type 'integer
+  :doc "Lines scrolled per C-n/C-p when moving past the window edge.")
+
+(config-register 'scroll-margin
+  :group 'scroll :type 'integer
+  :doc "Lines of scroll margin to keep at top/bottom of the window.")
+
+(config-register 'scroll-conservatively
+  :group 'scroll :type 'integer
+  :doc "Scroll at most this many lines before recentering (use most-positive-fixnum for smooth scroll).")
+
+(config-register 'hscroll-step
+  :group 'scroll :type 'integer
+  :doc "Columns scrolled per step during horizontal scrolling.")
+
+(config-register 'hscroll-margin
+  :group 'scroll :type 'integer
+  :doc "Columns of margin before horizontal scroll kicks in.")
+
+(config-register 'scroll-preserve-screen-position
+  :group 'scroll :type 'sexp
+  :choices '(t always nil)
+  :doc "Whether scroll commands keep point at the same screen position.")
+
+(config-register 'auto-hscroll-mode
+  :group 'scroll :type 'sexp
+  :choices '(t current-line nil)
+  :doc "Horizontal scroll policy (current-line = only the active line).")
+
+(config-register 'fast-but-imprecise-scrolling
+  :group 'scroll :type 'boolean
+  :doc "Skip fontification during fast scrolling for lower latency.")
+
+;;; --- Editing ---------------------------------------------------------------
+
+(config-register 'indent-tabs-mode
+  :group 'editing :type 'boolean
+  :get (lambda (_n) (default-value 'indent-tabs-mode))
+  :set (lambda (_n v) (setq-default indent-tabs-mode v))
+  :doc "Indent with tabs by default (global default).")
+
+(config-register 'tab-width
+  :group 'editing :type 'integer
+  :get (lambda (_n) (default-value 'tab-width))
+  :set (lambda (_n v) (setq-default tab-width v))
+  :doc "Default tab display width (global default).")
+
+(config-register 'c-basic-offset
+  :group 'editing :type 'integer
+  :get (lambda (_n) (default-value 'c-basic-offset))
+  :set (lambda (_n v) (setq-default c-basic-offset v))
+  :doc "Basic indentation unit for C/C++ and derived modes.")
+
+(config-register 'sentence-end-double-space
+  :group 'editing :type 'boolean
+  :doc "Treat two spaces after a period as the end of a sentence.")
+
+(config-register 'word-wrap-by-category
+  :group 'editing :type 'boolean
+  :doc "Wrap long lines at CJK character category boundaries.")
+
+(config-register 'kill-whole-line
+  :group 'editing :type 'boolean
+  :doc "Include the newline when killing to end of line.")
+
+(config-register 'kill-do-not-save-duplicates
+  :group 'editing :type 'boolean
+  :doc "Skip duplicate entries when adding text to the kill ring.")
+
+(config-register 'save-interprogram-paste-before-kill
+  :group 'editing :type 'boolean
+  :doc "Save external clipboard text into the kill ring before overwriting it.")
+
+;;; --- Files / persistence ---------------------------------------------------
+
+(config-register 'make-backup-files
+  :group 'files :type 'boolean
+  :doc "Keep numbered backups of edited files.")
+
+(config-register 'backup-by-copying
+  :group 'files :type 'boolean
+  :doc "Copy files to the backup directory instead of renaming them.")
+
+(config-register 'delete-old-versions
+  :group 'files :type 'boolean
+  :doc "Silently delete old backup versions without asking.")
+
+(config-register 'kept-new-versions
+  :group 'files :type 'integer
+  :doc "How many of the newest backup versions to keep.")
+
+(config-register 'kept-old-versions
+  :group 'files :type 'integer
+  :doc "How many of the oldest backup versions to keep.")
+
+(config-register 'auto-save-default
+  :group 'files :type 'boolean
+  :doc "Enable auto-saving in file-visiting buffers.")
+
+(config-register 'auto-save-timeout
+  :group 'files :type 'integer
+  :doc "Seconds of idle time before auto-save triggers.")
+
+(config-register 'auto-save-interval
+  :group 'files :type 'integer
+  :doc "Keystrokes between auto-saves (0 = disabled by keystroke count).")
+
+(config-register 'create-lockfiles
+  :group 'files :type 'boolean
+  :doc "Create lockfiles to detect concurrent edits.")
+
+(config-register 'delete-by-moving-to-trash
+  :group 'files :type 'boolean
+  :doc "Move files to OS trash instead of deleting immediately.")
+
+(config-register 'recentf-max-saved-items
+  :group 'files :type 'integer
+  :doc "Number of recent files remembered across sessions.")
+
+(config-register 'undo-tree-auto-save-history
+  :group 'files :type 'boolean
+  :doc "Persist undo-tree history to disk across sessions.")
+
+;;; --- Performance -----------------------------------------------------------
+
+(config-register 'gc-cons-threshold
+  :group 'performance :type 'integer
+  :doc "GC triggers when memory use exceeds this value (bytes).")
+
+(config-register 'gc-cons-percentage
+  :group 'performance :type 'number
+  :doc "GC triggers when consing exceeds this fraction of the threshold.")
+
+(config-register 'inhibit-compacting-font-caches
+  :group 'performance :type 'boolean
+  :doc "Prevent Emacs from clearing font caches on GC (reduces rendering stalls).")
+
+;;; --- Minibuffer / completion -----------------------------------------------
+
+(config-register 'enable-recursive-minibuffers
+  :group 'minibuffer :type 'boolean
+  :doc "Allow opening a minibuffer while another is active.")
+
+(config-register 'completion-ignore-case
+  :group 'minibuffer :type 'boolean
+  :doc "Ignore case in all completion commands.")
+
+(config-register 'read-buffer-completion-ignore-case
+  :group 'minibuffer :type 'boolean
+  :doc "Ignore case when completing buffer names.")
+
+(config-register 'read-file-name-completion-ignore-case
+  :group 'minibuffer :type 'boolean
+  :doc "Ignore case when completing file names.")
+
+(config-register 'completions-max-height
+  :group 'minibuffer :type 'integer
+  :doc "Maximum height of the *Completions* buffer.")
+
+(config-register 'completions-detailed
+  :group 'minibuffer :type 'boolean
+  :doc "Show annotations alongside completion candidates.")
+
+(config-register 'completion-styles
+  :group 'minibuffer :type 'sexp
+  :doc "Ordered list of completion styles Emacs tries in sequence.")
+
+;;; --- UI / appearance -------------------------------------------------------
+
+(config-register 'global-hl-line-sticky-flag
+  :group 'ui :type 'boolean
+  :doc "Whether `global-hl-line-mode' highlights inactive windows too.")
+
+(config-register 'show-paren-when-point-inside-paren
+  :group 'ui :type 'boolean
+  :doc "Highlight matching paren when point is inside a pair.")
+
+(config-register 'show-paren-when-point-in-periphery
+  :group 'ui :type 'boolean
+  :doc "Highlight matching paren when point is near a paren.")
+
+(config-register 'so-long-threshold
+  :group 'ui :type 'integer
+  :doc "Line length that triggers `so-long-mode' protection.")
+
+(config-register 'so-long-action
+  :group 'ui :type 'sexp
+  :choices '(so-long-minor-mode so-long-mode)
+  :doc "Action taken for lines exceeding `so-long-threshold'.")
+
+(config-register 'ibuffer-show-empty-filter-groups
+  :group 'ui :type 'boolean
+  :doc "Show ibuffer filter groups that contain no buffers.")
+
+(config-register 'ibuffer-expert
+  :group 'ui :type 'boolean
+  :doc "Skip confirmation prompts in ibuffer.")
+
+(config-register 'compilation-scroll-output
+  :group 'ui :type 'boolean
+  :doc "Auto-scroll the compilation output buffer.")
+
+(config-register 'amx-history-length
+  :group 'ui :type 'integer
+  :doc "Number of recently used commands `amx' remembers.")
+
+;;; --- Debug / warnings ------------------------------------------------------
+
+(config-register 'debug-on-quit
+  :group 'debug :type 'boolean
+  :doc "Enter the debugger when C-g is pressed.")
+
+(config-register 'eval-expression-debug-on-error
+  :group 'debug :type 'boolean
+  :doc "Enable `debug-on-error' temporarily during `eval-expression'.")
+
+(config-register 'garbage-collection-messages
+  :group 'debug :type 'boolean
+  :doc "Show a message in the echo area when GC runs.")
+
+;;; --- Hook membership -------------------------------------------------------
+
+(config-register-hook 'prog-mode-hook
+  :group 'editing
+  :doc "Minor modes enabled in programming buffers."
+  :candidates '((display-line-numbers-mode . "Line numbers")
+                (hl-line-mode              . "Highlight current line")
+                (electric-pair-local-mode  . "Electric pairs")))
+
+;;; --- etc/ config files -----------------------------------------------------
+
+(config-register-file 'clutch
+  :group 'database
+  :doc "Clutch database connections."
+  :path (expand-file-name "etc/clutch-config.el" user-emacs-directory)
+  :example (expand-file-name "etc/clutch-config.el.example" user-emacs-directory)
+  :loader (lambda ()
+            (when (boundp 'my/clutch--config-loaded)
+              (setq my/clutch--config-loaded nil))
+            (when (fboundp 'my/clutch--load-config)
+              (my/clutch--load-config))))
+
+(config-register-file 'remote
+  :group 'remote
+  :doc "Remote connection board hosts (JSON)."
+  :path (expand-file-name "etc/remote.json" user-emacs-directory))
+
+(config-register-file 'custom
+  :group 'startup
+  :doc "Emacs `custom-file' (Customize-written settings)."
+  :path (expand-file-name "etc/custom.el" user-emacs-directory)
+  :loader (lambda () (load custom-file nil 'nomessage)))
+
+(config-register-file 'dashboard
+  :group 'ui
+  :doc "Startup dashboard banner text."
+  :path (expand-file-name "etc/dashboard.txt" user-emacs-directory))
+
+(config-register-file 'spell-dictionary
+  :group 'spell
+  :doc "Personal hunspell word list."
+  :path (expand-file-name "etc/hunspell_dict.txt" user-emacs-directory))
 
 (provide 'init-base)
 

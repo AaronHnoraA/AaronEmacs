@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'init-funcs)
 (require 'cl-lib)
 (require 'seq)
@@ -56,39 +58,36 @@
   "Editor folding helpers."
   :group 'editing)
 
-(defcustom my/fold-state-file
-  (expand-file-name "fold-state.el"
-                    (expand-file-name "var" user-emacs-directory))
+(config-defvar my/fold-state-file nil
   "Path used to persist fold states."
   :type 'file
   :group 'my/fold)
 
-(defcustom my/fold-prog-startup 'fold-all
+(config-defvar my/fold-prog-startup nil
   "Default fold action for code buffers without a persisted fold state.
 
 When set to `fold-all', newly opened code buffers enter a compact outline by
 default.  This startup fold is intentionally not persisted; explicit fold
 commands still save their state."
-  :type '(choice (const :tag "Fold all blocks" fold-all)
-                 (const :tag "Leave buffer open" nil))
+  :type '(choice (const :tag "Fold all blocks" fold-all) (const :tag "Leave buffer open" nil))
   :group 'my/fold)
 
-(defcustom my/fold-diagnostics-enabled t
+(config-defvar my/fold-diagnostics-enabled nil
   "Show Flymake diagnostic summaries on folded regions."
   :type 'boolean
   :group 'my/fold)
 
-(defcustom my/fold-diagnostics-idle-delay 0.12
+(config-defvar my/fold-diagnostics-idle-delay nil
   "Idle delay before refreshing folded diagnostic summaries."
   :type 'number
   :group 'my/fold)
 
-(defcustom my/fold-deferred-modes '(lean-mode)
+(config-defvar my/fold-deferred-modes nil
   "Programming modes where startup fold restoration waits for idle time."
   :type '(repeat symbol)
   :group 'my/fold)
 
-(defcustom my/fold-restore-idle-delay 0.5
+(config-defvar my/fold-restore-idle-delay nil
   "Idle seconds before restoring folds in `my/fold-deferred-modes'."
   :type 'number
   :group 'my/fold)
@@ -120,7 +119,6 @@ commands still save their state."
   :hook (compilation-filter . ansi-color-compilation-filter)
   :custom
   (compilation-always-kill t)
-  (compilation-scroll-output t)
   ;; Save all buffers on M-x `compile'
   (compilation-ask-about-save nil))
 

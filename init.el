@@ -4,7 +4,6 @@
   (startup-redirect-eln-cache
    (expand-file-name "var/eln-cache/" user-emacs-directory)))
 
-(setq user-full-name "aaron")
 (setq load-prefer-newer t)
 (require 'compile)
 (require 'package)
@@ -101,11 +100,6 @@
 (setq gc-cons-threshold most-positive-fixnum
       gc-cons-percentage 0.6)
 
-;; Increase how much is read from processes in a single chunk (default is 4kb).
-;; `lsp-mode' benefits from that.
-;;
-;; `cat /proc/sys/fs/pipe-max-size` to check the max value.
-(setq read-process-output-max (* 4 1024 1024))
 (eval-and-compile
   (setq use-package-always-ensure nil)
   (setq use-package-always-defer nil)
@@ -140,8 +134,10 @@
        (telescope-dir (expand-file-name "telescope" dir))
        (tex-dir (expand-file-name "lang/tex" dir))
        (general-dir (locate-user-emacs-file "site-lisp/general.el"))
-       (aaron-ui-dir (locate-user-emacs-file "site-lisp/aaron-ui")))
+       (aaron-ui-dir (locate-user-emacs-file "site-lisp/aaron-ui"))
+       (config-dir (locate-user-emacs-file "site-lisp/config")))
   (add-to-list 'load-path (file-name-as-directory dir))
+  (add-to-list 'load-path (file-name-as-directory config-dir))
   (add-to-list 'load-path (file-name-as-directory org-dir))
   (add-to-list 'load-path (file-name-as-directory git-dir))
   (add-to-list 'load-path (file-name-as-directory roam-dir))
@@ -181,6 +177,10 @@
                   (error-message-string err)))))))
 
 
+
+;; Unified configuration registry: load before the module graph so modules can
+;; register while loading.  `config-apply-store' runs on `after-init-hook'.
+(require 'config)
 
 (require 'init-modules)
 (require 'init-compile)

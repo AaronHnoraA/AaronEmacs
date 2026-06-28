@@ -14,6 +14,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'json)
 (require 'seq)
@@ -61,17 +63,17 @@
 (defvar-local lean--iv--last-cursor nil
   "Last cursor signature sent to the infoview.")
 
-(defcustom lean-iv-cursor-sync-delay 0.035
+(config-defvar lean-iv-cursor-sync-delay nil
   "Seconds to debounce HTTP cursor sync to the infoview proxy."
   :type 'number
   :group 'lean)
 
-(defcustom lean-iv-port-wait-timeout 60
+(config-defvar lean-iv-port-wait-timeout nil
   "Seconds to wait for the proxy port-file to appear after Eglot connects."
   :type 'integer
   :group 'lean)
 
-(defcustom lean-iv-font-size 16
+(config-defvar lean-iv-font-size nil
   "Base font size in pixels for the Lean infoview."
   :type 'integer
   :group 'lean)

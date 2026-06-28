@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'init-funcs)
 (require 'subr-x)
@@ -46,7 +48,7 @@
   "Buffer and project symbol search."
   :group 'convenience)
 
-(defcustom my/symbols-preview-key '(:debounce 0.15 any)
+(config-defvar my/symbols-preview-key nil
   "Preview strategy for symbol pickers."
   :type 'sexp
   :group 'my/symbols)

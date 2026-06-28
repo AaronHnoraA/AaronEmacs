@@ -4,6 +4,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
 (require 'general)
 
@@ -25,7 +27,7 @@
   "Shared helpers for editor ergonomics."
   :group 'convenience)
 
-(defcustom my/large-buffer-size (* 1024 1024)
+(config-defvar my/large-buffer-size nil
   "Default threshold in bytes for treating a buffer as large."
   :type 'integer)
 

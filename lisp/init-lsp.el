@@ -8,6 +8,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'subr-x)
 
@@ -41,23 +43,22 @@ optional `:note' keys.")
 Each entry is a plist with keys such as `:modes', `:program',
 `:executables', `:label', `:source', and `:note'.")
 
-(defcustom my/language-server-performance-read-process-output-max (* 1024 1024)
+(config-defvar my/language-server-performance-read-process-output-max nil
   "Minimum `read-process-output-max' while any language server is active."
   :type 'integer
   :group 'my/language-server)
 
-(defcustom my/language-server-performance-gcmh-factor 2
+(config-defvar my/language-server-performance-gcmh-factor nil
   "Multiplier applied to `gcmh-high-cons-threshold' while LSP is active."
   :type 'integer
   :group 'my/language-server)
 
-(defcustom my/language-server-defer-shutdown 3
+(config-defvar my/language-server-defer-shutdown nil
   "Seconds to defer Eglot shutdown after the last managed buffer closes."
-  :type '(choice (const :tag "Disabled" nil)
-                 (integer :tag "Seconds"))
+  :type '(choice (const :tag "Disabled" nil) (integer :tag "Seconds"))
   :group 'my/language-server)
 
-(defcustom my/language-server-disable-file-watchers-on-remote t
+(config-defvar my/language-server-disable-file-watchers-on-remote nil
   "Disable `lsp-mode' file watchers in remote buffers."
   :type 'boolean
   :group 'my/language-server)
@@ -100,7 +101,7 @@ Each entry is a plist with keys such as `:modes', `:program',
 (defvar-local my/flymake-diagnostic-at-point-last-text nil
   "Last diagnostic text shown by `my/flymake-diagnostic-at-point-mode'.")
 
-(defcustom my/flymake-diagnostic-at-point-delay 0.45
+(config-defvar my/flymake-diagnostic-at-point-delay nil
   "Seconds to wait before echoing the Flymake diagnostic at point."
   :type 'number
   :group 'my/language-server)

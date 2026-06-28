@@ -40,6 +40,7 @@
 
 ;;; Code:
 
+(require 'config)
 (require 'init-package-utils)
 
 (my/package-register-vc
@@ -101,20 +102,26 @@
 
 ;;; ── Claude Code ────────────────────────────────────────────────────────────
 
-(defvar claude-code-ide-cli-path)
-(defvar claude-code-ide-window-side)
-(defvar claude-code-ide-window-width)
+(config-defvar claude-code-ide-cli-path nil
+  "Path to the Claude Code CLI binary."
+  :type 'file
+  :group 'ai)
+
+(config-defvar claude-code-ide-window-side nil
+  "Side used for the Claude Code IDE window."
+  :type 'symbol
+  :group 'ai)
+
+(config-defvar claude-code-ide-window-width nil
+  "Width used for the Claude Code IDE window."
+  :type 'integer
+  :group 'ai)
 
 (declare-function claude-code-ide-emacs-tools-setup
                   "claude-code-ide-emacs-tools" ())
 
 (autoload 'claude-code-ide-menu "claude-code-ide-transient" nil t)
 (autoload 'claude-code-ide "claude-code-ide" nil t)
-
-;; Point to the Claude CLI binary (installed via npm / brew / manual).
-(setq claude-code-ide-cli-path "/Users/hc/.local/bin/claude"
-      claude-code-ide-window-side 'right
-      claude-code-ide-window-width 90)
 
 (global-set-key (kbd "C-c C-'") #'claude-code-ide-menu)
 (global-set-key (kbd "C-c a") #'claude-code-ide-menu)
@@ -126,10 +133,25 @@
 
 ;;; ── Codex CLI ──────────────────────────────────────────────────────────────
 
-(defvar codex-cli-executable)
-(defvar codex-cli-terminal-backend)
-(defvar codex-cli-side)
-(defvar codex-cli-width)
+(config-defvar codex-cli-executable nil
+  "Executable used by codex-cli."
+  :type 'string
+  :group 'ai)
+
+(config-defvar codex-cli-terminal-backend nil
+  "Terminal backend used by codex-cli."
+  :type 'symbol
+  :group 'ai)
+
+(config-defvar codex-cli-side nil
+  "Side used for the codex-cli window."
+  :type 'symbol
+  :group 'ai)
+
+(config-defvar codex-cli-width nil
+  "Width used for the codex-cli window."
+  :type 'integer
+  :group 'ai)
 
 (autoload 'codex-cli-toggle "codex-cli" nil t)
 (autoload 'codex-cli-start "codex-cli" nil t)
@@ -141,11 +163,6 @@
 (autoload 'codex-cli-toggle-all "codex-cli" nil t)
 (autoload 'codex-cli-toggle-all-next-page "codex-cli" nil t)
 (autoload 'codex-cli-toggle-all-prev-page "codex-cli" nil t)
-
-(setq codex-cli-executable "codex"
-      codex-cli-terminal-backend 'vterm
-      codex-cli-side 'right
-      codex-cli-width 90)
 
 (global-set-key (kbd "C-c c t") #'codex-cli-toggle)
 (global-set-key (kbd "C-c c s") #'codex-cli-start)

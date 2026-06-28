@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (declare-function direnv-update-environment "direnv" (&optional file-name force-summary))
 (declare-function direnv-update-directory-environment "direnv" (&optional directory force-summary))
 (declare-function direnv--maybe-update-environment "direnv" ())
@@ -12,7 +14,7 @@
 (defvar direnv-always-show-summary)
 (defvar direnv--hooks)
 
-(defcustom my/enable-direnv t
+(config-defvar my/enable-direnv nil
   "Whether to enable `direnv-mode' automatically."
   :type 'boolean
   :group 'environment)

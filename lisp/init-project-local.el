@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'init-funcs)
 (require 'pp)
 (require 'seq)
@@ -16,7 +18,7 @@
   "Project-local overrides for workflows and language-server behavior."
   :group 'convenience)
 
-(defcustom my/project-local-overrides nil
+(config-defvar my/project-local-overrides nil
   "Project-local workflow overrides keyed by project matcher.
 Each entry is of the form (MATCHER . PLIST).
 
@@ -32,10 +34,7 @@ Supported plist keys:
 - `:debug-default' as a debug SPEC or profile label
 - `:language-server' as one of `eglot', `lsp-mode', or `disabled'
 - `:eglot-workspace' as extra workspace configuration merged before startup."
-  :type '(repeat
-          (cons :tag "Project override"
-                sexp
-                sexp))
+  :type '(repeat (cons :tag "Project override" sexp sexp))
   :group 'my/project-local)
 
 (defvar-local my/project-local-settings nil

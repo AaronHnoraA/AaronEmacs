@@ -5,6 +5,7 @@
 
 ;;; Code:
 
+(require 'config)
 (require 'init-funcs)
 (require 'subr-x)
 (require 'transient)
@@ -26,15 +27,16 @@
 (defvar my/output-last-buffer nil
   "Most recent compilation-like output buffer.")
 
-(defconst my/output--interesting-buffer-regexp
-  "\\*\\(?:compilation\\|test\\|task\\|run\\)\\*"
-  "Regexp matching output buffers managed by `my/output'.")
+(config-defvar my/output-interesting-buffer-regexp nil
+  "Regexp matching output buffers managed by `my/output'."
+  :type 'regexp
+  :group 'output)
 
 (defun my/output-buffer-p (&optional buffer)
   "Return non-nil when BUFFER is a managed output buffer."
   (with-current-buffer (or buffer (current-buffer))
     (and (derived-mode-p 'compilation-mode)
-         (string-match-p my/output--interesting-buffer-regexp
+         (string-match-p my/output-interesting-buffer-regexp
                          (buffer-name)))))
 
 (defun my/output--buffer ()

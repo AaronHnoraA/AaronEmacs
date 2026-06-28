@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'json)
 (require 'init-funcs)
@@ -27,7 +29,7 @@
 (defvar my/jupytext-command "jupytext"
   "Command used to run Jupytext.")
 
-(defcustom my/jupyter-remote-ikernel-command "/opt/homebrew/anaconda3/bin/remote_ikernel"
+(config-defvar my/jupyter-remote-ikernel-command nil
   "Absolute path to the `remote_ikernel' management command."
   :type 'string
   :group 'my/jupyter)
@@ -99,12 +101,7 @@
              (and kernel (my/jupyter--kernelspec-resource-dir kernel)))))
       (_ nil))))
 
-(defcustom my/jupyter-config-file-candidates
-  '("jupyter_server_config.py"
-    "jupyter_lab_config.py"
-    "jupyter_notebook_config.py"
-    "jupyter_server_config.json"
-    "jupyter_lab_config.json")
+(config-defvar my/jupyter-config-file-candidates nil
   "Likely Jupyter config files to edit from the board."
   :type '(repeat string)
   :group 'my/jupyter)

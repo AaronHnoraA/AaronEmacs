@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'aaron-ui)
 (require 'cl-lib)
 (require 'easymenu)
@@ -61,17 +63,17 @@
   "Face used for overflow markers in the centered tab line."
   :group 'tab-line)
 
-(defcustom my/tab-line-max-label-width 18
+(config-defvar my/tab-line-max-label-width nil
   "Maximum display width of a single centered buffer tab label."
   :type 'integer
   :group 'tab-line)
 
-(defcustom my/tab-line-min-label-width 8
+(config-defvar my/tab-line-min-label-width nil
   "Minimum display width of a single centered buffer tab label."
   :type 'integer
   :group 'tab-line)
 
-(defcustom my/tab-line-wheel-throttle 0.5
+(config-defvar my/tab-line-wheel-throttle nil
   "Minimum seconds between accepted wheel tab switches on one window.
 Scrolling in the opposite direction is allowed immediately."
   :type 'number

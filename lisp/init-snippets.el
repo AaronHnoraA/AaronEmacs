@@ -9,6 +9,13 @@
 
 ;;; Code:
 
+(require 'config)
+
+(config-defvar yas-snippet-dirs nil
+  "Directories searched by yasnippet."
+  :type '(repeat directory)
+  :group 'snippets)
+
 (declare-function yas-activate-extra-mode "yasnippet" (mode))
 (declare-function yas-reload-all "yasnippet" (&optional no-jit interactive))
 (declare-function yas-next-field "yasnippet" (&optional arg))
@@ -83,10 +90,6 @@ previously inlined in every org-mode snippet file."
   :ensure t
   :defer 2
   :commands (yas-expand yas-insert-snippet yas-new-snippet yas-visit-snippet-file)
-  :init
-  ;; 你自己的 snippets 目录：~/.emacs.d/snippets
-  (setq yas-snippet-dirs
-        (list (expand-file-name "snippets" user-emacs-directory)))
   :hook
   ((prog-mode . yas-minor-mode)
    (text-mode . yas-minor-mode)

@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'init-funcs)
 (require 'init-package-utils)
 (require 'subr-x)
@@ -13,29 +15,12 @@
   "Migration and state maintenance helpers."
   :group 'convenience)
 
-(defcustom my/maintenance-state-backup-dir
-  (expand-file-name "var/backup-snapshots" user-emacs-directory)
+(config-defvar my/maintenance-state-backup-dir nil
   "Directory used to store local state snapshot archives."
   :type 'directory
   :group 'my/maintenance)
 
-(defcustom my/maintenance-state-paths
-  '("package-lock.el"
-    "etc"
-    "var/amx-save.el"
-    "var/dape"
-    "var/org"
-    "var/prescient-save.el"
-    "var/project"
-    "var/project-list.el"
-    "var/projectile"
-    "var/recentf-save.el"
-    "var/save-place.el"
-    "var/savehist.el"
-    "var/session"
-    "var/transient"
-    "var/tramp/persistency.el"
-    "var/treemacs")
+(config-defvar my/maintenance-state-paths nil
   "Relative config paths included in state snapshots."
   :type '(repeat string)
   :group 'my/maintenance)

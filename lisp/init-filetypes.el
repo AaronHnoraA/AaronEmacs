@@ -8,6 +8,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'subr-x)
 
@@ -17,8 +19,7 @@
   "Common file type associations."
   :group 'files)
 
-(defcustom my/filetypes-sqlite-extensions
-  '("db" "db3" "sqlite" "sqlite3" "sqlite2" "sdb")
+(config-defvar my/filetypes-sqlite-extensions nil
   "Extensions opened with the database client."
   :type '(repeat string)
   :group 'my/filetypes)

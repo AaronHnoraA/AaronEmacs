@@ -4,6 +4,8 @@
 ;;
 
 ;;; Code:
+
+(require 'config)
 ;;;
 
 (require 'general)
@@ -62,7 +64,7 @@
   (when my/xwidget--session-id
     (remhash my/xwidget--session-id my/xwidget--sessions)))
 
-(defcustom my/xwidget-auto-focus-on-load t
+(config-defvar my/xwidget-auto-focus-on-load nil
   "Auto-focus xwidget buffer when its page finishes loading."
   :type 'boolean
   :group 'xwidget)
@@ -473,38 +475,66 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
   (my/xwidget--split-to-ibuffer #'split-window-right))
 
 ;; 共享 Brave 的所有数据（需要关闭 Brave）
-(setq xwidget-webkit-cookie-file 
-      (expand-file-name "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"))
-(setq xwidget-webkit-cache-directory 
-      (expand-file-name "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cache/"))
-(setq xwidget-webkit-local-storage-directory 
-      (expand-file-name "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Local Storage/"))
+(config-defvar xwidget-webkit-cookie-file nil
+  "Cookie database used by xwidget-webkit."
+  :type 'file
+  :group 'xwidget)
+
+(config-defvar xwidget-webkit-cache-directory nil
+  "Cache directory used by xwidget-webkit."
+  :type 'directory
+  :group 'xwidget)
+
+(config-defvar xwidget-webkit-local-storage-directory nil
+  "Local storage directory used by xwidget-webkit."
+  :type 'directory
+  :group 'xwidget)
 
 ;; === 其他有用的设置 ===
 ;; 启用 JavaScript
-(setq xwidget-webkit-enable-javascript t)
+(config-defvar xwidget-webkit-enable-javascript nil
+  "Enable JavaScript in xwidget-webkit."
+  :type 'boolean
+  :group 'xwidget)
 
 ;; 启用插件（如 Flash，虽然现在基本不用了）
-(setq xwidget-webkit-enable-plugins t)
+(config-defvar xwidget-webkit-enable-plugins nil
+  "Enable plugins in xwidget-webkit."
+  :type 'boolean
+  :group 'xwidget)
 
 ;; 启用媒体播放
-(setq xwidget-webkit-enable-media t)
+(config-defvar xwidget-webkit-enable-media nil
+  "Enable media playback in xwidget-webkit."
+  :type 'boolean
+  :group 'xwidget)
 
 ;; 设置用户代理（伪装成常规浏览器）
-(setq xwidget-webkit-user-agent 
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-
-
+(config-defvar xwidget-webkit-user-agent nil
+  "User agent string sent by xwidget-webkit."
+  :type 'string
+  :group 'xwidget)
 
 ;; 启用开发者工具
-(setq xwidget-webkit-enable-developer-extras t)
+(config-defvar xwidget-webkit-enable-developer-extras nil
+  "Enable developer extras in xwidget-webkit."
+  :type 'boolean
+  :group 'xwidget)
 
+(config-defvar xwidget-webkit-buffer-name-format nil
+  "Buffer name format used by xwidget-webkit."
+  :type 'string
+  :group 'xwidget)
 
-;; 设置 xwidget-webkit 使用 Brave 浏览器的 cookie
-(setq xwidget-webkit-cookie-file 
-      (expand-file-name "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"))
+(config-defvar browse-url-browser-function nil
+  "Default browser dispatcher for `browse-url'."
+  :type 'function
+  :group 'browser)
 
-
+(config-defvar eww-search-prefix nil
+  "Search URL prefix used by EWW."
+  :type 'string
+  :group 'browser)
 
 ;;;; xwidget line controls
 
@@ -634,7 +664,6 @@ AREA is `mode-line' by default; pass `header-line' for header buttons."
 (when (featurep 'xwidget-internal)
   ;; Keep this free of %-escapes: supported xwidget format keys vary across
   ;; Emacs builds, and unsupported keys raise `format-spec' errors.
-  (setq xwidget-webkit-buffer-name-format "*xwidget*")
 
   ;; 进入 xwidget buffer 时给常用键（不会污染全局）
   (with-eval-after-load 'xwidget
@@ -668,10 +697,6 @@ AREA is `mode-line' by default; pass `header-line' for header buttons."
   (interactive (browse-url-interactive-arg "URL: "))
   (my/open-url url))
 
-;; 让所有点链接都走这个
-(setq browse-url-browser-function #'my/browse-url)
-
-
 (general-define-key
  :keymaps 'global
  "C-c w e" #'my/open-eww-url
@@ -696,7 +721,6 @@ AREA is `mode-line' by default; pass `header-line' for header buttons."
 
 
 (with-eval-after-load 'eww
-  (setq eww-search-prefix "https://duckduckgo.com/?q=")
   (define-key eww-mode-map (kbd "g") #'my/refresh-current-content)
   (define-key eww-mode-map (kbd "M-r") #'my/refresh-current-content)
   (define-key eww-mode-map (kbd "M-w") #'delete-window)

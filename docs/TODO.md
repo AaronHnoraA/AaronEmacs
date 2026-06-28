@@ -18,6 +18,7 @@
 
 ### Features
 - 脱离链接附件检测
+- split 加入到top bar pop里面 并且提供一个刷新工具, 保光标位置地刷新; 再提供一个 aaronote完全关闭的功能; 再提供一个build aaronte再重新打开; 
 
 ### Bugs
 - copilot 补全不是很灵活 模仿vsocde补全的逻辑. 现在如果后面有字符 不管是括号还是copilot补全都会失效

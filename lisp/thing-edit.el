@@ -191,6 +191,7 @@
 ;;
 
 ;;; Require
+(require 'config)
 (require 'thingatpt)
 
 ;;; Code:
@@ -200,13 +201,13 @@
   "Thing edit."
   :group 'term)
 
-(defcustom thing-edit-show-message-p t
+(config-defvar thing-edit-show-message-p nil
   "Set this option to nil if want thing-edit work silencely.
 Default is nil."
   :type 'boolean
   :group 'thing-edit)
 
-(defcustom thing-edit-flash-line-delay .3
+(config-defvar thing-edit-flash-line-delay nil
   "How many seconds to flash `thing-edit-font-lock-flash' after navigation.
 
 Setting this to nil or 0 will turn off the indicator."

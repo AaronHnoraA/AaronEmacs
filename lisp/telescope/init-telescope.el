@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'init-funcs)
 
 (declare-function bookmark-bmenu-list "bookmark")
@@ -48,17 +50,17 @@
   "Centralized Telescope-style picker workflow."
   :group 'convenience)
 
-(defcustom my/telescope-preview-key '(:debounce 0.2 any)
+(config-defvar my/telescope-preview-key nil
   "Default preview strategy used by `telescope'."
   :type 'sexp
   :group 'my/telescope)
 
-(defcustom my/telescope-file-preview-key '(:debounce 0.15 any)
+(config-defvar my/telescope-file-preview-key nil
   "Preview strategy for file-oriented Telescope pickers."
   :type 'sexp
   :group 'my/telescope)
 
-(defcustom my/telescope-grep-preview-key '(:debounce 0.35 any)
+(config-defvar my/telescope-grep-preview-key nil
   "Preview strategy for grep-oriented Telescope pickers."
   :type 'sexp
   :group 'my/telescope)

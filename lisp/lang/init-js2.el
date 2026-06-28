@@ -6,7 +6,13 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'config)
 (require 'subr-x)
+
+(config-defvar my/js-indent-offset nil
+  "Indentation width used by JavaScript and TypeScript modes."
+  :type 'integer
+  :group 'languages)
 
 (declare-function my/eglot-ensure-unless-lsp-mode "init-lsp")
 (declare-function my/language-server-executable-available-p "init-lsp" (program))
@@ -97,19 +103,6 @@
 (add-to-list 'auto-mode-alist '("\\.js\\'" . my/js-auto-mode))
 
 ;; ---------------------------------------------------------
-;; 1. 设置 JavaScript 相关模式的专用缩进变量 (2 个空格)
-;; ---------------------------------------------------------
-(setq js-indent-level 2)      ; 适用于内置 js-mode, js-jsx-mode
-(setq js2-basic-offset 2)     ; 适用于 js2-mode
-
-;; ---------------------------------------------------------
-;; 2. 设置 TypeScript 相关模式的专用缩进变量 (2 个空格)
-;; ---------------------------------------------------------
-(setq typescript-indent-level 2)            ; 适用于传统的 typescript-mode
-(when (boundp 'typescript-ts-indent-offset)
-  (setq typescript-ts-indent-offset 2))     ; 适用于 Emacs 29+ 内置的 typescript-ts-mode 和 tsx-ts-mode
-
-;; ---------------------------------------------------------
 ;; 3. 通过 Hook 确保所有 JS/TS/LSP 相关的 Buffer 都是 2 个空格
 ;; ---------------------------------------------------------
 (defun my/js-set-local-variable (variable value)
@@ -120,15 +113,15 @@
       (set (make-local-variable target) value))))
 
 (defun my-js-ts-indent-setup ()
-  "统一设置 JS/TS buffer 的缩进为 2 个空格."
+  "统一设置 JS/TS buffer 的缩进."
   (setq-local indent-tabs-mode nil)
-  (setq-local tab-width 2)
-  (my/js-set-local-variable 'js-indent-level 2)
-  (my/js-set-local-variable 'js2-basic-offset 2)
-  (my/js-set-local-variable 'typescript-indent-level 2)
-  (my/js-set-local-variable 'typescript-ts-indent-offset 2)
-  (my/js-set-local-variable 'typescript-ts-mode-indent-offset 2)
-  (my/js-set-local-variable 'evil-shift-width 2))
+  (setq-local tab-width my/js-indent-offset)
+  (my/js-set-local-variable 'js-indent-level my/js-indent-offset)
+  (my/js-set-local-variable 'js2-basic-offset my/js-indent-offset)
+  (my/js-set-local-variable 'typescript-indent-level my/js-indent-offset)
+  (my/js-set-local-variable 'typescript-ts-indent-offset my/js-indent-offset)
+  (my/js-set-local-variable 'typescript-ts-mode-indent-offset my/js-indent-offset)
+  (my/js-set-local-variable 'evil-shift-width my/js-indent-offset))
 
 ;; 将上述设置挂载到各个 JS 模式的 Hook 上
 (add-hook 'js-mode-hook #'my-js-ts-indent-setup)

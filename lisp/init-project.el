@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'init-treemacs-bridge)
 (require 'subr-x)
 
@@ -52,19 +54,14 @@
   "Project workflow helpers."
   :group 'convenience)
 
-(defcustom my/project-search-paths nil
+(config-defvar my/project-search-paths nil
   "Project discovery roots for Projectile.
 Entries follow the same shape as `projectile-project-search-path': either a
 directory string or a cons cell of the form (DIRECTORY . DEPTH)."
-  :type '(repeat
-          (choice
-           (directory :tag "Directory")
-           (cons :tag "Directory + depth"
-                 (directory :tag "Directory")
-                 (integer :tag "Depth"))))
+  :type '(repeat (choice (directory :tag "Directory") (cons :tag "Directory + depth" (directory :tag "Directory") (integer :tag "Depth"))))
   :group 'my/project)
 
-(defcustom my/project-import-project-el-entries nil
+(config-defvar my/project-import-project-el-entries nil
   "Whether `project.el' entries may flow back into the manual project list."
   :type 'boolean
   :group 'my/project)
@@ -774,13 +771,12 @@ following."
 (defvar my/treemacs-cursor-follow--hooks-active nil
   "Whether Treemacs cursor-follow high-frequency hooks are installed.")
 
-(defcustom my/treemacs-cursor-follow-delay 0.35
+(config-defvar my/treemacs-cursor-follow-delay nil
   "Idle delay before Treemacs follows the current file and symbol."
   :type 'number
   :group 'my/project)
 
-(defcustom my/treemacs-tag-follow-excluded-modes
-  '(makefile-mode makefile-gmake-mode makefile-bsdmake-mode makefile-automake-mode)
+(config-defvar my/treemacs-tag-follow-excluded-modes nil
   "Major modes where custom Treemacs cursor follow should not enter tag nodes."
   :type '(repeat symbol)
   :group 'my/project)

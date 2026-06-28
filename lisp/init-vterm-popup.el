@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'aaron-ui)
 (require 'cl-lib)
 
@@ -23,16 +25,12 @@
   :group 'term
   :prefix "my/vterm-popup-")
 
-(defcustom my/vterm-popup-window-height 0.2
+(config-defvar my/vterm-popup-window-height nil
   "Height of the popup vterm side window."
   :type 'number
   :group 'my/vterm-popup)
 
-(defcustom my/project-popup-vterm-apps
-  '(("lazygit" . "lazygit")
-    ("btop" . "btop")
-    ("yazi" . "yazi")
-    ("tmux" . "tmux"))
+(config-defvar my/project-popup-vterm-apps nil
   "Preset terminal apps launched in a fresh popup vterm at project root."
   :type '(alist :key-type string :value-type string)
   :group 'my/vterm-popup)

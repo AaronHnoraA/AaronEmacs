@@ -5,31 +5,20 @@
 
 ;;; Code:
 
+(require 'config)
 (require 'seq)
 
 ;; ========== Tree-sitter grammars sources ==========
-(setq treesit-language-source-alist
-      '((bash       "https://github.com/tree-sitter/tree-sitter-bash")
-        (c          "https://github.com/tree-sitter/tree-sitter-c")
-        (cpp        "https://github.com/tree-sitter/tree-sitter-cpp")
-        (css        "https://github.com/tree-sitter/tree-sitter-css")
-        (go         "https://github.com/tree-sitter/tree-sitter-go")
-        (html       "https://github.com/tree-sitter/tree-sitter-html")
-        (java       "https://github.com/tree-sitter/tree-sitter-java")
-        (javascript "https://github.com/tree-sitter/tree-sitter-javascript")
-        (jsdoc      "https://github.com/tree-sitter/tree-sitter-jsdoc")
-        (json       "https://github.com/tree-sitter/tree-sitter-json")
-        (python     "https://github.com/tree-sitter/tree-sitter-python")
-        (rust       "https://github.com/tree-sitter/tree-sitter-rust")
-        (tsx        "https://github.com/tree-sitter/tree-sitter-typescript" "master" "tsx/src")
-        (typescript "https://github.com/tree-sitter/tree-sitter-typescript" "master" "typescript/src")
-        (toml       "https://github.com/tree-sitter/tree-sitter-toml")
-        (yaml       "https://github.com/ikatyang/tree-sitter-yaml")))
+(config-defvar treesit-language-source-alist nil
+  "Tree-sitter grammar source repositories."
+  :type 'sexp
+  :group 'treesit)
 
 ;; 建议显式指定 Emacs 放 grammar 动态库的位置（与你报错里一致）
-(setq treesit-extra-load-path
-      (list (or (and (boundp 'my/treesit-state-dir) my/treesit-state-dir)
-                (expand-file-name "var/tree-sitter/" user-emacs-directory))))
+(config-defvar treesit-extra-load-path nil
+  "Directories searched for tree-sitter grammar dynamic libraries."
+  :type 'sexp
+  :group 'treesit)
 
 
 (my/package-ensure-vc 'treesit-fold "https://github.com/emacs-tree-sitter/treesit-fold.git")
@@ -110,15 +99,27 @@
 (jit-lock-mode 1)
 (font-lock-mode 1)
 
-(setq idle-update-delay 5.0)
-(setq treesit-font-lock-level 3)
+(config-defvar idle-update-delay nil
+  "Idle seconds before delayed font-lock/refontification work runs."
+  :type 'number
+  :group 'treesit)
 ;; Disable background stealth fontification — only fontify visible text on
 ;; demand.  Profiler showed jit-lock-deferred-fontify at 8% of timer cost;
 ;; stealth was the main contributor running on idle even without scrolling.
-(setq jit-lock-stealth-time nil)
+(config-defvar jit-lock-stealth-time nil
+  "Idle time before stealth fontification, or nil to disable it."
+  :type 'sexp
+  :group 'treesit)
 ;; Larger chunks mean fewer timer firings per scroll burst.
-(setq jit-lock-chunk-size 4096)
-(setq jit-lock-context-time 0.2)
+(config-defvar jit-lock-chunk-size nil
+  "Chunk size used by jit-lock deferred fontification."
+  :type 'integer
+  :group 'treesit)
+
+(config-defvar jit-lock-context-time nil
+  "Seconds spent fontifying context around the visible region."
+  :type 'number
+  :group 'treesit)
 
 
 (provide 'init-treesit)

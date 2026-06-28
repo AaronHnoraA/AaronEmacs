@@ -14,6 +14,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'json)
 (require 'subr-x)
@@ -25,30 +27,25 @@
   "Curated picker for remote TRAMP targets."
   :group 'tools)
 
-(defcustom my/remote-connectboard-config-file
-  (expand-file-name "etc/remote.json" user-emacs-directory)
+(config-defvar my/remote-connectboard-config-file nil
   "JSON file that defines curated remote targets."
   :type 'file)
 
-(defcustom my/remote-connectboard-ssh-config-files
-  (list (expand-file-name "~/.ssh/config")
-        (expand-file-name "~/.config/ssh/config"))
+(config-defvar my/remote-connectboard-ssh-config-files nil
   "SSH config files imported by the remote connectboard."
   :type '(repeat file))
 
-(defcustom my/remote-connectboard-default-method "ssh"
+(config-defvar my/remote-connectboard-default-method nil
   "Default TRAMP method used for JSON entries without an explicit method."
   :type 'string)
 
-(defcustom my/remote-connectboard-default-path "~/"
+(config-defvar my/remote-connectboard-default-path nil
   "Default remote path used for JSON entries without an explicit path."
   :type 'string)
 
-(defcustom my/remote-connectboard-default-action 'open
+(config-defvar my/remote-connectboard-default-action nil
   "Default action used by `my/remote-connectboard-dispatch'."
-  :type '(choice (const :tag "Open" open)
-                 (const :tag "VTerm" vterm)
-                 (const :tag "Copy TRAMP path" copy)))
+  :type '(choice (const :tag "Open" open) (const :tag "VTerm" vterm) (const :tag "Copy TRAMP path" copy)))
 
 (defvar my/remote-connectboard-history nil)
 (defvar my/remote-connectboard-action-history nil)

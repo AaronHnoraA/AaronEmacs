@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'init-funcs)
 (require 'init-project-local)
 
@@ -14,7 +16,7 @@
   "Project run profile helpers."
   :group 'tools)
 
-(defcustom my/project-run-profile-alist nil
+(config-defvar my/project-run-profile-alist nil
   "Optional custom run profiles.
 Each entry is of the form (MATCHER . ((NAME . COMMAND) ...)).
 MATCHER can be a directory path or regexp matched against the project root."

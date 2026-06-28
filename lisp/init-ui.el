@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'aaron-ui)
 
 (declare-function on-screen-mode "on-screen" (&optional arg))
@@ -18,15 +20,17 @@
 (defvar my/file-icon-image-cache (make-hash-table :test #'equal)
   "Cached image descriptors for custom file icons.")
 
-(defcustom my/aaronnote-icon-file
-  (expand-file-name "assets/icons/Aaronnote.svg" user-emacs-directory)
+(config-defvar my/aaronnote-icon-file nil
   "SVG icon used for Markdown files."
   :type 'file
   :group 'appearance)
 
 (declare-function all-the-icons-fileicon "all-the-icons" (icon-name &rest args))
 (declare-function dashboard-icon-for-file "dashboard-widgets" (file &rest args))
+(declare-function config-board "config-tools" ())
 (declare-function my/aaronnote-roam-dashboard-insert-heatmap "init-md-roam" (&optional days))
+(declare-function my/aaronnote-roam-management "init-md-roam" ())
+(declare-function my/performance-watch "init-performance" ())
 (defvar dashboard-mode-map)
 
 (defun my/file-icon-for-file (file &rest args)
@@ -199,6 +203,27 @@ height in pixels."
   (interactive)
   (my/package-upgrade-all-noninteractive))
 
+(defun my/dashboard-open-config-board (&rest _)
+  "Open the local config board from the dashboard button."
+  (interactive)
+  (unless (fboundp 'config-board)
+    (require 'config-tools))
+  (config-board))
+
+(defun my/dashboard-open-roam (&rest _)
+  "Open the Roam management board from the dashboard button."
+  (interactive)
+  (unless (fboundp 'my/aaronnote-roam-management)
+    (require 'init-md-roam))
+  (my/aaronnote-roam-management))
+
+(defun my/dashboard-open-monitor (&rest _)
+  "Open the runtime performance monitor from the dashboard button."
+  (interactive)
+  (unless (fboundp 'my/performance-watch)
+    (require 'init-performance))
+  (my/performance-watch))
+
 (defun my/dashboard-initialize-full-frame-a (orig-fn &rest args)
   "Run dashboard initialization in the frame's only ordinary window."
   (delete-other-windows)
@@ -228,16 +253,18 @@ height in pixels."
 (use-package dashboard
   :ensure t
   :init
-  ;; 导航按钮配置 (保持不变)
   (setq dashboard-navigator-buttons
-        `(((,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-mark_github") "★")
-            "GitHub" "Browse" (lambda (&rest _) (browse-url homepage-url)))
-           (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-heart") "♥")
-            "Stars" "Show stars" (lambda (&rest _) (browse-url stars-url)))
-           (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-alert") "⚑")
-            "Issue" "Report issue" (lambda (&rest _) (browse-url issue-url)) warning)
+        `(((,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-gear") "⚙")
+            "config-board" "Open local config board"
+            ,#'my/dashboard-open-config-board)
+           (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-repo") "R")
+            "roam" "Open Roam management"
+            ,#'my/dashboard-open-roam)
+           (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-pulse") "M")
+            "monitor" "Open runtime performance monitor"
+            ,#'my/dashboard-open-monitor)
            (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-download") "♺")
-            "Upgrade" "Upgrade archive and VC packages, then refresh the lock file"
+            "upgrade" "Upgrade archive and VC packages, then refresh the lock file"
             ,#'my/dashboard-upgrade-packages success))))
   
   (dashboard-setup-startup-hook)
@@ -462,8 +489,6 @@ height in pixels."
 ;;; Scroll:
 
 (setq jit-lock-defer-time 0.3  ; Scroll 之后 延迟 fontify.
-      ;; Scroll 时, 假定滚过的文本有 default face, 从而避免 fontify 它们.  当那些滚过的文本的 size 不一致时, 可能导致终点位置有偏差.
-      fast-but-imprecise-scrolling t
       redisplay-skip-fontification-on-input t
       ;; TUI 下, recenter 时不 redraw frame, 可能造成屏幕有少许显示错误.  所以 此处仅考虑 TTY.
       recenter-redisplay 'tty)
@@ -489,13 +514,10 @@ height in pixels."
 ;; 无法再 scroll 时 就 停住, 而不是继续移动至 buffer 首/尾.
 (setopt scroll-error-top-bottom nil)
 
-(setopt scroll-margin 1
-        ;; ‘scroll-margin’的上界.
-        maximum-scroll-margin 0.5)
+(setopt maximum-scroll-margin 0.5)
 
-(setq scroll-conservatively most-positive-fixnum
-      ;; Minibuffer 永远 一行一行地 automatically scroll.
-      scroll-minibuffer-conservatively t)
+;; Minibuffer 永远 一行一行地 automatically scroll.
+(setq scroll-minibuffer-conservatively t)
 
 ;; Scroll 时 通过 高亮 即将 滚走/来 的 篇幅 以 提示 滚动方向.
 ;; (仅在翻阅 ‘*Completions*’ buffer 的候选词时启用.)
@@ -504,18 +526,10 @@ height in pixels."
         on-screen-delay 0.4)
 (add-hook 'completion-list-mode-hook #'on-screen-mode)
 
-;; 若非 nil, 则 scroll 时 (e.g., ‘C-v’) 保持 point 在屏幕上的位置 (有点像打字机), 但这样会扯坏 region.
-(setopt scroll-preserve-screen-position nil)
-
 ;;; Horizontal
-(setopt hscroll-margin 5
-        hscroll-step 1)
 
 (tooltip-mode -1)
 ;;; Dialo Box:
-
-(setopt use-dialog-box t
-        use-file-dialog t)
 
 ;; 在 GTK+ 的 file-chooser-dialog 中显示隐藏文件.
 (setq x-gtk-show-hidden-files t)

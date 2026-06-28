@@ -17,6 +17,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 
 
@@ -39,7 +41,7 @@
     (add-to-list 'load-path tramp-rpc-dir)
     (require 'tramp-rpc)))
 
-(defcustom my/tramp-use-login-shell nil
+(config-defvar my/tramp-use-login-shell nil
   "Whether TRAMP should force a login shell on the remote side.
 
 Leave this disabled unless a specific remote needs login-shell semantics.
@@ -49,13 +51,12 @@ work in a terminal."
   :type 'boolean
   :group 'my)
 
-(defcustom my/tramp-shell-methods '("ssh" "scp" "sshx")
+(config-defvar my/tramp-shell-methods nil
   "TRAMP methods whose remote shell startup policy is managed here."
   :type '(repeat string)
   :group 'my)
 
-(defcustom my/tramp-use-ssh-controlmaster
-  nil
+(config-defvar my/tramp-use-ssh-controlmaster nil
   "Whether TRAMP should add its own SSH ControlMaster options.
 
 Leave this disabled unless you have verified that multiplexed SSH sessions are
@@ -63,6 +64,86 @@ stable for your hosts.  It changes TRAMP's transport shape relative to plain
 terminal `ssh', which makes remote failures harder to reason about."
   :type 'boolean
   :group 'my)
+
+(config-defvar tramp-persistency-file-name nil
+  "File used to persist TRAMP connection data."
+  :type 'file
+  :group 'tramp)
+
+(config-defvar tramp-auto-save-directory nil
+  "Directory used for TRAMP auto-save files."
+  :type 'directory
+  :group 'tramp)
+
+(config-defvar remote-file-name-inhibit-cache nil
+  "Remote file-name cache lifetime in seconds."
+  :type 'number
+  :group 'tramp)
+
+(config-defvar remote-file-name-inhibit-auto-save-visited nil
+  "Whether to inhibit visited-file auto-saves for remote files."
+  :type 'boolean
+  :group 'tramp)
+
+(config-defvar remote-file-name-inhibit-locks nil
+  "Whether to inhibit lock files for remote files."
+  :type 'boolean
+  :group 'tramp)
+
+(config-defvar auto-revert-remote-files nil
+  "Whether auto-revert should poll remote files."
+  :type 'boolean
+  :group 'tramp)
+
+(config-defvar tramp-verbose nil
+  "TRAMP verbosity level."
+  :type 'integer
+  :group 'tramp)
+
+(config-defvar tramp-default-method nil
+  "Default TRAMP transport method."
+  :type 'string
+  :group 'tramp)
+
+(config-defvar tramp-connection-timeout nil
+  "TRAMP connection timeout in seconds."
+  :type 'integer
+  :group 'tramp)
+
+(config-defvar tramp-session-timeout nil
+  "TRAMP session timeout in seconds."
+  :type 'integer
+  :group 'tramp)
+
+(config-defvar tramp-remote-path nil
+  "Remote PATH entries searched by TRAMP."
+  :type '(repeat sexp)
+  :group 'tramp)
+
+(config-defvar tramp-use-scp-direct-remote-copying nil
+  "Whether TRAMP should use direct remote copying for scp."
+  :type 'boolean
+  :group 'tramp)
+
+(config-defvar tramp-copy-size-limit nil
+  "TRAMP scp direct-copy size limit."
+  :type 'integer
+  :group 'tramp)
+
+(config-defvar tramp-completion-reread-directory-timeout nil
+  "Directory reread timeout for TRAMP completion."
+  :type 'integer
+  :group 'tramp)
+
+(config-defvar tramp-histfile-override nil
+  "Remote HISTFILE override used by TRAMP."
+  :type 'string
+  :group 'tramp)
+
+(config-defvar tramp-allow-unsafe-temporary-files nil
+  "Whether TRAMP may use unsafe temporary files."
+  :type 'boolean
+  :group 'tramp)
 
 (defun my/tramp-rpc-path-p (&optional path)
   "Return non-nil if PATH (or current buffer path) uses Tramp method \"rpc\"."
@@ -87,37 +168,12 @@ non-login shell startup."
 ;;; ── Pre-load settings ───────────────────────────────────────────────────────
 ;; These must be set before TRAMP is first loaded.
 
-;; Persist the TRAMP connection cache between sessions.
-(setq tramp-persistency-file-name
-      (expand-file-name "persistency.el" my/tramp-state-dir))
-
-;; Store TRAMP auto-saves beside other auto-saves, not in /tmp on the remote.
-(setq tramp-auto-save-directory my/tramp-auto-save-dir)
-
-;; Cache remote stat results for 60 s — round-trips are expensive.
-(setq remote-file-name-inhibit-cache 60)
-
-;; Never auto-save-visited over TRAMP (causes extra round-trips).
-(setq remote-file-name-inhibit-auto-save-visited t)
-
-;; Don't create .#lockfile symlinks on remote hosts.
-(setq remote-file-name-inhibit-locks t)
-
-;; Don't auto-revert remote files — polling over SSH is wasteful.
-(setq auto-revert-remote-files nil)
-
 ;;; ── Core TRAMP package ──────────────────────────────────────────────────────
 
 (use-package tramp
   :ensure nil
   :defer t
   :config
-  ;; Verbosity: 0 = silent, 3 = warnings/errors only, 6 = full debug.
-  (setq tramp-verbose 3)
-
-  ;; SSH as the default transport.
-  (setq tramp-default-method "ssh")
-
   ;; Forcing a login shell makes TRAMP sensitive to startup chatter from
   ;; .profile/.bashrc/.zshrc.  Some teaching/login clusters print banners or
   ;; run module setup from those files, which can leave TRAMP stuck in the
@@ -133,50 +189,16 @@ non-login shell startup."
                                      (and my/tramp-use-login-shell '("-l")))
       (my/tramp-set-method-parameter method 'tramp-remote-shell-args '("-c"))))
 
-  ;; Connection and session timeouts.
-  (setq tramp-connection-timeout 10
-        tramp-session-timeout 300)
-
-  ;; Remote PATH: prefer the user's own installed tools first.
-  (setq tramp-remote-path
-        '(tramp-own-remote-path
-          tramp-default-remote-path
-          "/usr/local/bin"
-          "/opt/homebrew/bin"
-          "/opt/local/bin"
-          "/usr/sbin"
-          "/sbin"
-          "~/.elan/bin"
-          "~/.local/bin"
-          "~/.pyenv/shims"
-          "~/.asdf/shims"
-          "~/.cargo/bin"
-          "/snap/bin"))
-
   ;; SSH ControlMaster: multiplex all sessions over one TCP connection.
   ;; This is the single biggest speedup for remote file access.
   (setq tramp-use-ssh-controlmaster-options my/tramp-use-ssh-controlmaster)
 
-  ;; SCP direct remote copying: avoid local staging for large transfers.
-  (setq tramp-use-scp-direct-remote-copying t)
-  (setq tramp-copy-size-limit (* 1024 1024)) ; 1 MiB
-
-  ;; Only re-read remote directory listings at most once per minute.
-  (setq tramp-completion-reread-directory-timeout 60)
-
   ;; Mirror local backup policy on the remote.
   (setq tramp-backup-directory-alist backup-directory-alist)
 
-  ;; Don't write a history file to the remote home directory.
-  (setq tramp-histfile-override "/dev/null")
-
   ;; Keep remote shell startup non-interactive and quiet where possible.
   (dolist (env '("BASH_ENV=''" "ENV=''" "HISTFILE=/dev/null" "PROMPT_COMMAND="))
-    (add-to-list 'tramp-remote-process-environment env))
-
-  ;; Allow unsafe temporary files (needed on systems with nosuid /tmp,
-  ;; e.g. some NixOS configurations).
-  (setq tramp-allow-unsafe-temporary-files t))
+    (add-to-list 'tramp-remote-process-environment env)))
 
 ;;; ── Direct-async profile for scp ────────────────────────────────────────────
 ;; Enable TRAMP's direct-async path for scp bulk copies so they get a fresh
@@ -247,8 +269,7 @@ non-login shell startup."
 ;;   tramp-get-method-parameter for the tramp-direct-async key, so
 ;;   (consp nil) = nil → SSH omits -t -t → plain pipe.
 
-(defcustom my/tramp-lsp-pipe-mode-servers
-  '("lean4")
+(config-defvar my/tramp-lsp-pipe-mode-servers nil
   "LSP server name patterns that require pipe-mode direct-async over TRAMP.
 Each element is a regexp matched against the server name string passed to
 the lsp-stdio-connection :connect lambda (e.g. \"lean4-lsp\",
@@ -335,7 +356,7 @@ servers use the shared ControlMaster path."
 
 ;;; ── find-file timing feedback ────────────────────────────────────────────────
 
-(defcustom my/find-file-feedback-threshold 0.4
+(config-defvar my/find-file-feedback-threshold nil
   "Report local file opens only when they exceed this many seconds."
   :type 'number
   :group 'my)
@@ -362,11 +383,10 @@ servers use the shared ControlMaster path."
 ;; cache with filesystem-watch invalidation.  Wrapping that in our own alist
 ;; would only serve stale results after tramp-rpc has invalidated its cache.
 
-(defcustom my/tramp-memoize-cache-limit 128
+(config-defvar my/tramp-memoize-cache-limit nil
   "Maximum entries retained in each remote lookup memoization cache.
 Set to nil to keep caches unbounded."
-  :type '(choice (const :tag "Unbounded" nil)
-                 (integer :tag "Entries"))
+  :type '(choice (const :tag "Unbounded" nil) (integer :tag "Entries"))
   :group 'tramp)
 
 (defun my/tramp--trim-memoize-cache (cache)

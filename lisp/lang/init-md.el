@@ -7,6 +7,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'init-aaronnote)
 
@@ -14,7 +16,7 @@
   "Markdown file handoff to Aaronnote."
   :group 'my/aaronnote)
 
-(defcustom my/aaronnote-close-emacs-markdown-buffer t
+(config-defvar my/aaronnote-close-emacs-markdown-buffer nil
   "When non-nil, close the temporary Emacs buffer after opening Markdown in Aaronnote."
   :type 'boolean
   :group 'my/markdown)

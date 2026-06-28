@@ -2,6 +2,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'eglot)
 (require 'jsonrpc)
@@ -25,50 +27,43 @@
 (defvar flymake-note-bitmap)
 (defvar flymake-diagnostic-functions)
 
-(defcustom lean-sideline-enabled nil
+(config-defvar lean-sideline-enabled nil
   "When non-nil, render Lean diagnostics and progress at line end."
   :type 'boolean
   :group 'lean)
 
-(defcustom lean-sideline-delay 0.06
+(config-defvar lean-sideline-delay nil
   "Seconds to debounce Lean sideline overlay refreshes."
   :type 'number
   :group 'lean)
 
-(defcustom lean-sideline-max-message-length 96
+(config-defvar lean-sideline-max-message-length nil
   "Maximum characters shown in a Lean sideline message."
   :type 'integer
   :group 'lean)
 
-(defcustom lean-sideline-minimum-severity 'warning
+(config-defvar lean-sideline-minimum-severity nil
   "Minimum diagnostic severity rendered in Lean sideline overlays.
 Use `note' to show all Lean informational output, including `#check' results."
-  :type '(choice (const :tag "Errors only" error)
-                 (const :tag "Warnings and errors" warning)
-                 (const :tag "Notes, warnings, and errors" note))
+  :type '(choice (const :tag "Errors only" error) (const :tag "Warnings and errors" warning) (const :tag "Notes, warnings, and errors" note))
   :group 'lean)
 
-(defcustom lean-progress-fringe-enabled t
+(config-defvar lean-progress-fringe-enabled nil
   "When non-nil, show Lean file-progress markers in the fringe."
   :type 'boolean
   :group 'lean)
 
-(defcustom lean-declaration-fringe-enabled t
+(config-defvar lean-declaration-fringe-enabled nil
   "When non-nil, show Lean declaration entry markers in the left fringe."
   :type 'boolean
   :group 'lean)
 
-(defcustom lean-notification-debounce-delay 0.10
+(config-defvar lean-notification-debounce-delay nil
   "Seconds to coalesce Lean diagnostics and progress UI notifications."
   :type 'number
   :group 'lean)
 
-(defcustom lean-sideline-prefixes
-  '((error . "E")
-    (warning . "W")
-    (note . "N")
-    (processing . "~")
-    (blocked . "!"))
+(config-defvar lean-sideline-prefixes nil
   "Small prefix set used by Lean sideline overlays."
   :type '(alist :key-type symbol :value-type string)
   :group 'lean)

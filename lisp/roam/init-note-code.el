@@ -7,6 +7,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'subr-x)
 
 (declare-function my/aaronnote-roam-root "init-md-roam" ())
@@ -17,7 +19,7 @@
   "Tagged source regions embedded in Typst notes."
   :group 'my/aaronnote-roam)
 
-(defcustom my/note-code-root "/Users/hc/Documents/AaronNote/"
+(config-defvar my/note-code-root nil
   "Root containing Typst notes, source files, and the `.lean/' mirror."
   :type 'directory
   :group 'my/note-code)

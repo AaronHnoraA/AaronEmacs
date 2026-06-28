@@ -3,6 +3,10 @@
 ;;; Commentary:
 ;;
 
+;;; Code:
+
+(require 'config)
+
 ;;; ── GitHub Copilot ────────────────────────────────────────────────────────
 (declare-function copilot-server-executable "copilot" ())
 (declare-function copilot--overlay-visible "copilot" ())
@@ -19,29 +23,28 @@
   "Copilot integration defaults."
   :group 'tools)
 
-(defcustom my/copilot-idle-delay 0.85
+(config-defvar my/copilot-idle-delay nil
   "Idle seconds before Copilot asks for inline completions."
-  :type '(choice (number :tag "Seconds of delay")
-                 (const :tag "Inline completion disabled" nil))
+  :type '(choice (number :tag "Seconds of delay") (const :tag "Inline completion disabled" nil))
   :group 'my/copilot)
 
-(defcustom my/copilot-large-buffer-threshold (* 512 1024)
+(config-defvar my/copilot-large-buffer-threshold nil
   "Maximum buffer size where Copilot is auto-enabled.
 Large generated files can make inline completion unnecessarily expensive."
   :type 'integer
   :group 'my/copilot)
 
-(defcustom my/copilot-disable-on-remote t
+(config-defvar my/copilot-disable-on-remote nil
   "Whether to skip automatic Copilot startup in remote buffers."
   :type 'boolean
   :group 'my/copilot)
 
-(defcustom my/copilot-deferred-modes '(lean-mode)
+(config-defvar my/copilot-deferred-modes nil
   "Major modes where automatic Copilot startup waits for editor idle time."
   :type '(repeat symbol)
   :group 'my/copilot)
 
-(defcustom my/copilot-deferred-idle-delay 1.5
+(config-defvar my/copilot-deferred-idle-delay nil
   "Idle seconds before automatically enabling Copilot in deferred modes."
   :type 'number
   :group 'my/copilot)

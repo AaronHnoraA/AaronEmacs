@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 
 ;; Derive config root from this file's path so batch mode (-Q) gets the right
@@ -20,42 +22,37 @@
   "Aaronnote static-site build and deployment."
   :group 'applications)
 
-(defcustom my/aaronnote-publish-root
-  (expand-file-name "publish" my/aaronnote-publish--config-root)
+(config-defvar my/aaronnote-publish-root nil
   "Path to the publish git repo root (output lands here directly)."
   :type 'directory
   :group 'my/aaronnote-publish)
 
-(defcustom my/aaronnote-publish-engine
-  (expand-file-name "lisp/roam/aaronnote/publish/publish-site" my/aaronnote-publish--config-root)
+(config-defvar my/aaronnote-publish-engine nil
   "Path to the Python publish engine."
   :type 'file
   :group 'my/aaronnote-publish)
 
-(defcustom my/aaronnote-publish-assets-dir
-  (expand-file-name "lisp/roam/aaronnote/publish/assets" my/aaronnote-publish--config-root)
+(config-defvar my/aaronnote-publish-assets-dir nil
   "Path to publish source assets (css/, kinds/, homepage.html, etc.)."
   :type 'directory
   :group 'my/aaronnote-publish)
 
-(defcustom my/aaronnote-publish-state-dir
-  (expand-file-name "var/aaronnote/publish" my/aaronnote-publish--config-root)
+(config-defvar my/aaronnote-publish-state-dir nil
   "Path to publish cache/state directory (deps/, state.json, book/, cv/)."
   :type 'directory
   :group 'my/aaronnote-publish)
 
-(defcustom my/aaronnote-publish-cv-dir
-  (expand-file-name "lisp/roam/aaronnote/publish/CV" my/aaronnote-publish--config-root)
+(config-defvar my/aaronnote-publish-cv-dir nil
   "Path to the CV LaTeX source directory."
   :type 'directory
   :group 'my/aaronnote-publish)
 
-(defcustom my/aaronnote-publish-nas-target "Aaron-nas:/volume1/web/public/"
+(config-defvar my/aaronnote-publish-nas-target nil
   "rsync target for NAS deployment."
   :type 'string
   :group 'my/aaronnote-publish)
 
-(defcustom my/aaronnote-publish-nas-enable t
+(config-defvar my/aaronnote-publish-nas-enable nil
   "When non-nil, rsync to NAS after git push during deploy."
   :type 'boolean
   :group 'my/aaronnote-publish)

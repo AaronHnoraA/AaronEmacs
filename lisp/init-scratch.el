@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'cl-lib)
 (require 'init-funcs)
 
@@ -15,21 +17,15 @@
   "Persistent scratch buffers inspired by Doom Emacs."
   :group 'convenience)
 
-(defcustom my/scratch-directory
-  (expand-file-name "scratch"
-                    (or (and (boundp 'my/state-dir) my/state-dir)
-                        (expand-file-name "var" user-emacs-directory)))
+(config-defvar my/scratch-directory nil
   "Directory used to persist scratch buffers."
   :type 'directory
   :group 'my/scratch)
 
-(defcustom my/scratch-initial-major-mode t
+(config-defvar my/scratch-initial-major-mode nil
   "Initial major mode for a fresh scratch buffer.
 When set to t, inherit the current buffer's major mode when practical."
-  :type '(choice
-          (const :tag "Inherit current buffer mode" t)
-          (const :tag "Fundamental mode" nil)
-          (function :tag "Major mode"))
+  :type '(choice (const :tag "Inherit current buffer mode" t) (const :tag "Fundamental mode" nil) (function :tag "Major mode"))
   :group 'my/scratch)
 
 (defvar my/scratch-buffers nil

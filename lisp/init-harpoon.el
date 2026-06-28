@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'init-funcs)
 
 (declare-function my/project-current-root "init-project")
@@ -13,7 +15,7 @@
   "Quick file marks."
   :group 'tools)
 
-(defcustom my/harpoon-slot-count 4
+(config-defvar my/harpoon-slot-count nil
   "Number of per-project quick-jump slots."
   :type 'integer
   :group 'my/harpoon)

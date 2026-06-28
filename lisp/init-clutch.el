@@ -8,6 +8,8 @@
 
 ;;; Code:
 
+(require 'config)
+
 (require 'init-package-utils)
 
 (defgroup my/clutch nil
@@ -18,8 +20,7 @@
   "https://github.com/LuciusChen/clutch.git"
   "Git URL used to install clutch via package-vc.")
 
-(defcustom my/clutch-config-file
-  (expand-file-name "etc/clutch-config.el" user-emacs-directory)
+(config-defvar my/clutch-config-file nil
   "Local clutch configuration file."
   :type 'file
   :group 'my/clutch)
