@@ -2,19 +2,18 @@
 ;; Auto-generated.  Do not edit by hand; use `config-set' or the board.
 
 (config-store-set
- '((xwidget-webkit-cookie-file
-    . "/Users/hc/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies")
-   (xwidget-webkit-cache-directory
-    . "/Users/hc/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cache/")
-   (xwidget-webkit-local-storage-directory
-    . "/Users/hc/Library/Application Support/BraveSoftware/Brave-Browser/Default/Local Storage/")
-   (xwidget-webkit-enable-javascript . t)
-   (xwidget-webkit-enable-plugins . t)
-   (xwidget-webkit-enable-media . t)
+ '((eww-search-prefix . "https://duckduckgo.com/?q=")
+   (browse-url-browser-function . my/browse-url)
+   (xwidget-webkit-buffer-name-format . "*xwidget*")
+   (xwidget-webkit-enable-developer-extras . t)
    (xwidget-webkit-user-agent
     . "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-   (xwidget-webkit-enable-developer-extras . t)
-   (xwidget-webkit-buffer-name-format . "*xwidget*")
-   (browse-url-browser-function . my/browse-url)
-   (eww-search-prefix . "https://duckduckgo.com/?q="))
+   (xwidget-webkit-enable-media . t) (xwidget-webkit-enable-plugins . t)
+   (xwidget-webkit-enable-javascript . t)
+   (xwidget-webkit-local-storage-directory
+    . "/Users/hc/Library/Application Support/BraveSoftware/Brave-Browser/Default/Local Storage/")
+   (xwidget-webkit-cache-directory
+    . "/Users/hc/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cache/")
+   (xwidget-webkit-cookie-file
+    . "/Users/hc/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"))
 )

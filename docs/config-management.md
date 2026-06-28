@@ -36,6 +36,7 @@ M-x config-set RET my-new-setting RET t
 如果想把简单变量放进专门的 store 文件，直接把该 key 写进对应
 `etc/config-*.el` 即可。`config` 加载时会记录 key 来自哪个文件，之后
 `config-set` 会写回原文件；不需要在核心代码里维护 group→文件映射。
+store 文件只解析受支持的 `(config-store-set '...)` 数据表单，不执行任意 Lisp。
 
 ## 文件结构
 
@@ -57,6 +58,9 @@ M-x config-set RET my-new-setting RET t
    无歧义，后续新 key 也会沿用这个来源
 3. `config-apply-store` 挂在 `after-init-hook` 做最后一遍补刀
    （如 `:on-change` 回调在晚期才定义的情形）
+
+如果运行时新增或删除了 `etc/config-*.el`，执行 `M-x config-refresh-store-files`
+重新发现 store 文件并应用配置。
 
 ## 日常用法
 
@@ -136,6 +140,9 @@ transient `config-dispatch`：打开面板、保存 store、重载 store、打�
 通常不需要写 `:store-file`：已有 key 会按加载来源写回，`etc/config-*.el` 会自动发现。
 只有在新增 key 第一次保存前就必须强制写到某个非默认文件时，才给单项加
 `:store-file`。
+
+写回时会先比较生成内容；内容不变不会刷新文件 mtime。实际写入使用同目录临时文件
+加 rename，避免 store 被半写。
 
 ## `etc/config-store.el` 格式
 

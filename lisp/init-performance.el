@@ -365,6 +365,8 @@
                   (file-size-human-readable read-process-output-max)))
   (when (fboundp 'memory-info)
     (insert (format "%-24s %S\n" "memory-info" (memory-info))))
+  (when (fboundp 'memory-use-counts)
+    (insert (format "%-24s %S\n" "memory-use-counts" (memory-use-counts))))
   (insert "\n"))
 
 (defun my/performance--insert-emacs-processes ()
@@ -620,7 +622,7 @@ This samples once and does not mutate or display the performance board."
            (cons (format "rec %s" (if my/performance--recording "on" "off"))
                  (if my/performance--recording 'warning 'muted))))
   (aaron-ui-board-insert-key-hints
-   "Keys: g refresh  y copy page  a auto-refresh  s save record  R recording  o record dir  p profiler  q quit")
+   "Keys: g refresh  G collect  y copy page  a auto-refresh  s save record  R recording  o record dir  p profiler  q quit")
   (insert "\n"))
 
 (defun my/performance--insert-metric (label value ratio &optional suffix)
@@ -706,6 +708,22 @@ This samples once and does not mutate or display the performance board."
   (profiler-start 'cpu)
   (message "CPU profiler started; run `profiler-report' after reproducing load"))
 
+(defun my/performance-garbage-collect ()
+  "Run a manual garbage collection and report process memory before and after."
+  (interactive)
+  (let* ((before (my/performance--self-process-sample))
+         (start (float-time))
+         (stats (garbage-collect))
+         (elapsed (- (float-time) start))
+         (after (my/performance--self-process-sample)))
+    (when (derived-mode-p 'my/performance-watch-mode)
+      (my/performance-watch-refresh))
+    (message "GC %.3fs; RSS %s -> %s; %d statistic rows"
+             elapsed
+             (my/performance--format-kb (plist-get before :rss-kb))
+             (my/performance--format-kb (plist-get after :rss-kb))
+             (length stats))))
+
 (defun my/performance-copy-page ()
   "Copy the full current performance page to the kill ring."
   (interactive)
@@ -758,6 +776,7 @@ This samples once and does not mutate or display the performance board."
       (let ((map (copy-keymap special-mode-map)))
         (use-local-map map)
         (local-set-key (kbd "g") #'my/performance-watch-refresh)
+        (local-set-key (kbd "G") #'my/performance-garbage-collect)
         (local-set-key (kbd "y") #'my/performance-copy-page)
         (local-set-key (kbd "a") #'my/performance-watch-toggle-auto-refresh)
         (local-set-key (kbd "s") #'my/performance-save-record)

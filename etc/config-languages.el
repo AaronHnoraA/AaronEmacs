@@ -2,8 +2,7 @@
 ;; Auto-generated.  Do not edit by hand; use `config-set' or the board.
 
 (config-store-set
- '((my/js-indent-offset . 2)
-   (flymake-vale-program . "vale")
-   (flymake-vale-modes . (text-mode latex-mode org-mode message-mode))
-   (flymake-fringe-indicator-position . right-fringe))
+ '((flymake-fringe-indicator-position . right-fringe)
+   (flymake-vale-modes text-mode latex-mode org-mode message-mode)
+   (flymake-vale-program . "vale") (my/js-indent-offset . 2))
 )

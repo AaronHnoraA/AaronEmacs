@@ -2,7 +2,10 @@
 ;; Auto-generated.  Do not edit by hand; use `config-set' or the board.
 
 (config-store-set
- '((treesit-language-source-alist
+ '((jit-lock-context-time . 0.2) (jit-lock-chunk-size . 4096)
+   (jit-lock-stealth-time) (idle-update-delay . 5.0)
+   (treesit-extra-load-path "/Users/hc/.emacs.d/var/tree-sitter/")
+   (treesit-language-source-alist
     (bash "https://github.com/tree-sitter/tree-sitter-bash")
     (c "https://github.com/tree-sitter/tree-sitter-c")
     (cpp "https://github.com/tree-sitter/tree-sitter-cpp")
@@ -15,14 +18,10 @@
     (json "https://github.com/tree-sitter/tree-sitter-json")
     (python "https://github.com/tree-sitter/tree-sitter-python")
     (rust "https://github.com/tree-sitter/tree-sitter-rust")
-    (tsx "https://github.com/tree-sitter/tree-sitter-typescript" "master" "tsx/src")
+    (tsx "https://github.com/tree-sitter/tree-sitter-typescript" "master"
+         "tsx/src")
     (typescript "https://github.com/tree-sitter/tree-sitter-typescript" "master"
                 "typescript/src")
     (toml "https://github.com/tree-sitter/tree-sitter-toml")
-    (yaml "https://github.com/ikatyang/tree-sitter-yaml"))
-   (treesit-extra-load-path . ("/Users/hc/.emacs.d/var/tree-sitter/"))
-   (idle-update-delay . 5.0)
-   (jit-lock-stealth-time)
-   (jit-lock-chunk-size . 4096)
-   (jit-lock-context-time . 0.2))
+    (yaml "https://github.com/ikatyang/tree-sitter-yaml")))
 )

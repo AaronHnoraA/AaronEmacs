@@ -210,7 +210,7 @@ leader 入口：
 这个 buffer 默认打开到独立 frame，避免和 dashboard/Org 分屏共绘。默认只在打开和按 `g` 时采样；如果按 `a` 临时开启自动刷新，`q` 退出时会停止刷新 timer 并关闭监管 frame。顶部有用法区和概览条形图。里面可以看：
 
 - `ps` 里的 Emacs CPU、内存、RSS、子进程。
-- Emacs runtime：buffer/process/timer/GC/read-process-output-max。
+- Emacs runtime：buffer/process/timer/GC/read-process-output-max/memory-use-counts。
 - Emacs process 列表。
 - hook 表的全局和当前 buffer-local 激活数量。
 - Org buffer 列表、是否可见、局部 hook 数量、LaTeX 预览队列/overlay/pending 数。
@@ -263,6 +263,7 @@ leader 入口：
 按键：
 
 - `g` 立即刷新。
+- `G` 手动执行一次 `garbage-collect`，并报告 RSS 前后变化。
 - `y` 复制当前完整页面，方便粘给 agent 或 issue。
 - `a` 切换自动刷新。
 - `s` 保存当前采样。

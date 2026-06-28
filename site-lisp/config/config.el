@@ -78,10 +78,12 @@ persisted separately.")
 (defvar config--override-store-files (make-hash-table :test 'equal)
   "Hash table mapping persisted override keys to their loaded store files.")
 
-(defvar config--group-store-files (make-hash-table :test 'eq)
-  "Hash table mapping registry groups to inferred store files.
-The value is an expanded file name, or the symbol `ambiguous' when a group has
-persisted keys in more than one store file.")
+(defvar config--configured-store-files-cache nil
+  "Cached list of expanded store files discovered for startup loading.")
+
+(defvar config--group-store-file-sets (make-hash-table :test 'eq)
+  "Hash table mapping registry groups to store-file sets.
+Each value is a hash table where keys are expanded store file names.")
 
 (defvar config--current-store-file nil
   "Store file currently calling `config-store-set'.")
@@ -118,12 +120,14 @@ persisted keys in more than one store file.")
 
 (defun config--configured-store-files ()
   "Return expanded store files configured for startup preloading."
-  (delete-dups
-   (delq nil
-         (mapcar #'config--expand-store-file
-                 (append (list config-store-file)
-                         config-extra-store-files
-                         (config--discover-store-files))))))
+  (or config--configured-store-files-cache
+      (setq config--configured-store-files-cache
+            (delete-dups
+             (delq nil
+                   (mapcar #'config--expand-store-file
+                           (append (list config-store-file)
+                                   config-extra-store-files
+                                   (config--discover-store-files))))))))
 
 (defun config--load-configured-store-files ()
   "Load all configured store files once."
@@ -131,16 +135,37 @@ persisted keys in more than one store file.")
     (config--load-store-file file)))
 
 (defun config--learn-group-store-file (group file)
-  "Infer GROUP's default store FILE when it is unambiguous."
+  "Record that GROUP has persisted configuration in FILE."
   (when (and group file)
-    (let ((known (gethash group config--group-store-files)))
+    (let ((files (or (gethash group config--group-store-file-sets)
+                     (let ((table (make-hash-table :test 'equal)))
+                       (puthash group table config--group-store-file-sets)
+                       table))))
+      (puthash file t files))))
+
+(defun config--hash-table-keys (table)
+  "Return a list of TABLE's keys."
+  (let (keys)
+    (maphash (lambda (key _value) (push key keys)) table)
+    (nreverse keys)))
+
+(defun config--primary-store-file ()
+  "Return the expanded primary config store file."
+  (config--expand-store-file config-store-file))
+
+(defun config--group-default-store-file (group)
+  "Return GROUP's inferred default store file, or nil if ambiguous.
+If a group has exactly one non-primary store file, prefer it over the primary
+store.  This lets broad fallback values live in `config-store-file' while a
+specialized `etc/config-*.el' owns new keys for the same group."
+  (when-let* ((files (gethash group config--group-store-file-sets)))
+    (let* ((primary (config--primary-store-file))
+           (all-files (config--hash-table-keys files))
+           (specialized (cl-remove primary all-files :test #'equal)))
       (cond
-       ((null known)
-        (puthash group file config--group-store-files))
-       ((or (eq known 'ambiguous) (equal known file))
-        nil)
-       (t
-        (puthash group 'ambiguous config--group-store-files))))))
+       ((= (length specialized) 1) (car specialized))
+       ((and (null specialized) (= (length all-files) 1)) (car all-files))
+       (t nil)))))
 
 (defun config--learn-entry-store-file (key entry)
   "Learn ENTRY's group store from persisted KEY ownership."
@@ -327,7 +352,7 @@ An unknown NAME warns once and returns nil."
 
 (defun config--record-override (key value)
   "Record KEY=VALUE in `config--overrides' and persist the store."
-  (setf (alist-get key config--overrides nil nil #'equal) value)
+  (config--put-override key value)
   (puthash key (config--store-file-for-key key) config--override-store-files)
   (config--persist))
 
@@ -457,13 +482,63 @@ Unless NO-PERSIST, records the toggle in the store."
 (defun config-store-set (overrides)
   "Merge OVERRIDES into `config--overrides' (called by store files).
 Later-loaded stores win when the same key appears in more than one file."
+  (config--merge-store-overrides overrides config--current-store-file))
+
+(defun config--put-override (key value)
+  "Set KEY to VALUE in `config--overrides', preserving insertion order."
+  (if-let* ((cell (assoc key config--overrides #'equal)))
+      (setcdr cell value)
+    (setq config--overrides
+          (nconc config--overrides (list (cons key value))))))
+
+(defun config--merge-store-overrides (overrides &optional file)
+  "Merge OVERRIDES into memory, recording FILE as their owner."
+  (unless (listp overrides)
+    (user-error "config store overrides must be a list, got %S" overrides))
   (dolist (cell overrides)
-    (setf (alist-get (car cell) config--overrides nil nil #'equal)
-          (cdr cell))
-    (when config--current-store-file
+    (unless (consp cell)
+      (user-error "config store entry must be a cons cell, got %S" cell))
+    (config--put-override (car cell) (cdr cell))
+    (when file
       (puthash (car cell)
-               config--current-store-file
+               file
                config--override-store-files))))
+
+(defun config--store-form-overrides (form file)
+  "Return the override list encoded by FORM from FILE, or nil."
+  (cond
+   ((and (consp form)
+         (eq (car form) 'config-store-set)
+         (= (length form) 2)
+         (consp (cadr form))
+         (eq (car (cadr form)) 'quote))
+    (cadr (cadr form)))
+   (t
+    (display-warning
+     'config
+     (format "Ignoring unsupported form in %s: %S" file form)
+     :warning)
+    nil)))
+
+(defun config--read-store-file (file)
+  "Read config store FILE without evaluating arbitrary Lisp."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (goto-char (point-min))
+    (let ((done nil))
+      (while (not done)
+        (condition-case err
+            (let ((form (read (current-buffer))))
+              (when-let* ((overrides (config--store-form-overrides form file)))
+                (config--merge-store-overrides overrides file)))
+          (end-of-file
+           (setq done t))
+          (error
+           (display-warning
+            'config
+            (format "Failed to read %s: %s" file (error-message-string err))
+            :error)
+           (setq done t)))))))
 
 (defun config--store-file-for-key (key)
   "Return the store file that owns persisted override KEY."
@@ -474,11 +549,8 @@ Later-loaded stores win when the same key appears in more than one file."
            (config--entry (nth 1 key))))))
     (or (and entry (config--entry-store-file entry))
         (gethash key config--override-store-files)
-        (and entry
-             (let ((file (gethash (plist-get entry :group)
-                                  config--group-store-files)))
-               (and (not (eq file 'ambiguous)) file)))
-        (config--expand-store-file config-store-file))))
+        (and entry (config--group-default-store-file (plist-get entry :group)))
+        (config--primary-store-file))))
 
 (defun config--store-files ()
   "Return all known store files that should be persisted."
@@ -496,16 +568,16 @@ Later-loaded stores win when the same key appears in more than one file."
        (push file files))
      config--override-store-files)
     (maphash
-     (lambda (_group file)
-       (unless (eq file 'ambiguous)
-         (push file files)))
-     config--group-store-files)
+     (lambda (_group group-files)
+       (maphash (lambda (store-file _present)
+                  (push store-file files))
+                group-files))
+     config--group-store-file-sets)
     (delete-dups (delq nil files))))
 
-(defun config--write-store-file (file overrides)
-  "Write OVERRIDES to FILE."
-  (make-directory (file-name-directory file) t)
-  (with-temp-file file
+(defun config--store-file-content (file overrides)
+  "Return the generated content for FILE containing OVERRIDES."
+  (with-temp-buffer
     (insert ";;; "
             (file-name-nondirectory file)
             " --- generated by config.el -*- lexical-binding: t; -*-\n")
@@ -513,7 +585,39 @@ Later-loaded stores win when the same key appears in more than one file."
     (insert "(config-store-set\n '")
     (let ((print-level nil) (print-length nil))
       (pp overrides (current-buffer)))
-    (insert ")\n")))
+    (insert ")\n")
+    (buffer-string)))
+
+(defun config--file-string (file)
+  "Return FILE contents as a string, or nil when FILE is unreadable."
+  (when (file-readable-p file)
+    (with-temp-buffer
+      (insert-file-contents file)
+      (buffer-string))))
+
+(defun config--write-string-atomically (file content)
+  "Write CONTENT to FILE via a same-directory temporary file and rename."
+  (let* ((directory (file-name-directory file))
+         (temporary (make-temp-file
+                     (expand-file-name
+                      (concat "." (file-name-nondirectory file) ".")
+                      directory))))
+    (condition-case err
+        (progn
+          (with-temp-file temporary
+            (insert content))
+          (rename-file temporary file t))
+      (error
+       (when (file-exists-p temporary)
+         (ignore-errors (delete-file temporary)))
+       (signal (car err) (cdr err))))))
+
+(defun config--write-store-file (file overrides)
+  "Write OVERRIDES to FILE unless the generated content is unchanged."
+  (make-directory (file-name-directory file) t)
+  (let ((content (config--store-file-content file overrides)))
+    (unless (equal content (config--file-string file))
+      (config--write-string-atomically file content))))
 
 (defun config--persist ()
   "Write `config--overrides' to their owning store files."
@@ -537,8 +641,7 @@ Later-loaded stores win when the same key appears in more than one file."
       (puthash file t config--loaded-store-files)
       (when (file-readable-p file)
         (condition-case err
-            (let ((config--current-store-file file))
-              (load file nil 'nomessage))
+            (config--read-store-file file)
           (error
            (display-warning
             'config (format "Failed to load %s: %s" file
@@ -563,6 +666,13 @@ Each override is applied independently so one failure cannot abort the rest."
         'config (format "Failed to apply override %S: %s"
                         (car cell) (error-message-string err))
         :error)))))
+
+(defun config-refresh-store-files ()
+  "Rediscover configured store files and apply their overrides."
+  (interactive)
+  (setq config--configured-store-files-cache nil)
+  (config-apply-store)
+  (message "config: refreshed store files"))
 
 ;; Final pass after all modules have registered and :on-change fns are defined.
 (add-hook 'after-init-hook #'config-apply-store)

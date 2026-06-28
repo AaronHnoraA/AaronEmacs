@@ -2,33 +2,19 @@
 ;; Auto-generated.  Do not edit by hand; use `config-set' or the board.
 
 (config-store-set
- '((tramp-persistency-file-name . "/Users/hc/.emacs.d/var/tramp/persistency.el")
-   (tramp-auto-save-directory . "/Users/hc/.emacs.d/var/tramp/autosave/")
-   (remote-file-name-inhibit-cache . 60)
-   (remote-file-name-inhibit-auto-save-visited . t)
-   (remote-file-name-inhibit-locks . t)
-   (auto-revert-remote-files)
-   (tramp-verbose . 3)
-   (tramp-default-method . "ssh")
-   (tramp-connection-timeout . 10)
-   (tramp-session-timeout . 300)
-   (tramp-remote-path
-    tramp-own-remote-path
-    tramp-default-remote-path
-    "/usr/local/bin"
-    "/opt/homebrew/bin"
-    "/opt/local/bin"
-    "/usr/sbin"
-    "/sbin"
-    "~/.elan/bin"
-    "~/.local/bin"
-    "~/.pyenv/shims"
-    "~/.asdf/shims"
-    "~/.cargo/bin"
-    "/snap/bin")
-   (tramp-use-scp-direct-remote-copying . t)
-   (tramp-copy-size-limit . 1048576)
-   (tramp-completion-reread-directory-timeout . 60)
+ '((tramp-allow-unsafe-temporary-files . t)
    (tramp-histfile-override . "/dev/null")
-   (tramp-allow-unsafe-temporary-files . t))
+   (tramp-completion-reread-directory-timeout . 60)
+   (tramp-copy-size-limit . 1048576) (tramp-use-scp-direct-remote-copying . t)
+   (tramp-remote-path tramp-own-remote-path tramp-default-remote-path
+                      "/usr/local/bin" "/opt/homebrew/bin" "/opt/local/bin"
+                      "/usr/sbin" "/sbin" "~/.elan/bin" "~/.local/bin"
+                      "~/.pyenv/shims" "~/.asdf/shims" "~/.cargo/bin" "/snap/bin")
+   (tramp-session-timeout . 300) (tramp-connection-timeout . 10)
+   (tramp-default-method . "ssh") (tramp-verbose . 3) (auto-revert-remote-files)
+   (remote-file-name-inhibit-locks . t)
+   (remote-file-name-inhibit-auto-save-visited . t)
+   (remote-file-name-inhibit-cache . 60)
+   (tramp-auto-save-directory . "/Users/hc/.emacs.d/var/tramp/autosave/")
+   (tramp-persistency-file-name . "/Users/hc/.emacs.d/var/tramp/persistency.el"))
 )

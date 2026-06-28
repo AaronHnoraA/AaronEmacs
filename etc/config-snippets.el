@@ -2,5 +2,5 @@
 ;; Auto-generated.  Do not edit by hand; use `config-set' or the board.
 
 (config-store-set
- '((yas-snippet-dirs . ("/Users/hc/.emacs.d/snippets")))
+ '((yas-snippet-dirs "/Users/hc/.emacs.d/snippets"))
 )

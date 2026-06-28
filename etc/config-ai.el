@@ -2,11 +2,8 @@
 ;; Auto-generated.  Do not edit by hand; use `config-set' or the board.
 
 (config-store-set
- '((claude-code-ide-cli-path . "/Users/hc/.local/bin/claude")
-   (claude-code-ide-window-side . right)
-   (claude-code-ide-window-width . 90)
-   (codex-cli-executable . "codex")
-   (codex-cli-terminal-backend . vterm)
-   (codex-cli-side . right)
-   (codex-cli-width . 90))
+ '((codex-cli-width . 90) (codex-cli-side . right)
+   (codex-cli-terminal-backend . vterm) (codex-cli-executable . "codex")
+   (claude-code-ide-window-width . 90) (claude-code-ide-window-side . right)
+   (claude-code-ide-cli-path . "/Users/hc/.local/bin/claude"))
 )

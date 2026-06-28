@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'aaron-ui-transient)
+(require 'config)
 
 (declare-function my/browse-url "init-browser" (url &optional new-window))
 
@@ -102,15 +103,33 @@
   (wgrep-change-readonly-file t))
 
 ;; GC optimization
+(config-defvar my/gcmh-idle-delay nil
+  "Idle delay passed to `gcmh-idle-delay'."
+  :type 'sexp
+  :group 'performance)
+
+(config-defvar my/gcmh-auto-idle-delay-factor nil
+  "Auto idle delay factor passed to `gcmh-auto-idle-delay-factor'."
+  :type 'integer
+  :group 'performance)
+
+(config-defvar my/gcmh-high-cons-threshold nil
+  "High GC threshold used by gcmh while Emacs is active."
+  :type 'integer
+  :group 'performance)
+
 (use-package gcmh
   :ensure t
   :hook (after-init . gcmh-mode)
-  :custom
+  :init
   ;; Follow Doom's strategy: wait longer while active, then collect more
   ;; aggressively after a real idle period.
-  (gcmh-idle-delay 'auto)
-  (gcmh-auto-idle-delay-factor 20)
-  (gcmh-high-cons-threshold (* 512 1024 1024)))
+  (when my/gcmh-idle-delay
+    (setq gcmh-idle-delay my/gcmh-idle-delay))
+  (when my/gcmh-auto-idle-delay-factor
+    (setq gcmh-auto-idle-delay-factor my/gcmh-auto-idle-delay-factor))
+  (when my/gcmh-high-cons-threshold
+    (setq gcmh-high-cons-threshold my/gcmh-high-cons-threshold)))
 
 ;; Write documentation comment in an easy way
 (use-package separedit

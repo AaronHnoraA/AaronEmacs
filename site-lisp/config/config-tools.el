@@ -296,7 +296,7 @@ The live value is not changed; the override is removed from the store."
     ("f" "filter group" config-filter-group)]
    ["Store"
     ("s" "save store" config-save)
-    ("R" "reload store" config-apply-store)
+    ("R" "refresh stores" config-refresh-store-files)
     ("o" "open store file" config-open-store)
     ("D" "clear all overrides" config-reset-all)]])
 
