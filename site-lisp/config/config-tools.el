@@ -246,7 +246,7 @@ The live value is not changed; the override is removed from the store."
   "Drop every stored override (live values stay as-is; store becomes empty)."
   (interactive)
   (when (yes-or-no-p "Remove ALL stored config overrides? ")
-    (setq config--overrides nil)
+    (config--clear-overrides)
     (config--persist)
     (when (get-buffer config-board-buffer-name)
       (with-current-buffer config-board-buffer-name
@@ -269,6 +269,7 @@ The live value is not changed; the override is removed from the store."
   (define-key map (kbd "o") #'config-open-file)
   (define-key map (kbd "f") #'config-filter-group)
   (define-key map (kbd "s") #'config-save)
+  (define-key map (kbd "!") #'config-check)
   (define-key map (kbd "g") #'config-board-refresh)
   (define-key map (kbd "q") #'quit-window))
 
@@ -284,6 +285,7 @@ The live value is not changed; the override is removed from the store."
     (kbd "o") #'config-open-file
     (kbd "f") #'config-filter-group
     (kbd "s") #'config-save
+    (kbd "!") #'config-check
     (kbd "g") #'config-board-refresh
     (kbd "q") #'quit-window))
 
@@ -297,6 +299,7 @@ The live value is not changed; the override is removed from the store."
    ["Store"
     ("s" "save store" config-save)
     ("R" "refresh stores" config-refresh-store-files)
+    ("!" "check integrity" config-check)
     ("o" "open store file" config-open-store)
     ("D" "clear all overrides" config-reset-all)]])
 

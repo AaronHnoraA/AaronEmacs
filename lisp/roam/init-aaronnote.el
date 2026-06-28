@@ -113,6 +113,9 @@ Set to 0 to let the OS pick a random port."
 (defvar my/aaronnote--client-buffers (make-hash-table :test #'equal)
   "Aaronnote browser client id to browser buffer map.")
 
+(defvar my/aaronnote--build-process nil
+  "Current Aaronnote web build process, or nil.")
+
 (defvar my/aaronnote--readonly-split-counter 0
   "Counter for fresh read-only Aaronnote xwidget split sessions.")
 
@@ -863,10 +866,15 @@ reusing a remembered one."
 
 (defun my/aaronnote--send-command (command &optional detail)
   "Dispatch Aaronnote COMMAND with optional DETAIL."
-  (my/aaronnote--post
-   `((type . "command")
-     (command . ,command)
-     ,@(when detail `((detail . ,detail))))))
+  (let ((client (and (boundp 'my/aaronnote--client-id)
+                     (stringp my/aaronnote--client-id)
+                     (not (string-empty-p my/aaronnote--client-id))
+                     my/aaronnote--client-id)))
+    (my/aaronnote--post
+     `((type . "command")
+       (command . ,command)
+       ,@(when client `((client . ,client)))
+       ,@(when detail `((detail . ,detail)))))))
 
 (defun my/aaronnote--goto-location (file line col)
   "Open FILE in Emacs and move to one-based LINE and zero-based COL.
@@ -978,13 +986,8 @@ client and keeps it out of the normal file/session sync maps."
                            (format "*aaronnote readonly: %s*"
                                    (file-name-nondirectory file)))
                (setq-local my/xwidget-focus-script nil)
-               (setq-local header-line-format
-                           '(:eval
-                             (format "  %s  %s"
-                                     (propertize "Aaronnote readonly" 'face 'mode-line-buffer-id)
-                                     (or (and (my/aaronnote-buffer-file)
-                                              (file-name-nondirectory (my/aaronnote-buffer-file)))
-                                         ""))))
+               (when (fboundp 'my/xwidget-setup-control-line)
+                 (my/xwidget-setup-control-line))
                (when (eq major-mode 'xwidget-webkit-mode)
                  (rename-buffer my/aaronnote--xwidget-forced-name t))
                (when file
@@ -1009,9 +1012,17 @@ Cursor-level sync is intentionally no longer a per-keystroke preview channel."
 
 ;;;###autoload
 (defun my/aaronnote-refresh ()
-  "Reopen the current Markdown note in Aaronnote."
+  "Refresh the current Aaronnote note while preserving page cursor state."
   (interactive)
-  (my/aaronnote-open-current-note))
+  (if (and my/aaronnote--ready
+           (or (and (boundp 'my/aaronnote--client-id)
+                    (stringp my/aaronnote--client-id)
+                    (not (string-empty-p my/aaronnote--client-id)))
+               (buffer-live-p my/aaronnote--app-buffer)))
+      (progn
+        (my/aaronnote-command "refresh")
+        (my/aaronnote-focus))
+    (my/aaronnote-open-current-note)))
 
 ;;;###autoload
 (defun my/aaronnote-command (command &optional detail)
@@ -1181,6 +1192,70 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
     (my/appine--tab-reset))
   (message "Aaronnote web-host stopped."))
 
+(defun my/aaronnote--kill-browser-buffers ()
+  "Kill Emacs buffers that host Aaronnote browser pages."
+  (mapc
+   (lambda (buffer)
+     (when (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (when (or my/aaronnote-buffer-file-name
+                   my/aaronnote--client-id
+                   (and (derived-mode-p 'xwidget-webkit-mode)
+                        (string-prefix-p "*aaronnote" (buffer-name buffer))))
+           (kill-buffer buffer)))))
+   (buffer-list))
+  (setq my/aaronnote--app-buffer nil)
+  (clrhash my/aaronnote--file-buffers)
+  (clrhash my/aaronnote--client-buffers))
+
+;;;###autoload
+(defun my/aaronnote-close ()
+  "Completely close Aaronnote browser surfaces and stop the web-host."
+  (interactive)
+  (when (fboundp 'my/appine-kill-all)
+    (ignore-errors (my/appine-kill-all)))
+  (my/aaronnote--kill-browser-buffers)
+  (my/aaronnote-stop))
+
+;;;###autoload
+(defun my/aaronnote-build-and-reopen ()
+  "Build Aaronnote web assets, restart the runtime, and reopen the current note."
+  (interactive)
+  (when (and my/aaronnote--build-process
+             (process-live-p my/aaronnote--build-process))
+    (user-error "Aaronnote build is already running"))
+  (let* ((file (my/aaronnote--current-note-file))
+         (buffer (get-buffer-create "*aaronnote-build*"))
+         (default-directory user-emacs-directory))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)))
+    (message "Aaronnote: building web assets...")
+    (setq my/aaronnote--build-process
+          (make-process
+           :name "aaronnote-build"
+           :buffer buffer
+           :command '("make" "aaronnote-build")
+           :noquery t
+           :sentinel
+           (lambda (proc _event)
+             (when (memq (process-status proc) '(exit signal))
+               (let ((ok (= (process-exit-status proc) 0)))
+                 (setq my/aaronnote--build-process nil)
+                 (if ok
+                     (progn
+                       (my/aaronnote-close)
+                       (message "Aaronnote: build finished; reopening...")
+                       (if (and file (my/aaronnote--markdown-file-p file))
+                           (my/aaronnote-open-file file)
+                         (my/aaronnote--ensure-server
+                          (lambda ()
+                            (my/aaronnote--open-url
+                             (my/aaronnote--app-url nil "aaronnote") nil t)))))
+                   (display-buffer buffer)
+                   (message "Aaronnote: build failed; see %s" (buffer-name buffer))))))))
+    (display-buffer buffer)))
+
 (add-hook 'kill-emacs-hook #'my/aaronnote-stop)
 
 ;;; API call — POST to /api and parse JSON response.
@@ -1308,6 +1383,32 @@ Blocks the caller until the response arrives (or 8 s timeout)."
                   (t " ● ready"))))
     (concat "  " (propertize name 'face 'mode-line-buffer-id) status)))
 
+;;;###autoload
+(defun my/aaronnote-pop ()
+  "Open the Aaronnote command pop."
+  (interactive)
+  (require 'transient)
+  (call-interactively #'my/aaronnote-dispatch))
+
+(defun my/aaronnote--xwidget-menu-section ()
+  "Return Aaronnote actions for the xwidget top-bar popup."
+  (when (or my/aaronnote-buffer-file-name
+            my/aaronnote--client-id)
+    (list
+     "---"
+     ["Aaronnote: Refresh current pane" my/aaronnote-refresh t]
+     ["Aaronnote: Open read-only split" my/aaronnote-open-current-note-readonly-split t]
+     ["Aaronnote: Focus editor" my/aaronnote-focus t]
+     ["Aaronnote: Pop" my/aaronnote-pop t]
+     (list
+      "Aaronnote lifecycle"
+      ["Build + reopen" my/aaronnote-build-and-reopen t]
+      ["Close all Aaronnote" my/aaronnote-close t]))))
+
+(with-eval-after-load 'init-browser
+  (add-to-list 'my/xwidget-window-menu-extra-sections
+               #'my/aaronnote--xwidget-menu-section))
+
 ;;; Web-editor command wrappers.
 ;; These generate named interactive commands for every web-host editor command
 ;; so each entry in the dispatch hub is `commandp', appears in M-x, and can
@@ -1409,6 +1510,8 @@ Falls back to JupyterLab root when no matching .ipynb exists."
       ("e" "escape/normal"    my/aaronnote-escape)
       ("v" "toggle source"    my/aaronnote-toggle-source)
       ("W" "readonly split"   my/aaronnote-open-current-note-readonly-split)
+      ("B" "build + reopen"   my/aaronnote-build-and-reopen)
+      ("Q" "close all"        my/aaronnote-close)
       ("R" "raw edit in Emacs" my/aaronnote-open-markdown-raw)]
      ["Find / Browse"
       ("j" "find note"        my/aaronnote-roam-find-note)
@@ -1497,6 +1600,8 @@ Falls back to JupyterLab root when no matching .ipynb exists."
     (define-key appine-active-map (kbd "M-S-z") #'my/aaronnote-redo)
     (define-key appine-active-map (kbd "H-s") #'my/aaronnote-save)
     (define-key appine-active-map (kbd "H-r") #'my/aaronnote-refresh)
+    (define-key appine-active-map (kbd "H-B") #'my/aaronnote-build-and-reopen)
+    (define-key appine-active-map (kbd "H-q") #'my/aaronnote-close)
     (define-key appine-active-map (kbd "H-y") #'my/aaronnote-roam-sync)
     (define-key appine-active-map (kbd "H-g") #'my/aaronnote-roam-graph)))
 

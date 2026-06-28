@@ -48,7 +48,14 @@
   "Alist of persisted overrides loaded from / written to the store.
 
 Each element is (KEY . VALUE) where KEY is either an item NAME symbol
-\(a variable item) or a list (:hook HOOK FN) (a hook-membership toggle).")
+\(a variable item) or a list (:hook HOOK FN) (a hook-membership toggle).
+Ordering is significant (it determines serialization order), so this stays
+an alist; `config--override-index' provides O(1) lookup over the same cells.")
+
+(defvar config--override-index (make-hash-table :test 'equal)
+  "Hash table mapping an override KEY to its cons cell in `config--overrides'.
+Kept in lockstep with `config--overrides' so reads and updates are O(1)
+instead of a linear `assoc' scan over a growing alist at startup.")
 
 (defvar config--unknown-warned (make-hash-table :test 'eq)
   "Names already warned about in `config-get', to avoid repeat warnings.")
@@ -259,11 +266,20 @@ immediately applies any pre-loaded store override."
       (config--load-store-file store-file))
     (config--learn-entry-store-file name entry)
     ;; Apply any pre-loaded store override immediately so modules get their
-    ;; configured values as soon as they register, without waiting for
+    ;; configured value as soon as they register, without waiting for
     ;; `after-init-hook'.
-    (when-let* ((cell (assoc name config--overrides #'equal)))
+    (when-let* ((cell (gethash name config--override-index)))
       (condition-case nil
-          (config-set name (cdr cell) 'no-persist 'quiet)
+          (if after-init-time
+              ;; Registered by a module loaded lazily after startup:
+              ;; `config-apply-store' will not run again, so apply the value
+              ;; AND fire `:on-change' now.
+              (config-set name (cdr cell) 'no-persist 'quiet)
+            ;; During startup write only the value; the `:on-change' callback
+            ;; is deferred to the single `config-apply-store' pass so a callback
+            ;; shared by many keys (e.g. `my/font-reset-all') runs once per
+            ;; startup instead of once per registration.
+            (config--set-value entry name (cdr cell)))
         (error nil)))
     name))
 
@@ -351,17 +367,30 @@ An unknown NAME warns once and returns nil."
 ;;; Writing ------------------------------------------------------------------
 
 (defun config--record-override (key value)
-  "Record KEY=VALUE in `config--overrides' and persist the store."
+  "Record KEY=VALUE in `config--overrides' and persist its owning store."
   (config--put-override key value)
-  (puthash key (config--store-file-for-key key) config--override-store-files)
-  (config--persist))
+  (let ((file (config--store-file-for-key key)))
+    (puthash key file config--override-store-files)
+    (config--persist (list (expand-file-name file)))))
 
 (defun config--drop-override (key)
   "Remove KEY from `config--overrides' and persist the store."
-  (setq config--overrides
-        (assoc-delete-all key config--overrides #'equal))
-  (remhash key config--override-store-files)
-  (config--persist))
+  (let ((file (gethash key config--override-store-files)))
+    (setq config--overrides
+          (assoc-delete-all key config--overrides #'equal))
+    (remhash key config--override-index)
+    (remhash key config--override-store-files)
+    (config--persist (and file (list (expand-file-name file))))))
+
+(defun config--set-value (entry name value)
+  "Write VALUE for ENTRY named NAME without running `:on-change' or persisting.
+Applies the custom `:set', the backing variable, or the registry `:value'."
+  (cond
+   ((plist-get entry :set) (funcall (plist-get entry :set) name value))
+   (t (let ((var (config--backing-var entry name)))
+        (if var
+            (set var value)
+          (puthash name (plist-put entry :value value) config--registry))))))
 
 (defun config-set (name value &optional no-persist quiet)
   "Set configuration item NAME to VALUE, applying it live.
@@ -376,12 +405,7 @@ the store.  When QUIET, does not message."
     (let ((type (plist-get entry :type)))
       (unless (config--valid-type-p type value)
         (user-error "config-set: %S is not a valid %s for %s" value type name)))
-    (cond
-     ((plist-get entry :set) (funcall (plist-get entry :set) name value))
-     (t (let ((var (config--backing-var entry name)))
-          (if var
-              (set var value)
-            (puthash name (plist-put entry :value value) config--registry)))))
+    (config--set-value entry name value)
     (config--run-on-change entry name value)
     (unless no-persist
       (config--record-override name value))
@@ -477,6 +501,87 @@ Unless NO-PERSIST, records the toggle in the store."
                              (mapcar #'symbol-name (nreverse names))
                              nil t))))
 
+;;; Integrity ----------------------------------------------------------------
+
+(defun config--index-drift-p ()
+  "Return non-nil when `config--override-index' is out of sync with the alist."
+  (or (/= (hash-table-count config--override-index) (length config--overrides))
+      (catch 'drift
+        (dolist (cell config--overrides)
+          (unless (eq cell (gethash (car cell) config--override-index))
+            (throw 'drift t)))
+        nil)))
+
+(defun config--integrity-issues ()
+  "Return a list of human-readable integrity problems, empty when healthy.
+Checks the override index/alist lockstep, that every override resolves to a
+store file, and that every configured store file still parses."
+  (let (issues)
+    ;; Index <-> alist lockstep.
+    (when (/= (hash-table-count config--override-index) (length config--overrides))
+      (push (format "override index size %d != alist length %d"
+                    (hash-table-count config--override-index)
+                    (length config--overrides))
+            issues))
+    (dolist (cell config--overrides)
+      (unless (eq cell (gethash (car cell) config--override-index))
+        (push (format "index cell for %S is stale or missing" (car cell)) issues)))
+    (maphash
+     (lambda (key _cell)
+       (unless (assoc key config--overrides #'equal)
+         (push (format "index key %S has no alist entry" key) issues)))
+     config--override-index)
+    ;; Every override must resolve to a store file.
+    (dolist (cell config--overrides)
+      (unless (config--store-file-for-key (car cell))
+        (push (format "override %S resolves to no store file" (car cell)) issues)))
+    ;; Every configured store file must still parse.
+    (dolist (file (config--configured-store-files))
+      (when (file-readable-p file)
+        (condition-case err
+            (with-temp-buffer
+              (insert-file-contents file)
+              (goto-char (point-min))
+              (let ((done nil))
+                (while (not done)
+                  (condition-case nil
+                      (read (current-buffer))
+                    (end-of-file (setq done t))))))
+          (error
+           (push (format "store file %s fails to parse: %s"
+                         (abbreviate-file-name file) (error-message-string err))
+                 issues)))))
+    (nreverse issues)))
+
+(defun config-check ()
+  "Verify the config registry's invariants, repairing index drift in place.
+Reports remaining problems in a `*Config Check*' buffer, or confirms health."
+  (interactive)
+  (let ((repaired (when (config--index-drift-p)
+                    (config--reindex)
+                    (not (config--index-drift-p)))))
+    (let ((issues (config--integrity-issues)))
+      (cond
+       (issues
+        (with-current-buffer (get-buffer-create "*Config Check*")
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (when repaired
+              (insert "Repaired override index drift.\n\n"))
+            (insert (format "config-check found %d issue(s):\n\n" (length issues)))
+            (dolist (issue issues) (insert "  - " issue "\n")))
+          (goto-char (point-min))
+          (special-mode)
+          (display-buffer (current-buffer)))
+        (message "config-check: %d issue(s)%s"
+                 (length issues) (if repaired " (index repaired)" "")))
+       (repaired
+        (message "config-check: repaired index drift; %d items, %d overrides OK"
+                 (hash-table-count config--registry) (length config--overrides)))
+       (t
+        (message "config-check: OK (%d items, %d overrides)"
+                 (hash-table-count config--registry) (length config--overrides)))))))
+
 ;;; Persistence --------------------------------------------------------------
 
 (defun config-store-set (overrides)
@@ -486,10 +591,26 @@ Later-loaded stores win when the same key appears in more than one file."
 
 (defun config--put-override (key value)
   "Set KEY to VALUE in `config--overrides', preserving insertion order."
-  (if-let* ((cell (assoc key config--overrides #'equal)))
+  (if-let* ((cell (gethash key config--override-index)))
       (setcdr cell value)
-    (setq config--overrides
-          (nconc config--overrides (list (cons key value))))))
+    (let ((cell (cons key value)))
+      (setq config--overrides (nconc config--overrides (list cell)))
+      (puthash key cell config--override-index))))
+
+(defun config--reindex ()
+  "Rebuild `config--override-index' from `config--overrides'.
+Restores the lockstep invariant if the alist and index ever drift apart."
+  (clrhash config--override-index)
+  (dolist (cell config--overrides)
+    (puthash (car cell) cell config--override-index)))
+
+(defun config--clear-overrides ()
+  "Reset all in-memory override state in lockstep.
+Clears the ordered alist, its O(1) index, and the key->store-file map together
+so no caller can leave a stale index referencing detached cons cells."
+  (setq config--overrides nil)
+  (clrhash config--override-index)
+  (clrhash config--override-store-files))
 
 (defun config--merge-store-overrides (overrides &optional file)
   "Merge OVERRIDES into memory, recording FILE as their owner."
@@ -619,14 +740,27 @@ Later-loaded stores win when the same key appears in more than one file."
     (unless (equal content (config--file-string file))
       (config--write-string-atomically file content))))
 
-(defun config--persist ()
-  "Write `config--overrides' to their owning store files."
+(defun config--persist (&optional files)
+  "Write `config--overrides' to their owning store files.
+With FILES (a list of expanded store-file paths), only those files are
+re-rendered and written; otherwise every known store file is persisted.
+Restricting to the changed file keeps a single board edit from re-rendering
+and re-reading all ~10 store files."
   (condition-case err
-      (let ((buckets (make-hash-table :test 'equal)))
+      (let ((buckets (make-hash-table :test 'equal))
+            (targets (if files (delete-dups (copy-sequence files))
+                       (config--store-files))))
+        ;; Only bucket overrides destined for a target file.  Prefer the
+        ;; authoritative key->file map (filled at load/record time) over
+        ;; `config--store-file-for-key', which re-runs group inference; this
+        ;; keeps a single `config-set' from doing that work for every key.
         (dolist (cell config--overrides)
-          (let ((file (expand-file-name (config--store-file-for-key (car cell)))))
-            (push cell (gethash file buckets))))
-        (dolist (file (config--store-files))
+          (let ((file (expand-file-name
+                       (or (gethash (car cell) config--override-store-files)
+                           (config--store-file-for-key (car cell))))))
+            (when (or (null files) (member file targets))
+              (push cell (gethash file buckets)))))
+        (dolist (file targets)
           (config--write-store-file file (nreverse (gethash file buckets)))))
     (error
      (display-warning
@@ -650,26 +784,49 @@ Later-loaded stores win when the same key appears in more than one file."
 
 (defun config-apply-store ()
   "Load config store files and apply every override live.
-Each override is applied independently so one failure cannot abort the rest."
+Each override is applied independently so one failure cannot abort the rest.
+Value writes happen first; then each `:on-change' callback runs once: a
+zero-argument callback shared by several keys (e.g. `my/font-reset-all') is
+invoked a single time, while callbacks taking arguments run per entry."
   (config--load-configured-store-files)
-  (dolist (cell config--overrides)
-    (condition-case err
-        (let ((key (car cell)) (val (cdr cell)))
-          (cond
-           ((and (consp key) (eq (car key) :hook))
-            (config--hook-apply (nth 1 key) (nth 2 key) val))
-           ((symbolp key)
-            (when (config--entry key)
-              (config-set key val 'no-persist 'quiet)))))
-      (error
-       (display-warning
-        'config (format "Failed to apply override %S: %s"
-                        (car cell) (error-message-string err))
-        :error)))))
+  (let ((shared nil))
+    (dolist (cell config--overrides)
+      (condition-case err
+          (let ((key (car cell)) (val (cdr cell)))
+            (cond
+             ((and (consp key) (eq (car key) :hook))
+              (config--hook-apply (nth 1 key) (nth 2 key) val))
+             ((symbolp key)
+              (when-let* ((entry (config--entry key)))
+                (config--set-value entry key val)
+                (when-let* ((fn (plist-get entry :on-change)))
+                  (when (functionp fn)
+                    (if (zerop (cdr (func-arity fn)))
+                        (cl-pushnew fn shared :test #'eq)
+                      (config--run-on-change entry key val))))))))
+        (error
+         (display-warning
+          'config (format "Failed to apply override %S: %s"
+                          (car cell) (error-message-string err))
+          :error))))
+    ;; Run shared zero-argument callbacks exactly once, after all values set.
+    (dolist (fn (nreverse shared))
+      (condition-case err
+          (funcall fn)
+        (error
+         (display-warning
+          'config (format "on-change %S failed: %s" fn (error-message-string err))
+          :error))))))
 
 (defun config-refresh-store-files ()
-  "Rediscover configured store files and apply their overrides."
+  "Reload every store file from disk and re-apply, mirroring on-disk state.
+Discards in-memory overrides first, then rediscovers and re-reads the stores,
+so edits, newly added keys and removals are all reflected.  Persisted values
+are safe because `config-set' always writes through to disk; nothing lives
+only in memory."
   (interactive)
+  (config--clear-overrides)
+  (clrhash config--loaded-store-files)
   (setq config--configured-store-files-cache nil)
   (config-apply-store)
   (message "config: refreshed store files"))

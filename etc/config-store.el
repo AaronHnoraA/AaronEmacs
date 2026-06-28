@@ -58,7 +58,7 @@
    (my/native-comp-enable-jit . t)
    (my/package-enable-native-compile . t)
    (my/compile-third-party-directories "site-lisp")
-   (my/compile-target-directories "lisp")
+   (my/compile-target-directories "lisp" "site-lisp/config")
    (my/compile-target-files "early-init.el" "init.el" "bootstrap.el")
    (my/aaronnote-roam-runtime-cli
     . "/Users/hc/.emacs.d/lisp/roam/aaronnote/roam-cli.mjs")

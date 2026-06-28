@@ -1138,6 +1138,7 @@ const server = createServer(async (req, res) => {
       const body = await readJson(req, 1024 * 1024);
       if (body.type === "command" || body.command) {
         const detail = { ...(body.detail && typeof body.detail === "object" ? body.detail : {}), command: String(body.command || "") };
+        if (body.client) detail.client = String(body.client);
         broadcast("command", detail);
         sendJson(res, 200, { ok: true });
         return;

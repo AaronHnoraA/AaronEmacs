@@ -183,7 +183,9 @@ leader 入口：
 - async warning 策略走 `silent`
 - `custom.el` 不纳入统一编译目标
 - 不自动做 byte compile
+- 编译目标目录为 `lisp/` 与 `site-lisp/config/`（config 注册表是每次启动都要加载的基础设施，纳入 `my/byte-compile-config` / `my/native-compile-config`）
 - 启动时会删除本配置自有的 `lisp/` 和 `site-lisp/` 下 `.elc`，避免坏字节码或较新的错误 `.elc` 压过源码；`elpa/` 包字节码不受影响
+- 因为 `.elc` 每次启动都会被删，config 的启动加速来自 **native compile** 的 `.eln`（持久缓存在 `var/eln-cache/`，加载源码时自动采用）；byte compile 仅用于诊断 warning
 - 可选自动 native compile on save，由 board / dispatch 统一开关
 
 编译策略：

@@ -3568,11 +3568,28 @@ Each row is a list of strings or (LABEL . TONE) cells."
             (string-width (if (consp cell) (car cell) cell)))
           row)))
 
+(defun my/aaronnote-roam--pixel-width-to-columns (pixels)
+  "Return the display-column width represented by PIXELS."
+  (ceiling (/ (float pixels) (max 1 (frame-char-width)))))
+
+(defun my/aaronnote-roam--region-align-width (start end fallback-width)
+  "Return rendered width from START to END for `:align-to'.
+Use FALLBACK-WIDTH when pixel measurement is unavailable."
+  (or (and (fboundp 'string-pixel-width)
+           (let ((pixel-width
+                  (string-pixel-width (buffer-substring start end)
+                                      (current-buffer))))
+             (and (> pixel-width 0)
+                  (my/aaronnote-roam--pixel-width-to-columns pixel-width))))
+      fallback-width))
+
 (defun my/aaronnote-roam--center-inserted-region (start end width)
   "Center text from START to END using display WIDTH."
-  (let ((prefix (propertize
-                 " "
-                 'display `(space . (:align-to (- center ,(/ (float width) 2)))))))
+  (let* ((align-width (my/aaronnote-roam--region-align-width start end width))
+         (prefix (propertize
+                  " "
+                  'display
+                  `(space . (:align-to (- center ,(/ (float align-width) 2)))))))
     (add-text-properties start end
                          `(line-prefix ,prefix indent-prefix ,prefix))))
 

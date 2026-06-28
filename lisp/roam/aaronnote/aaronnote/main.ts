@@ -253,6 +253,7 @@ let snippetPopupItems: SnippetSummary[] = [];
 let snippetPopupIndex = 0;
 let snippetDeleteBefore = 0;
 let snippetSuppressedPrefix = "";
+let snippetCompletionArmed = false;
 let snippetRenderKey = "";
 let snippetPopupMatchKey = "";
 let paused = false;
@@ -819,6 +820,24 @@ async function openFile(file?: string, bootstrap = false): Promise<void> {
   } catch (error) {
     applyingContent = false;
     setStatus(error instanceof Error ? error.message : "Open failed");
+  }
+}
+
+async function reloadCurrentFilePreservingCursor(): Promise<void> {
+  if (!currentFile) return;
+  const position = trackCursorPosition();
+  if (position) rememberCursorPosition(position);
+  if (!currentReadOnly && revision !== savedRevision) {
+    await save();
+    if (revision !== savedRevision) return;
+  }
+  setStatus("Refreshing...");
+  try {
+    const opened = await api.notes.open(currentFile);
+    applyOpenedNote(opened, currentFile, position ? [position, ...cursorPositions] : cursorPositions);
+    setStatus(currentReadOnly ? "Read-only refreshed" : "Refreshed");
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : "Refresh failed");
   }
 }
 
@@ -3462,6 +3481,7 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
     hideSnippetPopup();
     return;
   }
+  if (!snippetCompletionArmed && snippetPopup.hidden) return;
   const mode = snippetContextMode(ctx);
   const matches = matchingSnippets(prefix, mode);
   if (matches.length === 0) {
@@ -3852,6 +3872,7 @@ function insertHostKeyText(key: string, text?: string): boolean {
         : key.length === 1 ? key
           : "";
   if (!literal) return false;
+  snippetCompletionArmed = key !== "Enter" && key !== "Tab";
   editor.insertText(literal);
   return true;
 }
@@ -3976,6 +3997,10 @@ function runHostCommand(detail: unknown): boolean {
       if (rejectReadOnlyAction("Read-only pane")) return true;
       void save();
       return true;
+    case "refresh":
+    case "reload":
+      void reloadCurrentFilePreservingCursor();
+      return true;
     case "prose-check":
     case "spell-check":
       void runProseCheck();
@@ -4043,6 +4068,9 @@ roamToolsClose.addEventListener("click", closeRoamToolsPanel);
 sourceButton.addEventListener("click", toggleSourceMode);
 saveButton.addEventListener("click", () => void save());
 document.addEventListener("keydown", (event) => {
+  if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.length !== 1 && event.key !== "Tab") {
+    snippetCompletionArmed = false;
+  }
   if (runFindShortcut(event)) {
     event.stopPropagation();
     return;
@@ -4148,6 +4176,9 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 }, true);
+host.addEventListener("mouseup", () => {
+  if (snippetPopup.hidden) snippetCompletionArmed = false;
+});
 host.addEventListener("click", (event) => {
   const target = event.target instanceof Element
     ? event.target.closest(".cm-prose-diagnostic")
@@ -4196,6 +4227,9 @@ prosePopover.addEventListener("click", (event) => {
 });
 document.addEventListener("beforeinput", (event) => {
   const ie = event as InputEvent;
+  if (ie.inputType === "insertText" && ie.data && ie.data !== "\t") {
+    snippetCompletionArmed = true;
+  }
   // xwidget Tab: may arrive only as beforeinput(insertText, "\t") with no keydown.
   // Try snippet popup acceptance and snippet expansion before letting CM6 insert \t.
   if (ie.inputType === "insertText" && ie.data === "\t"
@@ -4310,7 +4344,12 @@ window.addEventListener("aaronnote:open-file", (event) => {
   void openFile(detail?.file);
 });
 window.addEventListener("aaronnote:command", (event) => {
-  runHostCommand((event as CustomEvent<unknown>).detail);
+  const detail = (event as CustomEvent<unknown>).detail;
+  const targetClient = detail && typeof detail === "object"
+    ? String((detail as { client?: unknown }).client || "")
+    : "";
+  if (targetClient && targetClient !== currentClient) return;
+  runHostCommand(detail);
 });
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {

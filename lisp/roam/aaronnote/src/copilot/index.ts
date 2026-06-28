@@ -163,11 +163,12 @@ function visibleText(visible: VisibleCompletion): string {
   return visible.insertText.slice(visible.acceptedLength);
 }
 
-function hasRealTextAfterCursorOnLine(after: string | undefined): boolean {
+function hasBlockingTextAfterCursorOnLine(after: string | undefined): boolean {
   if (!after) return false;
   const lineEnd = after.indexOf("\n");
   const activeLineTail = after.slice(0, lineEnd < 0 ? after.length : lineEnd);
-  return activeLineTail.trim().length > 0;
+  const trimmed = activeLineTail.trimStart();
+  return /^[\p{L}\p{N}_$]/u.test(trimmed);
 }
 
 function clampedOffset(markdown: string, offset: number): number {
@@ -377,7 +378,7 @@ export function setupCopilot(context: Context): () => void {
     if (!eligibleShell()) return false;
     const selection = activeSelection(context.editor);
     if (selection.from !== selection.to) return false;
-    return !hasRealTextAfterCursorOnLine(context.editor.cursorContext(512).after);
+    return !hasBlockingTextAfterCursorOnLine(context.editor.cursorContext(512).after);
   }
 
   function eligibleShell(): boolean {
@@ -432,7 +433,7 @@ export function setupCopilot(context: Context): () => void {
         }
         return;
       }
-      if (hasRealTextAfterCursorOnLine(context.editor.cursorContext(512).after)) {
+      if (hasBlockingTextAfterCursorOnLine(context.editor.cursorContext(512).after)) {
         clearCompletion();
         return;
       }

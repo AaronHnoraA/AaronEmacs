@@ -383,6 +383,127 @@ describe("copilot plugin insertion", () => {
     }
   });
 
+  test("allows inline suggestions before closing punctuation", async () => {
+    const host = document.createElement("div");
+    const target = document.createElement("button");
+    host.appendChild(target);
+    document.body.appendChild(host);
+
+    const editor = new FakeEditor("call()");
+    editor.selection = { from: "call(".length, to: "call(".length };
+    editor.cursorAfter = ")";
+    const handlers: {
+      action?: (action: string) => void;
+    } = {};
+    let inlineRequests = 0;
+
+    const restoreApi = installNativeCopilot(async (action) => {
+      if (action === "inline") {
+        inlineRequests += 1;
+        return {
+          items: [{
+            insertText: "value",
+            range: { from: editor.selection.to, to: editor.selection.to },
+            item: { insertText: "value" },
+          }],
+        };
+      }
+      return { ok: true };
+    });
+
+    const cleanup = setupCopilot({
+      editor,
+      host,
+      currentFile: () => "/tmp/punctuation.md",
+      vimMode: () => "insert",
+      setStatus: () => {},
+      onChange: () => () => {},
+      onKeyDown: () => () => {},
+      onAction: (handler: (action: string) => void) => {
+        handlers.action = handler;
+        return () => {
+          delete handlers.action;
+        };
+      },
+      onSettingsChange: () => () => {},
+      getSettings: () => ({ idleDelayMs: 999_999, largeBufferThresholdKb: 512 }),
+      onDocumentEvent: () => () => {},
+      jumpSnippetNext: () => false,
+      jumpSnippetPrevious: () => false,
+      forwardDelimiter: () => false,
+      backwardDelimiter: () => false,
+    });
+
+    try {
+      target.focus();
+      handlers.action?.("trigger");
+      await waitForMicrotasks();
+      await waitForMicrotasks();
+      expect(inlineRequests).toBe(1);
+      expect(document.querySelector(".aaronnote-copilot-ghost")?.textContent).toBe("value");
+    } finally {
+      cleanup();
+      restoreApi();
+      host.remove();
+    }
+  });
+
+  test("suppresses inline suggestions before word text", async () => {
+    const host = document.createElement("div");
+    const target = document.createElement("button");
+    host.appendChild(target);
+    document.body.appendChild(host);
+
+    const editor = new FakeEditor("call(value)");
+    editor.selection = { from: "call(".length, to: "call(".length };
+    editor.cursorAfter = "value)";
+    const handlers: {
+      action?: (action: string) => void;
+    } = {};
+    let inlineRequests = 0;
+
+    const restoreApi = installNativeCopilot(async (action) => {
+      if (action === "inline") inlineRequests += 1;
+      return { ok: true, items: [] };
+    });
+
+    const cleanup = setupCopilot({
+      editor,
+      host,
+      currentFile: () => "/tmp/word-tail.md",
+      vimMode: () => "insert",
+      setStatus: () => {},
+      onChange: () => () => {},
+      onKeyDown: () => () => {},
+      onAction: (handler: (action: string) => void) => {
+        handlers.action = handler;
+        return () => {
+          delete handlers.action;
+        };
+      },
+      onSettingsChange: () => () => {},
+      getSettings: () => ({ idleDelayMs: 999_999, largeBufferThresholdKb: 512 }),
+      onDocumentEvent: () => () => {},
+      jumpSnippetNext: () => false,
+      jumpSnippetPrevious: () => false,
+      forwardDelimiter: () => false,
+      backwardDelimiter: () => false,
+    });
+
+    try {
+      target.focus();
+      handlers.action?.("trigger");
+      await waitForMicrotasks();
+      await waitForMicrotasks();
+      expect(inlineRequests).toBe(0);
+      expect((document.querySelector(".aaronnote-copilot-ghost") as HTMLElement | null)?.hidden).toBe(true);
+    } finally {
+      cleanup();
+      restoreApi();
+      host.remove();
+    }
+  });
+
   test("large documents send only a cursor-local completion window", async () => {
     const host = document.createElement("div");
     const target = document.createElement("button");

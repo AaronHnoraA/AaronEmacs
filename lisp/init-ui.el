@@ -20,6 +20,9 @@
 (defvar my/file-icon-image-cache (make-hash-table :test #'equal)
   "Cached image descriptors for custom file icons.")
 
+(defvar my/dashboard-items-content-width 100
+  "Maximum display width for the centered dashboard item block.")
+
 (config-defvar my/aaronnote-icon-file nil
   "SVG icon used for Markdown files."
   :type 'file
@@ -27,7 +30,7 @@
 
 (declare-function all-the-icons-fileicon "all-the-icons" (icon-name &rest args))
 (declare-function dashboard-icon-for-file "dashboard-widgets" (file &rest args))
-(declare-function config-board "config-tools" ())
+(declare-function config-board "config" ())
 (declare-function my/aaronnote-roam-dashboard-insert-heatmap "init-md-roam" (&optional days))
 (declare-function my/aaronnote-roam-management "init-md-roam" ())
 (declare-function my/performance-watch "init-performance" ())
@@ -236,6 +239,93 @@ height in pixels."
     (when (fboundp 'my/aaronnote-roam-dashboard-insert-heatmap)
       (my/aaronnote-roam-dashboard-insert-heatmap))))
 
+(defun my/dashboard--item-block-width ()
+  "Return the content width used to center dashboard item sections."
+  (let* ((window-width (max 40 (window-body-width nil t)))
+         (margin 12))
+    (min my/dashboard-items-content-width
+         (max 40 (- window-width (* 2 margin))))))
+
+(defun my/dashboard--line-display-width (start end)
+  "Return display width of text between START and END."
+  (string-width (buffer-substring-no-properties start end)))
+
+(defun my/dashboard--pixel-width-to-columns (pixels)
+  "Return the display-column width represented by PIXELS."
+  (ceiling (/ (float pixels) (max 1 (frame-char-width)))))
+
+(defun my/dashboard--string-align-width (string)
+  "Return STRING width in units suitable for `space' `:align-to'."
+  (or (and (fboundp 'string-pixel-width)
+           (let ((pixel-width (string-pixel-width string (current-buffer))))
+             (and (> pixel-width 0)
+                  (my/dashboard--pixel-width-to-columns pixel-width))))
+      (string-width string)))
+
+(defun my/dashboard--center-line (start end width)
+  "Center line text from START to END using display WIDTH."
+  (let ((prefix (propertize
+                 " "
+                 'display
+                 `(space . (:align-to (- center ,(/ (float width) 2)))))))
+    (add-text-properties start end
+                         `(line-prefix ,prefix indent-prefix ,prefix))))
+
+(defun my/dashboard--line-align-width (start end)
+  "Return rendered width from START to END in `:align-to' columns."
+  (my/dashboard--string-align-width (buffer-substring start end)))
+
+(defun my/dashboard--center-line-exact (start end)
+  "Center line text from START to END using rendered width when possible."
+  (let* ((width (my/dashboard--line-align-width start end))
+         (prefix (propertize
+                  " "
+                  'display
+                  `(space . (:align-to (- center ,(/ (float width) 2)))))))
+    (add-text-properties start end
+                         `(line-prefix ,prefix indent-prefix ,prefix))))
+
+(defun my/dashboard--center-lines (start end)
+  "Center each non-empty line between START and END by its own display width."
+  (let ((inhibit-read-only t))
+    (save-excursion
+      (goto-char start)
+      (while (< (point) end)
+        (let* ((line-start (line-beginning-position))
+               (line-end (line-end-position))
+               (width (my/dashboard--line-display-width line-start line-end)))
+          (when (> width 0)
+            (my/dashboard--center-line-exact line-start line-end)))
+        (forward-line 1)))))
+
+(defun my/dashboard--center-item-region (start end)
+  "Center and constrain dashboard item lines between START and END."
+  (let ((width (my/dashboard--item-block-width))
+        (inhibit-read-only t))
+    (save-excursion
+      (goto-char start)
+      (while (< (point) end)
+        (let ((line-start (line-beginning-position))
+              (line-end (line-end-position)))
+          (if (looking-at-p "[ \t]")
+              (my/dashboard--center-line line-start line-end width)
+            (let ((line-width (my/dashboard--line-display-width line-start line-end)))
+              (when (> line-width 0)
+                (my/dashboard--center-line-exact line-start line-end)))))
+        (forward-line 1)))))
+
+(defun my/dashboard-insert-items-centered-a (orig-fn &rest args)
+  "Run ORIG-FN, then center the Dashboard item block as a fixed-width panel."
+  (let ((start (point)))
+    (prog1 (apply orig-fn args)
+      (my/dashboard--center-item-region start (point)))))
+
+(defun my/dashboard-center-inserted-lines-a (orig-fn &rest args)
+  "Run ORIG-FN, then center inserted lines one by one."
+  (let ((start (point)))
+    (prog1 (apply orig-fn args)
+      (my/dashboard--center-lines start (point)))))
+
 (defun my/dashboard-ignore-horizontal-wheel (_event)
   "Ignore horizontal wheel EVENT in dashboard buffers."
   (interactive "e"))
@@ -277,6 +367,12 @@ height in pixels."
   (advice-add 'dashboard-initialize :around #'my/dashboard-initialize-full-frame-a)
   (advice-remove 'dashboard-icon-for-file #'my/dashboard-icon-for-file-a)
   (advice-add 'dashboard-icon-for-file :around #'my/dashboard-icon-for-file-a)
+  (advice-remove 'dashboard-insert-items #'my/dashboard-insert-items-centered-a)
+  (advice-add 'dashboard-insert-items :around #'my/dashboard-insert-items-centered-a)
+  (advice-remove 'dashboard-insert-navigator #'my/dashboard-center-inserted-lines-a)
+  (advice-add 'dashboard-insert-navigator :around #'my/dashboard-center-inserted-lines-a)
+  (advice-remove 'dashboard-insert-init-info #'my/dashboard-center-inserted-lines-a)
+  (advice-add 'dashboard-insert-init-info :around #'my/dashboard-center-inserted-lines-a)
   (my/dashboard-bind-horizontal-wheel)
 
   :custom
@@ -406,7 +502,7 @@ height in pixels."
 
 (defun my/dashboard-apply-ui ()
   "Apply local UI styling to the dashboard."
-  (setq-local truncate-lines nil)
+  (setq-local truncate-lines t)
   (setq-local auto-hscroll-mode nil)
   (when (display-graphic-p)
     (let ((signature (list custom-enabled-themes

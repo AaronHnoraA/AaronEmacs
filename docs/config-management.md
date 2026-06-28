@@ -54,13 +54,23 @@ store 文件只解析受支持的 `(config-store-set '...)` 数据表单，不�
    和同目录下的 `etc/config-*.el` → `config--overrides` 填充完毕，同时记录
    每个 key 的来源文件
 2. 每个模块的 `(config-register ...)` 调用时，如果 store 里有该项的值，
-   **立即应用**（不再等 after-init-hook）；如果该项所在 group 的来源文件
-   无歧义，后续新 key 也会沿用这个来源
-3. `config-apply-store` 挂在 `after-init-hook` 做最后一遍补刀
-   （如 `:on-change` 回调在晚期才定义的情形）
+   **立即写入变量**（不再等 after-init-hook），保证模块加载期读到正确的值；
+   但此时**不跑 `:on-change` 回调**——回调统一推迟到第 3 步，避免被多个 key
+   共用的回调（如 20 个字体项共用 `my/font-reset-all`）在注册期反复触发
+3. `config-apply-store` 挂在 `after-init-hook` 做最后一遍：先写入所有值，
+   再跑 `:on-change`，且**每个回调每次启动只跑一次**——无参回调（如
+   `my/font-reset-all`）按函数去重只调用一次，带参回调仍按 (NAME VALUE)
+   逐项调用。这样一次启动只重建一次字体/face，而不是几十次
 
-如果运行时新增或删除了 `etc/config-*.el`，执行 `M-x config-refresh-store-files`
-重新发现 store 文件并应用配置。
+> 注意：注册期推迟 `:on-change` 只针对**启动窗口**（`after-init-time` 为 nil）。
+> 启动完成后才加载的模块（延迟 `use-package` 等）注册时，`config-apply-store`
+> 不会再跑，因此此时会立即应用值**并**触发 `:on-change`，保证延迟模块的回调不丢。
+
+如果运行时新增、删除或**直接编辑**了 `etc/config-*.el`，执行
+`M-x config-refresh-store-files`（dispatch 里 `R`）。它会**以磁盘为准全量重建**：
+先丢弃内存中的覆盖，再重新发现并读入所有 store 文件，因此磁盘上的修改、新增的 key
+以及删除的 key 都会被反映出来（运行时严格对齐磁盘）。所有通过 `config-set`/面板
+改过的值都已落盘，不会因重建而丢失。
 
 ## 日常用法
 
@@ -79,14 +89,21 @@ store 文件只解析受支持的 `(config-store-set '...)` 数据表单，不�
 | `o` | 打开文件项 |
 | `f` | 按组过滤（留空清除） |
 | `s` | 强制写入 store |
+| `!` | 自检完整性（`config-check`）：校验索引与 store，发现索引漂移就地修复 |
 | `g` | 刷新 |
 | `q` | 退出 |
 
 **Doc 列**：该项注册时的 `:doc` 说明或 `:choices` 列表，静态不变，方便
 修改时参考合法值格式。
 
-transient `config-dispatch`：打开面板、保存 store、重载 store、打开 store 文件、
-清空所有覆盖。
+transient `config-dispatch`：打开面板、保存 store、刷新 store（`R`，全量重建）、
+自检完整性（`!`，`config-check`）、打开 store 文件、清空所有覆盖（`D`）。
+
+`config-check`（面板 `!` / dispatch `!` / `M-x`）校验注册表的不变式：覆盖索引与
+有序 alist 是否一一对应、每个覆盖是否能解析到 store 文件、各 store 文件是否还能
+正确解析。只发现索引漂移时会就地 `config--reindex` 自愈，其余问题列在
+`*Config Check*` 缓冲区。`config-store-set` / 覆盖写入只走 `config--clear-overrides`
+等集中入口维护索引，确保「清空全部覆盖」等操作不会留下悬挂的 cons。
 
 ### Lisp API
 

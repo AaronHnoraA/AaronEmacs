@@ -579,6 +579,9 @@ AREA is `mode-line' by default; pass `header-line' for header buttons."
   "Return an easy-menu item for LABEL and COMMAND."
   (vector label command (fboundp command)))
 
+(defvar my/xwidget-window-menu-extra-sections nil
+  "Functions returning extra top-level items for `my/xwidget-window-menu'.")
+
 (defun my/xwidget-window-menu (event)
   "Show the xwidget window-management popup menu for EVENT."
   (interactive "e")
@@ -586,7 +589,8 @@ AREA is `mode-line' by default; pass `header-line' for header buttons."
   (popup-menu
    (easy-menu-create-menu
     "Xwidget"
-    (list
+    (append
+     (list
      (list
       "Page"
       (my/xwidget--window-menu-item "Open URL here" #'my/xwidget-open-url-current)
@@ -612,7 +616,13 @@ AREA is `mode-line' by default; pass `header-line' for header buttons."
        #'my/xwidget-split-window-below-ibuffer)
       (my/xwidget--window-menu-item
        "Split right -> ibuffer"
-       #'my/xwidget-split-window-right-ibuffer))))
+       #'my/xwidget-split-window-right-ibuffer)))
+     (apply #'append
+            (delq nil
+                  (mapcar (lambda (fn)
+                            (when (functionp fn)
+                              (funcall fn)))
+                          my/xwidget-window-menu-extra-sections)))))
    event))
 
 (defun my/xwidget--header-browser-buttons ()
