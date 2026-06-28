@@ -30,7 +30,7 @@
 
 (declare-function all-the-icons-fileicon "all-the-icons" (icon-name &rest args))
 (declare-function dashboard-icon-for-file "dashboard-widgets" (file &rest args))
-(declare-function config-board "config" ())
+(declare-function config-board "config-tools" ())
 (declare-function my/aaronnote-roam-dashboard-insert-heatmap "init-md-roam" (&optional days))
 (declare-function my/aaronnote-roam-management "init-md-roam" ())
 (declare-function my/performance-watch "init-performance" ())
@@ -345,7 +345,7 @@ height in pixels."
   :init
   (setq dashboard-navigator-buttons
         `(((,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-gear") "⚙")
-            "config-board" "Open local config board"
+            "config" "Open local config board"
             ,#'my/dashboard-open-config-board)
            (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-repo") "R")
             "roam" "Open Roam management"
