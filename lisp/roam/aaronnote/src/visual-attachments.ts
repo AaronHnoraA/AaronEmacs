@@ -86,10 +86,40 @@ function aaronnoteMediaUrlP(src: string): boolean {
   }
 }
 
+function aaronnoteAssetProxyUrlP(url: URL): boolean {
+  return /(?:^|\/)aaronnote-asset$/.test(url.pathname) && Boolean(url.searchParams.get("url"));
+}
+
+function aaronnoteMediaSource(src: string): { mediaUrl: string; proxyUrl: string } | null {
+  const raw = String(src || "").trim();
+  if (!raw) return null;
+  if (aaronnoteMediaUrlP(raw)) return { mediaUrl: raw, proxyUrl: "" };
+
+  try {
+    const url = new URL(raw, "https://aaronnote.local");
+    if (!aaronnoteAssetProxyUrlP(url)) return null;
+    const proxied = url.searchParams.get("url") || "";
+    if (!aaronnoteMediaUrlP(proxied)) return null;
+    return { mediaUrl: proxied, proxyUrl: raw };
+  } catch {
+    return null;
+  }
+}
+
 function visualAttachmentLocalFrameSrc(kind: VisualAttachmentKind, resolvedSrc: string): string {
   const url = new URL(`aaronnote-asset://visual-frame/${kind}`);
   url.searchParams.set("src", resolvedSrc);
   return url.toString();
+}
+
+function proxiedAaronnoteAssetUrl(proxyUrl: string, assetUrl: string): string {
+  const absolute = /^[A-Za-z][A-Za-z0-9+.-]*:/.test(proxyUrl);
+  const url = new URL(proxyUrl, "https://aaronnote.local");
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("url", assetUrl);
+  if (absolute) return url.toString();
+  return `${url.pathname}${url.search}`;
 }
 
 function frameBaseStyle(): string {
@@ -173,8 +203,14 @@ function drawioSrcdoc(src: string): string {
 
 export function visualAttachmentFrame(kind: VisualAttachmentKind, resolvedSrc: string): VisualAttachmentFrame {
   if (kind === "html") return { kind, mode: "src", src: resolvedSrc };
-  if (aaronnoteMediaUrlP(resolvedSrc)) {
-    return { kind, mode: "src", src: visualAttachmentLocalFrameSrc(kind, resolvedSrc) };
+  const media = aaronnoteMediaSource(resolvedSrc);
+  if (media) {
+    const frameSrc = visualAttachmentLocalFrameSrc(kind, media.mediaUrl);
+    return {
+      kind,
+      mode: "src",
+      src: media.proxyUrl ? proxiedAaronnoteAssetUrl(media.proxyUrl, frameSrc) : frameSrc,
+    };
   }
   return { kind, mode: "srcdoc", srcdoc: drawioSrcdoc(resolvedSrc) };
 }

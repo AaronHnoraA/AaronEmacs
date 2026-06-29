@@ -275,6 +275,22 @@ $$`);
     expect(html).not.toContain("<img");
   });
 
+  test("routes proxied Aaronnote draw.io assets through the local visual frame", () => {
+    const mediaUrl = "aaronnote-asset://media?file=./attachments/demo.drawio&base=/notes/demo.md";
+    const proxied = `http://127.0.0.1:50815/aaronnote-asset?url=${encodeURIComponent(mediaUrl)}`;
+    const html = renderMarkdownHTML("![diagram](./attachments/demo.drawio)", {
+      assetResolver: () => proxied,
+    });
+
+    expect(html).toContain("aaronnote-visual-attachment-drawio");
+    expect(html).toContain("aaronnote-visual-embed-drawio");
+    expect(html).toContain('src="http://127.0.0.1:50815/aaronnote-asset?url=');
+    expect(html).toContain(encodeURIComponent("aaronnote-asset://visual-frame/drawio"));
+    expect(html).toContain(encodeURIComponent(encodeURIComponent(mediaUrl)));
+    expect(html).not.toContain('srcdoc="');
+    expect(html).not.toContain("Loading draw.io diagram");
+  });
+
   test("renders html image syntax as an isolated visual attachment iframe", () => {
     const html = renderMarkdownHTML("![panel](./attachments/demo.html){size:640; align:left}");
 
