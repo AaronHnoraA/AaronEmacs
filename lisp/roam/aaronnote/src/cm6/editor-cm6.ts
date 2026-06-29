@@ -93,7 +93,7 @@ function sourceRangeElement(target: EventTarget | null): HTMLElement | null {
 
 function mathBlockSourceAnchor(docText: string, from: number, to: number): number {
   const raw = docText.slice(from, to);
-  const open = raw.indexOf("$$");
+  const open = raw.indexOf("\\[");
   if (open < 0) return Math.min(to - 1, from + 1);
   const firstNewline = raw.indexOf("\n", open + 2);
   if (firstNewline < 0) return Math.min(to - 1, from + 2);
@@ -106,8 +106,11 @@ function sourceAnchorForClick(source: HTMLElement, event: MouseEvent, from: numb
     return Math.max(from, Math.min(to, explicit));
   }
   const rect = source.getBoundingClientRect();
-  const innerFrom = Math.min(to - 1, from + 1);
-  const innerTo = Math.max(innerFrom, to - 1);
+  // Inline math is delimited by the two-character `\(` … `\)`; other inline
+  // widgets use a single leading/trailing source character.
+  const delimiter = source.classList.contains("cm-math-inline") ? 2 : 1;
+  const innerFrom = Math.min(to - delimiter, from + delimiter);
+  const innerTo = Math.max(innerFrom, to - delimiter);
   if (rect.width <= 0 || innerTo <= innerFrom) return innerFrom;
   const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
   return Math.round(innerFrom + ratio * (innerTo - innerFrom));

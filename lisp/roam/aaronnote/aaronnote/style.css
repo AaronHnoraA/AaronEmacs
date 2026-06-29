@@ -709,6 +709,114 @@ button:disabled {
   width: min(680px, calc(100vw - 32px));
 }
 
+.aaronnote-latex-export-panel {
+  width: min(680px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  grid-template-rows: auto auto auto minmax(120px, 1fr) auto;
+}
+
+.aaronnote-latex-export-help {
+  margin: -4px 0 0;
+  color: var(--aaron-muted);
+  font: 12px/1.45 var(--aaron-font-sans);
+}
+
+.aaronnote-latex-export-search {
+  width: 100%;
+}
+
+.aaronnote-latex-export-scopes {
+  min-height: 120px;
+  max-height: min(480px, calc(100vh - 260px));
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  padding: 4px;
+  background: var(--aaron-paper-soft);
+}
+
+.aaronnote-latex-export-scope {
+  width: 100%;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 6px 9px 6px calc(9px + var(--latex-scope-depth, 0) * 16px);
+  background: transparent;
+  color: var(--aaron-ink);
+  text-align: left;
+}
+
+.aaronnote-latex-export-scope:hover {
+  border-color: var(--aaron-paper-line);
+  background: var(--aaron-paper);
+}
+
+.aaronnote-latex-export-scope[aria-checked="true"] {
+  border-color: var(--aaron-red);
+  background: color-mix(in srgb, var(--aaron-red), transparent 92%);
+}
+
+.aaronnote-latex-export-scope:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--aaron-red), transparent 45%);
+  outline-offset: -2px;
+}
+
+.aaronnote-latex-export-radio {
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--aaron-muted);
+  border-radius: 50%;
+}
+
+.aaronnote-latex-export-scope[aria-checked="true"] .aaronnote-latex-export-radio {
+  border: 4px solid var(--aaron-red-dark);
+}
+
+.aaronnote-latex-export-scope-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.aaronnote-latex-export-scope-name {
+  overflow: hidden;
+  color: var(--aaron-ink);
+  font: 650 13px/1.25 var(--aaron-font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aaronnote-latex-export-scope-detail {
+  color: var(--aaron-muted);
+  font: 11px/1.25 var(--aaron-font-sans);
+}
+
+.aaronnote-latex-export-current {
+  display: inline-block;
+  margin-left: 7px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 999px;
+  padding: 1px 5px;
+  color: var(--aaron-red-dark);
+  font: 700 9px/1.2 var(--aaron-font-sans);
+  vertical-align: 1px;
+}
+
+.aaronnote-latex-export-empty {
+  padding: 24px 12px;
+  color: var(--aaron-muted);
+  font: 12px/1.4 var(--aaron-font-sans);
+  text-align: center;
+}
+
 .aaronnote-modal-panel h2 {
   margin: 0 0 4px;
   color: var(--aaron-red-dark);

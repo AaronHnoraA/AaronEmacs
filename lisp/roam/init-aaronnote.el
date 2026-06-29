@@ -78,6 +78,10 @@
   (expand-file-name ".roam" user-emacs-directory)
   "Path to the Markdown notes directory.")
 
+(defvar my/aaronnote--katex-macros-dir
+  (expand-file-name "etc/katex-macros" user-emacs-directory)
+  "Folder of .tex files defining the global KaTeX macro environment.")
+
 (config-defvar my/aaronnote-backend nil
   "Backend used to display Aaronnote."
   :type '(choice (const :tag "xwidget-webkit" xwidget) (const :tag "Appine" appine))
@@ -298,6 +302,7 @@ Set to 0 to let the OS pick a random port."
             (format "AARONNOTE_TMP_DIR=%s" (expand-file-name my/aaronnote--tmp-root))
             (format "AARONNOTE_SNIPPETS_ROOT=%s" (expand-file-name my/aaronnote--snippets-root))
             (format "AARONNOTE_TEMPLATES_ROOT=%s" (expand-file-name my/aaronnote--templates-root))
+            (format "AARONNOTE_KATEX_MACROS_DIR=%s" (expand-file-name my/aaronnote--katex-macros-dir))
             (format "AARONNOTE_WEB_PORT=%d" my/aaronnote-web-port)
             (when copilot-server
               (format "AARONNOTE_COPILOT_LANGUAGE_SERVER=%s"

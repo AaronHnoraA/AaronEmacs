@@ -5,11 +5,11 @@ import { noteCssHrefFromMarkdown, renderMarkdownHTML, renderPublishedNoteHTML } 
 describe("shared markdown HTML renderer", () => {
   test("renders math and org env blocks with editor DOM", () => {
     const html = renderMarkdownHTML(String.raw`#+begin theorem Spectral
-Inline $x+1$.
+Inline \(x+1\).
 
-$$
+\[
 y^2
-$$
+\]
 #+end theorem`);
 
     expect(html).toContain("<org-env-block");
@@ -36,11 +36,11 @@ $$
   });
 
   test("renders math errors instead of empty previews", () => {
-    const html = renderMarkdownHTML(String.raw`Inline $\notacommand$.
+    const html = renderMarkdownHTML(String.raw`Inline \(\notacommand\).
 
-$$
+\[
 \notacommand
-$$`);
+\]`);
 
     expect(html.match(/aaronnote-math-error/g)).toHaveLength(2);
     expect(html).toContain("KaTeX parse error");
@@ -48,15 +48,15 @@ $$`);
   });
 
   test("keeps markdown and math literal inside fenced and inline code", () => {
-    const fenced = renderMarkdownHTML("```\ninline $x+1$ and [[wiki]] and **bold**\n```");
+    const fenced = renderMarkdownHTML("```\ninline \\(x+1\\) and [[wiki]] and **bold**\n```");
     expect(fenced).toContain("<code");
     expect(fenced).not.toContain("aaronnote-math-inline");
     expect(fenced).not.toContain("<strong");
-    expect(fenced).toContain("$x+1$");
+    expect(fenced).toContain("\\(x+1\\)");
 
-    const inline = renderMarkdownHTML("a `$x+1$` b");
+    const inline = renderMarkdownHTML("a `\\(x+1\\)` b");
     expect(inline).not.toContain("aaronnote-math-inline");
-    expect(inline).toContain("<code>$x+1$</code>");
+    expect(inline).toContain("<code>\\(x+1\\)</code>");
   });
 
   test("keeps org-env syntax literal inside fenced markdown code", () => {

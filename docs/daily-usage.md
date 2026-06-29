@@ -158,6 +158,20 @@ Aaronnote runtime，所以默认值、路径校验、meta、模板变量和 tabs
 Markdown 模板统一存放在 `templates/aaronnote/markdown-mode/`，供 Emacs 启动的 Aaronnote 与
 Roam New 共用。
 
+### Aaronnote LaTeX 导出
+
+在 Aaronnote 的 Tools 中选择 `Export LaTeX`，或在页面内按 `⌘P`。导出先打开专用范围
+选择器，不会再用一个模糊的空白 TOC 输入框：
+
+- `Whole note` 导出全文；有文本选区时会额外提供 `Text selection`。
+- 每个 heading 都按真实层级缩进显示；选择 heading 会连同它的所有子章节一起导出。
+- `cursor` 标记光标当前所在的最深章节；章节多时可以搜索过滤。
+- `↑` / `↓` 选择，`Enter` 确认，`Esc` 取消；双击章节可直接进入保存路径选择。
+
+标题、章节名和 theorem/proof 标签中的 `\(...\)` 会保留为 LaTeX 数学，而不是被转义成
+`\textbackslash`。输出路径按 note 记忆，写入是原子的，并强制使用 `.tex` 后缀。未闭合的
+display math、代码 fence 或 `#+begin` block 会在写文件前报出明确错误，避免留下半成品。
+
 ## 2. Leader 键分组
 
 ### 文件 `SPC f`

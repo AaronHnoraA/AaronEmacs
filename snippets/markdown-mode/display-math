@@ -3,7 +3,7 @@
 # key: :
 # group: Aaronnote local
 # --
-$$
+\[
 $1
-$$
+\]
 $0

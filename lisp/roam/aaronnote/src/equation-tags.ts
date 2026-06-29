@@ -37,17 +37,16 @@ function collectDisplayMathTags(markdown: string): EquationTagHit[] {
     if (!line) continue;
     const lineStart = offset;
     const text = line.endsWith("\n") ? line.slice(0, -1) : line;
-    const isFence = /^[ \t]*\$\$[ \t]*$/.test(text);
-    if (isFence) {
-      if (blockStart == null) {
-        blockStart = lineStart;
-        bodyStart = lineStart + line.length;
-        body = "";
-      } else {
-        hits.push(...latexTagHitsInText(body.replace(/\n$/, ""), bodyStart, blockStart));
-        blockStart = null;
-        body = "";
-      }
+    const isOpen = /^[ \t]*\\\[[ \t]*$/.test(text);
+    const isClose = /^[ \t]*\\\][ \t]*$/.test(text);
+    if (blockStart == null && isOpen) {
+      blockStart = lineStart;
+      bodyStart = lineStart + line.length;
+      body = "";
+    } else if (blockStart != null && isClose) {
+      hits.push(...latexTagHitsInText(body.replace(/\n$/, ""), bodyStart, blockStart));
+      blockStart = null;
+      body = "";
     } else if (blockStart != null) {
       body += line;
     }

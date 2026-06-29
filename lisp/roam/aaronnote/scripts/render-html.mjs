@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Window } from "happy-dom";
+import { loadKatexMacros } from "../server/lib/katex-macros.mjs";
 
 // Stub CSS imports (e.g. "katex/dist/katex.min.css?url") so Node.js ESM doesn't
 // try to load them as modules. Vite handles ?url imports at build time; Node doesn't.
@@ -41,6 +44,19 @@ for (const [key, value] of Object.entries({
 })) {
   Object.defineProperty(globalThis, key, { value, configurable: true });
 }
+
+// Install the global KaTeX macros before rendering so exported/published HTML
+// matches the live editor. The publish engine may not forward the env var, so
+// fall back to the repo's etc/katex-macros relative to this script.
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const macrosDir = resolve(
+  process.env.AARONNOTE_KATEX_MACROS_DIR
+    || (process.env.AARONNOTE_WORKSPACE_ROOT
+      ? join(process.env.AARONNOTE_WORKSPACE_ROOT, "etc", "katex-macros")
+      : join(scriptDir, "..", "..", "..", "..", "etc", "katex-macros")),
+);
+const { setKatexMacros } = await import("../src/katex-macros.ts");
+setKatexMacros(loadKatexMacros(macrosDir).macros);
 
 const { renderMarkdownHTML, renderPublishedNoteHTML } = await import("../src/render-html.ts");
 

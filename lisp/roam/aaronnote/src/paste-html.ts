@@ -40,7 +40,7 @@ turndown.addRule("aaronnoteInlineMath", {
     && Boolean(node.getAttribute("data-tex")),
   replacement: (_content, node) => {
     const tex = node instanceof HTMLElement ? node.getAttribute("data-tex") || "" : "";
-    return tex ? `$${tex}$` : "";
+    return tex ? `\\(${tex}\\)` : "";
   },
 });
 
@@ -52,7 +52,7 @@ turndown.addRule("aaronnoteDisplayMath", {
     if (!(node instanceof HTMLElement)) return "";
     const render = node.querySelector<HTMLElement>(".math-block-render");
     const tex = node.getAttribute("data-tex") || render?.getAttribute("data-tex") || "";
-    return tex ? `\n\n$$\n${tex.trim()}\n$$\n\n` : "";
+    return tex ? `\n\n\\[\n${tex.trim()}\n\\]\n\n` : "";
   },
 });
 

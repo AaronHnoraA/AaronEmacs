@@ -215,11 +215,11 @@ $$
 
   test("preview display math commit follows line fences before following text", () => {
     const source = String.raw`intro
-$$
+\[
 \#\begin{array}{c}
 x
 \end{array}
-$$
+\]
 outro`;
     const mount = document.createElement("div");
     document.body.appendChild(mount);
@@ -240,13 +240,13 @@ outro`;
   test("rendered edits do not rewrite math source", () => {
     const source = String.raw`intro
 
-$$
+\[
 \begin{array}{c}
 d\mathrm{GA} \le_p \mathrm{GI}
 \end{array}
-$$
+\]
 
-inline $\#\operatorname{Aut}(G)$`;
+inline \(\#\operatorname{Aut}(G)\)`;
     const mount = document.createElement("div");
     document.body.appendChild(mount);
     const editor = createEditor(mount, { initialContent: source });
@@ -265,7 +265,7 @@ describe("editor api HTML export", () => {
   test("exports rendered HTML in markdown and source modes", () => {
     const mount = document.createElement("div");
     document.body.appendChild(mount);
-    const editor = createEditor(mount, { initialContent: "# Title\n\n**bold**\n\n$$\nx+1\n$$" });
+    const editor = createEditor(mount, { initialContent: "# Title\n\n**bold**\n\n\\[\nx+1\n\\]" });
     try {
       expect(editor.getHTML()).toContain("<h1>Title</h1>");
       expect(editor.getHTML()).toContain("<strong>");

@@ -22,7 +22,7 @@ type SnippetFrame = {
 };
 
 function normalizeSnippetBody(body: string): string {
-  return body.replace(/(^|\n)([ \t]*\$\$[\s\S]*?\n[ \t]*\$\$)\n(\$0)$/, "$1$2$3");
+  return body.replace(/(^|\n)([ \t]*\\\[[\s\S]*?\n[ \t]*\\\])\n(\$0)$/, "$1$2$3");
 }
 
 function sortedStopIndexes(stops: SnippetTabstop[]): number[] {

@@ -5,8 +5,8 @@
  * they must be provided by a StateField via EditorView.decorations facet.
  *
  * Split strategy:
- *   mathBlockField   — StateField, processes full doc for $$…$$
- *   MathInlinePlugin — ViewPlugin (viewport-only), processes $…$ inline
+ *   mathBlockField   — StateField, processes full doc for \[…\]
+ *   MathInlinePlugin — ViewPlugin (viewport-only), processes \(…\) inline
  *
  * Both are bundled into `mathExtension = [mathBlockField, mathInlineExtension]`.
  */
@@ -175,10 +175,10 @@ function buildBlockMathDecoRanges(
       continue;
     }
     addActiveBlockSourceLineDecos(decos, state, range.from, range.to);
-    // Cursor is inside $$…$$: show source with $$ syntax-hints only.
+    // Cursor is inside \[…\]: show source with \[ \] syntax-hints only.
     const raw = state.doc.sliceString(range.from, range.to);
-    const open = raw.indexOf("$$");
-    const close = raw.lastIndexOf("$$");
+    const open = raw.indexOf("\\[");
+    const close = raw.lastIndexOf("\\]");
     if (open >= 0) {
       decos.push(Decoration.mark({ class: "syntax-hint" }).range(range.from + open, range.from + open + 2));
     }
@@ -281,7 +281,10 @@ function canMapBlockMathDecorations(
     if (!canMap) return;
     const removed = state.doc.sliceString(fromA, toA);
     const added = inserted.toString();
-    if (removed.includes("$$") || added.includes("$$")) {
+    if (
+      removed.includes("\\[") || added.includes("\\[") ||
+      removed.includes("\\]") || added.includes("\\]")
+    ) {
       canMap = false;
       return;
     }
@@ -303,7 +306,10 @@ function canPatchBlockMathDecorations(
     if (!canPatch) return;
     const removed = state.doc.sliceString(fromA, toA);
     const added = inserted.toString();
-    if (removed.includes("$$") || added.includes("$$")) {
+    if (
+      removed.includes("\\[") || added.includes("\\[") ||
+      removed.includes("\\]") || added.includes("\\]")
+    ) {
       canPatch = false;
       return;
     }

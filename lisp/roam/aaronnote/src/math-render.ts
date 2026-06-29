@@ -1,5 +1,6 @@
 import katex from "katex";
 import katexCssUrl from "katex/dist/katex.min.css?url";
+import { getKatexMacros, getKatexMacrosVersion, type KatexMacroMap } from "./katex-macros.ts";
 
 type KatexRenderOptions = {
   displayMode?: boolean;
@@ -8,6 +9,7 @@ type KatexRenderOptions = {
   trust?: boolean;
   output?: "html" | "mathml" | "htmlAndMathml";
   deferUntilIdle?: boolean;
+  macros?: KatexMacroMap;
 };
 
 const mathHtmlCache = new Map<string, { html: string; error?: string }>();
@@ -64,11 +66,17 @@ export function disposeMathRuntime(): void {
   }
 }
 
+// The active macro set is part of the rendered output, so it must be part of the
+// cache key — otherwise changing macros would serve stale HTML.
+function mathCacheKey(tex: string, displayMode: boolean | undefined): string {
+  return `${getKatexMacrosVersion()}\n${displayMode ? "display" : "inline"}\n${tex}`;
+}
+
 export function renderMathHTML(
   tex: string,
   options: KatexRenderOptions,
 ): { html: string; error?: string } {
-  const key = `${options.displayMode ? "display" : "inline"}\n${tex}`;
+  const key = mathCacheKey(tex, options.displayMode);
   const cached = cachedMathHtml(key);
   if (cached) {
     if (!cached.error) ensureKatexCss(katexCssUrl);
@@ -95,7 +103,7 @@ export function renderMathLazy(
   options: KatexRenderOptions,
   onError: (error: string) => void,
 ): void {
-  const key = `${options.displayMode ? "display" : "inline"}\n${tex}`;
+  const key = mathCacheKey(tex, options.displayMode);
   element.setAttribute("data-math-render-key", key);
   const cached = cachedMathHtml(key);
   if (cached) {
@@ -132,12 +140,16 @@ function applyRenderedMath(
 }
 
 function katexOptions(options: KatexRenderOptions): KatexRenderOptions {
+  // Pass a shallow copy of the macro map: KaTeX mutates it in place when the TeX
+  // uses \gdef/\global\def, and we must not leak one note's globals into the
+  // shared environment.
   return {
     displayMode: options.displayMode,
     throwOnError: true,
     strict: options.strict,
     trust: options.trust,
     output: options.output ?? "mathml",
+    macros: { ...(options.macros ?? getKatexMacros()) },
   };
 }
 

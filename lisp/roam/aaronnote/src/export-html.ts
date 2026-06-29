@@ -57,14 +57,18 @@ function renderInlineMathSources(root: HTMLElement): void {
   root.querySelectorAll<HTMLElement>("span[data-aaronnote-math-mark]").forEach((mark) => {
     const tex = mark.getAttribute("data-tex") || mark.textContent || "";
     const display = mark.getAttribute("data-display") === "1";
-    const delimiter = mark.getAttribute("data-delimiter") || (display ? "$$" : "$");
+    // Bracket delimiters are asymmetric. An explicit data-delimiter (legacy
+    // symmetric form) overrides both sides; otherwise default to \( \) / \[ \].
+    const explicit = mark.getAttribute("data-delimiter");
+    const openDelimiter = explicit || (display ? "\\[" : "\\(");
+    const closeDelimiter = explicit || (display ? "\\]" : "\\)");
     const rendered = document.createElement("span");
     rendered.className = display ? "aaronnote-math-block" : "aaronnote-math-inline";
     rendered.setAttribute("data-tex", tex);
     renderMathElement(tex, rendered, { displayMode: display });
 
-    trimDelimiterBefore(mark, delimiter);
-    trimDelimiterAfter(mark, delimiter);
+    trimDelimiterBefore(mark, openDelimiter);
+    trimDelimiterAfter(mark, closeDelimiter);
     mark.replaceWith(rendered);
   });
 }

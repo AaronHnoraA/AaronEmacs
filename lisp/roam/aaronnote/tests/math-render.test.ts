@@ -6,6 +6,7 @@ import {
   renderMathHTML,
   renderMathLazy,
 } from "../src/math-render.ts";
+import { getKatexMacrosVersion } from "../src/katex-macros.ts";
 
 describe("math render source handling", () => {
   test("synchronous render path loads KaTeX CSS", () => {
@@ -37,7 +38,7 @@ describe("math render source handling", () => {
     const el = document.createElement("span");
     const tex = "dathrm{GA} e_p athrm{GI}";
     renderMathLazy(tex, el, { displayMode: false, throwOnError: false }, () => {});
-    expect(el.getAttribute("data-math-render-key")).toBe(`inline\n${tex}`);
+    expect(el.getAttribute("data-math-render-key")).toBe(`${getKatexMacrosVersion()}\ninline\n${tex}`);
   });
 
   test("uses KaTeX as the primary renderer for TeX commands", () => {

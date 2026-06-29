@@ -13,13 +13,13 @@ export function plainTextLooksLikeMarkdownSource(text: string): boolean {
   if (!md) return false;
   return [
     /^\s{0,3}#{1,6}\s+\S/m,
-    /^\s{0,3}\$\$\s*$/m,
+    /^\s{0,3}\\\[\s*$/m,
     /^\s{0,3}```/m,
     /^\s{0,3}#\+begin\b/im,
     /^\s{0,3}>\s+\S/m,
     /^\s{0,3}(?:[-*+]\s+|\d+[.)]\s+)/m,
     /\[[^\]\n]+\]\([^)]+\)/,
-    /\$[^$\n]+\$/,
+    /\\\([^\n]+?\\\)/,
   ].some((re) => re.test(md));
 }
 

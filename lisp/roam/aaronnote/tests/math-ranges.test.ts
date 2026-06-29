@@ -15,7 +15,7 @@ import {
 
 describe("block math range queries", () => {
   test("finds overlaps, containment, and point hits on sorted ranges", () => {
-    const ranges = scanBlockMathRanges("a\n$$\nx\n$$\nb\n$$\ny\n$$\nc");
+    const ranges = scanBlockMathRanges("a\n\\[\nx\n\\]\nb\n\\[\ny\n\\]\nc");
 
     expect(ranges).toHaveLength(2);
     expect(rangeOverlapsAny(0, ranges[0]!.from, ranges)).toBe(false);
@@ -34,7 +34,7 @@ describe("block math range queries", () => {
 
   test("updates math tex incrementally for edits inside an existing block", () => {
     const state = EditorState.create({
-      doc: "before\n$$\nx\n$$\nafter",
+      doc: "before\n\\[\nx\n\\]\nafter",
       extensions: [blockMathRangesExtension],
     });
     const before = getBlockMathRanges(state)[0]!;
@@ -52,7 +52,7 @@ describe("block math range queries", () => {
 
   test("reuses unaffected math ranges and crops queries to viewport windows", () => {
     const state = EditorState.create({
-      doc: "$$\na\n$$\ntext\n$$\nb\n$$",
+      doc: "\\[\na\n\\]\ntext\n\\[\nb\n\\]",
       extensions: [blockMathRangesExtension],
     });
     const before = getBlockMathRanges(state);

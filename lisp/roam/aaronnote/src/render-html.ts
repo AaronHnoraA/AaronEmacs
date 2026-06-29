@@ -250,10 +250,10 @@ function orgEnvBlockRule(state: StateBlock, startLine: number, endLine: number, 
 
 function mathBlockRule(state: StateBlock, startLine: number, endLine: number, silent: boolean): boolean {
   const open = lineText(state, startLine);
-  if (!/^\s*\$\$\s*$/.test(open)) return false;
+  if (!/^\s*\\\[\s*$/.test(open)) return false;
   let closeLine = -1;
   for (let line = startLine + 1; line < endLine; line++) {
-    if (/^\s*\$\$\s*$/.test(lineText(state, line))) {
+    if (/^\s*\\\]\s*$/.test(lineText(state, line))) {
       closeLine = line;
       break;
     }
@@ -328,17 +328,16 @@ function tocRule(state: StateBlock, startLine: number, _endLine: number, silent:
 
 function mathInlineRule(state: StateInline, silent: boolean): boolean {
   const start = state.pos;
-  if (state.src.charCodeAt(start) !== 0x24 /* $ */) return false;
-  if (state.src[start + 1] === "$") return false;
-  if (start > 0 && state.src[start - 1] === "\\") return false;
-  const end = state.src.indexOf("$", start + 1);
-  if (end < 0 || end === start + 1) return false;
-  const tex = state.src.slice(start + 1, end);
+  // Inline math opens with the literal LaTeX delimiter `\(` and closes with `\)`.
+  if (state.src[start] !== "\\" || state.src[start + 1] !== "(") return false;
+  const end = state.src.indexOf("\\)", start + 2);
+  if (end < 0 || end === start + 2) return false;
+  const tex = state.src.slice(start + 2, end);
   if (tex.includes("\n")) return false;
   if (silent) return true;
   const token = state.push("math_inline", "span", 0);
   token.content = tex;
-  state.pos = end + 1;
+  state.pos = end + 2;
   return true;
 }
 
@@ -368,7 +367,7 @@ function renderMathInline(tokens: Token[], idx: number, _options: unknown, _env:
   const escaped = escapeAttr(tex);
   const rendered = renderMath(tex, false);
   const cls = rendered.error ? "aaronnote-math-inline aaronnote-math-error" : "aaronnote-math-inline";
-  const html = rendered.error ? escapeHtml(rendered.error) : rendered.html || escapeHtml(`$${tex}$`);
+  const html = rendered.error ? escapeHtml(rendered.error) : rendered.html || escapeHtml(`\\(${tex}\\)`);
   return `<span class="${cls}" data-tex="${escaped}" data-math-render-key="inline\n${escaped}">${html}</span>`;
 }
 
@@ -781,7 +780,9 @@ function createMarkdownIt(options: RenderMarkdownHTMLOptions): MarkdownIt {
   md.core.ruler.push("aaronnote_callouts", aaronnoteCalloutsRule);
   md.inline.ruler.before("link", "empty_html_link_embed", emptyHtmlLinkEmbedRule);
   md.inline.ruler.before("link", "jupyter_link", jupyterLinkRule);
-  md.inline.ruler.after("escape", "math_inline", mathInlineRule);
+  // Must run before `escape`: otherwise the backslash escape rule consumes the
+  // `\(` opener as a literal `(` and inline math is never recognized.
+  md.inline.ruler.before("escape", "math_inline", mathInlineRule);
 
   md.renderer.rules.math_block = renderMathBlock;
   md.renderer.rules.math_inline = renderMathInline;

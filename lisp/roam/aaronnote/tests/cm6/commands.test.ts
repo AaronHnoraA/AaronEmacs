@@ -276,12 +276,12 @@ maybeDescribe("CM6 runCommand — block insert", () => {
     ed.destroy();
   });
 
-  it("insert-math-block: inserts $$...$$ block", async () => {
+  it("insert-math-block: inserts \\[...\\] block", async () => {
     const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
     const host = document.createElement("div");
     const ed = createEditorCM6(host, { initialContent: "" });
     ed.runCommand("insert-math-block");
-    expect(ed.getMarkdown()).toBe("$$\n\n$$");
+    expect(ed.getMarkdown()).toBe("\\[\n\n\\]");
     ed.destroy();
   });
 

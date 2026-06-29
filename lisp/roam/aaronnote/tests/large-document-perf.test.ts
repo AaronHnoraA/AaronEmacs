@@ -57,7 +57,7 @@ describe("large-document bounded editing", () => {
   }
 
   const knownScanCases: Array<[name: string, insert: string]> = [
-    ["block math fence", "$$"],
+    ["block math fence", "\\["],
     ["code fence", "```"],
   ];
   for (const [name, insert] of knownScanCases) {

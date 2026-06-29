@@ -112,7 +112,7 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 | YAML front matter | :white_check_mark: |  |
 | reference link def `[id]: url` | :white_check_mark: | definition line renders as dimmed `syntax-hint`; `[text][id]` click resolves via on-demand syntax scan |
 | HTML block | :white_check_mark: | block widget; sanitized via `sanitizeEmbeddedHtml` (DOMPurify, forbids script/iframe/object) |
-| math block `$$…$$` | :white_check_mark: | block node, source-preserving parse/serialize, rendered preview |
+| math block `\[…\]` | :white_check_mark: | block node, source-preserving parse/serialize, rendered preview |
 
 ### Inline syntax
 
@@ -133,7 +133,7 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 | soft break (`\n` in para) | :white_check_mark: |  |
 | backslash escape `\*` | :yellow_circle: | round-trip works; no input-time UX |
 | inline HTML | :white_check_mark: | inline widget; sanitized via `sanitizeEmbeddedHtml` |
-| inline math `$x$` | :white_check_mark: | raw TeX preserved; rendered inline preview |
+| inline math `\(x\)` | :white_check_mark: | raw TeX preserved; rendered inline preview |
 
 ### Typora extensions
 

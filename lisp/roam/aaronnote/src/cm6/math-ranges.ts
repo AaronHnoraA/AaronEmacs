@@ -1,6 +1,7 @@
 import { StateField, type ChangeSet, type EditorState, type Extension, type Text } from "@codemirror/state";
 
-const BLOCK_MATH_FENCE_RE = /^[ \t]*\$\$[ \t]*$/;
+const BLOCK_MATH_OPEN_RE = /^[ \t]*\\\[[ \t]*$/;
+const BLOCK_MATH_CLOSE_RE = /^[ \t]*\\\][ \t]*$/;
 
 export interface BlockMathRange {
   from: number;
@@ -21,21 +22,21 @@ export function scanBlockMathRanges(text: string, baseOffset = 0): BlockMathRang
     const lineTo = newline < 0 ? text.length : newline;
     const line = text.slice(lineFrom, lineTo);
 
-    if (BLOCK_MATH_FENCE_RE.test(line)) {
-      if (openFrom < 0) {
+    if (openFrom < 0) {
+      if (BLOCK_MATH_OPEN_RE.test(line)) {
         openFrom = lineFrom;
         contentFrom = newline < 0 ? lineTo : newline + 1;
-      } else {
-        ranges.push({
-          from: baseOffset + openFrom,
-          to: baseOffset + lineTo,
-          contentFrom: baseOffset + contentFrom,
-          contentTo: baseOffset + lineFrom,
-          tex: text.slice(contentFrom, lineFrom).trim(),
-        });
-        openFrom = -1;
-        contentFrom = -1;
       }
+    } else if (BLOCK_MATH_CLOSE_RE.test(line)) {
+      ranges.push({
+        from: baseOffset + openFrom,
+        to: baseOffset + lineTo,
+        contentFrom: baseOffset + contentFrom,
+        contentTo: baseOffset + lineFrom,
+        tex: text.slice(contentFrom, lineFrom).trim(),
+      });
+      openFrom = -1;
+      contentFrom = -1;
     }
 
     if (newline < 0) break;
@@ -52,12 +53,14 @@ export function scanBlockMathRangesInDoc(doc: Text): BlockMathRange[] {
 
   for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
     const line = doc.line(lineNum);
-    if (!BLOCK_MATH_FENCE_RE.test(line.text)) continue;
     if (openFrom < 0) {
-      openFrom = line.from;
-      contentFrom = line.to < doc.length ? line.to + 1 : line.to;
+      if (BLOCK_MATH_OPEN_RE.test(line.text)) {
+        openFrom = line.from;
+        contentFrom = line.to < doc.length ? line.to + 1 : line.to;
+      }
       continue;
     }
+    if (!BLOCK_MATH_CLOSE_RE.test(line.text)) continue;
     ranges.push({
       from: openFrom,
       to: line.to,
@@ -82,7 +85,10 @@ function canMapBlockMathRanges(
     if (!canMap) return;
     const removed = state.doc.sliceString(fromA, toA);
     const added = inserted.toString();
-    if (removed.includes("$$") || added.includes("$$")) {
+    if (
+      removed.includes("\\[") || added.includes("\\[") ||
+      removed.includes("\\]") || added.includes("\\]")
+    ) {
       canMap = false;
       return;
     }
@@ -113,7 +119,8 @@ function changedLinesMightOpenMathFence(state: EditorState, changes: ChangeSet):
     const lineFrom = state.doc.lineAt(fromB).number;
     const lineTo = state.doc.lineAt(Math.min(toB, state.doc.length)).number;
     for (let ln = lineFrom; ln <= lineTo && !found; ln++) {
-      if (BLOCK_MATH_FENCE_RE.test(state.doc.line(ln).text)) found = true;
+      const lineText = state.doc.line(ln).text;
+      if (BLOCK_MATH_OPEN_RE.test(lineText) || BLOCK_MATH_CLOSE_RE.test(lineText)) found = true;
     }
   });
   return found;

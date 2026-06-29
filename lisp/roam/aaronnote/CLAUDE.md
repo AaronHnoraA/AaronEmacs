@@ -25,13 +25,19 @@ separate editor implementation.
 | `src/cm6/commands.ts` | Editing commands, block context, and quick insert registry. |
 | `src/cm6/widgets/*.ts` | Math, code fence, image, task, TOC, org-env, and related widgets. |
 | `src/render-html.ts` | Shared Markdown-to-HTML export/publish renderer. |
+| `src/math-render.ts` | KaTeX render + HTML cache. Cache key includes the active macro-set version. |
+| `src/katex-macros.ts` | Global KaTeX macro state (`setKatexMacros`/`getKatexMacros`/`getKatexMacrosVersion`); re-exports the parser. |
+| `shared/katex-macros.mjs` | Browser-safe `\newcommand`/`\DeclareMathOperator`/`\def` → KaTeX macros parser. |
+| `server/lib/katex-macros.mjs` | Node loader: reads `*.tex` from a folder and parses via the shared parser. |
 | `src/attrs-syntax.ts` | Shared `{key: value}` trailing-attribute block parser used by command-syntax and image-attrs. |
 | `src/layout-attrs.ts` | Layout-attribute normalization (align, wrap, width, height) and CSS-class/style helpers. |
 | `src/image-attrs.ts` | Image-specific layout attr reader/writer and DOM/token applicators, built on `layout-attrs.ts`. `imageLayoutToTrailingAttrs` serializes a layout back to `{...}` source (round-trips through `imageLayoutFromAttrs`); used by the image widget's hover toolbar. |
 | `src/command-syntax.ts` | Inline `@@cmd` and block `#+begin kind` command parser, now delegates to `attrs-syntax.ts`. |
 | `src/styles/*.css` | CM6 editor chrome and swappable Markdown themes. |
 | `aaronnote/main.ts` | Emacs-embedded app shell: notes UI, command palette, jump stack. |
+| `aaronnote/latex-export-scope.ts` | Pure whole-note/selection/heading-subtree range model used by the LaTeX scope picker. |
 | `server/lib/runtime.mjs` | Server-side note/index/save/runtime; Copilot LSP bridge. |
+| `server/lib/latex-export.mjs` | Aaronnote Markdown-to-LaTeX conversion, template rendering, validation, and atomic `.tex` writes. |
 | `server/lib/watch.mjs` | Recursive fs watcher for vault freshness; SSE broadcast on batch change. |
 | `server/lib/tmp.mjs` | Runtime temp staging (`mkdtemp`, atomic writes, TTL orphan sweep). |
 | `server/lib/copilot.mjs` | Re-export barrel for Copilot LSP bridge (uses Emacs-managed binary). |
@@ -85,6 +91,18 @@ class MyWidget extends MeasuredWidget {
 - For widgets that support `layout.wrap` (CSS float): see the "Float-wrap
   coexistence" section in `docs/maintenance.md` — Pattern A for inline-replace
   widgets, Pattern B for `block:true` widgets.
+
+## KaTeX macros
+
+Custom KaTeX macros are defined as `.tex` files (LaTeX `\newcommand` syntax) in
+`etc/katex-macros/` in the Emacs config and apply **globally** to every note.
+Flow: the Node server reads the folder (env `AARONNOTE_KATEX_MACROS_DIR`, wired in
+`lisp/roam/init-aaronnote.el`) via `server/lib/katex-macros.mjs`; the browser
+fetches them through `api.config.katexMacros()` (channel
+`aaronnote:api:config:katex-macros`) and installs them with `setKatexMacros`
+before the first note renders; `scripts/render-html.mjs` does the same for
+export/publish. `renderMathHTML` reads the active map on every call and folds the
+macro-set version into its cache key. See `etc/katex-macros/README.md`.
 
 ## Invariants
 

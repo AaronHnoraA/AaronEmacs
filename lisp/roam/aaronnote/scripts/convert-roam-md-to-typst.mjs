@@ -177,7 +177,7 @@ function convertFile(file) {
   const meta = parseMeta(lines);
   const markdown = normalizeOrgBlocks(stripMeta(lines)).join("\n").trim();
 
-  const pandoc = spawnSync("pandoc", ["--from=markdown+tex_math_dollars-citations+raw_attribute", "--to=typst"], {
+  const pandoc = spawnSync("pandoc", ["--from=markdown+tex_math_single_backslash-citations+raw_attribute", "--to=typst"], {
     input: markdown,
     encoding: "utf8",
     maxBuffer: 1024 * 1024 * 64,

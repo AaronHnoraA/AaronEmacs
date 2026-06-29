@@ -12,8 +12,9 @@ import { setupCopilot } from "../src/copilot/index.ts";
 import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownBlock, tableNavigateCell, tableEnterSameColumn } from "../src/cm6/commands.ts";
 import { getBlockMathRanges, rangeAtPosition, rangeOverlapsAny } from "../src/cm6/math-ranges.ts";
 import { equationTagsFromText, getEquationTagHits } from "../src/equation-tags.ts";
-import { INLINE_MATH_RE, isLikelyInlineMath } from "../src/inline-math.ts";
+import { INLINE_MATH_RE } from "../src/inline-math.ts";
 import { formatMathRenderError, renderMathLazy } from "../src/math-render.ts";
+import { setKatexMacros } from "../src/katex-macros.ts";
 import { hrefProtocol, safeHref } from "../src/url-safety.ts";
 import { api, type TodoItem } from "./api-client.ts";
 import { Epoch } from "../src/async-epoch.ts";
@@ -22,6 +23,11 @@ import { blobToBase64 } from "../src/paste.ts";
 import { collectFindMatches, createFindPattern, type FindMatch } from "./find.ts";
 import { AssistScheduler, type AssistUpdateFlags, type AssistUpdateOptions } from "./assist-scheduler.ts";
 import { createFloatingTocPanel, inlineTagAnchorsFromText, markdownHeadingsFromText } from "./floating-toc.ts";
+import {
+  buildLatexExportScopes,
+  latexExportScopeContent,
+  type LatexExportScope,
+} from "./latex-export-scope.ts";
 import { resolveAnchorHeading } from "../src/heading-slug.ts";
 import { createLocalGraphPanel } from "./local-graph.ts";
 import { setFindHighlightRanges } from "../src/cm6/find-highlight.ts";
@@ -1909,6 +1915,231 @@ function openFormModal(title: string, fields: ModalField[], submitLabel = "OK"):
   });
 }
 
+function currentMarkdownText(): string {
+  return editor.view.state.doc.toString();
+}
+
+function openLatexScopeModal(scopes: readonly LatexExportScope[]): Promise<LatexExportScope | null> {
+  return new Promise((resolve) => {
+    modal.innerHTML = "";
+    const panel = document.createElement("form");
+    panel.className = "aaronnote-modal-panel aaronnote-latex-export-panel";
+
+    const heading = document.createElement("h2");
+    heading.textContent = "Export LaTeX";
+    const help = document.createElement("p");
+    help.className = "aaronnote-latex-export-help";
+    help.textContent = "Choose exactly what goes into the .tex file. A section includes all of its nested subsections.";
+    panel.append(heading, help);
+
+    const headingScopes = scopes.filter((scope) => scope.kind === "heading");
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "aaronnote-latex-export-search";
+    search.placeholder = "Filter sections…";
+    search.autocomplete = "off";
+    search.spellcheck = false;
+    search.setAttribute("aria-label", "Filter export sections");
+    if (headingScopes.length > 0) panel.appendChild(search);
+
+    const list = document.createElement("div");
+    list.className = "aaronnote-latex-export-scopes";
+    list.setAttribute("role", "radiogroup");
+    list.setAttribute("aria-label", "LaTeX export scope");
+    panel.appendChild(list);
+
+    let selectedId = scopes.some((scope) => scope.kind === "selection")
+      ? "selection"
+      : "document";
+    let visibleScopes = [...scopes];
+
+    const selectedScope = (): LatexExportScope | undefined =>
+      scopes.find((scope) => scope.id === selectedId);
+
+    const close = (value: LatexExportScope | null): void => {
+      modal.hidden = true;
+      modal.innerHTML = "";
+      modal.removeEventListener("mousedown", onBackdrop);
+      editor.focus();
+      resolve(value);
+    };
+
+    const render = (): void => {
+      const query = search.value.trim().toLocaleLowerCase();
+      visibleScopes = query
+        ? headingScopes.filter((scope) => `${scope.title} ${scope.detail}`.toLocaleLowerCase().includes(query))
+        : [...scopes];
+      if (!visibleScopes.some((scope) => scope.id === selectedId)) {
+        selectedId = visibleScopes.find((scope) => scope.active)?.id || visibleScopes[0]?.id || "";
+      }
+
+      const fragment = document.createDocumentFragment();
+      if (visibleScopes.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "aaronnote-latex-export-empty";
+        empty.textContent = "No matching sections";
+        fragment.appendChild(empty);
+      }
+      for (const scope of visibleScopes) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "aaronnote-latex-export-scope";
+        row.dataset.scopeId = scope.id;
+        row.setAttribute("role", "radio");
+        row.setAttribute("aria-checked", String(scope.id === selectedId));
+        row.tabIndex = scope.id === selectedId ? 0 : -1;
+        row.style.setProperty("--latex-scope-depth", String(scope.kind === "heading" ? Math.max(0, scope.level - 1) : 0));
+
+        const marker = document.createElement("span");
+        marker.className = "aaronnote-latex-export-radio";
+        marker.setAttribute("aria-hidden", "true");
+        const copy = document.createElement("span");
+        copy.className = "aaronnote-latex-export-scope-copy";
+        const name = document.createElement("span");
+        name.className = "aaronnote-latex-export-scope-name";
+        name.textContent = scope.title;
+        if (scope.active) {
+          const badge = document.createElement("span");
+          badge.className = "aaronnote-latex-export-current";
+          badge.textContent = "cursor";
+          name.appendChild(badge);
+        }
+        const detail = document.createElement("span");
+        detail.className = "aaronnote-latex-export-scope-detail";
+        detail.textContent = scope.detail;
+        copy.append(name, detail);
+        row.append(marker, copy);
+        row.addEventListener("click", (event) => {
+          if (event.detail > 1) {
+            close(scope);
+            return;
+          }
+          selectedId = scope.id;
+          render();
+          list.querySelector<HTMLElement>(`[data-scope-id="${CSS.escape(scope.id)}"]`)?.focus();
+        });
+        row.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" || event.isComposing) return;
+          event.preventDefault();
+          close(scope);
+        });
+        fragment.appendChild(row);
+      }
+      list.replaceChildren(fragment);
+    };
+
+    const moveSelection = (delta: number): void => {
+      if (visibleScopes.length === 0) return;
+      const current = Math.max(0, visibleScopes.findIndex((scope) => scope.id === selectedId));
+      const next = Math.max(0, Math.min(visibleScopes.length - 1, current + delta));
+      selectedId = visibleScopes[next]!.id;
+      render();
+      list.querySelector<HTMLElement>(`[data-scope-id="${CSS.escape(selectedId)}"]`)?.focus();
+    };
+
+    search.addEventListener("input", render);
+    panel.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        close(null);
+      } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        moveSelection(event.key === "ArrowDown" ? 1 : -1);
+      }
+    });
+    panel.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const scope = selectedScope();
+      if (scope) close(scope);
+    });
+
+    const actions = document.createElement("div");
+    actions.className = "aaronnote-modal-actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => close(null));
+    const submit = document.createElement("button");
+    submit.type = "submit";
+    submit.textContent = "Choose Path";
+    actions.append(cancel, submit);
+    panel.appendChild(actions);
+
+    const onBackdrop = (event: MouseEvent): void => {
+      if (event.target === modal) close(null);
+    };
+    modal.addEventListener("mousedown", onBackdrop);
+    modal.appendChild(panel);
+    modal.hidden = false;
+    render();
+    window.setTimeout(() => {
+      if (headingScopes.length > 6) search.focus();
+      else list.querySelector<HTMLElement>(`[data-scope-id="${CSS.escape(selectedId)}"]`)?.focus();
+    }, 0);
+  });
+}
+
+async function exportLatexTool(): Promise<void> {
+  if (!currentFile) {
+    setStatus("Open a note before exporting LaTeX");
+    return;
+  }
+
+  const markdown = currentMarkdownText();
+  const selection = editor.getMarkdownSelection();
+  const allHeadings = markdownHeadingsFromText(editor.view.state.doc);
+  const scopes = buildLatexExportScopes({
+    markdown,
+    headings: allHeadings,
+    selection,
+    cursor: editor.view.state.selection.main.head,
+  });
+  const chosenScope = await openLatexScopeModal(scopes);
+  if (!chosenScope) {
+    setStatus("LaTeX export canceled");
+    return;
+  }
+
+  const content = latexExportScopeContent(markdown, chosenScope);
+  const title = chosenScope.kind === "document"
+    ? currentNote()?.title || fileNameFromPath(currentFile)
+    : chosenScope.title;
+  const scope = chosenScope.kind;
+
+  try {
+    setStatus("Choose LaTeX output path...");
+    const defaultInfo = await api.latex.defaults({
+      file: currentFile,
+      title,
+    });
+    const chosen = await api.latex.chooseOutputPath({
+      file: currentFile,
+      title,
+      defaultPath: defaultInfo.outputPath || "",
+    });
+    if (chosen.canceled) {
+      setStatus("LaTeX export canceled");
+      return;
+    }
+    if (chosen.ok === false || !chosen.path) {
+      setStatus(`LaTeX export failed: ${String(chosen.message || "output path was not selected")}`);
+      return;
+    }
+    const msg = await api.latex.export({
+      file: currentFile,
+      content,
+      outputPath: String(chosen.path),
+      title,
+      scope,
+    });
+    setStatus(`LaTeX exported: ${String(msg.file || chosen.path || "")}`);
+  } catch (err) {
+    setStatus(`LaTeX export failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 async function updateNoteMeta(
   action: (body: Record<string, unknown>) => Promise<Awaited<ReturnType<typeof api.notes.bootstrap>>>,
   body: Record<string, unknown>,
@@ -2590,6 +2821,7 @@ function toolActions(): ToolAction[] {
   const common: ToolAction[] = [
     { id: "toc", title: "Toggle TOC", detail: "Page headings, anchors, tags, backlinks", run: () => { floatingTocPanel.toggle(); updateFloatingToc(); } },
     { id: "tag-ref", title: "Tag / copy ref", detail: "Equation tag, inline anchor, reference copy", run: () => void tagOrCopyRef() },
+    { id: "export-latex", title: "Export LaTeX", detail: "Write selection, heading, or note to a .tex file", run: () => void exportLatexTool() },
     { id: "reload-snippets", title: "Reload snippets", detail: "Refresh Emacs md/tex snippets", run: () => void reloadSnippets() },
   ];
   return [
@@ -3267,7 +3499,6 @@ function mathAtCursor(ctx: ReturnType<typeof editor.cursorContext>): {
     const tex = match[1] || "";
     if (cursor <= from || cursor >= to) continue;
     if (rangeOverlapsAny(from, to, blockRanges)) continue;
-    if (!isLikelyInlineMath(tex)) continue;
     return { tex, display: false, rect: rectAtSourceOffset(from) };
   }
   return null;
@@ -4079,6 +4310,12 @@ document.addEventListener("keydown", (event) => {
     event.stopPropagation();
     return;
   }
+  if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "p" && modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden && !event.isComposing) {
+    event.preventDefault();
+    event.stopPropagation();
+    void exportLatexTool();
+    return;
+  }
   if (handleXwidgetEmacsKeydown(event)) return;
   if (handleXwidgetHistoryKeydown(event, {
     editor,
@@ -4374,4 +4611,14 @@ window.addEventListener("popstate", () => {
   void restoreNavigationBack();
 });
 
-void openInitialFile();
+// Install the global KaTeX macros before the first note renders so the initial
+// paint already uses them; failures degrade to plain KaTeX rather than blocking.
+void (async () => {
+  try {
+    const result = await api.config.katexMacros();
+    if (result?.macros) setKatexMacros(result.macros);
+  } catch (_) {
+    // Macros are optional.
+  }
+  await openInitialFile();
+})();

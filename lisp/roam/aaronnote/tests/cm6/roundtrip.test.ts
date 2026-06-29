@@ -106,13 +106,13 @@ maybeDescribe("cm6 kernel: getMarkdown / setMarkdown", () => {
   });
 
   test("preserves inline math", () => {
-    const md = "The value $x = 1$ is given.";
+    const md = "The value \\(x = 1\\) is given.";
     const { editor, cleanup } = mountCM6(md);
     expect(editor.getMarkdown()).toBe(md);
     cleanup();
   });
 
-  test("does not render prose between stray dollar signs as inline math", () => {
+  test("does not treat dollar signs as inline math (dollar syntax removed)", () => {
     const md = "$ I like this but it is not math $ and $10 is a price\n\n$plain words are prose$";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
@@ -120,26 +120,26 @@ maybeDescribe("cm6 kernel: getMarkdown / setMarkdown", () => {
     cleanup();
   });
 
-  test("still renders compact inline TeX after conservative math detection", () => {
-    const md = "Try $x^4 + y - 10$, $A \\leq_p B$, and $\\mathrm{GI}$ here.";
+  test("renders multiple inline math spans", () => {
+    const md = "Try \\(x^4 + y - 10\\), \\(A \\leq_p B\\), and \\(\\mathrm{GI}\\) here.";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
     expect(document.querySelectorAll(".cm-math-inline")).toHaveLength(3);
     cleanup();
   });
 
-  test("renders inline math with limited padding before the closing dollar", () => {
-    const md = "Given a graph $[asdas] s asd asd $ and $asdas s asd asd$ and $x     $ but $y      $.";
+  test("renders inline math spans with brackets and spaces in the content", () => {
+    const md = "Given a graph \\([asdas] s asd asd\\) and \\(asdas s asd asd\\) and \\(x\\).";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
     const rendered = Array.from(document.querySelectorAll<HTMLElement>(".cm-math-inline"))
       .map((el) => md.slice(Number(el.dataset.cmSourceFrom), Number(el.dataset.cmSourceTo)));
-    expect(rendered).toEqual(["$[asdas] s asd asd $", "$asdas s asd asd$", "$x     $"]);
+    expect(rendered).toEqual(["\\([asdas] s asd asd\\)", "\\(asdas s asd asd\\)", "\\(x\\)"]);
     cleanup();
   });
 
   test("renders inline TeX that starts with a digit", () => {
-    const md = "Numbers $1$ and $3\\times 4\\times 5$ render.";
+    const md = "Numbers \\(1\\) and \\(3\\times 4\\times 5\\) render.";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
     const rendered = Array.from(document.querySelectorAll<HTMLElement>(".cm-math-inline"));
@@ -150,11 +150,11 @@ maybeDescribe("cm6 kernel: getMarkdown / setMarkdown", () => {
   });
 
   test("shows bounded math render errors in preview widgets", () => {
-    const md = String.raw`Bad $\notacommand$.
+    const md = String.raw`Bad \(\notacommand\).
 
-$$
+\[
 \notacommand
-$$`;
+\]`;
     const { editor, cleanup } = mountCM6(md);
     try {
       editor.setMarkdownSelection(0);
@@ -163,14 +163,14 @@ $$`;
       expect(errors).toHaveLength(2);
       expect(errors.every((el) => (el.textContent || "").includes("KaTeX parse error"))).toBe(true);
       expect(errors.every((el) => (el.textContent || "").length <= MATH_RENDER_ERROR_MAX_LENGTH)).toBe(true);
-      expect(errors.some((el) => (el.textContent || "").includes("$$"))).toBe(false);
+      expect(errors.some((el) => (el.textContent || "").includes("\\["))).toBe(false);
     } finally {
       cleanup();
     }
   });
 
   test("does not render inline math inside a fenced code block", () => {
-    const md = "```\ninline $x+1$ here\n```\n";
+    const md = "```\ninline \\(x+1\\) here\n```\n";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
     expect(document.querySelector(".cm-math-inline")).toBeNull();
@@ -178,7 +178,7 @@ $$`;
   });
 
   test("does not render inline math inside an inline code span", () => {
-    const md = "text `$x+1$` more";
+    const md = "text `\\(x+1\\)` more";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
     expect(document.querySelector(".cm-math-inline")).toBeNull();
@@ -194,19 +194,19 @@ $$`;
   });
 
   test("does not apply markdown link preview inside active inline math", () => {
-    const md = "Given a graph $[asdas] s asd asd $";
+    const md = "Given a graph \\([asdas] s asd asd\\)";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.indexOf("asdas"));
 
     expect(document.querySelector(".cm-math-inline")).toBeNull();
     expect(document.querySelector(".cm-link-text")).toBeNull();
     expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
-      .toContain("$[asdas] s asd asd $");
+      .toContain("\\([asdas] s asd asd\\)");
     cleanup();
   });
 
   test("does not render inline command or image widgets inside inline math", () => {
-    const md = "Math $@@tag[qc] $ and $![x](y) $";
+    const md = "Math \\(@@tag[qc] \\) and \\(![x](y) \\)";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
 
@@ -235,14 +235,14 @@ $$`;
   });
 
   test("preserves display math", () => {
-    const md = "$$\na^2 + b^2 = c^2\n$$";
+    const md = "\\[\na^2 + b^2 = c^2\n\\]";
     const { editor, cleanup } = mountCM6(md);
     expect(editor.getMarkdown()).toBe(md);
     cleanup();
   });
 
   test("editing one display math block preserves unrelated math widget DOM", () => {
-    const md = "top\n\n$$\na\n$$\n\nmiddle\n\n$$\nb\n$$";
+    const md = "top\n\n\\[\na\n\\]\n\nmiddle\n\n\\[\nb\n\\]";
     const { editor, cleanup } = mountCM6(md);
 
     editor.setMarkdownSelection(md.indexOf("a"));
@@ -335,7 +335,7 @@ $$`;
   });
 
   test("getHTML renders current markdown through shared export pipeline", () => {
-    const { editor, cleanup } = mountCM6("# Title\n\n**bold**\n\n$$\nx+1\n$$");
+    const { editor, cleanup } = mountCM6("# Title\n\n**bold**\n\n\\[\nx+1\n\\]");
     const html = editor.getHTML();
     expect(html).toContain("<h1>Title</h1>");
     expect(html).toContain("<strong>");
@@ -345,11 +345,11 @@ $$`;
 
   test("org-env body remains normal CM6 markdown with math widgets", () => {
     const md = String.raw`#+begin theorem
-Inline $x+1$.
+Inline \(x+1\).
 
-$$
+\[
 y^2
-$$
+\]
 #+end theorem`;
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.indexOf("Inline"));
@@ -367,29 +367,29 @@ $$
     const md = String.raw`#+begin define
 1. Conjugate symmetry 共轭对称性:
 
-   $$
+   \[
    \langle v,w \rangle
    =
    \overline{\langle w,v \rangle}
-   $$
+   \]
 
 2. Additivity in the first variable 第一变量加法线性:
 
-   $$
+   \[
    \langle v_1 + v_2, w \rangle
    =
    \langle v_1,w \rangle
    +
    \langle v_2,w \rangle
-   $$
+   \]
 
 3. Homogeneity in the first variable 第一变量齐次线性:
 
-   $$
+   \[
    \langle \lambda v,w \rangle
    =
    \lambda \langle v,w \rangle
-   $$
+   \]
 #+end define`;
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(0);
@@ -397,11 +397,11 @@ $$
     const mathBlocks = Array.from(document.querySelectorAll<HTMLElement>(".cm-math-block"));
     expect(mathBlocks).toHaveLength(3);
     expect(mathBlocks.every((block) => block.dataset.orgEnvKind === "define")).toBe(true);
-    expect(mathBlocks.map((block) => block.textContent).join("\n")).not.toContain("$$");
-    const firstOpenLine = md.indexOf("   $$");
-    const firstCloseLine = md.indexOf("   $$", firstOpenLine + 1);
+    expect(mathBlocks.map((block) => block.textContent).join("\n")).not.toContain("\\[");
+    const firstOpenLine = md.indexOf("   \\[");
+    const firstCloseLine = md.indexOf("   \\]");
     expect(Number(mathBlocks[0]!.dataset.cmSourceFrom)).toBe(firstOpenLine);
-    expect(Number(mathBlocks[0]!.dataset.cmSourceTo)).toBe(firstCloseLine + "   $$".length);
+    expect(Number(mathBlocks[0]!.dataset.cmSourceTo)).toBe(firstCloseLine + "   \\]".length);
     expect(document.querySelector("link[data-aaronnote-katex-css]")).toBeTruthy();
     cleanup();
   });
@@ -440,7 +440,7 @@ $$
   });
 
   test("does not resolve markdown links inside inline math", () => {
-    const md = "Math $[x](y.md) $ and [real](z.md)";
+    const md = "Math \\([x](y.md) \\) and [real](z.md)";
     const { editor, cleanup } = mountCM6(md);
 
     expect(markdownHrefAt(editor.view.state, md.indexOf("x"))).toBeNull();
@@ -449,7 +449,7 @@ $$
   });
 
   test("marks unresolved wikilinks and bare roam links", () => {
-    const md = "Known [[Density Operator]], missing [[Ghost Note]], math $[[X]] $, and roam://bad-id.";
+    const md = "Known [[Density Operator]], missing [[Ghost Note]], math \\([[X]] \\), and roam://bad-id.";
     const { editor, cleanup } = mountCM6(md);
 
     editor.view.dispatch({ effects: setKnownRoamRefs.of(["Density Operator"]) });
@@ -766,9 +766,9 @@ $$
     const md = String.raw`#+begin theorem
 Before
 
-$$
+\[
 y^2
-$$
+\]
 #+end theorem`;
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(0);
@@ -1047,9 +1047,9 @@ $$
 
   test("mermaid preview source stays inside the fence when editing trailing attrs", () => {
     const md = [
-      "$$",
+      "\\[",
       "x",
-      "$$",
+      "\\]",
       "```mermaid",
       "graph LR",
       "  subgraph L[\"L, #L = ell\"]",
@@ -1539,7 +1539,7 @@ tags: one, two
   });
 
   test("clicking a rendered display math block reopens markdown source without bottom preview", () => {
-    const md = "before\n\n$$\na+b\n$$\n\nafter";
+    const md = "before\n\n\\[\na+b\n\\]\n\nafter";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(0);
     const block = document.querySelector<HTMLElement>(".cm-math-block");
@@ -1556,13 +1556,13 @@ tags: one, two
 
   test("expanded org-env display math is source-only", () => {
     const md = String.raw`#+begin proof
-$$
+\[
 \langle v,w_1+w_2 \rangle
 =
 \overline{\langle w_1,v \rangle}
 +
 \overline{\langle w_2,v \rangle}.
-$$
+\]
 #+end proof`;
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.indexOf("w_1,v"));
@@ -1577,13 +1577,13 @@ $$
 
   test("expanded display math suppresses other preview widgets inside org-env", () => {
     const md = String.raw`#+begin proof
-$$
+\[
 \langle \cdot,\cdot \rangle : V \times V \to F.
 # Stack
 @@todo(done) [sample]{ddl=2026-01-01}
 ![alt](missing.png)
 $x$
-$$
+\]
 #+end proof`;
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.indexOf("# Stack") + 2);
@@ -1701,7 +1701,7 @@ $$
   });
 
   test("renders bracketed math inside inline todo widgets", () => {
-    const md = String.raw`@@todo [prove $\alpha_{[i]}$ and $\sqrt[3]{x}$]{ddl=2026-06-01}` + "\nplain";
+    const md = String.raw`@@todo [prove \(\alpha_{[i]}\) and \(\sqrt[3]{x}\)]{ddl=2026-06-01}` + "\nplain";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
 
@@ -1732,9 +1732,9 @@ $$
   test("org-env scanner ignores boundary-looking lines inside display math", () => {
     const md = String.raw`#+begin proof
 before
-$$
+\[
 #+end proof
-$$
+\]
 after
 #+end proof`;
     const { editor, cleanup } = mountCM6(md);
@@ -1764,14 +1764,14 @@ after
   });
 
   test("clicking rendered inline widgets opens their markdown source", () => {
-    const md = "before $x+1$ after\n\n- [ ] task\n\n![alt](missing.png)";
+    const md = "before \\(x+1\\) after\n\n- [ ] task\n\n![alt](missing.png)";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
 
     const inlineMath = document.querySelector<HTMLElement>(".cm-math-inline");
     expect(inlineMath).toBeTruthy();
     inlineMath!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
-    expect(editor.getMarkdownSelection().from).toBe(md.indexOf("$x+1$") + 1);
+    expect(editor.getMarkdownSelection().from).toBe(md.indexOf("\\(x+1\\)") + 2);
     expect(document.querySelector(".cm-math-inline")).toBeNull();
 
     editor.setMarkdownSelection(0);
@@ -1784,7 +1784,7 @@ after
 
   test("selection-only updates open and restore CM6 inline widget source", () => {
     const md = [
-      "before $x+1$ after",
+      "before \\(x+1\\) after",
       "",
       "@@todo(doing) [write proof]",
       "",

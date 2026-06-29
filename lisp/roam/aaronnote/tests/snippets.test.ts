@@ -179,15 +179,15 @@ describe("aaronnote snippets", () => {
   test("plain child snippet without tabstops does not advance the parent snippet", () => {
     const editor = new TextEditor();
     const session = new SnippetSession(editor.asEditor());
-    session.insert({ key: ";", name: "Inline math", mode: "markdown-mode", body: "$${1:x}$ $0" });
+    session.insert({ key: ";", name: "Inline math", mode: "markdown-mode", body: "\\(${1:x}\\) $0" });
 
     editor.replaceRange(editor.selection.from, editor.selection.to, "aaaa", "end");
     expect(session.insert({ key: "aaaa", name: "Alpha", mode: "tex-mode", body: "\\alpha" }, 4)).toBe(true);
 
-    expect(editor.text).toBe("$\\alpha$ ");
-    expect(editor.selection).toEqual({ from: "$\\alpha".length, to: "$\\alpha".length });
+    expect(editor.text).toBe("\\(\\alpha\\) ");
+    expect(editor.selection).toEqual({ from: "\\(\\alpha".length, to: "\\(\\alpha".length });
     expect(session.next()).toBe(true);
-    expect(editor.selection).toEqual({ from: "$\\alpha$ ".length, to: "$\\alpha$ ".length });
+    expect(editor.selection).toEqual({ from: "\\(\\alpha\\) ".length, to: "\\(\\alpha\\) ".length });
   });
 
   test("contenteditable snippet insertion deletes the trigger prefix before the caret", () => {
@@ -303,16 +303,16 @@ describe("aaronnote snippets", () => {
         key: ":",
         name: "Display math",
         mode: "markdown-mode",
-        body: "$$\n$1\n$$\n$0",
+        body: "\\[\n$1\n\\]\n$0",
       })).toBe(true);
 
       let selection = editor.getSelection();
       expect(selection.from).toBe(selection.to);
       editor.replaceRange(selection.from, selection.to, "a", "end");
-      expect(editor.getMarkdown()).toBe("$$\na\n$$");
+      expect(editor.getMarkdown()).toBe("\\[\na\n\\]");
 
       editor.insertText("\n");
-      expect(editor.getMarkdown()).toBe("$$\na\n\n$$");
+      expect(editor.getMarkdown()).toBe("\\[\na\n\n\\]");
     } finally {
       editor.destroy();
       mount.remove();
@@ -324,7 +324,7 @@ describe("aaronnote snippets", () => {
     document.body.appendChild(mount);
       const editor = createEditor(mount);
     try {
-      editor.setMarkdown("$$\nfrac\n$$");
+      editor.setMarkdown("\\[\nfrac\n\\]");
       editor.setSelection(editor.getMarkdown().indexOf("frac") + "frac".length);
       const session = new SnippetSession(editor);
       expect(session.insert({
@@ -334,7 +334,7 @@ describe("aaronnote snippets", () => {
         body: "\\frac{${1:a}}{${2:b}}$0",
       }, 4)).toBe(true);
 
-      expect(editor.getMarkdown()).toBe("$$\n\\frac{a}{b}\n$$");
+      expect(editor.getMarkdown()).toBe("\\[\n\\frac{a}{b}\n\\]");
       const selection = editor.getSelection();
       expect(editor.textBetween(selection.from, selection.to)).toBe("a");
     } finally {
@@ -343,13 +343,13 @@ describe("aaronnote snippets", () => {
     }
   });
 
-  test("plain tex snippet confirmed inside inline math keeps cursor before the closing dollar", () => {
+  test("plain tex snippet confirmed inside inline math keeps cursor before the closing delimiter", () => {
     const mount = document.createElement("div");
     document.body.appendChild(mount);
       const editor = createEditor(mount);
     try {
-      editor.setMarkdown("$aaaa$");
-      editor.setSelection(1 + "aaaa".length);
+      editor.setMarkdown("\\(aaaa\\)");
+      editor.setSelection(2 + "aaaa".length);
       const session = new SnippetSession(editor);
       expect(session.insert({
         key: "aaaa",
@@ -358,11 +358,11 @@ describe("aaronnote snippets", () => {
         body: "\\alpha",
       }, 4)).toBe(true);
 
-      expect(editor.getMarkdown()).toBe("$\\alpha$");
+      expect(editor.getMarkdown()).toBe("\\(\\alpha\\)");
       const selection = editor.getSelection();
       expect(selection.from).toBe(selection.to);
       expect(editor.textBetween(selection.from - "\\alpha".length, selection.from)).toBe("\\alpha");
-      expect(editor.textBetween(selection.from, selection.from + 1)).toBe("$");
+      expect(editor.textBetween(selection.from, selection.from + 2)).toBe("\\)");
     } finally {
       editor.destroy();
       mount.remove();

@@ -8,6 +8,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { changedRoamFilesSince, commitRoam, fileHistory, restoreFileFromCommit, discardFileChanges, roamRepoStatus, roamRepoChanges, diffRoamFile, diffRoamCommit, pullRoam, pushRoam, repoHistory, headSha } from "./roam-git.mjs";
 import { configureTmpRoot, aaronnoteTmpRoot, runtimeMkdtemp, runtimeTmpFile } from "./tmp.mjs";
+import { aaronnoteMarkdownToLatex, applyLatexTemplate, defaultLatexOutputPath, escapeLatexTitle, latexMacrosPreamble, readLatexTemplate, writeLatexExport } from "./latex-export.mjs";
+import { loadKatexMacros } from "./katex-macros.mjs";
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 let workspaceRoot = resolve(process.env.AARONNOTE_WORKSPACE_ROOT || resolve(appDir, ".."));
@@ -16,6 +18,8 @@ let stateRoot = resolve(process.env.AARONNOTE_STATE_DIR || join(workspaceRoot, "
 let runtimeTmpRoot = configureTmpRoot(process.env.AARONNOTE_TMP_DIR || join(stateRoot, "tmp"));
 let snippetsRoot = resolve(process.env.AARONNOTE_SNIPPETS_ROOT || join(workspaceRoot, "snippets"));
 let templatesRoot = resolve(process.env.AARONNOTE_TEMPLATES_ROOT || join(workspaceRoot, "templates", "aaronnote"));
+let latexTemplatesRoot = resolve(process.env.AARONNOTE_LATEX_TEMPLATES_ROOT || join(workspaceRoot, "templates"));
+let katexMacrosRoot = resolve(process.env.AARONNOTE_KATEX_MACROS_DIR || join(workspaceRoot, "etc", "katex-macros"));
 const execFileAsync = promisify(execFile);
 
 let noteRoot = resolveUserPath(process.env.AARONNOTE_ROOT || join(appDir, "..", "roam"));
@@ -1635,7 +1639,7 @@ export async function exportPdf(file, content) {
   try {
     await execFileAsync("pandoc", [
       input,
-      "--from=markdown+tex_math_dollars+fenced_divs",
+      "--from=markdown+tex_math_single_backslash+fenced_divs",
       "--pdf-engine=xelatex",
       "-V", "mainfont=Times New Roman",
       "-V", "CJKmainfont=FZLiuGongQuanKaiShuJF",
@@ -2768,21 +2772,22 @@ function findInlineCommandClose(text, open, closeChar) {
   let bracketDepth = 0;
   for (let i = open + 1; i < text.length; i++) {
     const ch = text[i];
-    if (ch === "\\" && i + 1 < text.length) {
-      i++;
-      continue;
-    }
-    if (ch === "\n" || ch === "\r") return -1;
-    if (closeChar === "]" && ch === "$") {
-      const display = text[i + 1] === "$";
-      const close = display ? "$$" : "$";
-      const start = i + close.length;
+    // Skip over a whole inline/display math span so its `]` content does not
+    // close the attribute block. Checked before the generic backslash escape.
+    if (closeChar === "]" && ch === "\\" && (text[i + 1] === "(" || text[i + 1] === "[")) {
+      const close = text[i + 1] === "[" ? "\\]" : "\\)";
+      const start = i + 2;
       const found = text.indexOf(close, start);
       if (found >= 0 && !/[\n\r]/.test(text.slice(start, found))) {
         i = found + close.length - 1;
         continue;
       }
     }
+    if (ch === "\\" && i + 1 < text.length) {
+      i++;
+      continue;
+    }
+    if (ch === "\n" || ch === "\r") return -1;
     if (closeChar === "]" && ch === "[") {
       bracketDepth++;
       continue;
@@ -3307,6 +3312,155 @@ async function templateByKey(key) {
   return templates.find((template) => template.key === wanted)
     ?? templates.find((template) => template.key.split("/").at(-1) === wanted)
     ?? null;
+}
+
+function latexExportStateFile() {
+  return join(stateRoot, "export-latex.json");
+}
+
+async function readLatexExportState() {
+  try {
+    const raw = await readFile(latexExportStateFile(), "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeLatexExportState(state) {
+  await atomicWriteFile(latexExportStateFile(), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+function resolveLatexOutputPath(input, sourceFile = "") {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  if (/^~(?:$|[\\/])/.test(raw) || raw.startsWith("/")) return resolveUserPath(raw);
+  return resolve(sourceFile ? dirname(sourceFile) : workspaceRoot, raw);
+}
+
+function latexExportSourceFile(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  return safeOpenFile(raw);
+}
+
+function latexExportTitle(sourceFile, bodyTitle, metaTitle = "") {
+  const title = String(bodyTitle || metaTitle || "").trim();
+  if (title) return title;
+  const base = basename(sourceFile || "Aaronnote").replace(/\.[^.]+$/, "");
+  return base || "Aaronnote";
+}
+
+async function chooseMacSavePath(defaultPath, prompt = "Export LaTeX as:") {
+  const fallback = resolveLatexOutputPath(defaultPath || join(homedir(), "Aaronnote.tex"));
+  const defaultDirectory = existsSync(dirname(fallback)) ? dirname(fallback) : homedir();
+  const script = [
+    `set defaultPath to POSIX file ${JSON.stringify(defaultDirectory + "/")}`,
+    `set chosenFile to choose file name with prompt ${JSON.stringify(prompt)} default name ${JSON.stringify(basename(fallback))} default location defaultPath`,
+    "POSIX path of chosenFile",
+  ].join("\n");
+  try {
+    const { stdout } = await execFileAsync("osascript", ["-e", script], {
+      timeout: 5 * 60 * 1000,
+    });
+    const selected = stdout.trim();
+    const path = selected
+      ? selected.toLowerCase().endsWith(".tex") ? selected : `${selected}.tex`
+      : "";
+    return path ? { ok: true, path } : { ok: false, canceled: true };
+  } catch (err) {
+    const message = String(err?.stderr || err?.message || "");
+    if (/User canceled|cancelled/i.test(message)) return { ok: false, canceled: true };
+    return { ok: false, message: message.trim() || "System save dialog failed" };
+  }
+}
+
+export async function latexExportDefaults(body = {}) {
+  const sourceFile = latexExportSourceFile(body.file || body.sourceFile || "");
+  const state = await readLatexExportState();
+  const paths = state.paths && typeof state.paths === "object" ? state.paths : {};
+  const title = latexExportTitle(sourceFile, body.title || "", "");
+  return {
+    type: "latex-export-defaults",
+    ok: true,
+    file: sourceFile,
+    outputPath: paths[sourceFile] || defaultLatexOutputPath(sourceFile, title),
+    templateRoot: latexTemplatesRoot,
+  };
+}
+
+export async function chooseLatexOutputPath(body = {}) {
+  const defaults = await latexExportDefaults(body);
+  const defaultPath = resolveLatexOutputPath(body.defaultPath || defaults.outputPath, defaults.file);
+  if (process.platform === "darwin") {
+    return {
+      type: "latex-output-path",
+      ...await chooseMacSavePath(defaultPath),
+      defaultPath,
+    };
+  }
+  return {
+    type: "latex-output-path",
+    ok: false,
+    defaultPath,
+    message: "System save dialog is only implemented for macOS in this host",
+  };
+}
+
+export async function exportLatex(body = {}) {
+  const sourceFile = latexExportSourceFile(body.file || body.sourceFile || "");
+  const content = typeof body.content === "string"
+    ? body.content
+    : sourceFile
+      ? await readFile(sourceFile, "utf8")
+      : "";
+  if (!content.trim()) {
+    const err = new Error("No Aaronnote content to export");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const converted = aaronnoteMarkdownToLatex(content, { sourceFile });
+  const title = latexExportTitle(sourceFile, body.title || "", converted.meta.title || "");
+  const defaults = await latexExportDefaults({ file: sourceFile, title });
+  const outputPath = resolveLatexOutputPath(body.outputPath || defaults.outputPath, sourceFile);
+  if (!outputPath) {
+    const err = new Error("Missing LaTeX output path");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const template = await readLatexTemplate(latexTemplatesRoot, body.templatePath || "");
+  const macroResult = loadKatexMacros(katexMacrosRoot);
+  const latex = applyLatexTemplate(template.text, {
+    title: escapeLatexTitle(title),
+    date: escapeLatexTitle(converted.meta.date || new Date().toISOString().slice(0, 10)),
+    source: escapeLatexTitle(sourceFile ? displayPathForFile(sourceFile) : ""),
+    macros: latexMacrosPreamble(macroResult.macros),
+    body: converted.body,
+  });
+  const file = await writeLatexExport(outputPath, latex);
+
+  const state = await readLatexExportState();
+  const paths = state.paths && typeof state.paths === "object" ? state.paths : {};
+  paths[sourceFile] = file;
+  await writeLatexExportState({
+    ...state,
+    schemaVersion: 1,
+    paths,
+    updatedAt: new Date().toISOString(),
+  });
+
+  return {
+    type: "latex-export",
+    ok: true,
+    file,
+    sourceFile,
+    title,
+    template: template.file,
+    bytes: Buffer.byteLength(latex, "utf8"),
+  };
 }
 
 export function offsetToPosition(text, offset) {
@@ -5019,6 +5173,8 @@ export function configure(options = {}) {
   runtimeTmpRoot = configureTmpRoot(options.tmpRoot || process.env.AARONNOTE_TMP_DIR || join(stateRoot, "tmp"));
   snippetsRoot = resolve(String(options.snippetsRoot || process.env.AARONNOTE_SNIPPETS_ROOT || join(workspaceRoot, "snippets")));
   templatesRoot = resolve(String(options.templatesRoot || process.env.AARONNOTE_TEMPLATES_ROOT || join(workspaceRoot, "templates", "aaronnote")));
+  latexTemplatesRoot = resolve(String(options.latexTemplatesRoot || process.env.AARONNOTE_LATEX_TEMPLATES_ROOT || join(workspaceRoot, "templates")));
+  katexMacrosRoot = resolve(String(options.katexMacrosRoot || process.env.AARONNOTE_KATEX_MACROS_DIR || join(workspaceRoot, "etc", "katex-macros")));
   snippetCache = { key: "", scannedAt: 0, snippets: [] };
   templateCache = { key: "", scannedAt: 0, templates: [] };
   contentRootCache.clear();

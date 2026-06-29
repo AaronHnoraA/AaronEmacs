@@ -40,8 +40,8 @@ describe("HTML paste conversion", () => {
         <div class="aaronnote-math-block math-block-render" data-tex="y^2"><span>y2</span></div>
       </math-block>
     `);
-    expect(md).toContain("Inline $x+1$.");
-    expect(md).toContain("$$\ny^2\n$$");
+    expect(md).toContain("Inline \\(x+1\\).");
+    expect(md).toContain("\\[\ny^2\n\\]");
     expect(md).not.toContain("y2");
   });
 

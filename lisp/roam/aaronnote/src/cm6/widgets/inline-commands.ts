@@ -36,7 +36,7 @@ import { hasViewportDecorationRefresh } from "../viewport-refresh.ts";
 
 /**
  * Render a @@todo body as inline HTML so embedded markdown — notably inline math
- * `$…$` — renders inside the chip. The body sits in a replaced widget, so the
+ * `\(…\)` — renders inside the chip. The body sits in a replaced widget, so the
  * usual live-preview math decoration cannot reach it; we render it here instead,
  * via the same shared renderer the table cells use, and unwrap the `<p>`.
  */

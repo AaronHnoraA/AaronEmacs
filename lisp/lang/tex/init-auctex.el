@@ -17,6 +17,7 @@
 (declare-function my/mouse-code-actions "init-mouse" (event))
 (declare-function evil-local-set-key "evil-core" (state key def))
 (declare-function TeX-command-run-all "tex" (arg))
+(declare-function TeX-master-directory "tex" ())
 (declare-function TeX-master-file "tex" (&optional extension nondirectory ask))
 (declare-function TeX-master-output-file "tex" (extension))
 (declare-function TeX-process "tex" (name))
@@ -25,16 +26,21 @@
 (declare-function TeX-PDF-mode "tex" (&optional arg))
 (declare-function TeX-view "tex" ())
 (declare-function TeX-view-mouse "tex" (event))
+(declare-function completion-preview-mode "completion-preview" (&optional arg))
 (declare-function pdf-sync-backward-search-mouse "pdf-sync" (ev))
 (declare-function pdf-sync-locate-synctex-file "pdf-sync" (pdffile))
 
 ;; --- XeLaTeX 与 pdflatex 的编译命令，注入 -synctex=1 ---
 
 (defvar TeX-source-correlate-map)
+(defvar TeX-auto-local)
+(defvar TeX-auto-save-aggregate)
 (defvar TeX-current-process-region-p)
 (defvar TeX-default-extension)
 (defvar TeX-engine)
 (defvar TeX-output-dir)
+(defvar TeX-style-path)
+(defvar completion-preview-mode)
 (defvar eglot-mode-map)
 (defvar lsp-mode-map)
 
@@ -106,6 +112,18 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
   :type 'number
   :group 'TeX-command)
 
+(config-defvar my/auctex-auto-cache-root
+  (expand-file-name "var/auctex/auto/" user-emacs-directory)
+  "Root directory for generated AUCTeX auto style files."
+  :type 'directory
+  :group 'TeX-file)
+
+(config-defvar my/auctex-preview-output-root
+  (expand-file-name "var/auctex/output/" user-emacs-directory)
+  "Root directory for latexmk output created by the live preview workflow."
+  :type 'directory
+  :group 'TeX-command)
+
 (defvar-local my/auctex-live-preview--save-timer nil)
 (defvar-local my/auctex-live-preview--master-file nil)
 
@@ -119,6 +137,51 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
   "Seconds to keep waiting for the initial PDF after starting live preview."
   :type 'number
   :group 'TeX-command)
+
+(defun my/auctex--source-cache-key (&optional directory)
+  "Return a stable cache key for DIRECTORY."
+  (secure-hash 'sha1 (expand-file-name (or directory default-directory))))
+
+(defun my/auctex--cache-directory (root &optional directory)
+  "Return a per-source cache directory under ROOT for DIRECTORY."
+  (file-name-as-directory
+   (expand-file-name (my/auctex--source-cache-key directory) root)))
+
+(defun my/auctex--master-directory ()
+  "Return the current TeX master directory, falling back to `default-directory'."
+  (or (ignore-errors (TeX-master-directory))
+      default-directory))
+
+(defun my/auctex-setup-auto-cache ()
+  "Keep generated AUCTeX style information outside project directories."
+  (let* ((source-dir (my/auctex--master-directory))
+         (old-auto TeX-auto-local)
+         (old-auto-dir (and old-auto (expand-file-name old-auto source-dir)))
+         (auto-dir (my/auctex--cache-directory
+                    my/auctex-auto-cache-root
+                    source-dir)))
+    (make-directory auto-dir t)
+    (setq-local TeX-auto-local auto-dir
+                TeX-auto-save-aggregate t)
+    (when (boundp 'TeX-style-path)
+      (setq-local
+       TeX-style-path
+       (cons auto-dir
+             (cl-remove-if
+              (lambda (path)
+                (and old-auto-dir
+                     (stringp path)
+                     (string= (expand-file-name path source-dir)
+                              old-auto-dir)))
+              (remove auto-dir TeX-style-path)))))))
+
+(defun my/auctex-setup-preview-output ()
+  "Route live-preview latexmk output outside project directories."
+  (let ((output-dir (my/auctex--cache-directory
+                     my/auctex-preview-output-root
+                     (my/auctex--master-directory))))
+    (make-directory output-dir t)
+    (setq-local TeX-output-dir output-dir)))
 
 (defun my/latex-preview--master-tex-file ()
   "Return the current AUCTeX master TeX file, never the region file."
@@ -226,6 +289,7 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
     (user-error "Current buffer is not visiting a file"))
   (when (buffer-modified-p)
     (save-buffer))
+  (my/auctex-setup-preview-output)
   (setq TeX-current-process-region-p nil)
   (let* ((master-file (my/latex-preview--master-tex-file))
          (pdf-file (my/latex-preview--output-pdf-file))
@@ -306,6 +370,7 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
 
 (defun my/auctex-setup-build-workflow ()
   "Prefer latexmk-based builds in LaTeX buffers."
+  (my/auctex-setup-auto-cache)
   (when (eq TeX-engine 'default)
     (setq-local TeX-engine 'xetex))
   (setq-local TeX-command-default
@@ -658,6 +723,7 @@ highlight the matching PDF location."
     (TeX-PDF-mode 1))
   (when (buffer-modified-p)
     (save-buffer))
+  (my/auctex-setup-preview-output)
   (setq TeX-current-process-region-p nil)
   (my/latex-preview--stop-region-process)
   (let ((pdf (my/latex-preview--output-pdf-file)))
@@ -702,10 +768,24 @@ highlight the matching PDF location."
 
 (defun my/auctex-setup-preview-workflow ()
   "Expose the PDF workbench and SyncTeX commands in LaTeX buffers."
+  (when (bound-and-true-p completion-preview-mode)
+    (completion-preview-mode -1))
   (local-set-key (kbd "C-c C-p") #'my/latex-preview-current-buffer)
   (local-set-key (kbd "C-c C-g") #'my/latex-sync-forward)
   (local-set-key (kbd "M-RET") #'my/latex-sync-forward)
   (local-set-key (kbd "M-<return>") #'my/latex-sync-forward))
+
+(defun my/auctex-install-preview-keys ()
+  "Install final PDF-preview keys after AUCTeX and preview-latex maps load."
+  (dolist (map-symbol '(LaTeX-mode-map TeX-mode-map latex-mode-map tex-mode-map))
+    (when (and (boundp map-symbol)
+               (keymapp (symbol-value map-symbol)))
+      (define-key (symbol-value map-symbol)
+                  (kbd "C-c C-p")
+                  #'my/latex-preview-current-buffer)
+      (define-key (symbol-value map-symbol)
+                  (kbd "C-c C-g")
+                  #'my/latex-sync-forward))))
 
 (use-package tex
   :ensure auctex
@@ -717,10 +797,17 @@ highlight the matching PDF location."
   (LaTeX-mode . TeX-source-correlate-mode)
   (LaTeX-mode . my/auctex-setup-build-workflow)
   (LaTeX-mode . my/auctex-setup-preview-workflow)
+  (TeX-mode . my/auctex-setup-build-workflow)
+  (TeX-mode . my/auctex-setup-preview-workflow)
   :config
   (setq TeX-engine 'xetex)
   (setq TeX-source-correlate-method 'synctex)
   (setq TeX-source-correlate-start-server t)
+  (my/auctex-install-preview-keys)
+  (with-eval-after-load 'latex
+    (my/auctex-install-preview-keys))
+  (with-eval-after-load 'preview
+    (my/auctex-install-preview-keys))
   (define-key TeX-source-correlate-map [M-down-mouse-1]
               #'my/latex-sync-forward-mouse)
   (define-key TeX-source-correlate-map [M-mouse-1]

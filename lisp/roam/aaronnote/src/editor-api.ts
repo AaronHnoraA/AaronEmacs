@@ -336,7 +336,7 @@ const builtInQuickInsertItems: QuickInsertItem[] = [
   {
     id: "math-block",
     label: "Math block",
-    detail: "$$",
+    detail: "\\[ \\]",
     command: "insert-math-block",
     keywords: ["latex", "tex", "equation"],
   },

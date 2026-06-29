@@ -27,6 +27,9 @@ import {
   scanNotes,
   tagIndexPayload,
   pathSuggestionsForFile,
+  latexExportDefaults,
+  chooseLatexOutputPath,
+  exportLatex,
   readNoteCodeRegion,
   syncRoamDb,
   scanSnippets,
@@ -72,6 +75,7 @@ import { createImeSwitcher } from "./server/lib/ime.mjs";
 
 const ime = createImeSwitcher();
 import { runtimeMkdtemp, sweepRuntimeTmp } from "./server/lib/tmp.mjs";
+import { loadKatexMacros } from "./server/lib/katex-macros.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -85,6 +89,7 @@ const stateRoot = resolve(process.env.AARONNOTE_STATE_DIR || join(workspaceRoot,
 const tmpRoot = resolve(process.env.AARONNOTE_TMP_DIR || join(stateRoot, "tmp"));
 const snippetsRoot = resolve(process.env.AARONNOTE_SNIPPETS_ROOT || join(workspaceRoot, "snippets"));
 const templatesRoot = resolve(process.env.AARONNOTE_TEMPLATES_ROOT || join(workspaceRoot, "templates", "aaronnote"));
+const katexMacrosDir = resolve(process.env.AARONNOTE_KATEX_MACROS_DIR || join(workspaceRoot, "etc", "katex-macros"));
 const bindHost = process.env.AARONNOTE_WEB_HOST || "127.0.0.1";
 const bindPort = Number(process.env.AARONNOTE_WEB_PORT || 0);
 const liuGongQuanFontCandidates = [
@@ -552,6 +557,9 @@ const apiHandlers = {
   "aaronnote:api:notes:roam-sync-full": () => roamSyncFullPayload(),
   "aaronnote:api:notes:templates": (force) => templatesPayload(force === true),
   "aaronnote:api:notes:snippets": () => snippetsPayload(true),
+  "aaronnote:api:latex:defaults": (body) => latexExportDefaults(body || {}),
+  "aaronnote:api:latex:choose-output-path": (body) => chooseLatexOutputPath(body || {}),
+  "aaronnote:api:latex:export": (body) => exportLatex(body || {}),
   "aaronnote:api:notes:meta-add": (body) => updateCurrentNoteMeta(body || {}, "add"),
 
   "aaronnote:api:roam-tools:rename-tag": (body) => renameRoamTag(body || {}),
@@ -599,7 +607,15 @@ const apiHandlers = {
   "aaronnote:api:emacs:current-file": (file) => apiCurrentFile(file),
   "aaronnote:api:emacs:key": (key) => apiEmacsKey(key),
   "aaronnote:api:emacs:system-open": (target) => apiSystemOpen(target),
+  "aaronnote:api:config:katex-macros": () => katexMacrosPayload(),
 };
+
+// Read + parse the global KaTeX macro folder on every request (few small files),
+// so editing macros only needs a browser refresh to take effect.
+function katexMacrosPayload() {
+  const { macros, errors } = loadKatexMacros(katexMacrosDir);
+  return { type: "katex-macros", dir: katexMacrosDir, macros, errors };
+}
 
 async function readSystemClipboard(body) {
   const file = String(body.file || "");
@@ -796,6 +812,11 @@ function adapterScript(origin) {
     noteCode: {
       readRegion: function(body) { return call("aaronnote:api:note-code:read-region", [body || {}]); }
     },
+    latex: {
+      defaults: function(body) { return call("aaronnote:api:latex:defaults", [body || {}]); },
+      chooseOutputPath: function(body) { return call("aaronnote:api:latex:choose-output-path", [body || {}]); },
+      export: function(body) { return call("aaronnote:api:latex:export", [body || {}]); }
+    },
     roamTools: {
       renameTag: function(body) { return call("aaronnote:api:roam-tools:rename-tag", [body || {}]); },
       deleteTag: function(body) { return call("aaronnote:api:roam-tools:delete-tag", [body || {}]); },
@@ -867,6 +888,9 @@ function adapterScript(origin) {
     },
     ime: {
       vimMode: function(mode) { return call("aaronnote:api:ime:vim-mode", [{ mode: String(mode || "") }]); }
+    },
+    config: {
+      katexMacros: function() { return call("aaronnote:api:config:katex-macros", []); }
     }
   };
 }());

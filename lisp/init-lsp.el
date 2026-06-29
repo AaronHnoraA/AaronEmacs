@@ -699,7 +699,9 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
         company-files-exclusions '(".git/" ".DS_Store")
         company-backends my/company-lsp-backends)
   (when (boundp 'company-show-numbers)
-    (setq company-show-numbers t))
+    ;; `company-show-numbers' is the old UI for candidate shortcuts.  Keep the
+    ;; newer quick-access hints above as the single numbering surface.
+    (setq company-show-numbers nil))
   (setq-default company-backends my/company-lsp-backends))
 
 (with-eval-after-load 'esh-mode

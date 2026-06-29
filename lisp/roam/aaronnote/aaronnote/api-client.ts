@@ -93,6 +93,11 @@ type NativeApi = {
   noteCode?: {
     readRegion?: (body?: unknown) => Promise<unknown>;
   };
+  latex?: {
+    defaults?: (body?: Record<string, unknown>) => Promise<unknown>;
+    chooseOutputPath?: (body?: Record<string, unknown>) => Promise<unknown>;
+    export?: (body?: Record<string, unknown>) => Promise<unknown>;
+  };
   meta?: {
     add?: (body: Record<string, unknown>) => Promise<unknown>;
     remove?: (body: Record<string, unknown>) => Promise<unknown>;
@@ -130,6 +135,16 @@ type NativeApi = {
     run?: (body: ProseCheckBody) => Promise<unknown>;
     acceptWord?: (word: string) => Promise<unknown>;
   };
+  config?: {
+    katexMacros?: () => Promise<unknown>;
+  };
+};
+
+export type KatexMacrosResult = {
+  type?: string;
+  dir?: string;
+  macros?: Record<string, string>;
+  errors?: { file: string; message: string }[];
 };
 
 declare global {
@@ -204,6 +219,20 @@ export const api = {
     async readRegion(body: unknown): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().noteCode?.readRegion, "Note code");
       return ensureOk(await call(body) as Record<string, unknown>, "Note code failed");
+    },
+  },
+  latex: {
+    async defaults(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().latex?.defaults, "LaTeX export defaults");
+      return ensureOk(await call(body) as Record<string, unknown>, "LaTeX export defaults failed");
+    },
+    async chooseOutputPath(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().latex?.chooseOutputPath, "LaTeX output path chooser");
+      return await call(body) as Record<string, unknown>;
+    },
+    async export(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().latex?.export, "LaTeX export");
+      return ensureOk(await call(body) as Record<string, unknown>, "LaTeX export failed");
     },
   },
   meta: {
@@ -343,6 +372,13 @@ export const api = {
     async acceptWord(word: string): Promise<{ ok?: boolean; word?: string }> {
       const call = requireMethod(nativeApi().proseCheck?.acceptWord, "Prose dictionary");
       return ensureOk(await call(word) as { ok?: boolean; word?: string }, "Adding word failed");
+    },
+  },
+  config: {
+    async katexMacros(): Promise<KatexMacrosResult> {
+      const call = nativeApi().config?.katexMacros;
+      if (!call) return {};
+      return (await call()) as KatexMacrosResult;
     },
   },
 };

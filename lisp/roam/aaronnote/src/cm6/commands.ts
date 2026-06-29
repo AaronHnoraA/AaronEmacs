@@ -778,7 +778,7 @@ export function runCommandCM6(view: EditorView, command: EditorCommand, value = 
   }
 
   if (command === "insert-math-block") {
-    insertBlock(view, "$$\n\n$$", 3);
+    insertBlock(view, "\\[\n\n\\]", 3);
     return true;
   }
 

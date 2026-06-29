@@ -3,7 +3,7 @@ import { inlineTodoBodyHTML } from "../src/cm6/widgets/inline-commands.ts";
 
 describe("inlineTodoBodyHTML", () => {
   it("renders inline math inside a @@todo body", () => {
-    const html = inlineTodoBodyHTML("solve $x^2$ now");
+    const html = inlineTodoBodyHTML("solve \\(x^2\\) now");
     expect(html).toContain("katex");
     expect(html).toContain("solve");
     expect(html).toContain("now");
