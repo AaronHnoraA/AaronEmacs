@@ -166,7 +166,16 @@ function sectionCommand(level) {
 function beginEnv(kind, title) {
   const env = ENV_MAP.get(kind);
   if (env) {
-    const label = title ? `[${escapeLatexTitle(title)}]` : "";
+    let label = title ? escapeLatexTitle(title) : "";
+    if (kind === "proof" && label && !/^proof\b/i.test(title.trim())) {
+      const direction = title.trim() === "=>"
+        ? "\\(\\Rightarrow\\)"
+        : title.trim() === "<="
+          ? "\\(\\Leftarrow\\)"
+          : label;
+      label = `Proof (${direction})`;
+    }
+    label = label ? `[${label}]` : "";
     return `\\begin{${env}}${label}`;
   }
   if (COMMENT_BLOCKS.has(kind)) {
@@ -199,18 +208,20 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
   let fenceLine = 0;
   let inDisplayMath = false;
   let displayMathLine = 0;
-  let list = null;
+  const listStack = [];
 
   function closeList() {
-    if (!list) return;
-    out.push(`\\end{${list}}`, "");
-    list = null;
+    while (listStack.length) out.push(`\\end{${listStack.pop().kind}}`, "");
   }
 
-  function openList(kind) {
-    if (list === kind) return;
-    closeList();
-    list = kind;
+  function openList(kind, indent) {
+    while (listStack.length && listStack.at(-1).indent > indent) {
+      out.push(`\\end{${listStack.pop().kind}}`);
+    }
+    const current = listStack.at(-1);
+    if (current?.indent === indent && current.kind === kind) return;
+    if (current?.indent === indent) out.push(`\\end{${listStack.pop().kind}}`);
+    listStack.push({ kind, indent });
     out.push(`\\begin{${kind}}`);
   }
 
@@ -292,19 +303,21 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
       continue;
     }
 
-    const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
+    const unordered = line.match(/^([ \t]*)[-*+]\s+(.+)$/);
     if (unordered) {
       flushParagraph(out, paragraph);
-      openList("itemize");
-      out.push(`\\item ${convertInline(unordered[1])}`);
+      const indent = [...unordered[1]].reduce((sum, char) => sum + (char === "\t" ? 4 : 1), 0);
+      openList("itemize", indent);
+      out.push(`\\item ${convertInline(unordered[2])}`);
       continue;
     }
 
-    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    const ordered = line.match(/^([ \t]*)\d+[.)]\s+(.+)$/);
     if (ordered) {
       flushParagraph(out, paragraph);
-      openList("enumerate");
-      out.push(`\\item ${convertInline(ordered[1])}`);
+      const indent = [...ordered[1]].reduce((sum, char) => sum + (char === "\t" ? 4 : 1), 0);
+      openList("enumerate", indent);
+      out.push(`\\item ${convertInline(ordered[2])}`);
       continue;
     }
 

@@ -20,7 +20,7 @@ import {
   selectPageUp,
 } from "@codemirror/commands";
 import { insertNewlineContinueMarkup } from "@codemirror/lang-markdown";
-import { continueMarkdownBlock, exitEmptyMarkdownBlock } from "../src/cm6/commands.ts";
+import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownList } from "../src/cm6/commands.ts";
 import { historyChordKind } from "../src/keymap/shortcut-router.ts";
 
 type XwidgetControlKey = "Escape" | "Delete" | "Backspace";
@@ -206,6 +206,13 @@ function runEditorSpecialKey(key: XwidgetSpecialKey, context: XwidgetKeyContext,
     if (handled) context.editor.focus();
     return handled;
   }
+  if (!shiftKey && /^Arrow(?:Left|Right|Up|Down)$/.test(key)) {
+    const handled = context.vim.handleKey({ key });
+    if (handled) {
+      context.editor.focus();
+      return true;
+    }
+  }
   const view = context.editor.view;
   const command = (() => {
     switch (key) {
@@ -235,18 +242,10 @@ function runEditorSpecialKey(key: XwidgetSpecialKey, context: XwidgetKeyContext,
 }
 
 function runXwidgetTabKey(editor: Editor, shiftKey: boolean): boolean {
-  const doc = editor.view.state.doc;
-  const { from } = editor.getMarkdownSelection();
-  const line = doc.lineAt(Math.max(0, Math.min(from, doc.length)));
-  const text = line.text;
-  if (shiftKey) {
-    const remove = text.startsWith("  ") ? 2 : text.startsWith(" ") ? 1 : 0;
-    if (remove > 0) editor.replaceMarkdownRange(line.from, line.from + remove, "", "start");
-    return true;
-  }
-  if (!/^\s*(?:[-+*]|\d+[.)])\s/.test(text)) return false;
-  editor.replaceMarkdownRange(line.from, line.from, "  ", "end");
-  return true;
+  if (indentMarkdownList(editor.view, shiftKey ? -1 : 1)) return true;
+  // Shift-Tab must not escape the embedded editor even when there is no list
+  // level to lift. Plain Tab is left to CM6/snippet handling.
+  return shiftKey;
 }
 
 function shouldHandleXwidgetVimKey(event: KeyboardEvent | InputEvent, context: XwidgetKeyContext): boolean {

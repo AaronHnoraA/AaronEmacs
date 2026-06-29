@@ -2,7 +2,9 @@ import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
 import {
   buildLatexExportScopes,
   latexExportScopeContent,
+  latexExportScopesContent,
   latexHeadingRange,
+  toggleLatexExportScopeSelection,
 } from "../aaronnote/latex-export-scope.ts";
 
 describe("LaTeX export scopes", () => {
@@ -52,5 +54,23 @@ describe("LaTeX export scopes", () => {
     const selection = scopes.find((scope) => scope.kind === "selection")!;
     expect(selection.title).toBe("Text selection");
     expect(latexExportScopeContent(markdown, selection)).toBe("A.");
+  });
+
+  test("supports non-overlapping multi-section selection in document order", () => {
+    const scopes = buildLatexExportScopes({ markdown, headings });
+    const alpha = scopes.find((scope) => scope.title === "Alpha")!;
+    const nested = scopes.find((scope) => scope.title === "Nested")!;
+    const omega = scopes.find((scope) => scope.title === "Omega")!;
+
+    let selected = toggleLatexExportScopeSelection(scopes, new Set(), nested.id);
+    selected = toggleLatexExportScopeSelection(scopes, selected, omega.id);
+    expect([...selected]).toEqual([nested.id, omega.id]);
+    expect(latexExportScopesContent(markdown, scopes.filter((scope) => selected.has(scope.id))))
+      .toBe("## Nested\nN.\n\n# Omega\nO.");
+
+    selected = toggleLatexExportScopeSelection(scopes, selected, alpha.id);
+    expect([...selected]).toEqual([omega.id, alpha.id]);
+    selected = toggleLatexExportScopeSelection(scopes, selected, "document");
+    expect([...selected]).toEqual(["document"]);
   });
 });

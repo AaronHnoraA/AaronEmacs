@@ -20,6 +20,7 @@ import { calibrateWrappedLayoutClick, markdownHrefAt } from "../../src/cm6/edito
 import { setKnownRoamRefs } from "../../src/cm6/roam-link-status.ts";
 import { MATH_RENDER_ERROR_MAX_LENGTH } from "../../src/math-render.ts";
 import { createVimLite } from "../../aaronnote/vim-lite.ts";
+import { indentMarkdownBlock } from "../../src/cm6/commands.ts";
 
 // All tests in this file require CM6 deps installed.
 // Flip `CM6_READY` to `true` after:
@@ -2276,6 +2277,28 @@ maybeDescribe("cm6 kernel: selection", () => {
     expect(editor.getMarkdownSelection().from).toBe(9);
     press("k");
     expect(editor.getMarkdownSelection().from).toBe(4);
+    cleanup();
+  });
+
+  test("vim-lite normal-mode >> and << use semantic list nesting", () => {
+    const { editor, cleanup } = mountCM6("1. parent\n2. child\n3. tail");
+    const target = (editor.view as unknown as { contentDOM: HTMLElement }).contentDOM;
+    const vim = createVimLite(editor, document.body, {
+      onIndent: (direction) => indentMarkdownBlock(editor.view, direction),
+    });
+    const press = (key: string): void => {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      Object.defineProperty(event, "target", { value: target });
+      vim.handleKeyDown(event);
+    };
+    editor.setMarkdownSelection(editor.getMarkdown().indexOf("child"));
+    vim.setMode("normal");
+    press(">");
+    press(">");
+    expect(editor.getMarkdown()).toBe("1. parent\n    1. child\n2. tail");
+    press("<");
+    press("<");
+    expect(editor.getMarkdown()).toBe("1. parent\n2. child\n3. tail");
     cleanup();
   });
 

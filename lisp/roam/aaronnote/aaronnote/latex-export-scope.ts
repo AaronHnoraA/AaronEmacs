@@ -120,3 +120,41 @@ export function buildLatexExportScopes(options: {
 export function latexExportScopeContent(markdown: string, scope: LatexExportScope): string {
   return markdown.slice(scope.from, scope.to).trimEnd();
 }
+
+export function toggleLatexExportScopeSelection(
+  scopes: readonly LatexExportScope[],
+  selectedIds: ReadonlySet<string>,
+  toggledId: string,
+): Set<string> {
+  const toggled = scopes.find((scope) => scope.id === toggledId);
+  if (!toggled) return new Set(selectedIds);
+  if (toggled.kind !== "heading") return new Set([toggled.id]);
+
+  const next = new Set([...selectedIds].filter((id) =>
+    scopes.find((scope) => scope.id === id)?.kind === "heading",
+  ));
+  if (next.has(toggled.id)) {
+    next.delete(toggled.id);
+    return next;
+  }
+
+  // Parent and child scopes contain duplicate source. Keep the most recently
+  // chosen one and remove every overlapping ancestor/descendant.
+  for (const id of next) {
+    const scope = scopes.find((candidate) => candidate.id === id);
+    if (scope && scope.from < toggled.to && toggled.from < scope.to) next.delete(id);
+  }
+  next.add(toggled.id);
+  return next;
+}
+
+export function latexExportScopesContent(
+  markdown: string,
+  scopes: readonly LatexExportScope[],
+): string {
+  return [...scopes]
+    .sort((a, b) => a.from - b.from || a.to - b.to)
+    .map((scope) => latexExportScopeContent(markdown, scope))
+    .filter(Boolean)
+    .join("\n\n");
+}

@@ -3346,10 +3346,13 @@ function latexExportSourceFile(input) {
 }
 
 function latexExportTitle(sourceFile, bodyTitle, metaTitle = "") {
+  if (sourceFile) {
+    const fileTitle = basename(sourceFile).replace(/\.[^.]+$/, "").trim();
+    if (fileTitle) return fileTitle;
+  }
   const title = String(bodyTitle || metaTitle || "").trim();
   if (title) return title;
-  const base = basename(sourceFile || "Aaronnote").replace(/\.[^.]+$/, "");
-  return base || "Aaronnote";
+  return "Aaronnote";
 }
 
 async function chooseMacSavePath(defaultPath, prompt = "Export LaTeX as:") {

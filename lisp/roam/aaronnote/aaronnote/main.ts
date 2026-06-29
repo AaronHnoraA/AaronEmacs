@@ -9,7 +9,7 @@ import {
   type StoredPasteAsset,
 } from "../src/lib.ts";
 import { setupCopilot } from "../src/copilot/index.ts";
-import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownBlock, tableNavigateCell, tableEnterSameColumn } from "../src/cm6/commands.ts";
+import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownBlock, indentMarkdownList, tableNavigateCell, tableEnterSameColumn } from "../src/cm6/commands.ts";
 import { getBlockMathRanges, rangeAtPosition, rangeOverlapsAny } from "../src/cm6/math-ranges.ts";
 import { equationTagsFromText, getEquationTagHits } from "../src/equation-tags.ts";
 import { INLINE_MATH_RE } from "../src/inline-math.ts";
@@ -25,7 +25,8 @@ import { AssistScheduler, type AssistUpdateFlags, type AssistUpdateOptions } fro
 import { createFloatingTocPanel, inlineTagAnchorsFromText, markdownHeadingsFromText } from "./floating-toc.ts";
 import {
   buildLatexExportScopes,
-  latexExportScopeContent,
+  latexExportScopesContent,
+  toggleLatexExportScopeSelection,
   type LatexExportScope,
 } from "./latex-export-scope.ts";
 import { resolveAnchorHeading } from "../src/heading-slug.ts";
@@ -1919,7 +1920,7 @@ function currentMarkdownText(): string {
   return editor.view.state.doc.toString();
 }
 
-function openLatexScopeModal(scopes: readonly LatexExportScope[]): Promise<LatexExportScope | null> {
+function openLatexScopeModal(scopes: readonly LatexExportScope[]): Promise<LatexExportScope[] | null> {
   return new Promise((resolve) => {
     modal.innerHTML = "";
     const panel = document.createElement("form");
@@ -1944,19 +1945,19 @@ function openLatexScopeModal(scopes: readonly LatexExportScope[]): Promise<Latex
 
     const list = document.createElement("div");
     list.className = "aaronnote-latex-export-scopes";
-    list.setAttribute("role", "radiogroup");
-    list.setAttribute("aria-label", "LaTeX export scope");
+    list.setAttribute("role", "group");
+    list.setAttribute("aria-label", "LaTeX export scopes");
+    list.setAttribute("aria-multiselectable", "true");
     panel.appendChild(list);
 
-    let selectedId = scopes.some((scope) => scope.kind === "selection")
-      ? "selection"
-      : "document";
+    let selectedIds = new Set([scopes.some((scope) => scope.kind === "selection") ? "selection" : "document"]);
+    let focusedId = [...selectedIds][0]!;
     let visibleScopes = [...scopes];
 
-    const selectedScope = (): LatexExportScope | undefined =>
-      scopes.find((scope) => scope.id === selectedId);
+    const selectedScopes = (): LatexExportScope[] =>
+      scopes.filter((scope) => selectedIds.has(scope.id));
 
-    const close = (value: LatexExportScope | null): void => {
+    const close = (value: LatexExportScope[] | null): void => {
       modal.hidden = true;
       modal.innerHTML = "";
       modal.removeEventListener("mousedown", onBackdrop);
@@ -1969,8 +1970,8 @@ function openLatexScopeModal(scopes: readonly LatexExportScope[]): Promise<Latex
       visibleScopes = query
         ? headingScopes.filter((scope) => `${scope.title} ${scope.detail}`.toLocaleLowerCase().includes(query))
         : [...scopes];
-      if (!visibleScopes.some((scope) => scope.id === selectedId)) {
-        selectedId = visibleScopes.find((scope) => scope.active)?.id || visibleScopes[0]?.id || "";
+      if (!visibleScopes.some((scope) => scope.id === focusedId)) {
+        focusedId = visibleScopes.find((scope) => scope.active)?.id || visibleScopes[0]?.id || "";
       }
 
       const fragment = document.createDocumentFragment();
@@ -1985,9 +1986,9 @@ function openLatexScopeModal(scopes: readonly LatexExportScope[]): Promise<Latex
         row.type = "button";
         row.className = "aaronnote-latex-export-scope";
         row.dataset.scopeId = scope.id;
-        row.setAttribute("role", "radio");
-        row.setAttribute("aria-checked", String(scope.id === selectedId));
-        row.tabIndex = scope.id === selectedId ? 0 : -1;
+        row.setAttribute("role", "checkbox");
+        row.setAttribute("aria-checked", String(selectedIds.has(scope.id)));
+        row.tabIndex = scope.id === focusedId ? 0 : -1;
         row.style.setProperty("--latex-scope-depth", String(scope.kind === "heading" ? Math.max(0, scope.level - 1) : 0));
 
         const marker = document.createElement("span");
@@ -2009,32 +2010,38 @@ function openLatexScopeModal(scopes: readonly LatexExportScope[]): Promise<Latex
         detail.textContent = scope.detail;
         copy.append(name, detail);
         row.append(marker, copy);
-        row.addEventListener("click", (event) => {
-          if (event.detail > 1) {
-            close(scope);
-            return;
-          }
-          selectedId = scope.id;
+        const toggleScope = (): void => {
+          selectedIds = toggleLatexExportScopeSelection(scopes, selectedIds, scope.id);
+          focusedId = scope.id;
           render();
           list.querySelector<HTMLElement>(`[data-scope-id="${CSS.escape(scope.id)}"]`)?.focus();
-        });
+        };
+        row.addEventListener("click", toggleScope);
         row.addEventListener("keydown", (event) => {
           if (event.key !== "Enter" || event.isComposing) return;
           event.preventDefault();
-          close(scope);
+          toggleScope();
         });
         fragment.appendChild(row);
       }
       list.replaceChildren(fragment);
+      const selected = selectedScopes();
+      selectionSummary.textContent = selected.length === 0
+        ? "Select at least one section"
+        : selected.some((scope) => scope.kind !== "heading")
+          ? selected[0]!.title
+          : `${selected.length} ${selected.length === 1 ? "section" : "sections"} selected`;
+      submit.disabled = selected.length === 0;
+      submit.textContent = selected.length > 1 ? `Choose Path · ${selected.length}` : "Choose Path";
     };
 
     const moveSelection = (delta: number): void => {
       if (visibleScopes.length === 0) return;
-      const current = Math.max(0, visibleScopes.findIndex((scope) => scope.id === selectedId));
+      const current = Math.max(0, visibleScopes.findIndex((scope) => scope.id === focusedId));
       const next = Math.max(0, Math.min(visibleScopes.length - 1, current + delta));
-      selectedId = visibleScopes[next]!.id;
+      focusedId = visibleScopes[next]!.id;
       render();
-      list.querySelector<HTMLElement>(`[data-scope-id="${CSS.escape(selectedId)}"]`)?.focus();
+      list.querySelector<HTMLElement>(`[data-scope-id="${CSS.escape(focusedId)}"]`)?.focus();
     };
 
     search.addEventListener("input", render);
@@ -2051,10 +2058,14 @@ function openLatexScopeModal(scopes: readonly LatexExportScope[]): Promise<Latex
     });
     panel.addEventListener("submit", (event) => {
       event.preventDefault();
-      const scope = selectedScope();
-      if (scope) close(scope);
+      const selected = selectedScopes();
+      if (selected.length > 0) close(selected);
     });
 
+    const selectionSummary = document.createElement("div");
+    selectionSummary.className = "aaronnote-latex-export-selection-summary";
+    selectionSummary.setAttribute("aria-live", "polite");
+    panel.appendChild(selectionSummary);
     const actions = document.createElement("div");
     actions.className = "aaronnote-modal-actions";
     const cancel = document.createElement("button");
@@ -2076,7 +2087,7 @@ function openLatexScopeModal(scopes: readonly LatexExportScope[]): Promise<Latex
     render();
     window.setTimeout(() => {
       if (headingScopes.length > 6) search.focus();
-      else list.querySelector<HTMLElement>(`[data-scope-id="${CSS.escape(selectedId)}"]`)?.focus();
+      else list.querySelector<HTMLElement>(`[data-scope-id="${CSS.escape(focusedId)}"]`)?.focus();
     }, 0);
   });
 }
@@ -2096,17 +2107,15 @@ async function exportLatexTool(): Promise<void> {
     selection,
     cursor: editor.view.state.selection.main.head,
   });
-  const chosenScope = await openLatexScopeModal(scopes);
-  if (!chosenScope) {
+  const chosenScopes = await openLatexScopeModal(scopes);
+  if (!chosenScopes) {
     setStatus("LaTeX export canceled");
     return;
   }
 
-  const content = latexExportScopeContent(markdown, chosenScope);
-  const title = chosenScope.kind === "document"
-    ? currentNote()?.title || fileNameFromPath(currentFile)
-    : chosenScope.title;
-  const scope = chosenScope.kind;
+  const content = latexExportScopesContent(markdown, chosenScopes);
+  const title = fileNameFromPath(currentFile).replace(/\.[^.]+$/, "") || "Aaronnote";
+  const scope = chosenScopes.length === 1 ? chosenScopes[0]!.kind : "headings";
 
   try {
     setStatus("Choose LaTeX output path...");
@@ -4160,8 +4169,15 @@ function runHostKey(body: Record<string, unknown>): boolean {
       const tableHandled = tableNavigateCell(editor.view, -1);
       if (tableHandled) { scheduleAssistUpdate({ cursor: true }); return true; }
       const handled = jumpSnippetTabstopBack();
-      if (handled) scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
-      return handled;
+      if (handled) {
+        scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
+        return true;
+      }
+      if (indentMarkdownList(editor.view, -1)) {
+        scheduleAssistUpdate({ snippets: true, cursor: true });
+        return true;
+      }
+      return false;
     }
     const tableHandled = tableNavigateCell(editor.view, 1);
     if (tableHandled) { scheduleAssistUpdate({ cursor: true }); return true; }
@@ -4170,7 +4186,11 @@ function runHostKey(body: Record<string, unknown>): boolean {
       scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
       return true;
     }
-    // no snippet — fall through to insertHostKeyText("\t")
+    if (indentMarkdownList(editor.view, 1)) {
+      scheduleAssistUpdate({ snippets: true, cursor: true });
+      return true;
+    }
+    // No snippet/list match — fall through to insertHostKeyText("\t").
   }
   if (vim.mode() !== "insert" || hostKey.ctrlKey || hostKey.metaKey || hostKey.altKey) return false;
   if (key === "Enter") {
@@ -4490,7 +4510,12 @@ document.addEventListener("beforeinput", (event) => {
       scheduleAssistUpdate({ cursor: true });
       return;
     }
-    // No snippet match: fall through so CM6 inserts \t naturally
+    if (indentMarkdownList(editor.view, 1)) {
+      event.preventDefault();
+      scheduleAssistUpdate({ snippets: true, cursor: true });
+      return;
+    }
+    // No snippet/list match: fall through so CM6 inserts \t naturally.
     return;
   }
   if (handleXwidgetControlBeforeInput(event as InputEvent, {

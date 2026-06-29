@@ -247,20 +247,45 @@ maybeDescribe("CM6 markdown typing affordances", () => {
     ed.destroy();
   });
 
-  it("Tab and Shift-Tab indent selected markdown list items", async () => {
+  it("Tab and Shift-Tab nest a list item together with its subtree", async () => {
     const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
     const { indentMarkdownBlock, indentMarkdownList } = await import("../../src/cm6/commands.ts");
     const host = document.createElement("div");
-    const ed = createEditorCM6(host, { initialContent: "- one\n- two\nplain" });
-    ed.setSelection(0, "- one\n- two".length);
+    const ed = createEditorCM6(host, { initialContent: "- parent\n- child\n    - grandchild\n- tail" });
+    ed.setSelection(ed.getMarkdown().indexOf("child"));
 
     expect(indentMarkdownList(ed.view, 1)).toBe(true);
-    expect(ed.getMarkdown()).toBe("  - one\n  - two\nplain");
+    expect(ed.getMarkdown()).toBe("- parent\n    - child\n        - grandchild\n- tail");
     expect(indentMarkdownList(ed.view, -1)).toBe(true);
-    expect(ed.getMarkdown()).toBe("- one\n- two\nplain");
+    expect(ed.getMarkdown()).toBe("- parent\n- child\n    - grandchild\n- tail");
     ed.setSelection(ed.getMarkdown().length);
     expect(indentMarkdownBlock(ed.view, -1)).toBe(true);
-    expect(ed.getMarkdown()).toBe("- one\n- two\nplain");
+    expect(ed.getMarkdown()).toBe("- parent\n- child\n    - grandchild\n- tail");
+    ed.destroy();
+  });
+
+  it("renumbers ordered siblings when nesting and lifting list items", async () => {
+    const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
+    const { indentMarkdownList } = await import("../../src/cm6/commands.ts");
+    const host = document.createElement("div");
+    const ed = createEditorCM6(host, { initialContent: "1. parent\n2. child\n3. tail" });
+    ed.setSelection(ed.getMarkdown().indexOf("child"));
+
+    expect(indentMarkdownList(ed.view, 1)).toBe(true);
+    expect(ed.getMarkdown()).toBe("1. parent\n    1. child\n2. tail");
+    expect(indentMarkdownList(ed.view, -1)).toBe(true);
+    expect(ed.getMarkdown()).toBe("1. parent\n2. child\n3. tail");
+    ed.destroy();
+  });
+
+  it("does not create an invalid nested list without a previous parent item", async () => {
+    const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
+    const { indentMarkdownList } = await import("../../src/cm6/commands.ts");
+    const host = document.createElement("div");
+    const ed = createEditorCM6(host, { initialContent: "- first\n- second" });
+    ed.setSelection(2);
+    expect(indentMarkdownList(ed.view, 1)).toBe(false);
+    expect(ed.getMarkdown()).toBe("- first\n- second");
     ed.destroy();
   });
 });

@@ -773,11 +773,20 @@ button:disabled {
   height: 12px;
   box-sizing: border-box;
   border: 1px solid var(--aaron-muted);
-  border-radius: 50%;
+  border-radius: 2px;
 }
 
 .aaronnote-latex-export-scope[aria-checked="true"] .aaronnote-latex-export-radio {
-  border: 4px solid var(--aaron-red-dark);
+  display: grid;
+  place-items: center;
+  border-color: var(--aaron-red-dark);
+  background: var(--aaron-red-dark);
+}
+
+.aaronnote-latex-export-scope[aria-checked="true"] .aaronnote-latex-export-radio::after {
+  content: "✓";
+  color: var(--aaron-paper);
+  font: 800 9px/1 var(--aaron-font-sans);
 }
 
 .aaronnote-latex-export-scope-copy {
@@ -815,6 +824,11 @@ button:disabled {
   color: var(--aaron-muted);
   font: 12px/1.4 var(--aaron-font-sans);
   text-align: center;
+}
+
+.aaronnote-latex-export-selection-summary {
+  color: var(--aaron-muted);
+  font: 650 11px/1.3 var(--aaron-font-sans);
 }
 
 .aaronnote-modal-panel h2 {

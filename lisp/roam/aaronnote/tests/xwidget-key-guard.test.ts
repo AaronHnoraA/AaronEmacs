@@ -259,21 +259,43 @@ describe("xwidget key guard", () => {
 
   test("handles insert-mode Tab and Shift-Tab through CM6 list indentation", () => {
     const host = withMounted(document.createElement("section"));
-    const editor = createEditor(host, { initialContent: "- item" });
+    const editor = createEditor(host, { initialContent: "- parent\n- item" });
     const vim = createVimLite(editor, host);
     vim.setMode("insert");
-    editor.setMarkdownSelection(2);
+    editor.setMarkdownSelection(editor.getMarkdown().indexOf("item"));
     try {
       const tab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
       Object.defineProperty(tab, "target", { value: document.body });
       expect(handleXwidgetSpecialKeydown(tab, { editor, editorHost: host, vim })).toBe(true);
       expect(tab.defaultPrevented).toBe(true);
-      expect(editor.getMarkdown()).toBe("  - item");
+      expect(editor.getMarkdown()).toBe("- parent\n    - item");
 
       const shiftTab = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
       Object.defineProperty(shiftTab, "target", { value: document.body });
       expect(handleXwidgetSpecialKeydown(shiftTab, { editor, editorHost: host, vim })).toBe(true);
-      expect(editor.getMarkdown()).toBe("- item");
+      expect(editor.getMarkdown()).toBe("- parent\n- item");
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
+
+  test("normal-mode arrow movement uses the same vim motion as hjkl", () => {
+    const host = withMounted(document.createElement("section"));
+    const editor = createEditor(host, { initialContent: "aa\nbbbb\ncc" });
+    const vim = createVimLite(editor, host);
+    vim.setMode("insert");
+    editor.setMarkdownSelection(1);
+    try {
+      const down = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true });
+      Object.defineProperty(down, "target", { value: document.body });
+      expect(handleXwidgetSpecialKeydown(down, { editor, editorHost: host, vim })).toBe(true);
+      const arrowPosition = editor.getMarkdownSelection().from;
+
+      editor.setMarkdownSelection(1);
+      vim.setMode("normal");
+      expect(vim.handleKey({ key: "j" })).toBe(true);
+      expect(editor.getMarkdownSelection().from).toBe(arrowPosition);
     } finally {
       editor.destroy();
       host.remove();

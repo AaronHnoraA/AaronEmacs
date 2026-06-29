@@ -67,7 +67,7 @@ describe("LaTeX export", () => {
     expect(result.body).toContain("\\section{Main}");
     expect(result.body).toContain("\\begin{theorem}[Edge]");
     expect(result.body).toContain("\\lambda_\\otimes(B_G)=\\lambda(G)");
-    expect(result.body).toContain("\\begin{proof}[=>]");
+    expect(result.body).toContain("\\begin{proof}[Proof (\\(\\Rightarrow\\))]");
     expect(result.body).toContain("If \\(d < \\lambda(G)\\), contradiction.");
   });
 
@@ -83,6 +83,25 @@ describe("LaTeX export", () => {
     expect(result.body).toContain("\\(x_1\\)");
     expect(result.body).not.toContain("\\\\textbf");
     expect(result.body).not.toContain("[paper](");
+  });
+
+  test("preserves nested unordered and ordered list hierarchy", () => {
+    const result = aaronnoteMarkdownToLatex([
+      "- Parent",
+      "    1. First child",
+      "    2. Second child",
+      "- Tail",
+    ].join("\n"));
+    expect(result.body).toContain([
+      "\\begin{itemize}",
+      "\\item Parent",
+      "\\begin{enumerate}",
+      "\\item First child",
+      "\\item Second child",
+      "\\end{enumerate}",
+      "\\item Tail",
+      "\\end{itemize}",
+    ].join("\n"));
   });
 
   test("preserves inline math in document titles, headings, and block labels", () => {
@@ -103,6 +122,20 @@ describe("LaTeX export", () => {
     expect(result.body).toContain("\\begin{theorem}[Case \\(d < \\lambda(G)\\)]");
     expect(latex).toContain("\\title{ \\(\\lambda\\) and \\(\\kappa\\) }");
     expect(latex).not.toContain("\\textbackslash");
+  });
+
+  test("keeps the Proof label visible when a proof has a direction or title", () => {
+    const result = aaronnoteMarkdownToLatex([
+      "#+begin proof <=",
+      "Left direction.",
+      "#+end proof",
+      "",
+      "#+begin proof Easy direction",
+      "Right direction.",
+      "#+end proof",
+    ].join("\n"));
+    expect(result.body).toContain("\\begin{proof}[Proof (\\(\\Leftarrow\\))]");
+    expect(result.body).toContain("\\begin{proof}[Proof (Easy direction)]");
   });
 
   test("rejects structurally incomplete source instead of emitting broken LaTeX", () => {
@@ -164,7 +197,7 @@ describe("LaTeX export", () => {
     const exported = await exportLatex({ file: note, outputPath: out }) as { ok?: boolean; file?: string };
     expect(exported.ok).toBe(true);
     expect(exported.file).toBe(out);
-    expect(await readFile(out, "utf8")).toContain("\\title{ A }");
+    expect(await readFile(out, "utf8")).toContain("\\title{ a }");
 
     const defaults = await latexExportDefaults({ file: note }) as { outputPath?: string };
     expect(defaults.outputPath).toBe(out);

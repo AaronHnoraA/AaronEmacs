@@ -76,11 +76,72 @@ function mutateCurrentLine(view: EditorView, fn: (line: string) => string): bool
 // Strip common list/task prefixes so commands can re-apply cleanly.
 const LIST_PREFIX_RE = /^\s*(?:[-*+]\s+|\d+[.)]\s+|- \[[ xX]\]\s+)/;
 const EMPTY_LIST_RE = /^(\s*)(?:[-*+]\s+|\d+[.)]\s+|- \[[ xX]\]\s*)$/;
-const LIST_LINE_RE = /^(\s*)(?:[-*+]\s+|\d+[.)]\s+|- \[[ xX]\]\s+)/;
 const EMPTY_QUOTE_RE = /^\s{0,3}>\s?$/;
 const EMPTY_QUOTE_LIST_RE = /^(\s{0,3}(?:>\s*)+)(?:[-*+]\s*|\d+[.)]\s*|- \[[ xX]\]\s*)$/;
 const CONTINUE_MARKUP_RE = /^(\s{0,3}(?:>\s*)*)(\s*)(?:(- \[[ xX]\]\s+)|([-*+])\s+|(\d+)([.)])\s+)(.*)$/;
 const CONTINUE_QUOTE_RE = /^(\s{0,3}(?:>\s*)+)(.*)$/;
+
+type MarkdownListLine = {
+  indent: string;
+  indentWidth: number;
+  marker: string;
+  orderedNumber: number | null;
+  orderedDelimiter: "." | ")" | "";
+  spacing: string;
+  content: string;
+};
+
+function markdownListLine(text: string): MarkdownListLine | null {
+  const match = text.match(/^([ \t]*)(?:(- \[[ xX]\])|([-*+])|(\d+)([.)]))(\s+)(.*)$/);
+  if (!match) return null;
+  const indent = match[1] ?? "";
+  const orderedNumber = match[4] ? Number(match[4]) : null;
+  return {
+    indent,
+    indentWidth: [...indent].reduce((width, char) => width + (char === "\t" ? 4 : 1), 0),
+    marker: match[2] || match[3] || `${match[4]}${match[5]}`,
+    orderedNumber,
+    orderedDelimiter: (match[5] as "." | ")" | undefined) ?? "",
+    spacing: match[6] ?? " ",
+    content: match[7] ?? "",
+  };
+}
+
+function withOrderedNumber(text: string, number: number): string {
+  const info = markdownListLine(text);
+  if (!info || info.orderedNumber == null) return text;
+  return `${info.indent}${number}${info.orderedDelimiter}${info.spacing}${info.content}`;
+}
+
+function renumberOrderedListLines(lines: readonly string[]): string[] {
+  const output = [...lines];
+  const active = new Map<number, { next: number; delimiter: "." | ")" }>();
+  for (let index = 0; index < output.length; index += 1) {
+    const text = output[index]!;
+    const info = markdownListLine(text);
+    if (info) {
+      for (const depth of [...active.keys()]) {
+        if (depth > info.indentWidth) active.delete(depth);
+      }
+      if (info.orderedNumber != null && info.orderedDelimiter) {
+        const state = active.get(info.indentWidth);
+        const number = state?.delimiter === info.orderedDelimiter ? state.next : info.orderedNumber;
+        output[index] = withOrderedNumber(text, number);
+        active.set(info.indentWidth, { next: number + 1, delimiter: info.orderedDelimiter });
+      } else {
+        active.delete(info.indentWidth);
+      }
+      continue;
+    }
+    if (!text.trim()) continue;
+    const leading = text.match(/^[ \t]*/)?.[0] ?? "";
+    const width = [...leading].reduce((sum, char) => sum + (char === "\t" ? 4 : 1), 0);
+    for (const depth of [...active.keys()]) {
+      if (depth >= width) active.delete(depth);
+    }
+  }
+  return output;
+}
 
 // ---------------------------------------------------------------------------
 // Block insert (inserts below current line when it is non-empty)
@@ -158,6 +219,7 @@ export function continueMarkdownMarkup(view: EditorView): boolean {
     selection: { anchor: sel.from + insert.length },
     scrollIntoView: true,
   });
+  renumberMarkdownOrderedLists(view);
   return true;
 }
 
@@ -184,32 +246,31 @@ export function continueMarkdownBlock(view: EditorView): boolean {
   return continueMarkdownMarkup(view) || continueMarkdownQuote(view);
 }
 
-function lineStartOffsets(lines: readonly string[]): number[] {
-  const offsets: number[] = [];
-  let pos = 0;
-  for (const line of lines) {
-    offsets.push(pos);
-    pos += line.length + 1;
-  }
-  return offsets;
+export function renumberMarkdownOrderedLists(view: EditorView): boolean {
+  const doc = view.state.doc;
+  const oldLines = Array.from({ length: doc.lines }, (_, index) => doc.line(index + 1).text);
+  const newLines = renumberOrderedListLines(oldLines);
+  const changes = oldLines.flatMap((text, index) => {
+    if (text === newLines[index]) return [];
+    const line = doc.line(index + 1);
+    return [{ from: line.from, to: line.to, insert: newLines[index]! }];
+  });
+  if (changes.length === 0) return false;
+  const changeSet = view.state.changes(changes);
+  const sel = view.state.selection.main;
+  view.dispatch({
+    changes: changeSet,
+    selection: {
+      anchor: changeSet.mapPos(sel.anchor, 1),
+      head: changeSet.mapPos(sel.head, 1),
+    },
+  });
+  return true;
 }
 
-function mapPosAcrossLinePrefixChange(
-  pos: number,
-  blockFrom: number,
-  oldDocLines: readonly { from: number; text: string }[],
-  newLines: readonly string[],
-): number {
-  const index = oldDocLines.findIndex((line, lineIndex) => {
-    const end = line.from + line.text.length;
-    return pos >= line.from && (pos <= end || lineIndex === oldDocLines.length - 1);
-  });
-  if (index < 0) return pos;
-  const oldLine = oldDocLines[index]!;
-  const oldCol = Math.max(0, pos - oldLine.from);
-  const delta = (newLines[index]?.length ?? oldLine.text.length) - oldLine.text.length;
-  const newOffsets = lineStartOffsets(newLines);
-  return blockFrom + (newOffsets[index] ?? 0) + Math.max(0, oldCol + delta);
+function lineIndentWidth(text: string): number {
+  const leading = text.match(/^[ \t]*/)?.[0] ?? "";
+  return [...leading].reduce((sum, char) => sum + (char === "\t" ? 4 : 1), 0);
 }
 
 export function indentMarkdownList(view: EditorView, direction: 1 | -1): boolean {
@@ -217,35 +278,60 @@ export function indentMarkdownList(view: EditorView, direction: 1 | -1): boolean
   const doc = view.state.doc;
   const startLine = doc.lineAt(sel.from).number;
   const endLine = doc.lineAt(Math.max(sel.from, sel.to - (sel.to > sel.from ? 1 : 0))).number;
-  const oldDocLines: Array<{ from: number; text: string }> = [];
-  const newLines: string[] = [];
-  let changed = false;
+  const root = markdownListLine(doc.line(startLine).text);
+  if (!root) return false;
 
-  for (let lineNum = startLine; lineNum <= endLine; lineNum++) {
-    const line = doc.line(lineNum);
-    oldDocLines.push({ from: line.from, text: line.text });
-    if (!LIST_LINE_RE.test(line.text)) {
-      newLines.push(line.text);
-      continue;
+  if (direction > 0) {
+    let hasPreviousSibling = false;
+    for (let lineNum = startLine - 1; lineNum >= 1; lineNum -= 1) {
+      const text = doc.line(lineNum).text;
+      const candidate = markdownListLine(text);
+      if (candidate) {
+        if (candidate.indentWidth === root.indentWidth) hasPreviousSibling = true;
+        if (candidate.indentWidth <= root.indentWidth) break;
+        continue;
+      }
+      if (text.trim() && lineIndentWidth(text) <= root.indentWidth) break;
     }
-    if (direction > 0) {
-      newLines.push(`  ${line.text}`);
-      changed = true;
-      continue;
-    }
-    const next = line.text.replace(/^ {1,2}/, "");
-    newLines.push(next);
-    changed = changed || next !== line.text;
+    if (!hasPreviousSibling) return false;
+  } else if (root.indentWidth === 0) {
+    return false;
   }
 
-  if (!changed) return false;
-  const blockFrom = oldDocLines[0]!.from;
-  const blockTo = oldDocLines.at(-1)!.from + oldDocLines.at(-1)!.text.length;
+  let blockEndLine = endLine;
+  for (let lineNum = endLine + 1; lineNum <= doc.lines; lineNum += 1) {
+    const text = doc.line(lineNum).text;
+    const candidate = markdownListLine(text);
+    if (candidate && candidate.indentWidth <= root.indentWidth) break;
+    if (!candidate && text.trim() && lineIndentWidth(text) <= root.indentWidth) break;
+    blockEndLine = lineNum;
+  }
+
+  const oldLines = Array.from({ length: doc.lines }, (_, index) => doc.line(index + 1).text);
+  const indentedLines = [...oldLines];
+  for (let lineNum = startLine; lineNum <= blockEndLine; lineNum += 1) {
+    const text = indentedLines[lineNum - 1]!;
+    if (!text.trim()) continue;
+    indentedLines[lineNum - 1] = direction > 0
+      ? `    ${text}`
+      : text.replace(/^ {1,4}/, "").replace(/^\t/, "");
+  }
+  if (direction > 0 && root.orderedNumber != null) {
+    indentedLines[startLine - 1] = withOrderedNumber(indentedLines[startLine - 1]!, 1);
+  }
+  const newLines = renumberOrderedListLines(indentedLines);
+  const changes = oldLines.flatMap((text, index) => {
+    if (text === newLines[index]) return [];
+    const line = doc.line(index + 1);
+    return [{ from: line.from, to: line.to, insert: newLines[index]! }];
+  });
+  if (changes.length === 0) return false;
+  const changeSet = view.state.changes(changes);
   view.dispatch({
-    changes: { from: blockFrom, to: blockTo, insert: newLines.join("\n") },
+    changes: changeSet,
     selection: {
-      anchor: mapPosAcrossLinePrefixChange(sel.anchor, blockFrom, oldDocLines, newLines),
-      head: mapPosAcrossLinePrefixChange(sel.head, blockFrom, oldDocLines, newLines),
+      anchor: changeSet.mapPos(sel.anchor, 1),
+      head: changeSet.mapPos(sel.head, 1),
     },
     scrollIntoView: true,
   });
