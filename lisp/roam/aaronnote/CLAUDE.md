@@ -37,7 +37,9 @@ separate editor implementation.
 | `aaronnote/main.ts` | Emacs-embedded app shell: notes UI, command palette, jump stack. |
 | `aaronnote/latex-export-scope.ts` | Pure whole-note/selection/heading-subtree range model used by the LaTeX scope picker. |
 | `server/lib/runtime.mjs` | Server-side note/index/save/runtime; Copilot LSP bridge. |
-| `server/lib/latex-export.mjs` | Aaronnote Markdown-to-LaTeX conversion, template rendering, validation, and atomic `.tex` writes. |
+| `server/lib/latex-export.mjs` | Mechanical Markdown-to-LaTeX base conversion (`mechanicalConvert`/`aaronnoteMarkdownToLatex`), template rendering, validation, atomic `.tex` writes. Merges agent rules via `options.rules`. |
+| `server/lib/latex-export-codex.mjs` | Codex polish of the mechanical draft: staged workdir, compile-verify retry loop, prose-fidelity warnings, agent-rule loading. Falls back to the draft. See `docs/latex-export-style.md`. |
+| `agents/latex-export/` | Codex export contract (`AGENTS.md`), the agent-maintained `mechanical/rules.json` (envMap/commentBlocks merged into the base converter), and `notes.md`. Edited only on a maintenance pass, never during a normal export. |
 | `server/lib/watch.mjs` | Recursive fs watcher for vault freshness; SSE broadcast on batch change. |
 | `server/lib/tmp.mjs` | Runtime temp staging (`mkdtemp`, atomic writes, TTL orphan sweep). |
 | `server/lib/copilot.mjs` | Re-export barrel for Copilot LSP bridge (uses Emacs-managed binary). |

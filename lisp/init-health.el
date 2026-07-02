@@ -276,6 +276,11 @@
          (ignore-errors
            (require 'codex-cli)
            (fboundp 'codex-cli-toggle)))
+   (cons 'aaronnote-latex-codex
+         ;; OK unless the Aaronnote LaTeX export engine is codex but the codex
+         ;; binary is missing (export still works via mechanical fallback).
+         (or (not (equal (bound-and-true-p my/aaronnote-latex-export-engine) "codex"))
+             (and (my/health--codex-executable) t)))
    (cons 'theme-loaded
          (ignore-errors
            (memq 'kanagawa-wave custom-enabled-themes)))

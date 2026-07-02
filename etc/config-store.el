@@ -79,7 +79,10 @@
     . "/Users/hc/.emacs.d/lisp/roam/aaronnote/publish/publish-site")
    (my/aaronnote-publish-root . "/Users/hc/.emacs.d/publish")
    (my/session-auto-save) (my/aaronnote-web-port . 50815)
-   (my/aaronnote-backend . xwidget) (my/project-local-overrides)
+   (my/aaronnote-backend . xwidget)
+   (my/aaronnote-latex-export-engine . "codex")
+   (my/aaronnote-latex-export-max-attempts . 3)
+   (my/aaronnote-codex-model . "") (my/project-local-overrides)
    (my/note-code-root . "/Users/hc/Documents/AaronNote/")
    (my/debug-common-adapter-specs
     (python :title "Python" :configs

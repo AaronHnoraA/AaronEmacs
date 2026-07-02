@@ -95,6 +95,7 @@ type NativeApi = {
   };
   latex?: {
     defaults?: (body?: Record<string, unknown>) => Promise<unknown>;
+    templates?: () => Promise<unknown>;
     chooseOutputPath?: (body?: Record<string, unknown>) => Promise<unknown>;
     export?: (body?: Record<string, unknown>) => Promise<unknown>;
   };
@@ -139,6 +140,10 @@ type NativeApi = {
     katexMacros?: () => Promise<unknown>;
   };
 };
+
+export type LatexTemplateVar = { id: string; label: string; default: string };
+export type LatexTemplate = { key: string; file: string; name: string; engine: string; vars: LatexTemplateVar[] };
+export type LatexTemplatesResult = { type?: string; ok?: boolean; templates?: LatexTemplate[]; root?: string };
 
 export type KatexMacrosResult = {
   type?: string;
@@ -225,6 +230,10 @@ export const api = {
     async defaults(body: Record<string, unknown>): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().latex?.defaults, "LaTeX export defaults");
       return ensureOk(await call(body) as Record<string, unknown>, "LaTeX export defaults failed");
+    },
+    async templates(): Promise<LatexTemplatesResult> {
+      const call = requireMethod(nativeApi().latex?.templates, "LaTeX templates");
+      return ensureOk(await call() as LatexTemplatesResult, "LaTeX templates failed");
     },
     async chooseOutputPath(body: Record<string, unknown>): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().latex?.chooseOutputPath, "LaTeX output path chooser");

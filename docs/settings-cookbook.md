@@ -93,6 +93,20 @@
 
 键位前缀 `C-c c`；参见文件顶部注释。
 
+### Aaronnote LaTeX 导出（CMD+P）
+
+变量（`config-defvar`，组 `my/aaronnote`，落盘 `etc/config-store.el`）：
+
+- `my/aaronnote-latex-export-engine`      — `"codex"`（机械草稿 + codex 润色，编译校验）或 `"mechanical"`（仅确定性转换）
+- `my/aaronnote-latex-export-max-attempts` — codex 润色/编译重试次数（默认 3）
+- `my/aaronnote-codex-model`               — 可选 codex 模型 id（空 = 默认）
+- codex 可执行文件复用 `codex-cli-executable`
+
+模板：`templates/latex/*.tex`（`aaronnote-article` / `aaronnote-report` /
+`aaronnote-assignment`），每个文件首行 `% aaronnote-template: {json}` 声明显示名、
+编译引擎和额外字段。新增模板即放一个带该首行的 `.tex`。codex 契约见 Aaronnote 的
+`agents/latex-export/AGENTS.md` 与 `docs/latex-export-style.md`。
+
 ### 窗口切换 / 交换
 
 文件：

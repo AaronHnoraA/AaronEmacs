@@ -163,8 +163,8 @@ function sectionCommand(level) {
   return "paragraph";
 }
 
-function beginEnv(kind, title) {
-  const env = ENV_MAP.get(kind);
+function beginEnv(kind, title, envMap = ENV_MAP, commentBlocks = COMMENT_BLOCKS) {
+  const env = envMap.get(kind);
   if (env) {
     let label = title ? escapeLatexTitle(title) : "";
     if (kind === "proof" && label && !/^proof\b/i.test(title.trim())) {
@@ -178,16 +178,42 @@ function beginEnv(kind, title) {
     label = label ? `[${label}]` : "";
     return `\\begin{${env}}${label}`;
   }
-  if (COMMENT_BLOCKS.has(kind)) {
+  if (commentBlocks.has(kind)) {
     const heading = title || kind;
     return `\\begin{remark}[${escapeLatexTitle(heading)}]`;
   }
   return `\\paragraph{${escapeLatexTitle(kind)}}${title ? ` ${convertInline(title)}` : ""}`;
 }
 
-function endEnv(kind) {
-  const env = ENV_MAP.get(kind) || (COMMENT_BLOCKS.has(kind) ? "remark" : "");
+function endEnv(kind, envMap = ENV_MAP, commentBlocks = COMMENT_BLOCKS) {
+  const env = envMap.get(kind) || (commentBlocks.has(kind) ? "remark" : "");
   return env ? `\\end{${env}}` : "";
+}
+
+// Merge agent-maintained conversion rules over the built-in mapping. The base
+// module stays pure; runtime.mjs reads the rules file and passes the parsed
+// object in as `options.rules`. Shape: `{ envMap: {kind: env}, commentBlocks: [] }`.
+function effectiveEnvMap(rules) {
+  const extra = rules && typeof rules.envMap === "object" && rules.envMap ? rules.envMap : null;
+  if (!extra) return ENV_MAP;
+  const merged = new Map(ENV_MAP);
+  for (const [rawKind, rawEnv] of Object.entries(extra)) {
+    const kind = String(rawKind || "").trim().toLowerCase();
+    const env = String(rawEnv || "").trim();
+    if (kind && env) merged.set(kind, env);
+  }
+  return merged;
+}
+
+function effectiveCommentBlocks(rules) {
+  const extra = rules && Array.isArray(rules.commentBlocks) ? rules.commentBlocks : null;
+  if (!extra || extra.length === 0) return COMMENT_BLOCKS;
+  const merged = new Set(COMMENT_BLOCKS);
+  for (const raw of extra) {
+    const kind = String(raw || "").trim().toLowerCase();
+    if (kind) merged.add(kind);
+  }
+  return merged;
 }
 
 function flushParagraph(out, paragraph) {
@@ -201,6 +227,8 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
   const lines = String(markdown ?? "").replace(/\r\n?/g, "\n").split("\n");
   const meta = parseMeta(lines);
   const bodyLines = stripMeta(lines);
+  const envMap = effectiveEnvMap(options.rules);
+  const commentBlocks = effectiveCommentBlocks(options.rules);
   const out = [];
   const paragraph = [];
   const envStack = [];
@@ -268,7 +296,7 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
       closeList();
       const kind = begin[1].toLowerCase();
       envStack.push(kind);
-      out.push(beginEnv(kind, begin[2].trim()), "");
+      out.push(beginEnv(kind, begin[2].trim(), envMap, commentBlocks), "");
       continue;
     }
     const end = line.match(/^#\+end\s+([A-Za-z0-9_-]+)\s*$/i);
@@ -283,7 +311,7 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
       if (kind !== requestedKind) {
         throw new Error(`Mismatched Aaronnote block on line ${lineNumber}: expected #+end ${kind}, found #+end ${requestedKind}`);
       }
-      const close = endEnv(kind);
+      const close = endEnv(kind, envMap, commentBlocks);
       if (close) out.push(close, "");
       continue;
     }
@@ -349,6 +377,10 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
     body: out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n",
   };
 }
+
+// Canonical name for the deterministic base conversion. `aaronnoteMarkdownToLatex`
+// is kept as an alias for callers and tests that predate the mechanical/codex split.
+export const mechanicalConvert = aaronnoteMarkdownToLatex;
 
 export function applyLatexTemplate(template, vars) {
   const source = String(template || DEFAULT_TEMPLATE);

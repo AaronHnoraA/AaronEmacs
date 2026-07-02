@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 // @ts-ignore The converter is a Node ESM module outside the TS app graph.
 import { aaronnoteMarkdownToLatex, applyLatexTemplate, escapeLatexTitle, latexMacrosPreamble, writeLatexExport } from "../server/lib/latex-export.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
-import { configure, exportLatex, latexExportDefaults } from "../server/lib/index.mjs";
+import { configure, exportLatex, latexExportDefaults, listLatexTemplates } from "../server/lib/index.mjs";
 
 const roots: string[] = [];
 
@@ -38,6 +38,8 @@ async function setupRoot() {
     workspaceRoot: root,
     pluginRoot: join(root, "plugin"),
     latexTemplatesRoot: templates,
+    // Keep unit tests deterministic and offline: never shell out to codex.
+    latexExportEngine: "mechanical",
   });
   return { root, notes };
 }
@@ -201,5 +203,100 @@ describe("LaTeX export", () => {
 
     const defaults = await latexExportDefaults({ file: note }) as { outputPath?: string };
     expect(defaults.outputPath).toBe(out);
+  });
+
+  test("lists templates and parses their headers", async () => {
+    const { root } = await setupRoot();
+    const latexDir = join(root, "templates", "latex");
+    await writeFile(join(latexDir, "aaronnote-assignment.tex"), [
+      '% aaronnote-template: {"name":"Assignment","engine":"xelatex","vars":[{"id":"coursecode","label":"Course code","default":"COMP"}]}',
+      "\\documentclass{article}",
+      "\\begin{document}{{body}}\\end{document}",
+      "",
+    ].join("\n"), "utf8");
+
+    const result = await listLatexTemplates() as { templates?: Array<Record<string, unknown>> };
+    const templates = result.templates || [];
+    const article = templates.find((t) => t.key === "aaronnote-article");
+    const assignment = templates.find((t) => t.key === "aaronnote-assignment");
+    expect(templates[0]?.key).toBe("aaronnote-article"); // default sorts first
+    expect(article?.engine).toBe("pdflatex"); // header-less falls back to pdflatex
+    expect(assignment?.name).toBe("Assignment");
+    expect(assignment?.engine).toBe("xelatex");
+    expect((assignment?.vars as Array<Record<string, unknown>>)[0]?.id).toBe("coursecode");
+  });
+
+  test("selects a template by path and fills declared vars", async () => {
+    const { root, notes } = await setupRoot();
+    const templatePath = join(root, "templates", "latex", "aaronnote-assignment.tex");
+    await writeFile(templatePath, [
+      '% aaronnote-template: {"name":"Assignment","engine":"pdflatex","vars":[{"id":"coursecode","label":"Course code","default":"COMP"}]}',
+      "\\documentclass{article}",
+      "\\newcommand{\\course}{ {{coursecode}} }",
+      "\\begin{document}",
+      "{{body}}",
+      "\\end{document}",
+      "",
+    ].join("\n"), "utf8");
+    const note = join(notes, "assg.md");
+    await writeFile(note, "# Q1\n\nBody text.\n", "utf8");
+    const out = join(notes, "assg.tex");
+
+    const exported = await exportLatex({
+      file: note,
+      outputPath: out,
+      templatePath,
+      vars: { coursecode: "COMP3453" },
+    }) as { ok?: boolean; template?: string; engine?: string };
+    expect(exported.ok).toBe(true);
+    expect(exported.template).toBe(templatePath);
+    expect(exported.engine).toBe("mechanical");
+    const tex = await readFile(out, "utf8");
+    expect(tex).toContain("\\newcommand{\\course}{ COMP3453 }");
+    expect(tex).toContain("Body text.");
+
+    // The chosen template + vars are remembered for the next export of this note.
+    const defaults = await latexExportDefaults({ file: note }) as { template?: string; vars?: Record<string, string> };
+    expect(defaults.template).toBe(templatePath);
+    expect(defaults.vars?.coursecode).toBe("COMP3453");
+  });
+
+  test("merges agent-maintained conversion rules into the mechanical draft", async () => {
+    const { root, notes } = await setupRoot();
+    const agentDir = join(root, "agents", "latex-export");
+    await mkdir(join(agentDir, "mechanical"), { recursive: true });
+    await writeFile(join(agentDir, "mechanical", "rules.json"),
+      JSON.stringify({ envMap: { claim: "theorem" } }), "utf8");
+    configure({
+      root: notes,
+      workspaceRoot: root,
+      latexTemplatesRoot: join(root, "templates"),
+      latexExportEngine: "mechanical",
+      latexAgentDir: agentDir,
+    });
+    const note = join(notes, "claim.md");
+    await writeFile(note, "#+begin claim Key\nBody.\n#+end claim\n", "utf8");
+    const out = join(notes, "claim.tex");
+    await exportLatex({ file: note, outputPath: out });
+    const tex = await readFile(out, "utf8");
+    expect(tex).toContain("\\begin{theorem}[Key]");
+  });
+
+  test("falls back to the mechanical engine when codex is unavailable", async () => {
+    const { root, notes } = await setupRoot();
+    configure({
+      root: notes,
+      workspaceRoot: root,
+      latexTemplatesRoot: join(root, "templates"),
+      latexExportEngine: "codex",
+      latexCodexBin: "/nonexistent/codex-binary",
+    });
+    const note = join(notes, "c.md");
+    await writeFile(note, "# C\n\nBody.\n", "utf8");
+    const out = join(notes, "c.tex");
+    const exported = await exportLatex({ file: note, outputPath: out }) as { ok?: boolean; engine?: string };
+    expect(exported.ok).toBe(true);
+    expect(exported.engine).toBe("mechanical"); // codex unavailable -> mechanical draft
+    expect(await readFile(out, "utf8")).toContain("Body.");
   });
 });

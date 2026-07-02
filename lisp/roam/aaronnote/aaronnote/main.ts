@@ -16,7 +16,7 @@ import { INLINE_MATH_RE } from "../src/inline-math.ts";
 import { formatMathRenderError, renderMathLazy } from "../src/math-render.ts";
 import { setKatexMacros } from "../src/katex-macros.ts";
 import { hrefProtocol, safeHref } from "../src/url-safety.ts";
-import { api, type TodoItem } from "./api-client.ts";
+import { api, type TodoItem, type LatexTemplate } from "./api-client.ts";
 import { Epoch } from "../src/async-epoch.ts";
 import { CoalescedTimer } from "../src/coalesced-timer.ts";
 import { blobToBase64 } from "../src/paste.ts";
@@ -1818,8 +1818,9 @@ type ModalField = {
   id: string;
   label: string;
   value?: string;
-  type?: "text" | "tags";
+  type?: "text" | "tags" | "select";
   suggestions?: string[];
+  options?: { value: string; label: string }[];
 };
 
 function openFormModal(title: string, fields: ModalField[], submitLabel = "OK"): Promise<Record<string, string> | null> {
@@ -1830,11 +1831,26 @@ function openFormModal(title: string, fields: ModalField[], submitLabel = "OK"):
     const heading = document.createElement("h2");
     heading.textContent = title;
     panel.appendChild(heading);
-    const inputs = new Map<string, HTMLInputElement>();
+    const inputs = new Map<string, HTMLInputElement | HTMLSelectElement>();
 
     fields.forEach((field, index) => {
       const label = document.createElement("label");
       label.textContent = field.label;
+      if (field.type === "select") {
+        const select = document.createElement("select");
+        select.name = field.id;
+        for (const opt of field.options || []) {
+          const option = document.createElement("option");
+          option.value = opt.value;
+          option.textContent = opt.label;
+          select.appendChild(option);
+        }
+        select.value = field.value || (field.options?.[0]?.value ?? "");
+        label.appendChild(select);
+        inputs.set(field.id, select);
+        panel.appendChild(label);
+        return;
+      }
       const input = document.createElement("input");
       input.name = field.id;
       input.value = field.value || "";
@@ -2118,11 +2134,56 @@ async function exportLatexTool(): Promise<void> {
   const scope = chosenScopes.length === 1 ? chosenScopes[0]!.kind : "headings";
 
   try {
+    const defaultInfo = await api.latex.defaults({ file: currentFile, title });
+
+    // 1. Pick a template. Defaults to the last one used for this note, else Article.
+    let templates: LatexTemplate[] = [];
+    try {
+      templates = (await api.latex.templates()).templates || [];
+    } catch {
+      templates = [];
+    }
+    let chosenTemplate: LatexTemplate | null = null;
+    if (templates.length > 0) {
+      const rememberedFile = String(defaultInfo.template || "");
+      const fallback = templates.find((t) => t.key === "aaronnote-article") || templates[0]!;
+      const preselect = templates.find((t) => t.file === rememberedFile) || fallback;
+      const picked = await openFormModal("Export LaTeX — template", [{
+        id: "template",
+        label: "Template",
+        type: "select",
+        value: preselect.key,
+        options: templates.map((t) => ({ value: t.key, label: `${t.name} (${t.engine})` })),
+      }], "Continue");
+      if (!picked) {
+        setStatus("LaTeX export canceled");
+        return;
+      }
+      chosenTemplate = templates.find((t) => t.key === picked.template) || preselect;
+    }
+
+    // 2. Collect template-declared variables (course code, student id, …).
+    const rememberedVars = (defaultInfo.vars && typeof defaultInfo.vars === "object" ? defaultInfo.vars : {}) as Record<string, string>;
+    let vars: Record<string, string> = {};
+    if (chosenTemplate && chosenTemplate.vars.length > 0) {
+      const filled = await openFormModal(
+        `${chosenTemplate.name} — fields`,
+        chosenTemplate.vars.map((v) => ({
+          id: v.id,
+          label: v.label || v.id,
+          value: rememberedVars[v.id] ?? v.default ?? "",
+        })),
+        "Continue",
+      );
+      if (!filled) {
+        setStatus("LaTeX export canceled");
+        return;
+      }
+      vars = filled;
+    }
+
+    // 3. Choose the output path, then export.
     setStatus("Choose LaTeX output path...");
-    const defaultInfo = await api.latex.defaults({
-      file: currentFile,
-      title,
-    });
     const chosen = await api.latex.chooseOutputPath({
       file: currentFile,
       title,
@@ -2136,14 +2197,20 @@ async function exportLatexTool(): Promise<void> {
       setStatus(`LaTeX export failed: ${String(chosen.message || "output path was not selected")}`);
       return;
     }
+    setStatus("Exporting LaTeX…");
     const msg = await api.latex.export({
       file: currentFile,
       content,
       outputPath: String(chosen.path),
       title,
       scope,
+      ...(chosenTemplate ? { templatePath: chosenTemplate.file, engine: chosenTemplate.engine } : {}),
+      ...(Object.keys(vars).length > 0 ? { vars } : {}),
     });
-    setStatus(`LaTeX exported: ${String(msg.file || chosen.path || "")}`);
+    const warnings = Array.isArray(msg.warnings) ? msg.warnings as string[] : [];
+    const via = msg.engine ? ` [${String(msg.engine)}]` : "";
+    const warn = warnings.length > 0 ? ` — ${warnings.join("; ")}` : "";
+    setStatus(`LaTeX exported${via}: ${String(msg.file || chosen.path || "")}${warn}`);
   } catch (err) {
     setStatus(`LaTeX export failed: ${err instanceof Error ? err.message : String(err)}`);
   }

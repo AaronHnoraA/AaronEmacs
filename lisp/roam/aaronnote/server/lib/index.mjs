@@ -11,6 +11,7 @@ export {
   updateTodoStatus,
   pathSuggestionsForFile,
   latexExportDefaults,
+  listLatexTemplates,
   chooseLatexOutputPath,
   exportLatex,
   readNoteCodeRegion,

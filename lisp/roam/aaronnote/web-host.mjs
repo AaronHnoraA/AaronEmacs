@@ -28,6 +28,7 @@ import {
   tagIndexPayload,
   pathSuggestionsForFile,
   latexExportDefaults,
+  listLatexTemplates,
   chooseLatexOutputPath,
   exportLatex,
   readNoteCodeRegion,
@@ -558,6 +559,7 @@ const apiHandlers = {
   "aaronnote:api:notes:templates": (force) => templatesPayload(force === true),
   "aaronnote:api:notes:snippets": () => snippetsPayload(true),
   "aaronnote:api:latex:defaults": (body) => latexExportDefaults(body || {}),
+  "aaronnote:api:latex:templates": () => listLatexTemplates(),
   "aaronnote:api:latex:choose-output-path": (body) => chooseLatexOutputPath(body || {}),
   "aaronnote:api:latex:export": (body) => exportLatex(body || {}),
   "aaronnote:api:notes:meta-add": (body) => updateCurrentNoteMeta(body || {}, "add"),
@@ -814,6 +816,7 @@ function adapterScript(origin) {
     },
     latex: {
       defaults: function(body) { return call("aaronnote:api:latex:defaults", [body || {}]); },
+      templates: function() { return call("aaronnote:api:latex:templates", []); },
       chooseOutputPath: function(body) { return call("aaronnote:api:latex:choose-output-path", [body || {}]); },
       export: function(body) { return call("aaronnote:api:latex:export", [body || {}]); }
     },

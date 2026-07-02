@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { changedRoamFilesSince, commitRoam, fileHistory, restoreFileFromCommit, discardFileChanges, roamRepoStatus, roamRepoChanges, diffRoamFile, diffRoamCommit, pullRoam, pushRoam, repoHistory, headSha } from "./roam-git.mjs";
 import { configureTmpRoot, aaronnoteTmpRoot, runtimeMkdtemp, runtimeTmpFile } from "./tmp.mjs";
 import { aaronnoteMarkdownToLatex, applyLatexTemplate, defaultLatexOutputPath, escapeLatexTitle, latexMacrosPreamble, readLatexTemplate, writeLatexExport } from "./latex-export.mjs";
+import { codexAvailable, loadAgentRules, polishBodyWithCodex } from "./latex-export-codex.mjs";
 import { loadKatexMacros } from "./katex-macros.mjs";
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -20,6 +21,13 @@ let snippetsRoot = resolve(process.env.AARONNOTE_SNIPPETS_ROOT || join(workspace
 let templatesRoot = resolve(process.env.AARONNOTE_TEMPLATES_ROOT || join(workspaceRoot, "templates", "aaronnote"));
 let latexTemplatesRoot = resolve(process.env.AARONNOTE_LATEX_TEMPLATES_ROOT || join(workspaceRoot, "templates"));
 let katexMacrosRoot = resolve(process.env.AARONNOTE_KATEX_MACROS_DIR || join(workspaceRoot, "etc", "katex-macros"));
+// LaTeX export engine (mechanical base + optional codex polish). See
+// server/lib/latex-export-codex.mjs and docs/latex-export-style.md.
+let latexAgentDir = resolve(process.env.AARONNOTE_LATEX_AGENT_DIR || join(appDir, "agents", "latex-export"));
+let latexExportEngine = String(process.env.AARONNOTE_LATEX_EXPORT_ENGINE || "codex").trim().toLowerCase();
+let latexCodexBin = String(process.env.AARONNOTE_CODEX_BIN || "codex").trim();
+let latexCodexModel = String(process.env.AARONNOTE_CODEX_MODEL || "").trim();
+let latexExportMaxAttempts = Math.max(1, Number(process.env.AARONNOTE_LATEX_EXPORT_MAX_ATTEMPTS) || 3);
 const execFileAsync = promisify(execFile);
 
 let noteRoot = resolveUserPath(process.env.AARONNOTE_ROOT || join(appDir, "..", "roam"));
@@ -3358,13 +3366,20 @@ function latexExportTitle(sourceFile, bodyTitle, metaTitle = "") {
 async function chooseMacSavePath(defaultPath, prompt = "Export LaTeX as:") {
   const fallback = resolveLatexOutputPath(defaultPath || join(homedir(), "Aaronnote.tex"));
   const defaultDirectory = existsSync(dirname(fallback)) ? dirname(fallback) : homedir();
+  // osascript runs as a background child of Emacs, so a bare `choose file name`
+  // dialog opens *behind* the Emacs window and never receives focus (it looks
+  // like nothing happened). Running it inside a `System Events` tell block with
+  // `activate` forces the save dialog to the foreground.
   const script = [
     `set defaultPath to POSIX file ${JSON.stringify(defaultDirectory + "/")}`,
-    `set chosenFile to choose file name with prompt ${JSON.stringify(prompt)} default name ${JSON.stringify(basename(fallback))} default location defaultPath`,
+    'tell application "System Events"',
+    "  activate",
+    `  set chosenFile to choose file name with prompt ${JSON.stringify(prompt)} default name ${JSON.stringify(basename(fallback))} default location defaultPath`,
+    "end tell",
     "POSIX path of chosenFile",
   ].join("\n");
   try {
-    const { stdout } = await execFileAsync("osascript", ["-e", script], {
+    const { stdout } = await execFileAsync(executablePath("osascript"), ["-e", script], {
       timeout: 5 * 60 * 1000,
     });
     const selected = stdout.trim();
@@ -3379,10 +3394,62 @@ async function chooseMacSavePath(defaultPath, prompt = "Export LaTeX as:") {
   }
 }
 
+// Parse the optional leading `% aaronnote-template: {json}` header that declares
+// a template's display name, LaTeX engine, and extra `{{var}}` slots.
+function parseLatexTemplateHeader(text) {
+  const match = String(text || "").match(/^%\s*aaronnote-template:\s*(\{.*\})\s*$/m);
+  if (!match) return { name: "", engine: "", vars: [] };
+  try {
+    const parsed = JSON.parse(match[1]);
+    return {
+      name: String(parsed?.name || "").trim(),
+      engine: String(parsed?.engine || "").trim().toLowerCase(),
+      vars: Array.isArray(parsed?.vars)
+        ? parsed.vars
+            .map((v) => ({ id: String(v?.id || "").trim(), label: String(v?.label || v?.id || "").trim(), default: String(v?.default ?? "") }))
+            .filter((v) => v.id)
+        : [],
+    };
+  } catch {
+    return { name: "", engine: "", vars: [] };
+  }
+}
+
+export async function listLatexTemplates() {
+  const seen = new Map();
+  for (const sub of ["latex", "tex"]) {
+    const dir = join(latexTemplatesRoot, sub);
+    let entries = [];
+    try { entries = await readdir(dir); } catch { continue; }
+    for (const name of entries.sort()) {
+      if (!name.toLowerCase().endsWith(".tex")) continue;
+      const key = name.replace(/\.tex$/i, "");
+      if (seen.has(key)) continue; // latex/ takes precedence over tex/
+      const file = join(dir, name);
+      let text = "";
+      try { text = await readFile(file, "utf8"); } catch { continue; }
+      const header = parseLatexTemplateHeader(text);
+      seen.set(key, {
+        key,
+        file,
+        name: header.name || key,
+        engine: header.engine || "pdflatex",
+        vars: header.vars,
+      });
+    }
+  }
+  const templates = [...seen.values()].sort((a, b) =>
+    a.key === "aaronnote-article" ? -1 : b.key === "aaronnote-article" ? 1 : a.name.localeCompare(b.name),
+  );
+  return { type: "latex-templates", ok: true, templates, root: latexTemplatesRoot };
+}
+
 export async function latexExportDefaults(body = {}) {
   const sourceFile = latexExportSourceFile(body.file || body.sourceFile || "");
   const state = await readLatexExportState();
   const paths = state.paths && typeof state.paths === "object" ? state.paths : {};
+  const templates = state.templates && typeof state.templates === "object" ? state.templates : {};
+  const remembered = templates[sourceFile] && typeof templates[sourceFile] === "object" ? templates[sourceFile] : null;
   const title = latexExportTitle(sourceFile, body.title || "", "");
   return {
     type: "latex-export-defaults",
@@ -3390,6 +3457,8 @@ export async function latexExportDefaults(body = {}) {
     file: sourceFile,
     outputPath: paths[sourceFile] || defaultLatexOutputPath(sourceFile, title),
     templateRoot: latexTemplatesRoot,
+    template: remembered?.templatePath || "",
+    vars: remembered?.vars && typeof remembered.vars === "object" ? remembered.vars : {},
   };
 }
 
@@ -3424,7 +3493,9 @@ export async function exportLatex(body = {}) {
     throw err;
   }
 
-  const converted = aaronnoteMarkdownToLatex(content, { sourceFile });
+  // 1. Mechanical base conversion, extended by any agent-maintained rules.
+  const rules = await loadAgentRules(latexAgentDir);
+  const converted = aaronnoteMarkdownToLatex(content, { sourceFile, rules });
   const title = latexExportTitle(sourceFile, body.title || "", converted.meta.title || "");
   const defaults = await latexExportDefaults({ file: sourceFile, title });
   const outputPath = resolveLatexOutputPath(body.outputPath || defaults.outputPath, sourceFile);
@@ -3435,23 +3506,65 @@ export async function exportLatex(body = {}) {
   }
 
   const template = await readLatexTemplate(latexTemplatesRoot, body.templatePath || "");
+  const header = parseLatexTemplateHeader(template.text);
+  const engine = String(body.engine || header.engine || "pdflatex").toLowerCase();
   const macroResult = loadKatexMacros(katexMacrosRoot);
-  const latex = applyLatexTemplate(template.text, {
+  const macros = latexMacrosPreamble(macroResult.macros);
+
+  // Extra template variables declared in the header, merged with caller values.
+  const extraVars = {};
+  for (const v of header.vars) {
+    extraVars[v.id] = String((body.vars && body.vars[v.id] != null ? body.vars[v.id] : v.default) ?? "");
+  }
+  const assemble = (bodyLatex) => applyLatexTemplate(template.text, {
+    ...extraVars,
     title: escapeLatexTitle(title),
     date: escapeLatexTitle(converted.meta.date || new Date().toISOString().slice(0, 10)),
     source: escapeLatexTitle(sourceFile ? displayPathForFile(sourceFile) : ""),
-    macros: latexMacrosPreamble(macroResult.macros),
-    body: converted.body,
+    macros,
+    body: bodyLatex,
   });
+
+  // 2. Optional codex polish of the draft, gated on compilation, with fallback.
+  let bodyLatex = converted.body;
+  let engineUsed = "mechanical";
+  const warnings = [];
+  const wantCodex = latexExportEngine !== "mechanical" && String(body.engine || "").toLowerCase() !== "mechanical";
+  if (wantCodex && codexAvailable(latexCodexBin)) {
+    const latexBin = executablePath(engine === "xelatex" ? "xelatex" : engine === "lualatex" ? "lualatex" : "pdflatex");
+    const result = await polishBodyWithCodex({
+      sourceMarkdown: content,
+      draftBody: converted.body,
+      templateText: template.text,
+      styleDoc: join(appDir, "docs", "latex-export-style.md"),
+      syntaxDoc: join(appDir, "README.md"),
+      agentsDoc: join(latexAgentDir, "AGENTS.md"),
+      assemble,
+      latexBin,
+      codexBin: executablePath(latexCodexBin),
+      model: latexCodexModel,
+      sourceDir: sourceFile ? dirname(sourceFile) : "",
+      makeWorkdir: () => runtimeMkdtemp("latex-export", sourceFile || "export"),
+      maxAttempts: latexExportMaxAttempts,
+    });
+    bodyLatex = result.body;
+    engineUsed = result.usedCodex ? "codex" : "mechanical";
+    if (Array.isArray(result.warnings)) warnings.push(...result.warnings);
+  }
+
+  const latex = assemble(bodyLatex);
   const file = await writeLatexExport(outputPath, latex);
 
   const state = await readLatexExportState();
   const paths = state.paths && typeof state.paths === "object" ? state.paths : {};
   paths[sourceFile] = file;
+  const templates = state.templates && typeof state.templates === "object" ? state.templates : {};
+  if (sourceFile) templates[sourceFile] = { templatePath: template.file, vars: extraVars };
   await writeLatexExportState({
     ...state,
     schemaVersion: 1,
     paths,
+    templates,
     updatedAt: new Date().toISOString(),
   });
 
@@ -3462,6 +3575,8 @@ export async function exportLatex(body = {}) {
     sourceFile,
     title,
     template: template.file,
+    engine: engineUsed,
+    warnings,
     bytes: Buffer.byteLength(latex, "utf8"),
   };
 }
@@ -5178,6 +5293,11 @@ export function configure(options = {}) {
   templatesRoot = resolve(String(options.templatesRoot || process.env.AARONNOTE_TEMPLATES_ROOT || join(workspaceRoot, "templates", "aaronnote")));
   latexTemplatesRoot = resolve(String(options.latexTemplatesRoot || process.env.AARONNOTE_LATEX_TEMPLATES_ROOT || join(workspaceRoot, "templates")));
   katexMacrosRoot = resolve(String(options.katexMacrosRoot || process.env.AARONNOTE_KATEX_MACROS_DIR || join(workspaceRoot, "etc", "katex-macros")));
+  latexAgentDir = resolve(String(options.latexAgentDir || process.env.AARONNOTE_LATEX_AGENT_DIR || join(appDir, "agents", "latex-export")));
+  latexExportEngine = String(options.latexExportEngine || process.env.AARONNOTE_LATEX_EXPORT_ENGINE || "codex").trim().toLowerCase();
+  latexCodexBin = String(options.latexCodexBin || process.env.AARONNOTE_CODEX_BIN || "codex").trim();
+  latexCodexModel = String(options.latexCodexModel || process.env.AARONNOTE_CODEX_MODEL || "").trim();
+  latexExportMaxAttempts = Math.max(1, Number(options.latexExportMaxAttempts || process.env.AARONNOTE_LATEX_EXPORT_MAX_ATTEMPTS) || 3);
   snippetCache = { key: "", scannedAt: 0, snippets: [] };
   templateCache = { key: "", scannedAt: 0, templates: [] };
   contentRootCache.clear();

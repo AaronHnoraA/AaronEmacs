@@ -93,6 +93,25 @@ Set to 0 to let the OS pick a random port."
   :type 'integer
   :group 'my/aaronnote)
 
+(config-defvar my/aaronnote-latex-export-engine "codex"
+  "Engine for the Aaronnote CMD+P LaTeX export.
+\"codex\" builds a deterministic mechanical draft and then lets codex polish it,
+gated on the document compiling (with fallback to the draft).  \"mechanical\"
+uses only the deterministic converter.  See `docs/latex-export-style.md' in the
+Aaronnote app."
+  :type '(choice (const "codex") (const "mechanical"))
+  :group 'my/aaronnote)
+
+(config-defvar my/aaronnote-latex-export-max-attempts 3
+  "Maximum codex polish/compile retries before falling back to the LaTeX draft."
+  :type 'integer
+  :group 'my/aaronnote)
+
+(config-defvar my/aaronnote-codex-model ""
+  "Optional model id for codex during LaTeX export polish (empty = codex default)."
+  :type 'string
+  :group 'my/aaronnote)
+
 (defvar my/aaronnote--last-sync-stats nil
   "String summary from the last successful Roam DB sync, or nil.")
 
@@ -303,6 +322,16 @@ Set to 0 to let the OS pick a random port."
             (format "AARONNOTE_SNIPPETS_ROOT=%s" (expand-file-name my/aaronnote--snippets-root))
             (format "AARONNOTE_TEMPLATES_ROOT=%s" (expand-file-name my/aaronnote--templates-root))
             (format "AARONNOTE_KATEX_MACROS_DIR=%s" (expand-file-name my/aaronnote--katex-macros-dir))
+            (format "AARONNOTE_LATEX_EXPORT_ENGINE=%s"
+                    (or my/aaronnote-latex-export-engine "codex"))
+            (format "AARONNOTE_LATEX_EXPORT_MAX_ATTEMPTS=%d"
+                    (or my/aaronnote-latex-export-max-attempts 3))
+            (format "AARONNOTE_CODEX_BIN=%s"
+                    (or (bound-and-true-p codex-cli-executable) "codex"))
+            (when (and (boundp 'my/aaronnote-codex-model)
+                       (stringp my/aaronnote-codex-model)
+                       (not (string-empty-p my/aaronnote-codex-model)))
+              (format "AARONNOTE_CODEX_MODEL=%s" my/aaronnote-codex-model))
             (format "AARONNOTE_WEB_PORT=%d" my/aaronnote-web-port)
             (when copilot-server
               (format "AARONNOTE_COPILOT_LANGUAGE_SERVER=%s"

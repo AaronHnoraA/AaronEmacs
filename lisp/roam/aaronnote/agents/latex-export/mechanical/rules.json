@@ -1,0 +1,5 @@
+{
+  "$schema-note": "Agent-maintained conversion rules merged over the built-in mapping in server/lib/latex-export.mjs. Only edit during a host maintenance pass. envMap maps a #+begin <kind> to a LaTeX environment the template defines; commentBlocks lists kinds rendered as a remark with the kind/title as label.",
+  "envMap": {},
+  "commentBlocks": []
+}
