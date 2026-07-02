@@ -1,9 +1,8 @@
 /*
- * Paper-flavored minimal theme.
+ * Dark paper-flavored minimal theme.
  *
- * Aesthetic only. Light, thin, restrained — closer to a manuscript
- * than a GitHub README. No heading underlines, light borders, soft
- * code background, generous line-height.
+ * Aesthetic only. Thin, restrained, and manuscript-like, but tuned
+ * for Aaron's dark Wave palette instead of a bright paper surface.
  *
  * All rules scope to `.cm-editor` — the theme only styles the
  * editor body, never the surrounding website chrome.
@@ -11,7 +10,7 @@
 
 .cm-editor {
   font-family: var(--aaron-font-body, var(--aaron-font-english, serif), var(--aaron-font-chinese, serif), serif);
-  font-size: 20px;
+  font-size: calc(20px * var(--aaronnote-layout-zoom, 1));
   line-height: 1.46;
   color: var(--aaron-ink, #24201a);
   word-wrap: break-word;
@@ -37,7 +36,7 @@
   font-family: var(--aaron-font-heading);
   font-weight: 700;
   line-height: 1.2;
-  color: var(--aaron-ink, #1f2522);
+  color: var(--aaron-heading-4, #8effa8);
 }
 .cm-editor > :first-child { margin-top: 0; }
 .cm-editor h1 {
@@ -45,6 +44,7 @@
   font-size: 1.56em;
   letter-spacing: 0;
   text-align: center;
+  color: var(--aaron-heading-1, #ff9bad);
 }
 .cm-editor h1::after {
   content: "";
@@ -52,27 +52,32 @@
   width: 72px;
   height: 1px;
   margin: 0.34em auto 0;
-  background: var(--aaron-red, #b31b1b);
+  background: linear-gradient(90deg, transparent, var(--aaron-heading-1, #ff9bad), var(--aaron-heading-2, #7ee7ff), transparent);
 }
 .cm-editor h2 {
   font-size: 1.16em;
   padding-bottom: 0.12em;
-  border-bottom: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d9d2c4), var(--aaron-red, #b31b1b) 12%);
+  color: var(--aaron-heading-2, #7ee7ff);
+  border-bottom: 1px solid color-mix(in srgb, var(--aaron-heading-2, #7ee7ff), transparent 56%);
 }
 .cm-editor h3 {
   font-size: 1.06em;
   font-style: italic;
+  color: var(--aaron-heading-3, #d2a8ff);
 }
-.cm-editor h4 { font-size: 1.02em; }
+.cm-editor h4 {
+  font-size: 1.02em;
+  color: var(--aaron-heading-4, #8effa8);
+}
 .cm-editor h5 {
   font-size: 0.92em;
-  color: var(--aaron-muted, #4f5c54);
+  color: var(--aaron-heading-5, #ffd86a);
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 .cm-editor h6 {
   font-size: 0.84em;
-  color: var(--aaron-muted, #7a7165);
+  color: var(--aaron-heading-6, #9fb7ff);
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
@@ -85,7 +90,8 @@
   overflow-wrap: anywhere;
   margin: 0;
   padding: var(--section-margin-before, 4.2em) 0 var(--section-margin-after, 2.3em);
-  color: var(--aaron-ink, #24201a);
+  --section-heading-color: var(--aaron-heading-2, #7ee7ff);
+  color: var(--section-heading-color);
 }
 
 .cm-editor .aaronnote-section-heading-inner {
@@ -96,10 +102,10 @@
   min-height: var(--section-min-height, 8.2rem);
   align-content: center;
   padding: var(--section-padding-y, 2.1em) var(--section-padding-x, 1.6em);
-  border-top: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d9d2c4), var(--aaron-red, #b31b1b) 28%);
-  border-bottom: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d9d2c4), var(--aaron-red, #b31b1b) 12%);
+  border-top: 1px solid color-mix(in srgb, var(--section-heading-color), transparent 54%);
+  border-bottom: 1px solid color-mix(in srgb, var(--section-heading-color), transparent 72%);
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--aaron-paper-soft, #f8f1e4), transparent 0%), transparent 74%);
+    linear-gradient(90deg, color-mix(in srgb, var(--section-heading-color), transparent 92%), transparent 74%);
 }
 
 .cm-editor .aaronnote-section-heading-inner::before {
@@ -109,11 +115,11 @@
   top: 18%;
   bottom: 18%;
   width: 3px;
-  background: var(--aaron-red, #b31b1b);
+  background: var(--section-heading-color);
 }
 
 .cm-editor .aaronnote-section-label {
-  color: var(--aaron-red-dark, #8f1515);
+  color: var(--section-heading-color);
   font: 900 var(--section-label-size, 0.76em)/1 var(--aaron-font-sans, sans-serif);
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -125,9 +131,11 @@
   font-size: var(--section-title-size, 2.05em);
   line-height: 1.12;
   letter-spacing: 0;
+  color: var(--section-heading-color);
 }
 
 .cm-editor .aaronnote-section-heading[data-outline-level="1"] {
+  --section-heading-color: var(--aaron-heading-1, #ff9bad);
   --section-margin-before: 6.2em;
   --section-margin-after: 4.4em;
   --section-padding-y: 4.2em;
@@ -140,7 +148,7 @@
 .cm-editor .aaronnote-section-heading[data-outline-level="1"] .aaronnote-section-heading-inner {
   place-items: center;
   text-align: center;
-  border-bottom-color: color-mix(in srgb, var(--aaron-paper-line, #d9d2c4), var(--aaron-red, #b31b1b) 24%);
+  border-bottom-color: color-mix(in srgb, var(--section-heading-color), transparent 54%);
 }
 
 .cm-editor .aaronnote-section-heading[data-outline-level="1"] .aaronnote-section-heading-inner::before {
@@ -153,6 +161,7 @@
 }
 
 .cm-editor .aaronnote-section-heading[data-outline-level="3"] {
+  --section-heading-color: var(--aaron-heading-3, #d2a8ff);
   --section-margin-before: 3.1em;
   --section-margin-after: 1.7em;
   --section-padding-y: 1.55em;
@@ -162,6 +171,7 @@
 }
 
 .cm-editor .aaronnote-section-heading[data-outline-level="4"] {
+  --section-heading-color: var(--aaron-heading-4, #8effa8);
   --section-margin-before: 2.35em;
   --section-margin-after: 1.25em;
   --section-padding-y: 1.1em;
@@ -171,6 +181,7 @@
 }
 
 .cm-editor .aaronnote-section-heading[data-outline-level="5"] {
+  --section-heading-color: var(--aaron-heading-5, #ffd86a);
   --section-margin-before: 1.75em;
   --section-margin-after: 0.95em;
   --section-padding-y: 0.82em;
@@ -201,9 +212,9 @@
 
 .cm-editor a.aaronnote-roam-link,
 .aaronnote-roam-link {
-  color: #7a3e00;
-  border-bottom-color: color-mix(in srgb, #b56a12, transparent 42%);
-  background: color-mix(in srgb, #f1d49a, transparent 72%);
+  color: var(--aaron-accent-sand, #e7d6a5);
+  border-bottom-color: color-mix(in srgb, var(--aaron-accent-sand, #e7d6a5), transparent 42%);
+  background: color-mix(in srgb, var(--aaron-accent-sand, #e7d6a5), transparent 88%);
   border-radius: 3px;
   padding: 0 0.16em;
 }
@@ -215,7 +226,7 @@
   padding: 0.12em 0.34em;
   margin: 0;
   color: var(--aaron-ink, #25362e);
-  background: color-mix(in srgb, var(--aaron-paper-soft, #f6f1e8), white 18%);
+  background: var(--aaron-code-bg, #1e2638);
   border: 1px solid var(--aaron-paper-line, #d8e4da);
   border-radius: 2px;
   white-space: break-spaces;
@@ -225,7 +236,7 @@
   font-size: 0.88em;
   line-height: 1.5;
   tab-size: 2;
-  background: var(--aaron-paper-soft, #f7f5ef);
+  background: var(--aaron-code-bg, #1e2638);
   padding: 9px 12px;
   margin: 0 0 0.72em;
   border-radius: 2px;
@@ -288,13 +299,13 @@
 }
 .cm-editor table th {
   font-weight: 600;
-  background: var(--aaron-paper-soft, #f1f2ec);
+  background: var(--aaron-panel, #232b3d);
 }
-.cm-editor table tr:nth-child(2n) { background: color-mix(in srgb, var(--aaron-paper-soft, #fbfbf7), transparent 55%); }
+.cm-editor table tr:nth-child(2n) { background: color-mix(in srgb, var(--aaron-paper-soft, #1e2536), transparent 55%); }
 
 /* ─── extension marks ────────────────────────────────────────────── */
 .cm-editor mark {
-  background: #fff0a8;
+  background: var(--aaron-highlight, rgb(249 226 175 / 22%));
   color: inherit;
   padding: 0 0.12em;
   border-radius: 2px;
@@ -309,7 +320,7 @@
   margin: 0.56rem 0;
   overflow: visible;
   border: 0;
-  border-left: 3px solid color-mix(in srgb, var(--block-c), black 18%);
+  border-left: 3px solid color-mix(in srgb, var(--block-c), transparent 22%);
   border-radius: 0;
   background: transparent;
   box-shadow: none;
@@ -326,7 +337,7 @@
   margin: 0 0 0.34rem;
   padding: 0;
   background: transparent;
-  color: color-mix(in srgb, var(--block-c), black 48%);
+  color: color-mix(in srgb, var(--block-c), var(--aaron-ink, #e4ecff) 20%);
   font-family: var(--aaron-font-title, var(--aaron-font-heading, serif));
   font-size: var(--orgenv-head-size);
   font-weight: 700;
@@ -342,7 +353,7 @@
   border-bottom: 1px solid color-mix(in srgb, var(--block-c), transparent 45%);
   padding: 0 0 0.08rem;
   background: transparent;
-  color: color-mix(in srgb, var(--block-c), black 48%);
+  color: color-mix(in srgb, var(--block-c), var(--aaron-ink, #e4ecff) 20%);
   font: inherit;
   font-family: var(--aaron-font-title, var(--aaron-font-heading, serif));
   font-weight: 650;
@@ -375,8 +386,8 @@
 }
 
 .cm-editor org-env-block .org-env-content a[href^="zotero:"] {
-  color: color-mix(in srgb, #3f756e, var(--aaron-ink, #24201a) 12%);
-  border-bottom-color: color-mix(in srgb, #3f756e, transparent 42%);
+  color: color-mix(in srgb, var(--aaron-green, #bbf7b8), var(--aaron-ink, #e4ecff) 20%);
+  border-bottom-color: color-mix(in srgb, var(--aaron-green, #bbf7b8), transparent 42%);
 }
 
 .cm-editor a.aaronnote-zotero-link,
@@ -386,10 +397,10 @@
   gap: 0.35em;
   max-width: 100%;
   padding: 0.02em 0.42em 0.05em;
-  border: 1px solid color-mix(in srgb, #3f756e, transparent 58%);
+  border: 1px solid color-mix(in srgb, var(--aaron-green, #bbf7b8), transparent 58%);
   border-radius: 5px;
-  background: color-mix(in srgb, #3f756e, transparent 91%);
-  color: color-mix(in srgb, #2f625c, var(--aaron-ink, #24201a) 18%);
+  background: color-mix(in srgb, var(--aaron-green, #bbf7b8), transparent 91%);
+  color: color-mix(in srgb, var(--aaron-green, #bbf7b8), var(--aaron-ink, #e4ecff) 18%);
   font-weight: 650;
   text-decoration: none;
   vertical-align: baseline;
@@ -400,13 +411,13 @@
   content: "Z";
   flex: 0 0 auto;
   font: 800 0.72em/1 var(--aaron-font-sans, system-ui, sans-serif);
-  color: #2f625c;
+  color: var(--aaron-green, #bbf7b8);
 }
 
 .cm-editor a.aaronnote-zotero-link:hover,
 .aaronnote-zotero-link:hover {
-  border-color: color-mix(in srgb, #3f756e, transparent 30%);
-  background: color-mix(in srgb, #3f756e, transparent 86%);
+  border-color: color-mix(in srgb, var(--aaron-green, #bbf7b8), transparent 30%);
+  background: color-mix(in srgb, var(--aaron-green, #bbf7b8), transparent 86%);
 }
 
 .cm-editor org-env-block .org-env-content a:hover {
@@ -453,7 +464,7 @@
 .cm-editor org-env-block:not([data-kind="comment"]):not([data-kind="fold"]):not([data-kind="meta"])::after {
   content: var(--orgenv-end, "•");
   display: block;
-  color: color-mix(in srgb, var(--block-c), black 32%);
+  color: color-mix(in srgb, var(--block-c), transparent 36%);
   line-height: 1;
   text-align: right;
 }
@@ -477,8 +488,8 @@
   padding: 0.25rem 0.55rem;
   border: 1px solid color-mix(in srgb, var(--block-c), transparent 30%);
   border-radius: 4px;
-  background: color-mix(in srgb, var(--block-c), white 86%);
-  color: color-mix(in srgb, var(--block-c), black 48%);
+  background: color-mix(in srgb, var(--block-c), var(--aaron-paper, #171b28) 86%);
+  color: color-mix(in srgb, var(--block-c), var(--aaron-ink, #e4ecff) 22%);
   cursor: pointer;
   font: 700 0.92em/1.35 var(--aaron-font-title, var(--aaron-font-heading, serif));
   letter-spacing: 0;
@@ -508,14 +519,14 @@
   box-sizing: border-box;
   margin-top: 0.45rem;
   padding: 0.5rem 0 0.45rem 0.85rem;
-  border-left: 3px solid color-mix(in srgb, var(--block-c), black 18%);
+  border-left: 3px solid color-mix(in srgb, var(--block-c), transparent 22%);
 }
 
 .cm-editor org-env-block[data-kind="fold"] .org-env-fold-content[hidden] {
   display: none !important;
 }
 .cm-editor org-env-block[data-kind="comment"] {
-  --block-c: #f97316;
+  --block-c: #ffc69c;
   position: relative;
   display: block;
   width: fit-content;
@@ -540,8 +551,8 @@
   padding: 0 8px 0 10px;
   border: 1px solid color-mix(in srgb, var(--block-c), transparent 24%);
   border-radius: 999px;
-  background: linear-gradient(180deg, color-mix(in srgb, #fff7ed, white 28%), #ffedd5);
-  color: color-mix(in srgb, var(--block-c), black 18%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--block-c), var(--aaron-paper-soft, #1e2536) 86%), color-mix(in srgb, var(--block-c), var(--aaron-paper, #171b28) 88%));
+  color: color-mix(in srgb, var(--block-c), var(--aaron-ink, #e4ecff) 18%);
   cursor: pointer;
   font: 800 11px/1 var(--aaron-font-sans, system-ui, sans-serif);
   letter-spacing: 0;
@@ -558,16 +569,16 @@
 .cm-editor org-env-block[data-kind="comment"] .org-env-comment-state {
   border-radius: 999px;
   padding: 3px 6px;
-  background: rgb(255 255 255 / 58%);
-  color: color-mix(in srgb, var(--block-c), black 28%);
+  background: rgb(255 255 255 / 8%);
+  color: color-mix(in srgb, var(--block-c), var(--aaron-ink, #e4ecff) 24%);
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .cm-editor org-env-block[data-kind="comment"] .org-env-comment-button:hover {
-  border-color: color-mix(in srgb, var(--block-c), black 8%);
-  background: #ffedd5;
+  border-color: color-mix(in srgb, var(--block-c), transparent 12%);
+  background: color-mix(in srgb, var(--block-c), var(--aaron-paper-soft, #1e2536) 82%);
 }
 
 .cm-editor org-env-block[data-kind="comment"] .org-env-heading,
@@ -584,11 +595,11 @@
   min-height: 1.4em;
   box-sizing: border-box;
   padding: 10px 12px;
-  border: 1px solid #fdba74;
+  border: 1px solid color-mix(in srgb, var(--block-c), transparent 42%);
   border-left: 3px solid var(--block-c);
   border-radius: 10px;
-  background: #fff7ed;
-  box-shadow: 0 14px 34px rgb(68 45 23 / 16%);
+  background: var(--aaron-panel, #232b3d);
+  box-shadow: var(--aaron-shadow, 0 18px 46px rgb(0 0 0 / 38%));
   font-family: var(--aaron-font-body, var(--aaron-font-english, serif), var(--aaron-font-chinese, serif), serif);
 }
 
@@ -607,7 +618,7 @@
 
 .cm-editor org-env-block[data-kind="comment"].org-env-active .org-env-comment-button,
 .cm-editor org-env-block[data-kind="comment"].org-env-comment-open .org-env-comment-button {
-  background: #ffedd5;
+  background: color-mix(in srgb, var(--block-c), var(--aaron-paper-soft, #1e2536) 82%);
 }
 
 @media (max-width: 900px) {
@@ -649,7 +660,7 @@
   max-width: 100%;
   border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), var(--aaron-muted, #6f6a61) 10%);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--aaron-paper-soft, #f8f4ea), white 42%);
+  background: var(--aaron-paper-soft, #1e2536);
   box-shadow: none;
   overflow: hidden;
 }
@@ -660,7 +671,7 @@
   align-items: center;
   padding: 0.12rem 0.42rem 0.12rem 0.52rem;
   background: color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), transparent 52%);
-  color: color-mix(in srgb, var(--aaron-muted, #6f6a61), black 22%);
+  color: color-mix(in srgb, var(--aaron-muted, #a9bed3), var(--aaron-ink, #e4ecff) 18%);
   font: 650 0.72em/1.2 var(--aaron-font-sans, system-ui);
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -701,7 +712,7 @@
 /* Root typography (extends widgets.css base) */
 .cm-editor {
   font-family: var(--aaron-font-body, var(--aaron-font-english, serif), var(--aaron-font-chinese, serif), serif);
-  font-size: 20px;
+  font-size: calc(20px * var(--aaronnote-layout-zoom, 1));
   color: var(--aaron-ink, #24201a);
 }
 
@@ -711,6 +722,7 @@
   font-size: 1.56em;
   letter-spacing: 0;
   text-align: center;
+  color: var(--aaron-heading-1, #ff9bad);
 }
 .cm-editor .cm-md-h1::after {
   content: "";
@@ -718,31 +730,37 @@
   width: 72px;
   height: 1px;
   margin: 0.34em auto 0;
-  background: var(--aaron-red, #b31b1b);
+  background: linear-gradient(90deg, transparent, var(--aaron-heading-1, #ff9bad), var(--aaron-heading-2, #7ee7ff), transparent);
 }
 .cm-editor .cm-md-h2 {
   font-family: var(--aaron-font-heading);
   font-size: 1.16em;
   padding-bottom: 0.12em;
-  border-bottom: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d9d2c4), var(--aaron-red, #b31b1b) 12%);
+  color: var(--aaron-heading-2, #7ee7ff);
+  border-bottom: 1px solid color-mix(in srgb, var(--aaron-heading-2, #7ee7ff), transparent 56%);
 }
 .cm-editor .cm-md-h3 {
   font-family: var(--aaron-font-heading);
   font-size: 1.06em;
   font-style: italic;
+  color: var(--aaron-heading-3, #d2a8ff);
 }
-.cm-editor .cm-md-h4 { font-family: var(--aaron-font-heading); font-size: 1.02em; }
+.cm-editor .cm-md-h4 {
+  font-family: var(--aaron-font-heading);
+  font-size: 1.02em;
+  color: var(--aaron-heading-4, #8effa8);
+}
 .cm-editor .cm-md-h5 {
   font-family: var(--aaron-font-heading);
   font-size: 0.92em;
-  color: var(--aaron-muted, #4f5c54);
+  color: var(--aaron-heading-5, #ffd86a);
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 .cm-editor .cm-md-h6 {
   font-family: var(--aaron-font-heading);
   font-size: 0.84em;
-  color: var(--aaron-muted, #7a7165);
+  color: var(--aaron-heading-6, #9fb7ff);
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
@@ -755,9 +773,9 @@
 }
 
 .cm-editor .cm-roam-link-text {
-  color: #7a3e00;
-  border-bottom-color: color-mix(in srgb, #b56a12, transparent 42%);
-  background: color-mix(in srgb, #f1d49a, transparent 72%);
+  color: var(--aaron-accent-sand, #e7d6a5);
+  border-bottom-color: color-mix(in srgb, var(--aaron-accent-sand, #e7d6a5), transparent 42%);
+  background: color-mix(in srgb, var(--aaron-accent-sand, #e7d6a5), transparent 88%);
   border-radius: 3px;
   padding: 0 0.16em;
 }

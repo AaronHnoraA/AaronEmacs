@@ -269,6 +269,8 @@ let mathPreviewKey = "";
 let mathPreviewPendingErrorKey = "";
 let mathPreviewErrorTimer = 0;
 let mathPreviewWidth = 0;
+let layoutZoom = 1;
+let gestureStartZoom = 1;
 const clientId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const changeHandlers = new Set<() => void>();
 const MATH_PREVIEW_ERROR_IDLE_MS = 650;
@@ -277,6 +279,9 @@ const NAVIGATION_BACK_STACK_MAX = 80;
 const PROSE_SCOPE_PADDING = 32 * 1024;
 const PROSE_SCOPE_MAX_CHARS = 180_000;
 const LARGE_DOCUMENT_CHARS = 512 * 1024;
+const LAYOUT_ZOOM_MIN = 0.72;
+const LAYOUT_ZOOM_MAX = 1.55;
+const LAYOUT_ZOOM_STEP = 0.08;
 const editorCommands = new Set<EditorCommand>([
   "bold",
   "italic",
@@ -428,6 +433,99 @@ const editor = createEditor(host, {
   },
 });
 
+function layoutZoomPercent(): string {
+  return `${Math.round(layoutZoom * 100)}%`;
+}
+
+function clampLayoutZoom(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(LAYOUT_ZOOM_MAX, Math.max(LAYOUT_ZOOM_MIN, value));
+}
+
+function updateLayoutZoomTool(): void {
+  const value = toolsPanel.querySelector<HTMLElement>("[data-layout-zoom-value]");
+  if (value) value.textContent = layoutZoomPercent();
+  const min = layoutZoom <= LAYOUT_ZOOM_MIN + 0.001;
+  const max = layoutZoom >= LAYOUT_ZOOM_MAX - 0.001;
+  for (const button of toolsPanel.querySelectorAll<HTMLButtonElement>("[data-layout-zoom-action='out']")) button.disabled = min;
+  for (const button of toolsPanel.querySelectorAll<HTMLButtonElement>("[data-layout-zoom-action='in']")) button.disabled = max;
+}
+
+function applyLayoutZoom(next: number, options: { announce?: boolean } = {}): boolean {
+  const clamped = clampLayoutZoom(next);
+  if (Math.abs(clamped - layoutZoom) < 0.001) return false;
+  layoutZoom = clamped;
+  document.documentElement.style.setProperty("--aaronnote-layout-zoom", layoutZoom.toFixed(3));
+  editor.view.requestMeasure();
+  window.dispatchEvent(new Event("resize"));
+  scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: true });
+  updateLayoutZoomTool();
+  if (options.announce) setStatus(`Layout zoom ${layoutZoomPercent()}`);
+  return true;
+}
+
+function stepLayoutZoom(direction: -1 | 1, options: { announce?: boolean } = {}): boolean {
+  return applyLayoutZoom(layoutZoom + direction * LAYOUT_ZOOM_STEP, options);
+}
+
+function resetLayoutZoom(options: { announce?: boolean } = {}): boolean {
+  return applyLayoutZoom(1, options);
+}
+
+function runLayoutZoomShortcut(event: KeyboardEvent): boolean {
+  if (!primaryMod(event) || event.altKey || event.isComposing) return false;
+  const code = event.code;
+  const key = event.key;
+  const zoomIn = code === "Equal" || code === "NumpadAdd" || key === "=" || key === "+";
+  const zoomOut = code === "Minus" || code === "NumpadSubtract" || key === "-" || key === "_";
+  const reset = code === "Digit0" || code === "Numpad0" || key === "0";
+  if (!zoomIn && !zoomOut && !reset) return false;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  if (zoomIn) stepLayoutZoom(1, { announce: true });
+  else if (zoomOut) stepLayoutZoom(-1, { announce: true });
+  else resetLayoutZoom({ announce: true });
+  return true;
+}
+
+function layoutZoomWheelFactor(event: WheelEvent): number {
+  const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+    ? 18
+    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+      ? Math.max(1, window.innerHeight)
+      : 1;
+  return Math.exp(-event.deltaY * unit * 0.0025);
+}
+
+function shouldHandleLayoutZoomTarget(target: EventTarget | null): boolean {
+  if (!editorSurfaceVisible()) return false;
+  const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+  return !element?.closest(".aaronnote-local-graph-panel, .aaronnote-modal");
+}
+
+function handleLayoutZoomWheel(event: WheelEvent): void {
+  if (!(event.ctrlKey || event.metaKey) || !shouldHandleLayoutZoomTarget(event.target)) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  applyLayoutZoom(layoutZoom * layoutZoomWheelFactor(event));
+}
+
+function handleLayoutGestureStart(event: Event): void {
+  if (!shouldHandleLayoutZoomTarget(event.target)) return;
+  gestureStartZoom = layoutZoom;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}
+
+function handleLayoutGestureChange(event: Event): void {
+  if (!shouldHandleLayoutZoomTarget(event.target)) return;
+  const scale = Number((event as Event & { scale?: number }).scale);
+  if (!Number.isFinite(scale) || scale <= 0) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  applyLayoutZoom(gestureStartZoom * scale);
+}
+
 function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
   const target = event.target;
   if (!(target instanceof Node) || !host.contains(target)) return;
@@ -442,6 +540,9 @@ function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
 
 host.addEventListener("pointerdown", activateEditorFromPointer, { capture: true });
 host.addEventListener("mousedown", activateEditorFromPointer, { capture: true });
+document.addEventListener("wheel", handleLayoutZoomWheel, { capture: true, passive: false });
+document.addEventListener("gesturestart", handleLayoutGestureStart, { capture: true, passive: false });
+document.addEventListener("gesturechange", handleLayoutGestureChange, { capture: true, passive: false });
 
 const snippetSession = new SnippetSession(editor);
 host.addEventListener("aaronnote-assist-update", () => scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true }));
@@ -2967,8 +3068,52 @@ function toolActions(): ToolAction[] {
   ];
 }
 
+function renderLayoutZoomTool(): HTMLElement {
+  const panel = document.createElement("section");
+  panel.className = "aaronnote-layout-zoom-tool";
+  const head = document.createElement("div");
+  head.className = "aaronnote-layout-zoom-head";
+  const title = document.createElement("strong");
+  title.textContent = "🫴 Layout zoom";
+  const value = document.createElement("span");
+  value.dataset.layoutZoomValue = "";
+  value.textContent = layoutZoomPercent();
+  head.append(title, value);
+
+  const controls = document.createElement("div");
+  controls.className = "aaronnote-layout-zoom-controls";
+  const actions: Array<{ action: "out" | "reset" | "in"; label: string; title: string }> = [
+    { action: "out", label: "-", title: "M-- / Cmd+-" },
+    { action: "reset", label: "100%", title: "M-0 / Cmd+0" },
+    { action: "in", label: "+", title: "M-= / Cmd+=" },
+  ];
+  for (const item of actions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.layoutZoomAction = item.action;
+    button.title = item.title;
+    button.textContent = item.label;
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (item.action === "out") stepLayoutZoom(-1, { announce: true });
+      else if (item.action === "in") stepLayoutZoom(1, { announce: true });
+      else resetLayoutZoom({ announce: true });
+      editor.focus();
+    });
+    controls.appendChild(button);
+  }
+
+  const hint = document.createElement("p");
+  hint.textContent = "Pinch trackpad, M-= / M-- / M-0. Temporary per pane.";
+  panel.append(head, controls, hint);
+  return panel;
+}
+
 function renderToolsPanel(): void {
   toolsList.replaceChildren();
+  toolsList.appendChild(renderLayoutZoomTool());
+  updateLayoutZoomTool();
   for (const action of toolActions()) {
     const button = document.createElement("button");
     button.type = "button";
@@ -4458,6 +4603,9 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (handleXwidgetEmacsKeydown(event)) return;
+  if (runLayoutZoomShortcut(event)) {
+    return;
+  }
   if (handleXwidgetHistoryKeydown(event, {
     editor,
     editorHost: host,

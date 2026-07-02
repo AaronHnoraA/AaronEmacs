@@ -50,22 +50,71 @@
 }
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
   font-family: var(--aaron-font-body);
-  --aaronnote-bg: #fffdf8;
-  --aaronnote-chrome: #fbf8f1;
-  --aaronnote-border: rgb(109 90 56 / 18%);
-  --aaronnote-muted: rgb(82 70 50 / 70%);
-  --aaronnote-vim-accent: #1d6f72;
-  --aaronnote-vim-visual: #7b4acb;
-  --aaron-ink: #24201a;
-  --aaron-muted: rgb(82 70 50 / 70%);
-  --aaron-paper: #fffdf8;
-  --aaron-paper-soft: #fbf8f1;
-  --aaron-paper-line: rgb(109 90 56 / 18%);
-  --aaron-red: #8d202c;
-  --aaron-red-dark: #6f1721;
-  --aaron-shadow: 0 10px 28px rgb(49 38 22 / 14%);
+  --aaronnote-bg: #141a27;
+  --aaronnote-chrome: #161d2c;
+  --aaronnote-border: #435574;
+  --aaronnote-muted: #a9bad6;
+  --aaronnote-vim-accent: #7ee7ff;
+  --aaronnote-vim-visual: #d2a8ff;
+  --aaronnote-layout-zoom: 1;
+  --aaronnote-panel-bg: rgb(22 29 44 / 96%);
+  --aaronnote-surface: rgb(36 46 67 / 94%);
+  --aaron-ink: #e2eaff;
+  --aaron-muted: #a9bad6;
+  --aaron-faint: #7081a0;
+  --aaron-paper: #171f2f;
+  --aaron-paper-soft: #1e273a;
+  --aaron-paper-line: #435574;
+  --aaron-panel: #242e43;
+  --aaron-panel-strong: #2c3852;
+  --aaron-red: #ff8fa3;
+  --aaron-red-dark: #ffb2bf;
+  --aaron-link: #7ee7ff;
+  --aaron-link-soft: #1d3b48;
+  --aaron-accent: #7ee7ff;
+  --aaron-accent-sand: #ffd86a;
+  --aaron-accent-soft: #1d3b48;
+  --aaron-accent-2: #d2a8ff;
+  --aaron-green: #8effa8;
+  --aaron-green-soft: #79cf8f;
+  --aaron-code-bg: #182238;
+  --aaron-danger-bg: #382431;
+  --aaron-title: #ff9bad;
+  --aaron-heading-1: #ff9bad;
+  --aaron-heading-2: #7ee7ff;
+  --aaron-heading-3: #d2a8ff;
+  --aaron-heading-4: #8effa8;
+  --aaron-heading-5: #ffd86a;
+  --aaron-heading-6: #9fb7ff;
+  --aaron-cursor: #7ee7ff;
+  --aaron-cursor-glow: rgb(126 231 255 / 32%);
+  --aaron-math-ink: #d7defb;
+  --aaron-math-accent: #aebfff;
+  --aaron-math-muted: #9aa8c8;
+  --aaron-selection: rgb(49 70 94 / 48%);
+  --aaron-highlight: rgb(255 216 106 / 22%);
+  --aaron-shadow: 0 18px 46px rgb(0 0 0 / 38%);
+  --aaron-callout-note: #95c7ff;
+  --aaron-callout-tip: #8effa8;
+  --aaron-callout-info: #7ee7ff;
+  --aaron-callout-warning: #ffd86a;
+  --aaron-callout-danger: #ff8fa3;
+  --aaron-callout-quote: #d2a8ff;
+  --c-def: #ffd86a;
+  --c-thm: #8effa8;
+  --c-lemma: #95c7ff;
+  --c-cor: #d2a8ff;
+  --c-prop: #ffc5cf;
+  --c-proof: #7ee7ff;
+  --c-example: #e8b85f;
+  --c-attend: #ff8fa3;
+  --c-note: #86f6e4;
+  --lean4-header-bg: #222532;
+  --lean4-border: #4c5366;
+  --lean4-accent: #d2a8ff;
+  --lean4-muted: #8b90a8;
   --aaron-font-latin: "AaronLatinSystem";
   --aaron-font-english-fallback: -apple-system, BlinkMacSystemFont, "SF Pro Text";
   --aaron-font-chinese: "FZLiuGongQuanKaiShuJF";
@@ -87,23 +136,31 @@ body,
   width: 100%;
   height: 100%;
   margin: 0;
-  background: var(--aaronnote-bg);
+  background:
+    radial-gradient(circle at 18% -12%, rgb(126 231 255 / 5.5%), transparent 30rem),
+    radial-gradient(circle at 88% 0%, rgb(210 168 255 / 4.5%), transparent 28rem),
+    var(--aaronnote-bg);
   color: var(--aaron-ink);
   font-family: var(--aaron-font-body);
+}
+
+::selection {
+  background: var(--aaron-selection);
+  color: var(--aaron-ink);
 }
 
 button {
   border: 1px solid var(--aaronnote-border);
   border-radius: 5px;
   padding: 3px 9px;
-  background: #fff;
+  background: var(--aaron-paper-soft);
   color: inherit;
   cursor: pointer;
 }
 
 button:hover,
 button.is-active {
-  background: rgb(127 127 127 / 12%);
+  background: color-mix(in srgb, var(--aaron-accent), transparent 88%);
 }
 
 button:disabled {
@@ -115,7 +172,9 @@ button:disabled {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   height: 100vh;
-  background: var(--aaronnote-bg);
+  background:
+    linear-gradient(180deg, rgb(20 26 39 / 96%), rgb(20 26 39 / 100%)),
+    var(--aaronnote-bg);
 }
 
 .aaronnote-focused-bar {
@@ -153,22 +212,22 @@ button:disabled {
   border: 1px solid var(--aaronnote-border);
   border-radius: 5px;
   padding: 2px 6px;
-  background: #fff;
+  background: var(--aaron-paper);
   color: var(--aaronnote-muted);
   text-align: center;
   font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 #app[data-vim-mode="normal"] .aaronnote-focused-bar [data-vim-mode] {
-  border-color: rgb(29 111 114 / 42%);
-  background: rgb(29 111 114 / 10%);
+  border-color: rgb(130 231 255 / 42%);
+  background: rgb(130 231 255 / 10%);
   color: var(--aaronnote-vim-accent);
 }
 
 #app[data-vim-mode="visual"] .aaronnote-focused-bar [data-vim-mode],
 #app[data-vim-mode="visual-line"] .aaronnote-focused-bar [data-vim-mode] {
-  border-color: rgb(123 74 203 / 42%);
-  background: rgb(123 74 203 / 10%);
+  border-color: rgb(201 173 255 / 40%);
+  background: rgb(201 173 255 / 8%);
   color: var(--aaronnote-vim-visual);
 }
 
@@ -229,19 +288,32 @@ button:disabled {
   font-family: var(--aaron-font-mono);
 }
 
+.aaronnote-focused-editor .cm-content {
+  caret-color: var(--aaron-cursor);
+}
+
+.aaronnote-focused-editor .cm-cursor,
+.aaronnote-focused-editor .cm-dropCursor {
+  border-left-color: var(--aaron-cursor) !important;
+  border-left-width: 2px !important;
+  box-shadow: 0 0 0 1px var(--aaron-cursor-glow);
+}
+
 #app[data-vim-mode="normal"] .cm-cursor {
   width: 0.68em;
   border-left: 0;
-  outline: 1px solid rgb(29 111 114 / 78%);
-  background: rgb(29 111 114 / 20%);
+  outline: 1px solid rgb(130 231 255 / 78%);
+  background: rgb(130 231 255 / 16%);
+  box-shadow: none;
 }
 
 #app[data-vim-mode="visual"] .cm-cursor,
 #app[data-vim-mode="visual-line"] .cm-cursor {
   width: 0.68em;
   border-left: 0;
-  outline: 1px solid rgb(123 74 203 / 78%);
-  background: rgb(123 74 203 / 20%);
+  outline: 1px solid rgb(201 173 255 / 70%);
+  background: rgb(201 173 255 / 12%);
+  box-shadow: none;
 }
 
 #app[data-vim-mode="visual-line"] .cm-cursor {
@@ -298,7 +370,7 @@ button:disabled {
   background: color-mix(in srgb, var(--aaron-paper-soft), var(--aaron-red) 7%);
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--aaron-red), transparent 62%),
-    0 1px 0 rgb(255 255 255 / 48%) inset;
+    0 1px 0 rgb(255 255 255 / 8%) inset;
 }
 
 .aaronnote-snippet-option.is-active::after {
@@ -363,9 +435,9 @@ button:disabled {
 .aaronnote-math-preview.is-error {
   max-width: min(420px, calc(100vw - 16px));
   overflow: auto;
-  border-color: #fecdd3;
-  background: #fff1f2;
-  color: #9f1239;
+  border-color: rgb(255 150 180 / 38%);
+  background: #3a2d30;
+  color: #ffb7c8;
   font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -416,6 +488,62 @@ button:disabled {
   display: grid;
   gap: 1px;
   padding: 6px;
+}
+
+.aaronnote-layout-zoom-tool {
+  display: grid;
+  gap: 9px;
+  margin: 0 0 6px;
+  border: 1px solid color-mix(in srgb, var(--aaron-heading-2), transparent 58%);
+  border-radius: 5px;
+  padding: 10px;
+  background:
+    linear-gradient(135deg, rgb(126 231 255 / 10%), rgb(210 168 255 / 7%)),
+    color-mix(in srgb, var(--aaron-paper-soft), transparent 8%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+}
+
+.aaronnote-layout-zoom-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: var(--aaron-font-sans);
+}
+
+.aaronnote-layout-zoom-head strong {
+  color: var(--aaron-heading-2);
+  font: 780 12px/1.2 var(--aaron-font-sans);
+  letter-spacing: 0.02em;
+}
+
+.aaronnote-layout-zoom-head span {
+  color: var(--aaron-heading-5);
+  font: 750 11px/1 var(--aaron-font-mono);
+}
+
+.aaronnote-layout-zoom-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.aaronnote-layout-zoom-controls button {
+  min-height: 30px;
+  border-color: color-mix(in srgb, var(--aaron-heading-2), transparent 58%);
+  background: rgb(22 32 50 / 74%);
+  color: var(--aaron-ink);
+  font: 760 12px/1 var(--aaron-font-mono);
+}
+
+.aaronnote-layout-zoom-controls button:hover {
+  background: color-mix(in srgb, var(--aaron-heading-2), transparent 82%);
+}
+
+.aaronnote-layout-zoom-tool p {
+  margin: 0;
+  color: var(--aaron-muted);
+  font: 11px/1.35 var(--aaron-font-sans);
 }
 
 .aaronnote-tool-action {
@@ -1204,10 +1332,11 @@ html.aaronnote-paused *::after {
   padding: 4px;
   border: 1px solid color-mix(in srgb, var(--aaron-red), transparent 24%);
   border-radius: 5px;
-  background: color-mix(in srgb, var(--aaron-paper), white 18%);
+  background: var(--aaronnote-panel-bg);
   color: var(--aaron-ink);
   font: 700 12px/1 "Avenir Next", Inter, ui-sans-serif, system-ui, sans-serif;
-  box-shadow: 0 10px 26px rgb(67 39 25 / 18%);
+  box-shadow: var(--aaron-shadow);
+  backdrop-filter: blur(10px);
 }
 
 .aaronnote-selection-tool[hidden] {
@@ -1250,9 +1379,11 @@ html.aaronnote-paused *::after {
   padding: 7px;
   border: 1px solid var(--aaronnote-border);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--aaron-paper-soft), white 38%);
+  background: var(--aaronnote-panel-bg);
   box-shadow: var(--aaron-shadow);
   font: 12px/1.4 var(--aaron-font-sans);
+  color: var(--aaron-ink);
+  backdrop-filter: blur(10px);
 }
 
 .aaronnote-find-panel[hidden] {
@@ -1265,7 +1396,7 @@ html.aaronnote-paused *::after {
   border: 1px solid var(--aaronnote-border);
   border-radius: 5px;
   padding: 3px 8px;
-  background: #fff;
+  background: var(--aaron-paper);
   color: var(--aaron-ink);
   font: inherit;
 }
@@ -1293,8 +1424,9 @@ html.aaronnote-paused *::after {
   border: 1px solid color-mix(in srgb, var(--aaron-red), transparent 30%);
   border-radius: 5px;
   padding: 4px;
-  background: color-mix(in srgb, var(--aaron-paper), white 18%);
-  box-shadow: 0 10px 26px rgb(67 39 25 / 18%);
+  background: var(--aaronnote-panel-bg);
+  box-shadow: var(--aaron-shadow);
+  backdrop-filter: blur(10px);
 }
 
 .aaronnote-selection-more[hidden] {
@@ -1312,8 +1444,10 @@ html.aaronnote-paused *::after {
   padding: 8px;
   border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
   border-radius: 7px;
-  background: var(--aaronnote-panel-bg, #fff);
-  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.18);
+  background: var(--aaronnote-panel-bg);
+  color: var(--aaron-ink);
+  box-shadow: var(--aaron-shadow);
+  backdrop-filter: blur(10px);
 }
 
 .aaronnote-prose-popover[hidden] { display: none; }
