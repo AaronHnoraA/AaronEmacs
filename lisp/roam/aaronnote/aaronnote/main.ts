@@ -16,7 +16,7 @@ import { INLINE_MATH_RE } from "../src/inline-math.ts";
 import { formatMathRenderError, renderMathLazy } from "../src/math-render.ts";
 import { setKatexMacros } from "../src/katex-macros.ts";
 import { hrefProtocol, safeHref } from "../src/url-safety.ts";
-import { api, type TodoItem, type LatexTemplate } from "./api-client.ts";
+import { api, type TodoItem, type LatexExportAgentStatus, type LatexTemplate } from "./api-client.ts";
 import { Epoch } from "../src/async-epoch.ts";
 import { CoalescedTimer } from "../src/coalesced-timer.ts";
 import { blobToBase64 } from "../src/paste.ts";
@@ -2216,6 +2216,55 @@ async function exportLatexTool(): Promise<void> {
   }
 }
 
+function latexExportAgentLabel(id: string): string {
+  switch (id) {
+    case "claude": return "Claude";
+    case "opencode": return "OpenCode";
+    case "codex":
+    default: return "Codex";
+  }
+}
+
+function latexExportAgentOptions(status: LatexExportAgentStatus): { value: string; label: string }[] {
+  const agents = status.agents?.length
+    ? status.agents
+    : ["codex", "claude", "opencode"].map((id) => ({ id, label: latexExportAgentLabel(id), current: id === status.agent }));
+  return agents.map((agent) => {
+    const id = String(agent.id || "").trim();
+    const suffix = [
+      agent.current ? "current" : "",
+      agent.available === false ? "unavailable" : "",
+    ].filter(Boolean).join(", ");
+    return {
+      value: id,
+      label: `${agent.label || latexExportAgentLabel(id)}${suffix ? ` (${suffix})` : ""}`,
+    };
+  }).filter((option) => option.value);
+}
+
+async function switchLatexExportAgentTool(): Promise<void> {
+  setStatus("Loading LaTeX export agents...");
+  try {
+    const status = await api.latex.agentStatus();
+    const current = String(status.agent || "codex");
+    const picked = await openFormModal("LaTeX export agent", [{
+      id: "agent",
+      label: "Agent backend",
+      type: "select",
+      value: current,
+      options: latexExportAgentOptions(status),
+    }], "Switch");
+    if (!picked) {
+      setStatus("LaTeX export agent switch canceled");
+      return;
+    }
+    const next = await api.latex.setAgent({ agent: picked.agent });
+    setStatus(`LaTeX export agent: ${latexExportAgentLabel(String(next.agent || picked.agent))}`);
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : "LaTeX export agent switch failed");
+  }
+}
+
 async function updateNoteMeta(
   action: (body: Record<string, unknown>) => Promise<Awaited<ReturnType<typeof api.notes.bootstrap>>>,
   body: Record<string, unknown>,
@@ -2898,6 +2947,7 @@ function toolActions(): ToolAction[] {
     { id: "toc", title: "Toggle TOC", detail: "Page headings, anchors, tags, backlinks", run: () => { floatingTocPanel.toggle(); updateFloatingToc(); } },
     { id: "tag-ref", title: "Tag / copy ref", detail: "Equation tag, inline anchor, reference copy", run: () => void tagOrCopyRef() },
     { id: "export-latex", title: "Export LaTeX", detail: "Write selection, heading, or note to a .tex file", run: () => void exportLatexTool() },
+    { id: "latex-export-agent", title: "Switch export agent", detail: "Choose Codex, Claude, or OpenCode for LaTeX polish", run: () => void switchLatexExportAgentTool() },
     { id: "reload-snippets", title: "Reload snippets", detail: "Refresh Emacs md/tex snippets", run: () => void reloadSnippets() },
   ];
   return [

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 // @ts-ignore The converter is a Node ESM module outside the TS app graph.
 import { aaronnoteMarkdownToLatex, applyLatexTemplate, escapeLatexTitle, latexMacrosPreamble, writeLatexExport } from "../server/lib/latex-export.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
-import { configure, exportLatex, latexExportDefaults, listLatexTemplates } from "../server/lib/index.mjs";
+import { configure, exportLatex, latexExportAgentStatus, latexExportDefaults, listLatexTemplates, setLatexExportAgent } from "../server/lib/index.mjs";
 
 const roots: string[] = [];
 
@@ -260,6 +260,46 @@ describe("LaTeX export", () => {
     const defaults = await latexExportDefaults({ file: note }) as { template?: string; vars?: Record<string, string> };
     expect(defaults.template).toBe(templatePath);
     expect(defaults.vars?.coursecode).toBe("COMP3453");
+  });
+
+  test("does not force document title markup into templates without a title placeholder", async () => {
+    const { root, notes } = await setupRoot();
+    const templatePath = join(root, "templates", "latex", "body-only.tex");
+    await writeFile(templatePath, [
+      '% aaronnote-template: {"name":"Body only","engine":"pdflatex"}',
+      "\\documentclass{article}",
+      "\\begin{document}",
+      "{{body}}",
+      "\\end{document}",
+      "",
+    ].join("\n"), "utf8");
+    const note = join(notes, "body-only.md");
+    await writeFile(note, "# Generic\n\nActual body.\n", "utf8");
+    const out = join(notes, "body-only.tex");
+
+    await exportLatex({ file: note, outputPath: out, templatePath });
+    const tex = await readFile(out, "utf8");
+    expect(tex).toContain("Actual body.");
+    expect(tex).not.toContain("\\title{");
+    expect(tex).not.toContain("\\maketitle");
+  });
+
+  test("switches and persists the LaTeX export agent backend at runtime", async () => {
+    const { root } = await setupRoot();
+    let status = await setLatexExportAgent({ agent: "opencode" }) as { agent?: string; engine?: string };
+    expect(status.agent).toBe("opencode");
+    expect(status.engine).toBe("codex");
+
+    configure({
+      root: join(root, "roam"),
+      workspaceRoot: root,
+      latexTemplatesRoot: join(root, "templates"),
+      latexExportEngine: "mechanical",
+      latexExportAgent: "codex",
+    });
+    status = await latexExportAgentStatus() as { agent?: string; engine?: string };
+    expect(status.agent).toBe("opencode");
+    expect(status.engine).toBe("codex");
   });
 
   test("merges agent-maintained conversion rules into the mechanical draft", async () => {

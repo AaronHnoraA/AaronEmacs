@@ -28,6 +28,8 @@ import {
   tagIndexPayload,
   pathSuggestionsForFile,
   latexExportDefaults,
+  latexExportAgentStatus,
+  setLatexExportAgent,
   listLatexTemplates,
   chooseLatexOutputPath,
   exportLatex,
@@ -559,6 +561,8 @@ const apiHandlers = {
   "aaronnote:api:notes:templates": (force) => templatesPayload(force === true),
   "aaronnote:api:notes:snippets": () => snippetsPayload(true),
   "aaronnote:api:latex:defaults": (body) => latexExportDefaults(body || {}),
+  "aaronnote:api:latex:agent-status": () => latexExportAgentStatus(),
+  "aaronnote:api:latex:set-agent": (body) => setLatexExportAgent(body || {}),
   "aaronnote:api:latex:templates": () => listLatexTemplates(),
   "aaronnote:api:latex:choose-output-path": (body) => chooseLatexOutputPath(body || {}),
   "aaronnote:api:latex:export": (body) => exportLatex({
@@ -820,6 +824,8 @@ function adapterScript(origin) {
     },
     latex: {
       defaults: function(body) { return call("aaronnote:api:latex:defaults", [body || {}]); },
+      agentStatus: function() { return call("aaronnote:api:latex:agent-status", []); },
+      setAgent: function(body) { return call("aaronnote:api:latex:set-agent", [body || {}]); },
       templates: function() { return call("aaronnote:api:latex:templates", []); },
       chooseOutputPath: function(body) { return call("aaronnote:api:latex:choose-output-path", [body || {}]); },
       export: function(body) { return call("aaronnote:api:latex:export", [body || {}]); }

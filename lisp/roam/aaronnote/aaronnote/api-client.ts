@@ -95,6 +95,8 @@ type NativeApi = {
   };
   latex?: {
     defaults?: (body?: Record<string, unknown>) => Promise<unknown>;
+    agentStatus?: () => Promise<unknown>;
+    setAgent?: (body?: Record<string, unknown>) => Promise<unknown>;
     templates?: () => Promise<unknown>;
     chooseOutputPath?: (body?: Record<string, unknown>) => Promise<unknown>;
     export?: (body?: Record<string, unknown>) => Promise<unknown>;
@@ -144,6 +146,13 @@ type NativeApi = {
 export type LatexTemplateVar = { id: string; label: string; default: string };
 export type LatexTemplate = { key: string; file: string; name: string; engine: string; vars: LatexTemplateVar[] };
 export type LatexTemplatesResult = { type?: string; ok?: boolean; templates?: LatexTemplate[]; root?: string };
+export type LatexExportAgentStatus = {
+  type?: string;
+  ok?: boolean;
+  agent?: string;
+  engine?: string;
+  agents?: Array<{ id: string; label?: string; current?: boolean; available?: boolean }>;
+};
 
 export type KatexMacrosResult = {
   type?: string;
@@ -230,6 +239,14 @@ export const api = {
     async defaults(body: Record<string, unknown>): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().latex?.defaults, "LaTeX export defaults");
       return ensureOk(await call(body) as Record<string, unknown>, "LaTeX export defaults failed");
+    },
+    async agentStatus(): Promise<LatexExportAgentStatus> {
+      const call = requireMethod(nativeApi().latex?.agentStatus, "LaTeX export agent status");
+      return ensureOk(await call() as LatexExportAgentStatus, "LaTeX export agent status failed");
+    },
+    async setAgent(body: Record<string, unknown>): Promise<LatexExportAgentStatus> {
+      const call = requireMethod(nativeApi().latex?.setAgent, "LaTeX export agent switch");
+      return ensureOk(await call(body) as LatexExportAgentStatus, "LaTeX export agent switch failed");
     },
     async templates(): Promise<LatexTemplatesResult> {
       const call = requireMethod(nativeApi().latex?.templates, "LaTeX templates");

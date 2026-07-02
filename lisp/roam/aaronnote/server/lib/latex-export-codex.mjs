@@ -142,7 +142,7 @@ async function compileLatex({ tex, dir, latexBin, engine = "pdflatex", sourceDir
 
 // ---- Agent invocation (codex / claude / opencode) --------------------------
 
-function buildPrompt({ retryLog }) {
+function buildPrompt({ retryLog, needsTitle = true }) {
   const base = [
     "You are polishing a LaTeX export. All files are in your working directory.",
     "Read: style.md (style contract — obey strictly), AGENTS.md (your contract),",
@@ -156,10 +156,22 @@ function buildPrompt({ retryLog }) {
     "any prose from source.md — only change markup. Emit body content only: no",
     "\\documentclass, no preamble, no package or macro definitions.",
     "",
-    "Also write a concise document title to title.txt (one plain-text line, no",
-    "markup, no quotes) that best names this document based on its content.",
+    needsTitle
+      ? [
+          "This template uses a document title. After reading the full source.md and",
+          "final body.tex, write a concise document title to title.txt (one plain-text",
+          "line, no markup, no quotes). The title must summarize the whole exported",
+          "document, not merely copy the filename or first heading when those are generic.",
+        ].join("\n")
+      : [
+          "This template does not use a document title placeholder. Do not invent title",
+          "markup or force a title into body.tex; focus only on adapting the exported",
+          "body to this template.",
+        ].join("\n"),
     "",
-    "Write the final body to body.tex, write title.txt, then stop. Run no other commands.",
+    needsTitle
+      ? "Write the final body to body.tex, write title.txt, then stop. Run no other commands."
+      : "Write the final body to body.tex, then stop. Run no other commands.",
   ];
   if (retryLog) {
     base.push(
@@ -236,9 +248,9 @@ function progressLabel(backend, line) {
   return "";
 }
 
-function runAgent({ backend, bin, workdir, model, retryLog, timeoutMs, signal, onProgress }) {
+function runAgent({ backend, bin, workdir, model, retryLog, needsTitle, timeoutMs, signal, onProgress }) {
   return new Promise((resolve) => {
-    const args = agentArgs(backend, { workdir, model, prompt: buildPrompt({ retryLog }) });
+    const args = agentArgs(backend, { workdir, model, prompt: buildPrompt({ retryLog, needsTitle }) });
     let child;
     try {
       child = spawn(bin, args, { cwd: workdir, stdio: ["ignore", "pipe", "pipe"] });
@@ -319,6 +331,7 @@ export async function polishBodyWithAgent(opts) {
     sourceDir = "",
     makeWorkdir,
     maxAttempts = 3,
+    needsTitle = true,
     agentTimeoutMs = 180_000,
     compileTimeoutMs = 120_000,
     signal,
@@ -344,33 +357,35 @@ export async function polishBodyWithAgent(opts) {
     if (agentsDoc && existsSync(agentsDoc)) await copyFile(agentsDoc, join(workdir, "AGENTS.md"));
 
     let body = draftBody;
+    let bestAiTitle = "";
     let retryLog = "";
     let attempts = 0;
     for (let i = 0; i < Math.max(1, maxAttempts); i += 1) {
       attempts = i + 1;
       emit(retryLog ? `Polishing with ${backend} (retry ${attempts})…` : `Polishing with ${backend}…`);
-      const run = await runAgent({ backend, bin: agentBin, workdir, model, retryLog, timeoutMs: agentTimeoutMs, signal, onProgress });
+      const run = await runAgent({ backend, bin: agentBin, workdir, model, retryLog, needsTitle, timeoutMs: agentTimeoutMs, signal, onProgress });
       if (!run.ok) {
         warnings.push(`${backend} adjust failed (${run.message || "unknown"})`);
         break;
       }
-      const aiTitle = await readAgentTitle(workdir);
+      const aiTitle = needsTitle ? await readAgentTitle(workdir) : "";
+      if (aiTitle) bestAiTitle = aiTitle;
       try {
         body = await readFile(join(workdir, "body.tex"), "utf8");
       } catch {
         warnings.push(`${backend} did not produce body.tex; used mechanical draft`);
-        return { ...base, aiTitle, usedAgent: false, compiled: false, attempts, warnings };
+        return { ...base, aiTitle: bestAiTitle, usedAgent: false, compiled: false, attempts, warnings };
       }
       if (!compileEnabled) {
         warnings.push("compile not verified (no LaTeX engine / assembler)");
         warnings.push(...proseFidelityWarnings(sourceMarkdown, body));
-        return { body, aiTitle, backend, usedAgent: true, compiled: false, attempts, warnings };
+        return { body, aiTitle: bestAiTitle, backend, usedAgent: true, compiled: false, attempts, warnings };
       }
       emit(`Compiling (attempt ${attempts})…`);
       const res = await compileLatex({ tex: assemble(body), dir: workdir, latexBin, engine, sourceDir, timeoutMs: compileTimeoutMs, signal });
       if (res.ok) {
         warnings.push(...proseFidelityWarnings(sourceMarkdown, body));
-        return { body, aiTitle, backend, usedAgent: true, compiled: true, attempts, warnings };
+        return { body, aiTitle: bestAiTitle, backend, usedAgent: true, compiled: true, attempts, warnings };
       }
       emit(`Compile failed; feeding log back to ${backend}…`);
       retryLog = res.log;
@@ -382,12 +397,12 @@ export async function polishBodyWithAgent(opts) {
       const draftRes = await compileLatex({ tex: assemble(draftBody), dir: workdir, latexBin, engine, sourceDir, timeoutMs: compileTimeoutMs, signal });
       if (draftRes.ok) {
         warnings.push(`${backend} polish did not compile after ${attempts} attempt(s); used mechanical draft`);
-        return { ...base, usedAgent: false, compiled: true, attempts, warnings };
+        return { ...base, aiTitle: bestAiTitle, usedAgent: false, compiled: true, attempts, warnings };
       }
       warnings.push(`neither ${backend} polish nor mechanical draft compiled; wrote best-effort mechanical draft`);
-      return { ...base, usedAgent: false, compiled: false, attempts, warnings };
+      return { ...base, aiTitle: bestAiTitle, usedAgent: false, compiled: false, attempts, warnings };
     }
-    return { ...base, usedAgent: false, compiled: false, attempts, warnings };
+    return { ...base, aiTitle: bestAiTitle, usedAgent: false, compiled: false, attempts, warnings };
   } finally {
     await rm(workdir, { recursive: true, force: true }).catch(() => {});
   }

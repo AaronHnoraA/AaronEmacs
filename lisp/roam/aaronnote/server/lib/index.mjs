@@ -11,6 +11,8 @@ export {
   updateTodoStatus,
   pathSuggestionsForFile,
   latexExportDefaults,
+  latexExportAgentStatus,
+  setLatexExportAgent,
   listLatexTemplates,
   chooseLatexOutputPath,
   exportLatex,

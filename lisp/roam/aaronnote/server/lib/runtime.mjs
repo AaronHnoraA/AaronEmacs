@@ -32,6 +32,8 @@ let latexOpencodeBin = String(process.env.AARONNOTE_OPENCODE_BIN || "opencode").
 let latexCodexModel = String(process.env.AARONNOTE_CODEX_MODEL || "").trim();
 let latexExportModel = String(process.env.AARONNOTE_LATEX_EXPORT_MODEL || "").trim();
 let latexExportMaxAttempts = Math.max(1, Number(process.env.AARONNOTE_LATEX_EXPORT_MAX_ATTEMPTS) || 3);
+const LATEX_EXPORT_AGENTS = ["codex", "claude", "opencode"];
+const LATEX_EXPORT_ENGINES = ["codex", "mechanical"];
 const execFileAsync = promisify(execFile);
 
 let noteRoot = resolveUserPath(process.env.AARONNOTE_ROOT || join(appDir, "..", "roam"));
@@ -3344,6 +3346,60 @@ async function writeLatexExportState(state) {
   await atomicWriteFile(latexExportStateFile(), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
+function normalizeLatexExportAgent(value) {
+  const agent = String(value || "").trim().toLowerCase();
+  return LATEX_EXPORT_AGENTS.includes(agent) ? agent : "";
+}
+
+function normalizeLatexExportEngine(value) {
+  const engine = String(value || "").trim().toLowerCase();
+  return LATEX_EXPORT_ENGINES.includes(engine) ? engine : "";
+}
+
+function latexExportAgentBin(agent) {
+  switch (normalizeLatexExportAgent(agent) || "codex") {
+    case "claude": return latexClaudeBin;
+    case "opencode": return latexOpencodeBin;
+    case "codex":
+    default: return latexCodexBin;
+  }
+}
+
+async function applyLatexExportSettingsFromState(existingState = null) {
+  const state = existingState || await readLatexExportState();
+  const settings = state.settings && typeof state.settings === "object" ? state.settings : {};
+  const agent = normalizeLatexExportAgent(settings.latexExportAgent || settings.agent);
+  const engine = normalizeLatexExportEngine(settings.latexExportEngine || settings.engine);
+  if (agent) latexExportAgent = agent;
+  if (engine) latexExportEngine = engine;
+  return state;
+}
+
+function latexExportAgentStatusPayload() {
+  const agent = normalizeLatexExportAgent(latexExportAgent) || "codex";
+  const engine = normalizeLatexExportEngine(latexExportEngine) || "codex";
+  return {
+    type: "latex-export-agent",
+    ok: true,
+    agent,
+    engine,
+    agents: LATEX_EXPORT_AGENTS.map((id) => {
+      const bin = executablePath(latexExportAgentBin(id));
+      return {
+        id,
+        label: id === "codex" ? "Codex" : id === "claude" ? "Claude" : "OpenCode",
+        current: id === agent,
+        available: agentAvailable(bin),
+      };
+    }),
+  };
+}
+
+function latexTemplateUsesVar(templateText, name) {
+  const escaped = String(name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\{\\{\\s*${escaped}\\s*\\}\\}`).test(String(templateText || ""));
+}
+
 function resolveLatexOutputPath(input, sourceFile = "") {
   const raw = String(input || "").trim();
   if (!raw) return "";
@@ -3358,12 +3414,12 @@ function latexExportSourceFile(input) {
 }
 
 function latexExportTitle(sourceFile, bodyTitle, metaTitle = "") {
+  const title = String(metaTitle || bodyTitle || "").trim();
+  if (title) return title;
   if (sourceFile) {
     const fileTitle = basename(sourceFile).replace(/\.[^.]+$/, "").trim();
     if (fileTitle) return fileTitle;
   }
-  const title = String(bodyTitle || metaTitle || "").trim();
-  if (title) return title;
   return "Aaronnote";
 }
 
@@ -3480,6 +3536,41 @@ export async function latexExportDefaults(body = {}) {
   };
 }
 
+export async function latexExportAgentStatus() {
+  await applyLatexExportSettingsFromState();
+  return latexExportAgentStatusPayload();
+}
+
+export async function setLatexExportAgent(body = {}) {
+  const agent = normalizeLatexExportAgent(body.agent || body.backend);
+  if (!agent) {
+    const err = new Error(`Unsupported LaTeX export agent: ${String(body.agent || body.backend || "")}`);
+    err.statusCode = 400;
+    throw err;
+  }
+  latexExportAgent = agent;
+  const requestedEngine = normalizeLatexExportEngine(body.engine);
+  if (requestedEngine) {
+    latexExportEngine = requestedEngine;
+  } else if (body.enableAgent !== false) {
+    latexExportEngine = "codex";
+  }
+
+  const state = await readLatexExportState();
+  const settings = state.settings && typeof state.settings === "object" ? state.settings : {};
+  await writeLatexExportState({
+    ...state,
+    schemaVersion: 1,
+    settings: {
+      ...settings,
+      latexExportAgent,
+      latexExportEngine,
+    },
+    updatedAt: new Date().toISOString(),
+  });
+  return latexExportAgentStatusPayload();
+}
+
 export async function chooseLatexOutputPath(body = {}) {
   const defaults = await latexExportDefaults(body);
   const defaultPath = resolveLatexOutputPath(body.defaultPath || defaults.outputPath, defaults.file);
@@ -3499,6 +3590,7 @@ export async function chooseLatexOutputPath(body = {}) {
 }
 
 export async function exportLatex(body = {}) {
+  await applyLatexExportSettingsFromState();
   const sourceFile = latexExportSourceFile(body.file || body.sourceFile || "");
   const content = typeof body.content === "string"
     ? body.content
@@ -3530,6 +3622,7 @@ export async function exportLatex(body = {}) {
 
   const template = await readLatexTemplate(latexTemplatesRoot, body.templatePath || "");
   const header = parseLatexTemplateHeader(template.text);
+  const needsTitle = latexTemplateUsesVar(template.text, "title");
   const engine = String(body.engine || header.engine || "pdflatex").toLowerCase();
   const macroResult = loadKatexMacros(katexMacrosRoot);
   const macros = latexMacrosPreamble(macroResult.macros);
@@ -3576,6 +3669,7 @@ export async function exportLatex(body = {}) {
       backend,
       agentBin,
       model: latexExportModel || (backend === "codex" ? latexCodexModel : ""),
+      needsTitle,
       sourceDir: sourceFile ? dirname(sourceFile) : "",
       makeWorkdir: () => runtimeMkdtemp("latex-export", sourceFile || "export"),
       maxAttempts: latexExportMaxAttempts,
@@ -3584,7 +3678,7 @@ export async function exportLatex(body = {}) {
     bodyLatex = result.body;
     engineUsed = result.usedAgent ? backend : "mechanical";
     // AI title only overrides when the note has no explicit meta title.
-    if (!metaTitle && result.aiTitle) docTitle = result.aiTitle;
+    if (needsTitle && !metaTitle && result.aiTitle) docTitle = result.aiTitle;
     if (Array.isArray(result.warnings)) warnings.push(...result.warnings);
   }
 
