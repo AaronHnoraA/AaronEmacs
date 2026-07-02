@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { changedRoamFilesSince, commitRoam, fileHistory, restoreFileFromCommit, discardFileChanges, roamRepoStatus, roamRepoChanges, diffRoamFile, diffRoamCommit, pullRoam, pushRoam, repoHistory, headSha } from "./roam-git.mjs";
 import { configureTmpRoot, aaronnoteTmpRoot, runtimeMkdtemp, runtimeTmpFile } from "./tmp.mjs";
 import { aaronnoteMarkdownToLatex, applyLatexTemplate, defaultLatexOutputPath, escapeLatexTitle, latexMacrosPreamble, readLatexTemplate, writeLatexExport } from "./latex-export.mjs";
-import { codexAvailable, loadAgentRules, polishBodyWithCodex } from "./latex-export-codex.mjs";
+import { agentAvailable, loadAgentRules, polishBodyWithAgent } from "./latex-export-codex.mjs";
 import { loadKatexMacros } from "./katex-macros.mjs";
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -25,8 +25,12 @@ let katexMacrosRoot = resolve(process.env.AARONNOTE_KATEX_MACROS_DIR || join(wor
 // server/lib/latex-export-codex.mjs and docs/latex-export-style.md.
 let latexAgentDir = resolve(process.env.AARONNOTE_LATEX_AGENT_DIR || join(appDir, "agents", "latex-export"));
 let latexExportEngine = String(process.env.AARONNOTE_LATEX_EXPORT_ENGINE || "codex").trim().toLowerCase();
+let latexExportAgent = String(process.env.AARONNOTE_LATEX_EXPORT_AGENT || "codex").trim().toLowerCase();
 let latexCodexBin = String(process.env.AARONNOTE_CODEX_BIN || "codex").trim();
+let latexClaudeBin = String(process.env.AARONNOTE_CLAUDE_BIN || "claude").trim();
+let latexOpencodeBin = String(process.env.AARONNOTE_OPENCODE_BIN || "opencode").trim();
 let latexCodexModel = String(process.env.AARONNOTE_CODEX_MODEL || "").trim();
+let latexExportModel = String(process.env.AARONNOTE_LATEX_EXPORT_MODEL || "").trim();
 let latexExportMaxAttempts = Math.max(1, Number(process.env.AARONNOTE_LATEX_EXPORT_MAX_ATTEMPTS) || 3);
 const execFileAsync = promisify(execFile);
 
@@ -3363,6 +3367,20 @@ function latexExportTitle(sourceFile, bodyTitle, metaTitle = "") {
   return "Aaronnote";
 }
 
+// First Markdown H1 in the content (after meta stripping), used as a title
+// candidate so exports stop defaulting to the bare filename.
+function firstHeadingTitle(content) {
+  const lines = String(content || "").replace(/\r\n?/g, "\n").split("\n");
+  let inMeta = false;
+  for (const line of lines) {
+    if (/^#\+begin\s+meta\s*$/i.test(line)) { inMeta = true; continue; }
+    if (inMeta) { if (/^#\+end\s+meta\s*$/i.test(line)) inMeta = false; continue; }
+    const m = line.match(/^#\s+(.+?)\s*$/);
+    if (m) return m[1].trim();
+  }
+  return "";
+}
+
 async function chooseMacSavePath(defaultPath, prompt = "Export LaTeX as:") {
   const fallback = resolveLatexOutputPath(defaultPath || join(homedir(), "Aaronnote.tex"));
   const defaultDirectory = existsSync(dirname(fallback)) ? dirname(fallback) : homedir();
@@ -3493,10 +3511,15 @@ export async function exportLatex(body = {}) {
     throw err;
   }
 
+  const onProgress = typeof body.onProgress === "function" ? body.onProgress : null;
+  const emit = (text) => { if (onProgress && text) { try { onProgress(text); } catch {} } };
+
   // 1. Mechanical base conversion, extended by any agent-maintained rules.
+  emit("Converting (mechanical)…");
   const rules = await loadAgentRules(latexAgentDir);
   const converted = aaronnoteMarkdownToLatex(content, { sourceFile, rules });
-  const title = latexExportTitle(sourceFile, body.title || "", converted.meta.title || "");
+  const metaTitle = String(converted.meta.title || "").trim();
+  const title = latexExportTitle(sourceFile, body.title || "", metaTitle);
   const defaults = await latexExportDefaults({ file: sourceFile, title });
   const outputPath = resolveLatexOutputPath(body.outputPath || defaults.outputPath, sourceFile);
   if (!outputPath) {
@@ -3511,6 +3534,12 @@ export async function exportLatex(body = {}) {
   const macroResult = loadKatexMacros(katexMacrosRoot);
   const macros = latexMacrosPreamble(macroResult.macros);
 
+  // Document title precedence: explicit meta title > AI-chosen (set after polish)
+  // > first H1 heading > filename fallback. Never default to the bare filename
+  // when the content offers something better.
+  const filenameTitle = latexExportTitle(sourceFile, body.title || "", "");
+  let docTitle = metaTitle || firstHeadingTitle(content) || filenameTitle || "Aaronnote";
+
   // Extra template variables declared in the header, merged with caller values.
   const extraVars = {};
   for (const v of header.vars) {
@@ -3518,40 +3547,48 @@ export async function exportLatex(body = {}) {
   }
   const assemble = (bodyLatex) => applyLatexTemplate(template.text, {
     ...extraVars,
-    title: escapeLatexTitle(title),
+    title: escapeLatexTitle(docTitle),
     date: escapeLatexTitle(converted.meta.date || new Date().toISOString().slice(0, 10)),
     source: escapeLatexTitle(sourceFile ? displayPathForFile(sourceFile) : ""),
     macros,
     body: bodyLatex,
   });
 
-  // 2. Optional codex polish of the draft, gated on compilation, with fallback.
+  // 2. Optional agent polish of the draft, gated on compilation, with fallback.
   let bodyLatex = converted.body;
   let engineUsed = "mechanical";
   const warnings = [];
-  const wantCodex = latexExportEngine !== "mechanical" && String(body.engine || "").toLowerCase() !== "mechanical";
-  if (wantCodex && codexAvailable(latexCodexBin)) {
+  const backend = ["codex", "claude", "opencode"].includes(latexExportAgent) ? latexExportAgent : "codex";
+  const agentBin = executablePath(backend === "claude" ? latexClaudeBin : backend === "opencode" ? latexOpencodeBin : latexCodexBin);
+  const wantAgent = latexExportEngine !== "mechanical" && String(body.engine || "").toLowerCase() !== "mechanical";
+  if (wantAgent && agentAvailable(agentBin)) {
     const latexBin = executablePath(engine === "xelatex" ? "xelatex" : engine === "lualatex" ? "lualatex" : "pdflatex");
-    const result = await polishBodyWithCodex({
+    const result = await polishBodyWithAgent({
       sourceMarkdown: content,
       draftBody: converted.body,
       templateText: template.text,
       styleDoc: join(appDir, "docs", "latex-export-style.md"),
-      syntaxDoc: join(appDir, "README.md"),
+      syntaxDoc: join(appDir, "docs", "typora-syntax-survey.md"),
       agentsDoc: join(latexAgentDir, "AGENTS.md"),
       assemble,
+      engine,
       latexBin,
-      codexBin: executablePath(latexCodexBin),
-      model: latexCodexModel,
+      backend,
+      agentBin,
+      model: latexExportModel || (backend === "codex" ? latexCodexModel : ""),
       sourceDir: sourceFile ? dirname(sourceFile) : "",
       makeWorkdir: () => runtimeMkdtemp("latex-export", sourceFile || "export"),
       maxAttempts: latexExportMaxAttempts,
+      onProgress,
     });
     bodyLatex = result.body;
-    engineUsed = result.usedCodex ? "codex" : "mechanical";
+    engineUsed = result.usedAgent ? backend : "mechanical";
+    // AI title only overrides when the note has no explicit meta title.
+    if (!metaTitle && result.aiTitle) docTitle = result.aiTitle;
     if (Array.isArray(result.warnings)) warnings.push(...result.warnings);
   }
 
+  emit("Writing .tex…");
   const latex = assemble(bodyLatex);
   const file = await writeLatexExport(outputPath, latex);
 
@@ -3568,12 +3605,13 @@ export async function exportLatex(body = {}) {
     updatedAt: new Date().toISOString(),
   });
 
+  emit("Done");
   return {
     type: "latex-export",
     ok: true,
     file,
     sourceFile,
-    title,
+    title: docTitle,
     template: template.file,
     engine: engineUsed,
     warnings,
@@ -5295,8 +5333,12 @@ export function configure(options = {}) {
   katexMacrosRoot = resolve(String(options.katexMacrosRoot || process.env.AARONNOTE_KATEX_MACROS_DIR || join(workspaceRoot, "etc", "katex-macros")));
   latexAgentDir = resolve(String(options.latexAgentDir || process.env.AARONNOTE_LATEX_AGENT_DIR || join(appDir, "agents", "latex-export")));
   latexExportEngine = String(options.latexExportEngine || process.env.AARONNOTE_LATEX_EXPORT_ENGINE || "codex").trim().toLowerCase();
+  latexExportAgent = String(options.latexExportAgent || process.env.AARONNOTE_LATEX_EXPORT_AGENT || "codex").trim().toLowerCase();
   latexCodexBin = String(options.latexCodexBin || process.env.AARONNOTE_CODEX_BIN || "codex").trim();
+  latexClaudeBin = String(options.latexClaudeBin || process.env.AARONNOTE_CLAUDE_BIN || "claude").trim();
+  latexOpencodeBin = String(options.latexOpencodeBin || process.env.AARONNOTE_OPENCODE_BIN || "opencode").trim();
   latexCodexModel = String(options.latexCodexModel || process.env.AARONNOTE_CODEX_MODEL || "").trim();
+  latexExportModel = String(options.latexExportModel || process.env.AARONNOTE_LATEX_EXPORT_MODEL || "").trim();
   latexExportMaxAttempts = Math.max(1, Number(options.latexExportMaxAttempts || process.env.AARONNOTE_LATEX_EXPORT_MAX_ATTEMPTS) || 3);
   snippetCache = { key: "", scannedAt: 0, snippets: [] };
   templateCache = { key: "", scannedAt: 0, templates: [] };

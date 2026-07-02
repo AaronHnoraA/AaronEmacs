@@ -97,10 +97,12 @@
 
 变量（`config-defvar`，组 `my/aaronnote`，落盘 `etc/config-store.el`）：
 
-- `my/aaronnote-latex-export-engine`      — `"codex"`（机械草稿 + codex 润色，编译校验）或 `"mechanical"`（仅确定性转换）
-- `my/aaronnote-latex-export-max-attempts` — codex 润色/编译重试次数（默认 3）
-- `my/aaronnote-codex-model`               — 可选 codex 模型 id（空 = 默认）
-- codex 可执行文件复用 `codex-cli-executable`
+- `my/aaronnote-latex-export-engine`      — `"codex"`（机械草稿 + AI 润色，编译校验）或 `"mechanical"`（仅确定性转换）
+- `my/aaronnote-latex-export-agent`       — AI 后端 `"codex"`（默认）/ `"claude"` / `"opencode"`；配置里选定，非交互免确认
+- `my/aaronnote-latex-export-max-attempts` — 润色/编译重试次数（默认 3）
+- `my/aaronnote-latex-export-model`        — 传给当前后端的模型 id（空 = 默认）
+- `my/aaronnote-codex-model`               — 仅 codex 的模型 id（空 = 默认）
+- CLI 路径复用：codex → `codex-cli-executable`，claude → `claude-code-ide-cli-path`，opencode → `my/aaronnote-opencode-executable`
 
 模板：`templates/latex/*.tex`（`aaronnote-article` / `aaronnote-report` /
 `aaronnote-assignment`），每个文件首行 `% aaronnote-template: {json}` 声明显示名、

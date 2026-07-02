@@ -199,7 +199,8 @@ describe("LaTeX export", () => {
     const exported = await exportLatex({ file: note, outputPath: out }) as { ok?: boolean; file?: string };
     expect(exported.ok).toBe(true);
     expect(exported.file).toBe(out);
-    expect(await readFile(out, "utf8")).toContain("\\title{ a }");
+    // Title precedence: explicit meta title ("A") wins over the filename ("a").
+    expect(await readFile(out, "utf8")).toContain("\\title{ A }");
 
     const defaults = await latexExportDefaults({ file: note }) as { outputPath?: string };
     expect(defaults.outputPath).toBe(out);
@@ -298,5 +299,15 @@ describe("LaTeX export", () => {
     expect(exported.ok).toBe(true);
     expect(exported.engine).toBe("mechanical"); // codex unavailable -> mechanical draft
     expect(await readFile(out, "utf8")).toContain("Body.");
+  });
+
+  test("falls back to the first H1 heading for the title when no meta title", async () => {
+    const { notes } = await setupRoot();
+    const note = join(notes, "cheat-sheet.md");
+    await writeFile(note, "# Linear Algebra Notes\n\nBody.\n", "utf8");
+    const out = join(notes, "h.tex");
+    const exported = await exportLatex({ file: note, outputPath: out }) as { ok?: boolean; title?: string };
+    expect(exported.title).toBe("Linear Algebra Notes"); // not the filename "cheat-sheet"
+    expect(await readFile(out, "utf8")).toContain("\\title{ Linear Algebra Notes }");
   });
 });

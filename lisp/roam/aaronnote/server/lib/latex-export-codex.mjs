@@ -27,6 +27,9 @@ export function codexAvailable(codexBin) {
   return !bin.includes("/");
 }
 
+// Backend-neutral alias (codex/claude/opencode all resolve to a bin path).
+export const agentAvailable = codexAvailable;
+
 // ---- Agent-maintained conversion rules -------------------------------------
 
 export async function loadAgentRules(agentDir) {
@@ -102,7 +105,15 @@ export function proseFidelityWarnings(sourceMarkdown, latexBody, options = {}) {
 
 // ---- Compile a candidate assembled document --------------------------------
 
-async function compileLatex({ tex, dir, latexBin, sourceDir, timeoutMs, signal }) {
+// We only need to know whether the document compiles, never the PDF itself, so
+// verify in draft mode: pdflatex/lualatex skip PDF output with `-draftmode`,
+// xelatex with `-no-pdf`. This skips font embedding / PDF writing — the biggest
+// per-attempt cost.
+function draftModeFlag(engine) {
+  return engine === "xelatex" ? "-no-pdf" : "-draftmode";
+}
+
+async function compileLatex({ tex, dir, latexBin, engine = "pdflatex", sourceDir, timeoutMs, signal }) {
   const texFile = join(dir, "out.tex");
   await writeFile(texFile, tex, "utf8");
   // Compile inside the staging dir (so filecontents-based classes stay there),
@@ -113,6 +124,7 @@ async function compileLatex({ tex, dir, latexBin, sourceDir, timeoutMs, signal }
     await execFileAsync(latexBin, [
       "-interaction=nonstopmode",
       "-halt-on-error",
+      draftModeFlag(engine),
       `-output-directory=${dir}`,
       texFile,
     ], { cwd: dir, env, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, signal });
@@ -128,7 +140,7 @@ async function compileLatex({ tex, dir, latexBin, sourceDir, timeoutMs, signal }
   }
 }
 
-// ---- Codex invocation ------------------------------------------------------
+// ---- Agent invocation (codex / claude / opencode) --------------------------
 
 function buildPrompt({ retryLog }) {
   const base = [
@@ -142,8 +154,12 @@ function buildPrompt({ retryLog }) {
     "Edit body.tex so that (1) it compiles when the host inserts it into template.tex,",
     "and (2) its formatting follows style.md. Do NOT add, remove, translate, or reword",
     "any prose from source.md — only change markup. Emit body content only: no",
-    "\\documentclass, no preamble, no package or macro definitions. Write the final",
-    "result to body.tex and then stop. Run no other commands.",
+    "\\documentclass, no preamble, no package or macro definitions.",
+    "",
+    "Also write a concise document title to title.txt (one plain-text line, no",
+    "markup, no quotes) that best names this document based on its content.",
+    "",
+    "Write the final body to body.tex, write title.txt, then stop. Run no other commands.",
   ];
   if (retryLog) {
     base.push(
@@ -158,27 +174,80 @@ function buildPrompt({ retryLog }) {
   return base.join("\n");
 }
 
-function runCodex({ codexBin, workdir, model, retryLog, timeoutMs, signal }) {
-  return new Promise((resolve) => {
-    const args = [
-      "exec",
-      "-C", workdir,
-      "--sandbox", "workspace-write",
-      "--skip-git-repo-check",
-      "--ephemeral",
-      "-c", "approval_policy=\"never\"",
-    ];
-    if (model) args.push("-m", model);
-    args.push(buildPrompt({ retryLog }));
+// Backend-specific argv. All run non-interactively with permission prompts
+// disabled and read/write files within the working directory.
+function agentArgs(backend, { workdir, model, prompt }) {
+  switch (backend) {
+    case "claude":
+      return [
+        "-p", prompt,
+        "--dangerously-skip-permissions",
+        "--add-dir", workdir,
+        "--output-format", "stream-json",
+        "--verbose",
+        ...(model ? ["--model", model] : []),
+      ];
+    case "opencode":
+      return [
+        "run",
+        "--dangerously-skip-permissions",
+        "--format", "json",
+        ...(model ? ["-m", model] : []),
+        prompt,
+      ];
+    case "codex":
+    default:
+      return [
+        "exec",
+        "-C", workdir,
+        "--sandbox", "workspace-write",
+        "--skip-git-repo-check",
+        "--ephemeral",
+        "-c", "approval_policy=\"never\"",
+        ...(model ? ["-m", model] : []),
+        prompt,
+      ];
+  }
+}
 
+// Extract a short human-readable progress label from a backend stdout line.
+// codex prints plain text; claude/opencode emit JSONL/JSON events.
+function progressLabel(backend, line) {
+  const raw = String(line || "").trim();
+  if (!raw) return "";
+  if (backend === "codex") return raw.slice(0, 160);
+  try {
+    const ev = JSON.parse(raw);
+    const type = ev.type || ev.event || "";
+    if (backend === "claude") {
+      if (type === "assistant" && ev.message?.content) {
+        const t = ev.message.content.find?.((c) => c.type === "tool_use") || ev.message.content.find?.((c) => c.type === "text");
+        if (t?.type === "tool_use") return `claude: ${t.name || "tool"}`;
+        if (t?.type === "text" && t.text) return `claude: ${String(t.text).slice(0, 120)}`;
+      }
+      if (type) return `claude: ${type}`;
+    } else {
+      const label = ev.tool || ev.name || type;
+      if (label) return `opencode: ${String(label).slice(0, 120)}`;
+    }
+  } catch {
+    return raw.slice(0, 160);
+  }
+  return "";
+}
+
+function runAgent({ backend, bin, workdir, model, retryLog, timeoutMs, signal, onProgress }) {
+  return new Promise((resolve) => {
+    const args = agentArgs(backend, { workdir, model, prompt: buildPrompt({ retryLog }) });
     let child;
     try {
-      child = spawn(codexBin, args, { cwd: workdir, stdio: ["ignore", "pipe", "pipe"] });
+      child = spawn(bin, args, { cwd: workdir, stdio: ["ignore", "pipe", "pipe"] });
     } catch (err) {
       resolve({ ok: false, message: String(err?.message || err) });
       return;
     }
     let stderr = "";
+    let stdoutBuf = "";
     let settled = false;
     const finish = (result) => {
       if (settled) return;
@@ -193,26 +262,47 @@ function runCodex({ codexBin, workdir, model, retryLog, timeoutMs, signal }) {
     };
     const timer = setTimeout(() => {
       if (!child.killed) child.kill("SIGKILL");
-      finish({ ok: false, message: "codex timed out" });
+      finish({ ok: false, message: `${backend} timed out` });
     }, timeoutMs);
     if (signal) {
       if (signal.aborted) { onAbort(); return; }
       signal.addEventListener?.("abort", onAbort, { once: true });
     }
-    child.stdout?.on("data", () => {});
+    child.stdout?.on("data", (chunk) => {
+      if (!onProgress) return;
+      stdoutBuf += String(chunk);
+      let nl;
+      while ((nl = stdoutBuf.indexOf("\n")) >= 0) {
+        const line = stdoutBuf.slice(0, nl);
+        stdoutBuf = stdoutBuf.slice(nl + 1);
+        const label = progressLabel(backend, line);
+        if (label) { try { onProgress(label); } catch {} }
+      }
+      if (stdoutBuf.length > 65536) stdoutBuf = stdoutBuf.slice(-65536);
+    });
     child.stderr?.on("data", (chunk) => { stderr += String(chunk); if (stderr.length > 8192) stderr = stderr.slice(-8192); });
     child.on("error", (err) => finish({ ok: false, message: String(err?.message || err) }));
-    child.on("close", (code) => finish(code === 0 ? { ok: true } : { ok: false, message: stderr.trim() || `codex exited ${code}` }));
+    child.on("close", (code) => finish(code === 0 ? { ok: true } : { ok: false, message: stderr.trim() || `${backend} exited ${code}` }));
   });
 }
 
 // ---- Orchestrator ----------------------------------------------------------
 
+async function readAgentTitle(workdir) {
+  try {
+    const raw = await readFile(join(workdir, "title.txt"), "utf8");
+    const line = raw.split(/\r?\n/).map((l) => l.trim()).find(Boolean) || "";
+    return line.replace(/^["'“”]+|["'“”]+$/g, "").slice(0, 200);
+  } catch {
+    return "";
+  }
+}
+
 /**
- * Polish the mechanical draft with codex, gated on compilation.
- * @returns {Promise<{body:string, usedCodex:boolean, compiled:boolean, attempts:number, warnings:string[]}>}
+ * Polish the mechanical draft with the configured agent, gated on compilation.
+ * @returns {Promise<{body:string, aiTitle:string, usedAgent:boolean, backend:string, compiled:boolean, attempts:number, warnings:string[]}>}
  */
-export async function polishBodyWithCodex(opts) {
+export async function polishBodyWithAgent(opts) {
   const {
     sourceMarkdown = "",
     draftBody = "",
@@ -221,20 +311,25 @@ export async function polishBodyWithCodex(opts) {
     syntaxDoc = "",
     agentsDoc = "",
     assemble,
+    engine = "pdflatex",
     latexBin = "",
-    codexBin = "",
+    backend = "codex",
+    agentBin = "",
     model = "",
     sourceDir = "",
     makeWorkdir,
     maxAttempts = 3,
-    codexTimeoutMs = 180_000,
+    agentTimeoutMs = 180_000,
     compileTimeoutMs = 120_000,
     signal,
+    onProgress,
   } = opts || {};
 
+  const emit = (text) => { if (onProgress && text) { try { onProgress(text); } catch {} } };
   const warnings = [];
-  if (!codexAvailable(codexBin)) {
-    return { body: draftBody, usedCodex: false, compiled: false, attempts: 0, warnings: ["codex unavailable; used mechanical draft"] };
+  const base = { body: draftBody, aiTitle: "", backend, attempts: 0 };
+  if (!agentAvailable(agentBin)) {
+    return { ...base, usedAgent: false, compiled: false, warnings: [`${backend} unavailable; used mechanical draft`] };
   }
   const compileEnabled = typeof assemble === "function" && !!latexBin && existsSync(latexBin);
 
@@ -253,42 +348,58 @@ export async function polishBodyWithCodex(opts) {
     let attempts = 0;
     for (let i = 0; i < Math.max(1, maxAttempts); i += 1) {
       attempts = i + 1;
-      const run = await runCodex({ codexBin, workdir, model, retryLog, timeoutMs: codexTimeoutMs, signal });
+      emit(retryLog ? `Polishing with ${backend} (retry ${attempts})…` : `Polishing with ${backend}…`);
+      const run = await runAgent({ backend, bin: agentBin, workdir, model, retryLog, timeoutMs: agentTimeoutMs, signal, onProgress });
       if (!run.ok) {
-        warnings.push(`codex adjust failed (${run.message || "unknown"})`);
+        warnings.push(`${backend} adjust failed (${run.message || "unknown"})`);
         break;
       }
+      const aiTitle = await readAgentTitle(workdir);
       try {
         body = await readFile(join(workdir, "body.tex"), "utf8");
       } catch {
-        warnings.push("codex did not produce body.tex; used mechanical draft");
-        return { body: draftBody, usedCodex: false, compiled: false, attempts, warnings };
+        warnings.push(`${backend} did not produce body.tex; used mechanical draft`);
+        return { ...base, aiTitle, usedAgent: false, compiled: false, attempts, warnings };
       }
       if (!compileEnabled) {
         warnings.push("compile not verified (no LaTeX engine / assembler)");
         warnings.push(...proseFidelityWarnings(sourceMarkdown, body));
-        return { body, usedCodex: true, compiled: false, attempts, warnings };
+        return { body, aiTitle, backend, usedAgent: true, compiled: false, attempts, warnings };
       }
-      const res = await compileLatex({ tex: assemble(body), dir: workdir, latexBin, sourceDir, timeoutMs: compileTimeoutMs, signal });
+      emit(`Compiling (attempt ${attempts})…`);
+      const res = await compileLatex({ tex: assemble(body), dir: workdir, latexBin, engine, sourceDir, timeoutMs: compileTimeoutMs, signal });
       if (res.ok) {
         warnings.push(...proseFidelityWarnings(sourceMarkdown, body));
-        return { body, usedCodex: true, compiled: true, attempts, warnings };
+        return { body, aiTitle, backend, usedAgent: true, compiled: true, attempts, warnings };
       }
+      emit(`Compile failed; feeding log back to ${backend}…`);
       retryLog = res.log;
     }
 
-    // Codex path did not yield a compiling body. Fall back to the mechanical draft.
+    // Agent path did not yield a compiling body. Fall back to the mechanical draft.
     if (compileEnabled) {
-      const draftRes = await compileLatex({ tex: assemble(draftBody), dir: workdir, latexBin, sourceDir, timeoutMs: compileTimeoutMs, signal });
+      emit("Falling back to mechanical draft…");
+      const draftRes = await compileLatex({ tex: assemble(draftBody), dir: workdir, latexBin, engine, sourceDir, timeoutMs: compileTimeoutMs, signal });
       if (draftRes.ok) {
-        warnings.push(`codex polish did not compile after ${attempts} attempt(s); used mechanical draft`);
-        return { body: draftBody, usedCodex: false, compiled: true, attempts, warnings };
+        warnings.push(`${backend} polish did not compile after ${attempts} attempt(s); used mechanical draft`);
+        return { ...base, usedAgent: false, compiled: true, attempts, warnings };
       }
-      warnings.push(`neither codex polish nor mechanical draft compiled; wrote best-effort mechanical draft`);
-      return { body: draftBody, usedCodex: false, compiled: false, attempts, warnings };
+      warnings.push(`neither ${backend} polish nor mechanical draft compiled; wrote best-effort mechanical draft`);
+      return { ...base, usedAgent: false, compiled: false, attempts, warnings };
     }
-    return { body: draftBody, usedCodex: false, compiled: false, attempts, warnings };
+    return { ...base, usedAgent: false, compiled: false, attempts, warnings };
   } finally {
     await rm(workdir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+// Back-compat alias: earlier callers used the codex-only name/shape.
+export async function polishBodyWithCodex(opts = {}) {
+  const result = await polishBodyWithAgent({
+    ...opts,
+    backend: "codex",
+    agentBin: opts.agentBin || opts.codexBin || "",
+    agentTimeoutMs: opts.agentTimeoutMs || opts.codexTimeoutMs,
+  });
+  return { ...result, usedCodex: result.usedAgent };
 }

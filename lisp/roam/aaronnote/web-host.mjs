@@ -561,7 +561,11 @@ const apiHandlers = {
   "aaronnote:api:latex:defaults": (body) => latexExportDefaults(body || {}),
   "aaronnote:api:latex:templates": () => listLatexTemplates(),
   "aaronnote:api:latex:choose-output-path": (body) => chooseLatexOutputPath(body || {}),
-  "aaronnote:api:latex:export": (body) => exportLatex(body || {}),
+  "aaronnote:api:latex:export": (body) => exportLatex({
+    ...(body || {}),
+    // Stream export phase/agent progress to connected pages via SSE.
+    onProgress: (text) => broadcast("command", { command: "latex-export-progress", text: String(text || "") }),
+  }),
   "aaronnote:api:notes:meta-add": (body) => updateCurrentNoteMeta(body || {}, "add"),
 
   "aaronnote:api:roam-tools:rename-tag": (body) => renameRoamTag(body || {}),

@@ -4281,6 +4281,7 @@ function runHostCommand(detail: unknown): boolean {
     command?: string;
     key?: string;
     value?: string;
+    text?: string;
     mode?: VimLiteMode;
     version?: number;
   };
@@ -4288,6 +4289,9 @@ function runHostCommand(detail: unknown): boolean {
   if (!command) return false;
 
   switch (command) {
+    case "latex-export-progress":
+      setStatus(String(body.text || ""));
+      return true;
     case "notes-index-changed": {
       const version = typeof body.version === "number" ? body.version : 0;
       // Ignore stale broadcasts (e.g. replayed on reconnect).

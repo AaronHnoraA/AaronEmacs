@@ -107,8 +107,25 @@ Aaronnote app."
   :type 'integer
   :group 'my/aaronnote)
 
+(config-defvar my/aaronnote-latex-export-agent "codex"
+  "AI backend for the Aaronnote LaTeX export polish step.
+One of \"codex\", \"claude\", or \"opencode\".  All run non-interactively with
+permission prompts disabled.  The backend is chosen here, not per export."
+  :type '(choice (const "codex") (const "claude") (const "opencode"))
+  :group 'my/aaronnote)
+
 (config-defvar my/aaronnote-codex-model ""
   "Optional model id for codex during LaTeX export polish (empty = codex default)."
+  :type 'string
+  :group 'my/aaronnote)
+
+(config-defvar my/aaronnote-latex-export-model ""
+  "Optional model id passed to the active LaTeX export backend (empty = default)."
+  :type 'string
+  :group 'my/aaronnote)
+
+(config-defvar my/aaronnote-opencode-executable "opencode"
+  "Executable used when the LaTeX export backend is opencode."
   :type 'string
   :group 'my/aaronnote)
 
@@ -324,14 +341,24 @@ Aaronnote app."
             (format "AARONNOTE_KATEX_MACROS_DIR=%s" (expand-file-name my/aaronnote--katex-macros-dir))
             (format "AARONNOTE_LATEX_EXPORT_ENGINE=%s"
                     (or my/aaronnote-latex-export-engine "codex"))
+            (format "AARONNOTE_LATEX_EXPORT_AGENT=%s"
+                    (or (bound-and-true-p my/aaronnote-latex-export-agent) "codex"))
             (format "AARONNOTE_LATEX_EXPORT_MAX_ATTEMPTS=%d"
                     (or my/aaronnote-latex-export-max-attempts 3))
             (format "AARONNOTE_CODEX_BIN=%s"
                     (or (bound-and-true-p codex-cli-executable) "codex"))
+            (format "AARONNOTE_CLAUDE_BIN=%s"
+                    (or (bound-and-true-p claude-code-ide-cli-path) "claude"))
+            (format "AARONNOTE_OPENCODE_BIN=%s"
+                    (or (bound-and-true-p my/aaronnote-opencode-executable) "opencode"))
             (when (and (boundp 'my/aaronnote-codex-model)
                        (stringp my/aaronnote-codex-model)
                        (not (string-empty-p my/aaronnote-codex-model)))
               (format "AARONNOTE_CODEX_MODEL=%s" my/aaronnote-codex-model))
+            (when (and (boundp 'my/aaronnote-latex-export-model)
+                       (stringp my/aaronnote-latex-export-model)
+                       (not (string-empty-p my/aaronnote-latex-export-model)))
+              (format "AARONNOTE_LATEX_EXPORT_MODEL=%s" my/aaronnote-latex-export-model))
             (format "AARONNOTE_WEB_PORT=%d" my/aaronnote-web-port)
             (when copilot-server
               (format "AARONNOTE_COPILOT_LANGUAGE_SERVER=%s"

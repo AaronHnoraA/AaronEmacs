@@ -276,11 +276,17 @@
          (ignore-errors
            (require 'codex-cli)
            (fboundp 'codex-cli-toggle)))
-   (cons 'aaronnote-latex-codex
-         ;; OK unless the Aaronnote LaTeX export engine is codex but the codex
-         ;; binary is missing (export still works via mechanical fallback).
-         (or (not (equal (bound-and-true-p my/aaronnote-latex-export-engine) "codex"))
-             (and (my/health--codex-executable) t)))
+   (cons 'aaronnote-latex-agent
+         ;; OK unless the Aaronnote LaTeX export engine wants an AI backend but
+         ;; that backend's binary is missing (export still works via mechanical
+         ;; fallback).
+         (or (equal (bound-and-true-p my/aaronnote-latex-export-engine) "mechanical")
+             (let ((backend (or (bound-and-true-p my/aaronnote-latex-export-agent) "codex")))
+               (cond
+                ((equal backend "claude") (and (my/health--claude-cli-path) t))
+                ((equal backend "opencode")
+                 (and (executable-find (or (bound-and-true-p my/aaronnote-opencode-executable) "opencode")) t))
+                (t (and (my/health--codex-executable) t))))))
    (cons 'theme-loaded
          (ignore-errors
            (memq 'kanagawa-wave custom-enabled-themes)))
