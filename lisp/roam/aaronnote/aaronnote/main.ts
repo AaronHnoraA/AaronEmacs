@@ -270,7 +270,10 @@ let mathPreviewPendingErrorKey = "";
 let mathPreviewErrorTimer = 0;
 let mathPreviewWidth = 0;
 let layoutZoom = 1;
-let gestureStartZoom = 1;
+let visualZoom = 1;
+let visualGestureStartZoom = 1;
+let visualWheelRawZoom = 1;
+let visualWheelIdleTimer = 0;
 const clientId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const changeHandlers = new Set<() => void>();
 const MATH_PREVIEW_ERROR_IDLE_MS = 650;
@@ -282,6 +285,10 @@ const LARGE_DOCUMENT_CHARS = 512 * 1024;
 const LAYOUT_ZOOM_MIN = 0.72;
 const LAYOUT_ZOOM_MAX = 1.55;
 const LAYOUT_ZOOM_STEP = 0.08;
+const VISUAL_ZOOM_MIN = 1;
+const VISUAL_ZOOM_MAX = 2;
+const VISUAL_ZOOM_STEP = 0.12;
+const VISUAL_ZOOM_PINCH_SNAP = 0.05;
 const editorCommands = new Set<EditorCommand>([
   "bold",
   "italic",
@@ -472,6 +479,36 @@ function resetLayoutZoom(options: { announce?: boolean } = {}): boolean {
   return applyLayoutZoom(1, options);
 }
 
+function visualZoomPercent(): string {
+  return `${Math.round(visualZoom * 100)}%`;
+}
+
+function clampVisualZoom(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(VISUAL_ZOOM_MAX, Math.max(VISUAL_ZOOM_MIN, value));
+}
+
+function applyVisualZoom(next: number, options: { announce?: boolean } = {}): boolean {
+  const clamped = clampVisualZoom(next);
+  if (Math.abs(clamped - visualZoom) < 0.001) return false;
+  visualZoom = clamped;
+  document.documentElement.style.setProperty("--aaronnote-visual-zoom", visualZoom.toFixed(3));
+  if (options.announce) setStatus(`Visual zoom ${visualZoomPercent()}`);
+  return true;
+}
+
+function stepVisualZoom(direction: -1 | 1, options: { announce?: boolean } = {}): boolean {
+  const next = visualZoom + direction * VISUAL_ZOOM_STEP;
+  const crossesDefault = direction > 0
+    ? visualZoom < 1 && next >= 1
+    : visualZoom > 1 && next <= 1;
+  return applyVisualZoom(crossesDefault || Math.abs(next - 1) < VISUAL_ZOOM_STEP / 2 ? 1 : next, options);
+}
+
+function resetVisualZoom(options: { announce?: boolean } = {}): boolean {
+  return applyVisualZoom(1, options);
+}
+
 function runLayoutZoomShortcut(event: KeyboardEvent): boolean {
   if (!primaryMod(event) || event.altKey || event.isComposing) return false;
   const code = event.code;
@@ -488,7 +525,18 @@ function runLayoutZoomShortcut(event: KeyboardEvent): boolean {
   return true;
 }
 
-function layoutZoomWheelFactor(event: WheelEvent): number {
+function runVisualZoomShortcut(event: KeyboardEvent): boolean {
+  const tab = event.code === "Tab" || event.key === "Tab" || event.key === "Backtab" || event.key === "ISO_Left_Tab";
+  const reset = event.code === "Digit0" || event.code === "Numpad0" || event.key === "0";
+  if ((!tab && !reset) || !event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return false;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  if (reset) resetVisualZoom({ announce: true });
+  else stepVisualZoom(event.shiftKey || event.key !== "Tab" ? -1 : 1, { announce: true });
+  return true;
+}
+
+function visualZoomWheelFactor(event: WheelEvent): number {
   const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
     ? 18
     : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
@@ -497,33 +545,44 @@ function layoutZoomWheelFactor(event: WheelEvent): number {
   return Math.exp(-event.deltaY * unit * 0.0025);
 }
 
-function shouldHandleLayoutZoomTarget(target: EventTarget | null): boolean {
+function snapPinchVisualZoom(value: number): number {
+  return Math.abs(value - 1) <= VISUAL_ZOOM_PINCH_SNAP ? 1 : value;
+}
+
+function shouldHandleVisualZoomTarget(target: EventTarget | null): boolean {
   if (!editorSurfaceVisible()) return false;
   const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
   return !element?.closest(".aaronnote-local-graph-panel, .aaronnote-modal");
 }
 
-function handleLayoutZoomWheel(event: WheelEvent): void {
-  if (!(event.ctrlKey || event.metaKey) || !shouldHandleLayoutZoomTarget(event.target)) return;
+function handleVisualZoomWheel(event: WheelEvent): void {
+  if (!(event.ctrlKey || event.metaKey) || !shouldHandleVisualZoomTarget(event.target)) return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  applyLayoutZoom(layoutZoom * layoutZoomWheelFactor(event));
+  if (!visualWheelIdleTimer) visualWheelRawZoom = visualZoom;
+  visualWheelRawZoom = clampVisualZoom(visualWheelRawZoom * visualZoomWheelFactor(event));
+  applyVisualZoom(snapPinchVisualZoom(visualWheelRawZoom));
+  window.clearTimeout(visualWheelIdleTimer);
+  visualWheelIdleTimer = window.setTimeout(() => {
+    visualWheelIdleTimer = 0;
+    visualWheelRawZoom = visualZoom;
+  }, 140);
 }
 
-function handleLayoutGestureStart(event: Event): void {
-  if (!shouldHandleLayoutZoomTarget(event.target)) return;
-  gestureStartZoom = layoutZoom;
+function handleVisualGestureStart(event: Event): void {
+  if (!shouldHandleVisualZoomTarget(event.target)) return;
+  visualGestureStartZoom = visualZoom;
   event.preventDefault();
   event.stopImmediatePropagation();
 }
 
-function handleLayoutGestureChange(event: Event): void {
-  if (!shouldHandleLayoutZoomTarget(event.target)) return;
+function handleVisualGestureChange(event: Event): void {
+  if (!shouldHandleVisualZoomTarget(event.target)) return;
   const scale = Number((event as Event & { scale?: number }).scale);
   if (!Number.isFinite(scale) || scale <= 0) return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  applyLayoutZoom(gestureStartZoom * scale);
+  applyVisualZoom(snapPinchVisualZoom(visualGestureStartZoom * scale));
 }
 
 function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
@@ -540,9 +599,9 @@ function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
 
 host.addEventListener("pointerdown", activateEditorFromPointer, { capture: true });
 host.addEventListener("mousedown", activateEditorFromPointer, { capture: true });
-document.addEventListener("wheel", handleLayoutZoomWheel, { capture: true, passive: false });
-document.addEventListener("gesturestart", handleLayoutGestureStart, { capture: true, passive: false });
-document.addEventListener("gesturechange", handleLayoutGestureChange, { capture: true, passive: false });
+document.addEventListener("wheel", handleVisualZoomWheel, { capture: true, passive: false });
+document.addEventListener("gesturestart", handleVisualGestureStart, { capture: true, passive: false });
+document.addEventListener("gesturechange", handleVisualGestureChange, { capture: true, passive: false });
 
 const snippetSession = new SnippetSession(editor);
 host.addEventListener("aaronnote-assist-update", () => scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true }));
@@ -3105,7 +3164,7 @@ function renderLayoutZoomTool(): HTMLElement {
   }
 
   const hint = document.createElement("p");
-  hint.textContent = "Pinch trackpad, M-= / M-- / M-0. Temporary per pane.";
+  hint.textContent = "M-= / M-- / M-0 reflows Markdown layout. Pinch and C-Tab use visual zoom; C-0 resets it.";
   panel.append(head, controls, hint);
   return panel;
 }
@@ -4603,6 +4662,9 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (handleXwidgetEmacsKeydown(event)) return;
+  if (runVisualZoomShortcut(event)) {
+    return;
+  }
   if (runLayoutZoomShortcut(event)) {
     return;
   }

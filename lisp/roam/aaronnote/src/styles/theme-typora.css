@@ -52,7 +52,7 @@
   width: 72px;
   height: 1px;
   margin: 0.34em auto 0;
-  background: linear-gradient(90deg, transparent, var(--aaron-heading-1, #ff9bad), var(--aaron-heading-2, #7ee7ff), transparent);
+  background: var(--aaron-heading-1, #ff9bad);
 }
 .cm-editor h2 {
   font-size: 1.16em;
@@ -104,8 +104,7 @@
   padding: var(--section-padding-y, 2.1em) var(--section-padding-x, 1.6em);
   border-top: 1px solid color-mix(in srgb, var(--section-heading-color), transparent 54%);
   border-bottom: 1px solid color-mix(in srgb, var(--section-heading-color), transparent 72%);
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--section-heading-color), transparent 92%), transparent 74%);
+  background: color-mix(in srgb, var(--section-heading-color), transparent 94%);
 }
 
 .cm-editor .aaronnote-section-heading-inner::before {
@@ -285,8 +284,9 @@
   min-height: 1px;
   padding: 2em 0;
   margin: 0;
-  background: linear-gradient(90deg, transparent, var(--aaron-paper-line, #b8aa90) 18%, var(--aaron-paper-line, #b8aa90) 82%, transparent) center / 100% 1px no-repeat;
+  background: none;
   border: 0;
+  border-top: 1px solid var(--aaron-paper-line, #b8aa90);
 }
 
 /* ─── tables (cells; layout from widgets.css) ────────────────────── */
@@ -551,7 +551,7 @@
   padding: 0 8px 0 10px;
   border: 1px solid color-mix(in srgb, var(--block-c), transparent 24%);
   border-radius: 999px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--block-c), var(--aaron-paper-soft, #1e2536) 86%), color-mix(in srgb, var(--block-c), var(--aaron-paper, #171b28) 88%));
+  background: color-mix(in srgb, var(--block-c), var(--aaron-paper-soft, #1e2536) 87%);
   color: color-mix(in srgb, var(--block-c), var(--aaron-ink, #e4ecff) 18%);
   cursor: pointer;
   font: 800 11px/1 var(--aaron-font-sans, system-ui, sans-serif);
@@ -730,7 +730,7 @@
   width: 72px;
   height: 1px;
   margin: 0.34em auto 0;
-  background: linear-gradient(90deg, transparent, var(--aaron-heading-1, #ff9bad), var(--aaron-heading-2, #7ee7ff), transparent);
+  background: var(--aaron-heading-1, #ff9bad);
 }
 .cm-editor .cm-md-h2 {
   font-family: var(--aaron-font-heading);

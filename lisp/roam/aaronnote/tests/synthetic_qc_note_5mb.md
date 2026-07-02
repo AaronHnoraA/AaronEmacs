@@ -142945,7 +142945,7 @@ for every \(i\).
 #+end lemma
 
 #+begin proof Proof sketch
-The proof compares inclusions and projections between summands. By composing
+The proof compares inclusions and projections between summands. By composing tis this is ahrd t osay as lots of thing hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh sadas a sd as da 
 maps around an indecomposable component, one obtains endomorphisms. The
 locality of endomorphism rings forces at least one component map to be
 invertible. This identifies one matching pair of summands. Removing that

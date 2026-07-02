@@ -231,9 +231,7 @@
   color: #ffd2f2;
   text-decoration: none;
   border: 1px solid color-mix(in srgb, #ffd2f2, transparent 66%);
-  background:
-    linear-gradient(90deg, color-mix(in srgb, #ffd2f2, transparent 88%), transparent 38%),
-    var(--aaron-paper-soft, #1e2536);
+  background: color-mix(in srgb, var(--aaron-paper-soft, #1e2536), #ffd2f2 6%);
   border-radius: 4px;
   padding: 0 0.26em;
   box-decoration-break: clone;
@@ -1274,8 +1272,9 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
   min-height: 1px;
   padding: 1.4em 0;
   margin: 0;
-  background: linear-gradient(var(--aaron-paper-line, #b8aa90), var(--aaron-paper-line, #b8aa90)) center / 100% 1px no-repeat;
+  background: none;
   border: 0;
+  border-top: 1px solid var(--aaron-paper-line, #b8aa90);
   cursor: pointer;
 }
 
@@ -1359,9 +1358,7 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
   padding: 14px 16px;
   border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #414b61), var(--aaron-muted, #a9bed3) 12%);
   border-radius: 4px;
-  background:
-    linear-gradient(color-mix(in srgb, var(--aaron-paper, #171b28), var(--aaron-accent, #9de7ff) 4%), color-mix(in srgb, var(--aaron-paper-soft, #1e2536), transparent 0%)),
-    var(--aaron-paper, #171b28);
+  background: color-mix(in srgb, var(--aaron-paper, #171b28), var(--aaron-accent, #9de7ff) 4%);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 6%);
   overflow: auto;
   text-align: center;
@@ -1418,12 +1415,7 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
   overflow: visible;
   padding: 1.1rem 1.35rem;
   border-color: color-mix(in srgb, var(--aaron-paper-line, #414b61), var(--aaron-ink, #e4ecff) 10%);
-  background:
-    linear-gradient(
-      145deg,
-      color-mix(in srgb, var(--aaron-paper, #171b28), var(--aaron-accent, #9de7ff) 5%),
-      color-mix(in srgb, var(--aaron-paper-soft, #1e2536), transparent 0%)
-    );
+  background: color-mix(in srgb, var(--aaron-paper, #171b28), var(--aaron-accent, #9de7ff) 5%);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 6%),
     0 8px 24px color-mix(in srgb, #000, transparent 72%);
@@ -1720,9 +1712,7 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
 
 .cm-editor .inline-todo-chip[data-status="doing"] {
   border-radius: 999px;
-  background: linear-gradient(180deg,
-    color-mix(in srgb, var(--inline-todo-bg), var(--inline-todo-accent) 8%),
-    color-mix(in srgb, var(--inline-todo-bg), var(--inline-todo-accent) 18%));
+  background: color-mix(in srgb, var(--inline-todo-bg), var(--inline-todo-accent) 13%);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--inline-todo-accent), transparent 50%);
 }
 
@@ -2337,9 +2327,7 @@ org-env-block[data-kind="lean4"] .code-token-punctuation { color: #bac2de; }
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #414b61), var(--aaron-muted, #a9bed3) 12%);
   border-radius: 4px;
-  background:
-    linear-gradient(color-mix(in srgb, var(--aaron-paper, #171b28), var(--aaron-accent, #9de7ff) 4%), color-mix(in srgb, var(--aaron-paper-soft, #1e2536), transparent 0%)),
-    var(--aaron-paper, #171b28);
+  background: color-mix(in srgb, var(--aaron-paper, #171b28), var(--aaron-accent, #9de7ff) 4%);
   color: var(--aaron-muted, #a9bed3);
   overflow: visible;
   text-align: center;
