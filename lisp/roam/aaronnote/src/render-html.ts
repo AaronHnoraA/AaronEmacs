@@ -341,6 +341,42 @@ function mathInlineRule(state: StateInline, silent: boolean): boolean {
   return true;
 }
 
+/**
+ * `@@comment [text]{args}` — a private annotation. Exported HTML uses the
+ * same classes/structure as the editor chip (button + `.org-env-content`)
+ * but without a `hidden` attribute or toggle script, matching how the
+ * sibling `#+begin comment` block already exports its content unhidden
+ * (org-env-comment collapse is `.cm-editor`-scoped CSS, not present outside
+ * the live editor).
+ */
+function commentInlineRule(state: StateInline, silent: boolean): boolean {
+  const start = state.pos;
+  if (!state.src.startsWith("@@comment", start)) return false;
+  const lineEnd = state.src.indexOf("\n", start);
+  const slice = state.src.slice(start, lineEnd < 0 ? state.src.length : lineEnd);
+  const cmd = scanInlineCommands(slice, "comment")[0];
+  if (!cmd || cmd.fullFrom !== 0) return false;
+  if (silent) return true;
+  const token = state.push("comment_inline", "span", 0);
+  token.content = cmd.context.trim();
+  state.pos = start + cmd.fullTo;
+  return true;
+}
+
+function renderCommentInline(tokens: Token[], idx: number, _options: unknown, _env: unknown, _renderer: MarkdownIt["renderer"]): string {
+  const context = tokens[idx]!.content;
+  const body = context ? renderMarkdownInlineHTML(context) : "";
+  return [
+    '<span class="inline-comment-widget inline-command-token" data-comment-open="false">',
+    '<span class="org-env-comment-button" aria-expanded="false">',
+    '<span class="org-env-comment-label">comment</span>',
+    '<span class="org-env-comment-state">show</span>',
+    "</span>",
+    `<span class="org-env-content">${body}</span>`,
+    "</span>",
+  ].join("");
+}
+
 function renderMath(tex: string, displayMode: boolean): { html: string; error?: string } {
   return renderMathHTML(tex, {
     displayMode,
@@ -600,7 +636,7 @@ function renderLeanCodeCell(title: string, body: string): string {
   const classes = "cm-org-env-block org-env-block org-env-lean4";
   return [
     `<org-env-block class="${escapeAttr(classes)}" data-kind="lean4" data-title="${escapeAttr(title)}" data-label="${escapeAttr(label)}" data-comment-open="false">`,
-    `<span class="org-env-heading cm-org-env-heading-widget" data-org-env-kind="lean4"><span class="org-env-heading-label cm-org-env-label">${escapeHtml(label)}</span><span class="org-env-heading-title" data-empty="${title ? "false" : "true"}">${escapeHtml(title)}</span></span>`,
+    `<span class="org-env-heading cm-org-env-heading-widget" data-org-env-kind="lean4"><span class="org-env-heading-label cm-org-env-label">${escapeHtml(label)}</span><span class="org-env-heading-title" data-empty="${title ? "false" : "true"}">${renderMarkdownInlineHTML(title)}</span></span>`,
     `<div class="org-env-content"><pre class="aaronnote-lean-code"><code class="language-lean4">${highlighted}</code></pre></div>`,
     "</org-env-block>",
   ].join("");
@@ -676,7 +712,7 @@ function renderOrgEnv(md: MarkdownIt, tokens: Token[], idx: number): string {
   }
   return [
     `<org-env-block data-kind="${escapeAttr(kind)}" data-title="${escapeAttr(title)}" data-label="${escapeAttr(label)}" data-comment-open="false">`,
-    `<span class="org-env-heading"><span class="org-env-heading-label">${escapeHtml(label)}</span><span class="org-env-heading-title" data-empty="${title ? "false" : "true"}">${escapeHtml(title)}</span></span>`,
+    `<span class="org-env-heading"><span class="org-env-heading-label">${escapeHtml(label)}</span><span class="org-env-heading-title" data-empty="${title ? "false" : "true"}">${md.renderInline(title)}</span></span>`,
     `<div class="org-env-content">${body}</div>`,
     "</org-env-block>",
   ].join("");
@@ -783,9 +819,11 @@ function createMarkdownIt(options: RenderMarkdownHTMLOptions): MarkdownIt {
   // Must run before `escape`: otherwise the backslash escape rule consumes the
   // `\(` opener as a literal `(` and inline math is never recognized.
   md.inline.ruler.before("escape", "math_inline", mathInlineRule);
+  md.inline.ruler.before("escape", "comment_inline", commentInlineRule);
 
   md.renderer.rules.math_block = renderMathBlock;
   md.renderer.rules.math_inline = renderMathInline;
+  md.renderer.rules.comment_inline = renderCommentInline;
   md.renderer.rules.org_env_block = (tokens, idx) => renderOrgEnv(md, tokens, idx);
   md.renderer.rules.semantic_heading_block = renderSemanticHeading;
   md.renderer.rules.front_matter = (tokens, idx, _opts, _env, _renderer) =>

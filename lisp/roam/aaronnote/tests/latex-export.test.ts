@@ -190,6 +190,23 @@ describe("LaTeX export", () => {
     expect(result.body).not.toContain("hidden inline reminder");
   });
 
+  test("omits inline @@comment annotations from exported body", () => {
+    const result = aaronnoteMarkdownToLatex([
+      "# Main",
+      "",
+      "@@comment [a private annotation line]",
+      "",
+      "Visible text. @@comment [hidden aside] More text.",
+      "",
+    ].join("\n"));
+
+    expect(result.body).toContain("Visible text.");
+    expect(result.body).toContain("More text.");
+    expect(result.body).not.toContain("comment");
+    expect(result.body).not.toContain("private annotation");
+    expect(result.body).not.toContain("hidden aside");
+  });
+
   test("writes export and remembers the last path per note", async () => {
     const { notes } = await setupRoot();
     const note = join(notes, "a.md");

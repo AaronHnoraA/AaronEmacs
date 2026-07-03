@@ -47,6 +47,10 @@ const ENV_MAP = new Map([
 const COMMENT_BLOCKS = new Set(["comment", "summary", "note", "important", "warning", "attention"]);
 const TODO_LINE_RE = /^\s*@@todo(?:\([^)\n]*\))?\s*(?:\[[^\]\n]*\](?:\s*\{[^}\n]*\})?|[^\n]*)\s*$/i;
 const TODO_INLINE_RE = /@@todo(?:\([^)\n]*\))?\s*(?:\[[^\]\n]*\](?:\s*\{[^}\n]*\})?|[^\n]*)/gi;
+// `@@comment [text]{args}` is a private annotation — LaTeX export ignores it
+// entirely (no bare/bracket-less form, unlike @@todo).
+const COMMENT_LINE_RE = /^\s*@@comment(?:\([^)\n]*\))?\s*\[[^\]\n]*\](?:\s*\{[^}\n]*\})?\s*$/i;
+const COMMENT_INLINE_RE = /@@comment(?:\([^)\n]*\))?\s*\[[^\]\n]*\](?:\s*\{[^}\n]*\})?/gi;
 const DISPLAY_MATH_OPEN_RE = /^\s*(?:\\\[|\$\$)\s*$/;
 const DISPLAY_MATH_CLOSE_RE = /^\s*(?:\\\]|\$\$)\s*$/;
 
@@ -94,7 +98,7 @@ function inlineTokenAt(source, pos) {
 }
 
 function convertInline(text) {
-  const source = String(text ?? "").replace(TODO_INLINE_RE, "").trim();
+  const source = String(text ?? "").replace(TODO_INLINE_RE, "").replace(COMMENT_INLINE_RE, "").trim();
   let latex = "";
   let plain = "";
   const flushPlain = () => {
@@ -357,7 +361,7 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
       continue;
     }
 
-    if (TODO_LINE_RE.test(line)) {
+    if (TODO_LINE_RE.test(line) || COMMENT_LINE_RE.test(line)) {
       flushParagraph(out, paragraph);
       closeList();
       continue;

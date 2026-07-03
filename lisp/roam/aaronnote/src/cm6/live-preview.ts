@@ -64,6 +64,7 @@ import { tocIndexFromState } from "./toc-index.ts";
 import { hasViewportDecorationRefresh, refreshViewportDecorations, viewportDecorationRefreshRanges } from "./viewport-refresh.ts";
 import { getFencedCodeRanges } from "./code-ranges.ts";
 import { orgEnvContextForRange } from "./widgets/block-extras.ts";
+import { markdownLinkDestination } from "../markdown-link.ts";
 
 // ---------------------------------------------------------------------------
 // Asset URL helpers for raw HTML embedded in the live preview.
@@ -133,7 +134,7 @@ function linkHrefFromSpan(state: EditorState, from: number, to: number): string 
     enter(node) {
       if (href) return false;
       if (node.name !== "URL") return;
-      href = state.doc.sliceString(node.from, node.to).trim();
+      href = markdownLinkDestination(state.doc.sliceString(node.from, node.to));
       return false;
     },
   });
@@ -348,9 +349,10 @@ function collectLivePreviewTokens(
           return false;
         }
 
-        // ── Escape backslash: dim the \ but not the escaped char ──────────
+        // ── Escape backslash: hidden when cursor is outside the escape,
+        // dimmed (not fully hidden) while the cursor sits inside it ────────
         if (node.name === "Escape") {
-          tokens.push({ kind: "static", from: node.from, to: node.from + 1, cls: "syntax-hint" });
+          tokens.push({ kind: "delimiter", from: node.from, to: node.from + 1, spanFrom: node.from, spanTo: node.to });
           return false;
         }
 

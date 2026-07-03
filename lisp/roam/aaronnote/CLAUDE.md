@@ -22,6 +22,8 @@ separate editor implementation.
 | `src/editor-api.ts` | Stable `createEditor()` facade and controller types. |
 | `src/cm6/editor-cm6.ts` | CM6 `EditorView` construction and public editor methods. `getMarkdown()` is memoized by immutable-`Text` identity; prefer `getMarkdownLength()` when only length is needed. |
 | `src/cm6/live-preview.ts` | Inline Markdown preview decorations and line classes. |
+| `src/cm6/close-brackets-vscode.ts` | VSCode-style bracket pairing, selection wrapping, overtyping, and paired deletion. |
+| `src/cm6/lezer-link-ext.ts` | Lezer `LinkEnd` replacement that preserves nested brackets inside inline link/image text. |
 | `src/cm6/commands.ts` | Editing commands, block context, and quick insert registry. |
 | `src/cm6/widgets/*.ts` | Math, code fence, image, task, TOC, org-env, and related widgets. |
 | `src/render-html.ts` | Shared Markdown-to-HTML export/publish renderer. |

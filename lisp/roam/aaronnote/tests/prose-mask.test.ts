@@ -19,6 +19,16 @@ describe("Aaronnote prose mask", () => {
     expect(masked).not.toContain("proof-main");
   });
 
+  test("keeps prose and comment text while masking @@comment syntax", () => {
+    const md = "This stays visible.\n@@comment [Fix teh annotation]{k: v}\n";
+    const masked = maskAaronnoteProse(md);
+    expect(masked.length).toBe(md.length);
+    expect(masked).toContain("This stays visible.");
+    expect(masked).toContain("Fix teh annotation");
+    expect(masked).not.toContain("@@comment");
+    expect(masked).not.toContain("k: v");
+  });
+
   test("masks math, code, and technical org env bodies", () => {
     const md = [
       "Check this prose.",

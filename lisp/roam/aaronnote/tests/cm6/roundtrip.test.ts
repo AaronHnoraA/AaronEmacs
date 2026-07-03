@@ -420,6 +420,49 @@ y^2
     cleanup();
   });
 
+  test("resolves angle-bracket hrefs containing spaces", () => {
+    const md = "See [there](<target with spaces.md>) for more.";
+    const { editor, cleanup } = mountCM6(md);
+
+    expect(markdownHrefAt(editor.view.state, md.indexOf("there"))).toBe("target with spaces.md");
+    cleanup();
+  });
+
+  test("resolves link labels containing an escaped closing bracket", () => {
+    const md = String.raw`[a\]b](target.md) after`;
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    expect(markdownHrefAt(editor.view.state, md.indexOf("a"))).toBe("target.md");
+    expect(Array.from(document.querySelectorAll<HTMLElement>(".syntax-hidden"))
+      .map((el) => el.textContent || "")
+      .join(""))
+      .toContain("target.md");
+    cleanup();
+  });
+
+  test.each([
+    ["a nested bracket", "See [link [inner] rest](target.md) after", "link"],
+    ["multiple nested brackets", "See [a [b] c [d] e](target.md) after", "a"],
+    ["a nested image-alt bracket", "See ![plot [draft]](plot.png) after", "plot"],
+  ])("preserves %s inside inline link text", (_name, md, anchor) => {
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    expect(markdownHrefAt(editor.view.state, md.indexOf(anchor))).toBe(
+      md.includes("plot.png") ? "plot.png" : "target.md",
+    );
+    if (md.includes("plot.png")) {
+      expect(document.querySelector(".cm-image-widget")).toBeTruthy();
+    } else {
+      expect(Array.from(document.querySelectorAll<HTMLElement>(".syntax-hidden"))
+        .map((el) => el.textContent || "")
+        .join(""))
+        .toContain("target.md");
+    }
+    cleanup();
+  });
+
   test("renders ordinary markdown links outside the editable span", () => {
     const md = "- [related paper](./graph-tensor-background.md)\n\nsad";
     const { editor, cleanup } = mountCM6(md);
@@ -2697,5 +2740,69 @@ maybeDescribe("cm6 kernel: surface", () => {
     const editor = createEditor(host, { kernel: "cm6", initialContent: "x" });
     editor.destroy();
     expect(host.children.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// README coverage-table parity: backslash escape input UX, indented code,
+// and CommonMark rule-of-three nested emphasis.
+// ---------------------------------------------------------------------------
+
+maybeDescribe("cm6 kernel: README parity", () => {
+  test("backslash escape is hidden with the cursor outside, dimmed when inside", () => {
+    const md = "escaped \\* star";
+    const { editor, cleanup } = mountCM6(md);
+    const backslash = md.indexOf("\\");
+
+    editor.setMarkdownSelection(md.length);
+    let mark = document.querySelector<HTMLElement>(".syntax-hidden");
+    expect(mark).toBeTruthy();
+    expect(mark!.textContent).toBe("\\");
+
+    editor.setMarkdownSelection(backslash + 1);
+    expect(document.querySelector(".syntax-hidden")).toBeNull();
+    mark = document.querySelector<HTMLElement>(".syntax-hint");
+    expect(mark).toBeTruthy();
+    expect(mark!.textContent).toBe("\\");
+    cleanup();
+  });
+
+  test("4-space indented code blocks round-trip byte-for-byte and render as code", () => {
+    const md = "Paragraph.\n\n    indented code line\n    second line\n\nAfter.";
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(0);
+
+    expect(document.querySelector(".cm-inline-code")).toBeNull();
+    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
+      .toContain("indented code line");
+
+    editor.setMarkdownSelection(md.length);
+    editor.insertText("");
+    expect(editor.getMarkdown()).toBe(md);
+    cleanup();
+  });
+
+  function visibleText(root: HTMLElement): string {
+    const clone = root.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll(".syntax-hidden").forEach((el) => el.remove());
+    return clone.textContent || "";
+  }
+
+  test.each([
+    ["***x***", ["cm-em", "cm-strong"]],
+    ["**a *b***", ["cm-strong", "cm-em"]],
+    ["*a **b***", ["cm-em", "cm-strong"]],
+    ["**a*b***", ["cm-strong", "cm-em"]],
+  ])("nests emphasis correctly for %s (CommonMark rule-of-three)", (md, expectedClasses) => {
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    for (const cls of expectedClasses) {
+      expect(document.querySelector(`.${cls}`)).toBeTruthy();
+    }
+    expect(document.querySelectorAll(".syntax-hidden").length).toBeGreaterThan(0);
+    const contentDOM = (editor.view as unknown as { contentDOM: HTMLElement }).contentDOM;
+    expect(visibleText(contentDOM)).not.toContain("*");
+    cleanup();
   });
 });

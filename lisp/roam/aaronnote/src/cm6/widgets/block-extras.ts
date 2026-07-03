@@ -867,7 +867,7 @@ class OrgEnvOpenWidget extends MeasuredWidget {
     const title = document.createElement("span");
     title.className = "org-env-heading-title";
     title.dataset.empty = this.title ? "false" : "true";
-    title.textContent = this.title;
+    title.innerHTML = renderMarkdownInlineHTML(this.title);
     div.append(label, title);
     div.addEventListener("mousedown", (event) => {
       event.preventDefault();
@@ -1027,7 +1027,7 @@ class CommentWidget extends MeasuredWidget {
     button.setAttribute("aria-expanded", "false");
     const label = document.createElement("span");
     label.className = "org-env-comment-label";
-    label.textContent = this.title.trim() || "comment";
+    label.innerHTML = this.title.trim() ? renderMarkdownInlineHTML(this.title.trim()) : "comment";
     const state = document.createElement("span");
     state.className = "org-env-comment-state";
     state.textContent = "show";

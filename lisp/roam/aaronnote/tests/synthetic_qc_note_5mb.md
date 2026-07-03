@@ -142891,7 +142891,7 @@ The tensor analogue might be written as
 \mathrm{cTA}.
 \]
 
-The point of such notation is not merely symbolic. Each arrow represents
+The point of such notation is not merely symbolic. Each arrow representsa sssssssssssssssssssssssssssssssssssssssssssssssssssssssss this is easy to see tha tnote thin
 a concrete polynomial-time encoding transformation.
 
 ## 262.6. Direct sums and decompositions
@@ -246866,7 +246866,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文直觉：正半定保证测量概率非负；迹为一保证总概率为一。
+中文直觉：正半定保证测量概率非负；迹为一保证���概率为一。
 #+end note
 
 The expectation value of an observable \(A\) in state \(\rho\) is

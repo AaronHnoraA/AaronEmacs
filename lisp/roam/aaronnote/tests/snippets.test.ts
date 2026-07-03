@@ -118,6 +118,45 @@ describe("aaronnote snippets", () => {
     expect(field2 && expanded.text.slice(field2.from, field2.to)).toBe("thick");
   });
 
+  test("expands the emacs-migrated `set` snippet body with a plain tabstop between braces", () => {
+    // ~/.config/emacs/snippets/tex-mode/set — body is exactly `\{ $1 \}$2`.
+    const expanded = expandSnippetBody({ key: "set", name: "Set", mode: "tex-mode", body: "\\{ $1 \\}$2" });
+
+    expect(expanded.text).toBe("\\{  \\}");
+    const field1 = expanded.tabstops.find((stop) => stop.index === 1);
+    const field2 = expanded.tabstops.find((stop) => stop.index === 2);
+    expect(field1).toBeTruthy();
+    expect(field2).toBeTruthy();
+    expect(field1 && expanded.text.slice(0, field1.from)).toBe("\\{ ");
+    expect(field1 && expanded.text.slice(field1.to)).toBe(" \\}");
+  });
+
+  test("`set` snippet expands with a tabstop between braces inside inline math", () => {
+    const mount = document.createElement("div");
+    document.body.appendChild(mount);
+    const editor = createEditor(mount);
+    try {
+      editor.setMarkdown("\\(set\\)");
+      editor.setSelection(2 + "set".length);
+      const session = new SnippetSession(editor);
+      expect(session.insert({ key: "set", name: "Set", mode: "tex-mode", body: "\\{ $1 \\}$2" }, "set".length)).toBe(true);
+
+      expect(editor.getMarkdown()).toBe("\\(\\{  \\}\\)");
+      const selection = editor.getSelection();
+      expect(selection.from).toBe(selection.to);
+      expect(editor.textBetween(selection.from - 3, selection.from)).toBe("\\{ ");
+      expect(editor.textBetween(selection.from, selection.from + 3)).toBe(" \\}");
+
+      expect(session.next()).toBe(true);
+      const field2 = editor.getSelection();
+      expect(field2.from).toBe(field2.to);
+      expect(editor.textBetween(field2.from, field2.from + 2)).toBe("\\)");
+    } finally {
+      editor.destroy();
+      mount.remove();
+    }
+  });
+
   test("nested placeholders remain available when the outer field is unchanged", () => {
     const editor = new TextEditor();
     const session = new SnippetSession(editor.asEditor());

@@ -47,6 +47,29 @@ y^2
     expect(html).toContain("Undefined control sequence");
   });
 
+  test("renders inline @@comment as a collapsed static chip", () => {
+    const html = renderMarkdownHTML("Public text @@comment [private note].");
+
+    expect(html).not.toContain("@@comment");
+    const root = document.createElement("div");
+    root.innerHTML = html;
+    const widget = root.querySelector(".inline-comment-widget");
+    expect(widget).toBeTruthy();
+    expect(widget!.getAttribute("data-comment-open")).toBe("false");
+    expect(widget!.querySelector(".org-env-comment-label")?.textContent).toBe("comment");
+    const content = widget!.querySelector<HTMLElement>(".org-env-content");
+    expect(content?.hidden).toBe(false);
+    expect(content?.textContent).toBe("private note");
+  });
+
+  test("renders inline math inside an exported @@comment", () => {
+    const html = renderMarkdownHTML(String.raw`Check @@comment [see \(\alpha\)].`);
+    const root = document.createElement("div");
+    root.innerHTML = html;
+    const content = root.querySelector(".org-env-content");
+    expect(content?.querySelector(".katex")).toBeTruthy();
+  });
+
   test("keeps markdown and math literal inside fenced and inline code", () => {
     const fenced = renderMarkdownHTML("```\ninline \\(x+1\\) and [[wiki]] and **bold**\n```");
     expect(fenced).toContain("<code");
@@ -195,6 +218,32 @@ y^2
     expect(html).toContain("code-token-keyword");
     expect(html).toContain("code-token-comment");
     expect(html).not.toContain("<p>import Mathlib.Tactic");
+  });
+
+  test("renders inline KaTeX in an org-env block title", () => {
+    const html = renderMarkdownHTML(String.raw`#+begin theorem Spectral \(x^2\)
+Body.
+#+end theorem`);
+
+    const root = document.createElement("div");
+    root.innerHTML = html;
+    const title = root.querySelector(".org-env-heading-title");
+    expect(title).toBeTruthy();
+    expect(title!.querySelector(".aaronnote-math-inline")).toBeTruthy();
+    expect(title!.querySelector(".katex")).toBeTruthy();
+  });
+
+  test("renders inline KaTeX in a lean4 org-env block title", () => {
+    const html = renderMarkdownHTML(String.raw`#+begin lean4 basic \(\alpha\)
+example : True := by trivial
+#+end lean4`);
+
+    const root = document.createElement("div");
+    root.innerHTML = html;
+    const title = root.querySelector(".org-env-heading-title");
+    expect(title).toBeTruthy();
+    expect(title!.querySelector(".aaronnote-math-inline")).toBeTruthy();
+    expect(title!.querySelector(".katex")).toBeTruthy();
   });
 
   test("renders semantic part and section headings as outline blocks", () => {

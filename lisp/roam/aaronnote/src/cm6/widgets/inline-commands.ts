@@ -1,5 +1,6 @@
 /**
- * Inline @@command widgets — currently handles @@todo(status) [text]{args}
+ * Inline @@command widgets — handles @@todo(status) [text]{args},
+ * @@tag[name], and @@comment [text]{args}.
  *
  * Uses a ViewPlugin (viewport-scoped) since these are inline decorations
  * (no block:true needed).  When the cursor is inside a command span the
@@ -247,6 +248,86 @@ class TagWidget extends MeasuredWidget {
   ignoreEvent(): boolean { return false; }
 }
 
+function stopWidgetEventPropagation(event: Event): void {
+  event.stopPropagation();
+}
+
+/**
+ * `@@comment [text]{args}` — a private annotation chip. Mirrors the org-env
+ * block comment's dimmed collapsible UI (`org-env-comment-*` classes) but as
+ * an inline replace widget instead of a block:true one. The label stays a
+ * fixed "comment" placeholder (never a preview of the text) so the hidden
+ * content isn't partially leaked before the reader opts to reveal it.
+ */
+class InlineCommentWidget extends MeasuredWidget {
+  cmd: InlineCommand;
+
+  constructor(cmd: InlineCommand) {
+    super();
+    this.cmd = cmd;
+  }
+
+  protected measureKey(): string { return ""; }
+  protected get measuredBlock(): boolean { return false; }
+
+  eq(other: InlineCommentWidget): boolean {
+    return (
+      this.cmd.context === other.cmd.context &&
+      this.cmd.fullFrom === other.cmd.fullFrom &&
+      this.cmd.fullTo === other.cmd.fullTo
+    );
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const { cmd } = this;
+    const context = cmd.context.trim();
+
+    const wrap = document.createElement("span");
+    wrap.className = "inline-comment-widget inline-command-token";
+    wrap.dataset.commentOpen = "false";
+    wrap.dataset.cmSourceFrom = String(cmd.fullFrom);
+    wrap.dataset.cmSourceTo = String(cmd.fullTo);
+    wrap.dataset.cmOpenSource = "true";
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "org-env-comment-button";
+    button.setAttribute("aria-expanded", "false");
+
+    const label = document.createElement("span");
+    label.className = "org-env-comment-label";
+    label.textContent = "comment";
+
+    const state = document.createElement("span");
+    state.className = "org-env-comment-state";
+    state.textContent = "show";
+    button.append(label, state);
+    button.addEventListener("mousedown", stopWidgetEventPropagation);
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const open = content.hidden === true;
+      content.hidden = !open;
+      wrap.classList.toggle("inline-comment-open", open);
+      wrap.dataset.commentOpen = open ? "true" : "false";
+      button.setAttribute("aria-expanded", open ? "true" : "false");
+      state.textContent = open ? "hide" : "show";
+      if (wrap.isConnected) view.requestMeasure();
+    });
+
+    const content = document.createElement("span");
+    content.className = "org-env-content";
+    content.hidden = true;
+    content.innerHTML = context ? inlineTodoBodyHTML(context) : "";
+    content.addEventListener("mousedown", stopWidgetEventPropagation);
+
+    wrap.append(button, content);
+    return wrap;
+  }
+
+  ignoreEvent(): boolean { return false; }
+}
+
 // ---------------------------------------------------------------------------
 // ViewPlugin
 // ---------------------------------------------------------------------------
@@ -291,6 +372,13 @@ function buildInlineCommandDecos(
             }).range(from, to),
           );
         }
+      }
+      if (cmd.name === "comment" && !cursorInside) {
+        decos.push(
+          Decoration.replace({
+            widget: new InlineCommentWidget({ ...cmd, fullFrom: from, fullTo: to }),
+          }).range(from, to),
+        );
       }
     }
   }

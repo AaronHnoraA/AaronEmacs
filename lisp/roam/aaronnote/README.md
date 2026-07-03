@@ -106,7 +106,7 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 | nested list | :white_check_mark: |  |
 | task list `- [ ]` / `- [x]` | :white_check_mark: |  |
 | fenced code ```` ``` ```` | :white_check_mark: |  |
-| indented code (4-space) | :yellow_circle: | parses fine; saves as fenced (shape attr not yet preserved) |
+| indented code (4-space) | :white_check_mark: | source shape is preserved byte-for-byte |
 | thematic break `---` | :white_check_mark: |  |
 | table `\\| a \\| b \\|` | :white_check_mark: |  |
 | YAML front matter | :white_check_mark: |  |
@@ -120,10 +120,10 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 | --- | :---: | --- |
 | em `*x*` / `_x_` | :white_check_mark: |  |
 | strong `**x**` / `__x__` | :white_check_mark: |  |
-| nested `***em+strong***` | :yellow_circle: | works only when both runs ≥ 3 chars; full rule-of-three pending |
+| nested `***em+strong***` | :white_check_mark: | CommonMark rule-of-three cases covered |
 | inline code `` `x` `` | :white_check_mark: |  |
 | strike `~~x~~` | :white_check_mark: |  |
-| link `[text](url)` | :yellow_circle: | edge cases: nested `]`, `\]` escape, hrefs with spaces |
+| link `[text](url)` | :white_check_mark: | nested brackets, escaped `\]`, and angle-bracket hrefs with spaces covered |
 | link with title `[t](u "title")` | :white_check_mark: |  |
 | empty-text link `[](url)` | :white_check_mark: |  |
 | image `![alt](src)` | :white_check_mark: |  |
@@ -131,7 +131,7 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 | reference-style link `[t][id]` | :white_check_mark: | click resolves via on-demand LinkReference scan; def block preserved in source |
 | hard break (2-space + `\n`) | :white_check_mark: |  |
 | soft break (`\n` in para) | :white_check_mark: |  |
-| backslash escape `\*` | :yellow_circle: | round-trip works; no input-time UX |
+| backslash escape `\*` | :white_check_mark: | delimiter hides outside the cursor span and dims while editing |
 | inline HTML | :white_check_mark: | inline widget; sanitized via `sanitizeEmbeddedHtml` |
 | inline math `\(x\)` | :white_check_mark: | raw TeX preserved; rendered inline preview |
 
@@ -156,7 +156,7 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 | Behavior                             | Status             | Notes |
 | ------------------------------------ | :----------------: | ----- |
 | cursor-aware delimiter hinting       | :white_check_mark: | |
-| auto-pair brackets                   | :white_check_mark: | |
+| auto-pair brackets                   | :white_check_mark: | VSCode-style pairing, overtyping, selection wrapping, and paired deletion |
 | ordered-list auto-renumber           | :white_check_mark: | move/paste/delete renumbers in same transaction (single undo); `.`/`)` marker preserved |
 | heading fold (`zc`/`zo`/`za`/`zM`/`zR`) | :white_check_mark: | foldService + hover-only chevron; state in CM6 foldState |
 | lossless `parse → serialize → parse` | :white_check_mark: | |
@@ -165,7 +165,7 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 
 - Math is no longer a planned feature. The repo already contains parser, serializer, render, and editor tests for inline and display math.
 - Mermaid is partially implemented through fenced-code preview and lazy rendering. The README used to describe it as future work; that is no longer accurate.
-- The remaining edge cases are complex inline link parsing (nested `]` / `\]`), triple-emphasis nesting, and indented-code shape preservation. Reference-definition reload is fixed (live-preview renders the def block as `syntax-hint`; click-to-jump resolves via on-demand scan).
+- Complex inline links use a custom Lezer `LinkEnd` parser so nested brackets remain part of the enclosing link text. Reference-definition reload renders the definition block as `syntax-hint`; click-to-jump resolves it via an on-demand scan.
 
 ## Spec
 

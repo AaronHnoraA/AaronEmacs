@@ -26,9 +26,11 @@ import {
   historyKeymap,
 } from "@codemirror/commands";
 import { closeBrackets } from "@codemirror/autocomplete";
+import { vscodeCloseBrackets, vscodeDeleteBracketPairKeymap } from "./close-brackets-vscode.ts";
 import { foldEffect, syntaxTree, unfoldEffect } from "@codemirror/language";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { livePreviewExtension } from "./live-preview.ts";
+import { nestingAwareLinkExtension } from "./lezer-link-ext.ts";
 import { disposeHighlightWorker } from "../code-highlight-async.ts";
 import { disposeMathRuntime } from "../math-render.ts";
 import { mathExtension } from "./widgets/math.ts";
@@ -57,6 +59,7 @@ import {
   type EditorPasteOptions,
 } from "../paste.ts";
 import { renderMarkdownHTML } from "../render-html.ts";
+import { markdownLinkDestination } from "../markdown-link.ts";
 import { blockMathRangesExtension, getBlockMathRanges, positionInsideAnyRange } from "./math-ranges.ts";
 import { scanInlineMathRanges } from "../inline-math.ts";
 import { findHighlightExtension } from "./find-highlight.ts";
@@ -193,7 +196,7 @@ function hrefFromLinkNode(state: EditorState, from: number, to: number): string 
     enter(node) {
       if (href) return false;
       if (node.name !== "URL") return;
-      href = state.doc.sliceString(node.from, node.to).trim();
+      href = markdownLinkDestination(state.doc.sliceString(node.from, node.to));
       return false;
     },
   });
@@ -241,7 +244,7 @@ function resolveRefLinkHref(state: EditorState, linkFrom: number, linkTo: number
           defLabel = state.doc.sliceString(child.from, child.to).replace(/^\[|\]$/g, "").trim().toLowerCase();
         }
         if (child.name === "URL") {
-          defUrl = state.doc.sliceString(child.from, child.to).trim();
+          defUrl = markdownLinkDestination(state.doc.sliceString(child.from, child.to));
         }
       });
       if (defLabel === label && defUrl) resolved = defUrl;
@@ -259,10 +262,7 @@ function markdownHrefFromLineAt(state: EditorState, pos: number): string | null 
     const from = line.from + match.index;
     const to = from + match[0].length;
     if (pos < from || pos > to) continue;
-    return (match[1] || "")
-      .replace(/\s+"[^"]*"\s*$/, "")
-      .replace(/\s+'[^']*'\s*$/, "")
-      .trim() || null;
+    return markdownLinkDestination(match[1] || "") || null;
   }
   return null;
 }
@@ -292,7 +292,7 @@ export function markdownHrefAt(state: EditorState, pos: number): string | null {
         }
       }
       if (node.name === "URL") {
-        const href = state.doc.sliceString(node.from, node.to).trim();
+        const href = markdownLinkDestination(state.doc.sliceString(node.from, node.to));
         if (href) {
           if (jupyterHref(href)) {
             const lineHref = markdownHrefFromLineAt(state, clamped);
@@ -1011,10 +1011,12 @@ function buildExtensions(
     EditorView.clickAddsSelectionRange.of((event) => event.altKey || event.metaKey || event.ctrlKey),
     drawSelection({ cursorBlinkRate: -1 }),
     history({ minDepth: 200, newGroupDelay: 500 }),
+    vscodeCloseBrackets(),
     closeBrackets(),
     EditorView.inputHandler.of(wrapSelectedMarkdownInput),
     rectangularSelection(),
     keymap.of([
+      ...vscodeDeleteBracketPairKeymap,
       { key: "Enter", run: (view) => tableEnterSameColumn(view) || exitEmptyMarkdownBlock(view) || continueMarkdownBlock(view) },
       { key: "Mod-Enter", run: exitCurrentOrgEnv },
       { key: "Tab", run: (view) => tableNavigateCell(view, 1) || indentMarkdownBlock(view, 1) },
@@ -1025,7 +1027,7 @@ function buildExtensions(
       ...defaultKeymap,
       ...historyKeymap,
     ]),
-    markdown({ base: markdownLanguage }),
+    markdown({ base: markdownLanguage, extensions: [nestingAwareLinkExtension] }),
     highlightActiveLine(),
     tocIndexExtension,
     orderedListRenumber,
