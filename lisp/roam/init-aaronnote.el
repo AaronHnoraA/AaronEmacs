@@ -622,6 +622,12 @@ When BUFFER is nil, inspect the current buffer."
       (format "*aaronnote: %s*" (file-name-nondirectory file))
     "*aaronnote*"))
 
+(defun my/aaronnote--readonly-buffer-display-name (file ordinal)
+  "Return an ibuffer-friendly name for FILE's read-only split ORDINAL."
+  (format "*aaronnote split %d: %s*"
+          ordinal
+          (file-name-nondirectory (my/aaronnote--canonical-file file))))
+
 (defun my/aaronnote--cleanup-buffer ()
   "Remove the current buffer from Aaronnote identity registries."
   (when (and (stringp my/aaronnote--registered-file)
@@ -1025,9 +1031,10 @@ client and keeps it out of the normal file/session sync maps."
            (select-window source-window))
          (unless (fboundp 'my/xwidget-open-url)
            (require 'init-browser))
-         (let* ((client (format "aaronnote-readonly:%s:%d"
+         (let* ((ordinal (cl-incf my/aaronnote--readonly-split-counter))
+                (client (format "aaronnote-readonly:%s:%d"
                                 (file-truename file)
-                                (cl-incf my/aaronnote--readonly-split-counter)))
+                                ordinal))
                 (url (my/aaronnote--app-url
                       file client
                       '((readonly . "1"))))
@@ -1044,8 +1051,8 @@ client and keeps it out of the normal file/session sync maps."
                (setq-local my/aaronnote--client-id client)
                (setq-local my/aaronnote--registered-file nil)
                (setq-local my/aaronnote--xwidget-forced-name
-                           (format "*aaronnote readonly: %s*"
-                                   (file-name-nondirectory file)))
+                           (my/aaronnote--readonly-buffer-display-name
+                            file ordinal))
                (setq-local my/xwidget-focus-script nil)
                (when (fboundp 'my/xwidget-setup-control-line)
                  (my/xwidget-setup-control-line))
@@ -1055,6 +1062,7 @@ client and keeps it out of the normal file/session sync maps."
                  (setq-local default-directory
                              (file-name-as-directory (file-name-directory file))))
                (my/aaronnote-keys-mode 1)))
+           (my/aaronnote--refresh-visible-ibuffers)
            (when (window-live-p target-window)
              (select-window target-window))))))))
 

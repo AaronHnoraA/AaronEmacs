@@ -1035,7 +1035,13 @@ Else, call `comment-or-uncomment-region' on the current line."
 
 (defun my/ibuffer-aaronnote-canonical-buffer (buffer)
   "Return canonical Aaronnote BUFFER when the bridge can resolve one."
-  (or (and (fboundp 'my/aaronnote-canonical-buffer)
+  (or (and (buffer-live-p buffer)
+           (with-current-buffer buffer
+             (and (boundp 'my/aaronnote--client-id)
+                  (fboundp 'my/aaronnote--readonly-client-p)
+                  (my/aaronnote--readonly-client-p my/aaronnote--client-id)))
+           buffer)
+      (and (fboundp 'my/aaronnote-canonical-buffer)
            (my/aaronnote-canonical-buffer buffer))
       buffer))
 

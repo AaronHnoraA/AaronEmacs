@@ -2749,6 +2749,17 @@ maybeDescribe("cm6 kernel: surface", () => {
 // ---------------------------------------------------------------------------
 
 maybeDescribe("cm6 kernel: README parity", () => {
+  test("revealing the cursor preserves a non-empty selection", () => {
+    const md = "alpha beta gamma";
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(6, 10);
+
+    editor.revealCursor();
+
+    expect(editor.getMarkdownSelection()).toEqual({ from: 6, to: 10 });
+    cleanup();
+  });
+
   test("backslash escape is hidden with the cursor outside, dimmed when inside", () => {
     const md = "escaped \\* star";
     const { editor, cleanup } = mountCM6(md);

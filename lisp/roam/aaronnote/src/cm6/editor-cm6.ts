@@ -868,7 +868,7 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
 
     revealCursor(): void {
       const { from } = view.state.selection.main;
-      view.dispatch({ selection: { anchor: from }, scrollIntoView: true });
+      view.dispatch({ effects: EditorView.scrollIntoView(from, { y: "center" }) });
       flashCaret();
     },
 

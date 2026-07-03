@@ -17,7 +17,5 @@
 ##  Aaronnote && Roam
 
 ### Features
-- 支持触控板zoom (aaronote和emacs还有图片 图表等)
-- 重构: 架构层面升级aaronnote: 使得各种控件功能复用, 注册式配置 等 减少拓展维护成本
 
 ### Bugs
