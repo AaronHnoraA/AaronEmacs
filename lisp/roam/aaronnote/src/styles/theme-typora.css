@@ -314,7 +314,7 @@
 
 /* ─── org-style theorem/proof blocks ─────────────────────────────── */
 .cm-editor org-env-block {
-  --block-c: var(--c-note);
+  --block-c: var(--c-env-default, #a7b0c4);
   --block-l: attr(data-label);
   display: block;
   margin: 0.56rem 0;
@@ -438,11 +438,24 @@
 .cm-editor org-env-block[data-kind="proof"] { --block-c: var(--c-proof); }
 .cm-editor org-env-block[data-kind="example"] { --block-c: var(--c-example); }
 .cm-editor org-env-block[data-kind="attention"] { --block-c: var(--c-attend); }
-.cm-editor org-env-block[data-kind="warning"] { --block-c: var(--c-attend); }
+.cm-editor org-env-block[data-kind="warning"] { --block-c: var(--c-warning, #ffb86b); }
 .cm-editor org-env-block[data-kind="note"] { --block-c: var(--c-note); }
-.cm-editor org-env-block[data-kind="info"] { --block-c: var(--c-note); }
-.cm-editor org-env-block[data-kind="summary"] { --block-c: var(--c-note); }
-.cm-editor org-env-block[data-kind="fold"] { --block-c: var(--c-note); }
+.cm-editor org-env-block[data-kind="info"] { --block-c: var(--c-info, #64d2ff); }
+.cm-editor org-env-block[data-kind="summary"] { --block-c: var(--c-summary, #c6a0f6); }
+.cm-editor org-env-block[data-kind="fold"] { --block-c: var(--c-fold, #b7c6e8); }
+.cm-editor org-env-block[data-kind="comment"] { --block-c: var(--c-comment, #f2a272); }
+.cm-editor org-env-block[data-kind="convention"] { --block-c: var(--c-convention, #f0a6ca); }
+.cm-editor org-env-block[data-kind="axiom"] { --block-c: var(--c-axiom, #ffcf70); }
+.cm-editor org-env-block[data-kind="assumption"] { --block-c: var(--c-assumption, #e6b86a); }
+.cm-editor org-env-block[data-kind="conjecture"] { --block-c: var(--c-conjecture, #ff9f80); }
+.cm-editor org-env-block[data-kind="claim"] { --block-c: var(--c-claim, #b8c0ff); }
+.cm-editor org-env-block[data-kind="remark"] { --block-c: var(--c-remark, #9ccfd8); }
+.cm-editor org-env-block[data-kind="notation"] { --block-c: var(--c-notation, #7dcfff); }
+.cm-editor org-env-block[data-kind="observation"] { --block-c: var(--c-observation, #a6da95); }
+.cm-editor org-env-block[data-kind="exercise"] { --block-c: var(--c-exercise, #c099ff); }
+.cm-editor org-env-block[data-kind="solution"] { --block-c: var(--c-solution, #8bd5ca); }
+.cm-editor org-env-block[data-kind="algorithm"] { --block-c: var(--c-algorithm, #73daca); }
+.cm-editor org-env-block[data-kind="question"] { --block-c: var(--c-question, #f5bde6); }
 .cm-editor org-env-block[data-kind="definition"],
 .cm-editor org-env-block[data-kind="defn"],
 .cm-editor org-env-block[data-kind="define"] { --orgenv-end: "◇"; }
@@ -526,7 +539,7 @@
   display: none !important;
 }
 .cm-editor org-env-block[data-kind="comment"] {
-  --block-c: #ffc69c;
+  --block-c: var(--c-comment, #f2a272);
   position: relative;
   display: block;
   width: fit-content;

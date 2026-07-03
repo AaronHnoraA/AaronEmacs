@@ -14,7 +14,6 @@ import { markdownLinkDestination } from "./markdown-link.ts";
 import { safeHref } from "./url-safety.ts";
 import { scanInlineCommands } from "./command-syntax.ts";
 import { semanticOutlineFromCommand } from "./semantic-outline.ts";
-import { highlightCode, type CodeHighlightRange } from "./code-highlight.ts";
 import { renderTikzIframe } from "./tikz-render.ts";
 import {
   VISUAL_ATTACHMENT_IFRAME_ALLOW,
@@ -209,6 +208,18 @@ function envLabel(kind: string): string {
     summary: "Summary",
     fold: "Fold",
     tikz: "TikZ",
+    convention: "Convention",
+    axiom: "Axiom",
+    assumption: "Assumption",
+    conjecture: "Conjecture",
+    claim: "Claim",
+    remark: "Remark",
+    notation: "Notation",
+    observation: "Observation",
+    exercise: "Exercise",
+    solution: "Solution",
+    algorithm: "Algorithm",
+    question: "Question",
   };
   return labels[kind] ?? kind;
 }
@@ -222,6 +233,7 @@ function orgEnvBlockRule(state: StateBlock, startLine: number, endLine: number, 
   const open = openLine.match(ORG_ENV_OPEN_RE);
   if (!open) return false;
   const kind = open[1]!;
+  if (kind.toLowerCase() === "lean4") return false;
   const closeRe = new RegExp(`^\\s*#\\+\\s*end\\s+${kind.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i");
 
   let closeLine = -1;
@@ -613,39 +625,6 @@ function renderDiagramFence(token: Token, layout: LayoutAttrs): string {
   return `<pre class="${escapeAttr(cls)}"${styleAttr}><code${codeClass}>${escapeHtml(token.content)}</code></pre>\n`;
 }
 
-function renderHighlightedCode(lang: string, text: string): string {
-  const ranges = highlightCode(lang, text);
-  if (ranges.length === 0) return escapeHtml(text);
-  let cursor = 0;
-  let out = "";
-  for (const range of ranges as CodeHighlightRange[]) {
-    const from = Math.max(0, Math.min(text.length, range.from));
-    const to = Math.max(0, Math.min(text.length, range.to));
-    if (to <= from || from < cursor) continue;
-    if (from > cursor) out += escapeHtml(text.slice(cursor, from));
-    out += `<span class="${escapeAttr(range.className)}">${escapeHtml(text.slice(from, to))}</span>`;
-    cursor = to;
-  }
-  if (cursor < text.length) out += escapeHtml(text.slice(cursor));
-  return out;
-}
-
-function renderLeanCodeCell(title: string, body: string): string {
-  const label = "Lean 4";
-  const highlighted = renderHighlightedCode("lean4", body);
-  const classes = "cm-org-env-block org-env-block org-env-lean4";
-  return [
-    `<org-env-block class="${escapeAttr(classes)}" data-kind="lean4" data-title="${escapeAttr(title)}" data-label="${escapeAttr(label)}" data-comment-open="false">`,
-    `<span class="org-env-heading cm-org-env-heading-widget" data-org-env-kind="lean4"><span class="org-env-heading-label cm-org-env-label">${escapeHtml(label)}</span><span class="org-env-heading-title" data-empty="${title ? "false" : "true"}">${renderMarkdownInlineHTML(title)}</span></span>`,
-    `<div class="org-env-content"><pre class="aaronnote-lean-code"><code class="language-lean4">${highlighted}</code></pre></div>`,
-    "</org-env-block>",
-  ].join("");
-}
-
-function renderLeanOrgEnv(meta: OrgEnvTokenMeta): string {
-  return renderLeanCodeCell(meta.title, meta.body);
-}
-
 function renderMarkdownSummary(md: MarkdownIt, title: string): string {
   return md.renderInline(title.trim() || "Details");
 }
@@ -698,7 +677,6 @@ function renderOrgEnv(md: MarkdownIt, tokens: Token[], idx: number): string {
       ? `<div class="${escapeAttr(classes)}" data-aaronnote-image-align="${escapeAttr(layout.align)}" data-aaronnote-image-wrap="${layout.wrap ? "true" : "false"}"${styleAttr}>${renderTikzIframe(meta.body)}</div>`
       : "";
   }
-  if (kind.toLowerCase() === "lean4") return renderLeanOrgEnv(meta);
   const title = meta.title;
   const label = envLabel(kind);
   const body = meta.body.trim() ? md.render(meta.body) : "";

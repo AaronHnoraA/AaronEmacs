@@ -201,7 +201,7 @@ y^2
     expect(html).toContain("--aaronnote-image-width: 320px");
   });
 
-  test("renders lean4 org env as a code cell without markdown parsing", () => {
+  test("does not treat lean4 begin/end syntax as an org env", () => {
     const html = renderMarkdownHTML([
       "#+begin lean4 basic",
       "import Mathlib.Tactic",
@@ -212,31 +212,16 @@ y^2
       "#+end lean4",
     ].join("\n"));
 
-    expect(html).toContain('data-kind="lean4"');
-    expect(html).toContain('class="language-lean4"');
-    expect(html).toContain("aaronnote-lean-code");
-    expect(html).toContain("code-token-keyword");
-    expect(html).toContain("code-token-comment");
-    expect(html).not.toContain("<p>import Mathlib.Tactic");
+    expect(html).not.toContain('data-kind="lean4"');
+    expect(html).not.toContain('class="language-lean4"');
+    expect(html).not.toContain("aaronnote-lean-code");
+    expect(html).toContain("#+begin lean4 basic");
   });
 
   test("renders inline KaTeX in an org-env block title", () => {
     const html = renderMarkdownHTML(String.raw`#+begin theorem Spectral \(x^2\)
 Body.
 #+end theorem`);
-
-    const root = document.createElement("div");
-    root.innerHTML = html;
-    const title = root.querySelector(".org-env-heading-title");
-    expect(title).toBeTruthy();
-    expect(title!.querySelector(".aaronnote-math-inline")).toBeTruthy();
-    expect(title!.querySelector(".katex")).toBeTruthy();
-  });
-
-  test("renders inline KaTeX in a lean4 org-env block title", () => {
-    const html = renderMarkdownHTML(String.raw`#+begin lean4 basic \(\alpha\)
-example : True := by trivial
-#+end lean4`);
 
     const root = document.createElement("div");
     root.innerHTML = html;

@@ -1,7 +1,8 @@
 import { EditorState, Text } from "@codemirror/state";
 import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
 
-import { inlineTagAnchorsFromText, markdownHeadingsFromText } from "../aaronnote/floating-toc.ts";
+import { createFloatingTocPanel, inlineTagAnchorsFromText, markdownHeadingsFromText, orgEnvAnchorsFromText } from "../aaronnote/floating-toc.ts";
+import { createEditor } from "../src/lib.ts";
 import { tocIndexExtension, tocIndexFromState } from "../src/cm6/toc-index.ts";
 
 describe("floating toc heading scan", () => {
@@ -50,6 +51,80 @@ describe("floating toc heading scan", () => {
     ]);
 
     expect(markdownHeadingsFromText(doc).map((heading) => heading.text)).toEqual(["Alpha", "Beta"]);
+  });
+
+  test("indexes org-env blocks by kind while excluding fences, math, and lean4", () => {
+    const doc = Text.of([
+      "#+begin convention tensor minimal subspaces",
+      "body",
+      "#+end convention",
+      "#+begin theorem Spectral theorem",
+      "#+end theorem",
+      "```md",
+      "#+begin remark hidden",
+      "#+end remark",
+      "```",
+      "\\[",
+      "#+begin claim also-hidden",
+      "\\]",
+      "#+begin lean4 old-code-cell",
+      "#+end lean4",
+    ]);
+
+    expect(orgEnvAnchorsFromText(doc)).toEqual([
+      expect.objectContaining({ kind: "convention", title: "tensor minimal subspaces", pos: 0 }),
+      expect.objectContaining({ kind: "theorem", title: "Spectral theorem" }),
+    ]);
+  });
+
+  test("defers org-env scanning UI until its nested toggle and keeps tags visible", () => {
+    const mount = document.createElement("div");
+    const toc = document.createElement("aside");
+    const list = document.createElement("nav");
+    const toggleButton = document.createElement("button");
+    toc.className = "is-collapsed";
+    toc.appendChild(list);
+    document.body.append(mount, toc);
+    const editor = createEditor(mount);
+    editor.setMarkdown("# Heading\n#+begin convention tensor minimal subspaces\nbody\n#+end convention");
+    try {
+      const panel = createFloatingTocPanel({
+        toc,
+        toggleButton,
+        list,
+        editor,
+        getNotes: () => [{ id: "note", file: "note.md", title: "Note", tags: ["tensor"] }],
+        getCurrentFile: () => "note.md",
+        resolveNoteRef: () => undefined,
+        openNote: () => {},
+      });
+
+      panel.toggle();
+      panel.update();
+      expect(toc.querySelector(".aaronnote-toc-org-env")).toBeNull();
+      expect(toc.querySelector(".aaronnote-toc-org-filter")).toBeNull();
+      expect(toc.querySelector(".aaronnote-toc-resize-handle")).toBeTruthy();
+      expect(toc.textContent).toContain("#tensor");
+
+      toc.querySelector<HTMLButtonElement>(".aaronnote-toc-org-toggle")!.click();
+      const orgRow = toc.querySelector<HTMLElement>(".aaronnote-toc-org-row")!;
+      expect(orgRow.querySelector(".aaronnote-toc-org-env")?.textContent).toBe("tensor minimal subspaces");
+      expect(orgRow.querySelector(".aaronnote-toc-org-marker")?.textContent).toBe("C");
+      expect(orgRow.style.getPropertyValue("--toc-org-color")).toContain("--c-convention");
+      const outlineItems = Array.from(list.querySelectorAll<HTMLElement>(".aaronnote-toc-item"));
+      expect(outlineItems.findIndex((item) => item.textContent === "Heading"))
+        .toBeLessThan(outlineItems.findIndex((item) => item.textContent === "tensor minimal subspaces"));
+      expect(toc.textContent).toContain("#tensor");
+
+      const search = toc.querySelector<HTMLInputElement>(".aaronnote-toc-search")!;
+      search.value = "no heading matches";
+      search.dispatchEvent(new Event("input"));
+      expect(toc.textContent).toContain("#tensor");
+    } finally {
+      editor.destroy();
+      mount.remove();
+      toc.remove();
+    }
   });
 
   test("updates toc index around changed lines", () => {

@@ -6,7 +6,6 @@ const TECHNICAL_ORG_ENV_KINDS = new Set([
   "html",
   "meta",
   "lean",
-  "lean4",
   "tex",
   "latex",
   "math",

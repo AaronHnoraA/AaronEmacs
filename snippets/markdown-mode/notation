@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: Notation block
+# key: notation
+# group: Aaronnote blocks
+# --
+#+begin notation ${1:title}
+${2:Notation.}
+#+end notation
+$0

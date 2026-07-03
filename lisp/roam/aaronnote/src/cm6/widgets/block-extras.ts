@@ -159,6 +159,7 @@ function scanOrgEnvBlocks(
     if (!openMatch) { i = lineEndPos + 1; continue; }
 
     const kind = openMatch[1].toLowerCase();
+    if (kind === "lean4") { i = lineEndPos + 1; continue; }
     const title = (openMatch[2] ?? "").trim();
     const blockFrom = i;
     const bodyStart = lineEndPos + 1;
@@ -846,7 +847,7 @@ class OrgEnvOpenWidget extends MeasuredWidget {
 
   protected measureGroupKey(): string { return "oopen:" + this.kind; }
 
-  protected estimatedHeightFallback(): number { return this.kind === "lean4" ? 26 : -1; }
+  protected estimatedHeightFallback(): number { return -1; }
 
   eq(other: OrgEnvOpenWidget): boolean {
     return this.kind === other.kind
@@ -895,7 +896,7 @@ class OrgEnvEndWidget extends MeasuredWidget {
 
   protected measureGroupKey(): string { return "oend:" + this.kind; }
 
-  protected estimatedHeightFallback(): number { return this.kind === "lean4" ? 7 : -1; }
+  protected estimatedHeightFallback(): number { return -1; }
 
   eq(other: OrgEnvEndWidget): boolean {
     return this.kind === other.kind && this.depth === other.depth;
@@ -935,8 +936,19 @@ function envLabel(kind: string): string {
     comment: "Comment",
     summary: "Summary",
     fold: "Fold",
-    lean4: "Lean 4",
     tikz: "TikZ",
+    convention: "Convention",
+    axiom: "Axiom",
+    assumption: "Assumption",
+    conjecture: "Conjecture",
+    claim: "Claim",
+    remark: "Remark",
+    notation: "Notation",
+    observation: "Observation",
+    exercise: "Exercise",
+    solution: "Solution",
+    algorithm: "Algorithm",
+    question: "Question",
   };
   return labels[kind] ?? kind;
 }

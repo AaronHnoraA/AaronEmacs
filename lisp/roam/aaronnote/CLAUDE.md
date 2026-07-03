@@ -67,7 +67,7 @@ Emacs equivalents:
 | In-editor roam graph | `my/aaronnote-roam-graph` → `/graph` standalone route |
 | Plugin runtime + roamlookup | removed; Copilot is a built-in |
 
-`lean` and `#+begin lean4` code blocks render as **static syntax-highlighted
+Fenced `lean` and `lean4` code blocks render as **static syntax-highlighted
 snippets** in the web editor (no LSP process started from the browser).
 
 ## Widget Rules

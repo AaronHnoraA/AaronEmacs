@@ -111,11 +111,25 @@
   --c-proof: #7ee7ff;
   --c-example: #e8b85f;
   --c-attend: #ff8fa3;
+  --c-warning: #ffb86b;
   --c-note: #86f6e4;
-  --lean4-header-bg: #222532;
-  --lean4-border: #4c5366;
-  --lean4-accent: #d2a8ff;
-  --lean4-muted: #8b90a8;
+  --c-info: #64d2ff;
+  --c-summary: #c6a0f6;
+  --c-fold: #b7c6e8;
+  --c-comment: #f2a272;
+  --c-convention: #f0a6ca;
+  --c-axiom: #ffcf70;
+  --c-assumption: #e6b86a;
+  --c-conjecture: #ff9f80;
+  --c-claim: #b8c0ff;
+  --c-remark: #9ccfd8;
+  --c-notation: #7dcfff;
+  --c-observation: #a6da95;
+  --c-exercise: #c099ff;
+  --c-solution: #8bd5ca;
+  --c-algorithm: #73daca;
+  --c-question: #f5bde6;
+  --c-env-default: #a7b0c4;
   --aaron-font-latin: "AaronLatinSystem";
   --aaron-font-english-fallback: -apple-system, BlinkMacSystemFont, "SF Pro Text";
   --aaron-font-chinese: "FZLiuGongQuanKaiShuJF";
@@ -1037,11 +1051,11 @@ button:disabled {
   color: var(--aaron-ink);
   box-shadow: var(--aaron-shadow);
   backdrop-filter: blur(8px);
-  resize: horizontal;
-  /* Panel is anchored to the right edge, so the resize grip belongs on the
-     left: rtl moves the CSS resize handle to the bottom-left corner, making
-     drag direction match the way the panel grows (leftward). */
-  direction: rtl;
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+  min-height: 160px;
+  max-width: calc(100vw - 28px);
 }
 
 .aaronnote-floating-toc.is-collapsed {
@@ -1049,11 +1063,34 @@ button:disabled {
 }
 
 .aaronnote-floating-toc nav {
-  direction: ltr;
-  max-height: min(520px, calc(100vh - 58px));
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   padding: 6px;
   scrollbar-gutter: stable;
+}
+
+.aaronnote-toc-resize-handle {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  cursor: nesw-resize;
+  touch-action: none;
+}
+
+.aaronnote-toc-resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  width: 7px;
+  height: 7px;
+  border-left: 2px solid var(--aaron-muted);
+  border-bottom: 2px solid var(--aaron-muted);
+  opacity: 0.65;
 }
 
 .aaronnote-toc-status {
@@ -1199,6 +1236,45 @@ button:disabled {
 .aaronnote-toc-search:focus {
   outline: none;
   border-color: var(--aaron-red);
+}
+
+.aaronnote-toc-org-toggle {
+  width: calc(100% - 12px);
+  margin: 0 6px 6px;
+  box-sizing: border-box;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 4px;
+  padding: 5px 8px;
+  background: var(--aaron-paper-soft);
+  color: var(--aaron-muted);
+  font: 700 11px/1.3 var(--aaron-font-sans);
+}
+
+.aaronnote-toc-org-toggle {
+  text-align: left;
+  cursor: pointer;
+}
+
+.aaronnote-toc-org-toggle:hover {
+  outline: none;
+  border-color: var(--aaron-red);
+}
+
+.aaronnote-toc-org-env {
+  font-family: var(--aaron-font-heading, var(--aaron-font-sans));
+  color: color-mix(in srgb, var(--toc-org-color), var(--aaron-ink) 24%);
+}
+
+.aaronnote-toc-org-marker {
+  flex: 0 0 16px;
+  width: 16px;
+  text-align: center;
+  color: var(--toc-org-color);
+  font: 800 10px/1 var(--aaron-font-mono);
+}
+
+.aaronnote-toc-org-row:hover {
+  box-shadow: inset 2px 0 0 var(--toc-org-color);
 }
 
 /* Each heading row lays the fold chevron and the title out on one line; the

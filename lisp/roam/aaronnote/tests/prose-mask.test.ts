@@ -29,7 +29,7 @@ describe("Aaronnote prose mask", () => {
     expect(masked).not.toContain("k: v");
   });
 
-  test("masks math, code, and technical org env bodies", () => {
+  test("masks math and fenced code bodies", () => {
     const md = [
       "Check this prose.",
       "$teh + x$",
@@ -39,9 +39,6 @@ describe("Aaronnote prose mask", () => {
       "```ts",
       "const teh = 1;",
       "```",
-      "#+begin lean4",
-      "theorem teh : True := trivial",
-      "#+end lean4",
       "",
     ].join("\n");
     const masked = maskAaronnoteProse(md);
@@ -50,7 +47,6 @@ describe("Aaronnote prose mask", () => {
     expect(masked).not.toContain("$teh");
     expect(masked).not.toContain("recieve");
     expect(masked).not.toContain("const");
-    expect(masked).not.toContain("theorem");
   });
 
   test("keeps prose org env bodies but masks delimiters", () => {
