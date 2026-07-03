@@ -230,18 +230,21 @@ to evil insert state if evil is active in the buffer."
 (defun my/xwidget-update-buffer-name (&optional buffer)
   "Rename BUFFER from its page title or URL when it is safe to do so."
   (let ((buffer (or buffer (current-buffer))))
-    (when (and (buffer-live-p buffer)
-               (not (my/xwidget--aaronnote-owned-p buffer)))
+    (when (buffer-live-p buffer)
       (with-current-buffer buffer
-        (when (and (eq major-mode 'xwidget-webkit-mode)
-                   (not (minibufferp)))
+        (cond
+         ((my/xwidget--aaronnote-owned-p buffer)
+          (unless (equal (buffer-name) my/aaronnote--xwidget-forced-name)
+            (rename-buffer my/aaronnote--xwidget-forced-name t)))
+         ((and (eq major-mode 'xwidget-webkit-mode)
+               (not (minibufferp)))
           (when-let* ((name (my/xwidget--preferred-buffer-name buffer)))
             (when (or (null my/xwidget--managed-buffer-name)
                       (equal (buffer-name) my/xwidget--managed-buffer-name)
                       (string-match-p "\\`\\*xwidget\\*\\(?:<[0-9]+>\\)?\\'"
                                       (buffer-name)))
               (rename-buffer name t)
-              (setq-local my/xwidget--managed-buffer-name (buffer-name)))))))))
+              (setq-local my/xwidget--managed-buffer-name (buffer-name))))))))))
 
 (defun my/xwidget--record-buffer (buffer id url)
   "Record BUFFER as xwidget session ID with URL."

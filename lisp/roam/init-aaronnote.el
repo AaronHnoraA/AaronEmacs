@@ -1056,8 +1056,12 @@ client and keeps it out of the normal file/session sync maps."
                (setq-local my/xwidget-focus-script nil)
                (when (fboundp 'my/xwidget-setup-control-line)
                  (my/xwidget-setup-control-line))
-               (when (eq major-mode 'xwidget-webkit-mode)
-                 (rename-buffer my/aaronnote--xwidget-forced-name t))
+               ;; `xwidget-webkit-browse-url' may return before its buffer has
+               ;; finished switching to `xwidget-webkit-mode'.  Naming does
+               ;; not depend on the major mode, and delaying it leaves the
+               ;; buffer permanently named *xwidget* because the title
+               ;; callback correctly avoids overriding Aaronnote-owned names.
+               (rename-buffer my/aaronnote--xwidget-forced-name t)
                (when file
                  (setq-local default-directory
                              (file-name-as-directory (file-name-directory file))))
