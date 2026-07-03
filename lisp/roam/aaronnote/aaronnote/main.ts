@@ -49,6 +49,7 @@ import {
 import { matchingSnippetsForPrefix, SnippetSession, snippetDetail, snippetLabel, snippetPopupKeyAction } from "./snippets.ts";
 import type { CursorPosition, NoteSummary, SnippetSummary } from "./types.ts";
 import { createVimLite, type VimLiteKey, type VimLiteMode } from "./vim-lite.ts";
+import { countWritingStats, headingSubtreeRange, type WritingStats } from "./writing-stats.ts";
 import {
   handleXwidgetControlBeforeInput,
   handleXwidgetControlKeydown,
@@ -72,6 +73,7 @@ root.innerHTML = `
       <span data-vim-mode>INSERT</span>
       <span data-readonly hidden>READ ONLY</span>
       <span data-status>Opening...</span>
+      <span data-writing-stats aria-live="polite"></span>
       <button type="button" data-toc-toggle aria-expanded="false">TOC</button>
       <button type="button" data-agenda-toggle aria-expanded="false">Agenda</button>
       <button type="button" data-graph-toggle aria-expanded="false">Graph</button>
@@ -88,6 +90,7 @@ const fileLabel = root.querySelector<HTMLElement>("[data-file]")!;
 const modeLabel = root.querySelector<HTMLElement>("[data-vim-mode]")!;
 const readOnlyLabel = root.querySelector<HTMLElement>("[data-readonly]")!;
 const statusLabel = root.querySelector<HTMLElement>("[data-status]")!;
+const writingStatsLabel = root.querySelector<HTMLElement>("[data-writing-stats]")!;
 const tocButton = root.querySelector<HTMLButtonElement>("[data-toc-toggle]")!;
 const agendaButton = root.querySelector<HTMLButtonElement>("[data-agenda-toggle]")!;
 const graphButton = root.querySelector<HTMLButtonElement>("[data-graph-toggle]")!;
@@ -282,6 +285,9 @@ const NAVIGATION_BACK_STACK_MAX = 80;
 const PROSE_SCOPE_PADDING = 32 * 1024;
 const PROSE_SCOPE_MAX_CHARS = 180_000;
 const LARGE_DOCUMENT_CHARS = 512 * 1024;
+const WRITING_STATS_DELAY_MS = 300;
+const WRITING_STATS_LARGE_DELAY_MS = 900;
+const WRITING_STATS_SELECTION_DELAY_MS = 80;
 const LAYOUT_ZOOM_MIN = 0.72;
 const LAYOUT_ZOOM_MAX = 1.55;
 const LAYOUT_ZOOM_STEP = 0.08;
@@ -433,12 +439,94 @@ const editor = createEditor(host, {
     changeHandlers.forEach((handler) => handler());
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
     if (!currentReadOnly) scheduleSave();
+    scheduleWritingStats(true);
   },
+  onSelectionChange: () => scheduleWritingStats(editor.view.state.doc !== writingStatsDoc),
   onBlur: () => {
     onBlurVimReset?.();
     void flushCursorPosition();
   },
 });
+
+let writingStatsDoc: typeof editor.view.state.doc | null = null;
+let writingStatsFull: WritingStats = { words: 0, characters: 0, cjkCharacters: 0, nonCjkWords: 0 };
+let writingStatsSubtree: {
+  doc: typeof editor.view.state.doc;
+  from: number;
+  to: number;
+  stats: WritingStats;
+} | null = null;
+const writingStatsTimer = new CoalescedTimer(WRITING_STATS_DELAY_MS);
+let writingStatsIdleHandle: number | null = null;
+const numberFormat = new Intl.NumberFormat();
+
+function updateWritingStats(): void {
+  const state = editor.view.state;
+  if (state.doc !== writingStatsDoc) {
+    writingStatsFull = countWritingStats(state.doc);
+    writingStatsDoc = state.doc;
+  }
+  const selection = state.selection.main;
+  const hasSelection = selection.from !== selection.to;
+  const primary = hasSelection
+    ? countWritingStats(state.doc, selection.from, selection.to)
+    : writingStatsFull;
+  const subtree = headingSubtreeRange(state, selection.head);
+  let subtreeStats: WritingStats | null = null;
+  if (subtree) {
+    if (
+      writingStatsSubtree?.doc === state.doc
+      && writingStatsSubtree.from === subtree.from
+      && writingStatsSubtree.to === subtree.to
+    ) {
+      subtreeStats = writingStatsSubtree.stats;
+    } else {
+      subtreeStats = subtree.from === 0 && subtree.to === state.doc.length
+        ? writingStatsFull
+        : countWritingStats(state.doc, subtree.from, subtree.to);
+      writingStatsSubtree = { doc: state.doc, ...subtree, stats: subtreeStats };
+    }
+  }
+  const scope = hasSelection ? "选区" : "全文";
+  const parts = [`${scope} ${numberFormat.format(primary.words)} 字`];
+  if (subtreeStats && (!hasSelection || subtree.from !== selection.from || subtree.to !== selection.to)) {
+    parts.push(`本节 ${numberFormat.format(subtreeStats.words)} 字`);
+  }
+  writingStatsLabel.textContent = parts.join(" · ");
+  writingStatsLabel.title = "字数按中日韩字符和其他语言单词统计";
+}
+
+function cancelWritingStatsIdle(): void {
+  if (writingStatsIdleHandle !== null) {
+    if ("cancelIdleCallback" in window) window.cancelIdleCallback(writingStatsIdleHandle);
+    else window.clearTimeout(writingStatsIdleHandle);
+    writingStatsIdleHandle = null;
+  }
+}
+
+function queueWritingStatsIdle(): void {
+  cancelWritingStatsIdle();
+  if ("requestIdleCallback" in window) {
+    writingStatsIdleHandle = window.requestIdleCallback(() => {
+      writingStatsIdleHandle = null;
+      updateWritingStats();
+    });
+  } else {
+    // Compatibility fallback for engines without the Idle Callback API.
+    writingStatsIdleHandle = window.setTimeout(() => {
+      writingStatsIdleHandle = null;
+      updateWritingStats();
+    }, 50);
+  }
+}
+
+function scheduleWritingStats(documentChanged: boolean): void {
+  cancelWritingStatsIdle();
+  const delay = documentChanged
+    ? (editor.getMarkdownLength() >= LARGE_DOCUMENT_CHARS ? WRITING_STATS_LARGE_DELAY_MS : WRITING_STATS_DELAY_MS)
+    : WRITING_STATS_SELECTION_DELAY_MS;
+  writingStatsTimer.schedule(queueWritingStatsIdle, undefined, delay);
+}
 
 function layoutZoomPercent(): string {
   return `${Math.round(layoutZoom * 100)}%`;
@@ -930,6 +1018,7 @@ function applyOpenedNote(
     editor.revealCursor();
   }
   applyingContent = false;
+  scheduleWritingStats(true);
   if (currentReadOnly) {
     revision = savedRevision;
     setProseDiagnostics(editor.view, []);

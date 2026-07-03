@@ -142914,7 +142914,7 @@ B_1 \oplus B_2 \oplus \cdots \oplus B_s.
 \]
 
 A Krull--Schmidt type uniqueness theorem says that, under suitable
-hypotheses, decompositions into indecomposable summands are unique up to
+hypotheses, decompositions into indecomposable summands are unique up to this is har ad asdi  i will do this later assssssssssssssssssssssssssssssssssssssssssssssssss           ssssssssssssssssssssssssssssssssssssssssssssss jwo cam we do this later 
 permutation and isomorphism.
 
 #+begin lemma Krull--Schmidt style uniqueness

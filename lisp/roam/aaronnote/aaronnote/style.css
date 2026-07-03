@@ -203,6 +203,16 @@ button:disabled {
   color: var(--aaronnote-muted);
 }
 
+.aaronnote-focused-bar [data-writing-stats] {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aaron-faint);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .aaronnote-focused-bar [data-vim-mode] {
   min-width: 52px;
   border: 1px solid var(--aaronnote-border);
