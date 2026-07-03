@@ -962,6 +962,20 @@ When PREFER-TAG is non-nil, prefer following the current tag when one exists."
         (my/treemacs-schedule-follow))
     (my/treemacs-cursor-follow-disable-hooks)))
 
+(defun my/treemacs-process-file-events-safely-a (orig-fn &rest args)
+  "Ignore Treemacs' harmless stale file-event race.
+
+A file notification can schedule a refresh just before its tree node or buffer
+is torn down.  Some refresh paths then try to use nil as a vector and the timer
+reports `(wrong-type-argument arrayp nil)'.  The next file event or an explicit
+refresh will rebuild the affected node, so only suppress that exact race and
+preserve every other error for debugging."
+  (condition-case err
+      (apply orig-fn args)
+    (wrong-type-argument
+     (unless (equal err '(wrong-type-argument arrayp nil))
+       (signal (car err) (cdr err))))))
+
 (define-minor-mode my/treemacs-cursor-follow-mode
   "Follow the current file and symbol in Treemacs."
   :init-value nil
@@ -1303,6 +1317,12 @@ Returns the number of killed buffers."
     (advice-add 'treemacs--extract-position
                 :override
                 #'my/treemacs-extract-position))
+  (with-eval-after-load 'treemacs-filewatch-mode
+    (advice-remove 'treemacs--process-file-events
+                   #'my/treemacs-process-file-events-safely-a)
+    (advice-add 'treemacs--process-file-events
+                :around
+                #'my/treemacs-process-file-events-safely-a))
   (when (bound-and-true-p treemacs-tag-follow-mode)
     (treemacs-tag-follow-mode -1))
   (when (bound-and-true-p treemacs-follow-mode)
