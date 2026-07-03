@@ -142892,7 +142892,14 @@ The tensor analogue might be written as
 \]
 
 The point of such notation is not merely symbolic. Each arrow representsa sssssssssssssssssssssssssssssssssssssssssssssssssssssssss this is easy to see tha tnote thin
-a concrete polynomial-time encoding transformation.
+a concrete polynomial-time encoding transformation.  this is hard to see beacause I can do iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii hhhhhh I will do this later hhhh I dont lije this
+
+
+How can we do this here It is easye to see that this is hard to do because I will do this later as And I will do it later 
+
+
+Someting for me is to make it harder I don't like this hhh do this !! 
+
 
 ## 262.6. Direct sums and decompositions
 
