@@ -73,6 +73,11 @@ declare global {
   }
 }
 
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message || error.name;
+  return String(error);
+}
+
 let requireJsReady: Promise<RequireJs> | null = null;
 
 function installBundledRequireJs(): RequireJs {
@@ -251,6 +256,11 @@ class AaronnoteWidgetManager extends KernelWidgetManager {
     return this.restorePromise;
   }
 
+  loadedModelCount(): number {
+    const models = (this as unknown as { _models?: Record<string, unknown> })._models;
+    return models ? Object.keys(models).length : 0;
+  }
+
   async restoreFromMessages(messages: JupyterWidgetKernelMessage[] = []): Promise<void> {
     for (const message of messages) {
       await this.replayKernelMessage(message);
@@ -323,18 +333,35 @@ class AaronnoteWidgetManager extends KernelWidgetManager {
     } catch (error) {
       restoreError = error;
     }
+    const modelsAfterRestore = this.loadedModelCount();
     // Fallback for kernels whose ipywidgets predate the control comm, or when
     // the live state was unavailable: replay the comm messages captured during
     // execution. This yields a static (non-interactive) view but avoids a hard
     // failure.
+    let replayError: unknown = null;
     if (!this.has_model(modelId) && messages.length > 0) {
-      await this.restoreFromMessages(messages);
+      try {
+        await this.restoreFromMessages(messages);
+      } catch (error) {
+        replayError = error;
+      }
     }
     if (!this.has_model(modelId)) {
-      if (restoreError) {
-        throw restoreError instanceof Error ? restoreError : new Error(String(restoreError));
-      }
-      throw new Error("widget model not found");
+      // Report *why* nothing resolved so the failure is actionable on screen
+      // instead of a bare "model not found": which mechanism ran, how much it
+      // produced, and the live connection state.
+      const parts = [
+        restoreError
+          ? `kernel restore failed: ${errorText(restoreError)}`
+          : `kernel restore loaded ${modelsAfterRestore} model(s)`,
+        replayError
+          ? `message replay failed: ${errorText(replayError)}`
+          : `${messages.length} replay message(s)`,
+        `kernel ${this.kernel.connectionStatus}/${this.kernel.status}`,
+      ];
+      const detail = parts.join("; ");
+      console.error(`[aaronnote-jupyter] widget model ${modelId} not found — ${detail}`);
+      throw new Error(`widget model not found (${detail})`);
     }
     await this.seedOutputWidgets(widgetOutputs);
     const model = await this.get_model(modelId);
