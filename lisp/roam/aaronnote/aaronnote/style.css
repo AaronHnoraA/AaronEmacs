@@ -654,6 +654,186 @@ button:disabled {
   padding: 3px 2px;
 }
 
+.aaronnote-jupyter-runtime {
+  max-height: 260px;
+  overflow: auto;
+  border-top: 1px solid var(--aaron-paper-line);
+  padding: 7px 8px;
+  color: var(--aaronnote-muted);
+  font: 11px/1.4 var(--aaron-font-mono);
+}
+
+.aaronnote-jupyter-runtime[hidden] {
+  display: none;
+}
+
+.aaronnote-jupyter-runtime-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--aaron-paper-line);
+  padding: 2px 0 7px;
+  background: var(--aaron-paper);
+}
+
+.aaronnote-jupyter-runtime-head strong {
+  color: var(--aaron-red-dark);
+  font: 750 11px/1 var(--aaron-font-sans);
+}
+
+.aaronnote-jupyter-runtime-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aaronnote-jupyter-runtime-head [data-runtime-actions],
+.aaronnote-jupyter-runtime-task > div {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.aaronnote-jupyter-runtime button {
+  min-height: 24px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  padding: 0 7px;
+  background: var(--aaron-paper-soft);
+  color: var(--aaron-ink);
+  font: 700 10px/1 var(--aaron-font-sans);
+}
+
+.aaronnote-jupyter-runtime button:hover {
+  border-color: rgb(126 231 255 / 38%);
+  background: rgb(126 231 255 / 8%);
+}
+
+.aaronnote-jupyter-runtime-list {
+  display: grid;
+  gap: 1px;
+  padding-top: 6px;
+}
+
+.aaronnote-jupyter-runtime-task {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(110px, 0.9fr) minmax(120px, 1.4fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-left: 3px solid transparent;
+  border-radius: 3px;
+  padding: 5px 6px 5px 4px;
+}
+
+.aaronnote-jupyter-runtime-task:hover {
+  background: var(--aaron-paper-soft);
+}
+
+.aaronnote-jupyter-runtime-task[data-status="running"] {
+  border-left-color: var(--aaron-accent);
+}
+
+.aaronnote-jupyter-runtime-task[data-status="error"] {
+  border-left-color: var(--aaron-red);
+}
+
+.aaronnote-jupyter-runtime-main {
+  min-width: 0;
+  justify-self: stretch;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aaronnote-jupyter-runtime-task > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aaronnote-context-menu {
+  position: fixed;
+  z-index: 1200;
+  width: min(280px, calc(100vw - 12px));
+  max-height: min(480px, calc(100vh - 12px));
+  overflow: auto;
+  display: grid;
+  gap: 1px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 5px;
+  padding: 5px;
+  background: color-mix(in srgb, var(--aaron-paper), transparent 2%);
+  color: var(--aaron-ink);
+  box-shadow: var(--aaron-shadow);
+  backdrop-filter: blur(8px);
+  font-family: var(--aaron-font-sans);
+}
+
+.aaronnote-context-menu[hidden] {
+  display: none;
+}
+
+.aaronnote-context-menu button {
+  width: 100%;
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 5px 7px;
+  background: transparent;
+  color: var(--aaron-ink);
+  text-align: left;
+}
+
+.aaronnote-context-menu button:hover:not(:disabled),
+.aaronnote-context-menu button:focus-visible {
+  border-color: var(--aaron-paper-line);
+  background: var(--aaron-paper-soft);
+}
+
+.aaronnote-context-menu button:disabled {
+  opacity: 0.42;
+}
+
+.aaronnote-context-menu button[data-danger="true"] span {
+  color: var(--aaron-red-dark);
+}
+
+.aaronnote-context-menu span,
+.aaronnote-context-menu small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aaronnote-context-menu span {
+  font: 700 12px/1.2 var(--aaron-font-sans);
+}
+
+.aaronnote-context-menu small {
+  color: var(--aaron-muted);
+  font: 10px/1.2 var(--aaron-font-mono);
+}
+
+.aaronnote-context-separator {
+  height: 1px;
+  margin: 4px 3px;
+  background: var(--aaron-paper-line);
+  opacity: 0.75;
+}
+
 .aaronnote-tools-head,
 .aaronnote-roam-tools header {
   min-height: 38px;

@@ -574,6 +574,8 @@ const apiHandlers = {
   "aaronnote:api:jupyter-cell:restart": (body) => jupyterCell.restart(body || {}),
   "aaronnote:api:jupyter-cell:interrupt": (body) => jupyterCell.interrupt(body || {}),
   "aaronnote:api:jupyter-cell:shutdown": (body) => jupyterCell.shutdownKernel(body || {}),
+  "aaronnote:api:jupyter-cell:tasks": () => jupyterCell.listTasks(),
+  "aaronnote:api:jupyter-cell:cleanup": (body) => jupyterCell.cleanup(body || {}),
   "aaronnote:api:notes:wanted": async () => {
     const notes = await scanRoamNotes();
     return wantedPages(notes);
@@ -856,7 +858,9 @@ function adapterScript(origin) {
       kernelStatus: function(body) { return call("aaronnote:api:jupyter-cell:kernel-status", [body || {}]); },
       restart: function(body) { return call("aaronnote:api:jupyter-cell:restart", [body || {}]); },
       interrupt: function(body) { return call("aaronnote:api:jupyter-cell:interrupt", [body || {}]); },
-      shutdown: function(body) { return call("aaronnote:api:jupyter-cell:shutdown", [body || {}]); }
+      shutdown: function(body) { return call("aaronnote:api:jupyter-cell:shutdown", [body || {}]); },
+      tasks: function() { return call("aaronnote:api:jupyter-cell:tasks", []); },
+      cleanup: function(body) { return call("aaronnote:api:jupyter-cell:cleanup", [body || {}]); }
     },
     latex: {
       defaults: function(body) { return call("aaronnote:api:latex:defaults", [body || {}]); },

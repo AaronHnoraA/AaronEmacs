@@ -12,7 +12,7 @@ export JUPYTER_PATH="${JUPYTER_ROOT}/.jupyter/data"
 export IPYTHONDIR="${JUPYTER_ROOT}/.jupyter/ipython"
 export PYTHONNOUSERSITE=1
 export PATH="${VENV}/bin:${PATH}"
-ALLOWED_KERNELS="${AARONNOTE_JUPYTER_ALLOWED_KERNELS:-[\"python3\", \"sagemath-10.9\"]}"
+ALLOWED_KERNELS="${AARONNOTE_JUPYTER_ALLOWED_KERNELS:-[\"python3\", \"bash\", \"sagemath-10.9\"]}"
 
 printf 'Aaronnote Jupyter doctor\n'
 printf 'root=%s\n' "$JUPYTER_ROOT"
@@ -35,7 +35,7 @@ from importlib.metadata import version
 import sys
 
 print(sys.version.split()[0])
-for dist in ("jupyter-server", "ipykernel"):
+for dist in ("jupyter-server", "ipykernel", "bash_kernel"):
     print(f"{dist} {version(dist)}")
 PY
 "${VENV}/bin/jupyter" kernelspec list "--KernelSpecManager.allowed_kernelspecs=${ALLOWED_KERNELS}"

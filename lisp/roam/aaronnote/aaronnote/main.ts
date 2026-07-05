@@ -16,7 +16,14 @@ import { INLINE_MATH_RE } from "../src/inline-math.ts";
 import { formatMathRenderError, renderMathLazy } from "../src/math-render.ts";
 import { setKatexMacros } from "../src/katex-macros.ts";
 import { hrefProtocol, safeHref } from "../src/url-safety.ts";
-import { api, type TodoItem, type LatexExportAgentStatus, type LatexTemplate } from "./api-client.ts";
+import {
+  api,
+  type TodoItem,
+  type JupyterKernelTask,
+  type JupyterTasksResult,
+  type LatexExportAgentStatus,
+  type LatexTemplate,
+} from "./api-client.ts";
 import { Epoch } from "../src/async-epoch.ts";
 import { CoalescedTimer } from "../src/coalesced-timer.ts";
 import { blobToBase64 } from "../src/paste.ts";
@@ -75,7 +82,7 @@ root.innerHTML = `
       <span data-readonly hidden>READ ONLY</span>
       <span data-status>Opening...</span>
       <span data-writing-stats aria-live="polite"></span>
-      <button type="button" class="aaronnote-jupyter-stealth-button" data-jupyter-toggle aria-expanded="false" title="Jupyter cells" aria-label="Jupyter cells">&#xe606;</button>
+      <button type="button" class="aaronnote-jupyter-stealth-button" data-jupyter-toggle aria-expanded="false" title="Code cells" aria-label="Code cells">&#xf121;</button>
       <button type="button" data-toc-toggle aria-expanded="false">TOC</button>
       <button type="button" data-agenda-toggle aria-expanded="false">Agenda</button>
       <button type="button" data-graph-toggle aria-expanded="false">Graph</button>
@@ -170,17 +177,21 @@ jupyterPanel.innerHTML = `
     <button type="button" data-jupyter-action="interrupt" title="Interrupt kernel" aria-label="Interrupt kernel">&#xf04d;</button>
     <button type="button" data-jupyter-action="clear-all" title="Clear all outputs" aria-label="Clear all outputs">&#xf1f8;</button>
     <button type="button" data-jupyter-action="variables" title="Variables" aria-label="Variables">&#xf0ce;</button>
+    <button type="button" data-jupyter-action="tasks" title="Kernel task manager" aria-label="Kernel task manager">&#xf0ae;</button>
+    <button type="button" data-jupyter-action="cleanup" title="Cleanup idle kernels" aria-label="Cleanup idle kernels">&#xf12d;</button>
     <button type="button" data-jupyter-action="refresh" title="Refresh" aria-label="Refresh">&#xf2f1;</button>
   </div>
   <div class="aaronnote-jupyter-summary" data-jupyter-summary>No cells</div>
   <div class="aaronnote-jupyter-list" data-jupyter-list></div>
   <div class="aaronnote-jupyter-vars" data-jupyter-vars hidden></div>
+  <div class="aaronnote-jupyter-runtime" data-jupyter-runtime hidden></div>
 `;
 document.body.appendChild(jupyterPanel);
 const jupyterClose = jupyterPanel.querySelector<HTMLButtonElement>("[data-jupyter-close]")!;
 const jupyterSummary = jupyterPanel.querySelector<HTMLElement>("[data-jupyter-summary]")!;
 const jupyterList = jupyterPanel.querySelector<HTMLElement>("[data-jupyter-list]")!;
 const jupyterVars = jupyterPanel.querySelector<HTMLElement>("[data-jupyter-vars]")!;
+const jupyterRuntime = jupyterPanel.querySelector<HTMLElement>("[data-jupyter-runtime]")!;
 
 const roamToolsPanel = document.createElement("section");
 roamToolsPanel.className = "aaronnote-roam-tools";
@@ -232,6 +243,12 @@ selectionTool.hidden = true;
 document.body.appendChild(selectionTool);
 const selectionMore = selectionTool.querySelector<HTMLElement>("[data-selection-more]")!;
 const selectionRoamIdlink = selectionTool.querySelector<HTMLButtonElement>("[data-selection-command='insert-roam-idlink']")!;
+
+const contextMenu = document.createElement("div");
+contextMenu.className = "aaronnote-context-menu";
+contextMenu.hidden = true;
+contextMenu.setAttribute("role", "menu");
+document.body.appendChild(contextMenu);
 
 const findPanel = document.createElement("div");
 findPanel.className = "aaronnote-find-panel";
@@ -719,6 +736,20 @@ function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
 
 host.addEventListener("pointerdown", activateEditorFromPointer, { capture: true });
 host.addEventListener("mousedown", activateEditorFromPointer, { capture: true });
+document.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  showContextMenu(event);
+}, { capture: true });
+document.addEventListener("pointerdown", (event) => {
+  const target = event.target;
+  if (!contextMenu.hidden && target instanceof Node && !contextMenu.contains(target)) hideContextMenu();
+}, { capture: true });
+window.addEventListener("resize", hideContextMenu);
+document.addEventListener("scroll", hideContextMenu, { capture: true, passive: true });
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") hideContextMenu();
+}, { capture: true });
 document.addEventListener("wheel", handleVisualZoomWheel, { capture: true, passive: false });
 document.addEventListener("gesturestart", handleVisualGestureStart, { capture: true, passive: false });
 document.addEventListener("gesturechange", handleVisualGestureChange, { capture: true, passive: false });
@@ -836,6 +867,7 @@ function jupyterLanguageForKernel(kernel: string, requested = ""): string {
   const explicit = requested.trim().toLowerCase();
   const value = kernel.toLowerCase();
   if (value.includes("lean") || explicit === "lean" || explicit === "lean4") return "lean4";
+  if (["bash", "sh", "shell", "zsh"].includes(explicit)) return "bash";
   if (explicit) return explicit;
   if (value.includes("sage")) return "python";
   if (value.includes("python") || value === "py" || value === "python3") return "python";
@@ -855,6 +887,20 @@ function isLeanJupyterCell(cell: Pick<JupyterPanelCell, "language" | "kernel">):
   return /lean/i.test(cell.language) || /lean/i.test(cell.kernel);
 }
 
+function formatRuntimeDuration(ms: unknown): string {
+  const value = Number(ms);
+  if (!Number.isFinite(value) || value <= 0) return "0s";
+  if (value < 1000) return `${Math.round(value)}ms`;
+  const seconds = Math.round(value / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes < 60) return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const minuteRest = minutes % 60;
+  return minuteRest ? `${hours}h ${minuteRest}m` : `${hours}h`;
+}
+
 function scanJupyterCells(): JupyterPanelCell[] {
   const markdown = editor.getMarkdown();
   const cells: JupyterPanelCell[] = [];
@@ -868,7 +914,9 @@ function scanJupyterCells(): JupyterPanelCell[] {
     if (match) {
       const args = String(match[2] || "").split(",").map((item) => item.trim()).filter(Boolean);
       const requestedLanguage = cleanJupyterToken(args[0] || "", "python");
-      const kernelFallback = /^lean4?$/i.test(requestedLanguage) ? "lean4" : "python3";
+      const kernelFallback = /^lean4?$/i.test(requestedLanguage)
+        ? "lean4"
+        : /^(?:bash|sh|shell|zsh)$/i.test(requestedLanguage) ? "bash" : "python3";
       const kernel = cleanJupyterToken(args[1] || "", kernelFallback).replace(/^\((.*)\)$/, "$1").trim() || kernelFallback;
       const language = jupyterLanguageForKernel(kernel, requestedLanguage);
       const session = cleanJupyterToken(args[2] || "", "default");
@@ -972,6 +1020,39 @@ async function ensureJupyterScript(cell: JupyterPanelCell, allCells = scanJupyte
   });
 }
 
+async function runJupyterCell(cell: JupyterPanelCell, allCells = scanJupyterCells()): Promise<boolean> {
+  const key = jupyterCellKey(cell);
+  jupyterTaskState.set(key, { status: "running" });
+  renderJupyterPanel();
+  const started = performance.now();
+  try {
+    await ensureJupyterScript(cell, allCells);
+    const result = await api.jupyterCell.executeScriptCell({
+      file: currentFile,
+      cellId: cell.id,
+      kernel: cell.kernel,
+      session: cell.session,
+      language: cell.language,
+    });
+    jupyterTaskState.set(key, {
+      status: isLeanJupyterCell(cell) ? "synced" : result.status === "error" ? "error" : "ok",
+      executionCount: isLeanJupyterCell(cell) ? null : result.executionCount,
+      durationMs: performance.now() - started,
+      outputCount: isLeanJupyterCell(cell) ? undefined : result.outputs?.length ?? 0,
+    });
+    return result.status !== "error";
+  } catch (error) {
+    jupyterTaskState.set(key, {
+      status: "error",
+      durationMs: performance.now() - started,
+    });
+    setStatus(error instanceof Error ? error.message : "Jupyter run failed");
+    return false;
+  } finally {
+    renderJupyterPanel();
+  }
+}
+
 async function runJupyterCells(mode: "all" | "above" | "below" | "section"): Promise<void> {
   if (!currentFile) {
     setStatus("Save note first");
@@ -985,33 +1066,7 @@ async function runJupyterCells(mode: "all" | "above" | "below" | "section"): Pro
   }
   setStatus(`Running ${cells.length} Jupyter cell${cells.length === 1 ? "" : "s"}`);
   for (const cell of cells) {
-    const key = jupyterCellKey(cell);
-    jupyterTaskState.set(key, { status: "running" });
-    renderJupyterPanel();
-    const started = performance.now();
-    try {
-      await ensureJupyterScript(cell, allCells);
-      const result = await api.jupyterCell.executeScriptCell({
-        file: currentFile,
-        cellId: cell.id,
-        kernel: cell.kernel,
-        session: cell.session,
-        language: cell.language,
-      });
-      jupyterTaskState.set(key, {
-        status: isLeanJupyterCell(cell) ? "synced" : result.status === "error" ? "error" : "ok",
-        executionCount: isLeanJupyterCell(cell) ? null : result.executionCount,
-        durationMs: performance.now() - started,
-        outputCount: isLeanJupyterCell(cell) ? undefined : result.outputs?.length ?? 0,
-      });
-    } catch (error) {
-      jupyterTaskState.set(key, {
-        status: "error",
-        durationMs: performance.now() - started,
-      });
-      setStatus(error instanceof Error ? error.message : "Jupyter run failed");
-    }
-    renderJupyterPanel();
+    await runJupyterCell(cell, allCells);
   }
   setStatus("Jupyter run complete");
 }
@@ -1081,6 +1136,237 @@ async function showJupyterVariables(): Promise<void> {
   } catch (error) {
     jupyterVars.textContent = error instanceof Error ? error.message : "Variable load failed";
   }
+}
+
+function renderJupyterRuntime(result: JupyterTasksResult): void {
+  jupyterRuntime.hidden = false;
+  const server = result.server || {};
+  const cleanup = result.cleanup || {};
+  const kernels = Array.isArray(result.kernels) ? result.kernels : [];
+  const head = document.createElement("div");
+  head.className = "aaronnote-jupyter-runtime-head";
+  const active = Number(server.activeRequests || 0);
+  head.innerHTML = `
+    <strong>Runtime</strong>
+    <span data-runtime-summary></span>
+    <div data-runtime-actions></div>
+  `;
+  head.querySelector<HTMLElement>("[data-runtime-summary]")!.textContent = [
+    server.status || "not-started",
+    server.owned ? `pid ${server.pid ?? ""}` : "",
+    active ? `${active} request${active === 1 ? "" : "s"}` : "",
+    `kernel ttl ${formatRuntimeDuration(cleanup.kernelIdleTtlMs)}`,
+    `server ttl ${formatRuntimeDuration(cleanup.serverIdleTtlMs)}`,
+  ].filter(Boolean).join(" · ");
+  const actions = head.querySelector<HTMLElement>("[data-runtime-actions]")!;
+  const refresh = document.createElement("button");
+  refresh.type = "button";
+  refresh.textContent = "Refresh";
+  refresh.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void showJupyterTasks();
+  });
+  const force = document.createElement("button");
+  force.type = "button";
+  force.textContent = "Force cleanup";
+  force.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void cleanupJupyterRuntime(true);
+  });
+  actions.append(refresh, force);
+
+  const list = document.createElement("div");
+  list.className = "aaronnote-jupyter-runtime-list";
+  if (kernels.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "aaronnote-jupyter-empty";
+    empty.textContent = "No live kernels";
+    list.append(empty);
+  } else {
+    for (const task of kernels) {
+      const row = document.createElement("div");
+      row.className = "aaronnote-jupyter-runtime-task";
+      row.dataset.status = String(task.status || "");
+      const main = document.createElement("button");
+      main.type = "button";
+      main.className = "aaronnote-jupyter-runtime-main";
+      main.textContent = `${task.kernel || "kernel"} / ${task.session || "default"}`;
+      main.title = task.file || "";
+      main.addEventListener("click", (event) => {
+        event.preventDefault();
+        const cell = scanJupyterCells().find((item) =>
+          item.kernel === task.kernel && item.session === task.session && (!task.lastCellId || item.id === task.lastCellId)
+        );
+        if (cell) {
+          editor.view.dispatch({ selection: { anchor: cell.from }, scrollIntoView: true });
+          editor.focus();
+        }
+      });
+      const meta = document.createElement("span");
+      meta.textContent = [
+        task.status || "idle",
+        task.running ? `running ${formatRuntimeDuration(task.runningMs)}` : `idle ${formatRuntimeDuration(task.idleMs)}`,
+        task.totalRuns ? `${task.totalRuns} run${task.totalRuns === 1 ? "" : "s"}` : "",
+        task.executionCount != null ? `In [${task.executionCount}]` : "",
+        task.lastCellId ? `cell ${task.lastCellId}` : "",
+        task.lastError || "",
+      ].filter(Boolean).join(" · ");
+      const rowActions = document.createElement("div");
+      const interrupt = document.createElement("button");
+      interrupt.type = "button";
+      interrupt.textContent = "Interrupt";
+      interrupt.disabled = !task.kernel || !task.session || !task.file;
+      interrupt.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void api.jupyterCell.interrupt({ file: task.file, kernel: task.kernel, session: task.session })
+          .then(() => showJupyterTasks())
+          .catch((error) => setStatus(error instanceof Error ? error.message : "Jupyter interrupt failed"));
+      });
+      const kill = document.createElement("button");
+      kill.type = "button";
+      kill.textContent = "Kill";
+      kill.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void api.jupyterCell.shutdown({ key: task.key, id: task.id, file: task.file, kernel: task.kernel, session: task.session })
+          .then(() => showJupyterTasks())
+          .catch((error) => setStatus(error instanceof Error ? error.message : "Jupyter kill failed"));
+      });
+      rowActions.append(interrupt, kill);
+      row.append(main, meta, rowActions);
+      list.append(row);
+    }
+  }
+  jupyterRuntime.replaceChildren(head, list);
+}
+
+async function showJupyterTasks(): Promise<void> {
+  jupyterRuntime.hidden = false;
+  jupyterRuntime.textContent = "Loading runtime...";
+  try {
+    renderJupyterRuntime(await api.jupyterCell.tasks());
+  } catch (error) {
+    jupyterRuntime.textContent = error instanceof Error ? error.message : "Runtime load failed";
+  }
+}
+
+async function cleanupJupyterRuntime(force = false): Promise<void> {
+  jupyterRuntime.hidden = false;
+  jupyterRuntime.textContent = force ? "Force cleaning runtime..." : "Cleaning idle runtime...";
+  try {
+    const result = await api.jupyterCell.cleanup({ force });
+    renderJupyterRuntime(result);
+    const removed = result.removed?.length || 0;
+    setStatus(removed ? `Cleaned ${removed} Jupyter kernel${removed === 1 ? "" : "s"}` : "No idle Jupyter kernels");
+  } catch (error) {
+    jupyterRuntime.textContent = error instanceof Error ? error.message : "Runtime cleanup failed";
+  }
+}
+
+function jupyterCellAtPosition(position: number, cells = scanJupyterCells()): JupyterPanelCell | null {
+  let best: JupyterPanelCell | null = null;
+  for (const cell of cells) {
+    if (cell.from <= position) best = cell;
+    if (cell.from > position) break;
+  }
+  return best;
+}
+
+function jupyterCellFromPointer(event: MouseEvent): JupyterPanelCell | null {
+  const posAtCoords = editor.view.posAtCoords({ x: event.clientX, y: event.clientY });
+  if (typeof posAtCoords !== "number") return selectedJupyterCell();
+  return jupyterCellAtPosition(posAtCoords) ?? selectedJupyterCell();
+}
+
+async function openJupyterCellSource(cell: JupyterPanelCell): Promise<void> {
+  if (!currentFile) {
+    setStatus("Save note first");
+    return;
+  }
+  await api.jupyterCell.openScript({
+    file: currentFile,
+    cellId: cell.id,
+    kernel: cell.kernel,
+    session: cell.session,
+    language: cell.language,
+    storage: "script",
+    cells: jupyterCellsForContext(cell),
+  });
+}
+
+type AaronContextMenuItem = {
+  label: string;
+  detail?: string;
+  disabled?: boolean;
+  danger?: boolean;
+  separator?: boolean;
+  run?: () => void | Promise<void>;
+};
+
+function hideContextMenu(): void {
+  contextMenu.hidden = true;
+  contextMenu.replaceChildren();
+}
+
+function contextMenuItem(item: AaronContextMenuItem): HTMLElement {
+  if (item.separator) {
+    const separator = document.createElement("div");
+    separator.className = "aaronnote-context-separator";
+    separator.setAttribute("role", "separator");
+    return separator;
+  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.disabled = Boolean(item.disabled);
+  button.dataset.danger = item.danger ? "true" : "false";
+  button.innerHTML = "<span></span><small></small>";
+  button.querySelector("span")!.textContent = item.label;
+  button.querySelector("small")!.textContent = item.detail || "";
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    hideContextMenu();
+    if (!item.disabled) void item.run?.();
+  });
+  return button;
+}
+
+function showContextMenu(event: MouseEvent): void {
+  const selection = editor.getMarkdownSelection();
+  const hasSelection = selection.from !== selection.to;
+  const cell = jupyterCellFromPointer(event);
+  const cellDetail = cell
+    ? isLeanJupyterCell(cell) ? `${cell.language} / ${cell.session}` : `${cell.language} / ${cell.kernel} / ${cell.session}`
+    : "";
+  const items: AaronContextMenuItem[] = [
+    { label: "Save", detail: currentReadOnly ? "read-only" : "current note", disabled: currentReadOnly || !currentFile, run: () => save() },
+    { label: "Open in Emacs", detail: currentFile ? fileNameFromPath(currentFile) : "", disabled: !currentFile, run: () => api.emacs.open({ file: currentFile }) },
+    { label: editor.isSourceMode() ? "Markdown View" : "Source View", run: () => toggleSourceMode() },
+    { separator: true },
+    { label: "Run Cell", detail: cellDetail, disabled: !cell || !currentFile, run: () => cell ? runJupyterCell(cell) : undefined },
+    { label: "Edit Cell Source", detail: cell?.id || "", disabled: !cell || !currentFile, run: () => cell ? openJupyterCellSource(cell) : undefined },
+    { label: "Run All Cells", detail: `${scanJupyterCells().length} cells`, disabled: !currentFile, run: () => runJupyterCells("all") },
+    { label: "Runtime Tasks", detail: "kernels", run: () => { if (jupyterPanel.hidden) toggleJupyterPanel(); void showJupyterTasks(); } },
+    { separator: true },
+    { label: "TOC", run: () => { floatingTocPanel.toggle(); updateFloatingToc(); } },
+    { label: "Graph", run: () => localGraphPanel.toggle() },
+    { label: "Tools", run: () => toggleToolsPanel() },
+    { separator: true },
+    { label: "Copy", detail: hasSelection ? "selection" : "", disabled: !hasSelection, run: () => copyEditorSelection() },
+    { label: "Bold", disabled: currentReadOnly || !hasSelection, run: () => editor.runCommand("bold") },
+    { label: "Inline Code", disabled: currentReadOnly || !hasSelection, run: () => editor.runCommand("code") },
+    { label: "Link", disabled: currentReadOnly || !hasSelection, run: () => editor.runCommand("link") },
+  ];
+  contextMenu.replaceChildren(...items.map(contextMenuItem));
+  contextMenu.hidden = false;
+  const rect = contextMenu.getBoundingClientRect();
+  const left = Math.max(6, Math.min(window.innerWidth - rect.width - 6, event.clientX));
+  const top = Math.max(6, Math.min(window.innerHeight - rect.height - 6, event.clientY));
+  contextMenu.style.left = `${left}px`;
+  contextMenu.style.top = `${top}px`;
 }
 
 function toggleJupyterPanel(): void {
@@ -5022,8 +5308,11 @@ jupyterPanel.addEventListener("click", (event) => {
   else if (action === "interrupt") void interruptSelectedJupyterKernel().catch((error) => setStatus(error instanceof Error ? error.message : "Jupyter interrupt failed"));
   else if (action === "clear-all") void clearAllJupyterOutputs().catch((error) => setStatus(error instanceof Error ? error.message : "Clear outputs failed"));
   else if (action === "variables") void showJupyterVariables();
+  else if (action === "tasks") void showJupyterTasks();
+  else if (action === "cleanup") void cleanupJupyterRuntime(false);
   else if (action === "refresh") {
     jupyterVars.hidden = true;
+    jupyterRuntime.hidden = true;
     renderJupyterPanel();
   }
 });

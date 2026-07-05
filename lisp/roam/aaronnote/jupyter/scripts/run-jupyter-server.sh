@@ -58,6 +58,18 @@ ARGS=(
   "--ServerApp.open_browser=False"
 )
 
+DISABLED_EXTENSIONS=(
+  "jupyter_lsp"
+  "jupyterlab"
+  "jupyterlab_jupytext"
+  "neopyter"
+  "notebook_shim"
+)
+
+for EXTENSION in "${DISABLED_EXTENSIONS[@]}"; do
+  ARGS+=("--ServerApp.jpserver_extensions=${EXTENSION}=False")
+done
+
 if [ -n "${ALLOWED_KERNELS}" ]; then
   ARGS+=("--KernelSpecManager.allowed_kernelspecs=${ALLOWED_KERNELS}")
 fi

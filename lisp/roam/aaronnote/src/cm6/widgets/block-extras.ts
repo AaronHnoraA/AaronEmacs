@@ -439,6 +439,7 @@ function ceilLanguageForKernel(kernel: string, requested = ""): string {
   const explicit = requested.trim().toLowerCase();
   const clean = kernel.toLowerCase();
   if (clean.includes("lean") || explicit === "lean" || explicit === "lean4") return "lean4";
+  if (["bash", "sh", "shell", "zsh"].includes(explicit)) return "bash";
   if (explicit) return explicit;
   if (clean.includes("sage")) return "python";
   if (clean.includes("python") || clean === "py" || clean === "python3") return "python";
@@ -493,6 +494,7 @@ function parseCeilCommand(range: CeilCommandRange, file: string): CeilCommandMet
     language = ceilLanguageForKernel(kernel);
   }
   if (!args[1] && /^lean4?$/i.test(language)) kernel = "lean4";
+  else if (!args[1] && /^(?:bash|sh|shell|zsh)$/i.test(language)) kernel = "bash";
   kernel = cleanCeilToken(stripCeilKernelParens(kernel), DEFAULT_CEIL_KERNEL);
   session = cleanCeilToken(session, DEFAULT_CEIL_SESSION);
   language = ceilLanguageForKernel(kernel, language);
@@ -1148,7 +1150,7 @@ function envLabel(kind: string): string {
 }
 
 function fallbackCeilKernels(current: string): CeilKernelSpec[] {
-  const names = [current, DEFAULT_CEIL_KERNEL, "lean4", "sagemath-10.9"].filter(Boolean);
+  const names = [current, DEFAULT_CEIL_KERNEL, "bash", "lean4", "sagemath-10.9"].filter(Boolean);
   return Array.from(new Set(names)).map((name) => ({ name, displayName: name }));
 }
 
@@ -1442,12 +1444,14 @@ class CeilCommandWidget extends MeasuredWidget {
     };
 
     const writeCommandLine = (): void => {
+      const requestedLanguage = languageInput.value.trim();
       const nextKernel = isLeanCeilRuntime(languageInput.value, kernelSelect.value)
         ? "lean4"
+        : /^(?:bash|sh|shell|zsh)$/i.test(requestedLanguage) ? "bash"
         : (kernelSelect.value || DEFAULT_CEIL_KERNEL);
       const nextLanguage = isLeanCeilRuntime(languageInput.value, nextKernel)
         ? "lean4"
-        : (languageInput.value.trim() || ceilLanguageForKernel(nextKernel));
+        : (requestedLanguage || ceilLanguageForKernel(nextKernel));
       replaceCeilCommandLine(view, this.range.from, formatCeilCommand({
         ...meta,
         kernel: nextKernel,

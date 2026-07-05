@@ -86,6 +86,53 @@ export type JupyterVariablesResult = {
   session?: string;
   variables?: JupyterVariable[];
 };
+export type JupyterKernelTask = {
+  key?: string;
+  id?: string;
+  file?: string;
+  kernel?: string;
+  session?: string;
+  status?: string;
+  running?: number;
+  createdAt?: number;
+  createdAtIso?: string;
+  lastUsedAt?: number;
+  lastUsedAtIso?: string;
+  lastActivityAt?: number;
+  lastActivityAtIso?: string;
+  idleMs?: number;
+  runningMs?: number;
+  totalRuns?: number;
+  executionCount?: number | null;
+  lastCellId?: string;
+  lastError?: string;
+  protected?: boolean;
+  ttlMs?: number;
+};
+export type JupyterTasksResult = {
+  ok?: boolean;
+  server?: {
+    status?: string;
+    owned?: boolean;
+    pid?: number | null;
+    activeRequests?: number;
+    startedAt?: number;
+    startedAtIso?: string;
+    lastUsedAt?: number;
+    lastUsedAtIso?: string;
+    idleMs?: number;
+    idleTtlMs?: number;
+  };
+  cleanup?: {
+    kernelIdleTtlMs?: number;
+    serverIdleTtlMs?: number;
+    cleanupIntervalMs?: number;
+    execTimeoutMs?: number;
+  };
+  kernels?: JupyterKernelTask[];
+  removed?: Array<{ key?: string; kernel?: string; session?: string; reason?: string }>;
+  scheduled?: boolean;
+};
 export type TodoItem = Record<string, unknown> & {
   id?: string;
   file?: string;
@@ -147,6 +194,8 @@ type NativeApi = {
     restart?: (body?: unknown) => Promise<unknown>;
     interrupt?: (body?: unknown) => Promise<unknown>;
     shutdown?: (body?: unknown) => Promise<unknown>;
+    tasks?: () => Promise<unknown>;
+    cleanup?: (body?: unknown) => Promise<unknown>;
   };
   latex?: {
     defaults?: (body?: Record<string, unknown>) => Promise<unknown>;
@@ -338,6 +387,14 @@ export const api = {
     async shutdown(body: unknown): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().jupyterCell?.shutdown, "Jupyter kernel shutdown");
       return ensureOk(await call(body) as Record<string, unknown>, "Jupyter kernel shutdown failed");
+    },
+    async tasks(): Promise<JupyterTasksResult> {
+      const call = requireMethod(nativeApi().jupyterCell?.tasks, "Jupyter tasks");
+      return ensureOk(await call() as JupyterTasksResult, "Jupyter tasks failed");
+    },
+    async cleanup(body: unknown = {}): Promise<JupyterTasksResult> {
+      const call = requireMethod(nativeApi().jupyterCell?.cleanup, "Jupyter cleanup");
+      return ensureOk(await call(body) as JupyterTasksResult, "Jupyter cleanup failed");
     },
   },
   latex: {

@@ -67,12 +67,12 @@ class JupyterHttpClient {
   }
 
   async refreshXsrf() {
-    const response = await fetch(`${this.baseUrl}/lab`, {
+    const response = await fetch(`${this.baseUrl}/`, {
       headers: this.cookieHeader() ? { Cookie: this.cookieHeader() } : {},
     });
     this.rememberCookies(response);
     if (!this.xsrfToken) {
-      const fallback = await fetch(`${this.baseUrl}/`, {
+      const fallback = await fetch(`${this.baseUrl}/api/status`, {
         headers: this.cookieHeader() ? { Cookie: this.cookieHeader() } : {},
       });
       this.rememberCookies(fallback);
@@ -146,6 +146,7 @@ function languageForKernel(kernel, requested = "") {
   const explicit = String(requested || "").trim().toLowerCase();
   const value = String(kernel || "").toLowerCase();
   if (value.includes("lean") || explicit === "lean" || explicit === "lean4") return "lean4";
+  if (["bash", "sh", "shell", "zsh"].includes(explicit)) return "bash";
   if (explicit) return explicit;
   if (value.includes("sage")) return "python";
   if (value.includes("python") || value === "py" || value === "python3") return "python";
@@ -218,6 +219,15 @@ function normalizeCode(value) {
 
 function leanRuntimeP(language, kernel) {
   return /lean/i.test(String(language || "")) || /lean/i.test(String(kernel || ""));
+}
+
+function durationFromEnv(name, fallback) {
+  const value = Number(process.env[name] || "");
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function isoTime(value) {
+  return value ? new Date(value).toISOString() : "";
 }
 
 function parseHiddenScriptCells(text) {
@@ -317,8 +327,108 @@ export function createJupyterCellService({
   const wsBaseUrl = baseUrl.replace(/^http/i, "ws");
   const http = new JupyterHttpClient(baseUrl);
   const kernelsByKey = new Map();
+  const kernelIdleTtlMs = durationFromEnv("AARONNOTE_JUPYTER_KERNEL_IDLE_TTL_MS", 10 * 60 * 1000);
+  const serverIdleTtlMs = durationFromEnv("AARONNOTE_JUPYTER_SERVER_IDLE_TTL_MS", 90 * 1000);
+  const cleanupIntervalMs = durationFromEnv("AARONNOTE_JUPYTER_CLEANUP_INTERVAL_MS", 30 * 1000);
+  const execTimeoutMs = durationFromEnv("AARONNOTE_JUPYTER_EXEC_TIMEOUT_MS", 0);
   let serverProcess = null;
   let startPromise = null;
+  let serverStartedAt = 0;
+  let lastServerUseAt = 0;
+  let activeRequests = 0;
+  let cleanupTimer = null;
+  let cleanupRunning = false;
+
+  function cleanupNeeded() {
+    return Boolean(serverProcess) || kernelsByKey.size > 0;
+  }
+
+  function cancelCleanupTimer() {
+    if (!cleanupTimer) return;
+    clearTimeout(cleanupTimer);
+    cleanupTimer = null;
+  }
+
+  function scheduleCleanup() {
+    if (cleanupTimer || !cleanupNeeded()) return;
+    cleanupTimer = setTimeout(() => {
+      cleanupTimer = null;
+      void cleanupIdle({ scheduled: true }).catch((err) => {
+        stderr.write(`[aaronnote-jupyter] cleanup failed: ${err?.message || err}\n`);
+      });
+    }, Math.max(1000, cleanupIntervalMs));
+    cleanupTimer.unref?.();
+  }
+
+  function touchServer() {
+    lastServerUseAt = Date.now();
+    scheduleCleanup();
+  }
+
+  async function withActiveRequest(run) {
+    activeRequests += 1;
+    touchServer();
+    try {
+      return await run();
+    } finally {
+      activeRequests = Math.max(0, activeRequests - 1);
+      touchServer();
+    }
+  }
+
+  function touchKernel(record) {
+    if (!record) return;
+    const now = Date.now();
+    record.lastUsedAt = now;
+    record.lastActivityAt = now;
+    scheduleCleanup();
+  }
+
+  function kernelRecordForBody(body) {
+    const explicitKey = String(body?.key || "").trim();
+    if (explicitKey && kernelsByKey.has(explicitKey)) return { key: explicitKey, record: kernelsByKey.get(explicitKey) };
+    const id = String(body?.id || body?.kernelId || "").trim();
+    if (id) {
+      for (const [key, record] of kernelsByKey.entries()) {
+        if (record?.id === id) return { key, record };
+      }
+    }
+    const fileValue = String(body?.file || "").trim();
+    if (!fileValue) return { key: "", record: null };
+    const file = safeNoteFile(fileValue);
+    const kernel = cleanToken(body?.kernel, "python3");
+    const session = cleanToken(body?.session, "default");
+    const key = kernelKey({ file, kernel, session });
+    return { key, record: kernelsByKey.get(key) || null };
+  }
+
+  function kernelTask(key, record) {
+    const now = Date.now();
+    const running = Math.max(0, Number(record?.running || 0));
+    return {
+      key,
+      id: record?.id || "",
+      file: record?.file || "",
+      kernel: record?.kernel || "",
+      session: record?.session || "",
+      status: running > 0 ? "running" : (record?.lastStatus || "idle"),
+      running,
+      createdAt: record?.createdAt || 0,
+      createdAtIso: isoTime(record?.createdAt),
+      lastUsedAt: record?.lastUsedAt || 0,
+      lastUsedAtIso: isoTime(record?.lastUsedAt),
+      lastActivityAt: record?.lastActivityAt || 0,
+      lastActivityAtIso: isoTime(record?.lastActivityAt),
+      idleMs: Math.max(0, now - Number(record?.lastUsedAt || now)),
+      runningMs: running > 0 ? Math.max(0, now - Number(record?.executionStartedAt || now)) : 0,
+      totalRuns: Number(record?.totalRuns || 0),
+      executionCount: record?.executionCount ?? null,
+      lastCellId: record?.lastCellId || "",
+      lastError: record?.lastError || "",
+      protected: running > 0,
+      ttlMs: kernelIdleTtlMs,
+    };
+  }
 
   function safeNoteFile(raw) {
     const value = String(raw || "").trim();
@@ -355,7 +465,11 @@ export function createJupyterCellService({
   }
 
   async function ensureServer() {
-    if (await serverReady()) return;
+    if (await serverReady()) {
+      touchServer();
+      return;
+    }
+    kernelsByKey.clear();
     if (startPromise) return await startPromise;
     startPromise = (async () => {
       if (!existsSync(runScript)) {
@@ -374,11 +488,18 @@ export function createJupyterCellService({
         });
         serverProcess.stdout?.on("data", (chunk) => stderr.write(`[aaronnote-jupyter] ${chunk}`));
         serverProcess.stderr?.on("data", (chunk) => stderr.write(`[aaronnote-jupyter] ${chunk}`));
-        serverProcess.on("exit", () => { serverProcess = null; });
+        serverStartedAt = Date.now();
+        serverProcess.on("exit", () => {
+          serverProcess = null;
+          serverStartedAt = 0;
+          kernelsByKey.clear();
+          scheduleCleanup();
+        });
       }
       if (!(await waitForServer())) {
         throw error("Aaronnote Jupyter did not become ready. Run npm run jupyter:bootstrap if it is not installed.", 503);
       }
+      touchServer();
     })();
     try {
       await startPromise;
@@ -398,35 +519,57 @@ export function createJupyterCellService({
     const session = cleanToken(body?.session, "default");
     const key = kernelKey({ file, kernel, session });
     const existing = kernelsByKey.get(key);
-    if (existing?.id) return { ...existing, file, kernel, session, key };
+    if (existing?.id) {
+      touchKernel(existing);
+      return { ...existing, file, kernel, session, key };
+    }
     const created = await fetchJson("/api/kernels", {
       method: "POST",
       body: { name: kernel },
     });
     const id = String(created.id || "");
     if (!id) throw error("Jupyter did not return a kernel id", 502);
-    const next = { id, file, kernel, session };
+    const now = Date.now();
+    const next = {
+      id,
+      file,
+      kernel,
+      session,
+      createdAt: now,
+      lastUsedAt: now,
+      lastActivityAt: now,
+      running: 0,
+      totalRuns: 0,
+      executionCount: null,
+      executionStartedAt: 0,
+      lastCellId: "",
+      lastStatus: "idle",
+      lastError: "",
+    };
     kernelsByKey.set(key, next);
+    scheduleCleanup();
     return { ...next, key };
   }
 
   async function kernels() {
-    await ensureServer();
-    const result = await fetchJson("/api/kernelspecs");
-    const specs = result.kernelspecs && typeof result.kernelspecs === "object" ? result.kernelspecs : {};
-    const kernels = Object.entries(specs).map(([name, spec]) => ({
-      name,
-      displayName: spec?.spec?.display_name || spec?.display_name || name,
-      language: spec?.spec?.language || "",
-    }));
-    if (!kernels.some((item) => item.name === "lean4")) {
-      kernels.push({ name: "lean4", displayName: "Lean 4", language: "lean4" });
-    }
-    return {
-      ok: true,
-      default: result.default || "python3",
-      kernels: kernels.sort((a, b) => a.name.localeCompare(b.name)),
-    };
+    return await withActiveRequest(async () => {
+      await ensureServer();
+      const result = await fetchJson("/api/kernelspecs");
+      const specs = result.kernelspecs && typeof result.kernelspecs === "object" ? result.kernelspecs : {};
+      const kernels = Object.entries(specs).map(([name, spec]) => ({
+        name,
+        displayName: spec?.spec?.display_name || spec?.display_name || name,
+        language: spec?.spec?.language || "",
+      }));
+      if (!kernels.some((item) => item.name === "lean4")) {
+        kernels.push({ name: "lean4", displayName: "Lean 4", language: "lean4" });
+      }
+      return {
+        ok: true,
+        default: result.default || "python3",
+        kernels: kernels.sort((a, b) => a.name.localeCompare(b.name)),
+      };
+    });
   }
 
   async function execute(body) {
@@ -447,144 +590,181 @@ export function createJupyterCellService({
       };
     }
     if (!code.trim()) return { ok: true, status: "ok", outputs: [], executionCount: null, cellId };
-    const kernelInfo = await ensureKernel(body || {});
-    const ws = new WebSocket(`${wsBaseUrl}/api/kernels/${encodeURIComponent(kernelInfo.id)}/channels?session_id=${encodeURIComponent(randomUUID())}`);
-    const msgId = randomUUID();
-    const sessionId = randomUUID();
-    const outputs = [];
-    const displayIndexes = new Map();
-    let executionCount = null;
-    let shellReply = null;
-    let idle = false;
-    let clearOnNext = false;
+    return await withActiveRequest(async () => {
+      const kernelInfo = await ensureKernel(body || {});
+      const record = kernelsByKey.get(kernelInfo.key);
+      if (record) {
+        const now = Date.now();
+        record.running = Math.max(0, Number(record.running || 0)) + 1;
+        record.totalRuns = Number(record.totalRuns || 0) + 1;
+        record.executionStartedAt = now;
+        record.lastUsedAt = now;
+        record.lastActivityAt = now;
+        record.lastCellId = cellId;
+        record.lastStatus = "running";
+        record.lastError = "";
+      }
+      const ws = new WebSocket(`${wsBaseUrl}/api/kernels/${encodeURIComponent(kernelInfo.id)}/channels?session_id=${encodeURIComponent(randomUUID())}`);
+      const msgId = randomUUID();
+      const sessionId = randomUUID();
+      const outputs = [];
+      const displayIndexes = new Map();
+      let executionCount = null;
+      let shellReply = null;
+      let idle = false;
+      let clearOnNext = false;
+      let settled = false;
 
-    const finishIfDone = (resolveDone) => {
-      if (!shellReply || !idle) return;
-      try { ws.close(); } catch {}
-      resolveDone({
-        ok: true,
-        cellId,
-        kernel: kernelInfo.kernel,
-        session: kernelInfo.session,
-        status: shellReply.status || "ok",
-        executionCount,
-        outputs,
-      });
-    };
-
-    return await new Promise((resolveDone, rejectDone) => {
-      const timeout = setTimeout(() => {
-        try { ws.close(); } catch {}
-        rejectDone(error("Jupyter execution timed out", 504));
-      }, Number(process.env.AARONNOTE_JUPYTER_EXEC_TIMEOUT_MS || 120000));
-
-      const done = (value) => {
-        clearTimeout(timeout);
-        resolveDone(value);
-      };
-      const fail = (err) => {
-        clearTimeout(timeout);
-        try { ws.close(); } catch {}
-        rejectDone(err);
+      const finalizeRecord = (status, err = "") => {
+        if (!record) return;
+        record.running = Math.max(0, Number(record.running || 0) - 1);
+        record.executionStartedAt = record.running > 0 ? record.executionStartedAt : 0;
+        record.executionCount = executionCount ?? record.executionCount ?? null;
+        record.lastStatus = status || (record.running > 0 ? "running" : "idle");
+        record.lastError = err;
+        touchKernel(record);
       };
 
-      ws.addEventListener("open", () => {
-        ws.send(JSON.stringify({
-          header: {
-            msg_id: msgId,
-            username: "aaronnote",
-            session: sessionId,
-            msg_type: "execute_request",
-            version: "5.3",
-            date: new Date().toISOString(),
-          },
-          parent_header: {},
-          metadata: {},
-          content: {
-            code,
-            silent: Boolean(body?.silent),
-            store_history: body?.storeHistory === false ? false : true,
-            user_expressions: {},
-            allow_stdin: false,
-            stop_on_error: false,
-          },
-          channel: "shell",
-          buffers: [],
-        }));
-      });
-      ws.addEventListener("error", () => fail(error("Jupyter websocket failed", 502)));
-      ws.addEventListener("message", (event) => {
-        let message;
-        try {
-          message = JSON.parse(wsDataToString(event.data));
-        } catch {
-          return;
-        }
-        const parentId = message?.parent_header?.msg_id;
-        if (parentId !== msgId) return;
-        const channel = message.channel || "";
-        const type = message.header?.msg_type || "";
-        const content = message.content || {};
-        if (channel === "shell" && type === "execute_reply") {
-          shellReply = content;
-          finishIfDone(done);
-          return;
-        }
-        if (channel !== "iopub") return;
-        if (type === "status" && content.execution_state === "idle") {
-          idle = true;
-          finishIfDone(done);
-          return;
-        }
-        if (type === "execute_input") {
-          executionCount = content.execution_count ?? executionCount;
-          return;
-        }
-        const pushOutput = (output) => {
-          if (clearOnNext) {
-            outputs.length = 0;
-            displayIndexes.clear();
-            clearOnNext = false;
-          }
-          const displayId = output?.transient?.display_id;
-          if (displayId && output.output_type === "update_display_data" && displayIndexes.has(displayId)) {
-            outputs[displayIndexes.get(displayId)] = { ...output, output_type: "display_data" };
+      const finishIfDone = (resolveDone) => {
+        if (!shellReply || !idle) return;
+        try { ws.close(); } catch {}
+        finalizeRecord(shellReply.status || "ok");
+        resolveDone({
+          ok: true,
+          cellId,
+          kernel: kernelInfo.kernel,
+          session: kernelInfo.session,
+          status: shellReply.status || "ok",
+          executionCount,
+          outputs,
+        });
+      };
+
+      return await new Promise((resolveDone, rejectDone) => {
+        const timeout = execTimeoutMs > 0 ? setTimeout(() => {
+          fail(error("Jupyter execution timed out", 504));
+        }, execTimeoutMs) : null;
+
+        const done = (value) => {
+          if (settled) return;
+          settled = true;
+          if (timeout) clearTimeout(timeout);
+          resolveDone(value);
+        };
+        const fail = (err) => {
+          if (settled) return;
+          settled = true;
+          if (timeout) clearTimeout(timeout);
+          try { ws.close(); } catch {}
+          finalizeRecord("error", err?.message || String(err || ""));
+          rejectDone(err);
+        };
+
+        ws.addEventListener("open", () => {
+          touchKernel(record);
+          ws.send(JSON.stringify({
+            header: {
+              msg_id: msgId,
+              username: "aaronnote",
+              session: sessionId,
+              msg_type: "execute_request",
+              version: "5.3",
+              date: new Date().toISOString(),
+            },
+            parent_header: {},
+            metadata: {},
+            content: {
+              code,
+              silent: Boolean(body?.silent),
+              store_history: body?.storeHistory === false ? false : true,
+              user_expressions: {},
+              allow_stdin: false,
+              stop_on_error: false,
+            },
+            channel: "shell",
+            buffers: [],
+          }));
+        });
+        ws.addEventListener("error", () => fail(error("Jupyter websocket failed", 502)));
+        ws.addEventListener("close", () => {
+          if (!settled && (!shellReply || !idle)) fail(error("Jupyter websocket closed", 502));
+        });
+        ws.addEventListener("message", (event) => {
+          let message;
+          try {
+            message = JSON.parse(wsDataToString(event.data));
+          } catch {
             return;
           }
-          if (displayId) displayIndexes.set(displayId, outputs.length);
-          outputs.push(output);
-        };
-        if (type === "stream") {
-          pushOutput({ output_type: "stream", name: content.name || "stdout", text: content.text || "" });
-        } else if (type === "execute_result") {
-          executionCount = content.execution_count ?? executionCount;
-          pushOutput({
-            output_type: "execute_result",
-            execution_count: content.execution_count ?? null,
-            data: content.data || {},
-            metadata: content.metadata || {},
-          });
-        } else if (type === "display_data" || type === "update_display_data") {
-          pushOutput({
-            output_type: type,
-            data: content.data || {},
-            metadata: content.metadata || {},
-            transient: content.transient || {},
-          });
-        } else if (type === "error") {
-          pushOutput({
-            output_type: "error",
-            ename: content.ename || "",
-            evalue: content.evalue || "",
-            traceback: Array.isArray(content.traceback) ? content.traceback : [],
-          });
-        } else if (type === "clear_output") {
-          if (content.wait) clearOnNext = true;
-          else {
-            outputs.length = 0;
-            displayIndexes.clear();
+          const parentId = message?.parent_header?.msg_id;
+          if (parentId !== msgId) return;
+          touchKernel(record);
+          const channel = message.channel || "";
+          const type = message.header?.msg_type || "";
+          const content = message.content || {};
+          if (channel === "shell" && type === "execute_reply") {
+            shellReply = content;
+            finishIfDone(done);
+            return;
           }
-        }
+          if (channel !== "iopub") return;
+          if (type === "status" && content.execution_state === "idle") {
+            idle = true;
+            finishIfDone(done);
+            return;
+          }
+          if (type === "execute_input") {
+            executionCount = content.execution_count ?? executionCount;
+            if (record) record.executionCount = executionCount;
+            return;
+          }
+          const pushOutput = (output) => {
+            if (clearOnNext) {
+              outputs.length = 0;
+              displayIndexes.clear();
+              clearOnNext = false;
+            }
+            const displayId = output?.transient?.display_id;
+            if (displayId && output.output_type === "update_display_data" && displayIndexes.has(displayId)) {
+              outputs[displayIndexes.get(displayId)] = { ...output, output_type: "display_data" };
+              return;
+            }
+            if (displayId) displayIndexes.set(displayId, outputs.length);
+            outputs.push(output);
+          };
+          if (type === "stream") {
+            pushOutput({ output_type: "stream", name: content.name || "stdout", text: content.text || "" });
+          } else if (type === "execute_result") {
+            executionCount = content.execution_count ?? executionCount;
+            if (record) record.executionCount = executionCount;
+            pushOutput({
+              output_type: "execute_result",
+              execution_count: content.execution_count ?? null,
+              data: content.data || {},
+              metadata: content.metadata || {},
+            });
+          } else if (type === "display_data" || type === "update_display_data") {
+            pushOutput({
+              output_type: type,
+              data: content.data || {},
+              metadata: content.metadata || {},
+              transient: content.transient || {},
+            });
+          } else if (type === "error") {
+            pushOutput({
+              output_type: "error",
+              ename: content.ename || "",
+              evalue: content.evalue || "",
+              traceback: Array.isArray(content.traceback) ? content.traceback : [],
+            });
+          } else if (type === "clear_output") {
+            if (content.wait) clearOnNext = true;
+            else {
+              outputs.length = 0;
+              displayIndexes.clear();
+            }
+          }
+        });
       });
     });
   }
@@ -775,29 +955,124 @@ export function createJupyterCellService({
     const session = cleanToken(body?.session, "default");
     const key = kernelKey({ file, kernel, session });
     const existing = kernelsByKey.get(key);
-    return { ok: true, kernel, session, status: existing?.id ? "idle" : "not-started", id: existing?.id || "" };
+    return {
+      ok: true,
+      kernel,
+      session,
+      status: existing?.id ? (Number(existing.running || 0) > 0 ? "running" : (existing.lastStatus || "idle")) : "not-started",
+      id: existing?.id || "",
+      key: existing?.id ? key : "",
+    };
   }
 
   async function restart(body) {
-    const kernelInfo = await ensureKernel(body || {});
-    await fetchJson(`/api/kernels/${encodeURIComponent(kernelInfo.id)}/restart`, { method: "POST", body: {} });
-    return { ok: true, kernel: kernelInfo.kernel, session: kernelInfo.session };
+    return await withActiveRequest(async () => {
+      const kernelInfo = await ensureKernel(body || {});
+      await fetchJson(`/api/kernels/${encodeURIComponent(kernelInfo.id)}/restart`, { method: "POST", body: {} });
+      const record = kernelsByKey.get(kernelInfo.key);
+      if (record) {
+        record.running = 0;
+        record.executionStartedAt = 0;
+        record.lastStatus = "restarted";
+        record.lastError = "";
+        touchKernel(record);
+      }
+      return { ok: true, kernel: kernelInfo.kernel, session: kernelInfo.session };
+    });
   }
 
   async function interrupt(body) {
-    const kernelInfo = await ensureKernel(body || {});
-    await fetchJson(`/api/kernels/${encodeURIComponent(kernelInfo.id)}/interrupt`, { method: "POST", body: {} });
-    return { ok: true, kernel: kernelInfo.kernel, session: kernelInfo.session };
+    return await withActiveRequest(async () => {
+      const kernelInfo = await ensureKernel(body || {});
+      await fetchJson(`/api/kernels/${encodeURIComponent(kernelInfo.id)}/interrupt`, { method: "POST", body: {} });
+      const record = kernelsByKey.get(kernelInfo.key);
+      if (record) {
+        record.lastStatus = "interrupting";
+        touchKernel(record);
+      }
+      return { ok: true, kernel: kernelInfo.kernel, session: kernelInfo.session };
+    });
   }
 
   async function shutdownKernel(body) {
-    const kernelInfo = await ensureKernel(body || {});
-    await fetchJson(`/api/kernels/${encodeURIComponent(kernelInfo.id)}`, { method: "DELETE" });
-    kernelsByKey.delete(kernelInfo.key);
-    return { ok: true, kernel: kernelInfo.kernel, session: kernelInfo.session };
+    const { key, record } = kernelRecordForBody(body || {});
+    if (!record?.id) return { ok: true, status: "not-started" };
+    if (await serverReady()) {
+      await withActiveRequest(async () => {
+        try { await fetchJson(`/api/kernels/${encodeURIComponent(record.id)}`, { method: "DELETE" }); } catch {}
+      });
+    }
+    kernelsByKey.delete(key);
+    scheduleCleanup();
+    return { ok: true, status: "shutdown", kernel: record.kernel, session: record.session, key };
+  }
+
+  async function listTasks() {
+    const ready = cleanupNeeded() ? await serverReady() : false;
+    if (!ready) kernelsByKey.clear();
+    return {
+      ok: true,
+      server: {
+        status: ready ? "running" : "not-started",
+        owned: Boolean(serverProcess),
+        pid: serverProcess?.pid || null,
+        activeRequests,
+        startedAt: serverStartedAt,
+        startedAtIso: isoTime(serverStartedAt),
+        lastUsedAt: lastServerUseAt,
+        lastUsedAtIso: isoTime(lastServerUseAt),
+        idleMs: lastServerUseAt ? Math.max(0, Date.now() - lastServerUseAt) : 0,
+        idleTtlMs: serverIdleTtlMs,
+      },
+      cleanup: {
+        kernelIdleTtlMs,
+        serverIdleTtlMs,
+        cleanupIntervalMs,
+        execTimeoutMs,
+      },
+      kernels: Array.from(kernelsByKey.entries()).map(([key, record]) => kernelTask(key, record)),
+    };
+  }
+
+  async function cleanupIdle({ force = false, scheduled = false } = {}) {
+    if (cleanupRunning) return await listTasks();
+    cleanupRunning = true;
+    const removed = [];
+    try {
+      const now = Date.now();
+      const ready = cleanupNeeded() ? await serverReady() : false;
+      if (!ready) {
+        kernelsByKey.clear();
+      } else {
+        for (const [key, record] of Array.from(kernelsByKey.entries())) {
+          const running = Number(record?.running || 0) > 0;
+          const idleMs = now - Number(record?.lastUsedAt || now);
+          if (!force && (running || idleMs < kernelIdleTtlMs)) continue;
+          try { await fetchJson(`/api/kernels/${encodeURIComponent(record.id)}`, { method: "DELETE" }); } catch {}
+          kernelsByKey.delete(key);
+          removed.push({ key, kernel: record.kernel, session: record.session, reason: force ? "forced" : "idle" });
+        }
+      }
+      const serverIdleMs = now - Number(lastServerUseAt || now);
+      const mayStopServer = Boolean(serverProcess)
+        && activeRequests === 0
+        && kernelsByKey.size === 0
+        && (force || serverIdleMs >= serverIdleTtlMs);
+      if (mayStopServer) {
+        try { serverProcess.kill("SIGTERM"); } catch {}
+        serverProcess = null;
+        serverStartedAt = 0;
+      }
+    } finally {
+      cleanupRunning = false;
+      if (cleanupNeeded()) scheduleCleanup();
+    }
+    const snapshot = await listTasks();
+    return { ...snapshot, scheduled, removed };
   }
 
   async function shutdown() {
+    cancelCleanupTimer();
     for (const item of kernelsByKey.values()) {
       if (!item?.id) continue;
       try { await fetchJson(`/api/kernels/${encodeURIComponent(item.id)}`, { method: "DELETE" }); } catch {}
@@ -822,6 +1097,8 @@ export function createJupyterCellService({
     restart,
     interrupt,
     shutdownKernel,
+    listTasks,
+    cleanup: cleanupIdle,
     shutdown,
   };
 }
