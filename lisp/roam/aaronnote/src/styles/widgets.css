@@ -1897,7 +1897,7 @@
   display: block;
   box-sizing: border-box;
   width: 100%;
-  max-width: var(--aaronnote-jupyter-cell-max-width, 1100px);
+  max-width: var(--aaronnote-jupyter-cell-max-width, 2400px);
   min-width: 0;
   margin: 0.55rem auto;
   border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), transparent 12%);
@@ -1917,7 +1917,7 @@
   padding: 0.18rem 0.42rem;
   border-bottom: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), transparent 18%);
   color: color-mix(in srgb, var(--aaron-ink, #1e1a16), var(--aaron-muted, #666) 24%);
-  font: 650 11px/1.25 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
+  font: 650 0.72em/1.25 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 .cm-editor .cm-ceil-label {
@@ -1987,7 +1987,7 @@
   padding: 0.55rem 0.68rem;
   border-bottom: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), transparent 35%);
   background: color-mix(in srgb, var(--aaron-code-bg, #1e2638), var(--aaron-paper, #fff) 6%);
-  font: 13.5px/1.52 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
+  font: 0.875em/1.52 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 .cm-editor .cm-ceil-source-compact {
@@ -2015,7 +2015,7 @@
   padding: 0.55rem 0.68rem;
   color: var(--aaron-ink, #1e1a16);
   background: color-mix(in srgb, var(--aaron-paper, #171b28), var(--aaron-code-bg, #1e2638) 28%);
-  font: 13.5px/1.52 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
+  font: 0.875em/1.52 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 .cm-editor .cm-ceil-output-toolbar {
@@ -2027,7 +2027,7 @@
   padding: 0.14rem 0.42rem;
   border-bottom: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), transparent 40%);
   color: var(--aaron-muted, #666);
-  font: 650 11px/1.25 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
+  font: 650 0.72em/1.25 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 .cm-editor .cm-ceil-output-tools {
