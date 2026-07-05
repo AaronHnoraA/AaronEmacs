@@ -238,6 +238,27 @@ button:disabled {
   font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.aaronnote-jupyter-stealth-button {
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0;
+  background: transparent;
+  color: var(--aaron-accent, #7ee7ff);
+  cursor: pointer;
+  font: 16px/1 "Symbols Nerd Font Mono", "Symbols Nerd Font", var(--aaron-font-mono);
+  opacity: 0.08;
+}
+
+.aaronnote-jupyter-stealth-button:hover,
+.aaronnote-jupyter-stealth-button:focus-visible,
+.aaronnote-jupyter-stealth-button[aria-expanded="true"] {
+  border-color: rgb(126 231 255 / 35%);
+  background: rgb(126 231 255 / 8%);
+  opacity: 1;
+}
+
 #app[data-vim-mode="normal"] .aaronnote-focused-bar [data-vim-mode] {
   border-color: rgb(130 231 255 / 42%);
   background: rgb(130 231 255 / 10%);
@@ -486,6 +507,151 @@ button:disabled {
 
 .aaronnote-tools-panel[hidden] {
   display: none;
+}
+
+.aaronnote-jupyter-panel {
+  position: fixed;
+  right: 14px;
+  top: 42px;
+  z-index: 82;
+  width: min(520px, calc(100vw - 28px));
+  max-height: min(720px, calc(100vh - 56px));
+  overflow: hidden;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--aaron-paper), transparent 3%);
+  color: var(--aaron-ink);
+  box-shadow: var(--aaron-shadow);
+  backdrop-filter: blur(8px);
+}
+
+.aaronnote-jupyter-panel[hidden] {
+  display: none;
+}
+
+.aaronnote-jupyter-panel header {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--aaron-paper-line);
+  padding: 0 10px;
+  background: var(--aaron-paper-soft);
+  font-family: var(--aaron-font-sans);
+}
+
+.aaronnote-jupyter-panel header strong {
+  color: var(--aaron-red-dark);
+  font-size: 12px;
+}
+
+.aaronnote-jupyter-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid var(--aaron-paper-line);
+  padding: 8px;
+}
+
+.aaronnote-jupyter-toolbar button {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--aaronnote-border);
+  border-radius: 4px;
+  background: var(--aaron-paper);
+  color: var(--aaron-ink);
+  cursor: pointer;
+  font: 14px/1 "Symbols Nerd Font Mono", "Symbols Nerd Font", var(--aaron-font-mono);
+}
+
+.aaronnote-jupyter-toolbar button:hover {
+  border-color: rgb(126 231 255 / 38%);
+  background: rgb(126 231 255 / 8%);
+}
+
+.aaronnote-jupyter-summary {
+  border-bottom: 1px solid var(--aaron-paper-line);
+  padding: 7px 10px;
+  color: var(--aaronnote-muted);
+  font: 12px/1.4 var(--aaron-font-mono);
+}
+
+.aaronnote-jupyter-list {
+  max-height: 320px;
+  overflow: auto;
+  display: grid;
+  gap: 1px;
+  padding: 6px;
+}
+
+.aaronnote-jupyter-empty {
+  padding: 12px;
+  color: var(--aaronnote-muted);
+  font: 12px/1.4 var(--aaron-font-mono);
+}
+
+.aaronnote-jupyter-task {
+  min-width: 0;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 3px;
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) minmax(110px, 1.4fr) minmax(90px, auto);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 6px;
+  background: transparent;
+  color: var(--aaron-ink);
+  cursor: pointer;
+  text-align: left;
+  font: 12px/1.35 var(--aaron-font-sans);
+}
+
+.aaronnote-jupyter-task:hover {
+  background: var(--aaron-paper-soft);
+}
+
+.aaronnote-jupyter-task[data-status="running"],
+.aaronnote-jupyter-task[data-status="pending"] {
+  border-left-color: var(--aaron-accent, #7ee7ff);
+}
+
+.aaronnote-jupyter-task[data-status="error"] {
+  border-left-color: var(--aaron-red);
+}
+
+.aaronnote-jupyter-task [data-jupyter-task-main],
+.aaronnote-jupyter-task [data-jupyter-task-meta],
+.aaronnote-jupyter-task [data-jupyter-task-status] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aaronnote-jupyter-task [data-jupyter-task-meta],
+.aaronnote-jupyter-task [data-jupyter-task-status] {
+  color: var(--aaronnote-muted);
+  font-family: var(--aaron-font-mono);
+  font-size: 11px;
+}
+
+.aaronnote-jupyter-vars {
+  max-height: 220px;
+  overflow: auto;
+  border-top: 1px solid var(--aaron-paper-line);
+  padding: 7px 8px;
+  color: var(--aaronnote-muted);
+  font: 11px/1.45 var(--aaron-font-mono);
+}
+
+.aaronnote-jupyter-var {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 2px;
 }
 
 .aaronnote-tools-head,

@@ -63,7 +63,7 @@ Emacs equivalents:
 | Agenda / todos panel | `my/typst-roam-todos` |
 | Filesystem browser ranger | `dired`, roam selector |
 | Lean interactive editor (placeholders, infoview, child editors) | `lang/lean/` (Emacs LSP) |
-| Jupyter panel | Org Babel / Jupytext in Emacs |
+| Jupyter panel | Aaronnote `@@cell` |
 | In-editor roam graph | `my/aaronnote-roam-graph` → `/graph` standalone route |
 | Plugin runtime + roamlookup | removed; Copilot is a built-in |
 

@@ -78,15 +78,6 @@
 Set buffer-locally before the page loads (e.g. in the open function).")
 (put 'my/xwidget-focus-script 'permanent-local t)
 
-(defun my/xwidget--jupyter-url-p (url)
-  "Return non-nil when URL points at a known JupyterLab page."
-  (and (stringp url)
-       (or (and (fboundp 'my/jupyter-lab-url-p)
-                (my/jupyter-lab-url-p url))
-           (string-match-p
-            "\\`https?://\\(?:127\\.0\\.0\\.1\\|localhost\\):[0-9]+/lab\\(?:/\\|\\?\\|#\\|\\'\\)"
-            url))))
-
 (defun my/xwidget--auto-focus-allowed-p (&optional buffer)
   "Return non-nil when BUFFER may receive automatic xwidget focus."
   (let ((buf (or buffer (current-buffer))))
@@ -253,9 +244,7 @@ to evil insert state if evil is active in the buffer."
       (unless (equal my/xwidget-session-url url)
         (setq-local my/xwidget-session-title nil))
       (setq-local my/xwidget-session-url url)
-      (setq-local my/xwidget-suppress-auto-focus
-                  (or (equal id "jupyter-lab")
-                      (my/xwidget--jupyter-url-p url)))
+      (setq-local my/xwidget-suppress-auto-focus nil)
       (when id
         (setq-local my/xwidget--session-id id)
         (add-hook 'kill-buffer-hook #'my/xwidget--session-cleanup nil t)))

@@ -73,6 +73,19 @@ export type JupyterKernelListResult = {
   default?: string;
   kernels?: JupyterKernelSpec[];
 };
+export type JupyterVariable = {
+  name?: string;
+  type?: string;
+  summary?: string;
+  shape?: unknown;
+};
+export type JupyterVariablesResult = {
+  ok?: boolean;
+  supported?: boolean;
+  kernel?: string;
+  session?: string;
+  variables?: JupyterVariable[];
+};
 export type TodoItem = Record<string, unknown> & {
   id?: string;
   file?: string;
@@ -128,8 +141,12 @@ type NativeApi = {
     readScriptCell?: (body?: unknown) => Promise<unknown>;
     executeScriptCell?: (body?: unknown) => Promise<unknown>;
     clearScriptCellOutput?: (body?: unknown) => Promise<unknown>;
+    clearAllOutputs?: (body?: unknown) => Promise<unknown>;
+    variables?: (body?: unknown) => Promise<unknown>;
+    kernelStatus?: (body?: unknown) => Promise<unknown>;
     restart?: (body?: unknown) => Promise<unknown>;
     interrupt?: (body?: unknown) => Promise<unknown>;
+    shutdown?: (body?: unknown) => Promise<unknown>;
   };
   latex?: {
     defaults?: (body?: Record<string, unknown>) => Promise<unknown>;
@@ -298,6 +315,18 @@ export const api = {
       const call = requireMethod(nativeApi().jupyterCell?.clearScriptCellOutput, "Jupyter cell output");
       return ensureOk(await call(body) as Record<string, unknown>, "Jupyter cell output failed");
     },
+    async clearAllOutputs(body: unknown): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().jupyterCell?.clearAllOutputs, "Jupyter outputs");
+      return ensureOk(await call(body) as Record<string, unknown>, "Jupyter outputs failed");
+    },
+    async variables(body: unknown): Promise<JupyterVariablesResult> {
+      const call = requireMethod(nativeApi().jupyterCell?.variables, "Jupyter variables");
+      return ensureOk(await call(body) as JupyterVariablesResult, "Jupyter variables failed");
+    },
+    async kernelStatus(body: unknown): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().jupyterCell?.kernelStatus, "Jupyter kernel status");
+      return ensureOk(await call(body) as Record<string, unknown>, "Jupyter kernel status failed");
+    },
     async restart(body: unknown): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().jupyterCell?.restart, "Jupyter kernel restart");
       return ensureOk(await call(body) as Record<string, unknown>, "Jupyter kernel restart failed");
@@ -305,6 +334,10 @@ export const api = {
     async interrupt(body: unknown): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().jupyterCell?.interrupt, "Jupyter kernel interrupt");
       return ensureOk(await call(body) as Record<string, unknown>, "Jupyter kernel interrupt failed");
+    },
+    async shutdown(body: unknown): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().jupyterCell?.shutdown, "Jupyter kernel shutdown");
+      return ensureOk(await call(body) as Record<string, unknown>, "Jupyter kernel shutdown failed");
     },
   },
   latex: {

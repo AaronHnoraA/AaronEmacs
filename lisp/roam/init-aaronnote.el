@@ -498,7 +498,6 @@ KEY-STRING is used only for diagnostics."
                 ;; Markdown note (e.g. graph double-click): open in Aaronnote.
                 (my/aaronnote-open-file file)
               ;; Source region (lean, etc.) or explicit tag: open in Emacs.
-              (my/aaronnote--sync-app-buffer-file file)
               (my/aaronnote--goto-location file line-number column)
               (when (and tag (not (string-empty-p (or tag ""))))
                 (when (require 'init-note-code nil t)
@@ -996,24 +995,25 @@ When FILE is nil, use the current buffer."
                    (not (string-empty-p file))
                    (ignore-errors (file-truename (expand-file-name file)))))
          (key (list abs (truncate (or line 1)) (truncate (or col 0)))))
-    ;; Skip window selection + point move + pulse when we are already there.
-    (unless (equal key my/aaronnote--goto-last)
+    (let ((same-location (equal key my/aaronnote--goto-last))
+          (buffer (if abs
+                      (or (find-buffer-visiting abs)
+                          (find-file-noselect abs))
+                    (current-buffer))))
       (setq my/aaronnote--goto-last key)
-      (let ((buffer (if abs
-                        (find-file-noselect abs)
-                      (current-buffer))))
-        (when (buffer-live-p buffer)
-          (let ((window (or (get-buffer-window buffer t)
-                            (display-buffer buffer))))
-            (when (window-live-p window)
-              (select-window window)))
-          (with-current-buffer buffer
-            (save-restriction
-              (widen)
-              (goto-char (point-min))
-              (forward-line (max 0 (1- (truncate (or line 1)))))
-              (forward-char (min (max 0 (truncate (or col 0)))
-                                 (- (line-end-position) (point)))))
+      (when (buffer-live-p buffer)
+        (let ((window (or (get-buffer-window buffer t)
+                          (display-buffer buffer))))
+          (when (window-live-p window)
+            (select-window window)))
+        (with-current-buffer buffer
+          (save-restriction
+            (widen)
+            (goto-char (point-min))
+            (forward-line (max 0 (1- (truncate (or line 1)))))
+            (forward-char (min (max 0 (truncate (or col 0)))
+                               (- (line-end-position) (point)))))
+          (unless same-location
             (when (require 'pulse nil t)
               (pulse-momentary-highlight-one-line (point)))))))))
 

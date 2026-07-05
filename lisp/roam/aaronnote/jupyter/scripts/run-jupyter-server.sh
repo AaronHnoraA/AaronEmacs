@@ -6,7 +6,7 @@ JUPYTER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 AARONNOTE_ROOT="$(cd "${JUPYTER_ROOT}/.." && pwd)"
 VENV="${JUPYTER_ROOT}/.venv"
 
-if [ ! -x "${VENV}/bin/jupyter-lab" ]; then
+if [ ! -x "${VENV}/bin/jupyter-server" ]; then
   printf 'Aaronnote Jupyter is not bootstrapped. Run npm run jupyter:bootstrap in %s.\n' "$AARONNOTE_ROOT" >&2
   exit 2
 fi
@@ -22,8 +22,7 @@ mkdir -p \
   "${JUPYTER_ROOT}/.jupyter/runtime" \
   "${JUPYTER_ROOT}/.jupyter/logs" \
   "${JUPYTER_ROOT}/.jupyter/ipython" \
-  "${JUPYTER_ROOT}/.jupyter/tmp" \
-  "${JUPYTER_ROOT}/.jupyter/tmp/virtual_documents"
+  "${JUPYTER_ROOT}/.jupyter/tmp"
 
 "${SCRIPT_DIR}/install-kernelspecs.sh" >/dev/null
 
@@ -48,11 +47,7 @@ ALLOWED_KERNELS="${AARONNOTE_JUPYTER_ALLOWED_KERNELS:-}"
 HOST="${AARONNOTE_JUPYTER_HOST:-127.0.0.1}"
 PORT="${AARONNOTE_JUPYTER_PORT:-8890}"
 PORT_RETRIES="${AARONNOTE_JUPYTER_PORT_RETRIES:-0}"
-LABEXTENSIONS_USER="${JUPYTER_ROOT}/.jupyter/data/labextensions"
-LABEXTENSIONS_VENV="${VENV}/share/jupyter/labextensions"
-
 ARGS=(
-  --no-browser \
   "--ServerApp.ip=${HOST}" \
   "--ServerApp.port=${PORT}" \
   "--ServerApp.port_retries=${PORT_RETRIES}" \
@@ -60,15 +55,11 @@ ARGS=(
   "--ServerApp.password=" \
   "--ServerApp.root_dir=${ROOT_DIR}" \
   "--ContentsManager.allow_hidden=True" \
-  "--LanguageServerManager.autodetect=False" \
-  "--LanguageServerManager.virtual_documents_dir=${JUPYTER_ROOT}/.jupyter/tmp/virtual_documents" \
-  "--LabApp.extension_manager=readonly" \
-  "--LabApp.labextensions_path=${LABEXTENSIONS_USER}" \
-  "--LabApp.labextensions_path=${LABEXTENSIONS_VENV}"
+  "--ServerApp.open_browser=False"
 )
 
 if [ -n "${ALLOWED_KERNELS}" ]; then
   ARGS+=("--KernelSpecManager.allowed_kernelspecs=${ALLOWED_KERNELS}")
 fi
 
-exec "${VENV}/bin/jupyter-lab" "${ARGS[@]}" "$@"
+exec "${VENV}/bin/jupyter-server" "${ARGS[@]}" "$@"

@@ -437,8 +437,9 @@ function stripCeilKernelParens(value: string): string {
 
 function ceilLanguageForKernel(kernel: string, requested = ""): string {
   const explicit = requested.trim().toLowerCase();
-  if (explicit) return explicit;
   const clean = kernel.toLowerCase();
+  if (clean.includes("lean") || explicit === "lean" || explicit === "lean4") return "lean4";
+  if (explicit) return explicit;
   if (clean.includes("sage")) return "python";
   if (clean.includes("python") || clean === "py" || clean === "python3") return "python";
   if (clean.includes("julia")) return "julia";
@@ -447,6 +448,10 @@ function ceilLanguageForKernel(kernel: string, requested = ""): string {
   if (clean.includes("typescript") || clean === "ts") return "typescript";
   if (clean.includes("javascript") || clean === "js" || clean.includes("node")) return "javascript";
   return "python";
+}
+
+function isLeanCeilRuntime(language: string, kernel: string): boolean {
+  return /lean/i.test(language) || /lean/i.test(kernel);
 }
 
 type CeilCommandRange = {
@@ -483,10 +488,11 @@ function parseCeilCommand(range: CeilCommandRange, file: string): CeilCommandMet
   let language = args[0] || DEFAULT_CEIL_LANGUAGE;
   let kernel = args[1] || "";
   let session = args[2] || DEFAULT_CEIL_SESSION;
-  if (args.length === 1 && /python3|sage|julia|ir|bash|zsh|node|javascript|typescript/i.test(args[0]!)) {
+  if (args.length === 1 && /python3|sage|julia|ir|bash|zsh|node|javascript|typescript|lean4?/i.test(args[0]!)) {
     kernel = args[0]!;
     language = ceilLanguageForKernel(kernel);
   }
+  if (!args[1] && /^lean4?$/i.test(language)) kernel = "lean4";
   kernel = cleanCeilToken(stripCeilKernelParens(kernel), DEFAULT_CEIL_KERNEL);
   session = cleanCeilToken(session, DEFAULT_CEIL_SESSION);
   language = ceilLanguageForKernel(kernel, language);
@@ -1103,7 +1109,6 @@ class OrgEnvEndWidget extends MeasuredWidget {
 
 function envLabel(kind: string): string {
   const labels: Record<string, string> = {
-    ceil: "Jupyter",
     html: "HTML",
     meta: "Meta",
     theorem: "Theorem",
@@ -1143,7 +1148,7 @@ function envLabel(kind: string): string {
 }
 
 function fallbackCeilKernels(current: string): CeilKernelSpec[] {
-  const names = [current, DEFAULT_CEIL_KERNEL, "sagemath-10.9"].filter(Boolean);
+  const names = [current, DEFAULT_CEIL_KERNEL, "lean4", "sagemath-10.9"].filter(Boolean);
   return Array.from(new Set(names)).map((name) => ({ name, displayName: name }));
 }
 
@@ -1329,6 +1334,7 @@ class CeilCommandWidget extends MeasuredWidget {
   toDOM(view: EditorView): HTMLElement {
     const file = currentNoteFile();
     const meta = parseCeilCommand(this.range, file);
+    const leanRuntime = isLeanCeilRuntime(meta.language, meta.kernel);
     if (meta.changed) scheduleCeilCommandLineUpdate(view, this.range.from, formatCeilCommand(meta));
 
     const block = document.createElement("div");
@@ -1352,6 +1358,7 @@ class CeilCommandWidget extends MeasuredWidget {
     const kernelSelect = document.createElement("select");
     kernelSelect.className = "cm-ceil-kernel";
     kernelSelect.setAttribute("aria-label", "Kernel");
+    kernelSelect.hidden = leanRuntime;
     populateCeilKernelSelect(kernelSelect, ceilKernelsCache ?? fallbackCeilKernels(meta.kernel), meta.kernel);
     const loadKernels = (): void => {
       void loadCeilKernels(meta.kernel).then((kernels) => {
@@ -1361,6 +1368,14 @@ class CeilCommandWidget extends MeasuredWidget {
     };
     kernelSelect.addEventListener("pointerdown", loadKernels);
     kernelSelect.addEventListener("focus", loadKernels);
+
+    const sessionInput = document.createElement("input");
+    sessionInput.className = "cm-ceil-session";
+    sessionInput.type = "text";
+    sessionInput.value = meta.session;
+    sessionInput.spellcheck = false;
+    sessionInput.setAttribute("aria-label", "Session");
+    sessionInput.title = "Session";
 
     const status = document.createElement("span");
     status.className = "cm-ceil-status";
@@ -1373,6 +1388,7 @@ class CeilCommandWidget extends MeasuredWidget {
     source.textContent = "Loading source...";
     const outputWrap = document.createElement("div");
     outputWrap.className = "cm-ceil-output-wrap";
+    outputWrap.hidden = leanRuntime;
     const outputHeader = document.createElement("div");
     outputHeader.className = "cm-ceil-output-toolbar";
     const outputTitle = document.createElement("span");
@@ -1426,11 +1442,16 @@ class CeilCommandWidget extends MeasuredWidget {
     };
 
     const writeCommandLine = (): void => {
-      const nextKernel = kernelSelect.value || DEFAULT_CEIL_KERNEL;
-      const nextLanguage = languageInput.value.trim() || ceilLanguageForKernel(nextKernel);
+      const nextKernel = isLeanCeilRuntime(languageInput.value, kernelSelect.value)
+        ? "lean4"
+        : (kernelSelect.value || DEFAULT_CEIL_KERNEL);
+      const nextLanguage = isLeanCeilRuntime(languageInput.value, nextKernel)
+        ? "lean4"
+        : (languageInput.value.trim() || ceilLanguageForKernel(nextKernel));
       replaceCeilCommandLine(view, this.range.from, formatCeilCommand({
         ...meta,
         kernel: nextKernel,
+        session: sessionInput.value.trim() || DEFAULT_CEIL_SESSION,
         language: ceilLanguageForKernel(nextKernel, nextLanguage),
         changed: false,
       }));
@@ -1445,10 +1466,24 @@ class CeilCommandWidget extends MeasuredWidget {
         view.focus();
       }
     });
+    languageInput.addEventListener("input", () => {
+      const nextLean = isLeanCeilRuntime(languageInput.value, kernelSelect.value);
+      kernelSelect.hidden = nextLean;
+      outputWrap.hidden = nextLean;
+    });
     kernelSelect.addEventListener("change", (event) => {
       event.stopPropagation();
       languageInput.value = ceilLanguageForKernel(kernelSelect.value || DEFAULT_CEIL_KERNEL, languageInput.value);
       writeCommandLine();
+    });
+    sessionInput.addEventListener("blur", writeCommandLine);
+    sessionInput.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        writeCommandLine();
+        view.focus();
+      }
     });
 
     const setBusy = (busy: boolean): void => {
@@ -1458,6 +1493,7 @@ class CeilCommandWidget extends MeasuredWidget {
       }
       languageInput.disabled = busy;
       kernelSelect.disabled = busy;
+      sessionInput.disabled = busy;
     };
 
     const editButton = makeButton("Edit", "Open hidden source script", async () => {
@@ -1486,7 +1522,7 @@ class CeilCommandWidget extends MeasuredWidget {
       }
     });
 
-    const runButton = makeButton("Run", "Run this hidden script cell", async () => {
+    const runButton = makeButton(leanRuntime ? "Sync" : "Run", leanRuntime ? "Sync this Lean cell source file" : "Run this hidden script cell", async () => {
       if (!file) {
         status.textContent = "Save note first";
         return;
@@ -1504,8 +1540,10 @@ class CeilCommandWidget extends MeasuredWidget {
         }) as CeilExecutionResult;
         lastResult = result;
         ceilOutputCache.set(cacheKey, result);
-        status.textContent = result.executionCount != null ? `In [${result.executionCount}]` : (result.status || meta.id);
-        renderCeilOutputs(output, result);
+        status.textContent = leanRuntime
+          ? "Synced"
+          : result.executionCount != null ? `In [${result.executionCount}]` : (result.status || meta.id);
+        if (!leanRuntime) renderCeilOutputs(output, result);
         await refreshSource();
       } catch (err) {
         lastResult = {
@@ -1514,7 +1552,7 @@ class CeilCommandWidget extends MeasuredWidget {
           message: err instanceof Error ? err.message : String(err),
           outputs: [{ output_type: "error", traceback: [err instanceof Error ? err.message : String(err)] }],
         };
-        renderCeilOutputs(output, lastResult);
+        if (!leanRuntime) renderCeilOutputs(output, lastResult);
         status.textContent = "Error";
       } finally {
         setBusy(false);
@@ -1572,11 +1610,12 @@ class CeilCommandWidget extends MeasuredWidget {
     });
     const expandButton = makeButton("Popout", "Show full output", () => openCeilOutputPopup(lastResult));
 
-    buttonBar.append(editButton, runButton, interruptButton, restartButton, clearButton);
+    buttonBar.append(editButton, runButton);
+    if (!leanRuntime) buttonBar.append(interruptButton, restartButton, clearButton);
     outputTools.append(refreshButton, foldButton, expandButton);
     outputHeader.append(outputTitle, outputTools);
     outputWrap.append(outputHeader, output);
-    header.append(label, languageInput, kernelSelect, status, buttonBar);
+    header.append(label, languageInput, kernelSelect, sessionInput, status, buttonBar);
     block.append(header, source, outputWrap);
     stopInteractiveWidgetEvents(block);
     void refreshSource();
@@ -2424,7 +2463,6 @@ function buildOrgEnvBodyLineDecoRanges(
 
   for (const block of orgEnvBlocksFromState(state)) {
     if (block.kind === "meta") continue;
-    if (block.kind === "ceil") continue;
     if (block.kind === "fold" && !selectionTouchesRange(state, block.from, block.to)) continue;
     if (block.bodyTo < windowFrom || block.bodyFrom > windowTo) continue;
     const fromLine = doc.lineAt(Math.max(block.bodyFrom, windowFrom));
@@ -2527,7 +2565,6 @@ function measureOrgEnvRails(view: EditorView): OrgEnvRailMeasure[] {
       && block.kind !== "fold"
       && block.kind !== "html"
       && block.kind !== "tikz"
-      && block.kind !== "ceil"
       && block.openFrom <= visibleTo
       && block.closeTo >= visibleFrom
     ))
@@ -2666,7 +2703,7 @@ function buildBlockExtraDecoRanges(
 
   // ── org-env #+begin … #+end ────────────────────────────────────────────
   // Most org-env bodies remain normal CM6 markdown. Specialized blocks such as
-  // meta/html/tikz/ceil replace the whole source region with purpose-built UI.
+  // meta/html/tikz replace the whole source region with purpose-built UI.
   const orgEnvBlocks = orgEnvBlocksFromState(state);
   for (const block of orgEnvBlocks) {
     if (block.to < windowFrom || block.from > windowTo) continue;
@@ -2863,7 +2900,6 @@ function patchBlockExtraDecosForOrgEnvTitleChange(
   const fullBlockWidgetActive = block.kind === "meta"
     || block.kind === "html"
     || block.kind === "tikz"
-    || block.kind === "ceil"
     || ((block.kind === "comment" || block.kind === "fold") && !selectionTouchesRange(state, block.from, block.to));
   let next = fullBlockWidgetActive
     ? mapped.update({ filterFrom: block.from, filterTo: block.to, filter: () => false })

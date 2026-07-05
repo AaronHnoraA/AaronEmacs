@@ -10,9 +10,6 @@
     "url": "git+https://github.com/Yuyz0112/typora-web.git"
   },
   "type": "module",
-  "workspaces": [
-    "jupyter/labextension"
-  ],
   "module": "./dist/lib/typora-web.js",
   "exports": {
     ".": {
@@ -33,10 +30,8 @@
     "build:aaronnote": "tsc && vp build --config vite.aaronnote.config.ts",
     "build": "tsc && vp build",
     "build:lib": "tsc && vp build --config vite.lib.config.ts",
-    "jupyter:build-extension": "bash jupyter/scripts/build-labextension.sh",
     "jupyter:bootstrap": "bash jupyter/scripts/bootstrap-jupyter.sh",
-    "jupyter:doctor": "bash jupyter/scripts/doctor-jupyter.sh",
-    "jupyter:lab": "bash jupyter/scripts/run-jupyter-lab.sh",
+    "jupyter:server": "bash jupyter/scripts/run-jupyter-server.sh",
     "preview": "vp preview",
     "snippets:migrate-nvim": "node scripts/migrate-yas-to-nvim-snippets.mjs",
     "test": "vp test --run",

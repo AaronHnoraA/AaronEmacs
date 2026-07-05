@@ -69,8 +69,6 @@
     my/diagnostics-mode
     my/language-server-manager-mode
     my/language-server-doctor-mode
-    my/jupyter-manager-mode
-    my/jupyter-doctor-mode
     my/compile-board-mode
     org-agenda-mode
     my/health-mode
@@ -265,8 +263,6 @@ Emacs state keep their local behavior."
                   my/diagnostics-mode
                   my/language-server-manager-mode
                   my/language-server-doctor-mode
-                  my/jupyter-manager-mode
-                  my/jupyter-doctor-mode
                   my/compile-board-mode
                   org-agenda-mode
                   my/health-mode
@@ -291,8 +287,6 @@ Emacs state keep their local behavior."
                   my/diagnostics-mode-hook
                   my/language-server-manager-mode-hook
                   my/language-server-doctor-mode-hook
-                  my/jupyter-manager-mode-hook
-                  my/jupyter-doctor-mode-hook
                   my/compile-board-mode-hook
                   org-agenda-mode-hook
                   my/health-mode-hook

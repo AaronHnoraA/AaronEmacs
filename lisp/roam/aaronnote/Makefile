@@ -8,7 +8,7 @@ ICON_SVG := ../Aaronnote.svg
 ICONSET := build/Aaronnote.iconset
 ICON_ICNS := build/Aaronnote.icns
 
-.PHONY: install build build-web test icon install-app jupyter-build-extension jupyter-bootstrap jupyter-doctor jupyter-lab
+.PHONY: install build build-web test icon install-app jupyter-bootstrap jupyter-server
 
 install:
 	npm install
@@ -45,14 +45,8 @@ install-app:
 test:
 	npm test
 
-jupyter-build-extension:
-	npm run jupyter:build-extension
-
 jupyter-bootstrap:
 	npm run jupyter:bootstrap
 
-jupyter-doctor:
-	npm run jupyter:doctor
-
-jupyter-lab:
-	npm run jupyter:lab
+jupyter-server:
+	npm run jupyter:server

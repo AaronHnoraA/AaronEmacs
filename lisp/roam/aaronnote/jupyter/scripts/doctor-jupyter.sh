@@ -35,18 +35,7 @@ from importlib.metadata import version
 import sys
 
 print(sys.version.split()[0])
-for dist in ("jupyterlab", "jupyter-server", "ipykernel", "jupytext", "neopyter"):
+for dist in ("jupyter-server", "ipykernel"):
     print(f"{dist} {version(dist)}")
 PY
 "${VENV}/bin/jupyter" kernelspec list "--KernelSpecManager.allowed_kernelspecs=${ALLOWED_KERNELS}"
-
-LABEXTENSION_DIR="${JUPYTER_ROOT}/.jupyter/data/labextensions/@aaronnote/jupyter-extension"
-printf 'Aaronnote JupyterLab extension: '
-if [ -f "${LABEXTENSION_DIR}/package.json" ] && \
-   [ -n "$(find "${LABEXTENSION_DIR}/static" -maxdepth 1 -name 'remoteEntry.*.js' -print -quit 2>/dev/null)" ]; then
-  printf 'installed at %s\n' "$LABEXTENSION_DIR"
-else
-  printf 'missing; run npm run jupyter:build-extension from %s\n' "$(cd "${JUPYTER_ROOT}/.." && pwd)"
-fi
-
-"${VENV}/bin/jupyter" labextension list

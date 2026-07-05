@@ -568,8 +568,12 @@ const apiHandlers = {
   "aaronnote:api:jupyter-cell:read-script-cell": (body) => jupyterCell.readScriptCell(body || {}),
   "aaronnote:api:jupyter-cell:execute-script-cell": (body) => jupyterCell.executeScriptCell(body || {}),
   "aaronnote:api:jupyter-cell:clear-script-cell-output": (body) => jupyterCell.clearScriptCellOutput(body || {}),
+  "aaronnote:api:jupyter-cell:clear-all-outputs": (body) => jupyterCell.clearAllOutputs(body || {}),
+  "aaronnote:api:jupyter-cell:variables": (body) => jupyterCell.variables(body || {}),
+  "aaronnote:api:jupyter-cell:kernel-status": (body) => jupyterCell.kernelStatus(body || {}),
   "aaronnote:api:jupyter-cell:restart": (body) => jupyterCell.restart(body || {}),
   "aaronnote:api:jupyter-cell:interrupt": (body) => jupyterCell.interrupt(body || {}),
+  "aaronnote:api:jupyter-cell:shutdown": (body) => jupyterCell.shutdownKernel(body || {}),
   "aaronnote:api:notes:wanted": async () => {
     const notes = await scanRoamNotes();
     return wantedPages(notes);
@@ -847,8 +851,12 @@ function adapterScript(origin) {
       readScriptCell: function(body) { return call("aaronnote:api:jupyter-cell:read-script-cell", [body || {}]); },
       executeScriptCell: function(body) { return call("aaronnote:api:jupyter-cell:execute-script-cell", [body || {}]); },
       clearScriptCellOutput: function(body) { return call("aaronnote:api:jupyter-cell:clear-script-cell-output", [body || {}]); },
+      clearAllOutputs: function(body) { return call("aaronnote:api:jupyter-cell:clear-all-outputs", [body || {}]); },
+      variables: function(body) { return call("aaronnote:api:jupyter-cell:variables", [body || {}]); },
+      kernelStatus: function(body) { return call("aaronnote:api:jupyter-cell:kernel-status", [body || {}]); },
       restart: function(body) { return call("aaronnote:api:jupyter-cell:restart", [body || {}]); },
-      interrupt: function(body) { return call("aaronnote:api:jupyter-cell:interrupt", [body || {}]); }
+      interrupt: function(body) { return call("aaronnote:api:jupyter-cell:interrupt", [body || {}]); },
+      shutdown: function(body) { return call("aaronnote:api:jupyter-cell:shutdown", [body || {}]); }
     },
     latex: {
       defaults: function(body) { return call("aaronnote:api:latex:defaults", [body || {}]); },

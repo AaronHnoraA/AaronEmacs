@@ -75,6 +75,7 @@ root.innerHTML = `
       <span data-readonly hidden>READ ONLY</span>
       <span data-status>Opening...</span>
       <span data-writing-stats aria-live="polite"></span>
+      <button type="button" class="aaronnote-jupyter-stealth-button" data-jupyter-toggle aria-expanded="false" title="Jupyter cells" aria-label="Jupyter cells">&#xe606;</button>
       <button type="button" data-toc-toggle aria-expanded="false">TOC</button>
       <button type="button" data-agenda-toggle aria-expanded="false">Agenda</button>
       <button type="button" data-graph-toggle aria-expanded="false">Graph</button>
@@ -92,6 +93,7 @@ const modeLabel = root.querySelector<HTMLElement>("[data-vim-mode]")!;
 const readOnlyLabel = root.querySelector<HTMLElement>("[data-readonly]")!;
 const statusLabel = root.querySelector<HTMLElement>("[data-status]")!;
 const writingStatsLabel = root.querySelector<HTMLElement>("[data-writing-stats]")!;
+const jupyterButton = root.querySelector<HTMLButtonElement>("[data-jupyter-toggle]")!;
 const tocButton = root.querySelector<HTMLButtonElement>("[data-toc-toggle]")!;
 const agendaButton = root.querySelector<HTMLButtonElement>("[data-agenda-toggle]")!;
 const graphButton = root.querySelector<HTMLButtonElement>("[data-graph-toggle]")!;
@@ -150,6 +152,35 @@ toolsPanel.innerHTML = `
 document.body.appendChild(toolsPanel);
 const toolsList = toolsPanel.querySelector<HTMLElement>("[data-tools-list]")!;
 const toolsClose = toolsPanel.querySelector<HTMLButtonElement>("[data-tools-close]")!;
+
+const jupyterPanel = document.createElement("aside");
+jupyterPanel.className = "aaronnote-jupyter-panel";
+jupyterPanel.hidden = true;
+jupyterPanel.innerHTML = `
+  <header>
+    <strong>Jupyter</strong>
+    <button type="button" data-jupyter-close aria-label="Close">Close</button>
+  </header>
+  <div class="aaronnote-jupyter-toolbar">
+    <button type="button" data-jupyter-action="run-all" title="Run all" aria-label="Run all">&#xf04b;</button>
+    <button type="button" data-jupyter-action="run-above" title="Run cells above cursor" aria-label="Run cells above cursor">&#xf062;</button>
+    <button type="button" data-jupyter-action="run-below" title="Run cells below cursor" aria-label="Run cells below cursor">&#xf063;</button>
+    <button type="button" data-jupyter-action="run-section" title="Run current section" aria-label="Run current section">&#xf0e8;</button>
+    <button type="button" data-jupyter-action="restart-run-all" title="Restart and run all" aria-label="Restart and run all">&#xf021;</button>
+    <button type="button" data-jupyter-action="interrupt" title="Interrupt kernel" aria-label="Interrupt kernel">&#xf04d;</button>
+    <button type="button" data-jupyter-action="clear-all" title="Clear all outputs" aria-label="Clear all outputs">&#xf1f8;</button>
+    <button type="button" data-jupyter-action="variables" title="Variables" aria-label="Variables">&#xf0ce;</button>
+    <button type="button" data-jupyter-action="refresh" title="Refresh" aria-label="Refresh">&#xf2f1;</button>
+  </div>
+  <div class="aaronnote-jupyter-summary" data-jupyter-summary>No cells</div>
+  <div class="aaronnote-jupyter-list" data-jupyter-list></div>
+  <div class="aaronnote-jupyter-vars" data-jupyter-vars hidden></div>
+`;
+document.body.appendChild(jupyterPanel);
+const jupyterClose = jupyterPanel.querySelector<HTMLButtonElement>("[data-jupyter-close]")!;
+const jupyterSummary = jupyterPanel.querySelector<HTMLElement>("[data-jupyter-summary]")!;
+const jupyterList = jupyterPanel.querySelector<HTMLElement>("[data-jupyter-list]")!;
+const jupyterVars = jupyterPanel.querySelector<HTMLElement>("[data-jupyter-vars]")!;
 
 const roamToolsPanel = document.createElement("section");
 roamToolsPanel.className = "aaronnote-roam-tools";
@@ -778,6 +809,290 @@ const localGraphPanel = createLocalGraphPanel({
 });
 
 graphClose.addEventListener("click", () => localGraphPanel.collapse());
+
+type JupyterPanelCell = {
+  id: string;
+  from: number;
+  to: number;
+  line: number;
+  language: string;
+  kernel: string;
+  session: string;
+  status: string;
+  executionCount?: number | null;
+  durationMs?: number;
+  outputCount?: number;
+};
+
+const JUPYTER_CELL_RE = /^([ \t]*)@@cell(?:[ \t]*\(([^)\n]*)\))?(?:[ \t]+\[([^\]\n]*)\])?[ \t]*$/i;
+const jupyterTaskState = new Map<string, Partial<JupyterPanelCell>>();
+
+function cleanJupyterToken(value: string, fallback: string): string {
+  const clean = String(value || "").trim();
+  return clean || fallback;
+}
+
+function jupyterLanguageForKernel(kernel: string, requested = ""): string {
+  const explicit = requested.trim().toLowerCase();
+  const value = kernel.toLowerCase();
+  if (value.includes("lean") || explicit === "lean" || explicit === "lean4") return "lean4";
+  if (explicit) return explicit;
+  if (value.includes("sage")) return "python";
+  if (value.includes("python") || value === "py" || value === "python3") return "python";
+  if (value.includes("julia")) return "julia";
+  if (value === "r" || value.startsWith("ir")) return "r";
+  if (value.includes("bash") || value.includes("zsh") || value.includes("shell")) return "bash";
+  if (value.includes("javascript") || value === "js" || value.includes("node")) return "javascript";
+  if (value.includes("typescript") || value === "ts") return "typescript";
+  return "python";
+}
+
+function jupyterCellKey(cell: Pick<JupyterPanelCell, "id" | "language" | "session">): string {
+  return `${cell.language}\0${cell.session}\0${cell.id}`;
+}
+
+function isLeanJupyterCell(cell: Pick<JupyterPanelCell, "language" | "kernel">): boolean {
+  return /lean/i.test(cell.language) || /lean/i.test(cell.kernel);
+}
+
+function scanJupyterCells(): JupyterPanelCell[] {
+  const markdown = editor.getMarkdown();
+  const cells: JupyterPanelCell[] = [];
+  let pos = 0;
+  let lineNumber = 1;
+  while (pos <= markdown.length) {
+    const lineEndIndex = markdown.indexOf("\n", pos);
+    const lineEnd = lineEndIndex < 0 ? markdown.length : lineEndIndex;
+    const line = markdown.slice(pos, lineEnd);
+    const match = JUPYTER_CELL_RE.exec(line);
+    if (match) {
+      const args = String(match[2] || "").split(",").map((item) => item.trim()).filter(Boolean);
+      const requestedLanguage = cleanJupyterToken(args[0] || "", "python");
+      const kernelFallback = /^lean4?$/i.test(requestedLanguage) ? "lean4" : "python3";
+      const kernel = cleanJupyterToken(args[1] || "", kernelFallback).replace(/^\((.*)\)$/, "$1").trim() || kernelFallback;
+      const language = jupyterLanguageForKernel(kernel, requestedLanguage);
+      const session = cleanJupyterToken(args[2] || "", "default");
+      const id = cleanJupyterToken(match[3] || "", `cell-${shortHash(`${currentFile}\n${pos}\n${line}`)}`);
+      const base = { id, from: pos, to: lineEnd, line: lineNumber, language, kernel, session, status: "idle" };
+      cells.push({ ...base, ...(jupyterTaskState.get(jupyterCellKey(base)) || {}) });
+    }
+    if (lineEndIndex < 0) break;
+    pos = lineEnd + 1;
+    lineNumber += 1;
+  }
+  return cells;
+}
+
+function jupyterCellsForContext(target: JupyterPanelCell, cells = scanJupyterCells()): Array<Record<string, string>> {
+  return cells
+    .filter((cell) => cell.language === target.language && cell.session === target.session)
+    .map((cell) => ({ cellId: cell.id, id: cell.id, code: "" }));
+}
+
+function renderJupyterPanel(): JupyterPanelCell[] {
+  const cells = scanJupyterCells();
+  const running = cells.filter((cell) => cell.status === "running" || cell.status === "pending").length;
+  jupyterSummary.textContent = `${cells.length} cell${cells.length === 1 ? "" : "s"}${running ? `, ${running} running` : ""}`;
+  jupyterList.replaceChildren();
+  if (cells.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "aaronnote-jupyter-empty";
+    empty.textContent = "No @@cell entries";
+    jupyterList.append(empty);
+    return cells;
+  }
+  for (const cell of cells) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "aaronnote-jupyter-task";
+    row.dataset.status = cell.status;
+    row.innerHTML = `
+      <span data-jupyter-task-main></span>
+      <span data-jupyter-task-meta></span>
+      <span data-jupyter-task-status></span>
+    `;
+    row.querySelector<HTMLElement>("[data-jupyter-task-main]")!.textContent = `${cell.id}`;
+    row.querySelector<HTMLElement>("[data-jupyter-task-meta]")!.textContent = isLeanJupyterCell(cell)
+      ? `${cell.language} / ${cell.session} :${cell.line}`
+      : `${cell.language} / ${cell.kernel} / ${cell.session} :${cell.line}`;
+    row.querySelector<HTMLElement>("[data-jupyter-task-status]")!.textContent = [
+      cell.status,
+      !isLeanJupyterCell(cell) && cell.executionCount != null ? `In [${cell.executionCount}]` : "",
+      cell.durationMs != null ? `${Math.round(cell.durationMs)}ms` : "",
+      !isLeanJupyterCell(cell) && cell.outputCount != null ? `${cell.outputCount} out` : "",
+    ].filter(Boolean).join(" · ");
+    row.addEventListener("click", () => {
+      editor.view.dispatch({ selection: { anchor: cell.from }, scrollIntoView: true });
+      editor.focus();
+    });
+    jupyterList.append(row);
+  }
+  return cells;
+}
+
+function selectedJupyterCell(cells = scanJupyterCells()): JupyterPanelCell | null {
+  const position = editor.view.state.selection.main.from;
+  let best: JupyterPanelCell | null = null;
+  for (const cell of cells) {
+    if (cell.from <= position) best = cell;
+    if (cell.from > position) break;
+  }
+  return best ?? cells[0] ?? null;
+}
+
+function filterJupyterCells(mode: string, cells = scanJupyterCells()): JupyterPanelCell[] {
+  if (mode === "all") return cells;
+  const position = editor.view.state.selection.main.from;
+  if (mode === "above") return cells.filter((cell) => cell.from <= position);
+  if (mode === "below") return cells.filter((cell) => cell.from >= position);
+  if (mode === "section") {
+    const markdown = editor.getMarkdown();
+    const headings = markdownHeadingsFromText(editor.view.state.doc);
+    const currentHeading = headings
+      .filter((heading) => heading.pos <= position)
+      .sort((a, b) => b.pos - a.pos)[0];
+    if (!currentHeading) return cells;
+    const next = headings.find((heading) => heading.pos > currentHeading.pos && heading.level <= currentHeading.level);
+    const end = next?.pos ?? markdown.length;
+    return cells.filter((cell) => cell.from >= currentHeading.pos && cell.from < end);
+  }
+  return [];
+}
+
+async function ensureJupyterScript(cell: JupyterPanelCell, allCells = scanJupyterCells()): Promise<void> {
+  await api.jupyterCell.openScript({
+    file: currentFile,
+    cellId: cell.id,
+    kernel: cell.kernel,
+    session: cell.session,
+    language: cell.language,
+    storage: "script",
+    open: false,
+    cells: jupyterCellsForContext(cell, allCells),
+  });
+}
+
+async function runJupyterCells(mode: "all" | "above" | "below" | "section"): Promise<void> {
+  if (!currentFile) {
+    setStatus("Save note first");
+    return;
+  }
+  const allCells = scanJupyterCells();
+  const cells = filterJupyterCells(mode, allCells);
+  if (cells.length === 0) {
+    setStatus("No Jupyter cells");
+    return;
+  }
+  setStatus(`Running ${cells.length} Jupyter cell${cells.length === 1 ? "" : "s"}`);
+  for (const cell of cells) {
+    const key = jupyterCellKey(cell);
+    jupyterTaskState.set(key, { status: "running" });
+    renderJupyterPanel();
+    const started = performance.now();
+    try {
+      await ensureJupyterScript(cell, allCells);
+      const result = await api.jupyterCell.executeScriptCell({
+        file: currentFile,
+        cellId: cell.id,
+        kernel: cell.kernel,
+        session: cell.session,
+        language: cell.language,
+      });
+      jupyterTaskState.set(key, {
+        status: isLeanJupyterCell(cell) ? "synced" : result.status === "error" ? "error" : "ok",
+        executionCount: isLeanJupyterCell(cell) ? null : result.executionCount,
+        durationMs: performance.now() - started,
+        outputCount: isLeanJupyterCell(cell) ? undefined : result.outputs?.length ?? 0,
+      });
+    } catch (error) {
+      jupyterTaskState.set(key, {
+        status: "error",
+        durationMs: performance.now() - started,
+      });
+      setStatus(error instanceof Error ? error.message : "Jupyter run failed");
+    }
+    renderJupyterPanel();
+  }
+  setStatus("Jupyter run complete");
+}
+
+async function restartAndRunAllJupyterCells(): Promise<void> {
+  const cells = scanJupyterCells();
+  const cell = selectedJupyterCell(cells.filter((item) => !isLeanJupyterCell(item)));
+  if (!cell) return;
+  await api.jupyterCell.restart({ file: currentFile, kernel: cell.kernel, session: cell.session });
+  await runJupyterCells("all");
+}
+
+async function interruptSelectedJupyterKernel(): Promise<void> {
+  const cell = selectedJupyterCell();
+  if (!cell) return;
+  if (isLeanJupyterCell(cell)) {
+    setStatus("Lean cells sync files; no kernel interrupt");
+    return;
+  }
+  await api.jupyterCell.interrupt({ file: currentFile, kernel: cell.kernel, session: cell.session });
+  setStatus(`Interrupted ${cell.kernel}/${cell.session}`);
+}
+
+async function clearAllJupyterOutputs(): Promise<void> {
+  const cells = scanJupyterCells();
+  const seen = new Set<string>();
+  for (const cell of cells) {
+    if (isLeanJupyterCell(cell)) continue;
+    const group = `${cell.language}\0${cell.session}`;
+    if (seen.has(group)) continue;
+    seen.add(group);
+    await api.jupyterCell.clearAllOutputs({ file: currentFile, kernel: cell.kernel, session: cell.session, language: cell.language });
+  }
+  for (const key of Array.from(jupyterTaskState.keys())) jupyterTaskState.delete(key);
+  renderJupyterPanel();
+  setStatus("Jupyter outputs cleared");
+}
+
+async function showJupyterVariables(): Promise<void> {
+  const cell = selectedJupyterCell();
+  if (!cell) return;
+  if (isLeanJupyterCell(cell)) {
+    jupyterVars.hidden = false;
+    jupyterVars.textContent = "Lean cells do not expose variables";
+    return;
+  }
+  jupyterVars.hidden = false;
+  jupyterVars.textContent = "Loading variables...";
+  try {
+    const result = await api.jupyterCell.variables({ file: currentFile, kernel: cell.kernel, session: cell.session, language: cell.language });
+    if (!result.supported) {
+      jupyterVars.textContent = `Variables unavailable for ${cell.kernel}`;
+      return;
+    }
+    const vars = result.variables || [];
+    if (vars.length === 0) {
+      jupyterVars.textContent = "No variables";
+      return;
+    }
+    jupyterVars.replaceChildren(...vars.map((item) => {
+      const row = document.createElement("div");
+      row.className = "aaronnote-jupyter-var";
+      const shape = item.shape ? ` ${JSON.stringify(item.shape)}` : "";
+      row.textContent = `${item.name || ""} · ${item.type || ""}${shape} · ${item.summary || ""}`;
+      return row;
+    }));
+  } catch (error) {
+    jupyterVars.textContent = error instanceof Error ? error.message : "Variable load failed";
+  }
+}
+
+function toggleJupyterPanel(): void {
+  jupyterPanel.hidden = !jupyterPanel.hidden;
+  jupyterButton.setAttribute("aria-expanded", jupyterPanel.hidden ? "false" : "true");
+  if (!jupyterPanel.hidden) renderJupyterPanel();
+}
+
+function closeJupyterPanel(): void {
+  jupyterPanel.hidden = true;
+  jupyterButton.setAttribute("aria-expanded", "false");
+}
 
 function saveBody() {
   return {
@@ -4578,114 +4893,6 @@ function runHostKey(body: Record<string, unknown>): boolean {
   return inserted;
 }
 
-type CeilWriteBackCell = { cellId?: string; id?: string; code?: string };
-type CeilSourceBlock = {
-  from: number;
-  to: number;
-  bodyFrom: number;
-  bodyTo: number;
-  title: string;
-  body: string;
-  id: string;
-};
-
-const CEIL_OPEN_LINE_RE = /^[ \t]*#\+\s*begin\s+ceil(?:[ \t]+([^\n]*?))?[ \t]*$/i;
-const CEIL_CLOSE_LINE_RE = /^[ \t]*#\+\s*end\s+ceil[ \t]*$/i;
-
-function ceilTitleId(title: string): string {
-  const tokens = String(title || "").trim().split(/\s+/).filter(Boolean);
-  for (let index = 0; index < tokens.length; index++) {
-    const token = tokens[index]!;
-    if (token.toLowerCase() !== ":id") continue;
-    const value = tokens[index + 1];
-    return value && !value.startsWith(":") ? value : "";
-  }
-  return "";
-}
-
-function ceilGeneratedId(file: string, block: { from: number; title: string; body: string }): string {
-  return `ceil-${shortHash(`${file}\n${block.from}\n${block.title}\n${block.body}`)}`;
-}
-
-function scanCeilSourceBlocks(markdown: string, file: string): CeilSourceBlock[] {
-  const blocks: CeilSourceBlock[] = [];
-  let pos = 0;
-  while (pos < markdown.length) {
-    const lineEndIndex = markdown.indexOf("\n", pos);
-    const lineEnd = lineEndIndex < 0 ? markdown.length : lineEndIndex;
-    const line = markdown.slice(pos, lineEnd);
-    const open = CEIL_OPEN_LINE_RE.exec(line);
-    if (!open) {
-      pos = lineEndIndex < 0 ? markdown.length : lineEnd + 1;
-      continue;
-    }
-    const title = String(open[1] || "").trim();
-    const bodyFrom = lineEndIndex < 0 ? markdown.length : lineEnd + 1;
-    let closeFrom = -1;
-    let closeTo = -1;
-    let cursor = bodyFrom;
-    while (cursor < markdown.length) {
-      const closeLineEndIndex = markdown.indexOf("\n", cursor);
-      const closeLineEnd = closeLineEndIndex < 0 ? markdown.length : closeLineEndIndex;
-      const closeLine = markdown.slice(cursor, closeLineEnd);
-      if (CEIL_CLOSE_LINE_RE.test(closeLine)) {
-        closeFrom = cursor;
-        closeTo = closeLineEnd;
-        break;
-      }
-      cursor = closeLineEndIndex < 0 ? markdown.length : closeLineEnd + 1;
-    }
-    if (closeFrom < 0) {
-      pos = bodyFrom;
-      continue;
-    }
-    const body = markdown.slice(bodyFrom, closeFrom);
-    const base = { from: pos, title, body };
-    blocks.push({
-      ...base,
-      to: closeTo,
-      bodyFrom,
-      bodyTo: closeFrom,
-      id: ceilTitleId(title) || ceilGeneratedId(file, base),
-    });
-    pos = closeTo + 1;
-  }
-  return blocks;
-}
-
-function normalizeCeilBody(code: string): string {
-  const normalized = String(code ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  return normalized.endsWith("\n") ? normalized : `${normalized}\n`;
-}
-
-function writeBackJupyterCells(body: Record<string, unknown>): boolean {
-  const file = String(body.file || "");
-  if (!sameOpenFile(file)) return true;
-  if (rejectReadOnlyAction("Read-only pane")) return true;
-  const rawCells = Array.isArray(body.cells) ? body.cells : [];
-  const byId = new Map<string, string>();
-  for (const raw of rawCells) {
-    if (!raw || typeof raw !== "object") continue;
-    const cell = raw as CeilWriteBackCell;
-    const id = String(cell.cellId || cell.id || "").trim();
-    if (!id) continue;
-    byId.set(id, normalizeCeilBody(String(cell.code ?? "")));
-  }
-  if (byId.size === 0) return true;
-  const blocks = scanCeilSourceBlocks(editor.getMarkdown(), currentFile)
-    .filter((block) => byId.has(block.id))
-    .sort((a, b) => b.bodyFrom - a.bodyFrom);
-  if (blocks.length === 0) {
-    setStatus("Jupyter cell not found");
-    return true;
-  }
-  for (const block of blocks) {
-    editor.replaceMarkdownRange(block.bodyFrom, block.bodyTo, byId.get(block.id) || "");
-  }
-  setStatus(`Updated ${blocks.length} Jupyter cell${blocks.length === 1 ? "" : "s"}`);
-  return true;
-}
-
 function runHostCommand(detail: unknown): boolean {
   const body = (detail && typeof detail === "object" ? detail : {}) as {
     command?: string;
@@ -4729,8 +4936,6 @@ function runHostCommand(detail: unknown): boolean {
       if (rejectReadOnlyAction("Read-only pane")) return true;
       void save();
       return true;
-    case "jupyter-cells-write-back":
-      return writeBackJupyterCells(body as Record<string, unknown>);
     case "jupyter-cell-script-saved":
       setStatus("Jupyter cell script saved");
       return true;
@@ -4802,6 +5007,26 @@ agendaButton.addEventListener("click", () => {
 toolsButton.addEventListener("click", toggleToolsPanel);
 toolsClose.addEventListener("click", closeToolsPanel);
 roamToolsClose.addEventListener("click", closeRoamToolsPanel);
+jupyterButton.addEventListener("click", toggleJupyterPanel);
+jupyterClose.addEventListener("click", closeJupyterPanel);
+jupyterPanel.addEventListener("click", (event) => {
+  const button = (event.target as Element | null)?.closest<HTMLButtonElement>("[data-jupyter-action]");
+  if (!button) return;
+  event.preventDefault();
+  const action = button.dataset.jupyterAction || "";
+  if (action === "run-all") void runJupyterCells("all");
+  else if (action === "run-above") void runJupyterCells("above");
+  else if (action === "run-below") void runJupyterCells("below");
+  else if (action === "run-section") void runJupyterCells("section");
+  else if (action === "restart-run-all") void restartAndRunAllJupyterCells().catch((error) => setStatus(error instanceof Error ? error.message : "Jupyter restart failed"));
+  else if (action === "interrupt") void interruptSelectedJupyterKernel().catch((error) => setStatus(error instanceof Error ? error.message : "Jupyter interrupt failed"));
+  else if (action === "clear-all") void clearAllJupyterOutputs().catch((error) => setStatus(error instanceof Error ? error.message : "Clear outputs failed"));
+  else if (action === "variables") void showJupyterVariables();
+  else if (action === "refresh") {
+    jupyterVars.hidden = true;
+    renderJupyterPanel();
+  }
+});
 sourceButton.addEventListener("click", toggleSourceMode);
 saveButton.addEventListener("click", () => void save());
 document.addEventListener("keydown", (event) => {

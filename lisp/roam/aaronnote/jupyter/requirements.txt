@@ -1,6 +1,2 @@
-jupyterlab>=4.6,<4.7
 jupyter-server>=2,<3
 ipykernel>=6,<7
-jupytext>=1.16,<2
-neopyter>=0.2,<1
-

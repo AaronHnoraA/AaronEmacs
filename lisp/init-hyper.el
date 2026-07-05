@@ -14,8 +14,6 @@
 (declare-function my/git-board "init-git-board" ())
 (declare-function my/git-dispatch "init-git-core" ())
 (declare-function my/health-report "init-health" ())
-(declare-function my/jupyter-dispatch "init-jupyter-tools" ())
-(declare-function my/jupyter-manager "init-jupyter-core" ())
 (declare-function my/language-server-dispatch "init-lsp-tools" ())
 (declare-function my/language-server-manager "init-lsp-tools" ())
 (declare-function my/output-dispatch "init-output" ())
@@ -45,7 +43,6 @@
       ("c" "compile board" my/compile-board :transient transient--do-exit)
       ("g" "git board" my/git-board :transient transient--do-exit)
       ("L" "language server" my/language-server-manager :transient transient--do-exit)
-      ("j" "jupyter manager" my/jupyter-manager :transient transient--do-exit)
       ("a" "appine board" my/appine-board :transient transient--do-exit)
       ("h" "health report" my/health-report :transient transient--do-exit)]
      ["Menus"
@@ -66,7 +63,6 @@
       ("m" "git menu" my/git-dispatch :transient transient--do-exit)
       ("s" "merge conflict" my/smerge-dispatch :transient transient--do-exit)
       ("n" "problems project" my/problems-project :transient transient--do-exit)
-      ("J" "jupyter menu" my/jupyter-dispatch :transient transient--do-exit)
       ("R" "remote board" my/hyper-open-remote-connectboard-dispatch :transient transient--do-exit)
       ("P" "project local" my/project-local-describe :transient transient--do-exit)]]))
 

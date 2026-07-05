@@ -30,9 +30,8 @@ export PATH="${VENV}/bin:${PATH}"
 "${VENV}/bin/python" -m pip install --requirement "${JUPYTER_ROOT}/requirements.txt"
 
 "${SCRIPT_DIR}/install-kernelspecs.sh"
-"${SCRIPT_DIR}/build-labextension.sh"
 
-printf 'Aaronnote Jupyter bootstrap complete:\n'
+printf 'Aaronnote Jupyter kernel server bootstrap complete:\n'
 printf '  root: %s\n' "$JUPYTER_ROOT"
 printf '  python: %s\n' "${VENV}/bin/python"
 printf '  jupyter_data: %s\n' "$JUPYTER_DATA_DIR"

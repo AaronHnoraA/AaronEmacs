@@ -46,10 +46,6 @@
   (concat "^[ \t]*" my/aaronnote-jupyter-cell--comment-prefix
           "[ \t]*Aaronnote cell storage:[ \t]*\\(.+\\)$"))
 
-(defconst my/aaronnote-jupyter-cell--cell-re
-  (concat "^[ \t]*" my/aaronnote-jupyter-cell--comment-prefix
-          "[ \t]*%%[ \t]+aaronnote-cell[ \t]+id=\\([^ \t\n]+\\)[ \t]*$"))
-
 (defun my/aaronnote-jupyter-cell--header-value (regexp)
   "Return the first generated header value matching REGEXP."
   (save-excursion
@@ -76,53 +72,18 @@
                           my/aaronnote-jupyter-cell--storage-re)
                          "markdown")))))
 
-(defun my/aaronnote-jupyter-cell--end-re (id)
-  "Return the end marker regexp for Jupyter cell ID."
-  (concat "^[ \t]*" my/aaronnote-jupyter-cell--comment-prefix
-          "[ \t]*%%[ \t]+end-aaronnote-cell[ \t]+id="
-          (regexp-quote id)
-          "[ \t]*$"))
-
-(defun my/aaronnote-jupyter-cell--scan-cells ()
-  "Return marker-delimited cell payloads from the current hidden script."
-  (let (cells)
-    (save-excursion
-      (save-restriction
-        (widen)
-        (goto-char (point-min))
-        (while (re-search-forward my/aaronnote-jupyter-cell--cell-re nil t)
-          (let* ((id (match-string-no-properties 1))
-                 (body-start (line-beginning-position 2))
-                 (end-re (my/aaronnote-jupyter-cell--end-re id)))
-            (when (re-search-forward end-re nil t)
-              (push `((cellId . ,id)
-                      (code . ,(buffer-substring-no-properties
-                                body-start
-                                (match-beginning 0))))
-                    cells))))))
-    (nreverse cells)))
-
 (defun my/aaronnote-jupyter-cell-sync-buffer ()
-  "Send all generated Jupyter cell bodies in this script back to Aaronnote."
+  "Notify Aaronnote that the generated Jupyter cell script was saved."
   (interactive)
   (unless (and my/aaronnote-jupyter-cell-source-file
                (not (string-empty-p my/aaronnote-jupyter-cell-source-file)))
     (user-error "This buffer is not linked to an Aaronnote Jupyter cell source"))
-  (if (string= my/aaronnote-jupyter-cell-storage "script")
-      (my/aaronnote-command
-       "jupyter-cell-script-saved"
-       `((file . ,my/aaronnote-jupyter-cell-source-file)
-         (kernel . ,(or my/aaronnote-jupyter-cell-kernel ""))
-         (session . ,(or my/aaronnote-jupyter-cell-session ""))))
-    (let ((cells (my/aaronnote-jupyter-cell--scan-cells)))
-      (unless cells
-        (user-error "No Aaronnote Jupyter cells found"))
-      (my/aaronnote-command
-       "jupyter-cells-write-back"
-       `((file . ,my/aaronnote-jupyter-cell-source-file)
-         (kernel . ,(or my/aaronnote-jupyter-cell-kernel ""))
-         (session . ,(or my/aaronnote-jupyter-cell-session ""))
-         (cells . ,(vconcat cells))))))
+  (my/aaronnote-command
+   "jupyter-cell-script-saved"
+   `((file . ,my/aaronnote-jupyter-cell-source-file)
+     (kernel . ,(or my/aaronnote-jupyter-cell-kernel ""))
+     (session . ,(or my/aaronnote-jupyter-cell-session ""))
+     (storage . ,(or my/aaronnote-jupyter-cell-storage ""))))
   t)
 
 (defun my/aaronnote-jupyter-cell-after-save-h ()

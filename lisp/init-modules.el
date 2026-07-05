@@ -126,8 +126,6 @@ If one of FEATURES is already available, require MODULE immediately."
                    my/auctex-live-preview-mode))
   (autoload command "init-auctex" nil t))
 (my/require-module-after-any-feature 'init-auctex 'tex 'tex-site 'pdf-tools 'pdf-view)
-(my/require-module-safely 'init-jupyter)
-(my/require-module-safely 'init-neopyter)
 (my/require-module-safely 'init-browser)
 (my/require-module-safely 'init-fzfs)
 (require 'init-function-keys)

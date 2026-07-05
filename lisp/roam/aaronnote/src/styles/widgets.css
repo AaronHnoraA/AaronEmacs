@@ -1839,16 +1839,6 @@
   overflow-wrap: anywhere;
 }
 
-.cm-editor .cm-org-env-block[data-kind="ceil"],
-.cm-editor org-env-block[data-kind="ceil"] {
-  --block-c: var(--aaron-accent, #9de7ff);
-}
-
-.cm-editor .cm-org-env-block[data-kind="ceil"]::after,
-.cm-editor org-env-block[data-kind="ceil"]::after {
-  content: none;
-}
-
 .cm-editor .cm-ceil-cell-widget {
   box-sizing: border-box;
   width: 100%;
