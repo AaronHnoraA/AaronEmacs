@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 
 function inside(root, file) {
@@ -271,13 +271,27 @@ async function readOutputMirror(file) {
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch (err) {
     if (err?.code === "ENOENT") return {};
+    if (err instanceof SyntaxError) {
+      // A partially-written or hand-corrupted mirror must not brick the cell.
+      process.stderr.write(`[aaronnote-jupyter] ignoring corrupt output mirror: ${file}\n`);
+      return {};
+    }
     throw err;
   }
 }
 
 async function writeOutputMirror(file, value) {
   await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  // Atomic replace: a crash mid-write leaves the previous mirror intact instead
+  // of a half-written JSON that readOutputMirror would then have to discard.
+  const tmp = `${file}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await rename(tmp, file);
+  } catch (err) {
+    try { await rm(tmp, { force: true }); } catch {}
+    throw err;
+  }
 }
 
 function buildHiddenScript({ noteFile, kernel, session, language, cells, targetCellId, storage = "markdown", existingCells = new Map() }) {
@@ -338,6 +352,20 @@ export function createJupyterCellService({
   let activeRequests = 0;
   let cleanupTimer = null;
   let cleanupRunning = false;
+  const mirrorLocks = new Map();
+
+  function withMirrorLock(file, run) {
+    // Serialize read-modify-write on a single output mirror so two cells sharing
+    // one kernel/session file cannot clobber each other's saved outputs.
+    const previous = mirrorLocks.get(file) || Promise.resolve();
+    const result = previous.then(run, run);
+    const guard = result.catch(() => {});
+    mirrorLocks.set(file, guard);
+    void guard.finally(() => {
+      if (mirrorLocks.get(file) === guard) mirrorLocks.delete(file);
+    });
+    return result;
+  }
 
   function cleanupNeeded() {
     return Boolean(serverProcess) || kernelsByKey.size > 0;
@@ -448,10 +476,26 @@ export function createJupyterCellService({
 
   async function serverReady() {
     try {
-      const response = await fetch(`${baseUrl}/api/status`);
+      const response = await fetch(`${baseUrl}/api/status`, { signal: AbortSignal.timeout(3000) });
       return response.ok;
     } catch {
       return false;
+    }
+  }
+
+  async function reconcileKernels() {
+    // Drop local records whose kernel no longer exists on the server, without
+    // nuking the whole map on a transient probe failure (which would leak
+    // kernels on an externally-managed AARONNOTE_JUPYTER_URL server).
+    let live;
+    try {
+      live = await fetchJson("/api/kernels");
+    } catch {
+      return;
+    }
+    const ids = new Set(Array.isArray(live) ? live.map((item) => String(item?.id || "")) : []);
+    for (const [key, record] of Array.from(kernelsByKey.entries())) {
+      if (record?.id && !ids.has(record.id)) kernelsByKey.delete(key);
     }
   }
 
@@ -469,13 +513,16 @@ export function createJupyterCellService({
       touchServer();
       return;
     }
-    kernelsByKey.clear();
     if (startPromise) return await startPromise;
     startPromise = (async () => {
       if (!existsSync(runScript)) {
         throw error(`Aaronnote Jupyter launcher not found: ${runScript}`, 500);
       }
       if (!serverProcess || serverProcess.exitCode != null) {
+        // A fresh server owns no kernels; any cached ids from a prior process
+        // are stale. (An already-live-but-slow process falls through without
+        // clearing, so records survive a transient readiness blip.)
+        kernelsByKey.clear();
         serverProcess = spawn(runScript, [workspace], {
           cwd: root,
           env: {
@@ -572,6 +619,250 @@ export function createJupyterCellService({
     });
   }
 
+  function kernelGoneErrorP(err) {
+    if (Number(err?.statusCode || 0) === 404) return true;
+    return /websocket/i.test(String(err?.message || ""));
+  }
+
+  async function kernelAlive(id) {
+    if (!id) return false;
+    try {
+      await fetchJson(`/api/kernels/${encodeURIComponent(id)}`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function runExecuteOnKernel(kernelInfo, record, code, body, cellId) {
+    const msgId = randomUUID();
+    const sessionId = randomUUID();
+    const outputs = [];
+    const displayIndexes = new Map();
+    const streamLimit = durationFromEnv("AARONNOTE_JUPYTER_MAX_STREAM_BYTES", 1024 * 1024);
+    let streamBytes = 0;
+    let streamTruncated = false;
+    let executionCount = null;
+    let shellReply = null;
+    let idle = false;
+    let clearOnNext = false;
+    let settled = false;
+
+    const finalizeRecord = (status, err = "") => {
+      if (!record) return;
+      record.running = Math.max(0, Number(record.running || 0) - 1);
+      record.executionStartedAt = record.running > 0 ? record.executionStartedAt : 0;
+      record.executionCount = executionCount ?? record.executionCount ?? null;
+      record.lastStatus = status || (record.running > 0 ? "running" : "idle");
+      record.lastError = err;
+      touchKernel(record);
+    };
+
+    return new Promise((resolveDone, rejectDone) => {
+      let ws = null;
+      const timeout = execTimeoutMs > 0 ? setTimeout(() => {
+        fail(error("Jupyter execution timed out", 504));
+      }, execTimeoutMs) : null;
+
+      const done = (value) => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        resolveDone(value);
+      };
+      const fail = (err) => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        try { ws?.close(); } catch {}
+        finalizeRecord("error", err?.message || String(err || ""));
+        rejectDone(err);
+      };
+
+      const finishIfDone = () => {
+        if (settled || !shellReply || !idle) return;
+        try { ws?.close(); } catch {}
+        finalizeRecord(shellReply.status || "ok");
+        done({
+          ok: true,
+          cellId,
+          kernel: kernelInfo.kernel,
+          session: kernelInfo.session,
+          status: shellReply.status || "ok",
+          executionCount,
+          outputs,
+        });
+      };
+
+      const pushOutput = (output) => {
+        if (clearOnNext) {
+          outputs.length = 0;
+          displayIndexes.clear();
+          streamBytes = 0;
+          streamTruncated = false;
+          clearOnNext = false;
+        }
+        if (output.output_type === "stream") {
+          if (streamTruncated) return;
+          const last = outputs[outputs.length - 1];
+          if (last && last.output_type === "stream" && last.name === output.name) {
+            last.text += output.text;
+          } else {
+            outputs.push(output);
+          }
+          streamBytes += Buffer.byteLength(String(output.text || ""), "utf8");
+          if (streamBytes > streamLimit) {
+            streamTruncated = true;
+            outputs.push({
+              output_type: "stream",
+              name: "stderr",
+              text: `\n[aaronnote: output truncated at ${streamLimit} bytes]\n`,
+            });
+          }
+          return;
+        }
+        const displayId = output?.transient?.display_id;
+        if (displayId && output.output_type === "update_display_data") {
+          if (displayIndexes.has(displayId)) {
+            outputs[displayIndexes.get(displayId)] = { ...output, output_type: "display_data" };
+            return;
+          }
+          output = { ...output, output_type: "display_data" };
+        }
+        if (displayId) displayIndexes.set(displayId, outputs.length);
+        outputs.push(output);
+      };
+
+      try {
+        ws = new WebSocket(`${wsBaseUrl}/api/kernels/${encodeURIComponent(kernelInfo.id)}/channels?session_id=${encodeURIComponent(randomUUID())}`);
+      } catch (err) {
+        fail(error(`Jupyter websocket failed: ${err?.message || err}`, 502));
+        return;
+      }
+
+      ws.addEventListener("open", () => {
+        touchKernel(record);
+        ws.send(JSON.stringify({
+          header: {
+            msg_id: msgId,
+            username: "aaronnote",
+            session: sessionId,
+            msg_type: "execute_request",
+            version: "5.3",
+            date: new Date().toISOString(),
+          },
+          parent_header: {},
+          metadata: {},
+          content: {
+            code,
+            silent: Boolean(body?.silent),
+            store_history: body?.storeHistory === false ? false : true,
+            user_expressions: {},
+            allow_stdin: false,
+            stop_on_error: false,
+          },
+          channel: "shell",
+          buffers: [],
+        }));
+      });
+      ws.addEventListener("error", () => fail(error("Jupyter websocket failed", 502)));
+      ws.addEventListener("close", () => {
+        if (!settled && (!shellReply || !idle)) fail(error("Jupyter websocket closed", 502));
+      });
+      ws.addEventListener("message", (event) => {
+        let message;
+        try {
+          message = JSON.parse(wsDataToString(event.data));
+        } catch {
+          return;
+        }
+        const parentId = message?.parent_header?.msg_id;
+        if (parentId !== msgId) return;
+        touchKernel(record);
+        const channel = message.channel || "";
+        const type = message.header?.msg_type || "";
+        const content = message.content || {};
+        if (channel === "shell" && type === "execute_reply") {
+          shellReply = content;
+          finishIfDone();
+          return;
+        }
+        if (channel !== "iopub") return;
+        if (type === "status" && content.execution_state === "idle") {
+          idle = true;
+          finishIfDone();
+          return;
+        }
+        if (type === "execute_input") {
+          executionCount = content.execution_count ?? executionCount;
+          if (record) record.executionCount = executionCount;
+          return;
+        }
+        if (type === "stream") {
+          pushOutput({ output_type: "stream", name: content.name || "stdout", text: content.text || "" });
+        } else if (type === "execute_result") {
+          executionCount = content.execution_count ?? executionCount;
+          if (record) record.executionCount = executionCount;
+          pushOutput({
+            output_type: "execute_result",
+            execution_count: content.execution_count ?? null,
+            data: content.data || {},
+            metadata: content.metadata || {},
+          });
+        } else if (type === "display_data" || type === "update_display_data") {
+          pushOutput({
+            output_type: type,
+            data: content.data || {},
+            metadata: content.metadata || {},
+            transient: content.transient || {},
+          });
+        } else if (type === "error") {
+          pushOutput({
+            output_type: "error",
+            ename: content.ename || "",
+            evalue: content.evalue || "",
+            traceback: Array.isArray(content.traceback) ? content.traceback : [],
+          });
+        } else if (type === "clear_output") {
+          if (content.wait) clearOnNext = true;
+          else {
+            outputs.length = 0;
+            displayIndexes.clear();
+            streamBytes = 0;
+            streamTruncated = false;
+          }
+        }
+      });
+    });
+  }
+
+  async function runExecuteAttempt(body, code, cellId, allowRetry) {
+    const kernelInfo = await ensureKernel(body || {});
+    const record = kernelsByKey.get(kernelInfo.key);
+    if (record) {
+      const now = Date.now();
+      record.running = Math.max(0, Number(record.running || 0)) + 1;
+      record.totalRuns = Number(record.totalRuns || 0) + 1;
+      record.executionStartedAt = now;
+      record.lastUsedAt = now;
+      record.lastActivityAt = now;
+      record.lastCellId = cellId;
+      record.lastStatus = "running";
+      record.lastError = "";
+    }
+    try {
+      return await runExecuteOnKernel(kernelInfo, record, code, body, cellId);
+    } catch (err) {
+      // A cached kernel id that no longer exists on the server must self-heal:
+      // drop the dead record and re-provision once before surfacing the error.
+      if (allowRetry && kernelGoneErrorP(err) && !(await kernelAlive(kernelInfo.id))) {
+        kernelsByKey.delete(kernelInfo.key);
+        return await runExecuteAttempt(body, code, cellId, false);
+      }
+      throw err;
+    }
+  }
+
   async function execute(body) {
     const code = normalizeCode(body?.code);
     const cellId = String(body?.cellId || body?.id || "");
@@ -590,183 +881,7 @@ export function createJupyterCellService({
       };
     }
     if (!code.trim()) return { ok: true, status: "ok", outputs: [], executionCount: null, cellId };
-    return await withActiveRequest(async () => {
-      const kernelInfo = await ensureKernel(body || {});
-      const record = kernelsByKey.get(kernelInfo.key);
-      if (record) {
-        const now = Date.now();
-        record.running = Math.max(0, Number(record.running || 0)) + 1;
-        record.totalRuns = Number(record.totalRuns || 0) + 1;
-        record.executionStartedAt = now;
-        record.lastUsedAt = now;
-        record.lastActivityAt = now;
-        record.lastCellId = cellId;
-        record.lastStatus = "running";
-        record.lastError = "";
-      }
-      const ws = new WebSocket(`${wsBaseUrl}/api/kernels/${encodeURIComponent(kernelInfo.id)}/channels?session_id=${encodeURIComponent(randomUUID())}`);
-      const msgId = randomUUID();
-      const sessionId = randomUUID();
-      const outputs = [];
-      const displayIndexes = new Map();
-      let executionCount = null;
-      let shellReply = null;
-      let idle = false;
-      let clearOnNext = false;
-      let settled = false;
-
-      const finalizeRecord = (status, err = "") => {
-        if (!record) return;
-        record.running = Math.max(0, Number(record.running || 0) - 1);
-        record.executionStartedAt = record.running > 0 ? record.executionStartedAt : 0;
-        record.executionCount = executionCount ?? record.executionCount ?? null;
-        record.lastStatus = status || (record.running > 0 ? "running" : "idle");
-        record.lastError = err;
-        touchKernel(record);
-      };
-
-      const finishIfDone = (resolveDone) => {
-        if (!shellReply || !idle) return;
-        try { ws.close(); } catch {}
-        finalizeRecord(shellReply.status || "ok");
-        resolveDone({
-          ok: true,
-          cellId,
-          kernel: kernelInfo.kernel,
-          session: kernelInfo.session,
-          status: shellReply.status || "ok",
-          executionCount,
-          outputs,
-        });
-      };
-
-      return await new Promise((resolveDone, rejectDone) => {
-        const timeout = execTimeoutMs > 0 ? setTimeout(() => {
-          fail(error("Jupyter execution timed out", 504));
-        }, execTimeoutMs) : null;
-
-        const done = (value) => {
-          if (settled) return;
-          settled = true;
-          if (timeout) clearTimeout(timeout);
-          resolveDone(value);
-        };
-        const fail = (err) => {
-          if (settled) return;
-          settled = true;
-          if (timeout) clearTimeout(timeout);
-          try { ws.close(); } catch {}
-          finalizeRecord("error", err?.message || String(err || ""));
-          rejectDone(err);
-        };
-
-        ws.addEventListener("open", () => {
-          touchKernel(record);
-          ws.send(JSON.stringify({
-            header: {
-              msg_id: msgId,
-              username: "aaronnote",
-              session: sessionId,
-              msg_type: "execute_request",
-              version: "5.3",
-              date: new Date().toISOString(),
-            },
-            parent_header: {},
-            metadata: {},
-            content: {
-              code,
-              silent: Boolean(body?.silent),
-              store_history: body?.storeHistory === false ? false : true,
-              user_expressions: {},
-              allow_stdin: false,
-              stop_on_error: false,
-            },
-            channel: "shell",
-            buffers: [],
-          }));
-        });
-        ws.addEventListener("error", () => fail(error("Jupyter websocket failed", 502)));
-        ws.addEventListener("close", () => {
-          if (!settled && (!shellReply || !idle)) fail(error("Jupyter websocket closed", 502));
-        });
-        ws.addEventListener("message", (event) => {
-          let message;
-          try {
-            message = JSON.parse(wsDataToString(event.data));
-          } catch {
-            return;
-          }
-          const parentId = message?.parent_header?.msg_id;
-          if (parentId !== msgId) return;
-          touchKernel(record);
-          const channel = message.channel || "";
-          const type = message.header?.msg_type || "";
-          const content = message.content || {};
-          if (channel === "shell" && type === "execute_reply") {
-            shellReply = content;
-            finishIfDone(done);
-            return;
-          }
-          if (channel !== "iopub") return;
-          if (type === "status" && content.execution_state === "idle") {
-            idle = true;
-            finishIfDone(done);
-            return;
-          }
-          if (type === "execute_input") {
-            executionCount = content.execution_count ?? executionCount;
-            if (record) record.executionCount = executionCount;
-            return;
-          }
-          const pushOutput = (output) => {
-            if (clearOnNext) {
-              outputs.length = 0;
-              displayIndexes.clear();
-              clearOnNext = false;
-            }
-            const displayId = output?.transient?.display_id;
-            if (displayId && output.output_type === "update_display_data" && displayIndexes.has(displayId)) {
-              outputs[displayIndexes.get(displayId)] = { ...output, output_type: "display_data" };
-              return;
-            }
-            if (displayId) displayIndexes.set(displayId, outputs.length);
-            outputs.push(output);
-          };
-          if (type === "stream") {
-            pushOutput({ output_type: "stream", name: content.name || "stdout", text: content.text || "" });
-          } else if (type === "execute_result") {
-            executionCount = content.execution_count ?? executionCount;
-            if (record) record.executionCount = executionCount;
-            pushOutput({
-              output_type: "execute_result",
-              execution_count: content.execution_count ?? null,
-              data: content.data || {},
-              metadata: content.metadata || {},
-            });
-          } else if (type === "display_data" || type === "update_display_data") {
-            pushOutput({
-              output_type: type,
-              data: content.data || {},
-              metadata: content.metadata || {},
-              transient: content.transient || {},
-            });
-          } else if (type === "error") {
-            pushOutput({
-              output_type: "error",
-              ename: content.ename || "",
-              evalue: content.evalue || "",
-              traceback: Array.isArray(content.traceback) ? content.traceback : [],
-            });
-          } else if (type === "clear_output") {
-            if (content.wait) clearOnNext = true;
-            else {
-              outputs.length = 0;
-              displayIndexes.clear();
-            }
-          }
-        });
-      });
-    });
+    return await withActiveRequest(async () => runExecuteAttempt(body, code, cellId, true));
   }
 
   async function openScript(body) {
@@ -848,21 +963,26 @@ export function createJupyterCellService({
     });
     if (leanRuntimeP(read.language, read.kernel)) return result;
     const outputFile = outputMirrorPath(noteFile, read.session, read.language);
-    const mirror = await readOutputMirror(outputFile);
-    const cells = mirror.cells && typeof mirror.cells === "object" ? mirror.cells : {};
-    cells[read.cellId] = {
-      ...result,
-      savedAt: new Date().toISOString(),
-      kernel: read.kernel,
-      session: read.session,
-      language: read.language,
-    };
-    await writeOutputMirror(outputFile, {
-      version: 1,
-      source: noteFile,
-      kernel: read.kernel,
-      session: read.session,
-      cells,
+    await withMirrorLock(outputFile, async () => {
+      const mirror = await readOutputMirror(outputFile);
+      const cells = mirror.cells && typeof mirror.cells === "object" ? mirror.cells : {};
+      const current = cells[read.cellId] && typeof cells[read.cellId] === "object" ? cells[read.cellId] : {};
+      const currentUi = current.ui && typeof current.ui === "object" ? current.ui : {};
+      cells[read.cellId] = {
+        ...result,
+        ui: currentUi,
+        savedAt: new Date().toISOString(),
+        kernel: read.kernel,
+        session: read.session,
+        language: read.language,
+      };
+      await writeOutputMirror(outputFile, {
+        version: 1,
+        source: noteFile,
+        kernel: read.kernel,
+        session: read.session,
+        cells,
+      });
     });
     return result;
   }
@@ -875,18 +995,60 @@ export function createJupyterCellService({
     const cellId = markerId(body?.cellId || body?.id);
     if (!cellId) throw error("Missing Jupyter cell id", 400);
     const outputFile = outputMirrorPath(noteFile, session, language);
-    const mirror = await readOutputMirror(outputFile);
-    const cells = mirror.cells && typeof mirror.cells === "object" ? mirror.cells : {};
-    delete cells[cellId];
-    await writeOutputMirror(outputFile, {
-      version: 1,
-      source: noteFile,
-      kernel,
-      session,
-      language,
-      cells,
+    await withMirrorLock(outputFile, async () => {
+      const mirror = await readOutputMirror(outputFile);
+      const cells = mirror.cells && typeof mirror.cells === "object" ? mirror.cells : {};
+      delete cells[cellId];
+      await writeOutputMirror(outputFile, {
+        version: 1,
+        source: noteFile,
+        kernel,
+        session,
+        language,
+        cells,
+      });
     });
     return { ok: true, file: outputFile, cellId, kernel, session };
+  }
+
+  async function saveScriptCellOutputUi(body) {
+    const noteFile = safeNoteFile(body?.file);
+    const kernel = cleanToken(body?.kernel, "python3");
+    const session = cleanToken(body?.session, "default");
+    const language = languageForKernel(kernel, body?.language || body?.lang);
+    const cellId = markerId(body?.cellId || body?.id);
+    if (!cellId) throw error("Missing Jupyter cell id", 400);
+    const outputFile = outputMirrorPath(noteFile, session, language);
+    let savedCell = null;
+    await withMirrorLock(outputFile, async () => {
+      const mirror = await readOutputMirror(outputFile);
+      const cells = mirror.cells && typeof mirror.cells === "object" ? mirror.cells : {};
+      const current = cells[cellId] && typeof cells[cellId] === "object" ? cells[cellId] : { ok: true, status: "ok", outputs: [] };
+      const currentUi = current.ui && typeof current.ui === "object" ? current.ui : {};
+      const nextUi = {
+        ...currentUi,
+        outputFolded: body?.outputFolded === true,
+        outputExpanded: body?.outputExpanded === true,
+      };
+      savedCell = {
+        ...current,
+        ui: nextUi,
+        savedAt: current.savedAt || new Date().toISOString(),
+        kernel,
+        session,
+        language,
+      };
+      cells[cellId] = savedCell;
+      await writeOutputMirror(outputFile, {
+        version: 1,
+        source: noteFile,
+        kernel,
+        session,
+        language,
+        cells,
+      });
+    });
+    return { ok: true, file: outputFile, cellId, kernel, session, language, output: savedCell };
   }
 
   async function clearAllOutputs(body) {
@@ -895,14 +1057,14 @@ export function createJupyterCellService({
     const session = cleanToken(body?.session, "default");
     const language = languageForKernel(kernel, body?.language || body?.lang);
     const outputFile = outputMirrorPath(noteFile, session, language);
-    await writeOutputMirror(outputFile, {
+    await withMirrorLock(outputFile, () => writeOutputMirror(outputFile, {
       version: 1,
       source: noteFile,
       kernel,
       session,
       language,
       cells: {},
-    });
+    }));
     return { ok: true, file: outputFile, kernel, session };
   }
 
@@ -982,15 +1144,23 @@ export function createJupyterCellService({
   }
 
   async function interrupt(body) {
+    // Interrupt the kernel actually running this cell. Going through ensureKernel
+    // would spawn a fresh idle kernel when none exists (nothing to interrupt) and
+    // could desync state — a source of the flaky interrupt behavior.
+    const { record } = kernelRecordForBody(body || {});
+    if (!record?.id) {
+      return {
+        ok: true,
+        status: "not-started",
+        kernel: cleanToken(body?.kernel, "python3"),
+        session: cleanToken(body?.session, "default"),
+      };
+    }
     return await withActiveRequest(async () => {
-      const kernelInfo = await ensureKernel(body || {});
-      await fetchJson(`/api/kernels/${encodeURIComponent(kernelInfo.id)}/interrupt`, { method: "POST", body: {} });
-      const record = kernelsByKey.get(kernelInfo.key);
-      if (record) {
-        record.lastStatus = "interrupting";
-        touchKernel(record);
-      }
-      return { ok: true, kernel: kernelInfo.kernel, session: kernelInfo.session };
+      await fetchJson(`/api/kernels/${encodeURIComponent(record.id)}/interrupt`, { method: "POST", body: {} });
+      record.lastStatus = "interrupting";
+      touchKernel(record);
+      return { ok: true, kernel: record.kernel, session: record.session };
     });
   }
 
@@ -1009,7 +1179,7 @@ export function createJupyterCellService({
 
   async function listTasks() {
     const ready = cleanupNeeded() ? await serverReady() : false;
-    if (!ready) kernelsByKey.clear();
+    if (ready) await reconcileKernels();
     return {
       ok: true,
       server: {
@@ -1041,9 +1211,8 @@ export function createJupyterCellService({
     try {
       const now = Date.now();
       const ready = cleanupNeeded() ? await serverReady() : false;
-      if (!ready) {
-        kernelsByKey.clear();
-      } else {
+      if (ready) {
+        await reconcileKernels();
         for (const [key, record] of Array.from(kernelsByKey.entries())) {
           const running = Number(record?.running || 0) > 0;
           const idleMs = now - Number(record?.lastUsedAt || now);
@@ -1091,6 +1260,7 @@ export function createJupyterCellService({
     readScriptCell,
     executeScriptCell,
     clearScriptCellOutput,
+    saveScriptCellOutputUi,
     clearAllOutputs,
     variables,
     kernelStatus,

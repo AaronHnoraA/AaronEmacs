@@ -390,7 +390,10 @@ const builtInQuickInsertItems: QuickInsertItem[] = [
 export function builtInQuickInsertProvider(context: QuickInsertContext): QuickInsertItem[] {
   const allowed = new Set(context.block.commands);
   return builtInQuickInsertItems
-    .filter((item) => !item.command || allowed.has(item.command))
+    .filter((item) => {
+      if (item.command) return allowed.has(item.command);
+      return context.block.type !== "table_cell" && context.block.type !== "code_block";
+    })
     .filter((item) => quickMatches(item, context.query));
 }
 

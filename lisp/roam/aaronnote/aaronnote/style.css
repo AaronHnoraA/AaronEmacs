@@ -762,8 +762,8 @@ button:disabled {
 .aaronnote-context-menu {
   position: fixed;
   z-index: 1200;
-  width: min(280px, calc(100vw - 12px));
-  max-height: min(480px, calc(100vh - 12px));
+  width: min(320px, calc(100vw - 12px));
+  max-height: min(560px, calc(100vh - 12px));
   overflow: auto;
   display: grid;
   gap: 1px;
@@ -783,17 +783,18 @@ button:disabled {
 
 .aaronnote-context-menu button {
   width: 100%;
-  min-height: 30px;
+  min-height: 28px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(54px, auto);
   align-items: center;
   gap: 10px;
   border: 1px solid transparent;
   border-radius: 3px;
-  padding: 5px 7px;
+  padding: 5px 8px;
   background: transparent;
   color: var(--aaron-ink);
   text-align: left;
+  cursor: default;
 }
 
 .aaronnote-context-menu button:hover:not(:disabled),
@@ -804,6 +805,7 @@ button:disabled {
 
 .aaronnote-context-menu button:disabled {
   opacity: 0.42;
+  cursor: not-allowed;
 }
 
 .aaronnote-context-menu button[data-danger="true"] span {
@@ -825,6 +827,8 @@ button:disabled {
 .aaronnote-context-menu small {
   color: var(--aaron-muted);
   font: 10px/1.2 var(--aaron-font-mono);
+  justify-self: end;
+  text-align: right;
 }
 
 .aaronnote-context-separator {

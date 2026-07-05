@@ -188,6 +188,7 @@ type NativeApi = {
     readScriptCell?: (body?: unknown) => Promise<unknown>;
     executeScriptCell?: (body?: unknown) => Promise<unknown>;
     clearScriptCellOutput?: (body?: unknown) => Promise<unknown>;
+    saveScriptCellOutputUi?: (body?: unknown) => Promise<unknown>;
     clearAllOutputs?: (body?: unknown) => Promise<unknown>;
     variables?: (body?: unknown) => Promise<unknown>;
     kernelStatus?: (body?: unknown) => Promise<unknown>;
@@ -363,6 +364,10 @@ export const api = {
     async clearScriptCellOutput(body: unknown): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().jupyterCell?.clearScriptCellOutput, "Jupyter cell output");
       return ensureOk(await call(body) as Record<string, unknown>, "Jupyter cell output failed");
+    },
+    async saveScriptCellOutputUi(body: unknown): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().jupyterCell?.saveScriptCellOutputUi, "Jupyter cell output UI");
+      return ensureOk(await call(body) as Record<string, unknown>, "Jupyter cell output UI save failed");
     },
     async clearAllOutputs(body: unknown): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().jupyterCell?.clearAllOutputs, "Jupyter outputs");

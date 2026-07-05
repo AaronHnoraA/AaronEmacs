@@ -102,10 +102,18 @@
       (add-hook 'after-save-hook #'my/aaronnote-jupyter-cell-after-save-h nil t)
     (remove-hook 'after-save-hook #'my/aaronnote-jupyter-cell-after-save-h t)))
 
+(defun my/aaronnote-jupyter-cell--candidate-file-p ()
+  "Return non-nil when the current buffer might be a generated cell script.
+Cheap gate for `find-file-hook' so the header regexp scan (and any TRAMP
+round-trip it implies) only runs for files under a `.cell' store directory."
+  (when-let* ((file (buffer-file-name)))
+    (string-match-p (concat "\\(?:\\`\\|/\\)\\.cell/[^/]+\\'") file)))
+
 ;;;###autoload
 (defun my/aaronnote-jupyter-cell-maybe-enable-h ()
   "Enable `my/aaronnote-jupyter-cell-mode' in generated Jupyter cell scripts."
-  (when-let* ((meta (my/aaronnote-jupyter-cell--read-header))
+  (when-let* (((my/aaronnote-jupyter-cell--candidate-file-p))
+              (meta (my/aaronnote-jupyter-cell--read-header))
               (source (plist-get meta :source)))
     (setq-local my/aaronnote-jupyter-cell-source-file source)
     (setq-local my/aaronnote-jupyter-cell-kernel (plist-get meta :kernel))

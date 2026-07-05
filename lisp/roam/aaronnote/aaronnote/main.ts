@@ -57,7 +57,7 @@ import { matchingSnippetsForPrefix, SnippetSession, snippetDetail, snippetLabel,
 import type { CursorPosition, NoteSummary, SnippetSummary } from "./types.ts";
 import { createVimLite, type VimLiteKey, type VimLiteMode } from "./vim-lite.ts";
 import { countWritingStats, headingSubtreeRange, type WritingStats } from "./writing-stats.ts";
-import { shortHash } from "../src/cm6/widgets/measured-observer.ts";
+import { ceilCommandGeneratedId, ceilLanguageForKernel } from "../src/cm6/widgets/ceil-shared.ts";
 import {
   handleXwidgetControlBeforeInput,
   handleXwidgetControlKeydown,
@@ -863,22 +863,6 @@ function cleanJupyterToken(value: string, fallback: string): string {
   return clean || fallback;
 }
 
-function jupyterLanguageForKernel(kernel: string, requested = ""): string {
-  const explicit = requested.trim().toLowerCase();
-  const value = kernel.toLowerCase();
-  if (value.includes("lean") || explicit === "lean" || explicit === "lean4") return "lean4";
-  if (["bash", "sh", "shell", "zsh"].includes(explicit)) return "bash";
-  if (explicit) return explicit;
-  if (value.includes("sage")) return "python";
-  if (value.includes("python") || value === "py" || value === "python3") return "python";
-  if (value.includes("julia")) return "julia";
-  if (value === "r" || value.startsWith("ir")) return "r";
-  if (value.includes("bash") || value.includes("zsh") || value.includes("shell")) return "bash";
-  if (value.includes("javascript") || value === "js" || value.includes("node")) return "javascript";
-  if (value.includes("typescript") || value === "ts") return "typescript";
-  return "python";
-}
-
 function jupyterCellKey(cell: Pick<JupyterPanelCell, "id" | "language" | "session">): string {
   return `${cell.language}\0${cell.session}\0${cell.id}`;
 }
@@ -901,9 +885,18 @@ function formatRuntimeDuration(ms: unknown): string {
   return minuteRest ? `${hours}h ${minuteRest}m` : `${hours}h`;
 }
 
-function scanJupyterCells(): JupyterPanelCell[] {
+type JupyterCellBase = Pick<JupyterPanelCell, "id" | "from" | "to" | "line" | "language" | "kernel" | "session" | "status">;
+
+let jupyterScanMarkdown: string | null = null;
+let jupyterScanBases: JupyterCellBase[] = [];
+
+function scanJupyterCellBases(): JupyterCellBase[] {
   const markdown = editor.getMarkdown();
-  const cells: JupyterPanelCell[] = [];
+  // getMarkdown() is memoized by immutable-Text identity, so an unchanged doc
+  // returns the same string reference; skip re-scanning the whole file. A single
+  // context-menu open otherwise triggers this whole-document scan 2-3 times.
+  if (markdown === jupyterScanMarkdown) return jupyterScanBases;
+  const bases: JupyterCellBase[] = [];
   let pos = 0;
   let lineNumber = 1;
   while (pos <= markdown.length) {
@@ -912,23 +905,33 @@ function scanJupyterCells(): JupyterPanelCell[] {
     const line = markdown.slice(pos, lineEnd);
     const match = JUPYTER_CELL_RE.exec(line);
     if (match) {
-      const args = String(match[2] || "").split(",").map((item) => item.trim()).filter(Boolean);
+      const leading = match[1] ?? "";
+      const rawArgs = match[2] ?? "";
+      const rawId = match[3] ?? "";
+      const args = rawArgs.split(",").map((item) => item.trim()).filter(Boolean);
       const requestedLanguage = cleanJupyterToken(args[0] || "", "python");
       const kernelFallback = /^lean4?$/i.test(requestedLanguage)
         ? "lean4"
         : /^(?:bash|sh|shell|zsh)$/i.test(requestedLanguage) ? "bash" : "python3";
       const kernel = cleanJupyterToken(args[1] || "", kernelFallback).replace(/^\((.*)\)$/, "$1").trim() || kernelFallback;
-      const language = jupyterLanguageForKernel(kernel, requestedLanguage);
+      const language = ceilLanguageForKernel(kernel, requestedLanguage);
       const session = cleanJupyterToken(args[2] || "", "default");
-      const id = cleanJupyterToken(match[3] || "", `cell-${shortHash(`${currentFile}\n${pos}\n${line}`)}`);
-      const base = { id, from: pos, to: lineEnd, line: lineNumber, language, kernel, session, status: "idle" };
-      cells.push({ ...base, ...(jupyterTaskState.get(jupyterCellKey(base)) || {}) });
+      // Same generator the widget uses (offset after leading whitespace) so a
+      // panel run and the widget agree on an unlabeled cell's hidden-script id.
+      const id = cleanJupyterToken(rawId, ceilCommandGeneratedId(currentFile, pos + leading.length, rawArgs, rawId));
+      bases.push({ id, from: pos, to: lineEnd, line: lineNumber, language, kernel, session, status: "idle" });
     }
     if (lineEndIndex < 0) break;
     pos = lineEnd + 1;
     lineNumber += 1;
   }
-  return cells;
+  jupyterScanMarkdown = markdown;
+  jupyterScanBases = bases;
+  return bases;
+}
+
+function scanJupyterCells(): JupyterPanelCell[] {
+  return scanJupyterCellBases().map((base) => ({ ...base, ...(jupyterTaskState.get(jupyterCellKey(base)) || {}) }));
 }
 
 function jupyterCellsForContext(target: JupyterPanelCell, cells = scanJupyterCells()): Array<Record<string, string>> {
@@ -1066,7 +1069,13 @@ async function runJupyterCells(mode: "all" | "above" | "below" | "section"): Pro
   }
   setStatus(`Running ${cells.length} Jupyter cell${cells.length === 1 ? "" : "s"}`);
   for (const cell of cells) {
-    await runJupyterCell(cell, allCells);
+    const ok = await runJupyterCell(cell, allCells);
+    if (!ok) {
+      // Match VSCode Jupyter: a failing cell halts the run so later cells do not
+      // execute against half-initialized state.
+      setStatus(`Jupyter run stopped at ${cell.id} (error)`);
+      return;
+    }
   }
   setStatus("Jupyter run complete");
 }
@@ -1334,32 +1343,92 @@ function contextMenuItem(item: AaronContextMenuItem): HTMLElement {
   return button;
 }
 
+function runContextEditorCommand(command: EditorCommand, value = ""): boolean {
+  editor.focus();
+  return editor.runCommand(command, value);
+}
+
+async function copyCurrentNotePath(): Promise<void> {
+  if (!currentFile) return;
+  await copyText(currentFile);
+  setStatus("Note path copied");
+}
+
+async function pasteIntoEditorFromContextMenu(): Promise<boolean> {
+  editor.focus();
+  return editor.pasteFromClipboard();
+}
+
 function showContextMenu(event: MouseEvent): void {
   const selection = editor.getMarkdownSelection();
   const hasSelection = selection.from !== selection.to;
   const cell = jupyterCellFromPointer(event);
+  const cellCount = scanJupyterCells().length;
   const cellDetail = cell
     ? isLeanJupyterCell(cell) ? `${cell.language} / ${cell.session}` : `${cell.language} / ${cell.kernel} / ${cell.session}`
     : "";
-  const items: AaronContextMenuItem[] = [
-    { label: "Save", detail: currentReadOnly ? "read-only" : "current note", disabled: currentReadOnly || !currentFile, run: () => save() },
+  const items: AaronContextMenuItem[] = [];
+  const addSeparator = (): void => {
+    if (items.length > 0 && !items.at(-1)?.separator) items.push({ label: "", separator: true });
+  };
+
+  if (cell) {
+    items.push(
+      { label: "Run Cell", detail: cellDetail, disabled: !currentFile, run: () => runJupyterCell(cell) },
+      { label: "Edit Cell Source", detail: cell.id, disabled: !currentFile, run: () => openJupyterCellSource(cell) },
+      { label: "Run Section", detail: cell.session, disabled: !currentFile, run: () => runJupyterCells("section") },
+    );
+    addSeparator();
+  }
+
+  if (hasSelection) {
+    items.push(
+      { label: "Copy Selection", detail: "Cmd-C", run: () => copyEditorSelection() },
+      { label: "Bold", detail: "Cmd-B", disabled: currentReadOnly, run: () => runContextEditorCommand("bold") },
+      { label: "Italic", detail: "Cmd-I", disabled: currentReadOnly, run: () => runContextEditorCommand("italic") },
+      { label: "Inline Code", detail: "`code`", disabled: currentReadOnly, run: () => runContextEditorCommand("code") },
+      { label: "Link", detail: "Cmd-K", disabled: currentReadOnly, run: () => runContextEditorCommand("link") },
+    );
+    addSeparator();
+  } else {
+    items.push(
+      { label: "Paste", detail: "Cmd-V", disabled: currentReadOnly, run: () => pasteIntoEditorFromContextMenu() },
+      { label: "Find in Note", detail: "Cmd-F", run: () => openFindPanel() },
+    );
+    addSeparator();
+  }
+
+  items.push(
+    { label: "Save", detail: currentReadOnly ? "read-only" : "Cmd-S", disabled: currentReadOnly || !currentFile, run: () => save() },
     { label: "Open in Emacs", detail: currentFile ? fileNameFromPath(currentFile) : "", disabled: !currentFile, run: () => api.emacs.open({ file: currentFile }) },
-    { label: editor.isSourceMode() ? "Markdown View" : "Source View", run: () => toggleSourceMode() },
-    { separator: true },
-    { label: "Run Cell", detail: cellDetail, disabled: !cell || !currentFile, run: () => cell ? runJupyterCell(cell) : undefined },
-    { label: "Edit Cell Source", detail: cell?.id || "", disabled: !cell || !currentFile, run: () => cell ? openJupyterCellSource(cell) : undefined },
-    { label: "Run All Cells", detail: `${scanJupyterCells().length} cells`, disabled: !currentFile, run: () => runJupyterCells("all") },
-    { label: "Runtime Tasks", detail: "kernels", run: () => { if (jupyterPanel.hidden) toggleJupyterPanel(); void showJupyterTasks(); } },
-    { separator: true },
-    { label: "TOC", run: () => { floatingTocPanel.toggle(); updateFloatingToc(); } },
-    { label: "Graph", run: () => localGraphPanel.toggle() },
-    { label: "Tools", run: () => toggleToolsPanel() },
-    { separator: true },
-    { label: "Copy", detail: hasSelection ? "selection" : "", disabled: !hasSelection, run: () => copyEditorSelection() },
-    { label: "Bold", disabled: currentReadOnly || !hasSelection, run: () => editor.runCommand("bold") },
-    { label: "Inline Code", disabled: currentReadOnly || !hasSelection, run: () => editor.runCommand("code") },
-    { label: "Link", disabled: currentReadOnly || !hasSelection, run: () => editor.runCommand("link") },
-  ];
+    { label: editor.isSourceMode() ? "Markdown View" : "Source View", detail: "Cmd-/", run: () => toggleSourceMode() },
+    { label: "Copy Note Path", detail: currentFile ? fileNameFromPath(currentFile) : "", disabled: !currentFile, run: () => copyCurrentNotePath() },
+  );
+
+  addSeparator();
+  items.push(
+    { label: "TOC", detail: "outline", run: () => { floatingTocPanel.toggle(); updateFloatingToc(); } },
+    { label: "Graph", detail: "local", run: () => localGraphPanel.toggle() },
+    ...(hasSelection ? [{ label: "Find in Note", detail: "Cmd-F", run: () => openFindPanel() }] : []),
+    { label: "Tools", detail: "roam / export", run: () => toggleToolsPanel() },
+  );
+
+  addSeparator();
+  items.push(
+    { label: "Tag / Copy Ref", detail: "anchor", disabled: currentReadOnly, run: () => tagOrCopyRef() },
+    { label: "Insert Roam Idlink", detail: "search", disabled: currentReadOnly || currentStandalone, run: () => insertRoamIdLink() },
+    { label: "Export LaTeX", detail: hasSelection ? "selection" : "note", disabled: !currentFile, run: () => exportLatexTool() },
+    { label: "Reload Roam Index", detail: "notes", run: () => reloadNotes(true) },
+  );
+
+  if (cellCount > 0) {
+    addSeparator();
+    items.push(
+      { label: "Run All Cells", detail: `${cellCount} cell${cellCount === 1 ? "" : "s"}`, disabled: !currentFile, run: () => runJupyterCells("all") },
+      { label: "Runtime Tasks", detail: "kernels", run: () => { if (jupyterPanel.hidden) toggleJupyterPanel(); void showJupyterTasks(); } },
+    );
+  }
+
   contextMenu.replaceChildren(...items.map(contextMenuItem));
   contextMenu.hidden = false;
   const rect = contextMenu.getBoundingClientRect();
@@ -5185,6 +5254,7 @@ function runHostCommand(detail: unknown): boolean {
     key?: string;
     value?: string;
     text?: string;
+    file?: string;
     mode?: VimLiteMode;
     version?: number;
   };
@@ -5222,9 +5292,17 @@ function runHostCommand(detail: unknown): boolean {
       if (rejectReadOnlyAction("Read-only pane")) return true;
       void save();
       return true;
-    case "jupyter-cell-script-saved":
+    case "jupyter-cell-script-saved": {
+      // The hidden script was edited and saved in Emacs; force @@cell widgets to
+      // re-read their source and refresh the panel so both reflect the new code.
+      const savedFile = String(body.file || "");
+      if (!savedFile || savedFile === currentFile) {
+        window.AaronnoteReloadCeilCells?.(savedFile || currentFile);
+        if (!jupyterPanel.hidden) renderJupyterPanel();
+      }
       setStatus("Jupyter cell script saved");
       return true;
+    }
     case "refresh":
     case "reload":
       void reloadCurrentFilePreservingCursor();

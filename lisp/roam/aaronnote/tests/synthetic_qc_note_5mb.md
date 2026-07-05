@@ -141548,7 +141548,7 @@ such that
 In finite-dimensional quantum theory, positivity already implies
 self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
-operators belong to the real vector space of Hermitian operators.
+operators belong to the real vector space of Hermitian operators. This ishars asdasdas ssssssssssssssssssssssssssssssss    hhhh this  this is easy to see hhh I like this editor a lot  hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh
 
 中文直觉：正半定保证测量概率非负；迹为一保证总概率为一。
 #+end note
@@ -183703,7 +183703,7 @@ Coordinates are useful for computation because they give arrays of field
 elements. Invariance is useful for mathematics because it identifies the
 features of the object that do not depend on the chosen basis.
 
-中文直觉：坐标是“输入格式”，不变量是“结构本身留下的影子”。
+中文直觉：坐标是“输入格式”，不变量是���结构本身留下的影子”。
 #+end remark
 
 If \(g \in \operatorname{GL}(V)\) and \(h \in \operatorname{GL}(W)\), a change
@@ -226665,7 +226665,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文直觉：正半定保证测量概率非负；迹为一保证总概率为一。
+中文直觉��正半定保证测量概率非负；迹为一保证总概率为一。
 #+end note
 
 The expectation value of an observable \(A\) in state \(\rho\) is
@@ -254986,3 +254986,19 @@ adasd
 this is hard 
 
 
+
+## Jupyter cell benchmark section
+
+Some prose introducing the executable cells used by the performance guard.
+
+@@cell(python, python3) [bench-cell-1]
+
+@@cell(python, python3, analysis) [bench-cell-2]
+
+@@cell(bash, bash) [bench-cell-3]
+
+@@cell(python, sagemath-10.9) [bench-cell-4]
+
+@@cell(lean4, lean4) [bench-cell-5]
+
+Trailing prose so the final cell is not the last line of the document.

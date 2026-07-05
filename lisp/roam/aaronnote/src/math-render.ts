@@ -63,6 +63,7 @@ export function disposeMathRuntime(): void {
   clearMathRenderCache();
   if (typeof document !== "undefined") {
     document.querySelectorAll<HTMLStyleElement>("style[data-aaronnote-katex-css]").forEach((style) => style.remove());
+    document.querySelectorAll<HTMLLinkElement>("link[data-aaronnote-katex-css]").forEach((link) => link.remove());
   }
 }
 
@@ -155,11 +156,12 @@ function katexOptions(options: KatexRenderOptions): KatexRenderOptions {
 
 function ensureKatexCss(css: string): void {
   if (typeof document === "undefined") return;
-  if (document.querySelector("style[data-aaronnote-katex-css]")) return;
-  const style = document.createElement("style");
-  style.dataset.aaronnoteKatexCss = "embedded";
-  style.textContent = css;
-  document.head.appendChild(style);
+  if (document.querySelector("link[data-aaronnote-katex-css], style[data-aaronnote-katex-css]")) return;
+  const link = document.createElement("link");
+  link.dataset.aaronnoteKatexCss = "embedded";
+  link.rel = "stylesheet";
+  link.href = `data:text/css;charset=utf-8,${encodeURIComponent(css)}`;
+  document.head.appendChild(link);
 }
 
 function fitRenderedMath(element: HTMLElement): void {

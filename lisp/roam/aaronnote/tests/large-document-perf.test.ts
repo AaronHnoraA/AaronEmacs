@@ -59,6 +59,12 @@ describe("large-document bounded editing", () => {
   const knownScanCases: Array<[name: string, insert: string]> = [
     ["block math fence", "\\["],
     ["code fence", "```"],
+    // "(" forces a full block-extra redecoration (canMapBlockExtraDecos bails on
+    // it), which rebuilds every @@cell decoration in the doc. The fixture now
+    // contains @@cell blocks, so this guards against that rebuild becoming
+    // super-linear (e.g. an accidental O(cells·doc) scan) rather than the
+    // full-doc pass itself, which is a known trade-off.
+    ["paren over @@cell blocks", "("],
   ];
   for (const [name, insert] of knownScanCases) {
     test(`no runaway latency for ${name} edits in the 5 MB fixture`, () => {

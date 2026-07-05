@@ -7,9 +7,32 @@ type DiagramCacheValue = { html: string; error?: string };
 const MERMAID_CACHE_LIMIT = 96;
 const MERMAID_CACHE_BYTES = 8_000_000; // 8 MB
 const MAX_MERMAID_SOURCE_CHARS = 80_000;
+const MIN_DIAGRAM_SCALE = 0.55;
+const MAX_DIAGRAM_SCALE = 2.4;
+const DIAGRAM_ZOOM_STEP = 0.12;
+const DIAGRAM_LONG_PRESS_MS = 260;
+const DIAGRAM_LONG_PRESS_CANCEL_PX = 8;
 const mermaidCache = new Map<string, DiagramCacheValue>();
 let mermaidCacheBytes = 0;
 let renderSeq = 0;
+
+type DiagramDragState = { x: number; y: number; panX: number; panY: number; moved: boolean };
+
+type DiagramInteractionState = {
+  scale: number;
+  panX: number;
+  panY: number;
+  drag: DiagramDragState | null;
+  pendingDrag: DiagramDragState | null;
+  longPressTimer: number | null;
+  suppressNextClick: boolean;
+  applyTransform: () => void;
+  applyScale: (next: number, originX?: number, originY?: number) => void;
+  reset: () => void;
+  fit: () => void;
+};
+
+const diagramInteractions = new WeakMap<HTMLElement, DiagramInteractionState>();
 
 function mermaidEntryBytes(v: DiagramCacheValue): number {
   return (v.html.length + (v.error?.length ?? 0)) * 2;
@@ -183,42 +206,158 @@ function selectedDiagramNode(target: EventTarget | null): SVGElement | null {
     ?? target.closest<SVGElement>("text");
 }
 
-export function enableDiagramInteraction(element: HTMLElement): void {
-  const svg = element.querySelector<SVGSVGElement>("svg");
-  if (!svg) return;
+function currentDiagramSvg(element: HTMLElement): SVGSVGElement | null {
+  return element.querySelector<SVGSVGElement>("svg");
+}
 
-  element.classList.add("cm-diagram-interactive");
-  element.style.overflow = "hidden";
+function configureDiagramSvg(svg: SVGSVGElement): void {
   svg.style.maxWidth = "none";
+  svg.style.maxHeight = "none";
   svg.style.transformOrigin = "0 0";
-  sanitizeDiagramLinks(element);
+  svg.style.touchAction = "none";
+}
 
-  if (element.dataset.diagramInteractionBound === "true") return;
-  element.dataset.diagramInteractionBound = "true";
+function clampScale(value: number): number {
+  return Math.min(MAX_DIAGRAM_SCALE, Math.max(MIN_DIAGRAM_SCALE, value));
+}
 
-  let scale = 1;
-  let panX = 0;
-  let panY = 0;
-  let drag: { x: number; y: number; panX: number; panY: number; moved: boolean } | null = null;
-  let suppressNextClick = false;
-
-  const currentSvg = (): SVGSVGElement | null => element.querySelector<SVGSVGElement>("svg");
-  const applyTransform = (): void => {
-    const activeSvg = currentSvg();
-    if (!activeSvg) return;
-    activeSvg.style.maxWidth = "none";
-    activeSvg.style.transformOrigin = "0 0";
-    activeSvg.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+function diagramViewportSize(element: HTMLElement): { width: number; height: number } {
+  const rect = element.getBoundingClientRect();
+  return {
+    width: Math.max(1, element.clientWidth || rect.width || 1),
+    height: Math.max(1, element.clientHeight || rect.height || 1),
   };
-  const applyScale = (next: number, originX = element.clientWidth / 2, originY = element.clientHeight / 2): void => {
-    const prev = scale;
-    scale = Math.min(2.4, Math.max(0.55, next));
-    if (prev > 0 && prev !== scale) {
-      const factor = scale / prev;
-      panX = originX - (originX - panX) * factor;
-      panY = originY - (originY - panY) * factor;
+}
+
+function diagramSvgSize(svg: SVGSVGElement): { width: number; height: number } {
+  const viewBox = svg.getAttribute("viewBox")?.trim().split(/[\s,]+/).map((part) => Number(part));
+  if (viewBox && viewBox.length >= 4 && Number.isFinite(viewBox[2]) && Number.isFinite(viewBox[3]) && viewBox[2]! > 0 && viewBox[3]! > 0) {
+    return { width: viewBox[2]!, height: viewBox[3]! };
+  }
+
+  const width = svgLengthAttr(svg, "width");
+  const height = svgLengthAttr(svg, "height");
+  if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+    return { width, height };
+  }
+
+  const rect = svg.getBoundingClientRect();
+  return {
+    width: Math.max(1, rect.width || svg.clientWidth || 1),
+    height: Math.max(1, rect.height || svg.clientHeight || 1),
+  };
+}
+
+function svgLengthAttr(svg: SVGSVGElement, name: "width" | "height"): number {
+  const raw = (svg.getAttribute(name) || "").trim();
+  return raw.endsWith("%") ? Number.NaN : Number.parseFloat(raw);
+}
+
+function stopDiagramControlEvent(event: Event): void {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function diagramControlButton(label: string, action: string, title: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `cm-diagram-control cm-diagram-control-${action}`;
+  button.textContent = label;
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  button.addEventListener("mousedown", stopDiagramControlEvent);
+  button.addEventListener("pointerdown", stopDiagramControlEvent);
+  button.addEventListener("click", (event) => {
+    stopDiagramControlEvent(event);
+    onClick();
+  });
+  return button;
+}
+
+function installDiagramToolbar(element: HTMLElement, state: DiagramInteractionState): void {
+  Array.from(element.children).forEach((child) => {
+    if (child instanceof HTMLElement && child.classList.contains("cm-diagram-toolbar")) child.remove();
+  });
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "cm-diagram-toolbar";
+  toolbar.setAttribute("role", "toolbar");
+  toolbar.setAttribute("aria-label", "Diagram controls");
+  toolbar.addEventListener("mousedown", stopDiagramControlEvent);
+  toolbar.addEventListener("pointerdown", stopDiagramControlEvent);
+  toolbar.addEventListener("click", (event) => event.stopPropagation());
+  toolbar.append(
+    diagramControlButton("-", "zoom-out", "Zoom out", () => state.applyScale(state.scale - DIAGRAM_ZOOM_STEP)),
+    diagramControlButton("+", "zoom-in", "Zoom in", () => state.applyScale(state.scale + DIAGRAM_ZOOM_STEP)),
+    diagramControlButton("1:1", "reset", "Reset zoom", () => state.reset()),
+    diagramControlButton("Fit", "fit", "Fit to view", () => state.fit()),
+  );
+  element.append(toolbar);
+}
+
+function bindDiagramInteraction(element: HTMLElement): DiagramInteractionState {
+  const state: DiagramInteractionState = {
+    scale: 1,
+    panX: 0,
+    panY: 0,
+    drag: null,
+    pendingDrag: null,
+    longPressTimer: null,
+    suppressNextClick: false,
+    applyTransform: () => {
+      const activeSvg = currentDiagramSvg(element);
+      if (!activeSvg) return;
+      configureDiagramSvg(activeSvg);
+      activeSvg.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.scale})`;
+    },
+    applyScale: (next: number, originX = element.clientWidth / 2, originY = element.clientHeight / 2) => {
+      const prev = state.scale;
+      state.scale = clampScale(next);
+      if (prev > 0 && prev !== state.scale) {
+        const factor = state.scale / prev;
+        state.panX = originX - (originX - state.panX) * factor;
+        state.panY = originY - (originY - state.panY) * factor;
+      }
+      state.applyTransform();
+    },
+    reset: () => {
+      state.scale = 1;
+      state.panX = 0;
+      state.panY = 0;
+      state.applyTransform();
+    },
+    fit: () => {
+      const activeSvg = currentDiagramSvg(element);
+      if (!activeSvg) return;
+      const viewport = diagramViewportSize(element);
+      const content = diagramSvgSize(activeSvg);
+      const inset = 28;
+      const fitWidth = Math.max(1, viewport.width - inset);
+      const fitHeight = Math.max(1, viewport.height - inset);
+      const nextScale = Math.min(
+        1,
+        clampScale(Math.min(fitWidth / content.width, fitHeight / content.height)),
+      );
+      state.scale = nextScale;
+      state.panX = Math.max(0, (viewport.width - content.width * nextScale) / 2);
+      state.panY = Math.max(0, (viewport.height - content.height * nextScale) / 2);
+      state.applyTransform();
+    },
+  };
+
+  const clearLongPress = (): void => {
+    if (state.longPressTimer != null) {
+      window.clearTimeout(state.longPressTimer);
+      state.longPressTimer = null;
     }
-    applyTransform();
+    state.pendingDrag = null;
+    element.classList.remove("is-long-pressing");
+  };
+  const beginDrag = (start: DiagramDragState, pointerId: number): void => {
+    clearLongPress();
+    state.drag = start;
+    if (Number.isFinite(pointerId)) element.setPointerCapture?.(pointerId);
+    element.classList.add("is-panning");
   };
 
   element.addEventListener("mousedown", (event) => {
@@ -238,34 +377,53 @@ export function enableDiagramInteraction(element: HTMLElement): void {
     if (!(target instanceof Element) || !target.closest("svg")) return;
     event.preventDefault();
     event.stopPropagation();
-    drag = { x: event.clientX, y: event.clientY, panX, panY, moved: false };
-    if (Number.isFinite(event.pointerId)) element.setPointerCapture?.(event.pointerId);
-    element.classList.add("is-panning");
+    const start = { x: event.clientX, y: event.clientY, panX: state.panX, panY: state.panY, moved: false };
+    const pointerType = event.pointerType || "mouse";
+    if (pointerType === "touch" || pointerType === "pen") {
+      clearLongPress();
+      state.pendingDrag = start;
+      element.classList.add("is-long-pressing");
+      const pointerId = event.pointerId;
+      state.longPressTimer = window.setTimeout(() => {
+        if (!state.pendingDrag) return;
+        beginDrag(state.pendingDrag, pointerId);
+      }, DIAGRAM_LONG_PRESS_MS);
+      return;
+    }
+    beginDrag(start, event.pointerId);
   });
   element.addEventListener("pointermove", (event) => {
-    if (!drag) return;
+    if (state.pendingDrag && !state.drag) {
+      const dx = event.clientX - state.pendingDrag.x;
+      const dy = event.clientY - state.pendingDrag.y;
+      if (Math.abs(dx) + Math.abs(dy) > DIAGRAM_LONG_PRESS_CANCEL_PX) clearLongPress();
+      return;
+    }
+    if (!state.drag) return;
     event.preventDefault();
     event.stopPropagation();
-    const dx = event.clientX - drag.x;
-    const dy = event.clientY - drag.y;
-    if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
-    panX = drag.panX + dx;
-    panY = drag.panY + dy;
-    applyTransform();
+    const dx = event.clientX - state.drag.x;
+    const dy = event.clientY - state.drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) state.drag.moved = true;
+    state.panX = state.drag.panX + dx;
+    state.panY = state.drag.panY + dy;
+    state.applyTransform();
   });
-  const endDrag = (): void => {
-    suppressNextClick = Boolean(drag?.moved);
-    drag = null;
+  const endDrag = (event?: PointerEvent): void => {
+    state.suppressNextClick = Boolean(state.drag?.moved);
+    state.drag = null;
+    clearLongPress();
     element.classList.remove("is-panning");
-    if (suppressNextClick) window.setTimeout(() => { suppressNextClick = false; }, 0);
+    if (event && Number.isFinite(event.pointerId)) element.releasePointerCapture?.(event.pointerId);
+    if (state.suppressNextClick) window.setTimeout(() => { state.suppressNextClick = false; }, 0);
   };
   element.addEventListener("pointerup", endDrag);
   element.addEventListener("pointercancel", endDrag);
   element.addEventListener("click", (event) => {
-    if (suppressNextClick) {
+    if (state.suppressNextClick) {
       event.preventDefault();
       event.stopPropagation();
-      suppressNextClick = false;
+      state.suppressNextClick = false;
       return;
     }
     const anchor = (event.target as Element | null)?.closest<SVGElement>("a");
@@ -284,21 +442,41 @@ export function enableDiagramInteraction(element: HTMLElement): void {
   element.addEventListener("dblclick", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    scale = 1;
-    panX = 0;
-    panY = 0;
-    applyTransform();
+    state.reset();
   });
   element.addEventListener("wheel", (event) => {
-    if (!event.ctrlKey && !event.metaKey) return;
+    const target = event.target;
+    const overDiagram = target instanceof Element && Boolean(target.closest("svg"));
+    if (!overDiagram && !event.ctrlKey && !event.metaKey) return;
     event.preventDefault();
     const rect = element.getBoundingClientRect();
-    applyScale(
-      scale + (event.deltaY < 0 ? 0.12 : -0.12),
+    state.applyScale(
+      state.scale + (event.deltaY < 0 ? DIAGRAM_ZOOM_STEP : -DIAGRAM_ZOOM_STEP),
       event.clientX - rect.left,
       event.clientY - rect.top,
     );
   }, { passive: false });
+
+  return state;
+}
+
+export function enableDiagramInteraction(element: HTMLElement): void {
+  const svg = currentDiagramSvg(element);
+  if (!svg) return;
+
+  element.classList.add("cm-diagram-interactive");
+  element.style.overflow = "hidden";
+  configureDiagramSvg(svg);
+  sanitizeDiagramLinks(element);
+
+  let state = diagramInteractions.get(element);
+  if (!state) {
+    state = bindDiagramInteraction(element);
+    diagramInteractions.set(element, state);
+    element.dataset.diagramInteractionBound = "true";
+  }
+  installDiagramToolbar(element, state);
+  state.applyTransform();
 }
 
 export function renderMermaidLazy(
@@ -332,7 +510,7 @@ export function renderMermaidLazy(
       options.onRender?.();
     } else {
       element.innerHTML = cached.html;
-      if (!staticMindmap) enableDiagramInteraction(element);
+      enableDiagramInteraction(element);
       options.onRender?.();
     }
     return;
@@ -362,7 +540,7 @@ export function renderMermaidLazy(
       const html = sanitizeSvg(result.svg);
       rememberMermaid(key, { html });
       element.innerHTML = html;
-      if (!staticMindmap) enableDiagramInteraction(element);
+      enableDiagramInteraction(element);
       options.onRender?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
