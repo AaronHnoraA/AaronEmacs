@@ -29,6 +29,9 @@ export default defineConfig(({ command }) => ({
       },
     },
     rolldownOptions: {
+      checks: {
+        eval: false,
+      },
       output: {
         manualChunks(id) {
           if (!id.includes("/node_modules/")) return undefined;

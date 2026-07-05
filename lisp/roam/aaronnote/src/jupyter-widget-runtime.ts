@@ -174,6 +174,7 @@ async function loadCustomWidgetModule(moduleName: string, moduleVersion: string)
 class AaronnoteWidgetManager extends KernelWidgetManager {
   readonly renderMime: RenderMimeRegistry;
   private restorePromise: Promise<void> | null = null;
+  private replayQueue: Promise<void> = Promise.resolve();
   private readonly replayedMessages = new Set<string>();
   private readonly views = new Set<WidgetViewLike>();
   private readonly seededOutputComms = new Set<string>();
@@ -262,8 +263,29 @@ class AaronnoteWidgetManager extends KernelWidgetManager {
   }
 
   async restoreFromMessages(messages: JupyterWidgetKernelMessage[] = []): Promise<void> {
-    for (const message of messages) {
-      await this.replayKernelMessage(message);
+    const run = this.replayQueue.then(async () => {
+      for (const message of messages) await this.replayKernelMessage(message);
+    });
+    this.replayQueue = run.catch(() => undefined);
+    await run;
+  }
+
+  private existingKernelComm(commId: string): Kernel.IComm | null {
+    const kernel = this.kernel as unknown as { _comms?: Map<string, Kernel.IComm> };
+    return kernel._comms?.get(commId) ?? null;
+  }
+
+  private createOrReuseComm(targetName: string, commId: string): Kernel.IComm {
+    const existing = this.existingKernelComm(commId);
+    if (existing) return existing;
+    try {
+      return this.kernel.createComm(targetName, commId);
+    } catch (error) {
+      const createdByConcurrentReplay = this.existingKernelComm(commId);
+      if (createdByConcurrentReplay && /Comm is already created/.test(errorText(error))) {
+        return createdByConcurrentReplay;
+      }
+      throw error;
     }
   }
 
@@ -279,13 +301,16 @@ class AaronnoteWidgetManager extends KernelWidgetManager {
       JSON.stringify(message?.content?.data ?? null).slice(0, 512),
     ].join("\0");
     if (this.replayedMessages.has(key)) return;
-    this.replayedMessages.add(key);
 
     if (type === "comm_open") {
-      if (this.has_model(commId)) return;
+      if (this.has_model(commId)) {
+        this.replayedMessages.add(key);
+        return;
+      }
       const targetName = String(message?.content?.target_name || this.comm_target_name);
-      const comm = this.kernel.createComm(targetName, commId);
+      const comm = this.createOrReuseComm(targetName, commId);
       await this.handle_comm_open(new widgetBase.shims.services.Comm(comm), message as never);
+      this.replayedMessages.add(key);
       return;
     }
 
@@ -293,10 +318,12 @@ class AaronnoteWidgetManager extends KernelWidgetManager {
     const model = await this.get_model(commId) as unknown as WidgetModelLike;
     if (type === "comm_close") {
       model._handle_comm_closed?.(message);
+      this.replayedMessages.add(key);
       return;
     }
     model._handle_comm_msg?.(message);
     await model.state_change?.catch(() => undefined);
+    this.replayedMessages.add(key);
   }
 
   // Seed the outputs of any Output widget with content captured server-side

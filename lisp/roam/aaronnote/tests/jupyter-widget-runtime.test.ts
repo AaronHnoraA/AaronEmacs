@@ -33,6 +33,11 @@ describe("Jupyter widget runtime", () => {
     expect(restoreIdx).toBeGreaterThan(-1);
     expect(replayIdx).toBeGreaterThan(-1);
     expect(restoreIdx).toBeLessThan(replayIdx);
+    // Inline output and popout can mount the same widget concurrently; replay
+    // must serialize and tolerate comms created by an earlier replay/restore.
+    expect(source).toContain("private replayQueue: Promise<void>");
+    expect(source).toContain("createOrReuseComm(");
+    expect(source).toContain("Comm is already created");
     // Output widgets executed headless restore with empty outputs; we seed them.
     expect(source).toContain("async seedOutputWidgets(");
     expect(source).toContain('outputModel.set("outputs", outputs)');
