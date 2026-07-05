@@ -36,6 +36,7 @@ afterEach(async () => {
 describe("Jupyter widget proxy", () => {
   test("extracts only a kernel channels id", () => {
     expect(jupyterProxyKernelId("/jupyter/api/kernels/kernel%201/channels")).toBe("kernel 1");
+    expect(jupyterProxyKernelId("/jupyter/widget-runtimes/kernel%201/channels")).toBe("kernel 1");
     expect(jupyterProxyKernelId("/jupyter/api/kernels/kernel-1/restart")).toBe("");
   });
 
@@ -66,7 +67,7 @@ describe("Jupyter widget proxy", () => {
     const proxyPort = await listen(proxyServer);
 
     const client = new WebSocket(
-      `ws://127.0.0.1:${proxyPort}/jupyter/api/kernels/kernel-1/channels?session_id=test`,
+      `ws://127.0.0.1:${proxyPort}/jupyter/widget-runtimes/kernel-1/channels?session_id=test`,
       "v1.kernel.websocket.jupyter.org",
     );
     await new Promise<void>((resolve, reject) => {

@@ -70,6 +70,8 @@ export type JupyterCellExecuteResult = {
   autoRan?: boolean;
   results?: JupyterCellExecuteResult[];
   plan?: Array<{ cellId?: string; mode?: string; selected?: boolean }>;
+  widgetMessages?: Array<Record<string, unknown>>;
+  widgetMessagesTruncated?: boolean;
   live?: boolean;
   savedAt?: string;
   kernelRuntime?: {

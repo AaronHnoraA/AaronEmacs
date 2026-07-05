@@ -1,13 +1,21 @@
 import * as widgetBase from "@jupyter-widgets/base";
 import * as widgetControls from "@jupyter-widgets/controls";
-import * as widgetOutput from "@jupyter-widgets/output";
-import { HTMLManager } from "@jupyter-widgets/html-manager";
+import * as widgetOutput from "@jupyter-widgets/jupyterlab-manager/lib/output";
+import { KernelWidgetManager, WIDGET_VIEW_MIMETYPE } from "@jupyter-widgets/jupyterlab-manager/lib/manager";
+import { WidgetRenderer } from "@jupyter-widgets/jupyterlab-manager/lib/renderer";
+import { RenderMimeRegistry, standardRendererFactories } from "@jupyterlab/rendermime";
 import { KernelConnection, ServerConnection, type Kernel } from "@jupyterlab/services";
+import { MessageLoop } from "@lumino/messaging";
+import * as LuminoWidgets from "@lumino/widgets";
 import requireJsSource from "requirejs/require.js?raw";
-import { evaluateAmdLoaderSource, validWidgetModuleName, validWidgetModuleVersion, widgetModuleCdnUrl } from "./jupyter-widget-loader.ts";
+import { evaluateAmdLoaderSource, validWidgetModuleName, validWidgetModuleVersion, widgetModuleCdnUrls } from "./jupyter-widget-loader.ts";
 
 import "@jupyter-widgets/base/css/index.css";
+import "@jupyter-widgets/controls/css/labvariables.css";
 import "@jupyter-widgets/controls/css/widgets.css";
+import "@lumino/widgets/style/index.css";
+import "@jupyterlab/rendermime/style/base.css";
+import "@jupyterlab/outputarea/style/base.css";
 import "@fortawesome/fontawesome-free/css/all.min.css";
 
 export type JupyterWidgetRuntime = {
@@ -16,15 +24,43 @@ export type JupyterWidgetRuntime = {
   generation?: number;
 };
 
+export type JupyterWidgetKernelMessage = {
+  channel?: string;
+  header?: { msg_id?: string; msg_type?: string; [key: string]: unknown };
+  parent_header?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  content?: {
+    comm_id?: string;
+    target_name?: string;
+    data?: unknown;
+    [key: string]: unknown;
+  };
+  buffers?: ArrayBuffer[];
+};
+
 type RequireJs = {
   (modules: string[], onLoad: (module: unknown) => void, onError: (error: unknown) => void): void;
-  config(options: { paths: Record<string, string> }): RequireJs;
+  config(options: {
+    baseUrl?: string;
+    map?: Record<string, Record<string, string>>;
+    paths?: Record<string, string>;
+  }): RequireJs;
   defined(name: string): boolean;
   undef(name: string): void;
 };
 
 type WidgetViewLike = {
+  el?: HTMLElement;
+  luminoWidget?: LuminoWidgets.Widget;
+  pWidget?: LuminoWidgets.Widget;
+  once?: (name: string, callback: () => void) => unknown;
   remove(): unknown;
+};
+
+type WidgetModelLike = {
+  _handle_comm_msg?: (msg: JupyterWidgetKernelMessage) => unknown;
+  _handle_comm_closed?: (msg: JupyterWidgetKernelMessage) => unknown;
+  state_change?: Promise<unknown>;
 };
 
 declare global {
@@ -77,6 +113,13 @@ function defineCoreAmdModules(): void {
   const define = window.define;
   const requireJs = window.requirejs;
   if (!define || !requireJs) throw new Error("RequireJS globals are unavailable");
+  requireJs.config({
+    map: {
+      "*": {
+        "jupyter-js-widgets": "@jupyter-widgets/base",
+      },
+    },
+  });
   const modules: Array<[string, unknown]> = [
     ["@jupyter-widgets/base", widgetBase],
     ["@jupyter-widgets/controls", widgetControls],
@@ -96,6 +139,7 @@ const coreWidgetModules = new Map<string, unknown>([
 async function loadCustomWidgetModule(moduleName: string, moduleVersion: string): Promise<unknown> {
   if (!validWidgetModuleName(moduleName)) throw new Error(`Invalid widget module name: ${moduleName}`);
   if (!validWidgetModuleVersion(moduleVersion)) throw new Error(`Invalid widget module version: ${moduleVersion}`);
+  document.body.dataset.baseUrl ??= new URL("/jupyter/", window.location.origin).toString();
   // Standard ipywidgets (including @interact sliders) are already bundled.
   // Returning them directly avoids making core controls depend on an AMD
   // compatibility layer that is only needed by third-party widget packages.
@@ -110,46 +154,148 @@ async function loadCustomWidgetModule(moduleName: string, moduleVersion: string)
   } catch {
     requireJs.undef(moduleName);
   }
-  const cdnPath = widgetModuleCdnUrl(moduleName, moduleVersion);
-  console.info(`[aaronnote-jupyter] loading widget module ${moduleName}@${moduleVersion} from jsDelivr`);
-  requireJs.config({ paths: { [moduleName]: cdnPath } });
-  return await requireModule(requireJs, moduleName);
+  for (const cdnPath of widgetModuleCdnUrls(moduleName, moduleVersion)) {
+    console.info(`[aaronnote-jupyter] loading widget module ${moduleName}@${moduleVersion} from ${new URL(cdnPath).hostname}`);
+    requireJs.config({ paths: { [moduleName]: cdnPath } });
+    try {
+      return await requireModule(requireJs, moduleName);
+    } catch {
+      requireJs.undef(moduleName);
+    }
+  }
+  throw new Error(`Unable to load widget module ${moduleName}@${moduleVersion} from local nbextensions or CDN`);
 }
 
-class AaronnoteWidgetManager extends HTMLManager {
-  readonly kernel: Kernel.IKernelConnection;
+class AaronnoteWidgetManager extends KernelWidgetManager {
+  readonly renderMime: RenderMimeRegistry;
   private restorePromise: Promise<void> | null = null;
+  private readonly replayedMessages = new Set<string>();
+  private readonly views = new Set<WidgetViewLike>();
 
   constructor(kernel: Kernel.IKernelConnection) {
-    super({ loader: loadCustomWidgetModule });
-    this.kernel = kernel;
-    kernel.registerCommTarget(this.comm_target_name, async (comm, msg) => {
-      await this.handle_comm_open(new widgetBase.shims.services.Comm(comm), msg);
+    const renderMime = new RenderMimeRegistry({ initialFactories: standardRendererFactories });
+    super(kernel, renderMime);
+    this.renderMime = renderMime;
+    this.registerCoreWidgetModules();
+    this.renderMime.addFactory({
+      safe: false,
+      mimeTypes: [WIDGET_VIEW_MIMETYPE],
+      createRenderer: (options) => new WidgetRenderer(options, this as never),
+    }, 0);
+    window.addEventListener("resize", () => {
+      for (const view of this.views) {
+        const widget = view.luminoWidget || view.pWidget;
+        if (widget) MessageLoop.postMessage(widget, LuminoWidgets.Widget.ResizeMessage.UnknownSize);
+      }
     });
   }
 
-  override async _create_comm(targetName: string, modelId: string, data?: unknown, metadata?: unknown, buffers?: ArrayBuffer[]): Promise<widgetBase.shims.services.Comm> {
-    const comm = this.kernel.createComm(targetName, modelId);
-    if (data || metadata || buffers?.length) comm.open(data as never, metadata as never, buffers);
-    return new widgetBase.shims.services.Comm(comm);
+  get rendermime(): RenderMimeRegistry {
+    return this.renderMime;
   }
 
-  override _get_comm_info(): Promise<Record<string, unknown>> {
-    return this.kernel.requestCommInfo({ target_name: this.comm_target_name })
-      .then((reply) => (reply.content as { comms?: Record<string, unknown> }).comms ?? {});
+  private registerCoreWidgetModules(): void {
+    this.register({
+      name: "@jupyter-widgets/base",
+      version: String(widgetBase.JUPYTER_WIDGETS_VERSION || "2.0.0"),
+      exports: widgetBase as never,
+    });
+    this.register({
+      name: "@jupyter-widgets/controls",
+      version: String(widgetControls.JUPYTER_CONTROLS_VERSION || "2.0.0"),
+      exports: widgetControls as never,
+    });
+    this.register({
+      name: "@jupyter-widgets/output",
+      version: String(widgetOutput.OUTPUT_WIDGET_VERSION || "1.0.0"),
+      exports: widgetOutput as never,
+    });
+  }
+
+  protected override async loadClass(className: string, moduleName: string, moduleVersion: string): Promise<never> {
+    try {
+      return await super.loadClass(className, moduleName, moduleVersion) as never;
+    } catch (registeredError) {
+      const module = await loadCustomWidgetModule(moduleName, moduleVersion);
+      const exports = module && typeof module === "object" ? module as Record<string, unknown> : {};
+      const nestedDefault = exports.default && typeof exports.default === "object" ? exports.default as Record<string, unknown> : {};
+      const value = exports[className] ?? nestedDefault[className];
+      if (typeof value !== "function") {
+        const message = registeredError instanceof Error ? registeredError.message : String(registeredError);
+        throw new Error(`Class ${className} not found in widget module ${moduleName}@${moduleVersion}: ${message}`);
+      }
+      return value as never;
+    }
+  }
+
+  async displayView(view: unknown, host: HTMLElement): Promise<void> {
+    const resolved = await view as WidgetViewLike;
+    const widget = resolved.luminoWidget || resolved.pWidget;
+    if (widget) {
+      LuminoWidgets.Widget.attach(widget, host);
+    } else if (resolved.el instanceof HTMLElement) {
+      host.append(resolved.el);
+    } else {
+      throw new Error("Widget view has no attachable DOM element");
+    }
+    this.views.add(resolved);
+    resolved.once?.("remove", () => this.views.delete(resolved));
   }
 
   restoreFromKernel(): Promise<void> {
-    if (!this.restorePromise) this.restorePromise = this._loadFromKernel();
+    if (!this.restorePromise) this.restorePromise = this.restoreWidgets();
     return this.restorePromise;
   }
 
-  async mount(modelId: string, host: HTMLElement): Promise<() => void> {
-    await this.restoreFromKernel();
+  async restoreFromMessages(messages: JupyterWidgetKernelMessage[] = []): Promise<void> {
+    for (const message of messages) {
+      await this.replayKernelMessage(message);
+    }
+  }
+
+  private async replayKernelMessage(message: JupyterWidgetKernelMessage): Promise<void> {
+    const type = String(message?.header?.msg_type || "");
+    if (!["comm_open", "comm_msg", "comm_close"].includes(type)) return;
+    const commId = String(message?.content?.comm_id || "");
+    if (!commId) return;
+    const key = [
+      type,
+      commId,
+      String(message?.header?.msg_id || ""),
+      JSON.stringify(message?.content?.data ?? null).slice(0, 512),
+    ].join("\0");
+    if (this.replayedMessages.has(key)) return;
+    this.replayedMessages.add(key);
+
+    if (type === "comm_open") {
+      if (this.has_model(commId)) return;
+      const targetName = String(message?.content?.target_name || this.comm_target_name);
+      const comm = this.kernel.createComm(targetName, commId);
+      await this.handle_comm_open(new widgetBase.shims.services.Comm(comm), message as never);
+      return;
+    }
+
+    if (!this.has_model(commId)) return;
+    const model = await this.get_model(commId) as unknown as WidgetModelLike;
+    if (type === "comm_close") {
+      model._handle_comm_closed?.(message);
+      return;
+    }
+    model._handle_comm_msg?.(message);
+    await model.state_change?.catch(() => undefined);
+  }
+
+  async mount(modelId: string, host: HTMLElement, messages: JupyterWidgetKernelMessage[] = []): Promise<() => void> {
+    if (messages.length > 0) {
+      await this.restoreFromMessages(messages);
+    }
+    if (!this.has_model(modelId)) {
+      await this.restoreFromKernel();
+    }
     const model = await this.get_model(modelId);
     const view = await this.create_view(model);
     host.replaceChildren();
-    await this.display_view(view, host);
+    await this.displayView(view, host);
     return () => {
       try { (view as unknown as WidgetViewLike).remove(); } catch {}
     };
@@ -162,6 +308,92 @@ type RuntimeEntry = {
 };
 
 let runtimeEntries: Map<string, Promise<RuntimeEntry>> | undefined;
+
+type WebSocketHandler = ((event: Event) => unknown) | null;
+type WebSocketMessageHandler = ((event: MessageEvent) => unknown) | null;
+
+function runtimeChannelsUrl(runtime: JupyterWidgetRuntime, sessionId: string): string {
+  const url = new URL(`/jupyter/widget-runtimes/${encodeURIComponent(runtime.id)}/channels`, window.location.origin);
+  url.searchParams.set("session_id", sessionId);
+  return url.toString().replace(/^http/i, "ws");
+}
+
+function runtimeWebSocketCtor(runtime: JupyterWidgetRuntime): typeof WebSocket {
+  return class AaronnoteRuntimeWebSocket {
+    onopen: WebSocketHandler = null;
+    onclose: WebSocketHandler = null;
+    onerror: WebSocketHandler = null;
+    onmessage: WebSocketMessageHandler = null;
+    private readonly socket: WebSocket;
+    private binaryTypeValue: BinaryType = "blob";
+    private readonly targetUrl: string;
+
+    constructor(url: string | URL, protocols?: string | string[]) {
+      const requested = new URL(String(url), window.location.href);
+      const sessionId = requested.searchParams.get("session_id") || crypto.randomUUID();
+      this.targetUrl = runtimeChannelsUrl(runtime, sessionId);
+      this.socket = protocols && (Array.isArray(protocols) ? protocols.length > 0 : protocols)
+        ? new WebSocket(this.targetUrl, protocols)
+        : new WebSocket(this.targetUrl);
+      this.socket.binaryType = this.binaryTypeValue;
+      this.socket.onopen = (event) => this.onopen?.call(this, event);
+      this.socket.onclose = (event) => this.onclose?.call(this, event);
+      this.socket.onerror = (event) => this.onerror?.call(this, event);
+      this.socket.onmessage = (event) => this.onmessage?.call(this, event);
+    }
+
+    get readyState(): number {
+      return this.socket.readyState;
+    }
+
+    get url(): string {
+      return this.targetUrl;
+    }
+
+    get protocol(): string {
+      return this.socket.protocol;
+    }
+
+    get extensions(): string {
+      return this.socket.extensions;
+    }
+
+    get bufferedAmount(): number {
+      return this.socket.bufferedAmount;
+    }
+
+    get binaryType(): BinaryType {
+      return this.binaryTypeValue;
+    }
+
+    set binaryType(value: BinaryType) {
+      this.binaryTypeValue = value;
+      this.socket.binaryType = value;
+    }
+
+    send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
+      this.socket.send(data as never);
+    }
+
+    close(code?: number, reason?: string): void {
+      this.socket.close(code, reason);
+    }
+
+    addEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions): void {
+      if (!listener) return;
+      (this.socket as EventTarget).addEventListener(type, listener, options);
+    }
+
+    removeEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | EventListenerOptions): void {
+      if (!listener) return;
+      (this.socket as EventTarget).removeEventListener(type, listener, options);
+    }
+
+    dispatchEvent(event: Event): boolean {
+      return this.socket.dispatchEvent(event);
+    }
+  } as unknown as typeof WebSocket;
+}
 
 function runtimeEntryMap(): Map<string, Promise<RuntimeEntry>> {
   runtimeEntries ??= new Map<string, Promise<RuntimeEntry>>();
@@ -183,9 +415,13 @@ function disposeOlderGenerations(runtime: JupyterWidgetRuntime): void {
 }
 
 async function createRuntimeEntry(runtime: JupyterWidgetRuntime): Promise<RuntimeEntry> {
-  const baseUrl = new URL("./jupyter/", window.location.origin + window.location.pathname).toString();
-  const wsUrl = baseUrl.replace(/^http/i, "ws");
-  const serverSettings = ServerConnection.makeSettings({ baseUrl, wsUrl, token: "" });
+  const baseUrl = new URL("/jupyter/", window.location.origin).toString();
+  const serverSettings = ServerConnection.makeSettings({
+    baseUrl,
+    wsUrl: "ws://aaronnote-widget-runtime/",
+    token: "",
+    WebSocket: runtimeWebSocketCtor(runtime),
+  });
   const kernel = new KernelConnection({
     model: { id: runtime.id, name: runtime.name },
     serverSettings,
@@ -210,8 +446,29 @@ function getRuntimeEntry(runtime: JupyterWidgetRuntime): Promise<RuntimeEntry> {
   return pending;
 }
 
-export async function mountJupyterWidget(host: HTMLElement, modelId: string, runtime: JupyterWidgetRuntime): Promise<() => void> {
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+export async function mountJupyterWidget(
+  host: HTMLElement,
+  modelId: string,
+  runtime: JupyterWidgetRuntime,
+  messages: JupyterWidgetKernelMessage[] = [],
+): Promise<() => void> {
   if (!runtime.id || !runtime.name) throw new Error("Missing live Jupyter widget runtime");
-  const { manager } = await getRuntimeEntry(runtime);
-  return await manager.mount(modelId, host);
+  const { manager } = await withTimeout(getRuntimeEntry(runtime), 15_000, "Timed out connecting to live Jupyter kernel");
+  return await withTimeout(manager.mount(modelId, host, messages), 20_000, "Timed out restoring interactive widget state");
 }

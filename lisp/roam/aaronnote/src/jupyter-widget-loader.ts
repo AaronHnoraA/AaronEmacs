@@ -22,9 +22,7 @@ export function validWidgetModuleVersion(value: string): boolean {
   return value.length <= 120 && /^[A-Za-z0-9*^~<>=|.+_ -]+$/.test(value);
 }
 
-export function widgetModuleCdnUrl(moduleName: string, moduleVersion: string): string {
-  if (!validWidgetModuleName(moduleName)) throw new Error(`Invalid widget module name: ${moduleName}`);
-  if (!validWidgetModuleVersion(moduleVersion)) throw new Error(`Invalid widget module version: ${moduleVersion}`);
+function widgetModulePathParts(moduleName: string): { packageName: string; fileName: string } {
   let packageName = moduleName;
   let fileName = "index";
   let slash = moduleName.indexOf("/");
@@ -33,5 +31,21 @@ export function widgetModuleCdnUrl(moduleName: string, moduleVersion: string): s
     packageName = moduleName.slice(0, slash);
     fileName = moduleName.slice(slash + 1);
   }
-  return `https://cdn.jsdelivr.net/npm/${packageName}@${encodeURIComponent(moduleVersion)}/dist/${fileName}`;
+  return { packageName, fileName };
+}
+
+export function widgetModuleCdnUrls(moduleName: string, moduleVersion: string): string[] {
+  if (!validWidgetModuleName(moduleName)) throw new Error(`Invalid widget module name: ${moduleName}`);
+  if (!validWidgetModuleVersion(moduleVersion)) throw new Error(`Invalid widget module version: ${moduleVersion}`);
+  const { packageName, fileName } = widgetModulePathParts(moduleName);
+  const jsDelivrVersion = moduleVersion.startsWith("^") ? moduleVersion.slice(1) : moduleVersion;
+  const jsDelivrFile = fileName.endsWith(".js") ? fileName : `${fileName}.js`;
+  return [
+    `https://cdn.jsdelivr.net/npm/${packageName}@${jsDelivrVersion}/dist/${jsDelivrFile}`,
+    `https://unpkg.com/${packageName}@${moduleVersion}/dist/${fileName}`,
+  ];
+}
+
+export function widgetModuleCdnUrl(moduleName: string, moduleVersion: string): string {
+  return widgetModuleCdnUrls(moduleName, moduleVersion)[0];
 }

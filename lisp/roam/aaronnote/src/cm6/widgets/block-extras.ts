@@ -51,6 +51,7 @@ import { tocIndexFromState, type MarkdownHeading } from "../toc-index.ts";
 import { scanInlineCommands } from "../../command-syntax.ts";
 import { semanticOutlineFromCommand, type SemanticOutline } from "../../semantic-outline.ts";
 import { highlightCodeForEditor } from "../../code-highlight-async.ts";
+import type { JupyterWidgetKernelMessage } from "../../jupyter-widget-runtime.ts";
 import { ceilCommandGeneratedId as sharedCeilCommandGeneratedId, ceilLanguageForKernel } from "./ceil-shared.ts";
 
 // ---------------------------------------------------------------------------
@@ -370,6 +371,8 @@ type CeilExecutionResult = {
   autoRan?: boolean;
   results?: CeilExecutionResult[];
   plan?: Array<{ cellId?: string; mode?: string; selected?: boolean }>;
+  widgetMessages?: JupyterWidgetKernelMessage[];
+  widgetMessagesTruncated?: boolean;
   live?: boolean;
   savedAt?: string;
   kernelRuntime?: {
@@ -399,6 +402,12 @@ function patchCeilOutputUi(result: CeilExecutionResult | null, patch: NonNullabl
   };
 }
 
+function mergeCeilOutputUi(result: CeilExecutionResult | null, current: CeilExecutionResult | null): CeilExecutionResult | null {
+  if (!result) return current;
+  const ui = { ...ceilOutputUi(result), ...ceilOutputUi(current) };
+  return Object.keys(ui).length > 0 ? { ...result, ui } : result;
+}
+
 function ceilResultStatusLabel(meta: Pick<CeilMeta, "id">, result: CeilExecutionResult | null): string {
   if (!result) return meta.id;
   const prefix = result.live === false ? "Saved " : "";
@@ -408,11 +417,11 @@ function ceilResultStatusLabel(meta: Pick<CeilMeta, "id">, result: CeilExecution
 
 function mergeCeilOutputFromServer(saved: CeilExecutionResult | null, current: CeilExecutionResult | null): CeilExecutionResult | null {
   if (!saved) return current;
-  if (saved.widgetRuntime || saved.live === false) return saved;
+  if (saved.widgetRuntime || saved.live === false) return mergeCeilOutputUi(saved, current);
   if (current?.widgetRuntime && current.live !== false) {
-    return { ...saved, live: true, widgetRuntime: current.widgetRuntime };
+    return mergeCeilOutputUi({ ...saved, live: true, widgetRuntime: current.widgetRuntime }, current);
   }
-  return saved;
+  return mergeCeilOutputUi(saved, current);
 }
 
 const clearTikzDirtyEffect = StateEffect.define<string>();
@@ -1507,7 +1516,12 @@ function disposeCeilWidgetTree(root: HTMLElement): void {
   for (const host of root.querySelectorAll<HTMLElement>(".cm-ceil-output-widget")) disposeCeilWidgetHost(host);
 }
 
-function renderCeilWidget(container: HTMLElement, data: Record<string, unknown>, runtime?: CeilExecutionResult["widgetRuntime"]): void {
+function renderCeilWidget(
+  container: HTMLElement,
+  data: Record<string, unknown>,
+  runtime?: CeilExecutionResult["widgetRuntime"],
+  widgetMessages: JupyterWidgetKernelMessage[] = [],
+): void {
   const note = document.createElement("div");
   note.className = "cm-ceil-output-widget";
   const view = data["application/vnd.jupyter.widget-view+json"];
@@ -1535,7 +1549,7 @@ function renderCeilWidget(container: HTMLElement, data: Record<string, unknown>,
   (window as unknown as { __jupyter_widgets_assets_path__?: string }).__jupyter_widgets_assets_path__ ??=
     new URL("./", window.location.href).toString();
   void import("../../jupyter-widget-runtime.ts")
-    .then(({ mountJupyterWidget }) => mountJupyterWidget(note, modelId, runtime))
+    .then(({ mountJupyterWidget }) => mountJupyterWidget(note, modelId, runtime, widgetMessages))
     .then((cleanup) => {
       if (note.dataset.widgetMountToken !== token || !note.isConnected) {
         cleanup();
@@ -1551,7 +1565,13 @@ function renderCeilWidget(container: HTMLElement, data: Record<string, unknown>,
     });
 }
 
-function renderCeilMime(container: HTMLElement, mime: string, data: Record<string, unknown>, runtime?: CeilExecutionResult["widgetRuntime"]): void {
+function renderCeilMime(
+  container: HTMLElement,
+  mime: string,
+  data: Record<string, unknown>,
+  runtime?: CeilExecutionResult["widgetRuntime"],
+  widgetMessages: JupyterWidgetKernelMessage[] = [],
+): void {
   disposeCeilWidgetTree(container);
   container.replaceChildren();
   if (mime === "image/png" || mime === "image/jpeg") {
@@ -1574,7 +1594,7 @@ function renderCeilMime(container: HTMLElement, mime: string, data: Record<strin
     return;
   }
   if (mime === "application/vnd.jupyter.widget-view+json") {
-    renderCeilWidget(container, data, runtime);
+    renderCeilWidget(container, data, runtime, widgetMessages);
     return;
   }
   if (mime === "text/latex") {
@@ -1603,7 +1623,13 @@ function renderCeilMime(container: HTMLElement, mime: string, data: Record<strin
   container.append(pre);
 }
 
-function appendCeilMimeBundle(root: HTMLElement, data: Record<string, unknown> = {}, kernel = "", runtime?: CeilExecutionResult["widgetRuntime"]): void {
+function appendCeilMimeBundle(
+  root: HTMLElement,
+  data: Record<string, unknown> = {},
+  kernel = "",
+  runtime?: CeilExecutionResult["widgetRuntime"],
+  widgetMessages: JupyterWidgetKernelMessage[] = [],
+): void {
   const mimes = availableCeilMimes(data);
   if (mimes.length === 0) {
     const pre = document.createElement("pre");
@@ -1635,13 +1661,13 @@ function appendCeilMimeBundle(root: HTMLElement, data: Record<string, unknown> =
       event.stopPropagation();
       chosen = select.value;
       rememberCeilMimePref(kernel, chosen);
-      renderCeilMime(container, chosen, data, runtime);
+      renderCeilMime(container, chosen, data, runtime, widgetMessages);
     });
     bar.append(select);
     root.append(bar);
   }
   root.append(container);
-  renderCeilMime(container, chosen, data, runtime);
+  renderCeilMime(container, chosen, data, runtime, widgetMessages);
 }
 
 // Inline output view keeps very long stream text bounded so a runaway loop's
@@ -1698,6 +1724,7 @@ function renderCeilOutputs(root: HTMLElement, result: CeilExecutionResult | null
         (output.data && typeof output.data === "object" ? output.data : {}) as Record<string, unknown>,
         String(result.kernel || ""),
         result.widgetRuntime,
+        result.widgetMessages,
       );
     }
     root.append(item);
@@ -1866,6 +1893,13 @@ class CeilCommandWidget extends MeasuredWidget {
       return button;
     };
 
+    const currentOutputUi = (): NonNullable<CeilExecutionResult["ui"]> => ({
+      outputFolded: outputWrap.classList.contains("is-folded"),
+      outputExpanded: outputWrap.classList.contains("is-expanded"),
+    });
+
+    const preserveCurrentOutputUi = (result: CeilExecutionResult): CeilExecutionResult => patchCeilOutputUi(result, currentOutputUi());
+
     const saveOutputUi = (patch: NonNullable<CeilExecutionResult["ui"]>): void => {
       lastResult = patchCeilOutputUi(lastResult, patch);
       setBoundedMap(ceilOutputCache, cacheKey, lastResult);
@@ -1880,9 +1914,8 @@ class CeilCommandWidget extends MeasuredWidget {
       }).then((result) => {
         const saved = result.output && typeof result.output === "object" ? result.output as CeilExecutionResult : null;
         if (!saved) return;
-        const merged = lastResult?.widgetRuntime && lastResult.live !== false
-          ? { ...saved, live: true, widgetRuntime: lastResult.widgetRuntime }
-          : saved;
+        const merged = mergeCeilOutputFromServer(saved, lastResult);
+        if (!merged) return;
         lastResult = merged;
         setBoundedMap(ceilOutputCache, cacheKey, merged);
         status.textContent = ceilResultStatusLabel(meta, lastResult);
@@ -2035,23 +2068,24 @@ class CeilCommandWidget extends MeasuredWidget {
     );
     const publishEntryResult = (entry: CeilCellContextEntry, result: CeilExecutionResult): void => {
       const key = ceilOutputKey(file, entry, `script:${entry.id}`);
-      setBoundedMap(ceilOutputCache, key, result);
+      const merged = mergeCeilOutputUi(result, ceilOutputCache.get(key) ?? null) ?? result;
+      setBoundedMap(ceilOutputCache, key, merged);
       window.AaronnotePublishJupyterCellResult?.({
         file,
         cellId: entry.id,
         kernel: entry.kernel,
         session: entry.session,
-        result,
+        result: merged,
       });
     };
     const renderCurrentError = (err: unknown): void => {
-      lastResult = {
+      lastResult = preserveCurrentOutputUi({
         ok: false,
         status: "error",
         live: true,
         message: err instanceof Error ? err.message : String(err),
         outputs: [{ output_type: "error", traceback: [err instanceof Error ? err.message : String(err)] }],
-      };
+      });
       if (!leanRuntime) renderCeilOutputs(output, lastResult, outputWrap.classList.contains("is-expanded"));
       status.textContent = "Error";
     };
@@ -2083,15 +2117,16 @@ class CeilCommandWidget extends MeasuredWidget {
           }
         }
         const currentWasRequested = entriesToRun.some((entry) => entry.id === meta.id);
-        if (!published.has(meta.id) && currentWasRequested) publishEntryResult(currentEntry(), result);
+        const currentResult = currentWasRequested ? preserveCurrentOutputUi(result) : result;
+        if (!published.has(meta.id) && currentWasRequested) publishEntryResult(currentEntry(), currentResult);
         if (currentWasRequested) {
           ranCurrent = true;
-          lastResult = result;
-          setBoundedMap(ceilOutputCache, cacheKey, result);
+          lastResult = currentResult;
+          setBoundedMap(ceilOutputCache, cacheKey, currentResult);
           status.textContent = leanRuntime
             ? "Synced"
-            : result.status === "error" && result.stoppedAt ? `Stopped at ${result.stoppedAt}` : ceilResultStatusLabel(meta, result);
-          if (!leanRuntime) renderCeilOutputs(output, result, outputWrap.classList.contains("is-expanded"));
+            : currentResult.status === "error" && currentResult.stoppedAt ? `Stopped at ${currentResult.stoppedAt}` : ceilResultStatusLabel(meta, currentResult);
+          if (!leanRuntime) renderCeilOutputs(output, currentResult, outputWrap.classList.contains("is-expanded"));
         } else {
           status.textContent = result.status === "error" && result.stoppedAt ? `Stopped at ${result.stoppedAt}` : "Ran above";
         }
@@ -3573,7 +3608,8 @@ class CeilCellReloadPlugin {
     };
     this.resultHandler = ({ file, cellId, kernel, session, result }): void => {
       const key = ceilOutputKey(file, { id: cellId, kernel, session }, `script:${cellId}`);
-      setBoundedMap(ceilOutputCache, key, result);
+      const merged = mergeCeilOutputUi(result, ceilOutputCache.get(key) ?? null) ?? result;
+      setBoundedMap(ceilOutputCache, key, merged);
       ceilCacheEpoch += 1;
       this.view.dispatch({ effects: ceilRefreshEffect.of(file) });
     };

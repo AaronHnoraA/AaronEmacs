@@ -864,6 +864,8 @@ type JupyterPanelExecutionResult = {
   outputs?: unknown[];
   results?: JupyterPanelExecutionResult[];
   stoppedAt?: string;
+  widgetMessages?: Array<Record<string, unknown>>;
+  widgetMessagesTruncated?: boolean;
 };
 
 const JUPYTER_CELL_RE = /^([ \t]*)@@cell(?:[ \t]*\(([^)\n]*)\))?(?:[ \t]+\[([^\]\n]*)\])?[ \t]*$/i;

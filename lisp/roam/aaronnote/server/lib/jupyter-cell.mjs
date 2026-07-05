@@ -534,13 +534,15 @@ export function createJupyterCellService({
     if (!rawPath.startsWith("/jupyter/")) return null;
     const upstreamPath = rawPath.slice("/jupyter".length);
     const channel = /^\/api\/kernels\/([^/]+)\/channels$/.exec(upstreamPath);
+    const widgetRuntimeChannel = /^\/widget-runtimes\/([^/]+)\/channels$/.exec(upstreamPath);
     const localWidgetAsset = /^\/nbextensions\/[A-Za-z0-9@._~!$&'()+,;=:%/-]+$/.test(upstreamPath);
-    if (!channel && !localWidgetAsset) return null;
-    if (channel) {
+    if (!channel && !widgetRuntimeChannel && !localWidgetAsset) return null;
+    if (channel || widgetRuntimeChannel) {
       let id = "";
-      try { id = decodeURIComponent(channel[1]); } catch { return null; }
+      try { id = decodeURIComponent((channel || widgetRuntimeChannel)[1]); } catch { return null; }
       if (!kernelRecordById(id)) return null;
       touchKernelById(id);
+      return `${websocket ? wsBaseUrl : baseUrl}/api/kernels/${encodeURIComponent(id)}/channels${String(search || "")}`;
     }
     const root = websocket ? wsBaseUrl : baseUrl;
     return `${root}${upstreamPath}${String(search || "")}`;
@@ -825,9 +827,14 @@ export function createJupyterCellService({
     const sessionId = randomUUID();
     const outputs = [];
     const displayIndexes = new Map();
+    const widgetCommIds = new Set();
     const streamLimit = durationFromEnv("AARONNOTE_JUPYTER_MAX_STREAM_BYTES", 1024 * 1024);
+    const widgetMessageLimit = durationFromEnv("AARONNOTE_JUPYTER_MAX_WIDGET_MESSAGES", 512);
+    const widgetMessageBytesLimit = durationFromEnv("AARONNOTE_JUPYTER_MAX_WIDGET_MESSAGE_BYTES", 8 * 1024 * 1024);
     let streamBytes = 0;
     let streamTruncated = false;
+    let widgetMessageBytes = 0;
+    let widgetMessagesTruncated = false;
     let executionCount = null;
     let shellReply = null;
     let idle = false;
@@ -882,7 +889,44 @@ export function createJupyterCellService({
             name: kernelInfo.kernel,
             generation: Number(record?.widgetGeneration || 1),
           },
+          ...(widgetMessages.length > 0 ? {
+            widgetMessages,
+            widgetMessagesTruncated,
+          } : {}),
         });
+      };
+
+      const widgetMessages = [];
+
+      const rememberWidgetMessage = (message) => {
+        if (widgetMessagesTruncated) return;
+        const type = String(message?.header?.msg_type || "");
+        if (!["comm_open", "comm_msg", "comm_close"].includes(type)) return;
+        const content = message?.content && typeof message.content === "object" ? message.content : {};
+        const commId = String(content.comm_id || "");
+        const targetName = String(content.target_name || "");
+        if (!commId) return;
+        if (type === "comm_open") {
+          if (targetName && !/^jupyter\.widget/.test(targetName)) return;
+          widgetCommIds.add(commId);
+        } else if (!widgetCommIds.has(commId)) {
+          return;
+        }
+        const payload = {
+          channel: message.channel || "iopub",
+          header: message.header || {},
+          parent_header: message.parent_header || {},
+          metadata: message.metadata || {},
+          content,
+          buffers: Array.isArray(message.buffers) ? message.buffers : [],
+        };
+        const encoded = JSON.stringify(payload);
+        widgetMessageBytes += Buffer.byteLength(encoded, "utf8");
+        if (widgetMessages.length >= widgetMessageLimit || widgetMessageBytes > widgetMessageBytesLimit) {
+          widgetMessagesTruncated = true;
+          return;
+        }
+        widgetMessages.push(payload);
       };
 
       const pushOutput = (output) => {
@@ -967,6 +1011,7 @@ export function createJupyterCellService({
         } catch {
           return;
         }
+        rememberWidgetMessage(message);
         const parentId = message?.parent_header?.msg_id;
         if (parentId !== msgId) return;
         touchKernel(record);

@@ -1,7 +1,7 @@
 import { WebSocket, WebSocketServer } from "ws";
 
 export function jupyterProxyKernelId(pathname) {
-  const match = /^\/jupyter\/api\/kernels\/([^/]+)\/channels$/.exec(String(pathname || ""));
+  const match = /^\/jupyter\/(?:api\/kernels|widget-runtimes)\/([^/]+)\/channels$/.exec(String(pathname || ""));
   if (!match) return "";
   try { return decodeURIComponent(match[1]); } catch { return ""; }
 }
