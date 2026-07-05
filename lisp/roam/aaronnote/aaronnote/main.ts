@@ -854,6 +854,17 @@ type JupyterPanelCell = {
   durationMs?: number;
   outputCount?: number;
 };
+type JupyterPanelExecutionResult = {
+  ok?: boolean;
+  cellId?: string;
+  kernel?: string;
+  session?: string;
+  status?: string;
+  executionCount?: number | null;
+  outputs?: unknown[];
+  results?: JupyterPanelExecutionResult[];
+  stoppedAt?: string;
+};
 
 const JUPYTER_CELL_RE = /^([ \t]*)@@cell(?:[ \t]*\(([^)\n]*)\))?(?:[ \t]+\[([^\]\n]*)\])?[ \t]*$/i;
 const jupyterTaskState = new Map<string, Partial<JupyterPanelCell>>();
@@ -863,8 +874,8 @@ function cleanJupyterToken(value: string, fallback: string): string {
   return clean || fallback;
 }
 
-function jupyterCellKey(cell: Pick<JupyterPanelCell, "id" | "language" | "session">): string {
-  return `${cell.language}\0${cell.session}\0${cell.id}`;
+function jupyterCellKey(cell: Pick<JupyterPanelCell, "id" | "language" | "kernel" | "session">): string {
+  return `${cell.language}\0${cell.kernel}\0${cell.session}\0${cell.id}`;
 }
 
 function isLeanJupyterCell(cell: Pick<JupyterPanelCell, "language" | "kernel">): boolean {
@@ -937,7 +948,7 @@ function scanJupyterCells(): JupyterPanelCell[] {
 function jupyterCellsForContext(target: JupyterPanelCell, cells = scanJupyterCells()): Array<Record<string, string>> {
   return cells
     .filter((cell) => cell.language === target.language && cell.session === target.session)
-    .map((cell) => ({ cellId: cell.id, id: cell.id, code: "" }));
+    .map((cell) => ({ cellId: cell.id, id: cell.id, kernel: cell.kernel, session: cell.session, language: cell.language, code: "" }));
 }
 
 function renderJupyterPanel(): JupyterPanelCell[] {
@@ -1036,14 +1047,41 @@ async function runJupyterCell(cell: JupyterPanelCell, allCells = scanJupyterCell
       kernel: cell.kernel,
       session: cell.session,
       language: cell.language,
-    });
-    window.AaronnotePublishJupyterCellResult?.({
-      file: currentFile,
-      cellId: cell.id,
-      kernel: cell.kernel,
-      session: cell.session,
-      result,
-    });
+      runMode: "dependencies",
+      selectedCellIds: [cell.id],
+      cells: jupyterCellsForContext(cell, allCells),
+    }) as JupyterPanelExecutionResult;
+    const published = new Set<string>();
+    if (Array.isArray(result.results)) {
+      for (const item of result.results) {
+        const itemId = String(item?.cellId || "");
+        const itemCell = allCells.find((candidate) => candidate.id === itemId && candidate.language === cell.language && candidate.session === cell.session);
+        if (!itemId || !itemCell || published.has(itemId)) continue;
+        window.AaronnotePublishJupyterCellResult?.({
+          file: currentFile,
+          cellId: itemId,
+          kernel: itemCell.kernel,
+          session: itemCell.session,
+          result: item,
+        });
+        jupyterTaskState.set(jupyterCellKey(itemCell), {
+          status: isLeanJupyterCell(itemCell) ? "synced" : item.status === "error" ? "error" : "ok",
+          executionCount: isLeanJupyterCell(itemCell) ? null : item.executionCount,
+          durationMs: performance.now() - started,
+          outputCount: isLeanJupyterCell(itemCell) ? undefined : item.outputs?.length ?? 0,
+        });
+        published.add(itemId);
+      }
+    }
+    if (!published.has(cell.id)) {
+      window.AaronnotePublishJupyterCellResult?.({
+        file: currentFile,
+        cellId: cell.id,
+        kernel: cell.kernel,
+        session: cell.session,
+        result,
+      });
+    }
     jupyterTaskState.set(key, {
       status: isLeanJupyterCell(cell) ? "synced" : result.status === "error" ? "error" : "ok",
       executionCount: isLeanJupyterCell(cell) ? null : result.executionCount,
@@ -1075,16 +1113,56 @@ async function runJupyterCells(mode: "all" | "above" | "below" | "section"): Pro
     return;
   }
   setStatus(`Running ${cells.length} Jupyter cell${cells.length === 1 ? "" : "s"}`);
+  const groups = new Map<string, JupyterPanelCell[]>();
   for (const cell of cells) {
-    const ok = await runJupyterCell(cell, allCells);
-    if (!ok) {
-      // Match VSCode Jupyter: a failing cell halts the run so later cells do not
-      // execute against half-initialized state.
-      setStatus(`Jupyter run stopped at ${cell.id} (error)`);
+    const groupKey = `${cell.language}\0${cell.kernel}\0${cell.session}`;
+    groups.set(groupKey, [...(groups.get(groupKey) || []), cell]);
+  }
+  for (const groupCells of groups.values()) {
+    const anchor = groupCells[0];
+    if (!anchor) continue;
+    const started = performance.now();
+    for (const cell of groupCells) jupyterTaskState.set(jupyterCellKey(cell), { status: "running" });
+    renderJupyterPanel();
+    await ensureJupyterScript(anchor, allCells);
+    const result = await api.jupyterCell.executeScriptCell({
+      file: currentFile,
+      cellId: anchor.id,
+      kernel: anchor.kernel,
+      session: anchor.session,
+      language: anchor.language,
+      runMode: "selected",
+      selectedCellIds: groupCells.map((cell) => cell.id),
+      cells: jupyterCellsForContext(anchor, allCells),
+    }) as JupyterPanelExecutionResult;
+    const results = Array.isArray(result.results) && result.results.length > 0 ? result.results : [result];
+    for (const item of results) {
+      const itemId = String(item?.cellId || "");
+      const itemCell = groupCells.find((candidate) => candidate.id === itemId)
+        ?? allCells.find((candidate) => candidate.id === itemId && candidate.language === anchor.language && candidate.session === anchor.session);
+      if (!itemId || !itemCell) continue;
+      window.AaronnotePublishJupyterCellResult?.({
+        file: currentFile,
+        cellId: itemId,
+        kernel: itemCell.kernel,
+        session: itemCell.session,
+        result: item,
+      });
+      jupyterTaskState.set(jupyterCellKey(itemCell), {
+        status: isLeanJupyterCell(itemCell) ? "synced" : item.status === "error" ? "error" : "ok",
+        executionCount: isLeanJupyterCell(itemCell) ? null : item.executionCount,
+        durationMs: performance.now() - started,
+        outputCount: isLeanJupyterCell(itemCell) ? undefined : item.outputs?.length ?? 0,
+      });
+    }
+    if (result.status === "error") {
+      setStatus(`Jupyter run stopped at ${result.stoppedAt || result.cellId || anchor.id} (error)`);
+      renderJupyterPanel();
       return;
     }
   }
   setStatus("Jupyter run complete");
+  renderJupyterPanel();
 }
 
 async function restartAndRunAllJupyterCells(): Promise<void> {

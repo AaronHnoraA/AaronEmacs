@@ -126,6 +126,67 @@ describe("jupyter cell service (no kernel)", () => {
     });
   });
 
+  test("openScript keeps one hidden script per language/session when kernel changes", async () => {
+    await withService(async ({ service, note }) => {
+      await service.openScript({
+        file: note,
+        cellId: "cell-a",
+        kernel: "python3",
+        session: "default",
+        language: "python",
+        storage: "script",
+        open: false,
+        cells: [{ cellId: "cell-a", id: "cell-a", code: "x = 1" }],
+      });
+      await service.openScript({
+        file: note,
+        cellId: "cell-a",
+        kernel: "sagemath-10.9",
+        session: "default",
+        language: "python",
+        storage: "script",
+        open: false,
+        cells: [{ cellId: "cell-a", id: "cell-a", code: "x = 2" }],
+      });
+      const scriptPath = join(note, "..", ".cell", "note.python.default.py");
+      const pythonRead = await service.readScriptCell({
+        file: note, cellId: "cell-a", kernel: "python3", session: "default", language: "python",
+      });
+      const sageRead = await service.readScriptCell({
+        file: note, cellId: "cell-a", kernel: "sagemath-10.9", session: "default", language: "python",
+      });
+      const script = await readFile(scriptPath, "utf8");
+      expect(pythonRead.file).toBe(scriptPath);
+      expect(sageRead.file).toBe(scriptPath);
+      expect(pythonRead.code).toBe("x = 2");
+      expect(sageRead.code).toBe("x = 2");
+      expect(script).toContain("x = 2");
+    });
+  });
+
+  test("executeScriptCell uses the requested kernel for a shared language/session context", async () => {
+    await withService(async ({ service, note }) => {
+      const result = await service.executeScriptCell({
+        file: note,
+        cellId: "cell-b",
+        kernel: "sagemath-10.9",
+        session: "default",
+        language: "python",
+        runMode: "selected",
+        selectedCellIds: ["cell-a", "cell-b"],
+        cells: [
+          { cellId: "cell-a", id: "cell-a", kernel: "python3", session: "default", language: "python", code: "" },
+          { cellId: "cell-b", id: "cell-b", kernel: "python3", session: "default", language: "python", code: "" },
+        ],
+      });
+      const mirrorPath = join(note, "..", ".cell", "note.output.python.default.json");
+      const mirror = JSON.parse(await readFile(mirrorPath, "utf8"));
+      expect(result.results.map((item: { kernel?: string }) => item.kernel)).toEqual(["sagemath-10.9", "sagemath-10.9"]);
+      expect(mirror.cells["cell-a"].kernel).toBe("sagemath-10.9");
+      expect(mirror.cells["cell-b"].kernel).toBe("sagemath-10.9");
+    });
+  });
+
   test("a corrupt output mirror is ignored, not thrown", async () => {
     await withService(async ({ service, note }) => {
       await service.openScript({

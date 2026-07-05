@@ -366,6 +366,10 @@ type CeilExecutionResult = {
   executionCount?: number | null;
   outputs?: Array<Record<string, unknown>>;
   message?: string;
+  stoppedAt?: string;
+  autoRan?: boolean;
+  results?: CeilExecutionResult[];
+  plan?: Array<{ cellId?: string; mode?: string; selected?: boolean }>;
   live?: boolean;
   savedAt?: string;
   kernelRuntime?: {
@@ -2013,25 +2017,20 @@ class CeilCommandWidget extends MeasuredWidget {
         code: "",
       }
     );
-    const openScriptForContext = async (entries: CeilCellContextEntry[]): Promise<void> => {
-      await api.jupyterCell.openScript({
+    const executeEntries = async (
+      selectedEntries: CeilCellContextEntry[],
+      mode: "dependencies" | "selected",
+      entries: CeilCellContextEntry[],
+    ): Promise<CeilExecutionResult> => (
+      await api.jupyterCell.executeScriptCell({
         file,
         cellId: meta.id,
         kernel: meta.kernel,
         session: meta.session,
         language: meta.language,
-        storage: "script",
-        open: false,
+        runMode: mode,
+        selectedCellIds: selectedEntries.map((entry) => entry.id),
         cells: entries,
-      });
-    };
-    const executeEntry = async (entry: CeilCellContextEntry): Promise<CeilExecutionResult> => (
-      await api.jupyterCell.executeScriptCell({
-        file,
-        cellId: entry.id,
-        kernel: entry.kernel,
-        session: entry.session,
-        language: entry.language,
       }) as CeilExecutionResult
     );
     const publishEntryResult = (entry: CeilCellContextEntry, result: CeilExecutionResult): void => {
@@ -2069,30 +2068,34 @@ class CeilCommandWidget extends MeasuredWidget {
       setBusy(true);
       let ranCurrent = false;
       try {
-        await openScriptForContext(entries);
-        for (let index = 0; index < entriesToRun.length; index += 1) {
-          const entry = entriesToRun[index]!;
-          const runningCurrent = entry.id === meta.id;
-          status.textContent = entriesToRun.length === 1 ? "Running..." : `Running ${index + 1}/${entriesToRun.length}`;
-          if (runningCurrent && !leanRuntime) output.textContent = "Running...";
-          const result = await executeEntry(entry);
-          publishEntryResult(entry, result);
-          if (runningCurrent) {
-            ranCurrent = true;
-            lastResult = result;
-            setBoundedMap(ceilOutputCache, cacheKey, result);
-            status.textContent = leanRuntime
-              ? "Synced"
-              : ceilResultStatusLabel(meta, result);
-            if (!leanRuntime) renderCeilOutputs(output, result, outputWrap.classList.contains("is-expanded"));
-          }
-          if (result.status === "error") {
-            status.textContent = runningCurrent ? "Error" : `Stopped at ${entry.id}`;
-            break;
+        const dependencyMode = entriesToRun.length === 1 && entriesToRun[0]?.id === meta.id;
+        status.textContent = entriesToRun.length === 1 ? "Running..." : `Running ${entriesToRun.length}`;
+        if (dependencyMode && !leanRuntime) output.textContent = "Running...";
+        const result = await executeEntries(entriesToRun, dependencyMode ? "dependencies" : "selected", entries);
+        const published = new Set<string>();
+        if (Array.isArray(result.results)) {
+          for (const item of result.results) {
+            const itemId = String(item?.cellId || "");
+            const itemEntry = entries.find((candidate) => candidate.id === itemId);
+            if (!itemId || !itemEntry || published.has(itemId)) continue;
+            publishEntryResult(itemEntry, item);
+            published.add(itemId);
           }
         }
+        const currentWasRequested = entriesToRun.some((entry) => entry.id === meta.id);
+        if (!published.has(meta.id) && currentWasRequested) publishEntryResult(currentEntry(), result);
+        if (currentWasRequested) {
+          ranCurrent = true;
+          lastResult = result;
+          setBoundedMap(ceilOutputCache, cacheKey, result);
+          status.textContent = leanRuntime
+            ? "Synced"
+            : result.status === "error" && result.stoppedAt ? `Stopped at ${result.stoppedAt}` : ceilResultStatusLabel(meta, result);
+          if (!leanRuntime) renderCeilOutputs(output, result, outputWrap.classList.contains("is-expanded"));
+        } else {
+          status.textContent = result.status === "error" && result.stoppedAt ? `Stopped at ${result.stoppedAt}` : "Ran above";
+        }
         if (ranCurrent) await refreshSource();
-        else status.textContent = "Ran above";
       } catch (err) {
         renderCurrentError(err);
       } finally {
@@ -2101,7 +2104,7 @@ class CeilCommandWidget extends MeasuredWidget {
       }
     };
 
-    const runButton = makeButton(leanRuntime ? "Sync" : "Run", leanRuntime ? "Sync this Lean cell source file" : "Run this hidden script cell", async () => {
+    const runButton = makeButton(leanRuntime ? "Sync" : "Run", leanRuntime ? "Sync this Lean cell source file" : "Run this cell and stale cells above in the same language/session script", async () => {
       await runEntries([currentEntry()], "No cell");
     });
     const runAboveButton = makeButton("Above", "Run cells above this one in the same session", async () => {

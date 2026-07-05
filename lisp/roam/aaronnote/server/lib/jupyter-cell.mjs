@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
@@ -217,6 +217,10 @@ function normalizeCode(value) {
   return String(value ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
+function codeRevision(value) {
+  return createHash("sha256").update(normalizeCode(value)).digest("hex");
+}
+
 function leanRuntimeP(language, kernel) {
   return /lean/i.test(String(language || "")) || /lean/i.test(String(kernel || ""));
 }
@@ -271,21 +275,40 @@ function hiddenScriptCellOrder(text) {
   return ids;
 }
 
-async function readExistingHiddenCells(scriptFile) {
+async function readExistingHiddenCells(scriptFile, fallbackFile = "") {
   try {
     return parseHiddenScriptCells(await readFile(scriptFile, "utf8"));
   } catch (err) {
-    if (err?.code === "ENOENT") return new Map();
+    if (err?.code === "ENOENT") {
+      if (fallbackFile && fallbackFile !== scriptFile) {
+        try {
+          return parseHiddenScriptCells(await readFile(fallbackFile, "utf8"));
+        } catch (fallbackErr) {
+          if (fallbackErr?.code !== "ENOENT") throw fallbackErr;
+        }
+      }
+      return new Map();
+    }
     throw err;
   }
 }
 
-async function readOutputMirror(file) {
+async function readOutputMirror(file, fallbackFile = "") {
   try {
     const parsed = JSON.parse(await readFile(file, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch (err) {
-    if (err?.code === "ENOENT") return {};
+    if (err?.code === "ENOENT") {
+      if (fallbackFile && fallbackFile !== file) {
+        try {
+          const parsed = JSON.parse(await readFile(fallbackFile, "utf8"));
+          return parsed && typeof parsed === "object" ? parsed : {};
+        } catch (fallbackErr) {
+          if (fallbackErr?.code !== "ENOENT") throw fallbackErr;
+        }
+      }
+      return {};
+    }
     if (err instanceof SyntaxError) {
       // A partially-written or hand-corrupted mirror must not brick the cell.
       process.stderr.write(`[aaronnote-jupyter] ignoring corrupt output mirror: ${file}\n`);
@@ -309,7 +332,7 @@ async function writeOutputMirror(file, value) {
   }
 }
 
-async function readExistingHiddenScript(scriptFile) {
+async function readExistingHiddenScript(scriptFile, fallbackFile = "") {
   try {
     const text = await readFile(scriptFile, "utf8");
     return {
@@ -318,7 +341,21 @@ async function readExistingHiddenScript(scriptFile) {
       order: hiddenScriptCellOrder(text),
     };
   } catch (err) {
-    if (err?.code === "ENOENT") return { text: "", cells: new Map(), order: [] };
+    if (err?.code === "ENOENT") {
+      if (fallbackFile && fallbackFile !== scriptFile) {
+        try {
+          const text = await readFile(fallbackFile, "utf8");
+          return {
+            text: "",
+            cells: parseHiddenScriptCells(text),
+            order: hiddenScriptCellOrder(text),
+          };
+        } catch (fallbackErr) {
+          if (fallbackErr?.code !== "ENOENT") throw fallbackErr;
+        }
+      }
+      return { text: "", cells: new Map(), order: [] };
+    }
     throw err;
   }
 }
@@ -397,6 +434,7 @@ export function createJupyterCellService({
   let cleanupTimer = null;
   let cleanupRunning = false;
   const mirrorLocks = new Map();
+  const executionQueues = new Map();
 
   function withMirrorLock(file, run) {
     // Serialize read-modify-write on a single output mirror so two cells sharing
@@ -409,6 +447,25 @@ export function createJupyterCellService({
       if (mirrorLocks.get(file) === guard) mirrorLocks.delete(file);
     });
     return result;
+  }
+
+  function withKernelExecutionQueue(key, run) {
+    const previous = executionQueues.get(key) || Promise.resolve();
+    const result = previous.catch(() => {}).then(run);
+    const guard = result.catch(() => {});
+    executionQueues.set(key, guard);
+    void guard.finally(() => {
+      if (executionQueues.get(key) === guard) executionQueues.delete(key);
+    });
+    return result;
+  }
+
+  function executedRevisions(record) {
+    if (!record) return new Map();
+    if (!(record.executedCellRevisions instanceof Map)) {
+      record.executedCellRevisions = new Map(Object.entries(record.executedCellRevisions || {}));
+    }
+    return record.executedCellRevisions;
   }
 
   function cleanupNeeded() {
@@ -500,11 +557,8 @@ export function createJupyterCellService({
     }
     const fileValue = String(body?.file || "").trim();
     if (!fileValue) return { key: "", record: null };
-    const file = safeNoteFile(fileValue);
-    const kernel = cleanToken(body?.kernel, "python3");
-    const session = cleanToken(body?.session, "default");
-    const key = kernelKey({ file, kernel, session });
-    return { key, record: kernelsByKey.get(key) || null };
+    const runtime = runtimeForBody(body);
+    return { key: runtime.key, record: kernelsByKey.get(runtime.key) || null };
   }
 
   function widgetRuntimeForRecord(record) {
@@ -527,9 +581,10 @@ export function createJupyterCellService({
     };
   }
 
-  function attachLiveRuntimeToOutput(output, noteFile, kernel, session) {
+  function attachLiveRuntimeToOutput(output, noteFile, kernel, session, language) {
     if (!output || typeof output !== "object") return output ?? null;
-    const record = kernelsByKey.get(kernelKey({ file: noteFile, kernel, session }));
+    const scriptFile = hiddenScriptPath(noteFile, session, language);
+    const record = kernelsByKey.get(kernelKey({ file: scriptFile, kernel }));
     const runtime = widgetRuntimeForRecord(record);
     const stamp = outputRuntimeStamp(output);
     const live = Boolean(runtime && stamp && stamp.id === runtime.id && Number(stamp.generation || 1) === Number(runtime.generation || 1));
@@ -548,6 +603,7 @@ export function createJupyterCellService({
       key,
       id: record?.id || "",
       file: record?.file || "",
+      sourceFile: record?.sourceFile || "",
       kernel: record?.kernel || "",
       session: record?.session || "",
       status: running > 0 ? "running" : (record?.lastStatus || "idle"),
@@ -564,6 +620,7 @@ export function createJupyterCellService({
       executionCount: record?.executionCount ?? null,
       lastCellId: record?.lastCellId || "",
       lastError: record?.lastError || "",
+      executedCells: record?.executedCellRevisions instanceof Map ? record.executedCellRevisions.size : 0,
       widgetGeneration: Number(record?.widgetGeneration || 1),
       protected: running > 0,
       ttlMs: kernelIdleTtlMs,
@@ -580,6 +637,22 @@ export function createJupyterCellService({
       throw error(`Note file is outside the allowed root: ${file}`, 403);
     }
     return file;
+  }
+
+  function runtimeForBody(body) {
+    const noteFile = safeNoteFile(body?.file);
+    const kernel = cleanToken(body?.kernel, "python3");
+    const session = cleanToken(body?.session, "default");
+    const language = languageForKernel(kernel, body?.language || body?.lang);
+    const scriptFile = hiddenScriptPath(noteFile, session, language);
+    return {
+      noteFile,
+      scriptFile,
+      kernel,
+      session,
+      language,
+      key: kernelKey({ file: scriptFile, kernel }),
+    };
   }
 
   async function fetchJson(path, options = {}) {
@@ -667,20 +740,17 @@ export function createJupyterCellService({
     }
   }
 
-  function kernelKey({ file, kernel, session }) {
-    return `${resolve(file)}\0${kernel}\0${session}`;
+  function kernelKey({ file, kernel }) {
+    return `${resolve(file)}\0${cleanToken(kernel, "python3")}`;
   }
 
   async function ensureKernel(body) {
     await ensureServer();
-    const file = safeNoteFile(body?.file);
-    const kernel = cleanToken(body?.kernel, "python3");
-    const session = cleanToken(body?.session, "default");
-    const key = kernelKey({ file, kernel, session });
+    const { noteFile, scriptFile, kernel, session, language, key } = runtimeForBody(body || {});
     const existing = kernelsByKey.get(key);
     if (existing?.id) {
       touchKernel(existing);
-      return { ...existing, file, kernel, session, key };
+      return { ...existing, file: scriptFile, sourceFile: noteFile, kernel, session, language, key };
     }
     const created = await fetchJson("/api/kernels", {
       method: "POST",
@@ -691,9 +761,11 @@ export function createJupyterCellService({
     const now = Date.now();
     const next = {
       id,
-      file,
+      file: scriptFile,
+      sourceFile: noteFile,
       kernel,
       session,
+      language,
       createdAt: now,
       lastUsedAt: now,
       lastActivityAt: now,
@@ -705,6 +777,7 @@ export function createJupyterCellService({
       lastStatus: "idle",
       lastError: "",
       widgetGeneration: 1,
+      executedCellRevisions: new Map(),
     };
     kernelsByKey.set(key, next);
     scheduleCleanup();
@@ -981,15 +1054,15 @@ export function createJupyterCellService({
     }
   }
 
-  async function execute(body) {
-    const code = normalizeCode(body?.code);
-    const cellId = String(body?.cellId || body?.id || "");
+  async function executePrepared(body, code, cellId, { queued = true } = {}) {
+    const normalizedCode = normalizeCode(code);
+    const normalizedCellId = String(cellId || body?.cellId || body?.id || "");
     const requestedKernel = cleanToken(body?.kernel, "python3");
     const requestedLanguage = languageForKernel(requestedKernel, body?.language || body?.lang);
     if (leanRuntimeP(requestedLanguage, requestedKernel)) {
       return {
         ok: true,
-        cellId,
+        cellId: normalizedCellId,
         kernel: requestedKernel,
         session: cleanToken(body?.session, "default"),
         status: "ok",
@@ -998,8 +1071,22 @@ export function createJupyterCellService({
         runtime: "lean4",
       };
     }
-    if (!code.trim()) return { ok: true, status: "ok", outputs: [], executionCount: null, cellId };
-    return await withActiveRequest(async () => runExecuteAttempt(body, code, cellId, true));
+    if (!normalizedCode.trim()) return { ok: true, status: "ok", outputs: [], executionCount: null, cellId: normalizedCellId };
+    const runtime = runtimeForBody({ ...(body || {}), kernel: requestedKernel });
+    const run = () => withActiveRequest(async () => runExecuteAttempt({
+      ...(body || {}),
+      file: runtime.noteFile,
+      kernel: requestedKernel,
+      session: runtime.session,
+      language: runtime.language,
+    }, normalizedCode, normalizedCellId, true));
+    return queued ? await withKernelExecutionQueue(runtime.key, run) : await run();
+  }
+
+  async function execute(body) {
+    const code = normalizeCode(body?.code);
+    const cellId = String(body?.cellId || body?.id || "");
+    return await executePrepared(body || {}, code, cellId, { queued: true });
   }
 
   async function openScript(body) {
@@ -1067,14 +1154,180 @@ export function createJupyterCellService({
       language,
       cellId,
       code: cells.get(cellId) ?? "",
-      output: attachLiveRuntimeToOutput(savedOutput, noteFile, kernel, session),
+      output: attachLiveRuntimeToOutput(savedOutput, noteFile, kernel, session, language),
       exists: Boolean(info),
       mtimeMs: info?.mtimeMs ?? 0,
       size: info?.size ?? 0,
     };
   }
 
+  async function persistScriptCellResult(noteFile, cell, result) {
+    if (leanRuntimeP(cell.language, cell.kernel)) return;
+    const outputFile = outputMirrorPath(noteFile, cell.session, cell.language);
+    const { widgetRuntime, ...persistedResult } = result;
+    await withMirrorLock(outputFile, async () => {
+      const mirror = await readOutputMirror(outputFile);
+      const cells = mirror.cells && typeof mirror.cells === "object" ? mirror.cells : {};
+      const current = cells[cell.cellId] && typeof cells[cell.cellId] === "object" ? cells[cell.cellId] : {};
+      const currentUi = current.ui && typeof current.ui === "object" ? current.ui : {};
+      cells[cell.cellId] = {
+        ...persistedResult,
+        live: true,
+        ...(widgetRuntime ? { kernelRuntime: widgetRuntime } : {}),
+        ui: currentUi,
+        savedAt: new Date().toISOString(),
+        kernel: cell.kernel,
+        session: cell.session,
+        language: cell.language,
+      };
+      await writeOutputMirror(outputFile, {
+        version: 1,
+        source: noteFile,
+        kernel: cell.kernel,
+        session: cell.session,
+        language: cell.language,
+        cells,
+      });
+    });
+  }
+
+  function normalizeContextCells(cells, hiddenCells, targetCellId, fallback) {
+    const result = [];
+    const seen = new Set();
+    for (const raw of Array.isArray(cells) ? cells : []) {
+      const id = markerId(raw?.cellId || raw?.id);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      result.push({
+        cellId: id,
+        id,
+        kernel: fallback.kernel,
+        session: cleanToken(raw?.session, fallback.session),
+        language: languageForKernel(fallback.kernel, raw?.language || raw?.lang || fallback.language),
+        code: hiddenCells.get(id) ?? normalizeCode(raw?.code),
+      });
+    }
+    if (targetCellId && !seen.has(targetCellId)) {
+      result.push({
+        cellId: targetCellId,
+        id: targetCellId,
+        kernel: fallback.kernel,
+        session: fallback.session,
+        language: fallback.language,
+        code: hiddenCells.get(targetCellId) ?? "",
+      });
+    }
+    return result;
+  }
+
+  function selectedContextIds(body, targetCellId) {
+    const values = Array.isArray(body?.cellIds) ? body.cellIds
+      : Array.isArray(body?.selectedCellIds) ? body.selectedCellIds
+      : [targetCellId];
+    return new Set(values.map(markerId).filter(Boolean));
+  }
+
+  function planContextExecution({ mode, entries, targetCellId, record }) {
+    const targetIndex = entries.findIndex((entry) => entry.cellId === targetCellId);
+    if (targetIndex < 0) throw error("Target Jupyter cell is not in this session context", 400);
+    if (mode === "selected") return entries.filter((entry) => entry.selected);
+    const revisions = executedRevisions(record);
+    const planned = [];
+    let dirty = !record?.id;
+    for (let index = 0; index <= targetIndex; index += 1) {
+      const entry = entries[index];
+      const revision = codeRevision(entry.code);
+      const stale = dirty || revisions.get(entry.cellId) !== revision || entry.cellId === targetCellId;
+      if (!stale) continue;
+      planned.push(entry);
+      dirty = true;
+    }
+    return planned;
+  }
+
+  async function executeScriptCellWithContext(body) {
+    const noteFile = safeNoteFile(body?.file);
+    const kernel = cleanToken(body?.kernel, "python3");
+    const session = cleanToken(body?.session, "default");
+    const language = languageForKernel(kernel, body?.language || body?.lang);
+    const targetCellId = markerId(body?.cellId || body?.id);
+    if (!targetCellId) throw error("Missing Jupyter cell id", 400);
+
+    const runtime = runtimeForBody({ ...(body || {}), file: noteFile, kernel, session, language });
+    return await withKernelExecutionQueue(runtime.key, async () => {
+      await openScript({
+        ...(body || {}),
+        file: noteFile,
+        cellId: targetCellId,
+        kernel,
+        session,
+        language,
+        storage: "script",
+        open: false,
+      });
+      const scriptFile = hiddenScriptPath(noteFile, session, language);
+      const hiddenCells = await readExistingHiddenCells(scriptFile);
+      const selected = selectedContextIds(body, targetCellId);
+      const entries = normalizeContextCells(body?.cells, hiddenCells, targetCellId, { kernel, session, language })
+        .filter((entry) => entry.session === session && entry.language === language)
+        .map((entry) => ({ ...entry, selected: selected.has(entry.cellId), revision: codeRevision(entry.code) }));
+      const mode = String(body?.runMode || body?.executionMode || "dependencies") === "selected" ? "selected" : "dependencies";
+      const recordBefore = kernelsByKey.get(runtime.key);
+      const plan = planContextExecution({ mode, entries, targetCellId, record: recordBefore });
+      if (plan.length === 0) {
+        return { ok: true, cellId: targetCellId, kernel, session, status: "ok", executionCount: null, outputs: [], results: [], plan: [] };
+      }
+      const results = [];
+      let targetResult = null;
+      for (const entry of plan) {
+        const result = await executePrepared({
+          ...(body || {}),
+          file: noteFile,
+          kernel: entry.kernel,
+          session: entry.session,
+          language: entry.language,
+          cellId: entry.cellId,
+        }, entry.code, entry.cellId, { queued: false });
+        const liveResult = { ...result, live: true, cellId: entry.cellId, kernel: entry.kernel, session: entry.session };
+        await persistScriptCellResult(noteFile, entry, liveResult);
+        results.push(liveResult);
+        if (liveResult.status !== "error") {
+          const record = kernelsByKey.get(runtime.key);
+          if (record) executedRevisions(record).set(entry.cellId, entry.revision);
+        }
+        if (entry.cellId === targetCellId) targetResult = liveResult;
+        if (liveResult.status === "error") {
+          if (entry.cellId === targetCellId) {
+            targetResult = liveResult;
+          } else {
+            targetResult = {
+              ok: false,
+              cellId: targetCellId,
+              kernel,
+              session,
+              status: "error",
+              message: `Stopped at ${entry.cellId}`,
+              outputs: liveResult.outputs || [],
+              stoppedAt: entry.cellId,
+              live: true,
+            };
+          }
+          break;
+        }
+      }
+      return {
+        ...(targetResult || results[results.length - 1] || { ok: true, cellId: targetCellId, kernel, session, status: "ok", outputs: [] }),
+        results,
+        plan: plan.map((entry) => ({ cellId: entry.cellId, mode, selected: entry.selected })),
+        autoRan: mode === "dependencies" && plan.some((entry) => entry.cellId !== targetCellId),
+      };
+    });
+  }
+
   async function executeScriptCell(body) {
+    if (Array.isArray(body?.cells) && body.cells.length > 0) {
+      return await executeScriptCellWithContext(body || {});
+    }
     const read = await readScriptCell(body || {});
     const noteFile = safeNoteFile(body?.file);
     const result = await execute({
@@ -1086,32 +1339,7 @@ export function createJupyterCellService({
       code: read.code,
     });
     if (leanRuntimeP(read.language, read.kernel)) return result;
-    const outputFile = outputMirrorPath(noteFile, read.session, read.language);
-    const { widgetRuntime, ...persistedResult } = result;
-    await withMirrorLock(outputFile, async () => {
-      const mirror = await readOutputMirror(outputFile);
-      const cells = mirror.cells && typeof mirror.cells === "object" ? mirror.cells : {};
-      const current = cells[read.cellId] && typeof cells[read.cellId] === "object" ? cells[read.cellId] : {};
-      const currentUi = current.ui && typeof current.ui === "object" ? current.ui : {};
-      cells[read.cellId] = {
-        ...persistedResult,
-        live: true,
-        ...(widgetRuntime ? { kernelRuntime: widgetRuntime } : {}),
-        ui: currentUi,
-        savedAt: new Date().toISOString(),
-        kernel: read.kernel,
-        session: read.session,
-        language: read.language,
-      };
-      await writeOutputMirror(outputFile, {
-        version: 1,
-        source: noteFile,
-        kernel: read.kernel,
-        session: read.session,
-        language: read.language,
-        cells,
-      });
-    });
+    await persistScriptCellResult(noteFile, read, result);
     return { ...result, live: true };
   }
 
@@ -1240,10 +1468,7 @@ export function createJupyterCellService({
   }
 
   function kernelStatus(body) {
-    const file = safeNoteFile(body?.file);
-    const kernel = cleanToken(body?.kernel, "python3");
-    const session = cleanToken(body?.session, "default");
-    const key = kernelKey({ file, kernel, session });
+    const { kernel, session, key } = runtimeForBody(body || {});
     const existing = kernelsByKey.get(key);
     return {
       ok: true,
@@ -1266,6 +1491,7 @@ export function createJupyterCellService({
         record.lastStatus = "restarted";
         record.lastError = "";
         record.widgetGeneration = Number(record.widgetGeneration || 1) + 1;
+        record.executedCellRevisions = new Map();
         touchKernel(record);
       }
       return { ok: true, kernel: kernelInfo.kernel, session: kernelInfo.session };

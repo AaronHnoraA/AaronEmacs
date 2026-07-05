@@ -66,6 +66,10 @@ export type JupyterCellExecuteResult = {
   executionCount?: number | null;
   outputs?: JupyterCellOutput[];
   message?: string;
+  stoppedAt?: string;
+  autoRan?: boolean;
+  results?: JupyterCellExecuteResult[];
+  plan?: Array<{ cellId?: string; mode?: string; selected?: boolean }>;
   live?: boolean;
   savedAt?: string;
   kernelRuntime?: {
@@ -102,6 +106,7 @@ export type JupyterKernelTask = {
   key?: string;
   id?: string;
   file?: string;
+  sourceFile?: string;
   kernel?: string;
   session?: string;
   status?: string;
@@ -118,6 +123,7 @@ export type JupyterKernelTask = {
   executionCount?: number | null;
   lastCellId?: string;
   lastError?: string;
+  executedCells?: number;
   protected?: boolean;
   ttlMs?: number;
 };
