@@ -22,6 +22,8 @@ export interface JupyterCellService {
   restart(body?: Record<string, unknown>): Promise<Record<string, any>>;
   interrupt(body?: Record<string, unknown>): Promise<Record<string, any>>;
   shutdownKernel(body?: Record<string, unknown>): Promise<Record<string, any>>;
+  widgetProxyTarget(pathname: string, search?: string, websocket?: boolean): string | null;
+  touchKernelById(id: string): boolean;
   listTasks(): Promise<Record<string, any>>;
   cleanup(body?: Record<string, unknown>): Promise<Record<string, any>>;
   shutdown(): Promise<void>;

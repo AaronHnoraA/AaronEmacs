@@ -125,6 +125,13 @@ declare global {
     // widgets to re-read their hidden source after an out-of-band edit (e.g.
     // the user saved the script buffer in Emacs). See notifyCeilScriptSaved.
     AaronnoteReloadCeilCells?: (file?: string) => void;
+    AaronnotePublishJupyterCellResult?: (detail: {
+      file: string;
+      cellId: string;
+      kernel: string;
+      session: string;
+      result: CeilExecutionResult;
+    }) => void;
   }
 }
 
@@ -345,6 +352,11 @@ type CeilCellContext = {
   code: string;
 };
 
+type CeilCellContextEntry = CeilCellContext & CeilMeta & {
+  from: number;
+  to: number;
+};
+
 type CeilExecutionResult = {
   ok?: boolean;
   cellId?: string;
@@ -354,6 +366,18 @@ type CeilExecutionResult = {
   executionCount?: number | null;
   outputs?: Array<Record<string, unknown>>;
   message?: string;
+  live?: boolean;
+  savedAt?: string;
+  kernelRuntime?: {
+    id?: string;
+    name?: string;
+    generation?: number;
+  };
+  widgetRuntime?: {
+    id: string;
+    name: string;
+    generation?: number;
+  };
   ui?: {
     outputFolded?: boolean;
     outputExpanded?: boolean;
@@ -369,6 +393,22 @@ function patchCeilOutputUi(result: CeilExecutionResult | null, patch: NonNullabl
     ...(result ?? { ok: true, status: "ok", outputs: [] }),
     ui: { ...ceilOutputUi(result), ...patch },
   };
+}
+
+function ceilResultStatusLabel(meta: Pick<CeilMeta, "id">, result: CeilExecutionResult | null): string {
+  if (!result) return meta.id;
+  const prefix = result.live === false ? "Saved " : "";
+  if (result.executionCount != null) return `${prefix}In [${result.executionCount}]`;
+  return result.status ? `${prefix}${result.status}` : meta.id;
+}
+
+function mergeCeilOutputFromServer(saved: CeilExecutionResult | null, current: CeilExecutionResult | null): CeilExecutionResult | null {
+  if (!saved) return current;
+  if (saved.widgetRuntime || saved.live === false) return saved;
+  if (current?.widgetRuntime && current.live !== false) {
+    return { ...saved, live: true, widgetRuntime: current.widgetRuntime };
+  }
+  return saved;
 }
 
 const clearTikzDirtyEffect = StateEffect.define<string>();
@@ -577,26 +617,72 @@ function scheduleCeilCommandLineUpdate(view: EditorView, from: number, insert: s
   });
 }
 
-function ceilOutputKey(file: string, meta: CeilMeta, body: string): string {
+function ceilOutputKey(file: string, meta: Pick<CeilMeta, "kernel" | "session" | "id">, body: string): string {
   return `${file}\0${meta.kernel}\0${meta.session}\0${meta.id}\0${shortHash(body)}`;
 }
 
 function sameCeilContext(a: CeilMeta, b: CeilMeta): boolean {
-  return a.kernel === b.kernel && a.session === b.session;
+  return a.language === b.language && a.session === b.session;
 }
 
-function ceilCommandCellsForContext(state: EditorState, target: CeilMeta, file: string): CeilCellContext[] {
+function ceilCommandRangesFromState(state: EditorState): CeilCommandRange[] {
   const ranges = state.field(blockExtraRangesField, false) ?? scanBlockExtraRanges(state.doc, blockExtraExcludedRanges(state));
-  return ranges.ceilCommands
-    .map((range) => parseCeilCommand(range, file))
-    .filter((meta) => sameCeilContext(meta, target))
-    .map((meta) => ({
+  return ranges.ceilCommands;
+}
+
+function ceilCommandUsedIds(state: EditorState, file: string, current: CeilCommandRange): Set<string> {
+  const used = new Set<string>();
+  for (const range of ceilCommandRangesFromState(state)) {
+    if (range.from === current.from && range.to === current.to) continue;
+    const id = parseCeilCommand(range, file).id;
+    if (id) used.add(id);
+  }
+  return used;
+}
+
+function uniqueCeilCommandId(state: EditorState, file: string, range: CeilCommandRange, baseId: string): string {
+  const used = ceilCommandUsedIds(state, file, range);
+  if (!used.has(baseId)) return baseId;
+  for (let index = 1; index < 1000; index += 1) {
+    const candidate = `ceil-${shortHash(`${file}\n${range.from}\n${range.argsRaw}\n${index}`)}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return `ceil-${shortHash(`${file}\n${range.from}\n${range.argsRaw}\n${Date.now()}`)}`;
+}
+
+function parseCeilCommandForState(state: EditorState, range: CeilCommandRange, file: string): CeilCommandMeta {
+  const meta = parseCeilCommand(range, file);
+  if (!range.idRaw.trim()) {
+    const uniqueId = uniqueCeilCommandId(state, file, range, meta.id);
+    if (uniqueId !== meta.id) return { ...meta, id: uniqueId, changed: true };
+  }
+  return meta;
+}
+
+function ceilCommandEntriesForContext(state: EditorState, target: CeilMeta, file: string): CeilCellContextEntry[] {
+  return ceilCommandRangesFromState(state)
+    .map((range) => ({ range, meta: parseCeilCommandForState(state, range, file) }))
+    .filter(({ meta }) => sameCeilContext(meta, target))
+    .map(({ range, meta }) => ({
+      ...meta,
+      from: range.from,
+      to: range.to,
       cellId: meta.id,
       kernel: meta.kernel,
       session: meta.session,
       language: meta.language,
       code: "",
     }));
+}
+
+function ceilCommandCellsForContext(state: EditorState, target: CeilMeta, file: string): CeilCellContext[] {
+  return ceilCommandEntriesForContext(state, target, file).map(({ cellId, kernel, session, language, code }) => ({
+    cellId,
+    kernel,
+    session,
+    language,
+    code,
+  }));
 }
 
 function highlightedCeilCode(code: string, language: string): HTMLElement {
@@ -1401,17 +1487,68 @@ function appendCeilFrame(container: HTMLElement, content: string): void {
   container.append(frame);
 }
 
-function renderCeilWidgetPlaceholder(container: HTMLElement, data: Record<string, unknown>): void {
-  const note = document.createElement("div");
-  note.className = "cm-ceil-output-widget";
-  const repr = mimeText(data, "text/plain");
-  note.textContent = repr
-    ? `Interactive widget (ipywidgets) — live controls aren't supported inline.\n${repr}`
-    : "Interactive widget (ipywidgets) — live controls aren't supported inline.";
-  container.append(note);
+const ceilWidgetCleanup = new WeakMap<HTMLElement, () => void>();
+
+function disposeCeilWidgetHost(host: HTMLElement): void {
+  const cleanup = ceilWidgetCleanup.get(host);
+  if (cleanup) {
+    ceilWidgetCleanup.delete(host);
+    try { cleanup(); } catch {}
+  }
+  delete host.dataset.widgetMountToken;
 }
 
-function renderCeilMime(container: HTMLElement, mime: string, data: Record<string, unknown>): void {
+function disposeCeilWidgetTree(root: HTMLElement): void {
+  if (root.classList.contains("cm-ceil-output-widget")) disposeCeilWidgetHost(root);
+  for (const host of root.querySelectorAll<HTMLElement>(".cm-ceil-output-widget")) disposeCeilWidgetHost(host);
+}
+
+function renderCeilWidget(container: HTMLElement, data: Record<string, unknown>, runtime?: CeilExecutionResult["widgetRuntime"]): void {
+  const note = document.createElement("div");
+  note.className = "cm-ceil-output-widget";
+  const view = data["application/vnd.jupyter.widget-view+json"];
+  const modelId = view && typeof view === "object" ? String((view as { model_id?: unknown }).model_id || "") : "";
+  const repr = mimeText(data, "text/plain");
+  if (!modelId) {
+    note.dataset.state = "error";
+    note.textContent = "Invalid ipywidgets output: missing model_id.";
+    container.append(note);
+    return;
+  }
+  if (!runtime?.id || !runtime.name) {
+    note.dataset.state = "stale";
+    note.textContent = repr
+      ? `Interactive widget is no longer live — run the cell to reconnect.\n${repr}`
+      : "Interactive widget is no longer live — run the cell to reconnect.";
+    container.append(note);
+    return;
+  }
+  const token = `${runtime.id}:${runtime.generation || 1}:${modelId}:${Date.now()}`;
+  note.dataset.state = "loading";
+  note.dataset.widgetMountToken = token;
+  note.textContent = "Connecting interactive widget...";
+  container.append(note);
+  (window as unknown as { __jupyter_widgets_assets_path__?: string }).__jupyter_widgets_assets_path__ ??=
+    new URL("./", window.location.href).toString();
+  void import("../../jupyter-widget-runtime.ts")
+    .then(({ mountJupyterWidget }) => mountJupyterWidget(note, modelId, runtime))
+    .then((cleanup) => {
+      if (note.dataset.widgetMountToken !== token || !note.isConnected) {
+        cleanup();
+        return;
+      }
+      note.dataset.state = "live";
+      ceilWidgetCleanup.set(note, cleanup);
+    })
+    .catch((error) => {
+      if (note.dataset.widgetMountToken !== token) return;
+      note.dataset.state = "error";
+      note.textContent = `Widget failed: ${error instanceof Error ? error.message : String(error)}`;
+    });
+}
+
+function renderCeilMime(container: HTMLElement, mime: string, data: Record<string, unknown>, runtime?: CeilExecutionResult["widgetRuntime"]): void {
+  disposeCeilWidgetTree(container);
   container.replaceChildren();
   if (mime === "image/png" || mime === "image/jpeg") {
     const img = document.createElement("img");
@@ -1433,7 +1570,7 @@ function renderCeilMime(container: HTMLElement, mime: string, data: Record<strin
     return;
   }
   if (mime === "application/vnd.jupyter.widget-view+json") {
-    renderCeilWidgetPlaceholder(container, data);
+    renderCeilWidget(container, data, runtime);
     return;
   }
   if (mime === "text/latex") {
@@ -1462,7 +1599,7 @@ function renderCeilMime(container: HTMLElement, mime: string, data: Record<strin
   container.append(pre);
 }
 
-function appendCeilMimeBundle(root: HTMLElement, data: Record<string, unknown> = {}, kernel = ""): void {
+function appendCeilMimeBundle(root: HTMLElement, data: Record<string, unknown> = {}, kernel = "", runtime?: CeilExecutionResult["widgetRuntime"]): void {
   const mimes = availableCeilMimes(data);
   if (mimes.length === 0) {
     const pre = document.createElement("pre");
@@ -1494,13 +1631,13 @@ function appendCeilMimeBundle(root: HTMLElement, data: Record<string, unknown> =
       event.stopPropagation();
       chosen = select.value;
       rememberCeilMimePref(kernel, chosen);
-      renderCeilMime(container, chosen, data);
+      renderCeilMime(container, chosen, data, runtime);
     });
     bar.append(select);
     root.append(bar);
   }
   root.append(container);
-  renderCeilMime(container, chosen, data);
+  renderCeilMime(container, chosen, data, runtime);
 }
 
 // Inline output view keeps very long stream text bounded so a runaway loop's
@@ -1519,6 +1656,7 @@ function renderCeilStreamText(pre: HTMLElement, text: string, full: boolean): vo
 }
 
 function renderCeilOutputs(root: HTMLElement, result: CeilExecutionResult | null, full = false): void {
+  disposeCeilWidgetTree(root);
   root.replaceChildren();
   if (!result) {
     const empty = document.createElement("div");
@@ -1555,6 +1693,7 @@ function renderCeilOutputs(root: HTMLElement, result: CeilExecutionResult | null
         item,
         (output.data && typeof output.data === "object" ? output.data : {}) as Record<string, unknown>,
         String(result.kernel || ""),
+        result.widgetRuntime,
       );
     }
     root.append(item);
@@ -1581,6 +1720,7 @@ function openCeilOutputPopup(result: CeilExecutionResult | null): void {
   };
   const destroy = (): void => {
     window.removeEventListener("keydown", onKey);
+    disposeCeilWidgetTree(body);
     overlay.remove();
   };
   close.addEventListener("click", destroy);
@@ -1622,9 +1762,14 @@ class CeilCommandWidget extends MeasuredWidget {
       && this.epoch === other.epoch;
   }
 
+  override destroy(dom: HTMLElement): void {
+    disposeCeilWidgetTree(dom);
+    super.destroy(dom);
+  }
+
   toDOM(view: EditorView): HTMLElement {
     const file = currentNoteFile();
-    const meta = parseCeilCommand(this.range, file);
+    const meta = parseCeilCommandForState(view.state, this.range, file);
     const leanRuntime = isLeanCeilRuntime(meta.language, meta.kernel);
     if (meta.changed) scheduleCeilCommandLineUpdate(view, this.range.from, formatCeilCommand(meta));
 
@@ -1697,6 +1842,7 @@ class CeilCommandWidget extends MeasuredWidget {
     output.className = "cm-ceil-output cm-ceil-output-limited";
     const cacheKey = ceilOutputKey(file, meta, `script:${meta.id}`);
     let lastResult = ceilOutputCache.get(cacheKey) ?? null;
+    status.textContent = ceilResultStatusLabel(meta, lastResult);
     const uiState = ceilOutputUi(lastResult);
     outputWrap.classList.toggle("is-folded", Boolean(uiState.outputFolded));
     outputWrap.classList.toggle("is-expanded", Boolean(uiState.outputExpanded));
@@ -1730,8 +1876,12 @@ class CeilCommandWidget extends MeasuredWidget {
       }).then((result) => {
         const saved = result.output && typeof result.output === "object" ? result.output as CeilExecutionResult : null;
         if (!saved) return;
-        lastResult = saved;
-        setBoundedMap(ceilOutputCache, cacheKey, saved);
+        const merged = lastResult?.widgetRuntime && lastResult.live !== false
+          ? { ...saved, live: true, widgetRuntime: lastResult.widgetRuntime }
+          : saved;
+        lastResult = merged;
+        setBoundedMap(ceilOutputCache, cacheKey, merged);
+        status.textContent = ceilResultStatusLabel(meta, lastResult);
       }).catch(() => {});
     };
 
@@ -1753,13 +1903,15 @@ class CeilCommandWidget extends MeasuredWidget {
         source.replaceChildren(code.trim() ? highlightedCeilCode(code, meta.language) : highlightedCeilCode("", meta.language));
         if (!code.trim()) source.dataset.empty = "true";
         const savedOutput = result.output && typeof result.output === "object" ? result.output as CeilExecutionResult : null;
-        lastResult = savedOutput;
+        const cachedLive = ceilOutputCache.get(cacheKey);
+        lastResult = mergeCeilOutputFromServer(savedOutput, cachedLive ?? null);
         const ui = ceilOutputUi(lastResult);
         outputWrap.classList.toggle("is-folded", Boolean(ui.outputFolded));
         outputWrap.classList.toggle("is-expanded", Boolean(ui.outputExpanded));
         const expanded = Boolean(ui.outputExpanded);
         foldButton.textContent = ui.outputFolded ? "Show" : "Fold";
         expandButton.textContent = ui.outputExpanded ? "Collapse" : "Expand";
+        status.textContent = ceilResultStatusLabel(meta, lastResult);
         renderCeilOutputs(output, lastResult, expanded);
         if (lastResult) setBoundedMap(ceilOutputCache, cacheKey, lastResult);
         view.requestMeasure();
@@ -1851,42 +2003,112 @@ class CeilCommandWidget extends MeasuredWidget {
       }
     });
 
-    const runButton = makeButton(leanRuntime ? "Sync" : "Run", leanRuntime ? "Sync this Lean cell source file" : "Run this hidden script cell", async () => {
+    const contextEntries = (): CeilCellContextEntry[] => ceilCommandEntriesForContext(view.state, meta, file);
+    const currentEntry = (): CeilCellContextEntry => (
+      contextEntries().find((entry) => entry.id === meta.id) ?? {
+        ...meta,
+        from: this.range.from,
+        to: this.range.to,
+        cellId: meta.id,
+        code: "",
+      }
+    );
+    const openScriptForContext = async (entries: CeilCellContextEntry[]): Promise<void> => {
+      await api.jupyterCell.openScript({
+        file,
+        cellId: meta.id,
+        kernel: meta.kernel,
+        session: meta.session,
+        language: meta.language,
+        storage: "script",
+        open: false,
+        cells: entries,
+      });
+    };
+    const executeEntry = async (entry: CeilCellContextEntry): Promise<CeilExecutionResult> => (
+      await api.jupyterCell.executeScriptCell({
+        file,
+        cellId: entry.id,
+        kernel: entry.kernel,
+        session: entry.session,
+        language: entry.language,
+      }) as CeilExecutionResult
+    );
+    const publishEntryResult = (entry: CeilCellContextEntry, result: CeilExecutionResult): void => {
+      const key = ceilOutputKey(file, entry, `script:${entry.id}`);
+      setBoundedMap(ceilOutputCache, key, result);
+      window.AaronnotePublishJupyterCellResult?.({
+        file,
+        cellId: entry.id,
+        kernel: entry.kernel,
+        session: entry.session,
+        result,
+      });
+    };
+    const renderCurrentError = (err: unknown): void => {
+      lastResult = {
+        ok: false,
+        status: "error",
+        live: true,
+        message: err instanceof Error ? err.message : String(err),
+        outputs: [{ output_type: "error", traceback: [err instanceof Error ? err.message : String(err)] }],
+      };
+      if (!leanRuntime) renderCeilOutputs(output, lastResult, outputWrap.classList.contains("is-expanded"));
+      status.textContent = "Error";
+    };
+    const runEntries = async (entriesToRun: CeilCellContextEntry[], emptyMessage: string): Promise<void> => {
       if (!file) {
         status.textContent = "Save note first";
         return;
       }
+      const entries = contextEntries();
+      if (entriesToRun.length === 0) {
+        status.textContent = emptyMessage;
+        return;
+      }
       setBusy(true);
-      status.textContent = "Running...";
-      output.textContent = "Running...";
+      let ranCurrent = false;
       try {
-        const result = await api.jupyterCell.executeScriptCell({
-          file,
-          cellId: meta.id,
-          kernel: meta.kernel,
-          session: meta.session,
-          language: meta.language,
-        }) as CeilExecutionResult;
-        lastResult = result;
-        setBoundedMap(ceilOutputCache, cacheKey, result);
-        status.textContent = leanRuntime
-          ? "Synced"
-          : result.executionCount != null ? `In [${result.executionCount}]` : (result.status || meta.id);
-        if (!leanRuntime) renderCeilOutputs(output, result, outputWrap.classList.contains("is-expanded"));
-        await refreshSource();
+        await openScriptForContext(entries);
+        for (let index = 0; index < entriesToRun.length; index += 1) {
+          const entry = entriesToRun[index]!;
+          const runningCurrent = entry.id === meta.id;
+          status.textContent = entriesToRun.length === 1 ? "Running..." : `Running ${index + 1}/${entriesToRun.length}`;
+          if (runningCurrent && !leanRuntime) output.textContent = "Running...";
+          const result = await executeEntry(entry);
+          publishEntryResult(entry, result);
+          if (runningCurrent) {
+            ranCurrent = true;
+            lastResult = result;
+            setBoundedMap(ceilOutputCache, cacheKey, result);
+            status.textContent = leanRuntime
+              ? "Synced"
+              : ceilResultStatusLabel(meta, result);
+            if (!leanRuntime) renderCeilOutputs(output, result, outputWrap.classList.contains("is-expanded"));
+          }
+          if (result.status === "error") {
+            status.textContent = runningCurrent ? "Error" : `Stopped at ${entry.id}`;
+            break;
+          }
+        }
+        if (ranCurrent) await refreshSource();
+        else status.textContent = "Ran above";
       } catch (err) {
-        lastResult = {
-          ok: false,
-          status: "error",
-          message: err instanceof Error ? err.message : String(err),
-          outputs: [{ output_type: "error", traceback: [err instanceof Error ? err.message : String(err)] }],
-        };
-        if (!leanRuntime) renderCeilOutputs(output, lastResult, outputWrap.classList.contains("is-expanded"));
-        status.textContent = "Error";
+        renderCurrentError(err);
       } finally {
         setBusy(false);
         view.requestMeasure();
       }
+    };
+
+    const runButton = makeButton(leanRuntime ? "Sync" : "Run", leanRuntime ? "Sync this Lean cell source file" : "Run this hidden script cell", async () => {
+      await runEntries([currentEntry()], "No cell");
+    });
+    const runAboveButton = makeButton("Above", "Run cells above this one in the same session", async () => {
+      await runEntries(contextEntries().filter((entry) => entry.from < this.range.from), "No cells above");
+    });
+    const runAllButton = makeButton("All", "Run all cells in this session", async () => {
+      await runEntries(contextEntries(), "No cells");
     });
 
     const interruptButton = makeButton("Interrupt", "Interrupt this kernel session", async () => {
@@ -1906,6 +2128,11 @@ class CeilCommandWidget extends MeasuredWidget {
       status.textContent = "Restarting...";
       try {
         await api.jupyterCell.restart({ file, kernel: meta.kernel, session: meta.session });
+        if (lastResult) {
+          lastResult = { ...lastResult, live: false, widgetRuntime: undefined };
+          setBoundedMap(ceilOutputCache, cacheKey, lastResult);
+          renderCeilOutputs(output, lastResult, outputWrap.classList.contains("is-expanded"));
+        }
         status.textContent = meta.id;
       } catch (err) {
         status.textContent = err instanceof Error ? err.message : String(err);
@@ -1951,7 +2178,7 @@ class CeilCommandWidget extends MeasuredWidget {
     });
     const popoutButton = makeButton("Popout", "Show output in a separate panel", () => openCeilOutputPopup(lastResult));
 
-    buttonBar.append(editButton, runButton);
+    buttonBar.append(editButton, runButton, runAboveButton, runAllButton);
     if (!leanRuntime) buttonBar.append(interruptButton, restartButton, clearButton);
     foldButton.textContent = outputWrap.classList.contains("is-folded") ? "Show" : "Fold";
     expandButton.textContent = outputWrap.classList.contains("is-expanded") ? "Collapse" : "Expand";
@@ -3332,6 +3559,7 @@ const orgEnvRailExtension = ViewPlugin.fromClass(OrgEnvRailPlugin);
 class CeilCellReloadPlugin {
   private readonly view: EditorView;
   private readonly handler: (file?: string) => void;
+  private readonly resultHandler: NonNullable<Window["AaronnotePublishJupyterCellResult"]>;
 
   constructor(view: EditorView) {
     this.view = view;
@@ -3340,12 +3568,22 @@ class CeilCellReloadPlugin {
       clearCeilCachesForFile(file || "");
       this.view.dispatch({ effects: ceilRefreshEffect.of(file || "") });
     };
+    this.resultHandler = ({ file, cellId, kernel, session, result }): void => {
+      const key = ceilOutputKey(file, { id: cellId, kernel, session }, `script:${cellId}`);
+      setBoundedMap(ceilOutputCache, key, result);
+      ceilCacheEpoch += 1;
+      this.view.dispatch({ effects: ceilRefreshEffect.of(file) });
+    };
     window.AaronnoteReloadCeilCells = this.handler;
+    window.AaronnotePublishJupyterCellResult = this.resultHandler;
   }
 
   destroy(): void {
     if (window.AaronnoteReloadCeilCells === this.handler) {
       window.AaronnoteReloadCeilCells = undefined;
+    }
+    if (window.AaronnotePublishJupyterCellResult === this.resultHandler) {
+      window.AaronnotePublishJupyterCellResult = undefined;
     }
   }
 }

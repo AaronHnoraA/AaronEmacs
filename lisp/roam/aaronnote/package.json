@@ -39,7 +39,9 @@
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
+    "@types/requirejs": "2.1.37",
     "@types/turndown": "^5.0.6",
+    "@types/ws": "8.18.1",
     "happy-dom": "^20.9.0",
     "postcss": "^8.5.15",
     "typescript": "~6.0.2",
@@ -57,6 +59,11 @@
     "@codemirror/language": "^6.12.3",
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.43.0",
+    "@jupyter-widgets/base": "6.0.11",
+    "@jupyter-widgets/controls": "5.0.12",
+    "@jupyter-widgets/html-manager": "1.0.14",
+    "@jupyter-widgets/output": "6.0.11",
+    "@jupyterlab/services": "7.6.1",
     "@lezer/markdown": "^1.6.3",
     "dompurify": "^3.4.4",
     "highlight.js": "^11.11.1",
@@ -66,7 +73,9 @@
     "mermaid": "^11.15.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "requirejs": "2.3.8",
     "turndown": "^7.2.4",
-    "turndown-plugin-gfm": "^1.0.2"
+    "turndown-plugin-gfm": "^1.0.2",
+    "ws": "8.21.0"
   }
 }

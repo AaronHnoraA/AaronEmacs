@@ -80,6 +80,7 @@ const ime = createImeSwitcher();
 import { runtimeMkdtemp, sweepRuntimeTmp } from "./server/lib/tmp.mjs";
 import { loadKatexMacros } from "./server/lib/katex-macros.mjs";
 import { createJupyterCellService } from "./server/lib/jupyter-cell.mjs";
+import { installJupyterWidgetProxy } from "./server/lib/jupyter-widget-proxy.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -119,6 +120,7 @@ const jupyterCell = createJupyterCellService({
   stdout: process.stdout,
   stderr: process.stderr,
 });
+let jupyterWidgetProxy = null;
 
 // One-shot orphan sweep: remove staging/clipboard/db temp files older than 24h.
 void sweepRuntimeTmp().then(({ removed }) => {
@@ -197,6 +199,7 @@ async function shutdown() {
   }
   eventClients.clear();
   try { noteWatcher.close(); } catch {}
+  try { jupyterWidgetProxy?.close(); } catch {}
   try { await jupyterCell.shutdown(); } catch {}
   server.close();
   try { await shutdownCopilot(); } catch {}
@@ -1165,6 +1168,12 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     const origin = `http://${bindHost}:${server.address()?.port}`;
 
+    if (url.pathname.startsWith("/jupyter/")) {
+      if (await jupyterWidgetProxy.proxyHttp(req, res, url)) return;
+      sendText(res, 404, "Jupyter widget resource not found");
+      return;
+    }
+
     if (url.pathname === "/events") {
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -1366,6 +1375,13 @@ document.addEventListener("DOMContentLoaded", function () {
     if (req.url?.startsWith("/api")) sendJson(res, status, errorPayload(err));
     else sendText(res, status, err instanceof Error ? err.message : String(err));
   }
+});
+
+jupyterWidgetProxy = installJupyterWidgetProxy({
+  server,
+  resolveTarget: (pathname, search, websocket) => jupyterCell.widgetProxyTarget(pathname, search, websocket),
+  touchKernel: (id) => jupyterCell.touchKernelById(id),
+  stderr: process.stderr,
 });
 
 server.on("error", (err) => {

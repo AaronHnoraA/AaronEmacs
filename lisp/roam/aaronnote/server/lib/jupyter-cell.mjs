@@ -256,6 +256,21 @@ function parseHiddenScriptCells(text) {
   return cells;
 }
 
+function hiddenScriptCellOrder(text) {
+  const ids = [];
+  const seen = new Set();
+  const startRe = /^\s*(?:\/\/|--|#|;)\s*%%\s+aaronnote-cell\s+id=([^\s]+)\s*$/;
+  for (const line of normalizeCode(text).split("\n")) {
+    const start = startRe.exec(line);
+    if (!start) continue;
+    const id = markerId(start[1]);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
 async function readExistingHiddenCells(scriptFile) {
   try {
     return parseHiddenScriptCells(await readFile(scriptFile, "utf8"));
@@ -294,9 +309,39 @@ async function writeOutputMirror(file, value) {
   }
 }
 
-function buildHiddenScript({ noteFile, kernel, session, language, cells, targetCellId, storage = "markdown", existingCells = new Map() }) {
+async function readExistingHiddenScript(scriptFile) {
+  try {
+    const text = await readFile(scriptFile, "utf8");
+    return {
+      text,
+      cells: parseHiddenScriptCells(text),
+      order: hiddenScriptCellOrder(text),
+    };
+  } catch (err) {
+    if (err?.code === "ENOENT") return { text: "", cells: new Map(), order: [] };
+    throw err;
+  }
+}
+
+function buildHiddenScript({ noteFile, kernel, session, language, cells, targetCellId, storage = "markdown", existingCells = new Map(), existingOrder = [] }) {
   const prefix = commentPrefix(language);
   const leanRuntime = leanRuntimeP(language, kernel);
+  const normalizedCells = [];
+  const seen = new Set();
+  for (const cell of cells) {
+    const id = markerId(cell.cellId || cell.id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    normalizedCells.push({ ...cell, cellId: id, id });
+  }
+  // Opening one cell must never discard another cell body already present in
+  // the hidden script. This protects unsaved/older @@cell entries when the
+  // current editor scan is stale, partial, or still generating a new id.
+  for (const id of existingOrder) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    normalizedCells.push({ cellId: id, id, code: "" });
+  }
   const lines = [
     `${prefix} Aaronnote cell source: ${noteFile}`,
     `${prefix} Aaronnote cell kernel: ${kernel}`,
@@ -308,9 +353,8 @@ function buildHiddenScript({ noteFile, kernel, session, language, cells, targetC
     "",
   ];
   let targetLine = 1;
-  for (const cell of cells) {
+  for (const cell of normalizedCells) {
     const id = markerId(cell.cellId || cell.id);
-    if (!id) continue;
     lines.push(`${prefix} %% aaronnote-cell id=${id}`);
     if (id === targetCellId) targetLine = lines.length + 1;
     const incoming = normalizeCode(cell.code);
@@ -412,6 +456,39 @@ export function createJupyterCellService({
     scheduleCleanup();
   }
 
+  function kernelRecordById(id) {
+    const wanted = String(id || "").trim();
+    if (!wanted) return null;
+    for (const record of kernelsByKey.values()) {
+      if (record?.id === wanted) return record;
+    }
+    return null;
+  }
+
+  function touchKernelById(id) {
+    const record = kernelRecordById(id);
+    if (!record) return false;
+    touchKernel(record);
+    return true;
+  }
+
+  function widgetProxyTarget(pathname, search = "", websocket = false) {
+    const rawPath = String(pathname || "");
+    if (!rawPath.startsWith("/jupyter/")) return null;
+    const upstreamPath = rawPath.slice("/jupyter".length);
+    const channel = /^\/api\/kernels\/([^/]+)\/channels$/.exec(upstreamPath);
+    const localWidgetAsset = /^\/nbextensions\/[A-Za-z0-9@._~!$&'()+,;=:%/-]+$/.test(upstreamPath);
+    if (!channel && !localWidgetAsset) return null;
+    if (channel) {
+      let id = "";
+      try { id = decodeURIComponent(channel[1]); } catch { return null; }
+      if (!kernelRecordById(id)) return null;
+      touchKernelById(id);
+    }
+    const root = websocket ? wsBaseUrl : baseUrl;
+    return `${root}${upstreamPath}${String(search || "")}`;
+  }
+
   function kernelRecordForBody(body) {
     const explicitKey = String(body?.key || "").trim();
     if (explicitKey && kernelsByKey.has(explicitKey)) return { key: explicitKey, record: kernelsByKey.get(explicitKey) };
@@ -428,6 +505,40 @@ export function createJupyterCellService({
     const session = cleanToken(body?.session, "default");
     const key = kernelKey({ file, kernel, session });
     return { key, record: kernelsByKey.get(key) || null };
+  }
+
+  function widgetRuntimeForRecord(record) {
+    if (!record?.id) return null;
+    return {
+      id: record.id,
+      name: record.kernel,
+      generation: Number(record.widgetGeneration || 1),
+    };
+  }
+
+  function outputRuntimeStamp(output) {
+    const stamp = output?.kernelRuntime && typeof output.kernelRuntime === "object"
+      ? output.kernelRuntime
+      : output?.widgetRuntime && typeof output.widgetRuntime === "object" ? output.widgetRuntime : null;
+    if (!stamp?.id) return null;
+    return {
+      id: String(stamp.id || ""),
+      generation: Number(stamp.generation || 1),
+    };
+  }
+
+  function attachLiveRuntimeToOutput(output, noteFile, kernel, session) {
+    if (!output || typeof output !== "object") return output ?? null;
+    const record = kernelsByKey.get(kernelKey({ file: noteFile, kernel, session }));
+    const runtime = widgetRuntimeForRecord(record);
+    const stamp = outputRuntimeStamp(output);
+    const live = Boolean(runtime && stamp && stamp.id === runtime.id && Number(stamp.generation || 1) === Number(runtime.generation || 1));
+    const { widgetRuntime: _oldWidgetRuntime, ...rest } = output;
+    return {
+      ...rest,
+      live,
+      ...(live ? { widgetRuntime: runtime } : {}),
+    };
   }
 
   function kernelTask(key, record) {
@@ -453,6 +564,7 @@ export function createJupyterCellService({
       executionCount: record?.executionCount ?? null,
       lastCellId: record?.lastCellId || "",
       lastError: record?.lastError || "",
+      widgetGeneration: Number(record?.widgetGeneration || 1),
       protected: running > 0,
       ttlMs: kernelIdleTtlMs,
     };
@@ -592,6 +704,7 @@ export function createJupyterCellService({
       lastCellId: "",
       lastStatus: "idle",
       lastError: "",
+      widgetGeneration: 1,
     };
     kernelsByKey.set(key, next);
     scheduleCleanup();
@@ -691,6 +804,11 @@ export function createJupyterCellService({
           status: shellReply.status || "ok",
           executionCount,
           outputs,
+          widgetRuntime: {
+            id: kernelInfo.id,
+            name: kernelInfo.kernel,
+            generation: Number(record?.widgetGeneration || 1),
+          },
         });
       };
 
@@ -895,15 +1013,20 @@ export function createJupyterCellService({
     if (!targetCellId) throw error("Missing Jupyter cell id", 400);
     if (cells.length === 0) throw error("No Jupyter cells to write", 400);
     const scriptFile = hiddenScriptPath(noteFile, session, language);
-    const existingCells = await readExistingHiddenCells(scriptFile);
-    const rendered = buildHiddenScript({ noteFile, kernel, session, language, cells, targetCellId, storage, existingCells });
+    const existingScript = await readExistingHiddenScript(scriptFile);
+    const rendered = buildHiddenScript({
+      noteFile,
+      kernel,
+      session,
+      language,
+      cells,
+      targetCellId,
+      storage,
+      existingCells: existingScript.cells,
+      existingOrder: existingScript.order,
+    });
     await mkdir(dirname(scriptFile), { recursive: true });
-    let changed = true;
-    try {
-      changed = await readFile(scriptFile, "utf8") !== rendered.text;
-    } catch (err) {
-      if (err?.code !== "ENOENT") throw err;
-    }
+    const changed = existingScript.text !== rendered.text;
     if (changed) await writeFile(scriptFile, rendered.text, "utf8");
     const info = await stat(scriptFile);
     const payload = { file: scriptFile, line: rendered.line, col: 0, nonce: randomUUID() };
@@ -933,6 +1056,7 @@ export function createJupyterCellService({
     const outputFile = outputMirrorPath(noteFile, session, language);
     const cells = await readExistingHiddenCells(scriptFile);
     const outputs = await readOutputMirror(outputFile);
+    const savedOutput = outputs?.cells?.[cellId] ?? null;
     let info = null;
     try { info = await stat(scriptFile); } catch {}
     return {
@@ -943,7 +1067,7 @@ export function createJupyterCellService({
       language,
       cellId,
       code: cells.get(cellId) ?? "",
-      output: outputs?.cells?.[cellId] ?? null,
+      output: attachLiveRuntimeToOutput(savedOutput, noteFile, kernel, session),
       exists: Boolean(info),
       mtimeMs: info?.mtimeMs ?? 0,
       size: info?.size ?? 0,
@@ -963,13 +1087,16 @@ export function createJupyterCellService({
     });
     if (leanRuntimeP(read.language, read.kernel)) return result;
     const outputFile = outputMirrorPath(noteFile, read.session, read.language);
+    const { widgetRuntime, ...persistedResult } = result;
     await withMirrorLock(outputFile, async () => {
       const mirror = await readOutputMirror(outputFile);
       const cells = mirror.cells && typeof mirror.cells === "object" ? mirror.cells : {};
       const current = cells[read.cellId] && typeof cells[read.cellId] === "object" ? cells[read.cellId] : {};
       const currentUi = current.ui && typeof current.ui === "object" ? current.ui : {};
       cells[read.cellId] = {
-        ...result,
+        ...persistedResult,
+        live: true,
+        ...(widgetRuntime ? { kernelRuntime: widgetRuntime } : {}),
         ui: currentUi,
         savedAt: new Date().toISOString(),
         kernel: read.kernel,
@@ -981,10 +1108,11 @@ export function createJupyterCellService({
         source: noteFile,
         kernel: read.kernel,
         session: read.session,
+        language: read.language,
         cells,
       });
     });
-    return result;
+    return { ...result, live: true };
   }
 
   async function clearScriptCellOutput(body) {
@@ -1137,6 +1265,7 @@ export function createJupyterCellService({
         record.executionStartedAt = 0;
         record.lastStatus = "restarted";
         record.lastError = "";
+        record.widgetGeneration = Number(record.widgetGeneration || 1) + 1;
         touchKernel(record);
       }
       return { ok: true, kernel: kernelInfo.kernel, session: kernelInfo.session };
@@ -1267,6 +1396,8 @@ export function createJupyterCellService({
     restart,
     interrupt,
     shutdownKernel,
+    widgetProxyTarget,
+    touchKernelById,
     listTasks,
     cleanup: cleanupIdle,
     shutdown,

@@ -80,6 +80,7 @@ const EMPTY_QUOTE_RE = /^\s{0,3}>\s?$/;
 const EMPTY_QUOTE_LIST_RE = /^(\s{0,3}(?:>\s*)+)(?:[-*+]\s*|\d+[.)]\s*|- \[[ xX]\]\s*)$/;
 const CONTINUE_MARKUP_RE = /^(\s{0,3}(?:>\s*)*)(\s*)(?:(- \[[ xX]\]\s+)|([-*+])\s+|(\d+)([.)])\s+)(.*)$/;
 const CONTINUE_QUOTE_RE = /^(\s{0,3}(?:>\s*)+)(.*)$/;
+const JUPYTER_CELL_LINE_RE = /^[ \t]*@@cell(?:[ \t]*\(([^)\n]*)\))?(?:[ \t]+\[[^\]\n]*\])?[ \t]*$/i;
 
 type MarkdownListLine = {
   indent: string;
@@ -167,6 +168,26 @@ function insertBlock(view: EditorView, text: string, cursorOffset: number): void
       scrollIntoView: true,
     });
   }
+}
+
+function nearestJupyterCellArgs(view: EditorView): string {
+  const doc = view.state.doc;
+  const cursorLineNumber = doc.lineAt(view.state.selection.main.from).number;
+  let previous = "";
+  let next = "";
+  for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber += 1) {
+    const line = doc.line(lineNumber);
+    const match = JUPYTER_CELL_LINE_RE.exec(line.text);
+    if (!match) continue;
+    const args = (match[1] || "").trim();
+    if (!args) continue;
+    if (lineNumber <= cursorLineNumber) previous = args;
+    else {
+      next = args;
+      break;
+    }
+  }
+  return previous || next || "python, python3";
 }
 
 export function exitEmptyMarkdownBlock(view: EditorView): boolean {
@@ -877,6 +898,13 @@ export function runCommandCM6(view: EditorView, command: EditorCommand, value = 
     const kind = (value || "note").trim() || "note";
     const open = `#+begin ${kind}`;
     insertBlock(view, `${open}\n\n#+end ${kind}`, open.length + 1);
+    return true;
+  }
+
+  if (command === "jupyter-cell") {
+    const args = nearestJupyterCellArgs(view);
+    const text = `@@cell(${args})`;
+    insertBlock(view, text, text.length);
     return true;
   }
 

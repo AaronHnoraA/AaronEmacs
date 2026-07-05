@@ -48,6 +48,84 @@ describe("jupyter cell service (no kernel)", () => {
     });
   });
 
+  test("openScript preserves existing hidden cell bodies omitted by a partial context", async () => {
+    await withService(async ({ service, note }) => {
+      await service.openScript({
+        file: note,
+        cellId: "cell-a",
+        kernel: "python3",
+        session: "default",
+        language: "python",
+        storage: "script",
+        open: false,
+        cells: [
+          { cellId: "cell-a", id: "cell-a", code: "x = 1" },
+          { cellId: "cell-b", id: "cell-b", code: "print(x)" },
+        ],
+      });
+      await service.openScript({
+        file: note,
+        cellId: "cell-c",
+        kernel: "python3",
+        session: "default",
+        language: "python",
+        storage: "script",
+        open: false,
+        cells: [{ cellId: "cell-c", id: "cell-c", code: "" }],
+      });
+      const readA = await service.readScriptCell({
+        file: note, cellId: "cell-a", kernel: "python3", session: "default", language: "python",
+      });
+      const readB = await service.readScriptCell({
+        file: note, cellId: "cell-b", kernel: "python3", session: "default", language: "python",
+      });
+      const readC = await service.readScriptCell({
+        file: note, cellId: "cell-c", kernel: "python3", session: "default", language: "python",
+      });
+      expect(readA.code).toBe("x = 1");
+      expect(readB.code).toBe("print(x)");
+      expect(readC.code).toBe("");
+    });
+  });
+
+  test("openScript orders hidden cells by the incoming document context", async () => {
+    await withService(async ({ service, note }) => {
+      await service.openScript({
+        file: note,
+        cellId: "cell-c",
+        kernel: "python3",
+        session: "default",
+        language: "python",
+        storage: "script",
+        open: false,
+        cells: [
+          { cellId: "cell-a", id: "cell-a", code: "a = 1" },
+          { cellId: "cell-c", id: "cell-c", code: "c = a + 1" },
+        ],
+      });
+      await service.openScript({
+        file: note,
+        cellId: "cell-b",
+        kernel: "python3",
+        session: "default",
+        language: "python",
+        storage: "script",
+        open: false,
+        cells: [
+          { cellId: "cell-a", id: "cell-a", code: "" },
+          { cellId: "cell-b", id: "cell-b", code: "" },
+          { cellId: "cell-c", id: "cell-c", code: "" },
+        ],
+      });
+      const scriptPath = join(note, "..", ".cell", "note.python.default.py");
+      const script = await readFile(scriptPath, "utf8");
+      expect(script.indexOf("id=cell-a")).toBeLessThan(script.indexOf("id=cell-b"));
+      expect(script.indexOf("id=cell-b")).toBeLessThan(script.indexOf("id=cell-c"));
+      expect(script).toContain("a = 1");
+      expect(script).toContain("c = a + 1");
+    });
+  });
+
   test("a corrupt output mirror is ignored, not thrown", async () => {
     await withService(async ({ service, note }) => {
       await service.openScript({
@@ -78,6 +156,37 @@ describe("jupyter cell service (no kernel)", () => {
       const parsed = JSON.parse(await readFile(mirrorPath, "utf8"));
       expect(parsed.version).toBe(1);
       expect(parsed.cells).toEqual({});
+    });
+  });
+
+  test("readScriptCell marks persisted output stale when no matching live kernel exists", async () => {
+    await withService(async ({ service, note }) => {
+      await service.openScript({
+        file: note, cellId: "cell-live", kernel: "python3", session: "default", language: "python",
+        storage: "script", open: false, cells: [{ cellId: "cell-live", id: "cell-live", code: "x = 1" }],
+      });
+      const mirrorPath = join(note, "..", ".cell", "note.output.python.default.json");
+      await writeFile(mirrorPath, JSON.stringify({
+        version: 1,
+        source: note,
+        kernel: "python3",
+        session: "default",
+        language: "python",
+        cells: {
+          "cell-live": {
+            ok: true,
+            status: "ok",
+            executionCount: 3,
+            outputs: [],
+            kernelRuntime: { id: "old-kernel", name: "python3", generation: 1 },
+          },
+        },
+      }), "utf8");
+      const read = await service.readScriptCell({
+        file: note, cellId: "cell-live", kernel: "python3", session: "default", language: "python",
+      });
+      expect(read.output.live).toBe(false);
+      expect(read.output.widgetRuntime).toBeUndefined();
     });
   });
 
@@ -115,6 +224,16 @@ describe("jupyter cell service (no kernel)", () => {
       const result = await service.kernelStatus({ file: note, kernel: "python3", session: "default" });
       expect(result.status).toBe("not-started");
       expect(result.id).toBe("");
+    });
+  });
+
+  test("widget proxy refuses unknown kernels and unrelated paths", async () => {
+    await withService(async ({ service }) => {
+      expect(service.widgetProxyTarget("/jupyter/api/kernels/missing/channels", "?session_id=x", true)).toBe(null);
+      expect(service.widgetProxyTarget("/jupyter/api/kernels", "", false)).toBe(null);
+      expect(service.widgetProxyTarget("/jupyter/nbextensions/widget/index.js", "", false))
+        .toContain("/nbextensions/widget/index.js");
+      expect(service.touchKernelById("missing")).toBe(false);
     });
   });
 });

@@ -58,6 +58,7 @@ export type EditorCommand =
   | "insert-math-block"
   | "insert-toc"
   | "insert-org-env"
+  | "jupyter-cell"
   | "image-edit"
   | "table-insert-row"
   | "table-insert-column"
@@ -161,6 +162,7 @@ export function blockCommands(type: string): EditorCommand[] {
     "insert-math-block",
     "insert-toc",
     "insert-org-env",
+    "jupyter-cell",
   ];
 }
 
@@ -239,7 +241,7 @@ const builtInQuickInsertItems: QuickInsertItem[] = [
     id: "jupyter-cell",
     label: "Jupyter cell",
     detail: "@@cell",
-    markdown: "@@cell(python, python3)",
+    command: "jupyter-cell",
     keywords: ["cell", "jupyter", "python", "kernel"],
   },
   {

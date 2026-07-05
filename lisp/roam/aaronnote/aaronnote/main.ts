@@ -1037,6 +1037,13 @@ async function runJupyterCell(cell: JupyterPanelCell, allCells = scanJupyterCell
       session: cell.session,
       language: cell.language,
     });
+    window.AaronnotePublishJupyterCellResult?.({
+      file: currentFile,
+      cellId: cell.id,
+      kernel: cell.kernel,
+      session: cell.session,
+      result,
+    });
     jupyterTaskState.set(key, {
       status: isLeanJupyterCell(cell) ? "synced" : result.status === "error" ? "error" : "ok",
       executionCount: isLeanJupyterCell(cell) ? null : result.executionCount,

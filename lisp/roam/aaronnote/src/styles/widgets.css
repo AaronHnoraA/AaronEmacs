@@ -2102,6 +2102,27 @@
   font-size: 0.85em;
 }
 
+.cm-editor .cm-ceil-output-widget[data-state="live"],
+.cm-ceil-output-popover-body .cm-ceil-output-widget[data-state="live"] {
+  white-space: normal;
+  padding: 6px 2px;
+  border-style: solid;
+  color: inherit;
+  font-size: inherit;
+  overflow-x: auto;
+}
+
+.cm-editor .cm-ceil-output-widget[data-state="loading"],
+.cm-ceil-output-popover-body .cm-ceil-output-widget[data-state="loading"] {
+  opacity: 0.75;
+}
+
+.cm-editor .cm-ceil-output-widget[data-state="error"],
+.cm-ceil-output-popover-body .cm-ceil-output-widget[data-state="error"] {
+  border-color: color-mix(in srgb, var(--aaron-red-dark, #9f1239), transparent 35%);
+  color: var(--aaron-red-dark, #9f1239);
+}
+
 .cm-editor .cm-ceil-output-image,
 .cm-ceil-output-popover-body .cm-ceil-output-image {
   display: block;

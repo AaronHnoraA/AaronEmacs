@@ -9,6 +9,7 @@ The runtime provides:
 - Jupyter Server and `ipykernel`
 - optional local kernelspec templates, such as Sage
 - isolated Jupyter config/data/runtime directories under `jupyter/.jupyter`
+- live ipywidgets comms through Aaronnote's same-origin kernel websocket proxy
 
 From `lisp/roam/aaronnote`:
 
@@ -56,4 +57,11 @@ The Node cell service owns the server lifecycle and each cell run:
   local-only design; do not bind it to a non-loopback host without adding auth.
 - Each execution opens a fresh kernel websocket rather than holding a persistent
   connection. The local handshake is cheap and this keeps request handling
-  stateless; it is a deliberate choice, not an oversight.
+  stateless. Live widgets open a separate browser-owned connection after the
+  execution result identifies a widget model.
+- Core ipywidgets assets are bundled. Custom widget AMD modules try local
+  `/nbextensions` first and then load automatically from jsDelivr. Custom
+  widget JavaScript runs in the Aaronnote page and therefore has the same
+  privileges as the editor UI.
+- Widget comm state is intentionally not saved in the output mirror. Reloading
+  the page or restarting the kernel leaves a stale output that must be rerun.

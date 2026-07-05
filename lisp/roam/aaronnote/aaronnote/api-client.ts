@@ -66,6 +66,18 @@ export type JupyterCellExecuteResult = {
   executionCount?: number | null;
   outputs?: JupyterCellOutput[];
   message?: string;
+  live?: boolean;
+  savedAt?: string;
+  kernelRuntime?: {
+    id?: string;
+    name?: string;
+    generation?: number;
+  };
+  widgetRuntime?: {
+    id: string;
+    name: string;
+    generation?: number;
+  };
 };
 export type JupyterKernelSpec = { name: string; displayName?: string; language?: string };
 export type JupyterKernelListResult = {
