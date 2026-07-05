@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
+import { createOutputWidgetRouter } from "./jupyter-output-router.mjs";
 
 function inside(root, file) {
   const normalizedRoot = resolve(root);
@@ -828,6 +829,8 @@ export function createJupyterCellService({
     const outputs = [];
     const displayIndexes = new Map();
     const widgetCommIds = new Set();
+    // ipywidgets Output-widget routing (see jupyter-output-router.mjs).
+    const outputRouter = createOutputWidgetRouter();
     const streamLimit = durationFromEnv("AARONNOTE_JUPYTER_MAX_STREAM_BYTES", 1024 * 1024);
     const widgetMessageLimit = durationFromEnv("AARONNOTE_JUPYTER_MAX_WIDGET_MESSAGES", 512);
     const widgetMessageBytesLimit = durationFromEnv("AARONNOTE_JUPYTER_MAX_WIDGET_MESSAGE_BYTES", 8 * 1024 * 1024);
@@ -893,6 +896,7 @@ export function createJupyterCellService({
             widgetMessages,
             widgetMessagesTruncated,
           } : {}),
+          ...(outputRouter.hasOutputs() ? { widgetOutputs: outputRouter.widgetOutputs } : {}),
         });
       };
 
@@ -927,6 +931,14 @@ export function createJupyterCellService({
           return;
         }
         widgetMessages.push(payload);
+      };
+
+      // Route an output either into the active Output widget (if the message's
+      // parent falls inside a widget context) or to the top-level cell output.
+      const emitOutput = (parentId, output) => {
+        const commId = outputRouter.targetCommFor(parentId);
+        if (commId) outputRouter.pushOutput(commId, output);
+        else pushOutput(output);
       };
 
       const pushOutput = (output) => {
@@ -1012,6 +1024,7 @@ export function createJupyterCellService({
           return;
         }
         rememberWidgetMessage(message);
+        outputRouter.track(message);
         const parentId = message?.parent_header?.msg_id;
         if (parentId !== msgId) return;
         touchKernel(record);
@@ -1035,33 +1048,37 @@ export function createJupyterCellService({
           return;
         }
         if (type === "stream") {
-          pushOutput({ output_type: "stream", name: content.name || "stdout", text: content.text || "" });
+          emitOutput(parentId, { output_type: "stream", name: content.name || "stdout", text: content.text || "" });
         } else if (type === "execute_result") {
           executionCount = content.execution_count ?? executionCount;
           if (record) record.executionCount = executionCount;
-          pushOutput({
+          emitOutput(parentId, {
             output_type: "execute_result",
             execution_count: content.execution_count ?? null,
             data: content.data || {},
             metadata: content.metadata || {},
           });
         } else if (type === "display_data" || type === "update_display_data") {
-          pushOutput({
+          emitOutput(parentId, {
             output_type: type,
             data: content.data || {},
             metadata: content.metadata || {},
             transient: content.transient || {},
           });
         } else if (type === "error") {
-          pushOutput({
+          emitOutput(parentId, {
             output_type: "error",
             ename: content.ename || "",
             evalue: content.evalue || "",
             traceback: Array.isArray(content.traceback) ? content.traceback : [],
           });
         } else if (type === "clear_output") {
-          if (content.wait) clearOnNext = true;
-          else {
+          const commId = outputRouter.targetCommFor(parentId);
+          if (commId) {
+            outputRouter.clearOutput(commId, Boolean(content.wait));
+          } else if (content.wait) {
+            clearOnNext = true;
+          } else {
             outputs.length = 0;
             displayIndexes.clear();
             streamBytes = 0;

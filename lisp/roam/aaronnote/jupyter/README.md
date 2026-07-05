@@ -1,7 +1,10 @@
 # Aaronnote Jupyter Kernel Server
 
-This directory contains the minimal local Jupyter runtime used by Aaronnote
-`@@cell` blocks. It is not a JupyterLab frontend integration.
+This directory contains the minimal local Jupyter **kernel server** used by
+Aaronnote `@@cell` blocks. It does not run JupyterLab. The browser-side
+rendering of cell output and ipywidgets, however, reuses the same official
+JupyterLab building blocks that VS Code Jupyter uses — see "Frontend rendering"
+below.
 
 The runtime provides:
 
@@ -37,6 +40,30 @@ The Node cell service owns the server lifecycle and each cell run:
   is capped so a runaway loop cannot produce an unbounded payload. The inline
   widget view truncates long output further; **Popout** shows the full capped
   output.
+
+### Frontend rendering (browser)
+
+Cell output is rendered by the official JupyterLab stack — the same pipeline
+VS Code Jupyter uses — rather than a hand-rolled MIME renderer:
+
+- `src/jupyter-rendermime.ts` builds a `@jupyterlab/rendermime` registry and
+  renders outputs with `@jupyterlab/outputarea`'s `OutputArea`. This gives
+  upstream-identical layout, MIME preference, and error/stream formatting.
+  AaronNote layers in a KaTeX LaTeX typesetter, an HTML renderer that sandboxes
+  script-bearing HTML (e.g. Sage's threejs viewer) in an auto-sizing iframe, and
+  routes math-only HTML to KaTeX.
+- `src/jupyter-widget-runtime.ts` is a `KernelWidgetManager` over the live
+  kernel. It mounts **kernel-state-first** (`restoreWidgets`, the ipywidgets 8
+  control comm), so `@interact` sliders round-trip and Output areas update in
+  place; captured comm-message replay is only a fallback for older ipywidgets.
+- `server/lib/jupyter-output-router.mjs` routes display output produced inside
+  an ipywidgets Output widget's context (matched by the widget's published
+  `msg_id`) away from the top-level cell output and groups it by comm id. The
+  client seeds the widget with those outputs after it mounts, so an `@interact`
+  cell's initial plot shows *inside* the widget instead of duplicated above it.
+
+Both frontend modules are large and load lazily (their own bundle chunks), so
+they stay out of the main editor bundle until a cell actually produces output.
 
 ### Environment variables
 

@@ -13,11 +13,29 @@ describe("Jupyter widget runtime", () => {
     expect(source).toContain("restoreWidgets()");
     expect(source).toContain("/jupyter/widget-runtimes/");
     expect(source).toContain("runtimeWebSocketCtor");
-    expect(source).toContain("new RenderMimeRegistry");
+    // Shares the cell-output render stack (KaTeX LaTeX + HTML iframe handling)
+    // instead of a bespoke RenderMimeRegistry.
+    expect(source).toContain("createBaseRenderMime()");
     expect(source).toContain('"jupyter-js-widgets": "@jupyter-widgets/base"');
     expect(source).toContain('document.body.dataset.baseUrl ??= new URL("/jupyter/", window.location.origin).toString();');
     expect(source).not.toContain('import * as widgetOutput from "@jupyter-widgets/html-manager/lib/output";');
     expect(source).not.toContain('import * as widgetOutput from "@jupyter-widgets/output";');
     expect(source).not.toContain('@jupyterlab/outputarea/style/index.js');
+  });
+
+  test("mounts kernel-state-first and seeds Output widgets captured server-side", () => {
+    const source = readFileSync(join(process.cwd(), "src/jupyter-widget-runtime.ts"), "utf8");
+    // restoreFromKernel (live control comm) is attempted before the captured
+    // message replay fallback, so interactive widgets resolve their models and
+    // slider round-trips update outputs in place.
+    const restoreIdx = source.indexOf("await this.restoreFromKernel()");
+    const replayIdx = source.indexOf("await this.restoreFromMessages(messages)");
+    expect(restoreIdx).toBeGreaterThan(-1);
+    expect(replayIdx).toBeGreaterThan(-1);
+    expect(restoreIdx).toBeLessThan(replayIdx);
+    // Output widgets executed headless restore with empty outputs; we seed them.
+    expect(source).toContain("async seedOutputWidgets(");
+    expect(source).toContain('outputModel.set("outputs", outputs)');
+    expect(source).toContain("await this.seedOutputWidgets(widgetOutputs)");
   });
 });

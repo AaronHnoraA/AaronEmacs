@@ -2123,36 +2123,70 @@
   color: var(--aaron-red-dark, #9f1239);
 }
 
+/* Jupyter output renders through the official @jupyterlab/outputarea +
+   rendermime stack. Give that stack (and the ipywidgets controls) a dark
+   JupyterLab palette scoped to the cell-output containers so text/labels stay
+   white and readable on AaronNote's dark paper, while never touching the
+   surrounding editor. Rendered images keep a light backing (never inverted) so
+   transparent matplotlib/Sage plots read correctly — matching official Jupyter,
+   which shows outputs on a white cell background. */
+.cm-editor .cm-ceil-output,
+.cm-ceil-output-popover-body {
+  /* rendermime / outputarea content */
+  --jp-content-font-color0: #f4f7fc;
+  --jp-content-font-color1: #e4e9f2;
+  --jp-content-font-color2: #b6c0d3;
+  --jp-content-font-color3: #8592a8;
+  --jp-content-link-color: #8fd8ff;
+  --jp-ui-font-color0: #f4f7fc;
+  --jp-ui-font-color1: #e4e9f2;
+  --jp-ui-font-color2: #b6c0d3;
+  --jp-ui-font-color3: #8592a8;
+  --jp-layout-color0: transparent;
+  --jp-layout-color1: #171f2f;
+  --jp-layout-color2: #1e2638;
+  --jp-layout-color3: #263049;
+  --jp-border-color0: #3a4763;
+  --jp-border-color1: #435574;
+  --jp-border-color2: #37445e;
+  --jp-border-color3: #2c3750;
+  --jp-error-color0: #ff7b72;
+  --jp-error-color1: #ff9b93;
+  --jp-rendermime-error-background: color-mix(in srgb, var(--aaron-red-dark, #9f1239), transparent 82%);
+  --jp-cell-editor-background: #1e2638;
+  /* ipywidgets controls (override labvariables.css light defaults) */
+  --jp-widgets-color: #e4e9f2;
+  --jp-widgets-label-color: #e4e9f2;
+  --jp-widgets-readout-color: #f4f7fc;
+  --jp-widgets-input-color: #e4e9f2;
+  --jp-widgets-input-background-color: #1e2638;
+  --jp-widgets-input-border-color: #435574;
+  --jp-widgets-input-focus-border-color: #8fd8ff;
+  --jp-widgets-border-color: #435574;
+  --jp-widgets-slider-track-color: #37445e;
+  --jp-widgets-slider-handle-background-color: #c7d2e6;
+  --jp-widgets-slider-active-handle-color: #8fd8ff;
+  --jp-widgets-slider-border-color: #435574;
+}
+
+.cm-editor .cm-ceil-output .jp-OutputArea,
+.cm-ceil-output-popover-body .jp-OutputArea {
+  color: var(--jp-content-font-color1);
+}
+
 .cm-editor .cm-ceil-output-image,
-.cm-ceil-output-popover-body .cm-ceil-output-image {
+.cm-ceil-output-popover-body .cm-ceil-output-image,
+.cm-editor .cm-ceil-output .jp-RenderedImage img,
+.cm-ceil-output-popover-body .jp-RenderedImage img,
+.cm-editor .cm-ceil-output .jp-RenderedSVG svg,
+.cm-ceil-output-popover-body .jp-RenderedSVG svg {
   display: block;
   max-width: 100%;
   height: auto;
   border-radius: 4px;
-  background: var(--aaron-paper, #171f2f);
-  filter: invert(0.88) hue-rotate(180deg) saturate(0.9) contrast(0.98);
-}
-
-.cm-editor .cm-ceil-output-formatbar,
-.cm-ceil-output-popover-body .cm-ceil-output-formatbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 0.3rem;
-}
-
-.cm-editor .cm-ceil-output-format,
-.cm-ceil-output-popover-body .cm-ceil-output-format {
-  font-size: 0.72rem;
-  padding: 1px 4px;
-  border-radius: 4px;
-  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), transparent 45%);
-  background: color-mix(in srgb, var(--aaron-paper, #171f2f), transparent 20%);
-  color: var(--aaron-ink, #d9e3f5);
-  opacity: 0.75;
-}
-
-.cm-editor .cm-ceil-output-format:hover {
-  opacity: 1;
+  background: #fff;
+  padding: 4px;
+  box-sizing: border-box;
 }
 
 .cm-editor .cm-ceil-output-latex,

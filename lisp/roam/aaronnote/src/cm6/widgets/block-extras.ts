@@ -45,13 +45,13 @@ import {
 } from "../../render-html.ts";
 import { applyImageLayout, imageLayoutFromAttrs, readImageTrailingAttrs, type ImageLayoutAttrs } from "../../image-attrs.ts";
 import { supportedDiagramLang } from "../../diagram-langs.ts";
-import { renderMathHTML } from "../../math-render.ts";
 import { api } from "../../../aaronnote/api-client.ts";
 import { tocIndexFromState, type MarkdownHeading } from "../toc-index.ts";
 import { scanInlineCommands } from "../../command-syntax.ts";
 import { semanticOutlineFromCommand, type SemanticOutline } from "../../semantic-outline.ts";
 import { highlightCodeForEditor } from "../../code-highlight-async.ts";
 import type { JupyterWidgetKernelMessage } from "../../jupyter-widget-runtime.ts";
+import type { JupyterMarkdownParser, WidgetMountFn } from "../../jupyter-rendermime.ts";
 import { ceilCommandGeneratedId as sharedCeilCommandGeneratedId, ceilLanguageForKernel } from "./ceil-shared.ts";
 
 // ---------------------------------------------------------------------------
@@ -373,6 +373,7 @@ type CeilExecutionResult = {
   plan?: Array<{ cellId?: string; mode?: string; selected?: boolean }>;
   widgetMessages?: JupyterWidgetKernelMessage[];
   widgetMessagesTruncated?: boolean;
+  widgetOutputs?: Record<string, Array<Record<string, unknown>>>;
   live?: boolean;
   savedAt?: string;
   kernelRuntime?: {
@@ -456,12 +457,6 @@ function setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V, limit = 128): voi
 
 function ceilSourceKey(file: string, meta: Pick<CeilMeta, "kernel" | "session" | "id">): string {
   return `${file}\0${meta.kernel}\0${meta.session}\0${meta.id}`;
-}
-
-const ANSI_ESCAPE_RE = new RegExp("\\u001b\\[[0-9;]*m", "g");
-
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_ESCAPE_RE, "");
 }
 
 function clearCeilCachesForFile(file: string): void {
@@ -1332,362 +1327,93 @@ function populateCeilKernelSelect(select: HTMLSelectElement, kernels: CeilKernel
   select.value = all.some((kernel) => kernel.name === selected) ? selected : current;
 }
 
-function mimeText(data: Record<string, unknown>, key: string): string {
-  const value = data[key];
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.map((item) => String(item ?? "")).join("");
-  return "";
-}
-
-const CEIL_OUTPUT_HTML_THEME = `<style>
-:root { color-scheme: dark; }
-html, body {
-  margin: 0;
-  background: #171f2f;
-  color: #d9e3f5;
-  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-}
-body { padding: 8px; box-sizing: border-box; }
-pre, code {
-  background: #182238;
-  color: #d9e3f5;
-}
-table {
-  border-collapse: collapse;
-  color: inherit;
-}
-th, td {
-  border: 1px solid #435574;
-  padding: 4px 7px;
-}
-a { color: #8fd8ff; }
-svg text { fill: #d9e3f5; }
-</style>`;
-
-function themedCeilHtmlSrcdoc(html: string): string {
-  if (/<head[\s>]/i.test(html)) {
-    return html.replace(/<head([^>]*)>/i, `<head$1>${CEIL_OUTPUT_HTML_THEME}`);
-  }
-  if (/<html[\s>]/i.test(html)) {
-    return html.replace(/<html([^>]*)>/i, `<html$1><head>${CEIL_OUTPUT_HTML_THEME}</head>`);
-  }
-  return `<!doctype html><html><head>${CEIL_OUTPUT_HTML_THEME}</head><body>${html}</body></html>`;
-}
-
-// Rich mime types an output can carry, in default-preference order (richest
-// first). A kernel's last-picked format is remembered and wins when present.
-const CEIL_MIME_PRIORITY = [
-  "image/png",
-  "image/jpeg",
-  "image/svg+xml",
-  "text/latex",
-  "text/markdown",
-  "text/html",
-  "application/json",
-  "application/javascript",
-  "application/vnd.jupyter.widget-view+json",
-  "text/plain",
-] as const;
-
-const CEIL_MIME_LABELS: Record<string, string> = {
-  "image/png": "PNG",
-  "image/jpeg": "JPEG",
-  "image/svg+xml": "SVG",
-  "text/latex": "LaTeX",
-  "text/markdown": "Markdown",
-  "text/html": "HTML",
-  "application/json": "JSON",
-  "application/javascript": "JavaScript",
-  "application/vnd.jupyter.widget-view+json": "Widget",
-  "text/plain": "Text",
-};
-
-const ceilMimePrefByKernel = new Map<string, string>();
-const CEIL_MIME_PREF_PREFIX = "aaronnote:ceil:mime:";
-
-function ceilMimePref(kernel: string): string {
-  if (!kernel) return "";
-  const cached = ceilMimePrefByKernel.get(kernel);
-  if (cached != null) return cached;
-  let stored = "";
-  try { stored = window.localStorage?.getItem(CEIL_MIME_PREF_PREFIX + kernel) ?? ""; } catch {}
-  ceilMimePrefByKernel.set(kernel, stored);
-  return stored;
-}
-
-function rememberCeilMimePref(kernel: string, mime: string): void {
-  if (!kernel) return;
-  ceilMimePrefByKernel.set(kernel, mime);
-  try { window.localStorage?.setItem(CEIL_MIME_PREF_PREFIX + kernel, mime); } catch {}
-}
-
-function ceilMimeHasValue(data: Record<string, unknown>, mime: string): boolean {
-  const value = data[mime];
-  if (mime === "application/json" || mime === "application/vnd.jupyter.widget-view+json") return value != null;
-  return typeof value === "string" || Array.isArray(value);
-}
-
-function availableCeilMimes(data: Record<string, unknown>): string[] {
-  return CEIL_MIME_PRIORITY.filter((mime) => ceilMimeHasValue(data, mime));
-}
-
-function renderCeilLatex(container: HTMLElement, latex: string): void {
-  // Jupyter/Sage wrap text/latex in \(…\) (inline) or \[…\]/$$…$$ (display).
-  const raw = String(latex || "").trim();
-  let body = raw;
-  let displayMode = false;
-  if (raw.startsWith("\\[") && raw.endsWith("\\]")) { body = raw.slice(2, -2); displayMode = true; }
-  else if (raw.startsWith("\\(") && raw.endsWith("\\)")) { body = raw.slice(2, -2); }
-  else if (raw.startsWith("$$") && raw.endsWith("$$")) { body = raw.slice(2, -2); displayMode = true; }
-  else if (raw.length > 1 && raw.startsWith("$") && raw.endsWith("$")) { body = raw.slice(1, -1); }
-  const { html, error } = renderMathHTML(body.trim(), { displayMode });
-  if (error || !html) {
-    const pre = document.createElement("pre");
-    pre.textContent = raw;
-    container.append(pre);
-    return;
-  }
-  const div = document.createElement("div");
-  div.className = "cm-ceil-output-latex";
-  if (displayMode) div.dataset.display = "true";
-  div.innerHTML = html;
-  container.append(div);
-}
-
-// Sage/SymPy often emit their math as MathJax inside text/html. MathJax never
-// loads in the sandboxed output iframe, so a math-only payload would show as raw
-// \(...\) in a blank box — detect it and route to KaTeX instead.
-function ceilHtmlMathOnly(html: string): string | null {
-  let text = String(html || "").trim();
-  const script = /^<script[^>]*\btype=["']?math\/tex(?:;[^"'>]*)?["']?[^>]*>([\s\S]*?)<\/script>$/i.exec(text);
-  if (script) return `\\[${(script[1] || "").trim()}\\]`;
-  const wrapped = /^<(div|span|p)\b[^>]*>([\s\S]*)<\/\1>$/i.exec(text);
-  if (wrapped) text = (wrapped[2] || "").trim();
-  if (/<[a-z!/]/i.test(text)) return null;
-  if (/^(\\\(|\\\[|\$\$|\$)/.test(text) && /(\\\)|\\\]|\$\$|\$)$/.test(text)) return text;
-  return null;
-}
-
-// A single bounded listener resizes every auto-sized output iframe from the
-// height its sandboxed content posts back; disconnected frames are pruned.
-const ceilAutoHeightFrames = new Set<HTMLIFrameElement>();
-let ceilFrameListenerInstalled = false;
-
-function ensureCeilFrameListener(): void {
-  if (ceilFrameListenerInstalled) return;
-  ceilFrameListenerInstalled = true;
-  window.addEventListener("message", (event) => {
-    const data = event.data as { __aaronnoteCeilFrame?: boolean; height?: number } | null;
-    if (!data || data.__aaronnoteCeilFrame !== true || typeof data.height !== "number") return;
-    for (const frame of Array.from(ceilAutoHeightFrames)) {
-      if (!frame.isConnected) { ceilAutoHeightFrames.delete(frame); continue; }
-      if (frame.contentWindow && frame.contentWindow === event.source) {
-        frame.style.height = `${Math.min(Math.max(Math.ceil(data.height) + 6, 24), 4000)}px`;
-      }
-    }
-  });
-}
-
-const CEIL_FRAME_AUTOSIZE = `<script>(function(){function p(){try{var h=Math.max(document.documentElement.scrollHeight,document.body?document.body.scrollHeight:0);parent.postMessage({__aaronnoteCeilFrame:true,height:h},"*");}catch(e){}}window.addEventListener("load",p);try{new ResizeObserver(p).observe(document.documentElement);}catch(e){}setTimeout(p,50);setTimeout(p,400);})();</script>`;
-
-function appendCeilFrame(container: HTMLElement, content: string): void {
-  ensureCeilFrameListener();
-  const frame = document.createElement("iframe");
-  frame.className = "cm-ceil-output-html";
-  frame.sandbox.add("allow-scripts");
-  frame.srcdoc = themedCeilHtmlSrcdoc(content + CEIL_FRAME_AUTOSIZE);
-  ceilAutoHeightFrames.add(frame);
-  container.append(frame);
-}
-
-const ceilWidgetCleanup = new WeakMap<HTMLElement, () => void>();
-
-function disposeCeilWidgetHost(host: HTMLElement): void {
-  const cleanup = ceilWidgetCleanup.get(host);
-  if (cleanup) {
-    ceilWidgetCleanup.delete(host);
-    try { cleanup(); } catch {}
-  }
-  delete host.dataset.widgetMountToken;
-}
-
-function disposeCeilWidgetTree(root: HTMLElement): void {
-  if (root.classList.contains("cm-ceil-output-widget")) disposeCeilWidgetHost(root);
-  for (const host of root.querySelectorAll<HTMLElement>(".cm-ceil-output-widget")) disposeCeilWidgetHost(host);
-}
-
-function renderCeilWidget(
-  container: HTMLElement,
-  data: Record<string, unknown>,
-  runtime?: CeilExecutionResult["widgetRuntime"],
-  widgetMessages: JupyterWidgetKernelMessage[] = [],
-): void {
-  const note = document.createElement("div");
-  note.className = "cm-ceil-output-widget";
-  const view = data["application/vnd.jupyter.widget-view+json"];
-  const modelId = view && typeof view === "object" ? String((view as { model_id?: unknown }).model_id || "") : "";
-  const repr = mimeText(data, "text/plain");
-  if (!modelId) {
-    note.dataset.state = "error";
-    note.textContent = "Invalid ipywidgets output: missing model_id.";
-    container.append(note);
-    return;
-  }
-  if (!runtime?.id || !runtime.name) {
-    note.dataset.state = "stale";
-    note.textContent = repr
-      ? `Interactive widget is no longer live — run the cell to reconnect.\n${repr}`
-      : "Interactive widget is no longer live — run the cell to reconnect.";
-    container.append(note);
-    return;
-  }
-  const token = `${runtime.id}:${runtime.generation || 1}:${modelId}:${Date.now()}`;
-  note.dataset.state = "loading";
-  note.dataset.widgetMountToken = token;
-  note.textContent = "Connecting interactive widget...";
-  container.append(note);
-  (window as unknown as { __jupyter_widgets_assets_path__?: string }).__jupyter_widgets_assets_path__ ??=
-    new URL("./", window.location.href).toString();
-  void import("../../jupyter-widget-runtime.ts")
-    .then(({ mountJupyterWidget }) => mountJupyterWidget(note, modelId, runtime, widgetMessages))
-    .then((cleanup) => {
-      if (note.dataset.widgetMountToken !== token || !note.isConnected) {
-        cleanup();
-        return;
-      }
-      note.dataset.state = "live";
-      ceilWidgetCleanup.set(note, cleanup);
-    })
-    .catch((error) => {
-      if (note.dataset.widgetMountToken !== token) return;
-      note.dataset.state = "error";
-      note.textContent = `Widget failed: ${error instanceof Error ? error.message : String(error)}`;
-    });
-}
-
-function renderCeilMime(
-  container: HTMLElement,
-  mime: string,
-  data: Record<string, unknown>,
-  runtime?: CeilExecutionResult["widgetRuntime"],
-  widgetMessages: JupyterWidgetKernelMessage[] = [],
-): void {
-  disposeCeilWidgetTree(container);
-  container.replaceChildren();
-  if (mime === "image/png" || mime === "image/jpeg") {
-    const img = document.createElement("img");
-    img.className = "cm-ceil-output-image";
-    img.src = `data:${mime};base64,${mimeText(data, mime)}`;
-    img.alt = "Jupyter output";
-    container.append(img);
-    return;
-  }
-  if (mime === "text/html") {
-    const html = mimeText(data, mime);
-    const math = ceilHtmlMathOnly(html);
-    if (math) { renderCeilLatex(container, math); return; }
-    appendCeilFrame(container, html);
-    return;
-  }
-  if (mime === "image/svg+xml") {
-    appendCeilFrame(container, mimeText(data, mime));
-    return;
-  }
-  if (mime === "application/vnd.jupyter.widget-view+json") {
-    renderCeilWidget(container, data, runtime, widgetMessages);
-    return;
-  }
-  if (mime === "text/latex") {
-    renderCeilLatex(container, mimeText(data, mime));
-    return;
-  }
-  if (mime === "text/markdown") {
-    const div = document.createElement("div");
-    div.className = "cm-ceil-output-markdown";
-    div.innerHTML = renderMarkdownHTML(mimeText(data, mime));
-    enhanceRenderedMarkdown(div);
-    container.append(div);
-    return;
-  }
-  if (mime === "application/json") {
-    const pre = document.createElement("pre");
-    pre.className = "cm-ceil-output-json";
-    try { pre.textContent = JSON.stringify(data[mime], null, 2); }
-    catch { pre.textContent = String(data[mime] ?? ""); }
-    container.append(pre);
-    return;
-  }
-  // text/plain and application/javascript render as monospace text.
-  const pre = document.createElement("pre");
-  pre.textContent = mimeText(data, mime) || JSON.stringify(data, null, 2);
-  container.append(pre);
-}
-
-function appendCeilMimeBundle(
-  root: HTMLElement,
-  data: Record<string, unknown> = {},
-  kernel = "",
-  runtime?: CeilExecutionResult["widgetRuntime"],
-  widgetMessages: JupyterWidgetKernelMessage[] = [],
-): void {
-  const mimes = availableCeilMimes(data);
-  if (mimes.length === 0) {
-    const pre = document.createElement("pre");
-    pre.textContent = JSON.stringify(data, null, 2);
-    root.append(pre);
-    return;
-  }
-  const preferred = ceilMimePref(kernel);
-  let chosen = preferred && mimes.includes(preferred) ? preferred : mimes[0]!;
-  const container = document.createElement("div");
-  container.className = "cm-ceil-output-mime";
-  // Offer a format switch only when the output actually carries alternatives.
-  if (mimes.length > 1) {
-    const bar = document.createElement("div");
-    bar.className = "cm-ceil-output-formatbar";
-    const select = document.createElement("select");
-    select.className = "cm-ceil-output-format";
-    select.title = "Output format (remembered per kernel)";
-    for (const mime of mimes) {
-      const option = document.createElement("option");
-      option.value = mime;
-      option.textContent = CEIL_MIME_LABELS[mime] ?? mime;
-      select.append(option);
-    }
-    select.value = chosen;
-    select.addEventListener("mousedown", stopEditorPropagation);
-    select.addEventListener("click", (event) => event.stopPropagation());
-    select.addEventListener("change", (event) => {
-      event.stopPropagation();
-      chosen = select.value;
-      rememberCeilMimePref(kernel, chosen);
-      renderCeilMime(container, chosen, data, runtime, widgetMessages);
-    });
-    bar.append(select);
-    root.append(bar);
-  }
-  root.append(container);
-  renderCeilMime(container, chosen, data, runtime, widgetMessages);
-}
+// Cell outputs render through the shared JupyterLab OutputArea stack
+// (src/jupyter-rendermime.ts) so their layout, MIME preference, error/stream
+// formatting, and ipywidget hosting match upstream Jupyter / VS Code Jupyter.
 
 // Inline output view keeps very long stream text bounded so a runaway loop's
 // output cannot freeze the editor; the Popout ("full") view shows everything
 // the server kept (already capped server-side at ~1 MB).
 const CEIL_INLINE_STREAM_LIMIT = 40_000;
 
-function renderCeilStreamText(pre: HTMLElement, text: string, full: boolean): void {
-  const clean = stripAnsi(text);
-  if (full || clean.length <= CEIL_INLINE_STREAM_LIMIT) {
-    pre.textContent = clean;
-    return;
-  }
-  const hidden = clean.length - CEIL_INLINE_STREAM_LIMIT;
-  pre.textContent = `${clean.slice(0, CEIL_INLINE_STREAM_LIMIT)}\n[aaronnote: ${hidden} more chars — use Popout for full output]`;
+function streamOutputText(output: Record<string, unknown>): string {
+  const text = output.text;
+  if (typeof text === "string") return text;
+  if (Array.isArray(text)) return text.map((item) => String(item ?? "")).join("");
+  return "";
 }
 
-function renderCeilOutputs(root: HTMLElement, result: CeilExecutionResult | null, full = false): void {
-  disposeCeilWidgetTree(root);
+// Bound inline stream text; leave the full popout untouched.
+function boundedCeilOutputs(outputs: Array<Record<string, unknown>>, full: boolean): Array<Record<string, unknown>> {
+  if (full) return outputs;
+  return outputs.map((output) => {
+    if (String(output.output_type || "") !== "stream") return output;
+    const text = streamOutputText(output);
+    if (text.length <= CEIL_INLINE_STREAM_LIMIT) return output;
+    const hidden = text.length - CEIL_INLINE_STREAM_LIMIT;
+    return {
+      ...output,
+      text: `${text.slice(0, CEIL_INLINE_STREAM_LIMIT)}\n[aaronnote: ${hidden} more chars — use Popout for full output]`,
+    };
+  });
+}
+
+// AaronNote renders kernel markdown output with its own Markdown renderer so
+// it matches note prose (KaTeX macros, link handling) instead of the stock
+// marked-based parser.
+const ceilMarkdownParser: JupyterMarkdownParser = {
+  async render(source: string): Promise<string> {
+    return renderMarkdownHTML(source);
+  },
+};
+
+// The mounted OutputArea (and any live ipywidgets inside it) is disposed
+// through this disposer, keyed by the host element it was rendered into.
+const ceilOutputAreaDispose = new WeakMap<HTMLElement, () => void>();
+
+function disposeCeilOutputArea(root: HTMLElement): void {
+  const dispose = ceilOutputAreaDispose.get(root);
+  if (dispose) {
+    ceilOutputAreaDispose.delete(root);
+    try { dispose(); } catch {}
+  }
+}
+
+// Dispose any OutputArea rendered anywhere under (or at) `root` — used on
+// widget teardown, where we only hold the enclosing cell element.
+function disposeCeilOutputTree(root: HTMLElement): void {
+  disposeCeilOutputArea(root);
+  for (const el of root.querySelectorAll<HTMLElement>(".cm-ceil-output")) {
+    disposeCeilOutputArea(el);
+  }
+}
+
+// Lazily pull in the heavy widget manager only when an output actually hosts an
+// ipywidget, keeping it out of the main editor bundle.
+const mountCeilWidget: WidgetMountFn = (host, modelId, runtime, messages, widgetOutputs) => {
+  (window as unknown as { __jupyter_widgets_assets_path__?: string }).__jupyter_widgets_assets_path__ ??=
+    new URL("./", window.location.href).toString();
+  return import("../../jupyter-widget-runtime.ts")
+    .then(({ mountJupyterWidget }) => mountJupyterWidget(host, modelId, runtime, messages as JupyterWidgetKernelMessage[], widgetOutputs));
+};
+
+// The JupyterLab OutputArea/rendermime stack is large; load it on demand the
+// first time a cell actually produces output, keeping it out of the main
+// editor bundle (same rationale as the widget manager above).
+let jupyterRenderModule: Promise<typeof import("../../jupyter-rendermime.ts")> | null = null;
+function loadJupyterRender(): Promise<typeof import("../../jupyter-rendermime.ts")> {
+  return (jupyterRenderModule ??= import("../../jupyter-rendermime.ts"));
+}
+
+// Guards against a stale async fill when the same host is re-rendered (e.g. an
+// Expand toggle) before the render module finished loading.
+const ceilRenderTokens = new WeakMap<HTMLElement, number>();
+
+function renderCeilOutputs(root: HTMLElement, result: CeilExecutionResult | null, full = false, view?: EditorView): void {
+  disposeCeilOutputArea(root);
   root.replaceChildren();
+  const token = (ceilRenderTokens.get(root) ?? 0) + 1;
+  ceilRenderTokens.set(root, token);
   if (!result) {
     const empty = document.createElement("div");
     empty.className = "cm-ceil-output-empty";
@@ -1695,7 +1421,7 @@ function renderCeilOutputs(root: HTMLElement, result: CeilExecutionResult | null
     root.append(empty);
     return;
   }
-  const outputs = Array.isArray(result.outputs) ? result.outputs : [];
+  const outputs = Array.isArray(result.outputs) ? result.outputs as Array<Record<string, unknown>> : [];
   if (outputs.length === 0) {
     const empty = document.createElement("div");
     empty.className = "cm-ceil-output-empty";
@@ -1703,32 +1429,28 @@ function renderCeilOutputs(root: HTMLElement, result: CeilExecutionResult | null
     root.append(empty);
     return;
   }
-  for (const output of outputs) {
-    const item = document.createElement("div");
-    item.className = "cm-ceil-output-item";
-    const type = String(output.output_type || "");
-    if (type === "stream") {
-      const pre = document.createElement("pre");
-      pre.dataset.stream = String(output.name || "stdout");
-      renderCeilStreamText(pre, String(output.text || ""), full);
-      item.append(pre);
-    } else if (type === "error") {
-      item.classList.add("cm-ceil-output-error");
-      const pre = document.createElement("pre");
-      const traceback = Array.isArray(output.traceback) ? output.traceback.map(String).join("\n") : "";
-      pre.textContent = stripAnsi(traceback || [output.ename, output.evalue].filter(Boolean).map(String).join(": "));
-      item.append(pre);
-    } else {
-      appendCeilMimeBundle(
-        item,
-        (output.data && typeof output.data === "object" ? output.data : {}) as Record<string, unknown>,
-        String(result.kernel || ""),
-        result.widgetRuntime,
-        result.widgetMessages,
-      );
-    }
-    root.append(item);
-  }
+  const options = {
+    widgetRuntime: result.widgetRuntime,
+    widgetMessages: result.widgetMessages,
+    widgetOutputs: result.widgetOutputs,
+    mountWidget: mountCeilWidget,
+    markdownParser: ceilMarkdownParser,
+  };
+  const bounded = boundedCeilOutputs(outputs, full);
+  void loadJupyterRender().then(({ renderJupyterOutputs }) => {
+    if (ceilRenderTokens.get(root) !== token) return;
+    root.replaceChildren();
+    const dispose = renderJupyterOutputs(root, bounded, options);
+    ceilOutputAreaDispose.set(root, dispose);
+    view?.requestMeasure();
+  }).catch((error) => {
+    if (ceilRenderTokens.get(root) !== token) return;
+    root.replaceChildren();
+    const pre = document.createElement("pre");
+    pre.className = "cm-ceil-output-error";
+    pre.textContent = `Failed to render output: ${error instanceof Error ? error.message : String(error)}`;
+    root.append(pre);
+  });
 }
 
 function openCeilOutputPopup(result: CeilExecutionResult | null): void {
@@ -1751,7 +1473,7 @@ function openCeilOutputPopup(result: CeilExecutionResult | null): void {
   };
   const destroy = (): void => {
     window.removeEventListener("keydown", onKey);
-    disposeCeilWidgetTree(body);
+    disposeCeilOutputArea(body);
     overlay.remove();
   };
   close.addEventListener("click", destroy);
@@ -1794,7 +1516,7 @@ class CeilCommandWidget extends MeasuredWidget {
   }
 
   override destroy(dom: HTMLElement): void {
-    disposeCeilWidgetTree(dom);
+    disposeCeilOutputTree(dom);
     super.destroy(dom);
   }
 
@@ -1877,7 +1599,7 @@ class CeilCommandWidget extends MeasuredWidget {
     const uiState = ceilOutputUi(lastResult);
     outputWrap.classList.toggle("is-folded", Boolean(uiState.outputFolded));
     outputWrap.classList.toggle("is-expanded", Boolean(uiState.outputExpanded));
-    renderCeilOutputs(output, lastResult, Boolean(uiState.outputExpanded));
+    renderCeilOutputs(output, lastResult, Boolean(uiState.outputExpanded), view);
 
     const makeButton = (text: string, title: string, run: () => Promise<void> | void): HTMLButtonElement => {
       const button = document.createElement("button");
@@ -1949,7 +1671,7 @@ class CeilCommandWidget extends MeasuredWidget {
         foldButton.textContent = ui.outputFolded ? "Show" : "Fold";
         expandButton.textContent = ui.outputExpanded ? "Collapse" : "Expand";
         status.textContent = ceilResultStatusLabel(meta, lastResult);
-        renderCeilOutputs(output, lastResult, expanded);
+        renderCeilOutputs(output, lastResult, expanded, view);
         if (lastResult) setBoundedMap(ceilOutputCache, cacheKey, lastResult);
         view.requestMeasure();
       } catch (err) {
@@ -2086,7 +1808,7 @@ class CeilCommandWidget extends MeasuredWidget {
         message: err instanceof Error ? err.message : String(err),
         outputs: [{ output_type: "error", traceback: [err instanceof Error ? err.message : String(err)] }],
       });
-      if (!leanRuntime) renderCeilOutputs(output, lastResult, outputWrap.classList.contains("is-expanded"));
+      if (!leanRuntime) renderCeilOutputs(output, lastResult, outputWrap.classList.contains("is-expanded"), view);
       status.textContent = "Error";
     };
     const runEntries = async (entriesToRun: CeilCellContextEntry[], emptyMessage: string): Promise<void> => {
@@ -2126,7 +1848,7 @@ class CeilCommandWidget extends MeasuredWidget {
           status.textContent = leanRuntime
             ? "Synced"
             : currentResult.status === "error" && currentResult.stoppedAt ? `Stopped at ${currentResult.stoppedAt}` : ceilResultStatusLabel(meta, currentResult);
-          if (!leanRuntime) renderCeilOutputs(output, currentResult, outputWrap.classList.contains("is-expanded"));
+          if (!leanRuntime) renderCeilOutputs(output, currentResult, outputWrap.classList.contains("is-expanded"), view);
         } else {
           status.textContent = result.status === "error" && result.stoppedAt ? `Stopped at ${result.stoppedAt}` : "Ran above";
         }
@@ -2169,7 +1891,7 @@ class CeilCommandWidget extends MeasuredWidget {
         if (lastResult) {
           lastResult = { ...lastResult, live: false, widgetRuntime: undefined };
           setBoundedMap(ceilOutputCache, cacheKey, lastResult);
-          renderCeilOutputs(output, lastResult, outputWrap.classList.contains("is-expanded"));
+          renderCeilOutputs(output, lastResult, outputWrap.classList.contains("is-expanded"), view);
         }
         status.textContent = meta.id;
       } catch (err) {
@@ -2180,7 +1902,7 @@ class CeilCommandWidget extends MeasuredWidget {
     const clearButton = makeButton("Clear", "Clear output", () => {
       lastResult = null;
       ceilOutputCache.delete(cacheKey);
-      renderCeilOutputs(output, null);
+      renderCeilOutputs(output, null, false, view);
       if (file) {
         void api.jupyterCell.clearScriptCellOutput({
           file,
@@ -2210,7 +1932,7 @@ class CeilCommandWidget extends MeasuredWidget {
       if (expanded) outputWrap.classList.remove("is-folded");
       expandButton.textContent = expanded ? "Collapse" : "Expand";
       foldButton.textContent = "Fold";
-      renderCeilOutputs(output, lastResult, expanded);
+      renderCeilOutputs(output, lastResult, expanded, view);
       saveOutputUi({ outputExpanded: expanded, ...(expanded ? { outputFolded: false } : {}) });
       view.requestMeasure();
     });

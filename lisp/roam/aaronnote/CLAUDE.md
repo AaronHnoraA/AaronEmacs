@@ -25,7 +25,10 @@ separate editor implementation.
 | `src/cm6/close-brackets-vscode.ts` | VSCode-style bracket pairing, selection wrapping, overtyping, and paired deletion. |
 | `src/cm6/lezer-link-ext.ts` | Lezer `LinkEnd` replacement that preserves nested brackets inside inline link/image text. |
 | `src/cm6/commands.ts` | Editing commands, block context, and quick insert registry. |
-| `src/cm6/widgets/*.ts` | Math, code fence, image, task, TOC, org-env, and related widgets. |
+| `src/cm6/widgets/*.ts` | Math, code fence, image, task, TOC, org-env, and related widgets. `block-extras.ts` hosts the `@@cell` Jupyter widget; it renders cell output through the shared JupyterLab stack (lazy-loaded). |
+| `src/jupyter-rendermime.ts` | Shared JupyterLab render stack for cell output — the same `@jupyterlab/rendermime` + `@jupyterlab/outputarea` pipeline VS Code Jupyter uses. Adds a KaTeX LaTeX typesetter, an HTML renderer that sandboxes script-bearing HTML in an auto-sizing iframe (and routes math-only HTML to KaTeX), and a widget-view renderer bridging to the live kernel manager. Loaded lazily (large). |
+| `src/jupyter-widget-runtime.ts` | ipywidgets frontend: a `KernelWidgetManager` subclass over the live kernel (via `server/lib/jupyter-widget-proxy.mjs`). Mounts kernel-state-first (`restoreWidgets`), replays captured comm messages only as a fallback, and seeds Output widgets with server-captured outputs. Shares the render stack above. Lazy chunk. |
+| `server/lib/jupyter-output-router.mjs` | Server-side ipywidgets Output-widget output routing (ports VS Code Jupyter's `msgIdsToSwallow`): keeps display output produced inside an Output widget's context out of the top-level cell output and groups it by comm id for the client to seed. Used by `server/lib/jupyter-cell.mjs`. |
 | `src/render-html.ts` | Shared Markdown-to-HTML export/publish renderer. |
 | `src/math-render.ts` | KaTeX render + HTML cache. Cache key includes the active macro-set version. |
 | `src/katex-macros.ts` | Global KaTeX macro state (`setKatexMacros`/`getKatexMacros`/`getKatexMacrosVersion`); re-exports the parser. |

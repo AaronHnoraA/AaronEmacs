@@ -3,20 +3,20 @@ import * as widgetControls from "@jupyter-widgets/controls";
 import * as widgetOutput from "@jupyter-widgets/jupyterlab-manager/lib/output";
 import { KernelWidgetManager, WIDGET_VIEW_MIMETYPE } from "@jupyter-widgets/jupyterlab-manager/lib/manager";
 import { WidgetRenderer } from "@jupyter-widgets/jupyterlab-manager/lib/renderer";
-import { RenderMimeRegistry, standardRendererFactories } from "@jupyterlab/rendermime";
+import type { RenderMimeRegistry } from "@jupyterlab/rendermime";
 import { KernelConnection, ServerConnection, type Kernel } from "@jupyterlab/services";
 import { MessageLoop } from "@lumino/messaging";
 import * as LuminoWidgets from "@lumino/widgets";
 import requireJsSource from "requirejs/require.js?raw";
 import { evaluateAmdLoaderSource, validWidgetModuleName, validWidgetModuleVersion, widgetModuleCdnUrls } from "./jupyter-widget-loader.ts";
+import { createBaseRenderMime, type WidgetOutputsMap } from "./jupyter-rendermime.ts";
 
 import "@jupyter-widgets/base/css/index.css";
 import "@jupyter-widgets/controls/css/labvariables.css";
 import "@jupyter-widgets/controls/css/widgets.css";
 import "@lumino/widgets/style/index.css";
-import "@jupyterlab/rendermime/style/base.css";
-import "@jupyterlab/outputarea/style/base.css";
 import "@fortawesome/fontawesome-free/css/all.min.css";
+// rendermime/outputarea base CSS is imported by ./jupyter-rendermime.ts.
 
 export type JupyterWidgetRuntime = {
   id: string;
@@ -171,9 +171,13 @@ class AaronnoteWidgetManager extends KernelWidgetManager {
   private restorePromise: Promise<void> | null = null;
   private readonly replayedMessages = new Set<string>();
   private readonly views = new Set<WidgetViewLike>();
+  private readonly seededOutputComms = new Set<string>();
 
   constructor(kernel: Kernel.IKernelConnection) {
-    const renderMime = new RenderMimeRegistry({ initialFactories: standardRendererFactories });
+    // Same render stack as cell outputs (KaTeX LaTeX, iframe/HTML handling) so
+    // content shown *inside* widgets (e.g. an @interact Output area) matches
+    // the surrounding cell output exactly.
+    const renderMime = createBaseRenderMime();
     super(kernel, renderMime);
     this.renderMime = renderMime;
     this.registerCoreWidgetModules();
@@ -285,13 +289,54 @@ class AaronnoteWidgetManager extends KernelWidgetManager {
     await model.state_change?.catch(() => undefined);
   }
 
-  async mount(modelId: string, host: HTMLElement, messages: JupyterWidgetKernelMessage[] = []): Promise<() => void> {
-    if (messages.length > 0) {
+  // Seed the outputs of any Output widget with content captured server-side
+  // during the (headless) execution. ipywidgets' Output widget captures
+  // display output via a frontend msg_id hook, so a widget executed without a
+  // live frontend restores with an empty `outputs` trait — we replay the
+  // captured nbformat outputs so the initial render (e.g. an @interact's first
+  // plot) shows inside the widget, matching JupyterLab / VS Code Jupyter.
+  async seedOutputWidgets(widgetOutputs?: WidgetOutputsMap): Promise<void> {
+    if (!widgetOutputs) return;
+    for (const [commId, outputs] of Object.entries(widgetOutputs)) {
+      if (this.seededOutputComms.has(commId)) continue;
+      if (!Array.isArray(outputs) || outputs.length === 0) continue;
+      if (!this.has_model(commId)) continue;
+      let model: unknown;
+      try { model = await this.get_model(commId); } catch { continue; }
+      const outputModel = model as { set?: (key: string, value: unknown) => void; save_changes?: () => void };
+      if (typeof outputModel.set !== "function") continue;
+      this.seededOutputComms.add(commId);
+      outputModel.set("outputs", outputs);
+      outputModel.save_changes?.();
+    }
+  }
+
+  async mount(modelId: string, host: HTMLElement, messages: JupyterWidgetKernelMessage[] = [], widgetOutputs?: WidgetOutputsMap): Promise<() => void> {
+    // Kernel-state-first: pull live widget state directly from the kernel via
+    // the ipywidgets control comm (KernelWidgetManager.restoreWidgets), exactly
+    // like JupyterLab and VS Code Jupyter. This is what makes interaction work:
+    // the live view registers its own comm/message hooks, so slider changes
+    // round-trip and Output areas update in place.
+    let restoreError: unknown = null;
+    try {
+      await this.restoreFromKernel();
+    } catch (error) {
+      restoreError = error;
+    }
+    // Fallback for kernels whose ipywidgets predate the control comm, or when
+    // the live state was unavailable: replay the comm messages captured during
+    // execution. This yields a static (non-interactive) view but avoids a hard
+    // failure.
+    if (!this.has_model(modelId) && messages.length > 0) {
       await this.restoreFromMessages(messages);
     }
     if (!this.has_model(modelId)) {
-      await this.restoreFromKernel();
+      if (restoreError) {
+        throw restoreError instanceof Error ? restoreError : new Error(String(restoreError));
+      }
+      throw new Error("widget model not found");
     }
+    await this.seedOutputWidgets(widgetOutputs);
     const model = await this.get_model(modelId);
     const view = await this.create_view(model);
     host.replaceChildren();
@@ -467,8 +512,9 @@ export async function mountJupyterWidget(
   modelId: string,
   runtime: JupyterWidgetRuntime,
   messages: JupyterWidgetKernelMessage[] = [],
+  widgetOutputs?: WidgetOutputsMap,
 ): Promise<() => void> {
   if (!runtime.id || !runtime.name) throw new Error("Missing live Jupyter widget runtime");
   const { manager } = await withTimeout(getRuntimeEntry(runtime), 15_000, "Timed out connecting to live Jupyter kernel");
-  return await withTimeout(manager.mount(modelId, host, messages), 20_000, "Timed out restoring interactive widget state");
+  return await withTimeout(manager.mount(modelId, host, messages, widgetOutputs), 20_000, "Timed out restoring interactive widget state");
 }
