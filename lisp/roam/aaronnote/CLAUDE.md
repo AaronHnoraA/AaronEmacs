@@ -34,7 +34,7 @@ separate editor implementation.
 | `src/attrs-syntax.ts` | Shared `{key: value}` trailing-attribute block parser used by command-syntax and image-attrs. |
 | `src/layout-attrs.ts` | Layout-attribute normalization (align, wrap, width, height) and CSS-class/style helpers. |
 | `src/image-attrs.ts` | Image-specific layout attr reader/writer and DOM/token applicators, built on `layout-attrs.ts`. `imageLayoutToTrailingAttrs` serializes a layout back to `{...}` source (round-trips through `imageLayoutFromAttrs`); used by the image widget's hover toolbar. |
-| `src/command-syntax.ts` | Inline `@@cmd` and block `#+begin kind` command parser, now delegates to `attrs-syntax.ts`. |
+| `shared/command-syntax.mjs` | Canonical browser/server parser for inline `@@cmd` and block `#+begin kind` commands; `src/command-syntax.ts` is its typed facade. |
 | `src/styles/*.css` | CM6 editor chrome and swappable Markdown themes. |
 | `aaronnote/main.ts` | Emacs-embedded app shell: notes UI, command palette, jump stack. |
 | `aaronnote/latex-export-scope.ts` | Pure whole-note/selection/heading-subtree range model used by the LaTeX scope picker. |

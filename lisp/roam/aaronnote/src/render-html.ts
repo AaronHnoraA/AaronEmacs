@@ -375,6 +375,20 @@ function commentInlineRule(state: StateInline, silent: boolean): boolean {
   return true;
 }
 
+function sideCommentInlineRule(state: StateInline, silent: boolean): boolean {
+  const start = state.pos;
+  if (!state.src.startsWith("@@scomment", start)) return false;
+  const lineEnd = state.src.indexOf("\n", start);
+  const slice = state.src.slice(start, lineEnd < 0 ? state.src.length : lineEnd);
+  const cmd = scanInlineCommands(slice, "scomment")[0];
+  if (!cmd || cmd.fullFrom !== 0) return false;
+  if (silent) return true;
+  const token = state.push("side_comment_inline", "span", 0);
+  token.content = cmd.context.trim();
+  state.pos = start + cmd.fullTo;
+  return true;
+}
+
 function renderCommentInline(tokens: Token[], idx: number, _options: unknown, _env: unknown, _renderer: MarkdownIt["renderer"]): string {
   const context = tokens[idx]!.content;
   const body = context ? renderMarkdownInlineHTML(context) : "";
@@ -385,6 +399,19 @@ function renderCommentInline(tokens: Token[], idx: number, _options: unknown, _e
     '<span class="org-env-comment-state">show</span>',
     "</span>",
     `<span class="org-env-content">${body}</span>`,
+    "</span>",
+  ].join("");
+}
+
+function renderSideCommentInline(tokens: Token[], idx: number): string {
+  const context = tokens[idx]!.content;
+  const body = context ? renderMarkdownInlineHTML(context) : "";
+  return [
+    '<span class="inline-side-comment-widget inline-command-token" role="note" aria-label="Side comment">',
+    '<span class="inline-side-comment-anchor" aria-hidden="true">',
+    '<span class="inline-side-comment-connector"></span>',
+    "</span>",
+    `<span class="inline-side-comment-card">${body}</span>`,
     "</span>",
   ].join("");
 }
@@ -798,10 +825,12 @@ function createMarkdownIt(options: RenderMarkdownHTMLOptions): MarkdownIt {
   // `\(` opener as a literal `(` and inline math is never recognized.
   md.inline.ruler.before("escape", "math_inline", mathInlineRule);
   md.inline.ruler.before("escape", "comment_inline", commentInlineRule);
+  md.inline.ruler.before("escape", "side_comment_inline", sideCommentInlineRule);
 
   md.renderer.rules.math_block = renderMathBlock;
   md.renderer.rules.math_inline = renderMathInline;
   md.renderer.rules.comment_inline = renderCommentInline;
+  md.renderer.rules.side_comment_inline = renderSideCommentInline;
   md.renderer.rules.org_env_block = (tokens, idx) => renderOrgEnv(md, tokens, idx);
   md.renderer.rules.semantic_heading_block = renderSemanticHeading;
   md.renderer.rules.front_matter = (tokens, idx, _opts, _env, _renderer) =>

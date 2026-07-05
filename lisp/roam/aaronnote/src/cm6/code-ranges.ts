@@ -1,7 +1,7 @@
 /**
  * Shared scanner for code-span/code-block ranges in the current viewport.
  *
- * Several inline-preview features (inline math, wikilinks, CJK styling,
+ * Several inline-preview features (inline math, links, CJK styling,
  * ==highlight==, @@commands) are driven by regex scans over raw text and must
  * NOT fire inside fenced/indented/inline code, where Markdown is meant to stay
  * literal. The Lezer syntax tree already marks these regions, so we collect them

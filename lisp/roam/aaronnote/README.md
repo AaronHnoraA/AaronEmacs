@@ -145,7 +145,7 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 | `[toc]` block                     | :white_check_mark: |                                           |
 | emoji `:smile:`                   | :white_check_mark: |                                           |
 | HTML comment `<!-- -->`           | :white_check_mark: |                                           |
-| inline command `@@cmd(x) [y]{k: v}` | :white_check_mark: | TODO uses `@@todo(doing) [task]{ddl: 2026-05-20}`; `@@todo [task]` defaults to `todo` |
+| inline command `@@cmd(x) [y]{k: v}` | :white_check_mark: | TODO uses `@@todo(doing) [task]{ddl: 2026-05-20}`; `@@comment [note]` is collapsible; `@@scomment [note]` is a published side card and exports as `\sidecomment` |
 | org command block `#+begin kind`   | :white_check_mark: | rendered through the org-env CM6 widget   |
 | callout block `> [!note]`          | :white_check_mark: | editor shows left-border colour + title bold; HTML export wraps in `.callout` + `.callout-title` |
 | heading fold `zc` / `zo` / `za`   | :white_check_mark: | foldService + chevron (hover-only); state lives in CM6 foldState |

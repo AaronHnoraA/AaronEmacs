@@ -8,9 +8,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { changedRoamFilesSince, commitRoam, fileHistory, restoreFileFromCommit, discardFileChanges, roamRepoStatus, roamRepoChanges, diffRoamFile, diffRoamCommit, pullRoam, pushRoam, repoHistory, headSha } from "./roam-git.mjs";
 import { configureTmpRoot, aaronnoteTmpRoot, runtimeMkdtemp, runtimeTmpFile } from "./tmp.mjs";
-import { aaronnoteMarkdownToLatex, applyLatexTemplate, defaultLatexOutputPath, escapeLatexTitle, latexMacrosPreamble, readLatexTemplate, writeLatexExport } from "./latex-export.mjs";
+import { aaronnoteMarkdownToLatex, applyLatexTemplate, defaultLatexOutputPath, escapeLatexTitle, latexMacrosPreamble, latexSideCommentPreamble, readLatexTemplate, writeLatexExport } from "./latex-export.mjs";
 import { agentAvailable, loadAgentRules, polishBodyWithAgent } from "./latex-export-codex.mjs";
 import { loadKatexMacros } from "./katex-macros.mjs";
+import { parseCommandArgs, scanInlineCommands } from "../../shared/command-syntax.mjs";
+
+export { parseCommandArgs, scanInlineCommands };
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 let workspaceRoot = resolve(process.env.AARONNOTE_WORKSPACE_ROOT || resolve(appDir, ".."));
@@ -81,7 +84,7 @@ const projectRootMarkers = [
 const defaultNoteKind = "default";
 const defaultNoteKindAliases = new Set(["", "default", "note"]);
 const noteKindPattern = /^[a-z0-9_-]+$/;
-const refTokenPattern = /#note\("([^"]+)"\)|\[\[([^\]\n]+)\]\]|\broam:\/\/[^\s<>)\]]+/gi;
+const refTokenPattern = /#note\("([^"]+)"\)|\broam:\/\/[^\s<>)\]]+/gi;
 let noteCacheRoot = "";
 let noteCache = new Map();
 let notesSnapshotRoot = "";
@@ -1936,7 +1939,6 @@ export function refsFromContent(content) {
   let match;
   while ((match = refTokenPattern.exec(content)) !== null) {
     if (match[1]) refs.add(match[1]);
-    else if (match[2]) refs.add(match[2].trim());
     else refs.add(refFromRoamHref(match[0]));
   }
   for (const href of markdownLinkHrefs(content)) {
@@ -1955,7 +1957,6 @@ export function roamDbRefsFromContent(content) {
   let match;
   while ((match = refTokenPattern.exec(content)) !== null) {
     if (match[1]) refs.add(match[1]);
-    else if (match[2]) refs.add(match[2].trim());
     else refs.add(refFromRoamHref(match[0]));
   }
   for (const href of markdownLinkHrefs(content)) {
@@ -2763,137 +2764,6 @@ export function normalizeTodoStatus(raw = "") {
   return todoStatuses.has(value) ? value : "todo";
 }
 
-function cleanCommandArgValue(value = "") {
-  return String(value).trim().replace(/^["']|["']$/g, "");
-}
-
-export function parseCommandArgs(raw = "") {
-  const body = String(raw || "").trim().replace(/^\{/, "").replace(/\}$/, "").trim();
-  const args = {};
-  if (!body) return args;
-  for (const part of body.split(/[;,]/)) {
-    const split = part.trim().match(/^([A-Za-z][\w-]*)\s*[:=]\s*(.+)$/);
-    if (!split) continue;
-    const key = split[1].trim().toLowerCase();
-    const value = cleanCommandArgValue(split[2]);
-    if (!key || !value) continue;
-    args[key] = value;
-  }
-  return args;
-}
-
-function findInlineCommandClose(text, open, closeChar) {
-  let bracketDepth = 0;
-  for (let i = open + 1; i < text.length; i++) {
-    const ch = text[i];
-    // Skip over a whole inline/display math span so its `]` content does not
-    // close the attribute block. Checked before the generic backslash escape.
-    if (closeChar === "]" && ch === "\\" && (text[i + 1] === "(" || text[i + 1] === "[")) {
-      const close = text[i + 1] === "[" ? "\\]" : "\\)";
-      const start = i + 2;
-      const found = text.indexOf(close, start);
-      if (found >= 0 && !/[\n\r]/.test(text.slice(start, found))) {
-        i = found + close.length - 1;
-        continue;
-      }
-    }
-    if (ch === "\\" && i + 1 < text.length) {
-      i++;
-      continue;
-    }
-    if (ch === "\n" || ch === "\r") return -1;
-    if (closeChar === "]" && ch === "[") {
-      bracketDepth++;
-      continue;
-    }
-    if (ch === closeChar) {
-      if (closeChar === "]" && bracketDepth > 0) {
-        bracketDepth--;
-        continue;
-      }
-      return i;
-    }
-  }
-  return -1;
-}
-
-function inlineCommandMetaRange(text, closeBracket) {
-  let openBrace = closeBracket + 1;
-  while (openBrace < text.length && (text[openBrace] === " " || text[openBrace] === "\t")) openBrace++;
-  if (text[openBrace] !== "{") return { raw: "", fullTo: closeBracket + 1 };
-  const closeBrace = findInlineCommandClose(text, openBrace, "}");
-  if (closeBrace < 0) return { raw: "", fullTo: closeBracket + 1 };
-  return {
-    raw: text.slice(openBrace, closeBrace + 1),
-    fullTo: closeBrace + 1,
-  };
-}
-
-function inlineCommandTrailingMetaBeforeLineEnd(text, bodyFrom, lineEnd) {
-  const line = text.slice(bodyFrom, lineEnd);
-  const match = line.match(/[ \t]+(\{[^{}\n]*\})[ \t]*$/);
-  if (!match || match.index === undefined) return { raw: "", bodyTo: lineEnd, fullTo: lineEnd };
-  return {
-    raw: match[1] || "",
-    bodyTo: bodyFrom + match.index,
-    fullTo: bodyFrom + match.index + match[0].length,
-  };
-}
-
-export function scanInlineCommands(text, name = "") {
-  const commands = [];
-  const wanted = String(name || "").toLowerCase();
-  const pushCommand = (commandName, switchValue, contextFrom, contextTo, fullFrom, fullTo, argsRaw = "") => {
-    if (wanted && commandName !== wanted) return;
-    commands.push({
-      name: commandName,
-      switchValue,
-      context: text.slice(contextFrom, contextTo),
-      argsRaw,
-      args: parseCommandArgs(argsRaw),
-      fullFrom,
-      fullTo,
-      contextFrom,
-      contextTo,
-    });
-  };
-
-  const tagRe = /@@tag\[/gi;
-  let tagMatch;
-  while ((tagMatch = tagRe.exec(text))) {
-    const openBracket = tagRe.lastIndex - 1;
-    const closeBracket = findInlineCommandClose(text, openBracket, "]");
-    if (closeBracket < 0) continue;
-    pushCommand("tag", "", openBracket + 1, closeBracket, tagMatch.index, closeBracket + 1);
-    tagRe.lastIndex = closeBracket + 1;
-  }
-
-  const re = /@@([A-Za-z][\w-]*)(?:\(([^)\n]*)\))?[ \t]+\[/g;
-  let match;
-  while ((match = re.exec(text))) {
-    const commandName = match[1].toLowerCase();
-    const openBracket = re.lastIndex - 1;
-    const closeBracket = findInlineCommandClose(text, openBracket, "]");
-    if (closeBracket < 0) continue;
-    const meta = inlineCommandMetaRange(text, closeBracket);
-    pushCommand(commandName, String(match[2] || "").trim(), openBracket + 1, closeBracket, match.index, meta.fullTo, meta.raw);
-    re.lastIndex = meta.fullTo;
-  }
-
-  const bareTodoRe = /@@todo(?:\(([^)\n]*)\))?[ \t]+(?!\[)([^\n]+)/gi;
-  let bareTodoMatch;
-  while ((bareTodoMatch = bareTodoRe.exec(text))) {
-    const bodyFrom = bareTodoMatch.index + bareTodoMatch[0].length - String(bareTodoMatch[2] || "").length;
-    const lineEnd = bareTodoMatch.index + bareTodoMatch[0].length;
-    const meta = inlineCommandTrailingMetaBeforeLineEnd(text, bodyFrom, lineEnd);
-    if (text.slice(bodyFrom, meta.bodyTo).trim()) {
-      pushCommand("todo", String(bareTodoMatch[1] || "").trim(), bodyFrom, meta.bodyTo, bareTodoMatch.index, meta.fullTo, meta.raw);
-    }
-    bareTodoRe.lastIndex = lineEnd;
-  }
-  return commands.sort((a, b) => a.fullFrom - b.fullFrom || a.fullTo - b.fullTo);
-}
-
 export function extractTodos(content, note, updatedAt) {
   const todos = [];
   const lineStarts = [0];
@@ -3625,7 +3495,10 @@ export async function exportLatex(body = {}) {
   const needsTitle = latexTemplateUsesVar(template.text, "title");
   const engine = String(body.engine || header.engine || "pdflatex").toLowerCase();
   const macroResult = loadKatexMacros(katexMacrosRoot);
-  const macros = latexMacrosPreamble(macroResult.macros);
+  const macros = [
+    latexSideCommentPreamble(converted.features?.usesSideComment),
+    latexMacrosPreamble(macroResult.macros),
+  ].filter(Boolean).join("\n");
 
   // Document title precedence: explicit meta title > AI-chosen (set after polish)
   // > first H1 heading > filename fallback. Never default to the bare filename

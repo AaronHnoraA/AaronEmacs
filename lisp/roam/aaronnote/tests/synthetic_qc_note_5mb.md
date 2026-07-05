@@ -17499,7 +17499,7 @@ invertible. This identifies one matching pair of summands. Removing that
 pair and applying induction proves the result.
 #+end proof
 
-中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
+中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小���类型”凭空改变，只能重排。
 
 ## 32.7. Measurement statistics
 
@@ -142903,7 +142903,8 @@ Someting for me is to make it harder I don't like this hhh do this !!
 
 ## 262.6. Direct sums and decompositions
 
-Direct-sum decompositions are central in algebraic classification problems.
+Direct-sum decompositions are central in algebraic classification problems. sadas asd a da sada this is easy to use jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj  tttt tttt ttt 
+good! hhhh It is easy to see
 Suppose
 
 \[
@@ -186626,7 +186627,7 @@ invertible. This identifies one matching pair of summands. Removing that
 pair and applying induction proves the result.
 #+end proof
 
-中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
+中文直觉：如果整体分解成不可再拆的小块，那么同构不能���“小块类型”凭空改变，只能重排。
 
 ## 342.7. Measurement statistics
 
@@ -188806,7 +188807,7 @@ invertible. This identifies one matching pair of summands. Removing that
 pair and applying induction proves the result.
 #+end proof
 
-中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
+中文直觉：如果整体分解成不可���拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
 
 ## 346.7. Measurement statistics
 

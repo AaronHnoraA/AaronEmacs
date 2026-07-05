@@ -70,6 +70,20 @@ y^2
     expect(content?.querySelector(".katex")).toBeTruthy();
   });
 
+  test("renders @@scomment as a published side card", () => {
+    const html = renderMarkdownHTML(String.raw`Claim @@scomment [Check **this** with \(x\).] after.`);
+    expect(html).not.toContain("@@scomment");
+
+    const root = document.createElement("div");
+    root.innerHTML = html;
+    const widget = root.querySelector(".inline-side-comment-widget");
+    expect(widget).toBeTruthy();
+    expect(widget?.getAttribute("role")).toBe("note");
+    const card = widget?.querySelector(".inline-side-comment-card");
+    expect(card?.querySelector("strong")?.textContent).toBe("this");
+    expect(card?.querySelector(".katex")).toBeTruthy();
+  });
+
   test("keeps markdown and math literal inside fenced and inline code", () => {
     const fenced = renderMarkdownHTML("```\ninline \\(x+1\\) and [[wiki]] and **bold**\n```");
     expect(fenced).toContain("<code");

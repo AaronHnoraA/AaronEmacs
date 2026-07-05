@@ -114,7 +114,6 @@ const BLOCK_MARK_NODES = new Set([
 ]);
 
 const CJK_TEXT_RE = /[\u2E80-\u2EFF\u3000-\u303F\u31C0-\u31EF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]+/g;
-const WIKILINK_RE = /\[\[([^\]\n]+)\]\]/g;
 const JUPYTER_LINK_RE = /\[([^\]\n]+)\]\(((?:file:(?:\/\/)?|\.{1,2}\/|\/|~\/)?[^)\n]*?\.ipynb(?:[@#][^)]+)?)\)/gi;
 type CjkLineRanges = Array<{ relFrom: number; relTo: number }>;
 type CjkLineCache = Map<number, { text: string; ranges: CjkLineRanges }>;
@@ -168,7 +167,6 @@ type LivePreviewToken =
   | { kind: "link-delimiter"; from: number; to: number; spanFrom: number; spanTo: number; linkClass: string }
   | { kind: "block-mark"; from: number; to: number; line: number }
   | { kind: "autolink"; from: number; to: number }
-  | { kind: "wikilink"; from: number; openTo: number; closeFrom: number; to: number }
   | { kind: "static"; from: number; to: number; cls: string }
   | { kind: "html-inline"; from: number; to: number; source: string };
 
@@ -244,7 +242,7 @@ function collectLivePreviewTokens(
   const codeRanges: Array<{ from: number; to: number }> = [];
 
   // Headings come from the syntax tree (never inside code), so they can run
-  // before the main walk. CJK/wikilink scanners are regex-based and must skip
+  // before the main walk. CJK/Jupyter-link scanners are regex-based and must skip
   // code spans, so they run AFTER the walk below has populated `codeRanges` —
   // this reuses the same walk rather than adding a second pass (perf-neutral).
   addHeadingMarkTokens(tokens, view.state, ranges, excludedRanges);
@@ -302,6 +300,16 @@ function collectLivePreviewTokens(
 
           const spanFrom = p.from;
           const spanTo = p.to;
+          // `[[title]]` is intentionally plain text. Lezer treats the inner
+          // `[title]` as a shortcut-reference Link even without a definition;
+          // suppress that stock false positive now that Aaronnote no longer
+          // supports MediaWiki-style links.
+          if (p.name === "Link"
+            && spanFrom > 0 && spanTo < doc.length
+            && doc.sliceString(spanFrom - 1, spanFrom) === "["
+            && doc.sliceString(spanTo, spanTo + 1) === "]") {
+            return false;
+          }
           const href = p.name === "Link" ? linkHrefFromSpan(view.state, spanFrom, spanTo) : "";
 
           // Empty-text anchor link [](#slug) — show the URL token as clickable text
@@ -373,7 +381,7 @@ function collectLivePreviewTokens(
   }
   const allExcluded = combineRanges(excludedRanges, codeRanges);
   addCjkTextTokens(tokens, doc, ranges, allExcluded, cjkLineCache);
-  addWikilinkTokens(tokens, doc, ranges, allExcluded);
+  addJupyterLinkTokens(tokens, doc, ranges, allExcluded);
   addHighlightTokens(tokens, doc, ranges, allExcluded, codeRanges);
 
   return tokens;
@@ -413,13 +421,6 @@ function buildDecorations(view: EditorView, tokens = collectLivePreviewTokens(vi
         pushMark(decos, token.to - 1, token.to, cls);
         break;
       }
-      case "wikilink": {
-        const inSpan = selectionIntersectsSpan(sel, token.from, token.to);
-        pushMark(decos, token.from, token.openTo, inSpan ? "syntax-hint" : "syntax-hidden");
-        pushMark(decos, token.closeFrom, token.to, inSpan ? "syntax-hint" : "syntax-hidden");
-        pushMark(decos, token.openTo, token.closeFrom, "cm-link-text cm-roam-link-text");
-        break;
-      }
       case "static":
         pushMark(decos, token.from, token.to, token.cls);
         break;
@@ -453,7 +454,6 @@ function selectionAffectingTokenKey(state: EditorState, tokens: readonly LivePre
         }
         break;
       case "autolink":
-      case "wikilink":
       case "html-inline":
         if (selectionIntersectsSpan(sel, token.from, token.to)) {
           keys.push(`${token.kind}:${token.from}:${token.to}`);
@@ -469,7 +469,7 @@ function selectionAffectingTokenKey(state: EditorState, tokens: readonly LivePre
   return keys.join("|");
 }
 
-function addWikilinkTokens(
+function addJupyterLinkTokens(
   tokens: LivePreviewToken[],
   doc: Text,
   ranges: readonly { from: number; to: number }[],
@@ -477,17 +477,7 @@ function addWikilinkTokens(
 ): void {
   for (const { from: visibleFrom, to: visibleTo } of ranges) {
     const text = doc.sliceString(visibleFrom, visibleTo);
-    WIKILINK_RE.lastIndex = 0;
     let match: RegExpExecArray | null;
-    while ((match = WIKILINK_RE.exec(text)) !== null) {
-      const from = visibleFrom + match.index;
-      const to = from + match[0].length;
-      if (rangeOverlapsAny(from, to, blockMathRanges)) continue;
-      const openTo = from + 2;
-      const closeFrom = to - 2;
-      tokens.push({ kind: "wikilink", from, openTo, closeFrom, to });
-    }
-
     JUPYTER_LINK_RE.lastIndex = 0;
     while ((match = JUPYTER_LINK_RE.exec(text)) !== null) {
       const href = String(match[2] || "").trim();

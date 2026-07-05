@@ -328,6 +328,115 @@ class InlineCommentWidget extends MeasuredWidget {
   ignoreEvent(): boolean { return false; }
 }
 
+function visualLineTextRight(line: HTMLElement, anchorRect: DOMRect, ignored: HTMLElement): number {
+  const doc = line.ownerDocument;
+  const win = doc.defaultView;
+  if (!win) return anchorRect.right;
+  const filter = {
+    acceptNode(node: Node): number {
+      if (!node.textContent?.trim()) return win.NodeFilter.FILTER_REJECT;
+      const parent = node.parentElement;
+      if (parent && ignored.contains(parent)) return win.NodeFilter.FILTER_REJECT;
+      return win.NodeFilter.FILTER_ACCEPT;
+    },
+  };
+  const walker = doc.createTreeWalker(line, win.NodeFilter.SHOW_TEXT, filter);
+  const range = doc.createRange();
+  const yPad = 3;
+  let right = anchorRect.right;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    range.selectNodeContents(node);
+    for (const rect of Array.from(range.getClientRects())) {
+      const sameVisualRow = rect.bottom >= anchorRect.top - yPad && rect.top <= anchorRect.bottom + yPad;
+      if (sameVisualRow) right = Math.max(right, rect.right);
+    }
+  }
+  range.detach();
+  return right;
+}
+
+/**
+ * `@@scomment [text]` — an always-visible side annotation. On wide layouts the
+ * card is absolutely positioned and therefore does not alter CM6's height map;
+ * CSS switches it back into flow on narrow layouts.
+ */
+class SideCommentWidget extends MeasuredWidget {
+  cmd: InlineCommand;
+
+  constructor(cmd: InlineCommand) {
+    super();
+    this.cmd = cmd;
+  }
+
+  protected measureKey(): string { return ""; }
+  protected get measuredBlock(): boolean { return false; }
+
+  eq(other: SideCommentWidget): boolean {
+    return this.cmd.context === other.cmd.context
+      && this.cmd.fullFrom === other.cmd.fullFrom
+      && this.cmd.fullTo === other.cmd.fullTo;
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement("span");
+    wrap.className = "inline-side-comment-widget inline-command-token";
+    wrap.dataset.cmSourceFrom = String(this.cmd.fullFrom);
+    wrap.dataset.cmSourceTo = String(this.cmd.fullTo);
+    wrap.dataset.cmOpenSource = "true";
+    wrap.setAttribute("role", "note");
+    wrap.setAttribute("aria-label", "Side comment");
+
+    const anchor = document.createElement("span");
+    anchor.className = "inline-side-comment-anchor";
+    anchor.setAttribute("aria-hidden", "true");
+
+    const connector = document.createElement("span");
+    connector.className = "inline-side-comment-connector";
+    connector.setAttribute("aria-hidden", "true");
+
+    const card = document.createElement("span");
+    card.className = "inline-side-comment-card";
+    card.innerHTML = inlineTodoBodyHTML(this.cmd.context.trim());
+
+    anchor.append(connector);
+    wrap.append(anchor, card);
+
+    view.requestMeasure({
+      read: () => {
+        if (!wrap.isConnected) return null;
+        const line = wrap.closest(".cm-line") as HTMLElement | null;
+        const scroll = wrap.closest(".cm-scroller") as HTMLElement | null;
+        const lineRect = line?.getBoundingClientRect();
+        const scrollRect = scroll?.getBoundingClientRect() ?? view.dom.getBoundingClientRect();
+        const wrapRect = wrap.getBoundingClientRect();
+        const anchorRect = anchor.getBoundingClientRect();
+        const connectorRect = connector.getBoundingClientRect();
+        const cardRect = card.getBoundingClientRect();
+        if (!line || !lineRect || !cardRect.width || !anchorRect.width) return null;
+
+        const gap = 14;
+        const minLeft = anchorRect.right + gap;
+        const preferredRailLeft = scrollRect.right - cardRect.width - 120;
+        const textSafeLeft = visualLineTextRight(line, anchorRect, card) + gap;
+        const cardLeft = Math.max(minLeft, preferredRailLeft, textSafeLeft);
+        return {
+          cardLeft: cardLeft - wrapRect.left,
+          connectorWidth: Math.max(12, cardLeft - connectorRect.left),
+        };
+      },
+      write: (placement) => {
+        if (!placement) return;
+        wrap.style.setProperty("--side-comment-card-left", `${Math.round(placement.cardLeft)}px`);
+        wrap.style.setProperty("--side-comment-connector-width", `${Math.round(placement.connectorWidth)}px`);
+      },
+    });
+
+    return wrap;
+  }
+
+  ignoreEvent(): boolean { return false; }
+}
+
 // ---------------------------------------------------------------------------
 // ViewPlugin
 // ---------------------------------------------------------------------------
@@ -377,6 +486,13 @@ function buildInlineCommandDecos(
         decos.push(
           Decoration.replace({
             widget: new InlineCommentWidget({ ...cmd, fullFrom: from, fullTo: to }),
+          }).range(from, to),
+        );
+      }
+      if (cmd.name === "scomment" && !cursorInside) {
+        decos.push(
+          Decoration.replace({
+            widget: new SideCommentWidget({ ...cmd, fullFrom: from, fullTo: to }),
           }).range(from, to),
         );
       }

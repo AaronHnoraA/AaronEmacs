@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // @ts-ignore The converter is a Node ESM module outside the TS app graph.
-import { aaronnoteMarkdownToLatex, applyLatexTemplate, escapeLatexTitle, latexMacrosPreamble, writeLatexExport } from "../server/lib/latex-export.mjs";
+import { aaronnoteMarkdownToLatex, applyLatexTemplate, escapeLatexTitle, latexMacrosPreamble, latexSideCommentPreamble, writeLatexExport } from "../server/lib/latex-export.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
 import { configure, exportLatex, latexExportAgentStatus, latexExportDefaults, listLatexTemplates, setLatexExportAgent } from "../server/lib/index.mjs";
 
@@ -207,17 +207,50 @@ describe("LaTeX export", () => {
     expect(result.body).not.toContain("hidden aside");
   });
 
+  test("converts @@scomment and reports the required LaTeX feature", () => {
+    const result = aaronnoteMarkdownToLatex([
+      "# Main",
+      "",
+      String.raw`Visible @@scomment [Check **non-degenerate** \(u,v,w\).] text.`,
+      "",
+    ].join("\n"));
+
+    expect(result.body).toContain(String.raw`\sidecomment{Check \textbf{non-degenerate} \(u,v,w\).}`);
+    expect(result.body).toContain("Visible");
+    expect(result.body).toContain("text.");
+    expect(result.features).toEqual({ usesSideComment: true });
+  });
+
+  test("injects the side-comment package and macro only when needed", () => {
+    const enabled = latexSideCommentPreamble(true);
+    expect(enabled).toContain("todonotes");
+    expect(enabled).toContain("\\providecommand{\\sidecomment}");
+    expect(enabled).toContain("fancyline");
+    expect(latexSideCommentPreamble(false)).toBe("");
+
+    const plain = aaronnoteMarkdownToLatex("Plain body.");
+    expect(plain.features).toEqual({ usesSideComment: false });
+    const latex = applyLatexTemplate("\\documentclass{article}\n\\begin{document}\n{{body}}\n\\end{document}", {
+      macros: enabled,
+      body: String.raw`\sidecomment{note}`,
+    });
+    expect(latex.indexOf("todonotes")).toBeLessThan(latex.indexOf("\\begin{document}"));
+  });
+
   test("writes export and remembers the last path per note", async () => {
     const { notes } = await setupRoot();
     const note = join(notes, "a.md");
     const out = join(notes, "out", "a.tex");
-    await writeFile(note, "#+begin meta\ntitle: A\n#+end meta\n\n# A\n\nBody with \\(x\\).\n", "utf8");
+    await writeFile(note, "#+begin meta\ntitle: A\n#+end meta\n\n# A\n\nBody with \\(x\\). @@scomment [Review \\(x\\).]\n", "utf8");
 
     const exported = await exportLatex({ file: note, outputPath: out }) as { ok?: boolean; file?: string };
     expect(exported.ok).toBe(true);
     expect(exported.file).toBe(out);
     // Title precedence: explicit meta title ("A") wins over the filename ("a").
-    expect(await readFile(out, "utf8")).toContain("\\title{ A }");
+    const tex = await readFile(out, "utf8");
+    expect(tex).toContain("\\title{ A }");
+    expect(tex).toContain("\\providecommand{\\sidecomment}");
+    expect(tex).toContain("\\sidecomment{Review \\(x\\).}");
 
     const defaults = await latexExportDefaults({ file: note }) as { outputPath?: string };
     expect(defaults.outputPath).toBe(out);

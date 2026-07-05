@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
+import { scanInlineCommands } from "../../shared/command-syntax.mjs";
 
 const DEFAULT_TEMPLATE = `\\documentclass[11pt]{article}
 \\usepackage[a4paper,margin=1in]{geometry}
@@ -45,12 +46,6 @@ const ENV_MAP = new Map([
 ]);
 
 const COMMENT_BLOCKS = new Set(["comment", "summary", "note", "important", "warning", "attention"]);
-const TODO_LINE_RE = /^\s*@@todo(?:\([^)\n]*\))?\s*(?:\[[^\]\n]*\](?:\s*\{[^}\n]*\})?|[^\n]*)\s*$/i;
-const TODO_INLINE_RE = /@@todo(?:\([^)\n]*\))?\s*(?:\[[^\]\n]*\](?:\s*\{[^}\n]*\})?|[^\n]*)/gi;
-// `@@comment [text]{args}` is a private annotation — LaTeX export ignores it
-// entirely (no bare/bracket-less form, unlike @@todo).
-const COMMENT_LINE_RE = /^\s*@@comment(?:\([^)\n]*\))?\s*\[[^\]\n]*\](?:\s*\{[^}\n]*\})?\s*$/i;
-const COMMENT_INLINE_RE = /@@comment(?:\([^)\n]*\))?\s*\[[^\]\n]*\](?:\s*\{[^}\n]*\})?/gi;
 const DISPLAY_MATH_OPEN_RE = /^\s*(?:\\\[|\$\$)\s*$/;
 const DISPLAY_MATH_CLOSE_RE = /^\s*(?:\\\]|\$\$)\s*$/;
 
@@ -98,7 +93,10 @@ function inlineTokenAt(source, pos) {
 }
 
 function convertInline(text) {
-  const source = String(text ?? "").replace(TODO_INLINE_RE, "").replace(COMMENT_INLINE_RE, "").trim();
+  const source = String(text ?? "").trim();
+  const annotations = scanInlineCommands(source)
+    .filter((command) => command.name === "todo" || command.name === "comment" || command.name === "scomment");
+  let annotationIndex = 0;
   let latex = "";
   let plain = "";
   const flushPlain = () => {
@@ -106,6 +104,17 @@ function convertInline(text) {
     plain = "";
   };
   for (let pos = 0; pos < source.length;) {
+    while (annotationIndex < annotations.length && annotations[annotationIndex].fullTo <= pos) annotationIndex++;
+    const annotation = annotations[annotationIndex];
+    if (annotation?.fullFrom === pos) {
+      flushPlain();
+      if (annotation.name === "scomment") {
+        latex += `\\sidecomment{${convertInline(annotation.context)}}`;
+      }
+      pos = annotation.fullTo;
+      annotationIndex++;
+      continue;
+    }
     const token = inlineTokenAt(source, pos);
     if (!token) {
       plain += source[pos];
@@ -118,6 +127,16 @@ function convertInline(text) {
   }
   flushPlain();
   return latex;
+}
+
+function isPrivateAnnotationLine(line) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) return false;
+  const command = scanInlineCommands(trimmed)[0];
+  return Boolean(command
+    && (command.name === "todo" || command.name === "comment")
+    && command.fullFrom === 0
+    && command.fullTo === trimmed.length);
 }
 
 // Titles, headings, and environment labels are LaTeX moving arguments, but
@@ -361,7 +380,7 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
       continue;
     }
 
-    if (TODO_LINE_RE.test(line) || COMMENT_LINE_RE.test(line)) {
+    if (isPrivateAnnotationLine(line)) {
       flushParagraph(out, paragraph);
       closeList();
       continue;
@@ -376,9 +395,13 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
   if (inDisplayMath) throw new Error(`Unclosed display math opened on line ${displayMathLine}`);
   if (envStack.length) throw new Error(`Unclosed Aaronnote block: #+begin ${envStack.at(-1)}`);
 
+  const body = out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
   return {
     meta,
-    body: out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n",
+    body,
+    features: {
+      usesSideComment: body.includes("\\sidecomment{"),
+    },
   };
 }
 
@@ -413,6 +436,19 @@ export function latexMacrosPreamble(macros) {
     lines.push(`\\renewcommand{${rawName}}${args}{${body}}`);
   }
   return lines.length > 1 ? `${lines.join("\n")}\n` : "";
+}
+
+export function latexSideCommentPreamble(enabled) {
+  if (!enabled) return "";
+  return String.raw`% Aaronnote side comments
+\makeatletter
+\@ifpackageloaded{todonotes}{}{\usepackage[textsize=footnotesize]{todonotes}}
+\makeatother
+\providecolor{AaronSideCommentBackground}{HTML}{A94700}
+\providecommand{\sidecomment}[1]{%
+  \todo[fancyline,color=AaronSideCommentBackground,textcolor=white,linecolor=AaronSideCommentBackground,bordercolor=white]{#1}%
+}
+`;
 }
 
 export async function readLatexTemplate(templatesRoot, templatePath = "") {

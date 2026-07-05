@@ -186,11 +186,15 @@ maybeDescribe("cm6 kernel: getMarkdown / setMarkdown", () => {
     cleanup();
   });
 
-  test("does not render wikilinks inside a fenced code block", () => {
-    const md = "```\nsee [[Note]] ref\n```\n";
+  test("keeps double-bracket text literal and non-clickable", () => {
+    const md = "see [[Note Title]] ref";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
     expect(document.querySelector(".cm-roam-link-text")).toBeNull();
+    expect(document.querySelector(".cm-link-text")).toBeNull();
+    expect(markdownHrefAt(editor.view.state, md.indexOf("Note"))).toBeNull();
+    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
+      .toContain("[[Note Title]]");
     cleanup();
   });
 
@@ -492,18 +496,16 @@ y^2
     cleanup();
   });
 
-  test("marks unresolved wikilinks and bare roam links", () => {
-    const md = "Known [[Density Operator]], missing [[Ghost Note]], math \\([[X]] \\), and roam://bad-id.";
+  test("does not feed double-bracket text to roam link diagnostics", () => {
+    const md = "Plain [[Ghost Note]] and math \\([[X]] \\).";
     const { editor, cleanup } = mountCM6(md);
 
-    editor.view.dispatch({ effects: setKnownRoamRefs.of(["Density Operator"]) });
+    editor.view.dispatch({ effects: setKnownRoamRefs.of([]) });
 
     const broken = Array.from(document.querySelectorAll<HTMLElement>(".cm-roam-link-broken"))
       .map((el) => el.textContent);
-    expect(broken).toContain("Ghost Note");
-    expect(broken).toContain("roam://bad-id");
     expect(broken).not.toContain("X");
-    expect(broken).not.toContain("Density Operator");
+    expect(broken).not.toContain("Ghost Note");
     cleanup();
   });
 
@@ -2814,6 +2816,19 @@ maybeDescribe("cm6 kernel: README parity", () => {
     expect(document.querySelectorAll(".syntax-hidden").length).toBeGreaterThan(0);
     const contentDOM = (editor.view as unknown as { contentDOM: HTMLElement }).contentDOM;
     expect(visibleText(contentDOM)).not.toContain("*");
+    cleanup();
+  });
+
+  test.each([
+    "_[[_]",
+    "[[*]*",
+    "ordinary [unfinished _label] text",
+  ])("does not let incomplete bracket text change emphasis resolution for %s", (md) => {
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    expect(document.querySelector(".cm-em")).toBeNull();
+    expect(document.querySelector(".cm-strong")).toBeNull();
     cleanup();
   });
 });

@@ -1,3 +1,5 @@
+import { scanInlineCommands } from "./command-syntax.mjs";
+
 const TECHNICAL_ORG_ENV_KINDS = new Set([
   "src",
   "source",
@@ -18,6 +20,7 @@ const TECHNICAL_ORG_ENV_KINDS = new Set([
 const PROSE_INLINE_COMMANDS = new Set([
   "todo",
   "comment",
+  "scomment",
   "part",
   "chapter",
   "section",
@@ -145,49 +148,14 @@ function maskRegex(text, chars, re) {
   }
 }
 
-function findSingleLineClose(text, open, closeChar) {
-  for (let i = open + 1; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === "\n" || ch === "\r") return -1;
-    if (ch === closeChar) return i;
-  }
-  return -1;
-}
-
-function trailingAttrsEnd(text, pos) {
-  let i = pos;
-  while (text[i] === " " || text[i] === "\t") i++;
-  if (text[i] !== "{") return pos;
-  const close = findSingleLineClose(text, i, "}");
-  return close < 0 ? pos : close + 1;
-}
-
 function maskInlineCommands(text, chars) {
-  const tagRe = /@@tag\[/gi;
-  let tagMatch;
-  while ((tagMatch = tagRe.exec(text)) !== null) {
-    const open = tagRe.lastIndex - 1;
-    const close = findSingleLineClose(text, open, "]");
-    if (close < 0) continue;
-    maskRange(chars, tagMatch.index, close + 1);
-    tagRe.lastIndex = close + 1;
-  }
-
-  const re = /@@([A-Za-z][\w-]*)(?:\(([^)\n]*)\))?[ \t]+\[/g;
-  let match;
-  while ((match = re.exec(text)) !== null) {
-    const name = match[1].toLowerCase();
-    const open = re.lastIndex - 1;
-    const close = findSingleLineClose(text, open, "]");
-    if (close < 0) continue;
-    const fullTo = trailingAttrsEnd(text, close + 1);
-    if (PROSE_INLINE_COMMANDS.has(name)) {
-      maskRange(chars, match.index, open + 1);
-      maskRange(chars, close, fullTo);
+  for (const command of scanInlineCommands(text)) {
+    if (PROSE_INLINE_COMMANDS.has(command.name)) {
+      maskRange(chars, command.fullFrom, command.contextFrom);
+      maskRange(chars, command.contextTo, command.fullTo);
     } else {
-      maskRange(chars, match.index, fullTo);
+      maskRange(chars, command.fullFrom, command.fullTo);
     }
-    re.lastIndex = fullTo;
   }
 }
 

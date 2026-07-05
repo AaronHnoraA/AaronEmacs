@@ -67,11 +67,10 @@ describe("server note refs", () => {
       "[path](project/note.md#section)",
       "[roam](roam://node-id#section)",
       "[wiki](unrelated-node#anchor)",
-      "[[Wiki Note]]",
     ].join("\n"));
     expect(refs).not.toContain("project/note.md");
     expect(refs).not.toContain("project/note.md#section");
-    expect(refs).toEqual(expect.arrayContaining(["node-id", "unrelated-node", "Wiki Note"]));
+    expect(refs).toEqual(expect.arrayContaining(["node-id", "unrelated-node"]));
   });
 
   test("extracts roam core tag and DOM link targets", () => {
@@ -93,119 +92,8 @@ describe("server note refs", () => {
     expect(refs).not.toContain("./");
   });
 
-  test("extracts wiki links as note refs", () => {
-    expect(refsFromContent("See [[ Density Operator ]] and [[Alias A]].")).toEqual([
-      "Density Operator",
-      "Alias A",
-    ]);
-  });
-
-  test("resolves wiki links by note title and aliases during scan", async () => {
-    const root = await setupRoot("aaronnote-refs-");
-    try {
-      await writeFile(join(root, "target.md"), [
-        "---",
-        "id: target-id",
-        "aliases:",
-        "  - Alias A",
-        "---",
-        "# Density Operator",
-        "",
-      ].join("\n"), "utf8");
-      await writeFile(join(root, "source.md"), [
-        "---",
-        "id: source-id",
-        "---",
-        "# Source",
-        "",
-        "See [[Density Operator]] and [[Alias A]].",
-        "",
-      ].join("\n"), "utf8");
-
-      const payload = await notesIndexPayload();
-      const source = payload.notes.find((note: { id: string }) => note.id === "source-id");
-      const target = payload.notes.find((note: { id: string }) => note.id === "target-id");
-      expect(source.refs).toEqual(["target-id"]);
-      expect(target.backlinks).toEqual(["source-id"]);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("keeps inline aliases with spaces intact during scan", async () => {
-    const root = await setupRoot("aaronnote-refs-");
-    try {
-      await writeFile(join(root, "target.md"), [
-        "---",
-        "id: target-id",
-        "aliases: density matrix",
-        "---",
-        "# Density Operator",
-        "",
-      ].join("\n"), "utf8");
-      await writeFile(join(root, "source.md"), [
-        "---",
-        "id: source-id",
-        "---",
-        "# Source",
-        "",
-        "See [[density matrix]].",
-        "",
-      ].join("\n"), "utf8");
-
-      const payload = await notesIndexPayload();
-      const source = payload.notes.find((note: { id: string }) => note.id === "source-id");
-      const target = payload.notes.find((note: { id: string }) => note.id === "target-id");
-      expect(target.aliases).toEqual(["density matrix"]);
-      expect(source.refs).toEqual(["target-id"]);
-      expect(target.backlinks).toEqual(["source-id"]);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("keeps raw unresolved refs so a later note can resolve them", async () => {
-    const root = await setupRoot("aaronnote-refs-");
-    try {
-      await writeFile(join(root, "source.md"), [
-        "---",
-        "id: source-id",
-        "---",
-        "# Source",
-        "",
-        "See [[Future Target]].",
-        "",
-      ].join("\n"), "utf8");
-
-      const first = await notesIndexPayload();
-      const firstSource = first.notes.find((note: { id: string }) => note.id === "source-id");
-      expect(firstSource.refs).toEqual([]);
-
-      const targetFile = join(root, "target.md");
-      const saved = await saveNote({
-        file: targetFile,
-        content: [
-          "---",
-          "id: target-id",
-          "---",
-          "# Future Target",
-          "",
-        ].join("\n"),
-        clientId: "test",
-        seq: 1,
-        force: true,
-        refresh: "deferred",
-      });
-      expect((saved as { ok?: boolean }).ok).toBe(true);
-
-      const second = await notesIndexPayload();
-      const source = second.notes.find((note: { id: string }) => note.id === "source-id");
-      const target = second.notes.find((note: { id: string }) => note.id === "target-id");
-      expect(source.refs).toEqual(["target-id"]);
-      expect(target.backlinks).toEqual(["source-id"]);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
+  test("treats double-bracket text as plain prose, not a note ref", () => {
+    expect(refsFromContent("See [[ Density Operator ]] and [[Alias A]].")).toEqual([]);
   });
 
   test("suggests paths from relative, parent, and roam-root prefixes without hidden entries", async () => {
@@ -373,7 +261,7 @@ describe("server note refs", () => {
         "---",
         "# Source",
         "",
-        "See [[Alias A]].",
+        "See [Alias A](roam://target-id).",
         "",
       ].join("\n"), "utf8");
 
@@ -455,7 +343,7 @@ describe("server note refs", () => {
         "---",
         "# Visible",
         "",
-        "See [[Hidden]].",
+        "See [Hidden](roam://hidden-id).",
         "",
       ].join("\n"), "utf8");
       await writeFile(join(root, "hidden.md"), [

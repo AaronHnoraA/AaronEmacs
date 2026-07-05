@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Side comment
+# key: scomment
+# group: Aaronnote blocks
+# --
+@@scomment [$1] $0

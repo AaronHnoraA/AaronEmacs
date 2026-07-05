@@ -274,8 +274,6 @@ export function markdownHrefAt(state: EditorState, pos: number): string | null {
   const line = state.doc.lineAt(clamped);
   if (positionInsideAnyRange(clamped, scanInlineMathRanges(line.text, line.from))) return null;
 
-  const wikilink = wikilinkHrefAt(state, pos);
-  if (wikilink) return wikilink;
   const positions = clamped > 0 ? [clamped, clamped - 1] : [clamped];
 
   for (const targetPos of positions) {
@@ -306,22 +304,6 @@ export function markdownHrefAt(state: EditorState, pos: number): string | null {
   }
 
   return markdownHrefFromLineAt(state, clamped);
-}
-
-function wikilinkHrefAt(state: EditorState, pos: number): string | null {
-  const line = state.doc.lineAt(Math.max(0, Math.min(pos, state.doc.length)));
-  const text = line.text;
-  const re = /\[\[([^\]\n]+)\]\]/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(text)) !== null) {
-    const from = line.from + match.index;
-    const to = from + match[0].length;
-    if (pos < from || pos > to) continue;
-    const ref = match[1]?.trim();
-    if (!ref) return null;
-    return `roam://${encodeURIComponent(ref)}`;
-  }
-  return null;
 }
 
 function linkOpensNewWindow(href: string, event: MouseEvent): boolean {

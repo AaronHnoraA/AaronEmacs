@@ -3512,7 +3512,6 @@ function markdownInlineLinkTargetAtCursor(): {
 function completionDetail(snippet: SnippetSummary): string {
   const group = String(snippet.group || "");
   if (group === "path") return snippet.source || "";
-  if (group === "wikilink") return snippet.source ? `[[${snippet.source}]]` : "wikilink";
   if (group === "roam") return snippet.body ? `roam -> ${snippet.body}` : "roam";
   if (group === "tag") return snippet.source ? `inline tag in ${snippet.source}` : "inline tag";
   if (group === "dom") return snippet.source ? `DOM target in ${snippet.source}` : "DOM target";
@@ -3522,7 +3521,7 @@ function completionDetail(snippet: SnippetSummary): string {
 function completionPreviewText(snippet: SnippetSummary): string {
   const group = String(snippet.group || "");
   if (group === "path") return "";
-  if (group === "wikilink" || group === "roam" || group === "tag" || group === "dom") {
+  if (group === "roam" || group === "tag" || group === "dom") {
     return String(snippet.source || snippet.body || "").replace(/\s+/g, " ").trim().slice(0, 96);
   }
   return String(snippet.body || "").replace(/\s+/g, " ").trim().slice(0, 96);
@@ -3537,11 +3536,6 @@ function pathCompletionPrefix(before: string): string {
 
 function roamCompletionPrefix(before: string): string | null {
   const match = before.match(/(?:^|[\s([{"'=])roam:\/\/([^\s\])}"'`<>]*)$/i);
-  return match ? match[1] ?? "" : null;
-}
-
-function wikilinkCompletionPrefix(before: string): string | null {
-  const match = before.match(/(?:^|[\s([{"'=])\[\[([^\]\n]*)$/);
   return match ? match[1] ?? "" : null;
 }
 
@@ -3716,29 +3710,6 @@ async function matchingRoamCompletions(prefix: string): Promise<SnippetSummary[]
       group: "roam",
       source: note.path || note.id,
     }));
-  } catch {
-    return [];
-  }
-}
-
-async function matchingWikilinkCompletions(prefix: string): Promise<SnippetSummary[]> {
-  const needle = prefix.trim().toLowerCase();
-  try {
-    const result = await api.completions.roam(needle);
-    return (result.notes ?? []).map((note) => {
-      const label = String(note.title || note.path || note.id || "Untitled")
-        .replace(/[\r\n\]]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim() || "Untitled";
-      return {
-        key: label,
-        name: label,
-        body: `${label}]]`,
-        mode: "markdown-mode",
-        group: "wikilink",
-        source: note.path || "",
-      };
-    });
   } catch {
     return [];
   }
@@ -4081,19 +4052,6 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
       inlineTagPrefix.length,
       ctx.rect,
       () => matchingInlineTagCompletions(inlineTagPrefix),
-    );
-    return;
-  }
-
-  const wikilinkPrefix = wikilinkCompletionPrefix(ctx.before);
-  if (wikilinkPrefix !== null) {
-    const renderPrefix = `[[${wikilinkPrefix}`;
-    scheduleAsyncCompletion(
-      `wikilink:${wikilinkPrefix}`,
-      renderPrefix,
-      wikilinkPrefix.length,
-      ctx.rect,
-      () => matchingWikilinkCompletions(wikilinkPrefix),
     );
     return;
   }

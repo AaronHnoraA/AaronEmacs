@@ -29,6 +29,14 @@ describe("Aaronnote prose mask", () => {
     expect(masked).not.toContain("k: v");
   });
 
+  test("spell-checks @@scomment prose while masking its command shell", () => {
+    const md = "@@scomment [Clarify the recieve condition.]\n";
+    const masked = maskAaronnoteProse(md);
+    expect(masked.length).toBe(md.length);
+    expect(masked).toContain("Clarify the recieve condition.");
+    expect(masked).not.toContain("@@scomment");
+  });
+
   test("masks math and fenced code bodies", () => {
     const md = [
       "Check this prose.",
