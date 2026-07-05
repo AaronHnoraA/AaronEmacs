@@ -13,6 +13,7 @@
 import { Compartment, EditorSelection, EditorState, Transaction, type Extension, type Text as CMText } from "@codemirror/state";
 import {
   EditorView,
+  ViewPlugin,
   keymap,
   highlightActiveLine,
   rectangularSelection,
@@ -456,7 +457,13 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
   let activeDocumentKey = currentDocumentKey();
   const createState = (doc: string): EditorState => EditorState.create({
     doc,
-    extensions: buildExtensions(options, previewCompartment, () => inSource, rememberHeadingFolds),
+    extensions: buildExtensions(
+      options,
+      previewCompartment,
+      () => inSource,
+      rememberHeadingFolds,
+      "standalone",
+    ),
   });
 
   const view = new EditorView({
@@ -980,23 +987,91 @@ export function wrapSelectedMarkdownInput(view: EditorView, _from: number, _to: 
   return true;
 }
 
+export type AaronnoteMarkdownExtensionMode = "standalone" | "embedded";
+
+type EmbeddedSourceController = {
+  sourceMode: boolean;
+  setSourceMode(sourceMode: boolean): void;
+};
+
+const embeddedSourceControllers = new WeakMap<EditorView, EmbeddedSourceController>();
+
+export function toggleAaronnoteMarkdownSource(view: EditorView): boolean {
+  const controller = embeddedSourceControllers.get(view);
+  if (!controller) return false;
+  controller.setSourceMode(!controller.sourceMode);
+  return true;
+}
+
+export function isAaronnoteMarkdownSource(view: EditorView): boolean {
+  return embeddedSourceControllers.get(view)?.sourceMode ?? false;
+}
+
+export function createAaronnoteMarkdownExtensions(
+  options: EditorOptions = {},
+): Extension {
+  const previewCompartment = new Compartment();
+  let sourceMode = false;
+  let activeView: EditorView | null = null;
+  const controller: EmbeddedSourceController = {
+    get sourceMode() {
+      return sourceMode;
+    },
+    setSourceMode(nextSourceMode: boolean): void {
+      if (sourceMode === nextSourceMode) return;
+      sourceMode = nextSourceMode;
+      activeView?.dispatch({
+        effects: previewCompartment.reconfigure(sourceMode ? [] : previewExtensions()),
+      });
+    },
+  };
+  const lifecycle = ViewPlugin.fromClass(class {
+    constructor(view: EditorView) {
+      activeView = view;
+      embeddedSourceControllers.set(view, controller);
+    }
+
+    destroy(): void {
+      if (activeView) embeddedSourceControllers.delete(activeView);
+      activeView = null;
+    }
+  });
+  return [
+    EditorView.editorAttributes.of({ class: "aaronnote-embedded-markdown" }),
+    buildExtensions(
+      options,
+      previewCompartment,
+      () => sourceMode,
+      () => undefined,
+      "embedded",
+    ),
+    lifecycle,
+  ];
+}
+
 function buildExtensions(
   options: EditorOptions,
   previewCompartment: Compartment,
   isSourceMode: () => boolean,
   onFoldStateChanged: () => void,
-) {
+  mode: AaronnoteMarkdownExtensionMode,
+): Extension[] {
+  const standalone = mode === "standalone";
   return [
     EditorState.allowMultipleSelections.of(true),
-    EditorState.readOnly.of(!!options.readOnly),
-    EditorView.editable.of(!options.readOnly),
+    ...(standalone ? [
+      EditorState.readOnly.of(!!options.readOnly),
+      EditorView.editable.of(!options.readOnly),
+    ] : []),
     EditorView.clickAddsSelectionRange.of((event) => event.altKey || event.metaKey || event.ctrlKey),
-    drawSelection({ cursorBlinkRate: -1 }),
-    history({ minDepth: 200, newGroupDelay: 500 }),
+    ...(standalone ? [
+      drawSelection({ cursorBlinkRate: -1 }),
+      history({ minDepth: 200, newGroupDelay: 500 }),
+    ] : []),
     vscodeCloseBrackets(),
     closeBrackets(),
     EditorView.inputHandler.of(wrapSelectedMarkdownInput),
-    rectangularSelection(),
+    ...(standalone ? [rectangularSelection()] : []),
     keymap.of([
       ...vscodeDeleteBracketPairKeymap,
       { key: "Enter", run: (view) => tableEnterSameColumn(view) || exitEmptyMarkdownBlock(view) || continueMarkdownBlock(view) },
@@ -1006,8 +1081,8 @@ function buildExtensions(
       { key: "Mod-d", run: selectNextMarkdownOccurrence },
       { key: "Mod-Shift-z", run: cmRedo },
       { key: "Meta-Shift-z", run: cmRedo },
-      ...defaultKeymap,
-      ...historyKeymap,
+      ...(standalone ? defaultKeymap : []),
+      ...(standalone ? historyKeymap : []),
     ]),
     markdown({ base: markdownLanguage, extensions: [nestingAwareLinkExtension] }),
     highlightActiveLine(),

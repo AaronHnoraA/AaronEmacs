@@ -13,6 +13,21 @@ release
 dist-ssr
 *.local
 
+# Aaronnote-owned Jupyter runtime state.
+jupyter/.venv
+jupyter/.jupyter
+jupyter/labextension/lib
+jupyter/labextension/tsconfig.tsbuildinfo
+jupyter/labextension/node_modules
+jupyter/labextension/style/aaronnote-embedded.css
+.ipynb_checkpoints/
+.virtual_documents/
+.yarn/
+.yarnrc.yml
+yarn.lock
+.pnp.cjs
+.pnp.loader.mjs
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

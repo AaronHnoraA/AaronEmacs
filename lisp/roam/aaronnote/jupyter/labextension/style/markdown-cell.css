@@ -1,0 +1,160 @@
+.aaronnote-jupyter-source-hidden {
+  display: none !important;
+}
+
+.jp-MarkdownCell.aaronnote-jupyter-mdcell-active .jp-InputArea-editor,
+.jp-Cell.aaronnote-jupyter-mdcell-active .jp-InputArea-editor {
+  background: transparent;
+  border: 0;
+  display: block !important;
+  flex: 1 1 auto;
+  padding: 0;
+}
+
+.jp-MarkdownCell.aaronnote-jupyter-mdcell-active .jp-Cell-inputWrapper {
+  display: block !important;
+}
+
+.jp-MarkdownCell.aaronnote-jupyter-mdcell-active .jp-Cell-outputWrapper,
+.jp-MarkdownCell.aaronnote-jupyter-mdcell-active .jp-MarkdownOutput {
+  display: none !important;
+}
+
+.aaronnote-jupyter-mdcell-host {
+  --aaron-paper: var(--jp-layout-color0, #ffffff);
+  --aaron-paper-soft: var(--jp-layout-color1, #f5f6f8);
+  --aaron-ink: var(--jp-content-font-color1, #1f2328);
+  --aaron-muted: var(--jp-content-font-color2, #59636e);
+  --aaron-faint: var(--jp-border-color1, #d0d7de);
+  --aaron-accent: var(--jp-brand-color1, #0969da);
+  --aaron-accent-2: #7c3aed;
+  --aaron-link: var(--jp-content-link-color, #0969da);
+  color: var(--aaron-ink);
+  display: block;
+  min-height: 34px;
+  padding: 2px 0;
+}
+
+.jp-FileEditor.aaronnote-jupyter-document-active {
+  overflow: hidden;
+}
+
+.aaronnote-jupyter-document-host {
+  background: var(--jp-layout-color0, #ffffff);
+  box-sizing: border-box;
+  height: 100%;
+  overflow: auto;
+  padding: 18px clamp(16px, 6vw, 72px);
+  width: 100%;
+}
+
+.aaronnote-jupyter-document-host .typora-web-wrap,
+.aaronnote-jupyter-document-host .typora-web-editor-host,
+.aaronnote-jupyter-document-host .cm-editor {
+  min-height: 100%;
+}
+
+.aaronnote-jupyter-document-host .cm-editor {
+  background: transparent;
+  font-family: var(--jp-content-font-family);
+  font-size: var(--jp-content-font-size1);
+  line-height: 1.65;
+}
+
+.aaronnote-jupyter-document-host .cm-scroller {
+  overflow: visible;
+}
+
+.aaronnote-jupyter-document-host .cm-content {
+  caret-color: var(--jp-brand-color1);
+  margin: 0 auto;
+  max-width: 860px;
+  padding: 0 0 40vh;
+}
+
+.aaronnote-jupyter-mdcell-host .typora-web-wrap,
+.aaronnote-jupyter-mdcell-host .typora-web-editor-host {
+  min-height: inherit;
+}
+
+.aaronnote-jupyter-mdcell-host .cm-editor {
+  background: var(--aaron-paper);
+  border: 1px solid color-mix(in srgb, var(--aaron-accent), transparent 72%);
+  border-radius: 6px;
+  color: var(--aaron-ink);
+  font-family: var(--jp-content-font-family);
+  font-size: var(--jp-content-font-size1);
+  line-height: 1.58;
+  min-height: 34px;
+  outline: none;
+}
+
+.aaronnote-jupyter-mdcell-host .cm-editor.cm-focused {
+  border-color: color-mix(in srgb, var(--aaron-accent), transparent 34%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--aaron-accent), transparent 88%);
+}
+
+.aaronnote-jupyter-mdcell-host .cm-scroller {
+  font-family: inherit;
+  overflow: visible;
+}
+
+.aaronnote-jupyter-mdcell-host .cm-content {
+  caret-color: var(--aaron-accent);
+  min-height: 28px;
+  padding: 8px 12px;
+}
+
+.aaronnote-jupyter-mdcell-host .cm-line {
+  padding: 0;
+}
+
+.aaronnote-jupyter-mdcell-host .cm-activeLine,
+.aaronnote-jupyter-mdcell-host .cm-activeLineGutter {
+  background: transparent;
+}
+
+.aaronnote-jupyter-mdcell-host .cm-selectionBackground,
+.aaronnote-jupyter-mdcell-host .cm-content ::selection {
+  background: color-mix(in srgb, var(--aaron-accent), transparent 78%);
+}
+
+.aaronnote-jupyter-mdcell-host .cm-md-h1,
+.aaronnote-jupyter-mdcell-host .cm-md-h2,
+.aaronnote-jupyter-mdcell-host .cm-md-h3,
+.aaronnote-jupyter-mdcell-host .aaronnote-section-heading {
+  font-weight: 700;
+}
+
+.aaronnote-jupyter-mdcell-host .cm-md-h1 {
+  font-size: 1.45em;
+}
+
+.aaronnote-jupyter-mdcell-host .cm-md-h2 {
+  font-size: 1.25em;
+}
+
+.aaronnote-jupyter-mdcell-host .cm-md-h3 {
+  font-size: 1.12em;
+}
+
+.aaronnote-jupyter-mdcell-host code,
+.aaronnote-jupyter-mdcell-host .cm-inline-code,
+.aaronnote-jupyter-mdcell-host .cm-monospace {
+  background: color-mix(in srgb, var(--aaron-paper-soft), var(--aaron-accent) 7%);
+  border-radius: 4px;
+  font-family: var(--jp-code-font-family);
+  padding: 0.08em 0.28em;
+}
+
+.aaronnote-jupyter-mdcell-host blockquote {
+  border-left: 3px solid color-mix(in srgb, var(--aaron-accent), transparent 45%);
+  color: var(--aaron-muted);
+  margin: 0.3em 0;
+  padding-left: 0.8em;
+}
+
+.aaronnote-jupyter-mdcell-host .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}

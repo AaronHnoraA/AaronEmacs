@@ -1,5 +1,5 @@
 import katex from "katex";
-import katexCssUrl from "katex/dist/katex.min.css?url";
+import katexCssText from "katex/dist/katex.min.css?inline";
 import { getKatexMacros, getKatexMacrosVersion, type KatexMacroMap } from "./katex-macros.ts";
 
 type KatexRenderOptions = {
@@ -62,7 +62,7 @@ export function mathRenderCacheSize(): number {
 export function disposeMathRuntime(): void {
   clearMathRenderCache();
   if (typeof document !== "undefined") {
-    document.querySelectorAll<HTMLLinkElement>("link[data-aaronnote-katex-css]").forEach((link) => link.remove());
+    document.querySelectorAll<HTMLStyleElement>("style[data-aaronnote-katex-css]").forEach((style) => style.remove());
   }
 }
 
@@ -79,13 +79,13 @@ export function renderMathHTML(
   const key = mathCacheKey(tex, options.displayMode);
   const cached = cachedMathHtml(key);
   if (cached) {
-    if (!cached.error) ensureKatexCss(katexCssUrl);
+    if (!cached.error) ensureKatexCss(katexCssText);
     return cached;
   }
   try {
     const resolved = katexOptions(options);
     const html = katex.renderToString(tex, resolved);
-    ensureKatexCss(katexCssUrl);
+    ensureKatexCss(katexCssText);
     const rendered = { html };
     rememberMathHtml(key, rendered);
     return rendered;
@@ -153,16 +153,13 @@ function katexOptions(options: KatexRenderOptions): KatexRenderOptions {
   };
 }
 
-function ensureKatexCss(href: string): void {
+function ensureKatexCss(css: string): void {
   if (typeof document === "undefined") return;
-  const loaded = Array.from(document.querySelectorAll("link[data-aaronnote-katex-css]"))
-    .some((link) => link.getAttribute("data-aaronnote-katex-css") === href);
-  if (loaded) return;
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.href = href;
-  link.dataset.aaronnoteKatexCss = href;
-  document.head.appendChild(link);
+  if (document.querySelector("style[data-aaronnote-katex-css]")) return;
+  const style = document.createElement("style");
+  style.dataset.aaronnoteKatexCss = "embedded";
+  style.textContent = css;
+  document.head.appendChild(style);
 }
 
 function fitRenderedMath(element: HTMLElement): void {

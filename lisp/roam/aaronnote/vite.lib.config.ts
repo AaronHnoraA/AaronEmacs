@@ -20,6 +20,8 @@ export default defineConfig({
       external: [
         "markdown-it",
         /^markdown-it-/,
+        /^@codemirror\//,
+        /^@lezer\//,
       ],
     },
   },

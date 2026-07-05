@@ -5,6 +5,12 @@
 // hatch for advanced cases.
 
 export { createEditor } from "./editor-api.ts";
+export {
+  createAaronnoteMarkdownExtensions,
+  isAaronnoteMarkdownSource,
+  toggleAaronnoteMarkdownSource,
+} from "./cm6/editor-cm6.ts";
+export type { AaronnoteMarkdownExtensionMode } from "./cm6/editor-cm6.ts";
 export type {
   Editor,
   EditorBlockContext,

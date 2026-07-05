@@ -1,0 +1,136 @@
+.aaronnote-diagnostics-panel {
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--jp-ui-font-family);
+  min-width: 260px;
+  overflow: hidden;
+  padding: 12px;
+}
+
+.aaronnote-diagnostics-panel header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.aaronnote-diagnostics-panel header h2,
+.aaronnote-diagnostics-panel h3 {
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.aaronnote-diagnostics-panel header h2 {
+  font-size: 16px;
+}
+
+.aaronnote-diagnostics-panel h3 {
+  color: var(--jp-ui-font-color2);
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 16px;
+  text-transform: uppercase;
+}
+
+.aaronnote-diagnostics-panel header > div {
+  display: flex;
+  gap: 4px;
+}
+
+.aaronnote-diagnostics-icon-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--jp-ui-font-color1);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  padding: 3px;
+  width: 28px;
+}
+
+.aaronnote-diagnostics-icon-button:hover {
+  background: var(--jp-layout-color2);
+  border-color: var(--jp-border-color1);
+}
+
+.aaronnote-diagnostics-icon-button span {
+  height: 18px;
+  width: 18px;
+}
+
+.aaronnote-diagnostics-status-list {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.aaronnote-diagnostics-status {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 8px minmax(0, 1fr);
+  padding: 6px 2px;
+}
+
+.aaronnote-diagnostics-indicator {
+  background: var(--jp-warn-color1);
+  border-radius: 50%;
+  height: 7px;
+  margin-top: 5px;
+  width: 7px;
+}
+
+.aaronnote-diagnostics-status[data-level="ok"] .aaronnote-diagnostics-indicator {
+  background: var(--jp-success-color1);
+}
+
+.aaronnote-diagnostics-status[data-level="error"] .aaronnote-diagnostics-indicator {
+  background: var(--jp-error-color1);
+}
+
+.aaronnote-diagnostics-status strong,
+.aaronnote-diagnostics-status span {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 0;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.aaronnote-diagnostics-status span {
+  color: var(--jp-ui-font-color2);
+}
+
+.aaronnote-diagnostics-log {
+  border-top: 1px solid var(--jp-border-color2);
+  flex: 1;
+  margin-top: 6px;
+  min-height: 100px;
+  overflow: auto;
+  padding-top: 6px;
+}
+
+.aaronnote-diagnostics-log-entry {
+  display: grid;
+  font-family: var(--jp-code-font-family);
+  font-size: 10px;
+  gap: 7px;
+  grid-template-columns: auto minmax(0, 1fr);
+  letter-spacing: 0;
+  line-height: 1.45;
+  padding: 2px 0;
+}
+
+.aaronnote-diagnostics-log-entry time {
+  color: var(--jp-ui-font-color3);
+}
+
+.aaronnote-diagnostics-log-entry span {
+  overflow-wrap: anywhere;
+}
+
+.aaronnote-diagnostics-log-entry[data-level="error"] span {
+  color: var(--jp-error-color1);
+}

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+JUPYTER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+LOG="${SAGE_JUPYTER_LOG:-${JUPYTER_ROOT}/.jupyter/logs/sagemath-kernel.log}"
+mkdir -p "$(dirname "$LOG")" \
+  "${JUPYTER_ROOT}/.jupyter/sage" \
+  "${JUPYTER_ROOT}/.jupyter/ipython" \
+  "${JUPYTER_ROOT}/.jupyter/tmp"
+
+{
+  printf '\n[%s] starting SageMath kernel\n' "$(date '+%F %T')"
+  printf 'cwd=%s\n' "$(pwd)"
+  printf 'argv='
+  printf '%q ' "$@"
+  printf '\n'
+  env | sort | grep -E '^(HOME|USER|LOGNAME|SHELL|PATH|TMPDIR|DOT_SAGE|IPYTHONDIR|JUPYTER|SAGE|PYTHON|CONDA|VIRTUAL_ENV)=' || true
+} >>"$LOG" 2>&1
+
+export HOME="${HOME:-/Users/hc}"
+export USER="${USER:-hc}"
+export LOGNAME="${LOGNAME:-hc}"
+export SHELL="${SHELL:-/bin/zsh}"
+export DOT_SAGE="${DOT_SAGE:-${JUPYTER_ROOT}/.jupyter/sage}"
+export IPYTHONDIR="${IPYTHONDIR:-${JUPYTER_ROOT}/.jupyter/ipython}"
+export TMPDIR="${TMPDIR:-${JUPYTER_ROOT}/.jupyter/tmp/}"
+export SAGE_ROOT="${SAGE_ROOT:-/var/tmp/sage-10.9-current}"
+export SAGE_LOCAL="${SAGE_LOCAL:-${SAGE_ROOT}/local}"
+export PATH="${SAGE_LOCAL}/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+SAGE_BIN="${SAGE_ROOT}/venv/bin/sage"
+if [ ! -x "$SAGE_BIN" ]; then
+  if command -v sage >/dev/null 2>&1; then
+    SAGE_BIN="$(command -v sage)"
+  else
+    printf 'Sage executable not found. Expected %s or sage in PATH.\n' "$SAGE_BIN" >>"$LOG"
+    exit 127
+  fi
+fi
+
+exec "$SAGE_BIN" --python -m sage.repl.ipython_kernel "$@" 2>>"$LOG"
+

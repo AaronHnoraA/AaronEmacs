@@ -1,0 +1,49 @@
+.jp-AaronnoteMarkdownCell .jp-InputArea-editor {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+.jp-AaronnoteMarkdownCell .cm-editor {
+  background: var(--jp-layout-color0);
+  color: var(--jp-content-font-color1);
+  min-height: 34px;
+}
+
+.jp-AaronnoteMarkdownCell .cm-scroller {
+  overflow: visible;
+}
+
+.jp-AaronnoteMarkdownCell .cm-content {
+  caret-color: var(--jp-brand-color1);
+  min-height: 28px;
+  padding-bottom: 10px;
+  padding-top: 10px;
+}
+
+.jp-AaronnoteMarkdownCell .cm-activeLine,
+.jp-AaronnoteMarkdownCell .cm-activeLineGutter {
+  background: transparent;
+}
+
+.jp-AaronnoteMarkdownCell.jp-mod-active .cm-editor {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--jp-brand-color1), transparent 62%);
+}
+
+.jp-FileEditor .cm-editor.aaronnote-embedded-markdown .cm-content {
+  margin: 0 auto;
+  max-width: 860px;
+  padding: 24px clamp(16px, 6vw, 72px) 40vh;
+}
+
+.jp-FileEditor .cm-editor.aaronnote-embedded-markdown {
+  height: 100%;
+}
+
+.jp-FileEditor .cm-editor.aaronnote-embedded-markdown .cm-scroller {
+  overflow: auto !important;
+}
+
+.jp-FileEditor .cm-editor.aaronnote-embedded-markdown .cm-content {
+  min-height: 100%;
+}
