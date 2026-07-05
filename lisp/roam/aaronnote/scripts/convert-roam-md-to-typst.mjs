@@ -112,7 +112,7 @@ function findMarkdownNotes() {
     "-L",
     roamRoot,
     "-path",
-    `${roamRoot}/.lean/.lake`,
+    `${roamRoot}/.lake`,
     "-prune",
     "-o",
     "-type",

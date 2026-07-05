@@ -280,7 +280,8 @@ Aaronnote 的 Markdown vault 现在具备 MediaWiki 级别的 wiki 维护能力�
 # Embedded Source Regions
 
 Typst notes can render tagged regions from source files with `#note-code`.
-Lean uses the Aaronnote mirror rule, so the source path may be omitted:
+Lean uses the matching `.lean` file under the roam root, so the source path may
+be omitted:
 
 ```typst
 #import "/_typst/roam.typ": *
@@ -290,8 +291,8 @@ Lean uses the Aaronnote mirror rule, so the source path may be omitted:
 ```
 
 For `math/group.typ`, this reads the region after
-`-- @aaronnote group-cancel` from `/.lean/math/group.lean`, stopping at the
-next `@aaronnote` or `@note-code` marker.
+`-- @aaronnote group-cancel` from `/math/group.lean`, stopping at the next
+`@aaronnote` or `@note-code` marker.
 
 Every other language requires an explicit project-root source path:
 

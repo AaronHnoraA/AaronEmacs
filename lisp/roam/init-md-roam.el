@@ -409,7 +409,7 @@ plain-relative refs (./x, ../x); defaults to the current buffer's directory."
              (lambda (file)
                (let ((rel (file-relative-name file (my/aaronnote-roam-root))))
                  (not (string-match-p
-                       "\\`\\(?:\\.git/\\|\\.lean/\\|_typst/\\|node_modules/\\)"
+                       "\\`\\(?:\\.git/\\|\\.lake/\\|_typst/\\|node_modules/\\)"
                        rel))))
              (directory-files-recursively
               (my/aaronnote-roam-root) "\\.\\(?:md\\|markdown\\)$")))))

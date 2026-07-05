@@ -46,6 +46,7 @@ const excludedDirs = new Set([
   "public",
   "var",
   ".git",
+  ".lake",
   ".direnv",
   ".venv",
   "node_modules",

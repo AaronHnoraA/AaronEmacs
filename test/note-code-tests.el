@@ -6,7 +6,7 @@
 (require 'cl-lib)
 (require 'init-note-code)
 
-(ert-deftest my/note-code-parses-lean-default-mirror ()
+(ert-deftest my/note-code-parses-lean-default-root-path ()
   (with-temp-buffer
     (insert "#note-code(lang: lean)[group-cancel]")
     (goto-char 20)
@@ -23,13 +23,13 @@
       (should (equal (plist-get call :path) "src/demo.py"))
       (should (equal (plist-get call :tag) "example")))))
 
-(ert-deftest my/note-code-resolves-lean-mirror-and-explicit-path ()
+(ert-deftest my/note-code-resolves-lean-root-path-and-explicit-path ()
   (let* ((root (make-temp-file "note-code-test-" t))
          (my/note-code-root root)
          (my/aaronnote-roam-root root)
          (buffer-file-name (expand-file-name "math/group.typ" root)))
-    (should (equal (my/note-code-lean-mirror-path)
-                   (expand-file-name ".lean/math/group.lean" root)))
+    (should (equal (my/note-code-lean-path-for-note)
+                   (expand-file-name "math/group.lean" root)))
     (should (equal (my/note-code-source-path
                     '(:lang "python" :path "/src/demo.py" :tag "x"))
                    (expand-file-name "src/demo.py" root)))))

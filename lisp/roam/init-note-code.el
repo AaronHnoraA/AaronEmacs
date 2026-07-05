@@ -2,8 +2,8 @@
 
 ;;; Commentary:
 ;; Implements the note/source relationship used by `#note-code'.
-;; Lean defaults to the Aaronnote-style `.lean/' mirror.  Every other language
-;; requires an explicit source path.
+;; Lean defaults to the matching `.lean' file under the roam root.  Every other
+;; language requires an explicit source path.
 
 ;;; Code:
 
@@ -20,7 +20,7 @@
   :group 'my/aaronnote-roam)
 
 (config-defvar my/note-code-root nil
-  "Root containing Typst notes, source files, and the `.lean/' mirror."
+  "Root containing notes and source files."
   :type 'directory
   :group 'my/note-code)
 
@@ -94,24 +94,28 @@
       (user-error "Note is outside note-code root: %s" root))
     relative))
 
-(defun my/note-code-lean-mirror-path (&optional selector file)
-  "Return the `.lean/' mirror path for SELECTOR or FILE.
-SELECTOR is relative to the `.lean/' mirror.  Without SELECTOR, derive the
-mirror path from FILE, or from the current `buffer-file-name'."
+(defun my/note-code-lean-path-for-note (&optional selector file)
+  "Return the Lean path for SELECTOR or FILE under the note root.
+SELECTOR is relative to the note root.  Without SELECTOR, derive the path from
+FILE, or from the current `buffer-file-name'."
   (let* ((source
           (if (and selector (not (string-empty-p selector)))
               (string-remove-prefix "/" (string-remove-prefix "./" selector))
             (my/note-code--note-relative-path file)))
          (lean-relative
           (concat (file-name-sans-extension source) ".lean")))
-    (expand-file-name lean-relative
-                      (expand-file-name ".lean" (my/note-code--root)))))
+    (expand-file-name lean-relative (my/note-code--root))))
+
+(define-obsolete-function-alias
+  'my/note-code-lean-mirror-path
+  #'my/note-code-lean-path-for-note
+  "2026-07-05")
 
 (defun my/note-code-lean-path (selector)
-  "Resolve Lean SELECTOR to an absolute path under <root>/.lean/.
-SELECTOR is a path relative to the `.lean/' mirror, e.g. \"math/foo.lean\"."
+  "Resolve Lean SELECTOR to an absolute path under the note root.
+SELECTOR is a path relative to the note root, e.g. \"math/foo.lean\"."
   (expand-file-name
-   (my/note-code-lean-mirror-path selector)))
+   (my/note-code-lean-path-for-note selector)))
 
 (defun my/note-code-source-path (call)
   "Resolve source path for note-code CALL."
@@ -124,7 +128,7 @@ SELECTOR is a path relative to the `.lean/' mirror, e.g. \"math/foo.lean\"."
         (expand-file-name (string-remove-prefix "/" path)
                           (my/note-code--root))))
      ((member lang '("lean" "lean4"))
-      (my/note-code-lean-mirror-path))
+      (my/note-code-lean-path-for-note))
      (t
       (user-error "note-code path is required for language `%s'" lang)))))
 
