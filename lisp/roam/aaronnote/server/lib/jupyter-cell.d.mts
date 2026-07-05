@@ -30,3 +30,5 @@ export interface JupyterCellService {
 }
 
 export function createJupyterCellService(options?: JupyterCellServiceOptions): JupyterCellService;
+export function durationFromEnv(name: string, fallback: number): number;
+export function jupyterWidgetCommOpenP(content: Record<string, unknown>): boolean;

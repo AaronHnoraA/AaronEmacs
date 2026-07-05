@@ -2,7 +2,7 @@ import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createJupyterCellService } from "../server/lib/jupyter-cell.mjs";
+import { createJupyterCellService, durationFromEnv, jupyterWidgetCommOpenP } from "../server/lib/jupyter-cell.mjs";
 
 // These exercise only the filesystem + short-circuit paths of the cell service
 // (hidden-script write/read, output-mirror self-heal, non-kernel branches). They
@@ -26,6 +26,42 @@ async function withService(run: (ctx: {
 }
 
 describe("jupyter cell service (no kernel)", () => {
+  test("durationFromEnv uses defaults only when unset or invalid", () => {
+    const name = "AARONNOTE_TEST_DURATION_FROM_ENV";
+    const previous = process.env[name];
+    try {
+      delete process.env[name];
+      expect(durationFromEnv(name, 123)).toBe(123);
+      process.env[name] = "";
+      expect(durationFromEnv(name, 123)).toBe(123);
+      process.env[name] = "0";
+      expect(durationFromEnv(name, 123)).toBe(0);
+      process.env[name] = "bad";
+      expect(durationFromEnv(name, 123)).toBe(123);
+    } finally {
+      if (previous == null) delete process.env[name];
+      else process.env[name] = previous;
+    }
+  });
+
+  test("recognizes widget comm_open messages from model state", () => {
+    expect(jupyterWidgetCommOpenP({
+      comm_id: "widget-1",
+      data: {
+        state: {
+          _model_name: "VBoxModel",
+          _model_module: "@jupyter-widgets/controls",
+          _view_name: "VBoxView",
+        },
+      },
+    })).toBe(true);
+    expect(jupyterWidgetCommOpenP({
+      comm_id: "other-1",
+      target_name: "custom.comm",
+      data: { state: { value: 1 } },
+    })).toBe(false);
+  });
+
   test("openScript writes a hidden script that readScriptCell round-trips", async () => {
     await withService(async ({ service, note }) => {
       await service.openScript({

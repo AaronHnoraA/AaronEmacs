@@ -334,6 +334,7 @@ class AaronnoteWidgetManager extends KernelWidgetManager {
       restoreError = error;
     }
     const modelsAfterRestore = this.loadedModelCount();
+    const viaRestore = this.has_model(modelId);
     // Fallback for kernels whose ipywidgets predate the control comm, or when
     // the live state was unavailable: replay the comm messages captured during
     // execution. This yields a static (non-interactive) view but avoids a hard
@@ -363,6 +364,10 @@ class AaronnoteWidgetManager extends KernelWidgetManager {
       console.error(`[aaronnote-jupyter] widget model ${modelId} not found — ${detail}`);
       throw new Error(`widget model not found (${detail})`);
     }
+    console.info(
+      `[aaronnote-jupyter] mounted widget ${modelId.slice(0, 8)} via ${viaRestore ? "kernel-restore (LIVE)" : "message-replay (static)"}`
+      + ` — ${this.loadedModelCount()} models, kernel ${this.kernel.connectionStatus}/${this.kernel.status}`,
+    );
     await this.seedOutputWidgets(widgetOutputs);
     const model = await this.get_model(modelId);
     const view = await this.create_view(model);

@@ -21,9 +21,16 @@ function closeSocket(socket, code = 1011, reason = "Jupyter widget proxy failed"
   } catch {}
 }
 
-function forwardedCloseCode(code) {
+function forwardedCloseCode(code, fallback = 1000) {
   const value = Number(code || 0);
-  return value >= 1000 && value <= 4999 && ![1004, 1005, 1006, 1015].includes(value) ? value : 1000;
+  return value >= 1000 && value <= 4999 && ![1004, 1005, 1006, 1015].includes(value) ? value : fallback;
+}
+
+function upstreamCloseCodeForClient(code) {
+  // KernelConnection treats 1000/1001 as final. A server-originated channel
+  // close while the browser is still live should enter its reconnect path.
+  const value = forwardedCloseCode(code, 1011);
+  return value === 1000 || value === 1001 ? 1011 : value;
 }
 
 export function installJupyterWidgetProxy({ server, resolveTarget, touchKernel, stderr = process.stderr }) {
@@ -82,7 +89,7 @@ export function installJupyterWidgetProxy({ server, resolveTarget, touchKernel, 
         else closeSocket(upstream, 1000, "Client closed");
       });
       upstream.on("close", (code, reason) => {
-        if (downstream.readyState === WebSocket.OPEN) downstream.close(forwardedCloseCode(code), reason.toString());
+        if (downstream.readyState === WebSocket.OPEN) closeSocket(downstream, upstreamCloseCodeForClient(code), reason.toString() || "Jupyter kernel channel closed");
       });
       downstream.on("error", (err) => fail(err?.message || "downstream websocket error"));
       upstream.on("error", (err) => fail(err?.message || "upstream websocket error"));

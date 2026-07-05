@@ -83,4 +83,39 @@ describe("Jupyter widget proxy", () => {
     expect(touches).toBeGreaterThan(0);
     client.close();
   });
+
+  test("turns upstream kernel channel closes into reconnectable client closes", async () => {
+    const upstreamServer = createServer();
+    servers.push(upstreamServer);
+    const upstreamWss = new WebSocketServer({ noServer: true });
+    webSocketServers.push(upstreamWss);
+    upstreamServer.on("upgrade", (request, socket, head) => {
+      upstreamWss.handleUpgrade(request, socket, head, (upstream) => {
+        upstream.close(1000, "idle channel closed");
+      });
+    });
+    const upstreamPort = await listen(upstreamServer);
+
+    const proxyServer = createServer();
+    servers.push(proxyServer);
+    const proxy = installJupyterWidgetProxy({
+      server: proxyServer,
+      resolveTarget: (pathname: string, search: string, websocket: boolean) => websocket && jupyterProxyKernelId(pathname)
+        ? `ws://127.0.0.1:${upstreamPort}/api/kernels/kernel-1/channels${search}`
+        : null,
+      touchKernel: () => true,
+      stderr: { write() {} },
+    });
+    proxies.push(proxy);
+    const proxyPort = await listen(proxyServer);
+
+    const client = new WebSocket(
+      `ws://127.0.0.1:${proxyPort}/jupyter/widget-runtimes/kernel-1/channels?session_id=test`,
+    );
+    const close = new Promise<{ code: number; reason: string }>((resolve, reject) => {
+      client.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+      client.once("error", reject);
+    });
+    await expect(close).resolves.toEqual({ code: 1011, reason: "idle channel closed" });
+  });
 });

@@ -124,6 +124,22 @@ function wsDataToString(data) {
   return String(data || "");
 }
 
+function objectValue(value) {
+  return value && typeof value === "object" ? value : {};
+}
+
+export function jupyterWidgetCommOpenP(content) {
+  const targetName = String(content?.target_name || "");
+  if (/^jupyter\.widget(?:\.|$)/.test(targetName)) return true;
+  const data = objectValue(content?.data);
+  const state = objectValue(data.state);
+  const modelName = String(state._model_name || "");
+  const modelModule = String(state._model_module || "");
+  const viewName = String(state._view_name || "");
+  const viewModule = String(state._view_module || "");
+  return Boolean(modelName || modelModule || viewName || viewModule);
+}
+
 function cleanToken(value, fallback) {
   const clean = String(value || "").trim();
   return clean || fallback;
@@ -226,8 +242,10 @@ function leanRuntimeP(language, kernel) {
   return /lean/i.test(String(language || "")) || /lean/i.test(String(kernel || ""));
 }
 
-function durationFromEnv(name, fallback) {
-  const value = Number(process.env[name] || "");
+export function durationFromEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null || raw === "") return fallback;
+  const value = Number(raw);
   return Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
@@ -906,12 +924,11 @@ export function createJupyterCellService({
         if (widgetMessagesTruncated) return;
         const type = String(message?.header?.msg_type || "");
         if (!["comm_open", "comm_msg", "comm_close"].includes(type)) return;
-        const content = message?.content && typeof message.content === "object" ? message.content : {};
+        const content = objectValue(message?.content);
         const commId = String(content.comm_id || "");
-        const targetName = String(content.target_name || "");
         if (!commId) return;
         if (type === "comm_open") {
-          if (targetName && !/^jupyter\.widget/.test(targetName)) return;
+          if (!jupyterWidgetCommOpenP(content)) return;
           widgetCommIds.add(commId);
         } else if (!widgetCommIds.has(commId)) {
           return;
