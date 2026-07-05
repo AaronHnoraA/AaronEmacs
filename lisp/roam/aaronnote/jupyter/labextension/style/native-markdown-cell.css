@@ -5,8 +5,9 @@
 }
 
 .jp-AaronnoteMarkdownCell .cm-editor {
-  background: var(--jp-layout-color0);
-  color: var(--jp-content-font-color1);
+  background: var(--aaron-paper);
+  color: var(--aaron-ink);
+  font-family: var(--aaron-font-body);
   min-height: 34px;
 }
 
@@ -15,7 +16,7 @@
 }
 
 .jp-AaronnoteMarkdownCell .cm-content {
-  caret-color: var(--jp-brand-color1);
+  caret-color: var(--aaron-cursor);
   min-height: 28px;
   padding-bottom: 10px;
   padding-top: 10px;
@@ -27,7 +28,7 @@
 }
 
 .jp-AaronnoteMarkdownCell.jp-mod-active .cm-editor {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--jp-brand-color1), transparent 62%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aaron-accent), transparent 34%);
 }
 
 .jp-FileEditor .cm-editor.aaronnote-embedded-markdown .cm-content {
@@ -37,6 +38,8 @@
 }
 
 .jp-FileEditor .cm-editor.aaronnote-embedded-markdown {
+  background: var(--aaronnote-bg);
+  color: var(--aaron-ink);
   height: 100%;
 }
 

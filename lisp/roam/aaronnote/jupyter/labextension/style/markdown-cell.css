@@ -21,14 +21,6 @@
 }
 
 .aaronnote-jupyter-mdcell-host {
-  --aaron-paper: var(--jp-layout-color0, #ffffff);
-  --aaron-paper-soft: var(--jp-layout-color1, #f5f6f8);
-  --aaron-ink: var(--jp-content-font-color1, #1f2328);
-  --aaron-muted: var(--jp-content-font-color2, #59636e);
-  --aaron-faint: var(--jp-border-color1, #d0d7de);
-  --aaron-accent: var(--jp-brand-color1, #0969da);
-  --aaron-accent-2: #7c3aed;
-  --aaron-link: var(--jp-content-link-color, #0969da);
   color: var(--aaron-ink);
   display: block;
   min-height: 34px;
@@ -40,8 +32,9 @@
 }
 
 .aaronnote-jupyter-document-host {
-  background: var(--jp-layout-color0, #ffffff);
+  background: var(--aaronnote-bg);
   box-sizing: border-box;
+  color: var(--aaron-ink);
   height: 100%;
   overflow: auto;
   padding: 18px clamp(16px, 6vw, 72px);
@@ -56,9 +49,9 @@
 
 .aaronnote-jupyter-document-host .cm-editor {
   background: transparent;
-  font-family: var(--jp-content-font-family);
-  font-size: var(--jp-content-font-size1);
-  line-height: 1.65;
+  color: var(--aaron-ink);
+  font-family: var(--aaron-font-body);
+  line-height: 1.46;
 }
 
 .aaronnote-jupyter-document-host .cm-scroller {
@@ -66,7 +59,7 @@
 }
 
 .aaronnote-jupyter-document-host .cm-content {
-  caret-color: var(--jp-brand-color1);
+  caret-color: var(--aaron-cursor);
   margin: 0 auto;
   max-width: 860px;
   padding: 0 0 40vh;
@@ -79,12 +72,11 @@
 
 .aaronnote-jupyter-mdcell-host .cm-editor {
   background: var(--aaron-paper);
-  border: 1px solid color-mix(in srgb, var(--aaron-accent), transparent 72%);
+  border: 1px solid var(--aaron-paper-line);
   border-radius: 6px;
   color: var(--aaron-ink);
-  font-family: var(--jp-content-font-family);
-  font-size: var(--jp-content-font-size1);
-  line-height: 1.58;
+  font-family: var(--aaron-font-body);
+  line-height: 1.46;
   min-height: 34px;
   outline: none;
 }
@@ -143,7 +135,7 @@
 .aaronnote-jupyter-mdcell-host .cm-monospace {
   background: color-mix(in srgb, var(--aaron-paper-soft), var(--aaron-accent) 7%);
   border-radius: 4px;
-  font-family: var(--jp-code-font-family);
+  font-family: var(--aaron-font-mono);
   padding: 0.08em 0.28em;
 }
 

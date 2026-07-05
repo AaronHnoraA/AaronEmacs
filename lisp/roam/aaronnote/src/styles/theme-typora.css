@@ -444,6 +444,7 @@
 .cm-editor org-env-block[data-kind="summary"] { --block-c: var(--c-summary, #c6a0f6); }
 .cm-editor org-env-block[data-kind="fold"] { --block-c: var(--c-fold, #b7c6e8); }
 .cm-editor org-env-block[data-kind="comment"] { --block-c: var(--c-comment, #f2a272); }
+.cm-editor org-env-block[data-kind="ceil"] { --block-c: var(--aaron-accent, #7ee7ff); }
 .cm-editor org-env-block[data-kind="convention"] { --block-c: var(--c-convention, #f0a6ca); }
 .cm-editor org-env-block[data-kind="axiom"] { --block-c: var(--c-axiom, #ffcf70); }
 .cm-editor org-env-block[data-kind="assumption"] { --block-c: var(--c-assumption, #e6b86a); }
@@ -474,7 +475,7 @@
 .cm-editor org-env-block[data-kind="note"],
 .cm-editor org-env-block[data-kind="info"] { --orgenv-end: "·"; }
 .cm-editor org-env-block[data-kind="summary"] { --orgenv-end: "§"; }
-.cm-editor org-env-block:not([data-kind="comment"]):not([data-kind="fold"]):not([data-kind="meta"])::after {
+.cm-editor org-env-block:not([data-kind="comment"]):not([data-kind="fold"]):not([data-kind="meta"]):not([data-kind="ceil"])::after {
   content: var(--orgenv-end, "•");
   display: block;
   color: color-mix(in srgb, var(--block-c), transparent 36%);

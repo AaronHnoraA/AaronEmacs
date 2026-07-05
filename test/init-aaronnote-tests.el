@@ -51,6 +51,32 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(ert-deftest my/aaronnote-xwidget-undo-routes-jupyter-buffer-to-generic-xwidget ()
+  (let ((buffer (generate-new-buffer "*aaronnote-jupyter-test*"))
+        (my/aaronnote--app-buffer nil)
+        sent passed undo-called)
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (setq-local major-mode 'xwidget-webkit-mode)
+            (setq-local my/xwidget--session-id "aaronnote-jupyter"))
+          (cl-letf (((symbol-function 'my/aaronnote-command)
+                     (lambda (command &optional detail)
+                       (setq sent (list command detail))))
+                    ((symbol-function 'xwidget-webkit-pass-command-event)
+                     (lambda (event)
+                       (setq passed event)))
+                    ((symbol-function 'my/xwidget-undo)
+                     (lambda ()
+                       (setq undo-called t))))
+            (with-current-buffer buffer
+              (my/aaronnote-xwidget-undo 'jupyter-event))
+            (should undo-called)
+            (should-not sent)
+            (should-not passed)))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (ert-deftest my/aaronnote-readonly-split-opens-fresh-unregistered-xwidget ()
   (let* ((file (make-temp-file "aaronnote-readonly" nil ".md"))
          (source (generate-new-buffer "*aaronnote-readonly-source*"))

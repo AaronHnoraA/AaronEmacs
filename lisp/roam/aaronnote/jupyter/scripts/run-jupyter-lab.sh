@@ -30,11 +30,20 @@ mkdir -p \
 export JUPYTER_CONFIG_DIR="${JUPYTER_ROOT}/.jupyter/config"
 export JUPYTER_DATA_DIR="${JUPYTER_ROOT}/.jupyter/data"
 export JUPYTER_RUNTIME_DIR="${JUPYTER_ROOT}/.jupyter/runtime"
-export JUPYTER_PATH="${JUPYTER_ROOT}/.jupyter/data"
+if [ "${AARONNOTE_JUPYTER_USE_HOME_KERNELS:-1}" = "1" ]; then
+  JUPYTER_PATH_ENTRIES=("${JUPYTER_ROOT}/.jupyter/data")
+  HOME_JUPYTER_PATHS=()
+  [ -n "${HOME:-}" ] && HOME_JUPYTER_PATHS+=("${HOME}/Library/Jupyter" "${HOME}/.local/share/jupyter")
+  JUPYTER_PATH_ENTRIES+=("${HOME_JUPYTER_PATHS[@]}")
+  [ -n "${JUPYTER_PATH:-}" ] && JUPYTER_PATH_ENTRIES+=("${JUPYTER_PATH}")
+  export JUPYTER_PATH="$(IFS=:; printf '%s' "${JUPYTER_PATH_ENTRIES[*]}")"
+else
+  export JUPYTER_PATH="${JUPYTER_ROOT}/.jupyter/data"
+fi
 export IPYTHONDIR="${JUPYTER_ROOT}/.jupyter/ipython"
 export PYTHONNOUSERSITE=1
 export PATH="${VENV}/bin:${PATH}"
-ALLOWED_KERNELS="${AARONNOTE_JUPYTER_ALLOWED_KERNELS:-[\"python3\", \"sagemath-10.9\"]}"
+ALLOWED_KERNELS="${AARONNOTE_JUPYTER_ALLOWED_KERNELS:-}"
 
 HOST="${AARONNOTE_JUPYTER_HOST:-127.0.0.1}"
 PORT="${AARONNOTE_JUPYTER_PORT:-8890}"
@@ -42,7 +51,7 @@ PORT_RETRIES="${AARONNOTE_JUPYTER_PORT_RETRIES:-0}"
 LABEXTENSIONS_USER="${JUPYTER_ROOT}/.jupyter/data/labextensions"
 LABEXTENSIONS_VENV="${VENV}/share/jupyter/labextensions"
 
-exec "${VENV}/bin/jupyter-lab" \
+ARGS=(
   --no-browser \
   "--ServerApp.ip=${HOST}" \
   "--ServerApp.port=${PORT}" \
@@ -51,9 +60,15 @@ exec "${VENV}/bin/jupyter-lab" \
   "--ServerApp.password=" \
   "--ServerApp.root_dir=${ROOT_DIR}" \
   "--ContentsManager.allow_hidden=True" \
+  "--LanguageServerManager.autodetect=False" \
   "--LanguageServerManager.virtual_documents_dir=${JUPYTER_ROOT}/.jupyter/tmp/virtual_documents" \
   "--LabApp.extension_manager=readonly" \
   "--LabApp.labextensions_path=${LABEXTENSIONS_USER}" \
-  "--LabApp.labextensions_path=${LABEXTENSIONS_VENV}" \
-  "--KernelSpecManager.allowed_kernelspecs=${ALLOWED_KERNELS}" \
-  "$@"
+  "--LabApp.labextensions_path=${LABEXTENSIONS_VENV}"
+)
+
+if [ -n "${ALLOWED_KERNELS}" ]; then
+  ARGS+=("--KernelSpecManager.allowed_kernelspecs=${ALLOWED_KERNELS}")
+fi
+
+exec "${VENV}/bin/jupyter-lab" "${ARGS[@]}" "$@"

@@ -45,6 +45,34 @@ type ProseCheckMsg = {
   tools?: Array<{ source?: string; ok?: boolean; message?: string; partial?: boolean; optional?: boolean }>;
   scope?: { checkedChars?: number; totalChars?: number; partial?: boolean };
 };
+export type JupyterCellOutput = {
+  output_type?: string;
+  name?: string;
+  text?: string;
+  execution_count?: number | null;
+  data?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  transient?: Record<string, unknown>;
+  ename?: string;
+  evalue?: string;
+  traceback?: string[];
+};
+export type JupyterCellExecuteResult = {
+  ok?: boolean;
+  cellId?: string;
+  kernel?: string;
+  session?: string;
+  status?: string;
+  executionCount?: number | null;
+  outputs?: JupyterCellOutput[];
+  message?: string;
+};
+export type JupyterKernelSpec = { name: string; displayName?: string; language?: string };
+export type JupyterKernelListResult = {
+  ok?: boolean;
+  default?: string;
+  kernels?: JupyterKernelSpec[];
+};
 export type TodoItem = Record<string, unknown> & {
   id?: string;
   file?: string;
@@ -92,6 +120,16 @@ type NativeApi = {
   };
   noteCode?: {
     readRegion?: (body?: unknown) => Promise<unknown>;
+  };
+  jupyterCell?: {
+    kernels?: () => Promise<unknown>;
+    execute?: (body?: unknown) => Promise<unknown>;
+    openScript?: (body?: unknown) => Promise<unknown>;
+    readScriptCell?: (body?: unknown) => Promise<unknown>;
+    executeScriptCell?: (body?: unknown) => Promise<unknown>;
+    clearScriptCellOutput?: (body?: unknown) => Promise<unknown>;
+    restart?: (body?: unknown) => Promise<unknown>;
+    interrupt?: (body?: unknown) => Promise<unknown>;
   };
   latex?: {
     defaults?: (body?: Record<string, unknown>) => Promise<unknown>;
@@ -233,6 +271,40 @@ export const api = {
     async readRegion(body: unknown): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().noteCode?.readRegion, "Note code");
       return ensureOk(await call(body) as Record<string, unknown>, "Note code failed");
+    },
+  },
+  jupyterCell: {
+    async kernels(): Promise<JupyterKernelListResult> {
+      const call = requireMethod(nativeApi().jupyterCell?.kernels, "Jupyter kernels");
+      return ensureOk(await call() as JupyterKernelListResult, "Jupyter kernels failed");
+    },
+    async execute(body: unknown): Promise<JupyterCellExecuteResult> {
+      const call = requireMethod(nativeApi().jupyterCell?.execute, "Jupyter cell");
+      return ensureOk(await call(body) as JupyterCellExecuteResult, "Jupyter cell failed");
+    },
+    async openScript(body: unknown): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().jupyterCell?.openScript, "Jupyter cell script");
+      return ensureOk(await call(body) as Record<string, unknown>, "Jupyter cell script failed");
+    },
+    async readScriptCell(body: unknown): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().jupyterCell?.readScriptCell, "Jupyter cell script");
+      return ensureOk(await call(body) as Record<string, unknown>, "Jupyter cell script failed");
+    },
+    async executeScriptCell(body: unknown): Promise<JupyterCellExecuteResult> {
+      const call = requireMethod(nativeApi().jupyterCell?.executeScriptCell, "Jupyter cell");
+      return ensureOk(await call(body) as JupyterCellExecuteResult, "Jupyter cell failed");
+    },
+    async clearScriptCellOutput(body: unknown): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().jupyterCell?.clearScriptCellOutput, "Jupyter cell output");
+      return ensureOk(await call(body) as Record<string, unknown>, "Jupyter cell output failed");
+    },
+    async restart(body: unknown): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().jupyterCell?.restart, "Jupyter kernel restart");
+      return ensureOk(await call(body) as Record<string, unknown>, "Jupyter kernel restart failed");
+    },
+    async interrupt(body: unknown): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().jupyterCell?.interrupt, "Jupyter kernel interrupt");
+      return ensureOk(await call(body) as Record<string, unknown>, "Jupyter kernel interrupt failed");
     },
   },
   latex: {

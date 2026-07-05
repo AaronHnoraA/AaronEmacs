@@ -52,3 +52,7 @@ Markdown file opens are routed through `init-aaronnote-jupyter.el`, which starts
 session. The managed server uses `/` as its stable root, so files from roam,
 project directories, the home directory, and mounted volumes can stay open in
 one Lab workspace without restarting the server or invalidating existing tabs.
+Hidden path components such as `.config` are enabled explicitly. Jupyter LSP
+virtual documents are written under `jupyter/.jupyter/tmp/virtual_documents`,
+and external language-server autodetection is disabled, keeping all generated
+Jupyter state and runtime dependencies inside Aaronnote.

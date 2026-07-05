@@ -79,6 +79,7 @@ import { createImeSwitcher } from "./server/lib/ime.mjs";
 const ime = createImeSwitcher();
 import { runtimeMkdtemp, sweepRuntimeTmp } from "./server/lib/tmp.mjs";
 import { loadKatexMacros } from "./server/lib/katex-macros.mjs";
+import { createJupyterCellService } from "./server/lib/jupyter-cell.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -109,6 +110,14 @@ configure({
   tmpRoot,
   snippetsRoot,
   templatesRoot,
+});
+
+const jupyterCell = createJupyterCellService({
+  runtimeRoot,
+  noteRoot,
+  workspaceRoot,
+  stdout: process.stdout,
+  stderr: process.stderr,
 });
 
 // One-shot orphan sweep: remove staging/clipboard/db temp files older than 24h.
@@ -188,6 +197,7 @@ async function shutdown() {
   }
   eventClients.clear();
   try { noteWatcher.close(); } catch {}
+  try { await jupyterCell.shutdown(); } catch {}
   server.close();
   try { await shutdownCopilot(); } catch {}
   process.exit(0);
@@ -552,6 +562,14 @@ const apiHandlers = {
   },
   "aaronnote:api:runtime:debug": async () => ({ type: "runtime-debug", ...runtimeDebugSnapshot() }),
   "aaronnote:api:note-code:read-region": (body) => readNoteCodeRegion(body || {}),
+  "aaronnote:api:jupyter-cell:kernels": () => jupyterCell.kernels(),
+  "aaronnote:api:jupyter-cell:execute": (body) => jupyterCell.execute(body || {}),
+  "aaronnote:api:jupyter-cell:open-script": (body) => jupyterCell.openScript(body || {}),
+  "aaronnote:api:jupyter-cell:read-script-cell": (body) => jupyterCell.readScriptCell(body || {}),
+  "aaronnote:api:jupyter-cell:execute-script-cell": (body) => jupyterCell.executeScriptCell(body || {}),
+  "aaronnote:api:jupyter-cell:clear-script-cell-output": (body) => jupyterCell.clearScriptCellOutput(body || {}),
+  "aaronnote:api:jupyter-cell:restart": (body) => jupyterCell.restart(body || {}),
+  "aaronnote:api:jupyter-cell:interrupt": (body) => jupyterCell.interrupt(body || {}),
   "aaronnote:api:notes:wanted": async () => {
     const notes = await scanRoamNotes();
     return wantedPages(notes);
@@ -821,6 +839,16 @@ function adapterScript(origin) {
     },
     noteCode: {
       readRegion: function(body) { return call("aaronnote:api:note-code:read-region", [body || {}]); }
+    },
+    jupyterCell: {
+      kernels: function() { return call("aaronnote:api:jupyter-cell:kernels", []); },
+      execute: function(body) { return call("aaronnote:api:jupyter-cell:execute", [body || {}]); },
+      openScript: function(body) { return call("aaronnote:api:jupyter-cell:open-script", [body || {}]); },
+      readScriptCell: function(body) { return call("aaronnote:api:jupyter-cell:read-script-cell", [body || {}]); },
+      executeScriptCell: function(body) { return call("aaronnote:api:jupyter-cell:execute-script-cell", [body || {}]); },
+      clearScriptCellOutput: function(body) { return call("aaronnote:api:jupyter-cell:clear-script-cell-output", [body || {}]); },
+      restart: function(body) { return call("aaronnote:api:jupyter-cell:restart", [body || {}]); },
+      interrupt: function(body) { return call("aaronnote:api:jupyter-cell:interrupt", [body || {}]); }
     },
     latex: {
       defaults: function(body) { return call("aaronnote:api:latex:defaults", [body || {}]); },
@@ -1172,7 +1200,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === "/emacs/command" && req.method === "POST") {
-      const body = await readJson(req, 1024 * 1024);
+      const body = await readJson(req, 16 * 1024 * 1024);
       if (body.type === "command" || body.command) {
         const detail = { ...(body.detail && typeof body.detail === "object" ? body.detail : {}), command: String(body.command || "") };
         if (body.client) detail.client = String(body.client);

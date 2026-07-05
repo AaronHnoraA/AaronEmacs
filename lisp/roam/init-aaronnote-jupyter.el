@@ -19,6 +19,8 @@
 (require 'url-util)
 
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
+(declare-function my/xwidget-current-url "init-browser" (&optional buffer))
+(declare-function my/xwidget-session-buffer "init-browser" (id))
 (declare-function my/aaronnote-roam-root "init-md-roam" ())
 
 (defgroup my/aaronnote-jupyter nil
@@ -93,6 +95,9 @@ When this is a string, open that URL after restart.")
 
 (defvar my/aaronnote-jupyter--restart-directory nil
   "Root directory to use for a pending JupyterLab restart.")
+
+(defconst my/aaronnote-jupyter--xwidget-session-id "aaronnote-jupyter"
+  "Stable xwidget session id for the Aaronnote-owned JupyterLab surface.")
 
 (defun my/aaronnote-jupyter--env-get (env name)
   "Return NAME's value in ENV."
@@ -278,17 +283,49 @@ When this is a string, open that URL after restart.")
             query
             frag)))
 
+(defun my/aaronnote-jupyter--split-notebook-target (target)
+  "Return (NOTEBOOK . SELECTOR) parsed from local notebook TARGET."
+  (let* ((raw (url-unhex-string (string-remove-prefix "file:" (or target ""))))
+         (hash-pos (string-match-p "#" raw))
+         (hash-selector (and hash-pos (substring raw (1+ hash-pos))))
+         (raw (if hash-pos (substring raw 0 hash-pos) raw))
+         (at-match (string-match "\\(.+?\\.ipynb\\)@\\(.+\\)\\'" raw)))
+    (if at-match
+        (cons (match-string 1 raw) (match-string 2 raw))
+      (cons raw hash-selector))))
+
+(defun my/aaronnote-jupyter--open-xwidget-url (url)
+  "Open URL in the stable Aaronnote Jupyter xwidget buffer."
+  (unless (fboundp 'my/xwidget-open-url)
+    (require 'init-browser))
+  (let ((existing (and (fboundp 'my/xwidget-session-buffer)
+                       (my/xwidget-session-buffer
+                        my/aaronnote-jupyter--xwidget-session-id))))
+    (if (and (buffer-live-p existing)
+             (fboundp 'my/xwidget-current-url)
+             (equal (my/xwidget-current-url existing) url))
+        (progn
+          (switch-to-buffer existing)
+          existing)
+      (my/xwidget-open-url
+       url
+       :id my/aaronnote-jupyter--xwidget-session-id
+       :display 'current
+       :reuse-selected t))))
+
+;;;###autoload
+(defun my/aaronnote-jupyter-open-url (url)
+  "Open URL in the stable Aaronnote Jupyter xwidget buffer."
+  (interactive "sAaronnote Jupyter URL: ")
+  (my/aaronnote-jupyter--open-xwidget-url url))
+
 (defun my/aaronnote-jupyter--open-url (open &optional ready)
   "Open JupyterLab target described by OPEN."
   (if (or ready (my/aaronnote-jupyter--ready-p))
       (let ((url (if (stringp open) open (my/aaronnote-jupyter-url))))
         (if (or (fboundp 'my/xwidget-open-url)
                 (require 'init-browser nil t))
-            (my/xwidget-open-url
-             url
-             :id "aaronnote-jupyter"
-             :display 'side
-             :force-new t)
+            (my/aaronnote-jupyter--open-xwidget-url url)
           (browse-url url)))
     (my/aaronnote-jupyter--schedule-open-when-ready open)))
 
@@ -480,14 +517,32 @@ When SELECTOR is non-empty, append it as a URL fragment."
       (my/aaronnote-jupyter--open-url url))))
 
 ;;;###autoload
+(defun my/aaronnote-jupyter-open-target (target)
+  "Open a local notebook TARGET in the Aaronnote-owned JupyterLab.
+TARGET may be a path, file: URL, or a path with @/# selector syntax.
+Return non-nil when TARGET names a notebook."
+  (interactive "sOpen notebook target in Aaronnote Jupyter: ")
+  (pcase-let* ((`(,notebook . ,selector)
+                (my/aaronnote-jupyter--split-notebook-target target)))
+    (when (string-suffix-p ".ipynb" notebook t)
+      (my/aaronnote-jupyter-open-path notebook selector)
+      t)))
+
+;;;###autoload
+(defun my/aaronnote-jupyter-open-root ()
+  "Open the Aaronnote-owned JupyterLab root."
+  (interactive)
+  (let ((root (my/aaronnote-jupyter--default-directory)))
+    (when (my/aaronnote-jupyter--ensure-root root t)
+      (my/aaronnote-jupyter--open-url t))))
+
+;;;###autoload
 (defun my/aaronnote-jupyter-open ()
   "Open managed Aaronnote JupyterLab, preferring the current file."
   (interactive)
   (if buffer-file-name
       (my/aaronnote-jupyter-open-path buffer-file-name)
-    (let ((root (my/aaronnote-jupyter--default-directory)))
-      (when (my/aaronnote-jupyter--ensure-root root t)
-        (my/aaronnote-jupyter--open-url t)))))
+    (my/aaronnote-jupyter-open-root)))
 
 ;;;###autoload
 (defun my/aaronnote-jupyter-bootstrap ()

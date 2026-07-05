@@ -49,6 +49,7 @@ import { api } from "../../../aaronnote/api-client.ts";
 import { tocIndexFromState, type MarkdownHeading } from "../toc-index.ts";
 import { scanInlineCommands } from "../../command-syntax.ts";
 import { semanticOutlineFromCommand, type SemanticOutline } from "../../semantic-outline.ts";
+import { highlightCodeForEditor } from "../../code-highlight-async.ts";
 
 // ---------------------------------------------------------------------------
 // TOC fold state (session-level, not editor history)
@@ -319,10 +320,46 @@ type TikzAssetResult = {
   message?: string;
 };
 
+type CeilKernelSpec = { name: string; displayName?: string; language?: string };
+
+type CeilMeta = {
+  kernel: string;
+  session: string;
+  id: string;
+  language: string;
+  attrs: Array<{ key: string; value: string }>;
+  changed: boolean;
+};
+
+type CeilCellContext = {
+  cellId: string;
+  kernel: string;
+  session: string;
+  language: string;
+  code: string;
+};
+
+type CeilExecutionResult = {
+  ok?: boolean;
+  cellId?: string;
+  kernel?: string;
+  session?: string;
+  status?: string;
+  executionCount?: number | null;
+  outputs?: Array<Record<string, unknown>>;
+  message?: string;
+};
+
 const clearTikzDirtyEffect = StateEffect.define<string>();
 const tikzAssetCache = new Map<string, Promise<TikzAssetResult>>();
 const tikzRenderedSourceByAsset = new Map<string, string>();
 const tikzPendingSourceByAsset = new Map<string, string>();
+const DEFAULT_CEIL_KERNEL = "python3";
+const DEFAULT_CEIL_SESSION = "default";
+const DEFAULT_CEIL_LANGUAGE = "python";
+let ceilKernelsCache: CeilKernelSpec[] | null = null;
+let ceilKernelsPending: Promise<CeilKernelSpec[]> | null = null;
+const ceilOutputCache = new Map<string, CeilExecutionResult>();
 
 function setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V, limit = 128): void {
   map.set(key, value);
@@ -387,6 +424,148 @@ function currentNoteFile(): string {
   return window.AaronnoteCurrentFile?.() || "";
 }
 
+function cleanCeilToken(value: string, fallback: string): string {
+  const clean = String(value || "").trim();
+  return clean || fallback;
+}
+
+function stripCeilKernelParens(value: string): string {
+  const clean = String(value || "").trim();
+  const match = /^\(([^()]+)\)$/.exec(clean);
+  return (match?.[1] ?? clean).trim();
+}
+
+function ceilLanguageForKernel(kernel: string, requested = ""): string {
+  const explicit = requested.trim().toLowerCase();
+  if (explicit) return explicit;
+  const clean = kernel.toLowerCase();
+  if (clean.includes("sage")) return "python";
+  if (clean.includes("python") || clean === "py" || clean === "python3") return "python";
+  if (clean.includes("julia")) return "julia";
+  if (clean === "r" || clean.startsWith("ir")) return "r";
+  if (clean.includes("bash") || clean.includes("zsh") || clean.includes("shell")) return "bash";
+  if (clean.includes("typescript") || clean === "ts") return "typescript";
+  if (clean.includes("javascript") || clean === "js" || clean.includes("node")) return "javascript";
+  return "python";
+}
+
+type CeilCommandRange = {
+  from: number;
+  to: number;
+  argsRaw: string;
+  idRaw: string;
+};
+
+type CeilCommandMeta = CeilMeta & {
+  rawArgs: string;
+};
+
+const CEIL_COMMAND_LINE_RE = /^([ \t]*)@@cell(?:[ \t]*\(([^)\n]*)\))?(?:[ \t]+\[([^\]\n]*)\])?[ \t]*$/i;
+
+function parseCeilCommandLine(text: string, lineFrom: number): CeilCommandRange | null {
+  const match = CEIL_COMMAND_LINE_RE.exec(text);
+  if (!match) return null;
+  const leading = match[1]?.length ?? 0;
+  return {
+    from: lineFrom + leading,
+    to: lineFrom + text.length,
+    argsRaw: match[2] ?? "",
+    idRaw: match[3] ?? "",
+  };
+}
+
+function ceilCommandGeneratedId(file: string, range: CeilCommandRange): string {
+  return `ceil-${shortHash(`${file}\n${range.from}\n${range.argsRaw}\n${range.idRaw}`)}`;
+}
+
+function parseCeilCommand(range: CeilCommandRange, file: string): CeilCommandMeta {
+  const args = range.argsRaw.split(",").map((part) => part.trim()).filter(Boolean);
+  let language = args[0] || DEFAULT_CEIL_LANGUAGE;
+  let kernel = args[1] || "";
+  let session = args[2] || DEFAULT_CEIL_SESSION;
+  if (args.length === 1 && /python3|sage|julia|ir|bash|zsh|node|javascript|typescript/i.test(args[0]!)) {
+    kernel = args[0]!;
+    language = ceilLanguageForKernel(kernel);
+  }
+  kernel = cleanCeilToken(stripCeilKernelParens(kernel), DEFAULT_CEIL_KERNEL);
+  session = cleanCeilToken(session, DEFAULT_CEIL_SESSION);
+  language = ceilLanguageForKernel(kernel, language);
+  const id = cleanCeilToken(range.idRaw, ceilCommandGeneratedId(file, range));
+  return {
+    kernel,
+    session,
+    id,
+    language,
+    attrs: [],
+    rawArgs: range.argsRaw,
+    changed: !range.argsRaw.trim() || !range.idRaw.trim() || args[0] !== language || args[1] !== kernel,
+  };
+}
+
+function formatCeilCommand(meta: CeilCommandMeta): string {
+  const args = meta.session && meta.session !== DEFAULT_CEIL_SESSION
+    ? `${meta.language}, ${meta.kernel}, ${meta.session}`
+    : `${meta.language}, ${meta.kernel}`;
+  return `@@cell(${args}) [${meta.id}]`;
+}
+
+function replaceCeilCommandLine(view: EditorView, from: number, insert: string): void {
+  const line = view.state.doc.lineAt(from);
+  const range = parseCeilCommandLine(line.text, line.from);
+  if (!range) return;
+  const prefix = line.text.slice(0, range.from - line.from);
+  const next = `${prefix}${insert}`;
+  if (line.text === next) return;
+  view.dispatch({ changes: { from: line.from, to: line.to, insert: next } });
+}
+
+function scheduleCeilCommandLineUpdate(view: EditorView, from: number, insert: string): void {
+  window.requestAnimationFrame(() => {
+    if (!view.dom.isConnected) return;
+    replaceCeilCommandLine(view, from, insert);
+  });
+}
+
+function ceilOutputKey(file: string, meta: CeilMeta, body: string): string {
+  return `${file}\0${meta.kernel}\0${meta.session}\0${meta.id}\0${shortHash(body)}`;
+}
+
+function sameCeilContext(a: CeilMeta, b: CeilMeta): boolean {
+  return a.kernel === b.kernel && a.session === b.session;
+}
+
+function ceilCommandCellsForContext(state: EditorState, target: CeilMeta, file: string): CeilCellContext[] {
+  const ranges = state.field(blockExtraRangesField, false) ?? scanBlockExtraRanges(state.doc, blockExtraExcludedRanges(state));
+  return ranges.ceilCommands
+    .map((range) => parseCeilCommand(range, file))
+    .filter((meta) => sameCeilContext(meta, target))
+    .map((meta) => ({
+      cellId: meta.id,
+      kernel: meta.kernel,
+      session: meta.session,
+      language: meta.language,
+      code: "",
+    }));
+}
+
+function highlightedCeilCode(code: string, language: string): HTMLElement {
+  const pre = document.createElement("pre");
+  const codeEl = document.createElement("code");
+  pre.append(codeEl);
+  const ranges = highlightCodeForEditor(language, code);
+  let pos = 0;
+  for (const range of ranges) {
+    if (range.from > pos) codeEl.append(document.createTextNode(code.slice(pos, range.from)));
+    const span = document.createElement("span");
+    span.className = range.className;
+    span.textContent = code.slice(range.from, range.to);
+    codeEl.append(span);
+    pos = range.to;
+  }
+  if (pos < code.length) codeEl.append(document.createTextNode(code.slice(pos)));
+  return pre;
+}
+
 function resolveAssetSrc(src: string): string {
   return window.AaronnoteResolveAssetUrl?.(src) ?? src;
 }
@@ -446,6 +625,7 @@ type TocHeading = MarkdownHeading;
 interface BlockExtraRanges {
   toc: Array<{ from: number; to: number }>;
   semanticHeadings: Array<{ from: number; to: number; outline: SemanticOutline }>;
+  ceilCommands: CeilCommandRange[];
   hrs: Array<{ from: number; to: number }>;
   frontMatter: { from: number; to: number; body: string } | null;
 }
@@ -692,14 +872,17 @@ function scanBlockExtraLineRanges(
   startLine = 1,
   endLine = doc.lines,
   excludedRanges: ReadonlyArray<{ from: number; to: number }> = [],
-): Pick<BlockExtraRanges, "toc" | "semanticHeadings" | "hrs"> {
+): Pick<BlockExtraRanges, "toc" | "semanticHeadings" | "ceilCommands" | "hrs"> {
   const toc: Array<{ from: number; to: number }> = [];
   const semanticHeadings: Array<{ from: number; to: number; outline: SemanticOutline }> = [];
+  const ceilCommands: CeilCommandRange[] = [];
   const hrs: Array<{ from: number; to: number }> = [];
   for (let lineNum = Math.max(1, startLine); lineNum <= Math.min(doc.lines, endLine); lineNum++) {
     const line = doc.line(lineNum);
     if (rangeOverlapsAny(line.from, line.to, excludedRanges)) continue;
     if (TOC_LINE_RE.test(line.text)) toc.push({ from: line.from, to: line.to });
+    const ceilCommand = parseCeilCommandLine(line.text, line.from);
+    if (ceilCommand) ceilCommands.push(ceilCommand);
     const trimmed = line.text.trim();
     if (trimmed.startsWith("@@part") || trimmed.startsWith("@@section")) {
       const command = scanInlineCommands(trimmed)[0];
@@ -710,15 +893,15 @@ function scanBlockExtraLineRanges(
     }
     if (HR_LINE_RE.test(line.text)) hrs.push({ from: line.from, to: line.to });
   }
-  return { toc, semanticHeadings, hrs };
+  return { toc, semanticHeadings, ceilCommands, hrs };
 }
 
 function scanBlockExtraRanges(
   doc: Text,
   excludedRanges: ReadonlyArray<{ from: number; to: number }> = [],
 ): BlockExtraRanges {
-  const { toc, semanticHeadings, hrs } = scanBlockExtraLineRanges(doc, 1, doc.lines, excludedRanges);
-  return { toc, semanticHeadings, hrs, frontMatter: scanFrontMatter(doc) };
+  const { toc, semanticHeadings, ceilCommands, hrs } = scanBlockExtraLineRanges(doc, 1, doc.lines, excludedRanges);
+  return { toc, semanticHeadings, ceilCommands, hrs, frontMatter: scanFrontMatter(doc) };
 }
 
 const blockExtraRangesField = StateField.define<BlockExtraRanges>({
@@ -782,6 +965,7 @@ function mapBlockExtraRanges(ranges: BlockExtraRanges, changes: ChangeSet): Bloc
   return {
     toc: ranges.toc.map((range) => ({ from: changes.mapPos(range.from), to: changes.mapPos(range.to) })),
     semanticHeadings: ranges.semanticHeadings.map((range) => ({ from: changes.mapPos(range.from), to: changes.mapPos(range.to), outline: range.outline })),
+    ceilCommands: ranges.ceilCommands.map((range) => ({ ...range, from: changes.mapPos(range.from), to: changes.mapPos(range.to) })),
     hrs: ranges.hrs.map((range) => ({ from: changes.mapPos(range.from), to: changes.mapPos(range.to) })),
     frontMatter: ranges.frontMatter
       ? {
@@ -820,6 +1004,10 @@ function patchBlockExtraRangesNearChanges(
     semanticHeadings: [
       ...mapped.semanticHeadings.filter((range) => range.to < affectedFrom || range.from > affectedTo),
       ...scanned.semanticHeadings,
+    ].sort((a, b) => a.from - b.from || a.to - b.to),
+    ceilCommands: [
+      ...mapped.ceilCommands.filter((range) => range.to < affectedFrom || range.from > affectedTo),
+      ...scanned.ceilCommands,
     ].sort((a, b) => a.from - b.from || a.to - b.to),
     hrs: [
       ...mapped.hrs.filter((range) => range.to < affectedFrom || range.from > affectedTo),
@@ -915,6 +1103,7 @@ class OrgEnvEndWidget extends MeasuredWidget {
 
 function envLabel(kind: string): string {
   const labels: Record<string, string> = {
+    ceil: "Jupyter",
     html: "HTML",
     meta: "Meta",
     theorem: "Theorem",
@@ -951,6 +1140,450 @@ function envLabel(kind: string): string {
     question: "Question",
   };
   return labels[kind] ?? kind;
+}
+
+function fallbackCeilKernels(current: string): CeilKernelSpec[] {
+  const names = [current, DEFAULT_CEIL_KERNEL, "sagemath-10.9"].filter(Boolean);
+  return Array.from(new Set(names)).map((name) => ({ name, displayName: name }));
+}
+
+function loadCeilKernels(current: string): Promise<CeilKernelSpec[]> {
+  if (ceilKernelsCache) return Promise.resolve(ceilKernelsCache);
+  if (ceilKernelsPending) return ceilKernelsPending;
+  ceilKernelsPending = api.jupyterCell.kernels()
+    .then((result) => {
+      const kernels = Array.isArray(result.kernels) && result.kernels.length > 0
+        ? result.kernels.map((kernel) => ({
+            name: String(kernel.name || ""),
+            displayName: String(kernel.displayName || kernel.name || ""),
+            language: String(kernel.language || ""),
+          })).filter((kernel) => kernel.name)
+        : fallbackCeilKernels(current);
+      ceilKernelsCache = kernels;
+      return kernels;
+    })
+    .catch(() => fallbackCeilKernels(current))
+    .finally(() => { ceilKernelsPending = null; });
+  return ceilKernelsPending;
+}
+
+function populateCeilKernelSelect(select: HTMLSelectElement, kernels: CeilKernelSpec[], current: string): void {
+  const all = [...kernels];
+  if (!all.some((kernel) => kernel.name === current)) all.unshift({ name: current, displayName: current });
+  const selected = select.value || current;
+  select.replaceChildren();
+  for (const kernel of all) {
+    const option = document.createElement("option");
+    option.value = kernel.name;
+    option.textContent = kernel.displayName && kernel.displayName !== kernel.name
+      ? `${kernel.displayName} (${kernel.name})`
+      : kernel.name;
+    select.append(option);
+  }
+  select.value = all.some((kernel) => kernel.name === selected) ? selected : current;
+}
+
+function mimeText(data: Record<string, unknown>, key: string): string {
+  const value = data[key];
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map((item) => String(item ?? "")).join("");
+  return "";
+}
+
+function appendCeilMimeBundle(root: HTMLElement, data: Record<string, unknown> = {}): void {
+  const html = mimeText(data, "text/html");
+  if (html) {
+    const frame = document.createElement("iframe");
+    frame.className = "cm-ceil-output-html";
+    frame.sandbox.add("allow-scripts");
+    frame.srcdoc = html;
+    root.append(frame);
+    return;
+  }
+  const png = mimeText(data, "image/png");
+  if (png) {
+    const img = document.createElement("img");
+    img.className = "cm-ceil-output-image";
+    img.src = `data:image/png;base64,${png}`;
+    img.alt = "Jupyter output";
+    root.append(img);
+    return;
+  }
+  const svg = mimeText(data, "image/svg+xml");
+  if (svg) {
+    const frame = document.createElement("iframe");
+    frame.className = "cm-ceil-output-html";
+    frame.sandbox.add("allow-scripts");
+    frame.srcdoc = svg;
+    root.append(frame);
+    return;
+  }
+  const markdown = mimeText(data, "text/markdown");
+  if (markdown) {
+    const div = document.createElement("div");
+    div.className = "cm-ceil-output-markdown";
+    div.innerHTML = renderMarkdownHTML(markdown);
+    enhanceRenderedMarkdown(div);
+    root.append(div);
+    return;
+  }
+  const plain = mimeText(data, "text/plain") || JSON.stringify(data, null, 2);
+  const pre = document.createElement("pre");
+  pre.textContent = plain;
+  root.append(pre);
+}
+
+function renderCeilOutputs(root: HTMLElement, result: CeilExecutionResult | null): void {
+  root.replaceChildren();
+  if (!result) {
+    const empty = document.createElement("div");
+    empty.className = "cm-ceil-output-empty";
+    empty.textContent = "No output";
+    root.append(empty);
+    return;
+  }
+  const outputs = Array.isArray(result.outputs) ? result.outputs : [];
+  if (outputs.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "cm-ceil-output-empty";
+    empty.textContent = result.status === "error" ? (result.message || "Execution failed") : "No output";
+    root.append(empty);
+    return;
+  }
+  for (const output of outputs) {
+    const item = document.createElement("div");
+    item.className = "cm-ceil-output-item";
+    const type = String(output.output_type || "");
+    if (type === "stream") {
+      const pre = document.createElement("pre");
+      pre.dataset.stream = String(output.name || "stdout");
+      pre.textContent = String(output.text || "");
+      item.append(pre);
+    } else if (type === "error") {
+      item.classList.add("cm-ceil-output-error");
+      const pre = document.createElement("pre");
+      const traceback = Array.isArray(output.traceback) ? output.traceback.map(String).join("\n") : "";
+      pre.textContent = traceback || [output.ename, output.evalue].filter(Boolean).map(String).join(": ");
+      item.append(pre);
+    } else {
+      appendCeilMimeBundle(item, (output.data && typeof output.data === "object" ? output.data : {}) as Record<string, unknown>);
+    }
+    root.append(item);
+  }
+}
+
+function openCeilOutputPopup(result: CeilExecutionResult | null): void {
+  const overlay = document.createElement("div");
+  overlay.className = "cm-ceil-output-popover";
+  const panel = document.createElement("div");
+  panel.className = "cm-ceil-output-popover-panel";
+  const header = document.createElement("div");
+  header.className = "cm-ceil-output-popover-header";
+  const title = document.createElement("span");
+  title.textContent = "Jupyter output";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.textContent = "Close";
+  const body = document.createElement("div");
+  body.className = "cm-ceil-output-popover-body";
+  renderCeilOutputs(body, result);
+  const destroy = (): void => overlay.remove();
+  close.addEventListener("click", destroy);
+  overlay.addEventListener("mousedown", (event) => {
+    if (event.target === overlay) destroy();
+  });
+  window.addEventListener("keydown", function onKey(event) {
+    if (event.key !== "Escape") return;
+    window.removeEventListener("keydown", onKey);
+    destroy();
+  });
+  header.append(title, close);
+  panel.append(header, body);
+  overlay.append(panel);
+  document.body.append(overlay);
+}
+
+class CeilCommandWidget extends MeasuredWidget {
+  range: CeilCommandRange;
+
+  constructor(range: CeilCommandRange) {
+    super();
+    this.range = range;
+  }
+
+  protected measureKey(): string {
+    return `ceilcmd:${this.range.from}:${this.range.argsRaw}:${this.range.idRaw}`;
+  }
+
+  protected measureGroupKey(): string { return "ceilcmd"; }
+
+  protected estimatedHeightFallback(): number { return 132; }
+
+  eq(other: CeilCommandWidget): boolean {
+    return this.range.from === other.range.from
+      && this.range.to === other.range.to
+      && this.range.argsRaw === other.range.argsRaw
+      && this.range.idRaw === other.range.idRaw;
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const file = currentNoteFile();
+    const meta = parseCeilCommand(this.range, file);
+    if (meta.changed) scheduleCeilCommandLineUpdate(view, this.range.from, formatCeilCommand(meta));
+
+    const block = document.createElement("div");
+    block.className = "cm-ceil-cell-widget cm-ceil-command-widget";
+    setSourceRange(block, this.range.from, this.range.to);
+
+    const header = document.createElement("div");
+    header.className = "cm-ceil-header";
+
+    const label = document.createElement("span");
+    label.className = "cm-ceil-label";
+    label.textContent = "Jupyter";
+
+    const languageInput = document.createElement("input");
+    languageInput.className = "cm-ceil-language";
+    languageInput.type = "text";
+    languageInput.value = meta.language;
+    languageInput.spellcheck = false;
+    languageInput.setAttribute("aria-label", "Language");
+
+    const kernelSelect = document.createElement("select");
+    kernelSelect.className = "cm-ceil-kernel";
+    kernelSelect.setAttribute("aria-label", "Kernel");
+    populateCeilKernelSelect(kernelSelect, ceilKernelsCache ?? fallbackCeilKernels(meta.kernel), meta.kernel);
+    const loadKernels = (): void => {
+      void loadCeilKernels(meta.kernel).then((kernels) => {
+        if (!kernelSelect.isConnected) return;
+        populateCeilKernelSelect(kernelSelect, kernels, kernelSelect.value || meta.kernel);
+      });
+    };
+    kernelSelect.addEventListener("pointerdown", loadKernels);
+    kernelSelect.addEventListener("focus", loadKernels);
+
+    const status = document.createElement("span");
+    status.className = "cm-ceil-status";
+    status.textContent = meta.id;
+
+    const buttonBar = document.createElement("div");
+    buttonBar.className = "cm-ceil-actions";
+    const source = document.createElement("div");
+    source.className = "cm-ceil-source cm-ceil-source-compact";
+    source.textContent = "Loading source...";
+    const outputWrap = document.createElement("div");
+    outputWrap.className = "cm-ceil-output-wrap";
+    const outputHeader = document.createElement("div");
+    outputHeader.className = "cm-ceil-output-toolbar";
+    const outputTitle = document.createElement("span");
+    outputTitle.textContent = "Output";
+    const outputTools = document.createElement("div");
+    outputTools.className = "cm-ceil-output-tools";
+    const output = document.createElement("div");
+    output.className = "cm-ceil-output cm-ceil-output-limited";
+    const cacheKey = ceilOutputKey(file, meta, `script:${meta.id}`);
+    let lastResult = ceilOutputCache.get(cacheKey) ?? null;
+    renderCeilOutputs(output, lastResult);
+
+    const makeButton = (text: string, title: string, run: () => Promise<void> | void): HTMLButtonElement => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      button.title = title;
+      button.addEventListener("mousedown", stopEditorPropagation);
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void run();
+      });
+      return button;
+    };
+
+    const refreshSource = async (): Promise<void> => {
+      if (!file) {
+        source.textContent = "Save note first";
+        return;
+      }
+      try {
+        const result = await api.jupyterCell.readScriptCell({
+          file,
+          cellId: meta.id,
+          kernel: meta.kernel,
+          session: meta.session,
+          language: meta.language,
+        });
+        const code = String(result.code ?? "");
+        source.replaceChildren(code.trim() ? highlightedCeilCode(code, meta.language) : highlightedCeilCode("", meta.language));
+        if (!code.trim()) source.dataset.empty = "true";
+        const savedOutput = result.output && typeof result.output === "object" ? result.output as CeilExecutionResult : null;
+        lastResult = savedOutput;
+        renderCeilOutputs(output, lastResult);
+        if (lastResult) ceilOutputCache.set(cacheKey, lastResult);
+        view.requestMeasure();
+      } catch (err) {
+        source.textContent = err instanceof Error ? err.message : String(err);
+      }
+    };
+
+    const writeCommandLine = (): void => {
+      const nextKernel = kernelSelect.value || DEFAULT_CEIL_KERNEL;
+      const nextLanguage = languageInput.value.trim() || ceilLanguageForKernel(nextKernel);
+      replaceCeilCommandLine(view, this.range.from, formatCeilCommand({
+        ...meta,
+        kernel: nextKernel,
+        language: ceilLanguageForKernel(nextKernel, nextLanguage),
+        changed: false,
+      }));
+    };
+
+    languageInput.addEventListener("blur", writeCommandLine);
+    languageInput.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        writeCommandLine();
+        view.focus();
+      }
+    });
+    kernelSelect.addEventListener("change", (event) => {
+      event.stopPropagation();
+      languageInput.value = ceilLanguageForKernel(kernelSelect.value || DEFAULT_CEIL_KERNEL, languageInput.value);
+      writeCommandLine();
+    });
+
+    const setBusy = (busy: boolean): void => {
+      for (const button of buttonBar.querySelectorAll<HTMLButtonElement>("button")) {
+        if (button.dataset.ceilInterrupt === "true") continue;
+        button.disabled = busy;
+      }
+      languageInput.disabled = busy;
+      kernelSelect.disabled = busy;
+    };
+
+    const editButton = makeButton("Edit", "Open hidden source script", async () => {
+      if (!file) {
+        status.textContent = "Save note first";
+        return;
+      }
+      setBusy(true);
+      status.textContent = "Opening...";
+      try {
+        await api.jupyterCell.openScript({
+          file,
+          cellId: meta.id,
+          kernel: meta.kernel,
+          session: meta.session,
+          language: meta.language,
+          storage: "script",
+          cells: ceilCommandCellsForContext(view.state, meta, file),
+        });
+        status.textContent = meta.id;
+        await refreshSource();
+      } catch (err) {
+        status.textContent = err instanceof Error ? err.message : String(err);
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    const runButton = makeButton("Run", "Run this hidden script cell", async () => {
+      if (!file) {
+        status.textContent = "Save note first";
+        return;
+      }
+      setBusy(true);
+      status.textContent = "Running...";
+      output.textContent = "Running...";
+      try {
+        const result = await api.jupyterCell.executeScriptCell({
+          file,
+          cellId: meta.id,
+          kernel: meta.kernel,
+          session: meta.session,
+          language: meta.language,
+        }) as CeilExecutionResult;
+        lastResult = result;
+        ceilOutputCache.set(cacheKey, result);
+        status.textContent = result.executionCount != null ? `In [${result.executionCount}]` : (result.status || meta.id);
+        renderCeilOutputs(output, result);
+        await refreshSource();
+      } catch (err) {
+        lastResult = {
+          ok: false,
+          status: "error",
+          message: err instanceof Error ? err.message : String(err),
+          outputs: [{ output_type: "error", traceback: [err instanceof Error ? err.message : String(err)] }],
+        };
+        renderCeilOutputs(output, lastResult);
+        status.textContent = "Error";
+      } finally {
+        setBusy(false);
+        view.requestMeasure();
+      }
+    });
+
+    const interruptButton = makeButton("Interrupt", "Interrupt this kernel session", async () => {
+      if (!file) return;
+      status.textContent = "Interrupting...";
+      try {
+        await api.jupyterCell.interrupt({ file, kernel: meta.kernel, session: meta.session });
+        status.textContent = meta.id;
+      } catch (err) {
+        status.textContent = err instanceof Error ? err.message : String(err);
+      }
+    });
+    interruptButton.dataset.ceilInterrupt = "true";
+
+    const restartButton = makeButton("Restart", "Restart this kernel session", async () => {
+      if (!file) return;
+      status.textContent = "Restarting...";
+      try {
+        await api.jupyterCell.restart({ file, kernel: meta.kernel, session: meta.session });
+        status.textContent = meta.id;
+      } catch (err) {
+        status.textContent = err instanceof Error ? err.message : String(err);
+      }
+    });
+
+    const clearButton = makeButton("Clear", "Clear output", () => {
+      lastResult = null;
+      ceilOutputCache.delete(cacheKey);
+      renderCeilOutputs(output, null);
+      if (file) {
+        void api.jupyterCell.clearScriptCellOutput({
+          file,
+          cellId: meta.id,
+          kernel: meta.kernel,
+          session: meta.session,
+          language: meta.language,
+        }).catch(() => {});
+      }
+      view.requestMeasure();
+    });
+    const refreshButton = makeButton("Refresh", "Reload source and saved output", async () => {
+      status.textContent = "Refreshing...";
+      await refreshSource();
+      status.textContent = meta.id;
+    });
+    const foldButton = makeButton("Fold", "Fold output", () => {
+      outputWrap.classList.toggle("is-folded");
+      foldButton.textContent = outputWrap.classList.contains("is-folded") ? "Show" : "Fold";
+      view.requestMeasure();
+    });
+    const expandButton = makeButton("Popout", "Show full output", () => openCeilOutputPopup(lastResult));
+
+    buttonBar.append(editButton, runButton, interruptButton, restartButton, clearButton);
+    outputTools.append(refreshButton, foldButton, expandButton);
+    outputHeader.append(outputTitle, outputTools);
+    outputWrap.append(outputHeader, output);
+    header.append(label, languageInput, kernelSelect, status, buttonBar);
+    block.append(header, source, outputWrap);
+    stopInteractiveWidgetEvents(block);
+    void refreshSource();
+    return this.registerMeasured(block, view);
+  }
+
+  ignoreEvent(): boolean { return false; }
 }
 
 class MetaWidget extends MeasuredWidget {
@@ -1791,6 +2424,7 @@ function buildOrgEnvBodyLineDecoRanges(
 
   for (const block of orgEnvBlocksFromState(state)) {
     if (block.kind === "meta") continue;
+    if (block.kind === "ceil") continue;
     if (block.kind === "fold" && !selectionTouchesRange(state, block.from, block.to)) continue;
     if (block.bodyTo < windowFrom || block.bodyFrom > windowTo) continue;
     const fromLine = doc.lineAt(Math.max(block.bodyFrom, windowFrom));
@@ -1893,6 +2527,7 @@ function measureOrgEnvRails(view: EditorView): OrgEnvRailMeasure[] {
       && block.kind !== "fold"
       && block.kind !== "html"
       && block.kind !== "tikz"
+      && block.kind !== "ceil"
       && block.openFrom <= visibleTo
       && block.closeTo >= visibleFrom
     ))
@@ -2018,11 +2653,20 @@ function buildBlockExtraDecoRanges(
     occupied.push([range.from, range.to]);
   }
 
+  // ── @@cell(...) [id] Jupyter cells ────────────────────────────────────
+  for (const range of ranges.ceilCommands) {
+    if (range.to < windowFrom || range.from > windowTo) continue;
+    if (rangeOverlapsAny(range.from, range.to, excludedRanges)) continue;
+    if (occupied.some(([from, to]) => range.from < to && range.to > from)) continue;
+    decos.push(
+      Decoration.replace({ widget: new CeilCommandWidget(range), block: true }).range(range.from, range.to),
+    );
+    occupied.push([range.from, range.to]);
+  }
+
   // ── org-env #+begin … #+end ────────────────────────────────────────────
-  // Org-env is intentionally not a nested editor. The body remains normal CM6
-  // markdown so snippets, math widgets, cursor movement, and editing behavior
-  // are identical to the surrounding document; only the boundary lines render
-  // as UI chrome.
+  // Most org-env bodies remain normal CM6 markdown. Specialized blocks such as
+  // meta/html/tikz/ceil replace the whole source region with purpose-built UI.
   const orgEnvBlocks = orgEnvBlocksFromState(state);
   for (const block of orgEnvBlocks) {
     if (block.to < windowFrom || block.from > windowTo) continue;
@@ -2114,6 +2758,9 @@ function activeBlockExtraKey(state: EditorState): string {
   for (const range of ranges.semanticHeadings) {
     if (sel.from <= range.to && sel.to >= range.from) parts.push(`semantic:${range.from}:${range.to}`);
   }
+  for (const range of ranges.ceilCommands) {
+    if (sel.from <= range.to && sel.to >= range.from) parts.push(`ceilcmd:${range.from}:${range.to}`);
+  }
   if (ranges.frontMatter && sel.from < ranges.frontMatter.to && sel.to > ranges.frontMatter.from) {
     parts.push(`front:${ranges.frontMatter.from}:${ranges.frontMatter.to}`);
   }
@@ -2191,6 +2838,7 @@ function canMapBlockExtraDecos(state: EditorState, changes: ChangeSet): boolean 
 
   if (ranges.toc.some((range) => changesTouchRange(changes, range.from, range.to))) return false;
   if (ranges.semanticHeadings.some((range) => changesTouchRange(changes, range.from, range.to))) return false;
+  if (ranges.ceilCommands.some((range) => changesTouchRange(changes, range.from, range.to))) return false;
   if (ranges.hrs.some((range) => changesTouchRange(changes, range.from, range.to))) return false;
   if (ranges.frontMatter && changesTouchRange(changes, ranges.frontMatter.from, ranges.frontMatter.to)) return false;
   if (blocks.some((block) => (
@@ -2212,7 +2860,11 @@ function patchBlockExtraDecosForOrgEnvTitleChange(
   addOrgEnvBlockExtraDecos(decos, null, state, block);
   decos.sort((a, b) => a.from - b.from || a.to - b.to);
 
-  const fullBlockWidgetActive = (block.kind === "comment" || block.kind === "fold") && !selectionTouchesRange(state, block.from, block.to);
+  const fullBlockWidgetActive = block.kind === "meta"
+    || block.kind === "html"
+    || block.kind === "tikz"
+    || block.kind === "ceil"
+    || ((block.kind === "comment" || block.kind === "fold") && !selectionTouchesRange(state, block.from, block.to));
   let next = fullBlockWidgetActive
     ? mapped.update({ filterFrom: block.from, filterTo: block.to, filter: () => false })
     : mapped

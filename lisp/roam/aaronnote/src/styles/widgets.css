@@ -1839,6 +1839,238 @@
   overflow-wrap: anywhere;
 }
 
+.cm-editor .cm-org-env-block[data-kind="ceil"],
+.cm-editor org-env-block[data-kind="ceil"] {
+  --block-c: var(--aaron-accent, #9de7ff);
+}
+
+.cm-editor .cm-org-env-block[data-kind="ceil"]::after,
+.cm-editor org-env-block[data-kind="ceil"]::after {
+  content: none;
+}
+
+.cm-editor .cm-ceil-cell-widget {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0.35rem 0;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), var(--aaron-accent, #9de7ff) 20%);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--aaron-code-bg, #1e2638), var(--aaron-paper, #fff) 8%);
+  overflow: hidden;
+}
+
+.cm-editor .cm-ceil-header {
+  display: flex;
+  align-items: center;
+  gap: 0.32rem;
+  min-height: 28px;
+  padding: 0.22rem 0.42rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), transparent 18%);
+  color: color-mix(in srgb, var(--aaron-ink, #1e1a16), var(--aaron-muted, #666) 24%);
+  font: 700 10.5px/1.25 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.cm-editor .cm-ceil-label {
+  color: var(--aaron-accent, #9de7ff);
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.cm-editor .cm-ceil-kernel,
+.cm-editor .cm-ceil-language,
+.cm-editor .cm-ceil-session {
+  min-width: 5.5rem;
+  max-width: 11rem;
+  height: 22px;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), var(--aaron-muted, #666) 22%);
+  border-radius: 4px;
+  background: var(--aaron-paper-soft, #f8f4ee);
+  color: var(--aaron-ink, #1e1a16);
+  font: inherit;
+}
+
+.cm-editor .cm-ceil-language {
+  width: 5.5rem;
+  padding: 0 0.32rem;
+}
+
+.cm-editor .cm-ceil-session {
+  width: 6.8rem;
+  padding: 0 0.32rem;
+}
+
+.cm-editor .cm-ceil-status {
+  min-width: 4.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--aaron-muted, #666);
+  font-weight: 600;
+}
+
+.cm-editor .cm-ceil-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.24rem;
+  margin-left: auto;
+}
+
+.cm-editor .cm-ceil-actions button {
+  padding: 0.08rem 0.34rem;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), var(--aaron-muted, #666) 30%);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cm-editor .cm-ceil-actions button:not(:disabled):hover {
+  background: color-mix(in srgb, var(--aaron-accent, #9de7ff), transparent 88%);
+}
+
+.cm-editor .cm-ceil-source {
+  padding: 0.38rem 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), transparent 35%);
+  background: color-mix(in srgb, var(--aaron-code-bg, #1e2638), #000 6%);
+  font: 12px/1.42 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.cm-editor .cm-ceil-source-compact {
+  max-height: 8rem;
+  overflow: auto;
+}
+
+.cm-editor .cm-ceil-source-compact[data-empty="true"]::before {
+  content: "No source yet";
+  color: var(--aaron-muted, #666);
+  font-style: italic;
+}
+
+.cm-editor .cm-ceil-source pre,
+.cm-editor .cm-ceil-output pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cm-editor .cm-ceil-output {
+  padding: 0.38rem 0.5rem;
+  color: var(--aaron-ink, #1e1a16);
+  font: 12px/1.42 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.cm-editor .cm-ceil-output-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 24px;
+  padding: 0.16rem 0.42rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), transparent 40%);
+  color: var(--aaron-muted, #666);
+  font: 700 10.5px/1.25 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.cm-editor .cm-ceil-output-tools {
+  display: flex;
+  gap: 0.24rem;
+}
+
+.cm-editor .cm-ceil-output-tools button {
+  padding: 0.06rem 0.32rem;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), var(--aaron-muted, #666) 26%);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cm-editor .cm-ceil-output-limited {
+  max-height: 14rem;
+  overflow: auto;
+}
+
+.cm-editor .cm-ceil-output-wrap.is-folded .cm-ceil-output {
+  display: none;
+}
+
+.cm-editor .cm-ceil-output-empty {
+  color: var(--aaron-muted, #666);
+  font-style: italic;
+}
+
+.cm-editor .cm-ceil-output-item + .cm-ceil-output-item {
+  margin-top: 0.55rem;
+}
+
+.cm-editor .cm-ceil-output-error {
+  color: var(--aaron-red-dark, #9f1239);
+}
+
+.cm-editor .cm-ceil-output-html {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), transparent 25%);
+  border-radius: 4px;
+  background: white;
+}
+
+.cm-editor .cm-ceil-output-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.cm-ceil-output-popover {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: grid;
+  place-items: center;
+  padding: 3vh 3vw;
+  background: rgba(0, 0, 0, 0.38);
+}
+
+.cm-ceil-output-popover-panel {
+  width: min(1100px, 94vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), var(--aaron-muted, #666) 28%);
+  border-radius: 6px;
+  background: var(--aaron-paper, #fff);
+  color: var(--aaron-ink, #1e1a16);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+}
+
+.cm-ceil-output-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--aaron-paper-line, #ddd);
+  font: 700 12px/1.3 var(--aaron-font-mono, ui-monospace, monospace);
+}
+
+.cm-ceil-output-popover-header button {
+  padding: 0.12rem 0.5rem;
+  border: 1px solid var(--aaron-paper-line, #ddd);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.cm-ceil-output-popover-body {
+  overflow: auto;
+  padding: 0.6rem 0.7rem;
+  font: 12px/1.45 var(--aaron-font-mono, ui-monospace, monospace);
+}
+
 .cm-editor .cm-note-code-widget {
   box-sizing: border-box;
   width: 100%;

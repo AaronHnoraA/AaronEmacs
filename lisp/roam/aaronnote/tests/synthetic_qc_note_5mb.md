@@ -141511,7 +141511,7 @@ The corresponding density operator is
 |\psi\rangle\langle \psi|.
 \]
 
-This operator is positive semidefinite, Hermitian, trace-one, and idempotent.
+This operator is positive semidefinite, Hermitian, trace-one, and idempotent. hhhhhhhh this is easy to eas hhhh I lvoe this 
 
 \[
 \rho_\psi^\dagger = \rho_\psi.
@@ -185883,7 +185883,7 @@ Coordinates are useful for computation because they give arrays of field
 elements. Invariance is useful for mathematics because it identifies the
 features of the object that do not depend on the chosen basis.
 
-中文直觉：坐标是“输入格式”，不变量是“结构本身留下的影子”。
+中文直觉：坐标是“输入��式”，不变量是“结构本身留下的影子”。
 #+end remark
 
 If \(g \in \operatorname{GL}(V)\) and \(h \in \operatorname{GL}(W)\), a change

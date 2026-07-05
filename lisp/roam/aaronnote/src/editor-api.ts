@@ -236,6 +236,13 @@ const builtInQuickInsertItems: QuickInsertItem[] = [
     keywords: ["fence", "source"],
   },
   {
+    id: "jupyter-cell",
+    label: "Jupyter cell",
+    detail: "@@cell",
+    markdown: "@@cell(python, python3)",
+    keywords: ["cell", "jupyter", "python", "kernel"],
+  },
+  {
     id: "copy-code",
     label: "Copy code",
     detail: "Clipboard",

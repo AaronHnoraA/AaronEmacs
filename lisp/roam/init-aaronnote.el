@@ -13,11 +13,14 @@
 (require 'cl-lib)
 (require 'url)
 (require 'url-util)
+(require 'init-aaronnote-jupyter-cell)
 
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
 (declare-function my/xwidget-current-url "init-browser" (&optional buffer))
 (declare-function my/xwidget-session-buffer "init-browser" (id))
 (declare-function my/xwidget-focus "init-browser" (&optional buffer))
+(declare-function my/xwidget-undo "init-browser" ())
+(declare-function my/xwidget-redo "init-browser" ())
 (declare-function my/xwidget-setup-control-line "init-browser" ())
 (declare-function my/appine-open-url "init-appine" (url))
 (declare-function my/appine-open-url-fresh "init-appine" (url))
@@ -34,7 +37,13 @@
 (declare-function xwidget-webkit-edit-mode "xwidget" (&optional arg))
 (declare-function xwidget-webkit-execute-script "xwidget" (xwidget script &optional callback))
 (declare-function xwidget-webkit-pass-command-event "xwidget" (event))
+(declare-function my/aaronnote-jupyter-open-path "init-aaronnote-jupyter" (abs-path &optional selector))
+(declare-function my/aaronnote-jupyter-open-root "init-aaronnote-jupyter" ())
+(declare-function my/aaronnote-jupyter-open-target "init-aaronnote-jupyter" (target))
+(declare-function my/aaronnote-jupyter-open-url "init-aaronnote-jupyter" (url))
+(declare-function my/aaronnote-jupyter-url-p "init-aaronnote-jupyter" (url))
 (defvar my/appine-tab-list)
+(defvar my/xwidget--session-id)
 
 ;; Publish module — lazy, loaded only when a publish command is first invoked.
 (autoload 'my/aaronnote-publish              "init-aaronnote-publish" nil t)
@@ -506,13 +515,15 @@ KEY-STRING is used only for diagnostics."
               (cond
                ((and (string-match-p "\\.ipynb\\(?:@\\|#\\|\\'\\)" target)
                      (progn
-                       (unless (fboundp 'my/jupyter-lab-open-jupytext-target)
-                         (require 'init-jupyter-lab))
-                       (my/jupyter-lab-open-jupytext-target target))))
-               ((and (fboundp 'my/jupyter-lab-url-p)
-                     (my/jupyter-lab-url-p target))
-                (unless (fboundp 'my/xwidget-open-url) (require 'init-browser))
-                (my/xwidget-open-url target :id "jupyter-lab" :display 'side))
+                       (unless (fboundp 'my/aaronnote-jupyter-open-target)
+                         (require 'init-aaronnote-jupyter))
+                       (my/aaronnote-jupyter-open-target target))))
+               ((and (progn
+                       (unless (fboundp 'my/aaronnote-jupyter-url-p)
+                         (require 'init-aaronnote-jupyter nil t))
+                       (fboundp 'my/aaronnote-jupyter-url-p))
+                     (my/aaronnote-jupyter-url-p target))
+                (my/aaronnote-jupyter-open-url target))
                ;; Absolute file/dir path: use smart routing (dired, find-file,
                ;; pdf->system, etc.) instead of delegating to macOS `open'.
                ((file-name-absolute-p target)
@@ -740,8 +751,25 @@ When FILE is non-nil, set buffer-local file tracking directly."
                     (fboundp 'my/xwidget-current-url)
                     (when-let* ((url (my/xwidget-current-url buffer)))
                       (string-prefix-p
-                       (format "http://127.0.0.1:%d/" my/aaronnote--port)
-                       url))))))))
+                      (format "http://127.0.0.1:%d/" my/aaronnote--port)
+                      url))))))))
+
+(defun my/aaronnote--jupyter-xwidget-buffer-p (&optional buffer)
+  "Return non-nil when BUFFER hosts the Aaronnote-owned Jupyter xwidget page."
+  (let ((buffer (or buffer (current-buffer))))
+    (and (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (and (eq major-mode 'xwidget-webkit-mode)
+                (or (equal (and (boundp 'my/xwidget--session-id)
+                                my/xwidget--session-id)
+                           "aaronnote-jupyter")
+                    (and (progn
+                           (unless (fboundp 'my/aaronnote-jupyter-url-p)
+                             (require 'init-aaronnote-jupyter nil t))
+                           (fboundp 'my/aaronnote-jupyter-url-p))
+                         (fboundp 'my/xwidget-current-url)
+                         (when-let* ((url (my/xwidget-current-url buffer)))
+                           (my/aaronnote-jupyter-url-p url)))))))))
 
 (defun my/aaronnote--pass-xwidget-command-event (event)
   "Pass EVENT through to xwidget when the current buffer is not Aaronnote."
@@ -750,11 +778,29 @@ When FILE is non-nil, set buffer-local file tracking directly."
     (setq unread-command-events
           (nconc (list event) unread-command-events))))
 
+(defun my/aaronnote--jupyter-xwidget-command (event command)
+  "Route xwidget EVENT/COMMAND to Jupyter, or pass EVENT through."
+  (pcase command
+    ("undo"
+     (if (fboundp 'my/xwidget-undo)
+         (my/xwidget-undo)
+       (my/aaronnote--pass-xwidget-command-event event)))
+    ("redo"
+     (if (fboundp 'my/xwidget-redo)
+         (my/xwidget-redo)
+       (my/aaronnote--pass-xwidget-command-event event)))
+    (_
+     (my/aaronnote--pass-xwidget-command-event event))))
+
 (defun my/aaronnote--xwidget-editor-command (event command &optional detail)
   "Route xwidget EVENT to Aaronnote COMMAND, or pass it through otherwise."
-  (if (my/aaronnote--xwidget-buffer-p)
-      (my/aaronnote-command command detail)
-    (my/aaronnote--pass-xwidget-command-event event)))
+  (cond
+   ((my/aaronnote--xwidget-buffer-p)
+    (my/aaronnote-command command detail))
+   ((my/aaronnote--jupyter-xwidget-buffer-p)
+    (my/aaronnote--jupyter-xwidget-command event command))
+   (t
+    (my/aaronnote--pass-xwidget-command-event event))))
 
 (defun my/aaronnote-xwidget-undo (event)
   "Route Command-z / Meta-z from Aaronnote xwidget to web undo."
@@ -1516,11 +1562,6 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 
 ;;; Jupyter integration.
 
-(declare-function my/jupyter-lab-url-p    "init-jupyter-lab" (url))
-(declare-function my/jupyter-lab-open     "init-jupyter-lab" ())
-(declare-function my/jupyter-lab-open-path "init-jupyter-lab" (abs-path &optional selector))
-(declare-function my/jupyter-lab-open-jupytext-target "init-jupyter-lab" (target))
-
 (defun my/aaronnote--infer-notebook ()
   "Return the .ipynb file co-located with the current Aaronnote note, or nil."
   (when-let* ((file (my/aaronnote-buffer-file)))
@@ -1531,10 +1572,11 @@ Blocks the caller until the response arrives (or 8 s timeout)."
   "Open the notebook associated with the current note in xwidget.
 Falls back to JupyterLab root when no matching .ipynb exists."
   (interactive)
-  (unless (fboundp 'my/jupyter-lab-open) (require 'init-jupyter-lab))
+  (unless (fboundp 'my/aaronnote-jupyter-open-path)
+    (require 'init-aaronnote-jupyter))
   (if-let* ((nb (my/aaronnote--infer-notebook)))
-      (my/jupyter-lab-open-path nb)
-    (my/jupyter-lab-open)))
+      (my/aaronnote-jupyter-open-path nb)
+    (my/aaronnote-jupyter-open-root)))
 
 (defun my/aaronnote-jupyter-open-at-toc ()
   "Pick a heading from the current note, then open its notebook at that section."
@@ -1552,10 +1594,11 @@ Falls back to JupyterLab root when no matching .ipynb exists."
            (choice   (completing-read "Jump to heading: "
                                       (mapcar #'car choices) nil t))
            (slug     (cdr (assoc choice choices))))
-      (unless (fboundp 'my/jupyter-lab-open) (require 'init-jupyter-lab))
+      (unless (fboundp 'my/aaronnote-jupyter-open-path)
+        (require 'init-aaronnote-jupyter))
       (if-let* ((nb (my/aaronnote--infer-notebook)))
-          (my/jupyter-lab-open-path nb slug)
-        (my/jupyter-lab-open)))))
+          (my/aaronnote-jupyter-open-path nb slug)
+        (my/aaronnote-jupyter-open-root)))))
 
 ;;; Dispatch transient.
 

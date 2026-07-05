@@ -1,6 +1,7 @@
 import type { JupyterFrontEnd, JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { NotebookPanel } from "@jupyterlab/notebook";
 
+import "../style/theme.css";
 import { aaronnoteDiagnostics } from "./diagnostics";
 import { installAaronnoteDiagnosticsPanel } from "./diagnostics-panel";
 import {

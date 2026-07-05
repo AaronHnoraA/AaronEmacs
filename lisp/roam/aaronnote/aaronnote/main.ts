@@ -50,6 +50,7 @@ import { matchingSnippetsForPrefix, SnippetSession, snippetDetail, snippetLabel,
 import type { CursorPosition, NoteSummary, SnippetSummary } from "./types.ts";
 import { createVimLite, type VimLiteKey, type VimLiteMode } from "./vim-lite.ts";
 import { countWritingStats, headingSubtreeRange, type WritingStats } from "./writing-stats.ts";
+import { shortHash } from "../src/cm6/widgets/measured-observer.ts";
 import {
   handleXwidgetControlBeforeInput,
   handleXwidgetControlKeydown,
@@ -4577,6 +4578,114 @@ function runHostKey(body: Record<string, unknown>): boolean {
   return inserted;
 }
 
+type CeilWriteBackCell = { cellId?: string; id?: string; code?: string };
+type CeilSourceBlock = {
+  from: number;
+  to: number;
+  bodyFrom: number;
+  bodyTo: number;
+  title: string;
+  body: string;
+  id: string;
+};
+
+const CEIL_OPEN_LINE_RE = /^[ \t]*#\+\s*begin\s+ceil(?:[ \t]+([^\n]*?))?[ \t]*$/i;
+const CEIL_CLOSE_LINE_RE = /^[ \t]*#\+\s*end\s+ceil[ \t]*$/i;
+
+function ceilTitleId(title: string): string {
+  const tokens = String(title || "").trim().split(/\s+/).filter(Boolean);
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index]!;
+    if (token.toLowerCase() !== ":id") continue;
+    const value = tokens[index + 1];
+    return value && !value.startsWith(":") ? value : "";
+  }
+  return "";
+}
+
+function ceilGeneratedId(file: string, block: { from: number; title: string; body: string }): string {
+  return `ceil-${shortHash(`${file}\n${block.from}\n${block.title}\n${block.body}`)}`;
+}
+
+function scanCeilSourceBlocks(markdown: string, file: string): CeilSourceBlock[] {
+  const blocks: CeilSourceBlock[] = [];
+  let pos = 0;
+  while (pos < markdown.length) {
+    const lineEndIndex = markdown.indexOf("\n", pos);
+    const lineEnd = lineEndIndex < 0 ? markdown.length : lineEndIndex;
+    const line = markdown.slice(pos, lineEnd);
+    const open = CEIL_OPEN_LINE_RE.exec(line);
+    if (!open) {
+      pos = lineEndIndex < 0 ? markdown.length : lineEnd + 1;
+      continue;
+    }
+    const title = String(open[1] || "").trim();
+    const bodyFrom = lineEndIndex < 0 ? markdown.length : lineEnd + 1;
+    let closeFrom = -1;
+    let closeTo = -1;
+    let cursor = bodyFrom;
+    while (cursor < markdown.length) {
+      const closeLineEndIndex = markdown.indexOf("\n", cursor);
+      const closeLineEnd = closeLineEndIndex < 0 ? markdown.length : closeLineEndIndex;
+      const closeLine = markdown.slice(cursor, closeLineEnd);
+      if (CEIL_CLOSE_LINE_RE.test(closeLine)) {
+        closeFrom = cursor;
+        closeTo = closeLineEnd;
+        break;
+      }
+      cursor = closeLineEndIndex < 0 ? markdown.length : closeLineEnd + 1;
+    }
+    if (closeFrom < 0) {
+      pos = bodyFrom;
+      continue;
+    }
+    const body = markdown.slice(bodyFrom, closeFrom);
+    const base = { from: pos, title, body };
+    blocks.push({
+      ...base,
+      to: closeTo,
+      bodyFrom,
+      bodyTo: closeFrom,
+      id: ceilTitleId(title) || ceilGeneratedId(file, base),
+    });
+    pos = closeTo + 1;
+  }
+  return blocks;
+}
+
+function normalizeCeilBody(code: string): string {
+  const normalized = String(code ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  return normalized.endsWith("\n") ? normalized : `${normalized}\n`;
+}
+
+function writeBackJupyterCells(body: Record<string, unknown>): boolean {
+  const file = String(body.file || "");
+  if (!sameOpenFile(file)) return true;
+  if (rejectReadOnlyAction("Read-only pane")) return true;
+  const rawCells = Array.isArray(body.cells) ? body.cells : [];
+  const byId = new Map<string, string>();
+  for (const raw of rawCells) {
+    if (!raw || typeof raw !== "object") continue;
+    const cell = raw as CeilWriteBackCell;
+    const id = String(cell.cellId || cell.id || "").trim();
+    if (!id) continue;
+    byId.set(id, normalizeCeilBody(String(cell.code ?? "")));
+  }
+  if (byId.size === 0) return true;
+  const blocks = scanCeilSourceBlocks(editor.getMarkdown(), currentFile)
+    .filter((block) => byId.has(block.id))
+    .sort((a, b) => b.bodyFrom - a.bodyFrom);
+  if (blocks.length === 0) {
+    setStatus("Jupyter cell not found");
+    return true;
+  }
+  for (const block of blocks) {
+    editor.replaceMarkdownRange(block.bodyFrom, block.bodyTo, byId.get(block.id) || "");
+  }
+  setStatus(`Updated ${blocks.length} Jupyter cell${blocks.length === 1 ? "" : "s"}`);
+  return true;
+}
+
 function runHostCommand(detail: unknown): boolean {
   const body = (detail && typeof detail === "object" ? detail : {}) as {
     command?: string;
@@ -4619,6 +4728,11 @@ function runHostCommand(detail: unknown): boolean {
     case "save":
       if (rejectReadOnlyAction("Read-only pane")) return true;
       void save();
+      return true;
+    case "jupyter-cells-write-back":
+      return writeBackJupyterCells(body as Record<string, unknown>);
+    case "jupyter-cell-script-saved":
+      setStatus("Jupyter cell script saved");
       return true;
     case "refresh":
     case "reload":
