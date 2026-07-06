@@ -499,6 +499,12 @@ KEY-STRING is used only for diagnostics."
                 (my/aaronnote-open-file file)
               ;; Source region (lean, etc.) or explicit tag: open in Emacs.
               (my/aaronnote--goto-location file line-number column)
+              (when (and (stringp file)
+                         (string-match-p (concat "\\(?:\\`\\|/\\)\\.cell/[^/]+\\'")
+                                         file)
+                         (require 'init-aaronnote-jupyter-cell nil t))
+                (ignore-errors
+                  (my/aaronnote-jupyter-cell-activate-buffer)))
               (when (and tag (not (string-empty-p (or tag ""))))
                 (when (require 'init-note-code nil t)
                   (ignore-errors (my/note-code--goto-tag tag))))))

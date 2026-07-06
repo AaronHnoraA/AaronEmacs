@@ -19,6 +19,7 @@ import { hrefProtocol, safeHref } from "../src/url-safety.ts";
 import {
   api,
   type TodoItem,
+  type JupyterKernelSpec,
   type JupyterKernelTask,
   type JupyterTasksResult,
   type LatexExportAgentStatus,
@@ -177,9 +178,18 @@ jupyterPanel.innerHTML = `
     <button type="button" data-jupyter-action="interrupt" title="Interrupt kernel" aria-label="Interrupt kernel">&#xf04d;</button>
     <button type="button" data-jupyter-action="clear-all" title="Clear all outputs" aria-label="Clear all outputs">&#xf1f8;</button>
     <button type="button" data-jupyter-action="variables" title="Variables" aria-label="Variables">&#xf0ce;</button>
+    <button type="button" data-jupyter-action="toggle-kernel-tool" title="Switch kernel" aria-label="Switch kernel">&#xf085;</button>
     <button type="button" data-jupyter-action="tasks" title="Kernel task manager" aria-label="Kernel task manager">&#xf0ae;</button>
     <button type="button" data-jupyter-action="cleanup" title="Cleanup idle kernels" aria-label="Cleanup idle kernels">&#xf12d;</button>
     <button type="button" data-jupyter-action="refresh" title="Refresh" aria-label="Refresh">&#xf2f1;</button>
+  </div>
+  <div class="aaronnote-jupyter-kernel-tool" data-jupyter-kernel-tool hidden>
+    <label>Lang <select data-jupyter-kernel-language></select></label>
+    <label>Session <select data-jupyter-kernel-session></select></label>
+    <label>Old <select data-jupyter-kernel-old></select></label>
+    <label>New <select data-jupyter-kernel-new></select></label>
+    <div class="aaronnote-jupyter-kernel-cells" data-jupyter-kernel-cells></div>
+    <button type="button" data-jupyter-action="switch-kernel">Switch</button>
   </div>
   <div class="aaronnote-jupyter-summary" data-jupyter-summary>No cells</div>
   <div class="aaronnote-jupyter-list" data-jupyter-list></div>
@@ -192,6 +202,12 @@ const jupyterSummary = jupyterPanel.querySelector<HTMLElement>("[data-jupyter-su
 const jupyterList = jupyterPanel.querySelector<HTMLElement>("[data-jupyter-list]")!;
 const jupyterVars = jupyterPanel.querySelector<HTMLElement>("[data-jupyter-vars]")!;
 const jupyterRuntime = jupyterPanel.querySelector<HTMLElement>("[data-jupyter-runtime]")!;
+const jupyterKernelTool = jupyterPanel.querySelector<HTMLElement>("[data-jupyter-kernel-tool]")!;
+const jupyterKernelLanguage = jupyterPanel.querySelector<HTMLSelectElement>("[data-jupyter-kernel-language]")!;
+const jupyterKernelSession = jupyterPanel.querySelector<HTMLSelectElement>("[data-jupyter-kernel-session]")!;
+const jupyterKernelOld = jupyterPanel.querySelector<HTMLSelectElement>("[data-jupyter-kernel-old]")!;
+const jupyterKernelNew = jupyterPanel.querySelector<HTMLSelectElement>("[data-jupyter-kernel-new]")!;
+const jupyterKernelCells = jupyterPanel.querySelector<HTMLElement>("[data-jupyter-kernel-cells]")!;
 
 const roamToolsPanel = document.createElement("section");
 roamToolsPanel.className = "aaronnote-roam-tools";
@@ -902,6 +918,235 @@ type JupyterCellBase = Pick<JupyterPanelCell, "id" | "from" | "to" | "line" | "l
 
 let jupyterScanMarkdown: string | null = null;
 let jupyterScanBases: JupyterCellBase[] = [];
+let jupyterKernelSpecsCache: JupyterKernelSpec[] | null = null;
+
+function uniqueSorted(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+}
+
+function setSelectOptions(select: HTMLSelectElement, values: string[], selected = "", anyLabel = ""): void {
+  const options = anyLabel ? ["", ...uniqueSorted(values)] : uniqueSorted(values);
+  const current = selected || select.value;
+  select.replaceChildren(...options.map((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value || anyLabel;
+    return option;
+  }));
+  if (options.includes(current)) select.value = current;
+  else if (selected && !options.includes(selected)) {
+    const option = document.createElement("option");
+    option.value = selected;
+    option.textContent = selected;
+    select.append(option);
+    select.value = selected;
+  } else {
+    select.value = options[0] || "";
+  }
+}
+
+async function loadJupyterKernelSpecs(): Promise<JupyterKernelSpec[]> {
+  if (jupyterKernelSpecsCache) return jupyterKernelSpecsCache;
+  try {
+    const result = await api.jupyterCell.kernels();
+    jupyterKernelSpecsCache = Array.isArray(result.kernels) ? result.kernels : [];
+  } catch {
+    jupyterKernelSpecsCache = [];
+  }
+  return jupyterKernelSpecsCache;
+}
+
+function formatJupyterCellHeader(
+  leading: string,
+  rawArgs: string,
+  rawId: string,
+  newKernel: string,
+): string {
+  const args = rawArgs.split(",").map((item) => item.trim()).filter(Boolean);
+  const requestedLanguage = cleanJupyterToken(args[0] || "", "python");
+  const session = cleanJupyterToken(args[2] || "", "default");
+  const nextArgs = args.length >= 3 || session !== "default"
+    ? [requestedLanguage, newKernel, session]
+    : [requestedLanguage, newKernel];
+  return `${leading}@@cell(${nextArgs.join(", ")})${rawId ? ` [${rawId.trim()}]` : ""}`;
+}
+
+function switchJupyterKernelForCells(body: {
+  language?: string;
+  session?: string;
+  kernel?: string;
+  oldKernel?: string;
+}): number {
+  if (rejectReadOnlyAction("Read-only pane")) return 0;
+  const targetLanguage = String(body.language || "").trim().toLowerCase();
+  const targetSession = String(body.session || "").trim() || "default";
+  const targetKernel = String(body.kernel || "").trim();
+  const oldKernel = String(body.oldKernel || "").trim();
+  if (!targetLanguage || !targetKernel) {
+    setStatus("Language and kernel are required");
+    return 0;
+  }
+
+  const markdown = editor.getMarkdown();
+  const replacements: Array<{ from: number; to: number; text: string }> = [];
+  let pos = 0;
+  while (pos <= markdown.length) {
+    const lineEndIndex = markdown.indexOf("\n", pos);
+    const lineEnd = lineEndIndex < 0 ? markdown.length : lineEndIndex;
+    const line = markdown.slice(pos, lineEnd);
+    const match = JUPYTER_CELL_RE.exec(line);
+    if (match) {
+      const leading = match[1] ?? "";
+      const rawArgs = match[2] ?? "";
+      const rawId = match[3] ?? "";
+      const args = rawArgs.split(",").map((item) => item.trim()).filter(Boolean);
+      const requestedLanguage = cleanJupyterToken(args[0] || "", "python");
+      const kernelFallback = /^lean4?$/i.test(requestedLanguage)
+        ? "lean4"
+        : /^(?:bash|sh|shell|zsh)$/i.test(requestedLanguage) ? "bash" : "python3";
+      const currentKernel = cleanJupyterToken(args[1] || "", kernelFallback).replace(/^\((.*)\)$/, "$1").trim() || kernelFallback;
+      const language = ceilLanguageForKernel(currentKernel, requestedLanguage);
+      const session = cleanJupyterToken(args[2] || "", "default");
+      if (
+        language.toLowerCase() === targetLanguage
+        && session === targetSession
+        && (!oldKernel || currentKernel === oldKernel)
+        && currentKernel !== targetKernel
+      ) {
+        replacements.push({
+          from: pos,
+          to: lineEnd,
+          text: formatJupyterCellHeader(leading, rawArgs, rawId, targetKernel),
+        });
+      }
+    }
+    if (lineEndIndex < 0) break;
+    pos = lineEnd + 1;
+  }
+
+  for (const replacement of replacements.reverse()) {
+    editor.replaceMarkdownRange(replacement.from, replacement.to, replacement.text);
+  }
+  if (replacements.length > 0) {
+    jupyterScanMarkdown = null;
+    renderJupyterPanel();
+  }
+  setStatus(replacements.length
+    ? `Switched ${replacements.length} ${targetLanguage}/${targetSession} cell${replacements.length === 1 ? "" : "s"} to ${targetKernel}`
+    : `No matching ${targetLanguage}/${targetSession} cells`);
+  return replacements.length;
+}
+
+function setJupyterKernelToolFromCell(cell: JupyterPanelCell | null, specs: JupyterKernelSpec[] = jupyterKernelSpecsCache || []): void {
+  const cells = scanJupyterCells().filter((item) => !isLeanJupyterCell(item));
+  const selected = cell && !isLeanJupyterCell(cell) ? cell : null;
+  const fallback = cells[0] ?? null;
+  const language = selected?.language || jupyterKernelLanguage.value || fallback?.language || "python";
+  const sessionsForLanguage = cells.filter((item) => item.language === language).map((item) => item.session);
+  const session = selected?.session
+    || (sessionsForLanguage.includes(jupyterKernelSession.value) ? jupyterKernelSession.value : "")
+    || sessionsForLanguage[0]
+    || fallback?.session
+    || "default";
+  const kernelsForSelection = cells
+    .filter((item) => item.language === language && item.session === session)
+    .map((item) => item.kernel);
+  const oldKernel = selected?.kernel
+    || (kernelsForSelection.includes(jupyterKernelOld.value) ? jupyterKernelOld.value : "")
+    || kernelsForSelection[0]
+    || fallback?.kernel
+    || "";
+  const specKernels = specs
+    .filter((spec) => !spec.language || spec.language === language || language === "python")
+    .map((spec) => spec.name);
+
+  setSelectOptions(jupyterKernelLanguage, [...cells.map((item) => item.language), language], language);
+  setSelectOptions(jupyterKernelSession, [...sessionsForLanguage, session], session);
+  setSelectOptions(jupyterKernelOld, [...kernelsForSelection, oldKernel], oldKernel, "Any");
+  setSelectOptions(jupyterKernelNew, [...specKernels, ...kernelsForSelection, oldKernel], oldKernel || specKernels[0] || "python3");
+  renderJupyterKernelMatchPreview();
+}
+
+function renderJupyterKernelMatchPreview(): void {
+  const language = jupyterKernelLanguage.value;
+  const session = jupyterKernelSession.value || "default";
+  const oldKernel = jupyterKernelOld.value;
+  const matches = scanJupyterCells().filter((cell) => (
+    !isLeanJupyterCell(cell)
+    && cell.language === language
+    && cell.session === session
+    && (!oldKernel || cell.kernel === oldKernel)
+  ));
+  if (matches.length === 0) {
+    jupyterKernelCells.textContent = "No matching blocks";
+    return;
+  }
+  const head = document.createElement("div");
+  head.className = "aaronnote-jupyter-kernel-cells-head";
+  head.textContent = `${matches.length} matching block${matches.length === 1 ? "" : "s"}`;
+  const list = document.createElement("div");
+  list.className = "aaronnote-jupyter-kernel-cells-list";
+  for (const cell of matches) {
+    const row = document.createElement("div");
+    row.className = "aaronnote-jupyter-kernel-cell";
+    row.textContent = `:${cell.line}  ${cell.language} / ${cell.kernel} / ${cell.session}  ${cell.id}`;
+    list.append(row);
+  }
+  jupyterKernelCells.replaceChildren(head, list);
+}
+
+function switchJupyterKernelFromTool(): void {
+  switchJupyterKernelForCells({
+    language: jupyterKernelLanguage.value,
+    session: jupyterKernelSession.value,
+    kernel: jupyterKernelNew.value,
+    oldKernel: jupyterKernelOld.value,
+  });
+}
+
+async function openJupyterKernelTool(cell: JupyterPanelCell | null = selectedJupyterCell()): Promise<void> {
+  jupyterKernelTool.hidden = false;
+  setJupyterKernelToolFromCell(cell);
+  setJupyterKernelToolFromCell(cell, await loadJupyterKernelSpecs());
+}
+
+function toggleJupyterKernelTool(): void {
+  if (jupyterKernelTool.hidden) {
+    void openJupyterKernelTool();
+  } else {
+    jupyterKernelTool.hidden = true;
+  }
+}
+
+function selectJupyterCellFromHost(body: {
+  file?: string;
+  cellId?: string;
+  id?: string;
+}): JupyterPanelCell | null {
+  const cellId = String(body.cellId || body.id || "").trim();
+  if (!cellId) return null;
+  const cell = scanJupyterCells().find((item) => item.id === cellId) ?? null;
+  if (!cell) {
+    setStatus(`Jupyter cell not found: ${cellId}`);
+    return null;
+  }
+  editor.view.dispatch({ selection: { anchor: cell.from }, scrollIntoView: true });
+  setJupyterKernelToolFromCell(cell);
+  if (!jupyterPanel.hidden) renderJupyterPanel();
+  return cell;
+}
+
+async function runJupyterCellFromHost(body: {
+  file?: string;
+  cellId?: string;
+  id?: string;
+}): Promise<void> {
+  const cellId = String(body.cellId || body.id || "").trim();
+  if (cellId && await window.AaronnoteRunCeilCell?.(cellId)) return;
+  const cell = selectJupyterCellFromHost(body);
+  if (!cell) return;
+  await runJupyterCell(cell);
+}
 
 function scanJupyterCellBases(): JupyterCellBase[] {
   const markdown = editor.getMarkdown();
@@ -958,6 +1203,12 @@ function renderJupyterPanel(): JupyterPanelCell[] {
   const running = cells.filter((cell) => cell.status === "running" || cell.status === "pending").length;
   jupyterSummary.textContent = `${cells.length} cell${cells.length === 1 ? "" : "s"}${running ? `, ${running} running` : ""}`;
   jupyterList.replaceChildren();
+  if (document.activeElement !== jupyterKernelLanguage
+    && document.activeElement !== jupyterKernelSession
+    && document.activeElement !== jupyterKernelOld
+    && document.activeElement !== jupyterKernelNew) {
+    setJupyterKernelToolFromCell(selectedJupyterCell(cells));
+  }
   if (cells.length === 0) {
     const empty = document.createElement("div");
     empty.className = "aaronnote-jupyter-empty";
@@ -988,6 +1239,7 @@ function renderJupyterPanel(): JupyterPanelCell[] {
     row.addEventListener("click", () => {
       editor.view.dispatch({ selection: { anchor: cell.from }, scrollIntoView: true });
       editor.focus();
+      setJupyterKernelToolFromCell(cell);
     });
     jupyterList.append(row);
   }
@@ -5422,6 +5674,49 @@ function runHostCommand(detail: unknown): boolean {
       vim.setMode("insert");
       editor.focus();
       return true;
+    case "jupyter-panel":
+      toggleJupyterPanel();
+      return true;
+    case "jupyter-run-cell":
+      void (async () => {
+        const cell = selectedJupyterCell();
+        if (cell) await runJupyterCell(cell);
+      })();
+      return true;
+    case "jupyter-run-all":
+      void runJupyterCells("all");
+      return true;
+    case "jupyter-run-section":
+      void runJupyterCells("section");
+      return true;
+    case "jupyter-select-cell":
+      selectJupyterCellFromHost(body as { file?: string; cellId?: string; id?: string });
+      return true;
+    case "jupyter-run-script-cell":
+      void runJupyterCellFromHost(body as { file?: string; cellId?: string; id?: string });
+      return true;
+    case "jupyter-restart-run-all":
+      void restartAndRunAllJupyterCells();
+      return true;
+    case "jupyter-interrupt":
+      void interruptSelectedJupyterKernel();
+      return true;
+    case "jupyter-runtime-tasks":
+      if (jupyterPanel.hidden) toggleJupyterPanel();
+      void showJupyterTasks();
+      return true;
+    case "jupyter-cleanup":
+      if (jupyterPanel.hidden) toggleJupyterPanel();
+      void cleanupJupyterRuntime(Boolean((body as { force?: unknown }).force));
+      return true;
+    case "jupyter-switch-kernel":
+      switchJupyterKernelForCells(body as {
+        language?: string;
+        session?: string;
+        kernel?: string;
+        oldKernel?: string;
+      });
+      return true;
     case "toggle-source":
     case "source":
       toggleSourceMode();
@@ -5460,6 +5755,13 @@ toolsClose.addEventListener("click", closeToolsPanel);
 roamToolsClose.addEventListener("click", closeRoamToolsPanel);
 jupyterButton.addEventListener("click", toggleJupyterPanel);
 jupyterClose.addEventListener("click", closeJupyterPanel);
+jupyterKernelLanguage.addEventListener("change", () => setJupyterKernelToolFromCell(null));
+jupyterKernelSession.addEventListener("change", () => setJupyterKernelToolFromCell(null));
+jupyterKernelOld.addEventListener("change", () => {
+  if (jupyterKernelNew.value === "") jupyterKernelNew.value = jupyterKernelOld.value;
+  renderJupyterKernelMatchPreview();
+});
+jupyterKernelNew.addEventListener("change", renderJupyterKernelMatchPreview);
 jupyterPanel.addEventListener("click", (event) => {
   const button = (event.target as Element | null)?.closest<HTMLButtonElement>("[data-jupyter-action]");
   if (!button) return;
@@ -5473,8 +5775,13 @@ jupyterPanel.addEventListener("click", (event) => {
   else if (action === "interrupt") void interruptSelectedJupyterKernel().catch((error) => setStatus(error instanceof Error ? error.message : "Jupyter interrupt failed"));
   else if (action === "clear-all") void clearAllJupyterOutputs().catch((error) => setStatus(error instanceof Error ? error.message : "Clear outputs failed"));
   else if (action === "variables") void showJupyterVariables();
+  else if (action === "toggle-kernel-tool") toggleJupyterKernelTool();
   else if (action === "tasks") void showJupyterTasks();
   else if (action === "cleanup") void cleanupJupyterRuntime(false);
+  else if (action === "switch-kernel") {
+    switchJupyterKernelFromTool();
+    jupyterKernelTool.hidden = true;
+  }
   else if (action === "refresh") {
     jupyterVars.hidden = true;
     jupyterRuntime.hidden = true;

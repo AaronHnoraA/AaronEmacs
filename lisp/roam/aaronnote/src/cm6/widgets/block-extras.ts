@@ -126,6 +126,7 @@ declare global {
     // widgets to re-read their hidden source after an out-of-band edit (e.g.
     // the user saved the script buffer in Emacs). See notifyCeilScriptSaved.
     AaronnoteReloadCeilCells?: (file?: string) => void;
+    AaronnoteRunCeilCell?: (cellId: string) => Promise<boolean>;
     AaronnotePublishJupyterCellResult?: (detail: {
       file: string;
       cellId: string;
@@ -134,6 +135,31 @@ declare global {
       result: CeilExecutionResult;
     }) => void;
   }
+}
+
+const ceilRunHandlers = new Map<string, () => Promise<void>>();
+
+function installCeilRunBridge(): void {
+  window.AaronnoteRunCeilCell = async (cellId: string): Promise<boolean> => {
+    const id = String(cellId || "").trim();
+    const run = id ? ceilRunHandlers.get(id) : undefined;
+    if (!run) return false;
+    await run();
+    return true;
+  };
+}
+
+function registerCeilRunHandler(cellId: string, run: () => Promise<void>): () => void {
+  installCeilRunBridge();
+  const id = String(cellId || "").trim();
+  if (!id) return () => {};
+  ceilRunHandlers.set(id, run);
+  return () => {
+    if (ceilRunHandlers.get(id) === run) ceilRunHandlers.delete(id);
+    if (ceilRunHandlers.size === 0 && window.AaronnoteRunCeilCell) {
+      window.AaronnoteRunCeilCell = undefined;
+    }
+  };
 }
 
 const ORG_ENV_OPEN_LINE_RE = /^([ \t]*#\+\s*begin\s+)(\S+)(?:([ \t]+)([^\n]*?))?[ \t]*$/i;
@@ -1516,6 +1542,8 @@ class CeilCommandWidget extends MeasuredWidget {
   }
 
   override destroy(dom: HTMLElement): void {
+    const cleanup = (dom as HTMLElement & { __ceilRunCleanup?: () => void }).__ceilRunCleanup;
+    if (cleanup) cleanup();
     disposeCeilOutputTree(dom);
     super.destroy(dom);
   }
@@ -1864,6 +1892,10 @@ class CeilCommandWidget extends MeasuredWidget {
     const runButton = makeButton(leanRuntime ? "Sync" : "Run", leanRuntime ? "Sync this Lean cell source file" : "Run this cell and stale cells above in the same language/session script", async () => {
       await runEntries([currentEntry()], "No cell");
     });
+    (block as HTMLElement & { __ceilRunCleanup?: () => void }).__ceilRunCleanup =
+      registerCeilRunHandler(meta.id, async () => {
+        await runEntries([currentEntry()], "No cell");
+      });
     const runAboveButton = makeButton("Above", "Run cells above this one in the same session", async () => {
       await runEntries(contextEntries().filter((entry) => entry.from < this.range.from), "No cells above");
     });
