@@ -152,8 +152,6 @@ the expected body, and returns parsed JSON or nil."
                 (let ((body (make-hash-table :test 'equal))
                       (file (cadr (member "--file" args))))
                   (puthash "file" (or file "") body)
-                  (when (member "--activate-sync" args)
-                    (puthash "activateSync" t body))
                   (vector body)))
                ("update-todo"
                 (let ((body (make-hash-table :test 'equal)))
@@ -2259,8 +2257,8 @@ On a heading line, append `{#id}` unless an id already exists."
 ;; ── DB commands ───────────────────────────────────────────────────────────────
 
 (defun my/aaronnote-roam-update-db (&optional full)
-  "Refresh Markdown roam cache and sync roam.db plus todo.db via Aaronnote runtime.
-With prefix argument FULL, force a full roam/todo DB rebuild.
+  "Refresh Markdown roam cache and sync roam.db via Aaronnote runtime.
+With prefix argument FULL, force a full roam DB rebuild.
 When the web-host is running, delegates to its /api (async, non-blocking).
 Falls back to a CLI subprocess when the web-host is offline."
   (interactive "P")
@@ -2268,13 +2266,13 @@ Falls back to a CLI subprocess when the web-host is offline."
   (cond
    ;; Online: delegate to web-host /api; it is the authoritative writer.
    ((and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
-    (message "Aaronnote: syncing roam/todo DB...")
+    (message "Aaronnote: syncing roam DB...")
     (my/aaronnote--api-call
      (if full "aaronnote:api:notes:roam-sync-full" "aaronnote:api:notes:roam-sync")
      (if full [] [t])
      (lambda (_result)
        (my/aaronnote-roam--clear-runtime-cache)
-       (message "Aaronnote roam/todo sync: done"))))
+       (message "Aaronnote roam sync: done"))))
    ;; Offline fallback: CLI subprocess.
    ((my/aaronnote-roam--runtime-available-p)
     (my/aaronnote-roam--runtime-sync full nil))
@@ -2379,7 +2377,7 @@ Falls back to a CLI subprocess when the web-host is offline."
 
 (defun my/aaronnote-roam--todos ()
   "Return todos from the Aaronnote runtime, roam DB, or local scan."
-  (let* ((runtime (my/aaronnote-roam--runtime-call "todos" "--activate-sync"))
+  (let* ((runtime (my/aaronnote-roam--runtime-call "todos"))
          (runtime-todos (and runtime (gethash "todos" runtime)))
          (runtime-todos (if (hash-table-p runtime-todos)
                             (gethash "todos" runtime-todos)
@@ -3853,20 +3851,19 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
 ;; ── Roam DB utilities ─────────────────────────────────────────────────────────
 
 (defun my/aaronnote-roam-sync-full ()
-  "Force a full roam/todo DB rebuild (clears incremental state)."
+  "Force a full roam DB rebuild (clears incremental state)."
   (interactive)
-  (message "Rebuilding roam/todo DB from scratch…")
+  (message "Rebuilding roam DB from scratch…")
   (when (my/aaronnote-roam--runtime-available-p)
     (my/aaronnote-roam--runtime-sync t nil))
-  (message "Roam/todo DB full rebuild done."))
+  (message "Roam DB full rebuild done."))
 
 (defun my/aaronnote-roam-db-status ()
-  "Show roam/todo DB sync state from Aaronnote var."
+  "Show roam DB sync state from Aaronnote var."
   (interactive)
   (let* ((root (my/aaronnote-roam-root))
          (state-root (my/aaronnote-roam--state-root))
          (roam-db-file (expand-file-name "roam.db" root))
-         (todo-db-file (expand-file-name "todo.db" root))
          (state-file (expand-file-name "sync/state.json"
                                        state-root))
          (state
@@ -3886,24 +3883,22 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
       (my/aaronnote-roam-ui-render
        (lambda ()
          (my/aaronnote-roam-ui-insert-page-header
-          "Roam/todo DB status"
+          "Roam DB status"
           :icon 'database
-          :subtitle "Aaronnote incremental node and agenda index state"
+          :subtitle "Aaronnote incremental node index state"
           :stats (list (cons (if state "State ready" "State missing")
                              (if state 'success 'warning))
                        (cons (if (file-exists-p roam-db-file) "roam.db ready" "roam.db missing")
-                             (if (file-exists-p roam-db-file) 'success 'warning))
-                       (cons (if (file-exists-p todo-db-file) "todo.db ready" "todo.db missing")
-                             (if (file-exists-p todo-db-file) 'success 'warning)))
+                             (if (file-exists-p roam-db-file) 'success 'warning)))
           :actions
           (my/aaronnote-roam--ui-actions
            '((:label "Incremental sync"
               :command my/aaronnote-roam-update-db
-              :help "Run incremental roam/todo DB sync"
+              :help "Run incremental roam DB sync"
               :primary t)
              (:label "Full rebuild"
               :command my/aaronnote-roam-sync-full
-              :help "Rebuild the roam/todo DB index from scratch"))))
+              :help "Rebuild the roam DB index from scratch"))))
          (my/aaronnote-roam-ui-insert-activity-heatmap)
          (my/aaronnote-roam-ui-insert-section "Location")
          (my/aaronnote-roam-ui-insert-field
@@ -3912,16 +3907,17 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
           "roam.db" (abbreviate-file-name roam-db-file)
           'my/aaronnote-roam-ui-path)
          (my/aaronnote-roam-ui-insert-field
-          "todo.db" (abbreviate-file-name todo-db-file)
-          'my/aaronnote-roam-ui-path)
-         (my/aaronnote-roam-ui-insert-field
           "State file" (abbreviate-file-name state-file)
           'my/aaronnote-roam-ui-path)
          (insert "\n")
          (my/aaronnote-roam-ui-insert-section "State")
          (cond
           (state
-           (dolist (key (sort (hash-table-keys state) #'string<))
+           (dolist (key (sort (seq-remove
+                               (lambda (key)
+                                 (string-prefix-p "todoDb" key))
+                               (hash-table-keys state))
+                              #'string<))
              (let ((value (gethash key state)))
                (my/aaronnote-roam-ui-insert-field
                 key (if (eq value :null) "(null)" value)

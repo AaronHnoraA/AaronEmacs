@@ -1,4 +1,5 @@
 import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -145,9 +146,9 @@ describe("server todo scan", () => {
   });
 });
 
-describe("server todo db index", () => {
-  test("sync writes todos to todo.db and getTodos reads DB-first", async () => {
-    const root = await mkdtemp(join(tmpdir(), "aaronnote-todo-db-"));
+describe("server todo agenda", () => {
+  test("getTodos scans markdown without a separate todo db", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-todos-"));
     try {
       await mkdir(join(root, "state"), { recursive: true });
       configure({ root, workspaceRoot: root, stateRoot: join(root, "state"), tmpRoot: join(root, "tmp") });
@@ -168,26 +169,30 @@ describe("server todo db index", () => {
 
       await syncRoamDb(null, { mode: "full" });
       const payload = await getTodos("");
-      expect(payload).toMatchObject({ source: "todo.db", db: join(root, "todo.db") });
+      expect(payload).toMatchObject({ source: "scan" });
+      expect(payload).not.toHaveProperty("db");
+      expect(existsSync(join(root, "todo.db"))).toBe(false);
       expect(payload.todos).toHaveLength(2);
       expect(payload.todos[0]).toMatchObject({
         status: "doing",
         text: "write proof",
-        due: "2026-07-07",
-        priority: "A",
-        scheduled: "2026-07-06",
-        repeat: "+1w",
         noteId: "20260706T120000-a",
+        args: {
+          due: "2026-07-07",
+          priority: "A",
+          scheduled: "2026-07-06",
+          repeat: "+1w",
+        },
       });
       const filePayload = await getTodos(join(root, "a.md"));
-      expect(filePayload).toMatchObject({ source: "todo.db" });
+      expect(filePayload).toMatchObject({ source: "scan" });
       expect(filePayload.todos.map((todo: { text?: string }) => todo.text)).toEqual(["write proof"]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  test("todo status update rewrites markdown and refreshes todo.db", async () => {
+  test("todo status update rewrites markdown without refreshing a todo db", async () => {
     const root = await mkdtemp(join(tmpdir(), "aaronnote-todo-update-"));
     try {
       await mkdir(join(root, "state"), { recursive: true });
@@ -208,7 +213,8 @@ describe("server todo db index", () => {
 
       expect(await readFile(file, "utf8")).toContain("@@todo(done) [ship it]");
       const after = await getTodos("");
-      expect(after).toMatchObject({ source: "todo.db" });
+      expect(after).toMatchObject({ source: "scan" });
+      expect(existsSync(join(root, "todo.db"))).toBe(false);
       expect(after.todos[0]).toMatchObject({ status: "done", text: "ship it" });
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -246,9 +252,11 @@ describe("server todo db index", () => {
       expect(after.todos[0]).toMatchObject({
         status: "doing",
         text: "ship it",
-        priority: "B",
-        scheduled: "2026-07-06",
-        repeat: "+1w",
+        args: {
+          priority: "B",
+          scheduled: "2026-07-06",
+          repeat: "+1w",
+        },
       });
     } finally {
       await rm(root, { recursive: true, force: true });

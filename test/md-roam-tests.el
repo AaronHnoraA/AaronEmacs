@@ -534,7 +534,7 @@ source: roam/demo/analysis.md
                       todos 'search "estimate")
                      (list second))))))
 
-(ert-deftest my/aaronnote-roam-agenda-searches-and-sorts-todo-db-fields ()
+(ert-deftest my/aaronnote-roam-agenda-searches-and-sorts-todo-metadata ()
   (my/aaronnote-roam-test-with-vault
     (let* ((low '(:note "low"
                   :title "Low Note"
@@ -562,7 +562,7 @@ source: roam/demo/analysis.md
                              (my/aaronnote-roam--agenda-sort-todos todos))
                      '("High priority" "Low priority"))))))
 
-(ert-deftest my/aaronnote-roam-agenda-renders-todo-db-metadata ()
+(ert-deftest my/aaronnote-roam-agenda-renders-todo-metadata ()
   (my/aaronnote-roam-test-with-vault
     (let ((todo '(:note "20260605T120000-topology"
                   :title "Topology Note"
@@ -589,7 +589,7 @@ source: roam/demo/analysis.md
         (when-let* ((buffer (get-buffer "*roam-agenda*")))
           (kill-buffer buffer))))))
 
-(ert-deftest my/aaronnote-roam-agenda-renders-empty-todo-db-columns ()
+(ert-deftest my/aaronnote-roam-agenda-renders-empty-todo-metadata-columns ()
   (my/aaronnote-roam-test-with-vault
     (let ((todo '(:note "20260605T120000-topology"
                   :title "Topology Note"
@@ -664,7 +664,7 @@ source: roam/demo/analysis.md
       (should (equal (cadr (member "--priority" captured)) "B"))
       (should-not (member "--status" captured)))))
 
-(ert-deftest my/aaronnote-roam-todos-activate-sync-on-read ()
+(ert-deftest my/aaronnote-roam-todos-reads-runtime-without-activating-sync ()
   (my/aaronnote-roam-test-with-vault
     (let (captured)
       (cl-letf (((symbol-function 'my/aaronnote-roam--runtime-call)
@@ -679,7 +679,7 @@ source: roam/demo/analysis.md
                  (lambda () nil)))
         (my/aaronnote-roam--todos))
       (should (equal (car captured) "todos"))
-      (should (member "--activate-sync" captured)))))
+      (should-not (member "--activate-sync" captured)))))
 
 (ert-deftest my/aaronnote-roam-agenda-calendar-uses-square-cells ()
   (my/aaronnote-roam-test-with-vault
@@ -733,7 +733,7 @@ source: roam/demo/analysis.md
           (my/aaronnote-roam-db-status)
           (with-current-buffer "*roam-db-status*"
             (should (string-match-p "Roam activity" (buffer-string)))
-            (should (string-match-p "todo.db" (buffer-string)))
+            (should-not (string-match-p "todo.db" (buffer-string)))
             (should (string-match-p "roam.db" (buffer-string)))
             (should (string-match-p "W1" (buffer-string)))
             (should (string-match-p "Sun" (buffer-string)))))

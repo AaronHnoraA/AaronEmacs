@@ -71,7 +71,6 @@ async function main() {
   } else if (action === "todos") {
     result = await runtime.getTodos({
       file: argValue(args, "--file", ""),
-      activateSync: hasArg(args, "--activate-sync"),
     });
   } else if (action === "templates") {
     result = {
