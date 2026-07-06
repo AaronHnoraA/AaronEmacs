@@ -23,6 +23,41 @@
   (should (eq (lookup-key my/aaronnote-keys-mode-map (kbd "M-S-z"))
               #'my/aaronnote-redo)))
 
+(ert-deftest my/aaronnote-jupyter-cell-point-move-does-not-sync ()
+  (let ((buffer (generate-new-buffer "*aaronnote-jcell-test*"))
+        calls)
+    (unwind-protect
+        (with-current-buffer buffer
+          (insert "# Aaronnote cell source: /tmp/note.md\n"
+                  "# Aaronnote cell kernel: python3\n"
+                  "# Aaronnote cell session: default\n"
+                  "# Aaronnote cell storage: script\n"
+                  "# %% aaronnote-cell id=one\n"
+                  "print(1)\n"
+                  "# %% end-aaronnote-cell id=one\n\n"
+                  "# %% aaronnote-cell id=two\n"
+                  "print(2)\n"
+                  "# %% end-aaronnote-cell id=two\n")
+          (setq-local my/aaronnote-jupyter-cell-source-file "/tmp/note.md")
+          (setq-local my/aaronnote-jupyter-cell-kernel "python3")
+          (setq-local my/aaronnote-jupyter-cell-session "default")
+          (setq-local my/aaronnote-jupyter-cell-storage "script")
+          (my/aaronnote-jupyter-cell-mode 1)
+          (goto-char (point-min))
+          (search-forward "print(2)")
+          (cl-letf (((symbol-function 'my/aaronnote-command)
+                     (lambda (command &optional detail)
+                       (push (cons command detail) calls))))
+            (my/aaronnote-jupyter-cell--post-command-h)
+            (should (equal my/aaronnote-jupyter-cell-current-id "two"))
+            (should-not calls)
+            (my/aaronnote-jupyter-cell-sync-cursor)
+            (should (= (length calls) 1))
+            (should (equal (caar calls) "jupyter-select-cell"))
+            (should (equal (alist-get 'cellId (cdar calls)) "two"))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (ert-deftest my/aaronnote-xwidget-redo-routes-only-aaronnote-buffer ()
   (let ((buffer (generate-new-buffer "*aaronnote-test*"))
         (my/aaronnote--app-buffer nil)

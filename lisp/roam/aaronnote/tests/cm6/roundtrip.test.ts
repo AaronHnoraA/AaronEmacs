@@ -643,11 +643,36 @@ y^2
     view.contentDOM.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
-    expect(events[0]?.detail).toEqual({ href: "./images/GraphTensor/IMG_6118.jpeg" });
+    expect(events[0]?.detail).toEqual({ href: "./images/GraphTensor/IMG_6118.jpeg", x: 1, y: 1 });
 
     document.removeEventListener("aaronnote:attachment-context-menu", listener);
     if (originalDescriptor) Object.defineProperty(view, "posAtCoords", originalDescriptor);
     else delete (view as { posAtCoords?: unknown }).posAtCoords;
+    cleanup();
+  });
+
+  test("jupyter cell insert inherits previous language kernel and session", () => {
+    const md = "@@cell(python, sagemath-10.9, analysis) [a]\nplain";
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    expect(editor.runCommand("jupyter-cell")).toBe(true);
+    expect(editor.getMarkdown().match(/@@cell\(python, sagemath-10\.9, analysis\)/g)?.length).toBe(2);
+
+    cleanup();
+  });
+
+  test("bare jupyter cell widget inherits previous runtime defaults", async () => {
+    const md = "@@cell(python, sagemath-10.9, analysis) [a]\n@@cell";
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    expect(document.querySelector(".cm-ceil-label")?.textContent).toBe("CELL");
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+
+    expect(editor.getMarkdown()).toMatch(/@@cell\(python, sagemath-10\.9, analysis\) \[ceil-[^\]]+\]/);
+
     cleanup();
   });
 

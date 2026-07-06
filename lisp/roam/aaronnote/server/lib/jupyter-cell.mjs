@@ -992,6 +992,94 @@ export function createJupyterCellService({
     return { ok: true, file: outputFile, cellId, kernel, session };
   }
 
+  async function deleteScriptCell(body) {
+    const noteFile = safeNoteFile(body?.file);
+    const kernel = cleanToken(body?.kernel, "python3");
+    const session = cleanToken(body?.session, "default");
+    const language = languageForKernel(kernel, body?.language || body?.lang);
+    const cellId = markerId(body?.cellId || body?.id);
+    if (!cellId) throw error("Missing Jupyter cell id", 400);
+    const scriptFile = hiddenScriptPath(noteFile, session, language);
+    const outputFile = outputMirrorPath(noteFile, session, language);
+    const existingScript = await readExistingHiddenScript(scriptFile);
+    const remainingOrder = existingScript.order.filter((id) => id && id !== cellId);
+    let removedScript = false;
+    let changedScript = existingScript.order.includes(cellId);
+
+    if (remainingOrder.length === 0) {
+      await rm(scriptFile, { force: true });
+      await rm(outputFile, { force: true });
+      removedScript = true;
+    } else if (changedScript) {
+      const cells = remainingOrder.map((id) => ({
+        cellId: id,
+        id,
+        code: existingScript.cells.get(id) ?? "",
+      }));
+      const rendered = buildHiddenScript({
+        noteFile,
+        kernel,
+        session,
+        language,
+        cells,
+        targetCellId: remainingOrder[0],
+        storage: "script",
+        existingCells: new Map(),
+        existingOrder: [],
+      });
+      await mkdir(dirname(scriptFile), { recursive: true });
+      await writeFile(scriptFile, rendered.text, "utf8");
+      await withMirrorLock(outputFile, async () => {
+        const mirror = await readOutputMirror(outputFile);
+        const cellsMirror = mirror.cells && typeof mirror.cells === "object" ? mirror.cells : {};
+        delete cellsMirror[cellId];
+        if (Object.keys(cellsMirror).length === 0) {
+          await rm(outputFile, { force: true });
+        } else {
+          await writeOutputMirror(outputFile, {
+            version: 1,
+            source: noteFile,
+            kernel,
+            session,
+            language,
+            cells: cellsMirror,
+          });
+        }
+      });
+    } else {
+      await withMirrorLock(outputFile, async () => {
+        const mirror = await readOutputMirror(outputFile);
+        const cellsMirror = mirror.cells && typeof mirror.cells === "object" ? mirror.cells : {};
+        if (!Object.prototype.hasOwnProperty.call(cellsMirror, cellId)) return;
+        delete cellsMirror[cellId];
+        if (Object.keys(cellsMirror).length === 0) {
+          await rm(outputFile, { force: true });
+        } else {
+          await writeOutputMirror(outputFile, {
+            version: 1,
+            source: noteFile,
+            kernel,
+            session,
+            language,
+            cells: cellsMirror,
+          });
+        }
+      });
+    }
+    return {
+      ok: true,
+      file: scriptFile,
+      outputFile,
+      cellId,
+      kernel,
+      session,
+      language,
+      changedScript,
+      removedScript,
+      remainingCells: remainingOrder.length,
+    };
+  }
+
   async function saveScriptCellOutputUi(body) {
     const noteFile = safeNoteFile(body?.file);
     const kernel = cleanToken(body?.kernel, "python3");
@@ -1239,6 +1327,7 @@ export function createJupyterCellService({
     readScriptCell,
     executeScriptCell,
     clearScriptCellOutput,
+    deleteScriptCell,
     saveScriptCellOutputUi,
     clearAllOutputs,
     variables,

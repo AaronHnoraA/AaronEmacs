@@ -33,9 +33,6 @@
 (defvar-local my/aaronnote-jupyter-cell--end-overlay nil
   "Overlay highlighting the current Jupyter cell end marker.")
 
-(defvar-local my/aaronnote-jupyter-cell--last-sync-id nil
-  "Last cell id synced from this Emacs buffer to Aaronnote.")
-
 (defvar my/aaronnote-jupyter-cell-mode)
 
 (defface my/aaronnote-jupyter-cell-marker-face
@@ -158,19 +155,11 @@
       (storage . ,(or my/aaronnote-jupyter-cell-storage "")))))
 
 (defun my/aaronnote-jupyter-cell--post-command-h ()
-  "Track current cell and sync cursor moves to Aaronnote."
+  "Track current cell for local highlighting.
+Cursor moves in the Emacs source buffer are intentionally local; use
+`my/aaronnote-jupyter-cell-sync-cursor' (`M-RET') to sync Aaronnote."
   (when my/aaronnote-jupyter-cell-mode
-    (my/aaronnote-jupyter-cell--update-highlight)
-    (when (and my/aaronnote-jupyter-cell-current-id
-               (not (equal my/aaronnote-jupyter-cell-current-id
-                           my/aaronnote-jupyter-cell--last-sync-id)))
-      (setq-local my/aaronnote-jupyter-cell--last-sync-id
-                  my/aaronnote-jupyter-cell-current-id)
-      (ignore-errors
-        (my/aaronnote-command
-         "jupyter-select-cell"
-         (my/aaronnote-jupyter-cell--command-detail
-          my/aaronnote-jupyter-cell-current-id))))))
+    (my/aaronnote-jupyter-cell--update-highlight)))
 
 (defun my/aaronnote-jupyter-cell-sync-cursor ()
   "Sync the current Emacs Jupyter cell cursor back to Aaronnote."

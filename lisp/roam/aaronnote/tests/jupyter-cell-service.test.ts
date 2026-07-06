@@ -1,7 +1,7 @@
 import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createJupyterCellService, durationFromEnv, jupyterWidgetCommOpenP } from "../server/lib/jupyter-cell.mjs";
 
 // These exercise only the filesystem + short-circuit paths of the cell service
@@ -121,6 +121,50 @@ describe("jupyter cell service (no kernel)", () => {
       expect(readA.code).toBe("x = 1");
       expect(readB.code).toBe("print(x)");
       expect(readC.code).toBe("");
+    });
+  });
+
+  test("deleteScriptCell removes hidden code and deletes files when the script becomes empty", async () => {
+    await withService(async ({ service, note }) => {
+      const scriptFile = join(dirname(note), ".cell", "note.python.default.py");
+      const outputFile = join(dirname(note), ".cell", "note.output.python.default.json");
+      await service.openScript({
+        file: note,
+        cellId: "cell-a",
+        kernel: "python3",
+        session: "default",
+        language: "python",
+        storage: "script",
+        open: false,
+        cells: [
+          { cellId: "cell-a", id: "cell-a", code: "x = 1" },
+          { cellId: "cell-b", id: "cell-b", code: "print(x)" },
+        ],
+      });
+      await service.saveScriptCellOutputUi({
+        file: note, cellId: "cell-a", kernel: "python3", session: "default", language: "python", outputFolded: true,
+      });
+      await service.saveScriptCellOutputUi({
+        file: note, cellId: "cell-b", kernel: "python3", session: "default", language: "python", outputExpanded: true,
+      });
+
+      const first = await service.deleteScriptCell({
+        file: note, cellId: "cell-a", kernel: "python3", session: "default", language: "python",
+      });
+      expect(first.removedScript).toBe(false);
+      const scriptAfterFirst = await readFile(scriptFile, "utf8");
+      expect(scriptAfterFirst).not.toContain("id=cell-a");
+      expect(scriptAfterFirst).toContain("id=cell-b");
+      const outputAfterFirst = JSON.parse(await readFile(outputFile, "utf8"));
+      expect(outputAfterFirst.cells["cell-a"]).toBeUndefined();
+      expect(outputAfterFirst.cells["cell-b"]).toBeTruthy();
+
+      const second = await service.deleteScriptCell({
+        file: note, cellId: "cell-b", kernel: "python3", session: "default", language: "python",
+      });
+      expect(second.removedScript).toBe(true);
+      await expect(readFile(scriptFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(outputFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     });
   });
 

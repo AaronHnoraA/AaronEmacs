@@ -852,8 +852,6 @@ button:disabled {
   position: fixed;
   z-index: 1200;
   width: min(320px, calc(100vw - 12px));
-  max-height: min(560px, calc(100vh - 12px));
-  overflow: auto;
   display: grid;
   gap: 1px;
   border: 1px solid var(--aaron-paper-line);

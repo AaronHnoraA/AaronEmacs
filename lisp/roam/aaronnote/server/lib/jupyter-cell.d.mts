@@ -17,6 +17,7 @@ export interface JupyterCellService {
   readScriptCell(body?: Record<string, unknown>): Promise<Record<string, any>>;
   executeScriptCell(body?: Record<string, unknown>): Promise<Record<string, any>>;
   clearScriptCellOutput(body?: Record<string, unknown>): Promise<Record<string, any>>;
+  deleteScriptCell(body?: Record<string, unknown>): Promise<Record<string, any>>;
   saveScriptCellOutputUi(body?: Record<string, unknown>): Promise<Record<string, any>>;
   clearAllOutputs(body?: Record<string, unknown>): Promise<Record<string, any>>;
   variables(body?: Record<string, unknown>): Promise<Record<string, any>>;

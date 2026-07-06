@@ -10,6 +10,7 @@ import {
 } from "../src/lib.ts";
 import { setupCopilot } from "../src/copilot/index.ts";
 import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownBlock, indentMarkdownList, tableNavigateCell, tableEnterSameColumn } from "../src/cm6/commands.ts";
+import { markdownHrefAt } from "../src/cm6/editor-cm6.ts";
 import { getBlockMathRanges, rangeAtPosition, rangeOverlapsAny } from "../src/cm6/math-ranges.ts";
 import { equationTagsFromText, getEquationTagHits } from "../src/equation-tags.ts";
 import { INLINE_MATH_RE } from "../src/inline-math.ts";
@@ -753,9 +754,22 @@ function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
 host.addEventListener("pointerdown", activateEditorFromPointer, { capture: true });
 host.addEventListener("mousedown", activateEditorFromPointer, { capture: true });
 document.addEventListener("contextmenu", (event) => {
+  if (!(event.target instanceof Node) || !host.contains(event.target)) return;
+  event.preventDefault();
+  showContextMenu(event);
+}, { capture: true });
+document.addEventListener("aaronnote:attachment-context-menu", (event) => {
+  const custom = event as CustomEvent<{ href?: string; x?: number; y?: number }>;
+  const href = custom.detail?.href;
+  if (!href) return;
   event.preventDefault();
   event.stopPropagation();
-  showContextMenu(event);
+  showContextMenu(event as unknown as MouseEvent, {
+    href,
+    cell: null,
+    x: Number(custom.detail?.x) || 12,
+    y: Number(custom.detail?.y) || 12,
+  });
 }, { capture: true });
 document.addEventListener("pointerdown", (event) => {
   const target = event.target;
@@ -892,6 +906,50 @@ function cleanJupyterToken(value: string, fallback: string): string {
   return clean || fallback;
 }
 
+type JupyterCellDefaults = {
+  language: string;
+  kernel: string;
+  session: string;
+};
+
+const DEFAULT_JUPYTER_CELL: JupyterCellDefaults = {
+  language: "python",
+  kernel: "python3",
+  session: "default",
+};
+
+function jupyterLooksLikeKernelToken(value: string): boolean {
+  return /python3|sage|julia|ir|bash|zsh|node|javascript|typescript|lean4?/i.test(value);
+}
+
+function jupyterDefaultKernelForLanguage(language: string): string {
+  if (/^lean4?$/i.test(language)) return "lean4";
+  if (/^(?:bash|sh|shell|zsh)$/i.test(language)) return "bash";
+  return DEFAULT_JUPYTER_CELL.kernel;
+}
+
+function parseJupyterCellRuntime(rawArgs: string, defaults: JupyterCellDefaults = DEFAULT_JUPYTER_CELL): JupyterCellDefaults {
+  const args = rawArgs.split(",").map((item) => item.trim()).filter(Boolean);
+  let requestedLanguage = cleanJupyterToken(args[0] || "", defaults.language);
+  let kernel = args[1] || "";
+  const session = cleanJupyterToken(args[2] || "", defaults.session);
+  if (args.length === 1 && jupyterLooksLikeKernelToken(args[0]!)) {
+    kernel = args[0]!;
+    requestedLanguage = ceilLanguageForKernel(kernel);
+  } else if (!args[1] && defaults.kernel) {
+    const defaultLanguage = ceilLanguageForKernel(defaults.kernel, defaults.language);
+    const requestedLanguageLower = requestedLanguage.toLowerCase();
+    if (!args[0] || requestedLanguageLower === defaults.language.toLowerCase() || requestedLanguageLower === defaultLanguage.toLowerCase()) {
+      kernel = defaults.kernel;
+    }
+  }
+  if (!args[1] && !kernel) kernel = jupyterDefaultKernelForLanguage(requestedLanguage);
+  kernel = cleanJupyterToken(kernel, jupyterDefaultKernelForLanguage(requestedLanguage)).replace(/^\((.*)\)$/, "$1").trim()
+    || jupyterDefaultKernelForLanguage(requestedLanguage);
+  const language = ceilLanguageForKernel(kernel, requestedLanguage);
+  return { language, kernel, session };
+}
+
 function jupyterCellKey(cell: Pick<JupyterPanelCell, "id" | "language" | "kernel" | "session">): string {
   return `${cell.language}\0${cell.kernel}\0${cell.session}\0${cell.id}`;
 }
@@ -958,16 +1016,13 @@ async function loadJupyterKernelSpecs(): Promise<JupyterKernelSpec[]> {
 
 function formatJupyterCellHeader(
   leading: string,
-  rawArgs: string,
   rawId: string,
+  runtime: JupyterCellDefaults,
   newKernel: string,
 ): string {
-  const args = rawArgs.split(",").map((item) => item.trim()).filter(Boolean);
-  const requestedLanguage = cleanJupyterToken(args[0] || "", "python");
-  const session = cleanJupyterToken(args[2] || "", "default");
-  const nextArgs = args.length >= 3 || session !== "default"
-    ? [requestedLanguage, newKernel, session]
-    : [requestedLanguage, newKernel];
+  const nextArgs = runtime.session && runtime.session !== DEFAULT_JUPYTER_CELL.session
+    ? [runtime.language, newKernel, runtime.session]
+    : [runtime.language, newKernel];
   return `${leading}@@cell(${nextArgs.join(", ")})${rawId ? ` [${rawId.trim()}]` : ""}`;
 }
 
@@ -990,6 +1045,7 @@ function switchJupyterKernelForCells(body: {
   const markdown = editor.getMarkdown();
   const replacements: Array<{ from: number; to: number; text: string }> = [];
   let pos = 0;
+  let lastCellDefaults = DEFAULT_JUPYTER_CELL;
   while (pos <= markdown.length) {
     const lineEndIndex = markdown.indexOf("\n", pos);
     const lineEnd = lineEndIndex < 0 ? markdown.length : lineEndIndex;
@@ -999,24 +1055,18 @@ function switchJupyterKernelForCells(body: {
       const leading = match[1] ?? "";
       const rawArgs = match[2] ?? "";
       const rawId = match[3] ?? "";
-      const args = rawArgs.split(",").map((item) => item.trim()).filter(Boolean);
-      const requestedLanguage = cleanJupyterToken(args[0] || "", "python");
-      const kernelFallback = /^lean4?$/i.test(requestedLanguage)
-        ? "lean4"
-        : /^(?:bash|sh|shell|zsh)$/i.test(requestedLanguage) ? "bash" : "python3";
-      const currentKernel = cleanJupyterToken(args[1] || "", kernelFallback).replace(/^\((.*)\)$/, "$1").trim() || kernelFallback;
-      const language = ceilLanguageForKernel(currentKernel, requestedLanguage);
-      const session = cleanJupyterToken(args[2] || "", "default");
+      const runtime = parseJupyterCellRuntime(rawArgs, lastCellDefaults);
+      lastCellDefaults = runtime;
       if (
-        language.toLowerCase() === targetLanguage
-        && session === targetSession
-        && (!oldKernel || currentKernel === oldKernel)
-        && currentKernel !== targetKernel
+        runtime.language.toLowerCase() === targetLanguage
+        && runtime.session === targetSession
+        && (!oldKernel || runtime.kernel === oldKernel)
+        && runtime.kernel !== targetKernel
       ) {
         replacements.push({
           from: pos,
           to: lineEnd,
-          text: formatJupyterCellHeader(leading, rawArgs, rawId, targetKernel),
+          text: formatJupyterCellHeader(leading, rawId, runtime, targetKernel),
         });
       }
     }
@@ -1157,6 +1207,7 @@ function scanJupyterCellBases(): JupyterCellBase[] {
   const bases: JupyterCellBase[] = [];
   let pos = 0;
   let lineNumber = 1;
+  let lastCellDefaults = DEFAULT_JUPYTER_CELL;
   while (pos <= markdown.length) {
     const lineEndIndex = markdown.indexOf("\n", pos);
     const lineEnd = lineEndIndex < 0 ? markdown.length : lineEndIndex;
@@ -1166,18 +1217,12 @@ function scanJupyterCellBases(): JupyterCellBase[] {
       const leading = match[1] ?? "";
       const rawArgs = match[2] ?? "";
       const rawId = match[3] ?? "";
-      const args = rawArgs.split(",").map((item) => item.trim()).filter(Boolean);
-      const requestedLanguage = cleanJupyterToken(args[0] || "", "python");
-      const kernelFallback = /^lean4?$/i.test(requestedLanguage)
-        ? "lean4"
-        : /^(?:bash|sh|shell|zsh)$/i.test(requestedLanguage) ? "bash" : "python3";
-      const kernel = cleanJupyterToken(args[1] || "", kernelFallback).replace(/^\((.*)\)$/, "$1").trim() || kernelFallback;
-      const language = ceilLanguageForKernel(kernel, requestedLanguage);
-      const session = cleanJupyterToken(args[2] || "", "default");
+      const runtime = parseJupyterCellRuntime(rawArgs, lastCellDefaults);
+      lastCellDefaults = runtime;
       // Same generator the widget uses (offset after leading whitespace) so a
       // panel run and the widget agree on an unlabeled cell's hidden-script id.
       const id = cleanJupyterToken(rawId, ceilCommandGeneratedId(currentFile, pos + leading.length, rawArgs, rawId));
-      bases.push({ id, from: pos, to: lineEnd, line: lineNumber, language, kernel, session, status: "idle" });
+      bases.push({ id, from: pos, to: lineEnd, line: lineNumber, ...runtime, status: "idle" });
     }
     if (lineEndIndex < 0) break;
     pos = lineEnd + 1;
@@ -1614,19 +1659,32 @@ async function cleanupJupyterRuntime(force = false): Promise<void> {
   }
 }
 
-function jupyterCellAtPosition(position: number, cells = scanJupyterCells()): JupyterPanelCell | null {
-  let best: JupyterPanelCell | null = null;
-  for (const cell of cells) {
-    if (cell.from <= position) best = cell;
-    if (cell.from > position) break;
-  }
-  return best;
+function jupyterCellAtCommandPosition(position: number, cells = scanJupyterCells()): JupyterPanelCell | null {
+  return cells.find((cell) => position >= cell.from && position <= cell.to) ?? null;
 }
 
-function jupyterCellFromPointer(event: MouseEvent): JupyterPanelCell | null {
+function sourceRangeFromEventTarget(event: Event): { from: number; to: number } | null {
+  let el: Element | null = event.target instanceof Element ? event.target : null;
+  while (el) {
+    const from = Number((el as HTMLElement).dataset?.cmSourceFrom);
+    const to = Number((el as HTMLElement).dataset?.cmSourceTo);
+    if (Number.isFinite(from) && Number.isFinite(to)) return { from, to };
+    el = el.parentElement;
+  }
+  return null;
+}
+
+function jupyterCellFromPointer(event: MouseEvent, fallbackToSelection = true): JupyterPanelCell | null {
+  const sourceRange = sourceRangeFromEventTarget(event);
+  if (sourceRange) {
+    const fromWidget = jupyterCellAtCommandPosition(sourceRange.from)
+      ?? scanJupyterCells().find((cell) => sourceRange.from >= cell.from && sourceRange.from <= cell.to)
+      ?? null;
+    if (fromWidget) return fromWidget;
+  }
   const posAtCoords = editor.view.posAtCoords({ x: event.clientX, y: event.clientY });
-  if (typeof posAtCoords !== "number") return selectedJupyterCell();
-  return jupyterCellAtPosition(posAtCoords) ?? selectedJupyterCell();
+  if (typeof posAtCoords !== "number") return fallbackToSelection ? selectedJupyterCell() : null;
+  return jupyterCellAtCommandPosition(posAtCoords) ?? (fallbackToSelection ? selectedJupyterCell() : null);
 }
 
 async function openJupyterCellSource(cell: JupyterPanelCell): Promise<void> {
@@ -1643,6 +1701,42 @@ async function openJupyterCellSource(cell: JupyterPanelCell): Promise<void> {
     storage: "script",
     cells: jupyterCellsForContext(cell),
   });
+}
+
+async function deleteJupyterCellBlock(cell: JupyterPanelCell): Promise<void> {
+  if (rejectReadOnlyAction("Read-only pane")) return;
+  try {
+    const doc = editor.view.state.doc;
+    const line = doc.lineAt(cell.from);
+    let from = line.from;
+    let to = line.to;
+    if (to < doc.length) to += 1;
+    else if (from > 0) from -= 1;
+    editor.replaceMarkdownRange(from, to, "");
+    jupyterTaskState.delete(jupyterCellKey(cell));
+    jupyterScanMarkdown = null;
+    renderJupyterPanel();
+    setStatus(`Deleted Jupyter cell ${cell.id}`);
+  } catch (error) {
+    setStatus(error instanceof Error ? `Delete failed: ${error.message}` : "Delete failed");
+    return;
+  }
+  if (!currentFile) return;
+  try {
+    const result = await api.jupyterCell.deleteScriptCell({
+      file: currentFile,
+      cellId: cell.id,
+      kernel: cell.kernel,
+      session: cell.session,
+      language: cell.language,
+    });
+    const removedScript = result.removedScript === true;
+    setStatus(removedScript
+      ? `Deleted Jupyter cell ${cell.id} and empty script`
+      : `Deleted Jupyter cell ${cell.id}`);
+  } catch (error) {
+    setStatus(error instanceof Error ? `Cell deleted; cleanup failed: ${error.message}` : "Cell deleted; cleanup failed");
+  }
 }
 
 type AaronContextMenuItem = {
@@ -1677,7 +1771,11 @@ function contextMenuItem(item: AaronContextMenuItem): HTMLElement {
     event.preventDefault();
     event.stopPropagation();
     hideContextMenu();
-    if (!item.disabled) void item.run?.();
+    if (!item.disabled) {
+      Promise.resolve(item.run?.()).catch((error) => {
+        setStatus(error instanceof Error ? error.message : "Context action failed");
+      });
+    }
   });
   return button;
 }
@@ -1687,10 +1785,53 @@ function runContextEditorCommand(command: EditorCommand, value = ""): boolean {
   return editor.runCommand(command, value);
 }
 
+function markdownHrefFromPointer(event: MouseEvent): string {
+  const pos = editor.view.posAtCoords({ x: event.clientX, y: event.clientY });
+  if (typeof pos !== "number") return "";
+  return cleanHref(markdownHrefAt(editor.view.state, pos) || "");
+}
+
 async function copyCurrentNotePath(): Promise<void> {
   if (!currentFile) return;
   await copyText(currentFile);
   setStatus("Note path copied");
+}
+
+async function copyContextLink(href: string): Promise<void> {
+  await copyText(href);
+  setStatus("Link copied");
+}
+
+function canOpenHrefInEmacs(href: string): boolean {
+  const raw = cleanHref(href);
+  if (!raw) return false;
+  if (raw.startsWith("#")) return Boolean(currentFile);
+  return Boolean(resolveHrefTarget(raw).note?.file);
+}
+
+async function openHrefInEmacs(href: string): Promise<void> {
+  const raw = cleanHref(href);
+  if (!raw) return;
+  const target = resolveHrefTarget(raw);
+  const file = target.note?.file || (raw.startsWith("#") ? currentFile : "");
+  if (!file) {
+    setStatus("No Emacs target for link");
+    return;
+  }
+  await api.emacs.open({ file });
+}
+
+function canSystemOpenHref(href: string): boolean {
+  const raw = cleanHref(href);
+  return Boolean(raw && !raw.startsWith("#"));
+}
+
+async function systemOpenHref(href: string): Promise<void> {
+  const raw = cleanHref(href);
+  if (!raw || raw.startsWith("#")) return;
+  await api.emacs.systemOpen(raw, currentFile).catch((err) => {
+    setStatus(err instanceof Error ? err.message : `Cannot open: ${raw}`);
+  });
 }
 
 async function pasteIntoEditorFromContextMenu(): Promise<boolean> {
@@ -1698,29 +1839,40 @@ async function pasteIntoEditorFromContextMenu(): Promise<boolean> {
   return editor.pasteFromClipboard();
 }
 
-function showContextMenu(event: MouseEvent): void {
+type AaronContextMenuTarget = {
+  x: number;
+  y: number;
+  href?: string;
+  cell?: JupyterPanelCell | null;
+};
+
+function showContextMenu(event: MouseEvent, target: Partial<AaronContextMenuTarget> = {}): void {
   const selection = editor.getMarkdownSelection();
   const hasSelection = selection.from !== selection.to;
-  const cell = jupyterCellFromPointer(event);
-  const cellCount = scanJupyterCells().length;
+  const cell = target.cell !== undefined ? target.cell : jupyterCellFromPointer(event, false);
+  const href = cleanHref(target.href || markdownHrefFromPointer(event));
   const cellDetail = cell
     ? isLeanJupyterCell(cell) ? `${cell.language} / ${cell.session}` : `${cell.language} / ${cell.kernel} / ${cell.session}`
     : "";
   const items: AaronContextMenuItem[] = [];
-  const addSeparator = (): void => {
-    if (items.length > 0 && !items.at(-1)?.separator) items.push({ label: "", separator: true });
-  };
 
   if (cell) {
     items.push(
       { label: "Run Cell", detail: cellDetail, disabled: !currentFile, run: () => runJupyterCell(cell) },
       { label: "Edit Cell Source", detail: cell.id, disabled: !currentFile, run: () => openJupyterCellSource(cell) },
       { label: "Run Section", detail: cell.session, disabled: !currentFile, run: () => runJupyterCells("section") },
+      { label: "Kernel Tool", detail: "switch", disabled: isLeanJupyterCell(cell), run: () => void openJupyterKernelTool(cell) },
+      { label: "Delete Cell Block", detail: "source + output", danger: true, disabled: currentReadOnly, run: () => deleteJupyterCellBlock(cell) },
     );
-    addSeparator();
-  }
-
-  if (hasSelection) {
+  } else if (href) {
+    const detail = hrefPath(href) || href;
+    items.push(
+      { label: "Open", detail, run: () => openExternalUrl(href) },
+      { label: "Open in Emacs", detail: "target note", disabled: !canOpenHrefInEmacs(href), run: () => openHrefInEmacs(href) },
+      { label: "System Open", detail: "default app", disabled: !canSystemOpenHref(href), run: () => systemOpenHref(href) },
+      { label: "Copy Link", detail: "clipboard", run: () => copyContextLink(href) },
+    );
+  } else if (hasSelection) {
     items.push(
       { label: "Copy Selection", detail: "Cmd-C", run: () => copyEditorSelection() },
       { label: "Bold", detail: "Cmd-B", disabled: currentReadOnly, run: () => runContextEditorCommand("bold") },
@@ -1728,51 +1880,23 @@ function showContextMenu(event: MouseEvent): void {
       { label: "Inline Code", detail: "`code`", disabled: currentReadOnly, run: () => runContextEditorCommand("code") },
       { label: "Link", detail: "Cmd-K", disabled: currentReadOnly, run: () => runContextEditorCommand("link") },
     );
-    addSeparator();
   } else {
     items.push(
       { label: "Paste", detail: "Cmd-V", disabled: currentReadOnly, run: () => pasteIntoEditorFromContextMenu() },
       { label: "Find in Note", detail: "Cmd-F", run: () => openFindPanel() },
-    );
-    addSeparator();
-  }
-
-  items.push(
-    { label: "Save", detail: currentReadOnly ? "read-only" : "Cmd-S", disabled: currentReadOnly || !currentFile, run: () => save() },
-    { label: "Open in Emacs", detail: currentFile ? fileNameFromPath(currentFile) : "", disabled: !currentFile, run: () => api.emacs.open({ file: currentFile }) },
-    { label: editor.isSourceMode() ? "Markdown View" : "Source View", detail: "Cmd-/", run: () => toggleSourceMode() },
-    { label: "Copy Note Path", detail: currentFile ? fileNameFromPath(currentFile) : "", disabled: !currentFile, run: () => copyCurrentNotePath() },
-  );
-
-  addSeparator();
-  items.push(
-    { label: "TOC", detail: "outline", run: () => { floatingTocPanel.toggle(); updateFloatingToc(); } },
-    { label: "Graph", detail: "local", run: () => localGraphPanel.toggle() },
-    ...(hasSelection ? [{ label: "Find in Note", detail: "Cmd-F", run: () => openFindPanel() }] : []),
-    { label: "Tools", detail: "roam / export", run: () => toggleToolsPanel() },
-  );
-
-  addSeparator();
-  items.push(
-    { label: "Tag / Copy Ref", detail: "anchor", disabled: currentReadOnly, run: () => tagOrCopyRef() },
-    { label: "Insert Roam Idlink", detail: "search", disabled: currentReadOnly || currentStandalone, run: () => insertRoamIdLink() },
-    { label: "Export LaTeX", detail: hasSelection ? "selection" : "note", disabled: !currentFile, run: () => exportLatexTool() },
-    { label: "Reload Roam Index", detail: "notes", run: () => reloadNotes(true) },
-  );
-
-  if (cellCount > 0) {
-    addSeparator();
-    items.push(
-      { label: "Run All Cells", detail: `${cellCount} cell${cellCount === 1 ? "" : "s"}`, disabled: !currentFile, run: () => runJupyterCells("all") },
-      { label: "Runtime Tasks", detail: "kernels", run: () => { if (jupyterPanel.hidden) toggleJupyterPanel(); void showJupyterTasks(); } },
+      { label: "Save", detail: currentReadOnly ? "read-only" : "Cmd-S", disabled: currentReadOnly || !currentFile, run: () => save() },
+      { label: editor.isSourceMode() ? "Markdown View" : "Source View", detail: "Cmd-/", run: () => toggleSourceMode() },
+      { label: "Copy Note Path", detail: currentFile ? fileNameFromPath(currentFile) : "", disabled: !currentFile, run: () => copyCurrentNotePath() },
     );
   }
 
   contextMenu.replaceChildren(...items.map(contextMenuItem));
   contextMenu.hidden = false;
   const rect = contextMenu.getBoundingClientRect();
-  const left = Math.max(6, Math.min(window.innerWidth - rect.width - 6, event.clientX));
-  const top = Math.max(6, Math.min(window.innerHeight - rect.height - 6, event.clientY));
+  const x = target.x ?? event.clientX;
+  const y = target.y ?? event.clientY;
+  const left = Math.max(6, Math.min(window.innerWidth - rect.width - 6, x));
+  const top = Math.max(6, Math.min(window.innerHeight - rect.height - 6, y));
   contextMenu.style.left = `${left}px`;
   contextMenu.style.top = `${top}px`;
 }

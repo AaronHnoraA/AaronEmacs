@@ -583,6 +583,8 @@ type CeilCommandMeta = CeilMeta & {
   rawArgs: string;
 };
 
+type CeilCommandDefaults = Pick<CeilMeta, "language" | "kernel" | "session">;
+
 const CEIL_COMMAND_LINE_RE = /^([ \t]*)@@cell(?:[ \t]*\(([^)\n]*)\))?(?:[ \t]+\[([^\]\n]*)\])?[ \t]*$/i;
 
 function parseCeilCommandLine(text: string, lineFrom: number): CeilCommandRange | null {
@@ -601,21 +603,39 @@ function ceilCommandGeneratedId(file: string, range: CeilCommandRange): string {
   return sharedCeilCommandGeneratedId(file, range.from, range.argsRaw, range.idRaw);
 }
 
-function parseCeilCommand(range: CeilCommandRange, file: string): CeilCommandMeta {
+function ceilLooksLikeKernelToken(value: string): boolean {
+  return /python3|sage|julia|ir|bash|zsh|node|javascript|typescript|lean4?/i.test(value);
+}
+
+function defaultCeilKernelForLanguage(language: string): string {
+  if (/^lean4?$/i.test(language)) return "lean4";
+  if (/^(?:bash|sh|shell|zsh)$/i.test(language)) return "bash";
+  return DEFAULT_CEIL_KERNEL;
+}
+
+function parseCeilCommand(range: CeilCommandRange, file: string, defaults?: CeilCommandDefaults): CeilCommandMeta {
   const args = range.argsRaw.split(",").map((part) => part.trim()).filter(Boolean);
-  let language = args[0] || DEFAULT_CEIL_LANGUAGE;
+  let language = args[0] || defaults?.language || DEFAULT_CEIL_LANGUAGE;
   let kernel = args[1] || "";
-  let session = args[2] || DEFAULT_CEIL_SESSION;
-  if (args.length === 1 && /python3|sage|julia|ir|bash|zsh|node|javascript|typescript|lean4?/i.test(args[0]!)) {
+  let session = args[2] || defaults?.session || DEFAULT_CEIL_SESSION;
+  if (args.length === 1 && ceilLooksLikeKernelToken(args[0]!)) {
     kernel = args[0]!;
     language = ceilLanguageForKernel(kernel);
+  } else if (!args[1] && defaults?.kernel) {
+    const defaultLanguage = ceilLanguageForKernel(defaults.kernel, defaults.language);
+    const requestedLanguage = language.toLowerCase();
+    if (!args[0] || requestedLanguage === defaults.language.toLowerCase() || requestedLanguage === defaultLanguage.toLowerCase()) {
+      kernel = defaults.kernel;
+    }
   }
-  if (!args[1] && /^lean4?$/i.test(language)) kernel = "lean4";
-  else if (!args[1] && /^(?:bash|sh|shell|zsh)$/i.test(language)) kernel = "bash";
-  kernel = cleanCeilToken(stripCeilKernelParens(kernel), DEFAULT_CEIL_KERNEL);
+  if (!args[1] && !kernel) kernel = defaultCeilKernelForLanguage(language);
+  kernel = cleanCeilToken(stripCeilKernelParens(kernel), defaultCeilKernelForLanguage(language));
   session = cleanCeilToken(session, DEFAULT_CEIL_SESSION);
   language = ceilLanguageForKernel(kernel, language);
   const id = cleanCeilToken(range.idRaw, ceilCommandGeneratedId(file, range));
+  const normalizedArgs = session && session !== DEFAULT_CEIL_SESSION
+    ? `${language}, ${kernel}, ${session}`
+    : `${language}, ${kernel}`;
   return {
     kernel,
     session,
@@ -623,7 +643,7 @@ function parseCeilCommand(range: CeilCommandRange, file: string): CeilCommandMet
     language,
     attrs: [],
     rawArgs: range.argsRaw,
-    changed: !range.argsRaw.trim() || !range.idRaw.trim() || args[0] !== language || args[1] !== kernel,
+    changed: !range.idRaw.trim() || range.argsRaw.trim() !== normalizedArgs,
   };
 }
 
@@ -664,6 +684,18 @@ function ceilCommandRangesFromState(state: EditorState): CeilCommandRange[] {
   return ranges.ceilCommands;
 }
 
+function ceilCommandDefaultsForState(state: EditorState, current: CeilCommandRange, file: string): CeilCommandDefaults | undefined {
+  let previous: CeilCommandDefaults | undefined;
+  for (const range of ceilCommandRangesFromState(state)) {
+    if (range.from === current.from && range.to === current.to) continue;
+    if (!range.argsRaw.trim()) continue;
+    const meta = parseCeilCommand(range, file);
+    const defaults = { language: meta.language, kernel: meta.kernel, session: meta.session };
+    if (range.from < current.from) previous = defaults;
+  }
+  return previous;
+}
+
 function ceilCommandUsedIds(state: EditorState, file: string, current: CeilCommandRange): Set<string> {
   const used = new Set<string>();
   for (const range of ceilCommandRangesFromState(state)) {
@@ -685,7 +717,7 @@ function uniqueCeilCommandId(state: EditorState, file: string, range: CeilComman
 }
 
 function parseCeilCommandForState(state: EditorState, range: CeilCommandRange, file: string): CeilCommandMeta {
-  const meta = parseCeilCommand(range, file);
+  const meta = parseCeilCommand(range, file, ceilCommandDefaultsForState(state, range, file));
   if (!range.idRaw.trim()) {
     const uniqueId = uniqueCeilCommandId(state, file, range, meta.id);
     if (uniqueId !== meta.id) return { ...meta, id: uniqueId, changed: true };
@@ -717,6 +749,31 @@ function ceilCommandCellsForContext(state: EditorState, target: CeilMeta, file: 
     language,
     code,
   }));
+}
+
+function uniqueCeilSessions(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const session = cleanCeilToken(value, "");
+    if (!session || seen.has(session)) continue;
+    seen.add(session);
+    result.push(session);
+  }
+  return result;
+}
+
+function ceilSessionSuggestions(state: EditorState, target: CeilMeta, file: string): string[] {
+  const sameKernel: string[] = [];
+  const sameLanguage: string[] = [];
+  const all: string[] = [];
+  for (const range of ceilCommandRangesFromState(state)) {
+    const meta = parseCeilCommandForState(state, range, file);
+    all.push(meta.session);
+    if (meta.language === target.language) sameLanguage.push(meta.session);
+    if (meta.language === target.language && meta.kernel === target.kernel) sameKernel.push(meta.session);
+  }
+  return uniqueCeilSessions([target.session, ...sameKernel, ...sameLanguage, ...all, DEFAULT_CEIL_SESSION]);
 }
 
 function highlightedCeilCode(code: string, language: string): HTMLElement {
@@ -1563,7 +1620,7 @@ class CeilCommandWidget extends MeasuredWidget {
 
     const label = document.createElement("span");
     label.className = "cm-ceil-label";
-    label.textContent = "Jupyter";
+    label.textContent = "CELL";
 
     const languageInput = document.createElement("input");
     languageInput.className = "cm-ceil-language";
@@ -1593,6 +1650,14 @@ class CeilCommandWidget extends MeasuredWidget {
     sessionInput.spellcheck = false;
     sessionInput.setAttribute("aria-label", "Session");
     sessionInput.title = "Session";
+    const sessionList = document.createElement("datalist");
+    sessionList.id = `cm-ceil-session-${shortHash(`${file}\n${this.range.from}\n${meta.id}`)}`;
+    sessionInput.setAttribute("list", sessionList.id);
+    for (const session of ceilSessionSuggestions(view.state, meta, file)) {
+      const option = document.createElement("option");
+      option.value = session;
+      sessionList.append(option);
+    }
 
     const status = document.createElement("span");
     status.className = "cm-ceil-status";
@@ -1977,7 +2042,7 @@ class CeilCommandWidget extends MeasuredWidget {
     outputTools.append(refreshButton, foldButton, expandButton, popoutButton);
     outputHeader.append(outputTitle, outputTools);
     outputWrap.append(outputHeader, output);
-    header.append(label, languageInput, kernelSelect, sessionInput, status, buttonBar);
+    header.append(label, languageInput, kernelSelect, sessionInput, sessionList, status, buttonBar);
     block.append(header, source, outputWrap);
     stopInteractiveWidgetEvents(block);
     // Only hit the backend when we have nothing cached for this cell. Rebuilds

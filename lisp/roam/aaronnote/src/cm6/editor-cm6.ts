@@ -431,7 +431,7 @@ function openAttachmentContextMenuFromEvent(view: EditorView, event: MouseEvent)
   event.stopPropagation();
   view.dom.dispatchEvent(new CustomEvent("aaronnote:attachment-context-menu", {
     bubbles: true,
-    detail: { href },
+    detail: { href, x: event.clientX, y: event.clientY },
   }));
   return true;
 }
