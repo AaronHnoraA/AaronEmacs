@@ -2254,6 +2254,44 @@
   font: 13.5px/1.52 var(--aaron-font-mono, ui-monospace, monospace);
 }
 
+.cm-ceil-variables-empty {
+  padding: 0.4rem 0.1rem;
+  color: color-mix(in srgb, var(--aaron-ink, #d9e3f5), transparent 35%);
+}
+
+.cm-ceil-variables-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.cm-ceil-variables-table th,
+.cm-ceil-variables-table td {
+  padding: 0.28rem 0.55rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), transparent 55%);
+  text-align: left;
+  vertical-align: top;
+}
+
+.cm-ceil-variables-table th {
+  color: color-mix(in srgb, var(--aaron-ink, #d9e3f5), transparent 25%);
+  font-weight: 700;
+}
+
+.cm-ceil-variables-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cm-ceil-variables-type,
+.cm-ceil-variables-shape {
+  color: color-mix(in srgb, var(--aaron-ink, #d9e3f5), transparent 30%);
+  white-space: nowrap;
+}
+
+.cm-ceil-variables-summary {
+  word-break: break-word;
+}
+
 .cm-editor .cm-note-code-widget {
   box-sizing: border-box;
   width: 100%;

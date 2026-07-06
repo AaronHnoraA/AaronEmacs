@@ -14,13 +14,18 @@ import { executeOnKernel } from "../server/jupyter/execution-message-handler.mjs
 // to show a widget's initial content before the browser's live connection
 // exists. Gated: spawns a real kernel process.
 //
-// Note: this test relies on ipykernel's own comm_open/stdout-flush ordering
-// under real (threaded) kernel execution, so it can be sensitive to heavy CPU
-// contention from many *other* concurrently-launched kernels (e.g. running the
-// full gated suite at once, which spawns a dozen+ kernel processes across
-// files). It is deterministic and passes reliably alone or under moderate
-// concurrency; the routing logic itself is proven independent of kernel
-// timing by the scripted-message tests in jupyter-execution-message-handler.test.ts.
+// This used to be flaky specifically under heavy full-suite parallel load,
+// which was misdiagnosed as ipykernel thread-scheduling contention. The real
+// cause was raw-kernel.mjs's persistent connection having `handleComms: true`
+// with no widget target registered on it: jlab's KernelConnection reacts to
+// every comm_open it sees (IOPub is broadcast to all subscribers) by trying
+// to dispatch it, fails to find a target, and its catch block calls
+// `comm.close()` — which sends a real comm_close back to the kernel over the
+// shell channel, destroying the widget. Under light load this lost the race
+// against this test's own capture often enough to look deterministic; under
+// heavy load it usually won. Fixed by setting `handleComms: false` on that
+// connection (see raw-kernel.mjs) — capturing widget traffic only needs
+// `anyMessage`, which fires unconditionally regardless of handleComms.
 const RUN = process.env.AARONNOTE_TEST_KERNEL === "1";
 const describeIfKernel = RUN ? describe : describe.skip;
 

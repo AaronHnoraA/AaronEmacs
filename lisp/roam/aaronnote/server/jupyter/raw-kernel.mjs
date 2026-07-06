@@ -42,10 +42,22 @@ export function createRawKernelConnection({ connectionInfo, clientId, username, 
     },
   });
 
+  // handleComms MUST be false here. This connection is execution-only (no
+  // widget manager is ever registered on it); jlab's KernelConnection with
+  // handleComms:true actively processes every incoming comm_open itself, and
+  // when it finds no registered `jupyter.widget` target it throws inside
+  // _handleCommOpen — whose catch block calls `comm.close()`, which sends a
+  // REAL comm_close back to the kernel over the shell channel. Since IOPub is
+  // broadcast to every subscriber (including this connection), that silently
+  // destroyed every ipywidgets model moments after creation, regardless of
+  // whether a browser widget connection was attached — the actual root cause
+  // of sliders never responding (not a client-side timing race). Capturing
+  // comm traffic for widgetMessages only needs `anyMessage`, which fires
+  // unconditionally and does not require handleComms.
   const kernel = new KernelConnection({
     serverSettings: settings,
     clientId,
-    handleComms: true,
+    handleComms: false,
     username,
     model,
   });

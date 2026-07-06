@@ -45,7 +45,7 @@ import {
 } from "../../render-html.ts";
 import { applyImageLayout, imageLayoutFromAttrs, readImageTrailingAttrs, type ImageLayoutAttrs } from "../../image-attrs.ts";
 import { supportedDiagramLang } from "../../diagram-langs.ts";
-import { api } from "../../../aaronnote/api-client.ts";
+import { api, type JupyterVariable } from "../../../aaronnote/api-client.ts";
 import { tocIndexFromState, type MarkdownHeading } from "../toc-index.ts";
 import { scanInlineCommands } from "../../command-syntax.ts";
 import { semanticOutlineFromCommand, type SemanticOutline } from "../../semantic-outline.ts";
@@ -360,7 +360,7 @@ type TikzAssetResult = {
   message?: string;
 };
 
-type CeilKernelSpec = { name: string; displayName?: string; language?: string };
+type CeilKernelSpec = { name: string; displayName?: string; language?: string; attachable?: boolean };
 
 type CeilMeta = {
   kernel: string;
@@ -1374,19 +1374,35 @@ function fallbackCeilKernels(current: string): CeilKernelSpec[] {
   return Array.from(new Set(names)).map((name) => ({ name, displayName: name }));
 }
 
+// Attach-file listings churn as kernels come and go, so a fresh picker open
+// should not serve a stale list forever the way regular kernelspecs (which
+// rarely change within a session) can.
+const CEIL_KERNELS_CACHE_TTL_MS = 15_000;
+let ceilKernelsCacheAt = 0;
+
 function loadCeilKernels(current: string): Promise<CeilKernelSpec[]> {
-  if (ceilKernelsCache) return Promise.resolve(ceilKernelsCache);
+  if (ceilKernelsCache && Date.now() - ceilKernelsCacheAt < CEIL_KERNELS_CACHE_TTL_MS) return Promise.resolve(ceilKernelsCache);
   if (ceilKernelsPending) return ceilKernelsPending;
   ceilKernelsPending = api.jupyterCell.kernels()
     .then((result) => {
-      const kernels = Array.isArray(result.kernels) && result.kernels.length > 0
+      const specs = Array.isArray(result.kernels) && result.kernels.length > 0
         ? result.kernels.map((kernel) => ({
             name: String(kernel.name || ""),
             displayName: String(kernel.displayName || kernel.name || ""),
             language: String(kernel.language || ""),
           })).filter((kernel) => kernel.name)
         : fallbackCeilKernels(current);
+      const attachable = Array.isArray(result.attachable)
+        ? result.attachable.map((kernel) => ({
+            name: String(kernel.name || ""),
+            displayName: String(kernel.displayName || kernel.name || ""),
+            language: String(kernel.language || ""),
+            attachable: true,
+          })).filter((kernel) => kernel.name)
+        : [];
+      const kernels = [...specs, ...attachable];
       ceilKernelsCache = kernels;
+      ceilKernelsCacheAt = Date.now();
       return kernels;
     })
     .catch(() => fallbackCeilKernels(current))
@@ -1395,19 +1411,37 @@ function loadCeilKernels(current: string): Promise<CeilKernelSpec[]> {
 }
 
 function populateCeilKernelSelect(select: HTMLSelectElement, kernels: CeilKernelSpec[], current: string): void {
-  const all = [...kernels];
-  if (!all.some((kernel) => kernel.name === current)) all.unshift({ name: current, displayName: current });
+  const specs = kernels.filter((kernel) => !kernel.attachable);
+  const attachable = kernels.filter((kernel) => kernel.attachable);
+  if (!kernels.some((kernel) => kernel.name === current)) specs.unshift({ name: current, displayName: current });
   const selected = select.value || current;
   select.replaceChildren();
-  for (const kernel of all) {
+
+  const kernelsGroup = document.createElement("optgroup");
+  kernelsGroup.label = "Kernels";
+  for (const kernel of specs) {
     const option = document.createElement("option");
     option.value = kernel.name;
     option.textContent = kernel.displayName && kernel.displayName !== kernel.name
       ? `${kernel.displayName} (${kernel.name})`
       : kernel.name;
-    select.append(option);
+    kernelsGroup.append(option);
   }
-  select.value = all.some((kernel) => kernel.name === selected) ? selected : current;
+  select.append(kernelsGroup);
+
+  if (attachable.length > 0) {
+    const attachGroup = document.createElement("optgroup");
+    attachGroup.label = "Attach";
+    for (const kernel of attachable) {
+      const option = document.createElement("option");
+      option.value = kernel.name;
+      option.textContent = kernel.displayName || kernel.name;
+      attachGroup.append(option);
+    }
+    select.append(attachGroup);
+  }
+
+  select.value = [...specs, ...attachable].some((kernel) => kernel.name === selected) ? selected : current;
 }
 
 // Cell outputs render through the shared JupyterLab OutputArea stack
@@ -1534,6 +1568,113 @@ function renderCeilOutputs(root: HTMLElement, result: CeilExecutionResult | null
     pre.textContent = `Failed to render output: ${error instanceof Error ? error.message : String(error)}`;
     root.append(pre);
   });
+}
+
+function ceilVariablesCell(text: string, className: string): HTMLTableCellElement {
+  const cell = document.createElement("td");
+  cell.className = className;
+  cell.textContent = text;
+  return cell;
+}
+
+function renderCeilVariablesTable(body: HTMLElement, rows: JupyterVariable[]): void {
+  body.replaceChildren();
+  if (rows.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "cm-ceil-variables-empty";
+    empty.textContent = "No variables in this kernel's namespace.";
+    body.append(empty);
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "cm-ceil-variables-table";
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  for (const label of ["Name", "Type", "Shape", "Value"]) {
+    const th = document.createElement("th");
+    th.textContent = label;
+    headRow.append(th);
+  }
+  thead.append(headRow);
+  const tbody = document.createElement("tbody");
+  for (const variable of rows) {
+    const row = document.createElement("tr");
+    const shape = Array.isArray(variable.shape) ? variable.shape.join(" × ") : "";
+    row.append(
+      ceilVariablesCell(String(variable.name ?? ""), "cm-ceil-variables-name"),
+      ceilVariablesCell(String(variable.type ?? ""), "cm-ceil-variables-type"),
+      ceilVariablesCell(shape, "cm-ceil-variables-shape"),
+      ceilVariablesCell(String(variable.summary ?? ""), "cm-ceil-variables-summary"),
+    );
+    tbody.append(row);
+  }
+  table.append(thead, tbody);
+  body.append(table);
+}
+
+function openCeilVariablesPopup(context: () => { file: string; kernel: string; session: string; language: string }): void {
+  const overlay = document.createElement("div");
+  overlay.className = "cm-ceil-output-popover";
+  const panel = document.createElement("div");
+  panel.className = "cm-ceil-output-popover-panel";
+  const header = document.createElement("div");
+  header.className = "cm-ceil-output-popover-header";
+  const title = document.createElement("span");
+  title.textContent = "Jupyter variables";
+  const refresh = document.createElement("button");
+  refresh.type = "button";
+  refresh.textContent = "Refresh";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.textContent = "Close";
+  const body = document.createElement("div");
+  body.className = "cm-ceil-output-popover-body cm-ceil-variables-body";
+
+  const load = async (): Promise<void> => {
+    const { file, kernel, session, language } = context();
+    body.replaceChildren();
+    const loading = document.createElement("div");
+    loading.className = "cm-ceil-variables-empty";
+    loading.textContent = "Loading…";
+    body.append(loading);
+    try {
+      const result = await api.jupyterCell.variables({ file, kernel, session, language });
+      if (result.supported === false) {
+        body.replaceChildren();
+        const unsupported = document.createElement("div");
+        unsupported.className = "cm-ceil-variables-empty";
+        unsupported.textContent = `Variables are not available for kernel "${kernel}".`;
+        body.append(unsupported);
+        return;
+      }
+      renderCeilVariablesTable(body, Array.isArray(result.variables) ? result.variables : []);
+    } catch (err) {
+      body.replaceChildren();
+      const errorLine = document.createElement("div");
+      errorLine.className = "cm-ceil-variables-empty";
+      errorLine.textContent = err instanceof Error ? err.message : String(err);
+      body.append(errorLine);
+    }
+  };
+
+  const onKey = (event: KeyboardEvent): void => {
+    if (event.key === "Escape") destroy();
+  };
+  const destroy = (): void => {
+    window.removeEventListener("keydown", onKey);
+    overlay.remove();
+  };
+  close.addEventListener("click", destroy);
+  refresh.addEventListener("click", () => { void load(); });
+  overlay.addEventListener("mousedown", (event) => {
+    if (event.target === overlay) destroy();
+  });
+  window.addEventListener("keydown", onKey);
+  header.append(title, refresh, close);
+  panel.append(header, body);
+  overlay.append(panel);
+  document.body.append(overlay);
+  void load();
 }
 
 function openCeilOutputPopup(result: CeilExecutionResult | null): void {
@@ -1980,6 +2121,11 @@ class CeilCommandWidget extends MeasuredWidget {
     });
     interruptButton.dataset.ceilInterrupt = "true";
 
+    const variablesButton = makeButton("Vars", "Show variables in this kernel's namespace", () => {
+      if (!file) return;
+      openCeilVariablesPopup(() => ({ file, kernel: meta.kernel, session: meta.session, language: meta.language }));
+    });
+
     const restartButton = makeButton("Restart", "Restart this kernel session", async () => {
       if (!file) return;
       status.textContent = "Restarting...";
@@ -2036,7 +2182,14 @@ class CeilCommandWidget extends MeasuredWidget {
     const popoutButton = makeButton("Popout", "Show output in a separate panel", () => openCeilOutputPopup(lastResult));
 
     buttonBar.append(editButton, runButton, runAboveButton, runAllButton);
-    if (!leanRuntime) buttonBar.append(interruptButton, restartButton, clearButton);
+    const isAttachedKernel = meta.kernel.startsWith("attach:");
+    if (!leanRuntime) {
+      buttonBar.append(interruptButton, variablesButton);
+      // An attached kernel is owned by whatever process created it; Aaronnote
+      // never restarts (or force-kills) one it didn't launch.
+      if (!isAttachedKernel) buttonBar.append(restartButton);
+      buttonBar.append(clearButton);
+    }
     foldButton.textContent = outputWrap.classList.contains("is-folded") ? "Show" : "Fold";
     expandButton.textContent = outputWrap.classList.contains("is-expanded") ? "Collapse" : "Expand";
     outputTools.append(refreshButton, foldButton, expandButton, popoutButton);

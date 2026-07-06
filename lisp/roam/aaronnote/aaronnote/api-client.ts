@@ -90,6 +90,7 @@ export type JupyterKernelListResult = {
   ok?: boolean;
   default?: string;
   kernels?: JupyterKernelSpec[];
+  attachable?: JupyterKernelSpec[];
 };
 export type JupyterVariable = {
   name?: string;
