@@ -16,6 +16,7 @@
 (declare-function my/health-report "init-health" ())
 (declare-function my/language-server-dispatch "init-lsp-tools" ())
 (declare-function my/language-server-manager "init-lsp-tools" ())
+(declare-function my/jupyter-board "init-jupyter-board" ())
 (declare-function my/output-dispatch "init-output" ())
 (declare-function my/problems-project "init-problems" ())
 (declare-function my/project-dispatch "init-project" ())
@@ -43,6 +44,7 @@
       ("c" "compile board" my/compile-board :transient transient--do-exit)
       ("g" "git board" my/git-board :transient transient--do-exit)
       ("L" "language server" my/language-server-manager :transient transient--do-exit)
+      ("j" "jupyter board" my/jupyter-board :transient transient--do-exit)
       ("a" "appine board" my/appine-board :transient transient--do-exit)
       ("h" "health report" my/health-report :transient transient--do-exit)]
      ["Menus"

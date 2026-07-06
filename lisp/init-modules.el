@@ -99,6 +99,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-text)
 (require 'init-shell)
 (require 'init-remote-connectboard)
+(require 'init-jupyter-board)
 (my/require-module-safely 'init-spell)
 (require 'init-search)
 (require 'init-search-extra)

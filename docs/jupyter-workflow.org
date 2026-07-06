@@ -1,0 +1,89 @@
+#+title: Jupyter Kernel Workflow
+
+* Architecture
+
+The local Jupyter and AaronNote workflows use ordinary kernelspecs. Remote
+kernels are provided by the vendored =remote_ikernel= source under
+=site-lisp/remote_ikernel=. No remote Jupyter Server is required: the launcher
+starts the remote kernel over SSH or a scheduler and forwards its ZMQ ports.
+
+The vendored baseline is upstream tag =0.4.6= at commit
+=1c437edb9df017141a6357a90de751bb200bd9fb=. Local changes are documented in
+=site-lisp/remote_ikernel/UPSTREAM.md=.
+
+* Install and verify
+
+Install the editable source into the configured Anaconda environment:
+
+#+begin_src sh
+make remote-ikernel-install
+bin/install-remote-ikernel --check
+#+end_src
+
+The check must report version =0.4.6+aaron.1= and a module path below this
+repository's =site-lisp/remote_ikernel= directory. Emacs startup only checks
+the tool; it never mutates the Python environment automatically.
+
+* Jupyter Board
+
+Open the board with =M-x my/jupyter-board= or Hyper dispatch =j=. The board
+shows:
+
+- Jupyter, Python, remote_ikernel, and editable-source health;
+- protected Core remote kernels;
+- disposable Temporary remote kernels;
+- all local and other kernelspecs visible to the configured Jupyter CLI.
+
+Main keys:
+
+| Key | Action |
+|-----+--------|
+| =a= | Add a remote kernel through the CLI transient |
+| =e= | Edit/recreate the remote kernel at point |
+| =m= | Move a remote kernel between Core and Temporary |
+| =d= | Delete the current kernelspec |
+| =C= | Delete all Temporary remote kernels |
+| =RET= | Show the normalized fields and raw =kernel.json= |
+| =o= | Open the kernelspec resource directory |
+| =g= | Refresh |
+| =?= | Open the full Jupyter dispatch |
+
+Core deletion requires a full confirmation. Temporary kernels can be deleted
+individually or in one batch. A legacy =rik_*= kernelspec without Aaron
+metadata is treated as Core so an upgrade cannot accidentally remove it.
+
+* Persistent group metadata
+
+New remote kernels store their management data inside namespaced kernelspec
+metadata:
+
+#+begin_src json
+{
+  "metadata": {
+    "aaron": {
+      "remote_kernel": {
+        "group": "temporary",
+        "config": {}
+      }
+    }
+  }
+}
+#+end_src
+
+New kernels default to Temporary. Change a group from the board or CLI:
+
+#+begin_src sh
+remote_ikernel manage --set-group rik_ssh_example_python core
+#+end_src
+
+* Maintenance
+
+Run the vendored Python tests before changing the launcher:
+
+#+begin_src sh
+/opt/homebrew/anaconda3/bin/python -m pytest -q site-lisp/remote_ikernel
+#+end_src
+
+The SSH implementation uses =StrictHostKeyChecking=accept-new=: first-use keys
+are recorded, while changed keys fail instead of being silently accepted.
+CLI output from Board operations is retained in =*Jupyter Board Log*=.

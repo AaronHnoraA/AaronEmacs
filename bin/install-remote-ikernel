@@ -1,0 +1,45 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+SOURCE_DIR="$ROOT_DIR/site-lisp/remote_ikernel"
+PYTHON=${REMOTE_IKERNEL_PYTHON:-/opt/homebrew/anaconda3/bin/python}
+
+check_install() {
+  "$PYTHON" - "$SOURCE_DIR" <<'PY'
+from pathlib import Path
+import importlib.metadata
+import remote_ikernel
+import sys
+
+source = Path(sys.argv[1]).resolve()
+module = Path(remote_ikernel.__file__).resolve()
+if source not in module.parents:
+    raise SystemExit("remote_ikernel is not loaded from vendored source: " + str(module))
+version = importlib.metadata.version("remote_ikernel")
+if version != "0.4.6+aaron.1":
+    raise SystemExit("unexpected remote_ikernel version: " + version)
+print("remote_ikernel " + version)
+print("module: " + str(module))
+PY
+}
+
+case "${1:-install}" in
+  --check|check)
+    check_install
+    ;;
+  install)
+    test -x "$PYTHON" || {
+      printf 'Python is not executable: %s\n' "$PYTHON" >&2
+      exit 2
+    }
+    "$PYTHON" -m pip uninstall -y remote_ikernel
+    "$PYTHON" -m pip install --no-deps --no-build-isolation --editable "$SOURCE_DIR"
+    check_install
+    ;;
+  *)
+    printf 'usage: %s [install|check|--check]\n' "$0" >&2
+    exit 2
+    ;;
+esac

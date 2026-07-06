@@ -9,7 +9,7 @@ BOOTSTRAP_INSTALL = BOOTSTRAP_MODE=install $(BOOTSTRAP)
 BOOTSTRAP_EXPORT = BOOTSTRAP_MODE=export $(BOOTSTRAP)
 BOOTSTRAP_AUDIT = BOOTSTRAP_MODE=audit $(BOOTSTRAP)
 
-.PHONY: default help up setup setup-full bootstrap-health install lock audit-lock doctor build build-force \
+.PHONY: default help up setup setup-full bootstrap-health install remote-ikernel-install lock audit-lock doctor build build-force \
         aaronnote-build \
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
@@ -26,6 +26,7 @@ help:
 	  '  make setup-full           Restore + full health suite + doctor report' \
 	  '  make bootstrap-health     Restore + health + doctor + lock audit' \
 	  '  make install              Deterministically restore packages from package-lock.el' \
+	  '  make remote-ikernel-install  Install the vendored remote_ikernel into Anaconda' \
 	  '  make lock                 Export the current package set back into package-lock.el' \
 	  '  make audit-lock           Compare installed packages against package-lock.el' \
 	  '  make doctor               Open/check the config health doctor report in batch' \
@@ -69,6 +70,9 @@ bootstrap-health: install health doctor audit-lock
 
 install:
 	$(BOOTSTRAP_INSTALL)
+
+remote-ikernel-install:
+	bin/install-remote-ikernel install
 
 lock:
 	$(BOOTSTRAP_EXPORT)

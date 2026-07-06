@@ -130,6 +130,12 @@
 				      "jupyter_lab_config.json")
    (my/jupyter-remote-ikernel-command
     . "/opt/homebrew/anaconda3/bin/remote_ikernel")
+   (my/jupyter-board-jupyter-command . "/opt/homebrew/bin/jupyter")
+   (my/jupyter-board-python-command . "/opt/homebrew/anaconda3/bin/python")
+   (my/jupyter-remote-ikernel-source-directory
+    . "/Users/hc/.config/emacs/site-lisp/remote_ikernel")
+   (my/jupyter-remote-ikernel-install-script
+    . "/Users/hc/.config/emacs/bin/install-remote-ikernel")
    (my/expand-region-history-limit . 64)
    (my/jupyter-lab-jupyter-path . "/Users/hc/.emacs.d/jupyter")
    (my/jupyter-lab-log-buffer-name . "*jupyter-lab*")
