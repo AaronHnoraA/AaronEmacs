@@ -104,6 +104,8 @@ let roamSyncTimer = null;
 let roamSyncInFlight = null;
 let queuedRoamSyncNotes = null;
 let queuedRoamSyncChangedFiles = new Set();
+let todoActivationSyncInFlight = null;
+let lastTodoActivationSyncAt = 0;
 let atomicWriteCounter = 0;
 const noteCodeFileCache = new Map();
 const noteCodeFilePending = new Map();
@@ -114,6 +116,7 @@ const CURRENT_DB_SCHEMA = 1;
 const CURRENT_TODO_DB_SCHEMA = 1;
 const ASSET_CLEANUP_SCHEMA = 2;
 const ROAM_FULL_SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const TODO_ACTIVATION_SYNC_INTERVAL_MS = 30 * 1000;
 const scanConcurrency = Math.max(1, Math.min(64, Number(process.env.AARONNOTE_SCAN_CONCURRENCY) || 16));
 const saveRequestVersions = new Map();
 const saveWriteQueues = new Map();
@@ -3264,6 +3267,22 @@ async function ensureTodoDb(scanned = null) {
   }
 }
 
+function maybeActivateTodoSync(options = {}) {
+  if (!options.activateSync) return false;
+  const now = Date.now();
+  if (todoActivationSyncInFlight) return false;
+  if (now - lastTodoActivationSyncAt < TODO_ACTIVATION_SYNC_INTERVAL_MS) return false;
+  lastTodoActivationSyncAt = now;
+  todoActivationSyncInFlight = syncRoamDb(null, { reason: "todo-activation" })
+    .catch((err) => {
+      console.warn("[todo-db] activation sync failed:", err?.message || err);
+    })
+    .finally(() => {
+      todoActivationSyncInFlight = null;
+    });
+  return true;
+}
+
 function existingUniqueDirs(dirs) {
   const out = [];
   const seen = new Set();
@@ -4621,7 +4640,7 @@ function roamDbFile() {
 }
 
 function todoDbFile() {
-  return join(stateRoot, "todo.sqlite");
+  return join(noteRoot, "todo.db");
 }
 
 function roamSyncStateFile() {
@@ -5726,20 +5745,24 @@ export async function bootstrapNote(file) {
   return { type: "open", file: "", title: "Aaronnote", mode: "markdown", content: "# Aaronnote\n\nSelect a note from the left, or keep this scratch buffer.", ...index, snippets, templates, root: noteRoot, noteDir: "." };
 }
 
-export async function getTodos(file) {
-  if (file) {
-    const safe = safeOpenFile(file);
+export async function getTodos(file = "", options = {}) {
+  const request = file && typeof file === "object" ? file : { file, ...options };
+  const requestedFile = String(request.file || "");
+  if (requestedFile) {
+    const safe = safeOpenFile(requestedFile);
     if (standaloneFile(safe)) {
       noteScanRoot = scanRootForOpenFile(safe);
       return { type: "todos", todos: await scanTodos(), root: noteScanRoot, source: "scan" };
     }
     await ensureTodoDb();
+    const activatedSync = maybeActivateTodoSync(request);
     const dbTodos = await todosFromDb(safe);
-    if (dbTodos) return { type: "todos", todos: dbTodos, root: noteScanRoot, source: "todo.sqlite", db: todoDbFile() };
+    if (dbTodos) return { type: "todos", todos: dbTodos, root: noteScanRoot, source: "todo.db", db: todoDbFile(), activatedSync };
     return { type: "todos", todos: await scanTodos(), root: noteScanRoot, source: "scan" };
   }
   await ensureTodoDb();
+  const activatedSync = maybeActivateTodoSync(request);
   const dbTodos = await todosFromDb();
-  if (dbTodos) return { type: "todos", todos: dbTodos, root: noteScanRoot, source: "todo.sqlite", db: todoDbFile() };
+  if (dbTodos) return { type: "todos", todos: dbTodos, root: noteScanRoot, source: "todo.db", db: todoDbFile(), activatedSync };
   return { type: "todos", todos: await scanTodos(), root: noteScanRoot, source: "scan" };
 }

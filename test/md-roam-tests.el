@@ -534,6 +534,85 @@ source: roam/demo/analysis.md
                       todos 'search "estimate")
                      (list second))))))
 
+(ert-deftest my/aaronnote-roam-agenda-searches-and-sorts-todo-db-fields ()
+  (my/aaronnote-roam-test-with-vault
+    (let* ((low '(:note "low"
+                  :title "Low Note"
+                  :text "Low priority"
+                  :status "todo"
+                  :due "2026-06-07"
+                  :priority "C"
+                  :scheduled "2026-06-06"
+                  :repeat "+1w"))
+           (high '(:note "high"
+                   :title "High Note"
+                   :text "High priority"
+                   :status "todo"
+                   :due "2026-06-08"
+                   :priority "A"))
+           (todos (list low high)))
+      (should (equal (my/aaronnote-roam--agenda-filter-todos
+                      todos 'search "priority:C scheduled:2026-06-06 repeat:+1w")
+                     (list low)))
+      (should (equal (my/aaronnote-roam--agenda-filter-todos
+                      todos 'search "due:2026-06-08")
+                     (list high)))
+      (should (equal (mapcar (lambda (entry)
+                               (my/aaronnote-roam--todo-string-value entry "text"))
+                             (my/aaronnote-roam--agenda-sort-todos todos))
+                     '("High priority" "Low priority"))))))
+
+(ert-deftest my/aaronnote-roam-agenda-renders-todo-db-metadata ()
+  (my/aaronnote-roam-test-with-vault
+    (let ((todo '(:note "20260605T120000-topology"
+                  :title "Topology Note"
+                  :text "Review compact workbench"
+                  :status "todo"
+                  :due "2026-06-07"
+                  :priority "A"
+                  :scheduled "2026-06-06"
+                  :repeat "+1w")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'my/aaronnote-roam--todos)
+                     (lambda () (list todo)))
+                    ((symbol-function 'format-time-string)
+                     (lambda (&rest _args) "2026-06-06"))
+                    ((symbol-function 'display-buffer)
+                     (lambda (buffer &rest _args) buffer)))
+            (my/aaronnote-roam-agenda)
+            (with-current-buffer "*roam-agenda*"
+              (let ((text (buffer-string)))
+                (should (string-match-p "Status.*Date.*P.*Due.*Sched.*Rep.*Note.*Task" text))
+                (should (string-match-p "TODO.*2026-06-07.*A.*2026-06-07.*2026-06-06.*\\+1w" text))
+                (should (string-match-p "Pri" text))
+                (should (string-match-p "Sched" text)))))
+        (when-let* ((buffer (get-buffer "*roam-agenda*")))
+          (kill-buffer buffer))))))
+
+(ert-deftest my/aaronnote-roam-agenda-renders-empty-todo-db-columns ()
+  (my/aaronnote-roam-test-with-vault
+    (let ((todo '(:note "20260605T120000-topology"
+                  :title "Topology Note"
+                  :text "Review compact workbench"
+                  :status "todo")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'my/aaronnote-roam--todos)
+                     (lambda () (list todo)))
+                    ((symbol-function 'format-time-string)
+                     (lambda (&rest _args) "2026-06-06"))
+                    ((symbol-function 'display-buffer)
+                     (lambda (buffer &rest _args) buffer)))
+            (my/aaronnote-roam-agenda)
+            (with-current-buffer "*roam-agenda*"
+              (let ((text (buffer-string)))
+                (should (string-match-p "Status.*Date.*P.*Due.*Sched.*Rep.*Note.*Task" text))
+                (should (string-match-p "TODO.*no-date.*-.*-.*-.*-" text))
+                (should (string-match-p "Pri" text))
+                (should (string-match-p "Due" text))
+                (should (string-match-p "Rep" text)))))
+        (when-let* ((buffer (get-buffer "*roam-agenda*")))
+          (kill-buffer buffer))))))
+
 (ert-deftest my/aaronnote-roam-agenda-row-buttons-update-status ()
   (my/aaronnote-roam-test-with-vault
     (let ((todo '(:note "20260605T120000-topology"
@@ -555,7 +634,7 @@ source: roam/demo/analysis.md
             (my/aaronnote-roam-agenda)
             (with-current-buffer "*roam-agenda*"
               (goto-char (point-min))
-              (search-forward "Review compact workbench")
+              (search-forward "Review compact")
               (search-forward " Done ")
               (push-button (button-at (1- (point)))))
             (should (equal (car updated) "done"))
@@ -584,6 +663,23 @@ source: roam/demo/analysis.md
       (should (equal (cadr (member "--file" captured)) note-file))
       (should (equal (cadr (member "--priority" captured)) "B"))
       (should-not (member "--status" captured)))))
+
+(ert-deftest my/aaronnote-roam-todos-activate-sync-on-read ()
+  (my/aaronnote-roam-test-with-vault
+    (let (captured)
+      (cl-letf (((symbol-function 'my/aaronnote-roam--runtime-call)
+                 (lambda (&rest args)
+                   (setq captured args)
+                   (let ((payload (make-hash-table :test 'equal)))
+                     (puthash "todos" nil payload)
+                     payload)))
+                ((symbol-function 'my/aaronnote-roam--db)
+                 (lambda () nil))
+                ((symbol-function 'my/aaronnote-roam--scan-todos)
+                 (lambda () nil)))
+        (my/aaronnote-roam--todos))
+      (should (equal (car captured) "todos"))
+      (should (member "--activate-sync" captured)))))
 
 (ert-deftest my/aaronnote-roam-agenda-calendar-uses-square-cells ()
   (my/aaronnote-roam-test-with-vault
@@ -637,6 +733,8 @@ source: roam/demo/analysis.md
           (my/aaronnote-roam-db-status)
           (with-current-buffer "*roam-db-status*"
             (should (string-match-p "Roam activity" (buffer-string)))
+            (should (string-match-p "todo.db" (buffer-string)))
+            (should (string-match-p "roam.db" (buffer-string)))
             (should (string-match-p "W1" (buffer-string)))
             (should (string-match-p "Sun" (buffer-string)))))
       (when-let* ((buffer (get-buffer "*roam-db-status*")))

@@ -556,7 +556,7 @@ const apiHandlers = {
     };
   },
   "aaronnote:api:notes:todos": async (body) => {
-    return await getTodos(typeof body === "string" ? body : body?.file || "");
+    return await getTodos(typeof body === "string" ? body : body || {});
   },
   "aaronnote:api:notes:update-todo": (body) => updateTodoStatus(body || {}),
   "aaronnote:api:notes:index": async () => {

@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
-import {
+import * as serverIndex from "../server/lib/index.mjs";
+
+const {
   configure,
   extractTodos,
   getTodos,
@@ -14,7 +16,7 @@ import {
   syncRoamDb,
   tagsFromContent,
   updateTodoStatus,
-} from "../server/lib/index.mjs";
+} = serverIndex as any;
 
 const note = {
   file: "/notes/a.md",
@@ -143,8 +145,8 @@ describe("server todo scan", () => {
   });
 });
 
-describe("server todo sqlite index", () => {
-  test("sync writes todos to todo.sqlite and getTodos reads DB-first", async () => {
+describe("server todo db index", () => {
+  test("sync writes todos to todo.db and getTodos reads DB-first", async () => {
     const root = await mkdtemp(join(tmpdir(), "aaronnote-todo-db-"));
     try {
       await mkdir(join(root, "state"), { recursive: true });
@@ -166,7 +168,7 @@ describe("server todo sqlite index", () => {
 
       await syncRoamDb(null, { mode: "full" });
       const payload = await getTodos("");
-      expect(payload).toMatchObject({ source: "todo.sqlite" });
+      expect(payload).toMatchObject({ source: "todo.db", db: join(root, "todo.db") });
       expect(payload.todos).toHaveLength(2);
       expect(payload.todos[0]).toMatchObject({
         status: "doing",
@@ -178,14 +180,14 @@ describe("server todo sqlite index", () => {
         noteId: "20260706T120000-a",
       });
       const filePayload = await getTodos(join(root, "a.md"));
-      expect(filePayload).toMatchObject({ source: "todo.sqlite" });
+      expect(filePayload).toMatchObject({ source: "todo.db" });
       expect(filePayload.todos.map((todo: { text?: string }) => todo.text)).toEqual(["write proof"]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  test("todo status update rewrites markdown and refreshes todo.sqlite", async () => {
+  test("todo status update rewrites markdown and refreshes todo.db", async () => {
     const root = await mkdtemp(join(tmpdir(), "aaronnote-todo-update-"));
     try {
       await mkdir(join(root, "state"), { recursive: true });
@@ -206,7 +208,7 @@ describe("server todo sqlite index", () => {
 
       expect(await readFile(file, "utf8")).toContain("@@todo(done) [ship it]");
       const after = await getTodos("");
-      expect(after).toMatchObject({ source: "todo.sqlite" });
+      expect(after).toMatchObject({ source: "todo.db" });
       expect(after.todos[0]).toMatchObject({ status: "done", text: "ship it" });
     } finally {
       await rm(root, { recursive: true, force: true });

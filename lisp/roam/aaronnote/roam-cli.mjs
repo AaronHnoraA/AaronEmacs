@@ -69,7 +69,10 @@ async function main() {
   } else if (action === "tags") {
     result = runtime.tagIndexPayload(await runtime.scanNotes());
   } else if (action === "todos") {
-    result = await runtime.getTodos(argValue(args, "--file", ""));
+    result = await runtime.getTodos({
+      file: argValue(args, "--file", ""),
+      activateSync: hasArg(args, "--activate-sync"),
+    });
   } else if (action === "templates") {
     result = {
       templates: await runtime.scanTemplates({ force: hasArg(args, "--force") }),

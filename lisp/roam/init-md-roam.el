@@ -149,8 +149,12 @@ the expected body, and returns parsed JSON or nil."
                ("sync"
                 (vector (if (member "--full" args) t :false)))
                ("todos"
-                (let ((file (cadr (member "--file" args))))
-                  (vector (or file ""))))
+                (let ((body (make-hash-table :test 'equal))
+                      (file (cadr (member "--file" args))))
+                  (puthash "file" (or file "") body)
+                  (when (member "--activate-sync" args)
+                    (puthash "activateSync" t body))
+                  (vector body)))
                ("update-todo"
                 (let ((body (make-hash-table :test 'equal)))
                   (dolist (key '("--file" "--status" "--source" "--id"
@@ -2255,8 +2259,8 @@ On a heading line, append `{#id}` unless an id already exists."
 ;; ── DB commands ───────────────────────────────────────────────────────────────
 
 (defun my/aaronnote-roam-update-db (&optional full)
-  "Refresh Markdown roam cache and sync roam.db via Aaronnote runtime.
-With prefix argument FULL, force a full roam-db rebuild.
+  "Refresh Markdown roam cache and sync roam.db plus todo.db via Aaronnote runtime.
+With prefix argument FULL, force a full roam/todo DB rebuild.
 When the web-host is running, delegates to its /api (async, non-blocking).
 Falls back to a CLI subprocess when the web-host is offline."
   (interactive "P")
@@ -2264,13 +2268,13 @@ Falls back to a CLI subprocess when the web-host is offline."
   (cond
    ;; Online: delegate to web-host /api; it is the authoritative writer.
    ((and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
-    (message "Aaronnote: syncing roam DB...")
+    (message "Aaronnote: syncing roam/todo DB...")
     (my/aaronnote--api-call
      (if full "aaronnote:api:notes:roam-sync-full" "aaronnote:api:notes:roam-sync")
      (if full [] [t])
      (lambda (_result)
        (my/aaronnote-roam--clear-runtime-cache)
-       (message "Aaronnote roam sync: done"))))
+       (message "Aaronnote roam/todo sync: done"))))
    ;; Offline fallback: CLI subprocess.
    ((my/aaronnote-roam--runtime-available-p)
     (my/aaronnote-roam--runtime-sync full nil))
@@ -2375,7 +2379,7 @@ Falls back to a CLI subprocess when the web-host is offline."
 
 (defun my/aaronnote-roam--todos ()
   "Return todos from the Aaronnote runtime, roam DB, or local scan."
-  (let* ((runtime (my/aaronnote-roam--runtime-call "todos"))
+  (let* ((runtime (my/aaronnote-roam--runtime-call "todos" "--activate-sync"))
          (runtime-todos (and runtime (gethash "todos" runtime)))
          (runtime-todos (if (hash-table-p runtime-todos)
                             (gethash "todos" runtime-todos)
@@ -3298,6 +3302,15 @@ This checks top-level todo fields first, then the nested args object."
   "Set todo ENTRY to STATUS and refresh the agenda."
   (my/aaronnote-roam-update-todo-status status entry))
 
+(defun my/aaronnote-roam--agenda-set-todo-metadata (entry field)
+  "Prompt for FIELD metadata and update todo ENTRY."
+  (let* ((value
+          (if (string= field "priority")
+              (completing-read "Priority (empty clears): "
+                               '("A" "B" "C" "D" "E" "F" "") nil t)
+            (read-string (format "%s (empty clears): " (capitalize field))))))
+    (my/aaronnote-roam-update-todo-metadata field value entry)))
+
 (defun my/aaronnote-roam--agenda-compact-text (text width)
   "Return TEXT compacted to display WIDTH."
   (truncate-string-to-width (string-trim (or text "")) width nil nil "…"))
@@ -3314,8 +3327,31 @@ This checks top-level todo fields first, then the nested args object."
                       (list (and priority (format "P:%s" priority))
                             (and due (format "D:%s" due))
                             (and scheduled (format "S:%s" scheduled))
-                            (and repeat (format "R:%s" repeat)))))))
+                            (and repeat (format "R:%s" repeat))))))
     (string-join parts " ")))
+
+(defun my/aaronnote-roam--agenda-column-value (value width)
+  "Return VALUE as a compact agenda table column of WIDTH."
+  (format (format "%%-%ds" width)
+          (my/aaronnote-roam--agenda-compact-text
+           (or value "-")
+           width)))
+
+(defun my/aaronnote-roam--insert-agenda-table-header ()
+  "Insert the agenda task table header."
+  (insert "  ")
+  (insert (propertize
+           (concat
+            (my/aaronnote-roam--agenda-column-value "Status" 9) " "
+            (my/aaronnote-roam--agenda-column-value "Date" 10) " "
+            (my/aaronnote-roam--agenda-column-value "P" 1) " "
+            (my/aaronnote-roam--agenda-column-value "Due" 10) " "
+            (my/aaronnote-roam--agenda-column-value "Sched" 10) " "
+            (my/aaronnote-roam--agenda-column-value "Rep" 8) " "
+            (my/aaronnote-roam--agenda-column-value "Note" 22) " "
+            "Task")
+           'face 'my/aaronnote-roam-ui-meta))
+  (insert "\n"))
 
 (defun my/aaronnote-roam--insert-agenda-todo-row (entry &optional deadline-tone)
   "Insert one agenda row for todo ENTRY with optional DEADLINE-TONE."
@@ -3329,10 +3365,17 @@ This checks top-level todo fields first, then the nested args object."
                    "(empty todo)"))
          (line (my/aaronnote-roam--todo-field entry "line"))
          (date (or (my/aaronnote-roam--todo-agenda-date entry) "no-date"))
-         (meta (my/aaronnote-roam--agenda-todo-meta-label entry))
+         (priority (or (my/aaronnote-roam--todo-priority entry) "-"))
+         (due (or (my/aaronnote-roam--date-day-string
+                   (my/aaronnote-roam--todo-ddl entry))
+                  "-"))
+         (scheduled (or (my/aaronnote-roam--date-day-string
+                         (my/aaronnote-roam--todo-scheduled entry))
+                        "-"))
+         (repeat (or (my/aaronnote-roam--todo-repeat entry) "-"))
          (status (upcase (my/aaronnote-roam--todo-status entry)))
          (width (max 88 (window-body-width)))
-         (reserved (if (string-empty-p meta) 64 82))
+         (reserved 96)
          (text-width (max 22 (min 72 (- width reserved))))
          (start (point)))
     (insert "  ")
@@ -3342,6 +3385,13 @@ This checks top-level todo fields first, then the nested args object."
     (insert " ")
     (insert (propertize (format "%-10s " date)
                         'face 'my/aaronnote-roam-ui-meta))
+    (insert (propertize
+             (concat
+              (my/aaronnote-roam--agenda-column-value priority 1) " "
+              (my/aaronnote-roam--agenda-column-value due 10) " "
+              (my/aaronnote-roam--agenda-column-value scheduled 10) " "
+              (my/aaronnote-roam--agenda-column-value repeat 8) " ")
+             'face 'my/aaronnote-roam-ui-meta))
     (insert-text-button
      (format "%-22s  %s"
              (my/aaronnote-roam--agenda-compact-text note-title 22)
@@ -3357,10 +3407,6 @@ This checks top-level todo fields first, then the nested args object."
              (format "  L%-4s"
                      (if (integerp line) line "-"))
              'face 'my/aaronnote-roam-ui-meta))
-    (unless (string-empty-p meta)
-      (insert (propertize
-               (format "%-24s " (my/aaronnote-roam--agenda-compact-text meta 24))
-               'face 'my/aaronnote-roam-ui-meta)))
     (insert " ")
     (if (my/aaronnote-roam--todo-closed-p entry)
         (my/aaronnote-roam-ui-insert-actions
@@ -3385,7 +3431,27 @@ This checks top-level todo fields first, then the nested args object."
           :command ,(let ((todo entry))
                       (lambda ()
                         (my/aaronnote-roam--agenda-update-todo todo "cancelled")))
-          :help "Mark this task cancelled"))))
+          :help "Mark this task cancelled")
+         (:label "Pri"
+          :command ,(let ((todo entry))
+                      (lambda ()
+                        (my/aaronnote-roam--agenda-set-todo-metadata todo "priority")))
+          :help "Set priority")
+         (:label "Due"
+          :command ,(let ((todo entry))
+                      (lambda ()
+                        (my/aaronnote-roam--agenda-set-todo-metadata todo "due")))
+          :help "Set due date")
+         (:label "Sched"
+          :command ,(let ((todo entry))
+                      (lambda ()
+                        (my/aaronnote-roam--agenda-set-todo-metadata todo "scheduled")))
+          :help "Set scheduled date")
+         (:label "Rep"
+          :command ,(let ((todo entry))
+                      (lambda ()
+                        (my/aaronnote-roam--agenda-set-todo-metadata todo "repeat")))
+          :help "Set repeat metadata"))))
     (add-text-properties start (point) `(my/aaronnote-roam-todo ,entry))
     (insert "\n")))
 
@@ -3503,6 +3569,7 @@ This checks top-level todo fields first, then the nested args object."
                    (setq inserted t)
                    (my/aaronnote-roam-ui-insert-section
                     title (length entries) tone)
+                   (my/aaronnote-roam--insert-agenda-table-header)
                    (dolist (entry entries)
                      (my/aaronnote-roam--insert-agenda-todo-row entry tone))
                    (insert "\n"))))
@@ -3786,19 +3853,22 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
 ;; ── Roam DB utilities ─────────────────────────────────────────────────────────
 
 (defun my/aaronnote-roam-sync-full ()
-  "Force a full roam-db rebuild (clears incremental state)."
+  "Force a full roam/todo DB rebuild (clears incremental state)."
   (interactive)
-  (message "Rebuilding roam-db from scratch…")
+  (message "Rebuilding roam/todo DB from scratch…")
   (when (my/aaronnote-roam--runtime-available-p)
     (my/aaronnote-roam--runtime-sync t nil))
-  (message "Roam-db full rebuild done."))
+  (message "Roam/todo DB full rebuild done."))
 
 (defun my/aaronnote-roam-db-status ()
-  "Show roam-db sync state from Aaronnote var."
+  "Show roam/todo DB sync state from Aaronnote var."
   (interactive)
   (let* ((root (my/aaronnote-roam-root))
+         (state-root (my/aaronnote-roam--state-root))
+         (roam-db-file (expand-file-name "roam.db" root))
+         (todo-db-file (expand-file-name "todo.db" root))
          (state-file (expand-file-name "sync/state.json"
-                                       (my/aaronnote-roam--state-root)))
+                                       state-root))
          (state
           (when (file-exists-p state-file)
             (condition-case nil
@@ -3816,24 +3886,34 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
       (my/aaronnote-roam-ui-render
        (lambda ()
          (my/aaronnote-roam-ui-insert-page-header
-          "Roam DB status"
+          "Roam/todo DB status"
           :icon 'database
-          :subtitle "Aaronnote incremental index state"
+          :subtitle "Aaronnote incremental node and agenda index state"
           :stats (list (cons (if state "State ready" "State missing")
-                             (if state 'success 'warning)))
+                             (if state 'success 'warning))
+                       (cons (if (file-exists-p roam-db-file) "roam.db ready" "roam.db missing")
+                             (if (file-exists-p roam-db-file) 'success 'warning))
+                       (cons (if (file-exists-p todo-db-file) "todo.db ready" "todo.db missing")
+                             (if (file-exists-p todo-db-file) 'success 'warning)))
           :actions
           (my/aaronnote-roam--ui-actions
            '((:label "Incremental sync"
               :command my/aaronnote-roam-update-db
-              :help "Run incremental roam-db sync"
+              :help "Run incremental roam/todo DB sync"
               :primary t)
              (:label "Full rebuild"
               :command my/aaronnote-roam-sync-full
-              :help "Rebuild the roam-db index from scratch"))))
+              :help "Rebuild the roam/todo DB index from scratch"))))
          (my/aaronnote-roam-ui-insert-activity-heatmap)
          (my/aaronnote-roam-ui-insert-section "Location")
          (my/aaronnote-roam-ui-insert-field
           "Root" (abbreviate-file-name root) 'my/aaronnote-roam-ui-path)
+         (my/aaronnote-roam-ui-insert-field
+          "roam.db" (abbreviate-file-name roam-db-file)
+          'my/aaronnote-roam-ui-path)
+         (my/aaronnote-roam-ui-insert-field
+          "todo.db" (abbreviate-file-name todo-db-file)
+          'my/aaronnote-roam-ui-path)
          (my/aaronnote-roam-ui-insert-field
           "State file" (abbreviate-file-name state-file)
           'my/aaronnote-roam-ui-path)
