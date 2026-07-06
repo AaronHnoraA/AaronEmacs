@@ -1949,6 +1949,41 @@
   padding: 0 0.32rem;
 }
 
+.cm-editor .cm-ceil-session-wrap {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.cm-editor .cm-ceil-session-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  min-width: 100%;
+  max-height: 10rem;
+  overflow: auto;
+  margin-top: 2px;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #ddd), var(--aaron-muted, #666) 28%);
+  border-radius: 4px;
+  background: var(--aaron-paper, #fff);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  font: 0.72em/1.3 var(--aaron-font-mono, ui-monospace, monospace);
+}
+
+.cm-editor .cm-ceil-session-suggestion {
+  padding: 0.22rem 0.4rem;
+  color: var(--aaron-ink, #1e1a16);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.cm-editor .cm-ceil-session-suggestion:hover {
+  background: color-mix(in srgb, var(--aaron-accent, #9de7ff), transparent 78%);
+}
+
 .cm-editor .cm-ceil-status {
   flex: 1 1 8rem;
   min-width: 0;

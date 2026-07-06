@@ -1760,16 +1760,47 @@ class CeilCommandWidget extends MeasuredWidget {
     sessionInput.type = "text";
     sessionInput.value = meta.session;
     sessionInput.spellcheck = false;
+    sessionInput.autocomplete = "off";
     sessionInput.setAttribute("aria-label", "Session");
     sessionInput.title = "Session";
-    const sessionList = document.createElement("datalist");
-    sessionList.id = `cm-ceil-session-${shortHash(`${file}\n${this.range.from}\n${meta.id}`)}`;
-    sessionInput.setAttribute("list", sessionList.id);
-    for (const session of ceilSessionSuggestions(view.state, meta, file)) {
-      const option = document.createElement("option");
-      option.value = session;
-      sessionList.append(option);
-    }
+    // A native <input list=datalist> was tried here, but WebKit's datalist
+    // support (this editor runs inside xwidget-webkit) is unreliable enough
+    // that it was swallowing keystrokes — typing into the field had no
+    // effect. Hand-rolled suggestion dropdown instead.
+    const sessionSuggestions = ceilSessionSuggestions(view.state, meta, file);
+    const sessionWrap = document.createElement("span");
+    sessionWrap.className = "cm-ceil-session-wrap";
+    const sessionDropdown = document.createElement("div");
+    sessionDropdown.className = "cm-ceil-session-suggestions";
+    sessionDropdown.hidden = true;
+    const renderSessionSuggestions = (): void => {
+      const query = sessionInput.value.trim().toLowerCase();
+      const matches = sessionSuggestions.filter((session) => !query || session.toLowerCase().includes(query)).slice(0, 8);
+      if (matches.length === 0) {
+        sessionDropdown.hidden = true;
+        return;
+      }
+      sessionDropdown.replaceChildren(...matches.map((session) => {
+        const item = document.createElement("div");
+        item.className = "cm-ceil-session-suggestion";
+        item.textContent = session;
+        // mousedown (not click) fires before the input's blur, so the value
+        // is committed before writeCommandLine() runs on blur.
+        item.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          sessionInput.value = session;
+          sessionDropdown.hidden = true;
+          writeCommandLine();
+          view.focus();
+        });
+        return item;
+      }));
+      sessionDropdown.hidden = false;
+    };
+    sessionInput.addEventListener("focus", renderSessionSuggestions);
+    sessionInput.addEventListener("input", renderSessionSuggestions);
+    sessionInput.addEventListener("blur", () => { sessionDropdown.hidden = true; });
+    sessionWrap.append(sessionInput, sessionDropdown);
 
     const status = document.createElement("span");
     status.className = "cm-ceil-status";
@@ -1926,8 +1957,11 @@ class CeilCommandWidget extends MeasuredWidget {
       event.stopPropagation();
       if (event.key === "Enter") {
         event.preventDefault();
+        sessionDropdown.hidden = true;
         writeCommandLine();
         view.focus();
+      } else if (event.key === "Escape") {
+        sessionDropdown.hidden = true;
       }
     });
 
@@ -2166,7 +2200,7 @@ class CeilCommandWidget extends MeasuredWidget {
     outputTools.append(refreshButton, foldButton, expandButton, popoutButton);
     outputHeader.append(outputTitle, outputTools);
     outputWrap.append(outputHeader, output);
-    header.append(label, languageInput, kernelSelect, sessionInput, sessionList, status, buttonBar);
+    header.append(label, languageInput, kernelSelect, sessionWrap, status, buttonBar);
     block.append(header, source, outputWrap);
     stopInteractiveWidgetEvents(block);
     // Only hit the backend when we have nothing cached for this cell. Rebuilds
