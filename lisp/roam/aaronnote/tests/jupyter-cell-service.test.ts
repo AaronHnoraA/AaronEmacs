@@ -324,13 +324,11 @@ describe("jupyter cell service (no kernel)", () => {
     });
   });
 
-  test("widget proxy refuses unknown kernels and unrelated paths", async () => {
+  test("resolveConnectionInfoById returns undefined for unknown kernels", async () => {
     await withService(async ({ service }) => {
-      expect(service.widgetProxyTarget("/jupyter/api/kernels/missing/channels", "?session_id=x", true)).toBe(null);
-      expect(service.widgetProxyTarget("/jupyter/api/kernels", "", false)).toBe(null);
-      expect(service.widgetProxyTarget("/jupyter/nbextensions/widget/index.js", "", false))
-        .toContain("/nbextensions/widget/index.js");
-      expect(service.touchKernelById("missing")).toBe(false);
+      expect(await service.resolveConnectionInfoById("missing")).toBeUndefined();
+      expect(await service.readNbextensionAsset("../../etc/passwd")).toBeUndefined();
+      expect(await service.touchKernelById("missing")).toBe(false);
     });
   });
 });

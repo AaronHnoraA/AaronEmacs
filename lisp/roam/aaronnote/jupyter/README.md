@@ -1,45 +1,73 @@
-# Aaronnote Jupyter Kernel Server
+# Aaronnote Jupyter Kernel Stack
 
-This directory contains the minimal local Jupyter **kernel server** used by
-Aaronnote `@@cell` blocks. It does not run JupyterLab. The browser-side
-rendering of cell output and ipywidgets, however, reuses the same official
-JupyterLab building blocks that VS Code Jupyter uses — see "Frontend rendering"
-below.
+This directory holds the Python side of Aaronnote's Jupyter support: a private
+virtualenv (`jupyter/.venv`) with `ipykernel`/`ipywidgets`/`bash_kernel`, plus
+kernelspec templates. There is **no Jupyter server process** — the Node cell
+service (`server/lib/jupyter-cell.mjs`, orchestrating `server/jupyter/*`)
+launches and talks to kernels directly over raw ZMQ, the same approach
+Microsoft's VS Code Jupyter extension uses for local kernels (ported/adapted
+from `microsoft/vscode-jupyter`, MIT). The browser-side rendering of cell
+output and ipywidgets reuses the same official JupyterLab building blocks VS
+Code Jupyter uses — see "Frontend rendering" below.
 
 The runtime provides:
 
-- a private virtualenv under `jupyter/.venv`
-- Jupyter Server and `ipykernel`
+- a private virtualenv under `jupyter/.venv` with `ipykernel`, `ipywidgets`,
+  and `bash_kernel`
+- kernelspec discovery matching Jupyter's own search order (this project's
+  data dir, the venv's own `share/jupyter`, and — unless disabled — the user's
+  `~/Library/Jupyter`/`~/.local/share/jupyter` and system dirs)
 - optional local kernelspec templates, such as Sage
 - isolated Jupyter config/data/runtime directories under `jupyter/.jupyter`
-- live ipywidgets comms through Aaronnote's same-origin kernel websocket proxy
+- attaching to an already-running kernel via its connection file (e.g. a
+  remembered `kernel-*.json` from an Emacs-managed remote-kernel workflow),
+  instead of only ever launching kernels locally
+- live ipywidgets comms through Aaronnote's same-origin kernel channels
+  WebSocket bridge (`server/lib/jupyter-kernel-ws.mjs`), which talks raw ZMQ
+  directly rather than proxying to a Jupyter server
 
 From `lisp/roam/aaronnote`:
 
 ```sh
 npm run jupyter:bootstrap
-npm run jupyter:server
 ```
 
-`jupyter/scripts/run-jupyter-server.sh` starts `jupyter-server` for the
-Aaronnote cell service; it does not start JupyterLab.
+`npm run dev` (or the built app) starts Node's own `web-host.mjs`, which
+launches kernel processes on demand — there is nothing else to start.
 
-## Cell service behavior (`server/lib/jupyter-cell.mjs`)
+## Cell service behavior (`server/lib/jupyter-cell.mjs` + `server/jupyter/*`)
 
-The Node cell service owns the server lifecycle and each cell run:
+The Node cell service owns kernel lifecycle and each cell run:
 
-- It lazily spawns the server on first use and shuts it (and idle kernels) down
-  after the TTLs below. A cached kernel id that no longer exists on the server
-  self-heals: the run re-provisions the kernel once before surfacing an error.
+- `server/jupyter/kernel-registry.mjs` launches (or attaches to) a kernel per
+  note-script-file + kernel-name key, holding one persistent raw-ZMQ
+  `@jupyterlab/services` `KernelConnection` per kernel for execution,
+  interrupt, and restart. A kernel that dies unexpectedly self-heals on the
+  next run — this **also bumps `widgetGeneration`**, so a stale browser
+  ipywidgets connection from before the death is never reused.
+- `server/jupyter/execution-message-handler.mjs` drives one `execute_request`
+  and assembles outputs (stream merge/cap, display_id update-in-place,
+  Output-widget scoping via `server/lib/jupyter-output-router.mjs`).
 - Cell code and saved outputs live in a hidden `.cell/` directory beside the
   note (`<note>.<lang>.<session>.<ext>` script, `<note>.output.*.json` mirror).
-  The output mirror is written atomically and a corrupt mirror is ignored rather
-  than propagated as an error; concurrent cells sharing one kernel serialize
-  their writes so they cannot clobber each other.
+  The output mirror is written atomically and a corrupt mirror is ignored
+  rather than propagated as an error; concurrent cells sharing one kernel
+  serialize their writes so they cannot clobber each other.
 - Consecutive `stdout`/`stderr` stream chunks are merged, and total stream text
   is capped so a runaway loop cannot produce an unbounded payload. The inline
   widget view truncates long output further; **Popout** shows the full capped
   output.
+- A hung execution (no `execute_reply` within `AARONNOTE_JUPYTER_EXEC_TIMEOUT_MS`)
+  is escalated: interrupt the kernel, wait `AARONNOTE_JUPYTER_INTERRUPT_GRACE_MS`,
+  then surface a timeout error — the kernel process itself is left alive so
+  the next cell doesn't lose in-kernel state.
+- On startup, and whenever `web-host.mjs` shuts down cleanly, kernel processes
+  this instance owns are torn down; a `process.on("exit")` fallback SIGKILLs
+  any still-alive owned process groups if the async shutdown path didn't run.
+  A previous instance's crash leaves an `aaronnote-owned.json` sidecar under
+  `jupyter/.jupyter/runtime/`; the next instance sweeps it on first use,
+  killing any orphaned kernel process it can still find and confirm (by PID +
+  matching connection-file path in its command line).
 
 ### Frontend rendering (browser)
 
@@ -69,26 +97,36 @@ they stay out of the main editor bundle until a cell actually produces output.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `AARONNOTE_JUPYTER_HOST` | `127.0.0.1` | Server bind host. |
-| `AARONNOTE_JUPYTER_PORT` | `8890` | Server port. |
-| `AARONNOTE_JUPYTER_URL` | `http://host:port` | Point at an externally-managed server instead of spawning one. |
 | `AARONNOTE_JUPYTER_KERNEL_IDLE_TTL_MS` | `600000` | Idle kernel reap delay. |
-| `AARONNOTE_JUPYTER_SERVER_IDLE_TTL_MS` | `90000` | Idle server shutdown delay. |
-| `AARONNOTE_JUPYTER_EXEC_TIMEOUT_MS` | `0` (off) | Per-execution timeout. |
+| `AARONNOTE_JUPYTER_CLEANUP_INTERVAL_MS` | `30000` | How often the idle sweep runs. |
+| `AARONNOTE_JUPYTER_EXEC_TIMEOUT_MS` | `0` (off) | Per-execution timeout before interrupt escalation. |
+| `AARONNOTE_JUPYTER_INTERRUPT_GRACE_MS` | `5000` | Grace period after interrupting a timed-out execution. |
 | `AARONNOTE_JUPYTER_MAX_STREAM_BYTES` | `1048576` | Cap on merged stream text per run before truncation. |
+| `AARONNOTE_JUPYTER_MAX_WIDGET_MESSAGES` / `_BYTES` | `512` / `8388608` | Caps on captured widget comm messages per run. |
+| `AARONNOTE_JUPYTER_USE_HOME_KERNELS` | `1` | Also search `~/Library/Jupyter`, `~/.local/share/jupyter`, and system Jupyter dirs for kernelspecs. |
+| `AARONNOTE_JUPYTER_ALLOWED_KERNELS` | unset | Comma-separated kernelspec name allowlist. |
+| `AARONNOTE_JUPYTER_ATTACH_DIRS` | unset | `:`-separated extra directories to search for attachable `kernel-*.json` connection files, beyond `jupyter/.jupyter/runtime`. |
+
+Removed: `AARONNOTE_JUPYTER_HOST`/`_PORT`/`_URL`/`_SERVER_IDLE_TTL_MS` (there is
+no server process to bind or point at anymore). To use a kernel that isn't
+launched by this project — including a remote one over SSH port-forwarding —
+select `attach:<connection-file-name>` as the kernel; Aaronnote connects to it
+directly instead of spawning a process for it.
 
 ## Known trade-offs
 
-- The server runs with an **empty token/password on `127.0.0.1`**: any local
-  process on this machine can reach the kernel API. This is a single-user
-  local-only design; do not bind it to a non-loopback host without adding auth.
-- Each execution opens a fresh kernel websocket rather than holding a persistent
-  connection. The local handshake is cheap and this keeps request handling
-  stateless. Live widgets open a separate browser-owned connection after the
-  execution result identifies a widget model.
+- Kernel processes are spawned with an **empty-token connection** (raw ZMQ has
+  no auth concept beyond the HMAC signing key in the connection file, which
+  never leaves the local machine): any local process that can read the
+  connection file can talk to the kernel. This is a single-user, local-only
+  design.
 - Core ipywidgets assets are bundled. Custom widget AMD modules try local
-  `/nbextensions` first and then load automatically from jsDelivr. Custom
-  widget JavaScript runs in the Aaronnote page and therefore has the same
-  privileges as the editor UI.
+  `/nbextensions` first (served from disk, no server involved) and then load
+  automatically from jsDelivr. Custom widget JavaScript runs in the Aaronnote
+  page and therefore has the same privileges as the editor UI.
 - Widget comm state is intentionally not saved in the output mirror. Reloading
   the page or restarting the kernel leaves a stale output that must be rerun.
+- Attached kernels (connected via connection file rather than launched by this
+  project) are never restarted or force-killed by Aaronnote — only
+  disconnected. Interrupting one only works if its kernelspec supports message
+  interrupt (SIGINT requires owning the process).

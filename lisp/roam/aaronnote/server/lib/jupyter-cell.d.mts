@@ -7,6 +7,7 @@ export interface JupyterCellServiceOptions {
   workspaceRoot?: string;
   stdout?: NodeJS.WritableStream;
   stderr?: NodeJS.WritableStream;
+  zmq?: unknown;
 }
 
 export interface JupyterCellService {
@@ -16,14 +17,16 @@ export interface JupyterCellService {
   readScriptCell(body?: Record<string, unknown>): Promise<Record<string, any>>;
   executeScriptCell(body?: Record<string, unknown>): Promise<Record<string, any>>;
   clearScriptCellOutput(body?: Record<string, unknown>): Promise<Record<string, any>>;
+  saveScriptCellOutputUi(body?: Record<string, unknown>): Promise<Record<string, any>>;
   clearAllOutputs(body?: Record<string, unknown>): Promise<Record<string, any>>;
   variables(body?: Record<string, unknown>): Promise<Record<string, any>>;
-  kernelStatus(body?: Record<string, unknown>): Record<string, any>;
+  kernelStatus(body?: Record<string, unknown>): Promise<Record<string, any>>;
   restart(body?: Record<string, unknown>): Promise<Record<string, any>>;
   interrupt(body?: Record<string, unknown>): Promise<Record<string, any>>;
   shutdownKernel(body?: Record<string, unknown>): Promise<Record<string, any>>;
-  widgetProxyTarget(pathname: string, search?: string, websocket?: boolean): string | null;
-  touchKernelById(id: string): boolean;
+  resolveConnectionInfoById(id: string): Promise<unknown | undefined>;
+  readNbextensionAsset(relativePath: string): Promise<{ data: Buffer; contentType: string } | undefined>;
+  touchKernelById(id: string): Promise<boolean>;
   listTasks(): Promise<Record<string, any>>;
   cleanup(body?: Record<string, unknown>): Promise<Record<string, any>>;
   shutdown(): Promise<void>;

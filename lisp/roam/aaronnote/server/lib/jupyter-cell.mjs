@@ -1,9 +1,13 @@
-import { spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
-import { createOutputWidgetRouter } from "./jupyter-output-router.mjs";
+import { createKernelRegistry, sweepOrphanKernels } from "../jupyter/kernel-registry.mjs";
+import { defaultKernelSearchDirs, findKernelSpecs, findAttachableConnectionFiles, resolveAttachToken } from "../jupyter/kernel-finder.mjs";
+import { executeOnKernel, jupyterWidgetCommOpenP } from "../jupyter/execution-message-handler.mjs";
+
+export { jupyterWidgetCommOpenP };
 
 function inside(root, file) {
   const normalizedRoot = resolve(root);
@@ -16,128 +20,6 @@ function error(message, statusCode = 500) {
   const err = new Error(message);
   err.statusCode = statusCode;
   return err;
-}
-
-function delay(ms) {
-  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
-}
-
-function jsonHeaders() {
-  return { Accept: "application/json", "Content-Type": "application/json" };
-}
-
-function splitSetCookieHeader(value) {
-  if (!value) return [];
-  return String(value).split(/,(?=\s*[^;,=\s]+=[^;,]+)/g).map((item) => item.trim()).filter(Boolean);
-}
-
-function cookiePair(setCookieValue) {
-  return String(setCookieValue || "").split(";", 1)[0].trim();
-}
-
-function cookieName(pair) {
-  const index = String(pair || "").indexOf("=");
-  return index > 0 ? pair.slice(0, index) : "";
-}
-
-class JupyterHttpClient {
-  constructor(baseUrl) {
-    this.baseUrl = String(baseUrl || "").replace(/\/+$/, "");
-    this.cookies = new Map();
-    this.xsrfToken = "";
-  }
-
-  rememberCookies(response) {
-    const getSetCookie = response.headers?.getSetCookie;
-    const values = typeof getSetCookie === "function"
-      ? getSetCookie.call(response.headers)
-      : splitSetCookieHeader(response.headers?.get?.("set-cookie"));
-    for (const value of values || []) {
-      const pair = cookiePair(value);
-      const name = cookieName(pair);
-      if (!name) continue;
-      this.cookies.set(name, pair);
-      if (name === "_xsrf") {
-        this.xsrfToken = decodeURIComponent(pair.slice(name.length + 1));
-      }
-    }
-  }
-
-  cookieHeader() {
-    return Array.from(this.cookies.values()).join("; ");
-  }
-
-  async refreshXsrf() {
-    const response = await fetch(`${this.baseUrl}/`, {
-      headers: this.cookieHeader() ? { Cookie: this.cookieHeader() } : {},
-    });
-    this.rememberCookies(response);
-    if (!this.xsrfToken) {
-      const fallback = await fetch(`${this.baseUrl}/api/status`, {
-        headers: this.cookieHeader() ? { Cookie: this.cookieHeader() } : {},
-      });
-      this.rememberCookies(fallback);
-    }
-  }
-
-  async request(path, options = {}, retried = false) {
-    const method = String(options.method || "GET").toUpperCase();
-    const mutating = !["GET", "HEAD", "OPTIONS"].includes(method);
-    if (mutating && !this.xsrfToken) await this.refreshXsrf();
-    const headers = {
-      ...jsonHeaders(),
-      ...(this.cookieHeader() ? { Cookie: this.cookieHeader() } : {}),
-      ...(mutating && this.xsrfToken ? { "X-XSRFToken": this.xsrfToken } : {}),
-      ...(options.headers || {}),
-    };
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      ...options,
-      headers,
-      body: options.body && typeof options.body !== "string"
-        ? JSON.stringify(options.body)
-        : options.body,
-    });
-    this.rememberCookies(response);
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      if (!retried && mutating && /_xsrf|xsrf/i.test(text)) {
-        this.xsrfToken = "";
-        await this.refreshXsrf();
-        return this.request(path, options, true);
-      }
-      throw error(text || `Jupyter request failed: ${response.status}`, response.status);
-    }
-    return response;
-  }
-
-  async json(path, options = {}) {
-    const response = await this.request(path, options);
-    if (response.status === 204) return {};
-    return await response.json().catch(() => ({}));
-  }
-}
-
-function wsDataToString(data) {
-  if (typeof data === "string") return data;
-  if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
-  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
-  return String(data || "");
-}
-
-function objectValue(value) {
-  return value && typeof value === "object" ? value : {};
-}
-
-export function jupyterWidgetCommOpenP(content) {
-  const targetName = String(content?.target_name || "");
-  if (/^jupyter\.widget(?:\.|$)/.test(targetName)) return true;
-  const data = objectValue(content?.data);
-  const state = objectValue(data.state);
-  const modelName = String(state._model_name || "");
-  const modelModule = String(state._model_module || "");
-  const viewName = String(state._view_name || "");
-  const viewModule = String(state._view_module || "");
-  return Boolean(modelName || modelModule || viewName || viewModule);
 }
 
 function cleanToken(value, fallback) {
@@ -429,31 +311,92 @@ export function createJupyterCellService({
   workspaceRoot,
   stdout = process.stdout,
   stderr = process.stderr,
+  zmq: injectedZmq,
 } = {}) {
   const root = resolve(runtimeRoot || process.cwd());
   const notes = resolve(noteRoot || root);
   const workspace = resolve(workspaceRoot || notes);
   const jupyterRoot = join(root, "jupyter");
-  const runScript = join(jupyterRoot, "scripts", "run-jupyter-server.sh");
-  const host = process.env.AARONNOTE_JUPYTER_HOST || "127.0.0.1";
-  const port = Number(process.env.AARONNOTE_JUPYTER_PORT || 8890);
-  const baseUrl = process.env.AARONNOTE_JUPYTER_URL || `http://${host}:${port}`;
-  const wsBaseUrl = baseUrl.replace(/^http/i, "ws");
-  const http = new JupyterHttpClient(baseUrl);
-  const kernelsByKey = new Map();
+  const venvDir = join(jupyterRoot, ".venv");
+  const dataDir = join(jupyterRoot, ".jupyter", "data");
+  const runtimeDir = join(jupyterRoot, ".jupyter", "runtime");
   const kernelIdleTtlMs = durationFromEnv("AARONNOTE_JUPYTER_KERNEL_IDLE_TTL_MS", 10 * 60 * 1000);
-  const serverIdleTtlMs = durationFromEnv("AARONNOTE_JUPYTER_SERVER_IDLE_TTL_MS", 90 * 1000);
   const cleanupIntervalMs = durationFromEnv("AARONNOTE_JUPYTER_CLEANUP_INTERVAL_MS", 30 * 1000);
   const execTimeoutMs = durationFromEnv("AARONNOTE_JUPYTER_EXEC_TIMEOUT_MS", 0);
-  let serverProcess = null;
-  let startPromise = null;
-  let serverStartedAt = 0;
-  let lastServerUseAt = 0;
-  let activeRequests = 0;
+  const interruptGraceMs = durationFromEnv("AARONNOTE_JUPYTER_INTERRUPT_GRACE_MS", 5000);
+  const useHomeKernels = process.env.AARONNOTE_JUPYTER_USE_HOME_KERNELS !== "0";
+  const allowedKernelsRaw = String(process.env.AARONNOTE_JUPYTER_ALLOWED_KERNELS || "").trim();
+  const allowedNames = allowedKernelsRaw ? allowedKernelsRaw.split(",").map((v) => v.trim()).filter(Boolean) : undefined;
+  const attachDirs = [
+    runtimeDir,
+    ...(process.env.AARONNOTE_JUPYTER_ATTACH_DIRS ? process.env.AARONNOTE_JUPYTER_ATTACH_DIRS.split(":").filter(Boolean) : []),
+  ];
+
   let cleanupTimer = null;
   let cleanupRunning = false;
+  let registryPromise = null;
+  let registrySync = null;
+  let kernelspecsInstalled = false;
   const mirrorLocks = new Map();
   const executionQueues = new Map();
+
+  // Last-resort synchronous cleanup: `process.on("exit")` handlers cannot
+  // await, so if the async SIGTERM/SIGINT shutdown() path didn't run to
+  // completion (double signal, uncaught crash bypassing the handler), SIGKILL
+  // any owned kernel process groups we know about before the event loop dies.
+  // Installed lazily (only once a registry actually exists) and removed in
+  // shutdown() so short-lived service instances (tests, tooling) don't leak a
+  // listener onto the shared `process` object.
+  function onProcessExit() {
+    if (!registrySync) return;
+    for (const pid of registrySync.listOwnedPids()) {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+      }
+    }
+  }
+
+  async function getRegistry() {
+    if (!registryPromise) {
+      registryPromise = (async () => {
+        const sidecarPath = join(runtimeDir, "aaronnote-owned.json");
+        await sweepOrphanKernels({ sidecarPath, stderr }).catch(() => {});
+        const zmq = injectedZmq || (await import("zeromq"));
+        const registry = createKernelRegistry({
+          runtimeDir,
+          venvBinDir: join(venvDir, "bin"),
+          cwd: workspace,
+          zmq,
+          stderr,
+        });
+        registrySync = registry;
+        process.on("exit", onProcessExit);
+        return registry;
+      })();
+    }
+    return registryPromise;
+  }
+
+  async function ensureKernelspecTemplatesInstalled() {
+    if (kernelspecsInstalled) return;
+    kernelspecsInstalled = true;
+    const script = join(jupyterRoot, "scripts", "install-kernelspecs.sh");
+    if (!existsSync(script)) return;
+    await new Promise((resolveInstall) => {
+      execFile(script, [], { cwd: jupyterRoot }, () => resolveInstall());
+    });
+  }
+
+  function kernelSearchDirs() {
+    return defaultKernelSearchDirs({ dataDir, venvPrefix: venvDir, useHomeKernels });
+  }
+
+  async function listKernelSpecs() {
+    await ensureKernelspecTemplatesInstalled();
+    return await findKernelSpecs({ searchDirs: kernelSearchDirs(), allowedNames });
+  }
 
   function withMirrorLock(file, run) {
     // Serialize read-modify-write on a single output mirror so two cells sharing
@@ -487,10 +430,6 @@ export function createJupyterCellService({
     return record.executedCellRevisions;
   }
 
-  function cleanupNeeded() {
-    return Boolean(serverProcess) || kernelsByKey.size > 0;
-  }
-
   function cancelCleanupTimer() {
     if (!cleanupTimer) return;
     clearTimeout(cleanupTimer);
@@ -498,7 +437,7 @@ export function createJupyterCellService({
   }
 
   function scheduleCleanup() {
-    if (cleanupTimer || !cleanupNeeded()) return;
+    if (cleanupTimer) return;
     cleanupTimer = setTimeout(() => {
       cleanupTimer = null;
       void cleanupIdle({ scheduled: true }).catch((err) => {
@@ -508,144 +447,8 @@ export function createJupyterCellService({
     cleanupTimer.unref?.();
   }
 
-  function touchServer() {
-    lastServerUseAt = Date.now();
-    scheduleCleanup();
-  }
-
-  async function withActiveRequest(run) {
-    activeRequests += 1;
-    touchServer();
-    try {
-      return await run();
-    } finally {
-      activeRequests = Math.max(0, activeRequests - 1);
-      touchServer();
-    }
-  }
-
-  function touchKernel(record) {
-    if (!record) return;
-    const now = Date.now();
-    record.lastUsedAt = now;
-    record.lastActivityAt = now;
-    scheduleCleanup();
-  }
-
-  function kernelRecordById(id) {
-    const wanted = String(id || "").trim();
-    if (!wanted) return null;
-    for (const record of kernelsByKey.values()) {
-      if (record?.id === wanted) return record;
-    }
-    return null;
-  }
-
-  function touchKernelById(id) {
-    const record = kernelRecordById(id);
-    if (!record) return false;
-    touchKernel(record);
-    return true;
-  }
-
-  function widgetProxyTarget(pathname, search = "", websocket = false) {
-    const rawPath = String(pathname || "");
-    if (!rawPath.startsWith("/jupyter/")) return null;
-    const upstreamPath = rawPath.slice("/jupyter".length);
-    const channel = /^\/api\/kernels\/([^/]+)\/channels$/.exec(upstreamPath);
-    const widgetRuntimeChannel = /^\/widget-runtimes\/([^/]+)\/channels$/.exec(upstreamPath);
-    const localWidgetAsset = /^\/nbextensions\/[A-Za-z0-9@._~!$&'()+,;=:%/-]+$/.test(upstreamPath);
-    if (!channel && !widgetRuntimeChannel && !localWidgetAsset) return null;
-    if (channel || widgetRuntimeChannel) {
-      let id = "";
-      try { id = decodeURIComponent((channel || widgetRuntimeChannel)[1]); } catch { return null; }
-      if (!kernelRecordById(id)) return null;
-      touchKernelById(id);
-      return `${websocket ? wsBaseUrl : baseUrl}/api/kernels/${encodeURIComponent(id)}/channels${String(search || "")}`;
-    }
-    const root = websocket ? wsBaseUrl : baseUrl;
-    return `${root}${upstreamPath}${String(search || "")}`;
-  }
-
-  function kernelRecordForBody(body) {
-    const explicitKey = String(body?.key || "").trim();
-    if (explicitKey && kernelsByKey.has(explicitKey)) return { key: explicitKey, record: kernelsByKey.get(explicitKey) };
-    const id = String(body?.id || body?.kernelId || "").trim();
-    if (id) {
-      for (const [key, record] of kernelsByKey.entries()) {
-        if (record?.id === id) return { key, record };
-      }
-    }
-    const fileValue = String(body?.file || "").trim();
-    if (!fileValue) return { key: "", record: null };
-    const runtime = runtimeForBody(body);
-    return { key: runtime.key, record: kernelsByKey.get(runtime.key) || null };
-  }
-
-  function widgetRuntimeForRecord(record) {
-    if (!record?.id) return null;
-    return {
-      id: record.id,
-      name: record.kernel,
-      generation: Number(record.widgetGeneration || 1),
-    };
-  }
-
-  function outputRuntimeStamp(output) {
-    const stamp = output?.kernelRuntime && typeof output.kernelRuntime === "object"
-      ? output.kernelRuntime
-      : output?.widgetRuntime && typeof output.widgetRuntime === "object" ? output.widgetRuntime : null;
-    if (!stamp?.id) return null;
-    return {
-      id: String(stamp.id || ""),
-      generation: Number(stamp.generation || 1),
-    };
-  }
-
-  function attachLiveRuntimeToOutput(output, noteFile, kernel, session, language) {
-    if (!output || typeof output !== "object") return output ?? null;
-    const scriptFile = hiddenScriptPath(noteFile, session, language);
-    const record = kernelsByKey.get(kernelKey({ file: scriptFile, kernel }));
-    const runtime = widgetRuntimeForRecord(record);
-    const stamp = outputRuntimeStamp(output);
-    const live = Boolean(runtime && stamp && stamp.id === runtime.id && Number(stamp.generation || 1) === Number(runtime.generation || 1));
-    const { widgetRuntime: _oldWidgetRuntime, ...rest } = output;
-    return {
-      ...rest,
-      live,
-      ...(live ? { widgetRuntime: runtime } : {}),
-    };
-  }
-
-  function kernelTask(key, record) {
-    const now = Date.now();
-    const running = Math.max(0, Number(record?.running || 0));
-    return {
-      key,
-      id: record?.id || "",
-      file: record?.file || "",
-      sourceFile: record?.sourceFile || "",
-      kernel: record?.kernel || "",
-      session: record?.session || "",
-      status: running > 0 ? "running" : (record?.lastStatus || "idle"),
-      running,
-      createdAt: record?.createdAt || 0,
-      createdAtIso: isoTime(record?.createdAt),
-      lastUsedAt: record?.lastUsedAt || 0,
-      lastUsedAtIso: isoTime(record?.lastUsedAt),
-      lastActivityAt: record?.lastActivityAt || 0,
-      lastActivityAtIso: isoTime(record?.lastActivityAt),
-      idleMs: Math.max(0, now - Number(record?.lastUsedAt || now)),
-      runningMs: running > 0 ? Math.max(0, now - Number(record?.executionStartedAt || now)) : 0,
-      totalRuns: Number(record?.totalRuns || 0),
-      executionCount: record?.executionCount ?? null,
-      lastCellId: record?.lastCellId || "",
-      lastError: record?.lastError || "",
-      executedCells: record?.executedCellRevisions instanceof Map ? record.executedCellRevisions.size : 0,
-      widgetGeneration: Number(record?.widgetGeneration || 1),
-      protected: running > 0,
-      ttlMs: kernelIdleTtlMs,
-    };
+  function kernelKey({ file, kernel }) {
+    return `${resolve(file)}\0${cleanToken(kernel, "python3")}`;
   }
 
   function safeNoteFile(raw) {
@@ -676,460 +479,199 @@ export function createJupyterCellService({
     };
   }
 
-  async function fetchJson(path, options = {}) {
-    return http.json(path, options);
+  async function kernelRecordForBody(body) {
+    const registry = await getRegistry();
+    const explicitKey = String(body?.key || "").trim();
+    if (explicitKey) {
+      const record = registry.get(explicitKey);
+      if (record) return { key: explicitKey, record };
+    }
+    const id = String(body?.id || body?.kernelId || "").trim();
+    if (id) {
+      const record = registry.list().find((item) => item.id === id);
+      if (record) return { key: record.key, record };
+    }
+    const fileValue = String(body?.file || "").trim();
+    if (!fileValue) return { key: "", record: undefined };
+    const runtime = runtimeForBody(body);
+    return { key: runtime.key, record: registry.get(runtime.key) };
   }
 
-  async function serverReady() {
-    try {
-      const response = await fetch(`${baseUrl}/api/status`, { signal: AbortSignal.timeout(3000) });
-      return response.ok;
-    } catch {
-      return false;
-    }
+  function widgetRuntimeForRecord(record) {
+    if (!record?.id) return null;
+    return {
+      id: record.id,
+      name: record.kernelName,
+      generation: Number(record.widgetGeneration || 1),
+    };
   }
 
-  async function reconcileKernels() {
-    // Drop local records whose kernel no longer exists on the server, without
-    // nuking the whole map on a transient probe failure (which would leak
-    // kernels on an externally-managed AARONNOTE_JUPYTER_URL server).
-    let live;
-    try {
-      live = await fetchJson("/api/kernels");
-    } catch {
-      return;
-    }
-    const ids = new Set(Array.isArray(live) ? live.map((item) => String(item?.id || "")) : []);
-    for (const [key, record] of Array.from(kernelsByKey.entries())) {
-      if (record?.id && !ids.has(record.id)) kernelsByKey.delete(key);
-    }
+  function outputRuntimeStamp(output) {
+    const stamp = output?.kernelRuntime && typeof output.kernelRuntime === "object"
+      ? output.kernelRuntime
+      : output?.widgetRuntime && typeof output.widgetRuntime === "object" ? output.widgetRuntime : null;
+    if (!stamp?.id) return null;
+    return {
+      id: String(stamp.id || ""),
+      generation: Number(stamp.generation || 1),
+    };
   }
 
-  async function waitForServer(timeoutMs = 20000) {
-    const started = Date.now();
-    while (Date.now() - started < timeoutMs) {
-      if (await serverReady()) return true;
-      await delay(250);
-    }
-    return false;
+  async function attachLiveRuntimeToOutput(output, noteFile, kernel, session, language) {
+    if (!output || typeof output !== "object") return output ?? null;
+    const scriptFile = hiddenScriptPath(noteFile, session, language);
+    const registry = await getRegistry();
+    const record = registry.get(kernelKey({ file: scriptFile, kernel }));
+    const runtime = widgetRuntimeForRecord(record);
+    const stamp = outputRuntimeStamp(output);
+    const live = Boolean(runtime && stamp && stamp.id === runtime.id && Number(stamp.generation || 1) === Number(runtime.generation || 1));
+    const { widgetRuntime: _oldWidgetRuntime, ...rest } = output;
+    return {
+      ...rest,
+      live,
+      ...(live ? { widgetRuntime: runtime } : {}),
+    };
   }
 
-  async function ensureServer() {
-    if (await serverReady()) {
-      touchServer();
-      return;
-    }
-    if (startPromise) return await startPromise;
-    startPromise = (async () => {
-      if (!existsSync(runScript)) {
-        throw error(`Aaronnote Jupyter launcher not found: ${runScript}`, 500);
-      }
-      if (!serverProcess || serverProcess.exitCode != null) {
-        // A fresh server owns no kernels; any cached ids from a prior process
-        // are stale. (An already-live-but-slow process falls through without
-        // clearing, so records survive a transient readiness blip.)
-        kernelsByKey.clear();
-        serverProcess = spawn(runScript, [workspace], {
-          cwd: root,
-          env: {
-            ...process.env,
-            AARONNOTE_JUPYTER_HOST: host,
-            AARONNOTE_JUPYTER_PORT: String(port),
-            AARONNOTE_JUPYTER_USE_HOME_KERNELS: process.env.AARONNOTE_JUPYTER_USE_HOME_KERNELS || "1",
-          },
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        serverProcess.stdout?.on("data", (chunk) => stderr.write(`[aaronnote-jupyter] ${chunk}`));
-        serverProcess.stderr?.on("data", (chunk) => stderr.write(`[aaronnote-jupyter] ${chunk}`));
-        serverStartedAt = Date.now();
-        serverProcess.on("exit", () => {
-          serverProcess = null;
-          serverStartedAt = 0;
-          kernelsByKey.clear();
-          scheduleCleanup();
-        });
-      }
-      if (!(await waitForServer())) {
-        throw error("Aaronnote Jupyter did not become ready. Run npm run jupyter:bootstrap if it is not installed.", 503);
-      }
-      touchServer();
-    })();
-    try {
-      await startPromise;
-    } finally {
-      startPromise = null;
-    }
-  }
-
-  function kernelKey({ file, kernel }) {
-    return `${resolve(file)}\0${cleanToken(kernel, "python3")}`;
+  function kernelTask(key, record) {
+    const now = Date.now();
+    const running = Math.max(0, Number(record?.running || 0));
+    return {
+      key,
+      id: record?.id || "",
+      kernel: record?.kernelName || "",
+      status: record?.status === "dead" ? "dead" : (running > 0 ? "running" : (record?.lastStatus || "idle")),
+      running,
+      attached: Boolean(record?.attached),
+      createdAt: record?.createdAt || 0,
+      createdAtIso: isoTime(record?.createdAt),
+      lastUsedAt: record?.lastActivity || 0,
+      lastUsedAtIso: isoTime(record?.lastActivity),
+      idleMs: Math.max(0, now - Number(record?.lastActivity || now)),
+      totalRuns: Number(record?.totalRuns || 0),
+      executionCount: record?.executionCount ?? null,
+      lastCellId: record?.lastCellId || "",
+      lastError: record?.lastError || "",
+      executedCells: record?.executedCellRevisions instanceof Map ? record.executedCellRevisions.size : 0,
+      widgetGeneration: Number(record?.widgetGeneration || 1),
+      protected: running > 0,
+      ttlMs: kernelIdleTtlMs,
+    };
   }
 
   async function ensureKernel(body) {
-    await ensureServer();
     const { noteFile, scriptFile, kernel, session, language, key } = runtimeForBody(body || {});
-    const existing = kernelsByKey.get(key);
-    if (existing?.id) {
-      touchKernel(existing);
-      return { ...existing, file: scriptFile, sourceFile: noteFile, kernel, session, language, key };
+    const registry = await getRegistry();
+    let record;
+    if (kernel.startsWith("attach:")) {
+      const token = kernel.slice("attach:".length);
+      const connectionFilePath = await resolveAttachToken(token, attachDirs);
+      if (!connectionFilePath) throw error(`No attachable kernel connection file found for "${token}"`, 404);
+      record = await registry.ensureAttached(key, kernel, connectionFilePath);
+    } else {
+      if (leanRuntimeP(language, kernel)) {
+        throw error("Lean cells do not use a Jupyter kernel", 400);
+      }
+      const specs = await listKernelSpecs();
+      const specEntry = specs.find((item) => item.name === kernel);
+      if (!specEntry) throw error(`Unknown Jupyter kernel: ${kernel}`, 404);
+      record = await registry.ensure(key, specEntry);
     }
-    const created = await fetchJson("/api/kernels", {
-      method: "POST",
-      body: { name: kernel },
-    });
-    const id = String(created.id || "");
-    if (!id) throw error("Jupyter did not return a kernel id", 502);
-    const now = Date.now();
-    const next = {
-      id,
-      file: scriptFile,
-      sourceFile: noteFile,
-      kernel,
-      session,
-      language,
-      createdAt: now,
-      lastUsedAt: now,
-      lastActivityAt: now,
-      running: 0,
-      totalRuns: 0,
-      executionCount: null,
-      executionStartedAt: 0,
-      lastCellId: "",
-      lastStatus: "idle",
-      lastError: "",
-      widgetGeneration: 1,
-      executedCellRevisions: new Map(),
-    };
-    kernelsByKey.set(key, next);
+    registry.touch(key);
     scheduleCleanup();
-    return { ...next, key };
+    return { id: record.id, file: scriptFile, sourceFile: noteFile, kernel, session, language, key, record };
   }
 
   async function kernels() {
-    return await withActiveRequest(async () => {
-      await ensureServer();
-      const result = await fetchJson("/api/kernelspecs");
-      const specs = result.kernelspecs && typeof result.kernelspecs === "object" ? result.kernelspecs : {};
-      const kernels = Object.entries(specs).map(([name, spec]) => ({
-        name,
-        displayName: spec?.spec?.display_name || spec?.display_name || name,
-        language: spec?.spec?.language || "",
-      }));
-      if (!kernels.some((item) => item.name === "lean4")) {
-        kernels.push({ name: "lean4", displayName: "Lean 4", language: "lean4" });
+    const specs = await listKernelSpecs();
+    const list = specs.map((entry) => ({
+      name: entry.name,
+      displayName: entry.spec.display_name || entry.name,
+      language: entry.spec.language || "",
+    }));
+    if (!list.some((item) => item.name === "lean4")) {
+      list.push({ name: "lean4", displayName: "Lean 4", language: "lean4" });
+    }
+    const attachable = await findAttachableConnectionFiles(attachDirs);
+    return {
+      ok: true,
+      default: "python3",
+      kernels: list.sort((a, b) => a.name.localeCompare(b.name)),
+      attachable: attachable.map((item) => ({
+        name: `attach:${item.token}`,
+        displayName: `Attach: ${item.token}`,
+        language: "",
+      })),
+    };
+  }
+
+  function summarizeError(outputs) {
+    const err = (outputs || []).find((item) => item.output_type === "error");
+    if (!err) return "";
+    return `${err.ename || "Error"}: ${err.evalue || ""}`.trim();
+  }
+
+  async function runExecuteAttempt(kernelInfo, code, cellId, body) {
+    const record = kernelInfo.record;
+    const now = Date.now();
+    record.running = Math.max(0, Number(record.running || 0)) + 1;
+    record.totalRuns = Number(record.totalRuns || 0) + 1;
+    record.lastActivity = now;
+    record.lastCellId = cellId;
+    record.lastStatus = "running";
+    record.lastError = "";
+    try {
+      const streamLimit = durationFromEnv("AARONNOTE_JUPYTER_MAX_STREAM_BYTES", 1024 * 1024);
+      const widgetMessageLimit = durationFromEnv("AARONNOTE_JUPYTER_MAX_WIDGET_MESSAGES", 512);
+      const widgetMessageBytesLimit = durationFromEnv("AARONNOTE_JUPYTER_MAX_WIDGET_MESSAGE_BYTES", 8 * 1024 * 1024);
+      let result;
+      try {
+        result = await executeOnKernel(record.kernel, code, {
+          silent: Boolean(body?.silent),
+          storeHistory: body?.storeHistory !== false,
+          streamLimit,
+          widgetMessageLimit,
+          widgetMessageBytesLimit,
+          execTimeoutMs,
+        });
+      } catch (err) {
+        if (Number(err?.statusCode) === 504) {
+          // Escalate a hung execution: interrupt, give it a grace period, then
+          // surface the timeout while leaving the kernel process itself alive
+          // for the next cell (a hard kill would lose all in-kernel state).
+          const registry = await getRegistry();
+          await registry.interrupt(kernelInfo.key).catch(() => {});
+          await new Promise((resolveGrace) => setTimeout(resolveGrace, interruptGraceMs));
+        }
+        throw err;
       }
+      record.executionCount = result.executionCount ?? record.executionCount;
+      record.lastStatus = result.status;
+      record.lastError = result.status === "error" ? summarizeError(result.outputs) : "";
       return {
         ok: true,
-        default: result.default || "python3",
-        kernels: kernels.sort((a, b) => a.name.localeCompare(b.name)),
+        cellId,
+        kernel: kernelInfo.kernel,
+        session: kernelInfo.session,
+        status: result.status,
+        executionCount: result.executionCount,
+        outputs: result.outputs,
+        widgetRuntime: {
+          id: record.id,
+          name: kernelInfo.kernel,
+          generation: Number(record.widgetGeneration || 1),
+        },
+        ...(result.widgetMessages ? { widgetMessages: result.widgetMessages, widgetMessagesTruncated: result.widgetMessagesTruncated } : {}),
+        ...(result.widgetOutputs ? { widgetOutputs: result.widgetOutputs } : {}),
       };
-    });
-  }
-
-  function kernelGoneErrorP(err) {
-    if (Number(err?.statusCode || 0) === 404) return true;
-    return /websocket/i.test(String(err?.message || ""));
-  }
-
-  async function kernelAlive(id) {
-    if (!id) return false;
-    try {
-      await fetchJson(`/api/kernels/${encodeURIComponent(id)}`);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function runExecuteOnKernel(kernelInfo, record, code, body, cellId) {
-    const msgId = randomUUID();
-    const sessionId = randomUUID();
-    const outputs = [];
-    const displayIndexes = new Map();
-    const widgetCommIds = new Set();
-    // ipywidgets Output-widget routing (see jupyter-output-router.mjs).
-    const outputRouter = createOutputWidgetRouter();
-    const streamLimit = durationFromEnv("AARONNOTE_JUPYTER_MAX_STREAM_BYTES", 1024 * 1024);
-    const widgetMessageLimit = durationFromEnv("AARONNOTE_JUPYTER_MAX_WIDGET_MESSAGES", 512);
-    const widgetMessageBytesLimit = durationFromEnv("AARONNOTE_JUPYTER_MAX_WIDGET_MESSAGE_BYTES", 8 * 1024 * 1024);
-    let streamBytes = 0;
-    let streamTruncated = false;
-    let widgetMessageBytes = 0;
-    let widgetMessagesTruncated = false;
-    let executionCount = null;
-    let shellReply = null;
-    let idle = false;
-    let clearOnNext = false;
-    let settled = false;
-
-    const finalizeRecord = (status, err = "") => {
-      if (!record) return;
-      record.running = Math.max(0, Number(record.running || 0) - 1);
-      record.executionStartedAt = record.running > 0 ? record.executionStartedAt : 0;
-      record.executionCount = executionCount ?? record.executionCount ?? null;
-      record.lastStatus = status || (record.running > 0 ? "running" : "idle");
-      record.lastError = err;
-      touchKernel(record);
-    };
-
-    return new Promise((resolveDone, rejectDone) => {
-      let ws = null;
-      const timeout = execTimeoutMs > 0 ? setTimeout(() => {
-        fail(error("Jupyter execution timed out", 504));
-      }, execTimeoutMs) : null;
-
-      const done = (value) => {
-        if (settled) return;
-        settled = true;
-        if (timeout) clearTimeout(timeout);
-        resolveDone(value);
-      };
-      const fail = (err) => {
-        if (settled) return;
-        settled = true;
-        if (timeout) clearTimeout(timeout);
-        try { ws?.close(); } catch {}
-        finalizeRecord("error", err?.message || String(err || ""));
-        rejectDone(err);
-      };
-
-      const finishIfDone = () => {
-        if (settled || !shellReply || !idle) return;
-        try { ws?.close(); } catch {}
-        finalizeRecord(shellReply.status || "ok");
-        done({
-          ok: true,
-          cellId,
-          kernel: kernelInfo.kernel,
-          session: kernelInfo.session,
-          status: shellReply.status || "ok",
-          executionCount,
-          outputs,
-          widgetRuntime: {
-            id: kernelInfo.id,
-            name: kernelInfo.kernel,
-            generation: Number(record?.widgetGeneration || 1),
-          },
-          ...(widgetMessages.length > 0 ? {
-            widgetMessages,
-            widgetMessagesTruncated,
-          } : {}),
-          ...(outputRouter.hasOutputs() ? { widgetOutputs: outputRouter.widgetOutputs } : {}),
-        });
-      };
-
-      const widgetMessages = [];
-
-      const rememberWidgetMessage = (message) => {
-        if (widgetMessagesTruncated) return;
-        const type = String(message?.header?.msg_type || "");
-        if (!["comm_open", "comm_msg", "comm_close"].includes(type)) return;
-        const content = objectValue(message?.content);
-        const commId = String(content.comm_id || "");
-        if (!commId) return;
-        if (type === "comm_open") {
-          if (!jupyterWidgetCommOpenP(content)) return;
-          widgetCommIds.add(commId);
-        } else if (!widgetCommIds.has(commId)) {
-          return;
-        }
-        const payload = {
-          channel: message.channel || "iopub",
-          header: message.header || {},
-          parent_header: message.parent_header || {},
-          metadata: message.metadata || {},
-          content,
-          buffers: Array.isArray(message.buffers) ? message.buffers : [],
-        };
-        const encoded = JSON.stringify(payload);
-        widgetMessageBytes += Buffer.byteLength(encoded, "utf8");
-        if (widgetMessages.length >= widgetMessageLimit || widgetMessageBytes > widgetMessageBytesLimit) {
-          widgetMessagesTruncated = true;
-          return;
-        }
-        widgetMessages.push(payload);
-      };
-
-      // Route an output either into the active Output widget (if the message's
-      // parent falls inside a widget context) or to the top-level cell output.
-      const emitOutput = (parentId, output) => {
-        const commId = outputRouter.targetCommFor(parentId);
-        if (commId) outputRouter.pushOutput(commId, output);
-        else pushOutput(output);
-      };
-
-      const pushOutput = (output) => {
-        if (clearOnNext) {
-          outputs.length = 0;
-          displayIndexes.clear();
-          streamBytes = 0;
-          streamTruncated = false;
-          clearOnNext = false;
-        }
-        if (output.output_type === "stream") {
-          if (streamTruncated) return;
-          const last = outputs[outputs.length - 1];
-          if (last && last.output_type === "stream" && last.name === output.name) {
-            last.text += output.text;
-          } else {
-            outputs.push(output);
-          }
-          streamBytes += Buffer.byteLength(String(output.text || ""), "utf8");
-          if (streamBytes > streamLimit) {
-            streamTruncated = true;
-            outputs.push({
-              output_type: "stream",
-              name: "stderr",
-              text: `\n[aaronnote: output truncated at ${streamLimit} bytes]\n`,
-            });
-          }
-          return;
-        }
-        const displayId = output?.transient?.display_id;
-        if (displayId && output.output_type === "update_display_data") {
-          if (displayIndexes.has(displayId)) {
-            outputs[displayIndexes.get(displayId)] = { ...output, output_type: "display_data" };
-            return;
-          }
-          output = { ...output, output_type: "display_data" };
-        }
-        if (displayId) displayIndexes.set(displayId, outputs.length);
-        outputs.push(output);
-      };
-
-      try {
-        ws = new WebSocket(`${wsBaseUrl}/api/kernels/${encodeURIComponent(kernelInfo.id)}/channels?session_id=${encodeURIComponent(randomUUID())}`);
-      } catch (err) {
-        fail(error(`Jupyter websocket failed: ${err?.message || err}`, 502));
-        return;
-      }
-
-      ws.addEventListener("open", () => {
-        touchKernel(record);
-        ws.send(JSON.stringify({
-          header: {
-            msg_id: msgId,
-            username: "aaronnote",
-            session: sessionId,
-            msg_type: "execute_request",
-            version: "5.3",
-            date: new Date().toISOString(),
-          },
-          parent_header: {},
-          metadata: {},
-          content: {
-            code,
-            silent: Boolean(body?.silent),
-            store_history: body?.storeHistory === false ? false : true,
-            user_expressions: {},
-            allow_stdin: false,
-            stop_on_error: false,
-          },
-          channel: "shell",
-          buffers: [],
-        }));
-      });
-      ws.addEventListener("error", () => fail(error("Jupyter websocket failed", 502)));
-      ws.addEventListener("close", () => {
-        if (!settled && (!shellReply || !idle)) fail(error("Jupyter websocket closed", 502));
-      });
-      ws.addEventListener("message", (event) => {
-        let message;
-        try {
-          message = JSON.parse(wsDataToString(event.data));
-        } catch {
-          return;
-        }
-        rememberWidgetMessage(message);
-        outputRouter.track(message);
-        const parentId = message?.parent_header?.msg_id;
-        if (parentId !== msgId) return;
-        touchKernel(record);
-        const channel = message.channel || "";
-        const type = message.header?.msg_type || "";
-        const content = message.content || {};
-        if (channel === "shell" && type === "execute_reply") {
-          shellReply = content;
-          finishIfDone();
-          return;
-        }
-        if (channel !== "iopub") return;
-        if (type === "status" && content.execution_state === "idle") {
-          idle = true;
-          finishIfDone();
-          return;
-        }
-        if (type === "execute_input") {
-          executionCount = content.execution_count ?? executionCount;
-          if (record) record.executionCount = executionCount;
-          return;
-        }
-        if (type === "stream") {
-          emitOutput(parentId, { output_type: "stream", name: content.name || "stdout", text: content.text || "" });
-        } else if (type === "execute_result") {
-          executionCount = content.execution_count ?? executionCount;
-          if (record) record.executionCount = executionCount;
-          emitOutput(parentId, {
-            output_type: "execute_result",
-            execution_count: content.execution_count ?? null,
-            data: content.data || {},
-            metadata: content.metadata || {},
-          });
-        } else if (type === "display_data" || type === "update_display_data") {
-          emitOutput(parentId, {
-            output_type: type,
-            data: content.data || {},
-            metadata: content.metadata || {},
-            transient: content.transient || {},
-          });
-        } else if (type === "error") {
-          emitOutput(parentId, {
-            output_type: "error",
-            ename: content.ename || "",
-            evalue: content.evalue || "",
-            traceback: Array.isArray(content.traceback) ? content.traceback : [],
-          });
-        } else if (type === "clear_output") {
-          const commId = outputRouter.targetCommFor(parentId);
-          if (commId) {
-            outputRouter.clearOutput(commId, Boolean(content.wait));
-          } else if (content.wait) {
-            clearOnNext = true;
-          } else {
-            outputs.length = 0;
-            displayIndexes.clear();
-            streamBytes = 0;
-            streamTruncated = false;
-          }
-        }
-      });
-    });
-  }
-
-  async function runExecuteAttempt(body, code, cellId, allowRetry) {
-    const kernelInfo = await ensureKernel(body || {});
-    const record = kernelsByKey.get(kernelInfo.key);
-    if (record) {
-      const now = Date.now();
-      record.running = Math.max(0, Number(record.running || 0)) + 1;
-      record.totalRuns = Number(record.totalRuns || 0) + 1;
-      record.executionStartedAt = now;
-      record.lastUsedAt = now;
-      record.lastActivityAt = now;
-      record.lastCellId = cellId;
-      record.lastStatus = "running";
-      record.lastError = "";
-    }
-    try {
-      return await runExecuteOnKernel(kernelInfo, record, code, body, cellId);
     } catch (err) {
-      // A cached kernel id that no longer exists on the server must self-heal:
-      // drop the dead record and re-provision once before surfacing the error.
-      if (allowRetry && kernelGoneErrorP(err) && !(await kernelAlive(kernelInfo.id))) {
-        kernelsByKey.delete(kernelInfo.key);
-        return await runExecuteAttempt(body, code, cellId, false);
-      }
+      record.lastStatus = "error";
+      record.lastError = err?.message || String(err || "");
       throw err;
+    } finally {
+      record.running = Math.max(0, Number(record.running || 0) - 1);
+      record.lastActivity = Date.now();
+      scheduleCleanup();
     }
   }
 
@@ -1152,13 +694,16 @@ export function createJupyterCellService({
     }
     if (!normalizedCode.trim()) return { ok: true, status: "ok", outputs: [], executionCount: null, cellId: normalizedCellId };
     const runtime = runtimeForBody({ ...(body || {}), kernel: requestedKernel });
-    const run = () => withActiveRequest(async () => runExecuteAttempt({
-      ...(body || {}),
-      file: runtime.noteFile,
-      kernel: requestedKernel,
-      session: runtime.session,
-      language: runtime.language,
-    }, normalizedCode, normalizedCellId, true));
+    const run = async () => {
+      const kernelInfo = await ensureKernel({
+        ...(body || {}),
+        file: runtime.noteFile,
+        kernel: requestedKernel,
+        session: runtime.session,
+        language: runtime.language,
+      });
+      return await runExecuteAttempt(kernelInfo, normalizedCode, normalizedCellId, body);
+    };
     return queued ? await withKernelExecutionQueue(runtime.key, run) : await run();
   }
 
@@ -1233,7 +778,7 @@ export function createJupyterCellService({
       language,
       cellId,
       code: cells.get(cellId) ?? "",
-      output: attachLiveRuntimeToOutput(savedOutput, noteFile, kernel, session, language),
+      output: await attachLiveRuntimeToOutput(savedOutput, noteFile, kernel, session, language),
       exists: Boolean(info),
       mtimeMs: info?.mtimeMs ?? 0,
       size: info?.size ?? 0,
@@ -1351,7 +896,8 @@ export function createJupyterCellService({
         .filter((entry) => entry.session === session && entry.language === language)
         .map((entry) => ({ ...entry, selected: selected.has(entry.cellId), revision: codeRevision(entry.code) }));
       const mode = String(body?.runMode || body?.executionMode || "dependencies") === "selected" ? "selected" : "dependencies";
-      const recordBefore = kernelsByKey.get(runtime.key);
+      const registry = await getRegistry();
+      const recordBefore = registry.get(runtime.key);
       const plan = planContextExecution({ mode, entries, targetCellId, record: recordBefore });
       if (plan.length === 0) {
         return { ok: true, cellId: targetCellId, kernel, session, status: "ok", executionCount: null, outputs: [], results: [], plan: [] };
@@ -1371,7 +917,7 @@ export function createJupyterCellService({
         await persistScriptCellResult(noteFile, entry, liveResult);
         results.push(liveResult);
         if (liveResult.status !== "error") {
-          const record = kernelsByKey.get(runtime.key);
+          const record = registry.get(runtime.key);
           if (record) executedRevisions(record).set(entry.cellId, entry.revision);
         }
         if (entry.cellId === targetCellId) targetResult = liveResult;
@@ -1546,42 +1092,37 @@ export function createJupyterCellService({
     return { ok: true, supported: true, kernel, session: cleanToken(body?.session, "default"), variables: values };
   }
 
-  function kernelStatus(body) {
+  async function kernelStatus(body) {
     const { kernel, session, key } = runtimeForBody(body || {});
-    const existing = kernelsByKey.get(key);
+    const registry = await getRegistry();
+    const existing = registry.get(key);
     return {
       ok: true,
       kernel,
       session,
       status: existing?.id ? (Number(existing.running || 0) > 0 ? "running" : (existing.lastStatus || "idle")) : "not-started",
+      attached: Boolean(existing?.attached),
       id: existing?.id || "",
       key: existing?.id ? key : "",
     };
   }
 
   async function restart(body) {
-    return await withActiveRequest(async () => {
-      const kernelInfo = await ensureKernel(body || {});
-      await fetchJson(`/api/kernels/${encodeURIComponent(kernelInfo.id)}/restart`, { method: "POST", body: {} });
-      const record = kernelsByKey.get(kernelInfo.key);
-      if (record) {
-        record.running = 0;
-        record.executionStartedAt = 0;
-        record.lastStatus = "restarted";
-        record.lastError = "";
-        record.widgetGeneration = Number(record.widgetGeneration || 1) + 1;
-        record.executedCellRevisions = new Map();
-        touchKernel(record);
-      }
-      return { ok: true, kernel: kernelInfo.kernel, session: kernelInfo.session };
-    });
+    const kernelInfo = await ensureKernel(body || {});
+    const registry = await getRegistry();
+    try {
+      await registry.restart(kernelInfo.key);
+    } catch (err) {
+      throw error(err?.message || String(err), 400);
+    }
+    return { ok: true, kernel: kernelInfo.kernel, session: kernelInfo.session };
   }
 
   async function interrupt(body) {
     // Interrupt the kernel actually running this cell. Going through ensureKernel
     // would spawn a fresh idle kernel when none exists (nothing to interrupt) and
     // could desync state — a source of the flaky interrupt behavior.
-    const { record } = kernelRecordForBody(body || {});
+    const { key, record } = await kernelRecordForBody(body || {});
     if (!record?.id) {
       return {
         ok: true,
@@ -1590,51 +1131,30 @@ export function createJupyterCellService({
         session: cleanToken(body?.session, "default"),
       };
     }
-    return await withActiveRequest(async () => {
-      await fetchJson(`/api/kernels/${encodeURIComponent(record.id)}/interrupt`, { method: "POST", body: {} });
-      record.lastStatus = "interrupting";
-      touchKernel(record);
-      return { ok: true, kernel: record.kernel, session: record.session };
-    });
+    const registry = await getRegistry();
+    await registry.interrupt(key);
+    return { ok: true, kernel: record.kernelName, session: record.session };
   }
 
   async function shutdownKernel(body) {
-    const { key, record } = kernelRecordForBody(body || {});
+    const { key, record } = await kernelRecordForBody(body || {});
     if (!record?.id) return { ok: true, status: "not-started" };
-    if (await serverReady()) {
-      await withActiveRequest(async () => {
-        try { await fetchJson(`/api/kernels/${encodeURIComponent(record.id)}`, { method: "DELETE" }); } catch {}
-      });
-    }
-    kernelsByKey.delete(key);
-    scheduleCleanup();
-    return { ok: true, status: "shutdown", kernel: record.kernel, session: record.session, key };
+    const registry = await getRegistry();
+    await registry.shutdown(key);
+    return { ok: true, status: "shutdown", kernel: record.kernelName, session: record.session, key };
   }
 
   async function listTasks() {
-    const ready = cleanupNeeded() ? await serverReady() : false;
-    if (ready) await reconcileKernels();
+    const registry = await getRegistry();
     return {
       ok: true,
-      server: {
-        status: ready ? "running" : "not-started",
-        owned: Boolean(serverProcess),
-        pid: serverProcess?.pid || null,
-        activeRequests,
-        startedAt: serverStartedAt,
-        startedAtIso: isoTime(serverStartedAt),
-        lastUsedAt: lastServerUseAt,
-        lastUsedAtIso: isoTime(lastServerUseAt),
-        idleMs: lastServerUseAt ? Math.max(0, Date.now() - lastServerUseAt) : 0,
-        idleTtlMs: serverIdleTtlMs,
-      },
       cleanup: {
         kernelIdleTtlMs,
-        serverIdleTtlMs,
         cleanupIntervalMs,
         execTimeoutMs,
+        interruptGraceMs,
       },
-      kernels: Array.from(kernelsByKey.entries()).map(([key, record]) => kernelTask(key, record)),
+      kernels: registry.list().map((record) => kernelTask(record.key, record)),
     };
   }
 
@@ -1643,32 +1163,20 @@ export function createJupyterCellService({
     cleanupRunning = true;
     const removed = [];
     try {
+      const registry = await getRegistry();
       const now = Date.now();
-      const ready = cleanupNeeded() ? await serverReady() : false;
-      if (ready) {
-        await reconcileKernels();
-        for (const [key, record] of Array.from(kernelsByKey.entries())) {
-          const running = Number(record?.running || 0) > 0;
-          const idleMs = now - Number(record?.lastUsedAt || now);
-          if (!force && (running || idleMs < kernelIdleTtlMs)) continue;
-          try { await fetchJson(`/api/kernels/${encodeURIComponent(record.id)}`, { method: "DELETE" }); } catch {}
-          kernelsByKey.delete(key);
-          removed.push({ key, kernel: record.kernel, session: record.session, reason: force ? "forced" : "idle" });
-        }
-      }
-      const serverIdleMs = now - Number(lastServerUseAt || now);
-      const mayStopServer = Boolean(serverProcess)
-        && activeRequests === 0
-        && kernelsByKey.size === 0
-        && (force || serverIdleMs >= serverIdleTtlMs);
-      if (mayStopServer) {
-        try { serverProcess.kill("SIGTERM"); } catch {}
-        serverProcess = null;
-        serverStartedAt = 0;
+      for (const record of registry.list()) {
+        if (record.attached) continue;
+        const running = Number(record?.running || 0) > 0;
+        const isDead = record.status === "dead";
+        const idleMs = now - Number(record?.lastActivity || now);
+        if (!force && !isDead && (running || idleMs < kernelIdleTtlMs)) continue;
+        await registry.shutdown(record.key).catch(() => {});
+        removed.push({ key: record.key, kernel: record.kernelName, reason: force ? "forced" : (isDead ? "dead" : "idle") });
       }
     } finally {
       cleanupRunning = false;
-      if (cleanupNeeded()) scheduleCleanup();
+      if ((await getRegistry()).list().some((r) => !r.attached)) scheduleCleanup();
     }
     const snapshot = await listTasks();
     return { ...snapshot, scheduled, removed };
@@ -1676,15 +1184,52 @@ export function createJupyterCellService({
 
   async function shutdown() {
     cancelCleanupTimer();
-    for (const item of kernelsByKey.values()) {
-      if (!item?.id) continue;
-      try { await fetchJson(`/api/kernels/${encodeURIComponent(item.id)}`, { method: "DELETE" }); } catch {}
+    if (registryPromise) {
+      const registry = await registryPromise;
+      await registry.shutdownAll();
+      process.off("exit", onProcessExit);
+      registrySync = null;
     }
-    kernelsByKey.clear();
-    if (serverProcess) {
-      try { serverProcess.kill("SIGTERM"); } catch {}
-      serverProcess = null;
+  }
+
+  /** Kernel connection info for a live kernel id, for the browser-facing WS bridge. Undefined if not live. */
+  async function resolveConnectionInfoById(id) {
+    const registry = await getRegistry();
+    const record = registry.list().find((item) => item.id === id);
+    return record && record.status !== "dead" ? record.connectionInfo : undefined;
+  }
+
+  /**
+   * Serve a custom (non-core) ipywidgets RequireJS module asset requested at
+   * `/jupyter/nbextensions/<relative>`. Scans the same search dirs kernelspecs
+   * come from, each with `/nbextensions` instead of `/kernels` appended
+   * (matching a real Jupyter server's nbextensions_path). Tries the path
+   * as-is, then with a `.js` suffix (RequireJS module URLs omit it).
+   */
+  async function readNbextensionAsset(relativePath) {
+    const clean = String(relativePath || "").replace(/^\/+/, "");
+    if (!clean || clean.includes("..")) return undefined;
+    for (const dir of kernelSearchDirs()) {
+      const base = join(dir, "nbextensions");
+      for (const candidate of [join(base, clean), join(base, `${clean}.js`)]) {
+        if (!inside(base, candidate)) continue;
+        try {
+          const data = await readFile(candidate);
+          return { data, contentType: candidate.endsWith(".js") ? "application/javascript; charset=utf-8" : "application/octet-stream" };
+        } catch {
+          continue;
+        }
+      }
     }
+    return undefined;
+  }
+
+  async function touchKernelById(id) {
+    const registry = await getRegistry();
+    const record = registry.list().find((item) => item.id === id);
+    if (!record) return false;
+    record.lastActivity = Date.now();
+    return true;
   }
 
   return {
@@ -1701,7 +1246,8 @@ export function createJupyterCellService({
     restart,
     interrupt,
     shutdownKernel,
-    widgetProxyTarget,
+    resolveConnectionInfoById,
+    readNbextensionAsset,
     touchKernelById,
     listTasks,
     cleanup: cleanupIdle,

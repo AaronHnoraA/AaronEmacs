@@ -35,7 +35,14 @@ from importlib.metadata import version
 import sys
 
 print(sys.version.split()[0])
-for dist in ("jupyter-server", "ipykernel", "bash_kernel"):
+for dist in ("ipykernel", "bash_kernel", "ipywidgets"):
     print(f"{dist} {version(dist)}")
 PY
-"${VENV}/bin/jupyter" kernelspec list "--KernelSpecManager.allowed_kernelspecs=${ALLOWED_KERNELS}"
+
+if node -e "require('zeromq')" 2>/dev/null; then
+  printf 'zeromq (node): OK\n'
+else
+  printf 'zeromq (node): MISSING — run npm install from %s\n' "$(cd "${JUPYTER_ROOT}/.." && pwd)" >&2
+fi
+
+"${VENV}/bin/jupyter" kernelspec list

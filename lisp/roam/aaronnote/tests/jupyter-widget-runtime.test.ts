@@ -43,4 +43,39 @@ describe("Jupyter widget runtime", () => {
     expect(source).toContain('outputModel.set("outputs", outputs)');
     expect(source).toContain("await this.seedOutputWidgets(widgetOutputs)");
   });
+
+  test("first-run fix: a cold/empty restore is not permanently memoized, and mount() retries once", () => {
+    const source = readFileSync(join(process.cwd(), "src/jupyter-widget-runtime.ts"), "utf8");
+    // restoreFromKernel used to cache restoreWidgets()'s promise forever, so a
+    // 0-model result from a not-yet-warm connection wedged every later mount
+    // onto the same empty promise — the "works on the second run" bug.
+    expect(source).toContain("private async attemptRestoreFromKernel()");
+    expect(source).toContain("if (this.loadedModelCount() === 0) this.restorePromise = null;");
+    // mount() retries the restore once in-place before falling back to a
+    // static message replay, so a single Run is enough once the connection
+    // has actually warmed up.
+    const firstRestoreIdx = source.indexOf("await this.restoreFromKernel();");
+    const retryCommentIdx = source.indexOf("classic \"works on the second run\" symptom");
+    const secondRestoreIdx = source.lastIndexOf("await this.restoreFromKernel();", source.indexOf("modelsAfterRestore"));
+    expect(retryCommentIdx).toBeGreaterThan(firstRestoreIdx);
+    expect(secondRestoreIdx).toBeGreaterThan(retryCommentIdx);
+  });
+
+  test("each widget-runtime connection is warmed up (connected + first iopub seen) before use", () => {
+    const source = readFileSync(join(process.cwd(), "src/jupyter-widget-runtime.ts"), "utf8");
+    // Each browser widget connection is a fresh ZMQ identity/subscription on
+    // the server bridge, so it has its own slow-joiner window independent of
+    // the server's own persistent execution connection.
+    expect(source).toContain("async function warmupRuntimeConnection(");
+    expect(source).toContain('kernel.connectionStatus !== "connected"');
+    expect(source).toContain("kernel.iopubMessage.connect(");
+    expect(source).toContain("kernel.requestKernelInfo()");
+    expect(source).toContain("await warmupRuntimeConnection(kernel);");
+  });
+
+  test("widget-runtime KernelConnections are disposed on pagehide", () => {
+    const source = readFileSync(join(process.cwd(), "src/jupyter-widget-runtime.ts"), "utf8");
+    expect(source).toContain("export function disposeJupyterWidgetRuntimes()");
+    expect(source).toContain('window.addEventListener("pagehide", () => disposeJupyterWidgetRuntimes());');
+  });
 });

@@ -80,7 +80,8 @@ const ime = createImeSwitcher();
 import { runtimeMkdtemp, sweepRuntimeTmp } from "./server/lib/tmp.mjs";
 import { loadKatexMacros } from "./server/lib/katex-macros.mjs";
 import { createJupyterCellService } from "./server/lib/jupyter-cell.mjs";
-import { installJupyterWidgetProxy } from "./server/lib/jupyter-widget-proxy.mjs";
+import { installJupyterKernelWebSocket } from "./server/lib/jupyter-kernel-ws.mjs";
+import * as zmq from "zeromq";
 
 const execFileAsync = promisify(execFile);
 
@@ -119,8 +120,9 @@ const jupyterCell = createJupyterCellService({
   workspaceRoot,
   stdout: process.stdout,
   stderr: process.stderr,
+  zmq,
 });
-let jupyterWidgetProxy = null;
+let jupyterKernelWs = null;
 
 // One-shot orphan sweep: remove staging/clipboard/db temp files older than 24h.
 void sweepRuntimeTmp().then(({ removed }) => {
@@ -199,7 +201,7 @@ async function shutdown() {
   }
   eventClients.clear();
   try { noteWatcher.close(); } catch {}
-  try { jupyterWidgetProxy?.close(); } catch {}
+  try { jupyterKernelWs?.close(); } catch {}
   try { await jupyterCell.shutdown(); } catch {}
   server.close();
   try { await shutdownCopilot(); } catch {}
@@ -1168,8 +1170,19 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     const origin = `http://${bindHost}:${server.address()?.port}`;
 
+    if (url.pathname.startsWith("/jupyter/nbextensions/")) {
+      const relative = url.pathname.slice("/jupyter/nbextensions/".length);
+      const asset = req.method === "GET" || req.method === "HEAD" ? await jupyterCell.readNbextensionAsset(relative) : undefined;
+      if (!asset) {
+        sendText(res, 404, "Jupyter widget resource not found");
+        return;
+      }
+      res.writeHead(200, { "Content-Type": asset.contentType, "Cache-Control": "public, max-age=3600" });
+      if (req.method === "HEAD") res.end();
+      else res.end(asset.data);
+      return;
+    }
     if (url.pathname.startsWith("/jupyter/")) {
-      if (await jupyterWidgetProxy.proxyHttp(req, res, url)) return;
       sendText(res, 404, "Jupyter widget resource not found");
       return;
     }
@@ -1377,10 +1390,11 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 });
 
-jupyterWidgetProxy = installJupyterWidgetProxy({
+jupyterKernelWs = installJupyterKernelWebSocket({
   server,
-  resolveTarget: (pathname, search, websocket) => jupyterCell.widgetProxyTarget(pathname, search, websocket),
+  resolveConnectionInfo: (id) => jupyterCell.resolveConnectionInfoById(id),
   touchKernel: (id) => jupyterCell.touchKernelById(id),
+  zmq,
   stderr: process.stderr,
 });
 

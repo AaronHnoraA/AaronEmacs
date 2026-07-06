@@ -253,8 +253,23 @@ class AaronnoteWidgetManager extends KernelWidgetManager {
   }
 
   restoreFromKernel(): Promise<void> {
-    if (!this.restorePromise) this.restorePromise = this.restoreWidgets();
+    if (this.restorePromise) return this.restorePromise;
+    this.restorePromise = this.attemptRestoreFromKernel();
     return this.restorePromise;
+  }
+
+  private async attemptRestoreFromKernel(): Promise<void> {
+    try {
+      await this.restoreWidgets();
+    } finally {
+      // A restore that loaded nothing may simply have raced the connection
+      // warming up (comm target registration / IOPub subscribe still
+      // settling) rather than reflecting "this kernel truly has no widgets".
+      // Don't let that empty result wedge every *later* mount attempt onto
+      // the same stale promise — clear it so the next restoreFromKernel()
+      // call (this mount's retry, or a future cell run) gets a fresh look.
+      if (this.loadedModelCount() === 0) this.restorePromise = null;
+    }
   }
 
   loadedModelCount(): number {
@@ -359,6 +374,19 @@ class AaronnoteWidgetManager extends KernelWidgetManager {
       await this.restoreFromKernel();
     } catch (error) {
       restoreError = error;
+    }
+    if (!this.has_model(modelId)) {
+      // The first restore can lose a race against the connection actually
+      // warming up (comm target registration / IOPub subscribe settling) —
+      // this is the classic "works on the second run" symptom. Since a 0-model
+      // restore no longer wedges restorePromise (see restoreFromKernel), retry
+      // once, in-place, before falling back to a static message replay.
+      await new Promise((resolve) => window.setTimeout(resolve, 300));
+      try {
+        await this.restoreFromKernel();
+      } catch (error) {
+        restoreError = error;
+      }
     }
     const modelsAfterRestore = this.loadedModelCount();
     const viaRestore = this.has_model(modelId);
@@ -518,6 +546,51 @@ function disposeOlderGenerations(runtime: JupyterWidgetRuntime): void {
   }
 }
 
+// Wait for the connection to actually be usable before trusting it: not just
+// "kernel_info replied on shell" (jlab's own `kernel.info` already waits for
+// that) but "connected" *and* at least one IOPub message seen. Each browser
+// widget connection is its own fresh ZMQ identity/subscription on the server
+// bridge, so it has the same slow-joiner window a brand-new subscriber always
+// does — without this, the very first restoreWidgets() call on it can race
+// past comm state that hasn't arrived yet (the root cause of "works on the
+// second run").
+async function warmupRuntimeConnection(kernel: KernelConnection, timeoutMs = 10_000): Promise<void> {
+  await withTimeout(
+    (async () => {
+      if (kernel.connectionStatus !== "connected") {
+        await new Promise<void>((resolve) => {
+          const handler = (_sender: unknown, status: string) => {
+            if (status !== "connected") return;
+            kernel.connectionStatusChanged.disconnect(handler as never);
+            resolve();
+          };
+          kernel.connectionStatusChanged.connect(handler as never);
+          if (kernel.connectionStatus === "connected") {
+            kernel.connectionStatusChanged.disconnect(handler as never);
+            resolve();
+          }
+        });
+      }
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          kernel.iopubMessage.disconnect(finish as never);
+          resolve();
+        };
+        kernel.iopubMessage.connect(finish as never);
+        // Poke the kernel in case no iopub traffic is already in flight; retry
+        // once shortly after in case the first request raced kernel startup.
+        kernel.requestKernelInfo().catch(() => {});
+        window.setTimeout(() => { if (!settled) kernel.requestKernelInfo().catch(() => {}); }, 500);
+      });
+    })(),
+    timeoutMs,
+    "Timed out warming up the widget kernel connection",
+  );
+}
+
 async function createRuntimeEntry(runtime: JupyterWidgetRuntime): Promise<RuntimeEntry> {
   const baseUrl = new URL("/jupyter/", window.location.origin).toString();
   const serverSettings = ServerConnection.makeSettings({
@@ -533,6 +606,7 @@ async function createRuntimeEntry(runtime: JupyterWidgetRuntime): Promise<Runtim
     handleComms: true,
   });
   await kernel.info;
+  await warmupRuntimeConnection(kernel);
   return { kernel, manager: new AaronnoteWidgetManager(kernel) };
 }
 
@@ -576,4 +650,17 @@ export async function mountJupyterWidget(
   if (!runtime.id || !runtime.name) throw new Error("Missing live Jupyter widget runtime");
   const { manager } = await withTimeout(getRuntimeEntry(runtime), 15_000, "Timed out connecting to live Jupyter kernel");
   return await withTimeout(manager.mount(modelId, host, messages, widgetOutputs), 20_000, "Timed out restoring interactive widget state");
+}
+
+/** Dispose every live widget-runtime KernelConnection (all generations, all kernels). */
+export function disposeJupyterWidgetRuntimes(): void {
+  const entries = runtimeEntryMap();
+  for (const [key, pending] of Array.from(entries.entries())) {
+    entries.delete(key);
+    void pending.then(({ kernel }) => kernel.dispose()).catch(() => {});
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => disposeJupyterWidgetRuntimes());
 }

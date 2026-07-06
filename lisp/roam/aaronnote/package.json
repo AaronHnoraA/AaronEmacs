@@ -31,7 +31,6 @@
     "build": "tsc && vp build",
     "build:lib": "tsc && vp build --config vite.lib.config.ts",
     "jupyter:bootstrap": "bash jupyter/scripts/bootstrap-jupyter.sh",
-    "jupyter:server": "bash jupyter/scripts/run-jupyter-server.sh",
     "preview": "vp preview",
     "snippets:migrate-nvim": "node scripts/migrate-yas-to-nvim-snippets.mjs",
     "test": "vp test --run",
@@ -76,6 +75,7 @@
     "requirejs": "2.3.8",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2",
-    "ws": "8.21.0"
+    "ws": "8.21.0",
+    "zeromq": "^6.5.0"
   }
 }
