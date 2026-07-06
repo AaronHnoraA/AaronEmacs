@@ -921,6 +921,7 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
 (require 'init-python)
 (require 'init-elisp)
 (require 'init-vale)
+(require 'init-beancount)
 (require 'init-sh)
 (require 'init-java)
 (require 'init-lean)

@@ -581,7 +581,8 @@ Emacs state keep their local behavior."
     "oW" 'my/browser-open-search
     "ox" 'my/xwidget-open-url
     "oB" 'my/browser-switch-to
-    "os" 'shell-toggle)
+    "os" 'shell-toggle
+    "ol" 'my/beancount)
 
   (with-eval-after-load 'elisp-mode
     (my/local-leader!

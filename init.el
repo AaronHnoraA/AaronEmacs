@@ -133,6 +133,7 @@
        (roam-dir (expand-file-name "roam" dir))
        (telescope-dir (expand-file-name "telescope" dir))
        (tex-dir (expand-file-name "lang/tex" dir))
+       (beancount-dir (expand-file-name "lang/beancount" dir))
        (general-dir (locate-user-emacs-file "site-lisp/general.el"))
        (aaron-ui-dir (locate-user-emacs-file "site-lisp/aaron-ui"))
        (config-dir (locate-user-emacs-file "site-lisp/config")))
@@ -145,6 +146,7 @@
   (add-to-list 'load-path (file-name-as-directory (expand-file-name "lang" dir)))
   (add-to-list 'load-path (file-name-as-directory tex-dir))
   (add-to-list 'load-path (file-name-as-directory (expand-file-name "lang/lean" dir)))
+  (add-to-list 'load-path (file-name-as-directory beancount-dir))
   (add-to-list 'load-path (file-name-as-directory general-dir))
   (add-to-list 'load-path (file-name-as-directory aaron-ui-dir)))
 
