@@ -27,6 +27,7 @@ export interface KernelRecord {
   totalRuns: number;
   lastError: string | undefined;
   disposed: boolean;
+  variableBaseline: Set<string> | null;
 }
 
 export function sweepOrphanKernels(options: {

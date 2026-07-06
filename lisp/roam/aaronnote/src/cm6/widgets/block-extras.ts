@@ -1527,23 +1527,23 @@ function loadJupyterRender(): Promise<typeof import("../../jupyter-rendermime.ts
 const ceilRenderTokens = new WeakMap<HTMLElement, number>();
 
 function renderCeilOutputs(root: HTMLElement, result: CeilExecutionResult | null, full = false, view?: EditorView): void {
-  disposeCeilOutputArea(root);
-  root.replaceChildren();
   const token = (ceilRenderTokens.get(root) ?? 0) + 1;
   ceilRenderTokens.set(root, token);
   if (!result) {
+    disposeCeilOutputArea(root);
     const empty = document.createElement("div");
     empty.className = "cm-ceil-output-empty";
     empty.textContent = "No output";
-    root.append(empty);
+    root.replaceChildren(empty);
     return;
   }
   const outputs = Array.isArray(result.outputs) ? result.outputs as Array<Record<string, unknown>> : [];
   if (outputs.length === 0) {
+    disposeCeilOutputArea(root);
     const empty = document.createElement("div");
     empty.className = "cm-ceil-output-empty";
     empty.textContent = result.status === "error" ? (result.message || "Execution failed") : "No output";
-    root.append(empty);
+    root.replaceChildren(empty);
     return;
   }
   const options = {
@@ -1556,17 +1556,29 @@ function renderCeilOutputs(root: HTMLElement, result: CeilExecutionResult | null
   const bounded = boundedCeilOutputs(outputs, full);
   void loadJupyterRender().then(({ renderJupyterOutputs }) => {
     if (ceilRenderTokens.get(root) !== token) return;
-    root.replaceChildren();
-    const dispose = renderJupyterOutputs(root, bounded, options);
+    // Build the replacement OutputArea in a detached container *before*
+    // touching the live DOM, then swap it in with one replaceChildren call.
+    // Jupyter/VS Code never blank the cell between runs; clearing root first
+    // (the old behavior here) produced a visible flash of empty space while
+    // the new OutputArea/widgets were still being constructed.
+    const nextHost = document.createElement("div");
+    nextHost.className = root.className;
+    const dispose = renderJupyterOutputs(nextHost, bounded, options);
+    if (ceilRenderTokens.get(root) !== token) {
+      dispose();
+      return;
+    }
+    disposeCeilOutputArea(root);
+    root.replaceChildren(...Array.from(nextHost.childNodes));
     ceilOutputAreaDispose.set(root, dispose);
     view?.requestMeasure();
   }).catch((error) => {
     if (ceilRenderTokens.get(root) !== token) return;
-    root.replaceChildren();
+    disposeCeilOutputArea(root);
     const pre = document.createElement("pre");
     pre.className = "cm-ceil-output-error";
     pre.textContent = `Failed to render output: ${error instanceof Error ? error.message : String(error)}`;
-    root.append(pre);
+    root.replaceChildren(pre);
   });
 }
 

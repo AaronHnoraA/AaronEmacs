@@ -559,6 +559,37 @@ export function createJupyterCellService({
     };
   }
 
+  function isPythonFamilyKernel(kernel) {
+    return /python|sage/i.test(kernel);
+  }
+
+  // Sage (and any kernel that does a startup `from X import *`) injects
+  // thousands of names directly into globals() before any user code runs.
+  // Snapshot that set once, right after a freshly-launched kernel comes up
+  // and before any cell has executed on it, so variables() can exclude it and
+  // show only names the user's own code introduced — the same approach real
+  // Jupyter/VS Code variable explorers use (there is no reliable way to tell
+  // "library global" from "user global" by inspection alone).
+  async function captureVariableBaseline(record, kernel) {
+    if (record.variableBaseline || !isPythonFamilyKernel(kernel)) return;
+    const marker = `AARONNOTE_BASELINE_${randomUUID().replace(/-/g, "")}`;
+    const code = `import json as _aaronnote_json\nprint('${marker}' + _aaronnote_json.dumps(list(globals().keys())))`;
+    try {
+      const result = await executeOnKernel(record.kernel, code, { storeHistory: false });
+      const text = (result.outputs || [])
+        .filter((item) => item.output_type === "stream")
+        .map((item) => String(item.text || ""))
+        .join("");
+      const line = text.split(/\r?\n/).find((item) => item.startsWith(marker));
+      const names = line ? JSON.parse(line.slice(marker.length)) : [];
+      record.variableBaseline = new Set(Array.isArray(names) ? names : []);
+    } catch {
+      // Best-effort: if the snapshot fails, variables() just falls back to
+      // its existing `_aaronnote_`/`__`-prefix filtering.
+      record.variableBaseline = new Set();
+    }
+  }
+
   async function ensureKernel(body) {
     const { noteFile, scriptFile, kernel, session, language, key } = runtimeForBody(body || {});
     const registry = await getRegistry();
@@ -577,6 +608,7 @@ export function createJupyterCellService({
       if (!specEntry) throw error(`Unknown Jupyter kernel: ${kernel}`, 404);
       record = await registry.ensure(key, specEntry);
     }
+    await captureVariableBaseline(record, kernel);
     registry.touch(key);
     scheduleCleanup();
     return { id: record.id, file: scriptFile, sourceFile: noteFile, kernel, session, language, key, record };
@@ -1142,9 +1174,22 @@ export function createJupyterCellService({
     if (!/python|sage/i.test(kernel)) {
       return { ok: true, supported: false, kernel, variables: [] };
     }
+    // Make sure the kernel is up and its startup-namespace baseline captured
+    // (a no-op if this kernel is already live) *before* reading it, so a
+    // Variables-panel open as someone's very first action on a fresh kernel
+    // still excludes the startup namespace instead of embedding an empty set.
+    const kernelInfo = await ensureKernel({ ...(body || {}), kernel });
+    const baselineJson = JSON.stringify(Array.from(kernelInfo.record.variableBaseline || [])).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
     const marker = `AARONNOTE_VARIABLES_${randomUUID().replace(/-/g, "")}`;
     const code = [
       "import json as _aaronnote_json",
+      "import re as _aaronnote_re",
+      `_aaronnote_baseline = set(_aaronnote_json.loads('${baselineJson}'))`,
+      // IPython's own execution bookkeeping (In/Out history, "_"/"_i" result
+      // aliases) only appears *after* code has run, so it survives the
+      // startup-namespace baseline exclusion above — filter it separately,
+      // the same set real Jupyter/VS Code variable explorers hide.
+      "_aaronnote_ipython_re = _aaronnote_re.compile(r'^_i{1,3}$|^_i\\d+$|^_\\d+$|^(In|Out|get_ipython|exit|quit)$')",
       "def _aaronnote_repr(value):",
       "    try:",
       "        text = repr(value)",
@@ -1160,6 +1205,10 @@ export function createJupyterCellService({
       "_aaronnote_vars = []",
       "for _aaronnote_name, _aaronnote_value in sorted(globals().items()):",
       "    if _aaronnote_name.startswith('_aaronnote_') or _aaronnote_name.startswith('__'):",
+      "        continue",
+      "    if _aaronnote_name in _aaronnote_baseline:",
+      "        continue",
+      "    if _aaronnote_ipython_re.match(_aaronnote_name):",
       "        continue",
       "    try:",
       "        _aaronnote_vars.append({'name': _aaronnote_name, 'type': type(_aaronnote_value).__name__, 'summary': _aaronnote_repr(_aaronnote_value), 'shape': _aaronnote_shape(_aaronnote_value)})",

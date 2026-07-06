@@ -182,6 +182,11 @@ export function createKernelRegistry({
       totalRuns: 0,
       lastError: undefined,
       disposed: false,
+      // Names present in the kernel's global namespace before any user code
+      // ran (e.g. Sage's `from sage.all import *` injects thousands of
+      // builtins at startup) — set lazily by the variables() introspection
+      // caller so it can exclude them and show only user-defined names.
+      variableBaseline: null,
     };
 
     process_.exited.once("exit", ({ exitCode, signal, stderrTail }) => {
@@ -251,6 +256,7 @@ export function createKernelRegistry({
       totalRuns: 0,
       lastError: undefined,
       disposed: false,
+      variableBaseline: null,
     };
 
     const connected = await waitForConnected(kernel, launchTimeoutMs);
