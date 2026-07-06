@@ -1022,11 +1022,10 @@ function formatJupyterCellHeader(
   leading: string,
   rawId: string,
   runtime: JupyterCellDefaults,
-  newKernel: string,
 ): string {
   const nextArgs = runtime.session && runtime.session !== DEFAULT_JUPYTER_CELL.session
-    ? [runtime.language, newKernel, runtime.session]
-    : [runtime.language, newKernel];
+    ? [runtime.language, runtime.kernel, runtime.session]
+    : [runtime.language, runtime.kernel];
   return `${leading}@@cell(${nextArgs.join(", ")})${rawId ? ` [${rawId.trim()}]` : ""}`;
 }
 
@@ -1070,7 +1069,7 @@ function switchJupyterKernelForCells(body: {
         replacements.push({
           from: pos,
           to: lineEnd,
-          text: formatJupyterCellHeader(leading, rawId, runtime, targetKernel),
+          text: formatJupyterCellHeader(leading, rawId, { ...runtime, kernel: targetKernel }),
         });
       }
     }
@@ -1089,6 +1088,37 @@ function switchJupyterKernelForCells(body: {
     ? `Switched ${replacements.length} ${targetLanguage}/${targetSession} cell${replacements.length === 1 ? "" : "s"} to ${targetKernel}`
     : `No matching ${targetLanguage}/${targetSession} cells`);
   return replacements.length;
+}
+
+function exitJupyterCellFromLean(cell: JupyterPanelCell): boolean {
+  if (rejectReadOnlyAction("Read-only pane")) return false;
+  if (!isLeanJupyterCell(cell)) {
+    setStatus("Current cell is not Lean");
+    return false;
+  }
+  const line = editor.getMarkdown().slice(cell.from, cell.to);
+  const match = JUPYTER_CELL_RE.exec(line);
+  if (!match) {
+    setStatus("Jupyter cell header not found");
+    return false;
+  }
+  const leading = match[1] ?? "";
+  const rawId = match[3] ?? "";
+  const next = formatJupyterCellHeader(leading, rawId, {
+    language: DEFAULT_JUPYTER_CELL.language,
+    kernel: DEFAULT_JUPYTER_CELL.kernel,
+    session: cell.session || DEFAULT_JUPYTER_CELL.session,
+  });
+  if (line === next) {
+    setStatus(`Cell ${cell.id} already uses python3`);
+    return false;
+  }
+  editor.replaceMarkdownRange(cell.from, cell.to, next);
+  jupyterTaskState.delete(jupyterCellKey(cell));
+  jupyterScanMarkdown = null;
+  renderJupyterPanel();
+  setStatus(`Switched ${cell.id} from Lean to python3`);
+  return true;
 }
 
 function setJupyterKernelToolFromCell(cell: JupyterPanelCell | null, specs: JupyterKernelSpec[] = jupyterKernelSpecsCache || []): void {
@@ -1854,6 +1884,12 @@ function showContextMenu(event: MouseEvent, target: Partial<AaronContextMenuTarg
       { label: "Run Cell", detail: cellDetail, disabled: !currentFile, run: () => runJupyterCell(cell) },
       { label: "Edit Cell Source", detail: cell.id, disabled: !currentFile, run: () => openJupyterCellSource(cell) },
       { label: "Run Section", detail: cell.session, disabled: !currentFile, run: () => runJupyterCells("section") },
+      ...(isLeanJupyterCell(cell) ? [{
+        label: "exitfreomlean",
+        detail: "python3",
+        disabled: currentReadOnly,
+        run: () => exitJupyterCellFromLean(cell),
+      }] : []),
       { label: "Kernel Tool", detail: "switch", disabled: isLeanJupyterCell(cell), run: () => void openJupyterKernelTool(cell) },
       { label: "Delete Cell Block", detail: "source + output", danger: true, disabled: currentReadOnly, run: () => deleteJupyterCellBlock(cell) },
     );
