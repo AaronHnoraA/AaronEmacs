@@ -16,6 +16,7 @@ import { equationTagsFromText, getEquationTagHits } from "../src/equation-tags.t
 import { INLINE_MATH_RE } from "../src/inline-math.ts";
 import { formatMathRenderError, renderMathLazy } from "../src/math-render.ts";
 import { setKatexMacros } from "../src/katex-macros.ts";
+import { renderJupyterVariablesTable } from "../src/jupyter-variables-view.ts";
 import { hrefProtocol, safeHref } from "../src/url-safety.ts";
 import {
   api,
@@ -1514,18 +1515,7 @@ async function showJupyterVariables(): Promise<void> {
       jupyterVars.textContent = `Variables unavailable for ${cell.kernel}`;
       return;
     }
-    const vars = result.variables || [];
-    if (vars.length === 0) {
-      jupyterVars.textContent = "No variables";
-      return;
-    }
-    jupyterVars.replaceChildren(...vars.map((item) => {
-      const row = document.createElement("div");
-      row.className = "aaronnote-jupyter-var";
-      const shape = item.shape ? ` ${JSON.stringify(item.shape)}` : "";
-      row.textContent = `${item.name || ""} · ${item.type || ""}${shape} · ${item.summary || ""}`;
-      return row;
-    }));
+    renderJupyterVariablesTable(jupyterVars, result.variables || [], "No variables");
   } catch (error) {
     jupyterVars.textContent = error instanceof Error ? error.message : "Variable load failed";
   }

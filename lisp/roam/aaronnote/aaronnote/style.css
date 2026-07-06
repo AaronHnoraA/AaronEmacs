@@ -725,13 +725,6 @@ button:disabled {
   font: 11px/1.45 var(--aaron-font-mono);
 }
 
-.aaronnote-jupyter-var {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 3px 2px;
-}
 
 .aaronnote-jupyter-runtime {
   max-height: 260px;

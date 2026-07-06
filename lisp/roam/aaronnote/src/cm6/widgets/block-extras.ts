@@ -45,7 +45,8 @@ import {
 } from "../../render-html.ts";
 import { applyImageLayout, imageLayoutFromAttrs, readImageTrailingAttrs, type ImageLayoutAttrs } from "../../image-attrs.ts";
 import { supportedDiagramLang } from "../../diagram-langs.ts";
-import { api, type JupyterVariable } from "../../../aaronnote/api-client.ts";
+import { api } from "../../../aaronnote/api-client.ts";
+import { renderJupyterVariablesTable } from "../../jupyter-variables-view.ts";
 import { tocIndexFromState, type MarkdownHeading } from "../toc-index.ts";
 import { scanInlineCommands } from "../../command-syntax.ts";
 import { semanticOutlineFromCommand, type SemanticOutline } from "../../semantic-outline.ts";
@@ -1582,48 +1583,6 @@ function renderCeilOutputs(root: HTMLElement, result: CeilExecutionResult | null
   });
 }
 
-function ceilVariablesCell(text: string, className: string): HTMLTableCellElement {
-  const cell = document.createElement("td");
-  cell.className = className;
-  cell.textContent = text;
-  return cell;
-}
-
-function renderCeilVariablesTable(body: HTMLElement, rows: JupyterVariable[]): void {
-  body.replaceChildren();
-  if (rows.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "cm-ceil-variables-empty";
-    empty.textContent = "No variables in this kernel's namespace.";
-    body.append(empty);
-    return;
-  }
-  const table = document.createElement("table");
-  table.className = "cm-ceil-variables-table";
-  const thead = document.createElement("thead");
-  const headRow = document.createElement("tr");
-  for (const label of ["Name", "Type", "Shape", "Value"]) {
-    const th = document.createElement("th");
-    th.textContent = label;
-    headRow.append(th);
-  }
-  thead.append(headRow);
-  const tbody = document.createElement("tbody");
-  for (const variable of rows) {
-    const row = document.createElement("tr");
-    const shape = Array.isArray(variable.shape) ? variable.shape.join(" × ") : "";
-    row.append(
-      ceilVariablesCell(String(variable.name ?? ""), "cm-ceil-variables-name"),
-      ceilVariablesCell(String(variable.type ?? ""), "cm-ceil-variables-type"),
-      ceilVariablesCell(shape, "cm-ceil-variables-shape"),
-      ceilVariablesCell(String(variable.summary ?? ""), "cm-ceil-variables-summary"),
-    );
-    tbody.append(row);
-  }
-  table.append(thead, tbody);
-  body.append(table);
-}
-
 function openCeilVariablesPopup(context: () => { file: string; kernel: string; session: string; language: string }): void {
   const overlay = document.createElement("div");
   overlay.className = "cm-ceil-output-popover";
@@ -1659,7 +1618,7 @@ function openCeilVariablesPopup(context: () => { file: string; kernel: string; s
         body.append(unsupported);
         return;
       }
-      renderCeilVariablesTable(body, Array.isArray(result.variables) ? result.variables : []);
+      renderJupyterVariablesTable(body, Array.isArray(result.variables) ? result.variables : []);
     } catch (err) {
       body.replaceChildren();
       const errorLine = document.createElement("div");
