@@ -279,7 +279,7 @@ type NativeApi = {
   emacs?: {
     open?: (body: { file: string; tag?: string; line?: number; col?: number }) => Promise<unknown>;
     currentFile?: (body: string | { file: string; client?: string }) => Promise<unknown>;
-    key?: (keyString: string) => Promise<unknown>;
+    key?: (body: string | { key: string; client?: string }) => Promise<unknown>;
     systemOpen?: (target: string, base?: string) => Promise<unknown>;
   };
   roamTools?: {
@@ -541,10 +541,11 @@ export const api = {
       const body = client ? { file, client } : file;
       await call(body).catch(() => {});
     },
-    async key(keyString: string): Promise<void> {
+    async key(keyString: string, client = ""): Promise<void> {
       const call = window.aaronnoteApi?.emacs?.key;
       if (!call) return;
-      await call(keyString).catch(() => {});
+      const body = client ? { key: keyString, client } : keyString;
+      await call(body).catch(() => {});
     },
     async systemOpen(target: string, base?: string): Promise<void> {
       const call = window.aaronnoteApi?.emacs?.systemOpen;

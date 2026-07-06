@@ -41,6 +41,9 @@ type XwidgetKeyContext = {
   vim: Pick<VimLiteController, "handleKey" | "mode" | "setMode">;
   enabled?: boolean;
 };
+type EmacsKeyForwardOptions = {
+  client?: () => string | null | undefined;
+};
 
 const XWIDGET_CONTROL_KEYS = new Set<XwidgetControlKey>(["Escape", "Delete", "Backspace"]);
 const XWIDGET_SPECIAL_KEYS = new Set<XwidgetSpecialKey>([
@@ -381,6 +384,18 @@ function codeToBaseKey(code: string, shifted: boolean): string | null {
   return null;
 }
 
+const COMMAND_ARROW_EMACS_KEYS: Record<string, string> = {
+  ArrowLeft: "M-<left>",
+  ArrowRight: "M-<right>",
+  ArrowUp: "M-<up>",
+  ArrowDown: "M-<down>",
+};
+
+function commandArrowEmacsKeyFromEvent(event: KeyboardEvent): string | null {
+  if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return null;
+  return COMMAND_ARROW_EMACS_KEYS[event.code] ?? COMMAND_ARROW_EMACS_KEYS[event.key] ?? null;
+}
+
 /**
  * Key string for any event — including bare keys (no modifiers).
  * Used to capture the second key of a C-x / C-c prefix sequence.
@@ -398,6 +413,9 @@ function keyStringFromEvent(event: KeyboardEvent): string | null {
 
 /** Build the Emacs key string for a top-level chord — requires at least one modifier. */
 export function emacsKeyFromEvent(event: KeyboardEvent): string | null {
+  const commandArrowKey = commandArrowEmacsKeyFromEvent(event);
+  if (commandArrowKey) return commandArrowKey;
+
   const key = keyStringFromEvent(event);
   // Must have a modifier prefix to be a top-level forwarded chord
   if (!key || !key.includes("-")) return null;
@@ -417,9 +435,15 @@ export function shouldForwardToEmacs(event: KeyboardEvent): boolean {
   if (event.altKey && !event.metaKey && !event.ctrlKey) {
     return codeToBaseKey(event.code, event.shiftKey) !== null;
   }
-  // M-x (Cmd+X), M-w (kill-ring-save), M-q (fill-paragraph)
+  // M-x (Cmd+X), M-w (kill-ring-save), M-q (fill-paragraph), and
+  // Cmd+arrows as Emacs M-<arrow> windmove keys.
   if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
-    return event.code === "KeyX" || event.code === "KeyW" || event.code === "KeyQ";
+    return Boolean(
+      event.code === "KeyX"
+        || event.code === "KeyW"
+        || event.code === "KeyQ"
+        || commandArrowEmacsKeyFromEvent(event),
+    );
   }
   // Bare Ctrl: Emacs-style chords. Shift is ignored for letter chords so
   // xwidget/browser variants such as C-X still become Emacs' C-x.
@@ -429,9 +453,11 @@ export function shouldForwardToEmacs(event: KeyboardEvent): boolean {
   return false;
 }
 
-function forwardEmacsKey(keyString: string): void {
-  void (window.aaronnoteApi as { emacs?: { key?: (k: string) => unknown } })
-    ?.emacs?.key?.(keyString);
+function forwardEmacsKey(keyString: string, options?: EmacsKeyForwardOptions): void {
+  const client = options?.client?.() || "";
+  const payload = client ? { key: keyString, client } : keyString;
+  void (window.aaronnoteApi as { emacs?: { key?: (k: string | { key: string; client?: string }) => unknown } })
+    ?.emacs?.key?.(payload);
 }
 
 function releaseWebInputFocus(): void {
@@ -458,10 +484,10 @@ function releaseWebInputFocus(): void {
   }
 }
 
-function forwardEmacsKeyAndReleaseInput(event: KeyboardEvent, keyString: string): void {
+function forwardEmacsKeyAndReleaseInput(event: KeyboardEvent, keyString: string, options?: EmacsKeyForwardOptions): void {
   hardStop(event);
   releaseWebInputFocus();
-  forwardEmacsKey(keyString);
+  forwardEmacsKey(keyString, options);
 }
 
 // When the user presses C-x or C-c, we enter prefix mode and capture the
@@ -474,12 +500,12 @@ let pendingPrefix: string | null = null;
  * Stops the event and forwards to Emacs if the chord matches the forward scope.
  * Prefix keys (C-x, C-c) accumulate the following key before forwarding.
  */
-export function handleXwidgetEmacsKeydown(event: KeyboardEvent): boolean {
+export function handleXwidgetEmacsKeydown(event: KeyboardEvent, options?: EmacsKeyForwardOptions): boolean {
   if (pendingPrefix !== null) {
     // C-g while in prefix mode: cancel prefix, forward C-g as keyboard-quit
     if (event.ctrlKey && !event.metaKey && !event.altKey && event.code === "KeyG") {
       pendingPrefix = null;
-      forwardEmacsKeyAndReleaseInput(event, "C-g");
+      forwardEmacsKeyAndReleaseInput(event, "C-g", options);
       return true;
     }
     // Any other key: complete the prefix sequence
@@ -488,7 +514,7 @@ export function handleXwidgetEmacsKeydown(event: KeyboardEvent): boolean {
       if (nextKey) {
         const fullKey = pendingPrefix + " " + nextKey;
         pendingPrefix = null;
-        forwardEmacsKeyAndReleaseInput(event, fullKey);
+        forwardEmacsKeyAndReleaseInput(event, fullKey, options);
         return true;
       }
     }
@@ -508,6 +534,6 @@ export function handleXwidgetEmacsKeydown(event: KeyboardEvent): boolean {
     return true;
   }
 
-  forwardEmacsKeyAndReleaseInput(event, key);
+  forwardEmacsKeyAndReleaseInput(event, key, options);
   return true;
 }

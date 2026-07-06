@@ -14,16 +14,16 @@ export type VimJumpSession = {
   candidates: readonly VimJumpCandidate[];
 };
 
-const LABELS = "asdfghjklqwertyuiopzxcvbnm";
+export const VIM_JUMP_LABELS = "asdfghjklqweruiop";
 
 const setVimJumpHints = StateEffect.define<readonly VimJumpCandidate[]>();
 
 function jumpDecorations(candidates: readonly VimJumpCandidate[]): DecorationSet {
   return Decoration.set(candidates.map((candidate) => Decoration.mark({
-    class: "cm-vim-jump-label",
-    attributes: {
-      "data-vim-jump-label": candidate.label,
-    },
+    class: candidate.label ? "cm-vim-jump-label" : "cm-vim-jump-preview",
+    attributes: candidate.label
+      ? { "data-vim-jump-label": candidate.label }
+      : undefined,
   }).range(candidate.from, candidate.to)), true);
 }
 
@@ -46,7 +46,7 @@ export function clearVimJump(view: EditorView): void {
 }
 
 // Generous safety cap so a pathological viewport cannot create an unbounded
-// array. The real limit is LABELS.length, applied in beginVimJump AFTER
+// array. The real limit is VIM_JUMP_LABELS.length, applied in beginVimJump AFTER
 // orderedPositions sorts by direction/proximity — capping here (before
 // ordering) would fill the slots with whichever matches happen to scan first
 // (top of viewport) and drop the nearest in-direction targets.
@@ -55,11 +55,13 @@ const MAX_SCAN_MATCHES = 4096;
 function candidatePositions(view: EditorView, needle: string): number[] {
   if (!needle) return [];
   const positions: number[] = [];
+  const foldedNeedle = needle.toLowerCase();
   for (const range of view.visibleRanges) {
     const text = view.state.doc.sliceString(range.from, range.to);
+    const foldedText = text.toLowerCase();
     let offset = 0;
     while (offset <= text.length - needle.length) {
-      const found = text.indexOf(needle, offset);
+      const found = foldedText.indexOf(foldedNeedle, offset);
       if (found < 0) break;
       positions.push(range.from + found);
       offset = found + Math.max(1, needle.length);
@@ -86,9 +88,22 @@ export function selectJumpCandidates(
   positions: readonly number[],
   cursor: number,
   direction: VimJumpDirection,
-  max: number = LABELS.length,
+  max: number = VIM_JUMP_LABELS.length,
 ): number[] {
   return orderedPositions(positions, cursor, direction).slice(0, max);
+}
+
+export function previewVimJump(view: EditorView, needle: string, direction: VimJumpDirection): number {
+  const cursor = view.state.selection.main.head;
+  const positions = orderedPositions(candidatePositions(view, needle), cursor, direction);
+  view.dispatch({
+    effects: setVimJumpHints.of(positions.map((from) => ({
+      from,
+      to: Math.min(from + needle.length, view.state.doc.length),
+      label: "",
+    }))),
+  });
+  return positions.length;
 }
 
 export function beginVimJump(view: EditorView, needle: string, direction: VimJumpDirection): VimJumpSession {
@@ -97,7 +112,7 @@ export function beginVimJump(view: EditorView, needle: string, direction: VimJum
     .map((from, index) => ({
       from,
       to: Math.min(from + needle.length, view.state.doc.length),
-      label: LABELS[index]!,
+      label: VIM_JUMP_LABELS[index]!,
     }));
   view.dispatch({ effects: setVimJumpHints.of(candidates) });
   return { doc: view.state.doc, candidates };
@@ -108,7 +123,7 @@ export function applyVimJump(view: EditorView, session: VimJumpSession, label: s
     clearVimJump(view);
     return false;
   }
-  const candidate = session.candidates.find((entry) => entry.label === label.toLowerCase());
+  const candidate = session.candidates.find((entry) => entry.label === label);
   clearVimJump(view);
   if (!candidate) return false;
   view.dispatch({

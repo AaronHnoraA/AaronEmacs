@@ -1,4 +1,4 @@
-import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
+import { describe, expect, test, vi } from "@voidzero-dev/vite-plus-test";
 
 import { createEditor } from "../src/lib.ts";
 import { createVimLite } from "../aaronnote/vim-lite.ts";
@@ -42,16 +42,38 @@ function withMounted<T extends HTMLElement>(element: T): T {
   return element;
 }
 
+type ForwardedEmacsKey = string | { key: string; client?: string };
+
 function withForwardedEmacsKeys(run: (forwarded: string[]) => void): void {
   const forwarded: string[] = [];
   const win = window as Window & {
-    aaronnoteApi?: { emacs?: { key?: (key: string) => unknown } };
+    aaronnoteApi?: { emacs?: { key?: (key: ForwardedEmacsKey) => unknown } };
   };
   const previousApi = win.aaronnoteApi;
   try {
     win.aaronnoteApi = {
       emacs: {
-        key: async (key) => {
+        key: async (key: ForwardedEmacsKey) => {
+          forwarded.push(typeof key === "string" ? key : key.key);
+        },
+      },
+    };
+    run(forwarded);
+  } finally {
+    win.aaronnoteApi = previousApi;
+  }
+}
+
+function withForwardedEmacsPayloads(run: (forwarded: ForwardedEmacsKey[]) => void): void {
+  const forwarded: ForwardedEmacsKey[] = [];
+  const win = window as Window & {
+    aaronnoteApi?: { emacs?: { key?: (key: ForwardedEmacsKey) => unknown } };
+  };
+  const previousApi = win.aaronnoteApi;
+  try {
+    win.aaronnoteApi = {
+      emacs: {
+        key: async (key: ForwardedEmacsKey) => {
           forwarded.push(key);
         },
       },
@@ -476,9 +498,10 @@ describe("xwidget key guard", () => {
   test("handles normal-mode s jump keydown even when focus is not in CM6", () => {
     const host = withMounted(document.createElement("section"));
     const editor = createEditor(host, { initialContent: "alpha beta gamma beta" });
-    const vim = createVimLite(editor, host);
+    const vim = createVimLite(editor, host, { jumpTimeoutMs: 5 });
     vim.setMode("normal");
     editor.setMarkdownSelection(0);
+    vi.useFakeTimers();
     try {
       const jump = new KeyboardEvent("keydown", { key: "s", bubbles: true, cancelable: true });
       Object.defineProperty(jump, "target", { value: document.body });
@@ -489,6 +512,9 @@ describe("xwidget key guard", () => {
       Object.defineProperty(target, "target", { value: document.body });
       expect(handleXwidgetVimKeydown(target, { editor, editorHost: host, vim })).toBe(true);
       expect(target.defaultPrevented).toBe(true);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
+      expect(document.querySelectorAll(".cm-vim-jump-preview").length).toBe(2);
+      vi.advanceTimersByTime(5);
       expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(2);
 
       const label = new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true });
@@ -497,6 +523,7 @@ describe("xwidget key guard", () => {
       expect(editor.getMarkdownSelection().from).toBe(6);
       expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
     } finally {
+      vi.useRealTimers();
       editor.destroy();
       host.remove();
     }
@@ -680,6 +707,47 @@ describe("xwidget key guard", () => {
       expect(handleXwidgetEmacsKeydown(event)).toBe(true);
       expect(event.defaultPrevented).toBe(true);
       expect(forwarded).toEqual(["M-w"]);
+    });
+  });
+
+  test("forwards Cmd+Arrow keys as Emacs windmove chords", () => {
+    withForwardedEmacsKeys((forwarded) => {
+      const cases: Array<[string, string]> = [
+        ["ArrowLeft", "M-<left>"],
+        ["ArrowRight", "M-<right>"],
+        ["ArrowUp", "M-<up>"],
+        ["ArrowDown", "M-<down>"],
+      ];
+
+      for (const [arrowKey, emacsKey] of cases) {
+        const event = new KeyboardEvent("keydown", {
+          key: arrowKey,
+          code: arrowKey,
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        });
+        expect(handleXwidgetEmacsKeydown(event)).toBe(true);
+        expect(event.defaultPrevented).toBe(true);
+        expect(forwarded.at(-1)).toBe(emacsKey);
+      }
+
+      expect(forwarded).toEqual(cases.map(([, emacsKey]) => emacsKey));
+    });
+  });
+
+  test("includes the Aaronnote client when forwarding Emacs keys", () => {
+    withForwardedEmacsPayloads((forwarded) => {
+      const event = new KeyboardEvent("keydown", {
+        key: "ArrowRight",
+        code: "ArrowRight",
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      expect(handleXwidgetEmacsKeydown(event, { client: () => "split-client" })).toBe(true);
+      expect(event.defaultPrevented).toBe(true);
+      expect(forwarded).toEqual([{ key: "M-<right>", client: "split-client" }]);
     });
   });
 });

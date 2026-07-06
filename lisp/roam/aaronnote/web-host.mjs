@@ -498,10 +498,13 @@ async function apiCurrentFile(body) {
   return { ok: true, ...payload };
 }
 
-async function apiEmacsKey(key) {
-  const k = String(key || "").trim();
+async function apiEmacsKey(body) {
+  const k = String((body && typeof body === "object" ? body.key : body) || "").trim();
+  const client = String((body && typeof body === "object" ? body.client : "") || "").trim();
   if (!k || k.length > 32) return { ok: false, message: "Invalid key" };
-  process.stdout.write(`aaronote-event:key:${JSON.stringify({ key: k })}\n`);
+  const payload = { key: k };
+  if (client) payload.client = client;
+  process.stdout.write(`aaronote-event:key:${JSON.stringify(payload)}\n`);
   return { ok: true };
 }
 
@@ -948,7 +951,11 @@ function adapterScript(origin) {
           file && typeof file === "object" ? file : String(file || "")
         ]);
       },
-      key: function(k) { return call("aaronnote:api:emacs:key", [String(k || "")]); },
+      key: function(k) {
+        return call("aaronnote:api:emacs:key", [
+          k && typeof k === "object" ? k : String(k || "")
+        ]);
+      },
       systemOpen: function(target, base) {
         return call("aaronnote:api:emacs:system-open", [
           base ? {target: String(target || ""), base: String(base || "")} : String(target || "")

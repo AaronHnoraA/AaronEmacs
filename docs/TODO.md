@@ -5,10 +5,6 @@
 
 ### Features
 - 美化 emacs的界面: nerd, unicode, emoji
-- AI融合
-  - send 不直接提交
-  - 权限严格隔离: ask 的时候不允许改动, 要求改动的时候不需要审批
-  - 生命周期管理, 内存管理, buffer管理. 能完整控制, 停止,追踪等行为
 
 ###  Bugs
 

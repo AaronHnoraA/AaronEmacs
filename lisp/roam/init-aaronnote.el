@@ -411,13 +411,72 @@ permission prompts disabled.  The backend is chosen here, not per export."
   (when-let* ((window (active-minibuffer-window)))
     (my/aaronnote--select-emacs-window window)))
 
+(defun my/aaronnote--release-xwidget-input-buffer (&optional buffer)
+  "Exit xwidget edit mode in BUFFER when it is an Aaronnote xwidget."
+  (let ((buffer (or buffer my/aaronnote--app-buffer)))
+    (when (and (buffer-live-p buffer)
+               (fboundp 'xwidget-webkit-edit-mode))
+      (with-current-buffer buffer
+        (when (eq major-mode 'xwidget-webkit-mode)
+          (ignore-errors (xwidget-webkit-edit-mode -1)))))))
+
+(defun my/aaronnote--focus-xwidget-window (window)
+  "Focus Aaronnote xwidget WINDOW like a direct window click."
+  (when (window-live-p window)
+    (let ((buffer (window-buffer window)))
+      (when (my/aaronnote--xwidget-buffer-p buffer)
+        (select-window window)
+        (my/aaronnote--select-emacs-window window)
+        (setq my/aaronnote--app-buffer buffer)
+        (when (fboundp 'my/xwidget-focus)
+          (my/xwidget-focus buffer))))))
+
+(defun my/aaronnote--focus-xwidget-window-if-still-selected (window buffer)
+  "Focus WINDOW's xwidget if WINDOW still displays BUFFER and is selected."
+  (when (and (window-live-p window)
+             (eq window (selected-window))
+             (eq (window-buffer window) buffer))
+    (my/aaronnote--focus-xwidget-window window)))
+
+(defun my/aaronnote--focus-selected-window-after-move (&optional source-window)
+  "Restore input focus after selection moves away from SOURCE-WINDOW.
+If the target is Aaronnote, enter xwidget edit focus.  If the source was
+Aaronnote and the target is a normal Emacs window, restore Emacs frame focus."
+  (let ((target-window (selected-window)))
+    (when (and (window-live-p target-window)
+               (or (not (window-live-p source-window))
+                   (not (eq target-window source-window))))
+      (let ((target-buffer (window-buffer target-window))
+            (source-buffer (and (window-live-p source-window)
+                                (window-buffer source-window))))
+        (when (and source-buffer
+                   (my/aaronnote--xwidget-buffer-p source-buffer))
+          (my/aaronnote--release-xwidget-input-buffer source-buffer))
+        (cond
+         ((my/aaronnote--xwidget-buffer-p target-buffer)
+          (my/aaronnote--focus-xwidget-window target-window)
+          (run-at-time 0.05 nil
+                       #'my/aaronnote--focus-xwidget-window-if-still-selected
+                       target-window target-buffer))
+         ((and source-buffer
+               (my/aaronnote--xwidget-buffer-p source-buffer))
+          (my/aaronnote--select-emacs-window target-window)))))))
+
+(defun my/aaronnote--focus-forwarded-key-target (&optional source-window)
+  "Restore input focus after an Aaronnote-forwarded key leaves SOURCE-WINDOW."
+  (if (active-minibuffer-window)
+      (my/aaronnote--focus-minibuffer-if-active)
+    (my/aaronnote--focus-selected-window-after-move source-window)))
+
+(defun my/aaronnote--windmove-focus-advice (orig-fun &rest args)
+  "Around advice for windmove commands to focus Aaronnote targets correctly."
+  (let ((source-window (selected-window)))
+    (prog1 (apply orig-fun args)
+      (my/aaronnote--focus-selected-window-after-move source-window))))
+
 (defun my/aaronnote--release-xwidget-input ()
   "Exit Aaronnote xwidget edit mode before Emacs handles forwarded keys."
-  (when (and (buffer-live-p my/aaronnote--app-buffer)
-             (fboundp 'xwidget-webkit-edit-mode))
-    (with-current-buffer my/aaronnote--app-buffer
-      (when (eq major-mode 'xwidget-webkit-mode)
-        (ignore-errors (xwidget-webkit-edit-mode -1))))))
+  (my/aaronnote--release-xwidget-input-buffer my/aaronnote--app-buffer))
 
 (defun my/aaronnote--queue-emacs-key (keys key-string)
   "Queue KEYS forwarded from Aaronnote for Emacs' normal command loop.
@@ -428,20 +487,41 @@ KEY-STRING is used only for diagnostics."
       (setq unread-command-events
             (nconc (listify-key-sequence keys)
                    unread-command-events))
-      (run-at-time 0.05 nil #'my/aaronnote--focus-minibuffer-if-active))
+      (run-at-time 0.05 nil #'my/aaronnote--focus-forwarded-key-target
+                   (selected-window)))
      (t
       (message "Aaronnote: no binding for %s" key-string)))))
 
-(defun my/aaronnote--run-emacs-key (key-string)
-  "Execute Emacs key KEY-STRING forwarded from the Aaronnote browser."
+(defun my/aaronnote--key-source-buffer (&optional client)
+  "Return the Aaronnote buffer that forwarded a key for CLIENT."
+  (or (my/aaronnote--buffer-for-client client)
+      (let ((selected-buffer (window-buffer (selected-window))))
+        (and (my/aaronnote--xwidget-buffer-p selected-buffer)
+             selected-buffer))
+      (and (buffer-live-p my/aaronnote--app-buffer)
+           my/aaronnote--app-buffer)))
+
+(defun my/aaronnote--key-source-window (&optional client)
+  "Return the visible window that forwarded a key for CLIENT."
+  (let ((source-buffer (my/aaronnote--key-source-buffer client)))
+    (or (and (buffer-live-p source-buffer)
+             (get-buffer-window source-buffer 'visible))
+        (let ((window (selected-window)))
+          (and (window-live-p window)
+               (my/aaronnote--xwidget-buffer-p (window-buffer window))
+               window)))))
+
+(defun my/aaronnote--run-emacs-key (key-string &optional client)
+  "Execute Emacs key KEY-STRING forwarded from the Aaronnote browser.
+CLIENT, when non-nil, identifies the Aaronnote xwidget that sent the key."
   (condition-case err
       (let ((keys (ignore-errors (kbd key-string))))
         (when (and keys (> (length keys) 0))
-          (my/aaronnote--release-xwidget-input)
-          (let ((win (and (buffer-live-p my/aaronnote--app-buffer)
-                          (get-buffer-window my/aaronnote--app-buffer 'visible))))
+          (let ((source-buffer (my/aaronnote--key-source-buffer client))
+                (win (my/aaronnote--key-source-window client)))
+            (my/aaronnote--release-xwidget-input-buffer source-buffer)
             (if (window-live-p win)
-                (with-selected-window win
+                (progn
                   (my/aaronnote--select-emacs-window win)
                   (my/aaronnote--queue-emacs-key keys key-string))
               (my/aaronnote--select-emacs-window)
@@ -570,9 +650,10 @@ KEY-STRING is used only for diagnostics."
           (let* ((payload (json-parse-string
                            (substring line (length key-prefix))
                            :object-type 'alist))
-                 (key (alist-get 'key payload)))
+                 (key (alist-get 'key payload))
+                 (client (alist-get 'client payload)))
             (when (stringp key)
-              (my/aaronnote--run-emacs-key key)))
+              (my/aaronnote--run-emacs-key key client)))
         (error
          (message "Aaronnote key-event parse failed: %s"
                   (error-message-string err))))))))
@@ -671,10 +752,18 @@ When BUFFER is nil, inspect the current buffer."
   "Return the live Aaronnote buffer for CLIENT, or nil."
   (when (and (stringp client) (not (string-empty-p client)))
     (let ((buffer (gethash client my/aaronnote--client-buffers)))
-      (if (buffer-live-p buffer)
-          buffer
+      (unless (or (null buffer) (buffer-live-p buffer))
         (remhash client my/aaronnote--client-buffers)
-        nil))))
+        (setq buffer nil))
+      (or buffer
+          (cl-find-if
+           (lambda (buf)
+             (and (buffer-live-p buf)
+                  (with-current-buffer buf
+                    (and (eq major-mode 'xwidget-webkit-mode)
+                         (stringp my/aaronnote--client-id)
+                         (string-equal my/aaronnote--client-id client)))))
+           (buffer-list))))))
 
 (defun my/aaronnote--register-buffer (buffer file &optional client rename)
   "Register BUFFER as the Aaronnote browser for FILE and CLIENT.
@@ -752,12 +841,16 @@ When FILE is non-nil, set buffer-local file tracking directly."
          (or (eq buffer my/aaronnote--app-buffer)
              (with-current-buffer buffer
                (and (eq major-mode 'xwidget-webkit-mode)
-                    (integerp my/aaronnote--port)
-                    (fboundp 'my/xwidget-current-url)
-                    (when-let* ((url (my/xwidget-current-url buffer)))
-                      (string-prefix-p
-                      (format "http://127.0.0.1:%d/" my/aaronnote--port)
-                      url))))))))
+                    (or
+                     my/aaronnote--client-id
+                     my/aaronnote-buffer-file-name
+                     my/aaronnote--xwidget-forced-name
+                     (and (integerp my/aaronnote--port)
+                          (fboundp 'my/xwidget-current-url)
+                          (when-let* ((url (my/xwidget-current-url buffer)))
+                            (string-prefix-p
+                             (format "http://127.0.0.1:%d/" my/aaronnote--port)
+                             url))))))))))
 
 (defun my/aaronnote--jupyter-xwidget-buffer-p (&optional buffer)
   "Return non-nil when BUFFER hosts the Aaronnote-owned Jupyter xwidget page."
@@ -1765,6 +1858,20 @@ Falls back to JupyterLab root when no matching .ipynb exists."
       (define-key map (kbd key) #'my/aaronnote-xwidget-redo))
     (dolist (key '("<backtab>" "<iso-lefttab>" "S-TAB" "S-<tab>"))
       (define-key map (kbd key) #'my/aaronnote-xwidget-shift-tab))))
+
+(defvar my/aaronnote--windmove-focus-advice-installed nil
+  "Non-nil when Aaronnote windmove focus advice has been installed.")
+
+(defun my/aaronnote--install-windmove-focus-advice ()
+  "Install focus repair advice for windmove transitions involving Aaronnote."
+  (unless my/aaronnote--windmove-focus-advice-installed
+    (dolist (command '(windmove-left windmove-right windmove-up windmove-down))
+      (when (fboundp command)
+        (advice-add command :around #'my/aaronnote--windmove-focus-advice)))
+    (setq my/aaronnote--windmove-focus-advice-installed t)))
+
+(with-eval-after-load 'windmove
+  (my/aaronnote--install-windmove-focus-advice))
 
 (provide 'init-aaronnote)
 ;;; init-aaronnote.el ends here

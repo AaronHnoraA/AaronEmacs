@@ -160,7 +160,8 @@
         (my/aaronnote--app-buffer nil)
         focused-frame
         edit-mode-arg
-        scheduled-fn)
+        scheduled-fn
+        scheduled-args)
     (unwind-protect
         (progn
           (switch-to-buffer buffer)
@@ -171,8 +172,9 @@
                     ((symbol-function 'xwidget-webkit-edit-mode)
                      (lambda (arg) (setq edit-mode-arg arg)))
                     ((symbol-function 'run-at-time)
-                     (lambda (_time _repeat function &rest _args)
+                     (lambda (_time _repeat function &rest args)
                        (setq scheduled-fn function)
+                       (setq scheduled-args args)
                        'mock-timer)))
             (my/aaronnote--run-emacs-key "M-x"))
           (should (equal unread-command-events
@@ -180,24 +182,196 @@
           (should (eq (selected-window) (get-buffer-window buffer 'visible)))
           (should (eq focused-frame (selected-frame)))
           (should (equal edit-mode-arg -1))
-          (should (eq scheduled-fn #'my/aaronnote--focus-minibuffer-if-active)))
+          (should (eq scheduled-fn #'my/aaronnote--focus-forwarded-key-target))
+          (should (equal scheduled-args
+                         (list (get-buffer-window buffer 'visible)))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
 (ert-deftest my/aaronnote-run-emacs-key-queues-prefix-sequence ()
   (let ((unread-command-events nil)
         (my/aaronnote--app-buffer nil)
-        scheduled-fn)
+        scheduled-fn
+        scheduled-args)
     (cl-letf (((symbol-function 'select-frame-set-input-focus)
                (lambda (_frame) nil))
               ((symbol-function 'run-at-time)
-               (lambda (_time _repeat function &rest _args)
+               (lambda (_time _repeat function &rest args)
                  (setq scheduled-fn function)
+                 (setq scheduled-args args)
                  'mock-timer)))
       (my/aaronnote--run-emacs-key "C-x C-f"))
     (should (equal unread-command-events
                    (listify-key-sequence (kbd "C-x C-f"))))
-    (should (eq scheduled-fn #'my/aaronnote--focus-minibuffer-if-active))))
+    (should (eq scheduled-fn #'my/aaronnote--focus-forwarded-key-target))
+    (should (equal scheduled-args (list (selected-window))))))
+
+(ert-deftest my/aaronnote-focus-forwarded-key-target-focuses-window-left-from-aaronnote ()
+  (let ((source (generate-new-buffer "*aaronnote-source*"))
+        (target (generate-new-buffer "*aaronnote-target*"))
+        (my/aaronnote--app-buffer nil)
+        focused-frame)
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer source)
+          (setq-local major-mode 'xwidget-webkit-mode)
+          (setq my/aaronnote--app-buffer source)
+          (let ((source-window (selected-window))
+                (target-window (split-window-right)))
+            (set-window-buffer target-window target)
+            (select-window target-window)
+            (cl-letf (((symbol-function 'select-frame-set-input-focus)
+                       (lambda (frame) (setq focused-frame frame))))
+              (my/aaronnote--focus-forwarded-key-target source-window))
+            (should (eq (selected-window) target-window))
+            (should (eq focused-frame (selected-frame)))))
+      (when (buffer-live-p source) (kill-buffer source))
+      (when (buffer-live-p target) (kill-buffer target)))))
+
+(ert-deftest my/aaronnote-buffer-for-client-finds-unregistered-readonly-split ()
+  (let ((buffer (generate-new-buffer "*aaronnote-split*"))
+        (my/aaronnote--client-buffers (make-hash-table :test #'equal)))
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (setq-local major-mode 'xwidget-webkit-mode)
+            (setq-local my/aaronnote--client-id "aaronnote-readonly:/tmp/note.md:1"))
+          (should-not (gethash "aaronnote-readonly:/tmp/note.md:1"
+                               my/aaronnote--client-buffers))
+          (should (eq (my/aaronnote--buffer-for-client
+                       "aaronnote-readonly:/tmp/note.md:1")
+                      buffer)))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest my/aaronnote-xwidget-buffer-p-accepts-local-aaronnote-client ()
+  (let ((buffer (generate-new-buffer "*aaronnote-split*"))
+        (my/aaronnote--app-buffer nil)
+        (my/aaronnote--port nil))
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (setq-local major-mode 'xwidget-webkit-mode)
+            (setq-local my/aaronnote--client-id "aaronnote-readonly:/tmp/note.md:1"))
+          (should (my/aaronnote--xwidget-buffer-p buffer)))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest my/aaronnote-run-emacs-key-uses-client-source-window ()
+  (let ((main (generate-new-buffer "*aaronnote-main*"))
+        (split (generate-new-buffer "*aaronnote-split*"))
+        (my/aaronnote--app-buffer nil)
+        (my/aaronnote--client-buffers (make-hash-table :test #'equal))
+        (unread-command-events nil)
+        released-buffer
+        scheduled-fn
+        scheduled-args)
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer main)
+          (with-current-buffer main
+            (setq-local major-mode 'xwidget-webkit-mode)
+            (setq-local my/aaronnote--client-id "main-client"))
+          (setq my/aaronnote--app-buffer main)
+          (let ((main-window (selected-window))
+                (split-window (split-window-right)))
+            (set-window-buffer split-window split)
+            (with-current-buffer split
+              (setq-local major-mode 'xwidget-webkit-mode)
+              (setq-local my/aaronnote--client-id "split-client"))
+            (select-window main-window)
+            (cl-letf (((symbol-function 'select-frame-set-input-focus)
+                       (lambda (_frame) nil))
+                      ((symbol-function 'xwidget-webkit-edit-mode)
+                       (lambda (arg)
+                         (when (equal arg -1)
+                           (setq released-buffer (current-buffer)))))
+                      ((symbol-function 'run-at-time)
+                       (lambda (_time _repeat function &rest args)
+                         (setq scheduled-fn function)
+                         (setq scheduled-args args)
+                         'mock-timer)))
+              (my/aaronnote--run-emacs-key "M-x" "split-client"))
+            (should (eq (selected-window) split-window))
+            (should (eq released-buffer split))
+            (should (equal unread-command-events
+                           (listify-key-sequence (kbd "M-x"))))
+            (should (eq scheduled-fn #'my/aaronnote--focus-forwarded-key-target))
+            (should (equal scheduled-args (list split-window)))))
+      (when (buffer-live-p main) (kill-buffer main))
+      (when (buffer-live-p split) (kill-buffer split)))))
+
+(ert-deftest my/aaronnote-key-event-passes-client-to-run-emacs-key ()
+  (let (seen)
+    (cl-letf (((symbol-function 'my/aaronnote--run-emacs-key)
+               (lambda (key &optional client)
+                 (setq seen (list key client)))))
+      (my/aaronnote--handle-process-line
+       (concat "aaronote-event:key:"
+               (json-encode '((key . "M-<right>")
+                              (client . "split-client"))))))
+    (should (equal seen '("M-<right>" "split-client")))))
+
+(ert-deftest my/aaronnote-windmove-focus-advice-focuses-aaronnote-target ()
+  (let ((source (generate-new-buffer "*aaronnote-source*"))
+        (target (generate-new-buffer "*aaronnote-target*"))
+        (my/aaronnote--app-buffer nil)
+        focused-buffer)
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer source)
+          (let ((target-window (split-window-right)))
+            (set-window-buffer target-window target)
+            (with-current-buffer target
+              (setq-local major-mode 'xwidget-webkit-mode))
+            (setq my/aaronnote--app-buffer target)
+            (cl-letf (((symbol-function 'my/xwidget-focus)
+                       (lambda (&optional buffer)
+                         (setq focused-buffer buffer))))
+              (should (eq (my/aaronnote--windmove-focus-advice
+                           (lambda ()
+                             (select-window target-window)
+                             'moved))
+                          'moved)))
+            (should (eq (selected-window) target-window))
+            (should (eq focused-buffer target))))
+      (when (buffer-live-p source) (kill-buffer source))
+      (when (buffer-live-p target) (kill-buffer target)))))
+
+(ert-deftest my/aaronnote-focus-move-between-aaronnote-windows-releases-source-and-focuses-target ()
+  (let ((source (generate-new-buffer "*aaronnote-source*"))
+        (target (generate-new-buffer "*aaronnote-split*"))
+        (released-buffer nil)
+        (focused-buffer nil))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer source)
+          (with-current-buffer source
+            (setq-local major-mode 'xwidget-webkit-mode))
+          (let ((source-window (selected-window))
+                (target-window (split-window-right)))
+            (set-window-buffer target-window target)
+            (with-current-buffer target
+              (setq-local major-mode 'xwidget-webkit-mode))
+            (select-window target-window)
+            (cl-letf (((symbol-function 'my/aaronnote--xwidget-buffer-p)
+                       (lambda (&optional buffer)
+                         (memq (or buffer (current-buffer)) (list source target))))
+                      ((symbol-function 'xwidget-webkit-edit-mode)
+                       (lambda (arg)
+                         (when (equal arg -1)
+                           (setq released-buffer (current-buffer)))))
+                      ((symbol-function 'my/xwidget-focus)
+                       (lambda (&optional buffer)
+                         (setq focused-buffer buffer))))
+              (my/aaronnote--focus-selected-window-after-move source-window))
+            (should (eq released-buffer source))
+            (should (eq focused-buffer target))
+            (should (eq my/aaronnote--app-buffer target))))
+      (when (buffer-live-p source) (kill-buffer source))
+      (when (buffer-live-p target) (kill-buffer target)))))
 
 (ert-deftest my/aaronnote-process-filter-handles-split-ready-line ()
   (let* ((buffer (generate-new-buffer " *aaronnote-test-process*"))

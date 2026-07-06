@@ -275,7 +275,8 @@
   text-decoration-color: color-mix(in srgb, var(--aaron-link, #9de7ff), transparent 4%);
 }
 
-.cm-editor .cm-vim-jump-label {
+.cm-editor .cm-vim-jump-label,
+.cm-editor .cm-vim-jump-preview {
   position: relative;
   z-index: 20;
   background: color-mix(in srgb, var(--aaron-callout-warning, #ffe7aa), transparent 78%);

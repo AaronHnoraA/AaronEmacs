@@ -5,6 +5,7 @@ import {
   applyVimJump,
   beginVimJump,
   clearVimJump,
+  previewVimJump,
   type VimJumpDirection,
   type VimJumpSession,
 } from "../src/cm6/vim-jump.ts";
@@ -35,6 +36,7 @@ type VimLiteOptions = {
   onIndent?: (direction: 1 | -1) => boolean;
   onFold?: (action: VimLiteFoldAction) => boolean;
   onFind?: () => boolean;
+  jumpTimeoutMs?: number;
 };
 
 type VimRegisterKind = "linewise" | "characterwise";
@@ -50,12 +52,24 @@ type LineInfo = {
   column: number;
 };
 
+type VimJumpInput = {
+  direction: VimJumpDirection;
+  needle: string;
+  timer: number | null;
+};
+
+const AVY_TIMEOUT_MS = 500;
+
 function hasCommandModifier(event: VimLiteKey): boolean {
   return Boolean(event.metaKey || event.altKey || event.ctrlKey);
 }
 
 function isEscape(event: VimLiteKey): boolean {
   return event.key === "Escape" || Boolean(event.ctrlKey && event.key === "[");
+}
+
+function isUppercaseAsciiLetter(key: string): boolean {
+  return /^[A-Z]$/.test(key);
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -257,11 +271,12 @@ export function createVimLite(
   let mode: VimLiteMode = "insert";
   let goalColumn: number | null = null;
   let pending = "";
-  let jumpDirection: VimJumpDirection = 1;
+  let jumpInput: VimJumpInput | null = null;
   let jumpSession: VimJumpSession | null = null;
   let visualAnchor: number | null = null;
   let visualHead: number | null = null;
   let register: VimRegister = { text: "", kind: "characterwise" };
+  const jumpTimeoutMs = Math.max(0, options.jumpTimeoutMs ?? AVY_TIMEOUT_MS);
   // Tracks the in-flight system clipboard write so paste() can wait for it
   // before reading back. Avoids the dd→p race where writeText is async.
   let pendingClipboardWrite: Promise<void> = Promise.resolve();
@@ -300,10 +315,90 @@ export function createVimLite(
     goalColumn = null;
   }
 
+  function clearJumpInputTimer(): void {
+    if (jumpInput?.timer != null) {
+      window.clearTimeout(jumpInput.timer);
+      jumpInput.timer = null;
+    }
+  }
+
   function cancelJump(): void {
     pending = "";
+    clearJumpInputTimer();
+    jumpInput = null;
     jumpSession = null;
     clearVimJump(editor.view);
+  }
+
+  function finishJumpInput(): boolean {
+    const input = jumpInput;
+    if (!input) return false;
+    clearJumpInputTimer();
+    jumpInput = null;
+    if (!input.needle) {
+      clearVimJump(editor.view);
+      return true;
+    }
+
+    const session = beginVimJump(editor.view, input.needle, input.direction);
+    if (session.candidates.length === 0) {
+      clearVimJump(editor.view);
+      return true;
+    }
+    if (session.candidates.length === 1) {
+      applyVimJump(editor.view, session, session.candidates[0]!.label);
+      return true;
+    }
+    jumpSession = session;
+    return true;
+  }
+
+  function scheduleJumpInputTimeout(input: VimJumpInput): void {
+    clearJumpInputTimer();
+    if (!input.needle) return;
+    input.timer = window.setTimeout(() => {
+      if (jumpInput === input) finishJumpInput();
+    }, jumpTimeoutMs);
+  }
+
+  function updateJumpInputPreview(input: VimJumpInput): void {
+    if (!input.needle) {
+      clearVimJump(editor.view);
+      return;
+    }
+    previewVimJump(editor.view, input.needle, input.direction);
+  }
+
+  function startJumpInput(direction: VimJumpDirection): void {
+    cancelJump();
+    jumpInput = { direction, needle: "", timer: null };
+    resetMotionMemory();
+  }
+
+  function handleJumpInputKey(key: string): boolean {
+    const input = jumpInput;
+    if (!input) return false;
+
+    if (key === "Enter") return finishJumpInput();
+
+    if (key === "Backspace" || key === "Delete" || key === "\b" || key === "\u007f") {
+      input.needle = input.needle.slice(0, -1);
+      updateJumpInputPreview(input);
+      scheduleJumpInputTimeout(input);
+      return true;
+    }
+
+    if (key.length !== 1) {
+      cancelJump();
+      return true;
+    }
+
+    if (isUppercaseAsciiLetter(key)) return true;
+
+    input.needle += key;
+    updateJumpInputPreview(input);
+    scheduleJumpInputTimeout(input);
+    return true;
   }
 
   function setMode(next: VimLiteMode): void {
@@ -525,6 +620,7 @@ export function createVimLite(
       applyVimJump(editor.view, session, key);
       return true;
     }
+    if (jumpInput) return handleJumpInputKey(key);
     if (pending === "d") {
       pending = "";
       if (key === "d") {
@@ -591,21 +687,6 @@ export function createVimLite(
       }
       return true;
     }
-    if (pending === "s" || pending === "S") {
-      if (key.length !== 1) {
-        cancelJump();
-        return true;
-      }
-      jumpDirection = pending === "s" ? 1 : -1;
-      pending = "";
-      resetMotionMemory();
-      jumpSession = beginVimJump(editor.view, key, jumpDirection);
-      if (jumpSession.candidates.length === 0) {
-        cancelJump();
-      }
-      return true;
-    }
-
     switch (key) {
       case "h":
       case "ArrowLeft":
@@ -700,7 +781,7 @@ export function createVimLite(
         return true;
       case "s":
       case "S":
-        pending = key;
+        startJumpInput(key === "s" ? 1 : -1);
         return true;
       case "/":
         resetMotionMemory();

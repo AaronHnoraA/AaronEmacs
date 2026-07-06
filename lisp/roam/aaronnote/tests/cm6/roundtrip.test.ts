@@ -12,7 +12,7 @@
  *   cd Aaronnote && npx vp test --run tests/cm6/roundtrip.test.ts
  */
 
-import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
+import { describe, expect, test, vi } from "@voidzero-dev/vite-plus-test";
 import { foldedRanges } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
 import { createEditor } from "../../src/editor-api.ts";
@@ -2417,22 +2417,87 @@ maybeDescribe("cm6 kernel: selection", () => {
     cleanup();
   });
 
-  test("vim-lite s jump uses one character and labeled visible matches only in normal mode", () => {
+  test("vim-lite s jump uses avy-style timed multi-character input", () => {
     const { editor, cleanup } = mountCM6("zero ab one ab two");
-    const vim = createVimLite(editor, document.body);
+    const vim = createVimLite(editor, document.body, { jumpTimeoutMs: 5 });
 
-    editor.setMarkdownSelection(0);
-    expect(vim.handleKey({ key: "s" })).toBe(false);
-    expect(editor.getMarkdown()).toBe("zero ab one ab two");
+    vi.useFakeTimers();
+    try {
+      editor.setMarkdownSelection(0);
+      expect(vim.handleKey({ key: "s" })).toBe(false);
+      expect(editor.getMarkdown()).toBe("zero ab one ab two");
 
-    vim.setMode("normal");
-    expect(vim.handleKey({ key: "s" })).toBe(true);
-    expect(vim.handleKey({ key: "a" })).toBe(true);
-    expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(2);
-    expect(vim.handleKey({ key: "a" })).toBe(true);
-    expect(editor.getMarkdownSelection().from).toBe(5);
-    expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
-    cleanup();
+      vim.setMode("normal");
+      expect(vim.handleKey({ key: "s" })).toBe(true);
+      expect(vim.handleKey({ key: "a" })).toBe(true);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
+      expect(document.querySelectorAll(".cm-vim-jump-preview").length).toBe(2);
+      vi.advanceTimersByTime(5);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(2);
+      expect(vim.handleKey({ key: "a" })).toBe(true);
+      expect(editor.getMarkdownSelection().from).toBe(5);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
+      expect(document.querySelectorAll(".cm-vim-jump-preview").length).toBe(0);
+    } finally {
+      vi.useRealTimers();
+      cleanup();
+    }
+  });
+
+  test("vim-lite s jump refines candidates with additional chars before timeout", () => {
+    const { editor, cleanup } = mountCM6("theta beta alphabet beta");
+    const vim = createVimLite(editor, document.body, { jumpTimeoutMs: 5 });
+
+    vi.useFakeTimers();
+    try {
+      editor.setMarkdownSelection(0);
+      vim.setMode("normal");
+      expect(vim.handleKey({ key: "s" })).toBe(true);
+      expect(vim.handleKey({ key: "a" })).toBe(true);
+      expect(vim.handleKey({ key: "l" })).toBe(true);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
+      expect(document.querySelectorAll(".cm-vim-jump-preview").length).toBe(1);
+      vi.advanceTimersByTime(5);
+      expect(editor.getMarkdownSelection().from).toBe(11);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
+      expect(document.querySelectorAll(".cm-vim-jump-preview").length).toBe(0);
+    } finally {
+      vi.useRealTimers();
+      cleanup();
+    }
+  });
+
+  test("vim-lite s jump matches document text case-insensitively", () => {
+    const { editor, cleanup } = mountCM6("A x a");
+    const vim = createVimLite(editor, document.body, { jumpTimeoutMs: 5 });
+
+    vi.useFakeTimers();
+    try {
+      editor.setMarkdownSelection(0);
+      vim.setMode("normal");
+      expect(vim.handleKey({ key: "s" })).toBe(true);
+      expect(vim.handleKey({ key: "A" })).toBe(true);
+      expect(document.querySelectorAll(".cm-vim-jump-preview").length).toBe(0);
+      vi.advanceTimersByTime(5);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
+      expect(vim.handleKey({ key: "a" })).toBe(true);
+      expect(document.querySelectorAll(".cm-vim-jump-preview").length).toBe(2);
+      vi.advanceTimersByTime(5);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(2);
+      expect(vim.handleKey({ key: "a" })).toBe(true);
+      expect(editor.getMarkdownSelection().from).toBe(4);
+
+      editor.setMarkdownSelection(0);
+      expect(vim.handleKey({ key: "s" })).toBe(true);
+      expect(vim.handleKey({ key: "a" })).toBe(true);
+      vi.advanceTimersByTime(5);
+      expect(vim.handleKey({ key: "A" })).toBe(true);
+      expect(editor.getMarkdownSelection().from).toBe(0);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
+    } finally {
+      vi.useRealTimers();
+      cleanup();
+    }
   });
 
   test("vim-lite s jump cancels reliably with Escape in normal mode", () => {
@@ -2443,9 +2508,10 @@ maybeDescribe("cm6 kernel: selection", () => {
     vim.setMode("normal");
     expect(vim.handleKey({ key: "s" })).toBe(true);
     expect(vim.handleKey({ key: "a" })).toBe(true);
-    expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(2);
+    expect(document.querySelectorAll(".cm-vim-jump-preview").length).toBe(2);
     expect(vim.handleKey({ key: "Escape" })).toBe(true);
     expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
+    expect(document.querySelectorAll(".cm-vim-jump-preview").length).toBe(0);
 
     expect(vim.handleKey({ key: "j" })).toBe(true);
     expect(editor.getMarkdownSelection().from).toBe(0);
@@ -2455,17 +2521,24 @@ maybeDescribe("cm6 kernel: selection", () => {
 
   test("vim-lite S jump prioritizes visible matches before the cursor", () => {
     const { editor, cleanup } = mountCM6("a zero a one a two");
-    const vim = createVimLite(editor, document.body);
+    const vim = createVimLite(editor, document.body, { jumpTimeoutMs: 5 });
 
-    editor.setMarkdownSelection(13);
-    vim.setMode("normal");
-    expect(vim.handleKey({ key: "S" })).toBe(true);
-    expect(vim.handleKey({ key: "a" })).toBe(true);
-    expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(3);
-    expect(vim.handleKey({ key: "a" })).toBe(true);
-    expect(editor.getMarkdownSelection().from).toBe(7);
-    expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
-    cleanup();
+    vi.useFakeTimers();
+    try {
+      editor.setMarkdownSelection(13);
+      vim.setMode("normal");
+      expect(vim.handleKey({ key: "S" })).toBe(true);
+      expect(vim.handleKey({ key: "a" })).toBe(true);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
+      vi.advanceTimersByTime(5);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(3);
+      expect(vim.handleKey({ key: "a" })).toBe(true);
+      expect(editor.getMarkdownSelection().from).toBe(7);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
+    } finally {
+      vi.useRealTimers();
+      cleanup();
+    }
   });
 
   test("cm6 read-only mode rejects editing APIs while preserving navigation", () => {

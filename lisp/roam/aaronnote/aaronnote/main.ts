@@ -5964,7 +5964,7 @@ document.addEventListener("keydown", (event) => {
     void exportLatexTool();
     return;
   }
-  if (handleXwidgetEmacsKeydown(event)) return;
+  if (handleXwidgetEmacsKeydown(event, { client: () => currentClient })) return;
   if (runVisualZoomShortcut(event)) {
     return;
   }

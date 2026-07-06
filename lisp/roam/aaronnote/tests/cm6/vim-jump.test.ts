@@ -1,5 +1,5 @@
 import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
-import { selectJumpCandidates } from "../../src/cm6/vim-jump.ts";
+import { selectJumpCandidates, VIM_JUMP_LABELS } from "../../src/cm6/vim-jump.ts";
 
 // Guards the s-jump ordering contract: matches must be ranked by direction and
 // proximity to the cursor BEFORE being capped to the label budget. The previous
@@ -35,5 +35,11 @@ describe("selectJumpCandidates", () => {
     const justForward = 101;
     const result = selectJumpCandidates([...below, justForward], 100, 1, 26);
     expect(result[0]).toBe(justForward);
+  });
+
+  test("uses the same label key budget as the Emacs avy config", () => {
+    expect(VIM_JUMP_LABELS).toBe("asdfghjklqweruiop");
+    const positions = Array.from({ length: 30 }, (_, i) => i + 1);
+    expect(selectJumpCandidates(positions, 0, 1)).toHaveLength(VIM_JUMP_LABELS.length);
   });
 });
