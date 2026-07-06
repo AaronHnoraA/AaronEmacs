@@ -1,7 +1,20 @@
 import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
-import { extractTodos, inlineTagsFromContent, normalizeTodoStatus, scanInlineCommands, tagsFromContent } from "../server/lib/index.mjs";
+import {
+  configure,
+  extractTodos,
+  getTodos,
+  inlineTagsFromContent,
+  normalizeTodoStatus,
+  scanInlineCommands,
+  syncRoamDb,
+  tagsFromContent,
+  updateTodoStatus,
+} from "../server/lib/index.mjs";
 
 const note = {
   file: "/notes/a.md",
@@ -127,5 +140,116 @@ describe("server todo scan", () => {
     ].join("\n");
     expect(tagsFromContent(content)).toEqual(["paper", "quantum"]);
     expect(inlineTagsFromContent(content)).toEqual(["local-anchor"]);
+  });
+});
+
+describe("server todo sqlite index", () => {
+  test("sync writes todos to todo.sqlite and getTodos reads DB-first", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-todo-db-"));
+    try {
+      await mkdir(join(root, "state"), { recursive: true });
+      configure({ root, workspaceRoot: root, stateRoot: join(root, "state"), tmpRoot: join(root, "tmp") });
+      await writeFile(
+        join(root, "a.md"),
+        [
+          "---",
+          "id: 20260706T120000-a",
+          "---",
+          "# A",
+          "",
+          "@@todo(doing) [write proof]{due=2026-07-07, priority=A, scheduled=2026-07-06, repeat=+1w}",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await writeFile(join(root, "b.md"), "---\nid: b-note\n---\n# B\n\n@@todo [other]\n", "utf8");
+
+      await syncRoamDb(null, { mode: "full" });
+      const payload = await getTodos("");
+      expect(payload).toMatchObject({ source: "todo.sqlite" });
+      expect(payload.todos).toHaveLength(2);
+      expect(payload.todos[0]).toMatchObject({
+        status: "doing",
+        text: "write proof",
+        due: "2026-07-07",
+        priority: "A",
+        scheduled: "2026-07-06",
+        repeat: "+1w",
+        noteId: "20260706T120000-a",
+      });
+      const filePayload = await getTodos(join(root, "a.md"));
+      expect(filePayload).toMatchObject({ source: "todo.sqlite" });
+      expect(filePayload.todos.map((todo: { text?: string }) => todo.text)).toEqual(["write proof"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("todo status update rewrites markdown and refreshes todo.sqlite", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-todo-update-"));
+    try {
+      await mkdir(join(root, "state"), { recursive: true });
+      configure({ root, workspaceRoot: root, stateRoot: join(root, "state"), tmpRoot: join(root, "tmp") });
+      const file = join(root, "a.md");
+      await writeFile(file, "---\nid: task-note\n---\n# A\n\n@@todo [ship it]{due=2026-07-07}\n", "utf8");
+
+      await syncRoamDb(null, { mode: "full" });
+      const before = await getTodos("");
+      await updateTodoStatus({
+        file,
+        id: before.todos[0].id,
+        index: before.todos[0].index,
+        source: before.todos[0].source,
+        text: before.todos[0].text,
+        status: "done",
+      });
+
+      expect(await readFile(file, "utf8")).toContain("@@todo(done) [ship it]");
+      const after = await getTodos("");
+      expect(after).toMatchObject({ source: "todo.sqlite" });
+      expect(after.todos[0]).toMatchObject({ status: "done", text: "ship it" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("todo metadata update rewrites args without changing status", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-todo-meta-"));
+    try {
+      await mkdir(join(root, "state"), { recursive: true });
+      configure({ root, workspaceRoot: root, stateRoot: join(root, "state"), tmpRoot: join(root, "tmp") });
+      const file = join(root, "a.md");
+      await writeFile(file, "---\nid: task-meta\n---\n# A\n\n@@todo(doing) [ship it]{due=2026-07-07}\n", "utf8");
+
+      await syncRoamDb(null, { mode: "full" });
+      const before = await getTodos("");
+      await updateTodoStatus({
+        file,
+        id: before.todos[0].id,
+        index: before.todos[0].index,
+        source: before.todos[0].source,
+        text: before.todos[0].text,
+        priority: "b",
+        due: "tomorrow",
+        scheduled: "2026-07-06",
+        repeat: "+1w",
+      });
+
+      const content = await readFile(file, "utf8");
+      expect(content).toContain("@@todo(doing) [ship it]");
+      expect(content).toContain("priority=B");
+      expect(content).toContain("scheduled=2026-07-06");
+      expect(content).toContain("repeat=+1w");
+      const after = await getTodos("");
+      expect(after.todos[0]).toMatchObject({
+        status: "doing",
+        text: "ship it",
+        priority: "B",
+        scheduled: "2026-07-06",
+        repeat: "+1w",
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

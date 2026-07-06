@@ -10,6 +10,10 @@
 
 (declare-function my/aaronnote-roam-todo-done "init-md-roam" ())
 (declare-function my/aaronnote-roam-update-todo-status "init-md-roam" (status &optional entry))
+(declare-function my/aaronnote-roam-set-todo-priority "init-md-roam" (&optional priority entry))
+(declare-function my/aaronnote-roam-set-todo-due "init-md-roam" (&optional due entry))
+(declare-function my/aaronnote-roam-set-todo-scheduled "init-md-roam" (&optional scheduled entry))
+(declare-function my/aaronnote-roam-set-todo-repeat "init-md-roam" (&optional repeat entry))
 
 ;;; --- face aliases ---
 
@@ -58,6 +62,10 @@
 
 (define-key my/aaronnote-roam-ui-mode-map (kbd "d") #'my/aaronnote-roam-todo-done)
 (define-key my/aaronnote-roam-ui-mode-map (kbd "s") #'my/aaronnote-roam-update-todo-status)
+(define-key my/aaronnote-roam-ui-mode-map (kbd "p") #'my/aaronnote-roam-set-todo-priority)
+(define-key my/aaronnote-roam-ui-mode-map (kbd "D") #'my/aaronnote-roam-set-todo-due)
+(define-key my/aaronnote-roam-ui-mode-map (kbd "S") #'my/aaronnote-roam-set-todo-scheduled)
+(define-key my/aaronnote-roam-ui-mode-map (kbd "r") #'my/aaronnote-roam-set-todo-repeat)
 
 ;;; --- function aliases ---
 

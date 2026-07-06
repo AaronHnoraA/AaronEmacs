@@ -154,7 +154,8 @@ the expected body, and returns parsed JSON or nil."
                ("update-todo"
                 (let ((body (make-hash-table :test 'equal)))
                   (dolist (key '("--file" "--status" "--source" "--id"
-                                 "--text" "--index"))
+                                 "--text" "--index" "--priority" "--due"
+                                 "--scheduled" "--repeat"))
                     (when-let* ((value (cadr (member key args))))
                       (puthash (string-remove-prefix "--" key) value body)))
                   (vector body)))
@@ -2516,6 +2517,68 @@ Falls back to a CLI subprocess when the web-host is offline."
     (message "Todo marked %s" status)
     (my/aaronnote-roam-ui-refresh)))
 
+(defun my/aaronnote-roam-update-todo-metadata (field value &optional entry)
+  "Set todo metadata FIELD to VALUE for ENTRY and refresh the current task view.
+FIELD is one of priority, due, scheduled, or repeat.  Empty VALUE clears FIELD."
+  (interactive
+   (let* ((field (completing-read "Todo field: "
+                                  '("priority" "due" "scheduled" "repeat")
+                                  nil t))
+          (prompt (format "%s%s: "
+                          (if (string-empty-p field) "Value" (capitalize field))
+                          (if (member field '("due" "scheduled")) " (empty clears)" "")))
+          (value (read-string prompt)))
+     (list field value nil)))
+  (let* ((entry (or entry (my/aaronnote-roam--todo-at-point)))
+         (file (my/aaronnote-roam--todo-field entry "file"))
+         (index (my/aaronnote-roam--todo-field entry "index"))
+         (source (my/aaronnote-roam--todo-field entry "source"))
+         (id (my/aaronnote-roam--todo-field entry "id"))
+         (text (my/aaronnote-roam--todo-field entry "text"))
+         (field (downcase (format "%s" field)))
+         (value (string-trim (format "%s" value))))
+    (unless entry
+      (user-error "No todo on this line"))
+    (unless (member field '("priority" "due" "scheduled" "repeat"))
+      (user-error "Unsupported todo metadata field: %s" field))
+    (unless (and file
+                 (apply #'my/aaronnote-roam--runtime-call
+                        "update-todo"
+                        (append
+                         (list "--file" file
+                               "--index" (format "%s" (or index ""))
+                               "--source" (or source "")
+                               "--id" (or id "")
+                               "--text" (or text ""))
+                         (list (concat "--" field) value))))
+      (user-error "Aaronnote runtime is required for todo metadata updates"))
+    (my/aaronnote-roam--clear-runtime-cache)
+    (message "Todo %s %s" field (if (string-empty-p value) "cleared" value))
+    (my/aaronnote-roam-ui-refresh)))
+
+(defun my/aaronnote-roam-set-todo-priority (&optional priority entry)
+  "Set current todo PRIORITY and refresh the current task view."
+  (interactive
+   (list (completing-read "Priority (empty clears): "
+                          '("A" "B" "C" "D" "E" "F" "") nil t)
+         nil))
+  (my/aaronnote-roam-update-todo-metadata "priority" (or priority "") entry))
+
+(defun my/aaronnote-roam-set-todo-due (&optional due entry)
+  "Set current todo due date and refresh the current task view."
+  (interactive (list (read-string "Due (empty clears): ") nil))
+  (my/aaronnote-roam-update-todo-metadata "due" (or due "") entry))
+
+(defun my/aaronnote-roam-set-todo-scheduled (&optional scheduled entry)
+  "Set current todo scheduled date and refresh the current task view."
+  (interactive (list (read-string "Scheduled (empty clears): ") nil))
+  (my/aaronnote-roam-update-todo-metadata "scheduled" (or scheduled "") entry))
+
+(defun my/aaronnote-roam-set-todo-repeat (&optional repeat entry)
+  "Set current todo repeat metadata and refresh the current task view."
+  (interactive (list (read-string "Repeat (empty clears): ") nil))
+  (my/aaronnote-roam-update-todo-metadata "repeat" (or repeat "") entry))
+
 (defun my/aaronnote-roam-todo-done ()
   "Mark the current roam todo done."
   (interactive)
@@ -2881,6 +2944,27 @@ This checks top-level todo fields first, then the nested args object."
   "Return deadline string for todo ENTRY, or nil."
   (my/aaronnote-roam--todo-string-value entry "ddl" "deadline" "due"))
 
+(defun my/aaronnote-roam--todo-priority (entry)
+  "Return normalized single-letter priority for todo ENTRY, or nil."
+  (when-let* ((raw (my/aaronnote-roam--todo-string-value entry "priority" "pri" "p"))
+              (priority (upcase (substring raw 0 1))))
+    (when (string-match-p "\\`[A-Z]\\'" priority)
+      priority)))
+
+(defun my/aaronnote-roam--todo-scheduled (entry)
+  "Return scheduled date string for todo ENTRY, or nil."
+  (my/aaronnote-roam--todo-string-value entry "scheduled" "start" "when"))
+
+(defun my/aaronnote-roam--todo-repeat (entry)
+  "Return repeat metadata for todo ENTRY, or nil."
+  (my/aaronnote-roam--todo-string-value entry "repeat" "recur" "rec"))
+
+(defun my/aaronnote-roam--todo-priority-rank (entry)
+  "Return sortable numeric priority rank for todo ENTRY."
+  (if-let* ((priority (my/aaronnote-roam--todo-priority entry)))
+      (- (string-to-char priority) ?A)
+    99))
+
 (defun my/aaronnote-roam--date-day-string (value)
   "Return YYYY-MM-DD for date-like VALUE, or nil."
   (when-let* ((raw (and value (string-trim (format "%s" value)))))
@@ -2958,6 +3042,9 @@ This checks top-level todo fields first, then the nested args object."
                  (my/aaronnote-roam--todo-string-value entry "note" "noteId" "roamId" "noteKey")
                  (my/aaronnote-roam--todo-string-value entry "path" "file" "parentFile")
                  (my/aaronnote-roam--todo-string-value entry "groupKey" "groupLabel"))
+           (mapcar (lambda (key)
+                     (my/aaronnote-roam--todo-string-value entry key))
+                   '("priority" "due" "ddl" "deadline" "scheduled" "repeat"))
            (my/aaronnote-roam--todo-tags entry)))
     " ")))
 
@@ -3013,6 +3100,20 @@ This checks top-level todo fields first, then the nested args object."
           ("date"
            (let ((day (my/aaronnote-roam--date-day-string value)))
              (and day (equal day (my/aaronnote-roam--todo-agenda-date entry)))))
+          ((or "priority" "pri" "p")
+           (string= (upcase value)
+                    (or (my/aaronnote-roam--todo-priority entry) "")))
+          ((or "due" "ddl" "deadline")
+           (let ((day (my/aaronnote-roam--date-day-string value)))
+             (and day (equal day (my/aaronnote-roam--date-day-string
+                                  (my/aaronnote-roam--todo-ddl entry))))))
+          ("scheduled"
+           (let ((day (my/aaronnote-roam--date-day-string value)))
+             (and day (equal day (my/aaronnote-roam--date-day-string
+                                  (my/aaronnote-roam--todo-scheduled entry))))))
+          ((or "repeat" "recur")
+           (string-match-p (regexp-quote value)
+                           (downcase (or (my/aaronnote-roam--todo-repeat entry) ""))))
           ("from"
            (my/aaronnote-roam--agenda-date-in-range-p
             entry (my/aaronnote-roam--date-day-string value) nil))
@@ -3061,11 +3162,13 @@ This checks top-level todo fields first, then the nested args object."
      (or todos '()))))
 
 (defun my/aaronnote-roam--agenda-sort-todos (todos)
-  "Return TODOS sorted by agenda date, title, and text."
+  "Return TODOS sorted by priority, agenda date, title, and text."
   (sort
    (copy-sequence todos)
    (lambda (a b)
-     (let ((date-a (my/aaronnote-roam--todo-agenda-date a))
+     (let ((priority-a (my/aaronnote-roam--todo-priority-rank a))
+           (priority-b (my/aaronnote-roam--todo-priority-rank b))
+           (date-a (my/aaronnote-roam--todo-agenda-date a))
            (date-b (my/aaronnote-roam--todo-agenda-date b))
            (title-a (or (my/aaronnote-roam--todo-string-value a "title" "noteTitle")
                         ""))
@@ -3076,6 +3179,7 @@ This checks top-level todo fields first, then the nested args object."
            (text-b (or (my/aaronnote-roam--todo-string-value b "text" "source")
                        "")))
        (cond
+        ((not (= priority-a priority-b)) (< priority-a priority-b))
         ((and date-a date-b (not (string= date-a date-b)))
          (string< date-a date-b))
         ((and date-a (not date-b)) t)
@@ -3198,6 +3302,21 @@ This checks top-level todo fields first, then the nested args object."
   "Return TEXT compacted to display WIDTH."
   (truncate-string-to-width (string-trim (or text "")) width nil nil "…"))
 
+(defun my/aaronnote-roam--agenda-todo-meta-label (entry)
+  "Return compact metadata label for todo ENTRY."
+  (let* ((priority (my/aaronnote-roam--todo-priority entry))
+         (due (my/aaronnote-roam--date-day-string
+               (my/aaronnote-roam--todo-ddl entry)))
+         (scheduled (my/aaronnote-roam--date-day-string
+                     (my/aaronnote-roam--todo-scheduled entry)))
+         (repeat (my/aaronnote-roam--todo-repeat entry))
+         (parts (delq nil
+                      (list (and priority (format "P:%s" priority))
+                            (and due (format "D:%s" due))
+                            (and scheduled (format "S:%s" scheduled))
+                            (and repeat (format "R:%s" repeat)))))))
+    (string-join parts " ")))
+
 (defun my/aaronnote-roam--insert-agenda-todo-row (entry &optional deadline-tone)
   "Insert one agenda row for todo ENTRY with optional DEADLINE-TONE."
   (let* ((note-title (or (my/aaronnote-roam--todo-string-value
@@ -3210,9 +3329,10 @@ This checks top-level todo fields first, then the nested args object."
                    "(empty todo)"))
          (line (my/aaronnote-roam--todo-field entry "line"))
          (date (or (my/aaronnote-roam--todo-agenda-date entry) "no-date"))
+         (meta (my/aaronnote-roam--agenda-todo-meta-label entry))
          (status (upcase (my/aaronnote-roam--todo-status entry)))
          (width (max 88 (window-body-width)))
-         (reserved 64)
+         (reserved (if (string-empty-p meta) 64 82))
          (text-width (max 22 (min 72 (- width reserved))))
          (start (point)))
     (insert "  ")
@@ -3237,6 +3357,10 @@ This checks top-level todo fields first, then the nested args object."
              (format "  L%-4s"
                      (if (integerp line) line "-"))
              'face 'my/aaronnote-roam-ui-meta))
+    (unless (string-empty-p meta)
+      (insert (propertize
+               (format "%-24s " (my/aaronnote-roam--agenda-compact-text meta 24))
+               'face 'my/aaronnote-roam-ui-meta)))
     (insert " ")
     (if (my/aaronnote-roam--todo-closed-p entry)
         (my/aaronnote-roam-ui-insert-actions

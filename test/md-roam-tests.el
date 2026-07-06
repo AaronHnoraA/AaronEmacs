@@ -563,6 +563,28 @@ source: roam/demo/analysis.md
         (when-let* ((buffer (get-buffer "*roam-agenda*")))
           (kill-buffer buffer))))))
 
+(ert-deftest my/aaronnote-roam-todo-metadata-update-sends-runtime-patch ()
+  (my/aaronnote-roam-test-with-vault
+    (let ((todo `(:file ,note-file
+                  :id "todo-1"
+                  :index 0
+                  :source "@@todo(doing) [Review compact workbench]{due=2026-06-07}"
+                  :text "Review compact workbench"))
+          captured)
+      (cl-letf (((symbol-function 'my/aaronnote-roam--runtime-call)
+                 (lambda (&rest args)
+                   (setq captured args)
+                   t))
+                ((symbol-function 'my/aaronnote-roam--clear-runtime-cache)
+                 (lambda () nil))
+                ((symbol-function 'my/aaronnote-roam-ui-refresh)
+                 (lambda () nil)))
+        (my/aaronnote-roam-update-todo-metadata "priority" "B" todo))
+      (should (equal (car captured) "update-todo"))
+      (should (equal (cadr (member "--file" captured)) note-file))
+      (should (equal (cadr (member "--priority" captured)) "B"))
+      (should-not (member "--status" captured)))))
+
 (ert-deftest my/aaronnote-roam-agenda-calendar-uses-square-cells ()
   (my/aaronnote-roam-test-with-vault
     (let* ((decoded (decode-time (current-time)))

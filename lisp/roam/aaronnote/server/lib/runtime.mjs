@@ -111,6 +111,7 @@ let noteCodeFileCacheBytes = 0;
 const pathSuggestionDirListingCache = new Map();
 const contentRootCache = new Map();
 const CURRENT_DB_SCHEMA = 1;
+const CURRENT_TODO_DB_SCHEMA = 1;
 const ASSET_CLEANUP_SCHEMA = 2;
 const ROAM_FULL_SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const scanConcurrency = Math.max(1, Math.min(64, Number(process.env.AARONNOTE_SCAN_CONCURRENCY) || 16));
@@ -2835,9 +2836,74 @@ function replaceTodoStatusInSource(source, status) {
   return text;
 }
 
+const TODO_PATCH_ARG_KEYS = new Set(["priority", "due", "scheduled", "repeat"]);
+
+function bodyHasOwn(body, key) {
+  return Object.prototype.hasOwnProperty.call(body || {}, key);
+}
+
+function normalizeTodoPatchValue(key, value) {
+  if (value === null || value === undefined || value === false) return "";
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (key === "priority") {
+    const priority = raw.toUpperCase();
+    return /^[A-Z]$/.test(priority) ? priority : "";
+  }
+  if (DATE_KEYS.has(key)) return normalizeDateValue(raw) || raw;
+  return raw;
+}
+
+function serializeTodoArgValue(value) {
+  const text = String(value || "");
+  if (!text) return "";
+  return /[\s,;{}[\]"']/.test(text) ? JSON.stringify(text) : text;
+}
+
+function serializeTodoArgs(args) {
+  const entries = Object.entries(args || {})
+    .filter(([, value]) => String(value || "").trim())
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length === 0) return "";
+  return `{${entries.map(([key, value]) => `${key}=${serializeTodoArgValue(value)}`).join(", ")}}`;
+}
+
+function replaceTodoArgsInSource(source, argsRaw, nextArgsRaw) {
+  const text = String(source || "");
+  const argsText = String(argsRaw || "");
+  const nextText = String(nextArgsRaw || "");
+  if (argsText) {
+    const at = text.lastIndexOf(argsText);
+    if (at >= 0) {
+      const prefix = text.slice(0, at).trimEnd();
+      return nextText ? `${prefix}${text.slice(prefix.length, at)}${nextText}${text.slice(at + argsText.length)}` : `${prefix}${text.slice(at + argsText.length)}`;
+    }
+  }
+  return nextText ? `${text.trimEnd()}${text.endsWith(" ") || text.endsWith("\t") ? "" : " "}${nextText}` : text;
+}
+
+function patchTodoSource(source, body = {}) {
+  let next = bodyHasOwn(body, "status")
+    ? replaceTodoStatusInSource(source, body.status || "todo")
+    : String(source || "");
+  const patchKeys = [...TODO_PATCH_ARG_KEYS].filter((key) => bodyHasOwn(body, key));
+  if (patchKeys.length === 0) return next;
+  const command = scanInlineCommands(next, "todo")[0];
+  if (!command || command.fullFrom !== 0) return next;
+  const args = { ...(command.args || {}) };
+  for (const key of patchKeys) {
+    const value = normalizeTodoPatchValue(key, body[key]);
+    if (value) args[key] = value;
+    else delete args[key];
+  }
+  return replaceTodoArgsInSource(next, command.argsRaw || "", serializeTodoArgs(args));
+}
+
 export async function updateTodoStatus(body = {}) {
   const file = safeOpenFile(body.file || "");
-  const status = normalizeTodoStatus(body.status || "done");
+  const hasMetadataPatch = [...TODO_PATCH_ARG_KEYS].some((key) => bodyHasOwn(body, key));
+  const shouldPatchStatus = bodyHasOwn(body, "status") || !hasMetadataPatch;
+  const status = shouldPatchStatus ? normalizeTodoStatus(body.status || "done") : "";
   const source = String(body.source || "");
   const hasIndex = body.index !== undefined && body.index !== null && String(body.index) !== "";
   const rawIndex = hasIndex ? Number(body.index) : NaN;
@@ -2886,18 +2952,25 @@ export async function updateTodoStatus(body = {}) {
   }
 
   const oldSource = content.slice(from, to);
-  const nextSource = replaceTodoStatusInSource(oldSource, status);
+  const patchBody = shouldPatchStatus ? { ...body, status } : body;
+  const nextSource = patchTodoSource(oldSource, patchBody);
   if (nextSource === oldSource) {
     let mtimeMs = 0;
     try { mtimeMs = (await stat(file)).mtimeMs; } catch {}
-    return { type: "todo-updated", ok: true, file, status, changed: false, from, to, source: oldSource, mtimeMs };
+    return { type: "todo-updated", ok: true, file, status: status || normalizeTodoStatus(body.status || ""), changed: false, from, to, source: oldSource, mtimeMs };
   }
 
   await atomicWriteFile(file, content.slice(0, from) + nextSource + content.slice(to), "utf8");
   markNotesDirty(file);
+  try {
+    await runIncrementalTodoSync(null, [file]);
+  } catch (err) {
+    console.warn("[todo-db] immediate todo update sync failed:", err?.message || err);
+  }
+  scheduleRoamDbSync(null, file);
   let mtimeMs = 0;
   try { mtimeMs = (await stat(file)).mtimeMs; } catch {}
-  return { type: "todo-updated", ok: true, file, status, changed: true, from, to, source: oldSource, nextSource, mtimeMs };
+  return { type: "todo-updated", ok: true, file, status: status || normalizeTodoStatus(body.status || ""), changed: true, from, to, source: oldSource, nextSource, mtimeMs };
 }
 
 function contentMayHaveTodos(content) {
@@ -2939,6 +3012,256 @@ async function scanTodos() {
       || b.updatedAt - a.updatedAt
       || String(a.noteTitle).localeCompare(String(b.noteTitle));
   });
+}
+
+function todoDbSchemaStatements() {
+  return [
+    `CREATE TABLE IF NOT EXISTS meta (
+      key text primary key,
+      value text not null
+    );`,
+    `CREATE TABLE IF NOT EXISTS tasks (
+      id text primary key,
+      file text not null,
+      note_id text,
+      note_title text,
+      source_index integer not null,
+      source_hash text not null,
+      line integer,
+      column integer,
+      status text not null,
+      text text not null,
+      priority text,
+      due text,
+      scheduled text,
+      repeat text,
+      tags_json text not null default '[]',
+      args_json text not null default '{}',
+      raw_source text not null,
+      updated_at real not null default 0,
+      deleted integer not null default 0
+    );`,
+    "CREATE INDEX IF NOT EXISTS tasks_file_idx on tasks(file);",
+    "CREATE INDEX IF NOT EXISTS tasks_status_idx on tasks(status);",
+    "CREATE INDEX IF NOT EXISTS tasks_due_idx on tasks(due);",
+    "CREATE INDEX IF NOT EXISTS tasks_scheduled_idx on tasks(scheduled);",
+    "CREATE INDEX IF NOT EXISTS tasks_note_idx on tasks(note_id);",
+    `INSERT OR REPLACE INTO meta(key, value) VALUES ('schema', ${sqlString(CURRENT_TODO_DB_SCHEMA)});`,
+  ];
+}
+
+function todoSourceHash(source) {
+  return createHash("sha1").update(String(source || "")).digest("hex");
+}
+
+function todoStableId(todo) {
+  return createHash("sha1")
+    .update([
+      String(todo.file || ""),
+      String(todo.index ?? ""),
+      String(todo.source || ""),
+    ].join("\0"))
+    .digest("hex");
+}
+
+function todoPriority(todo) {
+  const args = todo.args && typeof todo.args === "object" ? todo.args : {};
+  const value = args.priority ?? args.pri ?? args.p ?? "";
+  const text = String(value || "").trim().toUpperCase();
+  return /^[A-Z]$/.test(text) ? text : "";
+}
+
+function todoScheduled(todo) {
+  const args = todo.args && typeof todo.args === "object" ? todo.args : {};
+  return String(args.scheduled || args.start || args.when || "").trim();
+}
+
+function todoRepeat(todo) {
+  const args = todo.args && typeof todo.args === "object" ? todo.args : {};
+  return String(args.repeat || args.recur || args.rec || "").trim();
+}
+
+function todoDue(todo) {
+  const args = todo.args && typeof todo.args === "object" ? todo.args : {};
+  return String(todo.ddl || args.due || args.deadline || args.ddl || "").trim();
+}
+
+function todoInsertStatement(todo) {
+  const tags = sortedUniqueStrings([...(todo.tags || []), ...(todo.inlineTags || [])]);
+  const args = todo.args && typeof todo.args === "object" ? todo.args : {};
+  const row = [
+    sqlString(todoStableId(todo)),
+    sqlString(todo.file || ""),
+    sqlNullableString(todo.noteId || todo.roamId || todo.noteKey || ""),
+    sqlNullableString(todo.noteTitle || todo.parentTitle || ""),
+    sqlNumber(Number(todo.index) || 0),
+    sqlString(todoSourceHash(todo.source || "")),
+    sqlNumber(Number(todo.line) || 0),
+    sqlNumber(Number(todo.column) || 0),
+    sqlString(normalizeTodoStatus(todo.status || "todo")),
+    sqlString(todo.text || ""),
+    sqlNullableString(todoPriority(todo)),
+    sqlNullableString(todoDue(todo)),
+    sqlNullableString(todoScheduled(todo)),
+    sqlNullableString(todoRepeat(todo)),
+    sqlString(JSON.stringify(tags)),
+    sqlString(JSON.stringify(args)),
+    sqlString(todo.source || ""),
+    sqlNumber(Number(todo.updatedAt) || 0),
+    "0",
+  ];
+  return `INSERT OR REPLACE INTO tasks(${[
+    "id",
+    "file",
+    "note_id",
+    "note_title",
+    "source_index",
+    "source_hash",
+    "line",
+    "column",
+    "status",
+    "text",
+    "priority",
+    "due",
+    "scheduled",
+    "repeat",
+    "tags_json",
+    "args_json",
+    "raw_source",
+    "updated_at",
+    "deleted",
+  ].join(", ")}) VALUES (${row.join(", ")});`;
+}
+
+async function todosForNotes(notes) {
+  const todoGroups = await mapLimit(notes || [], scanConcurrency, async (note) => todosForNote(note));
+  return todoGroups.flat();
+}
+
+async function appendTodoStatementsForNotes(statements, notes) {
+  const todos = await todosForNotes(notes);
+  for (const todo of todos) statements.push(todoInsertStatement(todo));
+  return todos.length;
+}
+
+async function notesForTodoFiles(files) {
+  const notes = await mapLimit(files || [], scanConcurrency, async (file) => noteFromFileForIndex(file));
+  return notes.filter(Boolean);
+}
+
+async function runTodoSql(statements) {
+  const dbFile = todoDbFile();
+  await mkdir(dirname(dbFile), { recursive: true });
+  await execFileAsync("sqlite3", [dbFile, statements.join("\n")], {
+    cwd: noteRoot,
+    maxBuffer: 1024 * 1024 * 16,
+  });
+  return dbFile;
+}
+
+async function runFullTodoSync(scanned) {
+  const statements = [
+    "PRAGMA foreign_keys = OFF;",
+    "BEGIN;",
+    ...todoDbSchemaStatements(),
+    "DELETE FROM tasks;",
+  ];
+  await appendTodoStatementsForNotes(statements, scanned || []);
+  statements.push("COMMIT;");
+  return await runTodoSql(statements);
+}
+
+async function runIncrementalTodoSync(scanned, changedFiles) {
+  const files = [...new Set((changedFiles || []).map((file) => resolveUserPath(file)).filter((file) => inside(file, noteRoot)))];
+  if (files.length === 0) return false;
+  const fileKeySet = new Set(files.map(canonicalExistingPath));
+  const changedNotes = Array.isArray(scanned)
+    ? scanned.filter((note) => note.file && fileKeySet.has(canonicalExistingPath(note.file)))
+    : await notesForTodoFiles(files);
+  const refreshFiles = [...new Set([...files, ...changedNotes.map((note) => note.file).filter(Boolean)])];
+  const statements = [
+    "PRAGMA foreign_keys = OFF;",
+    "BEGIN;",
+    ...todoDbSchemaStatements(),
+    `DELETE FROM tasks WHERE file IN (${refreshFiles.map(sqlString).join(", ")});`,
+  ];
+  await appendTodoStatementsForNotes(statements, changedNotes);
+  statements.push("COMMIT;");
+  await runTodoSql(statements);
+  return true;
+}
+
+function todoFromDbRow(row) {
+  let args = {};
+  let tags = [];
+  try { args = JSON.parse(row.args_json || "{}") || {}; } catch {}
+  try { tags = JSON.parse(row.tags_json || "[]") || []; } catch {}
+  return {
+    id: row.id || "",
+    status: normalizeTodoStatus(row.status || "todo"),
+    text: row.text || "",
+    args,
+    meta: "",
+    ddl: row.due || "",
+    due: row.due || "",
+    scheduled: row.scheduled || "",
+    repeat: row.repeat || "",
+    priority: row.priority || "",
+    source: row.raw_source || "",
+    sourceHash: row.source_hash || "",
+    index: Number(row.source_index) || 0,
+    line: Number(row.line) || 0,
+    column: Number(row.column) || 0,
+    file: row.file || "",
+    path: row.file ? displayPathForFile(row.file) : "",
+    noteKey: row.note_id || "",
+    noteId: row.note_id || "",
+    roamId: row.note_id || "",
+    noteTitle: row.note_title || "",
+    tags,
+    inlineTags: [],
+    parentFile: row.file || "",
+    parentTitle: row.note_title || "",
+    updatedAt: Number(row.updated_at) || 0,
+  };
+}
+
+async function todosFromDb(file = "") {
+  const dbFile = todoDbFile();
+  if (!existsSync(dbFile)) return null;
+  const filterFile = file ? resolveUserPath(file) : "";
+  const where = filterFile ? `WHERE deleted = 0 AND file = ${sqlString(filterFile)}` : "WHERE deleted = 0";
+  const query = [
+    "SELECT id, file, note_id, note_title, source_index, source_hash, line, column,",
+    "status, text, priority, due, scheduled, repeat, tags_json, args_json, raw_source, updated_at",
+    `FROM tasks ${where}`,
+    "ORDER BY",
+    "CASE status WHEN 'blocked' THEN 0 WHEN 'doing' THEN 1 WHEN 'todo' THEN 2 WHEN 'done' THEN 3 WHEN 'cancelled' THEN 4 ELSE 9 END,",
+    "updated_at DESC, note_title COLLATE NOCASE ASC, text COLLATE NOCASE ASC;",
+  ].join(" ");
+  try {
+    const { stdout } = await execFileAsync("sqlite3", ["-json", dbFile, query], {
+      cwd: noteRoot,
+      maxBuffer: 1024 * 1024 * 16,
+    });
+    const rows = stdout.trim() ? JSON.parse(stdout) : [];
+    return rows.map(todoFromDbRow);
+  } catch (err) {
+    console.warn("[todo-db] query failed, falling back to scan:", err?.message || err);
+    return null;
+  }
+}
+
+async function ensureTodoDb(scanned = null) {
+  if (existsSync(todoDbFile())) return true;
+  try {
+    await runFullTodoSync(scanned || await scanNotes());
+    await writeSyncState({ todoDbSchemaVersion: CURRENT_TODO_DB_SCHEMA });
+    return true;
+  } catch (err) {
+    console.warn("[todo-db] initialize failed:", err?.message || err);
+    return false;
+  }
 }
 
 function existingUniqueDirs(dirs) {
@@ -4297,6 +4620,10 @@ function roamDbFile() {
   return join(noteRoot, "roam.db");
 }
 
+function todoDbFile() {
+  return join(stateRoot, "todo.sqlite");
+}
+
 function roamSyncStateFile() {
   return join(stateRoot, "sync", "state.json");
 }
@@ -4326,6 +4653,10 @@ function sqlString(value) {
 
 function sqlNumber(value) {
   return Number.isFinite(value) ? String(value) : "0";
+}
+
+function sqlNullableString(value) {
+  return value === undefined || value === null || value === "" ? "NULL" : sqlString(value);
 }
 
 function notePosition(content) {
@@ -4515,6 +4846,8 @@ export async function syncRoamDb(notes = null, options = {}) {
     const state = await readSyncState();
     const schemaOk = state.dbSchemaVersion === CURRENT_DB_SCHEMA;
     const dbExists = existsSync(dbFile);
+    const todoSchemaOk = state.todoDbSchemaVersion === CURRENT_TODO_DB_SCHEMA;
+    const todoDbExists = existsSync(todoDbFile());
     const now = new Date().toISOString();
 
     // Determine whether we must do a full rebuild.
@@ -4523,14 +4856,15 @@ export async function syncRoamDb(notes = null, options = {}) {
     const stale = state.lastFullAt
       ? (Date.now() - new Date(state.lastFullAt).getTime()) > ROAM_FULL_SYNC_INTERVAL_MS
       : false;
-    const needFull = forceMode || !dbExists || !schemaOk || !state.lastSyncedCommit || stale;
+    const needFull = forceMode || !dbExists || !schemaOk || !todoDbExists || !todoSchemaOk || !state.lastSyncedCommit || stale;
 
     if (needFull) {
-      const reason = forceMode ? "forced" : !dbExists ? "no-db" : !schemaOk ? "schema" : !state.lastSyncedCommit ? "no-state" : "stale";
+      const reason = forceMode ? "forced" : !dbExists ? "no-db" : !schemaOk ? "schema" : !todoDbExists ? "no-todo-db" : !todoSchemaOk ? "todo-schema" : !state.lastSyncedCommit ? "no-state" : "stale";
       console.log(`[roam-sync] full rebuild (${reason})`);
       await runFullRoamSync(scanned, dbFile);
+      await runFullTodoSync(scanned);
       const sha = await commitRoam(noteRoot, `roam sync: ${now}`);
-      await writeSyncState({ lastSyncedCommit: sha, lastSyncedAt: now, lastFullAt: now, dbSchemaVersion: CURRENT_DB_SCHEMA });
+      await writeSyncState({ lastSyncedCommit: sha, lastSyncedAt: now, lastFullAt: now, dbSchemaVersion: CURRENT_DB_SCHEMA, todoDbSchemaVersion: CURRENT_TODO_DB_SCHEMA });
       return;
     }
 
@@ -4542,8 +4876,9 @@ export async function syncRoamDb(notes = null, options = {}) {
         // commit no longer reachable (rebase/squash) — fallback to full
         console.log("[roam-sync] full rebuild (stale commit ref)");
         await runFullRoamSync(scanned, dbFile);
+        await runFullTodoSync(scanned);
         const sha = await commitRoam(noteRoot, `roam sync: ${now}`);
-        await writeSyncState({ lastSyncedCommit: sha, lastSyncedAt: now, lastFullAt: state.lastFullAt, dbSchemaVersion: CURRENT_DB_SCHEMA });
+        await writeSyncState({ lastSyncedCommit: sha, lastSyncedAt: now, lastFullAt: state.lastFullAt, dbSchemaVersion: CURRENT_DB_SCHEMA, todoDbSchemaVersion: CURRENT_TODO_DB_SCHEMA });
         return;
       }
     }
@@ -4554,13 +4889,14 @@ export async function syncRoamDb(notes = null, options = {}) {
     }
 
     console.log(`[roam-sync] incremental: ${changedFiles.length} file(s)`);
-    const ok = await runIncrementalRoamSync(scanned, dbFile, changedFiles);
-    if (!ok) {
-      // incrementalRoamDbStatements returned null — changed IDs resolved to nothing roam-worthy
+    const roamOk = await runIncrementalRoamSync(scanned, dbFile, changedFiles);
+    const todoOk = await runIncrementalTodoSync(scanned, changedFiles);
+    if (!roamOk && !todoOk) {
+      // Incremental builders found no indexable note/task changes.
       return;
     }
     const sha = await commitRoam(noteRoot, `roam sync: ${now}`);
-    await writeSyncState({ lastSyncedCommit: sha, lastSyncedAt: now, lastFullAt: state.lastFullAt, dbSchemaVersion: CURRENT_DB_SCHEMA });
+    await writeSyncState({ lastSyncedCommit: sha, lastSyncedAt: now, lastFullAt: state.lastFullAt, dbSchemaVersion: CURRENT_DB_SCHEMA, todoDbSchemaVersion: CURRENT_TODO_DB_SCHEMA });
   });
   roamSyncInFlight = current;
   try {
@@ -5365,10 +5701,16 @@ export async function saveNote(body) {
   const refresh = body.refresh === "deferred" ? "deferred" : "full";
   if (refresh === "deferred") {
     markNotesDirty(file);
+    await runIncrementalTodoSync(null, [file]).catch((err) => {
+      console.warn("[todo-db] deferred save sync failed:", err?.message || err);
+    });
     scheduleRoamDbSync(null, file);
     return { type: "saved", ok: true, file, message: "Saved", note: await noteSummaryForFile(file, content), kind: kindFromContent(content), notesRefresh: "deferred", standalone: false, mtimeMs: wrote.mtimeMs, size: wrote.size };
   }
   const notes = await scanNotes();
+  await runIncrementalTodoSync(notes, [file]).catch((err) => {
+    console.warn("[todo-db] save sync failed:", err?.message || err);
+  });
   scheduleRoamDbSync(notes, file);
   return { type: "saved", ok: true, file, message: "Saved", notes, notesRefresh: "full", standalone: false, mtimeMs: wrote.mtimeMs, size: wrote.size };
 }
@@ -5387,7 +5729,17 @@ export async function bootstrapNote(file) {
 export async function getTodos(file) {
   if (file) {
     const safe = safeOpenFile(file);
-    if (standaloneFile(safe)) noteScanRoot = scanRootForOpenFile(safe);
+    if (standaloneFile(safe)) {
+      noteScanRoot = scanRootForOpenFile(safe);
+      return { type: "todos", todos: await scanTodos(), root: noteScanRoot, source: "scan" };
+    }
+    await ensureTodoDb();
+    const dbTodos = await todosFromDb(safe);
+    if (dbTodos) return { type: "todos", todos: dbTodos, root: noteScanRoot, source: "todo.sqlite", db: todoDbFile() };
+    return { type: "todos", todos: await scanTodos(), root: noteScanRoot, source: "scan" };
   }
-  return { type: "todos", todos: await scanTodos(), root: noteScanRoot };
+  await ensureTodoDb();
+  const dbTodos = await todosFromDb();
+  if (dbTodos) return { type: "todos", todos: dbTodos, root: noteScanRoot, source: "todo.sqlite", db: todoDbFile() };
+  return { type: "todos", todos: await scanTodos(), root: noteScanRoot, source: "scan" };
 }
