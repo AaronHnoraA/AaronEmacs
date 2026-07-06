@@ -26,6 +26,9 @@
 (declare-function my/navigation--push-jump "init-navigation")
 (declare-function my/navigation-find-definition "init-navigation")
 
+(defvar my/aaronnote--ready nil
+  "Non-nil when the Aaronnote web host is available.")
+
 (defgroup my/aaronnote-roam nil
   "Roam-style navigation for Aaronnote Markdown notes."
   :group 'my/aaronnote)
@@ -124,6 +127,9 @@
                 ("todos"     . "aaronnote:api:notes:todos")
                 ("templates" . "aaronnote:api:notes:templates")
                 ("update-todo" . "aaronnote:api:notes:update-todo")
+                ("agenda"    . "aaronnote:api:notes:agenda")
+                ("patch-todo" . "aaronnote:api:notes:patch-todo")
+                ("todo-dep-ref" . "aaronnote:api:notes:todo-dep-ref")
                 ("create"    . "aaronnote:api:notes:create-node")
                 ("delete-node" . "aaronnote:api:notes:delete-node")
                 ("sync"      . "aaronnote:api:notes:roam-sync")))))
@@ -136,12 +142,11 @@ the expected body, and returns parsed JSON or nil."
     (when channel
       (let ((api-args
              (pcase action
-               ("create"
-                (let ((json-str (cadr (member "--json" args))))
-                  (when json-str
-                    (condition-case nil
-                        (vector (json-parse-string json-str :object-type 'hash-table))
-                      (error nil)))))
+               ((or "create" "agenda" "patch-todo" "todo-dep-ref")
+                (let ((json-str (or (cadr (member "--json" args)) "{}")))
+                  (condition-case nil
+                      (vector (json-parse-string json-str :object-type 'hash-table))
+                    (error (vector (make-hash-table :test 'equal))))))
                ("delete-node"
                 (vector (or (cadr (member "--file" args))
                             (cadr (member "--path" args))
@@ -2376,12 +2381,13 @@ Falls back to a CLI subprocess when the web-host is offline."
     (nreverse todos)))
 
 (defun my/aaronnote-roam--todos ()
-  "Return todos from the Aaronnote runtime, roam DB, or local scan."
-  (let* ((runtime (my/aaronnote-roam--runtime-call "todos"))
+  "Return vault-wide todos from the Aaronnote runtime, roam DB, or local scan.
+Fetches through the `agenda' view-model rather than the plain `todos' list so
+dependency resolution (`effectiveStatus'/`blockedBy', computed vault-wide) and
+the urgency sort are already applied server-side instead of being re-derived
+in Elisp."
+  (let* ((runtime (my/aaronnote-roam--runtime-call "agenda" "--json" "{}"))
          (runtime-todos (and runtime (gethash "todos" runtime)))
-         (runtime-todos (if (hash-table-p runtime-todos)
-                            (gethash "todos" runtime-todos)
-                          runtime-todos))
          (db (my/aaronnote-roam--db)))
     (or runtime-todos
         (and db (gethash "todos" db))
@@ -2401,10 +2407,14 @@ Falls back to a CLI subprocess when the web-host is offline."
    keys))
 
 (defun my/aaronnote-roam--todo-status (entry)
-  "Return normalized status string for todo ENTRY."
+  "Return normalized status string for todo ENTRY.
+Prefers the server-computed `effectiveStatus' (dependency-aware: a todo with
+an open `after' reference is reported as blocked without any local file
+being rewritten) over the raw `status' field when present."
   (let ((status (downcase
                  (string-trim
-                  (format "%s" (or (my/aaronnote-roam--todo-field entry "status")
+                  (format "%s" (or (my/aaronnote-roam--todo-field entry "effectiveStatus")
+                                   (my/aaronnote-roam--todo-field entry "status")
                                    "todo"))))))
     (cond
      ((member status '("" " " "open" "unchecked")) "todo")
@@ -2491,29 +2501,43 @@ Falls back to a CLI subprocess when the web-host is offline."
       (save-buffer)))
   (my/aaronnote-roam--clear-runtime-cache))
 
+(defun my/aaronnote-roam--todo-patch (entry extra)
+  "Send a patch-todo request for todo ENTRY merging EXTRA alist fields.
+EXTRA keys are canonical (ddl/sche/prio/repeat/warn/after/afterAdd) or their
+legacy aliases (priority/due/scheduled); `patchTodo' on the server accepts
+both and preserves whichever alias the `@@todo' line already uses.  Returns
+the parsed response hash-table, or nil when the runtime is unavailable."
+  (let* ((file (my/aaronnote-roam--todo-field entry "file"))
+         (index (my/aaronnote-roam--todo-field entry "index"))
+         (source (my/aaronnote-roam--todo-field entry "source"))
+         (id (my/aaronnote-roam--todo-field entry "id"))
+         (text (my/aaronnote-roam--todo-field entry "text"))
+         (payload (append
+                   (list (cons 'file (or file ""))
+                         (cons 'id (or id ""))
+                         (cons 'index (or index ""))
+                         (cons 'source (or source ""))
+                         (cons 'text (or text "")))
+                   extra)))
+    (unless (and file (not (string-empty-p file)))
+      (user-error "Todo has no editable source file"))
+    (my/aaronnote-roam--runtime-call "patch-todo" "--json" (json-encode payload))))
+
 (defun my/aaronnote-roam-update-todo-status (status &optional entry)
-  "Set current todo ENTRY to STATUS and refresh the current task view."
+  "Set current todo ENTRY to STATUS and refresh the current task view.
+Setting STATUS to \"done\" runs the repeater engine server-side: a todo with
+a `repeat' arg rolls its deadline/scheduled dates forward and resets to
+`todo' instead of closing, mirroring org's repeating-task completion."
   (interactive
    (list (completing-read "Todo status: " '("todo" "doing" "blocked" "done" "cancelled")
                           nil t nil nil "done")
          nil))
-  (let* ((entry (or entry (my/aaronnote-roam--todo-at-point)))
-         (file (my/aaronnote-roam--todo-field entry "file"))
-         (index (my/aaronnote-roam--todo-field entry "index"))
-         (source (my/aaronnote-roam--todo-field entry "source"))
-         (id (my/aaronnote-roam--todo-field entry "id"))
-         (text (my/aaronnote-roam--todo-field entry "text")))
+  (let* ((entry (or entry (my/aaronnote-roam--todo-at-point))))
     (unless entry
       (user-error "No todo on this line"))
-    (or (and file
-             (my/aaronnote-roam--runtime-call
-              "update-todo"
-              "--file" file
-              "--status" status
-              "--index" (format "%s" (or index ""))
-              "--source" (or source "")
-              "--id" (or id "")
-              "--text" (or text "")))
+    (or (if (string= status "done")
+            (my/aaronnote-roam--todo-patch entry '((op . "complete")))
+          (my/aaronnote-roam--todo-patch entry `((status . ,status))))
         (my/aaronnote-roam--todo-update-local entry status))
     (my/aaronnote-roam--clear-runtime-cache)
     (message "Todo marked %s" status)
@@ -2521,38 +2545,25 @@ Falls back to a CLI subprocess when the web-host is offline."
 
 (defun my/aaronnote-roam-update-todo-metadata (field value &optional entry)
   "Set todo metadata FIELD to VALUE for ENTRY and refresh the current task view.
-FIELD is one of priority, due, scheduled, or repeat.  Empty VALUE clears FIELD."
+FIELD is one of priority, due, scheduled, repeat, or warn.  Empty VALUE
+clears FIELD."
   (interactive
    (let* ((field (completing-read "Todo field: "
-                                  '("priority" "due" "scheduled" "repeat")
+                                  '("priority" "due" "scheduled" "repeat" "warn")
                                   nil t))
           (prompt (format "%s%s: "
                           (if (string-empty-p field) "Value" (capitalize field))
-                          (if (member field '("due" "scheduled")) " (empty clears)" "")))
+                          (if (member field '("due" "scheduled" "warn")) " (empty clears)" "")))
           (value (read-string prompt)))
      (list field value nil)))
   (let* ((entry (or entry (my/aaronnote-roam--todo-at-point)))
-         (file (my/aaronnote-roam--todo-field entry "file"))
-         (index (my/aaronnote-roam--todo-field entry "index"))
-         (source (my/aaronnote-roam--todo-field entry "source"))
-         (id (my/aaronnote-roam--todo-field entry "id"))
-         (text (my/aaronnote-roam--todo-field entry "text"))
          (field (downcase (format "%s" field)))
          (value (string-trim (format "%s" value))))
     (unless entry
       (user-error "No todo on this line"))
-    (unless (member field '("priority" "due" "scheduled" "repeat"))
+    (unless (member field '("priority" "due" "scheduled" "repeat" "warn"))
       (user-error "Unsupported todo metadata field: %s" field))
-    (unless (and file
-                 (apply #'my/aaronnote-roam--runtime-call
-                        "update-todo"
-                        (append
-                         (list "--file" file
-                               "--index" (format "%s" (or index ""))
-                               "--source" (or source "")
-                               "--id" (or id "")
-                               "--text" (or text ""))
-                         (list (concat "--" field) value))))
+    (unless (my/aaronnote-roam--todo-patch entry (list (cons (intern field) value)))
       (user-error "Aaronnote runtime is required for todo metadata updates"))
     (my/aaronnote-roam--clear-runtime-cache)
     (message "Todo %s %s" field (if (string-empty-p value) "cleared" value))
@@ -2578,8 +2589,53 @@ FIELD is one of priority, due, scheduled, or repeat.  Empty VALUE clears FIELD."
 
 (defun my/aaronnote-roam-set-todo-repeat (&optional repeat entry)
   "Set current todo repeat metadata and refresh the current task view."
-  (interactive (list (read-string "Repeat (empty clears): ") nil))
+  (interactive (list (read-string "Repeat (+1w / ++1w / .+3d; empty clears): ") nil))
   (my/aaronnote-roam-update-todo-metadata "repeat" (or repeat "") entry))
+
+(defun my/aaronnote-roam-set-todo-warn (&optional warn entry)
+  "Set current todo's deadline warning lead time and refresh the task view."
+  (interactive (list (read-string "Warn lead (e.g. 3d; empty clears): ") nil))
+  (my/aaronnote-roam-update-todo-metadata "warn" (or warn "") entry))
+
+(defun my/aaronnote-roam-add-todo-dependency (&optional entry)
+  "Add a dependency (`after') reference from ENTRY to another todo.
+Prompts for the target todo by note and text, resolves it through the
+Aaronnote runtime into a stable, shortest-unique text reference, and appends
+it to ENTRY's `after' arg — no ids are ever written to the source file, so
+the reference stays a plain, human-readable part of the Markdown."
+  (interactive)
+  (let* ((entry (or entry (my/aaronnote-roam--todo-at-point))))
+    (unless entry
+      (user-error "No todo on this line"))
+    (let* ((self-id (my/aaronnote-roam--todo-field entry "id"))
+           (candidates
+            (delq nil
+                  (mapcar
+                   (lambda (todo)
+                     (unless (equal (my/aaronnote-roam--todo-field todo "id") self-id)
+                       (cons (format "[%s] %s"
+                                     (or (my/aaronnote-roam--todo-field todo "noteTitle" "title") "?")
+                                     (or (my/aaronnote-roam--todo-field todo "text") ""))
+                             todo)))
+                   (my/aaronnote-roam--todos))))
+           (choice (completing-read "Depends on: " candidates nil t))
+           (target (cdr (assoc choice candidates)))
+           (target-id (and target (my/aaronnote-roam--todo-field target "id"))))
+      (unless target
+        (user-error "No matching todo"))
+      (let* ((ref-response
+              (my/aaronnote-roam--runtime-call
+               "todo-dep-ref" "--json"
+               (json-encode `((targetId . ,target-id)
+                              (sourceId . ,(or self-id ""))))))
+             (ref (and ref-response (gethash "ref" ref-response))))
+        (unless ref
+          (user-error "Could not build a dependency reference"))
+        (unless (my/aaronnote-roam--todo-patch entry (list (cons 'afterAdd ref)))
+          (user-error "Aaronnote runtime is required for dependency updates"))
+        (my/aaronnote-roam--clear-runtime-cache)
+        (message "Depends on: %s" ref)
+        (my/aaronnote-roam-ui-refresh)))))
 
 (defun my/aaronnote-roam-todo-done ()
   "Mark the current roam todo done."
@@ -2893,6 +2949,62 @@ Multiple terms are ANDed."
   '("done" "complete" "completed" "cancelled" "canceled")
   "Todo statuses treated as closed in the agenda.")
 
+(defvar-local my/aaronnote-agenda--model nil
+  "Server agenda view-model rendered in the current agenda buffer.")
+
+(defvar-local my/aaronnote-agenda--view 'week
+  "Current agenda view: week, list, calendar, or log.")
+
+(defvar-local my/aaronnote-agenda--filter 'open
+  "Current agenda filter used as a presentation projection.")
+
+(defvar-local my/aaronnote-agenda--anchor nil
+  "YYYY-MM-DD anchor date for the current agenda range.")
+
+(defvar-local my/aaronnote-agenda--query nil
+  "Current agenda search query.")
+
+(defvar-local my/aaronnote-agenda--selection nil
+  "Todo ids selected for agenda bulk operations.")
+
+(defvar my/aaronnote-agenda-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map my/aaronnote-roam-ui-mode-map)
+    (define-key map (kbd "RET") #'my/aaronnote-agenda-visit)
+    (define-key map (kbd "<return>") #'my/aaronnote-agenda-visit)
+    (define-key map (kbd "TAB") #'my/aaronnote-agenda-visit)
+    (define-key map (kbd "<down>") #'next-line)
+    (define-key map (kbd "<up>") #'previous-line)
+    (define-key map (kbd "t") #'my/aaronnote-agenda-set-status)
+    (define-key map (kbd "p") #'my/aaronnote-agenda-set-priority)
+    (define-key map (kbd ",") #'my/aaronnote-agenda-set-priority)
+    (define-key map (kbd "d") #'my/aaronnote-agenda-set-deadline)
+    (define-key map (kbd "s") #'my/aaronnote-agenda-set-scheduled)
+    (define-key map (kbd "r") #'my/aaronnote-agenda-set-repeat)
+    (define-key map (kbd "a") #'my/aaronnote-agenda-add-dependency)
+    (define-key map (kbd "m") #'my/aaronnote-agenda-toggle-mark)
+    (define-key map (kbd "u") #'my/aaronnote-agenda-unmark)
+    (define-key map (kbd "B") #'my/aaronnote-agenda-bulk)
+    (define-key map (kbd "f") #'my/aaronnote-agenda-forward)
+    (define-key map (kbd "b") #'my/aaronnote-agenda-backward)
+    (define-key map (kbd ".") #'my/aaronnote-agenda-today)
+    (define-key map (kbd "v") #'my/aaronnote-agenda-cycle-view)
+    (define-key map (kbd "/") #'my/aaronnote-agenda-search-in-buffer)
+    (define-key map (kbd "q") #'quit-window)
+    (define-key map (kbd "<escape>") #'quit-window)
+    map)
+  "Keymap for `my/aaronnote-agenda-mode'.")
+
+(define-derived-mode my/aaronnote-agenda-mode my/aaronnote-roam-ui-mode "Aaronnote-Agenda"
+  "Server-backed Aaronnote agenda view."
+  (setq-local truncate-lines nil)
+  (setq-local my/aaronnote-roam-ui-refresh-function
+              #'my/aaronnote-agenda-refresh)
+  (my/aaronnote-roam-ui-set-header "Agenda" 'agenda "server"))
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'my/aaronnote-agenda-mode 'emacs))
+
 (defun my/aaronnote-roam--todo-value (entry &rest keys)
   "Return the first non-empty todo ENTRY value for KEYS.
 This checks top-level todo fields first, then the nested args object."
@@ -2942,24 +3054,51 @@ This checks top-level todo fields first, then the nested args object."
     (append (my/aaronnote-roam--todo-list-value entry "tags")
             (my/aaronnote-roam--todo-list-value entry "inlineTags")))))
 
+(defun my/aaronnote-roam--todo-canon (entry key)
+  "Return canonical arg KEY from todo ENTRY's `canon' object, or nil.
+`canon' is attached server-side (see `canonicalTodoArgs' in runtime.mjs) and
+already resolves every read alias (due/deadline -> ddl, priority -> prio,
+scheduled/start -> sche, ...), so callers no longer need to enumerate aliases
+themselves."
+  (when-let* ((canon (my/aaronnote-roam--todo-field entry "canon"))
+              (value (my/aaronnote-roam--todo-field canon key))
+              (s (string-trim (format "%s" value))))
+    (unless (string-empty-p s) s)))
+
 (defun my/aaronnote-roam--todo-ddl (entry)
   "Return deadline string for todo ENTRY, or nil."
-  (my/aaronnote-roam--todo-string-value entry "ddl" "deadline" "due"))
+  (or (my/aaronnote-roam--todo-canon entry "ddl")
+      (my/aaronnote-roam--todo-string-value entry "ddl" "deadline" "due")))
 
 (defun my/aaronnote-roam--todo-priority (entry)
   "Return normalized single-letter priority for todo ENTRY, or nil."
-  (when-let* ((raw (my/aaronnote-roam--todo-string-value entry "priority" "pri" "p"))
-              (priority (upcase (substring raw 0 1))))
-    (when (string-match-p "\\`[A-Z]\\'" priority)
-      priority)))
+  (or (my/aaronnote-roam--todo-canon entry "prio")
+      (when-let* ((raw (my/aaronnote-roam--todo-string-value entry "priority" "pri" "p"))
+                  (priority (upcase (substring raw 0 1))))
+        (when (string-match-p "\\`[A-Z]\\'" priority)
+          priority))))
 
 (defun my/aaronnote-roam--todo-scheduled (entry)
   "Return scheduled date string for todo ENTRY, or nil."
-  (my/aaronnote-roam--todo-string-value entry "scheduled" "start" "when"))
+  (or (my/aaronnote-roam--todo-canon entry "sche")
+      (my/aaronnote-roam--todo-string-value entry "scheduled" "start" "when")))
 
 (defun my/aaronnote-roam--todo-repeat (entry)
   "Return repeat metadata for todo ENTRY, or nil."
-  (my/aaronnote-roam--todo-string-value entry "repeat" "recur" "rec"))
+  (or (my/aaronnote-roam--todo-canon entry "repeat")
+      (my/aaronnote-roam--todo-string-value entry "repeat" "recur" "rec")))
+
+(defun my/aaronnote-roam--todo-after (entry)
+  "Return the raw `after' dependency arg for todo ENTRY, or nil."
+  (my/aaronnote-roam--todo-canon entry "after"))
+
+(defun my/aaronnote-roam--todo-blocked-count (entry)
+  "Return the number of open dependencies blocking todo ENTRY."
+  (let ((blocked-by (my/aaronnote-roam--todo-field entry "blockedBy")))
+    (cond
+     ((listp blocked-by) (length blocked-by))
+     ((vectorp blocked-by) (length blocked-by))
+     (t 0))))
 
 (defun my/aaronnote-roam--todo-priority-rank (entry)
   "Return sortable numeric priority rank for todo ENTRY."
@@ -2996,11 +3135,15 @@ This checks top-level todo fields first, then the nested args object."
 
 (defun my/aaronnote-roam--todo-agenda-date (entry)
   "Return the main agenda date string for todo ENTRY, or nil."
-  (seq-some
-   (lambda (key)
-     (my/aaronnote-roam--date-day-string
-      (my/aaronnote-roam--todo-value entry key)))
-   my/aaronnote-roam--agenda-date-fields))
+  (or (my/aaronnote-roam--date-day-string
+       (my/aaronnote-roam--todo-ddl entry))
+      (my/aaronnote-roam--date-day-string
+       (my/aaronnote-roam--todo-scheduled entry))
+      (seq-some
+       (lambda (key)
+         (my/aaronnote-roam--date-day-string
+          (my/aaronnote-roam--todo-value entry key)))
+       my/aaronnote-roam--agenda-date-fields)))
 
 (defun my/aaronnote-roam--todo-overdue-p (ddl)
   "Return non-nil when DDL string is in the past."
@@ -3260,6 +3403,797 @@ This checks top-level todo fields first, then the nested args object."
   (interactive (list (read-string
                       "Agenda search (status: tag: title: roamid: file: parent: date: from: to:): ")))
   (my/aaronnote-roam-agenda 'search query))
+
+(defun my/aaronnote-agenda--as-list (value)
+  "Return VALUE as a plain list."
+  (cond
+   ((null value) nil)
+   ((vectorp value) (append value nil))
+   ((listp value) value)
+   (t nil)))
+
+(defun my/aaronnote-agenda--hash (&rest pairs)
+  "Return a hash-table populated from PAIRS."
+  (let ((table (make-hash-table :test 'equal)))
+    (while pairs
+      (puthash (format "%s" (pop pairs)) (pop pairs) table))
+    table))
+
+(defun my/aaronnote-agenda--field (object &rest keys)
+  "Return the first field in OBJECT matching KEYS."
+  (apply #'my/aaronnote-roam--todo-field object keys))
+
+(defun my/aaronnote-agenda--date-add (date days)
+  "Return DATE shifted by DAYS as YYYY-MM-DD."
+  (let* ((base (if (and (stringp date)
+                        (string-match "\\`\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)\\'" date))
+                   (encode-time 0 0 0
+                                (string-to-number (match-string 3 date))
+                                (string-to-number (match-string 2 date))
+                                (string-to-number (match-string 1 date)))
+                 (current-time)))
+         (decoded (decode-time (time-add base (days-to-time days)))))
+    (format "%04d-%02d-%02d"
+            (nth 5 decoded)
+            (nth 4 decoded)
+            (nth 3 decoded))))
+
+(defun my/aaronnote-agenda--today ()
+  "Return today's date as YYYY-MM-DD."
+  (format-time-string "%Y-%m-%d"))
+
+(defun my/aaronnote-agenda--month-start (date)
+  "Return DATE's month start as YYYY-MM-DD."
+  (let* ((date (or (my/aaronnote-roam--date-day-string date)
+                   (my/aaronnote-agenda--today)))
+         (decoded (decode-time (encode-time 0 0 0
+                                            (string-to-number (substring date 8 10))
+                                            (string-to-number (substring date 5 7))
+                                            (string-to-number (substring date 0 4))))))
+    (format "%04d-%02d-01" (nth 5 decoded) (nth 4 decoded))))
+
+(defun my/aaronnote-agenda--days-in-month (date)
+  "Return number of days in DATE's month."
+  (let* ((date (or (my/aaronnote-roam--date-day-string date)
+                   (my/aaronnote-agenda--today)))
+         (month (string-to-number (substring date 5 7)))
+         (year (string-to-number (substring date 0 4))))
+    (calendar-last-day-of-month month year)))
+
+(defun my/aaronnote-agenda--view-days (view anchor)
+  "Return day span for agenda VIEW anchored at ANCHOR."
+  (pcase view
+    ('calendar (my/aaronnote-agenda--days-in-month anchor))
+    ('log 60)
+    ('list 30)
+    (_ 7)))
+
+(defun my/aaronnote-agenda--view-from (view anchor)
+  "Return agenda request start date for VIEW and ANCHOR."
+  (let ((anchor (or (my/aaronnote-roam--date-day-string anchor)
+                    anchor
+                    (my/aaronnote-agenda--today))))
+    (if (eq view 'calendar)
+        (my/aaronnote-agenda--month-start anchor)
+      anchor)))
+
+(defun my/aaronnote-agenda--normalize-view (mode)
+  "Return agenda view symbol for MODE."
+  (pcase mode
+    ((or 'calendar 'month) 'calendar)
+    ('log 'log)
+    ((or 'list 'all 'done 'cancelled 'search) 'list)
+    (_ 'week)))
+
+(defun my/aaronnote-agenda--normalize-filter (mode)
+  "Return agenda presentation filter for MODE."
+  (pcase mode
+    ('all 'all)
+    ('done 'done)
+    ('cancelled 'cancelled)
+    ('today 'today)
+    ('overdue 'overdue)
+    ('date 'date)
+    ('search 'search)
+    (_ 'open)))
+
+(defun my/aaronnote-agenda--request (view anchor query filter)
+  "Fetch server agenda view-model for VIEW, ANCHOR, QUERY, and FILTER."
+  (let* ((from (my/aaronnote-agenda--view-from view anchor))
+         (days (my/aaronnote-agenda--view-days view from))
+         (include-done (memq filter '(all done cancelled)))
+         (body `((from . ,from)
+                 (days . ,days)
+                 (view . ,(symbol-name view))
+                 (includeDone . ,(if include-done t :json-false))
+                 (filter . ((status . ,(symbol-name filter))
+                            (text . ,(or query "")))))))
+    (or (my/aaronnote-roam--runtime-call
+         "agenda" "--json" (json-encode body))
+        (my/aaronnote-agenda--fallback-model from days))))
+
+(defun my/aaronnote-agenda--fallback-model (from days)
+  "Build a minimal agenda view-model from local scan data."
+  (let* ((db (my/aaronnote-roam--db))
+         (todos (or (and db (gethash "todos" db))
+                    (my/aaronnote-roam--scan-todos)))
+         (today (my/aaronnote-agenda--today))
+         (day-list nil)
+         (stats (my/aaronnote-agenda--hash
+                 "open" 0 "doing" 0 "done" 0 "cancelled" 0 "blocked" 0 "overdue" 0)))
+    (dotimes (index days)
+      (push (my/aaronnote-agenda--hash
+             "date" (my/aaronnote-agenda--date-add from index)
+             "entries" nil)
+            day-list))
+    (dolist (todo todos)
+      (let ((status (my/aaronnote-roam--todo-status todo)))
+        (cond
+         ((string= status "blocked")
+          (puthash "blocked" (1+ (or (gethash "blocked" stats) 0)) stats))
+         ((string= status "doing")
+          (puthash "doing" (1+ (or (gethash "doing" stats) 0)) stats))
+         ((my/aaronnote-roam--todo-done-p todo)
+          (puthash "done" (1+ (or (gethash "done" stats) 0)) stats))
+         ((my/aaronnote-roam--todo-cancelled-p todo)
+          (puthash "cancelled" (1+ (or (gethash "cancelled" stats) 0)) stats))
+         (t
+          (puthash "open" (1+ (or (gethash "open" stats) 0)) stats)))
+        (when (and (not (my/aaronnote-roam--todo-closed-p todo))
+                   (my/aaronnote-roam--todo-overdue-p
+                    (my/aaronnote-roam--todo-ddl todo)))
+          (puthash "overdue" (1+ (or (gethash "overdue" stats) 0)) stats))))
+    (my/aaronnote-agenda--hash
+     "type" "agenda"
+     "range" (my/aaronnote-agenda--hash
+              "from" from
+              "to" (my/aaronnote-agenda--date-add from (1- days))
+              "today" today)
+     "days" (nreverse day-list)
+     "todos" todos
+     "lints" nil
+     "logByDay" (make-hash-table :test 'equal)
+     "stats" stats)))
+
+(defun my/aaronnote-agenda--todos (model)
+  "Return agenda MODEL todos."
+  (my/aaronnote-agenda--as-list
+   (my/aaronnote-agenda--field model "todos")))
+
+(defun my/aaronnote-agenda--days (model)
+  "Return agenda MODEL days."
+  (my/aaronnote-agenda--as-list
+   (my/aaronnote-agenda--field model "days")))
+
+(defun my/aaronnote-agenda--todos-by-id (model)
+  "Return a todo id -> todo hash table for MODEL."
+  (let ((table (make-hash-table :test 'equal)))
+    (dolist (todo (my/aaronnote-agenda--todos model))
+      (when-let* ((id (my/aaronnote-agenda--field todo "id")))
+        (puthash (format "%s" id) todo table)))
+    table))
+
+(defun my/aaronnote-agenda--todo-by-id (model todo-id)
+  "Return todo TODO-ID from MODEL."
+  (gethash (format "%s" todo-id)
+           (my/aaronnote-agenda--todos-by-id model)))
+
+(defun my/aaronnote-agenda--lints-for (model todo-id)
+  "Return lint entries in MODEL for TODO-ID."
+  (seq-filter
+   (lambda (lint)
+     (equal (format "%s" (or (my/aaronnote-agenda--field lint "todoId") ""))
+            (format "%s" todo-id)))
+   (my/aaronnote-agenda--as-list
+    (my/aaronnote-agenda--field model "lints"))))
+
+(defun my/aaronnote-agenda--todo-query-match-p (todo query)
+  "Return non-nil when TODO matches QUERY."
+  (my/aaronnote-roam--agenda-search-match-p todo query))
+
+(defun my/aaronnote-agenda--todo-visible-p (todo filter query anchor)
+  "Return non-nil when TODO should be shown for FILTER, QUERY, and ANCHOR."
+  (pcase filter
+    ('all t)
+    ('done (my/aaronnote-roam--todo-done-p todo))
+    ('cancelled (my/aaronnote-roam--todo-cancelled-p todo))
+    ('today
+     (and (not (my/aaronnote-roam--todo-closed-p todo))
+          (equal (my/aaronnote-roam--todo-agenda-date todo)
+                 (my/aaronnote-agenda--today))))
+    ('overdue
+     (and (not (my/aaronnote-roam--todo-closed-p todo))
+          (my/aaronnote-roam--todo-overdue-p
+           (my/aaronnote-roam--todo-ddl todo))))
+    ('date
+     (and (not (my/aaronnote-roam--todo-closed-p todo))
+          (equal (my/aaronnote-roam--todo-agenda-date todo)
+                 (or (my/aaronnote-roam--date-day-string query)
+                     (my/aaronnote-roam--date-day-string anchor)))))
+    ('search (my/aaronnote-agenda--todo-query-match-p todo query))
+    (_ (not (my/aaronnote-roam--todo-closed-p todo)))))
+
+(defun my/aaronnote-agenda--entry-tone (entry todo)
+  "Return badge tone for agenda ENTRY and TODO."
+  (pcase (intern (or (my/aaronnote-agenda--field entry "kind") ""))
+    ((or 'overdue 'sched-carry) 'danger)
+    ('warning 'warning)
+    ('log 'success)
+    (_ (my/aaronnote-roam--todo-tone todo))))
+
+(defun my/aaronnote-agenda--todo-detail (model todo entry)
+  "Return compact detail text for TODO in MODEL, optionally from ENTRY."
+  (let* ((note (or (my/aaronnote-roam--todo-string-value todo "noteTitle" "title")
+                   (my/aaronnote-roam--todo-string-value todo "path" "file")
+                   "Unknown note"))
+         (line (my/aaronnote-agenda--field todo "line"))
+         (ddl (my/aaronnote-roam--todo-ddl todo))
+         (sche (my/aaronnote-roam--todo-scheduled todo))
+         (repeat (my/aaronnote-roam--todo-repeat todo))
+         (after (my/aaronnote-roam--todo-after todo))
+         (blocked (my/aaronnote-roam--todo-blocked-count todo))
+         (lint-count (length (my/aaronnote-agenda--lints-for
+                              model
+                              (my/aaronnote-agenda--field todo "id"))))
+         (parts (delq nil
+                      (list note
+                            (and (integerp line) (format "L%d" line))
+                            (and ddl (format "DDL %s" ddl))
+                            (and sche (format "SCHED %s" sche))
+                            (and repeat (format "REP %s" repeat))
+                            (and after (format "after: %s" after))
+                            (and (> blocked 0) (format "blocked by %d" blocked))
+                            (and (> lint-count 0) (format "%d lint" lint-count))
+                            (and entry
+                                 (my/aaronnote-agenda--field entry "kind")
+                                 (format "%s %s"
+                                         (my/aaronnote-agenda--field entry "kind")
+                                         (or (my/aaronnote-agenda--field entry "date") "")))))))
+    (string-join parts "  |  ")))
+
+(defun my/aaronnote-agenda--insert-todo-row (model todo &optional entry)
+  "Insert one agenda TODO row from MODEL, optionally attached to ENTRY."
+  (let* ((todo-id (format "%s" (or (my/aaronnote-agenda--field todo "id") "")))
+         (status (upcase (my/aaronnote-roam--todo-status todo)))
+         (prio (my/aaronnote-roam--todo-priority todo))
+         (selected (member todo-id my/aaronnote-agenda--selection))
+         (entry-label (and entry
+                           (my/aaronnote-agenda--field entry "label")))
+         (text (or (my/aaronnote-roam--todo-string-value todo "text" "context" "source")
+                   "(empty todo)"))
+         (title (string-join
+                 (delq nil
+                       (list (if selected "*" " ")
+                             (and prio (format "[#%s]" prio))
+                             text))
+                 " "))
+         (meta (string-join
+                (delq nil
+                      (list (and entry-label (format "%s" entry-label))
+                            status
+                            (my/aaronnote-roam--date-day-string
+                             (or (and entry
+                                      (my/aaronnote-agenda--field entry "date"))
+                                 (my/aaronnote-roam--todo-agenda-date todo)))))
+                "  "))
+         (tone (my/aaronnote-agenda--entry-tone entry todo)))
+    (my/aaronnote-roam-ui-insert-row
+     :id (list "agenda" todo-id
+               (and entry (my/aaronnote-agenda--field entry "kind"))
+               (and entry (my/aaronnote-agenda--field entry "date")))
+     :icon 'todo
+     :badge status
+     :badge-tone tone
+     :title title
+     :meta meta
+     :detail (my/aaronnote-agenda--todo-detail model todo entry)
+     :action (let ((target todo))
+               (lambda (_button)
+                 (my/aaronnote-roam--visit-todo target)))
+     :properties `(my/aaronnote-roam-todo ,todo
+                   aaronnote-todo-id ,todo-id
+                   aaronnote-entry ,entry))))
+
+(defun my/aaronnote-agenda--stats (model)
+  "Return stat badge data for agenda MODEL."
+  (let* ((stats (my/aaronnote-agenda--field model "stats"))
+         (lints (length (my/aaronnote-agenda--as-list
+                         (my/aaronnote-agenda--field model "lints"))))
+         (num (lambda (key)
+                (let ((value (my/aaronnote-agenda--field stats key)))
+                  (cond
+                   ((numberp value) value)
+                   ((stringp value) (string-to-number value))
+                   (t 0))))))
+    (delq nil
+          (list (cons (format "%s open" (funcall num "open")) 'info)
+                (cons (format "%s doing" (funcall num "doing")) 'warning)
+                (cons (format "%s blocked" (funcall num "blocked"))
+                      (if (> (funcall num "blocked") 0) 'danger 'muted))
+                (cons (format "%s overdue" (funcall num "overdue"))
+                      (if (> (funcall num "overdue") 0) 'danger 'muted))
+                (and (> lints 0)
+                     (cons (format "%d lint" lints) 'warning))))))
+
+(defun my/aaronnote-agenda--subtitle (view filter query model)
+  "Return agenda subtitle for VIEW, FILTER, QUERY, and MODEL."
+  (let* ((range (my/aaronnote-agenda--field model "range"))
+         (from (my/aaronnote-agenda--field range "from"))
+         (to (my/aaronnote-agenda--field range "to")))
+    (format "%s view, %s filter%s%s"
+            (capitalize (symbol-name view))
+            (symbol-name filter)
+            (if (and from to) (format ", %s to %s" from to) "")
+            (if (and query (not (string-empty-p query)))
+                (format ", query: %s" query)
+              ""))))
+
+(defun my/aaronnote-agenda--actions ()
+  "Return toolbar actions for the current agenda buffer."
+  (my/aaronnote-roam--ui-actions
+   `((:label "Week"
+      :command ,(lambda () (my/aaronnote-agenda-set-view 'week))
+      :help "Show week agenda"
+      :primary ,(eq my/aaronnote-agenda--view 'week))
+     (:label "List"
+      :command ,(lambda () (my/aaronnote-agenda-set-view 'list))
+      :help "Show urgency list"
+      :primary ,(eq my/aaronnote-agenda--view 'list))
+     (:label "Month"
+      :command ,(lambda () (my/aaronnote-agenda-set-view 'calendar))
+      :help "Show month calendar"
+      :primary ,(eq my/aaronnote-agenda--view 'calendar))
+     (:label "Log"
+      :command ,(lambda () (my/aaronnote-agenda-set-view 'log))
+      :help "Show completion log"
+      :primary ,(eq my/aaronnote-agenda--view 'log))
+     (:label "b Prev"
+      :command my/aaronnote-agenda-backward
+      :help "Move the agenda range backward")
+     (:label ". Today"
+      :command my/aaronnote-agenda-today
+      :help "Return to today")
+     (:label "f Next"
+      :command my/aaronnote-agenda-forward
+      :help "Move the agenda range forward")
+     (:label "/ Search"
+      :command my/aaronnote-agenda-search-in-buffer
+      :help "Search visible agenda tasks"))))
+
+(defun my/aaronnote-agenda--render-lints (model)
+  "Insert lint summary for agenda MODEL."
+  (let ((lints (my/aaronnote-agenda--as-list
+                (my/aaronnote-agenda--field model "lints"))))
+    (when lints
+      (my/aaronnote-roam-ui-insert-section "Dependency lints" (length lints) 'warning)
+      (dolist (lint (seq-take lints 8))
+        (insert "   ")
+        (my/aaronnote-roam-ui-insert-badge
+         (or (my/aaronnote-agenda--field lint "kind") "lint")
+         'warning)
+        (insert " "
+                (propertize
+                 (or (my/aaronnote-agenda--field lint "message")
+                     (my/aaronnote-agenda--field lint "ref")
+                     "")
+                 'face 'my/aaronnote-roam-ui-meta)
+                "\n"))
+      (insert "\n"))))
+
+(defun my/aaronnote-agenda--render-week (model)
+  "Render week-style day buckets from agenda MODEL."
+  (let* ((by-id (my/aaronnote-agenda--todos-by-id model))
+         (seen (make-hash-table :test 'equal))
+         (inserted nil))
+    (dolist (day (my/aaronnote-agenda--days model))
+      (let* ((date (my/aaronnote-agenda--field day "date"))
+             (entries (seq-filter
+                       (lambda (entry)
+                         (when-let* ((todo (gethash
+                                            (format "%s" (my/aaronnote-agenda--field entry "todoId"))
+                                            by-id)))
+                           (my/aaronnote-agenda--todo-visible-p
+                            todo my/aaronnote-agenda--filter
+                            my/aaronnote-agenda--query date)))
+                       (my/aaronnote-agenda--as-list
+                        (my/aaronnote-agenda--field day "entries"))))
+             (title (if (equal date (my/aaronnote-agenda--today))
+                        (format "%s  Today" date)
+                      date))
+             (tone (if (equal date (my/aaronnote-agenda--today)) 'warning 'info)))
+        (when entries
+          (setq inserted t)
+          (my/aaronnote-roam-ui-insert-section title (length entries) tone)
+          (dolist (entry entries)
+            (when-let* ((todo (gethash
+                               (format "%s" (my/aaronnote-agenda--field entry "todoId"))
+                               by-id)))
+              (puthash (format "%s" (my/aaronnote-agenda--field todo "id"))
+                       t seen)
+              (my/aaronnote-agenda--insert-todo-row model todo entry)))
+          (insert "\n"))))
+    (when (eq my/aaronnote-agenda--filter 'open)
+      (let ((backlog
+             (seq-filter
+              (lambda (todo)
+                (let ((todo-id (format "%s" (my/aaronnote-agenda--field todo "id"))))
+                  (and (not (gethash todo-id seen))
+                       (my/aaronnote-agenda--todo-visible-p
+                        todo my/aaronnote-agenda--filter
+                        my/aaronnote-agenda--query
+                        my/aaronnote-agenda--anchor))))
+              (my/aaronnote-agenda--todos model))))
+        (when backlog
+          (setq inserted t)
+          (my/aaronnote-roam-ui-insert-section "Backlog" (length backlog) 'muted)
+          (dolist (todo backlog)
+            (my/aaronnote-agenda--insert-todo-row model todo nil))
+          (insert "\n"))))
+    (unless inserted
+      (my/aaronnote-roam-ui-insert-empty "No agenda entries in this range."))))
+
+(defun my/aaronnote-agenda--render-list (model)
+  "Render server urgency-sorted todo list from agenda MODEL."
+  (let* ((todos (seq-filter
+                 (lambda (todo)
+                   (my/aaronnote-agenda--todo-visible-p
+                    todo my/aaronnote-agenda--filter
+                    my/aaronnote-agenda--query
+                    my/aaronnote-agenda--anchor))
+                 (my/aaronnote-agenda--todos model))))
+    (my/aaronnote-roam-ui-insert-section "Tasks" (length todos) 'info)
+    (if todos
+        (dolist (todo todos)
+          (my/aaronnote-agenda--insert-todo-row model todo nil))
+      (my/aaronnote-roam-ui-insert-empty "No matching tasks."))
+    (insert "\n")))
+
+(defun my/aaronnote-agenda--render-calendar (model)
+  "Render month calendar from agenda MODEL."
+  (let* ((days (my/aaronnote-agenda--days model))
+         (first-date (or (my/aaronnote-agenda--field (car days) "date")
+                         (my/aaronnote-agenda--month-start my/aaronnote-agenda--anchor)))
+         (year (string-to-number (substring first-date 0 4)))
+         (month (string-to-number (substring first-date 5 7)))
+         (first-dow (calendar-day-of-week (list month 1 year))))
+    (my/aaronnote-roam-ui-insert-section (format "%04d-%02d" year month))
+    (insert "   SUN      MON      TUE      WED      THU      FRI      SAT\n   ")
+    (dotimes (_ first-dow)
+      (insert "        "))
+    (let ((day-index 0))
+      (dolist (day days)
+        (setq day-index (1+ day-index))
+        (let* ((date (my/aaronnote-agenda--field day "date"))
+               (entries (my/aaronnote-agenda--as-list
+                         (my/aaronnote-agenda--field day "entries")))
+               (count (length entries))
+               (label (my/aaronnote-roam--agenda-calendar-cell-label
+                       (string-to-number (substring date 8 10))
+                       count))
+               (tone (cond
+                      ((equal date (my/aaronnote-agenda--today)) 'warning)
+                      ((> count 0) 'info)
+                      (t 'muted))))
+          (insert-text-button
+           label
+           'action (let ((target-date date))
+                     (lambda (_button)
+                       (my/aaronnote-agenda--open
+                        'week target-date nil 'date "*roam-agenda*")))
+           'follow-link t
+           'help-echo (format "Show agenda entries for %s" date)
+           'face (my/aaronnote-roam-ui--tone-face tone))
+          (insert " ")
+          (when (= (mod (+ first-dow day-index) 7) 0)
+            (insert "\n   ")))))
+    (insert "\n\n")))
+
+(defun my/aaronnote-agenda--render-log (model)
+  "Render completion log entries from agenda MODEL."
+  (let* ((by-id (my/aaronnote-agenda--todos-by-id model))
+         (inserted nil))
+    (dolist (day (reverse (my/aaronnote-agenda--days model)))
+      (let* ((date (my/aaronnote-agenda--field day "date"))
+             (entries (seq-filter
+                       (lambda (entry)
+                         (and (equal (my/aaronnote-agenda--field entry "kind") "log")
+                              (when-let* ((todo (gethash
+                                                 (format "%s" (my/aaronnote-agenda--field entry "todoId"))
+                                                 by-id)))
+                                (my/aaronnote-agenda--todo-query-match-p
+                                 todo my/aaronnote-agenda--query))))
+                       (my/aaronnote-agenda--as-list
+                        (my/aaronnote-agenda--field day "entries")))))
+        (when entries
+          (setq inserted t)
+          (my/aaronnote-roam-ui-insert-section
+           (format "%s closed" date) (length entries) 'success)
+          (dolist (entry entries)
+            (when-let* ((todo (gethash
+                               (format "%s" (my/aaronnote-agenda--field entry "todoId"))
+                               by-id)))
+              (my/aaronnote-agenda--insert-todo-row model todo entry)))
+          (insert "\n"))))
+    (unless inserted
+      (my/aaronnote-roam-ui-insert-empty "No closed-task log entries."))))
+
+(defun my/aaronnote-agenda--render-current ()
+  "Render the current buffer's agenda model."
+  (let ((model my/aaronnote-agenda--model)
+        (view my/aaronnote-agenda--view)
+        (filter my/aaronnote-agenda--filter)
+        (query my/aaronnote-agenda--query))
+    (my/aaronnote-roam-ui-render
+     (lambda ()
+       (my/aaronnote-roam-ui-insert-page-header
+        "Agenda"
+        :icon 'agenda
+        :subtitle (my/aaronnote-agenda--subtitle view filter query model)
+        :stats (my/aaronnote-agenda--stats model)
+        :actions (my/aaronnote-agenda--actions))
+       (my/aaronnote-agenda--render-lints model)
+       (pcase view
+         ('calendar (my/aaronnote-agenda--render-calendar model))
+         ('log (my/aaronnote-agenda--render-log model))
+         ('list (my/aaronnote-agenda--render-list model))
+         (_ (my/aaronnote-agenda--render-week model))))))
+  (unless (get-text-property (point) 'my/aaronnote-roam-todo)
+    (my/aaronnote-roam-ui-goto-first-item)))
+
+(defun my/aaronnote-agenda--open (view anchor query filter &optional buffer-name)
+  "Open agenda VIEW at ANCHOR with QUERY and FILTER."
+  (let* ((view (or view 'week))
+         (anchor (or anchor (my/aaronnote-agenda--today)))
+         (filter (or filter 'open))
+         (model (my/aaronnote-agenda--request view anchor query filter))
+         (range (my/aaronnote-agenda--field model "range"))
+         (from (or (my/aaronnote-agenda--field range "from")
+                   (my/aaronnote-agenda--view-from view anchor)))
+         (buf (get-buffer-create (or buffer-name "*roam-agenda*"))))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'my/aaronnote-agenda-mode)
+        (my/aaronnote-agenda-mode))
+      (setq-local my/aaronnote-agenda--model model
+                  my/aaronnote-agenda--view view
+                  my/aaronnote-agenda--filter filter
+                  my/aaronnote-agenda--anchor from
+                  my/aaronnote-agenda--query query
+                  my/aaronnote-roam-ui-refresh-function
+                  #'my/aaronnote-agenda-refresh)
+      (my/aaronnote-roam-ui-set-header
+       "Agenda" 'agenda
+       (format "%s %s" (symbol-name view) from))
+      (my/aaronnote-agenda--render-current))
+    (display-buffer buf)))
+
+(defun my/aaronnote-agenda-refresh ()
+  "Refresh the current agenda buffer from the server."
+  (interactive)
+  (my/aaronnote-agenda--open
+   my/aaronnote-agenda--view
+   my/aaronnote-agenda--anchor
+   my/aaronnote-agenda--query
+   my/aaronnote-agenda--filter
+   (buffer-name)))
+
+(defun my/aaronnote-agenda-current-todo ()
+  "Return the agenda todo at point."
+  (or (my/aaronnote-roam--todo-at-point)
+      (when-let* ((todo-id (or (get-text-property (point) 'aaronnote-todo-id)
+                               (get-text-property (line-beginning-position)
+                                                  'aaronnote-todo-id))))
+        (my/aaronnote-agenda--todo-by-id my/aaronnote-agenda--model todo-id))))
+
+(defun my/aaronnote-agenda-visit ()
+  "Visit the source todo at point."
+  (interactive)
+  (if-let* ((todo (my/aaronnote-agenda-current-todo)))
+      (my/aaronnote-roam--visit-todo todo)
+    (user-error "No todo on this line")))
+
+(defun my/aaronnote-agenda-set-status (&optional status)
+  "Set current agenda todo STATUS."
+  (interactive)
+  (let ((todo (my/aaronnote-agenda-current-todo))
+        (status (or status
+                    (completing-read
+                     "Todo status: "
+                     '("todo" "doing" "blocked" "done" "cancelled")
+                     nil t nil nil "done"))))
+    (unless todo
+      (user-error "No todo on this line"))
+    (my/aaronnote-roam-update-todo-status status todo)))
+
+(defun my/aaronnote-agenda-set-priority ()
+  "Set current agenda todo priority."
+  (interactive)
+  (let ((todo (my/aaronnote-agenda-current-todo)))
+    (unless todo
+      (user-error "No todo on this line"))
+    (my/aaronnote-roam-update-todo-metadata
+     "priority"
+     (completing-read "Priority (empty clears): "
+                      '("A" "B" "C" "D" "E" "F" "") nil t)
+     todo)))
+
+(defun my/aaronnote-agenda-set-deadline ()
+  "Set current agenda todo deadline."
+  (interactive)
+  (let ((todo (my/aaronnote-agenda-current-todo)))
+    (unless todo
+      (user-error "No todo on this line"))
+    (my/aaronnote-roam-update-todo-metadata
+     "due"
+     (read-string "Deadline (empty clears): "
+                  (or (my/aaronnote-roam--todo-ddl todo) ""))
+     todo)))
+
+(defun my/aaronnote-agenda-set-scheduled ()
+  "Set current agenda todo scheduled date."
+  (interactive)
+  (let ((todo (my/aaronnote-agenda-current-todo)))
+    (unless todo
+      (user-error "No todo on this line"))
+    (my/aaronnote-roam-update-todo-metadata
+     "scheduled"
+     (read-string "Scheduled (empty clears): "
+                  (or (my/aaronnote-roam--todo-scheduled todo) ""))
+     todo)))
+
+(defun my/aaronnote-agenda-set-repeat ()
+  "Set current agenda todo repeat metadata."
+  (interactive)
+  (let ((todo (my/aaronnote-agenda-current-todo)))
+    (unless todo
+      (user-error "No todo on this line"))
+    (my/aaronnote-roam-update-todo-metadata
+     "repeat"
+     (read-string "Repeat (+1w / ++1w / .+3d; empty clears): "
+                  (or (my/aaronnote-roam--todo-repeat todo) ""))
+     todo)))
+
+(defun my/aaronnote-agenda-add-dependency ()
+  "Add a dependency to the current agenda todo."
+  (interactive)
+  (my/aaronnote-roam-add-todo-dependency (my/aaronnote-agenda-current-todo)))
+
+(defun my/aaronnote-agenda-toggle-mark ()
+  "Toggle mark on the current agenda todo."
+  (interactive)
+  (let* ((todo (my/aaronnote-agenda-current-todo))
+         (todo-id (and todo (format "%s" (my/aaronnote-agenda--field todo "id")))))
+    (unless (and todo-id (not (string-empty-p todo-id)))
+      (user-error "No todo on this line"))
+    (setq my/aaronnote-agenda--selection
+          (if (member todo-id my/aaronnote-agenda--selection)
+              (delete todo-id my/aaronnote-agenda--selection)
+            (cons todo-id my/aaronnote-agenda--selection)))
+    (my/aaronnote-agenda--render-current)))
+
+(defun my/aaronnote-agenda-unmark ()
+  "Unmark the current todo, or clear all marks when not on a todo."
+  (interactive)
+  (if-let* ((todo (my/aaronnote-agenda-current-todo))
+            (todo-id (format "%s" (my/aaronnote-agenda--field todo "id"))))
+      (setq my/aaronnote-agenda--selection
+            (delete todo-id my/aaronnote-agenda--selection))
+    (setq my/aaronnote-agenda--selection nil))
+  (my/aaronnote-agenda--render-current))
+
+(defun my/aaronnote-agenda--selected-todos ()
+  "Return selected todos in the current agenda model."
+  (let ((selected my/aaronnote-agenda--selection))
+    (seq-filter
+     (lambda (todo)
+       (member (format "%s" (my/aaronnote-agenda--field todo "id")) selected))
+     (my/aaronnote-agenda--todos my/aaronnote-agenda--model))))
+
+(defun my/aaronnote-agenda-bulk ()
+  "Apply a bulk operation to marked agenda todos."
+  (interactive)
+  (let ((todos (my/aaronnote-agenda--selected-todos)))
+    (unless todos
+      (user-error "No marked todos"))
+    (pcase (read-key "Bulk: t status, p priority, d deadline, s schedule")
+      (?t
+       (let ((status (completing-read
+                      "Bulk status: "
+                      '("todo" "doing" "blocked" "done" "cancelled")
+                      nil t nil nil "done")))
+         (dolist (todo todos)
+           (my/aaronnote-roam--todo-patch
+            todo
+            (if (string= status "done")
+                '((op . "complete"))
+              `((status . ,status)))))))
+      (?p
+       (let ((prio (completing-read "Bulk priority: " '("A" "B" "C" "D" "E" "F" "") nil t)))
+         (dolist (todo todos)
+           (my/aaronnote-roam--todo-patch todo `((prio . ,prio))))))
+      (?d
+       (let ((ddl (read-string "Bulk deadline (empty clears): ")))
+         (dolist (todo todos)
+           (my/aaronnote-roam--todo-patch todo `((ddl . ,ddl))))))
+      (?s
+       (let ((sche (read-string "Bulk scheduled (empty clears): ")))
+         (dolist (todo todos)
+           (my/aaronnote-roam--todo-patch todo `((sche . ,sche))))))
+      (_ (user-error "Unknown bulk operation")))
+    (setq my/aaronnote-agenda--selection nil)
+    (my/aaronnote-roam--clear-runtime-cache)
+    (my/aaronnote-agenda-refresh)))
+
+(defun my/aaronnote-agenda--shift-days (direction)
+  "Return date shift for DIRECTION in the current view."
+  (* direction
+     (pcase my/aaronnote-agenda--view
+       ('calendar (my/aaronnote-agenda--days-in-month my/aaronnote-agenda--anchor))
+       (_ 7))))
+
+(defun my/aaronnote-agenda-forward ()
+  "Move agenda forward."
+  (interactive)
+  (my/aaronnote-agenda--open
+   my/aaronnote-agenda--view
+   (my/aaronnote-agenda--date-add
+    my/aaronnote-agenda--anchor
+    (my/aaronnote-agenda--shift-days 1))
+   my/aaronnote-agenda--query
+   my/aaronnote-agenda--filter
+   (buffer-name)))
+
+(defun my/aaronnote-agenda-backward ()
+  "Move agenda backward."
+  (interactive)
+  (my/aaronnote-agenda--open
+   my/aaronnote-agenda--view
+   (my/aaronnote-agenda--date-add
+    my/aaronnote-agenda--anchor
+    (my/aaronnote-agenda--shift-days -1))
+   my/aaronnote-agenda--query
+   my/aaronnote-agenda--filter
+   (buffer-name)))
+
+(defun my/aaronnote-agenda-today ()
+  "Move agenda back to today."
+  (interactive)
+  (my/aaronnote-agenda--open
+   my/aaronnote-agenda--view
+   (my/aaronnote-agenda--today)
+   my/aaronnote-agenda--query
+   my/aaronnote-agenda--filter
+   (buffer-name)))
+
+(defun my/aaronnote-agenda-set-view (view)
+  "Switch the current agenda buffer to VIEW."
+  (interactive
+   (list (intern (completing-read "Agenda view: "
+                                  '("week" "list" "calendar" "log")
+                                  nil t))))
+  (my/aaronnote-agenda--open
+   view
+   my/aaronnote-agenda--anchor
+   my/aaronnote-agenda--query
+   (if (eq view 'log) 'all my/aaronnote-agenda--filter)
+   (buffer-name)))
+
+(defun my/aaronnote-agenda-cycle-view ()
+  "Cycle agenda view."
+  (interactive)
+  (let* ((order '(week list calendar log))
+         (next (cadr (member my/aaronnote-agenda--view order))))
+    (my/aaronnote-agenda-set-view (or next (car order)))))
+
+(defun my/aaronnote-agenda-search-in-buffer (&optional query)
+  "Search the current agenda buffer with QUERY."
+  (interactive (list (read-string "Agenda search: " my/aaronnote-agenda--query)))
+  (let ((query (string-trim (or query ""))))
+    (my/aaronnote-agenda--open
+     my/aaronnote-agenda--view
+     my/aaronnote-agenda--anchor
+     query
+     (if (string-empty-p query) 'open 'search)
+     (buffer-name))))
 
 (defun my/aaronnote-roam--agenda-actions (mode query)
   "Return agenda toolbar actions for MODE and QUERY."
@@ -3535,51 +4469,23 @@ This checks top-level todo fields first, then the nested args object."
      (cdr (assoc (completing-read "File todo: " choices nil t) choices)))))
 
 (defun my/aaronnote-roam-agenda (&optional mode query)
-  "Show a roam notes agenda: todos from md notes grouped by status/ddl."
+  "Show the server-backed Aaronnote agenda.
+MODE is a legacy entry-point filter (`open', `all', `done', `cancelled',
+`today', `overdue', `date', or `search') or a view (`week', `list',
+`calendar', `log').  Agenda bucketing, dependency status, urgency, repeaters,
+and logs come from the shared runtime view-model; Emacs only projects and
+renders that model."
   (interactive)
   (let* ((mode (or mode 'open))
-         (todos (or (my/aaronnote-roam--todos) '()))
-         (filtered (my/aaronnote-roam--agenda-filter-todos todos mode query))
-         (shown-count (length filtered))
-         (refresh (let ((view-mode mode)
-                        (view-query query))
-                    (lambda ()
-                      (my/aaronnote-roam-agenda view-mode view-query))))
-           (buf (my/aaronnote-roam--prepare-ui-buffer
-                 "*roam-agenda*" "Roam Agenda" 'agenda
-                 refresh
-                 (format "%d shown" shown-count))))
-      (with-current-buffer buf
-        (my/aaronnote-roam-ui-render
-         (lambda ()
-           (my/aaronnote-roam-ui-insert-page-header
-            "Agenda"
-            :icon 'agenda
-            :subtitle (my/aaronnote-roam--agenda-subtitle mode query shown-count)
-            :stats (my/aaronnote-roam--agenda-stats todos)
-            :actions (my/aaronnote-roam--agenda-actions mode query))
-           (let ((inserted nil))
-             (dolist (group (my/aaronnote-roam--agenda-groups filtered))
-               (let* ((title (car group))
-                      (entries (cadr group))
-                      (tone (cddr group)))
-                 (when entries
-                   (setq inserted t)
-                   (my/aaronnote-roam-ui-insert-section
-                    title (length entries) tone)
-                   (my/aaronnote-roam--insert-agenda-table-header)
-                   (dolist (entry entries)
-                     (my/aaronnote-roam--insert-agenda-todo-row entry tone))
-                   (insert "\n"))))
-             (unless inserted
-               (my/aaronnote-roam-ui-insert-empty
-                (pcase mode
-                  ('search "No matching tasks.")
-                  ('date "No open tasks on this date.")
-                  ('done "No completed tasks.")
-                  ('cancelled "No cancelled tasks.")
-                  (_ "No open tasks.")))))))
-      (display-buffer buf))))
+         (view (my/aaronnote-agenda--normalize-view mode))
+         (filter (my/aaronnote-agenda--normalize-filter mode))
+         (anchor (pcase mode
+                   ('date (or (my/aaronnote-roam--date-day-string query)
+                              query
+                              (my/aaronnote-agenda--today)))
+                   ('today (my/aaronnote-agenda--today))
+                   (_ (my/aaronnote-agenda--today)))))
+    (my/aaronnote-agenda--open view anchor query filter "*roam-agenda*")))
 
 (defun my/aaronnote-roam--agenda-calendar-counts (todos)
   "Return a date -> open todo entries hash table for TODOS."
@@ -3635,41 +4541,24 @@ This checks top-level todo fields first, then the nested args object."
     (insert "\n\n")))
 
 (defun my/aaronnote-roam-agenda-calendar ()
-  "Show a compact deadline calendar for open roam agenda tasks."
+  "Show the agenda month calendar."
   (interactive)
-  (let* ((todos (or (my/aaronnote-roam--todos) '()))
-         (counts (my/aaronnote-roam--agenda-calendar-counts todos))
-         (decoded (decode-time (current-time)))
-         (month (nth 4 decoded))
-         (year (nth 5 decoded))
-         (next-month (if (= month 12) 1 (1+ month)))
-         (next-year (if (= month 12) (1+ year) year))
-         (open-count (seq-count
-                      (lambda (entry)
-                        (not (my/aaronnote-roam--todo-closed-p entry)))
-                      todos))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
-               "*roam-agenda-calendar*" "Roam Agenda Calendar" 'agenda
-               #'my/aaronnote-roam-agenda-calendar
-               (format "%d open" open-count))))
-    (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
-       (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
-          "Agenda Calendar"
-          :icon 'agenda
-          :subtitle "Open task dates for this month and next month"
-          :stats (list (cons (format "%d open" open-count) 'info))
-          :actions (my/aaronnote-roam--ui-actions
-                    `((:label "Open Agenda"
-                       :command ,(lambda ()
-                                   (my/aaronnote-roam-agenda 'open nil))
-                       :help "Return to the open agenda"
-                       :primary t))))
-         (my/aaronnote-roam--agenda-calendar-insert-month year month counts)
-         (my/aaronnote-roam--agenda-calendar-insert-month
-          next-year next-month counts))))
-    (display-buffer buf)))
+  (my/aaronnote-agenda--open
+   'calendar
+   (my/aaronnote-agenda--today)
+   nil
+   'open
+   "*roam-agenda-calendar*"))
+
+(defun my/aaronnote-roam-agenda-log ()
+  "Show the agenda completion log."
+  (interactive)
+  (my/aaronnote-agenda--open
+   'log
+   (my/aaronnote-agenda--today)
+   nil
+   'all
+   "*roam-agenda*"))
 
 ;; ── Roam activity heatmap ────────────────────────────────────────────────────
 

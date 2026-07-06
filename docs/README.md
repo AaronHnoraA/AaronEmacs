@@ -6,6 +6,7 @@ This directory contains the operational docs for the Emacs configuration. The do
 
 - [quick-start.md](quick-start.md) First-time setup, system dependencies, fonts, path conventions, and bootstrap.
 - [daily-usage.md](daily-usage.md) Daily entry points, high-frequency keybindings, and leader-group layout.
+- [agenda.md](agenda.md) Aaronnote `@@todo` syntax, server agenda view-model, repeaters, dependencies, and Web/Emacs keys.
 - [settings-cookbook.md](settings-cookbook.md) “I want to change X” guidance that tells you where each kind of change belongs.
 - [config-management.md](config-management.md) Unified `config` registry: one front door (`config-get`/`config-set`, `M-x my/config-board`) to view, edit, live-apply, and persist every registered setting.
 
@@ -28,6 +29,7 @@ This directory contains the operational docs for the Emacs configuration. The do
 
 - Want to install it: [quick-start.md](quick-start.md)
 - Want keybindings: [daily-usage.md](daily-usage.md)
+- Want Aaronnote tasks/agenda: [agenda.md](agenda.md)
 - Want to change behavior: [settings-cookbook.md](settings-cookbook.md)
 - Want the project workflow: [project-guide.md](project-guide.md)
 - Want programming / LSP / remote details: [dev-guide.md](dev-guide.md)

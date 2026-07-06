@@ -72,6 +72,20 @@ async function main() {
     result = await runtime.getTodos({
       file: argValue(args, "--file", ""),
     });
+  } else if (action === "update-todo") {
+    result = await runtime.updateTodoStatus(JSON.parse(argValue(args, "--json", "{}")));
+  } else if (action === "agenda") {
+    result = await runtime.buildAgenda(JSON.parse(argValue(args, "--json", "{}")));
+  } else if (action === "patch-todo") {
+    result = await runtime.patchTodo(JSON.parse(argValue(args, "--json", "{}")));
+  } else if (action === "todo-dep-ref") {
+    const body = JSON.parse(argValue(args, "--json", "{}"));
+    const { todos } = await runtime.getTodos("");
+    const target = todos.find((todo) => todo.id === body.targetId);
+    if (!target) throw new Error("Todo not found");
+    const source = body.sourceId ? todos.find((todo) => todo.id === body.sourceId) || null : null;
+    const scope = todos.filter((todo) => todo.file === target.file);
+    result = { type: "todo-dep-ref", ref: runtime.depRefForTodo(target, scope, source) };
   } else if (action === "templates") {
     result = {
       templates: await runtime.scanTemplates({ force: hasArg(args, "--force") }),

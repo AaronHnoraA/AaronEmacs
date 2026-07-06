@@ -8,14 +8,17 @@ import { join } from "node:path";
 import * as serverIndex from "../server/lib/index.mjs";
 
 const {
+  canonicalTodoArgs,
   configure,
   extractTodos,
   getTodos,
   inlineTagsFromContent,
   normalizeTodoStatus,
+  parseCommandArgs,
   scanInlineCommands,
   syncRoamDb,
   tagsFromContent,
+  todoArgKeyForCanonical,
   updateTodoStatus,
 } = serverIndex as any;
 
@@ -128,6 +131,39 @@ describe("server todo scan", () => {
       },
     ]);
     expect(scanInlineCommands("@@section[not parsed]", "section")).toEqual([]);
+  });
+
+  test("parseCommandArgs keeps a comma inside a quoted value intact", () => {
+    expect(parseCommandArgs('{after: "fix parser, then ship", ddl: 2026-07-10}')).toEqual({
+      after: "fix parser, then ship",
+      ddl: "2026-07-10",
+    });
+  });
+
+  test("canonicalTodoArgs normalizes aliases and uppercases priority", () => {
+    expect(canonicalTodoArgs({ due: "2026-07-07", priority: "b", repeat: "+1w" })).toEqual({
+      ddl: "2026-07-07",
+      prio: "B",
+      repeat: "+1w",
+    });
+    expect(canonicalTodoArgs({ scheduled: "2026-07-06" })).toEqual({ sche: "2026-07-06" });
+    expect(canonicalTodoArgs({})).toEqual({});
+  });
+
+  test("todoArgKeyForCanonical reuses the alias already present on the line", () => {
+    expect(todoArgKeyForCanonical("ddl", { due: "2026-07-07" })).toBe("due");
+    expect(todoArgKeyForCanonical("ddl", {})).toBe("ddl");
+    expect(todoArgKeyForCanonical("prio", { priority: "A" })).toBe("priority");
+  });
+
+  test("extractTodos attaches canon alongside raw args", () => {
+    const todos = extractTodos(
+      "@@todo(doing) [ship it] {due: 2026-07-07, priority: b}",
+      note,
+      1,
+    );
+    expect(todos[0].canon).toEqual({ ddl: "2026-07-07", prio: "B" });
+    expect(todos[0].args).toEqual({ due: "2026-07-07", priority: "b" });
   });
 
   test("keeps inline anchors separate from file tags", () => {

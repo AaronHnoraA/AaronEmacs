@@ -28,6 +28,7 @@ import {
   type LatexTemplate,
 } from "./api-client.ts";
 import { Epoch } from "../src/async-epoch.ts";
+import { openAgendaView } from "./agenda-view.ts";
 import { CoalescedTimer } from "../src/coalesced-timer.ts";
 import { blobToBase64 } from "../src/paste.ts";
 import { collectFindMatches, createFindPattern, type FindMatch } from "./find.ts";
@@ -88,6 +89,7 @@ root.innerHTML = `
       <button type="button" class="aaronnote-jupyter-stealth-button" data-jupyter-toggle aria-expanded="false" title="Code cells" aria-label="Code cells">&#xf121;</button>
       <button type="button" data-toc-toggle aria-expanded="false">TOC</button>
       <button type="button" data-agenda-toggle aria-expanded="false">Agenda</button>
+      <button type="button" data-agenda-full-toggle title="Full agenda (all notes)">Agenda+</button>
       <button type="button" data-graph-toggle aria-expanded="false">Graph</button>
       <button type="button" data-tools-toggle aria-expanded="false">Tools</button>
       <button type="button" data-source>Source</button>
@@ -106,6 +108,7 @@ const writingStatsLabel = root.querySelector<HTMLElement>("[data-writing-stats]"
 const jupyterButton = root.querySelector<HTMLButtonElement>("[data-jupyter-toggle]")!;
 const tocButton = root.querySelector<HTMLButtonElement>("[data-toc-toggle]")!;
 const agendaButton = root.querySelector<HTMLButtonElement>("[data-agenda-toggle]")!;
+const agendaFullButton = root.querySelector<HTMLButtonElement>("[data-agenda-full-toggle]")!;
 const graphButton = root.querySelector<HTMLButtonElement>("[data-graph-toggle]")!;
 const toolsButton = root.querySelector<HTMLButtonElement>("[data-tools-toggle]")!;
 const sourceButton = root.querySelector<HTMLButtonElement>("[data-source]")!;
@@ -5863,6 +5866,9 @@ agendaButton.addEventListener("click", () => {
     return;
   }
   void openAgendaTool();
+});
+agendaFullButton.addEventListener("click", () => {
+  void openAgendaView({ api, jumpToTodo: agendaOpenTodo, setStatus });
 });
 toolsButton.addEventListener("click", toggleToolsPanel);
 toolsClose.addEventListener("click", closeToolsPanel);

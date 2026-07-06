@@ -1659,6 +1659,7 @@ Falls back to JupyterLab root when no matching .ipynb exists."
       ("g" "roam graph"       my/aaronnote-roam-graph)
       ("k" "tasks"            my/aaronnote-roam-todos)
       ("A" "agenda"           my/aaronnote-roam-agenda)
+      ("L" "agenda log"       my/aaronnote-roam-agenda-log)
       ("M" "management"       my/aaronnote-roam-management)]
      ["Special pages (wiki)"
       ("!" "reports hub"      my/aaronnote-roam-reports)

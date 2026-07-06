@@ -1261,6 +1261,277 @@ button:disabled {
   font: 12px/1.4 var(--aaron-font-sans);
 }
 
+/* Full-screen, vault-wide agenda view (org-agenda-class). The small
+   `.is-agenda` modal above stays a per-file quick panel; this is the
+   first-class surface for priority/scheduled/deadline/repeat/dependency
+   work across the whole vault. */
+.aaronnote-agenda-full {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--aaron-paper);
+  font-family: var(--aaron-font-sans);
+}
+
+.aaronnote-agenda-full[hidden] {
+  display: none;
+}
+
+.aaronnote-agenda-full-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--aaron-paper-line);
+  background: var(--aaron-paper-soft);
+}
+
+.aaronnote-agenda-full-tabs,
+.aaronnote-agenda-full-nav {
+  display: flex;
+  gap: 4px;
+}
+
+.aaronnote-agenda-full-header button,
+.aaronnote-agenda-full-header input {
+  height: 28px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  background: var(--aaron-paper);
+  color: var(--aaron-ink);
+  font: 700 11px/1 var(--aaron-font-sans);
+}
+
+.aaronnote-agenda-full-header button {
+  padding: 0 10px;
+}
+
+.aaronnote-agenda-full-tabs button.is-active {
+  border-color: var(--aaron-red-dark);
+  color: var(--aaron-red-dark);
+  background: color-mix(in srgb, var(--aaron-red-dark), transparent 90%);
+}
+
+.aaronnote-agenda-full-header input[type="search"] {
+  min-width: 220px;
+  flex: 1;
+  padding: 0 9px;
+  font-weight: 500;
+}
+
+.aaronnote-agenda-full-bulk {
+  border-color: var(--aaron-accent-2) !important;
+  color: var(--aaron-accent-2) !important;
+}
+
+.aaronnote-agenda-full-close:hover {
+  border-color: var(--aaron-red-dark);
+  color: var(--aaron-red-dark);
+}
+
+.aaronnote-agenda-full-stats {
+  width: 100%;
+  color: var(--aaron-muted);
+  font: 11px/1.2 var(--aaron-font-mono);
+}
+
+.aaronnote-agenda-full-body {
+  overflow: auto;
+  padding: 10px 14px 24px;
+}
+
+.aaronnote-agenda-full-lints {
+  margin-bottom: 8px;
+  padding: 6px 9px;
+  border: 1px solid var(--aaron-accent-sand);
+  border-radius: 3px;
+  color: var(--aaron-accent-sand);
+  font: 11px/1.3 var(--aaron-font-sans);
+}
+
+.aaronnote-agenda-full-week {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+  align-items: start;
+}
+
+.aaronnote-agenda-full-day {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 4px;
+  background: var(--aaron-paper-soft);
+}
+
+.aaronnote-agenda-full-day.is-today {
+  border-color: var(--aaron-red-dark);
+}
+
+.aaronnote-agenda-full-day-head {
+  color: var(--aaron-muted);
+  font: 800 10px/1 var(--aaron-font-mono);
+  text-transform: uppercase;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--aaron-paper-line);
+}
+
+.aaronnote-agenda-full-list,
+.aaronnote-agenda-full-day {
+  display: grid;
+  gap: 4px;
+}
+
+.aaronnote-agenda-full-group-head {
+  margin-top: 8px;
+  color: var(--aaron-red-dark);
+  font: 800 10px/1 var(--aaron-font-sans);
+  text-transform: uppercase;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--aaron-paper-line);
+}
+
+.aaronnote-agenda-full-row {
+  width: 100%;
+  min-height: 32px;
+  display: grid;
+  grid-template-columns: 16px 56px 30px 1fr;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 5px 7px;
+  background: var(--aaron-paper);
+  color: var(--aaron-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.aaronnote-agenda-full-row:hover {
+  border-color: var(--aaron-paper-line);
+}
+
+.aaronnote-agenda-full-row.is-cursor {
+  border-color: var(--aaron-accent);
+}
+
+.aaronnote-agenda-full-row.is-selected {
+  background: color-mix(in srgb, var(--aaron-accent-2), transparent 88%);
+}
+
+.aaronnote-agenda-full-mark {
+  color: var(--aaron-muted);
+  font: 11px/1 var(--aaron-font-mono);
+}
+
+.aaronnote-agenda-full-status {
+  color: var(--aaron-red-dark);
+  font: 800 10px/1 var(--aaron-font-sans);
+}
+
+.aaronnote-agenda-full-row[data-status="done"] .aaronnote-agenda-full-status {
+  color: var(--aaron-green);
+}
+
+.aaronnote-agenda-full-row[data-status="cancelled"] .aaronnote-agenda-full-status {
+  color: var(--aaron-muted);
+}
+
+.aaronnote-agenda-full-row[data-status="blocked"] .aaronnote-agenda-full-status {
+  color: var(--aaron-accent-2);
+}
+
+.aaronnote-agenda-full-prio {
+  font: 800 10px/1 var(--aaron-font-mono);
+}
+
+.aaronnote-agenda-full-prio.prio-a { color: var(--aaron-red-dark); }
+.aaronnote-agenda-full-prio.prio-b { color: var(--aaron-accent); }
+.aaronnote-agenda-full-prio.prio-other { color: var(--aaron-muted); }
+
+.aaronnote-agenda-full-badge {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--aaron-accent-sand);
+  font: 11px/1 var(--aaron-font-mono);
+}
+
+.aaronnote-agenda-full-body {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.aaronnote-agenda-full-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--aaron-ink);
+  font: 12px/1.2 var(--aaron-font-sans);
+}
+
+.aaronnote-agenda-full-note {
+  color: var(--aaron-muted);
+  font: 10px/1 var(--aaron-font-sans);
+}
+
+.aaronnote-agenda-full-dep,
+.aaronnote-agenda-full-repeat {
+  color: var(--aaron-link);
+  font: 10px/1 var(--aaron-font-mono);
+}
+
+.aaronnote-agenda-full-lint {
+  color: var(--aaron-accent-sand);
+}
+
+.aaronnote-agenda-full-month {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.aaronnote-agenda-full-month-cell {
+  min-height: 56px;
+  padding: 4px 6px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  background: var(--aaron-paper-soft);
+  cursor: pointer;
+}
+
+.aaronnote-agenda-full-month-cell.is-filler {
+  visibility: hidden;
+}
+
+.aaronnote-agenda-full-month-cell.is-today {
+  border-color: var(--aaron-red-dark);
+}
+
+.aaronnote-agenda-full-month-date {
+  color: var(--aaron-muted);
+  font: 700 11px/1 var(--aaron-font-mono);
+}
+
+.aaronnote-agenda-full-month-badge {
+  margin-top: 4px;
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--aaron-red-dark), transparent 80%);
+  color: var(--aaron-red-dark);
+  font: 700 10px/1 var(--aaron-font-mono);
+}
+
 .aaronnote-modal {
   position: fixed;
   inset: 0;

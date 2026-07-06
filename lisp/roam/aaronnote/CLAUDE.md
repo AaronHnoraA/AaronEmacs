@@ -44,7 +44,7 @@ separate editor implementation.
 | `src/styles/*.css` | CM6 editor chrome and swappable Markdown themes. |
 | `aaronnote/main.ts` | Emacs-embedded app shell: notes UI, command palette, jump stack. |
 | `aaronnote/latex-export-scope.ts` | Pure whole-note/selection/heading-subtree range model used by the LaTeX scope picker. |
-| `server/lib/runtime.mjs` | Server-side note/index/save/runtime; Copilot LSP bridge. |
+| `server/lib/runtime.mjs` | Server-side note/index/save/runtime; agenda engine for `@@todo` (canonical args, dependencies, urgency, repeat completion, day/log view-model); Copilot LSP bridge. |
 | `server/lib/latex-export.mjs` | Mechanical Markdown-to-LaTeX base conversion (`mechanicalConvert`/`aaronnoteMarkdownToLatex`), template rendering, validation, atomic `.tex` writes. Merges agent rules via `options.rules`. |
 | `server/lib/latex-export-codex.mjs` | Codex polish of the mechanical draft: staged workdir, compile-verify retry loop, prose-fidelity warnings, agent-rule loading. Falls back to the draft. See `docs/latex-export-style.md`. |
 | `agents/latex-export/` | Codex export contract (`AGENTS.md`), the agent-maintained `mechanical/rules.json` (envMap/commentBlocks merged into the base converter), and `notes.md`. Edited only on a maintenance pass, never during a normal export. |
@@ -66,7 +66,7 @@ Emacs equivalents:
 | Removed subsystem | Emacs equivalent |
 |---|---|
 | Git panel (commit/diff/pull/push) | `magit` |
-| Agenda / todos panel | `my/typst-roam-todos` |
+| Agenda / todos panel | Server-backed Aaronnote agenda view-model, rendered by `aaronnote/agenda-view.ts` and Emacs `my/aaronnote-roam-agenda` |
 | Filesystem browser ranger | `dired`, roam selector |
 | Lean interactive editor (placeholders, infoview, child editors) | `lang/lean/` (Emacs LSP) |
 | Jupyter panel | Aaronnote `@@cell` |

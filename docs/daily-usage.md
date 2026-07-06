@@ -131,14 +131,18 @@ Lean 4 buffer 里 `C-c C-i` 打开右侧官方 xwidget infoview。
 目标、hypotheses、诊断、trace、Try this、code actions 等交互都走
 `lisp/lang/lean/lean4-infoview-bridge/` 里的官方 React infoview bridge。
 
-Note task chip 支持 `priority`、`due`、`scheduled`、`repeat`，例如
-`#todo(priority: "A", due: "2026-05-20")[Write proof]`。`*Note Agenda*`
-里 `c` 循环状态，`t` 选择状态，`s` 设置 scheduled，`D` 设置 due，`p`
-设置 priority，`r` 设置 repeat，`.` 设 scheduled=today，`!` 设 due=today，`<` / `>`
-前后移动日期，`0` 清掉日期 metadata，`?` 打开同一套 task 菜单。Agenda / board buffer
-排除 Evil，但保留 `h/j/k/l` 轻导航；默认扫描只进 `todo / doing / waiting`，`done / cancelled`
-只在 `C-u`、all 视图或 `C` closed board 里进入扫描范围；closed board 只扫 `done / cancelled`。
-日期输入走 Org 的 date prompt，可用弹出的 calendar 和 `+2w`、`Fri` 这类 Org 解析。Graph 搜索框支持全文词和
+Aaronnote 任务使用 `@@todo(state) [text] {key: value}`，例如
+`@@todo(doing) [Write proof] {prio: A, ddl: 2026-05-20, repeat: +1w}`。
+agenda 引擎在 `server/lib/runtime.mjs`，Web 和 Emacs 都只渲染同一个 view-model；
+priority、deadline/scheduled、repeat、dependency、done/log 都写回原始 `@@todo`
+行。Emacs 里 `M-x my/aaronnote-roam-agenda` 或 dispatch `A` 打开
+`*roam-agenda*`，`L` 直接进 log view。常用键：`t` 状态，`p` / `,` priority，
+`d` deadline，`s` scheduled，`r` repeat，`a` dependency picker，`m` / `u`
+标记，`B` 批量，`f` / `b` 翻 range，`.` 今天，`v` 切 week/list/calendar/log，
+`RET` / `TAB` 跳源，`g` 刷新，`q` 关闭。完整语法和 API 见
+[`agenda.md`](agenda.md)。
+
+Graph 搜索框支持全文词和
 `tag:` / `alias:` / `path:` / `title:` 过滤，并会提示 tag / alias / path 等候选。
 本地 graph xwidget buffer 里 `M-w` 会 kill graph buffer 并关掉 graph websocket。
 

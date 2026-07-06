@@ -2,11 +2,38 @@ function cleanAttrValue(value) {
   return String(value || "").trim().replace(/^["']|["']$/g, "");
 }
 
+function splitArgChunks(body) {
+  const chunks = [];
+  let current = "";
+  let quote = null;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (quote) {
+      current += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === ";" || ch === ",") {
+      chunks.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  chunks.push(current);
+  return chunks;
+}
+
 export function parseCommandArgs(raw = "") {
   const body = String(raw || "").trim().replace(/^\{/, "").replace(/\}$/, "").trim();
   if (!body) return {};
   const out = {};
-  for (const chunk of body.split(/[;,]/)) {
+  for (const chunk of splitArgChunks(body)) {
     const item = chunk.trim();
     if (!item) continue;
     const attrPattern = /([A-Za-z][\w-]*)(?:\s*[:=]\s*("[^"]*"|'[^']*'|.*?))?(?=\s+[A-Za-z][\w-]*(?:\s*[:=]|\s*$)|$)/g;

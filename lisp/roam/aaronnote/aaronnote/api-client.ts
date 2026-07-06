@@ -172,11 +172,49 @@ export type TodoItem = Record<string, unknown> & {
   index?: number;
   tags?: string[];
   inlineTags?: string[];
+  /** Canonical arg keys (ddl/sche/prio/repeat/warn/after/done/log) after alias normalization. */
+  canon?: Record<string, string>;
+  /** Ids of other todos this one depends on (resolved by text reference, no ids in source). */
+  deps?: string[];
+  /** Status as computed by dependency resolution: "blocked" when an unresolved dep is open. */
+  effectiveStatus?: string;
+  /** Ids of open dependencies causing a computed-blocked effectiveStatus. */
+  blockedBy?: string[];
+  /** Sort key from the urgency formula (priority + deadline proximity + doing/blocked adjustments). */
+  urgency?: number;
 };
 export type TodosMsg = {
   type?: string;
   todos?: TodoItem[];
   root?: string;
+};
+export type TodoLint = {
+  todoId?: string;
+  file?: string;
+  line?: number;
+  kind?: "broken-ref" | "ambiguous-ref" | "ambiguous-note";
+  ref?: string;
+  message?: string;
+  candidates?: Array<{ id: string; text: string }>;
+};
+export type AgendaEntry = {
+  kind?: "deadline" | "warning" | "overdue" | "scheduled" | "sched-carry" | "log";
+  label?: string;
+  todoId?: string;
+  date?: string;
+  dateKey?: string;
+  time?: string | null;
+  urgency?: number;
+};
+export type AgendaDay = { date?: string; entries?: AgendaEntry[] };
+export type AgendaMsg = {
+  type?: string;
+  range?: { from?: string; to?: string; today?: string };
+  days?: AgendaDay[];
+  todos?: TodoItem[];
+  lints?: TodoLint[];
+  logByDay?: Record<string, number>;
+  stats?: { open?: number; doing?: number; done?: number; cancelled?: number; blocked?: number; overdue?: number };
 };
 type NativeApi = {
   notes?: {
@@ -191,6 +229,9 @@ type NativeApi = {
     notesIndex?: () => Promise<unknown>;
     todos?: (file: string) => Promise<unknown>;
     updateTodo?: (body: Record<string, unknown>) => Promise<unknown>;
+    agenda?: (body: Record<string, unknown>) => Promise<unknown>;
+    patchTodo?: (body: Record<string, unknown>) => Promise<unknown>;
+    todoDepRef?: (body: Record<string, unknown>) => Promise<unknown>;
   };
   completions?: {
     tags?: (prefix: string) => Promise<unknown>;
@@ -354,6 +395,18 @@ export const api = {
     async updateTodo(body: Record<string, unknown>): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().notes?.updateTodo, "Todo update");
       return ensureOk(await call(body) as Record<string, unknown>, "Todo update failed");
+    },
+    async agenda(body: Record<string, unknown> = {}): Promise<AgendaMsg> {
+      const call = requireMethod(nativeApi().notes?.agenda, "Agenda");
+      return ensureOk(await call(body) as AgendaMsg, "Agenda failed");
+    },
+    async patchTodo(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().notes?.patchTodo, "Todo patch");
+      return ensureOk(await call(body) as Record<string, unknown>, "Todo patch failed");
+    },
+    async todoDepRef(body: Record<string, unknown>): Promise<{ type?: string; ref?: string }> {
+      const call = requireMethod(nativeApi().notes?.todoDepRef, "Todo dependency reference");
+      return ensureOk(await call(body) as { type?: string; ref?: string }, "Todo dependency reference failed");
     },
   },
   noteCode: {

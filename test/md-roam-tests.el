@@ -73,7 +73,77 @@ source: roam/demo/analysis.md
                  my/aaronnote-roam--runtime-index-cache-key nil
                  my/aaronnote-roam--scan-cache nil)
            ,@body)
-       (delete-directory root t))))
+	       (delete-directory root t))))
+
+(defun my/aaronnote-roam-test--agenda-model (todos from days)
+  "Return a small server-shaped agenda view model for TODOS."
+  (let* ((from (or from (format-time-string "%Y-%m-%d")))
+         (days (or days 7))
+         (today (format-time-string "%Y-%m-%d"))
+         (dates nil)
+         (entries-by-date (make-hash-table :test 'equal))
+         (open 0)
+         (doing 0)
+         (done 0)
+         (cancelled 0)
+         (blocked 0)
+         (overdue 0))
+    (dotimes (index days)
+      (let ((date (my/aaronnote-agenda--date-add from index)))
+        (push date dates)
+        (puthash date nil entries-by-date)))
+    (dolist (todo todos)
+      (let* ((id (my/aaronnote-roam--todo-field todo "id"))
+             (status (my/aaronnote-roam--todo-status todo))
+             (date (my/aaronnote-roam--todo-agenda-date todo)))
+        (pcase status
+          ("blocked" (setq blocked (1+ blocked)))
+          ("doing" (setq doing (1+ doing)))
+          ((or "done" "complete" "completed") (setq done (1+ done)))
+          ((or "cancelled" "canceled") (setq cancelled (1+ cancelled)))
+          (_ (setq open (1+ open))))
+        (when (and date (string< date today)
+                   (not (my/aaronnote-roam--todo-closed-p todo)))
+          (setq overdue (1+ overdue)))
+        (when (and id date
+                   (not (eq (gethash date entries-by-date 'missing)
+                            'missing)))
+          (push `(:kind "deadline"
+                  :label "Deadline"
+                  :todoId ,id
+                  :date ,date
+                  :dateKey "ddl"
+                  :urgency 0)
+                (gethash date entries-by-date)))))
+    `(:type "agenda"
+      :range (:from ,from
+              :to ,(my/aaronnote-agenda--date-add from (1- days))
+              :today ,today)
+      :days ,(mapcar (lambda (date)
+                       `(:date ,date
+                         :entries ,(nreverse (gethash date entries-by-date))))
+                     (nreverse dates))
+      :todos ,todos
+      :lints nil
+      :logByDay nil
+      :stats (:open ,open
+              :doing ,doing
+              :done ,done
+              :cancelled ,cancelled
+              :blocked ,blocked
+              :overdue ,overdue))))
+
+(defun my/aaronnote-roam-test--agenda-runtime (todos)
+  "Return a mock `my/aaronnote-roam--runtime-call' for agenda TODOS."
+  (lambda (&rest args)
+    (pcase (car args)
+      ("agenda"
+       (let* ((json-str (or (cadr (member "--json" args)) "{}"))
+              (body (json-parse-string json-str :object-type 'alist))
+              (from (alist-get 'from body))
+              (days (alist-get 'days body)))
+         (my/aaronnote-roam-test--agenda-model todos from days)))
+      (_ nil))))
 
 (ert-deftest my/aaronnote-roam-parse-canonical-targets ()
   (my/aaronnote-roam-test-with-vault
@@ -434,53 +504,57 @@ source: roam/demo/analysis.md
         (when-let* ((buffer (get-buffer "*roam-orphaned-assets*")))
           (kill-buffer buffer))))))
 
-(ert-deftest my/aaronnote-roam-agenda-keeps-today-out-of-overdue ()
-  (my/aaronnote-roam-test-with-vault
-    (let ((todo '(:note "20260605T120000-topology"
-                  :title "Topology Note"
-                  :text "Review compact workbench"
-                  :status "todo"
-                  :ddl "2026-06-06")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'my/aaronnote-roam--todos)
-                     (lambda () (list todo)))
-                    ((symbol-function 'my/aaronnote-roam--todo-overdue-p)
-                     (lambda (_ddl) t))
-                    ((symbol-function 'format-time-string)
-                     (lambda (&rest _args) "2026-06-06"))
-                    ((symbol-function 'display-buffer)
-                     (lambda (buffer &rest _args) buffer)))
-            (my/aaronnote-roam-agenda)
-            (with-current-buffer "*roam-agenda*"
-              (should (string-match-p ">  Today" (buffer-string)))
-              (should-not (string-match-p ">  Overdue" (buffer-string)))))
-        (when-let* ((buffer (get-buffer "*roam-agenda*")))
-          (kill-buffer buffer))))))
+	(ert-deftest my/aaronnote-roam-agenda-keeps-today-out-of-overdue ()
+	  (my/aaronnote-roam-test-with-vault
+	    (let ((todo '(:id "todo-today"
+	                  :note "20260605T120000-topology"
+	                  :title "Topology Note"
+	                  :text "Review compact workbench"
+	                  :status "todo"
+	                  :ddl "2026-06-06")))
+	      (unwind-protect
+	          (cl-letf (((symbol-function 'my/aaronnote-roam--runtime-call)
+	                     (my/aaronnote-roam-test--agenda-runtime (list todo)))
+	                    ((symbol-function 'my/aaronnote-roam--todo-overdue-p)
+	                     (lambda (_ddl) t))
+	                    ((symbol-function 'format-time-string)
+	                     (lambda (&rest _args) "2026-06-06"))
+	                    ((symbol-function 'display-buffer)
+	                     (lambda (buffer &rest _args) buffer)))
+	            (my/aaronnote-roam-agenda)
+	            (with-current-buffer "*roam-agenda*"
+	              (should (string-match-p "2026-06-06  Today" (buffer-string)))
+	              (should (string-match-p "Review compact workbench" (buffer-string)))))
+	        (when-let* ((buffer (get-buffer "*roam-agenda*")))
+	          (kill-buffer buffer))))))
 
 (ert-deftest my/aaronnote-roam-agenda-default-hides-closed-tasks ()
   (my/aaronnote-roam-test-with-vault
-    (let ((todos '((:note "open-note"
-                    :title "Open Note"
-                    :text "Open task"
-                    :status "todo"
-                    :ddl "2026-06-07")
-                   (:note "done-note"
-                    :title "Done Note"
-                    :text "Finished task"
-                    :status "done"
-                    :ddl "2026-06-07")
-                   (:note "cancel-note"
-                    :title "Cancel Note"
-                    :text "Dropped task"
-                    :status "cancelled"
-                    :ddl "2026-06-07"))))
-      (unwind-protect
-          (cl-letf (((symbol-function 'my/aaronnote-roam--todos)
-                     (lambda () todos))
-                    ((symbol-function 'format-time-string)
-                     (lambda (&rest _args) "2026-06-06"))
-                    ((symbol-function 'display-buffer)
-                     (lambda (buffer &rest _args) buffer)))
+	    (let ((todos '((:id "open"
+	                    :note "open-note"
+	                    :title "Open Note"
+	                    :text "Open task"
+	                    :status "todo"
+	                    :ddl "2026-06-07")
+	                   (:id "done"
+	                    :note "done-note"
+	                    :title "Done Note"
+	                    :text "Finished task"
+	                    :status "done"
+	                    :ddl "2026-06-07")
+	                   (:id "cancel"
+	                    :note "cancel-note"
+	                    :title "Cancel Note"
+	                    :text "Dropped task"
+	                    :status "cancelled"
+	                    :ddl "2026-06-07"))))
+	      (unwind-protect
+	          (cl-letf (((symbol-function 'my/aaronnote-roam--runtime-call)
+	                     (my/aaronnote-roam-test--agenda-runtime todos))
+	                    ((symbol-function 'format-time-string)
+	                     (lambda (&rest _args) "2026-06-06"))
+	                    ((symbol-function 'display-buffer)
+	                     (lambda (buffer &rest _args) buffer)))
             (my/aaronnote-roam-agenda)
             (with-current-buffer "*roam-agenda*"
               (should (string-match-p "Open task" (buffer-string)))
@@ -562,19 +636,75 @@ source: roam/demo/analysis.md
                              (my/aaronnote-roam--agenda-sort-todos todos))
                      '("High priority" "Low priority"))))))
 
-(ert-deftest my/aaronnote-roam-agenda-renders-todo-metadata ()
+	(ert-deftest my/aaronnote-roam-agenda-renders-todo-metadata ()
+	  (my/aaronnote-roam-test-with-vault
+	    (let ((todo '(:id "todo-meta"
+	                  :note "20260605T120000-topology"
+	                  :title "Topology Note"
+	                  :text "Review compact workbench"
+	                  :status "todo"
+	                  :due "2026-06-07"
+	                  :priority "A"
+	                  :scheduled "2026-06-06"
+	                  :repeat "+1w")))
+	      (unwind-protect
+	          (cl-letf (((symbol-function 'my/aaronnote-roam--runtime-call)
+	                     (my/aaronnote-roam-test--agenda-runtime (list todo)))
+	                    ((symbol-function 'format-time-string)
+	                     (lambda (&rest _args) "2026-06-06"))
+	                    ((symbol-function 'display-buffer)
+	                     (lambda (buffer &rest _args) buffer)))
+	            (my/aaronnote-roam-agenda)
+	            (with-current-buffer "*roam-agenda*"
+	              (let ((text (buffer-string)))
+	                (should (derived-mode-p 'my/aaronnote-agenda-mode))
+	                (should (string-match-p "Review compact workbench" text))
+	                (should (string-match-p "\\[#A\\]" text))
+	                (should (string-match-p "DDL 2026-06-07" text))
+	                (should (string-match-p "SCHED 2026-06-06" text))
+	                (should (string-match-p "REP [+]1w" text)))))
+	        (when-let* ((buffer (get-buffer "*roam-agenda*")))
+	          (kill-buffer buffer))))))
+
+	(ert-deftest my/aaronnote-roam-agenda-renders-empty-todo-metadata-columns ()
+	  (my/aaronnote-roam-test-with-vault
+	    (let ((todo '(:id "todo-empty-meta"
+	                  :note "20260605T120000-topology"
+	                  :title "Topology Note"
+	                  :text "Review compact workbench"
+	                  :status "todo")))
+	      (unwind-protect
+	          (cl-letf (((symbol-function 'my/aaronnote-roam--runtime-call)
+	                     (my/aaronnote-roam-test--agenda-runtime (list todo)))
+	                    ((symbol-function 'format-time-string)
+	                     (lambda (&rest _args) "2026-06-06"))
+	                    ((symbol-function 'display-buffer)
+	                     (lambda (buffer &rest _args) buffer)))
+	            (my/aaronnote-roam-agenda 'all nil)
+	            (with-current-buffer "*roam-agenda*"
+	              (let ((text (buffer-string)))
+	                (should (derived-mode-p 'my/aaronnote-agenda-mode))
+	                (should (string-match-p "List view, all filter" text))
+	                (should (string-match-p "Review compact workbench" text))
+	                (should (string-match-p "Topology Note" text)))))
+	        (when-let* ((buffer (get-buffer "*roam-agenda*")))
+	          (kill-buffer buffer))))))
+
+(ert-deftest my/aaronnote-roam-agenda-week-shows-open-backlog-without-day-entries ()
   (my/aaronnote-roam-test-with-vault
-    (let ((todo '(:note "20260605T120000-topology"
-                  :title "Topology Note"
-                  :text "Review compact workbench"
-                  :status "todo"
-                  :due "2026-06-07"
-                  :priority "A"
-                  :scheduled "2026-06-06"
-                  :repeat "+1w")))
+    (let ((todos '((:id "todo-backlog"
+                    :note "20260605T120000-topology"
+                    :title "Topology Note"
+                    :text "Loose todo"
+                    :status "todo")
+                   (:id "doing-backlog"
+                    :note "20260605T120000-analysis"
+                    :title "Analysis Note"
+                    :text "Active loose todo"
+                    :status "doing"))))
       (unwind-protect
-          (cl-letf (((symbol-function 'my/aaronnote-roam--todos)
-                     (lambda () (list todo)))
+          (cl-letf (((symbol-function 'my/aaronnote-roam--runtime-call)
+                     (my/aaronnote-roam-test--agenda-runtime todos))
                     ((symbol-function 'format-time-string)
                      (lambda (&rest _args) "2026-06-06"))
                     ((symbol-function 'display-buffer)
@@ -582,65 +712,43 @@ source: roam/demo/analysis.md
             (my/aaronnote-roam-agenda)
             (with-current-buffer "*roam-agenda*"
               (let ((text (buffer-string)))
-                (should (string-match-p "Status.*Date.*P.*Due.*Sched.*Rep.*Note.*Task" text))
-                (should (string-match-p "TODO.*2026-06-07.*A.*2026-06-07.*2026-06-06.*\\+1w" text))
-                (should (string-match-p "Pri" text))
-                (should (string-match-p "Sched" text)))))
+                (should (derived-mode-p 'my/aaronnote-agenda-mode))
+                (should (string-match-p "Backlog" text))
+                (should (string-match-p "Loose todo" text))
+                (should (string-match-p "Active loose todo" text))
+                (should (string-match-p "DOING" text))
+                (should-not (string-match-p "No agenda entries" text)))))
         (when-let* ((buffer (get-buffer "*roam-agenda*")))
           (kill-buffer buffer))))))
 
-(ert-deftest my/aaronnote-roam-agenda-renders-empty-todo-metadata-columns ()
-  (my/aaronnote-roam-test-with-vault
-    (let ((todo '(:note "20260605T120000-topology"
-                  :title "Topology Note"
-                  :text "Review compact workbench"
-                  :status "todo")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'my/aaronnote-roam--todos)
-                     (lambda () (list todo)))
+	(ert-deftest my/aaronnote-roam-agenda-row-buttons-update-status ()
+	  (my/aaronnote-roam-test-with-vault
+	    (let ((todo '(:id "todo-status"
+	                  :note "20260605T120000-topology"
+	                  :title "Topology Note"
+	                  :text "Review compact workbench"
+	                  :status "todo"
+	                  :ddl "2026-06-07"))
+	          updated)
+	      (unwind-protect
+	          (cl-letf (((symbol-function 'my/aaronnote-roam--runtime-call)
+	                     (my/aaronnote-roam-test--agenda-runtime (list todo)))
+	                    ((symbol-function 'my/aaronnote-roam-update-todo-status)
+	                     (lambda (status &optional entry)
+	                       (setq updated (list status entry))))
                     ((symbol-function 'format-time-string)
                      (lambda (&rest _args) "2026-06-06"))
                     ((symbol-function 'display-buffer)
                      (lambda (buffer &rest _args) buffer)))
             (my/aaronnote-roam-agenda)
-            (with-current-buffer "*roam-agenda*"
-              (let ((text (buffer-string)))
-                (should (string-match-p "Status.*Date.*P.*Due.*Sched.*Rep.*Note.*Task" text))
-                (should (string-match-p "TODO.*no-date.*-.*-.*-.*-" text))
-                (should (string-match-p "Pri" text))
-                (should (string-match-p "Due" text))
-                (should (string-match-p "Rep" text)))))
-        (when-let* ((buffer (get-buffer "*roam-agenda*")))
-          (kill-buffer buffer))))))
-
-(ert-deftest my/aaronnote-roam-agenda-row-buttons-update-status ()
-  (my/aaronnote-roam-test-with-vault
-    (let ((todo '(:note "20260605T120000-topology"
-                  :title "Topology Note"
-                  :text "Review compact workbench"
-                  :status "todo"
-                  :ddl "2026-06-07"))
-          updated)
-      (unwind-protect
-          (cl-letf (((symbol-function 'my/aaronnote-roam--todos)
-                     (lambda () (list todo)))
-                    ((symbol-function 'my/aaronnote-roam-update-todo-status)
-                     (lambda (status &optional entry)
-                       (setq updated (list status entry))))
-                    ((symbol-function 'format-time-string)
-                     (lambda (&rest _args) "2026-06-06"))
-                    ((symbol-function 'display-buffer)
-                     (lambda (buffer &rest _args) buffer)))
-            (my/aaronnote-roam-agenda)
-            (with-current-buffer "*roam-agenda*"
-              (goto-char (point-min))
-              (search-forward "Review compact")
-              (search-forward " Done ")
-              (push-button (button-at (1- (point)))))
-            (should (equal (car updated) "done"))
-            (should (eq (cadr updated) todo)))
-        (when-let* ((buffer (get-buffer "*roam-agenda*")))
-          (kill-buffer buffer))))))
+	            (with-current-buffer "*roam-agenda*"
+	              (goto-char (point-min))
+	              (search-forward "Review compact")
+	              (my/aaronnote-agenda-set-status "done"))
+	            (should (equal (car updated) "done"))
+	            (should (eq (cadr updated) todo)))
+	        (when-let* ((buffer (get-buffer "*roam-agenda*")))
+	          (kill-buffer buffer))))))
 
 (ert-deftest my/aaronnote-roam-todo-metadata-update-sends-runtime-patch ()
   (my/aaronnote-roam-test-with-vault
@@ -658,11 +766,14 @@ source: roam/demo/analysis.md
                  (lambda () nil))
                 ((symbol-function 'my/aaronnote-roam-ui-refresh)
                  (lambda () nil)))
-        (my/aaronnote-roam-update-todo-metadata "priority" "B" todo))
-      (should (equal (car captured) "update-todo"))
-      (should (equal (cadr (member "--file" captured)) note-file))
-      (should (equal (cadr (member "--priority" captured)) "B"))
-      (should-not (member "--status" captured)))))
+	        (my/aaronnote-roam-update-todo-metadata "priority" "B" todo))
+	      (should (equal (car captured) "patch-todo"))
+	      (let ((payload (json-parse-string
+	                      (cadr (member "--json" captured))
+	                      :object-type 'alist)))
+	        (should (equal (alist-get 'file payload) note-file))
+	        (should (equal (alist-get 'priority payload) "B"))
+	        (should-not (alist-get 'status payload))))))
 
 (ert-deftest my/aaronnote-roam-todos-reads-runtime-without-activating-sync ()
   (my/aaronnote-roam-test-with-vault
@@ -677,9 +788,10 @@ source: roam/demo/analysis.md
                  (lambda () nil))
                 ((symbol-function 'my/aaronnote-roam--scan-todos)
                  (lambda () nil)))
-        (my/aaronnote-roam--todos))
-      (should (equal (car captured) "todos"))
-      (should-not (member "--activate-sync" captured)))))
+	        (my/aaronnote-roam--todos))
+	      (should (equal (car captured) "agenda"))
+	      (should (member "--json" captured))
+	      (should-not (member "--activate-sync" captured)))))
 
 (ert-deftest my/aaronnote-roam-agenda-calendar-uses-square-cells ()
   (my/aaronnote-roam-test-with-vault
@@ -687,16 +799,17 @@ source: roam/demo/analysis.md
            (month (nth 4 decoded))
            (year (nth 5 decoded))
            (date (format "%04d-%02d-15" year month))
-           (todo `(:note "20260605T120000-topology"
-                   :title "Topology Note"
-                   :text "Calendar task"
-                   :status "todo"
-                   :ddl ,date)))
-      (unwind-protect
-          (cl-letf (((symbol-function 'my/aaronnote-roam--todos)
-                     (lambda () (list todo)))
-                    ((symbol-function 'display-buffer)
-                     (lambda (buffer &rest _args) buffer)))
+	           (todo `(:id "calendar-task"
+	                   :note "20260605T120000-topology"
+	                   :title "Topology Note"
+	                   :text "Calendar task"
+	                   :status "todo"
+	                   :ddl ,date)))
+	      (unwind-protect
+	          (cl-letf (((symbol-function 'my/aaronnote-roam--runtime-call)
+	                     (my/aaronnote-roam-test--agenda-runtime (list todo)))
+	                    ((symbol-function 'display-buffer)
+	                     (lambda (buffer &rest _args) buffer)))
             (my/aaronnote-roam-agenda-calendar)
             (with-current-buffer "*roam-agenda-calendar*"
               (should (string-match-p "SUN      MON      TUE" (buffer-string)))

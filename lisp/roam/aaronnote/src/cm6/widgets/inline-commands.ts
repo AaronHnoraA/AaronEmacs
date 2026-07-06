@@ -157,7 +157,24 @@ class TodoWidget extends MeasuredWidget {
         const lowKey = key.toLowerCase();
         const isDateKey = DATE_KEYS.has(lowKey);
         const parsed = isDateKey ? parseDateValue(value) : null;
-        if (isDateKey && parsed) {
+        if (lowKey === "prio" || lowKey === "priority") {
+          const pill = document.createElement("span");
+          pill.className = "inline-todo-prio";
+          pill.dataset.prio = value.trim().toUpperCase();
+          pill.textContent = `#${value.trim().toUpperCase()}`;
+          meta.append(pill);
+        } else if (lowKey === "after" || lowKey === "dep") {
+          const pill = document.createElement("span");
+          pill.className = "inline-todo-dep";
+          pill.title = value;
+          pill.textContent = `→ ${value}`;
+          meta.append(pill);
+        } else if (lowKey === "repeat" || lowKey === "rep" || lowKey === "every") {
+          const pill = document.createElement("span");
+          pill.className = "inline-todo-repeat";
+          pill.textContent = `↻ ${value}`;
+          meta.append(pill);
+        } else if (isDateKey && parsed) {
           const canonical = formatDateValue(parsed.time, parsed.hasTime);
           const pill = document.createElement("span");
           pill.className = "inline-todo-date";

@@ -43,6 +43,9 @@ import {
   rewriteMarkdownPathReferences,
   getTodos,
   updateTodoStatus,
+  buildAgenda,
+  patchTodo,
+  depRefForTodo,
   runtimeDebugSnapshot,
 } from "./server/lib/index.mjs";
 import { configure, markNotesDirty, notesIndexVersionValue, noteSelfWriteRecently, notePathWatchRelevant } from "./server/lib/state.mjs";
@@ -559,6 +562,27 @@ const apiHandlers = {
     return await getTodos(typeof body === "string" ? body : body || {});
   },
   "aaronnote:api:notes:update-todo": (body) => updateTodoStatus(body || {}),
+  "aaronnote:api:notes:agenda": (body) => buildAgenda(body || {}),
+  "aaronnote:api:notes:patch-todo": (body) => patchTodo(body || {}),
+  "aaronnote:api:notes:todo-dep-ref": async (body) => {
+    const targetId = String(body?.targetId || "");
+    const sourceId = String(body?.sourceId || "");
+    if (!targetId) {
+      const err = new Error("targetId is required");
+      err.statusCode = 400;
+      throw err;
+    }
+    const { todos } = await getTodos("");
+    const target = todos.find((todo) => todo.id === targetId);
+    if (!target) {
+      const err = new Error("Todo not found");
+      err.statusCode = 404;
+      throw err;
+    }
+    const source = sourceId ? todos.find((todo) => todo.id === sourceId) || null : null;
+    const scope = todos.filter((todo) => todo.file === target.file);
+    return { type: "todo-dep-ref", ref: depRefForTodo(target, scope, source) };
+  },
   "aaronnote:api:notes:index": async () => {
     return { type: "notes", ...await notesIndexPayload(), root: noteRoot };
   },
@@ -844,7 +868,10 @@ function adapterScript(origin) {
       metaAdd: function(body) { return call("aaronnote:api:notes:meta-add", [body || {}]); },
       notesIndex: function() { return call("aaronnote:api:notes:index", []); },
       todos: function(file) { return call("aaronnote:api:notes:todos", [{ file: String(file || "") }]); },
-      updateTodo: function(body) { return call("aaronnote:api:notes:update-todo", [body || {}]); }
+      updateTodo: function(body) { return call("aaronnote:api:notes:update-todo", [body || {}]); },
+      agenda: function(body) { return call("aaronnote:api:notes:agenda", [body || {}]); },
+      patchTodo: function(body) { return call("aaronnote:api:notes:patch-todo", [body || {}]); },
+      todoDepRef: function(body) { return call("aaronnote:api:notes:todo-dep-ref", [body || {}]); }
     },
     completions: {
       tags: function(prefix) { return call("aaronnote:api:completions:tags", [{ prefix: String(prefix || "") }]); },

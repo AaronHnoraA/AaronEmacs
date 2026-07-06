@@ -1707,6 +1707,49 @@
   font-variant-numeric: tabular-nums;
 }
 
+.cm-editor .inline-todo-prio {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 7px;
+  border-radius: 9.5px;
+  border: 1px solid color-mix(in srgb, var(--aaron-red-dark, #ffb2bf), transparent 40%);
+  background: color-mix(in srgb, var(--aaron-red-dark, #ffb2bf), transparent 88%);
+  color: var(--aaron-red-dark, #ffb2bf);
+  font: 800 10px/1 var(--aaron-font-mono, monospace);
+  vertical-align: -2px;
+}
+
+.cm-editor .inline-todo-prio[data-prio="B"] {
+  border-color: color-mix(in srgb, var(--aaron-accent, #7ee7ff), transparent 40%);
+  background: color-mix(in srgb, var(--aaron-accent, #7ee7ff), transparent 88%);
+  color: var(--aaron-accent, #7ee7ff);
+}
+
+.cm-editor .inline-todo-prio:not([data-prio="A"]):not([data-prio="B"]) {
+  border-color: color-mix(in srgb, var(--aaron-muted, #a9bed3), transparent 40%);
+  background: color-mix(in srgb, var(--aaron-muted, #a9bed3), transparent 90%);
+  color: var(--aaron-muted, #a9bed3);
+}
+
+.cm-editor .inline-todo-dep,
+.cm-editor .inline-todo-repeat {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 8px;
+  border-radius: 9.5px;
+  border: 1px solid color-mix(in srgb, var(--aaron-link, #7ee7ff), transparent 45%);
+  background: color-mix(in srgb, var(--aaron-link, #7ee7ff), transparent 90%);
+  color: var(--aaron-link, #7ee7ff);
+  font: 650 10px/1 var(--aaron-font-mono, monospace);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: -2px;
+}
+
 .cm-editor .inline-todo-date {
   --date-accent: #a9bed3;
   --date-bg: #1e2536;

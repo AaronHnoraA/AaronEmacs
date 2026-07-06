@@ -2675,7 +2675,48 @@ export async function scanRoamNotes() {
 
 const todoStatuses = new Set(["todo", "doing", "done", "blocked", "cancelled"]);
 
-const DATE_KEYS = new Set(["ddl", "due", "deadline", "scheduled", "start", "done", "date", "when"]);
+const DATE_KEYS = new Set(["ddl", "due", "deadline", "sche", "scheduled", "start", "done", "date", "when"]);
+
+// Canonical @@todo arg keys and their read aliases. Reads normalize every
+// alias to the canonical key; writes reuse whichever alias a line already
+// has and only introduce the canonical spelling for brand-new args, so
+// existing notes (e.g. `{ddl: ...}`) never get silently rewritten.
+const TODO_KEY_ALIASES = {
+  ddl: ["ddl", "due", "deadline"],
+  sche: ["sche", "scheduled", "start"],
+  prio: ["prio", "priority"],
+  repeat: ["repeat", "rep", "every"],
+  warn: ["warn", "lead"],
+  after: ["after", "dep"],
+  done: ["done"],
+  log: ["log"],
+};
+
+const TODO_CANON_KEYS = Object.keys(TODO_KEY_ALIASES);
+
+export function canonicalTodoArgs(args) {
+  const out = {};
+  if (!args || typeof args !== "object") return out;
+  for (const canon of TODO_CANON_KEYS) {
+    for (const alias of TODO_KEY_ALIASES[canon]) {
+      if (Object.prototype.hasOwnProperty.call(args, alias) && args[alias]) {
+        out[canon] = canon === "prio" ? String(args[alias]).toUpperCase() : args[alias];
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+// Which arg key a patch should write for `canonKey`: the alias already
+// present on the line, or the canonical spelling if the arg is new.
+export function todoArgKeyForCanonical(canonKey, existingArgs) {
+  const aliases = TODO_KEY_ALIASES[canonKey] || [canonKey];
+  for (const alias of aliases) {
+    if (existingArgs && Object.prototype.hasOwnProperty.call(existingArgs, alias)) return alias;
+  }
+  return aliases[0];
+}
 
 function midnightMs(d) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
@@ -2795,6 +2836,7 @@ export function extractTodos(content, note, updatedAt) {
       status,
       text,
       args,
+      canon: canonicalTodoArgs(args),
       meta: command.argsRaw,
       ddl: args.ddl || "",
       source,
@@ -2898,15 +2940,14 @@ function patchTodoSource(source, body = {}) {
   return replaceTodoArgsInSource(next, command.argsRaw || "", serializeTodoArgs(args));
 }
 
-export async function updateTodoStatus(body = {}) {
-  const file = safeOpenFile(body.file || "");
-  const hasMetadataPatch = [...TODO_PATCH_ARG_KEYS].some((key) => bodyHasOwn(body, key));
-  const shouldPatchStatus = bodyHasOwn(body, "status") || !hasMetadataPatch;
-  const status = shouldPatchStatus ? normalizeTodoStatus(body.status || "done") : "";
+// Shared todo locator: index+source match, then a line-anchored regex scan,
+// then a full re-extract match by id/source/text. Used by updateTodoStatus
+// and the newer patchTodo/completeTodo so both tolerate unsaved editor drift
+// the same way.
+function locateTodoInContent(content, body, file) {
   const source = String(body.source || "");
   const hasIndex = body.index !== undefined && body.index !== null && String(body.index) !== "";
   const rawIndex = hasIndex ? Number(body.index) : NaN;
-  const content = await readFile(file, "utf8");
   let from = -1;
   let to = -1;
 
@@ -2944,11 +2985,22 @@ export async function updateTodoStatus(body = {}) {
     }
   }
 
-  if (from < 0 || to <= from) {
+  return from >= 0 && to > from ? { from, to } : null;
+}
+
+export async function updateTodoStatus(body = {}) {
+  const file = safeOpenFile(body.file || "");
+  const hasMetadataPatch = [...TODO_PATCH_ARG_KEYS].some((key) => bodyHasOwn(body, key));
+  const shouldPatchStatus = bodyHasOwn(body, "status") || !hasMetadataPatch;
+  const status = shouldPatchStatus ? normalizeTodoStatus(body.status || "done") : "";
+  const content = await readFile(file, "utf8");
+  const loc = locateTodoInContent(content, body, file);
+  if (!loc) {
     const err = new Error("Todo source was not found");
     err.statusCode = 404;
     throw err;
   }
+  const { from, to } = loc;
 
   const oldSource = content.slice(from, to);
   const patchBody = shouldPatchStatus ? { ...body, status } : body;
@@ -3006,6 +3058,473 @@ async function scanTodos() {
       || b.updatedAt - a.updatedAt
       || String(a.noteTitle).localeCompare(String(b.noteTitle));
   });
+}
+
+// ---------------------------------------------------------------------------
+// Agenda engine: repeaters, dependency resolution (no ids — text refs), the
+// urgency/sort formula, day-bucketed view-model, and canonical-key patching
+// (priority/scheduled/deadline/repeat/after) that writes straight back into
+// the @@todo line. See docs/agenda.md.
+// ---------------------------------------------------------------------------
+
+const CLOSED_STATUSES = new Set(["done", "cancelled"]);
+
+function shiftDate(time, n, unit) {
+  const d = new Date(time);
+  if (unit === "d") d.setDate(d.getDate() + n);
+  else if (unit === "w") d.setDate(d.getDate() + 7 * n);
+  else if (unit === "m") d.setMonth(d.getMonth() + n);
+  else if (unit === "y") d.setFullYear(d.getFullYear() + n);
+  return d.getTime();
+}
+
+// Repeater grammar: `[+|++|.+]N(d|w|m|y)`; a bare `Nd` behaves like `+Nd`.
+export function parseRepeater(raw) {
+  const t = String(raw ?? "").trim();
+  if (!t) return null;
+  const m = t.match(/^(\+\+|\.\+|\+)?(\d+)\s*(d|day|days|w|week|weeks|m|month|months|y|year|years)$/i);
+  if (!m) return null;
+  const mode = m[1] === "++" ? "++" : m[1] === ".+" ? ".+" : "+";
+  const n = Number(m[2]);
+  const unitRaw = m[3].toLowerCase();
+  const unit = unitRaw.startsWith("d") ? "d" : unitRaw.startsWith("w") ? "w" : unitRaw.startsWith("m") ? "m" : "y";
+  return { mode, n, unit };
+}
+
+// org semantics: `+` shifts once from the old date (may still land in the
+// past); `++` shifts repeatedly until the result is in the future; `.+`
+// shifts from the completion moment (`todayMs`), not the old date.
+export function applyRepeater(dateStr, repeater, todayMs = Date.now()) {
+  const parsed = parseDateValue(dateStr);
+  if (!parsed || !repeater) return dateStr;
+  const { hasTime } = parsed;
+  const todayBase = hasTime ? todayMs : midnightMs(new Date(todayMs));
+  let time;
+  if (repeater.mode === ".+") {
+    time = shiftDate(todayBase, repeater.n, repeater.unit);
+  } else if (repeater.mode === "++") {
+    let next = shiftDate(parsed.time, repeater.n, repeater.unit);
+    let guard = 0;
+    while (next <= todayBase && guard < 10000) {
+      next = shiftDate(next, repeater.n, repeater.unit);
+      guard++;
+    }
+    time = next;
+  } else {
+    time = shiftDate(parsed.time, repeater.n, repeater.unit);
+  }
+  return formatDateValue(time, hasTime);
+}
+
+// Deadline warning lead time, e.g. `3d`/`1w`; defaults to org's 14 days.
+export function parseLeadTime(raw, fallbackDays = 14) {
+  const t = String(raw ?? "").trim();
+  if (!t) return fallbackDays;
+  const m = t.match(/^(\d+)\s*(d|day|days|w|week|weeks|m|month|months)?$/i);
+  if (!m) return fallbackDays;
+  const n = Number(m[1]);
+  const unit = (m[2] || "d").toLowerCase();
+  if (unit.startsWith("w")) return n * 7;
+  if (unit.startsWith("m")) return n * 30;
+  return n;
+}
+
+// `after` grammar (no ids): `dep-ref ( "&" dep-ref )*`, where
+// `dep-ref := [ "[[" note-title "]]" "::" ] text-part`.
+export function parseDepRefs(raw) {
+  const t = String(raw ?? "").trim();
+  if (!t) return [];
+  return t
+    .split("&")
+    .map((part) => {
+      const piece = part.trim();
+      const m = piece.match(/^\[\[([^\]]+)\]\]::(.*)$/);
+      if (m) return { noteTitle: m[1].trim(), text: m[2].trim(), raw: piece };
+      return { noteTitle: null, text: piece, raw: piece };
+    })
+    .filter((ref) => ref.text);
+}
+
+function normalizeTitleKey(title) {
+  return String(title || "").trim().toLowerCase();
+}
+
+function matchTodoInScope(scopeTodos, needleText, excludeId) {
+  const needle = needleText.trim().toLowerCase();
+  const candidates = scopeTodos.filter((t) => t.id !== excludeId);
+  let hits = candidates.filter((t) => String(t.text || "").trim().toLowerCase() === needle);
+  if (hits.length === 1) return { tier: "exact", hits };
+  if (hits.length > 1) return { tier: "ambiguous", hits };
+  hits = candidates.filter((t) => String(t.text || "").trim().toLowerCase().startsWith(needle));
+  if (hits.length === 1) return { tier: "prefix", hits };
+  if (hits.length > 1) return { tier: "ambiguous", hits };
+  hits = candidates.filter((t) => String(t.text || "").trim().toLowerCase().includes(needle));
+  if (hits.length === 1) return { tier: "substring", hits };
+  if (hits.length > 1) return { tier: "ambiguous", hits };
+  return { tier: "none", hits: [] };
+}
+
+// Decorates `todos` in place with `deps` (resolved target ids),
+// `effectiveStatus`, and `blockedBy`; returns `{ lints }` for broken/ambiguous
+// refs. Broken/ambiguous refs never block — a typo must not freeze a task,
+// so they only ever surface as lint entries.
+export function resolveTodoDeps(todos) {
+  const lints = [];
+  const titleIndex = new Map();
+  for (const todo of todos) {
+    const key = normalizeTitleKey(todo.noteTitle);
+    if (!key) continue;
+    if (!titleIndex.has(key)) titleIndex.set(key, new Set());
+    titleIndex.get(key).add(todo.file);
+  }
+
+  for (const todo of todos) {
+    const afterRaw = todo.canon?.after;
+    todo.deps = [];
+    if (!afterRaw) continue;
+    for (const ref of parseDepRefs(afterRaw)) {
+      let scopeFiles;
+      if (ref.noteTitle) {
+        const files = titleIndex.get(normalizeTitleKey(ref.noteTitle));
+        if (!files || files.size === 0) {
+          lints.push({ todoId: todo.id, file: todo.file, line: todo.line, kind: "broken-ref", ref: ref.raw, message: `No note titled "${ref.noteTitle}"` });
+          continue;
+        }
+        if (files.size > 1) {
+          lints.push({ todoId: todo.id, file: todo.file, line: todo.line, kind: "ambiguous-note", ref: ref.raw, message: `Multiple notes titled "${ref.noteTitle}"` });
+          continue;
+        }
+        scopeFiles = [...files];
+      } else {
+        scopeFiles = [todo.file];
+      }
+      const scopeTodos = todos.filter((t) => scopeFiles.includes(t.file));
+      const { tier, hits } = matchTodoInScope(scopeTodos, ref.text, todo.id);
+      if (tier === "none") {
+        lints.push({ todoId: todo.id, file: todo.file, line: todo.line, kind: "broken-ref", ref: ref.raw, message: `No matching todo for "${ref.text}"` });
+      } else if (tier === "ambiguous") {
+        lints.push({
+          todoId: todo.id,
+          file: todo.file,
+          line: todo.line,
+          kind: "ambiguous-ref",
+          ref: ref.raw,
+          message: `Multiple todos match "${ref.text}"`,
+          candidates: hits.map((h) => ({ id: h.id, text: h.text })),
+        });
+      } else {
+        todo.deps.push(hits[0].id);
+      }
+    }
+  }
+
+  const byId = new Map(todos.map((t) => [t.id, t]));
+  for (const todo of todos) {
+    const openDeps = (todo.deps || []).filter((id) => {
+      const dep = byId.get(id);
+      return dep && !CLOSED_STATUSES.has(dep.status);
+    });
+    if ((todo.status === "todo" || todo.status === "doing") && openDeps.length > 0) {
+      todo.effectiveStatus = "blocked";
+      todo.blockedBy = openDeps;
+    } else {
+      todo.effectiveStatus = todo.status;
+      todo.blockedBy = [];
+    }
+  }
+
+  return { lints };
+}
+
+const TODO_PRIO_WEIGHT = { A: 4, B: 3, C: 2, D: 1, E: 0, F: -1 };
+
+// Adapted from org-agenda's urgency sort (our own implementation, not copied
+// code): priority dominates, deadline proximity adds a bounded bonus that
+// ramps up inside the warning window and further once overdue, `doing` gets
+// a small nudge, and a *computed* blocked state is pushed to the bottom.
+export function todoUrgency(todo, todayMs = Date.now()) {
+  const prio = todo.canon?.prio || "D";
+  const prioWeight = TODO_PRIO_WEIGHT[prio] ?? TODO_PRIO_WEIGHT.D;
+  let dateScore = 0;
+  const ddl = todo.canon?.ddl;
+  if (ddl) {
+    const parsed = parseDateValue(ddl);
+    if (parsed) {
+      const todayMid = midnightMs(new Date(todayMs));
+      const dayMs = 86_400_000;
+      const daysLeft = Math.round((parsed.time - todayMid) / dayMs);
+      const warnDays = Math.max(1, parseLeadTime(todo.canon?.warn, 14));
+      dateScore = daysLeft < 0
+        ? 500 + Math.min(-daysLeft, 10) * 100
+        : Math.max(0, ((warnDays - daysLeft) * 500) / warnDays);
+    }
+  }
+  const doingBonus = todo.status === "doing" ? 50 : 0;
+  const blockedPenalty = todo.effectiveStatus === "blocked" ? 2000 : 0;
+  return prioWeight * 1000 + dateScore + doingBonus - blockedPenalty;
+}
+
+function sortByUrgency(todos) {
+  return [...todos].sort((a, b) =>
+    (b.urgency ?? 0) - (a.urgency ?? 0)
+    || String(a.canon?.ddl || "").localeCompare(String(b.canon?.ddl || ""))
+    || String(a.noteTitle || "").localeCompare(String(b.noteTitle || ""))
+    || a.index - b.index);
+}
+
+function agendaEntry(todo, kind, label, date, dateKey) {
+  return { kind, label, todoId: todo.id, date, dateKey, time: null, urgency: todo.urgency ?? 0 };
+}
+
+// Builds the day-bucketed agenda view-model: SCHEDULED vs DEADLINE
+// semantics (with a per-item warning lead time and org-style overdue/sched
+// carry-forward onto today), a completion log (for the log view and the
+// existing activity heatmap), dependency lints, and the full urgency-sorted
+// todo list. Options: `{ from, days = 7 }`; `from` defaults to today.
+export async function buildAgenda(body = {}) {
+  const todos = await scanTodos();
+  const { lints } = resolveTodoDeps(todos);
+  const todayMs = Date.now();
+  const todayMid = midnightMs(new Date(todayMs));
+  const dayMs = 86_400_000;
+  for (const todo of todos) todo.urgency = todoUrgency(todo, todayMs);
+
+  const fromParsed = body.from ? parseDateValue(body.from) : null;
+  const fromMs = fromParsed ? midnightMs(new Date(fromParsed.time)) : todayMid;
+  const days = Math.max(1, Math.min(90, Number(body.days) || 7));
+
+  const dayBuckets = [];
+  for (let i = 0; i < days; i++) {
+    const ms = fromMs + i * dayMs;
+    dayBuckets.push({ date: formatDateValue(ms, false), ms, entries: [] });
+  }
+  const bucketByDate = new Map(dayBuckets.map((b) => [b.date, b]));
+  const todayKey = formatDateValue(todayMid, false);
+  const logByDay = {};
+
+  const addLogDate = (dateStr) => {
+    const parsed = parseDateValue(dateStr);
+    if (!parsed) return;
+    const key = formatDateValue(parsed.time, false);
+    logByDay[key] = (logByDay[key] || 0) + 1;
+  };
+
+  for (const todo of todos) {
+    const canon = todo.canon || {};
+    if (canon.ddl) {
+      const parsed = parseDateValue(canon.ddl);
+      if (parsed) {
+        const dateKey = formatDateValue(parsed.time, false);
+        const daysLeft = Math.round((parsed.time - todayMid) / dayMs);
+        const open = !CLOSED_STATUSES.has(todo.status);
+        if (daysLeft < 0) {
+          if (open) bucketByDate.get(todayKey)?.entries.push(agendaEntry(todo, "overdue", `${-daysLeft} d ago:`, canon.ddl, "ddl"));
+        } else {
+          bucketByDate.get(dateKey)?.entries.push(agendaEntry(todo, "deadline", daysLeft === 0 ? "Deadline" : `In ${daysLeft} d.`, canon.ddl, "ddl"));
+          const warnDays = parseLeadTime(canon.warn, 14);
+          if (open && daysLeft > 0 && daysLeft <= warnDays) {
+            bucketByDate.get(todayKey)?.entries.push(agendaEntry(todo, "warning", `In ${daysLeft} d.`, canon.ddl, "ddl"));
+          }
+        }
+      }
+    }
+    if (canon.sche) {
+      const parsed = parseDateValue(canon.sche);
+      if (parsed) {
+        const dateKey = formatDateValue(parsed.time, false);
+        if (parsed.time >= todayMid) {
+          bucketByDate.get(dateKey)?.entries.push(agendaEntry(todo, "scheduled", "Scheduled", canon.sche, "sche"));
+        } else if (!CLOSED_STATUSES.has(todo.status)) {
+          const daysLate = Math.round((todayMid - parsed.time) / dayMs);
+          bucketByDate.get(todayKey)?.entries.push(agendaEntry(todo, "sched-carry", `Sched ${daysLate}x:`, canon.sche, "sche"));
+        }
+      }
+    }
+    if (canon.done) {
+      addLogDate(canon.done);
+      const parsed = parseDateValue(canon.done);
+      if (parsed) {
+        const key = formatDateValue(parsed.time, false);
+        bucketByDate.get(key)?.entries.push(agendaEntry(todo, "log", "Closed", canon.done, "done"));
+      }
+    }
+    if (canon.log) {
+      for (const raw of String(canon.log).split("&")) {
+        const d = raw.trim();
+        if (d && d !== canon.done) addLogDate(d);
+      }
+    }
+  }
+
+  for (const bucket of dayBuckets) bucket.entries.sort((a, b) => b.urgency - a.urgency);
+
+  const stats = { open: 0, doing: 0, done: 0, cancelled: 0, blocked: 0, overdue: 0 };
+  for (const todo of todos) {
+    if (todo.effectiveStatus === "blocked") stats.blocked++;
+    else if (todo.status === "todo") stats.open++;
+    else if (todo.status === "doing") stats.doing++;
+    else if (todo.status === "done") stats.done++;
+    else if (todo.status === "cancelled") stats.cancelled++;
+    const ddl = todo.canon?.ddl ? parseDateValue(todo.canon.ddl) : null;
+    if (ddl && ddl.time < todayMid && !CLOSED_STATUSES.has(todo.status)) stats.overdue++;
+  }
+
+  return {
+    type: "agenda",
+    range: { from: dayBuckets[0]?.date || todayKey, to: dayBuckets[dayBuckets.length - 1]?.date || todayKey, today: todayKey },
+    days: dayBuckets.map(({ date, entries }) => ({ date, entries })),
+    todos: sortByUrgency(todos),
+    lints,
+    logByDay,
+    stats,
+  };
+}
+
+// --- canonical-key patching (alias-preserving) + repeater-aware completion --
+
+function normalizeCanonPatchValue(key, value) {
+  if (value === null || value === undefined || value === false) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (key === "prio") {
+    const p = raw.toUpperCase();
+    return /^[A-Z]$/.test(p) ? p : "";
+  }
+  if (key === "ddl" || key === "sche" || key === "done") return normalizeDateValue(raw) || raw;
+  if (key === "repeat") return parseRepeater(raw) ? raw : "";
+  return raw;
+}
+
+// Writes canonical-key values into a `@@todo` source line, reusing whichever
+// alias the line already has (e.g. keeps `due:` as `due:`) and only using
+// the canonical spelling when the arg is brand new.
+function patchTodoSourceCanonical(source, canonPatch = {}) {
+  const text = String(source || "");
+  const command = scanInlineCommands(text, "todo")[0];
+  if (!command || command.fullFrom !== 0) return text;
+  const args = { ...(command.args || {}) };
+  for (const [canonKey, rawValue] of Object.entries(canonPatch)) {
+    const value = normalizeCanonPatchValue(canonKey, rawValue);
+    if (value) {
+      const argKey = todoArgKeyForCanonical(canonKey, command.args || {});
+      args[argKey] = value;
+    } else {
+      for (const alias of TODO_KEY_ALIASES[canonKey] || [canonKey]) delete args[alias];
+    }
+  }
+  return replaceTodoArgsInSource(text, command.argsRaw || "", serializeTodoArgs(args));
+}
+
+function appendDepRef(existingAfter, ref) {
+  const parts = String(existingAfter || "")
+    .split("&")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!parts.includes(ref)) parts.push(ref);
+  return parts.join(" & ");
+}
+
+const CANON_PATCH_KEYS = ["ddl", "sche", "prio", "repeat", "warn", "after", "done", "log"];
+const LEGACY_PATCH_TO_CANON = { priority: "prio", due: "ddl", deadline: "ddl", scheduled: "sche", start: "sche", rep: "repeat", every: "repeat", lead: "warn", dep: "after" };
+
+// General todo patch: writes any canonical key (or its legacy alias field
+// name) plus `status`, straight back into the source `@@todo` line. `op:
+// "complete"` runs the repeater engine — rolling `ddl`/`sche` forward,
+// resetting status to `todo`, and recording `done`/`log` — instead of a
+// plain status flip.
+export async function patchTodo(body = {}) {
+  const file = safeOpenFile(body.file || "");
+  const content = await readFile(file, "utf8");
+  const loc = locateTodoInContent(content, body, file);
+  if (!loc) {
+    const err = new Error("Todo source was not found");
+    err.statusCode = 404;
+    throw err;
+  }
+  const { from, to } = loc;
+  const oldSource = content.slice(from, to);
+  const op = body.op === "complete" ? "complete" : "patch";
+  const nowMs = Date.now();
+
+  const canonPatch = {};
+  for (const key of CANON_PATCH_KEYS) {
+    if (bodyHasOwn(body, key)) canonPatch[key] = body[key];
+  }
+  for (const [legacy, canon] of Object.entries(LEGACY_PATCH_TO_CANON)) {
+    if (bodyHasOwn(body, legacy) && !bodyHasOwn(canonPatch, canon)) canonPatch[canon] = body[legacy];
+  }
+  const command0 = scanInlineCommands(oldSource, "todo")[0];
+  if (bodyHasOwn(body, "afterAdd")) {
+    canonPatch.after = appendDepRef(command0?.args?.after, String(body.afterAdd));
+  }
+
+  let statusPatch = "";
+  if (op === "complete") {
+    const repeaterRaw = command0?.args?.repeat || command0?.args?.rep || command0?.args?.every;
+    const repeater = parseRepeater(repeaterRaw);
+    const doneStr = formatDateValue(nowMs, false);
+    if (repeater) {
+      const ddlVal = command0?.args?.ddl || command0?.args?.due || command0?.args?.deadline;
+      const scheVal = command0?.args?.sche || command0?.args?.scheduled || command0?.args?.start;
+      if (ddlVal) canonPatch.ddl = applyRepeater(ddlVal, repeater, nowMs);
+      if (scheVal) canonPatch.sche = applyRepeater(scheVal, repeater, nowMs);
+      canonPatch.done = doneStr;
+      const logParts = String(command0?.args?.log || "").split("&").map((s) => s.trim()).filter(Boolean);
+      logParts.push(doneStr);
+      while (logParts.length > 30) logParts.shift();
+      canonPatch.log = logParts.join(" & ");
+      statusPatch = "todo";
+    } else {
+      canonPatch.done = doneStr;
+      statusPatch = "done";
+    }
+  } else if (bodyHasOwn(body, "status")) {
+    statusPatch = normalizeTodoStatus(body.status);
+  }
+
+  let next = oldSource;
+  if (statusPatch) next = replaceTodoStatusInSource(next, statusPatch);
+  if (Object.keys(canonPatch).length > 0) next = patchTodoSourceCanonical(next, canonPatch);
+
+  if (next === oldSource) {
+    let mtimeMs = 0;
+    try { mtimeMs = (await stat(file)).mtimeMs; } catch {}
+    return { type: "todo-patched", ok: true, file, changed: false, from, to, source: oldSource, mtimeMs };
+  }
+
+  await atomicWriteFile(file, content.slice(0, from) + next + content.slice(to), "utf8");
+  markNotesDirty(file);
+  scheduleRoamDbSync(null, file);
+  let mtimeMs = 0;
+  try { mtimeMs = (await stat(file)).mtimeMs; } catch {}
+  return { type: "todo-patched", ok: true, file, changed: true, from, to, source: oldSource, nextSource: next, mtimeMs };
+}
+
+export async function completeTodo(body = {}) {
+  return patchTodo({ ...body, op: "complete" });
+}
+
+// Generates the shortest word-boundary-unique text reference to `target`
+// (for writing into another todo's `after` arg), prefixed with
+// `[[Note Title]]::` when the reference crosses files.
+export function depRefForTodo(target, scopeTodos, sourceTodo) {
+  const targetText = String(target?.text || "").trim();
+  const words = targetText.split(/\s+/).filter(Boolean);
+  const others = (scopeTodos || []).filter((t) => t.id !== target.id && t.file === target.file);
+  let candidate = "";
+  for (let i = 1; i <= words.length; i++) {
+    const attempt = words.slice(0, i).join(" ");
+    const clash = others.some((t) => String(t.text || "").trim().toLowerCase().startsWith(attempt.toLowerCase()));
+    if (!clash) {
+      candidate = attempt;
+      break;
+    }
+  }
+  if (!candidate) candidate = targetText;
+  candidate = candidate.replace(/&/g, "").replace(/"/g, "").trim();
+  const crossFile = !sourceTodo || sourceTodo.file !== target.file;
+  const refBody = crossFile ? `[[${target.noteTitle}]]::${candidate}` : candidate;
+  return /[,&]/.test(refBody) ? `"${refBody}"` : refBody;
 }
 
 function existingUniqueDirs(dirs) {
