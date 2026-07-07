@@ -1,25 +1,44 @@
-// Full-screen, vault-wide agenda view (org-agenda-class): week/list/month/log
-// views over the server-computed agenda view-model (`api.notes.agenda`).
-// The small `.is-agenda` modal in main.ts stays as a per-file quick panel;
-// this is the first-class surface for priority/scheduled/deadline/repeat/
-// dependency work across the whole vault. All edits round-trip through
-// `api.notes.patchTodo`, which writes straight back into the `@@todo` line —
-// this view holds no state that isn't re-derivable from the markdown.
-import type { AgendaMsg, TodoItem, TodoLint } from "./api-client.ts";
+// Full-screen, vault-wide agenda view (org-agenda-class): week/list/month/
+// log/gantt/projects/clocktable/lints views over the server-computed agenda
+// view-model (`api.notes.agenda`). This is the first-class surface for
+// priority/scheduled/deadline/repeat/dependency/project/clock work across
+// the whole vault — served as its own page (see `agenda.html`/
+// `agenda-main.ts`) as well as embeddable via `openAgendaView`. All edits
+// round-trip through `api.notes.patchTodo`/`clockIn`/`clockOut`, which write
+// straight back into markdown — this view holds no state that isn't
+// re-derivable from it. See `docs/agenda.md` for the view-model shapes.
+import type { AgendaMsg, GanttTask, TodoItem, TodoLint } from "./api-client.ts";
 
 export type AgendaViewDeps = {
   api: {
     notes: {
       agenda: (body: Record<string, unknown>) => Promise<AgendaMsg>;
+      createTodo: (body: Record<string, unknown>) => Promise<Record<string, unknown>>;
       patchTodo: (body: Record<string, unknown>) => Promise<Record<string, unknown>>;
       todoDepRef: (body: Record<string, unknown>) => Promise<{ ref?: string }>;
+      clockIn: (body: Record<string, unknown>) => Promise<Record<string, unknown>>;
+      clockOut: (body: Record<string, unknown>) => Promise<Record<string, unknown>>;
     };
   };
   jumpToTodo: (todo: TodoItem) => void | Promise<void>;
   setStatus: (message: string) => void;
+  /** True when mounted as the standalone `/agenda` page: hides the "Close"
+   * button (there is nothing to return to) and syncs `view`/`q` to the URL. */
+  pageMode?: boolean;
 };
 
-type ViewKind = "week" | "list" | "month" | "log";
+type ViewKind = "week" | "list" | "month" | "log" | "gantt" | "projects" | "clocktable" | "lints";
+
+// Legacy/external view names (e.g. `main.ts`'s Agenda+ link, or a bookmark)
+// map onto the real ones above.
+const VIEW_ALIASES: Record<string, ViewKind> = { agenda: "week", calendar: "month" };
+
+function normalizeView(raw: string | null | undefined): ViewKind {
+  const v = String(raw || "").trim().toLowerCase();
+  if (VIEW_ALIASES[v]) return VIEW_ALIASES[v];
+  const known: ViewKind[] = ["week", "list", "month", "log", "gantt", "projects", "clocktable", "lints"];
+  return (known as string[]).includes(v) ? (v as ViewKind) : "week";
+}
 
 const DAY_MS = 86_400_000;
 const STATUS_CYCLE = ["todo", "doing", "done"];
@@ -35,6 +54,7 @@ let query = "";
 let cursorId = "";
 let selection = new Set<string>();
 let loading = false;
+let ganttDragging: { id: string; x: number } | null = null;
 
 function midnight(ms: number): number {
   const d = new Date(ms);
@@ -113,14 +133,25 @@ function lintsFor(todoId: string): TodoLint[] {
   return (data?.lints || []).filter((lint) => lint.todoId === todoId);
 }
 
+const WIDE_VIEWS = new Set<ViewKind>(["gantt", "projects", "clocktable", "lints"]);
+
+function syncPageUrl(): void {
+  if (!deps?.pageMode || typeof history === "undefined") return;
+  const params = new URLSearchParams();
+  params.set("view", view);
+  if (query) params.set("q", query);
+  history.replaceState(null, "", `/agenda?${params.toString()}`);
+}
+
 async function fetchAgenda(): Promise<void> {
   if (!deps) return;
   loading = true;
   render();
   try {
-    const from = view === "month" ? fmtDate(startOfMonth(anchorMs)) : fmtDate(anchorMs);
-    const days = view === "month" ? daysInMonth(anchorMs) : view === "week" ? 7 : view === "list" ? 30 : 60;
-    data = await deps.api.notes.agenda({ from, days });
+    const wide = WIDE_VIEWS.has(view);
+    const from = wide ? fmtDate(midnight(Date.now())) : view === "month" ? fmtDate(startOfMonth(anchorMs)) : fmtDate(anchorMs);
+    const days = wide ? 60 : view === "month" ? daysInMonth(anchorMs) : view === "week" ? 7 : view === "list" ? 30 : 60;
+    data = await deps.api.notes.agenda({ from, days, includePlanning: true, includeGantt: true });
   } catch (error) {
     deps.setStatus(error instanceof Error ? error.message : "Agenda failed");
     data = null;
@@ -167,6 +198,54 @@ function promptEdit(label: string, current: string, apply: (value: string) => vo
   const value = window.prompt(label, current);
   if (value === null) return;
   apply(value.trim());
+}
+
+function parseQuickTodo(raw: string): Record<string, unknown> {
+  const chunks = raw.split("|").map((part) => part.trim()).filter(Boolean);
+  const text = chunks.shift() || "";
+  const body: Record<string, unknown> = { text };
+  for (const chunk of chunks) {
+    const match = chunk.match(/^([A-Za-z][\w-]*)\s*[:=]\s*(.*)$/);
+    if (!match) continue;
+    const key = match[1].toLowerCase();
+    const value = match[2].trim();
+    if (key && value) body[key] = value;
+  }
+  return body;
+}
+
+async function createTodoFromPrompt(): Promise<void> {
+  if (!deps) return;
+  const current = cursorId ? todoById(cursorId) : undefined;
+  const project = String((current?.canon as Record<string, string> | undefined)?.project || "");
+  const raw = window.prompt("New todo: task | project=paper | ddl=today | sche=+1d | prio=A | file=inbox.md", "");
+  if (raw === null) return;
+  const body = parseQuickTodo(raw);
+  if (!String(body.text || "").trim()) return;
+  if (!body.file && current?.file) body.file = current.file;
+  if (!body.project && project) body.project = project;
+  try {
+    const result = await deps.api.notes.createTodo(body);
+    const todo = result.todo as TodoItem | undefined;
+    if (todo?.id) cursorId = String(todo.id);
+    await fetchAgenda();
+  } catch (error) {
+    deps.setStatus(error instanceof Error ? error.message : "Todo create failed");
+  }
+}
+
+function showHelp(): void {
+  window.alert([
+    "Agenda keys",
+    "",
+    "n new todo",
+    "j/k move, Enter jump",
+    "t status, p priority, d deadline, s scheduled, r repeat",
+    "a dependency, c clock in/out",
+    "m mark, B bulk status",
+    "f/b next/previous range, . today, v next view, g refresh",
+    "q/Esc close",
+  ].join("\n"));
 }
 
 function editPriority(todo: TodoItem): void {
@@ -220,6 +299,26 @@ async function addDependency(todo: TodoItem): Promise<void> {
   }
 }
 
+async function clockInTodo(todo: TodoItem): Promise<void> {
+  if (!deps) return;
+  try {
+    await deps.api.notes.clockIn(todoPatchBase(todo));
+    await fetchAgenda();
+  } catch (error) {
+    deps.setStatus(error instanceof Error ? error.message : "Clock in failed");
+  }
+}
+
+async function clockOutRunning(): Promise<void> {
+  if (!deps) return;
+  try {
+    await deps.api.notes.clockOut({});
+    await fetchAgenda();
+  } catch (error) {
+    deps.setStatus(error instanceof Error ? error.message : "Clock out failed");
+  }
+}
+
 function toggleMark(id: string): void {
   if (selection.has(id)) selection.delete(id);
   else selection.add(id);
@@ -251,7 +350,7 @@ function prioClass(prio: string): string {
 
 function buildRow(todo: TodoItem, opts: { badge?: string } = {}): HTMLElement {
   const row = document.createElement("div");
-  row.className = "aaronnote-agenda-full-row";
+  row.className = "aaronnote-agenda-full-row is-task-row";
   row.dataset.status = todoStatus(todo);
   row.dataset.todoId = String(todo.id || "");
   row.tabIndex = 0;
@@ -288,6 +387,27 @@ function buildRow(todo: TodoItem, opts: { badge?: string } = {}): HTMLElement {
   badge.className = "aaronnote-agenda-full-badge";
   badge.textContent = opts.badge || "";
 
+  const clock = document.createElement("span");
+  clock.className = "aaronnote-agenda-full-clock";
+  const runningTodoId = data?.clocktable?.running?.todoId || "";
+  const status0 = todoStatus(todo);
+  if (todo.id && runningTodoId === String(todo.id)) {
+    clock.classList.add("is-running");
+    clock.textContent = `⏱ ${data?.clocktable?.running?.minutesSoFar ?? 0}m`;
+    clock.title = "Clock out";
+    clock.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void clockOutRunning();
+    });
+  } else if (status0 !== "done" && status0 !== "cancelled") {
+    clock.textContent = "⏱";
+    clock.title = "Clock in";
+    clock.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void clockInTodo(todo);
+    });
+  }
+
   const body = document.createElement("span");
   body.className = "aaronnote-agenda-full-body";
   const text = document.createElement("span");
@@ -320,7 +440,7 @@ function buildRow(todo: TodoItem, opts: { badge?: string } = {}): HTMLElement {
     body.appendChild(lint);
   }
 
-  row.append(mark, status, prio, badge, body);
+  row.append(mark, status, prio, clock, badge, body);
   row.addEventListener("click", () => {
     cursorId = String(todo.id || "");
     if (deps) void deps.jumpToTodo(todo);
@@ -328,13 +448,20 @@ function buildRow(todo: TodoItem, opts: { badge?: string } = {}): HTMLElement {
   return row;
 }
 
+function lintDetail(lint: TodoLint): string {
+  const ref = typeof lint.ref === "string" && lint.ref.trim() && lint.ref.trim() !== "undefined" ? lint.ref.trim() : "";
+  const todo = lint.todoId ? todoById(lint.todoId) : undefined;
+  const subject = ref || (todo ? todoText(todo) : "") || lint.message || lint.kind || "issue";
+  const label = ref || todo ? `"${subject}"` : subject;
+  return `${label} (${lint.kind || "lint"})`;
+}
+
 function renderLints(): HTMLElement | null {
   if (!data?.lints?.length) return null;
   const wrap = document.createElement("div");
   wrap.className = "aaronnote-agenda-full-lints";
-  wrap.textContent = `${data.lints.length} dependency issue${data.lints.length === 1 ? "" : "s"}: `;
-  const details = data.lints.slice(0, 6).map((l) => `"${l.ref}" (${l.kind})`).join(", ");
-  wrap.textContent += details;
+  wrap.textContent = `${data.lints.length} issue${data.lints.length === 1 ? "" : "s"}: `;
+  wrap.textContent += data.lints.slice(0, 6).map(lintDetail).join(", ");
   return wrap;
 }
 
@@ -451,6 +578,317 @@ function renderLog(): HTMLElement {
   return wrap;
 }
 
+// --- Gantt ---
+
+function ganttRange(tasks: GanttTask[]): { min: number; days: number } {
+  const vals: number[] = [];
+  for (const t of tasks) {
+    if (t.start) vals.push(parseYmd(t.start));
+    if (t.end) vals.push(parseYmd(t.end));
+  }
+  const finite = vals.filter((v) => Number.isFinite(v));
+  const rawMin = finite.length ? Math.min(...finite) : Date.now();
+  const rawMax = finite.length ? Math.max(...finite) : rawMin + 14 * DAY_MS;
+  const min = rawMin - 2 * DAY_MS;
+  const max = rawMax + 3 * DAY_MS;
+  return { min, days: Math.max(7, Math.round((max - min) / DAY_MS) + 1) };
+}
+
+function ganttPatchBase(task: GanttTask, patch: Record<string, unknown>): Record<string, unknown> {
+  const source = (task.source || {}) as Record<string, unknown>;
+  return { file: source.file, index: source.index, source: source.source, text: source.text, ...patch };
+}
+
+async function bumpGanttProgress(task: GanttTask): Promise<void> {
+  if (!deps) return;
+  const next = ((Number(task.progress) || 0) + 25) % 125;
+  try {
+    await deps.api.notes.patchTodo(ganttPatchBase(task, { progress: next > 100 ? 0 : next }));
+    await fetchAgenda();
+  } catch (error) {
+    deps.setStatus(error instanceof Error ? error.message : "Progress update failed");
+  }
+}
+
+async function rescheduleGanttTask(task: GanttTask, deltaDays: number): Promise<void> {
+  if (!deps || !deltaDays) return;
+  const startMs = task.start ? parseYmd(task.start) : Date.now();
+  const endMs = task.end ? parseYmd(task.end) : startMs;
+  const nextStart = fmtDate(startMs + deltaDays * DAY_MS);
+  const nextEnd = fmtDate(endMs + deltaDays * DAY_MS);
+  try {
+    await deps.api.notes.patchTodo(ganttPatchBase(task, { sche: nextStart, end: nextEnd, ddl: nextEnd }));
+    await fetchAgenda();
+  } catch (error) {
+    deps.setStatus(error instanceof Error ? error.message : "Reschedule failed");
+  }
+}
+
+function renderGanttBar(task: GanttTask, range: { min: number; days: number }): HTMLElement {
+  const line = document.createElement("div");
+  line.className = "aaronnote-gantt-line";
+
+  const name = document.createElement("div");
+  name.className = "aaronnote-gantt-name";
+  const progressBtn = document.createElement("button");
+  progressBtn.type = "button";
+  progressBtn.textContent = `${task.progress || 0}%`;
+  progressBtn.addEventListener("click", () => void bumpGanttProgress(task));
+  const label = document.createElement("span");
+  label.textContent = task.name || "";
+  const sub = document.createElement("small");
+  sub.textContent = task.project || "";
+  name.append(progressBtn, label, document.createElement("br"), sub);
+
+  const timeline = document.createElement("div");
+  timeline.className = "aaronnote-gantt-timeline";
+  const bar = document.createElement("div");
+  bar.className = `aaronnote-gantt-bar ${task.status || ""}`;
+  bar.draggable = true;
+  const startMs = task.start ? parseYmd(task.start) : range.min;
+  const endMs = task.end ? parseYmd(task.end) : startMs;
+  const totalMs = range.days * DAY_MS;
+  bar.style.left = `${((startMs - range.min) / totalMs) * 100}%`;
+  bar.style.width = `${Math.max(1, ((endMs - startMs + DAY_MS) / totalMs) * 100)}%`;
+  bar.textContent = task.name || "";
+  bar.addEventListener("dragstart", (ev) => {
+    ganttDragging = { id: String(task.id || ""), x: ev.clientX };
+  });
+  bar.addEventListener("dragend", (ev) => {
+    if (!ganttDragging) return;
+    const dragStart = ganttDragging;
+    ganttDragging = null;
+    const rect = timeline.getBoundingClientRect();
+    const delta = Math.round(((ev.clientX - dragStart.x) / rect.width) * range.days);
+    void rescheduleGanttTask(task, delta);
+  });
+  timeline.appendChild(bar);
+
+  line.append(name, timeline);
+  return line;
+}
+
+function renderGanttHead(range: { min: number; days: number }): HTMLElement {
+  const head = document.createElement("div");
+  head.className = "aaronnote-gantt-head";
+  const name = document.createElement("div");
+  name.className = "aaronnote-gantt-name";
+  name.textContent = "Task";
+  const ticks = document.createElement("div");
+  ticks.className = "aaronnote-gantt-ticks";
+  for (let i = 0; i < range.days; i++) {
+    const tick = document.createElement("div");
+    tick.className = "aaronnote-gantt-tick";
+    tick.textContent = fmtDate(range.min + i * DAY_MS).slice(5);
+    ticks.appendChild(tick);
+  }
+  head.append(name, ticks);
+  return head;
+}
+
+function renderGantt(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "aaronnote-agenda-full-gantt";
+  const gantt = data?.gantt;
+  const tasks = gantt?.tasks || [];
+  const range = ganttRange(tasks);
+
+  const chart = document.createElement("div");
+  chart.className = "aaronnote-gantt-chart";
+  chart.style.setProperty("--gantt-days", String(range.days));
+  chart.appendChild(renderGanttHead(range));
+
+  const laned = new Set<string>();
+  for (const lane of gantt?.lanes || []) {
+    const laneHead = document.createElement("div");
+    laneHead.className = "aaronnote-gantt-lane-head";
+    laneHead.textContent = lane.name || lane.key || "";
+    chart.appendChild(laneHead);
+    for (const childId of lane.childTaskIds || []) {
+      laned.add(childId);
+      const task = tasks.find((t) => t.id === childId);
+      if (task) chart.appendChild(renderGanttBar(task, range));
+    }
+  }
+  const rest = tasks.filter((t) => !laned.has(String(t.id || "")));
+  if (rest.length > 0 && (gantt?.lanes?.length || 0) > 0) {
+    const otherHead = document.createElement("div");
+    otherHead.className = "aaronnote-gantt-lane-head";
+    otherHead.textContent = "Other";
+    chart.appendChild(otherHead);
+  }
+  for (const task of rest) chart.appendChild(renderGanttBar(task, range));
+  wrap.appendChild(chart);
+
+  if ((gantt?.milestones || []).length > 0) {
+    const milestoneHead = document.createElement("div");
+    milestoneHead.className = "aaronnote-agenda-full-group-head";
+    milestoneHead.textContent = "Milestones";
+    wrap.appendChild(milestoneHead);
+    for (const m of gantt?.milestones || []) {
+      const row = document.createElement("div");
+      row.className = "aaronnote-agenda-full-row is-marker-row";
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      const diamond = document.createElement("span");
+      diamond.className = "aaronnote-agenda-full-mark";
+      diamond.textContent = "◆";
+      const body = document.createElement("span");
+      body.className = "aaronnote-agenda-full-body";
+      const text = document.createElement("span");
+      text.className = "aaronnote-agenda-full-text";
+      text.textContent = m.name || "Milestone";
+      const note = document.createElement("span");
+      note.className = "aaronnote-agenda-full-note";
+      note.textContent = `${m.project || ""} · ${m.date || ""}`;
+      body.append(text, note);
+      row.append(diamond, body);
+      const source = (m.source || {}) as Record<string, unknown>;
+      row.addEventListener("click", () => {
+        if (deps) void deps.jumpToTodo({ file: source.file, line: source.line } as unknown as TodoItem);
+      });
+      wrap.appendChild(row);
+    }
+  }
+
+  if ((gantt?.backlog || []).length > 0) {
+    const backlogHead = document.createElement("div");
+    backlogHead.className = "aaronnote-agenda-full-group-head";
+    backlogHead.textContent = "Backlog (unscheduled)";
+    wrap.appendChild(backlogHead);
+    for (const t of gantt?.backlog || []) {
+      const todo = t.id ? todoById(t.id) : undefined;
+      if (todo) wrap.appendChild(buildRow(todo, { badge: "unscheduled" }));
+    }
+  }
+
+  return wrap;
+}
+
+// --- Projects ---
+
+function renderProjects(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "aaronnote-agenda-full-list";
+  const projects = data?.projectModel || [];
+  if (projects.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "aaronnote-empty";
+    empty.textContent = "No @@project entries yet";
+    wrap.appendChild(empty);
+    return wrap;
+  }
+  for (const project of projects) {
+    const card = document.createElement("div");
+    card.className = "aaronnote-agenda-full-project";
+    const title = document.createElement("h3");
+    title.textContent = project.title || project.key || "";
+    const meta = document.createElement("div");
+    meta.className = "aaronnote-agenda-full-note";
+    const parts = [
+      `${project.progress ?? 0}% done`,
+      `${project.open ?? 0} open`,
+      `${project.doing ?? 0} doing`,
+      `${project.blocked ?? 0} blocked`,
+    ];
+    if (project.effortMinutes) parts.push(`${Math.round((project.effortMinutes || 0) / 60)}h effort`);
+    if (project.clockedMinutes) parts.push(`${Math.round((project.clockedMinutes || 0) / 60)}h clocked`);
+    meta.textContent = parts.join(" · ");
+    card.append(title, meta);
+    wrap.appendChild(card);
+  }
+  return wrap;
+}
+
+// --- Clocktable ---
+
+function renderClocktable(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "aaronnote-agenda-full-list";
+  const model = data?.clocktable;
+  if (!model) {
+    const empty = document.createElement("div");
+    empty.className = "aaronnote-empty";
+    empty.textContent = "No clock data";
+    wrap.appendChild(empty);
+    return wrap;
+  }
+  if (model.running) {
+    const running = document.createElement("div");
+    running.className = "aaronnote-agenda-full-clocktable-running";
+    running.textContent = `● Running: ${model.running.text || ""} (${model.running.minutesSoFar ?? 0}m)`;
+    const stop = document.createElement("button");
+    stop.type = "button";
+    stop.textContent = "Clock out";
+    stop.addEventListener("click", () => void clockOutRunning());
+    running.appendChild(stop);
+    wrap.appendChild(running);
+  }
+  const tasksHead = document.createElement("div");
+  tasksHead.className = "aaronnote-agenda-full-group-head";
+  tasksHead.textContent = "By task";
+  wrap.appendChild(tasksHead);
+  for (const task of model.tasks || []) {
+    const row = document.createElement("div");
+    row.className = "aaronnote-agenda-full-row is-simple-row";
+    const body = document.createElement("span");
+    body.className = "aaronnote-agenda-full-body";
+    const text = document.createElement("span");
+    text.className = "aaronnote-agenda-full-text";
+    text.textContent = task.text || "(untitled)";
+    const note = document.createElement("span");
+    note.className = "aaronnote-agenda-full-note";
+    const hours = ((task.minutes || 0) / 60).toFixed(1);
+    const effort = task.effortMinutes ? ` / ${(task.effortMinutes / 60).toFixed(1)}h effort` : "";
+    note.textContent = `${hours}h${effort}`;
+    body.append(text, note);
+    row.appendChild(body);
+    wrap.appendChild(row);
+  }
+  const dayHead = document.createElement("div");
+  dayHead.className = "aaronnote-agenda-full-group-head";
+  dayHead.textContent = "By day";
+  wrap.appendChild(dayHead);
+  for (const [day, minutes] of Object.entries(model.byDay || {})) {
+    const row = document.createElement("div");
+    row.className = "aaronnote-agenda-full-row is-simple-row";
+    const body = document.createElement("span");
+    body.className = "aaronnote-agenda-full-body";
+    body.textContent = `${day} — ${(minutes / 60).toFixed(1)}h`;
+    row.appendChild(body);
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
+// --- Lints ---
+
+function renderLintsView(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "aaronnote-agenda-full-list";
+  const lints = data?.lints || [];
+  if (lints.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "aaronnote-empty";
+    empty.textContent = "No lints";
+    wrap.appendChild(empty);
+    return wrap;
+  }
+  for (const lint of lints) {
+    const row = document.createElement("div");
+    row.className = "aaronnote-agenda-full-lint";
+    const kind = document.createElement("b");
+    kind.textContent = lint.kind || "";
+    row.appendChild(kind);
+    row.appendChild(document.createTextNode(` ${lint.message || lint.ref || ""} `));
+    const where = document.createElement("small");
+    where.textContent = `${lint.file || ""}${lint.line ? `:${lint.line}` : ""}`;
+    row.appendChild(where);
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
 function flatTodoIds(): string[] {
   if (!listEl) return [];
   return [...listEl.querySelectorAll<HTMLElement>("[data-todo-id]")].map((el) => el.dataset.todoId || "");
@@ -470,7 +908,16 @@ function renderHeader(): void {
   if (!headerEl) return;
   headerEl.replaceChildren();
 
-  const views: Array<[ViewKind, string]> = [["week", "Week"], ["list", "List"], ["month", "Month"], ["log", "Log"]];
+  const views: Array<[ViewKind, string]> = [
+    ["week", "Week"],
+    ["list", "List"],
+    ["month", "Month"],
+    ["log", "Log"],
+    ["gantt", "Gantt"],
+    ["projects", "Projects"],
+    ["clocktable", "Clock"],
+    ["lints", "Lints"],
+  ];
   const tabs = document.createElement("div");
   tabs.className = "aaronnote-agenda-full-tabs";
   for (const [kind, label] of views) {
@@ -480,37 +927,40 @@ function renderHeader(): void {
     button.textContent = label;
     button.addEventListener("click", () => {
       view = kind;
+      syncPageUrl();
       void fetchAgenda();
     });
     tabs.appendChild(button);
   }
   headerEl.appendChild(tabs);
 
-  const nav = document.createElement("div");
-  nav.className = "aaronnote-agenda-full-nav";
-  const prev = document.createElement("button");
-  prev.type = "button";
-  prev.textContent = "←";
-  prev.addEventListener("click", () => {
-    anchorMs -= view === "month" ? daysInMonth(anchorMs) * DAY_MS : 7 * DAY_MS;
-    void fetchAgenda();
-  });
-  const today = document.createElement("button");
-  today.type = "button";
-  today.textContent = "Today";
-  today.addEventListener("click", () => {
-    anchorMs = midnight(Date.now());
-    void fetchAgenda();
-  });
-  const next = document.createElement("button");
-  next.type = "button";
-  next.textContent = "→";
-  next.addEventListener("click", () => {
-    anchorMs += view === "month" ? daysInMonth(anchorMs) * DAY_MS : 7 * DAY_MS;
-    void fetchAgenda();
-  });
-  nav.append(prev, today, next);
-  headerEl.appendChild(nav);
+  if (!WIDE_VIEWS.has(view)) {
+    const nav = document.createElement("div");
+    nav.className = "aaronnote-agenda-full-nav";
+    const prev = document.createElement("button");
+    prev.type = "button";
+    prev.textContent = "←";
+    prev.addEventListener("click", () => {
+      anchorMs -= view === "month" ? daysInMonth(anchorMs) * DAY_MS : 7 * DAY_MS;
+      void fetchAgenda();
+    });
+    const today = document.createElement("button");
+    today.type = "button";
+    today.textContent = "Today";
+    today.addEventListener("click", () => {
+      anchorMs = midnight(Date.now());
+      void fetchAgenda();
+    });
+    const next = document.createElement("button");
+    next.type = "button";
+    next.textContent = "→";
+    next.addEventListener("click", () => {
+      anchorMs += view === "month" ? daysInMonth(anchorMs) * DAY_MS : 7 * DAY_MS;
+      void fetchAgenda();
+    });
+    nav.append(prev, today, next);
+    headerEl.appendChild(nav);
+  }
 
   const search = document.createElement("input");
   search.type = "search";
@@ -518,9 +968,25 @@ function renderHeader(): void {
   search.placeholder = "Search status, priority, note, text, tag...";
   search.addEventListener("input", () => {
     query = search.value;
+    syncPageUrl();
     render();
   });
   headerEl.appendChild(search);
+
+  const create = document.createElement("button");
+  create.type = "button";
+  create.className = "aaronnote-agenda-full-primary";
+  create.textContent = "New";
+  create.title = "Create todo (n)";
+  create.addEventListener("click", () => void createTodoFromPrompt());
+  headerEl.appendChild(create);
+
+  const help = document.createElement("button");
+  help.type = "button";
+  help.textContent = "?";
+  help.title = "Keyboard help";
+  help.addEventListener("click", showHelp);
+  headerEl.appendChild(help);
 
   if (selection.size > 0) {
     const bulk = document.createElement("button");
@@ -531,12 +997,25 @@ function renderHeader(): void {
     headerEl.appendChild(bulk);
   }
 
-  const close = document.createElement("button");
-  close.type = "button";
-  close.className = "aaronnote-agenda-full-close";
-  close.textContent = "Close";
-  close.addEventListener("click", closeAgendaView);
-  headerEl.appendChild(close);
+  if (data?.clocktable?.running) {
+    const running = data.clocktable.running;
+    const clockBadge = document.createElement("button");
+    clockBadge.type = "button";
+    clockBadge.className = "aaronnote-agenda-full-clock-badge";
+    clockBadge.textContent = `⏱ ${running.text || ""} (${running.minutesSoFar ?? 0}m)`;
+    clockBadge.title = "Clock out";
+    clockBadge.addEventListener("click", () => void clockOutRunning());
+    headerEl.appendChild(clockBadge);
+  }
+
+  if (!deps?.pageMode) {
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "aaronnote-agenda-full-close";
+    close.textContent = "Close";
+    close.addEventListener("click", closeAgendaView);
+    headerEl.appendChild(close);
+  }
 
   const stats = document.createElement("div");
   stats.className = "aaronnote-agenda-full-stats";
@@ -565,12 +1044,18 @@ function render(): void {
     listEl.appendChild(empty);
     return;
   }
-  const lints = renderLints();
-  if (lints) listEl.appendChild(lints);
+  if (view !== "lints") {
+    const lints = renderLints();
+    if (lints) listEl.appendChild(lints);
+  }
   if (view === "week") listEl.appendChild(renderWeek());
   else if (view === "list") listEl.appendChild(renderList());
   else if (view === "month") listEl.appendChild(renderMonth());
-  else listEl.appendChild(renderLog());
+  else if (view === "log") listEl.appendChild(renderLog());
+  else if (view === "gantt") listEl.appendChild(renderGantt());
+  else if (view === "projects") listEl.appendChild(renderProjects());
+  else if (view === "clocktable") listEl.appendChild(renderClocktable());
+  else listEl.appendChild(renderLintsView());
 
   if (!cursorId) {
     const ids = flatTodoIds();
@@ -578,13 +1063,18 @@ function render(): void {
   }
 }
 
+function hasCommandModifier(event: KeyboardEvent): boolean {
+  return event.isComposing || event.metaKey || event.ctrlKey || event.altKey;
+}
+
 function handleKeydown(event: KeyboardEvent): void {
   if (!overlay || overlay.hidden) return;
   const target = event.target as HTMLElement | null;
   if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
-    if (event.key === "Escape") { event.preventDefault(); closeAgendaView(); }
+    if (event.key === "Escape" && !hasCommandModifier(event)) { event.preventDefault(); closeAgendaView(); }
     return;
   }
+  if (hasCommandModifier(event)) return;
   const todo = cursorId ? todoById(cursorId) : undefined;
   switch (event.key) {
     case "Escape":
@@ -610,6 +1100,10 @@ function handleKeydown(event: KeyboardEvent): void {
     case "t":
       event.preventDefault();
       if (todo) cycleStatus(todo);
+      break;
+    case "n":
+      event.preventDefault();
+      void createTodoFromPrompt();
       break;
     case "p":
     case ",":
@@ -658,14 +1152,24 @@ function handleKeydown(event: KeyboardEvent): void {
       break;
     case "v": {
       event.preventDefault();
-      const order: ViewKind[] = ["week", "list", "month", "log"];
+      const order: ViewKind[] = ["week", "list", "month", "log", "gantt", "projects", "clocktable", "lints"];
       view = order[(order.indexOf(view) + 1) % order.length];
+      syncPageUrl();
       void fetchAgenda();
       break;
     }
+    case "c":
+      event.preventDefault();
+      if (data?.clocktable?.running) void clockOutRunning();
+      else if (todo) void clockInTodo(todo);
+      break;
     case "g":
       event.preventDefault();
       void fetchAgenda();
+      break;
+    case "?":
+      event.preventDefault();
+      showHelp();
       break;
     default:
       break;
@@ -692,13 +1196,28 @@ export function closeAgendaView(): void {
   selection.clear();
 }
 
+// Re-fetches without resetting view/anchor/cursor — for SSE-driven refresh
+// (`agenda-changed`/`notes-index-changed`) so a background edit doesn't
+// yank the user back to today's view.
+export async function refreshAgendaView(): Promise<void> {
+  if (!overlay || overlay.hidden) return;
+  await fetchAgenda();
+}
+
 export async function openAgendaView(nextDeps: AgendaViewDeps): Promise<void> {
   deps = nextDeps;
   ensureOverlay();
   if (!overlay) return;
   overlay.hidden = false;
-  view = "week";
   anchorMs = midnight(Date.now());
   cursorId = "";
+  if (nextDeps.pageMode && typeof location !== "undefined") {
+    const params = new URLSearchParams(location.search);
+    view = normalizeView(params.get("view"));
+    query = params.get("q") || "";
+  } else {
+    view = "week";
+    query = "";
+  }
   await fetchAgenda();
 }

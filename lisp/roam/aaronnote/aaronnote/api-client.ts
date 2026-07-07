@@ -163,6 +163,7 @@ export type TodoItem = Record<string, unknown> & {
   noteTitle?: string;
   title?: string;
   text?: string;
+  command?: "todo" | "itodo" | string;
   source?: string;
   status?: string;
   ddl?: string;
@@ -192,26 +193,109 @@ export type TodoLint = {
   todoId?: string;
   file?: string;
   line?: number;
-  kind?: "broken-ref" | "ambiguous-ref" | "ambiguous-note";
+  kind?:
+    | "broken-ref"
+    | "ambiguous-ref"
+    | "ambiguous-note"
+    | "missing-gantt-date"
+    | "missing-milestone-date"
+    | "cycle"
+    | "broken-clock-ref"
+    | "ambiguous-clock-ref";
+  via?: "after" | "blocks";
   ref?: string;
   message?: string;
   candidates?: Array<{ id: string; text: string }>;
 };
+export type PlanningItem = Record<string, unknown> & {
+  id?: string;
+  kind?: "project" | "milestone" | "clock" | string;
+  status?: string;
+  title?: string;
+  text?: string;
+  args?: Record<string, string>;
+  canon?: Record<string, string>;
+  file?: string;
+  path?: string;
+  noteTitle?: string;
+  line?: number;
+  index?: number;
+  source?: string;
+};
+export type GanttTask = {
+  id?: string;
+  name?: string;
+  project?: string;
+  status?: string;
+  start?: string;
+  end?: string;
+  dependencies?: string[];
+  progress?: number;
+  source?: { file?: string; index?: number; line?: number; source?: string; text?: string };
+};
+export type GanttMilestone = {
+  id?: string;
+  name?: string;
+  project?: string;
+  date?: string;
+  source?: { file?: string; index?: number; line?: number; source?: string; text?: string };
+};
+export type GanttLane = { id?: string; key?: string; name?: string; start?: string; end?: string; childTaskIds?: string[] };
+export type GanttMsg = {
+  tasks?: GanttTask[];
+  backlog?: GanttTask[];
+  milestones?: GanttMilestone[];
+  lanes?: GanttLane[];
+  lints?: TodoLint[];
+};
+export type ProjectRollup = {
+  id?: string;
+  key?: string;
+  title?: string;
+  status?: string;
+  area?: string;
+  phase?: string;
+  file?: string;
+  open?: number;
+  doing?: number;
+  done?: number;
+  cancelled?: number;
+  blocked?: number;
+  total?: number;
+  progress?: number;
+  effortMinutes?: number;
+  clockedMinutes?: number;
+  childTodoIds?: string[];
+};
 export type AgendaEntry = {
-  kind?: "deadline" | "warning" | "overdue" | "scheduled" | "sched-carry" | "log";
+  kind?: "deadline" | "warning" | "overdue" | "scheduled" | "sched-carry" | "log" | "repeat";
   label?: string;
   todoId?: string;
   date?: string;
   dateKey?: string;
   time?: string | null;
   urgency?: number;
+  virtual?: boolean;
 };
 export type AgendaDay = { date?: string; entries?: AgendaEntry[] };
+export type ClockTask = { todoId?: string; text?: string; file?: string; minutes?: number; effortMinutes?: number };
+export type ClockModel = {
+  tasks?: ClockTask[];
+  byDay?: Record<string, number>;
+  byProject?: Record<string, number>;
+  running?: { todoId?: string; text?: string; file?: string; from?: string; minutesSoFar?: number } | null;
+};
 export type AgendaMsg = {
   type?: string;
   range?: { from?: string; to?: string; today?: string };
   days?: AgendaDay[];
   todos?: TodoItem[];
+  projects?: PlanningItem[];
+  milestones?: PlanningItem[];
+  clocks?: PlanningItem[];
+  clocktable?: ClockModel;
+  projectModel?: ProjectRollup[];
+  gantt?: GanttMsg;
   lints?: TodoLint[];
   logByDay?: Record<string, number>;
   stats?: { open?: number; doing?: number; done?: number; cancelled?: number; blocked?: number; overdue?: number };
@@ -230,7 +314,10 @@ type NativeApi = {
     todos?: (file: string) => Promise<unknown>;
     updateTodo?: (body: Record<string, unknown>) => Promise<unknown>;
     agenda?: (body: Record<string, unknown>) => Promise<unknown>;
+    createTodo?: (body: Record<string, unknown>) => Promise<unknown>;
     patchTodo?: (body: Record<string, unknown>) => Promise<unknown>;
+    clockIn?: (body: Record<string, unknown>) => Promise<unknown>;
+    clockOut?: (body: Record<string, unknown>) => Promise<unknown>;
     todoDepRef?: (body: Record<string, unknown>) => Promise<unknown>;
   };
   completions?: {
@@ -400,9 +487,21 @@ export const api = {
       const call = requireMethod(nativeApi().notes?.agenda, "Agenda");
       return ensureOk(await call(body) as AgendaMsg, "Agenda failed");
     },
+    async createTodo(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().notes?.createTodo, "Todo create");
+      return ensureOk(await call(body) as Record<string, unknown>, "Todo create failed");
+    },
     async patchTodo(body: Record<string, unknown>): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().notes?.patchTodo, "Todo patch");
       return ensureOk(await call(body) as Record<string, unknown>, "Todo patch failed");
+    },
+    async clockIn(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().notes?.clockIn, "Clock in");
+      return ensureOk(await call(body) as Record<string, unknown>, "Clock in failed");
+    },
+    async clockOut(body: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+      const call = requireMethod(nativeApi().notes?.clockOut, "Clock out");
+      return ensureOk(await call(body) as Record<string, unknown>, "Clock out failed");
     },
     async todoDepRef(body: Record<string, unknown>): Promise<{ type?: string; ref?: string }> {
       const call = requireMethod(nativeApi().notes?.todoDepRef, "Todo dependency reference");

@@ -76,6 +76,8 @@ async function main() {
     result = await runtime.updateTodoStatus(JSON.parse(argValue(args, "--json", "{}")));
   } else if (action === "agenda") {
     result = await runtime.buildAgenda(JSON.parse(argValue(args, "--json", "{}")));
+  } else if (action === "create-todo") {
+    result = await runtime.createTodo(JSON.parse(argValue(args, "--json", "{}")));
   } else if (action === "patch-todo") {
     result = await runtime.patchTodo(JSON.parse(argValue(args, "--json", "{}")));
   } else if (action === "todo-dep-ref") {

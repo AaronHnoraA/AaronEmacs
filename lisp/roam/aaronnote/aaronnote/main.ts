@@ -28,7 +28,6 @@ import {
   type LatexTemplate,
 } from "./api-client.ts";
 import { Epoch } from "../src/async-epoch.ts";
-import { openAgendaView } from "./agenda-view.ts";
 import { CoalescedTimer } from "../src/coalesced-timer.ts";
 import { blobToBase64 } from "../src/paste.ts";
 import { collectFindMatches, createFindPattern, type FindMatch } from "./find.ts";
@@ -4038,9 +4037,10 @@ function agendaOpenTodo(todo: TodoItem): void {
   void openFile(file);
 }
 
-function todoStatusSourcePrefix(status: string): string {
+function todoStatusSourcePrefix(status: string, commandName = "todo"): string {
   const s = (status || "todo").toLowerCase();
-  return s === "todo" || s === "open" || s === "unchecked" ? "@@todo " : `@@todo(${s}) `;
+  const command = commandName.toLowerCase() === "itodo" ? "itodo" : "todo";
+  return s === "todo" || s === "open" || s === "unchecked" ? `@@${command} ` : `@@${command}(${s}) `;
 }
 
 type TodoUpdateResult = {
@@ -4107,7 +4107,7 @@ function applyTodoStatusInEditor(todo: TodoItem, status: string, result: TodoUpd
   const current = editor.markdownBetween(from, to);
   const next = result.nextSource && current === oldSource
     ? String(result.nextSource)
-    : current.replace(/^@@todo(?:\([^)\n]*\))?[ \t]+/i, todoStatusSourcePrefix(status));
+    : current.replace(/^@@(todo|itodo)(?:\([^)\n]*\))?[ \t]+/i, (_match, command) => todoStatusSourcePrefix(status, command));
   if (next === current) return;
   applyingContent = true;
   editor.replaceMarkdownRange(from, to, next);
@@ -5904,7 +5904,7 @@ agendaButton.addEventListener("click", () => {
   void openAgendaTool();
 });
 agendaFullButton.addEventListener("click", () => {
-  void openAgendaView({ api, jumpToTodo: agendaOpenTodo, setStatus });
+  window.location.href = "/agenda?view=agenda";
 });
 toolsButton.addEventListener("click", toggleToolsPanel);
 toolsClose.addEventListener("click", closeToolsPanel);

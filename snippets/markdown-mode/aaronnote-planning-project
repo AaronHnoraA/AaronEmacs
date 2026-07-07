@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Aaronnote planning project
+# key: approject
+# group: Aaronnote planning DSL
+# --
+@@project(${1:active}) ${2:Project name} {area: ${3:area}, goal: "${4:Goal}"}$0

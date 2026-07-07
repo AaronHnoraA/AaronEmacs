@@ -5,6 +5,7 @@
 
 ### Features
 - 美化 emacs的界面: nerd, unicode, emoji
+- beancount 管理工具 以后有时间再弄吧 
 
 ###  Bugs
 

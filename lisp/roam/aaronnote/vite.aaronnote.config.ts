@@ -29,6 +29,10 @@ export default defineConfig(({ command }) => ({
       },
     },
     rolldownOptions: {
+      input: {
+        index: resolve("aaronnote/index.html"),
+        agenda: resolve("aaronnote/agenda.html"),
+      },
       checks: {
         eval: false,
       },

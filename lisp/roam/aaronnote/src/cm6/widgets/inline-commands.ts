@@ -1,5 +1,6 @@
 /**
  * Inline @@command widgets — handles @@todo(status) [text]{args},
+ * @@itodo(status) [text]{args},
  * @@tag[name], and @@comment [text]{args}.
  *
  * Uses a ViewPlugin (viewport-scoped) since these are inline decorations
@@ -15,7 +16,7 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 import { MeasuredWidget } from "./measured-widget.ts";
-import { scanInlineCommands, type InlineCommand } from "../../command-syntax.ts";
+import { findInlineCommandClose, parseCommandArgs, scanInlineCommands, type InlineCommand } from "../../command-syntax.ts";
 import { renderMarkdownHTML } from "../../render-html.ts";
 import type { Range } from "@codemirror/state";
 import { blockMathRangesOverlapping, mergeOverlappingRanges, positionInsideAnyRange } from "../math-ranges.ts";
@@ -35,6 +36,13 @@ import { hasViewportDecorationRefresh } from "../viewport-refresh.ts";
 // Helpers
 // ---------------------------------------------------------------------------
 
+type TodoCommand = InlineCommand & {
+  blockBodyFrom?: number;
+  blockTo?: number;
+};
+
+type PlanningUiCommand = TodoCommand;
+
 /**
  * Render a @@todo body as inline HTML so embedded markdown — notably inline math
  * `\(…\)` — renders inside the chip. The body sits in a replaced widget, so the
@@ -52,6 +60,7 @@ const STATUS_LABELS: Record<string, string> = {
   doing: "DOING",
   done: "DONE",
   blocked: "BLOCKED",
+  cancelled: "CANCELLED",
   "": "TODO",
 };
 
@@ -60,6 +69,18 @@ const STATUS_ICONS: Record<string, string> = {
   doing: "▶",
   done: "✓",
   blocked: "✕",
+  cancelled: "⊘",
+};
+
+const TODO_SUMMARY_KEYS = new Set(["project", "proj", "phase", "area", "owner", "context", "ctx"]);
+const TODO_TIME_KEYS = new Set(["effort", "progress", "repeat", "rep", "every"]);
+const TASK_COMMAND_NAMES = new Set(["todo", "itodo"]);
+const PLANNING_BLOCK_NAMES = new Set(["project", "milestone", "clock"]);
+const PLANNING_KIND_LABELS: Record<string, string> = {
+  todo: "TODO",
+  project: "PROJECT",
+  milestone: "MILESTONE",
+  clock: "CLOCK",
 };
 
 function statusLabel(sw: string): string {
@@ -74,14 +95,203 @@ function cleanTag(value: string): string {
   return value.trim().replace(/^#/, "");
 }
 
+function todoCommandBlocks(text: string): TodoCommand[] {
+  const out: TodoCommand[] = [];
+  const re = /@@(todo|itodo)(?:\(([^)\n]*)\))?[ \t]+\[/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text))) {
+    const name = match[1].toLowerCase();
+    const openBracket = re.lastIndex - 1;
+    const closeBracket = findInlineCommandClose(text, openBracket, "]");
+    if (closeBracket < 0) continue;
+    let pos = closeBracket + 1;
+    while (text[pos] === " " || text[pos] === "\t") pos++;
+    if (text[pos] !== "{") continue;
+    const sameLineEnd = text.indexOf("\n", pos + 1);
+    const sameLineClose = findInlineCommandClose(text.slice(0, sameLineEnd < 0 ? text.length : sameLineEnd), pos, "}");
+    if (sameLineClose >= 0) {
+      re.lastIndex = sameLineClose + 1;
+      continue;
+    }
+    const tail = text.slice(pos + 1);
+    const closeMatch = tail.match(/\n[ \t]*}/);
+    if (!closeMatch || closeMatch.index === undefined) continue;
+    const closeBrace = pos + 1 + closeMatch.index + closeMatch[0].lastIndexOf("}");
+    const blockTo = closeBrace + 1;
+    const sourceTo = pos + 1;
+    out.push({
+      name,
+      switchValue: match[2]?.trim() ?? "",
+      context: text.slice(openBracket + 1, closeBracket),
+      argsRaw: text.slice(pos, blockTo),
+      args: parseCommandArgs(text.slice(pos, blockTo)),
+      fullFrom: match.index,
+      fullTo: sourceTo,
+      blockBodyFrom: sourceTo,
+      blockTo,
+      contextFrom: openBracket + 1,
+      contextTo: closeBracket,
+    });
+    re.lastIndex = blockTo;
+  }
+  return out;
+}
+
+function planningCommandBlocks(text: string): PlanningUiCommand[] {
+  const out: PlanningUiCommand[] = [];
+  const re = /@@(project|milestone|clock)(?:\(([^)\n]*)\))?[ \t]+/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text))) {
+    const name = match[1].toLowerCase();
+    const titleFrom = re.lastIndex;
+    const lineEnd = text.indexOf("\n", titleFrom);
+    const headerEnd = lineEnd < 0 ? text.length : lineEnd;
+    const openBrace = text.indexOf("{", titleFrom);
+    if (openBrace < 0 || openBrace > headerEnd) continue;
+
+    const title = text.slice(titleFrom, openBrace).trim();
+    if (!title) continue;
+
+    const sameLineClose = findInlineCommandClose(text.slice(0, headerEnd), openBrace, "}");
+    if (sameLineClose >= 0) {
+      out.push({
+        name,
+        switchValue: match[2]?.trim() ?? "",
+        context: title,
+        argsRaw: text.slice(openBrace, sameLineClose + 1),
+        args: parseCommandArgs(text.slice(openBrace, sameLineClose + 1)),
+        fullFrom: match.index,
+        fullTo: sameLineClose + 1,
+        contextFrom: titleFrom,
+        contextTo: openBrace,
+      });
+      re.lastIndex = sameLineClose + 1;
+      continue;
+    }
+
+    const tail = text.slice(openBrace + 1);
+    const closeMatch = tail.match(/\n[ \t]*}/);
+    if (!closeMatch || closeMatch.index === undefined) continue;
+    const closeBrace = openBrace + 1 + closeMatch.index + closeMatch[0].lastIndexOf("}");
+    const blockTo = closeBrace + 1;
+    const sourceTo = openBrace + 1;
+    out.push({
+      name,
+      switchValue: match[2]?.trim() ?? "",
+      context: title,
+      argsRaw: text.slice(openBrace, blockTo),
+      args: parseCommandArgs(text.slice(openBrace, blockTo)),
+      fullFrom: match.index,
+      fullTo: sourceTo,
+      blockBodyFrom: sourceTo,
+      blockTo,
+      contextFrom: titleFrom,
+      contextTo: openBrace,
+    });
+    re.lastIndex = blockTo;
+  }
+  return out;
+}
+
+function visibleInlineCommands(text: string): PlanningUiCommand[] {
+  const blocks = [...todoCommandBlocks(text), ...planningCommandBlocks(text)];
+  const blockSpans = blocks.map((cmd) => ({ from: cmd.fullFrom, to: cmd.blockTo ?? cmd.fullTo }));
+  const inline = scanInlineCommands(text).filter((cmd) => {
+    if (blockSpans.some((span) => cmd.fullFrom >= span.from && cmd.fullTo <= span.to)) return false;
+    if (!TASK_COMMAND_NAMES.has(cmd.name)) return true;
+    let pos = cmd.fullTo;
+    while (text[pos] === " " || text[pos] === "\t") pos++;
+    if (text[pos] !== "{") return true;
+    // If this is a multi-line block but `todoCommandBlocks` could not see the
+    // closing brace in the current viewport slice, keep the original inline
+    // header widget as a fallback. ViewPlugin decorations cannot replace
+    // across line breaks, and viewport slices may end before the block closes.
+    return true;
+  });
+  return [...blocks, ...inline].sort((a, b) => a.fullFrom - b.fullFrom || a.fullTo - b.fullTo);
+}
+
+function appendTodoPill(meta: HTMLElement, key: string, value: string): void {
+  const lowKey = key.toLowerCase();
+  const isDateKey = DATE_KEYS.has(lowKey);
+  const parsed = isDateKey ? parseDateValue(value) : null;
+  if (lowKey === "prio" || lowKey === "priority") {
+    const pill = document.createElement("span");
+    pill.className = "inline-todo-prio";
+    pill.dataset.prio = value.trim().toUpperCase();
+    pill.textContent = `#${value.trim().toUpperCase()}`;
+    meta.append(pill);
+  } else if (lowKey === "after" || lowKey === "dep") {
+    const pill = document.createElement("span");
+    pill.className = "inline-todo-dep";
+    pill.title = value;
+    pill.textContent = `after ${value}`;
+    meta.append(pill);
+  } else if (lowKey === "repeat" || lowKey === "rep" || lowKey === "every") {
+    const pill = document.createElement("span");
+    pill.className = "inline-todo-repeat";
+    pill.textContent = `↻ ${value}`;
+    meta.append(pill);
+  } else if (isDateKey && parsed) {
+    const canonical = formatDateValue(parsed.time, parsed.hasTime);
+    const pill = document.createElement("span");
+    pill.className = "inline-todo-date";
+    pill.dataset.when = relativeDateClass(parsed.time);
+    pill.dataset.key = lowKey;
+    const k = document.createElement("span");
+    k.className = "inline-todo-date-key";
+    k.textContent = DATE_KEY_LABELS[lowKey] ?? lowKey;
+    const v = document.createElement("span");
+    v.className = "inline-todo-date-value";
+    v.textContent = canonical;
+    v.title = canonical === value.trim() ? canonical : `${value.trim()} → ${canonical}`;
+    const rel = document.createElement("span");
+    rel.className = "inline-todo-date-rel";
+    rel.textContent = relativeDateLabel(parsed.time);
+    pill.append(k, v, rel);
+    meta.append(pill);
+  } else if (isDateKey && !parsed) {
+    const pill = document.createElement("span");
+    pill.className = "inline-todo-date is-invalid";
+    pill.dataset.key = lowKey;
+    pill.title = `Unparseable date: ${value.trim()}`;
+    const k = document.createElement("span");
+    k.className = "inline-todo-date-key";
+    k.textContent = DATE_KEY_LABELS[lowKey] ?? lowKey;
+    const v = document.createElement("span");
+    v.className = "inline-todo-date-value";
+    v.textContent = value.trim();
+    pill.append(k, v);
+    meta.append(pill);
+  } else {
+    const pill = document.createElement("span");
+    pill.className = "inline-todo-arg";
+    const k = document.createElement("span");
+    k.className = "inline-todo-arg-key";
+    k.textContent = key;
+    const v = document.createElement("span");
+    v.className = "inline-todo-arg-value";
+    v.textContent = value;
+    pill.append(k, v);
+    meta.append(pill);
+  }
+}
+
+function appendPlanningMeta(meta: HTMLElement, args: Record<string, string>): void {
+  for (const [key, value] of Object.entries(args)) {
+    if (!key || !value) continue;
+    appendTodoPill(meta, key, value);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Widget
 // ---------------------------------------------------------------------------
 
 class TodoWidget extends MeasuredWidget {
-  cmd: InlineCommand;
+  cmd: TodoCommand;
 
-  constructor(cmd: InlineCommand) {
+  constructor(cmd: TodoCommand) {
     super();
     this.cmd = cmd;
   }
@@ -105,13 +315,23 @@ class TodoWidget extends MeasuredWidget {
 
     const wrap = document.createElement("span");
     wrap.className = "inline-todo-widget inline-command-token";
+    wrap.dataset.command = cmd.name;
     wrap.dataset.status = status;
+    wrap.dataset.shape = cmd.argsRaw.includes("\n") ? "block" : "inline";
     wrap.dataset.cmSourceFrom = String(cmd.fullFrom);
     wrap.dataset.cmSourceTo = String(cmd.fullTo);
     wrap.dataset.cmOpenSource = "true";
 
     const card = document.createElement("span");
     card.className = "inline-todo-card";
+
+    const head = document.createElement("span");
+    head.className = "inline-todo-head";
+
+    const kind = document.createElement("span");
+    kind.className = "inline-todo-kind";
+    kind.textContent = cmd.name === "itodo" ? "ITODO" : "TODO";
+    head.append(kind);
 
     const chip = document.createElement("span");
     chip.className = "inline-todo-chip";
@@ -128,7 +348,7 @@ class TodoWidget extends MeasuredWidget {
     label.textContent = statusLabel(status);
     chip.append(label);
 
-    card.append(chip);
+    head.append(chip);
 
     if (cmd.context.trim()) {
       const text = document.createElement("span");
@@ -145,66 +365,37 @@ class TodoWidget extends MeasuredWidget {
       rBracket.setAttribute("aria-hidden", "true");
       rBracket.textContent = "]";
       text.append(lBracket, body, rBracket);
-      card.append(text);
+      head.append(text);
     }
+    card.append(head);
 
     const metaEntries = Object.entries(cmd.args)
       .filter((entry): entry is [string, string] => Boolean(entry[0] && entry[1]));
     if (metaEntries.length > 0) {
       const meta = document.createElement("span");
       meta.className = "inline-todo-meta";
+
+      const primary = document.createElement("span");
+      primary.className = "inline-todo-meta-row inline-todo-meta-primary";
+      const secondary = document.createElement("span");
+      secondary.className = "inline-todo-meta-row inline-todo-meta-secondary";
+      const dependencies = document.createElement("span");
+      dependencies.className = "inline-todo-meta-row inline-todo-meta-deps";
+
       for (const [key, value] of metaEntries) {
         const lowKey = key.toLowerCase();
-        const isDateKey = DATE_KEYS.has(lowKey);
-        const parsed = isDateKey ? parseDateValue(value) : null;
-        if (lowKey === "prio" || lowKey === "priority") {
-          const pill = document.createElement("span");
-          pill.className = "inline-todo-prio";
-          pill.dataset.prio = value.trim().toUpperCase();
-          pill.textContent = `#${value.trim().toUpperCase()}`;
-          meta.append(pill);
-        } else if (lowKey === "after" || lowKey === "dep") {
-          const pill = document.createElement("span");
-          pill.className = "inline-todo-dep";
-          pill.title = value;
-          pill.textContent = `→ ${value}`;
-          meta.append(pill);
-        } else if (lowKey === "repeat" || lowKey === "rep" || lowKey === "every") {
-          const pill = document.createElement("span");
-          pill.className = "inline-todo-repeat";
-          pill.textContent = `↻ ${value}`;
-          meta.append(pill);
-        } else if (isDateKey && parsed) {
-          const canonical = formatDateValue(parsed.time, parsed.hasTime);
-          const pill = document.createElement("span");
-          pill.className = "inline-todo-date";
-          pill.dataset.when = relativeDateClass(parsed.time);
-          pill.dataset.key = lowKey;
-          const k = document.createElement("span");
-          k.className = "inline-todo-date-key";
-          k.textContent = DATE_KEY_LABELS[lowKey] ?? lowKey;
-          const v = document.createElement("span");
-          v.className = "inline-todo-date-value";
-          v.textContent = canonical;
-          v.title = canonical === value.trim() ? canonical : `${value.trim()} → ${canonical}`;
-          const rel = document.createElement("span");
-          rel.className = "inline-todo-date-rel";
-          rel.textContent = relativeDateLabel(parsed.time);
-          pill.append(k, v, rel);
-          meta.append(pill);
-        } else {
-          const pill = document.createElement("span");
-          pill.className = "inline-todo-arg";
-          const k = document.createElement("span");
-          k.className = "inline-todo-arg-key";
-          k.textContent = key;
-          const v = document.createElement("span");
-          v.className = "inline-todo-arg-value";
-          v.textContent = value;
-          pill.append(k, v);
-          meta.append(pill);
-        }
+        const target = lowKey === "after" || lowKey === "dep"
+          ? dependencies
+          : DATE_KEYS.has(lowKey) || lowKey === "prio" || lowKey === "priority" || TODO_TIME_KEYS.has(lowKey)
+            ? primary
+            : TODO_SUMMARY_KEYS.has(lowKey)
+              ? secondary
+              : secondary;
+        appendTodoPill(target, key, value);
       }
+      if (primary.childNodes.length > 0) meta.append(primary);
+      if (secondary.childNodes.length > 0) meta.append(secondary);
+      if (dependencies.childNodes.length > 0) meta.append(dependencies);
       card.append(meta);
     }
 
@@ -214,6 +405,76 @@ class TodoWidget extends MeasuredWidget {
     rail.className = "inline-todo-rail";
     rail.setAttribute("aria-hidden", "true");
     wrap.append(rail);
+
+    return wrap;
+  }
+
+  ignoreEvent(): boolean { return false; }
+}
+
+class PlanningBlockWidget extends MeasuredWidget {
+  cmd: PlanningUiCommand;
+
+  constructor(cmd: PlanningUiCommand) {
+    super();
+    this.cmd = cmd;
+  }
+
+  protected measureKey(): string { return ""; }
+  protected get measuredBlock(): boolean { return false; }
+
+  eq(other: PlanningBlockWidget): boolean {
+    return (
+      this.cmd.name === other.cmd.name &&
+      this.cmd.switchValue === other.cmd.switchValue &&
+      this.cmd.context === other.cmd.context &&
+      this.cmd.argsRaw === other.cmd.argsRaw &&
+      this.cmd.fullFrom === other.cmd.fullFrom &&
+      this.cmd.fullTo === other.cmd.fullTo
+    );
+  }
+
+  toDOM(): HTMLElement {
+    const { cmd } = this;
+    const kind = cmd.name.toLowerCase();
+
+    const wrap = document.createElement("span");
+    wrap.className = "inline-planning-widget inline-command-token";
+    wrap.dataset.kind = kind;
+    const status = cmd.switchValue.trim().toLowerCase() || (kind === "todo" ? "todo" : "");
+    if (status) wrap.dataset.status = status;
+    wrap.dataset.cmSourceFrom = String(cmd.fullFrom);
+    wrap.dataset.cmSourceTo = String(cmd.fullTo);
+    wrap.dataset.cmOpenSource = "true";
+
+    const head = document.createElement("span");
+    head.className = "inline-planning-head";
+
+    const badge = document.createElement("span");
+    badge.className = "inline-planning-badge";
+    badge.textContent = PLANNING_KIND_LABELS[kind] ?? kind.toUpperCase();
+    head.append(badge);
+
+    if (status) {
+      const state = document.createElement("span");
+      state.className = "inline-planning-state";
+      state.textContent = statusLabel(status);
+      head.append(state);
+    }
+
+    const title = document.createElement("span");
+    title.className = "inline-planning-title";
+    title.innerHTML = inlineTodoBodyHTML(cmd.context.trim());
+    head.append(title);
+    wrap.append(head);
+
+    const metaEntries = Object.entries(cmd.args).filter(([, value]) => Boolean(value));
+    if (metaEntries.length > 0) {
+      const meta = document.createElement("span");
+      meta.className = "inline-planning-meta inline-todo-meta-row";
+      appendPlanningMeta(meta, cmd.args);
+      wrap.append(meta);
+    }
 
     return wrap;
   }
@@ -466,6 +727,24 @@ function excludedCommandRanges(view: EditorView): Array<{ from: number; to: numb
   return mergeOverlappingRanges([...math, ...inlineMath, ...code]);
 }
 
+function pushHiddenPlanningBodyLines(
+  decos: Range<Decoration>[],
+  doc: EditorView["state"]["doc"],
+  bodyFrom: number,
+  blockTo: number,
+  className: string,
+): void {
+  let start = bodyFrom;
+  if (doc.sliceString(start, Math.min(start + 1, doc.length)) === "\n") start += 1;
+  if (start >= blockTo) return;
+  const firstLine = doc.lineAt(start).number;
+  const lastLine = doc.lineAt(Math.max(start, blockTo - 1)).number;
+  for (let lineNo = firstLine; lineNo <= lastLine; lineNo++) {
+    const line = doc.line(lineNo);
+    decos.push(Decoration.line({ class: className }).range(line.from));
+  }
+}
+
 function buildInlineCommandDecos(
   view: EditorView,
   excludedRanges: Array<{ from: number; to: number }>,
@@ -476,17 +755,49 @@ function buildInlineCommandDecos(
 
   for (const { from: vFrom, to: vTo } of view.visibleRanges) {
     const text = doc.sliceString(vFrom, vTo);
-    for (const cmd of scanInlineCommands(text)) {
+    for (const cmd of visibleInlineCommands(text)) {
       const from = vFrom + cmd.fullFrom;
       const to = vFrom + cmd.fullTo;
+      const blockTo = vFrom + (cmd.blockTo ?? cmd.fullTo);
       if (positionInsideAnyRange(from, excludedRanges)) continue;
-      const cursorInside = sel.from <= to && sel.to >= from;
-      if (cmd.name === "todo" && !cursorInside) {
+      const cursorInside = sel.from <= blockTo && sel.to >= from;
+      if (cmd.name === "itodo" && !cursorInside) {
+        if (cmd.blockBodyFrom !== undefined && cmd.blockTo !== undefined) {
+          decos.push(Decoration.line({ class: "cm-itodo-block-anchor-line" }).range(doc.lineAt(from).from));
+        }
         decos.push(
           Decoration.replace({
-            widget: new TodoWidget({ ...cmd, fullFrom: from, fullTo: to }),
+            widget: new TodoWidget({
+              ...cmd,
+              fullFrom: from,
+              fullTo: to,
+              blockBodyFrom: cmd.blockBodyFrom === undefined ? undefined : vFrom + cmd.blockBodyFrom,
+              blockTo,
+            }),
           }).range(from, to),
         );
+        if (cmd.blockBodyFrom !== undefined && cmd.blockTo !== undefined) {
+          pushHiddenPlanningBodyLines(decos, doc, vFrom + cmd.blockBodyFrom, blockTo, "cm-itodo-block-hidden-line");
+        }
+      }
+      if ((cmd.name === "todo" || PLANNING_BLOCK_NAMES.has(cmd.name)) && !cursorInside) {
+        if (cmd.blockBodyFrom !== undefined && cmd.blockTo !== undefined) {
+          decos.push(Decoration.line({ class: "cm-planning-block-anchor-line" }).range(doc.lineAt(from).from));
+        }
+        decos.push(
+          Decoration.replace({
+            widget: new PlanningBlockWidget({
+              ...cmd,
+              fullFrom: from,
+              fullTo: to,
+              blockBodyFrom: cmd.blockBodyFrom === undefined ? undefined : vFrom + cmd.blockBodyFrom,
+              blockTo,
+            }),
+          }).range(from, to),
+        );
+        if (cmd.blockBodyFrom !== undefined && cmd.blockTo !== undefined) {
+          pushHiddenPlanningBodyLines(decos, doc, vFrom + cmd.blockBodyFrom, blockTo, "cm-planning-block-hidden-line");
+        }
       }
       if (cmd.name === "tag") {
         const tag = cleanTag(cmd.context);
@@ -527,10 +838,24 @@ function activeInlineCommandKey(view: EditorView): string {
   if (lastLine - firstLine > 50) return `wide:${sel.from}:${sel.to}`;
   const keys: string[] = [];
 
+  const scanFromLine = Math.max(1, firstLine - 80);
+  const scanToLine = Math.min(view.state.doc.lines, lastLine + 80);
+  const scanFrom = view.state.doc.line(scanFromLine).from;
+  const scanTo = view.state.doc.line(scanToLine).to;
+  const localText = view.state.doc.sliceString(scanFrom, scanTo);
+  const localInlineMathRanges = scanInlineMathRanges(localText, scanFrom);
+  for (const cmd of visibleInlineCommands(localText)) {
+    const from = scanFrom + cmd.fullFrom;
+    const to = scanFrom + (cmd.blockTo ?? cmd.fullTo);
+    if (positionInsideAnyRange(from, localInlineMathRanges)) continue;
+    if (sel.from <= to && sel.to >= from) keys.push(`${from}:${to}`);
+  }
+  if (keys.length > 0) return keys.join("|");
+
   for (let lineNum = firstLine; lineNum <= lastLine; lineNum++) {
     const line = view.state.doc.line(lineNum);
     const inlineMathRanges = scanInlineMathRanges(line.text, line.from);
-    for (const cmd of scanInlineCommands(line.text)) {
+    for (const cmd of visibleInlineCommands(line.text)) {
       const from = line.from + cmd.fullFrom;
       const to = line.from + cmd.fullTo;
       if (positionInsideAnyRange(from, inlineMathRanges)) continue;

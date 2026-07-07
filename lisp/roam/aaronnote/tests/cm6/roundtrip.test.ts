@@ -1748,20 +1748,81 @@ $x$
     }
   });
 
-  test("renders inline todo widgets with a right-side rail", () => {
-    const md = "@@todo(doing) [write proof]{ddl=2026-05-20}\nplain";
+  test("renders itodo widgets with a right-side rail", () => {
+    const md = "@@itodo(doing) [write proof]{ddl=2026-05-20}\nplain";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
 
     const todo = document.querySelector<HTMLElement>(".inline-todo-widget");
     expect(todo).toBeTruthy();
+    expect(todo!.dataset.command).toBe("itodo");
     expect(todo!.dataset.status).toBe("doing");
+    expect(todo!.dataset.shape).toBe("inline");
     expect(todo!.textContent).toContain("[write proof]");
     const datePill = todo!.querySelector<HTMLElement>(".inline-todo-date");
     expect(datePill).toBeTruthy();
     expect(datePill!.dataset.key).toBe("ddl");
     expect(datePill!.querySelector(".inline-todo-date-value")!.textContent).toBe("2026-05-20");
     expect(todo!.querySelector(".inline-todo-rail")).toBeTruthy();
+    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
+      .not.toContain("@@itodo");
+
+    editor.setMarkdownSelection(md.indexOf("@@itodo") + 2);
+    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
+      .toContain("@@itodo(doing) [write proof]");
+    cleanup();
+  });
+
+  test("renders block itodo widgets as a right-side rail card using block attrs", () => {
+    const md = [
+      "@@itodo(doing) [write proof] {",
+      "  project: iso-202603",
+      "  sche: 2026-07-06",
+      "  end: 2026-07-10",
+      "  prio: A",
+      "  effort: 3h",
+      "}",
+      "plain",
+    ].join("\n");
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    const todo = document.querySelector<HTMLElement>(".inline-todo-widget");
+    expect(todo).toBeTruthy();
+    expect(todo!.dataset.command).toBe("itodo");
+    expect(todo!.dataset.status).toBe("doing");
+    expect(todo!.dataset.shape).toBe("block");
+    expect(todo!.querySelector(".inline-todo-rail")).toBeTruthy();
+    expect(todo!.querySelector(".inline-todo-card")).toBeTruthy();
+    expect(todo!.textContent).toContain("write proof");
+    expect(todo!.textContent).toContain("iso-202603");
+    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
+      .not.toContain("@@itodo(doing) [write proof]");
+    expect(document.querySelector(".cm-itodo-block-anchor-line")).toBeTruthy();
+    expect(document.querySelector(".cm-itodo-block-hidden-line")).toBeTruthy();
+
+    editor.setMarkdownSelection(md.indexOf("project:"));
+    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
+      .toContain("@@itodo(doing) [write proof]");
+    expect(document.querySelector(".cm-itodo-block-anchor-line")).toBeNull();
+    expect(document.querySelector(".cm-itodo-block-hidden-line")).toBeNull();
+    cleanup();
+  });
+
+  test("renders todo widgets as local planning cards", () => {
+    const md = "@@todo(doing) [write proof]{ddl=2026-05-20, project=iso-202603}\nplain";
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    const todo = document.querySelector<HTMLElement>(".inline-planning-widget[data-kind='todo']");
+    expect(todo).toBeTruthy();
+    expect(todo!.dataset.status).toBe("doing");
+    expect(todo!.textContent).toContain("TODO");
+    expect(todo!.textContent).toContain("DOING");
+    expect(todo!.textContent).toContain("write proof");
+    expect(todo!.textContent).toContain("iso-202603");
+    expect(todo!.querySelector(".inline-todo-rail")).toBeNull();
+    expect(document.querySelector(".inline-todo-widget")).toBeNull();
     expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
       .not.toContain("@@todo");
 
@@ -1771,12 +1832,53 @@ $x$
     cleanup();
   });
 
-  test("renders bracketed math inside inline todo widgets", () => {
+  test("renders planning commands as local block cards", () => {
+    const md = [
+      "@@project(active) ISO 202603 tensor paper {",
+      "  project: iso-202603",
+      "  area: UNSW",
+      "  owner: Aaron",
+      "}",
+      "",
+      "@@milestone Internal proof freeze {project: iso-202603, date: 2026-07-17}",
+      "",
+      "@@clock Clean graph tensor definitions {",
+      "  project: iso-202603",
+      "  from: \"2026-07-06 09:30\"",
+      "  to: \"2026-07-06 11:00\"",
+      "}",
+      "plain",
+    ].join("\n");
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    const cards = Array.from(document.querySelectorAll<HTMLElement>(".inline-planning-widget"));
+    expect(cards).toHaveLength(3);
+    expect(cards.map((card) => card.dataset.kind)).toEqual(["project", "milestone", "clock"]);
+    expect(cards[0]!.textContent).toContain("PROJECT");
+    expect(cards[0]!.textContent).toContain("ACTIVE");
+    expect(cards[0]!.textContent).toContain("ISO 202603 tensor paper");
+    expect(cards[0]!.textContent).toContain("Aaron");
+    expect(cards[1]!.textContent).toContain("Internal proof freeze");
+    expect(cards[2]!.textContent).toContain("Clean graph tensor definitions");
+    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
+      .not.toContain("@@project(active)");
+    expect(document.querySelector(".cm-planning-block-hidden-line")).toBeTruthy();
+
+    editor.setMarkdownSelection(md.indexOf("owner:"));
+    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
+      .toContain("@@project(active) ISO 202603 tensor paper");
+    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent)
+      .toContain("owner: Aaron");
+    cleanup();
+  });
+
+  test("renders bracketed math inside local todo widgets", () => {
     const md = String.raw`@@todo [prove \(\alpha_{[i]}\) and \(\sqrt[3]{x}\)]{ddl=2026-06-01}` + "\nplain";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
 
-    const todo = document.querySelector<HTMLElement>(".inline-todo-widget");
+    const todo = document.querySelector<HTMLElement>(".inline-planning-widget[data-kind='todo']");
     expect(todo).toBeTruthy();
     expect(todo!.textContent).toContain("prove");
     expect(todo!.querySelector(".katex")).toBeTruthy();
@@ -1786,12 +1888,12 @@ $x$
     cleanup();
   });
 
-  test("renders bare inline todo text through the line end", () => {
+  test("renders bare todo text as a local card through the line end", () => {
     const md = "@@todo 把 λ, κ 的证明与想法整理为可靠资料\nplain";
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
 
-    const todo = document.querySelector<HTMLElement>(".inline-todo-widget");
+    const todo = document.querySelector<HTMLElement>(".inline-planning-widget[data-kind='todo']");
     expect(todo).toBeTruthy();
     expect(todo!.dataset.status).toBe("todo");
     expect(todo!.textContent).toContain("把 λ, κ 的证明与想法整理为可靠资料");
@@ -1857,7 +1959,7 @@ after
     const md = [
       "before \\(x+1\\) after",
       "",
-      "@@todo(doing) [write proof]",
+      "@@itodo(doing) [write proof]",
       "",
       "- [ ] task",
       "",
@@ -1878,7 +1980,7 @@ after
     editor.setMarkdownSelection(md.length);
     expect(document.querySelector(".cm-math-inline")).toBeTruthy();
 
-    editor.setMarkdownSelection(md.indexOf("@@todo") + 2);
+    editor.setMarkdownSelection(md.indexOf("@@itodo") + 2);
     expect(document.querySelector(".inline-todo-widget")).toBeNull();
     editor.setMarkdownSelection(md.length);
     expect(document.querySelector(".inline-todo-widget")).toBeTruthy();

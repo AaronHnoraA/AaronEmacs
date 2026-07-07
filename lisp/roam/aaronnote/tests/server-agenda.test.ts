@@ -11,6 +11,7 @@ const {
   buildAgenda,
   completeTodo,
   configure,
+  createTodo,
   depRefForTodo,
   extractTodos,
   getTodos,
@@ -159,6 +160,60 @@ describe("dependency resolution (no ids)", () => {
       expect(dependent.effectiveStatus).toBe("blocked");
     });
   });
+
+  test("blocks is the reverse of after: the blocking todo's target gains it as a dependency", () => {
+    const todos = extractTodos(
+      [
+        '@@todo(doing) [write proof of lemma] {blocks: "write up final draft"}',
+        "@@todo [write up final draft]",
+      ].join("\n"),
+      note("/notes/a.md", "A"),
+      1,
+    );
+    const { lints } = resolveTodoDeps(todos);
+    expect(lints).toEqual([]);
+    expect(todos[1].deps).toEqual([todos[0].id]);
+    expect(todos[1].effectiveStatus).toBe("blocked");
+    expect(todos[1].blockedBy).toEqual([todos[0].id]);
+  });
+
+  test("after and blocks combine without duplicating a dependency", () => {
+    const todos = extractTodos(
+      [
+        '@@todo(doing) [write proof of lemma] {blocks: "write up final draft"}',
+        '@@todo [write up final draft] {after: "write proof of lemma"}',
+      ].join("\n"),
+      note("/notes/a.md", "A"),
+      1,
+    );
+    resolveTodoDeps(todos);
+    expect(todos[1].deps).toEqual([todos[0].id]);
+  });
+
+  test("a broken blocks ref lints but never blocks", () => {
+    const todos = extractTodos('@@todo [orphan blocker] {blocks: "nonexistent task"}', note("/notes/a.md", "A"), 1);
+    const { lints } = resolveTodoDeps(todos);
+    expect(lints).toMatchObject([{ kind: "broken-ref", ref: "nonexistent task", via: "blocks" }]);
+    expect(todos[0].effectiveStatus).toBe("todo");
+  });
+
+  test("blocks participates in cycle detection alongside after", async () => {
+    await withVault(async (root) => {
+      await writeFile(
+        join(root, "a.md"),
+        [
+          "---\nid: a\n---\n# A\n",
+          "@@todo [first] {blocks: second}",
+          "@@todo [second] {after: first, blocks: first}",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ includeGantt: true });
+      expect(agenda.lints.some((lint: { kind?: string }) => lint.kind === "cycle")).toBe(true);
+    });
+  });
 });
 
 describe("urgency ordering", () => {
@@ -217,6 +272,81 @@ describe("agenda bucketing", () => {
       expect(agenda.stats.overdue).toBe(1);
     });
   });
+
+  test("time-grid: timed entries sort ascending by time before untimed entries", async () => {
+    await withVault(async (root) => {
+      const today = new Date();
+      const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const ago2 = new Date(today); ago2.setDate(ago2.getDate() - 2);
+      await writeFile(
+        join(root, "a.md"),
+        [
+          "---\nid: a\n---\n# A\n",
+          `@@todo [afternoon slot] {sche: "${iso(today)} 14:00"}`,
+          `@@todo [morning slot] {sche: "${iso(today)} 09:00"}`,
+          `@@todo(doing) [overdue, high urgency] {priority: A, ddl: ${iso(ago2)}}`,
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ days: 1 });
+      const todayBucket = agenda.days.find((d: any) => d.date === agenda.range.today);
+      const scheduled = todayBucket.entries.filter((e: any) => e.kind === "scheduled");
+      expect(scheduled.map((e: any) => e.time)).toEqual(["09:00", "14:00"]);
+      // timed entries always sort ahead of untimed ones, regardless of urgency
+      const lastTimedIndex = todayBucket.entries.map((e: any) => Boolean(e.time)).lastIndexOf(true);
+      const firstUntimedIndex = todayBucket.entries.map((e: any) => !e.time).indexOf(true);
+      expect(firstUntimedIndex).toBeGreaterThan(lastTimedIndex);
+    });
+  });
+
+  test("a repeating deadline projects virtual occurrences into future day buckets", async () => {
+    await withVault(async (root) => {
+      const today = new Date();
+      const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const in2 = new Date(today); in2.setDate(in2.getDate() + 2);
+      const in9 = new Date(today); in9.setDate(in9.getDate() + 9);
+      await writeFile(
+        join(root, "a.md"),
+        [
+          "---\nid: a\n---\n# A\n",
+          `@@todo(doing) [weekly standup] {ddl: ${iso(in2)}, repeat: +1w}`,
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ days: 14 });
+      const nextWeekBucket = agenda.days.find((d: any) => d.date === iso(in9));
+      const repeatEntries = nextWeekBucket.entries.filter((e: any) => e.kind === "repeat" && e.virtual === true);
+      expect(repeatEntries).toHaveLength(1);
+      // the anchor occurrence itself is a normal (non-virtual) deadline entry
+      const anchorBucket = agenda.days.find((d: any) => d.date === iso(in2));
+      expect(anchorBucket.entries.some((e: any) => e.kind === "deadline" && !e.virtual)).toBe(true);
+    });
+  });
+
+  test("a cancelled repeating todo does not project future occurrences", async () => {
+    await withVault(async (root) => {
+      const today = new Date();
+      const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const in2 = new Date(today); in2.setDate(in2.getDate() + 2);
+      await writeFile(
+        join(root, "a.md"),
+        [
+          "---\nid: a\n---\n# A\n",
+          `@@todo(cancelled) [dropped habit] {ddl: ${iso(in2)}, repeat: +1d}`,
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ days: 14 });
+      const repeatEntries = agenda.days.flatMap((d: any) => d.entries).filter((e: any) => e.kind === "repeat");
+      expect(repeatEntries).toEqual([]);
+    });
+  });
 });
 
 describe("completeTodo repeater roll", () => {
@@ -250,6 +380,40 @@ describe("completeTodo repeater roll", () => {
       expect(after.canon.done).toMatch(/\d{4}-\d{2}-\d{2}/);
     });
   });
+
+  test("completing a repeating block todo rolls dates and preserves block attrs", async () => {
+    await withVault(async (root) => {
+      const file = join(root, "a.md");
+      await writeFile(file, [
+        "---",
+        "id: a",
+        "---",
+        "# A",
+        "",
+        "@@todo(doing) [weekly review] {",
+        "  project: iso-202603",
+        "  due: 2026-07-01",
+        "  scheduled: 2026-07-01",
+        "  repeat: +1w",
+        "  progress: 50",
+        "}",
+        "",
+      ].join("\n"), "utf8");
+      await syncRoamDb(null, { mode: "full" });
+      const before = (await getTodos("")).todos[0];
+      await completeTodo({ file, id: before.id, index: before.index, source: before.source, text: before.text });
+      const content = await readFile(file, "utf8");
+      expect(content).toContain("@@todo [weekly review] {");
+      expect(content).toContain("due: 2026-07-08");
+      expect(content).toContain("scheduled: 2026-07-08");
+      expect(content).toContain("project: iso-202603");
+      expect(content).toMatch(/done: \d{4}-\d{2}-\d{2}/);
+      expect((await getTodos("")).todos[0]).toMatchObject({
+        status: "todo",
+        canon: { ddl: "2026-07-08", sche: "2026-07-08", project: "iso-202603" },
+      });
+    });
+  });
 });
 
 describe("patchTodo alias-preserving writes", () => {
@@ -267,6 +431,21 @@ describe("patchTodo alias-preserving writes", () => {
     });
   });
 
+  test("patching an itodo preserves the itodo command name", async () => {
+    await withVault(async (root) => {
+      const file = join(root, "a.md");
+      await writeFile(file, "---\nid: a\n---\n# A\n\n@@itodo(doing) [ship it] {due: 2026-07-07}\n", "utf8");
+      await syncRoamDb(null, { mode: "full" });
+      const before = (await getTodos("")).todos[0];
+      expect(before.command).toBe("itodo");
+      await patchTodo({ file, id: before.id, index: before.index, source: before.source, text: before.text, status: "done", ddl: "2026-07-09" });
+      const content = await readFile(file, "utf8");
+      expect(content).toContain("@@itodo(done) [ship it]");
+      expect(content).toContain("due=2026-07-09");
+      expect(content).not.toContain("@@todo(done)");
+    });
+  });
+
   test("afterAdd appends a dep ref with &", async () => {
     await withVault(async (root) => {
       const file = join(root, "a.md");
@@ -276,6 +455,186 @@ describe("patchTodo alias-preserving writes", () => {
       await patchTodo({ file, id: before.id, index: before.index, source: before.source, text: before.text, afterAdd: "third" });
       const content = await readFile(file, "utf8");
       expect(content).toMatch(/after=.*first.*third|after=.*third.*first/);
+    });
+  });
+
+  test("afterAdd appends to a block todo dependency list", async () => {
+    await withVault(async (root) => {
+      const file = join(root, "a.md");
+      await writeFile(file, "---\nid: a\n---\n# A\n\n@@todo [second task] {\n  after: first\n}\n", "utf8");
+      await syncRoamDb(null, { mode: "full" });
+      const before = (await getTodos("")).todos[0];
+      await patchTodo({ file, id: before.id, index: before.index, source: before.source, text: before.text, afterAdd: "third" });
+      const content = await readFile(file, "utf8");
+      expect(content).toMatch(/after: .*first.*third|after: .*third.*first/);
+    });
+  });
+});
+
+describe("planning project and Gantt model", () => {
+  test("groups block todos under explicit projects and exposes milestones", async () => {
+    await withVault(async (root) => {
+      await writeFile(join(root, "iso.md"), [
+        "---",
+        "id: iso",
+        "---",
+        "# ISO",
+        "",
+        "@@project(active) [ISO 202603] {",
+        "  project: iso-202603",
+        "  goal: Submit tensor paper",
+        "}",
+        "",
+        "@@todo(doing) [write graph tensor proof] {",
+        "  project: iso-202603",
+        "  sche: 2026-07-06",
+        "  end: 2026-07-10",
+        "  progress: 25",
+        "}",
+        "",
+        "@@milestone [advisor check] {",
+        "  project: iso-202603",
+        "  date: 2026-07-15",
+        "}",
+        "",
+      ].join("\n"), "utf8");
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ includePlanning: true, includeGantt: true, days: 30 });
+      expect(agenda.projects).toMatchObject([{ title: "ISO 202603", args: { project: "iso-202603" } }]);
+      expect(agenda.milestones).toMatchObject([{ title: "advisor check", args: { project: "iso-202603", date: "2026-07-15" } }]);
+      expect(agenda.gantt.tasks).toMatchObject([
+        { name: "write graph tensor proof", project: "iso-202603", start: "2026-07-06", end: "2026-07-10", progress: 25 },
+      ]);
+      expect(agenda.gantt.milestones).toMatchObject([
+        { name: "advisor check", project: "iso-202603", date: "2026-07-15" },
+      ]);
+      expect(agenda.gantt.lanes).toMatchObject([
+        { key: "iso-202603", start: "2026-07-06", end: "2026-07-10", childTaskIds: [agenda.gantt.tasks[0].id] },
+      ]);
+      expect(agenda.projectModel).toMatchObject([
+        { key: "iso-202603", title: "ISO 202603", total: 1, doing: 1, progress: 0 },
+      ]);
+    });
+  });
+
+  test("project progress rolls up from child todo completion when not set explicitly", async () => {
+    await withVault(async (root) => {
+      await writeFile(join(root, "p.md"), [
+        "---\nid: p\n---\n# P\n",
+        "@@project(active) [Side Project] { project: side }",
+        "@@todo(done) [task one] { project: side }",
+        "@@todo(done) [task two] { project: side }",
+        "@@todo [task three] { project: side }",
+        "@@todo(cancelled) [task four] { project: side }",
+        "",
+      ].join("\n"), "utf8");
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ includePlanning: true });
+      const model = agenda.projectModel.find((p: any) => p.key === "side");
+      // 2 done out of 3 non-cancelled (cancelled is excluded from the base) = 67%
+      expect(model).toMatchObject({ total: 4, done: 2, open: 1, cancelled: 1, progress: 67 });
+    });
+  });
+
+  test("an explicit project progress key wins over the computed rollup", async () => {
+    await withVault(async (root) => {
+      await writeFile(join(root, "p.md"), [
+        "---\nid: p\n---\n# P\n",
+        "@@project(active) [Manual Progress] { project: manual, progress: 90 }",
+        "@@todo [only task] { project: manual }",
+        "",
+      ].join("\n"), "utf8");
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ includePlanning: true });
+      const model = agenda.projectModel.find((p: any) => p.key === "manual");
+      expect(model.progress).toBe(90);
+    });
+  });
+
+  test("project rollup includes effort and clocked minutes from its todos", async () => {
+    await withVault(async (root) => {
+      await writeFile(join(root, "p.md"), [
+        "---\nid: p\n---\n# P\n",
+        "@@project(active) [Timed Project] { project: timed }",
+        '@@todo(doing) [tracked task] { project: timed, effort: 2h }',
+        '@@clock [tracked task] {from: "2026-07-07 09:00", to: "2026-07-07 09:45"}',
+        "",
+      ].join("\n"), "utf8");
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ includePlanning: true });
+      const model = agenda.projectModel.find((p: any) => p.key === "timed");
+      expect(model).toMatchObject({ effortMinutes: 120, clockedMinutes: 45 });
+    });
+  });
+
+  test("agenda-only dates do not Gantt-lint, but explicit end without start does", async () => {
+    await withVault(async (root) => {
+      await writeFile(join(root, "p.md"), [
+        "---\nid: p\n---\n# P\n",
+        "@@todo(doing) [collect references] { project: paper }",
+        "@@todo(doing) [send reminder] { project: paper, ddl: 2026-07-09 }",
+        "@@todo(doing) [draft timeline] { project: paper, sche: 2026-07-07 }",
+        "@@todo(doing) [finish orphaned bar] { project: paper, end: 2026-07-12 }",
+        "",
+      ].join("\n"), "utf8");
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ includeGantt: true });
+      expect(agenda.gantt.backlog).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "collect references", start: "", end: "" }),
+        expect.objectContaining({ name: "send reminder", start: "", end: "2026-07-09" }),
+        expect.objectContaining({ name: "draft timeline", start: "2026-07-07", end: "" }),
+        expect.objectContaining({ name: "finish orphaned bar", start: "", end: "2026-07-12" }),
+      ]));
+      expect(agenda.lints).toMatchObject([
+        { kind: "missing-gantt-date", ref: "finish orphaned bar", message: "Partially scheduled Gantt tasks need both sche/start and end/ddl" },
+      ]);
+      expect(agenda.lints.some((lint: { ref?: string }) => lint.ref === "collect references")).toBe(false);
+      expect(agenda.lints.some((lint: { ref?: string }) => lint.ref === "send reminder")).toBe(false);
+      expect(agenda.lints.some((lint: { ref?: string }) => lint.ref === "draft timeline")).toBe(false);
+    });
+  });
+});
+
+describe("planning cache", () => {
+  test("createTodo appends an agenda-visible todo to inbox by default", async () => {
+    await withVault(async (root) => {
+      const created = await createTodo({ text: "Draft agenda capture", ddl: "2026-07-15", prio: "A" });
+      expect(created).toMatchObject({ ok: true, createdFile: true, path: "inbox.md" });
+      const content = await readFile(join(root, "inbox.md"), "utf8");
+      expect(content).toContain("@@todo [Draft agenda capture]");
+      expect(content).toContain("ddl=2026-07-15");
+      expect(content).toContain("prio=A");
+
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ from: "2026-07-14", days: 3 });
+      const todo = agenda.todos.find((item: any) => item.text === "Draft agenda capture");
+      expect(todo).toMatchObject({ status: "todo", canon: { ddl: "2026-07-15", prio: "A" } });
+      expect(agenda.days.some((day: any) => day.entries.some((entry: any) => entry.todoId === todo.id))).toBe(true);
+    });
+  });
+
+  test("planningItemsForNote memoizes parsed nodes instead of re-reading the file from disk on every agenda request", async () => {
+    await withVault(async (root) => {
+      const file = join(root, "a.md");
+      await writeFile(
+        file,
+        "---\nid: a\n---\n# A\n\n@@project(active) [Original Project] {area: tooling}\n\n@@todo [first task] {project: original-project}\n",
+        "utf8",
+      );
+      await syncRoamDb(null, { mode: "full" });
+      const first = await buildAgenda({ includeGantt: true });
+      expect(first.projects).toMatchObject([{ title: "Original Project" }]);
+
+      // Mutate the file directly on disk, bypassing patchTodo/updateNote and
+      // markNotesDirty — the noteCache must not notice on its own.
+      await writeFile(
+        file,
+        "---\nid: a\n---\n# A\n\n@@project(active) [Mutated Project] {area: tooling}\n\n@@todo [first task] {project: original-project}\n",
+        "utf8",
+      );
+
+      const second = await buildAgenda({ includeGantt: true });
+      expect(second.projects).toMatchObject([{ title: "Original Project" }]);
     });
   });
 });

@@ -19,6 +19,7 @@ const TECHNICAL_ORG_ENV_KINDS = new Set([
 
 const PROSE_INLINE_COMMANDS = new Set([
   "todo",
+  "itodo",
   "comment",
   "scomment",
   "part",

@@ -64,7 +64,7 @@ function proseWords(text) {
   // Drop math, code, comments, and Aaronnote todos before comparing words.
   s = s.replace(/\\\(.*?\\\)/gs, " ").replace(/\\\[.*?\\\]/gs, " ").replace(/\$\$.*?\$\$/gs, " ");
   s = s.replace(/```[\s\S]*?```/g, " ").replace(/\\begin\{verbatim\}[\s\S]*?\\end\{verbatim\}/g, " ");
-  s = s.replace(/@@todo[^\n]*/gi, " ");
+  s = s.replace(/@@(?:todo|itodo)[^\n]*/gi, " ");
   s = s.replace(/%[^\n]*/g, " "); // LaTeX comments
   s = s.replace(/\\[A-Za-z@]+\s*(\[[^\]]*\])?/g, " "); // LaTeX command names + optional args
   s = s.replace(/[#+*_>`~^{}\\$&/=.,;:!?()\[\]|"'—–-]/g, " "); // markup + punctuation

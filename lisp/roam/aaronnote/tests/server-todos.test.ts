@@ -50,6 +50,7 @@ describe("server todo scan", () => {
         "@@todo [plain]",
         "@@todo(done) [closed]",
         "@@todo(doing) [active]{ddl: 2026-05-20}",
+        "@@itodo(doing) [side active]{ddl: 2026-05-21}",
         "@@todo(cancel) [dropped]",
         "@@todo bare task",
         "@@todo(blocked) bare blocked {ddl: 2026-06-01}",
@@ -60,13 +61,14 @@ describe("server todo scan", () => {
       1,
     );
 
-    expect(todos.map((todo: { status: string; text: string; ddl?: string }) => [todo.status, todo.text, todo.ddl || ""])).toEqual([
-      ["todo", "plain", ""],
-      ["done", "closed", ""],
-      ["doing", "active", "2026-05-20"],
-      ["cancelled", "dropped", ""],
-      ["todo", "bare task", ""],
-      ["blocked", "bare blocked", "2026-06-01"],
+    expect(todos.map((todo: { command?: string; status: string; text: string; ddl?: string }) => [todo.command || "todo", todo.status, todo.text, todo.ddl || ""])).toEqual([
+      ["todo", "todo", "plain", ""],
+      ["todo", "done", "closed", ""],
+      ["todo", "doing", "active", "2026-05-20"],
+      ["itodo", "doing", "side active", "2026-05-21"],
+      ["todo", "cancelled", "dropped", ""],
+      ["todo", "todo", "bare task", ""],
+      ["todo", "blocked", "bare blocked", "2026-06-01"],
     ]);
     expect(todos[0]).toMatchObject({
       tags: ["math", "topology"],

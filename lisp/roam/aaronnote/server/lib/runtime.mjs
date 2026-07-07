@@ -12,8 +12,44 @@ import { aaronnoteMarkdownToLatex, applyLatexTemplate, defaultLatexOutputPath, e
 import { agentAvailable, loadAgentRules, polishBodyWithAgent } from "./latex-export-codex.mjs";
 import { loadKatexMacros } from "./katex-macros.mjs";
 import { parseCommandArgs, scanInlineCommands } from "../../shared/command-syntax.mjs";
+import {
+  patchPlanningNodeRaw,
+  scanPlanningNodes,
+  serializeInlineAttrs,
+} from "../../shared/planning-dsl.mjs";
+import {
+  DATE_KEYS,
+  TODO_KEY_ALIASES,
+  applyRepeater,
+  canonicalTodoArgs,
+  formatDateValue,
+  formatDuration,
+  midnightMs,
+  normalizeDateValue,
+  normalizeTodoStatus,
+  parseDateValue,
+  parseDepRefs,
+  parseDuration,
+  parseLeadTime,
+  parseRepeater,
+  todoArgKeyForCanonical,
+} from "../../shared/planning-values.mjs";
 
-export { parseCommandArgs, scanInlineCommands };
+export { parseCommandArgs, scanInlineCommands, scanPlanningNodes };
+export {
+  applyRepeater,
+  canonicalTodoArgs,
+  formatDateValue,
+  formatDuration,
+  normalizeDateValue,
+  normalizeTodoStatus,
+  parseDateValue,
+  parseDepRefs,
+  parseDuration,
+  parseLeadTime,
+  parseRepeater,
+  todoArgKeyForCanonical,
+};
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 let workspaceRoot = resolve(process.env.AARONNOTE_WORKSPACE_ROOT || resolve(appDir, ".."));
@@ -2450,13 +2486,14 @@ async function noteFromFileForIndex(file) {
       standalone: standaloneFile(file),
     };
     note.domTargets = domTargetsFromContent(content, note);
-    const todoContent = contentMayHaveTodos(content) ? content : "";
+    const planningContent = contentMayHavePlanning(content) ? content : "";
     noteCache.set(file, {
       mtimeMs: info.mtimeMs,
       size: info.size,
       note,
-      todos: todoContent ? null : [],
-      todoContent,
+      todos: planningContent ? null : [],
+      planning: planningContent ? null : { todos: [], projects: [], milestones: [], clocks: [], nodes: [] },
+      planningContent,
     });
     return { ...note };
   } catch {
@@ -2673,137 +2710,16 @@ export async function scanRoamNotes() {
   return await withNoteScanRoot(noteRoot, async () => scanNotes());
 }
 
-const todoStatuses = new Set(["todo", "doing", "done", "blocked", "cancelled"]);
-
-const DATE_KEYS = new Set(["ddl", "due", "deadline", "sche", "scheduled", "start", "done", "date", "when"]);
-
-// Canonical @@todo arg keys and their read aliases. Reads normalize every
-// alias to the canonical key; writes reuse whichever alias a line already
-// has and only introduce the canonical spelling for brand-new args, so
-// existing notes (e.g. `{ddl: ...}`) never get silently rewritten.
-const TODO_KEY_ALIASES = {
-  ddl: ["ddl", "due", "deadline"],
-  sche: ["sche", "scheduled", "start"],
-  prio: ["prio", "priority"],
-  repeat: ["repeat", "rep", "every"],
-  warn: ["warn", "lead"],
-  after: ["after", "dep"],
-  done: ["done"],
-  log: ["log"],
-};
-
-const TODO_CANON_KEYS = Object.keys(TODO_KEY_ALIASES);
-
-export function canonicalTodoArgs(args) {
-  const out = {};
-  if (!args || typeof args !== "object") return out;
-  for (const canon of TODO_CANON_KEYS) {
-    for (const alias of TODO_KEY_ALIASES[canon]) {
-      if (Object.prototype.hasOwnProperty.call(args, alias) && args[alias]) {
-        out[canon] = canon === "prio" ? String(args[alias]).toUpperCase() : args[alias];
-        break;
-      }
-    }
-  }
-  return out;
-}
-
-// Which arg key a patch should write for `canonKey`: the alias already
-// present on the line, or the canonical spelling if the arg is new.
-export function todoArgKeyForCanonical(canonKey, existingArgs) {
-  const aliases = TODO_KEY_ALIASES[canonKey] || [canonKey];
-  for (const alias of aliases) {
-    if (existingArgs && Object.prototype.hasOwnProperty.call(existingArgs, alias)) return alias;
-  }
-  return aliases[0];
-}
-
-function midnightMs(d) {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-}
-
-function pad2(n) { return String(n).padStart(2, "0"); }
-
-export function parseDateValue(raw) {
-  const t = String(raw ?? "").trim();
-  if (!t) return null;
-  const lower = t.toLowerCase();
-  if (lower === "today" || lower === "今天") return { time: midnightMs(new Date()), hasTime: false };
-  if (lower === "tomorrow" || lower === "明天") return { time: midnightMs(new Date()) + 86_400_000, hasTime: false };
-  if (lower === "yesterday" || lower === "昨天") return { time: midnightMs(new Date()) - 86_400_000, hasTime: false };
-  if (lower === "now") return { time: Date.now(), hasTime: true };
-  const rel = lower.match(/^([+-])(\d+)\s*(d|day|days|w|week|weeks|m|month|months|y|year|years)$/);
-  if (rel) {
-    const sign = rel[1] === "-" ? -1 : 1;
-    const n = Number(rel[2]) * sign;
-    const u = rel[3];
-    const base = new Date();
-    base.setHours(0, 0, 0, 0);
-    if (u.startsWith("d")) base.setDate(base.getDate() + n);
-    else if (u.startsWith("w")) base.setDate(base.getDate() + 7 * n);
-    else if (u.startsWith("m")) base.setMonth(base.getMonth() + n);
-    else if (u.startsWith("y")) base.setFullYear(base.getFullYear() + n);
-    return { time: base.getTime(), hasTime: false };
-  }
-  const cjk = t.replace(/年|月/g, "-").replace(/日|号/g, "");
-  const norm = cjk.replace(/[./]/g, "-").trim();
-  let m = norm.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?(?:[\sT](\d{1,2}):(\d{2}))?$/);
-  if (m) {
-    const y = Number(m[1]);
-    const mo = Number(m[2]) - 1;
-    const d = m[3] ? Number(m[3]) : 1;
-    const hh = m[4] ? Number(m[4]) : 0;
-    const mm = m[5] ? Number(m[5]) : 0;
-    const date = new Date(y, mo, d, hh, mm);
-    if (Number.isFinite(date.getTime())) return { time: date.getTime(), hasTime: Boolean(m[4]) };
-  }
-  m = norm.match(/^(\d{1,2})-(\d{1,2})(?:[\sT](\d{1,2}):(\d{2}))?$/);
-  if (m) {
-    const mo = Number(m[1]) - 1;
-    const d = Number(m[2]);
-    const hh = m[3] ? Number(m[3]) : 0;
-    const mm = m[4] ? Number(m[4]) : 0;
-    if (mo >= 0 && mo < 12 && d >= 1 && d <= 31) {
-      const date = new Date(new Date().getFullYear(), mo, d, hh, mm);
-      return { time: date.getTime(), hasTime: Boolean(m[3]) };
-    }
-  }
-  const parsed = Date.parse(t);
-  if (Number.isFinite(parsed)) return { time: parsed, hasTime: /\d{1,2}:\d{2}/.test(t) };
-  return null;
-}
-
-export function formatDateValue(time, hasTime) {
-  const d = new Date(time);
-  const base = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-  return hasTime ? `${base} ${pad2(d.getHours())}:${pad2(d.getMinutes())}` : base;
-}
-
-export function normalizeDateValue(raw) {
-  const parsed = parseDateValue(raw);
-  return parsed ? formatDateValue(parsed.time, parsed.hasTime) : null;
-}
-
 function normalizeArgDates(args) {
   if (!args || typeof args !== "object") return args;
   const out = { ...args };
   for (const key of Object.keys(out)) {
-    if (DATE_KEYS.has(key) && typeof out[key] === "string") {
+    if ((DATE_KEYS.has(key) || key === "end" || key === "finish") && typeof out[key] === "string") {
       const canon = normalizeDateValue(out[key]);
       if (canon) out[key] = canon;
     }
   }
   return out;
-}
-
-export function normalizeTodoStatus(raw = "") {
-  const value = String(raw || "").trim().toLowerCase();
-  if (!value || value === " " || value === "open" || value === "unchecked") return "todo";
-  if (value === "~" || value === "-" || value === "wip" || value === "active") return "doing";
-  if (value === "x" || value === "checked" || value === "complete") return "done";
-  if (value === "!" || value === "block") return "blocked";
-  if (value === "cancel" || value === "canceled" || value === "cancelled") return "cancelled";
-  return todoStatuses.has(value) ? value : "todo";
 }
 
 export function extractTodos(content, note, updatedAt) {
@@ -2822,27 +2738,28 @@ export function extractTodos(content, note, updatedAt) {
     }
     return Math.max(0, hi) + 1;
   };
-  for (const command of scanInlineCommands(content, "todo")) {
-    const source = content.slice(command.fullFrom, command.fullTo);
-    const text = String(command.context || "").replace(/\\([\]\\])/g, "$1").trim();
-    const status = normalizeTodoStatus(command.switchValue);
-    const args = normalizeArgDates(command.args);
-    const line = lineFor(command.fullFrom);
+  for (const command of scanPlanningNodes(content, { kind: "todo" })) {
+    const source = content.slice(command.span.from, command.span.to);
+    const text = String(command.title || "").trim();
+    const status = normalizeTodoStatus(command.status);
+    const args = normalizeArgDates(command.attrs);
+    const line = lineFor(command.span.from);
     const lineStart = lineStarts[line - 1] || 0;
     const lineEnd = content.indexOf("\n", lineStart);
     const rawLine = content.slice(lineStart, lineEnd < 0 ? content.length : lineEnd).trim();
     todos.push({
-      id: `${note.file}:${command.fullFrom}`,
+      id: `${note.file}:${command.span.from}`,
+      command: command.kind,
       status,
       text,
       args,
       canon: canonicalTodoArgs(args),
-      meta: command.argsRaw,
+      meta: command.attrsRaw,
       ddl: args.ddl || "",
       source,
-      index: command.fullFrom,
+      index: command.span.from,
       line,
-      column: command.fullFrom - lineStart + 1,
+      column: command.span.column,
       context: rawLine,
       file: note.file,
       path: note.path,
@@ -2863,16 +2780,59 @@ export function extractTodos(content, note, updatedAt) {
   return todos;
 }
 
-function todoStatusSource(status) {
+export function extractPlanningItems(content, note, updatedAt) {
+  const nodes = scanPlanningNodes(content);
+  const todos = extractTodos(content, note, updatedAt);
+  const todoByIndex = new Map(todos.map((todo) => [todo.index, todo]));
+  const projects = [];
+  const milestones = [];
+  const clocks = [];
+  for (const node of nodes) {
+    if (node.kind === "todo" || node.kind === "itodo") continue;
+    const args = normalizeArgDates(node.attrs || {});
+    const canon = canonicalTodoArgs(args);
+    const base = {
+      id: `${note.file}:${node.span.from}`,
+      kind: node.kind,
+      status: node.status || "",
+      text: node.title || "",
+      title: node.title || "",
+      args,
+      canon,
+      meta: node.attrsRaw || "",
+      source: node.raw,
+      index: node.span.from,
+      line: node.span.line,
+      column: node.span.column,
+      file: note.file,
+      path: note.path,
+      noteKey: note.key,
+      noteId: note.id,
+      roamId: note.id,
+      noteTitle: note.title,
+      tags: Array.isArray(note.tags) ? [...note.tags] : [],
+      inlineTags: Array.isArray(note.inlineTags) ? [...note.inlineTags] : [],
+      updatedAt,
+      diagnostics: node.diagnostics || [],
+    };
+    if (node.kind === "project") projects.push({ ...base, status: node.status || "active" });
+    else if (node.kind === "milestone") milestones.push(base);
+    else if (node.kind === "clock") clocks.push(base);
+  }
+  return { todos: todos.map((todo) => todoByIndex.get(todo.index) || todo), projects, milestones, clocks, nodes };
+}
+
+function todoStatusSource(status, commandName = "todo") {
   const normalized = normalizeTodoStatus(status);
-  return normalized === "todo" ? "@@todo " : `@@todo(${normalized}) `;
+  const command = String(commandName || "todo").toLowerCase() === "itodo" ? "itodo" : "todo";
+  return normalized === "todo" ? `@@${command} ` : `@@${command}(${normalized}) `;
 }
 
 function replaceTodoStatusInSource(source, status) {
-  const next = todoStatusSource(status);
   const text = String(source || "");
-  if (/^@@todo(?:\([^)\n]*\))?[ \t]+/i.test(text)) {
-    return text.replace(/^@@todo(?:\([^)\n]*\))?[ \t]+/i, next);
+  const match = text.match(/^@@(todo|itodo)(?:\([^)\n]*\))?[ \t]+/i);
+  if (match) {
+    return text.replace(/^@@(?:todo|itodo)(?:\([^)\n]*\))?[ \t]+/i, todoStatusSource(status, match[1]));
   }
   return text;
 }
@@ -2929,15 +2889,15 @@ function patchTodoSource(source, body = {}) {
     : String(source || "");
   const patchKeys = [...TODO_PATCH_ARG_KEYS].filter((key) => bodyHasOwn(body, key));
   if (patchKeys.length === 0) return next;
-  const command = scanInlineCommands(next, "todo")[0];
-  if (!command || command.fullFrom !== 0) return next;
-  const args = { ...(command.args || {}) };
+  const command = scanPlanningNodes(next, { kind: "todo" })[0];
+  if (!command || command.span.from !== 0) return next;
+  const args = { ...(command.attrs || {}) };
   for (const key of patchKeys) {
     const value = normalizeTodoPatchValue(key, body[key]);
     if (value) args[key] = value;
     else delete args[key];
   }
-  return replaceTodoArgsInSource(next, command.argsRaw || "", serializeTodoArgs(args));
+  return replaceTodoArgsInSource(next, command.attrsRaw || "", serializeTodoArgs(args));
 }
 
 // Shared todo locator: index+source match, then a line-anchored regex scan,
@@ -2960,12 +2920,12 @@ function locateTodoInContent(content, body, file) {
       to = rawIndex + source.length;
     } else {
       const line = content.slice(lineStart, boundedTo);
-      const match = line.match(/@@todo(?:\([^)\n]*\))?[ \t]+/i);
+      const match = line.match(/@@(?:todo|itodo)(?:\([^)\n]*\))?[ \t]+/i);
       if (match) {
         from = lineStart + (match.index || 0);
-        const commands = scanInlineCommands(content.slice(from, boundedTo), "todo");
-        if (commands.length > 0 && commands[0].fullFrom === 0) {
-          to = from + commands[0].fullTo;
+        const commands = scanPlanningNodes(content.slice(from, boundedTo), { kind: "todo" });
+        if (commands.length > 0 && commands[0].span.from === 0) {
+          to = from + commands[0].span.to;
         }
       }
     }
@@ -3019,19 +2979,28 @@ export async function updateTodoStatus(body = {}) {
   return { type: "todo-updated", ok: true, file, status: status || normalizeTodoStatus(body.status || ""), changed: true, from, to, source: oldSource, nextSource, mtimeMs };
 }
 
-function contentMayHaveTodos(content) {
-  return /@@todo(?:\s*\(|[ \t]+)/i.test(String(content || ""));
+function contentMayHavePlanning(content) {
+  return /@@(?:todo|itodo|project|milestone|clock)(?:\s*\(|[ \t]+)/i.test(String(content || ""));
+}
+
+// Parses `cached.planningContent` once (via `extractPlanningItems`, which
+// itself computes todos) and memoizes both `cached.todos` and
+// `cached.planning` so neither this nor `planningItemsForNote` ever
+// re-parses the same unchanged note.
+function parseAndCachePlanning(cached, note) {
+  const planning = extractPlanningItems(cached.planningContent, note, cached.mtimeMs || 0);
+  cached.planning = planning;
+  cached.todos = planning.todos;
+  cached.planningContent = "";
+  return planning;
 }
 
 async function todosForNote(note) {
   const cached = note.file ? noteCache.get(note.file) : null;
   if (cached) {
     if (Array.isArray(cached.todos)) return cached.todos.map((todo) => ({ ...todo }));
-    if (typeof cached.todoContent === "string" && cached.todoContent) {
-      const todos = extractTodos(cached.todoContent, note, cached.mtimeMs);
-      cached.todos = todos;
-      cached.todoContent = "";
-      return todos.map((todo) => ({ ...todo }));
+    if (typeof cached.planningContent === "string" && cached.planningContent) {
+      return parseAndCachePlanning(cached, note).todos.map((todo) => ({ ...todo }));
     }
     cached.todos = [];
     return [];
@@ -3060,6 +3029,48 @@ async function scanTodos() {
   });
 }
 
+function clonePlanningGroup(group) {
+  return {
+    todos: (group.todos || []).map((todo) => ({ ...todo })),
+    projects: (group.projects || []).map((project) => ({ ...project })),
+    milestones: (group.milestones || []).map((milestone) => ({ ...milestone })),
+    clocks: (group.clocks || []).map((clock) => ({ ...clock })),
+    nodes: group.nodes || [],
+  };
+}
+
+async function planningItemsForNote(note) {
+  try {
+    const cached = note.file ? noteCache.get(note.file) : null;
+    if (cached) {
+      if (cached.planning) return clonePlanningGroup(cached.planning);
+      if (typeof cached.planningContent === "string" && cached.planningContent) {
+        return clonePlanningGroup(parseAndCachePlanning(cached, note));
+      }
+      cached.planning = { todos: [], projects: [], milestones: [], clocks: [], nodes: [] };
+      cached.todos = [];
+      return clonePlanningGroup(cached.planning);
+    }
+    const info = await stat(note.file);
+    const content = await readFile(note.file, "utf8");
+    return extractPlanningItems(content, note, info.mtimeMs);
+  } catch {
+    return { todos: [], projects: [], milestones: [], clocks: [], nodes: [] };
+  }
+}
+
+async function scanPlanningItems() {
+  const scanned = await scanNotes();
+  const groups = await mapLimit(scanned, scanConcurrency, async (note) => planningItemsForNote(note));
+  return {
+    todos: groups.flatMap((group) => group.todos || []),
+    projects: groups.flatMap((group) => group.projects || []),
+    milestones: groups.flatMap((group) => group.milestones || []),
+    clocks: groups.flatMap((group) => group.clocks || []),
+    nodes: groups.flatMap((group) => group.nodes || []),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Agenda engine: repeaters, dependency resolution (no ids — text refs), the
 // urgency/sort formula, day-bucketed view-model, and canonical-key patching
@@ -3068,82 +3079,6 @@ async function scanTodos() {
 // ---------------------------------------------------------------------------
 
 const CLOSED_STATUSES = new Set(["done", "cancelled"]);
-
-function shiftDate(time, n, unit) {
-  const d = new Date(time);
-  if (unit === "d") d.setDate(d.getDate() + n);
-  else if (unit === "w") d.setDate(d.getDate() + 7 * n);
-  else if (unit === "m") d.setMonth(d.getMonth() + n);
-  else if (unit === "y") d.setFullYear(d.getFullYear() + n);
-  return d.getTime();
-}
-
-// Repeater grammar: `[+|++|.+]N(d|w|m|y)`; a bare `Nd` behaves like `+Nd`.
-export function parseRepeater(raw) {
-  const t = String(raw ?? "").trim();
-  if (!t) return null;
-  const m = t.match(/^(\+\+|\.\+|\+)?(\d+)\s*(d|day|days|w|week|weeks|m|month|months|y|year|years)$/i);
-  if (!m) return null;
-  const mode = m[1] === "++" ? "++" : m[1] === ".+" ? ".+" : "+";
-  const n = Number(m[2]);
-  const unitRaw = m[3].toLowerCase();
-  const unit = unitRaw.startsWith("d") ? "d" : unitRaw.startsWith("w") ? "w" : unitRaw.startsWith("m") ? "m" : "y";
-  return { mode, n, unit };
-}
-
-// org semantics: `+` shifts once from the old date (may still land in the
-// past); `++` shifts repeatedly until the result is in the future; `.+`
-// shifts from the completion moment (`todayMs`), not the old date.
-export function applyRepeater(dateStr, repeater, todayMs = Date.now()) {
-  const parsed = parseDateValue(dateStr);
-  if (!parsed || !repeater) return dateStr;
-  const { hasTime } = parsed;
-  const todayBase = hasTime ? todayMs : midnightMs(new Date(todayMs));
-  let time;
-  if (repeater.mode === ".+") {
-    time = shiftDate(todayBase, repeater.n, repeater.unit);
-  } else if (repeater.mode === "++") {
-    let next = shiftDate(parsed.time, repeater.n, repeater.unit);
-    let guard = 0;
-    while (next <= todayBase && guard < 10000) {
-      next = shiftDate(next, repeater.n, repeater.unit);
-      guard++;
-    }
-    time = next;
-  } else {
-    time = shiftDate(parsed.time, repeater.n, repeater.unit);
-  }
-  return formatDateValue(time, hasTime);
-}
-
-// Deadline warning lead time, e.g. `3d`/`1w`; defaults to org's 14 days.
-export function parseLeadTime(raw, fallbackDays = 14) {
-  const t = String(raw ?? "").trim();
-  if (!t) return fallbackDays;
-  const m = t.match(/^(\d+)\s*(d|day|days|w|week|weeks|m|month|months)?$/i);
-  if (!m) return fallbackDays;
-  const n = Number(m[1]);
-  const unit = (m[2] || "d").toLowerCase();
-  if (unit.startsWith("w")) return n * 7;
-  if (unit.startsWith("m")) return n * 30;
-  return n;
-}
-
-// `after` grammar (no ids): `dep-ref ( "&" dep-ref )*`, where
-// `dep-ref := [ "[[" note-title "]]" "::" ] text-part`.
-export function parseDepRefs(raw) {
-  const t = String(raw ?? "").trim();
-  if (!t) return [];
-  return t
-    .split("&")
-    .map((part) => {
-      const piece = part.trim();
-      const m = piece.match(/^\[\[([^\]]+)\]\]::(.*)$/);
-      if (m) return { noteTitle: m[1].trim(), text: m[2].trim(), raw: piece };
-      return { noteTitle: null, text: piece, raw: piece };
-    })
-    .filter((ref) => ref.text);
-}
 
 function normalizeTitleKey(title) {
   return String(title || "").trim().toLowerCase();
@@ -3164,10 +3099,55 @@ function matchTodoInScope(scopeTodos, needleText, excludeId) {
   return { tier: "none", hits: [] };
 }
 
-// Decorates `todos` in place with `deps` (resolved target ids),
-// `effectiveStatus`, and `blockedBy`; returns `{ lints }` for broken/ambiguous
-// refs. Broken/ambiguous refs never block — a typo must not freeze a task,
-// so they only ever surface as lint entries.
+// Resolves the dep-refs in `rawValue` (an `after`/`blocks` attr value)
+// against `titleIndex`/`todos`, pushing broken/ambiguous-ref lints as it
+// goes. Returns the resolved target todo ids (empty on any lint).
+function resolveDepRefTargets(todo, rawValue, titleIndex, todos, lints, via) {
+  const targets = [];
+  for (const ref of parseDepRefs(rawValue)) {
+    let scopeFiles;
+    if (ref.noteTitle) {
+      const files = titleIndex.get(normalizeTitleKey(ref.noteTitle));
+      if (!files || files.size === 0) {
+        lints.push({ todoId: todo.id, file: todo.file, line: todo.line, kind: "broken-ref", ref: ref.raw, via, message: `No note titled "${ref.noteTitle}"` });
+        continue;
+      }
+      if (files.size > 1) {
+        lints.push({ todoId: todo.id, file: todo.file, line: todo.line, kind: "ambiguous-note", ref: ref.raw, via, message: `Multiple notes titled "${ref.noteTitle}"` });
+        continue;
+      }
+      scopeFiles = [...files];
+    } else {
+      scopeFiles = [todo.file];
+    }
+    const scopeTodos = todos.filter((t) => scopeFiles.includes(t.file));
+    const { tier, hits } = matchTodoInScope(scopeTodos, ref.text, todo.id);
+    if (tier === "none") {
+      lints.push({ todoId: todo.id, file: todo.file, line: todo.line, kind: "broken-ref", ref: ref.raw, via, message: `No matching todo for "${ref.text}"` });
+    } else if (tier === "ambiguous") {
+      lints.push({
+        todoId: todo.id,
+        file: todo.file,
+        line: todo.line,
+        kind: "ambiguous-ref",
+        ref: ref.raw,
+        via,
+        message: `Multiple todos match "${ref.text}"`,
+        candidates: hits.map((h) => ({ id: h.id, text: h.text })),
+      });
+    } else {
+      targets.push(hits[0].id);
+    }
+  }
+  return targets;
+}
+
+// Decorates `todos` in place with `deps` (resolved target ids, from both
+// `after` — forward deps declared on this todo — and `blocks` — reverse
+// deps declared on the *target* todo), `effectiveStatus`, and `blockedBy`;
+// returns `{ lints }` for broken/ambiguous refs. Broken/ambiguous refs never
+// block — a typo must not freeze a task, so they only ever surface as lint
+// entries.
 export function resolveTodoDeps(todos) {
   const lints = [];
   const titleIndex = new Map();
@@ -3178,49 +3158,26 @@ export function resolveTodoDeps(todos) {
     titleIndex.get(key).add(todo.file);
   }
 
+  for (const todo of todos) todo.deps = [];
+
   for (const todo of todos) {
-    const afterRaw = todo.canon?.after;
-    todo.deps = [];
-    if (!afterRaw) continue;
-    for (const ref of parseDepRefs(afterRaw)) {
-      let scopeFiles;
-      if (ref.noteTitle) {
-        const files = titleIndex.get(normalizeTitleKey(ref.noteTitle));
-        if (!files || files.size === 0) {
-          lints.push({ todoId: todo.id, file: todo.file, line: todo.line, kind: "broken-ref", ref: ref.raw, message: `No note titled "${ref.noteTitle}"` });
-          continue;
-        }
-        if (files.size > 1) {
-          lints.push({ todoId: todo.id, file: todo.file, line: todo.line, kind: "ambiguous-note", ref: ref.raw, message: `Multiple notes titled "${ref.noteTitle}"` });
-          continue;
-        }
-        scopeFiles = [...files];
-      } else {
-        scopeFiles = [todo.file];
-      }
-      const scopeTodos = todos.filter((t) => scopeFiles.includes(t.file));
-      const { tier, hits } = matchTodoInScope(scopeTodos, ref.text, todo.id);
-      if (tier === "none") {
-        lints.push({ todoId: todo.id, file: todo.file, line: todo.line, kind: "broken-ref", ref: ref.raw, message: `No matching todo for "${ref.text}"` });
-      } else if (tier === "ambiguous") {
-        lints.push({
-          todoId: todo.id,
-          file: todo.file,
-          line: todo.line,
-          kind: "ambiguous-ref",
-          ref: ref.raw,
-          message: `Multiple todos match "${ref.text}"`,
-          candidates: hits.map((h) => ({ id: h.id, text: h.text })),
-        });
-      } else {
-        todo.deps.push(hits[0].id);
-      }
-    }
+    if (!todo.canon?.after) continue;
+    todo.deps.push(...resolveDepRefTargets(todo, todo.canon.after, titleIndex, todos, lints, "after"));
   }
 
   const byId = new Map(todos.map((t) => [t.id, t]));
   for (const todo of todos) {
-    const openDeps = (todo.deps || []).filter((id) => {
+    if (!todo.canon?.blocks) continue;
+    const targetIds = resolveDepRefTargets(todo, todo.canon.blocks, titleIndex, todos, lints, "blocks");
+    for (const targetId of targetIds) {
+      const target = byId.get(targetId);
+      if (target && !target.deps.includes(todo.id)) target.deps.push(todo.id);
+    }
+  }
+
+  for (const todo of todos) {
+    todo.deps = [...new Set(todo.deps)];
+    const openDeps = todo.deps.filter((id) => {
       const dep = byId.get(id);
       return dep && !CLOSED_STATUSES.has(dep.status);
     });
@@ -3272,8 +3229,356 @@ function sortByUrgency(todos) {
     || a.index - b.index);
 }
 
+// `time` is the HH:MM time-grid slot when `date` carries a time-of-day
+// (e.g. `sche: 2026-07-07 09:30`); untimed entries sort by urgency instead.
 function agendaEntry(todo, kind, label, date, dateKey) {
-  return { kind, label, todoId: todo.id, date, dateKey, time: null, urgency: todo.urgency ?? 0 };
+  const parsed = parseDateValue(date);
+  const time = parsed && parsed.hasTime ? formatDateValue(parsed.time, true).slice(-5) : null;
+  return { kind, label, todoId: todo.id, date, dateKey, time, urgency: todo.urgency ?? 0 };
+}
+
+// Projects future occurrences of a repeating ddl/sche forward from `rawDate`
+// using plain `+n·unit` stepping (display-only — never the completion-time
+// catch-up semantics of `++`/`.+`), for calendar/agenda views. Bounded to
+// the `[rangeStartMs, rangeEndMs)` window with a hard iteration guard.
+function expandRepeatOccurrences(rawDate, repeaterRaw, rangeStartMs, rangeEndMs) {
+  const repeater = parseRepeater(repeaterRaw);
+  if (!repeater) return [];
+  const stepper = { mode: "+", n: repeater.n, unit: repeater.unit };
+  const occurrences = [];
+  let current = rawDate;
+  for (let guard = 0; guard < 366; guard++) {
+    const parsedCurrent = parseDateValue(current);
+    const next = applyRepeater(current, stepper);
+    const parsedNext = parseDateValue(next);
+    if (!parsedCurrent || !parsedNext || parsedNext.time <= parsedCurrent.time) break;
+    if (parsedNext.time >= rangeEndMs) break;
+    if (parsedNext.time >= rangeStartMs) {
+      occurrences.push({
+        date: next,
+        dateKey: formatDateValue(parsedNext.time, false),
+        time: parsedNext.hasTime ? formatDateValue(parsedNext.time, true).slice(-5) : null,
+      });
+    }
+    current = next;
+  }
+  return occurrences;
+}
+
+function projectSlug(text) {
+  return String(text || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "inbox";
+}
+
+function inferTodoProject(todo, projects) {
+  const explicit = todo.canon?.project || todo.args?.project || todo.args?.proj;
+  if (explicit) return String(explicit);
+  const sameFileProjects = projects
+    .filter((project) => project.file === todo.file && project.index < todo.index)
+    .sort((a, b) => b.index - a.index);
+  if (sameFileProjects[0]) return projectSlug(sameFileProjects[0].title || sameFileProjects[0].text);
+  return todo.noteTitle || "Inbox";
+}
+
+// The project's own identity key, in the same space `inferTodoProject`
+// resolves todos into — explicit `project:`/`proj:`, else the slugified
+// title.
+function projectKeyFor(project) {
+  return String(project.canon?.project || project.args?.project || project.args?.proj || projectSlug(project.title || project.text));
+}
+
+function detectDependencyCycles(todos) {
+  const byId = new Map(todos.map((todo) => [todo.id, todo]));
+  const visiting = new Set();
+  const visited = new Set();
+  const cycles = [];
+  function visit(id, stack) {
+    if (visiting.has(id)) {
+      const at = stack.indexOf(id);
+      cycles.push(stack.slice(at).concat(id));
+      return;
+    }
+    if (visited.has(id)) return;
+    visiting.add(id);
+    const todo = byId.get(id);
+    for (const dep of todo?.deps || []) visit(dep, stack.concat(dep));
+    visiting.delete(id);
+    visited.add(id);
+  }
+  for (const todo of todos) visit(todo.id, [todo.id]);
+  return cycles;
+}
+
+// Groups Gantt `tasks` under each @@project's own bar: an explicit
+// sche/end(or ddl) on the project itself wins; otherwise the bar spans
+// min(children start) .. max(children end). Projects with neither are
+// omitted (nothing to draw).
+function buildProjectBars(tasks, projects) {
+  const byKey = new Map();
+  for (const task of tasks) {
+    if (!byKey.has(task.project)) byKey.set(task.project, []);
+    byKey.get(task.project).push(task);
+  }
+  const bars = [];
+  for (const project of projects) {
+    const key = projectKeyFor(project);
+    const children = byKey.get(key) || [];
+    let start = project.canon?.sche || "";
+    let end = project.canon?.end || project.canon?.ddl || "";
+    if (!start) start = [...children.map((t) => t.start)].sort()[0] || "";
+    if (!end) {
+      const ends = [...children.map((t) => t.end)].sort();
+      end = ends[ends.length - 1] || "";
+    }
+    if (!start || !end) continue;
+    bars.push({ id: project.id, key, name: project.title || project.text || key, start, end, childTaskIds: children.map((t) => t.id) });
+  }
+  return bars;
+}
+
+// Aggregates open/doing/done/blocked counts, progress, effort, and clocked
+// time onto each @@project — grouped by the same key `inferTodoProject`/
+// `buildGanttModel` already use, so this always matches the Gantt swimlanes.
+// Todos whose project key doesn't match any known @@project (e.g. bare
+// per-note grouping) still get a synthetic entry so nothing is dropped.
+export function buildProjectModel(projects, todos, clocks) {
+  const clockMinutesByTodoId = new Map();
+  for (const clock of clocks || []) {
+    if (!clock.todoId) continue;
+    clockMinutesByTodoId.set(clock.todoId, (clockMinutesByTodoId.get(clock.todoId) || 0) + clockMinutes(clock));
+  }
+
+  const emptyEntry = (key) => ({
+    id: "",
+    key,
+    title: key,
+    status: "",
+    area: "",
+    phase: "",
+    file: "",
+    open: 0,
+    doing: 0,
+    done: 0,
+    cancelled: 0,
+    blocked: 0,
+    total: 0,
+    progress: 0,
+    effortMinutes: 0,
+    clockedMinutes: 0,
+    childTodoIds: [],
+  });
+
+  const byKey = new Map();
+  for (const project of projects) {
+    const key = projectKeyFor(project);
+    byKey.set(key, {
+      ...emptyEntry(key),
+      id: project.id,
+      title: project.title || project.text || key,
+      status: project.status || "active",
+      area: project.canon?.area || "",
+      phase: project.canon?.phase || "",
+      file: project.file,
+    });
+  }
+
+  for (const todo of todos) {
+    const key = inferTodoProject(todo, projects);
+    if (!byKey.has(key)) byKey.set(key, emptyEntry(key));
+    const entry = byKey.get(key);
+    entry.total++;
+    entry.childTodoIds.push(todo.id);
+    if (todo.effectiveStatus === "blocked") entry.blocked++;
+    else if (todo.status === "todo") entry.open++;
+    else if (todo.status === "doing") entry.doing++;
+    else if (todo.status === "done") entry.done++;
+    else if (todo.status === "cancelled") entry.cancelled++;
+    const effort = todo.canon?.effort ? parseDuration(todo.canon.effort) : null;
+    if (effort) entry.effortMinutes += effort;
+    entry.clockedMinutes += clockMinutesByTodoId.get(todo.id) || 0;
+  }
+
+  const explicitProgressByKey = new Map(projects.map((p) => [projectKeyFor(p), p.canon?.progress]));
+  for (const entry of byKey.values()) {
+    const explicitProgress = explicitProgressByKey.get(entry.key);
+    if (explicitProgress !== undefined) {
+      entry.progress = Math.max(0, Math.min(100, Number(explicitProgress) || 0));
+    } else {
+      const countable = entry.total - entry.cancelled;
+      entry.progress = countable > 0 ? Math.round((entry.done / countable) * 100) : 0;
+    }
+  }
+
+  return [...byKey.values()].sort((a, b) => b.total - a.total || a.title.localeCompare(b.title));
+}
+
+function buildGanttModel(todos, projects, milestones) {
+  const lints = [];
+  const tasks = [];
+  const backlog = [];
+  for (const todo of todos) {
+    const canon = todo.canon || {};
+    const start = canon.sche;
+    const explicitEnd = canon.end;
+    const end = explicitEnd || (start ? canon.ddl : "");
+    const displayEnd = explicitEnd || canon.ddl || "";
+    const project = inferTodoProject(todo, projects);
+    const base = {
+      id: todo.id,
+      name: todo.text || "(empty todo)",
+      project,
+      status: todo.effectiveStatus || todo.status,
+      source: { file: todo.file, index: todo.index, line: todo.line, source: todo.source, text: todo.text },
+      dependencies: Array.isArray(todo.deps) ? todo.deps : [],
+      progress: canon.progress !== undefined ? Math.max(0, Math.min(100, Number(canon.progress) || 0)) : (todo.status === "done" ? 100 : 0),
+    };
+    if (start && end) tasks.push({ ...base, start, end });
+    else {
+      backlog.push({ ...base, start: start || "", end: displayEnd });
+      if (explicitEnd && !start && todo.status !== "done" && todo.status !== "cancelled") {
+        lints.push({ todoId: todo.id, file: todo.file, line: todo.line, kind: "missing-gantt-date", ref: todo.text || todo.id || "(empty todo)", message: "Partially scheduled Gantt tasks need both sche/start and end/ddl" });
+      }
+    }
+  }
+  const ganttMilestones = [];
+  for (const item of milestones || []) {
+    const date = item.canon?.date || item.args?.date || item.args?.when;
+    if (!date) {
+      lints.push({ todoId: item.id, file: item.file, line: item.line, kind: "missing-milestone-date", ref: item.title || item.text || item.id || "Milestone", message: "Milestones need date" });
+      continue;
+    }
+    ganttMilestones.push({
+      id: item.id,
+      name: item.title || item.text || "Milestone",
+      project: item.canon?.project || item.args?.project || item.noteTitle || "Inbox",
+      date,
+      source: { file: item.file, index: item.index, line: item.line, source: item.source, text: item.text },
+    });
+  }
+  for (const cycle of detectDependencyCycles(todos)) {
+    lints.push({ kind: "cycle", ref: cycle.join(" -> "), message: `Dependency cycle: ${cycle.join(" -> ")}` });
+  }
+  return { tasks, backlog, milestones: ganttMilestones, lanes: buildProjectBars(tasks, projects), lints };
+}
+
+// ---------------------------------------------------------------------------
+// Clock engine: `@@clock [task-ref]{from, to}` entries reference a todo the
+// same way `after`/`blocks` do — the title is a dep-ref (same-file text
+// match, or `[[Note]]::text` across files). Aggregates into per-task/
+// per-day/per-project totals, compares against a todo's `effort`, and
+// exposes the single globally-running clock (a `from` with no `to`) so
+// clock-in/out can enforce mutual exclusion.
+// ---------------------------------------------------------------------------
+
+// Resolves each clock's title against `todos`, decorating clocks in place
+// with `todoId` (empty when unresolved); returns `{ lints }`. Broken/
+// ambiguous refs never drop the clock from aggregation — it still counts
+// toward its own file/day, just not toward a specific todo or project.
+export function resolveClockRefs(clocks, todos) {
+  const lints = [];
+  const titleIndex = new Map();
+  for (const todo of todos) {
+    const key = normalizeTitleKey(todo.noteTitle);
+    if (!key) continue;
+    if (!titleIndex.has(key)) titleIndex.set(key, new Set());
+    titleIndex.get(key).add(todo.file);
+  }
+  for (const clock of clocks) {
+    clock.todoId = "";
+    const [ref] = parseDepRefs(clock.title || clock.text || "");
+    if (!ref) continue;
+    let scopeFiles;
+    if (ref.noteTitle) {
+      const files = titleIndex.get(normalizeTitleKey(ref.noteTitle));
+      if (!files || files.size === 0) {
+        lints.push({ file: clock.file, line: clock.line, kind: "broken-clock-ref", ref: ref.raw, message: `No note titled "${ref.noteTitle}"` });
+        continue;
+      }
+      if (files.size > 1) {
+        lints.push({ file: clock.file, line: clock.line, kind: "ambiguous-clock-ref", ref: ref.raw, message: `Multiple notes titled "${ref.noteTitle}"` });
+        continue;
+      }
+      scopeFiles = [...files];
+    } else {
+      scopeFiles = [clock.file];
+    }
+    const scopeTodos = todos.filter((t) => scopeFiles.includes(t.file));
+    const { tier, hits } = matchTodoInScope(scopeTodos, ref.text, "");
+    if (tier === "none") {
+      lints.push({ file: clock.file, line: clock.line, kind: "broken-clock-ref", ref: ref.raw, message: `No matching todo for "${ref.text}"` });
+    } else if (tier === "ambiguous") {
+      lints.push({
+        file: clock.file,
+        line: clock.line,
+        kind: "ambiguous-clock-ref",
+        ref: ref.raw,
+        message: `Multiple todos match "${ref.text}"`,
+        candidates: hits.map((h) => ({ id: h.id, text: h.text })),
+      });
+    } else {
+      clock.todoId = hits[0].id;
+    }
+  }
+  return { lints };
+}
+
+// Minutes spent in a clock span; open-ended (`from` with no `to`) is timed
+// against now, so a running clock's elapsed time is always current.
+function clockMinutes(clock) {
+  const fromRaw = clock.args?.from;
+  if (!fromRaw) return 0;
+  const from = parseDateValue(fromRaw);
+  if (!from) return 0;
+  const toRaw = clock.args?.to;
+  const to = toRaw ? parseDateValue(toRaw) : null;
+  const endMs = to ? to.time : Date.now();
+  return Math.max(0, Math.round((endMs - from.time) / 60_000));
+}
+
+export function buildClockModel(clocks, todos, projects) {
+  const todoById = new Map(todos.map((t) => [t.id, t]));
+  const byTask = new Map();
+  const byDay = new Map();
+  const byProject = new Map();
+  let running = null;
+
+  for (const clock of clocks) {
+    const minutes = clockMinutes(clock);
+    if (clock.args?.from && !clock.args?.to && !running) {
+      running = { todoId: clock.todoId || "", text: clock.title || clock.text || "", file: clock.file, from: clock.args.from, minutesSoFar: minutes };
+    }
+    const todo = clock.todoId ? todoById.get(clock.todoId) : null;
+    const taskKey = clock.todoId || `${clock.file}:${clock.index}`;
+    if (!byTask.has(taskKey)) {
+      byTask.set(taskKey, {
+        todoId: clock.todoId || "",
+        text: todo?.text || clock.title || clock.text || "",
+        file: todo?.file || clock.file,
+        minutes: 0,
+        effortMinutes: todo?.canon?.effort ? (parseDuration(todo.canon.effort) ?? 0) : 0,
+      });
+    }
+    byTask.get(taskKey).minutes += minutes;
+
+    const fromParsed = clock.args?.from ? parseDateValue(clock.args.from) : null;
+    if (fromParsed) {
+      const dayKey = formatDateValue(midnightMs(new Date(fromParsed.time)), false);
+      byDay.set(dayKey, (byDay.get(dayKey) || 0) + minutes);
+    }
+
+    const projectKey = todo ? inferTodoProject(todo, projects) : "";
+    if (projectKey) byProject.set(projectKey, (byProject.get(projectKey) || 0) + minutes);
+  }
+
+  return {
+    tasks: [...byTask.values()].sort((a, b) => b.minutes - a.minutes),
+    byDay: Object.fromEntries([...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]))),
+    byProject: Object.fromEntries([...byProject.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))),
+    running,
+  };
 }
 
 // Builds the day-bucketed agenda view-model: SCHEDULED vs DEADLINE
@@ -3282,7 +3587,12 @@ function agendaEntry(todo, kind, label, date, dateKey) {
 // existing activity heatmap), dependency lints, and the full urgency-sorted
 // todo list. Options: `{ from, days = 7 }`; `from` defaults to today.
 export async function buildAgenda(body = {}) {
-  const todos = await scanTodos();
+  const includePlanning = body.includePlanning === true || body.includeGantt === true;
+  const planning = includePlanning ? await scanPlanningItems() : null;
+  const todos = includePlanning ? planning.todos : await scanTodos();
+  const projects = includePlanning ? planning.projects : [];
+  const milestones = includePlanning ? planning.milestones : [];
+  const clocks = includePlanning ? planning.clocks : [];
   const { lints } = resolveTodoDeps(todos);
   const todayMs = Date.now();
   const todayMid = midnightMs(new Date(todayMs));
@@ -3354,9 +3664,36 @@ export async function buildAgenda(body = {}) {
         if (d && d !== canon.done) addLogDate(d);
       }
     }
+    if (canon.repeat && !CLOSED_STATUSES.has(todo.status)) {
+      const rangeEndMs = fromMs + days * dayMs;
+      for (const [anchorDate, kind] of [[canon.ddl, "deadline"], [canon.sche, "scheduled"]]) {
+        if (!anchorDate) continue;
+        for (const occurrence of expandRepeatOccurrences(anchorDate, canon.repeat, fromMs, rangeEndMs)) {
+          const bucket = bucketByDate.get(occurrence.dateKey);
+          if (!bucket) continue;
+          bucket.entries.push({
+            kind: "repeat",
+            label: kind === "deadline" ? "Repeats" : "Repeats (sched)",
+            todoId: todo.id,
+            date: occurrence.date,
+            dateKey: occurrence.dateKey,
+            time: occurrence.time,
+            urgency: todo.urgency ?? 0,
+            virtual: true,
+          });
+        }
+      }
+    }
   }
 
-  for (const bucket of dayBuckets) bucket.entries.sort((a, b) => b.urgency - a.urgency);
+  for (const bucket of dayBuckets) {
+    bucket.entries.sort((a, b) => {
+      if (a.time && b.time) return a.time.localeCompare(b.time);
+      if (a.time && !b.time) return -1;
+      if (!a.time && b.time) return 1;
+      return b.urgency - a.urgency;
+    });
+  }
 
   const stats = { open: 0, doing: 0, done: 0, cancelled: 0, blocked: 0, overdue: 0 };
   for (const todo of todos) {
@@ -3369,7 +3706,7 @@ export async function buildAgenda(body = {}) {
     if (ddl && ddl.time < todayMid && !CLOSED_STATUSES.has(todo.status)) stats.overdue++;
   }
 
-  return {
+  const payload = {
     type: "agenda",
     range: { from: dayBuckets[0]?.date || todayKey, to: dayBuckets[dayBuckets.length - 1]?.date || todayKey, today: todayKey },
     days: dayBuckets.map(({ date, entries }) => ({ date, entries })),
@@ -3378,6 +3715,20 @@ export async function buildAgenda(body = {}) {
     logByDay,
     stats,
   };
+  if (includePlanning) {
+    const { lints: clockLints } = resolveClockRefs(clocks, todos);
+    payload.projects = projects;
+    payload.milestones = milestones;
+    payload.clocks = clocks;
+    payload.clocktable = buildClockModel(clocks, todos, projects);
+    payload.projectModel = buildProjectModel(projects, todos, clocks);
+    payload.lints = [...lints, ...clockLints];
+  }
+  if (body.includeGantt === true) {
+    payload.gantt = buildGanttModel(todos, projects, milestones);
+    payload.lints = [...payload.lints, ...(payload.gantt.lints || [])];
+  }
+  return payload;
 }
 
 // --- canonical-key patching (alias-preserving) + repeater-aware completion --
@@ -3390,7 +3741,8 @@ function normalizeCanonPatchValue(key, value) {
     const p = raw.toUpperCase();
     return /^[A-Z]$/.test(p) ? p : "";
   }
-  if (key === "ddl" || key === "sche" || key === "done") return normalizeDateValue(raw) || raw;
+  if (key === "ddl" || key === "sche" || key === "end" || key === "date" || key === "done") return normalizeDateValue(raw) || raw;
+  if (key === "progress") return String(Math.max(0, Math.min(100, Number(raw) || 0)));
   if (key === "repeat") return parseRepeater(raw) ? raw : "";
   return raw;
 }
@@ -3400,19 +3752,21 @@ function normalizeCanonPatchValue(key, value) {
 // the canonical spelling when the arg is brand new.
 function patchTodoSourceCanonical(source, canonPatch = {}) {
   const text = String(source || "");
-  const command = scanInlineCommands(text, "todo")[0];
-  if (!command || command.fullFrom !== 0) return text;
-  const args = { ...(command.args || {}) };
+  const node = scanPlanningNodes(text, { kind: "todo" })[0];
+  if (!node || node.span.from !== 0) return text;
+  const args = { ...(node.attrs || {}) };
   for (const [canonKey, rawValue] of Object.entries(canonPatch)) {
     const value = normalizeCanonPatchValue(canonKey, rawValue);
     if (value) {
-      const argKey = todoArgKeyForCanonical(canonKey, command.args || {});
+      const argKey = todoArgKeyForCanonical(canonKey, node.attrs || {});
       args[argKey] = value;
     } else {
       for (const alias of TODO_KEY_ALIASES[canonKey] || [canonKey]) delete args[alias];
     }
   }
-  return replaceTodoArgsInSource(text, command.argsRaw || "", serializeTodoArgs(args));
+  return node.shape === "block"
+    ? patchPlanningNodeRaw(node, { attrs: args })
+    : replaceTodoArgsInSource(text, node.attrsRaw || "", serializeInlineAttrs(args));
 }
 
 function appendDepRef(existingAfter, ref) {
@@ -3424,8 +3778,130 @@ function appendDepRef(existingAfter, ref) {
   return parts.join(" & ");
 }
 
-const CANON_PATCH_KEYS = ["ddl", "sche", "prio", "repeat", "warn", "after", "done", "log"];
-const LEGACY_PATCH_TO_CANON = { priority: "prio", due: "ddl", deadline: "ddl", scheduled: "sche", start: "sche", rep: "repeat", every: "repeat", lead: "warn", dep: "after" };
+const CANON_PATCH_KEYS = ["ddl", "sche", "end", "date", "prio", "repeat", "warn", "after", "blocks", "project", "area", "phase", "goal", "effort", "progress", "owner", "tags", "context", "done", "log"];
+const LEGACY_PATCH_TO_CANON = { priority: "prio", due: "ddl", deadline: "ddl", scheduled: "sche", start: "sche", finish: "end", pct: "progress", proj: "project", rep: "repeat", every: "repeat", lead: "warn", dep: "after", ctx: "context" };
+const CREATE_TODO_KEYS = ["ddl", "sche", "end", "prio", "repeat", "warn", "after", "blocks", "project", "area", "phase", "goal", "effort", "progress", "owner", "tags", "context"];
+
+function planningNodeArgs(source) {
+  const node = scanPlanningNodes(source, { kind: "todo" })[0];
+  if (node && node.span.from === 0) return node.attrs || {};
+  return scanInlineCommands(source, "todo")[0]?.args || {};
+}
+
+function argValueForCanonical(args, canonKey) {
+  for (const alias of TODO_KEY_ALIASES[canonKey] || [canonKey]) {
+    if (args && Object.prototype.hasOwnProperty.call(args, alias) && args[alias]) return args[alias];
+  }
+  return "";
+}
+
+function escapePlanningTitle(text) {
+  return String(text || "").replace(/([\]\\])/g, "\\$1");
+}
+
+function defaultTodoFileTitle(file) {
+  const stem = basename(file, extname(file)).replace(/[-_]+/g, " ").trim();
+  return stem ? stem.replace(/\b\w/g, (ch) => ch.toUpperCase()) : "Inbox";
+}
+
+function resolveTodoCreateFile(rawInput) {
+  const raw = String(rawInput || "").trim();
+  const file = raw
+    ? resolveInputPath(raw, noteRoot)
+    : join(noteRoot, "inbox.md");
+  if (!inside(file, noteRoot)) {
+    const err = new Error(`Todo target is outside note root: ${file}`);
+    err.statusCode = 403;
+    throw err;
+  }
+  if (!/\.(?:md|markdown)$/i.test(file)) {
+    const err = new Error("Todo target must be a Markdown file");
+    err.statusCode = 400;
+    throw err;
+  }
+  return file;
+}
+
+function lineNumberAt(text, index) {
+  return String(text || "").slice(0, Math.max(0, index)).split("\n").length;
+}
+
+function todoSourceFromCreateBody(body = {}) {
+  const text = String(body.text || body.title || "").trim();
+  if (!text) {
+    const err = new Error("Todo text is required");
+    err.statusCode = 400;
+    throw err;
+  }
+  const status = normalizeTodoStatus(body.status || "todo");
+  const attrs = {};
+  for (const key of CREATE_TODO_KEYS) {
+    if (bodyHasOwn(body, key)) {
+      const value = normalizeCanonPatchValue(key, body[key]);
+      if (value) attrs[key] = value;
+    }
+  }
+  for (const [legacy, canon] of Object.entries(LEGACY_PATCH_TO_CANON)) {
+    if (!CREATE_TODO_KEYS.includes(canon)) continue;
+    if (bodyHasOwn(body, legacy) && !bodyHasOwn(attrs, canon)) {
+      const value = normalizeCanonPatchValue(canon, body[legacy]);
+      if (value) attrs[canon] = value;
+    }
+  }
+  const args = serializeInlineAttrs(attrs);
+  const statusPart = status === "todo" ? "" : `(${status})`;
+  return `@@todo${statusPart} [${escapePlanningTitle(text)}]${args ? ` ${args}` : ""}`;
+}
+
+function initialTodoFileContent(file) {
+  const title = defaultTodoFileTitle(file);
+  return [
+    buildMetaBlock({
+      id: `${timestampId()}-${slugifyTitle(title)}`,
+      title,
+      date: new Date().toISOString().slice(0, 10),
+      kind: defaultNoteKind,
+      tags: [],
+      refs: [],
+    }),
+    `# ${title}`,
+    "",
+  ].join("\n");
+}
+
+export async function createTodo(body = {}) {
+  const file = resolveTodoCreateFile(body.file || body.path || "");
+  const source = todoSourceFromCreateBody(body);
+  await mkdir(dirname(file), { recursive: true });
+  const existed = existsSync(file);
+  let content = existed ? await readFile(file, "utf8") : initialTodoFileContent(file);
+  const base = content.replace(/\s*$/, "");
+  const prefix = base ? "\n\n" : "";
+  const nextContent = `${base}${prefix}${source}\n`;
+  const index = base.length + prefix.length;
+  await atomicWriteFile(file, nextContent, "utf8");
+  markNotesDirty(file);
+  scheduleRoamDbSync(null, file);
+  let mtimeMs = 0;
+  try { mtimeMs = (await stat(file)).mtimeMs; } catch {}
+  const meta = noteMetadata(nextContent);
+  const noteTitle = String(meta.title || defaultTodoFileTitle(file));
+  const todos = extractTodos(nextContent, { file, path: displayPathForFile(file), key: noteTitle, id: String(meta.id || ""), title: noteTitle }, mtimeMs);
+  const created = todos.find((todo) => todo.index === index) || null;
+  return {
+    type: "todo-created",
+    ok: true,
+    file,
+    path: displayPathForFile(file),
+    createdFile: !existed,
+    changed: true,
+    index,
+    line: lineNumberAt(nextContent, index),
+    source,
+    todo: created,
+    mtimeMs,
+  };
+}
 
 // General todo patch: writes any canonical key (or its legacy alias field
 // name) plus `status`, straight back into the source `@@todo` line. `op:
@@ -3453,23 +3929,23 @@ export async function patchTodo(body = {}) {
   for (const [legacy, canon] of Object.entries(LEGACY_PATCH_TO_CANON)) {
     if (bodyHasOwn(body, legacy) && !bodyHasOwn(canonPatch, canon)) canonPatch[canon] = body[legacy];
   }
-  const command0 = scanInlineCommands(oldSource, "todo")[0];
+  const args0 = planningNodeArgs(oldSource);
   if (bodyHasOwn(body, "afterAdd")) {
-    canonPatch.after = appendDepRef(command0?.args?.after, String(body.afterAdd));
+    canonPatch.after = appendDepRef(argValueForCanonical(args0, "after"), String(body.afterAdd));
   }
 
   let statusPatch = "";
   if (op === "complete") {
-    const repeaterRaw = command0?.args?.repeat || command0?.args?.rep || command0?.args?.every;
+    const repeaterRaw = argValueForCanonical(args0, "repeat");
     const repeater = parseRepeater(repeaterRaw);
     const doneStr = formatDateValue(nowMs, false);
     if (repeater) {
-      const ddlVal = command0?.args?.ddl || command0?.args?.due || command0?.args?.deadline;
-      const scheVal = command0?.args?.sche || command0?.args?.scheduled || command0?.args?.start;
+      const ddlVal = argValueForCanonical(args0, "ddl");
+      const scheVal = argValueForCanonical(args0, "sche");
       if (ddlVal) canonPatch.ddl = applyRepeater(ddlVal, repeater, nowMs);
       if (scheVal) canonPatch.sche = applyRepeater(scheVal, repeater, nowMs);
       canonPatch.done = doneStr;
-      const logParts = String(command0?.args?.log || "").split("&").map((s) => s.trim()).filter(Boolean);
+      const logParts = String(argValueForCanonical(args0, "log")).split("&").map((s) => s.trim()).filter(Boolean);
       logParts.push(doneStr);
       while (logParts.length > 30) logParts.shift();
       canonPatch.log = logParts.join(" & ");
@@ -3502,6 +3978,100 @@ export async function patchTodo(body = {}) {
 
 export async function completeTodo(body = {}) {
   return patchTodo({ ...body, op: "complete" });
+}
+
+// --- clock-in / clock-out -----------------------------------------------
+
+function escapeBracketTitle(text) {
+  return String(text || "").replace(/([\]\\])/g, "\\$1");
+}
+
+// Finds the clock node to close: an explicit index+source match (the exact
+// clock the caller means), else the first open clock (`from` set, no `to`)
+// in this file's content.
+function findClockNode(content, locator = {}) {
+  const nodes = scanPlanningNodes(content, { kind: "clock" });
+  const { index, source } = locator;
+  if (typeof index === "number" && source) {
+    const exact = nodes.find((n) => n.span.from === index && n.raw === source);
+    if (exact) return exact;
+  }
+  return nodes.find((n) => n.attrs?.from && !n.attrs?.to) || null;
+}
+
+async function closeClockInFile(file, locator, toIso) {
+  const content = await readFile(file, "utf8");
+  const node = findClockNode(content, locator);
+  if (!node) return false;
+  const patched = patchPlanningNodeRaw(node, { attrs: { to: toIso } });
+  if (patched === node.raw) return false;
+  await atomicWriteFile(file, content.slice(0, node.span.from) + patched + content.slice(node.span.to), "utf8");
+  markNotesDirty(file);
+  scheduleRoamDbSync(null, file);
+  return true;
+}
+
+// Finds the single globally-running clock (a `from` with no `to`) across
+// the whole vault, if any.
+async function findRunningClock() {
+  const planning = await scanPlanningItems();
+  return planning.clocks.find((c) => c.args?.from && !c.args?.to) || null;
+}
+
+// Starts a clock on the todo located by `body` (same locator fields as
+// patchTodo: index+source, or id/text fallback), inserting a new
+// `@@clock [task]{from: now}` line right after the todo's line/block. Only
+// one clock may run at a time vault-wide, so any currently-running clock is
+// auto-closed first — mirroring org's clock-in behavior.
+export async function clockIn(body = {}) {
+  const file = safeOpenFile(body.file || "");
+  const nowIso = formatDateValue(Date.now(), true);
+
+  const running = await findRunningClock();
+  if (running) await closeClockInFile(running.file, { index: running.index, source: running.source }, nowIso);
+
+  const content = await readFile(file, "utf8");
+  const loc = locateTodoInContent(content, body, file);
+  if (!loc) {
+    const err = new Error("Todo source was not found");
+    err.statusCode = 404;
+    throw err;
+  }
+  const { from, to } = loc;
+  const todoNode = scanPlanningNodes(content.slice(from, to), { kind: "todo" })[0];
+  const title = escapeBracketTitle(todoNode?.title || "");
+
+  const lineEnd = content.indexOf("\n", to);
+  const insertAt = lineEnd < 0 ? content.length : lineEnd + 1;
+  const needsLeadingNewline = lineEnd < 0 && content.length > 0 && !content.endsWith("\n");
+  const clockLine = `${needsLeadingNewline ? "\n" : ""}@@clock [${title}]{from: ${nowIso}}\n`;
+
+  await atomicWriteFile(file, content.slice(0, insertAt) + clockLine + content.slice(insertAt), "utf8");
+  markNotesDirty(file);
+  scheduleRoamDbSync(null, file);
+  return { type: "clock-in", ok: true, file, from: insertAt, to: insertAt + clockLine.length, source: clockLine };
+}
+
+// Stops a clock: closes the clock named by `body.file`+index/source if
+// given, else whichever clock is running vault-wide.
+export async function clockOut(body = {}) {
+  const nowIso = formatDateValue(Date.now(), true);
+
+  if (body.file) {
+    const file = safeOpenFile(body.file);
+    const closed = await closeClockInFile(file, { index: body.index, source: body.source }, nowIso);
+    if (closed) return { type: "clock-out", ok: true, file, to: nowIso };
+  }
+
+  const running = await findRunningClock();
+  if (!running) {
+    const err = new Error("No running clock");
+    err.statusCode = 404;
+    throw err;
+  }
+  const file = safeOpenFile(running.file);
+  await closeClockInFile(file, { index: running.index, source: running.source }, nowIso);
+  return { type: "clock-out", ok: true, file, to: nowIso };
 }
 
 // Generates the shortest word-boundary-unique text reference to `target`

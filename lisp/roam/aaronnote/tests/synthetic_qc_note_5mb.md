@@ -141548,7 +141548,7 @@ such that
 In finite-dimensional quantum theory, positivity already implies
 self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
-operators belong to the real vector space of Hermitian operators. This ishars asdasdas ssssssssssssssssssssssssssssssss    hhhh this  this is easy to see hhh I like this editor a lot  hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh
+operators belong to the real vector space of Hermitian operators. This ishars asdasdas ssssssssssssssssssssssssssssssss    hhhh this  this is easy to see hhh I like this editor a lot  hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh this is something easy to see that not thing is inpossible
 
 中文直觉：正半定保证测量概率非负；迹为一保证总概率为一。
 #+end note

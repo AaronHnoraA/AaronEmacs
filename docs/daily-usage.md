@@ -133,13 +133,12 @@ Lean 4 buffer 里 `C-c C-i` 打开右侧官方 xwidget infoview。
 
 Aaronnote 任务使用 `@@todo(state) [text] {key: value}`，例如
 `@@todo(doing) [Write proof] {prio: A, ddl: 2026-05-20, repeat: +1w}`。
-agenda 引擎在 `server/lib/runtime.mjs`，Web 和 Emacs 都只渲染同一个 view-model；
-priority、deadline/scheduled、repeat、dependency、done/log 都写回原始 `@@todo`
-行。Emacs 里 `M-x my/aaronnote-roam-agenda` 或 dispatch `A` 打开
-`*roam-agenda*`，`L` 直接进 log view。常用键：`t` 状态，`p` / `,` priority，
-`d` deadline，`s` scheduled，`r` repeat，`a` dependency picker，`m` / `u`
-标记，`B` 批量，`f` / `b` 翻 range，`.` 今天，`v` 切 week/list/calendar/log，
-`RET` / `TAB` 跳源，`g` 刷新，`q` 关闭。完整语法和 API 见
+agenda/project/clock 引擎全在 `server/lib/runtime.mjs`，priority、deadline/
+scheduled、repeat、dependency（`after`/`blocks`）、done/log、clock-in/out 都写回
+原始 `@@todo`/`@@clock` 行。Aaronnote Web 的 `/agenda` 页是唯一的 agenda 界面
+（week/list/month/log/gantt/projects/clocktable/lints tabs，Gantt 支持拖拽改期）；
+Emacs 里 `M-x my/aaronnote-roam-agenda` 或 dispatch `A` 直接跳转打开这个页面，
+不再有原生 Emacs agenda buffer。完整语法和 view-model 见
 [`agenda.md`](agenda.md)。
 
 Graph 搜索框支持全文词和

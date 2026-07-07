@@ -41,10 +41,14 @@ separate editor implementation.
 | `src/layout-attrs.ts` | Layout-attribute normalization (align, wrap, width, height) and CSS-class/style helpers. |
 | `src/image-attrs.ts` | Image-specific layout attr reader/writer and DOM/token applicators, built on `layout-attrs.ts`. `imageLayoutToTrailingAttrs` serializes a layout back to `{...}` source (round-trips through `imageLayoutFromAttrs`); used by the image widget's hover toolbar. |
 | `shared/command-syntax.mjs` | Canonical browser/server parser for inline `@@cmd` and block `#+begin kind` commands; `src/command-syntax.ts` is its typed facade. |
+| `shared/planning-dsl.mjs` | Structural parser for the `@@todo`/`@@itodo`/`@@project`/`@@milestone`/`@@clock` planning DSL — inline/block shapes, bracket-less titles, parse-time diagnostics, patch/serialize helpers. See `docs/agenda.md`. |
+| `shared/planning-values.mjs` | Value-grammar layer for the planning DSL: dates, repeaters, lead-time, dep-refs, durations, canonical-key aliasing, status normalization. Shared by the server and `src/planning-values.ts` (browser facade) so both validate identically. |
 | `src/styles/*.css` | CM6 editor chrome and swappable Markdown themes. |
 | `aaronnote/main.ts` | Emacs-embedded app shell: notes UI, command palette, jump stack. |
+| `aaronnote/agenda.html`/`aaronnote/agenda-main.ts` | Vite entry for the standalone `/agenda` page — mounts `agenda-view.ts` in page mode using the same `api-client.ts` facade the embedded editor uses (`window.aaronnoteApi` is bridged in via `web-host.mjs`'s `adapterScript` for this page too). |
+| `aaronnote/agenda-view.ts` | Full-screen, vault-wide agenda renderer: week/list/month/log/gantt/projects/clocktable/lints views over `api.notes.agenda`. All edits round-trip through `patchTodo`/`clockIn`/`clockOut` — holds no state that isn't re-derivable from markdown. See `docs/agenda.md`. |
 | `aaronnote/latex-export-scope.ts` | Pure whole-note/selection/heading-subtree range model used by the LaTeX scope picker. |
-| `server/lib/runtime.mjs` | Server-side note/index/save/runtime; agenda engine for `@@todo` (canonical args, dependencies, urgency, repeat completion, day/log view-model); Copilot LSP bridge. |
+| `server/lib/runtime.mjs` | Server-side note/index/save/runtime; agenda engine (dependencies incl. `blocks` reverse-deps, urgency, day-bucketed view-model with time grid + repeat projection, clock aggregation, project rollup, Gantt model, canonical-key patching); Copilot LSP bridge. See `docs/agenda.md`. |
 | `server/lib/latex-export.mjs` | Mechanical Markdown-to-LaTeX base conversion (`mechanicalConvert`/`aaronnoteMarkdownToLatex`), template rendering, validation, atomic `.tex` writes. Merges agent rules via `options.rules`. |
 | `server/lib/latex-export-codex.mjs` | Codex polish of the mechanical draft: staged workdir, compile-verify retry loop, prose-fidelity warnings, agent-rule loading. Falls back to the draft. See `docs/latex-export-style.md`. |
 | `agents/latex-export/` | Codex export contract (`AGENTS.md`), the agent-maintained `mechanical/rules.json` (envMap/commentBlocks merged into the base converter), and `notes.md`. Edited only on a maintenance pass, never during a normal export. |
@@ -66,7 +70,7 @@ Emacs equivalents:
 | Removed subsystem | Emacs equivalent |
 |---|---|
 | Git panel (commit/diff/pull/push) | `magit` |
-| Agenda / todos panel | Server-backed Aaronnote agenda view-model, rendered by `aaronnote/agenda-view.ts` and Emacs `my/aaronnote-roam-agenda` |
+| Agenda / todos panel | Server-backed Aaronnote agenda view-model, rendered by the standalone `/agenda` page (`aaronnote/agenda.html`/`agenda-main.ts`, mounting `aaronnote/agenda-view.ts`: week/list/month/log/gantt/projects/clocktable/lints) and opened via Emacs `my/aaronnote-roam-agenda` |
 | Filesystem browser ranger | `dired`, roam selector |
 | Lean interactive editor (placeholders, infoview, child editors) | `lang/lean/` (Emacs LSP) |
 | Jupyter panel | Aaronnote `@@cell` |

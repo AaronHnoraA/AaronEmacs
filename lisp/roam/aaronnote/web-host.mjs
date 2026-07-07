@@ -44,7 +44,10 @@ import {
   getTodos,
   updateTodoStatus,
   buildAgenda,
+  createTodo,
   patchTodo,
+  clockIn,
+  clockOut,
   depRefForTodo,
   runtimeDebugSnapshot,
 } from "./server/lib/index.mjs";
@@ -564,9 +567,32 @@ const apiHandlers = {
   "aaronnote:api:notes:todos": async (body) => {
     return await getTodos(typeof body === "string" ? body : body || {});
   },
-  "aaronnote:api:notes:update-todo": (body) => updateTodoStatus(body || {}),
+  "aaronnote:api:notes:update-todo": async (body) => {
+    const result = await updateTodoStatus(body || {});
+    broadcast("command", { command: "agenda-changed", version: notesIndexVersionValue() });
+    return result;
+  },
   "aaronnote:api:notes:agenda": (body) => buildAgenda(body || {}),
-  "aaronnote:api:notes:patch-todo": (body) => patchTodo(body || {}),
+  "aaronnote:api:notes:create-todo": async (body) => {
+    const result = await createTodo(body || {});
+    broadcast("command", { command: "agenda-changed", version: notesIndexVersionValue() });
+    return result;
+  },
+  "aaronnote:api:notes:patch-todo": async (body) => {
+    const result = await patchTodo(body || {});
+    broadcast("command", { command: "agenda-changed", version: notesIndexVersionValue() });
+    return result;
+  },
+  "aaronnote:api:notes:clock-in": async (body) => {
+    const result = await clockIn(body || {});
+    broadcast("command", { command: "agenda-changed", version: notesIndexVersionValue() });
+    return result;
+  },
+  "aaronnote:api:notes:clock-out": async (body) => {
+    const result = await clockOut(body || {});
+    broadcast("command", { command: "agenda-changed", version: notesIndexVersionValue() });
+    return result;
+  },
   "aaronnote:api:notes:todo-dep-ref": async (body) => {
     const targetId = String(body?.targetId || "");
     const sourceId = String(body?.sourceId || "");
@@ -873,7 +899,10 @@ function adapterScript(origin) {
       todos: function(file) { return call("aaronnote:api:notes:todos", [{ file: String(file || "") }]); },
       updateTodo: function(body) { return call("aaronnote:api:notes:update-todo", [body || {}]); },
       agenda: function(body) { return call("aaronnote:api:notes:agenda", [body || {}]); },
+      createTodo: function(body) { return call("aaronnote:api:notes:create-todo", [body || {}]); },
       patchTodo: function(body) { return call("aaronnote:api:notes:patch-todo", [body || {}]); },
+      clockIn: function(body) { return call("aaronnote:api:notes:clock-in", [body || {}]); },
+      clockOut: function(body) { return call("aaronnote:api:notes:clock-out", [body || {}]); },
       todoDepRef: function(body) { return call("aaronnote:api:notes:todo-dep-ref", [body || {}]); }
     },
     completions: {
@@ -1185,7 +1214,7 @@ async function serveStatic(urlPath, res, origin) {
     res.end(transformJavaScript(data.toString("utf8")));
     return;
   }
-  if (file.endsWith("index.html")) {
+  if (file.endsWith("index.html") || file.endsWith("agenda.html")) {
     const html = data.toString("utf8").replace("</head>", `${adapterScript(origin)}\n</head>`);
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
@@ -1328,6 +1357,11 @@ const server = createServer(async (req, res) => {
         "Cache-Control": "no-cache",
       });
       res.end(data);
+      return;
+    }
+
+    if (url.pathname === "/agenda") {
+      await serveStatic("/agenda.html", res, origin);
       return;
     }
 

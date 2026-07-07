@@ -36,7 +36,12 @@ export function parseCommandArgs(raw = "") {
   for (const chunk of splitArgChunks(body)) {
     const item = chunk.trim();
     if (!item) continue;
-    const attrPattern = /([A-Za-z][\w-]*)(?:\s*[:=]\s*("[^"]*"|'[^']*'|.*?))?(?=\s+[A-Za-z][\w-]*(?:\s*[:=]|\s*$)|$)/g;
+    const bare = item.match(/^([A-Za-z][\w-]*)$/);
+    if (bare) {
+      out[bare[1].toLowerCase()] = bare[1].toLowerCase();
+      continue;
+    }
+    const attrPattern = /([A-Za-z][\w-]*)\s*[:=]\s*("[^"]*"|'[^']*'|.*?)(?=\s+[A-Za-z][\w-]*\s*[:=]|$)/g;
     let matched = false;
     for (const match of item.matchAll(attrPattern)) {
       matched = true;
@@ -52,8 +57,6 @@ export function parseCommandArgs(raw = "") {
       if (key && value) out[key] = value;
       continue;
     }
-    const bare = item.match(/^([A-Za-z][\w-]*)$/);
-    if (bare) out[bare[1].toLowerCase()] = bare[1].toLowerCase();
   }
   return out;
 }
@@ -153,14 +156,14 @@ export function scanInlineCommands(input, name = "") {
     re.lastIndex = meta.fullTo;
   }
 
-  const bareTodoRe = /@@todo(?:\(([^)\n]*)\))?[ \t]+(?!\[)([^\n]+)/gi;
+  const bareTodoRe = /@@(todo|itodo)(?:\(([^)\n]*)\))?[ \t]+(?!\[)([^\n]+)/gi;
   let bare;
   while ((bare = bareTodoRe.exec(text))) {
-    const bodyFrom = bare.index + bare[0].length - bare[2].length;
+    const bodyFrom = bare.index + bare[0].length - bare[3].length;
     const lineEnd = bare.index + bare[0].length;
     const meta = trailingMetaBeforeLineEnd(text, bodyFrom, lineEnd);
     if (text.slice(bodyFrom, meta.bodyTo).trim()) {
-      push("todo", bare[1]?.trim() ?? "", bodyFrom, meta.bodyTo, bare.index, meta.fullTo, meta.raw);
+      push(bare[1].toLowerCase(), bare[2]?.trim() ?? "", bodyFrom, meta.bodyTo, bare.index, meta.fullTo, meta.raw);
     }
     bareTodoRe.lastIndex = lineEnd;
   }

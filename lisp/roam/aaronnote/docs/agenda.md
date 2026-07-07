@@ -1,0 +1,285 @@
+# Agenda / Planning DSL
+
+Canonical reference for the `@@todo`/`@@itodo`/`@@project`/`@@milestone`/`@@clock`
+planning DSL and the server-side agenda engine built on top of it. This is
+the "grammar spec" referenced from `server/lib/runtime.mjs`'s agenda-engine
+header comment.
+
+## Layering
+
+| Layer | File | Owns |
+|---|---|---|
+| Structure | `shared/planning-dsl.mjs` | `@@kind(status) [title]{attrs}` parsing (inline/block shapes, bracket-less titles), diagnostics, patch/serialize helpers. |
+| Values | `shared/planning-values.mjs` (browser facade: `src/planning-values.ts`) | Date/duration/repeater/lead-time/dep-ref parsing, canonical-key aliasing, status normalization. Shared by the server and the editor widgets so both validate identically. |
+| Engine | `server/lib/runtime.mjs` | Dependency resolution, urgency, day-bucketed agenda view-model, clock aggregation, project rollup, Gantt model, canonical-key patching. |
+
+The structure layer never rejects a malformed value outright — bad dates,
+repeaters, or unknown keys become `diagnostics`/`lints` entries so a typo
+never makes a planning item vanish from the vault.
+
+## Kinds
+
+```
+PLANNING_KINDS = todo | itodo | project | milestone | clock
+```
+
+- **`todo`** — the primary task kind. Statuses: `todo` (open), `doing`,
+  `done`, `blocked` (manual), `cancelled`.
+- **`itodo`** — an alternate spelling of `todo`: identical grammar, status
+  set, and canonical keys. The agenda engine and dependency resolution treat
+  `todo` and `itodo` as the same kind everywhere (a query for kind `"todo"`
+  matches both). The only difference is presentational — the editor widget
+  gives it its own badge (`ITODO` vs `TODO`).
+- **`project`** — a grouping/organizing unit. Status defaults to `active`.
+- **`milestone`** — a dated marker, no status semantics beyond an optional
+  free-form tag.
+- **`clock`** — a time-tracking span referencing a todo (see
+  [Clock engine](#clock-engine)).
+
+## Structural grammar
+
+Two shapes, either of which any kind may use:
+
+```
+@@kind(status) [title]{key: value, key: value}      # inline
+@@kind(status) [title] {                             # block
+  key: value
+  key: value
+}
+```
+
+`project`/`milestone`/`clock` additionally accept a **bracket-less title** —
+bare text up to the `{`, instead of `[title]`:
+
+```
+@@project(active) Notes App {
+  area: tooling
+}
+```
+
+`todo`/`itodo` also has a bare fallback with no brackets and no attrs block,
+for quick capture: `@@todo(doing) write up the results`.
+
+Escaping inside `[...]` titles: `\]` and `\\` are unescaped on read; a
+generated title (e.g. clock-in's auto-inserted `[task title]`) re-escapes
+both.
+
+## Canonical keys and aliases
+
+`canonicalTodoArgs`/`todoArgKeyForCanonical` (`shared/planning-values.mjs`)
+normalize every alias below to its canonical spelling on read, and reuse
+whichever alias a line already has on write (introducing the canonical
+spelling only for brand-new keys):
+
+| Canonical | Aliases | Value grammar |
+|---|---|---|
+| `ddl` | `due`, `deadline` | date |
+| `sche` | `scheduled`, `start` | date |
+| `end` | `finish` | date |
+| `prio` | `priority` | `A`–`F` |
+| `repeat` | `rep`, `every` | repeater |
+| `warn` | `lead` | lead-time |
+| `after` | `dep` | dep-ref list |
+| `blocks` | — | dep-ref list (reverse of `after`) |
+| `project` | `proj` | text (a project key) |
+| `area` | — | text |
+| `phase` | — | text |
+| `goal` | — | text |
+| `effort` | — | duration |
+| `progress` | `pct` | `0`–`100` |
+| `owner` | — | text |
+| `date` | `when` | date (milestone) |
+| `tags` | — | text |
+| `context` | `ctx` | text |
+| `done` | — | date |
+| `log` | — | `&`-joined date list |
+
+`@@clock` additionally uses `from`/`to` (date, with time-of-day) and an
+optional `note`. These aren't part of `TODO_CANON_KEYS` (they're
+clock-specific) but share the same date grammar and lint the same way.
+
+## Value grammar
+
+**Dates** (`parseDateValue`/`formatDateValue`/`normalizeDateValue`): ISO
+(`2026-07-07`, optionally `HH:MM`), slash/dot/CJK variants, bare `MM-DD`
+(current year), relative (`today`/`tomorrow`/`yesterday`/`now`,
+`+3d`/`-1w`/`+2m`/`+1y`), or anything `Date.parse` accepts. Canonical output
+is `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.
+
+**Repeater** (`parseRepeater`/`applyRepeater`): `[+|++|.+]N(d|w|m|y)`; bare
+`Nd` behaves like `+Nd`. org semantics: `+` shifts once from the old date
+(may still land in the past); `++` shifts repeatedly until the result is
+after "now"; `.+` shifts from the completion moment instead of the old date.
+Display-only future-occurrence projection (the agenda's `repeat` entries)
+always uses plain `+` stepping regardless of the todo's own mode — only
+*completion* uses the todo's actual mode.
+
+**Lead time** (`parseLeadTime`): `Nd`/`Nw`/`Nm`, defaults to 14 days —
+how many days before a deadline a `warning` entry appears.
+
+**Dep-ref** (`parseDepRefs`) — used by `after`, `blocks`, and a clock's
+title: `ref ( "&" ref )*`, where `ref := [ "[[" note-title "]]" "::" ] text`.
+Same-file refs are just text; cross-file refs prefix the note title. Text
+matches resolve same-file (or same-titled-note) todos by exact, then
+prefix, then substring tier; multiple hits at a tier lint as
+`ambiguous-ref`/`ambiguous-clock-ref` and zero hits lint as
+`broken-ref`/`broken-clock-ref` — neither ever blocks a todo from being
+usable, they only ever surface as lints.
+
+**Duration** (`parseDuration`/`formatDuration`) — `effort` and clock spans:
+`2h`, `90m`, `1d` (an 8-hour workday), or `H:MM`. Returns/accepts total
+minutes.
+
+## Diagnostics (parse-time)
+
+`scanPlanningNodes` attaches a `diagnostics` array to every node:
+
+| kind | meaning |
+|---|---|
+| `malformed` | block-shape node with no title before `{` |
+| `invalid-date` | a date-valued key didn't parse |
+| `invalid-repeater` | `repeat`/`rep`/`every` didn't parse |
+| `invalid-lead-time` | `warn`/`lead` didn't parse |
+| `invalid-duration` | `effort` didn't parse |
+| `invalid-dep-ref` | `after`/`blocks` parsed to zero refs |
+| `unknown-key` | a key not in the canonical/alias set |
+
+None of these drop the node or its other attrs — they're purely advisory.
+
+## Dependency resolution
+
+`resolveTodoDeps` (`server/lib/runtime.mjs`) decorates every todo with
+`deps` (resolved target ids), `effectiveStatus`, and `blockedBy`:
+
+- **`after`** — forward: this todo depends on the referenced todo(s).
+- **`blocks`** — reverse: the *referenced* todo(s) gain this todo as a
+  dependency. `T {blocks: X}` is equivalent to `X {after: T}`.
+- A todo whose unresolved (non-`done`/`cancelled`) deps are non-empty gets
+  `effectiveStatus: "blocked"` — distinct from the manually-set `blocked`
+  status.
+- Cycles (via either `after` or `blocks`) are detected and reported as a
+  `cycle` lint in the Gantt model.
+
+## Urgency
+
+`todoUrgency`: `priority-weight * 1000 + deadline-proximity-score +
+doing-bonus - blocked-penalty`. Deadline proximity ramps up inside the
+`warn` window and further once overdue; a *computed* blocked state is
+pushed to the very bottom regardless of priority.
+
+## Clock engine
+
+```
+@@clock [task-ref]{from: <date>, to: <date>}
+```
+
+The title is a dep-ref (same grammar as `after`/`blocks`) naming the todo
+being timed. `to` is optional — a clock with `from` but no `to` is
+**running**. Only one clock may run vault-wide at a time: `clockIn` closes
+any currently-running clock first, then inserts a new `@@clock` line
+directly after the target todo's line/block. `clockOut` closes either an
+explicit clock (file+locator) or whatever is running.
+
+`buildClockModel(clocks, todos, projects)` aggregates:
+
+- `tasks[]` — per-todo total minutes plus `effortMinutes` (parsed from the
+  todo's `effort`) for an effort-vs-actual comparison.
+- `byDay` — minutes per `YYYY-MM-DD` (keyed off each clock's `from` date).
+- `byProject` — minutes per project key (see [Project rollup](#project-rollup)).
+- `running` — the one open clock, if any, with `minutesSoFar` computed
+  against the current time.
+
+Broken/ambiguous clock refs (`resolveClockRefs`) never drop the clock from
+aggregation — an unresolved clock still counts toward its own file/day,
+just not toward a specific todo or project.
+
+## Agenda view-model
+
+`buildAgenda({ from, days, includePlanning, includeGantt })` returns:
+
+- `days[]` — one bucket per day (`date`, `entries[]`). Each entry carries
+  `kind` (`deadline`/`warning`/`overdue`/`scheduled`/`sched-carry`/`log`/
+  `repeat`), `time` (an `"HH:MM"` string when the source date carried a
+  time-of-day, else `null`), and `urgency`.
+  - **Time grid**: within a bucket, timed entries sort ascending by `time`
+    ahead of all untimed entries (which sort by `urgency` instead).
+  - **Repeat projection**: a todo with `repeat` and an open (non-closed)
+    status gets its future `ddl`/`sche` occurrences projected forward
+    (plain `+n·unit` stepping, not the completion-time repeater mode) into
+    every bucket inside the requested range, as `kind: "repeat",
+    virtual: true` entries — display-only, not patchable.
+- `todos[]` — the full urgency-sorted list.
+- `lints[]` — dependency + clock-ref + (when `includeGantt`) Gantt lints.
+- `logByDay` — completion counts per day (drives the activity heatmap).
+- `stats` — open/doing/done/cancelled/blocked/overdue counts.
+- When `includePlanning`: `projects[]`, `milestones[]`, `clocks[]`,
+  `clocktable` (the `buildClockModel` output), `projectModel` (see below).
+- When `includeGantt`: `gantt` — `{ tasks, backlog, milestones, lanes,
+  lints }` (see [Gantt model](#gantt-model)).
+
+## Creating todos
+
+`createTodo({ text, file?, status?, ...attrs })` appends a new `@@todo` line.
+When `file` is omitted it writes to `inbox.md` under the note root, creating
+that note with metadata if necessary. Relative `file` values are resolved
+against the note root. Supported attrs are the normal todo canonical keys and
+aliases (`ddl`/`due`, `sche`/`scheduled`, `prio`/`priority`, `project`/`proj`,
+`repeat`, `after`, `blocks`, `effort`, etc.). The returned payload includes
+the created source line and parsed todo, then the host broadcasts
+`agenda-changed`.
+
+## Project rollup
+
+`buildProjectModel(projects, todos, clocks)` groups todos onto each
+`@@project` by the **same key** `inferTodoProject`/the Gantt model already
+use — explicit `project:`/`proj:`, else the slugified title of the nearest
+preceding same-file `@@project`, else the note's own title (`"Inbox"`
+fallback). Per project: open/doing/done/cancelled/blocked counts, `total`,
+`progress` (an explicit `progress:` key wins; otherwise `done / (total -
+cancelled)` rounded to a percent), `effortMinutes` and `clockedMinutes`
+summed from its todos. Todos whose inferred project key doesn't match any
+real `@@project` still get a synthetic rollup entry — nothing is dropped.
+
+## Gantt model
+
+`buildGanttModel(todos, projects, milestones)`:
+
+- `tasks[]` — todos with `sche`/`start` plus `end`/`ddl`; `backlog[]`
+  — unscheduled or agenda-only todos. Deadline-only and scheduled-only todos
+  are allowed and do not lint. A backlog item only lints as
+  `missing-gantt-date` when it has explicit Gantt end intent (`end`/`finish`)
+  without `sche`/`start` and is not closed.
+- `milestones[]` — requires `date`; missing it lints as
+  `missing-milestone-date`.
+- `lanes[]` — one swimlane per `@@project`: an explicit `sche`/`end`(or
+  `ddl`) on the project itself wins for the bar's span; otherwise it spans
+  `min(children start) .. max(children end)`. Projects with neither (no
+  dates anywhere) are omitted.
+- `lints[]` — the above plus `cycle` (dependency cycles, from either
+  `after` or `blocks`).
+
+## Examples
+
+```
+@@project(active) [Thesis] {
+  project: thesis
+  area: research
+  goal: "Submit by Q4"
+}
+
+@@todo(doing) [write related-work section] {
+  project: thesis
+  sche: 2026-07-06
+  end: 2026-07-10
+  effort: 6h
+  prio: A
+}
+
+@@milestone [advisor check-in] { project: thesis, date: 2026-07-15 }
+
+@@clock [write related-work section] {from: "2026-07-07 09:00", to: "2026-07-07 11:30"}
+
+@@todo [second pass] {after: "write related-work section", repeat: +1w, ddl: 2026-07-20}
+
+@@todo(doing) [blocking task] {blocks: "second pass"}
+```

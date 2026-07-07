@@ -1,0 +1,15 @@
+# -*- mode: snippet -*-
+# name: Aaronnote planning block todo
+# key: apblock
+# group: Aaronnote planning DSL
+# --
+@@todo(${1:doing}) [${2:Task}] {
+  project: ${3:project}
+  sche: ${4:2026-07-06}
+  end: ${5:2026-07-10}
+  prio: ${6:B}
+  effort: ${7:4h}
+  progress: ${8:25}
+  after: "${9:dependency text}"
+}
+$0
