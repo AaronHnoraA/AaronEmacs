@@ -13,6 +13,7 @@ const {
   configure,
   createTodo,
   depRefForTodo,
+  ensureTodoId,
   extractTodos,
   getTodos,
   parseDepRefs,
@@ -88,11 +89,11 @@ describe("repeater math", () => {
   });
 });
 
-describe("dependency resolution (no ids)", () => {
+describe("dependency resolution (text refs)", () => {
   test("parseDepRefs splits on & and recognizes [[Title]]:: cross-file refs", () => {
     expect(parseDepRefs("write proof & [[Other]]::fix bug")).toEqual([
-      { noteTitle: null, text: "write proof", raw: "write proof" },
-      { noteTitle: "Other", text: "fix bug", raw: "[[Other]]::fix bug" },
+      { id: null, noteTitle: null, text: "write proof", raw: "write proof" },
+      { id: null, noteTitle: "Other", text: "fix bug", raw: "[[Other]]::fix bug" },
     ]);
     expect(parseDepRefs("")).toEqual([]);
   });
@@ -212,6 +213,105 @@ describe("dependency resolution (no ids)", () => {
       await syncRoamDb(null, { mode: "full" });
       const agenda = await buildAgenda({ includeGantt: true });
       expect(agenda.lints.some((lint: { kind?: string }) => lint.kind === "cycle")).toBe(true);
+    });
+  });
+});
+
+describe("dependency resolution (stable ids)", () => {
+  test("after: #id resolves directly against the id index", () => {
+    const todos = extractTodos(
+      ["@@todo(doing) [write proof of lemma] {id: abc123}", '@@todo [write up final draft] {after: "#abc123"}'].join("\n"),
+      note("/notes/a.md", "A"),
+      1,
+    );
+    const { lints } = resolveTodoDeps(todos);
+    expect(lints).toEqual([]);
+    expect(todos[0].id).toBe("#abc123");
+    expect(todos[1].deps).toEqual(["#abc123"]);
+    expect(todos[1].effectiveStatus).toBe("blocked");
+  });
+
+  test("blocks: #id is the reverse of after: #id", () => {
+    const todos = extractTodos(
+      ['@@todo(doing) [write proof of lemma] {id: abc123, blocks: "#def456"}', "@@todo [write up final draft] {id: def456}"].join("\n"),
+      note("/notes/a.md", "A"),
+      1,
+    );
+    const { lints } = resolveTodoDeps(todos);
+    expect(lints).toEqual([]);
+    expect(todos[1].deps).toEqual(["#abc123"]);
+    expect(todos[1].effectiveStatus).toBe("blocked");
+  });
+
+  test("a broken #id ref lints but never blocks", () => {
+    const todos = extractTodos('@@todo [orphan] {after: "#nonexistent"}', note("/notes/a.md", "A"), 1);
+    const { lints } = resolveTodoDeps(todos);
+    expect(lints).toMatchObject([{ kind: "broken-ref", ref: "#nonexistent", via: "after" }]);
+    expect(todos[0].effectiveStatus).toBe("todo");
+  });
+
+  test("a duplicate id falls back to a positional id on the second occurrence and lints", () => {
+    const todos = extractTodos(
+      ["@@todo [first] {id: dup1}", "@@todo [second] {id: dup1}"].join("\n"),
+      note("/notes/a.md", "A"),
+      1,
+    );
+    expect(todos[0].id).toBe("#dup1");
+    expect(todos[1].id).toBe("#dup1"); // both extracted with the raw id before dedup runs
+    const { lints } = resolveTodoDeps(todos);
+    expect(lints).toMatchObject([{ kind: "duplicate-id", ref: "#dup1" }]);
+    // resolveTodoDeps mutates in place: the second occurrence falls back to file:offset
+    expect(todos[0].id).toBe("#dup1");
+    expect(todos[1].id).not.toBe("#dup1");
+    expect(todos[1].id).toContain(":");
+  });
+
+  test("an #id reference survives the target todo's title text changing entirely", () => {
+    const before = extractTodos(
+      ["@@todo(doing) [original title] {id: abc123}", '@@todo [depends] {after: "#abc123"}'].join("\n"),
+      note("/notes/a.md", "A"),
+      1,
+    );
+    resolveTodoDeps(before);
+    expect(before[1].deps).toEqual(["#abc123"]);
+
+    const renamed = extractTodos(
+      ["@@todo(doing) [a completely different title now] {id: abc123}", '@@todo [depends] {after: "#abc123"}'].join("\n"),
+      note("/notes/a.md", "A"),
+      1,
+    );
+    const { lints } = resolveTodoDeps(renamed);
+    expect(lints).toEqual([]);
+    expect(renamed[1].deps).toEqual(["#abc123"]);
+    expect(renamed[1].effectiveStatus).toBe("blocked");
+  });
+});
+
+describe("stable id minting (ensureTodoId / createTodo)", () => {
+  test("createTodo mints a fresh id for a brand-new todo", async () => {
+    await withVault(async (root) => {
+      const result = await createTodo({ file: join(root, "inbox.md"), text: "buy milk" });
+      expect(result.todo.id).toMatch(/^#[a-z0-9]{6}$/);
+      const content = await readFile(join(root, "inbox.md"), "utf8");
+      expect(content).toMatch(/@@todo \[buy milk\]\s*\{id=[a-z0-9]{6}\}/);
+    });
+  });
+
+  test("ensureTodoId mints an id for a todo that has none, and is idempotent afterward", async () => {
+    await withVault(async (root) => {
+      const file = join(root, "a.md");
+      await writeFile(file, "---\nid: a\n---\n# A\n\n@@todo [no id yet]\n", "utf8");
+      await syncRoamDb(null, { mode: "full" });
+      const todo = (await buildAgenda({ includePlanning: true })).todos.find((t: any) => t.text === "no id yet");
+      expect(todo.id).not.toMatch(/^#/);
+
+      const minted = await ensureTodoId({ file, index: todo.index, source: todo.source });
+      expect(minted.changed).toBe(true);
+      expect(minted.id).toMatch(/^#[a-z0-9]{6}$/);
+
+      const again = await ensureTodoId({ file, index: minted.from, source: minted.nextSource });
+      expect(again.changed).toBe(false);
+      expect(again.id).toBe(minted.id);
     });
   });
 });

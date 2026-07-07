@@ -1,6 +1,6 @@
 export type Repeater = { mode: "+" | "++" | ".+"; n: number; unit: "d" | "w" | "m" | "y" };
 export type ParsedDate = { time: number; hasTime: boolean };
-export type DepRef = { noteTitle: string | null; text: string; raw: string };
+export type DepRef = { id: string | null; noteTitle: string | null; text: string; raw: string };
 
 export const TODO_STATUSES: Set<string>;
 export const DATE_KEYS: Set<string>;

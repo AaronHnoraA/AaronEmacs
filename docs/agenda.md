@@ -23,6 +23,7 @@ distinguished only by its own widget badge. `state` is usually `todo`,
 
 | Canonical key | Read aliases | Meaning |
 |---|---|---|
+| `id` | - | Stable id (base36, 6 chars), minted on demand — see Dependencies. |
 | `ddl` | `due`, `deadline` | Deadline. |
 | `sche` | `scheduled`, `start` | Scheduled/start date. |
 | `end` | `finish` | End date (Gantt/duration tasks). |
@@ -57,7 +58,10 @@ Dependencies intentionally use text references instead of hidden ids:
 
 Reference matching is runtime-computed:
 
-- Without a note prefix, the reference matches another todo in the same file.
+- `#id` resolves directly against a todo's stable `id:` attr, no fuzzy
+  matching — durable across the target's title being edited later.
+- Without a note prefix (and no `#id`), the reference matches another todo
+  in the same file by text.
 - With `[[Note Title]]::`, the title is matched against note title/aliases.
 - Todo text matching tries exact text, then a unique prefix, then a unique
   substring.
@@ -68,9 +72,14 @@ Reference matching is runtime-computed:
 - Dependency cycles (via `after` or `blocks`) surface as a `cycle` lint in
   the Gantt model.
 
-Clients should not hand-write dependency refs when a target todo is selected.
-They call `todo-dep-ref`; the runtime returns the shortest stable text ref to
-append to `after`.
+Ids are minted **on demand**, never on every save (org-id model): `create-todo`
+always mints one; the dependency picker and `clock-in` mint one for an
+existing target the first time it needs a durable anchor. Clients should not
+hand-write dependency refs when a target todo is selected — they call
+`todo-dep-ref`, which mints an id for the target if it doesn't have one and
+returns `#id`. Passive completion (typing `after:`/`blocks:` and picking a
+candidate) never mints an id: a candidate with one completes to `#id`,
+otherwise to the shortest unique text ref.
 
 ## Repeating Tasks
 
@@ -89,14 +98,17 @@ completion engine.
 ## Time Tracking
 
 ```md
-@@clock [task-ref]{from: <date>, to: <date>}
+@@clock [task-ref]{from: <date>, to: <date>, task: "#id"}
 ```
 
-The title is a dependency reference (same grammar as `after`/`blocks`) naming
-the todo being timed. `to` is optional — a clock with `from` but no `to` is
-running. Only one clock may run vault-wide; starting a new one auto-closes
-whatever is running. The runtime aggregates clocks into per-task/per-day/
-per-project totals and compares against a todo's `effort`.
+The bracket title is a dependency reference (same grammar as `after`/
+`blocks`) naming the todo being timed; `task` is a stable-id anchor that
+wins over the title text when present. `clock-in` always mints an id for
+the target todo first, so the clock keeps attributing correctly even after
+the todo's title changes. `to` is optional — a clock with `from` but no
+`to` is running. Only one clock may run vault-wide; starting a new one
+auto-closes whatever is running. The runtime aggregates clocks into
+per-task/per-day/per-project totals and compares against a todo's `effort`.
 
 ## Project Rollup
 
@@ -122,6 +134,8 @@ API/actions:
 - `patch-todo --json '{...}'`
 - `clock-in --json '{...}'` / `clock-out --json '{...}'`
 - `todo-dep-ref --json '{"targetId":"...","sourceId":"..."}'`
+- `completions:todo-refs --json '{"prefix":"...","file":"..."}'` — completion
+  candidates for `after:`/`blocks:`/`task:` values.
 - `update-todo` remains as a compatibility wrapper.
 
 ## Web
@@ -139,6 +153,9 @@ Inline todo widgets in the editor are display-only: status, priority badge,
 repeat marker, and dependency pill are read from the parsed command and never
 become a second source of truth.
 
+The editor also completes `after:`/`blocks:`/`task:` values (same popup
+mechanism as tag/roam/path completion), backed by `completions:todo-refs`.
+
 ## Emacs
 
 Emacs does not render agenda UI natively — it opens the Web page:
@@ -154,3 +171,8 @@ Emacs does not render agenda UI natively — it opens the Web page:
 - `M-x my/aaronnote-roam-jump-file-todo` — jump to a todo in the current file
   (dispatch key `F`); this one stays local to Emacs (a `completing-read` over
   the current buffer's todos), not a web redirect.
+
+`after:`/`blocks:`/`task:` values also complete locally, via
+`my/aaronnote-roam-capf` (a `completion-at-point-functions` entry, so it
+works through `company`/the built-in completion UI) calling the same
+`todo-refs` backend service the Web editor uses.

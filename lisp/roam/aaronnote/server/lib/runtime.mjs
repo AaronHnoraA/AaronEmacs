@@ -2748,7 +2748,7 @@ export function extractTodos(content, note, updatedAt) {
     const lineEnd = content.indexOf("\n", lineStart);
     const rawLine = content.slice(lineStart, lineEnd < 0 ? content.length : lineEnd).trim();
     todos.push({
-      id: `${note.file}:${command.span.from}`,
+      id: args.id ? `#${args.id}` : `${note.file}:${command.span.from}`,
       command: command.kind,
       status,
       text,
@@ -2792,7 +2792,7 @@ export function extractPlanningItems(content, note, updatedAt) {
     const args = normalizeArgDates(node.attrs || {});
     const canon = canonicalTodoArgs(args);
     const base = {
-      id: `${note.file}:${node.span.from}`,
+      id: args.id ? `#${args.id}` : `${note.file}:${node.span.from}`,
       kind: node.kind,
       status: node.status || "",
       text: node.title || "",
@@ -3099,12 +3099,36 @@ function matchTodoInScope(scopeTodos, needleText, excludeId) {
   return { tier: "none", hits: [] };
 }
 
+// Builds an id -> item map from already-extracted planning items (todos,
+// or todos+projects+... combined), reassigning any item whose stable `#id`
+// collides with an earlier one back to its positional `file:offset` id and
+// recording a `duplicate-id` lint — a stable id is only useful while it's
+// unique, and a typo'd duplicate must never merge two different items.
+function buildIdIndexWithDedup(items, lints) {
+  const byId = new Map();
+  for (const item of items) {
+    if (item.id.startsWith("#") && byId.has(item.id)) {
+      const original = item.id;
+      item.id = `${item.file}:${item.index}`;
+      lints.push({ todoId: item.id, file: item.file, line: item.line, kind: "duplicate-id", ref: original, message: `Duplicate id "${original}"; fell back to a positional id` });
+    }
+    byId.set(item.id, item);
+  }
+  return byId;
+}
+
 // Resolves the dep-refs in `rawValue` (an `after`/`blocks` attr value)
-// against `titleIndex`/`todos`, pushing broken/ambiguous-ref lints as it
-// goes. Returns the resolved target todo ids (empty on any lint).
-function resolveDepRefTargets(todo, rawValue, titleIndex, todos, lints, via) {
+// against `titleIndex`/`todos`/`byId`, pushing broken/ambiguous-ref lints as
+// it goes. Returns the resolved target todo ids (empty on any lint).
+function resolveDepRefTargets(todo, rawValue, titleIndex, todos, lints, via, byId) {
   const targets = [];
   for (const ref of parseDepRefs(rawValue)) {
+    if (ref.id) {
+      const target = byId.get(`#${ref.id}`);
+      if (target && target.id !== todo.id) targets.push(target.id);
+      else lints.push({ todoId: todo.id, file: todo.file, line: todo.line, kind: "broken-ref", ref: ref.raw, via, message: `No todo with id "${ref.raw}"` });
+      continue;
+    }
     let scopeFiles;
     if (ref.noteTitle) {
       const files = titleIndex.get(normalizeTitleKey(ref.noteTitle));
@@ -3160,15 +3184,16 @@ export function resolveTodoDeps(todos) {
 
   for (const todo of todos) todo.deps = [];
 
+  const byId = buildIdIndexWithDedup(todos, lints);
+
   for (const todo of todos) {
     if (!todo.canon?.after) continue;
-    todo.deps.push(...resolveDepRefTargets(todo, todo.canon.after, titleIndex, todos, lints, "after"));
+    todo.deps.push(...resolveDepRefTargets(todo, todo.canon.after, titleIndex, todos, lints, "after", byId));
   }
 
-  const byId = new Map(todos.map((t) => [t.id, t]));
   for (const todo of todos) {
     if (!todo.canon?.blocks) continue;
-    const targetIds = resolveDepRefTargets(todo, todo.canon.blocks, titleIndex, todos, lints, "blocks");
+    const targetIds = resolveDepRefTargets(todo, todo.canon.blocks, titleIndex, todos, lints, "blocks", byId);
     for (const targetId of targetIds) {
       const target = byId.get(targetId);
       if (target && !target.deps.includes(todo.id)) target.deps.push(todo.id);
@@ -3473,13 +3498,17 @@ function buildGanttModel(todos, projects, milestones) {
 // clock-in/out can enforce mutual exclusion.
 // ---------------------------------------------------------------------------
 
-// Resolves each clock's title against `todos`, decorating clocks in place
-// with `todoId` (empty when unresolved); returns `{ lints }`. Broken/
-// ambiguous refs never drop the clock from aggregation — it still counts
-// toward its own file/day, just not toward a specific todo or project.
+// Resolves each clock against `todos`, decorating clocks in place with
+// `todoId` (empty when unresolved); returns `{ lints }`. Broken/ambiguous
+// refs never drop the clock from aggregation — it still counts toward its
+// own file/day, just not toward a specific todo or project. A `task: "#id"`
+// attr (written by `clockIn`) is a stable anchor and always wins over the
+// title text, which stays human-readable and only used as a fallback for
+// clocks nobody has clocked in through the id-aware writer yet.
 export function resolveClockRefs(clocks, todos) {
   const lints = [];
   const titleIndex = new Map();
+  const byId = new Map(todos.map((t) => [t.id, t]));
   for (const todo of todos) {
     const key = normalizeTitleKey(todo.noteTitle);
     if (!key) continue;
@@ -3488,6 +3517,13 @@ export function resolveClockRefs(clocks, todos) {
   }
   for (const clock of clocks) {
     clock.todoId = "";
+    const taskRef = clock.args?.task ? parseDepRefs(clock.args.task)[0] : null;
+    if (taskRef?.id) {
+      const target = byId.get(`#${taskRef.id}`);
+      if (target) { clock.todoId = target.id; continue; }
+      lints.push({ file: clock.file, line: clock.line, kind: "broken-clock-ref", ref: taskRef.raw, message: `No todo with id "${taskRef.raw}"` });
+      continue;
+    }
     const [ref] = parseDepRefs(clock.title || clock.text || "");
     if (!ref) continue;
     let scopeFiles;
@@ -3778,7 +3814,7 @@ function appendDepRef(existingAfter, ref) {
   return parts.join(" & ");
 }
 
-const CANON_PATCH_KEYS = ["ddl", "sche", "end", "date", "prio", "repeat", "warn", "after", "blocks", "project", "area", "phase", "goal", "effort", "progress", "owner", "tags", "context", "done", "log"];
+const CANON_PATCH_KEYS = ["id", "ddl", "sche", "end", "date", "prio", "repeat", "warn", "after", "blocks", "project", "area", "phase", "goal", "effort", "progress", "owner", "tags", "context", "done", "log"];
 const LEGACY_PATCH_TO_CANON = { priority: "prio", due: "ddl", deadline: "ddl", scheduled: "sche", start: "sche", finish: "end", pct: "progress", proj: "project", rep: "repeat", every: "repeat", lead: "warn", dep: "after", ctx: "context" };
 const CREATE_TODO_KEYS = ["ddl", "sche", "end", "prio", "repeat", "warn", "after", "blocks", "project", "area", "phase", "goal", "effort", "progress", "owner", "tags", "context"];
 
@@ -3826,7 +3862,34 @@ function lineNumberAt(text, index) {
   return String(text || "").slice(0, Math.max(0, index)).split("\n").length;
 }
 
-function todoSourceFromCreateBody(body = {}) {
+// Stable planning-node ids are minted on demand (org-id model), not on
+// every save: `createTodo` always mints one for a brand-new todo;
+// `ensureTodoId` mints one for an existing todo the first time something
+// needs a durable anchor into it (the dependency picker, clock-in). Base36,
+// 6 chars, checked against every id already in the vault so a fresh mint
+// never collides.
+function randomIdSegment() {
+  return Math.random().toString(36).slice(2, 8).padEnd(6, "0");
+}
+
+async function generatePlanningId() {
+  const planning = await scanPlanningItems();
+  const existing = new Set();
+  for (const group of [planning.todos, planning.projects, planning.milestones, planning.clocks]) {
+    for (const item of group) {
+      if (typeof item.id === "string" && item.id.startsWith("#")) existing.add(item.id.slice(1));
+    }
+  }
+  let candidate = randomIdSegment();
+  let guard = 0;
+  while (existing.has(candidate) && guard < 50) {
+    candidate = randomIdSegment();
+    guard++;
+  }
+  return candidate;
+}
+
+function todoSourceFromCreateBody(body = {}, id = "") {
   const text = String(body.text || body.title || "").trim();
   if (!text) {
     const err = new Error("Todo text is required");
@@ -3835,6 +3898,7 @@ function todoSourceFromCreateBody(body = {}) {
   }
   const status = normalizeTodoStatus(body.status || "todo");
   const attrs = {};
+  if (id) attrs.id = id;
   for (const key of CREATE_TODO_KEYS) {
     if (bodyHasOwn(body, key)) {
       const value = normalizeCanonPatchValue(key, body[key]);
@@ -3871,7 +3935,8 @@ function initialTodoFileContent(file) {
 
 export async function createTodo(body = {}) {
   const file = resolveTodoCreateFile(body.file || body.path || "");
-  const source = todoSourceFromCreateBody(body);
+  const id = await generatePlanningId();
+  const source = todoSourceFromCreateBody(body, id);
   await mkdir(dirname(file), { recursive: true });
   const existed = existsSync(file);
   let content = existed ? await readFile(file, "utf8") : initialTodoFileContent(file);
@@ -3980,6 +4045,33 @@ export async function completeTodo(body = {}) {
   return patchTodo({ ...body, op: "complete" });
 }
 
+// Mints and writes a stable `id:` for the todo located by `body` (same
+// locator fields as patchTodo) the first time something needs a durable
+// anchor into it — a todo that's never been referenced stays id-less
+// forever. Idempotent: a todo that already has an id is returned unchanged
+// (`changed: false`). Reuses `patchTodo`'s locate/write/dirty/sync pipeline.
+export async function ensureTodoId(body = {}) {
+  const file = safeOpenFile(body.file || "");
+  const content = await readFile(file, "utf8");
+  const loc = locateTodoInContent(content, body, file);
+  if (!loc) {
+    const err = new Error("Todo source was not found");
+    err.statusCode = 404;
+    throw err;
+  }
+  const { from, to } = loc;
+  const oldSource = content.slice(from, to);
+  const existingId = planningNodeArgs(oldSource).id;
+  if (existingId) {
+    let mtimeMs = 0;
+    try { mtimeMs = (await stat(file)).mtimeMs; } catch {}
+    return { type: "todo-id", ok: true, file, id: `#${existingId}`, changed: false, from, to, source: oldSource, mtimeMs };
+  }
+  const id = await generatePlanningId();
+  const result = await patchTodo({ ...body, file, id });
+  return { ...result, type: "todo-id", id: `#${id}` };
+}
+
 // --- clock-in / clock-out -----------------------------------------------
 
 function escapeBracketTitle(text) {
@@ -4020,9 +4112,12 @@ async function findRunningClock() {
 
 // Starts a clock on the todo located by `body` (same locator fields as
 // patchTodo: index+source, or id/text fallback), inserting a new
-// `@@clock [task]{from: now}` line right after the todo's line/block. Only
-// one clock may run at a time vault-wide, so any currently-running clock is
-// auto-closed first — mirroring org's clock-in behavior.
+// `@@clock [task]{from: now, task: "#id"}` line right after the todo's
+// line/block. The todo is minted a stable id first (if it doesn't have one)
+// so the clock's anchor survives the todo's title being edited later — the
+// bracket title stays human-readable text, `task:` is the durable link (see
+// `resolveClockRefs`). Only one clock may run at a time vault-wide, so any
+// currently-running clock is auto-closed first — mirroring org's clock-in.
 export async function clockIn(body = {}) {
   const file = safeOpenFile(body.file || "");
   const nowIso = formatDateValue(Date.now(), true);
@@ -4030,26 +4125,27 @@ export async function clockIn(body = {}) {
   const running = await findRunningClock();
   if (running) await closeClockInFile(running.file, { index: running.index, source: running.source }, nowIso);
 
+  // `ensureTodoId` may itself rewrite the todo's line (adding `id=...`), so
+  // its own `from`/`to` — not a fresh `locateTodoInContent(body)` — are the
+  // authoritative position afterward: re-locating with the now-stale
+  // pre-mutation `body.source` could fail to text-match the changed line.
+  const idResult = await ensureTodoId(body);
+  const from = idResult.from;
+  const to = idResult.changed ? idResult.from + idResult.nextSource.length : idResult.to;
+
   const content = await readFile(file, "utf8");
-  const loc = locateTodoInContent(content, body, file);
-  if (!loc) {
-    const err = new Error("Todo source was not found");
-    err.statusCode = 404;
-    throw err;
-  }
-  const { from, to } = loc;
   const todoNode = scanPlanningNodes(content.slice(from, to), { kind: "todo" })[0];
   const title = escapeBracketTitle(todoNode?.title || "");
 
   const lineEnd = content.indexOf("\n", to);
   const insertAt = lineEnd < 0 ? content.length : lineEnd + 1;
   const needsLeadingNewline = lineEnd < 0 && content.length > 0 && !content.endsWith("\n");
-  const clockLine = `${needsLeadingNewline ? "\n" : ""}@@clock [${title}]{from: ${nowIso}}\n`;
+  const clockLine = `${needsLeadingNewline ? "\n" : ""}@@clock [${title}]{from: ${nowIso}, task: ${idResult.id}}\n`;
 
   await atomicWriteFile(file, content.slice(0, insertAt) + clockLine + content.slice(insertAt), "utf8");
   markNotesDirty(file);
   scheduleRoamDbSync(null, file);
-  return { type: "clock-in", ok: true, file, from: insertAt, to: insertAt + clockLine.length, source: clockLine };
+  return { type: "clock-in", ok: true, file, from: insertAt, to: insertAt + clockLine.length, source: clockLine, todoId: idResult.id };
 }
 
 // Stops a clock: closes the clock named by `body.file`+index/source if
@@ -4095,6 +4191,44 @@ export function depRefForTodo(target, scopeTodos, sourceTodo) {
   const crossFile = !sourceTodo || sourceTodo.file !== target.file;
   const refBody = crossFile ? `[[${target.noteTitle}]]::${candidate}` : candidate;
   return /[,&]/.test(refBody) ? `"${refBody}"` : refBody;
+}
+
+// Completion candidates for `after:`/`blocks:`/clock `task:` values. Same-
+// file todos rank first (they're the common case and never need a
+// `[[Note]]::` prefix), then open statuses before closed ones. Candidates
+// that already have a stable id insert `#id` (durable); everything else
+// falls back to the same shortest-unique text ref `depRefForTodo` writes
+// for the explicit dependency picker — passive completion never mints an
+// id, only an explicit action (the picker, clock-in) does.
+export async function todoRefCompletions(body = {}) {
+  const prefix = String(body.prefix || "").trim().toLowerCase();
+  const file = body.file ? safeOpenFile(body.file) : "";
+  const excludeId = String(body.excludeId || "");
+  const limit = Math.max(1, Math.min(50, Number(body.limit) || 20));
+  const statusRank = { blocked: 0, doing: 1, todo: 2, done: 3, cancelled: 4 };
+  const todos = (await scanTodos()).filter((t) => t.id !== excludeId);
+  const matches = prefix
+    ? todos.filter((t) => t.text.toLowerCase().includes(prefix) || String(t.noteTitle || "").toLowerCase().includes(prefix))
+    : todos;
+  const sorted = [...matches].sort((a, b) => {
+    const aSame = file && a.file === file ? 0 : 1;
+    const bSame = file && b.file === file ? 0 : 1;
+    if (aSame !== bSame) return aSame - bSame;
+    return (statusRank[a.status] ?? 9) - (statusRank[b.status] ?? 9);
+  });
+  const items = sorted.slice(0, limit).map((todo) => {
+    const hasId = typeof todo.id === "string" && todo.id.startsWith("#");
+    const scope = todos.filter((t) => t.file === todo.file);
+    const ref = hasId ? todo.id : depRefForTodo(todo, scope, file ? { file } : null);
+    return {
+      label: `${String(todo.status || "todo").toUpperCase()} · ${todo.text} · ${todo.noteTitle || ""}`,
+      ref,
+      hasId,
+      file: todo.file,
+      status: todo.status,
+    };
+  });
+  return { type: "todo-ref-completions", items };
 }
 
 function existingUniqueDirs(dirs) {

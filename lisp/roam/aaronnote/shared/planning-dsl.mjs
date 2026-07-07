@@ -20,9 +20,9 @@ const TITLE_PLANNING_KINDS = new Set(["project", "milestone", "clock"]);
 // here (or in TODO_CANON_KEYS) is an unrecognized-key lint, not a hard
 // error — a typo in an attr must never make a planning node disappear.
 const DATE_VALUE_KEYS = new Set(["ddl", "due", "deadline", "sche", "scheduled", "start", "end", "finish", "date", "when", "done", "from", "to"]);
-const DEP_REF_KEYS = new Set(["after", "dep", "blocks"]);
+const DEP_REF_KEYS = new Set(["after", "dep", "blocks", "task"]);
 const DURATION_KEYS = new Set(["effort"]);
-const KNOWN_ATTR_KEYS = new Set([...TODO_CANON_KEYS, "from", "to", "note"]);
+const KNOWN_ATTR_KEYS = new Set([...TODO_CANON_KEYS, "from", "to", "note", "task"]);
 
 function diagnosePlanningAttrs(attrs) {
   const diagnostics = [];

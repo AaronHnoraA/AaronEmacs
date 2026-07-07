@@ -4707,6 +4707,23 @@ function inlineTagCompletionPrefix(before: string): string | null {
   return match ? match[1] ?? "" : null;
 }
 
+// Completion for `after:`/`blocks:`/`task:` dependency-ref values on
+// @@todo/@@itodo/@@project/@@milestone/@@clock lines — same key set
+// planning-dsl.mjs treats as dep-refs. Lightweight pattern match (no full
+// command parse), matching the other detectors in this waterfall.
+function depRefCompletionContext(before: string): { prefix: string; quoted: boolean } | null {
+  const match = before.match(/(?:^|[\s,{])(?:after|blocks|task)\s*[:=]\s*(")?([^,;{}"\n]*)$/i);
+  if (!match) return null;
+  return { prefix: match[2] ?? "", quoted: Boolean(match[1]) };
+}
+
+// `serializePlanningValue` (shared/planning-dsl.mjs) quotes any value with
+// whitespace/punctuation; mirror that here so an inserted multi-word text
+// ref round-trips instead of getting truncated by the attr parser.
+function needsPlanningValueQuotes(value: string): boolean {
+  return /[\s,;{}[\]"']/.test(value);
+}
+
 function displayPathCompletion(path: string, prefix: string): string {
   if (prefix.startsWith("./") && !path.startsWith("./") && !path.startsWith("../") && !path.startsWith("/")) return `./${path}`;
   return path;
@@ -4907,6 +4924,26 @@ async function matchingInlineTagCompletions(prefix: string): Promise<SnippetSumm
       group: "tag",
       source: tag,
     }));
+}
+
+async function matchingTodoRefCompletions(prefix: string, quoted: boolean): Promise<SnippetSummary[]> {
+  try {
+    const result = await api.completions.todoRefs({ prefix, file: currentFile });
+    return (result.items ?? []).map((item) => {
+      const ref = item.ref || "";
+      const needsQuotes = !quoted && !item.hasId && needsPlanningValueQuotes(ref);
+      return {
+        key: ref,
+        name: item.label || ref,
+        body: needsQuotes ? `"${ref}"` : ref,
+        mode: "markdown-mode",
+        group: "todo-ref",
+        source: item.file || "",
+      };
+    });
+  } catch {
+    return [];
+  }
 }
 
 async function matchingPathCompletions(prefix: string): Promise<SnippetSummary[]> {
@@ -5229,6 +5266,19 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
       roamPrefix.length,
       ctx.rect,
       () => matchingRoamCompletions(roamPrefix),
+    );
+    return;
+  }
+
+  const depRefContext = depRefCompletionContext(ctx.before);
+  if (depRefContext) {
+    const { prefix: depRefPrefix, quoted } = depRefContext;
+    scheduleAsyncCompletion(
+      `todo-ref:${currentFile}:${depRefPrefix}`,
+      depRefPrefix,
+      depRefPrefix.length,
+      ctx.rect,
+      () => matchingTodoRefCompletions(depRefPrefix, quoted),
     );
     return;
   }

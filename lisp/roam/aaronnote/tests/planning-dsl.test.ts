@@ -156,8 +156,18 @@ describe("planning value grammar", () => {
 
   test("parseDepRefs splits on & and recognizes [[Title]]::text", () => {
     expect(parseDepRefs("first & [[Note]]::second")).toEqual([
-      { noteTitle: null, text: "first", raw: "first" },
-      { noteTitle: "Note", text: "second", raw: "[[Note]]::second" },
+      { id: null, noteTitle: null, text: "first", raw: "first" },
+      { id: null, noteTitle: "Note", text: "second", raw: "[[Note]]::second" },
+    ]);
+  });
+
+  test("parseDepRefs recognizes a stable #id ref", () => {
+    expect(parseDepRefs("#abc123")).toEqual([
+      { id: "abc123", noteTitle: null, text: "", raw: "#abc123" },
+    ]);
+    expect(parseDepRefs("#abc123 & other task")).toEqual([
+      { id: "abc123", noteTitle: null, text: "", raw: "#abc123" },
+      { id: null, noteTitle: null, text: "other task", raw: "other task" },
     ]);
   });
 

@@ -19,6 +19,7 @@ export const DATE_KEYS = new Set(["ddl", "due", "deadline", "sche", "scheduled",
 // brand-new args, so existing notes (e.g. `{ddl: ...}`) never get silently
 // rewritten.
 export const TODO_KEY_ALIASES = {
+  id: ["id"],
   ddl: ["ddl", "due", "deadline"],
   sche: ["sche", "scheduled", "start"],
   end: ["end", "finish"],
@@ -205,9 +206,12 @@ export function parseLeadTime(raw, fallbackDays = 14) {
   return n;
 }
 
-// `after`/`blocks` grammar (no ids): `dep-ref ( "&" dep-ref )*`, where
-// `dep-ref := [ "[[" note-title "]]" "::" ] text-part`. Also reused by
-// `@@clock [task-ref]{...}` to locate the task a clock entry belongs to.
+// `after`/`blocks`/clock-`task` grammar: `dep-ref ( "&" dep-ref )*`, where
+// `dep-ref := "#" stable-id | [ "[[" note-title "]]" "::" ] text-part`.
+// A `#id` ref resolves directly against a todo's stable `id:` attr (see
+// `ensureTodoId` in runtime.mjs) and never needs title/text matching; ids
+// are minted on demand (dependency picker, clock-in), so most refs are
+// still plain text and go through the fuzzy same-file/cross-file matcher.
 export function parseDepRefs(raw) {
   const t = String(raw ?? "").trim();
   if (!t) return [];
@@ -215,11 +219,13 @@ export function parseDepRefs(raw) {
     .split("&")
     .map((part) => {
       const piece = part.trim();
+      const idMatch = piece.match(/^#([A-Za-z0-9]+)$/);
+      if (idMatch) return { id: idMatch[1], noteTitle: null, text: "", raw: piece };
       const m = piece.match(/^\[\[([^\]]+)\]\]::(.*)$/);
-      if (m) return { noteTitle: m[1].trim(), text: m[2].trim(), raw: piece };
-      return { noteTitle: null, text: piece, raw: piece };
+      if (m) return { id: null, noteTitle: m[1].trim(), text: m[2].trim(), raw: piece };
+      return { id: null, noteTitle: null, text: piece, raw: piece };
     })
-    .filter((ref) => ref.text);
+    .filter((ref) => ref.id || ref.text);
 }
 
 // Duration grammar for `effort`/clock spans: `2h`, `90m`, `1d` (an 8-hour

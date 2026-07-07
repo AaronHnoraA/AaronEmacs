@@ -201,12 +201,14 @@ export type TodoLint = {
     | "missing-milestone-date"
     | "cycle"
     | "broken-clock-ref"
-    | "ambiguous-clock-ref";
+    | "ambiguous-clock-ref"
+    | "duplicate-id";
   via?: "after" | "blocks";
   ref?: string;
   message?: string;
   candidates?: Array<{ id: string; text: string }>;
 };
+export type TodoRefCompletion = { label?: string; ref?: string; hasId?: boolean; file?: string; status?: string };
 export type PlanningItem = Record<string, unknown> & {
   id?: string;
   kind?: "project" | "milestone" | "clock" | string;
@@ -323,6 +325,7 @@ type NativeApi = {
   completions?: {
     tags?: (prefix: string) => Promise<unknown>;
     roam?: (prefix: string) => Promise<unknown>;
+    todoRefs?: (body: Record<string, unknown>) => Promise<unknown>;
   };
   clipboard?: {
     read?: (body?: { file?: string }) => Promise<unknown>;
@@ -695,6 +698,11 @@ export const api = {
       const call = window.aaronnoteApi?.completions?.roam;
       if (!call) return { notes: [] };
       return await call(prefix) as { notes?: Array<{ id: string; key: string; title: string; path: string }> };
+    },
+    async todoRefs(body: { prefix?: string; file?: string; excludeId?: string; limit?: number } = {}): Promise<{ items?: TodoRefCompletion[] }> {
+      const call = window.aaronnoteApi?.completions?.todoRefs;
+      if (!call) return { items: [] };
+      return await call(body) as { items?: TodoRefCompletion[] };
     },
   },
   clipboard: {

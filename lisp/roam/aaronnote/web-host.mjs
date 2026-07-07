@@ -46,9 +46,10 @@ import {
   buildAgenda,
   createTodo,
   patchTodo,
+  ensureTodoId,
   clockIn,
   clockOut,
-  depRefForTodo,
+  todoRefCompletions,
   runtimeDebugSnapshot,
 } from "./server/lib/index.mjs";
 import { configure, markNotesDirty, notesIndexVersionValue, noteSelfWriteRecently, notePathWatchRelevant } from "./server/lib/state.mjs";
@@ -564,6 +565,9 @@ const apiHandlers = {
       })),
     };
   },
+  "aaronnote:api:completions:todo-refs": async (body) => {
+    return await todoRefCompletions(body || {});
+  },
   "aaronnote:api:notes:todos": async (body) => {
     return await getTodos(typeof body === "string" ? body : body || {});
   },
@@ -595,11 +599,13 @@ const apiHandlers = {
   },
   "aaronnote:api:notes:todo-dep-ref": async (body) => {
     const targetId = String(body?.targetId || "");
-    const sourceId = String(body?.sourceId || "");
     if (!targetId) {
       const err = new Error("targetId is required");
       err.statusCode = 400;
       throw err;
+    }
+    if (targetId.startsWith("#")) {
+      return { type: "todo-dep-ref", ref: targetId };
     }
     const { todos } = await getTodos("");
     const target = todos.find((todo) => todo.id === targetId);
@@ -608,9 +614,13 @@ const apiHandlers = {
       err.statusCode = 404;
       throw err;
     }
-    const source = sourceId ? todos.find((todo) => todo.id === sourceId) || null : null;
-    const scope = todos.filter((todo) => todo.file === target.file);
-    return { type: "todo-dep-ref", ref: depRefForTodo(target, scope, source) };
+    // The dependency picker is an explicit action, so it's worth minting a
+    // stable id for the target (if it doesn't have one yet) rather than
+    // writing a fragile text reference — the ref then survives the target's
+    // title being edited later.
+    const idResult = await ensureTodoId({ file: target.file, index: target.index, source: target.source, id: target.id, text: target.text });
+    if (idResult.changed) broadcast("command", { command: "agenda-changed", version: notesIndexVersionValue() });
+    return { type: "todo-dep-ref", ref: idResult.id };
   },
   "aaronnote:api:notes:index": async () => {
     return { type: "notes", ...await notesIndexPayload(), root: noteRoot };
@@ -908,6 +918,7 @@ function adapterScript(origin) {
     completions: {
       tags: function(prefix) { return call("aaronnote:api:completions:tags", [{ prefix: String(prefix || "") }]); },
       roam: function(prefix) { return call("aaronnote:api:completions:roam", [{ prefix: String(prefix || "") }]); },
+      todoRefs: function(body) { return call("aaronnote:api:completions:todo-refs", [body || {}]); },
     },
     noteCode: {
       readRegion: function(body) { return call("aaronnote:api:note-code:read-region", [body || {}]); }

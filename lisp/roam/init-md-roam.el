@@ -133,6 +133,7 @@
                 ("agenda"    . "aaronnote:api:notes:agenda")
                 ("patch-todo" . "aaronnote:api:notes:patch-todo")
                 ("todo-dep-ref" . "aaronnote:api:notes:todo-dep-ref")
+                ("todo-refs"  . "aaronnote:api:completions:todo-refs")
                 ("create"    . "aaronnote:api:notes:create-node")
                 ("delete-node" . "aaronnote:api:notes:delete-node")
                 ("sync"      . "aaronnote:api:notes:roam-sync")))))
@@ -145,7 +146,7 @@ the expected body, and returns parsed JSON or nil."
     (when channel
       (let ((api-args
              (pcase action
-               ((or "create" "agenda" "patch-todo" "todo-dep-ref")
+               ((or "create" "agenda" "patch-todo" "todo-dep-ref" "todo-refs")
                 (let ((json-str (or (cadr (member "--json" args)) "{}")))
                   (condition-case nil
                       (vector (json-parse-string json-str :object-type 'hash-table))
@@ -3493,11 +3494,35 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
 
 ;; ── Roam completion-at-point (roam:// and ../ paths) ─────────────────────────
 
+(defun my/aaronnote-roam--todo-ref-completions (prefix)
+  "Return dependency-ref completion strings for PREFIX via the runtime.
+Queries the same `todo-refs' service the web editor's completion popup
+uses (see `todoRefCompletions' in server/lib/runtime.mjs): same-file todos
+first, then open statuses before closed ones; a todo with a stable id
+completes to `#id', otherwise to the shortest unique text ref."
+  (let* ((body (list :prefix prefix :file (or buffer-file-name "")))
+         (result (my/aaronnote-roam--runtime-call
+                  "todo-refs" "--json" (json-serialize body)))
+         (items (and result (gethash "items" result))))
+    (delq nil (mapcar (lambda (item) (gethash "ref" item)) items))))
+
 (defun my/aaronnote-roam-capf ()
   "Completion-at-point for roam:// links and relative paths in Typst/md buffers."
   (let ((roam-prefix "roam://")
         (dotdot-re "\\.\\./"))
     (cond
+     ;; after:/blocks:/task: dependency-ref completion on @@todo/@@itodo/
+     ;; @@project/@@milestone/@@clock lines — same key set planning-dsl.mjs
+     ;; treats as dep-refs.
+     ((looking-back
+       "\\(?:after\\|blocks\\|task\\)[ \t]*[:=][ \t]*\"?\\([^,;{}\"\n]*\\)"
+       (line-beginning-position) t)
+      (let* ((start (match-beginning 1))
+             (end (point))
+             (prefix (match-string-no-properties 1))
+             (candidates (my/aaronnote-roam--todo-ref-completions prefix)))
+        (when candidates
+          (list start end candidates :exclusive 'no))))
      ;; roam://... completion
      ((and (looking-back (concat roam-prefix "[^][\n\t ]*") (line-beginning-position) t)
            (save-excursion

@@ -73,6 +73,7 @@ spelling only for brand-new keys):
 
 | Canonical | Aliases | Value grammar |
 |---|---|---|
+| `id` | — | stable id (see [Stable ids](#stable-ids)) |
 | `ddl` | `due`, `deadline` | date |
 | `sche` | `scheduled`, `start` | date |
 | `end` | `finish` | date |
@@ -118,13 +119,14 @@ always uses plain `+` stepping regardless of the todo's own mode — only
 how many days before a deadline a `warning` entry appears.
 
 **Dep-ref** (`parseDepRefs`) — used by `after`, `blocks`, and a clock's
-title: `ref ( "&" ref )*`, where `ref := [ "[[" note-title "]]" "::" ] text`.
-Same-file refs are just text; cross-file refs prefix the note title. Text
-matches resolve same-file (or same-titled-note) todos by exact, then
-prefix, then substring tier; multiple hits at a tier lint as
-`ambiguous-ref`/`ambiguous-clock-ref` and zero hits lint as
-`broken-ref`/`broken-clock-ref` — neither ever blocks a todo from being
-usable, they only ever surface as lints.
+`task`: `ref ( "&" ref )*`, where `ref := "#" stable-id | [ "[[" note-title
+"]]" "::" ] text`. An `#id` ref resolves directly against the id index (see
+[Stable ids](#stable-ids)) with no fuzzy matching. Otherwise, same-file refs
+are just text; cross-file refs prefix the note title. Text matches resolve
+same-file (or same-titled-note) todos by exact, then prefix, then substring
+tier; multiple hits at a tier lint as `ambiguous-ref`/`ambiguous-clock-ref`
+and zero hits lint as `broken-ref`/`broken-clock-ref` — neither ever blocks a
+todo from being usable, they only ever surface as lints.
 
 **Duration** (`parseDuration`/`formatDuration`) — `effort` and clock spans:
 `2h`, `90m`, `1d` (an 8-hour workday), or `H:MM`. Returns/accepts total
@@ -160,6 +162,31 @@ None of these drop the node or its other attrs — they're purely advisory.
 - Cycles (via either `after` or `blocks`) are detected and reported as a
   `cycle` lint in the Gantt model.
 
+## Stable ids
+
+A todo's default id is derived (`` `${file}:${offset}` ``) and drifts on
+every edit above it — fine for a single request, useless as a durable
+anchor. `id:` (base36, 6 chars) is a **stable, opt-in** id that survives
+edits, minted **on demand** (org-id model), never on every save:
+
+- `createTodo` always mints one for a brand-new todo.
+- `ensureTodoId` mints one for an existing todo the first time something
+  needs a durable anchor into it: the web/Emacs dependency picker (before
+  writing an `after`/`blocks` ref) and `clockIn` (before writing a clock's
+  `task` anchor). Idempotent — a todo that already has an id is returned
+  unchanged.
+- Passive completion (typing `after:`/`blocks:`/`task:` and picking a
+  candidate) does **not** mint an id: a candidate that already has one
+  completes to `#id`, otherwise it falls back to `depRefForTodo`'s text ref
+  — browsing candidates should never have a write side effect.
+- A todo's view-model `id` is `#xxxxxx` when it has a stable id, else the
+  positional fallback — every consumer already treats `id` as an opaque
+  string, so this is transparent everywhere (`cursorId`, selection sets,
+  Gantt drag targets, `byId` dependency maps).
+- Two nodes sharing the same `id:` (hand-copied, typically) lint as
+  `duplicate-id`; the engine keeps the first occurrence's id and the second
+  falls back to its positional id so nothing silently merges.
+
 ## Urgency
 
 `todoUrgency`: `priority-weight * 1000 + deadline-proximity-score +
@@ -170,15 +197,20 @@ pushed to the very bottom regardless of priority.
 ## Clock engine
 
 ```
-@@clock [task-ref]{from: <date>, to: <date>}
+@@clock [task-ref]{from: <date>, to: <date>, task: "#id"}
 ```
 
-The title is a dep-ref (same grammar as `after`/`blocks`) naming the todo
-being timed. `to` is optional — a clock with `from` but no `to` is
-**running**. Only one clock may run vault-wide at a time: `clockIn` closes
-any currently-running clock first, then inserts a new `@@clock` line
-directly after the target todo's line/block. `clockOut` closes either an
-explicit clock (file+locator) or whatever is running.
+The bracket title is a dep-ref (same grammar as `after`/`blocks`) naming the
+todo being timed; `to` is optional — a clock with `from` but no `to` is
+**running**. `task` is a stable-id anchor (`resolveClockRefs` prefers it
+over the title text when present) — `clockIn` always mints one for the
+target todo first (see [Stable ids](#stable-ids)) and writes it, so the
+clock keeps attributing correctly even after the todo's title is edited;
+only clocks written before a todo had an id fall back to matching the
+(now possibly stale) bracket text. Only one clock may run vault-wide at a
+time: `clockIn` closes any currently-running clock first, then inserts a
+new `@@clock` line directly after the target todo's line/block. `clockOut`
+closes either an explicit clock (file+locator) or whatever is running.
 
 `buildClockModel(clocks, todos, projects)` aggregates:
 
@@ -228,6 +260,25 @@ aliases (`ddl`/`due`, `sche`/`scheduled`, `prio`/`priority`, `project`/`proj`,
 the created source line and parsed todo, then the host broadcasts
 `agenda-changed`.
 
+## Completion
+
+`todoRefCompletions({ prefix, file, excludeId?, limit? })` powers `after:`/
+`blocks:`/`task:` value completion in both clients — same-file todos rank
+first, then open statuses before closed ones. Each candidate's `ref` is
+`#id` when the todo already has a stable id, else the same shortest-unique
+text ref `depRefForTodo` generates for the explicit dependency picker.
+Browsing candidates never mints an id (see [Stable ids](#stable-ids)).
+
+- **Web** (`aaronnote/main.ts`): `depRefCompletionContext`/
+  `matchingTodoRefCompletions` slot into the same completion-popup waterfall
+  as tag/roam/path completion (`updateSnippetPopup`), triggered by the
+  cursor sitting inside an `after=`/`blocks=`/`task=` attr value.
+- **Emacs**: `my/aaronnote-roam-capf` gets a matching `cond` branch that
+  calls the `todo-refs` action through the same `/api` bridge other roam
+  actions use.
+- **API**: `aaronnote:api:completions:todo-refs` (web-host.mjs), bridged as
+  `api.completions.todoRefs(...)`.
+
 ## Project rollup
 
 `buildProjectModel(projects, todos, clocks)` groups todos onto each
@@ -268,6 +319,7 @@ real `@@project` still get a synthetic rollup entry — nothing is dropped.
 }
 
 @@todo(doing) [write related-work section] {
+  id: 9k2xq1
   project: thesis
   sche: 2026-07-06
   end: 2026-07-10
@@ -277,9 +329,9 @@ real `@@project` still get a synthetic rollup entry — nothing is dropped.
 
 @@milestone [advisor check-in] { project: thesis, date: 2026-07-15 }
 
-@@clock [write related-work section] {from: "2026-07-07 09:00", to: "2026-07-07 11:30"}
+@@clock [write related-work section] {from: "2026-07-07 09:00", to: "2026-07-07 11:30", task: "#9k2xq1"}
 
-@@todo [second pass] {after: "write related-work section", repeat: +1w, ddl: 2026-07-20}
+@@todo [second pass] {after: "#9k2xq1", repeat: +1w, ddl: 2026-07-20}
 
 @@todo(doing) [blocking task] {blocks: "second pass"}
 ```

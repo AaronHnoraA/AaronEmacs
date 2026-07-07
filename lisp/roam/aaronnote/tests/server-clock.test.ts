@@ -60,6 +60,37 @@ describe("clock ref resolution", () => {
     const model = buildClockModel(clocks, todos, []);
     expect(model.tasks).toMatchObject([{ todoId: "", minutes: 60 }]);
   });
+
+  test("a `task: #id` anchor resolves the clock to its todo regardless of the bracket title text", () => {
+    const content = [
+      "@@todo(doing) [some stale title in the bracket] {id: abc123}",
+      '@@clock [some stale title in the bracket] {from: "2026-07-07 09:00", to: "2026-07-07 10:00", task: "#abc123"}',
+    ].join("\n");
+    const { todos, clocks } = extractPlanningItems(content, note("/notes/a.md", "A"), 1);
+    const { lints } = resolveClockRefs(clocks, todos);
+    expect(lints).toEqual([]);
+    expect(clocks[0].todoId).toBe("#abc123");
+  });
+
+  test("a task-id anchor survives the todo's title text changing entirely (the title-based fallback would have broken)", () => {
+    const renamed = [
+      "@@todo(doing) [a totally different title now] {id: abc123}",
+      '@@clock [some stale title in the bracket] {from: "2026-07-07 09:00", to: "2026-07-07 10:00", task: "#abc123"}',
+    ].join("\n");
+    const { todos, clocks } = extractPlanningItems(renamed, note("/notes/a.md", "A"), 1);
+    const { lints } = resolveClockRefs(clocks, todos);
+    expect(lints).toEqual([]);
+    expect(clocks[0].todoId).toBe("#abc123");
+    const model = buildClockModel(clocks, todos, []);
+    expect(model.tasks).toMatchObject([{ todoId: "#abc123", minutes: 60 }]);
+  });
+
+  test("a broken task-id anchor lints as broken-clock-ref", () => {
+    const content = '@@clock [whatever] {from: "2026-07-07 09:00", task: "#nonexistent"}';
+    const { todos, clocks } = extractPlanningItems(content, note("/notes/a.md", "A"), 1);
+    const { lints } = resolveClockRefs(clocks, todos);
+    expect(lints).toMatchObject([{ kind: "broken-clock-ref", ref: "#nonexistent" }]);
+  });
 });
 
 describe("buildClockModel aggregation", () => {
@@ -95,21 +126,27 @@ describe("buildClockModel aggregation", () => {
 });
 
 describe("clock-in / clock-out", () => {
-  test("clockIn inserts a running @@clock line right after the todo", async () => {
+  test("clockIn mints a stable id for the todo and inserts a running @@clock line anchored to it", async () => {
     await withVault(async (root) => {
       const file = join(root, "a.md");
       await writeFile(file, "---\nid: a\n---\n# A\n\n@@todo(doing) [write proof of lemma]\n", "utf8");
       await syncRoamDb(null, { mode: "full" });
       const todosBefore = (await buildAgenda({ includePlanning: true })).todos;
       const todo = todosBefore.find((t: any) => t.text === "write proof of lemma");
+      expect(todo.id).not.toMatch(/^#/);
 
-      await clockIn({ file, index: todo.index, source: todo.source });
+      const result = await clockIn({ file, index: todo.index, source: todo.source });
+      expect(result.todoId).toMatch(/^#[a-z0-9]{6}$/);
 
       const content = await readFile(file, "utf8");
+      expect(content).toMatch(/@@todo\(doing\) \[write proof of lemma\]\s*\{id[:=]/);
       expect(content).toContain("@@clock [write proof of lemma]{from:");
+      expect(content).toContain(`task: ${result.todoId}`);
 
       const agenda = await buildAgenda({ includePlanning: true });
-      expect(agenda.clocktable.running).toMatchObject({ todoId: todo.id });
+      expect(agenda.clocktable.running).toMatchObject({ todoId: result.todoId });
+      const refreshedTodo = agenda.todos.find((t: any) => t.text === "write proof of lemma");
+      expect(refreshedTodo.id).toBe(result.todoId);
     });
   });
 
@@ -153,19 +190,18 @@ describe("clock-in / clock-out", () => {
       const todos = (await buildAgenda({ includePlanning: true })).todos;
       const first = todos.find((t: any) => t.text === "first task");
 
-      await clockIn({ file, index: first.index, source: first.source });
+      const firstClockIn = await clockIn({ file, index: first.index, source: first.source });
       let agenda = await buildAgenda({ includePlanning: true });
-      expect(agenda.clocktable.running).toMatchObject({ todoId: first.id });
+      expect(agenda.clocktable.running).toMatchObject({ todoId: firstClockIn.todoId });
 
       // second task's index/source shifted after the first clock-in inserted
       // a line; re-locate it fresh, the way a real client would.
       const refreshedSecond = (await buildAgenda({ includePlanning: true })).todos.find((t: any) => t.text === "second task");
-      await clockIn({ file, index: refreshedSecond.index, source: refreshedSecond.source });
+      const secondClockIn = await clockIn({ file, index: refreshedSecond.index, source: refreshedSecond.source });
 
       agenda = await buildAgenda({ includePlanning: true });
-      const finalSecond = agenda.todos.find((t: any) => t.text === "second task");
-      expect(agenda.clocktable.running).toMatchObject({ todoId: finalSecond.id });
-      const firstTaskModel = agenda.clocktable.tasks.find((t: any) => t.todoId === first.id);
+      expect(agenda.clocktable.running).toMatchObject({ todoId: secondClockIn.todoId });
+      const firstTaskModel = agenda.clocktable.tasks.find((t: any) => t.todoId === firstClockIn.todoId);
       expect(firstTaskModel.minutes).toBeGreaterThanOrEqual(0);
     });
   });
