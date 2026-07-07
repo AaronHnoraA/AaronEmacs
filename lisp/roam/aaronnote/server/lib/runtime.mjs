@@ -140,12 +140,19 @@ let roamSyncTimer = null;
 let roamSyncInFlight = null;
 let queuedRoamSyncNotes = null;
 let queuedRoamSyncChangedFiles = new Set();
+let agendaPersistentCache = null;
+let agendaPersistentCacheKey = "";
+let agendaPersistentCacheDirty = false;
+let agendaPersistentCacheLoad = null;
+let notesSnapshotFingerprint = "";
 let atomicWriteCounter = 0;
 const noteCodeFileCache = new Map();
 const noteCodeFilePending = new Map();
 let noteCodeFileCacheBytes = 0;
 const pathSuggestionDirListingCache = new Map();
 const contentRootCache = new Map();
+const AGENDA_CACHE_SCHEMA = 1;
+const AGENDA_PAYLOAD_CACHE_LIMIT = 32;
 const CURRENT_DB_SCHEMA = 1;
 const ASSET_CLEANUP_SCHEMA = 2;
 const ROAM_FULL_SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -2397,6 +2404,219 @@ function cloneNotes(notes) {
   return notes.map(cloneNote);
 }
 
+function cloneJson(value) {
+  if (value === undefined) return undefined;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function emptyPlanningGroup() {
+  return { todos: [], projects: [], milestones: [], clocks: [], nodes: [] };
+}
+
+function agendaCacheEnabled() {
+  return process.env.AARONNOTE_AGENDA_CACHE !== "0" && noteScanRoot === noteRoot;
+}
+
+function agendaCacheFile() {
+  return join(stateRoot, "cache", "agenda-cache.json");
+}
+
+function emptyAgendaPersistentCache() {
+  return {
+    schema: AGENDA_CACHE_SCHEMA,
+    root: noteRoot,
+    files: new Map(),
+    payloads: new Map(),
+  };
+}
+
+async function ensureAgendaPersistentCache() {
+  if (!agendaCacheEnabled()) return null;
+  const key = `${stateRoot}\0${noteRoot}`;
+  if (agendaPersistentCache && agendaPersistentCacheKey === key) return agendaPersistentCache;
+  if (agendaPersistentCacheLoad && agendaPersistentCacheKey === key) return await agendaPersistentCacheLoad;
+
+  agendaPersistentCacheKey = key;
+  agendaPersistentCacheLoad = (async () => {
+    let next = emptyAgendaPersistentCache();
+    try {
+      const raw = JSON.parse(await readFile(agendaCacheFile(), "utf8"));
+      if (raw?.schema === AGENDA_CACHE_SCHEMA && raw?.root === noteRoot) {
+        next = {
+          schema: AGENDA_CACHE_SCHEMA,
+          root: noteRoot,
+          files: new Map(Object.entries(raw.files || {})),
+          payloads: new Map(Object.entries(raw.payloads || {})),
+        };
+      }
+    } catch {}
+    agendaPersistentCache = next;
+    agendaPersistentCacheDirty = false;
+    agendaPersistentCacheLoad = null;
+    return agendaPersistentCache;
+  })();
+  return await agendaPersistentCacheLoad;
+}
+
+function trimAgendaPayloadCache(cache = agendaPersistentCache) {
+  if (!cache || cache.payloads.size <= AGENDA_PAYLOAD_CACHE_LIMIT) return;
+  const entries = [...cache.payloads.entries()]
+    .sort((a, b) => Number(a[1]?.storedAt || 0) - Number(b[1]?.storedAt || 0));
+  while (entries.length > AGENDA_PAYLOAD_CACHE_LIMIT) {
+    const [key] = entries.shift();
+    cache.payloads.delete(key);
+  }
+}
+
+async function flushAgendaPersistentCache() {
+  const cache = agendaPersistentCache;
+  if (!cache || !agendaPersistentCacheDirty || !agendaCacheEnabled()) return;
+  trimAgendaPayloadCache(cache);
+  agendaPersistentCacheDirty = false;
+  const payload = {
+    schema: AGENDA_CACHE_SCHEMA,
+    root: noteRoot,
+    updatedAt: new Date().toISOString(),
+    files: Object.fromEntries(cache.files),
+    payloads: Object.fromEntries(cache.payloads),
+  };
+  try {
+    await atomicWriteFile(agendaCacheFile(), `${JSON.stringify(payload)}\n`, "utf8");
+  } catch {
+    // The agenda cache is only an optimization; cache write failures must not
+    // affect editor correctness.
+  }
+}
+
+async function flushAgendaPersistentCacheQuietly() {
+  try {
+    await flushAgendaPersistentCache();
+  } catch {}
+}
+
+function noteCacheRecordForPersist(cached) {
+  const planning = cached.planning ? clonePlanningGroup(cached.planning) : null;
+  return {
+    mtimeMs: cached.mtimeMs || 0,
+    size: cached.size || 0,
+    note: cloneNote(cached.note),
+    hasPlanning: Boolean(planning || cached.planningContent || cached.planningNeedsRead),
+    planning,
+  };
+}
+
+function rememberAgendaFileCache(file, cached) {
+  if (!agendaPersistentCache || !agendaCacheEnabled() || !file || !cached?.note) return;
+  agendaPersistentCache.files.set(file, noteCacheRecordForPersist(cached));
+  agendaPersistentCacheDirty = true;
+}
+
+function forgetAgendaFileCache(file = "") {
+  const cache = agendaPersistentCache;
+  if (!cache) return;
+  if (file) cache.files.delete(file);
+  else cache.files.clear();
+  cache.payloads.clear();
+  agendaPersistentCacheDirty = true;
+}
+
+function noteCacheEntryFromPersistent(file, info, record) {
+  if (!record || record.mtimeMs !== info.mtimeMs || record.size !== info.size || !record.note) return null;
+  const planning = record.planning ? clonePlanningGroup(record.planning) : null;
+  const note = cloneNote({ ...record.note, file });
+  return {
+    mtimeMs: record.mtimeMs,
+    size: record.size,
+    note,
+    todos: planning ? planning.todos.map((todo) => ({ ...todo })) : (record.hasPlanning ? null : []),
+    planning: planning || (record.hasPlanning ? null : emptyPlanningGroup()),
+    planningContent: "",
+    planningNeedsRead: Boolean(record.hasPlanning && !planning),
+  };
+}
+
+async function cachedNoteEntryForFile(file, info) {
+  const cache = await ensureAgendaPersistentCache();
+  if (!cache) return null;
+  return noteCacheEntryFromPersistent(file, info, cache.files.get(file));
+}
+
+function computeNotesSnapshotFingerprint(rawNotes) {
+  const hash = createHash("sha1");
+  hash.update(`${AGENDA_CACHE_SCHEMA}\0${noteScanRoot}\0`);
+  const parts = [];
+  for (const note of rawNotes || []) {
+    const cached = note?.file ? noteCache.get(note.file) : null;
+    parts.push(`${note?.file || ""}\0${note?.id || ""}\0${cached?.mtimeMs || 0}\0${cached?.size || 0}`);
+  }
+  for (const part of parts.sort()) hash.update(`${part}\n`);
+  return hash.digest("hex");
+}
+
+function normalizedAgendaBody(body = {}) {
+  const includeGantt = body.includeGantt === true;
+  return {
+    from: body.from ? String(body.from) : "",
+    days: Math.max(1, Math.min(90, Number(body.days) || 7)),
+    includePlanning: body.includePlanning === true || includeGantt,
+    includeGantt,
+  };
+}
+
+function agendaPayloadCacheKey(body, todayKey) {
+  return createHash("sha1").update(stableJson({
+    schema: AGENDA_CACHE_SCHEMA,
+    root: noteRoot,
+    scanRoot: noteScanRoot,
+    snapshot: notesSnapshotFingerprint,
+    today: todayKey,
+    body: normalizedAgendaBody(body),
+  })).digest("hex");
+}
+
+async function cachedAgendaPayload(body, todayKey) {
+  if (!notesSnapshotFingerprint) return null;
+  const cache = await ensureAgendaPersistentCache();
+  if (!cache) return null;
+  const key = agendaPayloadCacheKey(body, todayKey);
+  const entry = cache.payloads.get(key);
+  if (!entry || entry.snapshot !== notesSnapshotFingerprint || entry.today !== todayKey || entry.volatile) return null;
+  return cloneJson(entry.payload);
+}
+
+function agendaPayloadIsVolatile(payload) {
+  return Boolean(payload?.clocktable?.running);
+}
+
+async function rememberAgendaPayload(body, todayKey, payload) {
+  if (!notesSnapshotFingerprint) return;
+  if (agendaPayloadIsVolatile(payload)) {
+    await flushAgendaPersistentCacheQuietly();
+    return;
+  }
+  const cache = await ensureAgendaPersistentCache();
+  if (!cache) return;
+  const key = agendaPayloadCacheKey(body, todayKey);
+  cache.payloads.set(key, {
+    snapshot: notesSnapshotFingerprint,
+    today: todayKey,
+    body: normalizedAgendaBody(body),
+    storedAt: Date.now(),
+    payload: cloneJson(payload),
+  });
+  trimAgendaPayloadCache(cache);
+  agendaPersistentCacheDirty = true;
+  await flushAgendaPersistentCacheQuietly();
+}
+
 // Monotonically-increasing version counter. Bumped on every markNotesDirty()
 // so clients can detect external index changes via the indexVersion field in
 // notesIndexPayload() responses and refresh without polling.
@@ -2440,9 +2660,11 @@ export function markNotesDirty(file = "") {
   if (file && inside(file, noteScanRoot)) {
     dirtyNoteFiles.add(file);
     noteCache.delete(file);
+    forgetAgendaFileCache(file);
   } else {
     notesSnapshotFullDirty = true;
     dirtyNoteFiles = new Set();
+    forgetAgendaFileCache();
   }
 }
 
@@ -2459,6 +2681,11 @@ async function noteFromFileForIndex(file) {
     const cached = noteCache.get(file);
     if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) {
       return { ...cached.note, backlinks: [] };
+    }
+    const persistent = await cachedNoteEntryForFile(file, info);
+    if (persistent) {
+      noteCache.set(file, persistent);
+      return { ...persistent.note, backlinks: [] };
     }
     const content = await readFile(file, "utf8");
     const relPath = displayPathForScanRoot(file, noteScanRoot);
@@ -2502,10 +2729,13 @@ async function noteFromFileForIndex(file) {
       todos: planningContent ? null : [],
       planning: planningContent ? null : { todos: [], projects: [], milestones: [], clocks: [], nodes: [] },
       planningContent,
+      planningNeedsRead: false,
     });
+    rememberAgendaFileCache(file, noteCache.get(file));
     return { ...note };
   } catch {
     noteCache.delete(file);
+    forgetAgendaFileCache(file);
     return null;
   }
 }
@@ -2618,6 +2848,7 @@ function rememberNoteSnapshots(rawNotes, resolvedNotes) {
   notesRawSnapshot = rawNotes;
   notesSnapshot = resolvedNotes;
   notesRelationshipCache = buildRelationshipCache(resolvedNotes);
+  notesSnapshotFingerprint = computeNotesSnapshotFingerprint(rawNotes);
 }
 
 async function walkFiles(root, accept) {
@@ -2664,6 +2895,7 @@ export async function scanNotes() {
     notesSnapshot = null;
     notesRawSnapshot = null;
     notesRelationshipCache = null;
+    notesSnapshotFingerprint = "";
     notesSnapshotDirty = true;
     notesSnapshotFullDirty = true;
     dirtyNoteFiles = new Set();
@@ -2676,6 +2908,12 @@ export async function scanNotes() {
   if (notesSnapshot && !notesSnapshotFullDirty && dirtyNoteFiles.size > 0) {
     const dirty = [...dirtyNoteFiles].filter((file) => notePathMayAffectIndex(file));
     dirtyNoteFiles = new Set();
+    const persistentCache = await ensureAgendaPersistentCache();
+    if (persistentCache && dirty.length > 0) {
+      for (const file of dirty) persistentCache.files.delete(file);
+      persistentCache.payloads.clear();
+      agendaPersistentCacheDirty = true;
+    }
     const dirtySet = new Set(dirty.map(canonicalExistingPath));
     const rawNotes = cloneNotes(notesRawSnapshot || [])
       .filter((note) => !dirtySet.has(canonicalExistingPath(note.file)));
@@ -2690,6 +2928,7 @@ export async function scanNotes() {
     const sorted = resolveNoteRelationships(rawNotes);
     rememberNoteSnapshots(rawNotes, sorted);
     notesSnapshotDirty = false;
+    await flushAgendaPersistentCacheQuietly();
     return cloneNotes(sorted);
   }
 
@@ -2706,11 +2945,20 @@ export async function scanNotes() {
   for (const file of noteCache.keys()) {
     if (!seen.has(file)) noteCache.delete(file);
   }
+  if (agendaPersistentCache && agendaCacheEnabled()) {
+    for (const file of agendaPersistentCache.files.keys()) {
+      if (!seen.has(file)) {
+        agendaPersistentCache.files.delete(file);
+        agendaPersistentCacheDirty = true;
+      }
+    }
+  }
   const sorted = resolveNoteRelationships(notes);
   rememberNoteSnapshots(notes, sorted);
   notesSnapshotDirty = false;
   notesSnapshotFullDirty = false;
   dirtyNoteFiles = new Set();
+  await flushAgendaPersistentCacheQuietly();
   return cloneNotes(sorted);
 }
 
@@ -3007,6 +3255,23 @@ function parseAndCachePlanning(cached, note) {
   cached.planning = planning;
   cached.todos = planning.todos;
   cached.planningContent = "";
+  cached.planningNeedsRead = false;
+  rememberAgendaFileCache(note.file, cached);
+  return planning;
+}
+
+async function readAndCachePlanning(cached, note) {
+  const info = await stat(note.file);
+  const content = await readFile(note.file, "utf8");
+  const planning = extractPlanningItems(content, note, info.mtimeMs);
+  cached.mtimeMs = info.mtimeMs;
+  cached.size = info.size;
+  cached.planning = planning;
+  cached.todos = planning.todos;
+  cached.planningContent = "";
+  cached.planningNeedsRead = false;
+  rememberAgendaFileCache(note.file, cached);
+  await flushAgendaPersistentCacheQuietly();
   return planning;
 }
 
@@ -3017,7 +3282,15 @@ async function todosForNote(note) {
     if (typeof cached.planningContent === "string" && cached.planningContent) {
       return parseAndCachePlanning(cached, note).todos.map((todo) => ({ ...todo }));
     }
+    if (cached.planningNeedsRead) {
+      try {
+        return (await readAndCachePlanning(cached, note)).todos.map((todo) => ({ ...todo }));
+      } catch {
+        return [];
+      }
+    }
     cached.todos = [];
+    cached.planningNeedsRead = false;
     return [];
   }
 
@@ -3062,8 +3335,13 @@ async function planningItemsForNote(note) {
       if (typeof cached.planningContent === "string" && cached.planningContent) {
         return clonePlanningGroup(parseAndCachePlanning(cached, note));
       }
+      if (cached.planningNeedsRead) {
+        return clonePlanningGroup(await readAndCachePlanning(cached, note));
+      }
       cached.planning = { todos: [], projects: [], milestones: [], clocks: [], nodes: [] };
       cached.todos = [];
+      cached.planningNeedsRead = false;
+      rememberAgendaFileCache(note.file, cached);
       return clonePlanningGroup(cached.planning);
     }
     const info = await stat(note.file);
@@ -3651,14 +3929,19 @@ export function buildClockModel(clocks, todos, projects) {
 // todo list. Options: `{ from, days = 7 }`; `from` defaults to today.
 export async function buildAgenda(body = {}) {
   const includePlanning = body.includePlanning === true || body.includeGantt === true;
+  await scanNotes();
+  const todayMs = Date.now();
+  const todayMid = midnightMs(new Date(todayMs));
+  const todayKey = formatDateValue(todayMid, false);
+  const cachedPayload = await cachedAgendaPayload(body, todayKey);
+  if (cachedPayload) return cachedPayload;
+
   const planning = includePlanning ? await scanPlanningItems() : null;
   const todos = includePlanning ? planning.todos : await scanTodos();
   const projects = includePlanning ? planning.projects : [];
   const milestones = includePlanning ? planning.milestones : [];
   const clocks = includePlanning ? planning.clocks : [];
   const { lints } = resolveTodoDeps(todos);
-  const todayMs = Date.now();
-  const todayMid = midnightMs(new Date(todayMs));
   const dayMs = 86_400_000;
   for (const todo of todos) todo.urgency = todoUrgency(todo, todayMs);
 
@@ -3672,7 +3955,6 @@ export async function buildAgenda(body = {}) {
     dayBuckets.push({ date: formatDateValue(ms, false), ms, entries: [] });
   }
   const bucketByDate = new Map(dayBuckets.map((b) => [b.date, b]));
-  const todayKey = formatDateValue(todayMid, false);
   const logByDay = {};
 
   const addLogDate = (dateStr) => {
@@ -3791,6 +4073,7 @@ export async function buildAgenda(body = {}) {
     payload.gantt = buildGanttModel(todos, projects, milestones);
     payload.lints = [...payload.lints, ...(payload.gantt.lints || [])];
   }
+  await rememberAgendaPayload(body, todayKey, payload);
   return payload;
 }
 
@@ -6652,6 +6935,11 @@ export function configure(options = {}) {
   roamSyncInFlight = null;
   queuedRoamSyncNotes = null;
   queuedRoamSyncChangedFiles = new Set();
+  agendaPersistentCache = null;
+  agendaPersistentCacheKey = "";
+  agendaPersistentCacheDirty = false;
+  agendaPersistentCacheLoad = null;
+  notesSnapshotFingerprint = "";
   markNotesDirty();
 }
 

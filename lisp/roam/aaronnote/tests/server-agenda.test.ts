@@ -788,6 +788,28 @@ describe("planning cache", () => {
       expect(second.projects).toMatchObject([{ title: "Original Project" }]);
     });
   });
+
+  test("persists parsed planning and agenda payload cache under stateRoot", async () => {
+    await withVault(async (root) => {
+      const file = join(root, "a.md");
+      await writeFile(
+        file,
+        "---\nid: a\n---\n# A\n\n@@project(active) [Cached Project] {area: tooling}\n\n@@todo [cached task] {project: cached-project}\n",
+        "utf8",
+      );
+
+      const first = await buildAgenda({ includeGantt: true });
+      expect(first.projects).toMatchObject([{ title: "Cached Project" }]);
+
+      const raw = JSON.parse(await readFile(join(root, "state", "cache", "agenda-cache.json"), "utf8"));
+      expect(raw.files[file].planning.projects).toMatchObject([{ title: "Cached Project" }]);
+      expect(Object.keys(raw.payloads).length).toBeGreaterThan(0);
+
+      configure({ root, workspaceRoot: root, stateRoot: join(root, "state"), tmpRoot: join(root, "tmp") });
+      const second = await buildAgenda({ includeGantt: true });
+      expect(second.projects).toMatchObject([{ title: "Cached Project" }]);
+    });
+  });
 });
 
 describe("depRefForTodo", () => {

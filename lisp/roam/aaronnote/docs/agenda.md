@@ -249,6 +249,23 @@ just not toward a specific todo or project.
 - When `includeGantt`: `gantt` — `{ tasks, backlog, milestones, lanes,
   lints }` (see [Gantt model](#gantt-model)).
 
+## Caching
+
+Agenda keeps two local, disposable cache layers under
+`stateRoot/cache/agenda-cache.json` (`var/` by default, git-ignored):
+
+- **Parsed file cache** — keyed by absolute file path plus `mtimeMs`/`size`.
+  It stores note metadata and parsed planning groups (`todos`, `projects`,
+  `milestones`, `clocks`) so a restart can avoid re-reading unchanged files.
+- **Agenda payload cache** — keyed by a snapshot fingerprint, today's date,
+  and the normalized `buildAgenda` request. It stores the final payload only
+  when the result is stable; payloads with a running clock are not cached
+  because `minutesSoFar` changes with wall time.
+
+Both layers are invalidated by `markNotesDirty(file)`/watcher changes and are
+best-effort only: cache read/write failures fall back to the in-memory scanner
+path. Set `AARONNOTE_AGENDA_CACHE=0` to disable the persistent cache.
+
 ## Creating todos
 
 `createTodo({ text, file?, status?, ...attrs })` appends a new `@@todo` line.

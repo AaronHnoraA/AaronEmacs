@@ -11,6 +11,7 @@ node_modules
 dist
 release
 dist-ssr
+var/
 *.local
 
 # Aaronnote-owned Jupyter runtime state.
