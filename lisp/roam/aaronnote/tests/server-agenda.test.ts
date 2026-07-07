@@ -447,6 +447,94 @@ describe("agenda bucketing", () => {
       expect(repeatEntries).toEqual([]);
     });
   });
+
+  test("a daily repeater anchored years in the past still projects into the requested window", async () => {
+    // Regression: expandRepeatOccurrences' 366-iteration guard used to count
+    // steps from the raw anchor, so a short-period repeater anchored more
+    // than 366 steps before the window exhausted the guard before ever
+    // reaching it — silently producing zero occurrences.
+    await withVault(async (root) => {
+      await writeFile(
+        join(root, "a.md"),
+        [
+          "---\nid: a\n---\n# A\n",
+          '@@todo(doing) [old daily habit] {sche: "2020-01-01 09:30", repeat: +1d}',
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ days: 7 });
+      const repeatEntries = agenda.days.flatMap((d: any) => d.entries).filter((e: any) => e.kind === "repeat");
+      // One virtual occurrence per day of the window except the anchor day
+      // itself (the first bucket may carry the real, non-virtual entry
+      // instead) — at minimum every subsequent day must have one.
+      expect(repeatEntries.length).toBeGreaterThanOrEqual(6);
+      expect(repeatEntries.every((e: any) => e.time === "09:30")).toBe(true);
+    });
+  });
+
+  test("a monthly repeater anchored years in the past fast-forwards using the same clamping semantics as single-step iteration", async () => {
+    await withVault(async (root) => {
+      await writeFile(
+        join(root, "a.md"),
+        [
+          "---\nid: a\n---\n# A\n",
+          "@@todo(doing) [old monthly review] {sche: 2020-01-31, repeat: +1m}",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await syncRoamDb(null, { mode: "full" });
+      // A wide enough window (400 days) that it must contain at least one
+      // occurrence regardless of today's date relative to day-31 clamping.
+      const agenda = await buildAgenda({ days: 400 });
+      const repeatEntries = agenda.days.flatMap((d: any) => d.entries).filter((e: any) => e.kind === "repeat");
+      expect(repeatEntries.length).toBeGreaterThan(0);
+    });
+  });
+
+  test("a repeater anchored inside the window is unaffected by the fast-forward path", async () => {
+    await withVault(async (root) => {
+      const today = new Date();
+      const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const in1 = new Date(today); in1.setDate(in1.getDate() + 1);
+      await writeFile(
+        join(root, "a.md"),
+        [
+          "---\nid: a\n---\n# A\n",
+          `@@todo(doing) [fresh daily] {sche: ${iso(in1)}, repeat: +1d}`,
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ days: 5 });
+      const repeatEntries = agenda.days.flatMap((d: any) => d.entries).filter((e: any) => e.kind === "repeat");
+      expect(repeatEntries.length).toBeGreaterThanOrEqual(3);
+    });
+  });
+
+  test("a repeater anchored beyond the window produces no occurrences and does not hang", async () => {
+    await withVault(async (root) => {
+      const today = new Date();
+      const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const farFuture = new Date(today); farFuture.setDate(farFuture.getDate() + 400);
+      await writeFile(
+        join(root, "a.md"),
+        [
+          "---\nid: a\n---\n# A\n",
+          `@@todo(doing) [far future] {sche: ${iso(farFuture)}, repeat: +1d}`,
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ days: 7 });
+      const repeatEntries = agenda.days.flatMap((d: any) => d.entries).filter((e: any) => e.kind === "repeat");
+      expect(repeatEntries).toEqual([]);
+    });
+  });
 });
 
 describe("completeTodo repeater roll", () => {

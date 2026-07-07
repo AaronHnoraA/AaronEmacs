@@ -109,6 +109,20 @@ export function parseDateValue(raw) {
     const date = new Date(y, mo, d, hh, mm);
     if (Number.isFinite(date.getTime())) return { time: date.getTime(), hasTime: Boolean(m[4]) };
   }
+  m = norm.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[\sT](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})$/i);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]) - 1;
+    const d = Number(m[3]);
+    const hh = Number(m[4]);
+    const mm = Number(m[5]);
+    // Planning dates are wall-clock calendar values, not instants. Treat an
+    // imported ISO timestamp with `Z`/offset as the same local date+time so
+    // `2026-07-07T23:30:00Z` stays in the 2026-07-07 agenda bucket instead
+    // of drifting to the user's next local day.
+    const date = new Date(y, mo, d, hh, mm);
+    if (Number.isFinite(date.getTime())) return { time: date.getTime(), hasTime: true };
+  }
   m = norm.match(/^(\d{1,2})-(\d{1,2})(?:[\sT](\d{1,2}):(\d{2}))?$/);
   if (m) {
     const mo = Number(m[1]) - 1;
@@ -146,7 +160,7 @@ export function normalizeTodoStatus(raw = "") {
   return TODO_STATUSES.has(value) ? value : "todo";
 }
 
-function shiftDate(time, n, unit) {
+export function shiftDate(time, n, unit) {
   const d = new Date(time);
   if (unit === "d") d.setDate(d.getDate() + n);
   else if (unit === "w") d.setDate(d.getDate() + 7 * n);

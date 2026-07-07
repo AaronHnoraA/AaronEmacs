@@ -15,6 +15,7 @@ const {
   inlineTagsFromContent,
   normalizeTodoStatus,
   parseCommandArgs,
+  patchTodo,
   scanInlineCommands,
   syncRoamDb,
   tagsFromContent,
@@ -296,6 +297,35 @@ describe("server todo agenda", () => {
           repeat: "+1w",
         },
       });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a stale index locator does not patch a different todo on that line", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-todo-stale-index-"));
+    try {
+      await mkdir(join(root, "state"), { recursive: true });
+      configure({ root, workspaceRoot: root, stateRoot: join(root, "state"), tmpRoot: join(root, "tmp") });
+      const file = join(root, "a.md");
+      await writeFile(file, "---\nid: task-note\n---\n# A\n\n@@todo [first task]\n\n@@todo [second task]\n", "utf8");
+
+      await syncRoamDb(null, { mode: "full" });
+      const before = await getTodos("");
+      const first = before.todos.find((todo: any) => todo.text === "first task");
+      const second = before.todos.find((todo: any) => todo.text === "second task");
+
+      await patchTodo({
+        file,
+        index: first.index,
+        source: second.source,
+        text: second.text,
+        prio: "A",
+      });
+
+      const content = await readFile(file, "utf8");
+      expect(content).toContain("@@todo [first task]\n");
+      expect(content).toContain("@@todo [second task] {prio=A}");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

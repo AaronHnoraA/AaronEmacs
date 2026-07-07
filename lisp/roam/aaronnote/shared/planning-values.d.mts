@@ -17,6 +17,7 @@ export function normalizeDateValue(raw: string): string | null;
 
 export function normalizeTodoStatus(raw?: string): string;
 
+export function shiftDate(time: number, n: number, unit: "d" | "w" | "m" | "y"): number;
 export function parseRepeater(raw: string): Repeater | null;
 export function applyRepeater(dateStr: string, repeater: Repeater | null, todayMs?: number): string;
 

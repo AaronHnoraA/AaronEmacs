@@ -32,6 +32,7 @@ import {
   parseDuration,
   parseLeadTime,
   parseRepeater,
+  shiftDate,
   todoArgKeyForCanonical,
 } from "../../shared/planning-values.mjs";
 
@@ -2887,79 +2888,113 @@ async function mapLimit(items, limit, mapper) {
   return out;
 }
 
+// Coalesces concurrent scanNotes() callers onto one in-flight scan instead of
+// letting them race and interleave mutations of the shared snapshot/cache
+// state. scanNotesOnce() claims the dirty state at its *start* (not its end)
+// so a markNotesDirty() that lands mid-scan is never lost: it re-populates
+// dirtyNoteFiles/notesSnapshotFullDirty, which the *next* loop iteration (or
+// the next external scanNotes() call) picks up.
+let scanNotesInFlight = null;
+
 export async function scanNotes() {
-  if (noteCacheRoot !== noteScanRoot) {
-    noteCacheRoot = noteScanRoot;
-    noteCache = new Map();
+  for (;;) {
+    if (noteCacheRoot !== noteScanRoot) {
+      noteCacheRoot = noteScanRoot;
+      noteCache = new Map();
+      notesSnapshotRoot = noteScanRoot;
+      notesSnapshot = null;
+      notesRawSnapshot = null;
+      notesRelationshipCache = null;
+      notesSnapshotFingerprint = "";
+      notesSnapshotDirty = true;
+      notesSnapshotFullDirty = true;
+      dirtyNoteFiles = new Set();
+    }
+    if (notesSnapshotRoot === noteScanRoot && notesSnapshot && !notesSnapshotDirty) {
+      return cloneNotes(notesSnapshot);
+    }
+    if (scanNotesInFlight) {
+      try { await scanNotesInFlight; } catch {}
+      continue;
+    }
     notesSnapshotRoot = noteScanRoot;
-    notesSnapshot = null;
-    notesRawSnapshot = null;
-    notesRelationshipCache = null;
-    notesSnapshotFingerprint = "";
-    notesSnapshotDirty = true;
-    notesSnapshotFullDirty = true;
-    dirtyNoteFiles = new Set();
+    scanNotesInFlight = scanNotesOnce();
+    try {
+      return await scanNotesInFlight;
+    } finally {
+      scanNotesInFlight = null;
+    }
   }
-  if (notesSnapshotRoot === noteScanRoot && notesSnapshot && !notesSnapshotDirty) {
-    return cloneNotes(notesSnapshot);
-  }
-  notesSnapshotRoot = noteScanRoot;
+}
 
-  if (notesSnapshot && !notesSnapshotFullDirty && dirtyNoteFiles.size > 0) {
-    const dirty = [...dirtyNoteFiles].filter((file) => notePathMayAffectIndex(file));
-    dirtyNoteFiles = new Set();
-    const persistentCache = await ensureAgendaPersistentCache();
-    if (persistentCache && dirty.length > 0) {
-      for (const file of dirty) persistentCache.files.delete(file);
-      persistentCache.payloads.clear();
-      agendaPersistentCacheDirty = true;
-    }
-    const dirtySet = new Set(dirty.map(canonicalExistingPath));
-    const rawNotes = cloneNotes(notesRawSnapshot || [])
-      .filter((note) => !dirtySet.has(canonicalExistingPath(note.file)));
-    const dirtyNotes = [];
-    for (const file of dirty) {
-      const note = await noteFromFileForIndex(file);
-      if (note) {
-        rawNotes.push(note);
-        dirtyNotes.push(note);
-      }
-    }
-    const sorted = resolveNoteRelationships(rawNotes);
-    rememberNoteSnapshots(rawNotes, sorted);
-    notesSnapshotDirty = false;
-    await flushAgendaPersistentCacheQuietly();
-    return cloneNotes(sorted);
-  }
-
-  const files = await walkFiles(noteScanRoot, (file) => {
-    const dot = file.lastIndexOf(".");
-    return dot >= 0 && noteExts.has(file.slice(dot).toLowerCase());
-  });
-  const notes = [];
-  const seen = new Set(files);
-  const scanned = await mapLimit(files, scanConcurrency, async (file) => {
-    return noteFromFileForIndex(file);
-  });
-  for (const note of scanned) if (note) notes.push(note);
-  for (const file of noteCache.keys()) {
-    if (!seen.has(file)) noteCache.delete(file);
-  }
-  if (agendaPersistentCache && agendaCacheEnabled()) {
-    for (const file of agendaPersistentCache.files.keys()) {
-      if (!seen.has(file)) {
-        agendaPersistentCache.files.delete(file);
-        agendaPersistentCacheDirty = true;
-      }
-    }
-  }
-  const sorted = resolveNoteRelationships(notes);
-  rememberNoteSnapshots(notes, sorted);
-  notesSnapshotDirty = false;
+async function scanNotesOnce() {
+  const claimedFullDirty = notesSnapshotFullDirty;
+  const claimedDirtyFiles = dirtyNoteFiles;
   notesSnapshotFullDirty = false;
   dirtyNoteFiles = new Set();
-  await flushAgendaPersistentCacheQuietly();
-  return cloneNotes(sorted);
+  notesSnapshotDirty = false;
+
+  try {
+    if (notesSnapshot && !claimedFullDirty && claimedDirtyFiles.size > 0) {
+      const dirty = [...claimedDirtyFiles].filter((file) => notePathMayAffectIndex(file));
+      const persistentCache = await ensureAgendaPersistentCache();
+      if (persistentCache && dirty.length > 0) {
+        for (const file of dirty) persistentCache.files.delete(file);
+        persistentCache.payloads.clear();
+        agendaPersistentCacheDirty = true;
+      }
+      const dirtySet = new Set(dirty.map(canonicalExistingPath));
+      const rawNotes = cloneNotes(notesRawSnapshot || [])
+        .filter((note) => !dirtySet.has(canonicalExistingPath(note.file)));
+      const dirtyNotes = [];
+      for (const file of dirty) {
+        const note = await noteFromFileForIndex(file);
+        if (note) {
+          rawNotes.push(note);
+          dirtyNotes.push(note);
+        }
+      }
+      const sorted = resolveNoteRelationships(rawNotes);
+      rememberNoteSnapshots(rawNotes, sorted);
+      await flushAgendaPersistentCacheQuietly();
+      return cloneNotes(sorted);
+    }
+
+    const files = await walkFiles(noteScanRoot, (file) => {
+      const dot = file.lastIndexOf(".");
+      return dot >= 0 && noteExts.has(file.slice(dot).toLowerCase());
+    });
+    const notes = [];
+    const seen = new Set(files);
+    const scanned = await mapLimit(files, scanConcurrency, async (file) => {
+      return noteFromFileForIndex(file);
+    });
+    for (const note of scanned) if (note) notes.push(note);
+    for (const file of noteCache.keys()) {
+      if (!seen.has(file)) noteCache.delete(file);
+    }
+    if (agendaPersistentCache && agendaCacheEnabled()) {
+      for (const file of agendaPersistentCache.files.keys()) {
+        if (!seen.has(file)) {
+          agendaPersistentCache.files.delete(file);
+          agendaPersistentCacheDirty = true;
+        }
+      }
+    }
+    const sorted = resolveNoteRelationships(notes);
+    rememberNoteSnapshots(notes, sorted);
+    await flushAgendaPersistentCacheQuietly();
+    return cloneNotes(sorted);
+  } catch (err) {
+    notesSnapshotDirty = true;
+    if (claimedFullDirty) {
+      notesSnapshotFullDirty = true;
+      dirtyNoteFiles = new Set();
+    } else {
+      for (const f of claimedDirtyFiles) dirtyNoteFiles.add(f);
+    }
+    throw err;
+  }
 }
 
 export async function scanRoamNotes() {
@@ -3169,6 +3204,7 @@ function patchTodoSource(source, body = {}) {
 // the same way.
 function locateTodoInContent(content, body, file) {
   const source = String(body.source || "");
+  const wantedText = String(body.text || "");
   const hasIndex = body.index !== undefined && body.index !== null && String(body.index) !== "";
   const rawIndex = hasIndex ? Number(body.index) : NaN;
   let from = -1;
@@ -3177,18 +3213,31 @@ function locateTodoInContent(content, body, file) {
   if (Number.isInteger(rawIndex) && rawIndex >= 0 && rawIndex < content.length) {
     const lineStart = content.lastIndexOf("\n", rawIndex - 1) + 1;
     const lineEnd = content.indexOf("\n", rawIndex);
-    const boundedTo = lineEnd < 0 ? content.length : lineEnd;
-    if (source && content.slice(rawIndex, Math.min(content.length, rawIndex + source.length)) === source) {
-      from = rawIndex;
-      to = rawIndex + source.length;
-    } else {
-      const line = content.slice(lineStart, boundedTo);
-      const match = line.match(/@@(?:todo|itodo)(?:\([^)\n]*\))?[ \t]+/i);
-      if (match) {
-        from = lineStart + (match.index || 0);
-        const commands = scanPlanningNodes(content.slice(from, boundedTo), { kind: "todo" });
-        if (commands.length > 0 && commands[0].span.from === 0) {
-          to = from + commands[0].span.to;
+    const line = content.slice(lineStart, lineEnd < 0 ? content.length : lineEnd);
+    const match = line.match(/@@(?:todo|itodo)(?:\([^)\n]*\))?[ \t]+/i);
+    if (match) {
+      const candidateFrom = lineStart + (match.index || 0);
+      // Always parse the actual node at this position (unbounded — a
+      // block-shape node can span multiple lines) instead of trusting a raw
+      // `source`-length substring compare. A stale `source` can be an exact
+      // PREFIX of the current node text — e.g. a prior patch appended a
+      // trailing `{...}` block — and a plain `content.slice(candidateFrom,
+      // candidateFrom + source.length) === source` check would accept that
+      // truncated match and silently drop everything after it on write.
+      const commands = scanPlanningNodes(content.slice(candidateFrom), { kind: "todo" });
+      if (commands.length > 0 && commands[0].span.from === 0) {
+        const candidateTo = candidateFrom + commands[0].span.to;
+        const nodeRaw = content.slice(candidateFrom, candidateTo);
+        // A text hint is the more stable signal — it survives any edit to
+        // the node's attrs (including one that makes `source` stale), so it
+        // wins whenever provided; an unchecked position-only hit previously
+        // let a drifted `index` silently patch a *different* todo that now
+        // happens to sit on that line. With neither hint, preserve the old
+        // lenient index-only behavior.
+        const ok = wantedText ? (commands[0].title || "") === wantedText : (!source || nodeRaw === source);
+        if (ok) {
+          from = candidateFrom;
+          to = candidateTo;
         }
       }
     }
@@ -3197,7 +3246,6 @@ function locateTodoInContent(content, body, file) {
   if (from < 0 || to <= from) {
     const todos = extractTodos(content, { file, path: displayPathForFile(file), key: "", id: "", title: "" }, 0);
     const wantedId = String(body.id || "");
-    const wantedText = String(body.text || "");
     const match = todos.find((todo) =>
       (wantedId && todo.id === wantedId)
       || (source && todo.source === source)
@@ -3211,8 +3259,7 @@ function locateTodoInContent(content, body, file) {
   return from >= 0 && to > from ? { from, to } : null;
 }
 
-export async function updateTodoStatus(body = {}) {
-  const file = safeOpenFile(body.file || "");
+async function updateTodoStatusInFile(file, body) {
   const hasMetadataPatch = [...TODO_PATCH_ARG_KEYS].some((key) => bodyHasOwn(body, key));
   const shouldPatchStatus = bodyHasOwn(body, "status") || !hasMetadataPatch;
   const status = shouldPatchStatus ? normalizeTodoStatus(body.status || "done") : "";
@@ -3240,6 +3287,14 @@ export async function updateTodoStatus(body = {}) {
   let mtimeMs = 0;
   try { mtimeMs = (await stat(file)).mtimeMs; } catch {}
   return { type: "todo-updated", ok: true, file, status: status || normalizeTodoStatus(body.status || ""), changed: true, from, to, source: oldSource, nextSource, mtimeMs };
+}
+
+// Serialized against editor saves and every other agenda mutation on the
+// same file via enqueueSaveWrite — the whole read/locate/write cycle runs
+// inside the queue so a concurrent editor save can never interleave with it.
+export async function updateTodoStatus(body = {}) {
+  const file = safeOpenFile(body.file || "");
+  return enqueueSaveWrite(file, () => updateTodoStatusInFile(file, body));
 }
 
 function contentMayHavePlanning(content) {
@@ -3565,6 +3620,39 @@ function expandRepeatOccurrences(rawDate, repeaterRaw, rangeStartMs, rangeEndMs)
   const stepper = { mode: "+", n: repeater.n, unit: repeater.unit };
   const occurrences = [];
   let current = rawDate;
+
+  // Fast-forward an anchor that predates the window instead of stepping one
+  // repeater-period at a time from it — a short-period repeater (e.g. daily)
+  // anchored years back would otherwise exhaust the 366-iteration guard
+  // below before ever reaching `rangeStartMs`, silently producing zero
+  // occurrences. d/w jump arithmetically in one `shiftDate` call (a single
+  // multi-day `setDate` jump preserves local wall-clock time across DST the
+  // same way the old one-step-at-a-time loop did; ms-based arithmetic would
+  // not). m/y still clamp/compound step by step (e.g. `2020-01-31 +1m` ->
+  // `03-03` -> ...), so they fast-forward with their own bounded iterative
+  // catch-up instead of a closed-form jump.
+  const parsedAnchor = parseDateValue(rawDate);
+  if (parsedAnchor && parsedAnchor.time < rangeStartMs) {
+    if (repeater.unit === "d" || repeater.unit === "w") {
+      const stepMs = repeater.n * (repeater.unit === "w" ? 7 : 1) * 86_400_000;
+      if (stepMs > 0) {
+        const k = Math.max(0, Math.floor((rangeStartMs - parsedAnchor.time) / stepMs) - 1);
+        if (k > 0) {
+          current = formatDateValue(shiftDate(parsedAnchor.time, k * repeater.n, repeater.unit), parsedAnchor.hasTime);
+        }
+      }
+    } else {
+      for (let guard = 0; guard < 2400; guard++) {
+        const parsedCurrent = parseDateValue(current);
+        const next = applyRepeater(current, stepper);
+        const parsedNext = parseDateValue(next);
+        if (!parsedCurrent || !parsedNext || parsedNext.time <= parsedCurrent.time) break;
+        if (parsedNext.time >= rangeStartMs) break;
+        current = next;
+      }
+    }
+  }
+
   for (let guard = 0; guard < 366; guard++) {
     const parsedCurrent = parseDateValue(current);
     const next = applyRepeater(current, stepper);
@@ -3922,6 +4010,77 @@ export function buildClockModel(clocks, todos, projects) {
   };
 }
 
+// Data-quality lints over the raw clock set (vault-wide). These never change
+// aggregation — buildClockModel keeps summing every open/overlapping/
+// reversed span so logged time is never silently hidden — they only surface
+// the underlying data problem so a human notices and fixes the source. Call
+// after resolveClockRefs so `clock.todoId` is populated (used to annotate
+// each lint with the task it belongs to, when resolved).
+function lintClocks(clocks) {
+  const lints = [];
+  const openClocks = [];
+  const spans = [];
+
+  for (const clock of clocks) {
+    const fromRaw = clock.args?.from;
+    if (!fromRaw) continue;
+    const from = parseDateValue(fromRaw);
+    if (!from) continue;
+    const toRaw = clock.args?.to;
+    if (!toRaw) {
+      openClocks.push(clock);
+      spans.push({ clock, fromMs: from.time, toMs: Date.now() });
+      continue;
+    }
+    const to = parseDateValue(toRaw);
+    if (!to) continue;
+    if (to.time < from.time) {
+      lints.push({
+        file: clock.file,
+        line: clock.line,
+        kind: "reversed-clock-span",
+        ref: clock.source,
+        todoId: clock.todoId || "",
+        message: "Clock ends before it starts (counted as 0 min)",
+      });
+      continue;
+    }
+    spans.push({ clock, fromMs: from.time, toMs: to.time });
+  }
+
+  if (openClocks.length > 1) {
+    const sorted = [...openClocks].sort((a, b) => String(a.args?.from || "").localeCompare(String(b.args?.from || "")));
+    for (const clock of sorted.slice(1)) {
+      lints.push({
+        file: clock.file,
+        line: clock.line,
+        kind: "multiple-running-clocks",
+        ref: clock.source,
+        todoId: clock.todoId || "",
+        message: "Multiple running clocks; only the first is shown as running",
+      });
+    }
+  }
+
+  const sortedSpans = [...spans].sort((a, b) => a.fromMs - b.fromMs);
+  let maxToMs = -Infinity;
+  for (const span of sortedSpans) {
+    if (span.fromMs < maxToMs) {
+      lints.push({
+        file: span.clock.file,
+        line: span.clock.line,
+        kind: "overlapping-clocks",
+        ref: span.clock.source,
+        todoId: span.clock.todoId || "",
+        message: "Overlaps another clock; totals over-count",
+      });
+    }
+    maxToMs = Math.max(maxToMs, span.toMs);
+  }
+
+  return lints;
+}
+
 // Builds the day-bucketed agenda view-model: SCHEDULED vs DEADLINE
 // semantics (with a per-item warning lead time and org-style overdue/sched
 // carry-forward onto today), a completion log (for the log view and the
@@ -4062,12 +4221,13 @@ export async function buildAgenda(body = {}) {
   };
   if (includePlanning) {
     const { lints: clockLints } = resolveClockRefs(clocks, todos);
+    const clockQualityLints = lintClocks(clocks);
     payload.projects = projects;
     payload.milestones = milestones;
     payload.clocks = clocks;
     payload.clocktable = buildClockModel(clocks, todos, projects);
     payload.projectModel = buildProjectModel(projects, todos, clocks);
-    payload.lints = [...lints, ...clockLints];
+    payload.lints = [...lints, ...clockLints, ...clockQualityLints];
   }
   if (body.includeGantt === true) {
     payload.gantt = buildGanttModel(todos, projects, milestones);
@@ -4182,7 +4342,24 @@ function randomIdSegment() {
   return Math.random().toString(36).slice(2, 8).padEnd(6, "0");
 }
 
-async function generatePlanningId() {
+// Ids minted between vault scans (concurrent clock-ins / dep-picks) so a
+// second mint in the same window never returns a candidate the first mint
+// already claimed but hasn't written to disk yet. Drained lazily: once a
+// reserved id is observed in a freshly-scanned `existing` set, it's removed
+// (it's now covered by the scan itself and would otherwise never be freed).
+const reservedPlanningIds = new Set();
+
+// The existing-id set is expensive to rebuild (a full vault planning scan)
+// and doesn't change between vault-index versions, so it's cached per
+// `notesIndexVersionValue()` — a mint immediately after another mint (no
+// intervening dirty mark) reuses the same set instead of rescanning.
+let planningIdCache = { version: -1, ids: null };
+
+async function existingPlanningIds() {
+  const version = notesIndexVersionValue();
+  if (planningIdCache.version === version && planningIdCache.ids) {
+    return planningIdCache.ids;
+  }
   const planning = await scanPlanningItems();
   const existing = new Set();
   for (const group of [planning.todos, planning.projects, planning.milestones, planning.clocks]) {
@@ -4190,13 +4367,40 @@ async function generatePlanningId() {
       if (typeof item.id === "string" && item.id.startsWith("#")) existing.add(item.id.slice(1));
     }
   }
+  planningIdCache = { version, ids: existing };
+  return existing;
+}
+
+async function generatePlanningId() {
+  const existing = await existingPlanningIds();
+  const unavailable = new Set(existing);
+  for (const id of reservedPlanningIds) {
+    if (existing.has(id)) reservedPlanningIds.delete(id);
+    else unavailable.add(id);
+  }
   let candidate = randomIdSegment();
   let guard = 0;
-  while (existing.has(candidate) && guard < 50) {
-    candidate = randomIdSegment();
+  while (unavailable.has(candidate)) {
     guard++;
+    candidate = guard < 50 ? randomIdSegment() : fallbackPlanningIdSegment(guard);
+    if (guard > 500) {
+      const err = new Error("Could not mint a unique planning id");
+      err.statusCode = 500;
+      throw err;
+    }
   }
+  reservedPlanningIds.add(candidate);
   return candidate;
+}
+
+let planningIdFallbackCounter = 0;
+function fallbackPlanningIdSegment(guard = 0) {
+  planningIdFallbackCounter = (planningIdFallbackCounter + 1) % 36 ** 3;
+  return `${Date.now().toString(36)}${guard.toString(36)}${planningIdFallbackCounter.toString(36)}`
+    .replace(/[^a-z0-9]/gi, "")
+    .toLowerCase()
+    .slice(-6)
+    .padStart(6, "0");
 }
 
 function todoSourceFromCreateBody(body = {}, id = "") {
@@ -4247,42 +4451,44 @@ export async function createTodo(body = {}) {
   const file = resolveTodoCreateFile(body.file || body.path || "");
   const id = await generatePlanningId();
   const source = todoSourceFromCreateBody(body, id);
-  await mkdir(dirname(file), { recursive: true });
-  const existed = existsSync(file);
-  let content = existed ? await readFile(file, "utf8") : initialTodoFileContent(file);
-  const base = content.replace(/\s*$/, "");
-  const prefix = base ? "\n\n" : "";
-  const nextContent = `${base}${prefix}${source}\n`;
-  const index = base.length + prefix.length;
-  await atomicWriteFile(file, nextContent, "utf8");
-  markNotesDirty(file);
-  scheduleRoamDbSync(null, file);
-  let mtimeMs = 0;
-  try { mtimeMs = (await stat(file)).mtimeMs; } catch {}
-  const meta = noteMetadata(nextContent);
-  const noteTitle = String(meta.title || defaultTodoFileTitle(file));
-  const todos = extractTodos(nextContent, {
-    file,
-    path: displayPathForFile(file),
-    key: noteTitle,
-    id: String(meta.id || ""),
-    title: noteTitle,
-    project: String(meta.project || meta.proj || "").trim(),
-  }, mtimeMs);
-  const created = todos.find((todo) => todo.index === index) || null;
-  return {
-    type: "todo-created",
-    ok: true,
-    file,
-    path: displayPathForFile(file),
-    createdFile: !existed,
-    changed: true,
-    index,
-    line: lineNumberAt(nextContent, index),
-    source,
-    todo: created,
-    mtimeMs,
-  };
+  return enqueueSaveWrite(file, async () => {
+    await mkdir(dirname(file), { recursive: true });
+    const existed = existsSync(file);
+    let content = existed ? await readFile(file, "utf8") : initialTodoFileContent(file);
+    const base = content.replace(/\s*$/, "");
+    const prefix = base ? "\n\n" : "";
+    const nextContent = `${base}${prefix}${source}\n`;
+    const index = base.length + prefix.length;
+    await atomicWriteFile(file, nextContent, "utf8");
+    markNotesDirty(file);
+    scheduleRoamDbSync(null, file);
+    let mtimeMs = 0;
+    try { mtimeMs = (await stat(file)).mtimeMs; } catch {}
+    const meta = noteMetadata(nextContent);
+    const noteTitle = String(meta.title || defaultTodoFileTitle(file));
+    const todos = extractTodos(nextContent, {
+      file,
+      path: displayPathForFile(file),
+      key: noteTitle,
+      id: String(meta.id || ""),
+      title: noteTitle,
+      project: String(meta.project || meta.proj || "").trim(),
+    }, mtimeMs);
+    const created = todos.find((todo) => todo.index === index) || null;
+    return {
+      type: "todo-created",
+      ok: true,
+      file,
+      path: displayPathForFile(file),
+      createdFile: !existed,
+      changed: true,
+      index,
+      line: lineNumberAt(nextContent, index),
+      source,
+      todo: created,
+      mtimeMs,
+    };
+  });
 }
 
 // General todo patch: writes any canonical key (or its legacy alias field
@@ -4290,8 +4496,7 @@ export async function createTodo(body = {}) {
 // "complete"` runs the repeater engine — rolling `ddl`/`sche` forward,
 // resetting status to `todo`, and recording `done`/`log` — instead of a
 // plain status flip.
-export async function patchTodo(body = {}) {
-  const file = safeOpenFile(body.file || "");
+async function patchTodoInFile(file, body) {
   const content = await readFile(file, "utf8");
   const loc = locateTodoInContent(content, body, file);
   if (!loc) {
@@ -4358,6 +4563,14 @@ export async function patchTodo(body = {}) {
   return { type: "todo-patched", ok: true, file, changed: true, from, to, source: oldSource, nextSource: next, mtimeMs };
 }
 
+// Serialized against editor saves and every other agenda mutation on the
+// same file via enqueueSaveWrite — the whole read/locate/write cycle runs
+// inside the queue so a concurrent editor save can never interleave with it.
+export async function patchTodo(body = {}) {
+  const file = safeOpenFile(body.file || "");
+  return enqueueSaveWrite(file, () => patchTodoInFile(file, body));
+}
+
 export async function completeTodo(body = {}) {
   return patchTodo({ ...body, op: "complete" });
 }
@@ -4366,9 +4579,11 @@ export async function completeTodo(body = {}) {
 // locator fields as patchTodo) the first time something needs a durable
 // anchor into it — a todo that's never been referenced stays id-less
 // forever. Idempotent: a todo that already has an id is returned unchanged
-// (`changed: false`). Reuses `patchTodo`'s locate/write/dirty/sync pipeline.
-export async function ensureTodoId(body = {}) {
-  const file = safeOpenFile(body.file || "");
+// (`changed: false`). Reuses patchTodoInFile's locate/write/dirty/sync
+// pipeline directly (not the queued `patchTodo` export) — calling the queued
+// wrapper here would deadlock, since this function itself already runs
+// inside this file's queue.
+async function ensureTodoIdInFile(file, body) {
   const content = await readFile(file, "utf8");
   const loc = locateTodoInContent(content, body, file);
   if (!loc) {
@@ -4385,8 +4600,13 @@ export async function ensureTodoId(body = {}) {
     return { type: "todo-id", ok: true, file, id: `#${existingId}`, changed: false, from, to, source: oldSource, mtimeMs };
   }
   const id = await generatePlanningId();
-  const result = await patchTodo({ ...body, file, id });
+  const result = await patchTodoInFile(file, { ...body, file, id });
   return { ...result, type: "todo-id", id: `#${id}` };
+}
+
+export async function ensureTodoId(body = {}) {
+  const file = safeOpenFile(body.file || "");
+  return enqueueSaveWrite(file, () => ensureTodoIdInFile(file, body));
 }
 
 // --- clock-in / clock-out -----------------------------------------------
@@ -4408,7 +4628,7 @@ function findClockNode(content, locator = {}) {
   return nodes.find((n) => n.attrs?.from && !n.attrs?.to) || null;
 }
 
-async function closeClockInFile(file, locator, toIso) {
+async function closeClockInFileUnlocked(file, locator, toIso) {
   const content = await readFile(file, "utf8");
   const node = findClockNode(content, locator);
   if (!node) return false;
@@ -4418,6 +4638,10 @@ async function closeClockInFile(file, locator, toIso) {
   markNotesDirty(file);
   scheduleRoamDbSync(null, file);
   return true;
+}
+
+async function closeClockInFile(file, locator, toIso) {
+  return enqueueSaveWrite(file, () => closeClockInFileUnlocked(file, locator, toIso));
 }
 
 // Finds the single globally-running clock (a `from` with no `to`) across
@@ -4439,30 +4663,41 @@ export async function clockIn(body = {}) {
   const file = safeOpenFile(body.file || "");
   const nowIso = formatDateValue(Date.now(), true);
 
+  // Step 1: close any running clock first, fully awaited (queued and
+  // serialized on its own file) before touching `file` below — if the
+  // running clock happens to live in `file` itself, this ordering (rather
+  // than nesting) is what keeps the two writes from deadlocking on the same
+  // per-file queue.
   const running = await findRunningClock();
   if (running) await closeClockInFile(running.file, { index: running.index, source: running.source }, nowIso);
 
-  // `ensureTodoId` may itself rewrite the todo's line (adding `id=...`), so
-  // its own `from`/`to` — not a fresh `locateTodoInContent(body)` — are the
-  // authoritative position afterward: re-locating with the now-stale
-  // pre-mutation `body.source` could fail to text-match the changed line.
-  const idResult = await ensureTodoId(body);
-  const from = idResult.from;
-  const to = idResult.changed ? idResult.from + idResult.nextSource.length : idResult.to;
+  // Step 2: id-mint and clock-line insert happen inside a *single* queued
+  // task on `file`, so no concurrent editor save can land between the
+  // id-mint write and the insert write (both operate on freshly re-read
+  // content). `ensureTodoIdInFile` may itself rewrite the todo's line
+  // (adding `id=...`), so its own `from`/`to` — not a fresh
+  // `locateTodoInContent(body)` — are the authoritative position afterward:
+  // re-locating with the now-stale pre-mutation `body.source` could fail to
+  // text-match the changed line.
+  return enqueueSaveWrite(file, async () => {
+    const idResult = await ensureTodoIdInFile(file, body);
+    const from = idResult.from;
+    const to = idResult.changed ? idResult.from + idResult.nextSource.length : idResult.to;
 
-  const content = await readFile(file, "utf8");
-  const todoNode = scanPlanningNodes(content.slice(from, to), { kind: "todo" })[0];
-  const title = escapeBracketTitle(todoNode?.title || "");
+    const content = await readFile(file, "utf8");
+    const todoNode = scanPlanningNodes(content.slice(from, to), { kind: "todo" })[0];
+    const title = escapeBracketTitle(todoNode?.title || "");
 
-  const lineEnd = content.indexOf("\n", to);
-  const insertAt = lineEnd < 0 ? content.length : lineEnd + 1;
-  const needsLeadingNewline = lineEnd < 0 && content.length > 0 && !content.endsWith("\n");
-  const clockLine = `${needsLeadingNewline ? "\n" : ""}@@clock [${title}]{from: ${nowIso}, task: ${idResult.id}}\n`;
+    const lineEnd = content.indexOf("\n", to);
+    const insertAt = lineEnd < 0 ? content.length : lineEnd + 1;
+    const needsLeadingNewline = lineEnd < 0 && content.length > 0 && !content.endsWith("\n");
+    const clockLine = `${needsLeadingNewline ? "\n" : ""}@@clock [${title}]{from: ${nowIso}, task: ${idResult.id}}\n`;
 
-  await atomicWriteFile(file, content.slice(0, insertAt) + clockLine + content.slice(insertAt), "utf8");
-  markNotesDirty(file);
-  scheduleRoamDbSync(null, file);
-  return { type: "clock-in", ok: true, file, from: insertAt, to: insertAt + clockLine.length, source: clockLine, todoId: idResult.id };
+    await atomicWriteFile(file, content.slice(0, insertAt) + clockLine + content.slice(insertAt), "utf8");
+    markNotesDirty(file);
+    scheduleRoamDbSync(null, file);
+    return { type: "clock-in", ok: true, file, from: insertAt, to: insertAt + clockLine.length, source: clockLine, todoId: idResult.id };
+  });
 }
 
 // Stops a clock: closes the clock named by `body.file`+index/source if
@@ -6381,6 +6616,9 @@ export function runtimeDebugSnapshot() {
   };
 }
 
+// Historical name kept for existing call sites. This deliberately does not
+// arm `roamSyncTimer`: note writes only accumulate changed files, and the
+// queue is drained by an explicit/manual syncRoamDb() call.
 function scheduleRoamDbSync(notes, changedFile) {
   queueRoamDbSync(notes, changedFile ? [changedFile] : []);
 }
@@ -6892,13 +7130,14 @@ function acceptSaveRequest(file, body) {
 }
 
 async function enqueueSaveWrite(file, task) {
-  const previous = saveWriteQueues.get(file) ?? Promise.resolve();
+  const key = canonicalExistingPath(file);
+  const previous = saveWriteQueues.get(key) ?? Promise.resolve();
   const current = previous.catch(() => {}).then(task);
-  saveWriteQueues.set(file, current);
+  saveWriteQueues.set(key, current);
   try {
     return await current;
   } finally {
-    if (saveWriteQueues.get(file) === current) saveWriteQueues.delete(file);
+    if (saveWriteQueues.get(key) === current) saveWriteQueues.delete(key);
   }
 }
 
@@ -6928,6 +7167,9 @@ export function configure(options = {}) {
   noteCodeFileCache.clear();
   noteCodeFilePending.clear();
   noteCodeFileCacheBytes = 0;
+  reservedPlanningIds.clear();
+  planningIdCache = { version: -1, ids: null };
+  planningIdFallbackCounter = 0;
   if (roamSyncTimer) {
     clearTimeout(roamSyncTimer);
     roamSyncTimer = null;

@@ -107,9 +107,9 @@ Aaronnote Web/Appine，并关闭临时 Markdown buffer。Markdown 编辑、保�
 | **Note (web)** | `o` 打开当前, `O` 选文件, `s` 保存, `r` 刷新, `f` 聚焦, `e` Esc/normal, `v` 切换源码视图, `R` Emacs 原始编辑 |
 | **Find/Browse** | `j` 查找笔记, `/` 搜索（支持 `intitle:` `incategory:` `linksto:` 操作符）, `l` 最近, `.` 跟随链接, `b` 反向链接, `x` 相关, `G` 跳转定义 |
 | **Insert** | `i` roam 链接, `I` TOC 链接, `t` tag id, `T` tag-id 链接, `w` 复制链接到此处, `c` note-code |
-| **Knowledge** | `n` 新笔记, `d` 今日日记, `a` 按标签浏览, `C` 分类层次浏览（MediaWiki Category），`g` roam graph, `k` 任务, `A` 日程, `M` 维护仪表板 |
+| **Knowledge** | `n` 新笔记, `d` 今日日记, `a` 按标签浏览, `C` 分类层次浏览（MediaWiki Category），`g` roam graph, `k` 任务, `A` 日程, `L` 日程日志, `F` 当前文件任务跳转, `M` 维护仪表板 |
 | **Special pages (wiki)** | `!` 报告总入口, `!w` Wanted Pages, `!o` 孤立页, `!d` 死端页, `!u` 无标签页, `!h` 最多链接页 |
-| **Index/Files** | `y` 同步 DB, `u` 增量更新, `F` 全量重建, `S` DB 状态, `D` dired, `m` 移动笔记（自动重写链接）, `V` magit, `q` 停止服务 |
+| **Index/Files** | `y` 同步 DB, `u` 增量更新, `Z` 全量重建, `S` DB 状态, `D` dired, `m` 移动笔记（自动重写链接）, `V` magit, `q` 停止服务 |
 | **Format (web)** | `1-9/0` 粗/斜/代码/高亮/删除线/引用/列表×3/代码块, `p` 段落菜单, `z` 表格, `E` 数学块, `C` 目录, `U/Y` undo/redo |
 
 **Wiki 搜索操作符**（`/` 搜索时可混用）：

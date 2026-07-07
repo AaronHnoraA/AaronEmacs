@@ -8,6 +8,7 @@ import {
 } from "../shared/planning-dsl.mjs";
 // @ts-ignore Shared ESM module outside the TS app graph.
 import {
+  formatDateValue,
   formatDuration,
   parseDateValue,
   parseDepRefs,
@@ -147,6 +148,13 @@ describe("planning value grammar", () => {
     expect(parseDateValue("2026-07-07")).toMatchObject({ hasTime: false });
     expect(parseDateValue("2026-07-07 09:30")).toMatchObject({ hasTime: true });
     expect(parseDateValue("not-a-date")).toBeNull();
+  });
+
+  test("parseDateValue treats ISO timezone timestamps as local planning wall time", () => {
+    const utc = parseDateValue("2026-07-07T23:30:00Z");
+    const offset = parseDateValue("2026-07-07T23:30:00+02:00");
+    expect(utc && formatDateValue(utc.time, utc.hasTime)).toBe("2026-07-07 23:30");
+    expect(offset && formatDateValue(offset.time, offset.hasTime)).toBe("2026-07-07 23:30");
   });
 
   test("parseRepeater grammar and applyRepeater semantics are re-exported unchanged", () => {

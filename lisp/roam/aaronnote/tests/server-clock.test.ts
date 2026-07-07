@@ -123,6 +123,40 @@ describe("buildClockModel aggregation", () => {
       vi.useRealTimers();
     }
   });
+
+  test("buildAgenda lints multiple running, reversed, and overlapping clock spans", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 7, 13, 0));
+    try {
+      await withVault(async (root) => {
+        await writeFile(
+          join(root, "a.md"),
+          [
+            "---\nid: a\n---\n# A\n",
+            "@@todo(doing) [deep work] {id: abc123}",
+            '@@clock [deep work] {from: "2026-07-07 09:00", to: "2026-07-07 10:00", task: "#abc123"}',
+            '@@clock [deep work] {from: "2026-07-07 09:30", to: "2026-07-07 10:30", task: "#abc123"}',
+            '@@clock [deep work] {from: "2026-07-07 12:00", to: "2026-07-07 11:00", task: "#abc123"}',
+            '@@clock [deep work] {from: "2026-07-07 11:30", task: "#abc123"}',
+            '@@clock [deep work] {from: "2026-07-07 12:30", task: "#abc123"}',
+            "",
+          ].join("\n"),
+          "utf8",
+        );
+        await syncRoamDb(null, { mode: "full" });
+
+        const agenda = await buildAgenda({ includePlanning: true });
+        const kinds = agenda.lints.map((lint: any) => lint.kind);
+        expect(kinds).toContain("overlapping-clocks");
+        expect(kinds).toContain("reversed-clock-span");
+        expect(kinds).toContain("multiple-running-clocks");
+        expect(agenda.clocktable.running).toMatchObject({ todoId: "#abc123" });
+        expect(agenda.clocktable.tasks.find((task: any) => task.todoId === "#abc123")?.minutes).toBeGreaterThan(0);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("clock-in / clock-out", () => {

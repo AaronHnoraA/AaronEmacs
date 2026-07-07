@@ -47,6 +47,7 @@ let deps: AgendaViewDeps | null = null;
 let overlay: HTMLElement | null = null;
 let listEl: HTMLElement | null = null;
 let headerEl: HTMLElement | null = null;
+let statsEl: HTMLElement | null = null;
 let data: AgendaMsg | null = null;
 let view: ViewKind = "week";
 let anchorMs = midnight(Date.now());
@@ -59,6 +60,19 @@ let projectPickerOpen = false;
 let projectFilter = new Set<string>();
 let keydownInstalled = false;
 let documentClickInstalled = false;
+
+// Bumped on every fetchAgenda() call; a response is only applied if its
+// token is still current when it resolves — guards against an
+// earlier-issued, later-resolving fetch (rapid f/b/v, or a nav overlapping
+// an edit's own refetch) clobbering a newer one's result.
+let fetchGeneration = 0;
+// Set immediately before a local edit's own fetchAgenda() call. The SSE
+// `agenda-changed`/`notes-index-changed` handler (refreshAgendaView) skips a
+// refresh triggered inside this window — that broadcast is an echo of the
+// edit we already issued our own refetch for, so acting on it too just
+// duplicates the request.
+let lastLocalMutationMs = 0;
+const LOCAL_MUTATION_SUPPRESS_MS = 800;
 
 type GanttScale = "day" | "week" | "month";
 type GanttDragMode = "move" | "resize-start" | "resize-end" | "progress";
@@ -182,14 +196,35 @@ function normalizeProjectKey(value: unknown): string {
   return String(value || "").trim();
 }
 
+// Reverse index (childTodoId -> project key) over `data.projectModel`,
+// rebuilt only when the `data` object identity changes — avoids an O(projects
+// * childIds) `.find`/`.includes` scan on every todo, on every render.
+let projectChildIndexData: AgendaMsg | null = null;
+let projectChildIndexMap = new Map<string, string>();
+
+function ensureProjectChildIndex(): Map<string, string> {
+  if (projectChildIndexData !== data) {
+    projectChildIndexData = data;
+    projectChildIndexMap = new Map();
+    for (const project of data?.projectModel || []) {
+      const key = normalizeProjectKey(project.key);
+      if (!key) continue;
+      for (const id of project.childTodoIds || []) {
+        if (!projectChildIndexMap.has(id)) projectChildIndexMap.set(id, key);
+      }
+    }
+  }
+  return projectChildIndexMap;
+}
+
 function projectForTodo(todo: TodoItem): string {
   const canon = (todo.canon as Record<string, string> | undefined) || {};
   const explicit = normalizeProjectKey(canon.project || canon.proj || (todo as Record<string, unknown>).project || (todo as Record<string, unknown>).proj);
   if (explicit) return explicit;
   const id = String(todo.id || "");
   if (id) {
-    const project = (data?.projectModel || []).find((entry) => (entry.childTodoIds || []).includes(id));
-    if (project?.key) return normalizeProjectKey(project.key);
+    const key = ensureProjectChildIndex().get(id);
+    if (key) return key;
   }
   return "";
 }
@@ -235,12 +270,42 @@ function matchesTodo(todo: TodoItem): boolean {
   return matchesProject(todo) && matchesQuery(todo);
 }
 
+// Rebuilt only when the `data` object identity changes (i.e. once per
+// fetchAgenda(), not once per lookup) — avoids an O(todos) `.find` scan on
+// every row of every render.
+let todoIndexData: AgendaMsg | null = null;
+let todoIndexMap = new Map<string, TodoItem>();
+
+function ensureTodoIndex(): Map<string, TodoItem> {
+  if (todoIndexData !== data) {
+    todoIndexData = data;
+    todoIndexMap = new Map();
+    for (const todo of data?.todos || []) todoIndexMap.set(String(todo.id || ""), todo);
+  }
+  return todoIndexMap;
+}
+
 function todoById(id: string): TodoItem | undefined {
-  return data?.todos?.find((t) => t.id === id);
+  return ensureTodoIndex().get(id);
+}
+
+// Grouped once per renderBody() pass (query/projectFilter can change every
+// render, unlike the todo/project indexes above) instead of re-filtering
+// the full lint list — and re-`todoById`-scanning it — once per row.
+let lintsByTodoIdMap = new Map<string, TodoLint[]>();
+
+function rebuildLintsByTodoId(): void {
+  lintsByTodoIdMap = new Map();
+  for (const lint of visibleLints()) {
+    if (!lint.todoId) continue;
+    const list = lintsByTodoIdMap.get(lint.todoId);
+    if (list) list.push(lint);
+    else lintsByTodoIdMap.set(lint.todoId, [lint]);
+  }
 }
 
 function lintsFor(todoId: string): TodoLint[] {
-  return visibleLints().filter((lint) => lint.todoId === todoId);
+  return lintsByTodoIdMap.get(todoId) || [];
 }
 
 type ProjectOption = { key: string; title: string; total: number; open: number };
@@ -349,19 +414,25 @@ installDocumentClickHandler();
 
 async function fetchAgenda(): Promise<void> {
   if (!deps) return;
+  const gen = ++fetchGeneration;
   loading = true;
   render();
   try {
     const wide = WIDE_VIEWS.has(view);
     const from = wide ? fmtDate(midnight(Date.now())) : view === "month" ? fmtDate(calendarGridStart(anchorMs)) : fmtDate(anchorMs);
     const days = wide ? 60 : view === "month" ? 42 : view === "week" ? 7 : view === "list" ? 30 : 60;
-    data = await deps.api.notes.agenda({ from, days, includePlanning: true, includeGantt: true });
+    const next = await deps.api.notes.agenda({ from, days, includePlanning: true, includeGantt: true });
+    if (gen !== fetchGeneration) return;
+    data = next;
   } catch (error) {
+    if (gen !== fetchGeneration) return;
     deps.setStatus(error instanceof Error ? error.message : "Agenda failed");
     data = null;
   } finally {
-    loading = false;
-    render();
+    if (gen === fetchGeneration) {
+      loading = false;
+      render();
+    }
   }
 }
 
@@ -381,6 +452,7 @@ async function applyPatch(todo: TodoItem, patch: Record<string, unknown>): Promi
   if (!deps) return;
   try {
     await deps.api.notes.patchTodo({ ...todoPatchBase(todo), ...patch });
+    lastLocalMutationMs = Date.now();
     await fetchAgenda();
   } catch (error) {
     deps.setStatus(error instanceof Error ? error.message : "Todo update failed");
@@ -433,6 +505,7 @@ async function createTodoFromPrompt(): Promise<void> {
     const result = await deps.api.notes.createTodo(body);
     const todo = result.todo as TodoItem | undefined;
     if (todo?.id) cursorId = String(todo.id);
+    lastLocalMutationMs = Date.now();
     await fetchAgenda();
   } catch (error) {
     deps.setStatus(error instanceof Error ? error.message : "Todo create failed");
@@ -476,8 +549,14 @@ function focusProject(key: string): void {
   applyProjectFilter([normalized], { announce: true });
 }
 
+// Steps by each view's actual fetch window (see fetchAgenda's `days`) so f/b
+// paging moves a full window instead of always paging by a week and
+// producing large overlapping re-fetches for the 30/60-day list/log views.
 function shiftAnchor(ranges: number): void {
-  anchorMs = view === "month" ? addMonths(anchorMs, ranges) : addDays(anchorMs, ranges * 7);
+  if (view === "month") anchorMs = addMonths(anchorMs, ranges);
+  else if (view === "list") anchorMs = addDays(anchorMs, ranges * 30);
+  else if (view === "log") anchorMs = addDays(anchorMs, ranges * 60);
+  else anchorMs = addDays(anchorMs, ranges * 7);
 }
 
 function showHelp(): void {
@@ -528,19 +607,22 @@ function editRepeat(todo: TodoItem): void {
 
 async function addDependency(todo: TodoItem): Promise<void> {
   if (!deps || !data) return;
-  const candidates = (data.todos || []).filter((t) => t.id !== todo.id);
-  const label = candidates
-    .slice(0, 200)
+  // Validation below checks against `shown.length`, not the full candidate
+  // count — matching what the prompt actually lists, so a number beyond the
+  // displayed 200 is rejected instead of silently resolving to an unlisted
+  // todo.
+  const shown = (data.todos || []).filter((t) => t.id !== todo.id).slice(0, 200);
+  const label = shown
     .map((t, i) => `${i + 1}. [${todoNote(t)}] ${todoText(t)}`)
     .join("\n");
   const raw = window.prompt(`Depends on which # (from below)?\n\n${label}`, "");
   if (!raw) return;
   const n = Number(raw.trim());
-  if (!Number.isInteger(n) || n < 1 || n > candidates.length) {
+  if (!Number.isInteger(n) || n < 1 || n > shown.length) {
     deps.setStatus("No matching todo number");
     return;
   }
-  const target = candidates[n - 1];
+  const target = shown[n - 1];
   try {
     const { ref } = await deps.api.notes.todoDepRef({ targetId: target.id, sourceId: todo.id });
     if (!ref) throw new Error("Could not build a dependency reference");
@@ -554,6 +636,7 @@ async function clockInTodo(todo: TodoItem): Promise<void> {
   if (!deps) return;
   try {
     await deps.api.notes.clockIn(todoPatchBase(todo));
+    lastLocalMutationMs = Date.now();
     await fetchAgenda();
   } catch (error) {
     deps.setStatus(error instanceof Error ? error.message : "Clock in failed");
@@ -564,6 +647,7 @@ async function clockOutRunning(): Promise<void> {
   if (!deps) return;
   try {
     await deps.api.notes.clockOut({});
+    lastLocalMutationMs = Date.now();
     await fetchAgenda();
   } catch (error) {
     deps.setStatus(error instanceof Error ? error.message : "Clock out failed");
@@ -576,6 +660,9 @@ function toggleMark(id: string): void {
   render();
 }
 
+// Batches the patches themselves (rather than reusing applyPatch, which
+// would issue a full agenda refetch after *every* todo) and issues a single
+// refetch once the whole selection has landed.
 async function bulkStatus(): Promise<void> {
   if (!deps || selection.size === 0) return;
   const value = window.prompt("Bulk set status (todo/doing/done/blocked/cancelled):", "done");
@@ -583,12 +670,33 @@ async function bulkStatus(): Promise<void> {
   const status = value.trim().toLowerCase();
   const ids = [...selection];
   selection.clear();
+  const touchedFiles = new Set<string>();
+  let failed = 0;
   for (const id of ids) {
     const todo = todoById(id);
     if (!todo) continue;
-    if (status === "done") await applyPatch(todo, { op: "complete" });
-    else await applyPatch(todo, { status });
+    const file = todoField(todo, "file");
+    const base = todoPatchBase(todo);
+    // A same-file todo patched earlier in this batch may have shifted this
+    // one's `index` (status/attr changes alter line length) — omit it so
+    // the server falls through to its text/source-based match instead of a
+    // possibly-stale line anchor that could land on the wrong todo.
+    if (touchedFiles.has(file)) delete base.index;
+    const patch = status === "done" ? { op: "complete" } : { status };
+    try {
+      await deps.api.notes.patchTodo({ ...base, ...patch });
+      touchedFiles.add(file);
+    } catch {
+      failed++;
+    }
   }
+  lastLocalMutationMs = Date.now();
+  await fetchAgenda();
+  deps.setStatus(
+    failed > 0
+      ? `Bulk update: ${ids.length - failed}/${ids.length} succeeded`
+      : `Bulk update: ${ids.length} todo${ids.length === 1 ? "" : "s"} updated`,
+  );
 }
 
 // --- rendering ---
@@ -816,7 +924,7 @@ function lintDetail(lint: TodoLint): string {
   const ref = typeof lint.ref === "string" && lint.ref.trim() && lint.ref.trim() !== "undefined" ? lint.ref.trim() : "";
   const todo = lint.todoId ? todoById(lint.todoId) : undefined;
   const subject = ref || (todo ? todoText(todo) : "") || lint.message || lint.kind || "issue";
-  const label = ref || todo ? `"${subject}"` : subject;
+  const label = (ref || todo) ? `"${subject}"` : subject;
   return `${label} (${lint.kind || "lint"})`;
 }
 
@@ -945,6 +1053,7 @@ async function moveCalendarTodoToDate(todo: TodoItem, field: "ddl" | "sche", dat
   try {
     await deps.api.notes.patchTodo({ ...todoPatchBase(todo), [field]: date });
     deps.setStatus(`${field === "ddl" ? "Deadline" : "Scheduled"} set to ${date}`);
+    lastLocalMutationMs = Date.now();
     await fetchAgenda();
   } catch (error) {
     deps.setStatus(error instanceof Error ? error.message : "Calendar move failed");
@@ -1180,6 +1289,7 @@ async function patchGanttProgress(task: GanttTask, progress: number): Promise<vo
   const next = Math.max(0, Math.min(100, Math.round(progress / 5) * 5));
   try {
     await deps.api.notes.patchTodo(ganttPatchBase(task, { progress: next }));
+    lastLocalMutationMs = Date.now();
     await fetchAgenda();
   } catch (error) {
     deps.setStatus(error instanceof Error ? error.message : "Progress update failed");
@@ -1197,6 +1307,7 @@ async function commitGanttSchedule(task: GanttTask, startMs: number, endMs: numb
   const nextEnd = fmtDate(endMs);
   try {
     await deps.api.notes.patchTodo(ganttPatchBase(task, { sche: nextStart, end: nextEnd, ddl: nextEnd }));
+    lastLocalMutationMs = Date.now();
     await fetchAgenda();
   } catch (error) {
     deps.setStatus(error instanceof Error ? error.message : "Reschedule failed");
@@ -1842,13 +1953,24 @@ function flatTodoIds(): string[] {
   return [...listEl.querySelectorAll<HTMLElement>("[data-todo-id]")].map((el) => el.dataset.todoId || "");
 }
 
+// Toggles the `.is-cursor` class on the already-rendered elements in place
+// instead of rebuilding the whole view — a todo can appear more than once in
+// a single render (e.g. the same deadline pill on two month cells), so every
+// matching element is updated, not just the first.
+function setCursorHighlight(id: string): void {
+  if (!listEl) return;
+  for (const el of listEl.querySelectorAll<HTMLElement>(".is-cursor")) el.classList.remove("is-cursor");
+  if (!id) return;
+  for (const el of listEl.querySelectorAll<HTMLElement>(`[data-todo-id="${CSS.escape(id)}"]`)) el.classList.add("is-cursor");
+}
+
 function moveCursor(delta: number): void {
   const ids = flatTodoIds();
   if (ids.length === 0) return;
   const idx = Math.max(0, ids.indexOf(cursorId));
   const next = Math.min(ids.length - 1, Math.max(0, idx + delta));
   cursorId = ids[next];
-  render();
+  setCursorHighlight(cursorId);
   listEl?.querySelector<HTMLElement>(`[data-todo-id="${CSS.escape(cursorId)}"]`)?.scrollIntoView({ block: "nearest" });
 }
 
@@ -1941,7 +2063,11 @@ function renderHeader(): void {
   search.addEventListener("input", () => {
     query = search.value;
     syncPageUrl();
-    render();
+    // Body + stats only — rebuilding the header here would destroy this
+    // very input mid-keystroke (and mid-IME-composition for CJK input),
+    // dropping focus after every character typed.
+    renderBody();
+    updateHeaderStats();
   });
   headerEl.appendChild(search);
 
@@ -1999,17 +2125,27 @@ function renderHeader(): void {
 
   const stats = document.createElement("div");
   stats.className = "aaronnote-agenda-full-stats";
-  if (data) {
-    const s = visibleStats();
-    const filterLabel = projectFilter.size > 0 ? `${projectFilter.size} project${projectFilter.size === 1 ? "" : "s"} · ` : "";
-    stats.textContent = `${filterLabel}${s.open || 0} open · ${s.doing || 0} doing · ${s.blocked || 0} blocked · ${s.overdue || 0} overdue`;
-  }
+  statsEl = stats;
+  stats.textContent = statsText();
   headerEl.appendChild(stats);
 }
 
-function render(): void {
-  if (!overlay || !listEl) return;
-  renderHeader();
+function statsText(): string {
+  if (!data) return "";
+  const s = visibleStats();
+  const filterLabel = projectFilter.size > 0 ? `${projectFilter.size} project${projectFilter.size === 1 ? "" : "s"} · ` : "";
+  return `${filterLabel}${s.open || 0} open · ${s.doing || 0} doing · ${s.blocked || 0} blocked · ${s.overdue || 0} overdue`;
+}
+
+// Rewrites just the stats text in place — used by the search-input handler,
+// which must not touch the rest of the header (see renderHeader's `search`
+// listener).
+function updateHeaderStats(): void {
+  if (statsEl) statsEl.textContent = statsText();
+}
+
+function renderBody(): void {
+  if (!listEl) return;
   listEl.replaceChildren();
   if (loading) {
     const spinner = document.createElement("div");
@@ -2027,6 +2163,7 @@ function render(): void {
     syncHelpPanel();
     return;
   }
+  rebuildLintsByTodoId();
   if (view !== "lints") {
     const lints = renderLints();
     if (lints) listEl.appendChild(lints);
@@ -2042,9 +2179,18 @@ function render(): void {
 
   if (!cursorId) {
     const ids = flatTodoIds();
-    if (ids.length > 0) cursorId = ids[0];
+    if (ids.length > 0) {
+      cursorId = ids[0];
+      setCursorHighlight(cursorId);
+    }
   }
   syncHelpPanel();
+}
+
+function render(): void {
+  if (!overlay || !listEl) return;
+  renderHeader();
+  renderBody();
 }
 
 function hasCommandModifier(event: KeyboardEvent): boolean {
@@ -2230,6 +2376,7 @@ export function closeAgendaView(): void {
 // yank the user back to today's view.
 export async function refreshAgendaView(): Promise<void> {
   if (!overlay || overlay.hidden) return;
+  if (Date.now() - lastLocalMutationMs < LOCAL_MUTATION_SUPPRESS_MS) return;
   await fetchAgenda();
 }
 
@@ -2242,6 +2389,7 @@ export async function openAgendaView(nextDeps: AgendaViewDeps): Promise<void> {
   cursorId = "";
   helpOpen = false;
   projectPickerOpen = false;
+  lastLocalMutationMs = 0;
   if (nextDeps.pageMode && typeof location !== "undefined") {
     const params = new URLSearchParams(location.search);
     view = normalizeView(params.get("view"));

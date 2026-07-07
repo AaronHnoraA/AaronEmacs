@@ -280,12 +280,42 @@ permission prompts disabled.  The backend is chosen here, not per export."
        (or (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file)
            (string-equal (file-name-nondirectory file) "README"))))
 
+(defun my/aaronnote--web-host-log-tail (&optional lines)
+  "Return the last LINES (default 12) lines of the Aaronnote web-host log
+buffer, or nil when the buffer does not exist or has no output yet."
+  (when-let* ((buf (get-buffer " *aaronnote-web-host*")))
+    (with-current-buffer buf
+      (when (> (point-max) (point-min))
+        (let* ((n (or lines 12))
+               (end (point-max))
+               (start (save-excursion
+                        (goto-char end)
+                        (forward-line (- n))
+                        (point)))
+               (text (string-trim (buffer-substring-no-properties start end))))
+          (unless (string-empty-p text) text))))))
+
 (defun my/aaronnote--watchdog-fire ()
-  "Called when the web-host fails to become ready within the timeout."
+  "Called when the web-host fails to become ready within the timeout.
+Previously this only dropped the queued ready-callbacks silently with a
+one-line `message'; the caller who pressed e.g. `A' for the agenda had no
+visible sign that nothing was going to happen. Now it also surfaces the
+process state and a tail of the log buffer, and pops that buffer so the
+failure is diagnosable without hunting for it."
   (setq my/aaronnote--ready-watchdog nil)
   (unless my/aaronnote--ready
-    (setq my/aaronnote--ready-callbacks nil)
-    (message "Aaronnote: web-host did not become ready (check *aaronnote-web-host* for errors)")))
+    (let* ((dropped (length my/aaronnote--ready-callbacks))
+           (alive (and my/aaronnote--process (process-live-p my/aaronnote--process)))
+           (tail (my/aaronnote--web-host-log-tail))
+           (log-buf (get-buffer " *aaronnote-web-host*")))
+      (setq my/aaronnote--ready-callbacks nil)
+      (when log-buf (display-buffer log-buf))
+      (message "%s"
+               (concat
+                (format "Aaronnote: web-host not ready after 10s (%d pending action%s dropped)."
+                        dropped (if (= dropped 1) "" "s"))
+                (if alive "" " Process exited — check node/port.")
+                (if tail (format " Last log: %s" tail) " No log output yet — see *aaronnote-web-host*."))))))
 
 (defun my/aaronnote--ensure-server (&optional callback)
   "Start the web-host if needed, then call CALLBACK."
@@ -1753,6 +1783,7 @@ Falls back to JupyterLab root when no matching .ipynb exists."
       ("k" "tasks"            my/aaronnote-roam-todos)
       ("A" "agenda"           my/aaronnote-roam-agenda)
       ("L" "agenda log"       my/aaronnote-roam-agenda-log)
+      ("F" "file todos"       my/aaronnote-roam-jump-file-todo)
       ("M" "management"       my/aaronnote-roam-management)]
      ["Special pages (wiki)"
       ("!" "reports hub"      my/aaronnote-roam-reports)
@@ -1764,7 +1795,7 @@ Falls back to JupyterLab root when no matching .ipynb exists."
      ["Index / Files"
       ("y" "sync DB"          my/aaronnote-roam-sync)
       ("u" "update index"     my/aaronnote-roam-update-db)
-      ("F" "full rebuild"     my/aaronnote-roam-sync-full)
+      ("Z" "full rebuild"     my/aaronnote-roam-sync-full)
       ("S" "DB status"        my/aaronnote-roam-db-status)
       ("P" "pause/resume"     my/aaronnote-toggle-pause)
       ("R" "runtime status"   my/aaronnote-runtime-status)

@@ -105,7 +105,10 @@ clock-specific) but share the same date grammar and lint the same way.
 (`2026-07-07`, optionally `HH:MM`), slash/dot/CJK variants, bare `MM-DD`
 (current year), relative (`today`/`tomorrow`/`yesterday`/`now`,
 `+3d`/`-1w`/`+2m`/`+1y`), or anything `Date.parse` accepts. Canonical output
-is `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.
+is `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`. ISO timestamp imports with `Z` or a
+numeric offset are interpreted as local planning wall time, not as instants:
+`2026-07-07T23:30:00Z` normalizes to `2026-07-07 23:30` and stays in the
+July 7 agenda bucket.
 
 **Repeater** (`parseRepeater`/`applyRepeater`): `[+|++|.+]N(d|w|m|y)`; bare
 `Nd` behaves like `+Nd`. org semantics: `+` shifts once from the old date
@@ -186,6 +189,9 @@ edits, minted **on demand** (org-id model), never on every save:
 - Two nodes sharing the same `id:` (hand-copied, typically) lint as
   `duplicate-id`; the engine keeps the first occurrence's id and the second
   falls back to its positional id so nothing silently merges.
+- Concurrent id minting uses an in-process reservation set in addition to
+  the scanned id index, so two simultaneous dependency/clock actions cannot
+  receive the same freshly-minted id even before either write lands on disk.
 
 ## Urgency
 
@@ -225,6 +231,15 @@ Broken/ambiguous clock refs (`resolveClockRefs`) never drop the clock from
 aggregation — an unresolved clock still counts toward its own file/day,
 just not toward a specific todo or project.
 
+Clock data-quality problems also surface as lints without changing
+aggregation:
+
+- `multiple-running-clocks` — more than one open `@@clock`; the first is the
+  displayed running clock, but every span still contributes to totals.
+- `reversed-clock-span` — `to` is earlier than `from`; aggregation counts it
+  as zero minutes.
+- `overlapping-clocks` — two spans overlap, so totals may over-count.
+
 ## Agenda view-model
 
 `buildAgenda({ from, days, includePlanning, includeGantt })` returns:
@@ -241,7 +256,8 @@ just not toward a specific todo or project.
     every bucket inside the requested range, as `kind: "repeat",
     virtual: true` entries — display-only, not patchable.
 - `todos[]` — the full urgency-sorted list.
-- `lints[]` — dependency + clock-ref + (when `includeGantt`) Gantt lints.
+- `lints[]` — dependency, clock-ref, clock data-quality, and (when
+  `includeGantt`) Gantt lints.
 - `logByDay` — completion counts per day (drives the activity heatmap).
 - `stats` — open/doing/done/cancelled/blocked/overdue counts.
 - When `includePlanning`: `projects[]`, `milestones[]`, `clocks[]`,
@@ -276,6 +292,21 @@ aliases (`ddl`/`due`, `sche`/`scheduled`, `prio`/`priority`, `project`/`proj`,
 `repeat`, `after`, `blocks`, `effort`, etc.). The returned payload includes
 the created source line and parsed todo, then the host broadcasts
 `agenda-changed`.
+
+## Write serialization
+
+All agenda mutations that rewrite note files (`createTodo`, `patchTodo`,
+`updateTodoStatus`, `ensureTodoId`, `clockIn`, `clockOut`) share the same
+per-file write queue as editor saves. The entire read/locate/compute/write
+cycle is serialized by canonical file path, so an agenda patch and a browser
+save cannot interleave and overwrite each other. If the editor later saves
+with an old `baseMtimeMs`, `saveNote` returns `conflict: true`; the client
+should reload/review instead of forcing an overwrite.
+
+Agenda writes mark the file dirty and enqueue its path for Roam DB sync, but
+they do not start an automatic git commit or background DB rebuild. The queue
+is drained by the next explicit/manual sync (`syncRoamDb`), preserving the
+"collect changes until sync" workflow.
 
 ## Completion
 

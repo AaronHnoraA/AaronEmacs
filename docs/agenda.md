@@ -40,7 +40,9 @@ distinguished only by its own widget badge. `state` is usually `todo`,
 Date values are parsed by the runtime, so ISO dates, relative forms such as
 `+3d`, and supported natural/CJK forms work everywhere. Multi-word values must
 be quoted. The command parser is quote-aware, so commas and semicolons inside
-`"..."` or `'...'` are preserved.
+`"..."` or `'...'` are preserved. Imported ISO timestamps with `Z` or a
+numeric offset are treated as local planning wall time, not as instants, so
+`2026-07-07T23:30:00Z` stays in the July 7 agenda bucket.
 
 `@@project`/`@@milestone`/`@@clock` also accept a bracket-less title (bare
 text before `{`) instead of `[title]`.
@@ -79,7 +81,9 @@ hand-write dependency refs when a target todo is selected — they call
 `todo-dep-ref`, which mints an id for the target if it doesn't have one and
 returns `#id`. Passive completion (typing `after:`/`blocks:` and picking a
 candidate) never mints an id: a candidate with one completes to `#id`,
-otherwise to the shortest unique text ref.
+otherwise to the shortest unique text ref. Concurrent mints reserve ids in
+process before writing, so simultaneous dependency/clock actions do not
+receive the same fresh id.
 
 ## Repeating Tasks
 
@@ -109,6 +113,9 @@ the todo's title changes. `to` is optional — a clock with `from` but no
 `to` is running. Only one clock may run vault-wide; starting a new one
 auto-closes whatever is running. The runtime aggregates clocks into
 per-task/per-day/per-project totals and compares against a todo's `effort`.
+Malformed clock data is reported in lints without hiding time: multiple open
+clocks, reversed spans (`to < from`, counted as zero), and overlapping spans
+all remain visible in the agenda.
 
 ## Project Rollup
 
@@ -137,6 +144,19 @@ API/actions:
 - `completions:todo-refs --json '{"prefix":"...","file":"..."}'` — completion
   candidates for `after:`/`blocks:`/`task:` values.
 - `update-todo` remains as a compatibility wrapper.
+
+## Writes and Sync
+
+Agenda writes and browser/editor saves share a per-file queue. The server
+serializes the whole read/locate/write cycle for `patch-todo`, `create-todo`,
+id minting, and clock in/out, so a UI patch cannot interleave with a save and
+silently overwrite it. If an editor save uses an old `baseMtimeMs` after an
+agenda write, the save returns `conflict: true` and the client should reload
+or review before forcing an overwrite.
+
+Agenda writes enqueue changed files for Roam DB sync but do not start an
+automatic git commit or background DB rebuild. The queue is intentionally
+drained by the next explicit sync/full rebuild command.
 
 ## Web
 
@@ -171,6 +191,8 @@ Emacs does not render agenda UI natively — it opens the Web page:
 - `M-x my/aaronnote-roam-jump-file-todo` — jump to a todo in the current file
   (dispatch key `F`); this one stays local to Emacs (a `completing-read` over
   the current buffer's todos), not a web redirect.
+- Full Roam DB rebuild is dispatch key `Z`; `F` is reserved for current-file
+  todos across the roam dispatchers.
 
 `after:`/`blocks:`/`task:` values also complete locally, via
 `my/aaronnote-roam-capf` (a `completion-at-point-functions` entry, so it

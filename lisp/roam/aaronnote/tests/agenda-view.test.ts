@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "@voidzero-dev/vite-plus-test";
 
-import { closeAgendaView, openAgendaView } from "../aaronnote/agenda-view.ts";
+import { closeAgendaView, openAgendaView, refreshAgendaView } from "../aaronnote/agenda-view.ts";
 import type { AgendaViewDeps } from "../aaronnote/agenda-view.ts";
 import type { AgendaMsg } from "../aaronnote/api-client.ts";
 
@@ -91,6 +91,42 @@ function deps(): AgendaViewDeps {
     jumpToTodo: () => {},
     setStatus: () => {},
   };
+}
+
+function agendaWithTodo(id: string, text: string): AgendaMsg {
+  return {
+    ...emptyAgenda,
+    days: [{
+      date: "2026-07-07",
+      entries: [{ kind: "scheduled", label: "Scheduled", todoId: id, date: "2026-07-07" }],
+    }],
+    todos: [{
+      id,
+      file: `${id}.md`,
+      noteTitle: id,
+      text,
+      status: "todo",
+      index: 1,
+      source: `@@todo [${text}]`,
+    }],
+    stats: { open: 1, doing: 0, done: 0, cancelled: 0, blocked: 0, overdue: 0 },
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushAsync(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 afterEach(() => {
@@ -332,6 +368,106 @@ describe("agenda keyboard handling", () => {
 
     expect(document.body.textContent).toContain("No projects");
     expect(document.body.textContent).not.toContain("Graph Tensor (0/0)");
+  });
+
+  test("search input filters the body without replacing the focused input", async () => {
+    const d = deps();
+    d.api.notes.agenda = async () => projectAgenda;
+    await openAgendaView(d);
+
+    const search = document.querySelector<HTMLInputElement>(".aaronnote-agenda-full-header input[type='search']")!;
+    search.focus();
+    search.value = "Alpha";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(document.activeElement).toBe(search);
+    expect(document.querySelector<HTMLInputElement>(".aaronnote-agenda-full-header input[type='search']")).toBe(search);
+    expect(document.body.textContent).toContain("Alpha task");
+    expect(document.body.textContent).not.toContain("Beta task");
+    expect(document.body.textContent).toContain("1 open");
+  });
+
+  test("out-of-order agenda fetch responses do not replace newer data", async () => {
+    const d = deps();
+    const first = deferred<AgendaMsg>();
+    const older = deferred<AgendaMsg>();
+    const newer = deferred<AgendaMsg>();
+    const agenda = vi.fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(newer.promise);
+    d.api.notes.agenda = agenda;
+
+    const opened = openAgendaView(d);
+    first.resolve(agendaWithTodo("initial", "Initial task"));
+    await opened;
+
+    document.querySelectorAll<HTMLButtonElement>(".aaronnote-agenda-full-nav button")[2].click();
+    document.querySelectorAll<HTMLButtonElement>(".aaronnote-agenda-full-nav button")[0].click();
+    newer.resolve(agendaWithTodo("newer", "Newer task"));
+    await flushAsync();
+    expect(document.body.textContent).toContain("Newer task");
+
+    older.resolve(agendaWithTodo("older", "Older stale task"));
+    await flushAsync();
+    expect(document.body.textContent).toContain("Newer task");
+    expect(document.body.textContent).not.toContain("Older stale task");
+  });
+
+  test("bulk status batches patches and refetches once", async () => {
+    const d = deps();
+    const bulkAgenda: AgendaMsg = {
+      ...emptyAgenda,
+      days: [{
+        date: "2026-07-07",
+        entries: [
+          { kind: "scheduled", label: "Scheduled", todoId: "one", date: "2026-07-07" },
+          { kind: "scheduled", label: "Scheduled", todoId: "two", date: "2026-07-07" },
+        ],
+      }],
+      todos: [
+        { id: "one", file: "same.md", noteTitle: "Same", text: "One", status: "todo", index: 10, source: "@@todo [One]" },
+        { id: "two", file: "same.md", noteTitle: "Same", text: "Two", status: "todo", index: 30, source: "@@todo [Two]" },
+      ],
+      stats: { open: 2, doing: 0, done: 0, cancelled: 0, blocked: 0, overdue: 0 },
+    };
+    const agenda = vi.fn(async (_body: Record<string, unknown>): Promise<AgendaMsg> => bulkAgenda);
+    const patchTodo = vi.fn(async (_body: Record<string, unknown>) => ({}));
+    d.api.notes.agenda = agenda;
+    d.api.notes.patchTodo = patchTodo;
+    Object.defineProperty(window, "prompt", {
+      value: vi.fn(() => "done"),
+      configurable: true,
+    });
+
+    await openAgendaView(d);
+    document.querySelectorAll<HTMLElement>(".aaronnote-agenda-full-mark")[0].click();
+    document.querySelectorAll<HTMLElement>(".aaronnote-agenda-full-mark")[1].click();
+    document.querySelector<HTMLButtonElement>(".aaronnote-agenda-full-bulk")!.click();
+    await flushAsync();
+
+    expect(patchTodo).toHaveBeenCalledTimes(2);
+    expect(patchTodo.mock.calls[0][0]).toMatchObject({ id: "one", index: 10, op: "complete" });
+    expect(patchTodo.mock.calls[1][0]).toMatchObject({ id: "two", op: "complete" });
+    expect(patchTodo.mock.calls[1][0]).not.toHaveProperty("index");
+    expect(agenda).toHaveBeenCalledTimes(2);
+  });
+
+  test("SSE refresh immediately after a local mutation is suppressed", async () => {
+    const d = deps();
+    const agenda = vi.fn(async () => projectAgenda);
+    const patchTodo = vi.fn(async () => ({}));
+    d.api.notes.agenda = agenda;
+    d.api.notes.patchTodo = patchTodo;
+
+    await openAgendaView(d);
+    document.querySelector<HTMLElement>(".aaronnote-agenda-full-status")!.click();
+    await flushAsync();
+    expect(patchTodo).toHaveBeenCalledTimes(1);
+    expect(agenda).toHaveBeenCalledTimes(2);
+
+    await refreshAgendaView();
+    expect(agenda).toHaveBeenCalledTimes(2);
   });
 
   test("month view renders a real 6-week calendar grid with event pills", async () => {
