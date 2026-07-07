@@ -1,5 +1,5 @@
 import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -9,6 +9,8 @@ import { configure } from "../server/lib/state.mjs";
 import * as serverIndex from "../server/lib/index.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
 import { saveNote } from "../server/lib/save.mjs";
+// @ts-ignore The server is a Node ESM module outside the TS app graph.
+import { updateCurrentNoteMeta } from "../server/lib/runtime.mjs";
 
 const {
   graphPayload,
@@ -376,6 +378,44 @@ describe("server note refs", () => {
       expect(tagIndexPayload(notes).tags).toEqual([
         expect.objectContaining({ name: "graph", count: 1 }),
       ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("meta update writes and preserves file-level project", async () => {
+    const root = await setupRoot("aaronnote-meta-project-");
+    try {
+      const file = join(root, "paper.md");
+      await writeFile(file, [
+        "#+begin meta",
+        "id: paper",
+        "title: Paper",
+        "tags: old",
+        "#+end meta",
+        "",
+        "# Paper",
+        "",
+      ].join("\n"), "utf8");
+
+      await updateCurrentNoteMeta({
+        file,
+        content: await readFile(file, "utf8"),
+        title: "Paper",
+        project: "iso-202603",
+        tags: ["old"],
+        kind: "default",
+      }, "add");
+      expect(await readFile(file, "utf8")).toContain("project: iso-202603");
+
+      await updateCurrentNoteMeta({
+        file,
+        content: await readFile(file, "utf8"),
+        tags: ["new"],
+      }, "tag");
+      const content = await readFile(file, "utf8");
+      expect(content).toContain("project: iso-202603");
+      expect(content).toContain("tags: new, old");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

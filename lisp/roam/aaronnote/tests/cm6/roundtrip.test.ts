@@ -1817,6 +1817,9 @@ $x$
     const todo = document.querySelector<HTMLElement>(".inline-planning-widget[data-kind='todo']");
     expect(todo).toBeTruthy();
     expect(todo!.dataset.status).toBe("doing");
+    expect(todo!.dataset.planningKind).toBe("todo");
+    expect(todo!.dataset.planningSourceFrom).toBe("0");
+    expect(Number(todo!.dataset.planningSourceTo)).toBe(md.indexOf("\nplain"));
     expect(todo!.textContent).toContain("TODO");
     expect(todo!.textContent).toContain("DOING");
     expect(todo!.textContent).toContain("write proof");

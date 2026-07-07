@@ -321,6 +321,10 @@ class TodoWidget extends MeasuredWidget {
     wrap.dataset.cmSourceFrom = String(cmd.fullFrom);
     wrap.dataset.cmSourceTo = String(cmd.fullTo);
     wrap.dataset.cmOpenSource = "true";
+    wrap.dataset.planningKind = cmd.name;
+    wrap.dataset.planningStatus = status;
+    wrap.dataset.planningSourceFrom = String(cmd.fullFrom);
+    wrap.dataset.planningSourceTo = String(cmd.blockTo ?? cmd.fullTo);
 
     const card = document.createElement("span");
     card.className = "inline-todo-card";
@@ -446,6 +450,10 @@ class PlanningBlockWidget extends MeasuredWidget {
     wrap.dataset.cmSourceFrom = String(cmd.fullFrom);
     wrap.dataset.cmSourceTo = String(cmd.fullTo);
     wrap.dataset.cmOpenSource = "true";
+    wrap.dataset.planningKind = kind;
+    if (status) wrap.dataset.planningStatus = status;
+    wrap.dataset.planningSourceFrom = String(cmd.fullFrom);
+    wrap.dataset.planningSourceTo = String(cmd.blockTo ?? cmd.fullTo);
 
     const head = document.createElement("span");
     head.className = "inline-planning-head";

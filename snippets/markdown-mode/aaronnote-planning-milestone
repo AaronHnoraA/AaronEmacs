@@ -3,4 +3,4 @@
 # key: apmile
 # group: Aaronnote planning DSL
 # --
-@@milestone ${1:Milestone} {project: ${2:project}, date: ${3:2026-07-21}}$0
+@@milestone ${1:Milestone} {}$0

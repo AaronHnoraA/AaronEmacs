@@ -617,6 +617,36 @@ describe("planning project and Gantt model", () => {
     });
   });
 
+  test("file meta project is the default planning project for items without args", async () => {
+    await withVault(async (root) => {
+      await writeFile(join(root, "graph.md"), [
+        "#+begin meta",
+        "id: graph",
+        "title: Graph Tensor",
+        "project: iso-202603",
+        "#+end meta",
+        "",
+        "# Graph Tensor",
+        "",
+        "@@project(active) [ISO 202603 tensor paper] {}",
+        "@@todo(doing) [clean definitions] {effort: 2h}",
+        "@@milestone [proof freeze] {date: 2026-07-17}",
+        "",
+      ].join("\n"), "utf8");
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ includePlanning: true, includeGantt: true, days: 30 });
+      expect(agenda.projects).toMatchObject([{ title: "ISO 202603 tensor paper", args: { project: "iso-202603" } }]);
+      expect(agenda.todos.find((todo: any) => todo.text === "clean definitions")).toMatchObject({
+        canon: { project: "iso-202603", effort: "2h" },
+      });
+      expect(agenda.milestones).toMatchObject([{ title: "proof freeze", args: { project: "iso-202603", date: "2026-07-17" } }]);
+      expect(agenda.projectModel).toMatchObject([
+        { key: "iso-202603", title: "ISO 202603 tensor paper", total: 1, doing: 1, effortMinutes: 120 },
+      ]);
+      expect(agenda.gantt.milestones).toMatchObject([{ name: "proof freeze", project: "iso-202603" }]);
+    });
+  });
+
   test("project progress rolls up from child todo completion when not set explicitly", async () => {
     await withVault(async (root) => {
       await writeFile(join(root, "p.md"), [
@@ -633,6 +663,27 @@ describe("planning project and Gantt model", () => {
       const model = agenda.projectModel.find((p: any) => p.key === "side");
       // 2 done out of 3 non-cancelled (cancelled is excluded from the base) = 67%
       expect(model).toMatchObject({ total: 4, done: 2, open: 1, cancelled: 1, progress: 67 });
+    });
+  });
+
+  test("unprojected note todos do not synthesize project cards or analysis project keys", async () => {
+    await withVault(async (root) => {
+      await writeFile(join(root, "graph.md"), [
+        "---\nid: graph\n---\n# Graph Tensor\n",
+        "@@itodo(doing) [clean definitions] {sche: 2026-07-07}",
+        "@@itodo [check proof]",
+        '@@clock [clean definitions] {from: "2026-07-07 09:00", to: "2026-07-07 09:30"}',
+        "@@milestone [local note marker] {date: 2026-07-10}",
+        "",
+      ].join("\n"), "utf8");
+      await syncRoamDb(null, { mode: "full" });
+      const agenda = await buildAgenda({ includePlanning: true, includeGantt: true });
+      expect(agenda.todos.map((todo: any) => todo.text)).toContain("clean definitions");
+      expect(agenda.projectModel).toEqual([]);
+      expect(agenda.clocktable.byProject).toEqual({});
+      expect(agenda.gantt.backlog.find((task: any) => task.name === "clean definitions")).toMatchObject({ project: "" });
+      expect(agenda.gantt.milestones).toMatchObject([{ name: "local note marker", project: "" }]);
+      expect(JSON.stringify(agenda)).not.toContain("Graph Tensor (");
     });
   });
 

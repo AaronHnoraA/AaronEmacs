@@ -33,6 +33,8 @@ import { blobToBase64 } from "../src/paste.ts";
 import { collectFindMatches, createFindPattern, type FindMatch } from "./find.ts";
 import { AssistScheduler, type AssistUpdateFlags, type AssistUpdateOptions } from "./assist-scheduler.ts";
 import { createFloatingTocPanel, inlineTagAnchorsFromText, markdownHeadingsFromText } from "./floating-toc.ts";
+import { normalizeDateValue } from "../src/planning-values.ts";
+import { patchPlanningNodeRaw, scanPlanningNodes } from "../shared/planning-dsl.mjs";
 import {
   buildLatexExportScopes,
   latexExportScopesContent,
@@ -88,7 +90,6 @@ root.innerHTML = `
       <button type="button" class="aaronnote-jupyter-stealth-button" data-jupyter-toggle aria-expanded="false" title="Code cells" aria-label="Code cells">&#xf121;</button>
       <button type="button" data-toc-toggle aria-expanded="false">TOC</button>
       <button type="button" data-agenda-toggle aria-expanded="false">Agenda</button>
-      <button type="button" data-agenda-full-toggle title="Full agenda (all notes)">Agenda+</button>
       <button type="button" data-graph-toggle aria-expanded="false">Graph</button>
       <button type="button" data-tools-toggle aria-expanded="false">Tools</button>
       <button type="button" data-source>Source</button>
@@ -107,7 +108,6 @@ const writingStatsLabel = root.querySelector<HTMLElement>("[data-writing-stats]"
 const jupyterButton = root.querySelector<HTMLButtonElement>("[data-jupyter-toggle]")!;
 const tocButton = root.querySelector<HTMLButtonElement>("[data-toc-toggle]")!;
 const agendaButton = root.querySelector<HTMLButtonElement>("[data-agenda-toggle]")!;
-const agendaFullButton = root.querySelector<HTMLButtonElement>("[data-agenda-full-toggle]")!;
 const graphButton = root.querySelector<HTMLButtonElement>("[data-graph-toggle]")!;
 const toolsButton = root.querySelector<HTMLButtonElement>("[data-tools-toggle]")!;
 const sourceButton = root.querySelector<HTMLButtonElement>("[data-source]")!;
@@ -1871,6 +1871,7 @@ type AaronContextMenuTarget = {
 function showContextMenu(event: MouseEvent, target: Partial<AaronContextMenuTarget> = {}): void {
   const selection = editor.getMarkdownSelection();
   const hasSelection = selection.from !== selection.to;
+  const planningTarget = planningEditTargetFromPointer(event);
   const cell = target.cell !== undefined ? target.cell : jupyterCellFromPointer(event, false);
   const href = cleanHref(target.href || markdownHrefFromPointer(event));
   const cellDetail = cell
@@ -1878,7 +1879,14 @@ function showContextMenu(event: MouseEvent, target: Partial<AaronContextMenuTarg
     : "";
   const items: AaronContextMenuItem[] = [];
 
-  if (cell) {
+  if (planningTarget) {
+    items.push({
+      label: "Agenda...",
+      detail: planningTarget.detail,
+      disabled: currentReadOnly,
+      run: () => openAgendaEditPop(planningTarget),
+    });
+  } else if (cell) {
     items.push(
       { label: "Run Cell", detail: cellDetail, disabled: !currentFile, run: () => runJupyterCell(cell) },
       { label: "Edit Cell Source", detail: cell.id, disabled: !currentFile, run: () => openJupyterCellSource(cell) },
@@ -3229,7 +3237,7 @@ type ModalField = {
   id: string;
   label: string;
   value?: string;
-  type?: "text" | "tags" | "select";
+  type?: "text" | "tags" | "select" | "suggest";
   suggestions?: string[];
   options?: { value: string; label: string }[];
 };
@@ -3284,14 +3292,19 @@ function openFormModal(title: string, fields: ModalField[], submitLabel = "OK"):
       inputs.set(field.id, input);
       panel.appendChild(label);
 
-      if (field.type === "tags" && field.suggestions?.length) {
+      if ((field.type === "tags" || field.type === "suggest") && field.suggestions?.length) {
         const picker = document.createElement("div");
-        picker.className = "aaronnote-modal-tag-picker";
+        picker.className = field.type === "tags" ? "aaronnote-modal-tag-picker" : "aaronnote-modal-suggestion-picker";
         for (const tag of field.suggestions.slice(0, 40)) {
           const button = document.createElement("button");
           button.type = "button";
-          button.textContent = `#${tag}`;
+          button.textContent = field.type === "tags" ? `#${tag}` : tag;
           button.addEventListener("click", () => {
+            if (field.type === "suggest") {
+              input.value = tag;
+              input.dispatchEvent(new Event("input", { bubbles: true }));
+              return;
+            }
             const existing = parseTagPrompt(input.value);
             const lower = tag.toLowerCase();
             input.value = existing.some((item) => item.toLowerCase() === lower)
@@ -3345,6 +3358,361 @@ function openFormModal(title: string, fields: ModalField[], submitLabel = "OK"):
 
 function currentMarkdownText(): string {
   return editor.view.state.doc.toString();
+}
+
+type PlanningNodeLike = {
+  kind: string;
+  status?: string;
+  title?: string;
+  attrs?: Record<string, string>;
+  raw: string;
+  shape?: string;
+  span: { from: number; to: number; line?: number; column?: number };
+};
+
+type PlanningEditTarget = {
+  from: number;
+  to: number;
+  detail: string;
+};
+
+const AGENDA_ARG_ALIASES: Record<string, string[]> = {
+  project: ["project", "proj"],
+  ddl: ["ddl", "due", "deadline"],
+  sche: ["sche", "scheduled", "start"],
+  end: ["end", "finish"],
+  prio: ["prio", "priority"],
+  repeat: ["repeat", "rep", "every"],
+  warn: ["warn", "lead"],
+  after: ["after", "dep"],
+  blocks: ["blocks"],
+  area: ["area"],
+  phase: ["phase"],
+  goal: ["goal"],
+  effort: ["effort"],
+  progress: ["progress", "pct"],
+  owner: ["owner"],
+  date: ["date", "when"],
+  context: ["context", "ctx"],
+  from: ["from"],
+  to: ["to"],
+};
+
+const AGENDA_DATE_FIELDS = new Set(["ddl", "sche", "end", "date", "from", "to"]);
+
+function agendaNodes(): PlanningNodeLike[] {
+  return scanPlanningNodes(currentMarkdownText()) as PlanningNodeLike[];
+}
+
+function agendaArgValue(attrs: Record<string, string> | undefined, canon: string): string {
+  for (const key of AGENDA_ARG_ALIASES[canon] || [canon]) {
+    const value = String(attrs?.[key] || "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function agendaArgWriteKey(attrs: Record<string, string> | undefined, canon: string): string {
+  for (const key of AGENDA_ARG_ALIASES[canon] || [canon]) {
+    if (Object.prototype.hasOwnProperty.call(attrs || {}, key)) return key;
+  }
+  return (AGENDA_ARG_ALIASES[canon] || [canon])[0] || canon;
+}
+
+function setAgendaPatchValue(
+  patch: Record<string, string | null>,
+  attrs: Record<string, string> | undefined,
+  canon: string,
+  rawValue: string,
+  options: { skipIfInherited?: boolean } = {},
+): void {
+  const value = normalizeAgendaFieldValue(canon, rawValue);
+  for (const key of AGENDA_ARG_ALIASES[canon] || [canon]) patch[key] = null;
+  if (!value || options.skipIfInherited) return;
+  patch[agendaArgWriteKey(attrs, canon)] = value;
+}
+
+function stripMetaQuotes(value: string): string {
+  return value.trim().replace(/^["']|["']$/g, "");
+}
+
+function projectFromMetaBody(raw: string): string {
+  for (const line of raw.split(/\r?\n/)) {
+    const match = line.match(/^\s*(project|proj)\s*:\s*(.+?)\s*$/i);
+    if (match?.[2]) return stripMetaQuotes(match[2]);
+  }
+  return "";
+}
+
+function currentFileProjectFromMarkdown(): string {
+  const md = currentMarkdownText();
+  const front = md.match(/^\s*---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/)?.[1] || "";
+  const org = md.match(/^\s*#\+begin\s+meta\s*\r?\n([\s\S]*?)\r?\n\s*#\+end\s+meta\s*$/im)?.[1] || "";
+  return projectFromMetaBody(org) || projectFromMetaBody(front);
+}
+
+function agendaProjectSlug(text: string): string {
+  return String(text || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "";
+}
+
+function inferredProjectForNode(node: PlanningNodeLike, nodes: PlanningNodeLike[]): string {
+  const own = agendaArgValue(node.attrs, "project");
+  if (own) return own;
+  const metaProject = currentFileProjectFromMarkdown();
+  if (metaProject) return metaProject;
+  const previousProject = [...nodes]
+    .reverse()
+    .find((candidate) => candidate.kind === "project" && candidate.span.from < node.span.from);
+  if (previousProject) return agendaArgValue(previousProject.attrs, "project") || agendaProjectSlug(previousProject.title || "");
+  if (node.kind === "project") return agendaProjectSlug(node.title || "");
+  return "";
+}
+
+function agendaProjectSuggestions(nodes: PlanningNodeLike[], fallback = ""): string[] {
+  const values = new Set<string>();
+  const add = (value: unknown): void => {
+    const clean = String(value || "").trim();
+    if (clean) values.add(clean);
+  };
+  add(fallback);
+  add(currentFileProjectFromMarkdown());
+  for (const node of nodes) {
+    add(agendaArgValue(node.attrs, "project"));
+    if (node.kind === "project") add(agendaProjectSlug(node.title || ""));
+  }
+  for (const todo of agendaTodos) add((todo.canon as Record<string, string> | undefined)?.project);
+  for (const note of notes) add((note as NoteSummary & { project?: string }).project);
+  return [...values].sort((a, b) => a.localeCompare(b));
+}
+
+async function agendaProjectSuggestionsWithGlobal(nodes: PlanningNodeLike[], fallback = ""): Promise<string[]> {
+  const values = new Set(agendaProjectSuggestions(nodes, fallback));
+  const add = (value: unknown): void => {
+    const clean = String(value || "").trim();
+    if (clean) values.add(clean);
+  };
+  try {
+    const agenda = await api.notes.agenda({ includePlanning: true, days: 1 });
+    for (const project of agenda.projects || []) {
+      add(project.canon?.project);
+      add(project.args?.project);
+      add(project.args?.proj);
+      if (!project.canon?.project && !project.args?.project && !project.args?.proj) add(agendaProjectSlug(project.title || project.text || ""));
+    }
+    for (const project of agenda.projectModel || []) add(project.key);
+    for (const task of agenda.gantt?.lanes || []) add(task.key);
+  } catch {
+    // Local editor suggestions should still work if the full agenda is unavailable.
+  }
+  return [...values].sort((a, b) => a.localeCompare(b));
+}
+
+function agendaDateOnly(time = Date.now()): string {
+  const d = new Date(time);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function agendaDateTime(time = Date.now()): string {
+  const d = new Date(time);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${agendaDateOnly(time)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function normalizeAgendaFieldValue(canon: string, rawValue: string): string {
+  const value = String(rawValue || "").trim();
+  if (!value) return "";
+  if (AGENDA_DATE_FIELDS.has(canon)) return normalizeDateValue(value) || value;
+  if (canon === "prio") return value.slice(0, 1).toUpperCase();
+  if (canon === "progress") return String(Math.max(0, Math.min(100, Number(value) || 0)));
+  return value;
+}
+
+function planningWidgetFromTarget(target: EventTarget | null): HTMLElement | null {
+  const element = target instanceof Element ? target : null;
+  return element?.closest<HTMLElement>("[data-planning-kind][data-planning-source-from][data-planning-source-to]") ?? null;
+}
+
+function planningNodeAtPointer(event: MouseEvent): PlanningNodeLike | null {
+  const nodes = agendaNodes();
+  const widget = planningWidgetFromTarget(event.target);
+  if (widget) {
+    const from = Number(widget.dataset.planningSourceFrom);
+    return nodes.find((node) => node.span.from === from)
+      || nodes.find((node) => Number.isFinite(from) && node.span.from <= from && from <= node.span.to)
+      || null;
+  }
+  const pos = editor.view.posAtCoords({ x: event.clientX, y: event.clientY });
+  if (typeof pos !== "number") return null;
+  return nodes.find((node) => node.span.from <= pos && pos <= node.span.to) || null;
+}
+
+function planningEditTargetFromPointer(event: MouseEvent): PlanningEditTarget | null {
+  const node = planningNodeAtPointer(event);
+  if (!node) return null;
+  const kind = node.kind.toUpperCase();
+  const title = String(node.title || "").trim();
+  return {
+    from: node.span.from,
+    to: node.span.to,
+    detail: title ? `${kind} - ${title}` : kind,
+  };
+}
+
+function planningNodeForTarget(target: PlanningEditTarget): { node: PlanningNodeLike; nodes: PlanningNodeLike[] } | null {
+  const nodes = agendaNodes();
+  const node = nodes.find((candidate) => candidate.span.from === target.from)
+    || nodes.find((candidate) => candidate.span.from <= target.from && target.from <= candidate.span.to)
+    || nodes.find((candidate) => candidate.span.from <= target.to && target.to <= candidate.span.to)
+    || null;
+  return node ? { node, nodes } : null;
+}
+
+function agendaStatusOptions(kind: string): { value: string; label: string }[] {
+  if (kind === "project") {
+    return [
+      { value: "active", label: "Active" },
+      { value: "paused", label: "Paused" },
+      { value: "done", label: "Done" },
+      { value: "cancelled", label: "Cancelled" },
+    ];
+  }
+  return [
+    { value: "todo", label: "Todo" },
+    { value: "doing", label: "Doing" },
+    { value: "done", label: "Done" },
+    { value: "blocked", label: "Blocked" },
+    { value: "cancelled", label: "Cancelled" },
+  ];
+}
+
+function agendaEditFields(
+  node: PlanningNodeLike,
+  nodes: PlanningNodeLike[],
+  defaults: { inheritedProject?: string; projectSuggestions?: string[] } = {},
+): { fields: ModalField[]; inheritedProject: string } {
+  const kind = node.kind;
+  const attrs = node.attrs || {};
+  const inheritedProject = defaults.inheritedProject ?? inferredProjectForNode(node, nodes);
+  const projectSuggestions = defaults.projectSuggestions ?? agendaProjectSuggestions(nodes, inheritedProject);
+  const field = (id: string, label: string, value = "", suggestions?: string[], type: ModalField["type"] = "text"): ModalField => ({ id, label, value, suggestions, type });
+  const project = field("project", "Project", agendaArgValue(attrs, "project") || inheritedProject, projectSuggestions, "suggest");
+  const fields: ModalField[] = [];
+  if (kind === "todo" || kind === "itodo") {
+    fields.push({
+      id: "status",
+      label: "Status",
+      type: "select",
+      value: node.status || "todo",
+      options: agendaStatusOptions(kind),
+    });
+    fields.push(
+      project,
+      field("prio", "Priority", agendaArgValue(attrs, "prio"), ["A", "B", "C"]),
+      field("ddl", "Deadline", agendaArgValue(attrs, "ddl"), ["today", "tomorrow", "+3d", "+1w"]),
+      field("sche", "Scheduled", agendaArgValue(attrs, "sche"), ["today", "tomorrow", "+3d", "+1w"]),
+      field("end", "End", agendaArgValue(attrs, "end"), ["today", "tomorrow", "+1w"]),
+      field("effort", "Effort", agendaArgValue(attrs, "effort"), ["30m", "1h", "2h", "4h"]),
+      field("progress", "Progress", agendaArgValue(attrs, "progress"), ["0", "25", "50", "75", "100"]),
+      field("repeat", "Repeat", agendaArgValue(attrs, "repeat"), ["+1d", "+1w", "+1m"]),
+      field("after", "After", agendaArgValue(attrs, "after")),
+      field("context", "Context", agendaArgValue(attrs, "context")),
+    );
+  } else if (kind === "project") {
+    fields.push({
+      id: "status",
+      label: "Status",
+      type: "select",
+      value: node.status || "active",
+      options: agendaStatusOptions(kind),
+    });
+    fields.push(
+      project,
+      field("area", "Area", agendaArgValue(attrs, "area")),
+      field("phase", "Phase", agendaArgValue(attrs, "phase")),
+      field("owner", "Owner", agendaArgValue(attrs, "owner")),
+      field("goal", "Goal", agendaArgValue(attrs, "goal")),
+      field("progress", "Progress", agendaArgValue(attrs, "progress"), ["0", "25", "50", "75", "100"]),
+      field("sche", "Start", agendaArgValue(attrs, "sche"), ["today", "tomorrow", "+1w"]),
+      field("end", "End", agendaArgValue(attrs, "end"), ["today", "tomorrow", "+1w"]),
+      field("ddl", "Deadline", agendaArgValue(attrs, "ddl"), ["today", "tomorrow", "+1w"]),
+    );
+  } else if (kind === "milestone") {
+    fields.push(
+      project,
+      field("date", "Date", agendaArgValue(attrs, "date") || agendaDateOnly(), ["today", "tomorrow", "+1w"]),
+    );
+  } else if (kind === "clock") {
+    fields.push(
+      project,
+      field("from", "From", agendaArgValue(attrs, "from") || agendaDateTime(), ["now"]),
+      field("to", "To", agendaArgValue(attrs, "to"), ["now"]),
+    );
+  }
+  return { fields, inheritedProject };
+}
+
+function statusPatchForAgendaNode(node: PlanningNodeLike, selectedStatus: string): string | undefined {
+  const kind = node.kind;
+  if (kind !== "todo" && kind !== "itodo" && kind !== "project") return undefined;
+  const implicit = kind === "project" ? "active" : "todo";
+  const selected = String(selectedStatus || implicit).trim().toLowerCase();
+  const current = String(node.status || implicit).trim().toLowerCase();
+  if (selected === current && !node.status) return undefined;
+  if (kind !== "project" && selected === "todo") return "";
+  return selected;
+}
+
+function agendaPatchFromForm(
+  node: PlanningNodeLike,
+  values: Record<string, string>,
+  inheritedProject: string,
+): { status?: string; attrs: Record<string, string | null> } {
+  const attrs = node.attrs || {};
+  const patch: { status?: string; attrs: Record<string, string | null> } = { attrs: {} };
+  const nextStatus = statusPatchForAgendaNode(node, values.status || "");
+  if (nextStatus !== undefined) patch.status = nextStatus;
+  for (const key of Object.keys(AGENDA_ARG_ALIASES)) {
+    if (!Object.prototype.hasOwnProperty.call(values, key)) continue;
+    const value = values[key] || "";
+    const inherited = key === "project"
+      && !agendaArgValue(attrs, "project")
+      && normalizeAgendaFieldValue("project", value) === inheritedProject;
+    setAgendaPatchValue(patch.attrs, attrs, key, value, { skipIfInherited: inherited });
+  }
+  return patch;
+}
+
+async function openAgendaEditPop(target: PlanningEditTarget): Promise<void> {
+  const found = planningNodeForTarget(target);
+  if (!found) {
+    setStatus("Agenda item not found");
+    return;
+  }
+  const { node, nodes } = found;
+  const inheritedProject = inferredProjectForNode(node, nodes);
+  const projectSuggestions = await agendaProjectSuggestionsWithGlobal(nodes, inheritedProject);
+  const { fields } = agendaEditFields(node, nodes, { inheritedProject, projectSuggestions });
+  if (fields.length === 0) {
+    setStatus("No editable agenda fields");
+    return;
+  }
+  const title = `${node.kind.toUpperCase()} - ${String(node.title || "").trim() || "Agenda"}`;
+  const values = await openFormModal(title, fields, "Apply");
+  if (!values) return;
+  const patch = agendaPatchFromForm(node, values, inheritedProject);
+  const nextRaw = patchPlanningNodeRaw(node, patch);
+  if (nextRaw === node.raw) {
+    setStatus("Agenda unchanged");
+    return;
+  }
+  editor.replaceMarkdownRange(node.span.from, node.span.to, nextRaw, "end");
+  scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+  setStatus("Agenda updated");
 }
 
 function openLatexScopeModal(scopes: readonly LatexExportScope[]): Promise<LatexExportScope[] | null> {
@@ -3700,12 +4068,20 @@ async function updateNoteMeta(
 }
 
 async function quickAddMeta(): Promise<void> {
+  const project = currentFileProjectFromMarkdown();
+  const projectSuggestions = await agendaProjectSuggestionsWithGlobal(agendaNodes(), project);
   const result = await openFormModal("Quick add meta", [
     { id: "title", label: "Title", value: currentNote()?.title || fileLabel.textContent || "Untitled" },
+    { id: "project", label: "Project", type: "suggest", value: project, suggestions: projectSuggestions },
     { id: "tags", label: "Tags", type: "tags", value: relationTags(currentNote()).join(", "), suggestions: tagSuggestions() },
   ], "Register");
   if (!result) return;
-  await updateNoteMeta(api.meta.add, { title: result.title, tags: parseTagPrompt(result.tags), kind: currentKind || "default" }, "Meta registered");
+  await updateNoteMeta(api.meta.add, {
+    title: result.title,
+    project: result.project,
+    tags: parseTagPrompt(result.tags),
+    kind: currentKind || "default",
+  }, "Meta registered");
 }
 
 async function unregisterMeta(): Promise<void> {
@@ -3728,15 +4104,19 @@ async function addTag(): Promise<void> {
 
 async function manageNoteTags(): Promise<void> {
   const note = currentNote();
-  const result = await openFormModal("Note tags", [
+  const project = currentFileProjectFromMarkdown();
+  const projectSuggestions = await agendaProjectSuggestionsWithGlobal(agendaNodes(), project);
+  const result = await openFormModal("Note meta", [
+    { id: "project", label: "Project", type: "suggest", value: project, suggestions: projectSuggestions },
     { id: "tags", label: "Tags", type: "tags", value: relationTags(note).join(", "), suggestions: tagSuggestions() },
   ], "Update");
   if (!result) return;
   await updateNoteMeta(api.meta.add, {
     title: note?.title || fileLabel.textContent || "Untitled",
+    project: result.project,
     tags: parseTagPrompt(result.tags),
     kind: note?.kind || currentKind || "default",
-  }, "Tags updated");
+  }, "Meta updated");
 }
 
 async function insertRoamIdLink(): Promise<void> {
@@ -4176,6 +4556,17 @@ function renderAgendaTool(): void {
   filters.appendChild(search);
   rootEl.appendChild(filters);
 
+  const subnav = document.createElement("div");
+  subnav.className = "aaronnote-agenda-subnav";
+  const fullAgenda = document.createElement("button");
+  fullAgenda.type = "button";
+  fullAgenda.textContent = "Full Agenda";
+  fullAgenda.addEventListener("click", () => {
+    window.location.href = "/agenda?view=agenda";
+  });
+  subnav.appendChild(fullAgenda);
+  rootEl.appendChild(subnav);
+
   const meta = document.createElement("div");
   meta.className = "aaronnote-agenda-meta";
   meta.textContent = `${visible.length} shown - ${todoToday()}`;
@@ -4370,7 +4761,7 @@ function toolActions(): ToolAction[] {
     { id: "hide-roam", title: "Set roam off", detail: "Keep meta but hide from roam graph", run: () => void updateNoteMeta(api.meta.hideRoam, {}, "roam: off set") },
     { id: "activate-roam", title: "Clear roam off", detail: "Activate current note in roam graph", run: () => void updateNoteMeta(api.meta.activateRoam, {}, "roam: off cleared") },
     { id: "add-tag", title: "Add tag", detail: "Append tags to current note", run: () => void addTag() },
-    { id: "manage-tags", title: "Manage note tags", detail: "Replace current note tag list", run: () => void manageNoteTags() },
+    { id: "manage-tags", title: "Manage note meta", detail: "Project and tags", run: () => void manageNoteTags() },
     { id: "insert-roam-idlink", title: "Insert roam idlink", detail: "Search roam note and insert id link", run: () => void insertRoamIdLink() },
     { id: "rename-tag", title: "Rename roam tag", detail: "Bulk rename tag in roam notes", run: () => void renameRoamTagTool() },
     { id: "delete-tag", title: "Delete roam tag", detail: "Bulk remove tag in roam notes", run: () => void deleteRoamTagTool() },
@@ -5952,9 +6343,6 @@ agendaButton.addEventListener("click", () => {
     return;
   }
   void openAgendaTool();
-});
-agendaFullButton.addEventListener("click", () => {
-  window.location.href = "/agenda?view=agenda";
 });
 toolsButton.addEventListener("click", toggleToolsPanel);
 toolsClose.addEventListener("click", closeToolsPanel);

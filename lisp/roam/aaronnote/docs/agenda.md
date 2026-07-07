@@ -283,13 +283,15 @@ Browsing candidates never mints an id (see [Stable ids](#stable-ids)).
 
 `buildProjectModel(projects, todos, clocks)` groups todos onto each
 `@@project` by the **same key** `inferTodoProject`/the Gantt model already
-use — explicit `project:`/`proj:`, else the slugified title of the nearest
-preceding same-file `@@project`, else the note's own title (`"Inbox"`
-fallback). Per project: open/doing/done/cancelled/blocked counts, `total`,
+use — explicit `project:`/`proj:`, file-level `project:` defaults injected
+into those args, or the slugified title of the nearest preceding same-file
+`@@project`. A note title is not a project; unprojected todos remain
+unprojected. Per project: open/doing/done/cancelled/blocked counts, `total`,
 `progress` (an explicit `progress:` key wins; otherwise `done / (total -
 cancelled)` rounded to a percent), `effortMinutes` and `clockedMinutes`
 summed from its todos. Todos whose inferred project key doesn't match any
-real `@@project` still get a synthetic rollup entry — nothing is dropped.
+real `@@project` stay visible in agenda/list views but do not get synthetic
+project rollup cards.
 
 ## Gantt model
 

@@ -3,4 +3,4 @@
 # key: apclock
 # group: Aaronnote planning DSL
 # --
-@@clock ${1:Task} {from: "${2:2026-07-06 09:00}", to: "${3:2026-07-06 10:30}"}$0
+@@clock ${1:Task} {}$0

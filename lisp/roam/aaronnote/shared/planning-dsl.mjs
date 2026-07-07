@@ -277,11 +277,20 @@ function replaceAttrsInRaw(raw, nextAttrsRaw) {
   const text = String(raw || "");
   const attrs = String(nextAttrsRaw || "");
   const bracket = text.indexOf("[");
-  if (bracket < 0) return text;
-  const close = findInlineCommandClose(text, bracket, "]");
-  if (close < 0) return text;
-  let pos = close + 1;
-  while (text[pos] === " " || text[pos] === "\t") pos++;
+  let pos = -1;
+  if (bracket >= 0) {
+    const close = findInlineCommandClose(text, bracket, "]");
+    if (close < 0) return text;
+    pos = close + 1;
+    while (text[pos] === " " || text[pos] === "\t") pos++;
+  } else {
+    const titleFrom = text.match(/^@@[A-Za-z][\w-]*(?:\([^)\n]*\))?[ \t]+/)?.[0]?.length ?? -1;
+    if (titleFrom < 0) return text;
+    const lineEnd = text.indexOf("\n", titleFrom);
+    const headerEnd = lineEnd < 0 ? text.length : lineEnd;
+    pos = text.indexOf("{", titleFrom);
+    if (pos < 0 || pos > headerEnd) return attrs ? `${text.trimEnd()} ${attrs}` : text;
+  }
   if (text[pos] === "{") {
     if (text.includes("\n", pos)) return `${text.slice(0, pos).trimEnd()} ${attrs}`;
     const end = findInlineCommandClose(text, pos, "}");
@@ -302,6 +311,7 @@ export function patchPlanningNodeRaw(node, patch = {}) {
     const prefix = status ? `@@${node.kind}(${status}) ` : `@@${node.kind} `;
     raw = raw.replace(/^@@[A-Za-z][\w-]*(?:\([^)\n]*\))?[ \t]+/i, prefix);
   }
-  const nextAttrsRaw = node?.shape === "block" ? serializeBlockAttrs(attrs) : serializeInlineAttrs(attrs);
+  const emptyAttrsRaw = TITLE_PLANNING_KINDS.has(String(node?.kind || "").toLowerCase()) ? "{}" : "";
+  const nextAttrsRaw = node?.shape === "block" ? serializeBlockAttrs(attrs) : (serializeInlineAttrs(attrs) || emptyAttrsRaw);
   return replaceAttrsInRaw(raw, nextAttrsRaw);
 }

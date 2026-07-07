@@ -3,4 +3,4 @@
 # key: apitodo
 # group: Aaronnote planning DSL
 # --
-@@itodo(${1:todo}) [${2:Task}] {project: ${3:project}, sche: ${4:2026-07-06}, end: ${5:2026-07-10}, prio: ${6:B}, effort: ${7:2h}, progress: ${8:0}}$0
+@@itodo(${1:todo}) [${2:Task}]$0

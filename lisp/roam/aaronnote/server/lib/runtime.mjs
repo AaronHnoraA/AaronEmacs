@@ -1387,6 +1387,7 @@ function buildMetaBlock(fields) {
   const tags = normalizeTags(fields.tags || []);
   const refs = normalizeTags(fields.refs || []);
   const aliases = normalizeTags(fields.aliases || []);
+  const project = String(fields.project || fields.proj || "").trim();
   const lines = ["#+begin meta"];
   // Omit the roam id for standalone (non-roam) notes so they keep a meta block
   // (tags etc.) without being synced into the roam graph database.
@@ -1397,6 +1398,7 @@ function buildMetaBlock(fields) {
     `kind: ${fields.kind || defaultNoteKind}`,
   );
   if (roamOffFromMeta(fields)) lines.push("roam: off");
+  if (project) lines.push(`project: ${project}`);
   lines.push(
     `tags: ${tags.join(", ")}`,
     `refs: ${refs.join(", ")}`,
@@ -2134,6 +2136,11 @@ function sourceFromContent(content) {
   return String(meta.source || "");
 }
 
+function projectFromContent(content) {
+  const meta = noteMetadata(content);
+  return String(meta.project || meta.proj || "").trim();
+}
+
 function normalizeNoteKind(value) {
   const item = Array.isArray(value) ? value[0] : value;
   const kind = String(item || "").trim().replace(/\\_/g, "_").toLowerCase();
@@ -2474,6 +2481,7 @@ async function noteFromFileForIndex(file) {
       groupLabel: groupLabelFor(groupKey),
       section: groupKey.includes(sep) ? groupKey.split(sep)[0] : groupKey,
       source: sourceFromContent(content),
+      project: projectFromContent(content),
       aliases: aliasesFromContent(content),
       summary: summaryFromContent(content),
       tags: tagsFromContent(content),
@@ -2722,6 +2730,13 @@ function normalizeArgDates(args) {
   return out;
 }
 
+function planningArgsWithNoteDefaults(attrs, note) {
+  const args = { ...(attrs || {}) };
+  const project = String(note?.project || "").trim();
+  if (project && !args.project && !args.proj) args.project = project;
+  return normalizeArgDates(args);
+}
+
 export function extractTodos(content, note, updatedAt) {
   const todos = [];
   const lineStarts = [0];
@@ -2742,7 +2757,7 @@ export function extractTodos(content, note, updatedAt) {
     const source = content.slice(command.span.from, command.span.to);
     const text = String(command.title || "").trim();
     const status = normalizeTodoStatus(command.status);
-    const args = normalizeArgDates(command.attrs);
+    const args = planningArgsWithNoteDefaults(command.attrs, note);
     const line = lineFor(command.span.from);
     const lineStart = lineStarts[line - 1] || 0;
     const lineEnd = content.indexOf("\n", lineStart);
@@ -2789,7 +2804,7 @@ export function extractPlanningItems(content, note, updatedAt) {
   const clocks = [];
   for (const node of nodes) {
     if (node.kind === "todo" || node.kind === "itodo") continue;
-    const args = normalizeArgDates(node.attrs || {});
+    const args = planningArgsWithNoteDefaults(node.attrs || {}, note);
     const canon = canonicalTodoArgs(args);
     const base = {
       id: args.id ? `#${args.id}` : `${note.file}:${node.span.from}`,
@@ -3301,11 +3316,21 @@ function projectSlug(text) {
 function inferTodoProject(todo, projects) {
   const explicit = todo.canon?.project || todo.args?.project || todo.args?.proj;
   if (explicit) return String(explicit);
+  return inferNearestProject(todo, projects);
+}
+
+function inferNearestProject(item, projects) {
   const sameFileProjects = projects
-    .filter((project) => project.file === todo.file && project.index < todo.index)
+    .filter((project) => project.file === item.file && project.index < item.index)
     .sort((a, b) => b.index - a.index);
   if (sameFileProjects[0]) return projectSlug(sameFileProjects[0].title || sameFileProjects[0].text);
-  return todo.noteTitle || "Inbox";
+  return "";
+}
+
+function inferPlanningProject(item, projects) {
+  const explicit = item.canon?.project || item.args?.project || item.args?.proj;
+  if (explicit) return String(explicit);
+  return inferNearestProject(item, projects);
 }
 
 // The project's own identity key, in the same space `inferTodoProject`
@@ -3365,10 +3390,12 @@ function buildProjectBars(tasks, projects) {
 }
 
 // Aggregates open/doing/done/blocked counts, progress, effort, and clocked
-// time onto each @@project — grouped by the same key `inferTodoProject`/
-// `buildGanttModel` already use, so this always matches the Gantt swimlanes.
-// Todos whose project key doesn't match any known @@project (e.g. bare
-// per-note grouping) still get a synthetic entry so nothing is dropped.
+// time onto each explicit @@project. Project keys come only from explicit
+// project/proj args, file-meta defaults injected into those args, or the
+// nearest preceding same-file @@project. A note title is not a project.
+// Todos whose project key does not match a known @@project remain visible in
+// the agenda/list views, but should not be promoted into synthetic project
+// cards.
 export function buildProjectModel(projects, todos, clocks) {
   const clockMinutesByTodoId = new Map();
   for (const clock of clocks || []) {
@@ -3412,7 +3439,7 @@ export function buildProjectModel(projects, todos, clocks) {
 
   for (const todo of todos) {
     const key = inferTodoProject(todo, projects);
-    if (!byKey.has(key)) byKey.set(key, emptyEntry(key));
+    if (!byKey.has(key)) continue;
     const entry = byKey.get(key);
     entry.total++;
     entry.childTodoIds.push(todo.id);
@@ -3478,7 +3505,7 @@ function buildGanttModel(todos, projects, milestones) {
     ganttMilestones.push({
       id: item.id,
       name: item.title || item.text || "Milestone",
-      project: item.canon?.project || item.args?.project || item.noteTitle || "Inbox",
+      project: inferPlanningProject(item, projects),
       date,
       source: { file: item.file, index: item.index, line: item.line, source: item.source, text: item.text },
     });
@@ -3951,7 +3978,14 @@ export async function createTodo(body = {}) {
   try { mtimeMs = (await stat(file)).mtimeMs; } catch {}
   const meta = noteMetadata(nextContent);
   const noteTitle = String(meta.title || defaultTodoFileTitle(file));
-  const todos = extractTodos(nextContent, { file, path: displayPathForFile(file), key: noteTitle, id: String(meta.id || ""), title: noteTitle }, mtimeMs);
+  const todos = extractTodos(nextContent, {
+    file,
+    path: displayPathForFile(file),
+    key: noteTitle,
+    id: String(meta.id || ""),
+    title: noteTitle,
+    project: String(meta.project || meta.proj || "").trim(),
+  }, mtimeMs);
   const created = todos.find((todo) => todo.index === index) || null;
   return {
     type: "todo-created",
@@ -6317,11 +6351,13 @@ export async function updateCurrentNoteMeta(body, action) {
   } else if (action === "activate-roam") {
     next = upsertMetaBlock(file, content, { roam: "" });
   } else {
-    next = upsertMetaBlock(file, content, {
+    const patch = {
       title: body.title,
       tags: body.tags || tagsFromContent(content),
       kind: body.kind || defaultNoteKind,
-    });
+    };
+    if (Object.prototype.hasOwnProperty.call(body || {}, "project")) patch.project = body.project;
+    next = upsertMetaBlock(file, content, patch);
   }
   if (next !== content) {
     await atomicWriteFile(file, next, "utf8");

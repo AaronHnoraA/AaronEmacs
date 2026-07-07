@@ -101,6 +101,12 @@ describe("planning DSL parser", () => {
       .toContain("progress=50");
   });
 
+  test("patches title planning command attrs", () => {
+    const [project] = scanPlanningNodes("@@project(active) ISO Paper {area: UNSW}");
+    expect(patchPlanningNodeRaw(project, { attrs: { project: "iso-202603", area: null } }))
+      .toBe("@@project(active) ISO Paper {project=iso-202603}");
+  });
+
   test("no longer recognizes the retired note/property kinds", () => {
     expect(PLANNING_KINDS.has("note")).toBe(false);
     expect(PLANNING_KINDS.has("property")).toBe(false);
