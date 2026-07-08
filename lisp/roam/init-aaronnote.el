@@ -37,6 +37,7 @@
 (declare-function xwidget-webkit-edit-mode "xwidget" (&optional arg))
 (declare-function xwidget-webkit-execute-script "xwidget" (xwidget script &optional callback))
 (declare-function xwidget-webkit-pass-command-event "xwidget" (event))
+(declare-function my/copilot-aaronnote-bridge-url "init-copilot" ())
 (declare-function my/aaronnote-jupyter-open-path "init-aaronnote-jupyter" (abs-path &optional selector))
 (declare-function my/aaronnote-jupyter-open-root "init-aaronnote-jupyter" ())
 (declare-function my/aaronnote-jupyter-open-target "init-aaronnote-jupyter" (target))
@@ -364,8 +365,12 @@ failure is diagnosable without hunting for it."
         my/aaronnote--port nil
         my/aaronnote--ready nil)
   (let* ((log-buf (get-buffer-create " *aaronnote-web-host*"))
+         (copilot-bridge-url
+          (when (require 'init-copilot nil t)
+            (ignore-errors (my/copilot-aaronnote-bridge-url))))
          (copilot-server
-          (when (require 'copilot nil t)
+          (when (and (not copilot-bridge-url)
+                     (require 'copilot nil t))
             (ignore-errors (copilot-server-executable))))
          (process-environment
           (append
@@ -408,10 +413,16 @@ failure is diagnosable without hunting for it."
                        (not (string-empty-p my/aaronnote-latex-export-model)))
               (format "AARONNOTE_LATEX_EXPORT_MODEL=%s" my/aaronnote-latex-export-model))
             (format "AARONNOTE_WEB_PORT=%d" my/aaronnote-web-port)
+            ;; Emacs-started AaronNote should share Emacs' existing Copilot LS
+            ;; through this bridge, not spawn its own memory-heavy second copy.
+            "AARONNOTE_COPILOT_DISABLE_LOCAL=1"
+            (when copilot-bridge-url
+              (format "AARONNOTE_COPILOT_BRIDGE_URL=%s" copilot-bridge-url))
             (when copilot-server
               (format "AARONNOTE_COPILOT_LANGUAGE_SERVER=%s"
                       (expand-file-name copilot-server)))
-            (when (bound-and-true-p my/copilot-server-max-heap-mb)
+            (when (and (not copilot-bridge-url)
+                       (bound-and-true-p my/copilot-server-max-heap-mb))
               (format "AARONNOTE_COPILOT_MAX_HEAP_MB=%d"
                       my/copilot-server-max-heap-mb))))
            process-environment))

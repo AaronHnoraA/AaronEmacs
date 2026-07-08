@@ -5524,6 +5524,7 @@ function setCopilotLogRecording(enabled, options = {}) {
 }
 
 function rawCopilotServerCommands() {
+  if (COPILOT_DISABLE_LOCAL) return [];
   const configured = process.env.AARONNOTE_COPILOT_LANGUAGE_SERVER;
   if (configured) return [{ command: configured, args: ["--stdio"] }];
   const binFile = join(appDir, "node_modules", ".bin", "copilot-language-server");
@@ -5578,6 +5579,8 @@ function copilotDiagnostics() {
     resourcesPath: process.resourcesPath || "",
     logRecording: copilotLogRecording,
     env: {
+      AARONNOTE_COPILOT_BRIDGE_URL: COPILOT_BRIDGE_URL,
+      AARONNOTE_COPILOT_DISABLE_LOCAL: process.env.AARONNOTE_COPILOT_DISABLE_LOCAL || "",
       AARONNOTE_COPILOT_LANGUAGE_SERVER: process.env.AARONNOTE_COPILOT_LANGUAGE_SERVER || "",
       AARONNOTE_NODE: process.env.AARONNOTE_NODE || "",
       ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE || "",
@@ -5597,7 +5600,14 @@ function copilotDiagnostics() {
       mustExist: cmd.mustExist || "",
     })),
     client: copilotClient
-      ? {
+      ? copilotClient.kind === "emacs-bridge"
+        ? {
+            kind: copilotClient.kind,
+            url: copilotClient.url,
+            status: copilotClient.status,
+            pending: copilotClient.pending?.size || 0,
+          }
+        : {
           hasProcess: !!copilotClient.proc,
           pid: copilotClient.proc?.pid || 0,
           status: copilotClient.status,
@@ -5669,9 +5679,73 @@ function copilotProcessCwd() {
 // It restarts transparently on the next request via `ensureReady`. 0 disables.
 const COPILOT_IDLE_TTL_MS = durationFromEnv("AARONNOTE_COPILOT_IDLE_TTL_MS", 15 * 60 * 1000);
 const COPILOT_IDLE_CHECK_MS = 30_000;
-// Mirrors Emacs's `my/copilot-server-max-heap-mb` (same config key, passed
-// through this env var) so both copies of the LSP share one V8 heap cap.
+// When AaronNote is launched from Emacs, Copilot requests should use Emacs'
+// existing copilot.el JSON-RPC connection instead of starting a second
+// @github/copilot-language-server process in web-host.
+const COPILOT_BRIDGE_URL = String(process.env.AARONNOTE_COPILOT_BRIDGE_URL || "").trim();
+const COPILOT_DISABLE_LOCAL = process.env.AARONNOTE_COPILOT_DISABLE_LOCAL === "1";
+// Used only by the local fallback LSP. Emacs-launched AaronNote normally
+// forwards Copilot requests to copilot.el through COPILOT_BRIDGE_URL.
 const COPILOT_MAX_HEAP_MB = Math.max(0, Number(process.env.AARONNOTE_COPILOT_MAX_HEAP_MB) || 0);
+
+class EmacsCopilotBridgeClient {
+  constructor(url) {
+    this.kind = "emacs-bridge";
+    this.url = url;
+    this.status = { message: "Using Emacs Copilot bridge", kind: "Normal", busy: false };
+    this.pending = new Set();
+  }
+
+  async post(action, body = {}) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    const pending = { action };
+    this.pending.add(pending);
+    try {
+      const res = await fetch(this.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, body }),
+        signal: controller.signal,
+      });
+      const text = await res.text();
+      let value = {};
+      try {
+        value = text ? JSON.parse(text) : {};
+      } catch {
+        value = { ok: false, message: text || "Invalid Emacs Copilot bridge response" };
+      }
+      if (!res.ok) {
+        return {
+          ok: false,
+          message: value?.message || `Emacs Copilot bridge returned HTTP ${res.status}`,
+          status: { message: value?.message || "Bridge HTTP error", kind: "Error", busy: false },
+        };
+      }
+      if (value?.status) this.status = value.status;
+      return value;
+    } catch (err) {
+      const message = err?.name === "AbortError"
+        ? "Emacs Copilot bridge timed out"
+        : err instanceof Error ? err.message : String(err);
+      this.status = { message, kind: "Error", busy: false };
+      return { ok: false, message, status: this.status };
+    } finally {
+      clearTimeout(timeout);
+      this.pending.delete(pending);
+    }
+  }
+
+  inline(body) { return this.post("inline", body); }
+  shown(body) { return this.post("shown", body); }
+  accept(body) { return this.post("accept", body); }
+  signIn() { return this.post("sign-in", {}); }
+  signOut() { return this.post("sign-out", {}); }
+  quota() { return this.post("quota", {}); }
+  statusRequest() { return this.post("status", {}); }
+  log(body) { return this.post("log", body || {}); }
+  stop() {}
+}
 
 class CopilotLspClient {
   constructor() {
@@ -5716,7 +5790,9 @@ class CopilotLspClient {
     pushCopilotLog("start", { commands: commands.map((cmd) => ({ command: cmd.command, args: cmd.args, env: cmd.env || {} })) });
     if (commands.length === 0) {
       pushCopilotLog("missing-server", { rawCommands: copilotDiagnostics().rawCommands });
-      throw new Error("Copilot language server is unavailable. Set AARONNOTE_COPILOT_LANGUAGE_SERVER to Emacs's copilot-server-executable.");
+      throw new Error(COPILOT_DISABLE_LOCAL
+        ? "Copilot local language server is disabled; Emacs Copilot bridge is unavailable."
+        : "Copilot language server is unavailable. Set AARONNOTE_COPILOT_LANGUAGE_SERVER to Emacs's copilot-server-executable.");
     }
     let lastError = null;
     for (const cmd of commands) {
@@ -6066,7 +6142,11 @@ function windowSetTimeout(fn, ms) {
 }
 
 function getCopilotClient() {
-  if (!copilotClient) copilotClient = new CopilotLspClient();
+  if (!copilotClient) {
+    copilotClient = COPILOT_BRIDGE_URL
+      ? new EmacsCopilotBridgeClient(COPILOT_BRIDGE_URL)
+      : new CopilotLspClient();
+  }
   return copilotClient;
 }
 
@@ -6079,6 +6159,7 @@ export async function shutdownCopilot() {
 
 export async function handleCopilotRequest(action, body = {}) {
   if (action === "log") {
+    if (COPILOT_BRIDGE_URL) return getCopilotClient().log(body || {});
     if (body?.record === true) {
       setCopilotLogRecording(true, { clear: body?.clear !== false });
       return { ...copilotDiagnostics(), message: "Copilot log recording started" };
@@ -6097,6 +6178,7 @@ export async function handleCopilotRequest(action, body = {}) {
   if (action === "sign-out") return client.signOut();
   if (action === "quota") return client.quota();
   if (action === "status") {
+    if (client.kind === "emacs-bridge") return client.statusRequest();
     await client.ensureReady();
     return { type: "copilot-status", status: client.status };
   }

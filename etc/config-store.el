@@ -229,7 +229,7 @@
    (my/copilot-deferred-modes lean-mode)
    (my/copilot-disable-on-remote . t)
    (my/copilot-large-buffer-threshold . 524288)
-   (my/copilot-idle-delay . 0.85) (my/copilot-server-max-heap-mb . 384)
+   (my/copilot-idle-delay . 0.85) (my/copilot-server-max-heap-mb . 1024)
    (my/aaronnote-web-host-max-heap-mb . 512) (my/macos-gc-after-minibuffer)
    (my/macos-idle-gc-delay . 8.0) (my/macos-scroll-profile . line)
    (inhibit-startup-screen . t) (inhibit-startup-message . t)

@@ -6,18 +6,35 @@
 ;;; Code:
 
 (require 'config)
+(require 'cl-lib)
+(require 'json)
+(require 'subr-x)
 
 ;;; ── GitHub Copilot ────────────────────────────────────────────────────────
 (declare-function copilot-server-executable "copilot" ())
+(declare-function copilot--connection-alivep "copilot" ())
+(declare-function copilot--path-to-uri "copilot" (path))
+(declare-function copilot--start-server "copilot" ())
 (declare-function copilot--overlay-visible "copilot" ())
 (declare-function copilot-accept-completion "copilot" (&optional transform-fn))
 (declare-function copilot-accept-completion-by-word "copilot" (&optional n))
 (declare-function copilot-accept-completion-to-char "copilot" (char &optional count))
+(declare-function jsonrpc-notify "jsonrpc" (connection method params))
+(declare-function jsonrpc-request "jsonrpc" (connection method params &rest args))
+(declare-function ws-body "web-server" (request))
+(declare-function ws-process "web-server" (server-or-request))
+(declare-function ws-response-header "web-server" (proc code &rest headers))
+(declare-function ws-send "web-server" (proc string))
+(declare-function ws-start "web-server" (handlers port &optional log-buffer &rest network-args))
+(declare-function ws-stop "web-server" (server))
 (declare-function my/snippet-active-p "init-funcs" ())
 (declare-function my/snippet-next-field-dwim "init-funcs" ())
 (declare-function my/forward-delimiter-dwim "init-funcs" ())
 (declare-function my/jump-forward-dwim "init-funcs" ())
 (declare-function my/backward-delimiter-or-snippet-dwim "init-funcs" ())
+(defvar copilot--connection nil)
+(defvar copilot--quota nil)
+(defvar copilot--status nil)
 
 (defgroup my/copilot nil
   "Copilot integration defaults."
@@ -42,9 +59,10 @@ Large generated files can make inline completion unnecessarily expensive."
 (config-defvar my/copilot-server-max-heap-mb nil
   "V8 heap cap (MB) for the Copilot language server, or nil for no cap.
 Applied via `NODE_OPTIONS=--max-old-space-size' on the process this Emacs
-spawns, and mirrored to AaronNote's own Copilot LSP instance (see
-AARONNOTE_COPILOT_MAX_HEAP_MB in `lisp/roam/init-aaronnote.el') so both
-copies of the language server share one cap."
+spawns.  Emacs-launched AaronNote now uses
+`my/copilot-aaronnote-bridge-url' to share that process instead of starting a
+second language server; this cap is only mirrored to AaronNote's local fallback
+LSP in standalone/non-bridge runs."
   :type '(choice (integer :tag "Heap cap in MB") (const :tag "No cap" nil))
   :group 'my/copilot)
 
@@ -58,8 +76,506 @@ copies of the language server share one cap."
   :type 'number
   :group 'my/copilot)
 
+(defvar my/copilot-aaronnote-bridge--server nil
+  "Local web-server instance used by AaronNote to share this Copilot LS.")
+
+(defvar my/copilot-aaronnote-bridge--port nil
+  "Local port of `my/copilot-aaronnote-bridge--server'.")
+
+(defvar my/copilot-aaronnote-bridge--documents (make-hash-table :test #'equal)
+  "Synthetic AaronNote document state known to the shared Copilot LS.")
+
+(defvar my/copilot-aaronnote-bridge--log nil
+  "Bounded recent log entries for AaronNote Copilot bridge diagnostics.")
+
+(defvar my/copilot-aaronnote-bridge--log-recording nil
+  "Non-nil when the AaronNote Copilot bridge records detailed events.")
+
 (defvar-local my/copilot--auto-enable-timer nil
   "Idle timer used to defer automatic Copilot startup.")
+
+(defun my/copilot-aaronnote-bridge--log (event &optional detail)
+  "Record AaronNote bridge EVENT with DETAIL when bridge logging is enabled."
+  (when my/copilot-aaronnote-bridge--log-recording
+    (push `((at . ,(format-time-string "%FT%T%z"))
+            (event . ,event)
+            ,@(when detail `((detail . ,detail))))
+          my/copilot-aaronnote-bridge--log)
+    (when (> (length my/copilot-aaronnote-bridge--log) 200)
+      (setcdr (nthcdr 199 my/copilot-aaronnote-bridge--log) nil))))
+
+(defun my/copilot-aaronnote-bridge--server-live-p ()
+  "Return non-nil when the AaronNote Copilot bridge HTTP server is live."
+  (and my/copilot-aaronnote-bridge--server
+       (process-live-p (ws-process my/copilot-aaronnote-bridge--server))))
+
+(defun my/copilot-aaronnote-bridge--empty-object ()
+  "Return a JSON object that serializes as `{}`."
+  (make-hash-table :test #'equal))
+
+(defun my/copilot-aaronnote-bridge--server-bootstrap-buffer ()
+  "Return a buffer whose file context gives Copilot a stable workspace root."
+  (let ((buffer (get-buffer-create " *aaronnote-copilot-bridge*")))
+    (with-current-buffer buffer
+      (setq-local buffer-file-name
+                  (expand-file-name "var/aaronnote/copilot-bridge/bridge.md"
+                                    user-emacs-directory))
+      (setq-local default-directory
+                  (file-name-as-directory user-emacs-directory)))
+    buffer))
+
+(defun my/copilot-aaronnote-bridge--ensure-copilot ()
+  "Ensure `copilot.el' is loaded and the shared LS connection is alive."
+  (unless (require 'copilot nil t)
+    (error "copilot.el is unavailable"))
+  (unless (copilot--connection-alivep)
+    (clrhash my/copilot-aaronnote-bridge--documents)
+    (with-current-buffer (my/copilot-aaronnote-bridge--server-bootstrap-buffer)
+      (copilot--start-server))))
+
+(defun my/copilot-aaronnote-bridge--request (method &optional params &rest args)
+  "Send METHOD with PARAMS to the shared Copilot LS and return its result."
+  (my/copilot-aaronnote-bridge--ensure-copilot)
+  (apply #'jsonrpc-request
+         copilot--connection
+         method
+         (or params (my/copilot-aaronnote-bridge--empty-object))
+         args))
+
+(defun my/copilot-aaronnote-bridge--notify (method params)
+  "Send METHOD notification with PARAMS to the shared Copilot LS."
+  (my/copilot-aaronnote-bridge--ensure-copilot)
+  (jsonrpc-notify copilot--connection method params))
+
+(defun my/copilot-aaronnote-bridge--language-id (file)
+  "Return a Copilot language id for FILE."
+  (pcase (downcase (or (file-name-extension (or file "") t) ""))
+    ((or ".md" ".markdown") "markdown")
+    (".typ" "typst")
+    (".ts" "typescript")
+    ((or ".js" ".mjs" ".cjs") "javascript")
+    (".json" "json")
+    (".tex" "latex")
+    (".lean" "lean")
+    (_ "plaintext")))
+
+(defun my/copilot-aaronnote-bridge--uri-for-file (file)
+  "Return a synthetic AaronNote Copilot URI for FILE.
+The URI intentionally does not equal the real file URI, so AaronNote document
+sync never collides with a normal Emacs buffer already opened in `copilot.el'."
+  (unless (require 'copilot nil t)
+    (error "copilot.el is unavailable"))
+  (let* ((raw (if (and (stringp file) (not (string-empty-p file)))
+                  (expand-file-name file)
+                "aaronnote-copilot.md"))
+         (ext (or (file-name-extension raw t) ".md"))
+         (base (file-name-nondirectory raw))
+         (hash (secure-hash 'sha1 raw))
+         (synthetic (expand-file-name
+                     (format "var/aaronnote/copilot-bridge/%s-%s%s"
+                             hash
+                             (file-name-base base)
+                             ext)
+                     user-emacs-directory)))
+    (copilot--path-to-uri synthetic)))
+
+(defun my/copilot-aaronnote-bridge--utf16-units (char)
+  "Return the UTF-16 code-unit width of CHAR."
+  (if (> char #xffff) 2 1))
+
+(defun my/copilot-aaronnote-bridge--utf16-length (text)
+  "Return the UTF-16 code-unit length of TEXT."
+  (let ((units 0))
+    (dotimes (i (length text) units)
+      (setq units (+ units
+                     (my/copilot-aaronnote-bridge--utf16-units
+                      (aref text i)))))))
+
+(defun my/copilot-aaronnote-bridge--json-value (value)
+  "Return VALUE with nested JSON arrays represented as vectors."
+  (cond
+   ((vectorp value)
+    (vconcat (mapcar #'my/copilot-aaronnote-bridge--json-value
+                     (append value nil))))
+   ((and (listp value) (keywordp (car value)))
+    (cl-loop for (key item) on value by #'cddr
+             append (list key
+                          (my/copilot-aaronnote-bridge--json-value item))))
+   ((consp value)
+    (vconcat (mapcar #'my/copilot-aaronnote-bridge--json-value value)))
+   (t value)))
+
+(defun my/copilot-aaronnote-bridge--json-array (value)
+  "Return VALUE normalized as a JSON array."
+  (cond
+   ((null value) [])
+   ((vectorp value)
+    (my/copilot-aaronnote-bridge--json-value value))
+   ((listp value)
+    (vconcat (mapcar #'my/copilot-aaronnote-bridge--json-value value)))
+   (t (vector (my/copilot-aaronnote-bridge--json-value value)))))
+
+(defun my/copilot-aaronnote-bridge--position-for-offset (text offset)
+  "Return LSP position in TEXT for JavaScript UTF-16 OFFSET."
+  (let ((limit (max 0 (or offset 0)))
+        (units 0)
+        (line 0)
+        (character 0)
+        (i 0)
+        (len (length text)))
+    (while (and (< i len) (< units limit))
+      (let* ((char (aref text i))
+             (width (my/copilot-aaronnote-bridge--utf16-units char)))
+        (if (= char ?\n)
+            (setq line (1+ line)
+                  character 0)
+          (setq character (+ character width)))
+        (setq units (+ units width)
+              i (1+ i))))
+    (list :line line :character character)))
+
+(defun my/copilot-aaronnote-bridge--offset-for-position (text position)
+  "Return JavaScript UTF-16 offset in TEXT for LSP POSITION."
+  (let ((target-line (max 0 (or (plist-get position :line) 0)))
+        (target-char (max 0 (or (plist-get position :character) 0)))
+        (line 0)
+        (character 0)
+        (offset 0)
+        (i 0)
+        (len (length text)))
+    (catch 'done
+      (while (< i len)
+        (let* ((char (aref text i))
+               (width (my/copilot-aaronnote-bridge--utf16-units char)))
+          (cond
+           ((= line target-line)
+            (when (= char ?\n)
+              (throw 'done offset))
+            (if (>= (+ character width) target-char)
+                (throw 'done (+ offset (min width (max 0 (- target-char character)))))
+              (setq character (+ character width)
+                    offset (+ offset width))))
+           (t
+            (setq offset (+ offset width))
+            (when (= char ?\n)
+              (setq line (1+ line)
+                    character 0)))))
+        (setq i (1+ i)))
+      offset)))
+
+(defun my/copilot-aaronnote-bridge--full-range-end (text)
+  "Return LSP position at the end of TEXT."
+  (my/copilot-aaronnote-bridge--position-for-offset
+   text
+   (my/copilot-aaronnote-bridge--utf16-length text)))
+
+(defun my/copilot-aaronnote-bridge--status ()
+  "Return a JSON-serializable status plist for AaronNote."
+  (or copilot--status
+      (list :message (if (and (require 'copilot nil t)
+                              (copilot--connection-alivep))
+                         "Ready"
+                       "Not started")
+            :kind (if (and (featurep 'copilot)
+                           (copilot--connection-alivep))
+                      "Normal"
+                    "Inactive")
+            :busy :json-false)))
+
+(defun my/copilot-aaronnote-bridge--sync-document (uri file content)
+  "Synchronize AaronNote CONTENT for URI/FILE into the shared Copilot LS."
+  (unless (and (require 'copilot nil t)
+               (copilot--connection-alivep))
+    (clrhash my/copilot-aaronnote-bridge--documents))
+  (let* ((language-id (my/copilot-aaronnote-bridge--language-id file))
+         (current (gethash uri my/copilot-aaronnote-bridge--documents))
+         (old-content (plist-get current :content)))
+    (cond
+     ((null current)
+      (puthash uri (list :version 1 :content content :language-id language-id)
+               my/copilot-aaronnote-bridge--documents)
+      (my/copilot-aaronnote-bridge--notify
+       'textDocument/didOpen
+       (list :textDocument (list :uri uri
+                                 :languageId language-id
+                                 :version 1
+                                 :text content)))
+      (list :version 1 :language-id language-id))
+     ((not (string-equal old-content content))
+      (let ((version (1+ (or (plist-get current :version) 1))))
+        (puthash uri (list :version version :content content :language-id language-id)
+                 my/copilot-aaronnote-bridge--documents)
+        (my/copilot-aaronnote-bridge--notify
+         'textDocument/didChange
+         (list :textDocument (list :uri uri :version version)
+               :contentChanges
+               (vector
+                (list :range (list :start (list :line 0 :character 0)
+                                   :end (my/copilot-aaronnote-bridge--full-range-end
+                                         old-content))
+                      :rangeLength (my/copilot-aaronnote-bridge--utf16-length
+                                    old-content)
+                      :text content))))
+        (list :version version :language-id language-id)))
+     (t
+      (list :version (plist-get current :version)
+            :language-id (or (plist-get current :language-id) language-id))))))
+
+(defun my/copilot-aaronnote-bridge--inline (body)
+  "Handle AaronNote Copilot inline completion BODY."
+  (let* ((content (or (plist-get body :content) ""))
+         (file (or (plist-get body :file) ""))
+         (offset (min (max 0 (or (plist-get body :offset) 0))
+                      (my/copilot-aaronnote-bridge--utf16-length content)))
+         (uri (my/copilot-aaronnote-bridge--uri-for-file file))
+         (doc (my/copilot-aaronnote-bridge--sync-document uri file content))
+         (version (plist-get doc :version))
+         (result nil))
+    (my/copilot-aaronnote-bridge--notify
+     'textDocument/didFocus
+     (list :textDocument (list :uri uri)))
+    (setq result
+          (my/copilot-aaronnote-bridge--request
+           'textDocument/inlineCompletion
+           (list :textDocument (list :uri uri :version version)
+                 :position (my/copilot-aaronnote-bridge--position-for-offset
+                            content offset)
+                 :context (list :triggerKind 2)
+                 :formattingOptions (list :tabSize 2 :insertSpaces t))
+           :timeout 30))
+    (let* ((items (plist-get result :items))
+           (item (cl-find-if (lambda (candidate)
+                               (stringp (plist-get candidate :insertText)))
+                             (append (or items []) nil))))
+      (my/copilot-aaronnote-bridge--log
+       "inline"
+       `((file . ,file)
+         (offset . ,offset)
+         (items . ,(length (append (or items []) nil)))))
+      (if (not item)
+          (list :type "copilot-inline"
+                :items []
+                :status (my/copilot-aaronnote-bridge--status))
+        (let* ((range (plist-get item :range))
+               (start (plist-get range :start))
+               (end (plist-get range :end))
+               (from (if start
+                         (my/copilot-aaronnote-bridge--offset-for-position
+                          content start)
+                       offset))
+               (to (if end
+                       (my/copilot-aaronnote-bridge--offset-for-position
+                        content end)
+                     offset)))
+          (list :type "copilot-inline"
+                :items (vector
+                        (list :insertText (plist-get item :insertText)
+                              :range (list :from from :to to)
+                              :item (my/copilot-aaronnote-bridge--json-value
+                                     item)))
+                :status (my/copilot-aaronnote-bridge--status)))))))
+
+(defun my/copilot-aaronnote-bridge--shown (body)
+  "Notify Copilot that AaronNote showed a completion from BODY."
+  (when-let* ((item (plist-get body :item)))
+    (my/copilot-aaronnote-bridge--notify
+     'textDocument/didShowCompletion
+     (list :item item)))
+  (list :ok t))
+
+(defun my/copilot-aaronnote-bridge--accept (body)
+  "Notify Copilot that AaronNote accepted a completion from BODY."
+  (let* ((item (plist-get body :item))
+         (accepted-length (plist-get body :acceptedLength)))
+    (cond
+     ((not item)
+      (list :ok :json-false))
+     ((and (numberp accepted-length)
+           (>= accepted-length 0)
+           (< accepted-length
+              (length (or (plist-get item :insertText) ""))))
+      (my/copilot-aaronnote-bridge--notify
+       'textDocument/didPartiallyAcceptCompletion
+       (list :item item :acceptedLength accepted-length))
+      (list :ok t :partial t))
+     (t
+      (when-let* ((command (plist-get item :command))
+                  (command-name (plist-get command :command)))
+        (my/copilot-aaronnote-bridge--request
+         'workspace/executeCommand
+         (list :command command-name
+               :arguments (my/copilot-aaronnote-bridge--json-array
+                           (or (plist-get command :arguments) nil)))
+         :timeout 30))
+      (list :ok t)))))
+
+(defun my/copilot-aaronnote-bridge--find-string-by-key (value keys)
+  "Return first string found in VALUE under one of KEYS."
+  (cond
+   ((not value) nil)
+   ((vectorp value)
+    (cl-loop for item across value
+             thereis (my/copilot-aaronnote-bridge--find-string-by-key
+                      item keys)))
+   ((and (listp value) (keywordp (car value)))
+    (cl-loop for (key item) on value by #'cddr
+             thereis (if (and (memq key keys) (stringp item)
+                              (not (string-empty-p item)))
+                         item
+                       (my/copilot-aaronnote-bridge--find-string-by-key
+                        item keys))))
+   (t nil)))
+
+(defun my/copilot-aaronnote-bridge--sign-in ()
+  "Start a Copilot sign-in flow for AaronNote."
+  (let* ((result (condition-case _err
+                     (my/copilot-aaronnote-bridge--request 'signIn nil :timeout 30)
+                   (error
+                    (my/copilot-aaronnote-bridge--request
+                     'signInInitiate nil :timeout 30))))
+         (uri (or (my/copilot-aaronnote-bridge--find-string-by-key
+                   result '(:verificationUri :verification_uri
+                             :verificationUriComplete
+                             :verification_uri_complete :uri :url))
+                  ""))
+         (code (or (my/copilot-aaronnote-bridge--find-string-by-key
+                    result '(:userCode :user_code :code))
+                   "")))
+    (when (and (stringp uri)
+               (string-match-p "\\`https?://" uri))
+      (browse-url uri))
+    (append (list :type "copilot-sign-in"
+                  :openedUri uri
+                  :userCode code
+                  :message (cond
+                            ((string-empty-p code) "Copilot login started")
+                            (t (format "Opened GitHub login; code %s" code)))
+                  :status (my/copilot-aaronnote-bridge--status))
+            (and (listp result) result))))
+
+(defun my/copilot-aaronnote-bridge--diagnostics ()
+  "Return bridge diagnostics for AaronNote."
+  (list :type "copilot-log"
+        :bridge "emacs"
+        :port (or my/copilot-aaronnote-bridge--port 0)
+        :serverLive (if (my/copilot-aaronnote-bridge--server-live-p) t :json-false)
+        :copilotLive (if (and (require 'copilot nil t)
+                              (copilot--connection-alivep))
+                         t :json-false)
+        :status (my/copilot-aaronnote-bridge--status)
+        :documents (hash-table-count my/copilot-aaronnote-bridge--documents)
+        :logRecording (if my/copilot-aaronnote-bridge--log-recording t :json-false)
+        :log (vconcat (reverse my/copilot-aaronnote-bridge--log))))
+
+(defun my/copilot-aaronnote-bridge--dispatch (action body)
+  "Dispatch AaronNote Copilot ACTION with BODY."
+  (pcase action
+    ("inline" (my/copilot-aaronnote-bridge--inline body))
+    ("shown" (my/copilot-aaronnote-bridge--shown body))
+    ("accept" (my/copilot-aaronnote-bridge--accept body))
+    ("sign-in" (my/copilot-aaronnote-bridge--sign-in))
+    ("sign-out"
+     (my/copilot-aaronnote-bridge--request 'signOut nil :timeout 30)
+     (list :ok t :status (my/copilot-aaronnote-bridge--status)))
+    ("quota"
+     (list :type "copilot-quota"
+           :result (condition-case err
+                       (my/copilot-aaronnote-bridge--request
+                        'checkQuota nil :timeout 30)
+                     (error (list :error (error-message-string err))))))
+    ("status"
+     (list :type "copilot-status"
+           :result (condition-case _err
+                       (my/copilot-aaronnote-bridge--request
+                        'checkStatus nil :timeout 30)
+                     (error nil))
+           :status (my/copilot-aaronnote-bridge--status)))
+    ("log"
+     (cond
+      ((eq (plist-get body :record) t)
+       (when (not (eq (plist-get body :clear) :json-false))
+         (setq my/copilot-aaronnote-bridge--log nil))
+       (setq my/copilot-aaronnote-bridge--log-recording t)
+       (my/copilot-aaronnote-bridge--log "recording-started")
+       (append (my/copilot-aaronnote-bridge--diagnostics)
+               (list :message "Copilot bridge log recording started")))
+      ((eq (plist-get body :record) :json-false)
+       (my/copilot-aaronnote-bridge--log "recording-stopped")
+       (setq my/copilot-aaronnote-bridge--log-recording nil)
+       (append (my/copilot-aaronnote-bridge--diagnostics)
+               (list :message "Copilot bridge logs recorded")))
+      (t (my/copilot-aaronnote-bridge--diagnostics))))
+    (_ (list :ok :json-false
+             :message (format "Unknown Copilot bridge action: %s" action)))))
+
+(defun my/copilot-aaronnote-bridge--send-json (request status payload)
+  "Send JSON PAYLOAD to web-server REQUEST with HTTP STATUS."
+  (let* ((proc (ws-process request))
+         (json (encode-coding-string (json-encode payload) 'utf-8)))
+    (ws-response-header proc status
+                        (cons "Content-Type" "application/json; charset=utf-8")
+                        (cons "Content-Length" (string-bytes json))
+                        (cons "Cache-Control" "no-store"))
+    (ws-send proc json)
+    (throw 'close-connection nil)))
+
+(defun my/copilot-aaronnote-bridge--handle-post (request)
+  "Handle one AaronNote Copilot bridge HTTP REQUEST."
+  (condition-case err
+      (let* ((payload (json-parse-string (or (ws-body request) "")
+                                         :object-type 'plist
+                                         :array-type 'array
+                                         :null-object nil
+                                         :false-object :json-false))
+             (action (or (plist-get payload :action) ""))
+             (body (or (plist-get payload :body) '())))
+        (my/copilot-aaronnote-bridge--send-json
+         request 200
+         (my/copilot-aaronnote-bridge--dispatch action body)))
+    (json-parse-error
+     (my/copilot-aaronnote-bridge--send-json
+      request 400
+      (list :ok :json-false :message "Invalid Copilot bridge JSON")))
+    (error
+     (let ((trace (with-output-to-string (backtrace))))
+       (my/copilot-aaronnote-bridge--log
+        "error"
+        `((message . ,(error-message-string err))
+          (backtrace . ,trace)))
+       (my/copilot-aaronnote-bridge--send-json
+        request 200
+        (list :ok :json-false
+              :message (error-message-string err)
+              :backtrace trace
+              :status (list :message (error-message-string err)
+                            :kind "Error"
+                            :busy :json-false)))))))
+
+(defun my/copilot-aaronnote-bridge-start ()
+  "Start the localhost AaronNote -> Emacs Copilot bridge and return its URL."
+  (interactive)
+  (unless (my/copilot-aaronnote-bridge--server-live-p)
+    (unless (require 'web-server nil t)
+      (user-error "AaronNote Copilot bridge requires the web-server package"))
+    (setq my/copilot-aaronnote-bridge--server
+          (ws-start
+           `(((:POST . "^/copilot$") . ,#'my/copilot-aaronnote-bridge--handle-post))
+           0 nil :host "127.0.0.1"))
+    (setq my/copilot-aaronnote-bridge--port
+          (process-contact (ws-process my/copilot-aaronnote-bridge--server)
+                           :service)))
+  (format "http://127.0.0.1:%d/copilot" my/copilot-aaronnote-bridge--port))
+
+(defun my/copilot-aaronnote-bridge-stop ()
+  "Stop the localhost AaronNote -> Emacs Copilot bridge."
+  (interactive)
+  (when (my/copilot-aaronnote-bridge--server-live-p)
+    (ws-stop my/copilot-aaronnote-bridge--server))
+  (setq my/copilot-aaronnote-bridge--server nil
+        my/copilot-aaronnote-bridge--port nil))
+
+(defalias 'my/copilot-aaronnote-bridge-url
+  #'my/copilot-aaronnote-bridge-start)
 
 (defun my/copilot-buffer-eligible-p ()
   "Return non-nil when the current buffer is cheap enough for Copilot."
