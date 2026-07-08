@@ -48,6 +48,7 @@ const ENV_MAP = new Map([
 const COMMENT_BLOCKS = new Set(["comment", "summary", "note", "important", "warning", "attention"]);
 const DISPLAY_MATH_OPEN_RE = /^\s*(?:\\\[|\$\$)\s*$/;
 const DISPLAY_MATH_CLOSE_RE = /^\s*(?:\\\]|\$\$)\s*$/;
+const CEIL_COMMAND_LINE_RE = /^\s*@@cell(?:[ \t]*\([^)\n]*\))?(?:[ \t]+\[[^\]\n]*\])?[ \t]*$/i;
 
 function escapeLatexText(value) {
   return String(value ?? "")
@@ -132,11 +133,22 @@ function convertInline(text) {
 function isPrivateAnnotationLine(line) {
   const trimmed = String(line || "").trim();
   if (!trimmed) return false;
+  if (CEIL_COMMAND_LINE_RE.test(trimmed)) return true;
   const command = scanInlineCommands(trimmed)[0];
   return Boolean(command
-    && (command.name === "todo" || command.name === "comment")
+    && (command.name === "todo" || command.name === "itodo" || command.name === "comment")
     && command.fullFrom === 0
     && command.fullTo === trimmed.length);
+}
+
+function orgBlockOpen(line) {
+  const match = String(line || "").match(/^#\+\s*begin\s+([A-Za-z0-9_-]+)\s*(.*)$/i);
+  return match ? { kind: match[1].toLowerCase(), title: match[2].trim() } : null;
+}
+
+function orgBlockCloseKind(line) {
+  const match = String(line || "").match(/^#\+\s*end\s+([A-Za-z0-9_-]+)\s*$/i);
+  return match ? match[1].toLowerCase() : "";
 }
 
 // Titles, headings, and environment labels are LaTeX moving arguments, but
@@ -259,6 +271,8 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
   let fenceLine = 0;
   let inDisplayMath = false;
   let displayMathLine = 0;
+  let ignoredOrgBlock = "";
+  let ignoredOrgDepth = 0;
   const listStack = [];
 
   function closeList() {
@@ -280,6 +294,16 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
     const rawLine = bodyLines[lineIndex];
     const lineNumber = lineIndex + 1;
     const line = rawLine.replace(/\s+$/g, "");
+
+    if (ignoredOrgBlock) {
+      const nested = orgBlockOpen(line);
+      if (nested?.kind === ignoredOrgBlock) ignoredOrgDepth += 1;
+      if (orgBlockCloseKind(line) === ignoredOrgBlock) {
+        ignoredOrgDepth -= 1;
+        if (ignoredOrgDepth <= 0) ignoredOrgBlock = "";
+      }
+      continue;
+    }
 
     if (/^```/.test(line)) {
       flushParagraph(out, paragraph);
@@ -313,20 +337,25 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
       continue;
     }
 
-    const begin = line.match(/^#\+begin\s+([A-Za-z0-9_-]+)\s*(.*)$/i);
+    const begin = orgBlockOpen(line);
     if (begin) {
       flushParagraph(out, paragraph);
       closeList();
-      const kind = begin[1].toLowerCase();
+      const kind = begin.kind;
+      if (kind === "lean4" || kind === "src" || kind === "source") {
+        ignoredOrgBlock = kind;
+        ignoredOrgDepth = 1;
+        continue;
+      }
       envStack.push(kind);
-      out.push(beginEnv(kind, begin[2].trim(), envMap, commentBlocks), "");
+      out.push(beginEnv(kind, begin.title, envMap, commentBlocks), "");
       continue;
     }
-    const end = line.match(/^#\+end\s+([A-Za-z0-9_-]+)\s*$/i);
+    const end = orgBlockCloseKind(line);
     if (end) {
       flushParagraph(out, paragraph);
       closeList();
-      const requestedKind = end[1].toLowerCase();
+      const requestedKind = end;
       const kind = envStack.pop();
       if (!kind) {
         throw new Error(`Unexpected #+end ${requestedKind} on line ${lineNumber}`);

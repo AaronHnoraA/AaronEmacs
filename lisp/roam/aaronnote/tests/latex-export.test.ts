@@ -176,6 +176,7 @@ describe("LaTeX export", () => {
       "# Main",
       "",
       "@@todo(doing) [draft private reminder] {ddl: 2026-07-03}",
+      "@@itodo(doing) [draft internal reminder] {project: iso-202603 ddl: 2026-07-12}",
       "@@todo bare private reminder",
       "",
       "Visible text. @@todo(done) [hidden inline reminder] More text.",
@@ -187,7 +188,34 @@ describe("LaTeX export", () => {
     expect(result.body).not.toContain("TODO");
     expect(result.body).not.toContain("todo");
     expect(result.body).not.toContain("private reminder");
+    expect(result.body).not.toContain("internal reminder");
+    expect(result.body).not.toContain("iso-202603");
+    expect(result.body).not.toContain("2026-07-12");
     expect(result.body).not.toContain("hidden inline reminder");
+  });
+
+  test("omits @@cell commands and Lean4 source blocks from exported body", () => {
+    const result = aaronnoteMarkdownToLatex([
+      "# Main",
+      "",
+      "@@cell(lean4, lean4) [ceil-f7whsr]",
+      "",
+      "#+begin lean4 basic",
+      "import Mathlib",
+      "example : True := by",
+      "  trivial",
+      "#+end lean4",
+      "",
+      "Visible theorem text.",
+    ].join("\n"));
+
+    expect(result.body).toContain("\\section{Main}");
+    expect(result.body).toContain("Visible theorem text.");
+    expect(result.body).not.toContain("@@cell");
+    expect(result.body).not.toContain("ceil-f7whsr");
+    expect(result.body).not.toContain("Mathlib");
+    expect(result.body).not.toContain("trivial");
+    expect(result.body).not.toContain("lean4");
   });
 
   test("omits inline @@comment annotations from exported body", () => {

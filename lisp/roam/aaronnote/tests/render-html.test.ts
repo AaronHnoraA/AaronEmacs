@@ -62,6 +62,44 @@ y^2
     expect(content?.textContent).toBe("private note");
   });
 
+  test("omits todo command lines and trailing attrs from static render", () => {
+    const html = renderMarkdownHTML([
+      "# Bipartite Graph Tensor",
+      "",
+      "@@todo(doing) [Bipartite Graph Tensor] { project: iso-202603 phase: graph-tensor sche: 2026-07-08 end: 2026-07-12 prio: A effort: 8h progress: 60 context: GraphTensor ddl: 2026-07-12 }",
+      "",
+      "Visible text.",
+    ].join("\n"));
+
+    expect(html).toContain("Bipartite Graph Tensor");
+    expect(html).toContain("Visible text.");
+    expect(html).not.toContain("@@todo");
+    expect(html).not.toContain("project: iso-202603");
+    expect(html).not.toContain("ddl: 2026-07-12");
+  });
+
+  test("omits inline todo commands and their trailing attrs from static render", () => {
+    const html = renderMarkdownHTML("Before @@todo(done) [hidden inline] {ddl: 2026-07-12} after.");
+
+    expect(html).toContain("Before");
+    expect(html).toContain("after.");
+    expect(html).not.toContain("@@todo");
+    expect(html).not.toContain("hidden inline");
+    expect(html).not.toContain("ddl: 2026-07-12");
+  });
+
+  test("omits @@cell command lines from static render", () => {
+    const html = renderMarkdownHTML([
+      "@@cell(lean4, lean4) [ceil-f7whsr]",
+      "",
+      "Visible text.",
+    ].join("\n"));
+
+    expect(html).toContain("Visible text.");
+    expect(html).not.toContain("@@cell");
+    expect(html).not.toContain("ceil-f7whsr");
+  });
+
   test("renders inline math inside an exported @@comment", () => {
     const html = renderMarkdownHTML(String.raw`Check @@comment [see \(\alpha\)].`);
     const root = document.createElement("div");

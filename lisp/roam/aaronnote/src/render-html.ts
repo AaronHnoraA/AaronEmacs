@@ -66,6 +66,7 @@ type SemanticHeadingTokenMeta = {
 const ORG_ENV_OPEN_RE = /^\s*#\+\s*begin\s+(\S+)(?:[ \t]+([^\n]*?))?[ \t]*$/i;
 const TABLE_ROW_LINE_RE = /^\s*\|.*\|\s*$/;
 const FENCE_CLOSE_LINE_RE = /^[ \t]{0,3}(`{3,}|~{3,})\s*$/;
+const CEIL_COMMAND_LINE_RE = /^\s*@@cell(?:[ \t]*\([^)\n]*\))?(?:[ \t]+\[[^\]\n]*\])?[ \t]*$/i;
 
 function escapeHtml(value: string): string {
   return value
@@ -338,6 +339,31 @@ function tocRule(state: StateBlock, startLine: number, _endLine: number, silent:
   return true;
 }
 
+function privateCommandLineRule(state: StateBlock, startLine: number, _endLine: number, silent: boolean): boolean {
+  const raw = lineText(state, startLine);
+  const trimmed = raw.trim();
+  if (!trimmed) return false;
+  if (CEIL_COMMAND_LINE_RE.test(raw)) {
+    if (silent) return true;
+    const token = state.push("private_command_line", "", 0);
+    token.block = true;
+    token.hidden = true;
+    token.map = [startLine, startLine + 1];
+    state.line = startLine + 1;
+    return true;
+  }
+  const command = scanInlineCommands(trimmed)[0];
+  if (!command || command.fullFrom !== 0 || command.fullTo !== trimmed.length) return false;
+  if (!["todo", "itodo", "comment"].includes(command.name)) return false;
+  if (silent) return true;
+  const token = state.push("private_command_line", "", 0);
+  token.block = true;
+  token.hidden = true;
+  token.map = [startLine, startLine + 1];
+  state.line = startLine + 1;
+  return true;
+}
+
 function mathInlineRule(state: StateInline, silent: boolean): boolean {
   const start = state.pos;
   // Inline math opens with the literal LaTeX delimiter `\(` and closes with `\)`.
@@ -385,6 +411,20 @@ function sideCommentInlineRule(state: StateInline, silent: boolean): boolean {
   if (silent) return true;
   const token = state.push("side_comment_inline", "span", 0);
   token.content = cmd.context.trim();
+  state.pos = start + cmd.fullTo;
+  return true;
+}
+
+function privateInlineRule(state: StateInline, silent: boolean): boolean {
+  const start = state.pos;
+  if (!state.src.startsWith("@@todo", start) && !state.src.startsWith("@@itodo", start)) return false;
+  const lineEnd = state.src.indexOf("\n", start);
+  const slice = state.src.slice(start, lineEnd < 0 ? state.src.length : lineEnd);
+  const cmd = scanInlineCommands(slice)[0];
+  if (!cmd || cmd.fullFrom !== 0 || !["todo", "itodo"].includes(cmd.name)) return false;
+  if (silent) return true;
+  const token = state.push("private_inline", "", 0);
+  token.hidden = true;
   state.pos = start + cmd.fullTo;
   return true;
 }
@@ -818,6 +858,7 @@ function createMarkdownIt(options: RenderMarkdownHTMLOptions): MarkdownIt {
   md.block.ruler.before("fence", "math_block", mathBlockRule, { alt: ["paragraph", "reference", "blockquote"] });
   md.block.ruler.before("paragraph", "semantic_heading_block", semanticHeadingBlockRule, { alt: ["paragraph"] });
   md.block.ruler.before("paragraph", "toc_block", tocRule, { alt: ["paragraph"] });
+  md.block.ruler.before("paragraph", "private_command_line", privateCommandLineRule, { alt: ["paragraph"] });
   md.core.ruler.push("aaronnote_callouts", aaronnoteCalloutsRule);
   md.inline.ruler.before("link", "empty_html_link_embed", emptyHtmlLinkEmbedRule);
   md.inline.ruler.before("link", "jupyter_link", jupyterLinkRule);
@@ -826,11 +867,14 @@ function createMarkdownIt(options: RenderMarkdownHTMLOptions): MarkdownIt {
   md.inline.ruler.before("escape", "math_inline", mathInlineRule);
   md.inline.ruler.before("escape", "comment_inline", commentInlineRule);
   md.inline.ruler.before("escape", "side_comment_inline", sideCommentInlineRule);
+  md.inline.ruler.before("escape", "private_inline", privateInlineRule);
 
   md.renderer.rules.math_block = renderMathBlock;
   md.renderer.rules.math_inline = renderMathInline;
   md.renderer.rules.comment_inline = renderCommentInline;
   md.renderer.rules.side_comment_inline = renderSideCommentInline;
+  md.renderer.rules.private_inline = () => "";
+  md.renderer.rules.private_command_line = () => "";
   md.renderer.rules.org_env_block = (tokens, idx) => renderOrgEnv(md, tokens, idx);
   md.renderer.rules.semantic_heading_block = renderSemanticHeading;
   md.renderer.rules.front_matter = (tokens, idx, _opts, _env, _renderer) =>
