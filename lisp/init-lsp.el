@@ -866,7 +866,17 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
                                     (eglot--managed-buffers deferred-server))
                           (funcall orig-shutdown deferred-server)))
                       srv)))))
-        (funcall fn server)))))
+        (funcall fn server))))
+
+  (defun my/eglot-shutdown-all-on-exit-h ()
+    "Cleanly shut down all Eglot servers before Emacs exits.
+Lean's LSP watchdog (and similar servers) fork worker subprocesses that
+only get reaped on a clean LSP shutdown/exit; killing Emacs without this
+leaves those workers orphaned and running."
+    (when (fboundp 'eglot-shutdown-all)
+      (with-demoted-errors "eglot-shutdown-all-on-exit: %S"
+        (eglot-shutdown-all))))
+  (add-hook 'kill-emacs-hook #'my/eglot-shutdown-all-on-exit-h))
 
 
 ;; -------------------------

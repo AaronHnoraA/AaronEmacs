@@ -75,6 +75,49 @@ export async function sweepOrphanKernels({ sidecarPath, stderr = process.stderr 
   return { reaped };
 }
 
+/**
+ * Reap aaronnote kernel processes whose spawning server process is gone
+ * entirely (e.g. an ephemeral diagnostics/test harness that mkdtemp'd its
+ * own one-off `runtimeDir` and exited without calling `shutdown()`).
+ *
+ * `sweepOrphanKernels` above only catches kernels from a *previous run of
+ * this same runtimeDir* via its sidecar file; a harness that uses a fresh
+ * temp runtimeDir every run never revisits its own sidecar, so those
+ * kernels are invisible to it. Kernels are spawned `detached` (own process
+ * group) but keep the spawning node process as their ppid while it's
+ * alive — once that parent exits, they're reparented to init (ppid 1).
+ * Since only this module ever launches a process matching
+ * `ipykernel_launcher ... aaronnote-kernel-*.json`, any such process with
+ * ppid 1 is unowned by construction and safe to kill regardless of which
+ * runtimeDir spawned it.
+ */
+export async function sweepGlobalOrphanKernels({ stderr = process.stderr } = {}) {
+  const log = makeLogger(stderr);
+  const listing = await new Promise((resolve) => {
+    execFile("ps", ["-axo", "pid=,ppid=,args="], { maxBuffer: 8 * 1024 * 1024 }, (err, stdout) =>
+      resolve(err ? "" : stdout),
+    );
+  });
+  let reaped = 0;
+  for (const line of listing.split("\n")) {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
+    if (!match) continue;
+    const [, pidStr, ppidStr, args] = match;
+    if (ppidStr !== "1") continue;
+    if (!args.includes("ipykernel_launcher")) continue;
+    if (!/aaronnote-kernel-[0-9a-f-]+\.json/.test(args)) continue;
+    const pid = Number(pidStr);
+    log.warn(`reaping orphaned kernel process ${pid} (parent server process is gone)`);
+    try {
+      process.kill(-pid, "SIGTERM");
+    } catch {
+      try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
+    }
+    reaped += 1;
+  }
+  return { reaped };
+}
+
 function makeConnectionInfo(ports, kernelName) {
   return {
     key: crypto.randomUUID(),

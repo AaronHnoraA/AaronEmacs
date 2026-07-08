@@ -39,6 +39,15 @@ Large generated files can make inline completion unnecessarily expensive."
   :type 'boolean
   :group 'my/copilot)
 
+(config-defvar my/copilot-server-max-heap-mb nil
+  "V8 heap cap (MB) for the Copilot language server, or nil for no cap.
+Applied via `NODE_OPTIONS=--max-old-space-size' on the process this Emacs
+spawns, and mirrored to AaronNote's own Copilot LSP instance (see
+AARONNOTE_COPILOT_MAX_HEAP_MB in `lisp/roam/init-aaronnote.el') so both
+copies of the language server share one cap."
+  :type '(choice (integer :tag "Heap cap in MB") (const :tag "No cap" nil))
+  :group 'my/copilot)
+
 (config-defvar my/copilot-deferred-modes nil
   "Major modes where automatic Copilot startup waits for editor idle time."
   :type '(repeat symbol)
@@ -213,6 +222,22 @@ method maps the bracket key to full-width punctuation.")
   :config
   (my/copilot-setup-dwim-keys copilot-mode-map)
   (my/copilot-setup-dwim-keys copilot-completion-map)
+  (define-advice copilot--make-connection (:around (fn) my/copilot-cap-server-heap)
+    "Cap the Copilot language server's V8 heap via NODE_OPTIONS.
+The server binary is a node script launched through `make-process'; there is
+no `copilot-server-args' hook for interpreter flags, so the cap has to be
+injected through the process environment instead."
+    (if my/copilot-server-max-heap-mb
+        (let* ((flag (format "--max-old-space-size=%d" my/copilot-server-max-heap-mb))
+               (existing (getenv "NODE_OPTIONS"))
+               (process-environment
+                (cons (format "NODE_OPTIONS=%s"
+                              (if (and existing (not (string-empty-p existing)))
+                                  (concat existing " " flag)
+                                flag))
+                      process-environment)))
+          (funcall fn))
+      (funcall fn)))
   (defun my/copilot-check-status ()
     "Report current `copilot.el' authentication status.
 

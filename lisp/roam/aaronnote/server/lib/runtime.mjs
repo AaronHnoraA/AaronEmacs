@@ -11,6 +11,7 @@ import { configureTmpRoot, aaronnoteTmpRoot, runtimeMkdtemp, runtimeTmpFile } fr
 import { aaronnoteMarkdownToLatex, applyLatexTemplate, defaultLatexOutputPath, escapeLatexTitle, latexMacrosPreamble, latexSideCommentPreamble, readLatexTemplate, writeLatexExport } from "./latex-export.mjs";
 import { agentAvailable, loadAgentRules, polishBodyWithAgent } from "./latex-export-codex.mjs";
 import { loadKatexMacros } from "./katex-macros.mjs";
+import { durationFromEnv } from "./jupyter-cell.mjs";
 import { parseCommandArgs, scanInlineCommands } from "../../shared/command-syntax.mjs";
 import {
   patchPlanningNodeRaw,
@@ -5664,6 +5665,14 @@ function copilotProcessCwd() {
   return appDir;
 }
 
+// How long the Copilot LSP may sit unused before `armIdleTimer` stops it.
+// It restarts transparently on the next request via `ensureReady`. 0 disables.
+const COPILOT_IDLE_TTL_MS = durationFromEnv("AARONNOTE_COPILOT_IDLE_TTL_MS", 15 * 60 * 1000);
+const COPILOT_IDLE_CHECK_MS = 30_000;
+// Mirrors Emacs's `my/copilot-server-max-heap-mb` (same config key, passed
+// through this env var) so both copies of the LSP share one V8 heap cap.
+const COPILOT_MAX_HEAP_MB = Math.max(0, Number(process.env.AARONNOTE_COPILOT_MAX_HEAP_MB) || 0);
+
 class CopilotLspClient {
   constructor() {
     this.proc = null;
@@ -5675,6 +5684,25 @@ class CopilotLspClient {
     this.ready = null;
     this.lastAuthCode = "";
     this.lastAuthMessage = "";
+    this.lastActivity = Date.now();
+    this.idleTimer = null;
+  }
+
+  touchActivity() {
+    this.lastActivity = Date.now();
+  }
+
+  armIdleTimer() {
+    clearInterval(this.idleTimer);
+    this.idleTimer = null;
+    if (!(COPILOT_IDLE_TTL_MS > 0)) return;
+    this.idleTimer = setInterval(() => {
+      if (!this.proc || this.pending.size > 0 || this.status.busy) return;
+      if (Date.now() - this.lastActivity < COPILOT_IDLE_TTL_MS) return;
+      pushCopilotLog("idle-shutdown", { idleMs: Date.now() - this.lastActivity });
+      this.stop();
+    }, COPILOT_IDLE_CHECK_MS);
+    this.idleTimer.unref?.();
   }
 
   async ensureReady() {
@@ -5716,9 +5744,15 @@ class CopilotLspClient {
   }
 
   async startCommand(cmd) {
+    const env = { ...process.env, ...(cmd.env || {}) };
+    if (COPILOT_MAX_HEAP_MB > 0) {
+      env.NODE_OPTIONS = [env.NODE_OPTIONS, `--max-old-space-size=${COPILOT_MAX_HEAP_MB}`]
+        .filter(Boolean)
+        .join(" ");
+    }
     const proc = spawn(cmd.command, cmd.args, {
       cwd: copilotProcessCwd(),
-      env: cmd.env ? { ...process.env, ...cmd.env } : process.env,
+      env,
       stdio: ["pipe", "pipe", "pipe"],
     });
     pushCopilotLog("spawn", { command: cmd.command, args: cmd.args, cwd: copilotProcessCwd(), env: cmd.env || {}, pid: proc.pid || 0 });
@@ -5771,6 +5805,8 @@ class CopilotLspClient {
       },
     });
     this.status = { message: "Ready", kind: "Normal", busy: false };
+    this.touchActivity();
+    this.armIdleTimer();
   }
 
   send(value) {
@@ -5906,6 +5942,7 @@ class CopilotLspClient {
 
   async inline(body) {
     await this.ensureReady();
+    this.touchActivity();
     const content = String(body.content || "");
     const file = String(body.file || "");
     const offset = Math.max(0, Math.min(Number(body.offset) || 0, content.length));
@@ -5939,12 +5976,14 @@ class CopilotLspClient {
 
   async shown(body) {
     await this.ensureReady();
+    this.touchActivity();
     if (body?.item) this.notify("textDocument/didShowCompletion", { item: body.item });
     return { ok: true };
   }
 
   async accept(body) {
     await this.ensureReady();
+    this.touchActivity();
     const item = body?.item;
     if (!item) return { ok: false };
     const acceptedLength = Number(body.acceptedLength);
@@ -6006,6 +6045,8 @@ class CopilotLspClient {
   }
 
   stop() {
+    clearInterval(this.idleTimer);
+    this.idleTimer = null;
     const proc = this.proc;
     this.proc = null;
     this.ready = null;

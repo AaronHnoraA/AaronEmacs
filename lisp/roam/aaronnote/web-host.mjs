@@ -87,6 +87,7 @@ const ime = createImeSwitcher();
 import { runtimeMkdtemp, sweepRuntimeTmp } from "./server/lib/tmp.mjs";
 import { loadKatexMacros } from "./server/lib/katex-macros.mjs";
 import { createJupyterCellService } from "./server/lib/jupyter-cell.mjs";
+import { sweepGlobalOrphanKernels } from "./server/jupyter/kernel-registry.mjs";
 import { installJupyterKernelWebSocket } from "./server/lib/jupyter-kernel-ws.mjs";
 import * as zmq from "zeromq";
 
@@ -134,6 +135,13 @@ let jupyterKernelWs = null;
 // One-shot orphan sweep: remove staging/clipboard/db temp files older than 24h.
 void sweepRuntimeTmp().then(({ removed }) => {
   if (removed > 0) process.stderr.write(`[aaronnote-web] swept ${removed} orphaned tmp file(s)\n`);
+}).catch(() => {});
+
+// One-shot orphan sweep: kernels left by a dead ephemeral harness (e.g. a
+// diagnostics run that used its own throwaway runtimeDir), invisible to the
+// per-runtimeDir sidecar sweep inside createJupyterCellService.
+void sweepGlobalOrphanKernels({ stderr: process.stderr }).then(({ reaped }) => {
+  if (reaped > 0) process.stderr.write(`[aaronnote-web] swept ${reaped} orphaned kernel process(es)\n`);
 }).catch(() => {});
 
 // Vault file watcher: marks the note index dirty on external changes (Emacs

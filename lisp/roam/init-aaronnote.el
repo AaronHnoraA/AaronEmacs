@@ -102,6 +102,15 @@ Set to 0 to let the OS pick a random port."
   :type 'integer
   :group 'my/aaronnote)
 
+(config-defvar my/aaronnote-web-host-max-heap-mb nil
+  "V8 heap cap (MB) for the Aaronnote web-host node process, or nil for no cap.
+Passed as a `--max-old-space-size' command-line flag rather than
+`NODE_OPTIONS' in the environment, because web-host's `process.env' is also
+handed to the codex/claude/opencode CLIs it shells out to for LaTeX export —
+an env-based cap would leak onto those unrelated node processes too."
+  :type '(choice (integer :tag "Heap cap in MB") (const :tag "No cap" nil))
+  :group 'my/aaronnote)
+
 (config-defvar my/aaronnote-latex-export-engine "codex"
   "Engine for the Aaronnote CMD+P LaTeX export.
 \"codex\" builds a deterministic mechanical draft and then lets codex polish it,
@@ -401,12 +410,19 @@ failure is diagnosable without hunting for it."
             (format "AARONNOTE_WEB_PORT=%d" my/aaronnote-web-port)
             (when copilot-server
               (format "AARONNOTE_COPILOT_LANGUAGE_SERVER=%s"
-                      (expand-file-name copilot-server)))))
+                      (expand-file-name copilot-server)))
+            (when (bound-and-true-p my/copilot-server-max-heap-mb)
+              (format "AARONNOTE_COPILOT_MAX_HEAP_MB=%d"
+                      my/copilot-server-max-heap-mb))))
            process-environment))
          (proc (make-process
                 :name "aaronnote-web-host"
                 :buffer log-buf
-                :command (list "node" my/aaronnote--web-host-script)
+                :command (append (list "node")
+                                  (when my/aaronnote-web-host-max-heap-mb
+                                    (list (format "--max-old-space-size=%d"
+                                                  my/aaronnote-web-host-max-heap-mb)))
+                                  (list my/aaronnote--web-host-script))
                 :noquery t
                 :sentinel #'my/aaronnote--sentinel
                 :filter #'my/aaronnote--process-filter)))

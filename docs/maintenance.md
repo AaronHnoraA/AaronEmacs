@@ -211,7 +211,13 @@ leader 入口：
 
 这个 buffer 默认打开到独立 frame，避免和 dashboard/Org 分屏共绘。默认只在打开和按 `g` 时采样；如果按 `a` 临时开启自动刷新，`q` 退出时会停止刷新 timer 并关闭监管 frame。顶部有用法区和概览条形图。里面可以看：
 
-- `ps` 里的 Emacs CPU、内存、RSS、子进程。
+- `ps` 里的 Emacs CPU、内存、RSS、子进程（原始 `ps` 行，只到直接子进程）。
+- **Toolchain Memory**：Emacs 整个后代进程树（递归，不止直接子进程）的 RSS
+  汇总——包含 AaronNote web-host 自己再 spawn 出来的 Copilot LSP、Jupyter
+  kernel 这类"孙进程"，用缩进树 + 合计展示，不用再手动拼 `ps`/`pgrep` 审计
+  工具链内存。结构化数据对应 `(my/performance-snapshot)` 里的
+  `:children-rss-kb`/`:children-count`（只加进结构化 sample，没有写入 TSV
+  记录，避免改动已有时序数据的列结构）。
 - Emacs runtime：buffer/process/timer/GC/read-process-output-max/memory-use-counts。
 - Emacs process 列表。
 - hook 表的全局和当前 buffer-local 激活数量。
@@ -478,6 +484,63 @@ board 会缓存同一 scope 的扫描结果；只要 Org、媒体和 cache 文�
 
 1. `gls` 是否存在
 2. macOS 上 coreutils 是否装好
+
+### Lean / AaronNote 孤儿进程占内存
+
+Lean 4 LSP 是 watchdog 架构：eglot 管理的是 `lean --server`/`lake serve`
+(或经 `lean-proxy.mjs` 包装的版本)，它为每个打开的 `.cell/*.lean` 文件 fork
+一个 `lean --worker` 子进程，真正的 elaboration 堆（常常几 GB）在 worker 里。
+如果 watchdog 被硬杀（Emacs 崩溃、`kill -9`），worker 会被 reparent 到 PID 1
+并常驻。
+
+- 正常路径：`kill-emacs-hook` 里的 `my/eglot-shutdown-all-on-exit-h`
+  （`lisp/init-lsp.el`）会在退出时干净关闭所有 eglot 服务器；
+  `lean-proxy.mjs` 收到 SIGTERM/SIGINT 时会用 `killDownstream()` 杀整个下游
+  进程组，而不只是直接子进程。
+- 自愈路径：`my/lean-sweep-orphan-workers`（`lisp/lang/lean/init-lean.el`，
+  模块加载时空闲 5 秒后自动跑一次，也可以手动 `M-x` 调用）只会杀
+  **ppid=1 且命令行匹配 `.cell/` 路径**的 `lean --worker`，不会碰任何还有活
+  watchdog 父进程的 worker。
+- 排查：`pgrep -fl 'lean --worker'` 看 ppid 是不是 1；`ps -p <pid> -o rss`
+  看占了多少内存。
+
+AaronNote 的 Jupyter kernel 同理：`server/jupyter/kernel-process.mjs` 用
+`detached: true` 启动 kernel，一旦孵化它的 node 进程（web-host 或某个临时
+诊断 harness）整体退出而没有干净调用 `shutdown()`，kernel 会被 reparent 到
+PID 1。`server/jupyter/kernel-registry.mjs` 的 `sweepOrphanKernels` 只能靠
+per-runtimeDir 的 `aaronnote-owned.json` sidecar 回收**同一个 runtimeDir 的
+上一轮**孤儿；如果调用方每次都 `mkdtemp` 一个新的临时 runtimeDir（例如一次性
+诊断脚本），sidecar 永远追不上。`web-host.mjs` 启动时额外跑一次
+`sweepGlobalOrphanKernels`：只要是 ppid=1 且命令行匹配
+`ipykernel_launcher ... aaronnote-kernel-*.json` 的进程，不管来自哪个
+runtimeDir 一律清理（这个命名模式只有本模块会用到，正常存活的 kernel
+ppid 是它的 node 宿主进程，不会命中）。
+
+**写临时诊断脚本时的规则**：不要给 `createJupyterCellService`/
+`createKernelRegistry` 传一次性 `mkdtemp` 出来的 runtimeDir 然后直接退出；
+要么复用稳定的 vault runtimeDir，要么显式 `await service.shutdown()`
+之后再退出。
+
+### 稳态内存调参
+
+孤儿进程之外，长期运行的稳态 RSS 主要由三个参数决定，都走 config
+registry(`etc/config-store.el`，改值用 `config-set` 或直接编辑该文件,
+不要散落 `setq`):
+
+| 键 | 位置 | 默认 | 作用 |
+|---|---|---|---|
+| `my/gcmh-high-cons-threshold` | `lisp/init-tools.el` (gcmh) | 128 MB | Emacs 空闲 GC 前允许堆积的垃圾上限；LSP 活跃时会被 `lisp/init-lsp.el` 的 `my/language-server-performance-gcmh-factor`(默认 2) 临时翻倍。之前是 512 MB(LSP 活跃时 1 GB),下调后 GC 更勤但单次更短,交互延迟影响很小。 |
+| `my/copilot-server-max-heap-mb` | `lisp/init-copilot.el` | 384 | Emacs 自己 spawn 的 Copilot language server 的 V8 堆上限,通过 `NODE_OPTIONS` 注入(该 LS 不是走命令行参数,`copilot-server-args` 只能传给二进制本身,包不去掉支持自定义 env,所以用 `copilot--make-connection` 的 advice)。同一个键的值会通过 `AARONNOTE_COPILOT_MAX_HEAP_MB` 环境变量传给 AaronNote 侧自己 spawn 的第二份 Copilot LSP 实例(`server/lib/runtime.mjs` 的 `CopilotLspClient`),两边共享一个上限。 |
+| `my/aaronnote-web-host-max-heap-mb` | `lisp/roam/init-aaronnote.el` | 512 | AaronNote `web-host.mjs` 自身的 V8 堆上限,**必须用 `--max-old-space-size` 命令行 flag 而不是 `NODE_OPTIONS` 环境变量**——web-host 的 `process.env` 会原样传给它 shell 出去的 codex/claude/opencode CLI(LaTeX export 用),用环境变量会把堆上限错误地传染给这些 node 程序。 |
+
+AaronNote 侧的 Copilot LSP 实例(`CopilotLspClient`)另外做了**空闲 TTL 自动
+停止**:`AARONNOTE_COPILOT_IDLE_TTL_MS`(默认 15 分钟,0 关闭)内如果没有
+真实的补全请求(inline/shown/accept,不含单纯的 status 轮询)、且没有
+pending 请求,就会自动 `stop()`;下次任何请求经 `ensureReady()` 自动重启。
+用一次 web 端 copilot 不会永久多驻留一个 ~400 MB 的进程。
+
+排查:`(my/performance-report-string)` 的 Toolchain Memory 区块能直接看到
+两份 Copilot LSP(如果都在跑)和它们各自的 RSS。
 
 ## 8. 推荐维护节奏
 

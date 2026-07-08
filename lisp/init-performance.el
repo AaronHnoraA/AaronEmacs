@@ -227,8 +227,9 @@
 
 (defun my/performance--sample ()
   "Return a structured performance sample."
-  (let ((process (my/performance--self-process-sample))
-        (org (my/performance--org-summary-sample)))
+  (let* ((process (my/performance--self-process-sample))
+         (org (my/performance--org-summary-sample))
+         (descendants (my/performance--descendant-tree-snapshot)))
     (list :timestamp (format-time-string "%Y-%m-%d %H:%M:%S")
           :unix-time (float-time)
           :pid (emacs-pid)
@@ -236,6 +237,8 @@
           :mem (or (plist-get process :mem) 0.0)
           :rss-kb (plist-get process :rss-kb)
           :vsz-kb (plist-get process :vsz-kb)
+          :children-rss-kb (plist-get descendants :rss-kb)
+          :children-count (length (plist-get descendants :tree))
           :elapsed (plist-get process :etime)
           :buffers (length (buffer-list))
           :processes (length (process-list))
@@ -346,6 +349,71 @@
       (dolist (line (cons (car all-lines) child-lines))
         (insert line "\n")))
     (insert "\n")))
+
+(defun my/performance--process-plists (ps-lines)
+  "Parse `ps' output PS-LINES (header + rows) into a list of process plists."
+  (delq nil (mapcar #'my/performance--parse-ps-process-line (cdr ps-lines))))
+
+(defun my/performance--descendant-tree (pid processes)
+  "Return (DEPTH . PROC) pairs for PID's descendants among PROCESSES.
+PROCESSES is a list of plists as returned by `my/performance--process-plists'.
+Order is depth-first, parent before children, matching indented display."
+  (let ((by-ppid (make-hash-table :test 'eql)))
+    (dolist (proc processes)
+      (push proc (gethash (plist-get proc :ppid) by-ppid)))
+    (let (result)
+      (cl-labels ((walk (parent-pid depth)
+                    (dolist (child (nreverse (copy-sequence (gethash parent-pid by-ppid))))
+                      (push (cons depth child) result)
+                      (walk (plist-get child :pid) (1+ depth)))))
+        (walk pid 0))
+      (nreverse result))))
+
+(defun my/performance--descendant-tree-snapshot ()
+  "Return (:tree TREE :rss-kb TOTAL) for the current Emacs process's descendants.
+TREE is as returned by `my/performance--descendant-tree'; TOTAL is the sum of
+their RSS in KB.  Returns nil when `ps' is unavailable."
+  (when-let* ((all-lines (my/performance--ps-lines
+                          "-axo" "pid,ppid,%cpu,%mem,rss,vsz,etime,command"))
+              (processes (my/performance--process-plists all-lines)))
+    (let ((tree (my/performance--descendant-tree (emacs-pid) processes)))
+      (list :tree tree
+            :rss-kb (apply #'+ (mapcar (lambda (entry)
+                                         (or (plist-get (cdr entry) :rss-kb) 0))
+                                       tree))))))
+
+(defun my/performance--insert-toolchain-memory ()
+  "Insert a recursive RSS rollup of the whole Emacs descendant process tree.
+Unlike the raw `ps' block above (direct children only), this walks the full
+tree — e.g. AaronNote's web-host node process and anything *it* spawns, like
+a Copilot LSP instance or a Jupyter kernel — so the real toolchain memory
+footprint (Lean workers, language servers, node backends) is visible in one
+place instead of requiring a manual audit."
+  (my/performance--section "Toolchain Memory")
+  (let* ((snapshot (my/performance--descendant-tree-snapshot))
+         (tree (plist-get snapshot :tree))
+         (children-rss-kb (or (plist-get snapshot :rss-kb) 0))
+         (self (my/performance--self-process-sample))
+         (self-rss-kb (or (plist-get self :rss-kb) 0)))
+    (if (null snapshot)
+        (insert "ps unavailable\n")
+      (insert (format "%-8s %10s  %s\n" "PID" "RSS(MB)" "Process"))
+      (insert (format "%-8d %10.1f  Emacs (self)\n" (emacs-pid) (/ self-rss-kb 1024.0)))
+      (if (null tree)
+          (insert "  (no descendant processes)\n")
+        (dolist (entry tree)
+          (let* ((depth (car entry))
+                 (proc (cdr entry)))
+            (insert (format "%-8d %10.1f  %s%s\n"
+                            (plist-get proc :pid)
+                            (/ (or (plist-get proc :rss-kb) 0) 1024.0)
+                            (make-string (* 2 (1+ depth)) ?\s)
+                            (plist-get proc :command))))))
+      (insert (format "\n%-28s %d\n" "Descendant processes" (length tree)))
+      (insert (format "%-28s %.1f MB\n" "Descendant RSS total" (/ children-rss-kb 1024.0)))
+      (insert (format "%-28s %.1f MB\n" "Emacs + descendants"
+                      (/ (+ self-rss-kb children-rss-kb) 1024.0)))))
+  (insert "\n"))
 
 (defun my/performance--insert-emacs-summary ()
   "Insert Emacs runtime metrics."
@@ -572,6 +640,7 @@ tools; it samples once and does not start any refresh timers."
   (my/performance--insert-header sample inspected-buffer)
   (my/performance--insert-overview sample)
   (my/performance--insert-os-processes)
+  (my/performance--insert-toolchain-memory)
   (my/performance--insert-emacs-summary)
   (my/performance--insert-org-buffers)
   (my/performance--insert-emacs-processes)

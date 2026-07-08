@@ -711,6 +711,35 @@ while using eglot (not lsp-mode) as the language server backend."
      :source "lean4-mode (sub-files only)"
      :note "Uses lake serve when a lakefile is found, else lean --server")))
 
+;;; ── Orphan worker sweep ──────────────────────────────────────────────────────
+
+(defun my/lean-sweep-orphan-workers ()
+  "Terminate orphaned `lean --worker' processes left behind by a dead watchdog.
+The Lean LSP server (`lean --server' / `lake serve') forks a `lean --worker'
+child per open file, and that child holds the (often multi-GB) elaboration
+heap.  If the server is killed without a clean LSP shutdown, the worker
+survives, reparented to init (ppid 1).  Only ppid-1 processes whose command
+line targets a `.cell/' mirror file are touched, so workers still owned by
+a live watchdog (any other Emacs/editor session) are never affected."
+  (interactive)
+  (let ((killed 0))
+    (dolist (pid (list-system-processes))
+      (let* ((attrs (process-attributes pid))
+             (ppid  (cdr (assq 'ppid attrs)))
+             (args  (cdr (assq 'args attrs))))
+        (when (and args
+                   (eql ppid 1)
+                   (string-match-p "/lean --worker " args)
+                   (string-match-p "/\\.cell/" args))
+          (lean-dev-log "sweep-orphan-workers: terminating pid=%s args=%s" pid args)
+          (ignore-errors (signal-process pid 'SIGTERM))
+          (cl-incf killed))))
+    (when (called-interactively-p 'any)
+      (message "Lean orphan sweep: terminated %d worker process(es)" killed))
+    killed))
+
+(run-with-idle-timer 5 nil #'my/lean-sweep-orphan-workers)
+
 ;;; ── Project symbol fallback ──────────────────────────────────────────────────
 
 (with-eval-after-load 'init-symbols

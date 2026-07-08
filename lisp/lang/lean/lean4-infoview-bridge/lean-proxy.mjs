@@ -331,10 +331,20 @@ function uriToPath(uri) {
 
 // ── Lake startup ──────────────────────────────────────────────────────────────
 
+function killDownstream(signal = 'SIGTERM') {
+  if (!lakeProc || lakeProc.pid == null) return
+  // lakeProc (lean --server / lake serve) forks a `lean --worker` per open
+  // file; killing only the direct child leaves those workers running.
+  // Since lakeProc is spawned detached (own process group), signal the
+  // whole group so workers die with it.
+  try { process.kill(-lakeProc.pid, signal) }
+  catch { try { lakeProc.kill(signal) } catch { /* already gone */ } }
+}
+
 function startLake() {
   const [cmd, ...cmdArgs] = DOWNSTREAM
   log(`spawning: ${cmd} ${cmdArgs.join(' ')} cwd=${ROOT}`)
-  lakeProc = spawn(cmd, cmdArgs, { cwd: ROOT, stdio: ['pipe','pipe','pipe'] })
+  lakeProc = spawn(cmd, cmdArgs, { cwd: ROOT, stdio: ['pipe','pipe','pipe'], detached: true })
   const lakeFramer = new LspFramer(fromLake)
   lakeProc.stdout.on('data', c => lakeFramer.feed(c))
   lakeProc.stderr.on('data', d => process.stderr.write(d))
@@ -366,7 +376,7 @@ function startLake() {
   // Eglot stdin feeds the proxy; proxy feeds lake
   const eglotFramer = new LspFramer(fromEglot)
   process.stdin.on('data', c => eglotFramer.feed(c))
-  process.stdin.on('end', () => { lakeProc?.kill(); process.exit(0) })
+  process.stdin.on('end', () => { killDownstream(); process.exit(0) })
 }
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
@@ -610,5 +620,6 @@ httpServer.listen(0, '127.0.0.1', async () => {
   startLake()
 })
 
-process.on('SIGTERM', () => { lakeProc?.kill(); process.exit(0) })
-process.on('SIGINT',  () => { lakeProc?.kill(); process.exit(0) })
+process.on('SIGTERM', () => { killDownstream(); process.exit(0) })
+process.on('SIGINT',  () => { killDownstream(); process.exit(0) })
+process.on('exit', () => { killDownstream('SIGKILL') })
