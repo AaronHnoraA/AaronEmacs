@@ -607,7 +607,7 @@ This section discusses a synthetic but mathematically coherent collection
 of ideas around density operators, tensor encodings, graph-like reductions,
 and algebraic isomorphism problems.
 
-The running theme is that a mathematical object may have several equivalent
+The running theme is that a mathematical object may have several equivalenta asd ad sa das ad asd asd as dsa da s this this this this this this this this this this this 
 representations:
 
 \[
@@ -9089,7 +9089,7 @@ Coordinates are useful for computation because they give arrays of field
 elements. Invariance is useful for mathematics because it identifies the
 features of the object that do not depend on the chosen basis.
 
-中文直觉：坐标是“输入格式”，不变量是“结构本身留下的影子”。
+中文直觉：坐标是“输入格式”，不变量是“结构本身留下的影���”。
 #+end remark
 
 If \(g \in \operatorname{GL}(V)\) and \(h \in \operatorname{GL}(W)\), a change

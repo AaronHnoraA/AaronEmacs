@@ -2415,6 +2415,7 @@ setupCopilot({
   editor,
   host,
   currentFile: () => currentFile,
+  clientId: () => clientId,
   vimMode: () => vim.mode(),
   setStatus,
   onChange: (handler) => {

@@ -5480,6 +5480,20 @@ function copilotUriForFile(file) {
   return pathToFileURL(join(runtimeTmpRoot || aaronnoteTmpRoot(), "copilot", "aaronnote-copilot.md")).href;
 }
 
+function copilotClientId(body = {}) {
+  return String(body?.clientId || body?.client || "").trim();
+}
+
+function copilotBodyActive(body = {}) {
+  return body?.active !== false && body?.focused !== false;
+}
+
+function copilotSupersededError(error) {
+  const code = error?.code ?? error?.data?.code;
+  const message = String(error?.message || error?.data?.message || "");
+  return code === -32802 || /superseded by a new request/i.test(message);
+}
+
 function uniqueExistingCommands(commands) {
   const seen = new Set();
   const out = [];
@@ -5613,6 +5627,10 @@ function copilotDiagnostics() {
           status: copilotClient.status,
           pending: copilotClient.pending?.size || 0,
           documents: copilotClient.documents?.size || 0,
+          clients: copilotClient.clientDocuments?.size || 0,
+          focusedUri: copilotClient.focusedUri || "",
+          focusedClient: copilotClient.focusedClient || "",
+          notifiedFocusedUri: copilotClient.notifiedFocusedUri || "",
         }
       : null,
     log: copilotLog,
@@ -5739,6 +5757,9 @@ class EmacsCopilotBridgeClient {
   inline(body) { return this.post("inline", body); }
   shown(body) { return this.post("shown", body); }
   accept(body) { return this.post("accept", body); }
+  focus(body) { return this.post("focus", body); }
+  blur(body) { return this.post("blur", body); }
+  close(body) { return this.post("close", body); }
   signIn() { return this.post("sign-in", {}); }
   signOut() { return this.post("sign-out", {}); }
   quota() { return this.post("quota", {}); }
@@ -5754,6 +5775,10 @@ class CopilotLspClient {
     this.nextId = 1;
     this.pending = new Map();
     this.documents = new Map();
+    this.clientDocuments = new Map();
+    this.focusedUri = "";
+    this.focusedClient = "";
+    this.notifiedFocusedUri = "";
     this.status = { message: "Not started", kind: "Inactive", busy: false };
     this.ready = null;
     this.lastAuthCode = "";
@@ -5857,6 +5882,10 @@ class CopilotLspClient {
       this.proc = null;
       this.ready = null;
       this.documents.clear();
+      this.clientDocuments.clear();
+      this.focusedUri = "";
+      this.focusedClient = "";
+      this.notifiedFocusedUri = "";
       this.status = { message: err.message, kind: "Error", busy: false };
     });
 
@@ -5945,7 +5974,12 @@ class CopilotLspClient {
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
-      if (message.error) pending.reject(new Error(message.error.message || "Copilot request failed"));
+      if (message.error) {
+        const error = new Error(message.error.message || "Copilot request failed");
+        error.code = message.error.code;
+        error.data = message.error.data;
+        pending.reject(error);
+      }
       else pending.resolve(message.result);
       return;
     }
@@ -5989,17 +6023,141 @@ class CopilotLspClient {
     }
   }
 
-  syncDocument(uri, file, content) {
+  closeDocument(uri, reason = "unreferenced") {
+    const current = this.documents.get(uri);
+    if (!current) return false;
+    this.documents.delete(uri);
+    if (this.focusedUri === uri) this.focusedUri = "";
+    if (this.notifiedFocusedUri === uri) this.notifiedFocusedUri = "";
+    if (this.proc?.stdin?.writable) {
+      this.notify("textDocument/didClose", { textDocument: { uri } });
+    }
+    pushCopilotLog("document-close", { uri, file: current.file || "", reason });
+    return true;
+  }
+
+  detachClient(clientId, reason = "close") {
+    if (!clientId) return null;
+    const previous = this.clientDocuments.get(clientId);
+    if (!previous) return null;
+    this.clientDocuments.delete(clientId);
+    const wasFocused = this.focusedClient === clientId;
+    if (wasFocused) {
+      this.focusedClient = "";
+      if (this.focusedUri === previous.uri) this.focusedUri = "";
+    }
+    const doc = this.documents.get(previous.uri);
+    if (doc?.clients) {
+      doc.clients.delete(clientId);
+      doc.lastUsedAt = Date.now();
+      if (doc.clients.size === 0 && this.focusedUri !== previous.uri) {
+        this.closeDocument(previous.uri, reason);
+      }
+    }
+    return previous;
+  }
+
+  attachClient(clientId, uri, file, state = "focused") {
+    if (!clientId) return;
+    const previous = this.clientDocuments.get(clientId);
+    if (previous?.uri && previous.uri !== uri) this.detachClient(clientId, "switch-file");
+    this.clientDocuments.set(clientId, {
+      uri,
+      file: String(file || ""),
+      state,
+      updatedAt: Date.now(),
+    });
+    const doc = this.documents.get(uri);
+    if (doc?.clients) {
+      doc.clients.add(clientId);
+      doc.lastUsedAt = Date.now();
+    }
+  }
+
+  markFocused(uri, clientId = "", file = "", notifyLsp = true) {
+    if (clientId) this.attachClient(clientId, uri, file, "focused");
+    this.focusedUri = uri;
+    this.focusedClient = clientId;
+    if (!notifyLsp || this.notifiedFocusedUri === uri || !this.documents.has(uri)) return;
+    this.notify("textDocument/didFocus", { textDocument: { uri } });
+    this.notifiedFocusedUri = uri;
+    pushCopilotLog("document-focus", { uri, file: String(file || ""), clientId });
+  }
+
+  markBlurred(body = {}) {
+    const clientId = copilotClientId(body);
+    if (!clientId) return { ok: true, focused: this.focusedClient || "" };
+    const current = this.clientDocuments.get(clientId);
+    if (current) {
+      this.clientDocuments.set(clientId, {
+        ...current,
+        state: "blurred",
+        updatedAt: Date.now(),
+      });
+    }
+    if (this.focusedClient === clientId) {
+      this.focusedClient = "";
+      if (this.focusedUri === current?.uri) this.focusedUri = "";
+    }
+    pushCopilotLog("client-blur", { clientId, file: String(body?.file || current?.file || "") });
+    return { ok: true, focused: this.focusedClient || "" };
+  }
+
+  markClosed(body = {}) {
+    const clientId = copilotClientId(body);
+    const previous = this.detachClient(clientId, "client-close");
+    pushCopilotLog("client-close", {
+      clientId,
+      file: String(body?.file || previous?.file || ""),
+      uri: previous?.uri || "",
+      clients: this.clientDocuments.size,
+    });
+    return { ok: true, closed: Boolean(previous), clients: this.clientDocuments.size };
+  }
+
+  markClientFocus(body = {}) {
+    const file = String(body.file || "");
+    const uri = copilotUriForFile(file);
+    const clientId = copilotClientId(body);
+    this.markFocused(uri, clientId, file, false);
+    pushCopilotLog("client-focus", { clientId, file, uri });
+    return { ok: true, focused: clientId, uri };
+  }
+
+  clientMayRequestInline(body, uri) {
+    if (!copilotBodyActive(body)) return false;
+    const clientId = copilotClientId(body);
+    if (!clientId) return true;
+    const current = this.clientDocuments.get(clientId);
+    if (this.focusedClient && this.focusedClient !== clientId && current?.state !== "focused") return false;
+    if (this.focusedUri && this.focusedUri !== uri && current?.state !== "focused") return false;
+    return true;
+  }
+
+  syncDocument(uri, file, content, clientId = "") {
     const languageId = languageIdForFile(file);
     const current = this.documents.get(uri);
     if (!current) {
       const version = 1;
-      this.documents.set(uri, { version, content, languageId });
+      const clients = new Set();
+      if (clientId) clients.add(clientId);
+      this.documents.set(uri, {
+        version,
+        content,
+        languageId,
+        file: String(file || ""),
+        clients,
+        openedAt: Date.now(),
+        lastUsedAt: Date.now(),
+      });
       this.notify("textDocument/didOpen", {
         textDocument: { uri, languageId, version, text: content },
       });
+      pushCopilotLog("document-open", { uri, file: String(file || ""), clientId });
       return { version, languageId };
     }
+    if (clientId && current.clients) current.clients.add(clientId);
+    current.lastUsedAt = Date.now();
     if (current.content !== content) {
       const version = current.version + 1;
       this.notify("textDocument/didChange", {
@@ -6010,7 +6168,14 @@ class CopilotLspClient {
           text: content,
         }],
       });
-      this.documents.set(uri, { version, content, languageId });
+      this.documents.set(uri, {
+        ...current,
+        version,
+        content,
+        languageId,
+        file: String(file || current.file || ""),
+        lastUsedAt: Date.now(),
+      });
       return { version, languageId };
     }
     return { version: current.version, languageId: current.languageId };
@@ -6023,14 +6188,26 @@ class CopilotLspClient {
     const file = String(body.file || "");
     const offset = Math.max(0, Math.min(Number(body.offset) || 0, content.length));
     const uri = copilotUriForFile(file);
-    const { version } = this.syncDocument(uri, file, content);
-    this.notify("textDocument/didFocus", { textDocument: { uri } });
-    const result = await this.request("textDocument/inlineCompletion", {
-      textDocument: { uri, version },
-      position: offsetToPosition(content, offset),
-      context: { triggerKind: 2 },
-      formattingOptions: { tabSize: 2, insertSpaces: true },
-    });
+    const clientId = copilotClientId(body);
+    if (!this.clientMayRequestInline(body, uri)) {
+      pushCopilotLog("inline-skipped", { uri, file, clientId, reason: "inactive-client" });
+      return { type: "copilot-inline", items: [], status: this.status };
+    }
+    const { version } = this.syncDocument(uri, file, content, clientId);
+    this.markFocused(uri, clientId, file, true);
+    let result;
+    try {
+      result = await this.request("textDocument/inlineCompletion", {
+        textDocument: { uri, version },
+        position: offsetToPosition(content, offset),
+        context: { triggerKind: 2 },
+        formattingOptions: { tabSize: 2, insertSpaces: true },
+      });
+    } catch (err) {
+      if (!copilotSupersededError(err)) throw err;
+      pushCopilotLog("inline-superseded", { uri, file, clientId });
+      return { type: "copilot-inline", items: [], status: this.status };
+    }
     const item = Array.isArray(result?.items) ? result.items.find((candidate) => typeof candidate?.insertText === "string") : null;
     if (!item) return { type: "copilot-inline", items: [], status: this.status };
     const range = item.range
@@ -6120,9 +6297,26 @@ class CopilotLspClient {
     return { type: "copilot-quota", result };
   }
 
+  focus(body) {
+    return this.markClientFocus(body || {});
+  }
+
+  blur(body) {
+    return this.markBlurred(body || {});
+  }
+
+  close(body) {
+    return this.markClosed(body || {});
+  }
+
   stop() {
     clearInterval(this.idleTimer);
     this.idleTimer = null;
+    this.documents.clear();
+    this.clientDocuments.clear();
+    this.focusedUri = "";
+    this.focusedClient = "";
+    this.notifiedFocusedUri = "";
     const proc = this.proc;
     this.proc = null;
     this.ready = null;
@@ -6174,6 +6368,9 @@ export async function handleCopilotRequest(action, body = {}) {
   if (action === "inline") return client.inline(body);
   if (action === "shown") return client.shown(body);
   if (action === "accept") return client.accept(body);
+  if (action === "focus") return client.focus(body);
+  if (action === "blur") return client.blur(body);
+  if (action === "close") return client.close(body);
   if (action === "sign-in") return client.signIn();
   if (action === "sign-out") return client.signOut();
   if (action === "quota") return client.quota();

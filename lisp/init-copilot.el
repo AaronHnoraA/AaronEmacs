@@ -85,6 +85,18 @@ LSP in standalone/non-bridge runs."
 (defvar my/copilot-aaronnote-bridge--documents (make-hash-table :test #'equal)
   "Synthetic AaronNote document state known to the shared Copilot LS.")
 
+(defvar my/copilot-aaronnote-bridge--clients (make-hash-table :test #'equal)
+  "AaronNote Copilot client state keyed by pane/client id.")
+
+(defvar my/copilot-aaronnote-bridge--focused-uri nil
+  "Synthetic AaronNote document URI last focused in the shared Copilot LS.")
+
+(defvar my/copilot-aaronnote-bridge--focused-client nil
+  "AaronNote pane/client id that most recently held Copilot focus.")
+
+(defvar my/copilot-aaronnote-bridge--notified-focused-uri nil
+  "Synthetic AaronNote document URI whose focus was last notified to Copilot.")
+
 (defvar my/copilot-aaronnote-bridge--log nil
   "Bounded recent log entries for AaronNote Copilot bridge diagnostics.")
 
@@ -130,6 +142,10 @@ LSP in standalone/non-bridge runs."
     (error "copilot.el is unavailable"))
   (unless (copilot--connection-alivep)
     (clrhash my/copilot-aaronnote-bridge--documents)
+    (clrhash my/copilot-aaronnote-bridge--clients)
+    (setq my/copilot-aaronnote-bridge--focused-uri nil
+          my/copilot-aaronnote-bridge--focused-client nil
+          my/copilot-aaronnote-bridge--notified-focused-uri nil)
     (with-current-buffer (my/copilot-aaronnote-bridge--server-bootstrap-buffer)
       (copilot--start-server))))
 
@@ -141,6 +157,12 @@ LSP in standalone/non-bridge runs."
          method
          (or params (my/copilot-aaronnote-bridge--empty-object))
          args))
+
+(defun my/copilot-aaronnote-bridge--superseded-error-p (err)
+  "Return non-nil when ERR is Copilot's stale inline request cancellation."
+  (let ((text (format "%S" err)))
+    (or (string-match-p "jsonrpc-error-code[[:space:]\n]*\\.[[:space:]\n]*-32802" text)
+        (string-match-p "Request was superseded by a new request" text))))
 
 (defun my/copilot-aaronnote-bridge--notify (method params)
   "Send METHOD notification with PARAMS to the shared Copilot LS."
@@ -178,6 +200,121 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
                              ext)
                      user-emacs-directory)))
     (copilot--path-to-uri synthetic)))
+
+(defun my/copilot-aaronnote-bridge--client-id (body)
+  "Return AaronNote client id from BODY, or an empty string."
+  (let ((value (or (plist-get body :clientId)
+                   (plist-get body :client)
+                   "")))
+    (if (stringp value) (string-trim value) "")))
+
+(defun my/copilot-aaronnote-bridge--body-active-p (body)
+  "Return non-nil when BODY represents an active/focused pane."
+  (and (not (eq (plist-get body :active) :json-false))
+       (not (eq (plist-get body :focused) :json-false))))
+
+(defun my/copilot-aaronnote-bridge--copilot-live-p ()
+  "Return non-nil when the shared Copilot LS connection is alive."
+  (and (require 'copilot nil t)
+       (copilot--connection-alivep)))
+
+(defun my/copilot-aaronnote-bridge--notify-if-live (method params)
+  "Send METHOD notification with PARAMS without starting Copilot."
+  (when (my/copilot-aaronnote-bridge--copilot-live-p)
+    (jsonrpc-notify copilot--connection method params)))
+
+(defun my/copilot-aaronnote-bridge--document-client-count (uri)
+  "Return number of AaronNote clients still attached to URI."
+  (let ((count 0))
+    (maphash
+     (lambda (_client state)
+       (when (equal (plist-get state :uri) uri)
+         (setq count (1+ count))))
+     my/copilot-aaronnote-bridge--clients)
+    count))
+
+(defun my/copilot-aaronnote-bridge--close-document (uri &optional reason)
+  "Close URI in Copilot when AaronNote has no remaining clients."
+  (when (gethash uri my/copilot-aaronnote-bridge--documents)
+    (remhash uri my/copilot-aaronnote-bridge--documents)
+    (when (equal my/copilot-aaronnote-bridge--focused-uri uri)
+      (setq my/copilot-aaronnote-bridge--focused-uri nil))
+    (when (equal my/copilot-aaronnote-bridge--notified-focused-uri uri)
+      (setq my/copilot-aaronnote-bridge--notified-focused-uri nil))
+    (my/copilot-aaronnote-bridge--notify-if-live
+     'textDocument/didClose
+     (list :textDocument (list :uri uri)))
+    (my/copilot-aaronnote-bridge--log
+     "document-close"
+     `((uri . ,uri) (reason . ,(or reason ""))))))
+
+(defun my/copilot-aaronnote-bridge--detach-client (client-id &optional reason)
+  "Detach CLIENT-ID from its AaronNote Copilot document."
+  (unless (string-empty-p client-id)
+    (let* ((state (gethash client-id my/copilot-aaronnote-bridge--clients))
+           (uri (plist-get state :uri)))
+      (when state
+        (remhash client-id my/copilot-aaronnote-bridge--clients)
+        (when (equal my/copilot-aaronnote-bridge--focused-client client-id)
+          (setq my/copilot-aaronnote-bridge--focused-client nil)
+          (when (equal my/copilot-aaronnote-bridge--focused-uri uri)
+            (setq my/copilot-aaronnote-bridge--focused-uri nil)))
+        (when (and uri
+                   (= (my/copilot-aaronnote-bridge--document-client-count uri) 0)
+                   (not (equal my/copilot-aaronnote-bridge--focused-uri uri)))
+          (my/copilot-aaronnote-bridge--close-document uri reason)))
+      state)))
+
+(defun my/copilot-aaronnote-bridge--attach-client (client-id uri file state)
+  "Attach CLIENT-ID to URI/FILE with lifecycle STATE."
+  (unless (or (string-empty-p client-id)
+              (string-empty-p uri))
+    (let ((previous (gethash client-id my/copilot-aaronnote-bridge--clients)))
+      (when (and previous
+                 (not (equal (plist-get previous :uri) uri)))
+        (my/copilot-aaronnote-bridge--detach-client client-id "switch-file")))
+    (puthash client-id
+             (list :uri uri
+                   :file file
+                   :state state
+                   :updated-at (float-time))
+             my/copilot-aaronnote-bridge--clients)))
+
+(defun my/copilot-aaronnote-bridge--focus-document (uri client-id file notify)
+  "Mark URI as focused by CLIENT-ID and optionally notify Copilot."
+  (unless (string-empty-p client-id)
+    (my/copilot-aaronnote-bridge--attach-client client-id uri file "focused"))
+  (setq my/copilot-aaronnote-bridge--focused-uri uri
+        my/copilot-aaronnote-bridge--focused-client
+        (unless (string-empty-p client-id) client-id))
+  (when (and notify
+             (gethash uri my/copilot-aaronnote-bridge--documents)
+             (not (equal my/copilot-aaronnote-bridge--notified-focused-uri uri)))
+    (my/copilot-aaronnote-bridge--notify
+     'textDocument/didFocus
+     (list :textDocument (list :uri uri)))
+    (setq my/copilot-aaronnote-bridge--notified-focused-uri uri)
+    (my/copilot-aaronnote-bridge--log
+     "document-focus"
+     `((uri . ,uri) (file . ,file) (clientId . ,client-id)))))
+
+(defun my/copilot-aaronnote-bridge--client-may-request-p (body uri)
+  "Return non-nil when BODY's client may request inline completion for URI."
+  (let* ((client-id (my/copilot-aaronnote-bridge--client-id body))
+         (state (and (not (string-empty-p client-id))
+                     (gethash client-id my/copilot-aaronnote-bridge--clients)))
+         (focused-client my/copilot-aaronnote-bridge--focused-client)
+         (focused-uri my/copilot-aaronnote-bridge--focused-uri))
+    (and (my/copilot-aaronnote-bridge--body-active-p body)
+         (or (string-empty-p client-id)
+             (not (and (stringp focused-client)
+                       (not (string-empty-p focused-client))))
+             (equal focused-client client-id)
+             (equal (plist-get state :state) "focused"))
+         (or (not (and (stringp focused-uri)
+                       (not (string-empty-p focused-uri))))
+             (equal focused-uri uri)
+             (equal (plist-get state :state) "focused")))))
 
 (defun my/copilot-aaronnote-bridge--utf16-units (char)
   "Return the UTF-16 code-unit width of CHAR."
@@ -282,14 +419,17 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
                     "Inactive")
             :busy :json-false)))
 
-(defun my/copilot-aaronnote-bridge--sync-document (uri file content)
+(defun my/copilot-aaronnote-bridge--sync-document (uri file content &optional client-id)
   "Synchronize AaronNote CONTENT for URI/FILE into the shared Copilot LS."
   (unless (and (require 'copilot nil t)
                (copilot--connection-alivep))
-    (clrhash my/copilot-aaronnote-bridge--documents))
+    (clrhash my/copilot-aaronnote-bridge--documents)
+    (setq my/copilot-aaronnote-bridge--notified-focused-uri nil))
   (let* ((language-id (my/copilot-aaronnote-bridge--language-id file))
          (current (gethash uri my/copilot-aaronnote-bridge--documents))
          (old-content (plist-get current :content)))
+    (unless (or (null client-id) (string-empty-p client-id))
+      (my/copilot-aaronnote-bridge--attach-client client-id uri file "focused"))
     (cond
      ((null current)
       (puthash uri (list :version 1 :content content :language-id language-id)
@@ -325,55 +465,74 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
   "Handle AaronNote Copilot inline completion BODY."
   (let* ((content (or (plist-get body :content) ""))
          (file (or (plist-get body :file) ""))
+         (client-id (my/copilot-aaronnote-bridge--client-id body))
          (offset (min (max 0 (or (plist-get body :offset) 0))
                       (my/copilot-aaronnote-bridge--utf16-length content)))
          (uri (my/copilot-aaronnote-bridge--uri-for-file file))
-         (doc (my/copilot-aaronnote-bridge--sync-document uri file content))
+         (doc (when (my/copilot-aaronnote-bridge--client-may-request-p body uri)
+                (my/copilot-aaronnote-bridge--sync-document
+                 uri file content client-id)))
          (version (plist-get doc :version))
          (result nil))
-    (my/copilot-aaronnote-bridge--notify
-     'textDocument/didFocus
-     (list :textDocument (list :uri uri)))
-    (setq result
-          (my/copilot-aaronnote-bridge--request
-           'textDocument/inlineCompletion
-           (list :textDocument (list :uri uri :version version)
-                 :position (my/copilot-aaronnote-bridge--position-for-offset
-                            content offset)
-                 :context (list :triggerKind 2)
-                 :formattingOptions (list :tabSize 2 :insertSpaces t))
-           :timeout 30))
-    (let* ((items (plist-get result :items))
-           (item (cl-find-if (lambda (candidate)
-                               (stringp (plist-get candidate :insertText)))
-                             (append (or items []) nil))))
-      (my/copilot-aaronnote-bridge--log
-       "inline"
-       `((file . ,file)
-         (offset . ,offset)
-         (items . ,(length (append (or items []) nil)))))
-      (if (not item)
+    (if (not doc)
+        (progn
+          (my/copilot-aaronnote-bridge--log
+           "inline-skipped"
+           `((file . ,file) (uri . ,uri) (clientId . ,client-id)
+             (reason . "inactive-client")))
           (list :type "copilot-inline"
                 :items []
-                :status (my/copilot-aaronnote-bridge--status))
-        (let* ((range (plist-get item :range))
-               (start (plist-get range :start))
-               (end (plist-get range :end))
-               (from (if start
+                :status (my/copilot-aaronnote-bridge--status)))
+      (my/copilot-aaronnote-bridge--focus-document uri client-id file t)
+      (setq result
+            (condition-case err
+                (my/copilot-aaronnote-bridge--request
+                 'textDocument/inlineCompletion
+                 (list :textDocument (list :uri uri :version version)
+                       :position (my/copilot-aaronnote-bridge--position-for-offset
+                                  content offset)
+                       :context (list :triggerKind 2)
+                       :formattingOptions (list :tabSize 2 :insertSpaces t))
+                 :timeout 30)
+              (error
+               (if (my/copilot-aaronnote-bridge--superseded-error-p err)
+                   (progn
+                     (my/copilot-aaronnote-bridge--log
+                      "inline-superseded"
+                      `((file . ,file) (uri . ,uri) (clientId . ,client-id)))
+                     (list :items []))
+                 (signal (car err) (cdr err))))))
+      (let* ((items (plist-get result :items))
+             (item (cl-find-if (lambda (candidate)
+                                 (stringp (plist-get candidate :insertText)))
+                               (append (or items []) nil))))
+        (my/copilot-aaronnote-bridge--log
+         "inline"
+         `((file . ,file)
+           (offset . ,offset)
+           (items . ,(length (append (or items []) nil)))))
+        (if (not item)
+            (list :type "copilot-inline"
+                  :items []
+                  :status (my/copilot-aaronnote-bridge--status))
+          (let* ((range (plist-get item :range))
+                 (start (plist-get range :start))
+                 (end (plist-get range :end))
+                 (from (if start
+                           (my/copilot-aaronnote-bridge--offset-for-position
+                            content start)
+                         offset))
+                 (to (if end
                          (my/copilot-aaronnote-bridge--offset-for-position
-                          content start)
-                       offset))
-               (to (if end
-                       (my/copilot-aaronnote-bridge--offset-for-position
-                        content end)
-                     offset)))
-          (list :type "copilot-inline"
-                :items (vector
-                        (list :insertText (plist-get item :insertText)
-                              :range (list :from from :to to)
-                              :item (my/copilot-aaronnote-bridge--json-value
-                                     item)))
-                :status (my/copilot-aaronnote-bridge--status)))))))
+                          content end)
+                       offset)))
+            (list :type "copilot-inline"
+                  :items (vector
+                          (list :insertText (plist-get item :insertText)
+                                :range (list :from from :to to)
+                                :item (my/copilot-aaronnote-bridge--json-value
+                                       item)))
+                  :status (my/copilot-aaronnote-bridge--status))))))))
 
 (defun my/copilot-aaronnote-bridge--shown (body)
   "Notify Copilot that AaronNote showed a completion from BODY."
@@ -407,7 +566,53 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
                :arguments (my/copilot-aaronnote-bridge--json-array
                            (or (plist-get command :arguments) nil)))
          :timeout 30))
-      (list :ok t)))))
+	      (list :ok t)))))
+
+(defun my/copilot-aaronnote-bridge--focus (body)
+  "Record AaronNote Copilot focus from BODY without starting Copilot."
+  (let* ((file (or (plist-get body :file) ""))
+         (uri (my/copilot-aaronnote-bridge--uri-for-file file))
+         (client-id (my/copilot-aaronnote-bridge--client-id body)))
+    (my/copilot-aaronnote-bridge--focus-document uri client-id file nil)
+    (my/copilot-aaronnote-bridge--log
+     "client-focus"
+     `((file . ,file) (uri . ,uri) (clientId . ,client-id)))
+    (list :ok t :focused client-id :uri uri)))
+
+(defun my/copilot-aaronnote-bridge--blur (body)
+  "Record AaronNote Copilot blur from BODY."
+  (let* ((client-id (my/copilot-aaronnote-bridge--client-id body))
+         (state (and (not (string-empty-p client-id))
+                     (gethash client-id my/copilot-aaronnote-bridge--clients)))
+         (uri (plist-get state :uri)))
+    (when state
+      (puthash client-id
+               (plist-put (copy-sequence state) :state "blurred")
+               my/copilot-aaronnote-bridge--clients))
+    (when (equal my/copilot-aaronnote-bridge--focused-client client-id)
+      (setq my/copilot-aaronnote-bridge--focused-client nil)
+      (when (equal my/copilot-aaronnote-bridge--focused-uri uri)
+        (setq my/copilot-aaronnote-bridge--focused-uri nil)))
+    (my/copilot-aaronnote-bridge--log
+     "client-blur"
+     `((file . ,(or (plist-get body :file) (plist-get state :file) ""))
+       (uri . ,(or uri ""))
+       (clientId . ,client-id)))
+    (list :ok t :focused (or my/copilot-aaronnote-bridge--focused-client ""))))
+
+(defun my/copilot-aaronnote-bridge--close (body)
+  "Detach an AaronNote Copilot client from BODY."
+  (let* ((client-id (my/copilot-aaronnote-bridge--client-id body))
+         (state (my/copilot-aaronnote-bridge--detach-client client-id "client-close")))
+    (my/copilot-aaronnote-bridge--log
+     "client-close"
+     `((file . ,(or (plist-get body :file) (plist-get state :file) ""))
+       (uri . ,(or (plist-get state :uri) ""))
+       (clientId . ,client-id)
+       (clients . ,(hash-table-count my/copilot-aaronnote-bridge--clients))))
+    (list :ok t
+          :closed (if state t :json-false)
+          :clients (hash-table-count my/copilot-aaronnote-bridge--clients))))
 
 (defun my/copilot-aaronnote-bridge--find-string-by-key (value keys)
   "Return first string found in VALUE under one of KEYS."
@@ -464,6 +669,10 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
                          t :json-false)
         :status (my/copilot-aaronnote-bridge--status)
         :documents (hash-table-count my/copilot-aaronnote-bridge--documents)
+        :clients (hash-table-count my/copilot-aaronnote-bridge--clients)
+        :focusedUri (or my/copilot-aaronnote-bridge--focused-uri "")
+        :focusedClient (or my/copilot-aaronnote-bridge--focused-client "")
+        :notifiedFocusedUri (or my/copilot-aaronnote-bridge--notified-focused-uri "")
         :logRecording (if my/copilot-aaronnote-bridge--log-recording t :json-false)
         :log (vconcat (reverse my/copilot-aaronnote-bridge--log))))
 
@@ -473,6 +682,9 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
     ("inline" (my/copilot-aaronnote-bridge--inline body))
     ("shown" (my/copilot-aaronnote-bridge--shown body))
     ("accept" (my/copilot-aaronnote-bridge--accept body))
+    ("focus" (my/copilot-aaronnote-bridge--focus body))
+    ("blur" (my/copilot-aaronnote-bridge--blur body))
+    ("close" (my/copilot-aaronnote-bridge--close body))
     ("sign-in" (my/copilot-aaronnote-bridge--sign-in))
     ("sign-out"
      (my/copilot-aaronnote-bridge--request 'signOut nil :timeout 30)

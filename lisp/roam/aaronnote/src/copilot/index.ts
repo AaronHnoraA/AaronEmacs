@@ -14,6 +14,7 @@ type Context = {
   editor: EditorLike;
   host: HTMLElement;
   currentFile: () => string;
+  clientId?: () => string;
   vimMode: () => VimMode;
   setStatus: (message: string) => void;
   onChange: (handler: () => void) => () => void;
@@ -103,6 +104,12 @@ function normalizeSettings(settings: PluginSettings): RuntimeSettings {
 
 function requestCopilot<T>(action: string, body: unknown = {}): Promise<T> {
   return requireNativeCopilotRequest()(action, body).then((value) => ensureNativeOk<T>(value));
+}
+
+function isSupersededCopilotError(error: unknown): boolean {
+  if (!error) return false;
+  const message = error instanceof Error ? error.message : String(error);
+  return /superseded by a new request/i.test(message) || /jsonrpc-error-code\s*\.\s*-32802/i.test(message);
 }
 
 function statusSummary(value: unknown, fallback: string): string {
@@ -311,6 +318,8 @@ export function setupCopilot(context: Context): () => void {
   let visible: VisibleCompletion | null = null;
   let settings = normalizeSettings(context.getSettings());
   let lastScheduleKey = "";
+  let focusState: "focused" | "blurred" | "closed" = "blurred";
+  let focusedFile = "";
   const cleanups: Array<() => void> = [];
 
   function clearCompletion(): void {
@@ -364,6 +373,46 @@ export function setupCopilot(context: Context): () => void {
     ].join("\0");
   }
 
+  function clientBody(extra: Record<string, unknown> = {}): Record<string, unknown> {
+    const clientId = context.clientId?.() || "";
+    const active = Object.prototype.hasOwnProperty.call(extra, "active")
+      ? extra.active
+      : document.hasFocus() && (!context.isActive || context.isActive());
+    return {
+      ...extra,
+      ...(clientId ? { clientId } : {}),
+      active,
+    };
+  }
+
+  function notifyFocus(reason = "focus"): Promise<void> {
+    const file = context.currentFile();
+    if (!file || !document.hasFocus()) return Promise.resolve();
+    if (context.isActive && !context.isActive()) return Promise.resolve();
+    if (focusState === "focused" && focusedFile === file) return Promise.resolve();
+    focusState = "focused";
+    focusedFile = file;
+    return requestCopilot("focus", clientBody({ file, reason })).then(() => undefined).catch(() => undefined);
+  }
+
+  function notifyBlur(reason = "blur"): void {
+    if (focusState !== "focused") return;
+    const file = focusedFile || context.currentFile();
+    focusState = "blurred";
+    focusedFile = "";
+    clearCompletion();
+    void requestCopilot("blur", clientBody({ file, reason, active: false })).catch(() => {});
+  }
+
+  function notifyClose(reason = "close"): void {
+    if (focusState === "closed") return;
+    const file = focusedFile || context.currentFile();
+    focusState = "closed";
+    focusedFile = "";
+    clearCompletion();
+    void requestCopilot("close", clientBody({ file, reason, active: false })).catch(() => {});
+  }
+
   function scheduleKey(): string {
     const selection = activeSelection(context.editor);
     return [
@@ -383,6 +432,7 @@ export function setupCopilot(context: Context): () => void {
 
   function eligibleShell(): boolean {
     if (context.isActive && !context.isActive()) return false;
+    if (!document.hasFocus()) return false;
     if (context.vimMode() !== "insert") return false;
     if (!targetInHost(context.host, document.activeElement)) return false;
     const selection = activeSelection(context.editor);
@@ -412,6 +462,8 @@ export function setupCopilot(context: Context): () => void {
 
   async function requestCompletion(): Promise<void> {
     if (!eligible()) return;
+    await notifyFocus("inline");
+    if (!eligible()) return;
     const fullOffset = completionOffset(context.editor);
     const requestDoc = completionRequestDocumentFromEditor(context.editor, fullOffset, settings.largeBufferThreshold);
     if (!eligible()) return;
@@ -419,6 +471,7 @@ export function setupCopilot(context: Context): () => void {
     const currentSeq = ++seq;
     try {
       const response = await requestCopilot<InlineResponse>("inline", {
+        ...clientBody(),
         file: context.currentFile(),
         content: requestDoc.content,
         offset: requestDoc.offset,
@@ -446,6 +499,8 @@ export function setupCopilot(context: Context): () => void {
       renderCompletion();
       void requestCopilot("shown", { item: choice.item }).catch(() => {});
     } catch (err) {
+      if (currentSeq !== seq || key !== requestKey()) return;
+      if (isSupersededCopilotError(err)) return;
       clearCompletion();
       context.setStatus(err instanceof Error ? `Copilot: ${err.message}` : "Copilot failed");
     }
@@ -625,13 +680,37 @@ export function setupCopilot(context: Context): () => void {
   cleanups.push(context.onDocumentEvent("mouseup", scheduleIfChanged));
   cleanups.push(context.onDocumentEvent("keyup", scheduleIfChanged));
   cleanups.push(context.onDocumentEvent("scroll", () => renderCompletion(), { capture: true }));
+  const handleHostFocusIn = () => { void notifyFocus("focusin"); };
+  const handleHostFocusOut = () => notifyBlur("focusout");
+  const handleWindowFocus = () => { void notifyFocus("window-focus"); };
+  const handleWindowBlur = () => notifyBlur("window-blur");
+  const handlePageHide = () => notifyClose("pagehide");
+  context.host.addEventListener("focusin", handleHostFocusIn);
+  context.host.addEventListener("focusout", handleHostFocusOut);
+  cleanups.push(() => {
+    context.host.removeEventListener("focusin", handleHostFocusIn);
+    context.host.removeEventListener("focusout", handleHostFocusOut);
+  });
+  window.addEventListener("focus", handleWindowFocus);
+  window.addEventListener("blur", handleWindowBlur);
+  window.addEventListener("pagehide", handlePageHide);
+  cleanups.push(context.onDocumentEvent("visibilitychange", () => {
+    if (document.hidden) notifyBlur("visibility-hidden");
+    else void notifyFocus("visibility-visible");
+  }));
   window.addEventListener("resize", renderCompletion);
-  cleanups.push(() => window.removeEventListener("resize", renderCompletion));
+  cleanups.push(() => {
+    window.removeEventListener("resize", renderCompletion);
+    window.removeEventListener("focus", handleWindowFocus);
+    window.removeEventListener("blur", handleWindowBlur);
+    window.removeEventListener("pagehide", handlePageHide);
+  });
 
   schedule();
 
   return () => {
     window.clearTimeout(timer);
+    notifyClose("dispose");
     cleanups.splice(0).forEach((cleanup) => cleanup());
     ghost.remove();
     style.remove();

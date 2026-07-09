@@ -311,6 +311,12 @@ function closeEditorClient(body = {}) {
   if (!client) return { ok: true, closed: false };
   const file = String((body && typeof body === "object" ? body.file : "") || "").trim();
   const existed = editorClients.delete(client);
+  void handleCopilotRequest("close", {
+    ...(body && typeof body === "object" ? body : {}),
+    clientId: client,
+    client,
+    file,
+  }).catch(() => {});
   broadcast("command", {
     command: "client-closed",
     client,

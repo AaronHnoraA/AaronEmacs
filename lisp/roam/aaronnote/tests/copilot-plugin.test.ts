@@ -54,6 +54,20 @@ function waitForMicrotasks(): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, 0));
 }
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 function installNativeCopilot(handler: (action: string, body: unknown) => Promise<unknown>): () => void {
   const target = window as Window & { aaronnoteApi?: { copilot?: { request?: (action: string, body?: unknown) => Promise<unknown> } } };
   const oldApi = target.aaronnoteApi;
@@ -616,6 +630,158 @@ describe("copilot plugin insertion", () => {
       handlers.selectionchange?.();
       handlers.selectionchange?.();
       expect(editor.cursorContextCalls - before).toBe(1);
+    } finally {
+      cleanup();
+      restoreApi();
+      host.remove();
+    }
+  });
+
+  test("sends pane client lifecycle and active metadata with inline requests", async () => {
+    const host = document.createElement("div");
+    const target = document.createElement("button");
+    host.appendChild(target);
+    document.body.appendChild(host);
+
+    const editor = new FakeEditor("prefix");
+    const handlers: {
+      action?: (action: string) => void;
+    } = {};
+    const requests: Array<{ action: string; body: Record<string, unknown> }> = [];
+
+    const restoreApi = installNativeCopilot(async (action, body) => {
+      requests.push({ action, body: body as Record<string, unknown> });
+      if (action === "inline") {
+        return {
+          items: [{
+            insertText: "prefixSuffix",
+            range: { from: 0, to: editor.markdown.length },
+            item: { insertText: "prefixSuffix" },
+          }],
+        };
+      }
+      return { ok: true };
+    });
+
+    const cleanup = setupCopilot({
+      editor,
+      host,
+      currentFile: () => "/tmp/client.md",
+      clientId: () => "pane-a",
+      vimMode: () => "insert",
+      setStatus: () => {},
+      onChange: () => () => {},
+      onKeyDown: () => () => {},
+      onAction: (handler: (action: string) => void) => {
+        handlers.action = handler;
+        return () => {
+          delete handlers.action;
+        };
+      },
+      onSettingsChange: () => () => {},
+      getSettings: () => ({ idleDelayMs: 999_999, largeBufferThresholdKb: 512 }),
+      isActive: () => true,
+      onDocumentEvent: () => () => {},
+      jumpSnippetNext: () => false,
+      jumpSnippetPrevious: () => false,
+      forwardDelimiter: () => false,
+      backwardDelimiter: () => false,
+    });
+
+    try {
+      target.focus();
+      await waitForMicrotasks();
+      handlers.action?.("trigger");
+      await waitForMicrotasks();
+      await waitForMicrotasks();
+
+      const focus = requests.find((request) => request.action === "focus");
+      const inline = requests.find((request) => request.action === "inline");
+      expect(focus?.body.clientId).toBe("pane-a");
+      expect(focus?.body.file).toBe("/tmp/client.md");
+      expect(inline?.body.clientId).toBe("pane-a");
+      expect(inline?.body.active).toBe(true);
+      expect(inline?.body.file).toBe("/tmp/client.md");
+
+      cleanup();
+      await waitForMicrotasks();
+      const close = requests.find((request) => request.action === "close");
+      expect(close?.body.clientId).toBe("pane-a");
+      expect(close?.body.active).toBe(false);
+    } finally {
+      restoreApi();
+      host.remove();
+    }
+  });
+
+  test("ignores superseded inline errors from stale requests", async () => {
+    const host = document.createElement("div");
+    const target = document.createElement("button");
+    host.appendChild(target);
+    document.body.appendChild(host);
+
+    const editor = new FakeEditor("prefix");
+    const handlers: {
+      action?: (action: string) => void;
+    } = {};
+    const statuses: string[] = [];
+    const firstInline = deferred<unknown>();
+    let inlineRequests = 0;
+
+    const restoreApi = installNativeCopilot(async (action) => {
+      if (action === "inline") {
+        inlineRequests += 1;
+        if (inlineRequests === 1) return firstInline.promise;
+        return {
+          items: [{
+            insertText: "prefixSuffix",
+            range: { from: 0, to: editor.markdown.length },
+            item: { insertText: "prefixSuffix" },
+          }],
+        };
+      }
+      return { ok: true };
+    });
+
+    const cleanup = setupCopilot({
+      editor,
+      host,
+      currentFile: () => "/tmp/superseded.md",
+      clientId: () => "pane-a",
+      vimMode: () => "insert",
+      setStatus: (status: string) => statuses.push(status),
+      onChange: () => () => {},
+      onKeyDown: () => () => {},
+      onAction: (handler: (action: string) => void) => {
+        handlers.action = handler;
+        return () => {
+          delete handlers.action;
+        };
+      },
+      onSettingsChange: () => () => {},
+      getSettings: () => ({ idleDelayMs: 999_999, largeBufferThresholdKb: 512 }),
+      isActive: () => true,
+      onDocumentEvent: () => () => {},
+      jumpSnippetNext: () => false,
+      jumpSnippetPrevious: () => false,
+      forwardDelimiter: () => false,
+      backwardDelimiter: () => false,
+    });
+
+    try {
+      target.focus();
+      handlers.action?.("trigger");
+      await waitForMicrotasks();
+      handlers.action?.("trigger");
+      await waitForMicrotasks();
+      await waitForMicrotasks();
+      expect(document.querySelector(".aaronnote-copilot-ghost")?.textContent).toBe("Suffix");
+
+      firstInline.reject(new Error("jsonrpc-error-code . -32802 Request was superseded by a new request"));
+      await waitForMicrotasks();
+
+      expect(document.querySelector(".aaronnote-copilot-ghost")?.textContent).toBe("Suffix");
+      expect(statuses.some((status) => status.includes("superseded"))).toBe(false);
     } finally {
       cleanup();
       restoreApi();
