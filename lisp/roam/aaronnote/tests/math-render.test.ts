@@ -38,7 +38,26 @@ describe("math render source handling", () => {
     const el = document.createElement("span");
     const tex = "dathrm{GA} e_p athrm{GI}";
     renderMathLazy(tex, el, { displayMode: false, throwOnError: false }, () => {});
-    expect(el.getAttribute("data-math-render-key")).toBe(`${getKatexMacrosVersion()}\ninline\n${tex}`);
+    expect(el.getAttribute("data-math-render-key")).toBe(`${getKatexMacrosVersion()}\ninline\nmathml\n${tex}`);
+  });
+
+  test("keeps output modes separate in the render cache", () => {
+    const tex = String.raw`\begin{align}& x \\ =& y\end{align}`;
+    const mathml = renderMathHTML(tex, {
+      displayMode: true,
+      output: "mathml",
+      strict: false,
+    });
+    const html = renderMathHTML(tex, {
+      displayMode: true,
+      output: "htmlAndMathml",
+      strict: false,
+    });
+
+    expect(mathml.error).toBeUndefined();
+    expect(html.error).toBeUndefined();
+    expect(mathml.html).not.toContain("katex-display");
+    expect(html.html).toContain("katex-display");
   });
 
   test("uses KaTeX as the primary renderer for TeX commands", () => {

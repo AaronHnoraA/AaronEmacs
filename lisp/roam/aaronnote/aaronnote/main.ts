@@ -14,7 +14,7 @@ import { markdownHrefAt } from "../src/cm6/editor-cm6.ts";
 import { getBlockMathRanges, rangeAtPosition, rangeOverlapsAny } from "../src/cm6/math-ranges.ts";
 import { equationTagsFromText, getEquationTagHits } from "../src/equation-tags.ts";
 import { INLINE_MATH_RE } from "../src/inline-math.ts";
-import { formatMathRenderError, renderMathLazy } from "../src/math-render.ts";
+import { formatMathRenderError, renderMathHTML } from "../src/math-render.ts";
 import { setKatexMacros } from "../src/katex-macros.ts";
 import { renderJupyterVariablesTable } from "../src/jupyter-variables-view.ts";
 import { hrefProtocol, safeHref } from "../src/url-safety.ts";
@@ -523,7 +523,7 @@ function updateModeLabel(mode: VimLiteMode): void {
   host.dataset.vimMode = mode;
   document.body.dataset.vimMode = mode;
   if (mode === "normal") noteCursorPositionEvent();
-  scheduleAssistUpdate({ cursor: true });
+  scheduleAssistUpdate({ mathPreview: true, cursor: true });
 }
 
 function subscribe<K extends keyof DocumentEventMap>(
@@ -6119,7 +6119,10 @@ function mathPreviewPreferredWidth(display: boolean): number {
 
 function updateMathPreviewOverflow(): void {
   if (mathPreview.hidden || mathPreview.classList.contains("is-error")) return;
-  const overflowX = mathPreview.scrollWidth > mathPreview.clientWidth + 2;
+  const rendered = mathPreview.querySelector<Element>(".katex-display, .katex, math, mjx-container");
+  const renderedWidth = Math.ceil(rendered?.getBoundingClientRect().width || 0);
+  const measuredWidth = Math.max(renderedWidth, mathPreview.scrollWidth);
+  const overflowX = measuredWidth > mathPreview.clientWidth + 2;
   const overflowY = mathPreview.scrollHeight > mathPreview.clientHeight + 2;
   mathPreview.classList.toggle("is-overflowing", overflowX || overflowY);
 }
@@ -6143,7 +6146,7 @@ function scheduleMathPreviewError(nextKey: string, error: string, display: boole
   const message = `Math error: ${formatMathRenderError(error, MATH_PREVIEW_ERROR_MAX_LENGTH)}`;
   mathPreviewErrorTimer = window.setTimeout(() => {
     if (mathPreviewPendingErrorKey !== nextKey || mathPreviewKey !== nextKey) return;
-    if (paused || vim.mode() !== "insert" || !editorSurfaceVisible()) return;
+    if (paused || !editorSurfaceVisible()) return;
     const ctx = editor.cursorContext(display ? 640 : 320);
     const math = mathAtCursor(ctx);
     if (!math || mathPreviewKeyFor(math) !== nextKey) return;
@@ -6181,18 +6184,18 @@ function updateMathPreview(ctx: ReturnType<typeof editor.cursorContext>, allowNe
     mathPreview.innerHTML = "";
     mathPreview.classList.remove("is-error");
     mathPreview.classList.toggle("is-display", math.display);
-    let renderFailed = false;
-    renderMathLazy(math.tex.trim(), mathPreview, {
+    const rendered = renderMathHTML(math.tex.trim(), {
       displayMode: math.display,
       strict: "ignore",
-    }, (error) => {
-      renderFailed = true;
-      scheduleMathPreviewError(nextKey, error, math.display);
     });
-    if (renderFailed) {
+    if (rendered.error) {
+      scheduleMathPreviewError(nextKey, rendered.error, math.display);
       mathPreview.hidden = true;
       return;
     }
+    mathPreview.innerHTML = rendered.html;
+    mathPreview.scrollLeft = 0;
+    mathPreview.scrollTop = 0;
   }
   if (mathPreviewPendingErrorKey === nextKey && mathPreview.hidden) return;
   clearMathPreviewErrorTimer();
@@ -6295,26 +6298,24 @@ function runSelectionCommand(command: string): void {
 }
 
 function runAssistUpdate(flags: AssistUpdateFlags): void {
-  const needsCursorContext = vim.mode() === "insert" && (
-    flags.snippets
-    || flags.mathPreview
-    || !snippetPopup.hidden
-    || !mathPreview.hidden
-  );
+  const insertMode = vim.mode() === "insert";
+  const wantsSnippets = insertMode && (flags.snippets || !snippetPopup.hidden);
+  const wantsMathPreview = flags.mathPreview || !mathPreview.hidden;
+  const needsCursorContext = wantsSnippets || wantsMathPreview;
   const ctx = needsCursorContext ? editor.cursorContext(!snippetPopup.hidden ? 640 : 320) : null;
   if (flags.toc) updateFloatingToc();
   if (flags.selectionTool) {
     const activeSelection = snippetPopup.hidden && modal.hidden ? activeEditorSelection() : null;
     updateSelectionTool(activeSelection);
   }
-  if (vim.mode() !== "insert") {
+  if (!insertMode) {
     hideSnippetPopup();
-    hideMathPreview();
+    if (ctx && wantsMathPreview) updateMathPreview(ctx, flags.mathPreview);
     return;
   }
   if (ctx) {
-    if (flags.snippets || !snippetPopup.hidden) updateSnippetPopup(ctx);
-    updateMathPreview(ctx, flags.mathPreview);
+    if (wantsSnippets) updateSnippetPopup(ctx);
+    if (wantsMathPreview) updateMathPreview(ctx, flags.mathPreview);
   }
 }
 
@@ -6418,7 +6419,7 @@ function runHostKey(body: Record<string, unknown>): boolean {
     return true;
   }
   if (vim.handleKey(hostKey)) {
-    scheduleAssistUpdate({ cursor: true });
+    scheduleAssistUpdate({ mathPreview: true, cursor: true });
     return true;
   }
   if (currentReadOnly) {
@@ -6762,7 +6763,7 @@ document.addEventListener("keydown", (event) => {
     enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
   })) {
     if (plainEscapeKey(event)) noteCursorPositionEvent();
-    scheduleAssistUpdate({ cursor: true });
+    scheduleAssistUpdate({ mathPreview: true, cursor: true });
     return;
   }
   if (vim.mode() === "insert" && (event.key === "Tab" || event.key === "\t") && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -6791,7 +6792,7 @@ document.addEventListener("keydown", (event) => {
   }
   if (vim.handleKeyDown(event)) {
     if (plainEscapeKey(event)) noteCursorPositionEvent();
-    scheduleAssistUpdate({ cursor: true });
+    scheduleAssistUpdate({ mathPreview: true, cursor: true });
     event.stopPropagation();
     return;
   }
@@ -6921,7 +6922,7 @@ document.addEventListener("beforeinput", (event) => {
     vim,
     enabled: modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden,
   })) {
-    scheduleAssistUpdate({ cursor: true });
+    scheduleAssistUpdate({ mathPreview: true, cursor: true });
   }
 }, true);
 document.addEventListener("selectionchange", () => {

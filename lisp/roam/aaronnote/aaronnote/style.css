@@ -469,13 +469,35 @@ button:disabled {
   padding: 10px 12px;
 }
 
+.aaronnote-math-preview .katex,
+.aaronnote-math-preview .katex * {
+  color: var(--aaron-math-ink, #d7defb);
+  font-family: var(--aaron-font-math), var(--aaron-font-chinese), "Times New Roman", serif !important;
+}
+
+.aaronnote-math-preview .katex .mord.mathnormal {
+  font-family: var(--aaron-font-math) !important;
+}
+
+.aaronnote-math-preview mtd.mtr-glue {
+  width: 0 !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+}
+
 .aaronnote-math-preview.is-display {
   max-width: calc(100vw - 16px);
   padding: 12px 16px;
+  text-align: left;
 }
 
 .aaronnote-math-preview.is-overflowing {
   overflow: auto;
+  text-align: left;
+}
+
+.aaronnote-math-preview.is-overflowing .katex-display {
+  text-align: left;
 }
 
 .aaronnote-math-preview.is-error {

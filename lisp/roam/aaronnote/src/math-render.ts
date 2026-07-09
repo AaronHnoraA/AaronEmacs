@@ -69,15 +69,19 @@ export function disposeMathRuntime(): void {
 
 // The active macro set is part of the rendered output, so it must be part of the
 // cache key — otherwise changing macros would serve stale HTML.
-function mathCacheKey(tex: string, displayMode: boolean | undefined): string {
-  return `${getKatexMacrosVersion()}\n${displayMode ? "display" : "inline"}\n${tex}`;
+function mathOutputMode(options: KatexRenderOptions): "html" | "mathml" | "htmlAndMathml" {
+  return options.output ?? "mathml";
+}
+
+function mathCacheKey(tex: string, options: KatexRenderOptions): string {
+  return `${getKatexMacrosVersion()}\n${options.displayMode ? "display" : "inline"}\n${mathOutputMode(options)}\n${tex}`;
 }
 
 export function renderMathHTML(
   tex: string,
   options: KatexRenderOptions,
 ): { html: string; error?: string } {
-  const key = mathCacheKey(tex, options.displayMode);
+  const key = mathCacheKey(tex, options);
   const cached = cachedMathHtml(key);
   if (cached) {
     if (!cached.error) ensureKatexCss(katexCssText);
@@ -104,7 +108,7 @@ export function renderMathLazy(
   options: KatexRenderOptions,
   onError: (error: string) => void,
 ): void {
-  const key = mathCacheKey(tex, options.displayMode);
+  const key = mathCacheKey(tex, options);
   element.setAttribute("data-math-render-key", key);
   const cached = cachedMathHtml(key);
   if (cached) {
@@ -149,7 +153,7 @@ function katexOptions(options: KatexRenderOptions): KatexRenderOptions {
     throwOnError: true,
     strict: options.strict,
     trust: options.trust,
-    output: options.output ?? "mathml",
+    output: mathOutputMode(options),
     macros: { ...(options.macros ?? getKatexMacros()) },
   };
 }
