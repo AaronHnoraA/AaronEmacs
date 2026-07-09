@@ -81,6 +81,7 @@ import type {
   EditorOptions,
   QuickInsertItem,
   QuickInsertProvider,
+  SelectionOptions,
   SetMarkdownOptions,
   WritingModeOptions,
 } from "../editor-api.ts";
@@ -707,15 +708,15 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
       }, pasteOptions);
     },
 
-    setSelection(from: number, to?: number): void {
+    setSelection(from: number, to?: number, selectionOptions: SelectionOptions = {}): void {
       view.dispatch({
         selection: { anchor: from, head: to ?? from },
-        scrollIntoView: true,
+        scrollIntoView: selectionOptions.scrollIntoView !== false,
       });
     },
 
-    setMarkdownSelection(from: number, to?: number): void {
-      editor.setSelection(from, to);
+    setMarkdownSelection(from: number, to?: number, selectionOptions: SelectionOptions = {}): void {
+      editor.setSelection(from, to, selectionOptions);
     },
 
     getMarkdownSelection(): { from: number; to: number } {

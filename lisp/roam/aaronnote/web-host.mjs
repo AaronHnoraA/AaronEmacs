@@ -175,6 +175,7 @@ if (!existsSync(webDir)) {
 }
 
 const eventClients = new Set();
+const editorClients = new Map();
 
 // SSE keepalive heartbeat — prevents hung-client memory leak and keeps
 // connections alive through idle-timeout proxies.
@@ -294,6 +295,29 @@ function broadcast(event, data) {
       eventClients.delete(res);
     }
   }
+}
+
+function noteEditorClient(file, client, detail = {}) {
+  if (!client) return;
+  editorClients.set(client, {
+    file: String(file || ""),
+    updatedAt: Date.now(),
+    ...detail,
+  });
+}
+
+function closeEditorClient(body = {}) {
+  const client = String((body && typeof body === "object" ? body.client || body.clientId : "") || "").trim();
+  if (!client) return { ok: true, closed: false };
+  const file = String((body && typeof body === "object" ? body.file : "") || "").trim();
+  const existed = editorClients.delete(client);
+  broadcast("command", {
+    command: "client-closed",
+    client,
+    file,
+    existed,
+  });
+  return { ok: true, closed: existed, client, file, activeClients: editorClients.size };
 }
 
 function errorPayload(err) {
@@ -506,6 +530,7 @@ async function apiCurrentFile(body) {
   const target = raw ? resolveShellPath(raw) : "";
   const payload = { file: target };
   if (client) payload.client = client;
+  if (client) noteEditorClient(target, client, { source: "current-file" });
   process.stdout.write(`aaronote-event:current-file:${JSON.stringify(payload)}\n`);
   return { ok: true, ...payload };
 }
@@ -539,8 +564,14 @@ const apiHandlers = {
   "aaronnote:api:notes:list": (force) => notesListPayload(force === true),
   "aaronnote:api:notes:save": async (body) => {
     const result = await saveNote(body || {});
-    if (result?.ok && !result?.conflict && result?.file) {
+    if (result?.ok && !result?.conflict && !result?.stale && result?.file) {
       process.stdout.write(`aaronote-event:saved:${JSON.stringify({ file: String(result.file) })}\n`);
+      broadcast("command", {
+        command: "note-saved",
+        file: String(result.file),
+        mtimeMs: Number(result.mtimeMs) || 0,
+        clientId: String((body && typeof body === "object" ? body.clientId : "") || ""),
+      });
     }
     return result;
   },
@@ -693,6 +724,7 @@ const apiHandlers = {
   }),
   "aaronnote:api:session:positions": async () => ({ type: "positions", positions: await readCursorPositions() }),
   "aaronnote:api:session:save-position": async (position) => ({ type: "positions", positions: await touchCursorPosition(position || {}) }),
+  "aaronnote:api:session:client-close": async (body) => closeEditorClient(body || {}),
 
   "aaronnote:api:fs:rename": (body) => renameManagedPath(body || {}),
   "aaronnote:api:fs:move": (body) => moveManagedPath(body || {}),
@@ -977,7 +1009,9 @@ function adapterScript(origin) {
       getRecent: function() { return call("aaronnote:api:session:recent", []); },
       touchRecent: function(file, openedAt) { return call("aaronnote:api:session:touch-recent", [String(file || ""), Number(openedAt) || Date.now()]); },
       getPositions: function() { return call("aaronnote:api:session:positions", []); },
-      savePosition: function(position) { return call("aaronnote:api:session:save-position", [position || {}]); }
+      savePosition: function(position) { return call("aaronnote:api:session:save-position", [position || {}]); },
+      closeClient: function(body) { return call("aaronnote:api:session:client-close", [body || {}]); },
+      closeClientKeepalive: function(body) { callKeepalive("aaronnote:api:session:client-close", [body || {}]); }
     },
     fs: {
       rename: function(body) { return call("aaronnote:api:fs:rename", [body || {}]); },
@@ -1326,6 +1360,10 @@ const server = createServer(async (req, res) => {
         if (body.client) detail.client = String(body.client);
         broadcast("command", detail);
         sendJson(res, 200, { ok: true });
+        return;
+      }
+      if (body.type === "client-close") {
+        sendJson(res, 200, closeEditorClient(body));
         return;
       }
       if (body.type === "open" || body.file) {

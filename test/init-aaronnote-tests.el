@@ -15,6 +15,16 @@
       (my/aaronnote-prose-check)
       (should (equal sent '("prose-check" nil))))))
 
+(ert-deftest my/aaronnote-refresh-does-not-send-extra-focus ()
+  (let ((my/aaronnote--ready t)
+        (my/aaronnote--app-buffer (current-buffer))
+        calls)
+    (cl-letf (((symbol-function 'my/aaronnote-command)
+               (lambda (command &optional _detail)
+                 (push command calls))))
+      (my/aaronnote-refresh)
+      (should (equal (nreverse calls) '("refresh"))))))
+
 (ert-deftest my/aaronnote-keys-mode-binds-history-chords ()
   (should (eq (lookup-key my/aaronnote-keys-mode-map (kbd "M-z"))
               #'my/aaronnote-undo))
@@ -112,10 +122,10 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
-(ert-deftest my/aaronnote-readonly-split-opens-fresh-unregistered-xwidget ()
-  (let* ((file (make-temp-file "aaronnote-readonly" nil ".md"))
-         (source (generate-new-buffer "*aaronnote-readonly-source*"))
-         (xwidget-buffer (generate-new-buffer "*aaronnote-readonly-xwidget*"))
+(ert-deftest my/aaronnote-editable-split-opens-fresh-client-xwidget ()
+  (let* ((file (make-temp-file "aaronnote-split" nil ".md"))
+         (source (generate-new-buffer "*aaronnote-split-source*"))
+         (xwidget-buffer (generate-new-buffer "*aaronnote-split-xwidget*"))
          (my/aaronnote--port 4242)
          (my/aaronnote--file-buffers (make-hash-table :test #'equal))
          (my/aaronnote--client-buffers (make-hash-table :test #'equal))
@@ -127,7 +137,7 @@
           (switch-to-buffer source)
           (cl-letf (((symbol-function 'my/aaronnote--ensure-server)
                      (lambda (callback) (funcall callback)))
-                    ((symbol-function 'my/aaronnote--readonly-split-window)
+                    ((symbol-function 'my/aaronnote--split-window)
                      (lambda () (selected-window)))
                     ((symbol-function 'my/xwidget-open-url)
                      (lambda (url &rest args)
@@ -137,21 +147,45 @@
                              opened-force-new (plist-get args :force-new)
                              opened-reuse (plist-get args :reuse-selected))
                        xwidget-buffer)))
-            (my/aaronnote-open-current-note-readonly-split))
-          (should (string-match-p "readonly=1" opened-url))
-          (should (string-match-p "client=aaronnote-readonly%3A" opened-url))
-          (should (string-prefix-p "aaronnote-readonly:" opened-id))
+            (my/aaronnote-open-current-note-split))
+          (should-not (string-match-p "readonly=1" opened-url))
+          (should (string-match-p "client=aaronnote-split%3A" opened-url))
+          (should (string-prefix-p "aaronnote-split:" opened-id))
           (should (eq opened-display 'current))
           (should opened-force-new)
           (should opened-reuse)
           (should-not (gethash (expand-file-name file) my/aaronnote--file-buffers))
-          (should-not (gethash opened-id my/aaronnote--client-buffers))
+          (should (eq (gethash opened-id my/aaronnote--client-buffers) xwidget-buffer))
           (with-current-buffer xwidget-buffer
             (should (equal my/aaronnote-buffer-file-name (expand-file-name file)))
             (should (equal my/aaronnote--client-id opened-id))
             (should-not my/aaronnote--registered-file)))
       (when (buffer-live-p source) (kill-buffer source))
       (when (buffer-live-p xwidget-buffer) (kill-buffer xwidget-buffer))
+      (when (file-exists-p file) (delete-file file)))))
+
+(ert-deftest my/aaronnote-split-registration-does-not-steal-canonical-file-buffer ()
+  (let* ((file (make-temp-file "aaronnote-split-register" nil ".md"))
+         (canonical (generate-new-buffer "*aaronnote-canonical*"))
+         (split (generate-new-buffer "*aaronnote-split*"))
+         (client "aaronnote-split:/tmp/note.md:7")
+         (my/aaronnote--file-buffers (make-hash-table :test #'equal))
+         (my/aaronnote--client-buffers (make-hash-table :test #'equal)))
+    (unwind-protect
+        (progn
+          (my/aaronnote--register-buffer
+           canonical file (my/aaronnote--xwidget-session-id file) nil)
+          (my/aaronnote--register-buffer split file client nil)
+          (should (eq (gethash (expand-file-name file) my/aaronnote--file-buffers)
+                      canonical))
+          (should (eq (gethash client my/aaronnote--client-buffers) split))
+          (should (eq (my/aaronnote--buffer-for-file file) canonical))
+          (with-current-buffer split
+            (should (equal my/aaronnote--xwidget-forced-name
+                           (format "*aaronnote split 7: %s*"
+                                   (file-name-nondirectory file))))))
+      (when (buffer-live-p canonical) (kill-buffer canonical))
+      (when (buffer-live-p split) (kill-buffer split))
       (when (file-exists-p file) (delete-file file)))))
 
 (ert-deftest my/aaronnote-run-emacs-key-queues-m-x ()
@@ -229,18 +263,18 @@
       (when (buffer-live-p source) (kill-buffer source))
       (when (buffer-live-p target) (kill-buffer target)))))
 
-(ert-deftest my/aaronnote-buffer-for-client-finds-unregistered-readonly-split ()
+(ert-deftest my/aaronnote-buffer-for-client-finds-unregistered-split ()
   (let ((buffer (generate-new-buffer "*aaronnote-split*"))
         (my/aaronnote--client-buffers (make-hash-table :test #'equal)))
     (unwind-protect
         (progn
           (with-current-buffer buffer
             (setq-local major-mode 'xwidget-webkit-mode)
-            (setq-local my/aaronnote--client-id "aaronnote-readonly:/tmp/note.md:1"))
-          (should-not (gethash "aaronnote-readonly:/tmp/note.md:1"
+            (setq-local my/aaronnote--client-id "aaronnote-split:/tmp/note.md:1"))
+          (should-not (gethash "aaronnote-split:/tmp/note.md:1"
                                my/aaronnote--client-buffers))
           (should (eq (my/aaronnote--buffer-for-client
-                       "aaronnote-readonly:/tmp/note.md:1")
+                       "aaronnote-split:/tmp/note.md:1")
                       buffer)))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
@@ -252,7 +286,7 @@
         (progn
           (with-current-buffer buffer
             (setq-local major-mode 'xwidget-webkit-mode)
-            (setq-local my/aaronnote--client-id "aaronnote-readonly:/tmp/note.md:1"))
+            (setq-local my/aaronnote--client-id "aaronnote-split:/tmp/note.md:1"))
           (should (my/aaronnote--xwidget-buffer-p buffer)))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
@@ -663,12 +697,18 @@
   (my/aaronnote-test--with-xwidget-mocks
     (let* ((file (expand-file-name "cleanup.md" temporary-file-directory))
            (client (my/aaronnote--xwidget-session-id file))
-           (buffer (my/aaronnote--open-xwidget "ignored" file)))
+           (buffer (my/aaronnote--open-xwidget "ignored" file))
+           posted)
       (should (eq (gethash file my/aaronnote--file-buffers) buffer))
       (should (eq (gethash client my/aaronnote--client-buffers) buffer))
-      (kill-buffer buffer)
+      (cl-letf (((symbol-function 'my/aaronnote--post)
+                 (lambda (payload) (push payload posted))))
+        (kill-buffer buffer))
       (should-not (gethash file my/aaronnote--file-buffers))
-      (should-not (gethash client my/aaronnote--client-buffers)))))
+      (should-not (gethash client my/aaronnote--client-buffers))
+      (should (equal (alist-get 'type (car posted)) "client-close"))
+      (should (equal (alist-get 'client (car posted)) client))
+      (should (equal (alist-get 'file (car posted)) file)))))
 
 (ert-deftest my/aaronnote-current-file-client-targets-buffer ()
   (my/aaronnote-test--with-xwidget-mocks

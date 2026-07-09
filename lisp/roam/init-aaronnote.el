@@ -175,8 +175,8 @@ permission prompts disabled.  The backend is chosen here, not per export."
 (defvar my/aaronnote--build-process nil
   "Current Aaronnote web build process, or nil.")
 
-(defvar my/aaronnote--readonly-split-counter 0
-  "Counter for fresh read-only Aaronnote xwidget split sessions.")
+(defvar my/aaronnote--split-counter 0
+  "Counter for fresh Aaronnote xwidget split sessions.")
 
 (defvar-local my/aaronnote-buffer-file-name nil
   "Current note file represented by an Aaronnote Appine/xwidget buffer.")
@@ -257,10 +257,10 @@ permission prompts disabled.  The backend is chosen here, not per export."
       (format "aaronnote:%s" file)
     "aaronnote"))
 
-(defun my/aaronnote--readonly-client-p (client)
-  "Return non-nil when CLIENT identifies a read-only split pane."
+(defun my/aaronnote--split-client-p (client)
+  "Return non-nil when CLIENT identifies a split pane."
   (and (stringp client)
-       (string-prefix-p "aaronnote-readonly:" client)))
+       (string-prefix-p "aaronnote-split:" client)))
 
 (defun my/aaronnote--app-url (&optional file client extra-params)
   "Return the Aaronnote app URL, optionally opening FILE for CLIENT."
@@ -685,8 +685,7 @@ CLIENT, when non-nil, identifies the Aaronnote xwidget that sent the key."
                            :object-type 'alist))
                  (file (alist-get 'file payload))
                  (client (alist-get 'client payload)))
-            (unless (my/aaronnote--readonly-client-p client)
-              (my/aaronnote--sync-app-buffer-file file client)))
+            (my/aaronnote--sync-app-buffer-file file client))
         (error
          (message "Aaronnote current-file parse failed: %s"
                   (error-message-string err)))))
@@ -776,14 +775,37 @@ When BUFFER is nil, inspect the current buffer."
       (format "*aaronnote: %s*" (file-name-nondirectory file))
     "*aaronnote*"))
 
-(defun my/aaronnote--readonly-buffer-display-name (file ordinal)
-  "Return an ibuffer-friendly name for FILE's read-only split ORDINAL."
+(defun my/aaronnote--split-buffer-display-name (file ordinal)
+  "Return an ibuffer-friendly name for FILE's split ORDINAL."
   (format "*aaronnote split %d: %s*"
           ordinal
-          (file-name-nondirectory (my/aaronnote--canonical-file file))))
+          (if-let* ((file (my/aaronnote--canonical-file file)))
+              (file-name-nondirectory file)
+            "Aaronnote")))
+
+(defun my/aaronnote--split-client-ordinal (client)
+  "Return split ordinal encoded in CLIENT, or nil."
+  (when (my/aaronnote--split-client-p client)
+    (let ((value (car (last (split-string client ":" t)))))
+      (when (and value (string-match-p "\\`[0-9]+\\'" value))
+        (string-to-number value)))))
+
+(defun my/aaronnote--notify-client-closed (&optional client file)
+  "Notify the Aaronnote core that CLIENT no longer has a live view."
+  (when (and (stringp client) (not (string-empty-p client)))
+    (condition-case nil
+        (my/aaronnote--post
+         `((type . "client-close")
+           (client . ,client)
+           ,@(when (and (stringp file) (not (string-empty-p file)))
+               `((file . ,file)))))
+      (error nil))))
 
 (defun my/aaronnote--cleanup-buffer ()
   "Remove the current buffer from Aaronnote identity registries."
+  (my/aaronnote--notify-client-closed
+   my/aaronnote--client-id
+   my/aaronnote-buffer-file-name)
   (when (and (stringp my/aaronnote--registered-file)
              (eq (gethash my/aaronnote--registered-file my/aaronnote--file-buffers)
                  (current-buffer)))
@@ -830,6 +852,7 @@ When RENAME is non-nil, rename xwidget buffers to a note-specific name."
            (client (and (stringp client)
                         (not (string-empty-p client))
                         client))
+           (split-client (my/aaronnote--split-client-p client))
            changed)
       (with-current-buffer buffer
         (let ((old-file my/aaronnote--registered-file)
@@ -848,7 +871,11 @@ When RENAME is non-nil, rename xwidget buffers to a note-specific name."
         (setq-local my/aaronnote--registered-file file)
         (setq-local my/aaronnote--client-id client)
         (setq-local my/aaronnote--xwidget-forced-name
-                    (my/aaronnote--buffer-display-name file))
+                    (if split-client
+                        (my/aaronnote--split-buffer-display-name
+                         file
+                         (or (my/aaronnote--split-client-ordinal client) 0))
+                      (my/aaronnote--buffer-display-name file)))
         (my/aaronnote-keys-mode 1)
         (when file
           (setq-local default-directory
@@ -857,13 +884,13 @@ When RENAME is non-nil, rename xwidget buffers to a note-specific name."
         (when (and rename
                    (eq major-mode 'xwidget-webkit-mode)
                    (not (equal (buffer-name)
-                               (my/aaronnote--buffer-display-name file))))
-          (rename-buffer (my/aaronnote--buffer-display-name file) t)
+                               my/aaronnote--xwidget-forced-name)))
+          (rename-buffer my/aaronnote--xwidget-forced-name t)
           (setq changed t))
         (when changed
           (force-mode-line-update)
           (force-window-update (current-buffer))))
-      (when file
+      (when (and file (not (my/aaronnote--split-client-p client)))
         (puthash file buffer my/aaronnote--file-buffers))
       (when client
         (puthash client buffer my/aaronnote--client-buffers))
@@ -992,6 +1019,8 @@ When FILE is non-nil, set buffer-local file tracking directly."
                         (and (buffer-live-p buf)
                              (with-current-buffer buf
                                (and (stringp my/aaronnote-buffer-file-name)
+                                    (not (my/aaronnote--split-client-p
+                                          my/aaronnote--client-id))
                                     (string-equal
                                      (expand-file-name my/aaronnote-buffer-file-name)
                                      abs)))))
@@ -1205,8 +1234,8 @@ When FILE is nil, use the current buffer."
            (my/aaronnote--markdown-file-p buffer-file-name)
            buffer-file-name)))
 
-(defun my/aaronnote--readonly-split-window ()
-  "Create and select the window for a read-only Aaronnote split."
+(defun my/aaronnote--split-window ()
+  "Create and select the window for an Aaronnote split."
   (let ((window (if (>= (window-total-width) 120)
                     (split-window-right)
                   (split-window-below))))
@@ -1214,13 +1243,13 @@ When FILE is nil, use the current buffer."
     window))
 
 ;;;###autoload
-(defun my/aaronnote-open-current-note-readonly-split ()
-  "Open the current Markdown note in a fresh read-only Aaronnote xwidget split.
+(defun my/aaronnote-open-current-note-split ()
+  "Open the current Markdown note in a fresh editable Aaronnote xwidget split.
 
-This intentionally does not reuse or register the canonical editable
-Aaronnote xwidget for the file.  Multiple xwidget windows for the same live
-session have rendering issues, so this command creates an isolated read-only
-client and keeps it out of the normal file/session sync maps."
+This intentionally does not reuse the canonical Aaronnote xwidget for the
+file.  Multiple xwidget windows for the same live session have rendering
+issues, so this command creates an isolated editable client while keeping the
+normal file/session reuse map owned by the canonical pane."
   (interactive)
   (let ((file (my/aaronnote--current-note-file)))
     (unless (and file (my/aaronnote--markdown-file-p file))
@@ -1233,14 +1262,12 @@ client and keeps it out of the normal file/session sync maps."
            (select-window source-window))
          (unless (fboundp 'my/xwidget-open-url)
            (require 'init-browser))
-         (let* ((ordinal (cl-incf my/aaronnote--readonly-split-counter))
-                (client (format "aaronnote-readonly:%s:%d"
+         (let* ((ordinal (cl-incf my/aaronnote--split-counter))
+                (client (format "aaronnote-split:%s:%d"
                                 (file-truename file)
                                 ordinal))
-                (url (my/aaronnote--app-url
-                      file client
-                      '((readonly . "1"))))
-                (target-window (my/aaronnote--readonly-split-window))
+                (url (my/aaronnote--app-url file client))
+                (target-window (my/aaronnote--split-window))
                 (buffer (my/xwidget-open-url
                          url
                          :id client
@@ -1253,9 +1280,11 @@ client and keeps it out of the normal file/session sync maps."
                (setq-local my/aaronnote--client-id client)
                (setq-local my/aaronnote--registered-file nil)
                (setq-local my/aaronnote--xwidget-forced-name
-                           (my/aaronnote--readonly-buffer-display-name
+                           (my/aaronnote--split-buffer-display-name
                             file ordinal))
-               (setq-local my/xwidget-focus-script nil)
+               (setq-local my/xwidget-focus-script my/aaronnote--xwidget-focus-script)
+               (puthash client (current-buffer) my/aaronnote--client-buffers)
+               (add-hook 'kill-buffer-hook #'my/aaronnote--cleanup-buffer nil t)
                (when (fboundp 'my/xwidget-setup-control-line)
                  (my/xwidget-setup-control-line))
                ;; `xwidget-webkit-browse-url' may return before its buffer has
@@ -1295,8 +1324,7 @@ Cursor-level sync is intentionally no longer a per-keystroke preview channel."
                     (not (string-empty-p my/aaronnote--client-id)))
                (buffer-live-p my/aaronnote--app-buffer)))
       (progn
-        (my/aaronnote-command "refresh")
-        (my/aaronnote-focus))
+        (my/aaronnote-command "refresh"))
     (my/aaronnote-open-current-note)))
 
 ;;;###autoload
@@ -1672,7 +1700,7 @@ Blocks the caller until the response arrives (or 8 s timeout)."
     (list
      "---"
      ["Aaronnote: Refresh current pane" my/aaronnote-refresh t]
-     ["Aaronnote: Open read-only split" my/aaronnote-open-current-note-readonly-split t]
+     ["Aaronnote: Open editable split" my/aaronnote-open-current-note-split t]
      ["Aaronnote: Focus editor" my/aaronnote-focus t]
      ["Aaronnote: Pop" my/aaronnote-pop t]
      (list
@@ -1781,7 +1809,7 @@ Falls back to JupyterLab root when no matching .ipynb exists."
       ("f" "focus editor"     my/aaronnote-focus)
       ("e" "escape/normal"    my/aaronnote-escape)
       ("v" "toggle source"    my/aaronnote-toggle-source)
-      ("W" "readonly split"   my/aaronnote-open-current-note-readonly-split)
+      ("W" "editable split"   my/aaronnote-open-current-note-split)
       ("B" "build + reopen"   my/aaronnote-build-and-reopen)
       ("Q" "close all"        my/aaronnote-close)
       ("R" "raw edit in Emacs" my/aaronnote-open-markdown-raw)]

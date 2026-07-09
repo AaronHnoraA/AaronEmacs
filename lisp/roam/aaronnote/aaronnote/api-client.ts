@@ -381,6 +381,8 @@ type NativeApi = {
   session?: {
     getPositions?: () => Promise<unknown>;
     savePosition?: (position: Partial<CursorPosition> & { file: string }) => Promise<unknown>;
+    closeClient?: (body: { clientId?: string; client?: string; file?: string }) => Promise<unknown>;
+    closeClientKeepalive?: (body: { clientId?: string; client?: string; file?: string }) => void;
   };
   assets?: {
     upload?: (body: { file?: string; name?: string; type?: string; data?: string }) => Promise<unknown>;
@@ -686,6 +688,19 @@ export const api = {
       const call = window.aaronnoteApi?.session?.savePosition;
       if (!call) return { type: "positions", positions: [] };
       return ensureOk(await call(position) as PositionsMsg, "Cursor position save failed");
+    },
+    async closeClient(body: { clientId?: string; client?: string; file?: string }): Promise<void> {
+      const call = window.aaronnoteApi?.session?.closeClient;
+      if (!call) return;
+      await call(body);
+    },
+    closeClientKeepalive(body: { clientId?: string; client?: string; file?: string }): void {
+      const api = window.aaronnoteApi?.session;
+      if (api?.closeClientKeepalive) {
+        api.closeClientKeepalive(body);
+        return;
+      }
+      if (api?.closeClient) void api.closeClient(body).catch(() => {});
     },
   },
   completions: {

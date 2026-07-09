@@ -123,6 +123,31 @@ describe("editor api source preservation", () => {
     }
   });
 
+  test("can restore markdown selection without scrolling it into view", () => {
+    const mount = document.createElement("div");
+    document.body.appendChild(mount);
+    const editor = createEditor(mount, { initialContent: "Alpha beta" });
+    const view = editor.view as unknown as {
+      dispatch: (...specs: Array<{ scrollIntoView?: boolean }>) => void;
+    };
+    const originalDispatch = view.dispatch.bind(editor.view);
+    let lastScrollIntoView: boolean | undefined;
+    view.dispatch = (...specs) => {
+      lastScrollIntoView = specs.at(-1)?.scrollIntoView;
+      originalDispatch(...specs);
+    };
+    try {
+      editor.setMarkdownSelection(0, 5, { scrollIntoView: false });
+      expect(lastScrollIntoView).toBe(false);
+      editor.setMarkdownSelection(6, 10);
+      expect(lastScrollIntoView).toBe(true);
+    } finally {
+      view.dispatch = originalDispatch;
+      editor.destroy();
+      mount.remove();
+    }
+  });
+
   test("reports markdown selection offsets in preview and source mode", () => {
     const source = "Alpha beta move";
     const mount = document.createElement("div");

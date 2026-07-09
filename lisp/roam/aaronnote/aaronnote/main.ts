@@ -306,6 +306,9 @@ let lastSavedCursorPositionKey = "";
 let lastTrackedCursorPositionKey = "";
 let cursorPositionFlushInFlight = false;
 let cursorPositionFlushQueued = false;
+let clientCloseNotified = false;
+let pendingExternalSave: { file: string; mtimeMs: number } | null = null;
+let pendingExternalSaveRefreshInFlight = false;
 let navigationBackStack: CursorPosition[] = [];
 let restoringNavigationBack = false;
 let snippets: SnippetSummary[] = [];
@@ -401,6 +404,24 @@ const editorCommands = new Set<EditorCommand>([
 ]);
 
 window.AaronnoteCurrentFile = () => currentFile;
+
+type EditorScrollSnapshot = {
+  hostTop: number;
+  hostLeft: number;
+  scrollTop: number;
+  scrollLeft: number;
+  windowX: number;
+  windowY: number;
+};
+
+type ApplyOpenedNoteOptions = {
+  revealCursor?: boolean;
+  focusEditor?: boolean;
+  updateStatus?: boolean;
+  resetVim?: boolean;
+  reloadNotes?: boolean;
+  restoreScroll?: EditorScrollSnapshot | null;
+};
 
 async function uploadPasteBlobAsset(
   blob: Blob,
@@ -516,6 +537,50 @@ const editor = createEditor(host, {
     void flushCursorPosition();
   },
 });
+
+function captureEditorScroll(): EditorScrollSnapshot {
+  return {
+    hostTop: host.scrollTop,
+    hostLeft: host.scrollLeft,
+    scrollTop: editor.view.scrollDOM.scrollTop,
+    scrollLeft: editor.view.scrollDOM.scrollLeft,
+    windowX: window.scrollX || 0,
+    windowY: window.scrollY || 0,
+  };
+}
+
+function restoreEditorScroll(snapshot: EditorScrollSnapshot | null | undefined): void {
+  if (!snapshot) return;
+  const restore = () => {
+    host.scrollTop = snapshot.hostTop;
+    host.scrollLeft = snapshot.hostLeft;
+    editor.view.scrollDOM.scrollTop = snapshot.scrollTop;
+    editor.view.scrollDOM.scrollLeft = snapshot.scrollLeft;
+    window.scrollTo(snapshot.windowX, snapshot.windowY);
+  };
+  restore();
+  window.requestAnimationFrame(() => {
+    restore();
+    window.requestAnimationFrame(restore);
+  });
+  window.setTimeout(restore, 80);
+}
+
+function focusEditorPreservingScroll(): void {
+  const scroll = captureEditorScroll();
+  editor.focus();
+  restoreEditorScroll(scroll);
+}
+
+function revealCursorAfterLayout(): void {
+  const reveal = () => editor.revealCursor();
+  reveal();
+  window.requestAnimationFrame(reveal);
+  window.requestAnimationFrame(() => window.requestAnimationFrame(reveal));
+  for (const delay of [50, 120, 250, 500, 900]) {
+    window.setTimeout(reveal, delay);
+  }
+}
 
 let writingStatsDoc: typeof editor.view.state.doc | null = null;
 let writingStatsFull: WritingStats = { words: 0, characters: 0, cjkCharacters: 0, nonCjkWords: 0 };
@@ -840,6 +905,10 @@ onBlurVimReset = () => {
 window.addEventListener("focus", () => {
   imeLastSentMode = "";
   syncImeForVimMode(vim.mode());
+  void refreshPendingExternalSaveOnFocus();
+});
+host.addEventListener("focusin", () => {
+  void refreshPendingExternalSaveOnFocus();
 });
 
 const floatingTocPanel = createFloatingTocPanel({
@@ -2155,11 +2224,27 @@ async function flushCursorPosition(): Promise<void> {
   if (position) await persistCursorPosition(position);
 }
 
+function notifyClientClosedKeepalive(): void {
+  if (clientCloseNotified) return;
+  clientCloseNotified = true;
+  api.session.closeClientKeepalive({
+    client: currentClient,
+    clientId,
+    file: currentFile,
+  });
+}
+
 function applyOpenedNote(
   opened: Awaited<ReturnType<typeof api.notes.bootstrap>>,
   fallbackFile?: string,
   rememberedPositions: CursorPosition[] = cursorPositions,
+  options: ApplyOpenedNoteOptions = {},
 ): void {
+  const revealCursor = options.revealCursor !== false;
+  const focusEditor = options.focusEditor !== false;
+  const updateStatus = options.updateStatus !== false;
+  const resetVim = options.resetVim !== false;
+  const reloadNoteIndex = options.reloadNotes !== false;
   currentFile = String(opened.file || fallbackFile || "");
   currentKind = String(opened.kind || "");
   currentStandalone = Boolean(opened.standalone);
@@ -2168,6 +2253,7 @@ function applyOpenedNote(
   applyIndexPayload(opened);
   if (Array.isArray(opened.snippets)) snippets = opened.snippets;
   currentMtimeMs = Number(opened.mtimeMs) || 0;
+  const hasPendingOpenTarget = Boolean(pendingOpenHash || pendingOpenDomTarget || pendingTodoTarget);
   const remembered = !opened.selection && !pendingOpenHash && !pendingOpenDomTarget && !pendingTodoTarget
     ? rememberedCursorPosition(currentFile, rememberedPositions)
     : undefined;
@@ -2180,12 +2266,16 @@ function applyOpenedNote(
   sourceButton.classList.toggle("is-active", editor.isSourceMode());
   const from = Number(opened.selection?.from ?? remembered?.from);
   const to = Number(opened.selection?.to ?? remembered?.to ?? from);
+  let shouldRevealCursor = false;
   if (Number.isFinite(from)) {
     const length = editor.getMarkdownLength();
     const safeFrom = Math.min(Math.max(0, from), length);
     const safeTo = Math.min(Math.max(0, Number.isFinite(to) ? to : from), length);
-    editor.setMarkdownSelection(safeFrom, safeTo);
-    editor.revealCursor();
+    editor.setMarkdownSelection(safeFrom, safeTo, { scrollIntoView: false });
+    if (revealCursor) {
+      shouldRevealCursor = true;
+      editor.revealCursor();
+    }
   }
   applyingContent = false;
   scheduleWritingStats(true);
@@ -2205,12 +2295,16 @@ function applyOpenedNote(
   hideProsePopover();
   selectionTool.hidden = true;
   selectionMore.hidden = true;
-  vim.setMode("insert");
+  if (resetVim) vim.setMode("insert");
   updateTitle();
   void api.emacs.currentFile(currentFile, currentClient);
-  setStatus(currentReadOnly ? "Read-only" : currentFile ? "Ready" : "Scratch");
-  editor.focus();
+  if (updateStatus) setStatus(currentReadOnly ? "Read-only" : currentFile ? "Ready" : "Scratch");
+  if (focusEditor) editor.focus();
   scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+  restoreEditorScroll(options.restoreScroll);
+  if (shouldRevealCursor && !options.restoreScroll && !hasPendingOpenTarget) {
+    revealCursorAfterLayout();
+  }
   const targetHash = pendingOpenHash;
   const targetDom = pendingOpenDomTarget;
   const targetTodo = pendingTodoTarget;
@@ -2226,7 +2320,7 @@ function applyOpenedNote(
       setStatus(targetDom ? `DOM target not found: ${targetDom}` : `Anchor not found: ${targetHash}`);
     });
   }
-  void reloadNotes(false);
+  if (reloadNoteIndex) void reloadNotes(false);
   if (!Array.isArray(opened.snippets) && snippets.length === 0) void reloadSnippets();
 }
 
@@ -2249,21 +2343,61 @@ async function openFile(file?: string, bootstrap = false): Promise<void> {
   }
 }
 
-async function reloadCurrentFilePreservingCursor(): Promise<void> {
+async function reloadCurrentFilePreservingCursor(options: {
+  silent?: boolean;
+  preserveScroll?: boolean;
+} = {}): Promise<void> {
   if (!currentFile) return;
   const position = trackCursorPosition();
+  const scroll = options.preserveScroll ? captureEditorScroll() : null;
   if (position) rememberCursorPosition(position);
   if (!currentReadOnly && revision !== savedRevision) {
     await save();
     if (revision !== savedRevision) return;
   }
-  setStatus("Refreshing...");
+  if (!options.silent) setStatus("Refreshing...");
   try {
     const opened = await api.notes.open(currentFile);
-    applyOpenedNote(opened, currentFile, position ? [position, ...cursorPositions] : cursorPositions);
-    setStatus(currentReadOnly ? "Read-only refreshed" : "Refreshed");
+    applyOpenedNote(
+      opened,
+      currentFile,
+      position ? [position, ...cursorPositions] : cursorPositions,
+      options.silent
+        ? {
+            revealCursor: false,
+            focusEditor: false,
+            updateStatus: false,
+            resetVim: false,
+            reloadNotes: false,
+            restoreScroll: scroll,
+          }
+        : { restoreScroll: scroll },
+    );
+    if (pendingExternalSave?.file === currentFile) pendingExternalSave = null;
+    if (!options.silent) setStatus(currentReadOnly ? "Read-only refreshed" : "Refreshed");
   } catch (error) {
     setStatus(error instanceof Error ? error.message : "Refresh failed");
+  }
+}
+
+async function refreshPendingExternalSaveOnFocus(): Promise<void> {
+  const pending = pendingExternalSave;
+  if (!pending || pendingExternalSaveRefreshInFlight) return;
+  if (!currentFile || pending.file !== currentFile) {
+    pendingExternalSave = null;
+    return;
+  }
+  if (revision !== savedRevision) {
+    setStatus("Changed in another pane; refresh before saving");
+    return;
+  }
+  pendingExternalSaveRefreshInFlight = true;
+  try {
+    if (pending.mtimeMs) currentMtimeMs = pending.mtimeMs;
+    await reloadCurrentFilePreservingCursor({ silent: true, preserveScroll: true });
+    if (pendingExternalSave === pending) pendingExternalSave = null;
+  } finally {
+    pendingExternalSaveRefreshInFlight = false;
   }
 }
 
@@ -6190,6 +6324,8 @@ function runHostCommand(detail: unknown): boolean {
     file?: string;
     mode?: VimLiteMode;
     version?: number;
+    mtimeMs?: number;
+    clientId?: string;
   };
   const command = String(body.command || "").trim().toLowerCase();
   if (!command) return false;
@@ -6207,6 +6343,17 @@ function runHostCommand(detail: unknown): boolean {
         pendingNotesRefresh = true;
       } else {
         notesRefreshTimer.schedule(() => void reloadNotes(false));
+      }
+      return true;
+    }
+    case "note-saved": {
+      const savedFile = String(body.file || "");
+      if (!savedFile || savedFile !== currentFile) return true;
+      if (String(body.clientId || "") === clientId) return true;
+      const mtimeMs = Number(body.mtimeMs) || 0;
+      pendingExternalSave = { file: savedFile, mtimeMs };
+      if (revision !== savedRevision) {
+        setStatus("Changed in another pane; refresh before saving");
       }
       return true;
     }
@@ -6238,7 +6385,7 @@ function runHostCommand(detail: unknown): boolean {
     }
     case "refresh":
     case "reload":
-      void reloadCurrentFilePreservingCursor();
+      void reloadCurrentFilePreservingCursor({ preserveScroll: true });
       return true;
     case "prose-check":
     case "spell-check":
@@ -6250,7 +6397,7 @@ function runHostCommand(detail: unknown): boolean {
       void restoreNavigationBack();
       return true;
     case "focus":
-      editor.focus();
+      focusEditorPreservingScroll();
       return true;
     case "paste":
       if (rejectReadOnlyAction("Read-only pane")) return true;
@@ -6700,9 +6847,11 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pagehide", () => {
   void flushCursorPosition();
   if (currentFile && revision !== savedRevision) api.notes.saveKeepalive(saveBody());
+  notifyClientClosedKeepalive();
 });
 window.addEventListener("beforeunload", () => {
   void flushCursorPosition();
+  notifyClientClosedKeepalive();
 });
 window.addEventListener("popstate", () => {
   void restoreNavigationBack();

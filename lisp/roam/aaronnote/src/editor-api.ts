@@ -404,6 +404,11 @@ export type SetMarkdownOptions = {
   history?: "record" | "skip" | "reset";
 };
 
+export type SelectionOptions = {
+  /** Whether selecting a range should ask the editor to scroll it into view. */
+  scrollIntoView?: boolean;
+};
+
 export interface Editor {
   /** Current markdown source. */
   getMarkdown(): string;
@@ -424,9 +429,9 @@ export interface Editor {
   /** Paste plain markdown source text through the editor paste pipeline. */
   pastePlainText(text: string, options?: EditorPasteOptions): boolean;
   /** Select a source range. */
-  setSelection(from: number, to?: number): void;
+  setSelection(from: number, to?: number, options?: SelectionOptions): void;
   /** Select a markdown-source range. */
-  setMarkdownSelection(from: number, to?: number): void;
+  setMarkdownSelection(from: number, to?: number, options?: SelectionOptions): void;
   /** Current selection as markdown-source offsets. */
   getMarkdownSelection(): { from: number; to: number };
   /** Current selection as markdown-source offsets preserving direction (anchor/head). */

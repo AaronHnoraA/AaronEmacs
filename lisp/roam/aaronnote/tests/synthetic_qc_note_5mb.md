@@ -10,20 +10,20 @@ source: generated/synthetic_qc_note_5mb.md
 
 #+begin summary Document overview
 This generated document is designed to test a Markdown editor with realistic
-research-note density.
+research-note density. asda da asd sadas d sadasdasda
 
 It containssssssss ss:
 
 - long prose paragraphs;
 - displayed equations;
 - inline mathematical notation;
-- Org-style custom environments;
+- Org-style custom environments;sad asdas
 - tables;
 - code blocks;
 - theorem-proof structure;
 - bilingual explanatory comments.
 
-The formula display style is always:
+The formula display style is always:sa das da
 
 \[
 \text{displayed equation}
@@ -444,7 +444,7 @@ The proof compares inclusions and projections between summands. By composing
 maps around an indecomposable component, one obtains endomorphisms. The
 locality of endomorphism rings forces at least one component map to be
 invertible. This identifies one matching pair of summands. Removing that
-pair and applying induction proves the result.
+pair and applying induction proves the result. ssss
 #+end proof
 
 中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
@@ -41135,7 +41135,7 @@ This section discusses a synthetic but mathematically coherent collection
 of ideas around density operators, tensor encodings, graph-like reductions,
 and algebraic isomorphism problems.
 
-The running theme is that a mathematical object may have several equivalent
+The running theme is that a mathematical object may have several equivalent asdas das das ad sadas
 representations:
 
 \[
@@ -75884,7 +75884,7 @@ invertible. This identifies one matching pair of summands. Removing that
 pair and applying induction proves the result.
 #+end proof
 
-中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
+中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”��空改变，只能重排。
 
 ## 139.7. Measurement statistics
 
@@ -142404,10 +142404,21 @@ The proof compares inclusions and projections between summands. By composing
 maps around an indecomposable component, one obtains endomorphisms. The
 locality of endomorphism rings forces at least one component map to be
 invertible. This identifies one matching pair of summands. Removing that
-pair and applying induction proves the result.
+pair and applying induction proves the result. sad as as da sd
 #+end proof
+sdasd as ds asd as d asd a sd
+中s a das 文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
+oo 
 
-中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
+asdas 
+ sada sd as da
+
+
+
+
+asdas das da
+ asda s das da as dsa
+
 
 ## 261.7. Measurement statistics
 
@@ -194603,7 +194614,7 @@ Coordinates are useful for computation because they give arrays of field
 elements. Invariance is useful for mathematics because it identifies the
 features of the object that do not depend on the chosen basis.
 
-中文直觉：坐标是“输入格式”，不变量是“结构本身留下的影子”。
+中文直觉：坐标是“输入格式”，不变量是“结构本身��下的影子”。
 #+end remark
 
 If \(g \in \operatorname{GL}(V)\) and \(h \in \operatorname{GL}(W)\), a change
