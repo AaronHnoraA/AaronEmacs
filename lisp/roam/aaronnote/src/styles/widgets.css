@@ -2189,6 +2189,7 @@
   border-radius: 4px;
   background: var(--aaron-paper, #fff);
   overflow: hidden;
+  overflow-anchor: none;
 }
 
 .cm-editor .cm-ceil-header {
@@ -2313,6 +2314,7 @@
   max-height: 18rem;
   overflow: auto;
   overflow-x: auto;
+  overflow-anchor: none;
 }
 
 .cm-editor .cm-ceil-source-compact[data-empty="true"]::before {
@@ -2335,6 +2337,7 @@
   color: var(--aaron-ink, #1e1a16);
   background: color-mix(in srgb, var(--aaron-paper, #171b28), var(--aaron-code-bg, #1e2638) 28%);
   font: 0.875em/1.52 var(--aaron-font-mono, "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace);
+  overflow-anchor: none;
 }
 
 .cm-editor .cm-ceil-output-toolbar {

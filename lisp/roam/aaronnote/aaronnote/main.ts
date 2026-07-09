@@ -1961,8 +1961,8 @@ function showContextMenu(event: MouseEvent, target: Partial<AaronContextMenuTarg
       { label: "Edit Cell Source", detail: cell.id, disabled: !currentFile, run: () => openJupyterCellSource(cell) },
       { label: "Run Section", detail: cell.session, disabled: !currentFile, run: () => runJupyterCells("section") },
       ...(isLeanJupyterCell(cell) ? [{
-        label: "exitfreomlean",
-        detail: "python3",
+        label: "Convert to Python Cell",
+        detail: "Lean -> python3",
         disabled: currentReadOnly,
         run: () => exitJupyterCellFromLean(cell),
       }] : []),

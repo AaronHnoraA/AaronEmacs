@@ -1527,24 +1527,128 @@ function loadJupyterRender(): Promise<typeof import("../../jupyter-rendermime.ts
 // Expand toggle) before the render module finished loading.
 const ceilRenderTokens = new WeakMap<HTMLElement, number>();
 
-function renderCeilOutputs(root: HTMLElement, result: CeilExecutionResult | null, full = false, view?: EditorView): void {
+type CeilScrollSnapshot = {
+  top: number;
+  left: number;
+  windowX: number;
+  windowY: number;
+  interactionVersion: number;
+};
+
+let ceilScrollInteractionVersion = 0;
+let ceilScrollInteractionListenersInstalled = false;
+
+function markCeilScrollInteraction(): void {
+  ceilScrollInteractionVersion += 1;
+}
+
+function markCeilKeyboardScrollInteraction(event: KeyboardEvent): void {
+  if (
+    event.key === "ArrowDown"
+    || event.key === "ArrowUp"
+    || event.key === "PageDown"
+    || event.key === "PageUp"
+    || event.key === "Home"
+    || event.key === "End"
+    || event.key === " "
+  ) {
+    markCeilScrollInteraction();
+  }
+}
+
+function ensureCeilScrollInteractionListeners(): void {
+  if (ceilScrollInteractionListenersInstalled) return;
+  ceilScrollInteractionListenersInstalled = true;
+  window.addEventListener("wheel", markCeilScrollInteraction, { capture: true, passive: true });
+  window.addEventListener("touchmove", markCeilScrollInteraction, { capture: true, passive: true });
+  window.addEventListener("pointerdown", markCeilScrollInteraction, { capture: true, passive: true });
+  window.addEventListener("keydown", markCeilKeyboardScrollInteraction, { capture: true });
+}
+
+function captureCeilScroll(view?: EditorView): CeilScrollSnapshot | null {
+  if (!view?.dom.isConnected) return null;
+  ensureCeilScrollInteractionListeners();
+  return {
+    top: view.scrollDOM.scrollTop,
+    left: view.scrollDOM.scrollLeft,
+    windowX: window.scrollX || 0,
+    windowY: window.scrollY || 0,
+    interactionVersion: ceilScrollInteractionVersion,
+  };
+}
+
+function restoreCeilScroll(view: EditorView | undefined, snapshot: CeilScrollSnapshot | null): void {
+  if (!view?.dom.isConnected || !snapshot) return;
+  if (snapshot.interactionVersion !== ceilScrollInteractionVersion) return;
+  view.scrollDOM.scrollTop = snapshot.top;
+  view.scrollDOM.scrollLeft = snapshot.left;
+  window.scrollTo(snapshot.windowX, snapshot.windowY);
+}
+
+function scheduleCeilScrollRestore(view: EditorView | undefined, snapshot: CeilScrollSnapshot | null): void {
+  if (!view?.dom.isConnected || !snapshot) return;
+  const restore = () => restoreCeilScroll(view, snapshot);
+  restore();
+  window.requestAnimationFrame(() => {
+    restore();
+    window.requestAnimationFrame(restore);
+  });
+  for (const delay of [40, 120, 260]) {
+    window.setTimeout(restore, delay);
+  }
+}
+
+function preserveCeilScroll<T>(view: EditorView | undefined, update: () => T): T {
+  const snapshot = captureCeilScroll(view);
+  try {
+    return update();
+  } finally {
+    scheduleCeilScrollRestore(view, snapshot);
+  }
+}
+
+function runCeilDomUpdate<T>(view: EditorView | undefined, preserveScroll: boolean, update: () => T): T {
+  return preserveScroll ? preserveCeilScroll(view, update) : update();
+}
+
+function requestMeasurePreservingCeilScroll(view: EditorView | undefined): void {
+  const snapshot = captureCeilScroll(view);
+  view?.requestMeasure();
+  scheduleCeilScrollRestore(view, snapshot);
+}
+
+type CeilRenderOptions = {
+  preserveScroll?: boolean;
+};
+
+function renderCeilOutputs(
+  root: HTMLElement,
+  result: CeilExecutionResult | null,
+  full = false,
+  view?: EditorView,
+  renderOptions: CeilRenderOptions = {},
+): void {
   const token = (ceilRenderTokens.get(root) ?? 0) + 1;
   ceilRenderTokens.set(root, token);
   if (!result) {
-    disposeCeilOutputArea(root);
-    const empty = document.createElement("div");
-    empty.className = "cm-ceil-output-empty";
-    empty.textContent = "No output";
-    root.replaceChildren(empty);
+    runCeilDomUpdate(view, renderOptions.preserveScroll === true, () => {
+      disposeCeilOutputArea(root);
+      const empty = document.createElement("div");
+      empty.className = "cm-ceil-output-empty";
+      empty.textContent = "No output";
+      root.replaceChildren(empty);
+    });
     return;
   }
   const outputs = Array.isArray(result.outputs) ? result.outputs as Array<Record<string, unknown>> : [];
   if (outputs.length === 0) {
-    disposeCeilOutputArea(root);
-    const empty = document.createElement("div");
-    empty.className = "cm-ceil-output-empty";
-    empty.textContent = result.status === "error" ? (result.message || "Execution failed") : "No output";
-    root.replaceChildren(empty);
+    runCeilDomUpdate(view, renderOptions.preserveScroll === true, () => {
+      disposeCeilOutputArea(root);
+      const empty = document.createElement("div");
+      empty.className = "cm-ceil-output-empty";
+      empty.textContent = result.status === "error" ? (result.message || "Execution failed") : "No output";
+      root.replaceChildren(empty);
+    });
     return;
   }
   const options = {
@@ -1569,17 +1673,24 @@ function renderCeilOutputs(root: HTMLElement, result: CeilExecutionResult | null
       dispose();
       return;
     }
-    disposeCeilOutputArea(root);
-    root.replaceChildren(...Array.from(nextHost.childNodes));
-    ceilOutputAreaDispose.set(root, dispose);
-    view?.requestMeasure();
+    const replace = () => {
+      disposeCeilOutputArea(root);
+      root.replaceChildren(...Array.from(nextHost.childNodes));
+      ceilOutputAreaDispose.set(root, dispose);
+    };
+    if (renderOptions.preserveScroll) preserveCeilScroll(view, replace);
+    else replace();
+    if (renderOptions.preserveScroll) requestMeasurePreservingCeilScroll(view);
+    else view?.requestMeasure();
   }).catch((error) => {
     if (ceilRenderTokens.get(root) !== token) return;
-    disposeCeilOutputArea(root);
-    const pre = document.createElement("pre");
-    pre.className = "cm-ceil-output-error";
-    pre.textContent = `Failed to render output: ${error instanceof Error ? error.message : String(error)}`;
-    root.replaceChildren(pre);
+    runCeilDomUpdate(view, renderOptions.preserveScroll === true, () => {
+      disposeCeilOutputArea(root);
+      const pre = document.createElement("pre");
+      pre.className = "cm-ceil-output-error";
+      pre.textContent = `Failed to render output: ${error instanceof Error ? error.message : String(error)}`;
+      root.replaceChildren(pre);
+    });
   });
 }
 
@@ -1836,6 +1947,11 @@ class CeilCommandWidget extends MeasuredWidget {
     outputWrap.classList.toggle("is-folded", Boolean(uiState.outputFolded));
     outputWrap.classList.toggle("is-expanded", Boolean(uiState.outputExpanded));
     renderCeilOutputs(output, lastResult, Boolean(uiState.outputExpanded), view);
+    const setStatus = (text: string, preserveScroll = true): void => {
+      runCeilDomUpdate(view, preserveScroll, () => {
+        status.textContent = text;
+      });
+    };
 
     const makeButton = (text: string, title: string, run: () => Promise<void> | void): HTMLButtonElement => {
       const button = document.createElement("button");
@@ -1876,13 +1992,15 @@ class CeilCommandWidget extends MeasuredWidget {
         if (!merged) return;
         lastResult = merged;
         setBoundedMap(ceilOutputCache, cacheKey, merged);
-        status.textContent = ceilResultStatusLabel(meta, lastResult);
+        setStatus(ceilResultStatusLabel(meta, lastResult));
       }).catch(() => {});
     };
 
-    const refreshSource = async (): Promise<void> => {
+    const refreshSource = async (options: { preserveScroll?: boolean } = {}): Promise<void> => {
       if (!file) {
-        source.textContent = "Save note first";
+        runCeilDomUpdate(view, options.preserveScroll === true, () => {
+          source.textContent = "Save note first";
+        });
         return;
       }
       try {
@@ -1895,23 +2013,31 @@ class CeilCommandWidget extends MeasuredWidget {
         });
         const code = String(result.code ?? "");
         setBoundedMap(ceilSourceCache, sourceKey, code);
-        source.replaceChildren(code.trim() ? highlightedCeilCode(code, meta.language) : highlightedCeilCode("", meta.language));
-        if (!code.trim()) source.dataset.empty = "true";
+        runCeilDomUpdate(view, options.preserveScroll === true, () => {
+          source.replaceChildren(code.trim() ? highlightedCeilCode(code, meta.language) : highlightedCeilCode("", meta.language));
+          if (!code.trim()) source.dataset.empty = "true";
+          else delete source.dataset.empty;
+        });
         const savedOutput = result.output && typeof result.output === "object" ? result.output as CeilExecutionResult : null;
         const cachedLive = ceilOutputCache.get(cacheKey);
         lastResult = mergeCeilOutputFromServer(savedOutput, cachedLive ?? null);
         const ui = ceilOutputUi(lastResult);
-        outputWrap.classList.toggle("is-folded", Boolean(ui.outputFolded));
-        outputWrap.classList.toggle("is-expanded", Boolean(ui.outputExpanded));
+        runCeilDomUpdate(view, options.preserveScroll === true, () => {
+          outputWrap.classList.toggle("is-folded", Boolean(ui.outputFolded));
+          outputWrap.classList.toggle("is-expanded", Boolean(ui.outputExpanded));
+        });
         const expanded = Boolean(ui.outputExpanded);
         foldButton.textContent = ui.outputFolded ? "Show" : "Fold";
         expandButton.textContent = ui.outputExpanded ? "Collapse" : "Expand";
-        status.textContent = ceilResultStatusLabel(meta, lastResult);
-        renderCeilOutputs(output, lastResult, expanded, view);
+        setStatus(ceilResultStatusLabel(meta, lastResult), options.preserveScroll === true);
+        renderCeilOutputs(output, lastResult, expanded, view, { preserveScroll: options.preserveScroll });
         if (lastResult) setBoundedMap(ceilOutputCache, cacheKey, lastResult);
-        view.requestMeasure();
+        if (options.preserveScroll) requestMeasurePreservingCeilScroll(view);
+        else view.requestMeasure();
       } catch (err) {
-        source.textContent = err instanceof Error ? err.message : String(err);
+        runCeilDomUpdate(view, options.preserveScroll === true, () => {
+          source.textContent = err instanceof Error ? err.message : String(err);
+        });
       }
     };
 
@@ -1924,13 +2050,15 @@ class CeilCommandWidget extends MeasuredWidget {
       const nextLanguage = isLeanCeilRuntime(languageInput.value, nextKernel)
         ? "lean4"
         : (requestedLanguage || ceilLanguageForKernel(nextKernel));
-      replaceCeilCommandLine(view, this.range.from, formatCeilCommand({
-        ...meta,
-        kernel: nextKernel,
-        session: sessionInput.value.trim() || DEFAULT_CEIL_SESSION,
-        language: ceilLanguageForKernel(nextKernel, nextLanguage),
-        changed: false,
-      }));
+      preserveCeilScroll(view, () => {
+        replaceCeilCommandLine(view, this.range.from, formatCeilCommand({
+          ...meta,
+          kernel: nextKernel,
+          session: sessionInput.value.trim() || DEFAULT_CEIL_SESSION,
+          language: ceilLanguageForKernel(nextKernel, nextLanguage),
+          changed: false,
+        }));
+      });
     };
 
     languageInput.addEventListener("blur", writeCommandLine);
@@ -1965,23 +2093,25 @@ class CeilCommandWidget extends MeasuredWidget {
       }
     });
 
-    const setBusy = (busy: boolean): void => {
-      for (const button of buttonBar.querySelectorAll<HTMLButtonElement>("button")) {
-        if (button.dataset.ceilInterrupt === "true") continue;
-        button.disabled = busy;
-      }
-      languageInput.disabled = busy;
-      kernelSelect.disabled = busy;
-      sessionInput.disabled = busy;
+    const setBusy = (busy: boolean, preserveScroll = true): void => {
+      runCeilDomUpdate(view, preserveScroll, () => {
+        for (const button of buttonBar.querySelectorAll<HTMLButtonElement>("button")) {
+          if (button.dataset.ceilInterrupt === "true") continue;
+          button.disabled = busy;
+        }
+        languageInput.disabled = busy;
+        kernelSelect.disabled = busy;
+        sessionInput.disabled = busy;
+      });
     };
 
     const editButton = makeButton("Edit", "Open hidden source script", async () => {
       if (!file) {
-        status.textContent = "Save note first";
+        setStatus("Save note first");
         return;
       }
       setBusy(true);
-      status.textContent = "Opening...";
+      setStatus("Opening...");
       try {
         await api.jupyterCell.openScript({
           file,
@@ -1992,10 +2122,10 @@ class CeilCommandWidget extends MeasuredWidget {
           storage: "script",
           cells: ceilCommandCellsForContext(view.state, meta, file),
         });
-        status.textContent = meta.id;
-        await refreshSource();
+        setStatus(meta.id);
+        await refreshSource({ preserveScroll: true });
       } catch (err) {
-        status.textContent = err instanceof Error ? err.message : String(err);
+        setStatus(err instanceof Error ? err.message : String(err));
       } finally {
         setBusy(false);
       }
@@ -2047,25 +2177,29 @@ class CeilCommandWidget extends MeasuredWidget {
         message: err instanceof Error ? err.message : String(err),
         outputs: [{ output_type: "error", traceback: [err instanceof Error ? err.message : String(err)] }],
       });
-      if (!leanRuntime) renderCeilOutputs(output, lastResult, outputWrap.classList.contains("is-expanded"), view);
-      status.textContent = "Error";
+      if (!leanRuntime) renderCeilOutputs(output, lastResult, outputWrap.classList.contains("is-expanded"), view, { preserveScroll: true });
+      setStatus("Error");
     };
     const runEntries = async (entriesToRun: CeilCellContextEntry[], emptyMessage: string): Promise<void> => {
       if (!file) {
-        status.textContent = "Save note first";
+        setStatus("Save note first");
         return;
       }
       const entries = contextEntries();
       if (entriesToRun.length === 0) {
-        status.textContent = emptyMessage;
+        setStatus(emptyMessage);
         return;
       }
       setBusy(true);
       let ranCurrent = false;
       try {
         const dependencyMode = entriesToRun.length === 1 && entriesToRun[0]?.id === meta.id;
-        status.textContent = entriesToRun.length === 1 ? "Running..." : `Running ${entriesToRun.length}`;
-        if (dependencyMode && !leanRuntime) output.textContent = "Running...";
+        setStatus(entriesToRun.length === 1 ? "Running..." : `Running ${entriesToRun.length}`);
+        if (dependencyMode && !leanRuntime) {
+          preserveCeilScroll(view, () => {
+            output.textContent = "Running...";
+          });
+        }
         const result = await executeEntries(entriesToRun, dependencyMode ? "dependencies" : "selected", entries);
         const published = new Set<string>();
         if (Array.isArray(result.results)) {
@@ -2084,19 +2218,19 @@ class CeilCommandWidget extends MeasuredWidget {
           ranCurrent = true;
           lastResult = currentResult;
           setBoundedMap(ceilOutputCache, cacheKey, currentResult);
-          status.textContent = leanRuntime
+          setStatus(leanRuntime
             ? "Synced"
-            : currentResult.status === "error" && currentResult.stoppedAt ? `Stopped at ${currentResult.stoppedAt}` : ceilResultStatusLabel(meta, currentResult);
-          if (!leanRuntime) renderCeilOutputs(output, currentResult, outputWrap.classList.contains("is-expanded"), view);
+            : currentResult.status === "error" && currentResult.stoppedAt ? `Stopped at ${currentResult.stoppedAt}` : ceilResultStatusLabel(meta, currentResult));
+          if (!leanRuntime) renderCeilOutputs(output, currentResult, outputWrap.classList.contains("is-expanded"), view, { preserveScroll: true });
         } else {
-          status.textContent = result.status === "error" && result.stoppedAt ? `Stopped at ${result.stoppedAt}` : "Ran above";
+          setStatus(result.status === "error" && result.stoppedAt ? `Stopped at ${result.stoppedAt}` : "Ran above");
         }
-        if (ranCurrent) await refreshSource();
+        if (ranCurrent) await refreshSource({ preserveScroll: true });
       } catch (err) {
         renderCurrentError(err);
       } finally {
         setBusy(false);
-        view.requestMeasure();
+        requestMeasurePreservingCeilScroll(view);
       }
     };
 
@@ -2116,12 +2250,12 @@ class CeilCommandWidget extends MeasuredWidget {
 
     const interruptButton = makeButton("Interrupt", "Interrupt this kernel session", async () => {
       if (!file) return;
-      status.textContent = "Interrupting...";
+      setStatus("Interrupting...");
       try {
         await api.jupyterCell.interrupt({ file, kernel: meta.kernel, session: meta.session });
-        status.textContent = meta.id;
+        setStatus(meta.id);
       } catch (err) {
-        status.textContent = err instanceof Error ? err.message : String(err);
+        setStatus(err instanceof Error ? err.message : String(err));
       }
     });
     interruptButton.dataset.ceilInterrupt = "true";
@@ -2133,24 +2267,24 @@ class CeilCommandWidget extends MeasuredWidget {
 
     const restartButton = makeButton("Restart", "Restart this kernel session", async () => {
       if (!file) return;
-      status.textContent = "Restarting...";
+      setStatus("Restarting...");
       try {
         await api.jupyterCell.restart({ file, kernel: meta.kernel, session: meta.session });
         if (lastResult) {
           lastResult = { ...lastResult, live: false, widgetRuntime: undefined };
           setBoundedMap(ceilOutputCache, cacheKey, lastResult);
-          renderCeilOutputs(output, lastResult, outputWrap.classList.contains("is-expanded"), view);
+          renderCeilOutputs(output, lastResult, outputWrap.classList.contains("is-expanded"), view, { preserveScroll: true });
         }
-        status.textContent = meta.id;
+        setStatus(meta.id);
       } catch (err) {
-        status.textContent = err instanceof Error ? err.message : String(err);
+        setStatus(err instanceof Error ? err.message : String(err));
       }
     });
 
     const clearButton = makeButton("Clear", "Clear output", () => {
       lastResult = null;
       ceilOutputCache.delete(cacheKey);
-      renderCeilOutputs(output, null, false, view);
+      renderCeilOutputs(output, null, false, view, { preserveScroll: true });
       if (file) {
         void api.jupyterCell.clearScriptCellOutput({
           file,
@@ -2160,29 +2294,33 @@ class CeilCommandWidget extends MeasuredWidget {
           language: meta.language,
         }).catch(() => {});
       }
-      view.requestMeasure();
+      requestMeasurePreservingCeilScroll(view);
     });
     const refreshButton = makeButton("Refresh", "Reload source and saved output", async () => {
-      status.textContent = "Refreshing...";
-      await refreshSource();
-      status.textContent = meta.id;
+      setStatus("Refreshing...");
+      await refreshSource({ preserveScroll: true });
+      setStatus(meta.id);
     });
     const foldButton = makeButton("Fold", "Fold output", () => {
       const folded = !outputWrap.classList.contains("is-folded");
-      outputWrap.classList.toggle("is-folded", folded);
+      preserveCeilScroll(view, () => {
+        outputWrap.classList.toggle("is-folded", folded);
+      });
       foldButton.textContent = folded ? "Show" : "Fold";
       saveOutputUi({ outputFolded: folded });
-      view.requestMeasure();
+      requestMeasurePreservingCeilScroll(view);
     });
     const expandButton = makeButton("Expand", "Expand output inline", () => {
       const expanded = !outputWrap.classList.contains("is-expanded");
-      outputWrap.classList.toggle("is-expanded", expanded);
-      if (expanded) outputWrap.classList.remove("is-folded");
+      preserveCeilScroll(view, () => {
+        outputWrap.classList.toggle("is-expanded", expanded);
+        if (expanded) outputWrap.classList.remove("is-folded");
+      });
       expandButton.textContent = expanded ? "Collapse" : "Expand";
       foldButton.textContent = "Fold";
-      renderCeilOutputs(output, lastResult, expanded, view);
+      renderCeilOutputs(output, lastResult, expanded, view, { preserveScroll: true });
       saveOutputUi({ outputExpanded: expanded, ...(expanded ? { outputFolded: false } : {}) });
-      view.requestMeasure();
+      requestMeasurePreservingCeilScroll(view);
     });
     const popoutButton = makeButton("Popout", "Show output in a separate panel", () => openCeilOutputPopup(lastResult));
 
@@ -3581,14 +3719,18 @@ class CeilCellReloadPlugin {
     this.handler = (file?: string): void => {
       ceilCacheEpoch += 1;
       clearCeilCachesForFile(file || "");
-      this.view.dispatch({ effects: ceilRefreshEffect.of(file || "") });
+      preserveCeilScroll(this.view, () => {
+        this.view.dispatch({ effects: ceilRefreshEffect.of(file || "") });
+      });
     };
     this.resultHandler = ({ file, cellId, kernel, session, result }): void => {
       const key = ceilOutputKey(file, { id: cellId, kernel, session }, `script:${cellId}`);
       const merged = mergeCeilOutputUi(result, ceilOutputCache.get(key) ?? null) ?? result;
       setBoundedMap(ceilOutputCache, key, merged);
       ceilCacheEpoch += 1;
-      this.view.dispatch({ effects: ceilRefreshEffect.of(file) });
+      preserveCeilScroll(this.view, () => {
+        this.view.dispatch({ effects: ceilRefreshEffect.of(file) });
+      });
     };
     window.AaronnoteReloadCeilCells = this.handler;
     window.AaronnotePublishJupyterCellResult = this.resultHandler;
