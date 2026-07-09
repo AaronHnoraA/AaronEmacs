@@ -10,6 +10,7 @@ class FakeEditor {
   insertions: string[] = [];
   getMarkdownCalls = 0;
   cursorContextCalls = 0;
+  revealCursorCalls = 0;
 
   constructor(markdown: string) {
     this.markdown = markdown;
@@ -47,7 +48,9 @@ class FakeEditor {
     return { before: this.cursorBefore, after: this.cursorAfter, rect: { left: 0, top: 0, bottom: 20 } };
   }
 
-  revealCursor(): void {}
+  revealCursor(): void {
+    this.revealCursorCalls++;
+  }
 }
 
 function waitForMicrotasks(): Promise<void> {
@@ -240,6 +243,92 @@ describe("copilot plugin insertion", () => {
       expect(jumpedSnippet).toBe(false);
       expect(editor.insertions).toEqual(["TopLevel"]);
       expect(editor.markdown).toBe("prefixTopLevel");
+    } finally {
+      cleanup();
+      restoreApi();
+      host.remove();
+    }
+  });
+
+  test("cmd-right-bracket accepts visible copilot text inside preserveScroll", async () => {
+    const host = document.createElement("div");
+    const target = document.createElement("button");
+    host.appendChild(target);
+    document.body.appendChild(host);
+
+    const editor = new FakeEditor("prefix");
+    const handlers: {
+      key?: (event: KeyboardEvent) => boolean;
+      action?: (action: string) => void;
+    } = {};
+    const preserveEvents: string[] = [];
+
+    const restoreApi = installNativeCopilot(async (action) => {
+      if (action === "inline") {
+        return {
+          items: [{
+            insertText: "prefixSuffix",
+            range: { from: 0, to: editor.markdown.length },
+            item: { insertText: "prefixSuffix" },
+          }],
+        };
+      }
+      return { ok: true };
+    });
+
+    const cleanup = setupCopilot({
+      editor,
+      host,
+      currentFile: () => "/tmp/copilot.md",
+      vimMode: () => "insert",
+      setStatus: () => {},
+      onChange: () => () => {},
+      onKeyDown: (handler: (event: KeyboardEvent) => boolean) => {
+        handlers.key = handler;
+        return () => {
+          delete handlers.key;
+        };
+      },
+      onAction: (handler: (action: string) => void) => {
+        handlers.action = handler;
+        return () => {
+          delete handlers.action;
+        };
+      },
+      onSettingsChange: () => () => {},
+      getSettings: () => ({ idleDelayMs: 999_999, largeBufferThresholdKb: 512 }),
+      onDocumentEvent: () => () => {},
+      preserveScroll: (update) => {
+        preserveEvents.push("before");
+        update();
+        preserveEvents.push("after");
+      },
+      jumpSnippetNext: () => false,
+      jumpSnippetPrevious: () => false,
+      forwardDelimiter: () => false,
+      backwardDelimiter: () => false,
+    });
+
+    try {
+      target.focus();
+      handlers.action?.("trigger");
+      await waitForMicrotasks();
+      await waitForMicrotasks();
+
+      target.addEventListener("keydown", (event) => {
+        handlers.key?.(event);
+      });
+      target.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "]",
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      }));
+
+      expect(preserveEvents).toEqual(["before", "after"]);
+      expect(editor.revealCursorCalls).toBe(1);
+      expect(editor.insertions).toEqual(["Suffix"]);
+      expect(editor.markdown).toBe("prefixSuffix");
     } finally {
       cleanup();
       restoreApi();

@@ -338,6 +338,17 @@ let snippetSuppressedPrefix = "";
 let snippetCompletionArmed = false;
 let snippetRenderKey = "";
 let snippetPopupMatchKey = "";
+
+const BUILTIN_SNIPPET_SOURCE = "aaronnote:builtin";
+const BUILTIN_SNIPPETS: SnippetSummary[] = [{
+  key: ":",
+  name: "Display math",
+  mode: "markdown-mode",
+  group: "Aaronnote builtin",
+  kind: "",
+  body: "\\[\n$1\n\\]\n$0",
+  source: BUILTIN_SNIPPET_SOURCE,
+}];
 let paused = false;
 const pauseReasons = new Set<string>();
 let mathPreviewKey = "";
@@ -483,6 +494,19 @@ function rejectReadOnlyAction(action = "Read-only pane"): boolean {
   setStatus(action);
   return true;
 }
+
+function snippetIdentity(snippet: SnippetSummary): string {
+  return `${snippet.kind || ""}\0${snippet.mode || ""}\0${snippet.key || ""}`;
+}
+
+function withBuiltinSnippets(items: readonly SnippetSummary[] = []): SnippetSummary[] {
+  const builtins = new Map(BUILTIN_SNIPPETS.map((snippet) => [snippetIdentity(snippet), snippet]));
+  return [
+    ...items.filter((snippet) => !builtins.has(snippetIdentity(snippet))),
+    ...BUILTIN_SNIPPETS,
+  ];
+}
+snippets = withBuiltinSnippets(snippets);
 
 function updateTitle(): void {
   const name = currentFile.split(/[\\/]/).at(-1) || "AaronNote";
@@ -1882,6 +1906,96 @@ function markdownHrefFromPointer(event: MouseEvent): string {
   return cleanHref(markdownHrefAt(editor.view.state, pos) || "");
 }
 
+type ContextMathTarget = {
+  kind: "inline" | "block";
+  from: number;
+  to: number;
+  tex: string;
+  contentFrom?: number;
+  contentTo?: number;
+};
+
+function mathTargetAtPosition(pos: number): ContextMathTarget | null {
+  const state = editor.view.state;
+  const safePos = Math.max(0, Math.min(pos, state.doc.length));
+  const blockRanges = getBlockMathRanges(state);
+  const block = rangeAtPosition(safePos, blockRanges);
+  if (block) {
+    return {
+      kind: "block",
+      from: block.from,
+      to: block.to,
+      tex: block.tex,
+      contentFrom: block.contentFrom,
+      contentTo: block.contentTo,
+    };
+  }
+
+  const line = state.doc.lineAt(safePos);
+  INLINE_MATH_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = INLINE_MATH_RE.exec(line.text)) !== null) {
+    const from = line.from + match.index;
+    const to = from + match[0].length;
+    if (safePos < from || safePos > to) continue;
+    if (rangeOverlapsAny(from, to, blockRanges)) continue;
+    return { kind: "inline", from, to, tex: match[1] || "" };
+  }
+  return null;
+}
+
+function mathTargetFromSourceElement(target: EventTarget | null): ContextMathTarget | null {
+  const element = target instanceof Element
+    ? target.closest<HTMLElement>(".cm-math-inline, .cm-math-block")
+    : null;
+  if (!element) return null;
+  const from = Number(element.dataset.cmSourceFrom);
+  const to = Number(element.dataset.cmSourceTo);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) return null;
+  return mathTargetAtPosition(Math.min(to, from + 1));
+}
+
+function mathTargetFromPointer(event: MouseEvent): ContextMathTarget | null {
+  const elementTarget = mathTargetFromSourceElement(event.target);
+  if (elementTarget) return elementTarget;
+  const pos = editor.view.posAtCoords({ x: event.clientX, y: event.clientY });
+  return typeof pos === "number" ? mathTargetAtPosition(pos) : null;
+}
+
+function convertInlineMathToBlock(target: ContextMathTarget): boolean {
+  if (rejectReadOnlyAction("Read-only pane")) return false;
+  if (target.kind !== "inline") return false;
+  const state = editor.view.state;
+  const line = state.doc.lineAt(target.from);
+  const before = state.doc.sliceString(line.from, target.from);
+  const after = state.doc.sliceString(target.to, line.to);
+  const prefix = before.trim().length > 0 ? "\n" : "";
+  const suffix = after.trim().length > 0 ? "\n" : "";
+  const tex = target.tex.trim();
+  const replacement = `${prefix}\\[\n${tex}\n\\]${suffix}`;
+  const scroll = captureEditorScroll();
+  const replaced = editor.replaceMarkdownRange(target.from, target.to, replacement, "end");
+  const contentFrom = target.from + prefix.length + "\\[\n".length;
+  editor.setMarkdownSelection(contentFrom, contentFrom + tex.length, { scrollIntoView: false });
+  restoreEditorScroll(scroll);
+  setStatus("Converted inline math to display math");
+  scheduleAssistUpdate({ mathPreview: true, cursor: true });
+  return replaced.to > replaced.from;
+}
+
+function convertBlockMathToInline(target: ContextMathTarget): boolean {
+  if (rejectReadOnlyAction("Read-only pane")) return false;
+  if (target.kind !== "block") return false;
+  const tex = target.tex.trim().replace(/\s*\n\s*/g, " ");
+  const replacement = `\\(${tex}\\)`;
+  const scroll = captureEditorScroll();
+  editor.replaceMarkdownRange(target.from, target.to, replacement, "end");
+  restoreEditorScroll(scroll);
+  setStatus("Converted display math to inline math");
+  scheduleAssistUpdate({ mathPreview: true, cursor: true });
+  return true;
+}
+
 async function copyCurrentNotePath(): Promise<void> {
   if (!currentFile) return;
   await copyText(currentFile);
@@ -1942,6 +2056,7 @@ function showContextMenu(event: MouseEvent, target: Partial<AaronContextMenuTarg
   const hasSelection = selection.from !== selection.to;
   const planningTarget = planningEditTargetFromPointer(event);
   const cell = target.cell !== undefined ? target.cell : jupyterCellFromPointer(event, false);
+  const mathTarget = mathTargetFromPointer(event);
   const href = cleanHref(target.href || markdownHrefFromPointer(event));
   const cellDetail = cell
     ? isLeanJupyterCell(cell) ? `${cell.language} / ${cell.session}` : `${cell.language} / ${cell.kernel} / ${cell.session}`
@@ -1955,6 +2070,22 @@ function showContextMenu(event: MouseEvent, target: Partial<AaronContextMenuTarg
       disabled: currentReadOnly,
       run: () => openAgendaEditPop(planningTarget),
     });
+  } else if (mathTarget) {
+    items.push(
+      mathTarget.kind === "inline"
+        ? {
+            label: "Convert to Display Math",
+            detail: "\\[ ... \\]",
+            disabled: currentReadOnly,
+            run: () => convertInlineMathToBlock(mathTarget),
+          }
+        : {
+            label: "Convert to Inline Math",
+            detail: "\\( ... \\)",
+            disabled: currentReadOnly,
+            run: () => convertBlockMathToInline(mathTarget),
+          },
+    );
   } else if (cell) {
     items.push(
       { label: "Run Cell", detail: cellDetail, disabled: !currentFile, run: () => runJupyterCell(cell) },
@@ -2251,7 +2382,7 @@ function applyOpenedNote(
   currentReadOnly = initialReadOnly;
   applyReadOnlyUi();
   applyIndexPayload(opened);
-  if (Array.isArray(opened.snippets)) snippets = opened.snippets;
+  if (Array.isArray(opened.snippets)) snippets = withBuiltinSnippets(opened.snippets);
   currentMtimeMs = Number(opened.mtimeMs) || 0;
   const hasPendingOpenTarget = Boolean(pendingOpenHash || pendingOpenDomTarget || pendingTodoTarget);
   const remembered = !opened.selection && !pendingOpenHash && !pendingOpenDomTarget && !pendingTodoTarget
@@ -2434,6 +2565,11 @@ setupCopilot({
   getSettings: () => ({ idleDelayMs: 850, largeBufferThresholdKb: 512 }),
   isActive: () => !paused && editorSurfaceVisible(),
   onDocumentEvent: subscribe,
+  preserveScroll: (update) => {
+    const scroll = captureEditorScroll();
+    update();
+    restoreEditorScroll(scroll);
+  },
   jumpSnippetNext: jumpSnippetTabstop,
   jumpSnippetPrevious: jumpSnippetTabstopBack,
   forwardDelimiter: () => false,
@@ -5078,8 +5214,31 @@ function matchingSnippets(prefix: string, mode: string): SnippetSummary[] {
   return matchingSnippetsForPrefix(snippets, prefix, { kind: currentSnippetKind(), mode, limit: 10 });
 }
 
+function builtinDisplayMathSnippetP(snippet: SnippetSummary): boolean {
+  return snippet.source === BUILTIN_SNIPPET_SOURCE
+    && snippet.mode === "markdown-mode"
+    && snippet.key === ":";
+}
+
+function snippetWithSmartBlockBoundaries(snippet: SnippetSummary, deleteBefore: number): SnippetSummary {
+  if (!builtinDisplayMathSnippetP(snippet)) return snippet;
+  const body = String(snippet.body || "");
+  const selection = editor.getMarkdownSelection();
+  const replaceFrom = Math.max(0, selection.from - deleteBefore);
+  const replaceTo = selection.to;
+  const doc = editor.view.state.doc;
+  const line = doc.lineAt(replaceFrom);
+  const before = doc.sliceString(line.from, replaceFrom);
+  const after = doc.sliceString(replaceTo, line.to);
+  const prefix = before.trim().length > 0 ? "\n" : "";
+  const suffix = after.trim().length > 0 ? "\n" : "";
+  if (!prefix && !suffix) return snippet;
+  return { ...snippet, body: `${prefix}${body}${suffix}` };
+}
+
 function insertSnippet(snippet: SnippetSummary, deleteBefore = 0): boolean {
-  if (!snippetSession.insert(snippet, deleteBefore)) return false;
+  const resolvedSnippet = snippetWithSmartBlockBoundaries(snippet, deleteBefore);
+  if (!snippetSession.insert(resolvedSnippet, deleteBefore)) return false;
   setStatus(`Inserted ${snippet.key || snippet.name || "snippet"}`);
   scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
   return true;
@@ -6203,7 +6362,7 @@ async function reloadSnippets(): Promise<void> {
       const message = (msg as { message?: string }).message || "Snippet reload failed";
       throw new Error(message);
     }
-    snippets = msg.snippets;
+    snippets = withBuiltinSnippets(msg.snippets);
     hideSnippetPopup();
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
     setStatus(`Reloaded ${snippets.length} snippets`);
@@ -6253,7 +6412,7 @@ function runHostKey(body: Record<string, unknown>): boolean {
     altKey: Boolean(body.altKey),
     shiftKey: Boolean(body.shiftKey) || shiftTabAlias,
   };
-  editor.focus();
+  focusEditorPreservingScroll();
   if (handleSnippetPopupHostKey(hostKey)) {
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
     return true;

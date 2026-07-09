@@ -28,6 +28,7 @@ type Context = {
     handler: (event: DocumentEventMap[K]) => void,
     options?: AddEventListenerOptions,
   ) => () => void;
+  preserveScroll?: (update: () => void) => void;
   jumpSnippetNext: () => boolean;
   jumpSnippetPrevious: () => boolean;
   forwardDelimiter: () => boolean;
@@ -518,12 +519,16 @@ export function setupCopilot(context: Context): () => void {
       return false;
     }
     accepting = true;
-    context.editor.insertText(text);
+    const insertAndReveal = () => {
+      context.editor.insertText(text);
+      context.editor.revealCursor();
+    };
+    if (context.preserveScroll) context.preserveScroll(insertAndReveal);
+    else insertAndReveal();
     window.setTimeout(() => {
       accepting = false;
     }, 0);
     visible.acceptedLength += text.length;
-    context.editor.revealCursor();
     if (visible.acceptedLength >= visible.insertText.length) {
       const item = visible.item;
       clearCompletion();
