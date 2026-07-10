@@ -97,6 +97,29 @@ describe("per-file write serialization", () => {
     });
   });
 
+  test("concurrent clockIn calls across files leave only one running clock", async () => {
+    await withVault(async (notes) => {
+      const aFile = join(notes, "a.md");
+      const bFile = join(notes, "b.md");
+      await writeFile(aFile, "---\nid: a\n---\n# A\n\n@@todo(doing) [alpha task]\n", "utf8");
+      await writeFile(bFile, "---\nid: b\n---\n# B\n\n@@todo(doing) [beta task]\n", "utf8");
+      await syncRoamDb(null, { mode: "full" });
+      const todos = (await buildAgenda({ includePlanning: true })).todos;
+      const alpha = todos.find((t: any) => t.text === "alpha task");
+      const beta = todos.find((t: any) => t.text === "beta task");
+
+      const [a, b] = await Promise.all([
+        clockIn({ file: aFile, index: alpha.index, source: alpha.source }),
+        clockIn({ file: bFile, index: beta.index, source: beta.source }),
+      ]);
+
+      const agenda = await buildAgenda({ includePlanning: true });
+      expect(agenda.lints.map((lint: any) => lint.kind)).not.toContain("multiple-running-clocks");
+      expect(agenda.clocktable.running?.todoId).toBe((b as any).todoId);
+      expect((a as any).todoId).not.toBe((b as any).todoId);
+    });
+  });
+
   test("concurrent ensureTodoId calls on the same todo mint exactly one id", async () => {
     await withVault(async (notes) => {
       const file = join(notes, "a.md");

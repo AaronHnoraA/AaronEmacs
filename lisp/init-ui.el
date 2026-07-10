@@ -207,7 +207,7 @@ height in pixels."
   (my/package-upgrade-all-noninteractive))
 
 (defun my/dashboard-open-config-board (&rest _)
-  "Open the local config board from the dashboard button."
+  "Open the local config Customize group from the dashboard button."
   (interactive)
   (unless (fboundp 'config-board)
     (require 'config-tools))
@@ -345,7 +345,7 @@ height in pixels."
   :init
   (setq dashboard-navigator-buttons
         `(((,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-gear") "⚙")
-            "config" "Open local config board"
+            "config" "Open native config Customize group"
             ,#'my/dashboard-open-config-board)
            (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-repo") "R")
             "roam" "Open Roam management"

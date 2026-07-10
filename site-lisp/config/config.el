@@ -39,7 +39,8 @@
 (defgroup config nil
   "Unified configuration registry."
   :group 'convenience
-  :prefix "config-")
+  :prefix "config-"
+  :load "config-custom")
 
 (defvar config--registry (make-hash-table :test 'eq)
   "Hash table mapping an item NAME (symbol) to its metadata plist.")
@@ -94,6 +95,10 @@ Each value is a hash table where keys are expanded store file names.")
 
 (defvar config--current-store-file nil
   "Store file currently calling `config-store-set'.")
+
+(defvar config-after-register-hook nil
+  "Hook run after a config registry entry is added or replaced.
+Hook functions are called with one argument, the registered entry plist.")
 
 ;;; Internal helpers ---------------------------------------------------------
 
@@ -183,9 +188,31 @@ specialized `etc/config-*.el' owns new keys for the same group."
 (defun config--backing-var (entry name)
   "Return the backing variable symbol for ENTRY named NAME, or nil.
 Defaults to NAME unless ENTRY explicitly supplies `:var' (possibly nil)."
-  (if (plist-member entry :var)
+    (if (plist-member entry :var)
       (plist-get entry :var)
     name))
+
+(defun config--current-raw-value (entry name)
+  "Return ENTRY's current raw value for NAME without warning on missing state."
+  (cond
+   ((plist-get entry :get) (funcall (plist-get entry :get) name))
+   ((eq (plist-get entry :kind) 'hook)
+    (and (boundp (plist-get entry :hook))
+         (copy-sequence (symbol-value (plist-get entry :hook)))))
+   (t
+    (let ((var (config--backing-var entry name)))
+      (cond
+       ((and var (boundp var)) (symbol-value var))
+       ((plist-member entry :value) (plist-get entry :value))
+       (t nil))))))
+
+(defun config--remember-initial-value (entry name)
+  "Record ENTRY's pre-store value for native Customize reset semantics."
+  (unless (plist-member entry :initial-value)
+    (plist-put entry :initial-value
+               (condition-case nil
+                   (config--current-raw-value entry name)
+                 (error nil)))))
 
 (defun config--valid-type-p (type value)
   "Return non-nil when VALUE is acceptable for TYPE."
@@ -261,6 +288,7 @@ immediately applies any pre-loaded store override."
       (setq entry (plist-put entry :var name)))
     (unless (plist-member plist :source)
       (setq entry (plist-put entry :source (config--caller-source))))
+    (config--remember-initial-value entry name)
     (puthash name entry config--registry)
     (when-let* ((store-file (config--entry-store-file entry)))
       (config--load-store-file store-file))
@@ -281,6 +309,7 @@ immediately applies any pre-loaded store override."
             ;; startup instead of once per registration.
             (config--set-value entry name (cdr cell)))
         (error nil)))
+    (run-hook-with-args 'config-after-register-hook entry)
     name))
 
 (defmacro config-defvar (name default &optional docstring &rest plist)
@@ -311,6 +340,7 @@ Pre-loaded store overrides for this hook are applied immediately."
     (setq entry (plist-put entry :hook hook))
     (unless (plist-member plist :source)
       (setq entry (plist-put entry :source (config--caller-source))))
+    (config--remember-initial-value entry hook)
     (puthash hook entry config--registry)
     (when-let* ((store-file (config--entry-store-file entry)))
       (config--load-store-file store-file))
@@ -322,6 +352,7 @@ Pre-loaded store overrides for this hook are applied immediately."
         (condition-case nil
             (config--hook-apply hook (nth 2 (car cell)) (cdr cell))
           (error nil))))
+    (run-hook-with-args 'config-after-register-hook entry)
     hook))
 
 (defun config-register-file (name &rest plist)
@@ -336,6 +367,7 @@ the file live), :on-change (update script run after a reload), :group,
     (unless (plist-member plist :source)
       (setq entry (plist-put entry :source (config--caller-source))))
     (puthash name entry config--registry)
+    (run-hook-with-args 'config-after-register-hook entry)
     name))
 
 ;;; Reading ------------------------------------------------------------------
@@ -423,6 +455,17 @@ whatever `etc/config-store.el' contains (which will no longer have NAME)."
   (config--drop-override name)
   (message "config: removed stored override for %s" name))
 
+(defun config-reset-to-initial (name &optional no-persist quiet)
+  "Restore NAME to its registration-time value.
+Unless NO-PERSIST, also records that value in the config store."
+  (let ((entry (config--entry name)))
+    (unless entry
+      (user-error "config-reset-to-initial: unknown item %s" name))
+    (unless (eq (plist-get entry :kind) 'variable)
+      (user-error "config-reset-to-initial: %s is not a variable item" name))
+    (let ((value (plist-get entry :initial-value)))
+      (config-set name value no-persist quiet))))
+
 ;;; Hook membership ----------------------------------------------------------
 
 (defun config--hook-apply (hook fn enable)
@@ -444,6 +487,13 @@ Unless NO-PERSIST, records the toggle in the store."
 (defun config-hook-toggle (hook fn)
   "Toggle membership of FN on HOOK and persist the result."
   (config-hook-set hook fn (not (config-hook-member-p hook fn))))
+
+(defun config-hook-reset-to-initial (hook fn &optional no-persist)
+  "Restore FN membership on HOOK to its registration-time value."
+  (let* ((entry (config--entry hook))
+         (initial (plist-get entry :initial-value))
+         (enabled (and (memq fn initial) t)))
+    (config-hook-set hook fn enabled no-persist)))
 
 ;;; File items ---------------------------------------------------------------
 

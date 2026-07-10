@@ -170,6 +170,7 @@ const ROAM_FULL_SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const scanConcurrency = Math.max(1, Math.min(64, Number(process.env.AARONNOTE_SCAN_CONCURRENCY) || 16));
 const saveRequestVersions = new Map();
 const saveWriteQueues = new Map();
+let clockMutationQueue = Promise.resolve();
 const NOTE_CODE_FILE_CACHE_LIMIT = 64;
 const NOTE_CODE_FILE_CACHE_BYTES = 8_000_000;
 const PATH_SUGGESTION_DIR_CACHE_LIMIT = 64;
@@ -2967,7 +2968,8 @@ async function scanNotesOnce() {
           dirtyNotes.push(note);
         }
       }
-      const sorted = resolveNoteRelationships(rawNotes);
+      const sorted = patchResolvedRelationships(notesSnapshot, dirty, dirtyNotes)
+        ?? resolveNoteRelationships(rawNotes);
       rememberNoteSnapshots(rawNotes, sorted);
       await flushAgendaPersistentCacheQuietly();
       return cloneNotes(sorted);
@@ -4657,6 +4659,17 @@ async function closeClockInFile(file, locator, toIso) {
   return enqueueSaveWrite(file, () => closeClockInFileUnlocked(file, locator, toIso));
 }
 
+async function enqueueClockMutation(task) {
+  const previous = clockMutationQueue;
+  const current = previous.catch(() => {}).then(task);
+  clockMutationQueue = current;
+  try {
+    return await current;
+  } finally {
+    if (clockMutationQueue === current) clockMutationQueue = Promise.resolve();
+  }
+}
+
 // Finds the single globally-running clock (a `from` with no `to`) across
 // the whole vault, if any.
 async function findRunningClock() {
@@ -4672,7 +4685,7 @@ async function findRunningClock() {
 // bracket title stays human-readable text, `task:` is the durable link (see
 // `resolveClockRefs`). Only one clock may run at a time vault-wide, so any
 // currently-running clock is auto-closed first — mirroring org's clock-in.
-export async function clockIn(body = {}) {
+async function clockInUnlocked(body = {}) {
   const file = safeOpenFile(body.file || "");
   const nowIso = formatDateValue(Date.now(), true);
 
@@ -4713,9 +4726,13 @@ export async function clockIn(body = {}) {
   });
 }
 
+export async function clockIn(body = {}) {
+  return enqueueClockMutation(() => clockInUnlocked(body));
+}
+
 // Stops a clock: closes the clock named by `body.file`+index/source if
 // given, else whichever clock is running vault-wide.
-export async function clockOut(body = {}) {
+async function clockOutUnlocked(body = {}) {
   const nowIso = formatDateValue(Date.now(), true);
 
   if (body.file) {
@@ -4733,6 +4750,10 @@ export async function clockOut(body = {}) {
   const file = safeOpenFile(running.file);
   await closeClockInFile(file, { index: running.index, source: running.source }, nowIso);
   return { type: "clock-out", ok: true, file, to: nowIso };
+}
+
+export async function clockOut(body = {}) {
+  return enqueueClockMutation(() => clockOutUnlocked(body));
 }
 
 // Generates the shortest word-boundary-unique text reference to `target`

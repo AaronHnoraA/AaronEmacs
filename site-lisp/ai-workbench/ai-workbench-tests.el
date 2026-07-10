@@ -5,10 +5,47 @@
 (require 'cl-lib)
 (require 'ert)
 (require 'ai-workbench-session)
+(require 'ai-workbench-backend)
 (require 'ai-workbench-profile)
 (require 'ai-workbench-tools)
 (require 'ai-workbench-status)
 (require 'ai-workbench-answer)
+
+;; ── backend registry tests ────────────────────────────────────────────────────
+
+(ert-deftest ai-workbench-backend-registers-and-retracts ()
+  "Backend contributions should be visible until their retractor runs."
+  (let ((ai-workbench-backend--registry (make-hash-table :test 'eq)))
+    (let ((retract
+           (ai-workbench-register-backend
+            'fake
+            :label "Fake"
+            :generation 'test
+            :capabilities '(:session :send :draft :stop :cancel)
+            :operations
+            (list :available-p (lambda () t)
+                  :live-p (lambda (_root) t)
+                  :ensure (lambda (_root) t)
+                  :open (lambda (_root) t)
+                  :send (lambda (&rest _args) t)
+                  :draft (lambda (&rest _args) t)
+                  :stop (lambda (_root) t)
+                  :cancel (lambda (_root) t)))))
+      (should (memq 'fake (ai-workbench-backend-ids :session)))
+      (should (ai-workbench-backend-live-p 'fake "/tmp/project/"))
+      (funcall retract)
+      (should-not (ai-workbench-backend-spec 'fake)))))
+
+(ert-deftest ai-workbench-backend-rejects-incomplete-spec ()
+  "Backend contributions must declare required operations."
+  (let ((ai-workbench-backend--registry (make-hash-table :test 'eq)))
+    (should-error
+     (ai-workbench-register-backend
+      'bad
+      :label "Bad"
+      :capabilities '(:session)
+      :operations (list :available-p (lambda () t)))
+     :type 'error)))
 
 ;; ── ai-workbench-answer tests ─────────────────────────────────────────────────
 

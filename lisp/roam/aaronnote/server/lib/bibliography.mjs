@@ -336,15 +336,14 @@ export async function bibliographyForDocument({ file = "", content = "" } = {}) 
   const commands = scanInlineCommands(content, "cite");
   if (commands.length === 0) return { ok: true, version, entries: [], references: [], citations: [], namespaces: [] };
   const { files, diagnostics } = await visibleBibFiles(file, content);
-  const parsed = [];
-  for (const bib of files) parsed.push(await readBibFile(bib.file, bib.namespace, bib.shortNamespace));
+  const parsed = await Promise.all(
+    files.map((bib) => readBibFile(bib.file, bib.namespace, bib.shortNamespace)));
   const namespaceList = parsed.map((bib) => ({
     namespace: bib.namespace,
     shortNamespace: bib.shortNamespace,
     file: bib.path,
     entries: bib.entries.length,
   }));
-  const entries = parsed.flatMap((bib) => bib.entries);
   const numbered = new Map();
   const citations = [];
   for (const command of commands) {
@@ -369,19 +368,19 @@ export async function bibliographyForDocument({ file = "", content = "" } = {}) 
     }
     citations.push(cite);
   }
-  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  const byId = new Map(parsed.flatMap((bib) => bib.entries).map((entry) => [entry.id, entry]));
   const references = [...numbered.entries()].map(([id, number]) => {
     const entry = byId.get(id);
     return { id, number, entry, text: formatBibEntry(entry, number), links: bibLinks(entry) };
   });
   const hash = createHash("sha1").update(content).digest("hex").slice(0, 12);
-  return { ok: true, version, hash, namespaces: namespaceList, entries, references, citations, diagnostics };
+  return { ok: true, version, hash, namespaces: namespaceList, entries: [], references, citations, diagnostics };
 }
 
 export async function bibliographyCompletions({ file = "", content = "", namespace = "", prefix = "", kind = "keys" } = {}) {
   const { files } = await visibleBibFiles(file, content);
-  const parsed = [];
-  for (const bib of files) parsed.push(await readBibFile(bib.file, bib.namespace, bib.shortNamespace));
+  const parsed = await Promise.all(
+    files.map((bib) => readBibFile(bib.file, bib.namespace, bib.shortNamespace)));
   const needle = String(prefix || "").toLowerCase();
   if (kind === "namespaces") {
     const seen = new Map();

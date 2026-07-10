@@ -7,6 +7,7 @@
 ;;; Code:
 
 (require 'project)
+(require 'ai-workbench-backend)
 
 (defvar ai-workbench-default-backend 'claude
   "Default backend used for new ai-workbench sessions.")
@@ -22,7 +23,8 @@
 
 (defun ai-workbench--normalize-backend (backend)
   "Return BACKEND when supported, otherwise fall back to the default backend."
-  (if (memq backend '(claude codex opencode chat))
+  (if (or (ai-workbench-backend-spec backend)
+          (memq backend '(claude codex opencode chat)))
       backend
     ai-workbench-default-backend))
 

@@ -10,6 +10,7 @@
 
 (require 'subr-x)
 (require 'ai-workbench-vendor)
+(require 'ai-workbench-backend)
 (require 'ai-workbench-session)
 (require 'ai-workbench-answer)
 (require 'ai-workbench-output)
@@ -38,20 +39,17 @@
 ;; the three CLI engines (CC, Codex, OpenCode); selecting one opens that tool's
 ;; interactive vterm session.
 
-(defconst ai-workbench--cli-candidates
-  '(("CC – Claude Code (CLI)"   . claude)
-    ("Codex (CLI)"              . codex)
-    ("OpenCode (CLI)"           . opencode))
-  "CLI engine entries for the ai-workbench picker.
-Selecting one opens the corresponding vterm session.")
-
 (defun ai-workbench--select-backend (_project-root)
   "Prompt for a CLI vterm engine (CC, Codex, OpenCode) and return its symbol."
-  (let* ((cli-names (mapcar #'car ai-workbench--cli-candidates))
+  (let* ((ids (ai-workbench-backend-ids :session))
+         (candidates (mapcar (lambda (id)
+                               (cons (ai-workbench-backend-label id) id))
+                             ids))
          (current-backend (ai-workbench-session-backend))
-         (default (car (rassq current-backend ai-workbench--cli-candidates)))
-         (chosen (completing-read "AI engine: " cli-names nil t nil nil default)))
-    (cdr (assoc chosen ai-workbench--cli-candidates))))
+         (default (car (rassq current-backend candidates)))
+         (chosen (completing-read "AI engine: " (mapcar #'car candidates)
+                                  nil t nil nil default)))
+    (cdr (assoc chosen candidates))))
 
 (defun ai-workbench--ensure-initialized (project-root)
   "Ensure PROJECT-ROOT has an initialized ai-workbench session."
@@ -66,11 +64,8 @@ Selecting one opens the corresponding vterm session.")
 
 (defun ai-workbench--backend-session-live-p (project-root)
   "Return non-nil when the selected backend session is live for PROJECT-ROOT."
-  (pcase (ai-workbench-session-backend project-root)
-    ('claude   (ai-workbench-claude-session-live-p project-root))
-    ('codex    (ai-workbench-codex-session-live-p  project-root))
-    ('opencode (ai-workbench-opencode-session-live-p project-root))
-    (_ nil)))
+  (ai-workbench-backend-live-p (ai-workbench-session-backend project-root)
+                               project-root))
 
 (defun ai-workbench--reset-selection (project-root)
   "Reset backend selection state for PROJECT-ROOT."
@@ -82,20 +77,12 @@ Selecting one opens the corresponding vterm session.")
 
 (defun ai-workbench--prepare-backend (project-root)
   "Prepare the current backend for PROJECT-ROOT."
-  (pcase (ai-workbench-session-backend project-root)
-    ('claude
-     (ai-workbench-claude-ensure-session project-root)
-     (ai-workbench-claude-prime-session project-root)
-     (ai-workbench-session-set-last-status "Claude session ready" project-root))
-    ('codex
-     (ai-workbench-codex-ensure-session project-root)
-     (ai-workbench-codex-prime-session project-root)
-     (ai-workbench-session-set-last-status "Codex session ready" project-root))
-    ('opencode
-     (ai-workbench-opencode-ensure-session project-root)
-     (ai-workbench-opencode-prime-session project-root)
-     (ai-workbench-session-set-last-status "OpenCode session ready" project-root))
-    (_ (user-error "Unsupported backend"))))
+  (let ((backend (ai-workbench-session-backend project-root)))
+    (ai-workbench-backend-call backend :ensure project-root)
+    (ai-workbench-cli-prime-session backend project-root)
+    (ai-workbench-session-set-last-status
+     (format "%s session ready" (ai-workbench-backend-label backend))
+     project-root)))
 
 ;; ── Context helpers ───────────────────────────────────────────────────────────
 
@@ -173,14 +160,15 @@ Selecting one opens the corresponding vterm session.")
 (defalias 'ai-workbench #'ai-workbench-open)
 
 (defun ai-workbench-cycle-backend ()
-  "Cycle the current project vterm engine: claude → codex → opencode → claude."
+  "Cycle the current project vterm engine."
   (interactive)
   (let* ((project-root (ai-workbench-project-root))
+         (ids (ai-workbench-backend-ids :session))
          (current (ai-workbench-session-backend project-root))
-         (next (pcase current
-                 ('claude   'codex)
-                 ('codex    'opencode)
-                 (_ 'claude))))
+         (tail (cdr (memq current ids)))
+         (next (or (car tail) (car ids))))
+    (unless next
+      (user-error "No ai-workbench backends are registered"))
     (ai-workbench-session-set-backend next project-root)
     (ai-workbench-session-reset-profile-injected project-root)
     (message "ai-workbench backend: %s" next)
@@ -260,11 +248,10 @@ Selecting one opens the corresponding vterm session.")
 (defun ai-workbench-open-backend-buffer ()
   "Open the current backend's session buffer."
   (interactive)
-  (pcase (ai-workbench-session-backend)
-    ('claude   (ai-workbench-claude-open-buffer))
-    ('codex    (ai-workbench-codex-open-buffer))
-    ('opencode (ai-workbench-opencode-open-buffer))
-    (_ (user-error "Unsupported backend"))))
+  (let ((project-root (ai-workbench-project-root)))
+    (ai-workbench-backend-call
+     (ai-workbench-session-backend project-root)
+     :open project-root)))
 
 (defun ai-workbench-toggle-codex-mode ()
   "Toggle the interactive Codex execution mode (kept for compatibility)."
@@ -278,31 +265,17 @@ Selecting one opens the corresponding vterm session.")
 (defun ai-workbench-stop ()
   "Stop the active run for the current backend."
   (interactive)
-  (pcase (ai-workbench-session-backend)
-    ('claude   (ai-workbench-claude-stop))
-    ('codex    (ai-workbench-codex-stop))
-    ('opencode (ai-workbench-opencode-stop))
-    (_ (user-error "Unsupported backend"))))
+  (let ((project-root (ai-workbench-project-root)))
+    (ai-workbench-backend-call
+     (ai-workbench-session-backend project-root)
+     :stop project-root)))
 
 (defun ai-workbench-cancel ()
   "Cancel the current AI operation in the active backend session."
   (interactive)
   (let* ((project-root (ai-workbench-project-root))
          (backend (ai-workbench-session-backend project-root)))
-    (pcase backend
-      ('claude
-       (when-let* ((buf (ai-workbench-claude-buffer project-root))
-                   (proc (get-buffer-process buf)))
-         (interrupt-process proc)))
-      ('codex
-       (when-let* ((buf (ai-workbench-codex-buffer project-root))
-                   (proc (get-buffer-process buf)))
-         (interrupt-process proc)))
-      ('opencode
-       (when-let* ((buf (ai-workbench-opencode-buffer project-root))
-                   (proc (get-buffer-process buf)))
-         (interrupt-process proc)))
-      (_ (user-error "Unsupported backend")))
+    (ai-workbench-backend-call backend :cancel project-root)
     (when (fboundp 'ai-workbench-abort)
       (ignore-errors (ai-workbench-abort)))
     (ai-workbench-session-set-last-status (format "Canceled %s operation" backend) project-root)
@@ -312,11 +285,9 @@ Selecting one opens the corresponding vterm session.")
   "Kill the current backend session and reset backend selection."
   (interactive)
   (let ((project-root (ai-workbench-project-root)))
-    (pcase (ai-workbench-session-backend project-root)
-      ('claude   (ai-workbench-claude-stop project-root))
-      ('codex    (ai-workbench-codex-stop  project-root))
-      ('opencode (ai-workbench-opencode-stop project-root))
-      (_ (user-error "Unsupported backend")))
+    (ai-workbench-backend-call
+     (ai-workbench-session-backend project-root)
+     :stop project-root)
     (ai-workbench--reset-selection project-root)
     (message "ai-workbench killed current backend session")))
 
@@ -349,7 +320,7 @@ Type your message, then press \\[ai-workbench-compose-submit] to send."
       (user-error "Not an ai-workbench compose buffer"))
     (unless content
       (user-error "Nothing to send"))
-    (unless (ai-workbench--backend-session-live-p root)
+    (unless (ai-workbench-backend-live-p backend root)
       (user-error "Session went away. Reopen with `ai-workbench-open' (C-c A W)"))
     (kill-buffer buf)
     (ai-workbench-send-string backend content root)))
@@ -381,27 +352,26 @@ Type your message, then press \\[ai-workbench-compose-submit] to send."
              effective-prompt)
      root)
     (let ((default-directory root))
-      (pcase backend
-        ('claude   (ai-workbench-claude-send-prompt   effective-prompt root))
-        ('codex    (ai-workbench-codex-send-prompt    effective-prompt root))
-        ('opencode (ai-workbench-opencode-send-prompt effective-prompt root))
-        (_ (user-error "Unsupported backend: %s" backend))))
-    (ai-workbench-session-mark-profile-bootstrap-sent backend root)
-    (ai-workbench-session-mark-profile-injected backend root)
-    (ai-workbench-output-append
-     'status
-     (format "Sent prompt to %s" backend)
-     root)
-    (ai-workbench-session-set-last-status (format "Sent prompt to %s" backend) root)
-    (message "ai-workbench sent prompt to %s" backend)))
+      (ai-workbench-backend-call
+       backend :send effective-prompt root
+       (lambda ()
+         (ai-workbench-session-mark-profile-bootstrap-sent backend root)
+         (ai-workbench-session-mark-profile-injected backend root)
+         (ai-workbench-output-append
+          'status
+          (format "Sent prompt to %s" backend)
+          root)
+         (ai-workbench-session-set-last-status
+          (format "Sent prompt to %s" backend) root)
+         (message "ai-workbench sent prompt to %s" backend))
+       (lambda (message)
+         (ai-workbench-session-set-last-error message root)
+         (ai-workbench-session-set-last-status
+          (format "Failed sending prompt to %s" backend) root))))))
 
 (defun ai-workbench--draft-string-now (backend prompt project-root)
   "Insert PROMPT into BACKEND for PROJECT-ROOT without submitting."
-  (pcase backend
-    ('claude   (ai-workbench-claude-draft-prompt   prompt project-root))
-    ('codex    (ai-workbench-codex-draft-prompt    prompt project-root))
-    ('opencode (ai-workbench-opencode-draft-prompt prompt project-root))
-    (_ (user-error "Unsupported backend: %s" backend))))
+  (ai-workbench-backend-call backend :draft prompt project-root nil nil))
 
 (defun ai-workbench--effective-prompt (backend prompt project-root)
   "Return PROMPT or a profile-wrapped version for BACKEND and PROJECT-ROOT."
@@ -414,7 +384,7 @@ Type your message, then press \\[ai-workbench-compose-submit] to send."
 Requires the backend session to be already active."
   (ai-workbench--save-current-file-buffer)
   (let* ((root (or project-root (ai-workbench-project-root))))
-    (unless (ai-workbench--backend-session-live-p root)
+    (unless (ai-workbench-backend-live-p backend root)
       (user-error "No active session. Start one first with `ai-workbench-open' (C-c A W)"))
     (unless (ai-workbench-session-profile-injected-p backend root)
       (ai-workbench--prepare-backend root))

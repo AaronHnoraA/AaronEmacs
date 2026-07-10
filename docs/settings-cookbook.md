@@ -4,10 +4,10 @@
 
 ## 0. 统一配置入口（优先看这里）
 
-已注册进 `config` 注册表的项，直接用管理面板改即可——**即时生效、自动持久化**，
+已注册进 `config` 注册表的项，直接用原生 Customize 改即可——**即时生效、自动持久化**，
 不用找模块、不用重启：
 
-- `M-x config-board`，或 leader `SPC h c`。
+- `M-x config-board` / `M-x customize-group RET config RET`，或 leader `SPC h c`。
 - Lisp：`(config-get 'X)` / `(config-set 'X V)` / `(config-reset 'X)`。
 
 注册表与注册语法见 [config-management.md](config-management.md)。下面各节是「该改哪个

@@ -14,5 +14,4 @@
 ##  Aaronnote && Roam
 
 ### Features
-- 为自己维护你个config工具 但是我发现eamcs自己其实有一套config管理工具(cmd+,) 所以我觉得我的工具架构上没问题 但是ui上面可以全面融合进入这个原生的工具, 这样会更加一体化
 ### Bugs

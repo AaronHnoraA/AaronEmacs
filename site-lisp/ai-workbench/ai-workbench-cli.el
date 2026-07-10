@@ -21,6 +21,7 @@
 (require 'subr-x)
 (require 'ai-workbench-session)
 (require 'ai-workbench-profile)
+(require 'ai-workbench-backend)
 
 (defvar my/terminal-startup-cd-inhibited)
 (defvar my/vterm-popup-kind nil)
@@ -59,7 +60,29 @@ Each entry is (ID . SPEC) where SPEC is a plist with:
 (defun ai-workbench-cli-register-tool (id &rest spec)
   "Register a CLI tool with ID and SPEC plist.
 See `ai-workbench-cli--tools' for the expected plist keys."
-  (setf (alist-get id ai-workbench-cli--tools) spec))
+  (setf (alist-get id ai-workbench-cli--tools) spec)
+  (ai-workbench-register-backend
+   id
+   :label (or (plist-get spec :name) (symbol-name id))
+   :generation (gensym (format "%s-" id))
+   :capabilities '(:session :send :draft :stop :cancel :headless)
+   :authority '(:kind host-cli :sandboxed nil)
+   :operations
+   (list
+    :available-p (lambda () (ai-workbench-cli-available-p id))
+    :live-p (lambda (root) (ai-workbench-cli-session-live-p id root))
+    :ensure (lambda (root) (ai-workbench-cli-ensure-session id root))
+    :open (lambda (root) (ai-workbench-cli-open-buffer id root))
+    :send (lambda (prompt root on-success on-error)
+            (ai-workbench-cli-send-prompt id prompt root on-success on-error))
+    :draft (lambda (prompt root on-success on-error)
+             (ai-workbench-cli-draft-prompt id prompt root on-success on-error))
+    :stop (lambda (root) (ai-workbench-cli-stop id root))
+    :cancel (lambda (root)
+              (when-let* ((buf (ai-workbench-cli-buffer id root))
+                          (proc (get-buffer-process buf)))
+                (interrupt-process proc)))))
+  id)
 
 (defun ai-workbench-cli--spec (id key)
   "Return the KEY value from the registered spec for tool ID."
@@ -317,43 +340,59 @@ Returns the session buffer."
 
 ;; ── Public: prompt dispatch ───────────────────────────────────────────────────
 
-(defun ai-workbench-cli--send-prompt-retry (id prompt root attempts)
+(defun ai-workbench-cli--send-prompt-retry (id prompt root attempts on-success on-error)
   "Send PROMPT to tool ID session in ROOT, retrying up to ATTEMPTS times."
   (if-let* ((buffer (ai-workbench-cli-buffer id root))
             (process (get-buffer-process buffer))
             ((process-live-p process)))
-      (with-current-buffer buffer
-        (ai-workbench-cli--terminal-paste-string id prompt)
-        (sit-for 0.1)
-        (ai-workbench-cli--terminal-send-return id))
+      (condition-case err
+          (with-current-buffer buffer
+            (ai-workbench-cli--terminal-paste-string id prompt)
+            (sit-for 0.1)
+            (ai-workbench-cli--terminal-send-return id)
+            (when on-success (funcall on-success)))
+        (error
+         (when on-error (funcall on-error (error-message-string err)))
+         (signal (car err) (cdr err))))
     (if (> attempts 0)
         (run-with-timer 0.3 nil #'ai-workbench-cli--send-prompt-retry
-                        id prompt root (1- attempts))
-      (error "%s session did not become ready" id))))
+                        id prompt root (1- attempts) on-success on-error)
+      (let ((message (format "%s session did not become ready" id)))
+        (when on-error (funcall on-error message))
+        (error "%s" message)))))
 
-(defun ai-workbench-cli-send-prompt (id prompt &optional project-root)
+(defun ai-workbench-cli-send-prompt (id prompt &optional project-root on-success on-error)
   "Send PROMPT to the terminal session for tool ID and PROJECT-ROOT."
   (let ((root (ai-workbench-cli--working-directory project-root)))
     (ai-workbench-cli-ensure-session id root)
-    (run-with-timer 0.3 nil #'ai-workbench-cli--send-prompt-retry id prompt root 8)))
+    (run-with-timer 0.3 nil #'ai-workbench-cli--send-prompt-retry
+                    id prompt root 8 on-success on-error)))
 
-(defun ai-workbench-cli--draft-prompt-retry (id prompt root attempts)
+(defun ai-workbench-cli--draft-prompt-retry (id prompt root attempts on-success on-error)
   "Insert PROMPT into the tool ID session in ROOT without submitting."
   (if-let* ((buffer (ai-workbench-cli-buffer id root))
             (process (get-buffer-process buffer))
             ((process-live-p process)))
-      (with-current-buffer buffer
-        (ai-workbench-cli--terminal-paste-string id prompt))
+      (condition-case err
+          (with-current-buffer buffer
+            (ai-workbench-cli--terminal-paste-string id prompt)
+            (when on-success (funcall on-success)))
+        (error
+         (when on-error (funcall on-error (error-message-string err)))
+         (signal (car err) (cdr err))))
     (if (> attempts 0)
         (run-with-timer 0.3 nil #'ai-workbench-cli--draft-prompt-retry
-                        id prompt root (1- attempts))
-      (error "%s session did not become ready" id))))
+                        id prompt root (1- attempts) on-success on-error)
+      (let ((message (format "%s session did not become ready" id)))
+        (when on-error (funcall on-error message))
+        (error "%s" message)))))
 
-(defun ai-workbench-cli-draft-prompt (id prompt &optional project-root)
+(defun ai-workbench-cli-draft-prompt (id prompt &optional project-root on-success on-error)
   "Insert PROMPT into the terminal session for tool ID without submitting."
   (let ((root (ai-workbench-cli--working-directory project-root)))
     (ai-workbench-cli-ensure-session id root)
-    (run-with-timer 0.3 nil #'ai-workbench-cli--draft-prompt-retry id prompt root 8)))
+    (run-with-timer 0.3 nil #'ai-workbench-cli--draft-prompt-retry
+                    id prompt root 8 on-success on-error)))
 
 ;; ── Public: profile bootstrap ─────────────────────────────────────────────────
 
@@ -372,11 +411,13 @@ cd line before the profile body arrives."
       (let ((bootstrap (concat (ai-workbench-cli--cd-prompt root)
                                "\n\n"
                                (ai-workbench-profile-build-prompt root))))
-        (ai-workbench-cli-send-prompt id bootstrap root)
-        (ai-workbench-session-mark-profile-bootstrap-sent id root)
-        (ai-workbench-session-mark-profile-injected id root)
-        (ai-workbench-session-set-last-status
-         (format "%s profile injected" id) root)))))
+        (ai-workbench-cli-send-prompt
+         id bootstrap root
+         (lambda ()
+           (ai-workbench-session-mark-profile-bootstrap-sent id root)
+           (ai-workbench-session-mark-profile-injected id root)
+           (ai-workbench-session-set-last-status
+            (format "%s profile injected" id) root)))))))
 
 ;; ── Public: headless exec ─────────────────────────────────────────────────────
 

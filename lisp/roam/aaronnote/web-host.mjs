@@ -197,6 +197,9 @@ if (!existsSync(webDir)) {
 
 const eventClients = new Set();
 const editorClients = new Map();
+let shuttingDown = false;
+let shutdownPromise = null;
+let fatalReported = false;
 
 // SSE keepalive heartbeat — prevents hung-client memory leak and keeps
 // connections alive through idle-timeout proxies.
@@ -214,6 +217,8 @@ sseHeartbeatInterval.unref();
 // bounded diagnostic on the SSE stream so the editor / Emacs can react instead
 // of the server wedging in a half-broken state unnoticed.
 function reportServerError(kind, detail) {
+  if (fatalReported) return;
+  fatalReported = true;
   const text = detail?.stack || String(detail ?? "");
   process.stderr.write(`[aaronnote-web] ${kind}: ${text}\n`);
   try {
@@ -226,26 +231,58 @@ function reportServerError(kind, detail) {
   } catch {
     // Never let diagnostic broadcasting trigger another uncaughtException.
   }
+  void beginShutdown({ reason: kind, exitCode: 1 });
 }
 
 process.on("uncaughtException", (err) => reportServerError("uncaughtException", err));
 process.on("unhandledRejection", (reason) => reportServerError("unhandledRejection", reason));
 
-async function shutdown() {
-  clearInterval(sseHeartbeatInterval);
-  for (const res of eventClients) {
-    try { res.end(); } catch {}
-  }
-  eventClients.clear();
-  try { noteWatcher.close(); } catch {}
-  try { jupyterKernelWs?.close(); } catch {}
-  try { await jupyterCell.shutdown(); } catch {}
-  server.close();
-  try { await shutdownCopilot(); } catch {}
-  process.exit(0);
+function closeHttpServer() {
+  return new Promise((resolve) => {
+    try {
+      server.close(() => resolve());
+      setTimeout(() => {
+        try { server.closeIdleConnections?.(); } catch {}
+      }, 1000).unref();
+    } catch {
+      resolve();
+    }
+  });
 }
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+
+async function beginShutdown({ reason = "shutdown", exitCode = 0, deadlineMs = 3000 } = {}) {
+  if (shutdownPromise) return shutdownPromise;
+  shuttingDown = true;
+  process.stderr.write(`[aaronnote-web] shutting down: ${reason}\n`);
+  shutdownPromise = (async () => {
+    const deadline = setTimeout(() => {
+      process.stderr.write(`[aaronnote-web] shutdown deadline reached: ${reason}\n`);
+      process.exit(exitCode);
+    }, deadlineMs);
+    deadline.unref();
+    try {
+      clearInterval(sseHeartbeatInterval);
+      broadcast("command", { command: "server-shutdown", reason, at: Date.now() });
+      for (const res of eventClients) {
+        try { res.end(); } catch {}
+      }
+      eventClients.clear();
+      await Promise.allSettled([
+        closeHttpServer(),
+        Promise.resolve().then(() => noteWatcher.close()),
+        Promise.resolve().then(() => jupyterKernelWs?.close()),
+        jupyterCell.shutdown(),
+        shutdownCopilot(),
+      ]);
+    } finally {
+      clearTimeout(deadline);
+      process.exit(exitCode);
+    }
+  })();
+  return shutdownPromise;
+}
+process.on("SIGTERM", () => beginShutdown({ reason: "SIGTERM", exitCode: 0 }));
+process.on("SIGINT", () => beginShutdown({ reason: "SIGINT", exitCode: 0 }));
 
 const MIME = {
   ".css": "text/css; charset=utf-8",
@@ -1340,6 +1377,11 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     const origin = `http://${bindHost}:${server.address()?.port}`;
 
+    if (shuttingDown && url.pathname !== "/events") {
+      sendJson(res, 503, { ok: false, message: "Aaronnote host is shutting down" });
+      return;
+    }
+
     if (url.pathname.startsWith("/jupyter/nbextensions/")) {
       const relative = url.pathname.slice("/jupyter/nbextensions/".length);
       const asset = req.method === "GET" || req.method === "HEAD" ? await jupyterCell.readNbextensionAsset(relative) : undefined;
@@ -1364,6 +1406,7 @@ const server = createServer(async (req, res) => {
         "Connection": "keep-alive",
       });
       res.write("retry: 2000\n\n");
+      res.write(`event: command\ndata: ${JSON.stringify({ command: "server-ready", at: Date.now() })}\n\n`);
       eventClients.add(res);
       req.on("close", () => eventClients.delete(res));
       return;

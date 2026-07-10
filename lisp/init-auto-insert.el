@@ -324,7 +324,7 @@ name, falling back to a prompt."
             (format "Template (%s): " picked-kind)
             cands nil t nil nil current))))
   (setf (alist-get kind my/template-current nil nil #'eq) template)
-  (customize-save-variable 'my/template-current my/template-current)
+  (config-set 'my/template-current my/template-current)
   (my/template-apply kind 'replace)
   (message "Template(%s) set to: %s" kind (alist-get kind my/template-current nil nil #'eq)))
 

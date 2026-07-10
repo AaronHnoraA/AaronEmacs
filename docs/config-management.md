@@ -9,7 +9,7 @@
 
 这样做的原因：
 - 防止**变量污染**——多处 `setq` 同一个变量，难以追踪谁是最终生效的值
-- 在 `config-board` 里可以直接看到、修改、持久化每个配置项
+- 在 Emacs 原生 Customize 里可以直接看到、修改、持久化每个配置项
 - 启动时 `config.el` 自动加载 `etc/config-store.el` 和同目录下的 `config-*.el`，
   每次 `config-register`
   立即应用已存储的值，无需等待 `after-init-hook`
@@ -43,7 +43,8 @@ store 文件只解析受支持的 `(config-store-set '...)` 数据表单，不�
 | 文件 | 职责 |
 | --- | --- |
 | `site-lisp/config/config.el` | 注册表核心 API (`(provide 'config)`) |
-| `site-lisp/config/config-tools.el` | 管理面板 `config-board` + transient `config-dispatch` |
+| `site-lisp/config/config-custom.el` | 原生 Customize 适配层：把注册表项映射成 Custom 变量/组 |
+| `site-lisp/config/config-tools.el` | 兼容入口 `config-board` + transient `config-dispatch` |
 | `etc/config-store.el` | **随仓库提交的配置值**，既是初始值也是用户自定义值 |
 | `etc/config-*.el` | 自动发现的专题 store；已存在的 key 会写回原文件 |
 | `lisp/init-base.el`（尾部） | Emacs 原生变量的注册声明（不含 setq，值在 store 里） |
@@ -74,32 +75,24 @@ store 文件只解析受支持的 `(config-store-set '...)` 数据表单，不�
 
 ## 日常用法
 
-### 管理面板
+### 原生 Customize
 
-- `M-x config-board`，或 leader `SPC h c` 打开 transient 调度菜单 `config-dispatch`
+- `M-x config-board` 打开 `config` 的原生 Customize group。
+- `M-x config-dispatch`，或 leader `SPC h c`，打开调度菜单。
+- `M-x customize-group RET config RET` 也会显示同一批注册项。
 
-面板按组列出 `Group | Name | Type | Value | Doc | Source`。
+Customize 里的 `Apply` 只做运行时生效，不写 `custom.el`；`Save` 通过
+`config-set` / `config-hook-set` 写入 `etc/config-store.el` 或对应的
+`etc/config-*.el`。已注册项不会被序列化到 `custom.el`，因此 store 仍是唯一来源。
 
-| 键 | 作用 |
-| --- | --- |
-| `RET` / `e` | 编辑当前项（按类型分派） |
-| `t` | 切换布尔变量 / hook 成员 |
-| `d` | 删除该项的存储覆盖（下次启动回到 Emacs 内置默认） |
-| `r` | 重新加载文件项（运行 loader + 更新脚本） |
-| `o` | 打开文件项 |
-| `f` | 按组过滤（留空清除） |
-| `s` | 强制写入 store |
-| `!` | 自检完整性（`config-check`）：校验索引与 store，发现索引漂移就地修复 |
-| `g` | 刷新 |
-| `q` | 退出 |
+`Set to Saved Value` 对齐 store 里的值；`Erase Customization` 会移除 store override；
+`Set to Standard Value` 使用注册瞬间捕获到的 Emacs/Lisp 初始值。
 
-**Doc 列**：该项注册时的 `:doc` 说明或 `:choices` 列表，静态不变，方便
-修改时参考合法值格式。
+transient `config-dispatch`：打开 `config` group、按注册表 group 打开生成的子组、
+保存 store、刷新 store（`R`，全量重建）、自检完整性（`!`，`config-check`）、
+打开主 store 文件、清空所有覆盖（`D`）。
 
-transient `config-dispatch`：打开面板、保存 store、刷新 store（`R`，全量重建）、
-自检完整性（`!`，`config-check`）、打开 store 文件、清空所有覆盖（`D`）。
-
-`config-check`（面板 `!` / dispatch `!` / `M-x`）校验注册表的不变式：覆盖索引与
+`config-check`（dispatch `!` / `M-x config-check`）校验注册表的不变式：覆盖索引与
 有序 alist 是否一一对应、每个覆盖是否能解析到 store 文件、各 store 文件是否还能
 正确解析。只发现索引漂移时会就地 `config--reindex` 自愈，其余问题列在
 `*Config Check*` 缓冲区。`config-store-set` / 覆盖写入只走 `config--clear-overrides`
