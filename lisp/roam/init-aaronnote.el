@@ -43,6 +43,8 @@
 (declare-function my/aaronnote-jupyter-open-target "init-aaronnote-jupyter" (target))
 (declare-function my/aaronnote-jupyter-open-url "init-aaronnote-jupyter" (url))
 (declare-function my/aaronnote-jupyter-url-p "init-aaronnote-jupyter" (url))
+(declare-function my/zotero-open-reference "init-latex" (payload))
+(declare-function my/zotero-import-bibtex "init-latex" (payload))
 (defvar my/appine-tab-list)
 (defvar my/xwidget--session-id)
 
@@ -587,12 +589,34 @@ CLIENT, when non-nil, identifies the Aaronnote xwidget that sent the key."
      (message "Aaronnote key forward failed (%s): %s"
               key-string (error-message-string err)))))
 
+(defun my/aaronnote--run-zotero-event (payload import-p)
+  "Handle Zotero PAYLOAD in Emacs; IMPORT-P starts the BibTeX picker."
+  (let* ((client (alist-get 'client payload))
+         (source-buffer (my/aaronnote--key-source-buffer client)))
+    (my/aaronnote--release-xwidget-input-buffer source-buffer)
+    (my/aaronnote--select-emacs-window)
+    (condition-case err
+        (progn
+          (unless (if import-p
+                      (fboundp 'my/zotero-import-bibtex)
+                    (fboundp 'my/zotero-open-reference))
+            (require 'init-latex))
+          (if import-p
+              (my/zotero-import-bibtex payload)
+            (my/zotero-open-reference payload)))
+      (error
+       (message "Aaronnote Zotero %s failed: %s"
+                (if import-p "import" "open")
+                (error-message-string err))))))
+
 (defun my/aaronnote--handle-process-line (line)
   "Handle one web-host stdout LINE."
   (let ((ready-prefix "aaronote-web-host:ready:")
         (goto-prefix "aaronote-event:goto:")
 	(open-prefix "aaronote-event:open:")
         (system-open-prefix "aaronote-event:system-open:")
+	(zotero-prefix "aaronote-event:zotero:")
+	(zotero-import-prefix "aaronote-event:zotero-import:")
 	(current-file-prefix "aaronote-event:current-file:")
         (saved-prefix "aaronote-event:saved:")
         (key-prefix "aaronote-event:key:"))
@@ -647,6 +671,24 @@ CLIENT, when non-nil, identifies the Aaronnote xwidget that sent the key."
                   (ignore-errors (my/note-code--goto-tag tag))))))
 	        (error
 	         (message "Aaronnote event parse failed: %s" (error-message-string err)))))
+     ((string-prefix-p zotero-import-prefix line)
+      (condition-case err
+          (let ((payload (json-parse-string
+                          (substring line (length zotero-import-prefix))
+                          :object-type 'alist)))
+            (run-at-time 0 nil #'my/aaronnote--run-zotero-event payload t))
+        (error
+         (message "Aaronnote Zotero import event failed: %s"
+                  (error-message-string err)))))
+     ((string-prefix-p zotero-prefix line)
+      (condition-case err
+          (let ((payload (json-parse-string
+                          (substring line (length zotero-prefix))
+                          :object-type 'alist)))
+            (run-at-time 0 nil #'my/aaronnote--run-zotero-event payload nil))
+        (error
+         (message "Aaronnote Zotero event failed: %s"
+                  (error-message-string err)))))
      ((string-prefix-p system-open-prefix line)
       (condition-case err
           (let* ((payload (json-parse-string

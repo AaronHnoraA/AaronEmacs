@@ -346,6 +346,63 @@
                               (client . "split-client"))))))
     (should (equal seen '("M-<right>" "split-client")))))
 
+(ert-deftest my/aaronnote-zotero-events-dispatch-structured-payloads ()
+  (let (seen)
+    (cl-letf (((symbol-function 'run-at-time)
+               (lambda (_time _repeat function &rest args)
+                 (apply function args)))
+              ((symbol-function 'my/aaronnote--run-zotero-event)
+               (lambda (payload import-p)
+                 (push (list payload import-p) seen))))
+      (my/aaronnote--handle-process-line
+       (concat "aaronote-event:zotero:"
+               (json-encode '((key . "Str87")
+                              (doi . "10.1515/example")))))
+      (my/aaronnote--handle-process-line
+       (concat "aaronote-event:zotero-import:"
+               (json-encode '((currentFile . "/tmp/note.md")
+                              (targetFile . "/tmp/bib/test.bib"))))))
+    (should (equal (cadar seen) t))
+    (should (equal (alist-get 'targetFile (caar seen))
+                   "/tmp/bib/test.bib"))
+    (should-not (cadadr seen))
+    (should (equal (alist-get 'key (caadr seen)) "Str87"))))
+
+(ert-deftest my/zotero-reference-result-falls-back-from-bib-key-to-doi ()
+  (let ((expected '((id . "http://zotero.org/users/1/items/C4ULFN2X")
+                    (citekey . "Strassen")
+                    (DOI . "10.1515/example")))
+        calls)
+    (cl-letf (((symbol-function 'my/zotero-better-bibtex-search)
+               (lambda (terms)
+                 (push terms calls)
+                 (if (equal terms [["DOI" "is" "10.1515/example"]])
+                     (list expected)
+                   nil))))
+      (let ((result (my/zotero-reference-result
+                     '((key . "Str87") (doi . "https://doi.org/10.1515/example")))))
+        (should (equal result expected))
+        (should (= (length calls) 1))
+        (should (equal (my/zotero-result-select-uri result)
+                       "zotero://select/library/items/C4ULFN2X"))))))
+
+(ert-deftest my/zotero-append-bibtex-does-not-duplicate-a-key ()
+  (let ((file (make-temp-file "aaronnote-zotero-test-" nil ".bib"))
+        (bibtex "@article{UniqueKey,\n  title = {One}\n}\n"))
+    (unwind-protect
+        (cl-letf (((symbol-function 'pop-to-buffer) #'ignore))
+          (my/zotero-append-bibtex file bibtex)
+          (my/zotero-append-bibtex file bibtex)
+          (with-temp-buffer
+            (insert-file-contents file)
+            (goto-char (point-min))
+            (should (re-search-forward "^@article{UniqueKey," nil t))
+            (should-not (re-search-forward "^@article{UniqueKey," nil t))))
+      (when-let* ((buffer (get-file-buffer file)))
+        (kill-buffer buffer))
+      (when (file-exists-p file)
+        (delete-file file)))))
+
 (ert-deftest my/aaronnote-windmove-focus-advice-focuses-aaronnote-target ()
   (let ((source (generate-new-buffer "*aaronnote-source*"))
         (target (generate-new-buffer "*aaronnote-target*"))

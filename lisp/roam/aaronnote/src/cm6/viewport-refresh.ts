@@ -32,6 +32,15 @@ function cancelPendingRefresh(view: EditorView): void {
   }
 }
 
+// Model-backed widgets (for example citations) already have a parsed editor
+// state. Dispatch their refresh immediately so an unrelated selection/layout
+// transaction cannot cancel the update between animation frames.
+export function refreshViewportDecorationsNow(view: EditorView): void {
+  cancelPendingRefresh(view);
+  viewGenerations.set(view, (viewGenerations.get(view) ?? 0) + 1);
+  dispatchRefresh(view, refreshRanges(view));
+}
+
 export function scheduleViewportDecorationRefresh(view: EditorView): void {
   cancelPendingRefresh(view);
   const gen = (viewGenerations.get(view) ?? 0) + 1;

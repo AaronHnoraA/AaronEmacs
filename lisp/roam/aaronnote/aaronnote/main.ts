@@ -26,6 +26,9 @@ import {
   type JupyterTasksResult,
   type LatexExportAgentStatus,
   type LatexTemplate,
+  type BibliographyCitation,
+  type BibliographyDocument,
+  type BibliographyReference,
 } from "./api-client.ts";
 import { Epoch } from "../src/async-epoch.ts";
 import { CoalescedTimer } from "../src/coalesced-timer.ts";
@@ -44,6 +47,7 @@ import {
 import { resolveAnchorHeading } from "../src/heading-slug.ts";
 import { createLocalGraphPanel } from "./local-graph.ts";
 import { setFindHighlightRanges } from "../src/cm6/find-highlight.ts";
+import { refreshViewportDecorationsNow } from "../src/cm6/viewport-refresh.ts";
 import {
   allProseDiagnostics,
   proseDiagnosticsAt,
@@ -59,6 +63,12 @@ import {
   roamNoteSearchValue,
 } from "./roam-idlink.ts";
 import { matchingSnippetsForPrefix, SnippetSession, snippetDetail, snippetLabel, snippetPopupKeyAction } from "./snippets.ts";
+import {
+  citeKeyCompletionContext,
+  citeKeyRenderPrefix,
+  citeNamespaceCompletionPrefix,
+  citeNamespaceRenderPrefix,
+} from "./bibliography-completion.ts";
 import type { CursorPosition, NoteSummary, SnippetSummary } from "./types.ts";
 import { createVimLite, type VimLiteKey, type VimLiteMode } from "./vim-lite.ts";
 import { countWritingStats, headingSubtreeRange, type WritingStats } from "./writing-stats.ts";
@@ -270,6 +280,10 @@ contextMenu.hidden = true;
 contextMenu.setAttribute("role", "menu");
 document.body.appendChild(contextMenu);
 
+const bibliographyPanel = document.createElement("section");
+bibliographyPanel.className = "aaronnote-bib-panel";
+bibliographyPanel.hidden = true;
+
 const findPanel = document.createElement("div");
 findPanel.className = "aaronnote-find-panel";
 findPanel.hidden = true;
@@ -347,6 +361,14 @@ const BUILTIN_SNIPPETS: SnippetSummary[] = [{
   group: "Aaronnote builtin",
   kind: "",
   body: "\\[\n$1\n\\]\n$0",
+  source: BUILTIN_SNIPPET_SOURCE,
+}, {
+  key: "cite",
+  name: "Citation",
+  mode: "markdown-mode",
+  group: "Aaronnote builtin",
+  kind: "",
+  body: "@@cite(${1:namespace}) [${2:key}] {locator: ${3:p. }}$0",
   source: BUILTIN_SNIPPET_SOURCE,
 }];
 let paused = false;
@@ -552,6 +574,7 @@ const editor = createEditor(host, {
     updateTitle();
     changeHandlers.forEach((handler) => handler());
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+    scheduleBibliographyRefresh();
     if (!currentReadOnly) scheduleSave();
     scheduleWritingStats(true);
   },
@@ -561,6 +584,335 @@ const editor = createEditor(host, {
     void flushCursorPosition();
   },
 });
+host.appendChild(bibliographyPanel);
+
+let bibliographyModel: BibliographyDocument = { ok: true, entries: [], references: [], citations: [], namespaces: [] };
+let bibliographyModelKey = "";
+let bibliographyRenderVersion = 0;
+let bibliographyRequestSeq = 0;
+let bibliographyHighlightTimer = 0;
+const bibliographyTimer = new CoalescedTimer(180);
+
+function citationAtRange(from: number, to: number): BibliographyCitation | undefined {
+  return (bibliographyModel.citations ?? []).find((cite) => cite.from === from && cite.to === to);
+}
+
+function referenceById(id: string): BibliographyReference | undefined {
+  return (bibliographyModel.references ?? []).find((ref) => ref.id === id);
+}
+
+function entryById(id: string) {
+  return bibliographyModel.entries?.find((entry) => entry.id === id);
+}
+
+function renderBibliographyPanel(): void {
+  const refs = bibliographyModel.references ?? [];
+  bibliographyPanel.hidden = refs.length === 0;
+  bibliographyPanel.replaceChildren();
+  if (refs.length === 0) return;
+  const title = document.createElement("h2");
+  title.textContent = "References";
+  bibliographyPanel.appendChild(title);
+  const list = document.createElement("ol");
+  list.className = "aaronnote-bib-list";
+  for (const ref of refs) {
+    const item = document.createElement("li");
+    item.className = "aaronnote-bib-item";
+    item.id = `aaronnote-bib-ref-${ref.number}`;
+    item.dataset.bibId = ref.id || "";
+    const text = document.createElement("span");
+    text.className = "aaronnote-bib-text";
+    text.textContent = ref.text || "";
+    item.appendChild(text);
+    for (const link of ref.links ?? []) {
+      if (!link.href) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "aaronnote-bib-link";
+      button.textContent = link.label || "link";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void api.emacs.systemOpen(link.href!, currentFile).catch((err) => setStatus(err instanceof Error ? err.message : "Open link failed"));
+      });
+      item.appendChild(button);
+    }
+    item.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showReferenceContextMenu(ref, event.clientX, event.clientY);
+    });
+    list.appendChild(item);
+  }
+  bibliographyPanel.appendChild(list);
+}
+
+function refreshBibliographyDecorations(): void {
+  bibliographyRenderVersion += 1;
+  refreshViewportDecorationsNow(editor.view);
+  renderBibliographyPanel();
+}
+
+async function refreshBibliography(force = false): Promise<void> {
+  const content = editor.getMarkdown();
+  if (!content.includes("@@cite")) {
+    bibliographyRequestSeq += 1;
+    bibliographyModel = { ok: true, entries: [], references: [], citations: [], namespaces: [] };
+    bibliographyModelKey = "";
+    refreshBibliographyDecorations();
+    return;
+  }
+  const key = `${currentFile}\n${content}`;
+  if (!force && key === bibliographyModelKey) return;
+  const requestSeq = ++bibliographyRequestSeq;
+  try {
+    const nextModel = await api.bibliography.document({ file: currentFile, content });
+    if (requestSeq !== bibliographyRequestSeq || key !== `${currentFile}\n${editor.getMarkdown()}`) return;
+    bibliographyModel = nextModel;
+    bibliographyModelKey = key;
+  } catch (error) {
+    if (requestSeq !== bibliographyRequestSeq) return;
+    bibliographyModel = { ok: false, entries: [], references: [], citations: [], namespaces: [], message: error instanceof Error ? error.message : "Bibliography failed" };
+    bibliographyModelKey = "";
+    setStatus(bibliographyModel.message || "Bibliography failed");
+  }
+  refreshBibliographyDecorations();
+}
+
+function scheduleBibliographyRefresh(force = false): void {
+  bibliographyTimer.schedule(() => void refreshBibliography(force));
+}
+
+function citeLocator(cite: BibliographyCitation | undefined): string {
+  const args = cite?.args ?? {};
+  return String(args.locator || args.page || args.pages || "").trim();
+}
+
+function citePrefix(cite: BibliographyCitation | undefined): string {
+  return String(cite?.args?.prefix || "").trim();
+}
+
+function citeSuffix(cite: BibliographyCitation | undefined): string {
+  return String(cite?.args?.suffix || "").trim();
+}
+
+function citationLabel(from: number, to: number): { label: string; title?: string; error?: boolean } | null {
+  const cite = citationAtRange(from, to);
+  if (!cite) return { label: "[?]", title: "Resolving citation", error: true };
+  if ((cite.diagnostics ?? []).length > 0 || !cite.numbers?.length) {
+    return { label: "[?]", title: (cite.diagnostics ?? []).join("; "), error: true };
+  }
+  const locator = citeLocator(cite);
+  const label = `[${cite.numbers.join(", ")}${locator ? `, ${locator}` : ""}]`;
+  const prefix = citePrefix(cite);
+  const suffix = citeSuffix(cite);
+  return { label: `${prefix ? `${prefix} ` : ""}${label}${suffix ? ` ${suffix}` : ""}`, title: cite.keys?.join("; ") || "" };
+}
+
+function highlightReference(ref: BibliographyReference | undefined): void {
+  if (!ref?.number) return;
+  window.clearTimeout(bibliographyHighlightTimer);
+  bibliographyPanel.hidden = false;
+  bibliographyPanel.querySelectorAll(".is-highlight").forEach((el) => el.classList.remove("is-highlight"));
+  const item = bibliographyPanel.querySelector<HTMLElement>(`#aaronnote-bib-ref-${ref.number}`);
+  if (!item) {
+    setStatus(`Reference [${ref.number}] is not rendered`);
+    return;
+  }
+  item.scrollIntoView({ block: "center", behavior: "auto" });
+  item.classList.add("is-highlight");
+  setStatus(`Reference [${ref.number}] · ${ref.entry?.key || ""}`);
+  bibliographyHighlightTimer = window.setTimeout(() => item.classList.remove("is-highlight"), 1600);
+}
+
+function zoteroHrefForEntry(entry: BibliographyReference["entry"] | undefined): string {
+  const fields = entry?.fields ?? {};
+  const keys = ["zotero", "zoteroselect", "zotero_select", "zotero-link", "zotero_link"];
+  for (const key of keys) {
+    const value = String(fields[key] || "").trim();
+    if (/^zotero:\/\//i.test(value)) return value;
+  }
+  return "";
+}
+
+function zoteroHrefForReference(ref: BibliographyReference | undefined): string {
+  const direct = zoteroHrefForEntry(ref?.entry);
+  if (direct) return direct;
+  return ref?.links?.find((link) => /^zotero:\/\//i.test(String(link.href || "")))?.href || "";
+}
+
+async function openReferenceInZotero(ref: BibliographyReference | undefined): Promise<void> {
+  const entry = ref?.entry;
+  if (!entry) {
+    setStatus("No reference to open in Zotero");
+    return;
+  }
+  const fields = entry.fields ?? {};
+  await api.emacs.zotero({
+    uri: zoteroHrefForReference(ref),
+    key: entry.key || "",
+    doi: fields.doi || fields.DOI || "",
+    title: fields.title || "",
+    bibFile: entry.file || "",
+    namespace: entry.namespace || "",
+    currentFile,
+    client: currentClient,
+  });
+  setStatus(`Sent ${entry.key || "reference"} to Emacs Zotero`);
+}
+
+function citationPrimaryReference(cite: BibliographyCitation | undefined): BibliographyReference | undefined {
+  const id = cite?.itemIds?.[0];
+  return id ? referenceById(id) : undefined;
+}
+
+function openCitationFromWidget(from: number, to: number, _rect: DOMRect, jump: boolean): void {
+  const ref = citationPrimaryReference(citationAtRange(from, to));
+  if (jump) highlightReference(ref);
+}
+
+function editCitationArgs(from: number, to: number): void {
+  if (currentReadOnly) return;
+  const source = editor.getMarkdown().slice(from, to);
+  const argsMatch = source.match(/\s+\{([^{}\n]*)\}\s*$/);
+  const current = argsMatch?.[1] ?? "";
+  const next = window.prompt("Edit @@cite args", current || "locator: p. ");
+  if (next == null) return;
+  const clean = next.trim();
+  const replacement = argsMatch
+    ? source.replace(/\s+\{[^{}\n]*\}\s*$/, clean ? ` {${clean}}` : "")
+    : `${source}${clean ? ` {${clean}}` : ""}`;
+  editor.replaceMarkdownRange(from, to, replacement, "end");
+  scheduleBibliographyRefresh(true);
+}
+
+async function openBibEntryInEmacs(entry: BibliographyReference["entry"] | undefined): Promise<void> {
+  if (!entry?.file) {
+    setStatus("No BibTeX file for reference");
+    return;
+  }
+  await api.emacs.open({ file: entry.file });
+  setStatus(`Opened ${entry.path || entry.file} in Emacs`);
+}
+
+async function openCitationBibInEmacs(from: number, to: number): Promise<void> {
+  const cite = citationAtRange(from, to);
+  const id = cite?.itemIds?.[0];
+  const entry = id ? entryById(id) : undefined;
+  await openBibEntryInEmacs(entry);
+}
+
+function citationReferences(cite: BibliographyCitation | undefined): BibliographyReference[] {
+  const refs: BibliographyReference[] = [];
+  const seen = new Set<string>();
+  for (const id of cite?.itemIds ?? []) {
+    if (!id || seen.has(id)) continue;
+    const ref = referenceById(id);
+    if (!ref) continue;
+    seen.add(id);
+    refs.push(ref);
+  }
+  return refs;
+}
+
+function bibliographyContextPreview(refs: readonly BibliographyReference[]): HTMLElement {
+  const preview = document.createElement("section");
+  preview.className = "aaronnote-bib-context-preview";
+  preview.setAttribute("aria-label", "Reference preview");
+  for (const ref of refs) {
+    const article = document.createElement("article");
+    const title = document.createElement("strong");
+    title.textContent = `[${ref.number || "?"}] ${ref.entry?.key || ""}`;
+    const text = document.createElement("p");
+    const repeatedNumber = ref.number ? new RegExp(`^\\[${ref.number}\\]\\s*`) : null;
+    text.textContent = repeatedNumber ? String(ref.text || "").replace(repeatedNumber, "") : ref.text || "";
+    article.append(title, text);
+    preview.appendChild(article);
+  }
+  if (refs.length === 0) {
+    const diagnostic = document.createElement("p");
+    diagnostic.textContent = "Reference is unresolved.";
+    preview.appendChild(diagnostic);
+  }
+  return preview;
+}
+
+function bibliographyLinkActions(refs: readonly BibliographyReference[]): AaronContextMenuItem[] {
+  const items: AaronContextMenuItem[] = [];
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    for (const link of ref.links ?? []) {
+      const href = String(link.href || "").trim();
+      if (!href || /^zotero:\/\//i.test(href) || seen.has(href)) continue;
+      seen.add(href);
+      const number = refs.length > 1 ? ` [${ref.number || "?"}]` : "";
+      items.push({
+        label: `Open ${link.label || "link"}${number}`,
+        detail: href,
+        run: () => api.emacs.systemOpen(href, currentFile),
+      });
+    }
+  }
+  return items;
+}
+
+function showBibliographyContextMenu(
+  refs: readonly BibliographyReference[],
+  items: readonly AaronContextMenuItem[],
+  x: number,
+  y: number,
+): void {
+  contextMenu.classList.add("is-bibliography");
+  const nodes: HTMLElement[] = [bibliographyContextPreview(refs)];
+  if (items.length > 0) nodes.push(contextMenuItem({ separator: true, label: "" }));
+  nodes.push(...items.map(contextMenuItem));
+  contextMenu.replaceChildren(...nodes);
+  contextMenu.hidden = false;
+  const rect = contextMenu.getBoundingClientRect();
+  contextMenu.style.left = `${Math.max(6, Math.min(window.innerWidth - rect.width - 6, x))}px`;
+  contextMenu.style.top = `${Math.max(6, Math.min(window.innerHeight - rect.height - 6, y))}px`;
+}
+
+function showCitationContextMenu(from: number, to: number, x: number, y: number): void {
+  const cite = citationAtRange(from, to);
+  const refs = citationReferences(cite);
+  const items: AaronContextMenuItem[] = [
+    { label: "Edit Cite Args...", detail: "{prefix/locator/suffix}", disabled: currentReadOnly, run: () => editCitationArgs(from, to) },
+    ...refs.map((ref) => ({
+      label: refs.length > 1 ? `Jump to Reference [${ref.number || "?"}]` : "Jump to Reference",
+      detail: ref.entry?.key || "",
+      run: () => highlightReference(ref),
+    })),
+    ...bibliographyLinkActions(refs),
+    ...refs.map((ref) => ({
+      label: refs.length > 1 ? `Open [${ref.number || "?"}] in Zotero` : "Open in Zotero",
+      detail: ref.entry?.key || ref.entry?.fields?.doi || "Emacs search",
+      disabled: !ref.entry,
+      run: () => openReferenceInZotero(ref),
+    })),
+    { label: "Open Bib in Emacs", detail: refs[0]?.entry?.path || "", disabled: !refs[0]?.entry?.file, run: () => openCitationBibInEmacs(from, to) },
+    { label: "Copy Citation Key", detail: cite?.keys?.join("; ") || "", disabled: !cite?.keys?.length, run: () => copyText(cite?.keys?.join("; ") || "") },
+  ];
+  showBibliographyContextMenu(refs, items, x, y);
+}
+
+function showReferenceContextMenu(ref: BibliographyReference, x: number, y: number): void {
+  const items: AaronContextMenuItem[] = [
+    { label: "Jump to Reference", detail: ref.entry?.key || "", run: () => highlightReference(ref) },
+    ...bibliographyLinkActions([ref]),
+    { label: "Open in Zotero", detail: ref.entry?.key || ref.entry?.fields?.doi || "Emacs search", disabled: !ref.entry, run: () => openReferenceInZotero(ref) },
+    { label: "Open Bib in Emacs", detail: ref.entry?.path || "", disabled: !ref.entry?.file, run: () => openBibEntryInEmacs(ref.entry) },
+    { label: "Copy Citation Key", detail: ref.entry?.key || "", disabled: !ref.entry?.key, run: () => copyText(ref.entry?.key || "") },
+  ];
+  showBibliographyContextMenu([ref], items, x, y);
+}
+
+window.AaronnoteBibliography = {
+  citationLabel,
+  version: () => bibliographyRenderVersion,
+  openCitation: openCitationFromWidget,
+  contextMenu: showCitationContextMenu,
+};
 
 function captureEditorScroll(): EditorScrollSnapshot {
   return {
@@ -847,6 +1199,8 @@ host.addEventListener("pointerdown", activateEditorFromPointer, { capture: true 
 host.addEventListener("mousedown", activateEditorFromPointer, { capture: true });
 document.addEventListener("contextmenu", (event) => {
   if (!(event.target instanceof Node) || !host.contains(event.target)) return;
+  const element = event.target instanceof Element ? event.target : event.target.parentElement;
+  if (element?.closest(".inline-cite-widget, .aaronnote-bib-item")) return;
   event.preventDefault();
   showContextMenu(event);
 }, { capture: true });
@@ -868,9 +1222,13 @@ document.addEventListener("pointerdown", (event) => {
   if (!contextMenu.hidden && target instanceof Node && !contextMenu.contains(target)) hideContextMenu();
 }, { capture: true });
 window.addEventListener("resize", hideContextMenu);
-document.addEventListener("scroll", hideContextMenu, { capture: true, passive: true });
+document.addEventListener("scroll", () => {
+  hideContextMenu();
+}, { capture: true, passive: true });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") hideContextMenu();
+  if (event.key === "Escape") {
+    hideContextMenu();
+  }
 }, { capture: true });
 document.addEventListener("wheel", handleVisualZoomWheel, { capture: true, passive: false });
 document.addEventListener("gesturestart", handleVisualGestureStart, { capture: true, passive: false });
@@ -1865,6 +2223,7 @@ type AaronContextMenuItem = {
 
 function hideContextMenu(): void {
   contextMenu.hidden = true;
+  contextMenu.classList.remove("is-bibliography");
   contextMenu.replaceChildren();
 }
 
@@ -2052,6 +2411,7 @@ type AaronContextMenuTarget = {
 };
 
 function showContextMenu(event: MouseEvent, target: Partial<AaronContextMenuTarget> = {}): void {
+  contextMenu.classList.remove("is-bibliography");
   const selection = editor.getMarkdownSelection();
   const hasSelection = selection.from !== selection.to;
   const planningTarget = planningEditTargetFromPointer(event);
@@ -2432,6 +2792,7 @@ function applyOpenedNote(
   if (updateStatus) setStatus(currentReadOnly ? "Read-only" : currentFile ? "Ready" : "Scratch");
   if (focusEditor) editor.focus();
   scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
+  scheduleBibliographyRefresh(true);
   restoreEditorScroll(options.restoreScroll);
   if (shouldRevealCursor && !options.restoreScroll && !hasPendingOpenTarget) {
     revealCursorAfterLayout();
@@ -5016,12 +5377,29 @@ type ToolAction = {
   run: () => void;
 };
 
+async function zoteroImportBibtexTool(): Promise<void> {
+  if (!currentFile) {
+    setStatus("Open a note before importing Zotero BibTeX");
+    return;
+  }
+  const selection = editor.getMarkdownSelection();
+  const query = selection.from !== selection.to
+    ? editor.getMarkdown().slice(selection.from, selection.to).trim().slice(0, 500)
+    : "";
+  const targetFile = (bibliographyModel.references ?? []).find((ref) => ref.entry?.file)?.entry?.file
+    || bibliographyModel.namespaces?.find((namespace) => namespace.file)?.file
+    || "";
+  await api.emacs.zoteroImport({ currentFile, targetFile, query, client: currentClient });
+  setStatus("Choose the BibTeX target and Zotero item in Emacs");
+}
+
 function toolActions(): ToolAction[] {
   const common: ToolAction[] = [
     { id: "toc", title: "Toggle TOC", detail: "Page headings, anchors, tags, backlinks", run: () => { floatingTocPanel.toggle(); updateFloatingToc(); } },
     { id: "tag-ref", title: "Tag / copy ref", detail: "Equation tag, inline anchor, reference copy", run: () => void tagOrCopyRef() },
     { id: "export-latex", title: "Export LaTeX", detail: "Write selection, heading, or note to a .tex file", run: () => void exportLatexTool() },
     { id: "latex-export-agent", title: "Switch export agent", detail: "Choose Codex, Claude, or OpenCode for LaTeX polish", run: () => void switchLatexExportAgentTool() },
+    { id: "zotero-import-bibtex", title: "Import Zotero BibTeX", detail: "Use the Zotero picker and append to a local .bib file", run: () => void zoteroImportBibtexTool() },
     { id: "reload-snippets", title: "Reload snippets", detail: "Refresh Emacs md/tex snippets", run: () => void reloadSnippets() },
   ];
   return [
@@ -5363,13 +5741,15 @@ function completionDetail(snippet: SnippetSummary): string {
   if (group === "roam") return snippet.body ? `roam -> ${snippet.body}` : "roam";
   if (group === "tag") return snippet.source ? `inline tag in ${snippet.source}` : "inline tag";
   if (group === "dom") return snippet.source ? `DOM target in ${snippet.source}` : "DOM target";
+  if (group === "bib-namespace") return snippet.source || "bibliography";
+  if (group === "bib-key") return snippet.source || "BibTeX entry";
   return snippetDetail(snippet);
 }
 
 function completionPreviewText(snippet: SnippetSummary): string {
   const group = String(snippet.group || "");
   if (group === "path") return "";
-  if (group === "roam" || group === "tag" || group === "dom") {
+  if (group === "roam" || group === "tag" || group === "dom" || group === "bib-namespace" || group === "bib-key") {
     return String(snippet.source || snippet.body || "").replace(/\s+/g, " ").trim().slice(0, 96);
   }
   return String(snippet.body || "").replace(/\s+/g, " ").trim().slice(0, 96);
@@ -5627,6 +6007,29 @@ async function matchingTodoRefCompletions(prefix: string, quoted: boolean): Prom
       };
     });
   } catch {
+    return [];
+  }
+}
+
+async function matchingBibliographyCompletions(kind: "namespaces" | "keys", prefix: string, namespace = ""): Promise<SnippetSummary[]> {
+  try {
+    const result = await api.completions.bibliography({
+      file: currentFile,
+      content: editor.getMarkdown(),
+      kind,
+      prefix,
+      namespace,
+    });
+    return (result.items ?? []).map((item) => ({
+      key: item.key || item.name || "",
+      name: item.name || item.key || "",
+      body: item.body || item.key || "",
+      mode: "markdown-mode",
+      group: kind === "namespaces" ? "bib-namespace" : "bib-key",
+      source: item.detail || item.source || "",
+    }));
+  } catch (error) {
+    setStatus(`Bibliography completion failed: ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }
 }
@@ -5937,6 +6340,32 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
       inlineTagPrefix.length,
       ctx.rect,
       () => matchingInlineTagCompletions(inlineTagPrefix),
+    );
+    return;
+  }
+
+  const citeNamespacePrefix = citeNamespaceCompletionPrefix(ctx.before);
+  if (citeNamespacePrefix !== null) {
+    const renderPrefix = citeNamespaceRenderPrefix(citeNamespacePrefix);
+    scheduleAsyncCompletion(
+      `bib-ns:${currentFile}:${citeNamespacePrefix}`,
+      renderPrefix,
+      citeNamespacePrefix.length,
+      ctx.rect,
+      () => matchingBibliographyCompletions("namespaces", citeNamespacePrefix),
+    );
+    return;
+  }
+
+  const citeKeyContext = citeKeyCompletionContext(ctx.before);
+  if (citeKeyContext) {
+    const renderPrefix = citeKeyRenderPrefix(citeKeyContext);
+    scheduleAsyncCompletion(
+      `bib-key:${currentFile}:${citeKeyContext.namespace}:${citeKeyContext.prefix}`,
+      renderPrefix,
+      citeKeyContext.prefix.length,
+      ctx.rect,
+      () => matchingBibliographyCompletions("keys", citeKeyContext.prefix, citeKeyContext.namespace),
     );
     return;
   }
@@ -6507,6 +6936,9 @@ function runHostCommand(detail: unknown): boolean {
       }
       return true;
     }
+    case "bibliography-index-changed":
+      scheduleBibliographyRefresh(true);
+      return true;
     case "note-saved": {
       const savedFile = String(body.file || "");
       if (!savedFile || savedFile !== currentFile) return true;

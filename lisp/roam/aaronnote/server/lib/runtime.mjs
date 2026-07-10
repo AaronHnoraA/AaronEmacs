@@ -8,10 +8,18 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { changedRoamFilesSince, commitRoam, fileHistory, restoreFileFromCommit, discardFileChanges, roamRepoStatus, roamRepoChanges, diffRoamFile, diffRoamCommit, pullRoam, pushRoam, repoHistory, headSha } from "./roam-git.mjs";
 import { configureTmpRoot, aaronnoteTmpRoot, runtimeMkdtemp, runtimeTmpFile } from "./tmp.mjs";
-import { aaronnoteMarkdownToLatex, applyLatexTemplate, defaultLatexOutputPath, escapeLatexTitle, latexMacrosPreamble, latexSideCommentPreamble, readLatexTemplate, writeLatexExport } from "./latex-export.mjs";
+import { aaronnoteMarkdownToLatex, applyLatexTemplate, bibliographyReferencesToLatex, defaultLatexOutputPath, escapeLatexTitle, latexMacrosPreamble, latexSideCommentPreamble, readLatexTemplate, writeLatexExport } from "./latex-export.mjs";
 import { agentAvailable, loadAgentRules, polishBodyWithAgent } from "./latex-export-codex.mjs";
 import { loadKatexMacros } from "./katex-macros.mjs";
 import { durationFromEnv } from "./jupyter-cell.mjs";
+import {
+  bibliographyCompletions,
+  bibliographyForDocument,
+  bibliographyPathWatchRelevant,
+  bibliographyVersion,
+  clearBibliographyCache,
+  configureBibliography,
+} from "./bibliography.mjs";
 import { parseCommandArgs, scanInlineCommands } from "../../shared/command-syntax.mjs";
 import {
   patchPlanningNodeRaw,
@@ -78,6 +86,7 @@ const LATEX_EXPORT_ENGINES = ["codex", "mechanical"];
 const execFileAsync = promisify(execFile);
 
 let noteRoot = resolveUserPath(process.env.AARONNOTE_ROOT || join(appDir, "..", "roam"));
+configureBibliography({ root: noteRoot });
 let noteScanRoot = noteRoot;
 const excludedDirs = new Set([
   "_typst",
@@ -1408,6 +1417,9 @@ function buildMetaBlock(fields) {
   );
   if (roamOffFromMeta(fields)) lines.push("roam: off");
   if (project) lines.push(`project: ${project}`);
+  if (fields.extend) lines.push(`extend: ${String(fields.extend).replace(/\r?\n/g, " ")}`);
+  if (fields.bib) lines.push(`bib: ${Array.isArray(fields.bib) ? fields.bib.join(", ") : String(fields.bib).replace(/\r?\n/g, " ")}`);
+  if (fields.css) lines.push(`css: ${String(fields.css).replace(/\r?\n/g, " ")}`);
   lines.push(
     `tags: ${tags.join(", ")}`,
     `refs: ${refs.join(", ")}`,
@@ -5127,6 +5139,32 @@ function latexExportSourceFile(input) {
   return safeOpenFile(raw);
 }
 
+function latexSafeCitationKey(value) {
+  const raw = String(value || "");
+  const clean = raw.replace(/[^A-Za-z0-9:_-]/g, "_").replace(/^_+|_+$/g, "");
+  return clean || `cite_${createHash("sha1").update(raw).digest("hex").slice(0, 10)}`;
+}
+
+function latexCitationMaps(bibModel) {
+  const byId = {};
+  const byNamespaceKey = {};
+  const shortCounts = new Map();
+  for (const entry of bibModel.entries || []) {
+    const id = String(entry.id || "");
+    if (!id) continue;
+    byId[id] = latexSafeCitationKey(`${entry.namespace}:${entry.key}`);
+    byNamespaceKey[`${entry.namespace}\0${entry.key}`] = byId[id];
+    const short = `${entry.shortNamespace}\0${entry.key}`;
+    shortCounts.set(short, (shortCounts.get(short) || 0) + 1);
+  }
+  for (const entry of bibModel.entries || []) {
+    const id = String(entry.id || "");
+    const short = `${entry.shortNamespace}\0${entry.key}`;
+    if (id && byId[id] && shortCounts.get(short) === 1) byNamespaceKey[short] = byId[id];
+  }
+  return { byId, byNamespaceKey };
+}
+
 function latexExportTitle(sourceFile, bodyTitle, metaTitle = "") {
   const title = String(metaTitle || bodyTitle || "").trim();
   if (title) return title;
@@ -5323,7 +5361,9 @@ export async function exportLatex(body = {}) {
   // 1. Mechanical base conversion, extended by any agent-maintained rules.
   emit("Converting (mechanical)…");
   const rules = await loadAgentRules(latexAgentDir);
-  const converted = aaronnoteMarkdownToLatex(content, { sourceFile, rules });
+  const bibliography = await bibliographyForDocument({ file: sourceFile, content });
+  const citationMaps = latexCitationMaps(bibliography);
+  const converted = aaronnoteMarkdownToLatex(content, { sourceFile, rules, citationKeyMap: citationMaps.byNamespaceKey });
   const metaTitle = String(converted.meta.title || "").trim();
   const title = latexExportTitle(sourceFile, body.title || "", metaTitle);
   const defaults = await latexExportDefaults({ file: sourceFile, title });
@@ -5365,7 +5405,8 @@ export async function exportLatex(body = {}) {
   });
 
   // 2. Optional agent polish of the draft, gated on compilation, with fallback.
-  let bodyLatex = converted.body;
+  const bibliographyLatex = bibliographyReferencesToLatex(bibliography.references || [], citationMaps.byId);
+  let bodyLatex = `${converted.body}${bibliographyLatex}`;
   let engineUsed = "mechanical";
   const warnings = [];
   const backend = ["codex", "claude", "opencode"].includes(latexExportAgent) ? latexExportAgent : "codex";
@@ -5375,7 +5416,7 @@ export async function exportLatex(body = {}) {
     const latexBin = executablePath(engine === "xelatex" ? "xelatex" : engine === "lualatex" ? "lualatex" : "pdflatex");
     const result = await polishBodyWithAgent({
       sourceMarkdown: content,
-      draftBody: converted.body,
+      draftBody: bodyLatex,
       templateText: template.text,
       styleDoc: join(appDir, "docs", "latex-export-style.md"),
       syntaxDoc: join(appDir, "docs", "typora-syntax-survey.md"),
@@ -6752,7 +6793,24 @@ export async function maybeScheduleWeeklyFullSync() {
 }
 
 // Exported for version control features
-export { fileHistory, restoreFileFromCommit, discardFileChanges, roamRepoStatus, roamRepoChanges, diffRoamFile, diffRoamCommit, pullRoam, pushRoam, repoHistory, noteRoot as roamNoteRoot };
+export {
+  bibliographyCompletions,
+  bibliographyForDocument,
+  bibliographyPathWatchRelevant,
+  bibliographyVersion,
+  clearBibliographyCache,
+  fileHistory,
+  restoreFileFromCommit,
+  discardFileChanges,
+  roamRepoStatus,
+  roamRepoChanges,
+  diffRoamFile,
+  diffRoamCommit,
+  pullRoam,
+  pushRoam,
+  repoHistory,
+  noteRoot as roamNoteRoot,
+};
 
 export async function createNode(body) {
   const title = String(body.title || "Untitled").trim() || "Untitled";
@@ -7481,6 +7539,7 @@ export function configure(options = {}) {
   latexCodexModel = String(options.latexCodexModel || process.env.AARONNOTE_CODEX_MODEL || "").trim();
   latexExportModel = String(options.latexExportModel || process.env.AARONNOTE_LATEX_EXPORT_MODEL || "").trim();
   latexExportMaxAttempts = Math.max(1, Number(options.latexExportMaxAttempts || process.env.AARONNOTE_LATEX_EXPORT_MAX_ATTEMPTS) || 3);
+  configureBibliography({ root: noteRoot });
   snippetCache = { key: "", scannedAt: 0, snippets: [] };
   templateCache = { key: "", scannedAt: 0, templates: [] };
   contentRootCache.clear();

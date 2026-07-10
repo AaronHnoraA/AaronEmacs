@@ -209,6 +209,45 @@ export type TodoLint = {
   candidates?: Array<{ id: string; text: string }>;
 };
 export type TodoRefCompletion = { label?: string; ref?: string; hasId?: boolean; file?: string; status?: string };
+export type BibliographyCompletion = { key?: string; name?: string; body?: string; detail?: string; source?: string };
+export type BibliographyEntry = {
+  id?: string;
+  key?: string;
+  namespace?: string;
+  shortNamespace?: string;
+  type?: string;
+  file?: string;
+  path?: string;
+  fields?: Record<string, string>;
+};
+export type BibliographyReference = {
+  id?: string;
+  number?: number;
+  entry?: BibliographyEntry;
+  text?: string;
+  links?: Array<{ label?: string; href?: string }>;
+};
+export type BibliographyCitation = {
+  from?: number;
+  to?: number;
+  namespace?: string;
+  keys?: string[];
+  args?: Record<string, string>;
+  itemIds?: string[];
+  numbers?: number[];
+  diagnostics?: string[];
+};
+export type BibliographyDocument = {
+  ok?: boolean;
+  version?: number;
+  hash?: string;
+  namespaces?: Array<{ namespace?: string; shortNamespace?: string; file?: string; entries?: number }>;
+  entries?: BibliographyEntry[];
+  references?: BibliographyReference[];
+  citations?: BibliographyCitation[];
+  diagnostics?: string[];
+  message?: string;
+};
 export type PlanningItem = Record<string, unknown> & {
   id?: string;
   kind?: "project" | "milestone" | "clock" | string;
@@ -326,6 +365,10 @@ type NativeApi = {
     tags?: (prefix: string) => Promise<unknown>;
     roam?: (prefix: string) => Promise<unknown>;
     todoRefs?: (body: Record<string, unknown>) => Promise<unknown>;
+    bibliography?: (body: Record<string, unknown>) => Promise<unknown>;
+  };
+  bibliography?: {
+    document?: (body: Record<string, unknown>) => Promise<unknown>;
   };
   clipboard?: {
     read?: (body?: { file?: string }) => Promise<unknown>;
@@ -371,6 +414,8 @@ type NativeApi = {
     currentFile?: (body: string | { file: string; client?: string }) => Promise<unknown>;
     key?: (body: string | { key: string; client?: string }) => Promise<unknown>;
     systemOpen?: (target: string, base?: string) => Promise<unknown>;
+    zotero?: (body: Record<string, unknown>) => Promise<unknown>;
+    zoteroImport?: (body: Record<string, unknown>) => Promise<unknown>;
   };
   roamTools?: {
     renameTag?: (body: Record<string, unknown>) => Promise<unknown>;
@@ -443,6 +488,22 @@ function ensureOk<T>(value: T, fallback: string, allowConflict = false): T {
     throw new Error(result.message || fallback);
   }
   return value;
+}
+
+async function callHttpApi<T>(channel: string, args: unknown[] = [], fallback = "API request failed"): Promise<T> {
+  const response = await fetch("/api", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ channel, args }),
+  });
+  const value = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = value && typeof value === "object" && "message" in value
+      ? String((value as { message?: unknown }).message || fallback)
+      : fallback;
+    throw new Error(message);
+  }
+  return ensureOk(value as T, fallback);
 }
 
 export const api = {
@@ -636,8 +697,10 @@ export const api = {
   emacs: {
     async open(body: { file: string; tag?: string; line?: number; col?: number }): Promise<void> {
       const call = window.aaronnoteApi?.emacs?.open;
-      if (!call) return;
-      await call(body).catch(() => {});
+      const result = call
+        ? await call(body)
+        : await callHttpApi("aaronnote:api:emacs:open", [body], "Open in Emacs failed");
+      ensureOk(result, "Open in Emacs failed");
     },
     async currentFile(file: string, client = ""): Promise<void> {
       const call = window.aaronnoteApi?.emacs?.currentFile;
@@ -654,10 +717,25 @@ export const api = {
     async systemOpen(target: string, base?: string): Promise<void> {
       const call = window.aaronnoteApi?.emacs?.systemOpen;
       if (!call) {
-        window.location.href = target;
+        const body = base ? { target, base } : target;
+        await callHttpApi("aaronnote:api:emacs:system-open", [body], "System open failed");
         return;
       }
-      await call(target, base);
+      ensureOk(await call(target, base), "System open failed");
+    },
+    async zotero(body: Record<string, unknown>): Promise<void> {
+      const call = window.aaronnoteApi?.emacs?.zotero;
+      const result = call
+        ? await call(body)
+        : await callHttpApi("aaronnote:api:emacs:zotero", [body], "Open in Zotero failed");
+      ensureOk(result, "Open in Zotero failed");
+    },
+    async zoteroImport(body: Record<string, unknown>): Promise<void> {
+      const call = window.aaronnoteApi?.emacs?.zoteroImport;
+      const result = call
+        ? await call(body)
+        : await callHttpApi("aaronnote:api:emacs:zotero-import", [body], "Zotero BibTeX import failed");
+      ensureOk(result, "Zotero BibTeX import failed");
     },
   },
   roamTools: {
@@ -718,6 +796,22 @@ export const api = {
       const call = window.aaronnoteApi?.completions?.todoRefs;
       if (!call) return { items: [] };
       return await call(body) as { items?: TodoRefCompletion[] };
+    },
+    async bibliography(body: { file?: string; content?: string; kind?: string; namespace?: string; prefix?: string } = {}): Promise<{ items?: BibliographyCompletion[] }> {
+      const call = window.aaronnoteApi?.completions?.bibliography;
+      if (!call) {
+        return await callHttpApi("aaronnote:api:completions:bibliography", [body], "Bibliography completion failed");
+      }
+      return ensureOk(await call(body) as { ok?: boolean; message?: string; items?: BibliographyCompletion[] }, "Bibliography completion failed");
+    },
+  },
+  bibliography: {
+    async document(body: { file?: string; content?: string } = {}): Promise<BibliographyDocument> {
+      const call = window.aaronnoteApi?.bibliography?.document;
+      if (!call) {
+        return await callHttpApi("aaronnote:api:bibliography:document", [body], "Bibliography failed");
+      }
+      return ensureOk(await call(body) as BibliographyDocument, "Bibliography failed");
     },
   },
   clipboard: {

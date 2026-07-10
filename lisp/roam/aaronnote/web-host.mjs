@@ -33,6 +33,8 @@ import {
   listLatexTemplates,
   chooseLatexOutputPath,
   exportLatex,
+  bibliographyCompletions,
+  bibliographyForDocument,
   readNoteCodeRegion,
   syncRoamDb,
   scanSnippets,
@@ -52,7 +54,16 @@ import {
   todoRefCompletions,
   runtimeDebugSnapshot,
 } from "./server/lib/index.mjs";
-import { configure, markNotesDirty, notesIndexVersionValue, noteSelfWriteRecently, notePathWatchRelevant } from "./server/lib/state.mjs";
+import {
+  bibliographyPathWatchRelevant,
+  bibliographyVersion,
+  clearBibliographyCache,
+  configure,
+  markNotesDirty,
+  notesIndexVersionValue,
+  noteSelfWriteRecently,
+  notePathWatchRelevant,
+} from "./server/lib/state.mjs";
 import { startNoteWatcher } from "./server/lib/watch.mjs";
 import { saveNote } from "./server/lib/save.mjs";
 import {
@@ -153,15 +164,25 @@ void sweepGlobalOrphanKernels({ stderr: process.stderr }).then(({ reaped }) => {
 const noteWatcher = process.env.AARONNOTE_WATCH !== "0"
   ? startNoteWatcher({
       root: noteRoot,
-      isRelevant: notePathWatchRelevant,
+      isRelevant: (file) => notePathWatchRelevant(file) || bibliographyPathWatchRelevant(file),
       isSelfWrite: (file) => noteSelfWriteRecently(file),
       onBatch(files) {
-        for (const file of files) markNotesDirty(file);
-        broadcast("command", { command: "notes-index-changed", version: notesIndexVersionValue() });
+        const noteFiles = files.filter((file) => notePathWatchRelevant(file));
+        const bibFiles = files.filter((file) => bibliographyPathWatchRelevant(file));
+        for (const file of noteFiles) markNotesDirty(file);
+        if (noteFiles.length > 0) {
+          broadcast("command", { command: "notes-index-changed", version: notesIndexVersionValue() });
+        }
+        if (bibFiles.length > 0) {
+          clearBibliographyCache();
+          broadcast("command", { command: "bibliography-index-changed", version: bibliographyVersion() });
+        }
       },
       onFullRescan() {
         markNotesDirty();
+        clearBibliographyCache();
         broadcast("command", { command: "notes-index-changed", version: notesIndexVersionValue() });
+        broadcast("command", { command: "bibliography-index-changed", version: bibliographyVersion() });
       },
     })
   : { close() {} };
@@ -564,6 +585,17 @@ async function apiSystemOpen(body) {
   return { ok: true, target: resolved };
 }
 
+async function apiEmacsZotero(body, eventName = "zotero") {
+  const source = body && typeof body === "object" ? body : {};
+  const payload = {};
+  for (const key of ["uri", "key", "doi", "title", "bibFile", "namespace", "currentFile", "targetFile", "query", "client"]) {
+    const value = String(source[key] || "").trim();
+    if (value) payload[key] = value.slice(0, key === "title" || key === "query" ? 2000 : 8192);
+  }
+  process.stdout.write(`aaronote-event:${eventName}:${JSON.stringify(payload)}\n`);
+  return { ok: true, queued: true };
+}
+
 const apiHandlers = {
   "aaronnote:api:notes:bootstrap": (file) => bootstrapNote(file || undefined),
   "aaronnote:api:notes:open": (file) => readNote(file),
@@ -612,6 +644,12 @@ const apiHandlers = {
   },
   "aaronnote:api:completions:todo-refs": async (body) => {
     return await todoRefCompletions(body || {});
+  },
+  "aaronnote:api:completions:bibliography": async (body) => {
+    return await bibliographyCompletions(body || {});
+  },
+  "aaronnote:api:bibliography:document": async (body) => {
+    return await bibliographyForDocument(body || {});
   },
   "aaronnote:api:notes:todos": async (body) => {
     return await getTodos(typeof body === "string" ? body : body || {});
@@ -757,6 +795,8 @@ const apiHandlers = {
   "aaronnote:api:emacs:current-file": (file) => apiCurrentFile(file),
   "aaronnote:api:emacs:key": (key) => apiEmacsKey(key),
   "aaronnote:api:emacs:system-open": (target) => apiSystemOpen(target),
+  "aaronnote:api:emacs:zotero": (body) => apiEmacsZotero(body),
+  "aaronnote:api:emacs:zotero-import": (body) => apiEmacsZotero(body, "zotero-import"),
   "aaronnote:api:config:katex-macros": () => katexMacrosPayload(),
 };
 
@@ -965,6 +1005,10 @@ function adapterScript(origin) {
       tags: function(prefix) { return call("aaronnote:api:completions:tags", [{ prefix: String(prefix || "") }]); },
       roam: function(prefix) { return call("aaronnote:api:completions:roam", [{ prefix: String(prefix || "") }]); },
       todoRefs: function(body) { return call("aaronnote:api:completions:todo-refs", [body || {}]); },
+      bibliography: function(body) { return call("aaronnote:api:completions:bibliography", [body || {}]); },
+    },
+    bibliography: {
+      document: function(body) { return call("aaronnote:api:bibliography:document", [body || {}]); },
     },
     noteCode: {
       readRegion: function(body) { return call("aaronnote:api:note-code:read-region", [body || {}]); }
@@ -1048,7 +1092,9 @@ function adapterScript(origin) {
         return call("aaronnote:api:emacs:system-open", [
           base ? {target: String(target || ""), base: String(base || "")} : String(target || "")
         ]);
-      }
+      },
+      zotero: function(body) { return call("aaronnote:api:emacs:zotero", [body || {}]); },
+      zoteroImport: function(body) { return call("aaronnote:api:emacs:zotero-import", [body || {}]); }
     },
     shell: {
       showInFolder: function(file) { return call("aaronnote:api:shell:show-in-folder", [String(file || "")]); },

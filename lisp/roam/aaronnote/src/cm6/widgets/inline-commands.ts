@@ -32,6 +32,17 @@ import {
 } from "../../date-syntax.ts";
 import { hasViewportDecorationRefresh } from "../viewport-refresh.ts";
 
+declare global {
+  interface Window {
+    AaronnoteBibliography?: {
+      citationLabel?: (from: number, to: number) => { label: string; title?: string; error?: boolean } | null;
+      version?: () => number;
+      openCitation?: (from: number, to: number, rect: DOMRect, jump: boolean) => void;
+      contextMenu?: (from: number, to: number, x: number, y: number) => void;
+    };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -614,6 +625,57 @@ class InlineCommentWidget extends MeasuredWidget {
   ignoreEvent(): boolean { return false; }
 }
 
+class CiteWidget extends MeasuredWidget {
+  cmd: InlineCommand;
+  bibliographyVersion: number;
+
+  constructor(cmd: InlineCommand) {
+    super();
+    this.cmd = cmd;
+    this.bibliographyVersion = window.AaronnoteBibliography?.version?.() ?? 0;
+  }
+
+  protected measureKey(): string { return ""; }
+  protected get measuredBlock(): boolean { return false; }
+
+  eq(other: CiteWidget): boolean {
+    return this.cmd.context === other.cmd.context
+      && this.cmd.switchValue === other.cmd.switchValue
+      && this.cmd.argsRaw === other.cmd.argsRaw
+      && this.cmd.fullFrom === other.cmd.fullFrom
+      && this.cmd.fullTo === other.cmd.fullTo
+      && this.bibliographyVersion === other.bibliographyVersion;
+  }
+
+  toDOM(): HTMLElement {
+    const cite = window.AaronnoteBibliography?.citationLabel?.(this.cmd.fullFrom, this.cmd.fullTo);
+    const wrap = document.createElement("span");
+    wrap.className = `inline-cite-widget inline-command-token${cite?.error ? " is-error" : ""}`;
+    wrap.dataset.cmSourceFrom = String(this.cmd.fullFrom);
+    wrap.dataset.cmSourceTo = String(this.cmd.fullTo);
+    wrap.dataset.cmOpenSource = "true";
+    wrap.textContent = cite?.label || `[${this.cmd.context.trim() || "?"}]`;
+    wrap.title = cite?.title || `${this.cmd.switchValue} / ${this.cmd.context}`;
+    wrap.addEventListener("mousedown", (event) => {
+      if (event.metaKey || event.ctrlKey) stopWidgetEventPropagation(event);
+    });
+    wrap.addEventListener("click", (event) => {
+      if (!event.metaKey && !event.ctrlKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      window.AaronnoteBibliography?.openCitation?.(this.cmd.fullFrom, this.cmd.fullTo, wrap.getBoundingClientRect(), true);
+    });
+    wrap.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      window.AaronnoteBibliography?.contextMenu?.(this.cmd.fullFrom, this.cmd.fullTo, event.clientX, event.clientY);
+    });
+    return wrap;
+  }
+
+  ignoreEvent(): boolean { return false; }
+}
+
 function visualLineTextRight(line: HTMLElement, anchorRect: DOMRect, ignored: HTMLElement): number {
   const doc = line.ownerDocument;
   const win = doc.defaultView;
@@ -829,6 +891,13 @@ function buildInlineCommandDecos(
         decos.push(
           Decoration.replace({
             widget: new SideCommentWidget({ ...cmd, fullFrom: from, fullTo: to }),
+          }).range(from, to),
+        );
+      }
+      if (cmd.name === "cite" && !cursorInside) {
+        decos.push(
+          Decoration.replace({
+            widget: new CiteWidget({ ...cmd, fullFrom: from, fullTo: to }),
           }).range(from, to),
         );
       }

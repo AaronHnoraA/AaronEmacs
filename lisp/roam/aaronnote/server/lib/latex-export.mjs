@@ -62,7 +62,7 @@ function escapeLatexUrl(value) {
   return String(value ?? "").trim().replace(/\\/g, "/").replace(/([%#{}])/g, "\\$1");
 }
 
-function inlineTokenAt(source, pos) {
+function inlineTokenAt(source, pos, options = {}) {
   const rest = source.slice(pos);
   let match = rest.match(/^\\\(([^\n]+?)\\\)/);
   if (match) return { length: match[0].length, latex: `\\(${match[1]}\\)` };
@@ -72,31 +72,58 @@ function inlineTokenAt(source, pos) {
 
   match = rest.match(/^!\[([^\]\n]*)\]\(([^)\n]+)\)/);
   if (match) {
-    const label = convertInline(match[1] || "image");
+    const label = convertInline(match[1] || "image", options);
     return { length: match[0].length, latex: `\\href{${escapeLatexUrl(match[2])}}{${label}}` };
   }
 
   match = rest.match(/^\[([^\]\n]+)\]\(([^)\n]+)\)/);
   if (match) return {
     length: match[0].length,
-    latex: `\\href{${escapeLatexUrl(match[2])}}{${convertInline(match[1])}}`,
+    latex: `\\href{${escapeLatexUrl(match[2])}}{${convertInline(match[1], options)}}`,
   };
 
   match = rest.match(/^\*\*([^*\n]+)\*\*/);
-  if (match) return { length: match[0].length, latex: `\\textbf{${convertInline(match[1])}}` };
+  if (match) return { length: match[0].length, latex: `\\textbf{${convertInline(match[1], options)}}` };
   match = rest.match(/^__([^_\n]+)__/);
-  if (match) return { length: match[0].length, latex: `\\textbf{${convertInline(match[1])}}` };
+  if (match) return { length: match[0].length, latex: `\\textbf{${convertInline(match[1], options)}}` };
   match = rest.match(/^\*([^*\n]+)\*/);
-  if (match) return { length: match[0].length, latex: `\\emph{${convertInline(match[1])}}` };
+  if (match) return { length: match[0].length, latex: `\\emph{${convertInline(match[1], options)}}` };
   match = rest.match(/^_([^_\n]+)_/);
-  if (match) return { length: match[0].length, latex: `\\emph{${convertInline(match[1])}}` };
+  if (match) return { length: match[0].length, latex: `\\emph{${convertInline(match[1], options)}}` };
   return null;
 }
 
-function convertInline(text) {
+function commandKeys(command) {
+  return String(command.context || "").split(";").map((key) => key.trim()).filter(Boolean);
+}
+
+function commandArgs(command) {
+  const body = String(command.argsRaw || "").trim().replace(/^\{|\}$/g, "");
+  const args = {};
+  for (const part of body.split(";")) {
+    const match = part.match(/^\s*([A-Za-z][\w-]*)\s*:\s*(.*?)\s*$/);
+    if (match) args[match[1].toLowerCase()] = match[2];
+  }
+  return args;
+}
+
+function citeLatex(command, options = {}) {
+  const map = options.citationKeyMap || {};
+  const namespace = String(command.switchValue || "").trim();
+  const keys = commandKeys(command)
+    .map((key) => map[`${namespace}\0${key}`] || "")
+    .filter(Boolean);
+  if (keys.length === 0) return "";
+  const args = commandArgs(command);
+  const locator = String(args.locator || args.page || args.pages || "").trim();
+  const opt = locator ? `[${escapeLatexText(locator)}]` : "";
+  return `\\cite${opt}{${keys.join(",")}}`;
+}
+
+function convertInline(text, options = {}) {
   const source = String(text ?? "").trim();
   const annotations = scanInlineCommands(source)
-    .filter((command) => command.name === "todo" || command.name === "comment" || command.name === "scomment");
+    .filter((command) => command.name === "todo" || command.name === "comment" || command.name === "scomment" || command.name === "cite");
   let annotationIndex = 0;
   let latex = "";
   let plain = "";
@@ -110,13 +137,15 @@ function convertInline(text) {
     if (annotation?.fullFrom === pos) {
       flushPlain();
       if (annotation.name === "scomment") {
-        latex += `\\sidecomment{${convertInline(annotation.context)}}`;
+        latex += `\\sidecomment{${convertInline(annotation.context, options)}}`;
+      } else if (annotation.name === "cite") {
+        latex += citeLatex(annotation, options);
       }
       pos = annotation.fullTo;
       annotationIndex++;
       continue;
     }
-    const token = inlineTokenAt(source, pos);
+    const token = inlineTokenAt(source, pos, options);
     if (!token) {
       plain += source[pos];
       pos += 1;
@@ -154,8 +183,8 @@ function orgBlockCloseKind(line) {
 // Titles, headings, and environment labels are LaTeX moving arguments, but
 // inline math is still valid there. Escape prose while preserving Aaronnote's
 // canonical \(...\) math spans instead of turning their backslashes into text.
-export function escapeLatexTitle(value) {
-  return convertInline(value).replace(/\s+/g, " ").trim();
+export function escapeLatexTitle(value, options = {}) {
+  return convertInline(value, options).replace(/\s+/g, " ").trim();
 }
 
 function parseMeta(lines) {
@@ -251,9 +280,9 @@ function effectiveCommentBlocks(rules) {
   return merged;
 }
 
-function flushParagraph(out, paragraph) {
+function flushParagraph(out, paragraph, options = {}) {
   if (paragraph.length === 0) return;
-  out.push(paragraph.map(convertInline).join(" "));
+  out.push(paragraph.map((line) => convertInline(line, options)).join(" "));
   out.push("");
   paragraph.length = 0;
 }
@@ -306,7 +335,7 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
     }
 
     if (/^```/.test(line)) {
-      flushParagraph(out, paragraph);
+      flushParagraph(out, paragraph, options);
       closeList();
       out.push(inFence ? "\\end{verbatim}" : "\\begin{verbatim}");
       inFence = !inFence;
@@ -319,7 +348,7 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
     }
 
     if (!inDisplayMath && DISPLAY_MATH_OPEN_RE.test(line)) {
-      flushParagraph(out, paragraph);
+      flushParagraph(out, paragraph, options);
       closeList();
       out.push("\\[");
       inDisplayMath = true;
@@ -339,7 +368,7 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
 
     const begin = orgBlockOpen(line);
     if (begin) {
-      flushParagraph(out, paragraph);
+      flushParagraph(out, paragraph, options);
       closeList();
       const kind = begin.kind;
       if (kind === "lean4" || kind === "src" || kind === "source") {
@@ -353,7 +382,7 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
     }
     const end = orgBlockCloseKind(line);
     if (end) {
-      flushParagraph(out, paragraph);
+      flushParagraph(out, paragraph, options);
       closeList();
       const requestedKind = end;
       const kind = envStack.pop();
@@ -369,48 +398,48 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
     }
 
     if (/^\s*$/.test(line)) {
-      flushParagraph(out, paragraph);
+      flushParagraph(out, paragraph, options);
       closeList();
       continue;
     }
 
     const heading = line.match(/^(#{1,6})\s+(.+)$/);
     if (heading) {
-      flushParagraph(out, paragraph);
+      flushParagraph(out, paragraph, options);
       closeList();
       const command = sectionCommand(heading[1].length);
-      out.push(`\\${command}{${escapeLatexTitle(heading[2])}}`, "");
+      out.push(`\\${command}{${escapeLatexTitle(heading[2], options)}}`, "");
       continue;
     }
 
     const unordered = line.match(/^([ \t]*)[-*+]\s+(.+)$/);
     if (unordered) {
-      flushParagraph(out, paragraph);
+      flushParagraph(out, paragraph, options);
       const indent = [...unordered[1]].reduce((sum, char) => sum + (char === "\t" ? 4 : 1), 0);
       openList("itemize", indent);
-      out.push(`\\item ${convertInline(unordered[2])}`);
+      out.push(`\\item ${convertInline(unordered[2], options)}`);
       continue;
     }
 
     const ordered = line.match(/^([ \t]*)\d+[.)]\s+(.+)$/);
     if (ordered) {
-      flushParagraph(out, paragraph);
+      flushParagraph(out, paragraph, options);
       const indent = [...ordered[1]].reduce((sum, char) => sum + (char === "\t" ? 4 : 1), 0);
       openList("enumerate", indent);
-      out.push(`\\item ${convertInline(ordered[2])}`);
+      out.push(`\\item ${convertInline(ordered[2], options)}`);
       continue;
     }
 
     const quote = line.match(/^>\s*(.*)$/);
     if (quote) {
-      flushParagraph(out, paragraph);
+      flushParagraph(out, paragraph, options);
       closeList();
-      out.push("\\begin{quote}", convertInline(quote[1]), "\\end{quote}", "");
+      out.push("\\begin{quote}", convertInline(quote[1], options), "\\end{quote}", "");
       continue;
     }
 
     if (isPrivateAnnotationLine(line)) {
-      flushParagraph(out, paragraph);
+      flushParagraph(out, paragraph, options);
       closeList();
       continue;
     }
@@ -418,7 +447,7 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
     paragraph.push(line);
   }
 
-  flushParagraph(out, paragraph);
+  flushParagraph(out, paragraph, options);
   closeList();
   if (inFence) throw new Error(`Unclosed Markdown code fence opened on line ${fenceLine}`);
   if (inDisplayMath) throw new Error(`Unclosed display math opened on line ${displayMathLine}`);
@@ -437,6 +466,20 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
 // Canonical name for the deterministic base conversion. `aaronnoteMarkdownToLatex`
 // is kept as an alias for callers and tests that predate the mechanical/codex split.
 export const mechanicalConvert = aaronnoteMarkdownToLatex;
+
+export function bibliographyReferencesToLatex(references = [], citationKeyById = {}) {
+  const refs = Array.isArray(references) ? references : [];
+  if (refs.length === 0) return "";
+  const lines = ["", "\\begin{thebibliography}{99}"];
+  for (const ref of refs) {
+    const id = String(ref?.id || "");
+    const key = citationKeyById[id] || id.replace(/[^A-Za-z0-9:_-]/g, "_");
+    const text = String(ref?.text || "").replace(/^\[\d+\]\s*/, "");
+    lines.push(`\\bibitem{${key}} ${escapeLatexText(text)}`);
+  }
+  lines.push("\\end{thebibliography}", "");
+  return lines.join("\n");
+}
 
 export function applyLatexTemplate(template, vars) {
   const source = String(template || DEFAULT_TEMPLATE);
