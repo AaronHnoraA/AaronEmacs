@@ -601,10 +601,6 @@ function referenceById(id: string): BibliographyReference | undefined {
   return (bibliographyModel.references ?? []).find((ref) => ref.id === id);
 }
 
-function entryById(id: string) {
-  return bibliographyModel.entries?.find((entry) => entry.id === id);
-}
-
 function renderBibliographyPanel(): void {
   const refs = bibliographyModel.references ?? [];
   bibliographyPanel.hidden = refs.length === 0;
@@ -798,7 +794,7 @@ async function openBibEntryInEmacs(entry: BibliographyReference["entry"] | undef
 async function openCitationBibInEmacs(from: number, to: number): Promise<void> {
   const cite = citationAtRange(from, to);
   const id = cite?.itemIds?.[0];
-  const entry = id ? entryById(id) : undefined;
+  const entry = id ? referenceById(id)?.entry : undefined;
   await openBibEntryInEmacs(entry);
 }
 
@@ -6361,7 +6357,7 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
   if (citeKeyContext) {
     const renderPrefix = citeKeyRenderPrefix(citeKeyContext);
     scheduleAsyncCompletion(
-      `bib-key:${currentFile}:${citeKeyContext.namespace}:${citeKeyContext.prefix}`,
+      `bib-key:${currentFile}:${citeKeyContext.namespace}:${citeKeyContext.separator ?? " "}:${citeKeyContext.prefix}`,
       renderPrefix,
       citeKeyContext.prefix.length,
       ctx.rect,

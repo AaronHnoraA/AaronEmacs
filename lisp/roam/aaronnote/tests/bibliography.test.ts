@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "@voidzero-dev/vite-plus-test";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -63,6 +63,8 @@ describe("bibliography", () => {
     expect(result.citations?.[0]?.diagnostics).toEqual([]);
     expect(result.references).toHaveLength(1);
     expect(result.references?.[0]?.text).toContain("Volker Strassen");
+    expect(result.references?.[0]?.entry?.file).toBe(await realpath(join(noteDir, "bib", "iso.bib")));
+    expect(result.references?.[0]?.entry?.path).toBe("project/iso/bib/iso.bib");
 
     const namespaces = await bibliographyCompletions({ file, content, kind: "namespaces" });
     expect(namespaces.items?.find((item: { key?: string }) => item.key === "iso")).toMatchObject({

@@ -7,16 +7,19 @@ export function citeNamespaceRenderPrefix(prefix: string): string {
   return `@@cite(${prefix}`;
 }
 
-export function citeKeyCompletionContext(before: string): { namespace: string; prefix: string } | null {
-  const match = before.match(/@@cite\(([^)\n]+)\)\s+\[([^\]\n]*)$/);
+export type CiteKeyCompletionContext = { namespace: string; prefix: string; separator?: string };
+
+export function citeKeyCompletionContext(before: string): CiteKeyCompletionContext | null {
+  const match = before.match(/@@cite\(([^)\n]+)\)(\s*)\[([^\]\n]*)$/);
   if (!match) return null;
-  const keys = match[2] ?? "";
+  const keys = match[3] ?? "";
   return {
     namespace: (match[1] ?? "").trim(),
+    separator: match[2] ?? "",
     prefix: keys.split(";").at(-1)?.trimStart() ?? "",
   };
 }
 
-export function citeKeyRenderPrefix(context: { namespace: string; prefix: string }): string {
-  return `@@cite(${context.namespace}) [${context.prefix}`;
+export function citeKeyRenderPrefix(context: CiteKeyCompletionContext): string {
+  return `@@cite(${context.namespace})${context.separator ?? " "}[${context.prefix}`;
 }

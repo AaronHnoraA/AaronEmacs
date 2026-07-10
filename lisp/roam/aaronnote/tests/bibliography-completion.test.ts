@@ -17,8 +17,19 @@ describe("bibliography completion context", () => {
   test("recognizes the current key after semicolon-separated keys", () => {
     expect(citeKeyCompletionContext("text @@cite(iso) [Str87; Iv")).toEqual({
       namespace: "iso",
+      separator: " ",
       prefix: "Iv",
     });
+  });
+
+  test("recognizes key completion without a space before the bracket", () => {
+    const context = citeKeyCompletionContext("text @@cite(iso)[Str");
+    expect(context).toEqual({
+      namespace: "iso",
+      separator: "",
+      prefix: "Str",
+    });
+    expect(context && citeKeyRenderPrefix(context)).toBe("@@cite(iso)[Str");
   });
 
   test("does not treat a completed citation as an active completion", () => {

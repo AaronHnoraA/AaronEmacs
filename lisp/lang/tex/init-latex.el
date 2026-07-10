@@ -284,25 +284,40 @@
 
 (defun my/zotero-append-bibtex (target bibtex)
   "Append BIBTEX to TARGET unless its key is already present."
-  (let ((key (my/zotero-bibtex-entry-key bibtex)))
+  (let ((key (my/zotero-bibtex-entry-key bibtex))
+        (target (expand-file-name target)))
     (unless (and key (not (string-empty-p key)))
       (error "Zotero returned BibTeX without a citation key"))
-    (let ((buffer (find-file-noselect target)))
-      (with-current-buffer buffer
-        (unless (derived-mode-p 'bibtex-mode)
-          (bibtex-mode))
-        (save-restriction
-          (widen)
-          (if (bibtex-search-entry key nil)
-              (message "BibTeX key %s already exists in %s" key target)
-            (goto-char (point-max))
-            (unless (bolp) (insert "\n"))
-            (unless (= (point) (point-min)) (insert "\n"))
-            (insert (string-trim-right bibtex) "\n")
-            (save-buffer)
-            (bibtex-search-entry key nil)
-            (message "Imported Zotero key %s into %s" key target))))
-      (pop-to-buffer buffer))))
+    (cl-labels
+        ((append-in-current-buffer ()
+           (unless (derived-mode-p 'bibtex-mode)
+             (bibtex-mode))
+           (save-excursion
+             (save-restriction
+               (widen)
+               (if (bibtex-search-entry key nil)
+                   (progn
+                     (message "BibTeX key %s already exists in %s" key target)
+                     nil)
+                 (goto-char (point-max))
+                 (unless (bolp) (insert "\n"))
+                 (unless (= (point) (point-min)) (insert "\n"))
+                 (insert (string-trim-right bibtex) "\n")
+                 t)))))
+      (make-directory (file-name-directory target) t)
+      (if-let* ((buffer (get-file-buffer target)))
+          (with-current-buffer buffer
+            (when (append-in-current-buffer)
+              (let ((inhibit-message t))
+                (save-buffer))
+              (message "Imported Zotero key %s into %s" key target)))
+        (with-temp-buffer
+          (when (file-exists-p target)
+            (insert-file-contents target))
+          (when (append-in-current-buffer)
+            (let ((inhibit-message t))
+              (write-region (point-min) (point-max) target nil 'silent))
+            (message "Imported Zotero key %s into %s" key target)))))))
 
 (defun my/zotero-default-bib-file (current-file target-file)
   "Return a sensible BibTeX target near CURRENT-FILE or TARGET-FILE."
