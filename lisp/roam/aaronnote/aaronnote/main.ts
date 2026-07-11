@@ -313,6 +313,7 @@ let applyingContent = false;
 let saveTimer = 0;
 let saveIdleHandle = 0;
 let proseRequestSeq = 0;
+let proseAutoSuspendedUntil = 0;
 let activeProseDiagnostic: ProseDiagnostic | null = null;
 let cursorPositionsLoaded = false;
 let cursorPositions: CursorPosition[] = [];
@@ -389,6 +390,12 @@ const MATH_PREVIEW_ERROR_MAX_LENGTH = 180;
 const NAVIGATION_BACK_STACK_MAX = 80;
 const PROSE_SCOPE_PADDING = 32 * 1024;
 const PROSE_SCOPE_MAX_CHARS = 180_000;
+const PROSE_AUTO_PADDING = 4 * 1024;
+const PROSE_AUTO_MAX_CHARS = 32 * 1024;
+const PROSE_AUTO_IDLE_MS = 1800;
+const PROSE_AUTO_SCROLL_IDLE_MS = 700;
+const PROSE_AUTO_RETRY_MS = 30_000;
+const proseCheckTimer = new CoalescedTimer(PROSE_AUTO_IDLE_MS);
 const LARGE_DOCUMENT_CHARS = 512 * 1024;
 const WRITING_STATS_DELAY_MS = 300;
 const WRITING_STATS_LARGE_DELAY_MS = 900;
@@ -577,6 +584,7 @@ const editor = createEditor(host, {
     scheduleBibliographyRefresh();
     if (!currentReadOnly) scheduleSave();
     scheduleWritingStats(true);
+    if (!applyingContent && !currentReadOnly) scheduleAutomaticProseCheck();
   },
   onSelectionChange: () => scheduleWritingStats(editor.view.state.doc !== writingStatsDoc),
   onBlur: () => {
@@ -2778,6 +2786,7 @@ function applyOpenedNote(
   hideSnippetPopup();
   hideMathPreview();
   proseRequestSeq += 1;
+  proseCheckTimer.cancel();
   setProseDiagnostics(editor.view, []);
   hideProsePopover();
   selectionTool.hidden = true;
@@ -2790,6 +2799,7 @@ function applyOpenedNote(
   scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
   scheduleBibliographyRefresh(true);
   restoreEditorScroll(options.restoreScroll);
+  if (!currentReadOnly) scheduleAutomaticProseCheck(2200);
   if (shouldRevealCursor && !options.restoreScroll && !hasPendingOpenTarget) {
     revealCursorAfterLayout();
   }
@@ -2950,14 +2960,16 @@ function primaryMod(event: KeyboardEvent): boolean {
     : event.ctrlKey && !event.metaKey;
 }
 
-function proseCheckSegments(): Array<{ from: number; text: string }> {
+function proseCheckSegments(automatic = false): Array<{ from: number; text: string }> {
   const doc = editor.view.state.doc;
   const selection = editor.getMarkdownSelection();
-  const rawRanges = selection.from !== selection.to
+  const padding = automatic ? PROSE_AUTO_PADDING : PROSE_SCOPE_PADDING;
+  const maxChars = automatic ? PROSE_AUTO_MAX_CHARS : PROSE_SCOPE_MAX_CHARS;
+  const rawRanges = !automatic && selection.from !== selection.to
     ? [{ from: selection.from, to: selection.to }]
     : editor.view.visibleRanges.map((range) => ({
-      from: Math.max(0, range.from - PROSE_SCOPE_PADDING),
-      to: Math.min(doc.length, range.to + PROSE_SCOPE_PADDING),
+      from: Math.max(0, range.from - padding),
+      to: Math.min(doc.length, range.to + padding),
     }));
   const ranges = rawRanges
     .map((range) => ({
@@ -2972,7 +2984,7 @@ function proseCheckSegments(): Array<{ from: number; text: string }> {
     else merged.push({ ...range });
   }
   const segments: Array<{ from: number; text: string }> = [];
-  let remaining = PROSE_SCOPE_MAX_CHARS;
+  let remaining = maxChars;
   for (const range of merged) {
     if (remaining <= 0) break;
     const to = Math.min(range.to, range.from + remaining);
@@ -2989,40 +3001,62 @@ function hideProsePopover(): void {
   activeProseDiagnostic = null;
 }
 
-async function runProseCheck(): Promise<void> {
+function scheduleAutomaticProseCheck(delayMs = PROSE_AUTO_IDLE_MS): void {
+  if (currentReadOnly || !currentFile || !editorSurfaceVisible()
+      || Date.now() < proseAutoSuspendedUntil) return;
+  proseCheckTimer.schedule(() => void runProseCheck(true), undefined, delayMs);
+}
+
+async function runProseCheck(automatic = false): Promise<void> {
   const requestSeq = ++proseRequestSeq;
-  hideProsePopover();
-  const segments = proseCheckSegments();
+  if (!automatic) hideProsePopover();
+  const segments = proseCheckSegments(automatic);
   if (segments.length === 0) {
-    setProseDiagnostics(editor.view, []);
-    setStatus("Nothing to check");
+    if (!automatic) {
+      setProseDiagnostics(editor.view, []);
+      setStatus("Nothing to check");
+    }
     return;
   }
-  setStatus("Checking prose...");
+  if (!automatic) setStatus("Checking prose...");
   try {
     const result = await api.proseCheck.run({
       file: currentFile,
       segments,
       totalChars: editor.getMarkdownLength(),
+      allowLocalFallback: !automatic,
     });
     if (requestSeq !== proseRequestSeq) return;
+    const failures = (result.tools ?? []).filter((tool) => tool.ok === false && !tool.optional);
+    if (automatic && failures.length > 0) {
+      proseAutoSuspendedUntil = Date.now() + PROSE_AUTO_RETRY_MS;
+      return;
+    }
+    if (failures.length === 0
+        && !(result.tools ?? []).some((tool) => tool.message?.includes("used local CLI"))) {
+      proseAutoSuspendedUntil = 0;
+    }
     const diagnostics = (result.diagnostics ?? []) as ProseDiagnostic[];
     setProseDiagnostics(editor.view, diagnostics);
-    const partial = result.scope?.partial ? " (bounded scope)" : "";
-    const failures = (result.tools ?? []).filter((tool) => tool.ok === false && !tool.optional);
-    setStatus(failures.length > 0
-      ? failures.map((tool) => tool.message || `${tool.source} failed`).join("; ")
-      : `${diagnostics.length} prose issue${diagnostics.length === 1 ? "" : "s"}${partial}`);
+    if (!automatic) {
+      const partial = result.scope?.partial ? " (bounded scope)" : "";
+      const localFallback = (result.tools ?? []).some((tool) => tool.message?.includes("used local CLI"))
+        ? " (local CLI)"
+        : "";
+      setStatus(failures.length > 0
+        ? failures.map((tool) => tool.message || `${tool.source} failed`).join("; ")
+        : `${diagnostics.length} prose issue${diagnostics.length === 1 ? "" : "s"}${partial}${localFallback}`);
+    }
   } catch (error) {
     if (requestSeq !== proseRequestSeq) return;
-    setStatus(error instanceof Error ? error.message : "Prose check failed");
+    if (!automatic) setStatus(error instanceof Error ? error.message : "Prose check failed");
   }
 }
 
 function runProseCheckShortcut(event: KeyboardEvent): boolean {
   if (!primaryMod(event) || !event.shiftKey || event.altKey || event.key.toLowerCase() !== "c") return false;
   event.preventDefault();
-  void runProseCheck();
+  void runProseCheck(false);
   return true;
 }
 
@@ -7285,7 +7319,7 @@ prosePopover.addEventListener("click", (event) => {
     void api.proseCheck.acceptWord(word)
       .then(() => {
         removeProseDiagnostics((entry) => entry.word?.toLowerCase() === word.toLowerCase());
-        setStatus(`Added “${word}” to the Aaronnote Vale vocabulary`);
+        setStatus(`Added “${word}” to the Aaronnote prose dictionary`);
       })
       .catch((error) => setStatus(error instanceof Error ? error.message : "Adding word failed"));
   }
@@ -7367,7 +7401,12 @@ document.addEventListener("mouseup", (event) => {
 window.addEventListener("resize", () => {
   scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: !selectionTool.hidden });
 });
-window.addEventListener("scroll", () => scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: !selectionTool.hidden }), { capture: true, passive: true });
+window.addEventListener("scroll", (event) => {
+  scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: !selectionTool.hidden });
+  if (event.target instanceof Node && host.contains(event.target)) {
+    scheduleAutomaticProseCheck(PROSE_AUTO_SCROLL_IDLE_MS);
+  }
+}, { capture: true, passive: true });
 selectionTool.addEventListener("mousedown", (event) => event.preventDefault());
 selectionTool.addEventListener("click", (event) => {
   const button = (event.target as Element | null)?.closest<HTMLButtonElement>("[data-selection-command]");

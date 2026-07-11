@@ -1,8 +1,0 @@
-extends: existence
-message: "'%s' is passive voice with an explicit agent. Prefer active voice if the actor matters."
-ignorecase: true
-level: suggestion
-raw:
-  - \b(am|are|were|being|is|been|was|be)\b\s*
-tokens:
-  - '(?:analy(?:s|z)ed|calculated|compared|computed|conducted|constructed|derived|designed|estimated|evaluated|examined|implemented|measured|model(?:ed|led)|observed|obtained|performed|predicted|recorded|reported|selected|simulated|tested|trained|verified)\s+by\b'

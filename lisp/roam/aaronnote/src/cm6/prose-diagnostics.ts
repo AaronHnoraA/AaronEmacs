@@ -1,7 +1,7 @@
 import { StateEffect, StateField, type Transaction } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 
-export type ProseDiagnosticSource = "vale" | "cspell" | "browser";
+export type ProseDiagnosticSource = "languagetool" | "browser";
 
 export type ProseDiagnostic = {
   source: ProseDiagnosticSource;

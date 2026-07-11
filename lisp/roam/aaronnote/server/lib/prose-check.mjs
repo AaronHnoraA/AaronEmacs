@@ -1,38 +1,30 @@
 import { execFile } from "node:child_process";
-import { constants, existsSync } from "node:fs";
+import { constants } from "node:fs";
 import { access } from "node:fs/promises";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
-import { promisify } from "node:util";
-import { runtimeMkdtemp } from "./tmp.mjs";
+import { dirname, join } from "node:path";
 
 import {
   AARONNOTE_ACCEPTED_WORDS,
   maskAaronnoteProse,
-  offsetFromLineColumn,
   rangeHasCheckedText,
 } from "../../shared/prose-mask.mjs";
 
-const execFileAsync = promisify(execFile);
-const TOOL_TIMEOUT_MS = 4000;
-const TOOL_BUDGET_MS = 6500;
+const LANGUAGETOOL_TIMEOUT_MS = 15_000;
+const LANGUAGETOOL_HTTP_TIMEOUT_MS = 5_000;
 const MAX_BUFFER = 4 * 1024 * 1024;
 const MAX_DIAGNOSTICS_PER_TOOL = 240;
 const MAX_CHECK_CHARS = 180_000;
 const CHUNK_TARGET_CHARS = 45_000;
 const MAX_CHUNKS_PER_TOOL = 6;
-const CSPELL_SEPARATOR = "\u001f";
+const LANGUAGETOOL_LANGUAGE = process.env.AARONNOTE_LANGUAGETOOL_LANGUAGE || "en-US";
+const LANGUAGETOOL_URL = process.env.AARONNOTE_LANGUAGETOOL_URL
+  || "http://10.243.90.222:8765";
 
 const WORKSPACE_ROOT = process.env.AARONNOTE_WORKSPACE_ROOT || join(homedir(), ".config", "emacs");
-const WORKSPACE_VALE_CONFIG = process.env.AARONNOTE_VALE_CONFIG || join(WORKSPACE_ROOT, "vale-styles", ".vale.ini");
-const VALE_CONFIG = existsSync(WORKSPACE_VALE_CONFIG)
-  ? WORKSPACE_VALE_CONFIG
-  : join(homedir(), ".config", "vale", ".vale.ini");
-const LEGACY_VALE_CONFIG = join(homedir(), ".vale.ini");
-const CSPELL_CONFIG = join(homedir(), ".config", "vale", "aaronnote-cspell.json");
-const USER_WORDS_FILE = process.env.AARONNOTE_VALE_WORDS
-  || join(WORKSPACE_ROOT, "vale-styles", "config", "vocabularies", "Notes", "accept.txt");
+const USER_WORDS_FILE = process.env.AARONNOTE_PROSE_WORDS
+  || join(WORKSPACE_ROOT, "etc", "prose-accepted-words.txt");
 const GUI_TOOL_PATHS = [
   join(homedir(), ".local", "bin"),
   join(homedir(), ".nix-profile", "bin"),
@@ -52,6 +44,21 @@ const TOOL_ENV = {
   ...process.env,
   PATH: [...new Set([...GUI_TOOL_PATHS, ...String(process.env.PATH || "").split(":").filter(Boolean)])].join(":"),
 };
+
+function execFileWithInput(file, args, input, options) {
+  return new Promise((resolve, reject) => {
+    const child = execFile(file, args, options, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+    child.stdin.end(input);
+  });
+}
 
 async function executable(path) {
   try {
@@ -213,63 +220,41 @@ function createCheckChunksFromSegments(segments, totalChars) {
   };
 }
 
-function mapChunkDiagnostics(diagnostics, chunk, sourceLength) {
-  return diagnostics
-    .map((diag) => ({
-      ...diag,
-      from: diag.from + chunk.from,
-      to: diag.to + chunk.from,
-    }))
-    .filter((diag) => diag.from >= 0 && diag.to > diag.from && diag.to <= sourceLength);
-}
-
-function severity(value) {
-  const raw = String(value || "").toLowerCase();
-  if (raw === "error") return "error";
-  if (raw === "warning") return "warning";
+function languageToolSeverity(item) {
+  const issueType = String(item?.rule?.issueType || "").toLowerCase();
+  const category = String(item?.rule?.category?.id || "").toUpperCase();
+  if (issueType === "grammar" || category === "GRAMMAR") return "error";
+  if (issueType === "misspelling" || category === "TYPOS") return "warning";
   return "info";
 }
 
-function valeReplacement(item) {
-  const action = item?.Action;
-  if (!action || typeof action !== "object") return undefined;
-  const name = String(action.Name || "").toLowerCase();
-  const params = Array.isArray(action.Params) ? action.Params : [];
-  if (name === "remove") return "";
-  if (name === "replace" && params[0] != null) return String(params[0]);
-  if (name === "edit" && String(params[0] || "").toLowerCase() === "replace" && params[1] != null) {
-    return String(params[1]);
-  }
-  return undefined;
-}
-
-export function parseValeDiagnostics(stdout, masked) {
+export function parseLanguageToolDiagnostics(stdout, masked) {
   let parsed;
   try {
     parsed = JSON.parse(stdout || "{}");
   } catch {
     return [];
   }
-  const items = Object.values(parsed).flat().filter((item) => item && typeof item === "object");
+  const items = Array.isArray(parsed?.matches) ? parsed.matches : [];
   const diagnostics = [];
   for (const item of items) {
-    const span = Array.isArray(item.Span) ? item.Span : [];
-    if (!Number.isFinite(Number(item.Line)) || !Number.isFinite(Number(span[0]))) continue;
-    const from = offsetFromLineColumn(masked, Number(item.Line), Number(span[0]));
-    const endColumn = Number.isFinite(Number(span[1])) ? Number(span[1]) + 1 : Number(span[0]) + String(item.Match || "").length;
-    const to = offsetFromLineColumn(masked, Number(item.Line), endColumn);
-    const range = clampRange(masked, from, Math.max(to, from + String(item.Match || "").length));
+    const offset = Number(item?.offset);
+    const length = Number(item?.length);
+    if (!Number.isFinite(offset) || !Number.isFinite(length) || length <= 0) continue;
+    const range = clampRange(masked, offset, offset + length);
     if (!rangeHasCheckedText(masked, range.from, range.to)) continue;
-    const replacement = valeReplacement(item);
+    const suggestions = Array.isArray(item?.replacements)
+      ? item.replacements.map((entry) => String(entry?.value ?? "")).slice(0, 8)
+      : [];
     diagnostics.push({
-      source: "vale",
+      source: "languagetool",
       from: range.from,
       to: range.to,
-      severity: severity(item.Severity),
-      message: String(item.Message || item.Check || "Vale issue"),
-      rule: String(item.Check || ""),
-      word: String(item.Match || ""),
-      suggestions: replacement == null ? [] : [replacement],
+      severity: languageToolSeverity(item),
+      message: String(item?.message || item?.shortMessage || "LanguageTool issue"),
+      rule: String(item?.rule?.id || ""),
+      word: masked.slice(range.from, range.to),
+      suggestions,
     });
     if (diagnostics.length >= MAX_DIAGNOSTICS_PER_TOOL) break;
   }
@@ -311,185 +296,161 @@ export async function acceptProseWord(value) {
   return { ok: true, word };
 }
 
-function parseCspellSuggestions(raw) {
-  return String(raw || "")
-    .replace(/^Suggestions?:\s*/i, "")
-    .replace(/^\[|\]$/g, "")
-    .split(/[,;]/)
-    .map((value) => value.trim().replace(/^["']|["']$/g, ""))
-    .filter(Boolean)
-    .slice(0, 8);
-}
-
-export function parseCspellDiagnostics(stdout, masked) {
-  const diagnostics = [];
-  for (const line of String(stdout || "").split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    const parts = line.split(CSPELL_SEPARATOR);
-    if (parts.length < 4) continue;
-    const [row, col, word, message, suggestionsRaw = ""] = parts;
-    const from = offsetFromLineColumn(masked, Number(row), Number(col));
-    const range = clampRange(masked, from, from + String(word || "").length);
-    if (!rangeHasCheckedText(masked, range.from, range.to)) continue;
-    diagnostics.push({
-      source: "cspell",
-      from: range.from,
-      to: range.to,
-      severity: "warning",
-      message: String(message || `Unknown word: ${word}`),
-      word: String(word || ""),
-      suggestions: parseCspellSuggestions(suggestionsRaw),
+function combineLanguageToolChunks(chunks) {
+  let text = "";
+  const mappings = [];
+  for (const chunk of chunks) {
+    if (text) text += "\n\n";
+    const combinedFrom = text.length;
+    text += chunk.text;
+    mappings.push({
+      combinedFrom,
+      combinedTo: text.length,
+      sourceFrom: chunk.from,
     });
-    if (diagnostics.length >= MAX_DIAGNOSTICS_PER_TOOL) break;
   }
-  return diagnostics;
+  return { text, mappings };
 }
 
-async function runVale(chunks, file, sourceLength) {
-  const bin = await resolveTool("vale", "AARONNOTE_VALE_BIN");
-  const config = existsSync(VALE_CONFIG) ? VALE_CONFIG : existsSync(LEGACY_VALE_CONFIG) ? LEGACY_VALE_CONFIG : "";
-  const diagnostics = [];
-  const deadline = Date.now() + TOOL_BUDGET_MS;
-  let partial = false;
-  for (const chunk of chunks) {
-    if (diagnostics.length >= MAX_DIAGNOSTICS_PER_TOOL || Date.now() >= deadline - 400) {
-      partial = true;
-      break;
-    }
-    const args = [
-      "--output=JSON",
-      "--no-exit",
-      "--no-wrap",
-      ...(config ? [`--config=${config}`] : []),
-      chunk.file,
-    ];
-    try {
-      const timeout = Math.max(750, Math.min(TOOL_TIMEOUT_MS, deadline - Date.now()));
-      const { stdout } = await execFileAsync(bin, args, { timeout, maxBuffer: MAX_BUFFER, env: TOOL_ENV });
-      diagnostics.push(...mapChunkDiagnostics(parseValeDiagnostics(stdout, chunk.text), chunk, sourceLength));
-    } catch (err) {
-      if (err?.code === "ENOENT") return { source: "vale", ok: false, diagnostics: [], message: "Vale is not installed or not on PATH" };
-      const parsed = mapChunkDiagnostics(parseValeDiagnostics(err?.stdout || "", chunk.text), chunk, sourceLength);
-      diagnostics.push(...parsed);
-      if (err?.killed) {
-        partial = true;
-        break;
-      }
-      return {
-        source: "vale",
-        ok: parsed.length > 0,
-        diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS_PER_TOOL),
-        message: String(err?.stderr || err?.message || "Vale failed").trim(),
-        partial,
-      };
-    }
-  }
-  if (diagnostics.length >= MAX_DIAGNOSTICS_PER_TOOL) partial = true;
+function mapLanguageToolDiagnostics(diagnostics, mappings, sourceLength) {
+  return diagnostics.flatMap((diagnostic) => {
+    const mapping = mappings.find((entry) => (
+      diagnostic.from >= entry.combinedFrom && diagnostic.to <= entry.combinedTo
+    ));
+    if (!mapping) return [];
+    const from = mapping.sourceFrom + diagnostic.from - mapping.combinedFrom;
+    const to = mapping.sourceFrom + diagnostic.to - mapping.combinedFrom;
+    if (from < 0 || to <= from || to > sourceLength) return [];
+    return [{ ...diagnostic, from, to }];
+  });
+}
+
+function languageToolResult(stdout, combined, sourceLength) {
+  const diagnostics = mapLanguageToolDiagnostics(
+    parseLanguageToolDiagnostics(stdout, combined.text),
+    combined.mappings,
+    sourceLength,
+  );
+  const partial = diagnostics.length >= MAX_DIAGNOSTICS_PER_TOOL;
   return {
-    source: "vale",
+    source: "languagetool",
     ok: true,
     diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS_PER_TOOL),
-    message: partial ? "Vale checked a bounded scope to stay responsive" : "",
+    message: partial ? "LanguageTool diagnostics were capped to stay responsive" : "",
     partial,
   };
 }
 
-async function runCspell(chunks, sourceLength) {
-  const bin = await resolveTool("cspell", "AARONNOTE_CSPELL_BIN");
-  const configArgs = existsSync(CSPELL_CONFIG) ? ["--config", CSPELL_CONFIG] : [];
-  const diagnostics = [];
-  const deadline = Date.now() + TOOL_BUDGET_MS;
-  let partial = false;
-  for (const chunk of chunks) {
-    if (diagnostics.length >= MAX_DIAGNOSTICS_PER_TOOL || Date.now() >= deadline - 400) {
-      partial = true;
-      break;
-    }
-    const args = [
-      "lint",
-      "--no-progress",
-      "--no-summary",
-      "--no-exit-code",
-      "--no-color",
-      "--show-suggestions",
-      "--issue-template",
-      `$row${CSPELL_SEPARATOR}$col${CSPELL_SEPARATOR}$text${CSPELL_SEPARATOR}$message${CSPELL_SEPARATOR}$suggestions`,
-      ...configArgs,
-      chunk.file,
-    ];
-    try {
-      const timeout = Math.max(750, Math.min(TOOL_TIMEOUT_MS, deadline - Date.now()));
-      const { stdout } = await execFileAsync(bin, args, { timeout, maxBuffer: MAX_BUFFER, env: TOOL_ENV });
-      diagnostics.push(...mapChunkDiagnostics(parseCspellDiagnostics(stdout, chunk.text), chunk, sourceLength));
-    } catch (err) {
-      if (err?.code === "ENOENT") return { source: "cspell", ok: false, diagnostics: [], message: "CSpell is not installed or not on PATH", optional: true };
-      const parsed = mapChunkDiagnostics(parseCspellDiagnostics(err?.stdout || "", chunk.text), chunk, sourceLength);
-      diagnostics.push(...parsed);
-      if (err?.killed) {
-        partial = true;
-        break;
-      }
-      return {
-        source: "cspell",
-        ok: parsed.length > 0,
-        diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS_PER_TOOL),
-        message: String(err?.stderr || err?.message || "CSpell failed").trim(),
-        partial,
-      };
-    }
-  }
-  if (diagnostics.length >= MAX_DIAGNOSTICS_PER_TOOL) partial = true;
-  return {
-    source: "cspell",
-    ok: true,
-    diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS_PER_TOOL),
-    message: partial ? "CSpell checked a bounded scope to stay responsive" : "",
-    partial,
-  };
+async function runLanguageToolRemote(combined, sourceLength) {
+  const endpoint = `${LANGUAGETOOL_URL.replace(/\/+$/, "")}/v2/check`;
+  const body = new URLSearchParams({
+    language: LANGUAGETOOL_LANGUAGE,
+    level: "picky",
+    text: combined.text,
+  });
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+    signal: AbortSignal.timeout(LANGUAGETOOL_HTTP_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`NAS LanguageTool returned HTTP ${response.status}`);
+  return languageToolResult(await response.text(), combined, sourceLength);
 }
 
-function tempMarkdownName(file) {
-  const raw = basename(String(file || "Aaronnote.md")).replace(/[^\w.-]+/g, "-") || "Aaronnote.md";
-  return /\.(?:md|markdown)$/i.test(raw) ? raw : `${raw}.md`;
-}
-
-export async function runExternalProseChecks({ file = "", content = "", ranges = [], segments = [], totalChars = 0 } = {}) {
-  const source = String(content || "");
-  const tempDir = await runtimeMkdtemp("prose", file || "Aaronnote.md");
+async function runLanguageToolCli(combined, sourceLength) {
+  const bin = await resolveTool("languagetool", "AARONNOTE_LANGUAGETOOL_BIN");
+  const args = [
+    "--encoding", "utf8",
+    "--json",
+    "--language", LANGUAGETOOL_LANGUAGE,
+    "--level", "PICKY",
+    "--clean-overlapping",
+    "-",
+  ];
   try {
-    const baseName = tempMarkdownName(file);
-    const segmentList = normalizeCheckSegments(segments);
-    const chunkInfo = segmentList.length > 0
-      ? createCheckChunksFromSegments(segmentList, totalChars)
-      : createCheckChunks(maskAaronnoteProse(source), ranges);
-    const chunks = chunkInfo.chunks.map((chunk) => ({
-      ...chunk,
-      file: join(tempDir, `${String(chunk.index + 1).padStart(2, "0")}-${baseName}`),
-    }));
-    await Promise.all(chunks.map((chunk) => writeFile(chunk.file, chunk.text, "utf8")));
-    const [results, userWords] = await Promise.all([Promise.all([
-      runVale(chunks, file, chunkInfo.totalChars),
-      runCspell(chunks, chunkInfo.totalChars),
-    ]), readUserWords()]);
-    const acceptedWords = new Set([
-      ...AARONNOTE_ACCEPTED_WORDS.map(normalizedAcceptedWord),
-      ...userWords,
-    ]);
-    const diagnostics = results
-      .flatMap((result) => result.diagnostics ?? [])
-      .filter((diagnostic) => !acceptedWords.has(normalizedAcceptedWord(diagnostic.word)));
+    const { stdout } = await execFileWithInput(bin, args, combined.text, {
+      timeout: LANGUAGETOOL_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+      env: TOOL_ENV,
+    });
+    return languageToolResult(stdout, combined, sourceLength);
+  } catch (err) {
+    if (err?.code === "ENOENT") {
+      return {
+        source: "languagetool",
+        ok: false,
+        diagnostics: [],
+        message: "LanguageTool is not installed or not on PATH",
+      };
+    }
+    const diagnostics = mapLanguageToolDiagnostics(
+      parseLanguageToolDiagnostics(err?.stdout || "", combined.text),
+      combined.mappings,
+      sourceLength,
+    );
     return {
-      ok: true,
-      diagnostics,
-      tools: results.map(({ source, ok, message, partial, optional }) => ({ source, ok, message: message || "", partial: !!partial, optional: !!optional })),
-      scope: {
-        checkedChars: chunkInfo.checkedChars,
-        totalChars: chunkInfo.totalChars,
-        partial: chunkInfo.partial || results.some((result) => result.partial),
-      },
-      acceptedWords: [...acceptedWords],
+      source: "languagetool",
+      ok: diagnostics.length > 0,
+      diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS_PER_TOOL),
+      message: String(err?.stderr || err?.message || "LanguageTool failed").trim(),
+      partial: !!err?.killed,
     };
-  } finally {
-    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+async function runLanguageTool(chunks, sourceLength, allowLocalFallback) {
+  const combined = combineLanguageToolChunks(chunks);
+  try {
+    return await runLanguageToolRemote(combined, sourceLength);
+  } catch (remoteError) {
+    const reason = remoteError instanceof Error ? remoteError.message : String(remoteError);
+    if (!allowLocalFallback) {
+      return {
+        source: "languagetool",
+        ok: false,
+        diagnostics: [],
+        message: `NAS LanguageTool unavailable (${reason})`,
+        partial: false,
+      };
+    }
+    const result = await runLanguageToolCli(combined, sourceLength);
+    return {
+      ...result,
+      message: result.ok
+        ? `NAS LanguageTool unavailable; used local CLI (${reason})`
+        : `${reason}; ${result.message}`,
+    };
+  }
+}
+
+export async function runExternalProseChecks({ file = "", content = "", ranges = [], segments = [], totalChars = 0, allowLocalFallback = true } = {}) {
+  void file;
+  const source = String(content || "");
+  const segmentList = normalizeCheckSegments(segments);
+  const chunkInfo = segmentList.length > 0
+    ? createCheckChunksFromSegments(segmentList, totalChars)
+    : createCheckChunks(maskAaronnoteProse(source), ranges);
+  const [result, userWords] = await Promise.all([
+    runLanguageTool(chunkInfo.chunks, chunkInfo.totalChars, allowLocalFallback !== false),
+    readUserWords(),
+  ]);
+  const acceptedWords = new Set([
+    ...AARONNOTE_ACCEPTED_WORDS.map(normalizedAcceptedWord),
+    ...userWords,
+  ]);
+  const diagnostics = (result.diagnostics ?? [])
+    .filter((diagnostic) => !acceptedWords.has(normalizedAcceptedWord(diagnostic.word)));
+  const { source: toolSource, ok, message, partial } = result;
+  return {
+    ok: true,
+    diagnostics,
+    tools: [{ source: toolSource, ok, message: message || "", partial: !!partial }],
+    scope: {
+      checkedChars: chunkInfo.checkedChars,
+      totalChars: chunkInfo.totalChars,
+      partial: chunkInfo.partial || !!result.partial,
+    },
+    acceptedWords: [...acceptedWords],
+  };
 }

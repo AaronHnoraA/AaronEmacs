@@ -166,8 +166,8 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 - `rust-analyzer`
 - Python 语言服务器
   这套配置走 `eglot`，你需要自己装对应 server
-- `vale`
-  如果要用写作 lint
+- `languagetool`（Homebrew）
+  文本 buffer 与 Aaronnote 默认在输入停顿后检查可见区域；`C-c i g` / `Cmd-Shift-C` 手动检查，NAS 失败时仅手动检查回退本地 CLI。`C-u C-c i g` 检查整个 Emacs buffer
 - `vscode-html-language-server`
   用于 HTML / Vue HTML
 

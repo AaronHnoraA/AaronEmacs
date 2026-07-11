@@ -3,6 +3,11 @@
 
 (config-store-set
  '((flymake-fringe-indicator-position . right-fringe)
-   (flymake-vale-modes text-mode latex-mode org-mode message-mode)
-   (flymake-vale-program . "vale") (my/js-indent-offset . 2))
+   (my/languagetool-language . "en-US")
+   (my/languagetool-server-url . "http://10.243.90.222:8765")
+   (my/languagetool-server-timeout . 5.0)
+   (my/languagetool-auto-idle-delay . 1.6)
+   (my/languagetool-auto-padding . 4096)
+   (my/languagetool-auto-max-chars . 32768)
+   (my/languagetool-auto-retry-delay . 30.0) (my/js-indent-offset . 2))
 )

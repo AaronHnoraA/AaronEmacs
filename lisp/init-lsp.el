@@ -930,7 +930,7 @@ leaves those workers orphaned and running."
 (require 'init-haskell)
 (require 'init-python)
 (require 'init-elisp)
-(require 'init-vale)
+(require 'init-languagetool)
 (require 'init-beancount)
 (require 'init-sh)
 (require 'init-java)

@@ -1,5 +1,5 @@
 export type ExternalProseDiagnostic = {
-  source: "vale" | "cspell";
+  source: "languagetool";
   from: number;
   to: number;
   severity: "info" | "warning" | "error";
@@ -9,8 +9,7 @@ export type ExternalProseDiagnostic = {
   suggestions: string[];
 };
 
-export function parseValeDiagnostics(stdout: string, masked: string): ExternalProseDiagnostic[];
-export function parseCspellDiagnostics(stdout: string, masked: string): ExternalProseDiagnostic[];
+export function parseLanguageToolDiagnostics(stdout: string, masked: string): ExternalProseDiagnostic[];
 export function acceptProseWord(word: string): Promise<{ ok: boolean; word?: string; message?: string }>;
 export function runExternalProseChecks(body?: {
   file?: string;
@@ -18,4 +17,5 @@ export function runExternalProseChecks(body?: {
   ranges?: Array<{ from: number; to: number }>;
   segments?: Array<{ from: number; text: string }>;
   totalChars?: number;
+  allowLocalFallback?: boolean;
 }): Promise<Record<string, unknown>>;

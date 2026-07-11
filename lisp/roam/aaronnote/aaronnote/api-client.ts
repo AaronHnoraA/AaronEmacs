@@ -29,11 +29,12 @@ type ProseCheckBody = {
   ranges?: Array<{ from: number; to: number }>;
   segments?: Array<{ from: number; text: string }>;
   totalChars?: number;
+  allowLocalFallback?: boolean;
 };
 type ProseCheckMsg = {
   ok?: boolean;
   diagnostics?: Array<{
-    source: "vale" | "cspell" | "browser";
+    source: "languagetool" | "browser";
     from: number;
     to: number;
     severity?: "info" | "warning" | "error";

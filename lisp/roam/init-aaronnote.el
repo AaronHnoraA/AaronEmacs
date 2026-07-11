@@ -382,10 +382,13 @@ failure is diagnosable without hunting for it."
             (format "AARONNOTE_WEB_DIR=%s" (expand-file-name my/aaronnote--web-dir))
             (format "AARONNOTE_RUNTIME_ROOT=%s" (expand-file-name my/aaronnote--runtime-root))
             (format "AARONNOTE_WORKSPACE_ROOT=%s" (expand-file-name user-emacs-directory))
-            (format "AARONNOTE_VALE_CONFIG=%s"
-                    (expand-file-name "vale-styles/.vale.ini" user-emacs-directory))
-            (format "AARONNOTE_VALE_WORDS=%s"
-                    (expand-file-name "vale-styles/config/vocabularies/Notes/accept.txt"
+            (format "AARONNOTE_LANGUAGETOOL_LANGUAGE=%s"
+                    (or (bound-and-true-p my/languagetool-language) "en-US"))
+            (format "AARONNOTE_LANGUAGETOOL_URL=%s"
+                    (or (bound-and-true-p my/languagetool-server-url)
+                        "http://10.243.90.222:8765"))
+            (format "AARONNOTE_PROSE_WORDS=%s"
+                    (expand-file-name "etc/prose-accepted-words.txt"
                                       user-emacs-directory))
             (format "AARONNOTE_PUBLISH_JS_DIR=%s"
                     (expand-file-name "js" my/aaronnote--runtime-root))
@@ -1784,7 +1787,7 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 (my/aaronnote--def-editor-cmd "insert-table"    "insert-table"    "Insert a Markdown table.")
 (my/aaronnote--def-editor-cmd "insert-math"     "insert-math-block" "Insert a math block.")
 (my/aaronnote--def-editor-cmd "insert-toc"      "insert-toc"      "Insert a table of contents.")
-(my/aaronnote--def-editor-cmd "prose-check"     "prose-check"     "Run bounded Vale/CSpell checks in Aaronnote.")
+(my/aaronnote--def-editor-cmd "prose-check"     "prose-check"     "Run a bounded LanguageTool check in Aaronnote.")
 
 ;;; Jupyter integration.
 

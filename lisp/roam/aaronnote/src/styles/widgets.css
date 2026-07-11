@@ -263,12 +263,8 @@
   text-underline-offset: 3px;
 }
 
-.cm-editor .cm-prose-diagnostic-vale {
+.cm-editor .cm-prose-diagnostic-languagetool {
   text-decoration-color: rgba(217, 119, 6, 0.95);
-}
-
-.cm-editor .cm-prose-diagnostic-cspell {
-  text-decoration-color: rgba(220, 38, 38, 0.95);
 }
 
 .cm-editor .cm-prose-diagnostic-browser {

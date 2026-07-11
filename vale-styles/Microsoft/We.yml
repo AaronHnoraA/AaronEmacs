@@ -1,7 +1,0 @@
-extends: existence
-message: "Conversational first-person plural like '%s' can sound informal in notes or academic prose."
-link: https://docs.microsoft.com/en-us/style-guide/grammar/person#avoid-first-person-plural
-level: suggestion
-ignorecase: true
-tokens:
-  - let's
