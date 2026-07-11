@@ -402,6 +402,7 @@ let mathPreviewWidth = 0;
 let layoutZoom = 1;
 let visualZoom = 1;
 let visualGestureStartZoom = 1;
+let visualGestureAnchor: VisualZoomAnchor = { clientX: 0, clientY: 0 };
 let visualWheelRawZoom = 1;
 let visualWheelIdleTimer = 0;
 const clientId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -1120,11 +1121,39 @@ function clampVisualZoom(value: number): number {
   return Math.min(VISUAL_ZOOM_MAX, Math.max(VISUAL_ZOOM_MIN, value));
 }
 
-function applyVisualZoom(next: number, options: { announce?: boolean } = {}): boolean {
+type VisualZoomAnchor = { clientX: number; clientY: number };
+
+function defaultVisualZoomAnchor(): VisualZoomAnchor {
+  const rect = host.getBoundingClientRect();
+  return { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+}
+
+function eventVisualZoomAnchor(event: Event, fallback = defaultVisualZoomAnchor()): VisualZoomAnchor {
+  const positioned = event as Event & { clientX?: number; clientY?: number };
+  const clientX = Number(positioned.clientX);
+  const clientY = Number(positioned.clientY);
+  return Number.isFinite(clientX) && Number.isFinite(clientY) && (clientX !== 0 || clientY !== 0)
+    ? { clientX, clientY }
+    : fallback;
+}
+
+function applyVisualZoom(
+  next: number,
+  options: { announce?: boolean; anchor?: VisualZoomAnchor } = {},
+): boolean {
   const clamped = clampVisualZoom(next);
   if (Math.abs(clamped - visualZoom) < 0.001) return false;
+  const previous = visualZoom;
+  const anchor = options.anchor;
+  const wrap = anchor ? host.querySelector<HTMLElement>(".typora-web-wrap") : null;
+  const wrapRect = wrap?.getBoundingClientRect();
   visualZoom = clamped;
   document.documentElement.style.setProperty("--aaronnote-visual-zoom", visualZoom.toFixed(3));
+  if (anchor && wrapRect && previous > 0) {
+    const ratio = visualZoom / previous;
+    host.scrollLeft += (anchor.clientX - wrapRect.left) * (ratio - 1);
+    host.scrollTop += (anchor.clientY - wrapRect.top) * (ratio - 1);
+  }
   if (options.announce) setStatus(`Visual zoom ${visualZoomPercent()}`);
   return true;
 }
@@ -1193,7 +1222,7 @@ function handleVisualZoomWheel(event: WheelEvent): void {
   event.stopImmediatePropagation();
   if (!visualWheelIdleTimer) visualWheelRawZoom = visualZoom;
   visualWheelRawZoom = clampVisualZoom(visualWheelRawZoom * visualZoomWheelFactor(event));
-  applyVisualZoom(snapPinchVisualZoom(visualWheelRawZoom));
+  applyVisualZoom(snapPinchVisualZoom(visualWheelRawZoom), { anchor: eventVisualZoomAnchor(event) });
   window.clearTimeout(visualWheelIdleTimer);
   visualWheelIdleTimer = window.setTimeout(() => {
     visualWheelIdleTimer = 0;
@@ -1204,6 +1233,7 @@ function handleVisualZoomWheel(event: WheelEvent): void {
 function handleVisualGestureStart(event: Event): void {
   if (!shouldHandleVisualZoomTarget(event.target)) return;
   visualGestureStartZoom = visualZoom;
+  visualGestureAnchor = eventVisualZoomAnchor(event);
   event.preventDefault();
   event.stopImmediatePropagation();
 }
@@ -1214,7 +1244,9 @@ function handleVisualGestureChange(event: Event): void {
   if (!Number.isFinite(scale) || scale <= 0) return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  applyVisualZoom(snapPinchVisualZoom(visualGestureStartZoom * scale));
+  applyVisualZoom(snapPinchVisualZoom(visualGestureStartZoom * scale), {
+    anchor: eventVisualZoomAnchor(event, visualGestureAnchor),
+  });
 }
 
 function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
