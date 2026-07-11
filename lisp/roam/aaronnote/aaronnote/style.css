@@ -554,7 +554,8 @@ button:disabled {
 
 .aaronnote-tools-panel {
   position: fixed;
-  right: 14px;
+  left: 14px;
+  right: auto;
   top: 42px;
   z-index: 80;
   width: min(360px, calc(100vw - 28px));

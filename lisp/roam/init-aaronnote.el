@@ -1763,6 +1763,7 @@ Blocks the caller until the response arrives (or 8 s timeout)."
      ["Agenda" my/aaronnote-toggle-agenda t]
      ["Local graph" my/aaronnote-toggle-graph t]
      ["Tools" my/aaronnote-toggle-tools t]
+     ["Jupyter cells" my/aaronnote-toggle-jupyter t]
      "---"
      ["Toggle source" my/aaronnote-toggle-source t]
      ["Save" my/aaronnote-save t]))
@@ -1771,7 +1772,8 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 (dolist (entry '((my/aaronnote-toggle-page . "toggle-toc")
                  (my/aaronnote-toggle-agenda . "toggle-agenda")
                  (my/aaronnote-toggle-graph . "toggle-graph")
-                 (my/aaronnote-toggle-tools . "toggle-tools")))
+                 (my/aaronnote-toggle-tools . "toggle-tools")
+                 (my/aaronnote-toggle-jupyter . "jupyter-panel")))
   (let ((fn (car entry)) (command (cdr entry)))
     (fset fn (lambda () (interactive) (my/aaronnote-command command)))))
 
