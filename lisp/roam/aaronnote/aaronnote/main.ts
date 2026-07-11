@@ -29,12 +29,19 @@ import {
   type BibliographyCitation,
   type BibliographyDocument,
   type BibliographyReference,
+  type LanguageToolSettings,
 } from "./api-client.ts";
 import { Epoch } from "../src/async-epoch.ts";
 import { CoalescedTimer } from "../src/coalesced-timer.ts";
 import { blobToBase64 } from "../src/paste.ts";
 import { collectFindMatches, createFindPattern, type FindMatch } from "./find.ts";
 import { AssistScheduler, type AssistUpdateFlags, type AssistUpdateOptions } from "./assist-scheduler.ts";
+import {
+  ProseCheckLifecycle,
+  type ProseCheckContext,
+  type ProseCheckOutcome,
+  type ProseCheckState,
+} from "./prose-check-lifecycle.ts";
 import { createFloatingTocPanel, inlineTagAnchorsFromText, markdownHeadingsFromText } from "./floating-toc.ts";
 import { normalizeDateValue } from "../src/planning-values.ts";
 import { patchPlanningNodeRaw, scanPlanningNodes } from "../shared/planning-dsl.mjs";
@@ -46,6 +53,7 @@ import {
 } from "./latex-export-scope.ts";
 import { resolveAnchorHeading } from "../src/heading-slug.ts";
 import { createLocalGraphPanel } from "./local-graph.ts";
+import { openLanguageToolSettingsTool } from "./languagetool-tool.ts";
 import { setFindHighlightRanges } from "../src/cm6/find-highlight.ts";
 import { refreshViewportDecorationsNow } from "../src/cm6/viewport-refresh.ts";
 import {
@@ -312,8 +320,21 @@ let savedRevision = 0;
 let applyingContent = false;
 let saveTimer = 0;
 let saveIdleHandle = 0;
-let proseRequestSeq = 0;
 let proseAutoSuspendedUntil = 0;
+let languageToolSettings: LanguageToolSettings = {
+  automaticEnabled: true,
+  serverUrl: "http://10.243.90.222:8765",
+  language: "en-US",
+  level: "picky",
+  performanceProfile: "balanced",
+  manualLocalFallback: true,
+  remoteTimeoutMs: 5_000,
+  retryCooldownMs: 30_000,
+};
+let languageToolDefaults = { ...languageToolSettings };
+let languageToolHealth = "Not tested";
+let languageToolRevision = "";
+let languageToolLoadSequence = 0;
 let activeProseDiagnostic: ProseDiagnostic | null = null;
 let cursorPositionsLoaded = false;
 let cursorPositions: CursorPosition[] = [];
@@ -390,12 +411,12 @@ const MATH_PREVIEW_ERROR_MAX_LENGTH = 180;
 const NAVIGATION_BACK_STACK_MAX = 80;
 const PROSE_SCOPE_PADDING = 32 * 1024;
 const PROSE_SCOPE_MAX_CHARS = 180_000;
-const PROSE_AUTO_PADDING = 4 * 1024;
-const PROSE_AUTO_MAX_CHARS = 32 * 1024;
-const PROSE_AUTO_IDLE_MS = 1800;
-const PROSE_AUTO_SCROLL_IDLE_MS = 700;
-const PROSE_AUTO_RETRY_MS = 30_000;
-const proseCheckTimer = new CoalescedTimer(PROSE_AUTO_IDLE_MS);
+const LANGUAGETOOL_LOCAL_DEADLINE_ALLOWANCE_MS = 17_000;
+const PROSE_PROFILES = {
+  responsive: { idleMs: 1_000, scrollMs: 500, padding: 4 * 1024, maxChars: 32 * 1024 },
+  balanced: { idleMs: 1_800, scrollMs: 700, padding: 4 * 1024, maxChars: 32 * 1024 },
+  quiet: { idleMs: 3_000, scrollMs: 1_200, padding: 2 * 1024, maxChars: 16 * 1024 },
+} as const;
 const LARGE_DOCUMENT_CHARS = 512 * 1024;
 const WRITING_STATS_DELAY_MS = 300;
 const WRITING_STATS_LARGE_DELAY_MS = 900;
@@ -502,6 +523,12 @@ function roamFeaturesEnabled(): boolean {
 
 function setStatus(message: string): void {
   statusLabel.textContent = message;
+  delete statusLabel.dataset.proseOwner;
+}
+
+function setOwnedProseStatus(requestId: number, message: string): void {
+  setStatus(message);
+  statusLabel.dataset.proseOwner = String(requestId);
 }
 
 function applyReadOnlyUi(): void {
@@ -584,7 +611,10 @@ const editor = createEditor(host, {
     scheduleBibliographyRefresh();
     if (!currentReadOnly) scheduleSave();
     scheduleWritingStats(true);
-    if (!applyingContent && !currentReadOnly) scheduleAutomaticProseCheck();
+    if (!applyingContent && !currentReadOnly) {
+      proseLifecycle.invalidate("document-edited");
+      scheduleAutomaticProseCheck();
+    }
   },
   onSelectionChange: () => scheduleWritingStats(editor.view.state.doc !== writingStatsDoc),
   onBlur: () => {
@@ -2785,8 +2815,7 @@ function applyOpenedNote(
   snippetSession.clear();
   hideSnippetPopup();
   hideMathPreview();
-  proseRequestSeq += 1;
-  proseCheckTimer.cancel();
+  proseLifecycle.invalidate("note-changed");
   setProseDiagnostics(editor.view, []);
   hideProsePopover();
   selectionTool.hidden = true;
@@ -2960,11 +2989,38 @@ function primaryMod(event: KeyboardEvent): boolean {
     : event.ctrlKey && !event.metaKey;
 }
 
+type ProseCheckInput = {
+  automatic: boolean;
+  file: string;
+  revision: number;
+  settings: LanguageToolSettings;
+};
+
+type ProseCheckApiResult = Awaited<ReturnType<typeof api.proseCheck.run>>;
+
+type ProseCheckRunResult = {
+  input: ProseCheckInput;
+  response?: ProseCheckApiResult;
+  elapsedMs: number;
+  empty?: boolean;
+  deferred?: boolean;
+};
+
+const proseRetryRequests = new Set<number>();
+let proseBusyRequestId = 0;
+let proseManualStageTimer = 0;
+let proseRetryTimer = 0;
+
+function proseProfile() {
+  return PROSE_PROFILES[languageToolSettings.performanceProfile] ?? PROSE_PROFILES.balanced;
+}
+
 function proseCheckSegments(automatic = false): Array<{ from: number; text: string }> {
   const doc = editor.view.state.doc;
   const selection = editor.getMarkdownSelection();
-  const padding = automatic ? PROSE_AUTO_PADDING : PROSE_SCOPE_PADDING;
-  const maxChars = automatic ? PROSE_AUTO_MAX_CHARS : PROSE_SCOPE_MAX_CHARS;
+  const profile = proseProfile();
+  const padding = automatic ? profile.padding : PROSE_SCOPE_PADDING;
+  const maxChars = automatic ? profile.maxChars : PROSE_SCOPE_MAX_CHARS;
   const rawRanges = !automatic && selection.from !== selection.to
     ? [{ from: selection.from, to: selection.to }]
     : editor.view.visibleRanges.map((range) => ({
@@ -3001,56 +3057,218 @@ function hideProsePopover(): void {
   activeProseDiagnostic = null;
 }
 
-function scheduleAutomaticProseCheck(delayMs = PROSE_AUTO_IDLE_MS): void {
-  if (currentReadOnly || !currentFile || !editorSurfaceVisible()
-      || Date.now() < proseAutoSuspendedUntil) return;
-  proseCheckTimer.schedule(() => void runProseCheck(true), undefined, delayMs);
+function proseCheckInput(automatic: boolean): ProseCheckInput {
+  return {
+    automatic,
+    file: currentFile,
+    revision,
+    settings: { ...languageToolSettings },
+  };
 }
 
-async function runProseCheck(automatic = false): Promise<void> {
-  const requestSeq = ++proseRequestSeq;
-  if (!automatic) hideProsePopover();
-  const segments = proseCheckSegments(automatic);
-  if (segments.length === 0) {
-    if (!automatic) {
+function proseAutoSignature(): string {
+  const ranges = editor.view.visibleRanges.map((range) => `${range.from}:${range.to}`).join(",");
+  return [
+    currentFile,
+    revision,
+    editor.getMarkdownLength(),
+    languageToolSettings.performanceProfile,
+    languageToolSettings.language,
+    languageToolSettings.level,
+    ranges,
+  ].join("|");
+}
+
+function clearProseManualStageTimer(): void {
+  if (!proseManualStageTimer) return;
+  window.clearTimeout(proseManualStageTimer);
+  proseManualStageTimer = 0;
+}
+
+function clearProseRetryTimer(): void {
+  if (!proseRetryTimer) return;
+  window.clearTimeout(proseRetryTimer);
+  proseRetryTimer = 0;
+}
+
+function scheduleProseRetry(): void {
+  clearProseRetryTimer();
+  const delayMs = Math.max(0, proseAutoSuspendedUntil - Date.now());
+  proseRetryTimer = window.setTimeout(() => {
+    proseRetryTimer = 0;
+    scheduleAutomaticProseCheck(0);
+  }, delayMs);
+}
+
+function setProseBusy(busy: boolean, requestId = 0): void {
+  if (busy) {
+    proseBusyRequestId = requestId;
+    statusLabel.setAttribute("aria-busy", "true");
+    statusLabel.dataset.proseState = "checking";
+    return;
+  }
+  if (requestId && requestId !== proseBusyRequestId) return;
+  proseBusyRequestId = 0;
+  statusLabel.removeAttribute("aria-busy");
+  delete statusLabel.dataset.proseState;
+  clearProseManualStageTimer();
+}
+
+function proseErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Prose check failed";
+}
+
+async function executeProseCheck(
+  input: ProseCheckInput,
+  context: ProseCheckContext,
+): Promise<ProseCheckRunResult> {
+  if (input.file !== currentFile || input.revision !== revision) {
+    return { input, elapsedMs: 0, deferred: true };
+  }
+  if (context.kind === "auto" && Date.now() < proseAutoSuspendedUntil) {
+    return { input, elapsedMs: 0, deferred: true };
+  }
+  const segments = proseCheckSegments(input.automatic);
+  if (segments.length === 0) return { input, elapsedMs: 0, empty: true };
+  const startedAt = performance.now();
+  const response = await api.proseCheck.run({
+    requestId: `${clientId}:prose:${context.id}`,
+    file: input.file,
+    segments,
+    totalChars: editor.getMarkdownLength(),
+    allowLocalFallback: !input.automatic && input.settings.manualLocalFallback,
+    interactive: !input.automatic,
+  });
+  return { input, response, elapsedMs: Math.max(0, performance.now() - startedAt) };
+}
+
+function observeProseCheck(result: ProseCheckRunResult, context: ProseCheckContext): void {
+  if (context.kind !== "auto" || !result.response) return;
+  const failures = (result.response.tools ?? []).filter((tool) => tool.ok === false && !tool.optional);
+  if (failures.length > 0) {
+    proseAutoSuspendedUntil = Date.now() + languageToolSettings.retryCooldownMs;
+    proseRetryRequests.add(context.id);
+    languageToolHealth = failures.map((tool) => tool.message || "NAS unavailable").join("; ");
+    return;
+  }
+  proseAutoSuspendedUntil = 0;
+  clearProseRetryTimer();
+  languageToolHealth = `Online · ${Math.round(result.elapsedMs)} ms`;
+}
+
+function applyProseCheck(result: ProseCheckRunResult, context: ProseCheckContext): boolean {
+  if (result.deferred) return false;
+  if (result.input.file !== currentFile || result.input.revision !== revision) return false;
+  if (result.empty) {
+    if (context.kind === "manual" && context.id === proseBusyRequestId) {
       setProseDiagnostics(editor.view, []);
       setStatus("Nothing to check");
     }
+    return true;
+  }
+  const response = result.response!;
+  const tools = response.tools ?? [];
+  const failures = tools.filter((tool) => tool.ok === false && !tool.optional);
+  const usedLocalCli = tools.some((tool) => tool.message?.includes("used local CLI"));
+  if (context.kind === "auto" && failures.length > 0) return false;
+  if (context.kind === "manual") {
+    if (failures.length === 0 && !usedLocalCli) {
+      proseAutoSuspendedUntil = 0;
+      clearProseRetryTimer();
+      languageToolHealth = `Online · ${Math.round(result.elapsedMs)} ms`;
+    } else if (usedLocalCli) {
+      proseAutoSuspendedUntil = Date.now() + languageToolSettings.retryCooldownMs;
+      scheduleProseRetry();
+      languageToolHealth = "NAS offline · local CLI used manually";
+    } else {
+      proseAutoSuspendedUntil = Date.now() + languageToolSettings.retryCooldownMs;
+      scheduleProseRetry();
+      languageToolHealth = failures.map((tool) => tool.message || "LanguageTool failed").join("; ");
+    }
+  }
+  const diagnostics = (response.diagnostics ?? []) as ProseDiagnostic[];
+  setProseDiagnostics(editor.view, diagnostics);
+  if (context.kind === "manual" && context.id === proseBusyRequestId) {
+    const partial = response.scope?.partial ? " (bounded scope)" : "";
+    const localFallback = usedLocalCli ? " (local CLI)" : "";
+    setStatus(failures.length > 0
+      ? failures.map((tool) => tool.message || `${tool.source} failed`).join("; ")
+      : `${diagnostics.length} prose issue${diagnostics.length === 1 ? "" : "s"}${partial}${localFallback}`);
+  }
+  return true;
+}
+
+function onProseCheckState(state: ProseCheckState): void {
+  if (state.kind !== "manual" || state.phase === "terminal") return;
+  setProseBusy(true, state.id);
+  setOwnedProseStatus(state.id, state.phase === "scheduled" ? "Prose check queued..." : "Checking prose on NAS...");
+  clearProseManualStageTimer();
+  if (state.phase === "running" && languageToolSettings.manualLocalFallback) {
+    proseManualStageTimer = window.setTimeout(() => {
+      if (proseBusyRequestId === state.id) setOwnedProseStatus(state.id, "Checking prose with local CLI...");
+    }, languageToolSettings.remoteTimeoutMs + 150);
+  }
+}
+
+function onProseCheckFinally(outcome: ProseCheckOutcome): void {
+  if (outcome.kind === "auto") {
+    if (outcome.terminal === "failed" || outcome.terminal === "timeout") {
+      proseAutoSuspendedUntil = Date.now() + languageToolSettings.retryCooldownMs;
+      proseRetryRequests.add(outcome.id);
+      languageToolHealth = outcome.terminal === "timeout"
+        ? "NAS check timed out"
+        : proseErrorMessage(outcome.error);
+    }
+    if (proseRetryRequests.delete(outcome.id)) {
+      scheduleProseRetry();
+    }
     return;
   }
-  if (!automatic) setStatus("Checking prose...");
-  try {
-    const result = await api.proseCheck.run({
-      file: currentFile,
-      segments,
-      totalChars: editor.getMarkdownLength(),
-      allowLocalFallback: !automatic,
-    });
-    if (requestSeq !== proseRequestSeq) return;
-    const failures = (result.tools ?? []).filter((tool) => tool.ok === false && !tool.optional);
-    if (automatic && failures.length > 0) {
-      proseAutoSuspendedUntil = Date.now() + PROSE_AUTO_RETRY_MS;
-      return;
-    }
-    if (failures.length === 0
-        && !(result.tools ?? []).some((tool) => tool.message?.includes("used local CLI"))) {
-      proseAutoSuspendedUntil = 0;
-    }
-    const diagnostics = (result.diagnostics ?? []) as ProseDiagnostic[];
-    setProseDiagnostics(editor.view, diagnostics);
-    if (!automatic) {
-      const partial = result.scope?.partial ? " (bounded scope)" : "";
-      const localFallback = (result.tools ?? []).some((tool) => tool.message?.includes("used local CLI"))
-        ? " (local CLI)"
-        : "";
-      setStatus(failures.length > 0
-        ? failures.map((tool) => tool.message || `${tool.source} failed`).join("; ")
-        : `${diagnostics.length} prose issue${diagnostics.length === 1 ? "" : "s"}${partial}${localFallback}`);
-    }
-  } catch (error) {
-    if (requestSeq !== proseRequestSeq) return;
-    if (!automatic) setStatus(error instanceof Error ? error.message : "Prose check failed");
+  const ownsBusyStatus = outcome.id === proseBusyRequestId;
+  const ownsStatusText = statusLabel.dataset.proseOwner === String(outcome.id);
+  setProseBusy(false, outcome.id);
+  if (!ownsBusyStatus || !ownsStatusText) return;
+  if (outcome.terminal === "failed") setStatus(proseErrorMessage(outcome.error));
+  else if (outcome.terminal === "timeout") setStatus("Prose check timed out");
+  else if (outcome.terminal === "stale" || outcome.terminal === "not-applied") setStatus("Prose check superseded");
+  else if (outcome.terminal === "cancelled") {
+    const message = outcome.reason === "document-edited"
+      ? "Prose check canceled after edit"
+      : outcome.reason === "page-hidden"
+        ? "Prose check paused"
+        : outcome.reason === "settings-changed"
+          ? "Prose check canceled after settings change"
+          : "Prose check canceled";
+    setStatus(message);
   }
+}
+
+const proseLifecycle = new ProseCheckLifecycle<ProseCheckInput, ProseCheckRunResult>({
+  autoDebounceMs: PROSE_PROFILES.balanced.idleMs,
+  deadlineMs: (input, kind) => input.settings.remoteTimeoutMs
+    + (kind === "manual" && input.settings.manualLocalFallback ? LANGUAGETOOL_LOCAL_DEADLINE_ALLOWANCE_MS : 2_000),
+  run: executeProseCheck,
+  observe: observeProseCheck,
+  apply: applyProseCheck,
+  onState: onProseCheckState,
+  onFinally: onProseCheckFinally,
+  onCancel: ({ context }) => api.proseCheck.cancelKeepalive(`${clientId}:prose:${context.id}`),
+});
+
+function scheduleAutomaticProseCheck(delayMs: number = proseProfile().idleMs): void {
+  if (!languageToolSettings.automaticEnabled || currentReadOnly || !currentFile
+      || paused || document.hidden || !editorSurfaceVisible()) return;
+  const cooldownMs = Math.max(0, proseAutoSuspendedUntil - Date.now());
+  proseLifecycle.scheduleAuto(proseCheckInput(true), proseAutoSignature(), Math.max(delayMs, cooldownMs));
+}
+
+function runProseCheck(automatic = false): void {
+  if (automatic) {
+    scheduleAutomaticProseCheck(0);
+    return;
+  }
+  hideProsePopover();
+  void proseLifecycle.runManual(proseCheckInput(false));
 }
 
 function runProseCheckShortcut(event: KeyboardEvent): boolean {
@@ -5423,6 +5641,58 @@ async function zoteroImportBibtexTool(): Promise<void> {
   setStatus("Choose the BibTeX target and Zotero item in Emacs");
 }
 
+function applyLanguageToolConfiguration(settings: LanguageToolSettings, settingsRevision = ""): void {
+  const changed = JSON.stringify(settings) !== JSON.stringify(languageToolSettings);
+  languageToolSettings = { ...settings };
+  if (settingsRevision) languageToolRevision = settingsRevision;
+  if (!changed) return;
+  languageToolHealth = "Not tested";
+  proseAutoSuspendedUntil = 0;
+  clearProseRetryTimer();
+  proseLifecycle.invalidate("settings-changed");
+  setProseDiagnostics(editor.view, []);
+  hideProsePopover();
+  if (languageToolSettings.automaticEnabled) scheduleAutomaticProseCheck();
+}
+
+async function loadLanguageToolConfiguration(): Promise<void> {
+  const sequence = ++languageToolLoadSequence;
+  try {
+    const result = await api.proseCheck.settings();
+    if (sequence !== languageToolLoadSequence) return;
+    if (result.defaults) languageToolDefaults = { ...result.defaults };
+    if (result.settings) applyLanguageToolConfiguration(result.settings, result.revision);
+  } catch (error) {
+    if (sequence === languageToolLoadSequence) languageToolHealth = proseErrorMessage(error);
+  }
+}
+
+function languageToolActionDetail(): string {
+  let server = languageToolSettings.serverUrl;
+  try {
+    server = new URL(server).host || server;
+  } catch {
+    // Keep the configured text when it is not yet a valid URL.
+  }
+  return `${server} · ${languageToolSettings.language} · Auto ${languageToolSettings.automaticEnabled ? "on" : "off"}`;
+}
+
+async function languageToolSettingsTool(): Promise<void> {
+  const saved = await openLanguageToolSettingsTool({
+    modal,
+    api: api.proseCheck,
+    settings: languageToolSettings,
+    defaults: languageToolDefaults,
+    revision: languageToolRevision,
+    status: languageToolHealth,
+    onClose: () => toolsButton.focus(),
+  });
+  if (!saved) return;
+  languageToolLoadSequence += 1;
+  applyLanguageToolConfiguration(saved.settings, saved.revision);
+  setStatus("LanguageTool settings saved");
+}
+
 function toolActions(): ToolAction[] {
   const common: ToolAction[] = [
     { id: "toc", title: "Toggle TOC", detail: "Page headings, anchors, tags, backlinks", run: () => { floatingTocPanel.toggle(); updateFloatingToc(); } },
@@ -5430,6 +5700,7 @@ function toolActions(): ToolAction[] {
     { id: "export-latex", title: "Export LaTeX", detail: "Write selection, heading, or note to a .tex file", run: () => void exportLatexTool() },
     { id: "latex-export-agent", title: "Switch export agent", detail: "Choose Codex, Claude, or OpenCode for LaTeX polish", run: () => void switchLatexExportAgentTool() },
     { id: "zotero-import-bibtex", title: "Import Zotero BibTeX", detail: "Use the Zotero picker and append to a local .bib file", run: () => void zoteroImportBibtexTool() },
+    { id: "languagetool", title: "LanguageTool", detail: languageToolActionDetail(), run: () => void languageToolSettingsTool() },
     { id: "reload-snippets", title: "Reload snippets", detail: "Refresh Emacs md/tex snippets", run: () => void reloadSnippets() },
   ];
   return [
@@ -6792,11 +7063,13 @@ function applyPaused(next: boolean): void {
   if (paused === next) return;
   paused = next;
   assistScheduler.setPaused(next);
+  proseLifecycle.setPaused(next, next ? "page-hidden" : "resumed");
   document.documentElement.classList.toggle("aaronnote-paused", next);
   if (next) {
     cancelAssistWork();
   } else {
     scheduleAssistUpdate({ cursor: true, mathPreview: true, selectionTool: true, toc: true });
+    scheduleAutomaticProseCheck();
   }
 }
 
@@ -6946,6 +7219,8 @@ function runHostCommand(detail: unknown): boolean {
     version?: number;
     mtimeMs?: number;
     clientId?: string;
+    settings?: LanguageToolSettings;
+    settingsRevision?: string;
   };
   const command = String(body.command || "").trim().toLowerCase();
   if (!command) return false;
@@ -6968,6 +7243,13 @@ function runHostCommand(detail: unknown): boolean {
     }
     case "bibliography-index-changed":
       scheduleBibliographyRefresh(true);
+      return true;
+    case "server-ready":
+      void loadLanguageToolConfiguration();
+      return true;
+    case "languagetool-settings-changed":
+      languageToolLoadSequence += 1;
+      if (body.settings) applyLanguageToolConfiguration(body.settings, body.settingsRevision);
       return true;
     case "note-saved": {
       const savedFile = String(body.file || "");
@@ -7404,7 +7686,7 @@ window.addEventListener("resize", () => {
 window.addEventListener("scroll", (event) => {
   scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: !selectionTool.hidden });
   if (event.target instanceof Node && host.contains(event.target)) {
-    scheduleAutomaticProseCheck(PROSE_AUTO_SCROLL_IDLE_MS);
+    scheduleAutomaticProseCheck(proseProfile().scrollMs);
   }
 }, { capture: true, passive: true });
 selectionTool.addEventListener("mousedown", (event) => event.preventDefault());
@@ -7473,6 +7755,7 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 window.addEventListener("pagehide", () => {
+  proseLifecycle.invalidate("page-hidden");
   void flushCursorPosition();
   if (currentFile && revision !== savedRevision) api.notes.saveKeepalive(saveBody());
   notifyClientClosedKeepalive();
@@ -7488,11 +7771,13 @@ window.addEventListener("popstate", () => {
 // Install the global KaTeX macros before the first note renders so the initial
 // paint already uses them; failures degrade to plain KaTeX rather than blocking.
 void (async () => {
+  const languageToolReady = loadLanguageToolConfiguration();
   try {
     const result = await api.config.katexMacros();
     if (result?.macros) setKatexMacros(result.macros);
   } catch (_) {
     // Macros are optional.
   }
+  await languageToolReady;
   await openInitialFile();
 })();

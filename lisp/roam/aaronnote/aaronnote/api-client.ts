@@ -24,12 +24,41 @@ type AssetStoreMsg = {
   message?: string;
 };
 type ProseCheckBody = {
+  requestId?: string;
   file?: string;
   content?: string;
   ranges?: Array<{ from: number; to: number }>;
   segments?: Array<{ from: number; text: string }>;
   totalChars?: number;
   allowLocalFallback?: boolean;
+  interactive?: boolean;
+};
+export type LanguageToolPerformanceProfile = "responsive" | "balanced" | "quiet";
+export type LanguageToolSettings = {
+  automaticEnabled: boolean;
+  serverUrl: string;
+  language: string;
+  level: "default" | "picky";
+  performanceProfile: LanguageToolPerformanceProfile;
+  manualLocalFallback: boolean;
+  remoteTimeoutMs: number;
+  retryCooldownMs: number;
+};
+export type LanguageToolSettingsMsg = {
+  ok?: boolean;
+  settings?: LanguageToolSettings;
+  defaults?: LanguageToolSettings;
+  revision?: string;
+  message?: string;
+};
+export type LanguageToolSettingsUpdate = Partial<LanguageToolSettings> & { revision?: string };
+export type LanguageToolProbeBody = Partial<LanguageToolSettings> & { requestId?: string };
+export type LanguageToolProbeMsg = {
+  ok?: boolean;
+  latencyMs?: number;
+  serverUrl?: string;
+  version?: string;
+  message?: string;
 };
 type ProseCheckMsg = {
   ok?: boolean;
@@ -443,6 +472,11 @@ type NativeApi = {
   proseCheck?: {
     run?: (body: ProseCheckBody) => Promise<unknown>;
     acceptWord?: (word: string) => Promise<unknown>;
+    cancel?: (requestId: string) => Promise<unknown>;
+    settings?: () => Promise<unknown>;
+    updateSettings?: (body: LanguageToolSettingsUpdate) => Promise<unknown>;
+    probe?: (body: LanguageToolProbeBody) => Promise<unknown>;
+    cancelKeepalive?: (requestId: string) => void;
   };
   config?: {
     katexMacros?: () => Promise<unknown>;
@@ -862,6 +896,31 @@ export const api = {
     async acceptWord(word: string): Promise<{ ok?: boolean; word?: string }> {
       const call = requireMethod(nativeApi().proseCheck?.acceptWord, "Prose dictionary");
       return ensureOk(await call(word) as { ok?: boolean; word?: string }, "Adding word failed");
+    },
+    async cancel(requestId: string): Promise<void> {
+      const call = nativeApi().proseCheck?.cancel;
+      if (!call) return;
+      await call(requestId);
+    },
+    cancelKeepalive(requestId: string): void {
+      const call = nativeApi().proseCheck?.cancelKeepalive;
+      if (call) call(requestId);
+      else {
+        const fallback = nativeApi().proseCheck?.cancel;
+        if (fallback) void fallback(requestId).catch(() => {});
+      }
+    },
+    async settings(): Promise<LanguageToolSettingsMsg> {
+      const call = requireMethod(nativeApi().proseCheck?.settings, "LanguageTool settings");
+      return ensureOk(await call() as LanguageToolSettingsMsg, "Loading LanguageTool settings failed");
+    },
+    async updateSettings(body: LanguageToolSettingsUpdate): Promise<LanguageToolSettingsMsg> {
+      const call = requireMethod(nativeApi().proseCheck?.updateSettings, "LanguageTool settings");
+      return ensureOk(await call(body) as LanguageToolSettingsMsg, "Saving LanguageTool settings failed");
+    },
+    async probe(body: LanguageToolProbeBody): Promise<LanguageToolProbeMsg> {
+      const call = requireMethod(nativeApi().proseCheck?.probe, "LanguageTool server test");
+      return ensureOk(await call(body) as LanguageToolProbeMsg, "LanguageTool server test failed");
     },
   },
   config: {

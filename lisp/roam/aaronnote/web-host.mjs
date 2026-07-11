@@ -91,7 +91,20 @@ import {
   touchCursorPosition,
 } from "./server/lib/session.mjs";
 import { handleCopilotRequest, shutdownCopilot } from "./server/lib/copilot.mjs";
-import { acceptProseWord, runExternalProseChecks } from "./server/lib/prose-check.mjs";
+import {
+  acceptProseWord,
+  cancelExternalProseCheck,
+  cancelAllExternalProseChecks,
+  cancelExternalProseChecksForClient,
+  probeLanguageTool,
+  runExternalProseChecks,
+} from "./server/lib/prose-check.mjs";
+import {
+  getLanguageToolSettings,
+  languageToolSettingsDefaults,
+  languageToolSettingsRevision,
+  updateLanguageToolSettings,
+} from "./server/lib/languagetool-config.mjs";
 import { createImeSwitcher } from "./server/lib/ime.mjs";
 
 const ime = createImeSwitcher();
@@ -267,6 +280,7 @@ async function beginShutdown({ reason = "shutdown", exitCode = 0, deadlineMs = 3
         try { res.end(); } catch {}
       }
       eventClients.clear();
+      cancelAllExternalProseChecks("server-shutdown");
       await Promise.allSettled([
         closeHttpServer(),
         Promise.resolve().then(() => noteWatcher.close()),
@@ -805,7 +819,10 @@ const apiHandlers = {
   }),
   "aaronnote:api:session:positions": async () => ({ type: "positions", positions: await readCursorPositions() }),
   "aaronnote:api:session:save-position": async (position) => ({ type: "positions", positions: await touchCursorPosition(position || {}) }),
-  "aaronnote:api:session:client-close": async (body) => closeEditorClient(body || {}),
+  "aaronnote:api:session:client-close": async (body) => {
+    cancelExternalProseChecksForClient(body?.clientId || body?.client);
+    return closeEditorClient(body || {});
+  },
 
   "aaronnote:api:fs:rename": (body) => renameManagedPath(body || {}),
   "aaronnote:api:fs:move": (body) => moveManagedPath(body || {}),
@@ -821,6 +838,25 @@ const apiHandlers = {
 
   "aaronnote:api:prose-check:run": (body) => runExternalProseChecks(body || {}),
   "aaronnote:api:prose-check:accept-word": (word) => acceptProseWord(word),
+  "aaronnote:api:prose-check:cancel": (requestId) => cancelExternalProseCheck(requestId),
+  "aaronnote:api:prose-check:settings": async () => ({
+    ok: true,
+    ...await (async () => {
+      const settings = await getLanguageToolSettings();
+      return { settings, revision: languageToolSettingsRevision(settings) };
+    })(),
+    defaults: languageToolSettingsDefaults(),
+  }),
+  "aaronnote:api:prose-check:update-settings": async (body) => {
+    const update = body && typeof body === "object" ? { ...body } : {};
+    const expectedRevision = String(update.revision || "");
+    delete update.revision;
+    const settings = await updateLanguageToolSettings(update, { expectedRevision });
+    const revision = languageToolSettingsRevision(settings);
+    broadcast("command", { command: "languagetool-settings-changed", settings, settingsRevision: revision });
+    return { ok: true, settings, revision, defaults: languageToolSettingsDefaults() };
+  },
+  "aaronnote:api:prose-check:probe": (body) => probeLanguageTool(body || {}),
   "aaronnote:api:ime:vim-mode": (body) => ime.vimMode(String(body?.mode || "")),
   "aaronnote:api:shell:show-in-folder": (file) => showInFolder(file),
   "aaronnote:api:shell:open-path": (file) => openPath(file),
@@ -1144,6 +1180,11 @@ function adapterScript(origin) {
     proseCheck: {
       run: function(body) { return call("aaronnote:api:prose-check:run", [body || {}]); },
       acceptWord: function(word) { return call("aaronnote:api:prose-check:accept-word", [String(word || "")]); },
+      cancel: function(requestId) { return call("aaronnote:api:prose-check:cancel", [String(requestId || "")]); },
+      cancelKeepalive: function(requestId) { callKeepalive("aaronnote:api:prose-check:cancel", [String(requestId || "")]); },
+      settings: function() { return call("aaronnote:api:prose-check:settings", []); },
+      updateSettings: function(body) { return call("aaronnote:api:prose-check:update-settings", [body || {}]); },
+      probe: function(body) { return call("aaronnote:api:prose-check:probe", [body || {}]); },
       browserSpellcheck: function(words) {
         return Array.isArray(words) ? words.map(function(word) {
           return {word: String(word || ""), misspelled: false, suggestions: []};
@@ -1458,6 +1499,7 @@ const server = createServer(async (req, res) => {
         return;
       }
       if (body.type === "client-close") {
+        cancelExternalProseChecksForClient(body.clientId || body.client);
         sendJson(res, 200, closeEditorClient(body));
         return;
       }

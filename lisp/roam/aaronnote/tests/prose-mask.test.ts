@@ -57,6 +57,49 @@ describe("Aaronnote prose mask", () => {
     expect(masked).not.toContain("const");
   });
 
+  test("masks LaTeX math and environments while keeping surrounding prose", () => {
+    const md = [
+      "Keep teh prose before \\(recieve + \\mathrm{GI}\\) and after.",
+      "\\[recieve + \\begin{aligned} x &= y \\end{aligned}\\]",
+      "\\begin{equation} another recieve \\end{equation}",
+    ].join("\n");
+    const masked = maskAaronnoteProse(md);
+    expect(masked.length).toBe(md.length);
+    expect(masked).toContain("Keep teh prose before");
+    expect(masked).toContain("and after.");
+    expect(masked).not.toContain("recieve");
+    expect(masked).not.toContain("aligned");
+    expect(masked).not.toContain("equation");
+  });
+
+  test("keeps link labels but masks destinations and images", () => {
+    const md = "Read [this recieve paper](zotero://select/items/bad-teh) and ![bad alt](img/teh.png).";
+    const masked = maskAaronnoteProse(md);
+    expect(masked.length).toBe(md.length);
+    expect(masked).toContain("this recieve paper");
+    expect(masked).not.toContain("zotero");
+    expect(masked).not.toContain("bad alt");
+    expect(masked).not.toContain("teh.png");
+  });
+
+  test("masks front matter, directives, references, and HTML comments", () => {
+    const md = [
+      "---",
+      "title: recieve metadata",
+      "---",
+      "#+title: another recieve",
+      "[paper]: ../../recieve.pdf",
+      "<!-- hidden recieve -->",
+      "Visible teh prose.",
+    ].join("\n");
+    const masked = maskAaronnoteProse(md);
+    expect(masked.length).toBe(md.length);
+    expect(masked).toContain("Visible teh prose.");
+    expect(masked).not.toContain("metadata");
+    expect(masked).not.toContain("another recieve");
+    expect(masked).not.toContain("hidden recieve");
+  });
+
   test("keeps prose org env bodies but masks delimiters", () => {
     const md = "#+begin theorem Spectral\nThe recieve typo is visible.\n#+end theorem\n";
     const masked = maskAaronnoteProse(md);

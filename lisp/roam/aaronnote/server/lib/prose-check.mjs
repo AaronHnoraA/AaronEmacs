@@ -10,18 +10,17 @@ import {
   maskAaronnoteProse,
   rangeHasCheckedText,
 } from "../../shared/prose-mask.mjs";
+import {
+  getLanguageToolSettings,
+  normalizeLanguageToolSettings,
+} from "./languagetool-config.mjs";
 
 const LANGUAGETOOL_TIMEOUT_MS = 15_000;
-const LANGUAGETOOL_HTTP_TIMEOUT_MS = 5_000;
 const MAX_BUFFER = 4 * 1024 * 1024;
 const MAX_DIAGNOSTICS_PER_TOOL = 240;
 const MAX_CHECK_CHARS = 180_000;
 const CHUNK_TARGET_CHARS = 45_000;
 const MAX_CHUNKS_PER_TOOL = 6;
-const LANGUAGETOOL_LANGUAGE = process.env.AARONNOTE_LANGUAGETOOL_LANGUAGE || "en-US";
-const LANGUAGETOOL_URL = process.env.AARONNOTE_LANGUAGETOOL_URL
-  || "http://10.243.90.222:8765";
-
 const WORKSPACE_ROOT = process.env.AARONNOTE_WORKSPACE_ROOT || join(homedir(), ".config", "emacs");
 const USER_WORDS_FILE = process.env.AARONNOTE_PROSE_WORDS
   || join(WORKSPACE_ROOT, "etc", "prose-accepted-words.txt");
@@ -44,6 +43,65 @@ const TOOL_ENV = {
   ...process.env,
   PATH: [...new Set([...GUI_TOOL_PATHS, ...String(process.env.PATH || "").split(":").filter(Boolean)])].join(":"),
 };
+const activeChecks = new Map();
+let userWordsCache = { expiresAt: 0, words: new Set() };
+const USER_WORDS_CACHE_MS = 30_000;
+
+function createSemaphore(limit) {
+  let active = 0;
+  let sequence = 0;
+  const queue = [];
+  const releaseFactory = () => {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      active = Math.max(0, active - 1);
+      pump();
+    };
+  };
+  const pump = () => {
+    while (active < limit && queue.length > 0) {
+      const entry = queue.shift();
+      entry.signal?.removeEventListener("abort", entry.onAbort);
+      if (entry.signal?.aborted) {
+        entry.reject(abortError(entry.signal));
+        continue;
+      }
+      active += 1;
+      entry.resolve(releaseFactory());
+    }
+  };
+  return {
+    async acquire(signal, priority = 0) {
+      throwIfAborted(signal);
+      if (active < limit) {
+        active += 1;
+        return releaseFactory();
+      }
+      return await new Promise((resolve, reject) => {
+        const entry = {
+          priority: Number(priority) || 0,
+          sequence: sequence++,
+          signal,
+          resolve,
+          reject,
+          onAbort: () => {
+            const index = queue.indexOf(entry);
+            if (index >= 0) queue.splice(index, 1);
+            reject(abortError(signal));
+          },
+        };
+        signal?.addEventListener("abort", entry.onAbort, { once: true });
+        queue.push(entry);
+        queue.sort((a, b) => b.priority - a.priority || a.sequence - b.sequence);
+      });
+    },
+  };
+}
+
+const remoteSemaphore = createSemaphore(2);
+const cliSemaphore = createSemaphore(1);
 
 function execFileWithInput(file, args, input, options) {
   return new Promise((resolve, reject) => {
@@ -56,8 +114,34 @@ function execFileWithInput(file, args, input, options) {
       }
       resolve({ stdout, stderr });
     });
+    child.stdin.on("error", () => {});
     child.stdin.end(input);
   });
+}
+
+function combinedAbortSignal(...signals) {
+  const active = signals.filter(Boolean);
+  if (active.length === 1) return active[0];
+  if (typeof AbortSignal.any === "function") return AbortSignal.any(active);
+  const controller = new AbortController();
+  const abort = (event) => controller.abort(event?.target?.reason);
+  for (const signal of active) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    signal.addEventListener("abort", abort, { once: true });
+  }
+  return controller.signal;
+}
+
+function abortError(signal) {
+  if (signal?.reason instanceof Error) return signal.reason;
+  return Object.assign(new Error("LanguageTool check cancelled"), { name: "AbortError" });
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw abortError(signal);
 }
 
 async function executable(path) {
@@ -228,14 +312,26 @@ function languageToolSeverity(item) {
   return "info";
 }
 
-export function parseLanguageToolDiagnostics(stdout, masked) {
+const CJK_SCRIPT_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+function diagnosticMatchesLanguage(masked, range, language) {
+  if (!language || /^(?:zh|ja|ko)(?:-|$)/i.test(String(language))) return true;
+  const matched = masked.slice(range.from, range.to);
+  if (CJK_SCRIPT_RE.test(matched)) return false;
+  if (/[A-Za-z0-9]/.test(matched)) return true;
+  const context = masked.slice(Math.max(0, range.from - 12), Math.min(masked.length, range.to + 12));
+  return !CJK_SCRIPT_RE.test(context);
+}
+
+export function parseLanguageToolDiagnostics(stdout, masked, language = "") {
   let parsed;
   try {
     parsed = JSON.parse(stdout || "{}");
   } catch {
     return [];
   }
-  const items = Array.isArray(parsed?.matches) ? parsed.matches : [];
+  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.matches)) return [];
+  const items = parsed.matches;
   const diagnostics = [];
   for (const item of items) {
     const offset = Number(item?.offset);
@@ -243,6 +339,7 @@ export function parseLanguageToolDiagnostics(stdout, masked) {
     if (!Number.isFinite(offset) || !Number.isFinite(length) || length <= 0) continue;
     const range = clampRange(masked, offset, offset + length);
     if (!rangeHasCheckedText(masked, range.from, range.to)) continue;
+    if (!diagnosticMatchesLanguage(masked, range, language)) continue;
     const suggestions = Array.isArray(item?.replacements)
       ? item.replacements.map((entry) => String(entry?.value ?? "")).slice(0, 8)
       : [];
@@ -268,12 +365,16 @@ function normalizedAcceptedWord(value) {
 }
 
 async function readUserWords() {
+  if (Date.now() < userWordsCache.expiresAt) return new Set(userWordsCache.words);
   try {
-    return new Set((await readFile(USER_WORDS_FILE, "utf8"))
+    const words = new Set((await readFile(USER_WORDS_FILE, "utf8"))
       .split(/\r?\n/)
       .map(normalizedAcceptedWord)
       .filter(Boolean));
+    userWordsCache = { expiresAt: Date.now() + USER_WORDS_CACHE_MS, words };
+    return new Set(words);
   } catch {
+    userWordsCache = { expiresAt: Date.now() + USER_WORDS_CACHE_MS, words: new Set() };
     return new Set();
   }
 }
@@ -293,6 +394,10 @@ export async function acceptProseWord(value) {
   const temporary = `${USER_WORDS_FILE}.${process.pid}.tmp`;
   await writeFile(temporary, `${sorted.join("\n")}\n`, "utf8");
   await rename(temporary, USER_WORDS_FILE);
+  userWordsCache = {
+    expiresAt: Date.now() + USER_WORDS_CACHE_MS,
+    words: new Set(sorted.map(normalizedAcceptedWord).filter(Boolean)),
+  };
   return { ok: true, word };
 }
 
@@ -325,9 +430,9 @@ function mapLanguageToolDiagnostics(diagnostics, mappings, sourceLength) {
   });
 }
 
-function languageToolResult(stdout, combined, sourceLength) {
+function languageToolResult(stdout, combined, sourceLength, language) {
   const diagnostics = mapLanguageToolDiagnostics(
-    parseLanguageToolDiagnostics(stdout, combined.text),
+    parseLanguageToolDiagnostics(stdout, combined.text, language),
     combined.mappings,
     sourceLength,
   );
@@ -341,41 +446,67 @@ function languageToolResult(stdout, combined, sourceLength) {
   };
 }
 
-async function runLanguageToolRemote(combined, sourceLength) {
-  const endpoint = `${LANGUAGETOOL_URL.replace(/\/+$/, "")}/v2/check`;
+async function postLanguageTool(settings, text, signal, priority = 0) {
+  const endpoint = `${settings.serverUrl.replace(/\/+$/, "")}/v2/check`;
   const body = new URLSearchParams({
-    language: LANGUAGETOOL_LANGUAGE,
-    level: "picky",
-    text: combined.text,
+    language: settings.language,
+    level: settings.level,
+    text,
   });
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-    signal: AbortSignal.timeout(LANGUAGETOOL_HTTP_TIMEOUT_MS),
-  });
-  if (!response.ok) throw new Error(`NAS LanguageTool returned HTTP ${response.status}`);
-  return languageToolResult(await response.text(), combined, sourceLength);
+  const operationSignal = combinedAbortSignal(signal, AbortSignal.timeout(settings.remoteTimeoutMs));
+  const release = await remoteSemaphore.acquire(operationSignal, priority);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      signal: operationSignal,
+    });
+    if (!response.ok) throw new Error(`NAS LanguageTool returned HTTP ${response.status}`);
+    const raw = await response.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error("NAS LanguageTool returned invalid JSON");
+    }
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.matches)) {
+      throw new Error("NAS LanguageTool response did not contain matches");
+    }
+    return { raw, parsed };
+  } finally {
+    release();
+  }
 }
 
-async function runLanguageToolCli(combined, sourceLength) {
+async function runLanguageToolRemote(combined, sourceLength, settings, signal, priority) {
+  const response = await postLanguageTool(settings, combined.text, signal, priority);
+  return languageToolResult(response.raw, combined, sourceLength, settings.language);
+}
+
+async function runLanguageToolCli(combined, sourceLength, settings, signal) {
   const bin = await resolveTool("languagetool", "AARONNOTE_LANGUAGETOOL_BIN");
   const args = [
     "--encoding", "utf8",
     "--json",
-    "--language", LANGUAGETOOL_LANGUAGE,
-    "--level", "PICKY",
+    "--language", settings.language,
+    "--level", settings.level.toUpperCase(),
     "--clean-overlapping",
     "-",
   ];
+  const operationSignal = combinedAbortSignal(signal, AbortSignal.timeout(LANGUAGETOOL_TIMEOUT_MS));
+  const release = await cliSemaphore.acquire(operationSignal);
   try {
+    throwIfAborted(signal);
     const { stdout } = await execFileWithInput(bin, args, combined.text, {
       timeout: LANGUAGETOOL_TIMEOUT_MS,
       maxBuffer: MAX_BUFFER,
       env: TOOL_ENV,
+      signal: operationSignal,
     });
-    return languageToolResult(stdout, combined, sourceLength);
+    return languageToolResult(stdout, combined, sourceLength, settings.language);
   } catch (err) {
+    throwIfAborted(signal);
     if (err?.code === "ENOENT") {
       return {
         source: "languagetool",
@@ -385,7 +516,7 @@ async function runLanguageToolCli(combined, sourceLength) {
       };
     }
     const diagnostics = mapLanguageToolDiagnostics(
-      parseLanguageToolDiagnostics(err?.stdout || "", combined.text),
+      parseLanguageToolDiagnostics(err?.stdout || "", combined.text, settings.language),
       combined.mappings,
       sourceLength,
     );
@@ -396,16 +527,20 @@ async function runLanguageToolCli(combined, sourceLength) {
       message: String(err?.stderr || err?.message || "LanguageTool failed").trim(),
       partial: !!err?.killed,
     };
+  } finally {
+    release();
   }
 }
 
-async function runLanguageTool(chunks, sourceLength, allowLocalFallback) {
+async function runLanguageTool(chunks, sourceLength, allowLocalFallback, interactive, settings, signal) {
   const combined = combineLanguageToolChunks(chunks);
   try {
-    return await runLanguageToolRemote(combined, sourceLength);
+    throwIfAborted(signal);
+    return await runLanguageToolRemote(combined, sourceLength, settings, signal, interactive ? 1 : 0);
   } catch (remoteError) {
+    throwIfAborted(signal);
     const reason = remoteError instanceof Error ? remoteError.message : String(remoteError);
-    if (!allowLocalFallback) {
+    if (!allowLocalFallback || !settings.manualLocalFallback) {
       return {
         source: "languagetool",
         ok: false,
@@ -414,7 +549,7 @@ async function runLanguageTool(chunks, sourceLength, allowLocalFallback) {
         partial: false,
       };
     }
-    const result = await runLanguageToolCli(combined, sourceLength);
+    const result = await runLanguageToolCli(combined, sourceLength, settings, signal);
     return {
       ...result,
       message: result.ok
@@ -424,33 +559,118 @@ async function runLanguageTool(chunks, sourceLength, allowLocalFallback) {
   }
 }
 
-export async function runExternalProseChecks({ file = "", content = "", ranges = [], segments = [], totalChars = 0, allowLocalFallback = true } = {}) {
+export function cancelExternalProseCheck(requestId) {
+  const key = String(requestId || "").trim();
+  const controller = key ? activeChecks.get(key) : null;
+  if (controller) controller.abort(Object.assign(new Error("LanguageTool check cancelled"), { name: "AbortError" }));
+  return { ok: true, cancelled: !!controller, requestId: key };
+}
+
+export function cancelAllExternalProseChecks(reason = "server-shutdown") {
+  const error = Object.assign(new Error(`LanguageTool checks cancelled: ${reason}`), { name: "AbortError" });
+  const controllers = [...new Set(activeChecks.values())];
+  for (const controller of controllers) controller.abort(error);
+  return { ok: true, cancelled: controllers.length };
+}
+
+export function cancelExternalProseChecksForClient(clientId, reason = "client-closed") {
+  const prefix = `${String(clientId || "").trim()}:prose:`;
+  if (prefix === ":prose:") return { ok: true, cancelled: 0 };
+  const controllers = new Set();
+  for (const [key, controller] of activeChecks) {
+    if (key.startsWith(prefix)) controllers.add(controller);
+  }
+  const error = Object.assign(new Error(`LanguageTool checks cancelled: ${reason}`), { name: "AbortError" });
+  for (const controller of controllers) controller.abort(error);
+  return { ok: true, cancelled: controllers.size };
+}
+
+function validateProbeServerUrl(value) {
+  try {
+    const parsed = new URL(String(value || ""));
+    if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname) throw new Error();
+  } catch {
+    throw Object.assign(new Error("LanguageTool server URL must use http or https"), { statusCode: 400 });
+  }
+}
+
+export async function probeLanguageTool(candidate = {}) {
+  const key = String(candidate.requestId || "").trim();
+  if (key) cancelExternalProseCheck(key);
+  const controller = new AbortController();
+  if (key) activeChecks.set(key, controller);
+  try {
+    const current = await getLanguageToolSettings();
+    if (Object.prototype.hasOwnProperty.call(candidate, "serverUrl")) validateProbeServerUrl(candidate.serverUrl);
+    const settings = normalizeLanguageToolSettings({ ...current, ...candidate }, current);
+    const startedAt = performance.now();
+    const { parsed } = await postLanguageTool(settings, "LanguageTool connection test.", controller.signal, 2);
+    return {
+      ok: true,
+      serverUrl: settings.serverUrl,
+      latencyMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      version: String(parsed?.software?.version || ""),
+    };
+  } finally {
+    if (key && activeChecks.get(key) === controller) activeChecks.delete(key);
+  }
+}
+
+export async function runExternalProseChecks({
+  requestId = "",
+  file = "",
+  content = "",
+  ranges = [],
+  segments = [],
+  totalChars = 0,
+  allowLocalFallback = true,
+  interactive = false,
+} = {}) {
   void file;
-  const source = String(content || "");
-  const segmentList = normalizeCheckSegments(segments);
-  const chunkInfo = segmentList.length > 0
-    ? createCheckChunksFromSegments(segmentList, totalChars)
-    : createCheckChunks(maskAaronnoteProse(source), ranges);
-  const [result, userWords] = await Promise.all([
-    runLanguageTool(chunkInfo.chunks, chunkInfo.totalChars, allowLocalFallback !== false),
-    readUserWords(),
-  ]);
-  const acceptedWords = new Set([
-    ...AARONNOTE_ACCEPTED_WORDS.map(normalizedAcceptedWord),
-    ...userWords,
-  ]);
-  const diagnostics = (result.diagnostics ?? [])
-    .filter((diagnostic) => !acceptedWords.has(normalizedAcceptedWord(diagnostic.word)));
-  const { source: toolSource, ok, message, partial } = result;
-  return {
-    ok: true,
-    diagnostics,
-    tools: [{ source: toolSource, ok, message: message || "", partial: !!partial }],
-    scope: {
-      checkedChars: chunkInfo.checkedChars,
-      totalChars: chunkInfo.totalChars,
-      partial: chunkInfo.partial || !!result.partial,
-    },
-    acceptedWords: [...acceptedWords],
-  };
+  const key = String(requestId || "").trim();
+  if (key) cancelExternalProseCheck(key);
+  const controller = new AbortController();
+  if (key) activeChecks.set(key, controller);
+  try {
+    const settings = await getLanguageToolSettings();
+    throwIfAborted(controller.signal);
+    const source = String(content || "");
+    const segmentList = normalizeCheckSegments(segments);
+    const chunkInfo = segmentList.length > 0
+      ? createCheckChunksFromSegments(segmentList, totalChars)
+      : createCheckChunks(maskAaronnoteProse(source), ranges);
+    const [result, userWords] = await Promise.all([
+      runLanguageTool(
+        chunkInfo.chunks,
+        chunkInfo.totalChars,
+        allowLocalFallback !== false,
+        interactive === true,
+        settings,
+        controller.signal,
+      ),
+      readUserWords(),
+    ]);
+    throwIfAborted(controller.signal);
+    const acceptedWords = new Set([
+      ...AARONNOTE_ACCEPTED_WORDS.map(normalizedAcceptedWord),
+      ...userWords,
+    ]);
+    const diagnostics = (result.diagnostics ?? [])
+      .filter((diagnostic) => !acceptedWords.has(normalizedAcceptedWord(diagnostic.word)));
+    const { source: toolSource, ok, message, partial } = result;
+    return {
+      ok: true,
+      requestId: key,
+      diagnostics,
+      tools: [{ source: toolSource, ok, message: message || "", partial: !!partial }],
+      scope: {
+        checkedChars: chunkInfo.checkedChars,
+        totalChars: chunkInfo.totalChars,
+        partial: chunkInfo.partial || !!result.partial,
+      },
+      acceptedWords: [...acceptedWords],
+    };
+  } finally {
+    if (key && activeChecks.get(key) === controller) activeChecks.delete(key);
+  }
 }

@@ -71,4 +71,5 @@ SEM
 SGD
 SVD
 symplectic
+thm
 VQE

@@ -2554,6 +2554,152 @@ button:disabled {
   padding-top: 4px;
 }
 
+.aaronnote-languagetool-tool {
+  width: min(540px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  overflow: auto;
+}
+
+.aaronnote-languagetool-head {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.aaronnote-languagetool-health {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aaron-muted);
+  font: 11px/1.25 var(--aaron-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aaronnote-languagetool-health[data-state="checking"] {
+  color: var(--aaron-heading-5);
+}
+
+.aaronnote-languagetool-health[data-state="online"] {
+  color: var(--aaron-heading-3);
+}
+
+.aaronnote-languagetool-health[data-state="error"] {
+  color: var(--aaron-red-dark);
+}
+
+.aaronnote-modal-panel .aaronnote-languagetool-toggle {
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: var(--aaron-ink);
+}
+
+.aaronnote-modal-panel .aaronnote-languagetool-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--aaron-red-dark);
+}
+
+.aaronnote-languagetool-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 0.55fr);
+  gap: 10px;
+}
+
+.aaronnote-languagetool-field {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.aaronnote-languagetool-field legend {
+  margin-bottom: 5px;
+  padding: 0;
+  color: var(--aaron-muted);
+  font: 650 12px/1.3 var(--aaron-font-sans);
+}
+
+.aaronnote-languagetool-segments {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 1px;
+  border: 1px solid var(--aaron-paper-line);
+  border-radius: 3px;
+  padding: 2px;
+  background: var(--aaron-paper-soft);
+}
+
+.aaronnote-modal-panel .aaronnote-languagetool-segments label {
+  display: block;
+  min-width: 0;
+  color: var(--aaron-muted);
+  cursor: pointer;
+  text-align: center;
+}
+
+.aaronnote-modal-panel .aaronnote-languagetool-segments input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.aaronnote-languagetool-segments span {
+  min-height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 2px;
+  padding: 0 6px;
+  font: 650 11px/1.2 var(--aaron-font-sans);
+}
+
+.aaronnote-languagetool-segments input:checked + span {
+  background: var(--aaron-paper);
+  color: var(--aaron-red-dark);
+  box-shadow: 0 0 0 1px var(--aaron-paper-line);
+}
+
+.aaronnote-languagetool-segments input:focus-visible + span {
+  outline: 2px solid color-mix(in srgb, var(--aaron-red), transparent 45%);
+  outline-offset: -2px;
+}
+
+.aaronnote-languagetool-status {
+  min-height: 16px;
+  color: var(--aaron-muted);
+  font: 11px/1.35 var(--aaron-font-sans);
+}
+
+.aaronnote-languagetool-actions {
+  flex-wrap: wrap;
+}
+
+.aaronnote-languagetool-actions button:first-child {
+  margin-right: auto;
+}
+
+.aaronnote-languagetool-tool[aria-busy="true"] {
+  cursor: wait;
+}
+
+@media (max-width: 520px) {
+  .aaronnote-languagetool-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aaronnote-languagetool-actions button:first-child {
+    margin-right: 0;
+  }
+}
+
 .aaronnote-floating-toc {
   position: fixed;
   right: 14px;

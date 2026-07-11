@@ -105,17 +105,70 @@ function maskFencedCodeBlocks(text, chars) {
 }
 
 function maskBlockMath(text, chars) {
-  let openFrom = -1;
-  for (const line of lineRanges(text)) {
-    if (!/^[ \t]*\$\$[ \t]*$/.test(line.text)) continue;
-    if (openFrom < 0) {
-      openFrom = line.from;
-    } else {
-      maskRange(chars, openFrom, line.lineEnd);
-      openFrom = -1;
+  maskDelimited(text, chars, "$$", "$$");
+}
+
+function maskDelimited(text, chars, open, close) {
+  let from = 0;
+  while (from < text.length) {
+    const start = text.indexOf(open, from);
+    if (start < 0) break;
+    const end = text.indexOf(close, start + open.length);
+    const to = end < 0 ? text.length : end + close.length;
+    maskRange(chars, start, to);
+    from = to;
+  }
+}
+
+function maskFrontMatter(text, chars) {
+  const lines = lineRanges(text);
+  if (!lines.length || !/^\ufeff?---[ \t]*$/.test(lines[0].text)) return;
+  for (let i = 1; i < lines.length; i++) {
+    if (/^(?:---|\.\.\.)[ \t]*$/.test(lines[i].text)) {
+      maskRange(chars, 0, lines[i].lineEnd);
+      return;
     }
   }
-  if (openFrom >= 0) maskRange(chars, openFrom, text.length);
+}
+
+function maskLatexEnvironments(text, chars) {
+  const tokenRe = /\\(begin|end)\{([A-Za-z*]+)\}/g;
+  const stack = [];
+  let match;
+  while ((match = tokenRe.exec(text)) !== null) {
+    if (match[1] === "begin") {
+      stack.push({ name: match[2], from: match.index });
+      continue;
+    }
+    const open = stack.at(-1);
+    if (open?.name === match[2]) {
+      stack.pop();
+      if (!stack.length) maskRange(chars, open.from, tokenRe.lastIndex);
+    }
+  }
+  if (stack.length) maskRange(chars, stack[0].from, text.length);
+}
+
+function maskMarkdownLinks(text, chars) {
+  const linkRe = /(!?)\[([^\]\n]*)\]\(([^)\n]*)\)/g;
+  let match;
+  while ((match = linkRe.exec(text)) !== null) {
+    if (match[1]) {
+      maskRange(chars, match.index, linkRe.lastIndex);
+      continue;
+    }
+    const labelFrom = match.index + 1;
+    const labelTo = labelFrom + match[2].length;
+    maskRange(chars, match.index, labelFrom);
+    maskRange(chars, labelTo, linkRe.lastIndex);
+  }
+}
+
+function maskDocumentSyntax(text, chars) {
+  maskRegex(text, chars, /<!--[\s\S]*?-->/g);
+  maskRegex(text, chars, /^[ \t]*#\+(?!begin(?:_|\s)|end(?:_|\s)).*$/gim);
+  maskRegex(text, chars, /^[ \t]*:[A-Za-z][\w-]*:[ \t]+.*$/gm);
+  maskRegex(text, chars, /^[ \t]*\[[^\]\n]+\]:[ \t]+\S+.*$/gm);
 }
 
 function maskOrgEnvBlocks(text, chars) {
@@ -164,17 +217,21 @@ export function maskAaronnoteProse(text) {
   const source = String(text || "");
   const chars = source.split("");
 
+  maskFrontMatter(source, chars);
   maskFencedCodeBlocks(source, chars);
   maskBlockMath(source, chars);
+  maskDelimited(source, chars, "\\(", "\\)");
+  maskDelimited(source, chars, "\\[", "\\]");
+  maskLatexEnvironments(source, chars);
   maskOrgEnvBlocks(source, chars);
   maskInlineCommands(source, chars);
+  maskDocumentSyntax(source, chars);
 
   maskRegex(source, chars, /`[^`\n]+`/g);
   maskRegex(source, chars, /(?<![A-Za-z0-9_$])\$(?![\s$])([^$\n]*?\S)\$(?![A-Za-z0-9_$])/g);
-  maskRegex(source, chars, /!\[[^\]\n]*\]\([^)\n]*\)/g);
-  maskRegex(source, chars, /\[[^\]\n]*\]\((?:https?:|file:|mailto:)[^)\n]*\)/gi);
+  maskMarkdownLinks(source, chars);
   maskRegex(source, chars, /\b(?:https?|file|mailto):[^\s<>)]+/gi);
-  maskRegex(source, chars, /\\[A-Za-z]+/g);
+  maskRegex(source, chars, /\\[A-Za-z]+(?:\*?\s*(?:\[[^\]\n]*\]|\{[^}\n]*\}))*/g);
   maskRegex(source, chars, /<\/?[A-Za-z][^>\n]*>/g);
   maskRegex(source, chars, /&[A-Za-z][A-Za-z0-9]+;/g);
 
