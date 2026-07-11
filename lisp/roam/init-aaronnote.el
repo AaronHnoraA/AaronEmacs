@@ -114,6 +114,16 @@ an env-based cap would leak onto those unrelated node processes too."
   :type '(choice (integer :tag "Heap cap in MB") (const :tag "No cap" nil))
   :group 'my/aaronnote)
 
+(config-defvar my/aaronnote-echo-severity 'error
+  "Warning/error policy for Aaronnote messages copied to the Emacs echo area.
+Important command responses are always echoed after browser-side deduplication
+and rate limiting.  `error' additionally echoes errors, `warning' echoes
+warnings and errors, and nil suppresses both severity classes."
+  :type '(choice (const :tag "Errors only" error)
+                 (const :tag "Warnings and errors" warning)
+                 (const :tag "Never" nil))
+  :group 'my/aaronnote)
+
 (config-defvar my/aaronnote-latex-export-engine "codex"
   "Engine for the Aaronnote CMD+P LaTeX export.
 \"codex\" builds a deterministic mechanical draft and then lets codex polish it,
@@ -621,6 +631,7 @@ CLIENT, when non-nil, identifies the Aaronnote xwidget that sent the key."
 	(zotero-prefix "aaronote-event:zotero:")
 	(zotero-import-prefix "aaronote-event:zotero-import:")
 	(current-file-prefix "aaronote-event:current-file:")
+	(ui-state-prefix "aaronote-event:ui-state:")
         (saved-prefix "aaronote-event:saved:")
         (key-prefix "aaronote-event:key:"))
     (cond
@@ -733,6 +744,23 @@ CLIENT, when non-nil, identifies the Aaronnote xwidget that sent the key."
             (my/aaronnote--sync-app-buffer-file file client))
         (error
          (message "Aaronnote current-file parse failed: %s"
+                  (error-message-string err)))))
+     ((string-prefix-p ui-state-prefix line)
+      (condition-case err
+          (let* ((payload (json-parse-string
+                           (substring line (length ui-state-prefix))
+                           :object-type 'alist))
+                 (status (alist-get 'status payload))
+                 (severity (intern-soft (or (alist-get 'severity payload) "")))
+                 (echo-p (or (eq severity 'info)
+                             (pcase my/aaronnote-echo-severity
+                               ('warning (memq severity '(warning error)))
+                               ('error (eq severity 'error))
+                               (_ nil)))))
+            (when (and echo-p (stringp status) (not (string-empty-p status)))
+              (message "AaronNote %s: %s" severity status)))
+        (error
+         (message "Aaronnote UI-state parse failed: %s"
                   (error-message-string err)))))
      ((string-prefix-p saved-prefix line)
       (condition-case err
@@ -939,6 +967,9 @@ When RENAME is non-nil, rename xwidget buffers to a note-specific name."
         (puthash file buffer my/aaronnote--file-buffers))
       (when client
         (puthash client buffer my/aaronnote--client-buffers))
+      (when (and (eq major-mode 'xwidget-webkit-mode)
+                 (fboundp 'my/aaronnote--setup-native-chrome))
+        (my/aaronnote--setup-native-chrome))
       (when changed
         (my/aaronnote--refresh-visible-ibuffers))
       buffer)))
@@ -1719,17 +1750,86 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 
 ;;; Header-line for the Aaronnote app buffer.
 
+(defun my/aaronnote-editor-menu (event)
+  "Open Aaronnote editor actions from the native pencil button at EVENT."
+  (interactive "e")
+  (my/xwidget--select-event-window event)
+  (popup-menu
+   (easy-menu-create-menu
+    "AaronNote"
+    (list
+     ["Focus editor" my/aaronnote-focus t]
+     ["Page outline" my/aaronnote-toggle-page t]
+     ["Agenda" my/aaronnote-toggle-agenda t]
+     ["Local graph" my/aaronnote-toggle-graph t]
+     ["Tools" my/aaronnote-toggle-tools t]
+     "---"
+     ["Toggle source" my/aaronnote-toggle-source t]
+     ["Save" my/aaronnote-save t]))
+   event))
+
+(dolist (entry '((my/aaronnote-toggle-page . "toggle-toc")
+                 (my/aaronnote-toggle-agenda . "toggle-agenda")
+                 (my/aaronnote-toggle-graph . "toggle-graph")
+                 (my/aaronnote-toggle-tools . "toggle-tools")))
+  (let ((fn (car entry)) (command (cdr entry)))
+    (fset fn (lambda () (interactive) (my/aaronnote-command command)))))
+
+(defun my/aaronnote--header-browser-buttons ()
+  "Return native xwidget controls with Aaronnote actions under the pencil."
+  (list
+   (my/xwidget--nav-button
+    (my/xwidget--mode-line-icon 'codicon "nf-cod-arrow_left" "back")
+    #'my/xwidget-back "Back [b]" 'header-line)
+   (my/xwidget--nav-button
+    (my/xwidget--mode-line-icon 'codicon "nf-cod-arrow_right" "fwd")
+    #'my/xwidget-forward "Forward [f]" 'header-line)
+   (my/xwidget--nav-button
+    (my/xwidget--mode-line-icon 'codicon "nf-cod-refresh" "reload")
+    #'my/xwidget-reload "Reload [g]" 'header-line)
+   (my/xwidget--nav-button
+    (my/xwidget--mode-line-icon 'codicon "nf-cod-edit" "edit")
+    #'my/aaronnote-editor-menu "AaronNote actions" 'header-line)
+   (my/xwidget--nav-button
+    (my/xwidget--mode-line-icon 'codicon "nf-cod-layout" "win")
+    #'my/xwidget-window-menu "Window menu" 'header-line)))
+
 (defun my/aaronnote--header-line ()
-  "Return the header-line string for the Aaronnote app buffer."
-  (let* ((file (and (buffer-live-p my/aaronnote--app-buffer)
-                    (my/aaronnote-buffer-file my/aaronnote--app-buffer)))
-         (name (if file (file-name-nondirectory file) "Aaronnote"))
-         (status (cond
-                  ((not my/aaronnote--ready) " ○ offline")
-                  (my/aaronnote--last-sync-stats
-                   (format " ◉ %s" my/aaronnote--last-sync-stats))
-                  (t " ● ready"))))
-    (concat "  " (propertize name 'face 'mode-line-buffer-id) status)))
+  "Return native browser and editor controls for an Aaronnote buffer."
+  (let* ((file (my/aaronnote-buffer-file (current-buffer)))
+         (name (if file (file-name-nondirectory file) "Aaronnote")))
+    (append
+     (list " ")
+     (my/aaronnote--header-browser-buttons)
+     (list "  " (propertize name 'face 'mode-line-buffer-id)))))
+
+(defun my/aaronnote--setup-native-chrome ()
+  "Install Aaronnote-only Emacs chrome in the current xwidget buffer."
+  (setq-local header-line-format '(:eval (my/aaronnote--header-line)))
+  (kill-local-variable 'mode-line-format)
+  (force-mode-line-update t))
+
+(defun my/aaronnote--restore-native-chrome-h ()
+  "Restore Aaronnote chrome after generic xwidget mode initialization."
+  (when (my/aaronnote--xwidget-buffer-p)
+    (my/aaronnote--setup-native-chrome)))
+
+(defun my/aaronnote--restore-native-chrome-later-h ()
+  "Restore Aaronnote chrome after all xwidget mode hooks have settled."
+  (let ((buffer (current-buffer)))
+    (run-at-time
+     0 nil
+     (lambda ()
+       (when (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (my/aaronnote--restore-native-chrome-h)))))))
+
+(with-eval-after-load 'init-browser
+  (advice-add 'my/xwidget-setup-control-line :after
+              #'my/aaronnote--restore-native-chrome-h)
+  (with-eval-after-load 'xwidget
+    (add-hook 'xwidget-webkit-mode-hook
+              #'my/aaronnote--restore-native-chrome-later-h 90)))
 
 ;;;###autoload
 (defun my/aaronnote-pop ()

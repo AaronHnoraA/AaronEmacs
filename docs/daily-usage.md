@@ -145,6 +145,14 @@ Graph 搜索框支持全文词和
 `tag:` / `alias:` / `path:` / `title:` 过滤，并会提示 tag / alias / path 等候选。
 本地 graph xwidget buffer 里 `M-w` 会 kill graph buffer 并关掉 graph websocket。
 
+Aaronnote 编辑器的 xwidget window 使用 Emacs 原生 chrome：顶部铅笔按钮集中提供
+Page、Agenda、Graph、Tools、Source、Save，点击后仍调用原 Web 面板和保存逻辑；
+Vim mode、只读和全文/选区/本节字数显示在 Web 编辑区右上角的小浮窗，
+Emacs mode-line 保持原样。Opening/Saved/Edited 等日常状态静默；LaTeX 进度、明确操作
+结果和错误等关键反馈经过去重与短间隔合并后进入 Emacs echo，error 立即显示；
+`my/aaronnote-echo-severity` 可配置为仅 error、warning + error 或完全关闭。这个布局只应用于
+Aaronnote 自己的 xwidget buffer，不改变普通网页的 xwidget 控制栏。
+
 Aaronnote 的 Emacs 原生 roam buffer（Agenda、Tasks、TOC、Backlinks、Related、
 Management、DB Status、note list 和 Roam Selector）使用统一的紧凑 workbench UI：
 header-line 显示当前视图状态，正文使用工具栏、分组、状态徽章和可点击行。通用按键为

@@ -613,6 +613,12 @@ async function apiCurrentFile(body) {
   return { ok: true, ...payload };
 }
 
+async function apiEmacsUiState(body) {
+  const payload = body && typeof body === "object" ? body : {};
+  process.stdout.write(`aaronote-event:ui-state:${JSON.stringify(payload)}\n`);
+  return { ok: true };
+}
+
 async function apiEmacsKey(body) {
   const k = String((body && typeof body === "object" ? body.key : body) || "").trim();
   const client = String((body && typeof body === "object" ? body.client : "") || "").trim();
@@ -866,6 +872,7 @@ const apiHandlers = {
   "aaronnote:api:shell:show-editor-context-menu": () => ({ ok: true }),
   "aaronnote:api:emacs:open": (body) => apiOpenInEmacs(body?.file ?? body, body?.line, body?.col, body?.tag),
   "aaronnote:api:emacs:current-file": (file) => apiCurrentFile(file),
+  "aaronnote:api:emacs:ui-state": (body) => apiEmacsUiState(body),
   "aaronnote:api:emacs:key": (key) => apiEmacsKey(key),
   "aaronnote:api:emacs:system-open": (target) => apiSystemOpen(target),
   "aaronnote:api:emacs:zotero": (body) => apiEmacsZotero(body),
@@ -1156,6 +1163,7 @@ function adapterScript(origin) {
           file && typeof file === "object" ? file : String(file || "")
         ]);
       },
+      uiState: function(body) { return call("aaronnote:api:emacs:ui-state", [body || {}]); },
       key: function(k) {
         return call("aaronnote:api:emacs:key", [
           k && typeof k === "object" ? k : String(k || "")

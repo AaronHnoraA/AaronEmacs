@@ -182,60 +182,103 @@ button:disabled {
 
 .aaronnote-focused-shell {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
   background: var(--aaronnote-bg);
 }
 
-.aaronnote-focused-bar {
+.aaronnote-status-hud {
+  position: fixed;
+  z-index: 40;
+  top: 10px;
+  left: 18px;
+  right: 18px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 34px;
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--aaronnote-border);
-  background: var(--aaronnote-chrome);
-  font: 12px/1.4 system-ui, sans-serif;
+  justify-content: space-between;
+  gap: 18px;
+  color: var(--aaronnote-muted);
+  font: 11px/1.35 var(--aaron-font-mono);
+  pointer-events: none;
 }
 
-#app.is-readonly .aaronnote-focused-bar {
-  background: color-mix(in srgb, var(--aaronnote-chrome), var(--aaron-red) 4%);
-}
-
-.aaronnote-focused-bar [data-readonly] {
-  border: 1px solid rgb(141 32 44 / 35%);
+.aaronnote-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--aaronnote-border), transparent 22%);
   border-radius: 999px;
-  padding: 1px 7px;
+  background: color-mix(in srgb, var(--aaronnote-chrome), transparent 9%);
+  box-shadow: 0 5px 18px rgb(0 0 0 / 14%);
+  backdrop-filter: blur(10px);
+}
+
+.aaronnote-status-pill-left > span + span::before {
+  margin-right: 7px;
+  color: var(--aaron-faint);
+  content: "│";
+}
+
+.aaronnote-status-pill-right {
+  max-width: min(54vw, 620px);
+  margin-left: auto;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.aaronnote-status-pill-left {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.aaronnote-status-pill-left:hover,
+.aaronnote-status-pill-left:focus-visible,
+.aaronnote-status-pill-left.is-active,
+.aaronnote-status-pill-left[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--aaron-accent), transparent 48%);
+  outline: none;
+}
+
+.aaronnote-status-pill-left.is-active,
+.aaronnote-status-pill-left[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--aaronnote-chrome), var(--aaron-accent) 9%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aaron-accent), transparent 72%);
+}
+
+.aaronnote-status-pill-right:hover,
+.aaronnote-status-pill-right:focus-visible,
+.aaronnote-status-pill-right.is-active,
+.aaronnote-status-pill-right[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--aaron-accent), transparent 48%);
+  color: var(--aaronnote-muted);
+  outline: none;
+}
+
+.aaronnote-status-pill-right.is-active,
+.aaronnote-status-pill-right[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--aaronnote-chrome), var(--aaron-accent) 9%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aaron-accent), transparent 72%);
+}
+
+
+.aaronnote-status-hud [data-readonly] {
   color: var(--aaron-red-dark);
-  background: rgb(141 32 44 / 8%);
-  font: 700 0.72rem/1.4 var(--aaron-font-mono);
+  font-weight: 700;
   letter-spacing: 0.04em;
 }
 
-.aaronnote-focused-bar [data-status] {
-  flex: 1;
-  color: var(--aaronnote-muted);
-}
-
-.aaronnote-focused-bar [data-writing-stats] {
-  flex: 0 1 auto;
+.aaronnote-status-hud [data-writing-stats] {
   min-width: 0;
   overflow: hidden;
-  color: var(--aaron-faint);
-  font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.aaronnote-focused-bar [data-vim-mode] {
-  min-width: 52px;
-  border: 1px solid var(--aaronnote-border);
-  border-radius: 5px;
-  padding: 2px 6px;
-  background: var(--aaron-paper);
-  color: var(--aaronnote-muted);
-  text-align: center;
-  font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+.aaronnote-status-hud [data-writing-stats] {
+  color: var(--aaron-faint);
+  font-variant-numeric: tabular-nums;
 }
 
 .aaronnote-jupyter-stealth-button {
@@ -259,17 +302,15 @@ button:disabled {
   opacity: 1;
 }
 
-#app[data-vim-mode="normal"] .aaronnote-focused-bar [data-vim-mode] {
-  border-color: rgb(130 231 255 / 42%);
-  background: rgb(130 231 255 / 10%);
+#app[data-vim-mode="normal"] .aaronnote-status-hud [data-vim-mode] {
   color: var(--aaronnote-vim-accent);
+  font-weight: 700;
 }
 
-#app[data-vim-mode="visual"] .aaronnote-focused-bar [data-vim-mode],
-#app[data-vim-mode="visual-line"] .aaronnote-focused-bar [data-vim-mode] {
-  border-color: rgb(201 173 255 / 40%);
-  background: rgb(201 173 255 / 8%);
+#app[data-vim-mode="visual"] .aaronnote-status-hud [data-vim-mode],
+#app[data-vim-mode="visual-line"] .aaronnote-status-hud [data-vim-mode] {
   color: var(--aaronnote-vim-visual);
+  font-weight: 700;
 }
 
 .aaronnote-focused-editor {

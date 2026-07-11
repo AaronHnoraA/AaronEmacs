@@ -99,37 +99,44 @@ const initialReadOnly = initialParams.get("readonly") === "1" || initialParams.g
 
 root.innerHTML = `
   <main class="aaronnote-focused-shell">
-    <header class="aaronnote-focused-bar">
-      <strong data-file>AaronNote</strong>
-      <span data-vim-mode>INSERT</span>
-      <span data-readonly hidden>READ ONLY</span>
-      <span data-status>Opening...</span>
-      <span data-writing-stats aria-live="polite"></span>
-      <button type="button" class="aaronnote-jupyter-stealth-button" data-jupyter-toggle aria-expanded="false" title="Code cells" aria-label="Code cells">&#xf121;</button>
-      <button type="button" data-toc-toggle aria-expanded="false">TOC</button>
-      <button type="button" data-agenda-toggle aria-expanded="false">Agenda</button>
-      <button type="button" data-graph-toggle aria-expanded="false">Graph</button>
-      <button type="button" data-tools-toggle aria-expanded="false">Tools</button>
-      <button type="button" data-source>Source</button>
-      <button type="button" data-save>Save</button>
-    </header>
+    <aside class="aaronnote-status-hud" aria-live="polite">
+      <span class="aaronnote-status-pill aaronnote-status-pill-left" data-mode-toggle
+            role="button" tabindex="0" title="Toggle tools" aria-label="Toggle tools"
+            aria-expanded="false">
+        <span data-vim-mode>INSERT</span>
+        <span data-readonly hidden>READ ONLY</span>
+      </span>
+      <span class="aaronnote-status-pill aaronnote-status-pill-right" data-stats-toggle
+            role="button" tabindex="0" title="Toggle page outline" aria-label="Toggle page outline"
+            aria-expanded="false">
+        <span data-writing-stats aria-live="polite"></span>
+      </span>
+    </aside>
     <section class="aaronnote-focused-editor" data-editor></section>
   </main>
 `;
 
 const host = root.querySelector<HTMLElement>("[data-editor]")!;
-const fileLabel = root.querySelector<HTMLElement>("[data-file]")!;
+const fileLabel = document.createElement("strong");
 const modeLabel = root.querySelector<HTMLElement>("[data-vim-mode]")!;
 const readOnlyLabel = root.querySelector<HTMLElement>("[data-readonly]")!;
-const statusLabel = root.querySelector<HTMLElement>("[data-status]")!;
+const statusLabel = document.createElement("span");
 const writingStatsLabel = root.querySelector<HTMLElement>("[data-writing-stats]")!;
-const jupyterButton = root.querySelector<HTMLButtonElement>("[data-jupyter-toggle]")!;
-const tocButton = root.querySelector<HTMLButtonElement>("[data-toc-toggle]")!;
-const agendaButton = root.querySelector<HTMLButtonElement>("[data-agenda-toggle]")!;
-const graphButton = root.querySelector<HTMLButtonElement>("[data-graph-toggle]")!;
-const toolsButton = root.querySelector<HTMLButtonElement>("[data-tools-toggle]")!;
-const sourceButton = root.querySelector<HTMLButtonElement>("[data-source]")!;
-const saveButton = root.querySelector<HTMLButtonElement>("[data-save]")!;
+const statsToggle = root.querySelector<HTMLElement>("[data-stats-toggle]")!;
+const modeToggle = root.querySelector<HTMLElement>("[data-mode-toggle]")!;
+const shellControl = (label: string): HTMLButtonElement => {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  return button;
+};
+const jupyterButton = shellControl("Code cells");
+const tocButton = shellControl("Page");
+const agendaButton = shellControl("Agenda");
+const graphButton = shellControl("Graph");
+const toolsButton = shellControl("Tools");
+const sourceButton = shellControl("Source");
+const saveButton = shellControl("Save");
 
 const prosePopover = document.createElement("div");
 prosePopover.className = "aaronnote-prose-popover";
@@ -522,9 +529,51 @@ function roamFeaturesEnabled(): boolean {
   return !currentStandalone;
 }
 
+let lastEmacsStatus = "";
+let lastEmacsStatusAt = 0;
+let pendingEmacsStatusTimer: number | null = null;
+let pendingEmacsStatus: { message: string; severity: "info" | "warning" | "error" } | null = null;
+
+function statusSeverity(message: string): "warning" | "error" | null {
+  if (/\b(?:error|failed?|conflict|not found|unavailable)\b/i.test(message)) return "error";
+  if (/\b(?:warning|warn|changed in another pane)\b/i.test(message)) return "warning";
+  return null;
+}
+
+function routineStatus(message: string): boolean {
+  return /^(?:opening(?:\.\.\.)?|saved|edited|ready)$/i.test(message.trim());
+}
+
+function sendImportantStatus(message: string, severity: "info" | "warning" | "error"): void {
+  const send = (next: { message: string; severity: "info" | "warning" | "error" }) => {
+    lastEmacsStatus = next.message;
+    lastEmacsStatusAt = performance.now();
+    void api.emacs.uiState({ client: currentClient, status: next.message, severity: next.severity });
+  };
+  if (severity === "error" || performance.now() - lastEmacsStatusAt >= 450) {
+    if (pendingEmacsStatusTimer !== null) window.clearTimeout(pendingEmacsStatusTimer);
+    pendingEmacsStatusTimer = null;
+    pendingEmacsStatus = null;
+    send({ message, severity });
+    return;
+  }
+  pendingEmacsStatus = { message, severity };
+  if (pendingEmacsStatusTimer !== null) return;
+  pendingEmacsStatusTimer = window.setTimeout(() => {
+    pendingEmacsStatusTimer = null;
+    const next = pendingEmacsStatus;
+    pendingEmacsStatus = null;
+    if (next && next.message !== lastEmacsStatus) send(next);
+  }, Math.max(0, 450 - (performance.now() - lastEmacsStatusAt)));
+}
+
 function setStatus(message: string): void {
   statusLabel.textContent = message;
   delete statusLabel.dataset.proseOwner;
+  const severity = statusSeverity(message);
+  if (!routineStatus(message) && message !== lastEmacsStatus) {
+    sendImportantStatus(message, severity || "info");
+  }
 }
 
 function setOwnedProseStatus(requestId: number, message: string): void {
@@ -5809,8 +5858,7 @@ function renderToolsPanel(): void {
     detail.textContent = action.detail;
     button.append(title, detail);
     button.addEventListener("click", () => {
-      toolsPanel.hidden = true;
-      toolsButton.setAttribute("aria-expanded", "false");
+      closeToolsPanel();
       action.run();
     });
     toolsList.appendChild(button);
@@ -5820,12 +5868,17 @@ function renderToolsPanel(): void {
 function toggleToolsPanel(): void {
   if (toolsPanel.hidden) renderToolsPanel();
   toolsPanel.hidden = !toolsPanel.hidden;
-  toolsButton.setAttribute("aria-expanded", toolsPanel.hidden ? "false" : "true");
+  const expanded = !toolsPanel.hidden;
+  toolsButton.setAttribute("aria-expanded", String(expanded));
+  modeToggle.setAttribute("aria-expanded", String(expanded));
+  modeToggle.classList.toggle("is-active", expanded);
 }
 
 function closeToolsPanel(): void {
   toolsPanel.hidden = true;
   toolsButton.setAttribute("aria-expanded", "false");
+  modeToggle.setAttribute("aria-expanded", "false");
+  modeToggle.classList.remove("is-active");
 }
 
 function closeRoamToolsPanel(): void {
@@ -7399,6 +7452,19 @@ function runHostCommand(detail: unknown): boolean {
     case "source":
       toggleSourceMode();
       return true;
+    case "toggle-toc":
+      togglePageOutline();
+      return true;
+    case "toggle-agenda":
+      if (!roamToolsPanel.hidden && roamToolsPanel.classList.contains("is-agenda")) closeRoamToolsPanel();
+      else void openAgendaTool();
+      return true;
+    case "toggle-graph":
+      localGraphPanel.toggle();
+      return true;
+    case "toggle-tools":
+      toggleToolsPanel();
+      return true;
     case "undo":
       if (rejectReadOnlyAction("Read-only pane")) return true;
       editor.focus();
@@ -7417,9 +7483,20 @@ function runHostCommand(detail: unknown): boolean {
   }
 }
 
-tocButton.addEventListener("click", () => {
+function togglePageOutline(): void {
   floatingTocPanel.toggle();
   updateFloatingToc();
+  const expanded = tocButton.getAttribute("aria-expanded") === "true";
+  statsToggle.setAttribute("aria-expanded", String(expanded));
+  statsToggle.classList.toggle("is-active", expanded);
+}
+
+tocButton.addEventListener("click", togglePageOutline);
+statsToggle.addEventListener("click", togglePageOutline);
+statsToggle.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  togglePageOutline();
 });
 agendaButton.addEventListener("click", () => {
   if (!roamToolsPanel.hidden && roamToolsPanel.classList.contains("is-agenda")) {
@@ -7429,6 +7506,12 @@ agendaButton.addEventListener("click", () => {
   void openAgendaTool();
 });
 toolsButton.addEventListener("click", toggleToolsPanel);
+modeToggle.addEventListener("click", toggleToolsPanel);
+modeToggle.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  toggleToolsPanel();
+});
 toolsClose.addEventListener("click", closeToolsPanel);
 roamToolsClose.addEventListener("click", closeRoamToolsPanel);
 jupyterButton.addEventListener("click", toggleJupyterPanel);
