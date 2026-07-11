@@ -107,7 +107,7 @@ describe("prose check diagnostic mapping", () => {
       requestData = new URLSearchParams(String(init?.body || "")).get("data") || "";
       return new Response(JSON.stringify({ matches: [] }), { status: 200 });
     });
-    const source = "Since \\(T_G\\) is decomposable.";
+    const source = "Since \\(T_G\\) is decomposable.\nSuch that\n\\[\nU = U_1 \\oplus U_2\n\\]\nis a basis.";
     await runExternalProseChecks({
       requestId: "annotated-math",
       segments: [{ from: 0, text: source }],
@@ -116,6 +116,7 @@ describe("prose check diagnostic mapping", () => {
     });
     const data = JSON.parse(requestData) as { annotation: Array<{ text?: string; markup?: string; interpretAs?: string }> };
     expect(data.annotation).toContainEqual({ markup: "\\(T_G\\)", interpretAs: "term" });
+    expect(data.annotation).toContainEqual({ markup: "\\[\nU = U_1 \\oplus U_2\n\\]", interpretAs: "term" });
     expect(data.annotation.map((entry) => entry.text || entry.markup || "").join("")).toBe(source);
   });
 

@@ -445,9 +445,12 @@ function languageToolAnnotations(source, masked) {
     const value = source.slice(from, to);
     if (!isMarkup) annotation.push({ text: value });
     else {
-      const interpretAs = /\r?\n/.test(value)
-        ? "\n\n"
-        : /[\p{L}\p{N}]/u.test(value) ? "term" : " ";
+      const trimmed = value.trimStart();
+      const isMath = /^(?:\$\$|\\\[|\\\(|\\begin\{(?:align|aligned|array|equation|gather|math|multline|pmatrix|bmatrix|matrix)\*?\})/i
+        .test(trimmed);
+      const interpretAs = isMath
+        ? "term"
+        : /\r?\n/.test(value) ? "\n\n" : /[\p{L}\p{N}]/u.test(value) ? "term" : " ";
       annotation.push({ markup: value, interpretAs });
     }
     from = to;
