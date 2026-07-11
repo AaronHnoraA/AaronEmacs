@@ -101,6 +101,24 @@ describe("prose check diagnostic mapping", () => {
     })]);
   });
 
+  test("sends masked technical syntax as interpreted markup", async () => {
+    let requestData = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      requestData = new URLSearchParams(String(init?.body || "")).get("data") || "";
+      return new Response(JSON.stringify({ matches: [] }), { status: 200 });
+    });
+    const source = "Since \\(T_G\\) is decomposable.";
+    await runExternalProseChecks({
+      requestId: "annotated-math",
+      segments: [{ from: 0, text: source }],
+      totalChars: source.length,
+      allowLocalFallback: false,
+    });
+    const data = JSON.parse(requestData) as { annotation: Array<{ text?: string; markup?: string; interpretAs?: string }> };
+    expect(data.annotation).toContainEqual({ markup: "\\(T_G\\)", interpretAs: "term" });
+    expect(data.annotation.map((entry) => entry.text || entry.markup || "").join("")).toBe(source);
+  });
+
   test("cancels an in-flight remote request by request id", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => new Promise((_resolve, reject) => {
       const signal = init?.signal;
@@ -124,7 +142,11 @@ describe("prose check diagnostic mapping", () => {
     const pending = new Map<string, (response: Response) => void>();
     const starts: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
-      const text = new URLSearchParams(String(init?.body || "")).get("text") || "";
+      const body = new URLSearchParams(String(init?.body || ""));
+      const data = JSON.parse(body.get("data") || '{"annotation":[]}') as {
+        annotation: Array<{ text?: string; markup?: string }>;
+      };
+      const text = data.annotation.map((entry) => entry.text || entry.markup || "").join("");
       starts.push(text);
       return new Promise<Response>((resolve) => pending.set(text, resolve));
     });

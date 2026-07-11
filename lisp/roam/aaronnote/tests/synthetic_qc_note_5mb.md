@@ -1212,7 +1212,7 @@ This operator is positive semidefinite, Hermitian, trace-one, and idempotent.
 
 #+begin define Density operator
 Let \(H\) be a finite-dimensional Hilbert space. A density operator on \(H\)
-is a linear operator
+is a linear operator.
 
 \[
 \rho : H \to H
@@ -233216,7 +233216,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文直觉：正半定保证测量概率非负；迹为一保证总概率为一。
+中文直觉：���半定保证测量概率非负；迹为一保证总概率为一。
 #+end note
 
 The expectation value of an observable \(A\) in state \(\rho\) is

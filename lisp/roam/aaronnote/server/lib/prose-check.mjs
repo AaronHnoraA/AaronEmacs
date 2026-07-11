@@ -290,6 +290,7 @@ function createCheckChunksFromSegments(segments, totalChars) {
         from: segment.from + chunk.from,
         to: segment.from + chunk.to,
         text: chunk.text,
+        sourceText: segment.text.slice(chunk.from, chunk.to),
       });
       checkedChars += chunk.to - chunk.from;
     }
@@ -404,17 +405,54 @@ export async function acceptProseWord(value) {
 function combineLanguageToolChunks(chunks) {
   let text = "";
   const mappings = [];
+  const annotation = [];
   for (const chunk of chunks) {
-    if (text) text += "\n\n";
+    if (text) {
+      text += "\n\n";
+      annotation.push({ text: "\n\n" });
+    }
     const combinedFrom = text.length;
     text += chunk.text;
+    annotation.push(...languageToolAnnotations(chunk.sourceText || chunk.text, chunk.text));
     mappings.push({
       combinedFrom,
       combinedTo: text.length,
       sourceFrom: chunk.from,
     });
   }
-  return { text, mappings };
+  return { text, mappings, data: JSON.stringify({ annotation }) };
+}
+
+function languageToolAnnotations(source, masked) {
+  const ignored = Array.from({ length: source.length }, (_, index) => source[index] !== masked[index]);
+  for (let i = 0; i < ignored.length;) {
+    if (ignored[i] || !/\s/.test(source[i] || "")) {
+      i += 1;
+      continue;
+    }
+    const from = i;
+    while (i < ignored.length && /\s/.test(source[i] || "") && !ignored[i]) i += 1;
+    if (from > 0 && i < ignored.length && ignored[from - 1] && ignored[i]) {
+      for (let j = from; j < i; j++) ignored[j] = true;
+    }
+  }
+
+  const annotation = [];
+  for (let from = 0; from < source.length;) {
+    const isMarkup = ignored[from];
+    let to = from + 1;
+    while (to < source.length && ignored[to] === isMarkup) to += 1;
+    const value = source.slice(from, to);
+    if (!isMarkup) annotation.push({ text: value });
+    else {
+      const interpretAs = /\r?\n/.test(value)
+        ? "\n\n"
+        : /[\p{L}\p{N}]/u.test(value) ? "term" : " ";
+      annotation.push({ markup: value, interpretAs });
+    }
+    from = to;
+  }
+  return annotation;
 }
 
 function mapLanguageToolDiagnostics(diagnostics, mappings, sourceLength) {
@@ -446,12 +484,12 @@ function languageToolResult(stdout, combined, sourceLength, language) {
   };
 }
 
-async function postLanguageTool(settings, text, signal, priority = 0) {
+async function postLanguageTool(settings, text, signal, priority = 0, data = "") {
   const endpoint = `${settings.serverUrl.replace(/\/+$/, "")}/v2/check`;
   const body = new URLSearchParams({
     language: settings.language,
     level: settings.level,
-    text,
+    ...(data ? { data } : { text }),
   });
   const operationSignal = combinedAbortSignal(signal, AbortSignal.timeout(settings.remoteTimeoutMs));
   const release = await remoteSemaphore.acquire(operationSignal, priority);
@@ -480,7 +518,7 @@ async function postLanguageTool(settings, text, signal, priority = 0) {
 }
 
 async function runLanguageToolRemote(combined, sourceLength, settings, signal, priority) {
-  const response = await postLanguageTool(settings, combined.text, signal, priority);
+  const response = await postLanguageTool(settings, combined.text, signal, priority, combined.data);
   return languageToolResult(response.raw, combined, sourceLength, settings.language);
 }
 
@@ -636,9 +674,14 @@ export async function runExternalProseChecks({
     throwIfAborted(controller.signal);
     const source = String(content || "");
     const segmentList = normalizeCheckSegments(segments);
-    const chunkInfo = segmentList.length > 0
-      ? createCheckChunksFromSegments(segmentList, totalChars)
-      : createCheckChunks(maskAaronnoteProse(source), ranges);
+    let chunkInfo;
+    if (segmentList.length > 0) {
+      chunkInfo = createCheckChunksFromSegments(segmentList, totalChars);
+    } else {
+      const masked = maskAaronnoteProse(source);
+      chunkInfo = createCheckChunks(masked, ranges);
+      for (const chunk of chunkInfo.chunks) chunk.sourceText = source.slice(chunk.from, chunk.to);
+    }
     const [result, userWords] = await Promise.all([
       runLanguageTool(
         chunkInfo.chunks,
