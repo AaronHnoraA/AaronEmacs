@@ -182,15 +182,16 @@ Roam New 共用。
 选完范围后会再让你**选择模板**（`Article` 默认、`Report`、`Assignment`），模板若声明了
 额外字段（如 Assignment 的课程代码 / 学期 / 学号）会弹出表单，默认值按 note 记忆。
 
-导出分两步：先用确定性的**机械转换**生成草稿，再由 **AI 后端**在草稿上做格式润色，并由服务端
-把成稿套进模板后**实际编译**校验；编译失败会带着日志让 AI 重试，若始终失败则回退到机械草稿。
-AI 不可用时静默回退到机械草稿，CMD+P 始终可用。AI 只改格式、不改正文（附带一个词表保真提醒），
-并会顺带给文档取一个合适的**标题**（无显式 meta 标题时用 AI 标题，其次首个 `#` 标题，最后才是
-文件名）。导出每一步（转换 / 润色 / 编译 / 重试）都会在状态栏 **echo 进度**。
+导出先由 Aaronnote 预处理私有语法，再用 **Pandoc** 完整解析标准 Markdown，随后由 **AI 后端**
+执行全文结构 polish，并由服务端做 review、严格保真和实际编译三重校验；任一 gate 失败都会重试，
+最终使用已验证的 Pandoc 草稿。AI 不可用时直接使用 Pandoc 草稿。Agent 只改格式、不改正文，
+并会顺带给文档取一个合适的**标题**：显式 meta 标题不可覆盖，否则综合文件名意图、模板用途和
+一个主主题，禁止直接使用 `assg`/`q1` 之类 slug 或生成多主题长摘要。导出每一步都会在状态栏
+**echo 进度**。
 
 后端可用 `my/aaronnote-latex-export-agent` 选择：`codex`（默认）/ `claude` / `opencode`，都以
 非交互、免确认方式运行，且在配置里选定、不会每次询问。引擎开关 `my/aaronnote-latex-export-engine`
-（`codex` / `mechanical`）。编译校验用 draft 模式（`-draftmode` / `-no-pdf`）加速。见 Aaronnote 的
+（`codex` / `mechanical`，后者名称仅为旧配置兼容）。编译校验用 draft 模式加速。见 Aaronnote 的
 `docs/latex-export-style.md`。
 
 标题、章节名和 theorem/proof 标签中的 `\(...\)` 会保留为 LaTeX 数学，而不是被转义成

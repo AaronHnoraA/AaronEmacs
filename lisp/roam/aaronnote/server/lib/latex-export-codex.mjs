@@ -1,18 +1,18 @@
 // Codex-assisted LaTeX export polish.
 //
-// Pipeline: the mechanical converter (latex-export.mjs) produces a draft body;
+// Pipeline: the Aaronnote preprocessor + Pandoc produces a draft body;
 // this module lets codex adjust that draft (formatting only, never prose), the
 // server compiles the assembled document, and on failure feeds the log back to
 // codex for a bounded number of retries. If codex is unavailable or never
-// produces a compiling body, the caller falls back to the raw mechanical draft.
+// produces a compiling body, the caller falls back to the verified Pandoc draft.
 //
 // This module owns no runtime state: paths, the template-assembly closure, and
 // resolved executable paths are all passed in, so it stays pure enough to test.
 
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { appendFile, copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { appendFile, copyFile, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -41,8 +41,10 @@ export async function loadAgentRules(agentDir) {
     if (!parsed || typeof parsed !== "object") return null;
     const envMap = parsed.envMap && typeof parsed.envMap === "object" ? parsed.envMap : {};
     const commentBlocks = Array.isArray(parsed.commentBlocks) ? parsed.commentBlocks : [];
-    if (Object.keys(envMap).length === 0 && commentBlocks.length === 0) return null;
-    return { envMap, commentBlocks };
+    const hiddenBlocks = Array.isArray(parsed.hiddenBlocks) ? parsed.hiddenBlocks : [];
+    const pandocExtensions = Array.isArray(parsed.pandocExtensions) ? parsed.pandocExtensions : [];
+    if (Object.keys(envMap).length === 0 && commentBlocks.length === 0 && hiddenBlocks.length === 0 && pandocExtensions.length === 0) return null;
+    return { envMap, commentBlocks, hiddenBlocks, pandocExtensions };
   } catch {
     return null;
   }
@@ -103,6 +105,197 @@ export function proseFidelityWarnings(sourceMarkdown, latexBody, options = {}) {
   return warnings;
 }
 
+function protectedPayloads(text) {
+  const source = String(text || "");
+  return {
+    math: [...source.matchAll(/\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]/g)].map((match) => (match[1] ?? match[2] ?? "").replace(/\s+/g, "")),
+    code: [...source.matchAll(/\\begin\{verbatim\}([\s\S]*?)\\end\{verbatim\}|\\texttt\{((?:\\.|[^{}])*)\}|\\verb\*?(.)(.*?)\3/g)]
+      .map((match) => (match[1] ?? match[2] ?? match[4] ?? "").replace(/^\n|\n$/g, "")),
+    citations: [...source.matchAll(/\\cite(?:\[[^\]]*\])?\{([^}]+)\}/g)].map((match) => match[0]),
+    resources: [...source.matchAll(/\\href\{((?:\\.|[^{}])*)\}|\\includegraphics(?:\[([^\]]*)\])?\{([^}]*)\}/g)]
+      .map((match) => match[1] ?? `${match[3] || ""}\0${String(match[2] || "").match(/\balt\s*=\s*\{([^}]*)\}/)?.[1] || ""}`),
+    anchors: [...source.matchAll(/\\(?:label|hypertarget)\{([^}]*)\}/g)].map((match) => match[1]),
+  };
+}
+
+function romanNumeral(value) {
+  const table = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]];
+  let number = Math.max(1, Number(value) || 1);
+  let output = "";
+  for (const [amount, symbol] of table) while (number >= amount) { output += symbol; number -= amount; }
+  return output;
+}
+
+function listLabel(style, index) {
+  const kind = /Alph/.test(style) ? "Alph" : /alph/.test(style) ? "alph" : /Roman/.test(style) ? "Roman" : /roman/.test(style) ? "roman" : "arabic";
+  let value = kind === "alph" || kind === "Alph"
+    ? String.fromCharCode((kind === "Alph" ? 65 : 97) + ((index - 1) % 26))
+    : kind === "roman" || kind === "Roman"
+      ? (kind === "Roman" ? romanNumeral(index).toUpperCase() : romanNumeral(index))
+      : String(index);
+  if (/\([^)]*(?:alph|roman|arabic)/i.test(style)) value = `(${value})`;
+  else if (/(?:alph|roman|arabic)[^}]*\)/i.test(style)) value = `${value})`;
+  else value = `${value}.`;
+  return value;
+}
+
+function renderListLabels(text) {
+  const stack = [];
+  const output = [];
+  for (const line of String(text || "").split("\n")) {
+    const begin = line.match(/\\begin\{(enumerate|itemize|description)\}(?:\[([^\]]*)\])?/);
+    if (begin) stack.push({ kind: begin[1], style: begin[2] || "arabic", count: 0 });
+    const definition = line.match(/^\s*\\def\\labelenum\w+\{(.+)\}\s*$/);
+    if (definition && stack.at(-1)?.kind === "enumerate") {
+      stack.at(-1).style = definition[1];
+      continue;
+    }
+    const item = line.match(/\\item(?:\[([^\]]*)\])?/);
+    if (item && stack.length) {
+      const current = stack.at(-1);
+      current.count += 1;
+      const label = item[1] || (current.kind === "enumerate" ? listLabel(current.style, current.count) : current.kind === "itemize" ? "•" : "");
+      output.push(line.slice(0, item.index) + (label ? `${label} ` : "") + line.slice(item.index + item[0].length));
+    } else output.push(line);
+    const end = line.match(/\\end\{(enumerate|itemize|description)\}/);
+    if (end && stack.at(-1)?.kind === end[1]) stack.pop();
+  }
+  return output.join("\n");
+}
+
+function structuralSignature(text) {
+  const tokens = [];
+  const pattern = /\\(begin|end)\{([^}]+)\}|\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)(\*)?|\\item(?:\[([^\]]*)\])?|\\def\\labelenum\w+\{([^\n]+)\}|\\(footnote|caption)(\*)?/g;
+  const structuralEnvironments = new Set(["enumerate", "itemize", "description", "theorem", "lemma", "proposition", "corollary", "definition", "remark", "example", "proof", "quote"]);
+  for (const match of String(text || "").matchAll(pattern)) {
+    if (match[1] && structuralEnvironments.has(match[2])) tokens.push(`${match[1]}:${match[2]}`);
+    else if (match[3]) tokens.push(`heading:${match[3]}${match[4] || ""}`);
+    else if (match[0].startsWith("\\item")) tokens.push(`item:${match[5] || ""}`);
+    else if (match[6] != null) tokens.push(`enum-label:${match[6].replace(/\s+/g, "")}`);
+    else if (match[7]) tokens.push(`${match[7]}${match[8] || ""}`);
+  }
+  let tableDepth = 0;
+  for (const line of String(text || "").split(/\r?\n/)) {
+    if (/\\begin\{(?:longtable\*?|tabular\*?|tabularx|array)\}/.test(line)) tableDepth += 1;
+    if (tableDepth > 0) {
+      const separators = [...line.matchAll(/(?<!\\)&/g)].length;
+      const rowEnd = /(?<!\\)\\\\(?:\[[^\]]*\])?\s*$/.test(line);
+      if (separators > 0 || rowEnd) tokens.push(`table-row:${separators + 1}`);
+    }
+    if (/\\end\{(?:longtable\*?|tabular\*?|tabularx|array)\}/.test(line)) tableDepth = Math.max(0, tableDepth - 1);
+  }
+  return tokens;
+}
+
+function nonListStructure(tokens) {
+  return tokens.filter((token) => !/^(?:begin|end):(enumerate|itemize|description)$|^item:|^enum-label:/.test(token));
+}
+
+function visibleContentSignature(text) {
+  let source = renderListLabels(text);
+  let resourceIndex = 0;
+  let anchorIndex = 0;
+  let codeIndex = 0;
+  let mathIndex = 0;
+  let citeIndex = 0;
+  source = source.replace(/\\href\{(?:\\.|[^{}])*\}\{|\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}/g,
+    (match) => ` AARONNOTERESOURCE${resourceIndex++} ${match.startsWith("\\href") ? "{" : ""}`);
+  source = source.replace(/\\label\{[^}]*\}|\\hypertarget\{[^}]*\}\{/g,
+    (match) => ` AARONNOTEANCHOR${anchorIndex++} ${match.startsWith("\\hypertarget") ? "{" : ""}`);
+  source = source.replace(/\\begin\{verbatim\}[\s\S]*?\\end\{verbatim\}|\\texttt\{(?:\\.|[^{}])*\}|\\verb\*?(.).*?\1/g,
+    () => ` AARONNOTECODE${codeIndex++} `);
+  source = source.replace(/\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]/g,
+    () => ` AARONNOTEMATH${mathIndex++} `);
+  source = source.replace(/\\cite(?:\[[^\]]*\])?\{[^}]+\}/g,
+    () => ` AARONNOTECITE${citeIndex++} `);
+  source = source
+    .replace(/(?<!\\)%[^\n]*/g, " ")
+    .replace(/^\s*\\def\\LTcaptype\{none\}\s*$/gm, " ")
+    .replace(/\\begin\{(?:longtable\*?|tabular\*?|tabularx|array)\}(?:\[[^\]]*\])?\{(?:[^{}]|\{[^{}]*\})*\}/g, " ")
+    .replace(/\\(?:begin|end)\{[^{}]+\}/g, " ")
+    .replace(/\\multicolumn\{[^{}]*\}\{[^{}]*\}\{/g, "{")
+    .replace(/\\(?:noalign|Needspace|vspace\*?|hspace\*?|addvspace|setlength|addtolength|enlargethispage)(?:\[[^\]]*\])?(?:\{(?:[^{}]|\{[^{}]*\})*\})*/g, "")
+    .replace(/\\textbackslash\{\}/g, "\uE000")
+    .replace(/\\textasciicircum\{\}/g, "\uE001")
+    .replace(/\\textasciitilde\{\}/g, "\uE002")
+    .replace(/\\([#$%&_{}])/g, (_match, value) => ({ "#": "\uE003", "$": "\uE004", "%": "\uE005", "&": "\uE006", "_": "\uE007", "{": "\uE008", "}": "\uE009" })[value])
+    .replace(/\\\\|\\[ \t]/g, " ")
+    .replace(/\\([A-Za-z@]+)\*?/g, (_match, name) => new Set([
+      "textbf", "emph", "textit", "textnormal", "textrm", "textsf", "textsl", "textsc", "underline", "uline", "sout", "st",
+      "textsuperscript", "textsubscript", "section", "subsection", "subsubsection", "paragraph", "subparagraph", "part", "chapter",
+      "item", "tightlist", "toprule", "midrule", "bottomrule", "endhead", "endlastfoot", "tabularnewline", "noalign",
+      "footnote", "caption", "noindent", "newpage", "clearpage", "pagebreak", "nopagebreak", "allowbreak", "linebreak", "newline",
+      "Needspace", "raggedright", "centering", "small", "footnotesize", "scriptsize", "sloppy", "fussy", "qedhere", "hfill", "vfill",
+      "smallskip", "medskip", "bigskip", "quad", "qquad", "par", "pandocbounded",
+    ]).has(name) ? "" : ` AARONNOTECOMMAND:${name} `)
+    .replace(/[{}]/g, "")
+    .replace(/&/g, " ")
+    .replace(/~/g, " ")
+    .replace(/\uE000/g, "\\")
+    .replace(/\uE001/g, "^")
+    .replace(/\uE002/g, "~")
+    .replace(/\uE003/g, "#")
+    .replace(/\uE004/g, "$")
+    .replace(/\uE005/g, "%")
+    .replace(/\uE006/g, "&")
+    .replace(/\uE007/g, "_")
+    .replace(/\uE008/g, "{")
+    .replace(/\uE009/g, "}")
+    .replace(/\s+/g, " ")
+    .trim();
+  return source;
+}
+
+export function strictFidelityIssues(draftBody, polishedBody) {
+  const issues = [];
+  const draftVisible = visibleContentSignature(draftBody);
+  const polishedVisible = visibleContentSignature(polishedBody);
+  if (draftVisible !== polishedVisible) issues.push("visible prose tokens changed or were reordered");
+  const draftStructure = structuralSignature(draftBody);
+  const polishedStructure = structuralSignature(polishedBody);
+  if (JSON.stringify(draftStructure) !== JSON.stringify(polishedStructure)) {
+    const listOnlyEquivalent = draftVisible === polishedVisible
+      && JSON.stringify(nonListStructure(draftStructure)) === JSON.stringify(nonListStructure(polishedStructure));
+    if (!listOnlyEquivalent) issues.push("document structure changed or was reordered");
+  }
+  const draftProtected = protectedPayloads(draftBody);
+  const polishedProtected = protectedPayloads(polishedBody);
+  for (const key of ["math", "code", "citations", "resources", "anchors"]) {
+    if (JSON.stringify(draftProtected[key]) !== JSON.stringify(polishedProtected[key])) issues.push(`${key} payloads changed or were reordered`);
+  }
+  return issues;
+}
+
+export function buildPolishCandidates(sourceMarkdown, draftBody) {
+  const candidates = [
+    { id: "whole-document-structure", kind: "structure", detail: "Audit heading, paragraph, list, theorem/proof, citation, math, and code structure end-to-end." },
+    { id: "academic-layout", kind: "typesetting", detail: "Audit restrained academic spacing, page flow, tables, figures, long material, and template fit." },
+  ];
+  const source = String(sourceMarkdown || "");
+  if (/(?:^|\n)\s*\([a-z]\)\s+.+\n\s*\([a-z]\)\s+/i.test(source)) {
+    candidates.push({ id: "alpha-enumeration", kind: "list", detail: "Verify that consecutive (a)/(b) material is a true list and that Pandoc preserved the intended labels." });
+  }
+  if (/^(?:problem|solution|answer|proof)\b/im.test(source)) {
+    candidates.push({ id: "role-environments", kind: "environment", detail: "Review explicit Problem/Solution/Answer/Proof roles against environments actually defined by the template." });
+  }
+  if (String(draftBody || "").split(/\r?\n/).some((line) => line.length > 140 && !/^\\(?:begin|end)\b/.test(line))) {
+    candidates.push({ id: "long-material", kind: "line-break", detail: "Review long URLs, inline math, code-like text, or table cells for semantic break opportunities without rewriting content." });
+  }
+  return candidates;
+}
+
+function reviewGateIssue(review, candidates) {
+  if (!review || !Array.isArray(review.decisions)) return "review.json missing or invalid";
+  const decisions = new Map(review.decisions.map((decision) => [String(decision?.id || ""), decision]));
+  for (const candidate of candidates) {
+    const decision = decisions.get(candidate.id);
+    if (!decision) return `review.json omitted candidate ${candidate.id}`;
+    if (!["applied", "kept"].includes(String(decision.action || ""))) return `review.json has invalid action for ${candidate.id}`;
+    if (!String(decision.reason || "").trim()) return `review.json has no reason for ${candidate.id}`;
+  }
+  return "";
+}
+
 // ---- Compile a candidate assembled document --------------------------------
 
 // We only need to know whether the document compiles, never the PDF itself, so
@@ -128,7 +321,13 @@ async function compileLatex({ tex, dir, latexBin, engine = "pdflatex", sourceDir
       `-output-directory=${dir}`,
       texFile,
     ], { cwd: dir, env, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, signal });
-    return { ok: true, log: "" };
+    let log = "";
+    try { log = await readFile(join(dir, "out.log"), "utf8"); } catch {}
+    const layout = log.split(/\r?\n/)
+      .filter((line) => /Overfull \\[hv]box|Float too large|Too many unprocessed floats/i.test(line))
+      .slice(-20)
+      .join("\n");
+    return { ok: true, log: layout };
   } catch (err) {
     const logFile = join(dir, "out.log");
     let log = "";
@@ -142,41 +341,75 @@ async function compileLatex({ tex, dir, latexBin, engine = "pdflatex", sourceDir
 
 // ---- Agent invocation (codex / claude / opencode) --------------------------
 
-function buildPrompt({ retryLog, needsTitle = true }) {
+function buildPrompt({ retryLog, needsTitle = true, sourceTitle = "", documentRole = "" }) {
   const base = [
     "You are polishing a LaTeX export. All files are in your working directory.",
     "Read: style.md (style contract — obey strictly), AGENTS.md (your contract),",
+    "skills/aaronnote-latex-polish/SKILL.md and skills/academic-typesetting/SKILL.md,",
+    "then polish-candidates.json; review.json must answer every candidate id.",
     "syntax.md (Aaronnote/Markdown syntax), template.tex (the target template; note",
     "which theorem environments and macros it defines), source.md (the author's",
-    "Markdown — the source of truth for text), and draft.tex (the mechanical",
+    "Markdown — the source of truth for text), and draft.tex (the Pandoc-based",
     "conversion). body.tex currently equals draft.tex.",
+    sourceTitle ? `The original source-name title is: ${JSON.stringify(sourceTitle)}.` : "",
+    documentRole ? `The selected template's document role is: ${JSON.stringify(documentRole)}.` : "",
     "",
-    "Edit body.tex so that (1) it compiles when the host inserts it into template.tex,",
-    "and (2) its formatting follows style.md. Do NOT add, remove, translate, or reword",
+    "ROLE: You are a format converter and validator, NOT an author or copy editor.",
+    "GOAL: deliver a publication-ready LaTeX body that is faithful to source.md,",
+    "fits template.tex, and compiles cleanly. Priorities, in order:",
+    "1. Preserve every public statement and its logical order exactly.",
+    "2. Preserve semantic structure: headings, paragraphs, lists, math, proofs,",
+    "   theorem labels, citations, explicit line breaks, and code-like material.",
+    "3. Use only environments/macros supported by template.tex and style.md.",
+    "4. Apply restrained academic typesetting: coherent hierarchy and theorem/proof/",
+    "   list/math presentation, balanced spacing, and sensible page flow.",
+    "5. Improve layout only where source semantics justify it; do not add decorative",
+    "   boxes, colours, rules, abstracts, numbering, captions, or invented structure.",
+    "Fidelity is the hard gate: if a formatting improvement might change text or",
+    "meaning, do not make it. It is correct to leave already-faithful markup alone.",
+    "",
+    "Edit body.tex so that it compiles when the host inserts it into template.tex",
+    "and its formatting follows style.md. Do NOT add, remove, translate, or reword",
     "any prose from source.md — only change markup. Emit body content only: no",
     "\\documentclass, no preamble, no package or macro definitions.",
+    "",
+    "Before writing the final files, perform this mandatory review:",
+    "- compare source.md against body.tex from beginning to end for omissions,",
+    "  duplication, reordered text, leaked private commands, and broken math;",
+    "- check every begin/end pair, moving argument, list nesting, and explicit break;",
+    "- check likely overfull boxes, orphan headings, excessive whitespace, and title",
+    "  overflow against template.tex; make only markup-level corrections;",
+    "- leave body.tex unchanged when draft.tex is already the most faithful result.",
     "",
     needsTitle
       ? [
           "This template uses a document title. After reading the full source.md and",
           "final body.tex, write a concise document title to title.txt (one plain-text",
-          "line, no markup, no quotes). The title must summarize the whole exported",
-          "document, not merely copy the filename or first heading when those are generic.",
+          "line, no markup, no quotes). A title is a short application-facing label,",
+          "never a summary sentence. Synthesize exactly three signals: the semantic",
+          "intent of the original source name, the document role implied by the template",
+          "(Assignment, Report, Notes, etc.), and ONE dominant subject from the content.",
+          "Do not blindly copy an internal slug or abbreviation such as assg/hw/q1;",
+          "expand its intent using the role and subject. Conversely, preserve a source",
+          "name that is already clear and suitable. Do not enumerate topics. Use at most",
+          "42 characters and normally at most 6 words. Example: source 'assg' + an",
+          "Assignment template + linear-algebra content -> 'Linear Algebra Assignment'.",
+          "Ensure the result fits template.tex's title area comfortably.",
         ].join("\n")
       : [
-          "This template does not use a document title placeholder. Do not invent title",
-          "markup or force a title into body.tex; focus only on adapting the exported",
-          "body to this template.",
+          "The host title is authoritative or this template does not accept a generated",
+          "title. Do not invent title markup or force a title into body.tex; focus only",
+          "on adapting the exported body to this template.",
         ].join("\n"),
     "",
     needsTitle
-      ? "Write the final body to body.tex, write title.txt, then stop. Run no other commands."
-      : "Write the final body to body.tex, then stop. Run no other commands.",
+      ? "Write body.tex, title.txt, and the required review.json, then stop. Run no other commands."
+      : "Write body.tex and the required review.json, then stop. Run no other commands.",
   ];
   if (retryLog) {
     base.push(
       "",
-      "The previous body.tex did not compile. Compiler log tail:",
+      "The previous attempt did not pass the host gates. Diagnostic:",
       "----",
       retryLog,
       "----",
@@ -248,9 +481,9 @@ function progressLabel(backend, line) {
   return "";
 }
 
-function runAgent({ backend, bin, workdir, model, retryLog, needsTitle, timeoutMs, signal, onProgress }) {
+function runAgent({ backend, bin, workdir, model, retryLog, needsTitle, sourceTitle, documentRole, timeoutMs, signal, onProgress }) {
   return new Promise((resolve) => {
-    const args = agentArgs(backend, { workdir, model, prompt: buildPrompt({ retryLog, needsTitle }) });
+    const args = agentArgs(backend, { workdir, model, prompt: buildPrompt({ retryLog, needsTitle, sourceTitle, documentRole }) });
     let child;
     try {
       child = spawn(bin, args, { cwd: workdir, stdio: ["ignore", "pipe", "pipe"] });
@@ -300,18 +533,41 @@ function runAgent({ backend, bin, workdir, model, retryLog, needsTitle, timeoutM
 
 // ---- Orchestrator ----------------------------------------------------------
 
+export function normalizeAgentTitle(value, maxLength = 42) {
+  const line = String(value || "").split(/\r?\n/).map((part) => part.trim()).find(Boolean) || "";
+  const clean = line
+    .replace(/^\s*(?:title\s*:\s*)/i, "")
+    .replace(/^['\"“”‘’]+|['\"“”‘’]+$/g, "")
+    .replace(/[*_`#]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if ([...clean].length <= maxLength) return clean;
+  const clipped = [...clean].slice(0, maxLength + 1).join("");
+  const boundary = clipped.slice(0, maxLength).replace(/[\s,:;\-–—]+\S*$/u, "").trim();
+  return (boundary || [...clean].slice(0, maxLength).join("")).replace(/[\s,:;\-–—]+$/u, "").trim();
+}
+
 async function readAgentTitle(workdir) {
   try {
     const raw = await readFile(join(workdir, "title.txt"), "utf8");
-    const line = raw.split(/\r?\n/).map((l) => l.trim()).find(Boolean) || "";
-    return line.replace(/^["'“”]+|["'“”]+$/g, "").slice(0, 200);
+    return normalizeAgentTitle(raw);
   } catch {
     return "";
   }
 }
 
+async function readAgentReview(workdir) {
+  try {
+    const parsed = JSON.parse(await readFile(join(workdir, "review.json"), "utf8"));
+    if (!parsed || !Array.isArray(parsed.decisions)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Polish the mechanical draft with the configured agent, gated on compilation.
+ * Polish the Pandoc draft with the configured agent, gated on fidelity + compilation.
  * @returns {Promise<{body:string, aiTitle:string, usedAgent:boolean, backend:string, compiled:boolean, attempts:number, warnings:string[]}>}
  */
 export async function polishBodyWithAgent(opts) {
@@ -332,6 +588,10 @@ export async function polishBodyWithAgent(opts) {
     makeWorkdir,
     maxAttempts = 3,
     needsTitle = true,
+    sourceTitle = "",
+    documentRole = "",
+    supportFiles = [],
+    skillsDir = "",
     agentTimeoutMs = 180_000,
     compileTimeoutMs = 120_000,
     signal,
@@ -342,7 +602,7 @@ export async function polishBodyWithAgent(opts) {
   const warnings = [];
   const base = { body: draftBody, aiTitle: "", backend, attempts: 0 };
   if (!agentAvailable(agentBin)) {
-    return { ...base, usedAgent: false, compiled: false, warnings: [`${backend} unavailable; used mechanical draft`] };
+    return { ...base, usedAgent: false, compiled: false, warnings: [`${backend} unavailable; used Pandoc draft`] };
   }
   const compileEnabled = typeof assemble === "function" && !!latexBin && existsSync(latexBin);
 
@@ -352,57 +612,76 @@ export async function polishBodyWithAgent(opts) {
     await writeFile(join(workdir, "draft.tex"), draftBody, "utf8");
     await writeFile(join(workdir, "body.tex"), draftBody, "utf8");
     await writeFile(join(workdir, "template.tex"), templateText, "utf8");
+    const polishCandidates = buildPolishCandidates(sourceMarkdown, draftBody);
+    await writeFile(join(workdir, "polish-candidates.json"), `${JSON.stringify({ candidates: polishCandidates }, null, 2)}\n`, "utf8");
+    if (sourceTitle) await writeFile(join(workdir, "source-title.txt"), sourceTitle, "utf8");
+    for (const file of supportFiles) {
+      if (file?.name && file?.content) await writeFile(join(workdir, basename(file.name)), file.content);
+    }
     if (styleDoc && existsSync(styleDoc)) await copyFile(styleDoc, join(workdir, "style.md"));
     if (syntaxDoc && existsSync(syntaxDoc)) await copyFile(syntaxDoc, join(workdir, "syntax.md"));
     if (agentsDoc && existsSync(agentsDoc)) await copyFile(agentsDoc, join(workdir, "AGENTS.md"));
+    if (skillsDir && existsSync(skillsDir)) await cp(skillsDir, join(workdir, "skills"), { recursive: true });
 
     let body = draftBody;
-    let bestAiTitle = "";
     let retryLog = "";
     let attempts = 0;
     for (let i = 0; i < Math.max(1, maxAttempts); i += 1) {
       attempts = i + 1;
       emit(retryLog ? `Polishing with ${backend} (retry ${attempts})…` : `Polishing with ${backend}…`);
-      const run = await runAgent({ backend, bin: agentBin, workdir, model, retryLog, needsTitle, timeoutMs: agentTimeoutMs, signal, onProgress });
+      const run = await runAgent({ backend, bin: agentBin, workdir, model, retryLog, needsTitle, sourceTitle, documentRole, timeoutMs: agentTimeoutMs, signal, onProgress });
       if (!run.ok) {
         warnings.push(`${backend} adjust failed (${run.message || "unknown"})`);
         break;
       }
-      const aiTitle = needsTitle ? await readAgentTitle(workdir) : "";
-      if (aiTitle) bestAiTitle = aiTitle;
+      const candidateAiTitle = needsTitle ? await readAgentTitle(workdir) : "";
       try {
         body = await readFile(join(workdir, "body.tex"), "utf8");
       } catch {
-        warnings.push(`${backend} did not produce body.tex; used mechanical draft`);
-        return { ...base, aiTitle: bestAiTitle, usedAgent: false, compiled: false, attempts, warnings };
+        warnings.push(`${backend} did not produce body.tex; used Pandoc draft`);
+        return { ...base, usedAgent: false, compiled: false, attempts, warnings };
+      }
+      const review = await readAgentReview(workdir);
+      const fidelityIssues = strictFidelityIssues(draftBody, body);
+      const reviewIssue = reviewGateIssue(review, polishCandidates);
+      if (reviewIssue || fidelityIssues.length > 0) {
+        const gate = [reviewIssue, ...fidelityIssues].filter(Boolean).join("; ");
+        warnings.push(`${backend} polish gate rejected attempt ${attempts}: ${gate}`);
+        retryLog = `POLISH GATE FAILURE: ${gate}. Re-read both skills, restore source fidelity, and write review.json.`;
+        continue;
       }
       if (!compileEnabled) {
         warnings.push("compile not verified (no LaTeX engine / assembler)");
         warnings.push(...proseFidelityWarnings(sourceMarkdown, body));
-        return { body, aiTitle: bestAiTitle, backend, usedAgent: true, compiled: false, attempts, warnings };
+        return { body, aiTitle: candidateAiTitle, backend, usedAgent: true, compiled: false, attempts, warnings };
       }
       emit(`Compiling (attempt ${attempts})…`);
-      const res = await compileLatex({ tex: assemble(body), dir: workdir, latexBin, engine, sourceDir, timeoutMs: compileTimeoutMs, signal });
+      const res = await compileLatex({ tex: assemble(body, candidateAiTitle), dir: workdir, latexBin, engine, sourceDir, timeoutMs: compileTimeoutMs, signal });
       if (res.ok) {
+        if (res.log) {
+          emit(`Layout warnings found; feeding log back to ${backend}…`);
+          retryLog = `LATEX LAYOUT WARNINGS:\n${res.log}`;
+          continue;
+        }
         warnings.push(...proseFidelityWarnings(sourceMarkdown, body));
-        return { body, aiTitle: bestAiTitle, backend, usedAgent: true, compiled: true, attempts, warnings };
+        return { body, aiTitle: candidateAiTitle, backend, usedAgent: true, compiled: true, attempts, warnings };
       }
       emit(`Compile failed; feeding log back to ${backend}…`);
       retryLog = res.log;
     }
 
-    // Agent path did not yield a compiling body. Fall back to the mechanical draft.
+    // Agent path did not pass the gates. Fall back to the verified Pandoc draft.
     if (compileEnabled) {
-      emit("Falling back to mechanical draft…");
+      emit("Falling back to Pandoc draft…");
       const draftRes = await compileLatex({ tex: assemble(draftBody), dir: workdir, latexBin, engine, sourceDir, timeoutMs: compileTimeoutMs, signal });
       if (draftRes.ok) {
-        warnings.push(`${backend} polish did not compile after ${attempts} attempt(s); used mechanical draft`);
-        return { ...base, aiTitle: bestAiTitle, usedAgent: false, compiled: true, attempts, warnings };
+        warnings.push(`${backend} polish did not pass after ${attempts} attempt(s); used Pandoc draft`);
+        return { ...base, usedAgent: false, compiled: true, attempts, warnings };
       }
-      warnings.push(`neither ${backend} polish nor mechanical draft compiled; wrote best-effort mechanical draft`);
-      return { ...base, aiTitle: bestAiTitle, usedAgent: false, compiled: false, attempts, warnings };
+      warnings.push(`neither ${backend} polish nor Pandoc draft compiled; wrote best-effort Pandoc draft`);
+      return { ...base, usedAgent: false, compiled: false, attempts, warnings };
     }
-    return { ...base, aiTitle: bestAiTitle, usedAgent: false, compiled: false, attempts, warnings };
+    return { ...base, usedAgent: false, compiled: false, attempts, warnings };
   } finally {
     await rm(workdir, { recursive: true, force: true }).catch(() => {});
   }

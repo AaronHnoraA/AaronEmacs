@@ -26,6 +26,7 @@ import {
   type JupyterTasksResult,
   type LatexExportAgentStatus,
   type LatexTemplate,
+  type CoreTask,
   type BibliographyCitation,
   type BibliographyDocument,
   type BibliographyReference,
@@ -45,6 +46,7 @@ import {
 import { createFloatingTocPanel, inlineTagAnchorsFromText, markdownHeadingsFromText } from "./floating-toc.ts";
 import { normalizeDateValue } from "../src/planning-values.ts";
 import { patchPlanningNodeRaw, scanPlanningNodes } from "../shared/planning-dsl.mjs";
+import { latexMarkNames, latexMarkSnippetDefinitions } from "../shared/latex-marks.mjs";
 import {
   buildLatexExportScopes,
   latexExportScopesContent,
@@ -257,6 +259,202 @@ const modal = document.createElement("div");
 modal.className = "aaronnote-modal";
 modal.hidden = true;
 document.body.appendChild(modal);
+
+const taskManagerModal = document.createElement("div");
+taskManagerModal.className = "aaronnote-task-manager-backdrop";
+taskManagerModal.hidden = true;
+taskManagerModal.innerHTML = `
+  <section class="aaronnote-task-manager" role="dialog" aria-modal="true" aria-labelledby="aaronnote-task-manager-title">
+    <header class="aaronnote-task-manager-head">
+      <div>
+        <strong id="aaronnote-task-manager-title">Task Manager</strong>
+        <span data-task-manager-summary>Core task pool</span>
+      </div>
+      <div class="aaronnote-task-manager-head-actions">
+        <button type="button" data-task-manager-refresh>Refresh</button>
+        <button type="button" data-task-manager-dismiss aria-label="Close task manager">Close</button>
+      </div>
+    </header>
+    <nav class="aaronnote-task-manager-tabs" role="tablist">
+      <button type="button" role="tab" data-task-tab="active" aria-selected="true">Active tasks</button>
+      <button type="button" role="tab" data-task-tab="latex" aria-selected="false">LaTeX exports</button>
+    </nav>
+    <div class="aaronnote-task-manager-status" data-task-manager-status>Open or refresh to read Core state.</div>
+    <div class="aaronnote-task-manager-list" data-task-manager-list></div>
+  </section>
+`;
+document.body.appendChild(taskManagerModal);
+const taskManagerPanel = taskManagerModal.querySelector<HTMLElement>(".aaronnote-task-manager")!;
+const taskManagerList = taskManagerModal.querySelector<HTMLElement>("[data-task-manager-list]")!;
+const taskManagerStatus = taskManagerModal.querySelector<HTMLElement>("[data-task-manager-status]")!;
+const taskManagerSummary = taskManagerModal.querySelector<HTMLElement>("[data-task-manager-summary]")!;
+const taskManagerRefresh = taskManagerModal.querySelector<HTMLButtonElement>("[data-task-manager-refresh]")!;
+const taskManagerDismiss = taskManagerModal.querySelector<HTMLButtonElement>("[data-task-manager-dismiss]")!;
+const taskManagerTabs = [...taskManagerModal.querySelectorAll<HTMLButtonElement>("[data-task-tab]")];
+let taskManagerTab: "active" | "latex" = "active";
+let taskManagerSnapshot: CoreTask[] = [];
+let taskManagerLoading = false;
+
+function taskTime(value: unknown): string {
+  const date = new Date(String(value || ""));
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
+}
+
+function taskMetadataLine(task: CoreTask): string {
+  const metadata = task.metadata || {};
+  return [metadata.file, metadata.outputPath, metadata.engine].map((value) => String(value || "").trim()).filter(Boolean).join(" · ");
+}
+
+function taskResultLine(task: CoreTask): string {
+  const result = task.result || {};
+  return [result.title, result.pdfFile || result.file].map((value) => String(value || "").trim()).filter(Boolean).join(" · ");
+}
+
+function visibleTaskSnapshot(): CoreTask[] {
+  return taskManagerSnapshot.filter((task) => taskManagerTab === "latex"
+    ? task.kind === "latex-export"
+    : ["queued", "running", "canceling"].includes(task.status));
+}
+
+function renderTaskManager(): void {
+  for (const tab of taskManagerTabs) {
+    const selected = tab.dataset.taskTab === taskManagerTab;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.classList.toggle("is-active", selected);
+  }
+  const tasks = visibleTaskSnapshot();
+  const active = taskManagerSnapshot.filter((task) => ["queued", "running", "canceling"].includes(task.status)).length;
+  taskManagerSummary.textContent = `${active} active · ${taskManagerSnapshot.length} retained`;
+  taskManagerList.replaceChildren();
+  if (tasks.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "aaronnote-task-empty";
+    empty.textContent = taskManagerTab === "active" ? "No active tasks." : "No LaTeX export tasks in the current Core session.";
+    taskManagerList.appendChild(empty);
+    return;
+  }
+  for (const task of tasks) {
+    const card = document.createElement("article");
+    card.className = `aaronnote-task-card is-${task.status}`;
+    const head = document.createElement("div");
+    head.className = "aaronnote-task-card-head";
+    const identity = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = task.title || task.kind;
+    const kind = document.createElement("span");
+    kind.textContent = task.kind;
+    identity.append(title, kind);
+    const badge = document.createElement("span");
+    badge.className = "aaronnote-task-status-badge";
+    badge.textContent = task.status;
+    head.append(identity, badge);
+
+    const description = document.createElement("p");
+    description.textContent = task.description || "Core task";
+    const phase = document.createElement("div");
+    phase.className = "aaronnote-task-phase";
+    phase.textContent = `${task.phase || task.status}${task.message && task.message !== task.phase ? ` — ${task.message}` : ""}`;
+    const meta = document.createElement("div");
+    meta.className = "aaronnote-task-meta";
+    meta.textContent = [taskMetadataLine(task), task.startedAt ? `Started ${taskTime(task.startedAt)}` : `Created ${taskTime(task.createdAt)}`].filter(Boolean).join(" · ");
+    card.append(head, description, phase, meta);
+
+    const resultText = taskResultLine(task);
+    if (resultText) {
+      const result = document.createElement("div");
+      result.className = "aaronnote-task-result";
+      result.textContent = resultText;
+      card.appendChild(result);
+    }
+    const warnings = Array.isArray(task.result?.warnings) ? task.result.warnings : [];
+    if (warnings.length > 0 || task.error) {
+      const notice = document.createElement("div");
+      notice.className = task.error ? "aaronnote-task-error" : "aaronnote-task-warning";
+      notice.textContent = task.error || warnings.map(String).join("; ");
+      card.appendChild(notice);
+    }
+    if (task.progress?.length) {
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = `Progress (${task.progress.length})`;
+      const log = document.createElement("ol");
+      for (const entry of task.progress) {
+        const item = document.createElement("li");
+        item.textContent = `${taskTime(entry.at)}  ${String(entry.text || "")}`.trim();
+        log.appendChild(item);
+      }
+      details.append(summary, log);
+      card.appendChild(details);
+    }
+    const actions = document.createElement("div");
+    actions.className = "aaronnote-task-actions";
+    if (task.cancellable) {
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", async () => {
+        cancel.disabled = true;
+        try { await api.tasks.cancel(task.id); } catch (error) { taskManagerStatus.textContent = error instanceof Error ? error.message : String(error); }
+        await refreshTaskManager();
+      });
+      actions.appendChild(cancel);
+    }
+    if (task.closeable) {
+      const close = document.createElement("button");
+      close.type = "button";
+      close.textContent = "Close task";
+      close.addEventListener("click", async () => {
+        close.disabled = true;
+        try { await api.tasks.close(task.id); } catch (error) { taskManagerStatus.textContent = error instanceof Error ? error.message : String(error); }
+        await refreshTaskManager();
+      });
+      actions.appendChild(close);
+    }
+    if (actions.childElementCount > 0) card.appendChild(actions);
+    taskManagerList.appendChild(card);
+  }
+}
+
+async function refreshTaskManager(): Promise<void> {
+  if (taskManagerLoading) return;
+  taskManagerLoading = true;
+  taskManagerRefresh.disabled = true;
+  taskManagerStatus.textContent = "Reading Core task snapshot…";
+  try {
+    const result = await api.tasks.list();
+    taskManagerSnapshot = result.tasks || [];
+    taskManagerStatus.textContent = `Snapshot refreshed ${new Date().toLocaleTimeString()}. No automatic polling.`;
+    renderTaskManager();
+  } catch (error) {
+    taskManagerStatus.textContent = error instanceof Error ? error.message : String(error);
+  } finally {
+    taskManagerLoading = false;
+    taskManagerRefresh.disabled = false;
+  }
+}
+
+function closeTaskManager(): void {
+  taskManagerModal.hidden = true;
+}
+
+function openTaskManager(): void {
+  taskManagerModal.hidden = false;
+  void refreshTaskManager();
+  window.setTimeout(() => taskManagerRefresh.focus(), 0);
+}
+
+taskManagerRefresh.addEventListener("click", () => void refreshTaskManager());
+taskManagerDismiss.addEventListener("click", closeTaskManager);
+taskManagerTabs.forEach((tab) => tab.addEventListener("click", () => {
+  taskManagerTab = tab.dataset.taskTab === "latex" ? "latex" : "active";
+  renderTaskManager();
+}));
+taskManagerModal.addEventListener("mousedown", (event) => { if (event.target === taskManagerModal) closeTaskManager(); });
+taskManagerPanel.addEventListener("mousedown", (event) => event.stopPropagation());
+window.addEventListener("keydown", (event) => {
+  if (!taskManagerModal.hidden && event.key === "Escape") { event.preventDefault(); closeTaskManager(); }
+});
+window.aaronnoteOpenTaskManager = openTaskManager;
 const snippetPopup = document.createElement("div");
 snippetPopup.className = "aaronnote-snippet-popup";
 snippetPopup.hidden = true;
@@ -383,6 +581,13 @@ let snippetRenderKey = "";
 let snippetPopupMatchKey = "";
 
 const BUILTIN_SNIPPET_SOURCE = "aaronnote:builtin";
+const LATEX_MARK_SNIPPETS: SnippetSummary[] = latexMarkSnippetDefinitions().map((snippet) => ({
+  ...snippet,
+  mode: "markdown-mode",
+  group: "Aaronnote LaTeX marks",
+  kind: "",
+  source: BUILTIN_SNIPPET_SOURCE,
+}));
 const BUILTIN_SNIPPETS: SnippetSummary[] = [{
   key: ":",
   name: "Display math",
@@ -399,7 +604,15 @@ const BUILTIN_SNIPPETS: SnippetSummary[] = [{
   kind: "",
   body: "@@cite(${1:namespace}) [${2:key}] {locator: ${3:p. }}$0",
   source: BUILTIN_SNIPPET_SOURCE,
-}];
+}, {
+  key: "latexmk",
+  name: "LaTeX mark",
+  mode: "markdown-mode",
+  group: "Aaronnote builtin",
+  kind: "",
+  body: `@@latexmk(\${1|${latexMarkNames().join(",")}|})$0`,
+  source: BUILTIN_SNIPPET_SOURCE,
+}, ...LATEX_MARK_SNIPPETS];
 let paused = false;
 const pauseReasons = new Set<string>();
 let mathPreviewKey = "";
@@ -4201,6 +4414,10 @@ type ModalField = {
   type?: "text" | "tags" | "select" | "suggest";
   suggestions?: string[];
   options?: { value: string; label: string }[];
+  required?: boolean;
+  placeholder?: string;
+  description?: string;
+  group?: string;
 };
 
 function openFormModal(title: string, fields: ModalField[], submitLabel = "OK"): Promise<Record<string, string> | null> {
@@ -4213,9 +4430,18 @@ function openFormModal(title: string, fields: ModalField[], submitLabel = "OK"):
     panel.appendChild(heading);
     const inputs = new Map<string, HTMLInputElement | HTMLSelectElement>();
 
+    let previousGroup = "";
     fields.forEach((field, index) => {
+      if (field.group && field.group !== previousGroup) {
+        const group = document.createElement("div");
+        group.className = "aaronnote-modal-field-group";
+        group.textContent = field.group;
+        panel.appendChild(group);
+      }
+      previousGroup = field.group || previousGroup;
       const label = document.createElement("label");
       label.textContent = field.label;
+      if (field.required) label.textContent += " *";
       if (field.type === "select") {
         const select = document.createElement("select");
         select.name = field.id;
@@ -4226,14 +4452,23 @@ function openFormModal(title: string, fields: ModalField[], submitLabel = "OK"):
           select.appendChild(option);
         }
         select.value = field.value || (field.options?.[0]?.value ?? "");
+        select.required = Boolean(field.required);
         label.appendChild(select);
         inputs.set(field.id, select);
         panel.appendChild(label);
+        if (field.description) {
+          const help = document.createElement("small");
+          help.className = "aaronnote-modal-field-help";
+          help.textContent = field.description;
+          panel.appendChild(help);
+        }
         return;
       }
       const input = document.createElement("input");
       input.name = field.id;
       input.value = field.value || "";
+      input.required = Boolean(field.required);
+      input.placeholder = field.placeholder || "";
       input.autocomplete = "off";
       input.spellcheck = false;
       if (field.suggestions?.length) {
@@ -4252,6 +4487,12 @@ function openFormModal(title: string, fields: ModalField[], submitLabel = "OK"):
       }
       inputs.set(field.id, input);
       panel.appendChild(label);
+      if (field.description) {
+        const help = document.createElement("small");
+        help.className = "aaronnote-modal-field-help";
+        help.textContent = field.description;
+        panel.appendChild(help);
+      }
 
       if ((field.type === "tags" || field.type === "suggest") && field.suggestions?.length) {
         const picker = document.createElement("div");
@@ -4911,6 +5152,12 @@ async function exportLatexTool(): Promise<void> {
         chosenTemplate.vars.map((v) => ({
           id: v.id,
           label: v.label || v.id,
+          type: v.input === "select" ? "select" as const : "text" as const,
+          options: v.options,
+          required: v.required,
+          placeholder: v.placeholder,
+          description: v.description,
+          group: v.group,
           value: rememberedVars[v.id] ?? v.default ?? "",
         })),
         "Continue",
@@ -4938,7 +5185,7 @@ async function exportLatexTool(): Promise<void> {
       return;
     }
     setStatus("Exporting LaTeX…");
-    const msg = await api.latex.export({
+    await api.latex.export({
       file: currentFile,
       content,
       outputPath: String(chosen.path),
@@ -4947,10 +5194,7 @@ async function exportLatexTool(): Promise<void> {
       ...(chosenTemplate ? { templatePath: chosenTemplate.file, engine: chosenTemplate.engine } : {}),
       ...(Object.keys(vars).length > 0 ? { vars } : {}),
     });
-    const warnings = Array.isArray(msg.warnings) ? msg.warnings as string[] : [];
-    const via = msg.engine ? ` [${String(msg.engine)}]` : "";
-    const warn = warnings.length > 0 ? ` — ${warnings.join("; ")}` : "";
-    setStatus(`LaTeX exported${via}: ${String(msg.file || chosen.path || "")}${warn}`);
+    setStatus("LaTeX export added to tasks");
   } catch (err) {
     setStatus(`LaTeX export failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -7311,9 +7555,6 @@ function runHostCommand(detail: unknown): boolean {
   if (!command) return false;
 
   switch (command) {
-    case "latex-export-progress":
-      setStatus(String(body.text || ""));
-      return true;
     case "notes-index-changed": {
       const version = typeof body.version === "number" ? body.version : 0;
       // Ignore stale broadcasts (e.g. replayed on reconnect).

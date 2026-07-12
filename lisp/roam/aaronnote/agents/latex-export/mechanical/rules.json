@@ -1,5 +1,7 @@
 {
-  "$schema-note": "Agent-maintained conversion rules merged over the built-in mapping in server/lib/latex-export.mjs. Only edit during a host maintenance pass. envMap maps a #+begin <kind> to a LaTeX environment the template defines; commentBlocks lists kinds rendered as a remark with the kind/title as label.",
+  "$schema-note": "Agent-maintained rules merged into the Aaronnote→Pandoc preprocessor. Edit only during an explicit maintenance pass and add regression tests. envMap maps #+begin <kind> to a template-defined LaTeX environment; commentBlocks lists visible remark-like kinds.",
   "envMap": {},
-  "commentBlocks": []
+  "commentBlocks": [],
+  "hiddenBlocks": [],
+  "pandocExtensions": []
 }

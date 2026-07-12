@@ -12,7 +12,7 @@ import { existsSync, statSync } from "node:fs";
 import { readFile, rm, stat } from "node:fs/promises";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
@@ -65,6 +65,7 @@ import {
   notePathWatchRelevant,
 } from "./server/lib/state.mjs";
 import { startNoteWatcher } from "./server/lib/watch.mjs";
+import { coreTasks } from "./server/lib/task-core.mjs";
 import { saveNote } from "./server/lib/save.mjs";
 import {
   storeAsset,
@@ -799,11 +800,36 @@ const apiHandlers = {
   "aaronnote:api:latex:set-agent": (body) => setLatexExportAgent(body || {}),
   "aaronnote:api:latex:templates": () => listLatexTemplates(),
   "aaronnote:api:latex:choose-output-path": (body) => chooseLatexOutputPath(body || {}),
-  "aaronnote:api:latex:export": (body) => exportLatex({
-    ...(body || {}),
-    // Stream export phase/agent progress to connected pages via SSE.
-    onProgress: (text) => broadcast("command", { command: "latex-export-progress", text: String(text || "") }),
-  }),
+  "aaronnote:api:latex:export": (body) => {
+    const request = { ...(body || {}) };
+    const file = String(request.file || request.sourceFile || "");
+    const outputPath = String(request.outputPath || "");
+    const duplicate = coreTasks.list({ kind: "latex-export", activeOnly: true })
+      .find((active) => outputPath && String(active.metadata?.outputPath || "") === outputPath);
+    if (duplicate) {
+      const error = new Error("A LaTeX export is already active for this output path");
+      error.statusCode = 409;
+      throw error;
+    }
+    const task = coreTasks.start({
+      kind: "latex-export",
+      title: `Export ${basename(file || outputPath || "document")}`,
+      description: `Convert ${String(request.scope || "note")} Markdown to LaTeX and compile PDF`,
+      metadata: {
+        file,
+        outputPath,
+        scope: String(request.scope || "note"),
+        templatePath: String(request.templatePath || ""),
+        engine: String(request.engine || ""),
+      },
+      run: ({ signal, progress }) => exportLatex({ ...request, signal, onProgress: progress }),
+    });
+    return { type: "core-task-started", ok: true, task };
+  },
+  "aaronnote:api:tasks:list": (body) => ({ type: "core-tasks", ok: true, tasks: coreTasks.list(body || {}) }),
+  "aaronnote:api:tasks:get": (body) => ({ type: "core-task", ok: true, task: coreTasks.get(body?.id) }),
+  "aaronnote:api:tasks:cancel": (body) => ({ type: "core-task-cancel", ...coreTasks.cancel(body?.id) }),
+  "aaronnote:api:tasks:close": (body) => ({ type: "core-task-close", ...coreTasks.close(body?.id) }),
   "aaronnote:api:notes:meta-add": (body) => updateCurrentNoteMeta(body || {}, "add"),
 
   "aaronnote:api:roam-tools:rename-tag": (body) => renameRoamTag(body || {}),
@@ -1118,6 +1144,12 @@ function adapterScript(origin) {
       templates: function() { return call("aaronnote:api:latex:templates", []); },
       chooseOutputPath: function(body) { return call("aaronnote:api:latex:choose-output-path", [body || {}]); },
       export: function(body) { return call("aaronnote:api:latex:export", [body || {}]); }
+    },
+    tasks: {
+      list: function(body) { return call("aaronnote:api:tasks:list", [body || {}]); },
+      get: function(body) { return call("aaronnote:api:tasks:get", [body || {}]); },
+      cancel: function(body) { return call("aaronnote:api:tasks:cancel", [body || {}]); },
+      close: function(body) { return call("aaronnote:api:tasks:close", [body || {}]); }
     },
     roamTools: {
       renameTag: function(body) { return call("aaronnote:api:roam-tools:rename-tag", [body || {}]); },

@@ -1759,6 +1759,8 @@ Blocks the caller until the response arrives (or 8 s timeout)."
     "AaronNote"
     (list
      ["Focus editor" my/aaronnote-focus t]
+     ["Task manager" my/xwidget-open-task-manager t]
+     "---"
      ["Page outline" my/aaronnote-toggle-page t]
      ["Agenda" my/aaronnote-toggle-agenda t]
      ["Local graph" my/aaronnote-toggle-graph t]

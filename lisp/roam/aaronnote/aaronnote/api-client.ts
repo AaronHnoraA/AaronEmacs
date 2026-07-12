@@ -432,6 +432,12 @@ type NativeApi = {
     chooseOutputPath?: (body?: Record<string, unknown>) => Promise<unknown>;
     export?: (body?: Record<string, unknown>) => Promise<unknown>;
   };
+  tasks?: {
+    list?: (body?: Record<string, unknown>) => Promise<unknown>;
+    get?: (body?: Record<string, unknown>) => Promise<unknown>;
+    cancel?: (body?: Record<string, unknown>) => Promise<unknown>;
+    close?: (body?: Record<string, unknown>) => Promise<unknown>;
+  };
   meta?: {
     add?: (body: Record<string, unknown>) => Promise<unknown>;
     remove?: (body: Record<string, unknown>) => Promise<unknown>;
@@ -484,8 +490,19 @@ type NativeApi = {
   };
 };
 
-export type LatexTemplateVar = { id: string; label: string; default: string };
-export type LatexTemplate = { key: string; file: string; name: string; engine: string; vars: LatexTemplateVar[] };
+export type LatexTemplateVar = {
+  id: string;
+  label: string;
+  default: string;
+  input?: "text" | "select";
+  options?: Array<{ value: string; label: string }>;
+  required?: boolean;
+  placeholder?: string;
+  description?: string;
+  group?: string;
+  escape?: "text" | "url" | "raw";
+};
+export type LatexTemplate = { key: string; file: string; name: string; engine: string; documentRole?: string; vars: LatexTemplateVar[] };
 export type LatexTemplatesResult = { type?: string; ok?: boolean; templates?: LatexTemplate[]; root?: string };
 export type LatexExportAgentStatus = {
   type?: string;
@@ -494,6 +511,26 @@ export type LatexExportAgentStatus = {
   engine?: string;
   agents?: Array<{ id: string; label?: string; current?: boolean; available?: boolean }>;
 };
+export type CoreTask = {
+  id: string;
+  kind: string;
+  title: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+  status: "queued" | "running" | "canceling" | "completed" | "failed" | "canceled" | string;
+  phase?: string;
+  message?: string;
+  progress?: Array<{ at?: string; text?: string }>;
+  createdAt?: string;
+  updatedAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  result?: Record<string, unknown> | null;
+  error?: string;
+  cancellable?: boolean;
+  closeable?: boolean;
+};
+export type CoreTasksResult = { type?: string; ok?: boolean; tasks?: CoreTask[]; task?: CoreTask | null; message?: string };
 
 export type KatexMacrosResult = {
   type?: string;
@@ -505,6 +542,7 @@ export type KatexMacrosResult = {
 declare global {
   interface Window {
     aaronnoteApi?: NativeApi;
+    aaronnoteOpenTaskManager?: () => void;
   }
 }
 
@@ -706,6 +744,24 @@ export const api = {
     async export(body: Record<string, unknown>): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().latex?.export, "LaTeX export");
       return ensureOk(await call(body) as Record<string, unknown>, "LaTeX export failed");
+    },
+  },
+  tasks: {
+    async list(body: Record<string, unknown> = {}): Promise<CoreTasksResult> {
+      const call = requireMethod(nativeApi().tasks?.list, "Task manager");
+      return ensureOk(await call(body) as CoreTasksResult, "Task list failed");
+    },
+    async get(id: string): Promise<CoreTasksResult> {
+      const call = requireMethod(nativeApi().tasks?.get, "Task manager");
+      return ensureOk(await call({ id }) as CoreTasksResult, "Task lookup failed");
+    },
+    async cancel(id: string): Promise<CoreTasksResult> {
+      const call = requireMethod(nativeApi().tasks?.cancel, "Task manager");
+      return ensureOk(await call({ id }) as CoreTasksResult, "Task cancellation failed");
+    },
+    async close(id: string): Promise<CoreTasksResult> {
+      const call = requireMethod(nativeApi().tasks?.close, "Task manager");
+      return ensureOk(await call({ id }) as CoreTasksResult, "Task close failed");
     },
   },
   meta: {

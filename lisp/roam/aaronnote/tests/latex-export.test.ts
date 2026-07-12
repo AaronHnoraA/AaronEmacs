@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // @ts-ignore The converter is a Node ESM module outside the TS app graph.
-import { aaronnoteMarkdownToLatex, applyLatexTemplate, escapeLatexTitle, latexMacrosPreamble, latexSideCommentPreamble, writeLatexExport } from "../server/lib/latex-export.mjs";
+import { aaronnoteMarkdownToLatex, applyLatexTemplate, escapeLatexTitle, latexMacrosPackage, latexSideCommentPreamble, writeLatexExport } from "../server/lib/latex-export.mjs";
+// @ts-ignore Node ESM module outside the TS app graph.
+import { aaronnoteMarkdownToLatexPandoc, preprocessAaronnoteForPandoc } from "../server/lib/latex-export-pandoc.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
 import { configure, exportLatex, latexExportAgentStatus, latexExportDefaults, listLatexTemplates, setLatexExportAgent } from "../server/lib/index.mjs";
 
@@ -23,6 +25,7 @@ async function setupRoot() {
   await writeFile(join(templates, "latex", "aaronnote-article.tex"), [
     "\\documentclass{article}",
     "\\usepackage{amsmath,amsthm}",
+    "\\usepackage{aaronnote-macros}",
     "\\newtheorem{theorem}{Theorem}",
     "\\title{ {{title}} }",
     "\\date{ {{date}} }",
@@ -45,6 +48,236 @@ async function setupRoot() {
 }
 
 describe("LaTeX export", () => {
+  test("uses Pandoc for broad native Markdown and academic list structure", async () => {
+    const result = await aaronnoteMarkdownToLatexPandoc([
+      "Setext heading",
+      "==============",
+      "",
+      "---",
+      "",
+      "(a) First case",
+      "(b) Second case",
+      "",
+      "| Term | Value |",
+      "|---|---|",
+      "| rank | 2 |",
+      "",
+      "Definition",
+      ": Meaning",
+      "",
+      "Text with ~~obsolete~~ wording and a footnote.[^1]",
+      "",
+      "[^1]: Evidence.",
+      "",
+      "中文第一行",
+      "继续第二行",
+    ].join("\n"));
+
+    expect(result.body).toContain("\\section{Setext heading}");
+    expect(result.body).toContain("\\rule{0.5\\linewidth}{0.5pt}");
+    expect(result.body).toContain("\\def\\labelenumi{(\\alph{enumi})}");
+    expect(result.body).toContain("\\begin{longtable}");
+    expect(result.body).toContain("\\begin{description}");
+    expect(result.body).toContain("\\st{obsolete}");
+    expect(result.body).toContain("\\footnote{Evidence.}");
+    expect(result.body).toContain("中文第一行继续第二行");
+  });
+
+  test("balances Aaronnote privacy, semantic blocks, math, and visible anchors", async () => {
+    const result = await aaronnoteMarkdownToLatexPandoc([
+      "#+begin meta", "title: Projector", "#+end meta", "",
+      "@@project(active) [Private plan] {", "  area: study", "}", "",
+      "#+begin theorem Case \\(x>0\\)",
+      "Visible \\(x_1\\) text @@tag[key].",
+      "#+end theorem",
+      "",
+      "~~~text", "@@latexmk(newpage)", "~~~",
+    ].join("\n"));
+    expect(result.meta.title).toBe("Projector");
+    expect(result.body).toContain("\\begin{theorem}[Case \\(x>0\\)]");
+    expect(result.body).toContain("Visible \\(x_1\\) text");
+    expect(result.body).toContain("\\hypertarget{key}{}");
+    expect(result.body).toContain("@@latexmk(newpage)");
+    expect(result.body).not.toContain("Private plan");
+  });
+
+  test("never leaks multiline private-command attributes after visible prose", async () => {
+    const result = await aaronnoteMarkdownToLatexPandoc([
+      "Visible before @@todo [secret] {",
+      "  credentials: {",
+      "    password: hunter2",
+      "  }",
+      "}",
+      "",
+      "Visible after.",
+    ].join("\n"));
+    expect(result.body).toContain("Visible before");
+    expect(result.body).toContain("Visible after.");
+    expect(result.body).not.toContain("secret");
+    expect(result.body).not.toContain("password");
+    expect(result.body).not.toContain("hunter2");
+  });
+
+  test("honors CommonMark fence character and minimum closing length", async () => {
+    const result = await aaronnoteMarkdownToLatexPandoc([
+      "````text",
+      "literal",
+      "```",
+      "still literal",
+      "````",
+    ].join("\n"));
+    expect(result.body).toContain("\\begin{verbatim}");
+    expect(result.body).toContain("```");
+    expect(result.body).toContain("still literal");
+  });
+
+  test("protects Aaronnote literals inside blockquote fences and balanced link destinations", async () => {
+    const quoted = await aaronnoteMarkdownToLatexPandoc([
+      "> ```text",
+      "> @@todo [literal command]",
+      "> @@latexmk(typo)",
+      "> ````",
+    ].join("\n"));
+    expect(quoted.body).toContain("@@todo [literal command]");
+    expect(quoted.body).toContain("@@latexmk(typo)");
+    const linked = preprocessAaronnoteForPandoc("[x](https://example.com/(a)/@@latexmk(typo))");
+    expect(linked.markdown).toContain("@@latexmk(typo)");
+    const otherContainers = preprocessAaronnoteForPandoc([
+      ">     @@latexmk(typo)",
+      "> $$",
+      "> @@latexmk(typo)",
+      "> $$",
+      "",
+      "[ref]: https://example.com/@@latexmk(typo)",
+    ].join("\n"));
+    expect(otherContainers.markdown.match(/@@latexmk\(typo\)/g)).toHaveLength(3);
+    const implicitClose = await aaronnoteMarkdownToLatexPandoc([
+      "> ```text",
+      "> code",
+      "outside",
+    ].join("\n"));
+    expect(implicitClose.body).toContain("\\begin{verbatim}");
+    expect(implicitClose.body).toContain("outside");
+  });
+
+  test("hides private commands in visible link labels and image alt text", async () => {
+    const result = await aaronnoteMarkdownToLatexPandoc([
+      "[Visible @@comment [secret] label](https://example.com)",
+      "",
+      "![Visible @@todo [hidden] alt](image.png)",
+    ].join("\n"));
+    expect(result.body).toContain("Visible");
+    expect(result.body).toContain("label");
+    expect(result.body).toContain("alt");
+    expect(result.body).not.toContain("@@comment");
+    expect(result.body).not.toContain("@@todo");
+    expect(result.body).not.toContain("secret");
+    expect(result.body).not.toContain("hidden");
+  });
+
+  test("maps semantic outline commands at Aaronnote's canonical levels", async () => {
+    const result = await aaronnoteMarkdownToLatexPandoc([
+      "@@part [Foundations]",
+      "@@section [Linear algebra]",
+      "@@section(sec) [Operators]",
+      "@@section(sub) [Projectors]",
+      "@@section(subsub) [Kernels]",
+      "@@section(subsubsub) [Details]",
+      "# Markdown child",
+    ].join("\n\n"));
+    expect(result.body).toContain("\\section{Foundations}");
+    expect(result.body).toContain("\\subsection{Linear algebra}");
+    expect(result.body).toContain("\\subsection{Operators}");
+    expect(result.body).toContain("\\subsubsection{Projectors}");
+    expect(result.body).toContain("\\paragraph{Kernels}");
+    expect(result.body).toContain("\\subparagraph{Details}");
+    expect(result.body).toContain("\\subparagraph{Markdown child}");
+    expect(result.body).not.toContain("\\section{Markdown child}");
+  });
+
+  test("does not let hidden semantic commands affect public Markdown headings", async () => {
+    const result = await aaronnoteMarkdownToLatexPandoc([
+      "#+begin lean4",
+      "@@section [private]",
+      "#+end lean4",
+      "",
+      "@@project(active) [private] {",
+      "  note: @@section [also private]",
+      "}",
+      "",
+      "# Public heading",
+    ].join("\n"));
+    expect(result.body).toContain("\\section{Public heading}");
+    expect(result.body).not.toContain("\\subparagraph{Public heading}");
+    expect(result.body).not.toContain("private");
+  });
+
+  test("reads and consumes standard Markdown title/date front matter", async () => {
+    const result = await aaronnoteMarkdownToLatexPandoc([
+      "---",
+      "title: \"Exact Projector Note\"",
+      "date: 2026-07-12",
+      "---",
+      "",
+      "Body.",
+    ].join("\n"));
+    expect(result.meta).toMatchObject({ title: "Exact Projector Note", date: "2026-07-12" });
+    expect(result.body).toContain("Body.");
+    expect(result.body).not.toContain("Exact Projector Note");
+  });
+
+  test("formats callout titles without inventing visible punctuation or labels", async () => {
+    const result = await aaronnoteMarkdownToLatexPandoc("> [!NOTE] Exact title\n> Body.");
+    expect(result.body).toContain("\\textbf{Exact title}");
+    expect(result.body).not.toContain("NOTE ---");
+    expect(result.body).not.toContain("Exact title.");
+  });
+
+  test("validates typed LaTeX marks instead of silently swallowing mistakes", () => {
+    expect(() => preprocessAaronnoteForPandoc("Text @@latexmk(typo) here."))
+      .toThrow(/Unknown @@latexmk mark/);
+    expect(() => preprocessAaronnoteForPandoc("@@latexmk(newline) tail"))
+      .toThrow(/between visible inline content/);
+    expect(() => preprocessAaronnoteForPandoc("prefix @@latexmk(newpage) tail"))
+      .toThrow(/alone on its line/);
+    expect(() => preprocessAaronnoteForPandoc("left @@latexmk(newline) @@latexmk(newline) right"))
+      .toThrow(/between visible inline content/);
+    expect(() => preprocessAaronnoteForPandoc("tail @@latexmk(newline)"))
+      .toThrow(/between visible inline content/);
+    expect(() => preprocessAaronnoteForPandoc("First soft line\n@@latexmk(noindent) continuation"))
+      .toThrow(/start of a paragraph/);
+    expect(preprocessAaronnoteForPandoc("`@@latexmk(typo)`").markdown).toContain("@@latexmk(typo)");
+    expect(preprocessAaronnoteForPandoc("    @@latexmk(typo)").markdown).toContain("@@latexmk(typo)");
+  });
+
+  test("emits a non-stretching LaTeX row break for the newline mark", async () => {
+    const result = await aaronnoteMarkdownToLatexPandoc(
+      "First clause @@latexmk(newline) second clause.",
+    );
+    expect(result.body).toContain("First clause \\\\ second clause.");
+    expect(result.body).not.toContain("\\linebreak");
+    const trailing = await aaronnoteMarkdownToLatexPandoc([
+      "Question text. @@latexmk(newline)",
+      "(a) First part. @@latexmk(newline)",
+      "(b) Second part.",
+    ].join("\n"));
+    expect(trailing.body.match(/\\\\/g)?.length).toBe(2);
+  });
+
+  test("preserves canonical inline math even when it has boundary spaces", async () => {
+    const result = await aaronnoteMarkdownToLatexPandoc(
+      "where \\( \\mathrm{id} \\in \\mathcal{L}(V)\\) is the identity",
+    );
+    expect(result.body).toContain("\\( \\mathrm{id} \\in \\mathcal{L}(V)\\)");
+    expect(result.body).not.toContain("\\$");
+  });
+
+  test("keeps unresolved citations visible and reports a warning", async () => {
+    const result = await aaronnoteMarkdownToLatexPandoc("See @@cite [Str87].");
+    expect(result.body).toContain("\\textnormal{[Str87]}");
+    expect(result.warnings).toContain("Unresolved Aaronnote citation kept visibly: Str87");
+  });
+
   test("converts Aaronnote theorem and proof blocks", () => {
     const result = aaronnoteMarkdownToLatex([
       "#+begin meta",
@@ -85,6 +318,31 @@ describe("LaTeX export", () => {
     expect(result.body).toContain("\\(x_1\\)");
     expect(result.body).not.toContain("\\\\textbf");
     expect(result.body).not.toContain("[paper](");
+  });
+
+  test("maps explicit and Markdown line breaks without conflating paragraphs", () => {
+    const result = aaronnoteMarkdownToLatex([
+      "First line",
+      "continues here @@latexmk(newline) next visual line.",
+      "",
+      "A new paragraph.",
+    ].join("\n"));
+
+    expect(result.body).toBe("First line continues here\\\\\nnext visual line.\n\nA new paragraph.\n");
+    expect(result.body).not.toContain("@@latexmk");
+  });
+
+  test("folds prose lines with CJK-aware spacing and Markdown hard breaks", () => {
+    const result = aaronnoteMarkdownToLatex([
+      "中文第一行",
+      "继续第二行",
+      "English first line",
+      "continues normally",
+      "hard break  ",
+      "after break",
+    ].join("\n"));
+
+    expect(result.body).toContain("中文第一行继续第二行 English first line continues normally hard break\\\\\nafter break");
   });
 
   test("preserves nested unordered and ordered list hierarchy", () => {
@@ -155,20 +413,22 @@ describe("LaTeX export", () => {
     await expect(writeLatexExport("", "body")).rejects.toThrow(/Missing output path/);
   });
 
-  test("injects global KaTeX macros into the LaTeX preamble", () => {
-    const macros = latexMacrosPreamble({
+  test("fails fast on misspelled template placeholders", () => {
+    expect(() => applyLatexTemplate("\\begin{document}{{boddy}}\\end{document}", { body: "Body" }))
+      .toThrow(/Unknown LaTeX template placeholder.*boddy/);
+  });
+
+  test("builds global KaTeX macros as a standalone shared package", () => {
+    const macros = latexMacrosPackage({
       "\\rank": "\\operatorname{rank}",
       "\\ip": "\\left\\langle#1,#2\\right\\rangle",
     });
-    const latex = applyLatexTemplate("\\documentclass{article}\n\\begin{document}\n{{body}}\n\\end{document}\n", {
-      macros,
-      body: "\\(\\rank \\Phi_C \\le \\dim N\\)",
-    });
 
-    expect(latex).toContain("\\providecommand{\\rank}{}");
-    expect(latex).toContain("\\renewcommand{\\rank}{\\operatorname{rank}}");
-    expect(latex).toContain("\\providecommand{\\ip}[2]{}");
-    expect(latex.indexOf("\\renewcommand{\\rank}")).toBeLessThan(latex.indexOf("\\begin{document}"));
+    expect(macros).toContain("\\ProvidesPackage{aaronnote-macros}");
+    expect(macros).toContain("\\providecommand{\\rank}{}");
+    expect(macros).toContain("\\renewcommand{\\rank}{\\operatorname{rank}}");
+    expect(macros).toContain("\\providecommand{\\ip}[2]{}");
+    expect(macros).toContain("\\providecommand{\\sidecomment}");
   });
 
   test("omits Aaronnote todos from exported body", () => {
@@ -249,7 +509,7 @@ describe("LaTeX export", () => {
     expect(result.features).toEqual({ usesSideComment: true });
   });
 
-  test("injects the side-comment package and macro only when needed", () => {
+  test("keeps side-comment support in the stable shared package", () => {
     const enabled = latexSideCommentPreamble(true);
     expect(enabled).toContain("todonotes");
     expect(enabled).toContain("\\providecommand{\\sidecomment}");
@@ -258,11 +518,7 @@ describe("LaTeX export", () => {
 
     const plain = aaronnoteMarkdownToLatex("Plain body.");
     expect(plain.features).toEqual({ usesSideComment: false });
-    const latex = applyLatexTemplate("\\documentclass{article}\n\\begin{document}\n{{body}}\n\\end{document}", {
-      macros: enabled,
-      body: String.raw`\sidecomment{note}`,
-    });
-    expect(latex.indexOf("todonotes")).toBeLessThan(latex.indexOf("\\begin{document}"));
+    expect(latexMacrosPackage({})).toContain("todonotes");
   });
 
   test("writes export and remembers the last path per note", async () => {
@@ -271,13 +527,17 @@ describe("LaTeX export", () => {
     const out = join(notes, "out", "a.tex");
     await writeFile(note, "#+begin meta\ntitle: A\n#+end meta\n\n# A\n\nBody with \\(x\\). @@scomment [Review \\(x\\).]\n", "utf8");
 
-    const exported = await exportLatex({ file: note, outputPath: out }) as { ok?: boolean; file?: string };
+    const exported = await exportLatex({ file: note, outputPath: out }) as { ok?: boolean; file?: string; pdfFile?: string };
     expect(exported.ok).toBe(true);
     expect(exported.file).toBe(out);
+    expect(exported.pdfFile).toBe(join(notes, "out", "a.pdf"));
+    expect((await readFile(exported.pdfFile!, "utf8")).slice(0, 4)).toBe("%PDF");
     // Title precedence: explicit meta title ("A") wins over the filename ("a").
     const tex = await readFile(out, "utf8");
     expect(tex).toContain("\\title{ A }");
-    expect(tex).toContain("\\providecommand{\\sidecomment}");
+    expect(tex).not.toContain("\\providecommand{\\sidecomment}");
+    expect(tex).toContain("\\usepackage{aaronnote-macros}");
+    expect(await readFile(join(notes, "out", "aaronnote-macros.sty"), "utf8")).toContain("\\providecommand{\\sidecomment}");
     expect(tex).toContain("\\sidecomment{Review \\(x\\).}");
 
     const defaults = await latexExportDefaults({ file: note }) as { outputPath?: string };
@@ -290,6 +550,7 @@ describe("LaTeX export", () => {
     await writeFile(join(latexDir, "aaronnote-assignment.tex"), [
       '% aaronnote-template: {"name":"Assignment","engine":"xelatex","vars":[{"id":"coursecode","label":"Course code","default":"COMP"}]}',
       "\\documentclass{article}",
+      "\\newcommand{\\coursecodevalue}{ {{coursecode}} }",
       "\\begin{document}{{body}}\\end{document}",
       "",
     ].join("\n"), "utf8");
@@ -325,19 +586,58 @@ describe("LaTeX export", () => {
       file: note,
       outputPath: out,
       templatePath,
-      vars: { coursecode: "COMP3453" },
-    }) as { ok?: boolean; template?: string; engine?: string };
+      vars: { coursecode: "COMP&3453" },
+    }) as { ok?: boolean; template?: string; engine?: string; title?: string };
     expect(exported.ok).toBe(true);
     expect(exported.template).toBe(templatePath);
-    expect(exported.engine).toBe("mechanical");
+    expect(exported.engine).toBe("pandoc");
+    expect(exported.title).toBe("Assignment"); // internal slug "assg" is not presentation-ready
     const tex = await readFile(out, "utf8");
-    expect(tex).toContain("\\newcommand{\\course}{ COMP3453 }");
+    expect(tex).toContain("\\newcommand{\\course}{ COMP\\&3453 }");
     expect(tex).toContain("Body text.");
 
     // The chosen template + vars are remembered for the next export of this note.
     const defaults = await latexExportDefaults({ file: note }) as { template?: string; vars?: Record<string, string> };
     expect(defaults.template).toBe(templatePath);
-    expect(defaults.vars?.coursecode).toBe("COMP3453");
+    expect(defaults.vars?.coursecode).toBe("COMP&3453");
+  });
+
+  test("rejects invalid embedded template schemas instead of silently defaulting", async () => {
+    const { root, notes } = await setupRoot();
+    const templatePath = join(root, "templates", "latex", "invalid.tex");
+    await writeFile(templatePath, [
+      '% aaronnote-template: {"name":"Invalid","engine":"word","vars":[]}',
+      "\\documentclass{article}", "\\begin{document}", "{{body}}", "\\end{document}", "",
+    ].join("\n"), "utf8");
+    const note = join(notes, "invalid.md");
+    await writeFile(note, "Body.\n", "utf8");
+    await expect(exportLatex({ file: note, outputPath: join(notes, "invalid.tex"), templatePath }))
+      .rejects.toThrow(/Invalid LaTeX template header.*unsupported engine/);
+  });
+
+  test("syncs declared template support files only when missing or outdated", async () => {
+    const { root, notes } = await setupRoot();
+    const templateDir = join(root, "templates", "latex");
+    const templatePath = join(templateDir, "shared.tex");
+    const classPath = join(templateDir, "shared.cls");
+    await writeFile(classPath, "\\NeedsTeXFormat{LaTeX2e}\n\\ProvidesClass{shared}\n\\LoadClass{article}\n", "utf8");
+    await writeFile(templatePath, [
+      '% aaronnote-template: {"name":"Shared","engine":"pdflatex","sharedFiles":["shared.cls"]}',
+      "\\documentclass{shared}",
+      "\\begin{document}",
+      "{{body}}",
+      "\\end{document}",
+      "",
+    ].join("\n"), "utf8");
+    const note = join(notes, "shared.md");
+    const out = join(notes, "export", "shared.tex");
+    await writeFile(note, "Body.\n", "utf8");
+
+    const first = await exportLatex({ file: note, outputPath: out, templatePath }) as { sharedFiles?: Array<{ updated: boolean }> };
+    expect(first.sharedFiles?.[0]?.updated).toBe(true);
+    expect(await readFile(join(notes, "export", "shared.cls"), "utf8")).toContain("ProvidesClass{shared}");
+    const second = await exportLatex({ file: note, outputPath: out, templatePath }) as { sharedFiles?: Array<{ updated: boolean }> };
+    expect(second.sharedFiles?.[0]?.updated).toBe(false);
   });
 
   test("does not force document title markup into templates without a title placeholder", async () => {
@@ -380,7 +680,7 @@ describe("LaTeX export", () => {
     expect(status.engine).toBe("codex");
   });
 
-  test("merges agent-maintained conversion rules into the mechanical draft", async () => {
+  test("merges agent-maintained conversion rules into the Pandoc draft", async () => {
     const { root, notes } = await setupRoot();
     const agentDir = join(root, "agents", "latex-export");
     await mkdir(join(agentDir, "mechanical"), { recursive: true });
@@ -415,17 +715,17 @@ describe("LaTeX export", () => {
     const out = join(notes, "c.tex");
     const exported = await exportLatex({ file: note, outputPath: out }) as { ok?: boolean; engine?: string };
     expect(exported.ok).toBe(true);
-    expect(exported.engine).toBe("mechanical"); // codex unavailable -> mechanical draft
+    expect(exported.engine).toBe("pandoc"); // agent unavailable -> verified Pandoc draft
     expect(await readFile(out, "utf8")).toContain("Body.");
   });
 
-  test("falls back to the first H1 heading for the title when no meta title", async () => {
+  test("prefers the source name over generated content summaries", async () => {
     const { notes } = await setupRoot();
     const note = join(notes, "cheat-sheet.md");
     await writeFile(note, "# Linear Algebra Notes\n\nBody.\n", "utf8");
     const out = join(notes, "h.tex");
     const exported = await exportLatex({ file: note, outputPath: out }) as { ok?: boolean; title?: string };
-    expect(exported.title).toBe("Linear Algebra Notes"); // not the filename "cheat-sheet"
-    expect(await readFile(out, "utf8")).toContain("\\title{ Linear Algebra Notes }");
+    expect(exported.title).toBe("cheat sheet");
+    expect(await readFile(out, "utf8")).toContain("\\title{ cheat sheet }");
   });
 });

@@ -134,6 +134,16 @@ export function scanInlineCommands(input, name = "") {
     });
   };
 
+  // Marker-only commands still go through the shared command scanner.  Keep
+  // this list deliberately small: unlike the bracket commands below, their
+  // end is determined by the command name itself.
+  const markerRe = /@@latexmk\(([^)\n]+)\)/gi;
+  let markerMatch;
+  while ((markerMatch = markerRe.exec(text))) {
+    push("latexmk", markerMatch[1].trim(), markerMatch.index + markerMatch[0].length,
+      markerMatch.index + markerMatch[0].length, markerMatch.index, markerRe.lastIndex);
+  }
+
   const tagRe = /@@tag\[/gi;
   let tagMatch;
   while ((tagMatch = tagRe.exec(text))) {
@@ -148,6 +158,7 @@ export function scanInlineCommands(input, name = "") {
   let match;
   while ((match = re.exec(text))) {
     const commandName = match[1].toLowerCase();
+    if (commandName === "latexmk") continue;
     const open = re.lastIndex - 1;
     const close = findInlineCommandClose(text, open, "]");
     if (close < 0) continue;

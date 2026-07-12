@@ -31,6 +31,7 @@ import {
   relativeDateLabel,
 } from "../../date-syntax.ts";
 import { hasViewportDecorationRefresh } from "../viewport-refresh.ts";
+import { latexMark } from "../../../shared/latex-marks.mjs";
 
 declare global {
   interface Window {
@@ -545,6 +546,49 @@ class TagWidget extends MeasuredWidget {
   ignoreEvent(): boolean { return false; }
 }
 
+class LatexMarkWidget extends MeasuredWidget {
+  mark: string;
+  from: number;
+  to: number;
+
+  constructor(mark: string, from: number, to: number) {
+    super();
+    this.mark = mark;
+    this.from = from;
+    this.to = to;
+  }
+
+  protected measureKey(): string { return this.mark; }
+  protected get measuredBlock(): boolean { return false; }
+
+  eq(other: LatexMarkWidget): boolean {
+    return this.mark === other.mark && this.from === other.from && this.to === other.to;
+  }
+
+  toDOM(): HTMLElement {
+    const marker = document.createElement("span");
+    const spec = latexMark(this.mark);
+    marker.className = "inline-latex-mark-widget inline-command-token";
+    marker.dataset.cmSourceFrom = String(this.from);
+    marker.dataset.cmSourceTo = String(this.to);
+    marker.dataset.cmOpenSource = "true";
+    marker.dataset.mark = this.mark;
+    marker.dataset.valid = spec ? "true" : "false";
+    marker.title = spec ? `LaTeX mark: ${spec.label} (@@latexmk(${this.mark}))` : `Unknown LaTeX mark: ${this.mark}`;
+    marker.setAttribute("aria-label", spec?.label || `Unknown LaTeX mark ${this.mark}`);
+    const latex = document.createElement("span");
+    latex.className = "inline-latex-mark-logo";
+    latex.textContent = "LaTeX";
+    const value = document.createElement("span");
+    value.className = "inline-latex-mark-symbol";
+    value.textContent = spec?.symbol || "?";
+    marker.append(latex, value);
+    return marker;
+  }
+
+  ignoreEvent(): boolean { return false; }
+}
+
 function stopWidgetEventPropagation(event: Event): void {
   event.stopPropagation();
 }
@@ -879,6 +923,11 @@ function buildInlineCommandDecos(
             }).range(from, to),
           );
         }
+      }
+      if (cmd.name === "latexmk" && !cursorInside) {
+        decos.push(
+          Decoration.replace({ widget: new LatexMarkWidget(cmd.switchValue.toLowerCase(), from, to) }).range(from, to),
+        );
       }
       if (cmd.name === "comment" && !cursorInside) {
         decos.push(

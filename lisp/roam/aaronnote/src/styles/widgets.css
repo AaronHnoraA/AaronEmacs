@@ -2173,6 +2173,34 @@
   overflow-wrap: anywhere;
 }
 
+.cm-editor .inline-latex-mark-widget {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.22em;
+  margin: 0 0.16em;
+  color: color-mix(in srgb, var(--aaron-muted, #91a4b7), transparent 18%);
+  font: 650 0.8em/1 var(--aaron-font-sans, system-ui, sans-serif);
+  vertical-align: 0.05em;
+  cursor: text;
+  user-select: none;
+}
+
+.cm-editor .inline-latex-mark-logo {
+  font-family: "Times New Roman", Times, serif;
+  font-size: 0.88em;
+  font-style: italic;
+  letter-spacing: -0.08em;
+}
+
+.cm-editor .inline-latex-mark-symbol {
+  font-size: 1.12em;
+}
+
+.cm-editor .inline-latex-mark-widget[data-valid="false"] {
+  color: var(--aaron-danger, #d14b4b);
+  text-decoration: wavy underline;
+}
+
 .cm-editor .cm-ceil-cell-widget {
   display: block;
   box-sizing: border-box;

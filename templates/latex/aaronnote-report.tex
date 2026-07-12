@@ -1,4 +1,4 @@
-% aaronnote-template: {"name":"Report","engine":"pdflatex","vars":[{"id":"author","label":"Author","default":""},{"id":"subtitle","label":"Subtitle","default":""}]}
+% aaronnote-template: {"name":"Report","engine":"pdflatex","documentRole":"report","vars":[{"id":"author","label":"Author","default":"","input":"text","required":false,"placeholder":"Author name","description":"Displayed below the report title.","group":"identity","escape":"text"},{"id":"subtitle","label":"Subtitle","default":"","input":"text","required":false,"placeholder":"Optional short subtitle","description":"Keep concise enough for the title block.","group":"document","escape":"text"}]}
 % Aaronnote export: long-form report style with title block and table of contents.
 \documentclass[11pt]{article}
 \usepackage[a4paper,margin=1in]{geometry}
@@ -36,7 +36,7 @@
 \newtheorem{remark}{Remark}
 \newtheorem{example}{Example}
 
-{{macros}}
+\usepackage{aaronnote-macros}
 
 \title{ {{title}} \\[0.3em] \large {{subtitle}} }
 \author{ {{author}} }

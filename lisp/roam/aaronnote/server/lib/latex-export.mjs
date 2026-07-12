@@ -20,7 +20,7 @@ const DEFAULT_TEMPLATE = `\\documentclass[11pt]{article}
 \\newtheorem{remark}{Remark}
 \\newtheorem{example}{Example}
 
-{{macros}}
+\\usepackage{aaronnote-macros}
 
 \\title{ {{title}} }
 \\date{ {{date}} }
@@ -50,7 +50,7 @@ const DISPLAY_MATH_OPEN_RE = /^\s*(?:\\\[|\$\$)\s*$/;
 const DISPLAY_MATH_CLOSE_RE = /^\s*(?:\\\]|\$\$)\s*$/;
 const CEIL_COMMAND_LINE_RE = /^\s*@@cell(?:[ \t]*\([^)\n]*\))?(?:[ \t]+\[[^\]\n]*\])?[ \t]*$/i;
 
-function escapeLatexText(value) {
+export function escapeLatexText(value) {
   return String(value ?? "")
     .replace(/\\/g, "\\textbackslash{}")
     .replace(/([#$%&_{}])/g, "\\$1")
@@ -58,7 +58,7 @@ function escapeLatexText(value) {
     .replace(/~/g, "\\textasciitilde{}");
 }
 
-function escapeLatexUrl(value) {
+export function escapeLatexUrl(value) {
   return String(value ?? "").trim().replace(/\\/g, "/").replace(/([%#{}])/g, "\\$1");
 }
 
@@ -107,7 +107,7 @@ function commandArgs(command) {
   return args;
 }
 
-function citeLatex(command, options = {}) {
+export function citeLatex(command, options = {}) {
   const map = options.citationKeyMap || {};
   const namespace = String(command.switchValue || "").trim();
   const keys = commandKeys(command)
@@ -120,10 +120,10 @@ function citeLatex(command, options = {}) {
   return `\\cite${opt}{${keys.join(",")}}`;
 }
 
-function convertInline(text, options = {}) {
+export function convertInline(text, options = {}) {
   const source = String(text ?? "").trim();
   const annotations = scanInlineCommands(source)
-    .filter((command) => command.name === "todo" || command.name === "comment" || command.name === "scomment" || command.name === "cite");
+    .filter((command) => command.name === "todo" || command.name === "comment" || command.name === "scomment" || command.name === "cite" || command.name === "latexmk");
   let annotationIndex = 0;
   let latex = "";
   let plain = "";
@@ -140,8 +140,15 @@ function convertInline(text, options = {}) {
         latex += `\\sidecomment{${convertInline(annotation.context, options)}}`;
       } else if (annotation.name === "cite") {
         latex += citeLatex(annotation, options);
+      } else if (annotation.name === "latexmk" && annotation.switchValue.toLowerCase() === "newline") {
+        // Explicit soft paragraph line break. Markdown source newlines remain
+        // spaces inside a paragraph; blank lines remain paragraph boundaries.
+        latex = `${latex.trimEnd()}\\\\\n`;
       }
       pos = annotation.fullTo;
+      if (annotation.name === "latexmk" && annotation.switchValue.toLowerCase() === "newline") {
+        while (source[pos] === " " || source[pos] === "\t") pos += 1;
+      }
       annotationIndex++;
       continue;
     }
@@ -282,7 +289,25 @@ function effectiveCommentBlocks(rules) {
 
 function flushParagraph(out, paragraph, options = {}) {
   if (paragraph.length === 0) return;
-  out.push(paragraph.map((line) => convertInline(line, options)).join(" "));
+  let latex = "";
+  for (let index = 0; index < paragraph.length; index += 1) {
+    const entry = paragraph[index];
+    const rendered = convertInline(entry.text, options);
+    if (index > 0) {
+      const previous = paragraph[index - 1];
+      if (previous.hardBreak) {
+        latex = `${latex.trimEnd()}\\\\\n`;
+      } else {
+        const previousTail = previous.text.trimEnd().at(-1) || "";
+        const currentHead = entry.text.trimStart().at(0) || "";
+        const cjkBoundary = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u.test(previousTail)
+          && /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}|[，。！？；：、）】》」』]/u.test(currentHead);
+        if (!latex.endsWith("\n") && !cjkBoundary) latex += " ";
+      }
+    }
+    latex += rendered;
+  }
+  out.push(latex);
   out.push("");
   paragraph.length = 0;
 }
@@ -322,7 +347,8 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
   for (let lineIndex = 0; lineIndex < bodyLines.length; lineIndex += 1) {
     const rawLine = bodyLines[lineIndex];
     const lineNumber = lineIndex + 1;
-    const line = rawLine.replace(/\s+$/g, "");
+    const trailingSpaces = rawLine.match(/ +$/)?.[0].length || 0;
+    const line = rawLine.replace(/[ \t]+$/g, "");
 
     if (ignoredOrgBlock) {
       const nested = orgBlockOpen(line);
@@ -444,7 +470,11 @@ export function aaronnoteMarkdownToLatex(markdown, options = {}) {
       continue;
     }
 
-    paragraph.push(line);
+    const slashBreak = /\\$/.test(line);
+    paragraph.push({
+      text: slashBreak ? line.slice(0, -1).trimEnd() : line,
+      hardBreak: trailingSpaces >= 2 || slashBreak,
+    });
   }
 
   flushParagraph(out, paragraph, options);
@@ -483,15 +513,10 @@ export function bibliographyReferencesToLatex(references = [], citationKeyById =
 
 export function applyLatexTemplate(template, vars) {
   const source = String(template || DEFAULT_TEMPLATE);
-  const hasMacrosSlot = /\{\{\s*macros\s*\}\}/.test(source);
-  let rendered = source.replace(/\{\{\s*([A-Za-z][\w-]*)\s*\}\}/g, (_m, key) => {
-    return Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key] ?? "") : "";
+  return source.replace(/\{\{\s*([A-Za-z][\w-]*)\s*\}\}/g, (_m, key) => {
+    if (!Object.prototype.hasOwnProperty.call(vars, key)) throw new Error(`Unknown LaTeX template placeholder: {{${key}}}`);
+    return String(vars[key] ?? "");
   });
-  const macros = String(vars?.macros || "").trim();
-  if (macros && !hasMacrosSlot) {
-    rendered = rendered.replace(/\\begin\{document\}/, `${macros}\n\n\\begin{document}`);
-  }
-  return rendered;
 }
 
 export function latexMacrosPreamble(macros) {
@@ -520,7 +545,49 @@ export function latexSideCommentPreamble(enabled) {
 \providecommand{\sidecomment}[1]{%
   \todo[fancyline,color=AaronSideCommentBackground,textcolor=white,linecolor=AaronSideCommentBackground,bordercolor=white]{#1}%
 }
+
 `;
+}
+
+export function latexMacrosPackage(macros, features = {}) {
+  return [
+    "\\NeedsTeXFormat{LaTeX2e}",
+    "\\ProvidesPackage{aaronnote-macros}[2026/07/12 Aaronnote shared macros]",
+    "\\RequirePackage{graphicx}",
+    "\\RequirePackage{booktabs,longtable,array,calc,etoolbox}",
+    "\\RequirePackage{footnote}",
+    "\\RequirePackage{needspace}",
+    "\\RequirePackage[normalem]{ulem}",
+    features.usesTikz ? "\\RequirePackage{tikz}" : "",
+    String.raw`% Pandoc body compatibility
+\makeatletter
+\@ifundefined{c@none}{\newcounter{none}}{}
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+\makesavenoteenv{longtable}
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0.2em}\setlength{\parskip}{0pt}}
+\providecommand{\st}[1]{\sout{#1}}
+\newsavebox{\AaronPandocBox}
+\providecommand{\pandocbounded}[1]{%
+  \sbox{\AaronPandocBox}{#1}%
+  \ifdim\wd\AaronPandocBox>\linewidth
+    \resizebox{\linewidth}{!}{\usebox{\AaronPandocBox}}%
+  \else\usebox{\AaronPandocBox}\fi}
+
+% Restrained academic page-flow defaults
+\widowpenalty=10000
+\clubpenalty=10000
+\displaywidowpenalty=10000
+\interfootnotelinepenalty=10000
+\setlength{\emergencystretch}{2em}`,
+    latexMacrosPreamble(macros).trim(),
+    // Keep this capability stable across every document in the same directory:
+    // exporting a note without side comments must not make an older note fail.
+    latexSideCommentPreamble(true).trim(),
+    "\\endinput",
+    "",
+  ].filter(Boolean).join("\n\n");
 }
 
 export async function readLatexTemplate(templatesRoot, templatePath = "") {

@@ -6,6 +6,8 @@ import { join } from "node:path";
 
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
 import * as serverIndex from "../server/lib/index.mjs";
+// @ts-ignore Shared ESM registry.
+import { latexMarkNames, latexMarkSnippetDefinitions } from "../shared/latex-marks.mjs";
 
 const {
   canonicalTodoArgs,
@@ -117,6 +119,9 @@ describe("server todo scan", () => {
         context: "qc",
       },
     ]);
+    expect(scanInlineCommands("before @@latexmk(newline) after", "latexmk")).toMatchObject([
+      { name: "latexmk", switchValue: "newline", context: "", fullFrom: 7, fullTo: 25 },
+    ]);
     expect(scanInlineCommands("@@todo[not parsed]", "todo")).toEqual([]);
     expect(scanInlineCommands("@@lean4 [group-cancel]", "lean4")).toMatchObject([
       {
@@ -134,6 +139,14 @@ describe("server todo scan", () => {
       },
     ]);
     expect(scanInlineCommands("@@section[not parsed]", "section")).toEqual([]);
+  });
+
+  test("provides an individual snippet for every typed LaTeX mark", () => {
+    const snippets = latexMarkSnippetDefinitions();
+    expect(snippets.map((snippet: { key: string }) => snippet.key)).toEqual(latexMarkNames());
+    expect(snippets.find((snippet: { key: string }) => snippet.key === "newline")?.body)
+      .toBe("@@latexmk(newline)$0");
+    expect(latexMarkNames()).toEqual(expect.arrayContaining(["nbsp", "noindent", "newpage", "clearpage", "nopagebreak", "appendix"]));
   });
 
   test("parseCommandArgs keeps a comma inside a quoted value intact", () => {

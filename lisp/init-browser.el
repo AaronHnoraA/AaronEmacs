@@ -342,6 +342,12 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
         (message "Copied URL."))
     (user-error "No xwidget URL available")))
 
+(defun my/xwidget-open-task-manager ()
+  "Open the current Aaronnote page's Core task manager without polling."
+  (interactive)
+  (my/xwidget--execute-script
+   "(() => { if (typeof window.aaronnoteOpenTaskManager === 'function') { window.aaronnoteOpenTaskManager(); return true; } return false; })()"))
+
 (defun my/xwidget--execute-script (script)
   "Execute JavaScript SCRIPT in the current xwidget session."
   (unless (and (fboundp 'xwidget-webkit-current-session)

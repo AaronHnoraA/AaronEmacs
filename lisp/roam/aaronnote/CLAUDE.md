@@ -49,8 +49,9 @@ separate editor implementation.
 | `aaronnote/agenda-view.ts` | Full-screen, vault-wide agenda renderer: week/list/month/log/gantt/projects/clocktable/lints views over `api.notes.agenda`. All edits round-trip through `patchTodo`/`clockIn`/`clockOut` — holds no state that isn't re-derivable from markdown. See `docs/agenda.md`. |
 | `aaronnote/latex-export-scope.ts` | Pure whole-note/selection/heading-subtree range model used by the LaTeX scope picker. |
 | `server/lib/runtime.mjs` | Server-side note/index/save/runtime; agenda engine (dependencies incl. `blocks` reverse-deps and `#id` stable-id refs, urgency, day-bucketed view-model with time grid + repeat projection, clock aggregation, project rollup, Gantt model, canonical-key patching, on-demand id minting via `ensureTodoId`, `todoRefCompletions`); Copilot LSP bridge. See `docs/agenda.md`. |
-| `server/lib/latex-export.mjs` | Mechanical Markdown-to-LaTeX base conversion (`mechanicalConvert`/`aaronnoteMarkdownToLatex`), template rendering, validation, atomic `.tex` writes. Merges agent rules via `options.rules`. |
-| `server/lib/latex-export-codex.mjs` | Codex polish of the mechanical draft: staged workdir, compile-verify retry loop, prose-fidelity warnings, agent-rule loading. Falls back to the draft. See `docs/latex-export-style.md`. |
+| `server/lib/latex-export-pandoc.mjs` | Aaronnote-aware preprocessing, fixed Pandoc Markdown profile, typed LaTeX marks, and academic LaTeX postprocessing. Pandoc is required in this fixed environment. |
+| `server/lib/latex-export.mjs` | Template rendering, escaping, shared macro package generation, legacy pure helpers, and atomic `.tex` writes. |
+| `server/lib/latex-export-codex.mjs` | Agent polish of the Pandoc draft: repository skills, mandatory review candidates, strict fidelity gate, compile-verify retry loop, and agent-maintained rules. |
 | `agents/latex-export/` | Codex export contract (`AGENTS.md`), the agent-maintained `mechanical/rules.json` (envMap/commentBlocks merged into the base converter), and `notes.md`. Edited only on a maintenance pass, never during a normal export. |
 | `server/lib/watch.mjs` | Recursive fs watcher for vault freshness; SSE broadcast on batch change. |
 | `server/lib/tmp.mjs` | Runtime temp staging (`mkdtemp`, atomic writes, TTL orphan sweep). |

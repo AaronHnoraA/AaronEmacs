@@ -1,4 +1,4 @@
-% aaronnote-template: {"name":"Article","engine":"pdflatex","vars":[]}
+% aaronnote-template: {"name":"Article","engine":"pdflatex","documentRole":"article","vars":[]}
 % Default Aaronnote export: article / meeting-note / academic style.
 \documentclass[11pt]{article}
 \usepackage[a4paper,margin=1in]{geometry}
@@ -28,7 +28,7 @@
 \newtheorem{remark}{Remark}
 \newtheorem{example}{Example}
 
-{{macros}}
+\usepackage{aaronnote-macros}
 
 \title{ {{title}} }
 \date{ {{date}} }
