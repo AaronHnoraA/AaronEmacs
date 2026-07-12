@@ -3,6 +3,17 @@ import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
 import { formatCitationLabel, noteCssHrefFromMarkdown, renderMarkdownHTML, renderPublishedNoteHTML } from "../src/render-html.ts";
 
 describe("shared markdown HTML renderer", () => {
+  test("keeps Jupyter commands hidden by default and emits slide hydration slots on request", () => {
+    const markdown = "Before\n\n@@cell(python, python3) [demo-cell]\n\nAfter";
+    expect(renderMarkdownHTML(markdown)).not.toContain("demo-cell");
+
+    const html = renderMarkdownHTML(markdown, {
+      renderJupyterCells: true,
+    });
+    expect(html).toContain("aaronnote-slide-jupyter-cell");
+    expect(html).toContain('data-aaronnote-cell-command="@@cell(python, python3) [demo-cell]"');
+  });
+
   test("optionally renders authored HTML and sanitizes unsafe attributes", () => {
     const html = renderMarkdownHTML('<div class="grid" onclick="evil()"><strong>Rendered</strong><script>evil()</script></div>', { allowHtml: true });
     expect(html).toContain('<div class="grid"><strong>Rendered</strong></div>');

@@ -174,18 +174,26 @@ Roam New 共用。
 在 meta 中设置 `kind: slides` 后，Aaronnote 默认进入 **Reveal** 展示视图。每个一级标题
 （`# Title`）开始一张新 slide；二级标题及以下、公式、图片、org-env 和手写 HTML 都留在当前页，
 代码围栏里的 `#` 不会分页。meta 与第一个一级标题前的内容不显示为 slide。Reveal 负责 16:9
-画布、缩放、动画、fragment、进度和翻页；Aaronnote 负责把每一页 Markdown 先渲染成 HTML，因此
+画布、缩放、动画、fragment 和翻页；Aaronnote 负责把每一页 Markdown 先渲染成 HTML，因此
 两边不会有第二套 Markdown 解释器。
 
 一级标题 `#` 默认向右分页；其下的二级标题 `##` 自动成为纵向页。← / → 在一级标题之间移动，
-↑ / ↓ 在同一一级标题的 stack 内移动。右上标题栏显示所属一级标题，纵向页的二级标题显示在
-内容区顶部。旧的 `@@slides(vertical) []` 标记仍兼容，但新笔记不再需要它。
+↑ / ↓ 在同一一级标题的 stack 内移动。一级、二级标题都直接在 slide 内容中渲染；展示页不再
+额外绘制左侧目录、顶部标题栏或底部进度线。旧的 `@@slides(vertical) []` 标记仍兼容，但新笔记不再需要它。
 若二级标题带现有的 `<!-- omit in toc -->` 标记，它不会建立纵向页，而会作为当前 slide 的普通
 二级标题继续由 Aaronnote renderer 渲染。
 
 `M-/` / `Cmd-/` 在 slides note 中切换 **Reveal 展示** 与完整、连续的 **Aaronnote 普通笔记页**；
-切回编辑后光标与鼠标焦点会落到当前横向 slide 的一级标题。铅笔 Tools 中的 **Source view** 仍能
-进入真正的 Markdown 源码。普通笔记的 `M-/` 仍是 Source 切换。
+两个视图各自保存位置，不做鼠标、光标或选区同步。铅笔 Tools 中的
+**Slides theme** 可即时切换并记住亮色/暗色展示，**Source view** 仍能进入真正的 Markdown 源码。
+演示时左下角胶囊改为整块亮暗主题开关，右侧写作统计隐藏；回到编辑后该胶囊恢复为
+Vim 模式状态与 Tools 入口。普通笔记的 `M-/` 仍是 Source 切换。
+
+普通、非 slides 的 Markdown 笔记在铅笔 Tools 中提供 **Slide view**：它在新页面临时把当前
+Markdown 展示成基础只读演示；没有标题时整篇作为一页。它与 slides note 共用同一套分页、
+Reveal 初始化、重建和销毁管线，仅关闭交互扩展。该页面不加载 Jupyter cell，也不注入
+`.slides` JavaScript/CSS mirror；同一 Tools 中的 **Slides theme** 决定新页面的亮暗主题。页面
+保存后自动刷新，并在关闭时销毁 Reveal 实例。
 
 在某一页标题后写 `@@slides(reveal) []`，该标记在编辑预览中隐藏，并将那一页交给原生 Reveal
 HTML：顶层 `<section data-background-color="…">…</section>` 会被直接接入 Reveal，支持

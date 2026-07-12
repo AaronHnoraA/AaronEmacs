@@ -855,8 +855,23 @@ function updateTitle(): void {
     : revision === savedRevision ? name : `* ${name}`;
 }
 
+function renderModeToggleLabel(mode: VimLiteMode): void {
+  if (slideDeck?.isRevealView()) {
+    const target = slideDeck.getTheme() === "dark" ? "light" : "dark";
+    modeLabel.textContent = target.toUpperCase();
+    modeToggle.title = `Switch slides to ${target} theme`;
+    modeToggle.setAttribute("aria-label", `Switch slides to ${target} theme`);
+    modeToggle.setAttribute("aria-expanded", "false");
+    modeToggle.classList.remove("is-active");
+  } else {
+    modeLabel.textContent = mode.toUpperCase();
+    modeToggle.title = "Toggle tools";
+    modeToggle.setAttribute("aria-label", "Toggle tools");
+  }
+}
+
 function updateModeLabel(mode: VimLiteMode): void {
-  modeLabel.textContent = mode.toUpperCase();
+  renderModeToggleLabel(mode);
   modeLabel.dataset.mode = mode;
   root.dataset.vimMode = mode;
   host.dataset.vimMode = mode;
@@ -903,7 +918,6 @@ const editor = createEditor(host, {
   },
   onSelectionChange: () => {
     scheduleWritingStats(editor.view.state.doc !== writingStatsDoc);
-    slideDeck?.refresh();
   },
   onBlur: () => {
     onBlurVimReset?.();
@@ -3171,6 +3185,7 @@ function applyOpenedNote(
       && (mode === "source") !== editor.isSourceMode()) editor.toggleSource();
   sourceButton.classList.toggle("is-active", editor.isSourceMode());
   slideDeck?.sync(currentKind);
+  renderModeToggleLabel(vim.mode());
   const from = Number(opened.selection?.from ?? remembered?.from);
   const to = Number(opened.selection?.to ?? remembered?.to ?? from);
   let shouldRevealCursor = false;
@@ -3361,6 +3376,7 @@ function toggleSourceMode(): void {
   editor.toggleSource();
   sourceButton.classList.toggle("is-active", editor.isSourceMode());
   slideDeck?.refresh();
+  renderModeToggleLabel(vim.mode());
   editor.focus();
   scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
 }
@@ -3373,6 +3389,12 @@ function togglePresentationOrSource(): void {
   // Cmd-/ always comes back to WYSIWYG, even if Source was used earlier.
   if (slideDeck.isRevealView() && editor.isSourceMode()) editor.toggleSource();
   slideDeck.toggleView();
+  if (slideDeck.isRevealView()) {
+    closeToolsPanel();
+    closeRoamToolsPanel();
+    closeJupyterPanel();
+  }
+  renderModeToggleLabel(vim.mode());
   sourceButton.classList.toggle("is-active", editor.isSourceMode());
 }
 
@@ -3778,6 +3800,7 @@ function applyIndexPayload(payload: { notes?: NoteSummary[]; note?: NoteSummary;
     .sort((a, b) => a.localeCompare(b));
   scheduleAssistUpdate({ toc: true });
   slideDeck?.sync(currentKind);
+  renderModeToggleLabel(vim.mode());
   localGraphPanel.invalidate();
 }
 
@@ -6123,11 +6146,55 @@ async function languageToolSettingsTool(): Promise<void> {
   setStatus("LanguageTool settings saved");
 }
 
+async function openStandaloneSlideView(): Promise<void> {
+  if (!currentFile || currentNoteIsSlides() || !/\.(?:md|markdown)$/i.test(currentFile)) return;
+  const url = new URL("/slides", window.location.origin);
+  url.searchParams.set("file", currentFile);
+  // Appine/xwidget cannot reliably navigate an about:blank WindowProxy after
+  // an async save. Open the final route while the click gesture is active.
+  window.open(url.toString(), "_blank", "noopener,noreferrer");
+  setStatus("Opening Slide view");
+  if (!currentReadOnly && revision !== savedRevision) {
+    await save();
+    if (revision !== savedRevision) {
+      setStatus("Slide view opened with the last saved version");
+      return;
+    }
+  }
+}
+
+function currentNoteIsSlides(): boolean {
+  return slideDeck?.isSlides() === true || String(currentKind || "").trim().toLowerCase() === "slides";
+}
+
 function toolActions(): ToolAction[] {
+  const offerSlideView = Boolean(
+    currentFile
+    && /\.(?:md|markdown)$/i.test(currentFile)
+    && !currentNoteIsSlides(),
+  );
+  const canSetSlideTheme = Boolean(slideDeck && (offerSlideView || currentNoteIsSlides()));
+  const slideTheme = slideDeck?.getTheme() ?? "dark";
   const common: ToolAction[] = [
     { id: "source", title: editor.isSourceMode() ? "Markdown view" : "Source view", detail: "True Markdown source", run: () => toggleSourceMode() },
-    ...(slideDeck?.isSlides() ? [{ id: "slides-mirror", title: "Reveal mirror", detail: "Edit this note's .slides JavaScript mirror", run: () => void slideDeck?.openMirror() }] : []),
-    { id: "source", title: editor.isSourceMode() ? "Markdown view" : "Source view", detail: "True Markdown source", run: () => toggleSourceMode() },
+    ...(offerSlideView ? [{
+      id: "slide-view",
+      title: "Slide view",
+      detail: "Present this ordinary Markdown in a new read-only page",
+      run: () => void openStandaloneSlideView(),
+    }] : []),
+    ...(canSetSlideTheme ? [{
+      id: "slides-theme",
+      title: `Slides theme: ${slideTheme === "dark" ? "Dark" : "Light"}`,
+      detail: `Switch presentation to ${slideTheme === "dark" ? "light" : "dark"}`,
+      run: () => {
+        const theme = slideDeck?.toggleTheme();
+        if (theme) {
+          renderModeToggleLabel(vim.mode());
+          setStatus(`Slides ${theme} theme`);
+        }
+      },
+    }] : []),
     ...(slideDeck?.isSlides() ? [{ id: "slides-mirror", title: "Reveal mirror", detail: "Edit this note's .slides JavaScript mirror", run: () => void slideDeck?.openMirror() }] : []),
     { id: "toc", title: "Toggle TOC", detail: "Page headings, anchors, tags, backlinks", run: () => { floatingTocPanel.toggle(); updateFloatingToc(); } },
     { id: "tag-ref", title: "Tag / copy ref", detail: "Equation tag, inline anchor, reference copy", run: () => void tagOrCopyRef() },
@@ -7862,11 +7929,21 @@ agendaButton.addEventListener("click", () => {
   void openAgendaTool();
 });
 toolsButton.addEventListener("click", toggleToolsPanel);
-modeToggle.addEventListener("click", toggleToolsPanel);
+function activateModeToggle(): void {
+  if (slideDeck?.isRevealView()) {
+    const theme = slideDeck.toggleTheme();
+    renderModeToggleLabel(vim.mode());
+    setStatus(`Slides ${theme} theme`);
+    return;
+  }
+  toggleToolsPanel();
+}
+
+modeToggle.addEventListener("click", activateModeToggle);
 modeToggle.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" && event.key !== " ") return;
   event.preventDefault();
-  toggleToolsPanel();
+  activateModeToggle();
 });
 toolsClose.addEventListener("click", closeToolsPanel);
 roamToolsClose.addEventListener("click", closeRoamToolsPanel);
@@ -7910,6 +7987,13 @@ saveButton.addEventListener("click", () => void save());
 document.addEventListener("keydown", (event) => {
   if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.length !== 1 && event.key !== "Tab") {
     snippetCompletionArmed = false;
+  }
+  // The editor's xwidget arrow-key guard runs in capture phase.  In Reveal it
+  // must yield before that guard so Reveal receives arrows, PageUp/PageDown,
+  // Home/End, Space and Escape.  Cmd-/ remains the way back to editing.
+  if (slideDeck?.isRevealView() && modal.hidden && toolsPanel.hidden && roamToolsPanel.hidden) {
+    if (runSourceToggleShortcut(event)) event.stopPropagation();
+    return;
   }
   if (runFindShortcut(event)) {
     event.stopPropagation();

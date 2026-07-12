@@ -298,6 +298,7 @@ export function cleanEditorHTML(root: HTMLElement): string {
       "data-aaronnote-dom-srcdoc-index",
       "data-aaronnote-protected-srcdoc",
       "data-aaronnote-protected-frame-attrs",
+      "data-aaronnote-cell-command",
       "href",
       "src",
       "srcdoc",

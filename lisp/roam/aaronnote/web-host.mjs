@@ -1442,7 +1442,7 @@ async function serveStatic(urlPath, res, origin) {
     res.end(transformJavaScript(data.toString("utf8")));
     return;
   }
-  if (file.endsWith("index.html") || file.endsWith("agenda.html")) {
+  if (["index.html", "agenda.html", "slides.html"].some((name) => file.endsWith(name))) {
     const html = data.toString("utf8").replace("</head>", `${adapterScript(origin)}\n</head>`);
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
@@ -1601,6 +1601,11 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname === "/agenda") {
       await serveStatic("/agenda.html", res, origin);
+      return;
+    }
+
+    if (url.pathname === "/slides") {
+      await serveStatic("/slides.html", res, origin);
       return;
     }
 

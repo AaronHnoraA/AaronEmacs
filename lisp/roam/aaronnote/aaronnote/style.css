@@ -354,7 +354,136 @@ button:disabled {
   z-index: 55;
   inset: 0;
   overflow: hidden;
-  background: var(--aaronnote-bg);
+  background-color: var(--aaronnote-bg);
+  color: var(--aaron-ink);
+  /* Slides match Aaronnote's monochrome formula rendering in both palettes. */
+  --aaron-math-ink: var(--aaron-ink);
+  --aaron-math-accent: var(--aaron-ink);
+  --aaron-math-muted: var(--aaron-ink);
+}
+
+.aaronnote-reveal-view[data-theme="light"] {
+  color-scheme: light;
+  --aaronnote-bg: #f7f4ed;
+  --aaronnote-chrome: #eee9df;
+  --aaronnote-border: #b8ad9d;
+  --aaronnote-muted: #655f58;
+  --aaronnote-panel-bg: rgb(247 244 237 / 96%);
+  --aaronnote-surface: rgb(238 233 223 / 96%);
+  --aaron-ink: #292622;
+  --aaron-muted: #655f58;
+  --aaron-faint: #8a8176;
+  --aaron-paper: #fffdf8;
+  --aaron-paper-soft: #eee9df;
+  --aaron-paper-line: #c9beb0;
+  --aaron-panel: #f3eee5;
+  --aaron-panel-strong: #e7dfd3;
+  --aaron-red: #a32f46;
+  --aaron-red-dark: #7f2036;
+  --aaron-title: #8f2940;
+  --aaron-link: #176b87;
+  --aaron-link-soft: #dcecf0;
+  --aaron-accent: #176b87;
+  --aaron-accent-sand: #8a6400;
+  --aaron-accent-soft: #dcecf0;
+  --aaron-accent-2: #6d3fb0;
+  --aaron-green: #267044;
+  --aaron-green-soft: #397b50;
+  --aaron-code-bg: #ece7dd;
+  --aaron-danger: #a32f46;
+  --aaron-danger-bg: #f4dfe3;
+  --aaron-heading-1: #8f2940;
+  --aaron-heading-2: #176b87;
+  --aaron-heading-3: #6d3fb0;
+  --aaron-heading-4: #267044;
+  --aaron-heading-5: #8a6400;
+  --aaron-heading-6: #225fa5;
+  --aaron-selection: rgb(23 107 135 / 20%);
+  --aaron-highlight: rgb(168 115 0 / 18%);
+  --aaron-shadow: 0 18px 46px rgb(65 52 38 / 18%);
+  --aaron-callout-note: #225fa5;
+  --aaron-callout-tip: #267044;
+  --aaron-callout-info: #08727c;
+  --aaron-callout-warning: #8a6400;
+  --aaron-callout-danger: #a32f46;
+  --aaron-callout-quote: #6d3fb0;
+  --c-def: #8a6400;
+  --c-thm: #267044;
+  --c-lemma: #225fa5;
+  --c-cor: #6d3fb0;
+  --c-prop: #9b2948;
+  --c-proof: #08727c;
+  --c-example: #8a6400;
+  --c-attend: #a32f46;
+  --c-warning: #9b4f13;
+  --c-note: #08727c;
+  --c-info: #176b87;
+  --c-summary: #6d3fb0;
+  --c-fold: #655f58;
+  --c-comment: #9b4f13;
+  --c-convention: #8f2940;
+  --c-axiom: #8a6400;
+  --c-assumption: #8a6400;
+  --c-conjecture: #9b4f13;
+  --c-claim: #225fa5;
+  --c-remark: #08727c;
+  --c-notation: #176b87;
+  --c-observation: #267044;
+  --c-exercise: #6d3fb0;
+  --c-solution: #08727c;
+  --c-algorithm: #08727c;
+  --c-question: #8f2940;
+  --c-env-default: #655f58;
+}
+
+/* Reveal adds its viewport class after dynamically loading reveal.css.  Keep
+   that runtime layer on Aaronnote's palette as well as the surrounding deck. */
+.aaronnote-reveal-view.reveal-viewport,
+.aaronnote-reveal-view .reveal,
+.aaronnote-reveal-view .reveal > .backgrounds {
+  background-color: var(--aaronnote-bg);
+  color: var(--aaron-ink);
+}
+
+/* Native @@slides(reveal) pages can carry fixed data-background colors and
+   gradients.  The presentation theme owns those palette layers too; media
+   backgrounds remain intact because Reveal renders them in the nested
+   .slide-background-content element. */
+.aaronnote-reveal-view .reveal .slide-background {
+  background-color: var(--aaronnote-bg) !important;
+  background-image: none !important;
+}
+
+.aaronnote-reveal-view[data-theme="light"] .reveal .controls,
+.aaronnote-reveal-view[data-theme="light"] .reveal .slide-number {
+  color: var(--aaron-accent) !important;
+}
+
+/* Keep only the theme control in presentation mode. */
+#app.aaronnote-slides-reveal .aaronnote-status-hud {
+  z-index: 60;
+  inset: auto auto 14px 14px;
+  width: max-content;
+}
+
+#app.aaronnote-slides-reveal .aaronnote-status-pill-right {
+  display: none;
+}
+
+/* In presentation this pill has one job only: switch the slide palette. */
+#app.aaronnote-slides-reveal .aaronnote-status-pill-left [data-readonly] {
+  display: none;
+}
+
+#app.aaronnote-slides-reveal[data-slides-theme="light"] .aaronnote-status-pill-left {
+  border-color: #b8ad9d;
+  background: rgb(238 233 223 / 94%);
+  color: #176b87;
+  box-shadow: 0 5px 18px rgb(65 52 38 / 16%);
+}
+
+#app.aaronnote-slides-reveal[data-slides-theme="light"] .aaronnote-status-pill-left [data-vim-mode] {
+  color: #176b87;
 }
 
 .aaronnote-reveal-view:focus-visible {
@@ -362,106 +491,30 @@ button:disabled {
   outline-offset: -4px;
 }
 
+.aaronnote-slide-view-error {
+  display: grid;
+  min-height: 100vh;
+  place-content: center;
+  gap: 10px;
+  padding: 32px;
+  background: var(--aaronnote-bg);
+  color: var(--aaron-ink);
+  text-align: center;
+}
+
+.aaronnote-slide-view-error h1,
+.aaronnote-slide-view-error p {
+  margin: 0;
+}
+
 .aaronnote-reveal-view .reveal {
   position: absolute;
-  inset: 58px 0 0 164px;
+  inset: 0;
   width: auto;
   height: auto;
   color: var(--aaron-ink);
   font-family: var(--aaron-font-body);
   font-size: 27px;
-}
-
-.aaronnote-deck-chrome {
-  position: absolute;
-  z-index: 4;
-  inset: 0;
-  pointer-events: none;
-  font-family: var(--aaron-font-sans);
-}
-
-.aaronnote-deck-chrome > header {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 164px;
-  height: 58px;
-  box-sizing: border-box;
-  border-bottom: 1px solid color-mix(in srgb, var(--aaron-title), transparent 38%);
-  padding: 10px 30px;
-  background: color-mix(in srgb, var(--aaron-title), var(--aaronnote-bg) 86%);
-  color: var(--aaron-title);
-  font: 700 24px/38px var(--aaron-font-heading);
-  text-align: right;
-}
-
-.aaronnote-deck-chrome > aside {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 164px;
-  box-sizing: border-box;
-  border-right: 1px solid color-mix(in srgb, var(--aaron-title), transparent 45%);
-  padding: 18px 10px;
-  background: color-mix(in srgb, var(--aaron-title), var(--aaronnote-bg) 78%);
-  color: var(--aaron-ink);
-  pointer-events: auto;
-}
-
-.aaronnote-deck-brand {
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  margin: 0 4px 22px;
-}
-
-.aaronnote-deck-brand > strong {
-  overflow: hidden;
-  color: var(--aaron-title);
-  font: 700 14px/1.15 var(--aaron-font-heading);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.aaronnote-deck-brand > img {
-  display: block;
-  width: 48px;
-  height: 48px;
-  object-fit: contain;
-  background: #fff;
-}
-
-.aaronnote-deck-chrome nav {
-  display: block;
-  max-height: calc(100vh - 92px);
-  overflow: auto;
-  scrollbar-width: none;
-}
-
-.aaronnote-deck-chrome nav::-webkit-scrollbar {
-  display: none;
-}
-
-.aaronnote-deck-chrome nav button {
-  display: block;
-  width: 100%;
-  overflow: hidden;
-  border: 0;
-  border-radius: 4px;
-  padding: 6px 8px;
-  background: transparent;
-  color: color-mix(in srgb, var(--aaron-ink), transparent 35%);
-  font: 600 12px/1.2 var(--aaron-font-sans);
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.aaronnote-deck-chrome nav button.is-vertical {
-  width: calc(100% - 12px);
-  margin-left: 12px;
-  font-size: 11px;
-  opacity: .82;
 }
 
 .aaronnote-reveal-view .reveal h1,
@@ -478,10 +531,10 @@ button:disabled {
 .aaronnote-reveal-view .reveal .slides section {
   box-sizing: border-box;
   width: 100%;
-  max-height: 660px;
+  max-height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: 36px 48px;
   color: var(--aaron-ink);
   line-height: 1.3;
   scrollbar-width: none;
@@ -498,7 +551,7 @@ button:disabled {
 }
 
 .aaronnote-reveal-view .reveal .slides section.aaronnote-vertical-slide {
-  padding-top: 16px;
+  padding-top: 36px;
 }
 
 .aaronnote-reveal-view .reveal .slides section::-webkit-scrollbar {
@@ -515,21 +568,126 @@ button:disabled {
   font-family: var(--aaron-font-body);
   font-size: 20px;
   line-height: 1.24;
-  text-align: inherit;
+  text-align: left;
 }
 
-.aaronnote-reveal-view .aaronnote-rendered-slide > *,
-.aaronnote-reveal-view .aaronnote-rendered-slide .cm-org-env-block,
-.aaronnote-reveal-view .aaronnote-rendered-slide .org-env-block,
-.aaronnote-reveal-view .aaronnote-rendered-slide table {
+.aaronnote-reveal-view .aaronnote-rendered-slide > * {
   box-sizing: border-box;
-  max-width: none;
+  max-width: 100%;
 }
 
 .aaronnote-reveal-view .aaronnote-rendered-slide .cm-org-env-block,
 .aaronnote-reveal-view .aaronnote-rendered-slide .org-env-block,
 .aaronnote-reveal-view .aaronnote-rendered-slide table {
+  max-width: 100%;
+}
+
+.aaronnote-reveal-view .aaronnote-rendered-slide p,
+.aaronnote-reveal-view .aaronnote-rendered-slide li,
+.aaronnote-reveal-view .aaronnote-rendered-slide blockquote,
+.aaronnote-reveal-view .aaronnote-rendered-slide table,
+.aaronnote-reveal-view .aaronnote-rendered-slide org-env-block,
+.aaronnote-reveal-view .aaronnote-rendered-slide details {
+  text-align: left;
+}
+
+.aaronnote-reveal-view .aaronnote-rendered-slide pre,
+.aaronnote-reveal-view .aaronnote-raw-reveal-slide pre {
+  box-sizing: border-box;
   width: 100%;
+  max-width: 100%;
+  overflow: auto;
+  margin: 0.7em 0;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line), transparent 18%);
+  border-radius: 5px;
+  padding: 0.72em 0.85em;
+  background: var(--aaron-code-bg);
+  color: var(--aaron-ink);
+  font: 0.82em/1.48 var(--aaron-font-mono);
+  text-align: left;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.aaronnote-reveal-view .aaronnote-rendered-slide pre code,
+.aaronnote-reveal-view .aaronnote-raw-reveal-slide pre code {
+  display: block;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.aaronnote-reveal-view .aaronnote-rendered-slide table {
+  width: max-content;
+  min-width: min(100%, 30rem);
+  overflow-x: auto;
+  margin-inline: 0;
+}
+
+.aaronnote-reveal-view .aaronnote-rendered-slide th,
+.aaronnote-reveal-view .aaronnote-rendered-slide td {
+  text-align: left;
+}
+
+.aaronnote-reveal-view .aaronnote-rendered-slide math-block,
+.aaronnote-reveal-view .aaronnote-rendered-slide .katex-display,
+.aaronnote-reveal-view .aaronnote-rendered-slide .aaronnote-diagram,
+.aaronnote-reveal-view .aaronnote-rendered-slide .aaronnote-tikz {
+  max-width: 100%;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.aaronnote-reveal-view .aaronnote-slide-jupyter-cell {
+  margin: 0.65em 0;
+  text-align: left;
+}
+
+.aaronnote-reveal-view .aaronnote-slide-jupyter-cell .cm-ceil-source,
+.aaronnote-reveal-view .aaronnote-slide-jupyter-cell .cm-ceil-output {
+  text-align: left;
+}
+
+.aaronnote-reveal-view .code-token-comment { color: #71809d; font-style: italic; }
+.aaronnote-reveal-view .code-token-string { color: #8ed69b; }
+.aaronnote-reveal-view .code-token-keyword { color: #c4a0ef; font-weight: 650; }
+.aaronnote-reveal-view .code-token-number { color: #e8ad7f; }
+.aaronnote-reveal-view .code-token-function { color: #8fb8ed; }
+.aaronnote-reveal-view .code-token-attr,
+.aaronnote-reveal-view .code-token-property { color: #73c8d1; }
+.aaronnote-reveal-view .code-token-tag { color: #e69aaf; }
+.aaronnote-reveal-view .code-token-operator,
+.aaronnote-reveal-view .code-token-punctuation,
+.aaronnote-reveal-view .code-token-variable { color: var(--aaron-ink); }
+
+.aaronnote-reveal-view[data-theme="light"] .code-token-comment { color: #6d7480; }
+.aaronnote-reveal-view[data-theme="light"] .code-token-string { color: #25733b; }
+.aaronnote-reveal-view[data-theme="light"] .code-token-keyword { color: #6d3fb0; }
+.aaronnote-reveal-view[data-theme="light"] .code-token-number { color: #9b4f13; }
+.aaronnote-reveal-view[data-theme="light"] .code-token-function { color: #225fa5; }
+.aaronnote-reveal-view[data-theme="light"] .code-token-attr,
+.aaronnote-reveal-view[data-theme="light"] .code-token-property { color: #08727c; }
+.aaronnote-reveal-view[data-theme="light"] .code-token-tag { color: #9b2948; }
+
+.aaronnote-reveal-view[data-theme="light"] .aaronnote-slide-jupyter-cell .cm-ceil-output {
+  --jp-content-font-color0: #24211d;
+  --jp-content-font-color1: #302c27;
+  --jp-content-font-color2: #625b53;
+  --jp-content-font-color3: #857b70;
+  --jp-content-link-color: #176b87;
+  --jp-ui-font-color0: #24211d;
+  --jp-ui-font-color1: #302c27;
+  --jp-ui-font-color2: #625b53;
+  --jp-ui-font-color3: #857b70;
+  --jp-layout-color0: transparent;
+  --jp-layout-color1: #fffdf8;
+  --jp-layout-color2: #eee9df;
+  --jp-layout-color3: #e7dfd3;
+  --jp-border-color0: #b8ad9d;
+  --jp-border-color1: #c9beb0;
+  --jp-cell-editor-background: #ece7dd;
 }
 
 .aaronnote-reveal-view .aaronnote-rendered-slide h1 { font-size: 1.75em; }
@@ -547,10 +705,6 @@ button:disabled {
 }
 
 .aaronnote-reveal-view .reveal .controls {
-  color: var(--aaron-accent);
-}
-
-.aaronnote-reveal-view .reveal .progress {
   color: var(--aaron-accent);
 }
 

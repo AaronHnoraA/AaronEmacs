@@ -586,6 +586,15 @@ type CeilCommandMeta = CeilMeta & {
 
 type CeilCommandDefaults = Pick<CeilMeta, "language" | "kernel" | "session">;
 
+export type JupyterCellDescriptor = {
+  from: number;
+  to: number;
+  cellId: string;
+  kernel: string;
+  session: string;
+  language: string;
+};
+
 const CEIL_COMMAND_LINE_RE = /^([ \t]*)@@cell(?:[ \t]*\(([^)\n]*)\))?(?:[ \t]+\[([^\]\n]*)\])?[ \t]*$/i;
 
 function parseCeilCommandLine(text: string, lineFrom: number): CeilCommandRange | null {
@@ -724,6 +733,22 @@ function parseCeilCommandForState(state: EditorState, range: CeilCommandRange, f
     if (uniqueId !== meta.id) return { ...meta, id: uniqueId, changed: true };
   }
   return meta;
+}
+
+/** Read-only consumers (such as slides) use the exact same inherited @@cell
+ * context and generated identity as the editable CM6 widget. */
+export function jupyterCellsFromState(state: EditorState, file: string): JupyterCellDescriptor[] {
+  return ceilCommandRangesFromState(state).map((range) => {
+    const meta = parseCeilCommandForState(state, range, file);
+    return {
+      from: range.from,
+      to: range.to,
+      cellId: meta.id,
+      kernel: meta.kernel,
+      session: meta.session,
+      language: meta.language,
+    };
+  });
 }
 
 function ceilCommandEntriesForContext(state: EditorState, target: CeilMeta, file: string): CeilCellContextEntry[] {

@@ -32,6 +32,7 @@ export default defineConfig(({ command }) => ({
       input: {
         index: resolve("aaronnote/index.html"),
         agenda: resolve("aaronnote/agenda.html"),
+        slides: resolve("aaronnote/slides.html"),
       },
       checks: {
         eval: false,

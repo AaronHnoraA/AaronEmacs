@@ -35,6 +35,8 @@ export type RenderMarkdownHTMLOptions = {
   assetResolver?: (src: string) => string;
   /** Allow authored HTML, then pass it through the normal Aaronnote sanitizer. */
   allowHtml?: boolean;
+  /** Render @@cell command lines as read-only hydration targets instead of hiding them. */
+  renderJupyterCells?: boolean;
 };
 
 export type RenderPublishedNoteOptions = {
@@ -69,6 +71,11 @@ type CiteTokenMeta = {
   namespace: string;
   keys: string[];
   args: Record<string, string>;
+};
+
+type PrivateCommandTokenMeta = {
+  kind: "cell";
+  raw: string;
 };
 
 const ORG_ENV_OPEN_RE = /^\s*#\+\s*begin\s+(\S+)(?:[ \t]+([^\n]*?))?[ \t]*$/i;
@@ -366,6 +373,7 @@ function privateCommandLineRule(state: StateBlock, startLine: number, _endLine: 
     token.block = true;
     token.hidden = true;
     token.map = [startLine, startLine + 1];
+    token.meta = { kind: "cell", raw: raw.trim() } satisfies PrivateCommandTokenMeta;
     state.line = startLine + 1;
     return true;
   }
@@ -948,7 +956,16 @@ function createMarkdownIt(options: RenderMarkdownHTMLOptions): MarkdownIt {
   md.renderer.rules.comment_inline = renderCommentInline;
   md.renderer.rules.side_comment_inline = renderSideCommentInline;
   md.renderer.rules.private_inline = () => "";
-  md.renderer.rules.private_command_line = () => "";
+  md.renderer.rules.private_command_line = (tokens, idx) => {
+    const token = tokens[idx]!;
+    const meta = token.meta as PrivateCommandTokenMeta | undefined;
+    if (!options.renderJupyterCells || meta?.kind !== "cell") return "";
+    return [
+      `<div class="aaronnote-slide-jupyter-cell cm-ceil-cell-widget" data-aaronnote-cell-command="${escapeAttr(meta.raw)}">`,
+      '<div class="cm-ceil-output-empty">Loading Jupyter cell…</div>',
+      "</div>",
+    ].join("");
+  };
   md.renderer.rules.org_env_block = (tokens, idx) => renderOrgEnv(md, tokens, idx);
   md.renderer.rules.semantic_heading_block = renderSemanticHeading;
   md.renderer.rules.front_matter = (tokens, idx, _opts, _env, _renderer) =>
