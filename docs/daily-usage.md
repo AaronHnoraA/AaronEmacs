@@ -169,6 +169,31 @@ Aaronnote runtime，所以默认值、路径校验、meta、模板变量和 tabs
 Markdown 模板统一存放在 `templates/aaronnote/markdown-mode/`，供 Emacs 启动的 Aaronnote 与
 Roam New 共用。
 
+### Aaronnote Slides
+
+在 meta 中设置 `kind: slides` 后，Aaronnote 默认进入 **Reveal** 展示视图。每个一级标题
+（`# Title`）开始一张新 slide；二级标题及以下、公式、图片、org-env 和手写 HTML 都留在当前页，
+代码围栏里的 `#` 不会分页。meta 与第一个一级标题前的内容不显示为 slide。Reveal 负责 16:9
+画布、缩放、动画、fragment、进度和翻页；Aaronnote 负责把每一页 Markdown 先渲染成 HTML，因此
+两边不会有第二套 Markdown 解释器。
+
+一级标题 `#` 默认向右分页；其下的二级标题 `##` 自动成为纵向页。← / → 在一级标题之间移动，
+↑ / ↓ 在同一一级标题的 stack 内移动。右上标题栏显示所属一级标题，纵向页的二级标题显示在
+内容区顶部。旧的 `@@slides(vertical) []` 标记仍兼容，但新笔记不再需要它。
+若二级标题带现有的 `<!-- omit in toc -->` 标记，它不会建立纵向页，而会作为当前 slide 的普通
+二级标题继续由 Aaronnote renderer 渲染。
+
+`M-/` / `Cmd-/` 在 slides note 中切换 **Reveal 展示** 与完整、连续的 **Aaronnote 普通笔记页**；
+切回编辑后光标与鼠标焦点会落到当前横向 slide 的一级标题。铅笔 Tools 中的 **Source view** 仍能
+进入真正的 Markdown 源码。普通笔记的 `M-/` 仍是 Source 切换。
+
+在某一页标题后写 `@@slides(reveal) []`，该标记在编辑预览中隐藏，并将那一页交给原生 Reveal
+HTML：顶层 `<section data-background-color="…">…</section>` 会被直接接入 Reveal，支持
+`data-auto-animate`、`fragment` 等 Reveal 指令。第一次打开 slides note 时会创建相邻的
+`.slides/<note>.js` 与 `.slides/<note>.css` mirror；铅笔 Tools 中的 **Reveal mirror** 会在 Emacs
+打开 JS mirror。它在 Reveal 初始化后以 ES module 运行，默认导出函数接收 `{ Reveal, root, file }`。
+可从 Roam New 的 Slides 模板创建，或参考 `templates/aaronnote/slides/markdown-mode/demo`。
+
 ### Aaronnote LaTeX 导出
 
 在 Aaronnote 的 Tools 中选择 `Export LaTeX`，或在页面内按 `⌘P`。导出先打开专用范围

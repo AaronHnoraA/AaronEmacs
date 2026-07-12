@@ -954,6 +954,13 @@ function buildInlineCommandDecos(
           Decoration.replace({ widget: new LatexMarkWidget(cmd.switchValue.toLowerCase(), from, to) }).range(from, to),
         );
       }
+      // `@@slides(reveal) []` is a structural marker for the Reveal deck.  It
+      // deliberately disappears in Aaronnote's editable preview but remains
+      // available whenever the cursor enters it, just like the other source
+      // backed widgets.
+      if (cmd.name === "slides" && ["reveal", "vertical"].includes(cmd.switchValue.toLowerCase()) && !cursorInside) {
+        decos.push(Decoration.replace({}).range(from, to));
+      }
       if (cmd.name === "comment" && !cursorInside) {
         decos.push(
           Decoration.replace({

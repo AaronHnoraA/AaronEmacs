@@ -344,6 +344,216 @@ button:disabled {
     clamp(78px, 6vw, 118px);
 }
 
+/* Metadata belongs to the file, not to a slide.  Source mode still exposes it. */
+#app.aaronnote-slides .aaronnote-focused-editor .cm-org-env-block[data-kind="meta"] {
+  display: none !important;
+}
+
+.aaronnote-reveal-view {
+  position: fixed;
+  z-index: 55;
+  inset: 0;
+  overflow: hidden;
+  background: var(--aaronnote-bg);
+}
+
+.aaronnote-reveal-view:focus-visible {
+  outline: 2px solid var(--aaron-accent);
+  outline-offset: -4px;
+}
+
+.aaronnote-reveal-view .reveal {
+  position: absolute;
+  inset: 58px 0 0 164px;
+  width: auto;
+  height: auto;
+  color: var(--aaron-ink);
+  font-family: var(--aaron-font-body);
+  font-size: 27px;
+}
+
+.aaronnote-deck-chrome {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  pointer-events: none;
+  font-family: var(--aaron-font-sans);
+}
+
+.aaronnote-deck-chrome > header {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 164px;
+  height: 58px;
+  box-sizing: border-box;
+  border-bottom: 1px solid color-mix(in srgb, var(--aaron-title), transparent 38%);
+  padding: 10px 30px;
+  background: color-mix(in srgb, var(--aaron-title), var(--aaronnote-bg) 86%);
+  color: var(--aaron-title);
+  font: 700 24px/38px var(--aaron-font-heading);
+  text-align: right;
+}
+
+.aaronnote-deck-chrome > aside {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 164px;
+  box-sizing: border-box;
+  border-right: 1px solid color-mix(in srgb, var(--aaron-title), transparent 45%);
+  padding: 18px 10px;
+  background: color-mix(in srgb, var(--aaron-title), var(--aaronnote-bg) 78%);
+  color: var(--aaron-ink);
+  pointer-events: auto;
+}
+
+.aaronnote-deck-brand {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin: 0 4px 22px;
+}
+
+.aaronnote-deck-brand > strong {
+  overflow: hidden;
+  color: var(--aaron-title);
+  font: 700 14px/1.15 var(--aaron-font-heading);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aaronnote-deck-brand > img {
+  display: block;
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  background: #fff;
+}
+
+.aaronnote-deck-chrome nav {
+  display: block;
+  max-height: calc(100vh - 92px);
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.aaronnote-deck-chrome nav::-webkit-scrollbar {
+  display: none;
+}
+
+.aaronnote-deck-chrome nav button {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  border: 0;
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: transparent;
+  color: color-mix(in srgb, var(--aaron-ink), transparent 35%);
+  font: 600 12px/1.2 var(--aaron-font-sans);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aaronnote-deck-chrome nav button.is-vertical {
+  width: calc(100% - 12px);
+  margin-left: 12px;
+  font-size: 11px;
+  opacity: .82;
+}
+
+.aaronnote-reveal-view .reveal h1,
+.aaronnote-reveal-view .reveal h2,
+.aaronnote-reveal-view .reveal h3,
+.aaronnote-reveal-view .reveal h4,
+.aaronnote-reveal-view .reveal h5,
+.aaronnote-reveal-view .reveal h6 {
+  color: var(--aaron-title);
+  font-family: var(--aaron-font-heading);
+  text-transform: none;
+}
+
+.aaronnote-reveal-view .reveal .slides section {
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 660px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 16px 20px;
+  color: var(--aaron-ink);
+  line-height: 1.3;
+  scrollbar-width: none;
+}
+
+.aaronnote-reveal-view .reveal .slides > section {
+  height: 100%;
+  max-height: 100%;
+}
+
+.aaronnote-reveal-view .reveal .slides > section.stack {
+  overflow: visible;
+  padding: 0;
+}
+
+.aaronnote-reveal-view .reveal .slides section.aaronnote-vertical-slide {
+  padding-top: 16px;
+}
+
+.aaronnote-reveal-view .reveal .slides section::-webkit-scrollbar {
+  display: none;
+}
+
+.aaronnote-reveal-view .aaronnote-rendered-slide {
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  font-family: var(--aaron-font-body);
+  font-size: 20px;
+  line-height: 1.24;
+  text-align: inherit;
+}
+
+.aaronnote-reveal-view .aaronnote-rendered-slide > *,
+.aaronnote-reveal-view .aaronnote-rendered-slide .cm-org-env-block,
+.aaronnote-reveal-view .aaronnote-rendered-slide .org-env-block,
+.aaronnote-reveal-view .aaronnote-rendered-slide table {
+  box-sizing: border-box;
+  max-width: none;
+}
+
+.aaronnote-reveal-view .aaronnote-rendered-slide .cm-org-env-block,
+.aaronnote-reveal-view .aaronnote-rendered-slide .org-env-block,
+.aaronnote-reveal-view .aaronnote-rendered-slide table {
+  width: 100%;
+}
+
+.aaronnote-reveal-view .aaronnote-rendered-slide h1 { font-size: 1.75em; }
+.aaronnote-reveal-view .aaronnote-rendered-slide h2 { font-size: 1.35em; }
+.aaronnote-reveal-view .aaronnote-rendered-slide h3 { font-size: 1.12em; }
+
+.aaronnote-reveal-view .reveal h1 { font-size: 2em; }
+.aaronnote-reveal-view .reveal h2 { font-size: 1.5em; }
+.aaronnote-reveal-view .reveal h3 { font-size: 1.2em; }
+.aaronnote-reveal-view .reveal .katex { font-size: 1.05em; }
+
+.aaronnote-reveal-view .reveal .slides p,
+.aaronnote-reveal-view .reveal .slides li {
+  font-family: var(--aaron-font-body);
+}
+
+.aaronnote-reveal-view .reveal .controls {
+  color: var(--aaron-accent);
+}
+
+.aaronnote-reveal-view .reveal .progress {
+  color: var(--aaron-accent);
+}
+
 .aaronnote-focused-editor .cm-line {
   font-family: var(--aaron-font-body);
 }

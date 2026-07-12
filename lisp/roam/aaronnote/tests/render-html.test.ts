@@ -3,6 +3,13 @@ import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
 import { formatCitationLabel, noteCssHrefFromMarkdown, renderMarkdownHTML, renderPublishedNoteHTML } from "../src/render-html.ts";
 
 describe("shared markdown HTML renderer", () => {
+  test("optionally renders authored HTML and sanitizes unsafe attributes", () => {
+    const html = renderMarkdownHTML('<div class="grid" onclick="evil()"><strong>Rendered</strong><script>evil()</script></div>', { allowHtml: true });
+    expect(html).toContain('<div class="grid"><strong>Rendered</strong></div>');
+    expect(html).not.toContain("onclick");
+    expect(html).not.toContain("script");
+  });
+
   test("renders math and org env blocks with editor DOM", () => {
     const html = renderMarkdownHTML(String.raw`#+begin theorem Spectral
 Inline \(x+1\).

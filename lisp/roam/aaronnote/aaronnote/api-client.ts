@@ -441,6 +441,9 @@ type NativeApi = {
   noteCode?: {
     readRegion?: (body?: unknown) => Promise<unknown>;
   };
+  slides?: {
+    mirror?: (body?: unknown) => Promise<unknown>;
+  };
   jupyterCell?: {
     kernels?: () => Promise<unknown>;
     execute?: (body?: unknown) => Promise<unknown>;
@@ -832,6 +835,12 @@ export const api = {
     async activateRoam(body: Record<string, unknown>): Promise<OpenMsg> {
       const call = requireMethod(nativeApi().meta?.activateRoam, "Roam activate");
       return ensureOk(await call(body) as OpenMsg, "Roam activate failed");
+    },
+  },
+  slides: {
+    async mirror(body: { file: string }): Promise<{ ok: boolean; jsFile: string; cssFile: string; js: string; css: string }> {
+      const call = requireMethod(nativeApi().slides?.mirror, "Slides mirror");
+      return ensureOk(await call(body) as { ok: boolean; jsFile: string; cssFile: string; js: string; css: string }, "Slides mirror failed");
     },
   },
   emacs: {

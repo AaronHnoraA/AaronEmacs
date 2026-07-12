@@ -19,6 +19,7 @@ import { homedir } from "node:os";
 import {
   bootstrapNote,
   readNote,
+  slidesMirror,
   notesIndexPayload,
   roamNotesIndexPayload,
   graphPayload,
@@ -771,6 +772,7 @@ const apiHandlers = {
   },
   "aaronnote:api:runtime:debug": async () => ({ type: "runtime-debug", ...runtimeDebugSnapshot() }),
   "aaronnote:api:note-code:read-region": (body) => readNoteCodeRegion(body || {}),
+  "aaronnote:api:slides:mirror": (body) => slidesMirror(body || {}),
   "aaronnote:api:jupyter-cell:kernels": () => jupyterCell.kernels(),
   "aaronnote:api:jupyter-cell:execute": (body) => jupyterCell.execute(body || {}),
   "aaronnote:api:jupyter-cell:open-script": (body) => jupyterCell.openScript(body || {}),
@@ -1118,6 +1120,9 @@ function adapterScript(origin) {
     },
     noteCode: {
       readRegion: function(body) { return call("aaronnote:api:note-code:read-region", [body || {}]); }
+    },
+    slides: {
+      mirror: function(body) { return call("aaronnote:api:slides:mirror", [body || {}]); }
     },
     jupyterCell: {
       kernels: function() { return call("aaronnote:api:jupyter-cell:kernels", []); },

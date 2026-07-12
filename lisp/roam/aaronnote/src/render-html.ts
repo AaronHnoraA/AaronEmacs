@@ -33,6 +33,8 @@ declare global {
 
 export type RenderMarkdownHTMLOptions = {
   assetResolver?: (src: string) => string;
+  /** Allow authored HTML, then pass it through the normal Aaronnote sanitizer. */
+  allowHtml?: boolean;
 };
 
 export type RenderPublishedNoteOptions = {
@@ -917,7 +919,7 @@ function aaronnoteCalloutsRule(state: StateCore): void {
 
 function createMarkdownIt(options: RenderMarkdownHTMLOptions): MarkdownIt {
   const md = new MarkdownIt({
-    html: false,
+    html: options.allowHtml === true,
     linkify: true,
     typographer: false,
   }).use(emoji);

@@ -6855,6 +6855,50 @@ export async function readNote(file, options = {}) {
   return payload;
 }
 
+function slidesMirrorPaths(file) {
+  const safe = safeOpenFile(file);
+  const stem = basename(safe, extname(safe)) || "slides";
+  const dir = join(dirname(safe), ".slides");
+  return {
+    file: safe,
+    dir,
+    jsFile: join(dir, `${stem}.js`),
+    cssFile: join(dir, `${stem}.css`),
+  };
+}
+
+const defaultSlidesMirrorJs = `// Aaronnote Reveal mirror for this note.
+// The default export runs after Reveal has initialized and receives the live
+// Reveal API, its root element, and the Markdown note path.
+export default function ({ Reveal, root, file }) {
+  void Reveal;
+  void root;
+  void file;
+}
+`;
+
+const defaultSlidesMirrorCss = `/* Aaronnote Reveal mirror for this note. */
+`;
+
+/**
+ * Read (and on first use create) a note-local Reveal JS/CSS mirror.  The
+ * browser executes the JS as a module only for the local note that requested
+ * it; it is never fed back through the Markdown HTML sanitizer.
+ */
+export async function slidesMirror(body = {}) {
+  const paths = slidesMirrorPaths(body.file);
+  if (!existsSync(paths.jsFile)) await atomicWriteFile(paths.jsFile, defaultSlidesMirrorJs, "utf8");
+  if (!existsSync(paths.cssFile)) await atomicWriteFile(paths.cssFile, defaultSlidesMirrorCss, "utf8");
+  return {
+    ok: true,
+    file: paths.file,
+    jsFile: paths.jsFile,
+    cssFile: paths.cssFile,
+    js: await readFile(paths.jsFile, "utf8"),
+    css: await readFile(paths.cssFile, "utf8"),
+  };
+}
+
 async function noteSummaryForFile(file, content = null) {
   const safe = safeOpenFile(file);
   const info = await stat(safe);

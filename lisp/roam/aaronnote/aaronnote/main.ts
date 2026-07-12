@@ -46,6 +46,7 @@ import {
   type ProseCheckState,
 } from "./prose-check-lifecycle.ts";
 import { createFloatingTocPanel, inlineTagAnchorsFromText, markdownHeadingsFromText } from "./floating-toc.ts";
+import { createSlideDeckController, type SlideDeckController } from "./slide-deck.ts";
 import { normalizeDateValue } from "../src/planning-values.ts";
 import { patchPlanningNodeRaw, scanPlanningNodes } from "../shared/planning-dsl.mjs";
 import { latexMarkNames, latexMarkSnippetDefinitions } from "../shared/latex-marks.mjs";
@@ -875,6 +876,7 @@ function subscribe<K extends keyof DocumentEventMap>(
 
 // Forward ref patched after vim is created (avoids TDZ while keeping reset near vim).
 let onBlurVimReset: (() => void) | undefined;
+let slideDeck: SlideDeckController | null = null;
 
 const editor = createEditor(host, {
   initialContent: "",
@@ -897,14 +899,19 @@ const editor = createEditor(host, {
       proseLifecycle.invalidate("document-edited");
       scheduleAutomaticProseCheck();
     }
+    slideDeck?.refresh();
   },
-  onSelectionChange: () => scheduleWritingStats(editor.view.state.doc !== writingStatsDoc),
+  onSelectionChange: () => {
+    scheduleWritingStats(editor.view.state.doc !== writingStatsDoc);
+    slideDeck?.refresh();
+  },
   onBlur: () => {
     onBlurVimReset?.();
     void flushCursorPosition();
   },
 });
 host.appendChild(bibliographyPanel);
+slideDeck = createSlideDeckController({ root, host, editor, getCurrentFile: () => currentFile });
 
 let bibliographyModel: BibliographyDocument = { ok: true, entries: [], references: [], citations: [], namespaces: [] };
 let bibliographyModelKey = "";
@@ -2886,7 +2893,9 @@ function showContextMenu(event: MouseEvent, target: Partial<AaronContextMenuTarg
       { label: "Paste", detail: "Cmd-V", disabled: currentReadOnly, run: () => pasteIntoEditorFromContextMenu() },
       { label: "Find in Note", detail: "Cmd-F", run: () => openFindPanel() },
       { label: "Save", detail: currentReadOnly ? "read-only" : "Cmd-S", disabled: currentReadOnly || !currentFile, run: () => save() },
-      { label: editor.isSourceMode() ? "Markdown View" : "Source View", detail: "Cmd-/", run: () => toggleSourceMode() },
+      { label: slideDeck?.isSlides()
+        ? (slideDeck.isRevealView() ? "Edit slides" : "Present slides")
+        : (editor.isSourceMode() ? "Markdown View" : "Source View"), detail: "Cmd-/", run: () => togglePresentationOrSource() },
       { label: "Copy Note Path", detail: currentFile ? fileNameFromPath(currentFile) : "", disabled: !currentFile, run: () => copyCurrentNotePath() },
     );
   }
@@ -3093,7 +3102,7 @@ function restoreCursorPosition(location: CursorPosition): void {
   const length = editor.getMarkdownLength();
   const from = Math.min(Math.max(0, location.from), length);
   const to = Math.min(Math.max(0, location.to), length);
-  if ((location.mode === "source") !== editor.isSourceMode()) editor.toggleSource();
+  if (!slideDeck?.isSlides() && (location.mode === "source") !== editor.isSourceMode()) editor.toggleSource();
   sourceButton.classList.toggle("is-active", editor.isSourceMode());
   editor.setMarkdownSelection(from, to);
   editor.revealCursor();
@@ -3158,8 +3167,10 @@ function applyOpenedNote(
   revision = 0;
   savedRevision = 0;
   const mode = remembered?.mode || opened.mode;
-  if ((mode === "source") !== editor.isSourceMode()) editor.toggleSource();
+  if (String(currentKind || "").trim().toLowerCase() !== "slides"
+      && (mode === "source") !== editor.isSourceMode()) editor.toggleSource();
   sourceButton.classList.toggle("is-active", editor.isSourceMode());
+  slideDeck?.sync(currentKind);
   const from = Number(opened.selection?.from ?? remembered?.from);
   const to = Number(opened.selection?.to ?? remembered?.to ?? from);
   let shouldRevealCursor = false;
@@ -3344,10 +3355,25 @@ setupCopilot({
 });
 
 function toggleSourceMode(): void {
+  // Source is an explicit pencil-tool action.  When invoked from Reveal, first
+  // return to the ordinary note so the raw source is immediately visible.
+  if (slideDeck?.isRevealView()) slideDeck.toggleView();
   editor.toggleSource();
   sourceButton.classList.toggle("is-active", editor.isSourceMode());
+  slideDeck?.refresh();
   editor.focus();
   scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
+}
+
+function togglePresentationOrSource(): void {
+  if (!slideDeck?.isSlides()) {
+    toggleSourceMode();
+    return;
+  }
+  // Cmd-/ always comes back to WYSIWYG, even if Source was used earlier.
+  if (slideDeck.isRevealView() && editor.isSourceMode()) editor.toggleSource();
+  slideDeck.toggleView();
+  sourceButton.classList.toggle("is-active", editor.isSourceMode());
 }
 
 function isEditorCommand(command: string): command is EditorCommand {
@@ -3709,7 +3735,7 @@ function runSourceToggleShortcut(event: KeyboardEvent): boolean {
   if (!primaryMod(event) || event.shiftKey || event.altKey || event.isComposing) return false;
   if (event.key !== "/" && event.code !== "Slash") return false;
   event.preventDefault();
-  toggleSourceMode();
+  togglePresentationOrSource();
   return true;
 }
 
@@ -3751,6 +3777,7 @@ function applyIndexPayload(payload: { notes?: NoteSummary[]; note?: NoteSummary;
     .filter(Boolean))]
     .sort((a, b) => a.localeCompare(b));
   scheduleAssistUpdate({ toc: true });
+  slideDeck?.sync(currentKind);
   localGraphPanel.invalidate();
 }
 
@@ -6098,6 +6125,10 @@ async function languageToolSettingsTool(): Promise<void> {
 
 function toolActions(): ToolAction[] {
   const common: ToolAction[] = [
+    { id: "source", title: editor.isSourceMode() ? "Markdown view" : "Source view", detail: "True Markdown source", run: () => toggleSourceMode() },
+    ...(slideDeck?.isSlides() ? [{ id: "slides-mirror", title: "Reveal mirror", detail: "Edit this note's .slides JavaScript mirror", run: () => void slideDeck?.openMirror() }] : []),
+    { id: "source", title: editor.isSourceMode() ? "Markdown view" : "Source view", detail: "True Markdown source", run: () => toggleSourceMode() },
+    ...(slideDeck?.isSlides() ? [{ id: "slides-mirror", title: "Reveal mirror", detail: "Edit this note's .slides JavaScript mirror", run: () => void slideDeck?.openMirror() }] : []),
     { id: "toc", title: "Toggle TOC", detail: "Page headings, anchors, tags, backlinks", run: () => { floatingTocPanel.toggle(); updateFloatingToc(); } },
     { id: "tag-ref", title: "Tag / copy ref", detail: "Equation tag, inline anchor, reference copy", run: () => void tagOrCopyRef() },
     { id: "export-latex", title: "Export LaTeX", detail: "Write selection, heading, or note to a .tex file", run: () => void exportLatexTool() },

@@ -1,6 +1,7 @@
 export {
   bootstrapNote,
   readNote,
+  slidesMirror,
   notesIndexPayload,
   roamNotesIndexPayload,
   scanNotes,
