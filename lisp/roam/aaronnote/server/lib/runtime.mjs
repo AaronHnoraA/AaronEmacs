@@ -677,6 +677,10 @@ function executablePath(command) {
   if (String(command || "").includes(sep) && existsSync(command)) return command;
   const paths = [
     ...(process.env.PATH || "").split(delimiter),
+    // Emacs may start AaronNote with a stale PATH (for example before the
+    // user's shell init has added ~/.local/bin).  Codex and other user-local
+    // CLIs commonly live here, so resolve them explicitly as well.
+    join(homedir(), ".local", "bin"),
     join(homedir(), ".nix-profile", "bin"),
     "/run/current-system/sw/bin",
     "/opt/homebrew/bin",
