@@ -694,17 +694,42 @@ class CiteWidget extends MeasuredWidget {
   toDOM(): HTMLElement {
     const cite = window.AaronnoteBibliography?.citationLabel?.(this.cmd.fullFrom, this.cmd.fullTo);
     const wrap = document.createElement("span");
-    wrap.className = `inline-cite-widget inline-command-token${cite?.error ? " is-error" : ""}`;
+    const error = cite?.error === true;
+    const label = cite?.label || `[${this.cmd.context.trim() || "?"}]`;
+    const fallbackTitle = `${this.cmd.switchValue ? `${this.cmd.switchValue}:` : ""}${this.cmd.context.trim() || "?"}`;
+    const title = cite?.title || (error ? `Unresolved citation: ${fallbackTitle}` : fallbackTitle);
+    wrap.className = `inline-cite-widget inline-command-token${error ? " is-error" : ""}`;
     wrap.dataset.cmSourceFrom = String(this.cmd.fullFrom);
     wrap.dataset.cmSourceTo = String(this.cmd.fullTo);
     wrap.dataset.cmOpenSource = "true";
-    wrap.textContent = cite?.label || `[${this.cmd.context.trim() || "?"}]`;
-    wrap.title = cite?.title || `${this.cmd.switchValue} / ${this.cmd.context}`;
+    wrap.dataset.citeState = error ? "error" : "resolved";
+    wrap.setAttribute("role", "button");
+    wrap.tabIndex = 0;
+    wrap.setAttribute("aria-invalid", String(error));
+    wrap.setAttribute("aria-label", error ? `Citation error: ${title}` : `Citation ${label}. ${title}`);
+    wrap.title = title;
+    const text = document.createElement("span");
+    text.className = "inline-cite-label";
+    text.textContent = label;
+    wrap.appendChild(text);
+    if (error) {
+      const mark = document.createElement("span");
+      mark.className = "inline-cite-error-mark";
+      mark.textContent = "⚠";
+      mark.setAttribute("aria-hidden", "true");
+      wrap.append(" ", mark);
+    }
     wrap.addEventListener("mousedown", (event) => {
       if (event.metaKey || event.ctrlKey) stopWidgetEventPropagation(event);
     });
     wrap.addEventListener("click", (event) => {
       if (!event.metaKey && !event.ctrlKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      window.AaronnoteBibliography?.openCitation?.(this.cmd.fullFrom, this.cmd.fullTo, wrap.getBoundingClientRect(), true);
+    });
+    wrap.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
       event.preventDefault();
       event.stopPropagation();
       window.AaronnoteBibliography?.openCitation?.(this.cmd.fullFrom, this.cmd.fullTo, wrap.getBoundingClientRect(), true);

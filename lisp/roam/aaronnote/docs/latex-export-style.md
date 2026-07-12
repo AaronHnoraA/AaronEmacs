@@ -39,6 +39,7 @@ agent then performs gated structural and typographic polish.
 | `[t](url)` / `![t](url)` | `\href{url}{t}` |
 | tables / footnotes / definitions / task lists / strikeout | Pandoc-native academic LaTeX |
 | `@@latexmk(name)` | typed, placement-validated LaTeX mark |
+| `@@cite(namespace) [key; ...] {locator: ...}` | resolved `\\cite` plus matching bibliography entries; unresolved/partial groups are export errors |
 | `@@todo(...) [...]{...}` | **dropped** (todos never appear in exports) |
 | `#+begin meta ... #+end meta` | consumed for title/date; not emitted |
 
@@ -123,13 +124,37 @@ and individual snippets:
 Unknown names and invalid placement are export errors; marks are never silently
 dropped.
 
+## Citation contract
+
+The full live document supplies meta context even when only a selection or
+heading subtree is exported. `bib:` may name a local directory or one concrete
+`.bib` file. A short namespace is accepted only when its basename is unique;
+otherwise the full namespace is required. Every item in a citation group must
+resolve before conversion. Never filter an unknown item out of a mixed group,
+invent a placeholder citation, or emit a bibliography entry from code, math,
+HTML comments, links, hidden source blocks, or private planning commands.
+`prefix`, `locator`/`page`/`pages`, and `suffix` are visible author content and
+must survive in order.
+
 ## Pipeline reminder
 
-Pandoc first, AI second. Start from `draft.tex` and `source.md`, read both export
-skills, make the **smallest** justified edits, and write `review.json`. The host
-rejects missing review evidence, reordered prose, or changed math/code/citations
-before accepting a compiling body. See
-`agents/latex-export/AGENTS.md` for the operational contract and the (rare) tool
+Pandoc and the host verifier come first. The mechanical document is staged and
+compiled before any agent is considered. In assisted mode a compiling draft may
+receive exactly one gated polish attempt. A timeout, opaque-payload fidelity
+failure, or non-compiling result ends the export without replacing the previous
+files and is never silently reported as a polished success. Missing or malformed
+review evidence is retained as an explicit warning, but does not discard a body
+that otherwise preserves critical payloads and compiles. Multiple attempts are
+reserved for a concrete mechanical compile failure with compiler feedback. Start
+from `draft.tex` and `source.md`, make the **smallest**
+justified edit, and write a fresh `review.json`. The host rejects changes to
+opaque citation/code/resource payloads. Semantic
+list/environment changes, paragraph wrappers, mathematical layout environments,
+and justified break opportunities remain available to the agent; their content
+constraints live in the prompt/review contract rather than an exact-structure
+host comparison. Final `.tex`/PDF/shared
+files are committed only after two compiler passes and log linting succeed. See
+`agents/latex-export/AGENTS.md` for the repair contract and the (rare) tool
 maintenance workflow.
 
 Templates may declare reusable support files through `sharedFiles` in their

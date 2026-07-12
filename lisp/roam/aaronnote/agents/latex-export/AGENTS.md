@@ -8,7 +8,10 @@ same). Your job is narrow and mechanical-assisted.
 
 - `source.md` — the author's Markdown (exact selection to export). Read-only.
 - `draft.tex` — the deterministic mechanical conversion of `source.md`.
-- `body.tex` — seeded with `draft.tex`; **this is the only file you write.**
+- `body.tex` — seeded with `draft.tex`; this is the only LaTeX file you edit.
+- `title.txt` — writable only when the host requests a generated title.
+- `review.json` — writable, pre-seeded structured audit output. Complete it so
+  the host can report which polish decisions were applied or kept.
 - The chosen template `.tex` — read it to learn the available theorem
   environments and macros. Read-only.
 - `../../docs/latex-export-style.md` — the style contract. Obey it.
@@ -42,7 +45,9 @@ text or meaning, do not make that improvement.
    schema. Every candidate id must appear exactly once. Every ambiguous candidate
    must say `applied` or `kept` with a concrete reason; an empty decision list is
    valid only when the draft truly needs no contextual structural change.
-7. Write `body.tex`, `title.txt`, and `review.json`, then stop. Run no other commands.
+7. Use your file-editing tools to write `body.tex`, the requested `title.txt`, and
+   `review.json`. Do not merely describe their contents in your final response.
+   After those files are complete, stop; do not modify any other file.
 
 Token discipline: prefer targeted edits over rewriting the whole file. The draft
 is usually 90% correct — fix the rest, don't redo it.

@@ -94,30 +94,43 @@ function inlineTokenAt(source, pos, options = {}) {
 }
 
 function commandKeys(command) {
-  return String(command.context || "").split(";").map((key) => key.trim()).filter(Boolean);
+  const parts = String(command.context || "").split(";").map((key) => key.trim());
+  if (parts.some((key) => !key)) return [];
+  return [...new Set(parts)];
 }
 
-function commandArgs(command) {
-  const body = String(command.argsRaw || "").trim().replace(/^\{|\}$/g, "");
-  const args = {};
-  for (const part of body.split(";")) {
-    const match = part.match(/^\s*([A-Za-z][\w-]*)\s*:\s*(.*?)\s*$/);
-    if (match) args[match[1].toLowerCase()] = match[2];
-  }
-  return args;
+function citationMapValue(map, key) {
+  return map instanceof Map ? map.get(key) : map[key];
+}
+
+function citationPrefixJoin(prefix, citation) {
+  if (!prefix) return citation;
+  const gap = /[([{\u00ab\u201c\u2018]$/.test(prefix) ? "" : " ";
+  return `${escapeLatexText(prefix)}${gap}${citation}`;
+}
+
+function citationSuffixJoin(citation, suffix) {
+  if (!suffix) return citation;
+  const gap = /^[,.;:!?)}\]\u00bb\u201d\u2019]/.test(suffix) ? "" : " ";
+  return `${citation}${gap}${escapeLatexText(suffix)}`;
 }
 
 export function citeLatex(command, options = {}) {
   const map = options.citationKeyMap || {};
   const namespace = String(command.switchValue || "").trim();
-  const keys = commandKeys(command)
-    .map((key) => map[`${namespace}\0${key}`] || "")
-    .filter(Boolean);
-  if (keys.length === 0) return "";
-  const args = commandArgs(command);
+  const sourceKeys = commandKeys(command);
+  if (!namespace || sourceKeys.length === 0) return "";
+  const keys = sourceKeys.map((key) => String(citationMapValue(map, `${namespace}\0${key}`) || ""));
+  // Citation groups are atomic: emitting only the resolvable subset silently
+  // drops source-authored keys. A LaTeX-key collision is equally unsafe.
+  if (keys.some((key) => !key) || new Set(keys).size !== keys.length) return "";
+  const args = command.args && typeof command.args === "object" ? command.args : {};
   const locator = String(args.locator || args.page || args.pages || "").trim();
-  const opt = locator ? `[${escapeLatexText(locator)}]` : "";
-  return `\\cite${opt}{${keys.join(",")}}`;
+  const escapedLocator = escapeLatexText(locator);
+  const opt = locator ? `[${locator.includes("]") ? `{${escapedLocator}}` : escapedLocator}]` : "";
+  const citation = `\\cite${opt}{${keys.join(",")}}`;
+  const prefixed = citationPrefixJoin(String(args.prefix || "").trim(), citation);
+  return citationSuffixJoin(prefixed, String(args.suffix || "").trim());
 }
 
 export function convertInline(text, options = {}) {

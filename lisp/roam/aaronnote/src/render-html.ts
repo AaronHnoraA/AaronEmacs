@@ -63,6 +63,12 @@ type SemanticHeadingTokenMeta = {
   attrs: Record<string, string>;
 };
 
+type CiteTokenMeta = {
+  namespace: string;
+  keys: string[];
+  args: Record<string, string>;
+};
+
 const ORG_ENV_OPEN_RE = /^\s*#\+\s*begin\s+(\S+)(?:[ \t]+([^\n]*?))?[ \t]*$/i;
 const TABLE_ROW_LINE_RE = /^\s*\|.*\|\s*$/;
 const FENCE_CLOSE_LINE_RE = /^[ \t]{0,3}(`{3,}|~{3,})\s*$/;
@@ -78,6 +84,15 @@ function escapeHtml(value: string): string {
 
 function escapeAttr(value: string): string {
   return escapeHtml(value);
+}
+
+/** Join human-readable citation affixes without inserting spaces before closing punctuation. */
+export function formatCitationLabel(label: string, prefix = "", suffix = ""): string {
+  const cleanPrefix = String(prefix || "").trim();
+  const cleanSuffix = String(suffix || "").trim();
+  const prefixGlue = cleanPrefix && !/[\s([{‘“«]$/u.test(cleanPrefix) ? " " : "";
+  const suffixGlue = cleanSuffix && !/^[\s,.;:!?%\])}’”»]/u.test(cleanSuffix) ? " " : "";
+  return `${cleanPrefix}${prefixGlue}${label}${suffixGlue}${cleanSuffix}`;
 }
 
 function safeNoteKind(value: string | undefined): string {
@@ -379,6 +394,36 @@ function mathInlineRule(state: StateInline, silent: boolean): boolean {
   return true;
 }
 
+function markdownEscapedAt(source: string, index: number): boolean {
+  let slashes = 0;
+  for (let pos = index - 1; pos >= 0 && source[pos] === "\\"; pos--) slashes++;
+  return slashes % 2 === 1;
+}
+
+function insideHtmlComment(source: string, index: number): boolean {
+  return source.lastIndexOf("<!--", index) > source.lastIndexOf("-->", index);
+}
+
+/** Render @@cite source as stable, hydratable HTML even without a bibliography model. */
+function citeInlineRule(state: StateInline, silent: boolean): boolean {
+  const start = state.pos;
+  if (state.src.slice(start, start + 6).toLowerCase() !== "@@cite") return false;
+  if (markdownEscapedAt(state.src, start) || insideHtmlComment(state.src, start)) return false;
+  const lineEnd = state.src.indexOf("\n", start);
+  const slice = state.src.slice(start, lineEnd < 0 ? state.src.length : lineEnd);
+  const command = scanInlineCommands(slice, "cite")[0];
+  if (!command || command.fullFrom !== 0) return false;
+  if (silent) return true;
+  const token = state.push("cite_inline", "span", 0);
+  token.meta = {
+    namespace: command.switchValue.trim(),
+    keys: command.context.split(";").map((key) => key.trim()).filter(Boolean),
+    args: command.args,
+  } satisfies CiteTokenMeta;
+  state.pos = start + command.fullTo;
+  return true;
+}
+
 /**
  * `@@comment [text]{args}` — a private annotation. Exported HTML uses the
  * same classes/structure as the editor chip (button + `.org-env-content`)
@@ -454,6 +499,31 @@ function renderSideCommentInline(tokens: Token[], idx: number): string {
     `<span class="inline-side-comment-card">${body}</span>`,
     "</span>",
   ].join("");
+}
+
+function renderCiteInline(tokens: Token[], idx: number): string {
+  const meta = (tokens[idx]!.meta || {}) as Partial<CiteTokenMeta>;
+  const namespace = String(meta.namespace || "").trim();
+  const keys = Array.isArray(meta.keys) ? meta.keys.map(String).map((key) => key.trim()).filter(Boolean) : [];
+  const args = meta.args || {};
+  const locator = String(args.locator || args.page || args.pages || "").trim();
+  const prefix = String(args.prefix || "").trim();
+  const suffix = String(args.suffix || "").trim();
+  const keyText = keys.join("; ") || "?";
+  const label = formatCitationLabel(`[${keyText}${locator ? `, ${locator}` : ""}]`, prefix, suffix);
+  const description = `Citation ${namespace ? `${namespace}:` : ""}${keyText}`;
+  const attrs = [
+    'class="inline-cite-widget inline-command-token is-unresolved"',
+    'data-cite-state="unresolved"',
+    `data-cite-namespace="${escapeAttr(namespace)}"`,
+    `data-cite-keys="${escapeAttr(keys.join(";"))}"`,
+    `aria-label="${escapeAttr(description)}"`,
+    'role="doc-biblioref"',
+  ];
+  if (locator) attrs.push(`data-cite-locator="${escapeAttr(locator)}"`);
+  if (prefix) attrs.push(`data-cite-prefix="${escapeAttr(prefix)}"`);
+  if (suffix) attrs.push(`data-cite-suffix="${escapeAttr(suffix)}"`);
+  return `<span ${attrs.join(" ")}>${escapeHtml(label)}</span>`;
 }
 
 function renderMath(tex: string, displayMode: boolean): { html: string; error?: string } {
@@ -865,12 +935,14 @@ function createMarkdownIt(options: RenderMarkdownHTMLOptions): MarkdownIt {
   // Must run before `escape`: otherwise the backslash escape rule consumes the
   // `\(` opener as a literal `(` and inline math is never recognized.
   md.inline.ruler.before("escape", "math_inline", mathInlineRule);
+  md.inline.ruler.before("escape", "cite_inline", citeInlineRule);
   md.inline.ruler.before("escape", "comment_inline", commentInlineRule);
   md.inline.ruler.before("escape", "side_comment_inline", sideCommentInlineRule);
   md.inline.ruler.before("escape", "private_inline", privateInlineRule);
 
   md.renderer.rules.math_block = renderMathBlock;
   md.renderer.rules.math_inline = renderMathInline;
+  md.renderer.rules.cite_inline = renderCiteInline;
   md.renderer.rules.comment_inline = renderCommentInline;
   md.renderer.rules.side_comment_inline = renderSideCommentInline;
   md.renderer.rules.private_inline = () => "";

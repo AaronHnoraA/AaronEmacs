@@ -4,6 +4,7 @@ export type InlineCommand = {
   context: string;
   argsRaw: string;
   args: Record<string, string>;
+  argsError?: string;
   fullFrom: number;
   fullTo: number;
   contextFrom: number;

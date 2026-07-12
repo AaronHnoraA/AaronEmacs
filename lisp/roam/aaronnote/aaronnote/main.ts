@@ -17,6 +17,7 @@ import { INLINE_MATH_RE } from "../src/inline-math.ts";
 import { formatMathRenderError, renderMathHTML } from "../src/math-render.ts";
 import { setKatexMacros } from "../src/katex-macros.ts";
 import { renderJupyterVariablesTable } from "../src/jupyter-variables-view.ts";
+import { formatCitationLabel } from "../src/render-html.ts";
 import { hrefProtocol, safeHref } from "../src/url-safety.ts";
 import {
   api,
@@ -28,6 +29,7 @@ import {
   type LatexTemplate,
   type CoreTask,
   type BibliographyCitation,
+  type BibliographyDiagnostic,
   type BibliographyDocument,
   type BibliographyReference,
   type LanguageToolSettings,
@@ -307,7 +309,20 @@ function taskMetadataLine(task: CoreTask): string {
 
 function taskResultLine(task: CoreTask): string {
   const result = task.result || {};
-  return [result.title, result.pdfFile || result.file].map((value) => String(value || "").trim()).filter(Boolean).join(" · ");
+  const agent = result.agent && typeof result.agent === "object" ? result.agent as Record<string, unknown> : null;
+  const elapsed = Number(agent?.elapsedMs || 0);
+  const agentText = agent
+    ? `${String(agent.backend || "agent")} polish${elapsed > 0 ? ` ${(elapsed / 1000).toFixed(1)}s` : ""} · ${Number(agent.applied || 0)} applied / ${Number(agent.kept || 0)} kept`
+    : "";
+  return [result.title, result.pdfFile || result.file, agentText].map((value) => String(value || "").trim()).filter(Boolean).join(" · ");
+}
+
+function visibleTaskWarnings(task: CoreTask): string[] {
+  const warnings = Array.isArray(task.result?.warnings) ? task.result.warnings.map(String) : [];
+  // Older retained export tasks may contain the removed Markdown-vs-LaTeX
+  // word-bag heuristic.  It was never a hard gate and is no longer emitted by
+  // Core; do not present that obsolete cached diagnostic as a current failure.
+  return warnings.filter((warning) => !/^fidelity:\s*~\d+/i.test(warning));
 }
 
 function visibleTaskSnapshot(): CoreTask[] {
@@ -356,7 +371,11 @@ function renderTaskManager(): void {
     phase.textContent = `${task.phase || task.status}${task.message && task.message !== task.phase ? ` — ${task.message}` : ""}`;
     const meta = document.createElement("div");
     meta.className = "aaronnote-task-meta";
-    meta.textContent = [taskMetadataLine(task), task.startedAt ? `Started ${taskTime(task.startedAt)}` : `Created ${taskTime(task.createdAt)}`].filter(Boolean).join(" · ");
+    meta.textContent = [
+      taskMetadataLine(task),
+      task.startedAt ? `Started ${taskTime(task.startedAt)}` : `Created ${taskTime(task.createdAt)}`,
+      task.finishedAt ? `Finished ${taskTime(task.finishedAt)}` : "",
+    ].filter(Boolean).join(" · ");
     card.append(head, description, phase, meta);
 
     const resultText = taskResultLine(task);
@@ -366,7 +385,7 @@ function renderTaskManager(): void {
       result.textContent = resultText;
       card.appendChild(result);
     }
-    const warnings = Array.isArray(task.result?.warnings) ? task.result.warnings : [];
+    const warnings = visibleTaskWarnings(task);
     if (warnings.length > 0 || task.error) {
       const notice = document.createElement("div");
       notice.className = task.error ? "aaronnote-task-error" : "aaronnote-task-warning";
@@ -602,7 +621,7 @@ const BUILTIN_SNIPPETS: SnippetSummary[] = [{
   mode: "markdown-mode",
   group: "Aaronnote builtin",
   kind: "",
-  body: "@@cite(${1:namespace}) [${2:key}] {locator: ${3:p. }}$0",
+  body: "@@cite(${1:namespace}) [${2:key}]$0",
   source: BUILTIN_SNIPPET_SOURCE,
 }, {
   key: "latexmk",
@@ -902,10 +921,44 @@ function referenceById(id: string): BibliographyReference | undefined {
   return (bibliographyModel.references ?? []).find((ref) => ref.id === id);
 }
 
+function bibliographyDiagnosticText(diagnostic: BibliographyDiagnostic): string {
+  if (typeof diagnostic === "string") return diagnostic.trim();
+  return String(diagnostic.message || diagnostic.detail || diagnostic.code || "Bibliography issue").trim();
+}
+
+function bibliographyDiagnosticTexts(diagnostics: readonly BibliographyDiagnostic[] | undefined): string[] {
+  return (diagnostics ?? []).map(bibliographyDiagnosticText).filter(Boolean);
+}
+
+function citationDiagnosticTexts(cite: BibliographyCitation | undefined): string[] {
+  return [...new Set([
+    ...bibliographyDiagnosticTexts(cite?.diagnostics),
+    ...(cite?.items ?? []).flatMap((item) => bibliographyDiagnosticTexts(item.diagnostics)),
+  ])];
+}
+
 function renderBibliographyPanel(): void {
   const refs = bibliographyModel.references ?? [];
-  bibliographyPanel.hidden = refs.length === 0;
+  const diagnostics = bibliographyModel.diagnostics ?? [];
+  bibliographyPanel.hidden = refs.length === 0 && diagnostics.length === 0;
   bibliographyPanel.replaceChildren();
+  if (diagnostics.length > 0) {
+    const notice = document.createElement("section");
+    notice.className = "aaronnote-bib-diagnostics";
+    notice.setAttribute("role", "status");
+    notice.setAttribute("aria-label", "Bibliography issues");
+    const heading = document.createElement("h2");
+    heading.textContent = "Bibliography issues";
+    const issues = document.createElement("ul");
+    for (const diagnostic of diagnostics) {
+      const item = document.createElement("li");
+      item.textContent = bibliographyDiagnosticText(diagnostic);
+      if (typeof diagnostic !== "string" && diagnostic.severity) item.dataset.severity = diagnostic.severity;
+      issues.appendChild(item);
+    }
+    notice.append(heading, issues);
+    bibliographyPanel.appendChild(notice);
+  }
   if (refs.length === 0) return;
   const title = document.createElement("h2");
   title.textContent = "References";
@@ -952,7 +1005,7 @@ function refreshBibliographyDecorations(): void {
 
 async function refreshBibliography(force = false): Promise<void> {
   const content = editor.getMarkdown();
-  if (!content.includes("@@cite")) {
+  if (!/@@cite\b/i.test(content)) {
     bibliographyRequestSeq += 1;
     bibliographyModel = { ok: true, entries: [], references: [], citations: [], namespaces: [] };
     bibliographyModelKey = "";
@@ -967,6 +1020,11 @@ async function refreshBibliography(force = false): Promise<void> {
     if (requestSeq !== bibliographyRequestSeq || key !== `${currentFile}\n${editor.getMarkdown()}`) return;
     bibliographyModel = nextModel;
     bibliographyModelKey = key;
+    const diagnostics = bibliographyDiagnosticTexts(nextModel.diagnostics);
+    if (diagnostics.length > 0) {
+      const more = diagnostics.length > 1 ? ` (+${diagnostics.length - 1} more)` : "";
+      setStatus(`Bibliography: ${diagnostics[0]}${more}`);
+    }
   } catch (error) {
     if (requestSeq !== bibliographyRequestSeq) return;
     bibliographyModel = { ok: false, entries: [], references: [], citations: [], namespaces: [], message: error instanceof Error ? error.message : "Bibliography failed" };
@@ -993,17 +1051,34 @@ function citeSuffix(cite: BibliographyCitation | undefined): string {
   return String(cite?.args?.suffix || "").trim();
 }
 
+function citationKeys(cite: BibliographyCitation | undefined): string[] {
+  if (cite?.keys?.length) return cite.keys;
+  return (cite?.items ?? []).map((item) => String(item.key || "").trim()).filter(Boolean);
+}
+
+function citationItemIds(cite: BibliographyCitation | undefined): string[] {
+  if (cite?.itemIds?.length) return cite.itemIds;
+  return (cite?.items ?? []).map((item) => String(item.itemId || item.id || "").trim()).filter(Boolean);
+}
+
 function citationLabel(from: number, to: number): { label: string; title?: string; error?: boolean } | null {
   const cite = citationAtRange(from, to);
   if (!cite) return { label: "[?]", title: "Resolving citation", error: true };
-  if ((cite.diagnostics ?? []).length > 0 || !cite.numbers?.length) {
-    return { label: "[?]", title: (cite.diagnostics ?? []).join("; "), error: true };
+  const diagnostics = citationDiagnosticTexts(cite);
+  const numbers = [...new Set((cite.numbers ?? cite.items?.map((item) => item.number) ?? [])
+    .filter((number): number is number => typeof number === "number" && Number.isFinite(number)))];
+  if (diagnostics.length > 0 || numbers.length === 0) {
+    return {
+      label: "[?]",
+      title: diagnostics.join("; ") || "Citation did not resolve any references",
+      error: true,
+    };
   }
   const locator = citeLocator(cite);
-  const label = `[${cite.numbers.join(", ")}${locator ? `, ${locator}` : ""}]`;
+  const label = `[${numbers.join(", ")}${locator ? `, ${locator}` : ""}]`;
   const prefix = citePrefix(cite);
   const suffix = citeSuffix(cite);
-  return { label: `${prefix ? `${prefix} ` : ""}${label}${suffix ? ` ${suffix}` : ""}`, title: cite.keys?.join("; ") || "" };
+  return { label: formatCitationLabel(label, prefix, suffix), title: citationKeys(cite).join("; ") };
 }
 
 function highlightReference(ref: BibliographyReference | undefined): void {
@@ -1059,7 +1134,7 @@ async function openReferenceInZotero(ref: BibliographyReference | undefined): Pr
 }
 
 function citationPrimaryReference(cite: BibliographyCitation | undefined): BibliographyReference | undefined {
-  const id = cite?.itemIds?.[0];
+  const id = citationItemIds(cite)[0];
   return id ? referenceById(id) : undefined;
 }
 
@@ -1071,13 +1146,14 @@ function openCitationFromWidget(from: number, to: number, _rect: DOMRect, jump: 
 function editCitationArgs(from: number, to: number): void {
   if (currentReadOnly) return;
   const source = editor.getMarkdown().slice(from, to);
-  const argsMatch = source.match(/\s+\{([^{}\n]*)\}\s*$/);
+  const argsPattern = /[ \t]*\{([^{}\n]*)\}[ \t]*$/;
+  const argsMatch = source.match(argsPattern);
   const current = argsMatch?.[1] ?? "";
-  const next = window.prompt("Edit @@cite args", current || "locator: p. ");
+  const next = window.prompt("Edit @@cite args", current);
   if (next == null) return;
   const clean = next.trim();
   const replacement = argsMatch
-    ? source.replace(/\s+\{[^{}\n]*\}\s*$/, clean ? ` {${clean}}` : "")
+    ? source.replace(argsPattern, clean ? ` {${clean}}` : "")
     : `${source}${clean ? ` {${clean}}` : ""}`;
   editor.replaceMarkdownRange(from, to, replacement, "end");
   scheduleBibliographyRefresh(true);
@@ -1094,7 +1170,7 @@ async function openBibEntryInEmacs(entry: BibliographyReference["entry"] | undef
 
 async function openCitationBibInEmacs(from: number, to: number): Promise<void> {
   const cite = citationAtRange(from, to);
-  const id = cite?.itemIds?.[0];
+  const id = citationItemIds(cite)[0];
   const entry = id ? referenceById(id)?.entry : undefined;
   await openBibEntryInEmacs(entry);
 }
@@ -1102,7 +1178,7 @@ async function openCitationBibInEmacs(from: number, to: number): Promise<void> {
 function citationReferences(cite: BibliographyCitation | undefined): BibliographyReference[] {
   const refs: BibliographyReference[] = [];
   const seen = new Set<string>();
-  for (const id of cite?.itemIds ?? []) {
+  for (const id of citationItemIds(cite)) {
     if (!id || seen.has(id)) continue;
     const ref = referenceById(id);
     if (!ref) continue;
@@ -1173,6 +1249,7 @@ function showBibliographyContextMenu(
 function showCitationContextMenu(from: number, to: number, x: number, y: number): void {
   const cite = citationAtRange(from, to);
   const refs = citationReferences(cite);
+  const keys = citationKeys(cite);
   const items: AaronContextMenuItem[] = [
     { label: "Edit Cite Args...", detail: "{prefix/locator/suffix}", disabled: currentReadOnly, run: () => editCitationArgs(from, to) },
     ...refs.map((ref) => ({
@@ -1188,7 +1265,7 @@ function showCitationContextMenu(from: number, to: number, x: number, y: number)
       run: () => openReferenceInZotero(ref),
     })),
     { label: "Open Bib in Emacs", detail: refs[0]?.entry?.path || "", disabled: !refs[0]?.entry?.file, run: () => openCitationBibInEmacs(from, to) },
-    { label: "Copy Citation Key", detail: cite?.keys?.join("; ") || "", disabled: !cite?.keys?.length, run: () => copyText(cite?.keys?.join("; ") || "") },
+    { label: "Copy Citation Key", detail: keys.join("; "), disabled: keys.length === 0, run: () => copyText(keys.join("; ")) },
   ];
   showBibliographyContextMenu(refs, items, x, y);
 }
@@ -5188,6 +5265,7 @@ async function exportLatexTool(): Promise<void> {
     await api.latex.export({
       file: currentFile,
       content,
+      documentContent: currentMarkdownText(),
       outputPath: String(chosen.path),
       title,
       scope,
@@ -6650,6 +6728,8 @@ async function matchingBibliographyCompletions(kind: "namespaces" | "keys", pref
       prefix,
       namespace,
     });
+    const diagnostics = bibliographyDiagnosticTexts(result.diagnostics);
+    if (diagnostics.length > 0) setStatus(`Bibliography completion: ${diagnostics[0]}`);
     return (result.items ?? []).map((item) => ({
       key: item.key || item.name || "",
       name: item.name || item.key || "",
@@ -7568,7 +7648,11 @@ function runHostCommand(detail: unknown): boolean {
       return true;
     }
     case "bibliography-index-changed":
+      hideSnippetPopup();
+      clearCompletionCache();
+      snippetSuppressedPrefix = "";
       scheduleBibliographyRefresh(true);
+      scheduleAssistUpdate({ snippets: true });
       return true;
     case "server-ready":
       void loadLanguageToolConfiguration();

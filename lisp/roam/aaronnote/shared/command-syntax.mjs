@@ -1,13 +1,30 @@
 function cleanAttrValue(value) {
-  return String(value || "").trim().replace(/^["']|["']$/g, "");
+  const clean = String(value || "").trim();
+  if (clean.length >= 2 && (clean[0] === '"' || clean[0] === "'") && clean.at(-1) === clean[0]) {
+    const quote = clean[0];
+    return clean.slice(1, -1).replace(new RegExp(`\\\\${quote}`, "g"), quote);
+  }
+  return clean;
 }
 
 function splitArgChunks(body) {
   const chunks = [];
   let current = "";
   let quote = null;
+  let escaped = false;
+  let nesting = 0;
   for (let i = 0; i < body.length; i++) {
     const ch = body[i];
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      current += ch;
+      escaped = true;
+      continue;
+    }
     if (quote) {
       current += ch;
       if (ch === quote) quote = null;
@@ -18,10 +35,24 @@ function splitArgChunks(body) {
       current += ch;
       continue;
     }
-    if (ch === ";" || ch === ",") {
+    if (ch === "{") nesting += 1;
+    else if (ch === "}" && nesting > 0) nesting -= 1;
+    if (ch === ";" && nesting === 0) {
       chunks.push(current);
       current = "";
       continue;
+    }
+    if (ch === "," && nesting === 0) {
+      // Commas are often data in citation affixes/locators (`pp. 2, 4`).
+      // Treat one as an argument separator only before another named field,
+      // or in the historical bare-flag form (`done, pinned`).
+      const currentHasAssignment = /[A-Za-z][\w-]*\s*[:=]/.test(current);
+      const nextStartsAssignment = /^\s*[A-Za-z][\w-]*\s*[:=]/.test(body.slice(i + 1));
+      if (!currentHasAssignment || nextStartsAssignment) {
+        chunks.push(current);
+        current = "";
+        continue;
+      }
     }
     current += ch;
   }
@@ -62,9 +93,22 @@ export function parseCommandArgs(raw = "") {
 }
 
 export function findInlineCommandClose(text, open, closeChar) {
-  let bracketDepth = 0;
+  const openChar = text[open];
+  let nestedDepth = 0;
+  let quote = "";
   for (let i = open + 1; i < text.length; i++) {
     const ch = text[i];
+    if (quote) {
+      if (ch === "\\" && i + 1 < text.length) i += 1;
+      else if (ch === quote) quote = "";
+      continue;
+    }
+    // Quotes delimit attribute values inside `{...}`. Apostrophes inside the
+    // bracket command body remain ordinary citation/key text.
+    if (closeChar === "}" && (ch === '"' || ch === "'")) {
+      quote = ch;
+      continue;
+    }
     if (closeChar === "]" && ch === "\\" && (text[i + 1] === "(" || text[i + 1] === "[")) {
       const close = text[i + 1] === "[" ? "\\]" : "\\)";
       const start = i + 2;
@@ -79,13 +123,13 @@ export function findInlineCommandClose(text, open, closeChar) {
       continue;
     }
     if (ch === "\n" || ch === "\r") return -1;
-    if (closeChar === "]" && ch === "[") {
-      bracketDepth++;
+    if (ch === openChar) {
+      nestedDepth++;
       continue;
     }
     if (ch === closeChar) {
-      if (closeChar === "]" && bracketDepth > 0) {
-        bracketDepth--;
+      if (nestedDepth > 0) {
+        nestedDepth--;
         continue;
       }
       return i;
@@ -94,14 +138,20 @@ export function findInlineCommandClose(text, open, closeChar) {
   return -1;
 }
 
+function isEscapedCommandStart(text, from) {
+  let slashes = 0;
+  for (let index = from - 1; index >= 0 && text[index] === "\\"; index -= 1) slashes += 1;
+  return slashes % 2 === 1;
+}
+
 function metaRange(text, closeBracket) {
   let openBrace = closeBracket + 1;
   while (openBrace < text.length && (text[openBrace] === " " || text[openBrace] === "\t")) openBrace++;
-  if (text[openBrace] !== "{") return { raw: "", fullTo: closeBracket + 1 };
+  if (text[openBrace] !== "{") return { raw: "", fullTo: closeBracket + 1, error: "" };
   const closeBrace = findInlineCommandClose(text, openBrace, "}");
   return closeBrace < 0
-    ? { raw: "", fullTo: closeBracket + 1 }
-    : { raw: text.slice(openBrace, closeBrace + 1), fullTo: closeBrace + 1 };
+    ? { raw: "", fullTo: closeBracket + 1, error: "unclosed command arguments" }
+    : { raw: text.slice(openBrace, closeBrace + 1), fullTo: closeBrace + 1, error: "" };
 }
 
 function trailingMetaBeforeLineEnd(text, bodyFrom, lineEnd) {
@@ -119,7 +169,7 @@ export function scanInlineCommands(input, name = "") {
   const text = String(input || "");
   const commands = [];
   const wanted = String(name || "").toLowerCase();
-  const push = (commandName, switchValue, contextFrom, contextTo, fullFrom, fullTo, argsRaw = "") => {
+  const push = (commandName, switchValue, contextFrom, contextTo, fullFrom, fullTo, argsRaw = "", argsError = "") => {
     if (wanted && commandName !== wanted) return;
     commands.push({
       name: commandName,
@@ -127,6 +177,7 @@ export function scanInlineCommands(input, name = "") {
       context: text.slice(contextFrom, contextTo),
       argsRaw,
       args: parseCommandArgs(argsRaw),
+      argsError,
       fullFrom,
       fullTo,
       contextFrom,
@@ -154,16 +205,24 @@ export function scanInlineCommands(input, name = "") {
     tagRe.lastIndex = close + 1;
   }
 
-  const re = /@@([A-Za-z][\w-]*)(?:\(([^)\n]*)\))?[ \t]+\[/g;
+  // Cite completion accepts both `@@cite(ns) [key]` and the compact
+  // `@@cite(ns)[key]`.  Keep the historical whitespace requirement for the
+  // other bracket commands, whose no-space forms may be ordinary prose.
+  const re = /@@([A-Za-z][\w-]*)(?:\(([^)\n]*)\))?([ \t]*)\[/g;
   let match;
   while ((match = re.exec(text))) {
     const commandName = match[1].toLowerCase();
+    if (!match[3] && commandName !== "cite") continue;
+    // A single (or otherwise odd) escaping backslash makes @@cite literal.
+    // Even backslashes leave the command active, matching normal escaping
+    // parity rather than rejecting every command preceded by a backslash.
+    if (commandName === "cite" && isEscapedCommandStart(text, match.index)) continue;
     if (commandName === "latexmk") continue;
     const open = re.lastIndex - 1;
     const close = findInlineCommandClose(text, open, "]");
     if (close < 0) continue;
     const meta = metaRange(text, close);
-    push(commandName, match[2]?.trim() ?? "", open + 1, close, match.index, meta.fullTo, meta.raw);
+    push(commandName, match[2]?.trim() ?? "", open + 1, close, match.index, meta.fullTo, meta.raw, meta.error);
     re.lastIndex = meta.fullTo;
   }
 

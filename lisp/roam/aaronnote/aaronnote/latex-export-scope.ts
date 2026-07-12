@@ -118,7 +118,9 @@ export function buildLatexExportScopes(options: {
 }
 
 export function latexExportScopeContent(markdown: string, scope: LatexExportScope): string {
-  return markdown.slice(scope.from, scope.to).trimEnd();
+  // Scope offsets are source-authoritative. In particular, trailing spaces and
+  // blank lines inside a fenced/verbatim block are data, not cosmetic padding.
+  return markdown.slice(scope.from, scope.to);
 }
 
 export function toggleLatexExportScopeSelection(
@@ -152,9 +154,14 @@ export function latexExportScopesContent(
   markdown: string,
   scopes: readonly LatexExportScope[],
 ): string {
-  return [...scopes]
+  const parts = [...scopes]
     .sort((a, b) => a.from - b.from || a.to - b.to)
     .map((scope) => latexExportScopeContent(markdown, scope))
-    .filter(Boolean)
-    .join("\n\n");
+    .filter((content) => content.length > 0);
+  return parts.reduce((joined, content) => {
+    if (!joined) return content;
+    if (joined.endsWith("\n\n") || content.startsWith("\n\n")) return joined + content;
+    if (joined.endsWith("\n") || content.startsWith("\n")) return `${joined}\n${content}`;
+    return `${joined}\n\n${content}`;
+  }, "");
 }

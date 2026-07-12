@@ -182,17 +182,43 @@ Roam New 共用。
 选完范围后会再让你**选择模板**（`Article` 默认、`Report`、`Assignment`），模板若声明了
 额外字段（如 Assignment 的课程代码 / 学期 / 学号）会弹出表单，默认值按 note 记忆。
 
-导出先由 Aaronnote 预处理私有语法，再用 **Pandoc** 完整解析标准 Markdown，随后由 **AI 后端**
-执行全文结构 polish，并由服务端做 review、严格保真和实际编译三重校验；任一 gate 失败都会重试，
-最终使用已验证的 Pandoc 草稿。AI 不可用时直接使用 Pandoc 草稿。Agent 只改格式、不改正文，
-并会顺带给文档取一个合适的**标题**：显式 meta 标题不可覆盖，否则综合文件名意图、模板用途和
-一个主主题，禁止直接使用 `assg`/`q1` 之类 slug 或生成多主题长摘要。导出每一步都会在状态栏
-**echo 进度**。
+导出先由 Aaronnote 预处理私有语法，再用 **Pandoc** 完整解析标准 Markdown。服务端先在隔离的
+staging 目录验证机械稿；`codex` 模式随后保留一次受严格 gate 保护的 AI 润色机会。已编译稿无论
+agent 超时、review 失败或改动 citation/code/resource 等不应触碰的 payload，都立即停止，**绝不 retry 2/3，也不会把未润色的 Pandoc
+稿伪装成成功结果**；上一次可用 `.tex` / PDF 保持不变。非致命 overfull 等版式诊断会作为精确反馈
+交给 agent。只有机械稿实际编译失败时，所选 AI 后端才可依据编译反馈进行多轮修复。
+介入，并经过 review、关键 payload 和编译 gate。章节/列表/段落包装、公式对齐与合理断行允许由
+agent 处理，正文及数学含义主要由 prompt 和逐项 review 约束，不再用逐 token 结构比较误杀。
+标题由文件名意图、模板用途和一个主主题确定性生成；显式 meta 标题
+始终优先。所有最终产物先完整验证、后原子替换，失败导出不会覆盖上一次可用的 `.tex` / PDF。
+任务结果会显示 agent 实际耗时以及 `applied / kept` 数量；review 由 host 预生成精确 candidate 模板，
+缺失证据会显示 warning，但不会反过来否决一个已通过关键 payload 与编译检查的排版结果。agent 超时
+会终止整个 CLI 进程组，避免 opencode 派生工具继续后台运行。
+
+引用使用 note 顶部 meta 声明本地 bibliography，再在正文写 `@@cite`：
+
+```text
+#+begin meta
+bib: ./bib
+#+end meta
+
+See @@cite(iso) [Str87] {locator: p. 406}.
+```
+
+`bib:` 可指向目录或具体 `.bib` 文件；目录中每个文件的 basename 是短 namespace，也可使用补全
+给出的完整 namespace。多 key 用分号分隔，`prefix` / `locator` / `suffix` 会保留到 PDF。heading
+或文本选区导出仍使用当前未保存全文的 meta/bib 上下文。未知/歧义 namespace、缺 key、损坏的
+BibTeX 或部分解析成功的多引用都会在写文件前阻断并给出明确诊断，不能再静默生成 `[ns:key]`
+占位或丢掉其中一项。代码、数学、HTML comment 和私有 block 中的字面 `@@cite` 不参与引用编号。
+metadata 同时支持 Aaronnote meta block 与 YAML front matter；BibTeX value 支持 `@string` 前向引用、
+`#` 拼接、标准月份宏与 TeX accent。未知/循环宏、畸形 field、未闭合 citation key/args 都会报告
+带行列位置的诊断。quoted `bib:` 路径可包含逗号，链接 URL 中的 `@@cite` 保持字面量，而可见链接
+label 中的 citation 正常解析。
 
 后端可用 `my/aaronnote-latex-export-agent` 选择：`codex`（默认）/ `claude` / `opencode`，都以
 非交互、免确认方式运行，且在配置里选定、不会每次询问。引擎开关 `my/aaronnote-latex-export-engine`
-（`codex` / `mechanical`，后者名称仅为旧配置兼容）。编译校验用 draft 模式加速。见 Aaronnote 的
-`docs/latex-export-style.md`。
+（`codex` = verified-first + 单次 gated polish / 必要时 repair；`mechanical` = 从不启动 agent）。中间校验用 draft
+模式加速，最终产物仍做完整两遍编译。见 Aaronnote 的 `docs/latex-export-style.md`。
 
 标题、章节名和 theorem/proof 标签中的 `\(...\)` 会保留为 LaTeX 数学，而不是被转义成
 `\textbackslash`。输出路径按 note 记忆，写入是原子的，并强制使用 `.tex` 后缀。未闭合的

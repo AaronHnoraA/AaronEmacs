@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "@voidzero-dev/vite-plus-test";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -701,7 +701,7 @@ describe("LaTeX export", () => {
     expect(tex).toContain("\\begin{theorem}[Key]");
   });
 
-  test("falls back to the mechanical engine when codex is unavailable", async () => {
+  test("does not silently bypass the configured agent when it is unavailable", async () => {
     const { root, notes } = await setupRoot();
     configure({
       root: notes,
@@ -713,10 +713,66 @@ describe("LaTeX export", () => {
     const note = join(notes, "c.md");
     await writeFile(note, "# C\n\nBody.\n", "utf8");
     const out = join(notes, "c.tex");
-    const exported = await exportLatex({ file: note, outputPath: out }) as { ok?: boolean; engine?: string };
-    expect(exported.ok).toBe(true);
-    expect(exported.engine).toBe("pandoc"); // agent unavailable -> verified Pandoc draft
-    expect(await readFile(out, "utf8")).toContain("Body.");
+    await expect(exportLatex({ file: note, outputPath: out }))
+      .rejects.toThrow(/configured latex polish agent is unavailable/i);
+    await expect(readFile(out, "utf8")).rejects.toThrow();
+  });
+
+  test("blocks partial and malformed citations before writing export files", async () => {
+    const { notes } = await setupRoot();
+    const note = join(notes, "citations.md");
+    const bib = join(notes, "refs.bib");
+    await writeFile(bib, "@book{A, author={Author, A}, title={Alpha}, year={2026}}", "utf8");
+    await writeFile(note, [
+      "#+begin meta", "bib: ./refs.bib", "#+end meta", "",
+      "See @@cite(refs) [A; Missing].",
+    ].join("\n"), "utf8");
+    const partialOut = join(notes, "partial.tex");
+
+    await expect(exportLatex({ file: note, outputPath: partialOut }))
+      .rejects.toThrow(/unknown BibTeX key: Missing/i);
+    await expect(readFile(partialOut, "utf8")).rejects.toThrow();
+
+    await writeFile(note, [
+      "#+begin meta", "bib: ./refs.bib", "#+end meta", "",
+      "See @@cite(refs) [A] {locator: p. 2",
+    ].join("\n"), "utf8");
+    const malformedOut = join(notes, "malformed.tex");
+    await expect(exportLatex({ file: note, outputPath: malformedOut }))
+      .rejects.toThrow(/unclosed command arguments/i);
+    await expect(readFile(malformedOut, "utf8")).rejects.toThrow();
+  });
+
+  test("runs the configured agent for every successful assisted export", async () => {
+    const { root, notes } = await setupRoot();
+    const agent = join(root, "fake-opencode.sh");
+    await writeFile(agent, [
+      "#!/bin/sh",
+      "printf '%s\\n' '{\"decisions\":[{\"id\":\"whole-document-structure\",\"action\":\"kept\",\"reason\":\"full audit complete\"},{\"id\":\"academic-layout\",\"action\":\"kept\",\"reason\":\"layout already appropriate\"}]}' > review.json",
+      "exit 0",
+    ].join("\n"), "utf8");
+    await chmod(agent, 0o755);
+    configure({
+      root: notes,
+      workspaceRoot: root,
+      latexTemplatesRoot: join(root, "templates"),
+      latexExportEngine: "codex",
+      latexExportAgent: "opencode",
+      latexOpencodeBin: agent,
+    });
+    const note = join(notes, "assisted.md");
+    const out = join(notes, "assisted.tex");
+    await writeFile(note, "Verified body.\n", "utf8");
+
+    const result = await exportLatex({ file: note, outputPath: out }) as {
+      engine?: string;
+      agent?: { backend?: string; attempts?: number; applied?: number; kept?: number; elapsedMs?: number };
+    };
+
+    expect(result.engine).toBe("opencode");
+    expect(result.agent).toMatchObject({ backend: "opencode", attempts: 1, applied: 0, kept: 2 });
+    expect(result.agent?.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(await readFile(out, "utf8")).toContain("Verified body.");
   });
 
   test("prefers the source name over generated content summaries", async () => {
@@ -727,5 +783,87 @@ describe("LaTeX export", () => {
     const exported = await exportLatex({ file: note, outputPath: out }) as { ok?: boolean; title?: string };
     expect(exported.title).toBe("cheat sheet");
     expect(await readFile(out, "utf8")).toContain("\\title{ cheat sheet }");
+  });
+
+  test("validates body cardinality for headerless templates", async () => {
+    const { root, notes } = await setupRoot();
+    const note = join(notes, "body-cardinality.md");
+    await writeFile(note, "Public body.\n", "utf8");
+    const latexDir = join(root, "templates", "latex");
+    const missing = join(latexDir, "missing-body.tex");
+    const duplicate = join(latexDir, "duplicate-body.tex");
+    await writeFile(missing, "\\documentclass{article}\n\\begin{document}\nNothing.\n\\end{document}\n", "utf8");
+    await writeFile(duplicate, "\\documentclass{article}\n\\begin{document}\n{{body}}\n{{body}}\n\\end{document}\n", "utf8");
+
+    await expect(exportLatex({ file: note, outputPath: join(notes, "missing.tex"), templatePath: missing }))
+      .rejects.toThrow(/body.*exactly once/i);
+    await expect(exportLatex({ file: note, outputPath: join(notes, "duplicate.tex"), templatePath: duplicate }))
+      .rejects.toThrow(/body.*exactly once/i);
+  });
+
+  test("uses live full-document metadata for a scoped body export", async () => {
+    const { notes } = await setupRoot();
+    const note = join(notes, "scoped.md");
+    const documentContent = [
+      "#+begin meta",
+      "title: Authoritative Live Title",
+      "date: 2026-07-01",
+      "#+end meta",
+      "",
+      "# Included",
+      "Scoped body.",
+    ].join("\n");
+    // Persist deliberately stale metadata: the live editor content must win.
+    await writeFile(note, documentContent.replace("Authoritative Live Title", "Stale Disk Title"), "utf8");
+    const out = join(notes, "scoped.tex");
+
+    const result = await exportLatex({
+      file: note,
+      content: "# Included\nScoped body.\n",
+      documentContent,
+      outputPath: out,
+    }) as { title?: string };
+
+    expect(result.title).toBe("Authoritative Live Title");
+    const tex = await readFile(out, "utf8");
+    expect(tex).toContain("\\title{ Authoritative Live Title }");
+    expect(tex).toContain("\\date{ 2026-07-01 }");
+    expect(tex).toContain("Scoped body.");
+    expect(tex).not.toContain("Stale Disk Title");
+  });
+
+  test("fails when an explicitly selected template cannot be read", async () => {
+    const { root, notes } = await setupRoot();
+    const note = join(notes, "missing-template.md");
+    await writeFile(note, "Public body.\n", "utf8");
+    const missing = join(root, "templates", "latex", "does-not-exist.tex");
+    await expect(exportLatex({ file: note, outputPath: join(notes, "out.tex"), templatePath: missing }))
+      .rejects.toThrow(/selected latex template could not be read/i);
+  });
+
+  test("keeps the previous tex and PDF when staged compilation fails", async () => {
+    const { root, notes } = await setupRoot();
+    const note = join(notes, "transaction.md");
+    const outDir = join(notes, "verified");
+    const out = join(outDir, "transaction.tex");
+    const pdf = join(outDir, "transaction.pdf");
+    const templatePath = join(root, "templates", "latex", "broken.tex");
+    await mkdir(outDir, { recursive: true });
+    await writeFile(note, "New public body.\n", "utf8");
+    await writeFile(out, "OLD VERIFIED TEX\n", "utf8");
+    await writeFile(pdf, "OLD VERIFIED PDF\n", "utf8");
+    await writeFile(templatePath, [
+      "\\documentclass{article}",
+      "\\begin{document}",
+      "{{body}}",
+      "\\DefinitelyUndefinedAaronnoteCommand",
+      "\\end{document}",
+      "",
+    ].join("\n"), "utf8");
+
+    await expect(exportLatex({ file: note, outputPath: out, templatePath }))
+      .rejects.toThrow(/PDF compilation failed|undefined control/i);
+    expect(await readFile(out, "utf8")).toBe("OLD VERIFIED TEX\n");
+    expect(await readFile(pdf, "utf8")).toBe("OLD VERIFIED PDF\n");
   });
 });

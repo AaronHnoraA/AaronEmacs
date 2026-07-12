@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { changedRoamFilesSince, commitRoam, fileHistory, restoreFileFromCommit, discardFileChanges, roamRepoStatus, roamRepoChanges, diffRoamFile, diffRoamCommit, pullRoam, pushRoam, repoHistory, headSha } from "./roam-git.mjs";
 import { configureTmpRoot, aaronnoteTmpRoot, runtimeMkdtemp, runtimeTmpFile } from "./tmp.mjs";
 import { applyLatexTemplate, bibliographyReferencesToLatex, defaultLatexOutputPath, escapeLatexText, escapeLatexTitle, escapeLatexUrl, latexMacrosPackage, readLatexTemplate, writeLatexExport } from "./latex-export.mjs";
-import { aaronnoteMarkdownToLatexPandoc } from "./latex-export-pandoc.mjs";
+import { aaronnoteMarkdownToLatexPandoc, extractAaronnoteMetadata } from "./latex-export-pandoc.mjs";
 import { agentAvailable, loadAgentRules, normalizeAgentTitle, polishBodyWithAgent } from "./latex-export-codex.mjs";
 import { loadKatexMacros } from "./katex-macros.mjs";
 import { durationFromEnv } from "./jupyter-cell.mjs";
@@ -5162,11 +5162,6 @@ function latexExportAgentStatusPayload() {
   };
 }
 
-function latexTemplateUsesVar(templateText, name) {
-  const escaped = String(name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`\\{\\{\\s*${escaped}\\s*\\}\\}`).test(String(templateText || ""));
-}
-
 function resolveLatexOutputPath(input, sourceFile = "") {
   const raw = String(input || "").trim();
   if (!raw) return "";
@@ -5182,28 +5177,73 @@ function latexExportSourceFile(input) {
 
 function latexSafeCitationKey(value) {
   const raw = String(value || "");
-  const clean = raw.replace(/[^A-Za-z0-9:_-]/g, "_").replace(/^_+|_+$/g, "");
-  return clean || `cite_${createHash("sha1").update(raw).digest("hex").slice(0, 10)}`;
+  const clean = raw.replace(/[^A-Za-z0-9:_-]/g, "_").replace(/^_+|_+$/g, "").slice(-48) || "cite";
+  // Sanitisation alone is not injective ("A/B" and "A?B" both become
+  // "A_B"). Keep a stable digest in every generated key so distinct source
+  // identifiers cannot alias the same \bibitem.
+  const digest = createHash("sha256").update(raw).digest("hex").slice(0, 12);
+  return `an_${clean}_${digest}`;
 }
 
 function latexCitationMaps(bibModel) {
   const byId = {};
   const byNamespaceKey = {};
   const shortCounts = new Map();
-  for (const entry of bibModel.entries || []) {
+  const entries = [...new Map([
+    ...(bibModel.entries || []),
+    ...(bibModel.references || []).map((reference) => reference?.entry).filter(Boolean),
+  ].map((entry) => [String(entry?.id || ""), entry])).values()].filter((entry) => entry?.id);
+  for (const entry of entries) {
     const id = String(entry.id || "");
     if (!id) continue;
-    byId[id] = latexSafeCitationKey(`${entry.namespace}:${entry.key}`);
+    byId[id] = latexSafeCitationKey(id);
     byNamespaceKey[`${entry.namespace}\0${entry.key}`] = byId[id];
     const short = `${entry.shortNamespace}\0${entry.key}`;
     shortCounts.set(short, (shortCounts.get(short) || 0) + 1);
   }
-  for (const entry of bibModel.entries || []) {
+  for (const entry of entries) {
     const id = String(entry.id || "");
     const short = `${entry.shortNamespace}\0${entry.key}`;
     if (id && byId[id] && shortCounts.get(short) === 1) byNamespaceKey[short] = byId[id];
   }
+  // The resolver is authoritative for the namespace spelling the author used.
+  // Populate that exact lookup from per-item resolution so ambiguous short
+  // namespaces can never be guessed by this later formatting stage.
+  for (const citation of bibModel.citations || []) {
+    const namespace = String(citation?.namespace || "").trim();
+    for (const item of citation?.items || []) {
+      const id = String(item?.id || item?.itemId || "");
+      const key = String(item?.key || "").trim();
+      if (namespace && key && byId[id] && (!item.status || item.status === "resolved")) {
+        byNamespaceKey[`${namespace}\0${key}`] = byId[id];
+      }
+    }
+  }
   return { byId, byNamespaceKey };
+}
+
+function bibliographyExportIssues(model) {
+  const issues = [];
+  const push = (value, prefix = "") => {
+    const message = typeof value === "string" ? value : String(value?.message || "").trim();
+    if (message) issues.push(prefix ? `${prefix}: ${message}` : message);
+  };
+  if (model?.ok === false) push(model.message || "bibliography resolution failed");
+  for (const diagnostic of model?.diagnostics || []) push(diagnostic, "Bibliography");
+  for (const citation of model?.citations || []) {
+    const namespace = String(citation?.namespace || "").trim();
+    const keys = Array.isArray(citation?.keys) ? citation.keys.join(";") : "";
+    const label = `${namespace}${namespace && keys ? ":" : ""}${keys}` || "(?)";
+    for (const diagnostic of citation?.diagnostics || []) push(diagnostic, `Citation ${label}`);
+    for (const item of citation?.items || []) {
+      const itemLabel = `${namespace}${namespace && item?.key ? ":" : ""}${String(item?.key || "?")}`;
+      for (const diagnostic of item?.diagnostics || []) push(diagnostic, `Citation ${itemLabel}`);
+      if (item?.status && item.status !== "resolved" && (!item.diagnostics || item.diagnostics.length === 0)) {
+        push(`item is ${item.status}`, `Citation ${itemLabel}`);
+      }
+    }
+  }
+  return [...new Set(issues)];
 }
 
 function latexExportTitle(sourceFile, bodyTitle, metaTitle = "") {
@@ -5238,8 +5278,11 @@ function usefulTitleHeading(title) {
 
 function inferredAcademicSubject(content) {
   const source = String(content || "");
-  if (/\bidempotent\b/i.test(source) || /\b([A-Z])\s*\^\s*2\s*=\s*\1\b/.test(source)) return "Projectors";
+  // Prefer the broad course/topic signal over one local construction.  The
+  // assignment regression is about an idempotent linear map, but its document
+  // title should remain "Linear Algebra Assignment", not "Projectors".
   if (/\bvector space\b/i.test(source) && /\blinear transformation\b/i.test(source)) return "Linear Algebra";
+  if (/\bidempotent\b/i.test(source) || /\b([A-Z])\s*\^\s*2\s*=\s*\1\b/.test(source)) return "Projectors";
   return "";
 }
 
@@ -5296,12 +5339,35 @@ async function chooseMacSavePath(defaultPath, prompt = "Export LaTeX as:") {
   }
 }
 
-async function compileLatexExportPdf({ texFile, engine, sourceDir, signal }) {
+function normalizedLatexOutputFile(outputPath) {
+  const raw = String(outputPath || "").trim();
+  if (!raw) throw new Error("Missing LaTeX output path");
+  const requested = resolve(raw);
+  return requested.toLowerCase().endsWith(".tex") ? requested : `${requested}.tex`;
+}
+
+function latexLogDiagnostics(log) {
+  const lines = String(log || "").split(/\r?\n/);
+  const fatal = lines.filter((line) =>
+    /LaTeX Warning: (?:Citation|Reference).+undefined|There were undefined references|There were undefined citations|Missing character: There is no/i.test(line),
+  );
+  const layout = lines.filter((line) =>
+    /Overfull \\[hv]box|Float too large|Too many unprocessed floats/i.test(line),
+  );
+  return {
+    fatal: [...new Set(fatal)].slice(-20),
+    layout: [...new Set(layout)].slice(-20),
+  };
+}
+
+async function compileLatexExportPdf({ latex, outputPath, engine, sourceDir, supportFiles = [], signal }) {
   const latexBin = executablePath(engine === "xelatex" ? "xelatex" : engine === "lualatex" ? "lualatex" : "pdflatex");
   if (!latexBin || !existsSync(latexBin)) throw new Error(`LaTeX engine not found: ${engine}`);
-  const buildDir = await runtimeMkdtemp("latex-pdf", texFile);
+  const finalTexFile = normalizedLatexOutputFile(outputPath);
+  const buildDir = await runtimeMkdtemp("latex-pdf", finalTexFile);
+  const texFile = join(buildDir, basename(finalTexFile));
   const env = { ...process.env };
-  const searchDirs = [sourceDir, dirname(texFile)].filter(Boolean).join("//:");
+  const searchDirs = [sourceDir, dirname(finalTexFile)].filter(Boolean).join("//:");
   if (searchDirs) env.TEXINPUTS = `${searchDirs}//:${env.TEXINPUTS || ""}`;
   const args = [
     "-interaction=nonstopmode",
@@ -5311,19 +5377,33 @@ async function compileLatexExportPdf({ texFile, engine, sourceDir, signal }) {
     texFile,
   ];
   try {
+    await writeFile(texFile, latex, "utf8");
+    for (const file of supportFiles) {
+      if (!file?.name || !file?.content) continue;
+      await writeFile(join(buildDir, basename(file.name)), file.content);
+    }
     // A second pass resolves references and the table of contents while all
-    // auxiliary files remain isolated from the export directory.
+    // auxiliary files and generated dependencies remain isolated from the
+    // export directory. Nothing user-visible is replaced until both passes and
+    // log linting have succeeded.
     throwIfAborted(signal);
-    await execFileAsync(latexBin, args, { cwd: dirname(texFile), env, timeout: 120_000, maxBuffer: 16 * 1024 * 1024, signal });
+    await execFileAsync(latexBin, args, { cwd: buildDir, env, timeout: 120_000, maxBuffer: 16 * 1024 * 1024, signal });
     throwIfAborted(signal);
-    await execFileAsync(latexBin, args, { cwd: dirname(texFile), env, timeout: 120_000, maxBuffer: 16 * 1024 * 1024, signal });
+    await execFileAsync(latexBin, args, { cwd: buildDir, env, timeout: 120_000, maxBuffer: 16 * 1024 * 1024, signal });
     throwIfAborted(signal);
     const builtPdf = join(buildDir, `${basename(texFile, extname(texFile))}.pdf`);
-    const pdfFile = join(dirname(texFile), `${basename(texFile, extname(texFile))}.pdf`);
-    const temporary = join(dirname(pdfFile), `.${basename(pdfFile)}.${process.pid}.${Date.now()}.tmp`);
-    await copyFile(builtPdf, temporary);
-    await rename(temporary, pdfFile);
-    return pdfFile;
+    const logFile = join(buildDir, `${basename(texFile, extname(texFile))}.log`);
+    const log = await readFile(logFile, "utf8").catch(() => "");
+    const diagnostics = latexLogDiagnostics(log);
+    if (diagnostics.fatal.length > 0) {
+      throw new Error(`LaTeX verification failed:\n${diagnostics.fatal.join("\n")}`);
+    }
+    return {
+      pdf: await readFile(builtPdf),
+      pdfFile: join(dirname(finalTexFile), `${basename(finalTexFile, extname(finalTexFile))}.pdf`),
+      texFile: finalTexFile,
+      warnings: diagnostics.layout,
+    };
   } catch (err) {
     if (signal?.aborted || err?.name === "AbortError") {
       const canceled = new Error("LaTeX export canceled");
@@ -5334,7 +5414,9 @@ async function compileLatexExportPdf({ texFile, engine, sourceDir, signal }) {
     let log = "";
     try { log = await readFile(logFile, "utf8"); } catch {}
     const detail = log.split(/\r?\n/).filter((line) => /^!|.*:[0-9]+:|error|undefined control/i.test(line)).slice(-12).join("\n");
-    throw new Error(`PDF compilation failed${detail ? `:\n${detail}` : `: ${String(err?.message || err)}`}`);
+    const message = String(err?.message || err);
+    if (/^LaTeX verification failed:/.test(message)) throw err;
+    throw new Error(`PDF compilation failed${detail ? `:\n${detail}` : `: ${message}`}`);
   } finally {
     await rm(buildDir, { recursive: true, force: true }).catch(() => {});
   }
@@ -5344,9 +5426,12 @@ async function compileLatexExportPdf({ texFile, engine, sourceDir, signal }) {
 // a template's display name, LaTeX engine, and extra `{{var}}` slots.
 function parseLatexTemplateHeader(text, templateFile = "") {
   const match = String(text || "").match(/^%\s*aaronnote-template:\s*(\{.*\})\s*$/m);
-  if (!match) return { name: "", engine: "", documentRole: "document", vars: [], sharedFiles: [] };
   try {
-    const parsed = JSON.parse(match[1]);
+    // Header metadata is optional for backwards compatibility, but the
+    // structural template contract is not: every template, including a legacy
+    // headerless one, must contain the body exactly once and may not reference
+    // undeclared placeholders.
+    const parsed = match ? JSON.parse(match[1]) : {};
     const engine = String(parsed?.engine || "").trim().toLowerCase();
     if (engine && !["pdflatex", "xelatex", "lualatex"].includes(engine)) throw new Error(`unsupported engine ${JSON.stringify(engine)}`);
     const documentRole = String(parsed?.documentRole || parsed?.name || "document").trim();
@@ -5560,11 +5645,20 @@ export async function exportLatex(body = {}) {
   throwIfAborted(signal);
   await applyLatexExportSettingsFromState();
   const sourceFile = latexExportSourceFile(body.file || body.sourceFile || "");
-  const content = typeof body.content === "string"
+  const contentWasProvided = typeof body.content === "string";
+  const content = contentWasProvided
     ? body.content
     : sourceFile
       ? await readFile(sourceFile, "utf8")
       : "";
+  // A scope export has two distinct inputs: CONTENT is the exact selected body,
+  // while DOCUMENT-CONTENT supplies live (possibly unsaved) note metadata such
+  // as title/date/bib. Older clients omit it, so fall back to the source file.
+  const documentContent = typeof body.documentContent === "string"
+    ? body.documentContent
+    : contentWasProvided && sourceFile
+      ? await readFile(sourceFile, "utf8")
+      : content;
   if (!content.trim()) {
     const err = new Error("No Aaronnote content to export");
     err.statusCode = 400;
@@ -5577,7 +5671,13 @@ export async function exportLatex(body = {}) {
   // 1. Mechanical base conversion, extended by any agent-maintained rules.
   emit("Converting with Pandoc…");
   const rules = await loadAgentRules(latexAgentDir);
-  const bibliography = await bibliographyForDocument({ file: sourceFile, content });
+  const bibliography = await bibliographyForDocument({ file: sourceFile, content, metadataContent: documentContent });
+  const bibliographyIssues = bibliographyExportIssues(bibliography);
+  if (bibliographyIssues.length > 0) {
+    const error = new Error(`LaTeX export blocked by citation preflight:\n${bibliographyIssues.join("\n")}`);
+    error.statusCode = 422;
+    throw error;
+  }
   const citationMaps = latexCitationMaps(bibliography);
   const converted = await aaronnoteMarkdownToLatexPandoc(content, {
     sourceFile,
@@ -5588,7 +5688,8 @@ export async function exportLatex(body = {}) {
     signal,
   });
   throwIfAborted(signal);
-  const metaTitle = String(converted.meta.title || "").trim();
+  const documentMeta = extractAaronnoteMetadata(documentContent);
+  const metaTitle = String(documentMeta.title || converted.meta.title || "").trim();
   const title = latexExportTitle(sourceFile, body.title || "", metaTitle);
   const defaults = await latexExportDefaults({ file: sourceFile, title });
   const outputPath = resolveLatexOutputPath(body.outputPath || defaults.outputPath, sourceFile);
@@ -5598,9 +5699,12 @@ export async function exportLatex(body = {}) {
     throw err;
   }
 
-  const template = await readLatexTemplate(latexTemplatesRoot, body.templatePath || "");
+  const requestedTemplate = String(body.templatePath || "").trim();
+  const template = await readLatexTemplate(latexTemplatesRoot, requestedTemplate);
+  if (requestedTemplate && (!template.file || resolve(template.file) !== resolve(requestedTemplate))) {
+    throw new Error(`Selected LaTeX template could not be read: ${resolve(requestedTemplate)}`);
+  }
   const header = parseLatexTemplateHeader(template.text, template.file);
-  const needsTitle = latexTemplateUsesVar(template.text, "title");
   const engine = String(body.engine || header.engine || "pdflatex").toLowerCase();
   if (!["pdflatex", "xelatex", "lualatex"].includes(engine)) throw new Error(`Unsupported LaTeX engine: ${engine}`);
   const macroResult = loadKatexMacros(katexMacrosRoot);
@@ -5609,7 +5713,6 @@ export async function exportLatex(body = {}) {
     ? [{ name: "aaronnote-macros.sty", content: Buffer.from(latexMacrosPackage(macroResult.macros, converted.features), "utf8") }]
     : [];
   const sharedFiles = [...declaredSharedFiles, ...generatedSharedFiles];
-  const sharedFileState = await syncLatexSharedFiles(sharedFiles, dirname(outputPath));
   throwIfAborted(signal);
 
   // A document title is a compact label, not a content synopsis. Preserve the
@@ -5617,7 +5720,7 @@ export async function exportLatex(body = {}) {
   const filenameTitle = latexExportTitle(sourceFile, body.title || "", "");
   const sourceNameTitle = latexSourceNameTitle(sourceFile, body.title || "");
   const keepSourceTitle = meaningfulSourceTitle(sourceNameTitle);
-  let docTitle = metaTitle
+  const docTitle = metaTitle
     || (keepSourceTitle ? sourceNameTitle : "")
     || roleAwareFallbackTitle(usefulTitleHeading(firstHeadingTitle(content)) || inferredAcademicSubject(content), header.name)
     || filenameTitle
@@ -5635,7 +5738,7 @@ export async function exportLatex(body = {}) {
   const assemble = (bodyLatex, titleOverride = "") => applyLatexTemplate(template.text, {
     ...extraVars,
     title: escapeLatexTitle(String(titleOverride || docTitle)),
-    date: escapeLatexTitle(converted.meta.date || new Date().toISOString().slice(0, 10)),
+    date: escapeLatexTitle(documentMeta.date || converted.meta.date || new Date().toISOString().slice(0, 10)),
     source: escapeLatexTitle(sourceFile ? displayPathForFile(sourceFile) : ""),
     body: bodyLatex,
   });
@@ -5644,12 +5747,26 @@ export async function exportLatex(body = {}) {
   const bibliographyLatex = bibliographyReferencesToLatex(bibliography.references || [], citationMaps.byId);
   let bodyLatex = `${converted.body}${bibliographyLatex}`;
   let engineUsed = "pandoc";
+  let agentSummary = null;
   const warnings = Array.isArray(converted.warnings) ? [...converted.warnings] : [];
+  for (const diagnostic of bibliography.diagnostics || []) {
+    warnings.push(`Bibliography: ${diagnostic}`);
+  }
+  for (const citation of bibliography.citations || []) {
+    const label = `${String(citation.namespace || "").trim()}:${(citation.keys || []).join(";")}`.replace(/^:/, "");
+    for (const diagnostic of citation.diagnostics || []) {
+      warnings.push(`Citation ${label || "(?)"}: ${diagnostic}`);
+    }
+  }
   const backend = ["codex", "claude", "opencode"].includes(latexExportAgent) ? latexExportAgent : "codex";
   const agentBin = executablePath(backend === "claude" ? latexClaudeBin : backend === "opencode" ? latexOpencodeBin : latexCodexBin);
   const wantAgent = latexExportEngine !== "mechanical" && String(body.engine || "").toLowerCase() !== "mechanical";
-  const generateAgentTitle = needsTitle && !metaTitle;
-  if (wantAgent && agentAvailable(agentBin)) {
+  if (wantAgent && !agentAvailable(agentBin)) {
+    const error = new Error(`Configured LaTeX polish agent is unavailable: ${backend} (${agentBin || "no executable"})`);
+    error.statusCode = 503;
+    throw error;
+  }
+  if (wantAgent) {
     const latexBin = executablePath(engine === "xelatex" ? "xelatex" : engine === "lualatex" ? "lualatex" : "pdflatex");
     const result = await polishBodyWithAgent({
       sourceMarkdown: content,
@@ -5664,7 +5781,7 @@ export async function exportLatex(body = {}) {
       backend,
       agentBin,
       model: latexExportModel || (backend === "codex" ? latexCodexModel : ""),
-      needsTitle: generateAgentTitle,
+      needsTitle: false,
       sourceTitle: sourceNameTitle,
       documentRole: header.documentRole || header.name || "Document",
       supportFiles: sharedFiles,
@@ -5672,25 +5789,54 @@ export async function exportLatex(body = {}) {
       sourceDir: sourceFile ? dirname(sourceFile) : "",
       makeWorkdir: () => runtimeMkdtemp("latex-export", sourceFile || "export"),
       maxAttempts: latexExportMaxAttempts,
+      polishVerifiedDraft: true,
       onProgress,
       signal,
     });
     throwIfAborted(signal);
+    if (!result.usedAgent || !result.compiled) {
+      const details = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
+      const error = new Error([
+        `${backend} did not produce a LaTeX body that passed review, fidelity, and compile gates.`,
+        ...details,
+      ].join("\n"));
+      error.statusCode = 502;
+      throw error;
+    }
     bodyLatex = result.body;
     engineUsed = result.usedAgent ? backend : "pandoc";
-    // Explicit source metadata is authoritative. Otherwise the agent synthesizes
-    // source-name intent + template role + one dominant subject under a hard
-    // length budget; this avoids both raw slugs ("assg") and synopsis titles.
-    if (generateAgentTitle && result.aiTitle) docTitle = result.aiTitle;
+    const decisions = Array.isArray(result.review?.decisions) ? result.review.decisions : [];
+    agentSummary = {
+      backend,
+      attempts: result.attempts,
+      elapsedMs: result.agentElapsedMs || 0,
+      applied: decisions.filter((decision) => decision?.action === "applied").length,
+      kept: decisions.filter((decision) => decision?.action === "kept").length,
+      decisions,
+    };
     if (Array.isArray(result.warnings)) warnings.push(...result.warnings);
   }
 
-  emit("Writing .tex…");
+  emit("Verifying final PDF…");
   throwIfAborted(signal);
   const latex = assemble(bodyLatex);
-  const file = await writeLatexExport(outputPath, latex);
-  emit("Compiling PDF…");
-  const pdfFile = await compileLatexExportPdf({ texFile: file, engine, sourceDir: sourceFile ? dirname(sourceFile) : "", signal });
+  const verified = await compileLatexExportPdf({
+    latex,
+    outputPath,
+    engine,
+    sourceDir: sourceFile ? dirname(sourceFile) : "",
+    supportFiles: sharedFiles,
+    signal,
+  });
+  if (verified.warnings.length > 0) warnings.push(...verified.warnings.map((line) => `LaTeX layout: ${line}`));
+
+  // Commit only after staging completed both compiler passes and log linting.
+  // Thus a failed export leaves the previous .tex/PDF untouched.
+  emit("Committing verified .tex and PDF…");
+  const sharedFileState = await syncLatexSharedFiles(sharedFiles, dirname(verified.texFile));
+  const file = await writeLatexExport(verified.texFile, latex);
+  await atomicWriteFile(verified.pdfFile, verified.pdf);
+  const pdfFile = verified.pdfFile;
   throwIfAborted(signal);
 
   await updateLatexExportState((state) => {
@@ -5711,6 +5857,7 @@ export async function exportLatex(body = {}) {
     title: docTitle,
     template: template.file,
     engine: engineUsed,
+    agent: agentSummary,
     warnings,
     sharedFiles: sharedFileState,
     bytes: Buffer.byteLength(latex, "utf8"),

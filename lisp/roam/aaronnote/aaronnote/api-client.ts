@@ -257,15 +257,50 @@ export type BibliographyReference = {
   text?: string;
   links?: Array<{ label?: string; href?: string }>;
 };
+export type BibliographyDiagnostic = string | {
+  code?: string;
+  severity?: "info" | "warning" | "error";
+  message?: string;
+  detail?: string;
+  from?: number;
+  to?: number;
+  namespace?: string;
+  key?: string;
+};
+export type BibliographyCitationItem = {
+  id?: string;
+  itemId?: string;
+  key?: string;
+  number?: number;
+  from?: number;
+  to?: number;
+  locator?: string;
+  prefix?: string;
+  suffix?: string;
+  duplicate?: boolean;
+  entry?: BibliographyEntry;
+  diagnostics?: BibliographyDiagnostic[];
+};
+export type BibliographyCompletionResult = {
+  ok?: boolean;
+  message?: string;
+  items?: BibliographyCompletion[];
+  diagnostics?: BibliographyDiagnostic[];
+};
 export type BibliographyCitation = {
   from?: number;
   to?: number;
   namespace?: string;
+  namespaceFrom?: number;
+  namespaceTo?: number;
   keys?: string[];
   args?: Record<string, string>;
+  argsFrom?: number;
+  argsTo?: number;
+  items?: BibliographyCitationItem[];
   itemIds?: string[];
   numbers?: number[];
-  diagnostics?: string[];
+  diagnostics?: BibliographyDiagnostic[];
 };
 export type BibliographyDocument = {
   ok?: boolean;
@@ -275,7 +310,7 @@ export type BibliographyDocument = {
   entries?: BibliographyEntry[];
   references?: BibliographyReference[];
   citations?: BibliographyCitation[];
-  diagnostics?: string[];
+  diagnostics?: BibliographyDiagnostic[];
   message?: string;
 };
 export type PlanningItem = Record<string, unknown> & {
@@ -430,7 +465,7 @@ type NativeApi = {
     setAgent?: (body?: Record<string, unknown>) => Promise<unknown>;
     templates?: () => Promise<unknown>;
     chooseOutputPath?: (body?: Record<string, unknown>) => Promise<unknown>;
-    export?: (body?: Record<string, unknown>) => Promise<unknown>;
+    export?: (body?: LatexExportRequest) => Promise<unknown>;
   };
   tasks?: {
     list?: (body?: Record<string, unknown>) => Promise<unknown>;
@@ -504,6 +539,19 @@ export type LatexTemplateVar = {
 };
 export type LatexTemplate = { key: string; file: string; name: string; engine: string; documentRole?: string; vars: LatexTemplateVar[] };
 export type LatexTemplatesResult = { type?: string; ok?: boolean; templates?: LatexTemplate[]; root?: string };
+export type LatexExportRequest = Record<string, unknown> & {
+  file: string;
+  /** The selected export scope. */
+  content: string;
+  /** The live complete note, used for bibliography/meta resolution. */
+  documentContent: string;
+  outputPath: string;
+  title: string;
+  scope: string;
+  templatePath?: string;
+  engine?: string;
+  vars?: Record<string, string>;
+};
 export type LatexExportAgentStatus = {
   type?: string;
   ok?: boolean;
@@ -741,7 +789,7 @@ export const api = {
       const call = requireMethod(nativeApi().latex?.chooseOutputPath, "LaTeX output path chooser");
       return await call(body) as Record<string, unknown>;
     },
-    async export(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    async export(body: LatexExportRequest): Promise<Record<string, unknown>> {
       const call = requireMethod(nativeApi().latex?.export, "LaTeX export");
       return ensureOk(await call(body) as Record<string, unknown>, "LaTeX export failed");
     },
@@ -894,12 +942,12 @@ export const api = {
       if (!call) return { items: [] };
       return await call(body) as { items?: TodoRefCompletion[] };
     },
-    async bibliography(body: { file?: string; content?: string; kind?: string; namespace?: string; prefix?: string } = {}): Promise<{ items?: BibliographyCompletion[] }> {
+    async bibliography(body: { file?: string; content?: string; kind?: string; namespace?: string; prefix?: string } = {}): Promise<BibliographyCompletionResult> {
       const call = window.aaronnoteApi?.completions?.bibliography;
       if (!call) {
         return await callHttpApi("aaronnote:api:completions:bibliography", [body], "Bibliography completion failed");
       }
-      return ensureOk(await call(body) as { ok?: boolean; message?: string; items?: BibliographyCompletion[] }, "Bibliography completion failed");
+      return ensureOk(await call(body) as BibliographyCompletionResult, "Bibliography completion failed");
     },
   },
   bibliography: {

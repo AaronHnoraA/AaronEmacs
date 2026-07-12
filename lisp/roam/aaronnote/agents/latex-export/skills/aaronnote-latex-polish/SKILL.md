@@ -13,7 +13,8 @@ Treat `source.md` as immutable content and `draft.tex` as the authoritative base
 2. Read `polish-candidates.json` and build a structural outline before editing.
 3. Make only markup changes justified by repeated, local, unambiguous structure.
 4. Compare the final body against the source from beginning to end.
-5. Answer every candidate id in `review.json`; omission fails the host gate.
+5. Answer every candidate id in `review.json`; omission is surfaced as an
+   explicit audit warning and makes the result less observable.
 
 Use this shape:
 

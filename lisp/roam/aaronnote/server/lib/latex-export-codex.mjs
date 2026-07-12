@@ -3,17 +3,18 @@
 // Pipeline: the Aaronnote preprocessor + Pandoc produces a draft body;
 // this module lets codex adjust that draft (formatting only, never prose), the
 // server compiles the assembled document, and on failure feeds the log back to
-// codex for a bounded number of retries. If codex is unavailable or never
-// produces a compiling body, the caller falls back to the verified Pandoc draft.
+// codex for a bounded number of retries. The assisted runtime requires a gated
+// agent result; direct legacy callers can still inspect the verified draft.
 //
 // This module owns no runtime state: paths, the template-assembly closure, and
 // resolved executable paths are all passed in, so it stays pure enough to test.
 
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { appendFile, copyFile, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
+import { LATEX_MARKS } from "../../shared/latex-marks.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -66,8 +67,13 @@ function proseWords(text) {
   // Drop math, code, comments, and Aaronnote todos before comparing words.
   s = s.replace(/\\\(.*?\\\)/gs, " ").replace(/\\\[.*?\\\]/gs, " ").replace(/\$\$.*?\$\$/gs, " ");
   s = s.replace(/```[\s\S]*?```/g, " ").replace(/\\begin\{verbatim\}[\s\S]*?\\end\{verbatim\}/g, " ");
-  s = s.replace(/@@(?:todo|itodo)[^\n]*/gi, " ");
+  // Aaronnote/Org control syntax is structure, not visible prose.  Keeping it
+  // in the word bag made a faithful proof block look as though it had dropped
+  // words such as "begin", "proof", "latexmk", and "newline".
+  s = s.replace(/^\s*#\+(?:begin|end)\s+[^\n]*$/gim, " ");
+  s = s.replace(/@@[A-Za-z][\w-]*(?:\([^\n)]*\))?(?:[ \t]+[^\s{\[]+)?(?:[ \t]*\[[^\]]*\])?(?:[ \t]*\{[^\n]*\})?/g, " ");
   s = s.replace(/%[^\n]*/g, " "); // LaTeX comments
+  s = s.replace(/\\(?:begin|end)\{[^}]+\}/g, " "); // environment names are structure
   s = s.replace(/\\[A-Za-z@]+\s*(\[[^\]]*\])?/g, " "); // LaTeX command names + optional args
   s = s.replace(/[#+*_>`~^{}\\$&/=.,;:!?()\[\]|"'—–-]/g, " "); // markup + punctuation
   const words = s.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
@@ -109,8 +115,8 @@ function protectedPayloads(text) {
   const source = String(text || "");
   return {
     math: [...source.matchAll(/\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]/g)].map((match) => (match[1] ?? match[2] ?? "").replace(/\s+/g, "")),
-    code: [...source.matchAll(/\\begin\{verbatim\}([\s\S]*?)\\end\{verbatim\}|\\texttt\{((?:\\.|[^{}])*)\}|\\verb\*?(.)(.*?)\3/g)]
-      .map((match) => (match[1] ?? match[2] ?? match[4] ?? "").replace(/^\n|\n$/g, "")),
+    code: [...source.matchAll(/\\begin\{(verbatim\*?|Verbatim|BVerbatim|LVerbatim|SaveVerbatim|lstlisting|minted|Highlighting)\}([\s\S]*?)\\end\{\1\}|\\texttt\{((?:\\.|[^{}])*)\}|\\verb\*?(.)(.*?)\4/g)]
+      .map((match) => (match[2] ?? match[3] ?? match[5] ?? "").replace(/^\n|\n$/g, "")),
     citations: [...source.matchAll(/\\cite(?:\[[^\]]*\])?\{([^}]+)\}/g)].map((match) => match[0]),
     resources: [...source.matchAll(/\\href\{((?:\\.|[^{}])*)\}|\\includegraphics(?:\[([^\]]*)\])?\{([^}]*)\}/g)]
       .map((match) => match[1] ?? `${match[3] || ""}\0${String(match[2] || "").match(/\balt\s*=\s*\{([^}]*)\}/)?.[1] || ""}`),
@@ -187,10 +193,6 @@ function structuralSignature(text) {
   return tokens;
 }
 
-function nonListStructure(tokens) {
-  return tokens.filter((token) => !/^(?:begin|end):(enumerate|itemize|description)$|^item:|^enum-label:/.test(token));
-}
-
 function visibleContentSignature(text) {
   let source = renderListLabels(text);
   let resourceIndex = 0;
@@ -202,7 +204,7 @@ function visibleContentSignature(text) {
     (match) => ` AARONNOTERESOURCE${resourceIndex++} ${match.startsWith("\\href") ? "{" : ""}`);
   source = source.replace(/\\label\{[^}]*\}|\\hypertarget\{[^}]*\}\{/g,
     (match) => ` AARONNOTEANCHOR${anchorIndex++} ${match.startsWith("\\hypertarget") ? "{" : ""}`);
-  source = source.replace(/\\begin\{verbatim\}[\s\S]*?\\end\{verbatim\}|\\texttt\{(?:\\.|[^{}])*\}|\\verb\*?(.).*?\1/g,
+  source = source.replace(/\\begin\{(verbatim\*?|Verbatim|BVerbatim|LVerbatim|SaveVerbatim|lstlisting|minted|Highlighting)\}[\s\S]*?\\end\{\1\}|\\texttt\{(?:\\.|[^{}])*\}|\\verb\*?(.).*?\2/g,
     () => ` AARONNOTECODE${codeIndex++} `);
   source = source.replace(/\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]/g,
     () => ` AARONNOTEMATH${mathIndex++} `);
@@ -246,6 +248,47 @@ function visibleContentSignature(text) {
   return source;
 }
 
+function maskedFidelitySource(text) {
+  return String(text || "")
+    .replace(/\\begin\{(verbatim\*?|Verbatim|BVerbatim|LVerbatim|SaveVerbatim|lstlisting|minted|Highlighting)\}[\s\S]*?\\end\{\1\}/g, " AARONNOTECODEBLOCK ")
+    .replace(/\\texttt\{(?:\\.|[^{}])*\}|\\verb\*?(.).*?\1/g, " AARONNOTEINLINECODE ")
+    .replace(/\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]/g, " AARONNOTEMATH ")
+    .replace(/\\href\{(?:\\.|[^{}])*\}/g, "\\href{}")
+    .replace(/\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}/g, " AARONNOTERESOURCE ")
+    .replace(/(?<!\\)%[^\n]*/g, " ");
+}
+
+function layoutIntentSignature(text) {
+  const source = maskedFidelitySource(text);
+  const marks = Object.entries(LATEX_MARKS).map(([name, spec]) => ({ name, latex: String(spec.latex || "") })).filter((mark) => mark.latex);
+  const tokens = [];
+  let cursor = 0;
+  while (cursor < source.length) {
+    let next = null;
+    for (const mark of marks) {
+      const index = source.indexOf(mark.latex, cursor);
+      if (index < 0) continue;
+      if (!next || index < next.index || (index === next.index && mark.latex.length > next.mark.latex.length)) next = { index, mark };
+    }
+    if (!next) break;
+    tokens.push(next.mark.name);
+    cursor = next.index + next.mark.latex.length;
+  }
+  return tokens;
+}
+
+function paragraphSignature(text) {
+  const source = maskedFidelitySource(text)
+    // Heading arguments are structural labels, not prose paragraphs. Removing
+    // them lets an agent adjust harmless blank space around a heading while
+    // still making a merge of two actual prose paragraphs observable.
+    .replace(/\\(?:part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?\{(?:\\.|[^{}]|\{[^{}]*\})*\}/g, " ")
+    .replace(/\\(?:label|hypertarget)\{[^}]*\}(?:\{)?/g, " ");
+  return source.split(/\n[ \t]*\n+/)
+    .map((block) => visibleContentSignature(block))
+    .filter(Boolean);
+}
+
 export function strictFidelityIssues(draftBody, polishedBody) {
   const issues = [];
   const draftVisible = visibleContentSignature(draftBody);
@@ -253,15 +296,33 @@ export function strictFidelityIssues(draftBody, polishedBody) {
   if (draftVisible !== polishedVisible) issues.push("visible prose tokens changed or were reordered");
   const draftStructure = structuralSignature(draftBody);
   const polishedStructure = structuralSignature(polishedBody);
-  if (JSON.stringify(draftStructure) !== JSON.stringify(polishedStructure)) {
-    const listOnlyEquivalent = draftVisible === polishedVisible
-      && JSON.stringify(nonListStructure(draftStructure)) === JSON.stringify(nonListStructure(polishedStructure));
-    if (!listOnlyEquivalent) issues.push("document structure changed or was reordered");
+  if (JSON.stringify(draftStructure) !== JSON.stringify(polishedStructure)) issues.push("document structure changed or was reordered");
+  if (JSON.stringify(paragraphSignature(draftBody)) !== JSON.stringify(paragraphSignature(polishedBody))) {
+    issues.push("paragraph boundaries changed or were reordered");
+  }
+  if (JSON.stringify(layoutIntentSignature(draftBody)) !== JSON.stringify(layoutIntentSignature(polishedBody))) {
+    issues.push("explicit layout intents changed or were reordered");
   }
   const draftProtected = protectedPayloads(draftBody);
   const polishedProtected = protectedPayloads(polishedBody);
   for (const key of ["math", "code", "citations", "resources", "anchors"]) {
     if (JSON.stringify(draftProtected[key]) !== JSON.stringify(polishedProtected[key])) issues.push(`${key} payloads changed or were reordered`);
+  }
+  return issues;
+}
+
+// The interactive agent contract carries the prose/math fidelity rules. The
+// host hard gate is deliberately narrower: it protects opaque payloads that a
+// typesetting agent never needs to rewrite, while allowing real structural and
+// mathematical-layout work (lists, paragraphs, aligned/split wrappers, breaks).
+function criticalFidelityIssues(draftBody, polishedBody) {
+  const issues = [];
+  const draftProtected = protectedPayloads(draftBody);
+  const polishedProtected = protectedPayloads(polishedBody);
+  for (const key of ["code", "citations", "resources", "anchors"]) {
+    if (JSON.stringify(draftProtected[key]) !== JSON.stringify(polishedProtected[key])) {
+      issues.push(`${key} payloads changed or were reordered`);
+    }
   }
   return issues;
 }
@@ -278,6 +339,20 @@ export function buildPolishCandidates(sourceMarkdown, draftBody) {
   if (/^(?:problem|solution|answer|proof)\b/im.test(source)) {
     candidates.push({ id: "role-environments", kind: "environment", detail: "Review explicit Problem/Solution/Answer/Proof roles against environments actually defined by the template." });
   }
+  if (/^\s*#\+begin\s+(?:definition|theorem|lemma|proposition|corollary|proof|remark|example|convention)\b/im.test(source)) {
+    candidates.push({ id: "semantic-environments", kind: "environment", detail: "Audit every source-declared academic block for the best template-supported environment, label, nesting, and surrounding rhythm." });
+  }
+  const displayMath = [...String(draftBody || "").matchAll(/\\\[([\s\S]*?)\\\]/g)].map((match) => match[1] || "");
+  if (displayMath.some((math) => math.replace(/\s+/g, " ").trim().length > 95
+      || (math.match(/\\otimes|\\oplus|\\sum|\\prod|\\longrightarrow/g) || []).length >= 4)) {
+    candidates.push({ id: "display-math-layout", kind: "math-layout", detail: "Inspect long display math for semantic aligned/split/multline structure and break points without changing mathematical content." });
+  }
+  if (/\\cite(?:\[[^\]]*\])?\{[^}]+\}/.test(String(draftBody || ""))) {
+    candidates.push({ id: "citation-presentation", kind: "citation", detail: "Verify citation placement, affixes, locators, punctuation, and bibliography-page flow while preserving every citation payload." });
+  }
+  if (String(draftBody || "").split(/\r?\n/).length > 260) {
+    candidates.push({ id: "long-document-flow", kind: "page-flow", detail: "Audit long-document page flow, orphan headings, theorem/proof breaks, floats, and reference-section transition." });
+  }
   if (String(draftBody || "").split(/\r?\n/).some((line) => line.length > 140 && !/^\\(?:begin|end)\b/.test(line))) {
     candidates.push({ id: "long-material", kind: "line-break", detail: "Review long URLs, inline math, code-like text, or table cells for semantic break opportunities without rewriting content." });
   }
@@ -286,7 +361,15 @@ export function buildPolishCandidates(sourceMarkdown, draftBody) {
 
 function reviewGateIssue(review, candidates) {
   if (!review || !Array.isArray(review.decisions)) return "review.json missing or invalid";
-  const decisions = new Map(review.decisions.map((decision) => [String(decision?.id || ""), decision]));
+  const expected = new Set(candidates.map((candidate) => candidate.id));
+  if (review.decisions.length !== expected.size) return "review.json must contain the exact candidate set";
+  const decisions = new Map();
+  for (const decision of review.decisions) {
+    const id = String(decision?.id || "");
+    if (!expected.has(id)) return `review.json contains unknown candidate ${id || "(empty)"}`;
+    if (decisions.has(id)) return `review.json contains duplicate candidate ${id}`;
+    decisions.set(id, decision);
+  }
   for (const candidate of candidates) {
     const decision = decisions.get(candidate.id);
     if (!decision) return `review.json omitted candidate ${candidate.id}`;
@@ -343,14 +426,23 @@ async function compileLatex({ tex, dir, latexBin, engine = "pdflatex", sourceDir
 
 function buildPrompt({ retryLog, needsTitle = true, sourceTitle = "", documentRole = "" }) {
   const base = [
-    "You are polishing a LaTeX export. All files are in your working directory.",
-    "Read: style.md (style contract — obey strictly), AGENTS.md (your contract),",
-    "skills/aaronnote-latex-polish/SKILL.md and skills/academic-typesetting/SKILL.md,",
-    "then polish-candidates.json; review.json must answer every candidate id.",
-    "syntax.md (Aaronnote/Markdown syntax), template.tex (the target template; note",
-    "which theorem environments and macros it defines), source.md (the author's",
-    "Markdown — the source of truth for text), and draft.tex (the Pandoc-based",
-    "conversion). body.tex currently equals draft.tex.",
+    "You are polishing a LaTeX export. This prompt is the complete contract; do",
+    "not search for other instruction files. Read source.md (content truth),",
+    "draft.tex (mechanical conversion), template.tex (available environments and",
+    "macros), polish-candidates.json, and the pre-seeded review.json. body.tex is",
+    "already an exact copy of draft.tex; edit it only after the audit. Replace every",
+    "review placeholder and answer every id exactly once. Read support .cls/.sty",
+    "files only when template.tex leaves a",
+    "specific environment or macro ambiguous.",
+    "",
+    "EFFICIENCY CONTRACT:",
+    "- Batch independent file reads when the tool supports it and never reread an",
+    "  unchanged file. Normally the five required inputs, body.tex, and review.json",
+    "  should fit within about 8-10 tool operations.",
+    "- Do not run LaTeX, tests, git, web searches, or exploratory shell commands; the",
+    "  host owns compilation and validation and will return exact diagnostics.",
+    "- If the draft is already optimal, do not make whitespace-only edits: fill the",
+    "  concrete `kept` reviews and finish immediately.",
     sourceTitle ? `The original source-name title is: ${JSON.stringify(sourceTitle)}.` : "",
     documentRole ? `The selected template's document role is: ${JSON.stringify(documentRole)}.` : "",
     "",
@@ -365,11 +457,19 @@ function buildPrompt({ retryLog, needsTitle = true, sourceTitle = "", documentRo
     "   list/math presentation, balanced spacing, and sensible page flow.",
     "5. Improve layout only where source semantics justify it; do not add decorative",
     "   boxes, colours, rules, abstracts, numbering, captions, or invented structure.",
+    "Do not interpret fidelity as a reason to skip useful typesetting. When evidence",
+    "exists, actively improve semantic lists/environments, theorem/proof rhythm, long",
+    "display math, break opportunities, page flow, TOC transitions, and title fit.",
+    "A `kept` decision must identify what was inspected and why the draft is already",
+    "best; generic reasons such as `looks fine` do not satisfy the review.",
+    "Review reasons are evidence, not marketing: describe exact source/draft/body",
+    "constructs and never claim a removal or fix that is absent from the actual diff.",
+    "Use `applied` only when body.tex contains a corresponding markup change.",
     "Fidelity is the hard gate: if a formatting improvement might change text or",
     "meaning, do not make it. It is correct to leave already-faithful markup alone.",
     "",
     "Edit body.tex so that it compiles when the host inserts it into template.tex",
-    "and its formatting follows style.md. Do NOT add, remove, translate, or reword",
+    "and its formatting follows this contract. Do NOT add, remove, translate, or reword",
     "any prose from source.md — only change markup. Emit body content only: no",
     "\\documentclass, no preamble, no package or macro definitions.",
     "",
@@ -403,8 +503,8 @@ function buildPrompt({ retryLog, needsTitle = true, sourceTitle = "", documentRo
         ].join("\n"),
     "",
     needsTitle
-      ? "Write body.tex, title.txt, and the required review.json, then stop. Run no other commands."
-      : "Write body.tex and the required review.json, then stop. Run no other commands.",
+      ? "Use file-editing tools to write body.tex, title.txt, and the required review.json. Do not only describe them in chat. Modify no other files, then stop."
+      : "Use file-editing tools to write body.tex and the required review.json. Do not only describe them in chat. Modify no other files, then stop.",
   ];
   if (retryLog) {
     base.push(
@@ -486,7 +586,13 @@ function runAgent({ backend, bin, workdir, model, retryLog, needsTitle, sourceTi
     const args = agentArgs(backend, { workdir, model, prompt: buildPrompt({ retryLog, needsTitle, sourceTitle, documentRole }) });
     let child;
     try {
-      child = spawn(bin, args, { cwd: workdir, stdio: ["ignore", "pipe", "pipe"] });
+      child = spawn(bin, args, {
+        cwd: workdir,
+        stdio: ["ignore", "pipe", "pipe"],
+        // Put the CLI and every subprocess it creates in one process group so
+        // an opencode timeout cannot leave model/tool children running.
+        detached: process.platform !== "win32",
+      });
     } catch (err) {
       resolve({ ok: false, message: String(err?.message || err) });
       return;
@@ -494,20 +600,37 @@ function runAgent({ backend, bin, workdir, model, retryLog, needsTitle, sourceTi
     let stderr = "";
     let stdoutBuf = "";
     let settled = false;
+    let forcedKillTimer = null;
+    let stopMessage = "";
+    const terminateGroup = (signalName) => {
+      if (!child?.pid) return;
+      try {
+        if (process.platform !== "win32") process.kill(-child.pid, signalName);
+        else child.kill(signalName);
+      } catch {
+        try { child.kill(signalName); } catch {}
+      }
+    };
     const finish = (result) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (forcedKillTimer) clearTimeout(forcedKillTimer);
       if (signal) signal.removeEventListener?.("abort", onAbort);
       resolve(result);
     };
-    const onAbort = () => {
-      if (!child.killed) child.kill("SIGKILL");
-      finish({ ok: false, message: "aborted" });
+    const stop = (message) => {
+      if (stopMessage) return;
+      stopMessage = message;
+      terminateGroup("SIGTERM");
+      forcedKillTimer = setTimeout(() => {
+        terminateGroup("SIGKILL");
+        finish({ ok: false, message });
+      }, 750);
     };
+    const onAbort = () => stop("aborted");
     const timer = setTimeout(() => {
-      if (!child.killed) child.kill("SIGKILL");
-      finish({ ok: false, message: `${backend} timed out` });
+      stop(`${backend} timed out`);
     }, timeoutMs);
     if (signal) {
       if (signal.aborted) { onAbort(); return; }
@@ -526,8 +649,12 @@ function runAgent({ backend, bin, workdir, model, retryLog, needsTitle, sourceTi
       if (stdoutBuf.length > 65536) stdoutBuf = stdoutBuf.slice(-65536);
     });
     child.stderr?.on("data", (chunk) => { stderr += String(chunk); if (stderr.length > 8192) stderr = stderr.slice(-8192); });
-    child.on("error", (err) => finish({ ok: false, message: String(err?.message || err) }));
-    child.on("close", (code) => finish(code === 0 ? { ok: true } : { ok: false, message: stderr.trim() || `${backend} exited ${code}` }));
+    child.on("error", (err) => finish({ ok: false, message: stopMessage || String(err?.message || err) }));
+    child.on("close", (code) => finish(stopMessage
+      ? { ok: false, message: stopMessage }
+      : code === 0
+        ? { ok: true }
+        : { ok: false, message: stderr.trim() || `${backend} exited ${code}` }));
   });
 }
 
@@ -587,6 +714,7 @@ export async function polishBodyWithAgent(opts) {
     sourceDir = "",
     makeWorkdir,
     maxAttempts = 3,
+    polishVerifiedDraft = false,
     needsTitle = true,
     sourceTitle = "",
     documentRole = "",
@@ -600,36 +728,78 @@ export async function polishBodyWithAgent(opts) {
 
   const emit = (text) => { if (onProgress && text) { try { onProgress(text); } catch {} } };
   const warnings = [];
-  const base = { body: draftBody, aiTitle: "", backend, attempts: 0 };
+  const base = { body: draftBody, aiTitle: "", backend, attempts: 0, agentElapsedMs: 0, review: null };
+  const compileEnabled = typeof assemble === "function" && !!latexBin && existsSync(latexBin);
+  if (!compileEnabled) {
+    return { ...base, usedAgent: false, compiled: false, warnings: ["compile not verified; skipped agent polish"] };
+  }
   if (!agentAvailable(agentBin)) {
     return { ...base, usedAgent: false, compiled: false, warnings: [`${backend} unavailable; used Pandoc draft`] };
   }
-  const compileEnabled = typeof assemble === "function" && !!latexBin && existsSync(latexBin);
 
   const workdir = await makeWorkdir();
   try {
-    await writeFile(join(workdir, "source.md"), sourceMarkdown, "utf8");
-    await writeFile(join(workdir, "draft.tex"), draftBody, "utf8");
-    await writeFile(join(workdir, "body.tex"), draftBody, "utf8");
-    await writeFile(join(workdir, "template.tex"), templateText, "utf8");
     const polishCandidates = buildPolishCandidates(sourceMarkdown, draftBody);
-    await writeFile(join(workdir, "polish-candidates.json"), `${JSON.stringify({ candidates: polishCandidates }, null, 2)}\n`, "utf8");
-    if (sourceTitle) await writeFile(join(workdir, "source-title.txt"), sourceTitle, "utf8");
+    const reviewTemplate = {
+      decisions: polishCandidates.map((candidate) => ({
+        id: candidate.id,
+        kind: candidate.kind,
+        action: "REPLACE_WITH_applied_OR_kept",
+        reason: "REPLACE_WITH_concrete_evidence",
+      })),
+    };
+    const prepare = [
+      writeFile(join(workdir, "source.md"), sourceMarkdown, "utf8"),
+      writeFile(join(workdir, "draft.tex"), draftBody, "utf8"),
+      writeFile(join(workdir, "body.tex"), draftBody, "utf8"),
+      writeFile(join(workdir, "template.tex"), templateText, "utf8"),
+      writeFile(join(workdir, "polish-candidates.json"), `${JSON.stringify({ candidates: polishCandidates }, null, 2)}\n`, "utf8"),
+    ];
     for (const file of supportFiles) {
-      if (file?.name && file?.content) await writeFile(join(workdir, basename(file.name)), file.content);
+      if (file?.name && file?.content) prepare.push(writeFile(join(workdir, basename(file.name)), file.content));
     }
-    if (styleDoc && existsSync(styleDoc)) await copyFile(styleDoc, join(workdir, "style.md"));
-    if (syntaxDoc && existsSync(syntaxDoc)) await copyFile(syntaxDoc, join(workdir, "syntax.md"));
-    if (agentsDoc && existsSync(agentsDoc)) await copyFile(agentsDoc, join(workdir, "AGENTS.md"));
-    if (skillsDir && existsSync(skillsDir)) await cp(skillsDir, join(workdir, "skills"), { recursive: true });
+    await Promise.all(prepare);
+
+    emit("Validating Pandoc draft…");
+    const draftVerification = await compileLatex({
+      tex: assemble(draftBody),
+      dir: workdir,
+      latexBin,
+      engine,
+      sourceDir,
+      timeoutMs: compileTimeoutMs,
+      signal,
+    });
+    if (draftVerification.ok && !polishVerifiedDraft) {
+      return { ...base, usedAgent: false, compiled: true, warnings };
+    }
 
     let body = draftBody;
-    let retryLog = "";
+    let retryLog = draftVerification.ok
+      ? draftVerification.log
+        ? `VERIFIED MECHANICAL DRAFT WITH NON-FATAL LAYOUT WARNINGS:\n${draftVerification.log}`
+        : "VERIFIED MECHANICAL DRAFT: review once and apply only safe markup-level polish."
+      : `LATEX COMPILE FAILURE:\n${draftVerification.log}`;
     let attempts = 0;
-    for (let i = 0; i < Math.max(1, maxAttempts); i += 1) {
+    let agentElapsedMs = 0;
+    // A compiling draft gets exactly one optional polish attempt. Repeated
+    // free-form retries after a timeout or gate rejection caused the observed
+    // opencode retry loop and add no reliability. Multiple attempts are kept
+    // only for a concrete mechanical compile failure with compiler feedback.
+    const attemptLimit = draftVerification.ok ? 1 : Math.max(1, maxAttempts);
+    for (let i = 0; i < attemptLimit; i += 1) {
       attempts = i + 1;
-      emit(retryLog ? `Polishing with ${backend} (retry ${attempts})…` : `Polishing with ${backend}…`);
+      emit(i === 0 ? `Polishing with ${backend}…` : `Polishing with ${backend} (retry ${attempts})…`);
+      // Required outputs are attempt-scoped. Without clearing them, an agent
+      // that exits successfully without reviewing can accidentally reuse a
+      // review/title written by an earlier rejected attempt.
+      await Promise.all([
+        rm(join(workdir, "title.txt"), { force: true }),
+        writeFile(join(workdir, "review.json"), `${JSON.stringify(reviewTemplate, null, 2)}\n`, "utf8"),
+      ]);
+      const agentStartedAt = Date.now();
       const run = await runAgent({ backend, bin: agentBin, workdir, model, retryLog, needsTitle, sourceTitle, documentRole, timeoutMs: agentTimeoutMs, signal, onProgress });
+      agentElapsedMs += Date.now() - agentStartedAt;
       if (!run.ok) {
         warnings.push(`${backend} adjust failed (${run.message || "unknown"})`);
         break;
@@ -642,46 +812,50 @@ export async function polishBodyWithAgent(opts) {
         return { ...base, usedAgent: false, compiled: false, attempts, warnings };
       }
       const review = await readAgentReview(workdir);
-      const fidelityIssues = strictFidelityIssues(draftBody, body);
+      const fidelityIssues = criticalFidelityIssues(draftBody, body);
       const reviewIssue = reviewGateIssue(review, polishCandidates);
-      if (reviewIssue || fidelityIssues.length > 0) {
+      if (fidelityIssues.length > 0) {
         const gate = [reviewIssue, ...fidelityIssues].filter(Boolean).join("; ");
         warnings.push(`${backend} polish gate rejected attempt ${attempts}: ${gate}`);
-        retryLog = `POLISH GATE FAILURE: ${gate}. Re-read both skills, restore source fidelity, and write review.json.`;
-        continue;
+        // Re-running a free-form agent after it changed protected content is
+        // not a repair strategy. Fall back immediately to the known draft.
+        break;
       }
-      if (!compileEnabled) {
-        warnings.push("compile not verified (no LaTeX engine / assembler)");
-        warnings.push(...proseFidelityWarnings(sourceMarkdown, body));
-        return { body, aiTitle: candidateAiTitle, backend, usedAgent: true, compiled: false, attempts, warnings };
+      if (reviewIssue) {
+        // Review is quality evidence, not the exported content itself. Surface
+        // incomplete evidence, but do not discard an agent body that preserves
+        // protected payloads and compiles successfully.
+        warnings.push(`${backend} review incomplete on attempt ${attempts}: ${reviewIssue}`);
+      } else {
+        const applied = review.decisions.filter((decision) => decision?.action === "applied").length;
+        if (body === draftBody && applied > 0) {
+          warnings.push(`${backend} review says ${applied} change(s) were applied, but body.tex is unchanged`);
+        } else if (body !== draftBody && applied === 0) {
+          warnings.push(`${backend} changed body.tex but review.json records no applied decision`);
+        }
       }
       emit(`Compiling (attempt ${attempts})…`);
       const res = await compileLatex({ tex: assemble(body, candidateAiTitle), dir: workdir, latexBin, engine, sourceDir, timeoutMs: compileTimeoutMs, signal });
       if (res.ok) {
         if (res.log) {
-          emit(`Layout warnings found; feeding log back to ${backend}…`);
-          retryLog = `LATEX LAYOUT WARNINGS:\n${res.log}`;
-          continue;
+          warnings.push(`${backend} output has non-fatal LaTeX layout warnings: ${res.log}`);
         }
-        warnings.push(...proseFidelityWarnings(sourceMarkdown, body));
-        return { body, aiTitle: candidateAiTitle, backend, usedAgent: true, compiled: true, attempts, warnings };
+        return { body, aiTitle: candidateAiTitle, backend, usedAgent: true, compiled: true, attempts, warnings, agentElapsedMs, review };
       }
       emit(`Compile failed; feeding log back to ${backend}…`);
       retryLog = res.log;
     }
 
-    // Agent path did not pass the gates. Fall back to the verified Pandoc draft.
-    if (compileEnabled) {
-      emit("Falling back to Pandoc draft…");
-      const draftRes = await compileLatex({ tex: assemble(draftBody), dir: workdir, latexBin, engine, sourceDir, timeoutMs: compileTimeoutMs, signal });
-      if (draftRes.ok) {
-        warnings.push(`${backend} polish did not pass after ${attempts} attempt(s); used Pandoc draft`);
-        return { ...base, usedAgent: false, compiled: true, attempts, warnings };
-      }
-      warnings.push(`neither ${backend} polish nor Pandoc draft compiled; wrote best-effort Pandoc draft`);
-      return { ...base, usedAgent: false, compiled: false, attempts, warnings };
+    // Do not spend another compiler pass re-checking the byte-identical draft:
+    // its result is already known from draftVerification. The assisted runtime
+    // treats usedAgent=false as a failed export, while legacy/direct callers
+    // still receive the verified draft explicitly in the result.
+    if (draftVerification.ok) {
+      warnings.push(`${backend} polish did not pass after ${attempts} attempt(s); kept verified Pandoc draft`);
+      return { ...base, usedAgent: false, compiled: true, attempts, warnings, agentElapsedMs };
     }
-    return { ...base, usedAgent: false, compiled: false, attempts, warnings };
+    warnings.push(`${backend} did not repair the mechanical LaTeX compile failure`);
+    return { ...base, usedAgent: false, compiled: false, attempts, warnings, agentElapsedMs };
   } finally {
     await rm(workdir, { recursive: true, force: true }).catch(() => {});
   }

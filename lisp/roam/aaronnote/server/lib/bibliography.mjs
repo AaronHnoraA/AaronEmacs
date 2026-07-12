@@ -20,7 +20,21 @@ function canonicalPath(value) {
   try {
     return realpathSync.native(absolute);
   } catch {
-    return absolute;
+    // The target (for example an unsaved standalone note) may not exist yet,
+    // while one of its parents is reached through a platform symlink such as
+    // macOS `/var` -> `/private/var`. Canonicalize the nearest existing parent
+    // so containment checks use one path identity for existing and live files.
+    const tail = [];
+    let parent = absolute;
+    while (true) {
+      const next = dirname(parent);
+      if (next === parent) return absolute;
+      tail.unshift(basename(parent));
+      parent = next;
+      try {
+        return join(realpathSync.native(parent), ...tail);
+      } catch {}
+    }
   }
 }
 
@@ -44,83 +58,162 @@ function inside(file, root) {
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
-function rootRelative(file) {
-  return relative(rootDir, file).replace(/\\/g, "/");
+function rootRelative(file, base = rootDir) {
+  return relative(base, file).replace(/\\/g, "/");
 }
 
+// Metadata is intentionally flat: Aaronnote/YAML values used here are paths
+// and scalar inheritance fields. Complex YAML remains Pandoc's responsibility.
 function parseMeta(content) {
-  const match = String(content || "").match(META_BLOCK_RE);
+  const source = String(content || "").replace(/^\uFEFF/, "");
   const out = {};
-  if (!match) return out;
-  for (const line of match[1].split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/);
-    if (m) out[m[1].toLowerCase()] = m[2].trim();
-  }
+  const addLines = (body) => {
+    for (const line of String(body || "").split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/);
+      if (!m) continue;
+      const key = m[1].toLowerCase();
+      const value = m[2].trim();
+      out[key] = key !== "bib" && value.length >= 2
+        && (value[0] === '"' || value[0] === "'") && value.at(-1) === value[0]
+        ? value.slice(1, -1)
+        : value;
+    }
+  };
+  const yaml = source.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
+  if (yaml) addLines(yaml[1]);
+  const match = source.match(META_BLOCK_RE);
+  if (match) addLines(match[1]);
   return out;
 }
 
 function splitList(value) {
-  return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
-}
-
-async function readMetaFromFile(file) {
-  try {
-    const ext = extname(file).toLowerCase();
-    if (!SAFE_EXT.has(ext) || !inside(file, rootDir)) return {};
-    return parseMeta(await readFile(file, "utf8"));
-  } catch {
-    return {};
+  const items = [];
+  let current = "";
+  let quote = "";
+  const source = String(value || "");
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "\\") {
+      const next = source[index + 1];
+      if (next === "," || next === "\\" || next === '"' || next === "'") {
+        current += next;
+        index += 1;
+      } else current += char;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = "";
+      else current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === ",") {
+      if (current.trim()) items.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
   }
+  if (current.trim()) items.push(current.trim());
+  return items;
 }
 
-async function effectiveMeta(file, content, seen = new Set()) {
+async function effectiveMeta(file, content, seen = new Set(), allowedRoot = rootDir) {
   const current = parseMeta(content);
   const key = canonicalPath(file || rootDir);
-  if (seen.has(key)) return { meta: current, diagnostics: [`extend cycle at ${rootRelative(key)}`] };
+  if (seen.has(key)) return { meta: current, bibSources: [], diagnostics: [`extend cycle at ${rootRelative(key, allowedRoot)}`] };
   seen.add(key);
   const diagnostics = [];
   const extend = String(current.extend || "").trim();
-  let parent = {};
+  let parentResult = { meta: {}, bibSources: [], diagnostics: [] };
   if (extend && file) {
     const parentFile = canonicalPath(resolve(dirname(key), extend));
-    if (!inside(parentFile, rootDir)) {
-      diagnostics.push(`extend is outside Aaronnote root: ${extend}`);
+    if (!inside(parentFile, allowedRoot)) {
+      diagnostics.push(`extend is outside the allowed note root: ${extend}`);
+    } else if (!SAFE_EXT.has(extname(parentFile).toLowerCase())) {
+      diagnostics.push(`extend source is not a Markdown file: ${extend}`);
     } else {
-      parent = (await effectiveMeta(parentFile, await readFile(parentFile, "utf8").catch(() => ""), seen)).meta;
+      try {
+        parentResult = await effectiveMeta(parentFile, await readFile(parentFile, "utf8"), seen, allowedRoot);
+      } catch {
+        diagnostics.push(`extend source not found: ${extend}`);
+      }
     }
   }
+  diagnostics.push(...parentResult.diagnostics);
+  const parent = parentResult.meta;
   const merged = {};
   for (const [k, v] of Object.entries(parent)) if (INHERIT_FIELDS.has(k)) merged[k] = v;
   for (const [k, v] of Object.entries(current)) {
     if (k === "bib" && merged.bib) merged.bib = `${v}, ${merged.bib}`;
     else merged[k] = v;
   }
-  return { meta: merged, diagnostics };
+  // Keep each bibliography declaration tied to the file that declared it.
+  // Resolving inherited raw paths relative to the child note silently points at
+  // the wrong directory whenever an `extend` crosses a folder boundary.
+  const ownBibSources = splitList(current.bib).map((raw) => ({
+    raw,
+    base: dirname(key),
+    origin: key,
+  }));
+  return { meta: merged, bibSources: [...ownBibSources, ...parentResult.bibSources], diagnostics };
 }
 
-async function visibleBibFiles(file, content) {
-  const noteFile = canonicalPath(file || join(rootDir, "scratch.md"));
-  const base = file ? dirname(noteFile) : rootDir;
-  const { meta, diagnostics } = await effectiveMeta(noteFile, content);
-  const dirs = splitList(meta.bib);
+async function visibleBibFiles(file, content, metadataContent = content, requestedRoot = "", libraryRoot = rootDir) {
+  const noteFile = canonicalPath(file || join(libraryRoot, "scratch.md"));
+  // Aaronnote explicitly supports opening a standalone Markdown file outside
+  // the library. Its local `bib: ./...` declarations must work too, while
+  // remaining confined to that note's directory unless the trusted caller
+  // supplies a narrower project root.
+  const allowedRoot = inside(noteFile, libraryRoot)
+    ? libraryRoot
+    : canonicalPath(requestedRoot || dirname(noteFile));
+  if (!inside(noteFile, allowedRoot)) {
+    return { files: [], diagnostics: ["standalone note is outside the allowed bibliography root"] };
+  }
+  const { bibSources, diagnostics } = await effectiveMeta(noteFile, metadataContent, new Set(), allowedRoot);
   const files = [];
-  for (const raw of dirs) {
-    const dir = canonicalPath(resolve(base, raw));
-    if (!inside(dir, rootDir)) {
-      diagnostics.push(`bib directory is outside Aaronnote root: ${raw}`);
+  const seenFiles = new Set();
+  const addFile = (filePath) => {
+    const canonical = canonicalPath(filePath);
+    if (seenFiles.has(canonical)) return;
+    seenFiles.add(canonical);
+    const full = rootRelative(canonical, allowedRoot).replace(/\.bib$/i, "");
+    const shortNamespace = basename(canonical).replace(/\.bib$/i, "");
+    files.push({ file: canonical, namespace: full, shortNamespace, pathRoot: allowedRoot });
+  };
+  for (const declaration of bibSources) {
+    const raw = declaration.raw;
+    const source = canonicalPath(resolve(declaration.base, raw));
+    if (!inside(source, allowedRoot)) {
+      diagnostics.push(`bib source is outside the allowed note root: ${raw}`);
       continue;
     }
     try {
-      const entries = await readdir(dir, { withFileTypes: true });
+      const sourceStat = await stat(source);
+      if (sourceStat.isFile()) {
+        if (extname(source).toLowerCase() !== ".bib") {
+          diagnostics.push(`bib source is not a .bib file: ${raw}`);
+          continue;
+        }
+        addFile(source);
+        continue;
+      }
+      if (!sourceStat.isDirectory()) {
+        diagnostics.push(`bib source is neither a directory nor .bib file: ${raw}`);
+        continue;
+      }
+      const entries = (await readdir(source, { withFileTypes: true }))
+        .sort((a, b) => a.name.localeCompare(b.name));
       for (const entry of entries) {
         if (!entry.isFile() || extname(entry.name).toLowerCase() !== ".bib") continue;
-        const abs = join(dir, entry.name);
-        const full = rootRelative(abs).replace(/\.bib$/i, "");
-        const localShort = basename(entry.name, ".bib");
-        files.push({ file: abs, namespace: full, shortNamespace: localShort });
+        addFile(join(source, entry.name));
       }
     } catch {
-      diagnostics.push(`bib directory not found: ${raw}`);
+      diagnostics.push(`bib source not found: ${raw}`);
     }
   }
   return { files, diagnostics };
@@ -134,6 +227,7 @@ function skipSpaces(source, pos) {
 function readBalanced(source, pos, open, close) {
   if (source[pos] !== open) return null;
   let depth = 0;
+  let braceDepth = 0;
   let quote = "";
   for (let i = pos; i < source.length; i += 1) {
     const ch = source[i];
@@ -142,9 +236,22 @@ function readBalanced(source, pos, open, close) {
       else if (ch === quote) quote = "";
       continue;
     }
+    // TeX accents such as {\"o} are ubiquitous in BibTeX.  Their escaped
+    // quote is data, not the beginning of a quoted BibTeX value.
+    if (ch === "\\" && i + 1 < source.length) {
+      i += 1;
+      continue;
+    }
     if (ch === '"') {
       quote = ch;
       continue;
+    }
+    // With parenthesized entries, parentheses inside a braced field value are
+    // protected and must not alter the outer entry depth.
+    if (open === "(") {
+      if (ch === "{") { braceDepth += 1; continue; }
+      if (ch === "}" && braceDepth > 0) { braceDepth -= 1; continue; }
+      if (braceDepth > 0) continue;
     }
     if (ch === open) depth += 1;
     if (ch === close) {
@@ -172,8 +279,34 @@ function readQuoted(source, pos) {
   return null;
 }
 
-function cleanBibValue(value) {
+const BIB_ACCENT_MARKS = {
+  "\"": "\u0308",
+  "'": "\u0301",
+  "`": "\u0300",
+  "^": "\u0302",
+  "~": "\u0303",
+  "=": "\u0304",
+  ".": "\u0307",
+  u: "\u0306",
+  v: "\u030C",
+  H: "\u030B",
+  c: "\u0327",
+  k: "\u0328",
+  r: "\u030A",
+};
+
+function decodeBibTeXText(value) {
   return String(value || "")
+    .replace(/\{?\\(["'`^~=\.uvHckr])\s*\{?([A-Za-z])\}?\}?/g,
+      (_match, accent, letter) => `${letter}${BIB_ACCENT_MARKS[accent] || ""}`.normalize("NFC"))
+    .replace(/\\(ae|AE|oe|OE|aa|AA|o|O|l|L|ss)\b(?:\{\})?/g, (_match, name) => ({
+      ae: "æ", AE: "Æ", oe: "œ", OE: "Œ", aa: "å", AA: "Å",
+      o: "ø", O: "Ø", l: "ł", L: "Ł", ss: "ß",
+    })[name] || name);
+}
+
+function cleanBibValue(value) {
+  return decodeBibTeXText(value)
     .trim()
     .replace(/^["{]+|["}]+$/g, "")
     .replace(/[{}]/g, "")
@@ -183,111 +316,222 @@ function cleanBibValue(value) {
     .trim();
 }
 
+function bibValuePart(value) {
+  return decodeBibTeXText(value)
+    .replace(/[{}]/g, "")
+    .replace(/\\&/g, "&")
+    .replace(/\\_/g, "_");
+}
+
+function readBibValueAtom(source, start) {
+  const pos = skipSpaces(source, start);
+  if (pos >= source.length) return null;
+  if (source[pos] === "{") {
+    const parsed = readBalanced(source, pos, "{", "}");
+    return parsed ? { part: { kind: "literal", text: parsed.text }, end: parsed.end } : null;
+  }
+  if (source[pos] === '"') {
+    const parsed = readQuoted(source, pos);
+    return parsed ? { part: { kind: "literal", text: parsed.text }, end: parsed.end } : null;
+  }
+  let end = pos;
+  while (end < source.length && source[end] !== "#" && source[end] !== ",") end += 1;
+  const text = source.slice(pos, end).trim();
+  return text ? { part: { kind: "bare", text }, end } : null;
+}
+
+function parseBibValueExpression(source, start) {
+  const parts = [];
+  let pos = start;
+  while (pos < source.length) {
+    const atom = readBibValueAtom(source, pos);
+    if (!atom) return null;
+    parts.push(atom.part);
+    pos = skipSpaces(source, atom.end);
+    if (source[pos] !== "#") break;
+    pos = skipSpaces(source, pos + 1);
+  }
+  return { parts, end: pos };
+}
+
 function parseFields(body) {
   const comma = body.indexOf(",");
   if (comma < 0) return null;
   const key = body.slice(0, comma).trim();
   const fields = {};
+  const diagnostics = [];
   let pos = comma + 1;
   while (pos < body.length) {
     pos = skipSpaces(body, pos);
     if (body[pos] === ",") { pos += 1; continue; }
+    if (!body.slice(pos).trim()) break;
     const m = body.slice(pos).match(/^([A-Za-z][\w-]*)\s*=/);
-    if (!m) break;
+    if (!m) {
+      diagnostics.push(`invalid field syntax near ${JSON.stringify(body.slice(pos, pos + 40).trim())}`);
+      break;
+    }
     const name = m[1].toLowerCase();
     pos += m[0].length;
-    pos = skipSpaces(body, pos);
-    let value = "";
-    if (body[pos] === "{") {
-      const parsed = readBalanced(body, pos, "{", "}");
-      if (!parsed) break;
-      value = parsed.text;
-      pos = parsed.end;
-    } else if (body[pos] === '"') {
-      const parsed = readQuoted(body, pos);
-      if (!parsed) break;
-      value = parsed.text;
-      pos = parsed.end;
-    } else {
-      const next = body.indexOf(",", pos);
-      value = body.slice(pos, next < 0 ? body.length : next);
-      pos = next < 0 ? body.length : next;
+    const expression = parseBibValueExpression(body, pos);
+    if (!expression) {
+      diagnostics.push(`invalid value for field ${name}`);
+      break;
     }
-    fields[name] = cleanBibValue(value);
+    fields[name] = expression.parts;
+    pos = skipSpaces(body, expression.end);
+    if (pos < body.length && body[pos] !== ",") {
+      diagnostics.push(`expected comma after field ${name}`);
+      break;
+    }
   }
-  return key ? { key, fields } : null;
+  return key ? { key, fields, diagnostics } : null;
 }
 
 function parseStringBody(body) {
-  const m = String(body || "").match(/^\s*([A-Za-z][\w-]*)\s*=\s*([\s\S]+?)\s*$/);
+  const source = String(body || "");
+  const m = source.match(/^\s*([A-Za-z][\w-]*)\s*=\s*/);
   if (!m) return null;
-  return { key: m[1].toLowerCase(), value: cleanBibValue(m[2]) };
+  const expression = parseBibValueExpression(source, m[0].length);
+  if (!expression || source.slice(expression.end).trim()) return null;
+  return { key: m[1].toLowerCase(), parts: expression.parts };
+}
+
+const BIB_MONTHS = new Map(Object.entries({
+  jan: "January", feb: "February", mar: "March", apr: "April",
+  may: "May", jun: "June", jul: "July", aug: "August",
+  sep: "September", oct: "October", nov: "November", dec: "December",
+}));
+
+function bibLocation(source, offset) {
+  const before = source.slice(0, Math.max(0, offset));
+  const lines = before.split("\n");
+  return `offset ${offset} (line ${lines.length}, column ${(lines.at(-1)?.length || 0) + 1})`;
+}
+
+function scanBibRecords(source, diagnostics) {
+  const records = [];
+  for (let pos = 0; pos < source.length;) {
+    if (source[pos] === "%") {
+      const newline = source.indexOf("\n", pos + 1);
+      pos = newline < 0 ? source.length : newline + 1;
+      continue;
+    }
+    if (source[pos] !== "@") { pos += 1; continue; }
+    const match = source.slice(pos).match(/^@([A-Za-z]+)\s*([{(])/);
+    if (!match) { pos += 1; continue; }
+    const open = pos + match[0].length - 1;
+    const parsed = readBalanced(source, open, match[2], match[2] === "{" ? "}" : ")");
+    if (!parsed) {
+      diagnostics.push(`Unclosed BibTeX entry near ${bibLocation(source, pos)}`);
+      break;
+    }
+    records.push({ type: match[1].toLowerCase(), text: parsed.text, offset: pos, end: parsed.end });
+    pos = parsed.end;
+  }
+  return records;
 }
 
 export function parseBibTeX(source) {
+  const input = String(source || "");
   const entries = [];
   const diagnostics = [];
-  const strings = new Map();
-  const re = /@([A-Za-z]+)\s*[{(]/g;
-  let match;
-  while ((match = re.exec(source))) {
-    const type = match[1].toLowerCase();
-    const open = re.lastIndex - 1;
-    const parsed = readBalanced(source, open, source[open], source[open] === "{" ? "}" : ")");
-    if (!parsed) {
-      diagnostics.push(`Unclosed BibTeX entry near offset ${match.index}`);
+  const records = scanBibRecords(input, diagnostics);
+  const stringDefinitions = new Map();
+  for (const record of records) {
+    if (record.type !== "string") continue;
+    const string = parseStringBody(record.text);
+    if (!string) {
+      diagnostics.push(`Invalid BibTeX @string near ${bibLocation(input, record.offset)}`);
       continue;
     }
-    re.lastIndex = parsed.end;
-    if (type === "comment" || type === "preamble") continue;
-    if (type === "string") {
-      const string = parseStringBody(parsed.text);
-      if (string) strings.set(string.key, string.value);
-      continue;
+    if (stringDefinitions.has(string.key)) diagnostics.push(`Duplicate BibTeX string macro: ${string.key}`);
+    stringDefinitions.set(string.key, { ...string, offset: record.offset });
+  }
+  const macroCache = new Map(BIB_MONTHS);
+  const diagnosticSet = new Set(diagnostics);
+  const addDiagnostic = (message) => {
+    if (!diagnosticSet.has(message)) {
+      diagnosticSet.add(message);
+      diagnostics.push(message);
     }
-    const fields = parseFields(parsed.text);
+  };
+  const resolveParts = (parts, stack = []) => cleanBibValue(parts.map((part) => {
+    if (part.kind === "literal") return bibValuePart(part.text);
+    const raw = String(part.text || "").trim();
+    const name = raw.toLowerCase();
+    if (!/^[A-Za-z][\w-]*$/.test(raw)) return bibValuePart(raw);
+    if (macroCache.has(name)) return macroCache.get(name);
+    const definition = stringDefinitions.get(name);
+    if (!definition) {
+      addDiagnostic(`Unknown BibTeX string macro: ${raw}`);
+      return raw;
+    }
+    if (stack.includes(name)) {
+      addDiagnostic(`Cyclic BibTeX string macro: ${[...stack, name].join(" -> ")}`);
+      return raw;
+    }
+    const value = resolveParts(definition.parts, [...stack, name]);
+    macroCache.set(name, value);
+    return value;
+  }).join(""));
+
+  // Resolve every definition up front so cycles and invalid forward references
+  // are reported even when a particular macro is not used by the cited entry.
+  for (const name of stringDefinitions.keys()) {
+    if (!macroCache.has(name)) resolveParts([{ kind: "bare", text: name }]);
+  }
+
+  for (const record of records) {
+    const type = record.type;
+    if (type === "comment" || type === "preamble" || type === "string") continue;
+    const fields = parseFields(record.text);
     if (!fields) {
-      diagnostics.push(`Invalid BibTeX entry near offset ${match.index}`);
+      diagnostics.push(`Invalid BibTeX entry near ${bibLocation(input, record.offset)}`);
       continue;
     }
-    for (const [key, value] of Object.entries(fields.fields)) {
-      const expanded = strings.get(String(value).toLowerCase());
-      if (expanded) fields.fields[key] = expanded;
+    for (const diagnostic of fields.diagnostics) {
+      diagnostics.push(`${fields.key}: ${diagnostic}`);
     }
-    entries.push({ type, ...fields, raw: source.slice(match.index, parsed.end) });
+    const resolvedFields = Object.fromEntries(Object.entries(fields.fields)
+      .map(([name, parts]) => [name, resolveParts(parts)]));
+    entries.push({ type, key: fields.key, fields: resolvedFields, raw: input.slice(record.offset, record.end) });
   }
   return { entries, diagnostics };
 }
 
-async function readBibFile(file, namespace, shortNamespace) {
+async function readBibFile(file, namespace, shortNamespace, pathRoot = rootDir) {
   const st = await stat(file);
   const cached = bibCache.get(file);
+  let parsed;
   if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
     cached.usedAt = Date.now();
-    return cached.value;
+    parsed = cached.value;
+  } else {
+    const source = await readFile(file, "utf8");
+    parsed = parseBibTeX(source);
+    const old = bibCache.get(file);
+    if (old) bibCacheBytes -= old.size;
+    bibCache.set(file, { mtimeMs: st.mtimeMs, size: st.size, usedAt: Date.now(), value: parsed });
+    bibCacheBytes += st.size;
+    while (bibCache.size > BIB_CACHE_LIMIT || bibCacheBytes > BIB_CACHE_BYTES) {
+      const victim = [...bibCache.entries()].sort((a, b) => a[1].usedAt - b[1].usedAt)[0];
+      if (!victim) break;
+      bibCache.delete(victim[0]);
+      bibCacheBytes -= victim[1].size;
+    }
   }
-  const source = await readFile(file, "utf8");
-  const parsed = parseBibTeX(source);
+  // Cache only file parsing.  Namespace is declaration-specific and the same
+  // canonical file may legitimately be reached through different metadata
+  // contexts during the lifetime of the process.
   const entries = parsed.entries.map((entry) => ({
     ...entry,
     namespace,
     shortNamespace,
     file,
-    path: rootRelative(file),
-    id: `${namespace}:${entry.key}`,
+    path: rootRelative(file, pathRoot),
+    id: `bib-${createHash("sha1").update(file).update("\0").update(entry.key).digest("hex")}`,
   }));
-  const value = { file, path: rootRelative(file), namespace, shortNamespace, entries, diagnostics: parsed.diagnostics };
-  const old = bibCache.get(file);
-  if (old) bibCacheBytes -= old.size;
-  bibCache.set(file, { mtimeMs: st.mtimeMs, size: st.size, usedAt: Date.now(), value });
-  bibCacheBytes += st.size;
-  while (bibCache.size > BIB_CACHE_LIMIT || bibCacheBytes > BIB_CACHE_BYTES) {
-    const victim = [...bibCache.entries()].sort((a, b) => a[1].usedAt - b[1].usedAt)[0];
-    if (!victim) break;
-    bibCache.delete(victim[0]);
-    bibCacheBytes -= victim[1].size;
-  }
-  return value;
+  return { file, path: rootRelative(file, pathRoot), namespace, shortNamespace, entries, diagnostics: parsed.diagnostics };
 }
 
 function authors(value) {
@@ -313,31 +557,255 @@ export function formatBibEntry(entry, index = 0) {
   return `${head}${names ? `${names}. ` : ""}${title ? `"${title}." ` : ""}${venue ? `${venue}. ` : ""}${year}${pages}.${doi}${url}`.replace(/\s+/g, " ").trim();
 }
 
-function citeArgs(command) {
-  const raw = String(command.argsRaw || "").trim().replace(/^\{|\}$/g, "");
-  const args = {};
-  for (const part of raw.split(";")) {
-    const m = part.match(/^\s*([A-Za-z][\w-]*)\s*:\s*(.*?)\s*$/);
-    if (m) args[m[1].toLowerCase()] = m[2];
-  }
-  return args;
-}
-
-function commandKeys(command) {
-  return String(command.context || "").split(";").map((key) => key.trim()).filter(Boolean);
-}
-
 function namespaceMatches(files, namespace) {
   return files.filter((file) => file.namespace === namespace || file.shortNamespace === namespace);
 }
 
-export async function bibliographyForDocument({ file = "", content = "" } = {}) {
-  if (!rootDir) return { ok: false, message: "Bibliography root is not configured", entries: [], references: [], citations: [] };
-  const commands = scanInlineCommands(content, "cite");
-  if (commands.length === 0) return { ok: true, version, entries: [], references: [], citations: [], namespaces: [] };
-  const { files, diagnostics } = await visibleBibFiles(file, content);
-  const parsed = await Promise.all(
-    files.map((bib) => readBibFile(bib.file, bib.namespace, bib.shortNamespace)));
+const HIDDEN_CITATION_BLOCKS = new Set(["lean4", "src", "source", "meta"]);
+const PRIVATE_CITATION_COMMANDS = new Set(["todo", "itodo", "project", "milestone", "clock", "comment", "cell", "lean4", "note-code"]);
+
+function lineRecords(text) {
+  const records = [];
+  let from = 0;
+  while (from <= text.length) {
+    const newline = text.indexOf("\n", from);
+    const to = newline < 0 ? text.length : newline;
+    records.push({ from, to, lineEnd: newline < 0 ? to : newline + 1, text: text.slice(from, to) });
+    if (newline < 0) break;
+    from = newline + 1;
+  }
+  return records;
+}
+
+function mergeRanges(ranges) {
+  const sorted = ranges
+    .filter((range) => range.to > range.from)
+    .sort((a, b) => a.from - b.from || a.to - b.to);
+  const merged = [];
+  for (const range of sorted) {
+    const last = merged.at(-1);
+    if (!last || range.from > last.to) merged.push({ ...range });
+    else last.to = Math.max(last.to, range.to);
+  }
+  return merged;
+}
+
+function addDelimitedRanges(source, ranges, open, close, allowNewlines = true) {
+  let cursor = 0;
+  while (cursor < source.length) {
+    const from = source.indexOf(open, cursor);
+    if (from < 0) break;
+    const end = source.indexOf(close, from + open.length);
+    if (end < 0 || (!allowNewlines && /[\r\n]/.test(source.slice(from + open.length, end)))) {
+      cursor = from + open.length;
+      continue;
+    }
+    ranges.push({ from, to: end + close.length });
+    cursor = end + close.length;
+  }
+}
+
+function markdownLinkRanges(source) {
+  const ranges = [];
+  for (let start = 0; start < source.length; start += 1) {
+    const image = source[start] === "!" && source[start + 1] === "[";
+    if (!image && source[start] !== "[") continue;
+    const bracketStart = start + (image ? 1 : 0);
+    let bracketDepth = 1;
+    let cursor = bracketStart + 1;
+    let escaped = false;
+    for (; cursor < source.length && bracketDepth > 0; cursor += 1) {
+      const char = source[cursor];
+      if (char === "\n" || char === "\r") break;
+      if (escaped) { escaped = false; continue; }
+      if (char === "\\") { escaped = true; continue; }
+      if (char === "[") bracketDepth += 1;
+      else if (char === "]") bracketDepth -= 1;
+    }
+    if (bracketDepth !== 0 || source[cursor] !== "(") continue;
+    const destinationFrom = cursor;
+    let parenDepth = 1;
+    cursor += 1;
+    escaped = false;
+    for (; cursor < source.length && parenDepth > 0; cursor += 1) {
+      const char = source[cursor];
+      if (char === "\n" || char === "\r") break;
+      if (escaped) { escaped = false; continue; }
+      if (char === "\\") { escaped = true; continue; }
+      if (char === "(") parenDepth += 1;
+      else if (char === ")") parenDepth -= 1;
+    }
+    if (parenDepth === 0) {
+      // The destination is literal URL data; the visible link label remains
+      // normal Markdown and may legitimately contain an Aaronnote citation.
+      ranges.push({ from: destinationFrom, to: cursor });
+      start = cursor - 1;
+    }
+  }
+  return ranges;
+}
+
+function balancedBraceEnd(source, open) {
+  let depth = 0;
+  let quote = "";
+  for (let index = open; index < source.length; index += 1) {
+    const char = source[index];
+    if (quote) {
+      if (char === "\\" && index + 1 < source.length) index += 1;
+      else if (char === quote) quote = "";
+      continue;
+    }
+    if (char === '"' || char === "'") { quote = char; continue; }
+    if (char === "\\" && index + 1 < source.length) { index += 1; continue; }
+    if (char === "{") depth += 1;
+    else if (char === "}" && --depth === 0) return index + 1;
+  }
+  return source.length;
+}
+
+function protectedCitationRanges(markdown) {
+  const source = String(markdown || "");
+  const ranges = [];
+
+  // HTML comments, including an unfinished comment through EOF.
+  let commentFrom = 0;
+  while ((commentFrom = source.indexOf("<!--", commentFrom)) >= 0) {
+    const close = source.indexOf("-->", commentFrom + 4);
+    ranges.push({ from: commentFrom, to: close < 0 ? source.length : close + 3 });
+    if (close < 0) break;
+    commentFrom = close + 3;
+  }
+
+  const lines = lineRecords(source);
+  let fence = null;
+  let hidden = null;
+  for (const line of lines) {
+    const containerText = line.text.replace(/^ {0,3}(?:> ?)+/, "");
+    const fenceMatch = containerText.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (!fence && fenceMatch) {
+      fence = { from: line.from, char: fenceMatch[1][0], length: fenceMatch[1].length };
+    } else if (fence && fenceMatch && fenceMatch[1][0] === fence.char && fenceMatch[1].length >= fence.length) {
+      ranges.push({ from: fence.from, to: line.lineEnd });
+      fence = null;
+    }
+
+    if (!hidden) {
+      const open = line.text.match(/^\s*#\+begin(?:_|\s+)([A-Za-z][\w-]*)\b/i);
+      const kind = open?.[1]?.toLowerCase() || "";
+      if (HIDDEN_CITATION_BLOCKS.has(kind)) hidden = { kind, from: line.from, depth: 1 };
+    } else {
+      if (new RegExp(`^\\s*#\\+begin(?:_|\\s+)${hidden.kind}\\b`, "i").test(line.text)) hidden.depth += 1;
+      if (new RegExp(`^\\s*#\\+end(?:_|\\s+)${hidden.kind}\\s*$`, "i").test(line.text)) {
+        hidden.depth -= 1;
+        if (hidden.depth === 0) {
+          ranges.push({ from: hidden.from, to: line.lineEnd });
+          hidden = null;
+        }
+      }
+    }
+  }
+  if (fence) ranges.push({ from: fence.from, to: source.length });
+  if (hidden) ranges.push({ from: hidden.from, to: source.length });
+
+  // Private planning blocks may span lines after their visible command header.
+  const privateBlock = /@@(?:todo|itodo|project|milestone|clock|comment|cell|lean4|note-code)(?:\([^\n)]*\))?[ \t]+\[[^\]\n]*\][ \t]*\{/gi;
+  for (const match of source.matchAll(privateBlock)) {
+    const open = match.index + match[0].lastIndexOf("{");
+    ranges.push({ from: match.index, to: balancedBraceEnd(source, open) });
+  }
+  for (const command of scanInlineCommands(source)) {
+    if (PRIVATE_CITATION_COMMANDS.has(command.name)) ranges.push({ from: command.fullFrom, to: command.fullTo });
+  }
+
+  // Literal Markdown/code/math contexts.
+  for (const match of source.matchAll(/(`+)[^\n]*?\1/g)) ranges.push({ from: match.index, to: match.index + match[0].length });
+  addDelimitedRanges(source, ranges, "\\(", "\\)", false);
+  addDelimitedRanges(source, ranges, "\\[", "\\]", true);
+  addDelimitedRanges(source, ranges, "$$", "$$", true);
+  for (const match of source.matchAll(/(?<!\\)\$(?!\s|\$)[^$\n]*?\S(?<!\\)\$/g)) {
+    ranges.push({ from: match.index, to: match.index + match[0].length });
+  }
+  ranges.push(...markdownLinkRanges(source));
+  return mergeRanges(ranges);
+}
+
+function escapedAt(source, from) {
+  let slashes = 0;
+  for (let index = from - 1; index >= 0 && source[index] === "\\"; index -= 1) slashes += 1;
+  return slashes % 2 === 1;
+}
+
+function citationScan(markdown) {
+  const source = String(markdown || "");
+  const ranges = protectedCitationRanges(markdown);
+  const commands = scanInlineCommands(markdown, "cite").filter((command) =>
+    !ranges.some((range) => command.fullFrom >= range.from && command.fullFrom < range.to));
+  const starts = new Set(commands.map((command) => command.fullFrom));
+  const diagnostics = [];
+  for (const match of source.matchAll(/@@cite\b/gi)) {
+    const from = match.index;
+    if (escapedAt(source, from) || ranges.some((range) => from >= range.from && from < range.to) || starts.has(from)) continue;
+    const lineEnd = source.indexOf("\n", from);
+    const fragment = source.slice(from, lineEnd < 0 ? source.length : lineEnd);
+    const open = fragment.match(/^@@cite(?:\([^)]*\))?[ \t]*\[/i);
+    diagnostics.push(open
+      ? `unclosed citation key list near ${bibLocation(source, from)}`
+      : `malformed citation command near ${bibLocation(source, from)}`);
+  }
+  return { commands, diagnostics };
+}
+
+async function loadVisibleBibliographies(file, content, metadataContent, allowedRoot = "", libraryRoot = rootDir) {
+  const { files, diagnostics } = await visibleBibFiles(file, content, metadataContent, allowedRoot, libraryRoot);
+  const results = await Promise.all(files.map(async (bib) => {
+    try {
+      return { value: await readBibFile(bib.file, bib.namespace, bib.shortNamespace, bib.pathRoot) };
+    } catch (error) {
+      return { error: `failed to read bibliography ${rootRelative(bib.file, bib.pathRoot)}: ${String(error?.message || error)}` };
+    }
+  }));
+  const parsed = [];
+  for (const result of results) {
+    if (result.error) {
+      diagnostics.push(result.error);
+      continue;
+    }
+    const bib = result.value;
+    parsed.push(bib);
+    for (const diagnostic of bib.diagnostics || []) diagnostics.push(`${bib.path}: ${diagnostic}`);
+    const keyCounts = new Map();
+    for (const entry of bib.entries) keyCounts.set(entry.key, (keyCounts.get(entry.key) || 0) + 1);
+    for (const [key, count] of keyCounts) {
+      if (count > 1) diagnostics.push(`${bib.path}: duplicate BibTeX key: ${key}`);
+    }
+  }
+
+  // A short namespace is export-safe only when it identifies exactly one
+  // visible file.  Keep full namespaces intact while withholding ambiguous
+  // aliases from the entry objects consumed by the LaTeX map builder.
+  const shortCounts = new Map();
+  for (const bib of parsed) shortCounts.set(bib.shortNamespace, (shortCounts.get(bib.shortNamespace) || 0) + 1);
+  for (const bib of parsed) {
+    if (shortCounts.get(bib.shortNamespace) > 1) {
+      bib.entries = bib.entries.map((entry) => ({ ...entry, shortNamespace: "" }));
+    }
+  }
+  return { parsed, diagnostics, shortCounts };
+}
+
+export async function bibliographyForDocument(options = {}) {
+  const file = String(options.file || "");
+  const content = String(options.content || "");
+  const metadataContent = typeof options.metadataContent === "string" ? options.metadataContent : content;
+  const libraryRoot = rootDir;
+  if (!libraryRoot) return { ok: false, message: "Bibliography root is not configured", entries: [], references: [], citations: [] };
+  const scanned = citationScan(content);
+  const commands = scanned.commands;
+  if (commands.length === 0) {
+    return { ok: true, version, entries: [], references: [], citations: [], namespaces: [], diagnostics: scanned.diagnostics };
+  }
+  const { parsed, diagnostics } = await loadVisibleBibliographies(file, content, metadataContent, options.allowedRoot, libraryRoot);
+  diagnostics.push(...scanned.diagnostics);
   const namespaceList = parsed.map((bib) => ({
     namespace: bib.namespace,
     shortNamespace: bib.shortNamespace,
@@ -348,24 +816,62 @@ export async function bibliographyForDocument({ file = "", content = "" } = {}) 
   const citations = [];
   for (const command of commands) {
     const ns = command.switchValue.trim();
-    const keys = commandKeys(command);
-    const args = citeArgs(command);
     const matches = namespaceMatches(parsed, ns);
-    const cite = { from: command.fullFrom, to: command.fullTo, namespace: ns, keys, args, itemIds: [], numbers: [], diagnostics: [] };
-    if (!ns) cite.diagnostics.push("citation namespace is required");
-    if (matches.length === 0) cite.diagnostics.push(`unknown bibliography namespace: ${ns}`);
-    if (matches.length > 1) cite.diagnostics.push(`ambiguous bibliography namespace: ${ns}`);
-    for (const key of keys) {
-      const found = matches.length === 1 ? matches[0].entries.filter((entry) => entry.key === key) : [];
-      if (found.length !== 1) {
-        cite.diagnostics.push(found.length > 1 ? `duplicate BibTeX key: ${key}` : `unknown BibTeX key: ${key}`);
+    const sourceKeys = String(command.context || "").split(";").map((key) => key.trim());
+    const cite = {
+      from: command.fullFrom,
+      to: command.fullTo,
+      namespace: ns,
+      keys: [],
+      args: { ...(command.args || {}) },
+      items: [],
+      itemIds: [],
+      numbers: [],
+      diagnostics: [],
+    };
+    if (command.argsError) cite.diagnostics.push(command.argsError);
+    let namespaceDiagnostic = "";
+    if (!ns) namespaceDiagnostic = "citation namespace is required";
+    else if (matches.length === 0) namespaceDiagnostic = `unknown bibliography namespace: ${ns}`;
+    else if (matches.length > 1) namespaceDiagnostic = `ambiguous bibliography namespace: ${ns}`;
+    if (namespaceDiagnostic) cite.diagnostics.push(namespaceDiagnostic);
+
+    const seenKeys = new Map();
+    for (const key of sourceKeys) {
+      if (!key) {
+        const item = { key: "", diagnostics: ["citation key is required"] };
+        cite.items.push(item);
+        cite.diagnostics.push(...item.diagnostics);
         continue;
       }
-      const entry = found[0];
-      if (!numbered.has(entry.id)) numbered.set(entry.id, numbered.size + 1);
-      cite.itemIds.push(entry.id);
-      cite.numbers.push(numbered.get(entry.id));
+      if (seenKeys.has(key)) {
+        const original = seenKeys.get(key);
+        cite.items.push({ ...original, diagnostics: [...original.diagnostics], duplicate: true });
+        continue;
+      }
+      cite.keys.push(key);
+      const item = { key, diagnostics: [] };
+      if (namespaceDiagnostic) {
+        item.diagnostics.push(namespaceDiagnostic);
+      } else {
+        const found = matches[0].entries.filter((entry) => entry.key === key);
+        if (found.length !== 1) {
+          item.diagnostics.push(found.length > 1 ? `duplicate BibTeX key: ${key}` : `unknown BibTeX key: ${key}`);
+        } else {
+          const entry = found[0];
+          if (!numbered.has(entry.id)) numbered.set(entry.id, numbered.size + 1);
+          item.id = entry.id;
+          item.entry = entry;
+          item.number = numbered.get(entry.id);
+          cite.itemIds.push(entry.id);
+          cite.numbers.push(item.number);
+        }
+      }
+      seenKeys.set(key, item);
+      cite.items.push(item);
+      cite.diagnostics.push(...item.diagnostics);
     }
+    cite.diagnostics = [...new Set(cite.diagnostics)];
     citations.push(cite);
   }
   const byId = new Map(parsed.flatMap((bib) => bib.entries).map((entry) => [entry.id, entry]));
@@ -373,30 +879,57 @@ export async function bibliographyForDocument({ file = "", content = "" } = {}) 
     const entry = byId.get(id);
     return { id, number, entry, text: formatBibEntry(entry, number), links: bibLinks(entry) };
   });
-  const hash = createHash("sha1").update(content).digest("hex").slice(0, 12);
-  return { ok: true, version, hash, namespaces: namespaceList, entries: [], references, citations, diagnostics };
+  const entries = references.map((reference) => reference.entry).filter(Boolean);
+  const hash = createHash("sha1").update(content).update("\0").update(metadataContent).digest("hex").slice(0, 12);
+  return { ok: true, version, hash, namespaces: namespaceList, entries, references, citations, diagnostics: [...new Set(diagnostics)] };
 }
 
-export async function bibliographyCompletions({ file = "", content = "", namespace = "", prefix = "", kind = "keys" } = {}) {
-  const { files } = await visibleBibFiles(file, content);
-  const parsed = await Promise.all(
-    files.map((bib) => readBibFile(bib.file, bib.namespace, bib.shortNamespace)));
+export async function bibliographyCompletions(options = {}) {
+  const file = String(options.file || "");
+  const content = String(options.content || "");
+  const metadataContent = typeof options.metadataContent === "string" ? options.metadataContent : content;
+  const namespace = String(options.namespace || "").trim();
+  const prefix = String(options.prefix || "");
+  const kind = String(options.kind || "keys");
+  const libraryRoot = rootDir;
+  const { parsed, diagnostics, shortCounts } = await loadVisibleBibliographies(file, content, metadataContent, options.allowedRoot, libraryRoot);
   const needle = String(prefix || "").toLowerCase();
   if (kind === "namespaces") {
     const seen = new Map();
     for (const bib of parsed) {
-      seen.set(bib.shortNamespace, { key: bib.shortNamespace, name: bib.shortNamespace, body: bib.shortNamespace, detail: bib.path });
+      if (shortCounts.get(bib.shortNamespace) === 1) {
+        seen.set(bib.shortNamespace, { key: bib.shortNamespace, name: bib.shortNamespace, body: bib.shortNamespace, detail: bib.path });
+      }
       seen.set(bib.namespace, { key: bib.namespace, name: bib.namespace, body: bib.namespace, detail: bib.path });
     }
-    return { ok: true, items: [...seen.values()].filter((item) => !needle || item.key.toLowerCase().includes(needle)).slice(0, 24) };
+    const items = [...seen.values()]
+      .filter((item) => !needle || item.key.toLowerCase().includes(needle))
+      .sort((a, b) => a.key.localeCompare(b.key))
+      .slice(0, 24);
+    return { ok: true, items, diagnostics: [...new Set(diagnostics)] };
   }
   const matches = namespaceMatches(parsed, namespace);
-  const items = matches.flatMap((bib) => bib.entries).map((entry) => {
+  if (matches.length !== 1) {
+    const reason = matches.length === 0
+      ? `unknown bibliography namespace: ${namespace}`
+      : `ambiguous bibliography namespace: ${namespace}`;
+    return { ok: true, items: [], diagnostics: [...new Set([...diagnostics, reason])] };
+  }
+  const keyCounts = new Map();
+  for (const entry of matches[0].entries) keyCounts.set(entry.key, (keyCounts.get(entry.key) || 0) + 1);
+  const items = matches[0].entries.filter((entry) => keyCounts.get(entry.key) === 1).map((entry) => {
     const f = entry.fields || {};
     const detail = [authors(f.author || "").join(", "), f.year || f.date, f.title].filter(Boolean).join(" · ");
     return { key: entry.key, name: entry.key, body: entry.key, detail, source: entry.path };
   });
-  return { ok: true, items: items.filter((item) => !needle || `${item.key} ${item.detail}`.toLowerCase().includes(needle)).slice(0, 24) };
+  return {
+    ok: true,
+    items: items
+      .filter((item) => !needle || `${item.key} ${item.detail}`.toLowerCase().includes(needle))
+      .sort((a, b) => a.key.localeCompare(b.key))
+      .slice(0, 24),
+    diagnostics: [...new Set(diagnostics)],
+  };
 }
 
 function bibLinks(entry) {

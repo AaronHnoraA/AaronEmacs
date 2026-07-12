@@ -1,6 +1,6 @@
 import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
 
-import { noteCssHrefFromMarkdown, renderMarkdownHTML, renderPublishedNoteHTML } from "../src/render-html.ts";
+import { formatCitationLabel, noteCssHrefFromMarkdown, renderMarkdownHTML, renderPublishedNoteHTML } from "../src/render-html.ts";
 
 describe("shared markdown HTML renderer", () => {
   test("renders math and org env blocks with editor DOM", () => {
@@ -60,6 +60,36 @@ y^2
     const content = widget!.querySelector<HTMLElement>(".org-env-content");
     expect(content?.hidden).toBe(false);
     expect(content?.textContent).toBe("private note");
+  });
+
+  test("renders @@cite as stable hydratable HTML without leaking command source", () => {
+    const html = renderMarkdownHTML("See @@cite(iso) [Str87; Ive09] {prefix: (; locator: p. 406; suffix: )}.");
+    expect(html).not.toContain("@@cite");
+
+    const root = document.createElement("div");
+    root.innerHTML = html;
+    const cite = root.querySelector<HTMLElement>("[data-cite-state]");
+    expect(cite).toBeTruthy();
+    expect(cite?.dataset.citeState).toBe("unresolved");
+    expect(cite?.dataset.citeNamespace).toBe("iso");
+    expect(cite?.dataset.citeKeys).toBe("Str87;Ive09");
+    expect(cite?.dataset.citeLocator).toBe("p. 406");
+    expect(cite?.getAttribute("role")).toBe("doc-biblioref");
+    expect(cite?.textContent).toBe("([Str87; Ive09, p. 406])");
+  });
+
+  test("keeps escaped and code citation syntax literal", () => {
+    const html = renderMarkdownHTML("Literal \\@@cite(iso) [K] and code `@@cite(iso) [K]`.");
+    const root = document.createElement("div");
+    root.innerHTML = html;
+    expect(root.querySelector("[data-cite-state]")).toBeNull();
+    expect(root.textContent?.match(/@@cite\(iso\) \[K\]/g)).toHaveLength(2);
+  });
+
+  test("joins citation affixes with punctuation-aware spacing", () => {
+    expect(formatCitationLabel("[1]", "see,", ",")).toBe("see, [1],");
+    expect(formatCitationLabel("[1]", "(", ")")).toBe("([1])");
+    expect(formatCitationLabel("[1]", "compare", "below")).toBe("compare [1] below");
   });
 
   test("omits todo command lines and trailing attrs from static render", () => {

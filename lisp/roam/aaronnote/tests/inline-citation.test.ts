@@ -29,7 +29,13 @@ describe("inline citation widget", () => {
     const editor = createEditor(host, { kernel: "cm6", initialContent: markdown });
     try {
       editor.setMarkdownSelection(markdown.length);
-      expect(host.querySelector<HTMLElement>(".inline-cite-widget")?.textContent).toBe("[?]");
+      const unresolved = host.querySelector<HTMLElement>(".inline-cite-widget")!;
+      expect(unresolved.querySelector(".inline-cite-label")?.textContent).toBe("[?]");
+      expect(unresolved.querySelector(".inline-cite-error-mark")?.textContent).toBe("⚠");
+      expect(unresolved.getAttribute("role")).toBe("button");
+      expect(unresolved.tabIndex).toBe(0);
+      expect(unresolved.getAttribute("aria-invalid")).toBe("true");
+      expect(unresolved.getAttribute("aria-label")).toContain("Citation error");
       expect(markdown.slice(observedRange.from, observedRange.to)).toBe(citation);
 
       label = "[1, p. 406]";
@@ -38,13 +44,19 @@ describe("inline citation widget", () => {
 
       expect(host.querySelector<HTMLElement>(".inline-cite-widget")?.textContent).toBe("[1, p. 406]");
       expect(host.querySelector(".inline-cite-widget")?.classList.contains("is-error")).toBe(false);
+      expect(host.querySelector(".inline-cite-widget")?.getAttribute("aria-invalid")).toBe("false");
+      expect(host.querySelector(".inline-cite-error-mark")).toBeNull();
 
       const widget = host.querySelector<HTMLElement>(".inline-cite-widget")!;
       expect(widget.dataset.cmOpenSource).toBe("true");
       widget.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
       widget.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, metaKey: true }));
+      widget.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }));
+      widget.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: " " }));
 
       expect(opened).toEqual([
+        { ...observedRange, jump: true },
+        { ...observedRange, jump: true },
         { ...observedRange, jump: true },
       ]);
       expect(editor.getMarkdownSelection()).toEqual({ from: markdown.length, to: markdown.length });

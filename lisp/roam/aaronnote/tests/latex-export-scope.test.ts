@@ -66,11 +66,21 @@ describe("LaTeX export scopes", () => {
     selected = toggleLatexExportScopeSelection(scopes, selected, omega.id);
     expect([...selected]).toEqual([nested.id, omega.id]);
     expect(latexExportScopesContent(markdown, scopes.filter((scope) => selected.has(scope.id))))
-      .toBe("## Nested\nN.\n\n# Omega\nO.");
+      .toBe("## Nested\nN.\n\n# Omega\nO.\n");
 
     selected = toggleLatexExportScopeSelection(scopes, selected, alpha.id);
     expect([...selected]).toEqual([omega.id, alpha.id]);
     selected = toggleLatexExportScopeSelection(scopes, selected, "document");
     expect([...selected]).toEqual(["document"]);
+  });
+
+  test("preserves trailing code whitespace byte-for-byte for a single scope", () => {
+    const source = "# Code\n\n```text\nalpha  \n\n\n```\n";
+    const scope = buildLatexExportScopes({
+      markdown: source,
+      headings: [{ level: 1, text: "Code", pos: 2, markerFrom: 0 }],
+    }).find((candidate) => candidate.kind === "heading")!;
+    expect(latexExportScopeContent(source, scope)).toBe(source);
+    expect(latexExportScopesContent(source, [scope])).toBe(source);
   });
 });

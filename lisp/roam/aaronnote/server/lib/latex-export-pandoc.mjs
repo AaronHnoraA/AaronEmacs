@@ -224,16 +224,70 @@ function semanticCommandOnLine(line) {
   return semanticMarkdownLevel(command) ? command : null;
 }
 
+function scanPrivateBraces(text, initial = { depth: 0, quote: "" }) {
+  let depth = Math.max(0, Number(initial.depth) || 0);
+  let quote = String(initial.quote || "");
+  let escaped = false;
+  const source = String(text || "");
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (escaped) { escaped = false; continue; }
+    if (char === "\\") { escaped = true; continue; }
+    if (quote) {
+      if (char === quote) quote = "";
+      continue;
+    }
+    if (char === '"' || char === "'") { quote = char; continue; }
+    if (char === "{") depth += 1;
+    else if (char === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0) return { state: { depth, quote: "" }, closeAt: index };
+    }
+  }
+  return { state: { depth, quote }, closeAt: -1 };
+}
+
+function multilinePrivateStart(line) {
+  for (const command of visiblePrivateCommands(line)) {
+    const remainder = String(line || "").slice(command.fullTo);
+    if (!/^\s*\{/.test(remainder)) continue;
+    const scanned = scanPrivateBraces(remainder);
+    if (scanned.state.depth > 0) return { command, state: scanned.state };
+  }
+  return null;
+}
+
+function continuePrivatePlanning(line, state) {
+  const container = markdownContainerLine(line);
+  const scanned = scanPrivateBraces(container.content, state);
+  if (scanned.closeAt < 0) return { closed: false, state: scanned.state, line: "" };
+  // Quote prefixes and indentation before the closing brace are Markdown
+  // structure, not private payload. Keep them when public prose follows `}`.
+  const indent = container.content.slice(0, scanned.closeAt).match(/^[ \t]*/)?.[0] || "";
+  return {
+    closed: true,
+    state: null,
+    line: `${container.prefix}${indent}${container.content.slice(scanned.closeAt + 1)}`,
+  };
+}
+
 function containsSemanticOutline(lines, frontMatterEnd, hiddenKinds) {
   let fence = null;
   let displayMath = null;
   let hidden = null;
   let hiddenDepth = 0;
-  let privatePlanningDepth = 0;
+  let privatePlanning = null;
   for (let index = frontMatterEnd + 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    const container = markdownContainerLine(line);
-    if (privatePlanningDepth > 0) { privatePlanningDepth += braceDelta(line); continue; }
+    let line = lines[index];
+    let container = markdownContainerLine(line);
+    if (privatePlanning) {
+      const continued = continuePrivatePlanning(line, privatePlanning);
+      privatePlanning = continued.state;
+      if (!continued.closed) continue;
+      line = continued.line;
+      container = markdownContainerLine(line);
+      if (!container.content.trim()) continue;
+    }
     if (hidden) {
       if (orgOpen(line)?.kind === hidden) hiddenDepth += 1;
       if (orgClose(line) === hidden && --hiddenDepth === 0) hidden = null;
@@ -256,9 +310,8 @@ function containsSemanticOutline(lines, frontMatterEnd, hiddenKinds) {
     if (/^(?: {4}|\t)/.test(container.content)) continue;
     const begin = orgOpen(line);
     if (begin && hiddenKinds.has(begin.kind)) { hidden = begin.kind; hiddenDepth = 1; continue; }
-    const multilinePrivate = visiblePrivateCommands(line)
-      .find((command) => /^\s*\{/.test(line.slice(command.fullTo)) && braceDelta(line.slice(command.fullTo)) > 0);
-    if (multilinePrivate) { privatePlanningDepth = Math.max(1, braceDelta(line.slice(multilinePrivate.fullTo))); continue; }
+    const multilinePrivate = multilinePrivateStart(line);
+    if (multilinePrivate) { privatePlanning = multilinePrivate.state; continue; }
     if (PRIVATE_COMMAND_LINE_RE.test(line)) continue;
     if (semanticCommandOnLine(line)) return true;
   }
@@ -279,21 +332,6 @@ function withoutVisibleLatexMarks(line) {
     output = output.slice(0, command.fullFrom) + output.slice(command.fullTo);
   }
   return output;
-}
-
-function braceDelta(text) {
-  let delta = 0;
-  let quote = "";
-  let escaped = false;
-  for (const char of String(text || "")) {
-    if (escaped) { escaped = false; continue; }
-    if (char === "\\") { escaped = true; continue; }
-    if (quote) { if (char === quote) quote = ""; continue; }
-    if (char === '"' || char === "'") { quote = char; continue; }
-    if (char === "{") delta += 1;
-    else if (char === "}") delta -= 1;
-  }
-  return delta;
 }
 
 function visiblePrivateCommands(line) {
@@ -344,11 +382,17 @@ function canonicalMathForPandoc(line) {
   return out;
 }
 
+export function extractAaronnoteMetadata(markdown) {
+  const lines = String(markdown || "").replace(/\r\n?/g, "\n").split("\n");
+  const frontMatter = parseYamlFrontMatter(lines);
+  return parseMeta(lines, frontMatter.meta);
+}
+
 export function preprocessAaronnoteForPandoc(markdown, options = {}) {
   const source = String(markdown || "").replace(/\r\n?/g, "\n");
   const lines = source.split("\n");
   const frontMatter = parseYamlFrontMatter(lines);
-  const meta = parseMeta(lines, frontMatter.meta);
+  const meta = extractAaronnoteMetadata(source);
   const hiddenKinds = new Set([...HIDDEN_BLOCKS, ...(Array.isArray(options.rules?.hiddenBlocks) ? options.rules.hiddenBlocks.map((value) => String(value).toLowerCase()) : [])]);
   const hasSemanticOutline = containsSemanticOutline(lines, frontMatter.end, hiddenKinds);
   const output = [];
@@ -358,21 +402,26 @@ export function preprocessAaronnoteForPandoc(markdown, options = {}) {
   let fence = null;
   let displayMath = null;
   let rawTikz = false;
-  let privatePlanningDepth = 0;
+  let privatePlanning = null;
+  let htmlComment = false;
   const singletonMarks = new Set();
   const unresolvedCitations = [];
   const conversionOptions = { ...options, unresolvedCitations };
 
   for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
+    let line = lines[index];
     const lineNumber = index + 1;
     const atParagraphStart = index === 0 || !lines[index - 1].trim();
     const markContext = { atParagraphStart, nextLineVisible: Boolean(lines[index + 1]?.trim()) };
-    const container = markdownContainerLine(line);
+    let container = markdownContainerLine(line);
     if (index <= frontMatter.end) continue;
-    if (privatePlanningDepth > 0) {
-      privatePlanningDepth += braceDelta(line);
-      continue;
+    if (privatePlanning) {
+      const continued = continuePrivatePlanning(line, privatePlanning);
+      privatePlanning = continued.state;
+      if (!continued.closed) continue;
+      line = continued.line;
+      container = markdownContainerLine(line);
+      if (!container.content.trim()) continue;
     }
     if (hidden) {
       if (orgOpen(line)?.kind === hidden) hiddenDepth += 1;
@@ -422,14 +471,34 @@ export function preprocessAaronnoteForPandoc(markdown, options = {}) {
     // Aaronnote command merely because its literal text occurs after 4 spaces.
     if (/^(?: {4}|\t)/.test(container.content)) { output.push(line); continue; }
 
+    if (htmlComment) {
+      const closeComment = line.indexOf("-->");
+      if (closeComment < 0) {
+        output.push(line);
+      } else {
+        htmlComment = false;
+        const comment = line.slice(0, closeComment + 3);
+        const suffix = line.slice(closeComment + 3);
+        const transformedSuffix = transformInlineCommands(suffix, conversionOptions, markContext);
+        output.push(`${comment}${canonicalMathForPandoc(transformedSuffix)}`);
+      }
+      continue;
+    }
+    const openComment = line.indexOf("<!--");
+    if (openComment >= 0 && line.indexOf("-->", openComment + 4) < 0) {
+      const prefix = transformInlineCommands(line.slice(0, openComment), conversionOptions, markContext);
+      output.push(`${canonicalMathForPandoc(prefix)}${line.slice(openComment)}`);
+      htmlComment = true;
+      continue;
+    }
+
     if (/^\s*\[(?:toc|TOC)\]\s*$/.test(line)) continue;
 
-    const multilinePrivate = visiblePrivateCommands(line)
-      .find((command) => /^\s*\{/.test(line.slice(command.fullTo)) && braceDelta(line.slice(command.fullTo)) > 0);
+    const multilinePrivate = multilinePrivateStart(line);
     if (multilinePrivate) {
-      privatePlanningDepth = Math.max(1, braceDelta(line.slice(multilinePrivate.fullTo)));
-      const visiblePrefix = transformInlineCommands(line.slice(0, multilinePrivate.fullTo), conversionOptions, { atParagraphStart });
-      if (visiblePrefix.trim()) output.push(canonicalMathForPandoc(visiblePrefix));
+      privatePlanning = multilinePrivate.state;
+      const visiblePrefix = transformInlineCommands(line.slice(0, multilinePrivate.command.fullTo), conversionOptions, { atParagraphStart });
+      if (markdownContainerLine(visiblePrefix).content.trim()) output.push(canonicalMathForPandoc(visiblePrefix));
       continue;
     }
 
@@ -494,7 +563,8 @@ export function preprocessAaronnoteForPandoc(markdown, options = {}) {
   if (fence) output.push(`${fence.prefix}${fence.char.repeat(fence.length)}`);
   if (displayMath) throw new Error("Unclosed display math");
   if (hidden) throw new Error(`Unclosed hidden Aaronnote block: ${hidden}`);
-  if (privatePlanningDepth > 0) throw new Error("Unclosed Aaronnote planning block");
+  if (privatePlanning) throw new Error("Unclosed Aaronnote planning block");
+  if (htmlComment) throw new Error("Unclosed HTML comment");
   if (rawTikz) throw new Error("Unclosed Aaronnote block: tikz");
   if (stack.length) throw new Error(`Unclosed Aaronnote block: ${stack.at(-1).kind}`);
   return {
@@ -506,10 +576,21 @@ export function preprocessAaronnoteForPandoc(markdown, options = {}) {
 }
 
 export function academicLatexPostprocess(latex) {
-  return String(latex || "")
+  const codeBlocks = [];
+  const protectedSource = String(latex || "").replace(
+    /\\begin\{(verbatim\*?|Verbatim|BVerbatim|LVerbatim|SaveVerbatim|lstlisting|minted|Highlighting)\}[\s\S]*?\\end\{\1\}/g,
+    (block) => {
+      const token = `\uE100AARONNOTECODEBLOCK${codeBlocks.length}\uE101`;
+      codeBlocks.push(block);
+      return token;
+    },
+  );
+  const normalized = protectedSource
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]+$/gm, "")
     .trim() + "\n";
+  return normalized.replace(/\uE100AARONNOTECODEBLOCK(\d+)\uE101/g,
+    (_match, index) => codeBlocks[Number(index)] || "");
 }
 
 function runPandoc(bin, args, input, options = {}) {

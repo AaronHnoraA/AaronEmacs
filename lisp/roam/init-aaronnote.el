@@ -126,22 +126,25 @@ warnings and errors, and nil suppresses both severity classes."
 
 (config-defvar my/aaronnote-latex-export-engine "codex"
   "Engine for the Aaronnote CMD+P LaTeX export.
-\"codex\" builds a deterministic mechanical draft and then lets codex polish it,
-gated on the document compiling (with fallback to the draft).  \"mechanical\"
-uses only the deterministic converter.  See `docs/latex-export-style.md' in the
-Aaronnote app."
+\"codex\" compile-verifies a deterministic mechanical draft first, then allows
+one fidelity-gated polish attempt.  A verified draft is never retried after an
+agent timeout or gate rejection; multiple repairs require a concrete mechanical
+compile failure.  \"mechanical\" never invokes an agent.  See
+`docs/latex-export-style.md' in the Aaronnote app."
   :type '(choice (const "codex") (const "mechanical"))
   :group 'my/aaronnote)
 
 (config-defvar my/aaronnote-latex-export-max-attempts 3
-  "Maximum codex polish/compile retries before falling back to the LaTeX draft."
+  "Maximum feedback-driven agent repairs after mechanical verification fails.
+A fidelity/review rejection falls back immediately instead of retrying."
   :type 'integer
   :group 'my/aaronnote)
 
 (config-defvar my/aaronnote-latex-export-agent "codex"
-  "AI backend for the Aaronnote LaTeX export polish step.
+  "AI backend for the Aaronnote LaTeX export repair step.
 One of \"codex\", \"claude\", or \"opencode\".  All run non-interactively with
-permission prompts disabled.  The backend is chosen here, not per export."
+permission prompts disabled.  Clean mechanically verified exports do not launch
+the backend.  The backend is chosen here, not per export."
   :type '(choice (const "codex") (const "claude") (const "opencode"))
   :group 'my/aaronnote)
 

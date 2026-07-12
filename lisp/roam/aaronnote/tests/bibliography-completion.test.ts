@@ -32,6 +32,18 @@ describe("bibliography completion context", () => {
     expect(context && citeKeyRenderPrefix(context)).toBe("@@cite(iso)[Str");
   });
 
+  test("accepts uppercase cite spelling but rejects an escaped command", () => {
+    expect(citeNamespaceCompletionPrefix("text @@CITE(project/UNSW")).toBe("project/UNSW");
+    expect(citeKeyCompletionContext("text @@CITE(iso)[Str")).toEqual({
+      namespace: "iso",
+      separator: "",
+      prefix: "Str",
+    });
+    expect(citeNamespaceCompletionPrefix(String.raw`text \@@cite(iso`)).toBeNull();
+    expect(citeKeyCompletionContext(String.raw`text \@@cite(iso)[Str`)).toBeNull();
+    expect(citeKeyCompletionContext(String.raw`text \\@@cite(iso)[Str`)).toMatchObject({ prefix: "Str" });
+  });
+
   test("does not treat a completed citation as an active completion", () => {
     expect(citeNamespaceCompletionPrefix("@@cite(iso) [Str87]")).toBeNull();
     expect(citeKeyCompletionContext("@@cite(iso) [Str87]")).toBeNull();
