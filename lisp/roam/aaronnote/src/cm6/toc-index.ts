@@ -1,6 +1,7 @@
 import { StateField, type ChangeSet, type EditorState, type Extension, type Text } from "@codemirror/state";
 
 import { scanInlineCommands } from "../command-syntax.ts";
+import { orgMetaSummaryRangeFromLines, type MetaSummarySourceRange } from "../org-meta.ts";
 import { semanticMarkdownLevel, semanticOutlineFromCommand } from "../semantic-outline.ts";
 
 export type MarkdownHeading = {
@@ -171,10 +172,18 @@ export function markdownHeadingsFromText(doc: Text): MarkdownHeading[] {
   return outlineHeadingsFromText(doc);
 }
 
-function docHasSemanticHeading(doc: Text): boolean {
+function lineInsideSourceRange(line: { from: number; to: number }, range: MetaSummarySourceRange | null): boolean {
+  return Boolean(range && line.from >= range.from && line.to <= range.to);
+}
+
+function docHasSemanticHeading(
+  doc: Text,
+  metaSummaryRange = orgMetaSummaryRangeFromLines(doc),
+): boolean {
   let inFence = false;
   for (let lineNo = 1; lineNo <= doc.lines; lineNo += 1) {
     const line = doc.line(lineNo);
+    if (lineInsideSourceRange(line, metaSummaryRange)) continue;
     const fenceToggle = FENCE_LINE_RE.test(line.text);
     if (fenceToggle) {
       inFence = !inFence;
@@ -187,11 +196,13 @@ function docHasSemanticHeading(doc: Text): boolean {
 }
 
 export function outlineHeadingsFromText(doc: Text): MarkdownHeading[] {
-  const hasSemantic = docHasSemanticHeading(doc);
+  const metaSummaryRange = orgMetaSummaryRangeFromLines(doc);
+  const hasSemantic = docHasSemanticHeading(doc, metaSummaryRange);
   const headings: MarkdownHeading[] = [];
   let inFence = false;
   for (let lineNo = 1; lineNo <= doc.lines; lineNo += 1) {
     const line = doc.line(lineNo);
+    if (lineInsideSourceRange(line, metaSummaryRange)) continue;
     const scan = scanLine(line.text, line.from, inFence, hasSemantic);
     headings.push(...scan.headings);
     if (scan.fenceToggle) inFence = !inFence;
@@ -213,20 +224,37 @@ function linesFromString(markdown: string): Array<{ text: string; from: number }
 export function inlineTagAnchorsFromText(doc: Text | string): InlineTagAnchor[] {
   const anchors: InlineTagAnchor[] = [];
   let inFence = false;
-  const pushLine = (text: string, from: number): void => {
+  const pushLine = (text: string, from: number, excluded = false): void => {
+    if (excluded) return;
     const scan = scanLine(text, from, inFence);
     anchors.push(...scan.anchors);
     if (scan.fenceToggle) inFence = !inFence;
   };
 
   if (typeof doc === "string") {
-    for (const line of linesFromString(doc)) pushLine(line.text, line.from);
+    const lines = linesFromString(doc);
+    const lineDoc = {
+      lines: lines.length,
+      line: (number: number) => {
+        const line = lines[number - 1]!;
+        return { ...line, to: line.from + line.text.length };
+      },
+    };
+    const metaSummaryRange = orgMetaSummaryRangeFromLines(lineDoc);
+    for (const line of lines) {
+      pushLine(
+        line.text,
+        line.from,
+        lineInsideSourceRange({ from: line.from, to: line.from + line.text.length }, metaSummaryRange),
+      );
+    }
     return anchors;
   }
 
+  const metaSummaryRange = orgMetaSummaryRangeFromLines(doc);
   for (let lineNo = 1; lineNo <= doc.lines; lineNo += 1) {
     const line = doc.line(lineNo);
-    pushLine(line.text, line.from);
+    pushLine(line.text, line.from, lineInsideSourceRange(line, metaSummaryRange));
   }
   return anchors;
 }
@@ -237,10 +265,12 @@ function collectTocIndex(doc: Text): TocIndex {
   const fenceRanges: Array<{ from: number; to: number }> = [];
   let inFence = false;
   let fenceFrom = -1;
-  const hasSemantic = docHasSemanticHeading(doc);
+  const metaSummaryRange = orgMetaSummaryRangeFromLines(doc);
+  const hasSemantic = docHasSemanticHeading(doc, metaSummaryRange);
 
   for (let lineNo = 1; lineNo <= doc.lines; lineNo += 1) {
     const line = doc.line(lineNo);
+    if (lineInsideSourceRange(line, metaSummaryRange)) continue;
     const scan = scanLine(line.text, line.from, inFence, hasSemantic);
     headings.push(...scan.headings);
     anchors.push(...scan.anchors);
@@ -346,6 +376,12 @@ function mapAnchor(anchor: InlineTagAnchor, changes: ChangeSet): InlineTagAnchor
 function patchTocIndex(index: TocIndex, startDoc: Text, nextDoc: Text, changes: ChangeSet): TocIndex | null {
   const range = changedRange(startDoc, changes);
   if (!range) return index;
+  const oldMetaSummary = orgMetaSummaryRangeFromLines(startDoc);
+  const nextMetaSummary = orgMetaSummaryRangeFromLines(nextDoc);
+  if (
+    (oldMetaSummary && range.oldFrom <= oldMetaSummary.to)
+    || (nextMetaSummary && range.newFrom <= nextMetaSummary.to)
+  ) return null;
   if (range.textTouchesFence || range.textTouchesHeading) return null;
 
   const oldWindow = lineWindow(startDoc, range.oldFrom, range.oldTo);

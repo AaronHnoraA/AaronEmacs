@@ -182,6 +182,29 @@ describe("xwidget key guard", () => {
     }
   });
 
+  test("xwidget Delete and Backspace remove whole grapheme clusters", () => {
+    const host = withMounted(document.createElement("section"));
+    const editor = createEditor(host, { initialContent: "A👍🏽B" });
+    const vim = createVimLite(editor, host);
+    try {
+      editor.setMarkdownSelection(5);
+      const backspace = new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true });
+      Object.defineProperty(backspace, "target", { value: document.body });
+      expect(handleXwidgetControlKeydown(backspace, { editor, editorHost: host, vim })).toBe(true);
+      expect(editor.getMarkdown()).toBe("AB");
+
+      editor.setMarkdown("A👍🏽B", { history: "reset" });
+      editor.setMarkdownSelection(1);
+      const del = new KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true });
+      Object.defineProperty(del, "target", { value: document.body });
+      expect(handleXwidgetControlKeydown(del, { editor, editorHost: host, vim })).toBe(true);
+      expect(editor.getMarkdown()).toBe("AB");
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
+
   test("maps raw xwidget keydown control bytes before they can insert glyphs", () => {
     const host = withMounted(document.createElement("section"));
     const editor = createEditor(host, { initialContent: "abc" });
@@ -302,7 +325,7 @@ describe("xwidget key guard", () => {
     }
   });
 
-  test("normal-mode arrow movement uses the same vim motion as hjkl", () => {
+  test("insert arrows stay native while normal j uses Vim screen-line motion", () => {
     const host = withMounted(document.createElement("section"));
     const editor = createEditor(host, { initialContent: "aa\nbbbb\ncc" });
     const vim = createVimLite(editor, host);
@@ -312,12 +335,11 @@ describe("xwidget key guard", () => {
       const down = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true });
       Object.defineProperty(down, "target", { value: document.body });
       expect(handleXwidgetSpecialKeydown(down, { editor, editorHost: host, vim })).toBe(true);
-      const arrowPosition = editor.getMarkdownSelection().from;
 
       editor.setMarkdownSelection(1);
       vim.setMode("normal");
       expect(vim.handleKey({ key: "j" })).toBe(true);
-      expect(editor.getMarkdownSelection().from).toBe(arrowPosition);
+      expect(editor.getMarkdownSelection().from).toBe(4);
     } finally {
       editor.destroy();
       host.remove();
@@ -489,6 +511,34 @@ describe("xwidget key guard", () => {
       Object.defineProperty(deleteChar, "target", { value: document.body });
       expect(handleXwidgetVimKeydown(deleteChar, { editor, editorHost: host, vim })).toBe(true);
       expect(editor.getMarkdown()).toBe("aa\nbbb\ncc");
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
+
+  test("leaves modified keys native inside embedded editable controls", () => {
+    const host = withMounted(document.createElement("section"));
+    const editor = createEditor(host, { initialContent: "abc" });
+    const vim = createVimLite(editor, host);
+    const editable = document.createElement("div");
+    editable.contentEditable = "true";
+    editable.textContent = "widget text";
+    host.appendChild(editable);
+    vim.setMode("normal");
+    try {
+      for (const key of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "a", "c", "v"]) {
+        const event = new KeyboardEvent("keydown", {
+          key,
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        });
+        Object.defineProperty(event, "target", { value: editable });
+        expect(vim.handleKeyDown(event)).toBe(false);
+        expect(event.defaultPrevented).toBe(false);
+      }
+      expect(vim.mode()).toBe("normal");
     } finally {
       editor.destroy();
       host.remove();
@@ -710,44 +760,39 @@ describe("xwidget key guard", () => {
     });
   });
 
-  test("forwards Cmd+Arrow keys as Emacs windmove chords", () => {
+  test("leaves Cmd+Arrow keys to native CodeMirror/WebKit editing", () => {
     withForwardedEmacsKeys((forwarded) => {
-      const cases: Array<[string, string]> = [
-        ["ArrowLeft", "M-<left>"],
-        ["ArrowRight", "M-<right>"],
-        ["ArrowUp", "M-<up>"],
-        ["ArrowDown", "M-<down>"],
-      ];
-
-      for (const [arrowKey, emacsKey] of cases) {
-        const event = new KeyboardEvent("keydown", {
-          key: arrowKey,
-          code: arrowKey,
-          metaKey: true,
-          bubbles: true,
-          cancelable: true,
-        });
-        expect(handleXwidgetEmacsKeydown(event)).toBe(true);
-        expect(event.defaultPrevented).toBe(true);
-        expect(forwarded.at(-1)).toBe(emacsKey);
+      for (const shiftKey of [false, true]) {
+        for (const arrowKey of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) {
+          const event = new KeyboardEvent("keydown", {
+            key: arrowKey,
+            code: arrowKey,
+            metaKey: true,
+            shiftKey,
+            bubbles: true,
+            cancelable: true,
+          });
+          expect(handleXwidgetEmacsKeydown(event)).toBe(false);
+          expect(event.defaultPrevented).toBe(false);
+        }
       }
 
-      expect(forwarded).toEqual(cases.map(([, emacsKey]) => emacsKey));
+      expect(forwarded).toEqual([]);
     });
   });
 
   test("includes the Aaronnote client when forwarding Emacs keys", () => {
     withForwardedEmacsPayloads((forwarded) => {
       const event = new KeyboardEvent("keydown", {
-        key: "ArrowRight",
-        code: "ArrowRight",
+        key: "w",
+        code: "KeyW",
         metaKey: true,
         bubbles: true,
         cancelable: true,
       });
       expect(handleXwidgetEmacsKeydown(event, { client: () => "split-client" })).toBe(true);
       expect(event.defaultPrevented).toBe(true);
-      expect(forwarded).toEqual([{ key: "M-<right>", client: "split-client" }]);
+      expect(forwarded).toEqual([{ key: "M-w", client: "split-client" }]);
     });
   });
 });

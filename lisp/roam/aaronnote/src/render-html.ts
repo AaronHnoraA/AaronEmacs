@@ -16,6 +16,16 @@ import { scanInlineCommands } from "./command-syntax.ts";
 import { semanticOutlineFromCommand } from "./semantic-outline.ts";
 import { renderTikzIframe } from "./tikz-render.ts";
 import {
+  metaEntryMap,
+  metaRoamIndexed,
+  metaTags,
+  ORG_META_PREAMBLE_LINE_LIMIT,
+  parseMetaEntries,
+  parseOrgMetaDocument,
+  showMetaTag,
+  unquoteMetaScalar,
+} from "./org-meta.ts";
+import {
   VISUAL_ATTACHMENT_IFRAME_ALLOW,
   visualAttachmentEmbeddableP,
   visualAttachmentFrame,
@@ -51,6 +61,15 @@ export type RenderPublishedNoteOptions = {
   private?: boolean;
   includePrivateContent?: boolean;
 };
+
+export {
+  metaEntryMap,
+  metaRoamIndexed,
+  metaTags,
+  parseMetaEntries,
+  parseOrgMetaDocument,
+  showMetaTag,
+} from "./org-meta.ts";
 
 type OrgEnvTokenMeta = {
   kind: string;
@@ -113,44 +132,6 @@ function classList(...parts: Array<string | false | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
 
-export function parseMetaEntries(body: string): Array<{ key: string; value: string }> {
-  return body
-    .split(/\r?\n/)
-    .map((line) => line.match(/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/))
-    .filter((match): match is RegExpMatchArray => Boolean(match))
-    .map((match) => ({ key: match[1]!, value: match[2] ?? "" }));
-}
-
-export function metaEntryMap(entries: Array<{ key: string; value: string }>): Map<string, string> {
-  return new Map(entries.map((entry) => [entry.key.toLowerCase(), entry.value]));
-}
-
-export function metaTags(value: string): string[] {
-  return String(value || "")
-    .split(",")
-    .map((tag) => tag.trim().replace(/^#/, ""))
-    .filter(Boolean);
-}
-
-export function showMetaTag(tag: string): boolean {
-  return !/[\\/_]/.test(tag);
-}
-
-function unquoteMetaScalar(value: string): string {
-  const trimmed = String(value || "").trim();
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-export function metaRoamIndexed(entries: Array<{ key: string; value: string }>): boolean {
-  const byKey = metaEntryMap(entries);
-  const id = unquoteMetaScalar(byKey.get("id") || "").trim();
-  const roam = unquoteMetaScalar(byKey.get("roam") || "").trim().toLowerCase();
-  return id.length > 0 && roam !== "off";
-}
-
 export function cssHrefFromMetaPath(value: string): string {
   const raw = unquoteMetaScalar(value).replace(/\\_/g, "_");
   if (!raw) return "";
@@ -168,12 +149,13 @@ export function noteCssHrefFromMarkdown(markdown: string): string {
   return cssHrefFromMetaPath(entries.get("css") || "");
 }
 
-function renderMetaCover(body: string): string {
-  const entries = parseMetaEntries(body);
+function renderMetaCover(md: MarkdownIt, body: string): string {
+  const metaDocument = parseOrgMetaDocument(body);
+  const { entries, summary } = metaDocument;
   const roamBadge = metaRoamIndexed(entries)
     ? ""
     : '<span class="aaronnote-meta-roam-badge" title="Not in roam database" aria-label="Not in roam database">🔕</span>';
-  if (entries.length === 0) {
+  if (entries.length === 0 && !summary) {
     return [
       '<div class="cm-org-env-block org-env-block" data-kind="meta" data-label="Meta">',
       '<div class="org-env-meta aaronnote-meta-cover">',
@@ -191,14 +173,27 @@ function renderMetaCover(body: string): string {
     .filter(showMetaTag)
     .map((tag) => `<button class="aaronnote-meta-tag">#${escapeHtml(tag)}</button>`)
     .join("");
+  const abstract = summary
+    ? [
+        '<section class="aaronnote-meta-abstract">',
+        '<div class="aaronnote-meta-abstract-heading">',
+        `<span class="aaronnote-meta-abstract-title">${md.renderInline(summary.title || "Abstract")}</span>`,
+        "</div>",
+        `<div class="aaronnote-meta-abstract-content">${summary.body.trim() ? md.render(summary.body) : ""}</div>`,
+        "</section>",
+      ].join("")
+    : "";
 
   return [
     '<div class="cm-org-env-block org-env-block" data-kind="meta" data-label="Meta">',
-    '<div class="org-env-meta aaronnote-meta-cover">',
+    `<div class="org-env-meta aaronnote-meta-cover"${summary ? ' data-has-abstract="true"' : ""}>`,
     roamBadge,
-    `<h1 class="aaronnote-meta-title">${escapeHtml(title)}</h1>`,
+    '<header class="aaronnote-meta-masthead">',
+    `<h1 class="aaronnote-meta-title">${md.renderInline(title)}</h1>`,
     date ? `<p class="aaronnote-meta-date">${escapeHtml(date)}</p>` : "",
     tags ? `<nav class="aaronnote-meta-tags" aria-label="Tags">${tags}</nav>` : "",
+    "</header>",
+    abstract,
     "</div>",
     "</div>",
   ].join("");
@@ -259,6 +254,7 @@ function orgEnvBlockRule(state: StateBlock, startLine: number, endLine: number, 
   if (!open) return false;
   const kind = open[1]!;
   if (kind.toLowerCase() === "lean4") return false;
+  if (kind.toLowerCase() === "meta" && startLine >= ORG_META_PREAMBLE_LINE_LIMIT) return false;
   const closeRe = new RegExp(`^\\s*#\\+\\s*end\\s+${kind.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i");
 
   let closeLine = -1;
@@ -811,7 +807,7 @@ function tikzTitleLayout(title: string): LayoutAttrs {
 function renderOrgEnv(md: MarkdownIt, tokens: Token[], idx: number): string {
   const meta = tokens[idx]!.meta as OrgEnvTokenMeta;
   const kind = meta.kind;
-  if (kind.toLowerCase() === "meta") return renderMetaCover(meta.body);
+  if (kind.toLowerCase() === "meta") return renderMetaCover(md, meta.body);
   if (kind.toLowerCase() === "html") {
     return meta.body.trim() ? `<div class="aaronnote-html">${meta.body}</div>` : "";
   }

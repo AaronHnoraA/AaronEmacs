@@ -1,5 +1,5 @@
 import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
-import { selectJumpCandidates, VIM_JUMP_LABELS } from "../../src/cm6/vim-jump.ts";
+import { buildVimJumpLabels, selectJumpCandidates, VIM_JUMP_LABELS } from "../../src/cm6/vim-jump.ts";
 
 // Guards the s-jump ordering contract: matches must be ranked by direction and
 // proximity to the cursor BEFORE being capped to the label budget. The previous
@@ -37,9 +37,20 @@ describe("selectJumpCandidates", () => {
     expect(result[0]).toBe(justForward);
   });
 
-  test("uses the same label key budget as the Emacs avy config", () => {
+  test("uses the same label alphabet as the Emacs avy config without truncating candidates", () => {
     expect(VIM_JUMP_LABELS).toBe("asdfghjklqweruiop");
     const positions = Array.from({ length: 30 }, (_, i) => i + 1);
-    expect(selectJumpCandidates(positions, 0, 1)).toHaveLength(VIM_JUMP_LABELS.length);
+    expect(selectJumpCandidates(positions, 0, 1)).toHaveLength(positions.length);
+  });
+
+  test("builds prefix-free multi-key labels for the whole visible candidate set", () => {
+    const labels = buildVimJumpLabels(VIM_JUMP_LABELS.length + 8);
+    expect(labels).toHaveLength(VIM_JUMP_LABELS.length + 8);
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(labels.some((label) => label.length === 1)).toBe(true);
+    expect(labels.some((label) => label.length === 2)).toBe(true);
+    for (const label of labels) {
+      expect(labels.some((other) => other !== label && other.startsWith(label))).toBe(false);
+    }
   });
 });

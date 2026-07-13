@@ -13,6 +13,7 @@ import { aaronnoteMarkdownToLatexPandoc, extractAaronnoteMetadata } from "./late
 import { agentAvailable, loadAgentRules, normalizeAgentTitle, polishBodyWithAgent } from "./latex-export-codex.mjs";
 import { loadKatexMacros } from "./katex-macros.mjs";
 import { durationFromEnv } from "./jupyter-cell.mjs";
+import { maskMetaSummaryContent } from "../../shared/meta-summary.mjs";
 import { SessionManager } from "../Features/Session/manager.mjs";
 import {
   bibliographyCompletions,
@@ -1715,7 +1716,7 @@ export function tagsFromContent(content) {
 export function inlineTagsFromContent(content) {
   const tags = [];
   let inFence = false;
-  for (const line of String(content || "").split(/\r?\n/)) {
+  for (const line of maskMetaSummaryContent(content).split(/\r?\n/)) {
     if (/^\s*(```|~~~)/.test(line)) {
       inFence = !inFence;
       continue;
@@ -1930,14 +1931,15 @@ function markdownLinkDestinations(text) {
 
 export function refsFromContent(content) {
   const meta = noteMetadata(content);
+  const source = maskMetaSummaryContent(content);
   const refs = new Set(Array.isArray(meta.refs) ? meta.refs : []);
   refTokenPattern.lastIndex = 0;
   let match;
-  while ((match = refTokenPattern.exec(content)) !== null) {
+  while ((match = refTokenPattern.exec(source)) !== null) {
     if (match[1]) refs.add(match[1]);
     else refs.add(refFromRoamHref(match[0]));
   }
-  for (const href of markdownLinkHrefs(content)) {
+  for (const href of markdownLinkHrefs(source)) {
     const noteRef = noteFileRefFromHref(href);
     if (noteRef) refs.add(noteRef);
     const roamRef = refFromRoamLikeHref(href);
@@ -1948,14 +1950,15 @@ export function refsFromContent(content) {
 
 export function roamDbRefsFromContent(content) {
   const meta = noteMetadata(content);
+  const source = maskMetaSummaryContent(content);
   const refs = new Set(Array.isArray(meta.refs) ? meta.refs : []);
   refTokenPattern.lastIndex = 0;
   let match;
-  while ((match = refTokenPattern.exec(content)) !== null) {
+  while ((match = refTokenPattern.exec(source)) !== null) {
     if (match[1]) refs.add(match[1]);
     else refs.add(refFromRoamHref(match[0]));
   }
-  for (const href of markdownLinkHrefs(content)) {
+  for (const href of markdownLinkHrefs(source)) {
     if (noteFileRefFromHref(href)) continue;
     const roamRef = refFromRoamLikeHref(href);
     if (roamRef) refs.add(roamRef);
@@ -2972,6 +2975,7 @@ function planningArgsWithNoteDefaults(attrs, note) {
 
 export function extractTodos(content, note, updatedAt) {
   const todos = [];
+  const planningSource = maskMetaSummaryContent(content);
   const lineStarts = [0];
   for (let i = 0; i < content.length; i++) {
     if (content[i] === "\n") lineStarts.push(i + 1);
@@ -2986,7 +2990,7 @@ export function extractTodos(content, note, updatedAt) {
     }
     return Math.max(0, hi) + 1;
   };
-  for (const command of scanPlanningNodes(content, { kind: "todo" })) {
+  for (const command of scanPlanningNodes(planningSource, { kind: "todo" })) {
     const source = content.slice(command.span.from, command.span.to);
     const text = String(command.title || "").trim();
     const status = normalizeTodoStatus(command.status);
@@ -3029,7 +3033,7 @@ export function extractTodos(content, note, updatedAt) {
 }
 
 export function extractPlanningItems(content, note, updatedAt) {
-  const nodes = scanPlanningNodes(content);
+  const nodes = scanPlanningNodes(maskMetaSummaryContent(content));
   const todos = extractTodos(content, note, updatedAt);
   const todoByIndex = new Map(todos.map((todo) => [todo.index, todo]));
   const projects = [];

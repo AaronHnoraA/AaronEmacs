@@ -5,6 +5,10 @@ import {
   headingSubtreeRange,
   type WritingStats,
 } from "../../writing-stats.ts";
+import {
+  orgMetaSummaryRangeFromLines,
+  type MetaSummarySourceRange,
+} from "../../../src/org-meta.ts";
 
 export type WritingStatsController = {
   schedule: (documentChanged: boolean) => void;
@@ -23,6 +27,7 @@ export function createWritingStatsController(
   label: HTMLElement,
 ): WritingStatsController {
   let cachedDoc: typeof editor.view.state.doc | null = null;
+  let metaSummaryRange: MetaSummarySourceRange | null = null;
   let full: WritingStats = { words: 0, characters: 0, cjkCharacters: 0, nonCjkWords: 0 };
   let subtreeCache: {
     doc: typeof editor.view.state.doc;
@@ -41,13 +46,14 @@ export function createWritingStatsController(
     if (destroyed) return;
     const state = editor.view.state;
     if (state.doc !== cachedDoc) {
-      full = countWritingStats(state.doc);
+      metaSummaryRange = orgMetaSummaryRangeFromLines(state.doc);
+      full = countWritingStats(state.doc, 0, state.doc.length, metaSummaryRange);
       cachedDoc = state.doc;
     }
     const selection = state.selection.main;
     const hasSelection = selection.from !== selection.to;
     const primary = hasSelection
-      ? countWritingStats(state.doc, selection.from, selection.to)
+      ? countWritingStats(state.doc, selection.from, selection.to, metaSummaryRange)
       : full;
     const subtree = headingSubtreeRange(state, selection.head);
     let subtreeStats: WritingStats | null = null;
@@ -61,7 +67,7 @@ export function createWritingStatsController(
       } else {
         subtreeStats = subtree.from === 0 && subtree.to === state.doc.length
           ? full
-          : countWritingStats(state.doc, subtree.from, subtree.to);
+          : countWritingStats(state.doc, subtree.from, subtree.to, metaSummaryRange);
         subtreeCache = { doc: state.doc, ...subtree, stats: subtreeStats };
       }
     }
@@ -111,6 +117,7 @@ export function createWritingStatsController(
     timer.cancel();
     cancelIdle();
     cachedDoc = null;
+    metaSummaryRange = null;
     subtreeCache = null;
   }
 

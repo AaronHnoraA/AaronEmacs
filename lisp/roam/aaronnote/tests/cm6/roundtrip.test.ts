@@ -14,7 +14,7 @@
 
 import { describe, expect, test, vi } from "@voidzero-dev/vite-plus-test";
 import { foldedRanges } from "@codemirror/language";
-import type { EditorState } from "@codemirror/state";
+import { EditorSelection, type EditorState } from "@codemirror/state";
 import { createEditor } from "../../src/editor-api.ts";
 import { calibrateWrappedLayoutClick, markdownHrefAt } from "../../src/cm6/editor-cm6.ts";
 import { setKnownRoamRefs } from "../../src/cm6/roam-link-status.ts";
@@ -1594,18 +1594,54 @@ Line two
     cleanup();
   });
 
-  test("meta block edits values without reopening full markdown source", () => {
-    const { editor, cleanup } = mountCM6(String.raw`#+begin meta
+  test("meta cover is read-only and edits through normal Source view", () => {
+    const md = String.raw`#+begin meta
 title: Alpha
 tags: one, two
-#+end meta`);
-    const input = document.querySelector<HTMLInputElement>(".org-env-meta-value[data-key='title']");
-    expect(input).toBeTruthy();
+#+end meta`;
+    const { editor, cleanup } = mountCM6(md);
+    expect(document.querySelector(".org-env-meta-value")).toBeNull();
+    expect(document.querySelector(".aaronnote-meta-title")?.textContent).toBe("Alpha");
     expect(document.querySelector(".aaronnote-meta-roam-badge")).toBeTruthy();
-    input!.value = "Beta";
-    input!.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
-    expect(editor.getMarkdown()).toContain("title: Beta");
+    editor.toggleSource();
+    expect(editor.isSourceMode()).toBe(true);
+    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent).toContain("title: Alpha");
+    expect(editor.getMarkdown()).toBe(md);
+    editor.toggleSource();
     expect(document.querySelector(".cm-org-env-block[data-kind='meta']")).toBeTruthy();
+    cleanup();
+  });
+
+  test("meta renders its nested summary as a single abstract cover widget", () => {
+    const md = String.raw`#+begin meta
+title: Tensor Isomorphism
+date: 2026-07-13
+tags: algebra, graph, tensor
+#+begin summary
+We present **three results**.
+
+1. First reduction.
+2. Second reduction.
+#+end summary
+#+end meta`;
+    const { editor, cleanup } = mountCM6(md);
+
+    expect(document.querySelectorAll(".cm-org-env-block[data-kind='meta']")).toHaveLength(1);
+    expect(document.querySelector(".aaronnote-meta-abstract-title")?.textContent).toBe("Abstract");
+    expect(document.querySelector(".aaronnote-meta-abstract-content strong")?.textContent).toBe("three results");
+    expect(document.querySelectorAll(".aaronnote-meta-tags .aaronnote-meta-tag")).toHaveLength(3);
+    expect(document.querySelector("[data-kind='summary']")).toBeNull();
+    expect(editor.getMarkdown()).toBe(md);
+    cleanup();
+  });
+
+  test("meta is recognized only in the short document preamble", () => {
+    const prefix = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join("\n");
+    const md = `${prefix}\n#+begin meta\ntitle: Mid-document\n#+end meta`;
+    const { editor, cleanup } = mountCM6(md);
+
+    expect(document.querySelector(".cm-org-env-block[data-kind='meta']")).toBeNull();
+    expect(editor.getMarkdown()).toBe(md);
     cleanup();
   });
 
@@ -2441,17 +2477,50 @@ maybeDescribe("cm6 kernel: selection", () => {
     }
 
     editor.setMarkdownSelection(1);
+    vim.setMode("normal");
     press("ArrowDown");
     expect(editor.getMarkdownSelection().from).toBe(4);
     press("ArrowDown");
     expect(editor.getMarkdownSelection().from).toBe(9);
     press("ArrowUp");
     expect(editor.getMarkdownSelection().from).toBe(4);
-    vim.setMode("normal");
     press("j");
     expect(editor.getMarkdownSelection().from).toBe(9);
     press("k");
     expect(editor.getMarkdownSelection().from).toBe(4);
+    cleanup();
+  });
+
+  test("vim-lite delegates insert-mode vertical movement to CM6", () => {
+    const { editor, cleanup } = mountCM6("ab\ncd");
+    const vim = createVimLite(editor, document.body);
+    editor.setMarkdownSelection(2);
+    expect(vim.handleKey({ key: "ArrowDown" })).toBe(false);
+    expect(editor.getMarkdownSelection()).toEqual({ from: 2, to: 2 });
+    cleanup();
+  });
+
+  test("vim-lite j/k use CM6 screen rows and preserve its pixel goal column", () => {
+    const { editor, cleanup } = mountCM6("a very long physical line that wraps");
+    const content = editor.view.contentDOM;
+    const rect = vi.spyOn(content, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, top: 0, left: 0, right: 320, bottom: 240,
+      width: 320, height: 240, toJSON: () => ({}),
+    } as DOMRect);
+    const move = vi.spyOn(editor.view, "moveVertically")
+      .mockReturnValueOnce(EditorSelection.cursor(12, 0, undefined, 73))
+      .mockReturnValueOnce(EditorSelection.cursor(4, 0, undefined, 73));
+    const vim = createVimLite(editor, document.body);
+
+    editor.setMarkdownSelection(2);
+    vim.setMode("normal");
+    expect(vim.handleKey({ key: "j" })).toBe(true);
+    expect(editor.getMarkdownSelection()).toEqual({ from: 12, to: 12 });
+    expect(vim.handleKey({ key: "k" })).toBe(true);
+    expect(move.mock.calls[1]![0].goalColumn).toBe(73);
+    expect(editor.getMarkdownSelection()).toEqual({ from: 4, to: 4 });
+
+    rect.mockRestore();
     cleanup();
   });
 
@@ -2518,7 +2587,7 @@ maybeDescribe("cm6 kernel: selection", () => {
     vim.setMode("normal");
     press("p");
     await settlePaste();
-    expect(editor.getMarkdown()).toBe("abcdab");
+    expect(editor.getMarkdown()).toBe("abcdabc");
     cleanup();
   });
 
@@ -2622,6 +2691,29 @@ maybeDescribe("cm6 kernel: selection", () => {
     expect(editor.getMarkdownSelection().from).toBe(0);
     expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
     cleanup();
+  });
+
+  test("vim-lite destroy cancels pending jump work and rejects later keys", () => {
+    const { editor, cleanup } = mountCM6("zero ab one ab two");
+    const vim = createVimLite(editor, document.body, { jumpTimeoutMs: 5 });
+
+    vi.useFakeTimers();
+    try {
+      editor.setMarkdownSelection(0);
+      vim.setMode("normal");
+      expect(vim.handleKey({ key: "s" })).toBe(true);
+      expect(vim.handleKey({ key: "a" })).toBe(true);
+      expect(document.querySelectorAll(".cm-vim-jump-preview").length).toBe(2);
+
+      vim.destroy();
+      vi.advanceTimersByTime(10);
+      expect(document.querySelectorAll(".cm-vim-jump-preview").length).toBe(0);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(0);
+      expect(vim.handleKey({ key: "x" })).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      cleanup();
+    }
   });
 
   test("vim-lite S jump prioritizes visible matches before the cursor", () => {
@@ -2769,7 +2861,7 @@ maybeDescribe("cm6 kernel: selection", () => {
     }
   });
 
-  test("vim-lite a and i at line end do not cross into the next line", () => {
+  test("vim-lite a, A, and i preserve Vim insertion boundaries", () => {
     const { editor, cleanup } = mountCM6("abc\ndef");
     const target = (editor.view as unknown as { contentDOM: HTMLElement }).contentDOM;
     const vim = createVimLite(editor, document.body);
@@ -2790,6 +2882,97 @@ maybeDescribe("cm6 kernel: selection", () => {
     press("i");
     expect(vim.mode()).toBe("insert");
     expect(editor.getMarkdownSelection()).toEqual({ from: 3, to: 3 });
+
+    vim.setMode("normal");
+    editor.setMarkdownSelection(1);
+    press("A");
+    expect(vim.mode()).toBe("insert");
+    expect(editor.getMarkdownSelection()).toEqual({ from: 3, to: 3 });
+    cleanup();
+  });
+
+  test("vim-lite Escape matches Vim cursor placement for i, a, I, and moved insert cursors", () => {
+    const { editor, cleanup } = mountCM6("  abc");
+    const vim = createVimLite(editor, document.body);
+
+    editor.setMarkdownSelection(3);
+    vim.setMode("normal");
+    expect(vim.handleKey({ key: "i" })).toBe(true);
+    expect(vim.handleKey({ key: "Escape" })).toBe(true);
+    expect(editor.getMarkdownSelection().from).toBe(3);
+
+    expect(vim.handleKey({ key: "a" })).toBe(true);
+    expect(editor.getMarkdownSelection().from).toBe(4);
+    expect(vim.handleKey({ key: "Escape" })).toBe(true);
+    expect(editor.getMarkdownSelection().from).toBe(3);
+
+    expect(vim.handleKey({ key: "I" })).toBe(true);
+    expect(editor.getMarkdownSelection().from).toBe(2);
+    expect(vim.handleKey({ key: "Escape" })).toBe(true);
+    expect(editor.getMarkdownSelection().from).toBe(2);
+
+    editor.setMarkdownSelection(3);
+    expect(vim.handleKey({ key: "i" })).toBe(true);
+    editor.setMarkdownSelection(5); // native insert-mode cursor movement
+    expect(vim.handleKey({ key: "Escape" })).toBe(true);
+    expect(editor.getMarkdownSelection().from).toBe(4);
+    cleanup();
+  });
+
+  test("vim-lite visual mode selects and deletes one full grapheme under the cursor", () => {
+    const { editor, cleanup } = mountCM6("A👍🏽B");
+    const vim = createVimLite(editor, document.body);
+
+    editor.setMarkdownSelection(1);
+    vim.setMode("normal");
+    expect(vim.handleKey({ key: "v" })).toBe(true);
+    expect(editor.getMarkdownSelection()).toEqual({ from: 1, to: 5 });
+    expect(vim.handleKey({ key: "x" })).toBe(true);
+    expect(editor.getMarkdown()).toBe("AB");
+    expect(editor.getMarkdownSelection()).toEqual({ from: 1, to: 1 });
+    cleanup();
+  });
+
+  test("vim-lite visual mode selects blank-line newlines and can swap its active end", () => {
+    const { editor, cleanup } = mountCM6("a\n\nb");
+    const vim = createVimLite(editor, document.body);
+
+    editor.setMarkdownSelection(2);
+    vim.setMode("normal");
+    expect(vim.handleKey({ key: "v" })).toBe(true);
+    expect(editor.getMarkdownSelectionRange()).toEqual({ anchor: 2, head: 3 });
+    expect(vim.handleKey({ key: "x" })).toBe(true);
+    expect(editor.getMarkdown()).toBe("a\nb");
+
+    editor.setMarkdown("abcd", { history: "reset" });
+    editor.setMarkdownSelection(1);
+    vim.setMode("normal");
+    vim.handleKey({ key: "v" });
+    vim.handleKey({ key: "l" });
+    expect(editor.getMarkdownSelectionRange()).toEqual({ anchor: 1, head: 3 });
+    expect(vim.handleKey({ key: "o" })).toBe(true);
+    expect(editor.getMarkdownSelectionRange()).toEqual({ anchor: 3, head: 1 });
+    cleanup();
+  });
+
+  test("vim-lite w/b distinguish Markdown punctuation while W/B use Vim WORDs", () => {
+    const { editor, cleanup } = mountCM6("foo.bar baz");
+    const vim = createVimLite(editor, document.body);
+
+    editor.setMarkdownSelection(0);
+    vim.setMode("normal");
+    vim.handleKey({ key: "w" });
+    expect(editor.getMarkdownSelection().from).toBe(3); // punctuation word
+    vim.handleKey({ key: "w" });
+    expect(editor.getMarkdownSelection().from).toBe(4);
+    vim.handleKey({ key: "b" });
+    expect(editor.getMarkdownSelection().from).toBe(3);
+
+    editor.setMarkdownSelection(0);
+    vim.handleKey({ key: "W" });
+    expect(editor.getMarkdownSelection().from).toBe(8);
+    vim.handleKey({ key: "B" });
+    expect(editor.getMarkdownSelection().from).toBe(0);
     cleanup();
   });
 
@@ -2810,17 +2993,74 @@ maybeDescribe("cm6 kernel: selection", () => {
     press("h"); // head must keep moving left past the anchor, not stick
 
     const range = editor.getMarkdownSelectionRange();
-    expect(range.anchor).toBe(3);
+    expect(range.anchor).toBe(4);
     expect(range.head).toBe(1);
-    expect(editor.getMarkdownSelection()).toEqual({ from: 1, to: 3 });
+    expect(editor.getMarkdownSelection()).toEqual({ from: 1, to: 4 });
 
     press("y");
     editor.setMarkdownSelection(editor.getMarkdown().length);
     vim.setMode("normal");
     press("p");
     await settlePaste();
-    expect(editor.getMarkdown()).toBe("abcdefbc");
+    expect(editor.getMarkdown()).toBe("abcdefbcd");
     cleanup();
+  });
+
+  test("vim-lite x and X use character-under-cursor semantics at line boundaries", () => {
+    const { editor, cleanup } = mountCM6("abc\ndef");
+    const vim = createVimLite(editor, document.body);
+
+    editor.setMarkdownSelection(3);
+    vim.setMode("normal");
+    expect(vim.handleKey({ key: "x" })).toBe(true);
+    expect(editor.getMarkdown()).toBe("ab\ndef");
+
+    editor.setMarkdown("abc", { history: "reset" });
+    editor.setMarkdownSelection(2);
+    expect(vim.handleKey({ key: "X" })).toBe(true);
+    expect(editor.getMarkdown()).toBe("ac");
+    cleanup();
+  });
+
+  test("vim-lite adopts mouse and Shift-click CM6 selections into visual mode", () => {
+    const { editor, cleanup } = mountCM6("abcdef");
+    const vim = createVimLite(editor, document.body);
+
+    editor.setMarkdownSelection(1, 4);
+    vim.syncSelectionFromEditor();
+    expect(vim.mode()).toBe("visual");
+    expect(editor.getMarkdownSelectionRange()).toEqual({ anchor: 1, head: 4 });
+
+    expect(vim.handleKey({ key: "l" })).toBe(true);
+    expect(editor.getMarkdownSelection()).toEqual({ from: 1, to: 5 });
+
+    editor.setMarkdownSelection(2);
+    vim.syncSelectionFromEditor();
+    expect(vim.mode()).toBe("normal");
+    expect(editor.getMarkdownSelection()).toEqual({ from: 2, to: 2 });
+    cleanup();
+  });
+
+  test("vim-lite s jump reaches visible candidates beyond the one-key label set", () => {
+    const { editor, cleanup } = mountCM6("a ".repeat(25));
+    const vim = createVimLite(editor, document.body, { jumpTimeoutMs: 5 });
+
+    vi.useFakeTimers();
+    try {
+      editor.setMarkdownSelection(0);
+      vim.setMode("normal");
+      expect(vim.handleKey({ key: "s" })).toBe(true);
+      expect(vim.handleKey({ key: "a" })).toBe(true);
+      vi.advanceTimersByTime(5);
+      expect(document.querySelectorAll(".cm-vim-jump-label").length).toBe(25);
+
+      expect(vim.handleKey({ key: "p" })).toBe(true);
+      expect(vim.handleKey({ key: "a" })).toBe(true);
+      expect(editor.getMarkdownSelection().from).toBe(34);
+    } finally {
+      vi.useRealTimers();
+      cleanup();
+    }
   });
 });
 
@@ -2980,6 +3220,34 @@ maybeDescribe("cm6 kernel: README parity", () => {
     mark = document.querySelector<HTMLElement>(".syntax-hint");
     expect(mark).toBeTruthy();
     expect(mark!.textContent).toBe("\\");
+    cleanup();
+  });
+
+  test("TeX delimiters stay visible while a display formula is incomplete or adjacent to prose", () => {
+    const formula = "\\[\nx + y\n\\]";
+    const { editor, cleanup } = mountCM6(formula);
+    editor.setMarkdownSelection(formula.length);
+    editor.insertText("after\\");
+    const md = `${formula}after\\`;
+
+    expect(editor.getMarkdown()).toBe(md);
+    const visibleText = editor.view.contentDOM.textContent ?? "";
+    expect(visibleText).toContain("\\[");
+    expect(visibleText).toContain("\\]after\\");
+    expect(Array.from(editor.view.dom.querySelectorAll<HTMLElement>(".syntax-hidden"))
+      .some((mark) => mark.textContent === "\\")).toBe(false);
+    cleanup();
+  });
+
+  test("formula cut/move/paste never hides adjacent TeX backslashes", () => {
+    const formula = "\\[\nx + y\n\\]";
+    const { editor, cleanup } = mountCM6(`${formula}\nafter`);
+
+    editor.replaceMarkdownRange(0, formula.length + 1, "", "start");
+    editor.replaceMarkdownRange(0, 0, `${formula}after\\`, "end");
+
+    expect(editor.getMarkdown()).toBe(`${formula}after\\after`);
+    expect(editor.view.contentDOM.textContent).toContain("\\]after\\after");
     cleanup();
   });
 

@@ -35,14 +35,17 @@ import {
   getFencedCodeRanges,
 } from "../../../code-ranges.ts";
 import {
+  renderMarkdownInlineHTML,
+  renderMarkdownHTML,
+} from "../../../../render-html.ts";
+import {
+  ORG_META_PREAMBLE_LINE_LIMIT,
   metaEntryMap,
   metaRoamIndexed,
   metaTags,
-  parseMetaEntries,
-  renderMarkdownInlineHTML,
-  renderMarkdownHTML,
+  parseOrgMetaDocument,
   showMetaTag,
-} from "../../../../render-html.ts";
+} from "../../../../org-meta.ts";
 import { applyImageLayout, imageLayoutFromAttrs, readImageTrailingAttrs, type ImageLayoutAttrs } from "../../../../image-attrs.ts";
 import { supportedDiagramLang } from "../../../../diagram-langs.ts";
 import { api } from "../../../../../aaronnote/api-client.ts";
@@ -190,6 +193,20 @@ function scanOrgEnvBlocks(
   excludedRanges: ReadonlyArray<{ from: number; to: number }> = [],
 ): OrgEnvBlock[] {
   const results: OrgEnvBlock[] = [];
+  let metaPreambleTo = -1;
+  if (depthLevel === 0 && baseOffset === 0) {
+    metaPreambleTo = text.length + 1;
+    let lineFrom = 0;
+    for (let line = 0; line < ORG_META_PREAMBLE_LINE_LIMIT; line++) {
+      const newline = text.indexOf("\n", lineFrom);
+      if (newline < 0) {
+        metaPreambleTo = text.length + 1;
+        break;
+      }
+      lineFrom = newline + 1;
+      metaPreambleTo = lineFrom;
+    }
+  }
   let i = 0;
   while (i < text.length) {
     // Advance to the start of the next line
@@ -202,6 +219,10 @@ function scanOrgEnvBlocks(
 
     const kind = openMatch[1].toLowerCase();
     if (kind === "lean4") { i = lineEndPos + 1; continue; }
+    if (kind === "meta" && (metaPreambleTo < 0 || i >= metaPreambleTo)) {
+      i = lineEndPos + 1;
+      continue;
+    }
     const title = (openMatch[2] ?? "").trim();
     const blockFrom = i;
     const bodyStart = lineEndPos + 1;
@@ -2391,9 +2412,13 @@ class MetaWidget extends MeasuredWidget {
 
   protected measureKey(): string { return "meta:" + shortHash(this.body); }
 
-  protected measureGroupKey(): string { return "meta"; }
+  protected measureGroupKey(): string {
+    return /(^|\n)[ \t]*#\+\s*begin\s+summary(?:\s|$)/i.test(this.body) ? "meta:abstract" : "meta";
+  }
 
-  protected estimatedHeightFallback(): number { return 210; }
+  protected estimatedHeightFallback(): number {
+    return /(^|\n)[ \t]*#\+\s*begin\s+summary(?:\s|$)/i.test(this.body) ? 520 : 270;
+  }
 
   eq(other: MetaWidget): boolean {
     return this.body === other.body && this.from === other.from && this.to === other.to;
@@ -2405,7 +2430,9 @@ class MetaWidget extends MeasuredWidget {
     setSourceRange(div, this.from, this.to);
     div.setAttribute("data-kind", "meta");
     div.dataset.label = envLabel("meta");
-    renderMetaWidget(div, view, this.body, this.from, this.to);
+    div.setAttribute("aria-readonly", "true");
+    div.title = "Edit metadata in Source view";
+    renderMetaWidget(div, this.body);
     return this.registerMeasured(div, view);
   }
 
@@ -2717,14 +2744,12 @@ class TikzWidget extends MeasuredWidget {
 
 function renderMetaWidget(
   root: HTMLElement,
-  view: EditorView,
   body: string,
-  from: number,
-  to: number,
 ): void {
   const meta = document.createElement("div");
   meta.className = "org-env-meta aaronnote-meta-cover";
-  const entries = parseMetaEntries(body);
+  const { entries, summary } = parseOrgMetaDocument(body);
+  if (summary) meta.dataset.hasAbstract = "true";
   if (!metaRoamIndexed(entries)) {
     const badge = document.createElement("span");
     badge.className = "aaronnote-meta-roam-badge";
@@ -2734,7 +2759,7 @@ function renderMetaWidget(
     meta.append(badge);
   }
 
-  if (entries.length === 0) {
+  if (entries.length === 0 && !summary) {
     const empty = document.createElement("span");
     empty.className = "org-env-meta-empty";
     empty.textContent = "No metadata";
@@ -2743,91 +2768,25 @@ function renderMetaWidget(
     return;
   }
 
-  const writeMeta = (): void => {
-    const lines = Array.from(meta.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(".org-env-meta-value"))
-      .map((input) => `${input.dataset.key}: ${input.value.trim()}`);
-    view.dispatch({
-      changes: { from, to, insert: buildOrgEnvSource("meta", "", lines.join("\n")) },
-    });
-  };
-
-  function makeInput(entry: { key: string; value: string }, className: string, label: string): HTMLInputElement;
-  function makeInput(
-    entry: { key: string; value: string },
-    className: string,
-    label: string,
-    multiline: true,
-  ): HTMLTextAreaElement;
-  function makeInput(
-    entry: { key: string; value: string },
-    className: string,
-    label: string,
-    multiline = false,
-  ): HTMLInputElement | HTMLTextAreaElement {
-    const value = multiline ? document.createElement("textarea") : document.createElement("input");
-    value.className = `org-env-meta-value ${className}`;
-    value.setAttribute("aria-label", label);
-    value.spellcheck = false;
-    value.value = entry.value;
-    value.dataset.key = entry.key;
-    if (value instanceof HTMLInputElement) {
-      value.type = "text";
-    } else {
-      value.rows = 1;
-      value.wrap = "soft";
-    }
-    const resize = (): void => {
-      if (!(value instanceof HTMLTextAreaElement)) return;
-      value.style.height = "auto";
-      value.style.height = `${value.scrollHeight}px`;
-    };
-    value.addEventListener("mousedown", stopEditorPropagation);
-    value.addEventListener("click", stopEditorPropagation);
-    value.addEventListener("beforeinput", stopEditorPropagation);
-    value.addEventListener("input", (event) => {
-      event.stopPropagation();
-      resize();
-    });
-    value.addEventListener("keyup", stopEditorPropagation);
-    value.addEventListener("paste", stopEditorPropagation);
-    value.addEventListener("cut", stopEditorPropagation);
-    value.addEventListener("blur", writeMeta);
-    const handleKeydown = (event: Event): void => {
-      const keyEvent = event as KeyboardEvent;
-      event.stopPropagation();
-      if (keyEvent.key === "Enter") {
-        event.preventDefault();
-        writeMeta();
-        view.focus();
-      }
-    };
-    value.addEventListener("keydown", handleKeydown);
-    queueMicrotask(resize);
-    return value;
-  }
-
   const byKey = metaEntryMap(entries);
-  const titleEntry = entries.find((entry) => entry.key.toLowerCase() === "title");
-  const dateEntry = entries.find((entry) => entry.key.toLowerCase() === "date");
-  const tagsEntry = entries.find((entry) => entry.key.toLowerCase() === "tags");
-  const sourceEntry = entries.find((entry) => entry.key.toLowerCase() === "source");
+  const masthead = document.createElement("header");
+  masthead.className = "aaronnote-meta-masthead";
+  const title = document.createElement("h1");
+  title.className = "aaronnote-meta-title";
+  title.textContent = byKey.get("title") || "Untitled";
+  masthead.append(title);
 
-  if (titleEntry) {
-    meta.append(makeInput(titleEntry, "aaronnote-meta-title", "Title", true));
-  } else {
-    const title = document.createElement("h1");
-    title.className = "aaronnote-meta-title";
-    title.textContent = "Untitled";
-    meta.append(title);
-  }
-
-  if (dateEntry) {
-    meta.append(makeInput(dateEntry, "aaronnote-meta-date", "Date"));
+  const dateValue = byKey.get("date") || "";
+  if (dateValue) {
+    const date = document.createElement("p");
+    date.className = "aaronnote-meta-date";
+    date.textContent = dateValue;
+    masthead.append(date);
   }
 
   const tagValues = metaTags(byKey.get("tags") || "");
   const visibleTagValues = tagValues.filter(showMetaTag);
-  if (tagsEntry || tagValues.length > 0) {
+  if (visibleTagValues.length > 0) {
     const tags = document.createElement("nav");
     tags.className = "aaronnote-meta-tags";
     tags.setAttribute("aria-label", "Tags");
@@ -2844,28 +2803,24 @@ function renderMetaWidget(
       });
       tags.append(tag);
     }
-    if (tagsEntry) {
-      const tagInput = makeInput(tagsEntry, "aaronnote-meta-hidden", "Tags");
-      tagInput.type = "hidden";
-      meta.append(tagInput);
-    }
-    if (visibleTagValues.length > 0) {
-      meta.append(tags);
-    }
+    masthead.append(tags);
   }
+  meta.append(masthead);
 
-  if (sourceEntry) {
-    const source = makeInput(sourceEntry, "aaronnote-meta-hidden", "Source");
-    source.type = "hidden";
-    meta.append(source);
-  }
-
-  const shownKeys = new Set(["title", "date", "tags", "source"]);
-  for (const entry of entries) {
-    if (shownKeys.has(entry.key.toLowerCase())) continue;
-    const hidden = makeInput(entry, "aaronnote-meta-hidden", entry.key);
-    hidden.type = "hidden";
-    meta.append(hidden);
+  if (summary) {
+    const abstract = document.createElement("section");
+    abstract.className = "aaronnote-meta-abstract";
+    const heading = document.createElement("div");
+    heading.className = "aaronnote-meta-abstract-heading";
+    const abstractTitle = document.createElement("span");
+    abstractTitle.className = "aaronnote-meta-abstract-title";
+    abstractTitle.textContent = summary.title || "Abstract";
+    heading.append(abstractTitle);
+    const content = document.createElement("div");
+    content.className = "aaronnote-meta-abstract-content";
+    if (summary.body.trim()) content.innerHTML = renderMarkdownHTML(summary.body);
+    abstract.append(heading, content);
+    meta.append(abstract);
   }
 
   root.append(meta);

@@ -1,10 +1,15 @@
 import type { Editor } from "../src/lib.ts";
-import type { Text } from "@codemirror/state";
+import { EditorSelection, findClusterBreak, type Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+import {
+  graphemeEndPosition,
+  previousGraphemePosition,
+} from "../src/cm6/text-boundaries.ts";
 import {
   applyVimJump,
   beginVimJump,
   clearVimJump,
+  narrowVimJump,
   previewVimJump,
   type VimJumpDirection,
   type VimJumpSession,
@@ -25,8 +30,10 @@ export type VimLiteKey = {
 export type VimLiteController = {
   mode(): VimLiteMode;
   setMode(mode: VimLiteMode): void;
+  syncSelectionFromEditor(): void;
   handleKey(event: VimLiteKey): boolean;
   handleKeyDown(event: KeyboardEvent): boolean;
+  destroy(): void;
 };
 
 type VimLiteOptions = {
@@ -56,6 +63,11 @@ type VimJumpInput = {
   direction: VimJumpDirection;
   needle: string;
   timer: number | null;
+};
+
+type VerticalGoal = {
+  kind: "pixel" | "column";
+  value: number;
 };
 
 const AVY_TIMEOUT_MS = 500;
@@ -142,13 +154,68 @@ function docLineSelectionRange(text: Text, anchor: number, head: number): { from
   };
 }
 
-function docChar(text: Text, pos: number): string {
+function visualCharEndPosition(text: Text, pos: number): number {
+  const end = graphemeEndPosition(text, pos);
+  // Vim's characterwise Visual mode can select the newline represented by an
+  // empty screen line. Without this, `v` on a blank line creates an empty CM6
+  // selection and appears to select nothing.
+  if (end === pos && pos < text.length && text.sliceString(pos, pos + 1) === "\n") return pos + 1;
+  return end;
+}
+
+function docCluster(text: Text, pos: number): string {
   if (pos < 0 || pos >= text.length) return "";
-  return text.sliceString(pos, pos + 1);
+  const end = graphemeEndPosition(text, pos);
+  return end > pos ? text.sliceString(pos, end) : text.sliceString(pos, pos + 1);
 }
 
 function wordChar(ch: string): boolean {
-  return /[A-Za-z0-9_]/.test(ch);
+  return /[\p{L}\p{N}_]/u.test(ch);
+}
+
+function wordCategory(ch: string, bigWord = false): "space" | "word" | "punctuation" {
+  if (!ch || /\s/u.test(ch)) return "space";
+  if (bigWord || wordChar(ch)) return "word";
+  return "punctuation";
+}
+
+function wordMotionPosition(text: Text, start: number, dir: -1 | 1, bigWord = false): number {
+  let pos = clamp(start, 0, text.length);
+  if (dir > 0) {
+    const initial = wordCategory(docCluster(text, pos), bigWord);
+    if (initial !== "space") {
+      while (pos < text.length && wordCategory(docCluster(text, pos), bigWord) === initial) {
+        pos = Math.max(pos + 1, graphemeEndPosition(text, pos));
+      }
+    }
+    while (pos < text.length && wordCategory(docCluster(text, pos), bigWord) === "space") {
+      pos = Math.max(pos + 1, graphemeEndPosition(text, pos));
+    }
+    return pos;
+  }
+
+  pos = previousGraphemePosition(text, pos);
+  while (pos > 0 && wordCategory(docCluster(text, pos), bigWord) === "space") {
+    pos = previousGraphemePosition(text, pos);
+  }
+  const target = wordCategory(docCluster(text, pos), bigWord);
+  while (pos > 0) {
+    const previous = previousGraphemePosition(text, pos);
+    if (wordCategory(docCluster(text, previous), bigWord) !== target) break;
+    pos = previous;
+  }
+  return pos;
+}
+
+function selectionClusterCount(text: Text, from: number, to: number): number {
+  let count = 0;
+  let pos = clamp(from, 0, text.length);
+  const end = clamp(to, pos, text.length);
+  while (pos < end) {
+    pos = Math.max(pos + 1, graphemeEndPosition(text, pos));
+    count += 1;
+  }
+  return count;
 }
 
 function currentHead(editor: Editor): number {
@@ -169,63 +236,139 @@ function setSelection(editor: Editor, anchor: number, head: number): void {
   editor.setMarkdownSelection(clamp(anchor, 0, length), clamp(head, 0, length));
 }
 
-function moveChar(editor: Editor, dir: -1 | 1): void {
-  const text = doc(editor);
-  const selection = editor.getMarkdownSelection();
-  const pos = selection.from === selection.to
-    ? selection.from + dir
-    : (dir < 0 ? selection.from : selection.to);
-  setPos(editor, clamp(pos, 0, text.length));
+function normalCharPosition(text: Text, pos: number): number {
+  const line = text.lineAt(clamp(pos, 0, text.length));
+  if (line.from === line.to) return line.from;
+  const relative = clamp(pos - line.from, 0, line.text.length);
+  if (relative >= line.text.length) {
+    return line.from + findClusterBreak(line.text, line.text.length, false);
+  }
+  if (relative === 0) return line.from;
+  // CM6 normally hands us grapheme boundaries already. Programmatic
+  // selections can still land inside a surrogate pair or combining sequence,
+  // so repair only those positions without moving a valid boundary left.
+  const previous = findClusterBreak(line.text, relative, false);
+  const previousEnd = findClusterBreak(line.text, previous, true);
+  return line.from + (previousEnd > relative ? previous : relative);
 }
 
-function moveLine(editor: Editor, dir: -1 | 1, goalColumn: number | null): number | null {
+function moveNormalCharPosition(text: Text, pos: number, dir: -1 | 1): number {
+  const current = normalCharPosition(text, pos);
+  const line = text.lineAt(current);
+  if (line.from === line.to) return line.from;
+  const relative = current - line.from;
+  const moved = line.from + findClusterBreak(line.text, relative, dir > 0);
+  if (dir > 0 && moved >= line.to) return current;
+  return moved;
+}
+
+function setNormalPos(editor: Editor, pos: number): void {
+  setPos(editor, normalCharPosition(doc(editor), pos));
+}
+
+function moveChar(editor: Editor, dir: -1 | 1): void {
   const text = doc(editor);
-  const pos = editor.getMarkdownSelection().from;
+  const pos = currentHead(editor);
+  setPos(editor, moveNormalCharPosition(text, pos, dir));
+}
+
+function moveDocumentLine(
+  editor: Editor,
+  dir: -1 | 1,
+  goal: VerticalGoal | null,
+  setTarget: (pos: number) => void = (pos) => setNormalPos(editor, pos),
+  startPos = currentHead(editor),
+): VerticalGoal {
+  const text = doc(editor);
+  const pos = normalCharPosition(text, startPos);
   const line = docLineInfo(text, pos);
-  const desired = goalColumn ?? line.column;
-  if (dir < 0) {
-    if (line.start === 0) return desired;
-    const prev = docLineInfo(text, line.start - 1);
-    setPos(editor, Math.min(prev.start + desired, prev.end));
-    return desired;
+  const desired = goal?.kind === "column" ? goal.value : line.column;
+  if (dir < 0 && line.start > 0) {
+    const previous = docLineInfo(text, line.start - 1);
+    setTarget(Math.min(previous.start + desired, previous.end));
+  } else if (dir > 0 && line.end < text.length) {
+    const next = docLineInfo(text, line.end + 1);
+    setTarget(Math.min(next.start + desired, next.end));
   }
-  if (line.end >= text.length) return desired;
-  const next = docLineInfo(text, line.end + 1);
-  setPos(editor, Math.min(next.start + desired, next.end));
-  return desired;
+  return { kind: "column", value: desired };
+}
+
+function moveScreenLine(editor: Editor, dir: -1 | 1, goal: VerticalGoal | null): VerticalGoal {
+  const rect = editor.view.contentDOM.getBoundingClientRect();
+  // A detached/hidden editor has no usable layout. Preserve keyboard access
+  // with a logical-line fallback until CM6 can measure real screen rows.
+  if (rect.width <= 0 || rect.height <= 0) return moveDocumentLine(editor, dir, goal);
+
+  const text = doc(editor);
+  const start = normalCharPosition(text, currentHead(editor));
+  const coords = editor.view.coordsAtPos(start);
+  const pixelGoal = goal?.kind === "pixel"
+    ? goal.value
+    : coords
+      ? coords.left - rect.left
+      : editor.view.defaultCharacterWidth * docLineInfo(text, start).column;
+  const range = EditorSelection.cursor(
+    start,
+    0,
+    undefined,
+    pixelGoal,
+  );
+  const moved = editor.view.moveVertically(range, dir > 0);
+  setNormalPos(editor, moved.head);
+  return { kind: "pixel", value: moved.goalColumn ?? pixelGoal };
 }
 
 function lineBoundary(editor: Editor, which: "start" | "end"): void {
-  const pos = editor.getMarkdownSelection().from;
-  const line = docLineInfo(doc(editor), pos);
-  setPos(editor, which === "start" ? line.start : line.end);
+  const text = doc(editor);
+  const pos = normalCharPosition(text, currentHead(editor));
+  const line = docLineInfo(text, pos);
+  setNormalPos(editor, which === "start" ? line.start : line.end);
+}
+
+function lineEndInsertBoundary(editor: Editor): void {
+  const text = doc(editor);
+  const line = text.lineAt(clamp(currentHead(editor), 0, text.length));
+  setPos(editor, line.to);
+}
+
+function lineFirstNonBlank(editor: Editor): number {
+  const text = doc(editor);
+  const line = text.lineAt(clamp(currentHead(editor), 0, text.length));
+  const first = line.text.search(/\S/u);
+  return first < 0 ? line.from : line.from + first;
 }
 
 function docBoundary(editor: Editor, which: "start" | "end"): void {
-  setPos(editor, which === "start" ? 0 : doc(editor).length);
+  setNormalPos(editor, which === "start" ? 0 : doc(editor).length);
 }
 
-function moveWord(editor: Editor, dir: -1 | 1): void {
+function moveWord(editor: Editor, dir: -1 | 1, bigWord = false): void {
   const text = doc(editor);
-  let pos = editor.getMarkdownSelection().from;
-  if (dir > 0) {
-    while (pos < text.length && wordChar(docChar(text, pos))) pos++;
-    while (pos < text.length && !wordChar(docChar(text, pos))) pos++;
-  } else {
-    pos = Math.max(0, pos - 1);
-    while (pos > 0 && !wordChar(docChar(text, pos))) pos--;
-    while (pos > 0 && wordChar(docChar(text, pos - 1))) pos--;
-  }
-  setPos(editor, pos);
+  setNormalPos(editor, wordMotionPosition(text, currentHead(editor), dir, bigWord));
 }
 
 function deleteChar(editor: Editor): string {
   const text = doc(editor);
   const { from, to } = editor.getMarkdownSelection();
-  const end = from === to ? Math.min(from + 1, text.length) : to;
-  if (from >= end) return "";
-  const deleted = text.sliceString(from, end);
-  editor.replaceMarkdownRange(from, end, "", "start");
+  const start = from === to ? normalCharPosition(text, from) : from;
+  const line = text.lineAt(start);
+  const end = from === to ? Math.min(graphemeEndPosition(text, start), line.to) : to;
+  if (start >= end) return "";
+  const deleted = text.sliceString(start, end);
+  editor.replaceMarkdownRange(start, end, "", "start");
+  return deleted;
+}
+
+function deleteCharBackward(editor: Editor): string {
+  const text = doc(editor);
+  const { from, to } = editor.getMarkdownSelection();
+  if (from !== to) return deleteChar(editor);
+  const pos = normalCharPosition(text, from);
+  const line = text.lineAt(pos);
+  if (pos <= line.from) return "";
+  const start = previousGraphemePosition(text, pos);
+  const deleted = text.sliceString(start, pos);
+  editor.replaceMarkdownRange(start, pos, "", "start");
   return deleted;
 }
 
@@ -246,12 +389,15 @@ function currentSelectionText(editor: Editor): string {
   return from < to ? doc(editor).sliceString(from, to) : "";
 }
 
-function replaceChar(editor: Editor, ch: string): void {
+function replaceChar(editor: Editor, ch: string): number | null {
   const text = doc(editor);
   const { from, to } = editor.getMarkdownSelection();
-  const end = from === to ? Math.min(from + 1, text.length) : to;
-  if (from >= end) return;
-  editor.replaceMarkdownRange(from, end, ch.repeat(Math.max(1, end - from)), "end");
+  const start = from === to ? normalCharPosition(text, from) : from;
+  const line = text.lineAt(start);
+  const end = from === to ? Math.min(graphemeEndPosition(text, start), line.to) : to;
+  if (start >= end) return null;
+  editor.replaceMarkdownRange(start, end, ch.repeat(Math.max(1, selectionClusterCount(text, start, end))), "end");
+  return start;
 }
 
 function openLine(editor: Editor, where: "above" | "below"): void {
@@ -269,13 +415,17 @@ export function createVimLite(
   options: VimLiteOptions = {},
 ): VimLiteController {
   let mode: VimLiteMode = "insert";
-  let goalColumn: number | null = null;
+  let goalColumn: VerticalGoal | null = null;
   let pending = "";
   let jumpInput: VimJumpInput | null = null;
   let jumpSession: VimJumpSession | null = null;
+  let jumpLabelPrefix = "";
   let visualAnchor: number | null = null;
   let visualHead: number | null = null;
+  let insertEntry: { doc: Text; boundary: number; returnPos: number } | null = null;
   let register: VimRegister = { text: "", kind: "characterwise" };
+  let destroyed = false;
+  let asyncEpoch = 0;
   const jumpTimeoutMs = Math.max(0, options.jumpTimeoutMs ?? AVY_TIMEOUT_MS);
   // Tracks the in-flight system clipboard write so paste() can wait for it
   // before reading back. Avoids the dd→p race where writeText is async.
@@ -323,11 +473,13 @@ export function createVimLite(
   }
 
   function cancelJump(): void {
+    const hadJump = jumpInput !== null || jumpSession !== null;
     pending = "";
     clearJumpInputTimer();
     jumpInput = null;
     jumpSession = null;
-    clearVimJump(editor.view);
+    jumpLabelPrefix = "";
+    if (hadJump) clearVimJump(editor.view);
   }
 
   function finishJumpInput(): boolean {
@@ -402,13 +554,54 @@ export function createVimLite(
   }
 
   function setMode(next: VimLiteMode): void {
+    const previous = mode;
     const changed = mode !== next;
+    const leavingVisual = previous === "visual" || previous === "visual-line";
+    const exitHead = leavingVisual ? (visualHead ?? currentHead(editor)) : currentHead(editor);
     mode = next;
     cancelJump();
     visualAnchor = null;
     visualHead = null;
+    if (next !== "insert" || previous !== "insert") insertEntry = null;
     resetMotionMemory();
+    if (leavingVisual && next !== "visual" && next !== "visual-line") {
+      if (next === "normal") setNormalPos(editor, exitHead);
+      else setPos(editor, exitHead);
+    } else if (previous === "insert" && next === "normal") {
+      setNormalPos(editor, exitHead);
+    }
     if (changed) options.onModeChange?.(mode);
+  }
+
+  function insertExitPosition(text: Text, pos: number): number {
+    const cursor = clamp(pos, 0, text.length);
+    const line = text.lineAt(cursor);
+    if (line.from === line.to || cursor <= line.from) return line.from;
+    return previousGraphemePosition(text, Math.min(cursor, line.to));
+  }
+
+  function enterInsert(returnPosWhenUnchanged: number | null = null): void {
+    setMode("insert");
+    insertEntry = returnPosWhenUnchanged == null
+      ? null
+      : {
+          doc: doc(editor),
+          boundary: currentHead(editor),
+          returnPos: normalCharPosition(doc(editor), returnPosWhenUnchanged),
+        };
+  }
+
+  function escapeToNormal(): void {
+    if (mode !== "insert") {
+      setMode("normal");
+      return;
+    }
+    const text = doc(editor);
+    const target = insertEntry?.doc === text && insertEntry.boundary === currentHead(editor)
+      ? insertEntry.returnPos
+      : insertExitPosition(text, currentHead(editor));
+    setMode("normal");
+    setNormalPos(editor, target);
   }
 
   // The tracked moving end of the visual selection. Prefer the local
@@ -419,15 +612,53 @@ export function createVimLite(
   }
 
   function setVisualHead(head: number): void {
-    if (visualAnchor == null) visualAnchor = currentHead(editor);
+    const text = doc(editor);
+    if (visualAnchor == null) visualAnchor = normalCharPosition(text, currentHead(editor));
+    visualHead = normalCharPosition(text, head);
+    if (visualHead >= visualAnchor) {
+      setSelection(editor, visualAnchor, visualCharEndPosition(text, visualHead));
+    } else {
+      setSelection(editor, visualCharEndPosition(text, visualAnchor), visualHead);
+    }
+  }
+
+  function swapVisualEnds(): void {
+    if (visualAnchor == null || visualHead == null) return;
+    const previousAnchor = visualAnchor;
+    visualAnchor = visualHead;
+    setVisualHead(previousAnchor);
+  }
+
+  function switchToVisualLine(): void {
+    const anchor = visualAnchor ?? currentHead(editor);
+    const head = visualHead ?? currentHead(editor);
+    const changed = mode !== "visual-line";
+    mode = "visual-line";
+    visualAnchor = anchor;
     visualHead = head;
-    setSelection(editor, visualAnchor, visualHead);
+    resetMotionMemory();
+    const range = docLineSelectionRange(doc(editor), anchor, head);
+    setSelection(editor, range.from, range.to);
+    if (changed) options.onModeChange?.(mode);
+  }
+
+  function switchToVisualChar(): void {
+    const anchor = normalCharPosition(doc(editor), visualAnchor ?? currentHead(editor));
+    const head = normalCharPosition(doc(editor), visualHead ?? currentHead(editor));
+    const changed = mode !== "visual";
+    mode = "visual";
+    visualAnchor = anchor;
+    visualHead = head;
+    resetMotionMemory();
+    setVisualHead(head);
+    if (changed) options.onModeChange?.(mode);
   }
 
   function enterVisual(): void {
+    const head = normalCharPosition(doc(editor), currentHead(editor));
     setMode("visual");
-    visualAnchor = currentHead(editor);
-    visualHead = visualAnchor;
+    visualAnchor = head;
+    setVisualHead(head);
   }
 
   function enterVisualLine(): void {
@@ -441,22 +672,32 @@ export function createVimLite(
 
   function visualMoveChar(dir: -1 | 1): void {
     resetMotionMemory();
-    setVisualHead(clamp(headPos() + dir, 0, doc(editor).length));
+    setVisualHead(moveNormalCharPosition(doc(editor), headPos(), dir));
   }
 
   function visualMoveLine(dir: -1 | 1): void {
     const text = doc(editor);
-    const pos = headPos();
-    const line = docLineInfo(text, pos);
-    const desired = goalColumn ?? line.column;
-    goalColumn = desired;
-    if (dir < 0 && line.start > 0) {
-      const prev = docLineInfo(text, line.start - 1);
-      setVisualHead(Math.min(prev.start + desired, prev.end));
-    } else if (dir > 0 && line.end < text.length) {
-      const next = docLineInfo(text, line.end + 1);
-      setVisualHead(Math.min(next.start + desired, next.end));
+    const start = normalCharPosition(text, headPos());
+    const rect = editor.view.contentDOM.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      goalColumn = moveDocumentLine(editor, dir, goalColumn, setVisualHead, start);
+      return;
     }
+    const coords = editor.view.coordsAtPos(start);
+    const pixelGoal = goalColumn?.kind === "pixel"
+      ? goalColumn.value
+      : coords
+        ? coords.left - rect.left
+        : editor.view.defaultCharacterWidth * docLineInfo(text, start).column;
+    const range = EditorSelection.cursor(
+      start,
+      0,
+      undefined,
+      pixelGoal,
+    );
+    const moved = editor.view.moveVertically(range, dir > 0);
+    goalColumn = { kind: "pixel", value: moved.goalColumn ?? pixelGoal };
+    setVisualHead(moved.head);
   }
 
   function visualLineMove(dir: -1 | 1): void {
@@ -474,33 +715,48 @@ export function createVimLite(
   function visualLineBoundary(which: "start" | "end"): void {
     resetMotionMemory();
     const line = docLineInfo(doc(editor), headPos());
-    setVisualHead(which === "start" ? line.start : line.end);
+    setVisualHead(which === "start" ? line.start : normalCharPosition(doc(editor), line.end));
   }
 
-  function visualMoveWord(dir: -1 | 1): void {
+  function visualMoveWord(dir: -1 | 1, bigWord = false): void {
     resetMotionMemory();
     const text = doc(editor);
-    let pos = headPos();
-    if (dir > 0) {
-      while (pos < text.length && wordChar(docChar(text, pos))) pos++;
-      while (pos < text.length && !wordChar(docChar(text, pos))) pos++;
-    } else {
-      pos = Math.max(0, pos - 1);
-      while (pos > 0 && !wordChar(docChar(text, pos))) pos--;
-      while (pos > 0 && wordChar(docChar(text, pos - 1))) pos--;
+    setVisualHead(normalCharPosition(text, wordMotionPosition(text, headPos(), dir, bigWord)));
+  }
+
+  function syncSelectionFromEditor(): void {
+    const text = doc(editor);
+    const { anchor, head } = editor.getMarkdownSelectionRange();
+    if (anchor === head) {
+      if (mode === "visual" || mode === "visual-line") {
+        visualHead = head;
+        setMode("normal");
+      }
+      return;
     }
-    setVisualHead(pos);
+
+    cancelJump();
+    const forward = head > anchor;
+    visualAnchor = normalCharPosition(text, forward ? anchor : previousGraphemePosition(text, anchor));
+    visualHead = normalCharPosition(text, forward ? previousGraphemePosition(text, head) : head);
+    const changed = mode !== "visual";
+    mode = "visual";
+    resetMotionMemory();
+    if (changed) options.onModeChange?.(mode);
   }
 
   function deleteLineCommand(): void {
     resetMotionMemory();
     yank(deleteLine(editor), "linewise");
+    if (mode === "visual" || mode === "visual-line") visualHead = currentHead(editor);
     setMode("normal");
   }
 
   function yankSelection(kind: VimRegisterKind = "characterwise"): void {
     resetMotionMemory();
+    const start = editor.getMarkdownSelection().from;
     yank(currentSelectionText(editor), kind);
+    visualHead = start;
     setMode("normal");
   }
 
@@ -520,16 +776,21 @@ export function createVimLite(
     // Capture the current register in case it changes before the async path runs.
     const localRegister = register;
     const pending = pendingClipboardWrite;
+    const epoch = asyncEpoch;
     window.setTimeout(() => {
+      if (destroyed || epoch !== asyncEpoch) return;
       void (async () => {
         // Wait for any in-flight clipboard write to land before reading back.
         // 400 ms guard prevents a stalled write from blocking paste indefinitely.
         await Promise.race([pending, new Promise<void>((r) => setTimeout(r, 400))]);
+        if (destroyed || epoch !== asyncEpoch) return;
         const handled = await editor.pasteFromClipboard({ placement });
         if (!handled && localRegister.text) {
           editor.pastePlainText(localRegister.text, { placement });
         }
-      })().finally(() => setMode("normal"));
+      })().finally(() => {
+        if (!destroyed && epoch === asyncEpoch) setMode("normal");
+      });
     }, 0);
   }
 
@@ -540,17 +801,16 @@ export function createVimLite(
 
   function appendChar(): void {
     const text = doc(editor);
-    const selection = editor.getMarkdownSelection();
-    const pos = selection.from === selection.to ? selection.from : selection.to;
+    const pos = normalCharPosition(text, currentHead(editor));
     const line = docLineInfo(text, pos);
-    setPos(editor, Math.min(line.end, pos + 1));
-    setMode("insert");
+    setPos(editor, Math.min(line.end, graphemeEndPosition(text, pos)));
+    enterInsert();
   }
 
   function editableNormalCommand(key: string, editable: HTMLElement): boolean {
     if (!isRichEditable(editable)) {
       if (key === "i" || key === "a") {
-        setMode("insert");
+        enterInsert();
         return true;
       }
       pending = "";
@@ -598,11 +858,11 @@ export function createVimLite(
         move("backward", "word");
         return true;
       case "i":
-        setMode("insert");
+        enterInsert();
         return true;
       case "a":
         move("forward", "character");
-        setMode("insert");
+        enterInsert();
         return true;
       case "Escape":
         setMode("normal");
@@ -616,8 +876,20 @@ export function createVimLite(
   function normalCommand(key: string): boolean {
     if (jumpSession) {
       const session = jumpSession;
-      cancelJump();
-      applyVimJump(editor.view, session, key);
+      if (key.length !== 1 || isUppercaseAsciiLetter(key)) {
+        cancelJump();
+        return true;
+      }
+      jumpLabelPrefix += key;
+      const exact = session.candidates.find((candidate) => candidate.label === jumpLabelPrefix);
+      if (exact) {
+        jumpSession = null;
+        jumpLabelPrefix = "";
+        applyVimJump(editor.view, session, exact.label);
+      } else {
+        const candidates = narrowVimJump(editor.view, session, jumpLabelPrefix);
+        if (candidates.length === 0) cancelJump();
+      }
       return true;
     }
     if (jumpInput) return handleJumpInputKey(key);
@@ -641,7 +913,8 @@ export function createVimLite(
       pending = "";
       if (key.length === 1) {
         resetMotionMemory();
-        replaceChar(editor, key);
+        const replacedFrom = replaceChar(editor, key);
+        if (replacedFrom != null) setNormalPos(editor, replacedFrom);
         setMode("normal");
       }
       return true;
@@ -702,11 +975,11 @@ export function createVimLite(
         return true;
       case "j":
       case "ArrowDown":
-        goalColumn = moveLine(editor, 1, goalColumn);
+        goalColumn = moveScreenLine(editor, 1, goalColumn);
         return true;
       case "k":
       case "ArrowUp":
-        goalColumn = moveLine(editor, -1, goalColumn);
+        goalColumn = moveScreenLine(editor, -1, goalColumn);
         return true;
       case "0":
         resetMotionMemory();
@@ -720,9 +993,17 @@ export function createVimLite(
         resetMotionMemory();
         moveWord(editor, 1);
         return true;
+      case "W":
+        resetMotionMemory();
+        moveWord(editor, 1, true);
+        return true;
       case "b":
         resetMotionMemory();
         moveWord(editor, -1);
+        return true;
+      case "B":
+        resetMotionMemory();
+        moveWord(editor, -1, true);
         return true;
       case "u":
         return options.onUndo?.() ?? false;
@@ -737,7 +1018,7 @@ export function createVimLite(
         docBoundary(editor, "end");
         return true;
       case "i":
-        setMode("insert");
+        enterInsert(normalCharPosition(doc(editor), currentHead(editor)));
         return true;
       case "v":
         enterVisual();
@@ -750,28 +1031,34 @@ export function createVimLite(
         return true;
       case "I":
         resetMotionMemory();
-        lineBoundary(editor, "start");
-        setMode("insert");
+        setPos(editor, lineFirstNonBlank(editor));
+        enterInsert(normalCharPosition(doc(editor), currentHead(editor)));
         return true;
       case "A":
         resetMotionMemory();
-        lineBoundary(editor, "end");
-        setMode("insert");
+        lineEndInsertBoundary(editor);
+        enterInsert();
         return true;
       case "o":
         resetMotionMemory();
         openLine(editor, "below");
-        setMode("insert");
+        enterInsert();
         return true;
       case "O":
         resetMotionMemory();
         openLine(editor, "above");
-        setMode("insert");
+        enterInsert();
         return true;
       case "x":
       case "Delete":
         resetMotionMemory();
         yank(deleteChar(editor));
+        setNormalPos(editor, currentHead(editor));
+        return true;
+      case "X":
+        resetMotionMemory();
+        yank(deleteCharBackward(editor));
+        setNormalPos(editor, currentHead(editor));
         return true;
       case "p":
         paste("after");
@@ -823,7 +1110,8 @@ export function createVimLite(
       pending = "";
       if (key.length === 1) {
         resetMotionMemory();
-        replaceChar(editor, key);
+        const replacedFrom = replaceChar(editor, key);
+        if (replacedFrom != null) visualHead = replacedFrom;
       }
       setMode("normal");
       return true;
@@ -856,18 +1144,32 @@ export function createVimLite(
       case "w":
         visualMoveWord(1);
         return true;
+      case "W":
+        visualMoveWord(1, true);
+        return true;
       case "b":
         visualMoveWord(-1);
         return true;
+      case "B":
+        visualMoveWord(-1, true);
+        return true;
       case "x":
+      case "X":
       case "Delete":
       case "d":
         resetMotionMemory();
         yank(deleteChar(editor));
+        visualHead = currentHead(editor);
         setMode("normal");
         return true;
       case "y":
         yankSelection();
+        return true;
+      case "o":
+        swapVisualEnds();
+        return true;
+      case "V":
+        switchToVisualLine();
         return true;
       case "r":
         pending = "r";
@@ -896,6 +1198,7 @@ export function createVimLite(
         visualLineMove(-1);
         return true;
       case "x":
+      case "X":
       case "d":
       case "Delete":
         deleteLineCommand();
@@ -903,11 +1206,13 @@ export function createVimLite(
       case "y":
         yankSelection("linewise");
         return true;
+      case "v":
+        switchToVisualChar();
+        return true;
       case "/":
         resetMotionMemory();
         return options.onFind?.() ?? false;
       case "V":
-      case "v":
       case "Escape":
         setMode("normal");
         return true;
@@ -920,25 +1225,28 @@ export function createVimLite(
   return {
     mode: () => mode,
     setMode,
+    syncSelectionFromEditor,
     handleKey(event: VimLiteKey): boolean {
+      if (destroyed) return false;
       if (event.isComposing) return false;
       if (isEscape(event)) {
         cancelJump();
-        setMode("normal");
+        escapeToNormal();
         return true;
       }
 
       if (mode === "insert") {
-        if (!hasCommandModifier(event) && !event.shiftKey && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-          goalColumn = moveLine(editor, event.key === "ArrowDown" ? 1 : -1, goalColumn);
-          return true;
-        }
+        // Let CM6's native cursor commands own insert-mode movement. They use
+        // visual wrapped lines and preserve the pixel goal column.
         return false;
       }
       if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "r") {
         return options.onRedo?.() ?? false;
       }
-      if (hasCommandModifier(event)) return false;
+      if (hasCommandModifier(event)) {
+        cancelJump();
+        return false;
+      }
 
       const handled = mode === "visual-line"
         ? visualLineCommand(event.key)
@@ -948,16 +1256,24 @@ export function createVimLite(
       return handled;
     },
     handleKeyDown(event: KeyboardEvent): boolean {
+      if (destroyed) return false;
       if (!targetInEditor(host, event.target)) return false;
       if (event.isComposing) return false;
       if (isEscape(event)) {
         event.preventDefault();
-        setMode("normal");
+        escapeToNormal();
         return true;
       }
 
       const editable = editableEventTarget(host, event.target);
       if (editable) {
+        // Native editing shortcuts belong to the embedded control. In
+        // particular, never reinterpret Cmd+Arrow as a Vim motion or consume
+        // Cmd+A/C/V while a widget's own editor has focus.
+        if (hasCommandModifier(event)) {
+          cancelJump();
+          return false;
+        }
         if (mode === "insert") return false;
         if (mode === "normal") {
           const handled = editableNormalCommand(event.key, editable);
@@ -970,6 +1286,12 @@ export function createVimLite(
       const handled = this.handleKey(event);
       if (handled) event.preventDefault();
       return handled;
+    },
+    destroy(): void {
+      if (destroyed) return;
+      destroyed = true;
+      asyncEpoch += 1;
+      cancelJump();
     },
   };
 }

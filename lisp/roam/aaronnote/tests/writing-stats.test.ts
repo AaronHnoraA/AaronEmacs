@@ -15,6 +15,24 @@ describe("writing stats", () => {
     expect(countWritingStats(doc, 6, 13).words).toBe(3);
   });
 
+  test("excludes the nested meta summary from external word statistics", () => {
+    const doc = Text.of([
+      "#+begin meta",
+      "title: Graph Tensor",
+      "#+begin summary",
+      "# Hidden heading",
+      "hidden abstract words 中文",
+      "#+end summary",
+      "#+end meta",
+      "visible body",
+    ]);
+    const stats = countWritingStats(doc);
+    expect(stats.words).toBe(9);
+
+    const abstractFrom = doc.toString().indexOf("hidden abstract");
+    expect(countWritingStats(doc, abstractFrom, abstractFrom + 21).words).toBe(0);
+  });
+
   test("finds the current heading subtree", () => {
     const state = EditorState.create({
       doc: "# One\nintro\n## Child\nbody\n# Two\ntail",

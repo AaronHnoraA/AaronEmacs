@@ -21,6 +21,7 @@ import {
 } from "@codemirror/commands";
 import { insertNewlineContinueMarkup } from "@codemirror/lang-markdown";
 import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownList } from "../src/cm6/commands/index.ts";
+import { nextGraphemePosition, previousGraphemePosition } from "../src/cm6/text-boundaries.ts";
 import { historyChordKind } from "../src/keymap/shortcut-router.ts";
 
 type XwidgetControlKey = "Escape" | "Delete" | "Backspace";
@@ -161,14 +162,10 @@ function deleteFromEditor(editor: Editor, key: "Delete" | "Backspace"): void {
     editor.replaceMarkdownRange(from, to, "", "start");
     return;
   }
-
-  const docLength = editor.view.state.doc.length;
-  if (key === "Backspace") {
-    if (from > 0) editor.replaceMarkdownRange(from - 1, from, "", "start");
-    return;
-  }
-
-  if (from < docLength) editor.replaceMarkdownRange(from, from + 1, "", "start");
+  const text = editor.view.state.doc;
+  const start = key === "Backspace" ? previousGraphemePosition(text, from) : from;
+  const end = key === "Delete" ? nextGraphemePosition(text, to) : to;
+  if (start < end) editor.replaceMarkdownRange(start, end, "", "start");
 }
 
 function nowMs(): number {
@@ -190,7 +187,9 @@ function recentlyHandledKeydown(editor: Editor, key: string): boolean {
 
 function runEditorControlKey(key: XwidgetControlKey, context: XwidgetKeyContext): void {
   if (key === "Escape") {
-    context.vim.setMode("normal");
+    // Route through Vim so insert-mode Escape applies the same cursor
+    // placement semantics as a native CM6 keydown (i/a/I/A differ here).
+    context.vim.handleKey({ key: "Escape" });
     context.editor.focus();
     return;
   }
@@ -384,18 +383,6 @@ function codeToBaseKey(code: string, shifted: boolean): string | null {
   return null;
 }
 
-const COMMAND_ARROW_EMACS_KEYS: Record<string, string> = {
-  ArrowLeft: "M-<left>",
-  ArrowRight: "M-<right>",
-  ArrowUp: "M-<up>",
-  ArrowDown: "M-<down>",
-};
-
-function commandArrowEmacsKeyFromEvent(event: KeyboardEvent): string | null {
-  if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return null;
-  return COMMAND_ARROW_EMACS_KEYS[event.code] ?? COMMAND_ARROW_EMACS_KEYS[event.key] ?? null;
-}
-
 /**
  * Key string for any event — including bare keys (no modifiers).
  * Used to capture the second key of a C-x / C-c prefix sequence.
@@ -413,9 +400,6 @@ function keyStringFromEvent(event: KeyboardEvent): string | null {
 
 /** Build the Emacs key string for a top-level chord — requires at least one modifier. */
 export function emacsKeyFromEvent(event: KeyboardEvent): string | null {
-  const commandArrowKey = commandArrowEmacsKeyFromEvent(event);
-  if (commandArrowKey) return commandArrowKey;
-
   const key = keyStringFromEvent(event);
   // Must have a modifier prefix to be a top-level forwarded chord
   if (!key || !key.includes("-")) return null;
@@ -435,15 +419,10 @@ export function shouldForwardToEmacs(event: KeyboardEvent): boolean {
   if (event.altKey && !event.metaKey && !event.ctrlKey) {
     return codeToBaseKey(event.code, event.shiftKey) !== null;
   }
-  // M-x (Cmd+X), M-w (kill-ring-save), M-q (fill-paragraph), and
-  // Cmd+arrows as Emacs M-<arrow> windmove keys.
+  // M-x (Cmd+X), M-w (kill-ring-save), and M-q (fill-paragraph).
+  // Cmd+Arrow is deliberately left to CodeMirror/WebKit for native editing.
   if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
-    return Boolean(
-      event.code === "KeyX"
-        || event.code === "KeyW"
-        || event.code === "KeyQ"
-        || commandArrowEmacsKeyFromEvent(event),
-    );
+    return event.code === "KeyX" || event.code === "KeyW" || event.code === "KeyQ";
   }
   // Bare Ctrl: Emacs-style chords. Shift is ignored for letter chords so
   // xwidget/browser variants such as C-X still become Emacs' C-x.

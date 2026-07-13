@@ -77,6 +77,51 @@ describe("floating toc heading scan", () => {
     ]);
   });
 
+  test("keeps every structure inside meta summary out of external indexes", () => {
+    const doc = Text.of([
+      "#+begin meta",
+      "title: Cover",
+      "tags: cover-tag",
+      "#+begin summary",
+      "# Hidden heading",
+      "@@section [Hidden semantic section]",
+      "@@tag[hidden-anchor]",
+      "#+begin theorem Hidden theorem",
+      "@@todo(todo) [Hidden task]",
+      "#+end theorem",
+      "#+end summary",
+      "#+end meta",
+      "# Visible heading",
+      "@@tag[visible-anchor]",
+      "#+begin theorem Visible theorem",
+      "#+end theorem",
+    ]);
+
+    expect(markdownHeadingsFromText(doc).map((heading) => heading.text)).toEqual(["Visible heading"]);
+    expect(inlineTagAnchorsFromText(doc).map((anchor) => anchor.tag)).toEqual(["visible-anchor"]);
+    expect(orgEnvAnchorsFromText(doc).map(({ kind, title }) => ({ kind, title }))).toEqual([
+      { kind: "meta", title: "" },
+      { kind: "theorem", title: "Visible theorem" },
+    ]);
+  });
+
+  test("keeps meta summary excluded after incremental edits", () => {
+    const source = [
+      "#+begin meta",
+      "title: Cover",
+      "#+begin summary",
+      "Abstract prose",
+      "#+end summary",
+      "#+end meta",
+      "# Visible",
+    ].join("\n");
+    let state = EditorState.create({ doc: source, extensions: [tocIndexExtension] });
+    const abstractPos = source.indexOf("Abstract prose") + "Abstract prose".length;
+    state = state.update({ changes: { from: abstractPos, insert: "\n# Still hidden" } }).state;
+
+    expect(tocIndexFromState(state).headings.map((heading) => heading.text)).toEqual(["Visible"]);
+  });
+
   test("defers org-env scanning UI until its nested toggle and keeps tags visible", () => {
     const mount = document.createElement("div");
     const toc = document.createElement("aside");

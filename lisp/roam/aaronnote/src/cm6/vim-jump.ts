@@ -46,11 +46,49 @@ export function clearVimJump(view: EditorView): void {
 }
 
 // Generous safety cap so a pathological viewport cannot create an unbounded
-// array. The real limit is VIM_JUMP_LABELS.length, applied in beginVimJump AFTER
-// orderedPositions sorts by direction/proximity — capping here (before
-// ordering) would fill the slots with whichever matches happen to scan first
-// (top of viewport) and drop the nearest in-direction targets.
+// array. Labels themselves are prefix trees, so this is a safety limit rather
+// than a one-key label budget.
 const MAX_SCAN_MATCHES = 4096;
+
+/**
+ * Build a prefix-free avy-style label set.
+ *
+ * The nearest candidates retain short labels. When the one-key alphabet is
+ * exhausted, the least-preferred leaf is expanded into another level instead
+ * of dropping the remaining visible candidates.
+ */
+export function buildVimJumpLabels(
+  count: number,
+  alphabet: string = VIM_JUMP_LABELS,
+): string[] {
+  const keys = [...new Set(alphabet)];
+  const target = Math.max(0, Math.floor(count));
+  if (target === 0 || keys.length === 0) return [];
+  if (keys.length === 1 && target > 1) {
+    throw new RangeError("Vim jump labels need at least two distinct keys");
+  }
+
+  const rank = new Map(keys.map((key, index) => [key, index]));
+  const leaves = [...keys];
+  while (leaves.length < target) {
+    let expandAt = 0;
+    for (let index = 1; index < leaves.length; index += 1) {
+      if (leaves[index]!.length <= leaves[expandAt]!.length) expandAt = index;
+    }
+    const prefix = leaves[expandAt]!;
+    leaves.splice(expandAt, 1, ...keys.map((key) => `${prefix}${key}`));
+  }
+
+  leaves.sort((left, right) => {
+    if (left.length !== right.length) return left.length - right.length;
+    for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
+      const delta = (rank.get(left[index]!) ?? 0) - (rank.get(right[index]!) ?? 0);
+      if (delta !== 0) return delta;
+    }
+    return 0;
+  });
+  return leaves.slice(0, target);
+}
 
 function candidatePositions(view: EditorView, needle: string): number[] {
   if (!needle) return [];
@@ -80,15 +118,15 @@ function orderedPositions(positions: readonly number[], cursor: number, directio
     : [...backward, ...forward, ...current];
 }
 
-// Order all matches by direction/proximity, THEN keep the nearest LABELS.length.
-// Capping before ordering (the previous bug) filled the slots with whatever
-// matched first while scanning the viewport top-down, so the nearest in-direction
-// targets — often all of them — were dropped.
+// Order all matches by direction/proximity before applying an explicit safety
+// limit. Capping before ordering (the previous bug) filled the slots with
+// whatever matched first while scanning the viewport top-down, so the nearest
+// in-direction targets — often all of them — were dropped.
 export function selectJumpCandidates(
   positions: readonly number[],
   cursor: number,
   direction: VimJumpDirection,
-  max: number = VIM_JUMP_LABELS.length,
+  max: number = positions.length,
 ): number[] {
   return orderedPositions(positions, cursor, direction).slice(0, max);
 }
@@ -108,14 +146,35 @@ export function previewVimJump(view: EditorView, needle: string, direction: VimJ
 
 export function beginVimJump(view: EditorView, needle: string, direction: VimJumpDirection): VimJumpSession {
   const cursor = view.state.selection.main.head;
-  const candidates = selectJumpCandidates(candidatePositions(view, needle), cursor, direction)
+  const positions = selectJumpCandidates(candidatePositions(view, needle), cursor, direction, MAX_SCAN_MATCHES);
+  const labels = buildVimJumpLabels(positions.length);
+  const candidates = positions
     .map((from, index) => ({
       from,
       to: Math.min(from + needle.length, view.state.doc.length),
-      label: VIM_JUMP_LABELS[index]!,
+      label: labels[index]!,
     }));
   view.dispatch({ effects: setVimJumpHints.of(candidates) });
   return { doc: view.state.doc, candidates };
+}
+
+export function narrowVimJump(
+  view: EditorView,
+  session: VimJumpSession,
+  prefix: string,
+): readonly VimJumpCandidate[] {
+  if (view.state.doc !== session.doc) {
+    clearVimJump(view);
+    return [];
+  }
+  const candidates = session.candidates.filter((candidate) => candidate.label.startsWith(prefix));
+  view.dispatch({
+    effects: setVimJumpHints.of(candidates.map((candidate) => ({
+      ...candidate,
+      label: candidate.label.slice(prefix.length),
+    }))),
+  });
+  return candidates;
 }
 
 export function applyVimJump(view: EditorView, session: VimJumpSession, label: string): boolean {

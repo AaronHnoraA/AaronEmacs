@@ -75,6 +75,21 @@ describe("server note refs", () => {
     expect(refs).toEqual(expect.arrayContaining(["node-id", "unrelated-node"]));
   });
 
+  test("keeps links inside meta summary out of graph indexes", () => {
+    const content = [
+      "#+begin meta",
+      "title: Cover",
+      "#+begin summary",
+      "[hidden](roam://hidden-note)",
+      "#+end summary",
+      "#+end meta",
+      "[visible](roam://visible-note)",
+    ].join("\n");
+
+    expect(refsFromContent(content)).toEqual(["visible-note"]);
+    expect(roamDbRefsFromContent(content)).toEqual(["visible-note"]);
+  });
+
   test("extracts roam core tag and DOM link targets", () => {
     const refs = refsFromContent([
       "[tag](20260520T120000-density-operator#section-anchor)",

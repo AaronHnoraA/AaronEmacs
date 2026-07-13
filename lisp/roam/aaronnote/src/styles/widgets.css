@@ -938,7 +938,7 @@
   line-height: 1.45;
   border-left: 0;
   margin: 0;
-  padding: 0.5rem 0 1.8rem;
+  padding: 0 0 0.8rem;
 }
 .cm-editor .cm-org-env-block .org-env-meta {
   white-space: normal;
@@ -946,20 +946,36 @@
 
 .aaronnote-meta-cover {
   position: relative;
-  display: grid;
-  justify-items: center;
-  gap: 12px;
-  margin: 22px auto 42px;
-  padding: 28px 0 34px;
-  border-top: 3px double color-mix(in srgb, var(--aaron-red-dark, #8d1f26), var(--aaron-paper-line, #d8d0c2) 42%);
-  border-bottom: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), transparent 10%);
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 10px auto 30px;
+  padding: clamp(42px, 5vw, 72px) clamp(28px, 6vw, 96px) clamp(38px, 4.5vw, 64px);
+  overflow: hidden;
+  border-top: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), transparent 18%);
+  border-bottom: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), transparent 18%);
+  border-radius: clamp(12px, 1.4vw, 20px);
+  background: var(--aaron-paper, #171b28);
   text-align: center;
+}
+
+.aaronnote-meta-masthead {
+  display: grid;
+  box-sizing: border-box;
+  place-content: start center;
+  justify-items: center;
+  gap: clamp(13px, 1.4vw, 19px);
+  padding: clamp(2px, 0.7vw, 10px) 0 clamp(4px, 0.8vw, 12px);
+}
+
+.aaronnote-meta-cover[data-has-abstract="true"] .aaronnote-meta-masthead {
+  padding-bottom: clamp(72px, 8vw, 122px);
 }
 
 .aaronnote-meta-roam-badge {
   position: absolute;
-  top: 7px;
-  left: 2px;
+  top: 18px;
+  left: 20px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -973,42 +989,33 @@
 
 .aaronnote-meta-title,
 .cm-editor .cm-org-env-block .aaronnote-meta-title {
-  width: min(960px, 100%);
+  width: min(1280px, 100%);
   box-sizing: border-box;
   margin: 0;
   border: 0;
   outline: none;
   background: transparent;
   color: var(--aaron-title, #ff9bad);
-  font: 780 64px/1.02 "Avenir Next", Inter, ui-sans-serif, system-ui, sans-serif;
-  letter-spacing: 0;
+  font-family: var(--aaron-font-math, "Times New Roman", serif), var(--aaron-font-chinese, serif);
+  font-size: clamp(42px, 4.4vw, 66px);
+  font-weight: 560;
+  line-height: 1.14;
+  letter-spacing: -0.012em;
   text-align: center;
   text-wrap: balance;
   overflow-wrap: anywhere;
-  text-shadow: 0 0 24px color-mix(in srgb, var(--aaron-title, #ff9bad), transparent 84%);
-}
-
-.cm-editor .cm-org-env-block input.aaronnote-meta-title,
-.cm-editor .cm-org-env-block textarea.aaronnote-meta-title {
-  cursor: text;
-}
-
-.cm-editor .cm-org-env-block textarea.aaronnote-meta-title {
-  display: block;
-  min-height: 1.15em;
-  resize: none;
-  overflow: hidden;
-  white-space: pre-wrap;
 }
 
 .aaronnote-meta-date,
 .cm-editor .cm-org-env-block .aaronnote-meta-date {
-  width: min(320px, 100%);
+  width: min(420px, 100%);
+  margin: 0;
   border: 0;
   outline: none;
   background: transparent;
   color: color-mix(in srgb, var(--aaron-muted, #6f6a61), var(--aaron-ink, #24201a) 10%);
-  font: 650 14px/1.35 var(--aaron-font-sans, system-ui);
+  font: 650 12px/1.35 var(--aaron-font-sans, system-ui);
+  letter-spacing: 0.08em;
   text-align: center;
   text-transform: uppercase;
 }
@@ -1016,44 +1023,172 @@
 .aaronnote-meta-tags {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
-  gap: 7px;
-  max-width: min(760px, 100%);
-  margin-top: 4px;
+  gap: 6px clamp(13px, 1.8vw, 24px);
+  max-width: min(980px, 88%);
+  margin-top: clamp(12px, 1.5vw, 20px);
+  padding: 14px 22px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), transparent 52%);
+}
+
+.aaronnote-meta-tags::before {
+  content: "Topics";
+  flex-basis: 100%;
+  margin: 0 0 5px;
+  color: color-mix(in srgb, var(--aaron-title, #ff9bad), var(--aaron-muted, #6f6a61) 42%);
+  font: 720 10px/1 var(--aaron-font-sans, system-ui);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
 }
 
 .aaronnote-meta-tag {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), var(--aaron-red, #b8202a) 16%);
-  border-radius: 999px;
-  padding: 0 11px;
-  background: color-mix(in srgb, var(--aaron-paper-soft, #1e2536), var(--aaron-red, #d79a9a) 8%);
-  color: var(--aaron-red-dark, #8d1f26);
-  font: 650 12px/1 var(--aaron-font-sans, system-ui);
+  display: inline-block;
+  min-height: 25px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  padding: 4px 1px 3px;
+  background: transparent;
+  color: color-mix(in srgb, var(--aaron-muted, #6f6a61), var(--aaron-ink, #24201a) 22%);
+  font: 570 12px/1.4 var(--aaron-font-sans, system-ui);
+  letter-spacing: 0.035em;
   text-decoration: none;
   cursor: pointer;
 }
 
 .aaronnote-meta-tag:hover {
-  border-color: var(--aaron-red, #b8202a);
-  background: var(--aaron-paper, #171b28);
+  border-bottom-color: color-mix(in srgb, var(--aaron-title, #ff9bad), transparent 28%);
+  background: transparent;
+  color: var(--aaron-title, #ff9bad);
 }
 
-.cm-editor .cm-org-env-block .aaronnote-meta-hidden {
-  display: none;
+.aaronnote-meta-tag:focus-visible {
+  border-radius: 4px;
+  outline: 1px solid var(--aaron-title, #ff9bad);
+  outline-offset: 2px;
 }
 
-.cm-editor .cm-org-env-block .org-env-meta-value:focus {
-  box-shadow: 0 1px 0 var(--aaron-red, #b8202a);
+.aaronnote-meta-abstract {
+  width: min(1380px, 88%);
+  margin: 0 auto;
+  color: var(--aaron-ink, #24201a);
+}
+
+.aaronnote-meta-abstract-heading {
+  display: grid;
+  grid-template-columns: minmax(24px, 1fr) auto minmax(24px, 1fr);
+  align-items: center;
+  gap: clamp(12px, 2vw, 24px);
+}
+
+.aaronnote-meta-abstract-heading::before,
+.aaronnote-meta-abstract-heading::after {
+  content: "";
+  height: 1px;
+  background: color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), var(--aaron-ink, #24201a) 16%);
+}
+
+.aaronnote-meta-abstract-title {
+  color: var(--aaron-ink, #24201a);
+  font-family: var(--aaron-font-math, "Times New Roman", serif), var(--aaron-font-chinese, serif);
+  font-size: clamp(22px, 1.85vw, 29px);
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.aaronnote-meta-abstract-content {
+  margin: clamp(20px, 2.6vw, 32px) auto 0;
+  padding: 0 clamp(4px, 1.5vw, 20px);
+  color: var(--aaron-ink, #24201a);
+  font-family: var(--aaron-font-body, Georgia, serif);
+  font-size: clamp(16px, 1.55vw, 20px);
+  line-height: 1.62;
+  text-align: left;
+}
+
+.aaronnote-meta-abstract-content > :first-child { margin-top: 0; }
+.aaronnote-meta-abstract-content > :last-child { margin-bottom: 0; }
+.aaronnote-meta-abstract-content p { margin: 0 0 0.9em; }
+.aaronnote-meta-abstract-content ol,
+.aaronnote-meta-abstract-content ul { margin: 0.35em 0 1em; padding-left: 1.65em; }
+.aaronnote-meta-abstract-content li + li { margin-top: 0.2em; }
+.aaronnote-meta-abstract-content math-block { margin: 0.8em 0; text-align: center; }
+
+/* Headings remain meaningful inside the abstract, but they are local
+ * subdivisions—not page-level title/section chrome. */
+.cm-editor .aaronnote-meta-abstract-content h1,
+.cm-editor .aaronnote-meta-abstract-content h2,
+.cm-editor .aaronnote-meta-abstract-content h3,
+.cm-editor .aaronnote-meta-abstract-content h4,
+.cm-editor .aaronnote-meta-abstract-content h5,
+.cm-editor .aaronnote-meta-abstract-content h6 {
+  margin: 1em 0 0.45em;
+  border: 0;
+  padding: 0;
+  color: var(--aaron-ink, #24201a);
+  font-family: var(--aaron-font-body, Georgia, serif);
+  font-size: 1.08em;
+  font-style: normal;
+  font-weight: 680;
+  line-height: 1.3;
+  letter-spacing: 0;
+  text-align: left;
+  text-transform: none;
+}
+.cm-editor .aaronnote-meta-abstract-content h1 { font-size: 1.2em; }
+.cm-editor .aaronnote-meta-abstract-content h2 { font-size: 1.14em; }
+.cm-editor .aaronnote-meta-abstract-content h1::after { display: none; }
+
+.cm-editor .aaronnote-meta-abstract-content .aaronnote-section-heading {
+  min-height: 0;
+  margin: 1em 0 0.55em;
+  padding: 0;
+  color: var(--aaron-ink, #24201a);
+}
+.cm-editor .aaronnote-meta-abstract-content .aaronnote-section-heading-inner {
+  min-height: 0;
+  place-items: start;
+  gap: 0.3em;
+  padding: 0.55em 0;
+  border-bottom: 0;
+  background: transparent;
+  text-align: left;
+}
+.cm-editor .aaronnote-meta-abstract-content .aaronnote-section-heading-inner::before { display: none; }
+.cm-editor .aaronnote-meta-abstract-content .aaronnote-section-title {
+  color: var(--aaron-ink, #24201a);
+  font-family: var(--aaron-font-body, Georgia, serif);
+  font-size: 1.12em;
+}
+
+.cm-editor .cm-org-env-block[data-kind="meta"][aria-readonly="true"] .aaronnote-meta-cover {
+  user-select: text;
 }
 
 @media (max-width: 720px) {
+  .aaronnote-meta-cover {
+    margin: 12px auto 30px;
+    padding: 34px 18px 32px;
+    border-radius: 16px;
+  }
+  .aaronnote-meta-cover[data-has-abstract="true"] .aaronnote-meta-masthead {
+    padding-bottom: 58px;
+  }
   .aaronnote-meta-title,
   .cm-editor .cm-org-env-block .aaronnote-meta-title {
-    font-size: 42px;
-    line-height: 1.06;
+    font-size: 36px;
+    line-height: 1.12;
+  }
+  .aaronnote-meta-tags {
+    max-width: 100%;
+    padding-inline: 8px;
+  }
+  .aaronnote-meta-abstract { width: 100%; }
+  .aaronnote-meta-abstract-heading {
+    gap: 10px;
+  }
+  .aaronnote-meta-abstract-content {
+    padding: 0;
   }
 }
 .cm-editor .cm-org-env-block .org-env-meta-empty {

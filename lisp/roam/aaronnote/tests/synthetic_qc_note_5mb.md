@@ -1256,7 +1256,7 @@ For a pure state, this agrees with the vector-state formula:
 
 ## 3.2. Mixed states and ensemble decompositions
 
-A mixed state represents classical uncertainty over quantum states. Suppose
+A mixed state represents classical uncertainty over quantum states. Supposea this this this this this this t sssss  sadasd as d  asth rhs this this this 
 the system is prepared in state \(|\psi_j\rangle\) with probability \(p_j\).
 The probability constraints are
 
@@ -1266,7 +1266,7 @@ p_j \ge 0,
 \sum_j p_j = 1.
 \]
 
-The corresponding density operator is
+The corresponding density operator isa hhhhhhhh hhhhhhh hhhh hh h h h h I can do this later I can;t od this 
 
 \[
 \rho
@@ -29177,7 +29177,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文直觉：正半定保证测量概率非负；迹为一保证总概率为一。
+中文直觉：正半定保证���量概率非负；迹为一保证总概率为一。
 #+end note
 
 The expectation value of an observable \(A\) in state \(\rho\) is
@@ -192434,7 +192434,7 @@ Coordinates are useful for computation because they give arrays of field
 elements. Invariance is useful for mathematics because it identifies the
 features of the object that do not depend on the chosen basis.
 
-中文直觉：坐标是“输入格式”，不变量是“结构本身留下的影子”。
+中文直觉：坐标��“输入格式”，不变量是“结构本身留下的影子”。
 #+end remark
 
 If \(g \in \operatorname{GL}(V)\) and \(h \in \operatorname{GL}(W)\), a change

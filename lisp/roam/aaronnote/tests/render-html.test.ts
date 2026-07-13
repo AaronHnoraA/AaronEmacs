@@ -1,6 +1,12 @@
 import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
 
-import { formatCitationLabel, noteCssHrefFromMarkdown, renderMarkdownHTML, renderPublishedNoteHTML } from "../src/render-html.ts";
+import {
+  formatCitationLabel,
+  noteCssHrefFromMarkdown,
+  parseMetaEntries,
+  renderMarkdownHTML,
+  renderPublishedNoteHTML,
+} from "../src/render-html.ts";
 
 describe("shared markdown HTML renderer", () => {
   test("keeps Jupyter commands hidden by default and emits slide hydration slots on request", () => {
@@ -229,12 +235,37 @@ y^2
 
     expect(html).toContain('<div class="cm-org-env-block org-env-block" data-kind="meta" data-label="Meta">');
     expect(html).toContain('<div class="org-env-meta aaronnote-meta-cover">');
+    expect(html).toContain('<header class="aaronnote-meta-masthead">');
     expect(html).toContain('<h1 class="aaronnote-meta-title">Meta Cover</h1>');
     expect(html).toContain('<p class="aaronnote-meta-date">2026-05-21</p>');
     expect(html).toContain('<button class="aaronnote-meta-tag">#preview</button>');
     expect(html).toContain('<button class="aaronnote-meta-tag">#publish</button>');
     expect(html).toContain('class="aaronnote-meta-roam-badge"');
     expect(html).not.toContain("#internal_tag");
+  });
+
+  test("renders a summary nested in meta as a paper abstract, not an outer summary block", () => {
+    const body = [
+      "title: Tensor Isomorphism",
+      "date: 2026-07-13",
+      "tags: algebra, graph, tensor",
+      "#+begin summary",
+      "We present **three results**.",
+      "",
+      "1. First reduction.",
+      "2. Second reduction.",
+      "",
+      "status: prose inside the abstract",
+      "#+end summary",
+    ].join("\n");
+    const html = renderMarkdownHTML(`#+begin meta\n${body}\n#+end meta`);
+
+    expect(html).toContain('class="aaronnote-meta-abstract"');
+    expect(html).toContain('<span class="aaronnote-meta-abstract-title">Abstract</span>');
+    expect(html).toContain("<strong>three results</strong>");
+    expect(html).toContain("<ol>");
+    expect(html).not.toContain('data-kind="summary"');
+    expect(parseMetaEntries(body).map((entry) => entry.key)).toEqual(["title", "date", "tags"]);
   });
 
   test("marks meta covers that are not indexed by roam db", () => {

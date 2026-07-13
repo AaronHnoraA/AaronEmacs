@@ -366,8 +366,18 @@ function collectLivePreviewTokens(
         }
 
         // ── Escape backslash: hidden when cursor is outside the escape,
-        // dimmed (not fully hidden) while the cursor sits inside it ────────
+        // dimmed (not fully hidden) while the cursor sits inside it.
+        //
+        // Never fold Aaronnote's TeX delimiters. During typing and formula
+        // cut/move/paste, a closing `\]` may temporarily share a line with
+        // prose and stop qualifying as block math. Lezer then reports it as a
+        // Markdown Escape; hiding its slash makes source appear to have been
+        // deleted precisely while the structure is being repaired.
         if (node.name === "Escape") {
+          const source = doc.sliceString(node.from, node.to);
+          if (source === "\\[" || source === "\\]" || source === "\\(" || source === "\\)") {
+            return false;
+          }
           tokens.push({ kind: "delimiter", from: node.from, to: node.from + 1, spanFrom: node.from, spanTo: node.to });
           return false;
         }

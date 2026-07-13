@@ -1,4 +1,5 @@
 import type { Editor } from "../src/lib.ts";
+import { ORG_META_PREAMBLE_LINE_LIMIT, orgMetaSummaryRangeFromLines } from "../src/org-meta.ts";
 import {
   inlineTagAnchorsFromText,
   markdownHeadingsFromText,
@@ -28,10 +29,12 @@ export type OrgEnvAnchor = {
 /** Scan org-env opening lines for TOC navigation without materializing the doc. */
 export function orgEnvAnchorsFromText(doc: { lines: number; line(n: number): { from: number; to: number; text: string } }): OrgEnvAnchor[] {
   const anchors: OrgEnvAnchor[] = [];
+  const metaSummaryRange = orgMetaSummaryRangeFromLines(doc);
   let fence = "";
   let displayMath = false;
   for (let n = 1; n <= doc.lines; n += 1) {
     const line = doc.line(n);
+    if (metaSummaryRange && line.from >= metaSummaryRange.from && line.to <= metaSummaryRange.to) continue;
     const trimmed = line.text.trim();
     const fenceMatch = /^(?: {0,3})(`{3,}|~{3,})/.exec(line.text);
     if (fenceMatch) {
@@ -48,6 +51,7 @@ export function orgEnvAnchorsFromText(doc: { lines: number; line(n: number): { f
     if (!match) continue;
     const kind = match[1]!.toLowerCase();
     if (kind === "lean4") continue;
+    if (kind === "meta" && n > ORG_META_PREAMBLE_LINE_LIMIT) continue;
     anchors.push({ kind, title: (match[2] ?? "").trim(), pos: line.from, to: line.to });
   }
   return anchors;

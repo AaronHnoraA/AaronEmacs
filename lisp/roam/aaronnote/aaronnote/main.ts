@@ -11,6 +11,7 @@ import {
 import { setupCopilot } from "../src/copilot/index.ts";
 import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownBlock, indentMarkdownList, tableNavigateCell, tableEnterSameColumn } from "../src/cm6/commands/index.ts";
 import { markdownHrefAt } from "../src/cm6/editor-cm6.ts";
+import { nextGraphemePosition, previousGraphemePosition } from "../src/cm6/text-boundaries.ts";
 import { getBlockMathRanges, rangeAtPosition, rangeOverlapsAny } from "../src/cm6/math-ranges.ts";
 import { equationTagsFromText, getEquationTagHits } from "../src/equation-tags.ts";
 import { INLINE_MATH_RE } from "../src/inline-math.ts";
@@ -7376,20 +7377,18 @@ function insertHostKeyText(key: string, text?: string): boolean {
 }
 
 function deleteHostKeyText(key: string): boolean {
+  if (key !== "Backspace" && key !== "Delete") return false;
   const { from, to } = editor.getMarkdownSelection();
   if (from !== to) {
     editor.replaceMarkdownRange(from, to, "", "start");
     return true;
   }
-  if (key === "Backspace" && from > 0) {
-    editor.replaceMarkdownRange(from - 1, from, "", "start");
-    return true;
-  }
-  if (key === "Delete") {
-    editor.replaceMarkdownRange(from, Math.min(from + 1, editor.getMarkdownLength()), "", "start");
-    return true;
-  }
-  return false;
+  const text = editor.view.state.doc;
+  const start = key === "Backspace" ? previousGraphemePosition(text, from) : from;
+  const end = key === "Delete" ? nextGraphemePosition(text, to) : to;
+  if (start >= end) return false;
+  editor.replaceMarkdownRange(start, end, "", "start");
+  return true;
 }
 
 function runHostKey(body: Record<string, unknown>): boolean {
@@ -7984,7 +7983,10 @@ document.addEventListener("selectionchange", () => {
 });
 document.addEventListener("mouseup", (event) => {
   if (!editorSurfaceVisible()) return;
-  if (event.target instanceof Node && host.contains(event.target)) noteCursorPositionEvent();
+  if (event.target instanceof Node && editor.view.dom.contains(event.target)) {
+    vim.syncSelectionFromEditor();
+    noteCursorPositionEvent();
+  }
   scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: true });
 });
 window.addEventListener("resize", () => {
@@ -8068,6 +8070,8 @@ window.addEventListener("pagehide", () => {
   notifyClientClosedKeepalive();
 });
 window.addEventListener("beforeunload", () => {
+  vim.destroy();
+  imeCoalesceTimer.cancel();
   zoomController.destroy();
   writingStatsController?.destroy();
   void flushCursorPosition();

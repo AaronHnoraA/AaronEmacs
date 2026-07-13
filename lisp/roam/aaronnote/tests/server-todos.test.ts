@@ -196,6 +196,23 @@ describe("server todo scan", () => {
     expect(tagsFromContent(content)).toEqual(["paper", "quantum"]);
     expect(inlineTagsFromContent(content)).toEqual(["local-anchor"]);
   });
+
+  test("keeps planning commands and inline anchors inside meta summary out of indexes", () => {
+    const content = [
+      "#+begin meta",
+      "title: Cover",
+      "#+begin summary",
+      "@@todo(doing) [Abstract-only task]",
+      "@@tag[abstract-only-anchor]",
+      "#+end summary",
+      "#+end meta",
+      "@@todo [Visible task]",
+      "@@tag[visible-anchor]",
+    ].join("\n");
+
+    expect(extractTodos(content, note, 1).map((todo: { text: string }) => todo.text)).toEqual(["Visible task"]);
+    expect(inlineTagsFromContent(content)).toEqual(["visible-anchor"]);
+  });
 });
 
 describe("server todo agenda", () => {

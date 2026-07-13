@@ -1,5 +1,9 @@
 import type { Text } from "@codemirror/state";
 import { tocIndexFromState } from "../src/cm6/toc-index.ts";
+import {
+  orgMetaSummaryRangeFromLines,
+  type MetaSummarySourceRange,
+} from "../src/org-meta.ts";
 import type { EditorState } from "@codemirror/state";
 
 export type WritingStats = {
@@ -13,8 +17,21 @@ const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=H
 const NON_CJK_WORD_RE = /[\p{L}\p{N}]+(?:['’_-][\p{L}\p{N}]+)*/gu;
 const NON_SPACE_RE = /\S/gu;
 
+function countText(text: string): Omit<WritingStats, "words"> {
+  const characters = [...text.matchAll(NON_SPACE_RE)].length;
+  const cjkCharacters = [...text.matchAll(CJK_RE)].length;
+  // Remove CJK characters so adjacent Latin runs remain ordinary words.
+  const nonCjkWords = [...text.replace(CJK_RE, " ").matchAll(NON_CJK_WORD_RE)].length;
+  return { characters, cjkCharacters, nonCjkWords };
+}
+
 /** Count a source range without materializing the whole CM6 document. */
-export function countWritingStats(doc: Text, from = 0, to = doc.length): WritingStats {
+export function countWritingStats(
+  doc: Text,
+  from = 0,
+  to = doc.length,
+  metaSummaryRange: MetaSummarySourceRange | null = orgMetaSummaryRangeFromLines(doc),
+): WritingStats {
   const safeFrom = Math.max(0, Math.min(from, doc.length));
   const safeTo = Math.max(safeFrom, Math.min(to, doc.length));
   let characters = 0;
@@ -25,15 +42,23 @@ export function countWritingStats(doc: Text, from = 0, to = doc.length): Writing
 
   for (let lineNo = firstLine; lineNo <= lastLine; lineNo += 1) {
     const line = doc.line(lineNo);
-    const text = line.text.slice(
-      lineNo === firstLine ? safeFrom - line.from : 0,
-      lineNo === lastLine ? safeTo - line.from : line.length,
-    );
-    characters += [...text.matchAll(NON_SPACE_RE)].length;
-    const cjk = [...text.matchAll(CJK_RE)].length;
-    cjkCharacters += cjk;
-    // Remove CJK characters so adjacent Latin runs remain ordinary words.
-    nonCjkWords += [...text.replace(CJK_RE, " ").matchAll(NON_CJK_WORD_RE)].length;
+    const segmentFrom = lineNo === firstLine ? safeFrom : line.from;
+    const segmentTo = lineNo === lastLine ? safeTo : line.to;
+    const visibleSegments = !metaSummaryRange
+      || segmentTo <= metaSummaryRange.from
+      || segmentFrom >= metaSummaryRange.to
+      ? [[segmentFrom, segmentTo] as const]
+      : [
+          [segmentFrom, Math.min(segmentTo, metaSummaryRange.from)] as const,
+          [Math.max(segmentFrom, metaSummaryRange.to), segmentTo] as const,
+        ];
+    for (const [visibleFrom, visibleTo] of visibleSegments) {
+      if (visibleTo <= visibleFrom) continue;
+      const stats = countText(line.text.slice(visibleFrom - line.from, visibleTo - line.from));
+      characters += stats.characters;
+      cjkCharacters += stats.cjkCharacters;
+      nonCjkWords += stats.nonCjkWords;
+    }
   }
   return { words: cjkCharacters + nonCjkWords, characters, cjkCharacters, nonCjkWords };
 }

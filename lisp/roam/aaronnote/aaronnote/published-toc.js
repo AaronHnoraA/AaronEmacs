@@ -37,7 +37,7 @@ function ensureHeadingIds(headings) {
 function collectHeadings(article) {
   const headings = Array.from(article.querySelectorAll(HEADING_SELECTOR))
     .filter((heading) => heading instanceof HTMLElement)
-    .filter((heading) => !heading.closest("[hidden], [aria-hidden='true']"));
+    .filter((heading) => !heading.closest("[hidden], [aria-hidden='true'], .aaronnote-meta-abstract-content"));
   const hasSemantic = headings.some((heading) => heading.classList.contains("aaronnote-section-heading"));
   ensureHeadingIds(headings);
   return headings.map((heading) => ({
