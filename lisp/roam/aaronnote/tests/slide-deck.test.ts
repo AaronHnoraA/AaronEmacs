@@ -7,7 +7,7 @@ import {
   createSlidePresentation,
   sourceSlideIndexFromReveal,
 } from "../aaronnote/slide-presentation.ts";
-import { jupyterCellsFromState } from "../src/cm6/widgets/block-extras.ts";
+import { jupyterCellsFromState } from "../src/cm6/extensions/visual/widgets/block-extras.ts";
 import { tocIndexExtension } from "../src/cm6/toc-index.ts";
 import type { Editor } from "../src/lib.ts";
 

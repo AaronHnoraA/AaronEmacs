@@ -1,5 +1,9 @@
 # Aaronnote / typora-web
 
+> License: AGPL-3.0-only. The source-editor infrastructure includes attributed
+> adaptations from Overleaf; see [NOTICE](NOTICE) and
+> [the architecture review](docs/architecture/overleaf-source-editor-study.md).
+
 > A Typora-style Markdown editor for the web.
 
 This README is package-focused. In the Emacs-vendored copy, the host bridge is

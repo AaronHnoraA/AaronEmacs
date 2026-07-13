@@ -24,7 +24,7 @@
 ### 2026-05-22
 
 **1 — math 缓存合并**
-- 删除 `src/cm6/widgets/math.ts` 里的 512 条 LRU（`mathHtmlCache` / `cachedMathHTML`）
+- 删除 `src/cm6/extensions/visual/widgets/math.ts` 里的 512 条 LRU（`mathHtmlCache` / `cachedMathHTML`）
 - `math-render.ts` 统一上限提升到 512，两处 `toDOM()` 改调 `renderMathHTML` 直接命中同一个 LRU
 
 **2 — 字节预算**

@@ -23,8 +23,8 @@ import {
 import { MeasuredWidget } from "./measured-widget.ts";
 import { syntaxTree } from "@codemirror/language";
 import type { Range } from "@codemirror/state";
-import { getBlockMathRanges, rangeInsideAny } from "../math-ranges.ts";
-import { hasViewportDecorationRefresh } from "../viewport-refresh.ts";
+import { getBlockMathRanges, rangeInsideAny } from "../../../math-ranges.ts";
+import { hasViewportDecorationRefresh } from "../../../viewport-refresh.ts";
 
 // ---------------------------------------------------------------------------
 // Widget

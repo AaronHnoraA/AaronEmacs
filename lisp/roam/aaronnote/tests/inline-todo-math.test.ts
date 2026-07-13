@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@voidzero-dev/vite-plus-test";
-import { inlineTodoBodyHTML } from "../src/cm6/widgets/inline-commands.ts";
+import { inlineTodoBodyHTML } from "../src/cm6/extensions/visual/widgets/inline-commands.ts";
 
 describe("inlineTodoBodyHTML", () => {
   it("renders inline math inside a @@todo body", () => {

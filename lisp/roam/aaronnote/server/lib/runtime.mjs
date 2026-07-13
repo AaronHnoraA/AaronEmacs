@@ -13,6 +13,7 @@ import { aaronnoteMarkdownToLatexPandoc, extractAaronnoteMetadata } from "./late
 import { agentAvailable, loadAgentRules, normalizeAgentTitle, polishBodyWithAgent } from "./latex-export-codex.mjs";
 import { loadKatexMacros } from "./katex-macros.mjs";
 import { durationFromEnv } from "./jupyter-cell.mjs";
+import { SessionManager } from "../Features/Session/manager.mjs";
 import {
   bibliographyCompletions,
   bibliographyForDocument,
@@ -172,6 +173,7 @@ const scanConcurrency = Math.max(1, Math.min(64, Number(process.env.AARONNOTE_SC
 const saveRequestVersions = new Map();
 const saveWriteQueues = new Map();
 let clockMutationQueue = Promise.resolve();
+let sessionManager = null;
 const NOTE_CODE_FILE_CACHE_LIMIT = 64;
 const NOTE_CODE_FILE_CACHE_BYTES = 8_000_000;
 const PATH_SUGGESTION_DIR_CACHE_LIMIT = 64;
@@ -1207,100 +1209,28 @@ export async function trashUnusedAssets(body) {
   return { type: "unused-assets-trash", ok: true, trashed, skipped, assets: await scanUnusedAssets() };
 }
 
-function recentStoreFile() {
-  return join(stateRoot, "recent.json");
-}
-
-function normalizeRecentNotes(entries) {
-  if (!Array.isArray(entries)) return [];
-  const byFile = new Map();
-  for (const item of entries) {
-    const file = item && typeof item.file === "string" ? item.file : "";
-    const openedAt = item && typeof item.openedAt === "number" ? item.openedAt : NaN;
-    if (!file || !Number.isFinite(openedAt)) continue;
-    let safe;
-    try {
-      safe = safeOpenFile(file);
-    } catch {
-      continue;
-    }
-    const current = byFile.get(safe);
-    if (!current || openedAt > current.openedAt) byFile.set(safe, { file: safe, openedAt });
-  }
-  return [...byFile.values()].sort((a, b) => b.openedAt - a.openedAt).slice(0, 24);
+function currentSessionManager() {
+  return (sessionManager ??= new SessionManager({
+    stateRoot,
+    resolveFile: safeOpenFile,
+    writeFile: atomicWriteFile,
+  }));
 }
 
 export async function readRecentNotes() {
-  try {
-    const raw = await readFile(recentStoreFile(), "utf8");
-    return normalizeRecentNotes(JSON.parse(raw));
-  } catch {
-    return [];
-  }
-}
-
-async function writeRecentNotes(entries) {
-  const file = recentStoreFile();
-  await atomicWriteFile(file, `${JSON.stringify(normalizeRecentNotes(entries), null, 2)}\n`, "utf8");
+  return currentSessionManager().readRecentNotes();
 }
 
 export async function touchRecentNote(file, openedAt = Date.now()) {
-  const safe = safeOpenFile(file);
-  const recent = await readRecentNotes();
-  const next = normalizeRecentNotes([{ file: safe, openedAt }, ...recent]);
-  await writeRecentNotes(next);
-  return next;
-}
-
-function positionStoreFile() {
-  return join(stateRoot, "positions.json");
-}
-
-function normalizeCursorPositions(entries) {
-  if (!Array.isArray(entries)) return [];
-  const byFile = new Map();
-  for (const item of entries) {
-    const file = item && typeof item.file === "string" ? item.file : "";
-    if (!file) continue;
-    let safe;
-    try {
-      safe = safeOpenFile(file);
-    } catch {
-      continue;
-    }
-    const from = item && typeof item.from === "number" && Number.isFinite(item.from) ? Math.max(0, item.from) : 0;
-    const to = item && typeof item.to === "number" && Number.isFinite(item.to) ? Math.max(0, item.to) : from;
-    const scrollY = item && typeof item.scrollY === "number" && Number.isFinite(item.scrollY) ? Math.max(0, item.scrollY) : 0;
-    const updatedAt = item && typeof item.updatedAt === "number" && Number.isFinite(item.updatedAt) ? item.updatedAt : 0;
-    const mode = item && item.mode === "source" ? "source" : "markdown";
-    const current = byFile.get(safe);
-    if (!current || updatedAt > current.updatedAt) {
-      byFile.set(safe, { file: safe, mode, from, to, scrollY, updatedAt });
-    }
-  }
-  return [...byFile.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 240);
+  return currentSessionManager().touchRecentNote(file, openedAt);
 }
 
 export async function readCursorPositions() {
-  try {
-    const raw = await readFile(positionStoreFile(), "utf8");
-    return normalizeCursorPositions(JSON.parse(raw));
-  } catch {
-    return [];
-  }
-}
-
-async function writeCursorPositions(entries) {
-  const file = positionStoreFile();
-  await atomicWriteFile(file, `${JSON.stringify(normalizeCursorPositions(entries), null, 2)}\n`, "utf8");
+  return currentSessionManager().readCursorPositions();
 }
 
 export async function touchCursorPosition(body) {
-  const safe = safeOpenFile(body.file);
-  const current = await readCursorPositions();
-  const next = normalizeCursorPositions([{ ...body, file: safe, updatedAt: Number(body.updatedAt) || Date.now() }, ...current]);
-  await writeCursorPositions(next);
-  return next;
+  return currentSessionManager().touchCursorPosition(body);
 }
 
 function modeForFile(file) {
@@ -7966,6 +7896,7 @@ export function configure(options = {}) {
   workspaceRoot = resolve(String(options.workspaceRoot || process.env.AARONNOTE_WORKSPACE_ROOT || resolve(appDir, "..")));
   publishJsDir = resolve(String(options.publishJsDir || process.env.AARONNOTE_PUBLISH_JS_DIR || join(workspaceRoot, "js")));
   stateRoot = resolve(String(options.stateRoot || process.env.AARONNOTE_STATE_DIR || join(workspaceRoot, "var", "aaronnote")));
+  sessionManager = null;
   runtimeTmpRoot = configureTmpRoot(options.tmpRoot || process.env.AARONNOTE_TMP_DIR || join(stateRoot, "tmp"));
   snippetsRoot = resolve(String(options.snippetsRoot || process.env.AARONNOTE_SNIPPETS_ROOT || join(workspaceRoot, "snippets")));
   templatesRoot = resolve(String(options.templatesRoot || process.env.AARONNOTE_TEMPLATES_ROOT || join(workspaceRoot, "templates", "aaronnote")));

@@ -46,8 +46,8 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from "@codemirror/view";
-import { MeasuredWidget } from "./widgets/measured-widget.ts";
-import { shortHash } from "./widgets/measured-observer.ts";
+import { MeasuredWidget } from "./extensions/visual/widgets/measured-widget.ts";
+import { shortHash } from "./extensions/visual/widgets/measured-observer.ts";
 import { StateField, type ChangeSet, type EditorState, type Text } from "@codemirror/state";
 import type { Range } from "@codemirror/state";
 import { getBlockMathRanges, mergeOverlappingRanges, rangeInsideAny, rangeOverlapsAny } from "./math-ranges.ts";
@@ -63,8 +63,16 @@ import {
 import { tocIndexFromState } from "./toc-index.ts";
 import { hasViewportDecorationRefresh, refreshViewportDecorations, viewportDecorationRefreshRanges } from "./viewport-refresh.ts";
 import { getFencedCodeRanges } from "./code-ranges.ts";
-import { orgEnvContextForRange } from "./widgets/block-extras.ts";
+import { orgEnvContextForRange } from "./extensions/visual/widgets/block-extras.ts";
 import { markdownLinkDestination } from "../markdown-link.ts";
+import {
+  firstChangedLine,
+  viewportDeltaRanges,
+} from "./utils/tree-operations/change-ranges.ts";
+import {
+  isPointerSelecting,
+  updateHasPointerSelectionEffect,
+} from "./extensions/visual/selection.ts";
 
 // ---------------------------------------------------------------------------
 // Asset URL helpers for raw HTML embedded in the live preview.
@@ -587,38 +595,6 @@ function pushMark(
 }
 
 // ---------------------------------------------------------------------------
-// Helpers for incremental viewport updates
-// ---------------------------------------------------------------------------
-
-/** Returns the 1-based line number of the earliest position affected by changes. */
-function firstChangedLine(changes: ChangeSet, doc: Text): number {
-  let minLine = Infinity;
-  changes.iterChangedRanges((_fromA, _toA, fromB) => {
-    const pos = Math.min(fromB, doc.length > 0 ? doc.length - 1 : 0);
-    const line = doc.lineAt(pos).number;
-    if (line < minLine) minLine = line;
-  });
-  return isFinite(minLine) ? minLine : 1;
-}
-
-/**
- * Returns sub-ranges of `newRanges` not already covered by the envelope
- * [lastFrom, lastTo], i.e. the portions that just scrolled into view.
- */
-function computeDeltaRanges(
-  lastFrom: number,
-  lastTo: number,
-  newRanges: readonly { from: number; to: number }[],
-): { from: number; to: number }[] {
-  const delta: { from: number; to: number }[] = [];
-  for (const { from, to } of newRanges) {
-    if (to > lastTo) delta.push({ from: Math.max(from, lastTo), to });
-    if (from < lastFrom) delta.push({ from, to: Math.min(to, lastFrom) });
-  }
-  return delta.filter(r => r.from < r.to);
-}
-
-// ---------------------------------------------------------------------------
 // ViewPlugin export
 // ---------------------------------------------------------------------------
 
@@ -643,6 +619,7 @@ class LivePreviewPlugin {
     if (update.view.compositionStarted && update.selectionSet && !update.docChanged && !update.viewportChanged) return;
 
     const forceRefresh = hasViewportDecorationRefresh(update);
+    const pointerSelectionChanged = updateHasPointerSelectionEffect(update);
     const vr = update.view.visibleRanges;
     const newFrom = vr[0]?.from ?? 0;
     const newTo = vr[vr.length - 1]?.to ?? 0;
@@ -667,7 +644,7 @@ class LivePreviewPlugin {
       this.decorations = buildDecorations(update.view, this.tokens);
     } else if (update.viewportChanged) {
       // Incremental: collect tokens only for ranges newly scrolled into view.
-      const delta = computeDeltaRanges(this.lastVpFrom, this.lastVpTo, vr);
+      const delta = viewportDeltaRanges(this.lastVpFrom, this.lastVpTo, vr);
       const kept = this.tokens.filter(t => t.to > newFrom && t.from < newTo);
       if (delta.length > 0) {
         const fresh = collectLivePreviewTokens(update.view, delta, this.cjkLineCache);
@@ -686,6 +663,15 @@ class LivePreviewPlugin {
       this.selectionKey = selectionAffectingTokenKey(update.view.state, this.tokens);
       this.decorations = buildDecorations(update.view, this.tokens);
     } else if (update.selectionSet) {
+      // Match Overleaf's selection model: a pointer drag can produce many
+      // selection transactions. Keep current marks stable until mouseup, then
+      // rebuild once from the final selection.
+      if (isPointerSelecting(update.state)) return;
+      const nextSelectionKey = selectionAffectingTokenKey(update.view.state, this.tokens);
+      if (nextSelectionKey === this.selectionKey) return;
+      this.selectionKey = nextSelectionKey;
+      this.decorations = buildDecorations(update.view, this.tokens);
+    } else if (pointerSelectionChanged && !isPointerSelecting(update.state)) {
       const nextSelectionKey = selectionAffectingTokenKey(update.view.state, this.tokens);
       if (nextSelectionKey === this.selectionKey) return;
       this.selectionKey = nextSelectionKey;

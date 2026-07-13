@@ -27,11 +27,11 @@ import { shortHash } from "./measured-observer.ts";
 import { StateField, type ChangeSet, type EditorState, type Text } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 import type { Range } from "@codemirror/state";
-import { highlightCodeForEditor, onCodeHighlightReady } from "../../code-highlight-async.ts";
-import { supportedDiagramLang } from "../../diagram-langs.ts";
-import { getBlockMathRanges, rangeInsideAny, rangeOverlapsAny } from "../math-ranges.ts";
-import { applyLayoutAttrs, layoutFromAttrs, readLayoutAttrsLine, type LayoutAttrs } from "../../layout-attrs.ts";
-import { hasViewportDecorationRefresh } from "../viewport-refresh.ts";
+import { highlightCodeForEditor, onCodeHighlightReady } from "../../../../code-highlight-async.ts";
+import { supportedDiagramLang } from "../../../../diagram-langs.ts";
+import { getBlockMathRanges, rangeInsideAny, rangeOverlapsAny } from "../../../math-ranges.ts";
+import { applyLayoutAttrs, layoutFromAttrs, readLayoutAttrsLine, type LayoutAttrs } from "../../../../layout-attrs.ts";
+import { hasViewportDecorationRefresh } from "../../../viewport-refresh.ts";
 
 function setSourceRange(el: HTMLElement, from: number, to: number, anchor?: number, openSource = false): void {
   el.dataset.cmSourceFrom = String(from);
@@ -257,7 +257,7 @@ function renderMermaidWidget(source: string, lang: string, div: HTMLElement, onR
   const key = `mermaid\n${lang}\n${source.trim()}`;
   div.dataset.diagramRenderKey = key;
   div.textContent = "Loading diagram renderer...";
-  void import("../../diagram-render.ts")
+  void import("../../../../diagram-render.ts")
     .then(({ renderMermaidLazy }) => {
       if (div.dataset.diagramRenderKey !== key) return;
       renderMermaidLazy(source, div, (err) => {

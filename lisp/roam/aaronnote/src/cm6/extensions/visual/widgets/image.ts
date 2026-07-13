@@ -23,8 +23,8 @@ import {
 import { MeasuredWidget } from "./measured-widget.ts";
 import { syntaxTree } from "@codemirror/language";
 import type { Range } from "@codemirror/state";
-import { blockMathRangesOverlapping, mergeOverlappingRanges, rangeInsideAny } from "../math-ranges.ts";
-import { scanInlineMathRanges } from "../../inline-math.ts";
+import { blockMathRangesOverlapping, mergeOverlappingRanges, rangeInsideAny } from "../../../math-ranges.ts";
+import { scanInlineMathRanges } from "../../../../inline-math.ts";
 import {
   applyImageLayout,
   imageLayoutFromAttrs,
@@ -32,8 +32,8 @@ import {
   readImageTrailingAttrs,
   type ImageAlign,
   type ImageLayoutAttrs,
-} from "../../image-attrs.ts";
-import { markdownLinkDestination } from "../../markdown-link.ts";
+} from "../../../../image-attrs.ts";
+import { markdownLinkDestination } from "../../../../markdown-link.ts";
 import {
   VISUAL_ATTACHMENT_IFRAME_ALLOW,
   visualAttachmentEmbeddableP,
@@ -41,8 +41,8 @@ import {
   visualAttachmentKind,
   visualAttachmentSandbox,
   visualAttachmentTitle,
-} from "../../visual-attachments.ts";
-import { hasViewportDecorationRefresh } from "../viewport-refresh.ts";
+} from "../../../../visual-attachments.ts";
+import { hasViewportDecorationRefresh } from "../../../viewport-refresh.ts";
 
 declare global {
   interface Window {

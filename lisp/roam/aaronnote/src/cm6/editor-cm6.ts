@@ -10,10 +10,9 @@
  * CM6 doc positions are the markdown source offsets used by the public API.
  */
 
-import { Compartment, EditorSelection, EditorState, Transaction, type Extension, type Text as CMText } from "@codemirror/state";
+import { EditorSelection, EditorState, Transaction, type Extension, type Text as CMText } from "@codemirror/state";
 import {
   EditorView,
-  ViewPlugin,
   keymap,
   highlightActiveLine,
   rectangularSelection,
@@ -29,20 +28,8 @@ import {
 import { closeBrackets } from "@codemirror/autocomplete";
 import { vscodeCloseBrackets, vscodeDeleteBracketPairKeymap } from "./close-brackets-vscode.ts";
 import { foldEffect, syntaxTree, unfoldEffect } from "@codemirror/language";
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { livePreviewExtension } from "./live-preview.ts";
-import { nestingAwareLinkExtension } from "./lezer-link-ext.ts";
 import { disposeHighlightWorker } from "../code-highlight-async.ts";
 import { disposeMathRuntime } from "../math-render.ts";
-import { mathExtension } from "./widgets/math.ts";
-import { fencedCodeExtension } from "./widgets/fenced-code.ts";
-import { taskListExtension } from "./widgets/task-list.ts";
-import { imageExtension } from "./widgets/image.ts";
-import { blockExtrasExtension, orgEnvExitTarget } from "./widgets/block-extras.ts";
-import { inlineCommandsExtension } from "./widgets/inline-commands.ts";
-import { leanExtension } from "./widgets/lean-block.ts";
-import { leanPlaceholderEditingExtension, leanPlaceholderPreviewExtension } from "./widgets/lean-placeholder.ts";
-import { noteCodeEditingExtension, noteCodePreviewExtension } from "./widgets/note-code.ts";
 import {
   runCommandCM6,
   getBlockContextCM6,
@@ -52,7 +39,7 @@ import {
   indentMarkdownBlock,
   tableNavigateCell,
   tableEnterSameColumn,
-} from "./commands.ts";
+} from "./commands/index.ts";
 import {
   pasteDataTransfer,
   pasteFromClipboard as runPasteFromClipboard,
@@ -61,17 +48,21 @@ import {
 } from "../paste.ts";
 import { renderMarkdownHTML } from "../render-html.ts";
 import { markdownLinkDestination } from "../markdown-link.ts";
-import { blockMathRangesExtension, getBlockMathRanges, positionInsideAnyRange } from "./math-ranges.ts";
+import { getBlockMathRanges, positionInsideAnyRange } from "./math-ranges.ts";
 import { scanInlineMathRanges } from "../inline-math.ts";
-import { findHighlightExtension } from "./find-highlight.ts";
-import { roamLinkStatusExtension } from "./roam-link-status.ts";
-import { tocIndexExtension, tocIndexFromState } from "./toc-index.ts";
+import { tocIndexFromState } from "./toc-index.ts";
 import { resolveAnchorHeading } from "../heading-slug.ts";
-import { orderedListRenumber, skipOrderedListRenumber } from "./ordered-list-renumber.ts";
-import { captureHeadingFoldKeys, headingFoldExtension, restoreHeadingFoldKeys } from "./heading-fold.ts";
-import { proseDiagnosticsExtension } from "./prose-diagnostics.ts";
-import { vimJumpExtension } from "./vim-jump.ts";
+import { skipOrderedListRenumber } from "./ordered-list-renumber.ts";
+import { captureHeadingFoldKeys, restoreHeadingFoldKeys } from "./heading-fold.ts";
 import { scheduleViewportDecorationRefresh } from "./viewport-refresh.ts";
+import { createMarkdownFeatureExtensions } from "./extensions/index.ts";
+import { beforeChangeDocumentEffect } from "./extensions/document-lifecycle.ts";
+import {
+  hasVisualMode,
+  isVisualMode,
+  orgEnvExitTarget,
+  setVisualMode,
+} from "./extensions/visual/index.ts";
 
 import type { SyntaxNode } from "@lezer/common";
 import type {
@@ -443,8 +434,6 @@ function openAttachmentContextMenuFromEvent(view: EditorView, event: MouseEvent)
 
 export function createEditorCM6(host: HTMLElement, options: EditorOptions): Editor {
   const qiRegistry = createQuickInsertRegistry();
-  const previewCompartment = new Compartment();
-  let inSource = false;
   // Preserve the stable outer DOM shape so themes and layout CSS work
   // without coupling to the editor implementation.
   const wrap = document.createElement("div");
@@ -456,12 +445,11 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
   const initialDoc = options.initialContent ?? "";
   const headingFoldMemory = new Map<string, string[]>();
   let activeDocumentKey = currentDocumentKey();
-  const createState = (doc: string): EditorState => EditorState.create({
+  const createState = (doc: string, visual = true): EditorState => EditorState.create({
     doc,
     extensions: buildExtensions(
       options,
-      previewCompartment,
-      () => inSource,
+      visual,
       rememberHeadingFolds,
       "standalone",
     ),
@@ -647,7 +635,9 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
       if (setOptions.history === "reset") {
         rememberHeadingFolds();
         activeDocumentKey = currentDocumentKey();
-        view.setState(createState(md));
+        const visual = isVisualMode(view);
+        view.dispatch({ effects: beforeChangeDocumentEffect.of(undefined) });
+        view.setState(createState(md, visual));
         restoreHeadingFolds();
         scheduleViewportDecorationRefresh(view);
         return;
@@ -837,19 +827,14 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
     toggleSource(): void {
       const { head } = view.state.selection.main;
       const beforeTop = coordsTopAt(head);
-      const enteringPreview = inSource;
-      inSource = !inSource;
-      view.dispatch({
-        effects: [
-          previewCompartment.reconfigure(inSource ? [] : previewExtensions()),
-        ],
-      });
+      const enteringPreview = !isVisualMode(view);
+      view.dispatch(setVisualMode(enteringPreview));
       preserveCursorScreenTop(head, beforeTop, enteringPreview);
       view.focus();
     },
 
     isSourceMode(): boolean {
-      return inSource;
+      return !isVisualMode(view);
     },
 
     focus(): void {
@@ -919,22 +904,6 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
 // Extension setup
 // ---------------------------------------------------------------------------
 
-function previewExtensions(): Extension[] {
-  return [
-    blockMathRangesExtension,
-    livePreviewExtension,
-    blockExtrasExtension,
-    mathExtension,
-    fencedCodeExtension,
-    taskListExtension,
-    imageExtension,
-    leanPlaceholderPreviewExtension,
-    noteCodePreviewExtension,
-    inlineCommandsExtension,
-    leanExtension,
-  ];
-}
-
 function exitCurrentOrgEnv(view: EditorView): boolean {
   const target = orgEnvExitTarget(view.state);
   if (target == null) return false;
@@ -990,70 +959,33 @@ export function wrapSelectedMarkdownInput(view: EditorView, _from: number, _to: 
 
 export type AaronnoteMarkdownExtensionMode = "standalone" | "embedded";
 
-type EmbeddedSourceController = {
-  sourceMode: boolean;
-  setSourceMode(sourceMode: boolean): void;
-};
-
-const embeddedSourceControllers = new WeakMap<EditorView, EmbeddedSourceController>();
-
 export function toggleAaronnoteMarkdownSource(view: EditorView): boolean {
-  const controller = embeddedSourceControllers.get(view);
-  if (!controller) return false;
-  controller.setSourceMode(!controller.sourceMode);
+  if (!hasVisualMode(view)) return false;
+  view.dispatch(setVisualMode(!isVisualMode(view)));
   return true;
 }
 
 export function isAaronnoteMarkdownSource(view: EditorView): boolean {
-  return embeddedSourceControllers.get(view)?.sourceMode ?? false;
+  return hasVisualMode(view) ? !isVisualMode(view) : false;
 }
 
 export function createAaronnoteMarkdownExtensions(
   options: EditorOptions = {},
 ): Extension {
-  const previewCompartment = new Compartment();
-  let sourceMode = false;
-  let activeView: EditorView | null = null;
-  const controller: EmbeddedSourceController = {
-    get sourceMode() {
-      return sourceMode;
-    },
-    setSourceMode(nextSourceMode: boolean): void {
-      if (sourceMode === nextSourceMode) return;
-      sourceMode = nextSourceMode;
-      activeView?.dispatch({
-        effects: previewCompartment.reconfigure(sourceMode ? [] : previewExtensions()),
-      });
-    },
-  };
-  const lifecycle = ViewPlugin.fromClass(class {
-    constructor(view: EditorView) {
-      activeView = view;
-      embeddedSourceControllers.set(view, controller);
-    }
-
-    destroy(): void {
-      if (activeView) embeddedSourceControllers.delete(activeView);
-      activeView = null;
-    }
-  });
   return [
     EditorView.editorAttributes.of({ class: "aaronnote-embedded-markdown" }),
     buildExtensions(
       options,
-      previewCompartment,
-      () => sourceMode,
+      true,
       () => undefined,
       "embedded",
     ),
-    lifecycle,
   ];
 }
 
 function buildExtensions(
   options: EditorOptions,
-  previewCompartment: Compartment,
-  isSourceMode: () => boolean,
+  initialVisualMode: boolean,
   onFoldStateChanged: () => void,
   mode: AaronnoteMarkdownExtensionMode,
 ): Extension[] {
@@ -1085,18 +1017,8 @@ function buildExtensions(
       ...(standalone ? defaultKeymap : []),
       ...(standalone ? historyKeymap : []),
     ]),
-    markdown({ base: markdownLanguage, extensions: [nestingAwareLinkExtension] }),
+    createMarkdownFeatureExtensions({ initialVisualMode }),
     highlightActiveLine(),
-    tocIndexExtension,
-    orderedListRenumber,
-    headingFoldExtension,
-    leanPlaceholderEditingExtension,
-    noteCodeEditingExtension,
-    previewCompartment.of(isSourceMode() ? [] : previewExtensions()),
-    findHighlightExtension,
-    roamLinkStatusExtension,
-    proseDiagnosticsExtension,
-    vimJumpExtension,
     EditorView.lineWrapping,
     EditorView.updateListener.of((update) => {
       if (update.docChanged && options.onChange) {

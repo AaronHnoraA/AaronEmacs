@@ -20,12 +20,12 @@ separate editor implementation.
 |---|---|
 | `src/lib.ts` | Public library API. |
 | `src/editor-api.ts` | Stable `createEditor()` facade and controller types. |
-| `src/cm6/editor-cm6.ts` | CM6 `EditorView` construction and public editor methods. `getMarkdown()` is memoized by immutable-`Text` identity; prefer `getMarkdownLength()` when only length is needed. |
+| `src/cm6/editor-cm6.ts` | CM6 shell and public editor methods. Feature order lives in `src/cm6/extensions/index.ts`. `getMarkdown()` is memoized by immutable-`Text` identity; prefer `getMarkdownLength()` when only length is needed. |
 | `src/cm6/live-preview.ts` | Inline Markdown preview decorations and line classes. |
 | `src/cm6/close-brackets-vscode.ts` | VSCode-style bracket pairing, selection wrapping, overtyping, and paired deletion. |
-| `src/cm6/lezer-link-ext.ts` | Lezer `LinkEnd` replacement that preserves nested brackets inside inline link/image text. |
-| `src/cm6/commands.ts` | Editing commands, block context, and quick insert registry. |
-| `src/cm6/widgets/*.ts` | Math, code fence, image, task, TOC, org-env, and related widgets. `block-extras.ts` hosts the `@@cell` Jupyter widget; it renders cell output through the shared JupyterLab stack (lazy-loaded). |
+| `src/cm6/languages/markdown/` | Lezer Markdown boundary, including nested-bracket link parsing. |
+| `src/cm6/commands/index.ts` | Editing commands, block context, and quick insert registry. |
+| `src/cm6/extensions/visual/widgets/*.ts` | Math, code fence, image, task, TOC, org-env, and related widgets. `block-extras.ts` hosts the `@@cell` Jupyter widget; it renders cell output through the shared JupyterLab stack (lazy-loaded). |
 | `src/jupyter-rendermime.ts` | Shared JupyterLab render stack for cell output — the same `@jupyterlab/rendermime` + `@jupyterlab/outputarea` pipeline VS Code Jupyter uses. Adds a KaTeX LaTeX typesetter, an HTML renderer that sandboxes script-bearing HTML in an auto-sizing iframe (and routes math-only HTML to KaTeX), and a widget-view renderer bridging to the live kernel manager. Loaded lazily (large). |
 | `src/jupyter-widget-runtime.ts` | ipywidgets frontend: a `KernelWidgetManager` subclass over the live kernel (via `server/lib/jupyter-kernel-ws.mjs`). Mounts kernel-state-first (`restoreWidgets`), replays captured comm messages only as a fallback, and seeds Output widgets with server-captured outputs. Shares the render stack above. Lazy chunk. |
 | `server/jupyter/` | Raw-ZMQ Jupyter kernel stack — logic ported from `microsoft/vscode-jupyter` (MIT) to plain `.mjs`, no build step. `wire-protocol.mjs`/`raw-socket.mjs`/`raw-kernel.mjs` are the ZMQ transport + the kernel_info/first-iopub warmup handshake; `kernel-process.mjs`/`kernel-ports.mjs`/`kernel-env.mjs`/`kernel-finder.mjs` launch and discover kernels; `kernel-registry.mjs` owns per-kernel lifecycle (launch/attach/restart/interrupt/self-heal, `widgetGeneration` bumping, orphan-process sweep); `execution-message-handler.mjs` drives one `execute_request` into aaronnote's output/widget-message shape. No Jupyter server process is spawned. |
@@ -44,11 +44,11 @@ separate editor implementation.
 | `shared/planning-dsl.mjs` | Structural parser for the `@@todo`/`@@itodo`/`@@project`/`@@milestone`/`@@clock` planning DSL — inline/block shapes, bracket-less titles, parse-time diagnostics, patch/serialize helpers. See `docs/agenda.md`. |
 | `shared/planning-values.mjs` | Value-grammar layer for the planning DSL: dates, repeaters, lead-time, dep-refs, durations, canonical-key aliasing, status normalization. Shared by the server and `src/planning-values.ts` (browser facade) so both validate identically. |
 | `src/styles/*.css` | CM6 editor chrome and swappable Markdown themes. |
-| `aaronnote/main.ts` | Emacs-embedded app shell: notes UI, command palette, jump stack. |
+| `aaronnote/main.ts` | Emacs-embedded app composition shell; feature controllers live under `aaronnote/features/`. |
 | `aaronnote/agenda.html`/`aaronnote/agenda-main.ts` | Vite entry for the standalone `/agenda` page — mounts `agenda-view.ts` in page mode using the same `api-client.ts` facade the embedded editor uses (`window.aaronnoteApi` is bridged in via `web-host.mjs`'s `adapterScript` for this page too). |
 | `aaronnote/agenda-view.ts` | Full-screen, vault-wide agenda renderer: week/list/month/log/gantt/projects/clocktable/lints views over `api.notes.agenda`. All edits round-trip through `patchTodo`/`clockIn`/`clockOut` — holds no state that isn't re-derivable from markdown. See `docs/agenda.md`. |
 | `aaronnote/latex-export-scope.ts` | Pure whole-note/selection/heading-subtree range model used by the LaTeX scope picker. |
-| `server/lib/runtime.mjs` | Server-side note/index/save/runtime; agenda engine (dependencies incl. `blocks` reverse-deps and `#id` stable-id refs, urgency, day-bucketed view-model with time grid + repeat projection, clock aggregation, project rollup, Gantt model, canonical-key patching, on-demand id minting via `ensureTodoId`, `todoRefCompletions`); Copilot LSP bridge. See `docs/agenda.md`. |
+| `server/lib/runtime.mjs` | Compatibility facade plus remaining note/index/save/agenda/Copilot implementation. New channel controllers live in `server/Features/`; transport helpers live in `server/infrastructure/`. See `docs/architecture/current-architecture.md`. |
 | `server/lib/latex-export-pandoc.mjs` | Aaronnote-aware preprocessing, fixed Pandoc Markdown profile, typed LaTeX marks, and academic LaTeX postprocessing. Pandoc is required in this fixed environment. |
 | `server/lib/latex-export.mjs` | Template rendering, escaping, shared macro package generation, legacy pure helpers, and atomic `.tex` writes. |
 | `server/lib/latex-export-codex.mjs` | Agent polish of the Pandoc draft: repository skills, mandatory review candidates, strict fidelity gate, compile-verify retry loop, and agent-maintained rules. |
@@ -56,7 +56,7 @@ separate editor implementation.
 | `server/lib/watch.mjs` | Recursive fs watcher for vault freshness; SSE broadcast on batch change. |
 | `server/lib/tmp.mjs` | Runtime temp staging (`mkdtemp`, atomic writes, TTL orphan sweep). |
 | `server/lib/copilot.mjs` | Re-export barrel for Copilot LSP bridge (uses Emacs-managed binary). |
-| `web-host.mjs` | Node HTTP server: API handlers, `/graph` route, static serving, Emacs event bridge. |
+| `web-host.mjs` | Node HTTP/SSE and static-serving composition root; Feature API handlers register through `server/infrastructure/api-router.mjs`. |
 | `src/cm6/heading-fold.ts` | Heading fold service + hover-only chevron widget; reuses `tocIndexField`. |
 | `src/cm6/ordered-list-renumber.ts` | Auto-renumber ordered lists; bounded `ensureSyntaxTree`; single-undo transaction. |
 | `src/cm6/toc-index.ts` | Incremental TOC / heading index state field; used by outline and fold. |
@@ -84,7 +84,7 @@ snippets** in the web editor (no LSP process started from the browser).
 ## Widget Rules
 
 All CM6 widgets that contribute vertical height must extend `MeasuredWidget`
-(`src/cm6/widgets/measured-widget.ts`) instead of bare `WidgetType`.
+(`src/cm6/extensions/visual/widgets/measured-widget.ts`) instead of bare `WidgetType`.
 Call `this.registerMeasured(dom, view)` at every `toDOM()` return point.
 
 ```typescript

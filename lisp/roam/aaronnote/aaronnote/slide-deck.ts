@@ -1,6 +1,6 @@
 import type { RevealApi } from "reveal.js";
 
-import { jupyterCellsFromState, type JupyterCellDescriptor } from "../src/cm6/widgets/block-extras.ts";
+import { jupyterCellsFromState, type JupyterCellDescriptor } from "../src/cm6/extensions/visual/widgets/block-extras.ts";
 import { renderMarkdownHTML } from "../src/render-html.ts";
 import type { Editor } from "../src/lib.ts";
 import type { JupyterWidgetKernelMessage } from "../src/jupyter-widget-runtime.ts";

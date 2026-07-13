@@ -9,7 +9,7 @@ import {
   type StoredPasteAsset,
 } from "../src/lib.ts";
 import { setupCopilot } from "../src/copilot/index.ts";
-import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownBlock, indentMarkdownList, tableNavigateCell, tableEnterSameColumn } from "../src/cm6/commands.ts";
+import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownBlock, indentMarkdownList, tableNavigateCell, tableEnterSameColumn } from "../src/cm6/commands/index.ts";
 import { markdownHrefAt } from "../src/cm6/editor-cm6.ts";
 import { getBlockMathRanges, rangeAtPosition, rangeOverlapsAny } from "../src/cm6/math-ranges.ts";
 import { equationTagsFromText, getEquationTagHits } from "../src/equation-tags.ts";
@@ -84,8 +84,7 @@ import {
 } from "./bibliography-completion.ts";
 import type { CursorPosition, NoteSummary, SnippetSummary } from "./types.ts";
 import { createVimLite, type VimLiteKey, type VimLiteMode } from "./vim-lite.ts";
-import { countWritingStats, headingSubtreeRange, type WritingStats } from "./writing-stats.ts";
-import { ceilCommandGeneratedId, ceilLanguageForKernel } from "../src/cm6/widgets/ceil-shared.ts";
+import { ceilCommandGeneratedId, ceilLanguageForKernel } from "../src/cm6/extensions/visual/widgets/ceil-shared.ts";
 import {
   handleXwidgetControlBeforeInput,
   handleXwidgetControlKeydown,
@@ -96,6 +95,11 @@ import {
   handleXwidgetVimBeforeInput,
   handleXwidgetVimKeydown,
 } from "./xwidget-key-guard.ts";
+import { createZoomController } from "./features/zoom/controller.ts";
+import {
+  createWritingStatsController,
+  type WritingStatsController,
+} from "./features/writing-stats/controller.ts";
 
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("Missing #app");
@@ -639,12 +643,6 @@ let mathPreviewKey = "";
 let mathPreviewPendingErrorKey = "";
 let mathPreviewErrorTimer = 0;
 let mathPreviewWidth = 0;
-let layoutZoom = 1;
-let visualZoom = 1;
-let visualGestureStartZoom = 1;
-let visualGestureAnchor: VisualZoomAnchor = { clientX: 0, clientY: 0 };
-let visualWheelRawZoom = 1;
-let visualWheelIdleTimer = 0;
 const clientId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const changeHandlers = new Set<() => void>();
 const MATH_PREVIEW_ERROR_IDLE_MS = 650;
@@ -659,16 +657,6 @@ const PROSE_PROFILES = {
   quiet: { idleMs: 3_000, scrollMs: 1_200, padding: 2 * 1024, maxChars: 16 * 1024 },
 } as const;
 const LARGE_DOCUMENT_CHARS = 512 * 1024;
-const WRITING_STATS_DELAY_MS = 300;
-const WRITING_STATS_LARGE_DELAY_MS = 900;
-const WRITING_STATS_SELECTION_DELAY_MS = 80;
-const LAYOUT_ZOOM_MIN = 0.72;
-const LAYOUT_ZOOM_MAX = 1.55;
-const LAYOUT_ZOOM_STEP = 0.08;
-const VISUAL_ZOOM_MIN = 1;
-const VISUAL_ZOOM_MAX = 2;
-const VISUAL_ZOOM_STEP = 0.12;
-const VISUAL_ZOOM_PINCH_SNAP = 0.05;
 const editorCommands = new Set<EditorCommand>([
   "bold",
   "italic",
@@ -892,6 +880,7 @@ function subscribe<K extends keyof DocumentEventMap>(
 // Forward ref patched after vim is created (avoids TDZ while keeping reset near vim).
 let onBlurVimReset: (() => void) | undefined;
 let slideDeck: SlideDeckController | null = null;
+let writingStatsController: WritingStatsController | null = null;
 
 const editor = createEditor(host, {
   initialContent: "",
@@ -917,7 +906,7 @@ const editor = createEditor(host, {
     slideDeck?.refresh();
   },
   onSelectionChange: () => {
-    scheduleWritingStats(editor.view.state.doc !== writingStatsDoc);
+    scheduleWritingStats(writingStatsController?.isDocumentChanged() ?? true);
   },
   onBlur: () => {
     onBlurVimReset?.();
@@ -926,6 +915,7 @@ const editor = createEditor(host, {
 });
 host.appendChild(bibliographyPanel);
 slideDeck = createSlideDeckController({ root, host, editor, getCurrentFile: () => currentFile });
+writingStatsController = createWritingStatsController(editor, writingStatsLabel);
 
 let bibliographyModel: BibliographyDocument = { ok: true, entries: [], references: [], citations: [], namespaces: [] };
 let bibliographyModelKey = "";
@@ -1353,261 +1343,27 @@ function revealCursorAfterLayout(): void {
   }
 }
 
-let writingStatsDoc: typeof editor.view.state.doc | null = null;
-let writingStatsFull: WritingStats = { words: 0, characters: 0, cjkCharacters: 0, nonCjkWords: 0 };
-let writingStatsSubtree: {
-  doc: typeof editor.view.state.doc;
-  from: number;
-  to: number;
-  stats: WritingStats;
-} | null = null;
-const writingStatsTimer = new CoalescedTimer(WRITING_STATS_DELAY_MS);
-let writingStatsIdleHandle: number | null = null;
-const numberFormat = new Intl.NumberFormat();
-
-function updateWritingStats(): void {
-  const state = editor.view.state;
-  if (state.doc !== writingStatsDoc) {
-    writingStatsFull = countWritingStats(state.doc);
-    writingStatsDoc = state.doc;
-  }
-  const selection = state.selection.main;
-  const hasSelection = selection.from !== selection.to;
-  const primary = hasSelection
-    ? countWritingStats(state.doc, selection.from, selection.to)
-    : writingStatsFull;
-  const subtree = headingSubtreeRange(state, selection.head);
-  let subtreeStats: WritingStats | null = null;
-  if (subtree) {
-    if (
-      writingStatsSubtree?.doc === state.doc
-      && writingStatsSubtree.from === subtree.from
-      && writingStatsSubtree.to === subtree.to
-    ) {
-      subtreeStats = writingStatsSubtree.stats;
-    } else {
-      subtreeStats = subtree.from === 0 && subtree.to === state.doc.length
-        ? writingStatsFull
-        : countWritingStats(state.doc, subtree.from, subtree.to);
-      writingStatsSubtree = { doc: state.doc, ...subtree, stats: subtreeStats };
-    }
-  }
-  const scope = hasSelection ? "选区" : "全文";
-  const parts = [`${scope} ${numberFormat.format(primary.words)} 字`];
-  if (subtreeStats && (!hasSelection || subtree.from !== selection.from || subtree.to !== selection.to)) {
-    parts.push(`本节 ${numberFormat.format(subtreeStats.words)} 字`);
-  }
-  writingStatsLabel.textContent = parts.join(" · ");
-  writingStatsLabel.title = "字数按中日韩字符和其他语言单词统计";
-}
-
-function cancelWritingStatsIdle(): void {
-  if (writingStatsIdleHandle !== null) {
-    if ("cancelIdleCallback" in window) window.cancelIdleCallback(writingStatsIdleHandle);
-    else window.clearTimeout(writingStatsIdleHandle);
-    writingStatsIdleHandle = null;
-  }
-}
-
-function queueWritingStatsIdle(): void {
-  cancelWritingStatsIdle();
-  if ("requestIdleCallback" in window) {
-    writingStatsIdleHandle = window.requestIdleCallback(() => {
-      writingStatsIdleHandle = null;
-      updateWritingStats();
-    });
-  } else {
-    // Compatibility fallback for engines without the Idle Callback API.
-    writingStatsIdleHandle = window.setTimeout(() => {
-      writingStatsIdleHandle = null;
-      updateWritingStats();
-    }, 50);
-  }
-}
-
 function scheduleWritingStats(documentChanged: boolean): void {
-  cancelWritingStatsIdle();
-  const delay = documentChanged
-    ? (editor.getMarkdownLength() >= LARGE_DOCUMENT_CHARS ? WRITING_STATS_LARGE_DELAY_MS : WRITING_STATS_DELAY_MS)
-    : WRITING_STATS_SELECTION_DELAY_MS;
-  writingStatsTimer.schedule(queueWritingStatsIdle, undefined, delay);
+  writingStatsController?.schedule(documentChanged);
 }
 
-function layoutZoomPercent(): string {
-  return `${Math.round(layoutZoom * 100)}%`;
-}
-
-function clampLayoutZoom(value: number): number {
-  if (!Number.isFinite(value)) return 1;
-  return Math.min(LAYOUT_ZOOM_MAX, Math.max(LAYOUT_ZOOM_MIN, value));
-}
-
-function updateLayoutZoomTool(): void {
-  const value = toolsPanel.querySelector<HTMLElement>("[data-layout-zoom-value]");
-  if (value) value.textContent = layoutZoomPercent();
-  const min = layoutZoom <= LAYOUT_ZOOM_MIN + 0.001;
-  const max = layoutZoom >= LAYOUT_ZOOM_MAX - 0.001;
-  for (const button of toolsPanel.querySelectorAll<HTMLButtonElement>("[data-layout-zoom-action='out']")) button.disabled = min;
-  for (const button of toolsPanel.querySelectorAll<HTMLButtonElement>("[data-layout-zoom-action='in']")) button.disabled = max;
-}
-
-function applyLayoutZoom(next: number, options: { announce?: boolean } = {}): boolean {
-  const clamped = clampLayoutZoom(next);
-  if (Math.abs(clamped - layoutZoom) < 0.001) return false;
-  layoutZoom = clamped;
-  document.documentElement.style.setProperty("--aaronnote-layout-zoom", layoutZoom.toFixed(3));
-  editor.view.requestMeasure();
-  window.dispatchEvent(new Event("resize"));
-  scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: true });
-  updateLayoutZoomTool();
-  if (options.announce) setStatus(`Layout zoom ${layoutZoomPercent()}`);
-  return true;
-}
-
-function stepLayoutZoom(direction: -1 | 1, options: { announce?: boolean } = {}): boolean {
-  return applyLayoutZoom(layoutZoom + direction * LAYOUT_ZOOM_STEP, options);
-}
-
-function resetLayoutZoom(options: { announce?: boolean } = {}): boolean {
-  return applyLayoutZoom(1, options);
-}
-
-function visualZoomPercent(): string {
-  return `${Math.round(visualZoom * 100)}%`;
-}
-
-function clampVisualZoom(value: number): number {
-  if (!Number.isFinite(value)) return 1;
-  return Math.min(VISUAL_ZOOM_MAX, Math.max(VISUAL_ZOOM_MIN, value));
-}
-
-type VisualZoomAnchor = { clientX: number; clientY: number };
-
-function defaultVisualZoomAnchor(): VisualZoomAnchor {
-  const rect = host.getBoundingClientRect();
-  return { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
-}
-
-function eventVisualZoomAnchor(event: Event, fallback = defaultVisualZoomAnchor()): VisualZoomAnchor {
-  const positioned = event as Event & { clientX?: number; clientY?: number };
-  const clientX = Number(positioned.clientX);
-  const clientY = Number(positioned.clientY);
-  return Number.isFinite(clientX) && Number.isFinite(clientY) && (clientX !== 0 || clientY !== 0)
-    ? { clientX, clientY }
-    : fallback;
-}
-
-function applyVisualZoom(
-  next: number,
-  options: { announce?: boolean; anchor?: VisualZoomAnchor } = {},
-): boolean {
-  const clamped = clampVisualZoom(next);
-  if (Math.abs(clamped - visualZoom) < 0.001) return false;
-  const previous = visualZoom;
-  const anchor = options.anchor;
-  const wrap = anchor ? host.querySelector<HTMLElement>(".typora-web-wrap") : null;
-  const wrapRect = wrap?.getBoundingClientRect();
-  visualZoom = clamped;
-  document.documentElement.style.setProperty("--aaronnote-visual-zoom", visualZoom.toFixed(3));
-  if (anchor && wrapRect && previous > 0) {
-    const ratio = visualZoom / previous;
-    host.scrollLeft += (anchor.clientX - wrapRect.left) * (ratio - 1);
-    host.scrollTop += (anchor.clientY - wrapRect.top) * (ratio - 1);
-  }
-  if (options.announce) setStatus(`Visual zoom ${visualZoomPercent()}`);
-  return true;
-}
-
-function stepVisualZoom(direction: -1 | 1, options: { announce?: boolean } = {}): boolean {
-  const next = visualZoom + direction * VISUAL_ZOOM_STEP;
-  const crossesDefault = direction > 0
-    ? visualZoom < 1 && next >= 1
-    : visualZoom > 1 && next <= 1;
-  return applyVisualZoom(crossesDefault || Math.abs(next - 1) < VISUAL_ZOOM_STEP / 2 ? 1 : next, options);
-}
-
-function resetVisualZoom(options: { announce?: boolean } = {}): boolean {
-  return applyVisualZoom(1, options);
-}
-
-function runLayoutZoomShortcut(event: KeyboardEvent): boolean {
-  if (!primaryMod(event) || event.altKey || event.isComposing) return false;
-  const code = event.code;
-  const key = event.key;
-  const zoomIn = code === "Equal" || code === "NumpadAdd" || key === "=" || key === "+";
-  const zoomOut = code === "Minus" || code === "NumpadSubtract" || key === "-" || key === "_";
-  const reset = code === "Digit0" || code === "Numpad0" || key === "0";
-  if (!zoomIn && !zoomOut && !reset) return false;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  if (zoomIn) stepLayoutZoom(1, { announce: true });
-  else if (zoomOut) stepLayoutZoom(-1, { announce: true });
-  else resetLayoutZoom({ announce: true });
-  return true;
-}
-
-function runVisualZoomShortcut(event: KeyboardEvent): boolean {
-  const tab = event.code === "Tab" || event.key === "Tab" || event.key === "Backtab" || event.key === "ISO_Left_Tab";
-  const reset = event.code === "Digit0" || event.code === "Numpad0" || event.key === "0";
-  if ((!tab && !reset) || !event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return false;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  if (reset) resetVisualZoom({ announce: true });
-  else stepVisualZoom(event.shiftKey || event.key !== "Tab" ? -1 : 1, { announce: true });
-  return true;
-}
-
-function visualZoomWheelFactor(event: WheelEvent): number {
-  const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-    ? 18
-    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-      ? Math.max(1, window.innerHeight)
-      : 1;
-  return Math.exp(-event.deltaY * unit * 0.0025);
-}
-
-function snapPinchVisualZoom(value: number): number {
-  return Math.abs(value - 1) <= VISUAL_ZOOM_PINCH_SNAP ? 1 : value;
-}
-
-function shouldHandleVisualZoomTarget(target: EventTarget | null): boolean {
-  if (!editorSurfaceVisible()) return false;
-  const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
-  return !element?.closest(".aaronnote-local-graph-panel, .aaronnote-modal");
-}
-
-function handleVisualZoomWheel(event: WheelEvent): void {
-  if (!(event.ctrlKey || event.metaKey) || !shouldHandleVisualZoomTarget(event.target)) return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  if (!visualWheelIdleTimer) visualWheelRawZoom = visualZoom;
-  visualWheelRawZoom = clampVisualZoom(visualWheelRawZoom * visualZoomWheelFactor(event));
-  applyVisualZoom(snapPinchVisualZoom(visualWheelRawZoom), { anchor: eventVisualZoomAnchor(event) });
-  window.clearTimeout(visualWheelIdleTimer);
-  visualWheelIdleTimer = window.setTimeout(() => {
-    visualWheelIdleTimer = 0;
-    visualWheelRawZoom = visualZoom;
-  }, 140);
-}
-
-function handleVisualGestureStart(event: Event): void {
-  if (!shouldHandleVisualZoomTarget(event.target)) return;
-  visualGestureStartZoom = visualZoom;
-  visualGestureAnchor = eventVisualZoomAnchor(event);
-  event.preventDefault();
-  event.stopImmediatePropagation();
-}
-
-function handleVisualGestureChange(event: Event): void {
-  if (!shouldHandleVisualZoomTarget(event.target)) return;
-  const scale = Number((event as Event & { scale?: number }).scale);
-  if (!Number.isFinite(scale) || scale <= 0) return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  applyVisualZoom(snapPinchVisualZoom(visualGestureStartZoom * scale), {
-    anchor: eventVisualZoomAnchor(event, visualGestureAnchor),
-  });
-}
+const zoomController = createZoomController({
+  editor,
+  host,
+  toolsPanel,
+  editorSurfaceVisible,
+  primaryModifier: primaryMod,
+  scheduleAssistUpdate: () => scheduleAssistUpdate({ mathPreview: true, cursor: true, selectionTool: true }),
+  setStatus,
+});
+const {
+  layoutZoomPercent,
+  updateLayoutZoomTool,
+  stepLayoutZoom,
+  resetLayoutZoom,
+  runLayoutZoomShortcut,
+  runVisualZoomShortcut,
+} = zoomController;
 
 function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
   const target = event.target;
@@ -1656,10 +1412,6 @@ document.addEventListener("keydown", (event) => {
     hideContextMenu();
   }
 }, { capture: true });
-document.addEventListener("wheel", handleVisualZoomWheel, { capture: true, passive: false });
-document.addEventListener("gesturestart", handleVisualGestureStart, { capture: true, passive: false });
-document.addEventListener("gesturechange", handleVisualGestureChange, { capture: true, passive: false });
-
 const snippetSession = new SnippetSession(editor);
 host.addEventListener("aaronnote-assist-update", () => scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true }));
 
@@ -8316,6 +8068,8 @@ window.addEventListener("pagehide", () => {
   notifyClientClosedKeepalive();
 });
 window.addEventListener("beforeunload", () => {
+  zoomController.destroy();
+  writingStatsController?.destroy();
   void flushCursorPosition();
   notifyClientClosedKeepalive();
 });

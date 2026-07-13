@@ -108,6 +108,14 @@ import {
   updateLanguageToolSettings,
 } from "./server/lib/languagetool-config.mjs";
 import { createImeSwitcher } from "./server/lib/ime.mjs";
+import { ApiRouter } from "./server/infrastructure/api-router.mjs";
+import { createAssetsApiHandlers } from "./server/Features/Assets/api.mjs";
+import { createEmacsApiHandlers } from "./server/Features/Emacs/api.mjs";
+import { createFilesystemApiHandlers } from "./server/Features/Filesystem/api.mjs";
+import { createJupyterApiHandlers } from "./server/Features/Jupyter/api.mjs";
+import { createProseApiHandlers } from "./server/Features/Prose/api.mjs";
+import { createSessionApiHandlers } from "./server/Features/Session/api.mjs";
+import { createTasksApiHandlers } from "./server/Features/Tasks/api.mjs";
 
 const ime = createImeSwitcher();
 import { runtimeMkdtemp, sweepRuntimeTmp } from "./server/lib/tmp.mjs";
@@ -655,7 +663,7 @@ async function apiEmacsZotero(body, eventName = "zotero") {
   return { ok: true, queued: true };
 }
 
-const apiHandlers = {
+const apiRouter = new ApiRouter().register({
   "aaronnote:api:notes:bootstrap": (file) => bootstrapNote(file || undefined),
   "aaronnote:api:notes:open": (file) => readNote(file),
   "aaronnote:api:notes:list": (force) => notesListPayload(force === true),
@@ -773,22 +781,7 @@ const apiHandlers = {
   "aaronnote:api:runtime:debug": async () => ({ type: "runtime-debug", ...runtimeDebugSnapshot() }),
   "aaronnote:api:note-code:read-region": (body) => readNoteCodeRegion(body || {}),
   "aaronnote:api:slides:mirror": (body) => slidesMirror(body || {}),
-  "aaronnote:api:jupyter-cell:kernels": () => jupyterCell.kernels(),
-  "aaronnote:api:jupyter-cell:execute": (body) => jupyterCell.execute(body || {}),
-  "aaronnote:api:jupyter-cell:open-script": (body) => jupyterCell.openScript(body || {}),
-  "aaronnote:api:jupyter-cell:read-script-cell": (body) => jupyterCell.readScriptCell(body || {}),
-  "aaronnote:api:jupyter-cell:execute-script-cell": (body) => jupyterCell.executeScriptCell(body || {}),
-  "aaronnote:api:jupyter-cell:clear-script-cell-output": (body) => jupyterCell.clearScriptCellOutput(body || {}),
-  "aaronnote:api:jupyter-cell:delete-script-cell": (body) => jupyterCell.deleteScriptCell(body || {}),
-  "aaronnote:api:jupyter-cell:save-script-cell-output-ui": (body) => jupyterCell.saveScriptCellOutputUi(body || {}),
-  "aaronnote:api:jupyter-cell:clear-all-outputs": (body) => jupyterCell.clearAllOutputs(body || {}),
-  "aaronnote:api:jupyter-cell:variables": (body) => jupyterCell.variables(body || {}),
-  "aaronnote:api:jupyter-cell:kernel-status": (body) => jupyterCell.kernelStatus(body || {}),
-  "aaronnote:api:jupyter-cell:restart": (body) => jupyterCell.restart(body || {}),
-  "aaronnote:api:jupyter-cell:interrupt": (body) => jupyterCell.interrupt(body || {}),
-  "aaronnote:api:jupyter-cell:shutdown": (body) => jupyterCell.shutdownKernel(body || {}),
-  "aaronnote:api:jupyter-cell:tasks": () => jupyterCell.listTasks(),
-  "aaronnote:api:jupyter-cell:cleanup": (body) => jupyterCell.cleanup(body || {}),
+  ...createJupyterApiHandlers(jupyterCell),
   "aaronnote:api:notes:wanted": async () => {
     const notes = await scanRoamNotes();
     return wantedPages(notes);
@@ -828,10 +821,7 @@ const apiHandlers = {
     });
     return { type: "core-task-started", ok: true, task };
   },
-  "aaronnote:api:tasks:list": (body) => ({ type: "core-tasks", ok: true, tasks: coreTasks.list(body || {}) }),
-  "aaronnote:api:tasks:get": (body) => ({ type: "core-task", ok: true, task: coreTasks.get(body?.id) }),
-  "aaronnote:api:tasks:cancel": (body) => ({ type: "core-task-cancel", ...coreTasks.cancel(body?.id) }),
-  "aaronnote:api:tasks:close": (body) => ({ type: "core-task-close", ...coreTasks.close(body?.id) }),
+  ...createTasksApiHandlers(coreTasks),
   "aaronnote:api:notes:meta-add": (body) => updateCurrentNoteMeta(body || {}, "add"),
 
   "aaronnote:api:roam-tools:rename-tag": (body) => renameRoamTag(body || {}),
@@ -839,58 +829,44 @@ const apiHandlers = {
   "aaronnote:api:roam-tools:tag-overlap": () => roamTagOverlapReport(),
   "aaronnote:api:roam-tools:rewrite-path-refs": (body) => rewriteMarkdownPathReferences(body || {}),
 
-  "aaronnote:api:assets:upload": (body) => storeAsset(body || {}),
-  "aaronnote:api:assets:store-from-path": (body) => storeAssetFromPath(body || {}),
-  "aaronnote:api:assets:render-tikz": (body) => renderTikzAsset(body || {}),
-  "aaronnote:api:assets:scan-orphans": async () => ({ type: "unused-assets", assets: await scanUnusedAssets(), root: noteRoot }),
-  "aaronnote:api:assets:trash-orphans": (files) => trashUnusedAssets({ files }),
-  "aaronnote:api:clipboard:read": (body) => readSystemClipboard(body || {}),
-
-  "aaronnote:api:session:recent": async () => ({ type: "recent", recent: await readRecentNotes() }),
-  "aaronnote:api:session:touch-recent": async (file, openedAt) => ({
-    type: "recent",
-    recent: await touchRecentNote(String(file || ""), Number(openedAt) || Date.now()),
+  ...createAssetsApiHandlers({
+    noteRoot,
+    storeAsset,
+    storeAssetFromPath,
+    renderTikzAsset,
+    scanUnusedAssets,
+    trashUnusedAssets,
+    readSystemClipboard,
   }),
-  "aaronnote:api:session:positions": async () => ({ type: "positions", positions: await readCursorPositions() }),
-  "aaronnote:api:session:save-position": async (position) => ({ type: "positions", positions: await touchCursorPosition(position || {}) }),
-  "aaronnote:api:session:client-close": async (body) => {
-    cancelExternalProseChecksForClient(body?.clientId || body?.client);
-    return closeEditorClient(body || {});
-  },
-
-  "aaronnote:api:fs:rename": (body) => renameManagedPath(body || {}),
-  "aaronnote:api:fs:move": (body) => moveManagedPath(body || {}),
-  "aaronnote:api:fs:duplicate": (body) => duplicateManagedFile(body || {}),
-  "aaronnote:api:fs:trash": (body) => trashManagedPath(body || {}),
-  "aaronnote:api:meta:add": (body) => updateCurrentNoteMeta(body || {}, "add"),
-  "aaronnote:api:meta:remove": (body) => updateCurrentNoteMeta(body || {}, "remove"),
-  "aaronnote:api:meta:tag": (body) => updateCurrentNoteMeta(body || {}, "tag"),
-  "aaronnote:api:meta:hide-roam": (body) => updateCurrentNoteMeta(body || {}, "hide-roam"),
-  "aaronnote:api:meta:activate-roam": (body) => updateCurrentNoteMeta(body || {}, "activate-roam"),
+  ...createSessionApiHandlers({
+    readRecentNotes,
+    touchRecentNote,
+    readCursorPositions,
+    touchCursorPosition,
+    closeEditorClient,
+    cancelExternalProseChecksForClient,
+  }),
+  ...createFilesystemApiHandlers({
+    renameManagedPath,
+    moveManagedPath,
+    duplicateManagedFile,
+    trashManagedPath,
+    updateCurrentNoteMeta,
+  }),
 
   "aaronnote:api:copilot:request": (action, body) => handleCopilotRequest(String(action || ""), body || {}),
 
-  "aaronnote:api:prose-check:run": (body) => runExternalProseChecks(body || {}),
-  "aaronnote:api:prose-check:accept-word": (word) => acceptProseWord(word),
-  "aaronnote:api:prose-check:cancel": (requestId) => cancelExternalProseCheck(requestId),
-  "aaronnote:api:prose-check:settings": async () => ({
-    ok: true,
-    ...await (async () => {
-      const settings = await getLanguageToolSettings();
-      return { settings, revision: languageToolSettingsRevision(settings) };
-    })(),
-    defaults: languageToolSettingsDefaults(),
+  ...createProseApiHandlers({
+    runExternalProseChecks,
+    acceptProseWord,
+    cancelExternalProseCheck,
+    getLanguageToolSettings,
+    languageToolSettingsRevision,
+    languageToolSettingsDefaults,
+    updateLanguageToolSettings,
+    probeLanguageTool,
+    broadcast,
   }),
-  "aaronnote:api:prose-check:update-settings": async (body) => {
-    const update = body && typeof body === "object" ? { ...body } : {};
-    const expectedRevision = String(update.revision || "");
-    delete update.revision;
-    const settings = await updateLanguageToolSettings(update, { expectedRevision });
-    const revision = languageToolSettingsRevision(settings);
-    broadcast("command", { command: "languagetool-settings-changed", settings, settingsRevision: revision });
-    return { ok: true, settings, revision, defaults: languageToolSettingsDefaults() };
-  },
-  "aaronnote:api:prose-check:probe": (body) => probeLanguageTool(body || {}),
   "aaronnote:api:ime:vim-mode": (body) => ime.vimMode(String(body?.mode || "")),
   "aaronnote:api:shell:show-in-folder": (file) => showInFolder(file),
   "aaronnote:api:shell:open-path": (file) => openPath(file),
@@ -898,15 +874,16 @@ const apiHandlers = {
   "aaronnote:api:shell:open-directory-in-kitty": () => ({ ok: false, message: "Kitty integration is not available in the Emacs web host yet" }),
   "aaronnote:api:shell:show-attachment-menu": (file) => openPath(file),
   "aaronnote:api:shell:show-editor-context-menu": () => ({ ok: true }),
-  "aaronnote:api:emacs:open": (body) => apiOpenInEmacs(body?.file ?? body, body?.line, body?.col, body?.tag),
-  "aaronnote:api:emacs:current-file": (file) => apiCurrentFile(file),
-  "aaronnote:api:emacs:ui-state": (body) => apiEmacsUiState(body),
-  "aaronnote:api:emacs:key": (key) => apiEmacsKey(key),
-  "aaronnote:api:emacs:system-open": (target) => apiSystemOpen(target),
-  "aaronnote:api:emacs:zotero": (body) => apiEmacsZotero(body),
-  "aaronnote:api:emacs:zotero-import": (body) => apiEmacsZotero(body, "zotero-import"),
+  ...createEmacsApiHandlers({
+    apiOpenInEmacs,
+    apiCurrentFile,
+    apiEmacsUiState,
+    apiEmacsKey,
+    apiSystemOpen,
+    apiEmacsZotero,
+  }),
   "aaronnote:api:config:katex-macros": () => katexMacrosPayload(),
-};
+}, "web-host");
 
 // Read + parse the global KaTeX macro folder on every request (few small files),
 // so editing macros only needs a browser refresh to take effect.
@@ -948,9 +925,7 @@ async function readSystemClipboard(body) {
 }
 
 async function callApi(channel, args = []) {
-  const handler = apiHandlers[channel];
-  if (!handler) throw Object.assign(new Error(`Unknown API channel: ${channel}`), { statusCode: 404 });
-  return await handler(...(Array.isArray(args) ? args : []));
+  return await apiRouter.call(channel, args);
 }
 
 function adapterScript(origin) {

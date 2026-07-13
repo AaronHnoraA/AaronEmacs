@@ -7,10 +7,10 @@ import {
 } from "@codemirror/view";
 import type { Range } from "@codemirror/state";
 import { MeasuredWidget } from "./measured-widget.ts";
-import { api } from "../../../aaronnote/api-client.ts";
-import { highlightCodeForEditor, onCodeHighlightReady } from "../../code-highlight-async.ts";
-import { hasViewportDecorationRefresh, scheduleViewportDecorationRefresh } from "../viewport-refresh.ts";
-import { parseNoteCodeLine } from "../../../shared/note-code.mjs";
+import { api } from "../../../../../aaronnote/api-client.ts";
+import { highlightCodeForEditor, onCodeHighlightReady } from "../../../../code-highlight-async.ts";
+import { hasViewportDecorationRefresh, scheduleViewportDecorationRefresh } from "../../../viewport-refresh.ts";
+import { parseNoteCodeLine } from "../../../../../shared/note-code.mjs";
 
 type NoteCodeLine = {
   commandFrom: number;

@@ -20,7 +20,7 @@ import {
   selectPageUp,
 } from "@codemirror/commands";
 import { insertNewlineContinueMarkup } from "@codemirror/lang-markdown";
-import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownList } from "../src/cm6/commands.ts";
+import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownList } from "../src/cm6/commands/index.ts";
 import { historyChordKind } from "../src/keymap/shortcut-router.ts";
 
 type XwidgetControlKey = "Escape" | "Delete" | "Backspace";

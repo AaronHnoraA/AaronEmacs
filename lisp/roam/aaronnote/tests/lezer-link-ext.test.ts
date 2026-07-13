@@ -1,6 +1,6 @@
 import { describe, expect, test } from "@voidzero-dev/vite-plus-test";
 import { parser } from "@lezer/markdown";
-import { nestingAwareLinkExtension } from "../src/cm6/lezer-link-ext.ts";
+import { nestingAwareLinkExtension } from "../src/cm6/languages/markdown/index.ts";
 
 const extended = parser.configure(nestingAwareLinkExtension);
 

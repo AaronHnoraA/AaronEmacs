@@ -1,5 +1,5 @@
 import type { EditorView } from "@codemirror/view";
-import { scheduleViewportDecorationRefresh } from "../viewport-refresh.ts";
+import { scheduleViewportDecorationRefresh } from "../../../viewport-refresh.ts";
 
 // ---------------------------------------------------------------------------
 // Per-content height cache: stable key → last measured pixel height

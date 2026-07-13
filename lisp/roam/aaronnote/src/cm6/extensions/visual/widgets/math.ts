@@ -22,12 +22,12 @@ import { MeasuredWidget } from "./measured-widget.ts";
 import { shortHash } from "./measured-observer.ts";
 import { StateField, type ChangeSet, type EditorState } from "@codemirror/state";
 import type { Range } from "@codemirror/state";
-import { scanInlineMathRanges } from "../../inline-math.ts";
-import { renderMathHTML } from "../../math-render.ts";
-import { getBlockMathRanges, rangeOverlapsAny } from "../math-ranges.ts";
-import { scanCodeRanges } from "../code-ranges.ts";
+import { scanInlineMathRanges } from "../../../../inline-math.ts";
+import { renderMathHTML } from "../../../../math-render.ts";
+import { getBlockMathRanges, rangeOverlapsAny } from "../../../math-ranges.ts";
+import { scanCodeRanges } from "../../../code-ranges.ts";
 import { orgEnvContextForRange, type OrgEnvContext } from "./block-extras.ts";
-import { hasViewportDecorationRefresh } from "../viewport-refresh.ts";
+import { hasViewportDecorationRefresh } from "../../../viewport-refresh.ts";
 
 function setSourceRange(el: HTMLElement, from: number, to: number, openSource = false): void {
   el.dataset.cmSourceFrom = String(from);

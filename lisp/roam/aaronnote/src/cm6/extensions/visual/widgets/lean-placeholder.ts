@@ -7,8 +7,8 @@ import {
 } from "@codemirror/view";
 import type { Range } from "@codemirror/state";
 import { MeasuredWidget } from "./measured-widget.ts";
-import { parseLeanPlaceholderLine } from "../../../shared/lean-placeholder.mjs";
-import { hasViewportDecorationRefresh } from "../viewport-refresh.ts";
+import { parseLeanPlaceholderLine } from "../../../../../shared/lean-placeholder.mjs";
+import { hasViewportDecorationRefresh } from "../../../viewport-refresh.ts";
 
 export type LeanLspAction = "definition" | "declaration" | "typeDefinition" | "implementation" | "references" | "hover";
 export type LeanEditAction =

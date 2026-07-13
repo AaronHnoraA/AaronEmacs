@@ -16,12 +16,12 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 import { MeasuredWidget } from "./measured-widget.ts";
-import { findInlineCommandClose, parseCommandArgs, scanInlineCommands, type InlineCommand } from "../../command-syntax.ts";
-import { renderMarkdownHTML } from "../../render-html.ts";
+import { findInlineCommandClose, parseCommandArgs, scanInlineCommands, type InlineCommand } from "../../../../command-syntax.ts";
+import { renderMarkdownHTML } from "../../../../render-html.ts";
 import type { Range } from "@codemirror/state";
-import { blockMathRangesOverlapping, mergeOverlappingRanges, positionInsideAnyRange } from "../math-ranges.ts";
-import { scanCodeRanges } from "../code-ranges.ts";
-import { scanInlineMathRanges } from "../../inline-math.ts";
+import { blockMathRangesOverlapping, mergeOverlappingRanges, positionInsideAnyRange } from "../../../math-ranges.ts";
+import { scanCodeRanges } from "../../../code-ranges.ts";
+import { scanInlineMathRanges } from "../../../../inline-math.ts";
 import {
   DATE_KEYS,
   DATE_KEY_LABELS,
@@ -29,9 +29,9 @@ import {
   parseDateValue,
   relativeDateClass,
   relativeDateLabel,
-} from "../../date-syntax.ts";
-import { hasViewportDecorationRefresh } from "../viewport-refresh.ts";
-import { latexMark } from "../../../shared/latex-marks.mjs";
+} from "../../../../date-syntax.ts";
+import { hasViewportDecorationRefresh } from "../../../viewport-refresh.ts";
+import { latexMark } from "../../../../../shared/latex-marks.mjs";
 
 declare global {
   interface Window {

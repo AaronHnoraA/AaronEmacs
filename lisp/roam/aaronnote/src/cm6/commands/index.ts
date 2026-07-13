@@ -11,19 +11,19 @@
 
 import { EditorView } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
-import { parseTableModel, formatTableLines, tableTooLarge, type TableAlign } from "./table-model.ts";
+import { parseTableModel, formatTableLines, tableTooLarge, type TableAlign } from "../table-model.ts";
 import type {
   EditorBlockContext,
   EditorCommand,
   QuickInsertContext,
   QuickInsertItem,
   QuickInsertProvider,
-} from "../editor-api.ts";
+} from "../../editor-api.ts";
 import {
   blockCommands,
   builtInQuickInsertProvider,
   quickMatches,
-} from "../editor-api.ts";
+} from "../../editor-api.ts";
 import { indentLess, indentMore } from "@codemirror/commands";
 import {
   foldAllHeadings,
@@ -31,7 +31,7 @@ import {
   toggleFoldAtCursor,
   unfoldAllHeadings,
   unfoldHeadingAtCursor,
-} from "./heading-fold.ts";
+} from "../heading-fold.ts";
 
 // ---------------------------------------------------------------------------
 // Inline wrap (bold / italic / highlight / strike / code / link / image)

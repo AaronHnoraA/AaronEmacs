@@ -20,7 +20,7 @@ import { calibrateWrappedLayoutClick, markdownHrefAt } from "../../src/cm6/edito
 import { setKnownRoamRefs } from "../../src/cm6/roam-link-status.ts";
 import { MATH_RENDER_ERROR_MAX_LENGTH } from "../../src/math-render.ts";
 import { createVimLite } from "../../aaronnote/vim-lite.ts";
-import { indentMarkdownBlock } from "../../src/cm6/commands.ts";
+import { indentMarkdownBlock } from "../../src/cm6/commands/index.ts";
 
 // All tests in this file require CM6 deps installed.
 // Flip `CM6_READY` to `true` after:

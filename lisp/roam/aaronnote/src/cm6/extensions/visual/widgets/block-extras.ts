@@ -28,12 +28,12 @@ import {
   mergeOverlappingRanges,
   positionInsideAnyRange,
   rangeOverlapsAny,
-} from "../math-ranges.ts";
+} from "../../../math-ranges.ts";
 import {
   changesMightAffectFencedCodeRanges,
   fencedCodeRangesExtension,
   getFencedCodeRanges,
-} from "../code-ranges.ts";
+} from "../../../code-ranges.ts";
 import {
   metaEntryMap,
   metaRoamIndexed,
@@ -42,17 +42,17 @@ import {
   renderMarkdownInlineHTML,
   renderMarkdownHTML,
   showMetaTag,
-} from "../../render-html.ts";
-import { applyImageLayout, imageLayoutFromAttrs, readImageTrailingAttrs, type ImageLayoutAttrs } from "../../image-attrs.ts";
-import { supportedDiagramLang } from "../../diagram-langs.ts";
-import { api } from "../../../aaronnote/api-client.ts";
-import { renderJupyterVariablesTable } from "../../jupyter-variables-view.ts";
-import { tocIndexFromState, type MarkdownHeading } from "../toc-index.ts";
-import { scanInlineCommands } from "../../command-syntax.ts";
-import { semanticOutlineFromCommand, type SemanticOutline } from "../../semantic-outline.ts";
-import { highlightCodeForEditor } from "../../code-highlight-async.ts";
-import type { JupyterWidgetKernelMessage } from "../../jupyter-widget-runtime.ts";
-import type { JupyterMarkdownParser, WidgetMountFn } from "../../jupyter-rendermime.ts";
+} from "../../../../render-html.ts";
+import { applyImageLayout, imageLayoutFromAttrs, readImageTrailingAttrs, type ImageLayoutAttrs } from "../../../../image-attrs.ts";
+import { supportedDiagramLang } from "../../../../diagram-langs.ts";
+import { api } from "../../../../../aaronnote/api-client.ts";
+import { renderJupyterVariablesTable } from "../../../../jupyter-variables-view.ts";
+import { tocIndexFromState, type MarkdownHeading } from "../../../toc-index.ts";
+import { scanInlineCommands } from "../../../../command-syntax.ts";
+import { semanticOutlineFromCommand, type SemanticOutline } from "../../../../semantic-outline.ts";
+import { highlightCodeForEditor } from "../../../../code-highlight-async.ts";
+import type { JupyterWidgetKernelMessage } from "../../../../jupyter-widget-runtime.ts";
+import type { JupyterMarkdownParser, WidgetMountFn } from "../../../../jupyter-rendermime.ts";
 import { ceilCommandGeneratedId as sharedCeilCommandGeneratedId, ceilLanguageForKernel } from "./ceil-shared.ts";
 
 // ---------------------------------------------------------------------------
@@ -320,7 +320,7 @@ function renderDiagramPreview(source: string, lang: string, div: HTMLElement): v
   const key = `mermaid\n${lang}\n${source.trim()}`;
   div.dataset.diagramRenderKey = key;
   div.textContent = "Loading diagram renderer...";
-  void import("../../diagram-render.ts")
+  void import("../../../../diagram-render.ts")
     .then(({ renderMermaidLazy }) => {
       if (div.dataset.diagramRenderKey !== key) return;
       renderMermaidLazy(source, div, (err) => {
@@ -1536,16 +1536,16 @@ function disposeCeilOutputTree(root: HTMLElement): void {
 const mountCeilWidget: WidgetMountFn = (host, modelId, runtime, messages, widgetOutputs) => {
   (window as unknown as { __jupyter_widgets_assets_path__?: string }).__jupyter_widgets_assets_path__ ??=
     new URL("./", window.location.href).toString();
-  return import("../../jupyter-widget-runtime.ts")
+  return import("../../../../jupyter-widget-runtime.ts")
     .then(({ mountJupyterWidget }) => mountJupyterWidget(host, modelId, runtime, messages as JupyterWidgetKernelMessage[], widgetOutputs));
 };
 
 // The JupyterLab OutputArea/rendermime stack is large; load it on demand the
 // first time a cell actually produces output, keeping it out of the main
 // editor bundle (same rationale as the widget manager above).
-let jupyterRenderModule: Promise<typeof import("../../jupyter-rendermime.ts")> | null = null;
-function loadJupyterRender(): Promise<typeof import("../../jupyter-rendermime.ts")> {
-  return (jupyterRenderModule ??= import("../../jupyter-rendermime.ts"));
+let jupyterRenderModule: Promise<typeof import("../../../../jupyter-rendermime.ts")> | null = null;
+function loadJupyterRender(): Promise<typeof import("../../../../jupyter-rendermime.ts")> {
+  return (jupyterRenderModule ??= import("../../../../jupyter-rendermime.ts"));
 }
 
 // Guards against a stale async fill when the same host is re-rendered (e.g. an

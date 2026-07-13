@@ -180,7 +180,7 @@ maybeDescribe("CM6 markdown typing affordances", () => {
 
   it("Enter exits an empty markdown list item", async () => {
     const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
-    const { exitEmptyMarkdownBlock } = await import("../../src/cm6/commands.ts");
+    const { exitEmptyMarkdownBlock } = await import("../../src/cm6/commands/index.ts");
     const host = document.createElement("div");
     const ed = createEditorCM6(host, { initialContent: "- " });
     ed.setSelection(2, 2);
@@ -193,7 +193,7 @@ maybeDescribe("CM6 markdown typing affordances", () => {
 
   it("Enter continues blockquote list markers", async () => {
     const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
-    const { continueMarkdownMarkup } = await import("../../src/cm6/commands.ts");
+    const { continueMarkdownMarkup } = await import("../../src/cm6/commands/index.ts");
     const host = document.createElement("div");
     const ed = createEditorCM6(host, { initialContent: "> - item" });
     ed.setSelection(ed.getMarkdown().length, ed.getMarkdown().length);
@@ -206,7 +206,7 @@ maybeDescribe("CM6 markdown typing affordances", () => {
 
   it("Enter continues plain blockquotes", async () => {
     const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
-    const { continueMarkdownBlock } = await import("../../src/cm6/commands.ts");
+    const { continueMarkdownBlock } = await import("../../src/cm6/commands/index.ts");
     const host = document.createElement("div");
     const ed = createEditorCM6(host, { initialContent: "> Once completed" });
     ed.setSelection(ed.getMarkdown().length, ed.getMarkdown().length);
@@ -219,7 +219,7 @@ maybeDescribe("CM6 markdown typing affordances", () => {
 
   it("Enter continues ordered and task markers inside blockquotes", async () => {
     const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
-    const { continueMarkdownMarkup } = await import("../../src/cm6/commands.ts");
+    const { continueMarkdownMarkup } = await import("../../src/cm6/commands/index.ts");
     const host = document.createElement("div");
     const ed = createEditorCM6(host, { initialContent: "> 3. item" });
     ed.setSelection(ed.getMarkdown().length, ed.getMarkdown().length);
@@ -236,7 +236,7 @@ maybeDescribe("CM6 markdown typing affordances", () => {
 
   it("Enter exits an empty blockquote list item to quote continuation", async () => {
     const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
-    const { exitEmptyMarkdownBlock } = await import("../../src/cm6/commands.ts");
+    const { exitEmptyMarkdownBlock } = await import("../../src/cm6/commands/index.ts");
     const host = document.createElement("div");
     const ed = createEditorCM6(host, { initialContent: "> - " });
     ed.setSelection(ed.getMarkdown().length, ed.getMarkdown().length);
@@ -249,7 +249,7 @@ maybeDescribe("CM6 markdown typing affordances", () => {
 
   it("Tab and Shift-Tab nest a list item together with its subtree", async () => {
     const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
-    const { indentMarkdownBlock, indentMarkdownList } = await import("../../src/cm6/commands.ts");
+    const { indentMarkdownBlock, indentMarkdownList } = await import("../../src/cm6/commands/index.ts");
     const host = document.createElement("div");
     const ed = createEditorCM6(host, { initialContent: "- parent\n- child\n    - grandchild\n- tail" });
     ed.setSelection(ed.getMarkdown().indexOf("child"));
@@ -266,7 +266,7 @@ maybeDescribe("CM6 markdown typing affordances", () => {
 
   it("renumbers ordered siblings when nesting and lifting list items", async () => {
     const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
-    const { indentMarkdownList } = await import("../../src/cm6/commands.ts");
+    const { indentMarkdownList } = await import("../../src/cm6/commands/index.ts");
     const host = document.createElement("div");
     const ed = createEditorCM6(host, { initialContent: "1. parent\n2. child\n3. tail" });
     ed.setSelection(ed.getMarkdown().indexOf("child"));
@@ -280,7 +280,7 @@ maybeDescribe("CM6 markdown typing affordances", () => {
 
   it("does not create an invalid nested list without a previous parent item", async () => {
     const { createEditorCM6 } = await import("../../src/cm6/editor-cm6.ts");
-    const { indentMarkdownList } = await import("../../src/cm6/commands.ts");
+    const { indentMarkdownList } = await import("../../src/cm6/commands/index.ts");
     const host = document.createElement("div");
     const ed = createEditorCM6(host, { initialContent: "- first\n- second" });
     ed.setSelection(2);
