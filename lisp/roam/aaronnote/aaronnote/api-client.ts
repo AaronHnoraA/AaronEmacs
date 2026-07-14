@@ -474,6 +474,7 @@ type NativeApi = {
     list?: (body?: Record<string, unknown>) => Promise<unknown>;
     get?: (body?: Record<string, unknown>) => Promise<unknown>;
     cancel?: (body?: Record<string, unknown>) => Promise<unknown>;
+    retry?: (body?: Record<string, unknown>) => Promise<unknown>;
     close?: (body?: Record<string, unknown>) => Promise<unknown>;
   };
   meta?: {
@@ -579,6 +580,7 @@ export type CoreTask = {
   result?: Record<string, unknown> | null;
   error?: string;
   cancellable?: boolean;
+  retryable?: boolean;
   closeable?: boolean;
 };
 export type CoreTasksResult = { type?: string; ok?: boolean; tasks?: CoreTask[]; task?: CoreTask | null; message?: string };
@@ -809,6 +811,10 @@ export const api = {
     async cancel(id: string): Promise<CoreTasksResult> {
       const call = requireMethod(nativeApi().tasks?.cancel, "Task manager");
       return ensureOk(await call({ id }) as CoreTasksResult, "Task cancellation failed");
+    },
+    async retry(id: string): Promise<CoreTasksResult> {
+      const call = requireMethod(nativeApi().tasks?.retry, "Task manager");
+      return ensureOk(await call({ id }) as CoreTasksResult, "Task rerun failed");
     },
     async close(id: string): Promise<CoreTasksResult> {
       const call = requireMethod(nativeApi().tasks?.close, "Task manager");

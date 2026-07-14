@@ -84,6 +84,8 @@ let latexOpencodeBin = String(process.env.AARONNOTE_OPENCODE_BIN || "opencode").
 let latexCodexModel = String(process.env.AARONNOTE_CODEX_MODEL || "").trim();
 let latexExportModel = String(process.env.AARONNOTE_LATEX_EXPORT_MODEL || "").trim();
 let latexExportMaxAttempts = Math.max(1, Number(process.env.AARONNOTE_LATEX_EXPORT_MAX_ATTEMPTS) || 3);
+let latexExportAgentIdleTimeoutMs = Math.max(10_000, Number(process.env.AARONNOTE_LATEX_EXPORT_AGENT_IDLE_TIMEOUT_MS) || 180_000);
+let latexExportAgentHardTimeoutMs = Math.max(latexExportAgentIdleTimeoutMs, Number(process.env.AARONNOTE_LATEX_EXPORT_AGENT_HARD_TIMEOUT_MS) || 900_000);
 const LATEX_EXPORT_AGENTS = ["codex", "claude", "opencode"];
 const LATEX_EXPORT_ENGINES = ["codex", "mechanical"];
 const execFileAsync = promisify(execFile);
@@ -5728,6 +5730,8 @@ export async function exportLatex(body = {}) {
       makeWorkdir: () => runtimeMkdtemp("latex-export", sourceFile || "export"),
       maxAttempts: latexExportMaxAttempts,
       polishVerifiedDraft: true,
+      agentTimeoutMs: latexExportAgentIdleTimeoutMs,
+      agentHardTimeoutMs: latexExportAgentHardTimeoutMs,
       onProgress,
       signal,
     });
@@ -5751,6 +5755,7 @@ export async function exportLatex(body = {}) {
       applied: decisions.filter((decision) => decision?.action === "applied").length,
       kept: decisions.filter((decision) => decision?.action === "kept").length,
       decisions,
+      summary: result.agentSummary || "",
     };
     if (Array.isArray(result.warnings)) warnings.push(...result.warnings);
   }
@@ -7915,6 +7920,8 @@ export function configure(options = {}) {
   latexCodexModel = String(options.latexCodexModel || process.env.AARONNOTE_CODEX_MODEL || "").trim();
   latexExportModel = String(options.latexExportModel || process.env.AARONNOTE_LATEX_EXPORT_MODEL || "").trim();
   latexExportMaxAttempts = Math.max(1, Number(options.latexExportMaxAttempts || process.env.AARONNOTE_LATEX_EXPORT_MAX_ATTEMPTS) || 3);
+  latexExportAgentIdleTimeoutMs = Math.max(10_000, Number(options.latexExportAgentIdleTimeoutMs || process.env.AARONNOTE_LATEX_EXPORT_AGENT_IDLE_TIMEOUT_MS) || 180_000);
+  latexExportAgentHardTimeoutMs = Math.max(latexExportAgentIdleTimeoutMs, Number(options.latexExportAgentHardTimeoutMs || process.env.AARONNOTE_LATEX_EXPORT_AGENT_HARD_TIMEOUT_MS) || 900_000);
   configureBibliography({ root: noteRoot });
   snippetCache = { key: "", scannedAt: 0, snippets: [] };
   templateCache = { key: "", scannedAt: 0, templates: [] };

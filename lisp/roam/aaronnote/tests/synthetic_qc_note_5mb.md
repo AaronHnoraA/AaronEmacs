@@ -1286,7 +1286,7 @@ The expression
 does not uniquely determine the ensemble \(\{p_j,|\psi_j\rangle\}_j\).
 q
 Different classical preparation procedures may induce the same density
-operator. Operationally, the density operator is the object that ==determines== this is this is easy to yse  this is har ssssssssssssssssss
+operator. Operationally, the density operator is the object that ==determines== this is this is easy to yse  this is har ssssssssssssssssss this this this this \(aasdasd as da asd as a ^5\) asadas as as das das dag yags d have ha veh va this thi ssssssss ssssss sssss sss 
 all measurement statistics. sssssssssssssssssssssssssssssss this is hard kkkkkkkkkkkkkkkkkkkkkk kkkkkkkkkkkk sssssssssss this is hard to use as ssssssssssssssssssss
 
 
@@ -33537,7 +33537,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文直觉：正半定保证测量概率非负；迹为一保证总概率为一。
+中文直觉：正半定保证测量概率���负；迹为一保证总概率为一。
 #+end note
 
 The expectation value of an observable \(A\) in state \(\rho\) is
@@ -96594,7 +96594,7 @@ invertible. This identifies one matching pair of summands. Removing that
 pair and applying induction proves the result.
 #+end proof
 
-中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
+中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改��，只能重排。
 
 ## 177.7. Measurement statistics
 
@@ -105002,7 +105002,7 @@ self-adjointness. However, listing Hermitian symmetry explicitly is often
 pedagogically useful because it reminds us that observables and density
 operators belong to the real vector space of Hermitian operators.
 
-中文直觉：正半定保证测量概率非负；迹为一保证总概率为一。
+中文直觉：正半定保证测量概���非负；迹为一保证总概率为一。
 #+end note
 
 The expectation value of an observable \(A\) in state \(\rho\) is
@@ -201154,7 +201154,7 @@ Coordinates are useful for computation because they give arrays of field
 elements. Invariance is useful for mathematics because it identifies the
 features of the object that do not depend on the chosen basis.
 
-中文直觉：坐标是“输入格式”，不变量是“结构本身留下的影子”。
+中文直觉：坐标是“输入格式”，不变量是“结构��身留下的影子”。
 #+end remark
 
 If \(g \in \operatorname{GL}(V)\) and \(h \in \operatorname{GL}(W)\), a change
@@ -204078,7 +204078,7 @@ invertible. This identifies one matching pair of summands. Removing that
 pair and applying induction proves the result.
 #+end proof
 
-中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
+中文直觉：如果��体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
 
 ## 374.7. Measurement statistics
 
@@ -210627,7 +210627,7 @@ invertible. This identifies one matching pair of summands. Removing that
 pair and applying induction proves the result.
 #+end proof
 
-中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
+中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”��空改变，只能重排。
 
 ## 386.7. Measurement statistics
 

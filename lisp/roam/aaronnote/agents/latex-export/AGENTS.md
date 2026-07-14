@@ -47,7 +47,10 @@ text or meaning, do not make that improvement.
    valid only when the draft truly needs no contextual structural change.
 7. Use your file-editing tools to write `body.tex`, the requested `title.txt`, and
    `review.json`. Do not merely describe their contents in your final response.
-   After those files are complete, stop; do not modify any other file.
+   Do not modify any other file. After those files are complete, return a concise,
+   concrete audit report covering what you inspected, exact markup changes,
+   important `kept` decisions, and readiness for host validation. Never return
+   only tool names, `use tool`, `done`, or a generic success sentence.
 
 Token discipline: prefer targeted edits over rewriting the whole file. The draft
 is usually 90% correct — fix the rest, don't redo it.

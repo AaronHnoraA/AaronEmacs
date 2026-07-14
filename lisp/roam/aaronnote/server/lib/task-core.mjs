@@ -24,8 +24,12 @@ export class CoreTaskManager {
     this.running = 0;
   }
 
-  start({ kind = "task", title = "Task", description = "", metadata = {}, run }) {
+  start({ kind = "task", title = "Task", description = "", metadata = {}, run, restartable = false, exclusiveKey = "" }) {
     if (typeof run !== "function") throw new TypeError("Core task requires a run function");
+    const key = String(exclusiveKey || "");
+    if (key && [...this.tasks.values()].some((task) => task.exclusiveKey === key && ["queued", "running", "canceling"].includes(task.status))) {
+      throw new Error("An equivalent task is already active");
+    }
     const active = [...this.tasks.values()].filter((task) => ["queued", "running", "canceling"].includes(task.status)).length;
     if (active >= this.maxConcurrent + this.maxPending) throw new Error("Core task pool is full; close or cancel existing work before adding more");
     const createdAt = nowIso();
@@ -35,6 +39,10 @@ export class CoreTaskManager {
       status: "queued", phase: "Queued", message: "Waiting for a worker", progress: [],
       createdAt, updatedAt: createdAt, startedAt: "", finishedAt: "", result: null, error: "",
       controller: new AbortController(), run,
+      // Keep only an explicitly opted-in restart closure.  A retry always gets
+      // a fresh task id/controller and never attempts to revive an old process.
+      restart: restartable ? run : null,
+      exclusiveKey: key,
     };
     this.tasks.set(task.id, task);
     this.queue.push(task.id);
@@ -81,6 +89,32 @@ export class CoreTaskManager {
     return { ok: false, message: `Task is already ${task.status}`, task: this.snapshot(task) };
   }
 
+  retry(id) {
+    const task = this.tasks.get(String(id || ""));
+    if (!task) return { ok: false, message: "Task not found" };
+    if (!["completed", "failed", "canceled"].includes(task.status)) {
+      return { ok: false, message: `Task is still ${task.status}`, task: this.snapshot(task) };
+    }
+    if (typeof task.restart !== "function") {
+      return { ok: false, message: "Task cannot be rerun", task: this.snapshot(task) };
+    }
+    let retried;
+    try {
+      retried = this.start({
+        kind: task.kind,
+        title: task.title,
+        description: task.description,
+        metadata: task.metadata,
+        run: task.restart,
+        restartable: true,
+        exclusiveKey: task.exclusiveKey,
+      });
+    } catch (error) {
+      return { ok: false, message: String(error?.message || error), task: this.snapshot(task) };
+    }
+    return { ok: true, task: retried, previousId: task.id };
+  }
+
   close(id) {
     const task = this.tasks.get(String(id || ""));
     if (!task) return { ok: false, message: "Task not found" };
@@ -99,6 +133,7 @@ export class CoreTaskManager {
       updatedAt: task.updatedAt, startedAt: task.startedAt, finishedAt: task.finishedAt,
       result: task.result && typeof task.result === "object" ? { ...task.result } : task.result,
       error: task.error, cancellable: ["queued", "running"].includes(task.status),
+      retryable: typeof task.restart === "function" && ["completed", "failed", "canceled"].includes(task.status),
       closeable: ["completed", "failed", "canceled"].includes(task.status),
     };
   }

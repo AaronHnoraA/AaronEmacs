@@ -818,6 +818,8 @@ const apiRouter = new ApiRouter().register({
         engine: String(request.engine || ""),
       },
       run: ({ signal, progress }) => exportLatex({ ...request, signal, onProgress: progress }),
+      restartable: true,
+      exclusiveKey: outputPath ? `latex-export:${outputPath}` : "",
     });
     return { type: "core-task-started", ok: true, task };
   },
@@ -1129,6 +1131,7 @@ function adapterScript(origin) {
       list: function(body) { return call("aaronnote:api:tasks:list", [body || {}]); },
       get: function(body) { return call("aaronnote:api:tasks:get", [body || {}]); },
       cancel: function(body) { return call("aaronnote:api:tasks:cancel", [body || {}]); },
+      retry: function(body) { return call("aaronnote:api:tasks:retry", [body || {}]); },
       close: function(body) { return call("aaronnote:api:tasks:close", [body || {}]); }
     },
     roamTools: {

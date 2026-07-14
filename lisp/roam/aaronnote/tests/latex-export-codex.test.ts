@@ -329,12 +329,115 @@ describe("latex-export-codex helpers", () => {
       makeWorkdir: async () => workdir,
       polishVerifiedDraft: true,
       agentTimeoutMs: 30,
+      agentHardTimeoutMs: 30,
     });
     await new Promise((resolve) => setTimeout(resolve, 350));
 
     expect(result).toMatchObject({ usedAgent: false, attempts: 1 });
-    expect(result.warnings.some((warning: string) => warning.includes("opencode timed out"))).toBe(true);
+    expect(result.warnings.some((warning: string) => warning.includes("opencode reached the"))).toBe(true);
     await expect(access(marker)).rejects.toThrow();
+  });
+
+  test("keeps a live agent past the idle check and accepts its eventual polish", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-agent-idle-grace-"));
+    roots.push(root);
+    const workdir = join(root, "work");
+    await mkdir(workdir, { recursive: true });
+    const agent = join(root, "quiet-agent.sh");
+    await writeFile(agent, [
+      "#!/bin/sh",
+      "sleep 0.08",
+      "printf 'Answer A.\\n' > body.tex",
+      "printf '%s\\n' '{\"decisions\":[{\"id\":\"whole-document-structure\",\"action\":\"kept\",\"reason\":\"full structure checked\"},{\"id\":\"academic-layout\",\"action\":\"kept\",\"reason\":\"layout already restrained\"}]}' > review.json",
+    ].join("\n"), "utf8");
+    await chmod(agent, 0o755);
+    const progress: string[] = [];
+    const result = await polishBodyWithAgent({
+      sourceMarkdown: "Answer A.",
+      draftBody: "Answer A.\n",
+      templateText: "{{body}}",
+      assemble: (body: string) => body,
+      latexBin: "/usr/bin/true",
+      agentBin: agent,
+      backend: "claude",
+      needsTitle: false,
+      makeWorkdir: async () => workdir,
+      polishVerifiedDraft: true,
+      agentTimeoutMs: 20,
+      agentHardTimeoutMs: 500,
+      onProgress: (text: string) => progress.push(text),
+    });
+    expect(result).toMatchObject({ usedAgent: true, compiled: true });
+    expect(progress.some((line) => line.includes("still alive"))).toBe(true);
+  });
+
+  test("applies isolated, network-capable launch policy to all three backends", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-agent-policy-"));
+    roots.push(root);
+    const style = join(root, "style-source.md");
+    const skills = join(root, "skills");
+    await writeFile(style, "STYLE_SENTINEL\n", "utf8");
+    await mkdir(join(skills, "one"), { recursive: true });
+    await mkdir(join(skills, "two"), { recursive: true });
+    await writeFile(join(skills, "one", "SKILL.md"), "ONE_SENTINEL\n", "utf8");
+    await writeFile(join(skills, "two", "SKILL.md"), "TWO_SENTINEL\n", "utf8");
+
+    for (const backend of ["codex", "claude", "opencode"]) {
+      const workdir = join(root, `work-${backend}`);
+      const agent = join(root, `${backend}-agent.sh`);
+      await mkdir(workdir, { recursive: true });
+      const policyChecks = backend === "codex"
+        ? [
+            "case \" $* \" in *\" --ignore-user-config \"*) ;; *) exit 21 ;; esac",
+            "case \" $* \" in *\" sandbox_workspace_write.network_access=true \"*) ;; *) exit 22 ;; esac",
+            "case \" $* \" in *\" sandbox_workspace_write.writable_roots=[] \"*) ;; *) exit 23 ;; esac",
+          ]
+        : backend === "claude"
+          ? [
+              "case \" $* \" in *\" --safe-mode \"*) ;; *) exit 24 ;; esac",
+              "case \" $* \" in *dangerously-skip-permissions*) exit 25 ;; *) ;; esac",
+              "case \" $* \" in *\" --disallowedTools Bash,Task \"*) ;; *) exit 26 ;; esac",
+            ]
+          : [
+              "case \" $* \" in *\" --pure \"*) ;; *) exit 27 ;; esac",
+              "case \" $* \" in *dangerously-skip-permissions*) exit 28 ;; *) ;; esac",
+              "grep -q '\"external_directory\": \"deny\"' opencode.json || exit 29",
+              "grep -q '\"webfetch\": \"allow\"' opencode.json || exit 30",
+            ];
+      const reportEvent = backend === "codex"
+        ? '{"type":"item.completed","item":{"type":"agent_message","text":"codex concrete audit report"}}'
+        : backend === "claude"
+          ? '{"type":"result","result":"claude concrete audit report"}'
+          : '{"type":"text","text":"opencode concrete audit report"}';
+      await writeFile(agent, [
+        "#!/bin/sh",
+        "grep -q STYLE_SENTINEL style.md || exit 11",
+        "grep -q ONE_SENTINEL skills/one/SKILL.md || exit 12",
+        "grep -q TWO_SENTINEL skills/two/SKILL.md || exit 13",
+        ...policyChecks,
+        "printf 'Answer A.\\n' > body.tex",
+        "printf '%s\\n' '{\"decisions\":[{\"id\":\"whole-document-structure\",\"action\":\"kept\",\"reason\":\"full structure checked\"},{\"id\":\"academic-layout\",\"action\":\"kept\",\"reason\":\"layout already restrained\"}]}' > review.json",
+        `printf '%s\\n' '${reportEvent}'`,
+      ].join("\n"), "utf8");
+      await chmod(agent, 0o755);
+
+      const result = await polishBodyWithAgent({
+        sourceMarkdown: "Answer A.",
+        draftBody: "Answer A.\n",
+        templateText: "{{body}}",
+        styleDoc: style,
+        skillsDir: skills,
+        assemble: (body: string) => body,
+        latexBin: "/usr/bin/true",
+        agentBin: agent,
+        backend,
+        needsTitle: false,
+        makeWorkdir: async () => workdir,
+        polishVerifiedDraft: true,
+      });
+      expect(result).toMatchObject({ usedAgent: true, compiled: true });
+      expect(result.agentSummary).toContain("concrete audit report");
+    }
   });
 
   test("invokes the Agent only after a real mechanical compile defect", async () => {

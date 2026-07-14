@@ -140,10 +140,23 @@ A fidelity/review rejection falls back immediately instead of retrying."
   :type 'integer
   :group 'my/aaronnote)
 
+(config-defvar my/aaronnote-latex-export-agent-idle-timeout 180
+  "Seconds without agent output before Aaronnote performs a liveness check.
+A live process is kept running; this is not a kill timeout."
+  :type 'integer
+  :group 'my/aaronnote)
+
+(config-defvar my/aaronnote-latex-export-agent-hard-timeout 900
+  "Absolute seconds allowed for one LaTeX export agent attempt.
+At this limit Aaronnote requests graceful termination before using a hard kill."
+  :type 'integer
+  :group 'my/aaronnote)
+
 (config-defvar my/aaronnote-latex-export-agent "codex"
   "AI backend for the Aaronnote LaTeX export repair step.
-One of \"codex\", \"claude\", or \"opencode\".  All run non-interactively with
-permission prompts disabled.  Clean mechanically verified exports do not launch
+One of \"codex\", \"claude\", or \"opencode\".  All run non-interactively in the
+single-export staging directory with external-directory writes blocked and
+network access available.  Clean mechanically verified exports do not launch
 the backend.  The backend is chosen here, not per export."
   :type '(choice (const "codex") (const "claude") (const "opencode"))
   :group 'my/aaronnote)
@@ -422,6 +435,11 @@ failure is diagnosable without hunting for it."
                     (or (bound-and-true-p my/aaronnote-latex-export-agent) "codex"))
             (format "AARONNOTE_LATEX_EXPORT_MAX_ATTEMPTS=%d"
                     (or my/aaronnote-latex-export-max-attempts 3))
+            (format "AARONNOTE_LATEX_EXPORT_AGENT_IDLE_TIMEOUT_MS=%d"
+                    (* 1000 (max 10 (or my/aaronnote-latex-export-agent-idle-timeout 180))))
+            (format "AARONNOTE_LATEX_EXPORT_AGENT_HARD_TIMEOUT_MS=%d"
+                    (* 1000 (max (or my/aaronnote-latex-export-agent-idle-timeout 180)
+                                 (or my/aaronnote-latex-export-agent-hard-timeout 900))))
             (format "AARONNOTE_CODEX_BIN=%s"
                     (or (bound-and-true-p codex-cli-executable) "codex"))
             (format "AARONNOTE_CLAUDE_BIN=%s"

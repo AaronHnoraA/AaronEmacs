@@ -312,6 +312,7 @@ const taskManagerTabs = [...taskManagerModal.querySelectorAll<HTMLButtonElement>
 let taskManagerTab: "active" | "latex" = "active";
 let taskManagerSnapshot: CoreTask[] = [];
 let taskManagerLoading = false;
+let taskManagerPollTimer: number | null = null;
 
 function taskTime(value: unknown): string {
   const date = new Date(String(value || ""));
@@ -421,6 +422,38 @@ function renderTaskManager(): void {
       details.append(summary, log);
       card.appendChild(details);
     }
+    const agent = task.result?.agent && typeof task.result.agent === "object"
+      ? task.result.agent as Record<string, unknown>
+      : null;
+    const decisions = agent && Array.isArray(agent.decisions)
+      ? agent.decisions as Array<Record<string, unknown>>
+      : [];
+    const agentSummary = String(agent?.summary || "").trim();
+    if (agentSummary || decisions.length > 0) {
+      const details = document.createElement("details");
+      details.className = "aaronnote-task-agent-audit";
+      const summary = document.createElement("summary");
+      summary.textContent = `Agent audit (${decisions.length} decisions)`;
+      details.appendChild(summary);
+      if (agentSummary) {
+        const report = document.createElement("p");
+        report.textContent = agentSummary;
+        details.appendChild(report);
+      }
+      if (decisions.length > 0) {
+        const list = document.createElement("ul");
+        for (const decision of decisions) {
+          const item = document.createElement("li");
+          const id = String(decision.id || decision.kind || "review");
+          const action = String(decision.action || "reviewed");
+          const reason = String(decision.reason || "No reason returned");
+          item.textContent = `${id}: ${action} — ${reason}`;
+          list.appendChild(item);
+        }
+        details.appendChild(list);
+      }
+      card.appendChild(details);
+    }
     const actions = document.createElement("div");
     actions.className = "aaronnote-task-actions";
     if (task.cancellable) {
@@ -433,6 +466,22 @@ function renderTaskManager(): void {
         await refreshTaskManager();
       });
       actions.appendChild(cancel);
+    }
+    if (task.retryable) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.textContent = task.status === "completed" ? "Run again" : "Rerun";
+      retry.addEventListener("click", async () => {
+        retry.disabled = true;
+        try {
+          await api.tasks.retry(task.id);
+          taskManagerStatus.textContent = "LaTeX export queued again with the same inputs.";
+        } catch (error) {
+          taskManagerStatus.textContent = error instanceof Error ? error.message : String(error);
+        }
+        await refreshTaskManager();
+      });
+      actions.appendChild(retry);
     }
     if (task.closeable) {
       const close = document.createElement("button");
@@ -450,15 +499,16 @@ function renderTaskManager(): void {
   }
 }
 
-async function refreshTaskManager(): Promise<void> {
+async function refreshTaskManager(silent = false): Promise<void> {
   if (taskManagerLoading) return;
   taskManagerLoading = true;
   taskManagerRefresh.disabled = true;
-  taskManagerStatus.textContent = "Reading Core task snapshot…";
+  if (!silent) taskManagerStatus.textContent = "Reading Core task snapshot…";
   try {
     const result = await api.tasks.list();
     taskManagerSnapshot = result.tasks || [];
-    taskManagerStatus.textContent = `Snapshot refreshed ${new Date().toLocaleTimeString()}. No automatic polling.`;
+    const active = taskManagerSnapshot.some((task) => ["queued", "running", "canceling"].includes(task.status));
+    taskManagerStatus.textContent = `${active ? "Live task state" : "Snapshot refreshed"} ${new Date().toLocaleTimeString()}.`;
     renderTaskManager();
   } catch (error) {
     taskManagerStatus.textContent = error instanceof Error ? error.message : String(error);
@@ -470,11 +520,18 @@ async function refreshTaskManager(): Promise<void> {
 
 function closeTaskManager(): void {
   taskManagerModal.hidden = true;
+  if (taskManagerPollTimer != null) window.clearInterval(taskManagerPollTimer);
+  taskManagerPollTimer = null;
 }
 
 function openTaskManager(): void {
   taskManagerModal.hidden = false;
   void refreshTaskManager();
+  if (taskManagerPollTimer == null) {
+    taskManagerPollTimer = window.setInterval(() => {
+      if (!taskManagerModal.hidden) void refreshTaskManager(true);
+    }, 1500);
+  }
   window.setTimeout(() => taskManagerRefresh.focus(), 0);
 }
 

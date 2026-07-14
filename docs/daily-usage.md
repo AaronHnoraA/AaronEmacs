@@ -226,7 +226,17 @@ agent 处理，正文及数学含义主要由 prompt 和逐项 review 约束，�
 始终优先。所有最终产物先完整验证、后原子替换，失败导出不会覆盖上一次可用的 `.tex` / PDF。
 任务结果会显示 agent 实际耗时以及 `applied / kept` 数量；review 由 host 预生成精确 candidate 模板，
 缺失证据会显示 warning，但不会反过来否决一个已通过关键 payload 与编译检查的排版结果。agent 超时
-会终止整个 CLI 进程组，避免 opencode 派生工具继续后台运行。
+不再按固定三分钟直接杀进程：三分钟无输出时只检查进程是否仍存活，存活就继续等待；单次 attempt
+默认有十五分钟硬上限，到达后先请求整个 CLI 进程组正常退出，十秒后才会强制清理。失败或取消的
+LaTeX task 会在 Task Manager 的 `LaTeX exports` 页显示 `Rerun`，使用完全相同的输入新建任务，
+不会尝试复活旧进程。
+
+Codex、Claude、OpenCode 都只在每次导出的隔离 staging 目录中工作；style contract、两个 skill、
+source/draft/template/review 会预先复制到该目录，避免 agent 因找不到上下文向父目录探索。网络权限
+保持开放。Codex 使用 `workspace-write` 且不继承用户规则/额外 writable roots；Claude 不再使用
+`dangerously-skip-permissions`，只开放读取、编辑和 web 工具并禁用 Bash/Task；OpenCode 使用
+`--dir`、`--pure` 和 `external_directory: deny`。任务卡的 `Agent audit` 可展开查看最终 audit 摘要
+以及每项 `applied / kept` 的具体理由。
 
 引用使用 note 顶部 meta 声明本地 bibliography，再在正文写 `@@cite`：
 
@@ -252,6 +262,8 @@ label 中的 citation 正常解析。
 非交互、免确认方式运行，且在配置里选定、不会每次询问。引擎开关 `my/aaronnote-latex-export-engine`
 （`codex` = verified-first + 单次 gated polish / 必要时 repair；`mechanical` = 从不启动 agent）。中间校验用 draft
 模式加速，最终产物仍做完整两遍编译。见 Aaronnote 的 `docs/latex-export-style.md`。
+空闲存活检查和硬上限分别由 `my/aaronnote-latex-export-agent-idle-timeout`（默认 180 秒）与
+`my/aaronnote-latex-export-agent-hard-timeout`（默认 900 秒）控制。
 
 标题、章节名和 theorem/proof 标签中的 `\(...\)` 会保留为 LaTeX 数学，而不是被转义成
 `\textbackslash`。输出路径按 note 记忆，写入是原子的，并强制使用 `.tex` 后缀。未闭合的

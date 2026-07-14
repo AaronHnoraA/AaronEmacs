@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, test, vi } from "@voidzero-dev/vite-plus-test";
-import { foldedRanges } from "@codemirror/language";
+import { foldedRanges, syntaxTree } from "@codemirror/language";
 import { EditorSelection, type EditorState } from "@codemirror/state";
 import { createEditor } from "../../src/editor-api.ts";
 import { calibrateWrappedLayoutClick, markdownHrefAt } from "../../src/cm6/editor-cm6.ts";
@@ -126,6 +126,30 @@ maybeDescribe("cm6 kernel: getMarkdown / setMarkdown", () => {
     const { editor, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(md.length);
     expect(document.querySelectorAll(".cm-math-inline")).toHaveLength(3);
+    cleanup();
+  });
+
+  test("does not pair underscores across separate inline math ranges as emphasis", () => {
+    const md = String.raw`\(i_j\). Thus every standard basis vector of \(W_G\) lies in \((W_G)_{T_G}\), while the reverse inclusion is immediate; hence \((W_G)_{T_G}=W_G\).`;
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    const nodeNames: string[] = [];
+    syntaxTree(editor.view.state).iterate({ enter: (node) => { nodeNames.push(node.name); } });
+    expect(nodeNames.filter((name) => name === "InlineMath")).toHaveLength(4);
+    expect(nodeNames).not.toContain("Emphasis");
+    expect(document.querySelector(".cm-em")).toBeNull();
+    expect(document.querySelectorAll(".cm-math-inline")).toHaveLength(4);
+    cleanup();
+  });
+
+  test("keeps deliberate emphasis around inline math", () => {
+    const md = String.raw`*before \(W_G\) after*`;
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    expect(document.querySelector(".cm-em")).toBeTruthy();
+    expect(document.querySelector(".cm-math-inline")).toBeTruthy();
     cleanup();
   });
 

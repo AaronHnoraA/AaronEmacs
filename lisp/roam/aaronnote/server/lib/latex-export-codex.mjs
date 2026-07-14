@@ -11,7 +11,7 @@
 
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { LATEX_MARKS } from "../../shared/latex-marks.mjs";
@@ -427,7 +427,10 @@ async function compileLatex({ tex, dir, latexBin, engine = "pdflatex", sourceDir
 function buildPrompt({ retryLog, needsTitle = true, sourceTitle = "", documentRole = "" }) {
   const base = [
     "You are polishing a LaTeX export. This prompt is the complete contract; do",
-    "not search for other instruction files. Read source.md (content truth),",
+    "not search outside this working directory. Every required input has been",
+    "copied here. Never inspect parent directories, absolute host paths, user",
+    "configuration, repositories, or unrelated files. Read style.md and both local",
+    "skills/*/SKILL.md files once, then source.md (content truth),",
     "draft.tex (mechanical conversion), template.tex (available environments and",
     "macros), polish-candidates.json, and the pre-seeded review.json. body.tex is",
     "already an exact copy of draft.tex; edit it only after the audit. Replace every",
@@ -503,8 +506,8 @@ function buildPrompt({ retryLog, needsTitle = true, sourceTitle = "", documentRo
         ].join("\n"),
     "",
     needsTitle
-      ? "Use file-editing tools to write body.tex, title.txt, and the required review.json. Do not only describe them in chat. Modify no other files, then stop."
-      : "Use file-editing tools to write body.tex and the required review.json. Do not only describe them in chat. Modify no other files, then stop.",
+      ? "Use file-editing tools to write body.tex, title.txt, and the required review.json. Modify no other files. Then return a concise but concrete audit report: what you inspected, exact markup changes applied, important items deliberately kept, and why the result is ready for host validation. Never answer only with tool names, `use tool`, `done`, or a generic success sentence."
+      : "Use file-editing tools to write body.tex and the required review.json. Modify no other files. Then return a concise but concrete audit report: what you inspected, exact markup changes applied, important items deliberately kept, and why the result is ready for host validation. Never answer only with tool names, `use tool`, `done`, or a generic success sentence.",
   ];
   if (retryLog) {
     base.push(
@@ -526,17 +529,33 @@ function agentArgs(backend, { workdir, model, prompt }) {
     case "claude":
       return [
         "-p", prompt,
-        "--dangerously-skip-permissions",
-        "--add-dir", workdir,
+        "--safe-mode",
+        "--permission-mode", "acceptEdits",
+        "--tools", "Read,Edit,Write,Glob,Grep,WebFetch,WebSearch",
+        "--allowedTools", "WebFetch,WebSearch",
+        "--disallowedTools", "Bash,Task",
+        "--settings", JSON.stringify({
+          permissions: {
+            deny: ["Bash", "Task", "Read(../**)", "Read(~/**)", "Edit(../**)", "Edit(~/**)"],
+          },
+        }),
         "--output-format", "stream-json",
+        "--include-partial-messages",
         "--verbose",
+        "--effort", "medium",
+        "--no-session-persistence",
+        "--no-chrome",
+        "--strict-mcp-config",
+        "--prompt-suggestions", "false",
         ...(model ? ["--model", model] : []),
       ];
     case "opencode":
       return [
         "run",
-        "--dangerously-skip-permissions",
+        "--dir", workdir,
+        "--pure",
         "--format", "json",
+        "--thinking",
         ...(model ? ["-m", model] : []),
         prompt,
       ];
@@ -548,40 +567,71 @@ function agentArgs(backend, { workdir, model, prompt }) {
         "--sandbox", "workspace-write",
         "--skip-git-repo-check",
         "--ephemeral",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--json",
         "-c", "approval_policy=\"never\"",
+        "-c", "allow_login_shell=false",
+        "-c", "model_reasoning_effort=\"medium\"",
+        "-c", "sandbox_workspace_write.network_access=true",
+        "-c", "sandbox_workspace_write.writable_roots=[]",
+        "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+        "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
         ...(model ? ["-m", model] : []),
         prompt,
       ];
   }
 }
 
-// Extract a short human-readable progress label from a backend stdout line.
-// codex prints plain text; claude/opencode emit JSONL/JSON events.
-function progressLabel(backend, line) {
+// Extract a short human-readable progress label and final audit report from
+// each backend's JSONL/JSON event stream.
+function progressEvent(backend, line) {
   const raw = String(line || "").trim();
-  if (!raw) return "";
-  if (backend === "codex") return raw.slice(0, 160);
+  if (!raw) return { label: "", report: "" };
   try {
     const ev = JSON.parse(raw);
     const type = ev.type || ev.event || "";
+    if (backend === "codex") {
+      const item = ev.item || {};
+      if (item.type === "agent_message" && item.text) {
+        const text = String(item.text).trim();
+        return { label: `codex: ${text.slice(0, 150)}`, report: text };
+      }
+      if (item.type === "command_execution") {
+        return { label: `codex: ${String(item.command || "command").slice(0, 140)}`, report: "" };
+      }
+      if (item.type === "file_change") return { label: "codex: updating export files", report: "" };
+      if (type === "turn.started") return { label: "codex: auditing LaTeX draft", report: "" };
+      if (type === "turn.completed") return { label: "codex: audit complete", report: "" };
+      if (type) return { label: `codex: ${String(type).slice(0, 130)}`, report: "" };
+    }
     if (backend === "claude") {
       if (type === "assistant" && ev.message?.content) {
         const t = ev.message.content.find?.((c) => c.type === "tool_use") || ev.message.content.find?.((c) => c.type === "text");
-        if (t?.type === "tool_use") return `claude: ${t.name || "tool"}`;
-        if (t?.type === "text" && t.text) return `claude: ${String(t.text).slice(0, 120)}`;
+        if (t?.type === "tool_use") return { label: `claude: ${t.name || "tool"}`, report: "" };
+        if (t?.type === "text" && t.text) {
+          const text = String(t.text).trim();
+          return { label: `claude: ${text.slice(0, 140)}`, report: text };
+        }
       }
-      if (type) return `claude: ${type}`;
+      if (type === "result" && ev.result) {
+        const text = String(ev.result).trim();
+        return { label: "claude: audit complete", report: text };
+      }
+      if (type) return { label: `claude: ${type}`, report: "" };
     } else {
+      const text = String(ev.part?.text || ev.message?.text || ev.text || ev.result || "").trim();
+      if (text) return { label: `opencode: ${text.slice(0, 140)}`, report: text };
       const label = ev.tool || ev.name || type;
-      if (label) return `opencode: ${String(label).slice(0, 120)}`;
+      if (label) return { label: `opencode: ${String(label).slice(0, 130)}`, report: "" };
     }
   } catch {
-    return raw.slice(0, 160);
+    return { label: `${backend}: ${raw.slice(0, 150)}`, report: raw };
   }
-  return "";
+  return { label: "", report: "" };
 }
 
-function runAgent({ backend, bin, workdir, model, retryLog, needsTitle, sourceTitle, documentRole, timeoutMs, signal, onProgress }) {
+function runAgent({ backend, bin, workdir, model, retryLog, needsTitle, sourceTitle, documentRole, idleTimeoutMs, hardTimeoutMs, signal, onProgress }) {
   return new Promise((resolve) => {
     const args = agentArgs(backend, { workdir, model, prompt: buildPrompt({ retryLog, needsTitle, sourceTitle, documentRole }) });
     let child;
@@ -600,8 +650,11 @@ function runAgent({ backend, bin, workdir, model, retryLog, needsTitle, sourceTi
     let stderr = "";
     let stdoutBuf = "";
     let settled = false;
+    let idleTimer = null;
+    let hardTimer = null;
     let forcedKillTimer = null;
     let stopMessage = "";
+    let finalReport = "";
     const terminateGroup = (signalName) => {
       if (!child?.pid) return;
       try {
@@ -614,48 +667,116 @@ function runAgent({ backend, bin, workdir, model, retryLog, needsTitle, sourceTi
     const finish = (result) => {
       if (settled) return;
       settled = true;
-      if (timer) clearTimeout(timer);
+      if (idleTimer) clearTimeout(idleTimer);
+      if (hardTimer) clearTimeout(hardTimer);
       if (forcedKillTimer) clearTimeout(forcedKillTimer);
       if (signal) signal.removeEventListener?.("abort", onAbort);
-      resolve(result);
+      resolve({ ...result, summary: finalReport.slice(0, 4000) });
     };
-    const stop = (message) => {
+    const stop = (message, graceMs = 10_000) => {
       if (stopMessage) return;
       stopMessage = message;
       terminateGroup("SIGTERM");
       forcedKillTimer = setTimeout(() => {
         terminateGroup("SIGKILL");
         finish({ ok: false, message });
-      }, 750);
+      }, graceMs);
     };
-    const onAbort = () => stop("aborted");
-    const timer = setTimeout(() => {
-      stop(`${backend} timed out`);
-    }, timeoutMs);
+    const processAlive = () => {
+      if (!child?.pid) return false;
+      try { process.kill(child.pid, 0); return true; } catch { return false; }
+    };
+    const armIdleCheck = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        if (settled) return;
+        if (processAlive()) {
+          try { onProgress?.(`${backend} is still alive; waiting for its final polish…`); } catch {}
+          armIdleCheck();
+        } else {
+          stop(`${backend} stopped responding`, 2_000);
+        }
+      }, idleTimeoutMs);
+    };
+    const touch = () => armIdleCheck();
+    const onAbort = () => stop("aborted", 5_000);
+    hardTimer = setTimeout(() => {
+      stop(`${backend} reached the ${Math.round(hardTimeoutMs / 60_000)} minute hard limit`);
+    }, hardTimeoutMs);
+    armIdleCheck();
     if (signal) {
       if (signal.aborted) { onAbort(); return; }
       signal.addEventListener?.("abort", onAbort, { once: true });
     }
+    const consumeStdoutLine = (line) => {
+      const event = progressEvent(backend, line);
+      if (event.report) finalReport = event.report;
+      if (event.label && onProgress) { try { onProgress(event.label); } catch {} }
+    };
     child.stdout?.on("data", (chunk) => {
-      if (!onProgress) return;
+      touch();
       stdoutBuf += String(chunk);
       let nl;
       while ((nl = stdoutBuf.indexOf("\n")) >= 0) {
         const line = stdoutBuf.slice(0, nl);
         stdoutBuf = stdoutBuf.slice(nl + 1);
-        const label = progressLabel(backend, line);
-        if (label) { try { onProgress(label); } catch {} }
+        consumeStdoutLine(line);
       }
       if (stdoutBuf.length > 65536) stdoutBuf = stdoutBuf.slice(-65536);
     });
-    child.stderr?.on("data", (chunk) => { stderr += String(chunk); if (stderr.length > 8192) stderr = stderr.slice(-8192); });
+    child.stderr?.on("data", (chunk) => {
+      touch();
+      stderr += String(chunk);
+      if (stderr.length > 8192) stderr = stderr.slice(-8192);
+    });
     child.on("error", (err) => finish({ ok: false, message: stopMessage || String(err?.message || err) }));
-    child.on("close", (code) => finish(stopMessage
-      ? { ok: false, message: stopMessage }
-      : code === 0
-        ? { ok: true }
-        : { ok: false, message: stderr.trim() || `${backend} exited ${code}` }));
+    child.on("close", (code) => {
+      if (stdoutBuf.trim()) consumeStdoutLine(stdoutBuf);
+      finish(stopMessage
+        ? { ok: false, message: stopMessage }
+        : code === 0
+          ? { ok: true }
+          : { ok: false, message: stderr.trim() || `${backend} exited ${code}` });
+    });
   });
+}
+
+async function stageOptionalFile(source, destination, fallback = "") {
+  let content = fallback;
+  if (String(source || "").trim()) {
+    try { content = await readFile(source, "utf8"); } catch {}
+  }
+  if (content) await writeFile(destination, content, "utf8");
+}
+
+async function stageAgentContext({ workdir, styleDoc, syntaxDoc, skillsDir, backend }) {
+  const writes = [
+    stageOptionalFile(styleDoc, join(workdir, "style.md"), "# LaTeX export style\nPreserve source text and improve only LaTeX markup.\n"),
+    stageOptionalFile(syntaxDoc, join(workdir, "syntax.md")),
+  ];
+  if (String(skillsDir || "").trim()) {
+    try {
+      const entries = await readdir(skillsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const source = join(skillsDir, entry.name, "SKILL.md");
+        const targetDir = join(workdir, "skills", entry.name);
+        writes.push(mkdir(targetDir, { recursive: true }).then(() => stageOptionalFile(source, join(targetDir, "SKILL.md"))));
+      }
+    } catch {}
+  }
+  if (backend === "opencode") {
+    writes.push(writeFile(join(workdir, "opencode.json"), `${JSON.stringify({
+      $schema: "https://opencode.ai/config.json",
+      permission: {
+        read: "allow", edit: "allow", glob: "allow", grep: "allow", list: "allow",
+        webfetch: "allow", websearch: "allow",
+        bash: "deny", task: "deny", skill: "deny", lsp: "deny",
+        question: "deny", doom_loop: "deny", external_directory: "deny",
+      },
+    }, null, 2)}\n`, "utf8"));
+  }
+  await Promise.all(writes);
 }
 
 // ---- Orchestrator ----------------------------------------------------------
@@ -721,6 +842,7 @@ export async function polishBodyWithAgent(opts) {
     supportFiles = [],
     skillsDir = "",
     agentTimeoutMs = 180_000,
+    agentHardTimeoutMs = 900_000,
     compileTimeoutMs = 120_000,
     signal,
     onProgress,
@@ -759,6 +881,7 @@ export async function polishBodyWithAgent(opts) {
       if (file?.name && file?.content) prepare.push(writeFile(join(workdir, basename(file.name)), file.content));
     }
     await Promise.all(prepare);
+    await stageAgentContext({ workdir, styleDoc, syntaxDoc, skillsDir, backend });
 
     emit("Validating Pandoc draft…");
     const draftVerification = await compileLatex({
@@ -782,6 +905,7 @@ export async function polishBodyWithAgent(opts) {
       : `LATEX COMPILE FAILURE:\n${draftVerification.log}`;
     let attempts = 0;
     let agentElapsedMs = 0;
+    let agentSummary = "";
     // A compiling draft gets exactly one optional polish attempt. Repeated
     // free-form retries after a timeout or gate rejection caused the observed
     // opencode retry loop and add no reliability. Multiple attempts are kept
@@ -798,8 +922,22 @@ export async function polishBodyWithAgent(opts) {
         writeFile(join(workdir, "review.json"), `${JSON.stringify(reviewTemplate, null, 2)}\n`, "utf8"),
       ]);
       const agentStartedAt = Date.now();
-      const run = await runAgent({ backend, bin: agentBin, workdir, model, retryLog, needsTitle, sourceTitle, documentRole, timeoutMs: agentTimeoutMs, signal, onProgress });
+      const run = await runAgent({
+        backend,
+        bin: agentBin,
+        workdir,
+        model,
+        retryLog,
+        needsTitle,
+        sourceTitle,
+        documentRole,
+        idleTimeoutMs: Math.max(10, agentTimeoutMs),
+        hardTimeoutMs: Math.max(agentTimeoutMs, agentHardTimeoutMs),
+        signal,
+        onProgress,
+      });
       agentElapsedMs += Date.now() - agentStartedAt;
+      agentSummary = String(run.summary || "").trim();
       if (!run.ok) {
         warnings.push(`${backend} adjust failed (${run.message || "unknown"})`);
         break;
@@ -840,7 +978,7 @@ export async function polishBodyWithAgent(opts) {
         if (res.log) {
           warnings.push(`${backend} output has non-fatal LaTeX layout warnings: ${res.log}`);
         }
-        return { body, aiTitle: candidateAiTitle, backend, usedAgent: true, compiled: true, attempts, warnings, agentElapsedMs, review };
+        return { body, aiTitle: candidateAiTitle, backend, usedAgent: true, compiled: true, attempts, warnings, agentElapsedMs, review, agentSummary };
       }
       emit(`Compile failed; feeding log back to ${backend}…`);
       retryLog = res.log;
@@ -852,10 +990,10 @@ export async function polishBodyWithAgent(opts) {
     // still receive the verified draft explicitly in the result.
     if (draftVerification.ok) {
       warnings.push(`${backend} polish did not pass after ${attempts} attempt(s); kept verified Pandoc draft`);
-      return { ...base, usedAgent: false, compiled: true, attempts, warnings, agentElapsedMs };
+      return { ...base, usedAgent: false, compiled: true, attempts, warnings, agentElapsedMs, agentSummary };
     }
     warnings.push(`${backend} did not repair the mechanical LaTeX compile failure`);
-    return { ...base, usedAgent: false, compiled: false, attempts, warnings, agentElapsedMs };
+    return { ...base, usedAgent: false, compiled: false, attempts, warnings, agentElapsedMs, agentSummary };
   } finally {
     await rm(workdir, { recursive: true, force: true }).catch(() => {});
   }

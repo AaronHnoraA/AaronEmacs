@@ -8,12 +8,13 @@
 
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import type { Extension } from "@codemirror/state";
+import { inlineMathMarkdownExtension } from "../../../inline-math.ts";
 import { nestingAwareLinkExtension } from "./nested-links.ts";
 
 export function createMarkdownLanguageExtension(): Extension {
   return markdown({
     base: markdownLanguage,
-    extensions: [nestingAwareLinkExtension],
+    extensions: [inlineMathMarkdownExtension, nestingAwareLinkExtension],
   });
 }
 

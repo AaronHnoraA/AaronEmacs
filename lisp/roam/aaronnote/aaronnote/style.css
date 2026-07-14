@@ -2946,6 +2946,17 @@ button:disabled {
   padding-left: 22px;
 }
 
+.aaronnote-task-agent-audit p,
+.aaronnote-task-agent-audit ul {
+  margin: 7px 0 0;
+}
+
+.aaronnote-task-agent-audit ul {
+  max-height: 180px;
+  overflow: auto;
+  padding-left: 22px;
+}
+
 .aaronnote-task-actions {
   justify-content: flex-end;
 }
