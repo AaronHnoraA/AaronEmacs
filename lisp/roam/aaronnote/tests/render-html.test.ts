@@ -86,6 +86,20 @@ y^2
     expect(content?.textContent).toBe("private note");
   });
 
+  test("renders @@comment(true) as an always-visible COMMENT annotation", () => {
+    const html = renderMarkdownHTML("Review @@comment(true) [check **this**].");
+    const root = document.createElement("div");
+    root.innerHTML = html;
+
+    const widget = root.querySelector<HTMLElement>(".inline-comment-display");
+    expect(html).not.toContain("@@comment");
+    expect(widget?.dataset.commentOpen).toBe("true");
+    expect(widget?.getAttribute("role")).toBe("note");
+    expect(widget?.querySelector(".inline-comment-display-label")?.textContent).toBe("COMMENT:");
+    expect(widget?.querySelector(".inline-comment-display-content strong")?.textContent).toBe("this");
+    expect(widget?.querySelector(".org-env-comment-button")).toBeNull();
+  });
+
   test("renders @@cite as stable hydratable HTML without leaking command source", () => {
     const html = renderMarkdownHTML("See @@cite(iso) [Str87; Ive09] {prefix: (; locator: p. 406; suffix: )}.");
     expect(html).not.toContain("@@cite");

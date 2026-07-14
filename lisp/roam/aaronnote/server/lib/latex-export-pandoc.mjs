@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { scanInlineCommands } from "../../shared/command-syntax.mjs";
 import { LATEX_MARKS, latexMark } from "../../shared/latex-marks.mjs";
-import { citeLatex, convertInline, escapeLatexTitle } from "./latex-export.mjs";
+import { citeLatex, convertInline, escapeLatexTitle, isDisplayCommentCommand } from "./latex-export.mjs";
 
 const ENV_MAP = new Map([
   ["definition", "definition"], ["define", "definition"],
@@ -135,6 +135,7 @@ function transformInlineCommands(line, options, context = {}) {
     if (command.fullFrom < cursor) continue;
     out += line.slice(cursor, command.fullFrom);
     if (command.name === "scomment") out += rawLatexInline(`\\sidecomment{${convertInline(command.context, options)}}`);
+    else if (isDisplayCommentCommand(command)) out += rawLatexInline(`\\aaroncomment{${convertInline(command.context, options)}}`);
     else if (command.name === "cite") {
       const citation = citeLatex(command, options);
       if (!citation) {
@@ -312,7 +313,7 @@ function containsSemanticOutline(lines, frontMatterEnd, hiddenKinds) {
     if (begin && hiddenKinds.has(begin.kind)) { hidden = begin.kind; hiddenDepth = 1; continue; }
     const multilinePrivate = multilinePrivateStart(line);
     if (multilinePrivate) { privatePlanning = multilinePrivate.state; continue; }
-    if (PRIVATE_COMMAND_LINE_RE.test(line)) continue;
+    if (privateCommandLine(line)) continue;
     if (semanticCommandOnLine(line)) return true;
   }
   return false;
@@ -338,7 +339,14 @@ function visiblePrivateCommands(line) {
   const protectedRanges = protectedInlineRanges(line);
   return scanInlineCommands(line)
     .filter((command) => PRIVATE_INLINE.has(command.name))
+    .filter((command) => !isDisplayCommentCommand(command))
     .filter((command) => !protectedRanges.some((range) => command.fullFrom >= range.from && command.fullFrom < range.to));
+}
+
+function privateCommandLine(line) {
+  if (!PRIVATE_COMMAND_LINE_RE.test(line)) return false;
+  const command = scanInlineCommands(String(line || "").trim())[0];
+  return !isDisplayCommentCommand(command);
 }
 
 function semanticMarkdownLevel(command) {
@@ -502,7 +510,7 @@ export function preprocessAaronnoteForPandoc(markdown, options = {}) {
       continue;
     }
 
-    if (PRIVATE_COMMAND_LINE_RE.test(line)) {
+    if (privateCommandLine(line)) {
       continue;
     }
     const semantic = semanticCommandOnLine(line);

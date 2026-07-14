@@ -38,6 +38,27 @@ describe("inline @@comment widget", () => {
     }
   });
 
+  test("keeps false collapsed but renders true as a prominent visible comment", () => {
+    const md = "@@comment(false) [private]\n@@comment(true) [check **this**]\nplain";
+    const { editor, cleanup } = mountCM6(md);
+    try {
+      editor.setMarkdownSelection(md.length);
+      const widgets = Array.from(document.querySelectorAll<HTMLElement>(".inline-comment-widget"));
+      const collapsed = widgets.find((widget) => !widget.classList.contains("inline-comment-display"))!;
+      const display = widgets.find((widget) => widget.classList.contains("inline-comment-display"))!;
+
+      expect(collapsed.dataset.commentOpen).toBe("false");
+      expect(collapsed.querySelector<HTMLElement>(".org-env-content")?.hidden).toBe(true);
+      expect(display.dataset.commentOpen).toBe("true");
+      expect(display.getAttribute("role")).toBe("note");
+      expect(display.querySelector(".inline-comment-display-label")?.textContent).toBe("COMMENT:");
+      expect(display.querySelector(".inline-comment-display-content strong")?.textContent).toBe("this");
+      expect(display.querySelector(".org-env-comment-button")).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
   test("shows raw source when the cursor is inside the command", () => {
     const md = "Public text @@comment [private note]\nplain";
     const { editor, cleanup } = mountCM6(md);

@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Inline display comment
+# key: iicomment
+# group: Aaronnote blocks
+# --
+@@comment(true) [$1] $0

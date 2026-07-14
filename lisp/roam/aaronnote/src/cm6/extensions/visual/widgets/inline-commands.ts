@@ -1,7 +1,7 @@
 /**
  * Inline @@command widgets — handles @@todo(status) [text]{args},
  * @@itodo(status) [text]{args},
- * @@tag[name], and @@comment [text]{args}.
+ * @@tag[name], and @@comment(true?) [text]{args}.
  *
  * Uses a ViewPlugin (viewport-scoped) since these are inline decorations
  * (no block:true needed).  When the cursor is inside a command span the
@@ -38,6 +38,13 @@ declare global {
     AaronnoteBibliography?: {
       citationLabel?: (from: number, to: number) => { label: string; title?: string; error?: boolean } | null;
       version?: () => number;
+      mapChanges?: (changes: readonly {
+        from: number;
+        to: number;
+        insertedLength: number;
+        insertedText?: string;
+        deletedText?: string;
+      }[]) => void;
       openCitation?: (from: number, to: number, rect: DOMRect, jump: boolean) => void;
       contextMenu?: (from: number, to: number, x: number, y: number) => void;
     };
@@ -596,9 +603,10 @@ function stopWidgetEventPropagation(event: Event): void {
 /**
  * `@@comment [text]{args}` — a private annotation chip. Mirrors the org-env
  * block comment's dimmed collapsible UI (`org-env-comment-*` classes) but as
- * an inline replace widget instead of a block:true one. The label stays a
- * fixed "comment" placeholder (never a preview of the text) so the hidden
- * content isn't partially leaked before the reader opts to reveal it.
+ * an inline replace widget instead of a block:true one. `@@comment(true)` is
+ * the explicit public/display variant: its body stays visible and is prefixed
+ * with a prominent `COMMENT:` label. Every other switch value, including an
+ * omitted switch, retains the private collapsed behavior.
  */
 class InlineCommentWidget extends MeasuredWidget {
   cmd: InlineCommand;
@@ -608,12 +616,13 @@ class InlineCommentWidget extends MeasuredWidget {
     this.cmd = cmd;
   }
 
-  protected measureKey(): string { return ""; }
+  protected measureKey(): string { return this.cmd.switchValue.toLowerCase(); }
   protected get measuredBlock(): boolean { return false; }
 
   eq(other: InlineCommentWidget): boolean {
     return (
       this.cmd.context === other.cmd.context &&
+      this.cmd.switchValue === other.cmd.switchValue &&
       this.cmd.fullFrom === other.cmd.fullFrom &&
       this.cmd.fullTo === other.cmd.fullTo
     );
@@ -622,13 +631,29 @@ class InlineCommentWidget extends MeasuredWidget {
   toDOM(view: EditorView): HTMLElement {
     const { cmd } = this;
     const context = cmd.context.trim();
+    const display = cmd.switchValue.trim().toLowerCase() === "true";
 
     const wrap = document.createElement("span");
-    wrap.className = "inline-comment-widget inline-command-token";
-    wrap.dataset.commentOpen = "false";
+    wrap.className = display
+      ? "inline-comment-widget inline-comment-display inline-command-token"
+      : "inline-comment-widget inline-command-token";
+    wrap.dataset.commentOpen = display ? "true" : "false";
     wrap.dataset.cmSourceFrom = String(cmd.fullFrom);
     wrap.dataset.cmSourceTo = String(cmd.fullTo);
     wrap.dataset.cmOpenSource = "true";
+
+    if (display) {
+      wrap.setAttribute("role", "note");
+      wrap.setAttribute("aria-label", `Comment: ${context}`);
+      const label = document.createElement("span");
+      label.className = "inline-comment-display-label";
+      label.textContent = "COMMENT:";
+      const content = document.createElement("span");
+      content.className = "inline-comment-display-content";
+      content.innerHTML = context ? inlineTodoBodyHTML(context) : "";
+      wrap.append(label, content);
+      return wrap;
+    }
 
     const button = document.createElement("button");
     button.type = "button";
@@ -1036,6 +1061,25 @@ class TodoPlugin {
 
   update(update: ViewUpdate): void {
     if (update.view.compositionStarted && update.selectionSet && !update.docChanged && !update.viewportChanged) return;
+    if (update.docChanged && window.AaronnoteBibliography?.mapChanges) {
+      const changes: Array<{
+        from: number;
+        to: number;
+        insertedLength: number;
+        insertedText: string;
+        deletedText: string;
+      }> = [];
+      update.changes.iterChanges((from, to, _fromB, _toB, inserted) => {
+        changes.push({
+          from,
+          to,
+          insertedLength: inserted.length,
+          insertedText: inserted.toString(),
+          deletedText: update.startState.doc.sliceString(from, to),
+        });
+      });
+      window.AaronnoteBibliography.mapChanges(changes);
+    }
     if (update.docChanged || update.viewportChanged || hasViewportDecorationRefresh(update)) {
       this.excludedRanges = excludedCommandRanges(update.view);
       this.activeCommandKey = activeInlineCommandKey(update.view);

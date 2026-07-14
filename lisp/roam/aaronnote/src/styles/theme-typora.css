@@ -715,6 +715,47 @@
   display: none !important;
 }
 
+/* `@@comment(true) [...]` is deliberately public: keep it in normal flow and
+   give it the unmistakable review-annotation treatment used in marked PDFs. */
+.inline-comment-widget.inline-comment-display {
+  --display-comment-c: #ec008c;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.42em;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin: 0 0.18em;
+  padding: 0.1em 0.38em 0.13em;
+  border-left: 3px solid var(--display-comment-c);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--display-comment-c), transparent 91%);
+  color: var(--display-comment-c);
+  font-family: var(--aaron-font-body, var(--aaron-font-english, serif), var(--aaron-font-chinese, serif), serif);
+  font-weight: 650;
+  line-height: 1.35;
+  vertical-align: baseline;
+}
+
+.inline-comment-display-label {
+  flex: 0 0 auto;
+  font-family: var(--aaron-font-sans, system-ui, sans-serif);
+  font-size: 0.78em;
+  font-weight: 900;
+  letter-spacing: 0.045em;
+}
+
+.inline-comment-display-content {
+  min-width: 0;
+}
+
+.inline-comment-display-content > :first-child {
+  margin-top: 0;
+}
+
+.inline-comment-display-content > :last-child {
+  margin-bottom: 0;
+}
+
 /* ─── Inline `@@scomment [text]` — an opaque side card anchored to the
    command position. The wide layout is deliberately out-of-flow so it does
    not perturb CodeMirror's height map. ─── */

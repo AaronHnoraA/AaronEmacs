@@ -448,6 +448,7 @@ function commentInlineRule(state: StateInline, silent: boolean): boolean {
   if (silent) return true;
   const token = state.push("comment_inline", "span", 0);
   token.content = cmd.context.trim();
+  token.meta = { display: cmd.switchValue.trim().toLowerCase() === "true" };
   state.pos = start + cmd.fullTo;
   return true;
 }
@@ -483,6 +484,15 @@ function privateInlineRule(state: StateInline, silent: boolean): boolean {
 function renderCommentInline(tokens: Token[], idx: number, _options: unknown, _env: unknown, _renderer: MarkdownIt["renderer"]): string {
   const context = tokens[idx]!.content;
   const body = context ? renderMarkdownInlineHTML(context) : "";
+  const display = Boolean((tokens[idx]!.meta as { display?: boolean } | null)?.display);
+  if (display) {
+    return [
+      '<span class="inline-comment-widget inline-comment-display inline-command-token" data-comment-open="true" role="note">',
+      '<span class="inline-comment-display-label">COMMENT:</span>',
+      `<span class="inline-comment-display-content">${body}</span>`,
+      "</span>",
+    ].join("");
+  }
   return [
     '<span class="inline-comment-widget inline-command-token" data-comment-open="false">',
     '<span class="org-env-comment-button" aria-expanded="false">',

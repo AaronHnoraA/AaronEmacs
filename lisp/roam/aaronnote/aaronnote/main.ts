@@ -83,6 +83,16 @@ import {
   citeNamespaceCompletionPrefix,
   citeNamespaceRenderPrefix,
 } from "./bibliography-completion.ts";
+import {
+  alignBibliographyCitationRanges,
+  bibliographyChangesRequireResolution,
+  bibliographyResolutionState,
+  mapBibliographyRangesThroughChanges,
+  mapBibliographyWatchRangesThroughChanges,
+  type BibliographyCommandRange,
+  type BibliographyTextChange,
+  type BibliographyWatchRange,
+} from "./bibliography-state.ts";
 import type { CursorPosition, NoteSummary, SnippetSummary } from "./types.ts";
 import { createVimLite, type VimLiteKey, type VimLiteMode } from "./vim-lite.ts";
 import { ceilCommandGeneratedId, ceilLanguageForKernel } from "../src/cm6/extensions/visual/widgets/ceil-shared.ts";
@@ -897,7 +907,7 @@ const editor = createEditor(host, {
     updateTitle();
     changeHandlers.forEach((handler) => handler());
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
-    scheduleBibliographyRefresh();
+    if (bibliographyResolutionDirty) scheduleBibliographyRefresh();
     if (!currentReadOnly) scheduleSave();
     scheduleWritingStats(true);
     if (!applyingContent && !currentReadOnly) {
@@ -920,10 +930,28 @@ writingStatsController = createWritingStatsController(editor, writingStatsLabel)
 
 let bibliographyModel: BibliographyDocument = { ok: true, entries: [], references: [], citations: [], namespaces: [] };
 let bibliographyModelKey = "";
+let bibliographyModelCommands: BibliographyCommandRange[] = [];
+let bibliographyWatchRanges: BibliographyWatchRange[] = [];
+let bibliographyResolutionDirty = false;
 let bibliographyRenderVersion = 0;
 let bibliographyRequestSeq = 0;
 let bibliographyHighlightTimer = 0;
 const bibliographyTimer = new CoalescedTimer(180);
+
+function syncBibliographyRanges(changes: readonly BibliographyTextChange[]): void {
+  // This callback runs inside the CodeMirror view update, before decorations
+  // and the public onChange callback. Keep positions synchronous for a stable
+  // label, but only mark semantic edits for the trailing full-document scan.
+  if (bibliographyChangesRequireResolution(changes, bibliographyWatchRanges)) {
+    bibliographyResolutionDirty = true;
+  }
+  mapBibliographyRangesThroughChanges(
+    bibliographyModel,
+    bibliographyModelCommands,
+    changes,
+  );
+  mapBibliographyWatchRangesThroughChanges(bibliographyWatchRanges, changes);
+}
 
 function citationAtRange(from: number, to: number): BibliographyCitation | undefined {
   return (bibliographyModel.citations ?? []).find((cite) => cite.from === from && cite.to === to);
@@ -1016,22 +1044,42 @@ function refreshBibliographyDecorations(): void {
 }
 
 async function refreshBibliography(force = false): Promise<void> {
+  bibliographyResolutionDirty = false;
   const content = editor.getMarkdown();
-  if (!/@@cite\b/i.test(content)) {
+  const state = bibliographyResolutionState(content);
+  const key = `${currentFile}\n${state.key}`;
+  if (!state.hasCitationSyntax) {
     bibliographyRequestSeq += 1;
+    const changed = bibliographyModelKey !== key
+      || (bibliographyModel.citations?.length ?? 0) > 0
+      || (bibliographyModel.references?.length ?? 0) > 0
+      || (bibliographyModel.diagnostics?.length ?? 0) > 0;
     bibliographyModel = { ok: true, entries: [], references: [], citations: [], namespaces: [] };
-    bibliographyModelKey = "";
-    refreshBibliographyDecorations();
+    bibliographyModelKey = key;
+    bibliographyModelCommands = [];
+    bibliographyWatchRanges = state.watchRanges;
+    if (changed) refreshBibliographyDecorations();
     return;
   }
-  const key = `${currentFile}\n${content}`;
-  if (!force && key === bibliographyModelKey) return;
+  if (!force && key === bibliographyModelKey) {
+    const changed = alignBibliographyCitationRanges(bibliographyModel, bibliographyModelCommands, state.commands);
+    bibliographyModelCommands = state.commands;
+    bibliographyWatchRanges = state.watchRanges;
+    if (changed) refreshBibliographyDecorations();
+    return;
+  }
   const requestSeq = ++bibliographyRequestSeq;
   try {
     const nextModel = await api.bibliography.document({ file: currentFile, content });
-    if (requestSeq !== bibliographyRequestSeq || key !== `${currentFile}\n${editor.getMarkdown()}`) return;
+    const currentContent = editor.getMarkdown();
+    const currentState = bibliographyResolutionState(currentContent);
+    const currentKey = `${currentFile}\n${currentState.key}`;
+    if (requestSeq !== bibliographyRequestSeq || key !== currentKey) return;
+    alignBibliographyCitationRanges(nextModel, state.commands, currentState.commands);
     bibliographyModel = nextModel;
     bibliographyModelKey = key;
+    bibliographyModelCommands = currentState.commands;
+    bibliographyWatchRanges = currentState.watchRanges;
     const diagnostics = bibliographyDiagnosticTexts(nextModel.diagnostics);
     if (diagnostics.length > 0) {
       const more = diagnostics.length > 1 ? ` (+${diagnostics.length - 1} more)` : "";
@@ -1039,8 +1087,17 @@ async function refreshBibliography(force = false): Promise<void> {
     }
   } catch (error) {
     if (requestSeq !== bibliographyRequestSeq) return;
+    const currentContent = editor.getMarkdown();
+    const currentState = bibliographyResolutionState(currentContent);
+    const currentKey = `${currentFile}\n${currentState.key}`;
+    if (key !== currentKey) return;
     bibliographyModel = { ok: false, entries: [], references: [], citations: [], namespaces: [], message: error instanceof Error ? error.message : "Bibliography failed" };
-    bibliographyModelKey = "";
+    // Cache failures by resolution input as well. Unrelated typing must not
+    // hammer a failing bibliography endpoint; a citation/meta edit, explicit
+    // refresh, or bibliography-index event will retry it.
+    bibliographyModelKey = key;
+    bibliographyModelCommands = currentState.commands;
+    bibliographyWatchRanges = currentState.watchRanges;
     setStatus(bibliographyModel.message || "Bibliography failed");
   }
   refreshBibliographyDecorations();
@@ -1296,6 +1353,7 @@ function showReferenceContextMenu(ref: BibliographyReference, x: number, y: numb
 window.AaronnoteBibliography = {
   citationLabel,
   version: () => bibliographyRenderVersion,
+  mapChanges: syncBibliographyRanges,
   openCitation: openCitationFromWidget,
   contextMenu: showCitationContextMenu,
 };

@@ -133,6 +133,11 @@ export function citeLatex(command, options = {}) {
   return citationSuffixJoin(prefixed, String(args.suffix || "").trim());
 }
 
+export function isDisplayCommentCommand(command) {
+  return command?.name === "comment"
+    && String(command.switchValue || "").trim().toLowerCase() === "true";
+}
+
 export function convertInline(text, options = {}) {
   const source = String(text ?? "").trim();
   const annotations = scanInlineCommands(source)
@@ -151,6 +156,8 @@ export function convertInline(text, options = {}) {
       flushPlain();
       if (annotation.name === "scomment") {
         latex += `\\sidecomment{${convertInline(annotation.context, options)}}`;
+      } else if (isDisplayCommentCommand(annotation)) {
+        latex += `\\aaroncomment{${convertInline(annotation.context, options)}}`;
       } else if (annotation.name === "cite") {
         latex += citeLatex(annotation, options);
       } else if (annotation.name === "latexmk" && annotation.switchValue.toLowerCase() === "newline") {
@@ -186,6 +193,7 @@ function isPrivateAnnotationLine(line) {
   const command = scanInlineCommands(trimmed)[0];
   return Boolean(command
     && (command.name === "todo" || command.name === "itodo" || command.name === "comment")
+    && !isDisplayCommentCommand(command)
     && command.fullFrom === 0
     && command.fullTo === trimmed.length);
 }
@@ -571,6 +579,7 @@ export function latexMacrosPackage(macros, features = {}) {
     "\\RequirePackage{footnote}",
     "\\RequirePackage{needspace}",
     "\\RequirePackage[normalem]{ulem}",
+    "\\RequirePackage{xcolor}",
     features.usesTikz ? "\\RequirePackage{tikz}" : "",
     String.raw`% Pandoc body compatibility
 \makeatletter
@@ -581,6 +590,10 @@ export function latexMacrosPackage(macros, features = {}) {
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0.2em}\setlength{\parskip}{0pt}}
 \providecommand{\st}[1]{\sout{#1}}
+\providecolor{AaronDisplayComment}{HTML}{EC008C}
+\providecommand{\aaroncomment}[1]{%
+  \textcolor{AaronDisplayComment}{\textbf{COMMENT:}\nobreakspace #1}%
+}
 \newsavebox{\AaronPandocBox}
 \providecommand{\pandocbounded}[1]{%
   \sbox{\AaronPandocBox}{#1}%

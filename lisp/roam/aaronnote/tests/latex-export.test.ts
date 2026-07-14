@@ -429,6 +429,8 @@ describe("LaTeX export", () => {
     expect(macros).toContain("\\renewcommand{\\rank}{\\operatorname{rank}}");
     expect(macros).toContain("\\providecommand{\\ip}[2]{}");
     expect(macros).toContain("\\providecommand{\\sidecomment}");
+    expect(macros).toContain("\\providecommand{\\aaroncomment}");
+    expect(macros).toContain("COMMENT:");
   });
 
   test("omits Aaronnote todos from exported body", () => {
@@ -483,6 +485,7 @@ describe("LaTeX export", () => {
       "# Main",
       "",
       "@@comment [a private annotation line]",
+      "@@comment(false) [also private]",
       "",
       "Visible text. @@comment [hidden aside] More text.",
       "",
@@ -493,6 +496,18 @@ describe("LaTeX export", () => {
     expect(result.body).not.toContain("comment");
     expect(result.body).not.toContain("private annotation");
     expect(result.body).not.toContain("hidden aside");
+    expect(result.body).not.toContain("also private");
+  });
+
+  test("exports @@comment(true) as a prominent COMMENT annotation", () => {
+    const source = String.raw`Visible @@comment(true) [Check **non-degenerate** \(u,v,w\).] text.`;
+    const mechanical = aaronnoteMarkdownToLatex(source);
+    const prepared = preprocessAaronnoteForPandoc(source);
+
+    expect(mechanical.body).toContain(String.raw`\aaroncomment{Check \textbf{non-degenerate} \(u,v,w\).}`);
+    expect(prepared.markdown).toContain(String.raw`\aaroncomment{Check \textbf{non-degenerate} \(u,v,w\).}`);
+    expect(mechanical.body).toContain("Visible");
+    expect(mechanical.body).toContain("text.");
   });
 
   test("converts @@scomment and reports the required LaTeX feature", () => {

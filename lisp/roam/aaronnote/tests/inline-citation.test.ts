@@ -2,12 +2,47 @@ import { afterEach, describe, expect, test } from "@voidzero-dev/vite-plus-test"
 
 import { createEditor } from "../src/editor-api.ts";
 import { refreshViewportDecorationsNow } from "../src/cm6/viewport-refresh.ts";
+import {
+  bibliographyResolutionState,
+  mapBibliographyRangesThroughChanges,
+} from "../aaronnote/bibliography-state.ts";
 
 afterEach(() => {
   delete window.AaronnoteBibliography;
 });
 
 describe("inline citation widget", () => {
+  test("keeps a resolved widget while typing before the citation", () => {
+    const citation = "@@cite(iso) [Str87] {locator: p. 406}";
+    const markdown = `Contracting T here.\nSpace construction ${citation}.`;
+    const commands = bibliographyResolutionState(markdown).commands;
+    const model = { citations: [{ from: commands[0]!.from, to: commands[0]!.to }] };
+    window.AaronnoteBibliography = {
+      version: () => 1,
+      mapChanges: (changes) => { mapBibliographyRangesThroughChanges(model, commands, changes); },
+      citationLabel: (from, to) => model.citations.some((item) => item.from === from && item.to === to)
+        ? { label: "[1, p. 406]" }
+        : { label: "[?]", error: true },
+    };
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const editor = createEditor(host, {
+      kernel: "cm6",
+      initialContent: markdown,
+    });
+    try {
+      expect(host.querySelector(".inline-cite-label")?.textContent).toBe("[1, p. 406]");
+      const insertAt = markdown.indexOf("here");
+      editor.setMarkdownSelection(insertAt);
+      editor.insertText("asda ");
+      expect(host.querySelector(".inline-cite-label")?.textContent).toBe("[1, p. 406]");
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
+
   test("re-renders immediately when the server-backed bibliography model changes", () => {
     const citation = "@@cite(iso) [Str87] {locator: p. 406}";
     const markdown = `Text ${citation}.\n\nNext paragraph.`;
