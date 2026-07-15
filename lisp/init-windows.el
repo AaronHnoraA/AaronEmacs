@@ -539,6 +539,19 @@ Relies on `winner-mode' (enabled below) to undo a prior delete."
 
 ;;; Buffer management helpers
 
+(defun my/window-skip-xwidget-fallback-p (_window buffer bury-or-kill)
+  "Return non-nil when automatic fallback should skip xwidget BUFFER.
+BURY-OR-KILL is non-nil when `switch-to-prev-buffer' is replacing a
+buffer that is being buried, killed, or quit.  Keep xwidget buffers
+available to explicit buffer-switching commands."
+  (and bury-or-kill
+       (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (derived-mode-p 'xwidget-webkit-mode))))
+
+(setopt switch-to-prev-buffer-skip
+        #'my/window-skip-xwidget-fallback-p)
+
 (defun my/kill-buffer-dwim ()
   "Kill the current buffer, or if it's a special/read-only buffer, bury it."
   (interactive)
