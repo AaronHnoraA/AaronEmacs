@@ -464,6 +464,44 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
     if (view.dom.isConnected) view.requestMeasure();
   });
 
+  type PointerScrollSnapshot = {
+    hostTop: number;
+    hostLeft: number;
+    editorTop: number;
+    editorLeft: number;
+    windowX: number;
+    windowY: number;
+  };
+
+  const capturePointerScroll = (): PointerScrollSnapshot => ({
+    hostTop: host.scrollTop,
+    hostLeft: host.scrollLeft,
+    editorTop: view.scrollDOM.scrollTop,
+    editorLeft: view.scrollDOM.scrollLeft,
+    windowX: window.scrollX || 0,
+    windowY: window.scrollY || 0,
+  });
+
+  const restorePointerScroll = (snapshot: PointerScrollSnapshot): void => {
+    if (!view.dom.isConnected) return;
+    host.scrollTop = snapshot.hostTop;
+    host.scrollLeft = snapshot.hostLeft;
+    view.scrollDOM.scrollTop = snapshot.editorTop;
+    view.scrollDOM.scrollLeft = snapshot.editorLeft;
+    window.scrollTo(snapshot.windowX, snapshot.windowY);
+  };
+
+  const preservePointerScrollThroughLayout = (snapshot: PointerScrollSnapshot): void => {
+    // Opening a replacement widget changes CM6's height map.  Restore only
+    // across the two layout frames belonging to this click; no scroll listener
+    // or polling remains active afterwards.
+    restorePointerScroll(snapshot);
+    window.requestAnimationFrame(() => {
+      restorePointerScroll(snapshot);
+      window.requestAnimationFrame(() => restorePointerScroll(snapshot));
+    });
+  };
+
   const onSourceWidgetMouseDown = (event: MouseEvent): void => {
     if (event.button !== 0 || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) {
       return;
@@ -492,11 +530,16 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
+    const scroll = capturePointerScroll();
     const anchor = mathBlock
       ? mathBlockSourceAnchor(view.state.doc.toString(), from, to)
       : sourceAnchorForClick(source, event, from, to);
-    view.dispatch({ selection: { anchor }, scrollIntoView: true });
-    view.focus();
+    // The pointer already identifies visible content.  Asking CM6 to reveal
+    // the new source cursor scrolls the old viewport while the replacement
+    // widget is expanding, which is both unnecessary and disorienting.
+    view.dispatch({ selection: { anchor } });
+    view.contentDOM.focus({ preventScroll: true });
+    preservePointerScrollThroughLayout(scroll);
     flashCaret();
   };
   view.contentDOM.addEventListener("mousedown", onSourceWidgetMouseDown, { capture: true });

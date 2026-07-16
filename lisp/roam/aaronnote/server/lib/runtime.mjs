@@ -172,6 +172,11 @@ const AGENDA_PAYLOAD_CACHE_LIMIT = 32;
 const CURRENT_DB_SCHEMA = 1;
 const ASSET_CLEANUP_SCHEMA = 2;
 const ROAM_FULL_SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+// Autosave is debounced at 650 ms in the client.  Even at the impossible
+// ceiling of one successful write every 650 ms for 24 hours, this sample rate
+// yields 2.66 automatic drains/day in expectation.  Real writing produces far
+// fewer saves.  A miss only leaves the already-deduplicated Set queue intact.
+const ROAM_SAVE_SYNC_SAMPLE_RATE = 1 / 50_000;
 const scanConcurrency = Math.max(1, Math.min(64, Number(process.env.AARONNOTE_SCAN_CONCURRENCY) || 16));
 const saveRequestVersions = new Map();
 const saveWriteQueues = new Map();
@@ -7374,11 +7379,25 @@ export function runtimeDebugSnapshot() {
   };
 }
 
-// Historical name kept for existing call sites. This deliberately does not
-// arm `roamSyncTimer`: note writes only accumulate changed files, and the
-// queue is drained by an explicit/manual syncRoamDb() call.
+// Historical name kept for existing call sites. Writes only accumulate changed
+// files here; explicit/manual sync and the very-low-rate save sampler below are
+// the only paths that drain the queue.
 function scheduleRoamDbSync(notes, changedFile) {
   queueRoamDbSync(notes, changedFile ? [changedFile] : []);
+}
+
+export function saveSamplesRoamDbSync(sample = Math.random()) {
+  return Number.isFinite(sample) && sample >= 0 && sample < ROAM_SAVE_SYNC_SAMPLE_RATE;
+}
+
+function maybeSyncRoamDbAfterSave() {
+  if (!saveSamplesRoamDbSync()) return;
+  // syncRoamDb atomically drains the queued Set and serializes with an existing
+  // sync.  Do not await it: the rare maintenance branch must not add latency to
+  // the save response.
+  void syncRoamDb().catch((err) => {
+    console.error("[roam-sync] sampled save sync failed:", err?.message || err);
+  });
 }
 
 export async function deleteNote(body) {
@@ -7989,10 +8008,12 @@ export async function saveNote(body) {
   if (refresh === "deferred") {
     markNotesDirty(file);
     scheduleRoamDbSync(null, file);
+    maybeSyncRoamDbAfterSave();
     return { type: "saved", ok: true, file, message: "Saved", note: await noteSummaryForFile(file, content), kind: kindFromContent(content), notesRefresh: "deferred", standalone: false, mtimeMs: wrote.mtimeMs, size: wrote.size };
   }
   const notes = await scanNotes();
   scheduleRoamDbSync(notes, file);
+  maybeSyncRoamDbAfterSave();
   return { type: "saved", ok: true, file, message: "Saved", notes, notesRefresh: "full", standalone: false, mtimeMs: wrote.mtimeMs, size: wrote.size };
 }
 

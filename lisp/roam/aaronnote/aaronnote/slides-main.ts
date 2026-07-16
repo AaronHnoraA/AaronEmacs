@@ -2,6 +2,7 @@
 // main.ts, slide-deck.ts, Editor, Jupyter, cursor state, or mirror APIs.
 import "../src/styles/widgets.css";
 import "../src/styles/theme-typora.css";
+import "../src/styles/typography.css";
 import "./style.css";
 
 import { setKatexMacros } from "../src/katex-macros.ts";

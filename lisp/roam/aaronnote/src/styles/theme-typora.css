@@ -9,20 +9,22 @@
  */
 
 .cm-editor {
-  font-family: var(--aaron-font-body, var(--aaron-font-english, serif), var(--aaron-font-chinese, serif), serif);
-  font-size: calc(20px * var(--aaronnote-layout-zoom, 1));
-  line-height: 1.46;
   color: var(--aaron-ink, #24201a);
   word-wrap: break-word;
   font-kerning: normal;
-  text-rendering: optimizeLegibility;
-  font-feature-settings: "kern" 1, "liga" 1, "onum" 1;
   --note-image-max: 420px;
   --note-table-image-max: 180px;
   --note-table-image-max-height: 160px;
   --note-diagram-max: 480px;
   --orgenv-pad-left: 0.88rem;
   --orgenv-head-size: 0.9em;
+}
+
+.cm-editor:not(.aaronnote-visual-typography) {
+  font-family: var(--aaron-font-body, var(--aaron-font-english, serif), var(--aaron-font-chinese, serif), serif);
+  font-size: calc(20px * var(--aaronnote-layout-zoom, 1));
+  line-height: 1.46;
+  font-feature-settings: "kern" 1, "liga" 1, "onum" 1;
 }
 
 /* ─── headings ───────────────────────────────────────────────────── */
@@ -191,12 +193,11 @@
 
 /* ─── paragraphs ─────────────────────────────────────────────────── */
 .cm-editor p {
-  margin: 0 0 0.48em;
+  margin: 0;
   text-align: left;
   white-space: pre-wrap;
 }
 .cm-editor p:last-child { margin-bottom: 0; }
-.cm-editor math-block + math-block { margin-top: -0.08em; }
 
 /* ─── links ──────────────────────────────────────────────────────── */
 .cm-editor a {
@@ -317,17 +318,17 @@
   --block-c: var(--c-env-default, #a7b0c4);
   --block-l: attr(data-label);
   display: block;
-  margin: 0.56rem 0;
+  margin: 0;
   overflow: visible;
   border: 0;
   border-left: 3px solid color-mix(in srgb, var(--block-c), transparent 22%);
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-  padding: 0.12rem 0 0.16rem var(--orgenv-pad-left);
+  padding: 0 0 0 var(--orgenv-pad-left);
   white-space: pre-wrap;
   color: var(--aaron-ink, #24201a);
-  font-family: var(--aaron-font-body, var(--aaron-font-english, serif), var(--aaron-font-chinese, serif), serif);
+  font-family: inherit;
 }
 
 .cm-editor org-env-block .org-env-heading {
@@ -613,7 +614,7 @@
   border-radius: 10px;
   background: var(--aaron-panel, #232b3d);
   box-shadow: var(--aaron-shadow, 0 18px 46px rgb(0 0 0 / 38%));
-  font-family: var(--aaron-font-body, var(--aaron-font-english, serif), var(--aaron-font-chinese, serif), serif);
+  font-family: var(--aaron-font-prose, var(--aaron-font-body, serif));
 }
 
 .cm-editor org-env-block[data-kind="comment"] .org-env-content[hidden] {
@@ -707,7 +708,7 @@
   border-radius: 8px;
   background: var(--aaron-panel, #232b3d);
   box-shadow: var(--aaron-shadow, 0 18px 46px rgb(0 0 0 / 38%));
-  font: 400 0.86em/1.4 var(--aaron-font-body, var(--aaron-font-english, serif), var(--aaron-font-chinese, serif), serif);
+  font: 400 0.86em/1.4 var(--aaron-font-prose, var(--aaron-font-body, serif));
   white-space: normal;
 }
 
@@ -730,7 +731,7 @@
   border-radius: 4px;
   background: color-mix(in srgb, var(--display-comment-c), transparent 91%);
   color: var(--display-comment-c);
-  font-family: var(--aaron-font-body, var(--aaron-font-english, serif), var(--aaron-font-chinese, serif), serif);
+  font-family: var(--aaron-font-prose, var(--aaron-font-body, serif));
   font-weight: 650;
   line-height: 1.35;
   vertical-align: baseline;
@@ -931,13 +932,6 @@
 }
 
 /* ─── CM6 kernel: Paper-theme equivalents ────────────────────────── */
-/* Root typography (extends widgets.css base) */
-.cm-editor {
-  font-family: var(--aaron-font-body, var(--aaron-font-english, serif), var(--aaron-font-chinese, serif), serif);
-  font-size: calc(20px * var(--aaronnote-layout-zoom, 1));
-  color: var(--aaron-ink, #24201a);
-}
-
 /* Heading refinements beyond the size scale in widgets.css */
 .cm-editor .cm-md-h1 {
   font-family: var(--aaron-font-heading);

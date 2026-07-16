@@ -305,8 +305,8 @@ should reload/review instead of forcing an overwrite.
 
 Agenda writes mark the file dirty and enqueue its path for Roam DB sync, but
 they do not start an automatic git commit or background DB rebuild. The queue
-is drained by the next explicit/manual sync (`syncRoamDb`), preserving the
-"collect changes until sync" workflow.
+is drained by the next explicit/manual sync (`syncRoamDb`) or a very-low-rate
+sampled editor save, preserving the "collect changes until sync" workflow.
 
 ## Completion
 

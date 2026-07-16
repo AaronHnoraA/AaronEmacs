@@ -2905,14 +2905,18 @@ function selectionTouchesRange(state: EditorState, from: number, to: number): bo
   return sel.from < to && sel.to > from;
 }
 
+function orgEnvCloseBoundaryActive(state: EditorState, block: OrgEnvBlock): boolean {
+  return selectionTouchesRange(state, block.closeFrom, block.closeTo)
+    && state.selection.main.from > block.closeFrom;
+}
+
 function addOrgEnvBoundaryDecos(
   decos: CMRange<Decoration>[],
   state: EditorState,
   block: OrgEnvBlock,
 ): void {
   const openActive = selectionTouchesRange(state, block.openFrom, block.openTo);
-  const closeActive = selectionTouchesRange(state, block.closeFrom, block.closeTo)
-    && state.selection.main.from > block.closeFrom;
+  const closeActive = orgEnvCloseBoundaryActive(state, block);
 
   if (!openActive) {
     decos.push(
@@ -2982,6 +2986,31 @@ const dirtyTikzBlocksField = StateField.define<ReadonlySet<string>>({
 
 function orgEnvBlocksFromState(state: EditorState): readonly OrgEnvBlock[] {
   return state.field(orgEnvBlocksField, false) ?? scanOrgEnvBlocks(state.doc.toString(), 0, 0, blockExtraExcludedRanges(state));
+}
+
+export interface OrgEnvHeadingRange {
+  from: number;
+  to: number;
+  anchor: number;
+}
+
+const orgEnvHeadingRangeCache = new WeakMap<readonly OrgEnvBlock[], readonly OrgEnvHeadingRange[]>();
+
+/** Cached source ranges for org-environment headings replaced in Visual mode. */
+export function getOrgEnvHeadingRanges(state: EditorState): readonly OrgEnvHeadingRange[] {
+  const blocks = state.field(orgEnvBlocksField, false);
+  if (!blocks) return [];
+  const cached = orgEnvHeadingRangeCache.get(blocks);
+  if (cached) return cached;
+  const ranges = blocks
+    .filter((block) => !["meta", "html", "tikz", "comment", "fold"].includes(block.kind))
+    .map((block) => ({
+      from: block.openFrom,
+      to: block.openTo,
+      anchor: block.titleAnchor,
+    }));
+  orgEnvHeadingRangeCache.set(blocks, ranges);
+  return ranges;
 }
 
 function canMapOrgEnvBlocks(doc: Text, blocks: readonly OrgEnvBlock[], changes: ChangeSet): boolean {
@@ -3141,13 +3170,18 @@ class OrgEnvRailPlugin {
     const next = document.createDocumentFragment();
     for (const rail of rails) {
       if (rail.height <= 0) continue;
+      // Blank lines around semantic environments are intentionally absorbed
+      // by the typography engine.  Inset the overlay itself so neighbouring
+      // blocks remain visually distinct without putting those blank lines
+      // (and their scroll cost) back into CodeMirror's height map.
+      const verticalInset = Math.min(6, rail.height / 4);
       const div = document.createElement("div");
       div.className = "cm-org-env-rail";
       div.dataset.orgEnvKind = rail.kind;
       div.dataset.orgEnvDepth = String(rail.depth);
       div.style.left = `${rail.left}px`;
-      div.style.top = `${rail.top}px`;
-      div.style.height = `${rail.height}px`;
+      div.style.top = `${rail.top + verticalInset}px`;
+      div.style.height = `${Math.max(1, rail.height - verticalInset * 2)}px`;
       next.append(div);
     }
     this.layer.replaceChildren(next);
@@ -3519,7 +3553,7 @@ function activeBlockExtraKey(state: EditorState): string {
     if (selectionTouchesRange(state, block.openFrom, block.openTo)) {
       parts.push(`org-open:${block.openFrom}:${block.openTo}:${block.from}:${block.to}`);
     }
-    if (selectionTouchesRange(state, block.closeFrom, block.closeTo)) {
+    if (orgEnvCloseBoundaryActive(state, block)) {
       parts.push(`org-close:${block.closeFrom}:${block.closeTo}:${block.from}:${block.to}`);
     }
   }

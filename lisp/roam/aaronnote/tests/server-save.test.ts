@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "@voidzero-dev/vite-plus-test";
+import { afterEach, describe, expect, test, vi } from "@voidzero-dev/vite-plus-test";
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
 import { configure } from "../server/lib/state.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
-import { getTodos, notesIndexPayload, queueRoamDbSync, readNote, roamNotesIndexPayload, runtimeDebugSnapshot } from "../server/lib/index.mjs";
+import { getTodos, notesIndexPayload, queueRoamDbSync, readNote, roamNotesIndexPayload, runtimeDebugSnapshot, saveSamplesRoamDbSync } from "../server/lib/index.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
 import { saveNote } from "../server/lib/save.mjs";
 // @ts-ignore The server is a Node ESM module outside the TS app graph.
@@ -40,6 +40,13 @@ async function setupRoot() {
 }
 
 describe("server save API", () => {
+  test("save DB-sync sampling uses the calibrated one-in-50000 boundary", () => {
+    expect(saveSamplesRoamDbSync(0)).toBe(true);
+    expect(saveSamplesRoamDbSync((1 / 50_000) - Number.EPSILON)).toBe(true);
+    expect(saveSamplesRoamDbSync(1 / 50_000)).toBe(false);
+    expect(saveSamplesRoamDbSync(1)).toBe(false);
+  });
+
   test("deferred save returns the current note summary without a full notes list", async () => {
     const { notes } = await setupRoot();
     const file = join(notes, "a.md");
@@ -183,7 +190,7 @@ describe("server save API", () => {
       .toEqual([["done", "second"]]);
   });
 
-  test("deferred save does not auto-sync or auto-commit roam db", async () => {
+  test("a deferred save that misses the sample only queues roam db work", async () => {
     const { root, notes } = await setupRoot();
     await git(root, ["init"]);
     await git(root, ["config", "user.email", "test@example.com"]);
@@ -194,19 +201,24 @@ describe("server save API", () => {
     await git(root, ["commit", "-m", "initial"]);
     const base = await stat(file);
 
-    const saved = await saveNote({
-      file,
-      content: "# A\n\nNo auto commit\n",
-      clientId: "test",
-      seq: 1,
-      baseMtimeMs: base.mtimeMs,
-      refresh: "deferred",
-    }) as { ok?: boolean };
-    expect(saved.ok).toBe(true);
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    try {
+      const saved = await saveNote({
+        file,
+        content: "# A\n\nNo auto commit\n",
+        clientId: "test",
+        seq: 1,
+        baseMtimeMs: base.mtimeMs,
+        refresh: "deferred",
+      }) as { ok?: boolean };
+      expect(saved.ok).toBe(true);
 
-    await new Promise((resolve) => setTimeout(resolve, 2100));
-    expect(await git(root, ["rev-list", "--count", "HEAD"])).toBe("1");
-    expect(await git(root, ["status", "--porcelain", "--", "."])).toContain("roam/a.md");
+      await new Promise((resolve) => setTimeout(resolve, 2100));
+      expect(await git(root, ["rev-list", "--count", "HEAD"])).toBe("1");
+      expect(await git(root, ["status", "--porcelain", "--", "."])).toContain("roam/a.md");
+    } finally {
+      random.mockRestore();
+    }
   });
 
   test("creating a roam node queues db sync without committing immediately", async () => {

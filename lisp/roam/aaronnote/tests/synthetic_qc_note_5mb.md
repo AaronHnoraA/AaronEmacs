@@ -1593,6 +1593,11 @@ Hidden content.
 
 locality of endomorphism rings forces at least one component map to be
 invertible. This identifies one matching pair of summands. Removing that this is h   this is hard to sse ta 
+
+
+hhhhhhh hhhh this is good to see 
+
+
 pair and applying induction proves the result.
 #+end proof
 
@@ -97684,7 +97689,7 @@ invertible. This identifies one matching pair of summands. Removing that
 pair and applying induction proves the result.
 #+end proof
 
-中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
+中文直觉��如果整体分解成不可再拆的小块，那么同构不能把“小块类型”凭空改变，只能重排。
 
 ## 179.7. Measurement statistics
 
@@ -227334,7 +227339,7 @@ Coordinates are useful for computation because they give arrays of field
 elements. Invariance is useful for mathematics because it identifies the
 features of the object that do not depend on the chosen basis.
 
-中文直觉：坐标是“输入格式”，不变量是“结构本身留下的影子”。
+中文直觉：坐标是“输入格式”，不变量是“结构本身留��的影子”。
 #+end remark
 
 If \(g \in \operatorname{GL}(V)\) and \(h \in \operatorname{GL}(W)\), a change

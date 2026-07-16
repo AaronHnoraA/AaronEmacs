@@ -19,3 +19,9 @@ The architecture review and migration matrix are in:
 The raw-ZMQ Jupyter transport includes code ported from microsoft/vscode-jupyter
 under the MIT License; its existing source notices remain in the relevant
 files.
+
+The bundled AaronLatinModernRoman prose webfonts are Latin-only subsets of
+Latin Modern Roman version 2.005, copyright 2003--2021 B. Jackowski and
+J.M. Nowacki (on behalf of TeX Users Groups), based on Donald E. Knuth's
+Computer Modern family. They are distributed under the GUST Font License; see
+src/styles/fonts/GUST-FONT-LICENSE.txt and src/styles/fonts/README.md.

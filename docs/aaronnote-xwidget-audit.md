@@ -149,7 +149,7 @@ New ERT test: `my/aaronnote-process-filter-ignores-stale-proc-ready-line` — as
 
 ### Verified false alarms (excluded)
 
-- **Roam sync never schedules** — `queueRoamDbSync` is the accumulator by design; `syncRoamDb` is triggered on demand via the `aaronnote:api:notes:roam-sync` channel (`web-host.mjs:396`).
+- **Roam sync is not debounce-scheduled** — `queueRoamDbSync` is the accumulator by design; `syncRoamDb` is normally triggered on demand via the `aaronnote:api:notes:roam-sync` channel, with a calibrated one-in-50,000 editor-save sample as a low-rate fallback.
 - **Activity hooks duplicate on restart** — already guarded by `my/aaronnote--activity-hooks-installed` (Pass 1).
 
 ### Out of scope (verified safe)

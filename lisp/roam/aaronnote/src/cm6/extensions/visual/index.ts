@@ -25,9 +25,11 @@ import {
 } from "./widgets/note-code.ts";
 import { taskListExtension } from "./widgets/task-list.ts";
 import { pointerSelectionExtension } from "./selection.ts";
+import { visualTypographyExtension } from "./typography.ts";
 
 export function createVisualMarkdownExtensions(): Extension {
   return [
+    visualTypographyExtension,
     pointerSelectionExtension,
     blockMathRangesExtension,
     livePreviewExtension,

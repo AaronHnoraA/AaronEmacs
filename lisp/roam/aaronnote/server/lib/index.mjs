@@ -43,6 +43,7 @@ export {
   readNoteCodeRegion,
   syncRoamDb,
   queueRoamDbSync,
+  saveSamplesRoamDbSync,
   runtimeDebugSnapshot,
   maybeScheduleWeeklyFullSync,
   fileHistory,

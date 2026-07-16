@@ -5,6 +5,8 @@ import {
   graphemeEndPosition,
   previousGraphemePosition,
 } from "../src/cm6/text-boundaries.ts";
+import { getBlockMathRanges } from "../src/cm6/math-ranges.ts";
+import { getOrgEnvHeadingRanges } from "../src/cm6/extensions/visual/widgets/block-extras.ts";
 import {
   applyVimJump,
   beginVimJump,
@@ -293,6 +295,110 @@ function moveDocumentLine(
   return { kind: "column", value: desired };
 }
 
+function nearestCrossedRange<T extends { from: number; to: number }>(
+  ranges: readonly T[],
+  start: number,
+  target: number,
+  dir: -1 | 1,
+): T | null {
+  let low = 0;
+  let high = ranges.length;
+  if (dir > 0) {
+    // First range whose opening boundary is strictly below the current source
+    // position.  Sorted, non-overlapping state fields make later candidates
+    // farther away, so only this nearest one can be the next visual entry.
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (ranges[mid]!.from <= start) low = mid + 1;
+      else high = mid;
+    }
+    const range = ranges[low];
+    return range && target >= range.to ? range : null;
+  }
+
+  // Last range whose closing boundary is strictly above the current source
+  // position.
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (ranges[mid]!.to < start) low = mid + 1;
+    else high = mid;
+  }
+  const range = ranges[low - 1];
+  return range && target <= range.from ? range : null;
+}
+
+function crossedVisualEntry(
+  editor: Editor,
+  start: number,
+  target: number,
+  dir: -1 | 1,
+  column: number,
+): number | null {
+  // Source mode has no collapsed block widgets.  Besides avoiding unnecessary
+  // work, this guard ensures the cached Visual fields never fall back to a
+  // document scan during ordinary source navigation.
+  if (!editor.view.dom.classList.contains("aaronnote-visual-typography")) return null;
+
+  const state = editor.view.state;
+  const entries: Array<{ from: number; to: number; target: number }> = [];
+  const mathRanges = getBlockMathRanges(state);
+
+  const mathRange = nearestCrossedRange(mathRanges, start, target, dir);
+  if (mathRange) {
+    const contentPos = dir > 0
+      ? mathRange.contentFrom
+      : Math.max(mathRange.contentFrom, mathRange.contentTo - 1);
+    const line = state.doc.lineAt(clamp(contentPos, mathRange.from, mathRange.to));
+    entries.push({
+      from: mathRange.from,
+      to: mathRange.to,
+      target: Math.min(line.from + column, line.to),
+    });
+  }
+
+  const orgHeading = nearestCrossedRange(getOrgEnvHeadingRanges(state), start, target, dir);
+  if (orgHeading) {
+    entries.push({ from: orgHeading.from, to: orgHeading.to, target: orgHeading.anchor });
+  }
+
+  // A semantic block may absorb its adjacent blank line to zero visual height.
+  // CM6's pixel motion can then cross that document line going down even though
+  // the reverse motion happens to land on it.  Treat the first crossed blank as
+  // an explicit visual entry in both directions.  Stop before the nearest
+  // replacement widget so a large formula never turns this into a source scan.
+  const startLine = state.doc.lineAt(start).number;
+  const targetLine = state.doc.lineAt(target).number;
+  const nearestReplacement = entries.length === 0
+    ? null
+    : entries.reduce((nearest, entry) => {
+        if (!nearest) return entry;
+        return dir > 0
+          ? (entry.from < nearest.from ? entry : nearest)
+          : (entry.to > nearest.to ? entry : nearest);
+      }, null as { from: number; to: number; target: number } | null);
+  const replacementLine = nearestReplacement == null
+    ? null
+    : state.doc.lineAt(dir > 0 ? nearestReplacement.from : nearestReplacement.to).number;
+  const lastLine = dir > 0
+    ? Math.min(targetLine, replacementLine == null ? targetLine : replacementLine - 1)
+    : Math.max(targetLine, replacementLine == null ? targetLine : replacementLine + 1);
+
+  for (
+    let lineNumber = startLine + dir;
+    dir > 0 ? lineNumber <= lastLine : lineNumber >= lastLine;
+    lineNumber += dir
+  ) {
+    const line = state.doc.line(lineNumber);
+    if (line.text.trim().length !== 0) continue;
+    entries.push({ from: line.from, to: line.to, target: line.from });
+    break;
+  }
+
+  if (entries.length === 0) return null;
+  entries.sort((left, right) => dir > 0 ? left.from - right.from : right.to - left.to);
+  return entries[0]!.target;
+}
+
 function moveScreenLine(editor: Editor, dir: -1 | 1, goal: VerticalGoal | null): VerticalGoal {
   const rect = editor.view.contentDOM.getBoundingClientRect();
   // A detached/hidden editor has no usable layout. Preserve keyboard access
@@ -314,7 +420,8 @@ function moveScreenLine(editor: Editor, dir: -1 | 1, goal: VerticalGoal | null):
     pixelGoal,
   );
   const moved = editor.view.moveVertically(range, dir > 0);
-  setNormalPos(editor, moved.head);
+  const entry = crossedVisualEntry(editor, start, moved.head, dir, docLineInfo(text, start).column);
+  setNormalPos(editor, entry ?? moved.head);
   return { kind: "pixel", value: moved.goalColumn ?? pixelGoal };
 }
 
@@ -697,7 +804,8 @@ export function createVimLite(
     );
     const moved = editor.view.moveVertically(range, dir > 0);
     goalColumn = { kind: "pixel", value: moved.goalColumn ?? pixelGoal };
-    setVisualHead(moved.head);
+    const entry = crossedVisualEntry(editor, start, moved.head, dir, docLineInfo(text, start).column);
+    setVisualHead(entry ?? moved.head);
   }
 
   function visualLineMove(dir: -1 | 1): void {

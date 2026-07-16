@@ -538,6 +538,7 @@ Body.
     expect(html).toContain('<section class="aaronnote-body">');
     expect(html).toContain('<section class="aaronnote-editor" id="editor">');
     expect(html).toContain('<span class="aaronnote-vim-mode">READ</span>');
+    expect(html).toContain('../Aaronnote/src/styles/typography.css?v=test');
     expect(html).toContain("<p>Body</p>");
   });
 

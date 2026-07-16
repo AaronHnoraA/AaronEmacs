@@ -35,7 +35,7 @@ function mountCM6(initialContent = "", options: Parameters<typeof createEditor>[
   const host = document.createElement("div");
   document.body.appendChild(host);
   const editor = createEditor(host, { kernel: "cm6", initialContent, ...options });
-  return { editor, cleanup: () => { editor.destroy(); host.remove(); } };
+  return { editor, host, cleanup: () => { editor.destroy(); host.remove(); } };
 }
 
 function iframeSrc(iframe: HTMLIFrameElement): string {
@@ -1456,6 +1456,24 @@ Body
     cleanup();
   });
 
+  test("org-env closing boundary collapses when a selection leaves the line", () => {
+    const md = String.raw`#+begin proposition
+Body
+#+end proposition`;
+    const { editor, cleanup } = mountCM6(md);
+    const bodyFrom = md.indexOf("Body");
+    const closeFrom = md.indexOf("#+end proposition");
+
+    editor.setMarkdownSelection(closeFrom + 2);
+    expect(document.querySelector(".cm-org-env-end-widget")).toBeNull();
+
+    // This range still intersects the closing boundary, but its active end has
+    // moved back into the body.  The source boundary must not remain cached.
+    editor.setMarkdownSelection(bodyFrom, closeFrom + 2);
+    expect(document.querySelector(".cm-org-env-end-widget")).toBeTruthy();
+    cleanup();
+  });
+
   test("editing an org-env title keeps typing on the open line", () => {
     const md = String.raw`#+begin summary title
 Body
@@ -1669,10 +1687,14 @@ We present **three results**.
     cleanup();
   });
 
-  test("clicking a rendered display math block reopens markdown source without bottom preview", () => {
+  test("clicking a rendered display math block opens source without revealing the old cursor", () => {
     const md = "before\n\n\\[\na+b\n\\]\n\nafter";
-    const { editor, cleanup } = mountCM6(md);
+    const { editor, host, cleanup } = mountCM6(md);
     editor.setMarkdownSelection(0);
+    host.scrollTop = 420;
+    editor.view.scrollDOM.scrollTop = 37;
+    const dispatch = vi.spyOn(editor.view, "dispatch");
+    const focus = vi.spyOn(editor.view.contentDOM, "focus");
     const block = document.querySelector<HTMLElement>(".cm-math-block");
     expect(block).toBeTruthy();
     block!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
@@ -1682,6 +1704,13 @@ We present **three results**.
     expect(document.querySelector(".cm-math-block-preview")).toBeNull();
     expect(document.querySelectorAll(".cm-math-source-line")).toHaveLength(3);
     expect(document.querySelectorAll(".syntax-hint").length).toBeGreaterThanOrEqual(2);
+    const pointerSelection = dispatch.mock.calls
+      .map(([spec]) => spec as { selection?: unknown; scrollIntoView?: boolean })
+      .find((spec) => spec.selection != null);
+    expect(pointerSelection?.scrollIntoView).not.toBe(true);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(host.scrollTop).toBe(420);
+    expect(editor.view.scrollDOM.scrollTop).toBe(37);
     cleanup();
   });
 
@@ -2548,6 +2577,111 @@ maybeDescribe("cm6 kernel: selection", () => {
     cleanup();
   });
 
+  test("vim-lite j/k enter display math instead of skipping its replacement widget", () => {
+    const md = String.raw`Before
+\[
+x + y
+\]
+After`;
+    const { editor, cleanup } = mountCM6(md);
+    const content = editor.view.contentDOM;
+    const rect = vi.spyOn(content, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, top: 0, left: 0, right: 320, bottom: 240,
+      width: 320, height: 240, toJSON: () => ({}),
+    } as DOMRect);
+    const before = md.indexOf("Before");
+    const formula = md.indexOf("x + y");
+    const after = md.indexOf("After");
+    const move = vi.spyOn(editor.view, "moveVertically")
+      .mockReturnValueOnce(EditorSelection.cursor(after))
+      .mockReturnValueOnce(EditorSelection.cursor(before));
+    const vim = createVimLite(editor, document.body);
+
+    editor.setMarkdownSelection(before);
+    vim.setMode("normal");
+    expect(vim.handleKey({ key: "j" })).toBe(true);
+    expect(editor.getMarkdownSelection()).toEqual({ from: formula, to: formula });
+    expect(document.querySelector(".cm-math-block")).toBeNull();
+
+    editor.setMarkdownSelection(after);
+    expect(vim.handleKey({ key: "k" })).toBe(true);
+    expect(editor.getMarkdownSelection()).toEqual({ from: formula, to: formula });
+    expect(document.querySelector(".cm-math-block")).toBeNull();
+
+    move.mockRestore();
+    rect.mockRestore();
+    cleanup();
+  });
+
+  test("vim-lite j/k enter org-env headings instead of skipping their replacement widget", () => {
+    const md = [
+      "Before",
+      "#+begin theorem bipartite graph disconnected theorem",
+      "Body",
+      "#+end theorem",
+      "After",
+    ].join("\n");
+    const { editor, cleanup } = mountCM6(md);
+    const content = editor.view.contentDOM;
+    const rect = vi.spyOn(content, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, top: 0, left: 0, right: 320, bottom: 240,
+      width: 320, height: 240, toJSON: () => ({}),
+    } as DOMRect);
+    const before = md.indexOf("Before");
+    const title = md.indexOf("bipartite graph disconnected theorem");
+    const body = md.indexOf("Body");
+    const move = vi.spyOn(editor.view, "moveVertically")
+      .mockReturnValueOnce(EditorSelection.cursor(body))
+      .mockReturnValueOnce(EditorSelection.cursor(before));
+    const vim = createVimLite(editor, document.body);
+
+    editor.setMarkdownSelection(before);
+    vim.setMode("normal");
+    expect(vim.handleKey({ key: "j" })).toBe(true);
+    expect(editor.getMarkdownSelection()).toEqual({ from: title, to: title });
+    expect(document.querySelector(".cm-org-env-heading-widget")).toBeNull();
+
+    editor.setMarkdownSelection(body);
+    expect(document.querySelector(".cm-org-env-heading-widget")).toBeTruthy();
+    expect(vim.handleKey({ key: "k" })).toBe(true);
+    expect(editor.getMarkdownSelection()).toEqual({ from: title, to: title });
+    expect(document.querySelector(".cm-org-env-heading-widget")).toBeNull();
+
+    move.mockRestore();
+    rect.mockRestore();
+    cleanup();
+  });
+
+  test("vim-lite j/k enter crossed blank lines symmetrically", () => {
+    const md = "Above\n\nBelow";
+    const { editor, cleanup } = mountCM6(md);
+    const content = editor.view.contentDOM;
+    const rect = vi.spyOn(content, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, top: 0, left: 0, right: 320, bottom: 240,
+      width: 320, height: 240, toJSON: () => ({}),
+    } as DOMRect);
+    const above = md.indexOf("Above");
+    const blank = md.indexOf("\n") + 1;
+    const below = md.indexOf("Below");
+    const move = vi.spyOn(editor.view, "moveVertically")
+      .mockReturnValueOnce(EditorSelection.cursor(below))
+      .mockReturnValueOnce(EditorSelection.cursor(above));
+    const vim = createVimLite(editor, document.body);
+
+    editor.setMarkdownSelection(above);
+    vim.setMode("normal");
+    expect(vim.handleKey({ key: "j" })).toBe(true);
+    expect(editor.getMarkdownSelection()).toEqual({ from: blank, to: blank });
+
+    editor.setMarkdownSelection(below);
+    expect(vim.handleKey({ key: "k" })).toBe(true);
+    expect(editor.getMarkdownSelection()).toEqual({ from: blank, to: blank });
+
+    move.mockRestore();
+    rect.mockRestore();
+    cleanup();
+  });
+
   test("vim-lite normal-mode >> and << use semantic list nesting", () => {
     const { editor, cleanup } = mountCM6("1. parent\n2. child\n3. tail");
     const target = (editor.view as unknown as { contentDOM: HTMLElement }).contentDOM;
@@ -3062,6 +3196,22 @@ maybeDescribe("cm6 kernel: selection", () => {
     vim.syncSelectionFromEditor();
     expect(vim.mode()).toBe("normal");
     expect(editor.getMarkdownSelection()).toEqual({ from: 2, to: 2 });
+    cleanup();
+  });
+
+  test("vim-lite x deletes exactly the highlighted external selection including its closing delimiter", () => {
+    const md = String.raw`Before \(T\). After`;
+    const { editor, cleanup } = mountCM6(md);
+    const vim = createVimLite(editor, document.body);
+    const from = md.indexOf(String.raw`\(`);
+    const to = md.indexOf(String.raw`\)`) + 2;
+
+    editor.setMarkdownSelection(from, to);
+    vim.syncSelectionFromEditor();
+    expect(vim.mode()).toBe("visual");
+    expect(vim.handleKey({ key: "x" })).toBe(true);
+    expect(editor.getMarkdown()).toBe("Before . After");
+
     cleanup();
   });
 

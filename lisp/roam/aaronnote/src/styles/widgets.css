@@ -57,10 +57,12 @@
 
 /* ─── CM6 base typography ────────────────────────────────────────── */
 /* Override CM6's default monospace theme so prose reads correctly.   */
-.cm-editor {
+.cm-editor:not(.aaronnote-visual-typography) {
   font-family: var(--aaron-font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
   font-size: calc(18px * var(--aaronnote-layout-zoom, 1));
   line-height: 1.65;
+}
+.cm-editor {
   color: inherit;
 }
 .cm-editor .cm-content {
@@ -68,8 +70,10 @@
   font-family: inherit;
   font-size: inherit;
   line-height: inherit;
-  padding: 0 0 0 74px;
   caret-color: var(--aaron-red-dark, #e4b3b3);
+}
+.cm-editor:not(.aaronnote-visual-typography) .cm-content {
+  padding: 0 0 0 74px;
 }
 .cm-editor .cm-line {
   position: relative;
@@ -305,7 +309,7 @@
 .cm-editor .cm-math-block-preview {
   display: block;
   text-align: center;
-  padding: 0.16em 0;
+  padding: 0;
   cursor: pointer;
 }
 .cm-editor .cm-math-block-float-preview {
@@ -636,7 +640,7 @@
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-  padding: 0.8rem 0 0.95rem var(--orgenv-pad-left, 0.95rem);
+  padding: 0 0 0 var(--orgenv-pad-left, 0.95rem);
   color: var(--aaron-ink, #24201a);
 }
 .cm-editor .cm-org-env-block[data-kind="definition"] { --block-c: var(--c-def, #f9e2af); }
@@ -922,10 +926,10 @@
   margin-bottom: 0;
 }
 .cm-editor .cm-org-env-content p {
-  margin: 0.25em 0 0.55em;
+  margin: 0;
 }
 .cm-editor .cm-org-env-content math-block {
-  margin: 0.45em 0 0.7em;
+  margin: 0;
 }
 .cm-editor .cm-org-env-content[contenteditable="true"] {
   outline: 1px solid color-mix(in srgb, var(--block-c), transparent 55%);
@@ -1100,7 +1104,7 @@
   margin: clamp(20px, 2.6vw, 32px) auto 0;
   padding: 0 clamp(4px, 1.5vw, 20px);
   color: var(--aaron-ink, #24201a);
-  font-family: var(--aaron-font-body, Georgia, serif);
+  font-family: var(--aaron-font-prose, var(--aaron-font-body, Georgia, serif));
   font-size: clamp(16px, 1.55vw, 20px);
   line-height: 1.62;
   text-align: left;
@@ -1621,7 +1625,7 @@
 .cm-editor math-block {
   display: block;
   box-sizing: border-box;
-  margin: 0.75em 0 1.05em;
+  margin: 0;
   color: var(--aaron-math-ink, #d7defb);
   font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: pre-wrap;
@@ -1672,7 +1676,7 @@
   display: block;
   width: fit-content;
   max-width: 100%;
-  margin: 0.14em auto;
+  margin: 0;
   color: var(--aaron-math-ink, #d7defb);
   overflow: visible;
   text-align: center;
@@ -1683,7 +1687,7 @@
   display: inline-block;
   width: auto;
   max-width: 100%;
-  margin: 0.08em 0;
+  margin: 0;
   overflow: visible;
 }
 .cm-editor .aaronnote-math-error {

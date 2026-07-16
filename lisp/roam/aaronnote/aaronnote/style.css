@@ -316,7 +316,7 @@ button:disabled {
 .aaronnote-focused-editor {
   min-height: 0;
   overflow: auto;
-  padding: 0 clamp(14px, 3vw, 64px);
+  padding: 0;
 }
 
 .aaronnote-focused-editor .typora-web-wrap {
@@ -324,24 +324,8 @@ button:disabled {
   transform-origin: top left;
 }
 
-.aaronnote-focused-editor > .cm-editor {
-  width: 100%;
-  max-width: min(1380px, 100%);
+.aaronnote-focused-editor .cm-editor {
   min-height: 100%;
-  margin: 0 auto;
-  font-family: var(--aaron-font-body);
-}
-
-.aaronnote-focused-editor .cm-scroller {
-  font-family: var(--aaron-font-body);
-}
-
-.aaronnote-focused-editor .cm-content {
-  padding:
-    clamp(20px, 3vw, 40px)
-    clamp(28px, 4vw, 76px)
-    clamp(56px, 7vw, 96px)
-    clamp(78px, 6vw, 118px);
 }
 
 /* Metadata belongs to the file, not to a slide.  Source mode still exposes it. */
@@ -565,7 +549,7 @@ button:disabled {
   margin: 0;
   padding: 0;
   color: inherit;
-  font-family: var(--aaron-font-body);
+  font-family: var(--aaron-font-prose);
   font-size: 20px;
   line-height: 1.24;
   text-align: left;
@@ -701,15 +685,11 @@ button:disabled {
 
 .aaronnote-reveal-view .reveal .slides p,
 .aaronnote-reveal-view .reveal .slides li {
-  font-family: var(--aaron-font-body);
+  font-family: var(--aaron-font-prose);
 }
 
 .aaronnote-reveal-view .reveal .controls {
   color: var(--aaron-accent);
-}
-
-.aaronnote-focused-editor .cm-line {
-  font-family: var(--aaron-font-body);
 }
 
 .aaronnote-focused-editor .cm-editor h1,
@@ -760,14 +740,9 @@ button:disabled {
 
 #app[data-vim-mode="visual"] .cm-cursor,
 #app[data-vim-mode="visual-line"] .cm-cursor {
-  width: 0.68em;
-  border-left: 0;
-  outline: 1px solid rgb(201 173 255 / 70%);
-  background: rgb(201 173 255 / 12%);
-  box-shadow: none;
-}
-
-#app[data-vim-mode="visual-line"] .cm-cursor {
+  /* CM selections use an exclusive end boundary, so a block cursor drawn at
+   * that boundary appears over the first character that x will *not* delete.
+   * The selection highlight is the unambiguous Visual-mode cursor. */
   display: none;
 }
 
@@ -3644,14 +3619,6 @@ button:disabled {
 }
 
 @media (max-width: 720px) {
-  .aaronnote-focused-editor {
-    padding: 0 8px;
-  }
-
-  .aaronnote-focused-editor .cm-content {
-    padding: 18px 20px 48px 64px;
-  }
-
   .aaronnote-floating-toc,
   .aaronnote-tools-panel,
   .aaronnote-roam-tools {

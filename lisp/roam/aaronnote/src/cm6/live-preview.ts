@@ -1518,6 +1518,25 @@ function buildLineDecoRanges(
   if (firstLine > lastWindowLine) return decos;
   const windowFrom = doc.line(firstLine).from;
   const windowTo = doc.line(lastWindowLine).to;
+  const activeBlankRun = blankLineRunAtSelection(state);
+
+  for (let lineNumber = firstLine; lineNumber <= lastWindowLine; lineNumber++) {
+    const line = doc.line(lineNumber);
+    if (line.text.trim().length > 0) continue;
+
+    const inActiveRun = activeBlankRun != null
+      && lineNumber >= activeBlankRun.startLine
+      && lineNumber <= activeBlankRun.endLine;
+    const firstInRun = lineNumber === 1 || doc.line(lineNumber - 1).text.trim().length > 0;
+    const absorbed = firstInRun && blankRunTouchesSemanticBlock(doc, lineNumber, blockMathRanges);
+    const classNames = ["cm-prose-blank-line"];
+    if (inActiveRun) classNames.push("cm-prose-blank-active");
+    else if (!firstInRun) classNames.push("cm-prose-blank-collapsed");
+    else if (absorbed) classNames.push("cm-prose-blank-absorbed");
+    else classNames.push("cm-prose-paragraph-gap");
+    decos.push(Decoration.line({ attributes: { class: classNames.join(" ") } }).range(line.from));
+  }
+
   for (const heading of tocIndexFromState(state).headings) {
     if (heading.source === "semantic") continue;
     const line = doc.lineAt(Math.max(0, Math.min(heading.pos, doc.length)));
@@ -1606,10 +1625,91 @@ const lineDecoField = StateField.define<DecorationSet>({
       }
       return buildLineDecos(tr.state);
     }
+    if (tr.selection != null) {
+      const oldRun = blankLineRunAtSelection(tr.startState);
+      const newRun = blankLineRunAtSelection(tr.state);
+      if (blankLineRunKey(oldRun) !== blankLineRunKey(newRun)) {
+        return patchLineDecosForBlankSelection(tr.state, value, oldRun, newRun);
+      }
+    }
     return value.map(tr.changes);
   },
   provide: (f) => EditorView.decorations.from(f),
 });
+
+type BlankLineRun = { startLine: number; endLine: number };
+
+const SEMANTIC_VERTICAL_LINE_RE = /^\s*(?:#{1,6}(?:\s|$)|#\+\s*(?:begin|end)\b|\\\[|\\\]|`{3,}|~{3,}|@@(?:todo|cell)\b|\|.*\|\s*$|<(?:table|figure|section|div)\b)/i;
+
+function blankLineRunAtSelection(state: EditorState): BlankLineRun | null {
+  const line = state.doc.lineAt(state.selection.main.head);
+  if (line.text.trim().length > 0) return null;
+  let startLine = line.number;
+  let endLine = line.number;
+  while (startLine > 1 && state.doc.line(startLine - 1).text.trim().length === 0) startLine--;
+  while (endLine < state.doc.lines && state.doc.line(endLine + 1).text.trim().length === 0) endLine++;
+  return { startLine, endLine };
+}
+
+function blankLineRunKey(run: BlankLineRun | null): string {
+  return run == null ? "" : `${run.startLine}:${run.endLine}`;
+}
+
+function lineOwnsVerticalRhythm(
+  doc: Text,
+  lineNumber: number,
+  blockMathRanges: readonly { from: number; to: number }[],
+): boolean {
+  if (lineNumber < 1 || lineNumber > doc.lines) return false;
+  const line = doc.line(lineNumber);
+  const rangeTo = Math.min(doc.length, Math.max(line.from + 1, line.to));
+  if (rangeOverlapsAny(line.from, rangeTo, blockMathRanges)) return true;
+  return SEMANTIC_VERTICAL_LINE_RE.test(line.text);
+}
+
+function blankRunTouchesSemanticBlock(
+  doc: Text,
+  firstBlankLine: number,
+  blockMathRanges: readonly { from: number; to: number }[],
+): boolean {
+  let lastBlankLine = firstBlankLine;
+  while (lastBlankLine < doc.lines && doc.line(lastBlankLine + 1).text.trim().length === 0) lastBlankLine++;
+  return lineOwnsVerticalRhythm(doc, firstBlankLine - 1, blockMathRanges)
+    || lineOwnsVerticalRhythm(doc, lastBlankLine + 1, blockMathRanges);
+}
+
+function patchLineDecosForBlankSelection(
+  state: EditorState,
+  current: DecorationSet,
+  ...runs: Array<BlankLineRun | null>
+): DecorationSet {
+  const windows = runs
+    .filter((run): run is BlankLineRun => run != null)
+    .sort((a, b) => a.startLine - b.startLine);
+  if (windows.length === 0) return current;
+
+  const merged: BlankLineRun[] = [];
+  for (const window of windows) {
+    const previous = merged[merged.length - 1];
+    if (previous && window.startLine <= previous.endLine + 1) {
+      previous.endLine = Math.max(previous.endLine, window.endLine);
+    } else {
+      merged.push({ ...window });
+    }
+  }
+
+  let next = current;
+  for (const window of merged) {
+    const from = state.doc.line(window.startLine).from;
+    const to = state.doc.line(window.endLine).to;
+    next = next.update({ filterFrom: from, filterTo: to, filter: () => false });
+    next = next.update({
+      add: buildLineDecoRanges(state, window.startLine, window.endLine),
+      sort: true,
+    });
+  }
+  return next;
+}
 
 function canMapLineDecos(doc: Text, changes: ChangeSet): boolean {
   let canMap = true;

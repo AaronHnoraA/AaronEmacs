@@ -25,6 +25,34 @@ Pointer drag 使用独立 StateField；拖选期间复用 decoration，结束后
 原有性能路径保持：viewport delta、8ms/16KB 解析预算、CJK line cache、近变更修补、
 byte-budget caches、MeasuredWidget、async epoch 以及 worker/observer teardown。
 
+## 排版内核
+
+```text
+src/cm6/extensions/visual/typography.ts   Visual-only 几何宽度与主题入口
+src/styles/typography.css                 唯一正文 font/rhythm 所有者
+src/styles/fonts/                         Latin Modern Latin-only WOFF2
+```
+
+Visual 排版是 composition root 的核心扩展，不是应用层 CSS 修补。宽度算法直接适配
+Overleaf `visual-theme.ts`：只在 CM6 `geometryChanged` 且文档未修改时读取一次
+`contentDOM.offsetWidth`，通过 `Compartment + Facet + Annotation` 写入
+`--content-width` 并阻止自触发循环。正文 padding 为
+`clamp(max(32px, width * 4%), (width - 95ch) / 2, width * 8%)`。窄屏留白在
+32px 处停止收缩（约对应 800px 容器宽度），中等窗口维持 95ch 阅读测度；宽屏的
+单侧留白最多为窗口的 8%，所以正文至少占 84% 并继续随窗口增长。因此无需 window
+resize listener。
+
+Visual 编辑面的最小排版宽度为 800px；低于该宽度后停止重排，由既有 editor host
+横向滚动。发布网页不继承此编辑器下限，继续对移动端响应式排版。
+
+正文默认 23.2px/1.5（原 20px 的 116%），英文使用 Latin Modern Roman；heading、数学、代码与 UI
+继续使用各自字体，并保留原 20px 结构字号基准。Visual 的连续空行分类并入已有 `lineDecoField`：普通空行 run 只
+贡献一个段落节奏，语义块吸收邻接空行，光标进入时局部展开。选择和文档更新都只修补
+相关行窗口；widget 垂直留白仍用可测 padding，不在 measured root 上使用 margin。
+
+发布长文复用同一 4%–8% 自适应连续流；PDF 页面与 Reveal slide 只复用字体和节奏，
+保留各自的纸张/舞台宽度模型。
+
 ## 元数据封面
 
 ```text
@@ -103,6 +131,6 @@ anchor/head，CM6 边界只在 dispatch 时转换；鼠标和 Shift-click 选区
 
 - `.md`、`.markdown` 与 README 仍由 Aaronnote 处理；`.tex` 不由 Aaronnote 接管。
 - Markdown source offset、Editor facade、API channel、SSE command 和 Emacs 公开命令不变。
-- Aaronnote 主题、proof/custom block class 和样式不变。
+- Aaronnote UI chrome、proof/custom block class 与颜色语义不变；正文排版由 typography core 统一。
 - TeX delimiter 在不完整块公式及剪切/粘贴过渡态保持可见；普通 Markdown escape 仍按原规则折叠。
 - CM6 roundtrip/command/editor API、5MB 大文档、Node feature、xwidget ERT 必须通过。

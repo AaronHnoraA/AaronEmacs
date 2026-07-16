@@ -1123,6 +1123,7 @@ export function renderPublishedNoteHTML(
   <link rel="stylesheet" href="${assetRoot}Aaronnote/aaronnote/style.css?v=${escapeAttr(version)}" />
   <link rel="stylesheet" href="${assetRoot}Aaronnote/src/styles/widgets.css?v=${escapeAttr(version)}" />
   <link rel="stylesheet" href="${assetRoot}Aaronnote/src/styles/theme-typora.css?v=${escapeAttr(version)}" />
+  <link rel="stylesheet" href="${assetRoot}Aaronnote/src/styles/typography.css?v=${escapeAttr(version)}" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.47/dist/katex.min.css" crossorigin="anonymous" />
   <link rel="stylesheet" href="${assetRoot}css/aaronnote-published.css?v=${escapeAttr(version)}" />
   <link rel="stylesheet" href="${assetRoot}css/mac-window.css?v=${escapeAttr(version)}" />

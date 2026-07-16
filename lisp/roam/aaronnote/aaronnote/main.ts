@@ -1,5 +1,6 @@
 import "../src/styles/widgets.css";
 import "../src/styles/theme-typora.css";
+import "../src/styles/typography.css";
 import "./style.css";
 
 import {
@@ -1481,16 +1482,26 @@ const {
   runVisualZoomShortcut,
 } = zoomController;
 
+let editorPointerFocusTimer = 0;
+
 function activateEditorFromPointer(event: PointerEvent | MouseEvent): void {
   const target = event.target;
   if (!(target instanceof Node) || !host.contains(target)) return;
   const element = target instanceof Element ? target : target.parentElement;
   if (element?.closest("input, textarea, select, button, a")) return;
-  // Two focus calls: the first is immediate, the second is deferred one tick.
-  // xwidget may not deliver the first call if Emacs still holds focus at event
-  // time; the deferred call lands after the event loop yields to WebKit.
-  editor.focus();
-  window.setTimeout(() => editor.focus(), 0);
+  const scroll = captureEditorScroll();
+  window.clearTimeout(editorPointerFocusTimer);
+  // Let CM6 process the pointer and establish its clicked selection first.
+  // Focusing synchronously here reveals the previous cursor before CM6's own
+  // mousedown handler runs, causing apparently random jumps after a long scroll.
+  // The one-tick fallback remains for xwidget focus hand-off and is deduplicated
+  // across the pointerdown + mousedown pair.
+  editorPointerFocusTimer = window.setTimeout(() => {
+    editorPointerFocusTimer = 0;
+    if (editor.view.hasFocus) return;
+    editor.view.contentDOM.focus({ preventScroll: true });
+    restoreEditorScroll(scroll);
+  }, 0);
 }
 
 host.addEventListener("pointerdown", activateEditorFromPointer, { capture: true });
