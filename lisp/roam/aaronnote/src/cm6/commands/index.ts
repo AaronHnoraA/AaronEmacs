@@ -32,6 +32,8 @@ import {
   unfoldAllHeadings,
   unfoldHeadingAtCursor,
 } from "../heading-fold.ts";
+import { revisionSource, type RevisionSourceOptions } from "../../authoring-syntax.ts";
+import { moveBlockAtCursor } from "../block-move.ts";
 
 // ---------------------------------------------------------------------------
 // Inline wrap (bold / italic / highlight / strike / code / link / image)
@@ -54,6 +56,87 @@ function wrapInline(view: EditorView, open: string, close: string): boolean {
       scrollIntoView: true,
     });
   }
+  return true;
+}
+
+function nextFootnoteId(view: EditorView): string {
+  const used = new Set<number>();
+  const source = view.state.doc.toString();
+  for (const match of source.matchAll(/\[\^(\d+)\]/g)) used.add(Number(match[1]));
+  let id = 1;
+  while (used.has(id)) id += 1;
+  return String(id);
+}
+
+function insertFootnote(view: EditorView): boolean {
+  const selection = view.state.selection.main;
+  const id = nextFootnoteId(view);
+  const reference = `[^${id}]`;
+  const definition = `[^${id}]: `;
+  const doc = view.state.doc;
+  const appendPrefix = doc.length === 0
+    ? ""
+    : doc.sliceString(Math.max(0, doc.length - 2), doc.length).endsWith("\n\n")
+      ? ""
+      : doc.sliceString(Math.max(0, doc.length - 1), doc.length) === "\n" ? "\n" : "\n\n";
+  if (selection.to === doc.length) {
+    view.dispatch({
+      changes: { from: doc.length, insert: `${reference}${appendPrefix}${definition}` },
+      selection: { anchor: doc.length + reference.length },
+      scrollIntoView: true,
+    });
+  } else {
+    view.dispatch({
+      changes: [
+        { from: selection.to, insert: reference },
+        { from: doc.length, insert: `${appendPrefix}${definition}` },
+      ],
+      selection: { anchor: selection.to + reference.length },
+      scrollIntoView: true,
+    });
+  }
+  return true;
+}
+
+function revisionOptions(value: string): RevisionSourceOptions {
+  if (!value.trim()) return { advice: "replacement", reason: "", style: "indigo" };
+  try {
+    const parsed = JSON.parse(value) as Partial<RevisionSourceOptions>;
+    return {
+      advice: String(parsed.advice || "replacement"),
+      reason: String(parsed.reason || ""),
+      style: String(parsed.style || "indigo"),
+    };
+  } catch {
+    return { advice: value, reason: "", style: "indigo" };
+  }
+}
+
+function insertRevision(view: EditorView, value: string): boolean {
+  const { from, to } = view.state.selection.main;
+  const original = from === to ? "original" : view.state.doc.sliceString(from, to);
+  const source = revisionSource(original, revisionOptions(value));
+  view.dispatch({
+    changes: { from, to, insert: source },
+    selection: { anchor: from + source.length },
+    scrollIntoView: true,
+  });
+  return true;
+}
+
+function editProperties(view: EditorView): boolean {
+  const existing = view.dom.querySelector<HTMLDetailsElement>(".aaronnote-meta-properties");
+  if (existing) {
+    existing.open = true;
+    existing.querySelector<HTMLElement>("input, textarea, summary")?.focus();
+    return true;
+  }
+  const text = view.state.doc.toString();
+  const frontmatter = /^(?:---\r?\n[\s\S]*?\r?\n---\s*(?:\r?\n|$))/.exec(text);
+  const at = frontmatter?.[0].length ?? 0;
+  const prefix = at > 0 && !text.slice(0, at).endsWith("\n\n") ? "\n" : "";
+  const block = `${prefix}#+begin meta\nproperty: \n#+end meta\n\n`;
+  view.dispatch({ changes: { from: at, insert: block }, selection: { anchor: at + block.indexOf("property: ") + 10 } });
   return true;
 }
 
@@ -828,6 +911,8 @@ export function tableEnterSameColumn(view: EditorView): boolean {
 // ---------------------------------------------------------------------------
 
 export function runCommandCM6(view: EditorView, command: EditorCommand, value = ""): boolean {
+  if (command === "move-block-up") return moveBlockAtCursor(view, -1);
+  if (command === "move-block-down") return moveBlockAtCursor(view, 1);
   if (command === "fold-heading") return foldHeadingAtCursor(view);
   if (command === "unfold-heading") return unfoldHeadingAtCursor(view);
   if (command === "toggle-fold") return toggleFoldAtCursor(view);
@@ -840,6 +925,11 @@ export function runCommandCM6(view: EditorView, command: EditorCommand, value = 
   if (command === "highlight") return wrapInline(view, "==", "==");
   if (command === "strike") return wrapInline(view, "~~", "~~");
   if (command === "code") return wrapInline(view, "`", "`");
+  if (command === "superscript") return wrapInline(view, "^", "^");
+  if (command === "subscript") return wrapInline(view, "~", "~");
+  if (command === "insert-footnote") return insertFootnote(view);
+  if (command === "insert-revision") return insertRevision(view, value);
+  if (command === "edit-properties") return editProperties(view);
 
   if (command === "link") {
     const { from, to } = view.state.selection.main;

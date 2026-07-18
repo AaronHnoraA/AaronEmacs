@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EMACS_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+RUNTIME_ROOT="${EMACS_ROOT}/lisp/roam/aaronnote"
+JUPYTER_ROOT="${RUNTIME_ROOT}/jupyter"
+STATE_ROOT="${EMACS_ROOT}/var/aaronnote"
+RUNTIME_STATE="${STATE_ROOT}/runtime"
+BACKUP_ROOT="${STATE_ROOT}/backups"
+NOTE_ROOT="${AARONNOTE_ROOT:-${EMACS_ROOT}/.roam}"
+CONDA_ENV_NAME="${AARONNOTE_CONDA_ENV:-aaronnote-python}"
+CONDA_SPEC="${EMACS_ROOT}/etc/conda/aaronnote-python.yml"
+SAGE_REQUIREMENTS="${EMACS_ROOT}/etc/sage/requirements.txt"
+PYTHON_ENV_FILE="${RUNTIME_STATE}/python.env"
+SAGE_ENV_FILE="${RUNTIME_STATE}/sage.env"
+ROAM_DB="${NOTE_ROOT}/roam.db"
+ROAM_CLI="${RUNTIME_ROOT}/roam-cli.mjs"
+
+die() {
+  printf 'aaronnote-runtime: %s\n' "$*" >&2
+  exit 1
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+quote_env() {
+  local name="$1"
+  local value="$2"
+  printf '%s=%q\n' "$name" "$value"
+}
+
+atomic_write() {
+  local target="$1"
+  local tmp
+  mkdir -p "$(dirname "$target")"
+  tmp="$(mktemp "${target}.XXXXXX")"
+  cat >"$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$target"
+}
+
+conda_executable() {
+  if [[ -n "${CONDA_EXE:-}" && -x "${CONDA_EXE}" ]]; then
+    printf '%s\n' "${CONDA_EXE}"
+    return
+  fi
+  command -v conda 2>/dev/null || die "conda not found; install/repair Anaconda first"
+}
+
+sage_executable() {
+  if [[ -n "${SAGE_BIN:-}" && -x "${SAGE_BIN}" ]]; then
+    printf '%s\n' "${SAGE_BIN}"
+    return
+  fi
+  command -v sage 2>/dev/null || die "sage not found; install SageMath first"
+}
+
+python_refresh() {
+  local conda python version prefix
+  conda="$(conda_executable)"
+  python="$($conda run --no-capture-output -n "$CONDA_ENV_NAME" python -c 'import sys; print(sys.executable)')"
+  version="$($conda run --no-capture-output -n "$CONDA_ENV_NAME" python -c 'import platform; print(platform.python_version())')"
+  prefix="$($conda run --no-capture-output -n "$CONDA_ENV_NAME" python -c 'import sys; print(sys.prefix)')"
+  [[ -x "$python" ]] || die "resolved Conda Python is not executable: $python"
+  {
+    quote_env AARONNOTE_CONDA_EXE "$conda"
+    quote_env AARONNOTE_CONDA_ENV "$CONDA_ENV_NAME"
+    quote_env AARONNOTE_CONDA_PREFIX "$prefix"
+    quote_env AARONNOTE_PYTHON "$python"
+    quote_env AARONNOTE_PYTHON_VERSION "$version"
+  } | atomic_write "$PYTHON_ENV_FILE"
+  printf 'Python runtime: %s (%s)\n' "$python" "$version"
+}
+
+python_env() {
+  local conda
+  conda="$(conda_executable)"
+  "$conda" env update --name "$CONDA_ENV_NAME" --file "$CONDA_SPEC" --prune
+  python_refresh
+  kernel_refresh
+}
+
+sage_query() {
+  local sage
+  sage="$(sage_executable)"
+  "$sage" --python -c '
+import json, site, sys
+try:
+    import sage.version as sage_version
+    version = sage_version.version
+except Exception:
+    version = ""
+paths = list(dict.fromkeys(site.getsitepackages() + [site.getusersitepackages()]))
+print(json.dumps({"python": sys.executable, "version": version, "paths": paths}))
+'
+}
+
+sage_info() {
+  local sage
+  sage="$(sage_executable)"
+  printf 'Sage executable: %s\n' "$sage"
+  sage_query
+}
+
+sage_refresh() {
+  local sage json python version site_packages user_site
+  need node
+  sage="$(sage_executable)"
+  json="$(sage_query | tail -n 1)"
+  python="$(node -e 'const d=JSON.parse(process.argv[1]); process.stdout.write(String(d.python||""))' "$json")"
+  version="$(node -e 'const d=JSON.parse(process.argv[1]); process.stdout.write(String(d.version||""))' "$json")"
+  site_packages="$(node -e 'const d=JSON.parse(process.argv[1]); process.stdout.write(String((d.paths||[])[0]||""))' "$json")"
+  user_site="$(node -e 'const d=JSON.parse(process.argv[1]); const p=d.paths||[]; process.stdout.write(String(p[p.length-1]||""))' "$json")"
+  [[ -x "$python" ]] || die "resolved Sage Python is not executable: $python"
+  [[ -d "$site_packages" ]] || die "resolved Sage site-packages is missing: $site_packages"
+  {
+    quote_env AARONNOTE_SAGE "$sage"
+    quote_env AARONNOTE_SAGE_PYTHON "$python"
+    quote_env AARONNOTE_SAGE_VERSION "$version"
+    quote_env AARONNOTE_SAGE_SITE_PACKAGES "$site_packages"
+    quote_env AARONNOTE_SAGE_USER_SITE "$user_site"
+  } | atomic_write "$SAGE_ENV_FILE"
+  if [[ -d "$NOTE_ROOT" ]]; then
+    ln -sfn "$site_packages" "${NOTE_ROOT}/.sage-site-packages"
+    if [[ -n "$user_site" ]]; then
+      mkdir -p "$user_site"
+      ln -sfn "$user_site" "${NOTE_ROOT}/.sage-user-site-packages"
+    fi
+  fi
+  kernel_refresh
+  printf 'Sage runtime: %s (%s)\n' "$python" "$version"
+}
+
+sage_packages() {
+  local sage
+  sage="$(sage_executable)"
+  "$sage" --python -m pip install --user --requirement "$SAGE_REQUIREMENTS"
+}
+
+sage_pip() {
+  [[ "$#" -gt 0 ]] || die 'sage-pip requires at least one package spec'
+  local sage
+  sage="$(sage_executable)"
+  "$sage" --python -m pip install --user "$@"
+}
+
+kernel_refresh() {
+  "${JUPYTER_ROOT}/scripts/install-kernelspecs.sh"
+}
+
+kernel_list() {
+  local kernels="${JUPYTER_ROOT}/.jupyter/data/kernels"
+  if [[ ! -d "$kernels" ]]; then
+    printf 'No project kernelspec directory: %s\n' "$kernels"
+    return
+  fi
+  find "$kernels" -mindepth 2 -maxdepth 2 -name kernel.json -print | sort
+}
+
+db_status() {
+  need sqlite3
+  [[ -f "$ROAM_DB" ]] || die "roam database not found: $ROAM_DB"
+  printf 'Database: %s\n' "$ROAM_DB"
+  sqlite3 "$ROAM_DB" 'SELECT "files", count(*) FROM files UNION ALL SELECT "nodes", count(*) FROM nodes UNION ALL SELECT "links", count(*) FROM links UNION ALL SELECT "tags", count(*) FROM tags;'
+  if [[ -f "${STATE_ROOT}/sync/state.json" ]]; then
+    printf 'Sync state: %s\n' "${STATE_ROOT}/sync/state.json"
+  fi
+}
+
+db_check() {
+  need sqlite3
+  [[ -f "$ROAM_DB" ]] || die "roam database not found: $ROAM_DB"
+  local quick integrity
+  quick="$(sqlite3 "$ROAM_DB" 'PRAGMA quick_check;')"
+  integrity="$(sqlite3 "$ROAM_DB" 'PRAGMA integrity_check;')"
+  [[ "$quick" == "ok" && "$integrity" == "ok" ]] || die "database check failed: quick=$quick integrity=$integrity"
+  printf 'Database integrity: ok\n'
+}
+
+db_backup() {
+  need sqlite3
+  [[ -f "$ROAM_DB" ]] || die "roam database not found: $ROAM_DB"
+  local backup
+  mkdir -p "$BACKUP_ROOT"
+  backup="${BACKUP_ROOT}/roam-$(date '+%Y%m%dT%H%M%S').db"
+  sqlite3 "$ROAM_DB" ".backup '$backup'"
+  printf 'Database backup: %s\n' "$backup"
+}
+
+db_sync() {
+  need node
+  printf 'NOTICE: db-sync stages and commits note-repository changes by design.\n'
+  node "$ROAM_CLI" sync --root "$NOTE_ROOT" --workspace "$EMACS_ROOT" --state "$STATE_ROOT"
+}
+
+db_rebuild() {
+  need node
+  printf 'NOTICE: db-rebuild stages and commits note-repository changes by design.\n'
+  node "$ROAM_CLI" sync --full --root "$NOTE_ROOT" --workspace "$EMACS_ROOT" --state "$STATE_ROOT"
+}
+
+db_vacuum() {
+  need sqlite3
+  if pgrep -f "${RUNTIME_ROOT}/web-host.mjs" >/dev/null 2>&1; then
+    die 'Aaronnote web-host is running; stop it before db-vacuum'
+  fi
+  db_backup
+  sqlite3 "$ROAM_DB" 'VACUUM; PRAGMA optimize;'
+  db_check
+}
+
+runtime_clean() {
+  local expected="${EMACS_ROOT}/lisp/roam/aaronnote/jupyter"
+  [[ "$JUPYTER_ROOT" == "$expected" ]] || die "refusing cleanup for unexpected root: $JUPYTER_ROOT"
+  rm -rf "${JUPYTER_ROOT}/.venv"
+  find "${JUPYTER_ROOT}/.jupyter/data/kernels" -mindepth 1 -maxdepth 1 -type d -name 'sagemath-*' -exec rm -rf -- {} + 2>/dev/null || true
+  find "${JUPYTER_ROOT}/.jupyter/runtime" -maxdepth 1 -type f -name '*.json' -mtime +7 -delete 2>/dev/null || true
+  printf 'Removed the retired Aaronnote venv, versioned Sage specs, and stale runtime JSON.\n'
+}
+
+doctor() {
+  printf 'Emacs root: %s\nNote root: %s\nRuntime root: %s\n' "$EMACS_ROOT" "$NOTE_ROOT" "$RUNTIME_ROOT"
+  printf 'Conda: %s\n' "$(conda_executable)"
+  "$(conda_executable)" env list
+  sage_info
+  kernel_list
+  if [[ -f "$ROAM_DB" ]]; then
+    db_check
+    db_status
+  fi
+}
+
+usage() {
+  cat <<'USAGE'
+usage: aaronnote-runtime COMMAND [ARGS...]
+
+Environment: setup doctor runtime-update python-env python-refresh
+Sage:        sage-info sage-refresh sage-packages sage-pip PACKAGE...
+Kernels:     kernel-refresh kernel-list runtime-clean
+Database:    db-status db-check db-backup db-sync db-rebuild db-vacuum
+USAGE
+}
+
+command="${1:-help}"
+if [[ "$#" -gt 0 ]]; then shift; fi
+case "$command" in
+  setup|runtime-update) python_env; sage_refresh; sage_packages; doctor ;;
+  doctor) doctor ;;
+  python-env) python_env ;;
+  python-refresh|python-kernel) python_refresh; kernel_refresh ;;
+  sage-info) sage_info ;;
+  sage-refresh) sage_refresh ;;
+  sage-packages) sage_packages ;;
+  sage-pip) sage_pip "$@" ;;
+  kernel-refresh) kernel_refresh ;;
+  kernel-list) kernel_list ;;
+  runtime-clean) runtime_clean ;;
+  db-status) db_status ;;
+  db-check) db_check ;;
+  db-backup) db_backup ;;
+  db-sync) db_sync ;;
+  db-rebuild) db_rebuild ;;
+  db-vacuum) db_vacuum ;;
+  help|-h|--help) usage ;;
+  *) usage >&2; die "unknown command: $command" ;;
+esac

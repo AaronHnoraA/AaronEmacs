@@ -17,15 +17,16 @@ const RUN = process.env.AARONNOTE_TEST_KERNEL === "1";
 const describeIfKernel = RUN ? describe : describe.skip;
 
 const aaronnoteRoot = join(import.meta.dirname, "..");
-const venvDir = join(aaronnoteRoot, "jupyter", ".venv");
+const jupyterDataDir = join(aaronnoteRoot, "jupyter", ".jupyter", "data");
+const pythonKernelRunner = join(aaronnoteRoot, "jupyter", "bin", "python-jupyter-kernel");
 
 describeIfKernel("kernel lifecycle (real ipykernel)", () => {
   test(
     "ensure() self-heals a dead record and bumps widgetGeneration (not just manual restart)",
     async () => {
       const runtimeDir = await mkdtemp(join(tmpdir(), "aaronnote-selfheal-"));
-      const registry = createKernelRegistry({ runtimeDir, venvBinDir: join(venvDir, "bin"), zmq, launchTimeoutMs: 15_000 });
-      const searchDirs = defaultKernelSearchDirs({ venvPrefix: venvDir, useHomeKernels: false });
+      const registry = createKernelRegistry({ runtimeDir, zmq, launchTimeoutMs: 15_000 });
+      const searchDirs = defaultKernelSearchDirs({ dataDir: jupyterDataDir, useHomeKernels: false });
       const specs = await findKernelSpecs({ searchDirs });
       const python3 = specs.find((s) => s.name === "python3")!;
       const key = "self-heal-test";
@@ -90,7 +91,7 @@ describeIfKernel("kernel lifecycle (real ipykernel)", () => {
       };
       const connectionFile = join(runtimeDir, "orphan-kernel.json");
       await writeFile(connectionFile, JSON.stringify(connectionInfo));
-      const proc = spawn(join(venvDir, "bin", "python"), ["-m", "ipykernel_launcher", "-f", connectionFile], {
+      const proc = spawn(pythonKernelRunner, ["-m", "ipykernel_launcher", "-f", connectionFile], {
         stdio: ["ignore", "pipe", "pipe"],
         detached: true,
       });
@@ -136,8 +137,8 @@ describeIfKernel("kernel lifecycle (real ipykernel)", () => {
       process.env.AARONNOTE_JUPYTER_EXEC_TIMEOUT_MS = "1000";
       process.env.AARONNOTE_JUPYTER_INTERRUPT_GRACE_MS = "500";
       const noteRoot = await mkdtemp(join(tmpdir(), "aaronnote-hang-"));
-      // runtimeRoot stays the real aaronnote checkout so jupyter/.venv (and its
-      // python3 kernelspec) resolve; only notes live in the scratch dir.
+      // runtimeRoot stays the real aaronnote checkout so its project-owned
+      // Python kernelspec resolves; only notes live in the scratch dir.
       const service = createJupyterCellService({ runtimeRoot: aaronnoteRoot, noteRoot, workspaceRoot: noteRoot, zmq });
       const note = join(noteRoot, "note.md");
       await writeFile(note, "# note\n", "utf8");
@@ -168,8 +169,8 @@ describeIfKernel("kernel lifecycle (real ipykernel)", () => {
     "idle TTL reaps an unused owned kernel but never an attached one",
     async () => {
       const runtimeDir = await mkdtemp(join(tmpdir(), "aaronnote-idle-"));
-      const registry = createKernelRegistry({ runtimeDir, venvBinDir: join(venvDir, "bin"), zmq, launchTimeoutMs: 15_000 });
-      const searchDirs = defaultKernelSearchDirs({ venvPrefix: venvDir, useHomeKernels: false });
+      const registry = createKernelRegistry({ runtimeDir, zmq, launchTimeoutMs: 15_000 });
+      const searchDirs = defaultKernelSearchDirs({ dataDir: jupyterDataDir, useHomeKernels: false });
       const specs = await findKernelSpecs({ searchDirs });
       const python3 = specs.find((s) => s.name === "python3")!;
 

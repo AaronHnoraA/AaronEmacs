@@ -1,6 +1,4 @@
-import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { createKernelRegistry, sweepOrphanKernels } from "../jupyter/kernel-registry.mjs";
@@ -317,7 +315,6 @@ export function createJupyterCellService({
   const notes = resolve(noteRoot || root);
   const workspace = resolve(workspaceRoot || notes);
   const jupyterRoot = join(root, "jupyter");
-  const venvDir = join(jupyterRoot, ".venv");
   const dataDir = join(jupyterRoot, ".jupyter", "data");
   const runtimeDir = join(jupyterRoot, ".jupyter", "runtime");
   const kernelIdleTtlMs = durationFromEnv("AARONNOTE_JUPYTER_KERNEL_IDLE_TTL_MS", 10 * 60 * 1000);
@@ -336,7 +333,6 @@ export function createJupyterCellService({
   let cleanupRunning = false;
   let registryPromise = null;
   let registrySync = null;
-  let kernelspecsInstalled = false;
   const mirrorLocks = new Map();
   const executionQueues = new Map();
 
@@ -366,7 +362,6 @@ export function createJupyterCellService({
         const zmq = injectedZmq || (await import("zeromq"));
         const registry = createKernelRegistry({
           runtimeDir,
-          venvBinDir: join(venvDir, "bin"),
           cwd: workspace,
           zmq,
           stderr,
@@ -379,22 +374,11 @@ export function createJupyterCellService({
     return registryPromise;
   }
 
-  async function ensureKernelspecTemplatesInstalled() {
-    if (kernelspecsInstalled) return;
-    kernelspecsInstalled = true;
-    const script = join(jupyterRoot, "scripts", "install-kernelspecs.sh");
-    if (!existsSync(script)) return;
-    await new Promise((resolveInstall) => {
-      execFile(script, [], { cwd: jupyterRoot }, () => resolveInstall());
-    });
-  }
-
   function kernelSearchDirs() {
-    return defaultKernelSearchDirs({ dataDir, venvPrefix: venvDir, useHomeKernels });
+    return defaultKernelSearchDirs({ dataDir, useHomeKernels });
   }
 
   async function listKernelSpecs() {
-    await ensureKernelspecTemplatesInstalled();
     return await findKernelSpecs({ searchDirs: kernelSearchDirs(), allowedNames });
   }
 

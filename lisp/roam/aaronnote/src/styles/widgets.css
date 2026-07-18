@@ -421,6 +421,30 @@
   margin: 2px 3px;
   background: rgba(255, 255, 255, 0.18);
 }
+.cm-editor .cm-image-resize-handle {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  z-index: 6;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 0;
+  border-right: 2px solid color-mix(in srgb, var(--aaron-link, #9de7ff), transparent 18%);
+  border-bottom: 2px solid color-mix(in srgb, var(--aaron-link, #9de7ff), transparent 18%);
+  background: transparent;
+  cursor: nwse-resize;
+  opacity: 0;
+  touch-action: none;
+}
+.cm-editor .cm-image-widget:hover .cm-image-resize-handle,
+.cm-editor .cm-image-widget:focus-within .cm-image-resize-handle,
+.cm-editor .cm-image-resize-handle.is-resizing {
+  opacity: 0.9;
+}
+.cm-editor .cm-image-widget.is-resizing {
+  user-select: none;
+}
 .aaronnote-visual-attachment {
   display: block;
   width: fit-content;
@@ -1118,6 +1142,78 @@
 .aaronnote-meta-abstract-content li + li { margin-top: 0.2em; }
 .aaronnote-meta-abstract-content math-block { margin: 0.8em 0; text-align: center; }
 
+.aaronnote-meta-properties {
+  width: min(920px, 94%);
+  margin: 28px auto 0;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), transparent 28%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--aaron-paper, #171b28), var(--aaron-panel, #202536) 24%);
+  color: var(--aaron-ink, #e6e2da);
+  text-align: left;
+}
+
+.aaronnote-meta-properties > summary {
+  padding: 10px 14px;
+  color: var(--aaron-muted, #a7a093);
+  font: 650 12px/1.35 var(--aaron-font-sans, system-ui);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  user-select: none;
+}
+
+.aaronnote-meta-properties-table { padding: 0 10px 8px; }
+.aaronnote-meta-property-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.7fr) minmax(180px, 2fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+}
+
+.aaronnote-meta-property-row input,
+.aaronnote-meta-summary-editor input,
+.aaronnote-meta-summary-editor textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), transparent 20%);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: color-mix(in srgb, var(--aaron-paper, #171b28), #000 8%);
+  color: var(--aaron-ink, #e6e2da);
+  font: 500 12px/1.35 var(--aaron-font-mono, ui-monospace, monospace);
+}
+
+.aaronnote-meta-property-row input[type="checkbox"] {
+  width: 18px;
+  min-height: 18px;
+  justify-self: start;
+}
+
+.aaronnote-meta-property-tools { display: inline-flex; gap: 3px; }
+.aaronnote-meta-property-tools button,
+.aaronnote-meta-property-actions button {
+  min-width: 27px;
+  min-height: 27px;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), transparent 26%);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--aaron-muted, #a7a093);
+  cursor: pointer;
+}
+.aaronnote-meta-property-tools button:hover,
+.aaronnote-meta-property-actions button:hover { color: var(--aaron-title, #ff9bad); }
+.aaronnote-meta-property-tools button:disabled { opacity: 0.28; cursor: default; }
+.aaronnote-meta-property-actions { padding: 0 10px 10px; }
+.aaronnote-meta-summary-editor {
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d8d0c2), transparent 50%);
+  padding: 10px;
+}
+.aaronnote-meta-summary-editor textarea { resize: vertical; font-family: var(--aaron-font-prose, Georgia, serif); }
+.aaronnote-meta-properties-limit { margin: 0; padding: 0 14px 12px; color: var(--aaron-muted, #a7a093); }
+
 /* Headings remain meaningful inside the abstract, but they are local
  * subdivisions—not page-level title/section chrome. */
 .cm-editor .aaronnote-meta-abstract-content h1,
@@ -1276,6 +1372,66 @@
   color: var(--aaron-muted, #a9bed3);
   background: transparent;
 }
+.cm-editor .cm-front-matter-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.55fr) minmax(120px, 1.45fr);
+  gap: 12px;
+  white-space: normal;
+}
+.cm-editor .cm-front-matter-key { color: var(--aaron-callout-warning, #ffe7aa); }
+.cm-editor .cm-front-matter-value { overflow-wrap: anywhere; }
+.cm-editor .cm-front-matter-source-only {
+  display: block;
+  margin-top: 6px;
+  color: var(--aaron-faint, #6f748b);
+  font-size: 10px;
+}
+
+/* ─── Native @@revision review widget ───────────────────────────── */
+.cm-editor .aaronnote-revision {
+  position: relative;
+  display: inline;
+  --revision-color: #8f82ff;
+}
+.cm-editor .aaronnote-revision[data-revision-style="teal"] { --revision-color: #3cc9bb; }
+.cm-editor .aaronnote-revision[data-revision-style="red"] { --revision-color: #ef6f7b; }
+.cm-editor .aaronnote-revision[data-revision-style="green"] { --revision-color: #69c786; }
+.cm-editor .aaronnote-revision[data-revision-style="yellow"] { --revision-color: #d4b34f; }
+.cm-editor .aaronnote-revision-original {
+  border-bottom: 2px solid var(--revision-color);
+  padding-bottom: 1px;
+  cursor: help;
+}
+.cm-editor .aaronnote-revision-card {
+  position: absolute;
+  z-index: 35;
+  left: 0;
+  top: calc(100% + 7px);
+  display: none;
+  box-sizing: border-box;
+  width: min(360px, 72vw);
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, var(--revision-color), transparent 34%);
+  border-radius: 7px;
+  padding: 9px;
+  background: var(--aaron-paper, #171b28);
+  color: var(--aaron-ink, #e6e2da);
+  box-shadow: 0 8px 26px rgb(0 0 0 / 24%);
+  font: 12px/1.45 var(--aaron-font-sans, system-ui);
+}
+.cm-editor .aaronnote-revision:hover .aaronnote-revision-card,
+.cm-editor .aaronnote-revision:focus-within .aaronnote-revision-card { display: grid; }
+.cm-editor .aaronnote-revision-advice { font-family: var(--aaron-font-prose, Georgia, serif); }
+.cm-editor .aaronnote-revision-reason { color: var(--aaron-muted, #a7a093); }
+.cm-editor .aaronnote-revision-actions { display: flex; gap: 5px; width: auto; height: auto; margin: 0; background: none; }
+.cm-editor .aaronnote-revision-actions button {
+  border: 1px solid color-mix(in srgb, var(--revision-color), transparent 50%);
+  border-radius: 4px;
+  padding: 3px 7px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
 
 /* ─── CM6 horizontal rule ───────────────────────────────────────── */
 .cm-editor .cm-horizontal-rule {
@@ -1301,6 +1457,23 @@
   user-select: none;
   pointer-events: none;
 }
+.cm-editor .cm-code-lang-badge.cm-code-lang-editor {
+  min-width: 2.5em;
+  cursor: text;
+  pointer-events: auto;
+}
+.cm-editor .cm-code-lang-input {
+  box-sizing: border-box;
+  width: 7.5em;
+  min-width: 3em;
+  padding: 0 3px;
+  border: 1px solid color-mix(in srgb, var(--aaron-link, #9de7ff), transparent 45%);
+  border-radius: 3px;
+  outline: none;
+  background: var(--aaron-paper-soft, #1e2536);
+  color: var(--aaron-ink, #e4ecff);
+  font: inherit;
+}
 
 .cm-editor .cm-code-copy-button {
   position: absolute;
@@ -1325,6 +1498,114 @@
   color: var(--aaron-ink, #e4ecff);
   border-color: color-mix(in srgb, var(--aaron-muted, #a9bed3), transparent 35%);
   opacity: 1;
+}
+.cm-editor .cm-code-fold-button {
+  position: absolute;
+  top: 2px;
+  right: 64px;
+  z-index: 2;
+  box-sizing: border-box;
+  width: 48px;
+  padding: 1px 0;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #d8dee4), #000 8%);
+  border-radius: 4px;
+  background: var(--aaron-panel, #232b3d);
+  color: var(--aaron-muted, #a9bed3);
+  cursor: pointer;
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  opacity: 0.78;
+}
+.cm-editor .cm-code-fold-button:hover,
+.cm-editor .cm-code-fold-button:focus {
+  color: var(--aaron-ink, #e4ecff);
+  opacity: 1;
+}
+.cm-editor .cm-code-fold-placeholder {
+  box-sizing: border-box;
+  min-height: 30px;
+  padding: 5px 10px;
+  border-left: 2px solid var(--aaron-paper-line, #414b61);
+  background: color-mix(in srgb, var(--aaron-code-bg, #1e2638), transparent 8%);
+  color: var(--aaron-faint, #6f748b);
+  font: 11px/20px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ─── Standard Markdown footnotes ───────────────────────────────── */
+.cm-editor .cm-footnote-reference button {
+  padding: 0 0.16em;
+  border: 0;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--aaron-link, #9de7ff), transparent 84%);
+  color: var(--aaron-link, #9de7ff);
+  cursor: pointer;
+  font: 700 0.72em/1 var(--aaron-font-sans, system-ui, sans-serif);
+}
+.cm-editor .cm-footnote-definition-label {
+  display: inline-block;
+  min-width: 1.5em;
+  margin-right: 0.35em;
+  color: var(--aaron-link, #9de7ff);
+  font: 700 0.72em/1 var(--aaron-font-sans, system-ui, sans-serif);
+}
+.cm-editor .cm-footnote-definition-label button {
+  margin-left: 0.25em;
+  border: 0;
+  padding: 0 0.15em;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* ─── Visible-range block drag handles ──────────────────────────── */
+.cm-editor .cm-gutters {
+  border-inline-end: 0;
+  background-color: var(--aaronnote-bg, #141a27);
+  color: var(--aaron-faint, #6f748b);
+}
+.cm-editor .cm-block-drag-gutter {
+  flex: 0 0 18px;
+  min-width: 18px;
+  width: 18px;
+  border: 0;
+  background-color: inherit;
+}
+.cm-editor .cm-block-drag-gutter .cm-gutterElement {
+  display: grid;
+  place-items: start center;
+  background-color: inherit;
+}
+.cm-editor .cm-block-drag-handle {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 22px;
+  color: var(--aaron-faint, #6f748b);
+  cursor: grab;
+  opacity: 0.15;
+  user-select: none;
+  font: 700 13px/1 ui-monospace, monospace;
+}
+.cm-editor .cm-line:hover ~ * .cm-block-drag-handle,
+.cm-editor .cm-block-drag-handle:hover { opacity: 0.9; color: var(--aaron-link, #9de7ff); }
+.cm-editor .cm-block-drag-handle:active { cursor: grabbing; }
+.cm-editor .cm-block-drag-handle.is-disabled { cursor: not-allowed; opacity: 0.18; }
+.cm-editor .aaronnote-footnote-reference a,
+.cm-editor .aaronnote-footnote-backref {
+  color: var(--aaron-link, #9de7ff);
+  text-decoration: none;
+}
+.cm-editor .aaronnote-footnote-definition {
+  display: block;
+  padding: 0.3em 0 0.3em 1.15em;
+  border-left: 2px solid color-mix(in srgb, var(--aaron-paper-line, #414b61), transparent 25%);
+  color: var(--aaron-muted, #a9bed3);
+  font-size: 0.88em;
+}
+.cm-editor .aaronnote-footnote-number {
+  margin-left: -0.75em;
+  color: var(--aaron-link, #9de7ff);
+  font-weight: 700;
 }
 
 /* ─── CM6 fenced code: syntax highlight tokens ───────────────────── */
@@ -3271,6 +3552,7 @@
 }
 .cm-editor .cm-table-block,
 .cm-editor .cm-table-block-preview {
+  position: relative;
   display: block;
   box-sizing: border-box;
   width: var(--aaronnote-table-width, 100%);
@@ -3337,6 +3619,79 @@
   background: var(--aaron-paper-soft, #1e2536);
   color: var(--aaron-ink, #e4ecff);
 }
+.cm-editor .cm-table-size-picker-host {
+  position: relative;
+  display: inline-flex;
+}
+.cm-editor .cm-table-size-picker {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 12;
+  display: grid;
+  grid-template-columns: repeat(8, 15px);
+  gap: 3px;
+  width: max-content;
+  padding: 7px;
+  border: 1px solid var(--aaron-paper-line, #414b61);
+  border-radius: 5px;
+  background: var(--aaron-panel, #232b3d);
+  box-shadow: var(--aaron-shadow, 0 18px 46px rgb(0 0 0 / 38%));
+}
+.cm-editor .cm-table-toolbar .cm-table-size-cell {
+  min-width: 15px;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--aaron-paper-line, #414b61), #fff 10%);
+  border-radius: 2px;
+  background: var(--aaron-paper-soft, #1e2536);
+}
+.cm-editor .cm-table-toolbar .cm-table-size-cell:hover {
+  border-color: var(--aaron-link, #9de7ff);
+  background: color-mix(in srgb, var(--aaron-link, #9de7ff), transparent 62%);
+}
+.cm-editor .cm-table-drag-handle {
+  display: inline-grid;
+  place-items: center;
+  width: 11px;
+  margin-right: 3px;
+  color: var(--aaron-faint, #6f748b);
+  cursor: grab;
+  font: 700 12px/1 ui-monospace, monospace;
+  opacity: 0;
+  user-select: none;
+}
+.cm-editor .cm-markdown-table-editable th:hover .cm-table-drag-handle,
+.cm-editor .cm-markdown-table-editable td:hover .cm-table-drag-handle,
+.cm-editor .cm-table-drag-handle:focus {
+  opacity: 0.8;
+}
+.cm-editor .cm-table-drag-handle:active { cursor: grabbing; }
+.cm-editor .cm-markdown-table-editable tr.is-row-hover > *,
+.cm-editor .cm-markdown-table-editable .is-column-hover {
+  background: color-mix(in srgb, var(--aaron-link, #9de7ff), transparent 88%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aaron-link, #9de7ff), transparent 55%);
+}
+.cm-editor .cm-table-edge-add {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--aaron-paper-line, #414b61);
+  border-radius: 50%;
+  background: var(--aaron-panel, #232b3d);
+  color: var(--aaron-muted, #a9bed3);
+  cursor: pointer;
+  opacity: 0;
+}
+.cm-editor .cm-table-block:hover .cm-table-edge-add,
+.cm-editor .cm-table-block:focus-within .cm-table-edge-add { opacity: 0.9; }
+.cm-editor .cm-table-edge-add-row { left: 50%; bottom: 0; transform: translateX(-50%); }
+.cm-editor .cm-table-edge-add-column { right: 0; top: 55%; transform: translateY(-50%); }
 .cm-editor .cm-markdown-table-editable th,
 .cm-editor .cm-markdown-table-editable td {
   cursor: text;

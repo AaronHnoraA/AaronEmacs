@@ -1,4 +1,6 @@
-import type { NoteSummary } from "./types.ts";
+import type { GraphNode, GraphPayload, NoteSummary } from "./types.ts";
+import type { WorkspaceGraph } from "./workspace-graph.ts";
+import { parseSimpleFrontmatter, simpleFrontmatterStrings } from "../src/simple-frontmatter.ts";
 import { CoalescedTimer } from "../src/coalesced-timer.ts";
 
 type OpenNoteOptions = { newWindow?: boolean };
@@ -13,6 +15,12 @@ type LocalGraphPanelOptions = {
   tagsInput: HTMLInputElement;
   canvas: HTMLElement;
   status: HTMLElement;
+  searchInput?: HTMLInputElement;
+  groupInput?: HTMLSelectElement;
+  detail?: HTMLElement;
+  modeButtons?: HTMLButtonElement[];
+  getWorkspaceGraph?: () => Promise<GraphPayload>;
+  getIndexVersion?: () => number;
   getNotes: () => NoteSummary[];
   getCurrentNote: () => NoteSummary | undefined;
   getMarkdown: () => string;
@@ -149,8 +157,8 @@ function markdownRoamTags(markdown: string): string[] | null {
   const text = String(markdown || "");
   const metaBlock = text.match(/^\s*#\+begin\s+meta\s*\r?\n([\s\S]*?)\r?\n\s*#\+end\s+meta\s*$/im);
   if (metaBlock) return tagsFromMetaLines(metaBlock[1] || "");
-  const frontMatter = text.match(/^\s*---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/);
-  return frontMatter ? tagsFromMetaLines(frontMatter[1] || "") : null;
+  const frontMatter = parseSimpleFrontmatter(text);
+  return frontMatter ? cleanTags(simpleFrontmatterStrings(frontMatter, "tags")) : null;
 }
 
 function currentRoamTags(note: NoteSummary | undefined, markdown: string): string[] {
@@ -234,6 +242,13 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
   let renderKey = "";
   const resizeTimer = new CoalescedTimer(40);
   let expandedOnce = false;
+  let mode: "local" | "workspace" = "local";
+  let workspaceGraph: WorkspaceGraph | null = null;
+  let workspacePayload: GraphPayload | null = null;
+  let workspaceRequest = 0;
+  const searchInput = options.searchInput ?? document.createElement("input");
+  const groupInput = options.groupInput ?? document.createElement("select");
+  const detail = options.detail ?? document.createElement("div");
 
   function isCollapsed(): boolean {
     return options.root.classList.contains("is-collapsed");
@@ -251,7 +266,72 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
 
   function clearGraph(): void {
     resizeTimer.cancel();
+    workspaceRequest += 1;
+    workspaceGraph?.destroy();
+    workspaceGraph = null;
     options.canvas.replaceChildren();
+  }
+
+  function currentKey(): string {
+    return noteKey(options.getCurrentNote());
+  }
+
+  function withCurrentOverlay(payload: GraphPayload): GraphPayload {
+    const current = options.getCurrentNote();
+    const key = noteKey(current);
+    if (!current || !key) return payload;
+    const nodes = payload.nodes.map((node) => node.key === key
+      ? { ...node, tags: currentRoamTags(current, options.getMarkdown()) }
+      : { ...node });
+    const edges = payload.edges.map((edge) => ({ ...edge, type: edge.type ?? "ref" as const }));
+    const seen = new Set(edges.map((edge) => `${edge.source}\0${edge.target}\0${edge.type || "ref"}`));
+    for (const ref of markdownRefs(options.getMarkdown())) {
+      const target = options.resolveNoteRef(ref);
+      const targetKey = noteKey(target);
+      const edgeKey = `${key}\0${targetKey}\0ref`;
+      if (!targetKey || targetKey === key || seen.has(edgeKey)) continue;
+      edges.push({ source: key, target: targetKey, type: "ref" });
+      seen.add(edgeKey);
+    }
+    return { ...payload, nodes, edges };
+  }
+
+  async function renderWorkspaceGraph(): Promise<void> {
+    const request = ++workspaceRequest;
+    workspaceGraph?.destroy();
+    workspaceGraph = null;
+    options.canvas.replaceChildren();
+    options.status.textContent = "Loading workspace graph…";
+    if (!options.getWorkspaceGraph) {
+      options.status.textContent = "Workspace graph API unavailable";
+      return;
+    }
+    try {
+      const expectedVersion = options.getIndexVersion?.() ?? 0;
+      if (!workspacePayload || (expectedVersion > 0 && workspacePayload.indexVersion !== expectedVersion)) {
+        workspacePayload = await options.getWorkspaceGraph();
+      }
+      if (request !== workspaceRequest || isCollapsed() || mode !== "workspace") return;
+      const module = await import("./workspace-graph.ts");
+      if (request !== workspaceRequest || isCollapsed() || mode !== "workspace") return;
+      workspaceGraph = module.createWorkspaceGraph({
+        root: options.canvas,
+        status: options.status,
+        detail,
+        searchInput,
+        groupInput,
+        payload: withCurrentOverlay(workspacePayload),
+        currentKey: currentKey(),
+        openNode: (node: GraphNode, openOptions) => {
+          const note = options.getNotes().find((candidate) => noteKey(candidate) === node.key)
+            ?? options.resolveNoteRef(node.key);
+          if (note) options.openNote(note, openOptions);
+        },
+      });
+    } catch (error) {
+      if (request !== workspaceRequest) return;
+      options.status.textContent = error instanceof Error ? error.message : "Workspace graph failed";
+    }
   }
 
   function noteSignature(note: NoteSummary | undefined): string {
@@ -484,6 +564,10 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
 
   function renderGraph(): void {
     clearGraph();
+    if (mode === "workspace") {
+      void renderWorkspaceGraph();
+      return;
+    }
     const rect = options.canvas.getBoundingClientRect();
     const width = Math.max(300, Math.round(rect.width || options.canvas.clientWidth || 360));
     const height = Math.max(240, Math.round(rect.height || options.canvas.clientHeight || 260));
@@ -565,6 +649,26 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
 
     let dragNode: LocalNode | null = null;
     let dragMoved = false;
+    let selectedNodeId = "";
+
+    function selectNode(node: LocalNode): void {
+      selectedNodeId = node.id;
+      const neighborIds = new Set<string>([node.id]);
+      for (const { link } of linkEls) {
+        if (link.source === node.id) neighborIds.add(link.target);
+        if (link.target === node.id) neighborIds.add(link.source);
+      }
+      for (const { node: candidate, group } of nodeEls) {
+        group.classList.toggle("is-selected", candidate.id === node.id);
+        group.classList.toggle("is-dimmed", !neighborIds.has(candidate.id));
+      }
+      for (const { link, line } of linkEls) {
+        const related = link.source === node.id || link.target === node.id;
+        line.classList.toggle("is-selected", related);
+        line.classList.toggle("is-dimmed", !related);
+      }
+      options.status.textContent = `${nodes.length} nodes · ${links.length} links · ${node.label}${graph.truncated ? " · capped" : ""}`;
+    }
 
     const nodeEls = nodes.map((node) => {
       const group = document.createElementNS(svg.namespaceURI, "g") as SVGGElement;
@@ -601,16 +705,26 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
         if (dragNode !== node) return;
         group.releasePointerCapture(event.pointerId);
         dragNode = null;
-        node.fx = undefined;
-        node.fy = undefined;
+        if (!dragMoved) { node.fx = undefined; node.fy = undefined; }
       });
       group.addEventListener("click", (event) => {
         if (dragMoved) return;
+        event.preventDefault();
+        selectNode(node);
+      });
+      group.addEventListener("dblclick", (event) => {
         if (node.type === "tag" && node.tag) {
           options.openTag(node.tag);
           return;
         }
         if (node.note?.file) options.openNote(node.note, { newWindow: event.metaKey || event.altKey });
+      });
+      group.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        if (selectedNodeId !== node.id) { selectNode(node); return; }
+        if (node.type === "tag" && node.tag) options.openTag(node.tag);
+        else if (node.note?.file) options.openNote(node.note);
       });
       group.addEventListener("auxclick", (event) => {
         if (event.button !== 1 || !node.note?.file) return;
@@ -745,6 +859,9 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
 
   function invalidate(): void {
     renderKey = "";
+    if (workspacePayload && options.getIndexVersion && workspacePayload.indexVersion !== options.getIndexVersion()) {
+      workspacePayload = null;
+    }
     if (!isCollapsed()) scheduleUpdate();
   }
 
@@ -753,6 +870,24 @@ export function createLocalGraphPanel(options: LocalGraphPanelOptions): LocalGra
     input.addEventListener("input", () => update(true));
     input.addEventListener("change", () => update(true));
   }
+  for (const button of options.modeButtons ?? []) {
+    button.addEventListener("click", () => {
+      const next = button.dataset.graphMode === "workspace" ? "workspace" : "local";
+      if (next === mode) return;
+      mode = next;
+      options.root.dataset.graphMode = mode;
+      for (const candidate of options.modeButtons ?? []) candidate.classList.toggle("is-active", candidate === button);
+      options.depthInput.disabled = mode === "workspace";
+      options.depthLabel.hidden = mode === "workspace";
+      searchInput.disabled = mode === "local";
+      groupInput.disabled = mode === "local";
+      detail.hidden = true;
+      renderKey = "";
+      update(true);
+    });
+  }
+  searchInput.disabled = true;
+  groupInput.disabled = true;
   window.addEventListener("resize", () => scheduleUpdate(120));
 
   return { toggle, collapse, update, invalidate };

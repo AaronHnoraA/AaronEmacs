@@ -1,8 +1,9 @@
 # Aaronnote Jupyter Kernel Stack
 
-This directory holds the Python side of Aaronnote's Jupyter support: a private
-virtualenv (`jupyter/.venv`) with `ipykernel`/`ipywidgets`/`bash_kernel`, plus
-kernelspec templates. There is **no Jupyter server process** — the Node cell
+This directory holds Aaronnote's project-owned kernelspec templates and stable
+kernel launchers. Python packages live in the `aaronnote-python` Conda
+environment; Sage is resolved dynamically from the installed `sage` command.
+There is **no Jupyter server process** — the Node cell
 service (`server/lib/jupyter-cell.mjs`, orchestrating `server/jupyter/*`)
 launches and talks to kernels directly over raw ZMQ, the same approach
 Microsoft's VS Code Jupyter extension uses for local kernels (ported/adapted
@@ -12,12 +13,15 @@ Code Jupyter uses — see "Frontend rendering" below.
 
 The runtime provides:
 
-- a private virtualenv under `jupyter/.venv` with `ipykernel`, `ipywidgets`,
-  and `bash_kernel`
+- an `aaronnote-python` Conda environment, reconciled from
+  `etc/conda/aaronnote-python.yml`, with `ipykernel`, `ipywidgets`, and
+  `bash_kernel`
+- stable `python3`, `bash`, and `sagemath` kernelspec ids whose launchers read
+  generated runtime metadata, so upgrades do not embed interpreter paths or a
+  Sage version in notes
 - kernelspec discovery matching Jupyter's own search order (this project's
-  data dir, the venv's own `share/jupyter`, and — unless disabled — the user's
+  data dir and — unless disabled — the user's
   `~/Library/Jupyter`/`~/.local/share/jupyter` and system dirs)
-- optional local kernelspec templates, such as Sage
 - isolated Jupyter config/data/runtime directories under `jupyter/.jupyter`
 - attaching to an already-running kernel via its connection file (e.g. a
   remembered `kernel-*.json` from an Emacs-managed remote-kernel workflow),
@@ -26,7 +30,10 @@ The runtime provides:
   WebSocket bridge (`server/lib/jupyter-kernel-ws.mjs`), which talks raw ZMQ
   directly rather than proxying to a Jupyter server
 
-From `lisp/roam/aaronnote`:
+From the AaronNote notes repository, run `make setup` or `make runtime-update`.
+Both are thin proxies to the central Emacs script
+`scripts/aaronnote-runtime`. For compatibility, from `lisp/roam/aaronnote`
+you can also run:
 
 ```sh
 npm run jupyter:bootstrap
@@ -106,6 +113,9 @@ they stay out of the main editor bundle until a cell actually produces output.
 | `AARONNOTE_JUPYTER_USE_HOME_KERNELS` | `1` | Also search `~/Library/Jupyter`, `~/.local/share/jupyter`, and system Jupyter dirs for kernelspecs. |
 | `AARONNOTE_JUPYTER_ALLOWED_KERNELS` | unset | Comma-separated kernelspec name allowlist. |
 | `AARONNOTE_JUPYTER_ATTACH_DIRS` | unset | `:`-separated extra directories to search for attachable `kernel-*.json` connection files, beyond `jupyter/.jupyter/runtime`. |
+| `AARONNOTE_JUPYTER_DEFAULT_LANGUAGE` | `python` | Default language for a newly inserted bare cell; supplied from project `:aaronnote-jupyter` settings. |
+| `AARONNOTE_JUPYTER_DEFAULT_KERNEL` | derived | Stable default kernelspec id (`sagemath` for Sage, otherwise `python3`) unless the project overrides it. |
+| `AARONNOTE_JUPYTER_DEFAULT_SESSION` | `default` | Default persistent cell session name. |
 
 Removed: `AARONNOTE_JUPYTER_HOST`/`_PORT`/`_URL`/`_SERVER_IDLE_TTL_MS` (there is
 no server process to bind or point at anymore). To use a kernel that isn't

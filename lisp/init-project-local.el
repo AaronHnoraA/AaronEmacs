@@ -33,12 +33,69 @@ Supported plist keys:
 - `:task', `:run', and `:debug' as alists of (LABEL . SPEC)
 - `:debug-default' as a debug SPEC or profile label
 - `:language-server' as one of `eglot', `lsp-mode', or `disabled'
-- `:eglot-workspace' as extra workspace configuration merged before startup."
+- `:eglot-workspace' as extra workspace configuration merged before startup
+- `:toolchain' as a language-family to profile-id alist
+- `:toolchain-profiles' as named language-server toolchain profiles
+- `:aaronnote-jupyter' as project Jupyter cell defaults."
   :type '(repeat (cons :tag "Project override" sexp sexp))
   :group 'my/project-local)
 
 (defvar-local my/project-local-settings nil
   "Buffer-local project override plist, typically set via `.dir-locals.el'.")
+
+(defun my/project-local--simple-toolchain-selection-p (value)
+  "Return non-nil when VALUE is a declarative toolchain selection."
+  (or (and value (symbolp value))
+      (stringp value)
+      (and (listp value)
+           (seq-every-p
+            (lambda (entry)
+              (and (consp entry)
+                   (symbolp (car entry))
+                   (or (symbolp (cdr entry)) (stringp (cdr entry)))))
+            value))))
+
+(defun my/project-local--simple-jupyter-defaults-p (value)
+  "Return non-nil when VALUE contains safe Aaronnote Jupyter defaults."
+  (and (listp value)
+       (let ((rest value)
+             (allowed '(:language :kernel :session))
+             (valid t))
+         (while (and valid rest)
+           (let ((key (pop rest)))
+             (if (null rest)
+                 (setq valid nil)
+               (let ((item (pop rest)))
+                 (setq valid
+                       (and (memq key allowed)
+                            item
+                            (or (symbolp item) (stringp item))))))))
+         (and valid (null rest)))))
+
+(defun my/project-local-settings-safe-p (value)
+  "Return non-nil for the non-executable project settings in VALUE.
+
+Command, environment, custom server and custom profile entries intentionally
+remain subject to Emacs' normal local-variable confirmation."
+  (and (listp value)
+       (let ((rest value)
+             (valid t))
+         (while (and valid rest)
+           (let ((key (pop rest)))
+             (if (null rest)
+                 (setq valid nil)
+               (let ((item (pop rest)))
+                 (setq valid
+                       (pcase key
+                         (:toolchain
+                          (my/project-local--simple-toolchain-selection-p item))
+                         (:aaronnote-jupyter
+                          (my/project-local--simple-jupyter-defaults-p item))
+                         (_ nil)))))))
+         (and valid (null rest)))))
+
+(put 'my/project-local-settings 'safe-local-variable
+     #'my/project-local-settings-safe-p)
 
 (defconst my/project-local--env-keys
   '(:env :test-env :task-env :run-env :debug-env :lsp-env)
@@ -47,6 +104,10 @@ Supported plist keys:
 (defconst my/project-local--candidate-keys
   '(:task :run :debug)
   "Plist keys that contain named candidate alists.")
+
+(defconst my/project-local--named-profile-keys
+  '(:toolchain-profiles)
+  "Plist keys that contain named profile alists.")
 
 (defun my/project-local-root ()
   "Return the best root for project-local workflow overrides."
@@ -86,6 +147,8 @@ Supported plist keys:
      (my/project-local--merge-pairs old new))
     ((pred (lambda (item) (memq item my/project-local--candidate-keys)))
      (append old new))
+    ((pred (lambda (item) (memq item my/project-local--named-profile-keys)))
+     (my/project-local--merge-pairs old new))
     (:test
      (if (and (my/project-local--pair-list-p old)
               (my/project-local--pair-list-p new))

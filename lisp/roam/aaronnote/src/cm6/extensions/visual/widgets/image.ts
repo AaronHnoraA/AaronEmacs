@@ -138,6 +138,7 @@ class ImageWidget extends MeasuredWidget {
 
   toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement("figure");
+    let resizableImage: HTMLImageElement | null = null;
     wrap.className = "cm-image-widget";
     setSourceRange(wrap, this.from, this.to);
     applyImageLayout(wrap, this.layout);
@@ -180,6 +181,7 @@ class ImageWidget extends MeasuredWidget {
           view.requestMeasure();
         };
         wrap.append(img);
+        resizableImage = img;
       }
     } else {
       wrap.classList.add("cm-image-broken");
@@ -205,14 +207,91 @@ class ImageWidget extends MeasuredWidget {
       view.requestMeasure();
     };
     wrap.append(buildImageToolbar(this.layout, applyLayout));
+    if (resizableImage) {
+      wrap.append(buildImageResizeHandle(wrap, resizableImage, this.layout, applyLayout, view));
+    }
 
     return this.registerMeasured(wrap, view);
   }
 
   ignoreEvent(event: Event): boolean {
     const target = event.target as HTMLElement | null;
-    return Boolean(target?.closest(".cm-image-toolbar"));
+    return Boolean(target?.closest(".cm-image-toolbar, .cm-image-resize-handle"));
   }
+}
+
+function buildImageResizeHandle(
+  wrap: HTMLElement,
+  image: HTMLImageElement,
+  layout: ImageLayoutAttrs,
+  apply: (next: ImageLayoutAttrs) => void,
+  view: EditorView,
+): HTMLButtonElement {
+  const handle = document.createElement("button");
+  handle.type = "button";
+  handle.className = "cm-image-resize-handle";
+  handle.title = "Drag to resize image";
+  handle.setAttribute("aria-label", handle.title);
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const fallbackWidth = Number.parseFloat(layout.width) || 320;
+    const startWidth = image.getBoundingClientRect().width || fallbackWidth;
+    const contentWidth = Math.max(160, view.contentDOM.clientWidth || wrap.parentElement?.clientWidth || 960);
+    const maxWidth = Math.max(96, Math.floor(contentWidth));
+    let pendingWidth = Math.round(startWidth);
+    let frame = 0;
+    let finished = false;
+    handle.classList.add("is-resizing");
+    wrap.classList.add("is-resizing");
+    handle.setPointerCapture?.(event.pointerId);
+
+    const detach = (): void => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", finish);
+      handle.removeEventListener("pointercancel", cancel);
+      handle.classList.remove("is-resizing");
+      wrap.classList.remove("is-resizing");
+    };
+    const paint = (): void => {
+      frame = 0;
+      if (!wrap.isConnected || finished) return;
+      wrap.style.setProperty("--aaronnote-image-width", `${pendingWidth}px`);
+      wrap.style.setProperty("--aaronnote-image-max-width", "none");
+      view.requestMeasure();
+    };
+    const move = (moveEvent: PointerEvent): void => {
+      moveEvent.preventDefault();
+      pendingWidth = Math.max(96, Math.min(maxWidth, Math.round(startWidth + moveEvent.clientX - startX)));
+      if (!frame) frame = window.requestAnimationFrame(paint);
+    };
+    const finish = (finishEvent: PointerEvent): void => {
+      finishEvent.preventDefault();
+      finishEvent.stopPropagation();
+      finished = true;
+      if (frame) window.cancelAnimationFrame(frame);
+      handle.releasePointerCapture?.(finishEvent.pointerId);
+      detach();
+      apply({ ...layout, width: `${pendingWidth}px`, height: "" });
+    };
+    const cancel = (cancelEvent: PointerEvent): void => {
+      finished = true;
+      if (frame) window.cancelAnimationFrame(frame);
+      handle.releasePointerCapture?.(cancelEvent.pointerId);
+      detach();
+      if (layout.width) wrap.style.setProperty("--aaronnote-image-width", layout.width);
+      else wrap.style.removeProperty("--aaronnote-image-width");
+      view.requestMeasure();
+    };
+
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", cancel);
+  });
+  return handle;
 }
 
 function stopImageEvent(event: Event): void {

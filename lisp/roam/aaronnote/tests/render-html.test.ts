@@ -594,4 +594,36 @@ Body.
     expect(html).toContain("<h2>Body Heading</h2>");
     expect(html).not.toContain("published-note-cover");
   });
+
+  test("renders standard Markdown footnotes with stable reference and back links", () => {
+    const html = renderMarkdownHTML([
+      "A claim[^proof] and another reference[^proof].",
+      "",
+      "[^proof]: **Proof sketch** on one line.",
+    ].join("\n"));
+
+    expect(html.match(/aaronnote-footnote-reference/g)).toHaveLength(2);
+    expect(html).toContain('href="#fn-proof"');
+    expect(html).toContain('id="fn-proof"');
+    expect(html).toContain("<strong>Proof sketch</strong>");
+    expect(html).toContain('href="#fnref-proof-1"');
+    expect(html).not.toContain("[^proof]");
+  });
+
+  test("keeps footnote-looking text literal in code and when undefined", () => {
+    const html = renderMarkdownHTML("`[^code]` and undefined [^missing].");
+    expect(html).toContain("[^code]");
+    expect(html).toContain("[^missing]");
+    expect(html).not.toContain("aaronnote-footnote-reference");
+  });
+
+  test("always exports unresolved revisions with original, advice, and reason", () => {
+    const html = renderMarkdownHTML('@@revision(red) [old **claim**] {advice: "new claim"; reason: "clearer"}');
+    expect(html).toContain('class="aaronnote-revision"');
+    expect(html).toContain('data-revision-style="red"');
+    expect(html).toContain("<strong>claim</strong>");
+    expect(html).toContain("new claim");
+    expect(html).toContain("clearer");
+    expect(html).not.toContain("@@revision");
+  });
 });

@@ -3,8 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JUPYTER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-VENV="${JUPYTER_ROOT}/.venv"
-PYTHON_BIN="${PYTHON:-python3}"
+EMACS_ROOT="$(cd "${JUPYTER_ROOT}/../../../.." && pwd)"
+RUNTIME_TOOL="${EMACS_ROOT}/scripts/aaronnote-runtime"
 
 mkdir -p \
   "${JUPYTER_ROOT}/.jupyter/config" \
@@ -14,24 +14,12 @@ mkdir -p \
   "${JUPYTER_ROOT}/.jupyter/ipython" \
   "${JUPYTER_ROOT}/.jupyter/tmp"
 
-if [ ! -x "${VENV}/bin/python" ]; then
-  "$PYTHON_BIN" -m venv "$VENV"
-fi
-
-export JUPYTER_CONFIG_DIR="${JUPYTER_ROOT}/.jupyter/config"
-export JUPYTER_DATA_DIR="${JUPYTER_ROOT}/.jupyter/data"
-export JUPYTER_RUNTIME_DIR="${JUPYTER_ROOT}/.jupyter/runtime"
-export JUPYTER_PATH="${JUPYTER_ROOT}/.jupyter/data"
-export IPYTHONDIR="${JUPYTER_ROOT}/.jupyter/ipython"
-export PYTHONNOUSERSITE=1
-export PATH="${VENV}/bin:${PATH}"
-
-"${VENV}/bin/python" -m pip install --upgrade pip setuptools wheel
-"${VENV}/bin/python" -m pip install --requirement "${JUPYTER_ROOT}/requirements.txt"
-
-"${SCRIPT_DIR}/install-kernelspecs.sh"
+[[ -x "$RUNTIME_TOOL" ]] || { printf 'Missing runtime tool: %s\n' "$RUNTIME_TOOL" >&2; exit 1; }
+"$RUNTIME_TOOL" python-env
+"$RUNTIME_TOOL" sage-refresh
+"$RUNTIME_TOOL" sage-packages
 
 printf 'Aaronnote Jupyter kernel server bootstrap complete:\n'
 printf '  root: %s\n' "$JUPYTER_ROOT"
-printf '  python: %s\n' "${VENV}/bin/python"
-printf '  jupyter_data: %s\n' "$JUPYTER_DATA_DIR"
+printf '  runtime metadata: %s\n' "${EMACS_ROOT}/var/aaronnote/runtime"
+printf '  jupyter_data: %s\n' "${JUPYTER_ROOT}/.jupyter/data"

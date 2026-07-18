@@ -136,7 +136,8 @@ function makeConnectionInfo(ports, kernelName) {
 /**
  * @param {object} options
  * @param {string} options.runtimeDir - where connection files are written (owned kernels)
- * @param {string} [options.venvBinDir] - prepended to PATH for launched kernels
+ * @param {string} [options.runtimeBinDir] - prepended to PATH for launched kernels
+ * @param {string} [options.venvBinDir] - deprecated alias for runtimeBinDir
  * @param {string} [options.cwd] - working directory for launched kernel processes
  * @param {object} options.zmq - the `zeromq` module (injected so tests can stub it)
  * @param {number} [options.launchTimeoutMs]
@@ -144,6 +145,7 @@ function makeConnectionInfo(ports, kernelName) {
  */
 export function createKernelRegistry({
   runtimeDir,
+  runtimeBinDir,
   venvBinDir,
   cwd,
   zmq,
@@ -181,7 +183,10 @@ export function createKernelRegistry({
     const connectionFilePath = path.join(runtimeDir, `aaronnote-kernel-${crypto.randomUUID()}.json`);
     await writeConnectionFile(connectionFilePath, connectionInfo);
 
-    const env = buildKernelEnv({ kernelSpecEnv: kernelSpecEntry.spec.env, venvBinDir });
+    const env = buildKernelEnv({
+      kernelSpecEnv: kernelSpecEntry.spec.env,
+      runtimeBinDir: runtimeBinDir || venvBinDir,
+    });
     const process_ = spawnKernelProcess({
       kernelSpec: kernelSpecEntry.spec,
       connectionFilePath,

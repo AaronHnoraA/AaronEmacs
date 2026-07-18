@@ -26,6 +26,28 @@ export type NoteSummary = {
   size?: number;
 };
 
+export type GraphNode = {
+  key: string;
+  id?: string;
+  title?: string;
+  path?: string;
+  link?: string;
+  groupKey?: string;
+  groupLabel?: string;
+  tags?: string[];
+  aliases?: string[];
+};
+
+export type GraphEdge = { source: string; target: string; type?: "ref" | "backlink" | "tag" };
+
+export type GraphPayload = {
+  type?: string;
+  indexVersion: number;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  meta: { generatedAt?: string; noteCount?: number; edgeCount?: number; tagCount?: number };
+};
+
 export type DirectorySummary = {
   path: string;
   label?: string;
@@ -56,6 +78,8 @@ export type SnippetSummary = {
   kind?: string;
   body?: string;
   source?: string;
+  /** Built-in authoring context. User/server snippets may omit it. */
+  context?: "prose" | "org-meta" | "markdown";
 };
 
 export type TemplateSummary = {

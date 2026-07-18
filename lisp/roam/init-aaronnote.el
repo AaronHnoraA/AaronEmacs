@@ -38,11 +38,6 @@
 (declare-function xwidget-webkit-execute-script "xwidget" (xwidget script &optional callback))
 (declare-function xwidget-webkit-pass-command-event "xwidget" (event))
 (declare-function my/copilot-aaronnote-bridge-url "init-copilot" ())
-(declare-function my/aaronnote-jupyter-open-path "init-aaronnote-jupyter" (abs-path &optional selector))
-(declare-function my/aaronnote-jupyter-open-root "init-aaronnote-jupyter" ())
-(declare-function my/aaronnote-jupyter-open-target "init-aaronnote-jupyter" (target))
-(declare-function my/aaronnote-jupyter-open-url "init-aaronnote-jupyter" (url))
-(declare-function my/aaronnote-jupyter-url-p "init-aaronnote-jupyter" (url))
 (declare-function my/zotero-open-reference "init-latex" (payload))
 (declare-function my/zotero-import-bibtex "init-latex" (payload))
 (defvar my/appine-tab-list)
@@ -89,6 +84,36 @@
 (defvar my/aaronnote--notes-root
   (expand-file-name ".roam" user-emacs-directory)
   "Path to the Markdown notes directory.")
+
+(defun my/aaronnote--project-settings ()
+  "Read Aaronnote's project settings from the note root without evaluation."
+  (let ((file (expand-file-name ".dir-locals.el" my/aaronnote--notes-root)))
+    (when (file-readable-p file)
+      (condition-case nil
+          (with-temp-buffer
+            (insert-file-contents file)
+            (goto-char (point-min))
+            (forward-comment (point-max))
+            (let* ((dir-locals (read (current-buffer)))
+                   (global-variables (cdr (assq nil dir-locals))))
+              (cdr (assq 'my/project-local-settings global-variables))))
+        (error nil)))))
+
+(defun my/aaronnote--jupyter-defaults ()
+  "Return project-configured Jupyter defaults for new Aaronnote cells."
+  (let* ((settings (my/aaronnote--project-settings))
+         (configured (plist-get settings :aaronnote-jupyter)))
+    (list :language (format "%s" (or (plist-get configured :language) "python"))
+          :kernel (format "%s" (or (plist-get configured :kernel) "python3"))
+          :session (format "%s" (or (plist-get configured :session) "default")))))
+
+(defun my/aaronnote--jupyter-default-environment ()
+  "Return web-host environment entries for project Jupyter defaults."
+  (let ((defaults (my/aaronnote--jupyter-defaults)))
+    (list
+     (format "AARONNOTE_JUPYTER_DEFAULT_LANGUAGE=%s" (plist-get defaults :language))
+     (format "AARONNOTE_JUPYTER_DEFAULT_KERNEL=%s" (plist-get defaults :kernel))
+     (format "AARONNOTE_JUPYTER_DEFAULT_SESSION=%s" (plist-get defaults :session)))))
 
 (defvar my/aaronnote--katex-macros-dir
   (expand-file-name "etc/katex-macros" user-emacs-directory)
@@ -409,7 +434,8 @@ failure is diagnosable without hunting for it."
          (process-environment
           (append
            (delq nil
-            (list
+            (append
+             (list
             (format "AARONNOTE_ROOT=%s" (expand-file-name my/aaronnote--notes-root))
             (format "AARONNOTE_WEB_DIR=%s" (expand-file-name my/aaronnote--web-dir))
             (format "AARONNOTE_RUNTIME_ROOT=%s" (expand-file-name my/aaronnote--runtime-root))
@@ -428,7 +454,9 @@ failure is diagnosable without hunting for it."
             (format "AARONNOTE_TMP_DIR=%s" (expand-file-name my/aaronnote--tmp-root))
             (format "AARONNOTE_SNIPPETS_ROOT=%s" (expand-file-name my/aaronnote--snippets-root))
             (format "AARONNOTE_TEMPLATES_ROOT=%s" (expand-file-name my/aaronnote--templates-root))
-            (format "AARONNOTE_KATEX_MACROS_DIR=%s" (expand-file-name my/aaronnote--katex-macros-dir))
+            (format "AARONNOTE_KATEX_MACROS_DIR=%s" (expand-file-name my/aaronnote--katex-macros-dir)))
+            (my/aaronnote--jupyter-default-environment)
+            (list
             (format "AARONNOTE_LATEX_EXPORT_ENGINE=%s"
                     (or my/aaronnote-latex-export-engine "codex"))
             (format "AARONNOTE_LATEX_EXPORT_AGENT=%s"
@@ -466,7 +494,7 @@ failure is diagnosable without hunting for it."
             (when (and (not copilot-bridge-url)
                        (bound-and-true-p my/copilot-server-max-heap-mb))
               (format "AARONNOTE_COPILOT_MAX_HEAP_MB=%d"
-                      my/copilot-server-max-heap-mb))))
+                      my/copilot-server-max-heap-mb)))))
            process-environment))
          (proc (make-process
                 :name "aaronnote-web-host"
@@ -605,17 +633,6 @@ failure is diagnosable without hunting for it."
                  (target (alist-get 'target payload)))
             (when (and (stringp target) (not (string-empty-p target)))
               (cond
-               ((and (string-match-p "\\.ipynb\\(?:@\\|#\\|\\'\\)" target)
-                     (progn
-                       (unless (fboundp 'my/aaronnote-jupyter-open-target)
-                         (require 'init-aaronnote-jupyter))
-                       (my/aaronnote-jupyter-open-target target))))
-               ((and (progn
-                       (unless (fboundp 'my/aaronnote-jupyter-url-p)
-                         (require 'init-aaronnote-jupyter nil t))
-                       (fboundp 'my/aaronnote-jupyter-url-p))
-                     (my/aaronnote-jupyter-url-p target))
-                (my/aaronnote-jupyter-open-url target))
                ;; Absolute file/dir path: use smart routing (dired, find-file,
                ;; pdf->system, etc.) instead of delegating to macOS `open'.
                ((file-name-absolute-p target)
@@ -1691,6 +1708,13 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 (my/aaronnote--def-editor-cmd "code-inline"     "code"            "Toggle inline code at point.")
 (my/aaronnote--def-editor-cmd "highlight"       "highlight"       "Toggle highlight at point.")
 (my/aaronnote--def-editor-cmd "strike"          "strike"          "Toggle strikethrough at point.")
+(my/aaronnote--def-editor-cmd "superscript"     "superscript"     "Wrap the selection as Markdown superscript.")
+(my/aaronnote--def-editor-cmd "subscript"       "subscript"       "Wrap the selection as Markdown subscript.")
+(my/aaronnote--def-editor-cmd "insert-footnote" "insert-footnote" "Insert a numbered Markdown footnote.")
+(my/aaronnote--def-editor-cmd "insert-revision" "insert-revision" "Insert an Aaronnote revision suggestion.")
+(my/aaronnote--def-editor-cmd "edit-properties" "edit-properties" "Open the native org-meta properties panel.")
+(my/aaronnote--def-editor-cmd "move-block-up"   "move-block-up"   "Move the current Markdown block upward.")
+(my/aaronnote--def-editor-cmd "move-block-down" "move-block-down" "Move the current Markdown block downward.")
 (my/aaronnote--def-editor-cmd "blockquote"      "blockquote"      "Toggle blockquote on paragraph.")
 (my/aaronnote--def-editor-cmd "bullet-list"     "bullet-list"     "Toggle bullet list.")
 (my/aaronnote--def-editor-cmd "ordered-list"    "ordered-list"    "Toggle ordered list.")
@@ -1701,46 +1725,6 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 (my/aaronnote--def-editor-cmd "insert-math"     "insert-math-block" "Insert a math block.")
 (my/aaronnote--def-editor-cmd "insert-toc"      "insert-toc"      "Insert a table of contents.")
 (my/aaronnote--def-editor-cmd "prose-check"     "prose-check"     "Run a bounded LanguageTool check in Aaronnote.")
-
-;;; Jupyter integration.
-
-(defun my/aaronnote--infer-notebook ()
-  "Return the .ipynb file co-located with the current Aaronnote note, or nil."
-  (when-let* ((file (my/aaronnote-buffer-file)))
-    (let ((nb (concat (file-name-sans-extension file) ".ipynb")))
-      (when (file-exists-p nb) nb))))
-
-(defun my/aaronnote-jupyter-open ()
-  "Open the notebook associated with the current note in xwidget.
-Falls back to JupyterLab root when no matching .ipynb exists."
-  (interactive)
-  (unless (fboundp 'my/aaronnote-jupyter-open-path)
-    (require 'init-aaronnote-jupyter))
-  (if-let* ((nb (my/aaronnote--infer-notebook)))
-      (my/aaronnote-jupyter-open-path nb)
-    (my/aaronnote-jupyter-open-root)))
-
-(defun my/aaronnote-jupyter-open-at-toc ()
-  "Pick a heading from the current note, then open its notebook at that section."
-  (interactive)
-  (let ((file (my/aaronnote-buffer-file)))
-    (unless file (user-error "No current Aaronnote note"))
-    (unless (fboundp 'my/aaronnote-roam--dom-targets)
-      (require 'init-md-roam))
-    (let* ((targets (nreverse (my/aaronnote-roam--dom-targets file)))
-           (choices  (mapcar
-                      (lambda (tgt)
-                        (cons (string-join (plist-get tgt :label-path) " / ")
-                              (car (last (plist-get tgt :path)))))
-                      targets))
-           (choice   (completing-read "Jump to heading: "
-                                      (mapcar #'car choices) nil t))
-           (slug     (cdr (assoc choice choices))))
-      (unless (fboundp 'my/aaronnote-jupyter-open-path)
-        (require 'init-aaronnote-jupyter))
-      (if-let* ((nb (my/aaronnote--infer-notebook)))
-          (my/aaronnote-jupyter-open-path nb slug)
-        (my/aaronnote-jupyter-open-root)))))
 
 ;;; Dispatch transient.
 
@@ -1821,15 +1805,19 @@ Falls back to JupyterLab root when no matching .ipynb exists."
       ("xb" "build only"      my/aaronnote-publish-build)
       ("xd" "deploy only"     my/aaronnote-publish-deploy)
       ("xc" "clean cache"     my/aaronnote-publish-clean)]
-     ["Jupyter"
-      ("J" "open notebook"    my/aaronnote-jupyter-open)
-      ("H" "open at heading"  my/aaronnote-jupyter-open-at-toc)]
      ["Format (web)"
       ("1" "bold"             my/aaronnote-bold)
       ("2" "italic"           my/aaronnote-italic)
       ("3" "code inline"      my/aaronnote-code-inline)
       ("4" "highlight"        my/aaronnote-highlight)
       ("5" "strike"           my/aaronnote-strike)
+      ("^" "superscript"      my/aaronnote-superscript)
+      ("_" "subscript"        my/aaronnote-subscript)
+      ("N" "footnote"         my/aaronnote-insert-footnote)
+      ("K" "revision"         my/aaronnote-insert-revision)
+      ("@" "properties"       my/aaronnote-edit-properties)
+      ("[" "move block up"    my/aaronnote-move-block-up)
+      ("]" "move block down"  my/aaronnote-move-block-down)
       ("6" "blockquote"       my/aaronnote-blockquote)
       ("7" "bullet list"      my/aaronnote-bullet-list)
       ("8" "ordered list"     my/aaronnote-ordered-list)

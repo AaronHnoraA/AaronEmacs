@@ -73,6 +73,11 @@
 (declare-function my/language-server-open-log "init-lsp-ops")
 (declare-function my/language-server-describe-session "init-lsp-ops")
 (declare-function my/language-server-show-workspace-configuration "init-lsp-ops")
+(declare-function my/language-server-current-toolchain-profile "init-lsp-toolchain" (&optional buffer))
+(declare-function my/language-server-toolchain-description "init-lsp-toolchain" (&optional buffer))
+(declare-function my/language-server-select-toolchain "init-lsp-toolchain")
+(declare-function my/language-server-reset-toolchain "init-lsp-toolchain")
+(declare-function my/language-server-refresh-toolchains "init-lsp-toolchain")
 (declare-function my/problems-buffer "init-problems")
 (declare-function my/problems-project "init-problems")
 (declare-function my/diagnostics-buffer-ui "init-diagnostics-ui")
@@ -271,6 +276,11 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
                 :company (if (bound-and-true-p company-mode) "on" "off")
                 :breadcrumb (if (bound-and-true-p breadcrumb-local-mode) "on" "off")
                 :workspace-set workspace-set
+                :toolchain (and (fboundp 'my/language-server-toolchain-description)
+                                (my/language-server-toolchain-description source))
+                :toolchain-id
+                (and (fboundp 'my/language-server-current-toolchain-profile)
+                     (plist-get (my/language-server-current-toolchain-profile source) :id))
                 :workspace (and workspace
                                 (string-trim-right
                                  (pp-to-string workspace)))))))))
@@ -649,6 +659,24 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
   (my/language-server--call-in-source-buffer
    #'my/language-server-show-workspace-configuration))
 
+(defun my/language-server-manager-select-toolchain ()
+  "Select a toolchain for the associated source project."
+  (interactive)
+  (my/language-server--call-in-source-buffer
+   #'my/language-server-select-toolchain t))
+
+(defun my/language-server-manager-reset-toolchain ()
+  "Reset the associated source project's session toolchain."
+  (interactive)
+  (my/language-server--call-in-source-buffer
+   #'my/language-server-reset-toolchain t))
+
+(defun my/language-server-manager-refresh-toolchains ()
+  "Refresh discovered toolchains for the associated source project."
+  (interactive)
+  (my/language-server--call-in-source-buffer
+   #'my/language-server-refresh-toolchains t))
+
 (defun my/language-server-manager-organize-imports ()
   "Organize imports for the source buffer."
   (interactive)
@@ -704,6 +732,10 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
   (aaron-ui-board-insert-field
    "eglot mappings"
    (number-to-string (length (my/language-server-eglot-program-entries))))
+  (when (boundp 'my/language-server-toolchain-providers)
+    (aaron-ui-board-insert-field
+     "toolchain providers"
+     (number-to-string (length my/language-server-toolchain-providers))))
   (insert "   ")
   (aaron-ui-board-insert-actions
    '((:label "Doctor"    :command my/language-server-doctor    :help "Doctor report")
@@ -766,6 +798,13 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
         (aaron-ui-board-insert-field "route policy" (plist-get status :policy))
         (aaron-ui-board-insert-field "active backend" (format "%s" (plist-get status :active-backend)))
         (aaron-ui-board-insert-field
+         "toolchain"
+         (format "%s%s"
+                 (or (plist-get status :toolchain) "automatic / PATH")
+                 (if-let* ((id (plist-get status :toolchain-id)))
+                     (format "  [%s]" id)
+                   "")))
+        (aaron-ui-board-insert-field
          "lsp feature"
          (format "%s (%s)" (plist-get status :required-feature) (plist-get status :feature-status)))
         (aaron-ui-board-insert-field "eglot mapping" (plist-get status :eglot-match))
@@ -792,6 +831,10 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
            (:label "Session"   :command my/language-server-manager-describe-session :help "Session info")
            (:label "Config"    :command my/language-server-manager-show-workspace-configuration
                    :help "Workspace config")
+           (:label "Toolchain" :command my/language-server-manager-select-toolchain
+                   :help "Select project toolchain")
+           (:label "Reset TC"  :command my/language-server-manager-reset-toolchain
+                   :help "Reset session toolchain")
            (:label "Actions"   :command my/language-server-manager-code-actions   :help "Code actions")
            (:label "Format"    :command my/language-server-manager-format-buffer  :help "Format buffer")
            (:label "Rename"    :command my/language-server-manager-rename         :help "Rename symbol")))
@@ -906,7 +949,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
        (my/language-server-manager--insert-eglot-section)
        (my/language-server-manager--insert-runtime-knobs)
        (aaron-ui-board-insert-key-hints
-        "Keys: g refresh  e ensure  r restart  k shutdown  l log  s session  c config  o imports  a actions  f format  R rename  p problems  D doctor  q quit")))))
+        "Keys: g refresh  i toolchain  x reset-toolchain  v rescan-toolchains  e ensure  r restart  k shutdown  l log  s session  c config  o imports  a actions  f format  R rename  p problems  D doctor  q quit")))))
 
 (defun my/language-server--doctor-insert-libraries ()
   "Insert the library availability section."
@@ -1085,6 +1128,9 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
   (local-set-key (kbd "l") #'my/language-server-manager-open-log)
   (local-set-key (kbd "s") #'my/language-server-manager-describe-session)
   (local-set-key (kbd "c") #'my/language-server-manager-show-workspace-configuration)
+  (local-set-key (kbd "i") #'my/language-server-manager-select-toolchain)
+  (local-set-key (kbd "x") #'my/language-server-manager-reset-toolchain)
+  (local-set-key (kbd "v") #'my/language-server-manager-refresh-toolchains)
   (local-set-key (kbd "o") #'my/language-server-manager-organize-imports)
   (local-set-key (kbd "a") #'my/language-server-manager-code-actions)
   (local-set-key (kbd "f") #'my/language-server-manager-format-buffer)
@@ -1137,6 +1183,10 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
     ("l" "log" my/language-server-manager-open-log)
     ("s" "session" my/language-server-manager-describe-session)
     ("c" "config" my/language-server-manager-show-workspace-configuration)]
+   ["Toolchain"
+    ("i" "select" my/language-server-manager-select-toolchain)
+    ("x" "reset" my/language-server-manager-reset-toolchain)
+    ("v" "rescan" my/language-server-manager-refresh-toolchains)]
    ["Edits"
     ("a" "code actions" my/language-server-manager-code-actions)
     ("o" "organize imports" my/language-server-manager-organize-imports)

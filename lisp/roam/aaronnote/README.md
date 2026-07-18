@@ -146,10 +146,11 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 | highlight `==x==`                 | :white_check_mark: |                                           |
 | subscript `~x~`                   | :white_check_mark: |                                           |
 | superscript `^x^`                 | :white_check_mark: |                                           |
+| footnotes `[^id]` / `[^id]: text` | :white_check_mark: | auto-number command, reference/definition navigation and HTML backrefs |
 | `[toc]` block                     | :white_check_mark: |                                           |
 | emoji `:smile:`                   | :white_check_mark: |                                           |
 | HTML comment `<!-- -->`           | :white_check_mark: |                                           |
-| inline command `@@cmd(x) [y]{k: v}` | :white_check_mark: | TODO uses `@@todo(doing) [task]{ddl: 2026-05-20}`; `@@comment [note]` / `@@comment(false) [note]` is collapsible, while `@@comment(true) [note]` is a prominent visible `COMMENT:` annotation in the editor, published HTML, and LaTeX; `@@scomment [note]` is a published side card and exports as `\sidecomment` |
+| inline command `@@cmd(x) [y]{k: v}` | :white_check_mark: | TODO/comment/side-comment plus native `@@revision(style) [original] {advice: "..."; reason: "..."}` with accept/keep/edit and visible HTML/LaTeX export |
 | org command block `#+begin kind`   | :white_check_mark: | rendered through the org-env CM6 widget   |
 | callout block `> [!note]`          | :white_check_mark: | editor shows left-border colour + title bold; HTML export wraps in `.callout` + `.callout-title` |
 | heading fold `zc` / `zo` / `za`   | :white_check_mark: | foldService + chevron (hover-only); state lives in CM6 foldState |

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { scanInlineCommands } from "../../shared/command-syntax.mjs";
 import { LATEX_MARKS, latexMark } from "../../shared/latex-marks.mjs";
-import { citeLatex, convertInline, escapeLatexTitle, isDisplayCommentCommand } from "./latex-export.mjs";
+import { citeLatex, convertInline, escapeLatexTitle, isDisplayCommentCommand, revisionLatex } from "./latex-export.mjs";
 
 const ENV_MAP = new Map([
   ["definition", "definition"], ["define", "definition"],
@@ -127,7 +127,7 @@ function transformInlineCommands(line, options, context = {}) {
   const protectedRanges = protectedInlineRanges(line);
   const commands = scanInlineCommands(line)
     .filter((command) => !protectedRanges.some((range) => command.fullFrom >= range.from && command.fullFrom < range.to))
-    .filter((command) => PRIVATE_INLINE.has(command.name) || command.name === "scomment" || command.name === "cite" || command.name === "tag" || command.name === "latexmk");
+    .filter((command) => PRIVATE_INLINE.has(command.name) || command.name === "scomment" || command.name === "revision" || command.name === "cite" || command.name === "tag" || command.name === "latexmk");
   if (commands.length === 0) return line;
   let out = "";
   let cursor = 0;
@@ -135,6 +135,7 @@ function transformInlineCommands(line, options, context = {}) {
     if (command.fullFrom < cursor) continue;
     out += line.slice(cursor, command.fullFrom);
     if (command.name === "scomment") out += rawLatexInline(`\\sidecomment{${convertInline(command.context, options)}}`);
+    else if (command.name === "revision") out += rawLatexInline(revisionLatex(command, options));
     else if (isDisplayCommentCommand(command)) out += rawLatexInline(`\\aaroncomment{${convertInline(command.context, options)}}`);
     else if (command.name === "cite") {
       const citation = citeLatex(command, options);
@@ -579,7 +580,10 @@ export function preprocessAaronnoteForPandoc(markdown, options = {}) {
     meta,
     markdown: output.join("\n"),
     warnings: [...new Set(unresolvedCitations)].map((key) => `Unresolved Aaronnote citation kept visibly: ${key}`),
-    features: { usesSideComment: output.some((line) => line.includes("\\sidecomment{")), usesTikz: output.some((line) => line.includes("tikzpicture")) },
+    features: {
+      usesSideComment: output.some((line) => line.includes("\\sidecomment{")),
+      usesTikz: output.some((line) => line.includes("tikzpicture")),
+    },
   };
 }
 

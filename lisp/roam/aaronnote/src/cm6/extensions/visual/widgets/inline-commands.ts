@@ -694,6 +694,110 @@ class InlineCommentWidget extends MeasuredWidget {
   ignoreEvent(): boolean { return false; }
 }
 
+const REVISION_STYLES = new Set(["indigo", "teal", "red", "green", "yellow"]);
+
+function revisionDecoded(value: string): string {
+  return String(value || "").replace(/\\\]/g, "]").replace(/\\\\/g, "\\");
+}
+
+/** An unresolved, always-visible review suggestion backed by one source span. */
+class RevisionWidget extends MeasuredWidget {
+  cmd: InlineCommand;
+
+  constructor(cmd: InlineCommand) {
+    super();
+    this.cmd = cmd;
+  }
+
+  protected measureKey(): string { return this.cmd.switchValue.toLowerCase(); }
+  protected get measuredBlock(): boolean { return false; }
+
+  eq(other: RevisionWidget): boolean {
+    return this.cmd.context === other.cmd.context
+      && this.cmd.argsRaw === other.cmd.argsRaw
+      && this.cmd.switchValue === other.cmd.switchValue
+      && this.cmd.fullFrom === other.cmd.fullFrom
+      && this.cmd.fullTo === other.cmd.fullTo;
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const original = revisionDecoded(this.cmd.context.trim());
+    const advice = revisionDecoded(this.cmd.args.advice || "");
+    const reason = revisionDecoded(this.cmd.args.reason || "");
+    const requestedStyle = this.cmd.switchValue.trim().toLowerCase();
+    const style = REVISION_STYLES.has(requestedStyle) ? requestedStyle : "indigo";
+    const wrap = document.createElement("span");
+    wrap.className = "aaronnote-revision inline-command-token";
+    wrap.dataset.revisionStyle = style;
+    wrap.dataset.cmSourceFrom = String(this.cmd.fullFrom);
+    wrap.dataset.cmSourceTo = String(this.cmd.fullTo);
+    wrap.setAttribute("role", "note");
+    wrap.setAttribute("aria-label", `Revision: replace ${original} with ${advice || "missing advice"}`);
+
+    const shown = document.createElement("span");
+    shown.className = "aaronnote-revision-original";
+    shown.innerHTML = inlineTodoBodyHTML(original);
+    shown.tabIndex = 0;
+
+    const card = document.createElement("span");
+    card.className = "aaronnote-revision-card";
+    const label = document.createElement("strong");
+    label.textContent = "Suggestion";
+    const replacement = document.createElement("span");
+    replacement.className = "aaronnote-revision-advice";
+    replacement.innerHTML = advice ? inlineTodoBodyHTML(advice) : "Missing advice";
+    card.append(label, replacement);
+    if (reason) {
+      const why = document.createElement("span");
+      why.className = "aaronnote-revision-reason";
+      why.textContent = reason;
+      card.append(why);
+    }
+    const actions = document.createElement("span");
+    actions.className = "aaronnote-revision-actions";
+    const action = (text: string, title: string, run: () => void): HTMLButtonElement => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      button.title = title;
+      button.addEventListener("mousedown", (event) => { event.preventDefault(); event.stopPropagation(); });
+      button.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); run(); });
+      return button;
+    };
+    actions.append(
+      action("Accept", "Replace original text with the suggestion", () => {
+        if (!advice) return;
+        view.dispatch({
+          changes: { from: this.cmd.fullFrom, to: this.cmd.fullTo, insert: advice },
+          selection: { anchor: this.cmd.fullFrom + advice.length },
+          scrollIntoView: true,
+        });
+        view.focus();
+      }),
+      action("Keep", "Keep the original text", () => {
+        view.dispatch({
+          changes: { from: this.cmd.fullFrom, to: this.cmd.fullTo, insert: original },
+          selection: { anchor: this.cmd.fullFrom + original.length },
+          scrollIntoView: true,
+        });
+        view.focus();
+      }),
+      action("Edit", "Edit the revision source", () => {
+        view.dispatch({
+          selection: { anchor: this.cmd.fullFrom, head: this.cmd.fullTo },
+          scrollIntoView: true,
+        });
+        view.focus();
+      }),
+    );
+    card.append(actions);
+    wrap.append(shown, card);
+    return wrap;
+  }
+
+  ignoreEvent(): boolean { return true; }
+}
+
 class CiteWidget extends MeasuredWidget {
   cmd: InlineCommand;
   bibliographyVersion: number;
@@ -990,6 +1094,13 @@ function buildInlineCommandDecos(
         decos.push(
           Decoration.replace({
             widget: new InlineCommentWidget({ ...cmd, fullFrom: from, fullTo: to }),
+          }).range(from, to),
+        );
+      }
+      if (cmd.name === "revision" && !cursorInside) {
+        decos.push(
+          Decoration.replace({
+            widget: new RevisionWidget({ ...cmd, fullFrom: from, fullTo: to }),
           }).range(from, to),
         );
       }

@@ -37,6 +37,8 @@ export function sweepOrphanKernels(options: {
 
 export function createKernelRegistry(options: {
   runtimeDir: string;
+  runtimeBinDir?: string;
+  /** @deprecated Use runtimeBinDir. */
   venvBinDir?: string;
   cwd?: string;
   zmq: unknown;

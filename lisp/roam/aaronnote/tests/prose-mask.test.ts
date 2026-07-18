@@ -7,6 +7,15 @@ function visible(masked: string): string {
 }
 
 describe("Aaronnote prose mask", () => {
+  test("spell-checks revision prose while masking the command shell", () => {
+    const source = '@@revision(red) [recieve old] {advice: "recieve new"; reason: "recieve reason"}';
+    const masked = maskAaronnoteProse(source);
+    expect(masked).not.toContain("@@revision");
+    expect(masked).not.toContain("advice:");
+    expect(masked).toContain("recieve old");
+    expect(masked).toContain("recieve new");
+    expect(masked).toContain("recieve reason");
+  });
   test("keeps ordinary prose and todo text while masking command syntax", () => {
     const md = "This recieve stays.\n@@todo(doing) [Fix teh word]{ddl: 2026-05-20}\n@@lean4 [proof-main]\n";
     const masked = maskAaronnoteProse(md);

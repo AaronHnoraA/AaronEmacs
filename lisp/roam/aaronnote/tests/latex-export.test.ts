@@ -510,6 +510,15 @@ describe("LaTeX export", () => {
     expect(mechanical.body).toContain("text.");
   });
 
+  test("keeps unresolved revisions visible in mechanical and Pandoc exports", () => {
+    const source = '@@revision(green) [old **claim**] {advice: "new claim"; reason: "clearer"}';
+    const mechanical = aaronnoteMarkdownToLatex(source);
+    const prepared = preprocessAaronnoteForPandoc(source);
+    expect(mechanical.body).toContain(String.raw`\aaronrevision{old \textbf{claim}}{new claim}{clearer}`);
+    expect(prepared.markdown).toContain(String.raw`\aaronrevision{old \textbf{claim}}{new claim}{clearer}`);
+    expect(latexMacrosPackage({})).toContain("\\providecommand{\\aaronrevision}[3]");
+  });
+
   test("converts @@scomment and reports the required LaTeX feature", () => {
     const result = aaronnoteMarkdownToLatex([
       "# Main",

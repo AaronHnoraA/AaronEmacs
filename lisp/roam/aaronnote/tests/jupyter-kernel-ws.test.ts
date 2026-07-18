@@ -30,15 +30,15 @@ const RUN = process.env.AARONNOTE_TEST_KERNEL === "1";
 const describeIfKernel = RUN ? describe : describe.skip;
 
 const aaronnoteRoot = join(import.meta.dirname, "..");
-const venvDir = join(aaronnoteRoot, "jupyter", ".venv");
+const jupyterDataDir = join(aaronnoteRoot, "jupyter", ".jupyter", "data");
 
 describeIfKernel("jupyter kernel WebSocket bridge (real kernel)", () => {
   test(
     "a browser-style KernelConnection executes code entirely through the bridge",
     async () => {
       const runtimeDir = await mkdtemp(join(tmpdir(), "aaronnote-ws-bridge-"));
-      const registry = createKernelRegistry({ runtimeDir, venvBinDir: join(venvDir, "bin"), zmq, launchTimeoutMs: 15_000 });
-      const searchDirs = defaultKernelSearchDirs({ venvPrefix: venvDir, useHomeKernels: false });
+      const registry = createKernelRegistry({ runtimeDir, zmq, launchTimeoutMs: 15_000 });
+      const searchDirs = defaultKernelSearchDirs({ dataDir: jupyterDataDir, useHomeKernels: false });
       const specs = await findKernelSpecs({ searchDirs });
       const python3 = specs.find((s) => s.name === "python3")!;
 

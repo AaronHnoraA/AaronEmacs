@@ -2040,7 +2040,7 @@ A \cong B
 g\cdot x_A=x_B.
 \]
 
-Thus the classification problem becomes an orbit-membership problem.
+Thus the classification problem becomes an orbit-membership problem.a as adsa das dasdthis this sssssssssssssssssssssssssss this this we can do this later then I will make it 
 #+end proof
 
 ## 4.5. Promise problems and reductions
@@ -2064,7 +2064,7 @@ with
 \]
 
 An algorithm for \(\Pi\) only needs to be correct on inputs satisfying the
-promise. This differs from a language decision problem, where every string
+promise. This differs from a language decision problem, where every stringa sada asd as da as this this this ttttttttttttttttttttttt this th
 over the alphabet must be classified.
 
 #+begin define Polynomial-time many-one reduction for promise problems
@@ -17504,7 +17504,7 @@ invertible. This identifies one matching pair of summands. Removing that
 pair and applying induction proves the result.
 #+end proof
 
-中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小���类型”凭空改变，只能重排。
+中文直觉：如果整体分解成不可再拆的小块，那么同构不能把“小���类���”凭空改变，只能重排。
 
 ## 32.7. Measurement statistics
 
@@ -181539,7 +181539,7 @@ Coordinates are useful for computation because they give arrays of field
 elements. Invariance is useful for mathematics because it identifies the
 features of the object that do not depend on the chosen basis.
 
-中文直觉：坐标是“输入格式”，不变量是“结构本身留下的影子”。
+中文直觉：坐标是“输入格式”，不变量是“结���本身留下的影子”。
 #+end remark
 
 If \(g \in \operatorname{GL}(V)\) and \(h \in \operatorname{GL}(W)\), a change

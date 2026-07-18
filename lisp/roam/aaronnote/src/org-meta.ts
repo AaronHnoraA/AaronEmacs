@@ -20,6 +20,17 @@ export interface MetaEntry {
   value: string;
 }
 
+/** A line-backed property. Offsets are relative to the meta block body. */
+export interface EditableMetaEntry extends MetaEntry {
+  lineFrom: number;
+  lineTo: number;
+  fullTo: number;
+  keyFrom: number;
+  keyTo: number;
+  valueFrom: number;
+  valueTo: number;
+}
+
 export interface MetaSummary {
   title: string;
   body: string;
@@ -64,6 +75,61 @@ function rawMetaEntries(body: string): MetaEntry[] {
     .map((line) => line.match(/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/))
     .filter((match): match is RegExpMatchArray => Boolean(match))
     .map((match) => ({ key: match[1]!, value: match[2] ?? "" }));
+}
+
+function summarySourceRange(body: string): { from: number; to: number } | null {
+  const lines = sourceLines(body);
+  for (let openIndex = 0; openIndex < lines.length; openIndex++) {
+    if (!META_SUMMARY_OPEN_RE.test(lines[openIndex]!.text)) continue;
+    let depth = 1;
+    for (let closeIndex = openIndex + 1; closeIndex < lines.length; closeIndex++) {
+      if (META_SUMMARY_OPEN_RE.test(lines[closeIndex]!.text)) depth += 1;
+      else if (META_SUMMARY_CLOSE_RE.test(lines[closeIndex]!.text)) depth -= 1;
+      if (depth === 0) {
+        return { from: lines[openIndex]!.from, to: lines[closeIndex]!.fullTo };
+      }
+    }
+    return { from: lines[openIndex]!.from, to: body.length };
+  }
+  return null;
+}
+
+/**
+ * Parse editable top-level `key: value` lines without serialising the block.
+ * Summary prose and unknown lines are deliberately excluded, so UI edits can
+ * patch exact source ranges and preserve every byte outside the chosen field.
+ */
+export function editableMetaEntries(body: string): EditableMetaEntry[] {
+  const source = String(body || "");
+  const summaryRange = summarySourceRange(source);
+  const entries: EditableMetaEntry[] = [];
+  for (const line of sourceLines(source)) {
+    if (summaryRange && line.from >= summaryRange.from && line.from < summaryRange.to) continue;
+    const prefix = /^(\s*)([A-Za-z0-9_-]+)(\s*:\s*)/.exec(line.text);
+    if (!prefix) continue;
+    const key = prefix[2] ?? "";
+    const keyFrom = line.from + (prefix[1]?.length ?? 0);
+    const keyTo = keyFrom + key.length;
+    const valueFrom = line.from + prefix[0].length;
+    let valueTo = line.to;
+    while (valueTo > valueFrom && /[ \t]/.test(source[valueTo - 1] ?? "")) valueTo -= 1;
+    entries.push({
+      key,
+      value: source.slice(valueFrom, valueTo),
+      lineFrom: line.from,
+      lineTo: line.to,
+      fullTo: line.fullTo,
+      keyFrom,
+      keyTo,
+      valueFrom,
+      valueTo,
+    });
+  }
+  return entries;
+}
+
+export function orgMetaSummarySourceRange(body: string): { from: number; to: number } | null {
+  return summarySourceRange(String(body || ""));
 }
 
 /** Parse metadata fields and the first complete, top-level summary block. */

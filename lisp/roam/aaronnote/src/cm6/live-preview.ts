@@ -1116,13 +1116,51 @@ class TableWidget extends MeasuredWidget {
       tableToolButton("L", "Align column left", () => apply((next) => { next.aligns[activeCol] = "left"; }, { row: activeRow, col: activeCol })),
       tableToolButton("C", "Align column center", () => apply((next) => { next.aligns[activeCol] = "center"; }, { row: activeRow, col: activeCol })),
       tableToolButton("R", "Align column right", () => apply((next) => { next.aligns[activeCol] = "right"; }, { row: activeRow, col: activeCol })),
+      tableSizePickerButton((rows, columns) => apply((next) => {
+        const targetRows = Math.max(2, Math.min(8, rows));
+        const targetColumns = Math.max(1, Math.min(8, columns));
+        while (next.rows.length < targetRows) next.rows.push(Array(next.rows[0]?.length ?? 1).fill(""));
+        next.rows.length = targetRows;
+        next.rows.forEach((row) => {
+          while (row.length < targetColumns) row.push("");
+          row.length = targetColumns;
+        });
+        while (next.aligns.length < targetColumns) next.aligns.push("");
+        next.aligns.length = targetColumns;
+      }, { row: 1, col: 0, edit: true, select: true })),
     );
 
     const table = renderEditableTable(data, (row, col) => {
       activeRow = row;
       activeCol = col;
     }, commit, scheduleCommit, () => view.requestMeasure());
-    wrap.append(toolbar, table);
+    installTableDragHandles(table, {
+      moveRow: (from, to) => apply((next) => {
+        if (from < 1 || to < 1 || from >= next.rows.length || to >= next.rows.length || from === to) return;
+        const [row] = next.rows.splice(from, 1);
+        if (row) next.rows.splice(to, 0, row);
+      }, { row: to, col: activeCol }),
+      moveColumn: (from, to) => apply((next) => {
+        const width = next.rows[0]?.length ?? 0;
+        if (from < 0 || to < 0 || from >= width || to >= width || from === to) return;
+        next.rows.forEach((row) => {
+          const [cell] = row.splice(from, 1);
+          row.splice(to, 0, cell ?? "");
+        });
+        const [align] = next.aligns.splice(from, 1);
+        next.aligns.splice(to, 0, align ?? "");
+      }, { row: activeRow, col: to }),
+    });
+    const addRowEdge = tableToolButton("+", "Add row at table edge", () => apply((next) => {
+      next.rows.push(Array(next.rows[0]?.length ?? 1).fill(""));
+    }, (next) => ({ row: next.rows.length - 1, col: activeCol, edit: true, select: true })));
+    addRowEdge.className = "cm-table-edge-add cm-table-edge-add-row";
+    const addColumnEdge = tableToolButton("+", "Add column at table edge", () => apply((next) => {
+      next.rows.forEach((row) => row.push(""));
+      next.aligns.push("");
+    }, (next) => ({ row: activeRow, col: (next.rows[0]?.length ?? 1) - 1, edit: true, select: true })));
+    addColumnEdge.className = "cm-table-edge-add cm-table-edge-add-column";
+    wrap.append(toolbar, table, addRowEdge, addColumnEdge);
     return this.registerMeasured(wrap, view);
   }
 
@@ -1145,6 +1183,140 @@ function tableToolButton(label: string, title: string, run: () => void): HTMLBut
     run();
   });
   return button;
+}
+
+function tableSizePickerButton(apply: (rows: number, columns: number) => void): HTMLElement {
+  const host = document.createElement("span");
+  host.className = "cm-table-size-picker-host";
+  const button = tableToolButton("Size", "Resize table with grid", () => {
+    let picker = host.querySelector<HTMLElement>(".cm-table-size-picker");
+    if (picker) {
+      picker.remove();
+      return;
+    }
+    picker = document.createElement("span");
+    picker.className = "cm-table-size-picker";
+    picker.setAttribute("role", "grid");
+    for (let row = 2; row <= 8; row++) {
+      for (let col = 1; col <= 8; col++) {
+        const cell = document.createElement("button");
+        cell.type = "button";
+        cell.className = "cm-table-size-cell";
+        cell.title = `${row} rows × ${col} columns`;
+        cell.setAttribute("aria-label", cell.title);
+        cell.style.setProperty("--table-picker-row", String(row - 1));
+        cell.style.setProperty("--table-picker-col", String(col));
+        cell.addEventListener("mouseenter", () => {
+          picker!.dataset.rows = String(row);
+          picker!.dataset.columns = String(col);
+        });
+        cell.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          picker?.remove();
+          apply(row, col);
+        });
+        picker.append(cell);
+      }
+    }
+    host.append(picker);
+  });
+  host.append(button);
+  return host;
+}
+
+function installTableDragHandles(
+  table: HTMLTableElement,
+  callbacks: { moveRow: (from: number, to: number) => void; moveColumn: (from: number, to: number) => void },
+): void {
+  const maxInteractiveRows = 500;
+  const maxInteractiveColumns = 64;
+  const stop = (event: Event): void => event.stopPropagation();
+  let activeDrag = "";
+  const dragPayload = (event: DragEvent): string => activeDrag || event.dataTransfer?.getData("text/plain") || "";
+  const interactiveRows = Array.from(table.rows).slice(0, maxInteractiveRows + 1);
+  const highlightColumn = (column: number, enabled: boolean): void => {
+    interactiveRows.forEach((row) => row.cells[column]?.classList.toggle("is-column-hover", enabled));
+  };
+
+  interactiveRows.forEach((row, rowIndex) => {
+    if (rowIndex < 1) return;
+    const firstCell = row.cells[0] as HTMLTableCellElement | undefined;
+    if (!firstCell) return;
+    const handle = document.createElement("span");
+    handle.className = "cm-table-drag-handle cm-table-row-drag-handle";
+    handle.textContent = "⋮";
+    handle.title = `Drag row ${rowIndex}`;
+    handle.draggable = true;
+    handle.addEventListener("mousedown", stop);
+    handle.addEventListener("click", stop);
+    handle.addEventListener("dragstart", (event) => {
+      event.stopPropagation();
+      activeDrag = `row:${rowIndex}`;
+      event.dataTransfer?.setData("text/plain", activeDrag);
+      row.classList.add("is-row-dragging");
+    });
+    handle.addEventListener("dragend", () => {
+      activeDrag = "";
+      row.classList.remove("is-row-dragging");
+    });
+    row.addEventListener("dragover", (event) => {
+      if (!dragPayload(event).startsWith("row:")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      row.classList.add("is-row-hover");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("is-row-hover"));
+    row.addEventListener("drop", (event) => {
+      const payload = dragPayload(event);
+      row.classList.remove("is-row-hover");
+      if (!payload.startsWith("row:")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      callbacks.moveRow(Number(payload.slice(4)), rowIndex);
+    });
+    firstCell.prepend(handle);
+  });
+
+  const header = table.querySelector<HTMLTableRowElement>("thead tr");
+  if (!header) return;
+  Array.from(header.cells).slice(0, maxInteractiveColumns).forEach((cell, columnIndex) => {
+    const handle = document.createElement("span");
+    handle.className = "cm-table-drag-handle cm-table-column-drag-handle";
+    handle.textContent = "⋮";
+    handle.title = `Drag column ${columnIndex + 1}`;
+    handle.draggable = true;
+    handle.addEventListener("mousedown", stop);
+    handle.addEventListener("click", stop);
+    handle.addEventListener("mouseenter", () => highlightColumn(columnIndex, true));
+    handle.addEventListener("mouseleave", () => highlightColumn(columnIndex, false));
+    handle.addEventListener("dragstart", (event) => {
+      event.stopPropagation();
+      activeDrag = `column:${columnIndex}`;
+      event.dataTransfer?.setData("text/plain", activeDrag);
+      highlightColumn(columnIndex, true);
+    });
+    handle.addEventListener("dragend", () => {
+      activeDrag = "";
+      highlightColumn(columnIndex, false);
+    });
+    cell.addEventListener("dragover", (event) => {
+      if (!dragPayload(event).startsWith("column:")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      highlightColumn(columnIndex, true);
+    });
+    cell.addEventListener("dragleave", () => highlightColumn(columnIndex, false));
+    cell.addEventListener("drop", (event) => {
+      const payload = dragPayload(event);
+      highlightColumn(columnIndex, false);
+      if (!payload.startsWith("column:")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      callbacks.moveColumn(Number(payload.slice(7)), columnIndex);
+    });
+    cell.prepend(handle);
+  });
 }
 
 function focusTableCellInTable(table: HTMLTableElement, target?: TableFocusTarget | null): boolean {

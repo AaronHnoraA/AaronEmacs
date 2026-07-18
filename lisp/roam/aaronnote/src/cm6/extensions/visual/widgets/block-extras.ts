@@ -40,9 +40,11 @@ import {
 } from "../../../../render-html.ts";
 import {
   ORG_META_PREAMBLE_LINE_LIMIT,
+  editableMetaEntries,
   metaEntryMap,
   metaRoamIndexed,
   metaTags,
+  orgMetaSummarySourceRange,
   parseOrgMetaDocument,
   showMetaTag,
 } from "../../../../org-meta.ts";
@@ -57,6 +59,7 @@ import { highlightCodeForEditor } from "../../../../code-highlight-async.ts";
 import type { JupyterWidgetKernelMessage } from "../../../../jupyter-widget-runtime.ts";
 import type { JupyterMarkdownParser, WidgetMountFn } from "../../../../jupyter-rendermime.ts";
 import { ceilCommandGeneratedId as sharedCeilCommandGeneratedId, ceilLanguageForKernel } from "./ceil-shared.ts";
+import { parseSimpleFrontmatter } from "../../../../simple-frontmatter.ts";
 
 // ---------------------------------------------------------------------------
 // TOC fold state (session-level, not editor history)
@@ -1417,7 +1420,7 @@ function envLabel(kind: string): string {
 }
 
 function fallbackCeilKernels(current: string): CeilKernelSpec[] {
-  const names = [current, DEFAULT_CEIL_KERNEL, "bash", "lean4", "sagemath-10.9"].filter(Boolean);
+  const names = [current, DEFAULT_CEIL_KERNEL, "bash", "lean4", "sagemath"].filter(Boolean);
   return Array.from(new Set(names)).map((name) => ({ name, displayName: name }));
 }
 
@@ -2430,9 +2433,12 @@ class MetaWidget extends MeasuredWidget {
     setSourceRange(div, this.from, this.to);
     div.setAttribute("data-kind", "meta");
     div.dataset.label = envLabel("meta");
-    div.setAttribute("aria-readonly", "true");
-    div.title = "Edit metadata in Source view";
-    renderMetaWidget(div, this.body);
+    const blockSource = view.state.doc.sliceString(this.from, this.to);
+    const firstBreak = blockSource.indexOf("\n");
+    const relativeBodyFrom = firstBreak < 0
+      ? 0
+      : Math.max(firstBreak + 1, blockSource.indexOf(this.body, firstBreak + 1));
+    renderMetaWidget(div, this.body, view, this.from + relativeBodyFrom);
     return this.registerMeasured(div, view);
   }
 
@@ -2745,6 +2751,8 @@ class TikzWidget extends MeasuredWidget {
 function renderMetaWidget(
   root: HTMLElement,
   body: string,
+  view: EditorView,
+  bodyFrom: number,
 ): void {
   const meta = document.createElement("div");
   meta.className = "org-env-meta aaronnote-meta-cover";
@@ -2764,6 +2772,7 @@ function renderMetaWidget(
     empty.className = "org-env-meta-empty";
     empty.textContent = "No metadata";
     meta.append(empty);
+    renderMetaProperties(meta, body, view, bodyFrom);
     root.append(meta);
     return;
   }
@@ -2823,7 +2832,255 @@ function renderMetaWidget(
     meta.append(abstract);
   }
 
+  renderMetaProperties(meta, body, view, bodyFrom);
+
   root.append(meta);
+}
+
+const META_WIDGET_MAX_BODY = 256 * 1024;
+const META_WIDGET_MAX_FIELDS = 256;
+const META_WIDGET_MAX_VALUE = 64 * 1024;
+
+function stopMetaControlEvent(event: Event): void {
+  event.stopPropagation();
+}
+
+function dispatchMetaPatch(
+  view: EditorView,
+  bodyFrom: number,
+  from: number,
+  to: number,
+  insert: string,
+): void {
+  view.dispatch({
+    changes: { from: bodyFrom + from, to: bodyFrom + to, insert },
+    scrollIntoView: false,
+  });
+  view.requestMeasure();
+}
+
+function editableMetaValueControl(
+  key: string,
+  value: string,
+  commit: (value: string) => void,
+): HTMLInputElement {
+  const lower = key.toLowerCase();
+  const input = document.createElement("input");
+  input.className = "aaronnote-meta-property-value";
+  input.value = value;
+  input.maxLength = META_WIDGET_MAX_VALUE;
+  input.spellcheck = !["tags", "aliases", "css", "bib", "extend", "id"].includes(lower);
+
+  const booleanValue = /^(?:true|false)$/i.test(value.trim());
+  const dateValue = /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+  const timeValue = /^\d{2}:\d{2}(?::\d{2})?$/.test(value.trim());
+  const dateTimeValue = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value.trim());
+  const progressValue = /^(?:100|\d{1,2})%$/.test(value.trim()) || lower === "progress";
+  const numberValue = /^-?(?:\d+|\d*\.\d+)$/.test(value.trim());
+
+  if (booleanValue) {
+    input.type = "checkbox";
+    input.checked = value.trim().toLowerCase() === "true";
+    input.value = input.checked ? "true" : "false";
+    input.addEventListener("change", () => commit(input.checked ? "true" : "false"));
+  } else if (dateTimeValue) {
+    input.type = "datetime-local";
+  } else if (dateValue) {
+    input.type = "date";
+  } else if (timeValue) {
+    input.type = "time";
+  } else if (progressValue) {
+    input.type = "number";
+    input.min = "0";
+    input.max = "100";
+    input.value = value.replace(/%$/, "");
+    input.dataset.metaSuffix = "%";
+  } else if (numberValue) {
+    input.type = "number";
+    input.step = "any";
+  } else {
+    input.type = "text";
+  }
+
+  if (!booleanValue) {
+    const finish = (): void => {
+      const suffix = input.dataset.metaSuffix ?? "";
+      commit(`${input.value}${suffix}`);
+    };
+    input.addEventListener("blur", finish);
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        input.blur();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        input.value = value.replace(/%$/, "");
+        input.blur();
+      }
+    });
+  }
+  input.addEventListener("mousedown", stopMetaControlEvent);
+  input.addEventListener("click", stopMetaControlEvent);
+  return input;
+}
+
+function swapMetaEntryLines(
+  body: string,
+  first: ReturnType<typeof editableMetaEntries>[number],
+  second: ReturnType<typeof editableMetaEntries>[number],
+): { from: number; to: number; insert: string } {
+  const a = first.lineFrom <= second.lineFrom ? first : second;
+  const b = a === first ? second : first;
+  return {
+    from: a.lineFrom,
+    to: b.lineTo,
+    insert: body.slice(b.lineFrom, b.lineTo)
+      + body.slice(a.lineTo, b.lineFrom)
+      + body.slice(a.lineFrom, a.lineTo),
+  };
+}
+
+function metaToolButton(label: string, title: string, action: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  button.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    action();
+  });
+  return button;
+}
+
+function renderMetaProperties(
+  meta: HTMLElement,
+  body: string,
+  view: EditorView,
+  bodyFrom: number,
+): void {
+  const details = document.createElement("details");
+  details.className = "aaronnote-meta-properties";
+  const summaryControl = document.createElement("summary");
+  const entries = editableMetaEntries(body);
+  summaryControl.textContent = `Properties (${entries.length})`;
+  details.append(summaryControl);
+
+  if (body.length > META_WIDGET_MAX_BODY || entries.length > META_WIDGET_MAX_FIELDS) {
+    const warning = document.createElement("p");
+    warning.className = "aaronnote-meta-properties-limit";
+    warning.textContent = "Metadata is too large for visual editing. Use Source view.";
+    details.append(warning);
+    meta.append(details);
+    return;
+  }
+
+  const table = document.createElement("div");
+  table.className = "aaronnote-meta-properties-table";
+  entries.forEach((entry, index) => {
+    const row = document.createElement("div");
+    row.className = "aaronnote-meta-property-row";
+    const key = document.createElement("input");
+    key.className = "aaronnote-meta-property-key";
+    key.value = entry.key;
+    key.maxLength = 128;
+    key.spellcheck = false;
+    key.setAttribute("aria-label", `Property ${entry.key} name`);
+    const commitKey = (): void => {
+      const next = key.value.trim().replace(/[^A-Za-z0-9_-]/g, "");
+      if (next && next !== entry.key) dispatchMetaPatch(view, bodyFrom, entry.keyFrom, entry.keyTo, next);
+    };
+    key.addEventListener("blur", commitKey);
+    key.addEventListener("mousedown", stopMetaControlEvent);
+    key.addEventListener("click", stopMetaControlEvent);
+    key.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") { event.preventDefault(); key.blur(); }
+      else if (event.key === "Escape") { event.preventDefault(); key.value = entry.key; key.blur(); }
+    });
+
+    const value = editableMetaValueControl(entry.key, entry.value, (next) => {
+      if (next !== entry.value) dispatchMetaPatch(view, bodyFrom, entry.valueFrom, entry.valueTo, next);
+    });
+    value.setAttribute("aria-label", `Property ${entry.key} value`);
+
+    const tools = document.createElement("span");
+    tools.className = "aaronnote-meta-property-tools";
+    const up = metaToolButton("↑", `Move ${entry.key} up`, () => {
+      if (index <= 0) return;
+      const patch = swapMetaEntryLines(body, entries[index - 1]!, entry);
+      dispatchMetaPatch(view, bodyFrom, patch.from, patch.to, patch.insert);
+    });
+    up.disabled = index <= 0;
+    const down = metaToolButton("↓", `Move ${entry.key} down`, () => {
+      if (index >= entries.length - 1) return;
+      const patch = swapMetaEntryLines(body, entry, entries[index + 1]!);
+      dispatchMetaPatch(view, bodyFrom, patch.from, patch.to, patch.insert);
+    });
+    down.disabled = index >= entries.length - 1;
+    const remove = metaToolButton("×", `Delete ${entry.key}`, () => {
+      dispatchMetaPatch(view, bodyFrom, entry.lineFrom, entry.fullTo, "");
+    });
+    tools.append(up, down, remove);
+    row.append(key, value, tools);
+    table.append(row);
+  });
+  details.append(table);
+
+  const actions = document.createElement("div");
+  actions.className = "aaronnote-meta-property-actions";
+  actions.append(metaToolButton("+ Property", "Add metadata property", () => {
+    const used = new Set(entries.map((entry) => entry.key.toLowerCase()));
+    let key = "property";
+    for (let suffix = 2; used.has(key.toLowerCase()); suffix += 1) key = `property${suffix}`;
+    const summaryRange = orgMetaSummarySourceRange(body);
+    const insertAt = summaryRange?.from ?? body.length;
+    const before = insertAt > 0 && body[insertAt - 1] !== "\n" ? "\n" : "";
+    dispatchMetaPatch(view, bodyFrom, insertAt, insertAt, `${before}${key}: \n`);
+  }));
+  details.append(actions);
+
+  if (orgMetaSummarySourceRange(body)) {
+    const summaryEditor = document.createElement("div");
+    summaryEditor.className = "aaronnote-meta-summary-editor";
+    const parsed = parseOrgMetaDocument(body).summary;
+    const title = document.createElement("input");
+    title.value = parsed?.title ?? "";
+    title.placeholder = "Summary title";
+    title.setAttribute("aria-label", "Summary title");
+    const text = document.createElement("textarea");
+    text.value = parsed?.body ?? "";
+    text.rows = Math.min(12, Math.max(3, text.value.split(/\r?\n/).length));
+    text.setAttribute("aria-label", "Summary Markdown");
+    const commit = (): void => {
+      const range = orgMetaSummarySourceRange(body);
+      if (!range) return;
+      const heading = title.value.trim();
+      const next = `#+begin summary${heading ? ` ${heading}` : ""}\n${text.value.replace(/\s+$/, "")}\n#+end summary`;
+      if (next !== body.slice(range.from, range.to).replace(/\n$/, "")) {
+        const trailing = body.slice(range.from, range.to).endsWith("\n") ? "\n" : "";
+        dispatchMetaPatch(view, bodyFrom, range.from, range.to, next + trailing);
+      }
+    };
+    for (const control of [title, text]) {
+      control.addEventListener("mousedown", stopMetaControlEvent);
+      control.addEventListener("click", stopMetaControlEvent);
+      control.addEventListener("blur", commit);
+      control.addEventListener("keydown", (event) => event.stopPropagation());
+    }
+    summaryEditor.append(title, text);
+    details.append(summaryEditor);
+  }
+
+  details.addEventListener("mousedown", stopMetaControlEvent);
+  details.addEventListener("click", stopMetaControlEvent);
+  meta.append(details);
 }
 
 class FrontMatterWidget extends MeasuredWidget {
@@ -2859,9 +3116,28 @@ class FrontMatterWidget extends MeasuredWidget {
     const label = document.createElement("span");
     label.className = "cm-front-matter-label";
     label.textContent = "YAML";
-    const content = document.createElement("pre");
+    const content = document.createElement("div");
     content.className = "cm-front-matter-content";
-    content.textContent = this.body.trim();
+    const parsed = parseSimpleFrontmatter(`---\n${this.body}\n---\n`);
+    for (const [key, value] of parsed?.fields ?? []) {
+      const row = document.createElement("div");
+      row.className = "cm-front-matter-row";
+      const name = document.createElement("span");
+      name.className = "cm-front-matter-key";
+      name.textContent = key;
+      const shown = document.createElement("span");
+      shown.className = "cm-front-matter-value";
+      shown.textContent = Array.isArray(value) ? value.join(", ") : value;
+      row.append(name, shown);
+      content.append(row);
+    }
+    if (!content.childElementCount) content.textContent = this.body.trim();
+    if (parsed?.unsupported) {
+      const sourceOnly = document.createElement("span");
+      sourceOnly.className = "cm-front-matter-source-only";
+      sourceOnly.textContent = "Complex YAML · source only";
+      content.append(sourceOnly);
+    }
     div.append(label, content);
     return this.registerMeasured(div, view);
   }
@@ -3668,12 +3944,15 @@ function patchTocWidgetDecos(
 function scanFrontMatter(doc: Text): { from: number; to: number; body: string } | null {
   if (doc.lines < 2 || doc.line(1).text.trim() !== "---") return null;
   const bodyLines: string[] = [];
-  for (let lineNum = 2; lineNum <= doc.lines; lineNum++) {
+  const lastLine = Math.min(doc.lines, 1_024);
+  let bytes = doc.line(1).length + 1;
+  for (let lineNum = 2; lineNum <= lastLine && bytes <= 256 * 1024; lineNum++) {
     const line = doc.line(lineNum);
     if (line.text.trim() === "---") {
       return { from: 0, to: line.to, body: bodyLines.join("\n") };
     }
     bodyLines.push(line.text);
+    bytes += line.length + 1;
   }
   return null;
 }

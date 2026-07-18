@@ -97,6 +97,17 @@ type PrivateCommandTokenMeta = {
   raw: string;
 };
 
+type FootnoteTokenMeta = {
+  label: string;
+  number: number;
+};
+
+type FootnoteEnvironment = {
+  labels: string[];
+  numbers: Record<string, number>;
+  references: Record<string, number>;
+};
+
 const ORG_ENV_OPEN_RE = /^\s*#\+\s*begin\s+(\S+)(?:[ \t]+([^\n]*?))?[ \t]*$/i;
 const TABLE_ROW_LINE_RE = /^\s*\|.*\|\s*$/;
 const FENCE_CLOSE_LINE_RE = /^[ \t]{0,3}(`{3,}|~{3,})\s*$/;
@@ -385,6 +396,74 @@ function privateCommandLineRule(state: StateBlock, startLine: number, _endLine: 
   return true;
 }
 
+function ensureFootnoteEnvironment(env: Record<string, unknown>): FootnoteEnvironment {
+  const existing = env.aaronnoteFootnotes as FootnoteEnvironment | undefined;
+  if (existing) return existing;
+  const created: FootnoteEnvironment = { labels: [], numbers: Object.create(null), references: Object.create(null) };
+  env.aaronnoteFootnotes = created;
+  return created;
+}
+
+function footnoteNumber(env: Record<string, unknown>, label: string): number {
+  const footnotes = ensureFootnoteEnvironment(env);
+  if (!footnotes.numbers[label]) {
+    footnotes.labels.push(label);
+    footnotes.numbers[label] = footnotes.labels.length;
+  }
+  return footnotes.numbers[label]!;
+}
+
+function footnoteDefinitionRule(state: StateBlock, startLine: number, endLine: number, silent: boolean): boolean {
+  const first = lineText(state, startLine);
+  const match = /^\s*\[\^([^\]\n]{1,128})\]:[ \t]*(.*)$/.exec(first);
+  if (!match) return false;
+  if (silent) return true;
+
+  const body = [match[2] ?? ""];
+  let nextLine = startLine + 1;
+  while (nextLine < endLine) {
+    const continuation = lineText(state, nextLine);
+    if (/^[ \t]{2,}\S/.test(continuation)) {
+      body.push(continuation.replace(/^[ \t]{2,4}/, ""));
+      nextLine++;
+      continue;
+    }
+    break;
+  }
+
+  const label = match[1]!;
+  const token = state.push("footnote_definition", "div", 0);
+  token.block = true;
+  token.map = [startLine, nextLine];
+  token.content = body.join("\n");
+  token.meta = {
+    label,
+    number: footnoteNumber(state.env as Record<string, unknown>, label),
+  } satisfies FootnoteTokenMeta;
+  state.line = nextLine;
+  return true;
+}
+
+function footnoteReferenceRule(state: StateInline, silent: boolean): boolean {
+  if (state.src.charCodeAt(state.pos) !== 0x5b || state.src.charCodeAt(state.pos + 1) !== 0x5e) return false;
+  const close = state.src.indexOf("]", state.pos + 2);
+  if (close < 0 || close - state.pos > 131) return false;
+  const label = state.src.slice(state.pos + 2, close);
+  if (!label || /[\n\]]/.test(label)) return false;
+  const env = state.env as Record<string, unknown>;
+  const footnotes = ensureFootnoteEnvironment(env);
+  if (!footnotes.numbers[label]) return false;
+  if (silent) return true;
+  const token = state.push("footnote_reference", "", 0);
+  token.meta = { label, number: footnoteNumber(env, label) } satisfies FootnoteTokenMeta;
+  state.pos = close + 1;
+  return true;
+}
+
+function footnoteDomId(label: string): string {
+  return encodeURIComponent(label).replace(/%/g, "-");
+}
+
 function mathInlineRule(state: StateInline, silent: boolean): boolean {
   const start = state.pos;
   // Inline math opens with the literal LaTeX delimiter `\(` and closes with `\)`.
@@ -467,6 +546,26 @@ function sideCommentInlineRule(state: StateInline, silent: boolean): boolean {
   return true;
 }
 
+function revisionInlineRule(state: StateInline, silent: boolean): boolean {
+  const start = state.pos;
+  if (!state.src.startsWith("@@revision", start)) return false;
+  if (markdownEscapedAt(state.src, start) || insideHtmlComment(state.src, start)) return false;
+  const lineEnd = state.src.indexOf("\n", start);
+  const slice = state.src.slice(start, lineEnd < 0 ? state.src.length : lineEnd);
+  const cmd = scanInlineCommands(slice, "revision")[0];
+  if (!cmd || cmd.fullFrom !== 0) return false;
+  if (silent) return true;
+  const token = state.push("revision_inline", "span", 0);
+  token.content = cmd.context.trim().replace(/\\\]/g, "]").replace(/\\\\/g, "\\");
+  token.meta = {
+    advice: String(cmd.args.advice || "").replace(/\\\\/g, "\\"),
+    reason: String(cmd.args.reason || "").replace(/\\\\/g, "\\"),
+    style: cmd.switchValue.trim().toLowerCase(),
+  };
+  state.pos = start + cmd.fullTo;
+  return true;
+}
+
 function privateInlineRule(state: StateInline, silent: boolean): boolean {
   const start = state.pos;
   if (!state.src.startsWith("@@todo", start) && !state.src.startsWith("@@itodo", start)) return false;
@@ -514,6 +613,24 @@ function renderSideCommentInline(tokens: Token[], idx: number): string {
     "</span>",
     `<span class="inline-side-comment-card">${body}</span>`,
     "</span>",
+  ].join("");
+}
+
+function renderRevisionInline(tokens: Token[], idx: number): string {
+  const original = tokens[idx]!.content;
+  const meta = (tokens[idx]!.meta || {}) as { advice?: string; reason?: string; style?: string };
+  const allowed = new Set(["indigo", "teal", "red", "green", "yellow"]);
+  const style = allowed.has(meta.style || "") ? meta.style : "indigo";
+  const advice = String(meta.advice || "");
+  const reason = String(meta.reason || "");
+  return [
+    `<span class="aaronnote-revision" data-revision-style="${escapeAttr(style || "indigo")}" role="note" aria-label="Unresolved revision">`,
+    `<span class="aaronnote-revision-original">${renderMarkdownInlineHTML(original)}</span>`,
+    '<span class="aaronnote-revision-card">',
+    "<strong>Suggestion</strong>",
+    `<span class="aaronnote-revision-advice">${renderMarkdownInlineHTML(advice)}</span>`,
+    reason ? `<span class="aaronnote-revision-reason">${renderMarkdownInlineHTML(reason)}</span>` : "",
+    "</span></span>",
   ].join("");
 }
 
@@ -945,13 +1062,16 @@ function createMarkdownIt(options: RenderMarkdownHTMLOptions): MarkdownIt {
   md.block.ruler.before("paragraph", "semantic_heading_block", semanticHeadingBlockRule, { alt: ["paragraph"] });
   md.block.ruler.before("paragraph", "toc_block", tocRule, { alt: ["paragraph"] });
   md.block.ruler.before("paragraph", "private_command_line", privateCommandLineRule, { alt: ["paragraph"] });
+  md.block.ruler.before("reference", "footnote_definition", footnoteDefinitionRule, { alt: ["paragraph", "reference", "blockquote"] });
   md.core.ruler.push("aaronnote_callouts", aaronnoteCalloutsRule);
   md.inline.ruler.before("link", "empty_html_link_embed", emptyHtmlLinkEmbedRule);
   md.inline.ruler.before("link", "jupyter_link", jupyterLinkRule);
+  md.inline.ruler.before("link", "footnote_reference", footnoteReferenceRule);
   // Must run before `escape`: otherwise the backslash escape rule consumes the
   // `\(` opener as a literal `(` and inline math is never recognized.
   md.inline.ruler.before("escape", "math_inline", mathInlineRule);
   md.inline.ruler.before("escape", "cite_inline", citeInlineRule);
+  md.inline.ruler.before("escape", "revision_inline", revisionInlineRule);
   md.inline.ruler.before("escape", "comment_inline", commentInlineRule);
   md.inline.ruler.before("escape", "side_comment_inline", sideCommentInlineRule);
   md.inline.ruler.before("escape", "private_inline", privateInlineRule);
@@ -959,9 +1079,25 @@ function createMarkdownIt(options: RenderMarkdownHTMLOptions): MarkdownIt {
   md.renderer.rules.math_block = renderMathBlock;
   md.renderer.rules.math_inline = renderMathInline;
   md.renderer.rules.cite_inline = renderCiteInline;
+  md.renderer.rules.revision_inline = renderRevisionInline;
   md.renderer.rules.comment_inline = renderCommentInline;
   md.renderer.rules.side_comment_inline = renderSideCommentInline;
   md.renderer.rules.private_inline = () => "";
+  md.renderer.rules.footnote_reference = (tokens, idx, _opts, env) => {
+    const meta = tokens[idx]!.meta as FootnoteTokenMeta;
+    const state = ensureFootnoteEnvironment(env as Record<string, unknown>);
+    const occurrence = (state.references[meta.label] ?? 0) + 1;
+    state.references[meta.label] = occurrence;
+    const id = footnoteDomId(meta.label);
+    return `<sup class="aaronnote-footnote-reference" id="fnref-${id}-${occurrence}"><a href="#fn-${id}" role="doc-noteref" aria-label="Footnote ${meta.number}">${meta.number}</a></sup>`;
+  };
+  md.renderer.rules.footnote_definition = (tokens, idx, _opts, env) => {
+    const token = tokens[idx]!;
+    const meta = token.meta as FootnoteTokenMeta;
+    const id = footnoteDomId(meta.label);
+    const body = md.renderInline(token.content, env as Record<string, unknown>);
+    return `<div class="aaronnote-footnote-definition" id="fn-${id}" role="doc-footnote"><span class="aaronnote-footnote-number">${meta.number}.</span> <span class="aaronnote-footnote-body">${body}</span> <a class="aaronnote-footnote-backref" href="#fnref-${id}-1" aria-label="Back to reference">↩</a></div>\n`;
+  };
   md.renderer.rules.private_command_line = (tokens, idx) => {
     const token = tokens[idx]!;
     const meta = token.meta as PrivateCommandTokenMeta | undefined;

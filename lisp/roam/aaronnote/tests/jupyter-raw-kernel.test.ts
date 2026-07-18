@@ -9,12 +9,12 @@ import * as zmq from "zeromq";
 import { createRawKernelConnection, waitForConnected, warmupKernelInfo } from "../server/jupyter/raw-kernel.mjs";
 
 // Exercises the raw ZMQ kernel stack (wire protocol + RawSocket + the
-// kernel_info/first-iopub handshake) against a real ipykernel process from
-// jupyter/.venv. Gated: needs a real kernel process, so it's opt-in.
+// kernel_info/first-iopub handshake) against the managed Conda ipykernel.
+// Gated: needs a real kernel process, so it's opt-in.
 const RUN = process.env.AARONNOTE_TEST_KERNEL === "1";
 const describeIfKernel = RUN ? describe : describe.skip;
 
-const pythonBin = join(import.meta.dirname, "..", "jupyter", ".venv", "bin", "python");
+const pythonBin = join(import.meta.dirname, "..", "jupyter", "bin", "python-jupyter-kernel");
 
 async function findFreePorts(count: number): Promise<number[]> {
   const ports: number[] = [];

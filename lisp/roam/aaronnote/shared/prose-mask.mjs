@@ -72,6 +72,12 @@ function maskRange(chars, from, to) {
   }
 }
 
+function unmaskRange(chars, source, from, to) {
+  const start = Math.max(0, from);
+  const end = Math.min(chars.length, to);
+  for (let i = start; i < end; i++) chars[i] = source[i];
+}
+
 function lineRanges(text) {
   const ranges = [];
   let from = 0;
@@ -204,7 +210,18 @@ function maskRegex(text, chars, re) {
 
 function maskInlineCommands(text, chars) {
   for (const command of scanInlineCommands(text)) {
-    if (PROSE_INLINE_COMMANDS.has(command.name)) {
+    if (command.name === "revision") {
+      maskRange(chars, command.fullFrom, command.fullTo);
+      unmaskRange(chars, text, command.contextFrom, command.contextTo);
+      const commandSource = text.slice(command.fullFrom, command.fullTo);
+      for (const match of commandSource.matchAll(/\b(?:advice|reason)\s*:\s*"((?:[^"\\]|\\.)*)"/gi)) {
+        if (match.index === undefined) continue;
+        const value = match[1] || "";
+        const valueOffset = match[0].indexOf(value);
+        const from = command.fullFrom + match.index + valueOffset;
+        unmaskRange(chars, text, from, from + value.length);
+      }
+    } else if (PROSE_INLINE_COMMANDS.has(command.name)) {
       maskRange(chars, command.fullFrom, command.contextFrom);
       maskRange(chars, command.contextTo, command.fullTo);
     } else {

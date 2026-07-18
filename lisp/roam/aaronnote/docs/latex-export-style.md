@@ -40,6 +40,7 @@ agent then performs gated structural and typographic polish.
 | tables / footnotes / definitions / task lists / strikeout | Pandoc-native academic LaTeX |
 | `@@latexmk(name)` | typed, placement-validated LaTeX mark |
 | `@@cite(namespace) [key; ...] {locator: ...}` | resolved `\\cite` plus matching bibliography entries; unresolved/partial groups are export errors |
+| `@@revision(style) [original] {advice: "..."; reason: "..."}` | always-visible `\\aaronrevision{original}{advice}{reason}` until accepted or kept |
 | `@@todo(...) [...]{...}` | **dropped** (todos never appear in exports) |
 | `#+begin meta ... #+end meta` | consumed for title/date; not emitted |
 

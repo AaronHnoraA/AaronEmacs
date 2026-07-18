@@ -48,6 +48,13 @@ export type EditorCommand =
   | "strike"
   | "code"
   | "link"
+  | "superscript"
+  | "subscript"
+  | "insert-footnote"
+  | "insert-revision"
+  | "edit-properties"
+  | "move-block-up"
+  | "move-block-down"
   | "blockquote"
   | "bullet-list"
   | "ordered-list"
@@ -150,6 +157,8 @@ export function blockCommands(type: string): EditorCommand[] {
   }
   if (type === "code_block") return ["copy-code", "code-block"];
   return [
+    "move-block-up",
+    "move-block-down",
     "heading-1",
     "heading-2",
     "heading-3",
@@ -181,6 +190,27 @@ export function quickMatches(item: QuickInsertItem, query: string): boolean {
 }
 
 const builtInQuickInsertItems: QuickInsertItem[] = [
+  {
+    id: "footnote",
+    label: "Footnote",
+    detail: "[^1]",
+    command: "insert-footnote",
+    keywords: ["reference", "note"],
+  },
+  {
+    id: "revision",
+    label: "Revision",
+    detail: "@@revision",
+    command: "insert-revision",
+    keywords: ["review", "suggestion", "change"],
+  },
+  {
+    id: "metadata",
+    label: "Document properties",
+    detail: "#+begin meta",
+    command: "edit-properties",
+    keywords: ["meta", "frontmatter", "property"],
+  },
   {
     id: "heading-1",
     label: "Heading 1",

@@ -121,6 +121,7 @@ const ime = createImeSwitcher();
 import { runtimeMkdtemp, sweepRuntimeTmp } from "./server/lib/tmp.mjs";
 import { loadKatexMacros } from "./server/lib/katex-macros.mjs";
 import { createJupyterCellService } from "./server/lib/jupyter-cell.mjs";
+import { jupyterDefaultsFromEnv } from "./server/lib/jupyter-defaults.mjs";
 import { sweepGlobalOrphanKernels } from "./server/jupyter/kernel-registry.mjs";
 import { installJupyterKernelWebSocket } from "./server/lib/jupyter-kernel-ws.mjs";
 import * as zmq from "zeromq";
@@ -140,6 +141,7 @@ const templatesRoot = resolve(process.env.AARONNOTE_TEMPLATES_ROOT || join(works
 const katexMacrosDir = resolve(process.env.AARONNOTE_KATEX_MACROS_DIR || join(workspaceRoot, "etc", "katex-macros"));
 const bindHost = process.env.AARONNOTE_WEB_HOST || "127.0.0.1";
 const bindPort = Number(process.env.AARONNOTE_WEB_PORT || 0);
+const jupyterDefaults = jupyterDefaultsFromEnv(process.env);
 const liuGongQuanFontCandidates = [
   process.env.AARONNOTE_LIUGONGQUAN_FONT,
   join(homedir(), "Library", "Fonts", "方正柳公权楷书 简繁.TTF"),
@@ -775,6 +777,10 @@ const apiRouter = new ApiRouter().register({
   "aaronnote:api:notes:index": async () => {
     return { type: "notes", ...await notesIndexPayload(), root: noteRoot };
   },
+  "aaronnote:api:notes:graph": async () => {
+    const payload = graphPayload(await scanRoamNotes());
+    return { ...payload, indexVersion: notesIndexVersionValue() };
+  },
   "aaronnote:api:notes:roam-index": async () => {
     return { type: "notes", ...await roamNotesIndexPayload(), root: noteRoot };
   },
@@ -935,6 +941,7 @@ function adapterScript(origin) {
 (function() {
   var BASE = ${JSON.stringify(origin)};
   window.__aaronnoteNotesRoot = ${JSON.stringify(noteRoot)};
+  window.__aaronnoteJupyterDefaults = ${JSON.stringify(jupyterDefaults)};
   function call(channel, args) {
     return fetch(BASE + "/api", {
       method: "POST",
@@ -1077,6 +1084,7 @@ function adapterScript(origin) {
       snippets: function() { return call("aaronnote:api:notes:snippets", []); },
       metaAdd: function(body) { return call("aaronnote:api:notes:meta-add", [body || {}]); },
       notesIndex: function() { return call("aaronnote:api:notes:index", []); },
+      graph: function() { return call("aaronnote:api:notes:graph", []); },
       todos: function(file) { return call("aaronnote:api:notes:todos", [{ file: String(file || "") }]); },
       updateTodo: function(body) { return call("aaronnote:api:notes:update-todo", [body || {}]); },
       agenda: function(body) { return call("aaronnote:api:notes:agenda", [body || {}]); },

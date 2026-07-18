@@ -16,15 +16,15 @@ const RUN = process.env.AARONNOTE_TEST_KERNEL === "1";
 const describeIfKernel = RUN ? describe : describe.skip;
 
 const aaronnoteRoot = join(import.meta.dirname, "..");
-const venvDir = join(aaronnoteRoot, "jupyter", ".venv");
+const jupyterDataDir = join(aaronnoteRoot, "jupyter", ".jupyter", "data");
 
 describeIfKernel("kernel death mid-execution (real ipykernel)", () => {
   test(
     "executeOnKernel rejects promptly (not hangs) when the kernel process is killed mid-run",
     async () => {
       const runtimeDir = await mkdtemp(join(tmpdir(), "aaronnote-death-"));
-      const registry = createKernelRegistry({ runtimeDir, venvBinDir: join(venvDir, "bin"), zmq, launchTimeoutMs: 15_000 });
-      const searchDirs = defaultKernelSearchDirs({ venvPrefix: venvDir, useHomeKernels: false });
+      const registry = createKernelRegistry({ runtimeDir, zmq, launchTimeoutMs: 15_000 });
+      const searchDirs = defaultKernelSearchDirs({ dataDir: jupyterDataDir, useHomeKernels: false });
       const specs = await findKernelSpecs({ searchDirs });
       const python3 = specs.find((s) => s.name === "python3")!;
 

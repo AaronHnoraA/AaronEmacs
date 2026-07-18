@@ -1,4 +1,4 @@
-import type { CursorPosition, Inbound, SnippetSummary, UnusedAsset } from "./types.ts";
+import type { CursorPosition, GraphPayload, Inbound, SnippetSummary, UnusedAsset } from "./types.ts";
 
 type OpenMsg = Extract<Inbound, { type: "open" }>;
 type SavedMsg = Extract<Inbound, { type: "saved" }>;
@@ -417,6 +417,7 @@ type NativeApi = {
     snippets?: () => Promise<unknown>;
     metaAdd?: (body: Record<string, unknown>) => Promise<unknown>;
     notesIndex?: () => Promise<unknown>;
+    graph?: () => Promise<unknown>;
     todos?: (file: string) => Promise<unknown>;
     updateTodo?: (body: Record<string, unknown>) => Promise<unknown>;
     agenda?: (body: Record<string, unknown>) => Promise<unknown>;
@@ -658,6 +659,10 @@ export const api = {
     async snippets(): Promise<SnippetsMsg & { snippets?: SnippetSummary[] }> {
       const call = requireMethod(nativeApi().notes?.snippets, "Snippet reload");
       return ensureOk(await call() as SnippetsMsg & { snippets?: SnippetSummary[] }, "Snippet reload failed");
+    },
+    async graph(): Promise<GraphPayload> {
+      const call = requireMethod(nativeApi().notes?.graph, "Workspace graph");
+      return ensureOk(await call() as GraphPayload, "Workspace graph failed");
     },
     async todos(file = ""): Promise<TodosMsg> {
       const call = requireMethod(nativeApi().notes?.todos, "Todo agenda");

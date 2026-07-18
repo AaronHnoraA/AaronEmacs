@@ -24,7 +24,7 @@ import {
 } from "@codemirror/view";
 import { MeasuredWidget } from "./measured-widget.ts";
 import { shortHash } from "./measured-observer.ts";
-import { StateField, type ChangeSet, type EditorState, type Text } from "@codemirror/state";
+import { StateEffect, StateField, type ChangeSet, type EditorState, type Text } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 import type { Range } from "@codemirror/state";
 import { highlightCodeForEditor, onCodeHighlightReady } from "../../../../code-highlight-async.ts";
@@ -46,22 +46,85 @@ function setSourceRange(el: HTMLElement, from: number, to: number, anchor?: numb
 
 class LangBadgeWidget extends MeasuredWidget {
   lang: string;
+  from: number;
+  to: number;
 
-  constructor(lang: string) { super(); this.lang = lang; }
+  constructor(lang: string, from: number, to: number) {
+    super();
+    this.lang = lang;
+    this.from = from;
+    this.to = to;
+  }
 
   protected measureKey(): string { return ""; }
   protected get measuredBlock(): boolean { return false; }
 
-  eq(other: LangBadgeWidget): boolean { return this.lang === other.lang; }
+  eq(other: LangBadgeWidget): boolean {
+    return this.lang === other.lang && this.from === other.from && this.to === other.to;
+  }
 
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
     const span = document.createElement("span");
-    span.className = "cm-code-lang-badge";
-    span.textContent = this.lang;
+    span.className = "cm-code-lang-badge cm-code-lang-editor";
+    span.textContent = this.lang || "lang";
+    span.title = "Click to edit code language";
+    span.tabIndex = 0;
+    const edit = (): void => {
+      if (span.querySelector("input")) return;
+      const input = document.createElement("input");
+      input.className = "cm-code-lang-input";
+      input.value = this.lang;
+      input.maxLength = 48;
+      input.spellcheck = false;
+      input.setAttribute("aria-label", "Code language");
+      span.textContent = "";
+      span.append(input);
+      const commit = (): void => {
+        const next = input.value.trim().replace(/[^A-Za-z0-9_+.-]/g, "").slice(0, 48);
+        if (next !== this.lang) {
+          view.dispatch({ changes: { from: this.from, to: this.to, insert: next } });
+          view.requestMeasure();
+        } else {
+          span.textContent = this.lang || "lang";
+        }
+      };
+      input.addEventListener("mousedown", (event) => event.stopPropagation());
+      input.addEventListener("click", (event) => event.stopPropagation());
+      input.addEventListener("blur", commit, { once: true });
+      input.addEventListener("keydown", (event) => {
+        event.stopPropagation();
+        if (event.key === "Enter") {
+          event.preventDefault();
+          input.blur();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          input.value = this.lang;
+          input.blur();
+        }
+      });
+      input.focus();
+      input.select();
+    };
+    span.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    span.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      edit();
+    });
+    span.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        event.stopPropagation();
+        edit();
+      }
+    });
     return span;
   }
 
-  ignoreEvent(): boolean { return false; }
+  ignoreEvent(): boolean { return true; }
 }
 
 class CodeCopyButtonWidget extends MeasuredWidget {
@@ -131,6 +194,119 @@ async function copyText(text: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+type CodeFold = { key: string; from: number; to: number; lines: number };
+type CodeFoldState = { folds: readonly CodeFold[]; decorations: DecorationSet };
+const MAX_CODE_FOLDS = 128;
+
+const toggleCodeFoldEffect = StateEffect.define<CodeFold>();
+
+class CodeFoldPlaceholderWidget extends MeasuredWidget {
+  readonly lines: number;
+  constructor(lines: number) {
+    super();
+    this.lines = lines;
+  }
+  protected measureKey(): string { return `code-fold:${this.lines}`; }
+  protected measureGroupKey(): string { return "code-fold"; }
+  protected estimatedHeightFallback(): number { return 30; }
+  eq(other: CodeFoldPlaceholderWidget): boolean { return this.lines === other.lines; }
+  toDOM(view: EditorView): HTMLElement {
+    const block = document.createElement("div");
+    block.className = "cm-code-fold-placeholder";
+    block.textContent = `${this.lines} ${this.lines === 1 ? "line" : "lines"} collapsed`;
+    return this.registerMeasured(block, view);
+  }
+  ignoreEvent(): boolean { return true; }
+}
+
+function codeFoldDecorations(state: EditorState, folds: readonly CodeFold[]): DecorationSet {
+  const decorations: Range<Decoration>[] = [];
+  for (const fold of folds) {
+    const from = state.doc.lineAt(Math.max(0, Math.min(fold.from, state.doc.length))).from;
+    const endPosition = Math.max(from, Math.min(Math.max(fold.from, fold.to - 1), state.doc.length));
+    const to = state.doc.lineAt(endPosition).to;
+    if (from >= to) continue;
+    decorations.push(Decoration.replace({
+      widget: new CodeFoldPlaceholderWidget(fold.lines),
+      block: true,
+    }).range(from, to));
+  }
+  return Decoration.set(decorations, true);
+}
+
+const codeFoldField = StateField.define<CodeFoldState>({
+  create: () => ({ folds: [], decorations: Decoration.none }),
+  update(value, transaction) {
+    let folds: CodeFold[] = [];
+    if (transaction.docChanged) {
+      const tree = syntaxTree(transaction.state);
+      for (const fold of value.folds.slice(0, MAX_CODE_FOLDS)) {
+        const mappedFrom = transaction.changes.mapPos(fold.from, -1);
+        let node = tree.resolve(Math.max(0, Math.min(mappedFrom, transaction.newDoc.length)), 1);
+        while (node.parent && node.name !== "FencedCode") node = node.parent;
+        if (node.name !== "FencedCode") continue;
+        const textNode = node.getChild("CodeText");
+        if (!textNode || textNode.from >= textNode.to) continue;
+        const source = transaction.newDoc.sliceString(textNode.from, textNode.to);
+        folds.push({
+          key: `code:${textNode.from}`,
+          from: textNode.from,
+          to: textNode.to,
+          lines: Math.max(1, source.split(/\r?\n/).length),
+        });
+      }
+    } else {
+      folds = Array.from(value.folds);
+    }
+    let changed = transaction.docChanged;
+    for (const effect of transaction.effects) {
+      if (!effect.is(toggleCodeFoldEffect)) continue;
+      changed = true;
+      const existing = folds.findIndex((fold) => fold.key === effect.value.key);
+      if (existing >= 0) folds.splice(existing, 1);
+      else if (folds.length < MAX_CODE_FOLDS) folds.push(effect.value);
+    }
+    return changed
+      ? { folds, decorations: codeFoldDecorations(transaction.state, folds) }
+      : value;
+  },
+  provide: (field) => EditorView.decorations.from(field, (value) => value.decorations),
+});
+
+class CodeFoldButtonWidget extends MeasuredWidget {
+  readonly fold: CodeFold;
+  readonly folded: boolean;
+  constructor(fold: CodeFold, folded: boolean) {
+    super();
+    this.fold = fold;
+    this.folded = folded;
+  }
+  protected measureKey(): string { return ""; }
+  protected get measuredBlock(): boolean { return false; }
+  eq(other: CodeFoldButtonWidget): boolean {
+    return this.fold.key === other.fold.key && this.folded === other.folded;
+  }
+  toDOM(view: EditorView): HTMLElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cm-code-fold-button";
+    button.textContent = this.folded ? "Show" : "Fold";
+    button.title = this.folded ? "Expand code block" : "Collapse code block";
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      view.dispatch({ effects: toggleCodeFoldEffect.of(this.fold) });
+      view.requestMeasure();
+    });
+    return button;
+  }
+  ignoreEvent(): boolean { return true; }
 }
 
 // ---------------------------------------------------------------------------
@@ -576,6 +752,15 @@ function buildFencedCodeDecos(view: EditorView): DecorationSet {
         const codeBody = textNode
           ? doc.sliceString(textNode.from, textNode.to)
           : "";
+        const foldKey = `code:${textNode?.from ?? node.from}`;
+        const fold = textNode ? {
+          key: foldKey,
+          from: textNode.from,
+          to: textNode.to,
+          lines: Math.max(1, codeBody.split(/\r?\n/).length),
+        } : null;
+        const folded = Boolean(fold && view.state.field(codeFoldField, false)?.folds
+          .some((entry) => entry.key === foldKey));
 
         const openFenceLine = doc.lineAt(node.from);
         const openFenceLineNum = openFenceLine.number;
@@ -589,15 +774,28 @@ function buildFencedCodeDecos(view: EditorView): DecorationSet {
         const fenceMarkEnd = infoNode ? infoNode.from : openFenceLine.to;
         pushMark(decos, openFenceLine.from, fenceMarkEnd, onOpenFence ? "syntax-hint" : "syntax-hidden");
 
-        // Lang badge
-        if (lang) {
-          decos.push(
-            Decoration.widget({ widget: new LangBadgeWidget(lang), side: 1 }).range(fenceMarkEnd),
-          );
-        }
+        // Editable language badge, shown even for an unlabelled fence.
+        decos.push(
+          Decoration.widget({
+            widget: new LangBadgeWidget(
+              lang,
+              infoNode?.from ?? fenceMarkEnd,
+              infoNode?.to ?? fenceMarkEnd,
+            ),
+            side: 1,
+          }).range(fenceMarkEnd),
+        );
         if (textNode) {
           decos.push(
             Decoration.widget({ widget: new CodeCopyButtonWidget(codeBody), side: 2 }).range(fenceMarkEnd),
+          );
+        }
+        if (fold) {
+          decos.push(
+            Decoration.widget({
+              widget: new CodeFoldButtonWidget(fold, folded),
+              side: 3,
+            }).range(fenceMarkEnd),
           );
         }
 
@@ -613,7 +811,7 @@ function buildFencedCodeDecos(view: EditorView): DecorationSet {
         }
 
         // Syntax highlighting
-        if (textNode && lang && codeBody) {
+        if (textNode && lang && codeBody && !folded) {
           const ranges = highlightCodeForEditor(lang, codeBody);
           for (const r of ranges) {
             const from = textNode.from + r.from;
@@ -669,7 +867,9 @@ class FencedCodePlugin {
 
   update(update: ViewUpdate): void {
     if (update.view.compositionStarted && update.selectionSet && !update.docChanged && !update.viewportChanged) return;
-    if (update.docChanged || update.viewportChanged || hasViewportDecorationRefresh(update)) {
+    const foldToggled = update.transactions.some((transaction) =>
+      transaction.effects.some((effect) => effect.is(toggleCodeFoldEffect)));
+    if (update.docChanged || update.viewportChanged || foldToggled || hasViewportDecorationRefresh(update)) {
       this.activeLineKey = activeFenceChromeLineKey(update.view);
       this.decorations = buildFencedCodeDecos(update.view);
     } else if (update.selectionSet) {
@@ -693,4 +893,9 @@ const fencedCodeViewPlugin = ViewPlugin.fromClass(FencedCodePlugin, {
 // Public export — both parts together
 // ---------------------------------------------------------------------------
 
-export const fencedCodeExtension = [mermaidBlocksField, mermaidField, fencedCodeViewPlugin];
+export const fencedCodeExtension = [
+  mermaidBlocksField,
+  mermaidField,
+  codeFoldField,
+  fencedCodeViewPlugin,
+];

@@ -11,6 +11,7 @@
 (require 'config)
 
 (require 'cl-lib)
+(require 'init-lsp-toolchain)
 (require 'subr-x)
 
 (eval-when-compile
@@ -347,7 +348,9 @@ byte-compile backend does not emit noisy warnings on startup."
 (defun my/language-server-apply-process-environment ()
   "Install the language-server process environment in the current buffer."
   (setq-local process-environment
-              (my/language-server-process-environment)))
+              (my/language-server-process-environment))
+  (when (fboundp 'my/language-server-toolchain-apply-environment)
+    (my/language-server-toolchain-apply-environment)))
 
 (defun my/language-server-project-workspace-configuration ()
   "Return project-local Eglot workspace configuration overrides."
@@ -365,7 +368,9 @@ byte-compile backend does not emit noisy warnings on startup."
 (defun my/language-server-apply-eglot-local-settings ()
   "Apply project-local Eglot settings before startup."
   (when-let* ((configuration (my/language-server-project-workspace-configuration)))
-    (my/eglot-set-workspace-configuration configuration)))
+    (my/eglot-set-workspace-configuration configuration))
+  (when (fboundp 'my/language-server-toolchain-apply-eglot-settings)
+    (my/language-server-toolchain-apply-eglot-settings)))
 
 (defun my/language-server-apply-lsp-local-settings ()
   "Apply local `lsp-mode' settings before startup."
@@ -552,12 +557,12 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
     (unless (or (bound-and-true-p lsp-managed-mode)
                 (and (fboundp 'eglot-managed-p)
                      (eglot-managed-p)))
+      (when (fboundp 'my/direnv-update-environment-maybe)
+        (my/direnv-update-environment-maybe))
+      (my/language-server-prepare-remote-eglot-environment)
+      (my/language-server-apply-process-environment)
+      (my/language-server-apply-eglot-local-settings)
       (when (my/eglot-contact-available-p)
-        (when (fboundp 'my/direnv-update-environment-maybe)
-          (my/direnv-update-environment-maybe))
-        (my/language-server-prepare-remote-eglot-environment)
-        (my/language-server-apply-process-environment)
-        (my/language-server-apply-eglot-local-settings)
         (eglot-ensure)))))
 
 (defun my/eglot-ensure ()

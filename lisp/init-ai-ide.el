@@ -57,6 +57,9 @@
               (locate-user-emacs-file "site-lisp/ai-workbench")))
 (add-to-list 'load-path
              (file-name-as-directory
+              (locate-user-emacs-file "site-lisp/ai-workbench/magent/lisp")))
+(add-to-list 'load-path
+             (file-name-as-directory
               (locate-user-emacs-file "site-lisp/ai-workbench/vendor/codex-cli")))
 (add-to-list 'load-path
              (file-name-as-directory
@@ -65,6 +68,63 @@
 (autoload 'ai-workbench "ai-workbench" nil t)
 (autoload 'ai-workbench-open "ai-workbench" nil t)
 (autoload 'ai-workbench-kill "ai-workbench" nil t)
+(autoload 'ai-workbench-open-direct-terminal "ai-workbench" nil t)
+(autoload 'magent-start "magent-agent-shell" nil t)
+
+;; Magent is embedded under ai-workbench; only its supporting libraries are
+;; normal locked packages.  Keep every dependency lazy so ordinary startup
+;; pays only for the load-path and autoload declarations above.
+(use-package compat :ensure t :defer t)
+(use-package gptel :ensure t :defer t)
+(use-package acp :ensure t :defer t)
+(use-package shell-maker :ensure t :defer t)
+(use-package agent-shell :ensure t :defer t)
+
+(config-defvar magent-session-directory
+  (locate-user-emacs-file "var/ai-workbench/magent/sessions/")
+  "Directory for Magent sessions and their audit trail."
+  :type 'directory
+  :group 'ai)
+
+(config-defvar magent-request-timeout 180
+  "Inactivity timeout for API and structured CLI sampling."
+  :type 'integer
+  :group 'ai)
+
+(config-defvar ai-workbench-magent-cli-max-json-line-bytes (* 1024 1024)
+  "Maximum buffered bytes for one coding-agent JSON event."
+  :type 'integer
+  :group 'ai)
+
+(config-defvar ai-workbench-magent-cli-max-answer-bytes (* 8 1024 1024)
+  "Maximum assistant bytes retained from one coding-agent turn."
+  :type 'integer
+  :group 'ai)
+
+(config-defvar ai-workbench-magent-cli-max-diagnostic-bytes (* 256 1024)
+  "Maximum diagnostic bytes retained from one coding-agent turn."
+  :type 'integer
+  :group 'ai)
+
+(config-defvar ai-workbench-magent-cli-max-prompt-bytes (* 4 1024 1024)
+  "Maximum combined Magent context and user prompt sent to a CLI."
+  :type 'integer
+  :group 'ai)
+
+(config-defvar ai-workbench-magent-max-prompt-bytes (* 2 1024 1024)
+  "Maximum user/profile prompt size accepted by ai-workbench."
+  :type 'integer
+  :group 'ai)
+
+(config-defvar ai-workbench-magent-max-pending-per-project 32
+  "Maximum queued Magent turns retained for one project."
+  :type 'integer
+  :group 'ai)
+
+(config-defvar ai-workbench-output-max-bytes (* 16 1024 1024)
+  "Soft maximum size of one ai-workbench transcript buffer."
+  :type 'integer
+  :group 'ai)
 (autoload 'ai-workbench-send-region "ai-workbench" nil t)
 (autoload 'ai-workbench-send-current-buffer "ai-workbench" nil t)
 (autoload 'ai-workbench-send-file "ai-workbench" nil t)
@@ -188,20 +248,13 @@
 (global-set-key (kbd "C-c o r") #'ai-workbench-send-region)
 (global-set-key (kbd "C-c o f") #'ai-workbench-send-file)
 
-;; ── AI Engine commands (ai-workbench-engine + CLI) ─────────────────────────
+;; ── Legacy AI Engine commands ──────────────────────────────────────────────
 
-;; Register CLI backends + restore persisted backend after Emacs finishes
-;; initialising.  `after-init-hook' runs after all init files so transient
-;; and other deps are guaranteed to be loaded by then.
-(add-hook 'after-init-hook
-          (lambda ()
-            (condition-case err
-                (when (require 'ai-workbench-vendor nil t)
-                  (ai-workbench-add-vendor-to-load-path 'ai-workbench-engine)
-                  (require 'ai-workbench-engine nil t)
-                  (require 'ai-workbench-engine-cli nil t)
-                  (ai-workbench-engine-cli-register))
-              (error (message "ai-workbench: init hook error: %s" err)))))
+;; Preserve rewrite/menu compatibility, but load and bridge the old engine only
+;; when one of its commands is invoked.  Normal startup and Magent use avoid it.
+(with-eval-after-load 'ai-workbench-engine
+  (require 'ai-workbench-engine-cli)
+  (ai-workbench-engine-cli-register))
 
 (provide 'init-ai-ide)
 ;;; init-ai-ide.el ends here

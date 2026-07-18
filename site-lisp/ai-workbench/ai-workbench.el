@@ -2,12 +2,14 @@
 
 ;;; Commentary:
 ;;
-;; Unified entry points for AI coding sessions.
-;; Backends: CLI tools (cc/Claude Code, codex, opencode) for interactive vterm
-;; sessions. All AI execution goes through CLI agents.
+;; Unified entry points for AI coding sessions.  The embedded Magent runtime
+;; owns queueing, durable sessions, lifecycle, and audit state.  API requests
+;; use Magent/gptel; CLI requests retain each coding agent's native tools and
+;; permissions behind a structured Magent sampler.
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'subr-x)
 (require 'ai-workbench-vendor)
 (require 'ai-workbench-backend)
@@ -21,6 +23,7 @@
 (require 'ai-workbench-adapter-codex)
 (require 'ai-workbench-adapter-opencode)
 (require 'ai-workbench-tools)
+(require 'ai-workbench-magent)
 
 (declare-function ai-workbench-status-open           "ai-workbench-status" ())
 
@@ -39,17 +42,26 @@
 ;; the three CLI engines (CC, Codex, OpenCode); selecting one opens that tool's
 ;; interactive vterm session.
 
+(defun ai-workbench--available-backends ()
+  "Return available Magent API and CLI engine identifiers."
+  (cl-remove-if-not
+   (lambda (id)
+     (ignore-errors (ai-workbench-backend-call id :available-p)))
+   (ai-workbench-backend-ids :session)))
+
 (defun ai-workbench--select-backend (_project-root)
-  "Prompt for a CLI vterm engine (CC, Codex, OpenCode) and return its symbol."
-  (let* ((ids (ai-workbench-backend-ids :session))
+  "Prompt for an available Magent API or CLI engine and return its symbol."
+  (let* ((ids (ai-workbench--available-backends))
          (candidates (mapcar (lambda (id)
                                (cons (ai-workbench-backend-label id) id))
                              ids))
          (current-backend (ai-workbench-session-backend))
-         (default (car (rassq current-backend candidates)))
-         (chosen (completing-read "AI engine: " (mapcar #'car candidates)
-                                  nil t nil nil default)))
-    (cdr (assoc chosen candidates))))
+         (default (car (rassq current-backend candidates))))
+    (unless candidates
+      (user-error "No available ai-workbench backends"))
+    (let ((chosen (completing-read "AI engine: " (mapcar #'car candidates)
+                                   nil t nil nil default)))
+      (cdr (assoc chosen candidates)))))
 
 (defun ai-workbench--ensure-initialized (project-root)
   "Ensure PROJECT-ROOT has an initialized ai-workbench session."
@@ -64,8 +76,9 @@
 
 (defun ai-workbench--backend-session-live-p (project-root)
   "Return non-nil when the selected backend session is live for PROJECT-ROOT."
-  (ai-workbench-backend-live-p (ai-workbench-session-backend project-root)
-                               project-root))
+  (or (ai-workbench-magent-session-live-p project-root)
+      (ai-workbench-backend-live-p (ai-workbench-session-backend project-root)
+                                   project-root)))
 
 (defun ai-workbench--reset-selection (project-root)
   "Reset backend selection state for PROJECT-ROOT."
@@ -78,10 +91,9 @@
 (defun ai-workbench--prepare-backend (project-root)
   "Prepare the current backend for PROJECT-ROOT."
   (let ((backend (ai-workbench-session-backend project-root)))
-    (ai-workbench-backend-call backend :ensure project-root)
-    (ai-workbench-cli-prime-session backend project-root)
+    (ai-workbench-magent-runtime-session project-root)
     (ai-workbench-session-set-last-status
-     (format "%s session ready" (ai-workbench-backend-label backend))
+     (format "%s Magent session ready" (ai-workbench-backend-label backend))
      project-root)))
 
 ;; ── Context helpers ───────────────────────────────────────────────────────────
@@ -147,12 +159,9 @@
 ;; ── Public: open / cycle / switch ────────────────────────────────────────────
 
 (defun ai-workbench-open ()
-  "Select a backend if needed, prepare it, then pop the interactive buffer."
+  "Select a backend, prepare its Magent runtime, and open its conversation UI."
   (interactive)
   (let ((project-root (ai-workbench-project-root)))
-    (when (and (ai-workbench-session-initialized-p project-root)
-               (not (ai-workbench--backend-session-live-p project-root)))
-      (ai-workbench--reset-selection project-root))
     (ai-workbench--ensure-initialized project-root)
     (ai-workbench--prepare-backend project-root)
     (ai-workbench-open-backend-buffer)))
@@ -163,7 +172,7 @@
   "Cycle the current project vterm engine."
   (interactive)
   (let* ((project-root (ai-workbench-project-root))
-         (ids (ai-workbench-backend-ids :session))
+         (ids (ai-workbench--available-backends))
          (current (ai-workbench-session-backend project-root))
          (tail (cdr (memq current ids)))
          (next (or (car tail) (car ids))))
@@ -246,12 +255,22 @@
 ;; ── Public: buffer display ────────────────────────────────────────────────────
 
 (defun ai-workbench-open-backend-buffer ()
-  "Open the current backend's session buffer."
+  "Open the current backend's Magent-owned conversation buffer."
   (interactive)
   (let ((project-root (ai-workbench-project-root)))
-    (ai-workbench-backend-call
-     (ai-workbench-session-backend project-root)
-     :open project-root)))
+    (ai-workbench-magent-open
+     (ai-workbench-session-backend project-root) project-root)))
+
+(defun ai-workbench-open-direct-terminal ()
+  "Open the selected CLI's legacy direct terminal session.
+This explicit escape hatch bypasses Magent orchestration for interactive use."
+  (interactive)
+  (let* ((project-root (ai-workbench-project-root))
+         (backend (ai-workbench-session-backend project-root)))
+    (when (eq backend 'api)
+      (user-error "The API backend has no direct terminal"))
+    (ai-workbench-backend-call backend :ensure project-root)
+    (ai-workbench-backend-call backend :open project-root)))
 
 (defun ai-workbench-toggle-codex-mode ()
   "Toggle the interactive Codex execution mode (kept for compatibility)."
@@ -263,21 +282,16 @@
 ;; ── Public: stop / kill ───────────────────────────────────────────────────────
 
 (defun ai-workbench-stop ()
-  "Stop the active run for the current backend."
+  "Stop active and queued Magent work for the current project."
   (interactive)
-  (let ((project-root (ai-workbench-project-root)))
-    (ai-workbench-backend-call
-     (ai-workbench-session-backend project-root)
-     :stop project-root)))
+  (ai-workbench-magent-cancel (ai-workbench-project-root)))
 
 (defun ai-workbench-cancel ()
   "Cancel the current AI operation in the active backend session."
   (interactive)
   (let* ((project-root (ai-workbench-project-root))
          (backend (ai-workbench-session-backend project-root)))
-    (ai-workbench-backend-call backend :cancel project-root)
-    (when (fboundp 'ai-workbench-abort)
-      (ignore-errors (ai-workbench-abort)))
+    (ai-workbench-magent-cancel project-root)
     (ai-workbench-session-set-last-status (format "Canceled %s operation" backend) project-root)
     (message "ai-workbench canceled %s operation" backend)))
 
@@ -285,9 +299,7 @@
   "Kill the current backend session and reset backend selection."
   (interactive)
   (let ((project-root (ai-workbench-project-root)))
-    (ai-workbench-backend-call
-     (ai-workbench-session-backend project-root)
-     :stop project-root)
+    (ai-workbench-magent-clear project-root)
     (ai-workbench--reset-selection project-root)
     (message "ai-workbench killed current backend session")))
 
@@ -320,7 +332,7 @@ Type your message, then press \\[ai-workbench-compose-submit] to send."
       (user-error "Not an ai-workbench compose buffer"))
     (unless content
       (user-error "Nothing to send"))
-    (unless (ai-workbench-backend-live-p backend root)
+    (unless (ai-workbench-magent-session-live-p root)
       (user-error "Session went away. Reopen with `ai-workbench-open' (C-c A W)"))
     (kill-buffer buf)
     (ai-workbench-send-string backend content root)))
@@ -352,18 +364,12 @@ Type your message, then press \\[ai-workbench-compose-submit] to send."
              effective-prompt)
      root)
     (let ((default-directory root))
-      (ai-workbench-backend-call
-       backend :send effective-prompt root
+      (ai-workbench-magent-submit
+       backend effective-prompt root
        (lambda ()
-         (ai-workbench-session-mark-profile-bootstrap-sent backend root)
-         (ai-workbench-session-mark-profile-injected backend root)
-         (ai-workbench-output-append
-          'status
-          (format "Sent prompt to %s" backend)
-          root)
          (ai-workbench-session-set-last-status
-          (format "Sent prompt to %s" backend) root)
-         (message "ai-workbench sent prompt to %s" backend))
+          (format "Completed prompt with %s" backend) root)
+         (message "ai-workbench completed prompt with %s" backend))
        (lambda (message)
          (ai-workbench-session-set-last-error message root)
          (ai-workbench-session-set-last-status
@@ -381,11 +387,10 @@ Type your message, then press \\[ai-workbench-compose-submit] to send."
 
 (defun ai-workbench-draft-string (backend prompt &optional project-root)
   "Open a compose buffer with PROMPT for editing before sending to BACKEND.
-Requires the backend session to be already active."
+The Magent session is created lazily when needed."
   (ai-workbench--save-current-file-buffer)
   (let* ((root (or project-root (ai-workbench-project-root))))
-    (unless (ai-workbench-backend-live-p backend root)
-      (user-error "No active session. Start one first with `ai-workbench-open' (C-c A W)"))
+    (ai-workbench-magent-runtime-session root)
     (unless (ai-workbench-session-profile-injected-p backend root)
       (ai-workbench--prepare-backend root))
     (ai-workbench-session-set-last-prompt prompt root)
@@ -406,7 +411,7 @@ Requires the backend session to be already active."
         (setq-local ai-workbench-compose-backend backend)
         (setq-local ai-workbench-compose-root root))
       (display-buffer buf)
-      (ai-workbench-open-backend-buffer)
+      (pop-to-buffer (ai-workbench-output-buffer root))
       (message "Compose: edit then press C-c C-c to send to %s" backend))))
 
 (defun ai-workbench-resend-last-prompt ()
@@ -425,6 +430,7 @@ Requires the backend session to be already active."
   "Clear transient runtime state for the current project."
   (interactive)
   (let ((project-root (ai-workbench-project-root)))
+    (ai-workbench-magent-clear project-root)
     (ai-workbench-session-clear-runtime project-root)
     (ai-workbench-output-append 'status "Cleared runtime session state" project-root)
     (message "ai-workbench cleared runtime state")))

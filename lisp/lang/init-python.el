@@ -5,48 +5,198 @@
 
 ;;; Code:
 
+(require 'json)
+(require 'seq)
+(require 'subr-x)
+
 (declare-function my/eglot-ensure-unless-lsp-mode "init-lsp")
 (declare-function my/language-server-executable-find "init-lsp" (program))
 (declare-function my/eglot-set-workspace-configuration "init-lsp" (configuration))
 (declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
+(declare-function my/register-language-server-toolchain-provider "init-lsp-toolchain"
+                  (family modes discover &rest properties))
 (declare-function eglot-alternatives "eglot" (alternatives))
 (defvar imenu-create-index-function)
 (defvar-local my/python-imenu-backend nil
   "Original Python imenu backend for the current buffer.")
 
-(defun my/python--project-bin-directory ()
-  "Return the current project-local bin directory, if any."
-  (when-let* ((root (or (locate-dominating-file default-directory "pyrightconfig.json")
-                        (locate-dominating-file default-directory ".envrc")
-                        (locate-dominating-file default-directory ".git"))))
-    (file-name-as-directory (expand-file-name "bin" root))))
-
-(defun my/python--path-without-project-bin ()
-  "Return PATH without the current project's bin directory."
-  (let ((project-bin (my/python--project-bin-directory)))
-    (mapconcat
-     #'identity
-     (delq nil
-           (mapcar
-            (lambda (entry)
-              (let ((normalized (file-name-as-directory (expand-file-name entry))))
-                (unless (and project-bin (string= normalized project-bin))
-                  entry)))
-            (split-string (or (getenv "PATH") "") path-separator t)))
-     path-separator)))
-
 (defun my/python--pyright-contact (program)
-  "Return a clean Eglot contact for local Pyright PROGRAM."
+  "Return an Eglot contact for local Pyright PROGRAM.
+
+The active toolchain supplies the interpreter and import environment; the
+language-server executable itself remains independently managed."
   (when-let* ((executable (ignore-errors
                             (my/language-server-executable-find program))))
-    (list "/usr/bin/env"
-          "-u" "PYTHONPATH"
-          "-u" "SAGE_PYTHON"
-          "-u" "SAGE_SITE_PACKAGES"
-          "-u" "DOT_SAGE"
-          (concat "PATH=" (my/python--path-without-project-bin))
-          executable
-          "--stdio")))
+    (list executable "--stdio")))
+
+(defun my/python-toolchain--command-json (program &rest arguments)
+  "Run PROGRAM with ARGUMENTS and return the last JSON object it prints."
+  (when (and program (file-executable-p program))
+    (with-temp-buffer
+      (when (zerop (apply #'process-file program nil t nil arguments))
+        (goto-char (point-max))
+        (when (re-search-backward "^[[:space:]]*{" nil t)
+          (condition-case nil
+              (json-parse-buffer :object-type 'alist :array-type 'list
+                                 :null-object nil :false-object nil)
+            (error nil)))))))
+
+(defun my/python-toolchain--canonical-executable (path)
+  "Return a canonical executable PATH, or nil when it cannot be run."
+  (when (and (stringp path) (file-executable-p path))
+    (or (ignore-errors (file-truename path)) (expand-file-name path))))
+
+(defun my/python-toolchain--workspace (executable &optional extra-paths)
+  "Build Eglot workspace settings for EXECUTABLE and EXTRA-PATHS."
+  (let ((paths (vconcat (delq nil extra-paths))))
+    `(:python (:pythonPath ,executable
+               :analysis (:autoSearchPaths t
+                          :useLibraryCodeForTypes t
+                          ,@(when (> (length paths) 0)
+                              `(:extraPaths ,paths))))
+      :pyright (:pythonPath ,executable)
+      :basedpyright (:pythonPath ,executable)
+      :pylsp (:plugins (:jedi (:environment ,executable))))))
+
+(defun my/python-toolchain--profile (id label executable &rest properties)
+  "Create a Python profile ID and LABEL around EXECUTABLE and PROPERTIES."
+  (when-let* ((executable (my/python-toolchain--canonical-executable executable)))
+    (append
+     (list :id id
+           :label label
+           :family 'python
+           :executable executable
+           :path-prepend (list (file-name-directory executable))
+           :workspace (my/python-toolchain--workspace executable))
+     properties)))
+
+(defun my/python-toolchain--project-venvs (root)
+  "Return virtual-environment profiles found below ROOT."
+  (let (profiles)
+    (dolist (name '(".venv" "venv"))
+      (let* ((environment (expand-file-name name root))
+             (python (expand-file-name "bin/python" environment)))
+        (when-let* ((profile
+                     (my/python-toolchain--profile
+                      (format "venv:%s" name)
+                      (format "Python %s" name)
+                      python
+                      :default (string= name ".venv")
+                      :kind 'venv
+                      :env `(("VIRTUAL_ENV" . ,environment)
+                             ("CONDA_PREFIX" . nil)
+                             ("CONDA_DEFAULT_ENV" . nil)))))
+          (push profile profiles))))
+    (nreverse profiles)))
+
+(defun my/python-toolchain--conda-profiles ()
+  "Return profiles reported by the active Conda installation."
+  (when-let* ((conda (executable-find "conda"))
+              (data (my/python-toolchain--command-json conda "env" "list" "--json"))
+              (environments (alist-get "envs" data nil nil #'string=)))
+    (let* ((info (my/python-toolchain--command-json conda "info" "--json"))
+           (base (and info (alist-get "root_prefix" info nil nil #'string=)))
+           profiles)
+      (dolist (environment environments (nreverse profiles))
+        (let* ((name (file-name-nondirectory (directory-file-name environment)))
+               (base-p (and base (string= environment base)))
+               (python (expand-file-name "bin/python" environment)))
+          (when-let* ((profile
+                       (my/python-toolchain--profile
+                        (format "conda:%s" (if base-p "base" name))
+                        (format "Conda %s" (if base-p "base" name))
+                        python
+                        :kind 'conda
+                        :env `(("CONDA_PREFIX" . ,environment)
+                               ("CONDA_DEFAULT_ENV" . ,(if base-p "base" name))
+                               ("VIRTUAL_ENV" . nil)))))
+            (push profile profiles)))))))
+
+(defun my/python-toolchain--sage-profile (root)
+  "Return a dynamically resolved Sage profile for ROOT."
+  (when-let* ((sage (executable-find "sage"))
+              (code (concat
+                     "import json, site, sys\n"
+                     "try:\n import sage.version as sv; version = sv.version\n"
+                     "except Exception:\n version = ''\n"
+                     "paths = list(dict.fromkeys(site.getsitepackages() + [site.getusersitepackages()]))\n"
+                     "print(json.dumps({'python': sys.executable, 'version': version, 'paths': paths}))"))
+              (data (my/python-toolchain--command-json sage "--python" "-c" code))
+              (python (alist-get "python" data nil nil #'string=))
+              (paths (alist-get "paths" data nil nil #'string=))
+              (profile
+               (my/python-toolchain--profile
+                'sage
+                (format "SageMath%s"
+                        (if-let* ((version (alist-get "version" data nil nil #'string=)))
+                            (format " %s" version)
+                          ""))
+                python
+                :kind 'sage
+                :sage-executable sage
+                :shell-program sage
+                :shell-args '("--python" "-i")
+                :env (lambda (_project-root)
+                       (let* ((site-path (car paths))
+                              (old (getenv "PYTHONPATH"))
+                              (pythonpath
+                               (string-join
+                                (delete-dups
+                                 (append paths
+                                         (and old (split-string old path-separator t))))
+                                path-separator)))
+                         `(("SAGE_PYTHON" . ,python)
+                           ("SAGE_SITE_PACKAGES" . ,site-path)
+                           ("DOT_SAGE" . ,(expand-file-name ".sage" root))
+                           ("PYTHONPATH" . ,pythonpath))))
+                :workspace (my/python-toolchain--workspace python paths))))
+    profile))
+
+(defun my/python-toolchain--path-profiles ()
+  "Return Python executables visible on PATH."
+  (let (profiles)
+    (dolist (program '("python3" "python") (nreverse profiles))
+      (when-let* ((executable (executable-find program))
+                  (profile
+                   (my/python-toolchain--profile
+                    (format "python:%s" executable)
+                    (format "PATH %s" program)
+                    executable
+                    :kind 'path
+                    :default (string= program "python3"))))
+        (push profile profiles)))))
+
+(defun my/python-toolchain-discover (root)
+  "Discover Python and Sage toolchains for project ROOT."
+  (let ((profiles (append (my/python-toolchain--project-venvs root)
+                          (my/python-toolchain--conda-profiles)
+                          (delq nil (list (my/python-toolchain--sage-profile root)))
+                          (my/python-toolchain--path-profiles)))
+        seen
+        result)
+    (dolist (profile profiles (nreverse result))
+      (let ((executable (plist-get profile :executable)))
+        (unless (member executable seen)
+          (push executable seen)
+          (push profile result))))))
+
+(defun my/python-toolchain-apply (profile _root)
+  "Apply Python-specific settings from PROFILE."
+  (let ((program (or (plist-get profile :shell-program)
+                     (plist-get profile :executable)))
+        (arguments (plist-get profile :shell-args)))
+    (when program
+      (setq-local python-shell-interpreter program)
+      (setq-local python-shell-interpreter-args
+                  (mapconcat #'shell-quote-argument arguments " ")))))
+
+(defun my/python-toolchain-after-select (_profile _root)
+  "Offer to restart an existing Python process after selecting a toolchain."
+  (when (and (fboundp 'python-shell-get-process)
+             (ignore-errors (python-shell-get-process)))
+    (when (y-or-n-p "Restart the current Python REPL with this toolchain? ")
+      (when-let* ((process (python-shell-get-process)))
+        (delete-process process)))))
 
 (defun my/python-eglot-contact (&optional interactive project)
   "Return the preferred Python Eglot contact for the current buffer."
@@ -99,6 +249,14 @@
                     "pylsp"
                     "jedi-language-server")
      :note "Python buffers prefer pyright locally, but prefer pylsp/jedi over TRAMP.")))
+
+(my/register-language-server-toolchain-provider
+ 'python
+ '(python-mode python-ts-mode)
+ #'my/python-toolchain-discover
+ :apply #'my/python-toolchain-apply
+ :after-select #'my/python-toolchain-after-select
+ :label "Python / Sage")
 
 (use-package python
   :ensure nil

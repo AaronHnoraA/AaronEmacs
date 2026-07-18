@@ -1,6 +1,6 @@
 {
   "argv": [
-    "@AARONNOTE_JUPYTER_ROOT@/.venv/bin/python",
+    "@AARONNOTE_JUPYTER_ROOT@/bin/python-jupyter-kernel",
     "-m",
     "bash_kernel",
     "-f",

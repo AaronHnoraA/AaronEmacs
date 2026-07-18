@@ -131,7 +131,8 @@
    (my/jupyter-remote-ikernel-command
     . "/opt/homebrew/anaconda3/bin/remote_ikernel")
    (my/jupyter-board-jupyter-command . "/opt/homebrew/bin/jupyter")
-   (my/jupyter-board-python-command . "/opt/homebrew/anaconda3/bin/python")
+   (my/jupyter-board-python-command
+    . "/opt/homebrew/anaconda3/bin/python")
    (my/jupyter-remote-ikernel-source-directory
     . "/Users/hc/.config/emacs/site-lisp/remote_ikernel")
    (my/jupyter-remote-ikernel-install-script
@@ -288,5 +289,15 @@
    (my/warning-popup-minimum-level . :error)
    (my/warning-suppress-elpa-noise . t)
    (my/gcmh-high-cons-threshold . 134217728)
-   (my/gcmh-auto-idle-delay-factor . 20) (my/gcmh-idle-delay . auto))
+   (my/gcmh-auto-idle-delay-factor . 20) (my/gcmh-idle-delay . auto)
+   (magent-session-directory
+    . "/Users/hc/.emacs.d/var/ai-workbench/magent/sessions/")
+   (magent-request-timeout . 180)
+   (ai-workbench-magent-cli-max-json-line-bytes . 1048576)
+   (ai-workbench-magent-cli-max-answer-bytes . 8388608)
+   (ai-workbench-magent-cli-max-diagnostic-bytes . 262144)
+   (ai-workbench-magent-cli-max-prompt-bytes . 4194304)
+   (ai-workbench-magent-max-prompt-bytes . 2097152)
+   (ai-workbench-magent-max-pending-per-project . 32)
+   (ai-workbench-output-max-bytes . 16777216))
 )

@@ -327,6 +327,73 @@ maybeDescribe("cm6 kernel: getMarkdown / setMarkdown", () => {
     }
   });
 
+  test("edits the fenced code language and folds without changing its body", async () => {
+    const md = "```ts\nconst x = 1;\nconst y = 2;\n```\n\nTail";
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    const language = document.querySelector<HTMLElement>(".cm-code-lang-editor");
+    expect(language).toBeTruthy();
+    language!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    const input = language!.querySelector<HTMLInputElement>(".cm-code-lang-input");
+    expect(input).toBeTruthy();
+    input!.value = "javascript";
+    input!.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+    await nextTick();
+    expect(editor.getMarkdown()).toContain("```javascript\nconst x = 1;");
+
+    const fold = document.querySelector<HTMLButtonElement>(".cm-code-fold-button");
+    expect(fold).toBeTruthy();
+    fold!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await nextTick();
+    expect(document.querySelector(".cm-code-fold-placeholder")).toBeTruthy();
+    expect(editor.getMarkdown()).toContain("const x = 1;\nconst y = 2;");
+
+    document.querySelector<HTMLButtonElement>(".cm-code-fold-button")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await nextTick();
+    expect(document.querySelector(".cm-code-fold-placeholder")).toBeNull();
+    cleanup();
+  });
+
+  test("previews standard footnotes and jumps to their definitions", () => {
+    const md = "Claim[^proof].\n\nMiddle\n\n[^proof]: Definition.";
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.indexOf("Middle") + 2);
+
+    const reference = document.querySelector<HTMLButtonElement>(".cm-footnote-reference button");
+    expect(reference).toBeTruthy();
+    expect(document.querySelector(".cm-footnote-definition-label")).toBeTruthy();
+    expect(editor.getMarkdown()).toBe(md);
+
+    reference!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(editor.getMarkdownSelection().from).toBe(md.indexOf("[^proof]:"));
+    expect(editor.getMarkdown()).toBe(md);
+    cleanup();
+  });
+
+  test("resizes an image on pointer release with one source attribute update", async () => {
+    const md = "![plot](./plot.png)\n\nTail";
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+    const handle = document.querySelector<HTMLElement>(".cm-image-resize-handle");
+    expect(handle).toBeTruthy();
+    expect(editor.getMarkdown()).toBe(md);
+    handle!.dispatchEvent(new MouseEvent("pointerdown", {
+      bubbles: true, cancelable: true, button: 0, clientX: 10,
+    }));
+    handle!.dispatchEvent(new MouseEvent("pointermove", {
+      bubbles: true, cancelable: true, button: 0, clientX: 90,
+    }));
+    expect(editor.getMarkdown()).toBe(md);
+    handle!.dispatchEvent(new MouseEvent("pointerup", {
+      bubbles: true, cancelable: true, button: 0, clientX: 90,
+    }));
+    await nextTick();
+    expect(editor.getMarkdown()).toContain("{width: 400px}");
+    cleanup();
+  });
+
   test("setMarkdown replaces entire doc", () => {
     const { editor, cleanup } = mountCM6("old content");
     editor.setMarkdown("# New\n\nnew content");
@@ -998,6 +1065,43 @@ y^2
     cleanup();
   });
 
+  test("table mouse controls resize from a bounded grid and expose drag handles", async () => {
+    const md = "| A | B |\n| --- | --- |\n| 1 | 2 |";
+    const { editor, cleanup } = mountCM6(md);
+    expect(document.querySelectorAll(".cm-table-row-drag-handle")).toHaveLength(1);
+    expect(document.querySelectorAll(".cm-table-column-drag-handle")).toHaveLength(2);
+    expect(document.querySelector(".cm-table-edge-add-row")).toBeTruthy();
+    expect(document.querySelector(".cm-table-edge-add-column")).toBeTruthy();
+
+    document.querySelector<HTMLButtonElement>(".cm-table-toolbar button[title='Resize table with grid']")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    const target = document.querySelector<HTMLButtonElement>(".cm-table-size-cell[title='4 rows × 3 columns']");
+    expect(target).toBeTruthy();
+    target!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await nextTick();
+
+    expect(editor.getMarkdown().split("\n")).toHaveLength(5);
+    expect(editor.getMarkdown().split("\n")[0]).toBe("| A | B |  |");
+    cleanup();
+  });
+
+  test("table row drag reorders source once on drop", async () => {
+    const md = "| A | B |\n| --- | --- |\n| first | 1 |\n| second | 2 |";
+    const { editor, cleanup } = mountCM6(md);
+    const handles = document.querySelectorAll<HTMLElement>(".cm-table-row-drag-handle");
+    const rows = document.querySelectorAll<HTMLTableRowElement>(".cm-markdown-table-editable tbody tr");
+    expect(handles).toHaveLength(2);
+    handles[0]!.dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    expect(editor.getMarkdown()).toBe(md);
+    rows[1]!.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+    await nextTick();
+    expect(editor.getMarkdown().split("\n").slice(2)).toEqual([
+      "| second | 2 |",
+      "| first | 1 |",
+    ]);
+    cleanup();
+  });
+
   test("enter in a table cell commits and moves editing to the next row", async () => {
     const md = "| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |";
     const { editor, cleanup } = mountCM6(md);
@@ -1636,21 +1740,23 @@ Line two
     cleanup();
   });
 
-  test("meta cover is read-only and edits through normal Source view", () => {
+  test("meta cover edits one property range without rewriting the block", async () => {
     const md = String.raw`#+begin meta
 title: Alpha
 tags: one, two
 #+end meta`;
     const { editor, cleanup } = mountCM6(md);
-    expect(document.querySelector(".org-env-meta-value")).toBeNull();
     expect(document.querySelector(".aaronnote-meta-title")?.textContent).toBe("Alpha");
     expect(document.querySelector(".aaronnote-meta-roam-badge")).toBeTruthy();
-    editor.toggleSource();
-    expect(editor.isSourceMode()).toBe(true);
-    expect((editor.view as unknown as { contentDOM: HTMLElement }).contentDOM.textContent).toContain("title: Alpha");
-    expect(editor.getMarkdown()).toBe(md);
-    editor.toggleSource();
-    expect(document.querySelector(".cm-org-env-block[data-kind='meta']")).toBeTruthy();
+    const details = document.querySelector<HTMLDetailsElement>(".aaronnote-meta-properties")!;
+    details.open = true;
+    const values = document.querySelectorAll<HTMLInputElement>(".aaronnote-meta-property-value");
+    expect(values).toHaveLength(2);
+    values[0]!.value = "Beta";
+    values[0]!.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+    await nextTick();
+    expect(editor.getMarkdown()).toBe(md.replace("title: Alpha", "title: Beta"));
+    expect(document.querySelector(".aaronnote-meta-title")?.textContent).toBe("Beta");
     cleanup();
   });
 

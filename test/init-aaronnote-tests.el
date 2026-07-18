@@ -6,6 +6,25 @@
   (defalias 'general-define-key #'ignore))
 (require 'init-aaronnote)
 
+(ert-deftest my/aaronnote-jupyter-defaults-read-project-config-without-eval ()
+  (let ((root (make-temp-file "aaronnote-project" t)))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name ".dir-locals.el" root)
+            (insert "((nil . ((my/project-local-settings . "
+                    "(:toolchain ((python . sage)) "
+                    ":aaronnote-jupyter (:language sage :kernel sagemath :session research))))))\n"))
+          (let ((my/aaronnote--notes-root root))
+            (should
+             (equal (my/aaronnote--jupyter-defaults)
+                    '(:language "sage" :kernel "sagemath" :session "research")))
+            (should
+             (equal (my/aaronnote--jupyter-default-environment)
+                    '("AARONNOTE_JUPYTER_DEFAULT_LANGUAGE=sage"
+                      "AARONNOTE_JUPYTER_DEFAULT_KERNEL=sagemath"
+                      "AARONNOTE_JUPYTER_DEFAULT_SESSION=research")))))
+      (delete-directory root t))))
+
 (ert-deftest my/aaronnote-prose-check-is-an-editor-command ()
   (should (commandp #'my/aaronnote-prose-check))
   (let (sent)

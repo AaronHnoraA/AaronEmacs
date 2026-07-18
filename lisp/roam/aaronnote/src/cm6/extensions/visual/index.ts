@@ -11,6 +11,7 @@ import { blockMathRangesExtension } from "../../math-ranges.ts";
 import { livePreviewExtension } from "../../live-preview.ts";
 import { blockExtrasExtension } from "./widgets/block-extras.ts";
 import { fencedCodeExtension } from "./widgets/fenced-code.ts";
+import { footnoteExtension } from "./widgets/footnotes.ts";
 import { imageExtension } from "./widgets/image.ts";
 import { inlineCommandsExtension } from "./widgets/inline-commands.ts";
 import { leanExtension } from "./widgets/lean-block.ts";
@@ -26,9 +27,11 @@ import {
 import { taskListExtension } from "./widgets/task-list.ts";
 import { pointerSelectionExtension } from "./selection.ts";
 import { visualTypographyExtension } from "./typography.ts";
+import { blockMoveGutterExtension } from "../../block-move.ts";
 
 export function createVisualMarkdownExtensions(): Extension {
   return [
+    blockMoveGutterExtension,
     visualTypographyExtension,
     pointerSelectionExtension,
     blockMathRangesExtension,
@@ -36,6 +39,7 @@ export function createVisualMarkdownExtensions(): Extension {
     blockExtrasExtension,
     mathExtension,
     fencedCodeExtension,
+    footnoteExtension,
     taskListExtension,
     imageExtension,
     leanPlaceholderPreviewExtension,

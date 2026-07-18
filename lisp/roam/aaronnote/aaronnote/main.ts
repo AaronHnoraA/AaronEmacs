@@ -50,6 +50,7 @@ import {
 import { createFloatingTocPanel, inlineTagAnchorsFromText, markdownHeadingsFromText } from "./floating-toc.ts";
 import { createSlideDeckController, type SlideDeckController } from "./slide-deck.ts";
 import { normalizeDateValue } from "../src/planning-values.ts";
+import { AARONNOTE_AUTHORING_SNIPPETS } from "../src/authoring-syntax.ts";
 import { patchPlanningNodeRaw, scanPlanningNodes } from "../shared/planning-dsl.mjs";
 import { latexMarkNames, latexMarkSnippetDefinitions } from "../shared/latex-marks.mjs";
 import {
@@ -168,10 +169,16 @@ const graphPanelRoot = document.createElement("aside");
 graphPanelRoot.className = "aaronnote-local-graph-panel is-collapsed";
 graphPanelRoot.innerHTML = `
   <header>
-    <strong>Local graph</strong>
+    <strong>Knowledge graph</strong>
     <button type="button" data-graph-close>Close</button>
   </header>
   <div class="aaronnote-local-graph-controls">
+    <div class="aaronnote-graph-mode" role="group" aria-label="Graph scope">
+      <button type="button" data-graph-mode="local" class="is-active">Local</button>
+      <button type="button" data-graph-mode="workspace">Workspace</button>
+    </div>
+    <input type="search" data-graph-search placeholder="Search graph" aria-label="Search graph" />
+    <select data-graph-group aria-label="Filter graph group"><option value="">All groups</option></select>
     <label>Depth <input type="range" data-graph-depth min="1" max="2" value="1" /></label>
     <span data-graph-depth-label>1</span>
     <label><input type="checkbox" data-graph-refs checked /> Refs</label>
@@ -180,6 +187,7 @@ graphPanelRoot.innerHTML = `
   </div>
   <div class="aaronnote-local-graph-canvas" data-graph-canvas></div>
   <div class="aaronnote-local-graph-status" data-graph-status></div>
+  <div class="aaronnote-graph-detail" data-graph-detail hidden></div>
 `;
 document.body.appendChild(graphPanelRoot);
 const graphDepthInput = graphPanelRoot.querySelector<HTMLInputElement>("[data-graph-depth]")!;
@@ -189,6 +197,10 @@ const graphBacklinksInput = graphPanelRoot.querySelector<HTMLInputElement>("[dat
 const graphTagsInput = graphPanelRoot.querySelector<HTMLInputElement>("[data-graph-tags]")!;
 const graphCanvas = graphPanelRoot.querySelector<HTMLElement>("[data-graph-canvas]")!;
 const graphStatus = graphPanelRoot.querySelector<HTMLElement>("[data-graph-status]")!;
+const graphSearch = graphPanelRoot.querySelector<HTMLInputElement>("[data-graph-search]")!;
+const graphGroup = graphPanelRoot.querySelector<HTMLSelectElement>("[data-graph-group]")!;
+const graphDetail = graphPanelRoot.querySelector<HTMLElement>("[data-graph-detail]")!;
+const graphModeButtons = Array.from(graphPanelRoot.querySelectorAll<HTMLButtonElement>("[data-graph-mode]"));
 const graphClose = graphPanelRoot.querySelector<HTMLButtonElement>("[data-graph-close]")!;
 
 const toc = document.createElement("aside");
@@ -567,6 +579,10 @@ selectionTool.innerHTML = `
   <button type="button" data-selection-command="highlight" title="Highlight">==</button>
   <button type="button" data-selection-command="strike" title="Strikethrough">~~</button>
   <button type="button" data-selection-command="code" title="Inline code">&lt;&gt;</button>
+  <button type="button" data-selection-command="superscript" title="Superscript">x²</button>
+  <button type="button" data-selection-command="subscript" title="Subscript">x₂</button>
+  <button type="button" data-selection-command="insert-footnote" title="Insert footnote">Fn</button>
+  <button type="button" data-selection-command="revision-form" title="Suggest revision">Rev</button>
   <button type="button" data-selection-command="link" title="Link">@</button>
   <span aria-hidden="true"></span>
   <button type="button" data-selection-command="copy" title="Copy">Copy</button>
@@ -574,11 +590,21 @@ selectionTool.innerHTML = `
   <div class="aaronnote-selection-more" data-selection-more hidden>
     <button type="button" data-selection-command="insert-roam-idlink">Insert roam idlink...</button>
   </div>
+  <form class="aaronnote-revision-form" data-revision-form hidden>
+    <input name="advice" placeholder="Replacement" aria-label="Revision replacement" required />
+    <input name="reason" placeholder="Reason (optional)" aria-label="Revision reason" />
+    <select name="style" aria-label="Revision colour">
+      <option value="indigo">Indigo</option><option value="teal">Teal</option>
+      <option value="red">Red</option><option value="green">Green</option><option value="yellow">Yellow</option>
+    </select>
+    <button type="submit">Insert</button>
+  </form>
 `;
 selectionTool.hidden = true;
 document.body.appendChild(selectionTool);
 const selectionMore = selectionTool.querySelector<HTMLElement>("[data-selection-more]")!;
 const selectionRoamIdlink = selectionTool.querySelector<HTMLButtonElement>("[data-selection-command='insert-roam-idlink']")!;
+const selectionRevisionForm = selectionTool.querySelector<HTMLFormElement>("[data-revision-form]")!;
 
 const contextMenu = document.createElement("div");
 contextMenu.className = "aaronnote-context-menu";
@@ -705,7 +731,13 @@ const BUILTIN_SNIPPETS: SnippetSummary[] = [{
   kind: "",
   body: `@@latexmk(\${1|${latexMarkNames().join(",")}|})$0`,
   source: BUILTIN_SNIPPET_SOURCE,
-}, ...LATEX_MARK_SNIPPETS];
+}, ...AARONNOTE_AUTHORING_SNIPPETS.map((snippet) => ({
+  ...snippet,
+  mode: "markdown-mode",
+  group: snippet.context === "org-meta" ? "Aaronnote metadata" : "Aaronnote authoring",
+  kind: "",
+  source: BUILTIN_SNIPPET_SOURCE,
+})), ...LATEX_MARK_SNIPPETS];
 let paused = false;
 const pauseReasons = new Set<string>();
 let mathPreviewKey = "";
@@ -733,6 +765,13 @@ const editorCommands = new Set<EditorCommand>([
   "strike",
   "code",
   "link",
+  "superscript",
+  "subscript",
+  "insert-footnote",
+  "insert-revision",
+  "edit-properties",
+  "move-block-up",
+  "move-block-down",
   "blockquote",
   "bullet-list",
   "ordered-list",
@@ -1620,6 +1659,12 @@ const localGraphPanel = createLocalGraphPanel({
   tagsInput: graphTagsInput,
   canvas: graphCanvas,
   status: graphStatus,
+  searchInput: graphSearch,
+  groupInput: graphGroup,
+  detail: graphDetail,
+  modeButtons: graphModeButtons,
+  getWorkspaceGraph: () => api.notes.graph(),
+  getIndexVersion: () => lastNotesIndexVersion,
   getNotes: () => notes.filter(note => note.roam !== false),
   getCurrentNote: currentNote,
   getMarkdown: () => editor.getMarkdown(),
@@ -1627,6 +1672,8 @@ const localGraphPanel = createLocalGraphPanel({
   openNote,
   openTag: openTagFilter,
 });
+const graphOverlayTimer = new CoalescedTimer(400);
+changeHandlers.add(() => graphOverlayTimer.schedule(() => localGraphPanel.update(true)));
 
 graphClose.addEventListener("click", () => localGraphPanel.collapse());
 
@@ -1671,10 +1718,14 @@ type JupyterCellDefaults = {
   session: string;
 };
 
+const HOST_JUPYTER_DEFAULTS = (window as typeof window & {
+  __aaronnoteJupyterDefaults?: Partial<JupyterCellDefaults>;
+}).__aaronnoteJupyterDefaults ?? {};
+
 const DEFAULT_JUPYTER_CELL: JupyterCellDefaults = {
-  language: "python",
-  kernel: "python3",
-  session: "default",
+  language: cleanJupyterToken(HOST_JUPYTER_DEFAULTS.language, "python"),
+  kernel: cleanJupyterToken(HOST_JUPYTER_DEFAULTS.kernel, "python3"),
+  session: cleanJupyterToken(HOST_JUPYTER_DEFAULTS.session, "default"),
 };
 
 function jupyterLooksLikeKernelToken(value: string): boolean {
@@ -1684,6 +1735,8 @@ function jupyterLooksLikeKernelToken(value: string): boolean {
 function jupyterDefaultKernelForLanguage(language: string): string {
   if (/^lean4?$/i.test(language)) return "lean4";
   if (/^(?:bash|sh|shell|zsh)$/i.test(language)) return "bash";
+  if (/^sage/i.test(language)) return "sagemath";
+  if (/^(?:python|py)$/i.test(language)) return "python3";
   return DEFAULT_JUPYTER_CELL.kernel;
 }
 
@@ -2780,9 +2833,27 @@ function showContextMenu(event: MouseEvent, target: Partial<AaronContextMenuTarg
       { label: "Italic", detail: "Cmd-I", disabled: currentReadOnly, run: () => runContextEditorCommand("italic") },
       { label: "Inline Code", detail: "`code`", disabled: currentReadOnly, run: () => runContextEditorCommand("code") },
       { label: "Link", detail: "Cmd-K", disabled: currentReadOnly, run: () => runContextEditorCommand("link") },
+      { label: "Superscript", detail: "^text^", disabled: currentReadOnly, run: () => runContextEditorCommand("superscript") },
+      { label: "Subscript", detail: "~text~", disabled: currentReadOnly, run: () => runContextEditorCommand("subscript") },
+      { label: "Footnote", detail: "[^1]", disabled: currentReadOnly, run: () => runContextEditorCommand("insert-footnote") },
+      { label: "Revision...", detail: "@@revision", disabled: currentReadOnly, run: () => {
+        updateSelectionTool();
+        runSelectionCommand("revision-form");
+      } },
     );
   } else {
+    const block = editor.getBlockContext();
     items.push(
+      { label: "Move Block Up", detail: block.type, disabled: currentReadOnly, run: () => runContextEditorCommand("move-block-up") },
+      { label: "Move Block Down", detail: block.type, disabled: currentReadOnly, run: () => runContextEditorCommand("move-block-down") },
+      ...(block.type.includes("heading") ? [
+        { label: "Fold Heading", detail: "section", run: () => runContextEditorCommand("fold-heading") },
+        { label: "Unfold Heading", detail: "section", run: () => runContextEditorCommand("unfold-heading") },
+      ] : []),
+      ...(block.type.includes("code") ? [
+        { label: "Copy Code", detail: "block", run: () => runContextEditorCommand("copy-code") },
+      ] : []),
+      { label: "Document Properties", detail: "org-env(meta)", disabled: currentReadOnly, run: () => runContextEditorCommand("edit-properties") },
       { label: "Paste", detail: "Cmd-V", disabled: currentReadOnly, run: () => pasteIntoEditorFromContextMenu() },
       { label: "Find in Note", detail: "Cmd-F", run: () => openFindPanel() },
       { label: "Save", detail: currentReadOnly ? "read-only" : "Cmd-S", disabled: currentReadOnly || !currentFile, run: () => save() },
@@ -6273,8 +6344,32 @@ function currentSnippetKind(): string {
   return currentKind.trim().toLowerCase();
 }
 
-function matchingSnippets(prefix: string, mode: string): SnippetSummary[] {
-  return matchingSnippetsForPrefix(snippets, prefix, { kind: currentSnippetKind(), mode, limit: 10 });
+function cursorInsideMetaSnippetContext(ctx: ReturnType<typeof editor.cursorContext>): boolean {
+  const before = ctx.before.toLowerCase();
+  const open = before.lastIndexOf("#+begin meta");
+  const close = before.lastIndexOf("#+end meta");
+  return open >= 0 && open > close && ctx.after.toLowerCase().includes("#+end meta");
+}
+
+function proseSnippetContext(ctx: ReturnType<typeof editor.cursorContext>, mode: string): boolean {
+  if (mode !== "markdown-mode" || cursorInsideMetaSnippetContext(ctx)) return false;
+  const type = editor.getBlockContext().type.toLowerCase();
+  return !type.includes("code") && !type.includes("html") && !type.includes("link");
+}
+
+function matchingSnippets(
+  prefix: string,
+  mode: string,
+  ctx: ReturnType<typeof editor.cursorContext>,
+): SnippetSummary[] {
+  const inMeta = cursorInsideMetaSnippetContext(ctx);
+  const inProse = proseSnippetContext(ctx, mode);
+  return matchingSnippetsForPrefix(snippets, prefix, { kind: currentSnippetKind(), mode, limit: 10 })
+    .filter((snippet) => {
+      if (snippet.context === "org-meta") return inMeta;
+      if (snippet.context === "prose") return inProse;
+      return !inMeta || snippet.context !== "markdown";
+    });
 }
 
 function builtinDisplayMathSnippetP(snippet: SnippetSummary): boolean {
@@ -7105,7 +7200,7 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
   }
   if (!snippetCompletionArmed && snippetPopup.hidden) return;
   const mode = snippetContextMode(ctx);
-  const matches = matchingSnippets(prefix, mode);
+  const matches = matchingSnippets(prefix, mode, ctx);
   if (matches.length === 0) {
     hideSnippetPopup();
     return;
@@ -7196,7 +7291,7 @@ function expandSnippetAtCursor(): boolean {
   const prefix = snippetPrefix(ctx.before);
   if (!prefix) return false;
   const mode = snippetContextMode(ctx);
-  const matches = matchingSnippets(prefix, mode);
+  const matches = matchingSnippets(prefix, mode, ctx);
   const exact = matches.find((snippet) => String(snippet.key || "") === prefix)
     ?? (matches.length === 1 ? matches[0] : undefined);
   if (!exact) return false;
@@ -7354,6 +7449,7 @@ function updateSelectionTool(active = activeEditorSelection()): void {
   if (!active || !modal.hidden) {
     selectionTool.hidden = true;
     selectionMore.hidden = true;
+    selectionRevisionForm.hidden = true;
     return;
   }
   selectionRoamIdlink.hidden = currentStandalone;
@@ -7399,6 +7495,14 @@ function runSelectionCommand(command: string): void {
     selectionMore.hidden = !selectionMore.hidden;
     return;
   }
+  if (command === "revision-form") {
+    if (rejectReadOnlyAction("Read-only pane")) return;
+    selectionMore.hidden = true;
+    selectionRevisionForm.hidden = false;
+    window.setTimeout(() => selectionRevisionForm.elements.namedItem("advice") instanceof HTMLElement
+      && (selectionRevisionForm.elements.namedItem("advice") as HTMLElement).focus(), 0);
+    return;
+  }
   if (command === "insert-roam-idlink") {
     if (rejectReadOnlyAction("Read-only pane")) return;
     selectionMore.hidden = true;
@@ -7406,11 +7510,12 @@ function runSelectionCommand(command: string): void {
     void insertRoamIdLink();
     return;
   }
-  if (!["bold", "italic", "highlight", "strike", "code", "link"].includes(command)) return;
+  if (!["bold", "italic", "highlight", "strike", "code", "link", "superscript", "subscript", "insert-footnote"].includes(command)) return;
   if (rejectReadOnlyAction("Read-only pane")) return;
   editor.runCommand(command as EditorCommand);
   selectionTool.hidden = true;
   selectionMore.hidden = true;
+  selectionRevisionForm.hidden = true;
 }
 
 function runAssistUpdate(flags: AssistUpdateFlags): void {
@@ -8124,13 +8229,31 @@ window.addEventListener("scroll", (event) => {
     scheduleAutomaticProseCheck(proseProfile().scrollMs);
   }
 }, { capture: true, passive: true });
-selectionTool.addEventListener("mousedown", (event) => event.preventDefault());
+selectionTool.addEventListener("mousedown", (event) => {
+  if (!(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLSelectElement)) event.preventDefault();
+});
 selectionTool.addEventListener("click", (event) => {
   const button = (event.target as Element | null)?.closest<HTMLButtonElement>("[data-selection-command]");
   if (!button) return;
   event.preventDefault();
   event.stopPropagation();
   runSelectionCommand(button.dataset.selectionCommand || "");
+});
+selectionRevisionForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (rejectReadOnlyAction("Read-only pane")) return;
+  const data = new FormData(selectionRevisionForm);
+  const advice = String(data.get("advice") || "").trim();
+  if (!advice) return;
+  editor.focus();
+  editor.runCommand("insert-revision", JSON.stringify({
+    advice,
+    reason: String(data.get("reason") || "").trim(),
+    style: String(data.get("style") || "indigo"),
+  }));
+  selectionRevisionForm.reset();
+  selectionRevisionForm.hidden = true;
+  selectionTool.hidden = true;
 });
 
 findInput.addEventListener("input", () => refreshFind(findInput.value, false));

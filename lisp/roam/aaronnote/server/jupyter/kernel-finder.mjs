@@ -5,15 +5,15 @@
 // the same search-path scheme jupyter/scripts/run-jupyter-server.sh used to
 // export for the (now retired) jupyter-server process, so kernel visibility
 // doesn't change under the raw-ZMQ swap: JUPYTER_PATH entries, this project's
-// own data dir, optionally the user/system Jupyter dirs, and the venv's own
-// `share/jupyter` prefix.
+// own data dir, optionally the user/system Jupyter dirs, and an optional
+// environment's own `share/jupyter` prefix.
 
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 /** Search directories to scan for `<dir>/kernels/<name>/kernel.json`, in priority order (first match per name wins). */
-export function defaultKernelSearchDirs({ dataDir, venvPrefix, useHomeKernels = true, extraJupyterPath }) {
+export function defaultKernelSearchDirs({ dataDir, environmentPrefix, venvPrefix, useHomeKernels = true, extraJupyterPath }) {
   const dirs = [];
   if (extraJupyterPath) {
     dirs.push(...String(extraJupyterPath).split(path.delimiter).map((p) => p.trim()).filter(Boolean));
@@ -27,7 +27,8 @@ export function defaultKernelSearchDirs({ dataDir, venvPrefix, useHomeKernels = 
     }
     dirs.push("/usr/local/share/jupyter", "/usr/share/jupyter");
   }
-  if (venvPrefix) dirs.push(path.join(venvPrefix, "share", "jupyter"));
+  const prefix = environmentPrefix || venvPrefix;
+  if (prefix) dirs.push(path.join(prefix, "share", "jupyter"));
   return dirs;
 }
 
@@ -63,6 +64,13 @@ export async function findKernelSpecs({ searchDirs, allowedNames }) {
   if (allowedNames && allowedNames.length > 0) {
     const allow = new Set(allowedNames);
     list = list.filter((k) => allow.has(k.name));
+  }
+  // A project-owned stable `sagemath` spec supersedes version-named local or
+  // system Sage specs.  Remote kernels keep their own ids (for example
+  // rik_ssh_*_sage) and are intentionally unaffected.
+  if (list.some((kernel) => kernel.name === "sagemath")) {
+    list = list.filter((kernel) => kernel.name === "sagemath"
+      || !/^sagemath(?:[-_.]?\d)/i.test(kernel.name));
   }
   return list;
 }

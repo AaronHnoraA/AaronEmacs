@@ -13,6 +13,8 @@ export interface KernelSpecEntry {
 
 export function defaultKernelSearchDirs(options: {
   dataDir?: string;
+  environmentPrefix?: string;
+  /** @deprecated Use environmentPrefix. */
   venvPrefix?: string;
   useHomeKernels?: boolean;
   extraJupyterPath?: string;

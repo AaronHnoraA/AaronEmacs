@@ -837,17 +837,22 @@ describe("planning project and Gantt model", () => {
 describe("planning cache", () => {
   test("createTodo appends an agenda-visible todo to inbox by default", async () => {
     await withVault(async (root) => {
-      const created = await createTodo({ text: "Draft agenda capture", ddl: "2026-07-15", prio: "A" });
+      const today = new Date();
+      const due = new Date(today);
+      due.setDate(due.getDate() + 1);
+      const dateString = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const dueDate = dateString(due);
+      const created = await createTodo({ text: "Draft agenda capture", ddl: dueDate, prio: "A" });
       expect(created).toMatchObject({ ok: true, createdFile: true, path: "inbox.md" });
       const content = await readFile(join(root, "inbox.md"), "utf8");
       expect(content).toContain("@@todo [Draft agenda capture]");
-      expect(content).toContain("ddl=2026-07-15");
+      expect(content).toContain(`ddl=${dueDate}`);
       expect(content).toContain("prio=A");
 
       await syncRoamDb(null, { mode: "full" });
-      const agenda = await buildAgenda({ from: "2026-07-14", days: 3 });
+      const agenda = await buildAgenda({ from: dateString(today), days: 3 });
       const todo = agenda.todos.find((item: any) => item.text === "Draft agenda capture");
-      expect(todo).toMatchObject({ status: "todo", canon: { ddl: "2026-07-15", prio: "A" } });
+      expect(todo).toMatchObject({ status: "todo", canon: { ddl: dueDate, prio: "A" } });
       expect(agenda.days.some((day: any) => day.entries.some((entry: any) => entry.todoId === todo.id))).toBe(true);
     });
   });

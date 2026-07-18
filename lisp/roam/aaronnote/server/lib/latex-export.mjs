@@ -138,10 +138,18 @@ export function isDisplayCommentCommand(command) {
     && String(command.switchValue || "").trim().toLowerCase() === "true";
 }
 
+export function revisionLatex(command, options = {}) {
+  const args = command?.args && typeof command.args === "object" ? command.args : {};
+  const original = String(command?.context || "").replace(/\\\]/g, "]").replace(/\\\\/g, "\\");
+  const advice = String(args.advice || "").replace(/\\\\/g, "\\");
+  const reason = String(args.reason || "").replace(/\\\\/g, "\\");
+  return `\\aaronrevision{${convertInline(original, options)}}{${convertInline(advice, options)}}{${convertInline(reason, options)}}`;
+}
+
 export function convertInline(text, options = {}) {
   const source = String(text ?? "").trim();
   const annotations = scanInlineCommands(source)
-    .filter((command) => command.name === "todo" || command.name === "comment" || command.name === "scomment" || command.name === "cite" || command.name === "latexmk");
+    .filter((command) => command.name === "todo" || command.name === "comment" || command.name === "scomment" || command.name === "revision" || command.name === "cite" || command.name === "latexmk");
   let annotationIndex = 0;
   let latex = "";
   let plain = "";
@@ -156,6 +164,8 @@ export function convertInline(text, options = {}) {
       flushPlain();
       if (annotation.name === "scomment") {
         latex += `\\sidecomment{${convertInline(annotation.context, options)}}`;
+      } else if (annotation.name === "revision") {
+        latex += revisionLatex(annotation, options);
       } else if (isDisplayCommentCommand(annotation)) {
         latex += `\\aaroncomment{${convertInline(annotation.context, options)}}`;
       } else if (annotation.name === "cite") {
@@ -593,6 +603,11 @@ export function latexMacrosPackage(macros, features = {}) {
 \providecolor{AaronDisplayComment}{HTML}{EC008C}
 \providecommand{\aaroncomment}[1]{%
   \textcolor{AaronDisplayComment}{\textbf{COMMENT:}\nobreakspace #1}%
+}
+\providecolor{AaronRevision}{HTML}{6558D3}
+\providecommand{\aaronrevision}[3]{%
+  \textcolor{AaronRevision}{\uline{#1}}%
+  \footnote{\textbf{Suggested:} #2\ifstrempty{#3}{}{\space\textit{Reason:} #3}}%
 }
 \newsavebox{\AaronPandocBox}
 \providecommand{\pandocbounded}[1]{%

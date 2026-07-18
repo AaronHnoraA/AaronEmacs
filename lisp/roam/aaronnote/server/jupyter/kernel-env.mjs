@@ -4,7 +4,8 @@
 // aaronnote needs: unlike vscode-jupyter, kernelspecs here always carry a
 // fully-resolved interpreter/executable path (see jupyter/kernel-templates/),
 // so there is no separate Python-interpreter-activation step to merge in —
-// just process.env + the venv bin dir on PATH + the kernelspec's own `env`.
+// just process.env + an optional runtime bin dir on PATH + the kernelspec's
+// own `env`.
 
 import path from "node:path";
 
@@ -16,15 +17,16 @@ function substituteEnvVars(value, vars) {
 }
 
 /**
- * Build the environment for a kernel process: `process.env`, with `venvBinDir`
- * prepended to PATH (so a kernelspec argv like `["python", ...]` resolves to
- * the venv interpreter) and the kernelspec's own `env` merged on top (kernel
- * vars win), substituting any `${VAR}` references against the merged result.
+ * Build the environment for a kernel process: `process.env`, with an optional
+ * runtime bin directory prepended to PATH and the kernelspec's own `env`
+ * merged on top (kernel vars win), substituting any `${VAR}` references
+ * against the merged result.
  */
-export function buildKernelEnv({ kernelSpecEnv, venvBinDir, pythonNoUserSite = true } = {}) {
+export function buildKernelEnv({ kernelSpecEnv, runtimeBinDir, venvBinDir, pythonNoUserSite = true } = {}) {
   const merged = { ...process.env };
-  if (venvBinDir) {
-    merged.PATH = [venvBinDir, merged.PATH].filter(Boolean).join(path.delimiter);
+  const binDir = runtimeBinDir || venvBinDir;
+  if (binDir) {
+    merged.PATH = [binDir, merged.PATH].filter(Boolean).join(path.delimiter);
   }
   if (pythonNoUserSite) merged.PYTHONNOUSERSITE = "1";
 
