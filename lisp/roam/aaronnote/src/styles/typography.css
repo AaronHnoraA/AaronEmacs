@@ -44,6 +44,7 @@
 
 :root {
   --aaron-font-prose: "AaronLatinModernRoman", var(--aaron-font-chinese), "Latin Modern Roman", "Computer Modern", Georgia, serif;
+  --aaron-font-academic-title: "AaronLatinModernRoman", "Latin Modern Roman", "Computer Modern", "Songti SC", "STSong", "Source Han Serif SC", "Noto Serif CJK SC", Georgia, serif;
   /* 116% of the previous 20px prose measure.  This remains the body-text
    * scale; heading, code and KaTeX faces keep their dedicated rules below. */
   --aaron-prose-size: 23.2px;

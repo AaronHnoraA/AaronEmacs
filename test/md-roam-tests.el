@@ -156,7 +156,15 @@ source: roam/demo/analysis.md
       (should (equal (plist-get plain :slug) "20260605T120000-topology"))
       (should (equal (plist-get tag :id) "eq-eq:1"))
       (should (equal (plist-get dom :dom) "nested@child-heading"))
-      (should (equal (plist-get dom :file) note-file)))))
+      (should (equal (plist-get dom :file) note-file)))
+    (with-temp-buffer
+      (setq buffer-file-name note-file)
+      (let ((local (my/aaronnote-roam--parse-target
+                    "@@main-title@nested@child-heading")))
+        (should (plist-get local :local))
+        (should (equal (plist-get local :dom)
+                       "main-title@nested@child-heading"))
+        (should (equal (plist-get local :file) note-file))))))
 
 (ert-deftest my/aaronnote-roam-resolves-path-title-alias-and-tag ()
   (my/aaronnote-roam-test-with-vault
@@ -307,6 +315,16 @@ source: roam/demo/analysis.md
               (search-forward "child-heading")
               (my/aaronnote-roam-follow-link)
               (setq opened (current-buffer))
+              (should (equal (file-truename buffer-file-name)
+                             (file-truename note-file)))
+              (save-excursion
+                (beginning-of-line)
+                (should (looking-at "### Child Heading"))))
+            (with-current-buffer opened
+              (goto-char (point-max))
+              (insert "\n[Local child](@@main-title@nested@child-heading)\n")
+              (search-backward "child-heading")
+              (my/aaronnote-roam-follow-link)
               (should (equal (file-truename buffer-file-name)
                              (file-truename note-file)))
               (save-excursion

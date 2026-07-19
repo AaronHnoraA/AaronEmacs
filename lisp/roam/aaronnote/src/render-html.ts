@@ -821,6 +821,87 @@ function emptyHtmlLinkEmbedRule(state: StateInline, silent: boolean): boolean {
   return true;
 }
 
+const spacedFragmentLabelCloseCache = new WeakMap<StateInline, Map<number, number>>();
+
+function spacedFragmentLabelCloses(state: StateInline): Map<number, number> {
+  const cached = spacedFragmentLabelCloseCache.get(state);
+  if (cached) return cached;
+  const closes = new Map<number, number>();
+  const stack: number[] = [];
+  let escaped = false;
+  for (let pos = 0; pos < state.posMax; pos++) {
+    const ch = state.src.charCodeAt(pos);
+    if (ch === 0x0a || ch === 0x0d) {
+      stack.length = 0;
+      escaped = false;
+      continue;
+    }
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === 0x5c /* \\ */) {
+      escaped = true;
+      continue;
+    }
+    if (ch === 0x5b /* [ */) stack.push(pos);
+    else if (ch === 0x5d /* ] */) {
+      const open = stack.pop();
+      if (open != null) closes.set(open, pos);
+    }
+  }
+  spacedFragmentLabelCloseCache.set(state, closes);
+  return closes;
+}
+
+function spacedFragmentLinkRule(state: StateInline, silent: boolean): boolean {
+  const start = state.pos;
+  if (state.src.charCodeAt(start) !== 0x5b /* [ */) return false;
+  const closeLabel = spacedFragmentLabelCloses(state).get(start) ?? -1;
+  if (closeLabel < 0 || state.src[closeLabel + 1] !== "(") return false;
+
+  const hrefFrom = closeLabel + 2;
+  let hrefContentFrom = hrefFrom;
+  while (state.src[hrefContentFrom] === " " || state.src[hrefContentFrom] === "\t") hrefContentFrom++;
+  if (state.src[hrefContentFrom] !== "#") return false;
+
+  let parenDepth = 0;
+  let escaped = false;
+  let closeHref = -1;
+  for (let pos = hrefFrom; pos < state.posMax; pos++) {
+    const ch = state.src[pos] ?? "";
+    if (ch === "\n" || ch === "\r") return false;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === "(") parenDepth++;
+    else if (ch === ")") {
+      if (parenDepth === 0) {
+        closeHref = pos;
+        break;
+      }
+      parenDepth--;
+    }
+  }
+  if (closeHref < 0) return false;
+
+  const href = state.src.slice(hrefFrom, closeHref).trim();
+  if (!href.startsWith("#") || !/\s/u.test(href)) return false;
+  if (silent) return true;
+
+  const open = state.push("link_open", "a", 1);
+  open.attrs = [["href", href.replace(/[ \t]+/g, (space) => encodeURIComponent(space))]];
+  state.md.inline.parse(state.src.slice(start + 1, closeLabel), state.md, state.env, state.tokens);
+  state.push("link_close", "a", -1);
+  state.pos = closeHref + 1;
+  return true;
+}
+
 function jupyterLinkRule(state: StateInline, silent: boolean): boolean {
   const start = state.pos;
   if (state.src.charCodeAt(start) !== 0x5b /* [ */) return false;
@@ -1065,6 +1146,7 @@ function createMarkdownIt(options: RenderMarkdownHTMLOptions): MarkdownIt {
   md.block.ruler.before("reference", "footnote_definition", footnoteDefinitionRule, { alt: ["paragraph", "reference", "blockquote"] });
   md.core.ruler.push("aaronnote_callouts", aaronnoteCalloutsRule);
   md.inline.ruler.before("link", "empty_html_link_embed", emptyHtmlLinkEmbedRule);
+  md.inline.ruler.before("link", "spaced_fragment_link", spacedFragmentLinkRule);
   md.inline.ruler.before("link", "jupyter_link", jupyterLinkRule);
   md.inline.ruler.before("link", "footnote_reference", footnoteReferenceRule);
   // Must run before `escape`: otherwise the backslash escape rule consumes the

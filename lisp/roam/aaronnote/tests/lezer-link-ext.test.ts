@@ -35,6 +35,13 @@ describe("complete nested-link parser", () => {
       .toBe(parser.parse("[outer [inner] text").toString());
   });
 
+  test("claims a local fragment destination containing spaces", () => {
+    expect(extended.parse("[Step 1](#step 1)").toString())
+      .toContain("Link(LinkMark,LinkMark,LinkMark,URL,LinkMark)");
+    expect(extended.parse("[Step 1](#step 1").toString())
+      .toBe(parser.parse("[Step 1](#step 1").toString());
+  });
+
   test("keeps adversarial unmatched brackets linear in practice", () => {
     const source = "[".repeat(100_000) + " plain";
     const started = performance.now();

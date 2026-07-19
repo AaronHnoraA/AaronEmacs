@@ -80,6 +80,37 @@ function nestedLabelClose(cx: InlineContext, open: number): number {
   return nestedLabelCloses(cx).get(open) ?? -1;
 }
 
+const balancedLabelCache = new WeakMap<InlineContext, Map<number, number>>();
+
+function balancedLabelCloses(cx: InlineContext): Map<number, number> {
+  const cached = balancedLabelCache.get(cx);
+  if (cached) return cached;
+  const closes = new Map<number, number>();
+  const stack: number[] = [];
+  for (let pos = cx.offset; pos < cx.end; pos++) {
+    const ch = cx.char(pos);
+    if (ch === 92 /* \\ */) {
+      pos++;
+      continue;
+    }
+    if (ch === 96 /* ` */) {
+      pos = skipCodeSpan(cx, pos) - 1;
+      continue;
+    }
+    if (ch === 91 /* [ */) stack.push(pos);
+    else if (ch === 93 /* ] */) {
+      const open = stack.pop();
+      if (open != null) closes.set(open, pos);
+    }
+  }
+  balancedLabelCache.set(cx, closes);
+  return closes;
+}
+
+function balancedLabelClose(cx: InlineContext, open: number): number {
+  return balancedLabelCloses(cx).get(open) ?? -1;
+}
+
 function parseUrl(cx: InlineContext, start: number): { from: number; to: number } | null {
   if (cx.char(start) === 60 /* < */) {
     for (let pos = start + 1; pos < cx.end; pos++) {
@@ -206,10 +237,67 @@ function parseCompleteNestedLink(cx: InlineContext, next: number, start: number)
   return cx.addElement(cx.elt(isImage ? "Image" : "Link", start, destination.end, children));
 }
 
+function parseSpacedFragmentLink(cx: InlineContext, next: number, start: number): number {
+  if (next !== 91 /* [ */) return -1;
+  const close = balancedLabelClose(cx, start);
+  if (close < 0 || cx.char(close + 1) !== 40 /* ( */) return -1;
+
+  let hrefFrom = close + 2;
+  while (cx.char(hrefFrom) === 32 || cx.char(hrefFrom) === 9) hrefFrom++;
+  if (cx.char(hrefFrom) !== 35 /* # */) return -1;
+
+  let escaped = false;
+  let depth = 0;
+  let destinationClose = -1;
+  for (let pos = hrefFrom; pos < cx.end; pos++) {
+    const ch = cx.char(pos);
+    if (ch === 10 || ch === 13) return -1;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === 92 /* \\ */) {
+      escaped = true;
+      continue;
+    }
+    if (ch === 40 /* ( */) depth++;
+    else if (ch === 41 /* ) */) {
+      if (depth === 0) {
+        destinationClose = pos;
+        break;
+      }
+      depth--;
+    }
+  }
+  if (destinationClose < 0) return -1;
+
+  let hrefTo = destinationClose;
+  while (hrefTo > hrefFrom && isSpaceCode(cx.char(hrefTo - 1))) hrefTo--;
+  const href = cx.slice(hrefFrom, hrefTo);
+  if (!/\s/u.test(href)) return -1;
+
+  const children: Element[] = [
+    cx.elt("LinkMark", start, start + 1),
+    ...labelChildrenWithoutNestedLinks(cx, start + 1, close),
+    cx.elt("LinkMark", close, close + 1),
+    cx.elt("LinkMark", close + 1, close + 2),
+    cx.elt("URL", hrefFrom, hrefTo),
+    cx.elt("LinkMark", destinationClose, destinationClose + 1),
+  ];
+  return cx.addElement(cx.elt("Link", start, destinationClose + 1, children));
+}
+
 export const nestingAwareLinkExtension: MarkdownConfig = {
-  parseInline: [{
-    name: "CompleteNestedLink",
-    before: "Link",
-    parse: parseCompleteNestedLink,
-  }],
+  parseInline: [
+    {
+      name: "CompleteNestedLink",
+      before: "Link",
+      parse: parseCompleteNestedLink,
+    },
+    {
+      name: "SpacedFragmentLink",
+      before: "Link",
+      parse: parseSpacedFragmentLink,
+    },
+  ],
 };

@@ -103,6 +103,12 @@ function editableEventTarget(host: HTMLElement, target: EventTarget | null): HTM
   return editable;
 }
 
+function targetUsesNativeInput(host: HTMLElement, target: EventTarget | null): boolean {
+  if (!(target instanceof Node) || !host.contains(target)) return false;
+  const element = target instanceof Element ? target : target.parentElement;
+  return Boolean(element?.closest("[data-aaronnote-vim='native']"));
+}
+
 function selectionInEditable(editable: HTMLElement): Selection | null {
   const selection = editable.ownerDocument.getSelection?.() ?? window.getSelection();
   if (!selection || selection.rangeCount === 0) return null;
@@ -1367,6 +1373,10 @@ export function createVimLite(
       if (destroyed) return false;
       if (!targetInEditor(host, event.target)) return false;
       if (event.isComposing) return false;
+      // Some embedded editors intentionally use ordinary browser input even
+      // while the document remains in Vim normal mode. Check this before
+      // Escape and editableNormalCommand so their very first key is native.
+      if (targetUsesNativeInput(host, event.target)) return false;
       if (isEscape(event)) {
         event.preventDefault();
         escapeToNormal();

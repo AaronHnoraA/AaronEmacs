@@ -223,6 +223,19 @@ y^2
     expect(html).toContain('data-roam-link="true"');
   });
 
+  test("renders a local heading fragment containing spaces as one link", () => {
+    const html = renderMarkdownHTML("1. [Step 1](#step 1):");
+    expect(html).toContain('<a href="#step%201">Step 1</a>:');
+    expect(html).not.toContain("(#step 1)");
+  });
+
+  test("keeps adversarial unmatched link labels linear in practice", () => {
+    const source = "[".repeat(100_000) + " plain";
+    const started = performance.now();
+    renderMarkdownHTML(source);
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
   test("marks jupyter links with toc selectors, including spaces", () => {
     const html = renderMarkdownHTML("[toc](./attachments/tset.ipynb@4) [heading](./attachments/tset.ipynb@test file) [hash](./attachments/tset.ipynb#4)");
 

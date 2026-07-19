@@ -3933,6 +3933,12 @@ function markdownNoteHref(href: string): boolean {
 function splitRoamLikeHref(href: string): { ref: string; hash: string; dom: string } | null {
   const raw = cleanHref(href);
   if (!raw || (hrefProtocol(raw) && !/^roam:\/\//i.test(raw))) return null;
+  // `@@parent@child` is the current-document form of the same hierarchical
+  // DOM path used by `roam://note@parent@child`.
+  if (raw.startsWith("@@")) {
+    const dom = normalizeDomTargetPath(raw.slice(2));
+    return dom ? { ref: "", hash: "", dom } : null;
+  }
   let body = raw.replace(/^roam:\/\//i, "").split(/[?&]/, 1)[0] || "";
   let hash = "";
   const hashIndex = body.indexOf("#");
@@ -3975,6 +3981,13 @@ function resolveHrefNote(href: string): NoteSummary | undefined {
 
 function resolveHrefTarget(href: string): { note?: NoteSummary; hash: string; domTarget: string } {
   const raw = cleanHref(href);
+  if (raw.startsWith("@@")) {
+    return {
+      note: currentNote(),
+      hash: "",
+      domTarget: normalizeDomTargetPath(raw.slice(2)),
+    };
+  }
   const roamLike = splitRoamLikeHref(raw);
   if (roamLike) {
     const note = roamLike.ref ? resolveNoteRef(roamLike.ref) : undefined;
@@ -6593,6 +6606,7 @@ function pathCompletionRank(path: string, prefix: string): number {
 }
 
 function noteFromCompletionRef(ref: string): NoteSummary | undefined {
+  if (ref === "@@") return currentNote();
   return resolveHrefNote(ref) || resolveNoteRef(ref);
 }
 
@@ -6613,6 +6627,16 @@ function tagCompletionContext(before: string): { note: NoteSummary; tagPrefix: s
 function domCompletionParts(rawHref: string): { ref: string; parentSegments: string[]; domPrefix: string } | null {
   const clean = cleanHref(rawHref);
   if (!clean || clean.includes("#")) return null;
+  if (clean.startsWith("@@")) {
+    const rawDom = clean.slice(2);
+    const endsAtSeparator = rawDom.length > 0 && rawDom.endsWith("@");
+    const segments = domTargetPathSegments(rawDom);
+    return {
+      ref: "@@",
+      parentSegments: endsAtSeparator ? segments : segments.slice(0, -1),
+      domPrefix: endsAtSeparator ? "" : segments[segments.length - 1] || "",
+    };
+  }
   const roamTarget = splitRoamLikeHref(clean);
   if (roamTarget?.dom) {
     const endsAtSeparator = /@$/.test(clean);
@@ -6711,18 +6735,26 @@ function descendantDomCompletionTargets(entries: readonly DomTargetEntry[], pare
 function matchingDomCompletions(note: NoteSummary, prefix: string, parentSegments: readonly string[] = []): SnippetSummary[] {
   const query = normalizeDomTarget(prefix).toLowerCase();
   const entries = domTargetsForCompletion(note);
+  const parentPath = parentSegments.map(slugDomTarget).filter(Boolean);
   const candidates = query
     ? descendantDomCompletionTargets(entries, parentSegments)
       .filter((target) => target.slug.includes(query) || target.label.toLowerCase().includes(query))
     : immediateDomCompletionTargets(entries, parentSegments);
-  return candidates.slice(0, 12).map((target) => ({
-    key: target.slug,
-    name: `@${target.slug}`,
-    mode: "markdown-mode",
-    group: "dom",
-    body: encodeURIComponent(target.slug),
-    source: domTargetPathLabel(target.labelPath) || note.path || note.file || canonicalRoamNoteId(note) || target.label,
-  }));
+  return candidates.slice(0, 12).map((target) => {
+    // A filtered result can be a deeper descendant. Insert every path segment
+    // below the already-authored parent so local, path and roam completions all
+    // retain an unambiguous hierarchical target.
+    const relativePath = target.path.slice(parentPath.length);
+    const encodedPath = relativePath.map((segment) => encodeURIComponent(segment)).join("@");
+    return {
+      key: relativePath.join("@") || target.slug,
+      name: `@${relativePath.join("@") || target.slug}`,
+      mode: "markdown-mode",
+      group: "dom",
+      body: encodedPath || encodeURIComponent(target.slug),
+      source: domTargetPathLabel(target.labelPath) || note.path || note.file || canonicalRoamNoteId(note) || target.label,
+    };
+  });
 }
 
 async function matchingRoamCompletions(prefix: string): Promise<SnippetSummary[]> {
@@ -7969,7 +8001,20 @@ jupyterPanel.addEventListener("click", (event) => {
 });
 sourceButton.addEventListener("click", toggleSourceMode);
 saveButton.addEventListener("click", () => void save());
+
+function eventTargetsNativeWidgetInput(target: EventTarget | null): boolean {
+  const element = target instanceof Element
+    ? target
+    : target instanceof Node
+      ? target.parentElement
+      : null;
+  return Boolean(element?.closest("[data-aaronnote-vim='native']"));
+}
+
 document.addEventListener("keydown", (event) => {
+  // Native widget editors are deliberately outside the document's Vim and
+  // authoring-shortcut pipeline, regardless of the current document mode.
+  if (eventTargetsNativeWidgetInput(event.target)) return;
   if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.length !== 1 && event.key !== "Tab") {
     snippetCompletionArmed = false;
   }
@@ -8147,6 +8192,7 @@ prosePopover.addEventListener("click", (event) => {
   }
 });
 document.addEventListener("beforeinput", (event) => {
+  if (eventTargetsNativeWidgetInput(event.target)) return;
   const ie = event as InputEvent;
   if (ie.inputType === "insertText" && ie.data && ie.data !== "\t") {
     snippetCompletionArmed = true;

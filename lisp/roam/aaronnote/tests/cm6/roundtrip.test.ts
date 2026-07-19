@@ -523,6 +523,20 @@ y^2
     cleanup();
   });
 
+  test("renders and resolves a local heading fragment containing spaces", () => {
+    const md = "1. [Step 1](#step 1):\n\n## step 1";
+    const { editor, cleanup } = mountCM6(md);
+    editor.setMarkdownSelection(md.length);
+
+    expect(markdownHrefAt(editor.view.state, md.indexOf("Step 1"))).toBe("#step 1");
+    expect(document.querySelector(".cm-link-text")).toBeTruthy();
+    expect(Array.from(document.querySelectorAll<HTMLElement>(".syntax-hidden"))
+      .map((element) => element.textContent || "")
+      .join(""))
+      .toContain("#step 1");
+    cleanup();
+  });
+
   test("resolves link labels containing an escaped closing bracket", () => {
     const md = String.raw`[a\]b](target.md) after`;
     const { editor, cleanup } = mountCM6(md);
@@ -1814,6 +1828,31 @@ We present **three results**.
     expect(document.querySelectorAll(".aaronnote-meta-tags .aaronnote-meta-tag")).toHaveLength(3);
     expect(document.querySelector("[data-kind='summary']")).toBeNull();
     expect(editor.getMarkdown()).toBe(md);
+    cleanup();
+  });
+
+  test("meta summary fields always use native input outside Vim mode", () => {
+    const md = String.raw`#+begin meta
+title: Native Summary
+#+begin summary
+First draft.
+#+end summary
+#+end meta`;
+    const { editor, host, cleanup } = mountCM6(md);
+    const summaryEditor = host.querySelector<HTMLElement>(".aaronnote-meta-summary-editor")!;
+    const textarea = summaryEditor.querySelector<HTMLTextAreaElement>("textarea")!;
+    const vim = createVimLite(editor, host);
+    vim.setMode("normal");
+
+    expect(summaryEditor.dataset.aaronnoteVim).toBe("native");
+    for (const key of ["a", "x", "Escape"]) {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      Object.defineProperty(event, "target", { value: textarea });
+      expect(vim.handleKeyDown(event)).toBe(false);
+      expect(event.defaultPrevented).toBe(false);
+      expect(vim.mode()).toBe("normal");
+    }
+    vim.destroy();
     cleanup();
   });
 

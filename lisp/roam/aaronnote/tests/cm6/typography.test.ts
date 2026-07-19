@@ -47,12 +47,13 @@ describe("Visual typography kernel", () => {
     cleanup();
   });
 
-  test("normalizes a run of paragraph blank lines to one rhythm line", () => {
+  test("keeps every authored blank line as compact visual rhythm", () => {
     const { cleanup } = mount("Alpha\n\n\nBeta");
     const lines = blankLines();
     expect(lines).toHaveLength(2);
     expect(lines[0]!.classList.contains("cm-prose-paragraph-gap")).toBe(true);
-    expect(lines[1]!.classList.contains("cm-prose-blank-collapsed")).toBe(true);
+    expect(lines[1]!.classList.contains("cm-prose-paragraph-gap")).toBe(true);
+    expect(lines.some((line) => line.classList.contains("cm-prose-blank-collapsed"))).toBe(false);
     cleanup();
   });
 
@@ -61,21 +62,21 @@ describe("Visual typography kernel", () => {
     const lines = blankLines();
     expect(lines).toHaveLength(2);
     expect(lines[0]!.classList.contains("cm-prose-blank-absorbed")).toBe(true);
-    expect(lines[1]!.classList.contains("cm-prose-blank-collapsed")).toBe(true);
+    expect(lines[1]!.classList.contains("cm-prose-paragraph-gap")).toBe(true);
     cleanup();
   });
 
-  test("expands the complete blank-line run while it contains the caret", () => {
+  test("expands only the blank line containing the caret", () => {
     const { editor, cleanup } = mount("Alpha\n\n\nBeta");
     editor.setMarkdownSelection(6);
     const lines = blankLines();
     expect(lines).toHaveLength(2);
-    expect(lines.every((line) => line.classList.contains("cm-prose-blank-active"))).toBe(true);
+    expect(lines[0]!.classList.contains("cm-prose-blank-active")).toBe(true);
+    expect(lines[1]!.classList.contains("cm-prose-paragraph-gap")).toBe(true);
 
     editor.setMarkdownSelection(0);
     expect(blankLines()[0]!.classList.contains("cm-prose-paragraph-gap")).toBe(true);
-    expect(blankLines()[1]!.classList.contains("cm-prose-blank-collapsed")).toBe(true);
+    expect(blankLines()[1]!.classList.contains("cm-prose-paragraph-gap")).toBe(true);
     cleanup();
   });
 });
-

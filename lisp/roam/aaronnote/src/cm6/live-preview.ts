@@ -1696,14 +1696,11 @@ function buildLineDecoRanges(
     const line = doc.line(lineNumber);
     if (line.text.trim().length > 0) continue;
 
-    const inActiveRun = activeBlankRun != null
-      && lineNumber >= activeBlankRun.startLine
-      && lineNumber <= activeBlankRun.endLine;
+    const isActiveBlank = activeBlankRun?.activeLine === lineNumber;
     const firstInRun = lineNumber === 1 || doc.line(lineNumber - 1).text.trim().length > 0;
     const absorbed = firstInRun && blankRunTouchesSemanticBlock(doc, lineNumber, blockMathRanges);
     const classNames = ["cm-prose-blank-line"];
-    if (inActiveRun) classNames.push("cm-prose-blank-active");
-    else if (!firstInRun) classNames.push("cm-prose-blank-collapsed");
+    if (isActiveBlank) classNames.push("cm-prose-blank-active");
     else if (absorbed) classNames.push("cm-prose-blank-absorbed");
     else classNames.push("cm-prose-paragraph-gap");
     decos.push(Decoration.line({ attributes: { class: classNames.join(" ") } }).range(line.from));
@@ -1809,7 +1806,7 @@ const lineDecoField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
-type BlankLineRun = { startLine: number; endLine: number };
+type BlankLineRun = { startLine: number; endLine: number; activeLine: number };
 
 const SEMANTIC_VERTICAL_LINE_RE = /^\s*(?:#{1,6}(?:\s|$)|#\+\s*(?:begin|end)\b|\\\[|\\\]|`{3,}|~{3,}|@@(?:todo|cell)\b|\|.*\|\s*$|<(?:table|figure|section|div)\b)/i;
 
@@ -1820,11 +1817,11 @@ function blankLineRunAtSelection(state: EditorState): BlankLineRun | null {
   let endLine = line.number;
   while (startLine > 1 && state.doc.line(startLine - 1).text.trim().length === 0) startLine--;
   while (endLine < state.doc.lines && state.doc.line(endLine + 1).text.trim().length === 0) endLine++;
-  return { startLine, endLine };
+  return { startLine, endLine, activeLine: line.number };
 }
 
 function blankLineRunKey(run: BlankLineRun | null): string {
-  return run == null ? "" : `${run.startLine}:${run.endLine}`;
+  return run == null ? "" : `${run.startLine}:${run.endLine}:${run.activeLine}`;
 }
 
 function lineOwnsVerticalRhythm(

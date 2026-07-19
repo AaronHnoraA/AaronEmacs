@@ -365,15 +365,20 @@ incremental hints."
 (defun my/aaronnote-roam--split-target (target)
   "Split Aaronnote TARGET into note ref plus optional tag or DOM target.
 Canonical targets look like `roam://note-id', `roam://note-id#tag', and
-`roam://note-id@dom-target'.  Path-like refs are accepted as input and later
+`roam://note-id@dom-target'.  `@@parent@child' addresses a hierarchical DOM
+target in the current note.  Path-like refs are accepted as input and later
 resolved using the same note lookup path."
   (when (and (stringp target) (not (string-empty-p target)))
     (let* ((raw (string-trim target))
            (body (replace-regexp-in-string "\\`roam://" "" raw t t))
            (body (replace-regexp-in-string "\\`file://" "" body t t))
            (body (or (car (split-string body "[?&]" t)) ""))
+           (local (string-prefix-p "@@" body))
            ref tag dom)
       (cond
+       (local
+        (setq ref ""
+              dom (my/aaronnote-roam--decode-ref (substring body 2))))
        ((string-match "\\`\\(.*?\\)#\\([^#]*\\)\\'" body)
         (setq ref (match-string 1 body)
               tag (my/aaronnote-roam--decode-ref (match-string 2 body))))
@@ -383,6 +388,7 @@ resolved using the same note lookup path."
        (t
         (setq ref body)))
       (list :raw raw
+            :local local
             :ref (string-trim
                   (replace-regexp-in-string
                    "\\`/+" ""
@@ -396,9 +402,11 @@ BASE-DIR is forwarded to `my/aaronnote-roam--ref-to-file-fallback' for
 plain-relative refs (./x, ../x); defaults to the current buffer's directory."
   (when-let* ((parts (my/aaronnote-roam--split-target target)))
     (let* ((ref (plist-get parts :ref))
+           (local (plist-get parts :local))
            (resolved (my/aaronnote-roam--resolve-note ref))
            (id (or (plist-get resolved :id) ref))
            (file (or (plist-get resolved :file)
+                     (and local buffer-file-name)
                      (my/aaronnote-roam--ref-to-file-fallback ref base-dir))))
       (append parts
               (list :slug id
@@ -1057,6 +1065,7 @@ Targets may use Aaronnote roam syntax:
   roam://note-id
   roam://note-id#tag
   roam://note-id@dom-target
+  @@parent@child
 Plain-relative refs (./x, ../x) are resolved against the current note's
 directory; /x is resolved against the roam vault root."
   (interactive)

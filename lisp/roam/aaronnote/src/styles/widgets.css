@@ -1024,11 +1024,11 @@
   outline: none;
   background: transparent;
   color: var(--aaron-title, #ff9bad);
-  font-family: var(--aaron-font-math, "Times New Roman", serif), var(--aaron-font-chinese, serif);
-  font-size: clamp(42px, 4.4vw, 66px);
-  font-weight: 560;
-  line-height: 1.14;
-  letter-spacing: -0.012em;
+  font-family: var(--aaron-font-academic-title, "Latin Modern Roman", "Songti SC", Georgia, serif) !important;
+  font-size: clamp(44px, 4.6vw, 72px);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -0.018em;
   text-align: center;
   text-wrap: balance;
   overflow-wrap: anywhere;

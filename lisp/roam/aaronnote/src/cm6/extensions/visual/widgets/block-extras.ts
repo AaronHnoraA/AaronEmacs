@@ -3114,6 +3114,7 @@ function renderMetaProperties(
   if (orgMetaSummarySourceRange(body)) {
     const summaryEditor = document.createElement("div");
     summaryEditor.className = "aaronnote-meta-summary-editor";
+    summaryEditor.dataset.aaronnoteVim = "native";
     const parsed = parseOrgMetaDocument(body).summary;
     const title = document.createElement("input");
     title.value = parsed?.title ?? "";
