@@ -23,6 +23,11 @@
     scroll.scrollTop = scroll.scrollHeight;
   }
 
+  function terminalIsVisible() {
+    const slide = input.closest(".cli-slide");
+    return !slide || slide.classList.contains("present");
+  }
+
   /* ── Build prompt PS1 HTML (dynamic cwd) ────────────────────────────── */
   function ps1() {
     return `<span class="p-user">hc</span><span class="p-at">@</span><span class="p-host">Aaron</span> <span class="p-path">${escHtml(cwd)}</span> <span class="p-sym">%</span>`;
@@ -83,7 +88,6 @@
     supervisorUrl:  "https://sites.google.com/site/jimmyqiao86/",
     research:       "Quantum · TCS · Algebra",
     location:       "Sydney, AU",
-    email:          "aaron.he@student.unsw.edu.au",
     github:         "AaronHnoraA",
     githubUrl:      "https://github.com/AaronHnoraA",
     cv:             "CV/Aaron_He_CV.pdf",
@@ -225,7 +229,7 @@
           ["Program",    escHtml(p.program)],
           ["Supervisor", `<a class='out-note-link' href='${escHtml(p.supervisorUrl)}' target='_blank'>${escHtml(p.supervisorText)}</a>`],
           ["Research",   escHtml(p.research)],
-          ["Email",      `<a class='out-note-link' href='mailto:${escHtml(p.email)}'>${escHtml(p.email)}</a>`],
+          ["Email",      `<a class='out-note-link' href='#' data-contact-link>Send email</a>`],
           ["GitHub",     `<a class='out-note-link' href='${escHtml(p.githubUrl)}' target='_blank'>${escHtml(p.github)}</a>`],
           ["CV",         `<a class='out-note-link' href='${escHtml(p.cv)}' target='_blank'>${escHtml(p.cv)}</a>`],
         ]) +
@@ -701,7 +705,7 @@
       kv("Updated", escHtml(String(updated)),   "nf-val-hi"),
       kv("Uptime",  escHtml(siteAge + " days"), "nf-val-hi"),
       sep(),
-      kv("Email",  `<a class='out-note-link' href='mailto:${escHtml(p.email)}'>${escHtml(p.email)}</a>`),
+      kv("Email",  `<a class='out-note-link' href='#' data-contact-link>Send email</a>`),
       kv("GitHub", `<a class='out-note-link' href='${escHtml(p.githubUrl)}' target='_blank'>${escHtml(p.github)}</a>`),
       kv("CV",     `<a class='out-note-link' href='${escHtml(p.cv)}' target='_blank'>${escHtml(p.cv)}</a>`),
     ].join("");
@@ -981,6 +985,11 @@
     }
   });
 
+  window.addEventListener("aaronnote:cli-visible", () => {
+    input.focus({ preventScroll: true });
+    scrollBottom();
+  });
+
   /* ── Startup boot sequence ────────────────────────────────────────────── */
 
   const nfEl = document.getElementById("neofetch-static");
@@ -995,7 +1004,7 @@
   setTimeout(() => {
     const hint = document.getElementById("terminal-hint");
     if (hint) hint.style.visibility = "visible";
-    input.focus();
+    if (terminalIsVisible()) input.focus({ preventScroll: true });
     scrollBottom();
   }, 100);
 

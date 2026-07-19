@@ -149,6 +149,23 @@ EXTRA-ENV is an alist of additional env vars.  Signals error on non-zero exit."
             (error "Aaronnote publish: %s failed (exit %d)" label exit-code)))
       (kill-buffer out-buf))))
 
+(defun my/aaronnote-publish--prepare-git-commit (out-buf)
+  "Stage publish output and commit it when it changed, logging to OUT-BUF.
+Signal an error when staging, inspection, or committing fails."
+  (let ((default-directory my/aaronnote-publish-root))
+    (unless (zerop (call-process "git" nil out-buf nil "add" "-A"))
+      (error "git add failed in %s" my/aaronnote-publish-root))
+    (pcase (call-process "git" nil out-buf nil "diff" "--cached" "--quiet")
+      (0 nil)
+      (1
+       (unless (zerop (call-process
+                       "git" nil out-buf nil
+                       "commit" "-m"
+                       (format "site update: %s" (format-time-string "%Y-%m-%d %H:%M:%S"))))
+         (error "git commit failed in %s" my/aaronnote-publish-root)))
+      (status
+       (error "git diff --cached failed (exit %d)" status)))))
+
 (defun my/aaronnote-publish--deploy-sync ()
   "Run git add+commit+push and optional NAS rsync, printing output to stdout."
   (let ((default-directory my/aaronnote-publish-root)
@@ -157,10 +174,7 @@ EXTRA-ENV is an alist of additional env vars.  Signals error on non-zero exit."
         (progn
           (princ (format "[publish] deploy: git add + commit (%s)...\n"
                          (format-time-string "%Y-%m-%d %H:%M:%S")))
-          (call-process-shell-command
-           (format "git add -A && git diff --cached --quiet || git commit -m 'site update: %s'"
-                   (format-time-string "%Y-%m-%d %H:%M:%S"))
-           nil out-buf)
+          (my/aaronnote-publish--prepare-git-commit out-buf)
           (princ (with-current-buffer out-buf (buffer-string)))
           (with-current-buffer out-buf (erase-buffer))
           (princ "[publish] git push...\n")
@@ -200,10 +214,12 @@ EXTRA-ENV is an alist of additional env vars.  Signals error on non-zero exit."
                       (concat "-jobname=" jobname)
                       (expand-file-name "main.tex" my/aaronnote-publish-cv-dir))))
       (if (zerop exit-code)
-          (progn
-            (copy-file pdf-in pdf-out t)
-            (princ (format "[publish] CV compiled → %s\n" pdf-out)))
-        (princ (format "[publish] CV compilation failed (exit %d)\n" exit-code))))))
+          (if (file-exists-p pdf-in)
+              (progn
+                (copy-file pdf-in pdf-out t)
+                (princ (format "[publish] CV compiled → %s\n" pdf-out)))
+            (error "CV compiler succeeded but produced no PDF: %s" pdf-in))
+        (error "CV compilation failed (exit %d)" exit-code)))))
 
 ;;; Public interactive commands
 
@@ -225,11 +241,8 @@ EXTRA-ENV is an alist of additional env vars.  Signals error on non-zero exit."
      (format "\n[%s] deploy: git add + commit + push\n" (format-time-string "%H:%M:%S")))
     (my/aaronnote-publish--show-log)
     (message "Aaronnote publish: committing…")
-    (shell-command
-     (format "cd %s && git add -A && git diff --cached --quiet || git commit -m 'site update: %s'"
-             (shell-quote-argument my/aaronnote-publish-root)
-             (format-time-string "%Y-%m-%d %H:%M:%S"))
-     my/aaronnote-publish--log-buffer)
+    (my/aaronnote-publish--prepare-git-commit
+     (get-buffer-create my/aaronnote-publish--log-buffer))
     (my/aaronnote-publish--run
      "git push"
      (list "git" "-C" my/aaronnote-publish-root "push")
@@ -266,10 +279,14 @@ EXTRA-ENV is an alist of additional env vars.  Signals error on non-zero exit."
     (when (process-live-p my/aaronnote-publish--process)
       (kill-process my/aaronnote-publish--process))
     (setq my/aaronnote-publish--process nil))
-  (let ((tmp (expand-file-name "tmp" my/aaronnote-publish-state-dir))
-        (cv  (expand-file-name "cv" my/aaronnote-publish-state-dir)))
-    (when (file-directory-p tmp) (delete-directory tmp t))
-    (when (file-directory-p cv)  (delete-directory cv t)))
+  (dolist (name '("deps" "tmp" "book" "cv"))
+    (let ((path (expand-file-name name my/aaronnote-publish-state-dir)))
+      (when (file-directory-p path)
+        (delete-directory path t))))
+  (dolist (name '("state.json" ".publish-state.json"))
+    (let ((path (expand-file-name name my/aaronnote-publish-state-dir)))
+      (when (file-exists-p path)
+        (delete-file path))))
   (when (buffer-live-p (get-buffer my/aaronnote-publish--log-buffer))
     (kill-buffer my/aaronnote-publish--log-buffer))
   (message "Aaronnote publish: cleaned state/cache."))

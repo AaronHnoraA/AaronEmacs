@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from pathlib import Path
+import filecmp
 import hashlib
 import json
 import os
+from pathlib import Path
 import re
 import shutil
 import subprocess
@@ -40,13 +41,13 @@ ROAM_ROOT = _env_path("AARONNOTE_ROAM_ROOT", ROOT / "roam")
 PUBLIC = ROOT
 
 PUBLISH_STATE = STATE_DIR / "state.json"
-ASSET_VERSION = "20260517-md"
+ASSET_VERSION = "20260719-reveal-home"
 NOTE_THEME_VERSION = "20260716-typography-core"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif"}
 VISUAL_ATTACHMENT_EXTENSIONS = {".drawio", ".dio", ".html", ".htm"}
 STATIC_EXTENSIONS = IMAGE_EXTENSIONS | {".css", ".js", ".pdf", ".drawio", ".dio"}
 NOTE_STATIC_EXTENSIONS = STATIC_EXTENSIONS | VISUAL_ATTACHMENT_EXTENSIONS
-SKIP_DIRS = {".git", ".git-rewrite", ".cache", ".direnv", ".venv", "node_modules", "public", "release", "ltximg", "_typst", "__pycache__"}
+SKIP_DIRS = {".git", ".git-rewrite", ".cache", ".direnv", ".lake", ".venv", "node_modules", "public", "release", "ltximg", "_typst", "__pycache__"}
 SENSITIVE_TAGS_FILE = ASSETS_DIR / "sensitive-tags.json"
 PRIVATE_PATH_PREFIXES = (
     Path("roam/daily"),
@@ -59,11 +60,32 @@ ORG_ENV_RE = re.compile(r"(?ms)^#\+begin(?:_|\s+)([A-Za-z][\w-]*)(?:\s+([^\n]+?)
 MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 MD_LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 HTML_MD_LINK_RE = re.compile(r'href="([^"#?:]+)\.md((?:#[^"]*)?)"')
+HTML_SHELL_ASSET_RE = re.compile(
+    r'<(?:script|link)\b[^>]*(?:src|href)=["\']([^"\']+)["\']',
+    re.I,
+)
 MARKDOWN_LEAN_TAG_RE = re.compile(r"(?m)^[ \t]*@@lean4[ \t]+\[([^\]\n]+)\]")
 LEAN_REGION_MARKER_RE = re.compile(r"(?m)^--[ \t]*@aaronnote[ \t]+([A-Za-z0-9_.:-]+)[ \t]*$")
 KIND_NAME_RE = re.compile(r"^[a-z0-9_-]+$")
 DEFAULT_NOTE_KIND = "default"
 DEFAULT_NOTE_KIND_ALIASES = {"", "default", "note"}
+
+PUBLISHED_ASSET_SOURCES = (
+    (RUNTIME_ROOT / "aaronnote" / "style.css", Path("Aaronnote/aaronnote/style.css")),
+    (RUNTIME_ROOT / "aaronnote" / "published-toc.js", Path("Aaronnote/aaronnote/published-toc.js")),
+    (RUNTIME_ROOT / "aaronnote" / "published-local-graph.js", Path("Aaronnote/aaronnote/published-local-graph.js")),
+    (RUNTIME_ROOT / "src" / "styles" / "widgets.css", Path("Aaronnote/src/styles/widgets.css")),
+    (RUNTIME_ROOT / "src" / "styles" / "theme-typora.css", Path("Aaronnote/src/styles/theme-typora.css")),
+    (RUNTIME_ROOT / "src" / "styles" / "typography.css", Path("Aaronnote/src/styles/typography.css")),
+    (RUNTIME_ROOT / "js" / "note-page.js", Path("js/note-page.js")),
+    (ASSETS_DIR / "js" / "mac-window.js", Path("js/mac-window.js")),
+    (ASSETS_DIR / "css" / "aaronnote-published.css", Path("css/aaronnote-published.css")),
+)
+
+REVEAL_ASSET_SOURCES = (
+    (RUNTIME_ROOT / "node_modules" / "reveal.js" / "dist" / "reveal.css", Path("vendor/reveal/reveal.css")),
+    (RUNTIME_ROOT / "node_modules" / "reveal.js" / "dist" / "reveal.js", Path("vendor/reveal/reveal.js")),
+)
 
 
 def sealed_mask(value: str) -> str:
@@ -528,7 +550,12 @@ def publish_forced() -> bool:
 
 def git_head(cwd: Path = ROOT) -> str | None:
     try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=cwd, text=True).strip()
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=cwd,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
@@ -544,33 +571,110 @@ def roam_inputs_dirty() -> bool:
             ["git", "status", "--porcelain", "--untracked-files=all"],
             cwd=ROAM_ROOT,
             text=True,
+            stderr=subprocess.DEVNULL,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         return True
     return bool(output.strip())
 
 
-def git_inputs_dirty() -> bool:
-    """Return True if ASSETS_DIR has uncommitted changes (modified or untracked)."""
+def runtime_git_head() -> str | None:
+    """HEAD of the Emacs repository that owns the Aaronnote runtime."""
+    return git_head(RUNTIME_ROOT)
+
+
+def runtime_inputs_dirty() -> bool:
+    """Return True when any Aaronnote runtime or publish input is uncommitted."""
     try:
         output = subprocess.check_output(
             ["git", "status", "--porcelain", "--untracked-files=all", "."],
-            cwd=ASSETS_DIR,
+            cwd=RUNTIME_ROOT,
             text=True,
+            stderr=subprocess.DEVNULL,
         )
         return bool(output.strip())
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return False
+        return True
+
+
+def static_publish_pairs() -> list[tuple[Path, Path]]:
+    pairs = [*PUBLISHED_ASSET_SOURCES, *REVEAL_ASSET_SOURCES]
+    for source in ASSETS_DIR.rglob("*"):
+        if not source.is_file():
+            continue
+        rel = source.relative_to(ASSETS_DIR)
+        if source.name.startswith(".") or source.name.endswith("~") or should_skip(rel):
+            continue
+        if source.suffix.lower() in STATIC_EXTENSIONS:
+            pairs.append((source, rel))
+    pairs.extend(
+        (ASSETS_DIR / template, Path(output))
+        for template, output in (("homepage.html", "index.html"), ("notes.html", "notes.html"))
+    )
+    return pairs
 
 
 def publish_outputs_exist(notes: list[Note]) -> bool:
     required = [PUBLIC / "js" / "data.js", PUBLIC / "index.html", PUBLIC / "notes.html"]
     required.extend(PUBLIC / note.link for note in notes)
-    return all(path.exists() for path in required)
+    required.extend(PUBLIC / target for _source, target in static_publish_pairs())
+    return all(path.exists() for path in required) and not missing_site_shell_assets()
 
 
-def publish_state_current(notes: list[Note], head: str | None, roam_head: str | None) -> bool:
-    if publish_forced() or not head or roam_inputs_dirty() or git_inputs_dirty() or not PUBLISH_STATE.exists():
+def missing_site_shell_assets() -> list[str]:
+    missing: list[str] = []
+    for page in (PUBLIC / "index.html", PUBLIC / "notes.html"):
+        if not page.exists():
+            missing.append(page.relative_to(PUBLIC).as_posix())
+            continue
+        try:
+            html = page.read_text(encoding="utf-8")
+        except OSError:
+            missing.append(page.relative_to(PUBLIC).as_posix())
+            continue
+        for raw_url in HTML_SHELL_ASSET_RE.findall(html):
+            url = unquote(raw_url.split("#", 1)[0].split("?", 1)[0]).strip()
+            if not url or url.startswith("//") or re.match(r"^[a-z][a-z0-9+.-]*:", url, flags=re.I):
+                continue
+            target = PUBLIC / url.lstrip("/") if url.startswith("/") else page.parent / url
+            if not target.exists():
+                missing.append(f"{page.name}: {raw_url}")
+    return sorted(set(missing))
+
+
+def validate_site_shell_assets() -> None:
+    missing = missing_site_shell_assets()
+    if missing:
+        raise RuntimeError("Published site references missing assets:\n  " + "\n  ".join(missing))
+
+
+def published_assets_current() -> bool:
+    for source, target in static_publish_pairs():
+        output = PUBLIC / target
+        if not source.exists() or not output.exists():
+            return False
+        try:
+            if not filecmp.cmp(source, output, shallow=False):
+                return False
+        except OSError:
+            return False
+    return True
+
+
+def publish_state_current(
+    notes: list[Note],
+    head: str | None,
+    roam_head: str | None,
+    runtime_head: str | None,
+) -> bool:
+    if (
+        publish_forced()
+        or not head
+        or not runtime_head
+        or roam_inputs_dirty()
+        or runtime_inputs_dirty()
+        or not PUBLISH_STATE.exists()
+    ):
         return False
     try:
         state = json.loads(PUBLISH_STATE.read_text(encoding="utf-8"))
@@ -579,17 +683,27 @@ def publish_state_current(notes: list[Note], head: str | None, roam_head: str | 
     return (
         state.get("gitHead") == head
         and state.get("roamGitHead") == roam_head
+        and state.get("runtimeGitHead") == runtime_head
         and state.get("dirty") is False
         and state.get("noteCount") == len(notes)
         and publish_outputs_exist(notes)
+        and published_assets_current()
     )
 
 
-def write_publish_state(notes: list[Note], rendered: int, skipped: int, head: str | None, roam_head: str | None) -> None:
+def write_publish_state(
+    notes: list[Note],
+    rendered: int,
+    skipped: int,
+    head: str | None,
+    roam_head: str | None,
+    runtime_head: str | None,
+) -> None:
     state = {
         "gitHead": head,
         "roamGitHead": roam_head,
-        "dirty": git_inputs_dirty() or roam_inputs_dirty(),
+        "runtimeGitHead": runtime_head,
+        "dirty": runtime_inputs_dirty() or roam_inputs_dirty(),
         "noteCount": len(notes),
         "rendered": rendered,
         "skipped": skipped,
@@ -627,7 +741,6 @@ def deps_for_note(note: Note, notes_by_rel: dict[str, Note] | None = None) -> se
         str(RUNTIME_ROOT / "aaronnote" / "published-toc.js"),
         str(RUNTIME_ROOT / "aaronnote" / "published-local-graph.js"),
         str(RUNTIME_ROOT / "js" / "note-page.js"),
-        str(RUNTIME_ROOT / "src" / "styles" / "theme-aaronnote.css"),
         str(RUNTIME_ROOT / "src" / "styles" / "widgets.css"),
         str(RUNTIME_ROOT / "src" / "styles" / "theme-typora.css"),
         str(RUNTIME_ROOT / "src" / "styles" / "typography.css"),
@@ -966,18 +1079,12 @@ def _copy_into_public(source: Path, target: Path) -> None:
 
 
 def copy_published_assets(output_root: Path) -> None:
-    for src_path, dst_rel in (
-        (RUNTIME_ROOT / "aaronnote" / "style.css", Path("Aaronnote/aaronnote/style.css")),
-        (RUNTIME_ROOT / "aaronnote" / "published-toc.js", Path("Aaronnote/aaronnote/published-toc.js")),
-        (RUNTIME_ROOT / "aaronnote" / "published-local-graph.js", Path("Aaronnote/aaronnote/published-local-graph.js")),
-        (RUNTIME_ROOT / "src" / "styles" / "theme-aaronnote.css", Path("Aaronnote/src/styles/theme-aaronnote.css")),
-        (RUNTIME_ROOT / "src" / "styles" / "widgets.css", Path("Aaronnote/src/styles/widgets.css")),
-        (RUNTIME_ROOT / "src" / "styles" / "theme-typora.css", Path("Aaronnote/src/styles/theme-typora.css")),
-        (RUNTIME_ROOT / "src" / "styles" / "typography.css", Path("Aaronnote/src/styles/typography.css")),
-        (ASSETS_DIR / "css" / "aaronnote-published.css", Path("css/aaronnote-published.css")),
-    ):
-        if src_path.exists():
-            _copy_into_public(src_path, output_root / dst_rel)
+    required_sources = [*PUBLISHED_ASSET_SOURCES, *REVEAL_ASSET_SOURCES]
+    missing = [str(src_path) for src_path, _dst_rel in required_sources if not src_path.exists()]
+    if missing:
+        raise RuntimeError("Missing required publish assets:\n  " + "\n  ".join(missing))
+    for src_path, dst_rel in required_sources:
+        _copy_into_public(src_path, output_root / dst_rel)
     fonts_dir = RUNTIME_ROOT / "src" / "styles" / "fonts"
     if fonts_dir.exists():
         for src_path in fonts_dir.iterdir():
@@ -1022,7 +1129,15 @@ def note_static_asset_paths(note: Note) -> set[Path]:
     return paths
 
 
-def copy_note_static_assets(note: Note, output_root: Path, notes_by_rel: dict[str, Note] | None = None) -> None:
+def copy_note_static_assets(
+    note: Note,
+    output_root: Path,
+    notes_by_rel: dict[str, Note] | None = None,
+    *,
+    include_private_content: bool = False,
+) -> None:
+    if note.private and not include_private_content:
+        return
     sources = set(note_static_asset_paths(note))
     _ = notes_by_rel
     for source in sources:
@@ -1126,6 +1241,17 @@ def clean_stale_outputs(notes: list[Note]) -> None:
     private_assets = private_static_asset_paths(notes)
     roam_public = PUBLIC / "roam"
     if roam_public.exists():
+        for dirpath, dirnames, _filenames in os.walk(roam_public, topdown=True, followlinks=False):
+            current = Path(dirpath)
+            for dirname in list(dirnames):
+                if dirname not in SKIP_DIRS:
+                    continue
+                stale_dir = current / dirname
+                if stale_dir.is_symlink():
+                    stale_dir.unlink()
+                else:
+                    shutil.rmtree(stale_dir)
+                dirnames.remove(dirname)
         for prefix in PRIVATE_PATH_PREFIXES:
             public_prefix = PUBLIC / prefix
             if public_prefix.exists():
@@ -1134,7 +1260,7 @@ def clean_stale_outputs(notes: list[Note]) -> None:
                         public_file.unlink()
         for source_asset in private_assets:
             try:
-                rel = source_asset.relative_to(ROOT)
+                rel = project_rel_path(source_asset)
             except ValueError:
                 continue
             public_asset = PUBLIC / rel
@@ -1153,7 +1279,7 @@ def clean_stale_outputs(notes: list[Note]) -> None:
 
 
 def collect_notes() -> tuple[list[Note], dict[str, Note]]:
-    PUBLIC.mkdir(exist_ok=True)
+    PUBLIC.mkdir(parents=True, exist_ok=True)
     notes = find_notes()
     notes_by_id = {note.id: note for note in notes}
     notes_by_rel = {note.rel_path: note for note in notes}
@@ -1164,9 +1290,12 @@ def collect_notes() -> tuple[list[Note], dict[str, Note]]:
         for ref in note.refs:
             if re.match(r"^[a-z][a-z0-9+.-]*:", ref, flags=re.I):
                 continue
-            ref_path = (note.path.parent / ref.split("#", 1)[0]).resolve()
+            ref_path_text = unquote(ref.split("#", 1)[0].split("?", 1)[0]).strip()
+            if not ref_path_text:
+                continue
+            ref_path = (note.path.parent / ref_path_text).resolve()
             try:
-                rel = ref_path.relative_to(ROOT).as_posix()
+                rel = project_rel_path(ref_path).as_posix()
             except ValueError:
                 continue
             target = notes_by_rel.get(rel)
@@ -1198,6 +1327,7 @@ def publish_summary(
     skipped: int,
     head: str | None,
     roam_head: str | None,
+    runtime_head: str | None,
     unchanged: bool = False,
 ) -> None:
     public_count = sum(not note.private for note in notes)
@@ -1222,7 +1352,12 @@ def publish_summary(
     print(f"  Graph: {reference_edges} reference edges, {connected_notes} connected notes")
     print(f"  Tags: {len(public_tags)} public tags, {masked_tags} masked occurrences, {distinct_masked_tags} masked tags")
     print(f"  Privacy: {sealed_groups} sealed groups, {private_assets} private static assets excluded")
-    print(f"  Git: org {head[:12] if head else 'unknown'}, roam {roam_head[:12] if roam_head else 'unknown'}")
+    print(
+        "  Git: "
+        f"publish {head[:12] if head else 'unknown'}, "
+        f"roam {roam_head[:12] if roam_head else 'unknown'}, "
+        f"runtime {runtime_head[:12] if runtime_head else 'unknown'}"
+    )
 
 
 def arg_value(args: list[str], name: str) -> str | None:
@@ -1274,7 +1409,12 @@ def publish_single_note(args: list[str]) -> bool:
     note = notes_by_rel.get(note.rel_path, note)
     output_root.mkdir(parents=True, exist_ok=True)
     copy_published_assets(output_root)
-    copy_note_static_assets(note, output_root, notes_by_rel)
+    copy_note_static_assets(
+        note,
+        output_root,
+        notes_by_rel,
+        include_private_content=include_private,
+    )
     copy_note_kind_assets(note, output_root)
     output_file = output_root / note_output_link(note)
     try:
@@ -1296,29 +1436,27 @@ def publish_single_note(args: list[str]) -> bool:
 
 
 def _migrate_roam_symlink() -> None:
-    """Remove ROOT/roam symlink if it points to ROAM_ROOT.
-    The engine writes generated HTML to ROOT/roam/ (a real output dir).
-    Source notes are discovered via ROAM_ROOT directly.
-    Also cleans up any HTML files accidentally written to ROAM_ROOT in a prior run.
+    """Detach a legacy ROOT/roam source symlink before creating output there.
+
+    HTML is a supported note attachment, so migration must never delete HTML
+    files from the source vault.
     """
+    global ROAM_ROOT
     roam_link = ROOT / "roam"
     if roam_link.is_symlink():
         try:
-            if roam_link.resolve() == ROAM_ROOT.resolve():
+            source_root = roam_link.resolve()
+            if source_root == ROAM_ROOT.resolve():
+                if ROAM_ROOT.absolute() == roam_link.absolute():
+                    ROAM_ROOT = source_root
                 roam_link.unlink()
         except OSError:
             pass
-    # Clean any .html files that leaked into the vault during a prior run.
-    if ROAM_ROOT.exists():
-        for html_file in ROAM_ROOT.rglob("*.html"):
-            try:
-                html_file.unlink()
-            except OSError:
-                pass
 
 
 def main() -> None:
     args = sys.argv[1:]
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
     _migrate_roam_symlink()
     if publish_single_note(args):
         return
@@ -1328,15 +1466,29 @@ def main() -> None:
 
     head = git_head()
     roam_head = roam_git_head()
+    runtime_head = runtime_git_head()
 
     if "--record-state" in args:
-        write_publish_state(notes, 0, len(notes), head, roam_head)
-        print(f"Recorded publish state for git {head[:12] if head else 'unknown'} / roam {roam_head[:12] if roam_head else 'unknown'}")
+        write_publish_state(notes, 0, len(notes), head, roam_head, runtime_head)
+        print(
+            "Recorded publish state for "
+            f"publish {head[:12] if head else 'unknown'} / "
+            f"roam {roam_head[:12] if roam_head else 'unknown'} / "
+            f"runtime {runtime_head[:12] if runtime_head else 'unknown'}"
+        )
         return
 
-    if publish_state_current(notes, head, roam_head):
+    if publish_state_current(notes, head, roam_head, runtime_head):
         print(f"Published {len(notes)} Markdown notes to {PUBLIC} (unchanged, skipped)")
-        publish_summary(notes, rendered=0, skipped=len(notes), head=head, roam_head=roam_head, unchanged=True)
+        publish_summary(
+            notes,
+            rendered=0,
+            skipped=len(notes),
+            head=head,
+            roam_head=roam_head,
+            runtime_head=runtime_head,
+            unchanged=True,
+        )
         return
 
     clean_stale_outputs(notes)
@@ -1356,9 +1508,17 @@ def main() -> None:
         write_rendered_note_html(pending, html, notes_by_rel)
     rendered = len(pending_renders)
     write_data(notes)
-    write_publish_state(notes, rendered, skipped, head, roam_head)
+    validate_site_shell_assets()
+    write_publish_state(notes, rendered, skipped, head, roam_head, runtime_head)
     print(f"Published {len(notes)} Markdown notes to {PUBLIC} ({rendered} rendered, {skipped} skipped)")
-    publish_summary(notes, rendered=rendered, skipped=skipped, head=head, roam_head=roam_head)
+    publish_summary(
+        notes,
+        rendered=rendered,
+        skipped=skipped,
+        head=head,
+        roam_head=roam_head,
+        runtime_head=runtime_head,
+    )
 
 
 if __name__ == "__main__":

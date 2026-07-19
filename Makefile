@@ -1,7 +1,7 @@
 EMACS ?= emacs
 AARONNOTE_DIR = lisp/roam/aaronnote
 EMACS_BATCH_BASE = $(EMACS) --batch --no-site-file --no-site-lisp --no-splash --init-directory=$(CURDIR) -q
-PUBLISH_BATCH = $(EMACS_BATCH_BASE) -L lisp -L lisp/roam -l ./lisp/roam/init-aaronnote-publish.el
+PUBLISH_BATCH = $(EMACS_BATCH_BASE) -L site-lisp/config -L lisp -L lisp/roam -l ./lisp/roam/init-aaronnote-publish.el
 # Load early-init first so native-comp never writes into top-level eln-cache.
 BATCH = $(EMACS_BATCH_BASE) -l ./early-init.el -l ./init.el
 BOOTSTRAP = $(EMACS_BATCH_BASE) -l ./early-init.el -l ./bootstrap.el

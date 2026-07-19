@@ -1,1 +1,1 @@
-../../js/note-page.js
+../../../js/note-page.js

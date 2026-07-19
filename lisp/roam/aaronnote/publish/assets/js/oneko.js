@@ -1,1 +1,1 @@
-../../js/oneko.js
+../../../js/oneko.js

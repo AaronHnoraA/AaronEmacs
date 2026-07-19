@@ -1,1 +1,1 @@
-../../js/knowledge.js
+../../../js/knowledge.js
