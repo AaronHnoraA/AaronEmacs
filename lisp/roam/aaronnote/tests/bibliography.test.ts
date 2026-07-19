@@ -80,7 +80,7 @@ describe("bibliography", () => {
     expect(parsed.diagnostics.some((item: string) => item.includes("Broken: invalid field syntax"))).toBe(true);
   });
 
-  test("indexes only declared local bib directories and resolves citations", async () => {
+  test("indexes the note-local bib directory by default and resolves citations", async () => {
     const root = await mkdtemp(join(tmpdir(), "aaronnote-bib-"));
     roots.push(root);
     const noteDir = join(root, "project", "iso");
@@ -99,7 +99,6 @@ describe("bibliography", () => {
     const content = [
       "#+begin meta",
       "title: Graph Tensor",
-      "bib: ./bib",
       "#+end meta",
       "",
       "As in @@cite(iso) [Str87] {locator: p. 406}.",
@@ -115,7 +114,7 @@ describe("bibliography", () => {
     expect(result.references?.[0]?.entry?.file).toBe(await realpath(join(noteDir, "bib", "iso.bib")));
     expect(result.references?.[0]?.entry?.path).toBe("project/iso/bib/iso.bib");
 
-    const namespaces = await bibliographyCompletions({ file, content, kind: "namespaces" });
+    const namespaces = await bibliographyCompletions({ file, content, kind: "namespaces", prefix: "is" });
     expect(namespaces.items?.find((item: { key?: string }) => item.key === "iso")).toMatchObject({
       body: "iso",
       detail: "project/iso/bib/iso.bib",
@@ -126,6 +125,57 @@ describe("bibliography", () => {
       body: "Str87",
       source: "project/iso/bib/iso.bib",
     });
+  });
+
+  test("adds declared bibliography paths to the default note-local directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-bib-additive-"));
+    roots.push(root);
+    const noteDir = join(root, "project");
+    await mkdir(join(noteDir, "bib"), { recursive: true });
+    await mkdir(join(noteDir, "extra"), { recursive: true });
+    await writeFile(join(noteDir, "bib", "local.bib"),
+      "@book{Local, author={Author, L}, title={Local Reference}, year={2026}}", "utf8");
+    await writeFile(join(noteDir, "extra", "shared.bib"),
+      "@book{Shared, author={Author, S}, title={Shared Reference}, year={2025}}", "utf8");
+    const file = join(noteDir, "note.md");
+    const content = [
+      "#+begin meta", "bib: ./extra", "#+end meta", "",
+      "See @@cite(local) [Local] and @@cite(shared) [Shared].",
+    ].join("\n");
+    configureBibliography({ root });
+
+    const namespaces = await bibliographyCompletions({ file, content, kind: "namespaces" });
+    expect(namespaces.diagnostics).toEqual([]);
+    expect(namespaces.items?.map((item: { key?: string }) => item.key)).toEqual(expect.arrayContaining(["local", "shared"]));
+
+    const result = await bibliographyForDocument({ file, content });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.references).toHaveLength(2);
+  });
+
+  test("resolves citations in a meta summary while keeping metadata fields private", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aaronnote-bib-abstract-"));
+    roots.push(root);
+    await mkdir(join(root, "bib"), { recursive: true });
+    await writeFile(join(root, "bib", "refs.bib"),
+      "@book{AbstractKey, author={Author, A}, title={Abstract Reference}, year={2026}}", "utf8");
+    const file = join(root, "note.md");
+    const content = [
+      "#+begin meta",
+      "title: Literal @@cite(refs) [Hidden]",
+      "#+begin summary",
+      "Abstract prose @@cite(refs) [AbstractKey].",
+      "#+end summary",
+      "#+end meta",
+    ].join("\n");
+    configureBibliography({ root });
+
+    const result = await bibliographyForDocument({ file, content });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.citations).toHaveLength(1);
+    expect(result.citations?.[0]?.keys).toEqual(["AbstractKey"]);
+    expect(result.references).toHaveLength(1);
   });
 
   test("resolves a real note path when the configured Aaronnote root is a symlink", async () => {
@@ -140,7 +190,7 @@ describe("bibliography", () => {
     const file = join(noteDir, "GraphTensor.md");
     const content = [
       "#+begin meta",
-      "bib: ./bib",
+      "title: Symlinked note",
       "#+end meta",
       "",
       "As in @@cite(iso) [Str87].",
@@ -210,7 +260,7 @@ describe("bibliography", () => {
       "@book{Local, author={Author, L}, title={Standalone Reference}, year={2026}}", "utf8");
     const file = join(standalone, "note.md");
     const content = [
-      "#+begin meta", "bib: ./bib", "#+end meta", "",
+      "#+begin meta", "title: Standalone note", "#+end meta", "",
       "See @@cite(local) [Local].",
     ].join("\n");
     await writeFile(file, content, "utf8");

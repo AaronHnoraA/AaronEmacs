@@ -47,6 +47,7 @@ import {
   orgMetaSummarySourceRange,
   parseOrgMetaDocument,
   showMetaTag,
+  type MetaSummary,
 } from "../../../../org-meta.ts";
 import { applyImageLayout, imageLayoutFromAttrs, readImageTrailingAttrs, type ImageLayoutAttrs } from "../../../../image-attrs.ts";
 import { supportedDiagramLang } from "../../../../diagram-langs.ts";
@@ -60,6 +61,13 @@ import type { JupyterWidgetKernelMessage } from "../../../../jupyter-widget-runt
 import type { JupyterMarkdownParser, WidgetMountFn } from "../../../../jupyter-rendermime.ts";
 import { ceilCommandGeneratedId as sharedCeilCommandGeneratedId, ceilLanguageForKernel } from "./ceil-shared.ts";
 import { parseSimpleFrontmatter } from "../../../../simple-frontmatter.ts";
+import { protectedCitationRanges } from "../../../../../shared/bibliography-syntax.mjs";
+import { createInteractiveCiteElement } from "./inline-commands.ts";
+import {
+  isMarkdownLinkOpenEvent,
+  markdownLinkOpensNewWindow,
+} from "../../../markdown-link-events.ts";
+import { refreshViewportDecorations } from "../../../viewport-refresh.ts";
 
 // ---------------------------------------------------------------------------
 // TOC fold state (session-level, not editor history)
@@ -2405,12 +2413,14 @@ class MetaWidget extends MeasuredWidget {
   body: string;
   from: number;
   to: number;
+  bibliographyVersion: number;
 
   constructor(body: string, from: number, to: number) {
     super();
     this.body = body;
     this.from = from;
     this.to = to;
+    this.bibliographyVersion = window.AaronnoteBibliography?.version?.() ?? 0;
   }
 
   protected measureKey(): string { return "meta:" + shortHash(this.body); }
@@ -2424,7 +2434,10 @@ class MetaWidget extends MeasuredWidget {
   }
 
   eq(other: MetaWidget): boolean {
-    return this.body === other.body && this.from === other.from && this.to === other.to;
+    return this.body === other.body
+      && this.from === other.from
+      && this.to === other.to
+      && this.bibliographyVersion === other.bibliographyVersion;
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -2827,7 +2840,11 @@ function renderMetaWidget(
     heading.append(abstractTitle);
     const content = document.createElement("div");
     content.className = "aaronnote-meta-abstract-content";
-    if (summary.body.trim()) content.innerHTML = renderMarkdownHTML(summary.body);
+    if (summary.body.trim()) {
+      content.innerHTML = renderMarkdownHTML(summary.body);
+      hydrateMetaSummaryCitations(content, summary, bodyFrom);
+      wireRenderedMarkdownLinks(content);
+    }
     abstract.append(heading, content);
     meta.append(abstract);
   }
@@ -2835,6 +2852,54 @@ function renderMetaWidget(
   renderMetaProperties(meta, body, view, bodyFrom);
 
   root.append(meta);
+}
+
+function wireRenderedMarkdownLinks(root: HTMLElement): void {
+  for (const anchor of root.querySelectorAll<HTMLAnchorElement>("a[href]")) {
+    const href = anchor.getAttribute("href")?.trim() || "";
+    if (!href) continue;
+    const open = (event: MouseEvent): void => {
+      if (!isMarkdownLinkOpenEvent(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      anchor.dispatchEvent(new CustomEvent("aaronnote:open-url", {
+        bubbles: true,
+        cancelable: true,
+        detail: { href, newWindow: markdownLinkOpensNewWindow(href, event) },
+      }));
+    };
+    anchor.addEventListener("mousedown", (event) => {
+      if (event.button === 0) open(event);
+    });
+    anchor.addEventListener("auxclick", (event) => {
+      if (event.button === 1) open(event);
+    });
+    // The source-backed editor opens links on Mod+mousedown. Prevent the real
+    // anchor from introducing a second, browser-native click path.
+    anchor.addEventListener("click", (event) => event.preventDefault());
+  }
+}
+
+function hydrateMetaSummaryCitations(
+  root: HTMLElement,
+  summary: MetaSummary,
+  metaBodyFrom: number,
+): void {
+  const protectedRanges = protectedCitationRanges(summary.body) as Array<{ from: number; to: number }>;
+  const commands = scanInlineCommands(summary.body, "cite")
+    .filter((command) => !protectedRanges.some((range) => command.fullFrom >= range.from && command.fullFrom < range.to));
+  const rendered = [...root.querySelectorAll<HTMLElement>(".inline-cite-widget[data-cite-state]")];
+  const absoluteOffset = metaBodyFrom + summary.bodyFrom;
+  for (let index = 0; index < Math.min(commands.length, rendered.length); index += 1) {
+    const command = commands[index]!;
+    rendered[index]!.replaceWith(createInteractiveCiteElement({
+      ...command,
+      fullFrom: absoluteOffset + command.fullFrom,
+      fullTo: absoluteOffset + command.fullTo,
+      contextFrom: absoluteOffset + command.contextFrom,
+      contextTo: absoluteOffset + command.contextTo,
+    }));
+  }
 }
 
 const META_WIDGET_MAX_BODY = 256 * 1024;
@@ -3970,6 +4035,12 @@ const blockExtrasDecorations = StateField.define<DecorationSet>({
     if (tr.effects.some((effect) => effect.is(ceilRefreshEffect))) {
       // Epoch already bumped by the reload hook; rebuilding makes eq() fail for
       // @@cell widgets so their toDOM re-reads the (now invalidated) source.
+      return buildBlockExtraDecos(tr.state);
+    }
+    if (tr.effects.some((effect) => effect.is(refreshViewportDecorations))) {
+      // Meta summaries may contain server-backed citation widgets. Rebuilding
+      // creates a new MetaWidget bibliography epoch while eq() preserves all
+      // unrelated block widgets.
       return buildBlockExtraDecos(tr.state);
     }
     if (tr.docChanged) {

@@ -58,10 +58,15 @@ function stringLineDocument(source) {
   };
 }
 
+/** Return the first nested meta summary range in a Markdown string. */
+export function orgMetaSummaryRange(markdown) {
+  return orgMetaSummaryRangeFromLines(stringLineDocument(String(markdown || "")));
+}
+
 /** Blank summary source while preserving every offset and line break. */
 export function maskMetaSummaryContent(markdown) {
   const source = String(markdown || "");
-  const range = orgMetaSummaryRangeFromLines(stringLineDocument(source));
+  const range = orgMetaSummaryRange(source);
   if (!range) return source;
   const masked = source.slice(range.from, range.to).replace(/[^\r\n]/g, " ");
   return source.slice(0, range.from) + masked + source.slice(range.to);

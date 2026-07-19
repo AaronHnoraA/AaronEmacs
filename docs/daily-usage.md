@@ -167,7 +167,8 @@ path、Kind 和 Tags 可在面板里直接输入，`c` 创建，`t` / `RET` 切�
 `T` 选模板，`R` 重置。创建实际走
 Aaronnote runtime，所以默认值、路径校验、meta、模板变量和 tabstop 展开逻辑保持一致。
 Markdown 模板统一存放在 `templates/aaronnote/markdown-mode/`，供 Emacs 启动的 Aaronnote 与
-Roam New 共用。
+Roam New 共用。所有新建 note 的 meta 都会带一个空的嵌套 `summary` block，可直接在 Abstract
+或 Properties 中编辑；模板自带 meta 时也会自动补齐，不需要每个模板重复声明。
 
 ### Aaronnote Slides
 
@@ -238,21 +239,25 @@ source/draft/template/review 会预先复制到该目录，避免 agent 因找�
 `--dir`、`--pure` 和 `external_directory: deny`。任务卡的 `Agent audit` 可展开查看最终 audit 摘要
 以及每项 `applied / kept` 的具体理由。
 
-引用使用 note 顶部 meta 声明本地 bibliography，再在正文写 `@@cite`：
+引用会默认扫描 note 所在目录的 `./bib/*.bib`，正文直接写 `@@cite` 即可：
 
 ```text
 #+begin meta
-bib: ./bib
+title: Example
 #+end meta
 
 See @@cite(iso) [Str87] {locator: p. 406}.
 ```
 
-`bib:` 可指向目录或具体 `.bib` 文件；目录中每个文件的 basename 是短 namespace，也可使用补全
+默认 `./bib` 不存在时不会报错。`bib:` 可用半角逗号追加多个其他目录或具体 `.bib` 文件，例如
+`bib: ../shared-bib, ./references.bib`；路径本身包含逗号时可写成
+`bib: "./refs,2026.bib", ../shared-bib`。目录中每个文件的 basename 是短 namespace，也可使用补全
 给出的完整 namespace。多 key 用分号分隔，`prefix` / `locator` / `suffix` 会保留到 PDF。heading
 或文本选区导出仍使用当前未保存全文的 meta/bib 上下文。未知/歧义 namespace、缺 key、损坏的
 BibTeX 或部分解析成功的多引用都会在写文件前阻断并给出明确诊断，不能再静默生成 `[ns:key]`
 占位或丢掉其中一项。代码、数学、HTML comment 和私有 block 中的字面 `@@cite` 不参与引用编号。
+meta 内只有嵌套 Summary/Abstract 的正文参与引用解析；其中的 citation、Markdown link、编号和
+打开/右键交互与外层正文一致，其他 metadata 字段仍保持私有。
 metadata 同时支持 Aaronnote meta block 与 YAML front matter；BibTeX value 支持 `@string` 前向引用、
 `#` 拼接、标准月份宏与 TeX accent。未知/循环宏、畸形 field、未闭合 citation key/args 都会报告
 带行列位置的诊断。quoted `bib:` 路径可包含逗号，链接 URL 中的 `@@cite` 保持字面量，而可见链接

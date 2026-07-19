@@ -176,6 +176,15 @@ async function visibleBibFiles(file, content, metadataContent = content, request
     return { files: [], diagnostics: ["standalone note is outside the allowed bibliography root"] };
   }
   const { bibSources, diagnostics } = await effectiveMeta(noteFile, metadataContent, new Set(), allowedRoot);
+  // Every note gets a conventional local bibliography directory for free.
+  // Explicit/inherited `bib:` declarations add sources; they are not required
+  // for the common `<note directory>/bib/*.bib` layout.  A missing default is
+  // normal and stays silent, while a missing explicitly declared path remains
+  // diagnostic-worthy.
+  const sources = [
+    { raw: "./bib", base: dirname(noteFile), origin: noteFile, optional: true },
+    ...bibSources.map((source) => ({ ...source, optional: false })),
+  ];
   const files = [];
   const seenFiles = new Set();
   const addFile = (filePath) => {
@@ -186,7 +195,7 @@ async function visibleBibFiles(file, content, metadataContent = content, request
     const shortNamespace = basename(canonical).replace(/\.bib$/i, "");
     files.push({ file: canonical, namespace: full, shortNamespace, pathRoot: allowedRoot });
   };
-  for (const declaration of bibSources) {
+  for (const declaration of sources) {
     const raw = declaration.raw;
     const source = canonicalPath(resolve(declaration.base, raw));
     if (!inside(source, allowedRoot)) {
@@ -214,7 +223,7 @@ async function visibleBibFiles(file, content, metadataContent = content, request
         addFile(join(source, entry.name));
       }
     } catch {
-      diagnostics.push(`bib source not found: ${raw}`);
+      if (!declaration.optional) diagnostics.push(`bib source not found: ${raw}`);
     }
   }
   return { files, diagnostics };

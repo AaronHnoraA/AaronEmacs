@@ -255,6 +255,41 @@ describe("server save API", () => {
     expect(await readdir(join(notes, "nested"))).not.toContain(".aaronnote-keep");
   });
 
+  test("new notes get an editable meta summary with and without template metadata", async () => {
+    const { root, notes } = await setupRoot();
+    const templates = join(root, "templates", "aaronnote", "markdown-mode");
+    await mkdir(templates, { recursive: true });
+    await writeFile(join(templates, "custom"), [
+      "# name: Custom",
+      "# key: custom",
+      "# --",
+      "#+begin meta",
+      "id: {{id}}",
+      "title: {{title}}",
+      "kind: {{kind}}",
+      "#+end meta",
+      "",
+      "# {{title}}",
+      "",
+      "$0",
+    ].join("\n"), "utf8");
+    configure({
+      root: notes,
+      workspaceRoot: root,
+      templatesRoot: join(root, "templates", "aaronnote"),
+      pluginRoot: join(root, "plugin"),
+    });
+
+    await createNode({ nodeType: "roam", id: "plain", title: "Plain", path: "plain.md" });
+    await createNode({ nodeType: "roam", id: "custom", title: "Custom", path: "custom.md", templateKey: "custom" });
+
+    for (const file of [join(notes, "plain.md"), join(notes, "custom.md")]) {
+      const content = await readFile(file, "utf8");
+      expect(content.match(/#\+begin summary/g)).toHaveLength(1);
+      expect(content).toContain("#+begin summary\n\n#+end summary");
+    }
+  });
+
   test("runtime debug reports deduplicated queued roam sync files", async () => {
     const { notes } = await setupRoot();
     const file = join(notes, "a.md");

@@ -636,6 +636,40 @@ y^2
     cleanup();
   });
 
+  test("cmd-click on a meta summary link uses the ordinary open-url route", () => {
+    const md = [
+      "#+begin meta",
+      "title: Paper",
+      "#+begin summary",
+      "Read [the source](target.md#result).",
+      "#+end summary",
+      "#+end meta",
+    ].join("\n");
+    const { host, cleanup } = mountCM6(md);
+    const events: CustomEvent[] = [];
+    const listener = (event: Event) => events.push(event as CustomEvent);
+    document.addEventListener("aaronnote:open-url", listener);
+
+    const anchor = host.querySelector<HTMLAnchorElement>(".aaronnote-meta-abstract a[href]")!;
+    const plainClick = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+    anchor.dispatchEvent(plainClick);
+    expect(plainClick.defaultPrevented).toBe(true);
+    expect(events).toEqual([]);
+
+    const open = new MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      metaKey: true,
+    });
+    anchor.dispatchEvent(open);
+    expect(open.defaultPrevented).toBe(true);
+    expect(events[0]?.detail).toEqual({ href: "target.md#result", newWindow: false });
+
+    document.removeEventListener("aaronnote:open-url", listener);
+    cleanup();
+  });
+
   test("plain click on a jupyter link does not dispatch open-url", () => {
     const md = "Go [nb](./attachments/tset.ipynb@test file)";
     const { editor, cleanup } = mountCM6(md);

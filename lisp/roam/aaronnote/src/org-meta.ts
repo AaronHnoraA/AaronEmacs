@@ -34,6 +34,9 @@ export interface EditableMetaEntry extends MetaEntry {
 export interface MetaSummary {
   title: string;
   body: string;
+  /** Offsets relative to the meta block body. */
+  bodyFrom: number;
+  bodyTo: number;
 }
 
 export interface OrgMetaDocument {
@@ -157,6 +160,8 @@ export function parseOrgMetaDocument(body: string): OrgMetaDocument {
         summary: {
           title: (open[1] ?? "").trim(),
           body: summaryBody,
+          bodyFrom: openLine.fullTo,
+          bodyTo: line.from,
         },
       };
     }

@@ -91,12 +91,22 @@ describe("bibliography editor state", () => {
     const visible = bibliographyResolutionState("Text @@cite(ns) [A]");
     const code = bibliographyResolutionState("Text `@@cite(ns) [A]`");
     const destination = bibliographyResolutionState("[label](url/@@cite(ns) [A])");
+    const abstract = bibliographyResolutionState([
+      "#+begin meta",
+      "title: @@cite(ns) [Hidden]",
+      "#+begin summary",
+      "Visible @@cite(ns) [Abstract]",
+      "#+end summary",
+      "#+end meta",
+    ].join("\n"));
 
     expect(visible.commands).toHaveLength(1);
     expect(code.commands).toHaveLength(0);
     expect(code.hasCitationSyntax).toBe(false);
     expect(destination.commands).toHaveLength(0);
     expect(destination.hasCitationSyntax).toBe(false);
+    expect(abstract.commands).toHaveLength(1);
+    expect(abstract.commands[0]?.source).toBe("@@cite(ns) [Abstract]");
     expect(code.key).not.toBe(visible.key);
   });
 

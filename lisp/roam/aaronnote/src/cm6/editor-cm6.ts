@@ -26,6 +26,11 @@ import {
   historyKeymap,
 } from "@codemirror/commands";
 import { closeBrackets } from "@codemirror/autocomplete";
+import {
+  isMarkdownLinkOpenEvent,
+  markdownLinkOpensNewWindow,
+  markdownLinkPrimaryModifier,
+} from "./markdown-link-events.ts";
 import { vscodeCloseBrackets, vscodeDeleteBracketPairKeymap } from "./close-brackets-vscode.ts";
 import { foldEffect, syntaxTree, unfoldEffect } from "@codemirror/language";
 import { disposeHighlightWorker } from "../code-highlight-async.ts";
@@ -299,24 +304,8 @@ export function markdownHrefAt(state: EditorState, pos: number): string | null {
   return markdownHrefFromLineAt(state, clamped);
 }
 
-function linkOpensNewWindow(href: string, event: MouseEvent): boolean {
-  void href;
-  return event.button === 1 && primaryLinkModifier(event);
-}
-
-function primaryLinkModifier(event: MouseEvent): boolean {
-  if (event.metaKey && !event.ctrlKey) return true;
-  return !/Mac/.test(navigator.platform) && event.ctrlKey && !event.metaKey;
-}
-
-function isLinkOpenMouseEvent(event: MouseEvent): boolean {
-  if (event.shiftKey) return false;
-  if (event.button !== 0 && event.button !== 1) return false;
-  return primaryLinkModifier(event);
-}
-
 function openMarkdownLinkFromEvent(view: EditorView, event: MouseEvent): boolean {
-  if (!isLinkOpenMouseEvent(event)) return false;
+  if (!isMarkdownLinkOpenEvent(event)) return false;
   const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
   if (pos == null) return false;
   const href = markdownHrefAt(view.state, pos);
@@ -327,7 +316,7 @@ function openMarkdownLinkFromEvent(view: EditorView, event: MouseEvent): boolean
   const customEvent = new CustomEvent("aaronnote:open-url", {
     bubbles: true,
     cancelable: true,
-    detail: { href, newWindow: linkOpensNewWindow(href, event) },
+    detail: { href, newWindow: markdownLinkOpensNewWindow(href, event) },
   });
   const handled = !view.dom.dispatchEvent(customEvent);
   if (!handled && href.startsWith("#")) {
@@ -344,7 +333,7 @@ function openMarkdownLinkFromEvent(view: EditorView, event: MouseEvent): boolean
 }
 
 function previewMarkdownLinkFromEvent(view: EditorView, event: MouseEvent): boolean {
-  if (!primaryLinkModifier(event)) return false;
+  if (!markdownLinkPrimaryModifier(event)) return false;
   const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
   if (pos == null) return false;
   const href = markdownHrefAt(view.state, pos);
@@ -398,7 +387,7 @@ function resolveSourceWidgetHref(view: EditorView, event: MouseEvent): string | 
 function openAttachmentSmartFromEvent(view: EditorView, event: MouseEvent): boolean {
   // Cmd+click (Mac) on image/attachment widgets — the main use case is images
   // which currently have no click handler. Text attachment links also benefit.
-  if (!primaryLinkModifier(event) || event.shiftKey || event.button !== 0) return false;
+  if (!markdownLinkPrimaryModifier(event) || event.shiftKey || event.button !== 0) return false;
   const widgetHref = resolveSourceWidgetHref(view, event);
   if (!widgetHref) return false; // Only intercept widget clicks; text links handled by openMarkdownLinkFromEvent
   if (!attachmentHref(widgetHref) && !/\.(png|jpe?g|gif|svg|webp|bmp|tiff?|avif|heic|pdf|mp4|mov|mp3|wav|docx?|xlsx?|pptx?|zip|tar|gz)$/i.test(widgetHref)) return false;
@@ -413,7 +402,7 @@ function openAttachmentSmartFromEvent(view: EditorView, event: MouseEvent): bool
 }
 
 function openAttachmentContextMenuFromEvent(view: EditorView, event: MouseEvent): boolean {
-  if (primaryLinkModifier(event)) return previewMarkdownLinkFromEvent(view, event);
+  if (markdownLinkPrimaryModifier(event)) return previewMarkdownLinkFromEvent(view, event);
   const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
   if (pos == null) return false;
   const href = markdownHrefAt(view.state, pos);

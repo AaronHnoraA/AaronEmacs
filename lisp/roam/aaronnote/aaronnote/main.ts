@@ -2618,6 +2618,9 @@ function runContextEditorCommand(command: EditorCommand, value = ""): boolean {
 }
 
 function markdownHrefFromPointer(event: MouseEvent): string {
+  const element = event.target instanceof Element ? event.target : event.target instanceof Node ? event.target.parentElement : null;
+  const renderedHref = element?.closest<HTMLAnchorElement>("a[href]")?.getAttribute("href") || "";
+  if (renderedHref) return cleanHref(renderedHref);
   const pos = editor.view.posAtCoords({ x: event.clientX, y: event.clientY });
   if (typeof pos !== "number") return "";
   return cleanHref(markdownHrefAt(editor.view.state, pos) || "");

@@ -13,4 +13,5 @@ export interface MetaSummarySourceRange {
 }
 
 export function orgMetaSummaryRangeFromLines(doc: LineDocument): MetaSummarySourceRange | null;
+export function orgMetaSummaryRange(markdown: string): MetaSummarySourceRange | null;
 export function maskMetaSummaryContent(markdown: string): string;

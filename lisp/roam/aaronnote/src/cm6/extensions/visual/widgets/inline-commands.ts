@@ -821,57 +821,62 @@ class CiteWidget extends MeasuredWidget {
   }
 
   toDOM(): HTMLElement {
-    const cite = window.AaronnoteBibliography?.citationLabel?.(this.cmd.fullFrom, this.cmd.fullTo);
-    const wrap = document.createElement("span");
-    const error = cite?.error === true;
-    const label = cite?.label || `[${this.cmd.context.trim() || "?"}]`;
-    const fallbackTitle = `${this.cmd.switchValue ? `${this.cmd.switchValue}:` : ""}${this.cmd.context.trim() || "?"}`;
-    const title = cite?.title || (error ? `Unresolved citation: ${fallbackTitle}` : fallbackTitle);
-    wrap.className = `inline-cite-widget inline-command-token${error ? " is-error" : ""}`;
-    wrap.dataset.cmSourceFrom = String(this.cmd.fullFrom);
-    wrap.dataset.cmSourceTo = String(this.cmd.fullTo);
-    wrap.dataset.cmOpenSource = "true";
-    wrap.dataset.citeState = error ? "error" : "resolved";
-    wrap.setAttribute("role", "button");
-    wrap.tabIndex = 0;
-    wrap.setAttribute("aria-invalid", String(error));
-    wrap.setAttribute("aria-label", error ? `Citation error: ${title}` : `Citation ${label}. ${title}`);
-    wrap.title = title;
-    const text = document.createElement("span");
-    text.className = "inline-cite-label";
-    text.textContent = label;
-    wrap.appendChild(text);
-    if (error) {
-      const mark = document.createElement("span");
-      mark.className = "inline-cite-error-mark";
-      mark.textContent = "⚠";
-      mark.setAttribute("aria-hidden", "true");
-      wrap.append(" ", mark);
-    }
-    wrap.addEventListener("mousedown", (event) => {
-      if (event.metaKey || event.ctrlKey) stopWidgetEventPropagation(event);
-    });
-    wrap.addEventListener("click", (event) => {
-      if (!event.metaKey && !event.ctrlKey) return;
-      event.preventDefault();
-      event.stopPropagation();
-      window.AaronnoteBibliography?.openCitation?.(this.cmd.fullFrom, this.cmd.fullTo, wrap.getBoundingClientRect(), true);
-    });
-    wrap.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
-      event.preventDefault();
-      event.stopPropagation();
-      window.AaronnoteBibliography?.openCitation?.(this.cmd.fullFrom, this.cmd.fullTo, wrap.getBoundingClientRect(), true);
-    });
-    wrap.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      window.AaronnoteBibliography?.contextMenu?.(this.cmd.fullFrom, this.cmd.fullTo, event.clientX, event.clientY);
-    });
-    return wrap;
+    return createInteractiveCiteElement(this.cmd);
   }
 
   ignoreEvent(): boolean { return false; }
+}
+
+/** Build the interactive citation used by both ordinary prose and meta summaries. */
+export function createInteractiveCiteElement(cmd: InlineCommand): HTMLElement {
+  const cite = window.AaronnoteBibliography?.citationLabel?.(cmd.fullFrom, cmd.fullTo);
+  const wrap = document.createElement("span");
+  const error = cite?.error === true;
+  const label = cite?.label || `[${cmd.context.trim() || "?"}]`;
+  const fallbackTitle = `${cmd.switchValue ? `${cmd.switchValue}:` : ""}${cmd.context.trim() || "?"}`;
+  const title = cite?.title || (error ? `Unresolved citation: ${fallbackTitle}` : fallbackTitle);
+  wrap.className = `inline-cite-widget inline-command-token${error ? " is-error" : ""}`;
+  wrap.dataset.cmSourceFrom = String(cmd.fullFrom);
+  wrap.dataset.cmSourceTo = String(cmd.fullTo);
+  wrap.dataset.cmOpenSource = "true";
+  wrap.dataset.citeState = error ? "error" : "resolved";
+  wrap.setAttribute("role", "button");
+  wrap.tabIndex = 0;
+  wrap.setAttribute("aria-invalid", String(error));
+  wrap.setAttribute("aria-label", error ? `Citation error: ${title}` : `Citation ${label}. ${title}`);
+  wrap.title = title;
+  const text = document.createElement("span");
+  text.className = "inline-cite-label";
+  text.textContent = label;
+  wrap.appendChild(text);
+  if (error) {
+    const mark = document.createElement("span");
+    mark.className = "inline-cite-error-mark";
+    mark.textContent = "⚠";
+    mark.setAttribute("aria-hidden", "true");
+    wrap.append(" ", mark);
+  }
+  wrap.addEventListener("mousedown", (event) => {
+    if (event.metaKey || event.ctrlKey) stopWidgetEventPropagation(event);
+  });
+  wrap.addEventListener("click", (event) => {
+    if (!event.metaKey && !event.ctrlKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    window.AaronnoteBibliography?.openCitation?.(cmd.fullFrom, cmd.fullTo, wrap.getBoundingClientRect(), true);
+  });
+  wrap.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
+    event.preventDefault();
+    event.stopPropagation();
+    window.AaronnoteBibliography?.openCitation?.(cmd.fullFrom, cmd.fullTo, wrap.getBoundingClientRect(), true);
+  });
+  wrap.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    window.AaronnoteBibliography?.contextMenu?.(cmd.fullFrom, cmd.fullTo, event.clientX, event.clientY);
+  });
+  return wrap;
 }
 
 function visualLineTextRight(line: HTMLElement, anchorRect: DOMRect, ignored: HTMLElement): number {

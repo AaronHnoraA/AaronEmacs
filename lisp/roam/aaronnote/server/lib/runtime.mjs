@@ -1345,7 +1345,7 @@ function ensureDate(value = "") {
   return String(value || new Date().toISOString().slice(0, 10));
 }
 
-function buildMetaBlock(fields) {
+function buildMetaBlock(fields, options = {}) {
   const tags = normalizeTags(fields.tags || []);
   const refs = normalizeTags(fields.refs || []);
   const aliases = normalizeTags(fields.aliases || []);
@@ -1372,6 +1372,7 @@ function buildMetaBlock(fields) {
   if (fields.source) lines.push(`source: ${fields.source}`);
   if (fields.summary) lines.push(`summary: ${String(fields.summary).replace(/\r?\n/g, " ")}`);
   if (fields.private !== undefined) lines.push(`private: ${fields.private === true || fields.private === "true" ? "true" : "false"}`);
+  if (options.includeSummary) lines.push("#+begin summary", "", "#+end summary");
   lines.push("#+end meta", "");
   return lines.join("\n");
 }
@@ -1425,6 +1426,24 @@ function withMetaRoamOff(content) {
   return {
     content: `${content.slice(0, insertAt)}${insertLine}${content.slice(insertAt)}`,
     offset: insertLine.length,
+  };
+}
+
+// New-note templates all expose the same nested Summary/Abstract editor. A
+// template may provide its own meta block, so creation cannot rely solely on
+// buildMetaBlock() to add it.
+function withMetaSummary(content) {
+  const range = metaBlockRange(content);
+  if (!range || /(^|\n)[ \t]*#\+begin(?:_|\s+)summary(?:\s|$)/i.test(range.text)) {
+    return { content, offset: 0 };
+  }
+  const close = /(^|\r?\n)([ \t]*#\+end(?:_|\s+)meta\s*)/im.exec(range.text);
+  if (!close || close.index == null) return { content, offset: 0 };
+  const insert = "#+begin summary\n\n#+end summary\n";
+  const insertAt = range.from + close.index + (close[1]?.length || 0);
+  return {
+    content: `${content.slice(0, insertAt)}${insert}${content.slice(insertAt)}`,
+    offset: insert.length,
   };
 }
 
@@ -7257,17 +7276,24 @@ export async function createNode(body) {
         roam: roam ? "" : "off",
         tags,
         refs: [],
-      });
+      }, { includeSummary: true });
       const prefix = `${meta}\n`;
       const offset = prefix.length;
       content = `${prefix}${content.replace(/^\s+/, "")}`;
       if (selection) selection = { from: selection.from + offset, to: selection.to + offset };
-    } else if (!roam) {
-      // Regular note from a template that already carries its own meta block:
-      // ensure it is excluded from the roam graph.
-      const { content: next, offset } = withMetaRoamOff(content);
-      content = next;
-      if (selection && offset) selection = { from: selection.from + offset, to: selection.to + offset };
+    } else {
+      const summarized = withMetaSummary(content);
+      content = summarized.content;
+      if (selection && summarized.offset) {
+        selection = { from: selection.from + summarized.offset, to: selection.to + summarized.offset };
+      }
+      if (!roam) {
+        // Regular note from a template that already carries its own meta block:
+        // ensure it is excluded from the roam graph.
+        const { content: next, offset } = withMetaRoamOff(content);
+        content = next;
+        if (selection && offset) selection = { from: selection.from + offset, to: selection.to + offset };
+      }
     }
   } else {
     content = [
@@ -7279,7 +7305,7 @@ export async function createNode(body) {
         roam: roam ? "" : "off",
         tags,
         refs: [],
-      }),
+      }, { includeSummary: true }),
       `# ${title}`,
       "",
     ].join("\n");

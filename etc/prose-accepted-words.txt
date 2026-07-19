@@ -70,6 +70,7 @@ docstring
 DONT
 dotenv
 ediff
+eigenbasis
 eigenspace
 eigenspace
 eigenspaces
@@ -111,6 +112,7 @@ groupoid
 GTK
 Hamiltonian
 Hamiltonians
+Hermitian
 heteroskedastic
 heteroskedasticity
 hideshow

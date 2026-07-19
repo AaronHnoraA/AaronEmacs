@@ -138,4 +138,48 @@ describe("inline citation widget", () => {
       host.remove();
     }
   });
+
+  test("meta summary citations use the same resolved widget and interactions", () => {
+    const citation = "@@cite(iso) [Str87]";
+    const markdown = [
+      "#+begin meta",
+      "title: Paper",
+      "#+begin summary",
+      `Abstract ${citation}.`,
+      "#+end summary",
+      "#+end meta",
+    ].join("\n");
+    let version = 1;
+    let label = "[4]";
+    let observed = { from: -1, to: -1 };
+    const opened: Array<{ from: number; to: number; jump: boolean }> = [];
+    window.AaronnoteBibliography = {
+      version: () => version,
+      citationLabel: (from, to) => {
+        observed = { from, to };
+        return { label };
+      },
+      openCitation: (from, to, _rect, jump) => opened.push({ from, to, jump }),
+    };
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const editor = createEditor(host, { kernel: "cm6", initialContent: markdown });
+    try {
+      expect(host.querySelector(".aaronnote-meta-abstract .inline-cite-label")?.textContent).toBe("[4]");
+      expect(markdown.slice(observed.from, observed.to)).toBe(citation);
+
+      label = "[5]";
+      version += 1;
+      refreshViewportDecorationsNow(editor.view);
+      const widget = host.querySelector<HTMLElement>(".aaronnote-meta-abstract .inline-cite-widget")!;
+      expect(widget.querySelector(".inline-cite-label")?.textContent).toBe("[5]");
+
+      widget.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, metaKey: true }));
+      expect(opened).toEqual([{ ...observed, jump: true }]);
+    } finally {
+      editor.destroy();
+      host.remove();
+    }
+  });
 });

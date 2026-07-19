@@ -1,6 +1,7 @@
 import { scanInlineCommands } from "./command-syntax.mjs";
+import { orgMetaSummaryRange } from "./meta-summary.mjs";
 
-const HIDDEN_CITATION_BLOCKS = new Set(["lean4", "src", "source", "meta"]);
+const HIDDEN_CITATION_BLOCKS = new Set(["lean4", "src", "source"]);
 const PRIVATE_CITATION_COMMANDS = new Set([
   "todo", "itodo", "project", "milestone", "clock", "comment", "cell", "lean4", "note-code",
 ]);
@@ -104,6 +105,33 @@ function balancedBraceEnd(source, open) {
   return source.length;
 }
 
+function addMetaCitationRanges(source, lines, ranges) {
+  const summary = orgMetaSummaryRange(source);
+  let meta = null;
+  for (const line of lines) {
+    if (!meta) {
+      if (/^\s*#\+begin(?:_|\s+)meta\b/i.test(line.text)) {
+        meta = { from: line.from, depth: 1 };
+      }
+      continue;
+    }
+    if (/^\s*#\+begin(?:_|\s+)meta\b/i.test(line.text)) meta.depth += 1;
+    if (!/^\s*#\+end(?:_|\s+)meta\s*$/i.test(line.text)) continue;
+    meta.depth -= 1;
+    if (meta.depth !== 0) continue;
+    if (summary && summary.from >= meta.from && summary.to <= line.lineEnd) {
+      // Metadata stays private, but its nested summary is authored prose: cite
+      // commands in the body must resolve exactly like citations in the note.
+      ranges.push({ from: meta.from, to: summary.bodyFrom });
+      ranges.push({ from: summary.bodyTo, to: line.lineEnd });
+    } else {
+      ranges.push({ from: meta.from, to: line.lineEnd });
+    }
+    meta = null;
+  }
+  if (meta) ranges.push({ from: meta.from, to: source.length });
+}
+
 /** Contexts in which `@@cite` is literal/private rather than resolvable. */
 export function protectedCitationRanges(markdown) {
   const source = String(markdown || "");
@@ -119,6 +147,7 @@ export function protectedCitationRanges(markdown) {
   }
 
   const lines = lineRecords(source);
+  addMetaCitationRanges(source, lines, ranges);
   let fence = null;
   let hidden = null;
   for (const line of lines) {
