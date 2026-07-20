@@ -10,7 +10,7 @@ This configuration is designed to solve a concrete set of problems:
 
 - Turn editing, search, project switching, build/test, and Git into a stable daily workflow.
 - Keep local development, remote development, and knowledge work inside the same environment.
-- Treat Org, LaTeX, Jupyter, citations, and research notes as first-class workflows rather than side features.
+- Treat Org, LaTeX with TeXpresso live preview, Jupyter, citations, and research notes as first-class workflows rather than side features.
 - Keep bootstrap, package locks, runtime state, and private local configuration explicit and recoverable.
 
 ## Core Capabilities
@@ -20,7 +20,7 @@ This configuration is designed to solve a concrete set of problems:
 - Programming and debugging
   The default route is `eglot`, with `lsp-mode` used selectively where needed. Completion, diagnostics, build/test, debugging, tree-sitter, snippets, code navigation, and an on-demand SQL/database client are already wired together.
 - Org and research writing
-  Agenda, capture, LaTeX preview, AUCTeX, Jupyter, citations, and PDF workflows are treated as long-term maintained parts of the system.
+  Agenda, capture, TeXpresso live preview, AUCTeX, Jupyter, citations, and PDF Tools workflows are treated as long-term maintained parts of the system.
 - Remote work and terminals
   TRAMP and `my/vterm-ssh` are first-class. The goal is not merely to “support remote files”, but to make remote work part of the default workflow.
 - Browser and system integration

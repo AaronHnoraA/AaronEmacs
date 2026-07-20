@@ -14,4 +14,9 @@
 ##  Aaronnote && Roam
 
 ### Features
+- iicoment 纳入latex吧
 ### Bugs
+- zoom直接触控板就行 不要M+滚轮 容易误触
+- relaod的时候如果是jump后的 页面, 会跳到首页, 这个不太好, 应该跳到上次的页面
+- roam link的ui有点丑
+- jk的行为不要对称 体验怪

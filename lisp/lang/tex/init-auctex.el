@@ -20,15 +20,15 @@
 (declare-function TeX-master-directory "tex" ())
 (declare-function TeX-master-file "tex" (&optional extension nondirectory ask))
 (declare-function TeX-master-output-file "tex" (extension))
-(declare-function TeX-process "tex" (name))
-(declare-function TeX-process-environment "tex" ())
-(declare-function TeX-region-file "tex" (&optional extension nondirectory ignore))
-(declare-function TeX-PDF-mode "tex" (&optional arg))
 (declare-function TeX-view "tex" ())
 (declare-function TeX-view-mouse "tex" (event))
 (declare-function completion-preview-mode "completion-preview" (&optional arg))
 (declare-function pdf-sync-backward-search-mouse "pdf-sync" (ev))
 (declare-function pdf-sync-locate-synctex-file "pdf-sync" (pdffile))
+(declare-function texpresso "texpresso" (&optional filename))
+(declare-function texpresso-display-output "texpresso" ())
+(declare-function texpresso-mode "texpresso" (&optional arg))
+(declare-function texpresso-move-to-cursor "texpresso" (&optional position))
 
 ;; --- XeLaTeX 与 pdflatex 的编译命令，注入 -synctex=1 ---
 
@@ -38,31 +38,40 @@
 (defvar TeX-current-process-region-p)
 (defvar TeX-default-extension)
 (defvar TeX-engine)
-(defvar TeX-output-dir)
 (defvar TeX-style-path)
 (defvar completion-preview-mode)
 (defvar eglot-mode-map)
 (defvar lsp-mode-map)
+(defvar texpresso--process)
+(defvar texpresso--state)
+(defvar texpresso-arguments)
+(defvar texpresso-binary)
+(defvar texpresso-distribution)
+(defvar texpresso-follow-cursor)
+(defvar texpresso-follow-edition)
+(defvar texpresso-mode)
+
+(defconst my/texpresso-root
+  (expand-file-name "var/texpresso/" user-emacs-directory)
+  "Local TeXpresso source and build root.")
+
+(defconst my/texpresso-elisp-directory
+  (expand-file-name "emacs/" my/texpresso-root)
+  "Directory containing the upstream TeXpresso Emacs mode.")
+
+(defconst my/texpresso-binary
+  (expand-file-name "build/texpresso" my/texpresso-root)
+  "Locally built TeXpresso executable.")
 
 (defconst my/auctex-xelatexmk-command
   (concat (my/shell-command-executable "latexmk")
           " -xelatex -synctex=1 %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t")
   "latexmk command that explicitly builds with XeLaTeX.")
 
-(defconst my/auctex-xelatexmk-pvc-command
-  (concat (my/shell-command-executable "latexmk")
-          " -xelatex -synctex=1 -pvc -view=none %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t")
-  "latexmk command that explicitly watches with XeLaTeX.")
-
 (defconst my/auctex-pdflatexmk-command
   (concat (my/shell-command-executable "latexmk")
           " -pdf -synctex=1 %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t")
   "latexmk command that explicitly builds with pdfLaTeX.")
-
-(defconst my/auctex-pdflatexmk-pvc-command
-  (concat (my/shell-command-executable "latexmk")
-          " -pdf -synctex=1 -pvc -view=none %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t")
-  "latexmk command that explicitly watches with pdfLaTeX.")
 
 (defun my/auctex-refresh-shell-environment (&rest _)
   "Refresh Emacs environment before starting TeX commands."
@@ -102,11 +111,6 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
   (setq TeX-command-list
         (cons entry (assoc-delete-all (car entry) TeX-command-list))))
 
-(config-defvar my/auctex-live-save-idle-delay nil
-  "Idle seconds before saving a modified LaTeX buffer in live preview mode."
-  :type 'number
-  :group 'TeX-command)
-
 (config-defvar my/pdf-view-auto-refresh-interval nil
   "Polling fallback interval for PDF buffers when file notifications are absent."
   :type 'number
@@ -117,26 +121,6 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
   "Root directory for generated AUCTeX auto style files."
   :type 'directory
   :group 'TeX-file)
-
-(config-defvar my/auctex-preview-output-root
-  (expand-file-name "var/auctex/output/" user-emacs-directory)
-  "Root directory for latexmk output created by the live preview workflow."
-  :type 'directory
-  :group 'TeX-command)
-
-(defvar-local my/auctex-live-preview--save-timer nil)
-(defvar-local my/auctex-live-preview--master-file nil)
-
-(defvar my/latex-preview--pending-open-pdfs (make-hash-table :test #'equal)
-  "PDF files that should be opened after the next successful compile.")
-
-(defvar my/auctex-live-preview--processes (make-hash-table :test #'equal)
-  "Live latexmk processes keyed by master TeX file.")
-
-(config-defvar my/latex-preview-open-timeout nil
-  "Seconds to keep waiting for the initial PDF after starting live preview."
-  :type 'number
-  :group 'TeX-command)
 
 (defun my/auctex--source-cache-key (&optional directory)
   "Return a stable cache key for DIRECTORY."
@@ -175,14 +159,6 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
                               old-auto-dir)))
               (remove auto-dir TeX-style-path)))))))
 
-(defun my/auctex-setup-preview-output ()
-  "Route live-preview latexmk output outside project directories."
-  (let ((output-dir (my/auctex--cache-directory
-                     my/auctex-preview-output-root
-                     (my/auctex--master-directory))))
-    (make-directory output-dir t)
-    (setq-local TeX-output-dir output-dir)))
-
 (defun my/latex-preview--master-tex-file ()
   "Return the current AUCTeX master TeX file, never the region file."
   (expand-file-name (TeX-master-file t nil t)))
@@ -199,174 +175,6 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
 (defun my/latex-preview--output-pdf-file ()
   "Return the current AUCTeX master PDF path, never `_region_.pdf'."
   (expand-file-name (TeX-master-output-file "pdf")))
-
-(defun my/auctex-live-preview--process-for-master (master-file)
-  "Return the live latexmk process for MASTER-FILE, if it is still running."
-  (let* ((master (expand-file-name master-file))
-         (process (gethash master my/auctex-live-preview--processes)))
-    (if (and process (process-live-p process))
-        process
-      (remhash master my/auctex-live-preview--processes)
-      nil)))
-
-(defun my/latex-preview--output-directory (master-file pdf-file)
-  "Return the latexmk output directory for MASTER-FILE and PDF-FILE, if needed."
-  (let ((master-dir (file-name-as-directory
-                     (expand-file-name (file-name-directory master-file))))
-        (pdf-dir (file-name-as-directory
-                  (expand-file-name (file-name-directory pdf-file)))))
-    (unless (string= master-dir pdf-dir)
-      pdf-dir)))
-
-(defun my/latex-preview--stop-region-process ()
-  "Stop a stale AUCTeX region process before starting whole-document preview."
-  (when (fboundp 'TeX-region-file)
-    (when-let* ((process (TeX-process (TeX-region-file))))
-      (when (process-live-p process)
-        (kill-process process)
-        (message "Stopped stale LaTeX region process: %s"
-                 (process-name process))))))
-
-(defun my/auctex-live-preview--process-sentinel (process event)
-  "Clean up PROCESS bookkeeping and report latexmk EVENT."
-  (let ((master (process-get process 'my/latex-master-file)))
-    (when (and master (eq (gethash master my/auctex-live-preview--processes)
-                          process))
-      (remhash master my/auctex-live-preview--processes)))
-  (unless (string-match-p "\\`\\(?:finished\\|killed\\|interrupt\\)" event)
-    (message "LaTeX preview process %s: %s"
-             (process-name process)
-             (string-trim event))))
-
-(defun my/auctex-live-preview--latexmk-args (master-file pdf-file)
-  "Return latexmk -pvc arguments for MASTER-FILE producing PDF-FILE."
-  (let ((output-dir (my/latex-preview--output-directory master-file pdf-file)))
-    (when output-dir
-      (make-directory output-dir t))
-    (append
-     (if (eq TeX-engine 'xetex)
-         '("-xelatex")
-       '("-pdf"))
-     '("-synctex=1" "-interaction=nonstopmode" "-file-line-error"
-       "-pvc" "-view=none")
-     (when output-dir
-       (list (concat "-outdir=" (directory-file-name output-dir))))
-     (list master-file))))
-
-(defun my/auctex-live-preview--cancel-save-timer ()
-  "Cancel the pending live-preview save timer in the current buffer."
-  (when (timerp my/auctex-live-preview--save-timer)
-    (cancel-timer my/auctex-live-preview--save-timer)
-    (setq my/auctex-live-preview--save-timer nil)))
-
-(defun my/auctex-live-preview--save-buffer-if-live (buffer)
-  "Save BUFFER when live preview mode is active and it is modified."
-  (when (buffer-live-p buffer)
-    (with-current-buffer buffer
-      (setq my/auctex-live-preview--save-timer nil)
-      (when (and my/auctex-live-preview-mode
-                 buffer-file-name
-                 (buffer-modified-p))
-        (save-buffer)))))
-
-(defun my/auctex-live-preview--schedule-save (&rest _ignore)
-  "Schedule an idle save for live preview."
-  (when (and my/auctex-live-preview-mode
-             buffer-file-name
-             (buffer-modified-p))
-    (my/auctex-live-preview--cancel-save-timer)
-    (setq my/auctex-live-preview--save-timer
-          (run-with-idle-timer my/auctex-live-save-idle-delay nil
-                               #'my/auctex-live-preview--save-buffer-if-live
-                               (current-buffer)))))
-
-(defun my/auctex-start-live-compilation ()
-  "Start a master-file `latexmk -pvc' process for the current TeX buffer."
-  (interactive)
-  (unless (derived-mode-p 'LaTeX-mode)
-    (user-error "Not in LaTeX mode"))
-  (unless buffer-file-name
-    (user-error "Current buffer is not visiting a file"))
-  (when (buffer-modified-p)
-    (save-buffer))
-  (my/auctex-setup-preview-output)
-  (setq TeX-current-process-region-p nil)
-  (let* ((master-file (my/latex-preview--master-tex-file))
-         (pdf-file (my/latex-preview--output-pdf-file))
-         (master-dir (file-name-directory master-file))
-         (process (my/auctex-live-preview--process-for-master master-file)))
-    (setq-local my/auctex-live-preview--master-file master-file)
-    (if process
-        (message "LaTeX preview already watching: %s"
-                 (abbreviate-file-name master-file))
-      (let* ((buffer (get-buffer-create
-                      (format "*LaTeX Preview: %s*"
-                              (file-name-nondirectory master-file))))
-             (program (my/shell-command-executable "latexmk"))
-             (args (my/auctex-live-preview--latexmk-args master-file pdf-file))
-             (default-directory master-dir)
-             (process-environment (TeX-process-environment)))
-        (with-current-buffer buffer
-          (setq-local default-directory master-dir)
-          (erase-buffer)
-          (compilation-mode))
-        (setq process (apply #'start-file-process
-                             "latexmk-preview" buffer program args))
-        (set-process-query-on-exit-flag process nil)
-        (process-put process 'my/latex-master-file master-file)
-        (set-process-sentinel process
-                              #'my/auctex-live-preview--process-sentinel)
-        (puthash master-file process my/auctex-live-preview--processes)
-        (message "LaTeX preview watching: %s"
-                 (abbreviate-file-name master-file))))))
-
-(defun my/auctex-stop-live-compilation ()
-  "Stop the live `latexmk -pvc' process for the current TeX master."
-  (interactive)
-  (my/auctex-live-preview--cancel-save-timer)
-  (when-let* ((master-file (or my/auctex-live-preview--master-file
-                               (and buffer-file-name
-                                    (my/latex-preview--master-tex-file))))
-              (process (my/auctex-live-preview--process-for-master master-file)))
-    (kill-process process)
-    (remhash master-file my/auctex-live-preview--processes)
-    (message "Stopped LaTeX preview: %s"
-             (abbreviate-file-name master-file))))
-
-(defun my/auctex-live-preview--after-save ()
-  "Ensure the live preview watcher is running after saving."
-  (when (and my/auctex-live-preview-mode
-             buffer-file-name
-             (not (my/auctex-live-preview--process-for-master
-                   (my/latex-preview--master-tex-file))))
-    (my/auctex-start-live-compilation)))
-
-(defun my/auctex-live-preview--enable ()
-  "Enable buffer-local hooks and start live preview compilation."
-  (add-hook 'after-change-functions #'my/auctex-live-preview--schedule-save nil t)
-  (add-hook 'after-save-hook #'my/auctex-live-preview--after-save nil t)
-  (add-hook 'change-major-mode-hook #'my/auctex-live-preview--cleanup-current-buffer nil t)
-  (add-hook 'kill-buffer-hook #'my/auctex-live-preview--cleanup-current-buffer nil t)
-  (my/auctex-start-live-compilation))
-
-(defun my/auctex-live-preview--cleanup-current-buffer ()
-  "Release live-preview hooks, timers, and TeX process in the current buffer."
-  (remove-hook 'after-change-functions #'my/auctex-live-preview--schedule-save t)
-  (remove-hook 'after-save-hook #'my/auctex-live-preview--after-save t)
-  (remove-hook 'change-major-mode-hook #'my/auctex-live-preview--cleanup-current-buffer t)
-  (remove-hook 'kill-buffer-hook #'my/auctex-live-preview--cleanup-current-buffer t)
-  (my/auctex-stop-live-compilation))
-
-(defun my/auctex-live-preview--disable ()
-  "Disable buffer-local hooks and stop live preview compilation."
-  (my/auctex-live-preview--cleanup-current-buffer))
-
-(define-minor-mode my/auctex-live-preview-mode
-  "Continuously compile the current TeX master with `latexmk -pvc'."
-  :lighter " LiveTeX"
-  (if my/auctex-live-preview-mode
-      (my/auctex-live-preview--enable)
-    (my/auctex-live-preview--disable)))
 
 (defun my/auctex-setup-build-workflow ()
   "Prefer latexmk-based builds in LaTeX buffers."
@@ -624,6 +432,87 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
                    (derived-mode-p 'latex-mode 'tex-mode)))
     (user-error "Not in a file-backed LaTeX buffer")))
 
+(defun my/texpresso--ensure-available ()
+  "Load the locally built TeXpresso integration or report how to install it."
+  (unless (file-executable-p my/texpresso-binary)
+    (user-error "TeXpresso is not built; run `make texpresso-install' in %s"
+                user-emacs-directory))
+  (unless (featurep 'texpresso)
+    (unless (file-readable-p
+             (expand-file-name "texpresso.el" my/texpresso-elisp-directory))
+      (user-error "TeXpresso Emacs mode is missing; run `make texpresso-install'"))
+    (let ((load-path (cons my/texpresso-elisp-directory load-path)))
+      (unless (require 'texpresso nil t)
+        (user-error "Cannot load the TeXpresso Emacs mode from %s"
+                    my/texpresso-elisp-directory))))
+  (setq texpresso-binary my/texpresso-binary
+        texpresso-distribution 'texlive
+        texpresso-arguments nil
+        texpresso-follow-edition t
+        texpresso-follow-cursor nil))
+
+(defun my/texpresso-running-p ()
+  "Return non-nil when the TeXpresso viewer process is running."
+  (and (featurep 'texpresso)
+       (process-live-p texpresso--process)))
+
+(defun my/texpresso-running-for-current-document-p ()
+  "Return non-nil when TeXpresso is showing the current AUCTeX document."
+  (and (my/texpresso-running-p)
+       (equal (process-get texpresso--process 'my/texpresso-master-file)
+              (ignore-errors (my/latex-preview--master-tex-file)))))
+
+(defun my/texpresso-start ()
+  "Start TeXpresso for the current AUCTeX master and show the source position."
+  (interactive)
+  (my/latex-preview--ensure-tex-buffer)
+  (my/texpresso--ensure-available)
+  (when (fboundp 'my/refresh-environment-from-shell)
+    (my/refresh-environment-from-shell))
+  (if (my/texpresso-running-for-current-document-p)
+      (texpresso-move-to-cursor)
+    (when (buffer-modified-p)
+      (save-buffer))
+    (setq TeX-current-process-region-p nil)
+    (let* ((master-file (my/latex-preview--master-tex-file))
+           (default-directory (file-name-directory master-file)))
+      (texpresso master-file)
+      (unless (process-live-p texpresso--process)
+        (user-error "TeXpresso failed to start; inspect *texpresso-stderr*"))
+      (set-process-query-on-exit-flag texpresso--process nil)
+      (process-put texpresso--process 'my/texpresso-master-file master-file)
+      (texpresso-move-to-cursor)
+      (message "TeXpresso live preview: %s"
+               (abbreviate-file-name master-file)))))
+
+(defun my/texpresso-stop ()
+  "Stop TeXpresso and release its synchronization hooks and buffer state."
+  (interactive)
+  (when (featurep 'texpresso)
+    (dolist (buffer (buffer-list))
+      (with-current-buffer buffer
+        (when (bound-and-true-p texpresso-mode)
+          (texpresso-mode -1))
+        (when (local-variable-p 'texpresso--state)
+          (setq texpresso--state nil))))
+    (when (process-live-p texpresso--process)
+      (delete-process texpresso--process))
+    (setq texpresso--process nil))
+  (message "TeXpresso live preview stopped"))
+
+(defun my/texpresso-toggle ()
+  "Stop the active TeXpresso viewer, or start it for the current document."
+  (interactive)
+  (if (my/texpresso-running-p)
+      (my/texpresso-stop)
+    (my/texpresso-start)))
+
+(defun my/texpresso-display-output ()
+  "Display TeXpresso errors and warnings in Emacs."
+  (interactive)
+  (my/texpresso--ensure-available)
+  (texpresso-display-output))
+
 (defun my/latex-preview-open-pdf (&optional file)
   "Open FILE, or the current TeX master PDF, in a right-side PDF window."
   (interactive)
@@ -642,57 +531,32 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
         (select-window source-window))
       buffer)))
 
-(defun my/latex-preview--open-pdf-after-compile (file)
-  "Open FILE when it was requested by `my/latex-preview-current-buffer'."
-  (let* ((pdf (expand-file-name file))
-         (source-buffer (gethash pdf my/latex-preview--pending-open-pdfs)))
-    (when source-buffer
-      (remhash pdf my/latex-preview--pending-open-pdfs)
-      (when (and (buffer-live-p source-buffer)
-                 (file-exists-p pdf))
-        (with-current-buffer source-buffer
-          (my/latex-preview-open-pdf pdf)
-          (message "LaTeX preview ready: %s" (abbreviate-file-name pdf)))))))
-
-(defun my/latex-preview--wait-for-pdf (pdf source-buffer started-at)
-  "Open PDF for SOURCE-BUFFER when it appears after STARTED-AT."
-  (let ((pdf (expand-file-name pdf)))
-    (cond
-     ((not (eq (gethash pdf my/latex-preview--pending-open-pdfs)
-               source-buffer))
-      nil)
-     ((file-exists-p pdf)
-      (remhash pdf my/latex-preview--pending-open-pdfs)
-      (when (buffer-live-p source-buffer)
-        (with-current-buffer source-buffer
-          (my/latex-sync-forward)
-          (message "LaTeX preview ready: %s"
-                   (abbreviate-file-name pdf)))))
-     ((< (- (float-time) started-at) my/latex-preview-open-timeout)
-      (run-at-time 0.5 nil #'my/latex-preview--wait-for-pdf
-                   pdf source-buffer started-at))
-     (t
-      (message "LaTeX preview is still compiling: %s"
-               (abbreviate-file-name pdf))))))
-
 (defun my/latex-sync-forward (&optional line column)
-  "Jump from the current LaTeX source location to the matching PDF location."
+  "Show the current source location in TeXpresso or the built PDF."
   (interactive)
   (my/latex-preview--ensure-tex-buffer)
-  (require 'pdf-sync)
-  (let ((pdf (my/latex-preview--output-pdf-file)))
-    (cond
-     ((and pdf
-           (file-exists-p pdf)
-           (pdf-sync-locate-synctex-file pdf))
-      (my/pdf-sync-forward-search-with-pdf pdf line column))
-     ((and pdf (file-exists-p pdf))
-      (my/latex-preview-open-pdf pdf))
-     (t
-      (my/latex-preview-current-buffer)))))
+  (if (my/texpresso-running-for-current-document-p)
+      (texpresso-move-to-cursor
+       (when line
+         (save-excursion
+           (goto-char (point-min))
+           (forward-line (1- line))
+           (move-to-column (or column 0))
+           (point))))
+    (require 'pdf-sync)
+    (let ((pdf (my/latex-preview--output-pdf-file)))
+      (cond
+       ((and pdf
+             (file-exists-p pdf)
+             (pdf-sync-locate-synctex-file pdf))
+        (my/pdf-sync-forward-search-with-pdf pdf line column))
+       ((and pdf (file-exists-p pdf))
+        (my/latex-preview-open-pdf pdf))
+       (t
+        (my/texpresso-start))))))
 
 (defun my/latex-sync-forward-mouse (event)
-  "Jump from a mouse EVENT in LaTeX source to the matching PDF location."
+  "Show the LaTeX source position at mouse EVENT in the active preview."
   (interactive "e")
   (let* ((start (event-start event))
          (window (posn-window start))
@@ -704,7 +568,7 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
       (my/latex-sync-forward))))
 
 (defun my/latex-sync-forward-mouse-or-code-actions (event)
-  "Use SyncTeX for TeX Cmd-click, otherwise keep the code-action mouse menu."
+  "Sync the TeX preview on Cmd-click, otherwise show the code-action menu."
   (interactive "e")
   (if (my/latex-preview--tex-window-event-p event)
       (my/latex-sync-forward-mouse event)
@@ -713,37 +577,9 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
       (user-error "No code action command is available"))))
 
 (defun my/latex-preview-current-buffer ()
-  "Open a VS Code TeX Workshop-like live preview for the current buffer.
-The command saves the current LaTeX buffer, starts a latexmk watcher when
-needed, opens the master PDF on the right, and uses SyncTeX when available to
-highlight the matching PDF location."
+  "Open or synchronize TeXpresso live preview for the current AUCTeX master."
   (interactive)
-  (my/latex-preview--ensure-tex-buffer)
-  (when (fboundp 'TeX-PDF-mode)
-    (TeX-PDF-mode 1))
-  (when (buffer-modified-p)
-    (save-buffer))
-  (my/auctex-setup-preview-output)
-  (setq TeX-current-process-region-p nil)
-  (my/latex-preview--stop-region-process)
-  (let ((pdf (my/latex-preview--output-pdf-file)))
-    (unless my/auctex-live-preview-mode
-      (my/auctex-live-preview-mode 1))
-    (when (and my/auctex-live-preview-mode
-               (not (my/auctex-live-preview--process-for-master
-                     (my/latex-preview--master-tex-file))))
-      (my/auctex-start-live-compilation))
-    (if (file-exists-p pdf)
-        (my/latex-sync-forward)
-      (let ((expanded-pdf (expand-file-name pdf)))
-        (puthash expanded-pdf
-                 (current-buffer)
-                 my/latex-preview--pending-open-pdfs)
-        (my/latex-preview--wait-for-pdf expanded-pdf
-                                        (current-buffer)
-                                        (float-time))
-        (message "LaTeX preview compiling whole document: %s"
-                 (abbreviate-file-name expanded-pdf))))))
+  (my/texpresso-start))
 
 (defun my/latex-preview-compile-and-view (&optional arg)
   "Run AUCTeX's compile-and-view command."
@@ -756,18 +592,19 @@ highlight the matching PDF location."
   (TeX-view))
 
 (transient-define-prefix my/latex-preview-dispatch ()
-  "LaTeX PDF workflow."
+  "LaTeX live-preview and PDF workflow."
   [["Workbench"
-    ("p" "current buffer" my/latex-preview-current-buffer :transient transient--do-exit)
-    ("g" "sync to PDF" my/latex-sync-forward :transient transient--do-exit)
-    ("v" "view PDF" my/latex-preview-open-pdf :transient transient--do-exit)
-    ("l" "live latexmk" my/auctex-live-preview-mode :transient transient--do-exit)]
+    ("p" "TeXpresso preview" my/latex-preview-current-buffer :transient transient--do-exit)
+    ("g" "sync preview" my/latex-sync-forward :transient transient--do-exit)
+    ("e" "errors/warnings" my/texpresso-display-output :transient transient--do-exit)
+    ("l" "toggle TeXpresso" my/texpresso-toggle :transient transient--do-exit)
+    ("v" "view built PDF" my/latex-preview-open-pdf :transient transient--do-exit)]
    ["Build"
     ("a" "compile/view" my/latex-preview-compile-and-view :transient transient--do-exit)
     ("V" "AUCTeX view" my/latex-preview-view-pdf :transient transient--do-exit)]])
 
 (defun my/auctex-setup-preview-workflow ()
-  "Expose the PDF workbench and SyncTeX commands in LaTeX buffers."
+  "Expose TeXpresso and PDF fallback commands in LaTeX buffers."
   (when (bound-and-true-p completion-preview-mode)
     (completion-preview-mode -1))
   (local-set-key (kbd "C-c C-p") #'my/latex-preview-current-buffer)
@@ -776,7 +613,7 @@ highlight the matching PDF location."
   (local-set-key (kbd "M-<return>") #'my/latex-sync-forward))
 
 (defun my/auctex-install-preview-keys ()
-  "Install final PDF-preview keys after AUCTeX and preview-latex maps load."
+  "Install final live-preview keys after AUCTeX and preview-latex maps load."
   (dolist (map-symbol '(LaTeX-mode-map TeX-mode-map latex-mode-map tex-mode-map))
     (when (and (boundp map-symbol)
                (keymapp (symbol-value map-symbol)))
@@ -833,8 +670,6 @@ highlight the matching PDF location."
 
   (add-hook 'TeX-after-compilation-finished-functions
             #'TeX-revert-document-buffer)
-  (add-hook 'TeX-after-compilation-finished-functions
-            #'my/latex-preview--open-pdf-after-compile)
 
   (my/auctex-register-command
    `("XeLaTeXMk"
@@ -843,22 +678,10 @@ highlight the matching PDF location."
      :help "Run latexmk with XeLaTeX"))
 
   (my/auctex-register-command
-   `("XeLaTeXMk-PVC"
-     ,my/auctex-xelatexmk-pvc-command
-     TeX-run-TeX nil (LaTeX-mode docTeX-mode)
-     :help "Run latexmk continuously with XeLaTeX"))
-
-  (my/auctex-register-command
    `("PdfLaTeXMk"
      ,my/auctex-pdflatexmk-command
      TeX-run-TeX nil (LaTeX-mode docTeX-mode)
      :help "Run latexmk with pdfLaTeX"))
-
-  (my/auctex-register-command
-   `("PdfLaTeXMk-PVC"
-     ,my/auctex-pdflatexmk-pvc-command
-     TeX-run-TeX nil (LaTeX-mode docTeX-mode)
-     :help "Run latexmk continuously with pdfLaTeX"))
 
   ;; 默认走 PDF Tools，保留 SyncTeX 正反向同步。
   (setq TeX-view-program-selection

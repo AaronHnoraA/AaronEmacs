@@ -62,7 +62,21 @@
 
 - `M-x my/font-reset-all`
 
-## 3. 我要改 AI 助手配置
+## 3. 我要改 LaTeX 实时预览
+
+文件：[lisp/lang/tex/init-auctex.el](../lisp/lang/tex/init-auctex.el)。
+
+TeXpresso 的本地 checkout、Emacs mode 和构建产物统一放在 `var/texpresso/`。常用维护入口：
+
+- `make texpresso-install`：用 Homebrew 补齐 `mupdf` / `sdl2`，clone 或更新源码并构建。
+- `make texpresso-build`：只重建已有 checkout。
+- `make texpresso-test`：用 TeX Live 和 dummy SDL driver 跑上游 sample smoke test。
+
+固定集成路径由 `my/texpresso-root`、`my/texpresso-elisp-directory` 和 `my/texpresso-binary`
+派生，不写入私人绝对路径。实时 viewer 使用 TeXpresso 自己的 SDL/MuPDF 窗口；PDF Tools 继续负责
+正式构建后 PDF 的阅读、搜索、批注和传统 SyncTeX。
+
+## 4. 我要改 AI 助手配置
 
 文件：
 

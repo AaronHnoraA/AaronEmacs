@@ -274,6 +274,21 @@ label 中的 citation 正常解析。
 `\textbackslash`。输出路径按 note 记忆，写入是原子的，并强制使用 `.tex` 后缀。未闭合的
 display math、代码 fence 或 `#+begin` block 会在写文件前报出明确错误，避免留下半成品。
 
+### LaTeX 实时预览（TeXpresso）
+
+普通 `.tex` 文件仍用 AUCTeX 做编辑、补全、RefTeX、master-file 识别和正式构建；实时预览改用
+[TeXpresso](https://github.com/let-def/texpresso)。它直接打开自己的 SDL/MuPDF 窗口并增量更新，
+不需要保存文件或等待 `latexmk -pvc` 重建整份 PDF。
+
+- `C-c C-p`：为当前 AUCTeX master 启动 TeXpresso；已在预览同一文档时只同步当前位置。
+- `C-c C-g` / `M-RET`：把 TeXpresso 滚到当前源码位置；若没有 TeXpresso 会回退到现有 PDF Tools/SyncTeX 流程。
+- `M-x my/latex-preview-dispatch`：统一菜单，可启动/停止实时预览、查看错误或打开正式构建的 PDF。
+- `M-x my/texpresso-display-output`：在 Emacs 底部查看当前页的 TeX 错误和警告。
+- `M-x my/texpresso-stop`：停止 viewer 和同步进程。
+
+TeXpresso viewer 内可用方向键或 `hjkl` 平移，`Space` / `b` 翻页，`p` 适应整页，`w` 适应宽度，
+`i` 切换暗色，`t` 置顶，`q` 退出。普通落盘 PDF 的阅读、批注、搜索和 SyncTeX 仍由 PDF Tools 提供。
+
 ## 2. Leader 键分组
 
 ### 文件 `SPC f`

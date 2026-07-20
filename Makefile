@@ -8,9 +8,11 @@ BOOTSTRAP = $(EMACS_BATCH_BASE) -l ./early-init.el -l ./bootstrap.el
 BOOTSTRAP_INSTALL = BOOTSTRAP_MODE=install $(BOOTSTRAP)
 BOOTSTRAP_EXPORT = BOOTSTRAP_MODE=export $(BOOTSTRAP)
 BOOTSTRAP_AUDIT = BOOTSTRAP_MODE=audit $(BOOTSTRAP)
+TEXPRESSO_DIR ?= $(CURDIR)/var/texpresso
+TEXPRESSO_REPOSITORY ?= https://github.com/let-def/texpresso.git
 
 .PHONY: default help up setup setup-full bootstrap-health install remote-ikernel-install lock audit-lock doctor build build-force \
-        aaronnote-build \
+        aaronnote-build texpresso-install texpresso-build texpresso-test \
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
         health health-startup health-byte health-native \
@@ -27,6 +29,9 @@ help:
 	  '  make bootstrap-health     Restore + health + doctor + lock audit' \
 	  '  make install              Deterministically restore packages from package-lock.el' \
 	  '  make remote-ikernel-install  Install the vendored remote_ikernel into Anaconda' \
+	  '  make texpresso-install    Install/update and build TeXpresso under var/texpresso' \
+	  '  make texpresso-build      Rebuild the existing local TeXpresso checkout' \
+	  '  make texpresso-test       Run TeXpresso headlessly against its sample document' \
 	  '  make lock                 Export the current package set back into package-lock.el' \
 	  '  make audit-lock           Compare installed packages against package-lock.el' \
 	  '  make doctor               Open/check the config health doctor report in batch' \
@@ -73,6 +78,26 @@ install:
 
 remote-ikernel-install:
 	bin/install-remote-ikernel install
+
+texpresso-install:
+	@command -v brew >/dev/null || (echo "Homebrew is required" >&2; exit 2)
+	@brew list --versions mupdf >/dev/null 2>&1 || brew install mupdf
+	@brew list --versions sdl2 >/dev/null 2>&1 || brew install sdl2
+	@if [ -d "$(TEXPRESSO_DIR)/.git" ]; then \
+	  git -C "$(TEXPRESSO_DIR)" pull --ff-only; \
+	else \
+	  git clone --recurse-submodules "$(TEXPRESSO_REPOSITORY)" "$(TEXPRESSO_DIR)"; \
+	fi
+	@git -C "$(TEXPRESSO_DIR)" submodule update --init --recursive
+	$(MAKE) -C "$(TEXPRESSO_DIR)" all
+
+texpresso-build:
+	@test -d "$(TEXPRESSO_DIR)/.git" || (echo "Run make texpresso-install first" >&2; exit 2)
+	$(MAKE) -C "$(TEXPRESSO_DIR)" all
+
+texpresso-test:
+	@test -x "$(TEXPRESSO_DIR)/build/texpresso" || (echo "Run make texpresso-install first" >&2; exit 2)
+	$(MAKE) -C "$(TEXPRESSO_DIR)" test-texpresso-texlive
 
 lock:
 	$(BOOTSTRAP_EXPORT)

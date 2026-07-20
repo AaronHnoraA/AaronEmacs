@@ -61,6 +61,27 @@ make audit-lock
 
 这层目前还没有做成自动安装，只能检查、记录、补装。
 
+### TeXpresso 本地构建
+
+TeXpresso 不进入 `package-lock.el`：源码、上游 Emacs mode 和二进制都在被 git 忽略的
+`var/texpresso/`，系统库由 Homebrew 提供。首次安装或升级：
+
+```sh
+make texpresso-install
+```
+
+这个 target 会确认 `mupdf` 和 `sdl2`（Homebrew 当前可能以 `sdl2-compat` 提供）存在，随后 clone
+或 fast-forward 更新 [let-def/texpresso](https://github.com/let-def/texpresso)，最后在本地 checkout
+运行 `make all`。只重建和 headless smoke test 分别使用：
+
+```sh
+make texpresso-build
+make texpresso-test
+```
+
+`make clean-state` 会连同其他 runtime state 删除整个 `var/`，因此执行后需要重新运行
+`make texpresso-install`。配置在二进制缺失时不会让 Emacs 启动失败，调用预览命令时会给出上述恢复入口。
+
 ### 本地 vendored Elisp
 
 `site-lisp/` 里放的是不走 package-lock 的本地 Elisp。

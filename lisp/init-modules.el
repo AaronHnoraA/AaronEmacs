@@ -124,7 +124,10 @@ If one of FEATURES is already available, require MODULE immediately."
                    my/latex-preview-clear-document
                    my/latex-preview-compile-and-view
                    my/latex-preview-view-pdf
-                   my/auctex-live-preview-mode))
+                   my/texpresso-start
+                   my/texpresso-stop
+                   my/texpresso-toggle
+                   my/texpresso-display-output))
   (autoload command "init-auctex" nil t))
 (my/require-module-after-any-feature 'init-auctex 'tex 'tex-site 'pdf-tools 'pdf-view)
 (my/require-module-safely 'init-browser)
